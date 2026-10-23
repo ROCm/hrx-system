@@ -13,8 +13,8 @@
 
 #include "iree/base/byte_sequence.h"
 #include "iree/base/internal/atomics.h"
-#include "iree/hal/drivers/amd/gpu/cts/code_images.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
+#include "iree/hal/drivers/amd/gpu/cts/testdata.h"
 #include "iree/hal/drivers/amd/gpu/image/hsaco.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/ring.h"
 #include "iree/hal/drivers/amd/gpu/queue/user_queue.h"
@@ -101,22 +101,18 @@ class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
   }
 
   void ReadImages() {
-    const auto gfx = context_->target_info.gfx_ip;
-    const char* selector = gfx.major == 9
-                               ? (gfx.minor == 4 ? "gfx9-4-generic" : "gfx90a")
-                           : gfx.major == 11 ? "gfx11-generic"
-                                             : "gfx12-generic";
-    const auto* files = iree_hal_amd_gpu_code_images_create();
-    for (size_t i = 0; i < iree_hal_amd_gpu_code_images_size(); ++i) {
-      if (!std::strstr(files[i].name, selector)) {
-        continue;
-      }
-      const size_t ordinal = std::strstr(files[i].name, "alternate") ? 1 : 0;
-      iree_byte_span_t bytes = {nullptr, files[i].size};
+    constexpr const char* kPrograms[] = {"transform.bin",
+                                         "transform_alternate.bin"};
+    for (size_t ordinal = 0; ordinal < IREE_ARRAYSIZE(kPrograms); ++ordinal) {
+      iree_const_byte_span_t artifact;
+      IREE_ASSERT_OK(iree::hal::amd::gpu::cts::LookupExecutableData(
+          "amd_gpu_code", context_->target_info,
+          iree_make_cstring_view(kPrograms[ordinal]), &artifact));
+      iree_byte_span_t bytes = {nullptr, artifact.data_length};
       IREE_ASSERT_OK(
           iree_allocator_malloc(iree_allocator_system(), bytes.data_length,
                                 reinterpret_cast<void**>(&bytes.data)));
-      std::memcpy(bytes.data, files[i].data, bytes.data_length);
+      std::memcpy(bytes.data, artifact.data, bytes.data_length);
       iree_byte_sequence_t* sequence = nullptr;
       iree_status_t status = iree_byte_sequence_create_from_span_move(
           &bytes, iree_allocator_system(), &sequence);

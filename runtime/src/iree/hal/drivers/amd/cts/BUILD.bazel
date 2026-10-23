@@ -4,11 +4,13 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//loom/build_tools/amdgpu:descriptor_sets.bzl", "loom_amdgpu_selected_descriptor_set_values")
+load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET", "LOOM_AMDGPU_SUPPORTED_TARGETS")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_target_profile")
+load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_library", "loom_target_profile")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+load("//runtime/build_tools/bazel:hal_cts.bzl", "iree_runtime_hal_cts_testdata")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -71,9 +73,16 @@ iree_runtime_cc_test(
 
 _EXECUTION_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/target:amdgpu_artifacts",
-    "//loom/config/target/amdgpu:descriptor_set_gfx11_generic_core",
-    "//loom/config/target/amdgpu:descriptor_set_gfx12_generic_core",
-]) + select({
+]) + select(dict([
+    (
+        "//loom/config/target/amdgpu:" + capability,
+        [],
+    )
+    for capability in LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
+] + [(
+    "//conditions:default",
+    ["@platforms//:incompatible"],
+)])) + select({
     "//runtime/config/hal:driver_task": [],
     "//conditions:default": ["@platforms//:incompatible"],
 }) + select({
@@ -87,41 +96,68 @@ _EXECUTION_COMPATIBLE_WITH = loom_config_compatible_with([
     "//conditions:default": ["@platforms//:incompatible"],
 })
 
-_GPU_TARGETS = [
-    "gfx11-generic",
-    "gfx12-generic",
-]
+_TARGET_COMPATIBLE_WITH = {
+    target: _EXECUTION_COMPATIBLE_WITH + loom_config_compatible_with([
+        "//loom/config/target/amdgpu:" + LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET[target],
+    ])
+    for target in LOOM_AMDGPU_SUPPORTED_TARGETS
+}
+
+loom_library(
+    name = "affine_source",
+    srcs = ["affine_i32.loom"],
+    tags = ["manual"],
+    target_compatible_with = _EXECUTION_COMPATIBLE_WITH,
+)
 
 [
     loom_target_profile(
         name = "affine_profile_" + target,
         family = "amdgpu",
         selector = target,
-        target_compatible_with = _EXECUTION_COMPATIBLE_WITH,
+        target_compatible_with = _TARGET_COMPATIBLE_WITH[target],
     )
-    for target in _GPU_TARGETS
+    for target in LOOM_AMDGPU_SUPPORTED_TARGETS
 ]
 
 [
     loom_kernel_binary(
         name = "affine_" + target,
         testonly = True,
-        srcs = ["affine_i32.loom"],
-        out = "affine_" + target + ".hsaco",
+        out = "affine_" + target + "/affine_i32.bin",
         target = ":affine_profile_" + target,
-        target_compatible_with = _EXECUTION_COMPATIBLE_WITH,
+        target_compatible_with = _TARGET_COMPATIBLE_WITH[target],
+        deps = [":affine_source"],
     )
-    for target in _GPU_TARGETS
+    for target in LOOM_AMDGPU_SUPPORTED_TARGETS
 ]
 
-iree_c_embed_data(
-    name = "affine_images",
+[
+    iree_runtime_hal_cts_testdata(
+        name = "affine_data_" + target,
+        srcs = [":affine_" + target],
+        backend_names = ["amd_cts_affine"],
+        target_compatible_with = _TARGET_COMPATIBLE_WITH[target],
+        target_family = "amdgpu",
+        target_key = target,
+        target_name = target.replace("-", "_"),
+    )
+    for target in LOOM_AMDGPU_SUPPORTED_TARGETS
+]
+
+iree_runtime_cc_library(
+    name = "affine_testdata",
     testonly = True,
-    srcs = [":affine_" + target for target in _GPU_TARGETS],
-    c_file_output = "affine_images.c",
-    h_file_output = "affine_images.h",
-    identifier = "iree_hal_amd_cts_affine_images",
     target_compatible_with = _EXECUTION_COMPATIBLE_WITH,
+    deps = loom_amdgpu_selected_descriptor_set_values({
+        capability: [
+            ":affine_data_" + target
+            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
+            if LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET[target] == capability
+        ]
+        for capability in LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
+    }),
+    alwayslink = True,
 )
 
 iree_runtime_cc_test(
@@ -137,11 +173,13 @@ iree_runtime_cc_test(
     ],
     target_compatible_with = _EXECUTION_COMPATIBLE_WITH,
     deps = [
-        ":affine_images",
+        ":affine_testdata",
         ":cpu_executable",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/cts:testdata",
         "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
         "//runtime/src/iree/hal/drivers/amd/registration",
         "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:mul_i32",

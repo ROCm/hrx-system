@@ -4,12 +4,14 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//loom/build_tools/amdgpu:descriptor_sets.bzl", "loom_amdgpu_selected_descriptor_set_values")
+load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET", "LOOM_AMDGPU_SUPPORTED_TARGETS")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_target_profile")
+load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_library", "loom_target_profile")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+load("//runtime/build_tools/bazel:hal_cts.bzl", "iree_runtime_hal_cts_testdata")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -17,60 +19,170 @@ package(
     licenses = ["notice"],
 )
 
-_FEEDBACK_COMPATIBLE_WITH = loom_config_compatible_with([
+# Each collection owns logical program names and backend views; target products
+# are derived from the compiler's configured descriptor sets. Non-executable
+# tests do not depend on these compiler inputs.
+_EXECUTABLE_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/target:amdgpu_artifacts",
-    "//loom/config/target/amdgpu:descriptor_set_cdna2_core",
-    "//loom/config/target/amdgpu:descriptor_set_gfx9_4_generic_core",
-    "//loom/config/target/amdgpu:descriptor_set_gfx11_generic_core",
-    "//loom/config/target/amdgpu:descriptor_set_gfx12_generic_core",
-])
+]) + select(dict([
+    (
+        "//loom/config/target/amdgpu:" + capability,
+        [],
+    )
+    for capability in LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
+] + [(
+    "//conditions:default",
+    ["@platforms//:incompatible"],
+)]))
 
-_FEEDBACK_TARGETS = [
-    "gfx90a",
-    "gfx9-4-generic",
-    "gfx11-generic",
-    "gfx12-generic",
-]
+_CORPORA = {
+    "asan_report": {
+        "backends": ["amd_gpu_asan_report"],
+        "programs": {"asan_report": "asan_report.loom"},
+    },
+    "code": {
+        "backends": ["amd_gpu_code"],
+        "programs": {
+            "transform": "//libamdf/cts/gpu/kernels:transform.loom",
+            "transform_alternate": "//libamdf/cts/gpu/kernels:transform_alternate.loom",
+        },
+    },
+    "dispatch": {
+        "backends": [
+            "rdna",
+            "cdna",
+        ],
+        "programs": {
+            "command_buffer_dispatch_constants_bindings_test": "command_buffer_dispatch_constants_bindings_test.loom",
+            "command_buffer_dispatch_multi_workgroup_test": "command_buffer_dispatch_multi_workgroup_test.loom",
+            "command_buffer_dispatch_test": "command_buffer_dispatch_test.loom",
+        },
+    },
+    "feedback": {
+        "backends": ["amd_gpu_feedback"],
+        "programs": {"feedback": "feedback.loom"},
+    },
+    "scratch": {
+        "backends": ["amd_gpu_scratch"],
+        "programs": {"scratch": "scratch.loom"},
+    },
+    "tsan": {
+        "backends": ["amd_gpu_tsan"],
+        "programs": {"tsan": "tsan.loom"},
+    },
+}
+
+_TARGET_COMPATIBLE_WITH = {
+    target: loom_config_compatible_with([
+        "//loom/config/target:amdgpu_artifacts",
+        "//loom/config/target/amdgpu:" + LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET[target],
+    ])
+    for target in LOOM_AMDGPU_SUPPORTED_TARGETS
+}
 
 [
     loom_target_profile(
-        name = "feedback_profile_" + target,
+        name = "cts_profile_" + target,
         family = "amdgpu",
         selector = target,
-        target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+        target_compatible_with = _TARGET_COMPATIBLE_WITH[target],
     )
-    for target in _FEEDBACK_TARGETS
+    for target in LOOM_AMDGPU_SUPPORTED_TARGETS
+]
+
+[
+    loom_library(
+        name = collection + "_source_" + program,
+        srcs = [source],
+        tags = ["manual"],
+        target_compatible_with = _EXECUTABLE_COMPATIBLE_WITH,
+    )
+    for collection, corpus in _CORPORA.items()
+    for program, source in corpus["programs"].items()
 ]
 
 [
     loom_kernel_binary(
-        name = "feedback_" + target,
+        name = collection + "_" + target + "_" + program,
         testonly = True,
-        srcs = ["feedback.loom"],
-        out = "feedback_" + target + ".hsaco",
-        target = ":feedback_profile_" + target,
-        target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+        out = collection + "_" + target + "/" + program + ".bin",
+        target = ":cts_profile_" + target,
+        target_compatible_with = _TARGET_COMPATIBLE_WITH[target],
+        deps = [":" + collection + "_source_" + program],
     )
-    for target in _FEEDBACK_TARGETS
+    for collection, corpus in _CORPORA.items()
+    for program in corpus["programs"]
+    for target in LOOM_AMDGPU_SUPPORTED_TARGETS
 ]
 
-iree_c_embed_data(
-    name = "feedback_images",
+[
+    iree_runtime_hal_cts_testdata(
+        name = collection + "_data_" + target,
+        srcs = [":" + collection + "_" + target + "_" + program for program in corpus["programs"]],
+        backend_names = corpus["backends"],
+        target_compatible_with = _TARGET_COMPATIBLE_WITH[target],
+        target_family = "amdgpu",
+        target_key = target,
+        target_name = target.replace("-", "_"),
+    )
+    for collection, corpus in _CORPORA.items()
+    for target in LOOM_AMDGPU_SUPPORTED_TARGETS
+]
+
+[
+    iree_runtime_cc_library(
+        name = collection + "_testdata",
+        testonly = True,
+        target_compatible_with = _EXECUTABLE_COMPATIBLE_WITH,
+        deps = loom_amdgpu_selected_descriptor_set_values({
+            capability: [
+                ":" + collection + "_data_" + target
+                for target in LOOM_AMDGPU_SUPPORTED_TARGETS
+                if LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET[target] == capability
+            ]
+            for capability in LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
+        }),
+        alwayslink = True,
+    )
+    for collection in _CORPORA
+]
+
+iree_runtime_cc_library(
+    name = "testdata",
     testonly = True,
-    srcs = [":feedback_" + target for target in _FEEDBACK_TARGETS],
-    c_file_output = "feedback_images.c",
-    h_file_output = "feedback_images.h",
-    identifier = "iree_hal_amd_gpu_feedback_images",
-    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+    srcs = ["testdata.cc"],
+    hdrs = ["testdata.h"],
+    visibility = ["//runtime/src/iree/hal/drivers/amd/cts:__pkg__"],
+    deps = [
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:code_object",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "testdata_test",
+    srcs = ["testdata_test.cc"],
+    deps = [
+        ":testdata",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 iree_runtime_cc_test(
     name = "feedback_test",
     srcs = ["feedback_test.cc"],
-    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+    target_compatible_with = _EXECUTABLE_COMPATIBLE_WITH,
     deps = [
-        ":feedback_images",
+        ":feedback_testdata",
         ":test_device",
+        ":testdata",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
@@ -78,48 +190,14 @@ iree_runtime_cc_test(
     ],
 )
 
-# The two exported native CTS programs share an ABI and differ only in their
-# arithmetic. Reuse the source inputs; publication is exercised by HAL code.
-[
-    loom_kernel_binary(
-        name = "code_" + variant + "_" + target,
-        testonly = True,
-        srcs = ["//libamdf/cts/gpu/kernels:" + variant + ".loom"],
-        out = "code_" + variant + "_" + target + ".hsaco",
-        target = ":feedback_profile_" + target,
-        target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
-    )
-    for variant in [
-        "transform",
-        "transform_alternate",
-    ]
-    for target in _FEEDBACK_TARGETS
-]
-
-iree_c_embed_data(
-    name = "code_images",
-    testonly = True,
-    srcs = [
-        ":code_" + variant + "_" + target
-        for variant in [
-            "transform",
-            "transform_alternate",
-        ]
-        for target in _FEEDBACK_TARGETS
-    ],
-    c_file_output = "code_images.c",
-    h_file_output = "code_images.h",
-    identifier = "iree_hal_amd_gpu_code_images",
-    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
-)
-
 iree_runtime_cc_test(
     name = "code_test",
     srcs = ["code_test.cc"],
-    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+    target_compatible_with = _EXECUTABLE_COMPATIBLE_WITH,
     deps = [
-        ":code_images",
+        ":code_testdata",
         ":test_device",
+        ":testdata",
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
@@ -137,60 +215,14 @@ iree_runtime_cc_test(
     ],
 )
 
-_SCRATCH_COMPATIBLE_WITH = loom_config_compatible_with([
-    "//loom/config/target:amdgpu_artifacts",
-    "//loom/config/target/amdgpu:descriptor_set_cdna2_core",
-    "//loom/config/target/amdgpu:descriptor_set_gfx9_4_generic_core",
-    "//loom/config/target/amdgpu:descriptor_set_gfx11_generic_core",
-    "//loom/config/target/amdgpu:descriptor_set_gfx12_generic_core",
-])
-
-_SCRATCH_TARGETS = [
-    "gfx90a",
-    "gfx9-4-generic",
-    "gfx11-generic",
-    "gfx12-generic",
-]
-
-[
-    loom_target_profile(
-        name = "scratch_profile_" + target,
-        family = "amdgpu",
-        selector = target,
-        target_compatible_with = _SCRATCH_COMPATIBLE_WITH,
-    )
-    for target in _SCRATCH_TARGETS
-]
-
-[
-    loom_kernel_binary(
-        name = "scratch_" + target,
-        testonly = True,
-        srcs = ["scratch.loom"],
-        out = "scratch_" + target + ".hsaco",
-        target = ":scratch_profile_" + target,
-        target_compatible_with = _SCRATCH_COMPATIBLE_WITH,
-    )
-    for target in _SCRATCH_TARGETS
-]
-
-iree_c_embed_data(
-    name = "scratch_images",
-    testonly = True,
-    srcs = [":scratch_" + target for target in _SCRATCH_TARGETS],
-    c_file_output = "scratch_images.c",
-    h_file_output = "scratch_images.h",
-    identifier = "iree_hal_amd_gpu_scratch_images",
-    target_compatible_with = _SCRATCH_COMPATIBLE_WITH,
-)
-
 iree_runtime_cc_test(
     name = "scratch_test",
     srcs = ["scratch_test.cc"],
-    target_compatible_with = _SCRATCH_COMPATIBLE_WITH,
+    target_compatible_with = _EXECUTABLE_COMPATIBLE_WITH,
     deps = [
-        ":scratch_images",
+        ":scratch_testdata",
         ":test_device",
+        ":testdata",
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
@@ -208,6 +240,7 @@ iree_runtime_cc_test(
     srcs = ["asan_test.cc"],
     deps = [
         ":test_device",
+        ":testdata",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:pool_test_util",
@@ -217,35 +250,14 @@ iree_runtime_cc_test(
     ],
 )
 
-[
-    loom_kernel_binary(
-        name = "asan_report_" + target,
-        testonly = True,
-        srcs = ["asan_report.loom"],
-        out = "asan_report_" + target + ".hsaco",
-        target = ":feedback_profile_" + target,
-        target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
-    )
-    for target in _FEEDBACK_TARGETS
-]
-
-iree_c_embed_data(
-    name = "asan_report_images",
-    testonly = True,
-    srcs = [":asan_report_" + target for target in _FEEDBACK_TARGETS],
-    c_file_output = "asan_report_images.c",
-    h_file_output = "asan_report_images.h",
-    identifier = "iree_hal_amd_gpu_asan_report_images",
-    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
-)
-
 iree_runtime_cc_test(
     name = "asan_report_test",
     srcs = ["asan_report_test.cc"],
-    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+    target_compatible_with = _EXECUTABLE_COMPATIBLE_WITH,
     deps = [
-        ":asan_report_images",
+        ":asan_report_testdata",
         ":test_device",
+        ":testdata",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
@@ -253,35 +265,14 @@ iree_runtime_cc_test(
     ],
 )
 
-[
-    loom_kernel_binary(
-        name = "tsan_" + target,
-        testonly = True,
-        srcs = ["tsan.loom"],
-        out = "tsan_" + target + ".hsaco",
-        target = ":feedback_profile_" + target,
-        target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
-    )
-    for target in _FEEDBACK_TARGETS
-]
-
-iree_c_embed_data(
-    name = "tsan_images",
-    testonly = True,
-    srcs = [":tsan_" + target for target in _FEEDBACK_TARGETS],
-    c_file_output = "tsan_images.c",
-    h_file_output = "tsan_images.h",
-    identifier = "iree_hal_amd_gpu_tsan_images",
-    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
-)
-
 iree_runtime_cc_test(
     name = "tsan_test",
     srcs = ["tsan_test.cc"],
-    target_compatible_with = _FEEDBACK_COMPATIBLE_WITH,
+    target_compatible_with = _EXECUTABLE_COMPATIBLE_WITH,
     deps = [
         ":test_device",
-        ":tsan_images",
+        ":testdata",
+        ":tsan_testdata",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:profile_test_util",
@@ -299,6 +290,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/drivers/amd:driver",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
     ],
     alwayslink = True,
 )
@@ -336,6 +328,7 @@ iree_runtime_cc_test(
     srcs = ["file_transfer_test.cc"],
     deps = [
         ":test_device",
+        ":testdata",
         "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -363,6 +356,17 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "queue_dispatch_test",
+    target_compatible_with = _EXECUTABLE_COMPATIBLE_WITH,
+    deps = [
+        ":backends",
+        ":dispatch_testdata",
+        "//runtime/src/iree/hal/cts/queue:all_executable_tests",
+        "//runtime/src/iree/hal/cts/util:test_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "semaphore_test",
     deps = [
         ":backends",
@@ -379,6 +383,7 @@ iree_runtime_cc_benchmark(
     # Explicit measurement iteration counts override the smoke's minimum time.
     args = ["--benchmark_dry_run"],
     deps = [
+        ":testdata",
         "//libamdf:amdf_static",
         "//libamdf:headers",
         "//runtime/src/iree/async",
@@ -435,6 +440,7 @@ iree_runtime_cc_test(
     }),
     deps = [
         ":test_device",
+        ":testdata",
         "//libamdf:amdf_static",
         "//libamdf:headers",
         "//runtime/src/iree/async",
@@ -476,6 +482,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/drivers/amd:status",
         "//runtime/src/iree/hal/drivers/amd/fabric",
         "//runtime/src/iree/hal/drivers/amd/gpu:code",
@@ -496,6 +503,7 @@ iree_runtime_cc_test(
     srcs = ["recording_test.cc"],
     deps = [
         ":test_device",
+        ":testdata",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd/gpu/image:hip_images",
@@ -540,6 +548,7 @@ iree_runtime_cc_test(
     srcs = ["profile_test.cc"],
     deps = [
         ":test_device",
+        ":testdata",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:profile_test_util",

@@ -14,6 +14,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/pool_test_util.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
+#include "iree/hal/drivers/amd/gpu/cts/testdata.h"
 #include "iree/hal/drivers/amd/gpu/image/asan_images.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -41,7 +42,6 @@ class GpuAsanTest : public GpuNativeTest,
           AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS)) {
       GTEST_SKIP() << "Native shader notification is unavailable";
     }
-    const auto gfx = context_->target_info.gfx_ip;
     options_.asan.memory.shadow_slab_size = 1024 * 1024;
     options_.asan.shadow_backing =
         std::get<1>(GetParam())
@@ -80,23 +80,14 @@ class GpuAsanTest : public GpuNativeTest,
     IREE_ASSERT_OK(iree_hal_pool_resolve_binding(
         pool_, program_scope, IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
         &slot_));
-    const auto* files = iree_hal_amd_gpu_asan_images_create();
-    const char* selector = gfx.major == 9
-                               ? (gfx.minor == 4 ? "gfx9_4_generic" : "gfx90a")
-                           : gfx.major == 11 ? "gfx11_generic"
-                                             : "gfx12_generic";
-    iree_hal_executable_load_params_t load;
-    iree_hal_executable_load_params_initialize(&load);
-    for (size_t i = 0; i < iree_hal_amd_gpu_asan_images_size(); ++i) {
-      if (std::strstr(files[i].name, selector)) {
-        load.executable_data =
-            iree_make_const_byte_span(files[i].data, files[i].size);
-      }
-    }
-    ASSERT_NE(load.executable_data.data, nullptr);
     const auto* target =
         &iree_hal_device_spec_executables(iree_hal_device_spec(device_))
              ->targets[0];
+    iree_hal_executable_load_params_t load;
+    iree_hal_executable_load_params_initialize(&load);
+    IREE_ASSERT_OK(LookupCodeObject(iree_hal_amd_gpu_asan_images_create(),
+                                    iree_hal_amd_gpu_asan_images_size(),
+                                    target->target_key, &load.executable_data));
     IREE_ASSERT_OK(
         iree_hal_executable_load(family, target, &load, &executable_));
     IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(

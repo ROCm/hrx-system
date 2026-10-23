@@ -10,9 +10,10 @@
 #include <tuple>
 
 #include "iree/hal/api.h"
+#include "iree/hal/cts/util/registry.h"
 #include "iree/hal/cts/util/test_base.h"
-#include "iree/hal/drivers/amd/cts/affine_images.h"
 #include "iree/hal/drivers/amd/cts/cpu_executable.h"
+#include "iree/hal/drivers/amd/gpu/cts/testdata.h"
 #include "iree/hal/drivers/amd/gpu/target/identity.h"
 #include "iree/hal/drivers/amd/registration/driver_module.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/mul_i32.h"
@@ -338,20 +339,13 @@ class ExecutionTest
     iree_hal_amd_gpu_target_identity_t identity;
     IREE_ASSERT_OK(iree_hal_amd_gpu_target_identity_parse_artifact_key(
         gpu_targets->targets[0].target_key, &identity));
-    ASSERT_TRUE(identity.version.major == 11 || identity.version.major == 12);
-    const char* selector =
-        identity.version.major == 11 ? "gfx11-generic" : "gfx12-generic";
-    const auto* gpu_images = iree_hal_amd_cts_affine_images_create();
-    for (size_t i = 0; i < iree_hal_amd_cts_affine_images_size(); ++i) {
-      if (strstr(gpu_images[i].name, selector)) {
-        ASSERT_NO_FATAL_FAILURE(Load(
-            kGpu,
-            iree_make_const_byte_span(gpu_images[i].data, gpu_images[i].size),
-            IREE_SV("affine_i32")));
-        break;
-      }
-    }
-    ASSERT_TRUE(participants_[kGpu].executable);
+    const auto images =
+        iree::hal::cts::CtsRegistry::ListExecutableTargets("amd_cts_affine");
+    const auto* image = gpu::cts::SelectExecutableTarget(images, identity);
+    ASSERT_NE(image, nullptr);
+    ASSERT_NO_FATAL_FAILURE(Load(kGpu,
+                                 image->data_fn(IREE_SV("affine_i32.bin")),
+                                 IREE_SV("affine_i32")));
   }
 
   static iree_hal_dispatch_config_t Config(Engine engine) {

@@ -6,14 +6,13 @@
 
 #include <array>
 #include <atomic>
-#include <cstring>
 #include <semaphore>
 #include <string>
 #include <tuple>
 
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/amd/gpu/cts/asan_report_images.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
+#include "iree/hal/drivers/amd/gpu/cts/testdata.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -39,13 +38,17 @@ class GpuAsanReportTest
           AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS)) {
       GTEST_SKIP() << "Native shader notification is unavailable";
     }
-    const auto gfx = context_->target_info.gfx_ip;
     context_->event_sink = {Publish, this};
     options_.asan.memory.shadow_slab_size = 1024 * 1024;
     options_.asan.report_policy =
         std::get<0>(GetParam())
             ? IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_FAIL_DEVICE
             : IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_REPORT_ONLY;
+    iree_hal_executable_load_params_t load;
+    iree_hal_executable_load_params_initialize(&load);
+    IREE_ASSERT_OK(LookupExecutableData(
+        "amd_gpu_asan_report", context_->target_info,
+        IREE_SV("asan_report.bin"), &load.executable_data));
     Create(IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_ASAN);
     if (HasFatalFailure() || IsSkipped()) {
       return;
@@ -75,20 +78,7 @@ class GpuAsanReportTest
     IREE_ASSERT_OK(iree_hal_pool_resolve_binding(
         pool_, program_scope, IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
         &slot_));
-    const auto* files = iree_hal_amd_gpu_asan_report_images_create();
-    const char* selector = gfx.major == 9
-                               ? (gfx.minor == 4 ? "gfx9-4-generic" : "gfx90a")
-                           : gfx.major == 11 ? "gfx11-generic"
-                                             : "gfx12-generic";
-    iree_hal_executable_load_params_t load;
-    iree_hal_executable_load_params_initialize(&load);
-    for (size_t i = 0; i < iree_hal_amd_gpu_asan_report_images_size(); ++i) {
-      if (std::strstr(files[i].name, selector)) {
-        load.executable_data =
-            iree_make_const_byte_span(files[i].data, files[i].size);
-      }
-    }
-    ASSERT_NE(load.executable_data.data, nullptr);
+
     const auto* target =
         &iree_hal_device_spec_executables(iree_hal_device_spec(device_))
              ->targets[0];

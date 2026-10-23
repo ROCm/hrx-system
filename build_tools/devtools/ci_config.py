@@ -218,11 +218,8 @@ AMD_GPU_WEIGHTS_TARGET = "//loom/src/loom/tooling/target/amdgpu/serve:gpu_weight
 # streaming cases separately without requesting the unavailable feedback service.
 AMD_GPU_WINDOWS_BAZEL_TARGETS = AMD_GPU_BAZEL_TARGETS + ("-" + AMD_GPU_WEIGHTS_TARGET,)
 AMD_GPU_WINDOWS_TEST_TAG_FILTERS = ("-requires-amd-gpu-feedback",)
-# Native CTS binaries embed images for every supported execution family. Their
-# compiler descriptors must remain enabled even on a single-family runner.
-AMD_GPU_BINARY_TARGETS = ("gfx90a", "gfx9-4-generic", "gfx11-generic", "gfx12-generic")
 # Compiler-only fixtures cover the complete supported target vocabulary, even
-# when hardware execution uses one family and native CTS embeds a smaller set.
+# when hardware execution and HIP images select a single target family.
 AMD_GPU_LOOM_TARGETS = ("loom_defaults",)
 # Single-family hardware jobs select only that family's HAL CTS instances.
 # Multi-family selectors retain both; queue transport tests are independent.
@@ -231,8 +228,6 @@ AMD_GPU_CTS_TARGET_PREFIXES = {
     "cdna": ("cdna", "gfx9"),
 }
 AMD_GPU_BAZEL_OPTIONS = (
-    "--//runtime/src/iree/hal/drivers/amd/gpu:targets="
-    + ",".join(AMD_GPU_BINARY_TARGETS),
     "--//loom/config/target/amdgpu:targets=" + ",".join(AMD_GPU_LOOM_TARGETS),
 )
 AMD_CLIENT_WINDOWS_BAZEL_TARGETS = (

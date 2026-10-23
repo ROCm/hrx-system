@@ -66,7 +66,7 @@ def configure_project(source, build, *arguments, expect_failure=False):
         "-B",
         str(build),
         *configured_cmake_arguments(),
-        f"-DIREE_REPO_ROOT={REPO_ROOT}",
+        f"-DIREE_REPO_ROOT={REPO_ROOT.as_posix()}",
         f"-DPython3_EXECUTABLE={sys.executable}",
         *arguments,
         expect_failure=expect_failure,

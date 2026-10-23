@@ -877,9 +877,10 @@ def amdgpu_test_steps(
         + ci_config.AMD_GPU_BAZEL_OPTIONS
         + amd_gpu_device_compiler_options()
         + (
-            # Shared Loom hardware fixtures consume this selector independently
-            # of the enabled drivers and the embedded native CTS image set.
+            # Hardware fixtures and HIP images follow the execution selector;
+            # compiler-only coverage keeps its independent target selection.
             "--//runtime/src/iree/hal/drivers/amdgpu:targets=" + target_selector,
+            "--//runtime/src/iree/hal/drivers/amd/gpu:targets=" + target_selector,
             "--//runtime/config/hal:drivers=task,amd",
         )
     )
@@ -916,6 +917,7 @@ def amdgpu_windows_steps(
         ci_config.AMDGPU_WINDOWS_BAZEL_OPTIONS
         + ci_config.AMD_GPU_BAZEL_OPTIONS
         + amd_gpu_device_compiler_options()
+        + ("--//runtime/src/iree/hal/drivers/amd/gpu:targets=" + target_selector,)
     )
     config_name = f" / {config.upper()}" if config is not None else ""
     # A required finite PM4 copy establishes the exact GPU and usable native
@@ -1283,8 +1285,7 @@ def cmake_amdgpu_steps(
                 "-DAMDF_FAMILY_XDNA=OFF",
                 "-DLOOM_BUILD=ON",
                 "-DIREE_HAL_AMDGPU_TARGETS=" + target_selector,
-                "-DIREE_HAL_AMD_GPU_TARGETS="
-                + ";".join(ci_config.AMD_GPU_BINARY_TARGETS),
+                "-DIREE_HAL_AMD_GPU_TARGETS=" + target_selector,
                 "-DLOOM_TARGET_AMDGPU_TARGETS="
                 + ";".join(ci_config.AMD_GPU_LOOM_TARGETS),
             )

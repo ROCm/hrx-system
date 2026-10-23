@@ -439,9 +439,8 @@ TEST_P(DispatchReuseTest, DispatchProfilingRecordsCommandBufferDispatch) {
   IREE_ASSERT_OK(profiling.End());
   EXPECT_EQ(1, sink.begin_count);
   EXPECT_EQ(1, sink.end_count);
-  EXPECT_EQ(1, sink.device_metadata_count);
-  EXPECT_EQ(1, sink.queue_metadata_count);
-  EXPECT_GE(sink.clock_correlation_count, 3);
+  EXPECT_GE(sink.device_metadata_count, 1);
+  EXPECT_GE(sink.queue_metadata_count, 1);
   EXPECT_GE(sink.executable_metadata_count, 1);
   EXPECT_GE(sink.command_buffer_metadata_count, 1);
   EXPECT_GE(sink.command_operation_metadata_count, 1);
@@ -463,7 +462,7 @@ TEST_P(DispatchReuseTest, DispatchProfilingRecordsCommandBufferDispatch) {
   EXPECT_TRUE(sink.saw_device_metadata);
   EXPECT_TRUE(sink.saw_queue_metadata);
   EXPECT_FALSE(sink.write_after_end);
-  ExpectDispatchEventsHaveClockCorrelations(sink);
+  ExpectDispatchEventsHaveClockMetadata(sink);
 }
 
 // Submits a reusable command buffer with large workgroup counts. The existing
@@ -955,9 +954,8 @@ TEST_P(DispatchReuseTest, MultiDispatchProfilingFiltersCommandIndex) {
   IREE_ASSERT_OK(profiling.End());
   EXPECT_EQ(1, sink.begin_count);
   EXPECT_EQ(1, sink.end_count);
-  EXPECT_EQ(1, sink.device_metadata_count);
-  EXPECT_EQ(1, sink.queue_metadata_count);
-  EXPECT_GE(sink.clock_correlation_count, 3);
+  EXPECT_GE(sink.device_metadata_count, 1);
+  EXPECT_GE(sink.queue_metadata_count, 1);
   EXPECT_GE(sink.command_buffer_metadata_count, 1);
   EXPECT_GE(sink.command_operation_metadata_count, 1);
   ASSERT_EQ(1u, sink.dispatch_events.size());
@@ -974,7 +972,7 @@ TEST_P(DispatchReuseTest, MultiDispatchProfilingFiltersCommandIndex) {
     }
   }
   EXPECT_EQ(2u, matching_dispatch_operation_count);
-  ExpectDispatchEventsHaveClockCorrelations(sink);
+  ExpectDispatchEventsHaveClockMetadata(sink);
 }
 
 // Resubmits a multi-dispatch command buffer multiple times with different

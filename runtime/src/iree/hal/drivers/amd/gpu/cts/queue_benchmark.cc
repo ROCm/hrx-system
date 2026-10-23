@@ -18,6 +18,7 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amd/gpu/cts/testdata.h"
 #include "iree/hal/drivers/amd/gpu/device.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/queue.h"
@@ -197,7 +198,6 @@ class NativeQueue {
           "No native AMD GPU endpoint with the requested packet family");
       return iree_ok_status();
     }
-    const auto gfxip = context_->target_info.gfx_ip;
     iree_hal_amd_gpu_device_options_t options;
     iree_hal_amd_gpu_device_options_initialize(&options);
     options.queue_family_ordinal = family_ordinal;
@@ -279,23 +279,15 @@ class NativeQueue {
         pool_, program_scope, IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
         &address_slot));
 
-    const auto* files = iree_hal_amd_gpu_hip_images_create();
-    iree_const_byte_span_t artifact = iree_const_byte_span_empty();
-    const char* selector =
-        gfxip.major == 9    ? (gfxip.minor == 4 ? "gfx9_4_generic" : "gfx90a")
-        : gfxip.major == 11 ? "gfx11_generic"
-                            : "gfx12_generic";
-    for (size_t i = 0; i < iree_hal_amd_gpu_hip_images_size(); ++i) {
-      if (std::strstr(files[i].name, selector)) {
-        artifact = iree_make_const_byte_span(files[i].data, files[i].size);
-      }
-    }
-    auto* target =
+    const auto* target =
         &iree_hal_device_spec_executables(iree_hal_device_spec(device_))
              ->targets[0];
     iree_hal_executable_load_params_t load;
     iree_hal_executable_load_params_initialize(&load);
-    load.executable_data = artifact;
+    IREE_RETURN_IF_ERROR(iree::hal::amd::gpu::cts::LookupCodeObject(
+        iree_hal_amd_gpu_hip_images_create(),
+        iree_hal_amd_gpu_hip_images_size(), target->target_key,
+        &load.executable_data));
     for (auto& lane : lanes_) {
       IREE_RETURN_IF_ERROR(iree_hal_pool_allocate_buffer(
           pool_, iree_hal_make_pool_reservation_request(buffer_length, 8),

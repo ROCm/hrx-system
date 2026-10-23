@@ -19,6 +19,7 @@
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
+#include "iree/hal/drivers/amd/gpu/cts/testdata.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
 #include "iree/hal/memory/fixed_block_pool.h"
 #include "iree/hal/utils/fd_file.h"
@@ -157,22 +158,12 @@ class GpuNativeFileTest
     CreateSemaphore(timeline_.out());
     iree_hal_executable_load_params_t load;
     iree_hal_executable_load_params_initialize(&load);
-    const char* selector = gfx.major == 9
-                               ? (gfx.minor == 4       ? "gfx9_4_generic"
-                                  : gfx.stepping == 10 ? "gfx90a"
-                                                       : "gfx9_generic")
-                           : gfx.major == 11 ? "gfx11_generic"
-                                             : "gfx12_generic";
-    const auto* images = iree_hal_amd_gpu_hip_images_create();
-    for (size_t i = 0; i < iree_hal_amd_gpu_hip_images_size(); ++i) {
-      if (std::strstr(images[i].name, selector)) {
-        load.executable_data =
-            iree_make_const_byte_span(images[i].data, images[i].size);
-      }
-    }
-    ASSERT_NE(load.executable_data.data, nullptr);
     const auto* targets =
         iree_hal_device_spec_executables(iree_hal_device_spec(device_));
+    IREE_ASSERT_OK(iree::hal::amd::gpu::cts::LookupCodeObject(
+        iree_hal_amd_gpu_hip_images_create(),
+        iree_hal_amd_gpu_hip_images_size(), targets->targets[0].target_key,
+        &load.executable_data));
     IREE_ASSERT_OK(iree_hal_executable_load(family.family, &targets->targets[0],
                                             &load, executable_.out()));
     IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
@@ -750,7 +741,7 @@ void GpuNativeFileAccessTest::RoundTrip(bool direct) {
   Ref<iree_hal_file_t> file;
   iree::Status file_status = Open(expected, file.out(), direct);
   if (file_status.code() == iree::StatusCode::kUnavailable) {
-    GTEST_SKIP() << file_status.ToString();
+    GTEST_SKIP() << iree::hal::cts::FormatSkipStatus(file_status);
   }
   IREE_ASSERT_OK(file_status);
   auto* semaphore = timeline_.get();

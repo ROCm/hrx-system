@@ -13,6 +13,7 @@
 
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
+#include "iree/hal/drivers/amd/gpu/cts/testdata.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/command_buffer.h"
 #include "iree/hal/slab_pool.h"
@@ -29,7 +30,6 @@ class GpuNativeRecordingTest : public GpuNativeTest {
     if (HasFatalFailure() || IsSkipped()) {
       return;
     }
-    const uint32_t gfx_major = context_->target_info.gfx_ip.major;
     options_.queue.ring_byte_length = 4096;
     options_.queue.retirement_capacity = 4;
     options_.queue.argument_capacity = 32;
@@ -58,21 +58,15 @@ class GpuNativeRecordingTest : public GpuNativeTest {
     iree_hal_slab_pool_options_initialize(&options);
     IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &options,
                                              iree_allocator_system(), &pool_));
-    const auto* files = iree_hal_amd_gpu_hip_images_create();
-    iree_const_byte_span_t artifact = iree_const_byte_span_empty();
-    const char* selector = gfx_major == 11 ? "gfx11_generic" : "gfx12_generic";
-    for (size_t i = 0; i < iree_hal_amd_gpu_hip_images_size(); ++i) {
-      if (std::strstr(files[i].name, selector)) {
-        artifact = iree_make_const_byte_span(files[i].data, files[i].size);
-      }
-    }
-    ASSERT_NE(artifact.data, nullptr);
-    auto* target =
+    const auto* target =
         &iree_hal_device_spec_executables(iree_hal_device_spec(device_))
              ->targets[0];
     iree_hal_executable_load_params_t load;
     iree_hal_executable_load_params_initialize(&load);
-    load.executable_data = artifact;
+    IREE_ASSERT_OK(iree::hal::amd::gpu::cts::LookupCodeObject(
+        iree_hal_amd_gpu_hip_images_create(),
+        iree_hal_amd_gpu_hip_images_size(), target->target_key,
+        &load.executable_data));
     IREE_ASSERT_OK(
         iree_hal_executable_load(family, target, &load, &executable_));
     IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(

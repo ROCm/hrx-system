@@ -122,6 +122,7 @@ include(cts)
 include(iree_execution_test_suite)
 include(iree_external_hal_driver)
 include(iree_runtime_amdgpu_toolchain)
+include(iree_runtime_hal_cts_testdata)
 include(iree_runtime_hal_cts_test_suite)
 include(iree_wasm_library)
 

@@ -1,0 +1,20 @@
+kernel.def export("command_buffer_dispatch_test") @absolute_value() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<2xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<2xf32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %count = index.constant 2 : index
+  %float_zero = scalar.constant 0.0 : f32
+  scf.for %i = [%zero to %count step %one] {
+    %value = view.load %input_view[%i] : view<2xf32> -> f32
+    %negative = scalar.negf %value : f32
+    %is_negative = scalar.cmpf olt, %value, %float_zero : f32
+    %result = scf.select %is_negative, %negative, %value : f32
+    view.store %result, %output_view[%i] : f32, view<2xf32>
+  }
+  kernel.return
+}

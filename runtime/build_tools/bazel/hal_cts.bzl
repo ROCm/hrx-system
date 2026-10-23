@@ -13,7 +13,8 @@ backend-owned and remains outside this runtime composition rule.
 
 load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
-load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary")
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary", "iree_runtime_cc_library")
 load("//runtime/requirements:package_policy.bzl", "apply_runtime_test_policy")
 
 _NON_EXECUTABLE_TEST_SUITES = [
@@ -45,6 +46,93 @@ _TEST_ATTRS = [
     "size",
     "timeout",
 ]
+
+def _testdata_registration_impl(ctx):
+    ctx.actions.expand_template(
+        template = ctx.file._template,
+        output = ctx.outputs.out,
+        substitutions = ctx.attr.substitutions,
+    )
+    return [DefaultInfo(files = depset([ctx.outputs.out]))]
+
+_testdata_registration = rule(
+    implementation = _testdata_registration_impl,
+    attrs = {
+        "out": attr.output(mandatory = True),
+        "substitutions": attr.string_dict(mandatory = True),
+        "_template": attr.label(
+            default = Label("//runtime/src/iree/hal/cts/util:testdata_target.cc.tpl"),
+            allow_single_file = True,
+        ),
+    },
+)
+
+def iree_runtime_hal_cts_testdata(
+        name,
+        srcs,
+        backend_names,
+        target_name,
+        target_family,
+        target_key,
+        **kwargs):
+    """Embeds one target's compiled corpus and registers it with CTS backends.
+
+    Artifact production and configured-target selection belong to the caller.
+    Source basenames are the logical names consumed by CTS executable lookups.
+
+    Args:
+      name: Registration library target and generated-file prefix.
+      srcs: Compiled executable artifacts for one target.
+      backend_names: Backend views receiving this target's registration.
+      target_name: GTest-compatible executable target name.
+      target_family: HAL executable target family.
+      target_key: Canonical family-owned artifact identity.
+      **kwargs: Common attributes, including configured-target compatibility.
+    """
+    identifier = name.replace("-", "_").replace(".", "_")
+    data_name = name + "_data"
+    header = data_name + ".h"
+    iree_c_embed_data(
+        name = data_name,
+        srcs = srcs,
+        c_file_output = data_name + ".c",
+        h_file_output = header,
+        identifier = identifier,
+        flatten = True,
+        testonly = True,
+        **kwargs
+    )
+    registrations = []
+    for ordinal, backend_name in enumerate(backend_names):
+        registration = "%s_reg%d.cc" % (name, ordinal)
+        _testdata_registration(
+            name = "%s_reg%d" % (name, ordinal),
+            out = registration,
+            substitutions = {
+                "{BACKEND_NAME}": backend_name,
+                "{HEADER_PATH}": "%s/%s" % (native.package_name(), header),
+                "{IDENTIFIER}": identifier,
+                "{TARGET_FAMILY}": target_family,
+                "{TARGET_FUNC_NAME}": identifier,
+                "{TARGET_KEY}": target_key,
+                "{TARGET_NAME}": target_name,
+                "{TARGET_VAR_NAME}": identifier,
+            },
+            testonly = True,
+            **kwargs
+        )
+        registrations.append(registration)
+    iree_runtime_cc_library(
+        name = name,
+        srcs = registrations,
+        deps = [
+            ":" + data_name,
+            "//runtime/src/iree/hal/cts/util:registry",
+        ],
+        alwayslink = True,
+        testonly = True,
+        **kwargs
+    )
 
 def _split_test_attrs(attrs):
     target_attrs = dict(attrs)

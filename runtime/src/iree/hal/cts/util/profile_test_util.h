@@ -90,6 +90,9 @@ struct TestProfileSink {
   // Clock correlation records copied from CLOCK_CORRELATIONS chunks.
   std::vector<iree_hal_profile_clock_correlation_record_t> clock_correlations;
 
+  // Device metadata records copied from DEVICES chunks, including refreshes.
+  std::vector<iree_hal_profile_device_record_t> devices;
+
   // Dispatch event records copied from DISPATCH_EVENTS chunks.
   std::vector<iree_hal_profile_dispatch_event_t> dispatch_events;
 
@@ -176,9 +179,9 @@ iree_hal_profile_sink_t* TestProfileSinkAsBase(TestProfileSink* sink);
 // requested profiling mode in a cross-backend CTS test.
 bool IsProfilingUnsupported(iree_status_code_t status_code);
 
-// Verifies all dispatch events have clock correlation records for their
-// physical device.
-void ExpectDispatchEventsHaveClockCorrelations(const TestProfileSink& sink);
+// Verifies all dispatch events have physical-device clock metadata. A timestamp
+// frequency supports elapsed durations without a host timeline correlation.
+void ExpectDispatchEventsHaveClockMetadata(const TestProfileSink& sink);
 
 // Verifies all queue device events have device ticks bracketed by clock
 // correlation records for their physical device.
