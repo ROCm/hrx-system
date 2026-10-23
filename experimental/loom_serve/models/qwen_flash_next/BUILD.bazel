@@ -232,6 +232,7 @@ loom_library(
         configs = {
             "flash_next.token_count": str(rows + 3),
             "q8_test.pipeline_depth": str(depth),
+            "q8_test.stage_k": "0",
             "q8_test.tile_columns": str(columns),
             "q8_test.tile_rows": str(rows),
             "q8_test.wave_columns": str(wave_columns),
@@ -255,6 +256,37 @@ loom_library(
         (64, 64, 4, 2, 1),
         (128, 128, 4, 2, 1),
         (128, 128, 4, 2, 2),
+    ]
+]
+
+# Both staged coefficient layouts exercise an odd K32 block count, partial
+# output tiles, empty/live epochs, and the same independent scalar oracle.
+[
+    loom_test(
+        name = "q8_matrix_half_stage{}_test".format(stage),
+        srcs = ["tests/q8_matrix.loom"],
+        benchmark_smoke = False,
+        configs = {
+            "flash_next.token_count": "4096",
+            "q8_test.pipeline_depth": "2",
+            "q8_test.stage_k": str(stage),
+            "q8_test.tile_columns": "128",
+            "q8_test.tile_rows": "128",
+            "q8_test.wave_columns": "2",
+            "q8_test.wave_rows": "4",
+        },
+        execution_profiles = [
+            AMD_GPU_HARDWARE_PROFILE,
+            AMD_GPU_ACCESS_PROFILE,
+        ],
+        deps = [
+            ":q8_matrix",
+            ":q8_reference",
+        ],
+    )
+    for stage in [
+        32,
+        64,
     ]
 ]
 

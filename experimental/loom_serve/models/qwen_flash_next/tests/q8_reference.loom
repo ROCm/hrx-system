@@ -40,7 +40,7 @@ func.def public @flash_next_q8_fixture(%count_value: index, %inputs: index, %out
 
 // Decode each original Q8 value independently and accumulate in F64. The
 // reference has no matrix fragments, lane partitioning, or subgroup reduction.
-func.def public inline @flash_next_q8_reference_dot(%inputs: index, %token: index, %row: index, %input: buffer, %weight: buffer) -> (f64) {
+func.def public inline @flash_next_q8_reference_dot_arithmetic(%half_coefficients: i1, %inputs: index, %token: index, %row: index, %input: buffer, %weight: buffer) -> (f64) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -66,14 +66,30 @@ func.def public inline @flash_next_q8_reference_dot(%inputs: index, %token: inde
     %value = scalar.sitofp %code : i8 to f64
     %x = scalar.extf %input_packed : bf16 to f64
     %w = scalar.mulf %value, %scale : f64
-    %product = scalar.mulf %w, %x : f64
+    %operand_x, %operand_w = scf.if %half_coefficients -> (f64, f64) {
+      %x_half = scalar.fptrunc %x : f64 to f16
+      %w_half = scalar.fptrunc %w : f64 to f16
+      %x_rounded = scalar.extf %x_half : f16 to f64
+      %w_rounded = scalar.extf %w_half : f16 to f64
+      scf.yield %x_rounded, %w_rounded : f64, f64
+    } else {
+      scf.yield %x, %w : f64, f64
+    }
+    %product = scalar.mulf %operand_w, %operand_x : f64
     %next = scalar.addf %sum, %product : f64
     scf.yield %next : f64
   }
   func.return %result : f64
 }
 
-func.def public @flash_next_q8_reference(%inputs: index, %outputs: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+// Scalar consumers retain original per-block coefficient arithmetic.
+func.def public inline @flash_next_q8_reference_dot(%inputs: index, %token: index, %row: index, %input: buffer, %weight: buffer) -> (f64) {
+  %half_coefficients = scalar.constant false : i1
+  %result = func.call @flash_next_q8_reference_dot_arithmetic(%half_coefficients, %inputs, %token, %row, %input, %weight) : (i1, index, index, index, buffer, buffer) -> (f64)
+  func.return %result : f64
+}
+
+func.def public @flash_next_q8_reference_arithmetic(%half_coefficients: i1, %inputs: index, %outputs: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -85,10 +101,16 @@ func.def public @flash_next_q8_reference(%inputs: index, %outputs: index, %epoch
   %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x[%outputs]xbf16>
   scf.for %token = [%c0 to %count step %c1] {
     scf.for %row = [%c0 to %outputs step %c1] {
-      %result = func.call @flash_next_q8_reference_dot(%inputs, %token, %row, %input, %weight) : (index, index, index, buffer, buffer) -> (f64)
+      %result = func.call @flash_next_q8_reference_dot_arithmetic(%half_coefficients, %inputs, %token, %row, %input, %weight) : (i1, index, index, index, buffer, buffer) -> (f64)
       %packed = scalar.fptrunc %result : f64 to bf16
       view.store %packed, %output_view[%token, %row] : bf16, view<[%tokens]x[%outputs]xbf16>
     }
   }
+  func.return
+}
+
+func.def public @flash_next_q8_reference(%inputs: index, %outputs: index, %epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %half_coefficients = scalar.constant false : i1
+  func.call @flash_next_q8_reference_arithmetic(%half_coefficients, %inputs, %outputs, %epoch, %input, %weight, %output) : (i1, index, index, buffer, buffer, buffer, buffer)
   func.return
 }

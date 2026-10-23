@@ -1454,6 +1454,7 @@ loom_execution_test(
     "--device=amdgpu2"
     "--config=flash_next.token_count=19"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=64"
     "--config=q8_test.tile_rows=16"
     "--config=q8_test.wave_columns=4"
@@ -1488,6 +1489,7 @@ loom_execution_test(
     "--sanitizer=access"
     "--config=flash_next.token_count=19"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=64"
     "--config=q8_test.tile_rows=16"
     "--config=q8_test.wave_columns=4"
@@ -1524,6 +1526,7 @@ loom_execution_test(
     "--sanitizer-reporting=report-only"
     "--config=flash_next.token_count=19"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=64"
     "--config=q8_test.tile_rows=16"
     "--config=q8_test.wave_columns=4"
@@ -1567,6 +1570,7 @@ loom_execution_test(
     "--device=amdgpu2"
     "--config=flash_next.token_count=35"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=64"
     "--config=q8_test.tile_rows=32"
     "--config=q8_test.wave_columns=2"
@@ -1601,6 +1605,7 @@ loom_execution_test(
     "--sanitizer=access"
     "--config=flash_next.token_count=35"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=64"
     "--config=q8_test.tile_rows=32"
     "--config=q8_test.wave_columns=2"
@@ -1637,6 +1642,7 @@ loom_execution_test(
     "--sanitizer-reporting=report-only"
     "--config=flash_next.token_count=35"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=64"
     "--config=q8_test.tile_rows=32"
     "--config=q8_test.wave_columns=2"
@@ -1680,6 +1686,7 @@ loom_execution_test(
     "--device=amdgpu2"
     "--config=flash_next.token_count=35"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=32"
     "--config=q8_test.tile_rows=32"
     "--config=q8_test.wave_columns=2"
@@ -1714,6 +1721,7 @@ loom_execution_test(
     "--sanitizer=access"
     "--config=flash_next.token_count=35"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=32"
     "--config=q8_test.tile_rows=32"
     "--config=q8_test.wave_columns=2"
@@ -1750,6 +1758,7 @@ loom_execution_test(
     "--sanitizer-reporting=report-only"
     "--config=flash_next.token_count=35"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=32"
     "--config=q8_test.tile_rows=32"
     "--config=q8_test.wave_columns=2"
@@ -1793,6 +1802,7 @@ loom_execution_test(
     "--device=amdgpu2"
     "--config=flash_next.token_count=67"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=64"
     "--config=q8_test.tile_rows=64"
     "--config=q8_test.wave_columns=2"
@@ -1827,6 +1837,7 @@ loom_execution_test(
     "--sanitizer=access"
     "--config=flash_next.token_count=67"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=64"
     "--config=q8_test.tile_rows=64"
     "--config=q8_test.wave_columns=2"
@@ -1863,6 +1874,7 @@ loom_execution_test(
     "--sanitizer-reporting=report-only"
     "--config=flash_next.token_count=67"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=64"
     "--config=q8_test.tile_rows=64"
     "--config=q8_test.wave_columns=2"
@@ -1906,6 +1918,7 @@ loom_execution_test(
     "--device=amdgpu2"
     "--config=flash_next.token_count=67"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=64"
     "--config=q8_test.tile_rows=64"
     "--config=q8_test.wave_columns=2"
@@ -1940,6 +1953,7 @@ loom_execution_test(
     "--sanitizer=access"
     "--config=flash_next.token_count=67"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=64"
     "--config=q8_test.tile_rows=64"
     "--config=q8_test.wave_columns=2"
@@ -1976,6 +1990,7 @@ loom_execution_test(
     "--sanitizer-reporting=report-only"
     "--config=flash_next.token_count=67"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=64"
     "--config=q8_test.tile_rows=64"
     "--config=q8_test.wave_columns=2"
@@ -2019,6 +2034,7 @@ loom_execution_test(
     "--device=amdgpu2"
     "--config=flash_next.token_count=131"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=128"
     "--config=q8_test.tile_rows=128"
     "--config=q8_test.wave_columns=2"
@@ -2053,6 +2069,7 @@ loom_execution_test(
     "--sanitizer=access"
     "--config=flash_next.token_count=131"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=128"
     "--config=q8_test.tile_rows=128"
     "--config=q8_test.wave_columns=2"
@@ -2089,6 +2106,7 @@ loom_execution_test(
     "--sanitizer-reporting=report-only"
     "--config=flash_next.token_count=131"
     "--config=q8_test.pipeline_depth=1"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=128"
     "--config=q8_test.tile_rows=128"
     "--config=q8_test.wave_columns=2"
@@ -2132,6 +2150,7 @@ loom_execution_test(
     "--device=amdgpu2"
     "--config=flash_next.token_count=131"
     "--config=q8_test.pipeline_depth=2"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=128"
     "--config=q8_test.tile_rows=128"
     "--config=q8_test.wave_columns=2"
@@ -2166,6 +2185,7 @@ loom_execution_test(
     "--sanitizer=access"
     "--config=flash_next.token_count=131"
     "--config=q8_test.pipeline_depth=2"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=128"
     "--config=q8_test.tile_rows=128"
     "--config=q8_test.wave_columns=2"
@@ -2202,6 +2222,7 @@ loom_execution_test(
     "--sanitizer-reporting=report-only"
     "--config=flash_next.token_count=131"
     "--config=q8_test.pipeline_depth=2"
+    "--config=q8_test.stage_k=0"
     "--config=q8_test.tile_columns=128"
     "--config=q8_test.tile_rows=128"
     "--config=q8_test.wave_columns=2"
@@ -2216,6 +2237,166 @@ loom_execution_test(
     "iree-run-requirement=libamdf.resource.amd_gpu"
     "runtime-resource=amd-gpu"
     "loom-execution-profile=amd_gpu_tsan"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
+    q8_matrix_half_stage32_test_module
+  SRCS
+    "tests/q8_matrix.loom"
+  LIBRARIES
+    "::q8_matrix"
+    "::q8_reference"
+)
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    q8_matrix_half_stage32_test_execute_amd_gpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_half_stage32_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu2"
+    "--config=flash_next.token_count=4096"
+    "--config=q8_test.pipeline_depth=2"
+    "--config=q8_test.stage_k=32"
+    "--config=q8_test.tile_columns=128"
+    "--config=q8_test.tile_rows=128"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=4"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amd_gpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    q8_matrix_half_stage32_test_execute_amd_gpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_half_stage32_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu2"
+    "--sanitizer=access"
+    "--config=flash_next.token_count=4096"
+    "--config=q8_test.pipeline_depth=2"
+    "--config=q8_test.stage_k=32"
+    "--config=q8_test.tile_columns=128"
+    "--config=q8_test.tile_rows=128"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=4"
+  LABELS
+    "notsan"
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amd_gpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
+    q8_matrix_half_stage64_test_module
+  SRCS
+    "tests/q8_matrix.loom"
+  LIBRARIES
+    "::q8_matrix"
+    "::q8_reference"
+)
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    q8_matrix_half_stage64_test_execute_amd_gpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_half_stage64_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu2"
+    "--config=flash_next.token_count=4096"
+    "--config=q8_test.pipeline_depth=2"
+    "--config=q8_test.stage_k=64"
+    "--config=q8_test.tile_columns=128"
+    "--config=q8_test.tile_rows=128"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=4"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amd_gpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    q8_matrix_half_stage64_test_execute_amd_gpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::q8_matrix_half_stage64_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu2"
+    "--sanitizer=access"
+    "--config=flash_next.token_count=4096"
+    "--config=q8_test.pipeline_depth=2"
+    "--config=q8_test.stage_k=64"
+    "--config=q8_test.tile_columns=128"
+    "--config=q8_test.tile_rows=128"
+    "--config=q8_test.wave_columns=2"
+    "--config=q8_test.wave_rows=4"
+  LABELS
+    "notsan"
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amd_gpu_access"
     "loom-target-family=amdgpu"
     "loom-target-class=gpu"
     "loom-executor=hardware"

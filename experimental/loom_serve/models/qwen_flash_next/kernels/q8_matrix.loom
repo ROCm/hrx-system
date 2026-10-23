@@ -1,6 +1,201 @@
+// Cooperatively stage two original Q8 blocks per K64 panel. Each producer
+// owns a complete block and its scale. Coefficients round to F16, matrix
+// accumulators remain F32, and service input/output buffers remain BF16.
+template.decl @flash_next.q8_stage64_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %row_bytes: offset, %weight_origin: offset, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>)
+
+template.def<@flash_next.q8_stage64_contract> device @flash_next_q8_stage64_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %row_bytes: offset, %weight_origin: offset, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>) {
+  %origin = index.constant 0 : offset
+  %workitem = kernel.workitem.id<x> : index
+  %wave = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c72 = index.constant 72 : index
+  %c64 = index.constant 64 : index
+  %waves = index.mul %wave_rows, %wave_columns : index
+  %threads = index.mul %waves, %c32 : index
+  %per_wave_rows = index.div %tile_rows, %wave_rows : index
+  %per_wave_columns = index.div %tile_columns, %wave_columns : index
+  %column_fragments = index.div %per_wave_columns, %c16 : index
+  %thread_rounding = index.sub %threads, %c1 : index
+  %weight_packets = index.mul %tile_columns, %c2 : index
+  %input_packets = index.mul %tile_rows, %c2 : index
+  %weight_padded = index.add %weight_packets, %thread_rounding : index
+  %input_padded = index.add %input_packets, %thread_rounding : index
+  %weight_rounds = index.div %weight_padded, %threads : index
+  %input_rounds = index.div %input_padded, %threads : index
+  %wave_column_group = index.rem %wave, %wave_columns : index
+  %wave_row_group = index.div %wave, %wave_columns : index
+  %wave_channel = index.mul %wave_column_group, %per_wave_columns : index
+  %wave_token = index.mul %wave_row_group, %per_wave_rows : index
+  %blocks = index.div %inputs, %c32 : index
+  %padded_blocks = index.add %blocks, %c1 : index
+  %stage_count = index.div %padded_blocks, %c2 : index
+  %block_bytes = index.constant 34 : offset
+  %scale_bytes = index.constant 2 : offset
+  %stage_row_bytes = index.constant 144 : offset
+  %weight_stage_bytes = index.scale %tile_columns, %stage_row_bytes : index, offset -> offset
+  %input_stage_bytes = index.scale %tile_rows, %stage_row_bytes : index, offset -> offset
+  %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
+  %input_stage = buffer.alloca<workgroup> align(16) %input_stage_bytes : buffer
+  %weight_view = buffer.view %weight_stage[%origin] : buffer -> view<[%tile_columns]x72xf16>
+  %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<[%tile_rows]x72xf16>
+  %weight_layout = encoding.layout.strided [1, %c72] : encoding<layout>
+  %weight_fragment = buffer.view %weight_stage[%origin] : buffer -> view<64x[%tile_columns]xf16, %weight_layout>
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%capacity]x[%inputs]xbf16>
+  %inactive_values = vector.constant 0.0 : vector<32xbf16>
+  %accumulator_zero = vector.constant 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %accumulator_zero shape [%c16, %c16] : vector<8xf32>
+  %initial_tile = vector.constant 0.0 : vector<[%fragment_count]x8xf32>
+  %result_tile = scf.for %stage = [%c0 to %stage_count step %c1](%accumulators = %initial_tile : vector<[%fragment_count]x8xf32>) -> (vector<[%fragment_count]x8xf32>) pipeline(%pipeline_depth) {
+    %stage_block = index.mul %stage, %c2 : index
+    // Whole-block producers retain one scale and address per row.
+    // A K64 stage uses a padded 72-half row pitch.
+    scf.for %round = [%c0 to %weight_rounds step %c1] unroll schedule(linear) {
+      %task = index.madd %round, %threads, %workitem : index
+      %owns_packet = index.cmp ult, %task, %weight_packets : index
+      scf.if %owns_packet {
+        // One producer owns an entire original K32 block.
+        %local_channel = index.div %task, %c2 : index
+        %within_stage = index.rem %task, %c2 : index
+        %local_k = index.mul %within_stage, %c32 : index
+        %candidate_block = index.add %stage_block, %within_stage : index
+        %valid_block = index.cmp ult, %candidate_block, %blocks : index
+        %block = scf.select %valid_block, %candidate_block, %c0 : index
+        %dense = index.cmp eq, %streams, %c1 : index
+        %channel, %valid_channel = scf.if %dense -> (index, i1) {
+          %channel = index.add %channel_base, %local_channel : index
+          %valid = index.cmp ult, %channel, %outputs : index
+          scf.yield %channel, %valid : index, i1
+        } else {
+          // Stage every stream for a feature panel in the same wave. Its
+          // consumer can combine F32 fragments before any global publication.
+          %stream_columns = index.div %per_wave_columns, %streams : index
+          %wave_column = index.div %local_channel, %per_wave_columns : index
+          %within_wave = index.rem %local_channel, %per_wave_columns : index
+          %stream = index.div %within_wave, %stream_columns : index
+          %within_stream = index.rem %within_wave, %stream_columns : index
+          %local_feature = index.madd %wave_column, %stream_columns, %within_stream : index
+          %feature = index.add %channel_base, %local_feature : index
+          %channel = index.madd %stream, %outputs, %feature : index
+          %valid = index.cmp ult, %feature, %outputs : index
+          scf.yield %channel, %valid : index, i1
+        }
+        %safe_channel = scf.select %valid_channel, %channel, %c0 : index
+        %block_delta = index.scale %block, %block_bytes : index, offset -> offset
+        %block_origin, %payload = scf.if %split_scales -> (offset, offset) {
+          %channel_group = index.div %safe_channel, %c4 : index
+          %within_group = index.rem %safe_channel, %c4 : index
+          %group_scale_bytes = index.constant 8 : offset
+          %code_row_bytes = index.constant 32 : offset
+          %group_bytes = index.scale %c4, %row_bytes : index, offset -> offset
+          %code_plane_bytes = index.scale %blocks, %group_scale_bytes : index, offset -> offset
+          %group_delta = index.scale %channel_group, %group_bytes : index, offset -> offset
+          %group_origin = index.add %weight_origin, %group_delta : offset
+          %code_plane = index.add %group_origin, %code_plane_bytes : offset
+          %block_row = index.madd %block, %c4, %within_group : index
+          %scale_delta = index.scale %block_row, %scale_bytes : index, offset -> offset
+          %scale_origin = index.add %group_origin, %scale_delta : offset
+          %code_delta = index.scale %block_row, %code_row_bytes : index, offset -> offset
+          %code_origin = index.add %code_plane, %code_delta : offset
+          scf.yield %scale_origin, %code_origin : offset, offset
+        } else {
+          %row_delta = index.scale %safe_channel, %row_bytes : index, offset -> offset
+          %row_origin = index.add %weight_origin, %row_delta : offset
+          %scale_origin = index.add %row_origin, %block_delta : offset
+          %code_origin = index.add %scale_origin, %scale_bytes : offset
+          scf.yield %scale_origin, %code_origin : offset, offset
+        }
+        %codes_view = buffer.view %weight[%payload] : buffer -> view<32xi8>
+        %codes = vector.load %codes_view[%c0] : view<32xi8> -> vector<32xi8>
+        // Signed codes become q+128, then exact FP16 values 1152+q.
+        // Subtracting 1152 recovers every I8 code exactly in packed halves.
+        %sign_bit = vector.constant -128 : vector<32xi8>
+        %unsigned_codes = vector.xori %codes, %sign_bit : vector<32xi8>
+        %wide_codes = vector.extui %unsigned_codes : vector<32xi8> to vector<32xi16>
+        %exponent = vector.constant 25600 : vector<32xi16>
+        %biased_bits = vector.ori %wide_codes, %exponent : vector<32xi16>
+        %biased = vector.bitcast %biased_bits : vector<32xi16> to vector<32xf16>
+        %bias = vector.constant -1152.0 : vector<32xf16>
+        %half_codes = vector.addf %biased, %bias : vector<32xf16>
+        %scale_view = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
+        %loaded_scale = view.load %scale_view[%c0] : view<1xf16> -> f16
+        %zero_scale = scalar.constant 0.0 : f16
+        %half_scale = scf.select %valid_block, %loaded_scale, %zero_scale : f16
+        %scales = vector.splat %half_scale : vector<32xf16>
+        %values = vector.mulf %half_codes, %scales : vector<32xf16>
+        vector.store %values, %weight_view[%local_channel, %local_k] : vector<32xf16>, view<[%tile_columns]x72xf16>
+      }
+    }
+    scf.for %round = [%c0 to %input_rounds step %c1] unroll schedule(linear) {
+      %task = index.madd %round, %threads, %workitem : index
+      %owns_packet = index.cmp ult, %task, %input_packets : index
+      scf.if %owns_packet {
+        // One producer owns an entire original K32 block.
+        %local_token = index.div %task, %c2 : index
+        %within_stage = index.rem %task, %c2 : index
+        %local_k = index.mul %within_stage, %c32 : index
+        %candidate_block = index.add %stage_block, %within_stage : index
+        %valid_block = index.cmp ult, %candidate_block, %blocks : index
+        %block = scf.select %valid_block, %candidate_block, %c0 : index
+        %token = index.add %first, %local_token : index
+        %live_token = index.cmp ult, %token, %end : index
+        %live = scalar.andi %live_token, %valid_block : i1
+        %safe_token = scf.select %live, %token, %c0 : index
+        // The producer owns one selected K32 block. Its row and block
+        // are both live or zero; keep the complete byte offset full-width.
+        %element_bytes = index.constant 2 : offset
+        %input_block_bytes = index.constant 64 : offset
+        %input_row_bytes = index.scale %inputs, %element_bytes : index, offset -> offset
+        %input_row_origin = index.scale %safe_token, %input_row_bytes : index, offset -> offset
+        %input_block_origin = index.scale %block, %input_block_bytes : index, offset -> offset
+        %input_position = index.add %input_row_origin, %input_block_origin : offset
+        %packet_view = buffer.view %input[%input_position] : buffer -> view<32xbf16>
+        %loaded = vector.load %packet_view[%c0] : view<32xbf16> -> vector<32xbf16>
+        %mask = vector.splat %live : vector<32xi1>
+        %selected = vector.select %mask, %loaded, %inactive_values : vector<32xbf16>
+        %wide = vector.extf %selected : vector<32xbf16> to vector<32xf32>
+        %values = vector.fptrunc %wide : vector<32xf32> to vector<32xf16>
+        vector.store %values, %input_stage_view[%local_token, %local_k] : vector<32xf16>, view<[%tile_rows]x72xf16>
+      }
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %stage_result = scf.for %within = [%c0 to %c2 step %c1](%stage_accumulators = %accumulators : vector<[%fragment_count]x8xf32>) -> (vector<[%fragment_count]x8xf32>) unroll schedule(linear) {
+      %first_k = index.mul %within, %c32 : index
+      %second_k = index.add %first_k, %c16 : index
+      %next_tile = scf.for %ordinal = [%c0 to %fragment_count step %c1](%partial_tile = %stage_accumulators : vector<[%fragment_count]x8xf32>) -> (vector<[%fragment_count]x8xf32>) unroll schedule(linear) {
+        %row_fragment = index.div %ordinal, %column_fragments : index
+        %column_fragment = index.rem %ordinal, %column_fragments : index
+        %fragment_row = index.madd %row_fragment, %c16, %wave_token : index
+        %fragment_column = index.madd %column_fragment, %c16, %wave_channel : index
+        %rhs0 = vector.fragment.load<rhs> %weight_fragment[%first_k, %fragment_column] shape [%c16, %c16] : view<64x[%tile_columns]xf16, %weight_layout> -> vector<16xf16>
+        %rhs1 = vector.fragment.load<rhs> %weight_fragment[%second_k, %fragment_column] shape [%c16, %c16] : view<64x[%tile_columns]xf16, %weight_layout> -> vector<16xf16>
+        %lhs0 = vector.fragment.load<lhs> %input_stage_view[%fragment_row, %first_k] shape [%c16, %c16] : view<[%tile_rows]x72xf16> -> vector<16xf16>
+        %lhs1 = vector.fragment.load<lhs> %input_stage_view[%fragment_row, %second_k] shape [%c16, %c16] : view<[%tile_rows]x72xf16> -> vector<16xf16>
+        %accumulator = vector.extract %partial_tile[%ordinal] : vector<[%fragment_count]x8xf32> -> vector<8xf32>
+        %fragment = vector.fragment<init> %accumulator shape [%c16, %c16] : vector<8xf32>
+        %half = vector.mma %lhs0, %rhs0, %fragment : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %next = vector.mma %lhs1, %rhs1, %half : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %updated = vector.insert %next into %partial_tile[%ordinal] : vector<8xf32>, vector<[%fragment_count]x8xf32>
+        scf.yield %updated : vector<[%fragment_count]x8xf32>
+      }
+      scf.yield %next_tile : vector<[%fragment_count]x8xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %stage_result : vector<[%fragment_count]x8xf32>
+  }
+  template.return %result_tile : vector<[%fragment_count]x8xf32>
+}
+
 // Return the F32 register tile for original Q8 blocks contracted with BF16
-// rows. Original per-block scales apply after each K32 dot; no activation
-// quantization or intermediate BF16 rounding occurs. All workitems participate.
+// rows. Wide programs reconstruct F16 coefficients and accumulate through the
+// full reduction; narrow programs retain per-block F32 scaling. All workitems
+// participate. There is no intermediate BF16 accumulator publication.
 // The caller supplies a nonempty [first,end) range within capacity, disjoint
 // input/weight storage, and a wave grid dividing the 16-aligned output tile.
 // fragment_count is (tile_rows/wave_rows/16)*(tile_columns/wave_columns/16).
@@ -11,12 +206,13 @@
 // split_scales selects four-channel groups with contiguous F16 scale and I8
 // code planes; otherwise weights retain interleaved GGUF Q8 blocks. Callers
 // specialize this storage choice before cooperative loop scheduling. row_bytes
-// is the physical byte stride of an interleaved row or one quarter of a prepared
-// four-channel group. weight_origin selects a submatrix within that storage.
-// A larger physical stride lets adjacent projections share the original bank.
+// is the physical interleaved-row stride or one quarter of a prepared group;
+// weight_origin locates a submatrix without allocating a separate weight bank.
 template.decl @flash_next.q8_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %row_bytes: offset, %weight_origin: offset, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>)
 
-template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %row_bytes: offset, %weight_origin: offset, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>) {
+template.decl @flash_next.q8_half_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %row_bytes: offset, %weight_origin: offset, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>)
+
+template.def<@flash_next.q8_half_contract> device @flash_next_q8_half_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %row_bytes: offset, %weight_origin: offset, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>) {
   %origin = index.constant 0 : offset
   %workitem = kernel.workitem.id<x> : index
   %wave = kernel.subgroup.id : index
@@ -49,18 +245,14 @@ template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: 
   %block_bytes = index.constant 34 : offset
   %scale_bytes = index.constant 2 : offset
   %stage_row_bytes = index.constant 80 : offset
-  %metadata_row_bytes = index.constant 4 : offset
   %weight_stage_bytes = index.scale %tile_columns, %stage_row_bytes : index, offset -> offset
   %input_stage_bytes = index.scale %tile_rows, %stage_row_bytes : index, offset -> offset
-  %metadata_bytes = index.scale %tile_columns, %metadata_row_bytes : index, offset -> offset
   %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
   %input_stage = buffer.alloca<workgroup> align(16) %input_stage_bytes : buffer
-  %metadata = buffer.alloca<workgroup> align(16) %metadata_bytes : buffer
-  %weight_view = buffer.view %weight_stage[%origin] : buffer -> view<[%tile_columns]x40xbf16>
-  %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<[%tile_rows]x40xbf16>
+  %weight_view = buffer.view %weight_stage[%origin] : buffer -> view<[%tile_columns]x40xf16>
+  %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<[%tile_rows]x40xf16>
   %weight_layout = encoding.layout.strided [1, %c40] : encoding<layout>
-  %weight_fragment = buffer.view %weight_stage[%origin] : buffer -> view<32x[%tile_columns]xbf16, %weight_layout>
-  %metadata_view = buffer.view %metadata[%origin] : buffer -> view<[%tile_columns]xf32>
+  %weight_fragment = buffer.view %weight_stage[%origin] : buffer -> view<32x[%tile_columns]xf16, %weight_layout>
   %input_view = buffer.view %input[%origin] : buffer -> view<[%capacity]x[%inputs]xbf16>
   %inactive_values = vector.constant 0.0 : vector<4xbf16>
   %accumulator_zero = vector.constant 0.0 : vector<8xf32>
@@ -127,28 +319,12 @@ template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: 
         %codes_view = buffer.view %weight[%payload] : buffer -> view<32xi8>
         %codes = vector.load %codes_view[%local_k] : view<32xi8> -> vector<4xi8>
         %wide = vector.sitofp %codes : vector<4xi8> to vector<4xf32>
-        %values = vector.fptrunc %wide : vector<4xf32> to vector<4xbf16>
-        vector.store %values, %weight_view[%local_channel, %local_k] : vector<4xbf16>, view<[%tile_columns]x40xbf16>
-        %leader = index.cmp eq, %packet, %c0 : index
-        %overlapped = index.cmp ugt, %pipeline_depth, %c1 : index
-        // A uniform scale read keeps its value in the read-ahead stage;
-        // only the owner publishes it. Lanes sharing a channel request the
-        // same address, so this adds no distinct weight bytes.
-        scf.if %overlapped {
-          %scale_view = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
-          %half_scale = view.load %scale_view[%c0] : view<1xf16> -> f16
-          %scale = scalar.extf %half_scale : f16 to f32
-          scf.if %leader {
-            view.store %scale, %metadata_view[%local_channel] : f32, view<[%tile_columns]xf32>
-          }
-        } else {
-          scf.if %leader {
-            %scale_view = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
-            %half_scale = view.load %scale_view[%c0] : view<1xf16> -> f16
-            %scale = scalar.extf %half_scale : f16 to f32
-            view.store %scale, %metadata_view[%local_channel] : f32, view<[%tile_columns]xf32>
-          }
-        }
+        %half_codes = vector.fptrunc %wide : vector<4xf32> to vector<4xf16>
+        %scale_view = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
+        %half_scale = view.load %scale_view[%c0] : view<1xf16> -> f16
+        %scales = vector.splat %half_scale : vector<4xf16>
+        %values = vector.mulf %half_codes, %scales : vector<4xf16>
+        vector.store %values, %weight_view[%local_channel, %local_k] : vector<4xf16>, view<[%tile_columns]x40xf16>
       }
     }
     scf.for %round = [%c0 to %input_rounds step %c1] unroll schedule(linear) {
@@ -167,28 +343,26 @@ template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: 
         %k = index.add %input_k, %local_k : index
         %loaded = vector.load %input_view[%safe_token, %k] : view<[%capacity]x[%inputs]xbf16> -> vector<4xbf16>
         %mask = vector.splat %live : vector<4xi1>
-        %values = vector.select %mask, %loaded, %inactive_values : vector<4xbf16>
-        vector.store %values, %input_stage_view[%local_token, %local_k] : vector<4xbf16>, view<[%tile_rows]x40xbf16>
+        %selected = vector.select %mask, %loaded, %inactive_values : vector<4xbf16>
+        %wide = vector.extf %selected : vector<4xbf16> to vector<4xf32>
+        %values = vector.fptrunc %wide : vector<4xf32> to vector<4xf16>
+        vector.store %values, %input_stage_view[%local_token, %local_k] : vector<4xf16>, view<[%tile_rows]x40xf16>
       }
     }
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-    %scale_column = index.rem %lane, %c16 : index
     %next_tile = scf.for %ordinal = [%c0 to %fragment_count step %c1](%partial_tile = %accumulators : vector<[%fragment_count]x8xf32>) -> (vector<[%fragment_count]x8xf32>) unroll schedule(linear) {
       %row_fragment = index.div %ordinal, %column_fragments : index
       %column_fragment = index.rem %ordinal, %column_fragments : index
       %fragment_row = index.madd %row_fragment, %c16, %wave_token : index
       %fragment_column = index.madd %column_fragment, %c16, %wave_channel : index
-      %scale_index = index.add %fragment_column, %scale_column : index
-      %scale_value = view.load %metadata_view[%scale_index] : view<[%tile_columns]xf32> -> f32
-      %scale = vector.splat %scale_value : vector<8xf32>
-      %rhs0 = vector.fragment.load<rhs> %weight_fragment[%c0, %fragment_column] shape [%c16, %c16] : view<32x[%tile_columns]xbf16, %weight_layout> -> vector<16xbf16>
-      %rhs1 = vector.fragment.load<rhs> %weight_fragment[%c16, %fragment_column] shape [%c16, %c16] : view<32x[%tile_columns]xbf16, %weight_layout> -> vector<16xbf16>
-      %lhs0 = vector.fragment.load<lhs> %input_stage_view[%fragment_row, %c0] shape [%c16, %c16] : view<[%tile_rows]x40xbf16> -> vector<16xbf16>
-      %lhs1 = vector.fragment.load<lhs> %input_stage_view[%fragment_row, %c16] shape [%c16, %c16] : view<[%tile_rows]x40xbf16> -> vector<16xbf16>
-      %half = vector.mma %lhs0, %rhs0, %initial : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-      %dot = vector.mma %lhs1, %rhs1, %half : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %rhs0 = vector.fragment.load<rhs> %weight_fragment[%c0, %fragment_column] shape [%c16, %c16] : view<32x[%tile_columns]xf16, %weight_layout> -> vector<16xf16>
+      %rhs1 = vector.fragment.load<rhs> %weight_fragment[%c16, %fragment_column] shape [%c16, %c16] : view<32x[%tile_columns]xf16, %weight_layout> -> vector<16xf16>
+      %lhs0 = vector.fragment.load<lhs> %input_stage_view[%fragment_row, %c0] shape [%c16, %c16] : view<[%tile_rows]x40xf16> -> vector<16xf16>
+      %lhs1 = vector.fragment.load<lhs> %input_stage_view[%fragment_row, %c16] shape [%c16, %c16] : view<[%tile_rows]x40xf16> -> vector<16xf16>
       %accumulator = vector.extract %partial_tile[%ordinal] : vector<[%fragment_count]x8xf32> -> vector<8xf32>
-      %next = vector.fmaf %dot, %scale, %accumulator : vector<8xf32>
+      %fragment = vector.fragment<init> %accumulator shape [%c16, %c16] : vector<8xf32>
+      %half = vector.mma %lhs0, %rhs0, %fragment : vector<16xf16>, vector<16xf16>, vector<8xf32>
+      %next = vector.mma %lhs1, %rhs1, %half : vector<16xf16>, vector<16xf16>, vector<8xf32>
       %updated = vector.insert %next into %partial_tile[%ordinal] : vector<8xf32>, vector<[%fragment_count]x8xf32>
       scf.yield %updated : vector<[%fragment_count]x8xf32>
     }
@@ -198,16 +372,208 @@ template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: 
   template.return %result_tile : vector<[%fragment_count]x8xf32>
 }
 
+template.def<@flash_next.q8_contract> device @flash_next_q8_contract(%capacity: index, %inputs: index, %outputs: index, %streams: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %split_scales: i1, %row_bytes: offset, %weight_origin: offset, %input: buffer, %weight: buffer) -> (vector<[%fragment_count]x8xf32>) {
+  %threshold = index.constant 4096 : index
+  %use_half = index.cmp uge, %capacity, %threshold : index
+  %result = scf.if %use_half -> (vector<[%fragment_count]x8xf32>) {
+    %tile = template.apply<@flash_next.q8_half_contract>(%capacity, %inputs, %outputs, %streams, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %fragment_count, %first, %end, %channel_base, %split_scales, %row_bytes, %weight_origin, %input, %weight) : (index, index, index, index, index, index, index, index, index, index, index, index, index, i1, offset, offset, buffer, buffer) -> (vector<[%fragment_count]x8xf32>)
+    scf.yield %tile : vector<[%fragment_count]x8xf32>
+  } else {
+    %origin = index.constant 0 : offset
+    %workitem = kernel.workitem.id<x> : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c4 = index.constant 4 : index
+    %c8 = index.constant 8 : index
+    %c16 = index.constant 16 : index
+    %c32 = index.constant 32 : index
+    %c40 = index.constant 40 : index
+    %c64 = index.constant 64 : index
+    %waves = index.mul %wave_rows, %wave_columns : index
+    %threads = index.mul %waves, %c32 : index
+    %per_wave_rows = index.div %tile_rows, %wave_rows : index
+    %per_wave_columns = index.div %tile_columns, %wave_columns : index
+    %column_fragments = index.div %per_wave_columns, %c16 : index
+    %thread_rounding = index.sub %threads, %c1 : index
+    %weight_packets = index.mul %tile_columns, %c8 : index
+    %input_packets = index.mul %tile_rows, %c8 : index
+    %weight_padded = index.add %weight_packets, %thread_rounding : index
+    %input_padded = index.add %input_packets, %thread_rounding : index
+    %weight_rounds = index.div %weight_padded, %threads : index
+    %input_rounds = index.div %input_padded, %threads : index
+    %wave_column_group = index.rem %wave, %wave_columns : index
+    %wave_row_group = index.div %wave, %wave_columns : index
+    %wave_channel = index.mul %wave_column_group, %per_wave_columns : index
+    %wave_token = index.mul %wave_row_group, %per_wave_rows : index
+    %blocks = index.div %inputs, %c32 : index
+    %block_bytes = index.constant 34 : offset
+    %scale_bytes = index.constant 2 : offset
+    %stage_row_bytes = index.constant 80 : offset
+    %metadata_row_bytes = index.constant 4 : offset
+    %weight_stage_bytes = index.scale %tile_columns, %stage_row_bytes : index, offset -> offset
+    %input_stage_bytes = index.scale %tile_rows, %stage_row_bytes : index, offset -> offset
+    %metadata_bytes = index.scale %tile_columns, %metadata_row_bytes : index, offset -> offset
+    %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
+    %input_stage = buffer.alloca<workgroup> align(16) %input_stage_bytes : buffer
+    %metadata = buffer.alloca<workgroup> align(16) %metadata_bytes : buffer
+    %weight_view = buffer.view %weight_stage[%origin] : buffer -> view<[%tile_columns]x40xbf16>
+    %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<[%tile_rows]x40xbf16>
+    %weight_layout = encoding.layout.strided [1, %c40] : encoding<layout>
+    %weight_fragment = buffer.view %weight_stage[%origin] : buffer -> view<32x[%tile_columns]xbf16, %weight_layout>
+    %metadata_view = buffer.view %metadata[%origin] : buffer -> view<[%tile_columns]xf32>
+    %input_view = buffer.view %input[%origin] : buffer -> view<[%capacity]x[%inputs]xbf16>
+    %inactive_values = vector.constant 0.0 : vector<4xbf16>
+    %accumulator_zero = vector.constant 0.0 : vector<8xf32>
+    %initial = vector.fragment<init> %accumulator_zero shape [%c16, %c16] : vector<8xf32>
+    %initial_tile = vector.constant 0.0 : vector<[%fragment_count]x8xf32>
+    %result_tile = scf.for %block = [%c0 to %blocks step %c1](%accumulators = %initial_tile : vector<[%fragment_count]x8xf32>) -> (vector<[%fragment_count]x8xf32>) pipeline(%pipeline_depth) {
+      %input_k = index.mul %block, %c32 : index
+      %block_delta = index.scale %block, %block_bytes : index, offset -> offset
+      // The 40-element pitch and packet permutation distribute each half-wave
+      // store across distinct LDS banks. The final round may use fewer lanes.
+      scf.for %round = [%c0 to %weight_rounds step %c1] unroll schedule(linear) {
+        %task = index.madd %round, %threads, %workitem : index
+        %owns_packet = index.cmp ult, %task, %weight_packets : index
+        scf.if %owns_packet {
+          %row_group = index.div %task, %c64 : index
+          %within_row_group = index.rem %task, %c8 : index
+          %local_channel = index.madd %row_group, %c8, %within_row_group : index
+          %packet_group = index.div %task, %c8 : index
+          %packet = index.rem %packet_group, %c8 : index
+          %local_k = index.mul %packet, %c4 : index
+          %dense = index.cmp eq, %streams, %c1 : index
+          %channel, %valid_channel = scf.if %dense -> (index, i1) {
+            %channel = index.add %channel_base, %local_channel : index
+            %valid = index.cmp ult, %channel, %outputs : index
+            scf.yield %channel, %valid : index, i1
+          } else {
+            // Stage every stream for a feature panel in the same wave. Its
+            // consumer can combine F32 fragments before any global publication.
+            %stream_columns = index.div %per_wave_columns, %streams : index
+            %wave_column = index.div %local_channel, %per_wave_columns : index
+            %within_wave = index.rem %local_channel, %per_wave_columns : index
+            %stream = index.div %within_wave, %stream_columns : index
+            %within_stream = index.rem %within_wave, %stream_columns : index
+            %local_feature = index.madd %wave_column, %stream_columns, %within_stream : index
+            %feature = index.add %channel_base, %local_feature : index
+            %channel = index.madd %stream, %outputs, %feature : index
+            %valid = index.cmp ult, %feature, %outputs : index
+            scf.yield %channel, %valid : index, i1
+          }
+          %safe_channel = scf.select %valid_channel, %channel, %c0 : index
+          %block_origin, %payload = scf.if %split_scales -> (offset, offset) {
+            %channel_group = index.div %safe_channel, %c4 : index
+            %within_group = index.rem %safe_channel, %c4 : index
+            %group_scale_bytes = index.constant 8 : offset
+            %code_row_bytes = index.constant 32 : offset
+            %group_bytes = index.scale %c4, %row_bytes : index, offset -> offset
+            %code_plane_bytes = index.scale %blocks, %group_scale_bytes : index, offset -> offset
+            %group_delta = index.scale %channel_group, %group_bytes : index, offset -> offset
+            %group_origin = index.add %weight_origin, %group_delta : offset
+            %code_plane = index.add %group_origin, %code_plane_bytes : offset
+            %block_row = index.madd %block, %c4, %within_group : index
+            %scale_delta = index.scale %block_row, %scale_bytes : index, offset -> offset
+            %scale_origin = index.add %group_origin, %scale_delta : offset
+            %code_delta = index.scale %block_row, %code_row_bytes : index, offset -> offset
+            %code_origin = index.add %code_plane, %code_delta : offset
+            scf.yield %scale_origin, %code_origin : offset, offset
+          } else {
+            %row_delta = index.scale %safe_channel, %row_bytes : index, offset -> offset
+            %row_origin = index.add %weight_origin, %row_delta : offset
+            %scale_origin = index.add %row_origin, %block_delta : offset
+            %code_origin = index.add %scale_origin, %scale_bytes : offset
+            scf.yield %scale_origin, %code_origin : offset, offset
+          }
+          %codes_view = buffer.view %weight[%payload] : buffer -> view<32xi8>
+          %codes = vector.load %codes_view[%local_k] : view<32xi8> -> vector<4xi8>
+          %wide = vector.sitofp %codes : vector<4xi8> to vector<4xf32>
+          %values = vector.fptrunc %wide : vector<4xf32> to vector<4xbf16>
+          vector.store %values, %weight_view[%local_channel, %local_k] : vector<4xbf16>, view<[%tile_columns]x40xbf16>
+          %leader = index.cmp eq, %packet, %c0 : index
+          %overlapped = index.cmp ugt, %pipeline_depth, %c1 : index
+          // A uniform scale read keeps its value in the read-ahead stage;
+          // only the owner publishes it. Lanes sharing a channel request the
+          // same address, so this adds no distinct weight bytes.
+          scf.if %overlapped {
+            %scale_view = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
+            %half_scale = view.load %scale_view[%c0] : view<1xf16> -> f16
+            %scale = scalar.extf %half_scale : f16 to f32
+            scf.if %leader {
+              view.store %scale, %metadata_view[%local_channel] : f32, view<[%tile_columns]xf32>
+            }
+          } else {
+            scf.if %leader {
+              %scale_view = buffer.view %weight[%block_origin] : buffer -> view<1xf16>
+              %half_scale = view.load %scale_view[%c0] : view<1xf16> -> f16
+              %scale = scalar.extf %half_scale : f16 to f32
+              view.store %scale, %metadata_view[%local_channel] : f32, view<[%tile_columns]xf32>
+            }
+          }
+        }
+      }
+      scf.for %round = [%c0 to %input_rounds step %c1] unroll schedule(linear) {
+        %task = index.madd %round, %threads, %workitem : index
+        %owns_packet = index.cmp ult, %task, %input_packets : index
+        scf.if %owns_packet {
+          %row_group = index.div %task, %c64 : index
+          %within_row_group = index.rem %task, %c8 : index
+          %local_token = index.madd %row_group, %c8, %within_row_group : index
+          %packet_group = index.div %task, %c8 : index
+          %packet = index.rem %packet_group, %c8 : index
+          %local_k = index.mul %packet, %c4 : index
+          %token = index.add %first, %local_token : index
+          %live = index.cmp ult, %token, %end : index
+          %safe_token = scf.select %live, %token, %c0 : index
+          %k = index.add %input_k, %local_k : index
+          %loaded = vector.load %input_view[%safe_token, %k] : view<[%capacity]x[%inputs]xbf16> -> vector<4xbf16>
+          %mask = vector.splat %live : vector<4xi1>
+          %values = vector.select %mask, %loaded, %inactive_values : vector<4xbf16>
+          vector.store %values, %input_stage_view[%local_token, %local_k] : vector<4xbf16>, view<[%tile_rows]x40xbf16>
+        }
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %scale_column = index.rem %lane, %c16 : index
+      %next_tile = scf.for %ordinal = [%c0 to %fragment_count step %c1](%partial_tile = %accumulators : vector<[%fragment_count]x8xf32>) -> (vector<[%fragment_count]x8xf32>) unroll schedule(linear) {
+        %row_fragment = index.div %ordinal, %column_fragments : index
+        %column_fragment = index.rem %ordinal, %column_fragments : index
+        %fragment_row = index.madd %row_fragment, %c16, %wave_token : index
+        %fragment_column = index.madd %column_fragment, %c16, %wave_channel : index
+        %scale_index = index.add %fragment_column, %scale_column : index
+        %scale_value = view.load %metadata_view[%scale_index] : view<[%tile_columns]xf32> -> f32
+        %scale = vector.splat %scale_value : vector<8xf32>
+        %rhs0 = vector.fragment.load<rhs> %weight_fragment[%c0, %fragment_column] shape [%c16, %c16] : view<32x[%tile_columns]xbf16, %weight_layout> -> vector<16xbf16>
+        %rhs1 = vector.fragment.load<rhs> %weight_fragment[%c16, %fragment_column] shape [%c16, %c16] : view<32x[%tile_columns]xbf16, %weight_layout> -> vector<16xbf16>
+        %lhs0 = vector.fragment.load<lhs> %input_stage_view[%fragment_row, %c0] shape [%c16, %c16] : view<[%tile_rows]x40xbf16> -> vector<16xbf16>
+        %lhs1 = vector.fragment.load<lhs> %input_stage_view[%fragment_row, %c16] shape [%c16, %c16] : view<[%tile_rows]x40xbf16> -> vector<16xbf16>
+        %half = vector.mma %lhs0, %rhs0, %initial : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+        %dot = vector.mma %lhs1, %rhs1, %half : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+        %accumulator = vector.extract %partial_tile[%ordinal] : vector<[%fragment_count]x8xf32> -> vector<8xf32>
+        %next = vector.fmaf %dot, %scale, %accumulator : vector<8xf32>
+        %updated = vector.insert %next into %partial_tile[%ordinal] : vector<8xf32>, vector<[%fragment_count]x8xf32>
+        scf.yield %updated : vector<[%fragment_count]x8xf32>
+      }
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      scf.yield %next_tile : vector<[%fragment_count]x8xf32>
+    }
+    scf.yield %result_tile : vector<[%fragment_count]x8xf32>
+  }
+  template.return %result : vector<[%fragment_count]x8xf32>
+}
+
 template.decl @flash_next.matrix_store_fragment(%remaining_rows: index, %outputs: index, %fragment_row: index, %result_column: index, %result: vector<8xf32>, %output_view: view<[%remaining_rows]x[%outputs]xbf16>)
 
 template.decl @flash_next.q8_tile(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+template.decl @flash_next.q8_tile_stage(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %use_stage64: i1, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
 
 // Dense Q8 publication rounds the contracted F32 tile once to BF16. The caller
 // launches ceil(outputs/tile_columns) by ceil(capacity/tile_rows) workgroups
 // of wave_rows*wave_columns*32 threads. Exact SSA geometry specializes before
 // fragment lowering; the immutable epoch header supplies the live row extent.
 // Operands and output are disjoint. Empty workgroups perform no memory access.
-template.def<@flash_next.q8_tile> device @flash_next_q8_tiled(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span_arg: buffer, %input_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
+template.def<@flash_next.q8_tile_stage> device @flash_next_q8_tiled_stage(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %use_stage64: i1, %span_arg: buffer, %input_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
   %span, %input, %weight, %output = buffer.assume.noalias %span_arg, %input_arg, %weight_arg, %output_arg : buffer, buffer, buffer, buffer
   %inputs = index.assume %input_width [range(%input_width, 32, 10240), multiple_of(%input_width, 32)] : index
   %outputs = index.assume %output_width [range(%output_width, 4, 262144), multiple_of(%output_width, 4)] : index
@@ -246,8 +612,15 @@ template.def<@flash_next.q8_tile> device @flash_next_q8_tiled(%capacity: index, 
     %block_bytes = index.constant 34 : offset
     %blocks = index.div %inputs, %block_width : index
     %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
+    %weight_origin = index.constant 0 : offset
     %split_scales = scalar.constant false : i1
-    %result_tile = template.apply<@flash_next.q8_contract>(%capacity, %inputs, %outputs, %c1, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %fragment_count, %first, %end, %channel_base, %split_scales, %row_bytes, %origin, %input, %weight) : (index, index, index, index, index, index, index, index, index, index, index, index, index, i1, offset, offset, buffer, buffer) -> (vector<[%fragment_count]x8xf32>)
+    %result_tile = scf.if %use_stage64 -> (vector<[%fragment_count]x8xf32>) {
+      %stage_tile = template.apply<@flash_next.q8_stage64_contract>(%capacity, %inputs, %outputs, %c1, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %fragment_count, %first, %end, %channel_base, %split_scales, %row_bytes, %weight_origin, %input, %weight) : (index, index, index, index, index, index, index, index, index, index, index, index, index, i1, offset, offset, buffer, buffer) -> (vector<[%fragment_count]x8xf32>)
+      scf.yield %stage_tile : vector<[%fragment_count]x8xf32>
+    } else {
+      %small_tile = template.apply<@flash_next.q8_contract>(%capacity, %inputs, %outputs, %c1, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %fragment_count, %first, %end, %channel_base, %split_scales, %row_bytes, %weight_origin, %input, %weight) : (index, index, index, index, index, index, index, index, index, index, index, index, index, i1, offset, offset, buffer, buffer) -> (vector<[%fragment_count]x8xf32>)
+      scf.yield %small_tile : vector<[%fragment_count]x8xf32>
+    }
     scf.for %ordinal = [%c0 to %fragment_count step %c1] unroll schedule(linear) {
       %row_fragment = index.div %ordinal, %column_fragments : index
       %column_fragment = index.rem %ordinal, %column_fragments : index
@@ -258,6 +631,13 @@ template.def<@flash_next.q8_tile> device @flash_next_q8_tiled(%capacity: index, 
       template.apply<@flash_next.matrix_store_fragment>(%remaining_rows, %outputs, %fragment_row, %result_column, %result, %output_view) : (index, index, index, index, vector<8xf32>, view<[%remaining_rows]x[%outputs]xbf16>)
     }
   }
+  template.return
+}
+
+template.def<@flash_next.q8_tile> device @flash_next_q8_tiled(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span_arg: buffer, %input_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
+  %threshold = index.constant 4096 : index
+  %use_stage64 = index.cmp uge, %capacity, %threshold : index
+  template.apply<@flash_next.q8_tile_stage>(%capacity, %input_width, %output_width, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %use_stage64, %span_arg, %input_arg, %weight_arg, %output_arg) : (index, index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer)
   template.return
 }
 
@@ -298,5 +678,12 @@ template.def<@flash_next.q8_schedule> device @flash_next_q8_128x128_waves_4x2(%c
 
 template.def<@flash_next.q8_schedule> device @flash_next_q8_128x128_read_ahead(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer) where [eq(%tile_rows, 128), eq(%tile_columns, 128), eq(%wave_rows, 4), eq(%wave_columns, 2), eq(%pipeline_depth, 2)] {
   template.apply<@flash_next.q8_tile>(%capacity, %input_width, %output_width, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %span, %input, %weight, %output) : (index, index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+// Stage ownership is selected before the shared tile implementation.
+template.def<@flash_next.q8_schedule> device priority(20) @flash_next_q8_128x128_long_reduction(%capacity: index, %input_width: index, %output_width: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %pipeline_depth: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer) where [ge(%capacity, 2048), ge(%input_width, 2560), ge(%output_width, 2560), eq(%tile_rows, 128), eq(%tile_columns, 128), eq(%wave_rows, 4), eq(%wave_columns, 2), eq(%pipeline_depth, 2)] {
+  %use_stage64 = scalar.constant true : i1
+  template.apply<@flash_next.q8_tile_stage>(%capacity, %input_width, %output_width, %tile_rows, %tile_columns, %wave_rows, %wave_columns, %pipeline_depth, %use_stage64, %span, %input, %weight, %output) : (index, index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer)
   template.return
 }
