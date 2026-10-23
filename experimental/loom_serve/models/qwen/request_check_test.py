@@ -338,12 +338,19 @@ class RequestCheckTest(unittest.TestCase):
         ]
         value = self.success(
             self.execute(
-                PACKAGE / "control.loom", self.request(tools=tools), capacity=8192
+                PACKAGE / "control.loom",
+                self.request(tools=tools),
+                "<tool_call>\n<function=tool_32>\n</function>\n</tool_call>",
+                capacity=8192,
             )
         )
-        self.assertEqual(value["declared_tool_count"], len(tools))
         catalog = value["prompt"].split("<tools>\n", 1)[1].split("\n</tools>", 1)[0]
         self.assertEqual([json.loads(line) for line in catalog.splitlines()], tools)
+        self.assertEqual(len(value["tool_calls"]), 1)
+        self.assertEqual(value["tool_calls"][0]["function"]["name"], "tool_32")
+        self.assertEqual(
+            json.loads(value["tool_calls"][0]["function"]["arguments"]), {}
+        )
 
     def test_independent_source_identity_roles_json_and_completion(self):
         response = json.dumps(
@@ -558,7 +565,6 @@ class RequestCheckTest(unittest.TestCase):
                 value = self.success(self.execute(source, request))
                 self.assertEqual(value["prompt"], ordinary["prompt"])
                 self.assertEqual(value["tokens"], ordinary["tokens"])
-                self.assertEqual(value["declared_tool_count"], len(TOOLS))
                 self.assertEqual(
                     struct.unpack("<ffiiq", bytes(value["request_options"])),
                     (0, 1, 0, expected_flag, 1),
