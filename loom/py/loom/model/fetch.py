@@ -269,11 +269,17 @@ def plan_lock(
     card: ModelCard,
     cache: ContentCache,
     *,
+    programs: str | None = None,
     overrides: dict[str, str] | None = None,
     lock_location: str | None = None,
     offline: bool = False,
 ) -> LockPlan:
-    """Resolves an explicit publication union without merging local destinations."""
+    """Resolves a publication union, optionally restricted to one program set."""
+    selections = card.choices()
+    if programs is not None:
+        selections = [choice for choice in selections if choice["programs"] == programs]
+        if not selections:
+            raise ManifestError(f"no compatible choices for program set {programs!r}")
     location = document_location(lock_location or sibling_lock(document.location))
     if "://" in location:
         raise ManifestError("publication lock updates require a local --lockfile")
@@ -293,7 +299,6 @@ def plan_lock(
     )
     sources = {}
     transforms = {}
-    selections = card.choices()
     for choice in selections:
         selected = card.select(**choice)
         for name, file in selected.files.items():
