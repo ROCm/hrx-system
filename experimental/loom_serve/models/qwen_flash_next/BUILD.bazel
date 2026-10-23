@@ -473,6 +473,38 @@ loom_test(
 )
 
 loom_test(
+    name = "draft_vocab_test",
+    srcs = ["tests/draft_vocab.loom"],
+    benchmark_smoke = False,
+    configs = {"flash_next.token_count": "2048"},
+    execution_profiles = [
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
+        AMD_GPU_TSAN_PROFILE,
+    ],
+    deps = [":residual_programs"],
+)
+
+loom_test(
+    name = "draft_head_test",
+    srcs = [
+        "tests/draft_head.loom",
+        "tests/q8_reference.loom",
+    ],
+    benchmark_smoke = False,
+    configs = {
+        "flash_next.span_capacity": "4",
+        "flash_next.token_count": "4",
+        "flash_next.verification_width": "0",
+    },
+    execution_profiles = [
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
+    ],
+    deps = [":residual_programs"],
+)
+
+loom_test(
     name = "mtp_state_test",
     srcs = ["tests/mtp_state.loom"],
     benchmark_smoke = False,

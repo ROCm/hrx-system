@@ -96,8 +96,22 @@ predictor with accepted target hidden rows. Rejected proposals remain outside
 the committed cache frontier. Verification retains compact transition operands
 and replays the accepted prefix through the existing recurrent kernels; it does
 not copy a complete recurrent endpoint for each candidate. Predictor carry adds
-21,248 bytes per retained owner, and predictor cache adds 2,112 bytes per pooled
+44,032 bytes per retained owner, and predictor cache adds 2,112 bytes per pooled
 token, plus a 768-byte working tail per execution row.
+
+Proposals score a 98,304-token prefix, all 33 checkpoint control tokens, and up
+to 991 rare tokens learned from that request's accepted history. An unknown
+anchor or two new misses within the last 32 accepted tokens selects the full
+head. The choice is fixed for the recursive proposal chain; guesses never teach
+the vocabulary. Membership occupies 22,784 bytes of the retained carry, so
+checkpoint forks and model reactivation preserve it with the history.
+
+Four proposal rows share one union of vocabulary weights. If any row needs
+fallback, the cohort reads the full head once; each row still samples its own
+selected domain. Rare rows read the original Q8 table directly, without a
+per-request weight copy. Logits and tie-breaking retain canonical token IDs.
+The target always scores the full valid vocabulary and verifies proposals under
+the original sampling policy.
 
 The deployment defaults to `continuation_epochs: 1`. Set it to `2` to pre-issue
 a second packed epoch without an intermediate host round trip. Device

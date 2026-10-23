@@ -63,7 +63,7 @@ kernel.def @flash_next_mtp_compact() {
   kernel.return
 }
 
-func.def inline @flash_next_mtp_span(%epoch: buffer, %span: index) -> (index, index, index, index) {
+func.def public inline @flash_next_mtp_span(%epoch: buffer, %span: index) -> (index, index, index, index) {
   %capacity = config.get @flash_next.token_count : index
   %records = index.constant 12 : offset
   %view = buffer.view %epoch[%records] : buffer -> view<16x5xi32>
@@ -82,9 +82,10 @@ func.def inline @flash_next_mtp_span(%epoch: buffer, %span: index) -> (index, in
   func.return %length, %position, %begin, %row : index, index, index, index
 }
 
-// Carry is 1280 raw-hidden packets followed by 48 partial-index packets, each
-// sixteen bytes. Only position%4 index rows are live. Restore them to the
-// working cache before proposing or replacing rejected speculative entries.
+// Carry begins with 1280 raw-hidden packets and 48 partial-index packets,
+// each sixteen bytes, followed by request-owned draft vocabulary. Only
+// position%4 index rows are live. Restore them to the working cache before
+// proposing or replacing rejected speculative entries.
 // A fresh span synthesizes hidden zero and never reads its uninitialized carry.
 kernel.def @flash_next_mtp_restore() {
   %spans = config.get @flash_next.span_capacity : index
@@ -98,7 +99,7 @@ kernel.def @flash_next_mtp_restore() {
     %length, %position, %begin, %row = func.call @flash_next_mtp_span(%epoch, %span) : (buffer, index) -> (index, index, index, index)
     %tokens = config.get @flash_next.token_count : index
     %origin = index.constant 0 : offset
-    %source = buffer.view %carry[%origin] : buffer -> view<16x1328x4xi32>
+    %source = buffer.view %carry[%origin] : buffer -> view<16x2752x4xi32>
     %working = buffer.view %cache[%origin] : buffer -> view<16x48x4xi32>
     %output = buffer.view %hidden[%origin] : buffer -> view<[%tokens]x1280x4xi32>
     %thread = kernel.workitem.id<x> : index
@@ -113,7 +114,7 @@ kernel.def @flash_next_mtp_restore() {
         %empty = vector.constant 0 : vector<4xi32>
         scf.yield %empty : vector<4xi32>
       } else {
-        %value = vector.load %source[%row, %packet, %c0] : view<16x1328x4xi32> -> vector<4xi32>
+        %value = vector.load %source[%row, %packet, %c0] : view<16x2752x4xi32> -> vector<4xi32>
         scf.yield %value : vector<4xi32>
       }
       vector.store %value, %output[%begin, %packet, %c0] : vector<4xi32>, view<[%tokens]x1280x4xi32>
@@ -123,7 +124,7 @@ kernel.def @flash_next_mtp_restore() {
     %copies_tail = index.cmp ult, %thread, %tail_packets : index
     scf.if %copies_tail {
       %packet = index.add %hidden_packets, %thread : index
-      %value = vector.load %source[%row, %packet, %c0] : view<16x1328x4xi32> -> vector<4xi32>
+      %value = vector.load %source[%row, %packet, %c0] : view<16x2752x4xi32> -> vector<4xi32>
       vector.store %value, %working[%row, %thread, %c0] : vector<4xi32>, view<16x48x4xi32>
     }
   }
@@ -163,6 +164,8 @@ kernel.def @flash_next_mtp_ids() {
   kernel.return
 }
 
+template.decl @flash_next.draft_update(%position: index, %begin: index, %length: index, %owner: index, %ids: buffer, %carry: buffer)
+
 // Publish only after all old-carry readers and accepted cache appends finish.
 // Native session retention snapshots this complete carry record for forks.
 kernel.def @flash_next_mtp_commit() {
@@ -170,7 +173,7 @@ kernel.def @flash_next_mtp_commit() {
   %threads = index.constant 128 : index
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%spans, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
-} launch(%epoch: buffer, %origins: buffer, %target: buffer, %cache: buffer, %carry: buffer) {
+} launch(%epoch: buffer, %origins: buffer, %target: buffer, %cache: buffer, %ids: buffer, %carry: buffer) {
   %span = kernel.workgroup.id<x> : index
   %active = func.call @flash_next_span_active(%epoch, %span) : (buffer, index) -> (i1)
   scf.if %active {
@@ -182,7 +185,7 @@ kernel.def @flash_next_mtp_commit() {
     %source_begin = index.cast %source_begin_word : i32 to index
     %source = buffer.view %target[%origin] : buffer -> view<[%capacity]x1280x4xi32>
     %working = buffer.view %cache[%origin] : buffer -> view<16x48x4xi32>
-    %output = buffer.view %carry[%origin] : buffer -> view<16x1328x4xi32>
+    %output = buffer.view %carry[%origin] : buffer -> view<16x2752x4xi32>
     %thread = kernel.workitem.id<x> : index
     %stride = index.constant 128 : index
     %hidden_packets = index.constant 1280 : index
@@ -195,7 +198,7 @@ kernel.def @flash_next_mtp_commit() {
     %source_index = index.assume %source_index_value [range(%source_index_value, 0, 32767), lt(%source_index_value, %capacity)] : index
     scf.for %packet = [%thread to %hidden_packets step %stride] {
       %value = vector.load %source[%source_index, %packet, %c0] : view<[%capacity]x1280x4xi32> -> vector<4xi32>
-      vector.store %value, %output[%row, %packet, %c0] : vector<4xi32>, view<16x1328x4xi32>
+      vector.store %value, %output[%row, %packet, %c0] : vector<4xi32>, view<16x2752x4xi32>
     }
     %end = index.add %position, %length : index
     %tail_rows = index.rem %end, %c4 : index
@@ -204,8 +207,9 @@ kernel.def @flash_next_mtp_commit() {
     scf.if %copies_tail {
       %packet = index.add %hidden_packets, %thread : index
       %value = vector.load %working[%row, %thread, %c0] : view<16x48x4xi32> -> vector<4xi32>
-      vector.store %value, %output[%row, %packet, %c0] : vector<4xi32>, view<16x1328x4xi32>
+      vector.store %value, %output[%row, %packet, %c0] : vector<4xi32>, view<16x2752x4xi32>
     }
+    template.apply<@flash_next.draft_update>(%position, %begin, %length, %row, %ids, %carry) : (index, index, index, index, buffer, buffer)
   }
   kernel.return
 }

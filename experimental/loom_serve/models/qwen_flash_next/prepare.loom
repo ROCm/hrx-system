@@ -298,7 +298,7 @@ func.def @storage(%tokens: i64, %context: i64, %pool: i64, %rows: i64, %pins: i6
   func.call @allocation(%allocations, %c3, %table_bytes, %c0_i64) : (buffer, index, i64, i64)
   func.call @allocation(%allocations, %c4, %cohort_input_bytes, %c0_i64) : (buffer, index, i64, i64)
   func.call @allocation(%allocations, %c5, %output_bytes, %c0_i64) : (buffer, index, i64, i64)
-  %carry_record = scalar.constant 21248 : i64
+  %carry_record = scalar.constant 44032 : i64
   %carry_stride = scf.select %enabled, %carry_record, %c0_i64 : i64
   %carry_bytes = scalar.muli %owners, %carry_stride : i64
   %tail_stride = scalar.constant 768 : i64

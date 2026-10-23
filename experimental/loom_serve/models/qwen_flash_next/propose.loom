@@ -16,7 +16,9 @@ kernel.decl @flash_next_map_tokens() launch(%epoch: buffer, %mapping: buffer)
 
 kernel.decl @flash_next_mtp_restore() launch(%epoch: buffer, %carry: buffer, %cache: buffer, %hidden: buffer)
 
-kernel.decl @flash_next_mtp_sample() launch(%epoch: buffer, %logits: buffer, %output: buffer)
+kernel.decl @flash_next_draft_plan() launch(%epoch: buffer, %ids: buffer, %carry: buffer, %plan: buffer)
+
+kernel.decl @flash_next_draft_sample() launch(%epoch: buffer, %plan: buffer, %carry: buffer, %logits: buffer, %output: buffer)
 
 kernel.decl @qwen38_continue_dispatch() launch(%context: index, %capacity: index, %epoch: buffer, %tokens: buffer, %results: buffer)
 
@@ -26,7 +28,7 @@ command.program.decl @flash_next_qsa_residual(%layer: index, %key_origin: offset
 
 command.program.decl @flash_next_ffn_residual(%layer: index) launch(%parameters: buffer, %span: buffer, %residual: buffer, %output: buffer)
 
-command.program.decl @flash_next_head_logits(%predictor: index) launch(%parameters: buffer, %vocabulary_parameters: buffer, %epoch: buffer, %residual: buffer, %logits: buffer)
+command.program.decl @flash_next_draft_head() launch(%parameters: buffer, %vocabulary_parameters: buffer, %epoch: buffer, %plan: buffer, %carry: buffer, %residual: buffer, %logits: buffer)
 
 // Three recursive proposals use private working history. Committed carry is
 // read once and remains immutable until accepted target inputs warm the cache.
@@ -46,6 +48,8 @@ command.program.def public @flash_next_mtp_propose() launch(%parameters: buffer,
   %token_stride = index.constant 4 : offset
   %token_bytes = index.scale %tokens, %token_stride : index, offset -> offset
   %draft = buffer.alloca<global> align(16) %control_bytes : buffer
+  %plan_bytes = index.constant 80 : offset
+  %plan = buffer.alloca<global> align(16) %plan_bytes : buffer
   %origins = buffer.alloca<global> align(16) %origin_bytes : buffer
   %ids = buffer.alloca<global> align(16) %token_bytes : buffer
   %predictions = buffer.alloca<global> align(16) %origin_bytes : buffer
@@ -56,6 +60,7 @@ command.program.def public @flash_next_mtp_propose() launch(%parameters: buffer,
   %logits = buffer.alloca<global> align(256) %logit_bytes : buffer
   kernel.launch @qwen38_mtp_proposal_prepare(%target_capacity, %tokens, %epoch, %target_tokens, %draft, %origins, %ids) : (index, index, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @flash_next_mtp_restore(%draft, %carry, %cache, %hidden) : (buffer, buffer, buffer, buffer)
+  kernel.launch @flash_next_draft_plan(%draft, %ids, %carry, %plan) : (buffer, buffer, buffer, buffer)
   %layer = index.constant 48 : index
   %key_origin = index.constant 0 : offset
   %tail_origin = index.constant 0 : offset
@@ -70,8 +75,8 @@ command.program.def public @flash_next_mtp_propose() launch(%parameters: buffer,
     command.program.launch @flash_next_mtp_input(%parameters, %embedding_parameters, %draft, %ids, %hidden, %residual) : (buffer, buffer, buffer, buffer, buffer, buffer)
     command.program.launch @flash_next_qsa_residual[%layer, %key_origin, %value_origin, %index_origin, %tail_origin](%parameters, %draft, %mapping, %residual, %rows, %cache, %attention, %hidden) : [index, offset, offset, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
     command.program.launch @flash_next_ffn_residual[%layer](%parameters, %draft, %attention, %hidden) : [index](buffer, buffer, buffer, buffer)
-    command.program.launch @flash_next_head_logits[%c1](%parameters, %vocabulary_parameters, %draft, %hidden, %logits) : [index](buffer, buffer, buffer, buffer, buffer)
-    kernel.launch @flash_next_mtp_sample(%draft, %logits, %predictions) : (buffer, buffer, buffer)
+    command.program.launch @flash_next_draft_head(%parameters, %vocabulary_parameters, %draft, %plan, %carry, %hidden, %logits) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @flash_next_draft_sample(%draft, %plan, %carry, %logits, %predictions) : (buffer, buffer, buffer, buffer, buffer)
     kernel.launch @qwen38_mtp_proposal_advance[%round](%round, %target_capacity, %tokens, %draft, %origins, %predictions, %ids, %target_tokens) : [index](index, index, index, buffer, buffer, buffer, buffer, buffer)
   }
   command.return

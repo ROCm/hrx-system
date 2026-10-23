@@ -211,17 +211,14 @@ kernel.def @flash_next_sample() {
   kernel.return
 }
 
-command.program.def public @flash_next_head_logits(%predictor: index) launch(%parameters: buffer, %vocabulary_parameters: buffer, %epoch: buffer, %residual: buffer, %logits: buffer) {
+command.program.def @flash_next_head_mix(%predictor: index) launch(%parameters: buffer, %epoch: buffer, %residual: buffer, %hidden: buffer) {
   %tokens = config.get @flash_next.token_count : index
   %residual_stride = index.constant 20480 : offset
   %rank_stride = index.constant 640 : offset
-  %hidden_stride = index.constant 5120 : offset
   %residual_bytes = index.scale %tokens, %residual_stride : index, offset -> offset
   %rank_bytes = index.scale %tokens, %rank_stride : index, offset -> offset
-  %hidden_bytes = index.scale %tokens, %hidden_stride : index, offset -> offset
   %normalized = buffer.alloca<global> align(256) %residual_bytes : buffer
   %lowrank = buffer.alloca<global> align(256) %rank_bytes : buffer
-  %hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %c0 = index.constant 0 : index
   %draft = index.cmp ne, %predictor, %c0 : index
   %gamma, %down, %up = scf.if %draft -> (view<4x2560xf32>, view<3481600xi8>, view<3481600xi8>) {
@@ -235,11 +232,37 @@ command.program.def public @flash_next_head_logits(%predictor: index) launch(%pa
     %up = command.parameter %parameters, "output_hc_up.weight" : view<3481600xi8>
     scf.yield %gamma, %down, %up : view<4x2560xf32>, view<3481600xi8>, view<3481600xi8>
   }
-  %head = command.parameter %vocabulary_parameters, "output.weight" : view<675430400xi8>
   kernel.launch @hc_normalize(%epoch, %residual, %gamma, %normalized) : (buffer, buffer, view<4x2560xf32>, buffer)
   kernel.launch @flash_next_head_down(%epoch, %normalized, %down, %lowrank) : (buffer, buffer, view<3481600xi8>, buffer)
   kernel.launch @hc_up_mix(%epoch, %normalized, %lowrank, %up, %hidden) : (buffer, buffer, buffer, view<3481600xi8>, buffer)
+  command.return
+}
+
+command.program.def public @flash_next_head_logits(%predictor: index) launch(%parameters: buffer, %vocabulary_parameters: buffer, %epoch: buffer, %residual: buffer, %logits: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %hidden_stride = index.constant 5120 : offset
+  %hidden_bytes = index.scale %tokens, %hidden_stride : index, offset -> offset
+  %hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @flash_next_head_mix[%predictor](%parameters, %epoch, %residual, %hidden) : [index](buffer, buffer, buffer, buffer)
+  %head = command.parameter %vocabulary_parameters, "output.weight" : view<675430400xi8>
   kernel.launch @flash_next_vocabulary(%epoch, %hidden, %head, %logits) : (buffer, buffer, view<675430400xi8>, buffer)
+  command.return
+}
+
+kernel.decl @flash_next_draft_common_head() launch(%epoch: buffer, %plan: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.decl @flash_next_draft_rare_head() launch(%epoch: buffer, %plan: buffer, %carry: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+command.program.def public @flash_next_draft_head() launch(%parameters: buffer, %vocabulary_parameters: buffer, %epoch: buffer, %plan: buffer, %carry: buffer, %residual: buffer, %logits: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %hidden_stride = index.constant 5120 : offset
+  %hidden_bytes = index.scale %tokens, %hidden_stride : index, offset -> offset
+  %hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %predictor = index.constant 1 : index
+  command.program.launch @flash_next_head_mix[%predictor](%parameters, %epoch, %residual, %hidden) : [index](buffer, buffer, buffer, buffer)
+  %head = command.parameter %vocabulary_parameters, "output.weight" : view<675430400xi8>
+  kernel.launch @flash_next_draft_common_head(%epoch, %plan, %hidden, %head, %logits) : (buffer, buffer, buffer, view<675430400xi8>, buffer)
+  kernel.launch @flash_next_draft_rare_head(%epoch, %plan, %carry, %hidden, %head, %logits) : (buffer, buffer, buffer, buffer, view<675430400xi8>, buffer)
   command.return
 }
 

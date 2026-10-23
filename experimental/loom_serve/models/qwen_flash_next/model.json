@@ -64,6 +64,7 @@
       "kernels/mtp.loom",
       "kernels/mtp_matrix.loom",
       "kernels/mtp_state.loom",
+      "kernels/draft_vocab.loom",
       "programs/mtp.loom",
       "propose.loom",
       "../qwen/kernels/qwen38/mtp_proposal.loom",

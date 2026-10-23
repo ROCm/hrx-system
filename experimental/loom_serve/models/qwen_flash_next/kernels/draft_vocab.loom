@@ -1,0 +1,423 @@
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+func.decl @flash_next_mtp_span(%epoch: buffer, %span: index) -> (index, index, index, index)
+
+func.decl @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
+
+func.decl @flash_next_q8_batch_partial(%width: index, %batch_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
+
+func.decl @sampling_key(%value: f32, %id: i32) -> (i64)
+
+template.decl @sampling.reduce_key(%key: i64, %minimum: i1) -> (i64)
+
+amdgpu.target<gfx11-generic> @flash_next_draft_wave32 {subgroup_size = 32}
+
+// A retained record contains the hidden/index carry, then request-owned draft
+// vocabulary. The latter is a three-word header, one padding word, a bitmap
+// for non-prefix/non-control IDs, and 991 live-bounded rare-token slots.
+// Headers hold rare count and the latest two miss positions plus one; zero
+// denotes no miss. Native checkpoint/fork transfers retain this entire record.
+func.def pure inline @flash_next_draft_record(%owner: index) -> (offset) {
+  %stride = index.constant 44032 : offset
+  %prefix = index.constant 21248 : offset
+  %row = index.scale %owner, %stride : index, offset -> offset
+  %origin = index.add %row, %prefix : offset
+  func.return %origin : offset
+}
+
+// This checkpoint's added control-token interval includes chat, tool, thinking,
+// coding, and multimodal markers. Physical vocabulary padding is not an ID.
+func.def pure inline @flash_next_draft_common(%id: index) -> (i1) {
+  %prefix = index.constant 98304 : index
+  %controls = index.constant 248044 : index
+  %frequent = index.cmp ult, %id, %prefix : index
+  %control = index.cmp uge, %id, %controls : index
+  %common = scalar.ori %frequent, %control : i1
+  func.return %common : i1
+}
+
+func.def inline @flash_next_draft_known(%carry: buffer, %record: offset, %id: index) -> (i1) {
+  %common = func.call pure @flash_next_draft_common(%id) : (index) -> (i1)
+  %known = scf.if %common -> (i1) {
+    %yes = scalar.constant true : i1
+    scf.yield %yes : i1
+  } else {
+    %prefix = index.constant 98304 : index
+    %bits = index.constant 32 : index
+    %header_bytes = index.constant 16 : offset
+    %bitmap_origin = index.add %record, %header_bytes : offset
+    %bitmap = buffer.view %carry[%bitmap_origin] : buffer -> view<4680xi32>
+    %relative = index.sub %id, %prefix : index
+    %word_value = index.div %relative, %bits : index
+    %word = index.assume %word_value [range(%word_value, 0, 4679)] : index
+    %bit = index.rem %relative, %bits : index
+    %shift = index.cast %bit : index to i32
+    %one = scalar.constant 1 : i32
+    %zero = scalar.constant 0 : i32
+    %mask = scalar.shli %one, %shift : i32
+    %stored = view.load %bitmap[%word] : view<4680xi32> -> i32
+    %present = scalar.andi %stored, %mask : i32
+    %known = scalar.cmpi ne, %present, %zero : i32
+    scf.yield %known : i1
+  }
+  func.return %known : i1
+}
+
+template.decl @flash_next.draft_update(%position: index, %begin: index, %length: index, %owner: index, %ids: buffer, %carry: buffer)
+
+// The final carry publisher invokes this for accepted target inputs only.
+// Each request has one writer, preserving first-use order across chunking and
+// batching. Rejected proposals never reach this boundary. Fresh rows initialize
+// the membership bitmap; unused table entries and padding remain untouched.
+template.def<@flash_next.draft_update> device @flash_next_draft_update(%position: index, %begin: index, %length: index, %owner: index, %ids: buffer, %carry: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %record = func.call pure @flash_next_draft_record(%owner) : (index) -> (offset)
+  %header_bytes = index.constant 16 : offset
+  %table_delta = index.constant 18736 : offset
+  %bitmap_origin = index.add %record, %header_bytes : offset
+  %table_origin = index.add %record, %table_delta : offset
+  %header = buffer.view %carry[%record] : buffer -> view<3xi32>
+  %bitmap = buffer.view %carry[%bitmap_origin] : buffer -> view<4680xi32>
+  %table = buffer.view %carry[%table_origin] : buffer -> view<991xi32>
+  %origin = index.constant 0 : offset
+  %tokens = buffer.view %ids[%origin] : buffer -> view<[%capacity]xi32>
+  %thread = kernel.workitem.id<x> : index
+  %threads = kernel.workgroup.size<x> : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %bitmap_words = index.constant 4680 : index
+  %zero_word = scalar.constant 0 : i32
+  %one_word = scalar.constant 1 : i32
+  %yes = scalar.constant true : i1
+  %leader = index.cmp eq, %thread, %zero : index
+  %fresh = index.cmp eq, %position, %zero : index
+  scf.if %fresh {
+    scf.for %word = [%thread to %bitmap_words step %threads] {
+      view.store %zero_word, %bitmap[%word] : i32, view<4680xi32>
+    }
+    scf.if %leader {
+      view.store %zero_word, %header[0] : i32, view<3xi32>
+      view.store %zero_word, %header[1] : i32, view<3xi32>
+      view.store %zero_word, %header[2] : i32, view<3xi32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  }
+  scf.if %leader {
+    %prefix = index.constant 98304 : index
+    %bits = index.constant 32 : index
+    %table_capacity = scalar.constant 991 : i32
+    scf.for %relative = [%zero to %length step %one] {
+      %input_value = index.add %begin, %relative : index
+      %input = index.assume %input_value [ge(%input_value, 0), lt(%input_value, %capacity)] : index
+      %id_word = view.load %tokens[%input] : view<[%capacity]xi32> -> i32
+      %id_value = index.cast %id_word : i32 to index
+      %id = index.assume %id_value [range(%id_value, 0, 248076)] : index
+      %known = func.call @flash_next_draft_known(%carry, %record, %id) : (buffer, offset, index) -> (i1)
+      %unknown = scalar.xori %known, %yes : i1
+      scf.if %unknown {
+        %absolute = index.add %position, %relative : index
+        %encoded = index.add %absolute, %one : index
+        %miss = index.cast %encoded : index to i32
+        %latest = view.load %header[1] : view<3xi32> -> i32
+        view.store %latest, %header[2] : i32, view<3xi32>
+        view.store %miss, %header[1] : i32, view<3xi32>
+        %count = view.load %header[0] : view<3xi32> -> i32
+        %room = scalar.cmpi ult, %count, %table_capacity : i32
+        scf.if %room {
+          %slot_value = index.cast %count : i32 to index
+          %slot = index.assume %slot_value [range(%slot_value, 0, 990)] : index
+          view.store %id_word, %table[%slot] : i32, view<991xi32>
+          %next = scalar.addi %count, %one_word : i32
+          view.store %next, %header[0] : i32, view<3xi32>
+          %key = index.sub %id, %prefix : index
+          %word_value = index.div %key, %bits : index
+          %word = index.assume %word_value [range(%word_value, 0, 4679)] : index
+          %bit = index.rem %key, %bits : index
+          %shift = index.cast %bit : index to i32
+          %mask = scalar.shli %one_word, %shift : i32
+          %prior = view.load %bitmap[%word] : view<4680xi32> -> i32
+          %updated = scalar.ori %prior, %mask : i32
+          view.store %updated, %bitmap[%word] : i32, view<4680xi32>
+        }
+      }
+    }
+  }
+  template.return
+}
+
+// The plan is immutable for a recursive proposal chain. Four cohort flags
+// precede sixteen row flags. A cohort shares the union of its requested weight
+// rows; a full-head peer therefore needs only one shared full weight pass.
+kernel.def @flash_next_draft_plan() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%epoch: buffer, %ids: buffer, %carry: buffer, %plan: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %count_value = func.call @flash_next_token_count(%epoch, %capacity) : (buffer, index) -> (index)
+  %count = index.assume %count_value [range(%count_value, 0, 16), le(%count_value, %capacity)] : index
+  %origin = index.constant 0 : offset
+  %row_origin = index.constant 16 : offset
+  %cohorts = buffer.view %plan[%origin] : buffer -> view<4xi32>
+  %modes = buffer.view %plan[%row_origin] : buffer -> view<16xi32>
+  %tokens = buffer.view %ids[%origin] : buffer -> view<[%capacity]xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %zero_word = scalar.constant 0 : i32
+  %window = index.constant 32 : index
+  %yes = scalar.constant true : i1
+  scf.for %cohort = [%zero to %four step %one] {
+    view.store %zero_word, %cohorts[%cohort] : i32, view<4xi32>
+  }
+  scf.for %span = [%zero to %count step %one] {
+    %length, %position, %begin, %owner = func.call @flash_next_mtp_span(%epoch, %span) : (buffer, index) -> (index, index, index, index)
+    %record = func.call pure @flash_next_draft_record(%owner) : (index) -> (offset)
+    %header = buffer.view %carry[%record] : buffer -> view<3xi32>
+    %prior_word = view.load %header[2] : view<3xi32> -> i32
+    %prior = index.cast %prior_word : i32 to index
+    %none = index.cmp eq, %prior, %zero : index
+    %end = index.add %prior, %window : index
+    %old = index.cmp ule, %end, %position : index
+    %quiet = scalar.ori %none, %old : i1
+    %anchor_word = view.load %tokens[%begin] : view<[%capacity]xi32> -> i32
+    %anchor_value = index.cast %anchor_word : i32 to index
+    %anchor = index.assume %anchor_value [range(%anchor_value, 0, 248076)] : index
+    %known = func.call @flash_next_draft_known(%carry, %record, %anchor) : (buffer, offset, index) -> (i1)
+    %subset = scalar.andi %known, %quiet : i1
+    %full = scalar.xori %subset, %yes : i1
+    %mode = scalar.extui %full : i1 to i32
+    %row = index.assume %begin [range(%begin, 0, 15)] : index
+    view.store %mode, %modes[%row] : i32, view<16xi32>
+    %cohort = index.div %row, %four : index
+    %prior_mode = view.load %cohorts[%cohort] : view<4xi32> -> i32
+    %combined = scalar.ori %prior_mode, %mode : i32
+    view.store %combined, %cohorts[%cohort] : i32, view<4xi32>
+  }
+  kernel.return
+}
+
+// Prefix and controls map monotonically to canonical token IDs. Rare IDs are
+// visited in first-use order, but sampling resolves ties by canonical ID.
+func.def inline @flash_next_draft_id(%column: index, %full: i1, %carry: buffer, %record: offset) -> (index) {
+  %prefix = index.constant 98304 : index
+  %common_count = index.constant 98337 : index
+  %control_first = index.constant 248044 : index
+  %frequent = index.cmp ult, %column, %prefix : index
+  %direct = scalar.ori %full, %frequent : i1
+  %id = scf.if %direct -> (index) {
+    scf.yield %column : index
+  } else {
+    %control = index.cmp ult, %column, %common_count : index
+    %id = scf.if %control -> (index) {
+      %relative = index.sub %column, %prefix : index
+      %id = index.add %control_first, %relative : index
+      scf.yield %id : index
+    } else {
+      %table_delta = index.constant 18736 : offset
+      %table_origin = index.add %record, %table_delta : offset
+      %table = buffer.view %carry[%table_origin] : buffer -> view<991xi32>
+      %slot_value = index.sub %column, %common_count : index
+      %slot = index.assume %slot_value [range(%slot_value, 0, 990)] : index
+      %word = view.load %table[%slot] : view<991xi32> -> i32
+      %id = index.cast %word : i32 to index
+      scf.yield %id : index
+    }
+    scf.yield %id : index
+  }
+  %bounded = index.assume %id [range(%id, 0, 248076)] : index
+  func.return %bounded : index
+}
+
+kernel.def target(@flash_next_draft_wave32) @flash_next_draft_common_head() {
+  %capacity = config.get @flash_next.token_count : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %rounded = index.add %capacity, %three : index
+  %batches = index.div %rounded, %four : index
+  %workers = index.constant 1280 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%workers, %batches, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%epoch: buffer, %plan: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %count_value = func.call @flash_next_token_count(%epoch, %capacity) : (buffer, index) -> (index)
+  %count = index.assume %count_value [range(%count_value, 0, 16), le(%count_value, %capacity)] : index
+  %batch = kernel.workgroup.id<y> : index
+  %four = index.constant 4 : index
+  %first = index.mul %batch, %four : index
+  %active = index.cmp ult, %first, %count : index
+  scf.if %active {
+    %origin = index.constant 0 : offset
+    %cohorts = buffer.view %plan[%origin] : buffer -> view<4xi32>
+    %mode = view.load %cohorts[%batch] : view<4xi32> -> i32
+    %zero_word = scalar.constant 0 : i32
+    %full = scalar.cmpi ne, %mode, %zero_word : i32
+    %full_rows = index.constant 248077 : index
+    %common_rows = index.constant 98337 : index
+    %rows = scf.select %full, %full_rows, %common_rows : index
+    %three = index.constant 3 : index
+    %padded = index.add %rows, %three : index
+    %groups = index.div %padded, %four : index
+    %worker = kernel.workgroup.id<x> : index
+    %workers = index.constant 1280 : index
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %zero = index.constant 0 : index
+    %one = index.constant 1 : index
+    %prefix = index.constant 98304 : index
+    %controls = index.constant 248044 : index
+    %width = index.constant 2560 : index
+    %stride = index.constant 32 : index
+    %leader = index.cmp eq, %lane, %zero : index
+    %logits = buffer.view %output[%origin] : buffer -> view<[%capacity]x248320xf32>
+    scf.for %group = [%worker to %groups step %workers] {
+      %column = index.madd %group, %four, %wave : index
+      %valid = index.cmp ult, %column, %rows : index
+      scf.if %valid {
+        %frequent = index.cmp ult, %column, %prefix : index
+        %direct = scalar.ori %full, %frequent : i1
+        %id_value = scf.if %direct -> (index) {
+          scf.yield %column : index
+        } else {
+          %relative = index.sub %column, %prefix : index
+          %control = index.add %controls, %relative : index
+          scf.yield %control : index
+        }
+        %id = index.assume %id_value [range(%id_value, 0, 248076)] : index
+        %partial = func.call @flash_next_q8_batch_partial(%width, %four, %first, %count, %id, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
+        %sums = kernel.subgroup.reduce<addf> %partial : vector<4xf32>
+        scf.if %leader {
+          scf.for %ordinal = [%zero to %four step %one] unroll schedule(linear) {
+            %token = index.add %first, %ordinal : index
+            %live = index.cmp ult, %token, %count : index
+            scf.if %live {
+              %sum = vector.extract %sums[%ordinal] : vector<4xf32> -> f32
+              %packed = scalar.fptrunc %sum : f32 to bf16
+              %logit = scalar.extf %packed : bf16 to f32
+              view.store %logit, %logits[%token, %id] : f32, view<[%capacity]x248320xf32>
+            }
+          }
+        }
+      }
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@flash_next_draft_wave32) @flash_next_draft_rare_head() {
+  %capacity = config.get @flash_next.token_count : index
+  %one = index.constant 1 : index
+  %groups = index.constant 248 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %capacity, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%epoch: buffer, %plan: buffer, %carry: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %count_value = func.call @flash_next_token_count(%epoch, %capacity) : (buffer, index) -> (index)
+  %count = index.assume %count_value [range(%count_value, 0, 16), le(%count_value, %capacity)] : index
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %count : index
+  scf.if %active {
+    %origin = index.constant 0 : offset
+    %four = index.constant 4 : index
+    %batch = index.div %token, %four : index
+    %cohorts = buffer.view %plan[%origin] : buffer -> view<4xi32>
+    %mode = view.load %cohorts[%batch] : view<4xi32> -> i32
+    %zero_word = scalar.constant 0 : i32
+    %subset = scalar.cmpi eq, %mode, %zero_word : i32
+    scf.if %subset {
+      %length, %position, %begin, %owner = func.call @flash_next_mtp_span(%epoch, %token) : (buffer, index) -> (index, index, index, index)
+      %record = func.call pure @flash_next_draft_record(%owner) : (index) -> (offset)
+      %header = buffer.view %carry[%record] : buffer -> view<3xi32>
+      %count_word = view.load %header[0] : view<3xi32> -> i32
+      %rare_count = index.cast %count_word : i32 to index
+      %group = kernel.workgroup.id<x> : index
+      %wave = kernel.subgroup.id : index
+      %lane = kernel.subgroup.lane.id : index
+      %slot = index.madd %group, %four, %wave : index
+      %valid = index.cmp ult, %slot, %rare_count : index
+      scf.if %valid {
+        %common = index.constant 98337 : index
+        %column = index.add %common, %slot : index
+        %no = scalar.constant false : i1
+        %id = func.call @flash_next_draft_id(%column, %no, %carry, %record) : (index, i1, buffer, offset) -> (index)
+        %width = index.constant 2560 : index
+        %stride = index.constant 32 : index
+        %part = func.call @flash_next_q8_partial(%width, %token, %id, %lane, %stride, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
+        %sum = kernel.subgroup.reduce<addf> %part : f32
+        %zero = index.constant 0 : index
+        %leader = index.cmp eq, %lane, %zero : index
+        scf.if %leader {
+          %packed = scalar.fptrunc %sum : f32 to bf16
+          %logit = scalar.extf %packed : bf16 to f32
+          %logits = buffer.view %output[%origin] : buffer -> view<[%capacity]x248320xf32>
+          view.store %logit, %logits[%token, %id] : f32, view<[%capacity]x248320xf32>
+        }
+      }
+    }
+  }
+  kernel.return
+}
+
+// Greedy proposal selection uses the same ordered-logit/ID key as target
+// sampling. Only the iteration domain differs; target sampling remains full.
+kernel.def @flash_next_draft_sample() {
+  %capacity = config.get @flash_next.token_count : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%capacity, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%epoch: buffer, %plan: buffer, %carry: buffer, %logits: buffer, %output: buffer) {
+  %capacity = config.get @flash_next.token_count : index
+  %count_value = func.call @flash_next_token_count(%epoch, %capacity) : (buffer, index) -> (index)
+  %count = index.assume %count_value [range(%count_value, 0, 16), le(%count_value, %capacity)] : index
+  %token = kernel.workgroup.id<x> : index
+  %active = index.cmp ult, %token, %count : index
+  scf.if %active {
+    %length, %position, %begin, %owner = func.call @flash_next_mtp_span(%epoch, %token) : (buffer, index) -> (index, index, index, index)
+    %record = func.call pure @flash_next_draft_record(%owner) : (index) -> (offset)
+    %header = buffer.view %carry[%record] : buffer -> view<3xi32>
+    %rare_word = view.load %header[0] : view<3xi32> -> i32
+    %rare = index.cast %rare_word : i32 to index
+    %row_origin = index.constant 16 : offset
+    %modes = buffer.view %plan[%row_origin] : buffer -> view<16xi32>
+    %mode = view.load %modes[%token] : view<16xi32> -> i32
+    %zero_word = scalar.constant 0 : i32
+    %full = scalar.cmpi ne, %mode, %zero_word : i32
+    %common = index.constant 98337 : index
+    %full_rows = index.constant 248077 : index
+    %subset_rows = index.add %common, %rare : index
+    %columns = scf.select %full, %full_rows, %subset_rows : index
+    %origin = index.constant 0 : offset
+    %values = buffer.view %logits[%origin] : buffer -> view<[%capacity]x248320xf32>
+    %thread = kernel.workitem.id<x> : index
+    %threads = kernel.workgroup.size<x> : index
+    %empty = scalar.constant 0 : i64
+    %zero = index.constant 0 : index
+    %one = index.constant 1 : index
+    %last = index.sub %columns, %one : index
+    %key = scf.for %base = [%zero to %columns step %threads](%best = %empty : i64) -> (i64) {
+      %position = index.add %base, %thread : index
+      %live = index.cmp ult, %position, %columns : index
+      %column = index.min %position, %last : index
+      %id = func.call @flash_next_draft_id(%column, %full, %carry, %record) : (index, i1, buffer, offset) -> (index)
+      %value = view.load %values[%token, %id] : view<[%capacity]x248320xf32> -> f32
+      %id_word = index.cast %id : index to i32
+      %candidate = func.call @sampling_key(%value, %id_word) : (f32, i32) -> (i64)
+      %contribution = scf.select %live, %candidate, %empty : i64
+      %next = scalar.maxui %best, %contribution : i64
+      scf.yield %next : i64
+    }
+    %maximum = scalar.constant false : i1
+    %best = template.apply<@sampling.reduce_key>(%key, %maximum) : (i64, i1) -> (i64)
+    %inverse = scalar.trunci %best : i64 to i32
+    %ones = scalar.constant -1 : i32
+    %selected = scalar.xori %inverse, %ones : i32
+    %leader = index.cmp eq, %thread, %zero : index
+    scf.if %leader {
+      %predictions = buffer.view %output[%origin] : buffer -> view<[%capacity]xi32>
+      view.store %selected, %predictions[%token] : i32, view<[%capacity]xi32>
+    }
+  }
+  kernel.return
+}

@@ -10,7 +10,7 @@ template.decl @sampling.reduce_key(%key: i64, %minimum: i1) -> (i64)
 
 // A strict descending-logit/ascending-ID order, including signed zero ties.
 // Inputs are finite F32 logits and nonnegative I32 vocabulary IDs.
-func.def @sampling_key(%value: f32, %id: i32) -> (i64) {
+func.def public @sampling_key(%value: f32, %id: i32) -> (i64) {
   %c0 = scalar.constant 0.0 : f32
   %is_zero = scalar.cmpf oeq, %value, %c0 : f32
   %canonical = scf.select %is_zero, %c0, %value : f32
