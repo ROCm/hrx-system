@@ -44,18 +44,19 @@ loom-fetch
 The release's compatible model catalog supplies the list and terminal picker.
 A development SDK without an associated catalog requires `--catalog` or a model
 card path or URL. Cards describe the exact files, variants, and runnable presets.
-For a card supplied by a model author:
+For example, install the library's Moonshine Streaming Tiny model on an AMD GPU:
 
 ```sh
-loom-fetch https://example.org/my-model/model.json --list --json
-loom-fetch https://example.org/my-model/model.json --preset=default --output=./my-model
-loom-serve --model=./my-model/model.json --device=task
+loom-fetch https://raw.githubusercontent.com/ROCm/hrx-loom-library/21637a18079d1f1dd9b8e20d26f700a62e60db4f/model/moonshine-ai/moonshine-streaming-tiny/model.json --preset=streaming --output=./moonshine
+loom-serve --model=./moonshine/model.json --device=amdgpu2
 ```
 
 Choose a device supported by the model: `task` for CPU, `amdgpu2` for AMD GPU,
 or `xdna` for AMD NPU. `loom-run --list_drivers` lists the installed drivers.
 The fetched card preserves the selected preset and can be served directly.
 Model weights are downloaded separately; the SDK does not contain checkpoints.
+The [fetch-to-serve walkthrough](https://rocm.github.io/hrx-system/loom/serving/workflows/fetch-and-serve/)
+includes the audio request, expected transcript, and offline/cache behavior.
 
 ## Tools and Python APIs
 

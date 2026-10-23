@@ -83,5 +83,5 @@ This layering is also the library organization model. Format decoders,
 reductions, tiles, and other motifs remain reusable across many kernels. Kernel
 packages own concrete operation ABIs. Model packages own only the composition
 that is genuinely model-specific. The optional
-[`hrx-loom-kernels`](https://github.com/ROCm/hrx-loom-kernels) repository is the
+[`hrx-loom-library`](https://github.com/ROCm/hrx-loom-library) repository is the
 growing standard-library corpus; the language and tool contracts remain here.

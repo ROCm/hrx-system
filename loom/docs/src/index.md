@@ -1,10 +1,5 @@
 # Loom programming guide
 
-!!! info "Programming guide preview"
-    This preview establishes the site structure and generated references. The
-    landing-page narrative and executable tutorial sequence are placeholders
-    while the checked guide programs are completed.
-
 <div class="loom-hero" markdown>
 
 ## One program, specialized all the way down
@@ -15,11 +10,25 @@ cases, benchmark workloads, and compile evidence connected from readable IR to
 native artifacts.
 
 [Get Loom](getting-started/acquiring-loom.md){ .md-button .md-button--primary }
+[Serve a model](serving/workflows/fetch-and-serve.md){ .md-button }
 [Run your first kernel](getting-started/first-kernel.md){ .md-button }
 [Read the guide](guide/index.md){ .md-button }
 [Explore the reference](reference/index.md){ .md-button }
 
 </div>
+
+## From a model card to a running service
+
+The SDK supplies `loom-fetch` for model acquisition and `loom-serve` for native
+execution over HTTP. A model card names its programs, exact parameter variants,
+tokenizers, and canonical presets. Fetch a selected preset, then pass the
+installed card directly to the server. The included compiler links and
+specializes its programs for the selected device.
+
+The [fetch-to-serve walkthrough](serving/workflows/fetch-and-serve.md) reaches a
+real speech-recognition response without a repository checkout or build step.
+The [model document reference](serving/model-documents.md) explains how the same
+model definition supports independent server routing and capacity settings.
 
 ## The authoring loop
 

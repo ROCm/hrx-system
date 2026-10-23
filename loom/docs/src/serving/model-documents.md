@@ -1,5 +1,11 @@
 # Serving model documents
 
+A portable model card describes identity, programs, variants, services, and
+canonical presets. `loom-fetch` installs its selected dependencies, and
+`loom-serve --model=installed/model.json` loads that local selection directly.
+[Fetch and serve a model](workflows/fetch-and-serve.md) walks through acquisition
+and a complete request.
+
 A deployment document gives a model its server name, device, admission policy,
 and execution capacities. The same object is accepted by
 `--model=path/serve.json` and `POST /v1/models/register`. Registration requires
