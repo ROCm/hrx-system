@@ -104,6 +104,7 @@ loom_generated_cc_library(
   DEPS
     ::target_info_defs
     iree::base
+  LINKABLE_MORE_THAN_ONCE
 )
 endif()
 
@@ -134,6 +135,7 @@ loom_cc_library(
     ::target_info
     ::target_info_defs
     iree::base
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 endif()
@@ -188,6 +190,7 @@ loom_cc_library(
     ::target_info
     iree::base
     iree::base::internal::arena
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 endif()
@@ -224,6 +227,7 @@ loom_cc_library(
     ::target_info
     iree::base
     iree::base::internal::arena
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 endif()
@@ -254,7 +258,7 @@ loom_cc_library(
     "profile_types.h"
   DEPS
     ::target_identity
-    loom::target::profile
+    loom::target::types
   PUBLIC
 )
 endif()

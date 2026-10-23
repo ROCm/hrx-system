@@ -8,6 +8,7 @@ load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_benchmark",
     "loom_cc_fuzz",
+    "loom_cc_instance_library",
     "loom_cc_library",
     "loom_cc_test",
 )
@@ -56,7 +57,7 @@ _LOW_REPRESENTATION_BINDING_VISIBILITY = [
 # Dense low descriptor tables
 #===------------------------------------------------------------------------===#
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "descriptors",
     srcs = [
         "descriptors.c",
@@ -92,7 +93,7 @@ loom_cc_library(
     deps = [":descriptors"],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "descriptor_traits",
     srcs = ["descriptor_traits.c"],
     hdrs = ["descriptor_traits.h"],
@@ -164,7 +165,7 @@ loom_cc_test(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "builder",
     srcs = ["builder.c"],
     hdrs = ["builder.h"],
@@ -173,7 +174,7 @@ loom_cc_library(
         ":descriptors",
         ":immediates",
         "//loom/src/loom/ir:builders",
-        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:builders",
         "//loom/src/loom/ops/low:op_defs",
         "//loom/src/loom/target:registers",
         "//runtime/src/iree/base",
@@ -197,7 +198,7 @@ loom_cc_library(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "immediates",
     srcs = ["immediates.c"],
     hdrs = ["immediates.h"],

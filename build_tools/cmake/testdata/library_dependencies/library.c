@@ -6,10 +6,9 @@
 
 #include <generated.h>
 
-int fixture_leaf_value(void);
 int fixture_external_value(void);
 
 int fixture_library_value(void) {
-  return GENERATED_VALUE + TRANSITIVE_VALUE + fixture_leaf_value() +
-         PRIVATE_VALUE + LATE_VALUE + fixture_external_value();
+  return GENERATED_VALUE + TRANSITIVE_VALUE + PRIVATE_VALUE + LATE_VALUE +
+         fixture_external_value();
 }

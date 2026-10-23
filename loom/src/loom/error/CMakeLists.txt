@@ -32,6 +32,7 @@ loom_cc_library(
     ::renderer
     iree::base
     loom::util::stream
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -62,6 +63,7 @@ loom_cc_library(
     iree::base::internal::arena
     iree::base::internal::unicode
     loom::ir::builders
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -157,6 +159,7 @@ loom_cc_library(
     iree::base
     loom::util::json
     loom::util::stream
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -184,6 +187,7 @@ loom_cc_library(
     ::parameter
     iree::base
     loom::util::stream
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 

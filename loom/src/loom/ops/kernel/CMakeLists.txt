@@ -52,9 +52,10 @@ loom_cc_library(
   DEPS
     loom::ir::builders
     loom::ir::types
-    loom::ops::op_defs
+    loom::ops::builders
     loom::ops::vocabulary
     loom::target::types
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 

@@ -179,7 +179,6 @@ loomc_cc_binary(
     name = "loom-test",
     srcs = ["loom-test.c"],
     copts = _LOOM_TEST_TARGET_COPTS,
-    runtime_only = True,
     deps = [
         ":main",
         "//loom/binding/c:loomc",

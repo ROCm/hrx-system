@@ -37,9 +37,10 @@ loom_cc_library(
     "builders.c"
   DEPS
     loom::ir::builders
-    loom::ops::op_defs
+    loom::ops::builders
     loom::target::arch::amd::xdna::aie2p::record_defs
     loom::target::types
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 endif()

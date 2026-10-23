@@ -76,6 +76,31 @@ loom_cc_library = macro(
     attrs = loom_cc_attrs.cxx_attributes,
 )
 
+def _loom_cc_instance_library_impl(name, visibility, tags, **kwargs):
+    loom_cc_library(
+        name = name,
+        visibility = visibility,
+        tags = (tags or []) + ["LINKABLE_MORE_THAN_ONCE"],
+        **kwargs
+    )
+
+loom_cc_instance_library = macro(
+    doc = """Defines support code whose state and identity come from explicit owners.
+
+    Persistent state belongs to caller-supplied instances. Identity-bearing
+    metadata is resolved through those owners, not image-local definitions.
+    Local immutable tables describe values; their addresses are not identities.
+    Function addresses are not used as implementation identities either.
+
+    These libraries may be linked privately into both an executable and its
+    exact-build shared compiler. This declares only the named library's contract:
+    dependencies retain their own ownership checks, and no symbols are exported.
+    Compilation and target ownership are otherwise identical to loom_cc_library.
+    """,
+    implementation = _loom_cc_instance_library_impl,
+    inherit_attrs = loom_cc_library,
+)
+
 def _loom_cc_binary_impl(
         name,
         visibility,

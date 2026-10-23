@@ -17,6 +17,7 @@ loom_cc_library(
     "builder.h"
     "builder_macros.h"
     "format.h"
+    "mutation.h"
     "op_defs.h"
     "use_list.h"
   TEXTUAL_HDRS
@@ -48,14 +49,16 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    op_defs
+    builders
   HDRS
     "attribute_accessors.h"
     "builder.h"
     "builder_macros.h"
+    "mutation.h"
     "op_defs.h"
     "use_list.h"
   SRCS
+    "builder.c"
     "op_defs.c"
     "use_list.c"
   DEPS
@@ -64,8 +67,33 @@ loom_cc_library(
     iree::base::internal::arena
     loom::error::emitter
     loom::ir::builders
-    loom::util::adaptive_sort
     loom::util::bstring
+  LINKABLE_MORE_THAN_ONCE
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    mutation
+  HDRS
+    "mutation.h"
+  SRCS
+    "mutation.c"
+  DEPS
+    ::builders
+    iree::base
+    iree::base::internal::arena
+    loom::ir::builders
+    loom::util::adaptive_sort
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    op_defs
+  DEPS
+    ::builders
+    ::mutation
   PUBLIC
 )
 
@@ -399,6 +427,7 @@ loom_cc_library(
     iree::base
     loom::ir::builders
     loom::util::bstring
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 

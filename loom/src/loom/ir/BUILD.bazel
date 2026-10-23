@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_library", "loom_cc_library_group", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_benchmark", "loom_cc_instance_library", "loom_cc_library", "loom_cc_library_group", "loom_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -18,6 +18,31 @@ loom_cc_library_group(
     deps = [
         ":builders",
         ":facts",
+        ":structural",
+        ":symbol_map",
+    ],
+)
+
+# Compiler-owned views of constructed IR: scope topology, local value domains,
+# and identities that survive function replacement. Construction needs none of
+# these; the complete IR API re-exports them alongside its other capabilities.
+loom_cc_library(
+    name = "structural",
+    srcs = [
+        "ancestry.c",
+        "function_version.c",
+        "local_value_domain.c",
+    ],
+    hdrs = [
+        "ancestry.h",
+        "function_version.h",
+        "local_value_domain.h",
+    ],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":builders",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
@@ -27,7 +52,6 @@ loom_cc_library_group(
     name = "builders",
     deps = [
         ":storage",
-        ":symbol_map",
         ":types",
     ],
 )
@@ -154,15 +178,12 @@ loom_cc_test(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "storage",
     srcs = [
-        "ancestry.c",
         "context.c",
         "encoding.c",
-        "function_version.c",
         "intern_table.c",
-        "local_value_domain.c",
         "location.c",
         "module.c",
         "module_record.c",
@@ -175,10 +196,7 @@ loom_cc_library(
         "value_replacement.c",
     ],
     hdrs = _REPRESENTATION_HEADERS + [
-        "ancestry.h",
         "context.h",
-        "function_version.h",
-        "local_value_domain.h",
         "module.h",
         "module_record.h",
         "module_source.h",
@@ -206,7 +224,7 @@ loom_cc_library(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "types",
     srcs = [
         "attribute.c",

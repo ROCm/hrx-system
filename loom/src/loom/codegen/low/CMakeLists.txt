@@ -24,6 +24,7 @@ loom_cc_library(
     loom::target::types
     loom::util::stable_id
     loom::util::string_pool
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -59,6 +60,7 @@ loom_cc_library(
     ::descriptors
     iree::base
     loom::ir::builders
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -143,9 +145,10 @@ loom_cc_library(
     ::immediates
     iree::base
     loom::ir::builders
+    loom::ops::builders
     loom::ops::low::op_defs
-    loom::ops::op_defs
     loom::target::registers
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -181,6 +184,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::ir::builders
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 

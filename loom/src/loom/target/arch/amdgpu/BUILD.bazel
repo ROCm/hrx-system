@@ -7,6 +7,7 @@
 load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_SUPPORTED_TARGETS")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_instance_library",
     "loom_cc_library",
     "loom_cc_test",
     "loom_generated_cc_library",
@@ -143,6 +144,7 @@ loom_generated_cc_library(
     generated_src_flags = ["--tables-header"],
     generated_srcs = ["target_info_tables.h"],
     generator = _AMDGPU_TARGET_INFO_GENERATOR,
+    instance_owned = True,
     source = "target_info_tables.c",
     visibility = (
         _AMDGPU_ANALYSIS_VISIBILITY +
@@ -174,7 +176,7 @@ loom_cc_test(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "target_identity",
     srcs = ["target_identity.c"],
     hdrs = ["target_identity.h"],
@@ -226,7 +228,7 @@ loom_cc_library(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "amdhsa_target_id",
     srcs = ["amdhsa_target_id.c"],
     hdrs = ["amdhsa_target_id.h"],
@@ -256,7 +258,7 @@ loom_cc_test(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "artifact_key",
     srcs = ["artifact_key.c"],
     hdrs = ["artifact_key.h"],
@@ -295,7 +297,7 @@ loom_cc_library(
     visibility = _AMDGPU_TOOLING_VISIBILITY,
     deps = [
         ":target_identity",
-        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target:types",
     ],
 )
 

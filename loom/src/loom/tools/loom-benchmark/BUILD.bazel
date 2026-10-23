@@ -346,7 +346,6 @@ loomc_cc_binary(
     name = "loom-benchmark",
     srcs = ["loom-benchmark.c"],
     copts = _LOOM_BENCHMARK_TARGET_COPTS,
-    runtime_only = True,
     deps = [
         ":main",
         "//loom/binding/c:loomc",

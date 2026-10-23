@@ -46,7 +46,8 @@ loom_cc_library(
   DEPS
     ::op_defs
     loom::ir::builders
-    loom::ops::op_defs
+    loom::ops::builders
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 endif()
@@ -115,6 +116,7 @@ loom_cc_library(
     loom::ir::builders
     loom::target::arch::spirv::isa
     loom::target::arch::spirv::vocabulary
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 endif()

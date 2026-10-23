@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_generated_cc_library")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_instance_library", "loom_cc_library", "loom_cc_test", "loom_generated_cc_library")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -59,14 +59,14 @@ loom_cc_library(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "builders",
     srcs = ["builders.c"],
     hdrs = ["ops.h"],
     textual_hdrs = ["ops.inc"],
     deps = [
         "//loom/src/loom/ir:builders",
-        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:builders",
         "//loom/src/loom/target:types",
     ],
 )

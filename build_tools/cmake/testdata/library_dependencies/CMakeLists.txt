@@ -22,6 +22,15 @@ include("${IREE_REPO_ROOT}/build_tools/cmake/iree_cc_library.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_cc_binary.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_cc_test.cmake")
 
+# External usage requirements are not implementations owned by a shared image.
+# Cover imported targets, aliases, and opaque expressions alongside platform
+# libraries such as libm, which main.c calls directly.
+add_library(external_imported INTERFACE IMPORTED)
+add_library(external_usage INTERFACE)
+add_library(external::usage ALIAS external_usage)
+list(APPEND IREE_DEFAULT_LINK_LIBRARIES
+  external_imported external::usage "$<1:${IREE_DEFAULT_LINK_LIBRARIES}>")
+
 # An existing source wins over a same-named file in the binary directory.
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/library.c" "#error Binary shadow source\n")
 foreach(_EXTENSION hpp inc inl)
@@ -62,26 +71,48 @@ iree_cc_binary(NAME probe DEPS ::test_main)
 iree_cc_unified_library(NAME unified ROOT ::library)
 iree_cc_binary(NAME unified_probe SRCS main.c DEPS ::unified)
 include("${IREE_REPO_ROOT}/loom/binding/c/cmake/loomc_shared.cmake")
-_loomc_collect(iree_fixture_library runtime _OBJECTS _LIBRARIES _OWNED _OPTIONS)
+_loomc_collect(iree_fixture_leaf runtime
+  _OBJECTS _LIBRARIES _runtime_owned _OPTIONS)
+add_library(loomc_runtime SHARED ${_OBJECTS})
+set_target_properties(loomc_runtime PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+target_link_libraries(loomc_runtime PRIVATE ${_LIBRARIES})
+target_link_options(loomc_runtime PRIVATE ${_OPTIONS})
+foreach(_DEPENDENCY IN LISTS IREE_DEFAULT_LINK_LIBRARIES)
+  _loomc_resolve(_EXTERNAL "${_DEPENDENCY}")
+  if(_EXTERNAL IN_LIST _runtime_owned)
+    message(FATAL_ERROR "Runtime claimed external requirement: ${_EXTERNAL}")
+  endif()
+endforeach()
+
+_loomc_collect(iree_fixture_library compiler
+  _OBJECTS _LIBRARIES _compiler_owned _OPTIONS)
 add_library(collected SHARED ${_OBJECTS})
+add_library(loomc_shared ALIAS collected)
 set_target_properties(collected PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 target_link_libraries(collected PRIVATE ${_LIBRARIES})
 target_link_options(collected PRIVATE ${_OPTIONS})
-iree_cc_binary(NAME collected_probe SRCS main.c DEPS collected)
+iree_cc_binary(NAME collected_probe SRCS main.c DEPS collected loomc_runtime)
 
 # Runtime-only tools keep compiler-owned objects local, even when a compiler
-# export exists, while substituting the shared runtime's retained dependencies.
-get_property(_LEAF_OBJECTS TARGET iree_fixture_leaf PROPERTY IREE_CC_OBJECTS)
-add_library(loomc_runtime SHARED ${_LEAF_OBJECTS})
-set_target_properties(loomc_runtime PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-set(_runtime_owned iree_fixture_leaf)
-set(_compiler_owned iree_fixture_library)
+# export exists. Fully shared tools substitute both implementation owners.
+# Replace the final link libraries just as shared-tool composition does, without
+# reintroducing default link requirements through iree_cc_binary.
 set(_compiler_exports iree_fixture_library)
-_loomc_collect(iree_fixture_library runtime_tool
-  _OBJECTS _LIBRARIES _OWNED _OPTIONS)
-iree_cc_binary(NAME runtime_probe SRCS main.c DEPS ${_LIBRARIES})
-target_sources(iree_fixture_runtime_probe PRIVATE ${_OBJECTS})
-target_link_options(iree_fixture_runtime_probe PRIVATE ${_OPTIONS})
+foreach(_MODE runtime_tool tool)
+  _loomc_collect("iree_fixture_library;iree_fixture_leaf;${IREE_DEFAULT_LINK_LIBRARIES}" ${_MODE}
+    _OBJECTS _LIBRARIES _OWNED _OPTIONS)
+  foreach(_DEPENDENCY IN LISTS IREE_DEFAULT_LINK_LIBRARIES)
+    _loomc_resolve(_EXTERNAL "${_DEPENDENCY}")
+    if(NOT _EXTERNAL IN_LIST _LIBRARIES)
+      message(FATAL_ERROR "${_MODE} lost external requirement: ${_EXTERNAL}")
+    endif()
+  endforeach()
+  iree_cc_binary(NAME ${_MODE}_probe SRCS main.c DEPS ${_LIBRARIES})
+  set_property(TARGET iree_fixture_${_MODE}_probe PROPERTY LINK_LIBRARIES
+    "${_LIBRARIES}")
+  target_sources(iree_fixture_${_MODE}_probe PRIVATE ${_OBJECTS})
+  target_link_options(iree_fixture_${_MODE}_probe PRIVATE ${_OPTIONS})
+endforeach()
 
 iree_cc_test(
   NAME source_less_test_with_a_long_target_name_matching_real_cts_binaries
@@ -101,4 +132,4 @@ add_subdirectory(producer)
 iree_finalize_target_dependencies()
 
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/paths-$<CONFIG>.txt"
-  CONTENT "${_LIBRARY_OBJECT_TARGET}\n$<TARGET_FILE:iree_fixture_leaf>\n$<TARGET_FILE:iree_fixture_probe>\n$<TARGET_FILE:iree_fixture_unified_probe>\n$<TARGET_FILE:iree_fixture_collected_probe>\n$<TARGET_FILE:iree_fixture_runtime_probe>\n$<TARGET_FILE:iree_fixture_source_less_test_with_a_long_target_name_matching_real_cts_binaries>\n")
+  CONTENT "${_LIBRARY_OBJECT_TARGET}\n$<TARGET_FILE:iree_fixture_leaf>\n$<TARGET_FILE:iree_fixture_probe>\n$<TARGET_FILE:iree_fixture_unified_probe>\n$<TARGET_FILE:iree_fixture_collected_probe>\n$<TARGET_FILE:iree_fixture_runtime_tool_probe>\n$<TARGET_FILE:iree_fixture_tool_probe>\n$<TARGET_FILE:iree_fixture_source_less_test_with_a_long_target_name_matching_real_cts_binaries>\n")

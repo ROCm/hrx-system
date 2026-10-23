@@ -183,6 +183,7 @@ loom_cc_library(
     "stable_id.c"
   DEPS
     iree::base
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -207,6 +208,7 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::arena
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 

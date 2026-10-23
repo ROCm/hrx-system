@@ -237,6 +237,7 @@ loom_cc_library(
     iree::base::internal
     iree::base::internal::arena
     loom::ir::builders
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 

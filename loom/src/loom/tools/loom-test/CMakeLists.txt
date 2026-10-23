@@ -115,7 +115,6 @@ if(LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK)
   list(APPEND _loom_test_platform_deps loom::binding::c::target::cpu::iree_hal)
 endif()
 loomc_cc_binary(
-  RUNTIME_ONLY
   NAME
     loom-test
   SRCS

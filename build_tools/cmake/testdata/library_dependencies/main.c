@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <math.h>
 #include <stdio.h>
 
 #if defined(PRIVATE_VALUE) || defined(LATE_VALUE)
@@ -12,8 +13,15 @@
 
 int fixture_library_value(void);
 int fixture_generated_value(void);
+int fixture_leaf_value(void);
 
 int main(void) {
-  printf("%d\n", fixture_library_value() + fixture_generated_value());
+  // Retain a real external call even when the compiler can fold floor(1.5).
+  double (*volatile round_down)(double) = floor;
+  if (round_down(1.5) != 1.0) {
+    return 1;
+  }
+  printf("%d\n", fixture_library_value() + fixture_generated_value() +
+                     fixture_leaf_value());
   return 0;
 }

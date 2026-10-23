@@ -22,7 +22,7 @@ loom_cc_library(
     hdrs = ["plan.h"],
     deps = [
         "//loom/src/loom/ir:builders",
-        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:headers",
         "//loom/src/loom/tooling/testbench:api",
         "//loom/src/loom/tooling/testbench:operation_plan",
         "//runtime/src/iree/base",

@@ -811,6 +811,9 @@ class LoomBuildFileFunctions(
         # The existing dependency-only CMake library is an INTERFACE target.
         self.cc_library(**self._apply_loom_cmake_policy(kwargs))
 
+    def loom_cc_instance_library(self, tags=None, **kwargs):
+        self.loom_cc_library(tags=(tags or []) + ["LINKABLE_MORE_THAN_ONCE"], **kwargs)
+
     def loom_cc_binary(self, deps=[], **kwargs):
         kwargs = self._apply_loom_cmake_policy(kwargs)
         self._emit_rewritten_cmake_rule(
@@ -1202,6 +1205,7 @@ class LoomBuildFileFunctions(
         extra_output_flags=None,
         extra_outputs=None,
         deps=None,
+        instance_owned=False,
         tags=None,
         testonly=None,
         target_compatible_with=None,
@@ -1256,7 +1260,8 @@ class LoomBuildFileFunctions(
         testonly_block = self._convert_option_block("TESTONLY", testonly)
 
         duplicate_safe_block = self._convert_option_block(
-            "LINKABLE_MORE_THAN_ONCE", "LINKABLE_MORE_THAN_ONCE" in (tags or [])
+            "LINKABLE_MORE_THAN_ONCE",
+            instance_owned or "LINKABLE_MORE_THAN_ONCE" in (tags or []),
         )
 
         self._emit_platform_guard_begin(target_compatible_with)
