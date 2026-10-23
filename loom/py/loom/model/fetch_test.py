@@ -421,6 +421,74 @@ def test_publication_cli_dry_run_and_offline_exact_update(tmp_path, capsys):
     assert json.loads(card.read_text()) == _publication_card()
 
 
+def test_publication_program_filter_locks_every_compatible_variant(tmp_path, capsys):
+    authored = _publication_card()
+    authored["programs"]["alternate"]["inputs"] = ["unbuilt.loombc"]
+    authored["variants"]["compiled-only"] = {
+        "services": {"text": {"programs": ["alternate"]}}
+    }
+    path = tmp_path / "model.json"
+    path.write_text(json.dumps(authored))
+    for name in ("code.loom", "weights.data", "alternate.data"):
+        (tmp_path / name).write_bytes(name.encode())
+    lock_path = tmp_path / "model.json.lock"
+    lock_path.write_text(json.dumps(_lock({"obsolete.loombc": b"old output"})))
+    assert (
+        main(
+            [
+                str(path),
+                "--update-lock",
+                "--all-variants",
+                "--programs=p",
+                "--offline",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["selections"] == [
+        {"variant": name, "service": "text", "programs": "p"}
+        for name in ("v", "unused")
+    ]
+    lock = ModelLock.parse(lock_path.read_text())
+    assert len(lock.files) == 3
+    cache = ContentCache(tmp_path / "client-cache")
+    document = cache.read_document(str(path), offline=True)
+    card = ModelCard.parse(document.text)
+    for variant, expected in (("v", b"weights.data"), ("unused", b"alternate.data")):
+        selected = card.select(variant=variant, service="text", programs="p")
+        plan = plan_fetch(document, selected, cache, offline=True)
+        destination = tmp_path / variant
+        install(plan, cache, destination)
+        assert (destination / "weights.data").read_bytes() == expected
+        assert (destination / "code.loom").read_bytes() == b"code.loom"
+    assert json.loads(path.read_text()) == authored
+
+
+@pytest.mark.parametrize("programs", ["unknown", "unreferenced"])
+def test_publication_program_filter_rejects_empty_selection_before_io(
+    tmp_path, programs
+):
+    authored = _publication_card()
+    authored["programs"]["unreferenced"] = {
+        "inputs": ["absent.loombc"],
+        "libraries": [],
+    }
+    with _server(authored, {}) as (base, requests, _):
+        cache = ContentCache(tmp_path / "cache")
+        document = cache.read_document(base + "/model.json", offline=False)
+        with pytest.raises(ManifestError, match="no compatible choices"):
+            plan_lock(
+                document,
+                ModelCard.parse(document.text),
+                cache,
+                programs=programs,
+                lock_location=str(tmp_path / "model.json.lock"),
+            )
+        assert requests == ["/model.json"]
+
+
 @pytest.mark.parametrize(
     "arguments",
     [

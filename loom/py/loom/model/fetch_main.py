@@ -52,6 +52,7 @@ def _update_publication_lock(args, document, card, cache, snapshot):
         document,
         card,
         cache,
+        programs=args.programs,
         overrides=_overrides(args.origin),
         lock_location=args.lockfile,
         offline=args.offline,
@@ -168,7 +169,8 @@ def main(argv: list[str] | None = None) -> int:
         "--all-variants",
         action="store_true",
         help="with --update-lock, publish a lock for every declared variant, "
-        "partition, service, and program set without creating an installation",
+        "partition, service, and program set without creating an installation; "
+        "--programs restricts publication to that set's compatible choices",
     )
     parser.add_argument(
         "--dry-run",
@@ -206,11 +208,10 @@ def main(argv: list[str] | None = None) -> int:
                 args.preset,
                 args.service,
                 args.variant,
-                args.programs,
                 args.partition,
             )
         ):
-            parser.error("--all-variants cannot be combined with selection flags")
+            parser.error("--all-variants permits only --programs as a selection flag")
         if args.output is not None or args.materialize != "share" or args.list:
             parser.error(
                 "--all-variants publishes only a lock; "
