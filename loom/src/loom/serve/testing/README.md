@@ -8,10 +8,14 @@ SDK. Integration tests stay beside the server or service they exercise.
 reproduces a full Linux stderr pipe so a lifecycle test can prove that a blocked
 diagnostic sink cannot stop inference on its only worker.
 
-The test-only native text request observer loads a source VM policy and
-tokenizer, prepares a real chat request and reports its tokens and completed
-transcript. Both the deterministic text fixture and external model checks use
-this path without loading numerical weights or acquiring a device.
+The test-only native text request observer loads a VM policy and tokenizer,
+prepares a real chat request, and reports its tokens and completed transcript.
+`--model=card.json --preset=chat` selects providers and versioned service exports
+through the same card resolver as the server; `--control=policy.loom` selects a
+direct program with exact export names. Both the deterministic text fixture and
+external model checks use this path without loading numerical weights or
+acquiring a device. The tokenizer remains an explicit `--tokenizer` input so
+small vocabulary fixtures can check exact token output.
 
 The local `loom_serve_testing` Python package contains these helpers:
 

@@ -18,18 +18,21 @@ PACKAGE = Path(sys.argv.pop(1)).resolve().parent
 
 
 class RequestTest(unittest.TestCase):
-    def execute(self, request, response=None, capacity=96):
+    def execute(self, request, response=None, capacity=96, card=None):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             request_path = directory / "request.json"
             request_path.write_text(request)
             command = [
                 str(CHECKER),
-                f"--control={PACKAGE / 'control.loom'}",
                 f"--tokenizer={PACKAGE / 'tokenizer.json'}",
                 f"--request={request_path}",
                 f"--capacity={capacity}",
             ]
+            if card is not None:
+                command.extend([f"--model={card}", "--preset=check"])
+            else:
+                command.append(f"--control={PACKAGE / 'control.loom'}")
             if response is not None:
                 response_path = directory / "response.txt"
                 response_path.write_text(response)
@@ -72,6 +75,27 @@ class RequestTest(unittest.TestCase):
         value = json.loads(result.stdout)
         self.assertEqual(value["prompt"], "abxabx#ba")
         self.assertEqual(value["tokens"], [0, 1, 2, 0, 1, 2, 3, 1, 0])
+
+    def test_card_selects_versioned_policy_with_identical_chat_behavior(self):
+        request = self.request()
+        direct = self.execute(request, "bx")
+        selected = self.execute(request, "bx", card=PACKAGE / "native.card.json")
+        self.assertEqual(direct.returncode, 0, direct.stderr)
+        self.assertEqual(selected.returncode, 0, selected.stderr)
+        self.assertEqual(json.loads(selected.stdout), json.loads(direct.stdout))
+
+    def test_card_rejects_unsupported_service_before_compilation(self):
+        for kind, version in (("text", 2), ("image", 1)):
+            with self.subTest(kind=kind, version=version):
+                document = json.loads((PACKAGE / "native.card.json").read_text())
+                document["services"]["chat"] = {"kind": kind, "version": version}
+                with tempfile.TemporaryDirectory() as temporary:
+                    card = Path(temporary) / "model.json"
+                    card.write_text(json.dumps(document))
+                    result = self.execute(self.request(), card=card)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("require text service version 1", result.stderr)
 
     def test_large_tool_catalog_renders(self):
         def tool(index):
