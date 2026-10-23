@@ -73,18 +73,20 @@ server.
 ## Multi-token prediction
 
 The optional predictor uses the original `mtp-Qwen3.8-Flash-Next-Q8_0.gguf`
-sidecar. Enable three recursive proposals by extending the deployment document:
+sidecar. Enable two recursive proposals by extending the deployment document:
 
 ```sh
 flash_draft=/path/to/mtp-Qwen3.8-Flash-Next-Q8_0.gguf
 jq --arg draft "$flash_draft" \
-   '.definition.draft_depth = 3 |
+   '.definition.draft_depth = 2 |
     .definition.options.draft_weights = $draft' \
    /tmp/flash-next-deployment.json > /tmp/flash-next-mtp-deployment.json
 ```
 
-Use that document with `--model`. The sidecar's embedding and vocabulary tensors
-are identical to the target's tensors and share their device allocations. Only
+Depths from one through seven specialize the proposal chain and target
+verification capacity together. Use that document with `--model`. The sidecar's
+embedding and vocabulary tensors are identical to the target's tensors and
+share their device allocations. Only
 2,775,621,632 additional parameter bytes are needed, bringing the logical
 parameter bank to approximately **106.26 GiB**. Physical backing granularity
 and mutable state add capacity independently. The predictor reads its Q8_0
@@ -133,7 +135,7 @@ Every epoch carries one immutable table of active token spans. Prompt chunks,
 single-token continuations, and independent sessions use the same program.
 `prefill_capacity` bounds an epoch, not a prompt: longer inputs are chunked.
 The package requires pooled cache storage, a context capacity divisible by 64,
-at most 32,768 tokens per epoch, and draft depth zero or three.
+at most 32,768 tokens per epoch, and draft depth zero through seven.
 
 The default document provides four execution rows, a 16K per-session context
 ceiling, a shared 32K-token page pool, a 16K-token epoch ceiling, and four
@@ -194,6 +196,7 @@ synthesize empty state instead of depending on cleared recurrent storage.
 | `prepare.loom`, `weights.loom` | Stage specialization, explicit checkpoint files, and storage geometry. |
 | `../qwen/control.loom` | Chat policy, sampling policy, epoch submission, and feedback publication. |
 | `epoch.loom` | Four residual streams through 48 layers, including PLE at layer 1 and QSA every fourth layer. |
+| `programs/last_layer.loom`, `kernels/last_layer.loom` | Complete final-layer cache publication followed by selected-query finishing for ordinary generation. |
 | `propose.loom`, `verify.loom`, `programs/mtp.loom` | Recursive proposals, target verification, and accepted-prefix predictor catch-up. |
 | `programs/` | Hyperconnection, recurrent attention, sparse attention, routed/shared experts, and output-head composition. |
 | `kernels/gdn.loom`, `kernels/gdn_window.loom`, `kernels/work.loom` | Recurrent updates and immutable span ownership. |
@@ -203,14 +206,24 @@ synthesize empty state instead of depending on cleared recurrent storage.
 | `kernels/ple_*.loom`, `kernels/iq4.loom` | EOS-aware bigram/trigram hashes, IQ4_NL reads, and dilated convolution history. |
 | `kernels/quantized.loom`, `kernels/q8.loom`, `kernels/experts.loom` | Q4_K, Q5_K, Q5_1, and Q8_0 expert projections in the checkpoint's actual encodings. |
 | `kernels/q8_matrix.loom`, `kernels/hyperconnection_matrix.loom` | Shared original-Q8 matrix contraction and fused hyperconnection publication. |
+| `kernels/f32_projection.loom` | Shared coefficient panels for wide router and recurrence projections. |
 | `kernels/expert_buckets.loom` | Device-owned expert grouping and finite workers that reuse weights across routed rows. |
 | `kernels/expert_matrix.loom`, `kernels/expert_block.loom` | Matrix schedules and register-resident packed blocks for routed gate/up and down projections. |
 
 The text model uses 36 GDN layers and 12 sparse-attention layers, with 512
 experts and ten selected experts plus a shared expert in each layer. Dense
 projections and embeddings use Q8_0; index projections use BF16. Accumulation is
-F32, with explicit BF16 activation publication boundaries. The output head
-projects only rows that require token selection.
+F32, with explicit BF16 activation publication boundaries. Wide projections
+decode coefficients into F16 panels in shared memory; smaller schedules retain
+exact integer-code products with F32 scale application. The 2K hyperconnection
+schedule also quantizes its normalized down-projection operands. These are
+shape-specific arithmetic contracts, not changes to the checkpoint encoding.
+
+The output head projects only rows that require token selection. Ordinary
+generation also limits final-layer attention and expert finishing to those
+rows, after publishing every input token's K/V and index history. It gathers
+the original four-query cohorts and scatters results back to their original
+row positions. MTP retains all target hidden rows for predictor catch-up.
 
 Recurrent spans keep the full F32 state in registers until publishing their
 private writer. At epoch capacities of 32 or more, two workgroups per head
@@ -256,8 +269,10 @@ Softmax and accumulation remain F32. Probabilities use a BF16 high component
 and a BF16 rounding residual for the matrix contractions; using only the high
 component loses accuracy in cancellation-sensitive outputs. Attended values
 still round to BF16 before sigmoid gating and final BF16 publication. Smaller
-cohorts use sixteen waves to partition one head's keys, providing parallelism
-when too few independent queries are available to occupy the device.
+cohorts divide each head's selected keys across eight workgroups of eight
+waves. Each load consumes the four adjacent members of a cache block. A second
+kernel merges partial maxima, denominators, and value sums in F32 before gating,
+exposing parallelism when few independent queries are available.
 
 The 36 GDN QKV tensors use an in-place preparation pass. Each workgroup owns
 four complete output channels, captures their original bytes into 10,880 bytes
@@ -267,10 +282,12 @@ after preparation and repeats it after reloading the original checkpoint; all
 QKV consumers, including speculative verification, use the prepared layout.
 
 At epoch capacities of at least 128, one workgroup contracts 128 tokens against
-one 128-channel Q/K/V head. Exact integer codes and existing BF16 activations
-feed matrix instructions; the original scales apply in F32 after each K32
-partial product. The shared Q8 contraction specializes its addressing for the
-prepared scale/code planes and keeps two stages in flight. Its F32 result rounds
+one 128-channel Q/K/V head. Below 4K capacity, exact integer codes and BF16
+activations feed matrix instructions, with scales applied in F32 after each
+K32 partial product. Larger capacities stage decoded F16 coefficients and
+converted activations before F32 matrix accumulation. The shared Q8 contraction
+specializes its addressing for the prepared scale/code planes and keeps two
+stages in flight. Its F32 result rounds
 to BF16 in a padded 128-by-132 LDS tile, where interior tokens immediately pass
 through four-tap convolution, SiLU, and Q/K normalization. The complete raw QKV
 array is never written to global memory.
@@ -301,14 +318,21 @@ or parameter repacking is added to an epoch. The immutable epoch header bounds
 active rows, so partial tiles preserve inactive storage and cannot mix padding
 into valid results.
 
-Hyperconnections use the same contraction at capacities of at least 128 tokens.
-Each 128-by-128 tile reuses original Q8 coefficients across its token panel.
+Hyperconnections reuse original Q8 coefficients across 128-token panels.
+Up projection and wide down projection use a 24 KiB F16 shared-memory panel
+whose XOR-permuted layout feeds wave32 matrix operands without duplicate loads.
 Down projection applies quarter-scaled SiLU to the F32 fragments before storing
 BF16. Up projection stages all four streams of a feature panel into the same
 wave, applies sigmoid, and combines the four normalized values in F32 before
 the final BF16 store. No global gate tensor or decoded weight bank is allocated.
-The separate four-row injection retains its original F32 or Q8 arithmetic;
-smaller epochs and selected output-head rows retain packed dot products.
+
+At capacities of at least 128, normalization is shared by the low-rank mixer
+and injection projection. At 2K and above, residual combination publishes the
+next normalized operand and injection together, avoiding repeated reads of all
+four residual streams. The 2K schedule additionally publishes signed-byte
+operands and per-block scales for the down projection. Larger schedules use
+floating-point panels. Each buffer's SSA lifetime ends at its last consumer,
+allowing transient storage reuse between successive mixers.
 
 At capacities of up to four tokens, each target injection row uses an entire
 128-thread workgroup. Four wave sums cross a 16-byte shared-memory exchange,
@@ -369,13 +393,18 @@ the following window while the current one computes, suppressing inactive
 rows and the final refill. Weight blocks remain resident across those windows,
 so each K32 contraction reuses their headers and code packets.
 
-Integer weight codes are represented exactly in BF16 and consumed by matrix
-instructions. Original scales and affine corrections are applied in F32 after
-each K32 partial product; fused gate/up retains F32 values through SiLU and
-the product before publishing BF16. The smaller routed, shared, and down
-matrix schedules stage both codes and activations in padded LDS panels, with
-tile and wave geometry passed as SSA values. All schedules consume original
-Q4_K, Q5_K, Q5_1, or Q8_0 storage without an expanded parameter bank.
+The 128-row schedules decode weights into F16 panels, combining original
+scales and affine offsets before F32 matrix accumulation. Fused gate/up keeps
+F32 values through SiLU and the product before publishing BF16. At 2K capacity,
+Q4_K and Q5_K gate/up consumers share one conversion of the live input rows to
+F16 across all selected experts. The same consumer handles prepacked operands
+or converts BF16 values at shared-memory publication. Q8 gate/up does its
+conversion there directly.
+
+Smaller routed and shared matrix schedules retain exact BF16 integer codes
+and F32 scale/correction application. All schedules consume original Q4_K,
+Q5_K, Q5_1, or Q8_0 storage without an expanded parameter bank. Tile and wave
+geometry remain SSA values selected during specialization.
 
 The producer's dispatch dependency publishes the complete table to consumers.
 The count word is an extent, and the command owns record storage until both
@@ -397,10 +426,10 @@ supplies the live row count directly; shared work needs no routing table.
 Smaller capacities retain packed dot products, including the default predictor
 proposal and verification shapes. Shared down uses the dense Q8 matrix policy.
 
-Both dot and matrix consumers preserve the original packed weights, BF16
-activations, and publication boundaries. Their accumulation order differs;
-independent F64 references check the original-value numerical contract instead
-of requiring identical rounding between schedules.
+Both dot and matrix consumers preserve original packed weights and BF16
+activation publication boundaries. Their panel rounding and accumulation order
+differ. Independent F64 references model each selected arithmetic contract;
+full-model distribution and task checks assess its effect on model quality.
 
 ## Exact sparse attention selection
 
