@@ -68,24 +68,3 @@ kernel.def target(@target) @non_power_of_two_reduce_uses_reference_lowering() {
 CHECK: * = kernel.subgroup.active.mask : i32
 CHECK: *, * = kernel.subgroup.shuffle<index> * : i32, i32, i32
 CHECK-NOT: * = kernel.subgroup.reduce<*>
-
-// ====
-
-amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
-
-kernel.def target(@target) @partial_wave_collectives_use_reference_lowering() {
-  %unit = index.constant 1 : index
-  %width = index.constant 48 : index
-  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
-} launch(%value: i32) {
-  %sum = kernel.subgroup.reduce<addi> %value : i32
-  %prefix = kernel.subgroup.scan<addi> %value {direction = forward, mode = inclusive} : i32
-  test.use %sum : i32
-  test.use %prefix : i32
-  kernel.return
-}
-
-// ----
-CHECK: *, * = kernel.subgroup.shuffle<up> * : i32, i32, i32
-CHECK-NOT: * = kernel.subgroup.reduce<*>
-CHECK-NOT: * = kernel.subgroup.scan<*>

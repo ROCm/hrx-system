@@ -271,6 +271,47 @@ iree_status_t loom_amdgpu_emit_subgroup_lane_compare(
   return iree_ok_status();
 }
 
+iree_status_t loom_amdgpu_emit_subgroup_tail_wave_guard(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* lane_ge_descriptor,
+    loom_value_id_t linear_id, uint32_t flat_workgroup_size,
+    uint32_t wavefront_size, loom_type_t lane_type, loom_type_t mask_type,
+    loom_value_id_t* out_tail_wave_guard) {
+  IREE_ASSERT_GT(flat_workgroup_size, wavefront_size);
+  IREE_ASSERT_NE(flat_workgroup_size % wavefront_size, 0u);
+  const uint32_t tail_wave_first_linear_id =
+      (flat_workgroup_size / wavefront_size) * wavefront_size;
+  loom_value_id_t low_tail_wave_first_linear_id = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
+      tail_wave_first_linear_id, lane_type, &low_tail_wave_first_linear_id));
+  return loom_amdgpu_emit_subgroup_lane_compare(
+      context, source_op, lane_ge_descriptor, linear_id,
+      low_tail_wave_first_linear_id, mask_type, out_tail_wave_guard);
+}
+
+iree_status_t loom_amdgpu_emit_subgroup_tail_active_lane_count(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* select_descriptor,
+    loom_value_id_t tail_wave_guard, uint32_t flat_workgroup_size,
+    uint32_t wavefront_size, loom_type_t lane_type,
+    loom_value_id_t* out_active_lane_count) {
+  IREE_ASSERT_GT(flat_workgroup_size, wavefront_size);
+  const uint32_t tail_lane_count = flat_workgroup_size % wavefront_size;
+  IREE_ASSERT_NE(tail_lane_count, 0u);
+  loom_value_id_t full_lane_count = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, wavefront_size,
+      lane_type, &full_lane_count));
+  loom_value_id_t tail_lane_count_value = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, tail_lane_count,
+      lane_type, &tail_lane_count_value));
+  return loom_amdgpu_emit_subgroup_select(
+      context, source_op, select_descriptor, full_lane_count,
+      tail_lane_count_value, tail_wave_guard, lane_type, out_active_lane_count);
+}
+
 static iree_status_t loom_amdgpu_emit_subgroup_reduce_xor_tree(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_subgroup_reduce_plan_t* plan, loom_value_id_t lane_id,
@@ -460,7 +501,8 @@ static iree_status_t loom_amdgpu_emit_subgroup_add_lane(
 static iree_status_t loom_amdgpu_emit_subgroup_reduce_down_tree(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_subgroup_reduce_plan_t* plan, loom_value_id_t lane_id,
-    loom_type_t lane_type, loom_value_id_t dynamic_active_lane_count,
+    loom_type_t lane_type, loom_value_id_t dynamic_first_lane,
+    loom_value_id_t dynamic_active_lane_count,
     loom_value_id_t* inout_registers) {
   loom_type_t mask_type = loom_type_none();
   IREE_RETURN_IF_ERROR(
@@ -472,10 +514,19 @@ static iree_status_t loom_amdgpu_emit_subgroup_reduce_down_tree(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32,
         plan->active_lane_count, lane_type, &active_lane_count));
   }
+  loom_value_id_t active_lane_end = active_lane_count;
   loom_value_id_t first_lane_offset = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
-      context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 0, lane_type,
-      &first_lane_offset));
+  if (dynamic_first_lane != LOOM_VALUE_ID_INVALID) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_binary(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_ADD_U32,
+        dynamic_first_lane, active_lane_count, lane_type, &active_lane_end));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_lane_byte_offset(
+        context, source_op, dynamic_first_lane, lane_type, &first_lane_offset));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
+        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_MOV_B32, 0, lane_type,
+        &first_lane_offset));
+  }
 
   const bool precompute_step_values = plan->register_count > 1;
   loom_value_id_t source_byte_offsets[LOOM_AMDGPU_MAX_SUBGROUP_TREE_STEPS] = {
@@ -495,7 +546,7 @@ static iree_status_t loom_amdgpu_emit_subgroup_reduce_down_tree(
           &source_byte_offsets[step_count]));
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_lane_compare(
           context, source_op, &plan->guard_descriptor, source_lane,
-          active_lane_count, mask_type, &guards[step_count]));
+          active_lane_end, mask_type, &guards[step_count]));
       ++step_count;
     }
   }
@@ -518,7 +569,7 @@ static iree_status_t loom_amdgpu_emit_subgroup_reduce_down_tree(
             &low_source_byte_offset));
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_lane_compare(
             context, source_op, &plan->guard_descriptor, source_lane,
-            active_lane_count, mask_type, &guard));
+            active_lane_end, mask_type, &guard));
       }
       loom_value_id_t peer = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_bpermute_register(
@@ -547,9 +598,11 @@ static iree_status_t loom_amdgpu_emit_subgroup_reduce_down_tree(
 iree_status_t loom_amdgpu_emit_subgroup_reduce_tree(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_subgroup_reduce_plan_t* plan, loom_value_id_t lane_id,
-    loom_type_t lane_type, loom_value_id_t dynamic_active_lane_count,
+    loom_type_t lane_type, loom_value_id_t dynamic_first_lane,
+    loom_value_id_t dynamic_active_lane_count,
     loom_value_id_t* inout_registers) {
-  if (dynamic_active_lane_count == LOOM_VALUE_ID_INVALID &&
+  if (dynamic_first_lane == LOOM_VALUE_ID_INVALID &&
+      dynamic_active_lane_count == LOOM_VALUE_ID_INVALID &&
       (plan->active_lane_count <= 1 ||
        loom_amdgpu_u32_is_power_of_two(plan->active_lane_count))) {
     if (plan->crosslane_kind ==
@@ -563,8 +616,8 @@ iree_status_t loom_amdgpu_emit_subgroup_reduce_tree(
         context, source_op, plan, lane_id, lane_type, inout_registers);
   }
   return loom_amdgpu_emit_subgroup_reduce_down_tree(
-      context, source_op, plan, lane_id, lane_type, dynamic_active_lane_count,
-      inout_registers);
+      context, source_op, plan, lane_id, lane_type, dynamic_first_lane,
+      dynamic_active_lane_count, inout_registers);
 }
 
 iree_status_t loom_amdgpu_emit_subgroup_reduce_scalar_broadcast(
@@ -581,7 +634,7 @@ iree_status_t loom_amdgpu_emit_subgroup_reduce_scalar_broadcast(
       LOOM_AMDGPU_SUBGROUP_REDUCE_PUBLICATION_ALL_LANES;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_subgroup_reduce_tree(
       context, source_op, &half_wave_plan, lane_id, lane_type,
-      LOOM_VALUE_ID_INVALID, inout_registers));
+      LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID, inout_registers));
 
   // Lane 0 holds each low-half result and lane 63 receives the full result
   // after combining it with the corresponding high-half result.
