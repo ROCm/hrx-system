@@ -1836,8 +1836,11 @@ def _compiling_owner_query(
     source_labels: set[str], target_patterns: tuple[str, ...]
 ) -> str:
     universe = " + ".join(target_patterns)
+    # attr() enumerates possible values of concatenated select() expressions.
+    # Restrict its inputs first so unrelated rule families cannot multiply this
+    # work before their results are discarded by the compiling-owner filter.
     source_references = " +\n    ".join(
-        f'attr("srcs", "{_source_label_pattern(label)}", $universe)'
+        f'attr("srcs", "{_source_label_pattern(label)}", $source_rules)'
         for label in sorted(source_labels)
     )
     aliases = " +\n    ".join(
@@ -1847,11 +1850,10 @@ def _compiling_owner_query(
     )
     return (
         f"let universe = {universe} in\n"
+        'let source_rules = kind("cc_.* rule|filegroup rule", $universe) in\n'
         f"let references = {source_references} in\n"
         f"let aliases = {aliases} in\n"
-        'kind("cc_.* rule", $references) +\n'
-        'kind("filegroup rule", $references) +\n'
-        "$aliases\n"
+        "$references + $aliases\n"
     )
 
 
