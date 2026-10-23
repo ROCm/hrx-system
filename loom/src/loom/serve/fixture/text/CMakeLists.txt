@@ -124,6 +124,8 @@ iree_register_generated_compile_input(${_FILEGROUP_TARGET}
 iree_py_library(
   NAME
     parameters
+  MAIN
+    "parameters.py"
   SRCS
     "parameters.py"
 )

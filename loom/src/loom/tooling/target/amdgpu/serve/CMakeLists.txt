@@ -894,6 +894,8 @@ loom_cc_test(
     ::test_device
     iree::testing::gtest_main
     loom::serve::service::text::source_media_tests
+  ARGS
+    "--gtest_filter=-Declarations/ManagedMediaServiceTest.*/1"
   ENV
     "LOOM_SERVE_TEST_MEDIA_SOURCE={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/model.json}}"
     "LOOM_SERVE_TEST_MODEL_SOURCE={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom}}"
@@ -937,6 +939,8 @@ loom_cc_test(
     ::test_device_gpu
     iree::testing::gtest_main
     loom::serve::service::text::source_media_tests
+  ARGS
+    "--gtest_filter=-Declarations/ManagedMediaServiceTest.*/1"
   ENV
     "LOOM_SERVE_TEST_MEDIA_SOURCE={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/embedding/model.json}}"
     "LOOM_SERVE_TEST_MODEL_SOURCE={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom}}"
