@@ -59,17 +59,26 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Linux compiler tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            clang-19 lld-19 llvm-19 libclang-rt-19-dev
+
       - name: Build and test Linux wheel
         if: runner.os == 'Linux'
         env:
-          CC: /usr/bin/clang-18
-          CXX: /usr/bin/clang++-18
-          AR: /usr/bin/llvm-ar-18
+          CC: /usr/bin/clang-19
+          CXX: /usr/bin/clang++-19
+          AR: /usr/bin/llvm-ar-19
         run: |
-          export PATH="/usr/lib/llvm-18/bin:$PATH"
+          export PATH="/usr/lib/llvm-19/bin:$PATH"
           clang --version
           ld.lld --version
           bazelisk --version
+          # Clang 19 supports libstdc++'s C++23 expected implementation used
+          # by the embedded C++ frontend.
           # Keep the C++ ABI at Ubuntu 24.04's GCC 13 baseline even when the
           # runner also has a newer GCC installed. The ELF audit enforces it.
           python -m build_tools.ci.loom_wheel \
