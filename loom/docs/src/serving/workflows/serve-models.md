@@ -12,6 +12,10 @@ It requires an installed `loom-serve` with the CPU target and task HAL enabled,
 plus `curl` and `jq`. [Acquiring Loom](../../getting-started/acquiring-loom.md)
 describes obtaining the tools.
 
+For a learned model installed from a single card URL, follow
+[fetch and serve a model](fetch-and-serve.md). The remainder of this page explains
+explicit deployment and runtime registration using the small arithmetic package.
+
 ## Start with no models
 
 ```sh

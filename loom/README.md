@@ -1,23 +1,47 @@
 # Loom
 
-> [!NOTE]
-> This README is a first-merge quickstart. It is intentionally narrow: get a
-> motivated human or agent from checkout to the current examples, then point at
-> the code and docs that explain the real surfaces. Deeper architecture,
-> performance, target, and model-program docs are still being split out.
+Loom compiles kernels and asynchronous device programs, links model programs,
+and specializes them for execution on CPUs, AMD GPUs, and AMD NPUs. It carries
+source facts, target facts, configuration, correctness cases, and compiler
+reports through the same authoring and execution path.
 
-Loom is a source-first native compiler substrate for asynchronous
-device-oriented programs. The current proof point is kernel authoring,
-specialization, compilation, emission, testing, benchmarking, and tuning. The
-larger unit is a model program: the same architecture is meant to scale upward
-from individual kernels into model execution, serving, eval, adaptation,
-LoRA/fine-tuning, and training loops where the scale makes sense.
+The `hrx-loom` SDK packages the compiler, runtime, Python APIs, and command-line
+tools. `loom-fetch` installs a model's selected programs and assets;
+`loom-serve` loads the resulting card and serves requests over HTTP. The
+[programming guide](https://rocm.github.io/hrx-system/loom/) covers installed
+use, model serving, kernel authoring, and embedding through `loomc`.
 
-The core idea is simple: keep source facts, target facts, linkable providers,
-specialization choices, executable artifacts, correctness policy, and
-performance evidence in one system. Loom is not another router over HIP, BLAS,
-Triton, CK, AITER, and framework dispatch. It is the compiler layer where those
-facts are still visible enough to compile, inspect, specialize, and tune.
+## Install and run a model
+
+Use Python 3.12 or newer. The first release targets recent Linux x86-64 and
+Windows 11 x86-64; the [installation guide](docs/src/getting-started/acquiring-loom.md)
+defines system runtime prerequisites and development-wheel installation.
+The first PyPI release is pending. Once published, an activated Python virtual
+environment can install the complete SDK with:
+
+```sh
+python -m pip install 'hrx-loom[hf]'
+loom-serve --help
+```
+
+`[hf]` adds optional Hugging Face acquisition support. The native tools and C++
+importer are included in the base package. AMD execution uses libamdf and the
+operating system device driver, without a ROCm SDK installation.
+
+With the SDK installed, fetch a published Moonshine preset and serve it on an
+AMD GPU:
+
+```sh
+loom-fetch https://raw.githubusercontent.com/ROCm/hrx-loom-library/21637a18079d1f1dd9b8e20d26f700a62e60db4f/model/moonshine-ai/moonshine-streaming-tiny/model.json --preset=streaming --output=./moonshine
+loom-serve --model=./moonshine/model.json --device=amdgpu2
+```
+
+The [complete walkthrough](docs/src/serving/workflows/fetch-and-serve.md) includes
+choice discovery, the audio request, expected transcript, offline use, and
+Windows commands. The server JIT compiles the source model with the installed
+SDK; this user workflow needs no Bazel build. The
+[Loom library](https://github.com/ROCm/hrx-loom-library) supplies model packages,
+reusable motifs, kernels, and their tests.
 
 ## Current Status
 
@@ -28,10 +52,11 @@ facts are still visible enough to compile, inspect, specialize, and tune.
 | AMDGPU HSACO | Most established native target path |
 | SPIR-V/Vulkan | Working examples and tests; still hardening as a product target |
 | x86, Wasm | Real early target paths with providers, lowering/check coverage, and initial emission infrastructure; not mature product targets |
+| Portable model cards and serving | Source/bytecode composition, locked acquisition, presets, and native HTTP service contracts |
 | Portable command programs | Source dialect, multi-root preparation, target-neutral Low ISA, and immutable artifact core; public embedding and materialization are staged separately |
 | Whole host programs | Direction of travel beyond reusable command-buffer-shaped subgraphs |
 
-## Build The First Slice
+## Build the tools
 
 Run commands from the repository root.
 
@@ -96,11 +121,12 @@ same source:
 
 ```bash
 python dev.py bazel run \
-  --//runtime/config/hal:drivers=amdgpu,task \
+  --//runtime/config/hal:drivers=amd,task \
+  --//libamdf/config:enabled=true \
   //loom/src/loom/tools/loom-benchmark:loom-benchmark -- \
   loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom \
   --config=mlp_down_projection_residual_bf16.row_capacity=3584 \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --measure=dispatch_complete \
   --iterations=1 \
   --warmup-iterations=0 \

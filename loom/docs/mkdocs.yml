@@ -108,6 +108,7 @@ nav:
       - Author model programs: serving/model-programs.md
       - HTTP profiles: serving/http-profiles.md
       - Workflows:
+          - Fetch and serve a model: serving/workflows/fetch-and-serve.md
           - Serve source-defined models: serving/workflows/serve-models.md
           - Stream speech: serving/workflows/stream-speech.md
           - Operate a model server: serving/workflows/operate-model-server.md
