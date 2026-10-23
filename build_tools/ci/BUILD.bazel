@@ -27,6 +27,26 @@ py_library(
     srcs = ["github_api.py"],
 )
 
+py_library(
+    name = "loom_release",
+    srcs = ["loom_release.py"],
+    deps = [
+        ":github_api",
+        "//loom/packaging/python:release_lib",
+    ],
+)
+
+py_test(
+    name = "loom_release_test",
+    size = "small",
+    srcs = ["loom_release_test.py"],
+    deps = [
+        ":github_api",
+        ":loom_release",
+        "//loom/packaging/python:release_lib",
+    ],
+)
+
 py_test(
     name = "github_api_test",
     size = "small",
@@ -201,6 +221,7 @@ test_suite(
         ":github_actions_watch_test",
         ":github_api_test",
         ":loom_binary_size_test",
+        ":loom_release_test",
         ":loom_wheel_test",
         ":rocm_environment_test",
         ":vulkan_environment_test",

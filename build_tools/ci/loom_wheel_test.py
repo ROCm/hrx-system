@@ -67,7 +67,8 @@ class LoomWheelTest(unittest.TestCase):
                 self.assertEqual(calls[0][1], "test")
                 self.assertEqual(calls[0][-1], loom_wheel.INSTALLED_TEST)
                 self.assertEqual(calls[1][1], "cquery")
-                self.assertEqual(calls[0][2:-1], calls[1][2:-2])
+                self.assertEqual(calls[0][2:-2], calls[1][2:-2])
+                self.assertEqual(calls[0][-2], "--test_arg=task,amdgpu2,rdna,cdna,xdna")
                 self.assertEqual(wheel.path.read_bytes(), path.read_bytes())
                 self.assertEqual(
                     wheel.digest, hashlib.sha256(path.read_bytes()).hexdigest()

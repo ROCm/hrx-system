@@ -34,7 +34,8 @@ jobs:
         run: |
           bazelisk test --config=asan \
             //loom/packaging/python:release_test \
-            //build_tools/ci:loom_wheel_test
+            //build_tools/ci:loom_wheel_test \
+            //build_tools/ci:loom_release_test
 
   wheel:
     name: ${{ matrix.platform }} / ${{ matrix.profile }}
