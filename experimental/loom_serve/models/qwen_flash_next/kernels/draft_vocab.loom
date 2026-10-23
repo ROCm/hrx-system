@@ -54,12 +54,12 @@ func.def inline @flash_next_draft_known(%carry: buffer, %record: offset, %id: in
     %word = index.assume %word_value [range(%word_value, 0, 4679)] : index
     %bit = index.rem %relative, %bits : index
     %shift = index.cast %bit : index to i32
-    %one = scalar.constant 1 : i32
-    %zero = scalar.constant 0 : i32
-    %mask = scalar.shli %one, %shift : i32
+    %c1_value = scalar.constant 1 : i32
+    %c0_value = scalar.constant 0 : i32
+    %mask = scalar.shli %c1_value, %shift : i32
     %stored = view.load %bitmap[%word] : view<4680xi32> -> i32
     %present = scalar.andi %stored, %mask : i32
-    %known = scalar.cmpi ne, %present, %zero : i32
+    %known = scalar.cmpi ne, %present, %c0_value : i32
     scf.yield %known : i1
   }
   func.return %known : i1
@@ -85,22 +85,22 @@ template.def<@flash_next.draft_update> device @flash_next_draft_update(%position
   %tokens = buffer.view %ids[%origin] : buffer -> view<[%capacity]xi32>
   %thread = kernel.workitem.id<x> : index
   %threads = kernel.workgroup.size<x> : index
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
+  %c0_value = index.constant 0 : index
+  %c1_value = index.constant 1 : index
   %bitmap_words = index.constant 4680 : index
-  %zero_word = scalar.constant 0 : i32
-  %one_word = scalar.constant 1 : i32
+  %c0_word = scalar.constant 0 : i32
+  %c1_word = scalar.constant 1 : i32
   %yes = scalar.constant true : i1
-  %leader = index.cmp eq, %thread, %zero : index
-  %fresh = index.cmp eq, %position, %zero : index
+  %leader = index.cmp eq, %thread, %c0_value : index
+  %fresh = index.cmp eq, %position, %c0_value : index
   scf.if %fresh {
     scf.for %word = [%thread to %bitmap_words step %threads] {
-      view.store %zero_word, %bitmap[%word] : i32, view<4680xi32>
+      view.store %c0_word, %bitmap[%word] : i32, view<4680xi32>
     }
     scf.if %leader {
-      view.store %zero_word, %header[0] : i32, view<3xi32>
-      view.store %zero_word, %header[1] : i32, view<3xi32>
-      view.store %zero_word, %header[2] : i32, view<3xi32>
+      view.store %c0_word, %header[0] : i32, view<3xi32>
+      view.store %c0_word, %header[1] : i32, view<3xi32>
+      view.store %c0_word, %header[2] : i32, view<3xi32>
     }
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   }
@@ -108,7 +108,7 @@ template.def<@flash_next.draft_update> device @flash_next_draft_update(%position
     %prefix = index.constant 98304 : index
     %bits = index.constant 32 : index
     %table_capacity = scalar.constant 991 : i32
-    scf.for %relative = [%zero to %length step %one] {
+    scf.for %relative = [%c0_value to %length step %c1_value] {
       %input_value = index.add %begin, %relative : index
       %input = index.assume %input_value [ge(%input_value, 0), lt(%input_value, %capacity)] : index
       %id_word = view.load %tokens[%input] : view<[%capacity]xi32> -> i32
@@ -118,7 +118,7 @@ template.def<@flash_next.draft_update> device @flash_next_draft_update(%position
       %unknown = scalar.xori %known, %yes : i1
       scf.if %unknown {
         %absolute = index.add %position, %relative : index
-        %encoded = index.add %absolute, %one : index
+        %encoded = index.add %absolute, %c1_value : index
         %miss = index.cast %encoded : index to i32
         %latest = view.load %header[1] : view<3xi32> -> i32
         view.store %latest, %header[2] : i32, view<3xi32>
@@ -129,14 +129,14 @@ template.def<@flash_next.draft_update> device @flash_next_draft_update(%position
           %slot_value = index.cast %count : i32 to index
           %slot = index.assume %slot_value [range(%slot_value, 0, 990)] : index
           view.store %id_word, %table[%slot] : i32, view<991xi32>
-          %next = scalar.addi %count, %one_word : i32
+          %next = scalar.addi %count, %c1_word : i32
           view.store %next, %header[0] : i32, view<3xi32>
           %key = index.sub %id, %prefix : index
           %word_value = index.div %key, %bits : index
           %word = index.assume %word_value [range(%word_value, 0, 4679)] : index
           %bit = index.rem %key, %bits : index
           %shift = index.cast %bit : index to i32
-          %mask = scalar.shli %one_word, %shift : i32
+          %mask = scalar.shli %c1_word, %shift : i32
           %prior = view.load %bitmap[%word] : view<4680xi32> -> i32
           %updated = scalar.ori %prior, %mask : i32
           view.store %updated, %bitmap[%word] : i32, view<4680xi32>
@@ -151,8 +151,8 @@ template.def<@flash_next.draft_update> device @flash_next_draft_update(%position
 // precede sixteen row flags. A cohort shares the union of its requested weight
 // rows; a full-head peer therefore needs only one shared full weight pass.
 kernel.def @flash_next_draft_plan() {
-  %one = index.constant 1 : index
-  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+  %c1_value = index.constant 1 : index
+  kernel.launch.config workgroups(%c1_value, %c1_value, %c1_value) workgroup_size(%c1_value, %c1_value, %c1_value) : index
 } launch(%epoch: buffer, %ids: buffer, %carry: buffer, %plan: buffer) {
   %capacity = config.get @flash_next.token_count : index
   %count_value = func.call @flash_next_token_count(%epoch, %capacity) : (buffer, index) -> (index)
@@ -162,22 +162,22 @@ kernel.def @flash_next_draft_plan() {
   %cohorts = buffer.view %plan[%origin] : buffer -> view<4xi32>
   %modes = buffer.view %plan[%row_origin] : buffer -> view<16xi32>
   %tokens = buffer.view %ids[%origin] : buffer -> view<[%capacity]xi32>
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %four = index.constant 4 : index
-  %zero_word = scalar.constant 0 : i32
+  %c0_value = index.constant 0 : index
+  %c1_value = index.constant 1 : index
+  %c4_value = index.constant 4 : index
+  %c0_word = scalar.constant 0 : i32
   %window = index.constant 32 : index
   %yes = scalar.constant true : i1
-  scf.for %cohort = [%zero to %four step %one] {
-    view.store %zero_word, %cohorts[%cohort] : i32, view<4xi32>
+  scf.for %cohort = [%c0_value to %c4_value step %c1_value] {
+    view.store %c0_word, %cohorts[%cohort] : i32, view<4xi32>
   }
-  scf.for %span = [%zero to %count step %one] {
+  scf.for %span = [%c0_value to %count step %c1_value] {
     %length, %position, %begin, %owner = func.call @flash_next_mtp_span(%epoch, %span) : (buffer, index) -> (index, index, index, index)
     %record = func.call pure @flash_next_draft_record(%owner) : (index) -> (offset)
     %header = buffer.view %carry[%record] : buffer -> view<3xi32>
     %prior_word = view.load %header[2] : view<3xi32> -> i32
     %prior = index.cast %prior_word : i32 to index
-    %none = index.cmp eq, %prior, %zero : index
+    %none = index.cmp eq, %prior, %c0_value : index
     %end = index.add %prior, %window : index
     %old = index.cmp ule, %end, %position : index
     %quiet = scalar.ori %none, %old : i1
@@ -190,7 +190,7 @@ kernel.def @flash_next_draft_plan() {
     %mode = scalar.extui %full : i1 to i32
     %row = index.assume %begin [range(%begin, 0, 15)] : index
     view.store %mode, %modes[%row] : i32, view<16xi32>
-    %cohort = index.div %row, %four : index
+    %cohort = index.div %row, %c4_value : index
     %prior_mode = view.load %cohorts[%cohort] : view<4xi32> -> i32
     %combined = scalar.ori %prior_mode, %mode : i32
     view.store %combined, %cohorts[%cohort] : i32, view<4xi32>
@@ -232,48 +232,48 @@ func.def inline @flash_next_draft_id(%column: index, %full: i1, %carry: buffer, 
 
 kernel.def target(@flash_next_draft_wave32) @flash_next_draft_common_head() {
   %capacity = config.get @flash_next.token_count : index
-  %one = index.constant 1 : index
-  %three = index.constant 3 : index
-  %four = index.constant 4 : index
-  %rounded = index.add %capacity, %three : index
-  %batches = index.div %rounded, %four : index
+  %c1_value = index.constant 1 : index
+  %c3_value = index.constant 3 : index
+  %c4_value = index.constant 4 : index
+  %rounded = index.add %capacity, %c3_value : index
+  %batches = index.div %rounded, %c4_value : index
   %workers = index.constant 1280 : index
   %threads = index.constant 128 : index
-  kernel.launch.config workgroups(%workers, %batches, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%workers, %batches, %c1_value) workgroup_size(%threads, %c1_value, %c1_value) : index
 } launch(%epoch: buffer, %plan: buffer, %input: buffer, %weight: buffer, %output: buffer) {
   %capacity = config.get @flash_next.token_count : index
   %count_value = func.call @flash_next_token_count(%epoch, %capacity) : (buffer, index) -> (index)
   %count = index.assume %count_value [range(%count_value, 0, 16), le(%count_value, %capacity)] : index
   %batch = kernel.workgroup.id<y> : index
-  %four = index.constant 4 : index
-  %first = index.mul %batch, %four : index
+  %c4_value = index.constant 4 : index
+  %first = index.mul %batch, %c4_value : index
   %active = index.cmp ult, %first, %count : index
   scf.if %active {
     %origin = index.constant 0 : offset
     %cohorts = buffer.view %plan[%origin] : buffer -> view<4xi32>
     %mode = view.load %cohorts[%batch] : view<4xi32> -> i32
-    %zero_word = scalar.constant 0 : i32
-    %full = scalar.cmpi ne, %mode, %zero_word : i32
+    %c0_word = scalar.constant 0 : i32
+    %full = scalar.cmpi ne, %mode, %c0_word : i32
     %full_rows = index.constant 248077 : index
     %common_rows = index.constant 98337 : index
     %rows = scf.select %full, %full_rows, %common_rows : index
-    %three = index.constant 3 : index
-    %padded = index.add %rows, %three : index
-    %groups = index.div %padded, %four : index
+    %c3_value = index.constant 3 : index
+    %padded = index.add %rows, %c3_value : index
+    %groups = index.div %padded, %c4_value : index
     %worker = kernel.workgroup.id<x> : index
     %workers = index.constant 1280 : index
     %wave = kernel.subgroup.id : index
     %lane = kernel.subgroup.lane.id : index
-    %zero = index.constant 0 : index
-    %one = index.constant 1 : index
+    %c0_value = index.constant 0 : index
+    %c1_value = index.constant 1 : index
     %prefix = index.constant 98304 : index
     %controls = index.constant 248044 : index
     %width = index.constant 2560 : index
     %stride = index.constant 32 : index
-    %leader = index.cmp eq, %lane, %zero : index
+    %leader = index.cmp eq, %lane, %c0_value : index
     %logits = buffer.view %output[%origin] : buffer -> view<[%capacity]x248320xf32>
     scf.for %group = [%worker to %groups step %workers] {
-      %column = index.madd %group, %four, %wave : index
+      %column = index.madd %group, %c4_value, %wave : index
       %valid = index.cmp ult, %column, %rows : index
       scf.if %valid {
         %frequent = index.cmp ult, %column, %prefix : index
@@ -286,10 +286,10 @@ kernel.def target(@flash_next_draft_wave32) @flash_next_draft_common_head() {
           scf.yield %control : index
         }
         %id = index.assume %id_value [range(%id_value, 0, 248076)] : index
-        %partial = func.call @flash_next_q8_batch_partial(%width, %four, %first, %count, %id, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
+        %partial = func.call @flash_next_q8_batch_partial(%width, %c4_value, %first, %count, %id, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
         %sums = kernel.subgroup.reduce<addf> %partial : vector<4xf32>
         scf.if %leader {
-          scf.for %ordinal = [%zero to %four step %one] unroll schedule(linear) {
+          scf.for %ordinal = [%c0_value to %c4_value step %c1_value] unroll schedule(linear) {
             %token = index.add %first, %ordinal : index
             %live = index.cmp ult, %token, %count : index
             scf.if %live {
@@ -308,10 +308,10 @@ kernel.def target(@flash_next_draft_wave32) @flash_next_draft_common_head() {
 
 kernel.def target(@flash_next_draft_wave32) @flash_next_draft_rare_head() {
   %capacity = config.get @flash_next.token_count : index
-  %one = index.constant 1 : index
+  %c1_value = index.constant 1 : index
   %groups = index.constant 248 : index
   %threads = index.constant 128 : index
-  kernel.launch.config workgroups(%groups, %capacity, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%groups, %capacity, %c1_value) workgroup_size(%threads, %c1_value, %c1_value) : index
 } launch(%epoch: buffer, %plan: buffer, %carry: buffer, %input: buffer, %weight: buffer, %output: buffer) {
   %capacity = config.get @flash_next.token_count : index
   %count_value = func.call @flash_next_token_count(%epoch, %capacity) : (buffer, index) -> (index)
@@ -320,12 +320,12 @@ kernel.def target(@flash_next_draft_wave32) @flash_next_draft_rare_head() {
   %active = index.cmp ult, %token, %count : index
   scf.if %active {
     %origin = index.constant 0 : offset
-    %four = index.constant 4 : index
-    %batch = index.div %token, %four : index
+    %c4_value = index.constant 4 : index
+    %batch = index.div %token, %c4_value : index
     %cohorts = buffer.view %plan[%origin] : buffer -> view<4xi32>
     %mode = view.load %cohorts[%batch] : view<4xi32> -> i32
-    %zero_word = scalar.constant 0 : i32
-    %subset = scalar.cmpi eq, %mode, %zero_word : i32
+    %c0_word = scalar.constant 0 : i32
+    %subset = scalar.cmpi eq, %mode, %c0_word : i32
     scf.if %subset {
       %length, %position, %begin, %owner = func.call @flash_next_mtp_span(%epoch, %token) : (buffer, index) -> (index, index, index, index)
       %record = func.call pure @flash_next_draft_record(%owner) : (index) -> (offset)
@@ -335,7 +335,7 @@ kernel.def target(@flash_next_draft_wave32) @flash_next_draft_rare_head() {
       %group = kernel.workgroup.id<x> : index
       %wave = kernel.subgroup.id : index
       %lane = kernel.subgroup.lane.id : index
-      %slot = index.madd %group, %four, %wave : index
+      %slot = index.madd %group, %c4_value, %wave : index
       %valid = index.cmp ult, %slot, %rare_count : index
       scf.if %valid {
         %common = index.constant 98337 : index
@@ -346,8 +346,8 @@ kernel.def target(@flash_next_draft_wave32) @flash_next_draft_rare_head() {
         %stride = index.constant 32 : index
         %part = func.call @flash_next_q8_partial(%width, %token, %id, %lane, %stride, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (f32)
         %sum = kernel.subgroup.reduce<addf> %part : f32
-        %zero = index.constant 0 : index
-        %leader = index.cmp eq, %lane, %zero : index
+        %c0_value = index.constant 0 : index
+        %leader = index.cmp eq, %lane, %c0_value : index
         scf.if %leader {
           %packed = scalar.fptrunc %sum : f32 to bf16
           %logit = scalar.extf %packed : bf16 to f32
@@ -364,9 +364,9 @@ kernel.def target(@flash_next_draft_wave32) @flash_next_draft_rare_head() {
 // sampling. Only the iteration domain differs; target sampling remains full.
 kernel.def @flash_next_draft_sample() {
   %capacity = config.get @flash_next.token_count : index
-  %one = index.constant 1 : index
+  %c1_value = index.constant 1 : index
   %threads = index.constant 256 : index
-  kernel.launch.config workgroups(%capacity, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%capacity, %c1_value, %c1_value) workgroup_size(%threads, %c1_value, %c1_value) : index
 } launch(%epoch: buffer, %plan: buffer, %carry: buffer, %logits: buffer, %output: buffer) {
   %capacity = config.get @flash_next.token_count : index
   %count_value = func.call @flash_next_token_count(%epoch, %capacity) : (buffer, index) -> (index)
@@ -382,8 +382,8 @@ kernel.def @flash_next_draft_sample() {
     %row_origin = index.constant 16 : offset
     %modes = buffer.view %plan[%row_origin] : buffer -> view<16xi32>
     %mode = view.load %modes[%token] : view<16xi32> -> i32
-    %zero_word = scalar.constant 0 : i32
-    %full = scalar.cmpi ne, %mode, %zero_word : i32
+    %c0_word = scalar.constant 0 : i32
+    %full = scalar.cmpi ne, %mode, %c0_word : i32
     %common = index.constant 98337 : index
     %full_rows = index.constant 248077 : index
     %subset_rows = index.add %common, %rare : index
@@ -393,10 +393,10 @@ kernel.def @flash_next_draft_sample() {
     %thread = kernel.workitem.id<x> : index
     %threads = kernel.workgroup.size<x> : index
     %empty = scalar.constant 0 : i64
-    %zero = index.constant 0 : index
-    %one = index.constant 1 : index
-    %last = index.sub %columns, %one : index
-    %key = scf.for %base = [%zero to %columns step %threads](%best = %empty : i64) -> (i64) {
+    %c0_value = index.constant 0 : index
+    %c1_value = index.constant 1 : index
+    %last = index.sub %columns, %c1_value : index
+    %key = scf.for %base = [%c0_value to %columns step %threads](%best = %empty : i64) -> (i64) {
       %position = index.add %base, %thread : index
       %live = index.cmp ult, %position, %columns : index
       %column = index.min %position, %last : index
@@ -411,9 +411,9 @@ kernel.def @flash_next_draft_sample() {
     %maximum = scalar.constant false : i1
     %best = template.apply<@sampling.reduce_key>(%key, %maximum) : (i64, i1) -> (i64)
     %inverse = scalar.trunci %best : i64 to i32
-    %ones = scalar.constant -1 : i32
-    %selected = scalar.xori %inverse, %ones : i32
-    %leader = index.cmp eq, %thread, %zero : index
+    %cneg1_values = scalar.constant -1 : i32
+    %selected = scalar.xori %inverse, %cneg1_values : i32
+    %leader = index.cmp eq, %thread, %c0_value : index
     scf.if %leader {
       %predictions = buffer.view %output[%origin] : buffer -> view<[%capacity]xi32>
       view.store %selected, %predictions[%token] : i32, view<[%capacity]xi32>

@@ -1,4 +1,5 @@
 func.decl pure @expert_gate_input_is_prepacked() -> (i1)
+
 kernel.decl @expert_input_half() launch(%input: buffer, %epoch: buffer, %output: buffer)
 
 // Original Q4_K/Q5_K/Q8_0 gate/up and Q5_1/Q8_0 down weights stay compressed. Selected

@@ -194,20 +194,20 @@ func.def inline @hc_down_inject_narrow(%span_arg: buffer, %normalized_arg: buffe
     %projection_groups = index.constant 80 : index
     %projection = index.cmp ult, %group, %projection_groups : index
     scf.if %projection {
-      %zero = index.constant 0 : index
+      %c0_value = index.constant 0 : index
       %f32_injection = scalar.constant false : i1
-      func.call @hc_down_inject_body(%zero, %f32_injection, %span, %normalized, %down_weight, %injection_weight, %lowrank, %injection) : (index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+      func.call @hc_down_inject_body(%c0_value, %f32_injection, %span, %normalized, %down_weight, %injection_weight, %lowrank, %injection) : (index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
     } else {
       %row = index.sub %group, %projection_groups : index
       %workitem = kernel.workitem.id<x> : index
       %wave = kernel.subgroup.id : index
       %lane = kernel.subgroup.lane.id : index
       %origin = index.constant 0 : offset
-      %zero = index.constant 0 : index
-      %eight = index.constant 8 : index
+      %c0_value = index.constant 0 : index
+      %c8_value = index.constant 8 : index
       %stride = index.constant 1024 : index
       %width = index.constant 10240 : index
-      %first = index.mul %workitem, %eight : index
+      %first = index.mul %workitem, %c8_value : index
       %input_view = buffer.view %normalized[%origin] : buffer -> view<[%capacity]x10240xbf16>
       %weight_view = buffer.view %injection_weight[%origin] : buffer -> view<4x10240xf32>
       %initial = vector.constant 0.0 : vector<8xf32>
@@ -218,29 +218,29 @@ func.def inline @hc_down_inject_narrow(%span_arg: buffer, %normalized_arg: buffe
         %next = vector.fmaf %values, %weights, %accumulator : vector<8xf32>
         scf.yield %next : vector<8xf32>
       }
-      %scalar_zero = scalar.constant 0.0 : f32
-      %lane_sum = vector.reduce<addf> %parts, %scalar_zero : vector<8xf32>, f32
+      %c0_scalar = scalar.constant 0.0 : f32
+      %lane_sum = vector.reduce<addf> %parts, %c0_scalar : vector<8xf32>, f32
       %wave_sum = kernel.subgroup.reduce<addf> %lane_sum : f32
       %exchange_bytes = index.constant 16 : offset
       %storage = buffer.alloca<workgroup> align(16) %exchange_bytes : buffer
       %exchange = buffer.view %storage[%origin] : buffer -> view<4xf32>
-      %wave_leader = index.cmp eq, %lane, %zero : index
+      %wave_leader = index.cmp eq, %lane, %c0_value : index
       scf.if %wave_leader {
         view.store %wave_sum, %exchange[%wave] : f32, view<4xf32>
       }
       kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-      %leader = index.cmp eq, %workitem, %zero : index
+      %leader = index.cmp eq, %workitem, %c0_value : index
       scf.if %leader {
-        %sums = vector.load %exchange[%zero] : view<4xf32> -> vector<4xf32>
-        %dot = vector.reduce<addf> %sums, %scalar_zero : vector<4xf32>, f32
+        %sums = vector.load %exchange[%c0_value] : view<4xf32> -> vector<4xf32>
+        %dot = vector.reduce<addf> %sums, %c0_scalar : vector<4xf32>, f32
         %quarter = scalar.constant 0.25 : f32
-        %one = scalar.constant 1.0 : f32
-        %two = scalar.constant 2.0 : f32
+        %c1_value = scalar.constant 1.0 : f32
+        %c2_value = scalar.constant 2.0 : f32
         %scaled = scalar.mulf %dot, %quarter : f32
         %negative = scalar.negf %scaled : f32
         %exponential = scalar.expf<afn> %negative : f32
-        %denominator = scalar.addf %one, %exponential : f32
-        %gate = scalar.divf %two, %denominator : f32
+        %denominator = scalar.addf %c1_value, %exponential : f32
+        %gate = scalar.divf %c2_value, %denominator : f32
         %output = buffer.view %injection[%origin] : buffer -> view<[%capacity]x4xf32>
         view.store %gate, %output[%token, %row] : f32, view<[%capacity]x4xf32>
       }
@@ -662,12 +662,12 @@ command.program.def public @flash_next_hc_attn_normalized(%layer: index) launch(
 // published BF16 values; only sixteen F32 partials cross the wave boundary.
 func.def inline @hc_injection_chunk(%stream: index, %channel: index, %packed: vector<8xbf16>, %weight: buffer, %partial: vector<4x8xf32>) -> (vector<4x8xf32>) {
   %origin = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
+  %c0_value = index.constant 0 : index
+  %c1_value = index.constant 1 : index
   %outputs = index.constant 4 : index
   %weights = buffer.view %weight[%origin] : buffer -> view<4x4x2560xf32>
   %values = vector.extf %packed : vector<8xbf16> to vector<8xf32>
-  %result = scf.for %row = [%zero to %outputs step %one](%current = %partial : vector<4x8xf32>) -> (vector<4x8xf32>) unroll schedule(linear) {
+  %result = scf.for %row = [%c0_value to %outputs step %c1_value](%current = %partial : vector<4x8xf32>) -> (vector<4x8xf32>) unroll schedule(linear) {
     %prior = vector.extract %current[%row] : vector<4x8xf32> -> vector<8xf32>
     %coefficient = vector.load %weights[%row, %stream, %channel] : view<4x4x2560xf32> -> vector<8xf32>
     %next = vector.fmaf %values, %coefficient, %prior : vector<8xf32>
@@ -682,33 +682,33 @@ func.def inline @hc_injection_chunk(%stream: index, %channel: index, %packed: ve
 func.def inline @hc_injection_publish(%token: index, %stream: index, %lane: index, %partial: vector<4x8xf32>, %output: buffer) {
   %capacity = config.get @flash_next.token_count : index
   %origin = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %two = index.constant 2 : index
-  %three = index.constant 3 : index
-  %four = index.constant 4 : index
+  %c0_value = index.constant 0 : index
+  %c1_value = index.constant 1 : index
+  %c2_value = index.constant 2 : index
+  %c3_value = index.constant 3 : index
+  %c4_value = index.constant 4 : index
   %bytes = index.constant 64 : offset
   %storage = buffer.alloca<workgroup> align(16) %bytes : buffer
   %exchange = buffer.view %storage[%origin] : buffer -> view<4x4xf32>
-  %scalar_zero = scalar.constant 0.0 : f32
+  %c0_scalar = scalar.constant 0.0 : f32
   %empty = vector.constant 0.0 : vector<4xf32>
-  %lane_sums = scf.for %row = [%zero to %four step %one](%current = %empty : vector<4xf32>) -> (vector<4xf32>) unroll schedule(linear) {
+  %lane_sums = scf.for %row = [%c0_value to %c4_value step %c1_value](%current = %empty : vector<4xf32>) -> (vector<4xf32>) unroll schedule(linear) {
     %vector_part = vector.extract %partial[%row] : vector<4x8xf32> -> vector<8xf32>
-    %sum = vector.reduce<addf> %vector_part, %scalar_zero : vector<8xf32>, f32
+    %sum = vector.reduce<addf> %vector_part, %c0_scalar : vector<8xf32>, f32
     %updated = vector.insert %sum into %current[%row] : f32, vector<4xf32>
     scf.yield %updated : vector<4xf32>
   }
   %wave_sums = kernel.subgroup.reduce<addf> %lane_sums : vector<4xf32>
-  %leader = index.cmp eq, %lane, %zero : index
+  %leader = index.cmp eq, %lane, %c0_value : index
   scf.if %leader {
-    vector.store %wave_sums, %exchange[%stream, %zero] : vector<4xf32>, view<4x4xf32>
+    vector.store %wave_sums, %exchange[%stream, %c0_value] : vector<4xf32>, view<4x4xf32>
   }
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   scf.if %leader {
-    %a = view.load %exchange[%zero, %stream] : view<4x4xf32> -> f32
-    %b = view.load %exchange[%one, %stream] : view<4x4xf32> -> f32
-    %c = view.load %exchange[%two, %stream] : view<4x4xf32> -> f32
-    %d = view.load %exchange[%three, %stream] : view<4x4xf32> -> f32
+    %a = view.load %exchange[%c0_value, %stream] : view<4x4xf32> -> f32
+    %b = view.load %exchange[%c1_value, %stream] : view<4x4xf32> -> f32
+    %c = view.load %exchange[%c2_value, %stream] : view<4x4xf32> -> f32
+    %d = view.load %exchange[%c3_value, %stream] : view<4x4xf32> -> f32
     %ab = scalar.addf %a, %b : f32
     %cd = scalar.addf %c, %d : f32
     %dot = scalar.addf %ab, %cd : f32
@@ -716,15 +716,16 @@ func.def inline @hc_injection_publish(%token: index, %stream: index, %lane: inde
     %scaled = scalar.mulf %dot, %quarter : f32
     %negative = scalar.negf %scaled : f32
     %exponential = scalar.expf<afn> %negative : f32
-    %scalar_one = scalar.constant 1.0 : f32
-    %scalar_two = scalar.constant 2.0 : f32
-    %denominator = scalar.addf %scalar_one, %exponential : f32
-    %gate = scalar.divf %scalar_two, %denominator : f32
+    %c1_scalar = scalar.constant 1.0 : f32
+    %c2_scalar = scalar.constant 2.0 : f32
+    %denominator = scalar.addf %c1_scalar, %exponential : f32
+    %gate = scalar.divf %c2_scalar, %denominator : f32
     %gates = buffer.view %output[%origin] : buffer -> view<[%capacity]x4xf32>
     view.store %gate, %gates[%token, %stream] : f32, view<[%capacity]x4xf32>
   }
   func.return
 }
+
 kernel.def target(@flash_next_hc_wave32) @hc_normalize_inject() {
   %tokens = config.get @flash_next.token_count : index
   %c1 = index.constant 1 : index
@@ -779,6 +780,7 @@ kernel.def target(@flash_next_hc_wave32) @hc_normalize_inject() {
   }
   kernel.return
 }
+
 kernel.def target(@flash_next_hc_wave32) @hc_combine_normalize_inject() {
   %tokens = config.get @flash_next.token_count : index
   %c1 = index.constant 1 : index
@@ -881,19 +883,19 @@ func.def inline @hc_quantize_chunk(%token: index, %stream: index, %channel: inde
   %exchange1 = scalar.constant 1 : i32
   %exchange2 = scalar.constant 2 : i32
   %width = scalar.constant 32 : i32
-  %zero = scalar.constant 0.0 : f32
-  %one = scalar.constant 1.0 : f32
+  %c0_value = scalar.constant 0.0 : f32
+  %c1_value = scalar.constant 1.0 : f32
   %divisor = scalar.constant 127.0 : f32
   %minimum = scalar.constant 1.1754943508222875e-38 : f32
   %wide = vector.extf %values : vector<8xbf16> to vector<8xf32>
   %absolute = vector.absf %wide : vector<8xf32>
-  %local = vector.reduce<maxnumf> %absolute, %zero : vector<8xf32>, f32
+  %local = vector.reduce<maxnumf> %absolute, %c0_value : vector<8xf32>, f32
   %peer1, %valid1 = kernel.subgroup.shuffle<xor> %local, %exchange1, %width : f32, i32, i32
   %pair = scalar.maxnumf %local, %peer1 : f32
   %peer2, %valid2 = kernel.subgroup.shuffle<xor> %pair, %exchange2, %width : f32, i32, i32
   %maximum = scalar.maxnumf %pair, %peer2 : f32
   // Exact for every finite BF16 maximum, including subnormal intermediates.
-  %scale_reciprocal = scalar.constant 0.007874015718698502 : f32
+  %scale_reciprocal = scalar.constant 0.0078740157186985016 : f32
   %negative_divisor = scalar.constant -127.0 : f32
   %estimate = scalar.mulf %maximum, %scale_reciprocal : f32
   %remainder = scalar.fmaf %estimate, %negative_divisor, %maximum : f32
@@ -901,10 +903,10 @@ func.def inline @hc_quantize_chunk(%token: index, %stream: index, %channel: inde
   // A subnormal scale is represented as a zero block. The reciprocal's
   // denominator is then one, so finite inputs cannot overflow conversion.
   %normal = scalar.cmpf oge, %unbounded_scale, %minimum : f32
-  %scale = scf.select %normal, %unbounded_scale, %zero : f32
-  %denominator = scf.select %normal, %scale, %one : f32
-  %reciprocal = scalar.divf<arcp> %one, %denominator : f32
-  %inverse = scf.select %normal, %reciprocal, %zero : f32
+  %scale = scf.select %normal, %unbounded_scale, %c0_value : f32
+  %denominator = scf.select %normal, %scale, %c1_value : f32
+  %reciprocal = scalar.divf<arcp> %c1_value, %denominator : f32
+  %inverse = scf.select %normal, %reciprocal, %c0_value : f32
   %inverses = vector.splat %inverse : vector<8xf32>
   %scaled = vector.mulf %wide, %inverses : vector<8xf32>
   %rounded = vector.roundf %scaled : vector<8xf32>
@@ -1107,7 +1109,7 @@ kernel.def target(@hc_int8_wave32) @hc_matrix_down_int8() {
     %wave_feature_base = index.madd %wave_feature, %c32, %feature_base : index
     %output_feature = index.add %wave_feature_base, %output_feature_lane : index
     %quarter = vector.constant 0.25 : vector<16xf32>
-    %one = vector.constant 1.0 : vector<16xf32>
+    %c1_value = vector.constant 1.0 : vector<16xf32>
     scf.for %token_fragment = [%c0 to %c2 step %c1] unroll schedule(linear) {
       scf.for %feature_fragment = [%c0 to %c2 step %c1] unroll schedule(linear) {
         %values = vector.extract %result[%feature_fragment, %token_fragment] : vector<2x2x8xf32> -> vector<8xf32>
@@ -1129,7 +1131,7 @@ kernel.def target(@hc_int8_wave32) @hc_matrix_down_int8() {
         %scaled = vector.mulf %dot, %quarter : vector<16xf32>
         %negative = vector.negf %scaled : vector<16xf32>
         %exponential = vector.expf<afn> %negative : vector<16xf32>
-        %denominator = vector.addf %one, %exponential : vector<16xf32>
+        %denominator = vector.addf %c1_value, %exponential : vector<16xf32>
         %activated = vector.divf<arcp> %scaled, %denominator : vector<16xf32>
         %packed = vector.fptrunc %activated : vector<16xf32> to vector<16xbf16>
         vector.store %packed, %output_view[%token, %output_feature] : vector<16xbf16>, view<[%capacity]x320xbf16>

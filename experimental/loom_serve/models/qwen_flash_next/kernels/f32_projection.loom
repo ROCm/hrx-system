@@ -219,9 +219,9 @@ func.def inline @flash_next_coefficient_matrix(%capacity: index, %first_outputs:
 
 func.def public inline @flash_next_route_matrix(%capacity: index, %epoch: buffer, %input: buffer, %weight: buffer, %shared: buffer, %logits: buffer, %gate: buffer) {
   %experts = index.constant 512 : index
-  %one = index.constant 1 : index
+  %c1_value = index.constant 1 : index
   %sigmoid = scalar.constant true : i1
-  func.call @flash_next_coefficient_matrix(%capacity, %experts, %one, %sigmoid, %epoch, %input, %weight, %shared, %logits, %gate) : (index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  func.call @flash_next_coefficient_matrix(%capacity, %experts, %c1_value, %sigmoid, %epoch, %input, %weight, %shared, %logits, %gate) : (index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
   func.return
 }
 

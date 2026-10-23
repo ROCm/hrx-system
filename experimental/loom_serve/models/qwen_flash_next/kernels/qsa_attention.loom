@@ -72,8 +72,3 @@ kernel.def target(@qsa_attention_wave32) @qsa_append_kv() {
   }
   kernel.return
 }
-
-// Sixteen waves partition each head's selected logical positions. Each wave
-// publishes its online-softmax numerator, denominator, and maximum to
-// workgroup memory; one wave merges them before the BF16 rounding boundary
-// and output gate. No attention matrix or global reduction buffer is created.

@@ -1,16 +1,27 @@
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
 kernel.decl @flash_next_finish_plan() launch(%epoch: buffer, %compact: buffer, %origins: buffer)
+
 kernel.decl @flash_next_finish_gather() launch(%epoch: buffer, %origins: buffer, %residual: buffer, %mixed: buffer, %injection: buffer, %staging: buffer)
+
 kernel.decl @flash_next_finish_publish() launch(%epoch: buffer, %origins: buffer, %residual: buffer, %mixed: buffer, %injection: buffer, %staging: buffer)
+
 kernel.decl @flash_next_finish_scatter() launch(%epoch: buffer, %origins: buffer, %input: buffer, %output: buffer)
+
 kernel.decl @flash_next_map_tokens() launch(%epoch: buffer, %mapping: buffer)
+
 kernel.decl @hc_combine_normalize_inject() launch(%span: buffer, %residual: buffer, %projected: buffer, %injection: buffer, %gamma: buffer, %output: buffer, %normalized: buffer, %weight: buffer, %next_injection: buffer)
+
 kernel.decl @hc_combine() launch(%span: buffer, %residual: buffer, %projected: buffer, %injection: buffer, %output: buffer)
+
 command.program.decl @flash_next_qsa_append(%layer: index, %key_origin: offset, %value_origin: offset, %index_origin: offset, %tail_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %rows: buffer, %input: buffer, %arena: buffer, %capture: buffer)
+
 command.program.decl @flash_next_qsa_queries(%layer: index, %key_origin: offset, %value_origin: offset, %index_origin: offset, %tail_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %rows: buffer, %input: buffer, %arena: buffer, %output: buffer, %capture: buffer)
+
 command.program.decl @flash_next_hc_mix_normalized(%down_weight: view<3481600xi8>, %up_weight: view<3481600xi8>) launch(%span: buffer, %normalized: buffer, %mixed: buffer)
+
 command.program.decl @flash_next_route(%layer: index) launch(%parameters: buffer, %span: buffer, %input: buffer, %ids: buffer, %weights: buffer, %shared_gate: buffer)
+
 command.program.decl @flash_next_experts(%layer: index) launch(%parameters: buffer, %span: buffer, %input: buffer, %ids: buffer, %weights: buffer, %shared_gate: buffer, %output: buffer)
 
 // The output-only epoch reaches this boundary after the final input mixer.

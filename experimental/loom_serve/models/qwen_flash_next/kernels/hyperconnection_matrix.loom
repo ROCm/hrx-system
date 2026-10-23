@@ -92,7 +92,7 @@ func.def inline @hc_up_wide_contract(%capacity: index, %first: index, %end: inde
   %safe_input_row = scf.select %input_live, %input_row, %c0 : index
   %input_view = buffer.view %input[%origin] : buffer -> view<[%capacity]x320xbf16>
   %local = buffer.assume.memory_space<workgroup> %stage : buffer
-  %zero = vector.constant 0.0 : vector<8xf32>
+  %c0_value = vector.constant 0.0 : vector<8xf32>
   %initial = vector.constant 0.0 : vector<16x8xf32>
   %tile = scf.for %block = [%c0 to %c10 step %c1](%accumulators = %initial : vector<16x8xf32>) -> (vector<16x8xf32>) pipeline(%c2) {
     %block_delta = index.scale %block, %block_bytes : index, offset -> offset
@@ -202,8 +202,8 @@ func.def inline @hc_matrix_up_body(%span_arg: buffer, %normalized_arg: buffer, %
     %feature_group = index.rem %workitem, %c16 : index
     %local_feature = index.mul %feature_group, %c4 : index
     %feature = index.add %channel_base, %local_feature : index
-    %zero = vector.constant 0.0 : vector<4xf32>
-    %one = vector.constant 1.0 : vector<4xf32>
+    %c0_value = vector.constant 0.0 : vector<4xf32>
+    %c1_value = vector.constant 1.0 : vector<4xf32>
     %quarter = vector.constant 0.25 : vector<4xf32>
     scf.for %row_fragment = [%c0 to %c4 step %c1] unroll schedule(linear) {
       scf.for %row_group = [%c0 to %c2 step %c1] unroll schedule(linear) {
@@ -226,12 +226,12 @@ func.def inline @hc_matrix_up_body(%span_arg: buffer, %normalized_arg: buffer, %
         %token = index.add %first, %within : index
         %live = index.cmp ult, %token, %end : index
         scf.if %live {
-          %sum = scf.for %stream = [%c0 to %c4 step %c1](%partial = %zero : vector<4xf32>) -> (vector<4xf32>) unroll schedule(linear) {
+          %sum = scf.for %stream = [%c0 to %c4 step %c1](%partial = %c0_value : vector<4xf32>) -> (vector<4xf32>) unroll schedule(linear) {
             %dot = vector.load %gates[%stream, %local_token, %local_feature] : view<4x16x65xf32> -> vector<4xf32>
             %negative = vector.negf %dot : vector<4xf32>
             %exponential = vector.expf<afn> %negative : vector<4xf32>
-            %denominator = vector.addf %one, %exponential : vector<4xf32>
-            %gate = vector.divf<arcp> %one, %denominator : vector<4xf32>
+            %denominator = vector.addf %c1_value, %exponential : vector<4xf32>
+            %gate = vector.divf<arcp> %c1_value, %denominator : vector<4xf32>
             %packed = vector.load %normalized_view[%token, %stream, %feature] : view<[%capacity]x4x2560xbf16> -> vector<4xbf16>
             %values = vector.extf %packed : vector<4xbf16> to vector<4xf32>
             %weighted = vector.mulf %gate, %values : vector<4xf32>
@@ -248,7 +248,6 @@ func.def inline @hc_matrix_up_body(%span_arg: buffer, %normalized_arg: buffer, %
   }
   func.return
 }
-
 
 // Share each reconstructed K64 panel across a 64x64 output tile. The high and
 // residual BF16 weight planes preserve the original Q8 coefficient accuracy;
@@ -422,7 +421,6 @@ kernel.def target(@flash_next_hc_matrix_wave32) @hc_matrix_up() {
   func.call @hc_matrix_up_body(%span, %normalized, %input, %weight, %output) : (buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
-
 
 // Large cohorts reconstruct Q8 coefficients into F16 K64 panels and retain
 // F32 accumulators through the complete contraction and quarter-scaled SiLU.

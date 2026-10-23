@@ -302,8 +302,8 @@ func.def inline @expert_bucket_down_body(%q8: i1, %input_arg: buffer, %tasks_arg
     %row = index.madd %expert, %features, %feature : index
     %partial, %partial_next = scf.if %q8 -> (vector<4xf32>, vector<4xf32>) {
       %value = func.call @flash_next_q8_rows_partial(%width, %routes, %live, %row, %lane, %stride, %input, %weight) : (index, vector<4xi32>, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
-      %zero = vector.constant 0.0 : vector<4xf32>
-      scf.yield %value, %zero : vector<4xf32>, vector<4xf32>
+      %c0_value = vector.constant 0.0 : vector<4xf32>
+      scf.yield %value, %c0_value : vector<4xf32>, vector<4xf32>
     } else {
       %value, %next_value = func.call @flash_next_q51_output_pair_partial(%width, %routes, %live, %row, %lane, %stride, %input, %weight) : (index, vector<4xi32>, index, index, index, index, buffer, buffer) -> (vector<4xf32>, vector<4xf32>)
       scf.yield %value, %next_value : vector<4xf32>, vector<4xf32>
@@ -313,8 +313,8 @@ func.def inline @expert_bucket_down_body(%q8: i1, %input_arg: buffer, %tasks_arg
       %value = kernel.subgroup.reduce<addf> %partial_next : vector<4xf32>
       scf.yield %value : vector<4xf32>
     } else {
-      %zero = vector.constant 0.0 : vector<4xf32>
-      scf.yield %zero : vector<4xf32>
+      %c0_value = vector.constant 0.0 : vector<4xf32>
+      scf.yield %c0_value : vector<4xf32>
     }
     scf.if %leader {
       scf.for %ordinal = [%c0 to %c4 step %c1] unroll schedule(linear) {

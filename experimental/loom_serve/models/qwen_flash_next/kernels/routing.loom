@@ -50,26 +50,26 @@ func.def inline @route_shared_row(%span: buffer, %input: buffer, %route_weight: 
   %thread = kernel.workitem.id<x> : index
   %wave = kernel.subgroup.id : index
   %lane = kernel.subgroup.lane.id : index
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %four = index.constant 4 : index
-  %eight = index.constant 8 : index
+  %c0_value = index.constant 0 : index
+  %c1_value = index.constant 1 : index
+  %c4_value = index.constant 4 : index
+  %c8_value = index.constant 8 : index
   %route_rows = index.constant 512 : index
   %width = index.constant 2560 : index
   %load_stride = index.constant 1024 : index
   %row_bytes = index.constant 10240 : offset
-  %first = index.mul %cohort, %four : index
+  %first = index.mul %cohort, %c4_value : index
   %active_cohort = index.cmp ult, %first, %end : index
   scf.if %active_cohort {
     %is_route = index.cmp ult, %column, %route_rows : index
-    %row = scf.select %is_route, %column, %zero : index
+    %row = scf.select %is_route, %column, %c0_value : index
     %weight = scf.select %is_route, %route_weight, %shared_weight : buffer
     %row_origin = index.scale %row, %row_bytes : index, offset -> offset
     %weights = buffer.view %weight[%row_origin] : buffer -> view<2560xf32>
     %origin = index.constant 0 : offset
     %resident = buffer.alloca<workgroup> align(16) %row_bytes : buffer
     %tile = buffer.view %resident[%origin] : buffer -> view<2560xf32>
-    %begin = index.mul %thread, %eight : index
+    %begin = index.mul %thread, %c8_value : index
     scf.for %channel = [%begin to %width step %load_stride] {
       %values = vector.load %weights[%channel] : view<2560xf32> -> vector<8xf32>
       vector.store %values, %tile[%channel] : vector<8xf32>, view<2560xf32>
@@ -79,9 +79,9 @@ func.def inline @route_shared_row(%span: buffer, %input: buffer, %route_weight: 
     %token = index.add %first, %wave : index
     %live = index.cmp ult, %token, %end : index
     scf.if %live {
-      %partial = func.call @route_partial(%token, %zero, %one, %lane, %input, %resident) : (index, index, index, index, buffer, buffer) -> (f32)
+      %partial = func.call @route_partial(%token, %c0_value, %c1_value, %lane, %input, %resident) : (index, index, index, index, buffer, buffer) -> (f32)
       %sum = kernel.subgroup.reduce<addf> %partial : f32
-      %leader = index.cmp eq, %lane, %zero : index
+      %leader = index.cmp eq, %lane, %c0_value : index
       scf.if %leader {
         scf.if %is_route {
           %bounded_column = index.assume %column [range(%column, 0, 511)] : index
@@ -143,8 +143,8 @@ kernel.def target(@flash_next_route_wave32) @route_project() {
   scf.if %tiled {
     template.apply<@flash_next.route_tile>(%capacity, %span_arg, %input_arg, %route_weight_arg, %shared_weight_arg, %logits_arg, %gate_arg) : (index, buffer, buffer, buffer, buffer, buffer, buffer)
   } else {
-    %one = index.constant 1 : index
-    %multiple = index.cmp ugt, %capacity, %one : index
+    %c1_value = index.constant 1 : index
+    %multiple = index.cmp ugt, %capacity, %c1_value : index
     scf.if %multiple {
       func.call @route_shared_row(%span_arg, %input_arg, %route_weight_arg, %shared_weight_arg, %logits_arg, %gate_arg) : (buffer, buffer, buffer, buffer, buffer, buffer)
     } else {

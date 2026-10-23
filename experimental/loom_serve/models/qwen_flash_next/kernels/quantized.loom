@@ -248,8 +248,8 @@ func.def public inline @flash_next_q51_output_pair_partial(%width: index, %rows:
   %row_bytes = index.scale %block_count, %block_bytes : index, offset -> offset
   %weight_origin = index.scale %row, %row_bytes : index, offset -> offset
   %input_row_bytes = index.scale %width, %element_bytes : index, offset -> offset
-  %zero = vector.constant 0.0 : vector<4xf32>
-  %result0, %result1 = scf.for %block = [%lane to %block_count step %stride](%accumulator0 = %zero : vector<4xf32>, %accumulator1 = %zero : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+  %c0_value = vector.constant 0.0 : vector<4xf32>
+  %result0, %result1 = scf.for %block = [%lane to %block_count step %stride](%accumulator0 = %c0_value : vector<4xf32>, %accumulator1 = %c0_value : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
     %block_add = index.scale %block, %block_bytes : index, offset -> offset
     %origin0 = index.add %weight_origin, %block_add : offset
     %origin1 = index.add %origin0, %row_bytes : offset

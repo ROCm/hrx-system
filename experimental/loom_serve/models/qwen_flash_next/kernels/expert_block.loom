@@ -422,19 +422,19 @@ kernel.def target(@expert_operand_wave32) @expert_input_half() {
   %features = index.constant 2560 : index
   %span = index.constant 2048 : index
   %threads = index.constant 256 : index
-  %one = index.constant 1 : index
+  %c1_value = index.constant 1 : index
   %elements = index.mul %capacity, %features : index
   %rounding = index.constant 2047 : index
   %rounded = index.add %elements, %rounding : index
   %groups = index.div %rounded, %span : index
-  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%groups, %c1_value, %c1_value) workgroup_size(%threads, %c1_value, %c1_value) : index
 } launch(%input_arg: buffer, %epoch_arg: buffer, %output_arg: buffer) {
   %input, %epoch, %output = buffer.assume.noalias %input_arg, %epoch_arg, %output_arg : buffer, buffer, buffer
   %capacity = config.get @flash_next.token_count : index
   %c8 = index.constant 8 : index
   %features = index.constant 2560 : index
   %span = index.constant 2048 : index
-  %zero = index.constant 0 : offset
+  %c0_value = index.constant 0 : offset
   %live = func.call @flash_next_token_count(%epoch, %capacity) : (buffer, index) -> (index)
   %elements = index.mul %capacity, %features : index
   %live_elements = index.mul %live, %features : index
@@ -444,8 +444,8 @@ kernel.def target(@expert_operand_wave32) @expert_input_half() {
   %base = index.madd %group, %span, %local : index
   %active = index.cmp ult, %base, %live_elements : index
   scf.if %active {
-    %input_view = buffer.view %input[%zero] : buffer -> view<[%elements]xbf16>
-    %output_view = buffer.view %output[%zero] : buffer -> view<[%elements]xf16>
+    %input_view = buffer.view %input[%c0_value] : buffer -> view<[%elements]xbf16>
+    %output_view = buffer.view %output[%c0_value] : buffer -> view<[%elements]xf16>
     %packet = vector.load %input_view[%base] : view<[%elements]xbf16> -> vector<8xbf16>
     %wide = vector.extf %packet : vector<8xbf16> to vector<8xf32>
     %half = vector.fptrunc %wide : vector<8xf32> to vector<8xf16>
