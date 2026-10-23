@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
 load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
 load("//libamdf/build_tools/bazel:cts_gpu_kernel.bzl", "amdf_cts_gpu_kernel_set")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
@@ -26,6 +27,19 @@ iree_c_embed_data(
     identifier = "amdf_cts_media_reference_main",
 )
 
+iree_c_embed_data(
+    name = "hevc_inputs",
+    testonly = True,
+    srcs = [
+        "hevc10.packet",
+        "hevc8.packet",
+    ],
+    c_file_output = "hevc_inputs.c",
+    flatten = True,
+    h_file_output = "hevc_inputs.h",
+    identifier = "amdf_cts_media_hevc_inputs",
+)
+
 loom_target_profile(
     name = "gfx1150",
     family = "amdgpu",
@@ -42,9 +56,11 @@ amdf_cts_gpu_kernel_set(
     targets = ["gfx1150"],
 )
 
-amdf_cts_test_suite(
-    name = "h264",
-    srcs = ["h264_test.cc"],
+amdf_cc_library(
+    name = "decode_fixture",
+    testonly = True,
+    srcs = ["decode_fixture.cc"],
+    hdrs = ["decode_fixture.h"],
     linkopts = [
         "d3d12.lib",
         "dxgi.lib",
@@ -53,12 +69,40 @@ amdf_cts_test_suite(
         "@platforms//os:windows",
         "@platforms//cpu:x86_64",
     ],
-    visibility = ["//visibility:public"],
     deps = [
         ":consume",
-        ":reference_main",
         "//libamdf/cts/gpu/pm4/encoding:commands",
         "//libamdf/cts/gpu/util:command_fixture",
+        "//third_party:google_test",
+    ],
+)
+
+amdf_cts_test_suite(
+    name = "h264",
+    srcs = ["h264_test.cc"],
+    target_compatible_with = [
+        "@platforms//os:windows",
+        "@platforms//cpu:x86_64",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":decode_fixture",
+        ":reference_main",
+        "//third_party:google_test",
+    ],
+)
+
+amdf_cts_test_suite(
+    name = "hevc",
+    srcs = ["hevc_test.cc"],
+    target_compatible_with = [
+        "@platforms//os:windows",
+        "@platforms//cpu:x86_64",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":decode_fixture",
+        ":hevc_inputs",
         "//third_party:google_test",
     ],
 )

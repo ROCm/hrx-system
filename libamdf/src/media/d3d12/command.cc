@@ -6,7 +6,7 @@
 
 #include "libamdf/src/media/d3d12/command.h"
 
-#include "libamdf/src/media/d3d12/h264.h"
+#include "libamdf/src/media/d3d12/decode.h"
 #include "libamdf/src/media/d3d12/image.h"
 #include "libamdf/src/media/d3d12/memory.h"
 #include "libamdf/src/media/d3d12/object.h"
@@ -105,8 +105,7 @@ CommandCreate(amdf_kernel_queue_t* queue,
     return status;
   }
   if (create_info->maximum_reference_count > 16 ||
-      create_info->maximum_slice_count >
-          UINT32_MAX / sizeof(DXVA_Slice_H264_Short) ||
+      create_info->maximum_slice_count > UINT32_MAX / kDecodeSliceByteLength ||
       create_info->maximum_activation_count > UINT32_MAX - 38) {
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
@@ -115,8 +114,7 @@ CommandCreate(amdf_kernel_queue_t* queue,
       2 * (uint64_t(create_info->maximum_reference_count) + 2);
   const uint64_t trailing_length =
       barrier_count * sizeof(D3D12_RESOURCE_BARRIER) +
-      uint64_t(create_info->maximum_slice_count) *
-          sizeof(DXVA_Slice_H264_Short);
+      uint64_t(create_info->maximum_slice_count) * kDecodeSliceByteLength;
   if (trailing_length > SIZE_MAX - sizeof(Command)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
   }
@@ -139,8 +137,7 @@ CommandCreate(amdf_kernel_queue_t* queue,
   command->maximum_reference_count = create_info->maximum_reference_count;
   command->maximum_activation_count = create_info->maximum_activation_count;
   command->barriers = reinterpret_cast<D3D12_RESOURCE_BARRIER*>(command + 1);
-  command->slices = reinterpret_cast<DXVA_Slice_H264_Short*>(command->barriers +
-                                                             barrier_count);
+  command->slices = command->barriers + barrier_count;
   status = Hresult(device->native->CreateCommandAllocator(
       D3D12_COMMAND_LIST_TYPE_VIDEO_DECODE, IID_PPV_ARGS(&command->allocator)));
   if (amdf_status_is_ok(status)) {
@@ -195,19 +192,11 @@ amdf_status_t AMDF_CALL CommandPrepare(
     return status;
   }
   const auto& decode = *prepare_info->decode;
-  status = amdf_structure_validate_input(
-      decode.next, AMDF_STRUCTURE_TYPE_MEDIA_H264_DECODE_PICTURE_INFO,
-      sizeof(amdf_media_h264_decode_picture_info_t));
-  if (!amdf_status_is_ok(status)) {
-    return status;
-  }
-  const auto& picture =
-      *static_cast<const amdf_media_h264_decode_picture_info_t*>(decode.next);
-  if (picture.reference_count > command->maximum_reference_count ||
-      picture.slice_count > command->maximum_slice_count) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
-  }
-  status = ValidateH264(*session, picture, decode.compressed.byte_length);
+  DecodePicture picture = {};
+  status = PrepareDecode(
+      *session, decode.next, decode.compressed.byte_length,
+      decode.reference_slot_index, command->maximum_reference_count,
+      command->maximum_slice_count, command->slices, &picture);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -296,33 +285,20 @@ amdf_status_t AMDF_CALL CommandPrepare(
   }
   command->session = session;
 
-  DXVA_PicParams_H264 native_picture;
-  DXVA_Qmatrix_H264 matrices;
-  LowerH264(*session, picture, &native_picture, &matrices, command->slices);
-  ID3D12Resource* references[17];
-  UINT subresources[17];
+  ID3D12Resource* references[17] = {};
+  UINT subresources[17] = {};
   for (uint32_t index = 0; index < picture.reference_count; ++index) {
-    references[index] = reference_images[index]->resource.Get();
-    subresources[index] =
-        picture.references[index].frame->storage.image.array_layer;
+    const auto& binding = picture.references[index];
+    references[binding.slot_index] = reference_images[index]->resource.Get();
+    subresources[binding.slot_index] = binding.frame->storage.image.array_layer;
   }
-  references[picture.reference_count] = current_image->resource.Get();
-  subresources[picture.reference_count] = current->storage.image.array_layer;
-  D3D12_VIDEO_DECODE_INPUT_STREAM_ARGUMENTS arguments = {
-      .NumFrameArguments = 3,
-  };
-  arguments.FrameArguments[0] = {
-      D3D12_VIDEO_DECODE_ARGUMENT_TYPE_PICTURE_PARAMETERS,
-      sizeof(native_picture), &native_picture};
-  arguments.FrameArguments[1] = {
-      D3D12_VIDEO_DECODE_ARGUMENT_TYPE_INVERSE_QUANTIZATION_MATRIX,
-      sizeof(matrices), &matrices};
-  arguments.FrameArguments[2] = {
-      D3D12_VIDEO_DECODE_ARGUMENT_TYPE_SLICE_CONTROL,
-      static_cast<UINT>(picture.slice_count * sizeof(*command->slices)),
-      command->slices};
-  arguments.ReferenceFrames = {picture.reference_count + 1, references,
-                               subresources, nullptr};
+  references[decode.reference_slot_index] = current_image->resource.Get();
+  subresources[decode.reference_slot_index] =
+      current->storage.image.array_layer;
+  auto& arguments = picture.arguments;
+  arguments.ReferenceFrames = {
+      session->info.configuration.reference_image_count, references,
+      subresources, nullptr};
   arguments.CompressedBitstream = {compressed->resource.Get(),
                                    decode.compressed.byte_offset,
                                    decode.compressed.byte_length};
@@ -373,9 +349,11 @@ amdf_status_t AMDF_CALL CommandPrepare(
                            command->barriers, &barrier_count);
   }
   for (uint32_t index = 0; index < picture.reference_count; ++index) {
-    AppendImageTransitions(reference_images[index], subresources[index],
-                           D3D12_RESOURCE_STATE_VIDEO_DECODE_READ,
-                           command->barriers, &barrier_count);
+    AppendImageTransitions(
+        reference_images[index],
+        picture.references[index].frame->storage.image.array_layer,
+        D3D12_RESOURCE_STATE_VIDEO_DECODE_READ, command->barriers,
+        &barrier_count);
   }
   command->native->ResourceBarrier(barrier_count, command->barriers);
   command->native->DecodeFrame(session->decoder.Get(), &output, &arguments);

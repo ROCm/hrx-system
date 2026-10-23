@@ -34,7 +34,10 @@ SessionCreate(amdf_kernel_queue_t* queue,
       create_info->configuration.coded_width;
   heap.VideoDecoderHeapDesc.DecodeHeight =
       create_info->configuration.coded_height;
-  heap.VideoDecoderHeapDesc.Format = DXGI_FORMAT_NV12;
+  heap.VideoDecoderHeapDesc.Format =
+      create_info->configuration.format == AMDF_MEDIA_PIXEL_FORMAT_NV12
+          ? DXGI_FORMAT_NV12
+          : DXGI_FORMAT_P010;
   heap.VideoDecoderHeapDesc.MaxDecodePictureBufferCount =
       create_info->configuration.reference_image_count;
   status = Hresult(device->video->CheckFeatureSupport(
@@ -49,8 +52,13 @@ SessionCreate(amdf_kernel_queue_t* queue,
   }
   session->base.queue = queue;
   session->requirements = requirements;
-  session->h264 =
-      *static_cast<const amdf_media_h264_configuration_t*>(create_info->next);
+  if (create_info->configuration.codec == AMDF_MEDIA_CODEC_H264) {
+    session->h264 =
+        *static_cast<const amdf_media_h264_configuration_t*>(create_info->next);
+  } else {
+    session->hevc =
+        *static_cast<const amdf_media_hevc_configuration_t*>(create_info->next);
+  }
   session->info.type = AMDF_STRUCTURE_TYPE_MEDIA_SESSION_INFO;
   session->info.structure_size = sizeof(session->info);
   session->info.queue = queue;

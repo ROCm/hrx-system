@@ -31,7 +31,8 @@ class H264PictureTest : public ::testing::Test {
     picture_.slice_count = 2;
     picture_.reference_count = 2;
     picture_.references = references_;
-    references_[0].frame = references_[1].frame = &frame_;
+    references_[0].binding = {&frame_, 0};
+    references_[1].binding = {&frame_, 1};
     references_[0].frame_number = 6;
     references_[0].top_field_order_count =
         references_[0].bottom_field_order_count = 12;
@@ -56,13 +57,13 @@ class H264PictureTest : public ::testing::Test {
   amdf_media_h264_scaling_matrices_t matrices_ = {};
 };
 
-TEST_F(H264PictureTest, DenseIndicesPreserveReferenceMarkingsAndPictureOrder) {
+TEST_F(H264PictureTest, StableSlotsPreserveReferenceMarkingsAndPictureOrder) {
   ASSERT_EQ(ValidateH264(session_, picture_, 256), AMDF_STATUS_OK);
   DXVA_PicParams_H264 native;
   DXVA_Qmatrix_H264 matrices;
   DXVA_Slice_H264_Short slices[2];
-  LowerH264(session_, picture_, &native, &matrices, slices);
-  EXPECT_EQ(native.CurrPic.bPicEntry, 2u);
+  LowerH264(session_, 3, picture_, &native, &matrices, slices);
+  EXPECT_EQ(native.CurrPic.bPicEntry, 3u);
   EXPECT_EQ(native.RefFrameList[0].bPicEntry, 0u);
   EXPECT_EQ(native.RefFrameList[1].bPicEntry, 0x81u);
   EXPECT_EQ(native.FrameNumList[0], 6u);
@@ -107,7 +108,7 @@ TEST_F(H264PictureTest, ScalingMatricesTraverseAlternatingRasterDiagonals) {
   DXVA_PicParams_H264 native;
   DXVA_Qmatrix_H264 matrices;
   DXVA_Slice_H264_Short slices[2];
-  LowerH264(session_, picture_, &native, &matrices, slices);
+  LowerH264(session_, 3, picture_, &native, &matrices, slices);
   auto check = [](const uint8_t* values, uint32_t width) {
     uint32_t index = 0;
     for (uint32_t diagonal = 0; diagonal < 2 * width - 1; ++diagonal) {

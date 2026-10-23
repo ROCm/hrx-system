@@ -26,6 +26,7 @@ typedef uint32_t amdf_media_codec_t;
 enum amdf_media_codec_e {
   AMDF_MEDIA_CODEC_UNKNOWN = 0,
   AMDF_MEDIA_CODEC_H264 = 1,
+  AMDF_MEDIA_CODEC_HEVC = 2,
 };
 
 typedef uint32_t amdf_media_direction_t;
@@ -67,8 +68,8 @@ typedef struct amdf_media_configuration_t {
   uint32_t coded_width;
   /// Exact coded height in pixels, including codec block padding.
   uint32_t coded_height;
-  /// Maximum simultaneously addressable reference image identities, including
-  /// the current reconstructed target when it has separate native storage.
+  /// Number of addressable reference slots, including the current reconstructed
+  /// target whether it shares the decoded output or has separate storage.
   uint32_t reference_image_count;
 } amdf_media_configuration_t;
 

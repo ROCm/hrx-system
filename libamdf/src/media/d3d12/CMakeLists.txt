@@ -28,6 +28,22 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD)
 iree_cc_test(
   NAME
+    hevc_test
+  SRCS
+    "hevc_test.cc"
+  DEPS
+    ::execution
+    amdf::headers
+    iree::third_party::google_test
+    iree::third_party::google_test_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD)
+iree_cc_test(
+  NAME
     queue_test
   SRCS
     "queue_test.cc"
@@ -86,12 +102,16 @@ iree_cc_library(
     execution
   HDRS
     "command.h"
+    "decode.h"
     "h264.h"
+    "hevc.h"
     "queue.h"
     "session.h"
   SRCS
     "command.cc"
+    "decode.cc"
     "h264.cc"
+    "hevc.cc"
     "queue.cc"
     "session.cc"
   DEPS

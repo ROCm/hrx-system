@@ -68,9 +68,13 @@ amdf_status_t AMDF_CALL EnumerateCodecs(amdf_device_t*, uint32_t,
                                         uint32_t capacity,
                                         amdf_media_codec_info_t* codecs,
                                         uint32_t* count) {
-  *count = 1;
-  if (capacity != 0) {
-    codecs[0] = {AMDF_MEDIA_CODEC_H264, AMDF_MEDIA_DIRECTION_DECODE};
+  static constexpr amdf_media_codec_info_t supported[] = {
+      {AMDF_MEDIA_CODEC_H264, AMDF_MEDIA_DIRECTION_DECODE},
+      {AMDF_MEDIA_CODEC_HEVC, AMDF_MEDIA_DIRECTION_DECODE},
+  };
+  *count = sizeof(supported) / sizeof(supported[0]);
+  for (uint32_t index = 0; index < capacity && index < *count; ++index) {
+    codecs[index] = supported[index];
   }
   return AMDF_STATUS_OK;
 }

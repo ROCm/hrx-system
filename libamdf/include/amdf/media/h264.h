@@ -7,7 +7,7 @@
 #ifndef AMDF_MEDIA_H264_H_
 #define AMDF_MEDIA_H264_H_
 
-#include "amdf/media/image.h"
+#include "amdf/media/session.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -111,8 +111,8 @@ typedef struct amdf_media_h264_slice_t {
 
 /// An explicitly marked reference, independent of any output-image ring.
 typedef struct amdf_media_h264_reference_t {
-  /// Borrowed reconstructed reference image and layer.
-  const amdf_media_frame_t* frame;
+  /// Borrowed reconstructed picture and its stable application-owned slot.
+  amdf_media_reference_t binding;
   /// Short-term frame_num, or long-term frame index when long_term is nonzero.
   uint32_t frame_number;
   /// Nonzero for a long-term reference; zero for a short-term reference.

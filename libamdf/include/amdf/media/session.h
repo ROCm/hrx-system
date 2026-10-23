@@ -35,6 +35,18 @@ typedef struct amdf_media_buffer_range_t {
   uint64_t byte_length;
 } amdf_media_buffer_range_t;
 
+/// One reconstructed picture's application-owned codec slot. Native codec
+/// state can be indexed by this slot as well as by the image address. A
+/// picture keeps the same slot from reconstruction through its final reference
+/// use; an ordered later picture may then reuse it. Slot assignment, reference
+/// eviction, and last-use ordering belong to the application, not the session.
+typedef struct amdf_media_reference_t {
+  /// Borrowed reconstructed image and array layer.
+  const amdf_media_frame_t* frame;
+  /// Stable session-local index, less than configuration.reference_image_count.
+  uint32_t slot_index;
+} amdf_media_reference_t;
+
 /// Cold construction of native codec state. Creation publishes no commands.
 typedef struct amdf_media_session_create_info_t {
   /// AMDF_STRUCTURE_TYPE_MEDIA_SESSION_CREATE_INFO.

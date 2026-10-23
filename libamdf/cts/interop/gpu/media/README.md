@@ -1,16 +1,20 @@
 # Native media and GPU ownership witness
 
-The H264 corpus exercises media and compute through the runtime-loaded libamdf
-tables. Twelve pictures include seven B pictures, three simultaneously live
+The H264 and HEVC corpora exercise media and compute through runtime-loaded
+libamdf tables. H264's twelve pictures include seven B pictures, three simultaneously live
 short-term references, and display order different from decode order. A second
 case repeats the stream through 32 pictures using four recording owners, two
 decoded output images, four reconstructed reference images, and fixed input,
 feedback, and GPU result backing. The application supplies every reference,
-placement, recording slot, and native queue dependency.
+placement, recording slot, and native queue dependency. HEVC adds Main/NV12 and
+Main10/P010, four live references, five reconstructed slots, and nonuniform
+scaling lists. Each picture keeps its codec slot until its last reference use;
+reordering the reference list never renumbers that slot. The Main10 envelope
+also exercises compatible eight-bit syntax with NV12 storage.
 
 The GPU publishes compressed bytes, waits natively for decode, reads the shared
-NV12 output, and produces a moving 64x64 RGB crop. A decode that reuses an output
-slot waits for that slot's last GPU consumer. Host observation occurs once per
+NV12 or P010 output, and produces a moving 64x64 RGB crop. A decode that reuses
+an output slot waits for that slot's last GPU consumer. Host observation occurs once per
 batch, after GPU consumption and a guard capture. Retired feedback is queried
 before the recording is prepared again. Commands remain immutable until their
 last accepted use retires.
@@ -38,9 +42,24 @@ tag on every GPU output pixel, and independently evaluates crop and color
 arithmetic on the host with a one-sample rounding bound. Native success feedback
 alone cannot establish correct pixels or reference mappings.
 
-The raw-address GPU consumer currently qualifies gfx1150's NV12 64K_D_X layout
-with zero pipe/bank XOR. Its source is rebuilt through Loom CXX and the ordinary
-CTS kernel embedding rules. The test admits the exact returned layout before
-dispatch; this witness does not establish other swizzles, gfx12, 10-bit codec
-behavior, or hardware image-instruction consumption of the returned descriptors.
+`hevc8.packet` and `hevc10.packet` contain twelve x265-encoded pictures apiece,
+with independent FFmpeg software reconstruction fingerprints. Their little-endian
+header contains `H265CTSF`, sample precision, width, height, and picture count.
+Each picture contains 24 DWORDs: POC, reconstructed slot, random-access flags,
+slice-header RPS bit count, reference count, before/after set counts, compressed
+extent, four slot/POC pairs, and four indices for each before/after set. A 64-bit
+FNV-1a fingerprint of per-pixel Y/U/V samples and the padded Annex B slice follow.
+Eight-bit samples occupy one byte each; P010 samples occupy two little-endian
+bytes with the full ten-bit value in the high bits. Decode-order POCs are
+0, 3, 2, 1, 6, 5, 4, 9, 8, 7, 11, and 10. The fixture SHA-256 values are
+`e0edaf272b6a56ba450331f7e93f069d7c4455cd2d84f4cdc29adff9c7fd8f67`
+and `044979a7f795fef2d31cbd634cc428866b5f75a86a03be47a7a8bd77271131a3`.
+P010 checks retain every sample bit and require all six low storage bits to be
+zero. No codec library participates in CTS execution or the media library.
+
+The raw-address GPU consumer currently qualifies gfx1150's NV12/P010 64K_D_X
+layout with zero pipe/bank XOR. Its source is rebuilt through Loom CXX and the
+ordinary CTS kernel embedding rules. The test admits the exact returned layout before
+dispatch; this witness does not establish other swizzles, gfx12, or hardware
+image-instruction consumption of the returned descriptors.
 Those require their corresponding execution witnesses.

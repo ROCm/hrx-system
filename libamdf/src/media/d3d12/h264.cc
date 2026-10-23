@@ -64,7 +64,7 @@ amdf_status_t ValidateH264(const Session& session,
   }
   for (uint32_t index = 0; index < picture.reference_count; ++index) {
     const auto& reference = picture.references[index];
-    if (reference.frame == nullptr || reference.long_term > 1 ||
+    if (reference.binding.frame == nullptr || reference.long_term > 1 ||
         reference.frame_number > UINT16_MAX ||
         (reference.long_term == 0 &&
          reference.frame_number >= maximum_frame_number)) {
@@ -98,7 +98,7 @@ amdf_status_t ValidateH264(const Session& session,
   return AMDF_STATUS_OK;
 }
 
-void LowerH264(const Session& session,
+void LowerH264(const Session& session, uint32_t current_reference_slot,
                const amdf_media_h264_decode_picture_info_t& picture,
                DXVA_PicParams_H264* native, DXVA_Qmatrix_H264* matrices,
                DXVA_Slice_H264_Short* slices) {
@@ -109,7 +109,7 @@ void LowerH264(const Session& session,
       static_cast<USHORT>(session.info.configuration.coded_width / 16 - 1);
   native->wFrameHeightInMbsMinus1 =
       static_cast<USHORT>(session.info.configuration.coded_height / 16 - 1);
-  native->CurrPic.bPicEntry = static_cast<UCHAR>(picture.reference_count);
+  native->CurrPic.bPicEntry = static_cast<UCHAR>(current_reference_slot);
   native->num_ref_frames =
       static_cast<UCHAR>(sequence.maximum_reference_frame_count);
   native->chroma_format_idc = 1;
@@ -168,8 +168,8 @@ void LowerH264(const Session& session,
   }
   for (uint32_t index = 0; index < picture.reference_count; ++index) {
     const auto& reference = picture.references[index];
-    native->RefFrameList[index].bPicEntry =
-        static_cast<UCHAR>(index | (reference.long_term << 7));
+    native->RefFrameList[index].bPicEntry = static_cast<UCHAR>(
+        reference.binding.slot_index | (reference.long_term << 7));
     native->FrameNumList[index] = static_cast<USHORT>(reference.frame_number);
     native->FieldOrderCntList[index][0] = reference.top_field_order_count;
     native->FieldOrderCntList[index][1] = reference.bottom_field_order_count;

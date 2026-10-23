@@ -61,6 +61,11 @@ typedef struct amdf_media_decode_picture_info_t {
   /// Separate reconstructed target when required by configuration, otherwise
   /// NULL. Its reference lifetime is controlled by the application.
   const amdf_media_frame_t* reference_output;
+  /// Application-owned slot for this reconstructed picture, less than the
+  /// session's reference_image_count. Every later reference to this picture
+  /// preserves this index, including when its position in a reference list
+  /// changes. This also identifies output when no separate reference is needed.
+  uint32_t reference_slot_index;
 } amdf_media_decode_picture_info_t;
 
 typedef uint32_t amdf_media_command_operation_t;

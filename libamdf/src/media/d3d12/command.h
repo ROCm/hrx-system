@@ -41,7 +41,7 @@ struct Command {
   // Maximum application-authored alias transitions admitted by preparation.
   uint32_t maximum_activation_count;
   // Slice controls in the owner's explicitly sized trailing allocation.
-  DXVA_Slice_H264_Short* slices;
+  void* slices;
   // Native transition storage in the same fixed trailing allocation.
   D3D12_RESOURCE_BARRIER* barriers;
   // Nonzero native prefix owned until checked retirement; zero before

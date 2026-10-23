@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "amdf/media/hevc.h"
 #include "libamdf/src/endpoint.h"
 #include "libamdf/src/instance.h"
 #include "libamdf/src/media/d3d12/device.h"
@@ -71,51 +72,106 @@ amdf_status_t QueryConfiguration(
       .structure_size = out_info->structure_size,
       .configuration = configuration,
   };
-  if (configuration.codec != AMDF_MEDIA_CODEC_H264 ||
-      configuration.direction != AMDF_MEDIA_DIRECTION_DECODE) {
+  if (configuration.direction != AMDF_MEDIA_DIRECTION_DECODE) {
     info.reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC;
     *out_info = info;
     return AMDF_STATUS_OK;
   }
-  amdf_status_t status = amdf_structure_validate_input(
-      codec_configuration, AMDF_STRUCTURE_TYPE_MEDIA_H264_CONFIGURATION,
-      sizeof(amdf_media_h264_configuration_t));
-  if (!amdf_status_is_ok(status)) {
-    return status;
+  D3D12_FEATURE_DATA_VIDEO_DECODE_SUPPORT support = {};
+  uint32_t dimension_alignment = 0;
+  uint32_t maximum_reference_count = 0;
+  amdf_status_t status = AMDF_STATUS_OK;
+  switch (configuration.codec) {
+    case AMDF_MEDIA_CODEC_H264: {
+      status = amdf_structure_validate_input(
+          codec_configuration, AMDF_STRUCTURE_TYPE_MEDIA_H264_CONFIGURATION,
+          sizeof(amdf_media_h264_configuration_t));
+      if (!amdf_status_is_ok(status)) {
+        return status;
+      }
+      const auto& h264 = *static_cast<const amdf_media_h264_configuration_t*>(
+          codec_configuration);
+      if (h264.profile < AMDF_MEDIA_H264_PROFILE_CONSTRAINED_BASELINE ||
+          h264.profile > AMDF_MEDIA_H264_PROFILE_HIGH || h264.level_idc > 255) {
+        info.reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC;
+      } else if (configuration.format != AMDF_MEDIA_PIXEL_FORMAT_NV12) {
+        info.reason = AMDF_MEDIA_CONFIGURATION_REASON_FORMAT;
+      }
+      support.Configuration.DecodeProfile = {
+          0x1b81be68,
+          0xa0c7,
+          0x11d3,
+          {0xb9, 0x84, 0x00, 0xc0, 0x4f, 0x2e, 0x73, 0xc5}};
+      dimension_alignment = 16;
+      maximum_reference_count = 17;
+      break;
+    }
+    case AMDF_MEDIA_CODEC_HEVC: {
+      status = amdf_structure_validate_input(
+          codec_configuration, AMDF_STRUCTURE_TYPE_MEDIA_HEVC_CONFIGURATION,
+          sizeof(amdf_media_hevc_configuration_t));
+      if (!amdf_status_is_ok(status)) {
+        return status;
+      }
+      const auto& hevc = *static_cast<const amdf_media_hevc_configuration_t*>(
+          codec_configuration);
+      if ((hevc.profile != AMDF_MEDIA_HEVC_PROFILE_MAIN &&
+           hevc.profile != AMDF_MEDIA_HEVC_PROFILE_MAIN10) ||
+          (hevc.sample_bit_depth != 8 && hevc.sample_bit_depth != 10) ||
+          (hevc.profile == AMDF_MEDIA_HEVC_PROFILE_MAIN &&
+           hevc.sample_bit_depth != 8)) {
+        info.reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC;
+      } else if (configuration.format != (hevc.sample_bit_depth == 8
+                                              ? AMDF_MEDIA_PIXEL_FORMAT_NV12
+                                              : AMDF_MEDIA_PIXEL_FORMAT_P010)) {
+        info.reason = AMDF_MEDIA_CONFIGURATION_REASON_FORMAT;
+      }
+      static constexpr GUID profiles[] = {
+          {0x5b11d51b,
+           0x2f4c,
+           0x4452,
+           {0xbc, 0xc3, 0x09, 0xf2, 0xa1, 0x16, 0x0c, 0xc0}},
+          {0x107af0e0,
+           0xef1a,
+           0x4d19,
+           {0xab, 0xa8, 0x67, 0xa1, 0x63, 0x07, 0x3d, 0x13}},
+      };
+      // Main10 permits eight-bit pictures with the same coding tools as Main.
+      // Select the native decoding mode by the actual sample representation;
+      // the bitstream's profile declaration need not name the narrowest mode.
+      support.Configuration.DecodeProfile =
+          profiles[hevc.sample_bit_depth == 10];
+      dimension_alignment = 8;
+      maximum_reference_count = 16;
+      break;
+    }
+    default:
+      info.reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC;
+      break;
   }
-  const auto& h264 =
-      *static_cast<const amdf_media_h264_configuration_t*>(codec_configuration);
-  if (h264.profile < AMDF_MEDIA_H264_PROFILE_CONSTRAINED_BASELINE ||
-      h264.profile > AMDF_MEDIA_H264_PROFILE_HIGH || h264.level_idc > 255) {
-    info.reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC;
-  } else if (configuration.format != AMDF_MEDIA_PIXEL_FORMAT_NV12) {
-    info.reason = AMDF_MEDIA_CONFIGURATION_REASON_FORMAT;
-  } else if (configuration.coded_width == 0 ||
-             configuration.coded_height == 0 ||
-             configuration.coded_width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
-             configuration.coded_height >
-                 D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
-             ((configuration.coded_width | configuration.coded_height) & 15) !=
-                 0) {
+  if (info.reason != AMDF_MEDIA_CONFIGURATION_REASON_NONE) {
+    *out_info = info;
+    return AMDF_STATUS_OK;
+  }
+  if (configuration.coded_width == 0 || configuration.coded_height == 0 ||
+      configuration.coded_width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
+      configuration.coded_height > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
+      ((configuration.coded_width | configuration.coded_height) &
+       (dimension_alignment - 1)) != 0) {
     info.reason = AMDF_MEDIA_CONFIGURATION_REASON_DIMENSIONS;
   } else if (configuration.reference_image_count == 0 ||
-             configuration.reference_image_count > 17) {
+             configuration.reference_image_count > maximum_reference_count) {
     info.reason = AMDF_MEDIA_CONFIGURATION_REASON_REFERENCE_STORAGE;
   }
   if (info.reason != AMDF_MEDIA_CONFIGURATION_REASON_NONE) {
     *out_info = info;
     return AMDF_STATUS_OK;
   }
-
-  D3D12_FEATURE_DATA_VIDEO_DECODE_SUPPORT support = {};
-  support.Configuration.DecodeProfile = {
-      0x1b81be68,
-      0xa0c7,
-      0x11d3,
-      {0xb9, 0x84, 0x00, 0xc0, 0x4f, 0x2e, 0x73, 0xc5}};
   support.Width = configuration.coded_width;
   support.Height = configuration.coded_height;
-  support.DecodeFormat = DXGI_FORMAT_NV12;
+  support.DecodeFormat = configuration.format == AMDF_MEDIA_PIXEL_FORMAT_NV12
+                             ? DXGI_FORMAT_NV12
+                             : DXGI_FORMAT_P010;
   // Unknown rates ask for the complete syntax envelope, not an invented rate
   // target. The session reports the native state charge for this envelope.
   status = Hresult(device->video->CheckFeatureSupport(
@@ -137,7 +193,7 @@ amdf_status_t QueryConfiguration(
         .Configuration = support.Configuration,
         .DecodeSample = {configuration.coded_width,
                          configuration.coded_height,
-                         {DXGI_FORMAT_NV12,
+                         {support.DecodeFormat,
                           DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601}},
     };
     conversion.OutputFormat = conversion.DecodeSample.Format;

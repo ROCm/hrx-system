@@ -25,6 +25,17 @@ amdf_cc_test(
 )
 
 amdf_cc_test(
+    name = "hevc_test",
+    srcs = ["hevc_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":execution",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
     name = "queue_test",
     srcs = [
         "queue_test.cc",
@@ -72,13 +83,17 @@ amdf_cc_library(
     name = "execution",
     srcs = [
         "command.cc",
+        "decode.cc",
         "h264.cc",
+        "hevc.cc",
         "queue.cc",
         "session.cc",
     ],
     hdrs = [
         "command.h",
+        "decode.h",
         "h264.h",
+        "hevc.h",
         "queue.h",
         "session.h",
     ],

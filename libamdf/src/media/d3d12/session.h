@@ -7,6 +7,7 @@
 #ifndef AMDF_SRC_MEDIA_D3D12_SESSION_H_
 #define AMDF_SRC_MEDIA_D3D12_SESSION_H_
 
+#include "amdf/media/hevc.h"
 #include "libamdf/src/media/d3d12/device.h"
 
 namespace amdf::media::d3d12 {
@@ -20,8 +21,13 @@ struct Session {
   ComPtr<ID3D12VideoDecoderHeap> heap;
   // Immutable realized configuration and native state charges.
   amdf_media_session_info_t info;
-  // Fully validated parsed H264 syntax envelope.
-  amdf_media_h264_configuration_t h264;
+  // Parsed syntax envelope selected by info.configuration.codec.
+  union {
+    // H264 syntax facts used during picture lowering.
+    amdf_media_h264_configuration_t h264;
+    // HEVC profile and component precision used during picture lowering.
+    amdf_media_hevc_configuration_t hevc;
+  };
   // Retained placement and buffer requirements from native admission.
   amdf_media_configuration_info_t requirements;
   // Recording owners that still borrow this native session.

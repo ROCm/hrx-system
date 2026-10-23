@@ -24,8 +24,8 @@ amdf_status_t ValidateH264(const Session& session,
                            uint64_t compressed_byte_length);
 
 // Lowers validated syntax into native off-host parsing arguments. Reference
-// indices are dense within this recording; the current target follows them.
-void LowerH264(const Session& session,
+// indices preserve the application-owned slot for each reconstructed picture.
+void LowerH264(const Session& session, uint32_t current_reference_slot,
                const amdf_media_h264_decode_picture_info_t& picture,
                DXVA_PicParams_H264* native_picture,
                DXVA_Qmatrix_H264* native_matrices,
