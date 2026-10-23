@@ -15,9 +15,8 @@ kernel.decl @flash_next_mtp_hidden_matrix() launch(%epoch: buffer, %input: buffe
 // Each projection rounds independently before the final BF16 addition. Batched
 // cohorts reuse input and weight panels through the shared Q8 matrix core;
 // small cohorts retain the wave reduction without an intermediate allocation.
-// At most sixteen resident rows with four verification tokens fit within 64.
-// Their accepted prefix can be much smaller, so all steady-state speculative
-// cohorts keep the small path; matrix publication starts at prompt capacity 128.
+// Small accepted prefixes retain the wave path. Matrix publication begins
+// at capacity 128, shared by prompt batches and large verification cohorts.
 command.program.def @flash_next_mtp_project() launch(%parameters: buffer, %epoch: buffer, %embedding: buffer, %hidden: buffer, %output: buffer) {
   %weight = command.parameter %parameters, "blk.48.nextn.eh_proj.weight" : view<2560x160x34xi8>
   %tokens = config.get @flash_next.token_count : index

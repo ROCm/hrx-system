@@ -37,6 +37,9 @@ global.rodata.def @continue_root = bytes("666c6173685f6e6578745f636f6e74696e7565
 // flash_next.verification_width
 global.rodata.def @verification_key = bytes("666c6173685f6e6578742e766572696669636174696f6e5f7769647468")
 
+// flash_next.draft_depth
+global.rodata.def @draft_depth_key = bytes("666c6173685f6e6578742e64726166745f6465707468")
+
 // draft_weights
 global.rodata.def @draft_key = bytes("64726166745f77656967687473")
 
@@ -64,8 +67,8 @@ global.rodata.def @terminal = bytes("3c7c696d5f656e647c3e")
 // sampling
 global.rodata.def @sampling_key = bytes("73616d706c696e67")
 
-// Flash-Next requires pooled packed epochs, draft depth zero or three, at most 32768 tokens per epoch, and context capacity divisible by 64.
-global.rodata.def @limits_error = bytes("466c6173682d4e65787420726571756972657320706f6f6c6564207061636b65642065706f6368732c206472616674206465707468207a65726f206f722074687265652c206174206d6f737420333237363820746f6b656e73207065722065706f63682c20616e6420636f6e7465787420636170616369747920646976697369626c652062792036342e")
+// Flash-Next requires pooled packed epochs, draft depth zero through seven, at most 32768 tokens per epoch, and context capacity divisible by 64.
+global.rodata.def @limits_error = bytes("466c6173682d4e65787420726571756972657320706f6f6c6564207061636b65642065706f6368732c206472616674206465707468207a65726f207468726f75676820736576656e2c206174206d6f737420333237363820746f6b656e73207065722065706f63682c20616e6420636f6e7465787420636170616369747920646976697369626c652062792036342e")
 
 // Flash-Next options support sampling and a nonempty draft_weights path exactly when MTP is enabled.
 global.rodata.def @options_error = bytes("466c6173682d4e657874206f7074696f6e7320737570706f72742073616d706c696e6720616e642061206e6f6e656d7074792064726166745f7765696768747320706174682065786163746c79207768656e204d545020697320656e61626c65642e")
@@ -419,10 +422,9 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %limit = scalar.constant 32768 : i64
   %has_shapes = scalar.cmpi ugt, %shape_count, %c0_i64 : i64
   %has_pool = scalar.cmpi ugt, %pool, %c0_i64 : i64
-  %no_draft = scalar.cmpi eq, %draft_depth, %c0_i32 : i32
-  %mtp_depth = scalar.constant 3 : i32
-  %enabled = scalar.cmpi eq, %draft_depth, %mtp_depth : i32
-  %valid_depth = scalar.ori %no_draft, %enabled : i1
+  %maximum_depth = scalar.constant 7 : i32
+  %enabled = scalar.cmpi ne, %draft_depth, %c0_i32 : i32
+  %valid_depth = scalar.cmpi ule, %draft_depth, %maximum_depth : i32
   %context_tail = scalar.remui %context, %c64 : i64
   %context_whole = scalar.cmpi eq, %context_tail, %c0_i64 : i64
   %small_enough = scalar.cmpi ule, %prefill, %limit : i64
@@ -457,11 +459,15 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %proposal = scf.if %enabled -> (i32) {
     %proposal_root = global.load @proposal_root : buffer
     %proposal = func.call @declare_stage(%proposal_root, %rows, %rows, %context, %pool, %weights, %draft_path, %one_root, %two_roots, %c0_i64) : (buffer, i64, i64, i64, i64, buffer, buffer, i32, i32, i64) -> (i32)
+    %depth = scalar.extui %draft_depth : i32 to i64
+    %draft_depth_key = global.load @draft_depth_key : buffer
+    func.call @config_i64(%proposal, %draft_depth_key, %depth) : (i32, buffer, i64)
     %epoch_capacity_key = global.load @epoch_capacity_key : buffer
     func.call @config_i64(%proposal, %epoch_capacity_key, %maximum) : (i32, buffer, i64)
     %warm_root = global.load @warm_root : buffer
     %verify_root = global.load @verify_root : buffer
-    %verification = scalar.constant 4 : i64
+    %anchor = scalar.constant 1 : i64
+    %verification = scalar.addi %depth, %anchor : i64
     scf.for %i = [%c0 to %count step %c1] {
       %tokens = view.load %view[%i, 0] : view<[%count]x2xi64> -> i64
       %spans = view.load %view[%i, 1] : view<[%count]x2xi64> -> i64
