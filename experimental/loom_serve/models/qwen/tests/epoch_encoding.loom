@@ -1,4 +1,4 @@
-func.decl @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32)
+func.decl @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32, buffer, i64, i64)
 
 // A nearly full first epoch and a short second epoch share one contiguous host
 // input stream. The expected device image uses two independent tensor rows,
@@ -56,21 +56,24 @@ func.def @encoding_fixture(%capacity_value: index, %plan: buffer, %inputs: buffe
   func.return
 }
 
-// Exercise the real VM entry point and compare both complete planes with the
-// independently constructed image. The output buffer begins with a sentinel.
+// Apply the encoder's upload plan to independent destination buffers before
+// comparing both complete token planes with the reference image. Sentinels
+// expose omitted copies and transfers to the wrong binding or offset.
 func.def @encode_token_planes(%capacity: index) -> (i1, i32, i32, i32, i32) {
   %origin = index.constant 0 : offset
-  %policy_bytes = index.constant 416 : offset
+  %policy_bytes = index.constant 496 : offset
   %plan_bytes = index.constant 1152 : offset
   %metadata_bytes = index.constant 6112 : offset
   %word_bytes = index.constant 4 : offset
   %input_bytes = index.scale %capacity, %word_bytes : index, offset -> offset
   %token_bytes = index.add %input_bytes, %input_bytes : offset
-  %policy = buffer.alloca<private> align(4) %policy_bytes : buffer
+  %policy = buffer.alloca<private> align(8) %policy_bytes : buffer
   %plan = buffer.alloca<private> align(4) %plan_bytes : buffer
   %inputs = buffer.alloca<private> align(4) %input_bytes : buffer
   %metadata = buffer.alloca<private> align(4) %metadata_bytes : buffer
   %tokens = buffer.alloca<private> align(4) %token_bytes : buffer
+  %device_metadata = buffer.alloca<private> align(4) %metadata_bytes : buffer
+  %device_tokens = buffer.alloca<private> align(4) %token_bytes : buffer
   %expected = buffer.alloca<private> align(4) %token_bytes : buffer
   %zero = scalar.constant 0 : i32
   %sentinel = scalar.constant -99 : i32
@@ -78,20 +81,61 @@ func.def @encode_token_planes(%capacity: index) -> (i1, i32, i32, i32, i32) {
   buffer.fill %zero, %plan[%origin], %plan_bytes : i32
   buffer.fill %sentinel, %metadata[%origin], %metadata_bytes : i32
   buffer.fill %sentinel, %tokens[%origin], %token_bytes : i32
+  buffer.fill %sentinel, %device_metadata[%origin], %metadata_bytes : i32
+  buffer.fill %sentinel, %device_tokens[%origin], %token_bytes : i32
   func.call @encoding_fixture(%capacity, %plan, %inputs, %expected) : (index, buffer, buffer, buffer)
   %one = scalar.constant 1 : i32
   %eos = scalar.constant 42 : i32
   %capacity_word = index.cast %capacity : index to i32
   %two = scalar.constant 2 : i32
   %input_count = scalar.subi %capacity_word, %two : i32
-  %outputs = func.call @encode_epoch(%policy, %plan, %inputs, %inputs, %one, %one, %input_count, %zero, %zero, %zero, %zero, %eos, %metadata, %tokens) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32)
+  %outputs, %transfers, %transfer_begin, %transfer_length = func.call @encode_epoch(%policy, %plan, %inputs, %inputs, %one, %one, %input_count, %zero, %zero, %zero, %zero, %eos, %metadata, %tokens) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32, buffer, i64, i64)
   %no_outputs = scalar.cmpi eq, %outputs, %zero : i32
-  %actual_view = buffer.view %tokens[%origin] : buffer -> view<2x[%capacity]xi32>
-  %expected_view = buffer.view %expected[%origin] : buffer -> view<2x[%capacity]xi32>
+  %zero64 = scalar.constant 0 : i64
+  %one64 = scalar.constant 1 : i64
+  %transfer_nonnegative = scalar.maxsi %transfer_begin, %zero64 : i64
+  %begin_valid = scalar.cmpi eq, %transfer_begin, %transfer_nonnegative : i64
+  %transfer_origin = index.cast %transfer_nonnegative : i64 to offset
+  %ranges = buffer.view %transfers[%transfer_origin] : buffer -> view<2x5xi64>
+  %upload_bytes = scalar.constant 80 : i64
+  %complete_plan = scalar.cmpi eq, %transfer_length, %upload_bytes : i64
+  %valid_extent = scalar.andi %begin_valid, %complete_plan : i1
+  %valid_plan = scalar.andi %no_outputs, %valid_extent : i1
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
-  %correct = scf.for %plane = [%c0 to %c2 step %c1](%planes_equal = %no_outputs : i1) -> (i1) {
+  %uploaded = scf.for %i = [%c0 to %c2 step %c1](%valid = %valid_plan : i1) -> (i1) {
+    %source_binding = view.load %ranges[%i, 0] : view<2x5xi64> -> i64
+    %source_offset = view.load %ranges[%i, 1] : view<2x5xi64> -> i64
+    %target_binding = view.load %ranges[%i, 2] : view<2x5xi64> -> i64
+    %target_offset = view.load %ranges[%i, 3] : view<2x5xi64> -> i64
+    %length = view.load %ranges[%i, 4] : view<2x5xi64> -> i64
+    %source_valid = scalar.cmpi ule, %source_binding, %one64 : i64
+    %target_valid = scalar.cmpi ule, %target_binding, %one64 : i64
+    %bindings_valid = scalar.andi %source_valid, %target_valid : i1
+    %source_nonnegative = scalar.maxsi %source_offset, %zero64 : i64
+    %target_nonnegative = scalar.maxsi %target_offset, %zero64 : i64
+    %length_nonnegative = scalar.maxsi %length, %zero64 : i64
+    %source_offset_valid = scalar.cmpi eq, %source_offset, %source_nonnegative : i64
+    %target_offset_valid = scalar.cmpi eq, %target_offset, %target_nonnegative : i64
+    %length_valid = scalar.cmpi eq, %length, %length_nonnegative : i64
+    %offsets_valid = scalar.andi %source_offset_valid, %target_offset_valid : i1
+    %range_valid = scalar.andi %offsets_valid, %length_valid : i1
+    %record_valid = scalar.andi %bindings_valid, %range_valid : i1
+    %next_valid = scalar.andi %valid, %record_valid : i1
+    %source_metadata = scalar.cmpi eq, %source_binding, %zero64 : i64
+    %target_metadata = scalar.cmpi eq, %target_binding, %zero64 : i64
+    %source = scf.select %source_metadata, %metadata, %tokens : buffer
+    %target = scf.select %target_metadata, %device_metadata, %device_tokens : buffer
+    %source_begin = index.cast %source_nonnegative : i64 to offset
+    %target_begin = index.cast %target_nonnegative : i64 to offset
+    %bytes = index.cast %length_nonnegative : i64 to offset
+    buffer.copy %source[%source_begin], %target[%target_begin], %bytes
+    scf.yield %next_valid : i1
+  }
+  %actual_view = buffer.view %device_tokens[%origin] : buffer -> view<2x[%capacity]xi32>
+  %expected_view = buffer.view %expected[%origin] : buffer -> view<2x[%capacity]xi32>
+  %correct = scf.for %plane = [%c0 to %c2 step %c1](%planes_equal = %uploaded : i1) -> (i1) {
     %equal = scf.for %token = [%c0 to %capacity step %c1](%tokens_equal = %planes_equal : i1) -> (i1) {
       %actual = view.load %actual_view[%plane, %token] : view<2x[%capacity]xi32> -> i32
       %expected = view.load %expected_view[%plane, %token] : view<2x[%capacity]xi32> -> i32
@@ -103,8 +147,8 @@ func.def @encode_token_planes(%capacity: index) -> (i1, i32, i32, i32, i32) {
   }
   %first_origin = index.constant 12 : offset
   %next_origin = index.constant 2332 : offset
-  %first_descriptor = buffer.view %metadata[%first_origin] : buffer -> view<5xi32>
-  %next_descriptor = buffer.view %metadata[%next_origin] : buffer -> view<5xi32>
+  %first_descriptor = buffer.view %device_metadata[%first_origin] : buffer -> view<5xi32>
+  %next_descriptor = buffer.view %device_metadata[%next_origin] : buffer -> view<5xi32>
   %causal = view.load %first_descriptor[1] : view<5xi32> -> i32
   %row = view.load %first_descriptor[3] : view<5xi32> -> i32
   %first_source = view.load %first_descriptor[4] : view<5xi32> -> i32

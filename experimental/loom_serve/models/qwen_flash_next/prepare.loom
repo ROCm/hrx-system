@@ -500,7 +500,7 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   // The shared Qwen controller uses six words: isolated prefill/decode stages,
   // shape count, draft origin/kind, and target shape origin. Sampling starts at
   // byte 32. Packed target stages begin at zero; predictor stages follow them.
-  %state_bytes = index.constant 416 : offset
+  %state_bytes = index.constant 496 : offset
   %state = buffer.alloca<private> align(8) %state_bytes : buffer
   buffer.fill %c0_i32, %state[%origin], %state_bytes : i32
   %state_view = buffer.view %state[%origin] : buffer -> view<6xi32>

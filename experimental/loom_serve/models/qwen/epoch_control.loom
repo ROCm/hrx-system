@@ -139,9 +139,11 @@ func.def @encode_plan(%plan: buffer, %inputs: buffer, %count: index, %first: ind
   func.return %output_count : i32
 }
 
-// All backing is cold retained storage. This transform allocates nothing and
-// completes before its opaque outputs are borrowed by queued host uploads.
-func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32) {
+// All backing is cold retained storage. The final 80 control bytes hold two
+// {source binding, source offset, target binding, target offset, length} upload
+// records. Both initialized packet buffers are uploaded in full. The caller
+// consumes this plan synchronously and retains packet bytes through retirement.
+func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32, buffer, i64, i64) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -200,7 +202,26 @@ func.def public @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: bu
       func.call @encode_media_plan(%plan, %inputs, %media_plan, %first_media, %all_media, %next, %c16, %metadata, %tokens, %packet_begin) : (buffer, buffer, buffer, index, index, index, index, buffer, buffer, index)
     }
   }
-  func.return %outputs : i32
+  %transfer_offset = index.constant 416 : offset
+  %transfers = buffer.view %control_state[%transfer_offset] : buffer -> view<2x5xi64>
+  %zero64 = scalar.constant 0 : i64
+  %one64 = scalar.constant 1 : i64
+  %metadata_bytes = buffer.length %metadata
+  %metadata_length = index.cast %metadata_bytes : offset to i64
+  %input_length = index.cast %token_bytes : offset to i64
+  view.store %zero64, %transfers[0, 0] : i64, view<2x5xi64>
+  view.store %zero64, %transfers[0, 1] : i64, view<2x5xi64>
+  view.store %zero64, %transfers[0, 2] : i64, view<2x5xi64>
+  view.store %zero64, %transfers[0, 3] : i64, view<2x5xi64>
+  view.store %metadata_length, %transfers[0, 4] : i64, view<2x5xi64>
+  view.store %one64, %transfers[1, 0] : i64, view<2x5xi64>
+  view.store %zero64, %transfers[1, 1] : i64, view<2x5xi64>
+  view.store %one64, %transfers[1, 2] : i64, view<2x5xi64>
+  view.store %zero64, %transfers[1, 3] : i64, view<2x5xi64>
+  view.store %input_length, %transfers[1, 4] : i64, view<2x5xi64>
+  %transfer_begin = scalar.constant 416 : i64
+  %transfer_length = scalar.constant 80 : i64
+  func.return %outputs, %control_state, %transfer_begin, %transfer_length : i32, buffer, i64, i64
 }
 
 // Semantic progress is {consumed, known, outputs, verifications,

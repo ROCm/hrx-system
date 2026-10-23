@@ -544,7 +544,7 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %two64 = scalar.constant 2 : i64
   %shared64 = scalar.addi %shape_count, %two64 : i64
   %shared = scalar.trunci %shared64 : i64 to i32
-  %state_bytes = index.constant 416 : offset
+  %state_bytes = index.constant 496 : offset
   %state = buffer.alloca<private> align(8) %state_bytes : buffer
   buffer.fill %zero32, %state[%origin], %state_bytes : i32
   %state_view = buffer.view %state[%origin] : buffer -> view<8xi32>

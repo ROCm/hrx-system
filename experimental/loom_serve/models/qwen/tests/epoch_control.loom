@@ -1,6 +1,6 @@
 func.decl @qwen38_continue_spans(%mixed_inputs: index, %context: index, %capacity: index, %epoch: buffer, %tokens: buffer, %results: buffer)
 
-func.decl @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32)
+func.decl @encode_epoch(%control_state: buffer, %plan: buffer, %inputs: buffer, %media_plan: buffer, %first_count: i32, %next_count: i32, %input_count: i32, %first_media_count: i32, %next_media_count: i32, %first_packet_capacity: i32, %next_packet_capacity: i32, %eos: i32, %metadata: buffer, %tokens: buffer) -> (i32, buffer, i64, i64)
 
 func.decl @publish_epoch(%plan: buffer, %media_plan: buffer, %count: i32, %first_media_count: i32, %next_media_count: i32, %verified: i32, %continues: i32, %next_speculative_mask: i32, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer)
 
@@ -9,12 +9,12 @@ func.decl @publish_epoch(%plan: buffer, %media_plan: buffer, %count: i32, %first
 func.def @encode_observation() -> (i32, i32, i32, i32, i32, i32) {
   %origin = index.constant 0 : offset
   %plan_bytes = index.constant 1152 : offset
-  %state_bytes = index.constant 416 : offset
+  %state_bytes = index.constant 496 : offset
   %input_bytes = index.constant 24 : offset
   %metadata_bytes = index.constant 6112 : offset
   %token_bytes = index.constant 4096 : offset
   %plan = buffer.alloca<private> align(4) %plan_bytes : buffer
-  %state = buffer.alloca<private> align(4) %state_bytes : buffer
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
   %inputs = buffer.alloca<private> align(4) %input_bytes : buffer
   %metadata = buffer.alloca<private> align(4) %metadata_bytes : buffer
   %tokens = buffer.alloca<private> align(4) %token_bytes : buffer
@@ -55,7 +55,7 @@ func.def @encode_observation() -> (i32, i32, i32, i32, i32, i32) {
     %token = scalar.addi %base, %index32 : i32
     view.store %token, %ids[%i] : i32, view<6xi32>
   }
-  %outputs = func.call @encode_epoch(%state, %plan, %inputs, %plan, %one, %one, %six, %zero, %zero, %zero, %zero, %eos, %metadata, %tokens) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32)
+  %outputs, %transfers, %transfer_begin, %transfer_length = func.call @encode_epoch(%state, %plan, %inputs, %plan, %one, %one, %six, %zero, %zero, %zero, %zero, %eos, %metadata, %tokens) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32, buffer, i64, i64)
   %descriptor_origin = index.constant 12 : offset
   %descriptor = buffer.view %metadata[%descriptor_origin] : buffer -> view<5xi32>
   %actual_position = view.load %descriptor[1] : view<5xi32> -> i32
@@ -168,7 +168,7 @@ check.case public @publish_known_and_speculative_frontiers {
 func.def @mixed_split_observation(%split: i32, %grid_width: i32) -> (i32) {
   %origin = index.constant 0 : offset
   %plan_bytes = index.constant 1152 : offset
-  %state_bytes = index.constant 416 : offset
+  %state_bytes = index.constant 496 : offset
   %input_bytes = index.constant 264 : offset
   %metadata_bytes = index.constant 6128 : offset
   %token_bytes = index.constant 2368 : offset
@@ -176,7 +176,7 @@ func.def @mixed_split_observation(%split: i32, %grid_width: i32) -> (i32) {
   %result_bytes = index.constant 1344 : offset
   %progress_bytes = index.constant 1344 : offset
   %plan = buffer.alloca<private> align(4) %plan_bytes : buffer
-  %state = buffer.alloca<private> align(4) %state_bytes : buffer
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
   %inputs = buffer.alloca<private> align(4) %input_bytes : buffer
   %metadata = buffer.alloca<private> align(4) %metadata_bytes : buffer
   %tokens = buffer.alloca<private> align(4) %token_bytes : buffer
@@ -245,7 +245,7 @@ func.def @mixed_split_observation(%split: i32, %grid_width: i32) -> (i32) {
     view.store %image_metadata_length, %media[%i, 5] : i32, view<64x7xi32>
     view.store %row, %media[%i, 6] : i32, view<64x7xi32>
   }
-  %outputs = func.call @encode_epoch(%state, %plan, %inputs, %media_plan, %one, %one, %total, %first_media, %next_media, %first_capacity, %next_capacity, %none, %metadata, %tokens) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32)
+  %outputs, %transfers, %transfer_begin, %transfer_length = func.call @encode_epoch(%state, %plan, %inputs, %media_plan, %one, %one, %total, %first_media, %next_media, %first_capacity, %next_capacity, %none, %metadata, %tokens) : (buffer, buffer, buffer, buffer, i32, i32, i32, i32, i32, i32, i32, i32, buffer, buffer) -> (i32, buffer, i64, i64)
   %records = buffer.view %tokens[%origin] : buffer -> view<74x8xi32>
   %failures, %expected_source = scf.for %i = [%c0 to %c66 step %c1](%failures = %zero : i32, %prior_frontier = %zero : i32) -> (i32, i32) {
     %input = index.cast %i : index to i32
