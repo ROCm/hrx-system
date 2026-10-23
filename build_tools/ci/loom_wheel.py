@@ -13,6 +13,7 @@ import argparse
 import shutil
 import subprocess
 from pathlib import Path
+from zipfile import BadZipFile
 
 from loom.packaging.python import release
 
@@ -30,7 +31,17 @@ def build_wheel(
     root: Path, output: Path, profile: str, bazel: str, options: list[str]
 ) -> release.Wheel:
     flags = ["--config=loom-sdk", *PROFILE_FLAGS[profile], *options]
-    subprocess.run([bazel, "test", *flags, INSTALLED_TEST], cwd=root, check=True)
+    subprocess.run(
+        [
+            bazel,
+            "test",
+            *flags,
+            "--test_arg=task,amdgpu2,rdna,cdna,xdna",
+            INSTALLED_TEST,
+        ],
+        cwd=root,
+        check=True,
+    )
     # Query the target just exercised, in the same configuration. A guessed
     # bazel-bin filename could select an old artifact after a profile change.
     result = subprocess.run(
@@ -71,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     options = args.options[1:] if args.options[:1] == ["--"] else args.options
     try:
         build_wheel(Path.cwd(), args.output, args.profile, args.bazel, options)
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+    except (ValueError, OSError, BadZipFile, subprocess.CalledProcessError) as error:
         parser.exit(1, f"SDK wheel build failed: {error}\n")
     return 0
 

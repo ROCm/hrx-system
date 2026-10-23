@@ -116,8 +116,8 @@ schema = files("loom.model").joinpath("model-card.v1.schema.json").read_text()
 The checked-in [version.json](version.json) owns the SDK's base package version
 and compatible model catalog association. Bazel reads it during analysis; builds
 have no environment or timestamp version override. The current development
-identity is `0.0.0.dev0` with no associated catalog. This target builds a local
-artifact and has no publishing command.
+identity is `0.0.0.dev0` with no associated catalog. The build target writes a
+local artifact; publication belongs to the release workflow.
 
 Release preparation uses canonical PEP 440 versions such as `1.2.3`, `1.2.3a1`,
 `1.2.3b1`, or `1.2.3rc1`, with a matching `v`-prefixed Git tag. Development
@@ -153,6 +153,46 @@ and rejects conflicting bytes. These checks establish artifact identity;
 installed-wheel tests establish runtime behavior. The normal profile is the
 PyPI artifact; the instrumented profiles are explicit GitHub release assets.
 These commands prepare and check local files without publishing them.
+
+The [release workflow](../../../.github/workflows/release_loom_sdk.yml) runs on
+a matching `v` tag or a manual dispatch selecting that tag. It first checks the
+canonical version and catalog, then calls the SDK build workflow. All eight
+platform/profile wheels must pass their installed-artifact checks. An independent
+job checks the complete set and records `SHA256SUMS`; the publishing jobs verify
+those checksums again and use the same wheel bytes without rebuilding.
+
+GitHub receives all eight wheels and `SHA256SUMS`. The PyPI job follows GitHub
+publication, verifies the same bundle, and stages only normal wheels for the
+official PyPA publishing action. It uses OIDC and attestations, without a stored
+API token. The
+`pypi` GitHub environment and PyPI trusted publisher are separate account setup:
+the publisher identifies owner `ROCm`, repository `hrx-system`, workflow
+`release_loom_sdk.yml`, and environment `pypi`. Environment protection and release
+tag permissions belong to the repository's human release policy. The
+[PyPI setup guide](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
+describes registration for the first package publication.
+
+Retrying failed publication jobs reuses the successful build jobs' artifacts.
+GitHub retries compare every overlapping asset's downloaded SHA-256 before
+uploading missing assets. PyPI retries compare published SHA-256 and yanked state,
+then upload only absent normal wheels. Conflicting bytes, unexpected wheels, or
+an incomplete GitHub upload stop the job for release-owner review. Authentication,
+rate-limit, and server failures remain errors. Neither publisher replaces assets
+or silently skips a conflict. Artifact retention is 14 days; after expiration,
+a new build must produce identical bytes to resume an already started release,
+or use a new version.
+
+The publication checker can inspect a downloaded bundle without network access:
+
+```sh
+python -m build_tools.ci.loom_release verify --tag=v1.2.3 --directory=release-assets
+```
+
+The `github` and `pypi-stage` operations are release-job entry points. The former
+publishes GitHub assets; the latter reads PyPI state and copies missing normal
+wheels to the fresh directory named by `--output`. Only the separate OIDC action
+uploads to PyPI. Release preparation does not create or push tags, configure
+accounts, or modify the checked-in identity automatically.
 
 The native build configuration determines the installed version. Publishers
 supply a base version without a `+` suffix; the wheel rule adds the matching
@@ -192,8 +232,8 @@ build is intended for deliberate capture; it is not an idle runtime switch.
 Release publishing keeps normal wheels on the package index and instrumented
 wheels as explicitly selected release assets. PyPI does not accept local-version
 suffixes. A requirement such as `hrx-loom==1.2.3` also accepts `1.2.3+tracy`, so
-switching back selects the normal wheel file or URL explicitly. This target
-does not publish either kind of artifact.
+switching back selects the normal wheel file or URL explicitly. The release
+workflow publishes each kind to its selected destination.
 
 SDK publishers set `package-version` and the independent `model-catalog`
 association in `version.json`, such as

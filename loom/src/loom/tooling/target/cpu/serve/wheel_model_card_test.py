@@ -71,7 +71,15 @@ def pick_model(arguments, environment, output):
         os.close(slave)
 
 
-def main(wheel, associated_wheel, deployment, elf_inspector, version_file, readme):
+def main(
+    wheel,
+    associated_wheel,
+    deployment,
+    elf_inspector,
+    version_file,
+    readme,
+    expected_drivers=None,
+):
     wheel = Path(wheel).absolute()
     associated_wheel = Path(associated_wheel).absolute()
     deployment = Path(deployment).absolute()
@@ -201,6 +209,14 @@ def main(wheel, associated_wheel, deployment, elf_inspector, version_file, readm
             executable = shutil.which(command, path=environment["PATH"])
             assert executable and Path(executable).parent == scripts, command
             run(command, "--help")
+        if expected_drivers is not None:
+            driver_output = run("loom-run", "--list_drivers")
+            drivers = {
+                line.split(":", 1)[0].strip()
+                for line in driver_output.splitlines()
+                if line.strip() and not line.startswith("#")
+            }
+            assert drivers == set(expected_drivers.split(",")), driver_output
         source = directory / "program.cxx"
         source.write_text(
             "#include <loomcxx/math.h>\n"
