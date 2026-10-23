@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shlex
 import subprocess
 import tempfile
 import unittest
+from contextlib import chdir
 from pathlib import Path
 from unittest.mock import patch
 from zipfile import ZipFile
@@ -111,6 +114,38 @@ class LoomWheelTest(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 loom_wheel.build_wheel(self.root, self.output, "release", "bazel", [])
         self.assertEqual(destination.read_bytes(), b"previous output")
+
+    def test_cli_resolves_the_platform_launcher(self):
+        path = self.wheel()
+        if os.name == "nt":
+            launcher = self.root / "test-bazel.cmd"
+            launcher.write_text(
+                f'@echo off\n@if "%1"=="cquery" echo {path.name}\n@exit /b 0\n'
+            )
+        else:
+            launcher = self.root / "test-bazel"
+            launcher.write_text(
+                '#!/bin/sh\nif [ "$1" = cquery ]; then\n'
+                f"  printf '%s\\n' {shlex.quote(path.name)}\nfi\n"
+            )
+            launcher.chmod(0o755)
+        with (
+            chdir(self.root),
+            patch.dict(
+                os.environ, {"PATH": str(self.root) + os.pathsep + os.environ["PATH"]}
+            ),
+        ):
+            self.assertEqual(
+                loom_wheel.main(
+                    [
+                        "--profile=release",
+                        "--output=" + str(self.output),
+                        "--bazel=test-bazel",
+                    ]
+                ),
+                0,
+            )
+        self.assertEqual((self.output / path.name).read_bytes(), path.read_bytes())
 
 
 if __name__ == "__main__":

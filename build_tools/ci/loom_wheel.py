@@ -81,7 +81,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     options = args.options[1:] if args.options[:1] == ["--"] else args.options
     try:
-        build_wheel(Path.cwd(), args.output, args.profile, args.bazel, options)
+        # Windows shell launchers may be .cmd files; CreateProcess does not
+        # perform the shell's PATHEXT search for a bare executable name.
+        bazel = shutil.which(args.bazel)
+        if bazel is None:
+            raise ValueError(f"Bazel executable not found: {args.bazel}")
+        build_wheel(Path.cwd(), args.output, args.profile, bazel, options)
     except (ValueError, OSError, BadZipFile, subprocess.CalledProcessError) as error:
         parser.exit(1, f"SDK wheel build failed: {error}\n")
     return 0
