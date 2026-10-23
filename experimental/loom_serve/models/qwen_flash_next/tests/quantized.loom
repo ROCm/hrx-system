@@ -137,7 +137,7 @@ check.scenario public @original_quantization configure[4](%format: index, %confi
 
 func.decl @flash_next_qk_pair_rows_partial(%q5: i1, %width: index, %rows: vector<4xi32>, %live: index, %row: index, %lane: index, %stride: index, %input: buffer, %gate_weight: buffer, %up_weight: buffer) -> (vector<4xf32>, vector<4xf32>)
 
-func.decl @flash_next_q51_rows_partial(%width: index, %rows: vector<4xi32>, %live: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
+func.decl @flash_next_q51_output_pair_partial(%width: index, %rows: vector<4xi32>, %live: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>, vector<4xf32>)
 
 func.decl @flash_next_q8_rows_partial(%width: index, %rows: vector<4xi32>, %live: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
 
@@ -179,8 +179,14 @@ kernel.def target(@wave32) @quantized_rows(%format: index) {
       %up = func.call @flash_next_q8_rows_partial(%width, %rows, %live, %row, %lane, %stride, %input, %up_weight) : (index, vector<4xi32>, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
       scf.yield %gate, %up : vector<4xf32>, vector<4xf32>
     } else {
-      %gate = func.call @flash_next_q51_rows_partial(%width, %rows, %live, %row, %lane, %stride, %input, %gate_weight) : (index, vector<4xi32>, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
-      %up = func.call @flash_next_q51_rows_partial(%width, %rows, %live, %row, %lane, %stride, %input, %up_weight) : (index, vector<4xi32>, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
+      // Exercise both adjacent outputs independently against the scalar oracle.
+      %pair = index.div %row, %c2 : index
+      %first = index.mul %pair, %c2 : index
+      %lower = index.cmp eq, %row, %first : index
+      %gate0, %gate1 = func.call @flash_next_q51_output_pair_partial(%width, %rows, %live, %first, %lane, %stride, %input, %gate_weight) : (index, vector<4xi32>, index, index, index, index, buffer, buffer) -> (vector<4xf32>, vector<4xf32>)
+      %up0, %up1 = func.call @flash_next_q51_output_pair_partial(%width, %rows, %live, %first, %lane, %stride, %input, %up_weight) : (index, vector<4xi32>, index, index, index, index, buffer, buffer) -> (vector<4xf32>, vector<4xf32>)
+      %gate = scf.select %lower, %gate0, %gate1 : vector<4xf32>
+      %up = scf.select %lower, %up0, %up1 : vector<4xf32>
       scf.yield %gate, %up : vector<4xf32>, vector<4xf32>
     }
     scf.yield %gate, %up : vector<4xf32>, vector<4xf32>

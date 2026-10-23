@@ -386,6 +386,13 @@ decoding; compact records limit padded matrix work when expert populations
 are smaller. These choices specialize into the command and kernel programs,
 without a host routing decision or a distinct prefill execution path.
 
+The packed Q5_1 down projection computes two adjacent output features per
+wave. Each activation chunk and its affine input sum feed both features,
+while their decoded weights remain shared across up to four routed rows.
+This halves requested activation bytes and repeated input-sum work without
+adding a dispatch, temporary storage, or another quantization boundary.
+Each output retains its original dot-product and wave-reduction order.
+
 Speculative verification groups its accepted anchor and proposed tokens even
 at the smallest capacities. These correlated rows often select the same
 experts, so they share compressed weight reads and decoding across both

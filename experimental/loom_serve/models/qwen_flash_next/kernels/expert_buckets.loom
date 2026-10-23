@@ -14,7 +14,7 @@ func.decl @expert_swiglu(%gate: f32, %up: f32) -> (bf16)
 
 func.decl @flash_next_qk_pair_rows_partial(%q5: i1, %width: index, %rows: vector<4xi32>, %live: index, %row: index, %lane: index, %stride: index, %input: buffer, %gate_weight: buffer, %up_weight: buffer) -> (vector<4xf32>, vector<4xf32>)
 
-func.decl @flash_next_q51_rows_partial(%width: index, %rows: vector<4xi32>, %live: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
+func.decl @flash_next_q51_output_pair_partial(%width: index, %rows: vector<4xi32>, %live: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>, vector<4xf32>)
 
 func.decl @flash_next_q8_rows_partial(%width: index, %rows: vector<4xi32>, %live: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
 
@@ -260,6 +260,12 @@ func.def inline @expert_bucket_down_body(%q8: i1, %input_arg: buffer, %tasks_arg
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c4 = index.constant 4 : index
+  %c2 = index.constant 2 : index
+  // Q5_1 shares activation loads and affine input sums across adjacent outputs.
+  // The format is a specialization constant; Q8 retains its single-output wave.
+  %outputs_per_wave = scf.select %q8, %c1, %c2 : index
+  %outputs_per_group = index.mul %c4, %outputs_per_wave : index
+  %multiple_outputs = index.cmp eq, %outputs_per_wave, %c2 : index
   %c10 = index.constant 10 : index
   %workers = index.constant 1280 : index
   %width = index.constant 640 : index
@@ -269,7 +275,7 @@ func.def inline @expert_bucket_down_body(%q8: i1, %input_arg: buffer, %tasks_arg
   %route_capacity = index.mul %tokens, %c10 : index
   %last_route = index.sub %route_capacity, %c1 : index
   %record_capacity, %record_fields, %record_bytes = func.call pure @expert_record_extent(%tokens, %c4) : (index, index) -> (index, index, offset)
-  %groups = index.div %features, %c4 : index
+  %groups = index.div %features, %outputs_per_group : index
   %header = buffer.view %tasks[%origin] : buffer -> view<1xi32>
   %records = buffer.view %tasks[%record_origin] : buffer -> view<[%record_capacity]x6xi32>
   %result = buffer.view %output[%origin] : buffer -> view<[%route_capacity]x[%features]xbf16>
@@ -284,7 +290,8 @@ func.def inline @expert_bucket_down_body(%q8: i1, %input_arg: buffer, %tasks_arg
   scf.for %work = [%worker to %work_count step %workers] {
     %task = index.div %work, %groups : index
     %group = index.rem %work, %groups : index
-    %feature = index.madd %group, %c4, %wave : index
+    %wave_output = index.mul %wave, %outputs_per_wave : index
+    %feature = index.madd %group, %outputs_per_group, %wave_output : index
     %expert_word = view.load %records[%task, 0] : view<[%record_capacity]x6xi32> -> i32
     %expert_value = index.cast %expert_word : i32 to index
     %expert = index.assume %expert_value [range(%expert_value, 0, 511)] : index
@@ -293,14 +300,22 @@ func.def inline @expert_bucket_down_body(%q8: i1, %input_arg: buffer, %tasks_arg
     %live = index.assume %live_value [range(%live_value, 1, 4)] : index
     %routes = vector.load %records[%task, 2] : view<[%record_capacity]x6xi32> -> vector<4xi32>
     %row = index.madd %expert, %features, %feature : index
-    %partial = scf.if %q8 -> (vector<4xf32>) {
+    %partial, %partial_next = scf.if %q8 -> (vector<4xf32>, vector<4xf32>) {
       %value = func.call @flash_next_q8_rows_partial(%width, %routes, %live, %row, %lane, %stride, %input, %weight) : (index, vector<4xi32>, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
-      scf.yield %value : vector<4xf32>
+      %zero = vector.constant 0.0 : vector<4xf32>
+      scf.yield %value, %zero : vector<4xf32>, vector<4xf32>
     } else {
-      %value = func.call @flash_next_q51_rows_partial(%width, %routes, %live, %row, %lane, %stride, %input, %weight) : (index, vector<4xi32>, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
-      scf.yield %value : vector<4xf32>
+      %value, %next_value = func.call @flash_next_q51_output_pair_partial(%width, %routes, %live, %row, %lane, %stride, %input, %weight) : (index, vector<4xi32>, index, index, index, index, buffer, buffer) -> (vector<4xf32>, vector<4xf32>)
+      scf.yield %value, %next_value : vector<4xf32>, vector<4xf32>
     }
     %sums = kernel.subgroup.reduce<addf> %partial : vector<4xf32>
+    %sums_next = scf.if %multiple_outputs -> (vector<4xf32>) {
+      %value = kernel.subgroup.reduce<addf> %partial_next : vector<4xf32>
+      scf.yield %value : vector<4xf32>
+    } else {
+      %zero = vector.constant 0.0 : vector<4xf32>
+      scf.yield %zero : vector<4xf32>
+    }
     scf.if %leader {
       scf.for %ordinal = [%c0 to %c4 step %c1] unroll schedule(linear) {
         %active = index.cmp ult, %ordinal, %live : index
@@ -311,6 +326,12 @@ func.def inline @expert_bucket_down_body(%q8: i1, %input_arg: buffer, %tasks_arg
           %sum = vector.extract %sums[%ordinal] : vector<4xf32> -> f32
           %packed = scalar.fptrunc %sum : f32 to bf16
           view.store %packed, %result[%route, %feature] : bf16, view<[%route_capacity]x[%features]xbf16>
+          scf.if %multiple_outputs {
+            %next_feature = index.add %feature, %c1 : index
+            %next_sum = vector.extract %sums_next[%ordinal] : vector<4xf32> -> f32
+            %next_packed = scalar.fptrunc %next_sum : f32 to bf16
+            view.store %next_packed, %result[%route, %next_feature] : bf16, view<[%route_capacity]x[%features]xbf16>
+          }
         }
       }
     }
