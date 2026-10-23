@@ -1,0 +1,133 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: Build Loom SDK
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/build_loom_sdk.yml"
+      - ".github/workflows/release_loom_sdk.yml"
+      - ".bazelrc"
+      - ".bazelversion"
+      - "MODULE.bazel*"
+      - "build_tools/**"
+      - "libamdf/**"
+      - "loom/**"
+      - "runtime/**"
+      - "third_party/**"
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Release tooling checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Test artifact and producer contracts
+        run: |
+          bazelisk test --config=asan \
+            //loom/packaging/python:release_test \
+            //build_tools/ci:loom_wheel_test
+
+  wheel:
+    name: ${{ matrix.platform }} / ${{ matrix.profile }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux, windows]
+        profile: [release, tracy, debug, asan]
+        include:
+          - platform: linux
+            runner: ubuntu-24.04
+          - platform: windows
+            runner: windows-2025
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Build and test Linux wheel
+        if: runner.os == 'Linux'
+        env:
+          CC: /usr/bin/clang-18
+          CXX: /usr/bin/clang++-18
+          AR: /usr/bin/llvm-ar-18
+        run: |
+          export PATH="/usr/lib/llvm-18/bin:$PATH"
+          clang --version
+          ld.lld --version
+          bazelisk --version
+          # Keep the C++ ABI at Ubuntu 24.04's GCC 13 baseline even when the
+          # runner also has a newer GCC installed. The ELF audit enforces it.
+          python -m build_tools.ci.loom_wheel \
+            --profile=${{ matrix.profile }} --output=wheel-artifact -- \
+            --jobs=4 \
+            --cxxopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 \
+            --linkopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13
+
+      - name: Build and test Windows wheel
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $visualStudio = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $visualStudio) { throw 'Visual Studio C++ discovery failed.' }
+          Import-Module (Join-Path $visualStudio.installationPath 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
+          Enter-VsDevShell -VsInstallPath $visualStudio.installationPath -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+          if ($env:VSCMD_ARG_TGT_ARCH -ne 'x64') { throw 'Visual Studio x64 initialization failed.' }
+          $env:BAZEL_VC = $env:VCINSTALLDIR.TrimEnd('\')
+          $env:BAZEL_VC_FULL_VERSION = $env:VCToolsVersion
+          $env:BAZEL_LLVM = Join-Path $env:ProgramFiles 'LLVM'
+          $env:CC = Join-Path $env:BAZEL_LLVM 'bin\clang-cl.exe'
+          $env:CXX = $env:CC
+          $env:AR = Join-Path $env:BAZEL_LLVM 'bin\llvm-lib.exe'
+          & $env:CC --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bazelisk --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $options = @('--jobs=4')
+          if ('${{ matrix.profile }}' -eq 'asan') {
+            $catalog = Join-Path $env:ProgramData "Microsoft\VisualStudio\Packages\_Instances\$($visualStudio.instanceId)\catalog.json"
+            $companion = python build_tools/ci/windows_stl_asan.py `
+              --tools-dir ($env:VCToolsInstallDir.TrimEnd('\')) --catalog $catalog `
+              --output-dir "$env:RUNNER_TEMP\stl-asan"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $options += "--linkopt=/LIBPATH:$($companion.Replace('\', '/'))"
+          }
+          python -m build_tools.ci.loom_wheel `
+            --profile=${{ matrix.profile }} --output=wheel-artifact -- @options
+          exit $LASTEXITCODE
+
+      - name: Upload tested wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: loom-sdk-wheel-${{ matrix.platform }}-${{ matrix.profile }}
+          path: wheel-artifact/*.whl
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+          overwrite: true
+
+      - name: Upload failed test logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: loom-sdk-logs-${{ matrix.platform }}-${{ matrix.profile }}
+          path: |
+            bazel-testlogs/**/test.log
+            bazel-testlogs/**/test.xml
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
