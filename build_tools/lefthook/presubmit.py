@@ -133,7 +133,7 @@ CLANG_TIDY_LOCAL_OUTPUT_GROUP = "iree_clang_tidy_local_reports"
 CLANG_TIDY_OUTPUT_GROUP = "iree_clang_tidy_reports"
 CLANG_TIDY_PATH_PREFIXES = SEMGREP_PATH_PREFIXES + ("loom/binding/c/",)
 CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
-CLANG_TIDY_SELECTED_FILES_FLAG = "--//build_tools/clang_tidy:selected_files"
+CLANG_TIDY_SELECTED_FILES_FLAG = "--aspects_parameters=selected_files"
 CLANG_TIDY_OWNER_TARGET_PATTERNS = (
     "//runtime/...",
     "//loom/...",
@@ -1137,6 +1137,20 @@ def clang_tidy_analysis_paths(inputs: PresubmitInputs) -> list[str]:
     if clang_tidy_uses_full_scope(inputs):
         return inputs.all_paths()
     return inputs.selected_paths
+
+
+def clang_tidy_bazel_inputs(inputs: PresubmitInputs) -> tuple[list[str], list[str]]:
+    candidate_files = existing_files(
+        [
+            path
+            for path in clang_tidy_analysis_paths(inputs)
+            if is_clang_tidy_candidate_file(path)
+        ]
+    )
+    infra_files = existing_files(
+        [path for path in inputs.changed_paths if is_clang_tidy_infra_file(path)]
+    )
+    return candidate_files, infra_files
 
 
 def cmake_clang_tidy_analysis_paths(inputs: PresubmitInputs) -> list[str]:
@@ -2536,13 +2550,7 @@ def run_clang_tidy(
     if lane != "bazel":
         return skip_step("clang-tidy", "unknown build-system lane")
 
-    paths = clang_tidy_analysis_paths(inputs)
-    candidate_files = existing_files(
-        [path for path in paths if is_clang_tidy_candidate_file(path)]
-    )
-    infra_files = existing_files(
-        [path for path in inputs.changed_paths if is_clang_tidy_infra_file(path)]
-    )
+    candidate_files, infra_files = clang_tidy_bazel_inputs(inputs)
     if not candidate_files and not infra_files:
         return skip_step("clang-tidy", "no C/C++ runtime inputs")
 
@@ -2923,16 +2931,53 @@ def run_presubmit_with_source_guard(
     return result
 
 
+@contextlib.contextmanager
+def clang_tidy_repository_environment(
+    args: argparse.Namespace, inputs: PresubmitInputs
+):
+    """Keep a hook's LLVM repository identical across all its Bazel commands."""
+    selected = args.clang_tidy or (
+        args.static_analysis
+        and inputs.selected_paths
+        and any(
+            provider.name == "clang-tidy" and args.profile in provider.profiles
+            for provider in STATIC_ANALYSIS_PROVIDERS
+        )
+    )
+    if (
+        not selected
+        or args.lane != "bazel"
+        or sys.platform == "win32"
+        or not any(clang_tidy_bazel_inputs(inputs))
+        or not clang_tidy_llvm_available()
+    ):
+        yield
+        return
+
+    # The clang-tidy action command selects auto explicitly. Inherit that same
+    # setting in earlier query/test phases so they retain its repository nodes.
+    previous = os.environ.get("IREE_CLANG_TIDY_LLVM")
+    os.environ["IREE_CLANG_TIDY_LLVM"] = "auto"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("IREE_CLANG_TIDY_LLVM", None)
+        else:
+            os.environ["IREE_CLANG_TIDY_LLVM"] = previous
+
+
 def main() -> int:
     args = parse_arguments()
     inputs = presubmit_inputs(args)
     if not validate_index_worktree_coherence(args, inputs):
         return 1
     projects = projects_for_paths(inputs.selected_paths)
-    if args.fix:
-        with source_mutation_lock(REPO_ROOT, "root-presubmit-fix"):
-            return run_presubmit_with_source_guard(args, inputs, projects)
-    return run_presubmit_with_source_guard(args, inputs, projects)
+    with clang_tidy_repository_environment(args, inputs):
+        if args.fix:
+            with source_mutation_lock(REPO_ROOT, "root-presubmit-fix"):
+                return run_presubmit_with_source_guard(args, inputs, projects)
+        return run_presubmit_with_source_guard(args, inputs, projects)
 
 
 if __name__ == "__main__":
