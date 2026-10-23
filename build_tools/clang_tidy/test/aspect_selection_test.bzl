@@ -6,6 +6,7 @@
 
 """Analysis tests for clang-tidy translation-unit selection."""
 
+load("@iree_clang_tidy_llvm//:config.bzl", "CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH")
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test")
 load("//build_tools/clang_tidy:clang_tidy.bzl", "IreeClangTidyInfo", "make_clang_tidy_aspect")
 
@@ -20,6 +21,9 @@ _selection_aspect = make_clang_tidy_aspect(selected_files_values = _SELECTIONS.v
 _REPORT_PREFIX = "build_tools_clang_tidy_test_"
 _TEST_ATTRIBUTES = {
     "tags": ["manual"],
+    # The aspect attaches directly to a C/C++ subject, so the test owns the
+    # tool compatibility constraint normally supplied by iree_clang_tidy.
+    "target_compatible_with": CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
     "timeout": "short",
 }
 
