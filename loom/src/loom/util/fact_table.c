@@ -108,6 +108,20 @@ static iree_status_t loom_value_fact_table_ensure_range(
   memset(touched_bits + prefix_word_count + old_word_count, 0,
          (word_count - prefix_word_count - old_word_count) *
              sizeof(*touched_bits));
+  if (table->replay.generation) {
+    uint32_t* generations = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(table->transient_arena, new_capacity,
+                                  sizeof(*generations), (void**)&generations));
+    memset(generations, 0, prefix_count * sizeof(*generations));
+    if (old_capacity) {
+      memcpy(generations + prefix_count, table->replay.generations,
+             old_capacity * sizeof(*generations));
+    }
+    memset(generations + prefix_count + old_capacity, 0,
+           (new_capacity - prefix_count - old_capacity) * sizeof(*generations));
+    table->replay.generations = generations;
+  }
   table->entries = entries;
   table->first_value_id = first_value_id;
   table->capacity = new_capacity;
@@ -246,6 +260,8 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   }
   loom_value_fact_table_clear_origin_scope(table);
   table->touched_count = 0;
+  table->replay.generation = 0;
+  table->replay.generations = NULL;
   table->count = 0;
   if (!table->has_persistent_extension_entries) {
     table->extensions.entries = NULL;
@@ -728,12 +744,48 @@ iree_status_t loom_value_fact_table_touch(loom_value_fact_table_t* table,
   return iree_ok_status();
 }
 
+iree_status_t loom_value_fact_table_enable_replay_generations(
+    loom_value_fact_table_t* table) {
+  if (table->replay.generation) {
+    return iree_ok_status();
+  }
+  if (table->capacity) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(table->transient_arena, table->capacity,
+                                  sizeof(*table->replay.generations),
+                                  (void**)&table->replay.generations));
+    memset(table->replay.generations, 0,
+           table->capacity * sizeof(*table->replay.generations));
+  }
+  table->replay.generation = 2;
+  return iree_ok_status();
+}
+
+static void loom_value_fact_table_advance_generation(
+    loom_value_fact_table_t* table) {
+  table->replay.generation += 2;
+  if (IREE_UNLIKELY(!table->replay.generation)) {
+    // Zero invalidates every evaluation watermark before the counter restarts.
+    memset(table->replay.generations, 0,
+           table->capacity * sizeof(*table->replay.generations));
+    table->replay.generation = 2;
+  }
+}
+
 iree_status_t loom_value_fact_table_define(loom_value_fact_table_t* table,
                                            loom_value_id_t value_id,
                                            loom_value_facts_t facts) {
   IREE_ASSERT_NE(facts.known_divisor, 0);
   IREE_RETURN_IF_ERROR(loom_value_fact_table_touch(table, value_id));
-  table->entries[value_id - table->first_value_id] = facts;
+  const iree_host_size_t index = value_id - table->first_value_id;
+  if (table->replay.generation &&
+      !loom_value_facts_equal(table->entries[index], facts)) {
+    loom_value_fact_table_advance_generation(table);
+    // Loop arguments, seeds, and resets publish without evaluating an ordinary
+    // equation. Its defining operation must establish this result before reuse.
+    table->replay.generations[index] = table->replay.generation | UINT32_C(1);
+  }
+  table->entries[index] = facts;
   if ((iree_host_size_t)value_id + 1 > table->count) {
     table->count = (iree_host_size_t)value_id + 1;
   }
@@ -751,6 +803,10 @@ void loom_value_fact_table_undefine(loom_value_fact_table_t* table,
       (iree_host_size_t)value_id - table->first_value_id;
   if (index < table->capacity) {
     table->entries[index] = (loom_value_facts_t){0};
+    if (table->replay.generation) {
+      loom_value_fact_table_advance_generation(table);
+      table->replay.generations[index] = table->replay.generation | UINT32_C(1);
+    }
   }
   loom_value_fact_table_undefine_identity(table, value_id);
 }

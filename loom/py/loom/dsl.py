@@ -6640,6 +6640,10 @@ class Op:
         target register packets while materializing its results.
     canonicalize_without_facts: Whether the canonicalization callback depends
         only on IR structure and may run before pending facts are published.
+    facts_from_operands: Whether inference depends only on operand fact tuples,
+        immutable IR, and the scope's target configuration, and only publishes
+        result tuples. Extension payloads are part of their owning tuples;
+        auxiliary relations and other value facts are separate dependencies.
     legacy_formats: Legacy textual formats accepted by migration tooling.
     examples: List of example IR strings for documentation.
 
@@ -6669,6 +6673,7 @@ class Op:
         ""  # C function name for per-instance trait computation, or "".
     )
     facts: str = ""  # C function name for fact inference, or "".
+    facts_from_operands: bool = False
     type_transfer: str = ""  # C function name for semantic type transfer, or "".
     condition_refinement: ConditionRefinement | None = None
     execution_condition: ExecutionCondition | None = None
@@ -6710,6 +6715,7 @@ class Op:
         canonicalize_without_facts: bool = False,
         effective_traits: str = "",
         facts: str = "",
+        facts_from_operands: bool = False,
         type_transfer: str = "",
         condition_refinement: ConditionRefinement | None = None,
         execution_condition: ExecutionCondition | None = None,
@@ -6761,6 +6767,35 @@ class Op:
         )
         object.__setattr__(self, "effective_traits", effective_traits)
         object.__setattr__(self, "facts", facts)
+        if facts_from_operands:
+            if not facts or not frozen_results:
+                raise ValueError(
+                    f"{name}: facts_from_operands requires a facts callback and results"
+                )
+            if (
+                frozen_regions
+                or frozen_successors
+                or frozen_effects
+                or frozen_ownership_effects
+                or any(result.allocates for result in frozen_results)
+                or any(
+                    trait.name
+                    in {
+                        "Convergent",
+                        "UniqueIdentity",
+                        "NonDeterministic",
+                        "UnknownEffects",
+                        "FactIdentity",
+                        "ValueAlias",
+                    }
+                    for trait in self.traits
+                )
+            ):
+                raise ValueError(
+                    f"{name}: facts_from_operands cannot observe execution, regions, "
+                    "or auxiliary identity facts"
+                )
+        object.__setattr__(self, "facts_from_operands", facts_from_operands)
         object.__setattr__(self, "type_transfer", type_transfer)
         object.__setattr__(self, "condition_refinement", condition_refinement)
         object.__setattr__(self, "execution_condition", execution_condition)

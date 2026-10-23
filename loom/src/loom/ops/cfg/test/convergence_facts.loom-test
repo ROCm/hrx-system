@@ -138,3 +138,47 @@ func.def @sequential_rotations(%repeat_first: i1, %repeat_second: i1) -> (i64, i
   %multiple = scalar.constant 8 : i64
   func.return %minimum, %maximum, %multiple : i64, i64, i64
 }
+
+// ====
+
+// The backedge changes a vector extension. Lanewise arithmetic must consume
+// the converged lane ranges rather than reusing the initial exact elements.
+func.def @vector_arithmetic_replay(%repeat: i1) -> (i64, i64) {
+  %initial_low = scalar.constant 1 : i32
+  %initial_high = scalar.constant 3 : i32
+  %replacement_low = scalar.constant 5 : i32
+  %replacement_high = scalar.constant 7 : i32
+  %initial = vector.from_elements %initial_low, %initial_high : vector<2xi32>
+  %replacement = vector.from_elements %replacement_low, %replacement_high : vector<2xi32>
+  cfg.br ^body(%initial: vector<2xi32>)
+^body(%value: vector<2xi32>):
+  %sum = vector.addi %value, %value : vector<2xi32>
+  %first_sum = vector.extract %sum[0] : vector<2xi32> -> i32
+  %second_sum = vector.extract %sum[1] : vector<2xi32> -> i32
+  %first_high = test.fact_range_hi %first_sum : i32 -> i64
+  %second_high = test.fact_range_hi %second_sum : i32 -> i64
+  cfg.cond_br %repeat, ^back, ^exit
+^back:
+  cfg.br ^body(%replacement: vector<2xi32>)
+^exit:
+  func.return %first_high, %second_high : i64, i64
+}
+
+// ----
+func.def @vector_arithmetic_replay(%repeat: i1) -> (i64, i64) {
+  %initial_low = scalar.constant 1 : i32
+  %initial_high = scalar.constant 3 : i32
+  %replacement_low = scalar.constant 5 : i32
+  %replacement_high = scalar.constant 7 : i32
+  %initial = vector.from_elements %initial_low, %initial_high : vector<2xi32>
+  %replacement = vector.from_elements %replacement_low, %replacement_high : vector<2xi32>
+  cfg.br ^body(%initial: vector<2xi32>)
+^body(%value: vector<2xi32>):
+  %first_high = scalar.constant 10 : i64
+  %second_high = scalar.constant 14 : i64
+  cfg.cond_br %repeat, ^back, ^exit
+^back:
+  cfg.br ^body(%replacement: vector<2xi32>)
+^exit:
+  func.return %first_high, %second_high : i64, i64
+}

@@ -1027,6 +1027,7 @@ static iree_status_t loom_value_fact_table_solve_cfg_component(
     const loom_value_fact_cfg_region_t* region, const loom_scc_t* component,
     iree_arena_allocator_t* scratch_arena,
     const loom_value_fact_cfg_saved_values_t* restart_values) {
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_enable_replay_generations(table));
   const bool was_replaying = table->replaying;
   iree_status_t status = loom_value_fact_table_iterate_cfg_component(
       table, module, region, component, scratch_arena, restart_values);
@@ -1355,6 +1356,37 @@ static iree_status_t loom_value_fact_table_compute_ordinary_op(
                                                  out_changed);
 }
 
+// Publication generations survive nested convergence and changes that later
+// revert. Result watermarks belong to completed equations, not individual
+// solver iterations; a changed input remains visible until its consumer runs.
+static bool loom_value_fact_table_operands_unchanged(
+    const loom_value_fact_table_t* table, const loom_op_t* op) {
+  uint32_t evaluated = UINT32_MAX;
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    const iree_host_size_t index =
+        (iree_host_size_t)results[i] - table->first_value_id;
+    if (index >= table->capacity) {
+      return false;
+    }
+    const uint32_t generation = table->replay.generations[index];
+    if (!generation || (generation & UINT32_C(1))) {
+      return false;
+    }
+    evaluated = iree_min(evaluated, generation);
+  }
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    const iree_host_size_t index =
+        (iree_host_size_t)operands[i] - table->first_value_id;
+    if (index < table->capacity &&
+        (table->replay.generations[index] & ~UINT32_C(1)) > evaluated) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static iree_status_t loom_value_fact_table_compute_scoped_op(
     loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_op_t* op, bool* out_changed) {
@@ -1376,6 +1408,16 @@ static iree_status_t loom_value_fact_table_compute_scoped_op(
     return iree_ok_status();
   }
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
+  // A refinement callback can depend on values outside the operand list. Its
+  // scope cannot reuse equations using numeric operand generations alone.
+  const bool operand_only =
+      table->replay.generation && vtable && op->result_count &&
+      (vtable->vtable_flags & LOOM_OP_VTABLE_FACTS_FROM_OPERANDS) &&
+      !table->context.refine_operands.fn;
+  if (table->replaying && operand_only &&
+      loom_value_fact_table_operands_unchanged(table, op)) {
+    return iree_ok_status();
+  }
   if (!table->replaying) {
     IREE_RETURN_IF_ERROR(loom_value_fact_table_propagate_select_dependencies(
         table, module, op, vtable, out_changed));
@@ -1397,6 +1439,15 @@ static iree_status_t loom_value_fact_table_compute_scoped_op(
   iree_status_t status = loom_value_fact_table_compute_ordinary_op(
       table, module, op, vtable, out_changed);
   loom_value_fact_table_end_origins(table, iree_status_is_ok(status));
+  if (iree_status_is_ok(status) && operand_only) {
+    // Inference and typed publication are complete. Every result participates,
+    // including unchanged siblings of a multi-result equation.
+    const loom_value_id_t* results = loom_op_const_results(op);
+    for (uint16_t i = 0; i < op->result_count; ++i) {
+      table->replay.generations[results[i] - table->first_value_id] =
+          table->replay.generation;
+    }
+  }
   return status;
 }
 

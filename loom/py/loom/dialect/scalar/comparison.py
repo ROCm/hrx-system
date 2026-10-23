@@ -117,6 +117,7 @@ scalar_isnanf = Op(
     traits=[PURE, SAFE_TO_SPECULATE],
     format=[Ref("input"), COLON, TypeOf("input")],
     facts="loom_scalar_isnanf_facts",
+    facts_from_operands=True,
     examples=["%result = scalar.isnanf %input : f32"],
     eager_execution_cost=1,
 )
@@ -131,6 +132,7 @@ scalar_isinff = Op(
     traits=[PURE, SAFE_TO_SPECULATE],
     format=[Ref("input"), COLON, TypeOf("input")],
     facts="loom_scalar_isinff_facts",
+    facts_from_operands=True,
     examples=["%result = scalar.isinff %input : f32"],
     eager_execution_cost=1,
 )
@@ -145,6 +147,7 @@ scalar_isfinitef = Op(
     traits=[PURE, SAFE_TO_SPECULATE],
     format=[Ref("input"), COLON, TypeOf("input")],
     facts="loom_scalar_isfinitef_facts",
+    facts_from_operands=True,
     examples=["%result = scalar.isfinitef %input : f32"],
     eager_execution_cost=1,
 )
@@ -160,6 +163,7 @@ scalar_signf = Op(
     traits=[PURE, SAFE_TO_SPECULATE],
     format=[Ref("input"), COLON, TypeOf("result")],
     facts="loom_scalar_signf_facts",
+    facts_from_operands=True,
     examples=["%result = scalar.signf %input : f32"],
     eager_execution_cost=1,
 )
@@ -175,6 +179,7 @@ scalar_signi = Op(
     traits=[PURE, SAFE_TO_SPECULATE],
     format=[Ref("input"), COLON, TypeOf("result")],
     facts="loom_scalar_signi_facts",
+    facts_from_operands=True,
     examples=["%result = scalar.signi %input : i32"],
     eager_execution_cost=1,
 )

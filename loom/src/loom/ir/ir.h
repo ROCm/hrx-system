@@ -1042,6 +1042,12 @@ enum loom_op_vtable_flag_bits_e {
   // The canonicalization callback depends only on IR structure and may run in
   // a mutation batch before pending value facts are published.
   LOOM_OP_VTABLE_CANONICALIZE_WITHOUT_FACTS = 1u << 12,
+  // Inference's only changing inputs are the supplied operand fact tuples,
+  // including their immutable extension payloads. IR and scoped target facts
+  // are immutable during replay. The callback only writes result tuples: it
+  // neither reads nor publishes identities, origins, or other auxiliary facts.
+  // Effective traits must preserve this contract for every operation instance.
+  LOOM_OP_VTABLE_FACTS_FROM_OPERANDS = 1u << 13,
 };
 typedef uint16_t loom_op_vtable_flags_t;
 

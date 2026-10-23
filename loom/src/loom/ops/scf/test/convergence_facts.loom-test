@@ -322,3 +322,47 @@ func.def @reversed_unsigned_countdown_rows(%requested_count: index) -> (i64, i64
   %result_high = scalar.constant 8 : i64
   func.return %result_low, %result_high : i64, i64
 }
+
+// ====
+
+// An inner arithmetic equation can converge before the outer carried value
+// changes. Its later consumers must still see that publication, including both
+// results of a division, rather than retaining the first iteration's bounds.
+func.def @nested_arithmetic_replay(%outer_count: index, %requested_inner_count: index, %input: i32) -> (i64, i64) {
+  %inner_count = index.assume %requested_inner_count [range(%requested_inner_count, 1, 4)] : index
+  %replacement = scalar.assume %input [range(%input, 4, 8)] : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial = scalar.constant 2 : i32
+  %increment = scalar.constant 1 : i32
+  %divisor = scalar.constant 2 : i32
+  %initial_bound = scalar.constant 0 : i64
+  %last, %quotient_high, %remainder_high = scf.for %outer = [%begin to %outer_count step %step](%value = %initial : i32, %previous_quotient = %initial_bound : i64, %previous_remainder = %initial_bound : i64) -> (i32, i64, i64) {
+    %inner_result = scf.for %inner = [%begin to %inner_count step %step](%carried = %value : i32) -> (i32) {
+      %sum = scalar.addi %value, %increment : i32
+      scf.yield %sum : i32
+    }
+    %quotient, %remainder = scalar.divremsi %inner_result, %divisor : i32
+    %high_quotient = test.fact_range_hi %quotient : i32 -> i64
+    %high_remainder = test.fact_range_hi %remainder : i32 -> i64
+    test.use %high_quotient, %high_remainder : i64, i64
+    scf.yield %replacement, %high_quotient, %high_remainder : i32, i64, i64
+  }
+  func.return %quotient_high, %remainder_high : i64, i64
+}
+
+// ----
+func.def @nested_arithmetic_replay(%outer_count: index, %requested_inner_count: index, %input: i32) -> (i64, i64) {
+  %replacement = scalar.assume %input [range(%input, 4, 8)] : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial = scalar.constant 2 : i32
+  %initial_bound = scalar.constant 0 : i64
+  %last, %quotient_high, %remainder_high = scf.for %outer = [%begin to %outer_count step %step](%value = %initial : i32, %previous_quotient = %initial_bound : i64, %previous_remainder = %initial_bound : i64) -> (i32, i64, i64) {
+    %high_quotient = scalar.constant 4 : i64
+    %high_remainder = scalar.constant 1 : i64
+    test.use %high_quotient, %high_remainder : i64, i64
+    scf.yield %replacement, %high_quotient, %high_remainder : i32, i64, i64
+  }
+  func.return %quotient_high, %remainder_high : i64, i64
+}

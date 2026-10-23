@@ -202,6 +202,7 @@ buffer_pack = Op(
     traits=[PURE],
     verify="loom_buffer_pack_verify",
     facts="loom_buffer_pack_facts",
+    facts_from_operands=True,
     format=[
         AlignedRefs("byte_lengths", "minimum_alignments"),
         COLON,
