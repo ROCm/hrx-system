@@ -15,6 +15,7 @@
 #include "libamdf/src/media/drm/command.h"
 #include "libamdf/src/platform/linux/endpoint.h"
 #include "libamdf/src/platform/linux/file.h"
+#include "libamdf/src/structure.h"
 
 amdf_status_t amdf_media_drm_query(int descriptor, uint32_t kind,
                                    uint32_t parameter, void* data,
@@ -68,42 +69,51 @@ static const amdf_device_vtable_t amdf_media_drm_device_operations = {
 static amdf_status_t AMDF_CALL amdf_media_drm_enumerate_codecs(
     amdf_device_t* device, uint32_t ordinal, uint32_t capacity,
     amdf_media_codec_info_t* codecs, uint32_t* count) {
-  (void)device;
-  (void)ordinal;
+  const amdf_media_drm_device_t* native =
+      (const amdf_media_drm_device_t*)device;
+  const bool jpeg = native->engines[ordinal].ip_type == AMDGPU_HW_IP_VCN_JPEG;
   *count = 1;
   if (capacity != 0) {
-    codecs[0] = (amdf_media_codec_info_t){AMDF_MEDIA_CODEC_JPEG,
-                                          AMDF_MEDIA_DIRECTION_DECODE};
+    codecs[0] = (amdf_media_codec_info_t){
+        jpeg ? AMDF_MEDIA_CODEC_JPEG : AMDF_MEDIA_CODEC_H264,
+        AMDF_MEDIA_DIRECTION_DECODE};
   }
   return AMDF_STATUS_OK;
 }
 
 amdf_status_t amdf_media_drm_configuration(
-    amdf_media_drm_device_t* device,
+    amdf_media_drm_device_t* device, uint32_t family_ordinal,
     const amdf_media_configuration_t* configuration, const void* next,
     amdf_media_configuration_info_t* out_info) {
-  if (next != NULL) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
-  }
   amdf_media_configuration_info_t info = {
       .type = AMDF_STRUCTURE_TYPE_MEDIA_CONFIGURATION_INFO,
       .structure_size = out_info->structure_size,
       .configuration = *configuration,
   };
-  const struct drm_amdgpu_info_video_codec_info* limits = &device->jpeg_limits;
-  if (configuration->codec != AMDF_MEDIA_CODEC_JPEG ||
+  const bool jpeg =
+      device->engines[family_ordinal].ip_type == AMDGPU_HW_IP_VCN_JPEG;
+  const struct drm_amdgpu_info_video_codec_info* limits =
+      &device->decode_limits
+           .codec_info[jpeg ? AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_JPEG
+                            : AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_MPEG4_AVC];
+  if (configuration->codec !=
+          (jpeg ? AMDF_MEDIA_CODEC_JPEG : AMDF_MEDIA_CODEC_H264) ||
       configuration->direction != AMDF_MEDIA_DIRECTION_DECODE) {
     info.reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC;
   } else if (configuration->format != AMDF_MEDIA_PIXEL_FORMAT_NV12) {
     info.reason = AMDF_MEDIA_CONFIGURATION_REASON_FORMAT;
-  } else if (configuration->reference_image_count != 0) {
+  } else if (jpeg ? configuration->reference_image_count != 0
+                  : configuration->reference_image_count == 0 ||
+                        configuration->reference_image_count > 17) {
     info.reason = AMDF_MEDIA_CONFIGURATION_REASON_REFERENCE_STORAGE;
   } else if (configuration->coded_width < 64 ||
              configuration->coded_height < 64 ||
-             ((configuration->coded_width | configuration->coded_height) & 1) !=
-                 0 ||
+             ((configuration->coded_width | configuration->coded_height) &
+              (jpeg ? 1u : 15u)) != 0 ||
              configuration->coded_width > limits->max_width ||
              configuration->coded_height > limits->max_height ||
+             (!jpeg && (configuration->coded_width > 4096 ||
+                        configuration->coded_height > 4096)) ||
              (uint64_t)configuration->coded_width *
                      configuration->coded_height >
                  limits->max_pixels_per_frame) {
@@ -113,23 +123,48 @@ amdf_status_t amdf_media_drm_configuration(
     *out_info = info;
     return AMDF_STATUS_OK;
   }
-  const amdf_media_image_description_t description = {
+  if (jpeg) {
+    if (next != NULL) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
+  } else {
+    const amdf_status_t status = amdf_structure_validate_input(
+        next, AMDF_STRUCTURE_TYPE_MEDIA_H264_CONFIGURATION,
+        sizeof(amdf_media_h264_configuration_t));
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    const amdf_media_h264_configuration_t* h264 = next;
+    if (h264->profile < AMDF_MEDIA_H264_PROFILE_CONSTRAINED_BASELINE ||
+        h264->profile > AMDF_MEDIA_H264_PROFILE_HIGH || h264->level_idc > 52) {
+      info.reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC;
+      *out_info = info;
+      return AMDF_STATUS_OK;
+    }
+  }
+  amdf_media_image_description_t description = {
       .format = configuration->format,
       .width = configuration->coded_width,
       .height = configuration->coded_height,
       .array_layer_count = 1,
       .roles = AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT,
   };
-  const amdf_status_t status = amdf_media_drm_image_requirements(
+  amdf_status_t status = amdf_media_drm_image_requirements(
       &device->base.base, &description, &info.output);
+  if (amdf_status_is_ok(status) && !jpeg) {
+    description.roles = AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE;
+    status = amdf_media_drm_image_requirements(&device->base.base, &description,
+                                               &info.reference);
+  }
   if (!amdf_status_is_ok(status)) {
     return status;
   }
   info.support = AMDF_MEDIA_CONFIGURATION_SUPPORT_SUPPORTED;
+  info.requires_begin_end = !jpeg;
   info.image_heap_memory_scope =
       &device->base.base.provider_instance->system_memory_scope;
   info.compressed_memory_scope = info.image_heap_memory_scope;
-  info.compressed_byte_offset_alignment = 128;
+  info.compressed_byte_offset_alignment = jpeg ? 128 : 256;
   info.compressed_byte_length_alignment = 128;
   *out_info = info;
   return AMDF_STATUS_OK;
@@ -138,9 +173,9 @@ amdf_status_t amdf_media_drm_configuration(
 static amdf_status_t AMDF_CALL amdf_media_drm_query_configuration(
     amdf_device_t* device, const amdf_media_configuration_query_t* query,
     amdf_media_configuration_info_t* out_info) {
-  return amdf_media_drm_configuration((amdf_media_drm_device_t*)device,
-                                      &query->configuration, query->next,
-                                      out_info);
+  return amdf_media_drm_configuration(
+      (amdf_media_drm_device_t*)device, query->queue_family_ordinal,
+      &query->configuration, query->next, out_info);
 }
 
 static const amdf_media_api_t amdf_media_drm_operations = {
@@ -164,7 +199,7 @@ static const amdf_media_api_t amdf_media_drm_operations = {
 };
 
 static amdf_status_t amdf_media_drm_device_discover(
-    amdf_media_drm_device_t* device) {
+    amdf_media_drm_device_t* device, uint32_t* out_family_count) {
   struct drm_amdgpu_info_device info = {0};
   amdf_status_t status = amdf_media_drm_query(
       device->descriptor, AMDGPU_INFO_DEV_INFO, 0, &info, sizeof(info));
@@ -190,21 +225,6 @@ static amdf_status_t amdf_media_drm_device_discover(
   if (device->address_begin >= device->address_end) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  status = amdf_media_drm_query(device->descriptor, AMDGPU_INFO_HW_IP_INFO,
-                                AMDGPU_HW_IP_VCN_JPEG, &device->jpeg,
-                                sizeof(device->jpeg));
-  if (!amdf_status_is_ok(status)) {
-    return status;
-  }
-  const uint32_t version = device->jpeg.ip_discovery_version;
-  const uint32_t major = (version >> 16) & 255;
-  if (major < 2 || major > 4 || version == 0x040003 ||
-      device->jpeg.available_rings == 0 ||
-      device->jpeg.ib_start_alignment > device->page_size ||
-      device->jpeg.ib_size_alignment == 0 ||
-      64 % device->jpeg.ib_size_alignment != 0) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
-  }
   struct drm_get_cap capability = {.capability = DRM_CAP_SYNCOBJ_TIMELINE};
   if (ioctl(device->descriptor, DRM_IOCTL_GET_CAP, &capability) != 0) {
     return amdf_linux_error(errno);
@@ -212,21 +232,48 @@ static amdf_status_t amdf_media_drm_device_discover(
   if (capability.value == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  struct drm_amdgpu_info_video_caps codecs = {0};
-  status = amdf_media_drm_query(device->descriptor, AMDGPU_INFO_VIDEO_CAPS,
-                                AMDGPU_INFO_VIDEO_CAPS_DECODE, &codecs,
-                                sizeof(codecs));
+  status = amdf_media_drm_query(
+      device->descriptor, AMDGPU_INFO_VIDEO_CAPS, AMDGPU_INFO_VIDEO_CAPS_DECODE,
+      &device->decode_limits, sizeof(device->decode_limits));
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  device->jpeg_limits =
-      codecs.codec_info[AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_JPEG];
-  if (!device->jpeg_limits.valid) {
+  uint32_t count = 0;
+  const uint32_t selectors[] = {AMDGPU_HW_IP_VCN_JPEG, AMDGPU_HW_IP_VCN_ENC};
+  for (uint32_t i = 0; amdf_status_is_ok(status) && i < 2; ++i) {
+    struct drm_amdgpu_info_hw_ip engine = {0};
+    status = amdf_media_drm_query(device->descriptor, AMDGPU_INFO_HW_IP_INFO,
+                                  selectors[i], &engine, sizeof(engine));
+    if (!amdf_status_is_ok(status)) {
+      break;
+    }
+    const uint32_t version = engine.ip_discovery_version;
+    const uint32_t major = (version >> 16) & 255;
+    const bool admitted =
+        i == 0 ? major >= 2 && major <= 4 && version != 0x040003 : major == 4;
+    const bool codec_present =
+        device->decode_limits
+            .codec_info[i == 0 ? AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_JPEG
+                               : AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_MPEG4_AVC]
+            .valid;
+    const uint32_t command_alignment = i == 0 ? 64 : 4;
+    if (!admitted || !codec_present || engine.available_rings == 0 ||
+        engine.ib_start_alignment > device->page_size ||
+        engine.ib_size_alignment == 0 ||
+        command_alignment % engine.ib_size_alignment != 0) {
+      continue;
+    }
+    device->engines[count++] = (amdf_media_drm_engine_t){selectors[i], engine};
+  }
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  if (count == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  device->family = (amdf_queue_family_info_t){
+  const amdf_queue_family_info_t family = (amdf_queue_family_info_t){
       .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
-      .structure_size = sizeof(device->family),
+      .structure_size = sizeof(family),
       .command_type = AMDF_QUEUE_COMMAND_TYPE_MEDIA,
       .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
       .format_version = AMDF_MEDIA_EXTENSION_VERSION_1,
@@ -237,6 +284,10 @@ static amdf_status_t amdf_media_drm_device_discover(
       .kernel_queue_capabilities =
           AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION,
   };
+  for (uint32_t i = 0; i < count; ++i) {
+    device->families[i] = family;
+  }
+  *out_family_count = count;
   return AMDF_STATUS_OK;
 }
 
@@ -265,15 +316,16 @@ amdf_status_t amdf_media_provider_device_create(
     amdf_free(allocator, device);
     return amdf_linux_error(initialized);
   }
+  uint32_t family_count = 0;
   status = amdf_linux_endpoint_open_file(amdf_endpoint_get_platform(endpoint),
                                          &device->descriptor);
   if (amdf_status_is_ok(status)) {
-    status = amdf_media_drm_device_discover(device);
+    status = amdf_media_drm_device_discover(device, &family_count);
   }
   if (amdf_status_is_ok(status)) {
-    status = amdf_device_initialize(&device->base.base,
-                                    &amdf_media_drm_device_operations, endpoint,
-                                    AMDF_EXTENSION_MEDIA, 1, &device->family);
+    status = amdf_device_initialize(
+        &device->base.base, &amdf_media_drm_device_operations, endpoint,
+        AMDF_EXTENSION_MEDIA, family_count, device->families);
   }
   if (!amdf_status_is_ok(status)) {
     const amdf_status_t cleanup =

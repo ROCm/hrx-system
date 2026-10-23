@@ -26,6 +26,20 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    h264
+  HDRS
+    "h264.h"
+  SRCS
+    "h264.c"
+  DEPS
+    amdf::headers
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     extension
   HDRS
     "extension.h"

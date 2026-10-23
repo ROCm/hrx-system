@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
 load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
 
 package(
@@ -46,6 +47,45 @@ amdf_cts_test_suite(
         "//libamdf/cts/util:mapped_memory",
         "//libamdf/cts/util:native_event",
         "//libamdf/cts/util:native_event_headers",
+        "//libamdf/cts/util:provider_headers",
+        "//third_party:google_test",
+    ],
+)
+
+iree_c_embed_data(
+    name = "reference_main",
+    testonly = True,
+    srcs = ["reference_main.packet"],
+    c_file_output = "reference_main.c",
+    flatten = True,
+    h_file_output = "reference_main.h",
+    identifier = "amdf_cts_media_reference_main",
+)
+
+amdf_cc_library(
+    name = "h264_fixture",
+    testonly = True,
+    srcs = ["h264_fixture.cc"],
+    hdrs = ["h264_fixture.h"],
+    visibility = ["//libamdf/cts/interop/gpu/media:__pkg__"],
+    deps = [
+        ":reference_main",
+        "//third_party:google_test",
+    ],
+)
+
+amdf_cts_test_suite(
+    name = "h264",
+    srcs = ["h264_test.cc"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":h264_fixture",
+        "//libamdf/cts/util:device_cache",
+        "//libamdf/cts/util:mapped_memory",
         "//libamdf/cts/util:provider_headers",
         "//third_party:google_test",
     ],

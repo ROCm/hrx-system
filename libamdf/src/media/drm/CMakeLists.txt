@@ -24,6 +24,7 @@ iree_cc_library(
     libamdf::src::instance
     libamdf::src::platform::linux::endpoint
     libamdf::src::platform::linux::file
+    libamdf::src::structure
   PUBLIC
 )
 endif()
@@ -37,17 +38,21 @@ iree_cc_library(
     "jpeg.h"
     "queue.h"
     "session.h"
+    "vcn.h"
   SRCS
     "command.c"
     "jpeg.c"
     "queue.c"
     "session.c"
+    "vcn.c"
   DEPS
+    ::buffer
     ::device_state
     ::image
     amdf::headers
     libamdf::src::allocator
     libamdf::src::atomics
+    libamdf::src::media::h264
     libamdf::src::platform::linux::file
     libamdf::src::platform::linux::native_event
     libamdf::src::platform::native_event

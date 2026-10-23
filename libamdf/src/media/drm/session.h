@@ -7,7 +7,8 @@
 #ifndef AMDF_SRC_MEDIA_DRM_SESSION_H_
 #define AMDF_SRC_MEDIA_DRM_SESSION_H_
 
-#include "libamdf/src/media/drm/device.h"
+#include "amdf/media/h264.h"
+#include "libamdf/src/media/drm/buffer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,6 +21,16 @@ typedef struct amdf_media_drm_session_t {
   amdf_media_configuration_info_t requirements;
   // Recordings borrowing this codec state, independent of submission status.
   amdf_child_tracker_t commands;
+  // Parsed H264 envelope retained without caller extension-chain pointers.
+  amdf_media_h264_configuration_t h264;
+  // Owned firmware session and collocated context; no pixel storage.
+  amdf_media_drm_buffer_t* storage;
+  // Bytes of codec-specific context following the 128 KiB session prefix.
+  uint32_t context_byte_length;
+  // Opaque firmware stream identity selected during cold construction.
+  uint32_t stream_handle;
+  // Last accepted lifecycle transition, serialized by the owning queue.
+  amdf_media_command_operation_t operation;
 } amdf_media_drm_session_t;
 
 amdf_status_t AMDF_CALL amdf_media_drm_session_create(

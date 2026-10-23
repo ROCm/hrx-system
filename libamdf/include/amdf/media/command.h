@@ -71,8 +71,12 @@ typedef struct amdf_media_decode_picture_info_t {
 
 typedef uint32_t amdf_media_command_operation_t;
 enum amdf_media_command_operation_e {
+  /// Starts a session whose configuration requires_begin_end is nonzero.
+  /// Submission is accepted only once, before any picture in that session.
   AMDF_MEDIA_COMMAND_OPERATION_BEGIN = 1,
   AMDF_MEDIA_COMMAND_OPERATION_PICTURE = 2,
+  /// Finishes a begun session. No further operation may be submitted to it.
+  /// Command retirement still precedes recording and session destruction.
   AMDF_MEDIA_COMMAND_OPERATION_END = 3,
 };
 

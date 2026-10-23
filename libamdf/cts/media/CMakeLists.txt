@@ -88,4 +88,91 @@ iree_native_test(
 )
 endif()
 
+iree_c_embed_data(
+  NAME
+    reference_main
+  SRCS
+    "reference_main.packet"
+  C_FILE_OUTPUT
+    "reference_main.c"
+  H_FILE_OUTPUT
+    "reference_main.h"
+  IDENTIFIER
+    "amdf_cts_media_reference_main"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    h264_fixture
+  HDRS
+    "h264_fixture.h"
+  SRCS
+    "h264_fixture.cc"
+  DEPS
+    ::reference_main
+    amdf::headers
+    iree::third_party::google_test
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+iree_cc_library(
+  NAME
+    h264_cases
+  SRCS
+    "h264_test.cc"
+  DEPS
+    ::h264_fixture
+    amdf::headers
+    iree::third_party::google_test
+    libamdf::cts::util::device_cache
+    libamdf::cts::util::mapped_memory
+    libamdf::cts::util::provider_headers
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+amdf_cts_binary(
+  NAME
+    h264_dynamic_bin
+  DATA
+    amdf::amdf
+  DEPS
+    ::h264_cases
+    amdf::headers
+    libamdf::cts::util::dynamic_provider
+    libamdf::cts::util::test_main
+  TESTONLY
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+iree_native_test(
+  NAME
+    "h264_dynamic"
+  ARGS
+    "--amdf_native_lifetime=process"
+    "--amdf_library={{$<TARGET_FILE:amdf::amdf>}}"
+  SRC
+    ::h264_dynamic_bin
+  DATA
+    "amdf::amdf"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

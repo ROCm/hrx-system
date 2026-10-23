@@ -17,6 +17,14 @@ static uint64_t amdf_media_drm_image_pitch(
   return (width + 255) & ~UINT64_C(255);
 }
 
+static uint32_t amdf_media_drm_image_rows(
+    const amdf_media_image_description_t* description) {
+  const uint32_t alignment =
+      (description->roles & AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE) != 0 ? 32
+                                                                         : 16;
+  return (description->height + alignment - 1) & ~(alignment - 1);
+}
+
 amdf_status_t AMDF_CALL amdf_media_drm_image_requirements(
     amdf_device_t* base, const amdf_media_image_description_t* description,
     amdf_media_image_requirements_t* out_requirements) {
@@ -34,7 +42,7 @@ amdf_status_t AMDF_CALL amdf_media_drm_image_requirements(
   }
   const amdf_media_drm_device_t* device = (const amdf_media_drm_device_t*)base;
   const uint64_t pitch = amdf_media_drm_image_pitch(description);
-  const uint64_t rows = (description->height + 15u) & ~15u;
+  const uint64_t rows = amdf_media_drm_image_rows(description);
   const uint64_t layer_length = pitch * (rows + rows / 2);
   if (description->array_layer_count >
       (device->address_end - device->address_begin) / layer_length) {
@@ -93,7 +101,8 @@ amdf_status_t AMDF_CALL amdf_media_drm_image_create(
   image->access_ordinal = create_info->media_access_ordinal;
   image->byte_offset = create_info->byte_offset;
   image->row_pitch = amdf_media_drm_image_pitch(&requirements.description);
-  image->allocated_height = (requirements.description.height + 15u) & ~15u;
+  image->allocated_height =
+      amdf_media_drm_image_rows(&requirements.description);
   image->layer_byte_length =
       requirements.byte_length / requirements.description.array_layer_count;
   *out_image = &image->base;
@@ -197,7 +206,7 @@ amdf_status_t amdf_media_drm_frame_prepare(
       (uint64_t)description->width *
       (description->format == AMDF_MEDIA_PIXEL_FORMAT_P010 ? 2u : 1u);
   for (uint32_t i = 0; amdf_status_is_ok(status) && i < 2; ++i) {
-    const uint64_t rows = ((description->height + 15u) & ~15u) >> i;
+    const uint64_t rows = amdf_media_drm_image_rows(description) >> i;
     if (planes[i].row_pitch < width || planes[i].row_pitch > UINT32_MAX ||
         planes[i].row_pitch % 256 != 0 ||
         planes[i].byte_length < planes[i].row_pitch * rows) {
@@ -208,6 +217,7 @@ amdf_status_t amdf_media_drm_frame_prepare(
           planes[i].byte_offset, planes[i].byte_length, &result.buffers[i],
           &result.addresses[i]);
       result.row_pitches[i] = (uint32_t)planes[i].row_pitch;
+      result.row_counts[i] = (uint32_t)rows;
     }
   }
   if (amdf_status_is_ok(status) &&
@@ -217,7 +227,7 @@ amdf_status_t amdf_media_drm_frame_prepare(
        (result.buffers[0] == result.buffers[1] &&
         result.addresses[1] - result.addresses[0] <
             (uint64_t)result.row_pitches[0] *
-                ((description->height + 15u) & ~15u)))) {
+                amdf_media_drm_image_rows(description)))) {
     status = amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
   if (amdf_status_is_ok(status)) {

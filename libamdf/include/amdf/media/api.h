@@ -137,8 +137,9 @@ typedef struct amdf_media_api_t {
   /// invalid argument.
   amdf_status_t(AMDF_CALL* command_destroy)(amdf_media_command_t* command);
 
-  /// Rejects retained command borrows with BUSY. Otherwise releases native
-  /// codec state without a hidden END submission. NULL is an invalid argument.
+  /// Rejects retained command borrows or a required BEGIN without its accepted
+  /// END with BUSY. Otherwise releases native codec state without submitting
+  /// work. NULL is an invalid argument.
   amdf_status_t(AMDF_CALL* session_destroy)(amdf_media_session_t* session);
 } amdf_media_api_t;
 

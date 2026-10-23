@@ -39,6 +39,8 @@ typedef struct amdf_media_drm_frame_t {
   uint64_t addresses[2];
   // Independently specified byte pitches for both component planes.
   uint32_t row_pitches[2];
+  // Native write footprint in rows, including codec-block padding.
+  uint32_t row_counts[2];
 } amdf_media_drm_frame_t;
 
 amdf_status_t AMDF_CALL amdf_media_drm_image_requirements(

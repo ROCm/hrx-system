@@ -125,6 +125,7 @@ iree_cc_library(
     libamdf::src::atomics
     libamdf::src::child_tracker
     libamdf::src::kernel_queue
+    libamdf::src::media::h264
     libamdf::src::platform::native_event
     libamdf::src::platform::wait
     libamdf::src::platform::windows::monitored_fence

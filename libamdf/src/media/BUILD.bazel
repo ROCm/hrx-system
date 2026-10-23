@@ -23,6 +23,13 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "h264",
+    srcs = ["h264.c"],
+    hdrs = ["h264.h"],
+    visibility = ["//libamdf/src/media:__subpackages__"],
+)
+
+amdf_cc_library(
     name = "extension",
     srcs = ["extension.c"],
     hdrs = ["extension.h"],

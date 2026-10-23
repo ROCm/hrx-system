@@ -1,0 +1,91 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "libamdf/src/media/h264.h"
+
+amdf_status_t amdf_media_h264_validate(
+    const amdf_media_configuration_t* configuration,
+    const amdf_media_h264_configuration_t* h264,
+    const amdf_media_h264_decode_picture_info_t* picture,
+    uint64_t compressed_byte_length) {
+  const amdf_media_h264_sequence_parameters_t* sequence = &picture->sequence;
+  const amdf_media_h264_picture_parameters_t* parameters = &picture->picture;
+  if (picture->scaling_matrices == NULL || picture->slice_count == 0 ||
+      picture->slices == NULL || picture->reference_count > 16 ||
+      (picture->reference_count != 0 && picture->references == NULL) ||
+      sequence->maximum_reference_frame_count > 16 ||
+      sequence->maximum_reference_frame_count + 1 >
+          configuration->reference_image_count ||
+      picture->reference_count > sequence->maximum_reference_frame_count ||
+      sequence->log2_max_frame_num_minus4 > 12 ||
+      sequence->picture_order_count_type > 2 ||
+      sequence->log2_max_picture_order_count_lsb_minus4 > 12 ||
+      (sequence->picture_order_count_type != 0 &&
+       sequence->log2_max_picture_order_count_lsb_minus4 != 0) ||
+      (sequence->picture_order_count_type != 1 &&
+       sequence->delta_picture_order_always_zero != 0) ||
+      sequence->delta_picture_order_always_zero > 1 ||
+      sequence->direct_8x8_inference > 1 || picture->is_reference > 1 ||
+      picture->is_intra > 1 || parameters->entropy_coding_mode > 1 ||
+      parameters->bottom_field_picture_order_present > 1 ||
+      parameters->default_reference_l0_count_minus1 > 31 ||
+      parameters->default_reference_l1_count_minus1 > 31 ||
+      parameters->weighted_prediction > 1 ||
+      parameters->weighted_biprediction > 2 ||
+      parameters->initial_qp_minus26 < -26 ||
+      parameters->initial_qp_minus26 > 25 ||
+      parameters->initial_qs_minus26 < -26 ||
+      parameters->initial_qs_minus26 > 25 ||
+      parameters->chroma_qp_index_offset < -12 ||
+      parameters->chroma_qp_index_offset > 12 ||
+      parameters->second_chroma_qp_index_offset < -12 ||
+      parameters->second_chroma_qp_index_offset > 12 ||
+      parameters->deblocking_filter_control_present > 1 ||
+      parameters->constrained_intra_prediction > 1 ||
+      parameters->redundant_picture_count_present > 1 ||
+      parameters->transform_8x8_mode > 1) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  if ((h264->profile != AMDF_MEDIA_H264_PROFILE_HIGH &&
+       parameters->transform_8x8_mode != 0) ||
+      (h264->profile == AMDF_MEDIA_H264_PROFILE_CONSTRAINED_BASELINE &&
+       (parameters->entropy_coding_mode != 0 ||
+        parameters->weighted_prediction != 0 ||
+        parameters->weighted_biprediction != 0))) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  const uint32_t maximum_frame_number =
+      1u << (sequence->log2_max_frame_num_minus4 + 4);
+  if (picture->frame_number >= maximum_frame_number) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+  }
+  for (uint32_t index = 0; index < picture->reference_count; ++index) {
+    const amdf_media_h264_reference_t* reference = &picture->references[index];
+    if (reference->binding.frame == NULL || reference->long_term > 1 ||
+        reference->frame_number > UINT16_MAX ||
+        (reference->long_term == 0 &&
+         reference->frame_number >= maximum_frame_number)) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+  }
+  uint64_t end = 0;
+  for (uint32_t index = 0; index < picture->slice_count; ++index) {
+    const amdf_media_h264_slice_t* slice = &picture->slices[index];
+    if (slice->byte_length < 4 || slice->byte_offset < end ||
+        slice->byte_offset > compressed_byte_length ||
+        slice->byte_length > compressed_byte_length - slice->byte_offset) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+    }
+    end = (uint64_t)slice->byte_offset + slice->byte_length;
+  }
+  const uint8_t* scaling = (const uint8_t*)picture->scaling_matrices;
+  for (uint32_t i = 0; i < sizeof(*picture->scaling_matrices); ++i) {
+    if (scaling[i] == 0) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+  }
+  return AMDF_STATUS_OK;
+}

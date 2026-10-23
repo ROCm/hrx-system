@@ -18,6 +18,13 @@ extern "C" {
 
 typedef struct amdf_media_drm_buffer_t amdf_media_drm_buffer_t;
 
+typedef struct amdf_media_drm_engine_t {
+  // Kernel hardware-IP selector for publication on this family.
+  uint32_t ip_type;
+  // Immutable native generation, rings, and command alignment.
+  struct drm_amdgpu_info_hw_ip information;
+} amdf_media_drm_engine_t;
+
 typedef struct amdf_media_drm_device_t {
   // Independently activated core media device and provider dispatch.
   amdf_media_device_t base;
@@ -36,12 +43,12 @@ typedef struct amdf_media_drm_device_t {
   // First native ownership failure; a compromised handle table cannot import
   // another alias whose ownership would no longer be represented.
   amdf_status_t memory_status;
-  // Native engine discovery and command alignment for the JPEG family.
-  struct drm_amdgpu_info_hw_ip jpeg;
-  // Native maximum JPEG dimensions, read from the driver's codec query.
-  struct drm_amdgpu_info_video_codec_info jpeg_limits;
-  // Immutable execution family exposed by this activation.
-  amdf_queue_family_info_t family;
+  // Native codec envelopes; advertising a schema also requires its lowering.
+  struct drm_amdgpu_info_video_caps decode_limits;
+  // Native engines indexed by the corresponding public family ordinal.
+  amdf_media_drm_engine_t engines[2];
+  // Immutable execution families exposed by this activation.
+  amdf_queue_family_info_t families[2];
 } amdf_media_drm_device_t;
 
 // Copies native query data into a caller-owned value before publication.
@@ -51,7 +58,7 @@ amdf_status_t amdf_media_drm_query(int descriptor, uint32_t query,
 
 // Validates a public configuration and answers exact native support.
 amdf_status_t amdf_media_drm_configuration(
-    amdf_media_drm_device_t* device,
+    amdf_media_drm_device_t* device, uint32_t family_ordinal,
     const amdf_media_configuration_t* configuration, const void* next,
     amdf_media_configuration_info_t* out_info);
 

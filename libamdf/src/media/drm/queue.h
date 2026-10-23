@@ -30,6 +30,8 @@ typedef struct amdf_media_drm_queue_t {
   uint32_t context;
   // Native ring selected from the admitted engine's available-ring mask.
   uint32_t ring;
+  // Native JPEG or unified VCN selector fixed at cold queue construction.
+  uint32_t ip_type;
   // Cold producer identity used for timeline observation and dependency import.
   amdf_media_drm_progress_t progress;
   // Original-job sync objects, indexed by submission modulo explicit capacity.

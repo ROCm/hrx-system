@@ -122,6 +122,9 @@ typedef struct amdf_media_configuration_info_t {
   amdf_media_configuration_reason_t reason;
   /// The queried envelope, unchanged by admission.
   amdf_media_configuration_t configuration;
+  /// Nonzero when this session needs explicit BEGIN before its first picture
+  /// and END after its last picture. Creation and destruction submit neither.
+  uint32_t requires_begin_end;
   /// Borrowed core scope for application-owned image heaps. Include this media
   /// device and every required peer in the core profile query/access set.
   amdf_memory_scope_t* image_heap_memory_scope;

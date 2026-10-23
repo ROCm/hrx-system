@@ -13,6 +13,7 @@ profile/format/dimension/reference admission is a separate query:
 | Provider | Decode schemas | Output storage |
 | --- | --- | --- |
 | Windows D3D12 | H264; HEVC Main and Main10, including compatible eight-bit syntax | NV12 or P010 according to actual sample depth; application-placed native images |
+| Linux DRM VCN | H264 on VCN 4 unified queues | Linear NV12 output and separate application-owned references |
 | Linux DRM JPEG | Eight-bit baseline sequential 4:2:0 JPEG on the layout-2 JPEG engine | Linear NV12 planes, directly or through a placed image identity |
 
 A native driver's broader codec list does not advertise schemas implemented by
@@ -43,6 +44,11 @@ A session owns native codec state and borrows one ordered queue. The application
 supplies the reference images and stable reference-slot indices. A reconstructed
 picture retains its slot until its last reference use; later pictures can reuse
 the retired slot. The session contains no image pool or reference scheduler.
+The exact configuration reports `requires_begin_end`. When set, the application
+submits an explicit BEGIN before its first picture and END after its last one.
+These operations share ordinary recording/retirement rules. Rejected publication
+changes no session state; accepted END prevents later submissions to that
+session. Construction and destruction publish no hidden firmware work.
 
 Each command is one reusable native recording. `command_prepare` consumes the
 caller's temporary parsed metadata and records into that owner. Compressed
@@ -80,7 +86,7 @@ allocation pool. Each hot operand resolves its already-established access
 ordinal directly. A failed native release quarantines that render file's memory
 ownership so another alias cannot accidentally close or reuse unresolved state.
 
-A JPEG publication is one DRM CS ioctl carrying the IB, residency, dependency
+A JPEG or VCN publication is one DRM CS ioctl carrying the IB, residency, dependency
 waits, and signals. Cold queue construction provisions one original-fence
 sync object per pending slot and one exportable timeline. Both signals attach
 the same job fence; no extra hardware signal job is introduced.
@@ -92,6 +98,14 @@ frontier. Sync-file export/query/close is an explicit retirement cost. Temporary
 observation failure leaves the point unretired; an original execution error is
 sticky and cannot be hidden by a later signaled point. Eventfd notification is a
 wake hint prompting that same status check.
+
+VCN sessions own firmware context, with charges reported by `session_query_info`;
+all output and reconstructed-reference images remain application-owned. One
+recording provisions the IB, parsed firmware message, and scaling tables in one
+native page. Preparation writes only that retired recording, and submission
+selects its provisioned residency list. Codec feedback is unavailable on these
+Linux decode paths; successful queue retirement is not reported as a codec
+success result.
 
 ## Compute integration
 

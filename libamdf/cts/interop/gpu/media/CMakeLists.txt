@@ -11,22 +11,6 @@ iree_add_all_subdirs()
 
 iree_c_embed_data(
   NAME
-    reference_main
-  SRCS
-    "reference_main.packet"
-  C_FILE_OUTPUT
-    "reference_main.c"
-  H_FILE_OUTPUT
-    "reference_main.h"
-  IDENTIFIER
-    "amdf_cts_media_reference_main"
-  TESTONLY
-  FLATTEN
-  PUBLIC
-)
-
-iree_c_embed_data(
-  NAME
     hevc_inputs
   SRCS
     "hevc10.packet"
@@ -98,9 +82,9 @@ iree_cc_library(
     "h264_test.cc"
   DEPS
     ::decode_fixture
-    ::reference_main
     amdf::headers
     iree::third_party::google_test
+    libamdf::cts::media::h264_fixture
   TESTONLY
   ALWAYSLINK
   PUBLIC

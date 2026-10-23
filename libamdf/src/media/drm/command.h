@@ -26,8 +26,16 @@ typedef struct amdf_media_drm_command_t {
   uint32_t byte_length;
   // Provisioned bound for application-authored identity activations.
   uint32_t maximum_activation_count;
+  // Parsed slice bound admitted by the provisioned recording.
+  uint32_t maximum_slice_count;
+  // Reference operand bound provisioned in the trailing residency storage.
+  uint32_t maximum_reference_count;
   // Native BO residency list; duplicate operands are legal in this protocol.
-  struct drm_amdgpu_bo_list_entry buffers[4];
+  struct drm_amdgpu_bo_list_entry* buffers;
+  // Initialized residency prefix consumed by the publication ioctl.
+  uint32_t buffer_count;
+  // Explicit operation selected during successful preparation.
+  amdf_media_command_operation_t operation;
   // Last accepted point borrowing the recording and all its operands.
   uint64_t submission;
 } amdf_media_drm_command_t;

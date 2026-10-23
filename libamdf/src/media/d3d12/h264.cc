@@ -6,96 +6,15 @@
 
 #include "libamdf/src/media/d3d12/h264.h"
 
+#include "libamdf/src/media/h264.h"
+
 namespace amdf::media::d3d12 {
 
 amdf_status_t ValidateH264(const Session& session,
                            const amdf_media_h264_decode_picture_info_t& picture,
                            uint64_t compressed_byte_length) {
-  const auto& sequence = picture.sequence;
-  const auto& parameters = picture.picture;
-  if (picture.scaling_matrices == nullptr || picture.slice_count == 0 ||
-      picture.slices == nullptr || picture.reference_count > 16 ||
-      (picture.reference_count != 0 && picture.references == nullptr) ||
-      sequence.maximum_reference_frame_count > 16 ||
-      sequence.maximum_reference_frame_count + 1 >
-          session.info.configuration.reference_image_count ||
-      picture.reference_count > sequence.maximum_reference_frame_count ||
-      sequence.log2_max_frame_num_minus4 > 12 ||
-      sequence.picture_order_count_type > 2 ||
-      sequence.log2_max_picture_order_count_lsb_minus4 > 12 ||
-      (sequence.picture_order_count_type != 0 &&
-       sequence.log2_max_picture_order_count_lsb_minus4 != 0) ||
-      (sequence.picture_order_count_type != 1 &&
-       sequence.delta_picture_order_always_zero != 0) ||
-      sequence.delta_picture_order_always_zero > 1 ||
-      sequence.direct_8x8_inference > 1 || picture.is_reference > 1 ||
-      picture.is_intra > 1 || parameters.entropy_coding_mode > 1 ||
-      parameters.bottom_field_picture_order_present > 1 ||
-      parameters.default_reference_l0_count_minus1 > 31 ||
-      parameters.default_reference_l1_count_minus1 > 31 ||
-      parameters.weighted_prediction > 1 ||
-      parameters.weighted_biprediction > 2 ||
-      parameters.initial_qp_minus26 < -26 ||
-      parameters.initial_qp_minus26 > 25 ||
-      parameters.initial_qs_minus26 < -26 ||
-      parameters.initial_qs_minus26 > 25 ||
-      parameters.chroma_qp_index_offset < -12 ||
-      parameters.chroma_qp_index_offset > 12 ||
-      parameters.second_chroma_qp_index_offset < -12 ||
-      parameters.second_chroma_qp_index_offset > 12 ||
-      parameters.deblocking_filter_control_present > 1 ||
-      parameters.constrained_intra_prediction > 1 ||
-      parameters.redundant_picture_count_present > 1 ||
-      parameters.transform_8x8_mode > 1) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-  }
-  if ((session.h264.profile != AMDF_MEDIA_H264_PROFILE_HIGH &&
-       parameters.transform_8x8_mode != 0) ||
-      (session.h264.profile == AMDF_MEDIA_H264_PROFILE_CONSTRAINED_BASELINE &&
-       (parameters.entropy_coding_mode != 0 ||
-        parameters.weighted_prediction != 0 ||
-        parameters.weighted_biprediction != 0))) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-  }
-  const uint32_t maximum_frame_number =
-      1u << (sequence.log2_max_frame_num_minus4 + 4);
-  if (picture.frame_number >= maximum_frame_number) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
-  }
-  for (uint32_t index = 0; index < picture.reference_count; ++index) {
-    const auto& reference = picture.references[index];
-    if (reference.binding.frame == nullptr || reference.long_term > 1 ||
-        reference.frame_number > UINT16_MAX ||
-        (reference.long_term == 0 &&
-         reference.frame_number >= maximum_frame_number)) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-    }
-  }
-  uint64_t end = 0;
-  for (uint32_t index = 0; index < picture.slice_count; ++index) {
-    const auto& slice = picture.slices[index];
-    if (slice.byte_length < 4 || slice.byte_offset < end ||
-        slice.byte_offset > compressed_byte_length ||
-        slice.byte_length > compressed_byte_length - slice.byte_offset) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
-    }
-    end = uint64_t(slice.byte_offset) + slice.byte_length;
-  }
-  for (const auto& matrix : picture.scaling_matrices->scaling_4x4) {
-    for (uint8_t value : matrix) {
-      if (value == 0) {
-        return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-      }
-    }
-  }
-  for (const auto& matrix : picture.scaling_matrices->scaling_8x8) {
-    for (uint8_t value : matrix) {
-      if (value == 0) {
-        return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-      }
-    }
-  }
-  return AMDF_STATUS_OK;
+  return amdf_media_h264_validate(&session.info.configuration, &session.h264,
+                                  &picture, compressed_byte_length);
 }
 
 void LowerH264(const Session& session, uint32_t current_reference_slot,

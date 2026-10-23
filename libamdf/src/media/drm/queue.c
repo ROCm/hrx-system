@@ -388,7 +388,10 @@ amdf_status_t AMDF_CALL amdf_media_drm_queue_create(
   // Both original and timeline signals attach the same native job fence. No
   // additional hardware submission or host signaling operation is introduced.
   queue->progress.base.signal_operation_count = 0;
-  queue->ring = (uint32_t)__builtin_ctz(device->jpeg.available_rings);
+  const amdf_media_drm_engine_t* engine =
+      &device->engines[create_info->queue_family_ordinal];
+  queue->ring = (uint32_t)__builtin_ctz(engine->information.available_rings);
+  queue->ip_type = engine->ip_type;
   queue->original_fences = (uint32_t*)(queue + 1);
   queue->waits = (struct drm_amdgpu_cs_chunk_syncobj*)((uint8_t*)(queue + 1) +
                                                        fence_bytes);
@@ -474,6 +477,15 @@ amdf_status_t AMDF_CALL amdf_media_drm_queue_submit(
       status = amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
     }
   }
+  if (amdf_status_is_ok(status) && queue->ip_type != AMDGPU_HW_IP_VCN_JPEG) {
+    const amdf_media_command_operation_t prior = command->session->operation;
+    const bool valid = command->operation == AMDF_MEDIA_COMMAND_OPERATION_BEGIN
+                           ? prior == 0
+                           : prior == AMDF_MEDIA_COMMAND_OPERATION_BEGIN;
+    if (!valid) {
+      status = amdf_make_api_status(AMDF_STATUS_CODE_FAILED_PRECONDITION);
+    }
+  }
   if (amdf_status_is_ok(status)) {
     const uint64_t submission = submitted + 1;
     for (uint32_t i = 0; i < submission_info->wait_count; ++i) {
@@ -487,11 +499,11 @@ amdf_status_t AMDF_CALL amdf_media_drm_queue_submit(
     const struct drm_amdgpu_cs_chunk_ib ib = {
         .va_start = command->storage->address,
         .ib_bytes = command->byte_length,
-        .ip_type = AMDGPU_HW_IP_VCN_JPEG,
+        .ip_type = queue->ip_type,
         .ring = queue->ring,
     };
     const struct drm_amdgpu_bo_list_in residency = {
-        .bo_number = 4,
+        .bo_number = command->buffer_count,
         .bo_info_size = sizeof(command->buffers[0]),
         .bo_info_ptr = (uintptr_t)command->buffers,
     };
@@ -528,6 +540,10 @@ amdf_status_t AMDF_CALL amdf_media_drm_queue_submit(
       status = amdf_linux_error(errno);
     } else {
       command->submission = submission;
+      if (queue->ip_type != AMDGPU_HW_IP_VCN_JPEG &&
+          command->operation != AMDF_MEDIA_COMMAND_OPERATION_PICTURE) {
+        command->session->operation = command->operation;
+      }
       amdf_kernel_queue_dependency_record_waits(
           submission_info->wait_count, submission_info->waits, submission);
       amdf_atomic_uint64_store_release(&queue->submitted, submission);

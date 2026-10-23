@@ -162,6 +162,7 @@ constexpr amdf_device_vtable_t kDevice = {.query_info = QueryDevice};
 
 class MediaQueueTest : public ::testing::Test {
  protected:
+  virtual uint32_t EngineType() { return AMDGPU_HW_IP_VCN_JPEG; }
   void SetUp() override {
     native_queue = &native_;
     device_.base.base.vtable = &kDevice;
@@ -175,7 +176,8 @@ class MediaQueueTest : public ::testing::Test {
     };
     amdf_child_tracker_initialize(&device_.base.base.children);
     device_.descriptor = 17;
-    device_.jpeg.available_rings = 1;
+    device_.engines[0].ip_type = EngineType();
+    device_.engines[0].information.available_rings = 1;
     const amdf_media_kernel_queue_create_info_t create = {
         .maximum_pending_submission_count = 4,
     };
@@ -282,6 +284,50 @@ TEST_F(MediaQueueTest, SignaledTimelineCannotHideAnOriginalJobFailure) {
   EXPECT_EQ(status.terminal_status, amdf_linux_error(EIO));
   uint64_t accepted = 0;
   EXPECT_EQ(Submit(3, &accepted), amdf_linux_error(EIO));
+  EXPECT_EQ(accepted, 0u);
+  EXPECT_EQ(native_.submissions, 3u);
+}
+
+class MediaVideoQueueTest : public MediaQueueTest {
+ protected:
+  uint32_t EngineType() override { return AMDGPU_HW_IP_VCN_ENC; }
+};
+
+TEST_F(MediaVideoQueueTest,
+       RejectedControlPublicationPreservesSessionLifetime) {
+  amdf_media_drm_session_t session = {};
+  session.base.queue = queue_;
+  commands_[0].session = &session;
+  commands_[0].operation = AMDF_MEDIA_COMMAND_OPERATION_BEGIN;
+  commands_[1].session = &session;
+  commands_[1].operation = AMDF_MEDIA_COMMAND_OPERATION_PICTURE;
+  commands_[2].session = &session;
+  commands_[2].operation = AMDF_MEDIA_COMMAND_OPERATION_END;
+  uint64_t accepted = 0;
+  native_.submit_error = EBUSY;
+  EXPECT_EQ(Submit(0, &accepted), amdf_linux_error(EBUSY));
+  EXPECT_EQ(accepted, 0u);
+  native_.submit_error = 0;
+  EXPECT_EQ(Submit(1, &accepted),
+            amdf_make_api_status(AMDF_STATUS_CODE_FAILED_PRECONDITION));
+  EXPECT_EQ(native_.submissions, 0u);
+  ASSERT_EQ(Submit(0, &accepted), AMDF_STATUS_OK);
+  EXPECT_EQ(accepted, 1u);
+  accepted = 0;
+  native_.submit_error = EBUSY;
+  EXPECT_EQ(Submit(2, &accepted), amdf_linux_error(EBUSY));
+  EXPECT_EQ(accepted, 0u);
+  native_.submit_error = 0;
+  ASSERT_EQ(Submit(1, &accepted), AMDF_STATUS_OK);
+  EXPECT_EQ(accepted, 2u);
+  ASSERT_EQ(Submit(2, &accepted), AMDF_STATUS_OK);
+  EXPECT_EQ(accepted, 3u);
+  native_.completed = 3;
+  auto status = Snapshot();
+  ASSERT_EQ(amdf_kernel_queue_refresh_status(queue_, &status), AMDF_STATUS_OK);
+  accepted = 0;
+  EXPECT_EQ(Submit(1, &accepted),
+            amdf_make_api_status(AMDF_STATUS_CODE_FAILED_PRECONDITION));
   EXPECT_EQ(accepted, 0u);
   EXPECT_EQ(native_.submissions, 3u);
 }
