@@ -1,0 +1,305 @@
+// Split sparse decode attention across eight independent key partitions.
+// Each wave reads four adjacent cache members together; a second dispatch
+// merges F32 softmax statistics before the existing BF16 output publication.
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+config.decl @flash_next.context_capacity : %value: index where [range(%value, 64, 262144), multiple_of(%value, 64)]
+
+config.decl @flash_next.pool_capacity : %value: index where [range(%value, 64, 4194304), multiple_of(%value, 64)]
+
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
+func.decl @flash_next_token_binding(%mapping: buffer, %token: index) -> (index, index, index, index)
+
+func.decl @flash_next_physical_token(%rows: buffer, %row: index, %position: index) -> (index)
+
+func.decl @flash_next_cache_origin(%rows: buffer, %row: index, %plane_origin: offset) -> (offset)
+
+func.decl @flash_next_row_state(%rows: buffer, %row: index, %position: index, %layer_origin: offset) -> (offset, offset)
+
+amdgpu.target<gfx11-generic> @qsa_split_wave32 {subgroup_size = 32}
+
+kernel.def target(@qsa_split_wave32) @qsa_attention_partial() {
+  %heads = index.constant 24 : index
+  %tokens = config.get @flash_next.token_count : index
+  %waves = index.constant 8 : index
+  %wave_size = index.constant 32 : index
+  %threads = index.mul %waves, %wave_size : index
+  %c1 = index.constant 1 : index
+  %splits = index.constant 8 : index
+  kernel.launch.config workgroups(%heads, %tokens, %splits) workgroup_size(%threads, %c1, %c1) : index
+} launch(%key_origin: offset, %value_origin: offset, %span: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %query_gate: buffer, %arena: buffer, %selected_blocks: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %capacity = config.get @flash_next.context_capacity : index
+  %header_origin = index.constant 0 : offset
+  %header = buffer.view %span[%header_origin] : buffer -> view<3xi32>
+  %count_word = view.load %header[0] : view<3xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %end = index.assume %count_value [range(%count_value, 0, %tokens)] : index
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %head = kernel.workgroup.id<x> : index
+    %lane = kernel.subgroup.lane.id : index
+    %wave = kernel.subgroup.id : index
+    %partitions = index.constant 8 : index
+    %split = kernel.workgroup.id<z> : index
+    %split_count = index.constant 8 : index
+    %first_block = index.madd %split, %partitions, %wave : index
+    %block_stride = index.mul %split_count, %partitions : index
+    %c0_index = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c4 = index.constant 4 : index
+    %c8 = index.constant 8 : index
+    %c12 = index.constant 12 : index
+    %width = index.constant 256 : index
+    %channel = index.mul %lane, %c8 : index
+    %gate_channel = index.add %width, %channel : index
+    %kv_head = index.div %head, %c12 : index
+    %position, %row, %begin, %first = func.call @flash_next_token_binding(%mapping, %token) : (buffer, index) -> (index, index, index, index)
+    %key_base = func.call @flash_next_cache_origin(%rows, %row, %key_origin) : (buffer, index, offset) -> (offset)
+    %value_base = func.call @flash_next_cache_origin(%rows, %row, %value_origin) : (buffer, index, offset) -> (offset)
+    %pool = config.get @flash_next.pool_capacity : index
+    %visible_value = index.add %position, %c1 : index
+    %visible = index.assume %visible_value [range(%visible_value, 1, %capacity)] : index
+    %origin = index.constant 0 : offset
+    %query_view = buffer.view %queries[%origin] : buffer -> view<[%tokens]x24x256xbf16>
+    %gate_view = buffer.view %query_gate[%origin] : buffer -> view<[%tokens]x24x512xbf16>
+    %blocks = index.div %pool, %c4 : index
+    %key_view = buffer.view %arena[%key_base] : buffer -> view<[%blocks]x2x16x4x16xbf16>
+    %value_layout = encoding.layout.strided [2048, 1024, 1, 4] : encoding<layout>
+    %value_view = buffer.view %arena[%value_base] : buffer -> view<[%blocks]x2x4x256xbf16, %value_layout>
+    %ids_view = buffer.view %selected_blocks[%origin] : buffer -> view<[%tokens]x512xi32>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x24x8x258xf32>
+    %query = vector.load %query_view[%token, %head, %channel] : view<[%tokens]x24x256xbf16> -> vector<8xbf16>
+    %budget = index.constant 512 : index
+    %complete = index.div %visible, %c4 : index
+    %sparse = index.cmp ugt, %complete, %budget : index
+    %selected_block_count = scf.select %sparse, %budget, %complete : index
+    %selected_block_tokens = index.mul %selected_block_count, %c4 : index
+    %tail_tokens = index.rem %visible, %c4 : index
+    %selected_tokens = index.add %selected_block_tokens, %tail_tokens : index
+    %tail_origin = index.mul %complete, %c4 : index
+    %few_tokens = index.cmp ult, %selected_tokens, %partitions : index
+    %live_partitions = scf.select %few_tokens, %selected_tokens, %partitions : index
+    %c0 = scalar.constant 0.0 : f32
+    %initial_maximum = scalar.constant -3.4028234660000002e+38 : f32
+    %c0v = vector.constant 0.0 : vector<8xf32>
+    %dot_zeros = vector.constant 0.0 : vector<4xf32>
+    %scale = scalar.constant 0.0625 : f32
+    %value_panel_view = buffer.view %arena[%value_base] : buffer -> view<[%blocks]x2x256x4xbf16>
+    // Each selected complete block is four adjacent members of one physical page.
+    %block_maximum, %block_denominator, %block_accumulated = scf.for %block_slot = [%first_block to %selected_block_count step %block_stride](%old_maximum = %initial_maximum : f32, %old_denominator = %c0 : f32, %old_accumulated = %c0v : vector<8xf32>) -> (f32, f32, vector<8xf32>) {
+      %id = view.load %ids_view[%token, %block_slot] : view<[%tokens]x512xi32> -> i32
+      %logical_block = index.cast %id : i32 to index
+      %logical_begin_value = index.mul %logical_block, %c4 : index
+      %logical_begin = index.assume %logical_begin_value [lt(%logical_begin_value, %visible)] : index
+      %physical_begin = func.call @flash_next_physical_token(%rows, %row, %logical_begin) : (buffer, index, index) -> (index)
+      %physical_block = index.div %physical_begin, %c4 : index
+      %group_width = index.constant 16 : index
+      %channel_group = index.div %channel, %group_width : index
+      %channel_component = index.rem %channel, %group_width : index
+      %key_panel = vector.load %key_view[%physical_block, %kv_head, %channel_group, 0, %channel_component] : view<[%blocks]x2x16x4x16xbf16> -> vector<4x8xbf16>
+      %value_panel = vector.load %value_panel_view[%physical_block, %kv_head, %channel, 0] : view<[%blocks]x2x256x4xbf16> -> vector<8x4xbf16>
+      %value_panel_f32 = vector.extf %value_panel : vector<8x4xbf16> to vector<8x4xf32>
+      %values_by_key = vector.transpose<[1, 0]> %value_panel_f32 : vector<8x4xf32> -> vector<4x8xf32>
+      %key0 = vector.extract %key_panel[0] : vector<4x8xbf16> -> vector<8xbf16>
+      %pairs0 = vector.dot2f %query, %key0, %dot_zeros : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+      %partial0 = vector.reduce<addf> %pairs0, %c0 : vector<4xf32>, f32
+      %dot0 = kernel.subgroup.reduce<addf> %partial0 : f32
+      %logit0 = scalar.mulf %dot0, %scale : f32
+      %key1 = vector.extract %key_panel[1] : vector<4x8xbf16> -> vector<8xbf16>
+      %pairs1 = vector.dot2f %query, %key1, %dot_zeros : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+      %partial1 = vector.reduce<addf> %pairs1, %c0 : vector<4xf32>, f32
+      %dot1 = kernel.subgroup.reduce<addf> %partial1 : f32
+      %logit1 = scalar.mulf %dot1, %scale : f32
+      %key2 = vector.extract %key_panel[2] : vector<4x8xbf16> -> vector<8xbf16>
+      %pairs2 = vector.dot2f %query, %key2, %dot_zeros : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+      %partial2 = vector.reduce<addf> %pairs2, %c0 : vector<4xf32>, f32
+      %dot2 = kernel.subgroup.reduce<addf> %partial2 : f32
+      %logit2 = scalar.mulf %dot2, %scale : f32
+      %key3 = vector.extract %key_panel[3] : vector<4x8xbf16> -> vector<8xbf16>
+      %pairs3 = vector.dot2f %query, %key3, %dot_zeros : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+      %partial3 = vector.reduce<addf> %pairs3, %c0 : vector<4xf32>, f32
+      %dot3 = kernel.subgroup.reduce<addf> %partial3 : f32
+      %logit3 = scalar.mulf %dot3, %scale : f32
+      %maximum01 = scalar.maxnumf %logit0, %logit1 : f32
+      %maximum23 = scalar.maxnumf %logit2, %logit3 : f32
+      %panel_maximum = scalar.maxnumf %maximum01, %maximum23 : f32
+      %new_maximum = scalar.maxnumf %old_maximum, %panel_maximum : f32
+      %old_delta = scalar.subf %old_maximum, %new_maximum : f32
+      %rescale = scalar.expf<afn> %old_delta : f32
+      %rescale_vector = vector.splat %rescale : vector<8xf32>
+      %previous = vector.mulf %old_accumulated, %rescale_vector : vector<8xf32>
+      %delta0 = scalar.subf %logit0, %new_maximum : f32
+      %weight0 = scalar.expf<afn> %delta0 : f32
+      %delta1 = scalar.subf %logit1, %new_maximum : f32
+      %weight1 = scalar.expf<afn> %delta1 : f32
+      %delta2 = scalar.subf %logit2, %new_maximum : f32
+      %weight2 = scalar.expf<afn> %delta2 : f32
+      %delta3 = scalar.subf %logit3, %new_maximum : f32
+      %weight3 = scalar.expf<afn> %delta3 : f32
+      %sum0 = scalar.fmaf %old_denominator, %rescale, %weight0 : f32
+      %sum1 = scalar.addf %sum0, %weight1 : f32
+      %sum2 = scalar.addf %sum1, %weight2 : f32
+      %sum3 = scalar.addf %sum2, %weight3 : f32
+      %values0 = vector.extract %values_by_key[0] : vector<4x8xf32> -> vector<8xf32>
+      %weight_vector0 = vector.splat %weight0 : vector<8xf32>
+      %accumulated0 = vector.fmaf %values0, %weight_vector0, %previous : vector<8xf32>
+      %values1 = vector.extract %values_by_key[1] : vector<4x8xf32> -> vector<8xf32>
+      %weight_vector1 = vector.splat %weight1 : vector<8xf32>
+      %accumulated1 = vector.fmaf %values1, %weight_vector1, %accumulated0 : vector<8xf32>
+      %values2 = vector.extract %values_by_key[2] : vector<4x8xf32> -> vector<8xf32>
+      %weight_vector2 = vector.splat %weight2 : vector<8xf32>
+      %accumulated2 = vector.fmaf %values2, %weight_vector2, %accumulated1 : vector<8xf32>
+      %values3 = vector.extract %values_by_key[3] : vector<4x8xf32> -> vector<8xf32>
+      %weight_vector3 = vector.splat %weight3 : vector<8xf32>
+      %accumulated3 = vector.fmaf %values3, %weight_vector3, %accumulated2 : vector<8xf32>
+      scf.yield %new_maximum, %sum3, %accumulated3 : f32, f32, vector<8xf32>
+    }
+    // A single wave consumes only the published members of the incomplete block.
+    %tail_owner = index.cmp eq, %first_block, %c0_index : index
+    %tail_end = scf.select %tail_owner, %tail_tokens, %c0_index : index
+    %maximum, %denominator, %accumulated = scf.for %member = [%c0_index to %tail_end step %c1](%old_maximum = %block_maximum : f32, %old_denominator = %block_denominator : f32, %old_accumulated = %block_accumulated : vector<8xf32>) -> (f32, f32, vector<8xf32>) {
+      %key_position = index.add %tail_origin, %member : index
+      %logical_token = index.assume %key_position [lt(%key_position, %visible)] : index
+      %key_token = func.call @flash_next_physical_token(%rows, %row, %logical_token) : (buffer, index, index) -> (index)
+      %group_width = index.constant 16 : index
+      %physical_block = index.div %key_token, %c4 : index
+      %physical_member = index.rem %key_token, %c4 : index
+      %channel_group = index.div %channel, %group_width : index
+      %channel_component = index.rem %channel, %group_width : index
+      %key = vector.load %key_view[%physical_block, %kv_head, %channel_group, %physical_member, %channel_component] : view<[%blocks]x2x16x4x16xbf16> -> vector<8xbf16>
+      %pairs = vector.dot2f %query, %key, %dot_zeros : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
+      %partial = vector.reduce<addf> %pairs, %c0 : vector<4xf32>, f32
+      %dot = kernel.subgroup.reduce<addf> %partial : f32
+      %logit = scalar.mulf %dot, %scale : f32
+      %new_maximum = scalar.maxnumf %logit, %old_maximum : f32
+      %old_delta = scalar.subf %old_maximum, %new_maximum : f32
+      %new_delta = scalar.subf %logit, %new_maximum : f32
+      %rescale = scalar.expf<afn> %old_delta : f32
+      %weight = scalar.expf<afn> %new_delta : f32
+      %new_denominator = scalar.fmaf %old_denominator, %rescale, %weight : f32
+      %packed = vector.load %value_view[%physical_block, %kv_head, %physical_member, %channel] : view<[%blocks]x2x4x256xbf16, %value_layout> -> vector<8xbf16>
+      %values = vector.extf %packed : vector<8xbf16> to vector<8xf32>
+      %rescale_vector = vector.splat %rescale : vector<8xf32>
+      %weight_vector = vector.splat %weight : vector<8xf32>
+      %previous = vector.mulf %old_accumulated, %rescale_vector : vector<8xf32>
+      %new_accumulated = vector.fmaf %values, %weight_vector, %previous : vector<8xf32>
+      scf.yield %new_maximum, %new_denominator, %new_accumulated : f32, f32, vector<8xf32>
+    }
+    %partial_row_bytes = index.constant 1024 : offset
+    %statistics_row_bytes = index.constant 8 : offset
+    %partial_bytes = index.scale %partitions, %partial_row_bytes : index, offset -> offset
+    %statistics_bytes = index.scale %partitions, %statistics_row_bytes : index, offset -> offset
+    %scratch_bytes = index.add %partial_bytes, %statistics_bytes : offset
+    %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+    %partials = buffer.view %scratch[%origin] : buffer -> view<[%partitions]x256xf32>
+    %statistics = buffer.view %scratch[%partial_bytes] : buffer -> view<[%partitions]x2xf32>
+    vector.store %accumulated, %partials[%wave, %channel] : vector<8xf32>, view<[%partitions]x256xf32>
+    %leader = index.cmp eq, %lane, %c0_index : index
+    scf.if %leader {
+      view.store %maximum, %statistics[%wave, 0] : f32, view<[%partitions]x2xf32>
+      view.store %denominator, %statistics[%wave, 1] : f32, view<[%partitions]x2xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %writer = index.cmp eq, %wave, %c0_index : index
+    scf.if %writer {
+      %merged_maximum, %merged_denominator, %merged_accumulated = scf.for %part = [%c0_index to %live_partitions step %c1](%old_maximum = %initial_maximum : f32, %old_denominator = %c0 : f32, %old_accumulated = %c0v : vector<8xf32>) -> (f32, f32, vector<8xf32>) {
+        %part_maximum = view.load %statistics[%part, 0] : view<[%partitions]x2xf32> -> f32
+        %part_denominator = view.load %statistics[%part, 1] : view<[%partitions]x2xf32> -> f32
+        %part_accumulated = vector.load %partials[%part, %channel] : view<[%partitions]x256xf32> -> vector<8xf32>
+        %next_maximum = scalar.maxnumf %old_maximum, %part_maximum : f32
+        %old_delta = scalar.subf %old_maximum, %next_maximum : f32
+        %part_delta = scalar.subf %part_maximum, %next_maximum : f32
+        %old_scale = scalar.expf<afn> %old_delta : f32
+        %part_scale = scalar.expf<afn> %part_delta : f32
+        %old_weight = scalar.mulf %old_denominator, %old_scale : f32
+        %next_denominator = scalar.fmaf %part_denominator, %part_scale, %old_weight : f32
+        %old_scale_vector = vector.splat %old_scale : vector<8xf32>
+        %part_scale_vector = vector.splat %part_scale : vector<8xf32>
+        %previous = vector.mulf %old_accumulated, %old_scale_vector : vector<8xf32>
+        %next_accumulated = vector.fmaf %part_accumulated, %part_scale_vector, %previous : vector<8xf32>
+        scf.yield %next_maximum, %next_denominator, %next_accumulated : f32, f32, vector<8xf32>
+      }
+      vector.store %merged_accumulated, %output_view[%token, %head, %split, %channel] : vector<8xf32>, view<[%tokens]x24x8x258xf32>
+      scf.if %leader {
+        view.store %merged_maximum, %output_view[%token, %head, %split, 256] : f32, view<[%tokens]x24x8x258xf32>
+        view.store %merged_denominator, %output_view[%token, %head, %split, 257] : f32, view<[%tokens]x24x8x258xf32>
+      }
+    }
+  }
+  kernel.return
+}
+
+kernel.def target(@qsa_split_wave32) @qsa_attention_merge() {
+  %heads = index.constant 24 : index
+  %tokens = config.get @flash_next.token_count : index
+  %threads = index.constant 32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%span: buffer, %query_gate: buffer, %partial_buffer: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+  %token = kernel.workgroup.id<y> : index
+  %active = index.cmp ult, %token, %end : index
+  scf.if %active {
+    %head = kernel.workgroup.id<x> : index
+    %lane = kernel.subgroup.lane.id : index
+    %c0_index = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c8 = index.constant 8 : index
+    %width = index.constant 256 : index
+    %channel = index.mul %lane, %c8 : index
+    %gate_channel = index.add %width, %channel : index
+    %splits = index.constant 8 : index
+    %origin = index.constant 0 : offset
+    %partials = buffer.view %partial_buffer[%origin] : buffer -> view<[%tokens]x24x8x258xf32>
+    %gate_view = buffer.view %query_gate[%origin] : buffer -> view<[%tokens]x24x512xbf16>
+    %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x24x256xbf16>
+    %c0 = scalar.constant 0.0 : f32
+    %initial_maximum = scalar.constant -3.4028234660000002e+38 : f32
+    %c0v = vector.constant 0.0 : vector<8xf32>
+    %merged_maximum, %merged_denominator, %merged_accumulated = scf.for %part = [%c0_index to %splits step %c1](%old_maximum = %initial_maximum : f32, %old_denominator = %c0 : f32, %old_accumulated = %c0v : vector<8xf32>) -> (f32, f32, vector<8xf32>) {
+      %part_maximum = view.load %partials[%token, %head, %part, 256] : view<[%tokens]x24x8x258xf32> -> f32
+      %part_denominator = view.load %partials[%token, %head, %part, 257] : view<[%tokens]x24x8x258xf32> -> f32
+      %part_accumulated = vector.load %partials[%token, %head, %part, %channel] : view<[%tokens]x24x8x258xf32> -> vector<8xf32>
+      %next_maximum = scalar.maxnumf %old_maximum, %part_maximum : f32
+      %old_delta = scalar.subf %old_maximum, %next_maximum : f32
+      %part_delta = scalar.subf %part_maximum, %next_maximum : f32
+      %old_scale = scalar.expf<afn> %old_delta : f32
+      %part_scale = scalar.expf<afn> %part_delta : f32
+      %old_weight = scalar.mulf %old_denominator, %old_scale : f32
+      %next_denominator = scalar.fmaf %part_denominator, %part_scale, %old_weight : f32
+      %old_scale_vector = vector.splat %old_scale : vector<8xf32>
+      %part_scale_vector = vector.splat %part_scale : vector<8xf32>
+      %previous = vector.mulf %old_accumulated, %old_scale_vector : vector<8xf32>
+      %next_accumulated = vector.fmaf %part_accumulated, %part_scale_vector, %previous : vector<8xf32>
+      scf.yield %next_maximum, %next_denominator, %next_accumulated : f32, f32, vector<8xf32>
+    }
+    %merged_denominators = vector.splat %merged_denominator : vector<8xf32>
+    %weighted = vector.divf %merged_accumulated, %merged_denominators : vector<8xf32>
+    %attention_bf16 = vector.fptrunc %weighted : vector<8xf32> to vector<8xbf16>
+    %attention = vector.extf %attention_bf16 : vector<8xbf16> to vector<8xf32>
+    %gate_packed = vector.load %gate_view[%token, %head, %gate_channel] : view<[%tokens]x24x512xbf16> -> vector<8xbf16>
+    %gate = vector.extf %gate_packed : vector<8xbf16> to vector<8xf32>
+    %negative = vector.negf %gate : vector<8xf32>
+    %exponential = vector.expf<afn> %negative : vector<8xf32>
+    %c1v = vector.constant 1.0 : vector<8xf32>
+    %gate_denominator = vector.addf %c1v, %exponential : vector<8xf32>
+    %gated = vector.divf %attention, %gate_denominator : vector<8xf32>
+    %output_packed = vector.fptrunc %gated : vector<8xf32> to vector<8xbf16>
+    vector.store %output_packed, %output_view[%token, %head, %channel] : vector<8xbf16>, view<[%tokens]x24x256xbf16>
+  }
+  kernel.return
+}
+
+command.program.def public @qsa_split_attention(%key_origin: offset, %value_origin: offset) launch(%span: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %query_gate: buffer, %arena: buffer, %selected_blocks: buffer, %output: buffer) {
+  %tokens = config.get @flash_next.token_count : index
+  %partial_row_bytes = index.constant 198144 : offset
+  %partial_bytes = index.scale %tokens, %partial_row_bytes : index, offset -> offset
+  %partials = buffer.alloca<global> align(16) %partial_bytes : buffer
+  kernel.launch @qsa_attention_partial(%key_origin, %value_origin, %span, %mapping, %rows, %queries, %query_gate, %arena, %selected_blocks, %partials) : (offset, offset, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @qsa_attention_merge(%span, %query_gate, %partials, %output) : (buffer, buffer, buffer, buffer)
+  command.return
+}

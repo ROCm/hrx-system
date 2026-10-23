@@ -1,3 +1,5 @@
+command.program.decl @qsa_split_attention(%key_origin: offset, %value_origin: offset) launch(%span: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %query_gate: buffer, %arena: buffer, %selected_blocks: buffer, %output: buffer)
+
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
 config.decl @flash_next.context_capacity : %value: index where [range(%value, 64, 262144), multiple_of(%value, 64)]
@@ -19,8 +21,6 @@ kernel.decl @qsa_prepare_blocks() launch(%index_origin: offset, %epoch: buffer, 
 kernel.decl @qsa_publish_tail() launch(%tail_origin: offset, %epoch: buffer, %rows: buffer, %raw: buffer, %arena: buffer)
 
 kernel.decl @qsa_append_kv() launch(%key_origin: offset, %value_origin: offset, %span: buffer, %mapping: buffer, %rows: buffer, %keys: buffer, %values: buffer, %weight: buffer, %arena: buffer)
-
-kernel.decl @qsa_selected_attention() launch(%key_origin: offset, %value_origin: offset, %span: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %query_gate: buffer, %arena: buffer, %selected_blocks: buffer, %output: buffer)
 
 func.decl pure @qsa_cohort_capacity() -> (index)
 
@@ -82,6 +82,12 @@ command.program.def public @flash_next_qsa_append(%layer: index, %key_origin: of
 }
 
 command.program.def public @flash_next_qsa_attention(%layer: index, %key_origin: offset, %value_origin: offset, %index_origin: offset, %tail_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %rows: buffer, %input: buffer, %arena: buffer, %output: buffer, %capture: buffer) {
+  command.program.launch @flash_next_qsa_append[%layer, %key_origin, %value_origin, %index_origin, %tail_origin](%parameters, %span, %mapping, %rows, %input, %arena, %capture) : [index, offset, offset, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @flash_next_qsa_queries[%layer, %key_origin, %value_origin, %index_origin, %tail_origin](%parameters, %span, %mapping, %rows, %input, %arena, %output, %capture) : [index, offset, offset, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @flash_next_qsa_queries(%layer: index, %key_origin: offset, %value_origin: offset, %index_origin: offset, %tail_origin: offset) launch(%parameters: buffer, %span: buffer, %mapping: buffer, %rows: buffer, %input: buffer, %arena: buffer, %output: buffer, %capture: buffer) {
   %tokens = config.get @flash_next.token_count : index
   %capacity = config.get @flash_next.context_capacity : index
   %c4 = index.constant 4 : index
@@ -119,7 +125,6 @@ command.program.def public @flash_next_qsa_attention(%layer: index, %key_origin:
   %query_weight = command.parameter %parameters, "blk.{}.attn_q.weight"[%layer] : view<12288x80x34xi8>
   %query_norm = command.parameter %parameters, "blk.{}.attn_q_norm.weight"[%layer] : view<256xf32>
   %output_weight = command.parameter %parameters, "blk.{}.attn_output.weight"[%layer] : view<2560x192x34xi8>
-  command.program.launch @flash_next_qsa_append[%layer, %key_origin, %value_origin, %index_origin, %tail_origin](%parameters, %span, %mapping, %rows, %input, %arena, %capture) : [index, offset, offset, offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @qsa_linear_bf16[%small_width](%small_width, %span, %input, %index_query_weight, %index_query_raw) : [index](index, buffer, buffer, view<512x2560xbf16>, buffer)
   kernel.launch @qsa_prepare_queries[%c4](%index_width, %c4, %index_width, %span, %mapping, %index_query_raw, %index_query_norm, %index_query) : [index](index, index, index, buffer, buffer, buffer, view<128xf32>, buffer)
   %query_weight_block_size = index.constant 32 : index
@@ -149,7 +154,7 @@ command.program.def public @flash_next_qsa_attention(%layer: index, %key_origin:
     kernel.launch @qsa_merge_cohorts(%span, %selected, %cohorts) : (buffer, buffer, buffer)
     kernel.launch @qsa_cohort_attention(%key_origin, %value_origin, %rows, %query, %query_gate, %arena, %cohorts, %attended) : (offset, offset, buffer, buffer, buffer, buffer, buffer, buffer)
   } else {
-    kernel.launch @qsa_selected_attention(%key_origin, %value_origin, %span, %mapping, %rows, %query, %query_gate, %arena, %selected, %attended) : (offset, offset, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @qsa_split_attention[%key_origin, %value_origin](%span, %mapping, %rows, %query, %query_gate, %arena, %selected, %attended) : [offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   }
   %output_weight_block_size = index.constant 32 : index
   %output_weight_blocks = index.div %output_width, %output_weight_block_size : index

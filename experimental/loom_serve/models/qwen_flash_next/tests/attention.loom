@@ -10,7 +10,7 @@ kernel.decl @qsa_merge_cohorts() launch(%epoch: buffer, %selected: buffer, %coho
 
 kernel.decl @qsa_cohort_attention() launch(%key_origin: offset, %value_origin: offset, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %cohorts: buffer, %output: buffer)
 
-kernel.decl @qsa_selected_attention() launch(%key_origin: offset, %value_origin: offset, %epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer, %output: buffer)
+command.program.decl @qsa_split_attention(%key_origin: offset, %value_origin: offset) launch(%epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer, %output: buffer)
 
 func.def @cohort_fixture_span(%trial: index, %span: index) -> (index, index, index, index) {
   %c0 = index.constant 0 : index
@@ -473,7 +473,7 @@ func.def @cohort_attention_reference(%epoch: buffer, %mapping: buffer, %rows: bu
 command.program.def @partitioned_attention_subject() launch(%epoch: buffer, %mapping: buffer, %rows: buffer, %queries: buffer, %gates: buffer, %arena: buffer, %selected: buffer, %output: buffer) {
   %key_origin = index.constant 128 : offset
   %value_origin = index.constant 2162816 : offset
-  kernel.launch @qsa_selected_attention(%key_origin, %value_origin, %epoch, %mapping, %rows, %queries, %gates, %arena, %selected, %output) : (offset, offset, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qsa_split_attention[%key_origin, %value_origin](%epoch, %mapping, %rows, %queries, %gates, %arena, %selected, %output) : [offset, offset](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
