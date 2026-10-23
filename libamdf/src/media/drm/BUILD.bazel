@@ -61,6 +61,7 @@ amdf_cc_library(
         "//libamdf/src:structure",
         "//libamdf/src:wait",
         "//libamdf/src/media:h264",
+        "//libamdf/src/media:hevc",
         "//libamdf/src/platform:native_event",
         "//libamdf/src/platform:wait",
         "//libamdf/src/platform/linux:file",

@@ -40,6 +40,20 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    hevc
+  HDRS
+    "hevc.h"
+  SRCS
+    "hevc.c"
+  DEPS
+    amdf::headers
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     extension
   HDRS
     "extension.h"

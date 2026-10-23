@@ -8,6 +8,7 @@
 #define AMDF_SRC_MEDIA_DRM_SESSION_H_
 
 #include "amdf/media/h264.h"
+#include "amdf/media/hevc.h"
 #include "libamdf/src/media/drm/buffer.h"
 
 #ifdef __cplusplus
@@ -21,8 +22,14 @@ typedef struct amdf_media_drm_session_t {
   amdf_media_configuration_info_t requirements;
   // Recordings borrowing this codec state, independent of submission status.
   amdf_child_tracker_t commands;
-  // Parsed H264 envelope retained without caller extension-chain pointers.
-  amdf_media_h264_configuration_t h264;
+  // Parsed envelope selected by requirements.configuration.codec; no borrowed
+  // extension-chain pointers survive construction.
+  union {
+    // H264 profile and level.
+    amdf_media_h264_configuration_t h264;
+    // HEVC profile and actual sample precision.
+    amdf_media_hevc_configuration_t hevc;
+  } codec;
   // Owned firmware session and collocated context; no pixel storage.
   amdf_media_drm_buffer_t* storage;
   // Bytes of codec-specific context following the 128 KiB session prefix.

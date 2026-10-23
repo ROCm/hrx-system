@@ -124,16 +124,33 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
 iree_cc_library(
   NAME
-    h264_cases
+    decode_fixture
+  HDRS
+    "decode_fixture.h"
   SRCS
-    "h264_test.cc"
+    "decode_fixture.cc"
   DEPS
-    ::h264_fixture
     amdf::headers
     iree::third_party::google_test
     libamdf::cts::util::device_cache
     libamdf::cts::util::mapped_memory
     libamdf::cts::util::provider_headers
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+iree_cc_library(
+  NAME
+    h264_cases
+  SRCS
+    "h264_test.cc"
+  DEPS
+    ::decode_fixture
+    ::h264_fixture
+    amdf::headers
+    iree::third_party::google_test
   TESTONLY
   ALWAYSLINK
   PUBLIC
@@ -172,6 +189,92 @@ iree_native_test(
     "runtime-resource=amd-gpu"
   RESOURCE_GROUP
     gpu-device
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+iree_cc_library(
+  NAME
+    hevc_cases
+  SRCS
+    "hevc_test.cc"
+  DEPS
+    ::decode_fixture
+    ::hevc_fixture
+    amdf::headers
+    iree::third_party::google_test
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+amdf_cts_binary(
+  NAME
+    hevc_dynamic_bin
+  DATA
+    amdf::amdf
+  DEPS
+    ::hevc_cases
+    amdf::headers
+    libamdf::cts::util::dynamic_provider
+    libamdf::cts::util::test_main
+  TESTONLY
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+iree_native_test(
+  NAME
+    "hevc_dynamic"
+  ARGS
+    "--amdf_native_lifetime=process"
+    "--amdf_library={{$<TARGET_FILE:amdf::amdf>}}"
+  SRC
+    ::hevc_dynamic_bin
+  DATA
+    "amdf::amdf"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+iree_c_embed_data(
+  NAME
+    hevc_inputs
+  SRCS
+    "hevc10.packet"
+    "hevc8.packet"
+  C_FILE_OUTPUT
+    "hevc_inputs.c"
+  H_FILE_OUTPUT
+    "hevc_inputs.h"
+  IDENTIFIER
+    "amdf_cts_media_hevc_inputs"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    hevc_fixture
+  HDRS
+    "hevc_fixture.h"
+  SRCS
+    "hevc_fixture.cc"
+  DEPS
+    ::hevc_inputs
+    amdf::headers
+    iree::third_party::google_test
+  TESTONLY
+  PUBLIC
 )
 endif()
 

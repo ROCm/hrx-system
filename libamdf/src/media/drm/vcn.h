@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-// Provisioned command-buffer offsets. Unified IB, message, and H264 scaling
+// Provisioned command-buffer offsets. Unified IB, message, and codec scaling
 // payloads occupy disjoint regions within one native page.
 enum {
   AMDF_MEDIA_DRM_VCN_MESSAGE_OFFSET = 256,
@@ -32,6 +32,12 @@ uint32_t amdf_media_drm_vcn_h264(
     const amdf_media_drm_frame_t* output, const amdf_media_drm_frame_t* current,
     const amdf_media_drm_frame_t* references, uint32_t current_slot,
     const amdf_media_h264_decode_picture_info_t* picture);
+uint32_t amdf_media_drm_vcn_hevc(
+    amdf_media_drm_buffer_t* storage, const amdf_media_drm_session_t* session,
+    uint64_t compressed_address, uint32_t compressed_byte_length,
+    const amdf_media_drm_frame_t* output, const amdf_media_drm_frame_t* current,
+    const amdf_media_drm_frame_t* references, uint32_t current_slot,
+    const amdf_media_hevc_decode_picture_info_t* picture);
 
 #ifdef __cplusplus
 }  // extern "C"

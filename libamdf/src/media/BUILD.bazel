@@ -30,6 +30,13 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "hevc",
+    srcs = ["hevc.c"],
+    hdrs = ["hevc.h"],
+    visibility = ["//libamdf/src/media:__subpackages__"],
+)
+
+amdf_cc_library(
     name = "extension",
     srcs = ["extension.c"],
     hdrs = ["extension.h"],

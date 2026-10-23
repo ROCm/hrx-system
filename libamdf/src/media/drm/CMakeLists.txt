@@ -53,6 +53,7 @@ iree_cc_library(
     libamdf::src::allocator
     libamdf::src::atomics
     libamdf::src::media::h264
+    libamdf::src::media::hevc
     libamdf::src::platform::linux::file
     libamdf::src::platform::linux::native_event
     libamdf::src::platform::native_event

@@ -9,23 +9,6 @@
 
 iree_add_all_subdirs()
 
-iree_c_embed_data(
-  NAME
-    hevc_inputs
-  SRCS
-    "hevc10.packet"
-    "hevc8.packet"
-  C_FILE_OUTPUT
-    "hevc_inputs.c"
-  H_FILE_OUTPUT
-    "hevc_inputs.h"
-  IDENTIFIER
-    "amdf_cts_media_hevc_inputs"
-  TESTONLY
-  FLATTEN
-  PUBLIC
-)
-
 loom_target_profile(
   NAME
     "gfx1150"
@@ -135,9 +118,9 @@ iree_cc_library(
     "hevc_test.cc"
   DEPS
     ::decode_fixture
-    ::hevc_inputs
     amdf::headers
     iree::third_party::google_test
+    libamdf::cts::media::hevc_fixture
   TESTONLY
   ALWAYSLINK
   PUBLIC

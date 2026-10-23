@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
 load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
 load("//libamdf/build_tools/bazel:cts_gpu_kernel.bzl", "amdf_cts_gpu_kernel_set")
@@ -15,19 +14,6 @@ package(
     default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],
-)
-
-iree_c_embed_data(
-    name = "hevc_inputs",
-    testonly = True,
-    srcs = [
-        "hevc10.packet",
-        "hevc8.packet",
-    ],
-    c_file_output = "hevc_inputs.c",
-    flatten = True,
-    h_file_output = "hevc_inputs.h",
-    identifier = "amdf_cts_media_hevc_inputs",
 )
 
 loom_target_profile(
@@ -92,7 +78,7 @@ amdf_cts_test_suite(
     visibility = ["//visibility:public"],
     deps = [
         ":decode_fixture",
-        ":hevc_inputs",
+        "//libamdf/cts/media:hevc_fixture",
         "//third_party:google_test",
     ],
 )

@@ -74,6 +74,23 @@ amdf_cc_library(
     ],
 )
 
+amdf_cc_library(
+    name = "decode_fixture",
+    testonly = True,
+    srcs = ["decode_fixture.cc"],
+    hdrs = ["decode_fixture.h"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    deps = [
+        "//libamdf/cts/util:device_cache",
+        "//libamdf/cts/util:mapped_memory",
+        "//libamdf/cts/util:provider_headers",
+        "//third_party:google_test",
+    ],
+)
+
 amdf_cts_test_suite(
     name = "h264",
     srcs = ["h264_test.cc"],
@@ -83,10 +100,48 @@ amdf_cts_test_suite(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":decode_fixture",
         ":h264_fixture",
-        "//libamdf/cts/util:device_cache",
-        "//libamdf/cts/util:mapped_memory",
-        "//libamdf/cts/util:provider_headers",
+        "//third_party:google_test",
+    ],
+)
+
+amdf_cts_test_suite(
+    name = "hevc",
+    srcs = ["hevc_test.cc"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":decode_fixture",
+        ":hevc_fixture",
+        "//third_party:google_test",
+    ],
+)
+
+iree_c_embed_data(
+    name = "hevc_inputs",
+    testonly = True,
+    srcs = [
+        "hevc10.packet",
+        "hevc8.packet",
+    ],
+    c_file_output = "hevc_inputs.c",
+    flatten = True,
+    h_file_output = "hevc_inputs.h",
+    identifier = "amdf_cts_media_hevc_inputs",
+)
+
+amdf_cc_library(
+    name = "hevc_fixture",
+    testonly = True,
+    srcs = ["hevc_fixture.cc"],
+    hdrs = ["hevc_fixture.h"],
+    visibility = ["//libamdf/cts/interop/gpu/media:__pkg__"],
+    deps = [
+        ":hevc_inputs",
         "//third_party:google_test",
     ],
 )

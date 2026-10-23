@@ -40,15 +40,35 @@ amdf_status_t AMDF_CALL amdf_media_drm_session_create(
   session->requirements = requirements;
   amdf_child_tracker_initialize(&session->commands);
   if (requirements.requires_begin_end) {
-    session->h264 = *(const amdf_media_h264_configuration_t*)create_info->next;
-    session->h264.next = NULL;
-    const uint32_t macroblock_width =
-        create_info->configuration.coded_width / 16;
-    const uint32_t macroblock_height =
-        ((create_info->configuration.coded_height / 16) + 1) & ~1u;
-    session->context_byte_length =
-        create_info->configuration.reference_image_count *
-        ((macroblock_width * macroblock_height * 192 + 255) & ~255u);
+    const uint32_t width = (create_info->configuration.coded_width + 15) & ~15u;
+    const uint32_t height =
+        (create_info->configuration.coded_height + 15) & ~15u;
+    const uint32_t references =
+        create_info->configuration.reference_image_count;
+    if (create_info->configuration.codec == AMDF_MEDIA_CODEC_H264) {
+      session->codec.h264 =
+          *(const amdf_media_h264_configuration_t*)create_info->next;
+      session->codec.h264.next = NULL;
+      session->context_byte_length =
+          references *
+          (((width / 16) * (((height / 16) + 1) & ~1u) * 192 + 255) & ~255u);
+    } else {
+      session->codec.hevc =
+          *(const amdf_media_hevc_configuration_t*)create_info->next;
+      session->codec.hevc.next = NULL;
+      if (session->codec.hevc.sample_bit_depth == 10) {
+        // Collocated 16x16 state within 64x64 CTBs, plus left-tile context and
+        // ten-bit pixel storage. Sizes are the native HEVC firmware contract.
+        const uint32_t row_context = (((width + 63) / 64) * 256 + 255) & ~255u;
+        session->context_byte_length =
+            references * row_context * ((height + 63) / 64) + 24576 +
+            2 * (((height + 255) / 256) * 4096 + 1024);
+      } else {
+        session->context_byte_length =
+            ((width + 255) / 16) * ((height + 255) / 16) * 16 * references +
+            52 * 1024;
+      }
+    }
     amdf_media_drm_device_t* device = (amdf_media_drm_device_t*)queue->device;
     const uint64_t length =
         (131072 + session->context_byte_length + device->page_size - 1) &

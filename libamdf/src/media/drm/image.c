@@ -19,9 +19,12 @@ static uint64_t amdf_media_drm_image_pitch(
 
 static uint32_t amdf_media_drm_image_rows(
     const amdf_media_image_description_t* description) {
+  // VCN's separate reference surfaces use a larger reconstruction extent than
+  // the linear decode output. Main10 references require complete 64-row tiles.
   const uint32_t alignment =
-      (description->roles & AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE) != 0 ? 32
-                                                                         : 16;
+      (description->roles & AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE) == 0 ? 16
+      : description->format == AMDF_MEDIA_PIXEL_FORMAT_P010              ? 64
+                                                                         : 32;
   return (description->height + alignment - 1) & ~(alignment - 1);
 }
 

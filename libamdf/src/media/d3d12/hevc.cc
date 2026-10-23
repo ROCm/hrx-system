@@ -8,223 +8,15 @@
 
 #include <cstring>
 
+#include "libamdf/src/media/hevc.h"
+
 namespace amdf::media::d3d12 {
-namespace {
-
-bool ValidReferenceSet(const amdf_media_hevc_decode_picture_info_t& picture,
-                       const amdf_media_hevc_reference_set_t& set,
-                       uint32_t kind, uint32_t* used) {
-  if (set.count > 8) {
-    return false;
-  }
-  int32_t previous = picture.picture_order_count;
-  for (uint32_t index = 0; index < set.count; ++index) {
-    const uint32_t reference_index = set.indices[index];
-    if (reference_index >= picture.reference_count ||
-        (*used & (1u << reference_index)) != 0) {
-      return false;
-    }
-    const auto& reference = picture.references[reference_index];
-    if ((reference.long_term != 0) != (kind == 2) ||
-        (kind == 0 && reference.picture_order_count >= previous) ||
-        (kind == 1 && reference.picture_order_count <= previous)) {
-      return false;
-    }
-    previous = reference.picture_order_count;
-    *used |= 1u << reference_index;
-  }
-  return true;
-}
-
-template <size_t N>
-void DiagonalScalingList(const uint8_t (&source)[N], uint8_t (&target)[N]) {
-  // HEVC scans every diagonal in the same direction. H264 alternates them.
-  constexpr uint32_t width = N == 16 ? 4 : 8;
-  uint32_t position = 0;
-  for (uint32_t diagonal = 0; diagonal < 2 * width - 1; ++diagonal) {
-    for (uint32_t x = 0; x < width; ++x) {
-      if (diagonal >= x && diagonal - x < width) {
-        target[position++] = source[(diagonal - x) * width + x];
-      }
-    }
-  }
-}
-
-}  // namespace
 
 amdf_status_t ValidateHevc(const Session& session,
                            const amdf_media_hevc_decode_picture_info_t& picture,
                            uint64_t compressed_byte_length) {
-  const auto& sequence = picture.sequence;
-  const auto& parameters = picture.picture;
-  const uint32_t flags =
-      sequence.scaling_list_enabled |
-      sequence.asymmetric_motion_partitions_enabled |
-      sequence.sample_adaptive_offset_enabled | sequence.pcm_enabled |
-      sequence.pcm_loop_filter_disabled |
-      sequence.long_term_references_present |
-      sequence.temporal_motion_vector_prediction_enabled |
-      sequence.strong_intra_smoothing_enabled |
-      parameters.dependent_slice_segments_enabled |
-      parameters.output_flag_present | parameters.sign_data_hiding_enabled |
-      parameters.cabac_initialization_present |
-      parameters.constrained_intra_prediction |
-      parameters.transform_skip_enabled |
-      parameters.coding_unit_qp_delta_enabled |
-      parameters.slice_chroma_qp_offsets_present |
-      parameters.weighted_prediction | parameters.weighted_biprediction |
-      parameters.transform_quantization_bypass_enabled |
-      parameters.tiles_enabled |
-      parameters.entropy_coding_synchronization_enabled |
-      parameters.uniform_tile_spacing |
-      parameters.loop_filter_across_tiles_enabled |
-      parameters.loop_filter_across_slices_enabled |
-      parameters.deblocking_filter_override_enabled |
-      parameters.deblocking_filter_disabled |
-      parameters.reference_lists_modification_present |
-      parameters.slice_segment_header_extension_present |
-      picture.is_random_access | picture.is_idr | picture.is_intra;
-  if (flags > 1 || picture.slice_count == 0 || picture.slices == nullptr ||
-      picture.reference_count > 15 ||
-      (picture.reference_count != 0 && picture.references == nullptr) ||
-      sequence.maximum_decoded_picture_buffer_count_minus1 > 15 ||
-      sequence.maximum_decoded_picture_buffer_count_minus1 + 1 >
-          session.info.configuration.reference_image_count ||
-      picture.reference_count >
-          sequence.maximum_decoded_picture_buffer_count_minus1 ||
-      sequence.log2_max_picture_order_count_lsb_minus4 > 12 ||
-      sequence.log2_min_luma_coding_block_size_minus3 > 3 ||
-      sequence.log2_diff_max_min_luma_coding_block_size > 3 ||
-      sequence.log2_min_luma_transform_block_size_minus2 > 3 ||
-      sequence.log2_diff_max_min_luma_transform_block_size > 3 ||
-      sequence.short_term_reference_set_count > 64 ||
-      sequence.long_term_reference_count > 32 ||
-      (!sequence.long_term_references_present &&
-       sequence.long_term_reference_count != 0) ||
-      parameters.default_reference_l0_count_minus1 > 14 ||
-      parameters.default_reference_l1_count_minus1 > 14 ||
-      parameters.initial_qp_minus26 <
-          -26 - 6 * int32_t(session.hevc.sample_bit_depth - 8) ||
-      parameters.initial_qp_minus26 > 25 ||
-      parameters.extra_slice_header_bit_count > 7 ||
-      parameters.cb_qp_offset < -12 || parameters.cb_qp_offset > 12 ||
-      parameters.cr_qp_offset < -12 || parameters.cr_qp_offset > 12 ||
-      parameters.beta_offset_div2 < -6 || parameters.beta_offset_div2 > 6 ||
-      parameters.tc_offset_div2 < -6 || parameters.tc_offset_div2 > 6 ||
-      parameters.tile_column_count_minus1 > 19 ||
-      parameters.tile_row_count_minus1 > 21 ||
-      picture.predicted_reference_set_delta_count > 15 ||
-      picture.short_term_reference_set_bit_count > UINT16_MAX ||
-      (picture.is_random_access && !picture.is_intra) ||
-      (picture.is_idr &&
-       (!picture.is_random_access || picture.picture_order_count != 0)) ||
-      (sequence.scaling_list_enabled && picture.scaling_matrices == nullptr)) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-  }
-  const uint32_t minimum_block_log2 =
-      sequence.log2_min_luma_coding_block_size_minus3 + 3;
-  const uint32_t maximum_block_log2 =
-      minimum_block_log2 + sequence.log2_diff_max_min_luma_coding_block_size;
-  const uint32_t minimum_transform_log2 =
-      sequence.log2_min_luma_transform_block_size_minus2 + 2;
-  const uint32_t maximum_transform_log2 =
-      minimum_transform_log2 +
-      sequence.log2_diff_max_min_luma_transform_block_size;
-  if (maximum_block_log2 < 4 || maximum_block_log2 > 6 ||
-      minimum_transform_log2 >= minimum_block_log2 ||
-      maximum_transform_log2 > 5 ||
-      maximum_transform_log2 > maximum_block_log2 ||
-      sequence.maximum_transform_hierarchy_depth_inter >
-          maximum_block_log2 - minimum_transform_log2 ||
-      sequence.maximum_transform_hierarchy_depth_intra >
-          maximum_block_log2 - minimum_transform_log2 ||
-      ((session.info.configuration.coded_width |
-        session.info.configuration.coded_height) &
-       ((1u << minimum_block_log2) - 1)) != 0 ||
-      parameters.coding_unit_qp_delta_depth >
-          sequence.log2_diff_max_min_luma_coding_block_size ||
-      (!parameters.coding_unit_qp_delta_enabled &&
-       parameters.coding_unit_qp_delta_depth != 0) ||
-      parameters.log2_parallel_merge_level_minus2 > maximum_block_log2 - 2) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-  }
-  if (sequence.pcm_enabled &&
-      (sequence.pcm_luma_bit_depth_minus1 >= session.hevc.sample_bit_depth ||
-       sequence.pcm_chroma_bit_depth_minus1 >= session.hevc.sample_bit_depth ||
-       sequence.log2_min_pcm_luma_coding_block_size_minus3 > 2 ||
-       sequence.log2_diff_max_min_pcm_luma_coding_block_size > 2 ||
-       sequence.log2_min_pcm_luma_coding_block_size_minus3 + 3 <
-           minimum_block_log2 ||
-       sequence.log2_min_pcm_luma_coding_block_size_minus3 + 3 +
-               sequence.log2_diff_max_min_pcm_luma_coding_block_size >
-           maximum_block_log2)) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-  }
-  const uint32_t block_size = 1u << maximum_block_log2;
-  const uint32_t columns =
-      (session.info.configuration.coded_width + block_size - 1) / block_size;
-  const uint32_t rows =
-      (session.info.configuration.coded_height + block_size - 1) / block_size;
-  if (parameters.tile_column_count_minus1 >= columns ||
-      parameters.tile_row_count_minus1 >= rows ||
-      (!parameters.tiles_enabled &&
-       (parameters.tile_column_count_minus1 != 0 ||
-        parameters.tile_row_count_minus1 != 0 ||
-        parameters.uniform_tile_spacing != 0 ||
-        parameters.loop_filter_across_tiles_enabled != 0))) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-  }
-  if (parameters.tiles_enabled && !parameters.uniform_tile_spacing) {
-    uint64_t width = 0, height = 0;
-    for (uint32_t index = 0; index < parameters.tile_column_count_minus1;
-         ++index) {
-      width += uint64_t(parameters.tile_column_width_minus1[index]) + 1;
-    }
-    for (uint32_t index = 0; index < parameters.tile_row_count_minus1;
-         ++index) {
-      height += uint64_t(parameters.tile_row_height_minus1[index]) + 1;
-    }
-    if (width >= columns || height >= rows) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
-    }
-  }
-  for (uint32_t index = 0; index < picture.reference_count; ++index) {
-    const auto& reference = picture.references[index];
-    if (reference.binding.frame == nullptr || reference.long_term > 1 ||
-        (reference.long_term && !sequence.long_term_references_present)) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-    }
-  }
-  uint32_t used = 0;
-  if (!ValidReferenceSet(picture, picture.short_term_before, 0, &used) ||
-      !ValidReferenceSet(picture, picture.short_term_after, 1, &used) ||
-      !ValidReferenceSet(picture, picture.long_term, 2, &used) ||
-      (!picture.is_intra && used == 0) || (picture.is_idr && used != 0)) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-  }
-  uint64_t end = 0;
-  for (uint32_t index = 0; index < picture.slice_count; ++index) {
-    const auto& slice = picture.slices[index];
-    if (slice.byte_length < 6 || slice.byte_offset < end ||
-        slice.byte_offset > compressed_byte_length ||
-        slice.byte_length > compressed_byte_length - slice.byte_offset) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
-    }
-    end = uint64_t(slice.byte_offset) + slice.byte_length;
-  }
-  if (sequence.scaling_list_enabled) {
-    for (uint8_t value : picture.scaling_matrices->dc_16x16) {
-      if (value == 0) {
-        return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-      }
-    }
-    for (uint8_t value : picture.scaling_matrices->dc_32x32) {
-      if (value == 0) {
-        return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
-      }
-    }
-  }
-  return AMDF_STATUS_OK;
+  return amdf_media_hevc_validate(&session.info.configuration, &session.hevc,
+                                  &picture, compressed_byte_length);
 }
 
 void LowerHevc(const Session& session, uint32_t current_reference_slot,
@@ -375,17 +167,17 @@ void LowerHevc(const Session& session, uint32_t current_reference_slot,
   if (sequence.scaling_list_enabled) {
     const auto& source = *picture.scaling_matrices;
     for (uint32_t index = 0; index < 6; ++index) {
-      DiagonalScalingList(source.scaling_4x4[index],
-                          matrices->ucScalingLists0[index]);
-      DiagonalScalingList(source.scaling_8x8[index],
-                          matrices->ucScalingLists1[index]);
-      DiagonalScalingList(source.scaling_16x16[index],
-                          matrices->ucScalingLists2[index]);
+      amdf_media_hevc_scan_scaling_list(source.scaling_4x4[index], 4,
+                                        matrices->ucScalingLists0[index]);
+      amdf_media_hevc_scan_scaling_list(source.scaling_8x8[index], 8,
+                                        matrices->ucScalingLists1[index]);
+      amdf_media_hevc_scan_scaling_list(source.scaling_16x16[index], 8,
+                                        matrices->ucScalingLists2[index]);
       matrices->ucScalingListDCCoefSizeID2[index] = source.dc_16x16[index];
     }
     for (uint32_t index = 0; index < 2; ++index) {
-      DiagonalScalingList(source.scaling_32x32[index],
-                          matrices->ucScalingLists3[index]);
+      amdf_media_hevc_scan_scaling_list(source.scaling_32x32[index], 8,
+                                        matrices->ucScalingLists3[index]);
       matrices->ucScalingListDCCoefSizeID3[index] = source.dc_32x32[index];
     }
   }
