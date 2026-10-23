@@ -249,10 +249,12 @@ loom_cc_library(
     deps = [
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/vm",
+        "//loom/src/loom/model:card",
         "//loom/src/loom/serve/runtime/program",
         "//loom/src/loom/serve/runtime/program:compilation",
         "//loom/src/loom/serve/runtime/program:input",
         "//loom/src/loom/serve/runtime/program:json",
+        "//loom/src/loom/serve/runtime/program:sources",
         "//loom/src/loom/serve/service/text:chat",
         "//runtime/src/iree/base",
         "//runtime/src/iree/io:file_handle",

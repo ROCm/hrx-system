@@ -28,6 +28,8 @@ loom_py_test(
         "$(rootpath //loom/src/loom/serve/fixture/text:control.loom)",
     ],
     data = TEXT_SOURCES + [
+        "//loom/src/loom/serve/fixture/text:native.card.json",
+        "//loom/src/loom/serve/fixture/text:service.loom",
         "//loom/src/loom/serve/testing:text_request_check",
     ],
 )

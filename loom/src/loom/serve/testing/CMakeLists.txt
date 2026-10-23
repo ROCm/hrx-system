@@ -296,10 +296,12 @@ loom_cc_library(
     iree::vm
     loom::binding::c::loomc
     loom::binding::c::target::vm
+    loom::model::card
     loom::serve::runtime::program
     loom::serve::runtime::program::compilation
     loom::serve::runtime::program::input
     loom::serve::runtime::program::json
+    loom::serve::runtime::program::sources
     loom::serve::service::text::chat
   TESTONLY
   PUBLIC

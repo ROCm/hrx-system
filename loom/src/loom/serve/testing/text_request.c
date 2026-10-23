@@ -17,6 +17,8 @@
 #include "loom/util/stream.h"
 
 IREE_FLAG(string, control, "", "Chat control VM program (.loom or .loombc).");
+IREE_FLAG(string, model, "", "Local model card supplying the text program.");
+IREE_FLAG(string, preset, "", "Model-card preset to select.");
 IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json path.");
 IREE_FLAG(string, request, "", "Chat Completions request JSON file.");
 IREE_FLAG(string, options, "{}", "Deployment options JSON object.");
@@ -153,18 +155,25 @@ static iree_status_t loom_serve_text_request_check_report(
 static iree_status_t loom_serve_text_request_check_run(
     iree_allocator_t host_allocator) {
   loom_serve_compilation_report_t compilation = {0};
-  if (!FLAG_control[0] || !FLAG_tokenizer[0] || !FLAG_request[0] ||
-      FLAG_capacity <= 0 || FLAG_capacity > 262144 ||
+  if ((!!FLAG_control[0] == !!FLAG_model[0]) ||
+      (FLAG_preset[0] && !FLAG_model[0]) || !FLAG_tokenizer[0] ||
+      !FLAG_request[0] || FLAG_capacity <= 0 || FLAG_capacity > 262144 ||
       FLAG_response_chunk_size < 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "--control, --tokenizer and --request are required; "
+        "exactly one of --control or --model, --tokenizer, and --request "
+        "are required; --preset requires --model; "
         "capacity is [1, 262144]");
   }
+  const loom_serve_sources_t requested_sources = {
+      .base_directory = IREE_SV("."),
+      .control = iree_make_cstring_view(FLAG_control),
+      .reference = {
+          .path = iree_make_cstring_view(FLAG_model),
+          .selector = {.preset = iree_make_cstring_view(FLAG_preset)}}};
   loom_serve_test_text_policy_t* policy_owner = NULL;
   iree_status_t status = loom_serve_test_text_policy_allocate(
-      iree_make_cstring_view(FLAG_control),
-      iree_make_cstring_view(FLAG_tokenizer),
+      &requested_sources, iree_make_cstring_view(FLAG_tokenizer),
       iree_make_cstring_view(FLAG_options), &compilation, host_allocator,
       &policy_owner);
   iree_io_file_contents_t* request = NULL;
