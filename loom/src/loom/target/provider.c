@@ -394,8 +394,10 @@ static iree_status_t loom_target_environment_append_canonical_emitter_fact(
   if (!emitter_contributed) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "canonical %s emitter must be in the provider emitter list",
-        product_name);
+        "canonical %s emitter '%.*s' must be in the provider's %" PRIhsz
+        "-entry emitter list",
+        product_name, (int)emitter->name.size, emitter->name.data,
+        provider->emitter_list.count);
   }
   for (iree_host_size_t i = 0; i < *inout_count; ++i) {
     if (fact_types[i] == target_fact_type) {

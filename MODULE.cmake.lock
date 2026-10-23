@@ -13,12 +13,12 @@
 set(IREE_DEPENDENCY_IDS
   "google_benchmark"
   "googletest"
-  "libbacktrace"
   "libjpeg_turbo"
   "libpng"
   "zlib"
   "zstd"
   "catch2"
+  "libbacktrace"
   "miniaudio"
   "giflib"
   "libwebp"
@@ -79,26 +79,6 @@ set(IREE_DEP_GOOGLETEST_STRIP_PREFIX "googletest-1.18.0")
 set(IREE_DEP_GOOGLETEST_BUILD_FILE "")
 set(IREE_DEP_GOOGLETEST_PATCHES "")
 set(IREE_DEP_GOOGLETEST_PATCH_ARGS "")
-
-set(IREE_DEP_LIBBACKTRACE_KIND "bazel_dep")
-set(IREE_DEP_LIBBACKTRACE_OWNER "shared")
-set(IREE_DEP_LIBBACKTRACE_MODULE_NAME "libbacktrace")
-set(IREE_DEP_LIBBACKTRACE_REPO_NAME "libbacktrace")
-set(IREE_DEP_LIBBACKTRACE_VERSION "1.0.0-20250926-7939218")
-set(IREE_DEP_LIBBACKTRACE_DEV_DEPENDENCY "FALSE")
-set(IREE_DEP_LIBBACKTRACE_SOURCE_URL "https://bcr.bazel.build/modules/libbacktrace/1.0.0-20250926-7939218/source.json")
-set(IREE_DEP_LIBBACKTRACE_URLS
-  "https://github.com/ianlancetaylor/libbacktrace/archive/793921876c981ce49759114d7bb89bb89b2d3a2d.tar.gz"
-)
-set(IREE_DEP_LIBBACKTRACE_SHA256 "858b1225351052234f7e71f0f36622fc9ad33aac947db7816d0b443ae0dd33ce")
-set(IREE_DEP_LIBBACKTRACE_STRIP_PREFIX "libbacktrace-793921876c981ce49759114d7bb89bb89b2d3a2d")
-set(IREE_DEP_LIBBACKTRACE_BUILD_FILE "")
-set(IREE_DEP_LIBBACKTRACE_PATCHES
-  "//build_tools/third_party/libbacktrace:threaded_cache_reads.patch"
-)
-set(IREE_DEP_LIBBACKTRACE_PATCH_ARGS
-  "-p1"
-)
 
 set(IREE_DEP_LIBJPEG_TURBO_KIND "bazel_dep")
 set(IREE_DEP_LIBJPEG_TURBO_OWNER "shared")
@@ -179,6 +159,26 @@ set(IREE_DEP_CATCH2_STRIP_PREFIX "Catch2-3.13.0")
 set(IREE_DEP_CATCH2_BUILD_FILE "")
 set(IREE_DEP_CATCH2_PATCHES "")
 set(IREE_DEP_CATCH2_PATCH_ARGS "")
+
+set(IREE_DEP_LIBBACKTRACE_KIND "http_archive")
+set(IREE_DEP_LIBBACKTRACE_OWNER "shared")
+set(IREE_DEP_LIBBACKTRACE_MODULE_NAME "libbacktrace")
+set(IREE_DEP_LIBBACKTRACE_REPO_NAME "libbacktrace")
+set(IREE_DEP_LIBBACKTRACE_VERSION "")
+set(IREE_DEP_LIBBACKTRACE_DEV_DEPENDENCY "FALSE")
+set(IREE_DEP_LIBBACKTRACE_SOURCE_URL "")
+set(IREE_DEP_LIBBACKTRACE_URLS
+  "https://github.com/ianlancetaylor/libbacktrace/archive/793921876c981ce49759114d7bb89bb89b2d3a2d.tar.gz"
+)
+set(IREE_DEP_LIBBACKTRACE_SHA256 "858b1225351052234f7e71f0f36622fc9ad33aac947db7816d0b443ae0dd33ce")
+set(IREE_DEP_LIBBACKTRACE_STRIP_PREFIX "libbacktrace-793921876c981ce49759114d7bb89bb89b2d3a2d")
+set(IREE_DEP_LIBBACKTRACE_BUILD_FILE "//build_tools/third_party/libbacktrace:libbacktrace.BUILD.bazel")
+set(IREE_DEP_LIBBACKTRACE_PATCHES
+  "//build_tools/third_party/libbacktrace:threaded_cache_reads.patch"
+)
+set(IREE_DEP_LIBBACKTRACE_PATCH_ARGS
+  "-p1"
+)
 
 set(IREE_DEP_MINIAUDIO_KIND "http_archive")
 set(IREE_DEP_MINIAUDIO_OWNER "shared")

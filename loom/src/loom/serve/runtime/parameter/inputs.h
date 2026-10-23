@@ -9,24 +9,25 @@
 
 #include "iree/io/parameter_index.h"
 #include "iree/io/parameter_provider.h"
+#include "loom/serve/runtime/parameter/sources.h"
 #include "loom/serve/runtime/program/preparation.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Independently indexed checkpoint domains and immutable source-selected read
-// ranges. Keys and metadata borrow the owned indexes; no payload is loaded.
+// Immutable source-selected read ranges. Keys and metadata borrow retained
+// checkpoint indexes; this recipe owner neither opens files nor loads payload.
 typedef struct loom_serve_weight_inputs_t loom_serve_weight_inputs_t;
 
-// Opens and indexes the declaration's ordered shard lists on a cold worker.
-// Relative paths resolve against sources.base_directory, not the source
-// package. Each independent source has its own provider and imported-file
-// cache.
+// Retains the selected indexes and providers in policy-local input order.
+// Input ordinals were checked at the source declaration boundary. The catalog
+// and declaration may retire independently after this call; unused peers are
+// not retained by the plan.
 iree_status_t loom_serve_weight_inputs_allocate(
     const loom_serve_preparation_parameter_t* parameter,
-    const loom_serve_sources_t* sources, iree_host_size_t concurrency,
-    iree_allocator_t host_allocator, loom_serve_weight_inputs_t** out_inputs);
+    loom_serve_parameter_sources_t* sources, iree_allocator_t host_allocator,
+    loom_serve_weight_inputs_t** out_inputs);
 void loom_serve_weight_inputs_free(loom_serve_weight_inputs_t* inputs);
 
 // Borrows one indexed source, with ordinal established by declaration capture.

@@ -83,17 +83,19 @@ AMD_GPU_HARDWARE_PROFILE = amd_gpu_execution_profile(name = "amd_gpu_hardware")
 AMD_GPU_ASAN_PROFILE = amd_gpu_execution_profile(
     name = "amd_gpu_asan",
     runner_args = ["--sanitizer=asan", "--sanitizer-reporting=report-only"],
-    tags = ["notsan"],
+    tags = ["notsan", "requires-amd-gpu-feedback"],
 )
 
 AMD_GPU_TSAN_PROFILE = amd_gpu_execution_profile(
     name = "amd_gpu_tsan",
+    tags = ["requires-amd-gpu-feedback"],
     device = "amdgpu2://?tsan_report_policy=report-only",
     runner_args = ["--sanitizer=tsan", "--sanitizer-reporting=report-only"],
 )
 
 AMD_GPU_TSAN_CAPACITY_PROFILE = amd_gpu_execution_profile(
     name = "amd_gpu_tsan_capacity",
+    tags = ["requires-amd-gpu-feedback"],
     device = "amdgpu2://?tsan_report_policy=report-only&tsan_shadow_size=1440",
     runner_args = ["--sanitizer=tsan", "--sanitizer-reporting=report-only"],
 )

@@ -17,9 +17,9 @@ loom_cc_library(
   TEXTUAL_HDRS
     "ops.inc"
   DEPS
-    loom::ir::types
-    loom::ops::atomic
-    loom::ops::op_defs
+    loom::ir::type_headers
+    loom::ops::headers
+    loom::ops::vocabulary
   PUBLIC
 )
 
@@ -35,8 +35,8 @@ loom_cc_library(
   DEPS
     loom::ir::builders
     loom::ir::types
-    loom::ops::atomic
     loom::ops::op_defs
+    loom::ops::vocabulary
   PUBLIC
 )
 

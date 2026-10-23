@@ -10,6 +10,8 @@
 #define LOOM_TOOLS_LOOM_BENCHMARK_DISPATCH_BENCHMARK_H_
 
 #include "iree/base/api.h"
+#include "iree/base/internal/arena.h"
+#include "loom/tooling/testbench/executor.h"
 #include "loom/tools/loom-benchmark/hal_actual.h"
 #include "loom/tools/loom-benchmark/model.h"
 #include "loom/tools/loom-benchmark/options.h"
@@ -24,11 +26,11 @@ iree_status_t loom_benchmark_run_hal_benchmark_sample(
     const loom_benchmark_candidate_identity_t* candidate,
     const loom_testbench_module_plan_t* module_plan,
     const loom_testbench_benchmark_plan_t* benchmark_plan,
-    const loom_testbench_case_plan_t* case_plan,
     const loom_benchmark_benchmark_policy_t* policy,
     const loom_benchmark_options_t* options,
     loom_benchmark_hal_actual_provider_t* provider,
-    const loom_testbench_value_materializer_options_t* materializer_options,
+    const loom_testbench_case_execution_options_t* execution_options,
+    iree_arena_allocator_t* execution_arena,
     iree_host_size_t benchmark_sample_ordinal, iree_allocator_t allocator,
     loom_benchmark_benchmark_result_t* out_result);
 
@@ -38,12 +40,12 @@ iree_status_t loom_benchmark_run_hal_sequence_benchmark_sample(
     const loom_benchmark_candidate_identity_t* candidate,
     const loom_testbench_module_plan_t* module_plan,
     const loom_testbench_benchmark_plan_t* benchmark_plan,
-    const loom_testbench_case_plan_t* case_plan,
     const loom_benchmark_benchmark_policy_t* policy,
     const loom_benchmark_options_t* options,
     loom_benchmark_hal_context_t* hal_context,
     loom_benchmark_hal_actual_sequence_t* sequence,
-    const loom_testbench_value_materializer_options_t* materializer_options,
+    const loom_testbench_case_execution_options_t* execution_options,
+    iree_arena_allocator_t* execution_arena,
     iree_host_size_t benchmark_sample_ordinal, iree_allocator_t allocator,
     loom_benchmark_benchmark_result_t* out_result);
 

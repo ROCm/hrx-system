@@ -34,15 +34,6 @@ void GpuStoreRelease(uint64_t address, T value) {
       .store(value, std::memory_order_release);
 }
 
-// Orders ring stores before the format's valid-header or producer-index store.
-inline void GpuPublishFence(const amdf_user_queue_mapping_info_t& mapping) {
-  if (mapping.host_publish_fence == AMDF_HOST_CACHE_FENCE_X86_SFENCE) {
-    _mm_sfence();
-  } else if (mapping.host_publish_fence == AMDF_HOST_CACHE_FENCE_X86_MFENCE) {
-    _mm_mfence();
-  }
-}
-
 // Orders command and index stores before the write-only MMIO doorbell. A C++
 // release store alone does not supply this x86 host-to-device store fence.
 inline void GpuRingDoorbell(uint64_t address, uint64_t value) {
@@ -91,12 +82,16 @@ struct GpuUserQueue {
       amdf_queue_placement_t placement = AMDF_QUEUE_PLACEMENT_DEFAULT);
   bool Release(const amdf_api_t* api);
 
+  // Completes ring-body stores before the format's header/index commitment.
+  amdf_status_t Flush() const;
   // Publishes an already-written PM4/SDMA stream, with the engine's index
   // units. AQL instead reserves indices before publishing each packet's valid
   // header.
   void PublishStream(uint64_t producer_index);
   void WaitConsumed(const amdf_api_t* api, uint64_t producer_index);
 
+  // Publication API borrowed for the lifetime of the mapped queue.
+  const amdf_api_t* publication_api = nullptr;
   // Queue retained until all submitted work and borrowed memory uses complete.
   amdf_user_queue_t* queue = nullptr;
   // Host view released before queue destruction.

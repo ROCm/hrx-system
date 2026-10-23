@@ -20,6 +20,7 @@
 #include "loom/codegen/low/transforms/allocation.h"
 #include "loom/codegen/low/transforms/dce.h"
 #include "loom/codegen/low/transforms/pipeline/source_invocation_facts.h"
+#include "loom/codegen/low/transforms/pipeline/source_signature_test_policy.h"
 #include "loom/codegen/pass_environment.h"
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/parser.h"
@@ -43,6 +44,7 @@
 #include "loom/target/function_contract.h"
 #include "loom/target/function_version.h"
 #include "loom/target/provider.h"
+#include "loom/target/registers.h"
 #include "loom/target/test/alt_descriptors.h"
 #include "loom/target/test/contracts/core_lower_rules.h"
 #include "loom/target/test/descriptors.h"
@@ -120,6 +122,11 @@ class LowLowerPassTest : public ::testing::Test {
     RegisterDialect(LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEMPLATE, loom_template_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables);
+    iree_host_size_t func_attr_count = 0;
+    const loom_parameterized_attr_descriptor_t* func_attrs =
+        loom_func_dialect_parameterized_attrs(&func_attr_count);
+    IREE_ASSERT_OK(loom_context_register_parameterized_attrs(
+        &context_, LOOM_DIALECT_FUNC, func_attrs, func_attr_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     loom_test_low_descriptor_registry_initialize(&registry_);
     loom_test_low_lower_policy_registry_initialize(&policy_registry_);
@@ -143,7 +150,7 @@ class LowLowerPassTest : public ::testing::Test {
 
   ModulePtr Parse(iree_string_view_t source) {
     loom_text_parse_options_t parse_options = {
-        .diagnostic_sink = {},
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
         .max_errors = 20,
     };
     loom_low_descriptor_text_asm_environment_initialize(
@@ -999,6 +1006,203 @@ TEST_F(LowLowerPassTest,
       RunSourceToLow(&policy_registry, module.get(), &collector);
   EXPECT_EQ(collector.count, 0);
   IREE_ASSERT_OK(status);
+}
+
+TEST_F(LowLowerPassTest,
+       SourceSignatureProjectsDefinitionsDeclarationsAndCalls) {
+  ModulePtr module = Parse(IREE_SV(
+      "test.target<low_core> @target\n"
+      "func.def target(@target) "
+      "source_signature(#func.abi.c.signature<arguments = "
+      "[1], results = [1], types = [#func.abi.c.type<unsigned_integer, "
+      "byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = "
+      "32>, #func.abi.c.type<record, byte_length = 8, byte_alignment = 4, "
+      "component_count = 2, name = \"Pair\", fields = "
+      "[#func.abi.c.field<\"left\", type = 0, byte_offset = 0>, "
+      "#func.abi.c.field<\"right\", type = 0, byte_offset = 4>]>]>) "
+      "@swap_pair(%left: i32, %right: i32) -> (%out_left: i32, %out_right: "
+      "i32) where [eq(%out_left, %right), eq(%out_right, %left)] {\n"
+      "  func.return %right, %left : i32, i32\n"
+      "}\n"
+      "func.decl target(@target) "
+      "source_signature(#func.abi.c.signature<arguments = "
+      "[1], results = [1], types = [#func.abi.c.type<unsigned_integer, "
+      "byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = "
+      "32>, #func.abi.c.type<record, byte_length = 8, byte_alignment = 4, "
+      "component_count = 2, name = \"Pair\", fields = "
+      "[#func.abi.c.field<\"left\", type = 0, byte_offset = 0>, "
+      "#func.abi.c.field<\"right\", type = 0, byte_offset = 4>]>]>) "
+      "@external_pair(%left: i32, %right: i32) -> (%out_left: i32, "
+      "%out_right: i32) where [eq(%out_left, %right), eq(%out_right, "
+      "%left)]\n"
+      "func.def target(@target) "
+      "source_signature(#func.abi.c.signature<arguments = "
+      "[1], results = [], types = [#func.abi.c.type<unsigned_integer, "
+      "byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = "
+      "32>, #func.abi.c.type<record, byte_length = 8, byte_alignment = 4, "
+      "component_count = 2, name = \"Pair\", fields = "
+      "[#func.abi.c.field<\"left\", type = 0, byte_offset = 0>, "
+      "#func.abi.c.field<\"right\", type = 0, byte_offset = 4>]>]>) "
+      "abi(hal_kernel) @kernel_linkage(%left: i32, %right: i32) {\n"
+      "  func.return\n"
+      "}\n"
+      "func.def target(@target) @identity(%value: i32) -> (i32) {\n"
+      "  func.return %value : i32\n"
+      "}\n"
+      "func.def public target(@target) @caller(%left: i32, %right: i32) -> "
+      "(i32, i32, i32) {\n"
+      "  %swapped_left, %swapped_right = func.call @swap_pair(%left, %right) "
+      ": (i32, i32) -> (i32, i32)\n"
+      "  %external_left, %external_right = func.call "
+      "@external_pair(%swapped_left, %swapped_right) : (i32, i32) -> (i32, "
+      "i32)\n"
+      "  %ordinary = func.call @identity(%left) : (i32) -> (i32)\n"
+      "  func.return %external_left, %external_right, %ordinary : i32, i32, "
+      "i32\n"
+      "}\n"));
+
+  loom_low_lower_policy_t policy = *loom_test_low_lower_policy();
+  policy.source_signature = {
+      .plan = loom_test_low_plan_source_signature,
+      .emit = loom_test_low_emit_source_signature,
+  };
+  const loom_low_lower_policy_registry_entry_t entries[] = {
+      {
+          .contract_set_stable_id = UINT64_C(0x235c515ddcc8fd92),
+          .policy = &policy,
+      },
+  };
+  loom_low_lower_policy_registry_t policy_registry = {};
+  loom_low_lower_policy_registry_initialize_from_entries(
+      &policy_registry, entries, IREE_ARRAYSIZE(entries));
+  IREE_ASSERT_OK(RunSourceToLow(&policy_registry, module.get()));
+
+  const loom_symbol_ref_t swap_ref =
+      FindSymbolRef(module.get(), IREE_SV("swap_pair"));
+  const loom_op_t* swap_op =
+      module->symbols.entries[swap_ref.symbol_id].defining_op;
+  ASSERT_TRUE(loom_low_func_def_isa(swap_op));
+  const loom_func_like_t swap =
+      loom_func_like_const_cast(module.get(), swap_op);
+  uint16_t swap_argument_count = 0;
+  const loom_value_id_t* swap_arguments =
+      loom_func_like_arg_ids(swap, &swap_argument_count);
+  ASSERT_EQ(swap_argument_count, 1u);
+  EXPECT_EQ(loom_low_register_type_unit_count(
+                loom_module_value_type(module.get(), swap_arguments[0])),
+            2u);
+  ASSERT_EQ(swap_op->result_count, 1u);
+  EXPECT_EQ(loom_low_register_type_unit_count(loom_module_value_type(
+                module.get(), loom_op_const_results(swap_op)[0])),
+            2u);
+  const loom_named_attr_slice_t swap_abi_layout =
+      loom_low_func_def_abi_layout(swap_op);
+  ASSERT_EQ(swap_abi_layout.count, 1u);
+  EXPECT_EQ(
+      swap_abi_layout.entries[0].name_id,
+      loom_module_lookup_string(module.get(), IREE_SV("source_projection")));
+  EXPECT_TRUE(loom_attr_as_bool(swap_abi_layout.entries[0].value));
+
+  loom_block_t* swap_entry = loom_region_entry_block(loom_func_like_body(swap));
+  ASSERT_NE(swap_entry, nullptr);
+  const loom_op_t* first_slice = swap_entry->first_op;
+  ASSERT_TRUE(loom_low_slice_isa(first_slice));
+  EXPECT_EQ(loom_low_slice_offset(first_slice), 0);
+  const loom_op_t* second_slice = first_slice->next_op;
+  ASSERT_TRUE(loom_low_slice_isa(second_slice));
+  EXPECT_EQ(loom_low_slice_offset(second_slice), 1);
+  const loom_op_t* swap_concat = second_slice->next_op;
+  ASSERT_TRUE(loom_low_concat_isa(swap_concat));
+  const loom_value_slice_t swap_sources = loom_low_concat_sources(swap_concat);
+  ASSERT_EQ(swap_sources.count, 2u);
+  EXPECT_EQ(swap_sources.values[0], loom_low_slice_result(second_slice));
+  EXPECT_EQ(swap_sources.values[1], loom_low_slice_result(first_slice));
+  ASSERT_TRUE(loom_low_return_isa(swap_concat->next_op));
+  EXPECT_EQ(swap_concat->next_op->next_op, nullptr);
+
+  const loom_symbol_ref_t external_ref =
+      FindSymbolRef(module.get(), IREE_SV("external_pair"));
+  const loom_op_t* external_op =
+      module->symbols.entries[external_ref.symbol_id].defining_op;
+  ASSERT_TRUE(loom_low_func_decl_isa(external_op));
+  EXPECT_EQ(external_op->operand_count, 1u);
+  EXPECT_EQ(external_op->result_count, 1u);
+  const loom_named_attr_slice_t external_abi_layout =
+      loom_low_func_decl_abi_layout(external_op);
+  ASSERT_EQ(external_abi_layout.count, 1u);
+  EXPECT_EQ(
+      external_abi_layout.entries[0].name_id,
+      loom_module_lookup_string(module.get(), IREE_SV("source_projection")));
+  EXPECT_TRUE(loom_attr_as_bool(external_abi_layout.entries[0].value));
+
+  const loom_symbol_ref_t kernel_ref =
+      FindSymbolRef(module.get(), IREE_SV("kernel_linkage"));
+  const loom_func_like_t kernel = loom_func_like_const_cast(
+      module.get(), module->symbols.entries[kernel_ref.symbol_id].defining_op);
+  uint16_t kernel_argument_count = 0;
+  (void)loom_func_like_arg_ids(kernel, &kernel_argument_count);
+  EXPECT_EQ(kernel_argument_count, 2u);
+  loom_block_t* kernel_entry =
+      loom_region_entry_block(loom_func_like_body(kernel));
+  ASSERT_NE(kernel_entry, nullptr);
+  EXPECT_TRUE(loom_low_return_isa(kernel_entry->first_op));
+  EXPECT_EQ(kernel_entry->first_op->next_op, nullptr);
+
+  const loom_symbol_ref_t caller_ref =
+      FindSymbolRef(module.get(), IREE_SV("caller"));
+  const loom_func_like_t caller = loom_func_like_const_cast(
+      module.get(), module->symbols.entries[caller_ref.symbol_id].defining_op);
+  loom_block_t* caller_entry =
+      loom_region_entry_block(loom_func_like_body(caller));
+  ASSERT_NE(caller_entry, nullptr);
+  int concat_count = 0;
+  int slice_count = 0;
+  int projected_call_count = 0;
+  int ordinary_call_count = 0;
+  int result_assume_count = 0;
+  for (const loom_op_t* op = caller_entry->first_op; op != nullptr;
+       op = op->next_op) {
+    concat_count += loom_low_concat_isa(op) ? 1 : 0;
+    slice_count += loom_low_slice_isa(op) ? 1 : 0;
+    if (loom_low_assume_isa(op)) {
+      ++result_assume_count;
+      EXPECT_EQ(op->operand_count, 4u);
+      EXPECT_EQ(op->result_count, 4u);
+    }
+    if (!loom_low_func_call_isa(op)) {
+      continue;
+    }
+    if (loom_low_func_call_callee(op).symbol_id == swap_ref.symbol_id ||
+        loom_low_func_call_callee(op).symbol_id == external_ref.symbol_id) {
+      ++projected_call_count;
+      EXPECT_EQ(op->operand_count, 1u);
+      EXPECT_EQ(op->result_count, 1u);
+    } else {
+      ++ordinary_call_count;
+      EXPECT_EQ(op->operand_count, 1u);
+      EXPECT_EQ(op->result_count, 1u);
+    }
+  }
+  EXPECT_EQ(concat_count, 2);
+  EXPECT_EQ(slice_count, 4);
+  EXPECT_EQ(projected_call_count, 2);
+  EXPECT_EQ(ordinary_call_count, 1);
+  EXPECT_EQ(result_assume_count, 2);
+}
+
+TEST_F(LowLowerPassTest, SourceSignatureRequiresTargetObjectFunctionPolicy) {
+  ModulePtr module =
+      Parse(IREE_SV("test.target<low_core> @target\n"
+                    "func.def target(@target) "
+                    "source_signature(#func.abi.c.signature<arguments = "
+                    "[], results = [], types = []>) @external_c() {\n"
+                    "  func.return\n"
+                    "}\n"));
+
+  DiagnosticEmissionCollector collector;
+  IREE_ASSERT_OK(RunSourceToLow(&policy_registry_, module.get(), &collector));
+  ASSERT_EQ(collector.count, 1);
+  EXPECT_EQ(collector.last_error, LOOM_ERR_TARGET_032);
 }
 
 TEST_F(LowLowerPassTest, EffectfulFactIdentityRequiresTargetContract) {

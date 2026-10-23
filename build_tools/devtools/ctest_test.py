@@ -24,15 +24,27 @@ def ctest_model(*tests: dict) -> str:
     )
 
 
-def test_record(name: str) -> dict:
-    return {"name": name, "properties": []}
+def test_record(name: str, temporary_directory: Path | None = None) -> dict:
+    properties = []
+    if temporary_directory is not None:
+        properties.append(
+            {
+                "name": "ENVIRONMENT",
+                "value": ["OTHER=value", f"TEST_TMPDIR={temporary_directory}"],
+            }
+        )
+    return {"name": name, "properties": properties}
 
 
-def build_target_catalog(*entries: tuple[str, object]) -> str:
+def build_target_catalog(
+    *entries: tuple[str, object],
+    temporary_directory_root: Path = Path("/build/test_tmpdir"),
+) -> str:
     return json.dumps(
         {
             "kind": "ireeCtestBuildTargets",
-            "version": 1,
+            "version": 2,
+            "temporaryDirectoryRoot": str(temporary_directory_root),
             "tests": dict(entries),
         }
     )
@@ -40,11 +52,12 @@ def build_target_catalog(*entries: tuple[str, object]) -> str:
 
 class CTestTest(unittest.TestCase):
     def test_parses_and_deduplicates_build_targets(self):
+        temporary_root = Path("/build/test_tmpdir")
         selection = ctest_dev.parse_ctest_selection(
             ctest_model(
-                test_record("compiled"),
+                test_record("compiled", temporary_root / "compiled"),
                 test_record("native"),
-                test_record("source-only"),
+                test_record("source-only", temporary_root / "source-only"),
                 test_record("shared-tool"),
             ),
             build_target_catalog(
@@ -63,6 +76,69 @@ class CTestTest(unittest.TestCase):
             selection.build_targets,
             ("compiled_root", "native_root", "tool_root"),
         )
+        self.assertEqual(selection.temporary_directory_root, temporary_root)
+        self.assertEqual(
+            selection.temporary_directories,
+            (
+                ctest_dev.CTestTemporaryDirectory(
+                    "compiled", temporary_root / "compiled"
+                ),
+                ctest_dev.CTestTemporaryDirectory(
+                    "source-only", temporary_root / "source-only"
+                ),
+            ),
+        )
+
+    def test_prepares_only_selected_temporary_directories(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            build_dir = Path(temporary)
+            temporary_root = build_dir / "test_tmpdir"
+            selected = temporary_root / "selected_test_tmpdir"
+            unselected = temporary_root / "unselected_test_tmpdir"
+            selected.mkdir(parents=True)
+            unselected.mkdir()
+            (selected / "stale").write_text("stale")
+            (unselected / "preserved").write_text("preserved")
+            selection = ctest_dev.CTestSelection(
+                ("selected",),
+                (),
+                temporary_root,
+                (ctest_dev.CTestTemporaryDirectory("selected", selected),),
+            )
+
+            ctest_dev.prepare_selected_test_temporary_directories(selection)
+
+            self.assertEqual(list(selected.iterdir()), [])
+            self.assertEqual((unselected / "preserved").read_text(), "preserved")
+
+    def test_rejects_temporary_directories_outside_the_build_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            build_dir = Path(temporary) / "build"
+            temporary_root = build_dir / "test_tmpdir"
+            inside = temporary_root / "inside"
+            inside.mkdir(parents=True)
+            inside_marker = inside / "preserved"
+            inside_marker.write_text("preserved")
+            outside = Path(temporary) / "outside"
+            outside.mkdir(parents=True)
+            outside_marker = outside / "preserved"
+            outside_marker.write_text("preserved")
+            selection = ctest_dev.CTestSelection(
+                ("inside", "escaped"),
+                (),
+                temporary_root,
+                (
+                    ctest_dev.CTestTemporaryDirectory("inside", inside),
+                    ctest_dev.CTestTemporaryDirectory("escaped", outside),
+                ),
+            )
+
+            with self.assertRaisesRegex(
+                ctest_dev.CTestMetadataError, "outside.*test_tmpdir"
+            ):
+                ctest_dev.prepare_selected_test_temporary_directories(selection)
+            self.assertEqual(inside_marker.read_text(), "preserved")
+            self.assertEqual(outside_marker.read_text(), "preserved")
 
     def test_rejects_missing_or_malformed_build_metadata(self):
         invalid_models = [

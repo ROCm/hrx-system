@@ -30,12 +30,10 @@ loom_cc_library(
     hdrs = ["ops.h"],
     textual_hdrs = ["ops.inc"],
     deps = [
-        "//loom/src/loom/ir:builders",
-        "//loom/src/loom/ir:types",
-        "//loom/src/loom/ops:atomic",
-        "//loom/src/loom/ops:cache",
-        "//loom/src/loom/ops:combining",
-        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ir:headers",
+        "//loom/src/loom/ir:type_headers",
+        "//loom/src/loom/ops:headers",
+        "//loom/src/loom/ops:vocabulary",
         "//loom/src/loom/target:types",
     ],
 )
@@ -48,10 +46,8 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ir:builders",
         "//loom/src/loom/ir:types",
-        "//loom/src/loom/ops:atomic",
-        "//loom/src/loom/ops:cache",
-        "//loom/src/loom/ops:combining",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:vocabulary",
         "//loom/src/loom/target:types",
     ],
 )

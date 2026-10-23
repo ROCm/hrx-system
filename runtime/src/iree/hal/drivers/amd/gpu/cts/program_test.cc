@@ -94,7 +94,7 @@ class GpuProgramTest : public GpuNativeTest {
         iree_hal_amd_gpu_pm4_ring_initialize(
             reinterpret_cast<uint32_t*>(queue.mapping.ring_address),
             static_cast<uint32_t>(queue.mapping.ring_byte_length / 4),
-            queue.user.host_publish_fence, &queue.ring);
+            queue.user.host_publish_executor, &queue.ring);
       }
     }
   }
@@ -302,6 +302,7 @@ class GpuProgramTest : public GpuNativeTest {
                                      ++queue.epoch);
     uses_.push_back(instance);
     if (!kernel_) {
+      ASSERT_EQ(iree_hal_amd_gpu_user_queue_flush(&queue.user), AMDF_STATUS_OK);
       iree_atomic_store(reinterpret_cast<iree_atomic_int64_t*>(
                             queue.mapping.write_index_address),
                         queue.ring.reserved_words, iree_memory_order_release);

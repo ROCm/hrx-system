@@ -65,7 +65,7 @@ SpirvScalarType = EnumDef(
     ),
     c_type="loom_spirv_scalar_type_t",
     c_const_prefix="LOOM_SPIRV_SCALAR_TYPE",
-    c_include="loom/target/arch/spirv/scalar_types.h",
+    c_include="loom/target/arch/spirv/scalar_type.h",
 )
 
 SpirvScope = EnumDef(

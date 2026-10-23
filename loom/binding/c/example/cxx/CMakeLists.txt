@@ -76,4 +76,65 @@ loom_cc_test(
 )
 endif()
 
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_X86 AND IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_generated_file(
+  NAME
+    native_abi_module
+  GENERATOR
+    loom::tools::loom-import-cxx::loom-import-cxx
+  OUTPUT
+    "native_abi.loombc"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "${PROJECT_SOURCE_DIR}/loom/binding/c/example/cxx/native_abi_library.cxx"
+    "--to=bc"
+  INPUTS
+    "native_abi.h"
+    "native_abi_library.cxx"
+)
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_X86 AND IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_generated_file(
+  NAME
+    native_abi_object
+  GENERATOR
+    loom::tools::loom-compile::loom-compile
+  OUTPUT
+    "native_abi.o"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "${CMAKE_CURRENT_BINARY_DIR}/native_abi.loombc"
+    "--target=x86:avx2"
+  INPUTS
+    "native_abi.loombc"
+)
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_X86 AND IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_binary(
+  NAME
+    native_abi
+  SRCS
+    "native_abi.h"
+    "native_abi.o"
+    "native_abi_main.cc"
+  COPTS
+    "-mavx2"
+  DEPS
+
+)
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_X86 AND IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_native_test(
+  NAME
+    "native_abi_test"
+  SRC
+    ::native_abi
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

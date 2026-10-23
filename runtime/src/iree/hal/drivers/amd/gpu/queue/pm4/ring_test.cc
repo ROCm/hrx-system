@@ -31,8 +31,8 @@ TEST(RingTest, InitializationDoesNotTouchNativeStorage) {
   std::array<uint32_t, 64> words;
   words.fill(kUnwritten);
   Ring ring;
-  iree_hal_amd_gpu_pm4_ring_initialize(words.data(), words.size(),
-                                       IREE_HAL_HOST_CACHE_FENCE_NONE, &ring);
+  iree_hal_amd_gpu_pm4_ring_initialize(
+      words.data(), words.size(), AMDF_CACHE_TRANSITION_EXECUTOR_NONE, &ring);
   EXPECT_EQ(ring.words, words.data());
   EXPECT_EQ(ring.capacity, 64u);
   EXPECT_EQ(ring.reserved_words, 0u);
@@ -48,8 +48,8 @@ TEST(RingTest, AllPublicationPaddingResidues) {
     std::array<uint32_t, 128> words;
     words.fill(kUnwritten);
     Ring ring;
-    iree_hal_amd_gpu_pm4_ring_initialize(words.data(), words.size(),
-                                         IREE_HAL_HOST_CACHE_FENCE_NONE, &ring);
+    iree_hal_amd_gpu_pm4_ring_initialize(
+        words.data(), words.size(), AMDF_CACHE_TRANSITION_EXECUTOR_NONE, &ring);
     Reservation reservation;
     const uint32_t body = 16 + residue;
     ASSERT_TRUE(
@@ -71,8 +71,8 @@ TEST(RingTest, InsufficientCreditLeavesEverythingUnchanged) {
   std::array<uint32_t, 64> words;
   words.fill(kUnwritten);
   Ring ring;
-  iree_hal_amd_gpu_pm4_ring_initialize(words.data(), words.size(),
-                                       IREE_HAL_HOST_CACHE_FENCE_NONE, &ring);
+  iree_hal_amd_gpu_pm4_ring_initialize(
+      words.data(), words.size(), AMDF_CACHE_TRANSITION_EXECUTOR_NONE, &ring);
   Reservation reservation;
   ASSERT_TRUE(
       iree_hal_amd_gpu_pm4_ring_try_reserve(&ring, 0, 24, &reservation));
@@ -97,8 +97,8 @@ TEST(RingTest, WrapPreservesTheUnconsumedNotificationTail) {
   std::array<uint32_t, 64> words;
   words.fill(kUnwritten);
   Ring ring;
-  iree_hal_amd_gpu_pm4_ring_initialize(words.data(), words.size(),
-                                       IREE_HAL_HOST_CACHE_FENCE_NONE, &ring);
+  iree_hal_amd_gpu_pm4_ring_initialize(
+      words.data(), words.size(), AMDF_CACHE_TRANSITION_EXECUTOR_NONE, &ring);
   Reservation first;
   ASSERT_TRUE(iree_hal_amd_gpu_pm4_ring_try_reserve(&ring, 0, 24, &first));
   iree_hal_amd_gpu_pm4_emit_nop(first.words, 24);
@@ -127,8 +127,8 @@ TEST(RingTest, CompletionCreditProgressesAcrossEveryBodyResidueAndWrap) {
     SCOPED_TRACE(capacity);
     std::vector<uint32_t> words(capacity, kUnwritten);
     Ring ring;
-    iree_hal_amd_gpu_pm4_ring_initialize(words.data(), capacity,
-                                         IREE_HAL_HOST_CACHE_FENCE_NONE, &ring);
+    iree_hal_amd_gpu_pm4_ring_initialize(
+        words.data(), capacity, AMDF_CACHE_TRANSITION_EXECUTOR_NONE, &ring);
     uint64_t consumed = 0;
     // Completed release packets return credit immediately. The final eight
     // DWORDs model the independent event tail, followed by native padding.
@@ -161,8 +161,8 @@ TEST(RingTest, CompletionCreditProgressesAcrossEveryBodyResidueAndWrap) {
 TEST(RingTest, LargestAdmittedSpanUsesValidWrapPackets) {
   std::vector<uint32_t> words(65536, kUnwritten);
   Ring ring;
-  iree_hal_amd_gpu_pm4_ring_initialize(words.data(), words.size(),
-                                       IREE_HAL_HOST_CACHE_FENCE_NONE, &ring);
+  iree_hal_amd_gpu_pm4_ring_initialize(
+      words.data(), words.size(), AMDF_CACHE_TRANSITION_EXECUTOR_NONE, &ring);
   uint64_t consumed = 0;
   for (uint32_t iteration = 0; iteration < 12; ++iteration) {
     const uint32_t body = iteration % 2 ? 16382 : 8199;
@@ -183,8 +183,8 @@ TEST(RingTest, LargestAdmittedSpanUsesValidWrapPackets) {
 TEST(RingTest, CompletedMaximumTailsCannotStrandTheNextPublication) {
   std::array<uint32_t, 1024> words;
   Ring ring;
-  iree_hal_amd_gpu_pm4_ring_initialize(words.data(), words.size(),
-                                       IREE_HAL_HOST_CACHE_FENCE_NONE, &ring);
+  iree_hal_amd_gpu_pm4_ring_initialize(
+      words.data(), words.size(), AMDF_CACHE_TRANSITION_EXECUTOR_NONE, &ring);
   uint64_t consumed = 0;
   for (uint32_t iteration = 0; iteration < 1024; ++iteration) {
     // A 495-DWORD body needs nine DWORDs of padding. Eight notification

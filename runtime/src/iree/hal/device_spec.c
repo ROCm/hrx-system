@@ -300,6 +300,26 @@ static iree_status_t iree_hal_device_spec_validate_queue_family(
                             family_ordinal,
                             family->placement_capabilities & ~known_placements);
   }
+  const iree_hal_queue_host_publication_flags_t known_publication_flags =
+      IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KNOWN |
+      IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ |
+      IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL;
+  for (uint32_t placement = 0; placement < IREE_HAL_QUEUE_PLACEMENT_COUNT;
+       ++placement) {
+    const iree_hal_queue_host_publication_flags_t flags =
+        family->host_publication[placement];
+    if (IREE_UNLIKELY(
+            (flags & ~known_publication_flags) ||
+            (flags && !(flags & IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KNOWN)) ||
+            (flags && placement != IREE_HAL_QUEUE_PLACEMENT_DEFAULT &&
+             !(family->placement_capabilities & (1u << placement))))) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "device spec queue family %" PRIhsz
+                              " has invalid host publication flags 0x%08" PRIx32
+                              " for placement %u",
+                              family_ordinal, flags, placement);
+    }
+  }
   const iree_hal_queue_feature_flags_t known_queue_features =
       IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH;
   if (IREE_UNLIKELY(family->supported_queue_features & ~known_queue_features)) {

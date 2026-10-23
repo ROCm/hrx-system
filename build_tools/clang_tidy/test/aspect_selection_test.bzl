@@ -6,13 +6,24 @@
 
 """Analysis tests for clang-tidy translation-unit selection."""
 
+load("@iree_clang_tidy_llvm//:config.bzl", "CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH")
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test")
-load("//build_tools/clang_tidy:clang_tidy.bzl", "IreeClangTidyInfo")
+load("//build_tools/clang_tidy:clang_tidy.bzl", "IreeClangTidyInfo", "make_clang_tidy_aspect")
 
-_SELECTED_FILES_FLAG = str(Label("//build_tools/clang_tidy:selected_files"))
+_SELECTIONS = {
+    "all": "",
+    "empty": "[]",
+    "header": '["build_tools/clang_tidy/test/action_smoke.h"]',
+    "source": '["build_tools/clang_tidy/test/action_smoke.c"]',
+    "unrelated": '["runtime/src/iree/base/status.h"]',
+}
+_selection_aspect = make_clang_tidy_aspect(selected_files_values = _SELECTIONS.values())
 _REPORT_PREFIX = "build_tools_clang_tidy_test_"
 _TEST_ATTRIBUTES = {
     "tags": ["manual"],
+    # The aspect attaches directly to a C/C++ subject, so the test owns the
+    # tool compatibility constraint normally supplied by iree_clang_tidy.
+    "target_compatible_with": CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH,
     "timeout": "short",
 }
 
@@ -39,45 +50,29 @@ def _unrelated_file_test_impl(env, target):
     _expect_reports(env, target, [])
 
 def clang_tidy_aspect_selection_test_suite(name, target):
-    """Defines source, header, and unrelated-input selection tests.
+    """Defines source, header, unrelated, empty, and full-source selection tests.
 
     Args:
       name: Test-suite target name.
-      target: Clang-tidy rule whose local reports are inspected.
+      target: C/C++ subject whose aspect reports are inspected.
     """
-    target = Label(target)
-    analysis_test(
-        name = name + "_source",
-        attr_values = _TEST_ATTRIBUTES,
-        config_settings = {
-            _SELECTED_FILES_FLAG: '["build_tools/clang_tidy/test/action_smoke.c"]',
-        },
-        impl = _selected_source_test_impl,
-        target = target,
-    )
-    analysis_test(
-        name = name + "_header",
-        attr_values = _TEST_ATTRIBUTES,
-        config_settings = {
-            _SELECTED_FILES_FLAG: '["build_tools/clang_tidy/test/action_smoke.h"]',
-        },
-        impl = _selected_header_test_impl,
-        target = target,
-    )
-    analysis_test(
-        name = name + "_unrelated",
-        attr_values = _TEST_ATTRIBUTES,
-        config_settings = {
-            _SELECTED_FILES_FLAG: '["runtime/src/iree/base/status.h"]',
-        },
-        impl = _unrelated_file_test_impl,
-        target = target,
-    )
+    implementations = {
+        "all": _selected_header_test_impl,
+        "empty": _unrelated_file_test_impl,
+        "header": _selected_header_test_impl,
+        "source": _selected_source_test_impl,
+        "unrelated": _unrelated_file_test_impl,
+    }
+    for selection, encoded_files in _SELECTIONS.items():
+        analysis_test(
+            name = name + "_" + selection,
+            attrs = {"selected_files": attr.string()},
+            attr_values = dict(_TEST_ATTRIBUTES, selected_files = encoded_files),
+            extra_target_under_test_aspects = [_selection_aspect],
+            impl = implementations[selection],
+            target = Label(target),
+        )
     native.test_suite(
         name = name,
-        tests = [
-            name + "_header",
-            name + "_source",
-            name + "_unrelated",
-        ],
+        tests = [name + "_" + selection for selection in _SELECTIONS],
     )

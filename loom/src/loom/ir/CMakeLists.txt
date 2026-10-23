@@ -30,6 +30,46 @@ iree_cc_library(
 
 loom_cc_library(
   NAME
+    type_headers
+  HDRS
+    "attribute.h"
+    "memory_space.h"
+    "scalar_type.h"
+    "structural_hash.h"
+    "type_constraint.h"
+    "types.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    headers
+  HDRS
+    "attribute_schema.h"
+    "encoding.h"
+    "intern_table.h"
+    "ir.h"
+    "location.h"
+    "parameterized_attr.h"
+    "parameterized_type.h"
+    "semantics.h"
+    "string_table.h"
+    "type_descriptor.h"
+    "type_table.h"
+  DEPS
+    ::type_headers
+    iree::base
+    iree::base::internal::arena
+    loom::error::emitter
+    loom::util::bstring
+    loom::util::segmented_storage_headers
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     facts
   HDRS
     "facts.h"

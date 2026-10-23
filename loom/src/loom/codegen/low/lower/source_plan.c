@@ -184,7 +184,8 @@ static bool loom_low_lower_op_is_structural(
     return true;
   }
   if (iree_any_bit_set(traits, LOOM_TRAIT_CALLABLE_BOUNDARY) &&
-      loom_low_lower_source_call_is_structural(context->module, op)) {
+      loom_low_lower_source_call_is_structural(context->module, op) &&
+      !loom_low_lower_source_call_requires_projection(context, op)) {
     return true;
   }
   switch (op->kind) {
@@ -615,6 +616,11 @@ static iree_status_t loom_low_lower_finalize_selected_plans(
     } else if (selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE) {
       status = loom_low_lower_source_invoke_finalize(
           context, selected_plan->source_op, selected_plan->data.invoke);
+    } else if (selected_plan->kind ==
+               LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL) {
+      status = loom_low_lower_projected_call_finalize(
+          context, selected_plan->source_op,
+          selected_plan->data.projected_call);
     }
     if (iree_status_is_ok(status) && context->result->error_count == 0 &&
         !loom_low_lower_selected_plan_preserves_volatile_memory(
@@ -1595,6 +1601,27 @@ static iree_status_t loom_low_lower_plan_op(
         .rule_set_index = UINT16_MAX,
         .rule_index = UINT16_MAX,
         .data.invoke = plan,
+    };
+    return loom_low_lower_select_fixed_plan(
+        context, candidate_plan, &selected_plan,
+        LOOM_LOW_LOWER_SOURCE_GRAPH_ALTERNATIVE_FIXED);
+  }
+
+  if (loom_low_lower_source_call_requires_projection(context, source_op)) {
+    const loom_low_lower_projected_call_plan_t* plan = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_projected_call_plan(context, source_op, &plan));
+    if (plan == NULL && candidate_plan == NULL) {
+      return iree_ok_status();
+    }
+    const loom_low_lower_selected_plan_t selected_plan = {
+        .source_op = source_op,
+        .kind = plan != NULL ? LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL
+                             : LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK,
+        .flags = plan != NULL ? 0 : LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED,
+        .rule_set_index = UINT16_MAX,
+        .rule_index = UINT16_MAX,
+        .data.projected_call = plan,
     };
     return loom_low_lower_select_fixed_plan(
         context, candidate_plan, &selected_plan,

@@ -27,7 +27,6 @@ static iree_status_t loom_benchmark_run_dispatch_sample_work_item(
            ->selected_benchmarks[work_item->representative_selection_index];
   const loom_testbench_benchmark_plan_t* benchmark_plan =
       selection->benchmark_plan;
-  const loom_testbench_case_plan_t* case_plan = selection->case_plan;
   const loom_benchmark_benchmark_policy_t* policy = &selection->policy;
 
   loom_benchmark_hal_work_item_state_t work_item_state = {0};
@@ -40,11 +39,11 @@ static iree_status_t loom_benchmark_run_dispatch_sample_work_item(
       loom_benchmark_benchmark_result_t benchmark_result = {0};
       status = loom_benchmark_run_hal_sequence_benchmark_sample(
           options->run, &selection->identity, options->module_plan,
-          benchmark_plan, case_plan, policy, options->benchmark_options,
+          benchmark_plan, policy, options->benchmark_options,
           options->hal_context, &compile_context->hal_sequence,
-          &compile_context->benchmark_materializer,
-          work_item->begin_benchmark_sample, options->host_allocator,
-          &benchmark_result);
+          &compile_context->benchmark_execution_options,
+          options->execution_arena, work_item->begin_benchmark_sample,
+          options->host_allocator, &benchmark_result);
       if (iree_status_is_ok(status)) {
         benchmark_result.compile_item = compile_context->compile_item;
         benchmark_result.launch_evidence = &work_item_state.launch_evidence;
@@ -58,11 +57,11 @@ static iree_status_t loom_benchmark_run_dispatch_sample_work_item(
       loom_benchmark_benchmark_result_t benchmark_result = {0};
       status = loom_benchmark_run_hal_benchmark_sample(
           options->run, &selection->identity, options->module_plan,
-          benchmark_plan, case_plan, policy, options->benchmark_options,
+          benchmark_plan, policy, options->benchmark_options,
           &compile_context->hal_provider,
-          &compile_context->benchmark_materializer,
-          work_item->begin_benchmark_sample, options->host_allocator,
-          &benchmark_result);
+          &compile_context->benchmark_execution_options,
+          options->execution_arena, work_item->begin_benchmark_sample,
+          options->host_allocator, &benchmark_result);
       if (iree_status_is_ok(status)) {
         benchmark_result.compile_item = compile_context->compile_item;
         benchmark_result.launch_evidence = &work_item_state.launch_evidence;

@@ -46,6 +46,9 @@ typedef struct amdf_gpu_queue_family_properties_t {
   amdf_queue_priority_capabilities_t priority_capabilities;
   // Supported explicit primary-ring locality guarantees for user queues.
   amdf_queue_placement_capabilities_t placement_capabilities;
+  // Immutable direct host-publication requirements for each placement.
+  amdf_queue_host_publication_flags_t
+      host_publication[AMDF_QUEUE_PLACEMENT_COUNT];
   // Optional sidecar metadata command format.
   amdf_queue_metadata_format_t metadata;
   // Minimum supported power-of-two primary user ring length in bytes.

@@ -1,0 +1,57 @@
+// Copyright 2026 The IREE Authors
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef IREE_BUILD_TOOLS_THIRD_PARTY_LIBBACKTRACE_SYMBOL_PREFIX_H_
+#define IREE_BUILD_TOOLS_THIRD_PARTY_LIBBACKTRACE_SYMBOL_PREFIX_H_
+
+// The pinned implementation is private to IREE's stack-trace formatter. Rename
+// both public entry points and cross-file implementation symbols: changing only
+// the entry points would still allow an application's libbacktrace to interpose
+// an unpatched cache implementation. This header is internal to the library and
+// its private IREE include wrapper, never a transitive compiler -D option.
+#define backtrace_state iree_private_backtrace_state
+#define backtrace_error_callback iree_private_backtrace_error_callback
+#define backtrace_full_callback iree_private_backtrace_full_callback
+#define backtrace_simple_callback iree_private_backtrace_simple_callback
+#define backtrace_syminfo_callback iree_private_backtrace_syminfo_callback
+
+#define backtrace_create_state iree_private_backtrace_create_state
+#define backtrace_full iree_private_backtrace_full
+#define backtrace_simple iree_private_backtrace_simple
+#define backtrace_print iree_private_backtrace_print
+#define backtrace_pcinfo iree_private_backtrace_pcinfo
+#define backtrace_syminfo iree_private_backtrace_syminfo
+
+#define backtrace_alloc iree_private_backtrace_alloc
+#define backtrace_close iree_private_backtrace_close
+#define backtrace_dwarf_add iree_private_backtrace_dwarf_add
+#define backtrace_free iree_private_backtrace_free
+#define backtrace_get_view iree_private_backtrace_get_view
+#define backtrace_initialize iree_private_backtrace_initialize
+#define backtrace_open iree_private_backtrace_open
+#define backtrace_qsort iree_private_backtrace_qsort
+#define backtrace_release_view iree_private_backtrace_release_view
+#define backtrace_syminfo_to_full_callback \
+  iree_private_backtrace_syminfo_to_full_callback
+#define backtrace_syminfo_to_full_error_callback \
+  iree_private_backtrace_syminfo_to_full_error_callback
+#define backtrace_uncompress_lzma iree_private_backtrace_uncompress_lzma
+#define backtrace_uncompress_zdebug iree_private_backtrace_uncompress_zdebug
+#define backtrace_uncompress_zstd iree_private_backtrace_uncompress_zstd
+#define backtrace_vector_finish iree_private_backtrace_vector_finish
+#define backtrace_vector_grow iree_private_backtrace_vector_grow
+#define backtrace_vector_release iree_private_backtrace_vector_release
+
+// Upstream uses function-like macros when atomic builtins are available and
+// external functions only in this fallback configuration.
+#if !defined(HAVE_ATOMIC_FUNCTIONS) && defined(HAVE_SYNC_FUNCTIONS)
+#define backtrace_atomic_load_pointer iree_private_backtrace_atomic_load_pointer
+#define backtrace_atomic_load_int iree_private_backtrace_atomic_load_int
+#define backtrace_atomic_load_size_t iree_private_backtrace_atomic_load_size_t
+#define backtrace_atomic_store_pointer \
+  iree_private_backtrace_atomic_store_pointer
+#define backtrace_atomic_store_int iree_private_backtrace_atomic_store_int
+#define backtrace_atomic_store_size_t iree_private_backtrace_atomic_store_size_t
+#endif
+
+#endif  // IREE_BUILD_TOOLS_THIRD_PARTY_LIBBACKTRACE_SYMBOL_PREFIX_H_

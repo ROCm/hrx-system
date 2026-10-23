@@ -4,10 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef AMDF_CTS_GPU_AQL_QUEUE_FIXTURE_H_
-#define AMDF_CTS_GPU_AQL_QUEUE_FIXTURE_H_
+#ifndef AMDF_CTS_GPU_AQL_QUEUE_QUEUE_FIXTURE_H_
+#define AMDF_CTS_GPU_AQL_QUEUE_QUEUE_FIXTURE_H_
 
-#include "libamdf/cts/gpu/aql/publication.h"
+#include "libamdf/cts/gpu/aql/queue/publication.h"
 #include "libamdf/cts/gpu/util/command_fixture.h"
 
 class AqlQueueTest : public GpuCommandTest {
@@ -34,4 +34,4 @@ class AqlQueueTest : public GpuCommandTest {
   }
 };
 
-#endif  // AMDF_CTS_GPU_AQL_QUEUE_FIXTURE_H_
+#endif  // AMDF_CTS_GPU_AQL_QUEUE_QUEUE_FIXTURE_H_

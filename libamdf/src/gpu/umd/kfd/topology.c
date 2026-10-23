@@ -535,6 +535,9 @@ amdf_status_t amdf_gpu_kfd_topology_query_memory(
   topology->virtual_address.alignment = device.virtual_address_alignment;
   topology->virtual_address.fragment_size = device.pte_fragment_size;
   topology->integrated = (device.ids_flags & AMDGPU_IDS_FLAGS_FUSION) != 0;
+  topology->virtual_function =
+      ((device.ids_flags & AMDGPU_IDS_FLAGS_MODE_MASK) >>
+       AMDGPU_IDS_FLAGS_MODE_SHIFT) == AMDGPU_IDS_FLAGS_MODE_VF;
   topology->memory_features =
       amdf_gpu_kfd_topology_memory_features(topology, topology->integrated);
   return AMDF_STATUS_OK;

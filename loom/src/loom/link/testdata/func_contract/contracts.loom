@@ -16,6 +16,14 @@ func.decl @argument_type_mismatch(%value: f32) -> (i32)
 
 func.decl @result_type_mismatch(%value: i32) -> (f32)
 
+func.decl source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<signed_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @c_source(%value: i32) -> (i32)
+
+func.decl source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<signed_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @c_selected(%value: i32) -> (i32)
+
+func.decl @c_absent(%value: i32) -> (i32)
+
+func.decl source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @c_unsigned(%value: i32) -> (i32)
+
 kernel.decl @kernel_source(%workload_count: index) launch(%value: i32)
 
 kernel.decl @kernel_count_mismatch(%workload_x: index, %workload_y: index) launch(%value: i32)

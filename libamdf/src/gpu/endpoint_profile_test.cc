@@ -247,11 +247,26 @@ TEST(GpuEndpointProfileTest, RejectsIncompleteOrInconsistentProperties) {
       .user_queue_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
       .producer_modes = AMDF_QUEUE_PRODUCER_MODE_BIT_SINGLE,
       .priority_capabilities = AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL,
+      .placement_capabilities = AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
+                                AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL,
+      .host_publication =
+          {
+              AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN,
+              AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN,
+              AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN |
+                  AMDF_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ |
+                  AMDF_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL,
+          },
       .minimum_ring_byte_length = 4096,
       .maximum_ring_byte_length = 4096,
       .ring_byte_length_alignment = 4096,
   };
   EXPECT_TRUE(amdf_gpu_endpoint_profile_initialize(&properties, &profile));
+  for (uint32_t placement = 0; placement < AMDF_QUEUE_PLACEMENT_COUNT;
+       ++placement) {
+    EXPECT_EQ(profile.queue_families[0].host_publication[placement],
+              properties.queue_families[0].host_publication[placement]);
+  }
   properties.queue_families[0].ring_byte_length_alignment = 3072;
   EXPECT_FALSE(amdf_gpu_endpoint_profile_initialize(&properties, &profile));
   properties.queue_families[0].ring_byte_length_alignment = 4096;

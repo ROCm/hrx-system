@@ -46,6 +46,8 @@ struct amdf_user_queue_t {
 };
 
 typedef struct amdf_user_queue_mapping_vtable_t {
+  // Completes host publication; native errors terminally fail the queue.
+  amdf_status_t (*flush)(amdf_user_queue_mapping_t* mapping);
   // Releases exact native mapping state after producer access has stopped.
   amdf_status_t (*destroy_native)(amdf_user_queue_mapping_t* mapping);
 } amdf_user_queue_mapping_vtable_t;
@@ -94,6 +96,10 @@ amdf_user_queue_map(amdf_user_queue_t* queue, amdf_device_t* producer_device,
 amdf_status_t AMDF_CALL
 amdf_user_queue_mapping_query_info(amdf_user_queue_mapping_t* mapping,
                                    amdf_user_queue_mapping_info_t* out_info);
+
+// Completes command stores for an admitted HOST_API mapping.
+amdf_status_t AMDF_CALL
+amdf_user_queue_mapping_flush(amdf_user_queue_mapping_t* mapping);
 
 // Releases one producer-local mapping.
 amdf_status_t AMDF_CALL

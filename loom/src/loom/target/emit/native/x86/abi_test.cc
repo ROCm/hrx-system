@@ -765,6 +765,78 @@ TEST_F(X86FunctionAbiTest, EveryProfileSupportsPrivateResultOverflow) {
   }
 }
 
+TEST_F(X86FunctionAbiTest, ExactSysvLayoutRetainsMixedRegisterBanks) {
+  ModulePtr module = Parse(R"(
+low.func.decl target<x86.avx2.core> abi(object_function) abi_layout({signature = (f32, i64) -> (f32, i64), sysv = {argument_offsets = [-1, -1], argument_registers = [0, 7], result_registers = [0, 0], stack_alignment = 0, stack_bytes = 0}}) @mixed(%value: reg<x86.xmm>, %tag: reg<x86.gpr64>) -> (reg<x86.xmm>, reg<x86.gpr64>)
+)");
+  const PreparedAbi prepared =
+      Prepare(module.get(), "mixed", loom_x86_avx2_core_descriptor_set);
+  ASSERT_TRUE(prepared.supported);
+  ASSERT_EQ(prepared.abi.call_contract.argument_count, 2u);
+  EXPECT_EQ(prepared.abi.call_contract.arguments[0].descriptor_reg_class_id,
+            LOOM_X86_REGISTER_CLASS_XMM);
+  EXPECT_EQ(prepared.abi.call_contract.arguments[0].location_base, 0u);
+  EXPECT_EQ(prepared.abi.call_contract.arguments[1].descriptor_reg_class_id,
+            LOOM_X86_REGISTER_CLASS_GPR64);
+  EXPECT_EQ(prepared.abi.call_contract.arguments[1].location_base, 7u);
+  ASSERT_EQ(prepared.abi.call_contract.result_count, 2u);
+  EXPECT_EQ(prepared.abi.call_contract.results[0].descriptor_reg_class_id,
+            LOOM_X86_REGISTER_CLASS_XMM);
+  EXPECT_EQ(prepared.abi.call_contract.results[0].location_base, 0u);
+  EXPECT_EQ(prepared.abi.call_contract.results[1].descriptor_reg_class_id,
+            LOOM_X86_REGISTER_CLASS_GPR64);
+  EXPECT_EQ(prepared.abi.call_contract.results[1].location_base, 0u);
+  EXPECT_FALSE(prepared.abi.has_indirect_results);
+}
+
+TEST_F(X86FunctionAbiTest, ExactSysvLayoutRetainsAtomicStackRollback) {
+  ModulePtr module = Parse(R"(
+low.func.decl target<x86.scalar.core> abi(object_function) abi_layout({signature = (i64, i64, i64, i64, i64, i64, i64, i64) -> (), sysv = {argument_offsets = [-1, -1, -1, -1, -1, 0, 8, -1], argument_registers = [7, 6, 2, 1, 8, -1, -1, 9], result_registers = [], stack_alignment = 16, stack_bytes = 16}}) @rollback(%a0: reg<x86.gpr64>, %a1: reg<x86.gpr64>, %a2: reg<x86.gpr64>, %a3: reg<x86.gpr64>, %a4: reg<x86.gpr64>, %object0: reg<x86.gpr64>, %object1: reg<x86.gpr64>, %tail: reg<x86.gpr64>)
+)");
+  const PreparedAbi prepared =
+      Prepare(module.get(), "rollback", loom_x86_scalar_core_descriptor_set);
+  ASSERT_TRUE(prepared.supported);
+  ASSERT_EQ(prepared.abi.call_contract.argument_count, 8u);
+  EXPECT_EQ(prepared.abi.call_contract.arguments[5].location_kind,
+            LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED);
+  EXPECT_EQ(prepared.abi.arguments[5].stack_offset, 0u);
+  EXPECT_EQ(prepared.abi.call_contract.arguments[6].location_kind,
+            LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED);
+  EXPECT_EQ(prepared.abi.arguments[6].stack_offset, 8u);
+  EXPECT_EQ(prepared.abi.call_contract.arguments[7].location_kind,
+            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
+  EXPECT_EQ(prepared.abi.call_contract.arguments[7].location_base, 9u);
+  EXPECT_EQ(prepared.abi.stack_argument_bytes, 16u);
+  EXPECT_EQ(prepared.abi.stack_argument_alignment, 16u);
+  EXPECT_EQ(prepared.abi.call_storage_bytes, 16u);
+}
+
+TEST_F(X86FunctionAbiTest, ExactSysvLayoutValidatesAuthoredPlacement) {
+  ModulePtr module = Parse(R"(
+low.func.decl target<x86.scalar.core> abi(object_function) abi_layout({signature = (i64) -> (), sysv = {argument_offsets = [-1], argument_registers = [6], result_registers = [], stack_alignment = 0, stack_bytes = 0}}) @wrong_register(%value: reg<x86.gpr64>)
+low.func.decl target<x86.scalar.core> abi(object_function) abi_layout({signature = (i64) -> (), sysv = {argument_offsets = [0], argument_registers = [-1], result_registers = [], stack_alignment = 16, stack_bytes = 4}}) @short_stack(%value: reg<x86.gpr64>)
+low.func.decl target<x86.scalar.core> abi(object_function) abi_layout({signature = (i64) -> (), sysv = {argument_offsets = [], argument_registers = [7], result_registers = [], stack_alignment = 0, stack_bytes = 0}}) @wrong_count(%value: reg<x86.gpr64>)
+)");
+  const PreparedAbi wrong_register = Prepare(
+      module.get(), "wrong_register", loom_x86_scalar_core_descriptor_set);
+  EXPECT_FALSE(wrong_register.supported);
+  EXPECT_TRUE(iree_string_view_equal(
+      wrong_register.constraint,
+      IREE_SV("native x86 exact ABI argument register is invalid")));
+  const PreparedAbi short_stack =
+      Prepare(module.get(), "short_stack", loom_x86_scalar_core_descriptor_set);
+  EXPECT_FALSE(short_stack.supported);
+  EXPECT_TRUE(iree_string_view_equal(
+      short_stack.constraint,
+      IREE_SV("native x86 exact ABI stack argument is invalid")));
+  const PreparedAbi wrong_count =
+      Prepare(module.get(), "wrong_count", loom_x86_scalar_core_descriptor_set);
+  EXPECT_FALSE(wrong_count.supported);
+  EXPECT_TRUE(iree_string_view_equal(
+      wrong_count.constraint,
+      IREE_SV("native x86 requires a valid physical ABI layout")));
+}
+
 TEST_F(X86FunctionAbiTest, RejectsUnavailableAndMismatchedBoundaries) {
   ModulePtr module = Parse(R"(
 low.func.decl target<x86.avx512.core> @unavailable(%value: reg<x86.xmm>)

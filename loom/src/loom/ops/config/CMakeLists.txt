@@ -17,7 +17,7 @@ loom_cc_library(
   TEXTUAL_HDRS
     "ops.inc"
   DEPS
-    loom::ops::op_defs
+    loom::ops::headers
   PUBLIC
 )
 

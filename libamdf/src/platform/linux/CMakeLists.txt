@@ -202,6 +202,7 @@ iree_cc_test(
     "-Wl,--wrap=mmap"
     "-Wl,--wrap=munmap"
     "-Wl,--wrap=close"
+    "-Wl,--wrap=uname"
   DEPS
     ::host_memory
     amdf::headers

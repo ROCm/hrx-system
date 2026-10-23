@@ -1,4 +1,62 @@
-# C++ source to GPU execution
+# C++ source integration
+
+## Native C++ ABI interop
+
+`native_abi_library.cxx` compiles into a normal x86-64 ELF relocatable object
+and links directly with `native_abi_main.cc`, which is compiled by the host C++
+toolchain. Both translation units include `native_abi.h`. They exchange the
+same records and pointers in both directions without a generated wrapper, a
+Loom runtime, or a custom loader:
+
+```cpp
+extern "C" Pair loom_pair(Pair value) {
+  return {value.second + 7u, value.first * 3u};
+}
+
+extern "C" Pair native_pair(Pair value);
+
+extern "C" Pair loom_call_native_pair(Pair value) {
+  return native_pair(value);
+}
+```
+
+The example also crosses a mixed `{float, unsigned}` record, a native 128-bit
+SIMD value, a 24-byte record that uses the platform's hidden-result convention,
+and a pointer with nonzero byte displacement. Each definition transforms its
+input so an identity-shaped ABI mistake cannot pass accidentally.
+
+```sh
+iree-bazel-run --config=loom-importer-cxx \
+  --//loom/config/target:enable=x86 \
+  //loom/binding/c/example/cxx:native_abi
+```
+
+The build target performs the same three ordinary steps available to another
+build system: import C++ into Loom bytecode, compile that module into an ELF
+object, and pass the object to the system C++ linker. The equivalent command
+line is:
+
+```sh
+iree-bazel-run --config=loom-importer-cxx \
+  //loom/src/loom/tools/loom-import-cxx -- \
+  loom/binding/c/example/cxx/native_abi_library.cxx \
+  --to=bc --output=/tmp/native_abi.loombc
+iree-bazel-run --//loom/config/target:enable=x86 \
+  //loom/src/loom/tools/loom-compile -- \
+  /tmp/native_abi.loombc --target=x86:avx2 --output=/tmp/native_abi.o
+c++ -std=c++20 -mavx2 -I. \
+  loom/binding/c/example/cxx/native_abi_main.cc \
+  /tmp/native_abi.o -o /tmp/native_abi
+/tmp/native_abi
+```
+
+The source contract retains complete C object layout while Loom High IR keeps
+record fields as named values. Target lowering performs the SysV register,
+stack, and hidden-result projection only at the native boundary. Internal Loom
+optimization therefore sees ordinary structured values instead of prematurely
+packed machine words.
+
+## C++ source to GPU execution
 
 `jit_amdgpu.c` is a C embedding that compiles the standalone HIP-style C++
 translation unit in `kernels.cxx`, emits one HSACO, loads it through IREE HAL

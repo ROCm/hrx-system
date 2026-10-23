@@ -172,10 +172,10 @@ static bool loom_x86_abi_classify_value(
                                                    out_classification);
 }
 
-static bool loom_x86_abi_signature(
-    const loom_module_t* module, loom_func_like_t function,
-    const loom_func_type_data_t** out_signature) {
-  *out_signature = NULL;
+static bool loom_x86_abi_layout(const loom_module_t* module,
+                                loom_func_like_t function,
+                                loom_x86_call_abi_layout_t* out_layout) {
+  *out_layout = (loom_x86_call_abi_layout_t){0};
   // The HAL task adapter has a fixed physical platform signature. Its ABI
   // layout describes logical dispatch parameters and remains owned by task
   // metadata construction; it is not the native function boundary.
@@ -189,26 +189,10 @@ static bool loom_x86_abi_signature(
   if (layout.count == 0) {
     return true;
   }
-  if (layout.count != 1 || layout.entries[0].value.kind != LOOM_ATTR_TYPE ||
-      !iree_string_view_equal(
-          loom_string_table_get(&module->strings, layout.entries[0].name_id),
-          IREE_SV("signature"))) {
-    return false;
-  }
-  const loom_type_t signature =
-      loom_type_table_get(&module->types, layout.entries[0].value.type_id);
-  if (!loom_type_is_function(signature)) {
-    return false;
-  }
-  const loom_func_type_data_t* data = loom_type_func_data(signature);
   uint16_t argument_count = 0;
   loom_func_like_arg_ids(function, &argument_count);
-  if (data->arg_count != argument_count ||
-      data->result_count != function.op->result_count) {
-    return false;
-  }
-  *out_signature = data;
-  return true;
+  return loom_x86_call_abi_layout_parse(module, layout, argument_count,
+                                        function.op->result_count, out_layout);
 }
 
 static bool loom_x86_abi_register_available(
@@ -255,12 +239,14 @@ iree_status_t loom_x86_function_abi_prepare(
   const loom_low_descriptor_set_t* descriptor_set =
       resolved_target->descriptor_set;
 
-  const loom_func_type_data_t* signature = NULL;
-  if (!loom_x86_abi_signature(module, function, &signature)) {
-    *out_constraint = IREE_SV("native x86 requires one valid ABI signature");
+  loom_x86_call_abi_layout_t abi_layout;
+  if (!loom_x86_abi_layout(module, function, &abi_layout)) {
+    *out_constraint =
+        IREE_SV("native x86 requires a valid physical ABI layout");
     return iree_ok_status();
   }
-  if (function.op->result_count > 1 &&
+  const loom_func_type_data_t* signature = abi_layout.signature;
+  if (!abi_layout.is_exact_sysv && function.op->result_count > 1 &&
       (!loom_func_like_is_module_internal(function) ||
        function.op->region_count == 0)) {
     *out_constraint = IREE_SV(
@@ -278,6 +264,144 @@ iree_status_t loom_x86_function_abi_prepare(
       argument_count, arena, &argument_locations, &out_abi->arguments));
   IREE_RETURN_IF_ERROR(loom_x86_abi_allocate_values(
       function.op->result_count, arena, &result_locations, &out_abi->results));
+
+  if (abi_layout.is_exact_sysv) {
+    uint16_t argument_register_counts[2] = {0, 0};
+    uint64_t stack_end = 0;
+    for (uint16_t i = 0; i < argument_count; ++i) {
+      const loom_type_t logical_type = signature->types[i];
+      const loom_type_t carrier =
+          loom_module_value_type(module, argument_ids[i]);
+      loom_x86_call_abi_classification_t classification;
+      if (!loom_x86_abi_classify_value(logical_type, carrier,
+                                       &classification)) {
+        *out_constraint = IREE_SV(
+            "native x86 argument logical type and Low carrier disagree");
+        return iree_ok_status();
+      }
+      loom_x86_abi_value_t* value = &out_abi->arguments[i];
+      *value = (loom_x86_abi_value_t){
+          .stack_offset = UINT32_MAX,
+          .byte_length = classification.byte_length,
+          .byte_alignment = classification.byte_alignment,
+          .action = classification.action,
+      };
+
+      const int64_t register_location = abi_layout.argument_registers.values[i];
+      if (register_location >= 0) {
+        const uint16_t register_index =
+            argument_register_counts[classification.abi_class]++;
+        const uint16_t register_limit =
+            classification.abi_class == LOOM_X86_CALL_ABI_CLASS_INTEGER
+                ? IREE_ARRAYSIZE(kSysvIntegerArgumentRegisters)
+                : 8;
+        if (register_index >= register_limit) {
+          *out_constraint =
+              IREE_SV("native x86 exact ABI argument register is invalid");
+          return iree_ok_status();
+        }
+        const uint32_t expected_location =
+            classification.abi_class == LOOM_X86_CALL_ABI_CLASS_INTEGER
+                ? kSysvIntegerArgumentRegisters[register_index]
+                : register_index;
+        if (register_location != expected_location ||
+            !loom_x86_abi_register_available(
+                descriptor_set, classification.boundary_register_class,
+                (uint32_t)register_location)) {
+          *out_constraint =
+              IREE_SV("native x86 exact ABI argument register is invalid");
+          return iree_ok_status();
+        }
+        argument_locations[i] = (loom_low_allocation_abi_location_t){
+            .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+            .descriptor_reg_class_id = classification.boundary_register_class,
+            .location_base = (uint32_t)register_location,
+        };
+        out_abi->has_upper_vector_register_argument |=
+            loom_x86_abi_has_upper_vector_state(
+                classification.boundary_register_class,
+                (uint32_t)register_location);
+        continue;
+      }
+
+      const uint32_t stack_offset =
+          (uint32_t)abi_layout.argument_offsets.values[i];
+      const uint32_t alignment = iree_max(8u, value->byte_alignment);
+      const uint64_t value_end =
+          (uint64_t)stack_offset + iree_host_align(value->byte_length, 8u);
+      if (stack_offset % alignment != 0 || stack_offset < stack_end ||
+          value_end > abi_layout.stack_bytes ||
+          alignment > abi_layout.stack_alignment) {
+        *out_constraint =
+            IREE_SV("native x86 exact ABI stack argument is invalid");
+        return iree_ok_status();
+      }
+      value->stack_offset = stack_offset;
+      stack_end = value_end;
+    }
+    out_abi->stack_argument_bytes = abi_layout.stack_bytes;
+    out_abi->stack_argument_alignment = abi_layout.stack_alignment;
+    out_abi->call_storage_bytes = abi_layout.stack_bytes;
+    out_abi->call_storage_alignment = abi_layout.stack_alignment;
+
+    uint16_t result_register_counts[2] = {0, 0};
+    for (uint16_t i = 0; i < function.op->result_count; ++i) {
+      const loom_type_t logical_type = signature->types[argument_count + i];
+      const loom_type_t carrier = loom_module_value_type(module, result_ids[i]);
+      loom_x86_call_abi_classification_t classification;
+      if (!loom_x86_abi_classify_value(logical_type, carrier,
+                                       &classification)) {
+        *out_constraint =
+            IREE_SV("native x86 result logical type and Low carrier disagree");
+        return iree_ok_status();
+      }
+      loom_x86_abi_value_t* value = &out_abi->results[i];
+      *value = (loom_x86_abi_value_t){
+          .stack_offset = UINT32_MAX,
+          .byte_length = classification.byte_length,
+          .byte_alignment = classification.byte_alignment,
+          .action = classification.action,
+      };
+
+      const uint16_t register_index =
+          result_register_counts[classification.abi_class]++;
+      if (register_index >= 2) {
+        *out_constraint =
+            IREE_SV("native x86 exact ABI result register is invalid");
+        return iree_ok_status();
+      }
+      const uint32_t expected_location =
+          classification.abi_class == LOOM_X86_CALL_ABI_CLASS_INTEGER
+              ? kInternalIntegerResultRegisters[register_index]
+              : register_index;
+      const int64_t register_location = abi_layout.result_registers.values[i];
+      if (register_location != expected_location ||
+          !loom_x86_abi_register_available(
+              descriptor_set, classification.boundary_register_class,
+              (uint32_t)register_location)) {
+        *out_constraint =
+            IREE_SV("native x86 exact ABI result register is invalid");
+        return iree_ok_status();
+      }
+      result_locations[i] = (loom_low_allocation_abi_location_t){
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .descriptor_reg_class_id = classification.boundary_register_class,
+          .location_base = (uint32_t)register_location,
+      };
+      out_abi->has_upper_vector_result |= loom_x86_abi_has_upper_vector_state(
+          classification.boundary_register_class, (uint32_t)register_location);
+    }
+
+    out_abi->call_contract = (loom_low_call_contract_t){
+        .arguments = argument_locations,
+        .argument_count = argument_count,
+        .results = result_locations,
+        .result_count = function.op->result_count,
+        .clobbers = {kSysvGprClobbers, IREE_ARRAYSIZE(kSysvGprClobbers)},
+    };
+    *out_supported = true;
+    return iree_ok_status();
+  }
 
   uint16_t register_counts[2] = {0, 0};
   uint64_t stack_bytes = 0;

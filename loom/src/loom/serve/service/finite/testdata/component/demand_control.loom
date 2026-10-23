@@ -1,0 +1,81 @@
+func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
+
+func.decl import("input") @require(%condition: i32, %message: buffer)
+
+func.decl import("runner") @execute_2(%stage: i32, %input: hal.buffer, %output: hal.buffer) -> (i64)
+
+func.decl import("runner") @fence(%work: i64) -> (hal.fence)
+
+func.decl import("runner") @join(%ready: hal.fence)
+
+func.decl import("parameters") @gather(%source: i32, %key: buffer, %wait: hal.fence, %descriptors: hal.buffer, %offset: i64, %count: i64, %target: hal.buffer) -> (hal.fence)
+
+global.rodata.def @first = bytes("776569676874732e7361666574656e736f7273")
+
+global.rodata.def @second = bytes("7365636f6e642e7361666574656e736f7273")
+
+global.rodata.def @key = bytes("666163746f72")
+
+func.def public @prepare_request(%state: buffer, %input: buffer) -> (buffer, i64, i64) {
+  %c1 = scalar.constant 1 : i64
+  %c0 = scalar.constant 0 : i64
+  func.return %input, %c1, %c0 : buffer, i64, i64
+}
+
+func.def public @prepare_batch(%directory: buffer, %tags: buffer, %ranges: buffer, %input: buffer) -> (i32, buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %request = buffer.view %input[%origin] : buffer -> view<4xf32>
+  %value = view.load %request[0] : view<4xf32> -> f32
+  %threshold = scalar.constant 4.0 : f32
+  %alternate = scalar.cmpf ogt, %value, %threshold : f32
+  %path = scf.if %alternate -> (buffer) {
+    %second = global.load @second : buffer
+    scf.yield %second : buffer
+  } else {
+    %first = global.load @first : buffer
+    scf.yield %first : buffer
+  }
+  %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
+  %c72 = index.constant 72 : offset
+  %plan = buffer.alloca<private> align(8) %c72 : buffer
+  %values = buffer.view %plan[%origin] : buffer -> view<9xi64>
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %c4 = scalar.constant 4 : i64
+  %c16 = scalar.constant 16 : i64
+  %c80 = scalar.constant 80 : i64
+  view.store %c80, %values[0] : i64, view<9xi64>
+  view.store %c16, %values[1] : i64, view<9xi64>
+  view.store %c1, %values[2] : i64, view<9xi64>
+  view.store %c1, %values[3] : i64, view<9xi64>
+  view.store %c0, %values[4] : i64, view<9xi64>
+  view.store %c1, %values[5] : i64, view<9xi64>
+  view.store %c4, %values[6] : i64, view<9xi64>
+  view.store %c0, %values[7] : i64, view<9xi64>
+  view.store %c4, %values[8] : i64, view<9xi64>
+  %c0_f32 = scalar.constant 0.0 : f32
+  %reject = scalar.cmpf olt, %value, %c0_f32 : f32
+  %stage = scalar.extui %reject : i1 to i32
+  func.return %stage, %input, %plan : i32, buffer, buffer
+}
+
+func.def public @run(%stage: i32, %input: hal.buffer, %output: hal.buffer) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %count = scalar.constant 1 : i64
+  %first_offset = scalar.constant 24 : i64
+  %second_offset = scalar.constant 48 : i64
+  %key = global.load @key : buffer
+  %producer = func.call @execute_2(%c0, %input, %output) : (i32, hal.buffer, hal.buffer) -> (i64)
+  %produced = func.call @fence(%producer) : (i64) -> (hal.fence)
+  %first = func.call @gather(%c0, %key, %produced, %output, %first_offset, %count, %output) : (i32, buffer, hal.fence, hal.buffer, i64, i64, hal.buffer) -> (hal.fence)
+  %second = func.call @gather(%c1, %key, %produced, %output, %second_offset, %count, %output) : (i32, buffer, hal.fence, hal.buffer, i64, i64, hal.buffer) -> (hal.fence)
+  %reject = scalar.cmpi ne, %stage, %c0 : i32
+  scf.if %reject {
+    func.call @require(%c0, %key) : (i32, buffer)
+  }
+  func.call @join(%first) : (hal.fence)
+  func.call @join(%second) : (hal.fence)
+  %consumer = func.call @execute_2(%c1, %input, %output) : (i32, hal.buffer, hal.buffer) -> (i64)
+  func.return
+}

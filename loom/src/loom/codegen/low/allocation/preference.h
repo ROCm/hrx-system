@@ -60,8 +60,9 @@ typedef struct loom_low_allocation_preference_query_t {
     // Low-bit index into the power-of-two entry span; collisions compare tags.
     uint32_t index_mask;
   } memo;
-  // Structural copy/disjoint preferences keep their existing relation owner
-  // and indexes. The same objective includes both tentative assembly values.
+  // Structural preferences and predicted hard-ordinal peers keep their
+  // existing relation owner and indexes. The same objective includes both
+  // tentative assembly values.
   struct {
     // Relation table, or NULL when no structural relation is actionable.
     const loom_low_placement_table_t* placement;

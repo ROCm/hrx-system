@@ -173,6 +173,7 @@ loom_cc_library(
         ":descriptors",
         ":immediates",
         "//loom/src/loom/ir:builders",
+        "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low:op_defs",
         "//loom/src/loom/target:registers",
         "//runtime/src/iree/base",

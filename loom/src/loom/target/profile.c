@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/internal/arena.h"
 #include "loom/target/facts_builder.h"
 
 static bool loom_target_profile_bundle_is_complete(

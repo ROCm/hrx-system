@@ -147,6 +147,21 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    offset_expression_test
+  SRCS
+    "offset_expression_test.cc"
+  DEPS
+    ::offset_expression
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::symbolic_expr
+    loom::analysis::symbolic_expr_test_fixture
+    loom::ir
+    loom::ops::index
+)
+
 loom_cc_library(
   NAME
     transport

@@ -19,21 +19,54 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+_OP_HEADERS = [
+    "attribute_accessors.h",
+    "builder.h",
+    "builder_macros.h",
+    "op_defs.h",
+    "use_list.h",
+]
+
+# Declarations/accessors do not bring construction, editing, or spelling tables.
+# Invoking an out-of-line API still requires its implementation library.
+loom_cc_library(
+    name = "headers",
+    hdrs = _OP_HEADERS + ["format.h"],
+    textual_hdrs = ["keyword_enum.inc"],
+    deps = [
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir:headers",
+        "//loom/src/loom/ir:type_headers",
+        "//loom/src/loom/util:bstring",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "vocabulary",
+    hdrs = [
+        "atomic.h",
+        "cache.h",
+        "combining.h",
+    ],
+    deps = [
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir:headers",
+        "//loom/src/loom/ir:type_headers",
+        "//runtime/src/iree/base",
+    ],
+)
+
 loom_cc_library(
     name = "op_defs",
     srcs = [
         "op_defs.c",
         "use_list.c",
     ],
-    hdrs = [
-        "attribute_accessors.h",
-        "builder.h",
-        "builder_macros.h",
-        "op_defs.h",
-        "use_list.h",
-    ],
+    hdrs = _OP_HEADERS,
     deps = [
-        ":format",
+        ":headers",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/ir:builders",
         "//loom/src/loom/util:adaptive_sort",
@@ -52,7 +85,7 @@ loom_cc_library(
         "keyword_table.inc",
     ],
     deps = [
-        "//loom/src/loom/ir:builders",
+        "//loom/src/loom/ir:headers",
         "//loom/src/loom/util:bstring",
         "//runtime/src/iree/base",
     ],
@@ -404,9 +437,9 @@ loom_cc_test(
     ],
 )
 
-# One configured closure check covers construction across the dialect family.
-# The aggregate is test-only: native callers select the dialects they construct.
-_CONSTRUCTION_DIALECTS = [
+# Configured closure checks cover each capability across the dialect family.
+# The aggregates are test-only: native callers select their own dialects.
+_DIALECTS = [
     "buffer",
     "cfg",
     "channel",
@@ -434,12 +467,73 @@ _CONSTRUCTION_DIALECTS = [
 ]
 
 loom_cc_library_group(
+    name = "declaration_boundary_deps",
+    testonly = True,
+    visibility = ["//visibility:private"],
+    deps = [
+        "//loom/src/loom/ops/%s:op_defs" % dialect
+        for dialect in _DIALECTS
+    ] + select({
+        "//loom/config/target/arch:amdgpu": ["//loom/src/loom/target/arch/amdgpu/ops:op_defs"],
+        "//conditions:default": [],
+    }) + select({
+        "//loom/config/target/arch:spirv": ["//loom/src/loom/target/arch/spirv/ops:op_defs"],
+        "//conditions:default": [],
+    }) + select({
+        "//loom/config/target/arch:vm": ["//loom/src/loom/target/arch/vm/ops:op_defs"],
+        "//conditions:default": [],
+    }) + select({
+        "//loom/config/target/arch:wasm": ["//loom/src/loom/target/arch/wasm/ops:op_defs"],
+        "//conditions:default": [],
+    }) + select({
+        "//loom/config/target/arch:x86": ["//loom/src/loom/target/arch/x86/ops:op_defs"],
+        "//conditions:default": [],
+    }) + select({
+        "//loom/config/target/arch:xdna": ["//loom/src/loom/target/arch/amd/xdna/aie2p/ops:op_defs"],
+        "//conditions:default": [],
+    }),
+)
+
+iree_assert_dependency_boundary(
+    name = "declaration_dependency_boundary",
+    allowed_dependencies = [
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/ir:headers",
+        "//loom/src/loom/ir:type_headers",
+        "//loom/src/loom/ops:declaration_boundary_deps",
+        "//loom/src/loom/ops:headers",
+        "//loom/src/loom/ops:vocabulary",
+        "//loom/src/loom/target:types",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:record_defs",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/ops:op_defs",
+        "//loom/src/loom/target/arch/amdgpu/ops:op_defs",
+        "//loom/src/loom/target/arch/spirv:isa",
+        "//loom/src/loom/target/arch/spirv:vocabulary",
+        "//loom/src/loom/target/arch/spirv/ops:op_defs",
+        "//loom/src/loom/target/arch/spirv/records:record_defs",
+        "//loom/src/loom/target/arch/vm/ops:op_defs",
+        "//loom/src/loom/target/arch/wasm/ops:op_defs",
+        "//loom/src/loom/target/arch/x86:feature_bits",
+        "//loom/src/loom/target/arch/x86/ops:op_defs",
+        "//loom/src/loom/target/arch/x86/records:record_defs",
+        "//loom/src/loom/target/test:record_defs",
+        "//loom/src/loom/util:bstring",
+        "//loom/src/loom/util:segmented_storage_headers",
+    ] + [
+        "//loom/src/loom/ops/%s:op_defs" % dialect
+        for dialect in _DIALECTS
+    ],
+    forbidden_subtrees = ["//loom/src/loom/..."],
+    target = ":declaration_boundary_deps",
+)
+
+loom_cc_library_group(
     name = "construction_boundary_deps",
     testonly = True,
     visibility = ["//visibility:private"],
     deps = [":type_builders"] + [
         "//loom/src/loom/ops/%s:builders" % dialect
-        for dialect in _CONSTRUCTION_DIALECTS
+        for dialect in _DIALECTS
     ] + select({
         "//loom/config/target/arch:amdgpu": ["//loom/src/loom/target/arch/amdgpu/ops:builders"],
         "//conditions:default": [],
@@ -464,13 +558,19 @@ loom_cc_library_group(
 iree_assert_dependency_boundary(
     name = "construction_dependency_boundary",
     forbidden_dependencies = [
-        ":op_registry",
-        ":type_registry",
         "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:atomic",
+        "//loom/src/loom/ops:cache",
+        "//loom/src/loom/ops:combining",
+        "//loom/src/loom/ops:format",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/target/arch/amd/xdna/aie2p:target_facts",
         "//loom/src/loom/target/arch/amd/xdna/aie2p:target_records",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/ops",
         "//loom/src/loom/target/arch/amdgpu/ops",
+        "//loom/src/loom/target/arch/spirv:features",
+        "//loom/src/loom/target/arch/spirv:scalar_types",
         "//loom/src/loom/target/arch/spirv/ops",
         "//loom/src/loom/target/arch/spirv/records:target_records",
         "//loom/src/loom/target/arch/vm/ops",
@@ -478,9 +578,10 @@ iree_assert_dependency_boundary(
         "//loom/src/loom/target/arch/x86/ops",
         "//loom/src/loom/target/arch/x86/records:target_records",
         "//loom/src/loom/target/test:target_record_table",
+        "//loom/src/loom/util:numeric_format",
     ] + [
         "//loom/src/loom/ops/%s" % dialect
-        for dialect in _CONSTRUCTION_DIALECTS
+        for dialect in _DIALECTS
     ],
     forbidden_subtrees = [
         "//loom/src/loom/analysis/...",

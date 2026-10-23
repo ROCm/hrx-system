@@ -55,7 +55,7 @@ iree_status_t iree_hal_amd_gpu_pm4_kmq_storage_allocate(
   iree_hal_amd_gpu_pm4_ring_initialize(
       (uint32_t*)storage->memory.contents.data,
       (uint32_t)(command_capacity / sizeof(uint32_t)),
-      IREE_HAL_HOST_CACHE_FENCE_NONE, out_ring);
+      AMDF_CACHE_TRANSITION_EXECUTOR_NONE, out_ring);
   return iree_ok_status();
 }
 

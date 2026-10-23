@@ -222,6 +222,15 @@ iree_status_t loom_testbench_run_prepared_invocation(
     const loom_testbench_prepared_invocation_t* prepared,
     loom_testbench_value_table_t* table);
 
+// Executes one prepared provider span against |table| using reusable scratch.
+// Sequence-capable providers receive the complete span in one callback;
+// singleton spans use the ordinary invocation callback.
+iree_status_t loom_testbench_run_prepared_invocation_span(
+    loom_testbench_invocation_executor_t* executor,
+    iree_host_size_t execution_index,
+    const loom_testbench_prepared_invocation_span_t* span,
+    loom_testbench_value_table_t* table);
+
 // Executes all prepared invocations in source order against one sample.
 iree_status_t loom_testbench_run_case_invocations(
     loom_testbench_invocation_executor_t* executor,

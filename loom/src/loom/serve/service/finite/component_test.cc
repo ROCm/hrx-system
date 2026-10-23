@@ -119,24 +119,13 @@ class FiniteComponentTest : public ::testing::Test {
     const auto source_directory =
         std::filesystem::path(source_path).parent_path();
     for (const char* file : {"prepare.loom", "control.loom", "kernels.loom",
-                             "copy.loom", "policy.loom"}) {
+                             "copy.loom", "policy.loom", "demand_prepare.loom",
+                             "demand_control.loom", "demand_kernels.loom"}) {
       ASSERT_TRUE(std::filesystem::copy_file(
           source_directory / file, std::filesystem::path(directory_) / file));
     }
-    std::string header =
-        R"({"factor":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}})";
-    header.append((8 - header.size() % 8) % 8, ' ');
-    std::ofstream checkpoint(directory_ + "/weights.safetensors",
-                             std::ios::binary);
-    uint8_t bytes[8];
-    iree_unaligned_store_le_u64(bytes, header.size());
-    checkpoint.write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
-    checkpoint.write(header.data(), header.size());
-    iree_unaligned_store_le_u32(bytes,
-                                0x3f800000);  // F32 1.0, prepared to 2.0.
-    checkpoint.write(reinterpret_cast<const char*>(bytes), 4);
-    checkpoint.close();
-    ASSERT_TRUE(checkpoint.good());
+    ASSERT_NO_FATAL_FAILURE(WriteCheckpoint("weights.safetensors", 1.0f));
+    ASSERT_NO_FATAL_FAILURE(WriteCheckpoint("second.safetensors", 3.0f));
     options_ = {
         .sources =
             {
@@ -177,6 +166,32 @@ class FiniteComponentTest : public ::testing::Test {
     });
   }
 
+  void WriteCheckpoint(const char* name, float factor) {
+    std::string header =
+        R"({"factor":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}})";
+    header.append((8 - header.size() % 8) % 8, ' ');
+    std::ofstream checkpoint(directory_ + "/" + name, std::ios::binary);
+    uint8_t bytes[8];
+    iree_unaligned_store_le_u64(bytes, header.size());
+    checkpoint.write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
+    checkpoint.write(header.data(), header.size());
+    iree_unaligned_store_le_f32(bytes, factor);
+    checkpoint.write(reinterpret_cast<const char*>(bytes), sizeof(factor));
+    checkpoint.close();
+    ASSERT_TRUE(checkpoint.good());
+  }
+
+  void UseDemandSources() {
+    IREE_ASSERT_OK(Retire(component_));
+    loom_serve_finite_component_free(std::exchange(component_, nullptr));
+    options_.sources.prepare = IREE_SV("demand_prepare.loom");
+    options_.sources.control = IREE_SV("demand_control.loom");
+    options_.sources.count = 1;
+    providers_[0] = IREE_SV("demand_kernels.loom");
+    IREE_ASSERT_OK(loom_serve_finite_component_allocate(
+        device_, &options_, owner_.observer(), host_allocator_, &component_));
+  }
+
   iree_status_t Retire(loom_serve_finite_component_t* component) {
     return owner_.Run(device_, [&](bool* complete) {
       return loom_serve_finite_component_retire(component, complete);
@@ -189,14 +204,16 @@ class FiniteComponentTest : public ::testing::Test {
     });
   }
 
-  void Submit(loom_serve_finite_model_t* model, size_t ordinal) {
+  void Submit(loom_serve_finite_model_t* model, size_t ordinal,
+              bool reject_after_gather = false) {
     iree_vm_buffer_t* input = nullptr;
     IREE_ASSERT_OK(iree_vm_buffer_create(16, 16, host_allocator_, &input));
     iree_byte_span_t bytes;
     IREE_ASSERT_OK(iree_vm_buffer_map_write(input, 0, 16, &bytes));
     for (uint32_t i = 0; i < 4; ++i) {
       iree_unaligned_store_le_f32(bytes.data + i * 4,
-                                  static_cast<float>(i + 1 + ordinal * 4));
+                                  static_cast<float>(i + 1 + ordinal * 4) *
+                                      (reject_after_gather ? -1.0f : 1.0f));
     }
     loom_serve_prepared_request_t prepared = {};
     IREE_ASSERT_OK(
@@ -204,10 +221,10 @@ class FiniteComponentTest : public ::testing::Test {
     const iree_host_size_t rows = 1;
     IREE_ASSERT_OK(
         loom_serve_finite_model_prepare_batch(model, 1, &prepared, &rows));
-    bool code_ready = false;
-    IREE_ASSERT_OK(
-        loom_serve_finite_model_advance_batch(model, false, &code_ready));
-    ASSERT_TRUE(code_ready);
+    loom_serve_finite_model_set_observer(model, owner_.observer());
+    IREE_ASSERT_OK(owner_.Run(device_, [&](bool* complete) {
+      return loom_serve_finite_model_advance_batch(model, false, complete);
+    }));
     iree_vm_buffer_release(prepared.bytes);
     iree_vm_buffer_release(input);
     loom_serve_residency_admission_t admission;
@@ -215,6 +232,13 @@ class FiniteComponentTest : public ::testing::Test {
         loom_serve_finite_model_residency(model), &admission));
     ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
     loom_serve_execution_frontier_t frontier;
+    if (reject_after_gather) {
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_INVALID_ARGUMENT,
+          loom_serve_finite_model_submit(model, &results_[ordinal], &frontier));
+      EXPECT_EQ(results_[ordinal], nullptr);
+      return;
+    }
     IREE_ASSERT_OK(
         loom_serve_finite_model_submit(model, &results_[ordinal], &frontier));
     EXPECT_EQ(frontier.values[1], 0u);
@@ -225,7 +249,7 @@ class FiniteComponentTest : public ::testing::Test {
     loom_serve_finite_model_complete(model);
   }
 
-  void CheckResult(size_t ordinal) {
+  void CheckResult(size_t ordinal, float factor = 2.0f) {
     if (!consumer_) {
       IREE_ASSERT_OK(loom_serve_device_create_execution(device_, &consumer_));
     }
@@ -249,7 +273,7 @@ class FiniteComponentTest : public ::testing::Test {
         loom_serve_execution_transfer(consumer_, 1, &download, &value));
     IREE_ASSERT_OK(loom_serve_execution_drain(consumer_));
     for (uint32_t i = 0; i < 4; ++i) {
-      EXPECT_EQ(output_[i], static_cast<float>((i + 1 + ordinal * 4) * 2));
+      EXPECT_EQ(output_[i], static_cast<float>(i + 1 + ordinal * 4) * factor);
     }
   }
 
@@ -462,6 +486,46 @@ TEST_F(FiniteComponentTest, TrimPreservesExplicitRetention) {
   IREE_ASSERT_OK(Prepare(component_, &model));
   EXPECT_FALSE(
       loom_serve_residency_is_pinned(loom_serve_finite_model_residency(model)));
+}
+
+TEST_F(FiniteComponentTest, DemandSourcesRebindWithoutResidentWeightsOrJit) {
+  ASSERT_NO_FATAL_FAILURE(UseDemandSources());
+  loom_serve_finite_model_t* model = nullptr;
+  IREE_ASSERT_OK(Prepare(component_, &model));
+  const auto commands =
+      loom_serve_finite_component_report(component_)->commands;
+  EXPECT_EQ(commands, 2u);
+  for (size_t ordinal : {0u, 1u, 0u}) {
+    ASSERT_NO_FATAL_FAILURE(Submit(model, ordinal));
+    ASSERT_NO_FATAL_FAILURE(CheckResult(ordinal, ordinal ? 4.0f : 2.0f));
+    loom_serve_finite_result_release(std::exchange(results_[ordinal], nullptr));
+    EXPECT_EQ(loom_serve_finite_component_report(component_)->commands,
+              commands);
+    const auto parameters = loom_serve_finite_model_parameters(model);
+    EXPECT_EQ(parameters.memory.reserved_bytes, 0u);
+    EXPECT_EQ(parameters.memory.committed_bytes, 0u);
+    EXPECT_EQ(parameters.activity.read_bytes, 0u);
+  }
+  ASSERT_NO_FATAL_FAILURE(Submit(model, 1));
+  IREE_ASSERT_OK(Retire(component_));
+  loom_serve_finite_component_free(std::exchange(component_, nullptr));
+  ASSERT_NO_FATAL_FAILURE(CheckResult(1, 4.0f));
+}
+
+TEST_F(FiniteComponentTest, UnjoinedDemandReadsRetireWithRejectedInvocation) {
+  ASSERT_NO_FATAL_FAILURE(UseDemandSources());
+  loom_serve_finite_model_t* model = nullptr;
+  IREE_ASSERT_OK(Prepare(component_, &model));
+  ASSERT_NO_FATAL_FAILURE(Submit(model, 0, true));
+  // Source rejected after submitting both reads, without joining either one.
+  // Removal releases the source VM before waiting for captured storage users.
+  IREE_ASSERT_OK(Retire(component_));
+  loom_serve_finite_component_free(std::exchange(component_, nullptr));
+  IREE_ASSERT_OK(loom_serve_finite_component_allocate(
+      device_, &options_, owner_.observer(), host_allocator_, &component_));
+  IREE_ASSERT_OK(Prepare(component_, &model));
+  ASSERT_NO_FATAL_FAILURE(Submit(model, 1));
+  ASSERT_NO_FATAL_FAILURE(CheckResult(1, 4.0f));
 }
 
 }  // namespace

@@ -249,9 +249,18 @@ TEST(BenchmarkWorkPlanApiTest, PlanningIssuesFollowSelectedOwnership) {
 
 TEST(BenchmarkWorkPlanApiTest, ExecutionSlotsCoverOnlySelectedPhysicalWork) {
   const loom_testbench_parameter_plan_t parameter = {.sample_count = 32};
+  const loom_testbench_invocation_plan_t invocations[] = {
+      {.kind = LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH},
+      {.kind = LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH},
+  };
+  const loom_testbench_invocation_plan_t* kernel_launches[] = {&invocations[0],
+                                                               &invocations[1]};
   const loom_testbench_case_plan_t case_plan = {
       .parameters = &parameter,
       .parameter_count = 1,
+      .invocations = invocations,
+      .invocation_count = IREE_ARRAYSIZE(invocations),
+      .kernel_launches = kernel_launches,
       .kernel_launch_count = 2,
       .cartesian_sample_count = 32,
       .sample_count = 2,
@@ -299,9 +308,18 @@ TEST(BenchmarkWorkPlanApiTest, DistinguishesSamplesBeyondFlatOrdinalCapacity) {
                                      << (sizeof(iree_host_size_t) * 4);
   const loom_testbench_parameter_plan_t parameters[] = {
       {.sample_count = radix}, {.sample_count = radix}, {.sample_count = 2}};
+  const loom_testbench_invocation_plan_t invocations[] = {
+      {.kind = LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH},
+      {.kind = LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH},
+  };
+  const loom_testbench_invocation_plan_t* kernel_launches[] = {&invocations[0],
+                                                               &invocations[1]};
   const loom_testbench_case_plan_t case_plan = {
       .parameters = parameters,
       .parameter_count = IREE_ARRAYSIZE(parameters),
+      .invocations = invocations,
+      .invocation_count = IREE_ARRAYSIZE(invocations),
+      .kernel_launches = kernel_launches,
       .kernel_launch_count = 2,
       .cartesian_sample_count = IREE_HOST_SIZE_MAX,
       .sample_count = 2,
@@ -1122,6 +1140,56 @@ check.benchmark<@scenario> @scenario_latency
   EXPECT_THAT(status, StatusIs(iree::StatusCode::kInvalidArgument));
   EXPECT_THAT(status.ToString(),
               HasSubstr("requires measure = \"dispatch_complete\""));
+}
+
+TEST(BenchmarkWorkPlanApiTest,
+     RejectsNonKernelGapOnlyForDispatchCompleteMeasurement) {
+  const loom_testbench_invocation_plan_t invocations[] = {
+      {.kind = LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH},
+      {.kind = LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL},
+      {.kind = LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH},
+  };
+  const loom_testbench_invocation_plan_t* kernel_launches[] = {&invocations[0],
+                                                               &invocations[2]};
+  const loom_testbench_case_plan_t case_plan = {
+      .name = IREE_SV("split_sequence"),
+      .invocations = invocations,
+      .invocation_count = IREE_ARRAYSIZE(invocations),
+      .kernel_launches = kernel_launches,
+      .kernel_launch_count = IREE_ARRAYSIZE(kernel_launches),
+      .cartesian_sample_count = 1,
+      .sample_count = 1,
+  };
+  const loom_testbench_benchmark_plan_t benchmark = {
+      .name = IREE_SV("split_sequence_latency"),
+      .case_index = 0,
+      .scenario_index = LOOM_TESTBENCH_SCENARIO_INDEX_INVALID,
+      .cartesian_sample_count = 1,
+      .sample_count = 1,
+  };
+  const loom_testbench_module_plan_t module_plan = {
+      .cases = &case_plan,
+      .case_count = 1,
+      .benchmarks = &benchmark,
+      .benchmark_count = 1,
+  };
+
+  loom_benchmark_options_t options = {};
+  loom_benchmark_options_initialize(&options);
+  options.measure = IREE_SV("dispatch_complete");
+  loom_benchmark_work_plan_t work_plan = {};
+  iree::Status status(loom_benchmark_work_plan_initialize(
+      &module_plan, &options, iree_allocator_system(), &work_plan));
+  EXPECT_THAT(status, StatusIs(iree::StatusCode::kInvalidArgument));
+  EXPECT_THAT(status.ToString(), HasSubstr("split_sequence_latency"));
+  EXPECT_THAT(status.ToString(), HasSubstr("split_sequence"));
+  EXPECT_THAT(status.ToString(),
+              HasSubstr("separated by a non-kernel invocation"));
+
+  options.measure = IREE_SV("case_end_to_end");
+  IREE_ASSERT_OK(loom_benchmark_work_plan_initialize(
+      &module_plan, &options, iree_allocator_system(), &work_plan));
+  loom_benchmark_work_plan_deinitialize(&work_plan);
 }
 
 TEST(BenchmarkWorkPlanApiTest, RejectsEmptyDomainWithoutPlanningIssues) {

@@ -192,9 +192,11 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::ir
     loom::ops::cfg
+    loom::ops::index
     loom::ops::scalar
     loom::ops::scf
     loom::ops::test
+    loom::ops::vector
     loom::pass::value_facts
 )
 

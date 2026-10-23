@@ -8,6 +8,7 @@
 
 #include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/runtime/execution/workspace.h"
+#include "loom/serve/runtime/parameter/sources.h"
 #include "loom/serve/runtime/program/jit.h"
 #include "loom/serve/runtime/program/preparation.h"
 #include "loom/serve/runtime/storage/memory.h"
@@ -98,15 +99,17 @@ typedef void (*loom_serve_weights_completion_fn_t)(void* user_data,
                                                    iree_status_t status);
 
 // Exclusively prepares a newly created plan without mutating its pool or
-// submitting device work. CPU source policy/indexing and native compilation
+// submitting device work. CPU source policy and native compilation
 // run on the shared host. Payload reads wait for activation; open checkpoint
 // handles and recorded preparers remain cached, not a second weight copy.
 //
-// Each declared source's ordered shards populate an independent parameter
-// index; files may use any supported format. Relative checkpoint paths use the
-// source environment's server-local base_directory. The declaration's policy
-// uses its package when present. Absolute paths name server-local files in both
-// cases. The environment and declaration are borrowed until completion.
+// indexed_sources retains the already opened immutable source catalog. The
+// declaration maps policy-local inputs to its source ordinals. Source indexes
+// and imported-file caches are shared, while each plan owns its input recipes.
+// The declaration's policy uses the source environment's package when present;
+// absolute paths name server-local files. The environment, declaration, and
+// indexed_sources are borrowed until completion; the plan retains its selected
+// indexes/providers independently after preparation, not unused catalog peers.
 // The policy names a text or bytecode source with the VM export:
 //   prepare_weight(buffer key) -> i64 byte_length
 // The key is a read-only, non-NUL-terminated tensor name. The policy declares
@@ -139,6 +142,7 @@ iree_status_t loom_serve_weights_prepare_async(
     loom_serve_jit_t* jit, iree_hal_command_buffer_mode_t command_mode,
     const loom_serve_sources_t* sources,
     const loom_serve_preparation_parameter_t* parameter,
+    loom_serve_parameter_sources_t* indexed_sources,
     loom_serve_weights_completion_fn_t completion, void* user_data);
 
 // Cold outer-application join over the same preparation. Never called by a
@@ -147,7 +151,8 @@ iree_status_t loom_serve_weights_prepare(
     loom_serve_weights_t* weights, loom_serve_host_t* host,
     loom_serve_jit_t* jit, iree_hal_command_buffer_mode_t command_mode,
     const loom_serve_sources_t* sources,
-    const loom_serve_preparation_parameter_t* parameter);
+    const loom_serve_preparation_parameter_t* parameter,
+    loom_serve_parameter_sources_t* indexed_sources);
 
 // Borrowed placement facts retained independently of the original compiler
 // product. Rows remain in construction order; index is below parameter_count.

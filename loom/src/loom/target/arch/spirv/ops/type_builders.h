@@ -15,7 +15,7 @@
 #include "loom/ir/ir.h"
 #include "loom/ir/types.h"
 #include "loom/target/arch/spirv/isa.h"
-#include "loom/target/arch/spirv/scalar_types.h"
+#include "loom/target/arch/spirv/scalar_type.h"
 
 #ifdef __cplusplus
 extern "C" {

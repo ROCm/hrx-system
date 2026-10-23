@@ -86,7 +86,7 @@ unsigned entry(unsigned x) { return alias::identity(x); }
 namespace api { extern "C" unsigned identity(unsigned x) { return x; } }
 unsigned entry(unsigned x) { return api::identity(x); }
 // ----
-// CHECK: func.def public @identity*
+// CHECK: func.def public source_signature* @identity*
 // CHECK: *func.call* @identity*
 // CHECK-NOT: *@api.identity*
 

@@ -133,6 +133,137 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count =
 
 // ====
 
+// A packed BF16 load is itself a valid narrowed F32-coordinate payload. The
+// direct store preserves its paired source elements without requiring an
+// intervening conversion to manufacture a lane-origin fact.
+amdgpu.target<gfx1100> @target {subgroup_size = 32}
+
+kernel.def target(@target) @bf16_lds_direct_payload_coordinates() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %payload_count = index.constant 8 : index
+  %scratch_bytes = index.constant 512 : offset
+  %lane = kernel.workitem.id<x> : index
+  %input_view = buffer.view %input[%base] : buffer -> view<32x8xbf16>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x16xbf16>
+  %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
+  %scratch_stage = buffer.view %scratch[%base] : buffer -> view<32x8xbf16>
+  %values = vector.load %input_view[%lane, 0] : view<32x8xbf16> -> vector<8xbf16>
+  vector.store %values, %scratch_stage[%lane, 0] : vector<8xbf16>, view<32x8xbf16>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xbf16>
+  %loaded = vector.fragment.load<result> %scratch_view[0, 0] shape [%tile, %tile] : view<16x16xbf16> -> vector<8xbf16>
+  vector.fragment.store<result> %loaded, %output_view[0, 0] shape [%tile, %tile] : vector<8xbf16>, view<16x16xbf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @bf16_lds_direct_payload_coordinates() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %30 = storage {byte_alignment = 16, byte_length = 512} : low.storage<workgroup>
+  %32 = v_lshlrev_b32_src0_inline %lane, 4
+  %values = global_load_b128_saddr %32, %input_view
+  ds_write_b128 %32, %values
+  s_waitcnt {lgkmcnt = 0}
+  %35 = v_lshlrev_b32_src0_inline %lane, 1
+  %36 = ds_read_u16 %35
+  %37 = v_and_b32_lit %36, 65535
+  %38 = ds_read_u16 %35 {offset = 64}
+  %39 = v_and_b32_lit %38, 65535
+  %40 = v_lshlrev_b32_src0_inline %39, 16
+  %41 = v_or_b32 %37, %40
+  %42 = ds_read_u16 %35 {offset = 128}
+  %43 = v_and_b32_lit %42, 65535
+  %44 = ds_read_u16 %35 {offset = 192}
+  %45 = v_and_b32_lit %44, 65535
+  %46 = v_lshlrev_b32_src0_inline %45, 16
+  %47 = v_or_b32 %43, %46
+  %48 = ds_read_u16 %35 {offset = 256}
+  %49 = v_and_b32_lit %48, 65535
+  %50 = ds_read_u16 %35 {offset = 320}
+  %51 = v_and_b32_lit %50, 65535
+  %52 = v_lshlrev_b32_src0_inline %51, 16
+  %53 = v_or_b32 %49, %52
+  %54 = ds_read_u16 %35 {offset = 384}
+  %55 = v_and_b32_lit %54, 65535
+  %56 = ds_read_u16 %35 {offset = 448}
+  %57 = v_and_b32_lit %56, 65535
+  %58 = v_lshlrev_b32_src0_inline %57, 16
+  %59 = v_or_b32 %55, %58
+  global_store_short_saddr %35, %41, %output_view
+  %63 = v_lshrrev_b32_src0_inline %41, 16
+  global_store_short_saddr %35, %63, %output_view {offset = 64}
+  global_store_short_saddr %35, %47, %output_view {offset = 128}
+  %66 = v_lshrrev_b32_src0_inline %47, 16
+  global_store_short_saddr %35, %66, %output_view {offset = 192}
+  global_store_short_saddr %35, %53, %output_view {offset = 256}
+  %69 = v_lshrrev_b32_src0_inline %53, 16
+  global_store_short_saddr %35, %69, %output_view {offset = 320}
+  global_store_short_saddr %35, %59, %output_view {offset = 384}
+  %72 = v_lshrrev_b32_src0_inline %59, 16
+  global_store_short_saddr %35, %72, %output_view {offset = 448}
+  return
+}
+
+// ====
+
+// Wave64 uses four packed F16 source elements for the same 16x16 logical
+// result tile. Direct publication preserves that smaller coordinate carrier.
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+kernel.def target(@target) @f16_wave64_direct_payload_coordinates() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %input_view = buffer.view %input[%base] : buffer -> view<16x16xf16, %layout>
+  %output_view = buffer.view %output[%base] : buffer -> view<16x16xf16, %layout>
+  %loaded = vector.fragment.load<result> %input_view[0, 0] shape [%tile, %tile] : view<16x16xf16, %layout> -> vector<4xf16>
+  vector.fragment.store<result> %loaded, %output_view[0, 0] shape [%tile, %tile] : vector<4xf16>, view<16x16xf16, %layout>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @f16_wave64_direct_payload_coordinates() asm {
+  %10 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %13 = v_and_b32_src0_inline %10, 15
+  %14 = v_lshlrev_b32_src0_inline %13, 5
+  %15 = v_lshrrev_b32_src0_inline %10, 4
+  %16 = v_lshl_add_u32_shift_imm %15, %14, 1
+  %17 = global_load_d16_b16_saddr %16, %input_view
+  %18 = v_bfe_u32_offset_0_width_inline_low16 %17
+  %19 = global_load_d16_b16_saddr %16, %input_view {offset = 8}
+  %20 = v_bfe_u32_offset_0_width_inline_low16 %19
+  %21 = v_lshlrev_b32_src0_inline %20, 16
+  %22 = v_or_b32 %18, %21
+  %23 = global_load_d16_b16_saddr %16, %input_view {offset = 16}
+  %24 = v_bfe_u32_offset_0_width_inline_low16 %23
+  %25 = global_load_d16_b16_saddr %16, %input_view {offset = 24}
+  %26 = v_bfe_u32_offset_0_width_inline_low16 %25
+  %27 = v_lshlrev_b32_src0_inline %26, 16
+  %28 = v_or_b32 %24, %27
+  global_store_short_saddr %16, %22, %output_view
+  %32 = v_lshrrev_b32_src0_inline %22, 16
+  global_store_short_saddr %16, %32, %output_view {offset = 8}
+  global_store_short_saddr %16, %28, %output_view {offset = 16}
+  %35 = v_lshrrev_b32_src0_inline %28, 16
+  global_store_short_saddr %16, %35, %output_view {offset = 24}
+  return
+}
+
+// ====
+
 // The base load fixes actual source-element coordinates through both SCF arms,
 // even when the final BF16 store would independently prefer operand exchange.
 amdgpu.target<gfx1151> @target {subgroup_size = 32}

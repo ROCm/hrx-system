@@ -39,6 +39,9 @@ typedef struct loom_cleanup_special_value_policy_t {
                                      loom_type_t result_type,
                                      loom_location_id_t location,
                                      loom_value_id_t* out_value_id);
+  // Returns true when exact |facts| can be materialized as |result_type|.
+  bool (*can_materialize_constant)(loom_value_facts_t facts,
+                                   loom_type_t result_type);
   // Builds a constant of |result_type| from exact |facts|.
   iree_status_t (*materialize_constant)(loom_builder_t* builder,
                                         loom_value_facts_t facts,

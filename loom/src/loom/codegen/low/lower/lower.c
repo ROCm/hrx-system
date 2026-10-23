@@ -512,10 +512,26 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_lower_structural_op(
     IREE_RETURN_IF_ERROR(loom_low_lower_remap_values(
         context, source_op, values, source_op->operand_count,
         context->lowering->boundary.result_types, &low_values));
+    loom_low_lower_function_boundary_t* boundary = &context->lowering->boundary;
+    if (boundary->source_signature_projection != NULL) {
+      loom_value_id_t* physical_values = NULL;
+      IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+          context, boundary->physical_result_count, sizeof(*physical_values),
+          (void**)&physical_values));
+      IREE_RETURN_IF_ERROR(loom_low_source_signature_projection_emit(
+          boundary->source_signature_projection, context,
+          LOOM_LOW_LOWER_SOURCE_SIGNATURE_EMISSION_DEFINITION_EXIT, source_op,
+          low_values, source_op->operand_count, physical_values,
+          boundary->physical_result_count, context->function_arena,
+          &boundary->source_signature_state));
+      low_values = physical_values;
+    }
     loom_op_t* low_return_op = NULL;
     return loom_low_return_build(&context->builder, low_values,
-                                 source_op->operand_count, source_op->location,
-                                 &low_return_op);
+                                 boundary->source_signature_projection != NULL
+                                     ? boundary->physical_result_count
+                                     : source_op->operand_count,
+                                 source_op->location, &low_return_op);
   }
   if (loom_low_lower_source_call_is_structural(context->module, source_op)) {
     return loom_low_lower_source_call(context, source_op);
@@ -977,6 +993,10 @@ static iree_status_t loom_low_lower_emit_selected_plan(
   } else if (selected_plan.kind == LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE) {
     IREE_RETURN_IF_ERROR(loom_low_lower_source_invoke(
         context, selected_plan.source_op, selected_plan.data.invoke));
+  } else if (selected_plan.kind ==
+             LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_projected_call(
+        context, selected_plan.source_op, selected_plan.data.projected_call));
   } else if (selected_plan.kind == LOOM_LOW_LOWER_SELECTED_PLAN_STRUCTURAL) {
     bool handled = false;
     IREE_RETURN_IF_ERROR(loom_low_lower_structural_op(
@@ -1489,6 +1509,11 @@ static iree_status_t loom_low_lower_function_plan_execute(
   if (iree_status_is_ok(status)) {
     loom_low_lower_report_initialize(context);
     status = loom_low_lower_map_blocks(context, source_body);
+  }
+  if (iree_status_is_ok(status)) {
+    loom_low_lower_emission_scope_begin(context);
+    status = loom_low_lower_function_boundary_emit_entry(context);
+    loom_low_lower_emission_scope_end(context);
   }
   if (iree_status_is_ok(status)) {
     status = loom_low_lower_function_boundary_remap_predicates(context);

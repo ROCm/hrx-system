@@ -90,18 +90,100 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "inputs",
-    srcs = ["inputs.c"],
-    hdrs = ["inputs.h"],
+    name = "sources",
+    srcs = ["sources.c"],
+    hdrs = ["sources.h"],
     deps = [
-        "//loom/src/loom/serve/runtime/program:preparation",
         "//loom/src/loom/serve/runtime/program:sources",
         "//runtime/src/iree/base",
         "//runtime/src/iree/io:parameter_index",
         "//runtime/src/iree/io:parameter_index_provider",
         "//runtime/src/iree/io:parameter_provider",
         "//runtime/src/iree/tooling:parameter_util",
+    ],
+)
+
+loom_cc_library(
+    name = "gather",
+    srcs = ["gather.c"],
+    hdrs = ["gather.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
+    ],
+)
+
+loom_cc_library(
+    name = "module",
+    srcs = ["module.c"],
+    hdrs = ["module.h"],
+    deps = [
+        ":gather",
+        ":sources",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/module/hal:types",
         "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "gather_tests",
+    testonly = True,
+    srcs = [
+        "gather_test.cc",
+        "module_test.cc",
+    ],
+    deps = [
+        ":gather",
+        ":module",
+        ":sources",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution:retirement",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/program",
+        "//loom/src/loom/serve/runtime/program:sources",
+        "//loom/src/loom/serve/testing:device",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/io:parameter_index_provider",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:temp_file",
+        "//runtime/src/iree/vm",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "inputs",
+    srcs = ["inputs.c"],
+    hdrs = ["inputs.h"],
+    deps = [
+        ":sources",
+        "//loom/src/loom/serve/runtime/program:preparation",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "sources_test",
+    srcs = ["sources_test.cc"],
+    deps = [
+        ":sources",
+        "//loom/src/loom/serve/runtime/program:sources",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
     ],
 )
 
@@ -111,6 +193,7 @@ loom_cc_library(
     hdrs = ["weights.h"],
     deps = [
         ":inputs",
+        ":sources",
         "//loom/binding/c:loomc",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/execution:retirement",
@@ -139,6 +222,7 @@ loom_cc_test(
     data = ["testdata/weights/inputs.loom"],
     deps = [
         ":inputs",
+        ":sources",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/vm",
         "//loom/src/loom/serve/runtime/program",

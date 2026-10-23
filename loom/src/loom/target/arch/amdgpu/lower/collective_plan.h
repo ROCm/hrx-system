@@ -159,6 +159,8 @@ typedef struct loom_amdgpu_subgroup_reduce_plan_t {
   loom_low_lower_resolved_descriptor_t guard_descriptor;
   // Descriptor row selected to retain the accumulator for inactive peers.
   loom_low_lower_resolved_descriptor_t select_descriptor;
+  // Descriptor row selected to identify the partial final wave.
+  loom_low_lower_resolved_descriptor_t lane_ge_descriptor;
   // Result value receiving the reduced payload.
   loom_value_id_t result;
   // Source/result payload shape selected during planning.
@@ -167,8 +169,14 @@ typedef struct loom_amdgpu_subgroup_reduce_plan_t {
   uint32_t register_count;
   // Exact subgroup width selected by the active target bundle.
   uint32_t wavefront_size;
-  // Number of low-numbered lanes participating in the emitted reduce tree.
+  // Physical lanes in each contiguous semantic reduction partition.
+  uint32_t partition_lane_count;
+  // Exact flattened workgroup size selected by launch configuration.
+  uint32_t flat_workgroup_size;
+  // Maximum lanes participating in one emitted reduce tree.
   uint32_t active_lane_count;
+  // Whether the last physical partition needs dynamic lane bounds.
+  bool has_dynamic_lane_bounds;
   // Cross-lane exchange strategy selected for the subgroup tree.
   loom_amdgpu_subgroup_reduce_crosslane_kind_t crosslane_kind;
   // Strategy used to publish the final reduced value to result users.
@@ -277,6 +285,8 @@ typedef struct loom_amdgpu_subgroup_scan_plan_t {
   loom_low_lower_resolved_descriptor_t guard_descriptor;
   // Descriptor row selected to merge guarded prefix-step results.
   loom_low_lower_resolved_descriptor_t select_descriptor;
+  // Descriptor row selected to identify the partial final wave.
+  loom_low_lower_resolved_descriptor_t lane_ge_descriptor;
   // Result value receiving the scanned payload.
   loom_value_id_t result;
   // Source/result payload shape selected during planning.
@@ -293,6 +303,8 @@ typedef struct loom_amdgpu_subgroup_scan_plan_t {
   uint32_t wavefront_size;
   // Number of low-numbered lanes participating in the emitted scan tree.
   uint32_t active_lane_count;
+  // Exact flattened workgroup size selected by launch configuration.
+  uint32_t flat_workgroup_size;
 } loom_amdgpu_subgroup_scan_plan_t;
 
 typedef struct loom_amdgpu_workgroup_scan_plan_t {

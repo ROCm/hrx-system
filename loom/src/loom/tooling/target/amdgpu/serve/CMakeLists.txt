@@ -119,13 +119,16 @@ loom_cc_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 loom_cc_test(
   NAME
     finite_component_test
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/copy.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/demand_control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/demand_kernels.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/demand_prepare.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/kernels.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/policy.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/prepare.loom"
@@ -139,6 +142,36 @@ loom_cc_test(
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "notsan"
+    "iree-build-requirement=loom.target.arch.vm"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+loom_cc_test(
+  NAME
+    gpu_finite_component_test
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/copy.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/demand_control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/demand_kernels.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/demand_prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/kernels.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/policy.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/prepare.loom"
+  DEPS
+    ::test_compiler
+    ::test_device_gpu
+    iree::testing::gtest_main
+    loom::serve::service::finite::component_tests
+  ENV
+    "LOOM_SERVE_TEST_COMPONENT_SOURCE={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/prepare.loom}}"
+  LABELS
+    "iree-run-requirement=libamdf.resource.amd_gpu"
     "iree-build-requirement=loom.target.arch.vm"
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -161,6 +194,43 @@ loom_cc_library(
   TESTONLY
   ALWAYSLINK
   PUBLIC
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+loom_cc_test(
+  NAME
+    parameter_gather_test
+  DEPS
+    ::test_device
+    iree::testing::gtest_main
+    loom::serve::runtime::parameter::gather_tests
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "notsan"
+    "iree-build-requirement=loom.target.arch.vm"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+loom_cc_test(
+  NAME
+    gpu_parameter_gather_test
+  DEPS
+    ::test_device_gpu
+    iree::testing::gtest_main
+    loom::serve::runtime::parameter::gather_tests
+  LABELS
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "iree-build-requirement=loom.target.arch.vm"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+  RESOURCE_GROUP
+    gpu-device
 )
 endif()
 
@@ -983,7 +1053,7 @@ loom_cc_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
     source_recognition_model_test
@@ -1010,7 +1080,7 @@ loom_cc_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
     source_recognition_model_elastic_test
@@ -1038,7 +1108,7 @@ loom_cc_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
     source_recognition_http_test
@@ -1065,7 +1135,7 @@ loom_cc_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
     source_recognition_http_elastic_test
@@ -1093,7 +1163,7 @@ loom_cc_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
     source_recognition_stream_test
@@ -1120,7 +1190,7 @@ loom_cc_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
     source_recognition_stream_elastic_test
@@ -1148,7 +1218,7 @@ loom_cc_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
     registry_speech_test
@@ -1175,7 +1245,7 @@ loom_cc_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
     registry_recognition_test
@@ -1431,7 +1501,7 @@ loom_cc_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMDGPU AND LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 loom_cc_binary(
   NAME
     storage_benchmark
@@ -1546,7 +1616,9 @@ loom_cc_test(
     loom::serve::runtime::execution
     loom::serve::runtime::parameter::activation
     loom::serve::runtime::parameter::bank
+    loom::serve::runtime::parameter::module
     loom::serve::runtime::parameter::residency
+    loom::serve::runtime::parameter::sources
     loom::serve::runtime::parameter::weights
     loom::serve::runtime::program
     loom::serve::runtime::program::jit
@@ -1612,7 +1684,9 @@ loom_cc_test(
     loom::serve::runtime::execution
     loom::serve::runtime::parameter::activation
     loom::serve::runtime::parameter::bank
+    loom::serve::runtime::parameter::module
     loom::serve::runtime::parameter::residency
+    loom::serve::runtime::parameter::sources
     loom::serve::runtime::parameter::weights
     loom::serve::runtime::program
     loom::serve::runtime::program::jit

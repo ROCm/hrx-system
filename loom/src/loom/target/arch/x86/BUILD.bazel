@@ -81,6 +81,31 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "source_signature",
+    srcs = ["source_signature.c"],
+    hdrs = ["source_signature.h"],
+    visibility = _X86_LOWER_VISIBILITY,
+    deps = [
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/target/abi/c:signature_layout",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "source_signature_test",
+    srcs = ["source_signature_test.cc"],
+    deps = [
+        ":source_signature",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "math_policy",
     srcs = ["math_policy.c"],
     hdrs = ["math_policy.h"],

@@ -37,12 +37,12 @@ iree_py_test(
   SRCS
     "dialect_test.py"
   ARGS
-    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/spirv/scalar_types.h}}"
+    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/spirv/scalar_type.h}}"
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/spirv/isa.h}}"
     "{{${_LOOM_SPIRV_CORE_GRAMMAR}}}"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/spirv/isa.h"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/spirv/scalar_types.h"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/spirv/scalar_type.h"
   DEPS
     loom::py::loom::target::arch::spirv::dialect
     iree::build_tools::spirv::registry::spirv_core_grammar

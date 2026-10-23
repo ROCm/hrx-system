@@ -42,6 +42,26 @@ iree_status_t loom_view_materialize_offset_expression(
     loom_builder_set_after(builder, anchor);
   }
   const loom_location_id_t location = anchor->location;
+  // Reuse the complete producer spelling. Its SSA identity carries facts
+  // established for the aggregate expression that a term-by-term
+  // reconstruction cannot attach to any one operand. The caller-owned
+  // dominance contract guarantees that this value is available at the anchor.
+  if (base_value_id == LOOM_VALUE_ID_INVALID &&
+      loom_symbolic_expr_has_relation_value(expression)) {
+    const loom_value_id_t value = expression->relation_value_id;
+    const loom_type_t source_type =
+        loom_module_value_type(builder->module, value);
+    const loom_type_t offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+    if (loom_type_equal(source_type, offset_type)) {
+      *out_value = value;
+      return iree_ok_status();
+    }
+    loom_op_t* cast = NULL;
+    IREE_RETURN_IF_ERROR(loom_index_cast_build(builder, value, source_type,
+                                               offset_type, location, &cast));
+    *out_value = loom_index_cast_result(cast);
+    return iree_ok_status();
+  }
   // A constant translation stays in the physical address domain. Converting
   // a carried base to signed arithmetic and back would require a new range
   // proof for the entire recurrence instead of just representing its step.

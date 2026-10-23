@@ -10,7 +10,7 @@
 #include <cstring>
 #include <string>
 
-#include "libamdf/cts/gpu/aql/queue_fixture.h"
+#include "libamdf/cts/gpu/aql/queue/queue_fixture.h"
 #include "libamdf/cts/gpu/pm4/encoding/memory_commands.h"
 
 namespace {

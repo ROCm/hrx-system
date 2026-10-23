@@ -32,12 +32,10 @@ loom_cc_library(
   TEXTUAL_HDRS
     "ops.inc"
   DEPS
-    loom::ir::builders
-    loom::ir::types
-    loom::ops::atomic
-    loom::ops::cache
-    loom::ops::combining
-    loom::ops::op_defs
+    loom::ir::headers
+    loom::ir::type_headers
+    loom::ops::headers
+    loom::ops::vocabulary
     loom::target::types
   PUBLIC
 )
@@ -54,10 +52,8 @@ loom_cc_library(
   DEPS
     loom::ir::builders
     loom::ir::types
-    loom::ops::atomic
-    loom::ops::cache
-    loom::ops::combining
     loom::ops::op_defs
+    loom::ops::vocabulary
     loom::target::types
   PUBLIC
 )

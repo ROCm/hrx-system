@@ -161,6 +161,15 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "segmented_storage_headers",
+    hdrs = ["segmented_storage.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "segmented_storage",
     srcs = ["segmented_storage.c"],
     hdrs = ["segmented_storage.h"],

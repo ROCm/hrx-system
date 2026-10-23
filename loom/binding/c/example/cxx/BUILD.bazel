@@ -4,10 +4,17 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//build_tools/sanitizer:suppressions.bzl", "rocm_suppressions")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_test", "loom_config_compatible_with")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_binary",
+    "loom_cc_test",
+    "loom_config_compatible_with",
+    "loom_generated_file",
+)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -15,10 +22,18 @@ package(
     licenses = ["notice"],
 )
 
-_COMPATIBLE_WITH = loom_config_compatible_with([
+_AMDGPU_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/import:cxx",
     "//loom/config/execute:amdgpu_hal",
 ])
+
+_NATIVE_X86_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/import:cxx",
+    "//loom/config/target/arch:x86",
+]) + [
+    "@platforms//cpu:x86_64",
+    "@platforms//os:linux",
+]
 
 iree_c_embed_data(
     name = "kernels",
@@ -27,7 +42,7 @@ iree_c_embed_data(
     flatten = True,
     h_file_output = "kernels.h",
     identifier = "loomc_cxx_example_kernels",
-    target_compatible_with = _COMPATIBLE_WITH,
+    target_compatible_with = _AMDGPU_COMPATIBLE_WITH,
 )
 
 _DEPS = [
@@ -47,7 +62,7 @@ _DEPS = [
 loom_cc_binary(
     name = "jit_amdgpu",
     srcs = ["jit_amdgpu.c"],
-    target_compatible_with = _COMPATIBLE_WITH,
+    target_compatible_with = _AMDGPU_COMPATIBLE_WITH,
     deps = _DEPS,
 )
 
@@ -60,9 +75,55 @@ loom_cc_test(
         "iree-run-requirement=runtime.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
-    target_compatible_with = _COMPATIBLE_WITH + loom_config_compatible_with([
+    target_compatible_with = _AMDGPU_COMPATIBLE_WITH + loom_config_compatible_with([
         "//loom/config/import/cxx:embed_includes_enabled",
         "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = _DEPS,
+)
+
+loom_generated_file(
+    name = "native_abi_module",
+    args = [
+        "$(location native_abi_library.cxx)",
+        "--to=bc",
+    ],
+    generator = "//loom/src/loom/tools/loom-import-cxx:loom-import-cxx",
+    inputs = [
+        "native_abi.h",
+        "native_abi_library.cxx",
+    ],
+    output = "native_abi.loombc",
+    output_flag = "--output=",
+    target_compatible_with = _NATIVE_X86_COMPATIBLE_WITH,
+)
+
+loom_generated_file(
+    name = "native_abi_object",
+    args = [
+        "$(location native_abi.loombc)",
+        "--target=x86:avx2",
+    ],
+    generator = "//loom/src/loom/tools/loom-compile:loom-compile",
+    inputs = ["native_abi.loombc"],
+    output = "native_abi.o",
+    output_flag = "--output=",
+    target_compatible_with = _NATIVE_X86_COMPATIBLE_WITH,
+)
+
+loom_cc_binary(
+    name = "native_abi",
+    srcs = [
+        "native_abi.h",
+        "native_abi.o",
+        "native_abi_main.cc",
+    ],
+    copts = ["-mavx2"],
+    target_compatible_with = _NATIVE_X86_COMPATIBLE_WITH,
+)
+
+iree_executable_test(
+    name = "native_abi_test",
+    src = ":native_abi",
+    target_compatible_with = _NATIVE_X86_COMPATIBLE_WITH,
 )

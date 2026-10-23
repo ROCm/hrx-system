@@ -7,6 +7,7 @@
 #include "libamdf/src/gpu/endpoint_profile.h"
 
 #include <stddef.h>
+#include <string.h>
 
 amdf_atomic_capabilities_t amdf_gpu_pm4_atomic_capabilities(void) {
   const amdf_atomic_operations_t operations =
@@ -242,6 +243,8 @@ bool amdf_gpu_endpoint_profile_initialize(
         .maximum_ring_byte_length = source->maximum_ring_byte_length,
         .ring_byte_length_alignment = source->ring_byte_length_alignment,
     };
+    memcpy(profile.queue_families[i].host_publication, source->host_publication,
+           sizeof(source->host_publication));
   }
   *out_profile = profile;
   return true;

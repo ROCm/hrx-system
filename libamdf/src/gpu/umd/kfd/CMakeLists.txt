@@ -64,6 +64,7 @@ iree_cc_test(
     libamdf::src::wait
   LABELS
     "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
   RESOURCE_GROUP
@@ -112,7 +113,11 @@ iree_cc_test(
     topology_test
   SRCS
     "topology_test.cc"
+  LINKOPTS
+    "-Wl,--wrap=amdf_linux_endpoint_open_file"
+    "-Wl,--wrap=ioctl"
   DEPS
+    $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_amdgpu_uapi>
     ::endpoint_profile
     ::topology
     amdf::headers
@@ -402,6 +407,7 @@ iree_cc_library(
     ::buffer
     ::device_state
     ::doorbell
+    ::hdp
     amdf::headers
     libamdf::src::platform::linux::file
   PUBLIC
@@ -667,7 +673,9 @@ iree_cc_test(
   NAME
     user_queue_test
   SRCS
+    "user_queue_publication_test.cc"
     "user_queue_test.cc"
+    "user_queue_test_fixture.h"
   DEPS
     $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_kfd_uapi>
     ::aql

@@ -121,7 +121,7 @@ class AsanAllocationTest : public ::testing::TestWithParam<BackendInfo> {
     iree_status_t status = asan_device_.Initialize(GetParam(), "asan");
     if (iree_status_is_unavailable(status)) {
       iree::Status unavailable_status(std::move(status));
-      GTEST_SKIP() << unavailable_status.ToString();
+      GTEST_SKIP() << FormatSkipStatus(unavailable_status);
     }
     IREE_ASSERT_OK(status);
 

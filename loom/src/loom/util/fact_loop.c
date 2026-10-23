@@ -1066,6 +1066,8 @@ iree_status_t loom_value_fact_table_compute_loop_like_summary(
   }
   if (loom_loop_like_condition_region(loop) ||
       loom_loop_like_has_counted_range(loop)) {
+    IREE_RETURN_IF_ERROR(
+        loom_value_fact_table_enable_replay_generations(table));
     // Each solve owns its working tuples and equations, so a reentrant child
     // releases only its own scratch. Published facts copy extension IDs into
     // table-owned entries; extension payloads and condition projections retain

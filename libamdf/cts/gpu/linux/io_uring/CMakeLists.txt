@@ -275,7 +275,7 @@ iree_cc_library(
     ::file_io_resources
     amdf::headers
     iree::third_party::google_test
-    libamdf::cts::gpu::aql::publication
+    libamdf::cts::gpu::aql::queue::publication
     libamdf::cts::gpu::kernels::file_staged
     libamdf::cts::gpu::kernels::file_staged_read_kernels
     libamdf::cts::gpu::kernels::file_staged_reader_kernels

@@ -44,12 +44,19 @@ class CTestIntegrationTest(unittest.TestCase):
             )
             make_temporary = root / "make $files = # '"
             make_temporary.mkdir()
+            unselected_temporary_directory = (
+                build / "test_tmpdir" / "unselected_test_tmpdir"
+            )
+            unselected_temporary_directory.mkdir(parents=True)
+            unselected_sentinel = unselected_temporary_directory / "preserved"
+            unselected_sentinel.write_text("unselected\n")
 
             def check(build_count):
                 # Exercise the real Make/shell boundary, including cleanup.
                 with mock.patch.object(tempfile, "tempdir", str(make_temporary)):
                     self.assertEqual(step.run(), 0)
                 self.assertEqual(list(make_temporary.iterdir()), [])
+                self.assertEqual(unselected_sentinel.read_text(), "unselected\n")
                 generator = os.environ["IREE_TEST_CMAKE_GENERATOR"]
                 if generator == "Unix Makefiles" or generator.startswith("Ninja"):
                     self.assertEqual(
@@ -63,9 +70,14 @@ class CTestIntegrationTest(unittest.TestCase):
                     )
 
             check(1)
-            tests = json.loads(
-                test_project(build, "-R", "^left$", "--show-only=json-v1")
-            )["tests"]
+            with mock.patch.dict(
+                os.environ,
+                {ctest_dev.SKIP_GLOBAL_TMPDIR_CLEANUP_ENV: "1"},
+            ):
+                tests = json.loads(
+                    test_project(build, "-R", "^left$", "--show-only=json-v1")
+                )["tests"]
+            self.assertEqual(unselected_sentinel.read_text(), "unselected\n")
             executable = Path(tests[0]["command"][0])
             timestamp = executable.stat().st_mtime_ns
             check(2)

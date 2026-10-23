@@ -144,6 +144,7 @@ loom_cc_library(
     iree::base
     loom::ir::builders
     loom::ops::low::op_defs
+    loom::ops::op_defs
     loom::target::registers
   PUBLIC
 )

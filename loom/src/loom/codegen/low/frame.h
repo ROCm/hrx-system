@@ -85,6 +85,9 @@ typedef struct loom_low_emission_frame_options_t {
   loom_low_schedule_flags_t schedule_flags;
   // Allocation retention requested by downstream target planning.
   loom_low_allocation_flags_t allocation_flags;
+  // Whether the current function snapshot contains traffic introduced by an
+  // earlier allocation-repair iteration.
+  bool has_allocation_repair;
   // Explicit per-class register budgets passed to scheduling and allocation.
   const loom_low_allocation_budget_t* allocation_budgets;
   // Number of entries in |allocation_budgets|.

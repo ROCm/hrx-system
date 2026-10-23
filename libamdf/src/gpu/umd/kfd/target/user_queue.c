@@ -6,6 +6,7 @@
 
 #include "libamdf/src/gpu/umd/kfd/target/user_queue.h"
 
+#include "libamdf/src/gpu/umd/kfd/hdp.h"
 #include "libamdf/src/gpu/umd/kfd/target/aql_queue.h"
 #include "libamdf/src/gpu/umd/kfd/target/pm4_queue.h"
 #include "libamdf/src/gpu/umd/kfd/target/sdma_queue.h"
@@ -47,15 +48,26 @@ void amdf_gpu_kfd_target_user_queue_plans_initialize(
                                    &plan)) {
     plans.values[plans.count++] = plan;
   }
+  const amdf_queue_host_publication_flags_t local_publication =
+      topology->integrated ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN
+                           : amdf_gpu_kfd_hdp_host_publication(topology);
   const bool host_visible_local =
       topology->integrated ||
       (topology->vram.total_byte_length != 0 &&
-       topology->vram.visible_byte_length >= topology->vram.total_byte_length);
+       topology->vram.visible_byte_length >= topology->vram.total_byte_length &&
+       page_size <= 4096 && local_publication != 0);
   for (uint32_t i = 0; i < plans.count; ++i) {
     plans.values[i].family.placement_capabilities =
         AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
         (host_visible_local ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL : 0);
     plans.values[i].ring.placement = AMDF_QUEUE_PLACEMENT_HOST_LOCAL;
+    plans.values[i].family.host_publication[AMDF_QUEUE_PLACEMENT_DEFAULT] =
+        AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN;
+    plans.values[i].family.host_publication[AMDF_QUEUE_PLACEMENT_HOST_LOCAL] =
+        AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN;
+    plans.values[i].family.host_publication[AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL] =
+        host_visible_local ? local_publication
+                           : AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN;
   }
   *out_plans = plans;
 }

@@ -16,6 +16,34 @@ from loom.target.low_descriptors import OperandAddressMapKind, OperandRole, RegC
 
 
 @pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+def test_physical_lane_id_packets_span_every_family(target: str) -> None:
+    overlays = {
+        overlay.descriptor_key: overlay
+        for overlay in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target].overlay_rows()
+    }
+    low = overlays["amdgpu.v_mbcnt_lo_u32_b32.lane_id"]
+    high = overlays["amdgpu.v_mbcnt_hi_u32_b32.lane_id"]
+
+    assert low.instruction_name == "V_MBCNT_LO_U32_B32"
+    assert tuple(operand.descriptor_operand.field_name for operand in low.operands) == (
+        "dst",
+    )
+    assert tuple(
+        (field_name, value.value_name, value.operand_type)
+        for field_name, value in low.fixed_encoding_fields
+    ) == (("SRC0", "-1", "OPR_SRC"), ("SRC1", "0", "OPR_SRC"))
+
+    assert high.instruction_name == "V_MBCNT_HI_U32_B32"
+    assert tuple(
+        operand.descriptor_operand.field_name for operand in high.operands
+    ) == ("dst", "low_lane")
+    assert tuple(
+        (field_name, value.value_name, value.operand_type)
+        for field_name, value in high.fixed_encoding_fields
+    ) == (("SRC0", "-1", "OPR_SRC"),)
+
+
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
 @pytest.mark.parametrize("bit_width", [32, 64])
 def test_fma_residuals_use_operand_modifiers_on_every_family(target, bit_width) -> None:
     overlays = {

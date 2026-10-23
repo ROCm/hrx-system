@@ -497,6 +497,7 @@ static iree_status_t loom_low_emission_frame_build_impl(
       .residency = out_frame->residency,
       .storage_leases = storage_leases,
       .instruction_preferences = options->instruction_preferences,
+      .has_allocation_repair = options->has_allocation_repair,
       .emitter = options->emitter,
   };
   if (iree_status_is_ok(status) && out_frame->schedule.error_count == 0) {
@@ -1221,6 +1222,7 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
     }
     // Every subsequent frame contains traffic inserted by allocation repair,
     // including target packets that replace the structural spill operations.
+    repair_options.has_allocation_repair = true;
     repair_options.schedule_flags |=
         LOOM_LOW_SCHEDULE_FLAG_HAS_LOWERED_SPILL_TRAFFIC;
     const bool materialized_target_traffic =

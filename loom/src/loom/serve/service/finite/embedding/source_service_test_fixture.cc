@@ -604,13 +604,15 @@ void SourceEmbeddingServiceTest::WriteCheckpointPackage(
   ASSERT_NE(result_position, std::string::npos);
   prepare.insert(result_position, R"(
   %parameter_index = scalar.constant 0 : i32
-  %parameter_source = scalar.constant 0 : i32
+  %parameter_input = scalar.constant 0 : i32
   %parameter_path = global.load @checkpoint : buffer
   %parameter_policy = global.load @policy : buffer
-  func.call @parameter(%stage, %parameter_index, %parameter_source, %directory, %parameter_path, %parameter_policy) : (i32, i32, i32, buffer, buffer, buffer) -> ()
+  %parameter_source = func.call @source(%directory, %parameter_path) : (buffer, buffer) -> (i32)
+  func.call @parameter(%stage, %parameter_index, %parameter_input, %parameter_source, %parameter_policy) : (i32, i32, i32, i32, buffer) -> ()
 )");
   const std::string declarations = R"(
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
 global.rodata.def @checkpoint = bytes("776569676874732e7361666574656e736f7273")
 global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
 )";

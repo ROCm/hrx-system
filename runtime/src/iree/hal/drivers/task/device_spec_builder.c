@@ -284,6 +284,12 @@ IREE_API_EXPORT iree_status_t iree_hal_task_device_spec_create(
       .placement_capabilities =
           IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
           IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL,
+      .host_publication =
+          {
+              IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KNOWN,
+              IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KNOWN,
+              IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KNOWN,
+          },
       .physical_device_affinity = 1ull,
       .role_flags = queue_role_flags,
       .atomic_capabilities = params->atomic_capabilities,

@@ -31,6 +31,7 @@ static iree_status_t loom_bytecode_validate_module(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "module has no context (needed for op vtables)");
   }
+  IREE_RETURN_IF_ERROR(loom_module_validate_symbol_definitions(module));
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
     const loom_symbol_t* symbol = &module->symbols.entries[i];
     loom_symbol_kind_t bytecode_kind = loom_symbol_bytecode_kind(symbol);

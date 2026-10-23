@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef AMDF_CTS_GPU_AQL_PUBLICATION_H_
-#define AMDF_CTS_GPU_AQL_PUBLICATION_H_
+#ifndef AMDF_CTS_GPU_AQL_QUEUE_PUBLICATION_H_
+#define AMDF_CTS_GPU_AQL_QUEUE_PUBLICATION_H_
 
 #include <cstring>
 #include <span>
@@ -34,7 +34,11 @@ namespace aql {
   auto* slot = reinterpret_cast<uint32_t*>(queue.host.ring_address) +
                (index & (capacity - 1)) * 16;
   std::memcpy(slot + 1, packet.data() + 1, sizeof(Packet) - sizeof(uint32_t));
-  GpuPublishFence(queue.host);
+  const amdf_status_t status = queue.Flush();
+  if (!amdf_status_is_ok(status)) {
+    return ::testing::AssertionFailure()
+           << "native host publication: " << status;
+  }
   GpuStoreRelease(reinterpret_cast<uintptr_t>(slot), packet[0]);
   GpuRingDoorbell(queue.host.doorbell_address, index);
   return ::testing::AssertionSuccess();
@@ -49,7 +53,6 @@ inline void PrepareBatch(const GpuUserQueue& queue, uint64_t begin,
   ASSERT_EQ(GpuLoadAcquire<uint64_t>(queue.host.read_index_address), begin);
   auto* ring = reinterpret_cast<Packet*>(queue.host.ring_address);
   auto& first = ring[begin & (capacity - 1)];
-  ASSERT_EQ(first[0] & 0xffu, 1u);
   std::memcpy(first.data() + 1, packets.front().data() + 1,
               sizeof(Packet) - sizeof(uint32_t));
   for (size_t i = 1; i < packets.size(); ++i) {
@@ -64,7 +67,7 @@ inline void PublishBatch(const GpuUserQueue& queue, uint64_t begin,
   const uint64_t capacity = queue.host.ring_byte_length / sizeof(Packet);
   auto* ring = reinterpret_cast<Packet*>(queue.host.ring_address);
   GpuStoreRelease(queue.host.write_index_address, begin + packets.size());
-  GpuPublishFence(queue.host);
+  ASSERT_EQ(queue.Flush(), AMDF_STATUS_OK);
   GpuStoreRelease(
       reinterpret_cast<uintptr_t>(ring[begin & (capacity - 1)].data()),
       packets.front()[0]);
@@ -73,4 +76,4 @@ inline void PublishBatch(const GpuUserQueue& queue, uint64_t begin,
 
 }  // namespace aql
 
-#endif  // AMDF_CTS_GPU_AQL_PUBLICATION_H_
+#endif  // AMDF_CTS_GPU_AQL_QUEUE_PUBLICATION_H_

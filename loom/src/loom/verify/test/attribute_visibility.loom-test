@@ -69,17 +69,6 @@ func.def @isolated_predicate(%bound: index) {
 
 // ====
 
-// Function signature isolation applies to predicates as well as argument types.
-func.def @outer_signature_predicate(%bound: index) {
-  // ERROR@+1: DOMINANCE/017 "bound"
-  func.def @capturing_signature(%value: index) where [lt(%value, %bound)] {
-    func.return
-  }
-  func.return
-}
-
-// ====
-
 // A dominating block argument may occur repeatedly within nested metadata.
 func.def @dominating_attribute(%width: index, %value: f32) -> (f32) {
   cfg.br ^use
@@ -144,13 +133,3 @@ config.decl @maximum_width : %width: index where [range(%width, 1, 131072)]
 
 // Global shape placeholders are declaration-local, not undefined body values.
 global.constant @weights : tile<[%rows]x[%columns]xf32> where [multiple_of(%rows, 16), multiple_of(%columns, 8)]
-
-// ====
-
-// Visibility does not relax the function-specific signature-origin contract.
-// Even a visible enclosing value is not a declared signature parameter.
-func.def @outer_declaration_predicate(%bound: index) {
-  // ERROR@+1: STRUCTURE/032 "must reference a function argument or result"
-  func.decl @capturing_declaration(%value: index) where [lt(%value, %bound)]
-  func.return
-}

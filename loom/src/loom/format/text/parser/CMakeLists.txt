@@ -56,6 +56,7 @@ loom_cc_library(
     loom::format::text::tokenizer
     loom::ir
     loom::ir::symbol_map
+    loom::ops::format
     loom::ops::op_defs
     loom::ops::type_registry
     loom::rewrite::remap

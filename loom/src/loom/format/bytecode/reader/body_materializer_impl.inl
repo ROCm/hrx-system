@@ -262,6 +262,11 @@ loom_bytecode_body_reader_read_op_record(
   IREE_RETURN_IF_ERROR(loom_bytecode_body_policy_resolve_op(
       &body_reader->values, op_table_index_plus1, op_offset, &vtable,
       &op_kind));
+  if (iree_any_bit_set(vtable->traits, LOOM_TRAIT_SYMBOL_DEFINE)) {
+    return loom_bytecode_value_scope_emit_invalid(
+        &body_reader->values, op_offset,
+        IREE_SV("symbol_definition_is_not_permitted_in_a_symbol_body"));
+  }
 
   uint8_t instance_flags = 0;
   uint64_t instance_flags_offset =

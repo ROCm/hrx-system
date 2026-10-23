@@ -161,6 +161,7 @@ amdf_cc_test(
         "-Wl,--wrap=mmap",
         "-Wl,--wrap=munmap",
         "-Wl,--wrap=close",
+        "-Wl,--wrap=uname",
     ],
     target_compatible_with = [
         "@platforms//os:linux",

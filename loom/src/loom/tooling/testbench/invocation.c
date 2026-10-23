@@ -343,6 +343,22 @@ static iree_status_t loom_testbench_query_invocation_span_issues(
   return status;
 }
 
+iree_status_t loom_testbench_run_prepared_invocation_span(
+    loom_testbench_invocation_executor_t* executor,
+    iree_host_size_t execution_index,
+    const loom_testbench_prepared_invocation_span_t* span,
+    loom_testbench_value_table_t* table) {
+  const loom_testbench_prepared_invocation_t* prepared = span->invocations;
+  if (span->invocation_count > 1) {
+    IREE_ASSERT(prepared->provider.invoke_sequence != NULL);
+    IREE_RETURN_IF_ERROR(prepared->provider.invoke_sequence(
+        prepared->provider.user_data, execution_index, span->invocation_count,
+        prepared, table));
+    return loom_testbench_query_invocation_span_issues(executor, span);
+  }
+  return loom_testbench_run_prepared_invocation(executor, prepared, table);
+}
+
 iree_status_t loom_testbench_run_case_invocations(
     loom_testbench_invocation_executor_t* executor,
     iree_host_size_t execution_index, loom_testbench_value_table_t* table) {
@@ -354,19 +370,8 @@ iree_status_t loom_testbench_run_case_invocations(
        ++span_index) {
     const loom_testbench_prepared_invocation_span_t* span =
         &executor->schedule->spans[span_index];
-    const loom_testbench_prepared_invocation_t* prepared = span->invocations;
-    if (span->invocation_count > 1) {
-      IREE_ASSERT(prepared->provider.invoke_sequence != NULL);
-      status = prepared->provider.invoke_sequence(
-          prepared->provider.user_data, execution_index, span->invocation_count,
-          prepared, table);
-      if (iree_status_is_ok(status)) {
-        status = loom_testbench_query_invocation_span_issues(executor, span);
-      }
-    } else {
-      status =
-          loom_testbench_run_prepared_invocation(executor, prepared, table);
-    }
+    status = loom_testbench_run_prepared_invocation_span(
+        executor, execution_index, span, table);
   }
   return status;
 }

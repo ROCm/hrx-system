@@ -9,6 +9,7 @@
 #ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_TOPOLOGY_H_
 #define LOOM_TARGET_ARCH_AMDGPU_LOWER_TOPOLOGY_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "loom/codegen/low/lower/lower.h"
@@ -85,6 +86,25 @@ bool loom_amdgpu_required_flat_workgroup_size_from_facts(
     const loom_module_t* module, loom_func_like_t function,
     const loom_target_bundle_t* bundle,
     const loom_value_fact_table_t* fact_table, uint32_t* out_flat_size);
+
+typedef struct loom_amdgpu_subgroup_wave_shape_t {
+  // Exact flattened workgroup size selected by launch configuration.
+  uint32_t flat_workgroup_size;
+  // Maximum number of live lanes in any source subgroup wave.
+  uint32_t active_lane_count;
+  // Number of live lanes in the final source subgroup wave.
+  uint32_t tail_lane_count;
+  // Whether full waves precede a shorter final wave.
+  bool has_partial_tail;
+} loom_amdgpu_subgroup_wave_shape_t;
+
+// Resolves the exact live-lane shape of source subgroup waves. A workgroup
+// smaller than one wave has one statically short wave; |has_partial_tail| is
+// reserved for workgroups whose waves have differing live-lane counts.
+bool loom_amdgpu_resolve_subgroup_wave_shape(
+    const loom_module_t* module, loom_func_like_t function,
+    const loom_target_bundle_t* bundle, uint32_t wavefront_size,
+    loom_amdgpu_subgroup_wave_shape_t* out_shape);
 
 // Emits the current invocation lane id within its subgroup as a VGPR value.
 iree_status_t loom_amdgpu_emit_current_subgroup_lane_id(

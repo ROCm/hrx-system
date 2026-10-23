@@ -42,6 +42,7 @@ iree_cc_library(
     iree::base
     iree::hal
     iree::hal::drivers::amd::fabric::memory
+    iree::hal::drivers::amd::fabric::memory_transition
     iree::hal::drivers::amd::gpu::completion
     iree::hal::drivers::amd::gpu::context
     iree::hal::drivers::amd::gpu::publication

@@ -80,8 +80,11 @@ python build_tools/devtools/ci.py iree-bazel-amdgpu-native-asan --amdgpu-target 
 
 This profile uses native libamdf GPU queues without requiring ROCr or an NPU.
 The `iree-bazel-amd-client[-asan]` profiles cover the GPU/NPU client configuration;
-their admitted resources depend on the host platform. The ordinary
-`iree-bazel-amdgpu[-<sanitizer>]` profiles include the ROCr-backed runtime.
+their admitted resources depend on the host platform. The Linux
+`iree-bazel-amdgpu[-<sanitizer>]` and `iree-cmake-amdgpu[-<sanitizer>]` profiles
+also use native libamdf GPU queues, with the legacy AMDGPU HAL disabled. They
+retain the ROCm device compiler for HIP code-object fixtures; execution does
+not load the ROCr-backed HAL.
 The [profile definitions](../devtools/ci_config.py) specify the package scope
 and resources for each.
 

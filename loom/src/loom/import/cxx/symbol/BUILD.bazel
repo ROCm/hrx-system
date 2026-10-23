@@ -65,6 +65,7 @@ loom_cc_library(
     deps = [
         ":immutable_objects",
         ":names",
+        ":source_signature",
         "//loom/src/loom/import/cxx/binding:config",
         "//loom/src/loom/import/cxx/binding:fastmath",
         "//loom/src/loom/import/cxx/binding:function_contracts",
@@ -87,6 +88,22 @@ loom_cc_library(
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/template",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
+    name = "source_signature",
+    srcs = ["source_signature.cc"],
+    hdrs = ["source_signature.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        "//loom/src/loom/import/cxx/source",
+        "//loom/src/loom/import/cxx/source:error",
+        "//loom/src/loom/import/cxx/value:types",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
         "//third_party:cxx_parser",
     ],
 )

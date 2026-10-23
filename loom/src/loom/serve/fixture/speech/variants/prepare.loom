@@ -1,6 +1,10 @@
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
+
+func.decl import("prepare") @source_append(%source: i32, %directory: buffer, %path: buffer)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
 
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 
@@ -56,16 +60,16 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %empty_buffer = global.load @empty : buffer
   // Declaration order is independent of each command's fixed binding order.
   // The raw base factor has a different preparation policy and storage owner.
-  func.call @parameter(%first, %binding2, %c0_source, %directory, %voices, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-  func.call @parameter(%first, %binding3, %c0_source, %directory, %weights, %identity) : (i32, i32, i32, buffer, buffer, buffer)
-  func.call @parameter(%first, %binding1, %c0_source, %directory, %weights, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-  func.call @parameter(%first, %binding1, %c0_source, %directory, %phases, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-  func.call @parameter(%first, %binding0, %c0_source, %directory, %weights, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-  func.call @parameter(%first, %binding0, %c0_source, %directory, %phases, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-  func.call @parameter(%second, %binding1, %c0_source, %directory, %weights, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-  func.call @parameter(%second, %binding1, %c0_source, %directory, %phases, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-  func.call @parameter(%second, %binding0, %c0_source, %directory, %weights, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-  func.call @parameter(%second, %binding0, %c0_source, %directory, %phases, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+  %voice_source = func.call @source(%directory, %voices) : (buffer, buffer) -> (i32)
+  %raw_source = func.call @source(%directory, %weights) : (buffer, buffer) -> (i32)
+  %packed_source = func.call @source(%directory, %weights) : (buffer, buffer) -> (i32)
+  func.call @source_append(%packed_source, %directory, %phases) : (i32, buffer, buffer)
+  func.call @parameter(%first, %binding2, %c0_source, %voice_source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%first, %binding3, %c0_source, %raw_source, %identity) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%first, %binding1, %c0_source, %packed_source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%first, %binding0, %c0_source, %packed_source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%second, %binding1, %c0_source, %packed_source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%second, %binding0, %c0_source, %packed_source, %policy) : (i32, i32, i32, i32, buffer)
   %rows = scalar.constant 4 : i64
   %work_bytes = scalar.constant 64 : i64
   %input = scalar.constant 16 : i64

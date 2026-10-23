@@ -14,12 +14,16 @@ from loom.dsl import (
     ATTR_TYPE_I64,
     ATTR_TYPE_PREDICATE_LIST,
     ATTR_TYPE_SYMBOL,
+    CONVERGENT,
+    FACT_IDENTITY,
     INTEGER,
     ISOLATED_FROM_ABOVE,
     PURE,
     SAFE_TO_SPECULATE,
     SYMBOL_DEFINE,
     TERMINATOR,
+    UNIQUE_IDENTITY,
+    VALUE_ALIAS,
     AttrDef,
     Dialect,
     Effect,
@@ -259,6 +263,52 @@ def test_fact_independent_canonicalization_requires_callback() -> None:
             "test.projection",
             group=Dialect("test"),
             canonicalize_without_facts=True,
+        )
+
+
+def test_generate_tables_marks_operand_fact_dependencies() -> None:
+    op = Op(
+        "test.equation",
+        operands=[Operand("inputs", INTEGER, variadic=True)],
+        results=[Result("outputs", INTEGER, variadic=True)],
+        facts="test_equation_facts",
+        facts_from_operands=True,
+    )
+    source = generate_tables_c("test", 0x01, [op])
+    assert "LOOM_OP_VTABLE_FACTS_FROM_OPERANDS" in source
+
+
+@pytest.mark.parametrize("missing", ["facts", "results"])
+def test_operand_fact_dependencies_require_an_equation(missing: str) -> None:
+    fields = dict(
+        facts="test_equation_facts",
+        results=[Result("result", INTEGER)],
+    )
+    fields.pop(missing)
+    with pytest.raises(ValueError, match="requires a facts callback and results"):
+        Op("test.equation", facts_from_operands=True, **fields)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        dict(traits=[CONVERGENT]),
+        dict(traits=[UNIQUE_IDENTITY]),
+        dict(traits=[FACT_IDENTITY]),
+        dict(traits=[VALUE_ALIAS]),
+        dict(effects=[Reads()]),
+        dict(regions=[RegionDef("body")]),
+        dict(results=[Result("result", ANY, allocates=True)]),
+    ],
+)
+def test_operand_fact_dependencies_reject_contextual_inference(fields) -> None:
+    fields = dict(results=[Result("result", INTEGER)]) | fields
+    with pytest.raises(ValueError, match="cannot observe execution, regions, or auxiliary identity facts"):
+        Op(
+            "test.equation",
+            facts="test_equation_facts",
+            facts_from_operands=True,
+            **fields,
         )
 
 

@@ -37,8 +37,13 @@ struct amdf_gpu_kfd_hdp_t {
   amdf_gpu_kfd_hdp_posting_t posting;
 };
 
-bool amdf_gpu_kfd_hdp_supports_host_publication(
+amdf_queue_host_publication_flags_t amdf_gpu_kfd_hdp_host_publication(
     const amdf_gpu_kfd_topology_t* topology) {
+  // Native SR-IOV functions do not expose KFD's HDP register remap, even
+  // when the complete virtual VRAM heap is CPU-visible.
+  if (topology->virtual_function) {
+    return AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN;
+  }
   const bool gfx90a = topology->properties.gfx_ip.major == 9 &&
                       topology->properties.gfx_ip.minor == 0 &&
                       topology->properties.gfx_ip.stepping == 10;
@@ -52,7 +57,12 @@ bool amdf_gpu_kfd_hdp_supports_host_publication(
   const bool gfx11 = topology->properties.gfx_ip.major == 11 &&
                      (topology->properties.gfx_ip.minor == 0 ||
                       topology->properties.gfx_ip.minor == 5);
-  return gfx90a || gfx94x || gfx11 || gfx120x || gfx125x;
+  if (!(gfx90a || gfx94x || gfx11 || gfx120x || gfx125x)) {
+    return AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN;
+  }
+  return AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN |
+         AMDF_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ |
+         (gfx11 ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL : 0);
 }
 
 static int amdf_gpu_kfd_hdp_map_ioctl(amdf_gpu_umd_device_t* device,
@@ -120,7 +130,9 @@ amdf_status_t amdf_gpu_kfd_hdp_destroy(amdf_gpu_kfd_hdp_t* hdp) {
 
 amdf_status_t amdf_gpu_kfd_hdp_create(amdf_gpu_umd_device_t* device,
                                       amdf_gpu_kfd_hdp_t** out_hdp) {
-  if (!amdf_gpu_kfd_hdp_supports_host_publication(&device->topology) ||
+  const amdf_queue_host_publication_flags_t publication =
+      amdf_gpu_kfd_hdp_host_publication(&device->topology);
+  if (publication == AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN ||
       (device->topology.memory_features &
        AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY) == 0 ||
       device->page_size > 4096) {
@@ -136,7 +148,7 @@ amdf_status_t amdf_gpu_kfd_hdp_create(amdf_gpu_umd_device_t* device,
     return status;
   }
   hdp->device = device;
-  hdp->posting = device->topology.properties.gfx_ip.major == 11
+  hdp->posting = (publication & AMDF_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL)
                      ? AMDF_GPU_KFD_HDP_POSTING_TIMESTAMP
                      : AMDF_GPU_KFD_HDP_POSTING_REMAP;
   void* mapping = mmap(NULL, device->page_size, PROT_NONE,
@@ -162,7 +174,6 @@ amdf_status_t amdf_gpu_kfd_hdp_create(amdf_gpu_umd_device_t* device,
                AMDF_GPU_KFD_ALLOC_MEM_FLAGS_WRITABLE |
                KFD_IOC_ALLOC_MEM_FLAGS_COHERENT,
   };
-  bool unavailable = false;
   if (amdf_status_is_ok(status)) {
     amdf_gpu_kfd_device_lock_memory(device,
                                     AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
@@ -171,8 +182,7 @@ amdf_status_t amdf_gpu_kfd_hdp_create(amdf_gpu_umd_device_t* device,
     const int error = errno;
     amdf_gpu_kfd_device_unlock_memory(device);
     if (result != 0) {
-      unavailable = error == ENOMEM;
-      status = unavailable ? AMDF_STATUS_OK : amdf_linux_error(error);
+      status = amdf_linux_error(error);
     } else {
       hdp->handle = allocate.handle;
       if (hdp->handle == 0) {
@@ -180,7 +190,7 @@ amdf_status_t amdf_gpu_kfd_hdp_create(amdf_gpu_umd_device_t* device,
       }
     }
   }
-  if (amdf_status_is_ok(status) && !unavailable) {
+  if (amdf_status_is_ok(status)) {
     mapping =
         mmap(hdp->mapping, device->page_size, PROT_READ | PROT_WRITE,
              MAP_SHARED | MAP_FIXED, device->descriptor, allocate.mmap_offset);
@@ -190,7 +200,7 @@ amdf_status_t amdf_gpu_kfd_hdp_create(amdf_gpu_umd_device_t* device,
       status = amdf_linux_error(EPROTO);
     }
   }
-  if (amdf_status_is_ok(status) && !unavailable) {
+  if (amdf_status_is_ok(status)) {
     uint32_t gpu_id = device->topology.gpu_id;
     struct kfd_ioctl_map_memory_to_gpu_args map = {
         .handle = hdp->handle,
@@ -207,16 +217,13 @@ amdf_status_t amdf_gpu_kfd_hdp_create(amdf_gpu_umd_device_t* device,
       status = amdf_linux_error(EPROTO);
     }
   }
-  if (amdf_status_is_ok(status) && !unavailable) {
+  if (amdf_status_is_ok(status)) {
     hdp->memory_flush_control = hdp->mapping;
     *out_hdp = hdp;
   } else {
     const amdf_status_t release_status = amdf_gpu_kfd_hdp_destroy(hdp);
     if (!amdf_status_is_ok(release_status)) {
       status = release_status;
-    }
-    if (amdf_status_is_ok(status)) {
-      *out_hdp = NULL;
     }
   }
   return status;

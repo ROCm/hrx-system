@@ -14,6 +14,17 @@
 #include "iree/base/threading/numa.h"
 
 namespace iree::hal::cts {
+
+std::string FormatSkipStatus(const iree::Status& status) {
+  std::string reason = iree::StatusCodeToString(status.code());
+  iree_string_view_t message = iree_status_message(status.get());
+  if (!iree_string_view_is_empty(message)) {
+    reason.append(": ");
+    reason.append(message.data, message.size);
+  }
+  return reason;
+}
+
 namespace {
 
 // Every CTS device gets a production-shaped frontier tracker. The capacity is

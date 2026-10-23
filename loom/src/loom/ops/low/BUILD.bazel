@@ -45,8 +45,8 @@ loom_cc_library(
     hdrs = ["ops.h"],
     textual_hdrs = ["ops.inc"],
     deps = [
-        "//loom/src/loom/ir:builders",
-        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ir:headers",
+        "//loom/src/loom/ops:headers",
         "//loom/src/loom/target:types",
     ],
 )

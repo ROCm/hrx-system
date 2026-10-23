@@ -19,7 +19,7 @@ iree_cc_library(
     amdf::headers
     iree::third_party::google_test
     libamdf::cts::gpu::aql::executable
-    libamdf::cts::gpu::aql::publication
+    libamdf::cts::gpu::aql::queue::publication
     libamdf::cts::gpu::kernels::transform
     libamdf::cts::gpu::kernels::transform_kernels
     libamdf::cts::gpu::peer::device_fixture

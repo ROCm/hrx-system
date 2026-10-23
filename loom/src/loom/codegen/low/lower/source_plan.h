@@ -29,6 +29,8 @@ typedef struct loom_low_representation_plan_t loom_low_representation_plan_t;
 typedef struct loom_low_lower_realizations_t loom_low_lower_realizations_t;
 typedef struct loom_low_lower_source_invoke_plan_t
     loom_low_lower_source_invoke_plan_t;
+typedef struct loom_low_lower_projected_call_plan_t
+    loom_low_lower_projected_call_plan_t;
 
 enum loom_low_lower_value_flag_bits_e {
   // The source value must be materialized as a target-Low SSA value.
@@ -70,8 +72,10 @@ typedef enum loom_low_lower_selected_plan_kind_e {
   LOOM_LOW_LOWER_SELECTED_PLAN_FUNCTION_STORAGE = 3,
   // Shared normalization of a semantic invocation into a native helper call.
   LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE = 4,
+  // Shared physical projection of a direct source-ABI call edge.
+  LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL = 5,
   // Shared structural lowering retained as an exact-cover alternative.
-  LOOM_LOW_LOWER_SELECTED_PLAN_STRUCTURAL = 5,
+  LOOM_LOW_LOWER_SELECTED_PLAN_STRUCTURAL = 6,
 } loom_low_lower_selected_plan_kind_t;
 
 // Canonical source-memory data retained with a selected table rule.
@@ -118,6 +122,8 @@ typedef struct loom_low_lower_selected_plan_t {
   union {
     // Helper signature and proved preconditions owned by the function plan.
     const loom_low_lower_source_invoke_plan_t* invoke;
+    // Physical callee projection and proved logical preconditions.
+    const loom_low_lower_projected_call_plan_t* projected_call;
     // Shared bounded-allocation plan owned by the function lowering arena.
     const loom_low_lower_function_storage_plan_t* function_storage;
     // Target-owned plan selected during planning.

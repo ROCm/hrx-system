@@ -1,0 +1,187 @@
+// RUN: emit source-low target=x86:avx2 output=low
+
+struct Pair {
+  unsigned first;
+  unsigned second;
+};
+
+extern "C" Pair pair_identity(Pair value) { return value; }
+
+// ----
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (i64) -> (i64), sysv = {argument_offsets = [-1], argument_registers = [7], result_registers = [0], stack_alignment = 0, stack_bytes = 0}}) @pair_identity(%4: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %value_first = mov.trunc.gpr32.gpr64 %4
+  %7 = copy %4 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %8 = shr.imm.gpr64 %7 {shift = 32}
+  %value_second = mov.trunc.gpr32.gpr64 %8
+  %10 = movzx.gpr64.gpr32 %value_first
+  %11 = movzx.gpr64.gpr32 %value_second
+  %12 = shl.imm.gpr64 %11 {shift = 32}
+  %13 = or.gpr64 %10, %12
+  return %13
+}
+
+// ====
+
+struct Mixed {
+  float value;
+  unsigned tag;
+};
+
+extern "C" Mixed mixed_identity(Mixed value) { return value; }
+
+// ----
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (i64) -> (i64), sysv = {argument_offsets = [-1], argument_registers = [7], result_registers = [0], stack_alignment = 0, stack_bytes = 0}}) @mixed_identity(%4: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %6 = mov.trunc.gpr32.gpr64 %4
+  %value_value = vmovd.xmm.gpr32 %6
+  %8 = copy %4 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %9 = shr.imm.gpr64 %8 {shift = 32}
+  %value_tag = mov.trunc.gpr32.gpr64 %9
+  %11 = vmovd.gpr32.xmm %value_value
+  %12 = movzx.gpr64.gpr32 %11
+  %13 = movzx.gpr64.gpr32 %value_tag
+  %14 = shl.imm.gpr64 %13 {shift = 32}
+  %15 = or.gpr64 %12, %14
+  return %15
+}
+
+// ====
+
+struct Split {
+  double value;
+  unsigned long long tag;
+};
+
+extern "C" Split split_identity(Split value) { return value; }
+
+// ----
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (f64, i64) -> (f64, i64), sysv = {argument_offsets = [-1, -1], argument_registers = [0, 7], result_registers = [0, 0], stack_alignment = 0, stack_bytes = 0}}) @split_identity(%value_value: reg<x86.xmm>, %value_tag: reg<x86.gpr64>) -> (reg<x86.xmm>, reg<x86.gpr64>) asm {
+  return %value_value, %value_tag
+}
+
+// ====
+
+struct Wide {
+  unsigned long long first;
+  unsigned long long second;
+};
+
+extern "C" unsigned long long register_rollback(unsigned long long first, unsigned long long second, unsigned long long third, unsigned long long fourth, unsigned long long fifth, Wide wide, unsigned long long tail) {
+  return wide.first + tail;
+}
+
+// ----
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (i64, i64, i64, i64, i64, i64, i64, i64) -> (i64), sysv = {argument_offsets = [-1, -1, -1, -1, -1, 0, 8, -1], argument_registers = [7, 6, 2, 1, 8, -1, -1, 9], result_registers = [0], stack_alignment = 16, stack_bytes = 16}}) @register_rollback(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %third: reg<x86.gpr64>, %fourth: reg<x86.gpr64>, %fifth: reg<x86.gpr64>, %wide_first: reg<x86.gpr64>, %wide_second: reg<x86.gpr64>, %tail: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %19 = copy %wide_first : reg<x86.gpr64> -> reg<x86.gpr64>
+  %20 = add.gpr64 %19, %tail
+  return %20
+}
+
+// ====
+
+struct Large {
+  unsigned long long first;
+  unsigned long long second;
+  unsigned long long third;
+};
+
+extern "C" Large large_identity(Large value) { return value; }
+
+// ----
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, i64, i64, i64) -> (buffer), sysv = {argument_offsets = [-1, 0, 8, 16], argument_registers = [7, -1, -1, -1], result_registers = [0], stack_alignment = 16, stack_bytes = 32}}) @large_identity(%6: reg<x86.gpr64>, %value_first: reg<x86.gpr64>, %value_second: reg<x86.gpr64>, %value_third: reg<x86.gpr64>) -> (%6 as reg<x86.gpr64>) asm {
+  mov.store.gpr64 %value_first, %6 {disp32 = 0}
+  mov.store.gpr64 %value_second, %6 {disp32 = 8}
+  mov.store.gpr64 %value_third, %6 {disp32 = 16}
+  return %6
+}
+
+// ====
+
+extern "C" const unsigned* advance_pointer(const unsigned* base) {
+  return base + 3;
+}
+
+// ----
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (i64) -> (i64), sysv = {argument_offsets = [-1], argument_registers = [7], result_registers = [0], stack_alignment = 0, stack_bytes = 0}}) @advance_pointer(%base: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %base_byte_offset = mov.imm64 0
+  %16 = copy %base_byte_offset : reg<x86.gpr64> -> reg<x86.gpr64>
+  %17 = add.imm.gpr64 %16 {imm32 = 12}
+  %18 = copy %base : reg<x86.gpr64> -> reg<x86.gpr64>
+  %19 = add.gpr64 %18, %17
+  return %19
+}
+
+// ====
+
+struct Pair {
+  unsigned first;
+  unsigned second;
+};
+
+extern "C" Pair external_pair(Pair value);
+
+Pair call_external_pair(Pair value) { return external_pair(value); }
+
+// ----
+low.func.def public target<x86.avx2.core> abi(object_function) @call_external_pair(%value_first: reg<x86.gpr32>, %value_second: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
+  %16 = movzx.gpr64.gpr32 %value_first
+  %17 = movzx.gpr64.gpr32 %value_second
+  %18 = shl.imm.gpr64 %17 {shift = 32}
+  %19 = or.gpr64 %16, %18
+  %20 = low.func.call @external_pair(%19) : (reg<x86.gpr64>) -> (reg<x86.gpr64>)
+  %21 = mov.trunc.gpr32.gpr64 %20
+  %22 = copy %20 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %23 = shr.imm.gpr64 %22 {shift = 32}
+  %24 = mov.trunc.gpr32.gpr64 %23
+  return %21, %24
+}
+
+low.func.decl target<x86.avx2.core> abi_layout({signature = (i64) -> (i64), sysv = {argument_offsets = [-1], argument_registers = [7], result_registers = [0], stack_alignment = 0, stack_bytes = 0}}) @external_pair(%10: reg<x86.gpr64>) -> (reg<x86.gpr64>)
+
+// ====
+
+struct Narrow {
+  unsigned char byte;
+  unsigned short half;
+  bool flag;
+};
+
+extern "C" Narrow narrow_identity(Narrow value) { return value; }
+
+// ----
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (i64) -> (i64), sysv = {argument_offsets = [-1], argument_registers = [7], result_registers = [0], stack_alignment = 0, stack_bytes = 0}}) @narrow_identity(%6: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %8 = mov.trunc.gpr32.gpr64 %6
+  %value_byte = and.imm.gpr32 %8 {imm32 = 255}
+  %10 = copy %6 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %11 = shr.imm.gpr64 %10 {shift = 16}
+  %12 = mov.trunc.gpr32.gpr64 %11
+  %value_half = and.imm.gpr32 %12 {imm32 = 65535}
+  %14 = copy %6 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %15 = shr.imm.gpr64 %14 {shift = 32}
+  %16 = mov.trunc.gpr32.gpr64 %15
+  %value_flag = and.imm.gpr32 %16 {imm32 = 1}
+  %18 = copy %value_byte : reg<x86.gpr32> -> reg<x86.gpr32>
+  %19 = and.imm.gpr32 %18 {imm32 = 255}
+  %20 = movzx.gpr64.gpr32 %19
+  %21 = copy %value_half : reg<x86.gpr32> -> reg<x86.gpr32>
+  %22 = and.imm.gpr32 %21 {imm32 = 65535}
+  %23 = movzx.gpr64.gpr32 %22
+  %24 = shl.imm.gpr64 %23 {shift = 16}
+  %25 = or.gpr64 %20, %24
+  %26 = copy %value_flag : reg<x86.gpr32> -> reg<x86.gpr32>
+  %27 = and.imm.gpr32 %26 {imm32 = 1}
+  %28 = movzx.gpr64.gpr32 %27
+  %29 = shl.imm.gpr64 %28 {shift = 32}
+  %30 = or.gpr64 %25, %29
+  return %30
+}
+
+// ====
+
+using Words4 = unsigned __attribute__((vector_size(16)));
+
+extern "C" Words4 vector_identity(Words4 value) { return value; }
+
+// ----
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<16xi8>) -> (vector<16xi8>), sysv = {argument_offsets = [-1], argument_registers = [0], result_registers = [0], stack_alignment = 0, stack_bytes = 0}}) @vector_identity(%value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  return %value
+}

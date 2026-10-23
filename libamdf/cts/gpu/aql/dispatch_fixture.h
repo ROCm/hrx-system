@@ -11,7 +11,7 @@
 #include <deque>
 
 #include "libamdf/cts/gpu/aql/executable.h"
-#include "libamdf/cts/gpu/aql/queue_fixture.h"
+#include "libamdf/cts/gpu/aql/queue/queue_fixture.h"
 #include "libamdf/cts/gpu/kernels/kernel.h"
 
 // Target-selected executable publication completed before workload dispatch.

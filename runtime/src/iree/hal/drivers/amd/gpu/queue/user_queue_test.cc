@@ -127,13 +127,21 @@ struct NativeRing {
       out_info->doorbell_address = reinterpret_cast<uintptr_t>(&self->doorbell);
       out_info->index_bits = 64;
       out_info->doorbell_bits = 64;
-      out_info->host_publish_fence =
+      out_info->host_publish_executor =
           !view->device && self->create_info->placement ==
                                AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL
-              ? AMDF_HOST_CACHE_FENCE_X86_SFENCE
-              : AMDF_HOST_CACHE_FENCE_NONE;
+              ? AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API
+              : AMDF_CACHE_TRANSITION_EXECUTOR_NONE;
+      out_info->host_publish_fence = AMDF_HOST_CACHE_FENCE_NONE;
     }
     return status;
+  }
+
+  static amdf_status_t AMDF_CALL Flush(amdf_user_queue_mapping_t* mapping) {
+    auto* view = reinterpret_cast<Mapping*>(mapping);
+    EXPECT_FALSE(view->device);
+    EXPECT_TRUE(view->owner->mapping_live);
+    return view->owner->Call("flush");
   }
 
   static amdf_status_t AMDF_CALL Wait(amdf_user_queue_t* queue,
@@ -181,6 +189,7 @@ class UserQueueTest : public ::testing::Test {
     api_.user_queue_map = NativeRing::Map;
     api_.user_queue_mapping_query_info = NativeRing::Query;
     api_.user_queue_wait_consumed = NativeRing::Wait;
+    api_.user_queue_mapping_flush = NativeRing::Flush;
     api_.user_queue_mapping_destroy = NativeRing::Unmap;
     api_.user_queue_destroy = NativeRing::Destroy;
     gpu_.user_queue_create = NativeRing::Create;
@@ -255,6 +264,26 @@ TEST_F(UserQueueTest, CapturesMappedStorageWithoutPublication) {
   EXPECT_EQ(native_.calls.size(), 6u);
 }
 
+TEST_F(UserQueueTest, NativeReleaseFailureRetainsMappedOwnership) {
+  create_info_.placement = AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL;
+  IREE_ASSERT_OK(Initialize());
+  EXPECT_EQ(iree_hal_amd_gpu_user_queue_flush(&storage_), AMDF_STATUS_OK);
+  native_.fail_operation = "flush";
+  native_.failure = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
+  EXPECT_EQ(iree_hal_amd_gpu_user_queue_flush(&storage_), native_.failure);
+  EXPECT_TRUE(native_.queue_live);
+  EXPECT_TRUE(native_.mapping_live);
+  EXPECT_EQ(native_.write_index, 0u);
+  EXPECT_EQ(native_.doorbell, 0u);
+  native_.fail_operation = "wait";
+  EXPECT_EQ(Deinitialize(8), native_.failure);
+  EXPECT_TRUE(native_.queue_live);
+  EXPECT_TRUE(native_.mapping_live);
+  // The native dependency independently supplies proof for test teardown.
+  native_.fail_operation.clear();
+  EXPECT_EQ(Deinitialize(8), AMDF_STATUS_OK);
+}
+
 TEST_F(UserQueueTest, ConstructionFailurePreservesPartialOwnerForCleanup) {
   for (const char* operation : {"create", "info", "map", "query"}) {
     SCOPED_TRACE(operation);
@@ -278,7 +307,10 @@ TEST_F(UserQueueTest, DeviceViewSharesQueueAndJoinsBeforeHostView) {
   IREE_ASSERT_OK(Initialize(&device));
   EXPECT_NE(storage_.device_mapping, nullptr);
   EXPECT_EQ(storage_.placement, IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL);
-  EXPECT_EQ(storage_.host_publish_fence, IREE_HAL_HOST_CACHE_FENCE_X86_SFENCE);
+  EXPECT_EQ(storage_.host_publish_executor,
+            AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API);
+  EXPECT_EQ(storage_.host_publish_fence, IREE_HAL_HOST_CACHE_FENCE_NONE);
+  EXPECT_EQ(device.host_publish_executor, AMDF_CACHE_TRANSITION_EXECUTOR_NONE);
   EXPECT_EQ(device.host_publish_fence, AMDF_HOST_CACHE_FENCE_NONE);
   EXPECT_EQ(device.ring_address, UINT64_C(0x12340000));
   EXPECT_NE(device.ring_address, mapping_info_.ring_address);

@@ -18,6 +18,8 @@ import argparse
 import ctypes
 import datetime as dt
 import json
+import os
+from collections.abc import Iterator
 from ctypes import wintypes
 from pathlib import Path
 
@@ -25,7 +27,10 @@ GENERIC_READ = 0x80000000
 DELETE = 0x00010000
 FILE_SHARE_ALL = 0x00000007
 OPEN_EXISTING = 3
+FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
 MAX_RESOURCE_USERS = 256
+MAX_TREE_PATHS = 1024
 
 
 class UniqueProcess(ctypes.Structure):
@@ -77,10 +82,16 @@ class FileAccess:
         self.kernel.CloseHandle.argtypes = [wintypes.HANDLE]
         self.kernel.CloseHandle.restype = wintypes.BOOL
 
-    def probe(self, path: str, access: int) -> dict:
+    def probe(self, path: str, access: int, *, directory: bool = False) -> dict:
         result = {"observed_at": dt.datetime.now(dt.UTC).isoformat()}
         handle = self.kernel.CreateFileW(
-            path, access, FILE_SHARE_ALL, None, OPEN_EXISTING, 0, None
+            path,
+            access,
+            FILE_SHARE_ALL,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS if directory else 0,
+            None,
         )
         if handle == ctypes.c_void_p(-1).value:
             result.update(win32_result(ctypes.get_last_error()))
@@ -167,10 +178,60 @@ def resource_users(paths: list[str]) -> dict:
         result["end_session"] = win32_result(manager.RmEndSession(session))
 
 
+def tree_paths(root: str) -> Iterator[str]:
+    """Observes a bounded remainder of a failed removal without following links."""
+    yield root
+    count = 1
+
+    def record_error(error: OSError) -> None:
+        print(
+            json.dumps(
+                {
+                    "tree_error": {
+                        "path": error.filename,
+                        "error": str(error),
+                        "winerror": getattr(error, "winerror", None),
+                    }
+                }
+            ),
+            flush=True,
+        )
+
+    try:
+        if Path(root).lstat().st_file_attributes & FILE_ATTRIBUTE_REPARSE_POINT:
+            return
+    except OSError as error:
+        record_error(error)
+        return
+    for parent, directories, files in os.walk(root, onerror=record_error):
+        for name in directories + files:
+            if count == MAX_TREE_PATHS:
+                print(
+                    json.dumps({"tree_limit": {"root": root, "paths": count}}),
+                    flush=True,
+                )
+                return
+            yield str(Path(parent) / name)
+            count += 1
+        # Windows directory junctions are reparse points, but are not always
+        # classified as symbolic links. The failed tree does not own their
+        # targets, so neither kind may be traversed by the diagnostic.
+        descend = []
+        for name in directories:
+            try:
+                attributes = (Path(parent) / name).lstat().st_file_attributes
+                if not attributes & FILE_ATTRIBUTE_REPARSE_POINT:
+                    descend.append(name)
+            except OSError as error:
+                record_error(error)
+        directories[:] = descend
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--read", action="append", default=[])
     parser.add_argument("--delete", action="append", default=[])
+    parser.add_argument("--delete-tree", action="append", default=[])
     args = parser.parse_args()
     delete_paths = {str(Path(path).absolute()) for path in args.delete}
     paths = dict.fromkeys(
@@ -189,6 +250,22 @@ def main() -> None:
             resources.append(path)
     if resources:
         print(json.dumps({"resource_users": resource_users(resources)}), flush=True)
+
+    for root in dict.fromkeys(str(Path(path).absolute()) for path in args.delete_tree):
+        resources = []
+        for path in tree_paths(root):
+            result = {
+                "path": path,
+                "delete": access.probe(path, DELETE, directory=Path(path).is_dir()),
+            }
+            print(json.dumps({"file_access": result}), flush=True)
+            # Restart Manager accepts files, not directories. Query only files
+            # whose removal is currently denied; successful ancestor probes
+            # do not prove that their children can be removed.
+            if result["delete"]["winerror"] not in (0, 2, 3) and Path(path).is_file():
+                resources.append(path)
+        if resources:
+            print(json.dumps({"resource_users": resource_users(resources)}), flush=True)
 
 
 if __name__ == "__main__":

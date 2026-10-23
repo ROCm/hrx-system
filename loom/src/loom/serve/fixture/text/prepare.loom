@@ -8,9 +8,11 @@ func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
 
-func.decl import("prepare") @parameter_scope(%stage: i32, %binding: i32, %source: i32, %scope: buffer, %policy: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
+
+func.decl import("prepare") @source_scope(%scope: buffer) -> (i32)
 
 global.rodata.def @model_scope = bytes("6d6f64656c")
 
@@ -88,16 +90,18 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %empty = global.load @empty : buffer
   %policy = global.load @policy : buffer
   %card = config.get @fixture.card : i1
-  scf.if %card {
+  %checkpoint = scf.if %card -> (i32) {
     %scope = global.load @model_scope : buffer
-    func.call @parameter_scope(%stage, %c0_i32, %c0_source, %scope, %policy) : (i32, i32, i32, buffer, buffer)
-    func.call @parameter_scope(%media_stage, %c0_i32, %c0_source, %scope, %policy) : (i32, i32, i32, buffer, buffer)
+    %scoped = func.call @source_scope(%scope) : (buffer) -> (i32)
+    scf.yield %scoped : i32
   } else {
-    func.call @parameter(%stage, %c0_i32, %c0_source, %empty, %weights, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-    func.call @parameter(%media_stage, %c0_i32, %c0_source, %empty, %weights, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+    %direct = func.call @source(%empty, %weights) : (buffer, buffer) -> (i32)
+    scf.yield %direct : i32
   }
-  %state_bytes = index.constant 8 : offset
-  %state = buffer.alloca<private> align(4) %state_bytes : buffer
+  func.call @parameter(%stage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%media_stage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
+  %state_bytes = index.constant 88 : offset
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
   %state_view = buffer.view %state[%origin] : buffer -> view<2xi32>
   view.store %stage, %state_view[0] : i32, view<2xi32>
   view.store %media_stage, %state_view[1] : i32, view<2xi32>

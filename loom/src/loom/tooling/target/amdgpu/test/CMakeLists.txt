@@ -1034,6 +1034,7 @@ loom_execution_test(
     "--config=asan_launch_bound.tile_capacity=1"
   LABELS
     "notsan"
+    "requires-amd-gpu-feedback"
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -1071,6 +1072,7 @@ loom_execution_test(
   RUNNER_ARGS
     "--device=amdgpu"
   LABELS
+    "requires-amd-gpu-feedback"
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
     "iree-build-requirement=loom.execute.iree_hal"
@@ -1095,6 +1097,7 @@ loom_execution_test(
   RUNNER_ARGS
     "--device=amdgpu2"
   LABELS
+    "requires-amd-gpu-feedback"
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -1430,6 +1433,7 @@ loom_execution_test(
     "--sanitizer=tsan"
     "--sanitizer-reporting=report-only"
   LABELS
+    "requires-amd-gpu-feedback"
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -1497,6 +1501,7 @@ loom_execution_test(
     "--sanitizer=tsan"
     "--sanitizer-reporting=report-only"
   LABELS
+    "requires-amd-gpu-feedback"
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -1564,6 +1569,7 @@ loom_execution_test(
     "--sanitizer=tsan"
     "--sanitizer-reporting=report-only"
   LABELS
+    "requires-amd-gpu-feedback"
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -1631,6 +1637,7 @@ loom_execution_test(
     "--sanitizer=tsan"
     "--sanitizer-reporting=report-only"
   LABELS
+    "requires-amd-gpu-feedback"
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -1732,6 +1739,7 @@ loom_execution_test(
     "--sanitizer=tsan"
     "--sanitizer-reporting=report-only"
   LABELS
+    "requires-amd-gpu-feedback"
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
     "iree-build-requirement=loom.target.arch.amdgpu"

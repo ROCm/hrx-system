@@ -40,9 +40,12 @@ class WeightInputsTest : public ::testing::Test {
          IREE_SV("safetensors")}};
     const loom_model_file_list_t checkpoints[] = {{1, &paths[0]},
                                                   {1, &paths[1]}};
+    IREE_ASSERT_OK(loom_serve_parameter_sources_create(
+        nullptr, &sources_, 2, checkpoints, allocator_, &catalog_));
+    const uint32_t ordinals[] = {0, 1};
     const loom_serve_preparation_parameter_t parameter = {
-        0, 2, checkpoints, IREE_SV("unused.loom")};
-    IREE_ASSERT_OK(loom_serve_weight_inputs_allocate(&parameter, &sources_, 4,
+        0, 2, checkpoints, IREE_SV("unused.loom"), ordinals};
+    IREE_ASSERT_OK(loom_serve_weight_inputs_allocate(&parameter, catalog_,
                                                      allocator_, &inputs_));
     IREE_ASSERT_OK(iree_vm_environment_allocate(allocator_, &environment_));
     IREE_ASSERT_OK(iree_vm_ref_types_resolve(
@@ -68,6 +71,7 @@ class WeightInputsTest : public ::testing::Test {
     iree_vm_environment_free(environment_);
     loomc_target_environment_release(target_environment_);
     loom_serve_weight_inputs_free(inputs_);
+    loom_serve_parameter_sources_release(catalog_);
     if (first_.Exists()) {
       EXPECT_TRUE(first_.Remove());
     }
@@ -146,6 +150,8 @@ class WeightInputsTest : public ::testing::Test {
   iree::testing::TempFilePath second_{"weight_input_second", ".data"};
   // Owned indexes and captured ranges, outliving every borrowed VM buffer.
   loom_serve_weight_inputs_t* inputs_ = nullptr;
+  // Shared immutable source catalog, independent of the selected input recipe.
+  loom_serve_parameter_sources_t* catalog_ = nullptr;
   // Reference environment enclosing both native and source modules.
   iree_vm_environment_t* environment_ = nullptr;
   // Resolved canonical reference types used for arguments and results.
@@ -274,6 +280,27 @@ TEST_F(WeightInputsTest, AlignedExtentCannotOverflowTheAddressableRecipe) {
 
 TEST_F(WeightInputsTest, CapabilityIsUnavailableOutsidePolicyCapture) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION, Invoke(0, 0, 4, 4));
+}
+
+TEST_F(WeightInputsTest,
+       RecipesRetainSelectedSourcesAndMapPolicyLocalOrdinals) {
+  const uint32_t reversed[] = {1, 0};
+  const loom_serve_preparation_parameter_t parameter = {
+      0, 2, nullptr, IREE_SV("unused.loom"), reversed};
+  loom_serve_weight_inputs_t* other = nullptr;
+  IREE_ASSERT_OK(loom_serve_weight_inputs_allocate(&parameter, catalog_,
+                                                   allocator_, &other));
+  EXPECT_EQ(loom_serve_weight_inputs_provider(other, 0),
+            loom_serve_weight_inputs_provider(inputs_, 1));
+  EXPECT_EQ(loom_serve_weight_inputs_provider(other, 1),
+            loom_serve_weight_inputs_provider(inputs_, 0));
+  loom_serve_parameter_sources_release(catalog_);
+  catalog_ = nullptr;
+  loom_serve_weight_inputs_free(other);
+  loom_serve_weight_inputs_module_begin(module_);
+  IREE_ASSERT_OK(Invoke(1, 0, 16, 16));
+  EXPECT_NE(metadata_.find("\"dtype\":\"BF16\""), std::string::npos);
+  EXPECT_EQ(loom_serve_weight_inputs_module_take(module_).count, 1u);
 }
 
 }  // namespace

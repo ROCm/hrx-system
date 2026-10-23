@@ -679,6 +679,8 @@ def test_plan(
     requested_build_dir = build_dir(configured_build_dir)
     command_env = tool_env.path_env() if env is None else env
     if ctest_dev.is_inspection_only(backend_args):
+        inspection_env = dict(command_env)
+        inspection_env[ctest_dev.SKIP_GLOBAL_TMPDIR_CLEANUP_ENV] = "1"
         return CommandPlan(
             [
                 CommandStep(
@@ -688,7 +690,7 @@ def test_plan(
                         backend_args,
                     ),
                     cwd=REPO_ROOT,
-                    env=command_env,
+                    env=inspection_env,
                     label="inspect cmake tests",
                 )
             ]

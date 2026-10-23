@@ -10,17 +10,26 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
+#include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/vector/ops.h"
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/fact_propagation.h"
 #include "loom/rewrite/rewriter.h"
 
 namespace loom {
 namespace {
+
+static bool CanMaterialize(loom_value_facts_t facts, loom_type_t type) {
+  int64_t value = 0;
+  return loom_type_is_scalar(type) &&
+         loom_value_facts_as_exact_i64(facts, &value);
+}
 
 static iree_status_t Materialize(loom_builder_t* builder,
                                  loom_value_facts_t facts, loom_type_t type,
@@ -35,6 +44,70 @@ static iree_status_t Materialize(loom_builder_t* builder,
                                                 type, location, &constant));
   *out_value = loom_test_constant_result(constant);
   return iree_ok_status();
+}
+
+enum class MaterializerProbeMode { kIndexOnly, kVector };
+
+struct MaterializerProbeState {
+  // Capability policy exercised by the active test.
+  MaterializerProbeMode mode;
+  // Number of fact/type pairs inspected before mutation.
+  uint32_t support_query_count;
+  // Number of constants constructed by the selected materializer.
+  uint32_t materialization_count;
+};
+
+static MaterializerProbeState materializer_probe;
+
+static bool ProbeMaterializerSupport(loom_value_facts_t facts,
+                                     loom_type_t type) {
+  ++materializer_probe.support_query_count;
+  if (!loom_value_facts_is_exact(facts)) {
+    return false;
+  }
+  switch (materializer_probe.mode) {
+    case MaterializerProbeMode::kIndexOnly:
+      return loom_type_is_scalar(type) &&
+             loom_type_element_type(type) == LOOM_SCALAR_TYPE_INDEX;
+    case MaterializerProbeMode::kVector:
+      return loom_type_is_vector(type);
+  }
+  return false;
+}
+
+static iree_status_t ProbeMaterialize(loom_builder_t* builder,
+                                      loom_value_facts_t facts,
+                                      loom_type_t type,
+                                      loom_location_id_t location,
+                                      loom_value_id_t* out_value) {
+  ++materializer_probe.materialization_count;
+  loom_op_t* constant = nullptr;
+  if (loom_type_is_scalar(type) &&
+      loom_type_element_type(type) == LOOM_SCALAR_TYPE_INDEX) {
+    IREE_RETURN_IF_ERROR(loom_index_constant_build(
+        builder, loom_attr_i64(facts.range_lo), type, location, &constant));
+    *out_value = loom_index_constant_result(constant);
+    return iree_ok_status();
+  }
+  if (loom_type_is_vector(type)) {
+    const loom_scalar_type_t element_type = loom_type_element_type(type);
+    loom_attribute_t value = loom_attr_i64(facts.range_lo);
+    if (loom_scalar_type_is_float(element_type)) {
+      double exact_value = 0.0;
+      if (!loom_value_facts_as_exact_float(element_type, facts, &exact_value)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "expected exact floating-point facts");
+      }
+      value = loom_attr_f64(exact_value);
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_test_constant_build(builder, value, type, location, &constant));
+    *out_value = loom_test_constant_result(constant);
+    return iree_ok_status();
+  }
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "probe materializer does not support type kind %u",
+                          (unsigned)loom_type_kind(type));
 }
 
 enum class EquationOwner {
@@ -67,8 +140,10 @@ class FactPublicationTest : public ::testing::Test {
     };
     register_dialect(LOOM_DIALECT_TEST, loom_test_dialect_vtables(&count));
     register_dialect(LOOM_DIALECT_CFG, loom_cfg_dialect_vtables(&count));
+    register_dialect(LOOM_DIALECT_INDEX, loom_index_dialect_vtables(&count));
     register_dialect(LOOM_DIALECT_SCALAR, loom_scalar_dialect_vtables(&count));
     register_dialect(LOOM_DIALECT_SCF, loom_scf_dialect_vtables(&count));
+    register_dialect(LOOM_DIALECT_VECTOR, loom_vector_dialect_vtables(&count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("inverse_mutation"),
                                         &pool_, nullptr,
@@ -107,6 +182,139 @@ class FactPublicationTest : public ::testing::Test {
 class FactInputsTest : public FactPublicationTest,
                        public ::testing::WithParamInterface<
                            std::tuple<EquationOwner, TypeMutation>> {};
+
+TEST_F(FactPublicationTest, ExactFoldPreflightsCompleteMaterializerFamily) {
+  loom_builder_t builder;
+  loom_builder_initialize(module_, &module_->arena, loom_module_block(module_),
+                          &builder);
+  loom_string_id_t name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder, IREE_SV("preflight"), &name));
+  uint16_t symbol = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, name, &symbol));
+
+  const loom_type_t types[] = {
+      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+      loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+  };
+  loom_op_t* function_op = nullptr;
+  IREE_ASSERT_OK(loom_test_func_build(
+      &builder, 0, 0, 0, {.module_id = 0, .symbol_id = symbol}, nullptr, 0,
+      nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function_op));
+  const loom_func_like_t function = loom_func_like_cast(module_, function_op);
+  loom_builder_enter_region(&builder, function_op,
+                            loom_func_like_body(function));
+
+  loom_value_id_t sources[IREE_ARRAYSIZE(types)] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(types); ++i) {
+    loom_op_t* constant = nullptr;
+    IREE_ASSERT_OK(
+        loom_index_constant_build(&builder, loom_attr_i64((int64_t)i + 7),
+                                  types[i], LOOM_LOCATION_UNKNOWN, &constant));
+    sources[i] = loom_index_constant_result(constant);
+  }
+  loom_op_t* assume = nullptr;
+  IREE_ASSERT_OK(loom_index_assume_build(
+      &builder, sources, IREE_ARRAYSIZE(sources), nullptr, 0, types,
+      IREE_ARRAYSIZE(types), LOOM_LOCATION_UNKNOWN, &assume));
+  const loom_value_slice_t results = loom_index_assume_results(assume);
+  loom_op_t* use = nullptr;
+  IREE_ASSERT_OK(loom_test_use_build(&builder, results.values, results.count,
+                                     LOOM_LOCATION_UNKNOWN, &use));
+  loom_op_t* terminator = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &terminator));
+
+  loom_value_fact_table_t* facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &owner_, module_, loom_pass_value_fact_scope_function(function), &facts));
+  loom_rewriter_attach_value_facts(&rewriter_, facts);
+  materializer_probe = {
+      .mode = MaterializerProbeMode::kIndexOnly,
+      .support_query_count = 0,
+      .materialization_count = 0,
+  };
+  rewriter_.constant_materializer = {
+      .supports = ProbeMaterializerSupport,
+      .materialize = ProbeMaterialize,
+  };
+
+  bool folded = false;
+  IREE_ASSERT_OK(loom_rewriter_try_fold(&rewriter_, assume, &folded));
+  EXPECT_FALSE(folded);
+  EXPECT_EQ(materializer_probe.support_query_count, 2u);
+  EXPECT_EQ(materializer_probe.materialization_count, 0u);
+  EXPECT_FALSE(assume->flags & LOOM_OP_FLAG_DEAD);
+  EXPECT_EQ(loom_op_const_operands(use)[0], results.values[0]);
+  EXPECT_EQ(loom_op_const_operands(use)[1], results.values[1]);
+}
+
+TEST_F(FactPublicationTest, ExactFoldUsesSelectedNonScalarMaterializer) {
+  loom_builder_t builder;
+  loom_builder_initialize(module_, &module_->arena, loom_module_block(module_),
+                          &builder);
+  loom_string_id_t name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder, IREE_SV("vector_fold"), &name));
+  uint16_t symbol = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, name, &symbol));
+  loom_op_t* function_op = nullptr;
+  IREE_ASSERT_OK(loom_test_func_build(
+      &builder, 0, 0, 0, {.module_id = 0, .symbol_id = symbol}, nullptr, 0,
+      nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function_op));
+  const loom_func_like_t function = loom_func_like_cast(module_, function_op);
+  loom_builder_enter_region(&builder, function_op,
+                            loom_func_like_body(function));
+
+  const loom_type_t input_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(4), 0);
+  const loom_type_t result_type = loom_type_shaped_1d(
+      LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_BF16, loom_dim_pack_static(4), 0);
+  loom_op_t* input = nullptr;
+  IREE_ASSERT_OK(loom_vector_constant_build(
+      &builder, loom_attr_f64(0.5), input_type, LOOM_LOCATION_UNKNOWN, &input));
+  loom_op_t* conversion = nullptr;
+  IREE_ASSERT_OK(loom_vector_fptrunc_build(
+      &builder, 0, loom_vector_constant_result(input), input_type, result_type,
+      LOOM_LOCATION_UNKNOWN, &conversion));
+  const loom_value_id_t original_result =
+      loom_vector_fptrunc_result(conversion);
+  loom_op_t* use = nullptr;
+  IREE_ASSERT_OK(loom_test_use_build(&builder, &original_result, 1,
+                                     LOOM_LOCATION_UNKNOWN, &use));
+  loom_op_t* terminator = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &terminator));
+
+  loom_value_fact_table_t* facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &owner_, module_, loom_pass_value_fact_scope_function(function), &facts));
+  loom_rewriter_attach_value_facts(&rewriter_, facts);
+  materializer_probe = {
+      .mode = MaterializerProbeMode::kVector,
+      .support_query_count = 0,
+      .materialization_count = 0,
+  };
+  rewriter_.constant_materializer = {
+      .supports = ProbeMaterializerSupport,
+      .materialize = ProbeMaterialize,
+  };
+
+  bool folded = false;
+  IREE_ASSERT_OK(loom_rewriter_try_fold(&rewriter_, conversion, &folded));
+  EXPECT_TRUE(folded);
+  EXPECT_EQ(materializer_probe.support_query_count, 1u);
+  EXPECT_EQ(materializer_probe.materialization_count, 1u);
+  EXPECT_TRUE(conversion->flags & LOOM_OP_FLAG_DEAD);
+  const loom_value_id_t replacement = loom_op_const_operands(use)[0];
+  EXPECT_NE(replacement, original_result);
+  const loom_op_t* replacement_op =
+      loom_value_def_op(loom_module_value(module_, replacement));
+  ASSERT_TRUE(loom_test_constant_isa(replacement_op));
+  EXPECT_EQ(loom_attr_as_f64(loom_test_constant_value(replacement_op)), 0.5);
+  EXPECT_TRUE(loom_type_equal(loom_module_value_type(module_, replacement),
+                              result_type));
+}
 
 TEST_P(FactInputsTest, TypeEdgesRefreshTheirEquationOwnerBeforeFolding) {
   const auto [equation_owner, mutation] = GetParam();
@@ -273,7 +481,10 @@ TEST_P(FactInputsTest, TypeEdgesRefreshTheirEquationOwnerBeforeFolding) {
   IREE_ASSERT_OK(
       loom_pass_value_fact_owner_acquire(&owner_, module_, scope, &facts));
   loom_rewriter_attach_value_facts(&rewriter_, facts);
-  rewriter_.materialize_constant = Materialize;
+  rewriter_.constant_materializer = {
+      .supports = CanMaterialize,
+      .materialize = Materialize,
+  };
   IREE_ASSERT_OK(loom_rewriter_seed_function(&rewriter_, function));
   loom_builder_set_before(&rewriter_.builder, terminator);
   if (create) {

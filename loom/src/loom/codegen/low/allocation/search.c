@@ -197,11 +197,15 @@ static uint32_t loom_low_allocation_search_location_preference_penalty(
       context->descriptor_set, &query->preferences, candidate, NULL);
 }
 
+// Active checks may be discharged only by a complete conflict collection whose
+// owners are all covered by the caller's planned storage releases. Projected
+// hard-relation peers have their own candidates and still need active checks.
 static bool loom_low_allocation_search_storage_conflicts(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_search_identity_t* identity,
     const loom_low_allocation_assignment_t* candidate,
-    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    bool check_active_assignments, const loom_value_id_t* ignored_value_ids,
+    uint16_t ignored_value_count,
     const loom_value_id_t* ignored_storage_lease_value_ids,
     uint16_t ignored_storage_lease_value_count,
     loom_low_allocation_storage_release_policy_t release_policy);
@@ -256,7 +260,8 @@ static bool loom_low_allocation_search_hard_relation_conflicts(
     // register. Check the retained peer lifetime before making that choice;
     // waiting until the peer is visited can leave it with no legal location.
     return loom_low_allocation_search_storage_conflicts(
-        context, &projected_identity, &projected, NULL, 0, NULL, 0,
+        context, &projected_identity, &projected,
+        /*check_active_assignments=*/true, NULL, 0, NULL, 0,
         LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED);
   }
   const loom_low_allocation_assignment_t* result_assignment =
@@ -313,7 +318,8 @@ static bool loom_low_allocation_search_storage_conflicts(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_search_identity_t* identity,
     const loom_low_allocation_assignment_t* candidate,
-    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    bool check_active_assignments, const loom_value_id_t* ignored_value_ids,
+    uint16_t ignored_value_count,
     const loom_value_id_t* ignored_storage_lease_value_ids,
     uint16_t ignored_storage_lease_value_count,
     loom_low_allocation_storage_release_policy_t release_policy) {
@@ -340,7 +346,8 @@ static bool loom_low_allocation_search_storage_conflicts(
     }
     return true;
   }
-  if (loom_low_allocation_active_set_conflicts(
+  if (check_active_assignments &&
+      loom_low_allocation_active_set_conflicts(
           context->active_set, context->descriptor_set, context->unit_liveness,
           context->assignment_map->assignments,
           context->assignment_map->assignment_count, candidate,
@@ -371,7 +378,8 @@ static bool loom_low_allocation_search_assignment_conflicts_with_identity(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_search_identity_t* identity,
     const loom_low_allocation_assignment_t* candidate,
-    const loom_value_id_t* ignored_value_ids, uint16_t ignored_value_count,
+    bool check_active_assignments, const loom_value_id_t* ignored_value_ids,
+    uint16_t ignored_value_count,
     const loom_value_id_t* ignored_storage_lease_value_ids,
     uint16_t ignored_storage_lease_value_count,
     loom_low_allocation_storage_release_policy_t release_policy) {
@@ -388,9 +396,10 @@ static bool loom_low_allocation_search_assignment_conflicts_with_identity(
     }
   }
   return loom_low_allocation_search_storage_conflicts(
-             context, identity, candidate, ignored_value_ids,
-             ignored_value_count, ignored_storage_lease_value_ids,
-             ignored_storage_lease_value_count, release_policy) ||
+             context, identity, candidate, check_active_assignments,
+             ignored_value_ids, ignored_value_count,
+             ignored_storage_lease_value_ids, ignored_storage_lease_value_count,
+             release_policy) ||
          loom_low_allocation_search_hard_relations_conflict(
              context, identity->value_ordinal, candidate);
 }
@@ -406,9 +415,9 @@ bool loom_low_allocation_search_assignment_conflicts(
       loom_low_allocation_search_identity_for_value(context,
                                                     candidate->value_id);
   return loom_low_allocation_search_assignment_conflicts_with_identity(
-      context, &identity, candidate, ignored_value_ids, ignored_value_count,
-      ignored_storage_lease_value_ids, ignored_storage_lease_value_count,
-      release_policy);
+      context, &identity, candidate, /*check_active_assignments=*/true,
+      ignored_value_ids, ignored_value_count, ignored_storage_lease_value_ids,
+      ignored_storage_lease_value_count, release_policy);
 }
 
 bool loom_low_allocation_search_location_conflicts(
@@ -528,6 +537,7 @@ static bool loom_low_allocation_search_consider_linear_location(
   candidate.location_base = base;
   if (loom_low_allocation_search_assignment_conflicts_with_identity(
           context, &query->identity, &candidate,
+          /*check_active_assignments=*/true,
           /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
           /*ignored_storage_lease_value_ids=*/NULL,
           /*ignored_storage_lease_value_count=*/0, release_policy)) {
@@ -896,6 +906,7 @@ loom_low_allocation_search_find_linear_pressure_choice(
     candidate.location_base = base;
     if (loom_low_allocation_search_assignment_conflicts_with_identity(
             context, &query->identity, &candidate,
+            /*check_active_assignments=*/true,
             /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
             /*ignored_storage_lease_value_ids=*/NULL,
             /*ignored_storage_lease_value_count=*/0,
@@ -990,6 +1001,7 @@ loom_low_allocation_search_find_explicit_physical_register_for_release_policy(
     candidate.location_base = location_base;
     if (loom_low_allocation_search_assignment_conflicts_with_identity(
             context, &query->identity, &candidate,
+            /*check_active_assignments=*/true,
             /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
             /*ignored_storage_lease_value_ids=*/NULL,
             /*ignored_storage_lease_value_count=*/0, release_policy)) {
@@ -1131,6 +1143,7 @@ bool loom_low_allocation_search_find_physical_location(
          retained->location_base % alignment != 0) ||
         loom_low_allocation_search_assignment_conflicts_with_identity(
             context, &location_query.identity, &retained_candidate,
+            /*check_active_assignments=*/true,
             /*ignored_value_ids=*/NULL, /*ignored_value_count=*/0,
             /*ignored_storage_lease_value_ids=*/NULL,
             /*ignored_storage_lease_value_count=*/0,
@@ -1545,13 +1558,31 @@ loom_low_allocation_search_begin_covering_spill_selection(
 }
 
 static bool loom_low_allocation_search_spill_victim_set_is_better(
-    uint16_t candidate_count, uint32_t candidate_unit_count,
-    uint32_t candidate_latest_end_point, uint64_t candidate_traffic_cost,
+    bool use_pressure_efficiency, uint16_t candidate_count,
+    uint32_t candidate_unit_count, uint32_t candidate_latest_end_point,
+    uint64_t candidate_traffic_cost, uint64_t candidate_remaining_pressure_area,
     uint32_t candidate_location_ordinal, uint16_t best_count,
     uint32_t best_unit_count, uint32_t best_latest_end_point,
-    uint64_t best_traffic_cost, uint32_t best_location_ordinal) {
+    uint64_t best_traffic_cost, uint64_t best_remaining_pressure_area,
+    uint32_t best_location_ordinal) {
   if (best_count == 0) {
     return true;
+  }
+  if (use_pressure_efficiency) {
+    uint64_t candidate_high = 0, candidate_low = 0;
+    uint64_t best_high = 0, best_low = 0;
+    iree_math_mul_u64_to_u128(candidate_traffic_cost,
+                              best_remaining_pressure_area, &candidate_high,
+                              &candidate_low);
+    iree_math_mul_u64_to_u128(best_traffic_cost,
+                              candidate_remaining_pressure_area, &best_high,
+                              &best_low);
+    if (candidate_high != best_high) {
+      return candidate_high < best_high;
+    }
+    if (candidate_low != best_low) {
+      return candidate_low < best_low;
+    }
   }
   if (candidate_traffic_cost != best_traffic_cost) {
     return candidate_traffic_cost < best_traffic_cost;
@@ -1573,16 +1604,18 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
     const loom_liveness_interval_t* interval,
     const loom_low_allocation_class_capacity_t* capacity,
     uint32_t location_base, bool interval_requires_register,
-    uint32_t* assignment_indices, loom_value_id_t* ignored_value_ids,
+    uint64_t traffic_limit, uint32_t* assignment_indices,
+    loom_value_id_t* ignored_value_ids,
     loom_low_allocation_search_workspace_t* workspace,
     iree_arena_allocator_t* arena, uint16_t* out_assignment_count,
     uint32_t* out_unit_count, uint32_t* out_latest_end_point,
-    uint64_t* out_traffic_cost, uint16_t* out_released_value_count,
-    bool* out_blocked) {
+    uint64_t* out_traffic_cost, uint64_t* out_remaining_pressure_area,
+    uint16_t* out_released_value_count, bool* out_blocked) {
   *out_assignment_count = 0;
   *out_unit_count = 0;
   *out_latest_end_point = 0;
   *out_traffic_cost = 0;
+  *out_remaining_pressure_area = 0;
   *out_released_value_count = 0;
   *out_blocked = false;
   const uint16_t conflict_assignment_capacity =
@@ -1637,6 +1670,7 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
   uint32_t unit_count = 0;
   uint32_t latest_end_point = 0;
   uint64_t traffic_cost = 0;
+  uint64_t remaining_pressure_area = 0;
   bool has_covering_spill = false;
   for (uint16_t i = 0; i < conflict_assignment_count; ++i) {
     const uint32_t assignment_index = assignment_indices[i];
@@ -1706,6 +1740,19 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
     unit_count += assignment->unit_count;
     traffic_cost =
         iree_math_saturating_add_u64(traffic_cost, assignment_traffic_cost);
+    // Further victims cannot reduce traffic. Equal costs still compete on
+    // victim count, footprint, remaining lifetime, and location order.
+    if (traffic_cost > traffic_limit) {
+      *out_blocked = true;
+      break;
+    }
+    if (context->use_pressure_efficiency && !interval_requires_register) {
+      remaining_pressure_area = iree_math_saturating_add_u64(
+          remaining_pressure_area,
+          iree_math_saturating_mul_u64(
+              assignment->end_point - candidate.start_point,
+              assignment->unit_count));
+    }
     if (latest_end_point < assignment->end_point) {
       latest_end_point = assignment->end_point;
     }
@@ -1731,10 +1778,14 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
           workspace->ignored_storage_lease_value_ids;
       ignored_storage_lease_value_count = assignment_count;
     }
+    const loom_low_allocation_search_identity_t identity =
+        loom_low_allocation_search_identity_for_value(context,
+                                                      candidate.value_id);
+    // Every active conflict was collected and covered by the selected victims.
+    // Fixed storage, retained reads, leases, and hard relations still apply.
     if (assignment_count == 0 ||
-        loom_low_allocation_search_location_conflicts(
-            context, interval, capacity->descriptor_reg_class_id,
-            capacity->location_kind, location_base, interval->unit_count,
+        loom_low_allocation_search_assignment_conflicts_with_identity(
+            context, &identity, &candidate, /*check_active_assignments=*/false,
             ignored_value_ids, ignored_value_count,
             ignored_storage_lease_value_ids, ignored_storage_lease_value_count,
             LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FOR_PRESSURE)) {
@@ -1768,6 +1819,7 @@ static iree_status_t loom_low_allocation_search_collect_active_spill_victim_set(
     *out_unit_count = unit_count;
     *out_latest_end_point = latest_end_point;
     *out_traffic_cost = traffic_cost;
+    *out_remaining_pressure_area = remaining_pressure_area;
     *out_released_value_count = released_value_count;
   }
   if (has_covering_spill) {
@@ -1845,6 +1897,7 @@ iree_status_t loom_low_allocation_search_find_active_spill_victim_set(
   uint32_t best_unit_count = 0;
   uint32_t best_latest_end_point = 0;
   uint64_t best_traffic_cost = 0;
+  uint64_t best_remaining_pressure_area = 0;
   uint16_t best_released_value_count = 0;
   uint32_t best_location_base = 0;
   uint32_t best_location_ordinal = 0;
@@ -1863,6 +1916,8 @@ iree_status_t loom_low_allocation_search_find_active_spill_victim_set(
                 context->descriptor_set, capacity->descriptor_reg_class_id,
                 interval->unit_count)
           : (uint64_t)last_base / alignment + 1u;
+  const bool use_pressure_efficiency =
+      context->use_pressure_efficiency && !interval_requires_register;
   for (uint64_t candidate_index = 0; candidate_index < candidate_count;
        ++candidate_index) {
     uint32_t candidate_ordinal = (uint32_t)candidate_index;
@@ -1883,25 +1938,36 @@ iree_status_t loom_low_allocation_search_find_active_spill_victim_set(
     uint32_t candidate_unit_count = 0;
     uint32_t candidate_latest_end_point = 0;
     uint64_t candidate_traffic_cost = 0;
+    uint64_t candidate_remaining_pressure_area = 0;
     uint16_t candidate_released_value_count = 0;
     bool blocked = false;
+    // Pressure-area denominators may grow with later victims, so raw traffic
+    // alone bounds only absolute-cost ranking.
+    const uint64_t traffic_limit =
+        !use_pressure_efficiency && best_assignment_count != 0
+            ? best_traffic_cost
+            : UINT64_MAX;
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_search_collect_active_spill_victim_set(
             context, interval, capacity, base, interval_requires_register,
-            candidate_assignment_indices, ignored_value_ids, workspace, arena,
-            &candidate_assignment_count, &candidate_unit_count,
-            &candidate_latest_end_point, &candidate_traffic_cost,
+            traffic_limit, candidate_assignment_indices, ignored_value_ids,
+            workspace, arena, &candidate_assignment_count,
+            &candidate_unit_count, &candidate_latest_end_point,
+            &candidate_traffic_cost, &candidate_remaining_pressure_area,
             &candidate_released_value_count, &blocked));
     if (!blocked &&
         loom_low_allocation_search_spill_victim_set_is_better(
-            candidate_assignment_count, candidate_unit_count,
-            candidate_latest_end_point, candidate_traffic_cost,
+            use_pressure_efficiency, candidate_assignment_count,
+            candidate_unit_count, candidate_latest_end_point,
+            candidate_traffic_cost, candidate_remaining_pressure_area,
             candidate_ordinal, best_assignment_count, best_unit_count,
-            best_latest_end_point, best_traffic_cost, best_location_ordinal)) {
+            best_latest_end_point, best_traffic_cost,
+            best_remaining_pressure_area, best_location_ordinal)) {
       best_assignment_count = candidate_assignment_count;
       best_unit_count = candidate_unit_count;
       best_latest_end_point = candidate_latest_end_point;
       best_traffic_cost = candidate_traffic_cost;
+      best_remaining_pressure_area = candidate_remaining_pressure_area;
       best_released_value_count = candidate_released_value_count;
       best_location_base = base;
       best_location_ordinal = candidate_ordinal;

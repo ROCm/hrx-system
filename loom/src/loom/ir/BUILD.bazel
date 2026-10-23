@@ -32,6 +32,50 @@ loom_cc_library_group(
     ],
 )
 
+# Value/type vocabulary and graph representation are also available without
+# storage, interning, replacement, or other out-of-line IR operations.
+_TYPE_HEADERS = [
+    "attribute.h",
+    "memory_space.h",
+    "scalar_type.h",
+    "structural_hash.h",
+    "type_constraint.h",
+    "types.h",
+]
+
+loom_cc_library(
+    name = "type_headers",
+    hdrs = _TYPE_HEADERS,
+    deps = ["//runtime/src/iree/base"],
+)
+
+_REPRESENTATION_HEADERS = [
+    "attribute_schema.h",
+    "encoding.h",
+    "intern_table.h",
+    "ir.h",
+    "location.h",
+    "parameterized_attr.h",
+    "parameterized_type.h",
+    "semantics.h",
+    "string_table.h",
+    "type_descriptor.h",
+    "type_table.h",
+]
+
+loom_cc_library(
+    name = "headers",
+    hdrs = _REPRESENTATION_HEADERS,
+    deps = [
+        ":type_headers",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/util:bstring",
+        "//loom/src/loom/util:segmented_storage_headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
 loom_cc_library(
     name = "facts",
     srcs = [
@@ -130,29 +174,18 @@ loom_cc_library(
         "value_refs.c",
         "value_replacement.c",
     ],
-    hdrs = [
+    hdrs = _REPRESENTATION_HEADERS + [
         "ancestry.h",
-        "attribute_schema.h",
         "context.h",
-        "encoding.h",
         "function_version.h",
-        "intern_table.h",
-        "ir.h",
         "local_value_domain.h",
-        "location.h",
         "module.h",
         "module_record.h",
         "module_source.h",
-        "parameterized_attr.h",
-        "parameterized_type.h",
-        "semantics.h",
-        "string_table.h",
         "type_dependencies.h",
-        "type_descriptor.h",
         "type_identity.h",
         "type_import.h",
         "type_refs.h",
-        "type_table.h",
         "value_refs.h",
         "value_replacement.h",
     ],
@@ -182,15 +215,7 @@ loom_cc_library(
         "type_refinement.c",
         "types.c",
     ],
-    hdrs = [
-        "attribute.h",
-        "memory_space.h",
-        "scalar_type.h",
-        "structural_hash.h",
-        "type_constraint.h",
-        "type_refinement.h",
-        "types.h",
-    ],
+    hdrs = _TYPE_HEADERS + ["type_refinement.h"],
     textual_hdrs = ["scalar_type_table.inc"],
     deps = [
         "//runtime/src/iree/base",

@@ -25,8 +25,35 @@ enum {
   LOOM_PARAMETERIZED_ATTR_FUNC_LOCATION_FUSED = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_FUNC, 3),
   LOOM_PARAMETERIZED_ATTR_FUNC_LOCATION_OPAQUE = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_FUNC, 4),
   LOOM_PARAMETERIZED_ATTR_FUNC_LOCATION_TAGGED = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_FUNC, 5),
-  LOOM_PARAMETERIZED_ATTR_FUNC_COUNT_ = 6,
+  LOOM_PARAMETERIZED_ATTR_FUNC_ABI_C_FIELD = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_FUNC, 6),
+  LOOM_PARAMETERIZED_ATTR_FUNC_ABI_C_TYPE = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_FUNC, 7),
+  LOOM_PARAMETERIZED_ATTR_FUNC_ABI_C_SIGNATURE = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_FUNC, 8),
+  LOOM_PARAMETERIZED_ATTR_FUNC_COUNT_ = 9,
 };
+
+// Semantic source object kind in a retained C ABI signature.
+typedef enum loom_func_abi_c_type_kind_e {
+  LOOM_FUNC_ABI_C_TYPE_KIND_BOOLEAN = 1,
+  LOOM_FUNC_ABI_C_TYPE_KIND_SIGNED_INTEGER = 2,
+  LOOM_FUNC_ABI_C_TYPE_KIND_UNSIGNED_INTEGER = 3,
+  LOOM_FUNC_ABI_C_TYPE_KIND_FLOATING = 4,
+  LOOM_FUNC_ABI_C_TYPE_KIND_POINTER = 5,
+  LOOM_FUNC_ABI_C_TYPE_KIND_VECTOR = 6,
+  LOOM_FUNC_ABI_C_TYPE_KIND_ARRAY = 7,
+  LOOM_FUNC_ABI_C_TYPE_KIND_RECORD = 8,
+  LOOM_FUNC_ABI_C_TYPE_KIND_COUNT_ = 9,
+} loom_func_abi_c_type_kind_t;
+
+// Floating representation in a retained C ABI source object.
+typedef enum loom_func_abi_c_type_format_e {
+  LOOM_FUNC_ABI_C_TYPE_FORMAT_F8E4M3FN = 1,
+  LOOM_FUNC_ABI_C_TYPE_FORMAT_F8E5M2 = 2,
+  LOOM_FUNC_ABI_C_TYPE_FORMAT_F16 = 3,
+  LOOM_FUNC_ABI_C_TYPE_FORMAT_BF16 = 4,
+  LOOM_FUNC_ABI_C_TYPE_FORMAT_F32 = 5,
+  LOOM_FUNC_ABI_C_TYPE_FORMAT_F64 = 6,
+  LOOM_FUNC_ABI_C_TYPE_FORMAT_COUNT_ = 7,
+} loom_func_abi_c_type_format_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -209,6 +236,156 @@ iree_status_t loom_func_location_tagged_attr_make(
     bool synthetic,
     loom_attribute_t* out_attr);
 
+// One named field in a retained C ABI record layout.
+static inline bool loom_func_abi_c_field_attr_isa(loom_attribute_t attr) {
+  return attr.kind == LOOM_ATTR_PARAMETERIZED && loom_attr_as_parameterized_kind(attr) == LOOM_PARAMETERIZED_ATTR_FUNC_ABI_C_FIELD;
+}
+enum { LOOM_FUNC_ABI_C_FIELD_ATTR_NAME_PARAMETER_INDEX = 0 };
+static inline loom_string_id_t loom_func_abi_c_field_attr_name(loom_attribute_t attr) {
+  return loom_attr_as_string_id(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_FIELD_ATTR_NAME_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_FIELD_ATTR_TYPE_PARAMETER_INDEX = 1 };
+static inline int64_t loom_func_abi_c_field_attr_type(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_FIELD_ATTR_TYPE_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_FIELD_ATTR_BYTE_OFFSET_PARAMETER_INDEX = 2 };
+static inline int64_t loom_func_abi_c_field_attr_byte_offset(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_FIELD_ATTR_BYTE_OFFSET_PARAMETER_INDEX]);
+}
+iree_status_t loom_func_abi_c_field_attr_make(
+    loom_module_t* module,
+    loom_string_id_t name,
+    int64_t type,
+    int64_t byte_offset,
+    loom_attribute_t* out_attr);
+
+// One postorder source object type node. Composite references name only preceding nodes.
+enum loom_func_abi_c_type_attr_build_flag_bits_e {
+  LOOM_FUNC_ABI_C_TYPE_ATTR_BUILD_FLAG_HAS_BITWIDTH = 1u << 0,
+  LOOM_FUNC_ABI_C_TYPE_ATTR_BUILD_FLAG_HAS_FORMAT = 1u << 1,
+  LOOM_FUNC_ABI_C_TYPE_ATTR_BUILD_FLAG_HAS_ADDRESS_SPACE = 1u << 2,
+  LOOM_FUNC_ABI_C_TYPE_ATTR_BUILD_FLAG_HAS_ELEMENT_TYPE = 1u << 3,
+  LOOM_FUNC_ABI_C_TYPE_ATTR_BUILD_FLAG_HAS_ELEMENT_COUNT = 1u << 4,
+  LOOM_FUNC_ABI_C_TYPE_ATTR_BUILD_FLAG_HAS_ELEMENT_STRIDE = 1u << 5,
+  LOOM_FUNC_ABI_C_TYPE_ATTR_BUILD_FLAG_HAS_NAME = 1u << 6,
+  LOOM_FUNC_ABI_C_TYPE_ATTR_BUILD_FLAG_HAS_FIELDS = 1u << 7,
+};
+typedef uint32_t loom_func_abi_c_type_attr_build_flags_t;
+static inline bool loom_func_abi_c_type_attr_isa(loom_attribute_t attr) {
+  return attr.kind == LOOM_ATTR_PARAMETERIZED && loom_attr_as_parameterized_kind(attr) == LOOM_PARAMETERIZED_ATTR_FUNC_ABI_C_TYPE;
+}
+enum { LOOM_FUNC_ABI_C_TYPE_ATTR_KIND_PARAMETER_INDEX = 0 };
+static inline loom_func_abi_c_type_kind_t loom_func_abi_c_type_attr_kind(loom_attribute_t attr) {
+  return (loom_func_abi_c_type_kind_t)loom_attr_as_enum(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_KIND_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_TYPE_ATTR_BYTE_LENGTH_PARAMETER_INDEX = 1 };
+static inline int64_t loom_func_abi_c_type_attr_byte_length(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_BYTE_LENGTH_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_TYPE_ATTR_BYTE_ALIGNMENT_PARAMETER_INDEX = 2 };
+static inline int64_t loom_func_abi_c_type_attr_byte_alignment(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_BYTE_ALIGNMENT_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_TYPE_ATTR_COMPONENT_COUNT_PARAMETER_INDEX = 3 };
+static inline int64_t loom_func_abi_c_type_attr_component_count(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_COMPONENT_COUNT_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_TYPE_ATTR_BITWIDTH_PARAMETER_INDEX = 4 };
+static inline bool loom_func_abi_c_type_attr_has_bitwidth(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_BITWIDTH_PARAMETER_INDEX]);
+}
+static inline int64_t loom_func_abi_c_type_attr_bitwidth(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_BITWIDTH_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_TYPE_ATTR_FORMAT_PARAMETER_INDEX = 5 };
+static inline bool loom_func_abi_c_type_attr_has_format(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_FORMAT_PARAMETER_INDEX]);
+}
+static inline loom_func_abi_c_type_format_t loom_func_abi_c_type_attr_format(loom_attribute_t attr) {
+  return (loom_func_abi_c_type_format_t)loom_attr_as_enum(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_FORMAT_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_TYPE_ATTR_ADDRESS_SPACE_PARAMETER_INDEX = 6 };
+static inline bool loom_func_abi_c_type_attr_has_address_space(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_ADDRESS_SPACE_PARAMETER_INDEX]);
+}
+static inline int64_t loom_func_abi_c_type_attr_address_space(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_ADDRESS_SPACE_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_TYPE_ATTR_ELEMENT_TYPE_PARAMETER_INDEX = 7 };
+static inline bool loom_func_abi_c_type_attr_has_element_type(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_ELEMENT_TYPE_PARAMETER_INDEX]);
+}
+static inline int64_t loom_func_abi_c_type_attr_element_type(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_ELEMENT_TYPE_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_TYPE_ATTR_ELEMENT_COUNT_PARAMETER_INDEX = 8 };
+static inline bool loom_func_abi_c_type_attr_has_element_count(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_ELEMENT_COUNT_PARAMETER_INDEX]);
+}
+static inline int64_t loom_func_abi_c_type_attr_element_count(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_ELEMENT_COUNT_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_TYPE_ATTR_ELEMENT_STRIDE_PARAMETER_INDEX = 9 };
+static inline bool loom_func_abi_c_type_attr_has_element_stride(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_ELEMENT_STRIDE_PARAMETER_INDEX]);
+}
+static inline int64_t loom_func_abi_c_type_attr_element_stride(loom_attribute_t attr) {
+  return loom_attr_as_i64(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_ELEMENT_STRIDE_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_TYPE_ATTR_NAME_PARAMETER_INDEX = 10 };
+static inline bool loom_func_abi_c_type_attr_has_name(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_NAME_PARAMETER_INDEX]);
+}
+static inline loom_string_id_t loom_func_abi_c_type_attr_name(loom_attribute_t attr) {
+  return loom_attr_as_string_id(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_NAME_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_TYPE_ATTR_FIELDS_PARAMETER_INDEX = 11 };
+static inline bool loom_func_abi_c_type_attr_has_fields(loom_attribute_t attr) {
+  return !loom_attr_is_absent(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_FIELDS_PARAMETER_INDEX]);
+}
+static inline loom_parameterized_attr_array_t loom_func_abi_c_type_attr_fields(loom_attribute_t attr) {
+  return loom_attr_as_parameterized_array(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_TYPE_ATTR_FIELDS_PARAMETER_INDEX]);
+}
+iree_status_t loom_func_abi_c_type_attr_make(
+    loom_module_t* module,
+    loom_func_abi_c_type_attr_build_flags_t build_flags,
+    loom_func_abi_c_type_kind_t kind,
+    int64_t byte_length,
+    int64_t byte_alignment,
+    int64_t component_count,
+    int64_t bitwidth,
+    loom_func_abi_c_type_format_t format,
+    int64_t address_space,
+    int64_t element_type,
+    int64_t element_count,
+    int64_t element_stride,
+    loom_string_id_t name,
+    loom_parameterized_attr_array_t fields,
+    loom_attribute_t* out_attr);
+
+// C-compatible source signature retained independently of its flattened Loom value projection and selected output ABI.
+static inline bool loom_func_abi_c_signature_attr_isa(loom_attribute_t attr) {
+  return attr.kind == LOOM_ATTR_PARAMETERIZED && loom_attr_as_parameterized_kind(attr) == LOOM_PARAMETERIZED_ATTR_FUNC_ABI_C_SIGNATURE;
+}
+enum { LOOM_FUNC_ABI_C_SIGNATURE_ATTR_ARGUMENTS_PARAMETER_INDEX = 0 };
+static inline loom_i64_array_t loom_func_abi_c_signature_attr_arguments(loom_attribute_t attr) {
+  return loom_attr_as_i64_array(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_SIGNATURE_ATTR_ARGUMENTS_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_SIGNATURE_ATTR_RESULTS_PARAMETER_INDEX = 1 };
+static inline loom_i64_array_t loom_func_abi_c_signature_attr_results(loom_attribute_t attr) {
+  return loom_attr_as_i64_array(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_SIGNATURE_ATTR_RESULTS_PARAMETER_INDEX]);
+}
+enum { LOOM_FUNC_ABI_C_SIGNATURE_ATTR_TYPES_PARAMETER_INDEX = 2 };
+static inline loom_parameterized_attr_array_t loom_func_abi_c_signature_attr_types(loom_attribute_t attr) {
+  return loom_attr_as_parameterized_array(loom_attr_as_parameterized_slots(attr)[LOOM_FUNC_ABI_C_SIGNATURE_ATTR_TYPES_PARAMETER_INDEX]);
+}
+iree_status_t loom_func_abi_c_signature_attr_make(
+    loom_module_t* module,
+    loom_i64_array_t arguments,
+    loom_i64_array_t results,
+    loom_parameterized_attr_array_t types,
+    loom_attribute_t* out_attr);
+
 enum {
   LOOM_OP_FUNC_DEF = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 0),
   LOOM_OP_FUNC_DECL = LOOM_OP_KIND(LOOM_DIALECT_FUNC, 1),
@@ -260,12 +437,13 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_effect_contract, 4, loom_callable_effe
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_temperature, 5, loom_func_temperature_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_inline_policy, 6, loom_inline_policy_t)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_def_predicates, 7)
-LOOM_DEFINE_ATTR_SYMBOL(loom_func_def_target, 8)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_abi, 9, loom_target_abi_kind_t)
-LOOM_DEFINE_ATTR_DICT(loom_func_def_abi_attrs, 10)
-LOOM_DEFINE_ATTR_STRING(loom_func_def_export_symbol, 11)
-LOOM_DEFINE_ATTR_DICT(loom_func_def_export_attrs, 12)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_retain, 13, loom_func_retain_t)
+LOOM_DEFINE_ATTR_PARAMETERIZED(loom_func_def_source_signature, 8)
+LOOM_DEFINE_ATTR_SYMBOL(loom_func_def_target, 9)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_abi, 10, loom_target_abi_kind_t)
+LOOM_DEFINE_ATTR_DICT(loom_func_def_abi_attrs, 11)
+LOOM_DEFINE_ATTR_STRING(loom_func_def_export_symbol, 12)
+LOOM_DEFINE_ATTR_DICT(loom_func_def_export_attrs, 13)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_retain, 14, loom_func_retain_t)
 LOOM_DEFINE_REGION(loom_func_def_body, 0)
 enum loom_func_def_build_flag_bits_e {
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
@@ -294,6 +472,7 @@ iree_status_t loom_func_def_build(
     loom_optional uint8_t temperature,
     loom_optional uint8_t inline_policy,
     loom_optional loom_symbol_ref_t target,
+    loom_optional loom_attribute_t source_signature,
     loom_optional uint8_t abi,
     loom_optional loom_named_attr_slice_t abi_attrs,
     loom_optional loom_string_id_t export_symbol,
@@ -326,13 +505,14 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_cc, 4, loom_func_cc_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_effect_contract, 5, loom_callable_effect_contract_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_temperature, 6, loom_func_temperature_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_inline_policy, 7, loom_inline_policy_t)
-LOOM_DEFINE_ATTR_SYMBOL(loom_func_decl_target, 8)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_abi, 9, loom_target_abi_kind_t)
-LOOM_DEFINE_ATTR_DICT(loom_func_decl_abi_attrs, 10)
-LOOM_DEFINE_ATTR_STRING(loom_func_decl_export_symbol, 11)
-LOOM_DEFINE_ATTR_DICT(loom_func_decl_export_attrs, 12)
-LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_decl_predicates, 13)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_retain, 14, loom_func_retain_t)
+LOOM_DEFINE_ATTR_PARAMETERIZED(loom_func_decl_source_signature, 8)
+LOOM_DEFINE_ATTR_SYMBOL(loom_func_decl_target, 9)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_abi, 10, loom_target_abi_kind_t)
+LOOM_DEFINE_ATTR_DICT(loom_func_decl_abi_attrs, 11)
+LOOM_DEFINE_ATTR_STRING(loom_func_decl_export_symbol, 12)
+LOOM_DEFINE_ATTR_DICT(loom_func_decl_export_attrs, 13)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_decl_predicates, 14)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_retain, 15, loom_func_retain_t)
 enum loom_func_decl_build_flag_bits_e {
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_RETAIN = 1u << 1,
@@ -362,6 +542,7 @@ iree_status_t loom_func_decl_build(
     loom_optional uint8_t temperature,
     loom_optional uint8_t inline_policy,
     loom_optional loom_symbol_ref_t target,
+    loom_optional loom_attribute_t source_signature,
     loom_optional uint8_t abi,
     loom_optional loom_named_attr_slice_t abi_attrs,
     loom_optional loom_string_id_t export_symbol,

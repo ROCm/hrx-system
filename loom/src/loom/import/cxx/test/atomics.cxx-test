@@ -196,7 +196,7 @@ unsigned advance(unsigned* destination) {
   return value;
 }
 // ----
-func.def public @advance(%destination: buffer, %destination_byte_offset: offset) -> (i32) {
+func.def public source_signature(#func.abi.c.signature<arguments = [0], results = [1], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @advance(%destination: buffer, %destination_byte_offset: offset) -> (i32) {
   %3 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi32>
   %4 = view.atomic.load %3[0] {ordering = seq_cst, scope = system} : view<1xi32> -> i32
   %5 = scalar.constant 1 : i32

@@ -31,6 +31,7 @@ iree_cc_test(
   DEPS
     ::types
     iree::base
+    iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm

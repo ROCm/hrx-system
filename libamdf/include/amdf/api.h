@@ -510,6 +510,25 @@ typedef struct amdf_api_t {
       amdf_user_queue_mapping_t* mapping,
       amdf_user_queue_mapping_info_t* out_info);
 
+  /// Completes host command stores for a mapping with HOST_API publication.
+  ///
+  /// The producer calls this after writing command bodies and before publishing
+  /// a valid header or producer index. It performs the native release and CPU
+  /// ordering, without reading command-ring contents, accepting commands,
+  /// notifying the device, waiting for execution, allocating, or taking a host
+  /// lock. The family's host_publication describes native device reads and
+  /// kernel calls. Other executors and device mappings return UNSUPPORTED.
+  ///
+  /// Native failure terminally fails the queue and is retained by subsequent
+  /// status queries and waits. It never proves completion or permits storage
+  /// reuse. The caller stops publication and reports failure to its waiters;
+  /// there is no implicit notification, retry, or rollback. The mapping and
+  /// queue remain owned by the caller under their ordinary teardown contract.
+  /// Concurrent independent producers may release their own stores; conflicting
+  /// command writes and mapping destruction require caller synchronization.
+  amdf_status_t(AMDF_CALL* user_queue_mapping_flush)(
+      amdf_user_queue_mapping_t* mapping);
+
   /// Releases one queue mapping after that producer has stopped using it.
   ///
   /// The caller must have exclusive access. Failure leaves the mapping live so

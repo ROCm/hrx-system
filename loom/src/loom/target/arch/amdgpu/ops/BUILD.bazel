@@ -30,7 +30,7 @@ loom_cc_library(
     textual_hdrs = ["ops.inc"],
     visibility = ["//visibility:public"],
     deps = [
-        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:headers",
         "//loom/src/loom/target:types",
     ],
 )

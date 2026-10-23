@@ -54,6 +54,8 @@ loom_check_test_suite(
     "buffer_alloca_invalid.cxx-test"
     "buffer_memory_space.cxx-test"
     "buffer_memory_space_invalid.cxx-test"
+    "c_abi.cxx-test"
+    "c_abi_invalid.cxx-test"
     "callable_effects.cxx-test"
     "check.cxx-test"
     "check_close.cxx-test"
@@ -1262,6 +1264,7 @@ loom_check_test_suite(
   NAME
     x86_compiler_test
   SRCS
+    "x86_c_abi_lowering.cxx-test"
     "x86_lowering.cxx-test"
 )
 endif()

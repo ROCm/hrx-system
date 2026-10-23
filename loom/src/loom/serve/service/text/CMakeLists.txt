@@ -283,10 +283,13 @@ loom_cc_library(
     source_execution_tests
   SRCS
     "capture_execution_test.cc"
+    "epoch_upload_test.cc"
+    "model_instance.h"
     "source_execution_test.cc"
     "state_test.cc"
   DEPS
     ::capture
+    ::epoch_upload
     ::model
     ::source_service_fixture
     ::storage
@@ -312,6 +315,7 @@ loom_cc_library(
     "projector_execution_test.cc"
   DEPS
     ::epoch
+    ::epoch_upload
     ::media_projector
     ::model
     ::readiness
@@ -557,6 +561,23 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    epoch_upload
+  HDRS
+    "epoch_upload.h"
+  SRCS
+    "epoch_upload.c"
+  DEPS
+    iree::base
+    iree::hal
+    loom::serve::runtime::execution
+    loom::serve::runtime::program::transfer_plan
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     model
   HDRS
     "control.h"
@@ -586,6 +607,7 @@ loom_cc_library(
   DEPS
     ::capture
     ::chat
+    ::epoch_upload
     ::packing
     ::storage
     iree::async
@@ -603,7 +625,9 @@ loom_cc_library(
     loom::serve::runtime::execution
     loom::serve::runtime::execution::retirement
     loom::serve::runtime::parameter::activation
+    loom::serve::runtime::parameter::module
     loom::serve::runtime::parameter::residency
+    loom::serve::runtime::parameter::sources
     loom::serve::runtime::parameter::weights
     loom::serve::runtime::program
     loom::serve::runtime::program::compilation

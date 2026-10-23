@@ -7,8 +7,8 @@
 #ifndef IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_RING_H_
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PM4_RING_H_
 
+#include "amdf/amdf.h"
 #include "iree/base/api.h"
-#include "iree/hal/memory_scope.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,8 +24,8 @@ typedef struct iree_hal_amd_gpu_pm4_ring_t {
   uint32_t* words;
   // Power-of-two capacity in DWORDs, admitted by native construction.
   uint32_t capacity;
-  // Native host ordering between command-body and producer-index stores.
-  iree_hal_host_cache_fence_t host_publish_fence;
+  // Native release between command-body and producer-index stores.
+  amdf_cache_transition_executor_t host_publish_executor;
   // End of reserved storage in the monotonic DWORD reservation domain. The
   // publisher completes command stores before native publication.
   uint64_t reserved_words;
@@ -46,7 +46,7 @@ typedef struct iree_hal_amd_gpu_pm4_ring_reservation_t {
 // have already been established by native construction; this allocates nothing.
 void iree_hal_amd_gpu_pm4_ring_initialize(
     uint32_t* words, uint32_t capacity,
-    iree_hal_host_cache_fence_t host_publish_fence,
+    amdf_cache_transition_executor_t host_publish_executor,
     iree_hal_amd_gpu_pm4_ring_t* out_ring);
 
 // Reserves one bounded body, including native eight-DWORD publication alignment

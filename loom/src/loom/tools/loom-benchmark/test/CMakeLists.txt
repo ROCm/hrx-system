@@ -22,9 +22,11 @@ iree_py_test(
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/scenario_compare_hal_vm.loom}}"
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/command_scenario_dependent_stages.loom}}"
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-benchmark/test/sequence_storage.loom}}"
+    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-benchmark/test/host_derived_launch_values.loom}}"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/command_scenario_dependent_stages.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/scenario_compare_hal_vm.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-benchmark/test/host_derived_launch_values.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tools/loom-benchmark/test/sequence_storage.loom"
     "loom::tools::loom-benchmark::loom-benchmark"
   PACKAGE_DIRS

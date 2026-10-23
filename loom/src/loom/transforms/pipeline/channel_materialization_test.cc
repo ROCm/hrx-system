@@ -62,7 +62,8 @@ class ChannelMaterializationTest : public ::testing::Test {
         channel, loom_type_scalar(LOOM_SCALAR_TYPE_I1), i32};
     IREE_ASSERT_OK(loom_func_def_build(
         &builder_, 0, 0, /*linkage=*/0, 0, 0, 0, 0, 0, loom_symbol_ref_null(),
-        0, loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
+        /*source_signature=*/loom_attr_absent(), 0,
+        loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
         loom_named_attr_slice_empty(), Symbol("worker"), arguments,
         IREE_ARRAYSIZE(arguments), nullptr, 0, nullptr, 0, nullptr, 0,
         LOOM_LOCATION_UNKNOWN, &function_));
@@ -108,10 +109,12 @@ class ChannelMaterializationTest : public ::testing::Test {
     loom_op_t* declaration;
     IREE_CHECK_OK(loom_func_decl_build(
         &builder_, 0, 0, 0, LOOM_STRING_ID_INVALID, LOOM_STRING_ID_INVALID, 0,
-        0, 0, 0, loom_symbol_ref_null(), 0, loom_named_attr_slice_empty(),
-        LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol,
-        arguments.data(), arguments.size(), results.data(), results.size(),
-        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &declaration));
+        0, 0, 0, loom_symbol_ref_null(),
+        /*source_signature=*/loom_attr_absent(), 0,
+        loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
+        loom_named_attr_slice_empty(), symbol, arguments.data(),
+        arguments.size(), results.data(), results.size(), nullptr, 0, nullptr,
+        0, LOOM_LOCATION_UNKNOWN, &declaration));
     return symbol;
   }
 

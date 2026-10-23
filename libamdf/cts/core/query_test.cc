@@ -55,6 +55,7 @@ TEST(QueryApiTest, NegotiatesSupportedVersion) {
   EXPECT_NE(api->user_queue_query_info, nullptr);
   EXPECT_NE(api->user_queue_map, nullptr);
   EXPECT_NE(api->user_queue_mapping_query_info, nullptr);
+  EXPECT_NE(api->user_queue_mapping_flush, nullptr);
   EXPECT_NE(api->user_queue_mapping_destroy, nullptr);
   EXPECT_NE(api->user_queue_query_status, nullptr);
   EXPECT_NE(api->user_queue_wait_consumed, nullptr);

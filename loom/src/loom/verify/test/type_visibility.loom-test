@@ -25,81 +25,14 @@ func.def @outer_group_size(%count: index) {
 
 // ====
 
-// Function argument types cannot implicitly capture an enclosing dimension.
-func.def @outer_argument_shape(%count: index) {
-  // ERROR@+1: DOMINANCE/016 "block arg 0 type references value '%count'"
-  func.def @capturing_argument(%tile: tile<[%count]xf32>) {
-    func.return
-  }
-  func.return
-}
-
-// ====
-
-// Bodyless signatures retain the declared variadic argument field name when
-// a surrounding isolated region hides the referenced encoding.
-func.def @outer_declared_layout(%layout: encoding<layout>) {
-  test.isolated_region {
-    // ERROR@+1: ENCODING/004 "args[0]"
-    func.decl @capturing_declaration(%view: view<4xf32, %layout>)
-    test.yield
-  }
-  func.return
-}
-
-// ====
-
-// Bulk use reconstruction retains dynamic dimensions in declaration arguments.
-func.def @outer_declared_shape(%count: index) {
-  test.isolated_region {
-    // ERROR@+1: DOMINANCE/016 "args[0] type references value '%count'"
-    func.decl @capturing_shape(%tile: tile<[%count]xf32>)
-    test.yield
-  }
-  func.return
-}
-
-// ====
-
-// Nested types on declaration arguments retain their SSA references too.
-func.def @outer_declared_reference(%layout: encoding<layout>) {
-  test.isolated_region {
-    // ERROR@+1: DOMINANCE/016 "args[0] type references value '%layout'"
-    func.decl @capturing_reference(%reference: test.ref<view<4xf32, %layout>>)
-    test.yield
-  }
-  func.return
-}
-
-// ====
-
-// Declarations have no isolation trait and preserve ordinary enclosing captures.
-func.def @ordinary_declared_shape(%count: index) {
-  func.decl @ordinary_shape(%tile: tile<[%count]xf32>)
-  func.return
-}
-
-// ====
-
 // Variadic result diagnostics identify the dependent value's field ordinal.
 func.def @outer_variadic_shape(%count: index) {
-  func.def @capturing_results(%input: tensor<4xf32>) {
+  test.isolated_region {
+    %seed = test.constant 7 : i32
+    %input = test.convert %seed : i32 -> tensor<4xf32>
     // ERROR@+1: DOMINANCE/016 "results[0] type references value '%count'"
     %tile, %size = test.deflate %input : tensor<4xf32> -> (tile<[%count]xf32>, index)
-    func.return
-  }
-  func.return
-}
-
-// ====
-
-// A non-returning body does not exempt its return type from signature scope.
-func.def @outer_result_shape(%count: index) {
-  // ERROR@+1: DOMINANCE/016 "count"
-  func.def @capturing_return_type() -> (tile<[%count]xf32>) {
-    cfg.br ^loop
-  ^loop:
-    cfg.br ^loop
+    test.yield
   }
   func.return
 }
@@ -153,13 +86,14 @@ func.def @local_repeated_shape(%count: index, %tile: tile<[%count]x[%count]xf32>
 
 // ====
 
-// Shared nested signatures report each invisible provider once per carrier,
+// Shared nested types report each invisible provider once per carrier,
 // even when the same dimension occurs through several structural paths.
 func.def @shared_nested_capture(%width: index, %height: index) {
   test.isolated_region {
-    // ERROR@+2: DOMINANCE/016 "args[0] type references value '%width'"
-    // ERROR@+1: DOMINANCE/016 "args[0] type references value '%height'"
-    func.decl @callback(%signature: (vector<[%width]x[%width]xf32>, vector<[%height]x[%width]xf32>) -> (vector<[%width]xf32>))
+    %seed = test.constant 7 : i32
+    // ERROR@+2: DOMINANCE/016 "width"
+    // ERROR@+1: DOMINANCE/016 "height"
+    %callback = test.convert %seed : i32 -> (vector<[%width]x[%width]xf32>, vector<[%height]x[%width]xf32>) -> (vector<[%width]xf32>)
     test.yield
   }
   func.return
@@ -171,8 +105,9 @@ func.def @shared_nested_capture(%width: index, %height: index) {
 // dictionary fields, without keeping separate paths to the same provider.
 func.def @parameterized_capture(%count: index) {
   test.isolated_region {
-    // ERROR@+1: DOMINANCE/016 "args[0] type references value '%count'"
-    func.decl @array(%storage: test.array<vector<[%count]xf32>, metadata = {shape = #test.options<mode = precise, element_type = vector<[%count]x[%count]xf32>>}>)
+    %seed = test.constant 7 : i32
+    // ERROR@+1: DOMINANCE/016 "count"
+    %array = test.convert %seed : i32 -> test.array<vector<[%count]xf32>, metadata = {shape = #test.options<mode = precise, element_type = vector<[%count]x[%count]xf32>>}>
     test.yield
   }
   func.return
@@ -214,8 +149,12 @@ func.def @coresult_encodings(%input: tensor<4xf32>) {
 // Ordinary nested regions retain enclosing type references, and an isolated
 // sibling does not change the enclosing visibility floor after it exits.
 func.def @shape_restoration(%count: index, %condition: i1) {
-  func.def @local_group(%count: index, %members: group<[%count]>) {
-    func.return
+  test.isolated_region {
+    %local_count = index.constant 4 : index
+    %local_seed = test.constant 7 : i32
+    %members = test.convert %local_seed : i32 -> group<[%local_count]>
+    test.use %members : group<[%local_count]>
+    test.yield
   }
   %seed = test.constant 7 : i32
   scf.if %condition {

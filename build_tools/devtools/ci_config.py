@@ -145,10 +145,10 @@ CPU_BAZEL_TARGET_EXCLUDES = (
     "-//runtime/src/iree/hal/drivers/webgpu/...",
 )
 CPU_RESOURCE_TAG_EXCLUDES = run_requirements.bazel_exclusions(())
-# GPU jobs explicitly admit both native endpoints and HSA agents. XDNA-only
-# jobs retain their separate device requirement.
+# GPU jobs admit native endpoints. XDNA-only jobs retain their separate device
+# requirement.
 XDNA_RESOURCES = ("libamdf.resource.xdna",)
-AMDGPU_RESOURCES = ("runtime.resource.amd_gpu", "libamdf.resource.amd_gpu")
+AMDGPU_RESOURCES = ("libamdf.resource.amd_gpu",)
 AMD_GPU_RUN_REQUIREMENT_TAG = "iree-run-requirement=libamdf.resource.amd_gpu"
 VULKAN_RESOURCES = ("vulkan.resource.device",)
 # Each command resets explicit API requests from machine-local Bazel settings.
@@ -217,16 +217,19 @@ AMD_GPU_WEIGHTS_TARGET = "//loom/src/loom/tooling/target/amdgpu/serve:gpu_weight
 # The complete weights suite exercises shader assertions. Windows runs its
 # streaming cases separately without requesting the unavailable feedback service.
 AMD_GPU_WINDOWS_BAZEL_TARGETS = AMD_GPU_BAZEL_TARGETS + ("-" + AMD_GPU_WEIGHTS_TARGET,)
+AMD_GPU_WINDOWS_TEST_TAG_FILTERS = ("-requires-amd-gpu-feedback",)
 # Native CTS binaries embed images for every supported execution family. Their
 # compiler descriptors must remain enabled even on a single-family runner.
 AMD_GPU_BINARY_TARGETS = ("gfx90a", "gfx9-4-generic", "gfx11-generic", "gfx12-generic")
-AMD_GPU_LOOM_TARGETS = (
-    "iree_hal",
-    *AMD_GPU_BINARY_TARGETS,
-    "gfx110X-all",
-    "gfx115X-all",
-    "gfx120X-all",
-)
+# Compiler-only fixtures cover the complete supported target vocabulary, even
+# when hardware execution uses one family and native CTS embeds a smaller set.
+AMD_GPU_LOOM_TARGETS = ("loom_defaults",)
+# Single-family hardware jobs select only that family's HAL CTS instances.
+# Multi-family selectors retain both; queue transport tests are independent.
+AMD_GPU_CTS_TARGET_PREFIXES = {
+    "rdna": ("rdna", "gfx10", "gfx11", "gfx12"),
+    "cdna": ("cdna", "gfx9"),
+}
 AMD_GPU_BAZEL_OPTIONS = (
     "--//runtime/src/iree/hal/drivers/amd/gpu:targets="
     + ",".join(AMD_GPU_BINARY_TARGETS),
@@ -249,10 +252,9 @@ AMD_CLIENT_WINDOWS_RESOURCES = (
         "d3d12.resource.device",
     )
 )
-AMDGPU_CMAKE_PACKAGE_REGEX = r"^iree/hal/drivers/(amd|amdgpu)/"
+AMDGPU_CMAKE_PACKAGE_REGEX = r"^iree/hal/drivers/amd/"
 AMDGPU_CMAKE_BUILD_TARGETS = (
     "runtime/src/iree/hal/drivers/amd/all",
-    "runtime/src/iree/hal/drivers/amdgpu/all",
     "libamdf/all",
 )
 AMDGPU_BAZEL_OPTIONS = (
@@ -287,15 +289,12 @@ AMDGPU_WINDOWS_COPY_FILTER = (
     "SdmaKernelQueueTest.ExecutesMaterializedSdmaCopy"
 )
 DEFAULT_AMDGPU_TARGET_SELECTOR = "gfx942"
-AMDGPU_BUILD_REQUIREMENT_TAG = "iree-build-requirement=runtime.hal.amdgpu"
-AMDGPU_RUN_REQUIREMENT_TAG = "iree-run-requirement=runtime.resource.amd_gpu"
 AMDGPU_BAZEL_TEST_TAG_FILTERS = (
-    AMDGPU_BUILD_REQUIREMENT_TAG,
-    AMDGPU_RUN_REQUIREMENT_TAG,
     AMDF_BUILD_REQUIREMENT_TAG,
     AMD_GPU_RUN_REQUIREMENT_TAG,
 )
 AMDGPU_BAZEL_TARGET_EXCLUDES = (
+    "-//runtime/src/iree/hal/drivers/amdgpu/...",
     "-//runtime/src/iree/hal/drivers/vulkan/...",
     "-//runtime/src/iree/hal/drivers/webgpu/...",
 )

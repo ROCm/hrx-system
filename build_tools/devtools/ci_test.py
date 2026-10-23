@@ -47,6 +47,41 @@ from build_tools.devtools import ci, ci_config, run_requirements
 
 
 class CiTest(unittest.TestCase):
+    def test_cts_family_filter_composes_with_requested_cases(self):
+        with (
+            mock.patch.object(
+                ci_config,
+                "AMD_GPU_CTS_TARGET_PREFIXES",
+                {"alpha": ("chip-a",), "beta": ("chip-b",)},
+            ),
+            mock.patch.dict(os.environ, {"GTEST_FILTER": "Selected.*-Ignored.*"}),
+        ):
+            self.assertEqual(
+                ci.amd_gpu_cts_test_env("chip-a0,chip-a1"),
+                (("GTEST_FILTER", "Selected.*-Ignored.*:CTS*/*/beta:CTS*/*/beta_*"),),
+            )
+            self.assertEqual(
+                ci.amd_gpu_cts_test_env("chip-b0"),
+                (("GTEST_FILTER", "Selected.*-Ignored.*:CTS*/*/alpha:CTS*/*/alpha_*"),),
+            )
+            for selector in ("chip-a0,chip-b0", "all", "unknown", ""):
+                with self.subTest(selector=selector):
+                    self.assertEqual(ci.amd_gpu_cts_test_env(selector), ())
+
+    def test_cts_family_filter_defaults_to_all_other_cases(self):
+        with (
+            mock.patch.object(
+                ci_config,
+                "AMD_GPU_CTS_TARGET_PREFIXES",
+                {"alpha": ("chip-a",), "beta": ("chip-b",)},
+            ),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
+            self.assertEqual(
+                ci.amd_gpu_cts_test_env("chip-a0"),
+                (("GTEST_FILTER", "*-CTS*/*/beta:CTS*/*/beta_*"),),
+            )
+
     def test_sanitizer_uses_explicit_symbolizer_before_toolchain_discovery(self):
         with (
             mock.patch.dict(
@@ -992,47 +1027,34 @@ class CiTest(unittest.TestCase):
 
         text = output.getvalue()
         self.assertIn("dev.py bazel configure", text)
-        self.assertIn("-DIREE_ROCM_DEPENDENCY_MODE=pinned", text)
-        self.assertIn(
-            "--//runtime/src/iree/hal/drivers/amdgpu:targets=gfx942",
-            text,
-        )
-        self.assertIn("--//loom/config/target/amdgpu:targets=iree_hal", text)
         self.assertNotIn("IREE_ROCM_PATH", text)
         self.assertNotIn("/opt/rocm", text)
-
-    def test_amdgpu_target_selects_runtime_and_loom_build_settings(self):
-        args = ci.parse_arguments(
-            [
-                "iree-bazel-amdgpu",
-                "--amdgpu-target",
-                "gfx1150",
-            ]
-        )
-
-        steps = ci.steps_from_args(args)
-        bazel_action_steps = [
-            step
-            for step in steps
-            if step.argv[2:4] in (("bazel", "build"), ("bazel", "test"))
-        ]
-
-        self.assertTrue(bazel_action_steps)
-        for step in bazel_action_steps:
-            self.assertIn(
-                "--//runtime/src/iree/hal/drivers/amdgpu:targets=gfx1150",
-                step.argv,
-            )
-            self.assertIn(
-                "--//loom/config/target/amdgpu:targets=iree_hal",
-                step.argv,
-            )
 
     def test_amdgpu_target_rejected_by_non_amdgpu_command(self):
         args = ci.parse_arguments(["iree-bazel-cpu", "--amdgpu-target", "gfx1150"])
 
         with self.assertRaisesRegex(ValueError, "only supported for AMDGPU"):
             ci.steps_from_args(args)
+
+    def test_amdgpu_execution_selector_is_independent_of_compiler_targets(self):
+        with mock.patch.object(
+            ci_config,
+            "AMD_GPU_BAZEL_OPTIONS",
+            ("--//loom/config/target/amdgpu:targets=compiler-source",),
+        ):
+            steps = ci.steps_from_args(
+                ci.parse_arguments(
+                    ["iree-bazel-amdgpu", "--amdgpu-target", "selected-hardware"]
+                )
+            )
+        test_step = next(step for step in steps if "test" in step.argv)
+        self.assertIn(
+            "--//runtime/src/iree/hal/drivers/amdgpu:targets=selected-hardware",
+            test_step.argv,
+        )
+        self.assertIn(
+            "--//loom/config/target/amdgpu:targets=compiler-source", test_step.argv
+        )
 
     def test_amdgpu_loom_importers_are_forwarded_to_configuration(self):
         args = ci.parse_arguments(
@@ -1059,41 +1081,6 @@ class CiTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "only supported for AMDGPU Bazel"):
             ci.steps_from_args(args)
 
-    def test_amdgpu_bazel_tests_pin_libhsa_from_rocm_root(self):
-        args = ci.parse_arguments(
-            [
-                "iree-bazel-amdgpu",
-                "--target",
-                "//runtime/...",
-            ]
-        )
-
-        with mock.patch.dict(
-            ci.os.environ,
-            {"HRX_ROCM_ROOT": "/tmp/rocm-root"},
-            clear=True,
-        ):
-            steps = ci.steps_from_args(args)
-
-        amdgpu_test = next(step for step in steps if step.name == "Test IREE / AMDGPU")
-        relative_path = (
-            Path("bin/hsa-runtime64.dll")
-            if ci.sys.platform == "win32"
-            else Path("lib/libhsa-runtime64.so.1")
-        )
-        self.assertIn(
-            "--test_env=IREE_HAL_AMDGPU_LIBHSA_PATH="
-            + str(Path("/tmp/rocm-root") / relative_path),
-            amdgpu_test.argv,
-        )
-        for name in ci.AMDGPU_DEVICE_VISIBILITY_ENV_VARS:
-            self.assertFalse(
-                any(
-                    option.startswith(f"--test_env={name}=")
-                    for option in amdgpu_test.argv
-                )
-            )
-
     def test_amdgpu_commands_preserve_device_visibility(self):
         args = ci.parse_arguments(
             [
@@ -1119,7 +1106,7 @@ class CiTest(unittest.TestCase):
             cmake_steps = ci.steps_from_args(ci.parse_arguments(["iree-cmake-amdgpu"]))
 
         amdgpu_test = next(step for step in steps if step.name == "Test IREE / AMDGPU")
-        for name in ci.AMDGPU_DEVICE_VISIBILITY_ENV_VARS:
+        for name in ci.AMD_DEVICE_VISIBILITY_ENV_VARS:
             self.assertIn(
                 f"--test_env={name}={device_visibility[name]}",
                 amdgpu_test.argv,
@@ -1129,8 +1116,8 @@ class CiTest(unittest.TestCase):
         ]
         self.assertEqual(len(cmake_tests), 2)
         for step in cmake_tests:
-            for item in device_visibility.items():
-                self.assertIn(item, step.env)
+            for name in ci.AMD_DEVICE_VISIBILITY_ENV_VARS:
+                self.assertIn((name, device_visibility[name]), step.env)
 
     def test_native_amd_profiles_preserve_independent_and_empty_visibility(self):
         selection = {
@@ -1179,33 +1166,8 @@ class CiTest(unittest.TestCase):
         ):
             steps = ci.steps_from_args(args)
 
-        configure_step = next(step for step in steps if step.name == "Configure Bazel")
-        self.assertIn("-DIREE_ROCM_PATH=/tmp/rocm-root", configure_step.argv)
-
-    def test_amdgpu_bazel_tests_use_explicit_libhsa_override(self):
-        args = ci.parse_arguments(
-            [
-                "iree-bazel-amdgpu",
-                "--target",
-                "//runtime/...",
-            ]
-        )
-
-        with mock.patch.dict(
-            ci.os.environ,
-            {
-                "HRX_ROCM_ROOT": "/tmp/rocm-root",
-                "IREE_HAL_AMDGPU_LIBHSA_PATH": "/tmp/custom/libhsa-runtime64.so.1",
-            },
-            clear=True,
-        ):
-            steps = ci.steps_from_args(args)
-
-        amdgpu_test = next(step for step in steps if step.name == "Test IREE / AMDGPU")
-        self.assertIn(
-            "--test_env=IREE_HAL_AMDGPU_LIBHSA_PATH=/tmp/custom/libhsa-runtime64.so.1",
-            amdgpu_test.argv,
-        )
+        test_step = next(step for step in steps if step.name == "Test IREE / AMDGPU")
+        self.assertIn("--repo_env=IREE_ROCM_PATH=/tmp/rocm-root", test_step.argv)
 
     def test_amdgpu_loom_target_scope_tests_loom(self):
         args = ci.parse_arguments(
@@ -1424,76 +1386,6 @@ class CiTest(unittest.TestCase):
             self.assertIn(target, test_step.argv)
         for target in ci_config.AMDGPU_BAZEL_TARGET_EXCLUDES:
             self.assertIn(target, test_step.argv)
-        self.assertFalse(
-            any(
-                arg.startswith("-//runtime/src/iree/hal/drivers/amdgpu")
-                for arg in test_step.argv
-            )
-        )
-
-    def test_amdgpu_jobs_enable_native_execution_for_rdna_and_cdna(self):
-        for target in ("gfx90a", "gfx942", "gfx1100", "gfx1201"):
-            for sanitizer in (None, "asan", "tsan", "ubsan"):
-                with self.subTest(target=target, sanitizer=sanitizer):
-                    command = "iree-bazel-amdgpu"
-                    if sanitizer:
-                        command += "-" + sanitizer
-                    steps = ci.steps_from_args(
-                        ci.parse_arguments([command, "--amdgpu-target", target])
-                    )
-                    configure_step = steps[0]
-                    self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", configure_step.argv)
-                    self.assertIn("-DIREE_HAL_DRIVER_AMD=ON", configure_step.argv)
-                    test_step = next(
-                        step for step in steps if step.name.startswith("Test IREE")
-                    )
-                    self.assertIn(
-                        "--//runtime/config/hal:drivers=task,amdgpu,amd",
-                        test_step.argv,
-                    )
-                    self.assertIn(
-                        "--//runtime/src/iree/hal/drivers/amdgpu:targets=" + target,
-                        test_step.argv,
-                    )
-                    self.assert_native_gpu_image_targets(test_step.argv)
-
-    def assert_native_gpu_image_targets(self, argv):
-        image_prefix = "--//runtime/src/iree/hal/drivers/amd/gpu:targets="
-        compiler_prefix = "--//loom/config/target/amdgpu:targets="
-        images = next(
-            option.removeprefix(image_prefix).split(",")
-            for option in reversed(argv)
-            if option.startswith(image_prefix)
-        )
-        compiler_targets = next(
-            option.removeprefix(compiler_prefix).split(",")
-            for option in reversed(argv)
-            if option.startswith(compiler_prefix)
-        )
-        for target in ("gfx90a", "gfx9-4-generic", "gfx11-generic", "gfx12-generic"):
-            self.assertIn(target, images)
-            self.assertIn(target, compiler_targets)
-        self.assertIn("iree_hal", compiler_targets)
-
-    def test_windows_native_gpu_jobs_keep_all_cts_image_descriptors(self):
-        with (
-            mock.patch.object(ci.sys, "platform", "win32"),
-            mock.patch.object(ci.shutil, "which", return_value=None),
-        ):
-            steps = ci.steps_from_args(
-                ci.parse_arguments(
-                    ["iree-bazel-amdgpu-native-asan", "--amdgpu-target", "gfx1201"]
-                )
-            )
-        test_step = next(
-            step for step in steps if step.name == "Test IREE / Windows AMDGPU / ASAN"
-        )
-        self.assert_native_gpu_image_targets(test_step.argv)
-        self.assertIn(
-            "//loom/src/loom/tooling/target/amdgpu/test:"
-            "amd_gpu_hal_tests_execute_amd_gpu_hardware_test",
-            test_step.argv,
-        )
 
     def test_bazel_amdgpu_single_sanitizer_command_runs_one_configuration(self):
         args = ci.parse_arguments(
@@ -1524,13 +1416,6 @@ class CiTest(unittest.TestCase):
             any(
                 arg.startswith("--test_env=TSAN_OPTIONS=suppressions=")
                 for arg in tsan_test.argv
-            )
-        )
-        self.assertFalse(
-            any(
-                arg.startswith("-//runtime/src/iree/hal/drivers/amdgpu")
-                for step in steps
-                for arg in step.argv
             )
         )
         self.assertFalse(any("--config=asan" in line for line in command_lines))
@@ -2003,21 +1888,6 @@ fi
         command_lines = [step.command_line() for step in steps]
 
         self.assertTrue(
-            any("-DIREE_HAL_DRIVER_AMDGPU=ON" in line for line in command_lines)
-        )
-        self.assertTrue(
-            any("-DIREE_ROCM_DEPENDENCY_MODE=pinned" in line for line in command_lines)
-        )
-        self.assertTrue(
-            any("-DIREE_HAL_AMDGPU_TARGETS=gfx1150" in line for line in command_lines)
-        )
-        self.assertTrue(
-            any(
-                "-DLOOM_TARGET_AMDGPU_TARGETS=iree_hal" in line
-                for line in command_lines
-            )
-        )
-        self.assertTrue(
             any(
                 "-DIREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source" in line
                 for line in command_lines
@@ -2067,51 +1937,26 @@ fi
             configure_step.argv,
         )
 
-    def test_cmake_amdgpu_jobs_enable_both_driver_packages_and_native_images(self):
-        for target in ("gfx90a", "gfx942", "gfx1151", "gfx1201"):
-            with self.subTest(target=target):
-                steps = ci.steps_from_args(
-                    ci.parse_arguments(["iree-cmake-amdgpu", "--amdgpu-target", target])
-                )
-                configure_step = steps[0]
-                self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", configure_step.argv)
-                self.assertIn("-DIREE_HAL_DRIVER_AMD=ON", configure_step.argv)
-                for name in ("IREE_HAL_AMD_GPU_TARGETS", "LOOM_TARGET_AMDGPU_TARGETS"):
-                    prefix = f"-D{name}="
-                    values = next(
-                        option.removeprefix(prefix).split(";")
-                        for option in reversed(configure_step.argv)
-                        if option.startswith(prefix)
-                    )
-                    for image in (
-                        "gfx90a",
-                        "gfx9-4-generic",
-                        "gfx11-generic",
-                        "gfx12-generic",
-                    ):
-                        self.assertIn(image, values)
-                package_step = next(
-                    step for step in steps if step.name.endswith("package tests")
-                )
-                self.assertIn(r"^iree/hal/drivers/(amd|amdgpu)/", package_step.argv)
-
-    def test_cmake_amdgpu_tests_pin_libhsa_from_rocm_root(self):
-        args = ci.parse_arguments(["iree-cmake-amdgpu"])
-
-        with mock.patch.dict(
-            ci.os.environ,
-            {"HRX_ROCM_ROOT": "/tmp/rocm-root"},
-            clear=True,
+    def test_cmake_amdgpu_serializes_image_and_compiler_selectors_independently(self):
+        with (
+            mock.patch.object(
+                ci_config, "AMD_GPU_BINARY_TARGETS", ("image-a", "image-b")
+            ),
+            mock.patch.object(ci_config, "AMD_GPU_LOOM_TARGETS", ("compiler-source",)),
         ):
-            steps = ci.steps_from_args(args)
-            expected_env = ci.amdgpu_test_env()
-
-        test_steps = [
-            step for step in steps if step.name.startswith("Test IREE CMake AMDGPU")
-        ]
-        self.assertEqual(len(test_steps), 2)
-        for step in test_steps:
-            self.assertEqual(step.env, expected_env)
+            steps = ci.steps_from_args(
+                ci.parse_arguments(
+                    ["iree-cmake-amdgpu", "--amdgpu-target", "selected-hardware"]
+                )
+            )
+        configure_step = steps[0]
+        self.assertIn("-DIREE_HAL_AMD_GPU_TARGETS=image-a;image-b", configure_step.argv)
+        self.assertIn(
+            "-DLOOM_TARGET_AMDGPU_TARGETS=compiler-source", configure_step.argv
+        )
+        self.assertIn(
+            "-DIREE_HAL_AMDGPU_TARGETS=selected-hardware", configure_step.argv
+        )
 
     def test_cmake_amdgpu_msan_builds_driver_targets_without_test_deps(self):
         args = ci.parse_arguments(["iree-cmake-amdgpu-msan"])

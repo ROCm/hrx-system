@@ -11,11 +11,15 @@
 #include <linux/mempolicy.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <climits>
+#include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <string>
 #include <tuple>
 #include <vector>
 
@@ -42,12 +46,24 @@ struct NativeState {
 };
 
 thread_local NativeState* native_state = nullptr;
+// Overrides only kernel identity; page population uses real native mappings.
+thread_local const char* kernel_release = nullptr;
 
 }  // namespace
 
 extern "C" void* __real_mmap(void*, size_t, int, int, int, off_t);
 extern "C" int __real_munmap(void*, size_t);
 extern "C" int __real_close(int);
+extern "C" int __real_uname(struct utsname*);
+
+extern "C" int __wrap_uname(struct utsname* kernel) {
+  const int result = __real_uname(kernel);
+  if (result == 0 && kernel_release != nullptr) {
+    std::snprintf(kernel->release, sizeof(kernel->release), "%s",
+                  kernel_release);
+  }
+  return result;
+}
 
 extern "C" void* __wrap_mmap(void* address, size_t length, int protection,
                              int flags, int descriptor, off_t offset) {
@@ -164,14 +180,22 @@ TEST_F(HostMemoryTest, CloseErrorPreservesTheFactThatTheSourceWasConsumed) {
   EXPECT_EQ(native_.close_count, 1u);
 }
 
-class HostBackingTest
-    : public ::testing::TestWithParam<std::tuple<uint64_t, bool>> {
+struct KernelPagePolicy {
+  // Native release identifying the exporter's scatterlist implementation.
+  const char* release;
+  // Whether export backing must prohibit huge-page allocation/promotion.
+  bool requires_base_pages;
+};
+
+class HostBackingTest : public ::testing::TestWithParam<
+                            std::tuple<uint64_t, bool, KernelPagePolicy>> {
  protected:
   void SetUp() override {
     const long page_size = sysconf(_SC_PAGESIZE);
     ASSERT_GT(page_size, 0);
     page_size_ = static_cast<size_t>(page_size);
     byte_length_ = std::get<0>(GetParam());
+    kernel_release = std::get<2>(GetParam()).release;
     ASSERT_NO_FATAL_FAILURE(CreateBacking());
   }
 
@@ -186,10 +210,35 @@ class HostBackingTest
   }
 
   void TearDown() override {
+    kernel_release = nullptr;
     if (backing_.pointer != nullptr) {
       EXPECT_EQ(amdf_platform_host_backing_destroy(&backing_, byte_length_),
                 AMDF_STATUS_OK);
     }
+  }
+
+  void ExpectPageSizePolicy() {
+    SCOPED_TRACE(kernel_release);
+    // VmFlags exposes the actual native VMA policy without reading PFNs or
+    // assuming huge-page promotion succeeds under machine-wide pressure.
+    std::ifstream mappings("/proc/self/smaps");
+    ASSERT_TRUE(mappings.is_open());
+    const auto address = reinterpret_cast<uintptr_t>(backing_.pointer);
+    bool contains_backing = false;
+    std::string line;
+    while (std::getline(mappings, line)) {
+      uintptr_t begin = 0, end = 0;
+      if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2) {
+        contains_backing = address >= begin && address < end;
+      } else if (contains_backing && line.starts_with("VmFlags:")) {
+        const bool prohibits_huge_pages = line.find(" nh") != std::string::npos;
+        EXPECT_EQ(prohibits_huge_pages,
+                  std::get<1>(GetParam()) ||
+                      std::get<2>(GetParam()).requires_base_pages);
+        return;
+      }
+    }
+    FAIL() << "native backing missing from smaps";
   }
 
   void ExpectPresent() {
@@ -223,6 +272,7 @@ TEST_P(HostBackingTest, PreparesEveryTranslationAndPreservesFileAliases) {
                                                 amdf_allocator_system()),
             AMDF_STATUS_OK);
   ASSERT_NO_FATAL_FAILURE(ExpectPresent());
+  ASSERT_NO_FATAL_FAILURE(ExpectPageSizePolicy());
   auto* bytes = static_cast<uint8_t*>(backing_.pointer);
   std::vector<uint8_t> expected(byte_length_);
   ASSERT_EQ(std::memcmp(bytes, expected.data(), expected.size()), 0);
@@ -243,9 +293,12 @@ TEST_P(HostBackingTest, BindsPlacementBeforePreparingFoliosAndTail) {
   constexpr size_t kWordBits = sizeof(unsigned long) * CHAR_BIT;
   std::vector<unsigned long> allowed(page_size_ / sizeof(unsigned long));
   const size_t node_count = allowed.size() * kWordBits;
-  ASSERT_EQ(syscall(SYS_get_mempolicy, nullptr, allowed.data(), node_count + 1,
-                    nullptr, MPOL_F_MEMS_ALLOWED),
-            0);
+  const long result = syscall(SYS_get_mempolicy, nullptr, allowed.data(),
+                              node_count + 1, nullptr, MPOL_F_MEMS_ALLOWED);
+  if (result == -1 && (errno == EPERM || errno == ENOSYS)) {
+    GTEST_SKIP() << "NUMA policy queries unavailable: " << std::strerror(errno);
+  }
+  ASSERT_EQ(result, 0) << std::strerror(errno);
   uint32_t tested_nodes = 0;
   for (uint32_t node = 0; node < node_count; ++node) {
     if ((allowed[node / kWordBits] & (1UL << (node % kWordBits))) == 0) {
@@ -280,9 +333,16 @@ TEST_P(HostBackingTest, BindsPlacementBeforePreparingFoliosAndTail) {
 
 INSTANTIATE_TEST_SUITE_P(
     Geometry, HostBackingTest,
-    ::testing::Combine(::testing::Values<uint64_t>(4096, 2u << 20,
-                                                   (2u << 20) + 4096,
-                                                   (4u << 20) + 4096),
-                       ::testing::Bool()));
+    ::testing::Combine(
+        ::testing::Values<uint64_t>(4096, 2u << 20, (2u << 20) + 4096,
+                                    (4u << 20) + 4096),
+        ::testing::Bool(),
+        ::testing::Values(KernelPagePolicy{"6.19.5-arch1-1", true},
+                          KernelPagePolicy{"7.0.0-38-generic", true},
+                          KernelPagePolicy{"7.1.12-200.fc44.x86_64", true},
+                          KernelPagePolicy{"7.2.0-rc1", false},
+                          KernelPagePolicy{"7.10.0", false},
+                          KernelPagePolicy{"8.0.0", false},
+                          KernelPagePolicy{"custom", true})));
 
 }  // namespace

@@ -53,6 +53,8 @@ typedef struct amdf_gpu_kfd_topology_t {
   // Native integrated-package identity; owned cached SYSTEM storage is also
   // local to this GPU without requiring a distinct VRAM heap.
   bool integrated;
+  // Native SR-IOV function identity; KFD cannot expose the HDP remap to VFs.
+  bool virtual_function;
   // Cached physical heap totals, independent of current allocation usage.
   struct {
     // Physical VRAM capacity in bytes, not KFD's possibly substituted GTT size.

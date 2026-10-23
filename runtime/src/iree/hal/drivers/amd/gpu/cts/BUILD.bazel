@@ -196,6 +196,8 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:pool_test_util",
         "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:queue",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:queue",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

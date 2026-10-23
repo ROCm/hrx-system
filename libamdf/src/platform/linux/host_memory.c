@@ -10,8 +10,10 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <linux/mempolicy.h>
+#include <stdio.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
+#include <sys/utsname.h>
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/platform/host_reservation.h"
@@ -176,13 +178,31 @@ amdf_status_t amdf_platform_host_memory_place(void* pointer,
 amdf_status_t amdf_platform_host_backing_populate(
     const amdf_platform_host_backing_t* backing, uint64_t byte_length,
     amdf_memory_placement_t placement, amdf_allocator_t host_allocator) {
+  // Before Linux 7.2, udmabuf constructs one scatterlist entry per base page
+  // with a folio-relative offset. DMA importers count that offset as additional
+  // pages, producing repeated/wrong GPU mappings. Restrict this fresh export
+  // backing before population; suppressing only MADV_COLLAPSE would still
+  // permit transparent promotion before export pins the pages.
+  struct utsname kernel;
+  if (uname(&kernel) != 0) {
+    return amdf_linux_error(errno);
+  }
+  unsigned int major = 0, minor = 0;
+  const bool large_pages =
+      sscanf(kernel.release, "%u.%u", &major, &minor) == 2 &&
+      (major > 7 || (major == 7 && minor >= 2));
+  if (!large_pages &&
+      madvise(backing->pointer, (size_t)byte_length, MADV_NOHUGEPAGE) != 0) {
+    return amdf_linux_error(errno);
+  }
   amdf_status_t status = AMDF_STATUS_OK;
   if (placement.kind != AMDF_MEMORY_PLACEMENT_KIND_NONE) {
     status = amdf_linux_host_memory_bind(backing->pointer, byte_length,
                                          placement, host_allocator);
   }
   const uint64_t folio_length =
-      byte_length & ~((uint64_t)AMDF_LINUX_HOST_FOLIO_SIZE - 1);
+      large_pages ? byte_length & ~((uint64_t)AMDF_LINUX_HOST_FOLIO_SIZE - 1)
+                  : 0;
   const long page_size = sysconf(_SC_PAGESIZE);
   if (amdf_status_is_ok(status) && page_size <= 0) {
     status = amdf_linux_error(EINVAL);

@@ -6,9 +6,12 @@
 
 #include "libamdf/src/gpu/umd/kfd/topology.h"
 
+#include <drm/amdgpu_drm.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <sys/ioctl.h>
 
+#include <cstdarg>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -22,11 +25,82 @@
 
 namespace {
 
+struct NativeDeviceInfo {
+  // Cached native facts returned by the read-only render query.
+  drm_amdgpu_info_device info = {
+      .virtual_address_offset = 0x10000,
+      .virtual_address_max = UINT64_C(1) << 47,
+      .virtual_address_alignment = 4096,
+      .pte_fragment_size = 2 * 1024 * 1024,
+  };
+  // Real descriptor borrowed by the query and closed by profile construction.
+  int descriptor = -1;
+  // Error at native file opening, or zero for success.
+  int open_error = 0;
+  // Error at the metadata query, or zero for success.
+  int query_error = 0;
+  // Number of native metadata queries.
+  uint32_t query_count = 0;
+};
+
+thread_local NativeDeviceInfo* native_device_info = nullptr;
+
+}  // namespace
+
+extern "C" amdf_status_t __real_amdf_linux_endpoint_open_file(
+    const amdf_platform_endpoint_t*, int*);
+extern "C" int __real_ioctl(int, unsigned long, ...);
+
+extern "C" amdf_status_t __wrap_amdf_linux_endpoint_open_file(
+    const amdf_platform_endpoint_t* endpoint, int* out_descriptor) {
+  if (native_device_info == nullptr) {
+    return __real_amdf_linux_endpoint_open_file(endpoint, out_descriptor);
+  }
+  if (native_device_info->open_error != 0) {
+    return amdf_linux_error(native_device_info->open_error);
+  }
+  const int descriptor = open("/dev/null", O_RDONLY | O_CLOEXEC);
+  if (descriptor < 0) {
+    return amdf_linux_error(errno);
+  }
+  native_device_info->descriptor = descriptor;
+  native_device_info->info.device_id = endpoint->info.pci.device_id;
+  *out_descriptor = descriptor;
+  return AMDF_STATUS_OK;
+}
+
+extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
+  va_list arguments;
+  va_start(arguments, request);
+  void* argument = va_arg(arguments, void*);
+  va_end(arguments);
+  if (native_device_info == nullptr) {
+    return __real_ioctl(descriptor, request, argument);
+  }
+  EXPECT_EQ(descriptor, native_device_info->descriptor);
+  EXPECT_EQ(request, DRM_IOCTL_AMDGPU_INFO);
+  const auto* query = static_cast<const drm_amdgpu_info*>(argument);
+  EXPECT_EQ(query->query, AMDGPU_INFO_DEV_INFO);
+  EXPECT_EQ(query->return_size, sizeof(drm_amdgpu_info_device));
+  ++native_device_info->query_count;
+  if (native_device_info->query_error != 0) {
+    errno = native_device_info->query_error;
+    return -1;
+  }
+  *reinterpret_cast<drm_amdgpu_info_device*>(query->return_pointer) =
+      native_device_info->info;
+  return 0;
+}
+
+namespace {
+
 // The filesystem is the native dependency. The production query reads it
-// through the instance's sysfs root without a render node or native device.
+// through the instance's sysfs root. Profile construction additionally queries
+// cached render metadata; neither path acquires a KFD VM or execution storage.
 class KfdTopologyTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    native_device_info = &native_;
     std::string directory = ::testing::TempDir() + "/amdf-topology-XXXXXX";
     ASSERT_NE(mkdtemp(directory.data()), nullptr);
     directory_ = directory;
@@ -53,6 +127,11 @@ class KfdTopologyTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    native_device_info = nullptr;
+    if (native_.descriptor >= 0) {
+      EXPECT_EQ(fcntl(native_.descriptor, F_GETFD), -1);
+      EXPECT_EQ(errno, EBADF);
+    }
     EXPECT_EQ(amdf_linux_file_close(&instance_.sysfs_descriptor),
               AMDF_STATUS_OK);
     if (!directory_.empty()) {
@@ -125,6 +204,8 @@ class KfdTopologyTest : public ::testing::Test {
     }
   }
 
+  // Read-only native query dependency; descriptor release remains real.
+  NativeDeviceInfo native_;
   // Temporary native metadata directory owned by this case.
   std::filesystem::path directory_;
   // Instance whose discovery root names only the test-owned directory.
@@ -359,6 +440,73 @@ TEST_F(KfdTopologyTest, DiscoversNewPciAndGfxIdentitiesWithoutMemoryTables) {
     EXPECT_EQ(profile->info.compute.compute_unit_count, 304u);
     amdf_free(amdf_allocator_system(), profile);
   }
+}
+
+TEST_F(KfdTopologyTest, VirtualFunctionsKeepOnlyHostPublishedSystemRings) {
+  const auto gc =
+      directory_ / "dev/char/226:160/device/ip_discovery/die/0/11/0";
+  std::filesystem::create_directories(gc);
+  WriteAttribute(gc / "major", "11\n");
+  WriteAttribute(gc / "minor", "0\n");
+  WriteAttribute(gc / "revision", "3\n");
+  const auto sdma =
+      directory_ / "dev/char/226:160/device/ip_discovery/die/0/42/0";
+  WriteAttribute(sdma / "major", "6\n");
+  WriteAttribute(sdma / "minor", "0\n");
+  WriteAttribute(sdma / "revision", "1\n");
+  WriteAttribute(directory_ / "class/kfd/kfd/topology/nodes/6/properties",
+                 "drm_render_minor 160\nvendor_id 4098\ndevice_id 29857\n"
+                 "capability 2893521536\nsimd_count 216\nsimd_per_cu 4\n"
+                 "max_waves_per_simd 8\nmax_slots_scratch_cu 32\n"
+                 "wave_front_size 32\nlds_size_in_kb 64\narray_count 3\n"
+                 "simd_arrays_per_engine 1\nnum_xcc 1\nnum_cp_queues 24\n"
+                 "gfx_target_version 110001\np2p_links_count 0\n"
+                 "cwsr_size 4096\nctl_stack_size 4096\nnum_sdma_engines 2\n"
+                 "num_sdma_xgmi_engines 0\nnum_sdma_queues_per_engine 8\n");
+  for (uint64_t mode : {AMDGPU_IDS_FLAGS_MODE_PF, AMDGPU_IDS_FLAGS_MODE_VF,
+                        AMDGPU_IDS_FLAGS_MODE_PT}) {
+    SCOPED_TRACE(mode);
+    native_.info.ids_flags = mode << AMDGPU_IDS_FLAGS_MODE_SHIFT;
+    amdf_gpu_endpoint_profile_t* profile = nullptr;
+    ASSERT_EQ(amdf_gpu_umd_create_endpoint_profile(
+                  &endpoint_, amdf_allocator_system(), &profile),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(profile->queue_family_count, 3u);
+    for (uint32_t i = 0; i < profile->queue_family_count; ++i) {
+      const auto& family = profile->queue_families[i];
+      EXPECT_EQ(family.placement_capabilities,
+                AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
+                    (mode != AMDGPU_IDS_FLAGS_MODE_VF
+                         ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL
+                         : 0));
+      EXPECT_EQ(family.host_publication[AMDF_QUEUE_PLACEMENT_HOST_LOCAL],
+                AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
+      EXPECT_EQ(family.host_publication[AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL] ==
+                    AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN,
+                mode == AMDGPU_IDS_FLAGS_MODE_VF);
+    }
+    amdf_free(amdf_allocator_system(), profile);
+    EXPECT_EQ(fcntl(native_.descriptor, F_GETFD), -1);
+    EXPECT_EQ(errno, EBADF);
+  }
+  EXPECT_EQ(native_.query_count, 3u);
+}
+
+TEST_F(KfdTopologyTest, FailedNativeProfileQueryDoesNotPublishOrRetainFile) {
+  WriteProperties("");
+  auto* const sentinel =
+      reinterpret_cast<amdf_gpu_endpoint_profile_t*>(uintptr_t{1});
+  for (bool fail_open : {true, false}) {
+    SCOPED_TRACE(fail_open);
+    native_.open_error = fail_open ? EACCES : 0;
+    native_.query_error = fail_open ? 0 : EIO;
+    auto* output = sentinel;
+    EXPECT_EQ(amdf_gpu_umd_create_endpoint_profile(
+                  &endpoint_, amdf_allocator_system(), &output),
+              amdf_linux_error(fail_open ? EACCES : EIO));
+    EXPECT_EQ(output, sentinel);
+  }
+  EXPECT_EQ(native_.query_count, 1u);
 }
 
 TEST_F(KfdTopologyTest, ChangedGenerationReleasesUnpublishedPeerMetadata) {

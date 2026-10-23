@@ -21,6 +21,8 @@ _X86_NATIVE_VISIBILITY = ["//loom/src/loom/target/emit/native/x86:__pkg__"]
 
 _X86_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/x86:__pkg__"]
 
+_X86_LOWER_VISIBILITY = ["//loom/src/loom/target/arch/x86/lower:__pkg__"]
+
 loom_low_descriptor_cc_library(
     name = "scalar_descriptors",
     header_only = True,
@@ -202,7 +204,7 @@ loom_cc_library(
     name = "entry",
     srcs = ["entry.c"],
     hdrs = ["entry.h"],
-    visibility = _X86_ROOT_VISIBILITY,
+    visibility = _X86_ROOT_VISIBILITY + _X86_LOWER_VISIBILITY,
     deps = [
         ":avx2_descriptors_ids",
         ":avx2_features_descriptors_ids",

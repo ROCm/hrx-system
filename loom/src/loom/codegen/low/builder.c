@@ -12,6 +12,7 @@
 #include "loom/codegen/low/descriptor_traits.h"
 #include "loom/codegen/low/immediates.h"
 #include "loom/ir/module.h"
+#include "loom/ops/builder.h"
 #include "loom/target/registers.h"
 
 static iree_status_t loom_low_validate_register_type_parts(

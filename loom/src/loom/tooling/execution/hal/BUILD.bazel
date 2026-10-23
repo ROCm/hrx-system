@@ -206,7 +206,6 @@ loom_cc_library(
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/iree_hal",
         "//loom/src/loom/ir:builders",
-        "//loom/src/loom/target:profile",
         "//loom/src/loom/target:types",
         "//loom/src/loom/tooling/testbench:api",
         "//loom/src/loom/tooling/testbench:compiled_provider",

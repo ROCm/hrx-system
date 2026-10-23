@@ -107,14 +107,15 @@ static bool loom_serve_text_media_epoch_layout(
 static void loom_serve_text_media_epoch_copy(
     loom_serve_text_media_epoch_t* epoch, iree_hal_buffer_ref_t row,
     uint32_t offset) {
-  iree_hal_transfer_operation_t* previous =
-      &epoch->transfer.operations[epoch->transfer.operation_count - 1];
-  if (previous->type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY &&
-      previous->copy.source_buffer == row.buffer &&
-      previous->copy.source_offset + previous->copy.length == row.offset &&
-      previous->copy.target_offset + previous->copy.length == offset) {
-    previous->copy.length += row.length;
-    return;
+  if (epoch->transfer.operation_count) {
+    iree_hal_transfer_operation_t* previous =
+        &epoch->transfer.operations[epoch->transfer.operation_count - 1];
+    if (previous->copy.source_buffer == row.buffer &&
+        previous->copy.source_offset + previous->copy.length == row.offset &&
+        previous->copy.target_offset + previous->copy.length == offset) {
+      previous->copy.length += row.length;
+      return;
+    }
   }
   epoch->transfer.operations[epoch->transfer.operation_count++] =
       (iree_hal_transfer_operation_t){
@@ -223,7 +224,7 @@ iree_status_t loom_serve_text_media_epoch_initialize(
                             "mixed input metadata exceeds 32-bit extent");
   }
   const iree_host_size_t operation_bytes =
-      (layout.copy_count + 2) * sizeof(iree_hal_transfer_operation_t);
+      layout.copy_count * sizeof(iree_hal_transfer_operation_t);
   const iree_host_size_t result_bytes =
       layout.image_count * sizeof(loom_serve_finite_result_t*);
   loom_serve_text_media_epoch_t epoch = {
@@ -255,8 +256,6 @@ iree_status_t loom_serve_text_media_epoch_initialize(
         (const loom_serve_finite_result_t**)((uint8_t*)
                                                  epoch.transfer.operations +
                                              operation_bytes);
-    epoch.transfer.operation_count = 2;
-    epoch.transfer.operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
     status = iree_vm_buffer_map_write(epoch.plan, 0, plan_length, &plan);
   }
   iree_host_size_t record_index = 0;
@@ -279,7 +278,6 @@ iree_status_t loom_serve_text_media_epoch_initialize(
 
 iree_status_t loom_serve_text_media_epoch_enqueue(
     loom_serve_text_media_epoch_t* epoch, loom_serve_execution_t* execution,
-    iree_const_byte_span_t metadata, iree_hal_buffer_t* metadata_target,
     iree_hal_buffer_t* target, uint64_t* out_value) {
   // Cohorts from one component share timelines. Merge their values while
   // preserving distinct execution generations after component reconstruction.
@@ -306,19 +304,7 @@ iree_status_t loom_serve_text_media_epoch_enqueue(
     status = loom_serve_execution_barrier(execution, waits);
   }
   iree_hal_transfer_operation_t* operations = epoch->transfer.operations;
-  operations[0] = (iree_hal_transfer_operation_t){
-      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-      .upload = {.source = metadata.data,
-                 .target_buffer = metadata_target,
-                 .length = metadata.data_length},
-  };
-  operations[1] = (iree_hal_transfer_operation_t){
-      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-      .upload = {.source = epoch->packet_record_bytes.data,
-                 .target_buffer = target,
-                 .length = epoch->packet_record_bytes.data_length},
-  };
-  for (iree_host_size_t i = 2; i < epoch->transfer.operation_count; ++i) {
+  for (iree_host_size_t i = 0; i < epoch->transfer.operation_count; ++i) {
     operations[i].copy.target_buffer = target;
   }
   if (iree_status_is_ok(status)) {

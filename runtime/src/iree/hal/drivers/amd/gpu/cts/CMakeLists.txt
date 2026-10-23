@@ -487,6 +487,8 @@ iree_cc_test(
     iree::hal
     iree::hal::cts::util::pool_test_util
     iree::hal::cts::util::test_base
+    iree::hal::drivers::amd::gpu::queue::aql::queue
+    iree::hal::drivers::amd::gpu::queue::pm4::queue
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

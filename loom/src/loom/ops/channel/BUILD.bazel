@@ -16,7 +16,7 @@ loom_cc_library(
     name = "op_defs",
     hdrs = ["ops.h"],
     textual_hdrs = ["ops.inc"],
-    deps = ["//loom/src/loom/ops:op_defs"],
+    deps = ["//loom/src/loom/ops:headers"],
 )
 
 loom_cc_library(

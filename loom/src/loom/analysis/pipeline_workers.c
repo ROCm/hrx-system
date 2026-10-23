@@ -536,6 +536,19 @@ loom_pipeline_storage_reference_from_facts(const loom_value_fact_table_t* facts,
   return reference;
 }
 
+static bool loom_pipeline_storage_reference_may_modify(
+    loom_storage_access_effects_t effects,
+    const loom_pipeline_storage_reference_t* reference) {
+  // Constant memory remains immutable across opaque escapes. Keep explicit
+  // writes conservative here so their eventual legality does not affect this
+  // proof.
+  if (iree_any_bit_set(effects, LOOM_STORAGE_ACCESS_WRITE)) {
+    return true;
+  }
+  return iree_any_bit_set(effects, LOOM_STORAGE_ACCESS_ESCAPE) &&
+         reference->memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT;
+}
+
 static bool loom_pipeline_storage_references_may_alias(
     const loom_view_region_t* source,
     const loom_pipeline_storage_reference_t* access) {
@@ -611,11 +624,11 @@ static iree_status_t loom_pipeline_workers_prove_transport_sources(
          use = use->next_in_function) {
       const loom_storage_access_effects_t effects =
           loom_storage_access_use_effects(use);
-      if (iree_any_bit_set(effects, LOOM_STORAGE_ACCESS_WRITE |
-                                        LOOM_STORAGE_ACCESS_ESCAPE)) {
-        modifying[modifying_count++] =
-            loom_pipeline_storage_reference_from_facts(&worker->facts,
-                                                       use->value_id);
+      const loom_pipeline_storage_reference_t reference =
+          loom_pipeline_storage_reference_from_facts(&worker->facts,
+                                                     use->value_id);
+      if (loom_pipeline_storage_reference_may_modify(effects, &reference)) {
+        modifying[modifying_count++] = reference;
       }
     }
     if (!access->has_unknown_memory_access) {
@@ -623,8 +636,13 @@ static iree_status_t loom_pipeline_workers_prove_transport_sources(
     }
     for (const loom_storage_reference_t* reference = access->references;
          reference; reference = reference->next) {
-      modifying[modifying_count++] = loom_pipeline_storage_reference_from_facts(
-          &worker->facts, reference->value_id);
+      const loom_pipeline_storage_reference_t storage_reference =
+          loom_pipeline_storage_reference_from_facts(&worker->facts,
+                                                     reference->value_id);
+      if (loom_pipeline_storage_reference_may_modify(LOOM_STORAGE_ACCESS_ESCAPE,
+                                                     &storage_reference)) {
+        modifying[modifying_count++] = storage_reference;
+      }
     }
   }
   // Closed channel membership and admitted local async streams account for

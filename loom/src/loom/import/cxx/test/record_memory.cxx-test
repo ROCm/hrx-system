@@ -220,7 +220,7 @@ unsigned read(const struct Record* records, unsigned index) {
 }
 
 // ----
-func.def public @read(%records: buffer, %records_byte_offset: offset, %index: i32) -> (i32) {
+func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], results = [1], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @read(%records: buffer, %records_byte_offset: offset, %index: i32) -> (i32) {
   %4 = scalar.extui %index : i32 to i64
   %15 = scalar.constant 3 : i64
   %16 = scalar.shli %4, %15 : i64

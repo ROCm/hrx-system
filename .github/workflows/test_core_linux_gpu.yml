@@ -128,7 +128,7 @@ jobs:
           python3 --version
           mkdir -p "${HRX_OUTPUT_DIR}"
           python3 -m venv "${HRX_OUTPUT_DIR}/python"
-          "${HRX_PYTHON}" -m pip install --upgrade pip cmake==3.31.6 zstandard
+          "${HRX_PYTHON}" -m pip install --upgrade pip cmake==4.4.4 zstandard
           echo "${HRX_OUTPUT_DIR}/python/bin" >> "${GITHUB_PATH}"
           "${HRX_OUTPUT_DIR}/python/bin/ctest" --version
 
@@ -176,8 +176,8 @@ jobs:
         run: |
           "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py test
 
-      - name: Upload failed test results
-        if: ${{ always() && steps.core_tests.outcome == 'failure' }}
+      - name: Upload native test results
+        if: ${{ always() && (steps.core_tests.outcome == 'success' || steps.core_tests.outcome == 'failure') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ctest-results-core-linux-gpu-attempt-${{ github.run_attempt }}

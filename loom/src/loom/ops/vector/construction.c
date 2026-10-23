@@ -549,6 +549,12 @@ iree_status_t loom_vector_fold_constant_lanes(loom_op_t* op,
       loom_module_value_type(rewriter->module, result);
   const loom_type_t element_type =
       loom_type_scalar(loom_type_element_type(result_type));
+  for (iree_host_size_t lane = 0; lane < lanes.count; ++lane) {
+    if (!loom_rewriter_can_materialize_constant(rewriter, lanes.lanes[lane],
+                                                element_type)) {
+      return iree_ok_status();
+    }
+  }
   loom_builder_set_before(&rewriter->builder, op);
   const loom_value_id_t value_checkpoint =
       loom_rewriter_value_checkpoint(rewriter);

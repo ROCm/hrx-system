@@ -39,8 +39,8 @@ typedef struct loom_greedy_rewrite_options_t {
   // Maximum number of fixed-point iterations. Zero selects the default.
   uint32_t max_iterations;
 
-  // Optional constant materialization hook installed on the active rewriter.
-  loom_materialize_constant_fn_t materialize_constant;
+  // Optional constant materialization policy installed on the active rewriter.
+  loom_constant_materializer_t constant_materializer;
 
   // Optional consumer for relations retained before an exact fold.
   loom_rewriter_pending_exact_relations_callback_t

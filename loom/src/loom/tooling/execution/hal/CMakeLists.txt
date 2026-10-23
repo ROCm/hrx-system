@@ -348,7 +348,6 @@ loom_cc_library(
     loom::binding::c::loomc
     loom::binding::c::target::iree_hal
     loom::ir::builders
-    loom::target::profile
     loom::target::types
     loom::tooling::testbench::api
     loom::tooling::testbench::compiled_provider

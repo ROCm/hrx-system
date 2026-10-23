@@ -94,6 +94,7 @@ loom_cc_library(
   DEPS
     ::immutable_objects
     ::names
+    ::source_signature
     iree::third_party::cxx_parser
     loom::import::cxx::binding::config
     loom::import::cxx::binding::fastmath
@@ -117,6 +118,30 @@ loom_cc_library(
     loom::ops::func
     loom::ops::kernel
     loom::ops::template
+  PUBLIC
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_cc_library(
+  NAME
+    source_signature
+  CXX_STANDARD
+    23
+  CXX_FEATURES
+    "exceptions"
+    "rtti"
+  HDRS
+    "source_signature.h"
+  SRCS
+    "source_signature.cc"
+  DEPS
+    iree::third_party::cxx_parser
+    loom::import::cxx::source
+    loom::import::cxx::source::error
+    loom::import::cxx::value::types
+    loom::ir
+    loom::ops::func
   PUBLIC
 )
 endif()

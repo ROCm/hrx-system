@@ -1,0 +1,30 @@
+// RUN: roundtrip
+// C language linkage preserves the complete source object layout independently
+// of the ordinary flattened High value signature.
+using Float4 = float __attribute__((vector_size(16)));
+struct Packet {
+  Float4 lanes;
+  unsigned ids[2];
+  const float* base;
+};
+extern "C" Packet packet_identity(Packet packet, bool valid, double scale) {
+  return packet;
+}
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [5, 6, 7], results = [5], types = [#func.abi.c.type<floating, byte_length = 4, byte_alignment = 4, component_count = 1, format = f32>, #func.abi.c.type<vector, byte_length = 16, byte_alignment = 16, component_count = 1, element_type = 0, element_count = 4>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>, #func.abi.c.type<array, byte_length = 8, byte_alignment = 4, component_count = 2, element_type = 2, element_count = 2, element_stride = 4>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<record, byte_length = 32, byte_alignment = 16, component_count = 5, name = "Packet", fields = [#func.abi.c.field<"lanes", type = 1, byte_offset = 0>, #func.abi.c.field<"ids", type = 3, byte_offset = 16>, #func.abi.c.field<"base", type = 4, byte_offset = 24>]>, #func.abi.c.type<boolean, byte_length = 1, byte_alignment = 1, component_count = 1>, #func.abi.c.type<floating, byte_length = 8, byte_alignment = 8, component_count = 1, format = f64>]>) @packet_identity(%packet_lanes: vector<4xf32>, %packet_ids_0: i32, %packet_ids_1: i32, %packet_base: buffer, %packet_base_byte_offset: offset, %valid: i1, %scale: f64) -> (vector<4xf32>, i32, i32, buffer, offset) {
+  func.return %packet_lanes, %packet_ids_0, %packet_ids_1, %packet_base, %packet_base_byte_offset : vector<4xf32>, i32, i32, buffer, offset
+}
+
+// ====
+// A reached C declaration carries the same source contract as a definition;
+// its C++ caller remains an ordinary Loom function.
+struct Pair { float x; unsigned y; };
+extern "C" Pair pair_swap(Pair value);
+Pair entry(Pair value) { return pair_swap(value); }
+// ----
+func.def public @entry(%value_x: f32, %value_y: i32) -> (f32, i32) {
+  %4, %5 = func.call @pair_swap(%value_x, %value_y) : (f32, i32) -> (f32, i32)
+  func.return %4, %5 : f32, i32
+}
+
+func.decl source_signature(#func.abi.c.signature<arguments = [2], results = [2], types = [#func.abi.c.type<floating, byte_length = 4, byte_alignment = 4, component_count = 1, format = f32>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>, #func.abi.c.type<record, byte_length = 8, byte_alignment = 4, component_count = 2, name = "Pair", fields = [#func.abi.c.field<"x", type = 0, byte_offset = 0>, #func.abi.c.field<"y", type = 1, byte_offset = 4>]>]>) @pair_swap(%6: f32, %7: i32) -> (f32, i32)

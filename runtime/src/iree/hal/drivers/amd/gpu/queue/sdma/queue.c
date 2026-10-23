@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/sdma/queue.h"
 
+#include "iree/hal/drivers/amd/fabric/memory_transition.h"
 #include "iree/hal/drivers/amd/status.h"
 
 #define IREE_HAL_AMD_GPU_SDMA_CAPACITY 64u
@@ -101,6 +102,10 @@ struct iree_hal_amd_gpu_sdma_queue_t {
     amdf_user_queue_t* queue;
     // Owned host mapping, destroyed before its queue.
     amdf_user_queue_mapping_t* mapping;
+    // Native release selected once for this host mapping.
+    amdf_cache_transition_executor_t host_publish_executor;
+    // Direct ordering operand used only by HOST_DIRECT publication.
+    iree_hal_host_cache_fence_t host_publish_fence;
     // Borrowed native monotonic byte-count index.
     iree_atomic_int64_t* write_index;
     // Borrowed write-only 64-bit MMIO doorbell.
@@ -328,6 +333,21 @@ iree_hal_amd_gpu_sdma_queue_publish_one(iree_hal_amd_gpu_sdma_queue_t* queue) {
     }
     memcpy((uint8_t*)queue->commands + offset, words, length);
     queue->user.position += length;
+    if (queue->user.host_publish_executor ==
+        AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API) {
+      status =
+          queue->context->api->user_queue_mapping_flush(queue->user.mapping);
+      if (IREE_UNLIKELY(!amdf_status_is_ok(status))) {
+        iree_hal_amd_gpu_sdma_queue_fail(queue, status);
+        return NULL;
+      }
+    } else if (queue->user.host_publish_executor ==
+               AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT) {
+      const iree_hal_memory_transition_recipe_info_t publication_fence = {
+          .host = {.fence_after = queue->user.host_publish_fence}};
+      iree_hal_memory_transition_execute_host_direct(&publication_fence, NULL,
+                                                     1);
+    }
     iree_atomic_store(queue->user.write_index, (int64_t)queue->user.position,
                       iree_memory_order_release);
     const iree_hal_memory_transition_recipe_info_t fence = {
@@ -662,6 +682,11 @@ iree_status_t iree_hal_amd_gpu_sdma_queue_allocate(
         status = iree_make_status(
             IREE_STATUS_UNAVAILABLE,
             "SDMA USER queue did not provide its requested ring mapping");
+      }
+      if (iree_status_is_ok(status)) {
+        queue->user.host_publish_executor = info.host_publish_executor;
+        status = iree_hal_amd_fabric_memory_translate_host_fence(
+            info.host_publish_fence, &queue->user.host_publish_fence);
       }
       if (iree_status_is_ok(status)) {
         queue->commands = (void*)(uintptr_t)info.ring_address;

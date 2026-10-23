@@ -160,11 +160,14 @@ a program set, supplies the source program's execution context and does not
 rebase the declared file paths.
 
 Each `parameters` key names an independent parameter index. Source preparation
-uses `prepare.parameter_scope(stage, binding, source, scope, policy)` to select
-that index; its ordered files populate the same scope. Text service uses the
-`text` tokenizer identity. Image, embedding, decision, speech, recognition, and
-activity preparation return a tokenizer identity; services supporting inputs
-without tokenization may return an empty string. Sequence consumes token IDs
+uses `prepare.source_scope(scope)` to select that index; its ordered typed files
+populate one shared checkpoint source. `prepare.parameter(stage, binding, input,
+source, policy)` binds that source to a resident policy input. Several stages
+can share the same source, and demand reads can use it without a resident binding.
+Text service uses the `text` tokenizer identity. Image, embedding, decision,
+speech, recognition, and activity preparation return a tokenizer identity;
+services supporting inputs without tokenization may return an empty string.
+Sequence consumes token IDs
 directly and needs no tokenizer. File names need not identify their role or
 encoding:
 an explicit `format` supports renamed assets, while shorthand strings use the

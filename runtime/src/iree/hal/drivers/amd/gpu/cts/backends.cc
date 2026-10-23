@@ -60,11 +60,15 @@ static iree_status_t CreateGpuDevice(
         iree_status_is_not_found(status)) {
       // Missing native execution services are unavailable backend instances;
       // once creation succeeds, operation failures remain test failures.
-      status = iree_status_join(
-          iree_make_status(IREE_STATUS_UNAVAILABLE,
-                           "native %.*s execution services are unavailable",
-                           (int)scheme.size, scheme.data),
-          status);
+      iree_string_view_t message = iree_status_message(status);
+      iree_status_t unavailable_status = iree_make_status(
+          IREE_STATUS_UNAVAILABLE,
+          "native %.*s execution services are unavailable: %s; %.*s",
+          (int)scheme.size, scheme.data,
+          iree_status_code_string(iree_status_code(status)), (int)message.size,
+          message.data);
+      iree_status_free(status);
+      status = unavailable_status;
     }
   }
   return status;

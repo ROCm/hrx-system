@@ -34,6 +34,23 @@ than regenerated for each consumer. Semantic callback declarations remain in
 that surface; depending on it does not link their implementations. Enum headers
 likewise expose vocabulary without requiring target record tables.
 
+The declaration boundary is transitive. Generic operation declarations use
+`//loom/src/loom/ops:headers`; shared atomic, cache, and combining vocabulary
+uses `:vocabulary`. Beneath them, `//loom/src/loom/ir:type_headers` supplies
+value/type vocabulary, while `:headers` supplies graph representation and
+metadata declarations without IR storage or interning implementations. These
+are dependency capabilities, not new C APIs or alternative representations.
+The existing `:ir` and `:builders` aggregates keep their implementation roles.
+
+An out-of-line call still requires its implementation dependency. In particular,
+generated attribute setters invoke generic operation mutation, and rewrite
+setters invoke the rewriter; including their declarations does not link those
+algorithms. Keyword and assembly-format lookups belong to `:format`, which text
+parsing and printing select explicitly rather than through construction.
+
+`declaration_dependency_boundary` checks all configured dialect declarations
+together, admitting only Loom representation, metadata, and vocabulary providers.
+The underlying IREE base/arena runtime dependencies remain explicit.
 `construction_dependency_boundary` checks the complete configured dialect
 family together. It keeps compiler registries, semantic dialect libraries,
 analysis, rewriting, and format implementations out of the construction closure.

@@ -15,6 +15,8 @@
 #include "iree/vm/sync.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/parameter/bank.h"
+#include "loom/serve/runtime/parameter/module.h"
+#include "loom/serve/runtime/parameter/sources.h"
 #include "loom/serve/runtime/parameter/weights.h"
 #include "loom/serve/runtime/program/input.h"
 #include "loom/serve/runtime/program/json.h"
@@ -65,6 +67,8 @@ struct loom_serve_finite_model_t {
   loom_serve_jit_t* jit;
   // Owned source declarations, independent of the bootstrap VM and arguments.
   loom_serve_preparation_t* preparation;
+  // Owned immutable indexes shared by resident and demand-read consumers.
+  loom_serve_parameter_sources_t* parameter_sources;
   // Code generations and batch captures, independent of checkpoint residency.
   loom_serve_executables_t* executables;
   // Idle request-code policy captured independently of source-owned options.
@@ -94,6 +98,8 @@ struct loom_serve_finite_model_t {
     iree_vm_module_t* runner;
     // Scoped request declaration capability, retained beside the runner.
     iree_vm_module_t* preparation;
+    // Retained demand-read capability, rebound with each request's sources.
+    iree_vm_module_t* parameters;
     // Opaque source-owned state, retained across serialized requests.
     iree_vm_buffer_t* state;
     // Cold-resolved request preparation function.
@@ -118,6 +124,8 @@ static void loom_serve_finite_model_release_consumers(
   iree_vm_module_release(model->control.runner);
   iree_vm_module_release(model->control.preparation);
   model->control.preparation = NULL;
+  iree_vm_module_release(model->control.parameters);
+  model->control.parameters = NULL;
   model->control.runner = NULL;
   loom_serve_stage_table_free(model->stages.table);
   model->stages.table = NULL;
@@ -177,6 +185,7 @@ static iree_status_t loom_serve_finite_model_destroy_resources(
     }
     iree_allocator_free(model->host_allocator, model->stages.values);
     loom_serve_preparation_free(model->preparation);
+    loom_serve_parameter_sources_release(model->parameter_sources);
     loom_serve_finite_result_release(model->invocation.result);
     iree_vm_buffer_release(model->invocation.payload);
     iree_vm_environment_free(model->control.environment);
@@ -368,7 +377,7 @@ static iree_status_t loom_serve_finite_create_control(
       .binding_capacity = 2,
       .stages = {model->stages.table->part_count, model->stages.table->parts},
   };
-  iree_vm_module_t* native_modules[4] = {0};
+  iree_vm_module_t* native_modules[5] = {0};
   iree_vm_buffer_t* read_only_tags = NULL;
   iree_status_t status = iree_vm_buffer_subspan(
       model->control.tags, 0, tags.data_length, IREE_VM_BUFFER_ACCESS_FLAG_READ,
@@ -403,16 +412,25 @@ static iree_status_t loom_serve_finite_create_control(
     iree_vm_module_retain(model->control.preparation);
   }
   if (iree_status_is_ok(status)) {
+    status = loom_serve_parameters_module_create(
+        model->control.environment, &model->control.hal_types,
+        loom_serve_device_transfer_queue(model->owner),
+        model->parameter_sources, host_allocator, &native_modules[4]);
+    model->control.parameters = native_modules[4];
+    iree_vm_module_retain(model->control.parameters);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_serve_program_link_service(
         module, loom_serve_preparation_card(model->preparation),
         loom_serve_preparation_component(model->preparation),
-        (iree_vm_module_span_t){native_modules, 4}, host_allocator,
+        (iree_vm_module_span_t){native_modules, 5}, host_allocator,
         &model->control.program);
   }
   iree_vm_module_release(native_modules[0]);
   iree_vm_module_release(native_modules[1]);
   iree_vm_module_release(native_modules[2]);
   iree_vm_module_release(native_modules[3]);
+  iree_vm_module_release(native_modules[4]);
   IREE_RETURN_IF_ERROR(status);
   const iree_vm_signature_type_t buffer = {
       .kind = IREE_VM_SIGNATURE_TYPE_KIND_REF,
@@ -480,6 +498,7 @@ static iree_status_t loom_serve_finite_model_link(
       .execution = model->execution,
       .residency = model->residency,
       .preparation = model->preparation,
+      .parameter_sources = model->parameter_sources,
       .parameters = model->parameters,
       .recording = {.queue_family = iree_hal_queue_family(dispatch),
                     .parameters =
@@ -495,6 +514,7 @@ static iree_status_t loom_serve_finite_model_link(
   loom_serve_executable_options_t bound_options = options;
   bound_options.stages = model->stages.table;
   bound_options.runner = model->control.runner;
+  bound_options.parameter_module = model->control.parameters;
   return loom_serve_executables_allocate(&bound_options, host_allocator,
                                          &model->executables);
 }
@@ -571,6 +591,12 @@ static iree_status_t loom_serve_finite_load_prepare(
   IREE_RETURN_IF_ERROR(
       loom_serve_finite_prepare(model, &load->options, load->event.wake,
                                 load->event.user_data, &load->tokenizer_load));
+  const loom_model_file_list_t* paths = NULL;
+  const uint32_t source_count =
+      loom_serve_preparation_local_sources(model->preparation, &paths);
+  IREE_RETURN_IF_ERROR(loom_serve_parameter_sources_create(
+      NULL, &load->options.sources, source_count, paths, host_allocator,
+      &model->parameter_sources));
   const iree_vm_ref_type_table_t* table = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_module_register_types(model->control.environment, &table));
@@ -716,7 +742,7 @@ iree_status_t loom_serve_finite_load_advance(
           status = loom_serve_weights_prepare_async(
               loom_serve_parameter_bank_weights(model->parameters, i), host,
               model->jit, load->command_mode, &load->options.sources, parameter,
-              loom_serve_finite_load_complete, load);
+              model->parameter_sources, loom_serve_finite_load_complete, load);
           submitted = iree_status_is_ok(status);
         } else {
           load->phase = FINITE_LOAD_LINK;
@@ -931,7 +957,7 @@ iree_status_t loom_serve_finite_model_prepare_batch(
       count, requests, model->host_allocator, &ranges, &packed));
   loom_serve_executables_capture(model->executables);
   loom_serve_preparation_module_begin(model->control.preparation,
-                                      model->stages.count,
+                                      model->stages.count, model->preparation,
                                       LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
   iree_vm_variant_t arguments[] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,

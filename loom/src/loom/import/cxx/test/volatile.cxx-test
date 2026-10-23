@@ -295,7 +295,7 @@ unsigned c_parameter_observation(volatile unsigned value) {
   return value;
 }
 // ----
-func.def public @c_observations(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
+func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], results = [2], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @c_observations(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
   %5 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi32>
   %6 = view.load<volatile> %5[0] : view<1xi32> -> i32
   %value = view.load<volatile> %5[0] : view<1xi32> -> i32
@@ -304,7 +304,7 @@ func.def public @c_observations(%input: buffer, %input_byte_offset: offset, %out
   func.return %value : i32
 }
 
-func.def public @c_parameter_observation(%value$10: i32) -> (i32) {
+func.def public source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @c_parameter_observation(%value$10: i32) -> (i32) {
   %12 = index.constant 4 : offset
   %value_storage = buffer.alloca<private> align(4) %12 : buffer
   %value_storage_byte_offset = index.constant 0 : offset

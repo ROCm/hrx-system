@@ -307,7 +307,8 @@ class SanitizerCachedBackendDevice {
             backend.factory(cached.create_context.params(), &driver, &device);
       }
       if (iree_status_is_unavailable(status)) {
-        cached.unavailable_reason = iree::Status(std::move(status)).ToString();
+        cached.unavailable_reason =
+            FormatSkipStatus(iree::Status(std::move(status)));
         cached.create_context.Deinitialize();
       } else if (!iree_status_is_ok(status)) {
         cached.create_context.Deinitialize();

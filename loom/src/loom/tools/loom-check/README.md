@@ -71,6 +71,10 @@ bindings constrain locations through the production allocation interface.
 `reverse-blocks` reverses the nonentry block table after parsing, preserving the
 CFG and SSA dominance while exercising allocation when physical block order
 differs from dominance order. Authored text still defines values before uses.
+`spill-free` runs the complete production repair loop before querying the final
+allocation. With `spill-count`, it also reports inserted store/reload traffic,
+so a zero final spill count cannot hide materialized spills. `materialize-spills`
+instead applies one allocation batch and prints the resulting IR.
 
 Focused lowering examples use exact goldens. When a case lowers one operation
 and the output is small, the complete before/after IR is the assertion and

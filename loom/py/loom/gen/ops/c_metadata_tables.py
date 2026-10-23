@@ -1285,6 +1285,8 @@ def generate_tables_c(
             vtable_flag_bits.append("LOOM_OP_VTABLE_HAS_REFERENCE_SOURCE")
         if op.canonicalize_without_facts:
             vtable_flag_bits.append("LOOM_OP_VTABLE_CANONICALIZE_WITHOUT_FACTS")
+        if op.facts_from_operands:
+            vtable_flag_bits.append("LOOM_OP_VTABLE_FACTS_FROM_OPERANDS")
         vtable_flags_str = " | ".join(vtable_flag_bits) if vtable_flag_bits else "0"
 
         sym_kind = _symbol_kind(op)

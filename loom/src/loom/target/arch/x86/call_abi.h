@@ -45,6 +45,53 @@ typedef struct loom_x86_call_abi_classification_t {
   uint8_t action;
 } loom_x86_call_abi_classification_t;
 
+// Exact physical placement retained after classifying one complete SysV
+// function boundary. The signature describes each physical Low value while
+// the parallel placement arrays identify its platform register or stack slot.
+// A register value has a non-negative register index and offset -1. A stack
+// argument has register -1 and a non-negative byte offset. Results are always
+// direct registers; indirect source results are projected to an explicit
+// hidden pointer argument before this contract is formed.
+typedef struct loom_x86_call_abi_layout_t {
+  // Physical source-semantic signature corresponding one-to-one with the Low
+  // arguments and results.
+  const loom_func_type_data_t* signature;
+  // Exact platform register index for each physical argument, or -1 for stack.
+  loom_i64_array_t argument_registers;
+  // Exact incoming stack byte offset for each argument, or -1 for a register.
+  loom_i64_array_t argument_offsets;
+  // Exact platform register index for each physical result.
+  loom_i64_array_t result_registers;
+  // Complete incoming stack argument area in bytes.
+  uint32_t stack_bytes;
+  // Required alignment of the stack argument area, or zero when empty.
+  uint8_t stack_alignment;
+  // Whether exact SysV placement is present. A signature-only layout leaves
+  // physical placement to the ordinary native ABI planner.
+  bool is_exact_sysv;
+} loom_x86_call_abi_layout_t;
+
+// Builds the canonical exact SysV layout consumed by native x86 emission.
+// Placement arrays correspond one-to-one with the physical semantic types and
+// only need to remain live for the duration of this call. The returned slice
+// borrows canonical module storage.
+iree_status_t loom_x86_call_abi_layout_make(
+    loom_module_t* module, const loom_type_t* argument_types,
+    uint16_t argument_count, const loom_type_t* result_types,
+    uint16_t result_count, int64_t* argument_registers,
+    int64_t* argument_offsets, int64_t* result_registers, uint32_t stack_bytes,
+    uint8_t stack_alignment, loom_named_attr_slice_t* out_layout);
+
+// Parses and validates the shared x86 ABI layout vocabulary. Empty and
+// signature-only layouts are admitted for ordinary Loom call boundaries.
+// Exact layouts use a nested `sysv` dictionary with argument/result placement
+// arrays and stack geometry. Returns false for malformed authored Low IR.
+bool loom_x86_call_abi_layout_parse(const loom_module_t* module,
+                                    loom_named_attr_slice_t layout,
+                                    uint16_t argument_count,
+                                    uint16_t result_count,
+                                    loom_x86_call_abi_layout_t* out_layout);
+
 // Classifies one source type admitted by the native x86-64 SysV boundary.
 // Source views are transported as their projected data address. Compiler-only
 // values and vectors without an exact architectural register width fail.

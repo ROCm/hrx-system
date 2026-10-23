@@ -97,3 +97,4 @@
   LOOM_KW_CONFLICTS = 88,  // "conflicts"
   LOOM_KW_RUN = 89,  // "run"
   LOOM_KW_POOL = 90,  // "pool"
+  LOOM_KW_SOURCE_SIGNATURE = 91,  // "source_signature"

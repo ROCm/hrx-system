@@ -708,10 +708,12 @@ check.scenario @subgroup_scan_wide_sum_values {
   check.return
 }
 
-// Three-lane strided clusters cross neither the subgroup boundary nor each
-// other, even when only part of a cluster exists. Runtime participation creates
-// holes and singleton clusters. The serial oracle groups recorded physical
-// coordinates independently of the collective's compact active-lane ranks.
+// Whole-subgroup reductions and scans cover a partial final subgroup, and the
+// eight-lane reduction covers its incomplete final cluster. Three-lane strided
+// clusters cross neither the subgroup boundary nor each other, even when only
+// part of a cluster exists. Runtime participation creates holes and singleton
+// clusters. The serial oracle groups recorded physical coordinates
+// independently of the collective's lowering strategy.
 kernel.def @subgroup_scan_strided_sums() {
   %unit = index.constant 1 : index
   %items = index.constant 67 : index
@@ -737,9 +739,58 @@ kernel.def @subgroup_scan_strided_sums() {
   %c2 = scalar.constant 2 : i32
   %c3 = scalar.constant 3 : i32
   %c6 = scalar.constant 6 : i32
+  %c8 = scalar.constant 8 : i32
+  %whole_total = kernel.subgroup.reduce<addi> %value : i32
+  %contiguous_total = kernel.subgroup.reduce<addi> %value {cluster_size = 8} : i32
+  %whole_through = kernel.subgroup.scan<addi> %value {direction = forward, mode = inclusive} : i32
+  %whole_before = kernel.subgroup.scan<addi> %value {direction = forward, mode = exclusive} : i32
+  %whole_from = kernel.subgroup.scan<addi> %value {direction = reverse, mode = inclusive} : i32
+  %whole_after = kernel.subgroup.scan<addi> %value {direction = reverse, mode = exclusive} : i32
+  %begin = index.constant 0 : index
+  %end = index.constant 67 : index
+  %step = index.constant 1 : index
+  %contiguous_cluster = scalar.divui %lane_i32, %c8 : i32
+  %expected_whole_total, %expected_contiguous_total, %expected_whole_through, %expected_whole_before, %expected_whole_from, %expected_whole_after = scf.for %other = [%begin to %end step %step](%whole_acc = %c0 : i32, %contiguous_acc = %c0 : i32, %through_acc = %c0 : i32, %before_acc = %c0 : i32, %from_acc = %c0 : i32, %after_acc = %c0 : i32) -> (i32, i32, i32, i32, i32, i32) {
+    %other_lane = view.load %topology[%other, 0] : view<67x2xi32> -> i32
+    %other_subgroup = view.load %topology[%other, 1] : view<67x2xi32> -> i32
+    %other_value = view.load %source[%other] : view<67xi32> -> i32
+    %same_subgroup = scalar.cmpi eq, %subgroup_i32, %other_subgroup : i32
+    %contribution = scf.select %same_subgroup, %other_value, %c0 : i32
+    %other_contiguous_cluster = scalar.divui %other_lane, %c8 : i32
+    %same_contiguous_partition = scalar.cmpi eq, %contiguous_cluster, %other_contiguous_cluster : i32
+    %same_contiguous_cluster = scalar.andi %same_subgroup, %same_contiguous_partition : i1
+    %contiguous_contribution = scf.select %same_contiguous_cluster, %other_value, %c0 : i32
+    %at_or_before = scalar.cmpi ule, %other_lane, %lane_i32 : i32
+    %earlier = scalar.cmpi ult, %other_lane, %lane_i32 : i32
+    %at_or_after = scalar.cmpi uge, %other_lane, %lane_i32 : i32
+    %later = scalar.cmpi ugt, %other_lane, %lane_i32 : i32
+    %through_value = scf.select %at_or_before, %contribution, %c0 : i32
+    %before_value = scf.select %earlier, %contribution, %c0 : i32
+    %from_value = scf.select %at_or_after, %contribution, %c0 : i32
+    %after_value = scf.select %later, %contribution, %c0 : i32
+    %next_whole = scalar.addi %whole_acc, %contribution : i32
+    %next_contiguous = scalar.addi %contiguous_acc, %contiguous_contribution : i32
+    %next_through = scalar.addi %through_acc, %through_value : i32
+    %next_before = scalar.addi %before_acc, %before_value : i32
+    %next_from = scalar.addi %from_acc, %from_value : i32
+    %next_after = scalar.addi %after_acc, %after_value : i32
+    scf.yield %next_whole, %next_contiguous, %next_through, %next_before, %next_from, %next_after : i32, i32, i32, i32, i32, i32
+  }
+  %whole_total_matches = scalar.cmpi eq, %whole_total, %expected_whole_total : i32
+  %contiguous_total_matches = scalar.cmpi eq, %contiguous_total, %expected_contiguous_total : i32
+  %reductions_match = scalar.andi %whole_total_matches, %contiguous_total_matches : i1
+  %whole_through_matches = scalar.cmpi eq, %whole_through, %expected_whole_through : i32
+  %whole_before_matches = scalar.cmpi eq, %whole_before, %expected_whole_before : i32
+  %whole_from_matches = scalar.cmpi eq, %whole_from, %expected_whole_from : i32
+  %whole_after_matches = scalar.cmpi eq, %whole_after, %expected_whole_after : i32
+  %whole_forward_matches = scalar.andi %whole_through_matches, %whole_before_matches : i1
+  %whole_reverse_matches = scalar.andi %whole_from_matches, %whole_after_matches : i1
+  %whole_scans_match = scalar.andi %whole_forward_matches, %whole_reverse_matches : i1
+  %direct_matches = scalar.andi %reductions_match, %whole_scans_match : i1
+  %direct_failed = scf.select %direct_matches, %c0, %c1 : i32
   %participation = scalar.andi %value, %c3 : i32
   %active = scalar.cmpi ne, %participation, %c1 : i32
-  %difference = scf.if %active -> (i32) {
+  %cluster_failed = scf.if %active -> (i32) {
     %total = kernel.subgroup.reduce<addi> %value {cluster_size = 3, cluster_stride = 2} : i32
     %through = kernel.subgroup.scan<addi> %value {cluster_size = 3, cluster_stride = 2, direction = forward, mode = inclusive} : i32
     %before = kernel.subgroup.scan<addi> %value {cluster_size = 3, cluster_stride = 2, direction = forward, mode = exclusive} : i32
@@ -747,9 +798,6 @@ kernel.def @subgroup_scan_strided_sums() {
     %after = kernel.subgroup.scan<addi> %value {cluster_size = 3, cluster_stride = 2, direction = reverse, mode = exclusive} : i32
     %cluster_block = scalar.divui %lane_i32, %c6 : i32
     %cluster_parity = scalar.remui %lane_i32, %c2 : i32
-    %begin = index.constant 0 : index
-    %end = index.constant 67 : index
-    %step = index.constant 1 : index
     %sum, %forward_inclusive, %forward_exclusive, %reverse_inclusive, %reverse_exclusive = scf.for %other = [%begin to %end step %step](%sum_acc = %c0 : i32, %through_acc = %c0 : i32, %before_acc = %c0 : i32, %from_acc = %c0 : i32, %after_acc = %c0 : i32) -> (i32, i32, i32, i32, i32) {
       %other_lane = view.load %topology[%other, 0] : view<67x2xi32> -> i32
       %other_subgroup = view.load %topology[%other, 1] : view<67x2xi32> -> i32
@@ -794,6 +842,7 @@ kernel.def @subgroup_scan_strided_sums() {
   } else {
     scf.yield %c0 : i32
   }
+  %difference = scalar.ori %direct_failed, %cluster_failed : i32
   view.store %difference, %destination[%item] : i32, view<67xi32>
   kernel.return
 }

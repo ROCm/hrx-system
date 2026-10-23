@@ -111,7 +111,7 @@ func.def @cyclic_region_body_chain(%again: i1, %seed: index) -> (index) {
 // RUN: pass cfg-simplify
 
 // Moving a region owner preserves references to an ancestor CFG definition
-// in nested declaration types and predicate attributes.
+// in nested block argument types and predicate attributes.
 func.def @ancestor_types_and_attributes(%choose: i1, %element: f32) {
   %width = index.constant 16 : index
   cfg.br ^outer
@@ -120,7 +120,10 @@ func.def @ancestor_types_and_attributes(%choose: i1, %element: f32) {
   cfg.br ^tail
 ^tail:
   scf.if %choose {
-    test.decl @nested_signature(%storage: group<[%width]>) -> (i32)
+    %storage = test.constant 0.0 : vector<[%width]xf32>
+    test.block_args %storage : vector<[%width]xf32> do(%local: vector<[%width]xf32>) {
+      test.yield
+    }
     %annotated = test.attrs %element {shape = #test.options<mode = fast, element_type = vector<[%width]xf32>>} : f32
     test.use %annotated : f32
   } else {
@@ -136,7 +139,10 @@ func.def @ancestor_types_and_attributes(%choose: i1, %element: f32) {
   %width = index.constant 16 : index
   test.use %width : index
   scf.if %choose {
-    test.decl @nested_signature(%storage: group<[%width]>) -> (i32)
+    %storage = test.constant 0.0 : vector<[%width]xf32>
+    test.block_args %storage : vector<[%width]xf32> do(%local: vector<[%width]xf32>) {
+      test.yield
+    }
     %annotated = test.attrs %element {shape = #test.options<mode = fast, element_type = vector<[%width]xf32>>} : f32
     test.use %annotated : f32
   } else {

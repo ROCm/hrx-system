@@ -365,6 +365,10 @@ typedef enum iree_hal_amd_gpu_pm4_publication_result_e {
   IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_SCRATCH,
 } iree_hal_amd_gpu_pm4_publication_result_t;
 
+static void iree_hal_amd_gpu_pm4_fail_native(
+    iree_hal_amd_gpu_pm4_queue_t* queue, amdf_status_t status,
+    const char* operation);
+
 // Native acceptance is irrevocable here. Finish every capture access before
 // exposing the retirement record, transferring the final publication reference
 // directly to completion. Only a piece with an unpublished suffix needs another
@@ -438,12 +442,16 @@ iree_hal_amd_gpu_pm4_publish_accepted(
     }
   } else {
     const uint64_t published_words = queue->producer.ring.reserved_words;
-    if (queue->producer.ring.host_publish_fence !=
-        IREE_HAL_HOST_CACHE_FENCE_NONE) {
-      const iree_hal_memory_transition_recipe_info_t fence = {
-          .host = {.fence_after = queue->producer.ring.host_publish_fence},
-      };
-      iree_hal_memory_transition_execute_host_direct(&fence, NULL, 1);
+    if (queue->producer.ring.host_publish_executor !=
+        AMDF_CACHE_TRANSITION_EXECUTOR_NONE) {
+      const amdf_status_t publication_status =
+          iree_hal_amd_gpu_user_queue_flush(&queue->storage);
+      if (IREE_UNLIKELY(!amdf_status_is_ok(publication_status))) {
+        iree_hal_amd_gpu_pm4_fail_native(queue, publication_status,
+                                         "flush PM4 command publication");
+        return terminal ? IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED
+                        : IREE_HAL_AMD_GPU_PM4_PUBLICATION_MORE;
+      }
     }
     iree_atomic_store(queue->producer.write_index, published_words,
                       iree_memory_order_release);
@@ -1835,8 +1843,12 @@ static bool iree_hal_amd_gpu_pm4_progress(void* user_data) {
 static void iree_hal_amd_gpu_pm4_fail_native(
     iree_hal_amd_gpu_pm4_queue_t* queue, amdf_status_t status,
     const char* operation) {
-  iree_atomic_store(&queue->native_failure, status, iree_memory_order_release);
-  iree_hal_amd_gpu_context_report(queue->context, status, operation);
+  int64_t expected = 0;
+  if (iree_atomic_compare_exchange_strong(&queue->native_failure, &expected,
+                                          status, iree_memory_order_release,
+                                          iree_memory_order_relaxed)) {
+    iree_hal_amd_gpu_context_report(queue->context, status, operation);
+  }
   iree_hal_amd_gpu_publication_notify(queue->options.publication,
                                       queue->options.source_ordinal);
 }
@@ -2376,7 +2388,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_prepare_native(
     iree_hal_amd_gpu_pm4_ring_initialize(
         (uint32_t*)(uintptr_t)mapping.ring_address,
         (uint32_t)(mapping.ring_byte_length / sizeof(uint32_t)),
-        queue->storage.host_publish_fence, &queue->producer.ring);
+        queue->storage.host_publish_executor, &queue->producer.ring);
     if (mapping.index_bits != 64 || mapping.doorbell_bits != 64 ||
         !mapping.write_index_address || !mapping.doorbell_address) {
       return iree_make_status(IREE_STATUS_UNIMPLEMENTED,

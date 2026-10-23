@@ -25,7 +25,8 @@ static const loom_op_t* loom_global_load_definition(const loom_module_t* module,
 
 iree_status_t loom_global_load_canonicalize(loom_op_t* op,
                                             loom_rewriter_t* rewriter) {
-  if (!rewriter->fact_table || !rewriter->materialize_constant) {
+  if (!rewriter->fact_table ||
+      !loom_rewriter_has_constant_materializer(rewriter)) {
     return iree_ok_status();
   }
 
@@ -45,7 +46,10 @@ iree_status_t loom_global_load_canonicalize(loom_op_t* op,
     }
     loom_value_facts_t facts =
         loom_rewriter_value_facts(rewriter, results.values[i]);
-    if (!loom_value_facts_is_exact(facts)) {
+    loom_type_t result_type =
+        loom_module_value_type(rewriter->module, results.values[i]);
+    if (!loom_value_facts_is_exact(facts) ||
+        !loom_rewriter_can_materialize_constant(rewriter, facts, result_type)) {
       return iree_ok_status();
     }
   }

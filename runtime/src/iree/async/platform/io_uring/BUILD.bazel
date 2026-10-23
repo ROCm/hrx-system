@@ -331,7 +331,9 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_thread",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
     ],
 )

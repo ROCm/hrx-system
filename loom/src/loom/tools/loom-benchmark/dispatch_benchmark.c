@@ -17,6 +17,121 @@
 #include "loom/tools/loom-benchmark/input_ring.h"
 #include "loom/tools/loom-benchmark/profile_report.h"
 
+typedef struct loom_benchmark_hal_case_sample_preparation_t {
+  // Materializer options used to create each independent ring slot.
+  loom_testbench_value_materializer_options_t materializer_options;
+  // Provider-resolved source-order invocation schedule.
+  loom_testbench_prepared_case_t prepared_case;
+  // Reusable table containing the current materialized sample.
+  loom_testbench_value_table_t value_table;
+  // Reusable scratch used to execute pre-dispatch invocations.
+  loom_testbench_invocation_executor_t invocation_executor;
+  // Number of complete provider spans before the first kernel launch.
+  iree_host_size_t preparation_span_count;
+} loom_benchmark_hal_case_sample_preparation_t;
+
+static iree_status_t loom_benchmark_hal_case_sample_preparation_initialize(
+    const loom_testbench_module_plan_t* module_plan,
+    const loom_testbench_benchmark_plan_t* benchmark_plan,
+    const loom_testbench_case_execution_options_t* execution_options,
+    iree_arena_allocator_t* arena, iree_allocator_t allocator,
+    loom_benchmark_hal_case_sample_preparation_t* out_preparation) {
+  *out_preparation = (loom_benchmark_hal_case_sample_preparation_t){
+      .materializer_options = execution_options->materializer,
+  };
+
+  const loom_testbench_case_plan_t* case_plan =
+      &module_plan->cases[benchmark_plan->case_index];
+  const iree_host_size_t first_kernel_index =
+      (iree_host_size_t)(case_plan->kernel_launches[0] -
+                         case_plan->invocations);
+  iree_status_t status = loom_testbench_prepare_case_execution(
+      execution_options, module_plan, benchmark_plan->case_index, arena,
+      &out_preparation->prepared_case);
+  if (iree_status_is_ok(status)) {
+    status = loom_testbench_value_table_initialize_case(
+        module_plan->module, case_plan, allocator,
+        &out_preparation->value_table);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_testbench_invocation_executor_initialize(
+        &out_preparation->prepared_case.invocation_schedule, allocator,
+        &out_preparation->invocation_executor);
+  }
+  const loom_testbench_invocation_schedule_t* schedule =
+      &out_preparation->prepared_case.invocation_schedule;
+  for (iree_host_size_t span_index = 0;
+       iree_status_is_ok(status) && span_index < schedule->span_count;
+       ++span_index) {
+    const loom_testbench_prepared_invocation_span_t* span =
+        &schedule->spans[span_index];
+    const iree_host_size_t first_span_invocation =
+        (iree_host_size_t)(span->invocations[0].plan - case_plan->invocations);
+    if (first_span_invocation >= first_kernel_index) {
+      break;
+    }
+    IREE_ASSERT(first_span_invocation + span->invocation_count <=
+                first_kernel_index);
+    ++out_preparation->preparation_span_count;
+  }
+  if (!iree_status_is_ok(status)) {
+    loom_testbench_invocation_executor_deinitialize(
+        &out_preparation->invocation_executor);
+    loom_testbench_value_table_deinitialize(&out_preparation->value_table);
+    *out_preparation = (loom_benchmark_hal_case_sample_preparation_t){0};
+  }
+  return status;
+}
+
+static void loom_benchmark_hal_case_sample_preparation_deinitialize(
+    loom_benchmark_hal_case_sample_preparation_t* preparation) {
+  loom_testbench_invocation_executor_deinitialize(
+      &preparation->invocation_executor);
+  loom_testbench_value_table_deinitialize(&preparation->value_table);
+  *preparation = (loom_benchmark_hal_case_sample_preparation_t){0};
+}
+
+static iree_status_t loom_benchmark_hal_case_sample_prepare(
+    loom_benchmark_hal_case_sample_preparation_t* preparation,
+    loom_testbench_case_sample_t sample, iree_host_size_t execution_index) {
+  const loom_testbench_case_plan_t* case_plan =
+      preparation->prepared_case.case_plan;
+  loom_testbench_value_table_reset(&preparation->value_table);
+  loom_testbench_invocation_executor_reset_issues(
+      &preparation->invocation_executor);
+  iree_status_t status = loom_testbench_materialize_case_sample(
+      &preparation->materializer_options, case_plan, sample,
+      &preparation->value_table);
+  for (iree_host_size_t span_index = 0;
+       iree_status_is_ok(status) &&
+       preparation->invocation_executor.issue_count == 0 &&
+       span_index < preparation->preparation_span_count;
+       ++span_index) {
+    status = loom_testbench_run_prepared_invocation_span(
+        &preparation->invocation_executor, execution_index,
+        &preparation->prepared_case.invocation_schedule.spans[span_index],
+        &preparation->value_table);
+  }
+  if (iree_status_is_ok(status) &&
+      preparation->invocation_executor.issue_count != 0) {
+    const loom_testbench_sample_issue_t* issue =
+        &preparation->invocation_executor.issues[0];
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "pre-dispatch invocation rejected sample preparation during %.*s "
+        "(%.*s): %.*s",
+        (int)issue->stage.size, issue->stage.data, (int)issue->kind.size,
+        issue->kind.data, (int)issue->message.size, issue->message.data);
+  }
+  if (!iree_status_is_ok(status)) {
+    status = iree_status_annotate_f(
+        status,
+        "preparing dispatch_complete check.case '@%.*s' sample %" PRIhsz,
+        (int)case_plan->name.size, case_plan->name.data, sample.ordinal);
+  }
+  return status;
+}
+
 typedef struct loom_benchmark_hal_input_ring_t {
   // Host allocator used for ring-owned arrays.
   iree_allocator_t host_allocator;
@@ -31,20 +146,25 @@ typedef struct loom_benchmark_hal_input_ring_t {
 } loom_benchmark_hal_input_ring_t;
 
 static iree_status_t loom_benchmark_prepare_hal_invocation_plan_for_sample(
-    const loom_testbench_module_plan_t* module_plan,
-    const loom_testbench_case_plan_t* case_plan,
+    loom_benchmark_hal_case_sample_preparation_t* preparation,
     loom_benchmark_hal_actual_provider_t* provider,
-    const loom_testbench_value_materializer_options_t* materializer_options,
-    loom_testbench_case_sample_t sample, iree_allocator_t allocator,
-    loom_run_hal_invocation_plan_t* out_plan,
+    loom_testbench_case_sample_t sample, iree_host_size_t execution_index,
+    iree_allocator_t allocator, loom_run_hal_invocation_plan_t* out_plan,
     loom_testbench_buffer_footprint_t* out_input_footprint) {
   loom_run_hal_invocation_options_t invocation_options = {0};
   loom_run_hal_binding_list_t bindings = {0};
-  iree_status_t status =
-      loom_run_hal_testbench_materialize_invocation_for_sample(
-          module_plan->module, materializer_options, case_plan,
-          &provider->execution, sample, allocator, &invocation_options,
-          &bindings, out_input_footprint);
+  iree_status_t status = loom_benchmark_hal_case_sample_prepare(
+      preparation, sample, execution_index);
+  if (iree_status_is_ok(status)) {
+    status = loom_testbench_value_table_resolve_buffer_footprint(
+        &preparation->value_table, provider->execution.invocation->input_count,
+        provider->execution.invocation->input_value_ids, out_input_footprint);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_materialize_invocation_from_table(
+        &preparation->value_table, &provider->execution, allocator,
+        &invocation_options, &bindings);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_invocation_plan_prepare_from_lists(
         &invocation_options, &bindings, /*expected_bindings=*/NULL,
@@ -55,12 +175,10 @@ static iree_status_t loom_benchmark_prepare_hal_invocation_plan_for_sample(
 }
 
 static iree_status_t loom_benchmark_hal_input_ring_initialize(
-    const loom_testbench_module_plan_t* module_plan,
-    const loom_testbench_case_plan_t* case_plan,
     const loom_benchmark_benchmark_policy_t* policy,
     const loom_benchmark_options_t* options,
+    loom_benchmark_hal_case_sample_preparation_t* preparation,
     loom_benchmark_hal_actual_provider_t* provider,
-    const loom_testbench_value_materializer_options_t* materializer_options,
     loom_testbench_case_sample_t sample, iree_allocator_t allocator,
     loom_benchmark_hal_input_ring_t* out_ring) {
   *out_ring = (loom_benchmark_hal_input_ring_t){
@@ -70,7 +188,7 @@ static iree_status_t loom_benchmark_hal_input_ring_initialize(
   loom_run_hal_invocation_plan_t first_plan = {0};
   loom_testbench_buffer_footprint_t first_input_footprint = {0};
   iree_status_t status = loom_benchmark_prepare_hal_invocation_plan_for_sample(
-      module_plan, case_plan, provider, materializer_options, sample, allocator,
+      preparation, provider, sample, /*execution_index=*/0, allocator,
       &first_plan, &first_input_footprint);
   uint64_t first_binding_set_bytes = 0;
   if (iree_status_is_ok(status)) {
@@ -130,8 +248,8 @@ static iree_status_t loom_benchmark_hal_input_ring_initialize(
        ++i) {
     loom_testbench_buffer_footprint_t input_footprint = {0};
     status = loom_benchmark_prepare_hal_invocation_plan_for_sample(
-        module_plan, case_plan, provider, materializer_options, sample,
-        allocator, &out_ring->plans[i], &input_footprint);
+        preparation, provider, sample, /*execution_index=*/i, allocator,
+        &out_ring->plans[i], &input_footprint);
     if (iree_status_is_ok(status) &&
         !loom_run_hal_invocation_options_equal(&out_ring->plans[0].options,
                                                &out_ring->plans[i].options)) {
@@ -290,21 +408,14 @@ static iree_status_t loom_benchmark_hal_sequence_resolve_input_footprint(
 }
 
 static iree_status_t loom_benchmark_prepare_hal_sequence_plans_for_sample(
-    const loom_testbench_module_plan_t* module_plan,
-    const loom_testbench_case_plan_t* case_plan,
+    loom_benchmark_hal_case_sample_preparation_t* preparation,
     loom_benchmark_hal_actual_sequence_t* sequence,
-    const loom_testbench_value_materializer_options_t* materializer_options,
-    loom_testbench_case_sample_t sample, iree_allocator_t allocator,
-    loom_run_hal_invocation_plan_t* out_plans,
+    loom_testbench_case_sample_t sample, iree_host_size_t execution_index,
+    iree_allocator_t allocator, loom_run_hal_invocation_plan_t* out_plans,
     loom_testbench_buffer_footprint_t* out_input_footprint) {
   *out_input_footprint = (loom_testbench_buffer_footprint_t){0};
-  loom_testbench_value_table_t table = {0};
-  iree_status_t status = loom_testbench_value_table_initialize_case(
-      module_plan->module, case_plan, allocator, &table);
-  if (iree_status_is_ok(status)) {
-    status = loom_testbench_materialize_case_sample(materializer_options,
-                                                    case_plan, sample, &table);
-  }
+  iree_status_t status = loom_benchmark_hal_case_sample_prepare(
+      preparation, sample, execution_index);
   for (iree_host_size_t i = 0;
        iree_status_is_ok(status) && i < sequence->provider_count; ++i) {
     loom_run_hal_testbench_actual_provider_t* provider =
@@ -312,7 +423,8 @@ static iree_status_t loom_benchmark_prepare_hal_sequence_plans_for_sample(
     loom_run_hal_invocation_options_t invocation_options = {0};
     loom_run_hal_binding_list_t bindings = {0};
     status = loom_run_hal_testbench_materialize_invocation_from_table(
-        &table, provider, allocator, &invocation_options, &bindings);
+        &preparation->value_table, provider, allocator, &invocation_options,
+        &bindings);
     if (iree_status_is_ok(status)) {
       status = loom_run_hal_invocation_plan_prepare_from_lists(
           &invocation_options, &bindings, /*expected_bindings=*/NULL,
@@ -322,19 +434,16 @@ static iree_status_t loom_benchmark_prepare_hal_sequence_plans_for_sample(
   }
   if (iree_status_is_ok(status)) {
     status = loom_benchmark_hal_sequence_resolve_input_footprint(
-        &table, sequence, allocator, out_input_footprint);
+        &preparation->value_table, sequence, allocator, out_input_footprint);
   }
-  loom_testbench_value_table_deinitialize(&table);
   return status;
 }
 
 static iree_status_t loom_benchmark_hal_sequence_input_ring_initialize(
-    const loom_testbench_module_plan_t* module_plan,
-    const loom_testbench_case_plan_t* case_plan,
     const loom_benchmark_benchmark_policy_t* policy,
     const loom_benchmark_options_t* options,
+    loom_benchmark_hal_case_sample_preparation_t* preparation,
     loom_benchmark_hal_actual_sequence_t* sequence,
-    const loom_testbench_value_materializer_options_t* materializer_options,
     loom_testbench_case_sample_t sample, iree_allocator_t allocator,
     loom_benchmark_hal_sequence_input_ring_t* out_ring) {
   *out_ring = (loom_benchmark_hal_sequence_input_ring_t){
@@ -352,8 +461,8 @@ static iree_status_t loom_benchmark_hal_sequence_input_ring_initialize(
     memset(first_plans, 0, sequence->provider_count * sizeof(*first_plans));
     first_plan_count = sequence->provider_count;
     status = loom_benchmark_prepare_hal_sequence_plans_for_sample(
-        module_plan, case_plan, sequence, materializer_options, sample,
-        allocator, first_plans, &first_input_footprint);
+        preparation, sequence, sample, /*execution_index=*/0, allocator,
+        first_plans, &first_input_footprint);
   }
   uint64_t first_binding_set_bytes = 0;
   if (iree_status_is_ok(status)) {
@@ -449,7 +558,7 @@ static iree_status_t loom_benchmark_hal_sequence_input_ring_initialize(
         &out_ring->plans[ring_index * sequence->provider_count];
     loom_testbench_buffer_footprint_t input_footprint = {0};
     status = loom_benchmark_prepare_hal_sequence_plans_for_sample(
-        module_plan, case_plan, sequence, materializer_options, sample,
+        preparation, sequence, sample, /*execution_index=*/ring_index,
         allocator, ring_plans, &input_footprint);
     for (iree_host_size_t step_index = 0;
          iree_status_is_ok(status) && step_index < sequence->provider_count;
@@ -543,11 +652,11 @@ iree_status_t loom_benchmark_run_hal_benchmark_sample(
     const loom_benchmark_candidate_identity_t* candidate,
     const loom_testbench_module_plan_t* module_plan,
     const loom_testbench_benchmark_plan_t* benchmark_plan,
-    const loom_testbench_case_plan_t* case_plan,
     const loom_benchmark_benchmark_policy_t* policy,
     const loom_benchmark_options_t* options,
     loom_benchmark_hal_actual_provider_t* provider,
-    const loom_testbench_value_materializer_options_t* materializer_options,
+    const loom_testbench_case_execution_options_t* execution_options,
+    iree_arena_allocator_t* execution_arena,
     iree_host_size_t benchmark_sample_ordinal, iree_allocator_t allocator,
     loom_benchmark_benchmark_result_t* out_result) {
   const loom_testbench_case_sample_t sample =
@@ -574,9 +683,17 @@ iree_status_t loom_benchmark_run_hal_benchmark_sample(
   }
 
   loom_benchmark_hal_input_ring_t input_ring = {0};
-  iree_status_t status = loom_benchmark_hal_input_ring_initialize(
-      module_plan, case_plan, policy, options, provider, materializer_options,
-      sample, allocator, &input_ring);
+  loom_benchmark_hal_case_sample_preparation_t preparation = {0};
+  iree_status_t status = loom_benchmark_hal_case_sample_preparation_initialize(
+      module_plan, benchmark_plan, execution_options, execution_arena,
+      allocator, &preparation);
+  if (iree_status_is_ok(status)) {
+    status = loom_benchmark_hal_input_ring_initialize(
+        policy, options, &preparation, provider, sample, allocator,
+        &input_ring);
+  }
+  loom_benchmark_hal_case_sample_preparation_deinitialize(&preparation);
+  iree_arena_reset(execution_arena);
   if (iree_status_is_ok(status)) {
     out_result->has_hal_benchmark = true;
     out_result->data_cache = input_ring.summary;
@@ -614,12 +731,12 @@ iree_status_t loom_benchmark_run_hal_sequence_benchmark_sample(
     const loom_benchmark_candidate_identity_t* candidate,
     const loom_testbench_module_plan_t* module_plan,
     const loom_testbench_benchmark_plan_t* benchmark_plan,
-    const loom_testbench_case_plan_t* case_plan,
     const loom_benchmark_benchmark_policy_t* policy,
     const loom_benchmark_options_t* options,
     loom_benchmark_hal_context_t* hal_context,
     loom_benchmark_hal_actual_sequence_t* sequence,
-    const loom_testbench_value_materializer_options_t* materializer_options,
+    const loom_testbench_case_execution_options_t* execution_options,
+    iree_arena_allocator_t* execution_arena,
     iree_host_size_t benchmark_sample_ordinal, iree_allocator_t allocator,
     loom_benchmark_benchmark_result_t* out_result) {
   const loom_testbench_case_sample_t sample =
@@ -642,9 +759,17 @@ iree_status_t loom_benchmark_run_hal_sequence_benchmark_sample(
   }
 
   loom_benchmark_hal_sequence_input_ring_t input_ring = {0};
-  iree_status_t status = loom_benchmark_hal_sequence_input_ring_initialize(
-      module_plan, case_plan, policy, options, sequence, materializer_options,
-      sample, allocator, &input_ring);
+  loom_benchmark_hal_case_sample_preparation_t preparation = {0};
+  iree_status_t status = loom_benchmark_hal_case_sample_preparation_initialize(
+      module_plan, benchmark_plan, execution_options, execution_arena,
+      allocator, &preparation);
+  if (iree_status_is_ok(status)) {
+    status = loom_benchmark_hal_sequence_input_ring_initialize(
+        policy, options, &preparation, sequence, sample, allocator,
+        &input_ring);
+  }
+  loom_benchmark_hal_case_sample_preparation_deinitialize(&preparation);
+  iree_arena_reset(execution_arena);
   if (iree_status_is_ok(status)) {
     out_result->has_hal_benchmark = true;
     out_result->data_cache = input_ring.summary;

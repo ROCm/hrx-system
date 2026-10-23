@@ -1095,12 +1095,21 @@ or newly permitted services. The library does not load modules, change device
 permissions, or raise resource limits.
 
 The exported host backing is prepared before its first device attachment.
-Explicit NUMA placement is applied before physical allocation. Full 2 MiB
-extents attempt synchronous large-folio promotion where supported. Promotion
-may be unavailable or partial when contiguous physical memory is scarce;
-allocation does not require huge pages. The ordinary host view is populated
-for the entire allocation before export pins it and publishes CPU
-initialization, including every base page that could not be promoted.
+Explicit NUMA placement is applied before physical allocation. On Linux 7.2
+and newer, full 2 MiB extents attempt synchronous large-folio promotion where
+supported. Earlier kernels use base pages and prohibit transparent huge-page
+promotion for this backing: their udmabuf exporter constructs malformed
+scatterlists for large folios, causing DMA importers to map repeated or wrong
+pages. The [upstream repair](https://gitlab.freedesktop.org/drm/tip/-/commit/5bf888673e0dda5a53220fa0c4956271a46c353c)
+replaces those entries with page-based scatterlists. Older kernels with a
+backported repair still use base pages. This restriction applies only to
+owned backing exported through udmabuf; fixed-address KFD file staging and
+ordinary GPU allocations retain their own page policies.
+
+Large-folio promotion may be unavailable or partial when contiguous physical
+memory is scarce; allocation does not require huge pages. The ordinary host
+view is populated for the entire allocation before export pins it and publishes
+CPU initialization, including every base page that could not be promoted.
 Required placement or population failures remain allocation errors. CPU-only
 allocations and caller-owned imports retain their separate construction
 contracts.

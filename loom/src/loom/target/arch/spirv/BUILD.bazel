@@ -30,6 +30,7 @@ package(
 exports_files(
     [
         "isa.h",
+        "scalar_type.h",
         "scalar_types.h",
     ],
     visibility = [
@@ -136,12 +137,26 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "vocabulary",
+    hdrs = [
+        "features.h",
+        "scalar_type.h",
+    ],
+    visibility = _SPIRV_OPS_VISIBILITY + _SPIRV_RECORDS_VISIBILITY,
+    deps = [
+        ":isa",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "scalar_types",
     srcs = ["scalar_types.c"],
     hdrs = ["scalar_types.h"],
     visibility = _SPIRV_EMIT_VISIBILITY + _SPIRV_LOWER_VISIBILITY + _SPIRV_OPS_VISIBILITY,
     deps = [
         ":features",
+        ":vocabulary",
         "//loom/src/loom/util:numeric_format",
         "//runtime/src/iree/base",
     ],
@@ -261,6 +276,7 @@ loom_cc_library(
         "//loom/src/loom/target:profile",
         "//loom/src/loom/target/arch/spirv/records:target_records",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 

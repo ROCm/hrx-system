@@ -529,6 +529,14 @@ TEST_F(DominanceTest, CfgLoopDominanceUsesFixedPointDominators) {
   EXPECT_TRUE(loom_dominates_op(&dom_info_, header_value, exit_value));
   EXPECT_FALSE(loom_dominates_op(&dom_info_, body_value, header_value));
   EXPECT_FALSE(loom_dominates_op(&dom_info_, body_value, exit_value));
+
+  const loom_cfg_graph_t* graph = nullptr;
+  const loom_cfg_dominance_t* dominance = nullptr;
+  ASSERT_TRUE(loom_dominance_info_lookup_cfg_region(&dom_info_, body_, &graph,
+                                                    &dominance));
+  EXPECT_EQ(graph->region, body_);
+  EXPECT_EQ(graph->block_count, 3u);
+  EXPECT_TRUE(dominance->available);
 }
 
 TEST_F(DominanceTest, CfgBlockArgumentsDominateOnlyDominatedBlocks) {

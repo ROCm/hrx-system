@@ -15,6 +15,7 @@ from typing import Any
 from loom.dsl import (
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64,
+    ATTR_TYPE_PARAMETERIZED,
     ATTR_TYPE_PARAMETERIZED_ARRAY,
     ATTR_TYPE_STRING,
     CachePolicyInterface,
@@ -161,6 +162,12 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
                 expected_attr_type=ATTR_TYPE_STRING,
             ),
             InterfaceFieldSpec("abi", "abi_attr_index", "attr"),
+            InterfaceFieldSpec(
+                "source_signature",
+                "source_signature_attr_index",
+                "attr",
+                expected_attr_type=ATTR_TYPE_PARAMETERIZED,
+            ),
             InterfaceFieldSpec("abi_attrs", "abi_attrs_attr_index", "attr"),
             InterfaceFieldSpec("export_symbol", "export_symbol_attr_index", "attr"),
             InterfaceFieldSpec("export_attrs", "export_attrs_attr_index", "attr"),

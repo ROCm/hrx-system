@@ -239,7 +239,7 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
   };
 
   const loom_low_reg_class_t reg_class =
-      RegClass(/*allocatable_count=*/6, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
+      RegClass(/*allocatable_count=*/8, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
   const loom_low_descriptor_set_t descriptor_set =
       DescriptorSet(&reg_class, descriptor_set_id);
   const loom_low_resolved_target_t target = ResolvedTarget(&descriptor_set);
@@ -355,6 +355,51 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
   EXPECT_EQ(victim_set.assignment_indices[0], 1u);
   ASSERT_EQ(victim_set.released_value_count, 1u);
   EXPECT_EQ(victim_set.released_value_ids[0], required_source_value);
+
+  // Compare a cheap ordinary victim with a later candidate requiring both it
+  // and a covering victim. Rejecting that costlier set must retire all of its
+  // temporary membership before the covering-only candidate is evaluated.
+  const uint32_t comparison_locations[] = {4, 6, 0};
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(assignments); ++i) {
+    loom_low_allocation_active_set_remove(&active_set, assignments,
+                                          IREE_ARRAYSIZE(assignments), i);
+  }
+  intervals[3].end_point = 16;
+  assignments[2].end_point = 16;
+  unit_end_points[8] = unit_end_points[9] = 16;
+  max_assigned_location_end_by_reg_class[0] = 8;
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(assignments); ++i) {
+    assignments[i].location_base = comparison_locations[i];
+    loom_low_allocation_active_set_insert(&active_set, &descriptor_set,
+                                          assignments,
+                                          IREE_ARRAYSIZE(assignments), i);
+  }
+  const loom_low_allocation_class_capacity_t comparison_capacity = Capacity(8);
+  for (int repetition = 0; repetition < 2; ++repetition) {
+    IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+        &context, &intervals[0], &comparison_capacity,
+        /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
+    ASSERT_TRUE(victim_set.found);
+    EXPECT_EQ(victim_set.location_base, 2u);
+    ASSERT_EQ(victim_set.assignment_count, 1u);
+    EXPECT_EQ(victim_set.assignment_indices[0], 1u);
+    ASSERT_EQ(victim_set.released_value_count, 1u);
+    EXPECT_EQ(victim_set.released_value_ids[0], required_source_value);
+  }
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(assignments); ++i) {
+    loom_low_allocation_active_set_remove(&active_set, assignments,
+                                          IREE_ARRAYSIZE(assignments), i);
+  }
+  intervals[3].end_point = 20;
+  assignments[2].end_point = 20;
+  unit_end_points[8] = unit_end_points[9] = 20;
+  max_assigned_location_end_by_reg_class[0] = 6;
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(assignments); ++i) {
+    assignments[i].location_base = i * 2u;
+    loom_low_allocation_active_set_insert(&active_set, &descriptor_set,
+                                          assignments,
+                                          IREE_ARRAYSIZE(assignments), i);
+  }
 
   // The source and covering victim both have outstanding asynchronous leases.
   // Spilling the victim retires its lease, while the source lease must be

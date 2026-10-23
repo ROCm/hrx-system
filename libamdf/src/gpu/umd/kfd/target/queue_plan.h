@@ -24,6 +24,8 @@ typedef struct amdf_gpu_kfd_user_queue_plan_t {
   struct {
     // Achieved locality of the primary command storage.
     amdf_queue_placement_t placement;
+    // Required host release executor before command commit.
+    amdf_cache_transition_executor_t host_publish_executor;
     // Host ordering between packet stores and header/index publication.
     amdf_host_cache_fence_t host_publish_fence;
     // Complete allocation containing both ring regions.

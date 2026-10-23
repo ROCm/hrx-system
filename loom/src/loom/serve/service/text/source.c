@@ -186,6 +186,12 @@ iree_status_t loom_serve_text_source_initialize(
   out_source->host_allocator = host_allocator;
   IREE_RETURN_IF_ERROR(loom_serve_text_prepare(target_environment, out_source,
                                                options, out_storage));
+  const loom_model_file_list_t* paths = NULL;
+  const uint32_t source_count =
+      loom_serve_preparation_local_sources(out_source->preparation, &paths);
+  IREE_RETURN_IF_ERROR(loom_serve_parameter_sources_create(
+      NULL, &options->sources, source_count, paths, host_allocator,
+      &out_source->parameter_sources));
   const iree_vm_ref_type_table_t* table = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_module_register_types(out_source->environment, &table));
@@ -228,6 +234,7 @@ iree_status_t loom_serve_text_source_initialize(
 }
 
 void loom_serve_text_source_deinitialize(loom_serve_text_source_t* source) {
+  loom_serve_parameter_sources_release(source->parameter_sources);
   loom_serve_preparation_free(source->preparation);
   iree_vm_module_release(source->module);
   iree_vm_buffer_release(source->control_state);

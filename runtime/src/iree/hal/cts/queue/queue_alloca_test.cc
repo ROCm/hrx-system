@@ -432,7 +432,7 @@ TEST_P(QueueAllocaTest, MapsSubspanBackingInNativeCoordinates) {
   if (iree_status_is_unavailable(status)) {
     iree::Status unavailable_status(std::move(status));
     GTEST_SKIP() << "device has no host-mappable queue storage: "
-                 << unavailable_status.ToString();
+                 << FormatSkipStatus(unavailable_status);
   }
   IREE_ASSERT_OK(status);
 
@@ -744,7 +744,7 @@ TEST_P(QueueAllocaTest, ExportFollowsAllocationLifetime) {
   if (iree_status_is_unavailable(status)) {
     iree::Status unavailable_status(std::move(status));
     GTEST_SKIP() << "device has no host-exportable queue storage: "
-                 << unavailable_status.ToString();
+                 << FormatSkipStatus(unavailable_status);
   }
   IREE_ASSERT_OK(status);
   auto request = MakeRequest(/*size=*/256);

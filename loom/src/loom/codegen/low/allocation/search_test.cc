@@ -1574,6 +1574,53 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   ASSERT_EQ(victim_set.assignment_count, 1u);
   EXPECT_EQ(victim_set.assignment_indices[0], 1u);
 
+  // Traffic wins independently of candidate order. Equal traffic retains the
+  // longer remaining lifetime even when that candidate is visited second.
+  for (bool reverse_locations : {false, true, false}) {
+    for (uint32_t i = 0; i < IREE_ARRAYSIZE(assignments); ++i) {
+      loom_low_allocation_active_set_remove(&active_set, assignments,
+                                            IREE_ARRAYSIZE(assignments), i);
+    }
+    for (uint32_t i = 0; i < IREE_ARRAYSIZE(assignments); ++i) {
+      assignments[i].location_base = (reverse_locations ? 1u - i : i) * 2u;
+      loom_low_allocation_active_set_insert(&active_set, &descriptor_set,
+                                            assignments,
+                                            IREE_ARRAYSIZE(assignments), i);
+    }
+    for (uint32_t reload_bytes : {8u, 64u, 128u}) {
+      spill_traffic[2].reload_count = reload_bytes / 8u;
+      spill_traffic[2].reload_bytes = reload_bytes;
+      IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+          &context, &intervals[0], &capacity,
+          /*interval_requires_register=*/true, &workspace, &arena_,
+          &victim_set));
+      ASSERT_TRUE(victim_set.found);
+      ASSERT_EQ(victim_set.assignment_count, 1u);
+      const uint32_t expected_assignment = reload_bytes < 64u ? 1u : 0u;
+      EXPECT_EQ(victim_set.assignment_indices[0], expected_assignment);
+      EXPECT_EQ(victim_set.location_base,
+                assignments[expected_assignment].location_base);
+    }
+
+    // The later, more expensive victim can still win by removing more sustained
+    // pressure. Hard register requirements retain absolute-traffic ranking.
+    spill_traffic[2].reload_count = 5;
+    spill_traffic[2].reload_bytes = 40;
+    context.use_pressure_efficiency = true;
+    for (bool requires_register : {false, true}) {
+      IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+          &context, &intervals[0], &capacity, requires_register, &workspace,
+          &arena_, &victim_set));
+      ASSERT_TRUE(victim_set.found);
+      ASSERT_EQ(victim_set.assignment_count, 1u);
+      const uint32_t expected_assignment = requires_register ? 1u : 0u;
+      EXPECT_EQ(victim_set.assignment_indices[0], expected_assignment);
+      EXPECT_EQ(victim_set.location_base,
+                assignments[expected_assignment].location_base);
+    }
+    context.use_pressure_efficiency = false;
+  }
+
   // A heavily reused active value can cost more traffic for the pressure it
   // removes than the incoming interval. Required incoming storage must still
   // evict a physical victim.

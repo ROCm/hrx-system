@@ -426,6 +426,7 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+if(AMDF_BUILD)
 iree_cc_library(
   NAME
     ring
@@ -435,10 +436,13 @@ iree_cc_library(
     "ring.c"
   DEPS
     ::packet
+    amdf::headers
     iree::base::internal
     iree::hal
+    iree::hal::drivers::amd::gpu::queue::user_queue
   PUBLIC
 )
+endif()
 
 iree_cc_test(
   NAME
@@ -451,6 +455,7 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
+if(AMDF_BUILD)
 iree_cc_test(
   NAME
     ring_test
@@ -463,7 +468,9 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
 )
+endif()
 
+if(AMDF_BUILD)
 iree_cc_binary_benchmark(
   NAME
     ring_benchmark
@@ -477,6 +484,7 @@ iree_cc_binary_benchmark(
     iree::third_party::google_benchmark
   TESTONLY
 )
+endif()
 
 if(AMDF_BUILD)
 iree_cc_library(
@@ -820,6 +828,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::code
     iree::hal::drivers::amd::gpu::queue::blit
     iree::hal::drivers::amd::gpu::queue::program
+    iree::hal::drivers::amd::gpu::queue::user_queue
     iree::hal::drivers::amd::status
   PUBLIC
 )

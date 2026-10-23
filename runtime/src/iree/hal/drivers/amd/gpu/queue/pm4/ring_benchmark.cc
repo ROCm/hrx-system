@@ -16,8 +16,8 @@ namespace {
 void BM_Reserve(benchmark::State& state) {
   std::array<uint32_t, 1024> words;
   iree_hal_amd_gpu_pm4_ring_t ring;
-  iree_hal_amd_gpu_pm4_ring_initialize(words.data(), words.size(),
-                                       IREE_HAL_HOST_CACHE_FENCE_NONE, &ring);
+  iree_hal_amd_gpu_pm4_ring_initialize(
+      words.data(), words.size(), AMDF_CACHE_TRANSITION_EXECUTOR_NONE, &ring);
   uint64_t consumed = 0;
   const uint32_t body = state.range(0);
   for (auto _ : state) {
@@ -38,8 +38,8 @@ BENCHMARK(BM_Reserve)->Arg(32)->Arg(76)->Arg(252);
 void BM_CapacityBlocked(benchmark::State& state) {
   std::array<uint32_t, 1024> words;
   iree_hal_amd_gpu_pm4_ring_t ring;
-  iree_hal_amd_gpu_pm4_ring_initialize(words.data(), words.size(),
-                                       IREE_HAL_HOST_CACHE_FENCE_NONE, &ring);
+  iree_hal_amd_gpu_pm4_ring_initialize(
+      words.data(), words.size(), AMDF_CACHE_TRANSITION_EXECUTOR_NONE, &ring);
   iree_hal_amd_gpu_pm4_ring_reservation_t reservation;
   for (int i = 0; i < 3; ++i) {
     iree_hal_amd_gpu_pm4_ring_try_reserve(&ring, 0, 256, &reservation);

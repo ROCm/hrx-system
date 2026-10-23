@@ -133,6 +133,32 @@ static iree_status_t loom_vector_packet_preserve_memory_loads_impl(
         packetization->context->module, packetized_value->source);
     loom_op_t* load_op = loom_value_def_op(value);
     IREE_ASSERT_TRUE(loom_vector_load_isa(load_op));
+    // A single authored vector load is already an immutable one-packet
+    // snapshot. Replacing it with an identical load would falsely report
+    // rewrite progress forever; retain the existing SSA value as the regular
+    // partition instead. Consumers can then take static slices without
+    // replaying the read across motion barriers.
+    if (!exact_components && shape->chunk_count == 1u) {
+      loom_value_fact_vector_partition_component_t* component = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(packetization->context->arena,
+                                               sizeof(*component),
+                                               (void**)&component));
+      *component = (loom_value_fact_vector_partition_component_t){
+          .value = packetized_value->source,
+          .lane_count = shape->lane_count,
+      };
+      packetized_value->source_mode = LOOM_VECTOR_PACKET_SOURCE_MODE_SNAPSHOT;
+      packetized_value->source_partition = (loom_value_fact_vector_partition_t){
+          .components = component,
+          .snapshot_components = component,
+          .count = 1u,
+          .lane_count = shape->lane_count,
+          .regular_lane_count = shape->lane_count,
+          .snapshot_count = 1u,
+          .snapshot_lane_count = shape->lane_count,
+      };
+      continue;
+    }
     if (exact_components) {
       loom_target_contract_query_result_t query_result =
           loom_target_contract_query_result_empty();

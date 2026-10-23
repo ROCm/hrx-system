@@ -226,3 +226,56 @@ low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 0
   global_store_dword_saddr %10, %marker_value, %output_view
   return
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @dynamic_subgroup_lane_id(%size: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%size, %c1, %c1) : index
+} launch(%output: buffer) {
+  %lane_id = kernel.subgroup.lane.id : index
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<32xi32>
+  %marker_value = vector.constant 1 : vector<1xi32>
+  vector.store %marker_value, %output_view[%lane_id] : vector<1xi32>, view<32xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_count(1, 1, 1) @dynamic_subgroup_lane_id() asm {
+  %output_view = resource<hal_binding> {extent = 128, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %lane_id = v_mbcnt_lo_u32_b32_lane_id
+  %marker_value = v_mov_b32 1
+  %10 = v_lshlrev_b32_src0_inline %lane_id, 2
+  global_store_b32_saddr %10, %marker_value, %output_view
+  return
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+
+kernel.def target(@target) @dynamic_subgroup_lane_id_wave64(%size: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%size, %c1, %c1) : index
+} launch(%output: buffer) {
+  %lane_id = kernel.subgroup.lane.id : index
+  %output_base = index.constant 0 : offset
+  %output_view = buffer.view %output[%output_base] : buffer -> view<64xi32>
+  %marker_value = vector.constant 1 : vector<1xi32>
+  vector.store %marker_value, %output_view[%lane_id] : vector<1xi32>, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_count(1, 1, 1) @dynamic_subgroup_lane_id_wave64() asm {
+  %output_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %8 = v_mbcnt_lo_u32_b32_lane_id
+  %lane_id = v_mbcnt_hi_u32_b32_lane_id %8
+  %marker_value = v_mov_b32 1
+  %11 = v_lshlrev_b32_src0_inline %lane_id, 2
+  global_store_dword_saddr %11, %marker_value, %output_view
+  return
+}

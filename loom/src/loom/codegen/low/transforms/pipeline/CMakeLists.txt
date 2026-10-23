@@ -115,6 +115,8 @@ loom_cc_test(
   NAME
     source_to_low_test
   SRCS
+    "source_signature_test_policy.c"
+    "source_signature_test_policy.h"
     "source_to_low_test.cc"
   DEPS
     ::source_invocation_facts
@@ -150,6 +152,7 @@ loom_cc_test(
     loom::target::function_contract
     loom::target::function_version
     loom::target::provider
+    loom::target::registers
     loom::target::test::alt_descriptors
     loom::target::test::contracts::core_lower_rules
     loom::target::test::descriptors

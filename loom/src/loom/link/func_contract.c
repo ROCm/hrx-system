@@ -168,6 +168,33 @@ static iree_status_t loom_link_func_contract_apply_attr(
   return iree_ok_status();
 }
 
+static iree_status_t loom_link_func_contract_check_exact_attr(
+    loom_ir_remap_t* remap, const loom_link_func_contract_t* source,
+    uint8_t source_attr_index, const loom_link_func_contract_t* selected,
+    uint8_t selected_attr_index, iree_string_view_t field_name,
+    loom_link_func_contract_mismatch_t* out_mismatch) {
+  const bool source_present =
+      loom_link_func_contract_attr_present(source, source_attr_index);
+  const bool selected_present =
+      loom_link_func_contract_attr_present(selected, selected_attr_index);
+  if (source_present != selected_present) {
+    loom_link_func_contract_mismatch_field(field_name, out_mismatch);
+    return iree_ok_status();
+  }
+  if (!source_present) {
+    return iree_ok_status();
+  }
+
+  loom_attribute_t remapped_attr = {0};
+  IREE_RETURN_IF_ERROR(loom_ir_remap_attribute(
+      remap, source->attributes[source_attr_index], &remapped_attr));
+  if (!loom_attribute_equal(&selected->attributes[selected_attr_index],
+                            &remapped_attr)) {
+    loom_link_func_contract_mismatch_field(field_name, out_mismatch);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_link_func_contract_apply_attrs(
     loom_ir_remap_t* remap, const loom_link_func_contract_t* source,
     const loom_link_func_contract_t* selected,
@@ -295,6 +322,14 @@ static iree_status_t loom_link_func_contract_apply(
                  sizeof(*source->tied_results)) != 0) {
     loom_link_func_contract_mismatch_field(IREE_SV("tied_results"),
                                            out_mismatch);
+    return iree_ok_status();
+  }
+
+  IREE_RETURN_IF_ERROR(loom_link_func_contract_check_exact_attr(
+      remap, source, source->function->source_signature_attr_index, selected,
+      selected->function->source_signature_attr_index,
+      IREE_SV("source_signature"), out_mismatch));
+  if (loom_link_func_contract_mismatch_present(out_mismatch)) {
     return iree_ok_status();
   }
 

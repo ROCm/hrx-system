@@ -47,6 +47,13 @@ struct FakeNativeState {
   amdf_status_t create_status = AMDF_STATUS_OK;
   amdf_status_t map_status = AMDF_STATUS_OK;
   amdf_status_t mapping_destroy_status = AMDF_STATUS_OK;
+  // Native release result below the public mapping API.
+  amdf_status_t flush_status = AMDF_STATUS_OK;
+  // Number of actual provider release operations.
+  uint32_t flush_count = 0;
+  // Producer-local release requirement supplied by the native mapping.
+  amdf_cache_transition_executor_t host_publish_executor =
+      AMDF_CACHE_TRANSITION_EXECUTOR_NONE;
   amdf_status_t query_status = AMDF_STATUS_OK;
   amdf_status_t wait_status = AMDF_STATUS_OK;
   amdf_status_t destroy_status = AMDF_STATUS_OK;
@@ -171,6 +178,54 @@ class GpuUserQueueTest : public ::testing::Test {
   amdf_user_queue_t* queue_ = nullptr;
   amdf_user_queue_mapping_t* mapping_ = nullptr;
 };
+
+TEST_F(GpuUserQueueTest, HostPublicationPreservesNativeFailureAndOwnership) {
+  consumer_state_.host_publish_executor =
+      AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
+  const auto create_info = MakeCreateInfo();
+  ASSERT_EQ(amdf_gpu_user_queue_create(&consumer_.base, &create_info, &queue_),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_user_queue_map(queue_, nullptr, &mapping_), AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_user_queue_mapping_flush(mapping_), AMDF_STATUS_OK);
+  EXPECT_EQ(consumer_state_.flush_count, 1u);
+  const auto failure = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
+  consumer_state_.flush_status = failure;
+  EXPECT_EQ(amdf_user_queue_mapping_flush(mapping_), failure);
+  EXPECT_EQ(consumer_state_.flush_count, 2u);
+  amdf_user_queue_mapping_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_MAPPING_INFO,
+      .structure_size = sizeof(info),
+  };
+  ASSERT_EQ(amdf_user_queue_mapping_query_info(mapping_, &info),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(info.host_publish_executor,
+            AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API);
+}
+
+TEST_F(GpuUserQueueTest, RejectsReleaseWithoutANativeHostExecutor) {
+  EXPECT_EQ(amdf_user_queue_mapping_flush(nullptr),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  const auto create_info = MakeCreateInfo();
+  ASSERT_EQ(amdf_gpu_user_queue_create(&consumer_.base, &create_info, &queue_),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_user_queue_map(queue_, nullptr, &mapping_), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_user_queue_mapping_flush(mapping_),
+            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+  EXPECT_EQ(consumer_state_.flush_count, 0u);
+}
+
+TEST_F(GpuUserQueueTest, DeviceProducerDoesNotRunHostPublication) {
+  consumer_state_.host_publish_executor =
+      AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
+  const auto create_info = MakeCreateInfo();
+  ASSERT_EQ(amdf_gpu_user_queue_create(&consumer_.base, &create_info, &queue_),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_user_queue_map(queue_, &consumer_.base, &mapping_),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_user_queue_mapping_flush(mapping_),
+            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+  EXPECT_EQ(consumer_state_.flush_count, 0u);
+}
 
 TEST_F(GpuUserQueueTest, RequiresAdvertisedPlacementAndReportsAchievement) {
   auto create = MakeCreateInfo();
@@ -705,9 +760,18 @@ amdf_status_t amdf_gpu_umd_user_queue_map(
       .doorbell_address = UINT64_C(0x3000),
       .index_bits = 64,
       .doorbell_bits = 64,
+      .host_publish_executor = producer_device == nullptr
+                                   ? state->host_publish_executor
+                                   : AMDF_CACHE_TRANSITION_EXECUTOR_NONE,
   };
   *out_mapping = &state->mapping;
   return AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_gpu_umd_user_queue_mapping_flush(
+    amdf_gpu_umd_user_queue_mapping_t* mapping) {
+  ++mapping->state->flush_count;
+  return mapping->state->flush_status;
 }
 
 amdf_status_t amdf_gpu_umd_user_queue_mapping_destroy(

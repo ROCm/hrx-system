@@ -79,13 +79,32 @@ iree_status_t loom_amdgpu_emit_subgroup_lane_compare(
     const loom_low_lower_resolved_descriptor_t* descriptor, loom_value_id_t lhs,
     loom_value_id_t rhs, loom_type_t mask_type, loom_value_id_t* out_guard);
 
+// Compares the flattened workitem coordinate against the first lane of a
+// statically known partial final wave.
+iree_status_t loom_amdgpu_emit_subgroup_tail_wave_guard(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* lane_ge_descriptor,
+    loom_value_id_t linear_id, uint32_t flat_workgroup_size,
+    uint32_t wavefront_size, loom_type_t lane_type, loom_type_t mask_type,
+    loom_value_id_t* out_tail_wave_guard);
+
+// Selects the full or tail live-lane count using a final-wave guard.
+iree_status_t loom_amdgpu_emit_subgroup_tail_active_lane_count(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_resolved_descriptor_t* select_descriptor,
+    loom_value_id_t tail_wave_guard, uint32_t flat_workgroup_size,
+    uint32_t wavefront_size, loom_type_t lane_type,
+    loom_value_id_t* out_active_lane_count);
+
 // Reduces each payload register across the selected participating lanes.
-// A dynamic lane count selects the guarded down tree for a partial tail;
-// otherwise the retained cross-lane strategy owns the exchange mechanics.
+// Dynamic lane bounds select the guarded down tree for a partial partition;
+// otherwise the retained cross-lane strategy owns the exchange mechanics. A
+// missing dynamic first lane denotes physical lane zero.
 iree_status_t loom_amdgpu_emit_subgroup_reduce_tree(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_subgroup_reduce_plan_t* plan, loom_value_id_t lane_id,
-    loom_type_t lane_type, loom_value_id_t dynamic_active_lane_count,
+    loom_type_t lane_type, loom_value_id_t dynamic_first_lane,
+    loom_value_id_t dynamic_active_lane_count,
     loom_value_id_t* inout_registers);
 
 // Combines 32-lane halves through SGPRs and broadcasts the completed payload

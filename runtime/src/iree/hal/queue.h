@@ -68,6 +68,8 @@ typedef enum iree_hal_queue_placement_e {
   IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL = 1,
   // Command storage is local to the queue's execution device.
   IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL = 2,
+  // Number of entries in a table indexed by placement, including DEFAULT.
+  IREE_HAL_QUEUE_PLACEMENT_COUNT = 3,
 } iree_hal_queue_placement_t;
 
 // Supported explicit command-storage placements. DEFAULT is always available
@@ -79,6 +81,26 @@ enum iree_hal_queue_placement_capability_bits_e {
       1u << IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL,
   IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL =
       1u << IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL,
+};
+
+// Native work required to make prepared commands visible to their execution
+// device. These describe host publication, not device-produced commands, and
+// exclude preparation, host scheduling/wakes, capacity waits, and execution.
+// They report mechanisms, not latency estimates or placement recommendations.
+typedef uint32_t iree_hal_queue_host_publication_flags_t;
+enum iree_hal_queue_host_publication_flag_bits_e {
+  // The implementation does not expose its publication requirements.
+  IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN = 0,
+  // Requirements are known: an absent DEVICE_READ or KERNEL_CALL bit guarantees
+  // that publication does not require that operation. KNOWN alone means CPU
+  // ordering and writes, potentially including a write-only MMIO notification.
+  IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KNOWN = 1u << 0,
+  // Publication requires a synchronous read from the device, such as a control
+  // register read completing posted writes. This is not a command-ring read.
+  IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ = 1u << 1,
+  // Publication requires entry into the native kernel driver. DEVICE_READ may
+  // also be present when that call performs a device read.
+  IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL = 1u << 2,
 };
 
 // Immutable execution features of an exact queue.

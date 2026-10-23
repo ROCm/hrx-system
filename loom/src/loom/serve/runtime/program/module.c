@@ -18,8 +18,10 @@ typedef struct loom_serve_module_t {
   iree_allocator_t host_allocator;
   // Immutable generic module description.
   iree_vm_module_descriptor_t descriptor;
-  // Canonical HAL buffer identity borrowed from the VM environment.
-  iree_vm_ref_type_t buffer_type;
+  // Canonical HAL buffer and fence identities borrowed from the environment.
+  iree_vm_ref_type_t types[2];
+  // Largest execute_N arity, independent of the loaded stage table.
+  uint16_t binding_capacity;
   // Retained external execution capability, shared with the host's I/O path.
   loom_serve_execution_t* execution;
   // Number of retained stages, independent of the export arity family.
@@ -192,15 +194,35 @@ static iree_status_t loom_serve_module_start(
     iree_vm_execution_outcome_t* out_outcome) {
   const loom_serve_module_t* module = (const loom_serve_module_t*)base;
   uint64_t value = 0;
-  iree_status_t status =
-      params->function_ordinal + 1 == module->descriptor.counts.function_count
-          ? loom_serve_module_feedback(module, &params->call, &value)
-          : loom_serve_module_execute(module, params, &value);
-  if (iree_status_is_ok(status)) {
+  if (params->function_ordinal <= module->binding_capacity + 1) {
+    IREE_RETURN_IF_ERROR(
+        params->function_ordinal == module->binding_capacity + 1
+            ? loom_serve_module_feedback(module, &params->call, &value)
+            : loom_serve_module_execute(module, params, &value));
     iree_vm_call_value_result_store(&params->call, 0, value);
-    *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
+  } else if (params->function_ordinal == module->binding_capacity + 2) {
+    value = iree_vm_call_value_argument_load(&params->call, 0);
+    const loom_serve_execution_frontier_t frontier =
+        loom_serve_execution_frontier(module->execution);
+    if (value > frontier.values[0]) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "runner fence requires an accepted work value");
+    }
+    iree_hal_fence_t* fence = NULL;
+    IREE_RETURN_IF_ERROR(iree_hal_fence_create_at(
+        frontier.semaphores[0], value, module->host_allocator, &fence));
+    void* owned = fence;
+    iree_vm_ref_t result = iree_vm_ref_from_ptr_move(&owned, module->types[1]);
+    iree_vm_call_ref_result_store_move(&params->call, 0, &result);
+  } else {
+    iree_vm_ref_t fence = iree_vm_ref_null();
+    iree_vm_call_ref_argument_load_borrow(&params->call, 0, &fence);
+    IREE_RETURN_IF_ERROR(loom_serve_execution_barrier(
+        module->execution,
+        iree_hal_fence_semaphore_list((iree_hal_fence_t*)fence.object)));
   }
-  return status;
+  *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
+  return iree_ok_status();
 }
 
 static void loom_serve_module_query_export(
@@ -258,8 +280,7 @@ iree_status_t loom_serve_module_bind_stages(iree_vm_module_t* base,
   uint64_t workspace_length = 0;
   uint64_t workspace_alignment = 0;
   for (iree_host_size_t i = 0; i < stage_count; ++i) {
-    if (stages[i].binding_count >
-        module->descriptor.counts.function_count - 2) {
+    if (stages[i].binding_count > module->binding_capacity) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "replacement stage %zu exceeds binding capacity",
                               i);
@@ -325,16 +346,18 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*module), (void**)&module));
   module->host_allocator = host_allocator;
-  module->buffer_type = types->buffer;
+  module->types[0] = types->buffer;
+  module->types[1] = types->fence;
+  module->binding_capacity = options.binding_capacity;
   module->execution = execution;
   module->workspace_requirement = iree_hal_make_pool_reservation_request(
       workspace_length, workspace_alignment);
   loom_serve_execution_retain(execution);
-  const iree_host_size_t export_count = options.binding_capacity + 2;
+  const iree_host_size_t export_count = options.binding_capacity + 4;
   module->descriptor = (iree_vm_module_descriptor_t){
       .name = IREE_SVL("runner"),
       .flags = IREE_VM_MODULE_FLAG_LINKABLE,
-      .ref_types = {&module->buffer_type, 1},
+      .ref_types = {module->types, IREE_ARRAYSIZE(module->types)},
       .counts = {.function_count = export_count,
                  .export_count = export_count,
                  .callable_type_count = export_count},
@@ -388,14 +411,15 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
       module->arguments[i] = (iree_vm_module_signature_type_t){
           IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0};
     }
-    // Signatures sort by field count, then type. Feedback has four fields
-    // and its scalar offset sorts before execute_3's third reference.
+    // Signatures sort by field count, then type. The one-argument signatures
+    // are execute_0(i32), fence(i64), and join(hal.fence). Feedback has four
+    // fields and its scalar offset sorts before execute_3's third reference.
     const iree_host_size_t feedback_ordinal =
-        iree_min(3, options.binding_capacity + 1);
+        iree_min(3, options.binding_capacity + 1) + 2;
     for (iree_host_size_t i = 0; i <= options.binding_capacity; ++i) {
       char* name = module->names + i * 16;
       const int length = snprintf(name, 16, "execute_%zu", i);
-      const iree_host_size_t ordinal = i + (i >= feedback_ordinal);
+      const iree_host_size_t ordinal = i ? i + 2 + (i >= 3) : 0;
       module->callables[ordinal].signature = (iree_vm_module_signature_t){
           .arguments = {module->arguments, i + 1, 1, i, 0},
           .results = {&loom_serve_module_result, 1, 1, 0, 0},
@@ -414,7 +438,7 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
         {IREE_VM_SCALAR_TYPE_I64, 0},
         {IREE_VM_SCALAR_TYPE_I64, 0},
     };
-    const iree_host_size_t ordinal = export_count - 1;
+    const iree_host_size_t ordinal = options.binding_capacity + 1;
     module->callables[feedback_ordinal].signature =
         (iree_vm_module_signature_t){
             .arguments = {feedback_arguments, 4, 3, 1, 0},
@@ -426,6 +450,27 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
         .export_name = IREE_SVL("feedback"),
         .callable_type_ordinal = feedback_ordinal,
         .function_ordinal = ordinal,
+    };
+    static const iree_vm_module_signature_type_t fence_type = {
+        IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 1};
+    module->callables[1].signature = (iree_vm_module_signature_t){
+        .arguments = {&loom_serve_module_result, 1, 1, 0, 0},
+        .results = {&fence_type, 1, 0, 1, 0},
+    };
+    module->callables[2].signature = (iree_vm_module_signature_t){
+        .arguments = {&fence_type, 1, 0, 1, 0},
+    };
+    module->descriptor.counts.callable_fields.value_count += 1;
+    module->descriptor.counts.callable_fields.ref_count += 2;
+    module->exports[ordinal + 1] = (iree_vm_module_export_declaration_t){
+        .export_name = IREE_SVL("fence"),
+        .callable_type_ordinal = 1,
+        .function_ordinal = ordinal + 1,
+    };
+    module->exports[ordinal + 2] = (iree_vm_module_export_declaration_t){
+        .export_name = IREE_SVL("join"),
+        .callable_type_ordinal = 2,
+        .function_ordinal = ordinal + 2,
     };
     qsort(module->exports, export_count, sizeof(*module->exports),
           loom_serve_module_compare_exports);

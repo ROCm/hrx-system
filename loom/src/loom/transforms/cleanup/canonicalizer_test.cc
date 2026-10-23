@@ -31,6 +31,7 @@ static const loom_cleanup_special_value_policy_t kSpecialValuePolicy = {
     .op_is_empty = loom_op_is_empty,
     .type_has_empty_materializer = loom_type_has_empty_materializer,
     .materialize_empty = loom_empty_build,
+    .can_materialize_constant = loom_value_facts_can_materialize_constant,
     .materialize_constant = loom_constant_build,
 };
 

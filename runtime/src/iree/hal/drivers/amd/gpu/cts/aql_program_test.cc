@@ -86,7 +86,7 @@ class AqlProgramTest : public GpuNativeTest,
         reinterpret_cast<const iree_atomic_int64_t*>(host.read_index_address),
         reinterpret_cast<iree_atomic_int64_t*>(host.write_index_address),
         reinterpret_cast<volatile uint64_t*>(host.doorbell_address),
-        queue_.host_publish_fence, &ring_);
+        queue_.host_publish_executor, &ring_);
     signal_ = reinterpret_cast<iree_hal_amd_gpu_aql_signal_t*>(
         control_.contents.data);
     *signal_ = {
@@ -121,7 +121,9 @@ class AqlProgramTest : public GpuNativeTest,
 
   void Write(uint64_t position, iree_hal_amd_gpu_aql_packet_t packet) {
     iree_hal_amd_gpu_aql_ring_write_body(&ring_, position, &packet);
-    iree_hal_amd_gpu_aql_ring_publish_header(&ring_, position, packet.words[0]);
+    ASSERT_EQ(iree_hal_amd_gpu_aql_ring_publish_header(
+                  &ring_, &queue_, position, packet.words[0]),
+              AMDF_STATUS_OK);
   }
 
   iree_hal_amd_gpu_aql_packet_t Dispatch(uint64_t kernel, uint64_t arguments,

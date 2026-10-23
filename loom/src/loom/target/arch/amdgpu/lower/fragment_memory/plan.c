@@ -715,6 +715,24 @@ static bool loom_amdgpu_fragment_memory_is_packed_16bit_result_source(
   return true;
 }
 
+static bool loom_amdgpu_fragment_memory_is_packed_16bit_result_load(
+    const loom_module_t* module, loom_value_id_t source,
+    const loom_matrix_fragment_role_layout_t* role_layout,
+    loom_scalar_type_t storage_element_type, uint16_t* out_register_count) {
+  if (source >= module->values.count) {
+    return false;
+  }
+  const loom_op_t* defining_op =
+      loom_value_def_op(loom_module_value(module, source));
+  return defining_op != NULL &&
+         defining_op->kind == LOOM_OP_VECTOR_FRAGMENT_LOAD &&
+         loom_vector_fragment_load_role(defining_op) ==
+             LOOM_VECTOR_ROLE_RESULT &&
+         loom_amdgpu_fragment_memory_is_packed_16bit_result_source(
+             module, source, role_layout, storage_element_type,
+             out_register_count);
+}
+
 static loom_value_id_t
 loom_amdgpu_fragment_memory_same_lane_packed_16bit_source(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
@@ -767,6 +785,12 @@ loom_amdgpu_fragment_memory_narrowed_result_sources(
           : loom_amdgpu_fragment_memory_same_lane_round_source(
                 module, fact_table, payload, role_layout);
   if (sources.round_source == LOOM_VALUE_ID_INVALID) {
+    sources.packed_source =
+        loom_amdgpu_fragment_memory_is_packed_16bit_result_load(
+            module, payload, role_layout, storage_element_type,
+            &sources.packed_register_count)
+            ? payload
+            : LOOM_VALUE_ID_INVALID;
     return sources;
   }
 

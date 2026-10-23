@@ -13,6 +13,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/aql/ring.h"
 #include "iree/hal/drivers/amd/gpu/queue/blit.h"
 #include "iree/hal/drivers/amd/gpu/queue/program.h"
+#include "iree/hal/drivers/amd/gpu/queue/user_queue.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -83,11 +84,14 @@ uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
 // exclusively by the GPU. upload is coherent native argument storage and its
 // value table is already written. The caller establishes ownership before
 // emission and publishes a terminal completion after the block's slots.
-void iree_hal_amd_gpu_aql_program_emit(
+// A native release failure is terminal; accepted ownership stays with the
+// caller, and the remaining headers are not published.
+amdf_status_t iree_hal_amd_gpu_aql_program_emit(
     const iree_hal_amd_gpu_aql_program_pool_t* pool,
     const iree_hal_amd_gpu_program_t* program,
     const iree_hal_amd_gpu_program_instance_t* instance, uint32_t block_offset,
-    uint32_t packet_count, iree_hal_amd_gpu_aql_ring_t* ring, uint64_t position,
+    uint32_t packet_count, iree_hal_amd_gpu_aql_ring_t* ring,
+    const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
     uint64_t argument_address, uint64_t signal_address, void* upload,
     iree_hal_amd_gpu_aql_program_flags_t flags);
 

@@ -9,6 +9,7 @@
 
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/parameter/bank.h"
+#include "loom/serve/runtime/parameter/sources.h"
 #include "loom/serve/runtime/program/jit.h"
 #include "loom/serve/runtime/program/module.h"
 #include "loom/serve/runtime/program/preparation.h"
@@ -38,6 +39,8 @@ typedef struct loom_serve_executable_options_t {
   loom_serve_residency_t* residency;
   // Immutable cold declarations, borrowed through every replacement job.
   const loom_serve_preparation_t* preparation;
+  // Immutable cold source catalog, borrowed through every request choice.
+  loom_serve_parameter_sources_t* parameter_sources;
   // Borrowed checkpoint owner and placement, live through every recording.
   // NULL for a parameter-free model.
   const loom_serve_parameter_bank_t* parameters;
@@ -47,6 +50,8 @@ typedef struct loom_serve_executable_options_t {
   loom_serve_stage_record_options_t recording;
   // Borrowed runner, initially bound to stages and alive through retirement.
   iree_vm_module_t* runner;
+  // Borrowed demand-read capability, bound alongside each invocation's code.
+  iree_vm_module_t* parameter_module;
   // Bounds reusable request products without restricting one active request.
   loom_serve_variant_cache_options_t cache;
   // Independent bounds on retained checkpoint entries and final packed bytes.

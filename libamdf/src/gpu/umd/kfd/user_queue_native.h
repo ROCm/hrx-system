@@ -73,6 +73,10 @@ typedef struct amdf_gpu_kfd_user_queue_native_api_t {
   amdf_status_t (*vm_fault_query)(
       void* user_data, amdf_gpu_umd_device_t* device,
       struct drm_amdgpu_info_gpuvm_fault* out_fault);
+  // Completes host command stores through this device's qualified HDP mapping.
+  // No command-ring load, allocation, or memory-management lock is involved.
+  amdf_status_t (*flush_host_writes)(void* user_data,
+                                     amdf_gpu_umd_device_t* device);
 } amdf_gpu_kfd_user_queue_native_api_t;
 
 // Returns the production KFD queue operation table.

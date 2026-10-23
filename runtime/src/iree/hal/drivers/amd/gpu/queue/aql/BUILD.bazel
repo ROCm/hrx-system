@@ -157,10 +157,16 @@ iree_runtime_cc_library(
     name = "ring",
     srcs = ["ring.c"],
     hdrs = ["ring.h"],
+    target_compatible_with = select({
+        "//libamdf/config:enabled_setting": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":packet",
+        "//libamdf:headers",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:user_queue",
     ],
 )
 
@@ -177,6 +183,10 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "ring_test",
     srcs = ["ring_test.cc"],
+    target_compatible_with = select({
+        "//libamdf/config:enabled_setting": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":packet",
         ":ring",
@@ -189,6 +199,10 @@ iree_runtime_cc_test(
 iree_runtime_cc_benchmark(
     name = "ring_benchmark",
     srcs = ["ring_benchmark.cc"],
+    target_compatible_with = select({
+        "//libamdf/config:enabled_setting": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":packet",
         ":ring",
@@ -528,5 +542,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu:code",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:blit",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:program",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:user_queue",
     ],
 )

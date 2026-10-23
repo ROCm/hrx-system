@@ -67,14 +67,28 @@ typedef uint8_t loom_rewriter_name_policy_flags_t;
   (LOOM_REWRITER_NAME_POLICY_PRESERVE_NAMES | \
    LOOM_REWRITER_NAME_POLICY_DERIVE_DEBUG_NAMES)
 
-// Callback to materialize a constant from exact facts into IR.
-// Called by try_fold when all results are exact, and by
-// loom_rewriter_build_constant for pattern use. The implementation
-// builds the appropriate constant op (e.g., scalar.constant or
-// test.constant) and returns the result value ID.
+// Callback to query whether exact facts can be materialized as a constant of
+// the requested type. The query is pure and must agree with the paired
+// materialization callback's supported fact/type domain.
+typedef bool (*loom_constant_materializer_support_fn_t)(
+    loom_value_facts_t facts, loom_type_t result_type);
+
+// Callback to materialize a supported constant from exact facts into IR. The
+// implementation builds the appropriate constant op and returns its result.
 typedef iree_status_t (*loom_materialize_constant_fn_t)(
     loom_builder_t* builder, loom_value_facts_t facts, loom_type_t result_type,
     loom_location_id_t location, loom_value_id_t* out_value_id);
+
+// Constant materialization policy selected for one rewrite scope. Both
+// callbacks must be set for the materializer to be available. Capability can
+// be queried for a complete replacement family before any IR is constructed.
+typedef struct loom_constant_materializer_t {
+  // Pure applicability query for an exact fact/type pair.
+  loom_constant_materializer_support_fn_t supports;
+  // Builds a pair accepted by |supports|; allocation/build failures remain
+  // possible after a successful query.
+  loom_materialize_constant_fn_t materialize;
+} loom_constant_materializer_t;
 
 // Callback to materialize a typed replacement value into IR.
 typedef iree_status_t (*loom_materialize_value_fn_t)(
@@ -172,10 +186,10 @@ struct loom_rewriter_t {
     loom_rewriter_cfg_region_t* entries;
   } cfg_facts;
 
-  // Dialect-provided constant materialization. Set by the pass before
-  // enabling analysis. NULL means try_fold cannot materialize
-  // constants (facts are still computed and propagated).
-  loom_materialize_constant_fn_t materialize_constant;
+  // Dialect-provided constant materialization policy. Set by the pass before
+  // enabling analysis. A zero policy leaves facts computed and propagated but
+  // prevents exact-value folding.
+  loom_constant_materializer_t constant_materializer;
 
   // Optional consumer invoked when an exact fold has retained relations.
   loom_rewriter_pending_exact_relations_callback_t
@@ -261,11 +275,26 @@ static inline bool loom_rewriter_values_equal(const loom_rewriter_t* rewriter,
 loom_op_t* loom_rewriter_value_defining_op(const loom_rewriter_t* rewriter,
                                            loom_value_id_t value_id);
 
-// Materializes a constant value using the rewriter's callback.
-// Convenience for patterns that need to create constants (e.g.,
-// index values for shape dimensions) without depending on any
-// specific dialect. Returns IREE_STATUS_UNIMPLEMENTED if no
-// materialize_constant callback is set.
+// Returns whether a complete constant materializer policy is selected.
+static inline bool loom_rewriter_has_constant_materializer(
+    const loom_rewriter_t* rewriter) {
+  return rewriter->constant_materializer.supports != NULL &&
+         rewriter->constant_materializer.materialize != NULL;
+}
+
+// Returns whether the selected materializer supports an exact fact/type pair.
+// False also covers a rewrite scope with no complete materializer policy.
+static inline bool loom_rewriter_can_materialize_constant(
+    const loom_rewriter_t* rewriter, loom_value_facts_t facts,
+    loom_type_t result_type) {
+  return loom_rewriter_has_constant_materializer(rewriter) &&
+         rewriter->constant_materializer.supports(facts, result_type);
+}
+
+// Materializes a constant value using the rewriter's selected policy.
+// Convenience for patterns that have already established applicability and
+// need to create constants without depending on a specific dialect. Returns
+// IREE_STATUS_UNIMPLEMENTED if no complete materializer policy is set.
 iree_status_t loom_rewriter_build_constant(loom_rewriter_t* rewriter,
                                            loom_value_facts_t facts,
                                            loom_type_t result_type,
@@ -274,12 +303,12 @@ iree_status_t loom_rewriter_build_constant(loom_rewriter_t* rewriter,
 
 // Recomputes an op's inferred or structured-region result facts, then attempts
 // to fold a side-effect-free op with vtable fact inference to constants.
-// Materializes constants via the rewriter's materialize_constant callback when
-// every result is an exact scalar and replaces the original op via RAUW+erase.
-// Aggregate constants remain owned by dialect-specific patterns. Sets
-// |*out_folded| to true if the op was erased, false otherwise. No-op if
-// analysis is not enabled or the op has no fact inference or region summary
-// interface.
+// Materializes constants when every result is exact and supported by the
+// selected materializer, then replaces the original op via RAUW+erase. The
+// complete result family is checked before any relation preservation or IR
+// construction. Sets |*out_folded| to true if the op was erased, false
+// otherwise. No-op if analysis is not enabled or the op has no fact inference
+// or region summary interface.
 iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
                                      bool* out_folded);
 

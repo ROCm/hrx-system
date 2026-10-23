@@ -6,24 +6,23 @@
 
 #include "loom/serve/runtime/parameter/inputs.h"
 
-#include "iree/io/parameter_index_provider.h"
-#include "iree/tooling/parameter_util.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/reflection.h"
 
 typedef struct loom_serve_weight_source_t {
-  // Owned index retaining canonical keys, metadata, and open checkpoint files.
+  // Retained canonical keys, metadata, and backing checkpoint files.
   iree_io_parameter_index_t* index;
-  // Owned imported-file cache for this independent checkpoint domain.
+  // Retained imported-file cache shared with other users of this source.
   iree_io_parameter_provider_t* provider;
 } loom_serve_weight_source_t;
 
 struct loom_serve_weight_inputs_t {
   // Allocator owning source records and the immutable captured range table.
   iree_allocator_t host_allocator;
-  // Number of owned source records, including partial construction.
+  // Number of policy-local input sources.
   uint32_t source_count;
-  // Owned independent checkpoint indexes/providers in declaration order.
+  // Retained selected sources in policy-local order, following this object.
+  // Unused peers in a request catalog do not stay live through this plan.
   loom_serve_weight_source_t* sources;
   // Number of initialized ranges, addressable by the compact recipe ordinals.
   uint32_t count;
@@ -39,47 +38,27 @@ struct loom_serve_weight_inputs_t {
 
 iree_status_t loom_serve_weight_inputs_allocate(
     const loom_serve_preparation_parameter_t* parameter,
-    const loom_serve_sources_t* sources, iree_host_size_t concurrency,
-    iree_allocator_t host_allocator, loom_serve_weight_inputs_t** out_inputs) {
+    loom_serve_parameter_sources_t* sources, iree_allocator_t host_allocator,
+    loom_serve_weight_inputs_t** out_inputs) {
   *out_inputs = NULL;
   loom_serve_weight_inputs_t* inputs = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, sizeof(*inputs), (void**)&inputs));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_struct_array(
+      host_allocator, sizeof(*inputs), parameter->source_count,
+      sizeof(*inputs->sources), (void**)&inputs));
   inputs->host_allocator = host_allocator;
   inputs->staging_alignment = 1;
-  iree_status_t status = iree_allocator_malloc_array(
-      host_allocator, parameter->source_count, sizeof(*inputs->sources),
-      (void**)&inputs->sources);
-  for (uint32_t s = 0; s < parameter->source_count && iree_status_is_ok(status);
-       ++s) {
-    loom_serve_weight_source_t* source = &inputs->sources[s];
-    ++inputs->source_count;
-    status = iree_io_parameter_index_create(host_allocator, &source->index);
-    const loom_model_file_list_t paths = parameter->sources[s];
-    for (iree_host_size_t p = 0; p < paths.count && iree_status_is_ok(status);
-         ++p) {
-      char* path = NULL;
-      status = loom_serve_path_resolve(
-          sources->base_directory, paths.values[p].path, host_allocator, &path);
-      if (iree_status_is_ok(status)) {
-        status = iree_tooling_append_parameter_file_to_index_with_format(
-            iree_make_cstring_view(path), paths.values[p].format, source->index,
-            host_allocator);
-      }
-      iree_allocator_free(host_allocator, path);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_io_parameter_index_provider_create(
-          iree_string_view_empty(), source->index, concurrency, host_allocator,
-          &source->provider);
-    }
+  inputs->source_count = parameter->source_count;
+  inputs->sources = (loom_serve_weight_source_t*)(inputs + 1);
+  for (uint32_t i = 0; i < parameter->source_count; ++i) {
+    inputs->sources[i].index = loom_serve_parameter_sources_index(
+        sources, parameter->source_ordinals[i]);
+    iree_io_parameter_index_retain(inputs->sources[i].index);
+    inputs->sources[i].provider = loom_serve_parameter_sources_provider(
+        sources, parameter->source_ordinals[i]);
+    iree_io_parameter_provider_retain(inputs->sources[i].provider);
   }
-  if (iree_status_is_ok(status)) {
-    *out_inputs = inputs;
-  } else {
-    loom_serve_weight_inputs_free(inputs);
-  }
-  return status;
+  *out_inputs = inputs;
+  return iree_ok_status();
 }
 
 void loom_serve_weight_inputs_free(loom_serve_weight_inputs_t* inputs) {
@@ -90,7 +69,6 @@ void loom_serve_weight_inputs_free(loom_serve_weight_inputs_t* inputs) {
     iree_io_parameter_provider_release(inputs->sources[i].provider);
     iree_io_parameter_index_release(inputs->sources[i].index);
   }
-  iree_allocator_free(inputs->host_allocator, inputs->sources);
   iree_allocator_free(inputs->host_allocator, inputs->values);
   iree_allocator_free(inputs->host_allocator, inputs);
 }

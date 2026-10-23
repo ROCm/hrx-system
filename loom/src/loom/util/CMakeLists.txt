@@ -188,6 +188,17 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    segmented_storage_headers
+  HDRS
+    "segmented_storage.h"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     segmented_storage
   HDRS
     "segmented_storage.h"

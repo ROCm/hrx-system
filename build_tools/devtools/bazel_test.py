@@ -24,6 +24,28 @@ from build_tools.devtools import bazel as bazel_dev
 
 
 class BazelTest(unittest.TestCase):
+    def test_source_owner_query_filters_rule_kinds_before_expanding_attributes(self):
+        query = bazel_dev._compiling_owner_query(
+            {"//source:second.cc", "//source:first.c"},
+            ("//runtime/...", "//loom/..."),
+        )
+
+        self.assertEqual(
+            query,
+            "let universe = //runtime/... + //loom/... in\n"
+            'let source_rules = kind("cc_.* rule|filegroup rule", $universe) in\n'
+            'let references = attr("srcs", '
+            '"//source:first[.]c(?![A-Za-z0-9_./:+-])", $source_rules) +\n    '
+            'attr("srcs", "//source:second[.]cc(?![A-Za-z0-9_./:+-])", '
+            "$source_rules) in\n"
+            'let aliases = attr("actual", '
+            '"//source:first[.]c(?![A-Za-z0-9_./:+-])", '
+            'kind("alias rule", $universe)) +\n    '
+            'attr("actual", "//source:second[.]cc(?![A-Za-z0-9_./:+-])", '
+            'kind("alias rule", $universe)) in\n'
+            "$references + $aliases\n",
+        )
+
     def test_source_owner_query_follows_filegroups_and_aliases(self):
         queries = []
 

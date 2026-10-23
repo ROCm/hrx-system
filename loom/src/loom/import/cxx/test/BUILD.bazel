@@ -59,6 +59,8 @@ loom_check_test_suite(
         "buffer_alloca_invalid.cxx-test",
         "buffer_memory_space.cxx-test",
         "buffer_memory_space_invalid.cxx-test",
+        "c_abi.cxx-test",
+        "c_abi_invalid.cxx-test",
         "callable_effects.cxx-test",
         "check.cxx-test",
         "check_close.cxx-test",
@@ -601,7 +603,10 @@ loom_check_test_suite(
 
 loom_check_test_suite(
     name = "x86_compiler_test",
-    srcs = ["x86_lowering.cxx-test"],
+    srcs = [
+        "x86_c_abi_lowering.cxx-test",
+        "x86_lowering.cxx-test",
+    ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/import:cxx",
         "//loom/config/target/arch:x86",

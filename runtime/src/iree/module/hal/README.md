@@ -1,7 +1,7 @@
 # HAL reference types
 
-`iree/module/hal/types.h` lets a VM host pass actual HAL buffers and buffer views
-through ordinary compiled calls. Link the optional `types` library and register
+`iree/module/hal/types.h` lets a VM host pass actual HAL buffers, buffer views,
+and fences through ordinary compiled calls. Link the optional `types` library and register
 its provider once when composing the environment:
 
 ```c
@@ -17,15 +17,17 @@ iree_vm_variant_t argument =
 
 Other native modules resolve the already registered `hal` table from the
 environment. The consumer-owned `iree_hal_module_types_t` contains canonical
-handles for `buffer` and `buffer_view`, in append-only provider ordinal order.
-Bytecode images use their own sorted namespace/type ordinals; loading binds
+handles for `buffer`, `buffer_view`, and `fence`, in append-only provider ordinal
+order. Bytecode images use their own sorted namespace/type ordinals; loading binds
 those keys to the same canonical handles used by native signatures.
 
 References preserve the original object pointer, buffer range and access rights,
 and view shape, element type and encoding. VM and HAL owners share the existing
 intrusive count. The final VM buffer owner follows HAL recycling; the final view
-owner destroys the view and releases its buffer. No wrapper object is allocated.
-The Core VM `buffer` remains a separate CPU byte-storage type.
+owner destroys the view and releases its buffer. Fences retain their semaphore
+timepoints and use the same shared owner count. Dropping a fence neither cancels
+accepted work nor establishes retirement of the resources it uses. No wrapper
+object is allocated. The Core VM `buffer` remains a separate CPU byte-storage type.
 
 The environment borrows the provider table and can be freed after module
 construction. Provider descriptors and finalizer code must remain loaded until

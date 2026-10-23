@@ -10,6 +10,7 @@
 #include "iree/base/api.h"
 #include "iree/hal/buffer.h"
 #include "iree/hal/buffer_view.h"
+#include "iree/hal/fence.h"
 #include "iree/vm/environment.h"
 #include "iree/vm/variant.h"
 
@@ -24,8 +25,10 @@ enum iree_hal_module_type_ordinal_e {
   IREE_HAL_MODULE_TYPE_BUFFER = 0,
   // Exact HAL buffer view, retaining its buffer and shape/element metadata.
   IREE_HAL_MODULE_TYPE_BUFFER_VIEW = 1,
+  // Exact HAL fence retaining the semaphores of its completion set.
+  IREE_HAL_MODULE_TYPE_FENCE = 2,
   // Number of HAL types known by this consumer API version.
-  IREE_HAL_MODULE_TYPE_COUNT = 2,
+  IREE_HAL_MODULE_TYPE_COUNT = 3,
 };
 typedef uint32_t iree_hal_module_type_ordinal_t;
 
@@ -38,6 +41,8 @@ typedef struct iree_hal_module_types_t {
   iree_vm_ref_type_t buffer;
   // Canonical descriptor for an actual iree_hal_buffer_view_t pointer.
   iree_vm_ref_type_t buffer_view;
+  // Canonical descriptor for an actual iree_hal_fence_t pointer.
+  iree_vm_ref_type_t fence;
 } iree_hal_module_types_t;
 
 static_assert(offsetof(iree_hal_module_types_t, buffer) ==
@@ -49,6 +54,9 @@ static_assert(offsetof(iree_hal_module_types_t, buffer_view) ==
 static_assert(sizeof(iree_hal_module_types_t) ==
                   IREE_HAL_MODULE_TYPE_COUNT * sizeof(iree_vm_ref_type_t),
               "HAL type fields must remain dense");
+static_assert(offsetof(iree_hal_module_types_t, fence) ==
+                  IREE_HAL_MODULE_TYPE_FENCE * sizeof(iree_vm_ref_type_t),
+              "HAL fence type must remain at ordinal two");
 
 // Registers this provider's complete canonical "hal" table and returns the
 // borrowed table in |out_table|. The hosting executable/library calls this once
@@ -58,7 +66,7 @@ static_assert(sizeof(iree_hal_module_types_t) ==
 //
 // Objects share their existing HAL intrusive owner count with VM references;
 // there is no wrapper allocation or second owner count. Final buffer release
-// follows HAL recycling, and final view release destroys the view normally.
+// follows HAL recycling; views and fences use their normal HAL destruction.
 IREE_API_EXPORT iree_status_t
 iree_hal_module_register_types(iree_vm_environment_t* environment,
                                const iree_vm_ref_type_table_t** out_table);
@@ -82,10 +90,12 @@ static inline iree_status_t iree_hal_module_types_resolve(
       iree_vm_ref_type_storage_at(table->types, IREE_HAL_MODULE_TYPE_BUFFER),
       iree_vm_ref_type_storage_at(table->types,
                                   IREE_HAL_MODULE_TYPE_BUFFER_VIEW),
+      iree_vm_ref_type_storage_at(table->types, IREE_HAL_MODULE_TYPE_FENCE),
   };
   if (!iree_string_view_equal(types.buffer->type_name, IREE_SV("buffer")) ||
       !iree_string_view_equal(types.buffer_view->type_name,
-                              IREE_SV("buffer_view"))) {
+                              IREE_SV("buffer_view")) ||
+      !iree_string_view_equal(types.fence->type_name, IREE_SV("fence"))) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "HAL type ordinal mismatch");
   }
@@ -97,6 +107,8 @@ IREE_VM_DEFINE_TYPE_ADAPTERS(iree_hal_buffer, iree_hal_module_types_t, buffer,
                              iree_hal_buffer_t)
 IREE_VM_DEFINE_TYPE_ADAPTERS(iree_hal_buffer_view, iree_hal_module_types_t,
                              buffer_view, iree_hal_buffer_view_t)
+IREE_VM_DEFINE_TYPE_ADAPTERS(iree_hal_fence, iree_hal_module_types_t, fence,
+                             iree_hal_fence_t)
 
 #ifdef __cplusplus
 }  // extern "C"

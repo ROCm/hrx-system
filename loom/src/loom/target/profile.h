@@ -15,7 +15,6 @@
 #define LOOM_TARGET_PROFILE_H_
 
 #include "iree/base/api.h"
-#include "iree/base/internal/arena.h"
 #include "loom/target/facts.h"
 #include "loom/target/types.h"
 

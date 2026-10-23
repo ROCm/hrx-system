@@ -74,7 +74,7 @@ class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
             mapping.read_index_address),
         reinterpret_cast<iree_atomic_int64_t*>(mapping.write_index_address),
         reinterpret_cast<volatile uint64_t*>(mapping.doorbell_address),
-        queue_.host_publish_fence, &ring_);
+        queue_.host_publish_executor, &ring_);
   }
 
   void TearDown() override {
@@ -245,7 +245,9 @@ TEST_F(AqlCodeTest, ReplacesCompletedInstructionsAtSameAddress) {
     uint64_t position = 0;
     ASSERT_TRUE(iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, 1, &position));
     iree_hal_amd_gpu_aql_ring_write_body(&ring_, position, &packet);
-    iree_hal_amd_gpu_aql_ring_publish_header(&ring_, position, packet.words[0]);
+    ASSERT_EQ(iree_hal_amd_gpu_aql_ring_publish_header(
+                  &ring_, &queue_, position, packet.words[0]),
+              AMDF_STATUS_OK);
     iree_hal_amd_gpu_aql_ring_notify(&ring_);
     pending_ = true;
     ASSERT_NO_FATAL_FAILURE(Wait());
