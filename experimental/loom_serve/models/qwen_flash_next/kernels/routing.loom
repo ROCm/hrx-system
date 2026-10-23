@@ -43,16 +43,23 @@ func.def inline @route_partial(%token0: index, %row0: index, %rows0: index, %lan
 kernel.def target(@flash_next_route_wave32) @route_project() {
   %tokens = config.get @flash_next.token_count : index
   %c1 = index.constant 1 : index
+  %c5 = index.constant 5 : index
   %c9 = index.constant 9 : index
   %c63 = index.constant 63 : index
   %c64 = index.constant 64 : index
+  %c127 = index.constant 127 : index
   %c128 = index.constant 128 : index
   %c129 = index.constant 129 : index
   %c256 = index.constant 256 : index
   %tiled = index.cmp uge, %tokens, %c64 : index
-  %rounded = index.add %tokens, %c63 : index
-  %tile_rows = index.div %rounded, %c64 : index
-  %groups = scf.select %tiled, %c9, %c129 : index
+  %threshold = index.constant 2048 : index
+  %matrix = index.cmp uge, %tokens, %threshold : index
+  %panel_height = scf.select %matrix, %c128, %c64 : index
+  %rounding = scf.select %matrix, %c127, %c63 : index
+  %rounded = index.add %tokens, %rounding : index
+  %tile_rows = index.div %rounded, %panel_height : index
+  %panel_groups = scf.select %matrix, %c5, %c9 : index
+  %groups = scf.select %tiled, %panel_groups, %c129 : index
   %rows = scf.select %tiled, %tile_rows, %tokens : index
   %threads = scf.select %tiled, %c256, %c128 : index
   kernel.launch.config workgroups(%groups, %rows, %c1) workgroup_size(%threads, %c1, %c1) : index

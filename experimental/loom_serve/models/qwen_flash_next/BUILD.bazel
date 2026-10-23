@@ -215,6 +215,7 @@ loom_library(
     for capacity in [
         7,
         131,
+        2048,
     ]
 ]
 

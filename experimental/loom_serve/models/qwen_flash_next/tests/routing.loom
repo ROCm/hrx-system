@@ -1,8 +1,10 @@
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
+kernel.decl @gdn_project_alpha_beta() launch(%span: buffer, %input: buffer, %alpha_weight: buffer, %beta_weight: buffer, %alpha: buffer, %beta: buffer)
+
 kernel.decl @route_project() launch(%epoch: buffer, %input: buffer, %route_weight: buffer, %shared_weight: buffer, %logits: buffer, %gate: buffer)
 
-// Both policies use the same backing storage; the small one uses a prefix.
+// Every policy uses the same backing storage and owns its configured prefix.
 // Empty, single-row, aligned, and ragged inputs leave inactive rows unchanged.
 // NaN padding exposes any contribution from an inactive input row.
 kernel.def @routing_fixture() {
@@ -12,10 +14,10 @@ kernel.def @routing_fixture() {
   %requested = index.assume %requested_arg [range(%requested_arg, 0, 131)] : index
   %capacity = config.get @flash_next.token_count : index
   %count = index.min %requested, %capacity : index
-  %backing_rows = index.constant 131 : index
+  %backing_rows = index.constant 2048 : index
   %origin = index.constant 0 : offset
   %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
-  %values = buffer.view %input[%origin] : buffer -> view<131x2560xbf16>
+  %values = buffer.view %input[%origin] : buffer -> view<2048x2560xbf16>
   %word = index.cast %count : index to i32
   view.store %word, %header[0] : i32, view<3xi32>
   %c0 = index.constant 0 : index
@@ -24,22 +26,23 @@ kernel.def @routing_fixture() {
   %poison = scalar.constant nan : bf16
   scf.for %row = [%count to %backing_rows step %c1] {
     scf.for %column = [%c0 to %width step %c1] {
-      view.store %poison, %values[%row, %column] : bf16, view<131x2560xbf16>
+      view.store %poison, %values[%row, %column] : bf16, view<2048x2560xbf16>
     }
   }
   kernel.return
 }
 
-// Each reference thread contracts a complete original row in scalar F64.
+// Each reference thread contracts one coefficient row in scalar F64. Wide
+// panels round coefficients to BF16; narrow batches retain original F32.
 // It shares neither the tiled staging nor the small-path subgroup reduction.
 // The shared gate applies sigmoid only after completing the contraction.
-kernel.def @route_reference() {
+kernel.def @coefficient_reference() {
   %capacity = config.get @flash_next.token_count : index
   %groups = index.constant 9 : index
   %threads = index.constant 64 : index
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%groups, %capacity, %c1) workgroup_size(%threads, %c1, %c1) : index
-} launch(%epoch: buffer, %input: buffer, %route_weight: buffer, %shared_weight: buffer, %logits: buffer, %gate: buffer) {
+} launch(%first_outputs_arg: index, %second_outputs_arg: index, %sigmoid: i1, %epoch: buffer, %input: buffer, %route_weight: buffer, %shared_weight: buffer, %logits: buffer, %gate: buffer) {
   %capacity = config.get @flash_next.token_count : index
   %origin = index.constant 0 : offset
   %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
@@ -50,20 +53,27 @@ kernel.def @route_reference() {
   %group = kernel.workgroup.id<x> : index
   %thread = kernel.workitem.id<x> : index
   %c64 = index.constant 64 : index
-  %c512 = index.constant 512 : index
-  %c513 = index.constant 513 : index
+  %first_outputs = index.assume %first_outputs_arg [range(%first_outputs_arg, 1, 512)] : index
+  %second_outputs = index.assume %second_outputs_arg [range(%second_outputs_arg, 1, 48)] : index
+  %outputs = index.add %first_outputs, %second_outputs : index
+  %c1 = index.constant 1 : index
+  %last_first = index.sub %first_outputs, %c1 : index
+  %threshold = index.constant 2048 : index
+  %matrix = index.cmp uge, %capacity, %threshold : index
   %column = index.madd %group, %c64, %thread : index
   %live_token = index.cmp ult, %token, %count : index
-  %live_column = index.cmp ult, %column, %c513 : index
+  %live_column = index.cmp ult, %column, %outputs : index
   %active = scalar.andi %live_token, %live_column : i1
   scf.if %active {
     %c0 = index.constant 0 : index
     %c1 = index.constant 1 : index
     %width = index.constant 2560 : index
     %row_bytes = index.constant 10240 : offset
-    %is_route = index.cmp ult, %column, %c512 : index
+    %is_route = index.cmp ult, %column, %first_outputs : index
     %selected = scf.select %is_route, %route_weight, %shared_weight : buffer
-    %row = scf.select %is_route, %column, %c0 : index
+    %second_base = index.max %column, %first_outputs : index
+    %second_row = index.sub %second_base, %first_outputs : index
+    %row = scf.select %is_route, %column, %second_row : index
     %row_origin = index.scale %row, %row_bytes : index, offset -> offset
     %weights = buffer.view %selected[%row_origin] : buffer -> view<2560xf32>
     %values = buffer.view %input[%origin] : buffer -> view<[%capacity]x2560xbf16>
@@ -72,34 +82,52 @@ kernel.def @route_reference() {
       %stored = view.load %values[%token, %feature] : view<[%capacity]x2560xbf16> -> bf16
       %weight = view.load %weights[%feature] : view<2560xf32> -> f32
       %left = scalar.extf %stored : bf16 to f64
-      %right = scalar.extf %weight : f32 to f64
+      %coefficient = scf.if %matrix -> (f32) {
+        %rounded = scalar.fptrunc %weight : f32 to bf16
+        %expanded = scalar.extf %rounded : bf16 to f32
+        scf.yield %expanded : f32
+      } else {
+        scf.yield %weight : f32
+      }
+      %right = scalar.extf %coefficient : f32 to f64
       %product = scalar.mulf %left, %right : f64
       %next = scalar.addf %partial, %product : f64
       scf.yield %next : f64
     }
     scf.if %is_route {
-      %bounded_column = index.assume %column [range(%column, 0, 511)] : index
-      %output = buffer.view %logits[%origin] : buffer -> view<[%capacity]x512xf32>
+      %bounded_column = index.assume %column [range(%column, 0, %last_first)] : index
+      %output = buffer.view %logits[%origin] : buffer -> view<[%capacity]x[%first_outputs]xf32>
       %value = scalar.fptrunc %sum : f64 to f32
-      view.store %value, %output[%token, %bounded_column] : f32, view<[%capacity]x512xf32>
+      view.store %value, %output[%token, %bounded_column] : f32, view<[%capacity]x[%first_outputs]xf32>
     } else {
       %value = scalar.fptrunc %sum : f64 to f32
-      %negative = scalar.negf %value : f32
-      %exponential = scalar.expf<afn> %negative : f32
-      %unit = scalar.constant 1.0 : f32
-      %denominator = scalar.addf %unit, %exponential : f32
-      %sigmoid = scalar.divf %unit, %denominator : f32
-      %output = buffer.view %gate[%origin] : buffer -> view<[%capacity]xf32>
-      view.store %sigmoid, %output[%token] : f32, view<[%capacity]xf32>
+      %result = scf.if %sigmoid -> (f32) {
+        %negative = scalar.negf %value : f32
+        %exponential = scalar.expf<afn> %negative : f32
+        %unit = scalar.constant 1.0 : f32
+        %denominator = scalar.addf %unit, %exponential : f32
+        %activated = scalar.divf %unit, %denominator : f32
+        scf.yield %activated : f32
+      } else {
+        scf.yield %value : f32
+      }
+      %element = index.madd %token, %second_outputs, %second_row : index
+      %element_bytes = index.constant 4 : offset
+      %position = index.scale %element, %element_bytes : index, offset -> offset
+      %output = buffer.view %gate[%position] : buffer -> view<1xf32>
+      view.store %result, %output[0] : f32, view<1xf32>
     }
   }
   kernel.return
 }
 
-check.case public @original_f32_router {
+check.case public @router_coefficients {
   check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
-  %requested = check.param.choice values([0, 1, 64, 129]) name("active") : index
-  %capacity = check.literal value(131) : index
+  %requested = check.param.choice values([0, 1, 128, 129]) name("active") : index
+  %capacity = check.literal value(2048) : index
+  %first_outputs = check.literal value(512) : index
+  %second_outputs = check.literal value(1) : index
+  %sigmoid = check.literal value(true) : i1
   %input_seed = check.literal value(3187) : i64
   %weight_seed = check.literal value(9181) : i64
   %shared_seed = check.literal value(5857) : i64
@@ -112,9 +140,35 @@ check.case public @original_f32_router {
   %expected = check.generate.fill value(-17.0) : tensor<[%capacity]x512xf32>
   %gate = check.generate.fill value(-17.0) : tensor<[%capacity]xf32>
   %expected_gate = check.generate.fill value(-17.0) : tensor<[%capacity]xf32>
-  kernel.launch @route_reference(%epoch, %input, %weights, %shared, %expected, %expected_gate) : (tensor<3xi32>, tensor<[%capacity]x2560xbf16>, tensor<512x2560xf32>, tensor<2560xf32>, tensor<[%capacity]x512xf32>, tensor<[%capacity]xf32>)
+  kernel.launch @coefficient_reference(%first_outputs, %second_outputs, %sigmoid, %epoch, %input, %weights, %shared, %expected, %expected_gate) : (index, index, i1, tensor<3xi32>, tensor<[%capacity]x2560xbf16>, tensor<512x2560xf32>, tensor<2560xf32>, tensor<[%capacity]x512xf32>, tensor<[%capacity]xf32>)
   kernel.launch @route_project(%epoch, %input, %weights, %shared, %actual, %gate) : (tensor<3xi32>, tensor<[%capacity]x2560xbf16>, tensor<512x2560xf32>, tensor<2560xf32>, tensor<[%capacity]x512xf32>, tensor<[%capacity]xf32>)
   check.expect.close actual(%actual) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(different) : tensor<[%capacity]x512xf32>
   check.expect.close actual(%gate) expected(%expected_gate) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(different) : tensor<[%capacity]xf32>
+  check.return
+}
+
+check.case public @alpha_beta_coefficients {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  %requested = check.param.choice values([0, 1, 128, 129]) name("active") : index
+  %capacity = check.literal value(2048) : index
+  %first_outputs = check.literal value(48) : index
+  %second_outputs = check.literal value(48) : index
+  %sigmoid = check.literal value(false) : i1
+  %input_seed = check.literal value(3187) : i64
+  %weight_seed = check.literal value(9181) : i64
+  %shared_seed = check.literal value(5857) : i64
+  %epoch = check.generate.fill value(0) : tensor<3xi32>
+  %input = check.generate.random.uniform seed(%input_seed) range(-0.125 to 0.125) : tensor<[%capacity]x2560xbf16>
+  %weights = check.generate.random.uniform seed(%weight_seed) range(-0.125 to 0.125) : tensor<48x2560xf32>
+  %shared = check.generate.random.uniform seed(%shared_seed) range(-0.125 to 0.125) : tensor<48x2560xf32>
+  kernel.launch @routing_fixture(%requested, %epoch, %input) : (index, tensor<3xi32>, tensor<[%capacity]x2560xbf16>)
+  %actual = check.generate.fill value(-17.0) : tensor<[%capacity]x48xf32>
+  %expected = check.generate.fill value(-17.0) : tensor<[%capacity]x48xf32>
+  %gate = check.generate.fill value(-17.0) : tensor<[%capacity]x48xf32>
+  %expected_gate = check.generate.fill value(-17.0) : tensor<[%capacity]x48xf32>
+  kernel.launch @coefficient_reference(%first_outputs, %second_outputs, %sigmoid, %epoch, %input, %weights, %shared, %expected, %expected_gate) : (index, index, i1, tensor<3xi32>, tensor<[%capacity]x2560xbf16>, tensor<48x2560xf32>, tensor<48x2560xf32>, tensor<[%capacity]x48xf32>, tensor<[%capacity]x48xf32>)
+  kernel.launch @gdn_project_alpha_beta(%epoch, %input, %weights, %shared, %actual, %gate) : (tensor<3xi32>, tensor<[%capacity]x2560xbf16>, tensor<48x2560xf32>, tensor<48x2560xf32>, tensor<[%capacity]x48xf32>, tensor<[%capacity]x48xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(different) : tensor<[%capacity]x48xf32>
+  check.expect.close actual(%gate) expected(%expected_gate) atol(1.0000000000000001e-05) rtol(1.0000000000000001e-05) nan(different) : tensor<[%capacity]x48xf32>
   check.return
 }

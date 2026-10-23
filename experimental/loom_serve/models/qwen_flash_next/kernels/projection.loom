@@ -1,3 +1,5 @@
+func.decl @flash_next_alpha_beta_matrix(%capacity: index, %epoch: buffer, %input: buffer, %alpha_weight: buffer, %beta_weight: buffer, %alpha: buffer, %beta: buffer)
+
 template.decl @flash_next.project_dense_q8(%inputs: index, %outputs: index, %blocks: index, %span: buffer, %input: buffer, %weight: view<[%outputs]x[%blocks]x34xi8>, %output: buffer)
 
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
@@ -69,56 +71,74 @@ kernel.def target(@flash_next_projection_wave32) @flash_next_linear_q8(%output_w
   kernel.return
 }
 
-// The small alpha/beta projections share activation loads while preserving
-// their original F32 weights, accumulators, and output publications.
+// Wide alpha/beta projections share BF16 coefficient panels across 128 tokens.
+// Narrow batches use the original F32 coefficients directly. Both accumulate
+// and publish F32 values.
 kernel.def target(@flash_next_projection_wave32) @gdn_project_alpha_beta() {
-  %groups = index.constant 12 : index
   %tokens = config.get @flash_next.token_count : index
-  %threads = index.constant 128 : index
+  %threshold = index.constant 2048 : index
+  %matrix = index.cmp uge, %tokens, %threshold : index
   %c1 = index.constant 1 : index
-  kernel.launch.config workgroups(%groups, %tokens, %c1) workgroup_size(%threads, %c1, %c1) : index
+  %c12 = index.constant 12 : index
+  %rounding = index.constant 127 : index
+  %panel_height = index.constant 128 : index
+  %c128 = index.constant 128 : index
+  %c256 = index.constant 256 : index
+  %rounded = index.add %tokens, %rounding : index
+  %batches = index.div %rounded, %panel_height : index
+  %groups = scf.select %matrix, %c1, %c12 : index
+  %rows = scf.select %matrix, %batches, %tokens : index
+  %threads = scf.select %matrix, %c256, %c128 : index
+  kernel.launch.config workgroups(%groups, %rows, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%span_arg: buffer, %input_arg: buffer, %alpha_weight_arg: buffer, %beta_weight_arg: buffer, %alpha_arg: buffer, %beta_arg: buffer) {
-  %span, %input, %alpha_weight, %beta_weight, %alpha, %beta = buffer.assume.noalias %span_arg, %input_arg, %alpha_weight_arg, %beta_weight_arg, %alpha_arg, %beta_arg : buffer, buffer, buffer, buffer, buffer, buffer
-  %tokens = config.get @flash_next.token_count : index
-  %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
-  %token = kernel.workgroup.id<y> : index
-  %active = index.cmp ult, %token, %end : index
-  scf.if %active {
-    %group = kernel.workgroup.id<x> : index
-    %wave = kernel.subgroup.id : index
-    %lane = kernel.subgroup.lane.id : index
-    %c0_index = index.constant 0 : index
-    %c4 = index.constant 4 : index
-    %c8 = index.constant 8 : index
-    %stride = index.constant 256 : index
-    %width = index.constant 2560 : index
-    %head = index.madd %group, %c4, %wave : index
-    %first = index.mul %lane, %c8 : index
-    %origin = index.constant 0 : offset
-    %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x2560xbf16>
-    %alpha_weight_view = buffer.view %alpha_weight[%origin] : buffer -> view<48x2560xf32>
-    %beta_weight_view = buffer.view %beta_weight[%origin] : buffer -> view<48x2560xf32>
-    %alpha_view = buffer.view %alpha[%origin] : buffer -> view<[%tokens]x48xf32>
-    %beta_view = buffer.view %beta[%origin] : buffer -> view<[%tokens]x48xf32>
-    %c0 = scalar.constant 0.0 : f32
-    %c0v = vector.constant 0.0 : vector<8xf32>
-    %alpha_partial, %beta_partial = scf.for %channel = [%first to %width step %stride](%alpha_acc = %c0v : vector<8xf32>, %beta_acc = %c0v : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) {
-      %packed = vector.load %input_view[%token, %channel] : view<[%tokens]x2560xbf16> -> vector<8xbf16>
-      %values = vector.extf %packed : vector<8xbf16> to vector<8xf32>
-      %alpha_values = vector.load %alpha_weight_view[%head, %channel] : view<48x2560xf32> -> vector<8xf32>
-      %beta_values = vector.load %beta_weight_view[%head, %channel] : view<48x2560xf32> -> vector<8xf32>
-      %next_alpha = vector.fmaf %values, %alpha_values, %alpha_acc : vector<8xf32>
-      %next_beta = vector.fmaf %values, %beta_values, %beta_acc : vector<8xf32>
-      scf.yield %next_alpha, %next_beta : vector<8xf32>, vector<8xf32>
-    }
-    %alpha_lane = vector.reduce<addf> %alpha_partial, %c0 : vector<8xf32>, f32
-    %beta_lane = vector.reduce<addf> %beta_partial, %c0 : vector<8xf32>, f32
-    %alpha_result = kernel.subgroup.reduce<addf> %alpha_lane : f32
-    %beta_result = kernel.subgroup.reduce<addf> %beta_lane : f32
-    %leader = index.cmp eq, %lane, %c0_index : index
-    scf.if %leader {
-      view.store %alpha_result, %alpha_view[%token, %head] : f32, view<[%tokens]x48xf32>
-      view.store %beta_result, %beta_view[%token, %head] : f32, view<[%tokens]x48xf32>
+  %capacity = config.get @flash_next.token_count : index
+  %threshold = index.constant 2048 : index
+  %matrix = index.cmp uge, %capacity, %threshold : index
+  scf.if %matrix {
+    func.call @flash_next_alpha_beta_matrix(%capacity, %span_arg, %input_arg, %alpha_weight_arg, %beta_weight_arg, %alpha_arg, %beta_arg) : (index, buffer, buffer, buffer, buffer, buffer, buffer)
+  } else {
+    %span, %input, %alpha_weight, %beta_weight, %alpha, %beta = buffer.assume.noalias %span_arg, %input_arg, %alpha_weight_arg, %beta_weight_arg, %alpha_arg, %beta_arg : buffer, buffer, buffer, buffer, buffer, buffer
+    %tokens = config.get @flash_next.token_count : index
+    %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
+    %token = kernel.workgroup.id<y> : index
+    %active = index.cmp ult, %token, %end : index
+    scf.if %active {
+      %group = kernel.workgroup.id<x> : index
+      %wave = kernel.subgroup.id : index
+      %lane = kernel.subgroup.lane.id : index
+      %c0_index = index.constant 0 : index
+      %c4 = index.constant 4 : index
+      %c8 = index.constant 8 : index
+      %stride = index.constant 256 : index
+      %width = index.constant 2560 : index
+      %head = index.madd %group, %c4, %wave : index
+      %first = index.mul %lane, %c8 : index
+      %origin = index.constant 0 : offset
+      %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x2560xbf16>
+      %alpha_weight_view = buffer.view %alpha_weight[%origin] : buffer -> view<48x2560xf32>
+      %beta_weight_view = buffer.view %beta_weight[%origin] : buffer -> view<48x2560xf32>
+      %alpha_view = buffer.view %alpha[%origin] : buffer -> view<[%tokens]x48xf32>
+      %beta_view = buffer.view %beta[%origin] : buffer -> view<[%tokens]x48xf32>
+      %c0 = scalar.constant 0.0 : f32
+      %c0v = vector.constant 0.0 : vector<8xf32>
+      %alpha_partial, %beta_partial = scf.for %channel = [%first to %width step %stride](%alpha_acc = %c0v : vector<8xf32>, %beta_acc = %c0v : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) {
+        %packed = vector.load %input_view[%token, %channel] : view<[%tokens]x2560xbf16> -> vector<8xbf16>
+        %values = vector.extf %packed : vector<8xbf16> to vector<8xf32>
+        %alpha_values = vector.load %alpha_weight_view[%head, %channel] : view<48x2560xf32> -> vector<8xf32>
+        %beta_values = vector.load %beta_weight_view[%head, %channel] : view<48x2560xf32> -> vector<8xf32>
+        %next_alpha = vector.fmaf %values, %alpha_values, %alpha_acc : vector<8xf32>
+        %next_beta = vector.fmaf %values, %beta_values, %beta_acc : vector<8xf32>
+        scf.yield %next_alpha, %next_beta : vector<8xf32>, vector<8xf32>
+      }
+      %alpha_lane = vector.reduce<addf> %alpha_partial, %c0 : vector<8xf32>, f32
+      %beta_lane = vector.reduce<addf> %beta_partial, %c0 : vector<8xf32>, f32
+      %alpha_result = kernel.subgroup.reduce<addf> %alpha_lane : f32
+      %beta_result = kernel.subgroup.reduce<addf> %beta_lane : f32
+      %leader = index.cmp eq, %lane, %c0_index : index
+      scf.if %leader {
+        view.store %alpha_result, %alpha_view[%token, %head] : f32, view<[%tokens]x48xf32>
+        view.store %beta_result, %beta_view[%token, %head] : f32, view<[%tokens]x48xf32>
+      }
     }
   }
   kernel.return

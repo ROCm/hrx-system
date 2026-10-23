@@ -1,3 +1,5 @@
+func.decl @flash_next_route_matrix(%capacity: index, %epoch: buffer, %input: buffer, %weight: buffer, %shared: buffer, %logits: buffer, %gate: buffer)
+
 // Publish four contiguous router logits, or the scalar shared-expert gate.
 func.def inline @route_matrix_publish(%capacity: index, %token: index, %column: index, %end: index, %values: vector<4xf32>, %logits: buffer, %gate: buffer) {
   %live = index.cmp ult, %token, %end : index
@@ -43,110 +45,116 @@ func.def inline @route_matrix_publish(%capacity: index, %token: index, %column: 
 template.decl @flash_next.route_tile(%capacity: index, %span_arg: buffer, %input_arg: buffer, %route_weight_arg: buffer, %shared_weight_arg: buffer, %logits_arg: buffer, %gate_arg: buffer)
 
 template.def<@flash_next.route_tile> device @flash_next_route_tiled(%capacity: index, %span_arg: buffer, %input_arg: buffer, %route_weight_arg: buffer, %shared_weight_arg: buffer, %logits_arg: buffer, %gate_arg: buffer) {
-  %span, %input, %route_weight, %shared_weight, %logits, %gate = buffer.assume.noalias %span_arg, %input_arg, %route_weight_arg, %shared_weight_arg, %logits_arg, %gate_arg : buffer, buffer, buffer, buffer, buffer, buffer
-  %header_origin = index.constant 0 : offset
-  %header = buffer.view %span[%header_origin] : buffer -> view<3xi32>
-  %end_word = view.load %header[0] : view<3xi32> -> i32
-  %end_value = index.cast %end_word : i32 to index
-  %end = index.assume %end_value [range(%end_value, 0, %capacity)] : index
-  %group_column = kernel.workgroup.id<x> : index
-  %group_row = kernel.workgroup.id<y> : index
-  %thread = kernel.workitem.id<x> : index
-  %c0 = index.constant 0 : index
-  %c1 = index.constant 1 : index
-  %c4 = index.constant 4 : index
-  %c8 = index.constant 8 : index
-  %c16 = index.constant 16 : index
-  %c32 = index.constant 32 : index
-  %c48 = index.constant 48 : index
-  %c64 = index.constant 64 : index
-  %experts = index.constant 512 : index
-  %width = index.constant 2560 : index
-  %row_base = index.mul %group_row, %c64 : index
-  %column_base = index.mul %group_column, %c64 : index
-  %active = index.cmp ult, %row_base, %end : index
-  scf.if %active {
-    %origin = index.constant 0 : offset
-    %input_bytes = index.constant 8448 : offset
-    %weight_bytes = index.constant 8192 : offset
-    %input_storage = buffer.alloca<workgroup> align(16) %input_bytes : buffer
-    %weight_storage = buffer.alloca<workgroup> align(16) %weight_bytes : buffer
-    %staged_input = buffer.view %input_storage[%origin] : buffer -> view<64x33xf32>
-    %staged_weight = buffer.view %weight_storage[%origin] : buffer -> view<32x64xf32>
-    %inputs = buffer.view %input[%origin] : buffer -> view<[%capacity]x2560xbf16>
-    %weights = buffer.view %route_weight[%origin] : buffer -> view<512x2560xf32>
-    %shared = buffer.view %shared_weight[%origin] : buffer -> view<2560xf32>
-    %copy_row = index.div %thread, %c4 : index
-    %copy_packet = index.rem %thread, %c4 : index
-    %copy_k = index.mul %copy_packet, %c8 : index
-    %input_row = index.add %row_base, %copy_row : index
-    %input_live = index.cmp ult, %input_row, %end : index
-    %safe_row = scf.select %input_live, %input_row, %c0 : index
-    %weight_row = index.add %column_base, %copy_row : index
-    %weight_live = index.cmp ult, %weight_row, %experts : index
-    %shared_row = index.cmp eq, %weight_row, %experts : index
-    %thread_row = index.div %thread, %c16 : index
-    %thread_column = index.rem %thread, %c16 : index
-    %column = index.mul %thread_column, %c4 : index
-    %row1 = index.add %thread_row, %c16 : index
-    %row2 = index.add %thread_row, %c32 : index
-    %row3 = index.add %thread_row, %c48 : index
-    %initial = vector.constant 0.0 : vector<4xf32>
-    %inactive_values = vector.constant 0.0 : vector<8xf32>
-    %mask = vector.splat %input_live : vector<8xi1>
-    %result0, %result1, %result2, %result3 = scf.for %block = [%c0 to %width step %c32](%sum0 = %initial : vector<4xf32>, %sum1 = %initial : vector<4xf32>, %sum2 = %initial : vector<4xf32>, %sum3 = %initial : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
-      %source_k = index.add %block, %copy_k : index
-      %packed = vector.load %inputs[%safe_row, %source_k] : view<[%capacity]x2560xbf16> -> vector<8xbf16>
-      %wide = vector.extf %packed : vector<8xbf16> to vector<8xf32>
-      %selected = vector.select %mask, %wide, %inactive_values : vector<8xf32>
-      vector.store %selected, %staged_input[%copy_row, %copy_k] : vector<8xf32>, view<64x33xf32>
-      %loaded_weight = scf.if %weight_live -> (vector<8xf32>) {
-        %bounded = index.assume %weight_row [range(%weight_row, 0, 511)] : index
-        %values = vector.load %weights[%bounded, %source_k] : view<512x2560xf32> -> vector<8xf32>
-        scf.yield %values : vector<8xf32>
-      } else {
-        %values = scf.if %shared_row -> (vector<8xf32>) {
-          %stored = vector.load %shared[%source_k] : view<2560xf32> -> vector<8xf32>
-          scf.yield %stored : vector<8xf32>
+  %matrix_threshold = index.constant 2048 : index
+  %matrix = index.cmp uge, %capacity, %matrix_threshold : index
+  scf.if %matrix {
+    func.call @flash_next_route_matrix(%capacity, %span_arg, %input_arg, %route_weight_arg, %shared_weight_arg, %logits_arg, %gate_arg) : (index, buffer, buffer, buffer, buffer, buffer, buffer)
+  } else {
+    %span, %input, %route_weight, %shared_weight, %logits, %gate = buffer.assume.noalias %span_arg, %input_arg, %route_weight_arg, %shared_weight_arg, %logits_arg, %gate_arg : buffer, buffer, buffer, buffer, buffer, buffer
+    %header_origin = index.constant 0 : offset
+    %header = buffer.view %span[%header_origin] : buffer -> view<3xi32>
+    %end_word = view.load %header[0] : view<3xi32> -> i32
+    %end_value = index.cast %end_word : i32 to index
+    %end = index.assume %end_value [range(%end_value, 0, %capacity)] : index
+    %group_column = kernel.workgroup.id<x> : index
+    %group_row = kernel.workgroup.id<y> : index
+    %thread = kernel.workitem.id<x> : index
+    %c0 = index.constant 0 : index
+    %c1 = index.constant 1 : index
+    %c4 = index.constant 4 : index
+    %c8 = index.constant 8 : index
+    %c16 = index.constant 16 : index
+    %c32 = index.constant 32 : index
+    %c48 = index.constant 48 : index
+    %c64 = index.constant 64 : index
+    %experts = index.constant 512 : index
+    %width = index.constant 2560 : index
+    %row_base = index.mul %group_row, %c64 : index
+    %column_base = index.mul %group_column, %c64 : index
+    %active = index.cmp ult, %row_base, %end : index
+    scf.if %active {
+      %origin = index.constant 0 : offset
+      %input_bytes = index.constant 8448 : offset
+      %weight_bytes = index.constant 8192 : offset
+      %input_storage = buffer.alloca<workgroup> align(16) %input_bytes : buffer
+      %weight_storage = buffer.alloca<workgroup> align(16) %weight_bytes : buffer
+      %staged_input = buffer.view %input_storage[%origin] : buffer -> view<64x33xf32>
+      %staged_weight = buffer.view %weight_storage[%origin] : buffer -> view<32x64xf32>
+      %inputs = buffer.view %input[%origin] : buffer -> view<[%capacity]x2560xbf16>
+      %weights = buffer.view %route_weight[%origin] : buffer -> view<512x2560xf32>
+      %shared = buffer.view %shared_weight[%origin] : buffer -> view<2560xf32>
+      %copy_row = index.div %thread, %c4 : index
+      %copy_packet = index.rem %thread, %c4 : index
+      %copy_k = index.mul %copy_packet, %c8 : index
+      %input_row = index.add %row_base, %copy_row : index
+      %input_live = index.cmp ult, %input_row, %end : index
+      %safe_row = scf.select %input_live, %input_row, %c0 : index
+      %weight_row = index.add %column_base, %copy_row : index
+      %weight_live = index.cmp ult, %weight_row, %experts : index
+      %shared_row = index.cmp eq, %weight_row, %experts : index
+      %thread_row = index.div %thread, %c16 : index
+      %thread_column = index.rem %thread, %c16 : index
+      %column = index.mul %thread_column, %c4 : index
+      %row1 = index.add %thread_row, %c16 : index
+      %row2 = index.add %thread_row, %c32 : index
+      %row3 = index.add %thread_row, %c48 : index
+      %initial = vector.constant 0.0 : vector<4xf32>
+      %inactive_values = vector.constant 0.0 : vector<8xf32>
+      %mask = vector.splat %input_live : vector<8xi1>
+      %result0, %result1, %result2, %result3 = scf.for %block = [%c0 to %width step %c32](%sum0 = %initial : vector<4xf32>, %sum1 = %initial : vector<4xf32>, %sum2 = %initial : vector<4xf32>, %sum3 = %initial : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+        %source_k = index.add %block, %copy_k : index
+        %packed = vector.load %inputs[%safe_row, %source_k] : view<[%capacity]x2560xbf16> -> vector<8xbf16>
+        %wide = vector.extf %packed : vector<8xbf16> to vector<8xf32>
+        %selected = vector.select %mask, %wide, %inactive_values : vector<8xf32>
+        vector.store %selected, %staged_input[%copy_row, %copy_k] : vector<8xf32>, view<64x33xf32>
+        %loaded_weight = scf.if %weight_live -> (vector<8xf32>) {
+          %bounded = index.assume %weight_row [range(%weight_row, 0, 511)] : index
+          %values = vector.load %weights[%bounded, %source_k] : view<512x2560xf32> -> vector<8xf32>
+          scf.yield %values : vector<8xf32>
         } else {
-          scf.yield %inactive_values : vector<8xf32>
+          %values = scf.if %shared_row -> (vector<8xf32>) {
+            %stored = vector.load %shared[%source_k] : view<2560xf32> -> vector<8xf32>
+            scf.yield %stored : vector<8xf32>
+          } else {
+            scf.yield %inactive_values : vector<8xf32>
+          }
+          scf.yield %values : vector<8xf32>
         }
-        scf.yield %values : vector<8xf32>
+        scf.for %element = [%c0 to %c8 step %c1] unroll schedule(linear) {
+          %k = index.add %copy_k, %element : index
+          %value = vector.extract %loaded_weight[%element] : vector<8xf32> -> f32
+          view.store %value, %staged_weight[%k, %copy_row] : f32, view<32x64xf32>
+        }
+        kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+        %next0, %next1, %next2, %next3 = scf.for %k = [%c0 to %c32 step %c1](%part0 = %sum0 : vector<4xf32>, %part1 = %sum1 : vector<4xf32>, %part2 = %sum2 : vector<4xf32>, %part3 = %sum3 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) unroll schedule(linear) {
+          %right = vector.load %staged_weight[%k, %column] : view<32x64xf32> -> vector<4xf32>
+          %left0 = view.load %staged_input[%thread_row, %k] : view<64x33xf32> -> f32
+          %left1 = view.load %staged_input[%row1, %k] : view<64x33xf32> -> f32
+          %left2 = view.load %staged_input[%row2, %k] : view<64x33xf32> -> f32
+          %left3 = view.load %staged_input[%row3, %k] : view<64x33xf32> -> f32
+          %a0 = vector.splat %left0 : vector<4xf32>
+          %a1 = vector.splat %left1 : vector<4xf32>
+          %a2 = vector.splat %left2 : vector<4xf32>
+          %a3 = vector.splat %left3 : vector<4xf32>
+          %updated0 = vector.fmaf %a0, %right, %part0 : vector<4xf32>
+          %updated1 = vector.fmaf %a1, %right, %part1 : vector<4xf32>
+          %updated2 = vector.fmaf %a2, %right, %part2 : vector<4xf32>
+          %updated3 = vector.fmaf %a3, %right, %part3 : vector<4xf32>
+          scf.yield %updated0, %updated1, %updated2, %updated3 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+        }
+        kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+        scf.yield %next0, %next1, %next2, %next3 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
       }
-      scf.for %element = [%c0 to %c8 step %c1] unroll schedule(linear) {
-        %k = index.add %copy_k, %element : index
-        %value = vector.extract %loaded_weight[%element] : vector<8xf32> -> f32
-        view.store %value, %staged_weight[%k, %copy_row] : f32, view<32x64xf32>
-      }
-      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-      %next0, %next1, %next2, %next3 = scf.for %k = [%c0 to %c32 step %c1](%part0 = %sum0 : vector<4xf32>, %part1 = %sum1 : vector<4xf32>, %part2 = %sum2 : vector<4xf32>, %part3 = %sum3 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) unroll schedule(linear) {
-        %right = vector.load %staged_weight[%k, %column] : view<32x64xf32> -> vector<4xf32>
-        %left0 = view.load %staged_input[%thread_row, %k] : view<64x33xf32> -> f32
-        %left1 = view.load %staged_input[%row1, %k] : view<64x33xf32> -> f32
-        %left2 = view.load %staged_input[%row2, %k] : view<64x33xf32> -> f32
-        %left3 = view.load %staged_input[%row3, %k] : view<64x33xf32> -> f32
-        %a0 = vector.splat %left0 : vector<4xf32>
-        %a1 = vector.splat %left1 : vector<4xf32>
-        %a2 = vector.splat %left2 : vector<4xf32>
-        %a3 = vector.splat %left3 : vector<4xf32>
-        %updated0 = vector.fmaf %a0, %right, %part0 : vector<4xf32>
-        %updated1 = vector.fmaf %a1, %right, %part1 : vector<4xf32>
-        %updated2 = vector.fmaf %a2, %right, %part2 : vector<4xf32>
-        %updated3 = vector.fmaf %a3, %right, %part3 : vector<4xf32>
-        scf.yield %updated0, %updated1, %updated2, %updated3 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
-      }
-      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-      scf.yield %next0, %next1, %next2, %next3 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+      %publish_column = index.add %column_base, %column : index
+      %publish0 = index.add %row_base, %thread_row : index
+      %publish1 = index.add %row_base, %row1 : index
+      %publish2 = index.add %row_base, %row2 : index
+      %publish3 = index.add %row_base, %row3 : index
+      func.call @route_matrix_publish(%capacity, %publish0, %publish_column, %end, %result0, %logits, %gate) : (index, index, index, index, vector<4xf32>, buffer, buffer)
+      func.call @route_matrix_publish(%capacity, %publish1, %publish_column, %end, %result1, %logits, %gate) : (index, index, index, index, vector<4xf32>, buffer, buffer)
+      func.call @route_matrix_publish(%capacity, %publish2, %publish_column, %end, %result2, %logits, %gate) : (index, index, index, index, vector<4xf32>, buffer, buffer)
+      func.call @route_matrix_publish(%capacity, %publish3, %publish_column, %end, %result3, %logits, %gate) : (index, index, index, index, vector<4xf32>, buffer, buffer)
     }
-    %publish_column = index.add %column_base, %column : index
-    %publish0 = index.add %row_base, %thread_row : index
-    %publish1 = index.add %row_base, %row1 : index
-    %publish2 = index.add %row_base, %row2 : index
-    %publish3 = index.add %row_base, %row3 : index
-    func.call @route_matrix_publish(%capacity, %publish0, %publish_column, %end, %result0, %logits, %gate) : (index, index, index, index, vector<4xf32>, buffer, buffer)
-    func.call @route_matrix_publish(%capacity, %publish1, %publish_column, %end, %result1, %logits, %gate) : (index, index, index, index, vector<4xf32>, buffer, buffer)
-    func.call @route_matrix_publish(%capacity, %publish2, %publish_column, %end, %result2, %logits, %gate) : (index, index, index, index, vector<4xf32>, buffer, buffer)
-    func.call @route_matrix_publish(%capacity, %publish3, %publish_column, %end, %result3, %logits, %gate) : (index, index, index, index, vector<4xf32>, buffer, buffer)
   }
   template.return
 }

@@ -1,0 +1,233 @@
+// Cooperative coefficient panels round F32 weights to BF16 once per K64 panel
+// and share them across 128 tokens. Native matrix instructions accumulate in
+// F32; the coefficient projections publish F32 without an output truncation.
+template.decl @flash_next.coefficient_contract(%capacity: index, %inputs: index, %first_outputs: index, %second_outputs: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %input: buffer, %first_weight: buffer, %second_weight: buffer) -> (vector<[%fragment_count]x8xf32>)
+
+template.def<@flash_next.coefficient_contract> device @flash_next_coefficient_contract(%capacity: index, %inputs: index, %first_outputs: index, %second_outputs: index, %tile_rows: index, %tile_columns: index, %wave_rows: index, %wave_columns: index, %fragment_count: index, %first: index, %end: index, %channel_base: index, %input_arg: buffer, %first_weight_arg: buffer, %second_weight_arg: buffer) -> (vector<[%fragment_count]x8xf32>) {
+  %input, %first_weight, %second_weight = buffer.assume.noalias %input_arg, %first_weight_arg, %second_weight_arg : buffer, buffer, buffer
+  %origin = index.constant 0 : offset
+  %workitem = kernel.workitem.id<x> : index
+  %wave = kernel.subgroup.id : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c72 = index.constant 72 : index
+  %waves = index.mul %wave_rows, %wave_columns : index
+  %threads = index.mul %waves, %c32 : index
+  %per_wave_rows = index.div %tile_rows, %wave_rows : index
+  %per_wave_columns = index.div %tile_columns, %wave_columns : index
+  %column_fragments = index.div %per_wave_columns, %c16 : index
+  %wave_column_group = index.rem %wave, %wave_columns : index
+  %wave_row_group = index.div %wave, %wave_columns : index
+  %wave_channel = index.mul %wave_column_group, %per_wave_columns : index
+  %wave_token = index.mul %wave_row_group, %per_wave_rows : index
+  %thread_rounding = index.sub %threads, %c1 : index
+  %weight_packets = index.mul %tile_columns, %c2 : index
+  %input_packets = index.mul %tile_rows, %c2 : index
+  %weight_padded = index.add %weight_packets, %thread_rounding : index
+  %input_padded = index.add %input_packets, %thread_rounding : index
+  %weight_rounds = index.div %weight_padded, %threads : index
+  %input_rounds = index.div %input_padded, %threads : index
+  %outputs = index.add %first_outputs, %second_outputs : index
+  %last_output = index.sub %outputs, %c1 : index
+  %blocks = index.div %inputs, %c32 : index
+  %padded_blocks = index.add %blocks, %c1 : index
+  %stages = index.div %padded_blocks, %c2 : index
+  %weight_element_bytes = index.constant 4 : offset
+  %input_element_bytes = index.constant 2 : offset
+  %weight_row_bytes = index.scale %inputs, %weight_element_bytes : index, offset -> offset
+  %input_row_bytes = index.scale %inputs, %input_element_bytes : index, offset -> offset
+  %weight_block_bytes = index.constant 128 : offset
+  %input_block_bytes = index.constant 64 : offset
+  %stage_row_bytes = index.constant 144 : offset
+  %weight_stage_bytes = index.scale %tile_columns, %stage_row_bytes : index, offset -> offset
+  %input_stage_bytes = index.scale %tile_rows, %stage_row_bytes : index, offset -> offset
+  %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
+  %input_stage = buffer.alloca<workgroup> align(16) %input_stage_bytes : buffer
+  %weight_view = buffer.view %weight_stage[%origin] : buffer -> view<[%tile_columns]x72xbf16>
+  %input_view = buffer.view %input_stage[%origin] : buffer -> view<[%tile_rows]x72xbf16>
+  %weight_layout = encoding.layout.strided [1, %c72] : encoding<layout>
+  %weight_fragment = buffer.view %weight_stage[%origin] : buffer -> view<64x[%tile_columns]xbf16, %weight_layout>
+  %inactive = vector.constant 0.0 : vector<32xbf16>
+  %initial = vector.constant 0.0 : vector<[%fragment_count]x8xf32>
+  %result = scf.for %stage = [%c0 to %stages step %c1](%accumulators = %initial : vector<[%fragment_count]x8xf32>) -> (vector<[%fragment_count]x8xf32>) pipeline(%c2) {
+    %stage_block = index.mul %stage, %c2 : index
+    // A producer owns all 32 coefficients of one row/block. The next stage's
+    // global reads may overlap this stage's MMA without another global buffer.
+    scf.for %round = [%c0 to %weight_rounds step %c1] unroll schedule(linear) {
+      %task = index.madd %round, %threads, %workitem : index
+      %owns = index.cmp ult, %task, %weight_packets : index
+      scf.if %owns {
+        %local_channel = index.div %task, %c2 : index
+        %within = index.rem %task, %c2 : index
+        %local_k = index.mul %within, %c32 : index
+        %candidate_block = index.add %stage_block, %within : index
+        %valid_block = index.cmp ult, %candidate_block, %blocks : index
+        %block = scf.select %valid_block, %candidate_block, %c0 : index
+        %channel = index.add %channel_base, %local_channel : index
+        %valid_channel = index.cmp ult, %channel, %outputs : index
+        %live = scalar.andi %valid_block, %valid_channel : i1
+        %safe_channel = index.min %channel, %last_output : index
+        %first_tensor = index.cmp ult, %safe_channel, %first_outputs : index
+        %second_origin = index.max %safe_channel, %first_outputs : index
+        %second_row = index.sub %second_origin, %first_outputs : index
+        %weight_row = scf.select %first_tensor, %safe_channel, %second_row : index
+        %weight_buffer = scf.select %first_tensor, %first_weight, %second_weight : buffer
+        %row_origin = index.scale %weight_row, %weight_row_bytes : index, offset -> offset
+        %block_origin = index.scale %block, %weight_block_bytes : index, offset -> offset
+        %position = index.add %row_origin, %block_origin : offset
+        %source = buffer.view %weight_buffer[%position] : buffer -> view<32xf32>
+        %loaded = vector.load %source[%c0] : view<32xf32> -> vector<32xf32>
+        %narrow = vector.fptrunc %loaded : vector<32xf32> to vector<32xbf16>
+        %mask = vector.splat %live : vector<32xi1>
+        %selected = vector.select %mask, %narrow, %inactive : vector<32xbf16>
+        vector.store %selected, %weight_view[%local_channel, %local_k] : vector<32xbf16>, view<[%tile_columns]x72xbf16>
+      }
+    }
+    scf.for %round = [%c0 to %input_rounds step %c1] unroll schedule(linear) {
+      %task = index.madd %round, %threads, %workitem : index
+      %owns = index.cmp ult, %task, %input_packets : index
+      scf.if %owns {
+        %local_row = index.div %task, %c2 : index
+        %within = index.rem %task, %c2 : index
+        %local_k = index.mul %within, %c32 : index
+        %candidate_block = index.add %stage_block, %within : index
+        %valid_block = index.cmp ult, %candidate_block, %blocks : index
+        %block = scf.select %valid_block, %candidate_block, %c0 : index
+        %token = index.add %first, %local_row : index
+        %valid_token = index.cmp ult, %token, %end : index
+        %live = scalar.andi %valid_token, %valid_block : i1
+        %safe_token = scf.select %live, %token, %c0 : index
+        %row_origin = index.scale %safe_token, %input_row_bytes : index, offset -> offset
+        %block_origin = index.scale %block, %input_block_bytes : index, offset -> offset
+        %position = index.add %row_origin, %block_origin : offset
+        %source = buffer.view %input[%position] : buffer -> view<32xbf16>
+        %loaded = vector.load %source[%c0] : view<32xbf16> -> vector<32xbf16>
+        %mask = vector.splat %live : vector<32xi1>
+        %selected = vector.select %mask, %loaded, %inactive : vector<32xbf16>
+        vector.store %selected, %input_view[%local_row, %local_k] : vector<32xbf16>, view<[%tile_rows]x72xbf16>
+      }
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %next = scf.for %part = [%c0 to %c4 step %c1](%partial = %accumulators : vector<[%fragment_count]x8xf32>) -> (vector<[%fragment_count]x8xf32>) unroll schedule(linear) {
+      %fragment_k = index.mul %part, %c16 : index
+      %tile = scf.for %ordinal = [%c0 to %fragment_count step %c1](%current = %partial : vector<[%fragment_count]x8xf32>) -> (vector<[%fragment_count]x8xf32>) unroll schedule(linear) {
+        %row_fragment = index.div %ordinal, %column_fragments : index
+        %column_fragment = index.rem %ordinal, %column_fragments : index
+        %fragment_row = index.madd %row_fragment, %c16, %wave_token : index
+        %fragment_column = index.madd %column_fragment, %c16, %wave_channel : index
+        %left = vector.fragment.load<lhs> %input_view[%fragment_row, %fragment_k] shape [%c16, %c16] : view<[%tile_rows]x72xbf16> -> vector<16xbf16>
+        %right = vector.fragment.load<rhs> %weight_fragment[%fragment_k, %fragment_column] shape [%c16, %c16] : view<64x[%tile_columns]xbf16, %weight_layout> -> vector<16xbf16>
+        %values = vector.extract %current[%ordinal] : vector<[%fragment_count]x8xf32> -> vector<8xf32>
+        %fragment = vector.fragment<result> %values shape [%c16, %c16] : vector<8xf32>
+        %updated = vector.mma %left, %right, %fragment : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+        %with_result = vector.insert %updated into %current[%ordinal] : vector<8xf32>, vector<[%fragment_count]x8xf32>
+        scf.yield %with_result : vector<[%fragment_count]x8xf32>
+      }
+      scf.yield %tile : vector<[%fragment_count]x8xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %next : vector<[%fragment_count]x8xf32>
+  }
+  template.return %result : vector<[%fragment_count]x8xf32>
+}
+
+// Both coefficient families keep their existing F32 output buffers. The
+// second matrix is either beta or the shared gate; only the gate uses sigmoid.
+func.def inline @flash_next_coefficient_matrix(%capacity: index, %first_outputs: index, %second_outputs: index, %sigmoid: i1, %epoch: buffer, %input: buffer, %first_weight: buffer, %second_weight: buffer, %first_output: buffer, %second_output: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %count_word = view.load %header[0] : view<3xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %end = index.assume %count_value [range(%count_value, 0, %capacity)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c16 = index.constant 16 : index
+  %c32 = index.constant 32 : index
+  %c64 = index.constant 64 : index
+  %c128 = index.constant 128 : index
+  %inputs = index.constant 2560 : index
+  %outputs = index.add %first_outputs, %second_outputs : index
+  %last_row = index.sub %capacity, %c1 : index
+  %group = kernel.workgroup.id<x> : index
+  %batch = kernel.workgroup.id<y> : index
+  %first = index.mul %batch, %c128 : index
+  %channel_base = index.mul %group, %c128 : index
+  %active = index.cmp ult, %first, %end : index
+  scf.if %active {
+    %values = template.apply<@flash_next.coefficient_contract>(%capacity, %inputs, %first_outputs, %second_outputs, %c128, %c128, %c4, %c2, %c8, %first, %end, %channel_base, %input, %first_weight, %second_weight) : (index, index, index, index, index, index, index, index, index, index, index, index, buffer, buffer, buffer) -> (vector<[%c8]x8xf32>)
+    %wave = kernel.subgroup.id : index
+    %lane = kernel.subgroup.lane.id : index
+    %wave_columns = index.rem %wave, %c2 : index
+    %wave_rows = index.div %wave, %c2 : index
+    %wave_column = index.mul %wave_columns, %c64 : index
+    %wave_row = index.mul %wave_rows, %c32 : index
+    %lane_column = index.rem %lane, %c16 : index
+    %lane_row = index.div %lane, %c16 : index
+    scf.for %fragment = [%c0 to %c8 step %c1] unroll schedule(linear) {
+      %row_fragment = index.div %fragment, %c4 : index
+      %column_fragment = index.rem %fragment, %c4 : index
+      %fragment_row = index.madd %row_fragment, %c16, %wave_row : index
+      %fragment_column = index.madd %column_fragment, %c16, %wave_column : index
+      %column_base = index.add %channel_base, %fragment_column : index
+      %column = index.add %column_base, %lane_column : index
+      %live_column = index.cmp ult, %column, %outputs : index
+      %is_first = index.cmp ult, %column, %first_outputs : index
+      %second_origin = index.max %column, %first_outputs : index
+      %second_column = index.sub %second_origin, %first_outputs : index
+      %relative_column = scf.select %is_first, %column, %second_column : index
+      %output_width = scf.select %is_first, %first_outputs, %second_outputs : index
+      %last_column = index.sub %output_width, %c1 : index
+      %output_buffer = scf.select %is_first, %first_output, %second_output : buffer
+      %is_second = index.cmp uge, %column, %first_outputs : index
+      %needs_sigmoid = scalar.andi %sigmoid, %is_second : i1
+      %output = buffer.view %output_buffer[%origin] : buffer -> view<[%capacity]x[%output_width]xf32>
+      %relative_row = index.add %fragment_row, %lane_row : index
+      %row_base = index.add %first, %relative_row : index
+      %fragment_values = vector.extract %values[%fragment] : vector<[%c8]x8xf32> -> vector<8xf32>
+      scf.for %element = [%c0 to %c8 step %c1] unroll schedule(linear) {
+        %row = index.madd %element, %c2, %row_base : index
+        %live_row = index.cmp ult, %row, %end : index
+        %live = scalar.andi %live_row, %live_column : i1
+        scf.if %live {
+          %checked_row = index.assume %row [range(%row, 0, %last_row)] : index
+          %checked_column = index.assume %relative_column [range(%relative_column, 0, %last_column)] : index
+          %dot = vector.extract %fragment_values[%element] : vector<8xf32> -> f32
+          %result = scf.if %needs_sigmoid -> (f32) {
+            %negative = scalar.negf %dot : f32
+            %exponential = scalar.expf<afn> %negative : f32
+            %unit = scalar.constant 1.0 : f32
+            %denominator = scalar.addf %unit, %exponential : f32
+            %value = scalar.divf %unit, %denominator : f32
+            scf.yield %value : f32
+          } else {
+            scf.yield %dot : f32
+          }
+          view.store %result, %output[%checked_row, %checked_column] : f32, view<[%capacity]x[%output_width]xf32>
+        }
+      }
+    }
+  }
+  func.return
+}
+
+func.def public inline @flash_next_route_matrix(%capacity: index, %epoch: buffer, %input: buffer, %weight: buffer, %shared: buffer, %logits: buffer, %gate: buffer) {
+  %experts = index.constant 512 : index
+  %one = index.constant 1 : index
+  %sigmoid = scalar.constant true : i1
+  func.call @flash_next_coefficient_matrix(%capacity, %experts, %one, %sigmoid, %epoch, %input, %weight, %shared, %logits, %gate) : (index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  func.return
+}
+
+func.def public inline @flash_next_alpha_beta_matrix(%capacity: index, %epoch: buffer, %input: buffer, %alpha_weight: buffer, %beta_weight: buffer, %alpha: buffer, %beta: buffer) {
+  %heads = index.constant 48 : index
+  %sigmoid = scalar.constant false : i1
+  func.call @flash_next_coefficient_matrix(%capacity, %heads, %heads, %sigmoid, %epoch, %input, %alpha_weight, %beta_weight, %alpha, %beta) : (index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  func.return
+}
