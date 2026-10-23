@@ -23,7 +23,7 @@ amdf_cts_test_suite(
     visibility = ["//visibility:public"],
     deps = [
         "//libamdf/cts/gpu/aql:executable",
-        "//libamdf/cts/gpu/aql:publication",
+        "//libamdf/cts/gpu/aql/queue:publication",
         "//libamdf/cts/gpu/kernels:transform",
         "//libamdf/cts/gpu/kernels:transform_kernels",
         "//libamdf/cts/gpu/peer:device_fixture",

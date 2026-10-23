@@ -20,37 +20,16 @@ _AQL_TEST_COMPATIBILITY = ["@platforms//cpu:x86_64"] + select({
 })
 
 amdf_cc_library(
-    name = "publication",
-    testonly = True,
-    hdrs = ["publication.h"],
-    deps = [
-        "//libamdf/cts/gpu/aql/encoding:packets",
-        "//libamdf/cts/gpu/util:user_queue",
-        "//third_party:google_test",
-    ],
-)
-
-amdf_cc_library(
     name = "executable",
     testonly = True,
     srcs = ["executable.cc"],
     hdrs = ["executable.h"],
     deps = [
-        ":publication",
         "//libamdf/cts/gpu:gpu_device_fixture",
+        "//libamdf/cts/gpu/aql/queue:publication",
         "//libamdf/cts/gpu/kernels:kernel",
         "//libamdf/cts/gpu/util:memory",
         "//libamdf/cts/gpu/util:user_queue",
-    ],
-)
-
-amdf_cc_library(
-    name = "queue_fixture",
-    testonly = True,
-    hdrs = ["queue_fixture.h"],
-    deps = [
-        ":publication",
-        "//libamdf/cts/gpu/util:command_fixture",
     ],
 )
 
@@ -117,7 +96,7 @@ amdf_cts_test_suite(
         ":barrier_or_payload_fixture",
         ":dispatch_fixture",
         ":dispatch_timing_fixture",
-        ":queue_fixture",
+        "//libamdf/cts/gpu/aql/queue:queue_fixture",
         "//libamdf/cts/gpu/kernels:aql_publish",
         "//libamdf/cts/gpu/kernels:aql_publish_kernels",
         "//libamdf/cts/gpu/kernels:argument_payloads_kernels",
@@ -173,7 +152,7 @@ amdf_cc_library(
     target_compatible_with = _AQL_TEST_COMPATIBILITY,
     deps = [
         ":executable",
-        ":queue_fixture",
+        "//libamdf/cts/gpu/aql/queue:queue_fixture",
         "//libamdf/cts/gpu/kernels:kernel",
         "//libamdf/cts/gpu/pm4/encoding:profile",
     ],

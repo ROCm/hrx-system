@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef AMDF_CTS_GPU_AQL_PUBLICATION_H_
-#define AMDF_CTS_GPU_AQL_PUBLICATION_H_
+#ifndef AMDF_CTS_GPU_AQL_QUEUE_PUBLICATION_H_
+#define AMDF_CTS_GPU_AQL_QUEUE_PUBLICATION_H_
 
 #include <cstring>
 #include <span>
@@ -73,4 +73,4 @@ inline void PublishBatch(const GpuUserQueue& queue, uint64_t begin,
 
 }  // namespace aql
 
-#endif  // AMDF_CTS_GPU_AQL_PUBLICATION_H_
+#endif  // AMDF_CTS_GPU_AQL_QUEUE_PUBLICATION_H_

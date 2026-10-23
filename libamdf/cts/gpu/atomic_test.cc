@@ -12,7 +12,7 @@
 #include <memory>
 #include <string>
 
-#include "libamdf/cts/gpu/aql/publication.h"
+#include "libamdf/cts/gpu/aql/queue/publication.h"
 #include "libamdf/cts/gpu/pm4/encoding/memory_commands.h"
 #include "libamdf/cts/gpu/util/command_fixture.h"
 

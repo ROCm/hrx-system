@@ -12,49 +12,18 @@ iree_add_all_subdirs()
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 iree_cc_library(
   NAME
-    publication
-  HDRS
-    "publication.h"
-  DEPS
-    amdf::headers
-    iree::third_party::google_test
-    libamdf::cts::gpu::aql::encoding::packets
-    libamdf::cts::gpu::util::user_queue
-  TESTONLY
-  PUBLIC
-)
-endif()
-
-if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
-iree_cc_library(
-  NAME
     executable
   HDRS
     "executable.h"
   SRCS
     "executable.cc"
   DEPS
-    ::publication
     amdf::headers
+    libamdf::cts::gpu::aql::queue::publication
     libamdf::cts::gpu::gpu_device_fixture
     libamdf::cts::gpu::kernels::kernel
     libamdf::cts::gpu::util::memory
     libamdf::cts::gpu::util::user_queue
-  TESTONLY
-  PUBLIC
-)
-endif()
-
-if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
-iree_cc_library(
-  NAME
-    queue_fixture
-  HDRS
-    "queue_fixture.h"
-  DEPS
-    ::publication
-    amdf::headers
-    libamdf::cts::gpu::util::command_fixture
   TESTONLY
   PUBLIC
 )
@@ -132,9 +101,9 @@ iree_cc_library(
     ::barrier_or_payload_fixture
     ::dispatch_fixture
     ::dispatch_timing_fixture
-    ::queue_fixture
     amdf::headers
     iree::third_party::google_test
+    libamdf::cts::gpu::aql::queue::queue_fixture
     libamdf::cts::gpu::kernels::aql_publish
     libamdf::cts::gpu::kernels::aql_publish_kernels
     libamdf::cts::gpu::kernels::argument_payloads_kernels
@@ -271,8 +240,8 @@ iree_cc_library(
     "dispatch_fixture.cc"
   DEPS
     ::executable
-    ::queue_fixture
     amdf::headers
+    libamdf::cts::gpu::aql::queue::queue_fixture
     libamdf::cts::gpu::kernels::kernel
     libamdf::cts::gpu::pm4::encoding::profile
   TESTONLY

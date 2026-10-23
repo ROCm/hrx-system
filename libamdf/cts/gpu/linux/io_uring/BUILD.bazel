@@ -173,7 +173,7 @@ amdf_cc_library(
     target_compatible_with = _FILE_IO_HOST_COMPATIBILITY,
     deps = [
         ":file_io_resources",
-        "//libamdf/cts/gpu/aql:publication",
+        "//libamdf/cts/gpu/aql/queue:publication",
         "//libamdf/cts/gpu/kernels:file_staged",
         "//libamdf/cts/gpu/kernels:file_staged_read_kernels",
         "//libamdf/cts/gpu/kernels:file_staged_reader_kernels",
