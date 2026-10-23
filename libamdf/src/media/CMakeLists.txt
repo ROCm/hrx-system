@@ -54,6 +54,20 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    vp9
+  HDRS
+    "vp9.h"
+  SRCS
+    "vp9.c"
+  DEPS
+    amdf::headers
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     extension
   HDRS
     "extension.h"

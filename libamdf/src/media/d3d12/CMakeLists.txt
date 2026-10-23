@@ -107,6 +107,7 @@ iree_cc_library(
     "hevc.h"
     "queue.h"
     "session.h"
+    "vp9.h"
   SRCS
     "command.cc"
     "decode.cc"
@@ -114,6 +115,7 @@ iree_cc_library(
     "hevc.cc"
     "queue.cc"
     "session.cc"
+    "vp9.cc"
   DEPS
     ::configuration
     ::device_state
@@ -127,6 +129,7 @@ iree_cc_library(
     libamdf::src::kernel_queue
     libamdf::src::media::h264
     libamdf::src::media::hevc
+    libamdf::src::media::vp9
     libamdf::src::platform::native_event
     libamdf::src::platform::wait
     libamdf::src::platform::windows::monitored_fence

@@ -20,12 +20,14 @@ enum {
   DYNAMIC_WORDS = 42,
   AVC_BYTES = 1124,
   HEVC_BYTES = 296,
+  VP9_BYTES = 120,
   ENGINE_PACKAGE_BYTES = 16,
   DECODE_PACKAGE_BYTES = 140,
   INDIRECT_BUFFER_BYTES = ENGINE_PACKAGE_BYTES + DECODE_PACKAGE_BYTES,
   SESSION_CONTEXT_BYTES = 131072,
   STREAM_H264 = 7,
   STREAM_HEVC = 16,
+  STREAM_VP9 = 17,
 };
 
 // DWORD offsets within the unified DECODE_BUFFER package. Each address pair
@@ -37,6 +39,7 @@ enum {
   BINDING_SESSION = 7,
   BINDING_COMPRESSED = 9,
   BINDING_CONTEXT = 11,
+  BINDING_PROBABILITIES = 17,
   BINDING_SCALING = 21,
 };
 
@@ -160,9 +163,43 @@ enum {
   HEVC_BYTE_DC_32X32 = 234,
 };
 
+// VP9 byte offsets; the first DWORD holds header flags and the final DWORDs
+// locate its compressed and uncompressed header partitions.
+enum {
+  VP9_BYTE_CONTEXT = 4,
+  VP9_BYTE_RESET_CONTEXT = 5,
+  VP9_BYTE_CURRENT_SLOT = 6,
+  VP9_BYTE_INTERPOLATION = 7,
+  VP9_BYTE_FILTER_LEVEL = 8,
+  VP9_BYTE_SHARPNESS = 9,
+  VP9_BYTE_ADJUSTED_LEVELS = 10,
+  VP9_BYTE_BASE_QUANTIZER = 74,
+  VP9_BYTE_Y_DC_DELTA = 75,
+  VP9_BYTE_UV_AC_DELTA = 76,
+  VP9_BYTE_UV_DC_DELTA = 77,
+  VP9_BYTE_TILE_COLUMNS = 78,
+  VP9_BYTE_TILE_ROWS = 79,
+  VP9_BYTE_CHROMA_FORMAT = 82,
+  VP9_BYTE_REFERENCE_MAP = 83,
+  VP9_BYTE_ACTIVE_REFERENCES = 91,
+  VP9_BYTE_SIGN_BIASES = 94,
+  VP9_BYTE_LUMA_DEPTH = 98,
+  VP9_BYTE_CHROMA_DEPTH = 99,
+  VP9_BYTE_P010 = 100,
+  VP9_BYTE_MSB = 101,
+  VP9_WORD_COMPRESSED_HEADER = 27,
+  VP9_WORD_UNCOMPRESSED_HEADER = 28,
+};
+
 static void amdf_media_drm_vcn_address(uint32_t* words, uint64_t address) {
   words[0] = (uint32_t)(address >> 32);
   words[1] = (uint32_t)address;
+}
+
+static uint32_t amdf_media_drm_vcn_stream(amdf_media_codec_t codec) {
+  return codec == AMDF_MEDIA_CODEC_H264   ? STREAM_H264
+         : codec == AMDF_MEDIA_CODEC_HEVC ? STREAM_HEVC
+                                          : STREAM_VP9;
 }
 
 static uint32_t amdf_media_drm_vcn_ib(amdf_media_drm_buffer_t* storage,
@@ -184,16 +221,19 @@ static uint32_t amdf_media_drm_vcn_ib(amdf_media_drm_buffer_t* storage,
   amdf_media_drm_vcn_address(buffers + BINDING_SESSION,
                              session->storage->address);
   if (compressed != 0) {
-    buffers[BINDING_FLAGS] |=
-        0xa0c;  // Bitstream, target, collocated state, and scaling.
+    const bool vp9 =
+        session->requirements.configuration.codec == AMDF_MEDIA_CODEC_VP9;
+    // Bitstream, target, collocated state, and scaling or probabilities.
+    buffers[BINDING_FLAGS] |= vp9 ? 0x180c : 0xa0c;
     amdf_media_drm_vcn_address(buffers + BINDING_OUTPUT, output);
     amdf_media_drm_vcn_address(buffers + BINDING_COMPRESSED, compressed);
     amdf_media_drm_vcn_address(
         buffers + BINDING_CONTEXT,
         session->storage->address + SESSION_CONTEXT_BYTES);
     amdf_media_drm_vcn_address(
-        buffers + BINDING_SCALING,
-        storage->address + AMDF_MEDIA_DRM_VCN_SCALING_OFFSET);
+        buffers + (vp9 ? BINDING_PROBABILITIES : BINDING_SCALING),
+        storage->address + (vp9 ? AMDF_MEDIA_DRM_VCN_PROBABILITY_OFFSET
+                                : AMDF_MEDIA_DRM_VCN_SCALING_OFFSET));
   }
   return INDIRECT_BUFFER_BYTES;
 }
@@ -221,9 +261,7 @@ uint32_t amdf_media_drm_vcn_control(amdf_media_drm_buffer_t* storage,
   if (begin) {
     amdf_media_drm_vcn_index(message + 6, 1, 40, 16);
     message[10] =
-        session->requirements.configuration.codec == AMDF_MEDIA_CODEC_H264
-            ? STREAM_H264
-            : STREAM_HEVC;
+        amdf_media_drm_vcn_stream(session->requirements.configuration.codec);
     message[12] = session->requirements.configuration.coded_width;
     message[13] = session->requirements.configuration.coded_height;
   }
@@ -319,9 +357,7 @@ static uint8_t* amdf_media_drm_vcn_decode(
           ? 2
           : 1;
   decode[DECODE_STREAM] =
-      session->requirements.configuration.codec == AMDF_MEDIA_CODEC_H264
-          ? STREAM_H264
-          : STREAM_HEVC;
+      amdf_media_drm_vcn_stream(session->requirements.configuration.codec);
   decode[DECODE_FLAGS] = 1;  // Explicit dynamic reference surfaces (tier 2).
   decode[DECODE_WIDTH] = session->requirements.configuration.coded_width;
   decode[DECODE_HEIGHT] = session->requirements.configuration.coded_height;
@@ -331,8 +367,10 @@ static uint8_t* amdf_media_drm_vcn_decode(
       output->row_pitches[1] * output->row_counts[1];
   decode[DECODE_HARDWARE_CONTEXT_BYTES] = session->context_byte_length;
   decode[DECODE_SESSION_CONTEXT_BYTES] = SESSION_CONTEXT_BYTES;
+  // Message, compressed, output, context, and codec-specific auxiliary storage.
   decode[DECODE_BUFFER_FLAGS] =
-      0xa0d;  // Message, compressed, output, context, and scaling.
+      session->requirements.configuration.codec == AMDF_MEDIA_CODEC_VP9 ? 0x180d
+                                                                        : 0xa0d;
   decode[DECODE_REFERENCE_PITCH] = current->row_pitches[0] / sample_bytes;
   decode[DECODE_REFERENCE_ROWS] = current->row_counts[0];
   const amdf_media_drm_device_t* device =
@@ -546,6 +584,112 @@ uint32_t amdf_media_drm_vcn_hevc(
     }
   } else {
     memset(scaling, 0, 992);
+  }
+  return amdf_media_drm_vcn_ib(storage, session, compressed_address,
+                               output->addresses[0]);
+}
+
+static uint8_t amdf_media_drm_vcn_vp9_filter_level(int32_t value) {
+  return (uint8_t)(value < 0 ? 0 : value > 63 ? 63 : value);
+}
+
+uint32_t amdf_media_drm_vcn_vp9(
+    amdf_media_drm_buffer_t* storage, const amdf_media_drm_session_t* session,
+    uint64_t compressed_address, uint32_t compressed_byte_length,
+    const amdf_media_drm_frame_t* output, const amdf_media_drm_frame_t* current,
+    const amdf_media_drm_frame_t* references, uint32_t current_slot,
+    const amdf_media_vp9_decode_picture_info_t* picture) {
+  uint8_t* codec =
+      amdf_media_drm_vcn_decode(storage, session, compressed_byte_length,
+                                output, current, NULL, 0, 8, 0x0e, VP9_BYTES);
+  uint32_t* words = (uint32_t*)codec;
+  const amdf_media_vp9_loop_filter_t* filter = &picture->loop_filter;
+  const amdf_media_vp9_segmentation_t* segments = &picture->segmentation;
+  words[0] = (picture->frame_type << 1) | (picture->error_resilient << 2) |
+             (picture->intra_only << 3) |
+             (picture->high_precision_motion_vectors << 4) |
+             (picture->refresh_frame_context << 5) |
+             (picture->parallel_decoding << 6) | (segments->enabled << 7) |
+             (segments->update_map << 8) | (segments->temporal_update << 9) |
+             (segments->update_data << 10) | (filter->deltas_enabled << 11) |
+             (filter->deltas_updated << 12) |
+             (picture->use_previous_frame_motion_vectors << 13) |
+             (1u << 14);  // The payload includes its uncompressed header.
+  words[VP9_WORD_COMPRESSED_HEADER] = picture->compressed_header_byte_length;
+  words[VP9_WORD_UNCOMPRESSED_HEADER] =
+      picture->uncompressed_header_byte_length;
+  codec[VP9_BYTE_CONTEXT] = (uint8_t)picture->frame_context_index;
+  codec[VP9_BYTE_RESET_CONTEXT] = (uint8_t)picture->reset_frame_context;
+  codec[VP9_BYTE_CURRENT_SLOT] = (uint8_t)current_slot;
+  codec[VP9_BYTE_INTERPOLATION] = (uint8_t)picture->interpolation_filter;
+  codec[VP9_BYTE_FILTER_LEVEL] = (uint8_t)filter->level;
+  codec[VP9_BYTE_SHARPNESS] = (uint8_t)filter->sharpness;
+  codec[VP9_BYTE_BASE_QUANTIZER] = (uint8_t)picture->base_quantizer_index;
+  codec[VP9_BYTE_Y_DC_DELTA] = (uint8_t)picture->y_dc_quantizer_delta;
+  codec[VP9_BYTE_UV_AC_DELTA] = (uint8_t)picture->uv_ac_quantizer_delta;
+  codec[VP9_BYTE_UV_DC_DELTA] = (uint8_t)picture->uv_dc_quantizer_delta;
+  codec[VP9_BYTE_TILE_COLUMNS] = (uint8_t)picture->log2_tile_columns;
+  codec[VP9_BYTE_TILE_ROWS] = (uint8_t)picture->log2_tile_rows;
+  codec[VP9_BYTE_CHROMA_FORMAT] = 1;
+  codec[VP9_BYTE_LUMA_DEPTH] =
+      (uint8_t)(session->codec.vp9.sample_bit_depth - 8);
+  codec[VP9_BYTE_CHROMA_DEPTH] = codec[VP9_BYTE_LUMA_DEPTH];
+  codec[VP9_BYTE_P010] = session->codec.vp9.sample_bit_depth == 10;
+  codec[VP9_BYTE_MSB] = codec[VP9_BYTE_P010];
+  const int32_t scale = 1 << (filter->level >> 5);
+  for (uint32_t segment = 0; segment < 8; ++segment) {
+    int32_t base = (int32_t)filter->level;
+    if (segments->enabled && (segments->feature_masks[segment] & 2) != 0) {
+      base = amdf_media_drm_vcn_vp9_filter_level(
+          segments->feature_values[segment][1] +
+          (segments->absolute_values ? 0 : base));
+    }
+    for (uint32_t reference = 0; reference < 4; ++reference) {
+      for (uint32_t mode = 0; mode < 2; ++mode) {
+        const int32_t delta =
+            filter->deltas_enabled
+                ? filter->reference_deltas[reference] +
+                      (reference ? filter->mode_deltas[mode] : 0)
+                : 0;
+        codec[VP9_BYTE_ADJUSTED_LEVELS + (segment * 4 + reference) * 2 + mode] =
+            amdf_media_drm_vcn_vp9_filter_level(base + delta * scale);
+      }
+    }
+  }
+  // Tier-2 VP9 addresses follow the eight logical map entries. Aliasing those
+  // entries is legal; the residency list retains each unique physical binding.
+  uint32_t* dynamic = (uint32_t*)(codec - DYNAMIC_WORDS * 4);
+  for (uint32_t i = 0; i < 8; ++i) {
+    const uint32_t index = picture->reference_map[i];
+    codec[VP9_BYTE_REFERENCE_MAP + i] =
+        index == 255 ? 127 : (uint8_t)picture->references[index].slot_index;
+    if (index != 255) {
+      dynamic[DYNAMIC_REFERENCE_LOW + i] =
+          (uint32_t)references[index].addresses[0];
+      dynamic[DYNAMIC_REFERENCE_HIGH + i] =
+          (uint32_t)(references[index].addresses[0] >> 32);
+    }
+  }
+  for (uint32_t i = 0; i < 3; ++i) {
+    const uint32_t index = picture->active_reference_indices[i];
+    codec[VP9_BYTE_ACTIVE_REFERENCES + i] =
+        index == 255 ? 127 : codec[VP9_BYTE_REFERENCE_MAP + index];
+    codec[VP9_BYTE_SIGN_BIASES + i] = picture->reference_sign_bias[i];
+  }
+  uint8_t* probabilities =
+      (uint8_t*)storage->host_pointer + AMDF_MEDIA_DRM_VCN_PROBABILITY_OFFSET;
+  memset(probabilities, 0, 2560);
+  if (segments->enabled) {
+    uint32_t* values = (uint32_t*)(probabilities + 2304);
+    for (uint32_t i = 0; i < 8; ++i) {
+      values[i] = (uint16_t)segments->feature_values[i][0] |
+                  ((uint32_t)(uint8_t)segments->feature_values[i][1] << 16) |
+                  ((uint32_t)segments->feature_values[i][2] << 24);
+    }
+    memcpy(probabilities + 2336, segments->tree_probabilities, 7);
+    memcpy(probabilities + 2343, segments->prediction_probabilities, 3);
+    probabilities[2346] = (uint8_t)segments->absolute_values;
+    memcpy(probabilities + 2347, segments->feature_masks, 8);
   }
   return amdf_media_drm_vcn_ib(storage, session, compressed_address,
                                output->addresses[0]);

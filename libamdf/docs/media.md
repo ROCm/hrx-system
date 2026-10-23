@@ -12,8 +12,8 @@ profile/format/dimension/reference admission is a separate query:
 
 | Provider | Decode schemas | Output storage |
 | --- | --- | --- |
-| Windows D3D12 | H264; HEVC Main and Main10, including compatible eight-bit syntax | NV12 or P010 according to actual sample depth; application-placed native images |
-| Linux DRM VCN | H264 on VCN 4 unified queues | Linear NV12 output and separate application-owned references |
+| Windows D3D12 | H264; HEVC Main/Main10; VP9 profiles 0/2 | NV12 or P010 according to actual sample depth; application-placed native images |
+| Linux DRM VCN | H264; HEVC Main/Main10; VP9 profiles 0/2 on VCN 4 unified queues | Linear NV12/P010 output and separate application-owned references |
 | Linux DRM JPEG | Eight-bit baseline sequential 4:2:0 JPEG on the layout-2 JPEG engine | Linear NV12 planes, directly or through a placed image identity |
 
 A native driver's broader codec list does not advertise schemas implemented by
@@ -21,6 +21,13 @@ this extension. Configuration queries preserve requested dimensions and return
 an explicit unsupported predicate. Image placement queries separately report
 alignment and storage padding; allocation dimensions never silently replace
 coded dimensions.
+
+HEVC Main10 admits compatible eight-bit syntax. VP9 admits eight-bit profile 0
+and ten-bit profile 2, both 4:2:0. VP9 reference maps may alias the caller's
+unique physical bindings; active LAST/GOLDEN/ALTREF entries select that map.
+The caller resolves loop-filter and segmentation state, while the session
+retains native probability contexts. A show-existing-frame header reuses the
+application's existing image without submitting a decode command.
 
 ## Ownership through one picture
 
@@ -39,6 +46,12 @@ explicit planes with direct memory owners, access ordinals, offsets, extents,
 and row pitches. A linear image query returns the same plane representation,
 including the selected layer's offsets. The full returned extent belongs to
 native execution; row and codec-block padding has unspecified contents.
+
+The Windows shared-heap profile provisions backing in 2 MiB units so its
+pre-allocation native charge remains exact across the driver's page-size
+transition. Logical length and queried image placement alignment remain
+independent. Applications can suballocate several images in that explicit heap;
+the library neither pools heaps nor hides the padding charge.
 
 A session owns native codec state and borrows one ordered queue. The application
 supplies the reference images and stable reference-slot indices. A reconstructed
@@ -101,11 +114,17 @@ wake hint prompting that same status check.
 
 VCN sessions own firmware context, with charges reported by `session_query_info`;
 all output and reconstructed-reference images remain application-owned. One
-recording provisions the IB, parsed firmware message, and scaling tables in one
+recording provisions the IB, parsed firmware message, and codec auxiliary data in one
 native page. Preparation writes only that retired recording, and submission
 selects its provisioned residency list. Codec feedback is unavailable on these
 Linux decode paths; successful queue retirement is not reported as a codec
 success result.
+
+VP9's firmware context reserves about 10.4 MiB even for small images. This
+generation-specific native cost is included in `session_query_info`; it is
+separate from application-owned decoded and reference pixels. Reference storage
+queries also expose reconstruction padding: sixteen rows on D3D12 and sixty-four
+on VCN for VP9, with exact coded dimensions retained in the session.
 
 ## Compute integration
 

@@ -6,10 +6,21 @@
 
 #include "libamdf/src/media/d3d12/decode.h"
 
+#include "libamdf/src/media/vp9.h"
 #include "libamdf/src/structure.h"
 
 namespace amdf::media::d3d12 {
 namespace {
+
+const amdf_media_reference_t& ReferenceBinding(
+    const amdf_media_reference_t& reference) {
+  return reference;
+}
+
+template <typename T>
+const amdf_media_reference_t& ReferenceBinding(const T& reference) {
+  return reference.binding;
+}
 
 template <typename T>
 amdf_status_t PrepareReferences(const Session& session, uint32_t current_slot,
@@ -21,7 +32,7 @@ amdf_status_t PrepareReferences(const Session& session, uint32_t current_slot,
   }
   uint32_t used = 1u << current_slot;
   for (uint32_t index = 0; index < count; ++index) {
-    const auto& binding = references[index].binding;
+    const auto& binding = ReferenceBinding(references[index]);
     if (binding.slot_index >= capacity) {
       return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
     }
@@ -125,6 +136,43 @@ amdf_status_t PrepareDecode(const Session& session, const void* input,
           static_cast<UINT>(picture.slice_count *
                             sizeof(DXVA_Slice_HEVC_Short)),
           slices};
+      break;
+    }
+    case AMDF_MEDIA_CODEC_VP9: {
+      amdf_status_t status = amdf_structure_validate_input(
+          input, AMDF_STRUCTURE_TYPE_MEDIA_VP9_DECODE_PICTURE_INFO,
+          sizeof(amdf_media_vp9_decode_picture_info_t));
+      if (!amdf_status_is_ok(status)) {
+        return status;
+      }
+      const auto& picture =
+          *static_cast<const amdf_media_vp9_decode_picture_info_t*>(input);
+      if (picture.reference_count > maximum_reference_count ||
+          maximum_slice_count == 0 || compressed_byte_length > UINT32_MAX) {
+        return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+      }
+      status = amdf_media_vp9_validate(&session.info.configuration, &picture,
+                                       compressed_byte_length);
+      if (!amdf_status_is_ok(status)) {
+        return status;
+      }
+      status = PrepareReferences(session, current_reference_slot,
+                                 picture.reference_count, picture.references,
+                                 result);
+      if (!amdf_status_is_ok(status)) {
+        return status;
+      }
+      LowerVp9(session, current_reference_slot, picture,
+               &result->parameters.vp9);
+      *static_cast<DXVA_Slice_VPx_Short*>(slices) = {
+          0, static_cast<UINT>(compressed_byte_length), 0};
+      arguments.NumFrameArguments = 2;
+      arguments.FrameArguments[0] = {
+          D3D12_VIDEO_DECODE_ARGUMENT_TYPE_PICTURE_PARAMETERS,
+          sizeof(result->parameters.vp9), &result->parameters.vp9};
+      arguments.FrameArguments[1] = {
+          D3D12_VIDEO_DECODE_ARGUMENT_TYPE_SLICE_CONTROL,
+          sizeof(DXVA_Slice_VPx_Short), slices};
       break;
     }
     default:

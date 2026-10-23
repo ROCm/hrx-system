@@ -9,6 +9,7 @@
 #include "amdf/media/gfx11.h"
 #include "amdf/media/h264.h"
 #include "amdf/media/hevc.h"
+#include "amdf/media/vp9.h"
 
 int main(void) {
   const amdf_api_t* api = 0;

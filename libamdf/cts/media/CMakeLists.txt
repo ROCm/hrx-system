@@ -278,4 +278,92 @@ iree_cc_library(
 )
 endif()
 
+iree_c_embed_data(
+  NAME
+    vp9_inputs
+  SRCS
+    "vp9_10.packet"
+    "vp9_16x16_10.packet"
+    "vp9_16x16_8.packet"
+    "vp9_8.packet"
+  C_FILE_OUTPUT
+    "vp9_inputs.c"
+  H_FILE_OUTPUT
+    "vp9_inputs.h"
+  IDENTIFIER
+    "amdf_cts_media_vp9_inputs"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    vp9_fixture
+  HDRS
+    "vp9_fixture.h"
+  SRCS
+    "vp9_fixture.cc"
+  DEPS
+    ::vp9_inputs
+    amdf::headers
+    iree::third_party::google_test
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+iree_cc_library(
+  NAME
+    vp9_cases
+  SRCS
+    "vp9_test.cc"
+  DEPS
+    ::decode_fixture
+    ::vp9_fixture
+    amdf::headers
+    iree::third_party::google_test
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+amdf_cts_binary(
+  NAME
+    vp9_dynamic_bin
+  DATA
+    amdf::amdf
+  DEPS
+    ::vp9_cases
+    amdf::headers
+    libamdf::cts::util::dynamic_provider
+    libamdf::cts::util::test_main
+  TESTONLY
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+iree_native_test(
+  NAME
+    "vp9_dynamic"
+  ARGS
+    "--amdf_native_lifetime=process"
+    "--amdf_library={{$<TARGET_FILE:amdf::amdf>}}"
+  SRC
+    ::vp9_dynamic_bin
+  DATA
+    "amdf::amdf"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

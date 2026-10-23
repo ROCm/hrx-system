@@ -8,6 +8,7 @@
 #define AMDF_SRC_MEDIA_D3D12_SESSION_H_
 
 #include "amdf/media/hevc.h"
+#include "amdf/media/vp9.h"
 #include "libamdf/src/media/d3d12/device.h"
 
 namespace amdf::media::d3d12 {
@@ -27,6 +28,8 @@ struct Session {
     amdf_media_h264_configuration_t h264;
     // HEVC profile and component precision used during picture lowering.
     amdf_media_hevc_configuration_t hevc;
+    // VP9 profile and component precision used during picture lowering.
+    amdf_media_vp9_configuration_t vp9;
   };
   // Retained placement and buffer requirements from native admission.
   amdf_media_configuration_info_t requirements;

@@ -9,6 +9,7 @@
 
 #include "libamdf/src/media/d3d12/h264.h"
 #include "libamdf/src/media/d3d12/hevc.h"
+#include "libamdf/src/media/d3d12/vp9.h"
 
 namespace amdf::media::d3d12 {
 
@@ -17,6 +18,7 @@ constexpr size_t kDecodeSliceByteLength = sizeof(DXVA_Slice_H264_Short) >
                                                   sizeof(DXVA_Slice_HEVC_Short)
                                               ? sizeof(DXVA_Slice_H264_Short)
                                               : sizeof(DXVA_Slice_HEVC_Short);
+static_assert(sizeof(DXVA_Slice_VPx_Short) <= kDecodeSliceByteLength);
 
 // Preparation-local native arguments. No state survives recording and no
 // native pointers escape the preparation call.
@@ -27,6 +29,8 @@ struct DecodePicture {
     DXVA_PicParams_H264 h264;
     // Off-host HEVC parsing arguments.
     DXVA_PicParams_HEVC hevc;
+    // VP9 headers and resolved adaptive state.
+    DXVA_PicParams_VP9 vp9;
   } parameters;
   // Codec-selected scaling data in native scan order.
   union {

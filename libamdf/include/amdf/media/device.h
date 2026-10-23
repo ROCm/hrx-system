@@ -30,6 +30,7 @@ enum amdf_media_codec_e {
   /// Eight-bit baseline sequential 4:2:0 JPEG to NV12. The complete input
   /// includes its marker headers; no parsed-picture extension is required.
   AMDF_MEDIA_CODEC_JPEG = 3,
+  AMDF_MEDIA_CODEC_VP9 = 4,
 };
 
 typedef uint32_t amdf_media_direction_t;
@@ -67,9 +68,11 @@ typedef struct amdf_media_configuration_t {
   amdf_media_direction_t direction;
   /// Uncompressed component storage format.
   amdf_media_pixel_format_t format;
-  /// Exact coded width in pixels, including codec block padding.
+  /// Exact bitstream-coded width in pixels, before the consumer's render crop.
+  /// Native storage padding is reported separately by configuration admission.
   uint32_t coded_width;
-  /// Exact coded height in pixels, including codec block padding.
+  /// Exact bitstream-coded height in pixels, before the consumer's render crop.
+  /// Native storage padding is reported separately by configuration admission.
   uint32_t coded_height;
   /// Number of addressable reference slots, including the current reconstructed
   /// target whether it shares the decoded output or has separate storage.

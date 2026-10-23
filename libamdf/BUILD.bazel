@@ -51,6 +51,7 @@ amdf_library(
         "include/amdf/media/hevc.h",
         "include/amdf/media/image.h",
         "include/amdf/media/session.h",
+        "include/amdf/media/vp9.h",
         "include/amdf/memory.h",
         "include/amdf/memory_reservation.h",
         "include/amdf/native_event.h",

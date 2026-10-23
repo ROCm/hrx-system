@@ -16,6 +16,16 @@ package(
     licenses = ["notice"],
 )
 
+test_suite(
+    name = "media",
+    tests = [
+        ":h264",
+        ":hevc",
+        ":vp9",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 loom_target_profile(
     name = "gfx1150",
     family = "amdgpu",
@@ -79,6 +89,21 @@ amdf_cts_test_suite(
     deps = [
         ":decode_fixture",
         "//libamdf/cts/media:hevc_fixture",
+        "//third_party:google_test",
+    ],
+)
+
+amdf_cts_test_suite(
+    name = "vp9",
+    srcs = ["vp9_test.cc"],
+    target_compatible_with = [
+        "@platforms//os:windows",
+        "@platforms//cpu:x86_64",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":decode_fixture",
+        "//libamdf/cts/media:vp9_fixture",
         "//third_party:google_test",
     ],
 )

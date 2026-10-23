@@ -37,6 +37,13 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "vp9",
+    srcs = ["vp9.c"],
+    hdrs = ["vp9.h"],
+    visibility = ["//libamdf/src/media:__subpackages__"],
+)
+
+amdf_cc_library(
     name = "extension",
     srcs = ["extension.c"],
     hdrs = ["extension.h"],

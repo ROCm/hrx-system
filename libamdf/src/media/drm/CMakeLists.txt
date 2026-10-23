@@ -39,12 +39,14 @@ iree_cc_library(
     "queue.h"
     "session.h"
     "vcn.h"
+    "vp9_context.h"
   SRCS
     "command.c"
     "jpeg.c"
     "queue.c"
     "session.c"
     "vcn.c"
+    "vp9_context.c"
   DEPS
     ::buffer
     ::device_state
@@ -54,6 +56,7 @@ iree_cc_library(
     libamdf::src::atomics
     libamdf::src::media::h264
     libamdf::src::media::hevc
+    libamdf::src::media::vp9
     libamdf::src::platform::linux::file
     libamdf::src::platform::linux::native_event
     libamdf::src::platform::native_event

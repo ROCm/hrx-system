@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "amdf/media/hevc.h"
+#include "amdf/media/vp9.h"
 #include "libamdf/src/endpoint.h"
 #include "libamdf/src/instance.h"
 #include "libamdf/src/media/d3d12/device.h"
@@ -145,6 +146,41 @@ amdf_status_t QueryConfiguration(
       maximum_reference_count = 16;
       break;
     }
+    case AMDF_MEDIA_CODEC_VP9: {
+      status = amdf_structure_validate_input(
+          codec_configuration, AMDF_STRUCTURE_TYPE_MEDIA_VP9_CONFIGURATION,
+          sizeof(amdf_media_vp9_configuration_t));
+      if (!amdf_status_is_ok(status)) {
+        return status;
+      }
+      const auto& vp9 = *static_cast<const amdf_media_vp9_configuration_t*>(
+          codec_configuration);
+      if (!((vp9.profile == AMDF_MEDIA_VP9_PROFILE_0 &&
+             vp9.sample_bit_depth == 8) ||
+            (vp9.profile == AMDF_MEDIA_VP9_PROFILE_2 &&
+             vp9.sample_bit_depth == 10))) {
+        info.reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC;
+      } else if (configuration.format != (vp9.sample_bit_depth == 8
+                                              ? AMDF_MEDIA_PIXEL_FORMAT_NV12
+                                              : AMDF_MEDIA_PIXEL_FORMAT_P010)) {
+        info.reason = AMDF_MEDIA_CONFIGURATION_REASON_FORMAT;
+      }
+      static constexpr GUID profiles[] = {
+          {0x463707f8,
+           0xa1d0,
+           0x4585,
+           {0x87, 0x6d, 0x83, 0xaa, 0x6d, 0x60, 0xb8, 0x9e}},
+          {0xa4c749ef,
+           0x6ecf,
+           0x48aa,
+           {0x84, 0x48, 0x50, 0xa7, 0xa1, 0x16, 0x5f, 0xf7}},
+      };
+      support.Configuration.DecodeProfile =
+          profiles[vp9.sample_bit_depth == 10];
+      dimension_alignment = 2;
+      maximum_reference_count = 9;
+      break;
+    }
     default:
       info.reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC;
       break;
@@ -219,8 +255,16 @@ amdf_status_t QueryConfiguration(
   amdf_media_image_description_t description = {
       configuration.format, configuration.coded_width, storage_height, 1,
       AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT};
+  // VP9 reference sampling needs complete sixteen-row reconstruction blocks,
+  // including the chroma border. Native admission does not report this through
+  // HEIGHT_ALIGNMENT_MULTIPLE_32_REQUIRED. Keep coded and output extents exact
+  // when a separate reference allocation carries this padding.
+  const uint32_t reference_height = configuration.codec == AMDF_MEDIA_CODEC_VP9
+                                        ? (storage_height + 15) & ~15u
+                                        : storage_height;
   if (!separate_reference) {
     description.roles |= AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE;
+    description.height = reference_height;
   }
   status = ImageRequirements(device, description, &info.output);
   if (!amdf_status_is_ok(status)) {
@@ -228,6 +272,7 @@ amdf_status_t QueryConfiguration(
   }
   if (separate_reference) {
     description.roles = AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE;
+    description.height = reference_height;
     status = ImageRequirements(device, description, &info.reference);
     if (!amdf_status_is_ok(status)) {
       return status;

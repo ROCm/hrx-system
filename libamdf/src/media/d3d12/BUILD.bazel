@@ -88,6 +88,7 @@ amdf_cc_library(
         "hevc.cc",
         "queue.cc",
         "session.cc",
+        "vp9.cc",
     ],
     hdrs = [
         "command.h",
@@ -96,6 +97,7 @@ amdf_cc_library(
         "hevc.h",
         "queue.h",
         "session.h",
+        "vp9.h",
     ],
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
@@ -112,6 +114,7 @@ amdf_cc_library(
         "//libamdf/src:wait",
         "//libamdf/src/media:h264",
         "//libamdf/src/media:hevc",
+        "//libamdf/src/media:vp9",
         "//libamdf/src/platform:native_event",
         "//libamdf/src/platform:wait",
         "//libamdf/src/platform/windows:monitored_fence",

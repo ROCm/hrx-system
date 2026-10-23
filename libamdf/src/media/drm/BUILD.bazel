@@ -43,6 +43,7 @@ amdf_cc_library(
         "queue.c",
         "session.c",
         "vcn.c",
+        "vp9_context.c",
     ],
     hdrs = [
         "command.h",
@@ -50,6 +51,7 @@ amdf_cc_library(
         "queue.h",
         "session.h",
         "vcn.h",
+        "vp9_context.h",
     ],
     target_compatible_with = DRM_COMPATIBILITY,
     deps = [
@@ -62,6 +64,7 @@ amdf_cc_library(
         "//libamdf/src:wait",
         "//libamdf/src/media:h264",
         "//libamdf/src/media:hevc",
+        "//libamdf/src/media:vp9",
         "//libamdf/src/platform:native_event",
         "//libamdf/src/platform:wait",
         "//libamdf/src/platform/linux:file",

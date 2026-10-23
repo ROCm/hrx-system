@@ -11,6 +11,7 @@
 #include "libamdf/src/media/drm/vcn.h"
 #include "libamdf/src/media/h264.h"
 #include "libamdf/src/media/hevc.h"
+#include "libamdf/src/media/vp9.h"
 #include "libamdf/src/structure.h"
 
 amdf_status_t AMDF_CALL amdf_media_drm_command_create(
@@ -141,6 +142,7 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
   amdf_media_drm_frame_t output = {0}, current = {0}, references[16];
   const amdf_media_h264_decode_picture_info_t* h264 = NULL;
   const amdf_media_hevc_decode_picture_info_t* hevc = NULL;
+  const amdf_media_vp9_decode_picture_info_t* vp9 = NULL;
   uint32_t reference_count = 0, slice_count = 0;
   if (picture_operation) {
     status = amdf_structure_validate_header(
@@ -192,6 +194,17 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
         }
         reference_count = h264->reference_count;
         slice_count = h264->slice_count;
+      } else if (session->requirements.configuration.codec ==
+                 AMDF_MEDIA_CODEC_VP9) {
+        vp9 = decode->next;
+        status = amdf_structure_validate_input(
+            vp9, AMDF_STRUCTURE_TYPE_MEDIA_VP9_DECODE_PICTURE_INFO,
+            sizeof(*vp9));
+        if (!amdf_status_is_ok(status)) {
+          return status;
+        }
+        reference_count = vp9->reference_count;
+        slice_count = 1;
       } else {
         hevc = decode->next;
         status = amdf_structure_validate_input(
@@ -214,6 +227,9 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
               ? amdf_media_h264_validate(&session->requirements.configuration,
                                          &session->codec.h264, h264,
                                          decode->compressed.byte_length)
+          : vp9 != NULL
+              ? amdf_media_vp9_validate(&session->requirements.configuration,
+                                        vp9, decode->compressed.byte_length)
               : amdf_media_hevc_validate(&session->requirements.configuration,
                                          &session->codec.hevc, hevc,
                                          decode->compressed.byte_length);
@@ -236,8 +252,9 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
       for (uint32_t i = 0; amdf_status_is_ok(status) && i < reference_count;
            ++i) {
         const amdf_media_reference_t* binding =
-            h264 != NULL ? &h264->references[i].binding
-                         : &hevc->references[i].binding;
+            h264 != NULL  ? &h264->references[i].binding
+            : vp9 != NULL ? &vp9->references[i]
+                          : &hevc->references[i].binding;
         if (binding->slot_index >=
                 session->requirements.configuration.reference_image_count ||
             (used_slots & (1u << binding->slot_index)) != 0) {
@@ -325,6 +342,11 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
                     command->storage, session, address,
                     (uint32_t)decode->compressed.byte_length, &output, &current,
                     references, decode->reference_slot_index, h264)
+          : vp9 != NULL
+              ? amdf_media_drm_vcn_vp9(command->storage, session, address,
+                                       (uint32_t)decode->compressed.byte_length,
+                                       &output, &current, references,
+                                       decode->reference_slot_index, vp9)
               : amdf_media_drm_vcn_hevc(
                     command->storage, session, address,
                     (uint32_t)decode->compressed.byte_length, &output, &current,

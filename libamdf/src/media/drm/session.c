@@ -10,6 +10,7 @@
 #include <sys/random.h>
 
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/media/drm/vp9_context.h"
 #include "libamdf/src/platform/linux/file.h"
 
 amdf_status_t AMDF_CALL amdf_media_drm_session_create(
@@ -52,6 +53,12 @@ amdf_status_t AMDF_CALL amdf_media_drm_session_create(
       session->context_byte_length =
           references *
           (((width / 16) * (((height / 16) + 1) & ~1u) * 192 + 255) & ~255u);
+    } else if (create_info->configuration.codec == AMDF_MEDIA_CODEC_VP9) {
+      session->codec.vp9 =
+          *(const amdf_media_vp9_configuration_t*)create_info->next;
+      session->codec.vp9.next = NULL;
+      session->context_byte_length = amdf_media_drm_vp9_context_byte_length(
+          session->codec.vp9.sample_bit_depth);
     } else {
       session->codec.hevc =
           *(const amdf_media_hevc_configuration_t*)create_info->next;
@@ -77,6 +84,10 @@ amdf_status_t AMDF_CALL amdf_media_drm_session_create(
                                            &session->storage);
     if (amdf_status_is_ok(status)) {
       memset(session->storage->host_pointer, 0, length);
+      if (create_info->configuration.codec == AMDF_MEDIA_CODEC_VP9) {
+        amdf_media_drm_vp9_context_initialize(
+            (uint8_t*)session->storage->host_pointer + 131072);
+      }
       // Firmware uses an opaque 32-bit stream cookie alongside explicit context
       // storage. A cold entropy request avoids process-global identity state.
       const ssize_t received =
