@@ -10,6 +10,19 @@
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 
 py_library(
+    name = "loom_wheel",
+    srcs = ["loom_wheel.py"],
+    deps = ["//loom/packaging/python:release_lib"],
+)
+
+py_test(
+    name = "loom_wheel_test",
+    size = "small",
+    srcs = ["loom_wheel_test.py"],
+    deps = [":loom_wheel"],
+)
+
+py_library(
     name = "github_api",
     srcs = ["github_api.py"],
 )
@@ -188,6 +201,7 @@ test_suite(
         ":github_actions_watch_test",
         ":github_api_test",
         ":loom_binary_size_test",
+        ":loom_wheel_test",
         ":rocm_environment_test",
         ":vulkan_environment_test",
         ":windows_diagnostics_test",

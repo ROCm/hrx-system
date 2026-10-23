@@ -71,6 +71,19 @@ one leaves the other serving requests. Windows uses separate consoles and real
 console control events. Cross-building the target verifies its inputs; execution
 requires the matching operating system.
 
+The [SDK build workflow](../../../.github/workflows/build_loom_sdk.yml) runs
+this installed test for all four profiles on Linux and Windows. The producer
+exports the exact `release_wheel` target only after that test succeeds:
+
+```sh
+python -m build_tools.ci.loom_wheel --profile=release --output=wheel-artifact
+```
+
+Run it from the repository root with Bazelisk and the native compiler toolchain
+on PATH. The output directory receives one wheel and existing files are never
+replaced. Optional Bazel flags follow `--`. PR and manual build jobs have read
+permissions and produce test artifacts without publishing a release.
+
 `--config=loom-sdk` selects the SDK's CPU and libamdf runtime drivers, compiler
 targets, and media codecs independently of the worktree configuration. Native
 AMD execution uses the operating-system device driver; it requires no ROCm SDK.
