@@ -14,10 +14,11 @@
 namespace amdf::media::d3d12 {
 namespace {
 
-// Shared default heaps are admitted only when their actual native allocation
-// satisfies this contract. Image placement alignment remains independently
-// queried; neither logical heap bytes nor VA coverage substitutes for payload.
-constexpr uint64_t kSharedGranularity = 262144;
+// The native driver switches from small allocation pages to 2 MiB pages as a
+// heap grows. Explicitly provisioning full large pages gives every admitted
+// logical length the same exact pre-allocation payload geometry. Image
+// placement and host feedback keep their independent 64 KiB alignment.
+constexpr uint64_t kSharedGranularity = 2 * 1024 * 1024;
 constexpr uint64_t kHostGranularity = 65536;
 
 uint32_t Read32(const uint8_t* bytes) {
@@ -310,6 +311,7 @@ amdf_status_t QueryMemoryProfile(amdf_device_t* base, uint32_t ordinal,
   profile.allocation.maximum_alignment = kHostGranularity;
   profile.visibility.describe_site = DescribeSite;
   if (ordinal == kSharedHeap) {
+    profile.allocation.maximum_byte_length &= ~(kSharedGranularity - 1);
     profile.memory_class = AMDF_MEMORY_CLASS_LOCAL;
     profile.roles |= AMDF_MEMORY_PROFILE_ROLE_EXPORT;
     profile.guaranteed_flags =
@@ -375,7 +377,7 @@ amdf_status_t PrepareMemory(amdf_memory_t* memory,
   native->native_byte_length = expected_native_byte_length;
   if (native->profile == kSharedHeap) {
     D3D12_HEAP_DESC description = {
-        .SizeInBytes = heap_byte_length,
+        .SizeInBytes = expected_native_byte_length,
         .Alignment = kHostGranularity,
     };
     description.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;

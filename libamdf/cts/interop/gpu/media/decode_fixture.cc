@@ -220,6 +220,15 @@ void MediaDecodeInteropTest::CreateSharedMemory(uint64_t byte_length,
   };
   ASSERT_EQ(api_->memory_query_info(memory, &info), AMDF_STATUS_OK);
   ASSERT_EQ(info.access_count, 2u);
+  EXPECT_EQ(info.byte_length, byte_length);
+  const uint64_t granularity =
+      profile.allocation.native_byte_length_granularity;
+  ASSERT_NE(granularity, 0u);
+  EXPECT_EQ(info.native_allocation_byte_length,
+            (byte_length + profile.allocation.native_byte_length_prefix +
+             granularity - 1) &
+                ~(granularity - 1));
+  EXPECT_EQ(info.native_allocation_granularity, granularity);
   ASSERT_EQ(api_->memory_query_address(memory, 1, AMDF_MEMORY_ADDRESS_GPU,
                                        out_address),
             AMDF_STATUS_OK);

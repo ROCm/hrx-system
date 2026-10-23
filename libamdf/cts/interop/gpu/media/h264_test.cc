@@ -143,11 +143,17 @@ TEST_F(MediaH264InteropTest, AdmissionPreservesTheRequestedCodecEnvelope) {
 }
 
 TEST_F(MediaH264InteropTest, PlansArrayPlacementBeforeAllocatingItsBacking) {
-  for (auto format :
-       {AMDF_MEDIA_PIXEL_FORMAT_NV12, AMDF_MEDIA_PIXEL_FORMAT_P010}) {
-    const amdf_media_image_description_t description = {
-        static_cast<amdf_media_pixel_format_t>(format), 256, 256, 2,
-        AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT};
+  const amdf_media_image_description_t descriptions[] = {
+      {AMDF_MEDIA_PIXEL_FORMAT_NV12, 256, 256, 2,
+       AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT},
+      {AMDF_MEDIA_PIXEL_FORMAT_P010, 256, 256, 2,
+       AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT},
+      {AMDF_MEDIA_PIXEL_FORMAT_NV12, 520, 208, 9,
+       AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT},
+      {AMDF_MEDIA_PIXEL_FORMAT_P010, 520, 208, 9,
+       AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT},
+  };
+  for (const auto& description : descriptions) {
     amdf_media_image_requirements_t requirements = {};
     ASSERT_EQ(media_->device_query_image_requirements(
                   media_device_, &description, &requirements),
@@ -160,7 +166,7 @@ TEST_F(MediaH264InteropTest, PlansArrayPlacementBeforeAllocatingItsBacking) {
         offset + requirements.byte_length, &memory, &address));
     amdf_media_image_t* image = nullptr;
     ASSERT_NO_FATAL_FAILURE(CreateImage(memory, offset, description, &image));
-    for (uint32_t layer = 0; layer < 2; ++layer) {
+    for (uint32_t layer = 0; layer < description.array_layer_count; ++layer) {
       amdf_media_gfx11_image_layout_t layout = {
           .type = AMDF_STRUCTURE_TYPE_MEDIA_GFX11_IMAGE_LAYOUT,
           .structure_size = sizeof(layout),
