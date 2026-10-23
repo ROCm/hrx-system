@@ -154,3 +154,7 @@ check.case @overlapping_buffer_sequence_case {
   check.expect.bitwise actual(%after) expected(%expected_after) : tensor<4xi32>
   check.return
 }
+
+check.benchmark<@buffer_copy_bytes_case> @buffer_copy_bytes_end_to_end
+
+check.benchmark<@overlapping_buffer_sequence_case> @overlapping_buffer_sequence_end_to_end

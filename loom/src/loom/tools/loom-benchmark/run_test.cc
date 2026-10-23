@@ -63,13 +63,16 @@ static void ExpectJsonRowKind(const std::string& row,
   EXPECT_TRUE(iree_string_view_equal(actual_kind, expected_kind));
 }
 
-TEST(BenchmarkRunTest, RunsFileThroughCallerOwnedSink) {
+TEST(BenchmarkRunTest, RunsHostTensorCaseThroughCallerOwnedSink) {
   iree::testing::TempFilePath input_path("loom-benchmark-run", ".loom");
   std::ofstream input_file(input_path.path());
   input_file << R"(
 check.case @sampled_choice {
   %value = check.param.choice values([5, 7]) name("value") : i32
   check.expect.equal actual(%value) expected(%value) : i32
+  %actual = check.generate.iota offset(3) step(1) : tensor<256xi32>
+  %expected = check.generate.iota offset(3) step(1) : tensor<256xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<256xi32>
   check.return
 }
 
