@@ -318,6 +318,14 @@ or parameter repacking is added to an epoch. The immutable epoch header bounds
 active rows, so partial tiles preserve inactive storage and cannot mix padding
 into valid results.
 
+Small router cohorts share each original F32 coefficient row across four
+token waves. The workgroup cooperatively stages its 10 KB row before the waves
+contract their own BF16 activations. Inactive token waves participate in the
+publication barrier, then leave without reading padded activations or writing
+inactive outputs. Each live wave retains the single-token accumulation and
+reduction order. Single-token epochs use direct weight reads; wide epochs use
+the existing matrix panels.
+
 Hyperconnections reuse original Q8 coefficients across 128-token panels.
 Up projection and wide down projection use a 24 KiB F16 shared-memory panel
 whose XOR-permuted layout feeds wave32 matrix operands without duplicate loads.
