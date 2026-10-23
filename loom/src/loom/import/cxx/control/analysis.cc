@@ -248,9 +248,26 @@ const CountedLoop* ControlFlow::counted(cxx::ForStatementAST* loop) const {
   return bound && addressed(bound->binding) ? nullptr : &found->second;
 }
 
+const SwitchLayout& ControlFlow::switch_layout(
+    cxx::SwitchStatementAST* statement) const {
+  return switches_.at(statement).layout;
+}
+
 unsigned ControlFlow::paths(cxx::StatementAST* statement) const {
   auto found = paths_.find(statement);
   return found == paths_.end() ? unsigned(Fallthrough) : found->second;
+}
+
+unsigned ControlFlow::sequence_paths(
+    std::span<cxx::StatementAST* const> statements) const {
+  unsigned outcomes = Fallthrough;
+  for (auto* statement : statements) {
+    if (!(outcomes & Fallthrough)) {
+      break;
+    }
+    outcomes = (outcomes & ~Fallthrough) | paths(statement);
+  }
+  return outcomes;
 }
 
 ExitFlow ControlFlow::exits(cxx::StatementAST* statement,
@@ -377,6 +394,21 @@ unsigned ControlFlow::classify_paths(cxx::StatementAST* statement) const {
     }
     return paths(branch->statement) | paths(branch->elseStatement);
   }
+  if (auto* selection = cxx::ast_cast<cxx::SwitchStatementAST>(statement)) {
+    const auto& facts = switches_.at(selection);
+    unsigned outcomes = facts.layout.has_default ? 0 : unsigned(Fallthrough);
+    unsigned suffix = Fallthrough;
+    for (size_t index = facts.clause_paths.size(); index > 0; --index) {
+      auto clause = facts.clause_paths[index - 1];
+      auto entry =
+          (clause & ~Fallthrough) | (clause & Fallthrough ? suffix : 0);
+      outcomes |= entry;
+      suffix = entry;
+    }
+    // A break selects the ordinary switch continuation. Continue and return
+    // still escape to their enclosing loop and function, respectively.
+    return (outcomes & ~Break) | (outcomes & Break ? unsigned(Fallthrough) : 0);
+  }
   cxx::StatementAST* body = nullptr;
   if (auto* loop = cxx::ast_cast<cxx::ForStatementAST>(statement)) {
     body = loop->statement;
@@ -392,6 +424,103 @@ unsigned ControlFlow::classify_paths(cxx::StatementAST* statement) const {
   return Fallthrough | (paths(body) & Return);
 }
 
+void ControlFlow::visit(cxx::CaseStatementAST* ast) {
+  if (!switch_stack_.empty() && active_switch_label_ != ast) {
+    diagnostics_.reject(
+        unit_, ast,
+        "case labels must be direct children of a compound switch body");
+  }
+  cxx::ASTVisitor::visit(ast);
+}
+
+void ControlFlow::visit(cxx::DefaultStatementAST* ast) {
+  if (!switch_stack_.empty() && active_switch_label_ != ast) {
+    diagnostics_.reject(
+        unit_, ast,
+        "default labels must be direct children of a compound switch body");
+  }
+  cxx::ASTVisitor::visit(ast);
+}
+
+void ControlFlow::visit(cxx::CompoundStatementAST* ast) {
+  if (switch_stack_.empty() || switch_stack_.back()->statement != ast) {
+    cxx::ASTVisitor::visit(ast);
+    return;
+  }
+
+  for (auto* attribute : cxx::ListView{ast->attributeList}) {
+    accept(attribute);
+  }
+
+  SwitchFacts facts;
+  bool clause_owner_active = false;
+  auto finish_clause = [&] {
+    if (!clause_owner_active) {
+      return;
+    }
+    auto& clause = facts.layout.clauses.back();
+    auto* owner = clause.labels.front().source;
+    auto found = writes_.find(owner);
+    if (found != writes_.end()) {
+      clause.writes = std::move(found->second);
+      writes_.erase(found);
+    }
+    auto outcomes = sequence_paths(clause.statements);
+    clause.falls_through = outcomes & Fallthrough;
+    facts.clause_paths.push_back(outcomes);
+    owners_.pop_back();
+    clause_owner_active = false;
+  };
+
+  for (auto* child : cxx::ListView{ast->statementList}) {
+    auto* case_label = cxx::ast_cast<cxx::CaseStatementAST>(child);
+    auto* default_label = cxx::ast_cast<cxx::DefaultStatementAST>(child);
+    if (case_label || default_label) {
+      bool starts_clause = facts.layout.clauses.empty() ||
+                           !facts.layout.clauses.back().statements.empty();
+      if (starts_clause) {
+        finish_clause();
+        facts.layout.clauses.push_back({});
+      }
+      active_switch_label_ = child;
+      accept(child);
+      active_switch_label_ = nullptr;
+      auto& clause = facts.layout.clauses.back();
+      std::optional<std::int64_t> key;
+      if (case_label) {
+        key = case_label->caseValue;
+      }
+      clause.labels.push_back({child, key});
+      if (default_label) {
+        facts.layout.has_default = true;
+      }
+      if (starts_clause) {
+        owners_.push_back(child);
+        clause_owner_active = true;
+      }
+      continue;
+    }
+    if (facts.layout.clauses.empty()) {
+      diagnostics_.reject(
+          unit_, child,
+          "switch body statements require a preceding case or default label");
+    }
+    facts.layout.clauses.back().statements.push_back(child);
+    accept(child);
+  }
+  finish_clause();
+
+  for (size_t index = 0; index < facts.layout.clauses.size(); ++index) {
+    const auto& clause = facts.layout.clauses[index];
+    if (clause.labels.size() != 1 ||
+        (index + 1 < facts.layout.clauses.size() && clause.falls_through)) {
+      facts.layout.direct = false;
+      break;
+    }
+  }
+  switches_.emplace(switch_stack_.back(), std::move(facts));
+}
+
 void ControlFlow::visit(cxx::IfStatementAST* ast) {
   if (ast->constexprValue.has_value()) {
     accept(ast->initializer);
@@ -400,6 +529,21 @@ void ControlFlow::visit(cxx::IfStatementAST* ast) {
   } else {
     cxx::ASTVisitor::visit(ast);
   }
+}
+
+void ControlFlow::visit(cxx::SwitchStatementAST* ast) {
+  for (auto* attribute : cxx::ListView{ast->attributeList}) {
+    accept(attribute);
+  }
+  accept(ast->initializer);
+  accept(ast->condition);
+  if (!cxx::ast_cast<cxx::CompoundStatementAST>(ast->statement)) {
+    diagnostics_.reject(unit_, ast->statement,
+                        "runtime switch requires a compound statement body");
+  }
+  switch_stack_.push_back(ast);
+  accept(ast->statement);
+  switch_stack_.pop_back();
 }
 
 void ControlFlow::visit(cxx::AssignmentExpressionAST* ast) {
@@ -896,6 +1040,7 @@ bool ControlFlow::structured(cxx::AST* ast) {
                                binary->op == cxx::TokenKind::T_BAR_BAR);
   }
   return cxx::ast_cast<cxx::IfStatementAST>(ast) ||
+         cxx::ast_cast<cxx::SwitchStatementAST>(ast) ||
          cxx::ast_cast<cxx::ForStatementAST>(ast) ||
          cxx::ast_cast<cxx::WhileStatementAST>(ast) ||
          cxx::ast_cast<cxx::DoStatementAST>(ast) ||

@@ -3352,8 +3352,14 @@ class Translator final : private Initialization::Evaluation {
                                 lexical_fastmath_flags_, tracks_break);
     }
     // The retained path analysis propagates iteration exits through blocks
-    // and conditionals only; nested loops consume their own exits.
+    // and admitted control statements only; nested loops consume their own
+    // exits. A retained construct must still fail through the ordinary source
+    // diagnostic until translation admits it.
     auto* branch = cxx::ast_cast<cxx::IfStatementAST>(ast);
+    if (!branch) {
+      fail(ast, "unsupported statement: " +
+                    std::string(cxx::to_string(ast->kind())));
+    }
     auto condition = branch_condition(branch);
     return iteration_branch(
         ast, condition, tracks_break,
