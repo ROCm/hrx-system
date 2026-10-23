@@ -327,7 +327,8 @@ record width and contraction schedule:
 
 | Prepared token capacity | Expert schedule |
 | --- | --- |
-| 1–4 | Direct per-route projections. |
+| 1–4, ordinary or predictor work | Direct per-route projections. |
+| 1–4, speculative target verification | Four-route records and packed dot products. |
 | 5–255 | Four-route records and packed dot products. |
 | 256–2,047 | 64-route records and matrix contractions. |
 | 2,048–32,768 | 128-route records and matrix contractions. |
@@ -338,6 +339,13 @@ original ten slots in order. Wider records amortize packed-weight reads and
 decoding; compact records limit padded matrix work when expert populations
 are smaller. These choices specialize into the command and kernel programs,
 without a host routing decision or a distinct prefill execution path.
+
+Speculative verification groups its accepted anchor and proposed tokens even
+at the smallest capacities. These correlated rows often select the same
+experts, so they share compressed weight reads and decoding across both
+contractions. The declared verification width selects this schedule at compile
+time; ordinary single-token work retains the direct path. Routing, arithmetic,
+and final slot order stay the same.
 
 The 128-row gate/up schedule assigns eight wave32 subgroups to 64 channels
 per branch. Each lane retains packed weight codes and their original headers

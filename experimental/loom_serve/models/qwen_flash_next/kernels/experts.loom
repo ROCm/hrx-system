@@ -3,6 +3,8 @@
 // weighting accumulate in F32 before the final BF16 branch publication.
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
+config.decl @flash_next.verification_width : %value: index where [range(%value, 0, 8)]
+
 amdgpu.target<gfx11-generic> @flash_next_expert_wave32 {subgroup_size = 32}
 
 func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
@@ -311,10 +313,14 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
   %matrix_rows = scf.select %wide, %wide_rows, %compact_rows : index
   %matrix = index.cmp uge, %tokens, %matrix_threshold : index
   %record_rows = scf.select %matrix, %matrix_rows, %c4 : index
-  // Capacity specialization keeps small epochs on the direct route path.
-  // Larger epochs build one expert-major table and reuse it in both passes.
-  // Rank scratch dies after production; records live through the down pass.
-  %bucketed = index.cmp ugt, %tokens, %c4 : index
+  // Verification supplies a cohort of anchor and proposed tokens, even
+  // at capacity four. Share expert weights across those correlated rows.
+  // Ordinary one-token epochs retain the direct route path. One table feeds
+  // both contractions; rank scratch dies after table production.
+  %verification_width = config.get @flash_next.verification_width : index
+  %verification_cohort = index.cmp ugt, %verification_width, %c1 : index
+  %large_capacity = index.cmp ugt, %tokens, %c4 : index
+  %bucketed = scalar.ori %large_capacity, %verification_cohort : i1
   %routing = scf.if %bucketed -> (buffer) {
     %rank_row_bytes = index.constant 40 : offset
     %rank_bytes = index.scale %tokens, %rank_row_bytes : index, offset -> offset
