@@ -265,6 +265,9 @@ static amdf_status_t AMDF_CALL amdf_media_kernel_queue_submit(
       submission_info->command->queue != queue) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
+  if (submission_info->wait_count > queue->info.maximum_wait_count) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+  }
   status = amdf_kernel_queue_dependency_validate_waits(
       queue, submission_info->wait_count, submission_info->waits);
   if (!amdf_status_is_ok(status)) {

@@ -1,0 +1,101 @@
+# Native media queues
+
+The optional [`amdf_media_api_t`](../include/amdf/media/api.h) extension exposes
+native codecs through core devices, memory, and kernel queues. Enabling
+`AMDF_MEDIA` in CMake or `//libamdf/config:media` in Bazel selects the platform
+provider independently of GPU and NPU compute families. Table negotiation
+performs no native initialization. Activating media opens its execution domain;
+it neither activates compute nor creates a queue or pixel allocation.
+
+The implemented codec set is queried per live queue family. Exact
+profile/format/dimension/reference admission is a separate query:
+
+| Provider | Decode schemas | Output storage |
+| --- | --- | --- |
+| Windows D3D12 | H264; HEVC Main and Main10, including compatible eight-bit syntax | NV12 or P010 according to actual sample depth; application-placed native images |
+| Linux DRM JPEG | Eight-bit baseline sequential 4:2:0 JPEG on the layout-2 JPEG engine | Linear NV12 planes, directly or through a placed image identity |
+
+A native driver's broader codec list does not advertise schemas implemented by
+this extension. Configuration queries preserve requested dimensions and return
+an explicit unsupported predicate. Image placement queries separately report
+alignment and storage padding; allocation dimensions never silently replace
+coded dimensions.
+
+## Ownership through one picture
+
+The application activates media with `device_create`, queries its configuration,
+and creates a `kernel_queue` with explicit pending-submission and dependency
+operand bounds. Configuration results identify core memory scopes/profiles for
+images, compressed input, and any codec feedback. The access set includes every
+required live consumer at core memory construction. Imports and consumer layout
+establishment happen before use.
+
+An `amdf_media_image_t` is a native identity borrowing a range of
+`amdf_memory_t`. It allocates no pixel backing. The application chooses heap
+placement, array layers, aliasing transitions, and final use. An
+`amdf_media_frame_t` carries either that identity and its exact placement or
+explicit planes with direct memory owners, access ordinals, offsets, extents,
+and row pitches. A linear image query returns the same plane representation,
+including the selected layer's offsets. The full returned extent belongs to
+native execution; row and codec-block padding has unspecified contents.
+
+A session owns native codec state and borrows one ordered queue. The application
+supplies the reference images and stable reference-slot indices. A reconstructed
+picture retains its slot until its last reference use; later pictures can reuse
+the retired slot. The session contains no image pool or reference scheduler.
+
+Each command is one reusable native recording. `command_prepare` consumes the
+caller's temporary parsed metadata and records into that owner. Compressed
+payload and pixel backing remain borrowed through accepted execution. JPEG
+consumes a complete marker/header stream; the caller's admitted dimensions,
+sampling, and precision must describe that stream. Video schemas carry explicit
+parsed syntax. Preparation performs no compressed-payload readback or pixel copy.
+
+`kernel_queue_submit` publishes the prepared recording and already-created
+native dependency bindings. It performs no libamdf allocation, parsing, import,
+completion polling, or host completion wait. A nonzero accepted point owns the
+recording and operands even when a later native operation returns failure.
+The application refreshes checked queue status or waits at its chosen drain
+boundary, reads the retired command result, and reuses its own slots. Preparing
+a new operation clears the previous result association.
+
+Shutdown follows those borrows: checked retirement, dependency bindings and
+commands, sessions/queues, image identities, core memory attachments, then media
+devices. A failed native detach preserves its unrelinquished backing; a failing
+status is never permission to recycle storage that native execution may retain.
+
+## Linux native ownership and retirement
+
+One independently activated media device owns a DRM render file and private VM.
+Allocation uses shareable GTT backing. The system-memory import profile checks
+native placement before admitting a DMA-BUF; it does not label local VRAM as
+system memory. Cold import preserves physical identity and logical subrange
+placement, including through re-export.
+
+Repeated PRIME imports in one render file return the same GEM handle without
+another native handle reference. Resource attachments share a canonical native
+buffer owner through a cold, per-device weak index. Its final attachment releases
+the VM mapping and native handle. The index owns no references and is not an
+allocation pool. Each hot operand resolves its already-established access
+ordinal directly. A failed native release quarantines that render file's memory
+ownership so another alias cannot accidentally close or reuse unresolved state.
+
+A JPEG publication is one DRM CS ioctl carrying the IB, residency, dependency
+waits, and signals. Cold queue construction provisions one original-fence
+sync object per pending slot and one exportable timeline. Both signals attach
+the same job fence; no extra hardware signal job is introduced.
+
+Timeline signaling establishes execution order but cannot certify original job
+success. Checked retirement first samples completed timeline progress, then
+exports and inspects each newly completed original fence before advancing its
+frontier. Sync-file export/query/close is an explicit retirement cost. Temporary
+observation failure leaves the point unretired; an original execution error is
+sticky and cannot be hidden by a later signaled point. Eventfd notification is a
+wake hint prompting that same status check.
+
+## Compute integration
+
+Native queue bindings connect compatible KMQ transports. A user queue's memory
+signal protocol remains an application integration boundary. A media API alone
+does not turn such a protocol into a kernel-owned timeline or supply an implicit
+host relay.

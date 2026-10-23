@@ -97,6 +97,11 @@ PACKAGE_POLICIES = [
         run_requirements = [AMDGPU_PEERS_RESOURCE],
     ),
     package_policy(
+        packages = ["libamdf/cts/media/..."],
+        run_requirements = [AMDGPU_RESOURCE],
+        resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    ),
+    package_policy(
         packages = [
             "libamdf/benchmarks/xdna/...",
             "libamdf/cts/xdna/...",

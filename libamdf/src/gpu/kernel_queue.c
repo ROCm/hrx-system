@@ -318,6 +318,7 @@ amdf_status_t AMDF_CALL amdf_gpu_kernel_queue_create(
     if (amdf_gpu_umd_kernel_queue_query_native_progress(queue->umd) != NULL) {
       queue->base.info.capabilities |=
           AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION;
+      queue->base.info.maximum_wait_count = UINT32_MAX;
     }
     if ((create_info->required_capabilities & ~queue->base.info.capabilities) !=
         0) {

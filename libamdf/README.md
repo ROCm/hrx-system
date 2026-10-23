@@ -107,9 +107,10 @@ package version does not select an implementation path. CDNA targets Linux.
 ## Working with the API
 
 The public entry point is [amdf_query_api](include/amdf/api.h), which returns an
-immutable, versioned C table. Optional [GPU](include/amdf/gpu.h) and
-[XDNA](include/amdf/xdna.h) tables expose family-specific services. Loading the
-library and querying its tables do not discover or activate hardware.
+immutable, versioned C table. Optional [GPU](include/amdf/gpu.h),
+[XDNA](include/amdf/xdna.h), and [media](docs/media.md) tables expose
+family-specific services. Loading the library and querying its tables do not
+discover or activate hardware.
 
 A caller follows an explicit resource lifecycle:
 

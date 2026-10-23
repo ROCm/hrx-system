@@ -355,6 +355,9 @@ QueueCreate(amdf_device_t* base,
         .maximum_command_count = 1,
         .notification_types = AMDF_NATIVE_EVENT_TYPE_BIT_WIN32_EVENT,
         .capabilities = create_info->required_capabilities,
+        .maximum_wait_count = create_info->maximum_wait_count != 0
+                                  ? create_info->maximum_wait_count
+                                  : UINT32_MAX,
     };
     status =
         amdf_kernel_queue_initialize(&queue->base, &kQueueVtable, base, &info);

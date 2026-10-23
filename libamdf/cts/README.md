@@ -29,6 +29,12 @@ notifications and explicit batch retirement. In particular,
 `XdnaKernelQueueTest.RefreshRetiresBatchesAndReusesPacketStorage` distinguishes
 read-only status from checked progress and transport-slot reuse.
 
+The [native media corpus](media/README.md) exercises codecs through direct core
+backing, explicit image placement, fixed recording reuse, and native queue
+dependencies without activating GPU compute. The
+[media/compute corpus](interop/gpu/media/README.md) covers decoded images
+consumed by GPU kernels with shared memory and native synchronization.
+
 Process and instance native lifetimes are separate invocations of the same
 binary. For example, `//libamdf/cts/core:memory_dynamic` and
 `:memory_dynamic_instance` use different lifetime arguments. Cases query the

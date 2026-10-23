@@ -23,6 +23,8 @@ typedef struct amdf_media_image_t amdf_media_image_t;
 #define AMDF_STRUCTURE_TYPE_MEDIA_IMAGE_INFO \
   ((amdf_structure_type_t)0x00040103u)
 #define AMDF_STRUCTURE_TYPE_MEDIA_FRAME ((amdf_structure_type_t)0x00040104u)
+#define AMDF_STRUCTURE_TYPE_MEDIA_LINEAR_IMAGE_LAYOUT \
+  ((amdf_structure_type_t)0x00040105u)
 
 /// Component storage, independent of transfer function and native tiling.
 typedef uint32_t amdf_media_pixel_format_t;
@@ -122,6 +124,8 @@ typedef struct amdf_media_image_info_t {
 typedef struct amdf_media_frame_plane_t {
   /// Direct backing owner, borrowed through accepted use.
   amdf_memory_t* memory;
+  /// Exact consumer in memory's caller-ordered access list.
+  uint32_t access_ordinal;
   /// Plane start relative to the memory's logical byte zero.
   uint64_t byte_offset;
   /// Accessible byte extent, including allocated row padding.
@@ -129,6 +133,24 @@ typedef struct amdf_media_frame_plane_t {
   /// Byte distance between consecutive rows.
   uint64_t row_pitch;
 } amdf_media_frame_plane_t;
+
+/// Optional image_query_info output for a native linear image. Plane offsets
+/// include image placement and the queried array layer, relative to the direct
+/// memory owner. The returned access ordinal is the query's exact consumer.
+typedef struct amdf_media_linear_image_layout_t {
+  /// AMDF_STRUCTURE_TYPE_MEDIA_LINEAR_IMAGE_LAYOUT.
+  amdf_structure_type_t type;
+  /// Size of caller-provided result storage.
+  uint32_t structure_size;
+  /// Further typed outputs, or NULL.
+  void* next;
+  /// Number of initialized component-plane records.
+  uint32_t plane_count;
+  /// Layer represented by the plane offsets.
+  uint32_t array_layer;
+  /// Luma followed by interleaved chroma for NV12 and P010.
+  amdf_media_frame_plane_t planes[2];
+} amdf_media_linear_image_layout_t;
 
 typedef uint32_t amdf_media_frame_storage_kind_t;
 enum amdf_media_frame_storage_kind_e {

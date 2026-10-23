@@ -27,6 +27,9 @@ enum amdf_media_codec_e {
   AMDF_MEDIA_CODEC_UNKNOWN = 0,
   AMDF_MEDIA_CODEC_H264 = 1,
   AMDF_MEDIA_CODEC_HEVC = 2,
+  /// Eight-bit baseline sequential 4:2:0 JPEG to NV12. The complete input
+  /// includes its marker headers; no parsed-picture extension is required.
+  AMDF_MEDIA_CODEC_JPEG = 3,
 };
 
 typedef uint32_t amdf_media_direction_t;
@@ -128,7 +131,8 @@ typedef struct amdf_media_configuration_info_t {
   amdf_memory_scope_t* compressed_memory_scope;
   /// Core scope-local profile for compressed input backing.
   uint32_t compressed_memory_profile_ordinal;
-  /// Borrowed core scope for application-owned host-readable result storage.
+  /// Borrowed core scope for application-owned host-readable result storage,
+  /// or NULL when feedback_byte_length is zero.
   amdf_memory_scope_t* feedback_memory_scope;
   /// Core scope-local profile for result storage, with this media device in
   /// the explicit access set. A profile query qualifies any additional peers.
@@ -164,6 +168,10 @@ typedef struct amdf_media_kernel_queue_create_info_t {
   /// Nonzero bound on accepted points that may remain unretired. This admission
   /// bound neither reserves driver capacity nor allocates a recording pool.
   uint32_t maximum_pending_submission_count;
+  /// Native dependency operands provisioned per publication, or zero for the
+  /// provider default. The realized bound is reported by
+  /// kernel_queue_query_info.
+  uint32_t maximum_wait_count;
 } amdf_media_kernel_queue_create_info_t;
 
 #ifdef __cplusplus

@@ -16,7 +16,23 @@ config_setting(
 selects.config_setting_group(
     name = "media",
     match_all = [
+        ":gpu_platform",
+        "//libamdf/config:media_setting",
+    ],
+)
+
+selects.config_setting_group(
+    name = "media_windows",
+    match_all = [
         ":windows",
+        "//libamdf/config:media_setting",
+    ],
+)
+
+selects.config_setting_group(
+    name = "media_linux",
+    match_all = [
+        ":linux_x86_64",
         "//libamdf/config:media_setting",
     ],
 )

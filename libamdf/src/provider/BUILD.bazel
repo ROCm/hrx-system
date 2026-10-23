@@ -70,8 +70,11 @@ amdf_cc_library(
     }) + select({
         "//libamdf/config/provider:media": [
             "//libamdf/src/media:extension",
-            "//libamdf/src/media/d3d12",
         ],
+        "//conditions:default": [],
+    }) + select({
+        "//libamdf/config/provider:media_linux": ["//libamdf/src/media/drm"],
+        "//libamdf/config/provider:media_windows": ["//libamdf/src/media/d3d12"],
         "//conditions:default": [],
     }),
 )

@@ -411,6 +411,9 @@ typedef struct amdf_kernel_queue_info_t {
   amdf_native_event_types_t notification_types;
   /// Optional operations resolved for this live queue without lazy setup.
   amdf_kernel_queue_capabilities_t capabilities;
+  /// Maximum native dependency operands accepted by one submission. Zero means
+  /// no dependency waits; UINT32_MAX means no additional provider bound.
+  uint32_t maximum_wait_count;
 } amdf_kernel_queue_info_t;
 
 /// Current retirement and terminal state of one kernel-mediated queue.
@@ -443,6 +446,10 @@ enum amdf_kernel_queue_dependency_protocol_e {
   /// Native completion orders execution; it does not report codec success or
   /// establish successful retirement after device removal.
   AMDF_KERNEL_QUEUE_DEPENDENCY_PROTOCOL_WINDOWS_MONITORED_FENCE = 1,
+  /// Kernel DRM timeline sync object shared through a cold opaque-fd import.
+  /// Signaling orders native jobs; checked retirement separately inspects each
+  /// original job fence, including errors hidden by later timeline progress.
+  AMDF_KERNEL_QUEUE_DEPENDENCY_PROTOCOL_DRM_SYNCOBJ_TIMELINE = 2,
 };
 
 /// Requirements for a cold producer/consumer binding.

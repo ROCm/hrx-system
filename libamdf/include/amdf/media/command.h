@@ -52,7 +52,8 @@ typedef struct amdf_media_decode_picture_info_t {
   amdf_structure_type_t type;
   /// Size of this caller-provided structure.
   uint32_t structure_size;
-  /// Required codec-specific parsed picture description.
+  /// Codec-specific parsed picture description, or NULL for complete JPEG
+  /// input.
   const void* next;
   /// Borrowed compressed bytes; preparation performs no readback or copy.
   amdf_media_buffer_range_t compressed;

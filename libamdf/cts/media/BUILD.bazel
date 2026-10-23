@@ -1,0 +1,52 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+iree_c_embed_data(
+    name = "jpeg_fixtures",
+    testonly = True,
+    srcs = [
+        "jpeg_128x96.jpg",
+        "jpeg_128x96.nv12",
+        "jpeg_128x96_inverse.jpg",
+        "jpeg_128x96_inverse.nv12",
+        "jpeg_80x72.jpg",
+        "jpeg_80x72.nv12",
+        "jpeg_80x72_inverse.jpg",
+        "jpeg_80x72_inverse.nv12",
+    ],
+    c_file_output = "jpeg_fixtures.c",
+    flatten = True,
+    h_file_output = "jpeg_fixtures.h",
+    identifier = "amdf_cts_jpeg_fixtures",
+)
+
+amdf_cts_test_suite(
+    name = "jpeg",
+    srcs = ["jpeg_test.cc"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":jpeg_fixtures",
+        "//libamdf/cts/util:device_cache",
+        "//libamdf/cts/util:mapped_memory",
+        "//libamdf/cts/util:native_event",
+        "//libamdf/cts/util:native_event_headers",
+        "//libamdf/cts/util:provider_headers",
+        "//third_party:google_test",
+    ],
+)
