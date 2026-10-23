@@ -143,6 +143,9 @@ loom_low_allocation_interval_assignment_search_context(
       .storage_leases = state->context->storage_leases,
       .expanded_execution_values = state->context->expanded_execution_values,
       .spill_traffic_by_value_ordinal = state->spill_traffic_by_value_ordinal,
+      .use_pressure_efficiency =
+          state->context->search_strategy ==
+          LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_PRESSURE_EFFICIENCY,
       .scalar_packing = state->scalar_packing,
       .physical_domains = &state->physical_domains,
   };

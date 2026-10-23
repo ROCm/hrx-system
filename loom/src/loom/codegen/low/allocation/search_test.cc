@@ -1574,6 +1574,28 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   ASSERT_EQ(victim_set.assignment_count, 1u);
   EXPECT_EQ(victim_set.assignment_indices[0], 1u);
 
+  // Raw traffic prefers the cheaper short lifetime. Pressure efficiency pays
+  // more once when the longer lifetime removes enough future pressure to
+  // amortize that traffic.
+  spill_traffic[2].reload_count = 5;
+  spill_traffic[2].reload_bytes = 40;
+  context.use_pressure_efficiency = true;
+  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+      &context, &intervals[0], &capacity,
+      /*interval_requires_register=*/false, &workspace, &arena_, &victim_set));
+  ASSERT_TRUE(victim_set.found);
+  EXPECT_EQ(victim_set.location_base, 0u);
+  ASSERT_EQ(victim_set.assignment_count, 1u);
+  EXPECT_EQ(victim_set.assignment_indices[0], 0u);
+  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+      &context, &intervals[0], &capacity,
+      /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
+  ASSERT_TRUE(victim_set.found);
+  EXPECT_EQ(victim_set.location_base, 2u);
+  ASSERT_EQ(victim_set.assignment_count, 1u);
+  EXPECT_EQ(victim_set.assignment_indices[0], 1u);
+  context.use_pressure_efficiency = false;
+
   // A heavily reused active value can cost more traffic for the pressure it
   // removes than the incoming interval. Required incoming storage must still
   // evict a physical victim.

@@ -36,13 +36,16 @@ struct loom_low_allocation_concat_affinity_t;
 typedef enum loom_low_allocation_search_strategy_e {
   // Searches legal locations from low to high.
   LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FIRST_FIT = 0,
+  // Ranks spill victim sets by predicted traffic per unit of remaining
+  // register-pressure area removed.
+  LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_PRESSURE_EFFICIENCY = 1,
   // Separates overlapping scalar and wide intervals across the feasible
   // liveness-pressure frontier to repair first-fit fragmentation.
-  LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR = 1,
+  LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR = 2,
   // Reuses an exact retained location for every current value. The attempt
   // stops without a planning error when any location is unavailable under the
   // current liveness and target constraints.
-  LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_RETAINED_LOCATIONS = 2,
+  LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_RETAINED_LOCATIONS = 3,
 } loom_low_allocation_search_strategy_t;
 
 typedef struct loom_low_allocation_interval_assignment_context_t {
