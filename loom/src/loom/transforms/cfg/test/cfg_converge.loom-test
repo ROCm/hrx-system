@@ -367,6 +367,81 @@ func.def @transparent_fallback(%outer: i1, %inner: i1, %input: i32, %fallback: i
 
 // RUN: pass cfg-converge,cfg-converge
 
+// A shared true arm has inverted predicate sense and must be factored before
+// the forwarding block is a single-entry successor of the rebuilt decision.
+func.def @transparent_true_arm(%outer: i1, %inner: i1, %input: i32, %fallback: i32) -> (i32) {
+  cfg.cond_br %outer, ^fallback, ^evaluate
+^evaluate:
+  %value = scalar.addi %input, %input : i32
+  cfg.cond_br %inner, ^fallback, ^selected
+^selected:
+  cfg.br ^merge(%value: i32)
+^fallback:
+  cfg.br ^merge(%fallback: i32)
+^merge(%result: i32):
+  func.return %result : i32
+}
+
+// ----
+func.def @transparent_true_arm(%outer: i1, %inner: i1, %input: i32, %fallback: i32) -> (i32) {
+  cfg.cond_br %outer, ^_bb2, ^evaluate
+^evaluate:
+  %value = scalar.addi %input, %input : i32
+  cfg.br ^_bb3(%inner: i1, %value: i32)
+^_bb2:
+  %9 = scalar.constant 1 : i1
+  %10 = scalar.constant 0 : i32
+  cfg.br ^_bb3(%9: i1, %10: i32)
+^_bb3(%7: i1, %8: i32):
+  cfg.cond_br %7, ^fallback, ^selected
+^selected:
+  cfg.br ^merge(%8: i32)
+^fallback:
+  cfg.br ^merge(%fallback: i32)
+^merge(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass cfg-converge,cfg-converge
+
+// A shared true continuation receives a dedicated forwarding arm after its
+// upstream bypasses join, leaving both decision successors single-entry.
+func.def @direct_true_continuation(%outer: i1, %inner: i1, %value: i32) {
+  cfg.cond_br %outer, ^exit, ^evaluate
+^evaluate:
+  cfg.cond_br %inner, ^exit, ^selected
+^selected:
+  test.use %value : i32
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ----
+func.def @direct_true_continuation(%outer: i1, %inner: i1, %value: i32) {
+  cfg.cond_br %outer, ^_bb2, ^evaluate
+^evaluate:
+  cfg.br ^_bb3(%inner: i1)
+^_bb2:
+  %4 = scalar.constant 1 : i1
+  cfg.br ^_bb3(%4: i1)
+^_bb3(%3: i1):
+  cfg.cond_br %3, ^_bb5, ^selected
+^selected:
+  test.use %value : i32
+  cfg.br ^exit
+^_bb5:
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ====
+
+// RUN: pass cfg-converge,cfg-converge
+
 // Decisions within one loop iteration converge before reaching its latch.
 func.def @loop_decision(%outer: i1, %inner: i1, %repeat: i1) {
   cfg.br ^header
@@ -592,9 +667,11 @@ func.def @overlapping_false_siblings(%a: i1, %b: i1, %c: i1, %value: i32) {
   %5 = scalar.constant 0 : i1
   cfg.br ^_bb7(%5: i1)
 ^_bb7(%4: i1):
-  cfg.cond_br %4, ^exit, ^last
+  cfg.cond_br %4, ^_bb9, ^last
 ^last:
   test.use %value : i32
+  cfg.br ^exit
+^_bb9:
   cfg.br ^exit
 ^exit:
   func.return
@@ -791,9 +868,11 @@ func.def @upstream_bypass_true(%leader: i1, %report: i1, %capture: i1, %value: i
   %6 = scalar.constant 1 : i1
   cfg.br ^_bb6(%6: i1)
 ^_bb6(%4: i1):
-  cfg.cond_br %4, ^exit, ^shared
+  cfg.cond_br %4, ^_bb8, ^shared
 ^shared:
   test.use %value : i32
+  cfg.br ^exit
+^_bb8:
   cfg.br ^exit
 ^exit:
   func.return

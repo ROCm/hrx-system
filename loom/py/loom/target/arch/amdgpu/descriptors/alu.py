@@ -1495,6 +1495,61 @@ def _v_readfirstlane_b32_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
+def _v_mbcnt_lo_u32_b32_lane_id_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_mbcnt_lo_u32_b32.lane_id",
+        instruction_name="V_MBCNT_LO_U32_B32",
+        mnemonic="v_mbcnt_lo_u32_b32_lane_id",
+        encoding_name="ENC_VOP3",
+        semantic_tag="lane.id.lo.u32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(AmdgpuOperandOverlay("VDST", _vgpr_result()),),
+        fixed_encoding_fields=(
+            ("SRC0", _predefined("-1", "OPR_SRC")),
+            ("SRC1", _predefined("0", "OPR_SRC")),
+        ),
+        asm_forms=_asm(
+            results=("dst",),
+            native_assembly_mnemonic="v_mbcnt_lo_u32_b32",
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_literal("-1"),
+                _native_literal("0"),
+            ),
+        ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
+        flags=(DescriptorFlag.DEAD_REMOVABLE, DescriptorFlag.SAFE_TO_SPECULATE),
+    )
+
+
+def _v_mbcnt_hi_u32_b32_lane_id_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_mbcnt_hi_u32_b32.lane_id",
+        instruction_name="V_MBCNT_HI_U32_B32",
+        mnemonic="v_mbcnt_hi_u32_b32_lane_id",
+        encoding_name="ENC_VOP3",
+        semantic_tag="lane.id.hi.u32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC1", _vgpr_operand("low_lane")),
+        ),
+        fixed_encoding_fields=(("SRC0", _predefined("-1", "OPR_SRC")),),
+        asm_forms=_asm(
+            results=("dst",),
+            operands=("low_lane",),
+            native_assembly_mnemonic="v_mbcnt_hi_u32_b32",
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_literal("-1"),
+                _native_operand("low_lane"),
+            ),
+        ),
+        constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
+        flags=(DescriptorFlag.DEAD_REMOVABLE, DescriptorFlag.SAFE_TO_SPECULATE),
+    )
+
+
 def _v_readlane_b32_src1_inline_overlay() -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key="amdgpu.v_readlane_b32.src1_inline",
@@ -8336,6 +8391,8 @@ __all__ = (
     "_v_mov_b32_dpp_overlay",
     "_v_mov_b32_literal_overlay",
     "_v_mov_b32_sdwa_overlay",
+    "_v_mbcnt_hi_u32_b32_lane_id_overlay",
+    "_v_mbcnt_lo_u32_b32_lane_id_overlay",
     "_v_native_f32_math_overlays",
     "_v_mul_f16_overlay",
     "_v_mul_f32_literal_overlay",

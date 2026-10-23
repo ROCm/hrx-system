@@ -70,10 +70,10 @@ file(CONFIGURE OUTPUT "${_INIT_EXTERNAL_C_SRC}"
      CONTENT "${_INIT_EXTERNAL_TEMPLATE}")
 
 set(_INIT_INTERNAL_DEPS)
-if(IREE_HAL_DRIVER_AMD)
+if(IREE_HAL_DRIVER_AMD_GPU OR IREE_HAL_DRIVER_AMD_XDNA)
   if(NOT AMDF_BUILD)
     message(FATAL_ERROR
-      "IREE_HAL_DRIVER_AMD requires AMDF_BUILD")
+      "The native AMD HAL engines require AMDF_BUILD")
   endif()
   list(APPEND _INIT_INTERNAL_DEPS iree::hal::drivers::amd::registration)
 endif()

@@ -7,42 +7,17 @@
 #include "loom/target/arch/amd/xdna/aie2p/lower/vector_construct.h"
 
 #include "loom/ops/vector/ops.h"
-#include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/vector_packet.h"
 
 enum {
   LOOM_AIE2P_VECTOR_CONSTRUCT_PLAN_PUSH = 0x403,
 };
 
-typedef struct loom_aie2p_vector_construct_width_t {
-  // Broadcast that seeds one X packet from a scalar payload.
-  uint32_t splat_descriptor;
-  // Push that appends a scalar at the high end of an X packet.
-  uint32_t push_high_descriptor;
-  // Push that prepends a scalar at the low end of an X packet.
-  uint32_t push_low_descriptor;
-} loom_aie2p_vector_construct_width_t;
-
-static const loom_aie2p_vector_construct_width_t kConstructWidths[] = {
-    {AIE2P_CORE_DESCRIPTOR_REF_SPLAT_I8X64,
-     AIE2P_CORE_DESCRIPTOR_REF_PUSH_HI_I8,
-     AIE2P_CORE_DESCRIPTOR_REF_PUSH_LO_I8},
-    {AIE2P_CORE_DESCRIPTOR_REF_SPLAT_I16X32,
-     AIE2P_CORE_DESCRIPTOR_REF_PUSH_HI_I16,
-     AIE2P_CORE_DESCRIPTOR_REF_PUSH_LO_I16},
-    {AIE2P_CORE_DESCRIPTOR_REF_SPLAT_I32X16,
-     AIE2P_CORE_DESCRIPTOR_REF_PUSH_HI_I32,
-     AIE2P_CORE_DESCRIPTOR_REF_PUSH_LO_I32},
-    {AIE2P_CORE_DESCRIPTOR_REF_SPLAT_I64X8,
-     AIE2P_CORE_DESCRIPTOR_REF_PUSH_HI_I64,
-     AIE2P_CORE_DESCRIPTOR_REF_PUSH_LO_I64},
-};
-
 typedef struct loom_aie2p_vector_construct_plan_t {
   // Number of scalar elements in the verified source segment.
   uint16_t element_count;
-  // Native scalar-width row shared by integer and floating payloads.
-  uint8_t width_index;
+  // Physical scalar width shared by integer and floating payloads.
+  uint8_t element_bit_count;
   // Logical elements represented by one X packet before carrier packing.
   uint8_t packet_lane_count;
   // Number of packets containing logical result elements.
@@ -68,30 +43,16 @@ static bool loom_aie2p_vector_construct_plan_from_op(
   }
   const uint16_t element_bit_count = loom_aie2p_scalar_type_physical_bit_count(
       loom_type_element_type(result_type));
-  uint8_t width_index = 0;
-  switch (element_bit_count) {
-    case 1:
-    case 8:
-      width_index = 0;
-      break;
-    case 16:
-      width_index = 1;
-      break;
-    case 32:
-      width_index = 2;
-      break;
-    case 64:
-      width_index = 3;
-      break;
-    default:
-      return false;
+  const uint8_t packet_lane_count =
+      loom_aie2p_vector_packet_scalar_lane_count(element_bit_count);
+  if (packet_lane_count == 0) {
+    return false;
   }
-  const uint8_t packet_lane_count = 64u >> width_index;
   const uint16_t element_count =
       (uint16_t)loom_vector_from_elements_elements(source_op).count;
   *out_plan = (loom_aie2p_vector_construct_plan_t){
       .element_count = element_count,
-      .width_index = width_index,
+      .element_bit_count = (uint8_t)element_bit_count,
       .packet_lane_count = packet_lane_count,
       .logical_packet_count =
           (uint8_t)((element_count + packet_lane_count - 1) /
@@ -159,8 +120,6 @@ iree_status_t loom_aie2p_emit_vector_construct_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t plan) {
   const loom_aie2p_vector_construct_plan_t* construction = plan.target_data;
-  const loom_aie2p_vector_construct_width_t* width =
-      &kConstructWidths[construction->width_index];
   const loom_value_slice_t elements =
       loom_vector_from_elements_elements(source_op);
   loom_aie2p_vector_packet_emitter_t emitter;
@@ -181,27 +140,16 @@ iree_status_t loom_aie2p_emit_vector_construct_plan(
     const loom_value_id_t seed =
         loom_low_lower_lookup_value(context, elements.values[seed_index]);
     loom_value_id_t result = LOOM_VALUE_ID_INVALID;
-    status = loom_aie2p_vector_packet_emit_descriptor_op(
-        &emitter, width->splat_descriptor, &seed, 1,
-        loom_make_named_attr_slice(NULL, 0), emitter.vector_type,
-        /*tied_results=*/NULL, /*tied_result_count=*/0, &result);
+    status = loom_aie2p_vector_packet_emit_scalar_splat(
+        &emitter, construction->element_bit_count, seed, &result);
     for (uint16_t lane = 1; lane < count && iree_status_is_ok(status); ++lane) {
       const uint16_t element_index =
           full_packet ? begin + lane : begin + count - lane - 1;
       const loom_value_id_t scalar =
           loom_low_lower_lookup_value(context, elements.values[element_index]);
-      const loom_value_id_t operands[] = {
-          full_packet ? result : scalar,
-          full_packet ? scalar : result,
-      };
-      status = loom_aie2p_vector_packet_emit_descriptor_op(
-          &emitter,
-          full_packet ? width->push_high_descriptor
-                      : width->push_low_descriptor,
-          operands, IREE_ARRAYSIZE(operands),
-          loom_make_named_attr_slice(NULL, 0), emitter.vector_type,
-          /*tied_results=*/NULL,
-          /*tied_result_count=*/0, &result);
+      status = loom_aie2p_vector_packet_emit_scalar_push(
+          &emitter, construction->element_bit_count, full_packet, result,
+          scalar, &result);
     }
     packets[packet] = result;
   }

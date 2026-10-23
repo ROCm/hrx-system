@@ -182,7 +182,7 @@ class QueueAtomicTest : public CtsTestBase<> {
       iree_hal_external_storage_release(&external_buffer);
       GTEST_SKIP() << "Pool cannot import an explicitly unaligned host "
                       "allocation for target validation: "
-                   << import_status.ToString();
+                   << FormatSkipStatus(import_status);
     }
 
     enum class AtomicKind { kWait, kStore, kRmw };

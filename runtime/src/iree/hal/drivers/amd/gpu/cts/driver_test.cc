@@ -214,8 +214,7 @@ class DriverTest : public ::testing::Test {
 };
 
 TEST_F(DriverTest, DefaultAndNativeIdentityRetainOneOwner) {
-  for (auto scheme : {IREE_SV("xdna"), IREE_SV("rdna"), IREE_SV("cdna"),
-                      IREE_SV("amdgpu2")}) {
+  for (auto scheme : {IREE_SV("rdna"), IREE_SV("cdna"), IREE_SV("amdgpu")}) {
     iree_hal_driver_t* alias = nullptr;
     IREE_ASSERT_OK(
         iree_hal_driver_registry_acquire_driver(registry_, scheme, &alias));
@@ -226,7 +225,7 @@ TEST_F(DriverTest, DefaultAndNativeIdentityRetainOneOwner) {
   iree_host_size_t gpu_count = 0;
   iree_hal_device_info_t* gpu_infos = nullptr;
   IREE_ASSERT_OK(iree_hal_driver_query_available_devices(
-      driver_, IREE_SV("amdgpu2"), iree_allocator_system(), &gpu_count,
+      driver_, IREE_SV("amdgpu"), iree_allocator_system(), &gpu_count,
       &gpu_infos));
   iree_string_view_t gpu_path = iree_string_view_empty();
   for (iree_host_size_t i = 0; i < gpu_count; ++i) {
@@ -241,7 +240,7 @@ TEST_F(DriverTest, DefaultAndNativeIdentityRetainOneOwner) {
   }
   iree_allocator_free(iree_allocator_system(), gpu_infos);
   ASSERT_FALSE(gpu_path_storage.empty())
-      << "Selected GPU is unavailable through amdgpu2";
+      << "Selected GPU is unavailable through amdgpu";
 
   auto params = iree_hal_device_create_params_default();
   params.proactor_pool = proactors_;
@@ -263,7 +262,7 @@ TEST_F(DriverTest, DefaultAndNativeIdentityRetainOneOwner) {
     return;
   }
   Create(1, iree_make_cstring_view(gpu_path_storage.c_str()),
-         IREE_SV("amdgpu2"));
+         IREE_SV("amdgpu"));
   if (HasFatalFailure()) {
     return;
   }

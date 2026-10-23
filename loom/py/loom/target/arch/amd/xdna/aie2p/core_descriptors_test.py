@@ -723,6 +723,15 @@ def test_floating_packet_descriptors_retain_complete_destination_clobbers() -> N
     ]
     assert [operand.unit_count for operand in low_move.operands] == [1, 2]
 
+    low_widen = descriptors["amd.xdna.aie2p.convert.bf16x16.to.f32x16.low"]
+    assert low_widen.operands[0].reg_alts[0].reg_class == "aie2p.ebmll"
+    assert low_widen.operands[0].unit_count == 1
+    assert low_widen.operands[0].encoding_adapter_id != 0
+    low_narrow = descriptors["amd.xdna.aie2p.convert.f32x16.to.bf16x16.low"]
+    assert low_narrow.operands[1].reg_alts[0].reg_class == "aie2p.ebmll"
+    assert low_narrow.operands[1].unit_count == 1
+    assert low_narrow.operands[1].encoding_adapter_id != 0
+
     classes = {row.name: row for row in CORE_MACHINE_TABLE.register_classes}
     registers = {row.name: row for row in CORE_MACHINE_TABLE.physical_registers}
     adapters = {row.name: row for row in CORE_MACHINE_TABLE.register_adapters}
@@ -738,6 +747,20 @@ def test_floating_packet_descriptors_retain_complete_destination_clobbers() -> N
             classes["eDM"].candidates,
             strict=True,
         )
+    )
+    conversion_adapter = adapters["LOOM_eBMLL_OP_mBMm"]
+    conversion_encodings = dict(adapters["OP_mBMm"].effective_register_encodings)
+    assert conversion_adapter.register_class == "eBMLL"
+    assert conversion_adapter.effective_register_encodings == tuple(
+        (quarter_name, conversion_encodings[quarter_name])
+        for quarter_name in classes["eBMLL"].candidates
+    )
+    narrow_adapter = adapters["LOOM_eBMLL_OP_mBMs"]
+    narrow_encodings = dict(adapters["OP_mBMs"].effective_register_encodings)
+    assert narrow_adapter.register_class == "eBMLL"
+    assert narrow_adapter.effective_register_encodings == tuple(
+        (quarter_name, narrow_encodings[quarter_name])
+        for quarter_name in classes["eBMLL"].candidates
     )
 
 

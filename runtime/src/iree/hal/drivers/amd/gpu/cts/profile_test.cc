@@ -14,6 +14,7 @@
 #include "iree/hal/cts/util/profile_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
+#include "iree/hal/drivers/amd/gpu/cts/testdata.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
 #include "iree/hal/drivers/amd/gpu/image/hsaco.h"
@@ -37,12 +38,6 @@ class GpuNativeProfileTestBase : public GpuNativeTest {
     if (HasFatalFailure() || IsSkipped()) {
       return;
     }
-    const auto gfx = context_->target_info.gfx_ip;
-    image_selector_ = gfx.major == 9 ? (gfx.minor == 4       ? "gfx9_4_generic"
-                                        : gfx.stepping == 10 ? "gfx90a"
-                                                             : "gfx9_generic")
-                      : gfx.major == 11 ? "gfx11_generic"
-                                        : "gfx12_generic";
     options_.queue.retirement_capacity = 4;
     options_.queue.argument_capacity = 32;
     options_.queue.ring_byte_length = 4096;
@@ -120,19 +115,15 @@ class GpuNativeProfileTestBase : public GpuNativeTest {
 
   void Load(Ref<iree_hal_executable_t>& executable,
             iree_hal_executable_function_t& function) {
-    const auto* files = iree_hal_amd_gpu_hip_images_create();
-    iree_hal_executable_load_params_t params;
-    iree_hal_executable_load_params_initialize(&params);
-    for (size_t i = 0; i < iree_hal_amd_gpu_hip_images_size(); ++i) {
-      if (std::strstr(files[i].name, image_selector_)) {
-        params.executable_data =
-            iree_make_const_byte_span(files[i].data, files[i].size);
-      }
-    }
-    ASSERT_NE(params.executable_data.data, nullptr);
-    loaded_image_ = params.executable_data;
     const auto* targets =
         iree_hal_device_spec_executables(iree_hal_device_spec(device_));
+    iree_hal_executable_load_params_t params;
+    iree_hal_executable_load_params_initialize(&params);
+    IREE_ASSERT_OK(iree::hal::amd::gpu::cts::LookupCodeObject(
+        iree_hal_amd_gpu_hip_images_create(),
+        iree_hal_amd_gpu_hip_images_size(), targets->targets[0].target_key,
+        &params.executable_data));
+    loaded_image_ = params.executable_data;
     IREE_ASSERT_OK(iree_hal_executable_load(iree_hal_queue_family(queues_[0]),
                                             &targets->targets[0], &params,
                                             executable.out()));
@@ -204,8 +195,6 @@ class GpuNativeProfileTestBase : public GpuNativeTest {
     IREE_ASSERT_OK(status);
   }
 
-  // Native image selector captured before ownership transfers into the device.
-  const char* image_selector_ = nullptr;
   // Borrowed embedded artifact passed to the most recent native executable
   // load.
   iree_const_byte_span_t loaded_image_ = {};

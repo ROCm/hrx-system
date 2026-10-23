@@ -6,9 +6,46 @@ func.decl import("prepare") @config(%stage: i32, %key: buffer, %value: buffer)
 
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
+
+func.decl import("prepare") @source_append(%source: i32, %directory: buffer, %path: buffer)
+
+func.decl import("prepare") @source_scope(%scope: buffer) -> (i32)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
 
 func.decl import("prepare") @workspace_limit(%stage: i32, %bytes: i64)
+
+func.decl import("prepare") @memory_forecast(%root: buffer)
+
+global.rodata.def @empty_forecast = bytes("")
+
+// One entry exercises the cold declaration boundary without compiling a new
+// VM program for each capability, ownership, or malformed-string case.
+func.def public @declare_forecast(%mode: i32) {
+  %empty_mode = scalar.constant 1 : i32
+  %nul_mode = scalar.constant 2 : i32
+  %duplicate_mode = scalar.constant 3 : i32
+  %alternate_mode = scalar.constant 4 : i32
+  %normal = global.load @root : buffer
+  %empty = global.load @empty_forecast : buffer
+  %nul = global.load @nul : buffer
+  %alternate = global.load @key : buffer
+  %is_empty = scalar.cmpi eq, %mode, %empty_mode : i32
+  %is_nul = scalar.cmpi eq, %mode, %nul_mode : i32
+  %is_duplicate = scalar.cmpi eq, %mode, %duplicate_mode : i32
+  %is_alternate = scalar.cmpi eq, %mode, %alternate_mode : i32
+  %selected = scf.select %is_empty, %empty, %normal : buffer
+  %checked = scf.select %is_nul, %nul, %selected : buffer
+  %root = scf.select %is_alternate, %alternate, %checked : buffer
+  func.call @memory_forecast(%root) : (buffer)
+  scf.if %is_duplicate {
+    func.call @memory_forecast(%root) : (buffer)
+  }
+  %tag = scalar.constant 0 : i64
+  %stage = func.call @stage(%normal, %tag) : (buffer, i64) -> (i32)
+  func.return
+}
 
 // stage_root
 global.rodata.def @root = bytes("73746167655f726f6f74")
@@ -118,7 +155,8 @@ func.def public @direct_parameter() {
   %directory = global.load @directory : buffer
   %path = global.load @path : buffer
   %policy = global.load @policy : buffer
-  func.call @parameter(%stage, %c0, %c0_source, %directory, %path, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+  %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
+  func.call @parameter(%stage, %c0, %c0_source, %source, %policy) : (i32, i32, i32, i32, buffer)
   func.return
 }
 
@@ -131,8 +169,9 @@ func.def public @conflicting_parameter_policy() {
   %directory = global.load @directory : buffer
   %path = global.load @path : buffer
   %policy = global.load @policy : buffer
-  func.call @parameter(%stage, %c0, %c0_source, %directory, %path, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-  func.call @parameter(%stage, %c0, %c0_source, %directory, %path, %path) : (i32, i32, i32, buffer, buffer, buffer)
+  %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
+  func.call @parameter(%stage, %c0, %c0_source, %source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%stage, %c0, %c0_source, %source, %path) : (i32, i32, i32, i32, buffer)
   func.return
 }
 
@@ -152,14 +191,15 @@ func.def public @many_sources() {
   %c1 = index.constant 1 : index
   %count = index.constant 33 : index
   scf.for %i = [%c0 to %count step %c1] {
-    %source = index.cast %i : index to i32
-    func.call @parameter(%stage, %binding, %source, %directory, %path, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-    func.call @parameter(%stage, %binding, %source, %directory, %policy, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+    %input = index.cast %i : index to i32
+    %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
+    func.call @parameter(%stage, %binding, %input, %source, %policy) : (i32, i32, i32, i32, buffer)
+    func.call @source_append(%source, %directory, %policy) : (i32, buffer, buffer)
   }
   func.return
 }
 
-func.def @invalid_source(%source: i32) {
+func.def @invalid_input(%input: i32) {
   %root = global.load @root : buffer
   %tag = scalar.constant 0 : i64
   %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
@@ -167,19 +207,20 @@ func.def @invalid_source(%source: i32) {
   %directory = global.load @directory : buffer
   %path = global.load @path : buffer
   %policy = global.load @policy : buffer
-  func.call @parameter(%stage, %binding, %source, %directory, %path, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+  %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
+  func.call @parameter(%stage, %binding, %input, %source, %policy) : (i32, i32, i32, i32, buffer)
   func.return
 }
 
-func.def public @sparse_source() {
-  %source = scalar.constant 1 : i32
-  func.call @invalid_source(%source) : (i32)
+func.def public @sparse_input() {
+  %input = scalar.constant 1 : i32
+  func.call @invalid_input(%input) : (i32)
   func.return
 }
 
-func.def public @negative_source() {
-  %source = scalar.constant -1 : i32
-  func.call @invalid_source(%source) : (i32)
+func.def public @negative_input() {
+  %input = scalar.constant -1 : i32
+  func.call @invalid_input(%input) : (i32)
   func.return
 }
 
@@ -237,9 +278,10 @@ func.def public @large_catalog() {
       %value = index.cast %j : index to i64
       %binding = index.cast %j : index to i32
       func.call @config_i64(%stage, %key, %value) : (i32, buffer, i64)
-      func.call @parameter(%stage, %binding, %c0_source, %directory, %path, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-      func.call @parameter(%stage, %binding, %c0_source, %directory, %key, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-      func.call @parameter(%stage, %binding, %c0_source, %directory, %policy, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+      %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
+      func.call @source_append(%source, %directory, %key) : (i32, buffer, buffer)
+      func.call @parameter(%stage, %binding, %c0_source, %source, %policy) : (i32, i32, i32, i32, buffer)
+      func.call @source_append(%source, %directory, %policy) : (i32, buffer, buffer)
     }
   }
   func.return
@@ -279,6 +321,67 @@ func.def public @nul_string(%field: i32) {
   %selected_policy = scf.select %is_policy, %nul, %policy : buffer
   %stage = func.call @stage(%selected_root, %tag) : (buffer, i64) -> (i32)
   func.call @config(%stage, %selected_key, %selected_value) : (i32, buffer, buffer)
-  func.call @parameter(%stage, %c0, %c0_source, %selected_directory, %selected_path, %selected_policy) : (i32, i32, i32, buffer, buffer, buffer)
+  %source = func.call @source(%selected_directory, %selected_path) : (buffer, buffer) -> (i32)
+  func.call @parameter(%stage, %c0, %c0_source, %source, %selected_policy) : (i32, i32, i32, i32, buffer)
+  func.return
+}
+
+// One checkpoint supplies several resident bindings and remains independently
+// addressable. Appending after binding must update every finalized shard view.
+func.def public @shared_source(%path: buffer) -> (i32) {
+  %directory = global.load @directory : buffer
+  %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
+  %root = global.load @root : buffer
+  %policy = global.load @policy : buffer
+  %tag = scalar.constant 0 : i64
+  %first = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %second = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  func.call @parameter(%first, %c0, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%first, %c1, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%second, %c0, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @source_append(%source, %directory, %policy) : (i32, buffer, buffer)
+  func.return %source : i32
+}
+
+func.def public @scoped_source(%scope: buffer) -> (i32) {
+  %source = func.call @source_scope(%scope) : (buffer) -> (i32)
+  func.return %source : i32
+}
+
+// Runtime-only sources have no resident parameter root or preparation policy.
+func.def public @cold_source(%path: buffer) -> (i32) {
+  %directory = global.load @directory : buffer
+  %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
+  %root = global.load @root : buffer
+  %tag = scalar.constant 0 : i64
+  %stage = func.call @dispatch(%root, %tag) : (buffer, i64) -> (i32)
+  func.return %source : i32
+}
+
+func.def public @bind_source(%source: i32) {
+  %root = global.load @root : buffer
+  %policy = global.load @policy : buffer
+  %tag = scalar.constant 0 : i64
+  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %c0 = scalar.constant 0 : i32
+  func.call @parameter(%stage, %c0, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
+  func.return
+}
+
+func.def public @append_source(%source: i32) {
+  %directory = global.load @directory : buffer
+  %path = global.load @path : buffer
+  func.call @source_append(%source, %directory, %path) : (i32, buffer, buffer)
+  func.return
+}
+
+func.def public @duplicate_input() {
+  %path = global.load @path : buffer
+  %source = func.call @shared_source(%path) : (buffer) -> (i32)
+  %c0 = scalar.constant 0 : i32
+  %policy = global.load @policy : buffer
+  func.call @parameter(%c0, %c0, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
   func.return
 }

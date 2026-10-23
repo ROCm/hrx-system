@@ -1,0 +1,37 @@
+// RUN: pass target=spirv:vulkan1.3+bda+hal @lower
+
+// A kernel entry remains unambiguous beside private helpers. The named program
+// consumes its selected target facts while leaving unrelated source IR alone.
+pass.pipeline<module> @lower pipeline {
+  source-to-low
+  for func {
+    low-dce
+  }
+}
+
+func.def @unselected_helper(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+kernel.def @entry() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  kernel.return
+}
+
+// ----
+pass.pipeline<module> @lower pipeline {
+  source-to-low
+  for func {
+    low-dce
+  }
+}
+
+func.def @unselected_helper(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+low.kernel.def target<spirv.logical.core> abi_layout({signature = () -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @entry() asm {
+  return
+}

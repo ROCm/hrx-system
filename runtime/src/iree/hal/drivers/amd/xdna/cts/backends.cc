@@ -34,8 +34,9 @@ static iree_status_t CreateXdnaDevice(
 
   iree_hal_device_t* device = nullptr;
   if (iree_status_is_ok(status)) {
-    status = iree_hal_driver_create_default_device(
-        driver, create_params, iree_allocator_system(), &device);
+    status = iree_hal_driver_create_device_by_uri(
+        driver, IREE_SV("xdna"), create_params, iree_allocator_system(),
+        &device);
   }
 
   if (iree_status_is_ok(status)) {

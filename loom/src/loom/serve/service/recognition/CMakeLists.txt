@@ -86,6 +86,7 @@ loom_cc_library(
     iree::task
     iree::testing::gtest
     loom::serve::runtime::host
+    loom::serve::server::resources
     loom::serve::testing::http_harness
     loom::serve::testing::service_application
     loom::serve::testing::worker_gate
@@ -281,7 +282,9 @@ loom_cc_library(
     loom::serve::runtime::execution::dispatch
     loom::serve::runtime::execution::retirement
     loom::serve::runtime::host
+    loom::serve::runtime::parameter::module
     loom::serve::runtime::parameter::residency
+    loom::serve::runtime::parameter::sources
     loom::serve::runtime::parameter::weights
     loom::serve::runtime::program
     loom::serve::runtime::program::compilation
@@ -317,6 +320,7 @@ loom_cc_library(
     iree::testing::gtest
     loom::serve::runtime::execution
     loom::serve::runtime::parameter::residency
+    loom::serve::runtime::storage::memory
     loom::serve::testing::service_application
   TESTONLY
   ALWAYSLINK
@@ -365,6 +369,7 @@ loom_cc_library(
     loom::serve::runtime::execution
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
+    loom::serve::server::resources
     loom::serve::telemetry::record
     loom::serve::testing::native_allocator
     loom::serve::testing::service_application

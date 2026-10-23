@@ -13,6 +13,8 @@ loom_cc_library(
   NAME
     types
   HDRS
+    "facts.h"
+    "profile.h"
     "types.h"
   DEPS
     iree::base
@@ -277,7 +279,7 @@ loom_cc_library(
   HDRS
     "projection.h"
   DEPS
-    ::facts
+    ::types
   PUBLIC
 )
 

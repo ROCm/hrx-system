@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_library_group", "loom_cc_test", "loom_generated_cc_library")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_instance_library", "loom_cc_library", "loom_cc_library_group", "loom_cc_test", "loom_generated_cc_library")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -21,8 +21,8 @@ loom_cc_library(
     hdrs = ["ops.h"],
     textual_hdrs = ["ops.inc"],
     deps = [
-        "//loom/src/loom/ir:builders",
-        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ir:headers",
+        "//loom/src/loom/ops:headers",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/test:record_defs",
     ],
@@ -37,14 +37,14 @@ loom_cc_library_group(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "op_builders",
     srcs = ["builders.c"],
     visibility = ["//visibility:private"],
     deps = [
         ":op_defs",
         "//loom/src/loom/ir:builders",
-        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:builders",
     ],
 )
 
@@ -108,7 +108,7 @@ loom_generated_cc_library(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "type_builders",
     srcs = ["type_builders.c"],
     hdrs = ["type_builders.h"],

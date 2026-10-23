@@ -2458,7 +2458,8 @@ TEST(Regex, GPT2Pattern_ConsecutiveNewlinesBeforeWord_Streaming) {
       callback, &matches));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      pat.dfa(), &state, strlen(text), callback, &matches));
+      pat.dfa(), &state, strlen(text), iree_string_view_empty(), callback,
+      &matches));
 
   // First two matches should be separate newlines.
   ASSERT_GE(matches.size(), 3) << "Expected at least 3 matches";
@@ -2594,7 +2595,8 @@ TEST(GPT2, RubyAnnotationBrackets_Streaming) {
   }
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      pat.dfa(), &state, text_len, callback, &streaming_matches));
+      pat.dfa(), &state, text_len, iree_string_view_empty(), callback,
+      &streaming_matches));
 
   EXPECT_EQ(streaming_matches, single_chunk_matches)
       << "Streaming produced " << streaming_matches.size()
@@ -2682,7 +2684,8 @@ TEST(GPT2, CJKTextWithPunctuation_Streaming) {
       callback, &streaming_matches));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      pat.dfa(), &state, text_len, callback, &streaming_matches));
+      pat.dfa(), &state, text_len, iree_string_view_empty(), callback,
+      &streaming_matches));
 
   EXPECT_EQ(streaming_matches, single_chunk_matches)
       << "Streaming produced " << streaming_matches.size()
@@ -2751,7 +2754,8 @@ TEST(GPT2, CJKTextWithPunctuation_SmallChunks) {
   }
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      pat.dfa(), &state, text_len, callback, &chunked_matches));
+      pat.dfa(), &state, text_len, iree_string_view_empty(), callback,
+      &chunked_matches));
 
   EXPECT_EQ(chunked_matches, single_chunk_matches)
       << "Chunked produced " << chunked_matches.size()
@@ -2835,7 +2839,8 @@ TEST(GPT2, CJKLetterRunWithoutPunctuation) {
 
   // Only finalize should produce the match.
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      pat.dfa(), &state, text_len, callback, &streaming_matches));
+      pat.dfa(), &state, text_len, iree_string_view_empty(), callback,
+      &streaming_matches));
 
   EXPECT_EQ(streaming_matches.size(), 1u)
       << "Expected exactly one match after finalize";

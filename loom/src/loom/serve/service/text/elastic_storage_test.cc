@@ -26,6 +26,14 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
     IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
   }
 
+  void WaitFrontier(const loom_serve_execution_frontier_t& frontier) {
+    for (size_t i = 0; i < IREE_ARRAYSIZE(frontier.semaphores); ++i) {
+      IREE_ASSERT_OK(loom_serve_workspace_wait(
+          loom_serve_device_workspace(device_), frontier.semaphores[i],
+          frontier.values[i]));
+    }
+  }
+
   static bool HasPendingBacking(const std::string& status) {
     const std::string key = "\"pending_bytes\":";
     size_t position = 0;
@@ -90,10 +98,7 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
       peer.Consume("abxb");
       EXPECT_EQ(loom_serve_text_row_token(warm), peer.Predict());
     }
-    IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-        {IREE_ARRAYSIZE(frontier.semaphores), frontier.semaphores,
-         frontier.values},
-        iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    ASSERT_NO_FATAL_FAILURE(WaitFrontier(frontier));
     if (trim_first) {
       loom_serve_text_trim_result_t result;
       IREE_ASSERT_OK(loom_serve_text_model_trim(source, &result));
@@ -338,10 +343,7 @@ TEST_F(ElasticTextServiceTest,
   loom_serve_text_trim_result_t result;
   loom_serve_execution_frontier_t frontier;
   const auto wait_frontier = [&] {
-    IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-        {IREE_ARRAYSIZE(frontier.semaphores), frontier.semaphores,
-         frontier.values},
-        iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    ASSERT_NO_FATAL_FAILURE(WaitFrontier(frontier));
   };
   auto* pool = loom_serve_device_memory_pool(device_);
   IREE_ASSERT_OK(loom_serve_text_model_submit_trim(sparse, &result, &frontier));
@@ -442,10 +444,7 @@ TEST_F(ElasticTextServiceTest,
   iree_notification_initialize(&notification);
   IREE_ASSERT_OK(
       loom_serve_text_model_submit_trim(retiring, &result, &frontier));
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-      {IREE_ARRAYSIZE(frontier.semaphores), frontier.semaphores,
-       frontier.values},
-      iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  ASSERT_NO_FATAL_FAILURE(WaitFrontier(frontier));
   auto* pool = loom_serve_device_memory_pool(device_);
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
   {
@@ -522,12 +521,13 @@ TEST_F(ElasticTextServiceTest, RetirementOwnsAcceptedCheckpointCapture) {
   IREE_ASSERT_OK(loom_serve_text_model_free_retired(model_));
   model_ = nullptr;
   iree_notification_deinitialize(&notification);
-  auto* pool = loom_serve_device_memory_pool(device_);
   // Physical capacity returns at the outer pool join, not model retirement.
-  loom_serve_memory_pool_trim(pool, 0);
-  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+  IREE_ASSERT_OK(loom_serve_test_device_trim_and_drain(device_, 0));
   const auto memory = loom_serve_device_memory_statistics(device_);
-  EXPECT_EQ(memory.retained.reserved_bytes, 0u);
+  EXPECT_EQ(
+      memory.retained.reserved_bytes,
+      loom_serve_workspace_memory_usage(loom_serve_device_workspace(device_))
+          .reserved_bytes);
   EXPECT_EQ(memory.retained.pending_bytes, 0u);
   EXPECT_EQ(memory.retained.committed_bytes, 0u);
   EXPECT_EQ(memory.retained.releasing_bytes, 0u);

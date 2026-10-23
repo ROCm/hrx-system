@@ -159,7 +159,7 @@ TEST_P(PoolTest, ImportHostAllocationNullCallback) {
   iree_status_t create_status = CreateHostImportPool(pool.out());
   if (iree_status_is_unavailable(create_status)) {
     iree::Status unavailable_status(std::move(create_status));
-    GTEST_SKIP() << unavailable_status.ToString();
+    GTEST_SKIP() << FormatSkipStatus(unavailable_status);
   }
   IREE_ASSERT_OK(create_status);
   const iree_hal_external_storage_class_t storage_class =
@@ -216,7 +216,7 @@ TEST_P(PoolTest, ImportHostAllocationWithCallback) {
   iree_status_t create_status = CreateHostImportPool(pool.out());
   if (iree_status_is_unavailable(create_status)) {
     iree::Status unavailable_status(std::move(create_status));
-    GTEST_SKIP() << unavailable_status.ToString();
+    GTEST_SKIP() << FormatSkipStatus(unavailable_status);
   }
   IREE_ASSERT_OK(create_status);
   const iree_hal_external_storage_class_t storage_class =

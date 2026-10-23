@@ -300,13 +300,17 @@ bool loom_low_allocation_live_range_assignments_conflict(
                                                                lhs, rhs)) {
       return false;
     }
+    // The whole-range query already proves the sole pair of units overlaps.
+    const bool single_unit_pair =
+        lhs->location_count == 1 && rhs->location_count == 1;
     if (has_expanded_execution_definition) {
       for (uint32_t lhs_unit = 0; lhs_unit < lhs->location_count; ++lhs_unit) {
         for (uint32_t rhs_unit = 0; rhs_unit < rhs->location_count;
              ++rhs_unit) {
-          if (loom_low_allocation_storage_assignment_subranges_overlap(
-                  descriptor_set, lhs, lhs_unit, rhs, rhs_unit,
-                  /*unit_count=*/1) &&
+          if ((single_unit_pair ||
+               loom_low_allocation_storage_assignment_subranges_overlap(
+                   descriptor_set, lhs, lhs_unit, rhs, rhs_unit,
+                   /*unit_count=*/1)) &&
               loom_low_allocation_live_range_expanded_execution_definitions_conflict(
                   unit_start_points, unit_end_points, unit_point_count, lhs,
                   lhs_unit, rhs, rhs_unit)) {
@@ -324,7 +328,8 @@ bool loom_low_allocation_live_range_assignments_conflict(
         LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS);
     for (uint32_t lhs_unit = 0; lhs_unit < lhs->location_count; ++lhs_unit) {
       for (uint32_t rhs_unit = 0; rhs_unit < rhs->location_count; ++rhs_unit) {
-        if (!loom_low_allocation_storage_assignment_subranges_overlap(
+        if (!single_unit_pair &&
+            !loom_low_allocation_storage_assignment_subranges_overlap(
                 descriptor_set, lhs, lhs_unit, rhs, rhs_unit,
                 /*unit_count=*/1)) {
           continue;

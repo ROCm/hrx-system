@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test", "loom_check_test_suite")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -25,7 +25,20 @@ loom_check_test_suite(
     ],
 )
 
+# The shipping tool includes test dialect syntax without synthetic target
+# passes. A non-idempotent path map also checks that diagnostics keep the case's
+# logical identity instead of remapping it a second time during admission.
+loom_check_test(
+    name = "verify_tool",
+    src = "verify.loom-test",
+    args = ["--source-prefix-map==logical/"],
+    runner = "//loom/src/loom/tools/loom-check:loom-check",
+)
+
 test_suite(
     name = "test",
-    tests = [":core_test"],
+    tests = [
+        ":core_test",
+        ":verify_tool",
+    ],
 )

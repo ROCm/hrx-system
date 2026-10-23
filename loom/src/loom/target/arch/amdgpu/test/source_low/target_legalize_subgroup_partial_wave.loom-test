@@ -1,0 +1,49 @@
+// RUN: pass target-legalize{mode=complete,policy=prefer-native}
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
+
+// Full waves and a three-lane tail retain the direct target contract across
+// every scan mode/direction and native scalar/vector payload class. The
+// clustered reduction's final eight-lane partition is also only three lanes.
+kernel.def target(@target) @partial_wave_collectives_remain_native() {
+  %unit = index.constant 1 : index
+  %width = index.constant 35 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%integer: i32, %float: f32, %integers: vector<2xi32>, %floats: vector<2xf32>) {
+  %integer_sum = kernel.subgroup.reduce<addi> %integers : vector<2xi32>
+  %float_maximum = kernel.subgroup.reduce<maxnumf> %float {cluster_size = 8} : f32
+  %forward_inclusive = kernel.subgroup.scan<addi> %integer {direction = forward, mode = inclusive} : i32
+  %forward_exclusive = kernel.subgroup.scan<maxnumf> %float {direction = forward, mode = exclusive} : f32
+  %reverse_inclusive = kernel.subgroup.scan<addi> %integers {direction = reverse, mode = inclusive} : vector<2xi32>
+  %reverse_exclusive = kernel.subgroup.scan<maxnumf> %floats {direction = reverse, mode = exclusive} : vector<2xf32>
+  test.use %integer_sum : vector<2xi32>
+  test.use %float_maximum : f32
+  test.use %forward_inclusive : i32
+  test.use %forward_exclusive : f32
+  test.use %reverse_inclusive : vector<2xi32>
+  test.use %reverse_exclusive : vector<2xf32>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
+
+kernel.def target(@target) @partial_wave_collectives_remain_native() {
+  %unit = index.constant 1 : index
+  %width = index.constant 35 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%integer: i32, %float: f32, %integers: vector<2xi32>, %floats: vector<2xf32>) {
+  %integer_sum = kernel.subgroup.reduce<addi> %integers : vector<2xi32>
+  %float_maximum = kernel.subgroup.reduce<maxnumf> %float {cluster_size = 8} : f32
+  %forward_inclusive = kernel.subgroup.scan<addi> %integer {direction = forward, mode = inclusive} : i32
+  %forward_exclusive = kernel.subgroup.scan<maxnumf> %float {direction = forward, mode = exclusive} : f32
+  %reverse_inclusive = kernel.subgroup.scan<addi> %integers {direction = reverse, mode = inclusive} : vector<2xi32>
+  %reverse_exclusive = kernel.subgroup.scan<maxnumf> %floats {direction = reverse, mode = exclusive} : vector<2xf32>
+  test.use %integer_sum : vector<2xi32>
+  test.use %float_maximum : f32
+  test.use %forward_inclusive : i32
+  test.use %forward_exclusive : f32
+  test.use %reverse_inclusive : vector<2xi32>
+  test.use %reverse_exclusive : vector<2xf32>
+  kernel.return
+}

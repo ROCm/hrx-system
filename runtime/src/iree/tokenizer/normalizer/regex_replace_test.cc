@@ -375,6 +375,66 @@ TEST_F(RegexReplaceNormalizerTest, TrailingPassthrough_WhitespaceOnly_Match) {
                         /*expect_pending_after_process=*/true);
 }
 
+TEST_F(RegexReplaceNormalizerTest, ReplayedMatchesWithPassthrough) {
+  auto normalizer = CreateRegexReplace(IREE_SV("abx|b"), IREE_SV("XY"));
+  TestWithAllChunkSizes(normalizer.get(), "ab", "aXY", true);
+  TestLimitedOutputCapacity(normalizer.get(), "ab", "aXY");
+}
+
+TEST_F(RegexReplaceNormalizerTest, ReplayedMatchesBeforeNextChunk) {
+  auto normalizer = CreateRegexReplace(IREE_SV("abx|b"), IREE_SV("XY"));
+  TestWithAllChunkSizes(normalizer.get(), "ab!", "aXY!", false);
+  TestLimitedOutputCapacity(normalizer.get(), "ab!", "aXY!");
+}
+
+TEST_F(RegexReplaceNormalizerTest, OwnsAcceptedInputAcrossOutputPressure) {
+  auto normalizer =
+      CreateRegexReplace(IREE_SV("a[bc]*z|a(?!x)|b"), IREE_SV("XY"));
+  const std::string input = "abbbc!abbbc";
+  for (size_t chunk_size : {1u, 2u, 3u, 5u}) {
+    SCOPED_TRACE(chunk_size);
+    ScopedNormalizerState state(normalizer.get());
+    std::string actual;
+    char output;
+    for (size_t offset = 0; offset < input.size(); offset += chunk_size) {
+      std::string chunk = input.substr(offset, chunk_size);
+      size_t consumed = 0;
+      while (consumed < chunk.size()) {
+        iree_host_size_t count = 0;
+        iree_host_size_t written = 0;
+        IREE_ASSERT_OK(iree_tokenizer_normalizer_state_process(
+            state.get(),
+            iree_make_string_view(chunk.data() + consumed,
+                                  chunk.size() - consumed),
+            iree_make_mutable_string_view(&output, 1),
+            IREE_TOKENIZER_NORMALIZER_FLAG_NONE, &count, &written));
+        ASSERT_TRUE(count > 0 || written > 0);
+        ASSERT_LE(count, chunk.size() - consumed);
+        consumed += count;
+        actual.append(&output, written);
+      }
+      // Accepted bytes no longer belong to the caller.
+      chunk.assign(chunk.size(), '#');
+    }
+    do {
+      iree_host_size_t written = 0;
+      IREE_ASSERT_OK(iree_tokenizer_normalizer_state_finalize(
+          state.get(), iree_make_mutable_string_view(&output, 1), &written));
+      actual.append(&output, written);
+      ASSERT_TRUE(written > 0 ||
+                  !iree_tokenizer_normalizer_state_has_pending(state.get()));
+    } while (iree_tokenizer_normalizer_state_has_pending(state.get()));
+    EXPECT_EQ(actual, "XYXYXYXYc!XYXYXYXYc");
+  }
+}
+
+TEST_F(RegexReplaceNormalizerTest, ReplayedMultipleMatchesWithLimitedOutput) {
+  auto normalizer =
+      CreateRegexReplace(IREE_SV("a[bc]*z|a(?!x)|b"), IREE_SV("XY"));
+  TestWithAllChunkSizes(normalizer.get(), "abbbc", "XYXYXYXYc", true);
+  TestLimitedOutputCapacity(normalizer.get(), "abbbc", "XYXYXYXYc");
+}
+
 TEST_F(RegexReplaceNormalizerTest, TrailingPassthrough_WordCharsAtEnd) {
   // Pattern "\w+" with input "abc" — entire input is partial match, resolves
   // at finalize to a full match → replaced with "X".

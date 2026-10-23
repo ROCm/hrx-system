@@ -53,6 +53,23 @@ iree_status_t loom_aie2p_vector_packet_emitter_initialize(
 uint8_t loom_aie2p_vector_packet_carrier_unit_count(
     loom_aie2p_vector_carrier_kind_t carrier_kind);
 
+// Returns the number of logical scalar lanes in one 512-bit X packet. One-bit
+// predicate elements use byte construction before conversion to predicate
+// storage. Returns zero when |element_bit_count| has no scalar push family.
+uint8_t loom_aie2p_vector_packet_scalar_lane_count(uint16_t element_bit_count);
+
+// Seeds one X packet by broadcasting |scalar| in its physical scalar width.
+iree_status_t loom_aie2p_vector_packet_emit_scalar_splat(
+    loom_aie2p_vector_packet_emitter_t* emitter, uint16_t element_bit_count,
+    loom_value_id_t scalar, loom_value_id_t* out_packet);
+
+// Pushes |scalar| onto the high or low end of |packet| in its physical scalar
+// width. The result is a fresh X packet.
+iree_status_t loom_aie2p_vector_packet_emit_scalar_push(
+    loom_aie2p_vector_packet_emitter_t* emitter, uint16_t element_bit_count,
+    bool push_high, loom_value_id_t packet, loom_value_id_t scalar,
+    loom_value_id_t* out_packet);
+
 // Returns the low register type for |unit_count| units of |carrier_kind|.
 iree_status_t loom_aie2p_vector_packet_make_carrier_type(
     loom_low_lower_context_t* context,

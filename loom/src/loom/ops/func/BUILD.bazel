@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_generated_cc_library")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_instance_library", "loom_cc_library", "loom_cc_test", "loom_generated_cc_library")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -34,6 +34,7 @@ _FUNC_VISIBILITY = [
     "//loom/src/loom/ops/low:__pkg__",
     "//loom/src/loom/rewrite:__pkg__",
     "//loom/src/loom/target:__pkg__",
+    "//loom/src/loom/target/abi/c:__pkg__",
     "//loom/src/loom/target/arch:__subpackages__",
     "//loom/src/loom/target/emit:__subpackages__",
     "//loom/src/loom/target/reporting:__pkg__",
@@ -52,20 +53,20 @@ loom_cc_library(
     hdrs = ["ops.h"],
     textual_hdrs = ["ops.inc"],
     deps = [
-        "//loom/src/loom/ir:builders",
-        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ir:headers",
+        "//loom/src/loom/ops:headers",
         "//loom/src/loom/target:types",
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "builders",
     srcs = ["builders.c"],
     hdrs = ["ops.h"],
     textual_hdrs = ["ops.inc"],
     deps = [
         "//loom/src/loom/ir:builders",
-        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:builders",
         "//loom/src/loom/target:types",
     ],
 )
@@ -76,11 +77,13 @@ loom_generated_cc_library(
         "canonicalize.c",
         "facts.c",
         "location.c",
+        "source_signature.c",
         "verify.c",
     ],
     hdrs = [
         "location.h",
         "ops.h",
+        "source_signature.h",
     ],
     args = ["--dialect=func"],
     extra_output_flags = [
@@ -98,6 +101,7 @@ loom_generated_cc_library(
     visibility = _FUNC_VISIBILITY,
     deps = [
         ":builders",
+        "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:parameter",
         "//loom/src/loom/format:location",
@@ -109,6 +113,7 @@ loom_generated_cc_library(
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:types",
         "//loom/src/loom/util:fact_table_api",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
     ],
 )

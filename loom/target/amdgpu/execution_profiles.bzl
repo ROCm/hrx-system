@@ -23,8 +23,8 @@ load(
 load(
     "//runtime/requirements:defs.bzl",
     "AMDGPU_RESOURCE",
-    "HAL_AMD",
     "HAL_AMDGPU",
+    "HAL_AMD_GPU",
 )
 
 def amdgpu_execution_profile(
@@ -47,7 +47,7 @@ def amdgpu_execution_profile(
         executor = "hardware",
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
         run_requirements = [AMDGPU_RESOURCE],
-        runner_args = ["--device=amdgpu"] + runner_args,
+        runner_args = ["--device=legacy-amdgpu"] + runner_args,
         tags = tags,
         target_class = "gpu",
         target_family = "amdgpu",
@@ -57,7 +57,7 @@ AMDGPU_HARDWARE_PROFILE = amdgpu_execution_profile(
     name = "amdgpu_hardware",
 )
 
-def amd_gpu_execution_profile(name, runner_args = [], tags = [], device = "amdgpu2"):
+def amd_gpu_execution_profile(name, runner_args = [], tags = [], device = "amdgpu"):
     """Defines native AMD GPU execution with libamdf hardware requirements."""
     return loom_execution_profile(
         name = name,
@@ -67,7 +67,7 @@ def amd_gpu_execution_profile(name, runner_args = [], tags = [], device = "amdgp
             TARGET_ARCH_AMDGPU,
             EMIT_AMDGPU,
             EXECUTE_IREE_HAL,
-            HAL_AMD,
+            HAL_AMD_GPU,
         ],
         executor = "hardware",
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
@@ -83,18 +83,20 @@ AMD_GPU_HARDWARE_PROFILE = amd_gpu_execution_profile(name = "amd_gpu_hardware")
 AMD_GPU_ASAN_PROFILE = amd_gpu_execution_profile(
     name = "amd_gpu_asan",
     runner_args = ["--sanitizer=asan", "--sanitizer-reporting=report-only"],
-    tags = ["notsan"],
+    tags = ["notsan", "requires-amd-gpu-feedback"],
 )
 
 AMD_GPU_TSAN_PROFILE = amd_gpu_execution_profile(
     name = "amd_gpu_tsan",
-    device = "amdgpu2://?tsan_report_policy=report-only",
+    tags = ["requires-amd-gpu-feedback"],
+    device = "amdgpu://?tsan_report_policy=report-only",
     runner_args = ["--sanitizer=tsan", "--sanitizer-reporting=report-only"],
 )
 
 AMD_GPU_TSAN_CAPACITY_PROFILE = amd_gpu_execution_profile(
     name = "amd_gpu_tsan_capacity",
-    device = "amdgpu2://?tsan_report_policy=report-only&tsan_shadow_size=1440",
+    tags = ["requires-amd-gpu-feedback"],
+    device = "amdgpu://?tsan_report_policy=report-only&tsan_shadow_size=1440",
     runner_args = ["--sanitizer=tsan", "--sanitizer-reporting=report-only"],
 )
 

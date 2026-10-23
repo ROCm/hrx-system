@@ -462,6 +462,11 @@ struct iree_hal_queue_family_spec_t {
   // Explicit command-storage localities that queue acquisition can require.
   // Zero exposes only implementation-selected DEFAULT placement.
   iree_hal_queue_placement_capabilities_t placement_capabilities;
+  // Host publication requirements indexed by iree_hal_queue_placement_t.
+  // DEFAULT describes implementation-selected placement. Unsupported explicit
+  // placements and implementations with opaque requirements report UNKNOWN.
+  iree_hal_queue_host_publication_flags_t
+      host_publication[IREE_HAL_QUEUE_PLACEMENT_COUNT];
   // Union of immutable feature bits available on queues in this family.
   iree_hal_queue_feature_flags_t supported_queue_features;
   // Number of low bits defined in a tick captured on this family's queues.

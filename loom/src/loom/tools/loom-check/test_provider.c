@@ -9,7 +9,6 @@
 #include "loom/tools/loom-check/test_provider.h"
 
 #include "iree/base/api.h"
-#include "loom/target/test/provider.h"
 #include "loom/tools/loom-check/execute.h"
 #include "loom/tools/loom-check/test/config/providers.h"
 #include "loom/tools/loom-check/test/low/providers.h"
@@ -65,7 +64,6 @@ static const loom_check_requirement_provider_t* const
 
 const loom_check_provider_t loom_check_test_provider = {
     .name = IREE_SVL("test"),
-    .target_provider = &loom_test_target_provider,
     .emit_providers = kLoomCheckTestEmitProviders,
     .emit_provider_count = IREE_ARRAYSIZE(kLoomCheckTestEmitProviders),
     .requirement_providers = kLoomCheckTestRequirementProviders,

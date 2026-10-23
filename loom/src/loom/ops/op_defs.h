@@ -28,6 +28,7 @@
 #include "loom/ops/attribute_accessors.h"
 #include "loom/ops/builder.h"
 #include "loom/ops/format.h"
+#include "loom/ops/mutation.h"
 #include "loom/ops/use_list.h"
 #include "loom/util/bstring.h"
 
@@ -918,19 +919,6 @@ void loom_op_refresh_effective_traits(const loom_module_t* module,
 // Returns true if |op| may write to a resource or has unknown effects.
 bool loom_op_may_write(const loom_module_t* module, const loom_op_t* op);
 
-// Returns true if every result of |op| has zero operand uses and no attribute
-// or value type references from outside |op|. References carried by |op|'s
-// own attributes or result types do not keep the whole op alive.
-bool loom_op_results_unused(const loom_module_t* module, const loom_op_t* op);
-
-// Returns true if |op| is trivially dead: it has results, does not
-// write to any resource, has no unknown effects, and every result is
-// unused. Read-only and non-deterministic ops without writes are dead
-// when unused — a read with no observer is a no-op. Symbols and hints are
-// retained independently of their SSA result uses.
-bool loom_op_is_trivially_dead(const loom_module_t* module,
-                               const loom_op_t* op);
-
 //===----------------------------------------------------------------------===//
 // CallLike interface helpers
 //===----------------------------------------------------------------------===//
@@ -1140,6 +1128,10 @@ loom_string_id_t loom_func_like_repr_contract(loom_func_like_t func);
 
 // Returns the target ABI enum value, or 0 if |func| has no explicit ABI.
 uint8_t loom_func_like_abi(loom_func_like_t func);
+
+// Returns the retained source-language ABI contract, or an absent attribute
+// when the callable has no source boundary contract.
+loom_attribute_t loom_func_like_source_signature(loom_func_like_t func);
 
 // Returns the target ABI payload attrs, or an empty slice if absent.
 loom_named_attr_slice_t loom_func_like_abi_attrs(loom_func_like_t func);
@@ -1615,69 +1607,6 @@ loom_attribute_t loom_memory_access_atomic_scope(loom_memory_access_t access);
   static inline uint8_t func_name(const loom_op_t* op) { \
     return op->instance_flags;                           \
   }
-
-//===----------------------------------------------------------------------===//
-// Operation and region mutation
-//===----------------------------------------------------------------------===//
-
-// Removes selected results from a variadic-result op and compacts trailing
-// storage in-place.
-//
-// |remove_results| has one entry per current result. Removed result values must
-// have no operand, attribute, or incoming type uses. Dropped values remain in
-// the module value table but no longer carry defining-op identity or outgoing
-// type-use records. Kept result values keep their IDs and receive updated
-// definition indices. Tied results targeting removed result slots are rejected;
-// kept tied result indices are remapped.
-iree_status_t loom_op_remove_results(loom_module_t* module, loom_op_t* op,
-                                     const bool* remove_results,
-                                     iree_arena_allocator_t* scratch_arena,
-                                     uint16_t* out_removed_count);
-
-// Erases an op after verifying that every result has no operand uses or
-// attribute/type uses from outside the op (caller must RAUW results first).
-// Removes operand and attribute use records, drops type-use records carried by
-// results, owned declaration arguments and nested block arguments, then marks
-// the op dead. Result values retain their defining op and result index as
-// immutable producer provenance. The remaining operation payload is left
-// unchanged and may be inspected as immutable provenance until module
-// destruction. Dead ops are skipped by enumeration macros and will not be
-// serialized. The memory is not freed (arena-owned). Returns
-// IREE_STATUS_FAILED_PRECONDITION if any result still has uses.
-iree_status_t loom_op_erase(loom_module_t* module, loom_op_t* op);
-
-// Erases a producer-proven closed set of disjoint operation subtrees. Results
-// may reference other members, but no live operation or type outside the set
-// may use a removed value. The consuming rewrite establishes that closure
-// before calling; this path does not repeat its use/def analysis. Unlike
-// repeated single-op erasure, source order need not be reverse topological.
-void loom_op_erase_closed_set(loom_module_t* module, loom_op_t* const* ops,
-                              iree_host_size_t count);
-
-// Removes a closed set of non-entry blocks from |region| and compacts the
-// region block table in place.
-//
-// |remove_blocks| must contain exactly |remove_block_count| entries, one per
-// current block index in |region|. Entry block removal is rejected. Any kept op
-// successor targeting a removed block is rejected. Values defined by removed
-// block arguments or removed op subtrees may only have operand, type and
-// attribute uses inside the removed set; callers must retarget or replace
-// external uses before removing blocks. Closure and scratch-allocation failures
-// leave IR unchanged and |out_removed_count| zero.
-//
-// Uses O(B) space in |scratch_arena| to index B removed nested blocks; flat
-// block sets allocate no scratch. Validation is O(S + (B + E) log(B + 2)) for
-// S inspected IR nodes/value slots and E incoming references/successors.
-//
-// Removed block/op/value objects remain arena-owned for diagnostics, but the
-// blocks are detached from the region, their operations are marked dead, and
-// block-argument identity/type-use records are dropped.
-iree_status_t loom_region_remove_blocks(loom_module_t* module,
-                                        loom_region_t* region,
-                                        const bool* remove_blocks,
-                                        uint16_t remove_block_count,
-                                        iree_arena_allocator_t* scratch_arena,
-                                        uint16_t* out_removed_count);
 
 //===----------------------------------------------------------------------===//
 // Use-def list maintenance

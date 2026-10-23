@@ -601,11 +601,13 @@ its existing cache. Bazel-native overrides not handled by configure belong in
 | `IREE_ENABLE_VULKAN` | `ON`, `OFF` | Enables Vulkan API clients independently of HAL drivers. Defaults to `ON`; the Vulkan HAL also enables API availability. | Selects Vulkan API clients with the same default and HAL implication. | `--//build_tools/vulkan/config:enabled=<bool>` |
 | `IREE_ENABLE_D3D12` | `ON`, `OFF` | Enables D3D12 API clients for Windows targets. Defaults to `ON`. | Selects D3D12 API clients for Windows targets, including cross-compilation. Defaults to `ON`. | `--//build_tools/d3d12/config:enabled=<bool>` |
 | `IREE_NET_RDMA` | `ON`, `OFF` | Enables native RDMA resources and registration on Linux. Defaults to `OFF`. | Enables the same native RDMA packages; no host carrier is implicitly registered. Defaults to `OFF`. | `--//runtime/config/net:rdma=<bool>` |
-| `IREE_HAL_DRIVER_AMDGPU` | `ON`, `OFF` | Builds the AMDGPU runtime HAL driver. | Adds or removes `amdgpu` from the runtime driver registry and recursive package scope. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
+| `IREE_HAL_DRIVER_AMDGPU` | `ON`, `OFF` | Builds the legacy ROCr HAL driver, selected at runtime as `legacy-amdgpu`. | Adds or removes the `amdgpu` build selector from the recursive package scope and registers `legacy-amdgpu`. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_TASK` | `ON`, `OFF` | Builds the task runtime HAL driver. | Adds or removes `task` from the runtime driver registry. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_VULKAN` | `ON`, `OFF` | Builds the Vulkan runtime HAL driver. | Adds or removes `vulkan` from the runtime driver registry and recursive package scope. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_WEBGPU` | `ON`, `OFF` | Builds the WebGPU runtime HAL driver. | Adds or removes `webgpu` from the runtime driver registry and recursive package scope for WebGPU development. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
-| `IREE_HAL_DRIVER_AMD` | `ON`, `OFF` | Builds the shared AMD runtime HAL driver using libamdf. Native families are selected independently. | Adds or removes `amd` from the runtime driver registry build and enables libamdf when selected. Device schemes remain `rdna` and `xdna`. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
+| `IREE_HAL_DRIVER_AMD` | `ON`, `OFF` | Supplies the default for both native AMD HAL engines below. Defaults to `OFF`; explicit engine options override it. | Supplies the same defaults; explicit engine options override it regardless of argument order. | `amd` in `--//runtime/config/hal:drivers=<complete-driver-list>` selects both engines. |
+| `IREE_HAL_DRIVER_AMD_GPU` | `ON`, `OFF` | Builds the native GPU HAL and registers `amdgpu`, `rdna`, and `cdna`. Defaults to `IREE_HAL_DRIVER_AMD`. | Adds or removes `amd-gpu` and enables libamdf when selected. | `amd-gpu` in `--//runtime/config/hal:drivers=<complete-driver-list>` |
+| `IREE_HAL_DRIVER_AMD_XDNA` | `ON`, `OFF` | Builds the native NPU HAL and registers `xdna`. Defaults to `IREE_HAL_DRIVER_AMD`. | Adds or removes `amd-xdna` and enables libamdf when selected. | `amd-xdna` in `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_DEPENDENCY_MODE` | `pinned`, `package`, `auto` | Selects locked source archives, package discovery, or package-then-pinned dependency resolution. | Writes `--repo_env=IREE_DEPENDENCY_MODE=<mode>`. | `--repo_env=IREE_DEPENDENCY_MODE=<mode>` |
 | `IREE_ROCM_DEPENDENCY_MODE` | `pinned`, `package`, `auto` | Overrides dependency resolution for ROCm header facades; empty uses package mode when `IREE_ROCM_PATH` is set and otherwise inherits `IREE_DEPENDENCY_MODE`. | Writes `--repo_env=IREE_ROCM_DEPENDENCY_MODE=<mode>`. | `--repo_env=IREE_ROCM_DEPENDENCY_MODE=<mode>` |
 | `IREE_ROCM_PATH` | path | Prepends the ROCm or TheRock SDK root to `CMAKE_PREFIX_PATH`, uses it for AMDGPU device tooling, and selects ROCm package header mode by default. | Writes `--repo_env=IREE_ROCM_PATH=<path>` and `--repo_env=IREE_ROCM_DEPENDENCY_MODE=package` unless explicitly overridden. | `--repo_env=IREE_ROCM_PATH=<path>` |
@@ -625,6 +627,24 @@ The portable spelling is shorter for common cases:
 ```bash
 python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON
 ```
+
+The native HAL engines can be compiled independently. For example, both build
+systems accept these portable options for a GPU-only HAL:
+
+```bash
+iree-cmake-configure -DIREE_HAL_DRIVER_AMD=ON -DIREE_HAL_DRIVER_AMD_XDNA=OFF
+python dev.py bazel configure -DIREE_HAL_DRIVER_AMD=ON -DIREE_HAL_DRIVER_AMD_XDNA=OFF
+```
+
+Selecting only `IREE_HAL_DRIVER_AMD_GPU=ON` or
+`IREE_HAL_DRIVER_AMD_XDNA=ON` also works without enabling the umbrella. In a
+reused CMake build, each engine keeps its cached value until explicitly changed;
+the umbrella supplies initial defaults. A disabled engine contributes neither
+its implementation nor its URI schemes or execution tests. When both are
+enabled they share one driver and libamdf fabric. The `AMDF_FAMILY_*` options
+independently control libamdf's native implementations, including those used by
+clients other than the HAL. Portable image and target utilities remain available
+to compiler clients independently of HAL engine selection.
 
 libamdf can also be built independently of the legacy AMDGPU HAL and ROCm
 dependency stack:

@@ -188,6 +188,12 @@ iree_py_test(
     "--source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom}}"
     "--device=task"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/model.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/project.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/weighted_prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/weighted_project.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/model.json"
@@ -236,6 +242,19 @@ loom_cc_test(
 )
 endif()
 
+if(IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    parameter_gather_test
+  DEPS
+    ::test_device
+    iree::testing::gtest_main
+    loom::serve::runtime::parameter::gather_tests
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
 if(LOOM_TARGET_ARCH_X86 AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM)
 loom_cc_test(
   NAME
@@ -243,6 +262,9 @@ loom_cc_test(
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/copy.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/demand_control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/demand_kernels.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/demand_prepare.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/kernels.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/policy.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/finite/testdata/component/prepare.loom"
@@ -675,6 +697,29 @@ loom_cc_test(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_X86 AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    media_projector_test
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/model.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/project.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/weighted_prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/weighted_project.loom"
+  DEPS
+    ::test_compiler
+    ::test_device
+    iree::testing::gtest_main
+    loom::serve::service::text::media_projector_tests
+  ENV
+    "LOOM_SERVE_TEST_PROJECTOR_SOURCE={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/model.json}}"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
 if(LOOM_TARGET_ARCH_X86 AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
   NAME
@@ -986,6 +1031,7 @@ loom_cc_test(
     loom::serve::runtime::execution
     loom::serve::runtime::parameter::activation
     loom::serve::runtime::parameter::bank
+    loom::serve::runtime::parameter::module
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::parameter::weights
     loom::serve::runtime::program

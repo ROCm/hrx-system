@@ -7,7 +7,7 @@ kernel.def target(@fragment_numeric_coordinates_gfx11) @fragment_numeric_coordin
   %unit = index.constant 1 : index
   %width = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
-} launch(%input_buffer: buffer, %direct_buffer: buffer, %roundtrip_buffer: buffer) {
+} launch(%input_buffer: buffer, %direct_buffer: buffer, %native_roundtrip_buffer: buffer, %roundtrip_buffer: buffer) {
   %base = index.constant 0 : offset
   %origin = index.constant 0 : index
   %extent = index.constant 16 : index
@@ -17,10 +17,12 @@ kernel.def target(@fragment_numeric_coordinates_gfx11) @fragment_numeric_coordin
   %input_offset = index.mul %lane, %payload_count : index
   %input_global = buffer.assume.memory_space<global> %input_buffer : buffer
   %direct_global = buffer.assume.memory_space<global> %direct_buffer : buffer
+  %native_roundtrip_global = buffer.assume.memory_space<global> %native_roundtrip_buffer : buffer
   %roundtrip_global = buffer.assume.memory_space<global> %roundtrip_buffer : buffer
   %transposed_layout = encoding.layout.strided [1, 16] : encoding<layout>
   %input_view = buffer.view %input_global[%base] : buffer -> view<256xi32>
   %direct_view = buffer.view %direct_global[%base] : buffer -> view<16x16xbf16, %transposed_layout>
+  %native_roundtrip_view = buffer.view %native_roundtrip_global[%base] : buffer -> view<16x16xbf16, %transposed_layout>
   %roundtrip_view = buffer.view %roundtrip_global[%base] : buffer -> view<16x16xf32, %transposed_layout>
   %integers = vector.load %input_view[%input_offset] : view<256xi32> -> vector<8xi32>
   %payload = vector.sitofp %integers : vector<8xi32> to vector<8xf32>
@@ -32,12 +34,13 @@ kernel.def target(@fragment_numeric_coordinates_gfx11) @fragment_numeric_coordin
   vector.fragment.store<result> %fragment, %shared_view[%origin, %origin] shape [%extent, %extent] : vector<8xf32>, view<16x16xbf16, %transposed_layout>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %loaded = vector.fragment.load<result> %shared_view[%origin, %origin] shape [%extent, %extent] : view<16x16xbf16, %transposed_layout> -> vector<8xbf16>
+  vector.fragment.store<result> %loaded, %native_roundtrip_view[%origin, %origin] shape [%extent, %extent] : vector<8xbf16>, view<16x16xbf16, %transposed_layout>
   %restored = vector.extf %loaded : vector<8xbf16> to vector<8xf32>
   vector.fragment.store<result> %restored, %roundtrip_view[%origin, %origin] shape [%extent, %extent] : vector<8xf32>, view<16x16xf32, %transposed_layout>
   kernel.return
 }
 
-func.def @fragment_numeric_coordinates_oracle(%input_buffer: buffer, %direct_buffer: buffer, %roundtrip_buffer: buffer) {
+func.def @fragment_numeric_coordinates_oracle(%input_buffer: buffer, %direct_buffer: buffer, %native_roundtrip_buffer: buffer, %roundtrip_buffer: buffer) {
   %base = index.constant 0 : offset
   %begin = index.constant 0 : index
   %lane_count = index.constant 32 : index
@@ -48,6 +51,7 @@ func.def @fragment_numeric_coordinates_oracle(%input_buffer: buffer, %direct_buf
   %transposed_layout = encoding.layout.strided [1, 16] : encoding<layout>
   %input_view = buffer.view %input_buffer[%base] : buffer -> view<256xi32>
   %direct_view = buffer.view %direct_buffer[%base] : buffer -> view<16x16xbf16, %transposed_layout>
+  %native_roundtrip_view = buffer.view %native_roundtrip_buffer[%base] : buffer -> view<16x16xbf16, %transposed_layout>
   %roundtrip_view = buffer.view %roundtrip_buffer[%base] : buffer -> view<16x16xf32, %transposed_layout>
   scf.for %lane = [%begin to %lane_count step %step] {
     %row_parity = index.div %lane, %extent : index
@@ -62,6 +66,7 @@ func.def @fragment_numeric_coordinates_oracle(%input_buffer: buffer, %direct_buf
       %row_offset = index.mul %element, %row_step : index
       %row = index.add %row_parity, %row_offset : index
       view.store %narrow, %direct_view[%row, %column] : bf16, view<16x16xbf16, %transposed_layout>
+      view.store %narrow, %native_roundtrip_view[%row, %column] : bf16, view<16x16xbf16, %transposed_layout>
       view.store %restored, %roundtrip_view[%row, %column] : f32, view<16x16xf32, %transposed_layout>
     }
   }
@@ -72,9 +77,11 @@ check.scenario public @fragment_numeric_coordinates_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(257) step(1) : tensor<256xi32>
     %direct = check.generate.fill value(-1.0) : tensor<16x16xbf16>
+    %native_roundtrip = check.generate.fill value(-1.0) : tensor<16x16xbf16>
     %roundtrip = check.generate.fill value(-1.0) : tensor<16x16xf32>
-    check.compare<@fragment_numeric_coordinates, @fragment_numeric_coordinates_oracle>(%input, %direct, %roundtrip) : (tensor<256xi32>, tensor<16x16xbf16>, tensor<16x16xf32>) -> () {
+    check.compare<@fragment_numeric_coordinates, @fragment_numeric_coordinates_oracle>(%input, %direct, %native_roundtrip, %roundtrip) : (tensor<256xi32>, tensor<16x16xbf16>, tensor<16x16xbf16>, tensor<16x16xf32>) -> () {
       check.expect.bitwise actual(%direct) expected(%direct) : tensor<16x16xbf16>
+      check.expect.bitwise actual(%native_roundtrip) expected(%native_roundtrip) : tensor<16x16xbf16>
       check.expect.bitwise actual(%roundtrip) expected(%roundtrip) : tensor<16x16xf32>
     }
   }

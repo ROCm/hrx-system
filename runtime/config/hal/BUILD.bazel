@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@bazel_skylib//lib:selects.bzl", "selects")
 load("//build_tools/bazel:settings.bzl", "iree_string_list_flag")
 
 package(default_visibility = ["//visibility:public"])
@@ -17,6 +18,8 @@ DEFAULT_DRIVERS = [
 
 SUPPORTED_DRIVERS = [
     "amd",
+    "amd-gpu",
+    "amd-xdna",
     "amdgpu",
     "task",
     "vulkan",
@@ -56,7 +59,44 @@ label_flag(
         },
     )
     for driver in SUPPORTED_DRIVERS
+    if not driver.startswith("amd-") and driver != "amd"
 ]
+
+# The shared driver is present for either engine. `amd` selects both; individual
+# selections never depend on the other engine's implementation or registration.
+[
+    config_setting(
+        name = "selected_" + driver.replace("-", "_"),
+        flag_values = {":drivers": driver},
+    )
+    for driver in [
+        "amd",
+        "amd-gpu",
+        "amd-xdna",
+    ]
+]
+
+[
+    selects.config_setting_group(
+        name = "driver_amd_" + engine,
+        match_any = [
+            ":selected_amd",
+            ":selected_amd_" + engine,
+        ],
+    )
+    for engine in [
+        "gpu",
+        "xdna",
+    ]
+]
+
+selects.config_setting_group(
+    name = "driver_amd",
+    match_any = [
+        ":driver_amd_gpu",
+        ":driver_amd_xdna",
+    ],
+)
 
 iree_string_list_flag(
     name = "executable_loaders",

@@ -408,7 +408,8 @@ BENCHMARK_DEFINE_F(StreamingBenchmark, ChunkSize)(benchmark::State& state) {
           /*stride=*/NULL, CountCallback, &count));
     }
     IREE_CHECK_OK(iree_tokenizer_regex_exec_finalize(
-        &dfa, &exec_state, text_1m_.size(), CountCallback, &count));
+        &dfa, &exec_state, text_1m_.size(), iree_string_view_empty(),
+        CountCallback, &count));
     benchmark::DoNotOptimize(count);
   }
   state.SetBytesProcessed(state.iterations() * text_1m_.size());

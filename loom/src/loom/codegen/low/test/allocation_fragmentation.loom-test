@@ -387,3 +387,75 @@ value %alias: test.i32 -> target_id[0:1]
 value %left: test.i32 -> target_id[1:1]
 value %right: test.i32 -> spill_slot[0:1]
 value %sum: test.i32 -> target_id[1:1]
+
+// ====
+
+// Two fixed scalars fragment the six-unit bank. Splitting only the first
+// one frees the four-unit load; another split would add an unnecessary copy.
+// RUN: emit low-allocation-query @first_cut_frees_wide_slot spill-free spill-count copy-count test.i32=6 fixed=%first:target_id:2:1 fixed=%second:target_id:0:1
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @first_cut_frees_wide_slot(%first: reg<test.i32>, %second: reg<test.i32>, %address: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32 x4>) asm {
+  %wide = test.load.v4i32 %address
+  return %first, %second, %wide
+}
+
+// ----
+spills: 0
+materialized traffic: stores=0 reloads=0
+copies: coalesced=0 materialized=1
+
+// ====
+
+// The same repair is required when the first fixed scalar occupies the
+// upper wide slot instead of the lower one.
+// RUN: emit low-allocation-query @first_cut_at_upper_slot spill-free spill-count copy-count test.i32=6 fixed=%first:target_id:4:1 fixed=%second:target_id:0:1
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @first_cut_at_upper_slot(%first: reg<test.i32>, %second: reg<test.i32>, %address: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32 x4>) asm {
+  %wide = test.load.v4i32 %address
+  return %first, %second, %wide
+}
+
+// ----
+spills: 0
+materialized traffic: stores=0 reloads=0
+copies: coalesced=0 materialized=1
+
+// ====
+
+// Free units alone do not remove fragmentation. Reallocation after one
+// split discovers that the other fixed scalar can stay in place.
+// RUN: emit low-allocation-query @first_cut_with_spare_capacity spill-free spill-count copy-count test.i32=8 fixed=%first:target_id:4:1 fixed=%second:target_id:0:1
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @first_cut_with_spare_capacity(%first: reg<test.i32>, %second: reg<test.i32>, %address: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32 x4>) asm {
+  %wide = test.load.v4i32 %address
+  return %first, %second, %wide
+}
+
+// ----
+spills: 0
+materialized traffic: stores=0 reloads=0
+copies: coalesced=0 materialized=1
+
+// ====
+
+// A four-unit slot is already free: the complete repair path emits no
+// transfers when both fixed scalars can remain in their incoming locations.
+// RUN: emit low-allocation-query @fixed_values_already_fit spill-free spill-count copy-count test.i32=8 fixed=%first:target_id:2:1 fixed=%second:target_id:0:1
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @fixed_values_already_fit(%first: reg<test.i32>, %second: reg<test.i32>, %address: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32 x4>) asm {
+  %wide = test.load.v4i32 %address
+  return %first, %second, %wide
+}
+
+// ----
+spills: 0
+materialized traffic: stores=0 reloads=0
+copies: coalesced=0 materialized=0

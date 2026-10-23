@@ -34,6 +34,75 @@ iree_status_t loom_serve_media_image_request_size(
   return iree_ok_status();
 }
 
+static void loom_serve_media_image_request_write_descriptor(
+    const loom_serve_media_image_info_t* info, iree_const_byte_span_t metadata,
+    uint32_t output_rows, iree_byte_span_t bytes) {
+  const iree_host_size_t pixel_offset = iree_host_align(
+      LOOM_SERVE_MEDIA_IMAGE_REQUEST_HEADER_BYTES + metadata.data_length,
+      LOOM_SERVE_MEDIA_IMAGE_REQUEST_PIXEL_ALIGNMENT);
+  memset(bytes.data, 0, LOOM_SERVE_MEDIA_IMAGE_REQUEST_HEADER_BYTES);
+  const uint32_t fields[LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_COUNT] = {
+      [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_VERSION] =
+          LOOM_SERVE_MEDIA_IMAGE_REQUEST_VERSION,
+      [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_FORMAT] = info->format,
+      [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_WIDTH] = info->width,
+      [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_HEIGHT] = info->height,
+      [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_DISPLAY_WIDTH] =
+          info->display_width,
+      [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_DISPLAY_HEIGHT] =
+          info->display_height,
+      [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_ORIENTATION] = info->orientation,
+      [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_OUTPUT_ROWS] = output_rows,
+      [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_METADATA_OFFSET] =
+          LOOM_SERVE_MEDIA_IMAGE_REQUEST_HEADER_BYTES,
+      [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_METADATA_LENGTH] =
+          (uint32_t)metadata.data_length,
+      [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_PIXEL_OFFSET] =
+          (uint32_t)pixel_offset,
+      [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_PIXEL_LENGTH] =
+          (uint32_t)info->pixel_length,
+      [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_PIXEL_FORMAT] = info->pixel_format,
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(fields); ++i) {
+    iree_unaligned_store_le_u32(bytes.data + i * sizeof(uint32_t), fields[i]);
+  }
+  if (metadata.data_length) {
+    memcpy(bytes.data + LOOM_SERVE_MEDIA_IMAGE_REQUEST_HEADER_BYTES,
+           metadata.data, metadata.data_length);
+  }
+  const iree_host_size_t metadata_end =
+      LOOM_SERVE_MEDIA_IMAGE_REQUEST_HEADER_BYTES + metadata.data_length;
+  memset(bytes.data + metadata_end, 0, pixel_offset - metadata_end);
+}
+
+iree_status_t loom_serve_media_image_request_describe(
+    const loom_serve_media_image_info_t* info, iree_const_byte_span_t metadata,
+    uint32_t output_rows, iree_allocator_t host_allocator,
+    iree_vm_buffer_t** out_descriptor) {
+  *out_descriptor = NULL;
+  iree_host_size_t packet_length = 0;
+  IREE_RETURN_IF_ERROR(loom_serve_media_image_request_size(
+      info, metadata.data_length, &packet_length));
+  const iree_host_size_t length = iree_host_align(
+      LOOM_SERVE_MEDIA_IMAGE_REQUEST_HEADER_BYTES + metadata.data_length,
+      LOOM_SERVE_MEDIA_IMAGE_REQUEST_PIXEL_ALIGNMENT);
+  iree_vm_buffer_t* descriptor = NULL;
+  IREE_RETURN_IF_ERROR(iree_vm_buffer_create(
+      length, LOOM_SERVE_MEDIA_IMAGE_REQUEST_PIXEL_ALIGNMENT, host_allocator,
+      &descriptor));
+  iree_byte_span_t bytes;
+  iree_status_t status =
+      iree_vm_buffer_map_write(descriptor, 0, length, &bytes);
+  if (iree_status_is_ok(status)) {
+    loom_serve_media_image_request_write_descriptor(info, metadata, output_rows,
+                                                    bytes);
+    *out_descriptor = descriptor;
+  } else {
+    iree_vm_buffer_release(descriptor);
+  }
+  return status;
+}
+
 static iree_status_t loom_serve_media_image_request_allocate(
     const loom_serve_media_image_request_t* request,
     iree_allocator_t host_allocator, iree_vm_buffer_t** out_packet,
@@ -58,40 +127,9 @@ static iree_status_t loom_serve_media_image_request_allocate(
   if (iree_status_is_ok(status)) {
     // Initialize only control and alignment bytes; the codec writes the exact
     // complete plane. A failed decoder never publishes a partial packet.
-    memset(bytes.data, 0, LOOM_SERVE_MEDIA_IMAGE_REQUEST_HEADER_BYTES);
-    memset(bytes.data + metadata_end, 0, pixel_offset - metadata_end);
+    loom_serve_media_image_request_write_descriptor(
+        info, request->metadata, request->output_rows, bytes);
     memset(bytes.data + pixel_end, 0, packet_length - pixel_end);
-    const uint32_t fields[LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_COUNT] = {
-        [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_VERSION] =
-            LOOM_SERVE_MEDIA_IMAGE_REQUEST_VERSION,
-        [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_FORMAT] = info->format,
-        [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_WIDTH] = info->width,
-        [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_HEIGHT] = info->height,
-        [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_DISPLAY_WIDTH] =
-            info->display_width,
-        [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_DISPLAY_HEIGHT] =
-            info->display_height,
-        [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_ORIENTATION] = info->orientation,
-        [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_OUTPUT_ROWS] =
-            request->output_rows,
-        [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_METADATA_OFFSET] =
-            LOOM_SERVE_MEDIA_IMAGE_REQUEST_HEADER_BYTES,
-        [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_METADATA_LENGTH] =
-            (uint32_t)request->metadata.data_length,
-        [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_PIXEL_OFFSET] =
-            (uint32_t)pixel_offset,
-        [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_PIXEL_LENGTH] =
-            (uint32_t)info->pixel_length,
-        [LOOM_SERVE_MEDIA_IMAGE_REQUEST_FIELD_PIXEL_FORMAT] =
-            info->pixel_format,
-    };
-    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(fields); ++i) {
-      iree_unaligned_store_le_u32(bytes.data + i * sizeof(uint32_t), fields[i]);
-    }
-    if (request->metadata.data_length) {
-      memcpy(bytes.data + LOOM_SERVE_MEDIA_IMAGE_REQUEST_HEADER_BYTES,
-             request->metadata.data, request->metadata.data_length);
-    }
     *out_pixels =
         iree_make_byte_span(bytes.data + pixel_offset, info->pixel_length);
     *out_packet = packet;

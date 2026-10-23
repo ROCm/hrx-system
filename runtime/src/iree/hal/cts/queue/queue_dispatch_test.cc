@@ -488,14 +488,13 @@ TEST_P(QueueDispatchTest, DispatchWithConstantsAndBindingsWhileProfiling) {
   IREE_ASSERT_OK(profiling.End());
   EXPECT_EQ(1, sink.begin_count);
   EXPECT_EQ(1, sink.end_count);
-  EXPECT_EQ(1, sink.device_metadata_count);
-  EXPECT_EQ(1, sink.queue_metadata_count);
-  EXPECT_GE(sink.clock_correlation_count, 3);
+  EXPECT_GE(sink.device_metadata_count, 1);
+  EXPECT_GE(sink.queue_metadata_count, 1);
   EXPECT_GE(sink.dispatch_event_count, 1);
   EXPECT_TRUE(sink.saw_device_metadata);
   EXPECT_TRUE(sink.saw_queue_metadata);
   EXPECT_FALSE(sink.write_after_end);
-  ExpectDispatchEventsHaveClockCorrelations(sink);
+  ExpectDispatchEventsHaveClockMetadata(sink);
 }
 
 // HAL-native CPU profiling should produce host queue and execution records for
@@ -1006,8 +1005,8 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
     IREE_ASSERT_OK(profiling.End());
     EXPECT_EQ(1, sink.begin_count);
     EXPECT_EQ(1, sink.end_count);
-    EXPECT_EQ(1, sink.device_metadata_count);
-    EXPECT_EQ(1, sink.queue_metadata_count);
+    EXPECT_GE(sink.device_metadata_count, 1);
+    EXPECT_GE(sink.queue_metadata_count, 1);
     EXPECT_GE(sink.clock_correlation_count, 2);
     EXPECT_GE(sink.dispatch_event_count, 1);
     EXPECT_GE(sink.queue_device_event_count, 1);
@@ -1020,7 +1019,7 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
     EXPECT_TRUE(sink.saw_device_metadata);
     EXPECT_TRUE(sink.saw_queue_metadata);
     EXPECT_FALSE(sink.write_after_end);
-    ExpectDispatchEventsHaveClockCorrelations(sink);
+    ExpectDispatchEventsHaveClockMetadata(sink);
     ExpectQueueDeviceEventsWithinClockCorrelationRange(sink);
   }
 

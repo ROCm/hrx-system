@@ -17,12 +17,14 @@ loom_cc_library(
     srcs = ["program_plan.c"],
     hdrs = ["program_plan.h"],
     deps = [
+        "//loom/binding/c:interop",
+        "//loom/binding/c:loomc",
         "//loom/src/loom/codegen/low:text_asm",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/link:module_index",
         "//loom/src/loom/ops/command",
-        "//loom/src/loom/pass:builtin_registry",
+        "//loom/src/loom/pass:registry",
         "//loom/src/loom/target/arch/cmd:artifact_set",
         "//loom/src/loom/target/arch/cmd:program",
         "//loom/src/loom/target/arch/cmd/lower:program_plan",
@@ -40,7 +42,6 @@ loom_cc_library(
     visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
     deps = [
         ":program_plan",
-        "//loom/src/loom/target/arch/cmd:provider",
         "//loom/src/loom/tools/loom-check:provider",
         "//runtime/src/iree/base",
     ],

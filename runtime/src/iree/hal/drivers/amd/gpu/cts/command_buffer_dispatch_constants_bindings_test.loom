@@ -1,0 +1,18 @@
+kernel.def export("command_buffer_dispatch_constants_bindings_test") @scale_and_offset() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%input: buffer, %output: buffer, %scale: i32, %offset: i32) {
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<4xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<4xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %count = index.constant 4 : index
+  scf.for %i = [%zero to %count step %one] {
+    %value = view.load %input_view[%i] : view<4xi32> -> i32
+    %product = scalar.muli %value, %scale : i32
+    %result = scalar.addi %product, %offset : i32
+    view.store %result, %output_view[%i] : i32, view<4xi32>
+  }
+  kernel.return
+}

@@ -34,6 +34,8 @@ static loom_symbolic_product_t loom_symbolic_product_operand(
       .scale = 1,
       .factors = value_id,
       .factor_count = 1,
+      .materialized_expression_value_id = LOOM_VALUE_ID_INVALID,
+      .materialized_component_value_id = LOOM_VALUE_ID_INVALID,
   };
   if (loom_symbolic_expr_is_linear(expression) && expression->constant == 0 &&
       expression->term_count == 1) {
@@ -90,6 +92,9 @@ iree_status_t loom_symbolic_product_multiply(
       .scale = scale,
       .factors = factors,
       .factor_count = factor_count,
+      .operand_values = {left_value, right_value},
+      .materialized_expression_value_id = LOOM_VALUE_ID_INVALID,
+      .materialized_component_value_id = LOOM_VALUE_ID_INVALID,
   };
   return iree_ok_status();
 }

@@ -345,7 +345,7 @@ func.def @dynamic_prefix_is_unchanged(%initial: vector<2x2x4xf32>, %dynamic: ind
 // ====
 // RUN: pass sroa-vector-banks
 
-func.def @aggregate_result_escape_is_unchanged(%initial: vector<2x2x4xf32>) {
+func.def @aggregate_result_reconstruction(%initial: vector<2x2x4xf32>) {
   %loop_begin = index.constant 0 : index
   %loop_end = index.constant 1 : index
   %loop_step = index.constant 1 : index
@@ -354,6 +354,32 @@ func.def @aggregate_result_escape_is_unchanged(%initial: vector<2x2x4xf32>) {
     %updated = vector.insert %value into %bank[0, 0] : vector<4xf32>, vector<2x2x4xf32>
     scf.yield %updated : vector<2x2x4xf32>
   }
+  test.use %result : vector<2x2x4xf32>
+  func.return
+}
+
+// ----
+func.def @aggregate_result_reconstruction(%initial: vector<2x2x4xf32>) {
+  %loop_begin = index.constant 0 : index
+  %loop_end = index.constant 1 : index
+  %loop_step = index.constant 1 : index
+  %initial_slot_0 = vector.extract %initial[0, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  %initial_slot_1 = vector.extract %initial[0, 1] : vector<2x2x4xf32> -> vector<4xf32>
+  %initial_slot_2 = vector.extract %initial[1, 0] : vector<2x2x4xf32> -> vector<4xf32>
+  %initial_slot_3 = vector.extract %initial[1, 1] : vector<2x2x4xf32> -> vector<4xf32>
+  %result_slot_0, %result_slot_1, %result_slot_2, %result_slot_3 = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank_slot_0 = %initial_slot_0 : vector<4xf32>, %bank_slot_1 = %initial_slot_1 : vector<4xf32>, %bank_slot_2 = %initial_slot_2 : vector<4xf32>, %bank_slot_3 = %initial_slot_3 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
+    %22 = vector.broadcast %bank_slot_0 : vector<4xf32> -> vector<2x2x4xf32>
+    %23 = vector.insert %bank_slot_1 into %22[0, 1] : vector<4xf32>, vector<2x2x4xf32>
+    %24 = vector.insert %bank_slot_2 into %23[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+    %bank = vector.insert %bank_slot_3 into %24[1, 1] : vector<4xf32>, vector<2x2x4xf32>
+    %value = vector.extract %bank[0, 0] : vector<2x2x4xf32> -> vector<4xf32>
+    %updated = vector.insert %value into %bank[0, 0] : vector<4xf32>, vector<2x2x4xf32>
+    scf.yield %value, %bank_slot_1, %bank_slot_2, %bank_slot_3 : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
+  }
+  %26 = vector.broadcast %result_slot_0 : vector<4xf32> -> vector<2x2x4xf32>
+  %27 = vector.insert %result_slot_1 into %26[0, 1] : vector<4xf32>, vector<2x2x4xf32>
+  %28 = vector.insert %result_slot_2 into %27[1, 0] : vector<4xf32>, vector<2x2x4xf32>
+  %result = vector.insert %result_slot_3 into %28[1, 1] : vector<4xf32>, vector<2x2x4xf32>
   test.use %result : vector<2x2x4xf32>
   func.return
 }
@@ -873,7 +899,7 @@ COMPILE-REPORT: source_low selected_ops=0 emitted_ops=0 rows=0 unkeyed_maximum_e
 COMPILE-REPORT: source_boundary_projections rows=12 selected=2 preserved=2 rejected=8
 COMPILE-REPORT: source_boundary_projection[0] function=report_selected_static_bank source_op=scf.for projection=loop-vector-bank boundary=loop_state outcome=selected reason=static_component_accesses operation=0 source_value=0 source_type=vector<2x2xf32> prefix_rank=2 component_type=f32 components=4
 COMPILE-REPORT: source_boundary_projection[1] function=report_preserved_whole_vector source_op=scf.for projection=loop-vector-bank boundary=loop_state outcome=preserved reason=whole_value_use operation=0 source_value=0 source_type=vector<4xf32>
-COMPILE-REPORT: source_boundary_projection[2] function=report_preserved_unobserved_bank source_op=scf.for projection=loop-vector-bank boundary=loop_state outcome=preserved reason=whole_value_use operation=0 source_value=0 source_type=vector<2xi32>
+COMPILE-REPORT: source_boundary_projection[2] function=report_preserved_unobserved_bank source_op=scf.for projection=loop-vector-bank boundary=loop_state outcome=preserved reason=no_component_access operation=0 source_value=0 source_type=vector<2xi32>
 COMPILE-REPORT: source_boundary_projection[3] function=report_rejected_dynamic_access source_op=scf.for projection=loop-vector-bank boundary=loop_state outcome=rejected reason=non_static_component_access operation=0 source_value=0 source_type=vector<4xf32>
 COMPILE-REPORT: source_boundary_projection[4] function=report_rejected_inconsistent_access source_op=scf.for projection=loop-vector-bank boundary=loop_state outcome=rejected reason=inconsistent_component_access operation=0 source_value=0 source_type=vector<2x2xf32> prefix_rank=1 component_type=vector<2xf32> components=2
 COMPILE-REPORT: source_boundary_projection[5] function=report_rejected_whole_use_after_access source_op=scf.for projection=loop-vector-bank boundary=loop_state outcome=rejected reason=unsupported_value_use operation=0 source_value=0 source_type=vector<2xf32> prefix_rank=1 component_type=f32 components=2

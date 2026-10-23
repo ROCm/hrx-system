@@ -18,7 +18,7 @@ loom_cc_library(
   TEXTUAL_HDRS
     "ops.inc"
   DEPS
-    loom::ops::op_defs
+    loom::ops::headers
     loom::target::arch::spirv::records::record_defs
     loom::target::types
   PUBLIC
@@ -46,7 +46,8 @@ loom_cc_library(
   DEPS
     ::op_defs
     loom::ir::builders
-    loom::ops::op_defs
+    loom::ops::builders
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 endif()
@@ -114,7 +115,8 @@ loom_cc_library(
     iree::base
     loom::ir::builders
     loom::target::arch::spirv::isa
-    loom::target::arch::spirv::scalar_types
+    loom::target::arch::spirv::vocabulary
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 endif()

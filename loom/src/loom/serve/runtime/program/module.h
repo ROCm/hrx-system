@@ -63,6 +63,12 @@ typedef struct loom_serve_module_options_t {
 // ranges. Feedback advances only the independent feedback timeline.
 // Returned values identify accepted submissions in |execution| only. The host
 // retains that context when interpreting results; they are not global handles.
+// fence(i64 work) -> hal.fence retains an accepted work timepoint, rejecting
+// values beyond this execution's submitted work. It excludes later work and
+// the independent feedback branch. join(hal.fence) imports an external
+// completion set into subsequent model work without a CPU wait or a global
+// device barrier. A null fence represents an empty dependency set. Neither
+// operation establishes ownership of storage referenced by other operations.
 //
 // The module retains |execution| and stage commands. Its declarations are
 // immutable. Per-invocation binding scratch lives in the process storage, so

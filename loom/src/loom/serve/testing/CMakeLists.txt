@@ -71,6 +71,7 @@ loom_cc_library(
     iree::base::threading
     iree::hal
     loom::serve::runtime::device
+    loom::serve::runtime::execution::workspace
     loom::serve::runtime::host
   TESTONLY
   PUBLIC
@@ -280,15 +281,15 @@ iree_py_library(
 endif()
 
 if(LOOM_TARGET_ARCH_VM)
-loom_cc_binary(
+loom_cc_library(
   NAME
-    text_request_check
+    text_policy
+  HDRS
+    "text_policy.h"
   SRCS
-    "text_request.c"
+    "text_policy.c"
   DEPS
     iree::base
-    iree::base::internal::arena
-    iree::base::tooling::flags
     iree::io::file_handle
     iree::tokenizer
     iree::tokenizer::format::huggingface::tokenizer_json
@@ -299,6 +300,26 @@ loom_cc_binary(
     loom::serve::runtime::program::compilation
     loom::serve::runtime::program::input
     loom::serve::runtime::program::json
+    loom::serve::service::text::chat
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_binary(
+  NAME
+    text_request_check
+  SRCS
+    "text_request.c"
+  DEPS
+    ::text_policy
+    iree::base
+    iree::base::internal::arena
+    iree::base::tooling::flags
+    iree::io::file_handle
+    iree::vm
+    loom::serve::runtime::program::compilation
     loom::serve::service::text::chat
     loom::util::json
     loom::util::stream

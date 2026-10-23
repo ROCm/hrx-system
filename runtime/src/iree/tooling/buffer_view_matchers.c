@@ -84,7 +84,23 @@ static bool iree_hal_compare_strided_elements_exact(
       iree_hal_element_dense_byte_count(element_type);
   const uint8_t* expected_ptr = expected_elements.data;
   const uint8_t* actual_ptr = actual_elements.data;
-  for (iree_host_size_t i = 0; i < element_count; ++i) {
+  iree_host_size_t first_element = 0;
+  if (expected_stride == 1 && actual_stride == 1) {
+    // Compare dense runs together instead of calling memcmp for every element.
+    // Only the first differing block needs a scalar scan for its element index.
+    while (first_element < element_count) {
+      iree_host_size_t block_count =
+          iree_min(element_count - first_element, 4096);
+      iree_host_size_t block_length = block_count * element_size;
+      if (memcmp(expected_ptr, actual_ptr, block_length) != 0) {
+        break;
+      }
+      expected_ptr += block_length;
+      actual_ptr += block_length;
+      first_element += block_count;
+    }
+  }
+  for (iree_host_size_t i = first_element; i < element_count; ++i) {
     int cmp = memcmp(expected_ptr, actual_ptr, element_size);
     if (cmp != 0) {
       *out_index = i;

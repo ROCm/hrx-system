@@ -27,9 +27,9 @@ class JitWorkspaceTest : public loom_serve::testing::JitModuleTest {
       IREE_EXPECT_OK(loom_serve_execution_drain(held_.execution));
     }
     if (held_.completion) {
-      IREE_EXPECT_OK(iree_hal_semaphore_wait(
-          held_.completion, held_.completion_value, iree_infinite_timeout(),
-          IREE_ASYNC_WAIT_FLAG_NONE));
+      IREE_EXPECT_OK(
+          loom_serve_workspace_wait(loom_serve_device_workspace(device_owner_),
+                                    held_.completion, held_.completion_value));
     }
     loom_serve_execution_release(held_.execution);
     iree_hal_semaphore_release(held_.completion);

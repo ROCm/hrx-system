@@ -21,22 +21,29 @@ func.def public @mix(%input: i64, %delta: i64) -> (i64) {
 
 The target selects SysV AMD64 by default, independently of the compiler host.
 The explicit function spelling is
-`abi(object_function, {calling_convention = "sysv"})`. The ELF product accepts
-scalar arguments and one result: `i32`, `i64`, and 64-bit buffer addresses,
-indices, or offsets. The first six arguments use registers; remaining arguments
-use the caller's stack. Unused arguments retain their ABI positions. Private
-functions, recursion, and direct calls to external C symbols remain outlined.
-Unsupported calling conventions or payload classes are diagnosed before an
-object is returned.
+`abi(object_function, {calling_convention = "sysv"})`. Ordinary Loom functions
+use their explicit flat scalar signatures. Imported `extern "C"` functions
+instead retain complete source objects across the High IR boundary. The x86
+projection supports Booleans, signed and unsigned integers, enums, floating
+types through `f64`, pointers, native vectors admitted by the selected profile,
+arrays, records, and packed records. Register groups, stack arguments, and
+hidden result pointers follow the platform ABI. Unsupported calling conventions
+or source object families are diagnosed before an object is returned.
+
+Pointers remain a base buffer plus byte offset inside Loom. The native boundary
+collapses that pair to one machine address, and reconstructs a zero-offset pair
+when a pointer enters Loom. Direct calls to external C definitions use the same
+projection as exported definitions, so a system linker can resolve calls in
+either direction without wrappers.
 
 Module-internal definitions may return several flattened values because every
 caller and callee is emitted together. Integer-class results use RAX and RDX;
 SSE-class results independently use vector registers 0 and 1. Additional
 results use a compact caller-owned block after the complete stack-argument
 area. A callee retains that block across nested calls, while allocation plans
-all register results as one parallel exit. Public and imported functions remain
-limited to one result until their source aggregate layout supplies a real
-platform ABI instead of an ambiguous flat value list.
+all register results as one parallel exit. A retained C source contract replaces
+that internal convention with the platform's complete-object classification at
+the public or imported boundary.
 
 The shared allocator preserves values across call clobbers, inserts spill
 storage, and resolves register permutations. When a signature exceeds the
@@ -58,8 +65,8 @@ reserves RSP before the shared scheduler and allocator run. These constrain
 boundary transfers without pinning the argument's entire SSA lifetime. Native
 instruction preparation consumes their final packets, edge transport, and CFG
 block ordinals, retaining actual GPR writes, including implicit writes and
-allocation-generated moves. This
-determines the minimal callee-preserved register envelope before byte encoding.
+allocation-generated moves. This determines the minimal callee-preserved
+register envelope before byte encoding.
 All returns reach its common restore sequence.
 
 The encoder consumes concrete operands and generated opcode facts. It has no
@@ -71,9 +78,10 @@ The returned artifact is independent of all compiler storage.
 `test/function.loom-test` checks which registers require preservation, including
 writes introduced by allocation transport. Focused writer tests verify save and
 restore order and branch destinations from prepared native instructions;
-instruction encoding has its own byte-level tests. `callable_link_test` links a
-Loom-generated object into a normal host test with independent arithmetic and
-memory references; the compiler exits before linking begins.
+instruction encoding has its own byte-level tests. The C++ native ABI example
+links a Loom-generated object into a normal host binary, exchanges records and
+pointers in both directions, and calls unresolved native definitions from Loom;
+the compiler exits before linking begins.
 
 ## Task HAL kernels
 

@@ -12,6 +12,26 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    virtual_pool
+  HDRS
+    "virtual_pool.h"
+  SRCS
+    "virtual_pool.c"
+  DEPS
+    ::memory
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::memory::buffer_range
+    loom::serve::runtime::host::wake
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     memory
   HDRS
     "memory.h"
@@ -23,6 +43,7 @@ loom_cc_library(
     iree::base::threading
     iree::hal
     iree::hal::memory::slab_cache
+    loom::serve::runtime::host::wake
   PUBLIC
 )
 endif()
@@ -42,6 +63,7 @@ loom_cc_library(
     loom::serve::runtime::device
     loom::serve::runtime::execution
     loom::serve::runtime::execution::retirement
+    loom::serve::runtime::parameter::residency
   PUBLIC
 )
 endif()
@@ -113,17 +135,28 @@ if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
     memory_tests
+  HDRS
+    "memory_test_fixture.h"
   SRCS
     "memory_test.cc"
+    "memory_test_fixture.cc"
+    "virtual_pool_test.cc"
   DEPS
     ::memory
+    ::virtual_pool
+    iree::async
     iree::base
+    iree::base::threading
     iree::hal
     iree::hal::memory::fixed_block_pool
+    iree::hal::memory::tlsf_pool
     iree::hal::testing::deferred_pool
     iree::testing::gtest
     loom::serve::runtime::device
     loom::serve::runtime::execution
+    loom::serve::runtime::execution::queues
+    loom::serve::runtime::execution::workspace
+    loom::serve::runtime::parameter::residency
     loom::serve::testing::device
     loom::serve::testing::native_allocator
   TESTONLY

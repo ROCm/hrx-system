@@ -30,6 +30,19 @@ Bazel exposes the matching LLVM install through the optional
 enabled. `dev.py bazel clang-tidy` enables it with
 `--repo_env=IREE_CLANG_TIDY_LLVM=auto`.
 
+Presubmits that will run Bazel clang-tidy inherit this same repository selection
+through their hygiene, query, test, and analysis phases. Hooks without eligible
+inputs or available LLVM tools leave the repository setting unchanged. This
+keeps the hook from alternating between the stub and LLVM-backed repository.
+
+Changed-file checks pass the JSON source/header list through
+`--aspects_parameters=selected_files`. Selection belongs to the clang-tidy aspect
+and does not change the configuration of compiled targets. A selected source
+gets its own analysis action; a selected header analyzes every translation unit
+whose declared header closure includes it. An empty JSON list selects no sources,
+while an omitted selection analyzes all sources. The `iree_clang_tidy` BUILD rule
+always analyzes all sources of its selected targets.
+
 Discovery checks `IREE_CLANG_TIDY_LLVM_CONFIG`, `LLVM_CONFIG`,
 `IREE_CLANG_TIDY_LLVM_ROOT`, `IREE_LLVM_ROOT`, `LLVM_ROOT`, and then `PATH`.
 The selected `llvm-config --bindir` must contain the matching `clang-tidy` and

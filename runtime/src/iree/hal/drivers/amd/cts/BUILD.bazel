@@ -4,11 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_target_profile")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+load("//runtime/src/iree/hal/drivers/amd/gpu/cts:testdata.bzl", "iree_hal_amd_gpu_cts_testdata")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -46,7 +46,7 @@ iree_runtime_cc_test(
         "//runtime/config/hal:driver_task": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }) + select({
-        "//runtime/config/hal:driver_amd": [],
+        "//runtime/config/hal:driver_amd_xdna": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }) + select({
         "//libamdf/config/family:xdna": [],
@@ -71,13 +71,23 @@ iree_runtime_cc_test(
 
 _EXECUTION_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/target:amdgpu_artifacts",
-    "//loom/config/target/amdgpu:descriptor_set_gfx11_generic_core",
-    "//loom/config/target/amdgpu:descriptor_set_gfx12_generic_core",
-]) + select({
+]) + select(dict([
+    (
+        "//loom/config/target/amdgpu:" + capability,
+        [],
+    )
+    for capability in LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
+] + [(
+    "//conditions:default",
+    ["@platforms//:incompatible"],
+)])) + select({
     "//runtime/config/hal:driver_task": [],
     "//conditions:default": ["@platforms//:incompatible"],
 }) + select({
-    "//runtime/config/hal:driver_amd": [],
+    "//runtime/config/hal:driver_amd_gpu": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+}) + select({
+    "//runtime/config/hal:driver_amd_xdna": [],
     "//conditions:default": ["@platforms//:incompatible"],
 }) + select({
     "//libamdf/config/family:gpu": [],
@@ -87,40 +97,10 @@ _EXECUTION_COMPATIBLE_WITH = loom_config_compatible_with([
     "//conditions:default": ["@platforms//:incompatible"],
 })
 
-_GPU_TARGETS = [
-    "gfx11-generic",
-    "gfx12-generic",
-]
-
-[
-    loom_target_profile(
-        name = "affine_profile_" + target,
-        family = "amdgpu",
-        selector = target,
-        target_compatible_with = _EXECUTION_COMPATIBLE_WITH,
-    )
-    for target in _GPU_TARGETS
-]
-
-[
-    loom_kernel_binary(
-        name = "affine_" + target,
-        testonly = True,
-        srcs = ["affine_i32.loom"],
-        out = "affine_" + target + ".hsaco",
-        target = ":affine_profile_" + target,
-        target_compatible_with = _EXECUTION_COMPATIBLE_WITH,
-    )
-    for target in _GPU_TARGETS
-]
-
-iree_c_embed_data(
-    name = "affine_images",
-    testonly = True,
-    srcs = [":affine_" + target for target in _GPU_TARGETS],
-    c_file_output = "affine_images.c",
-    h_file_output = "affine_images.h",
-    identifier = "iree_hal_amd_cts_affine_images",
+iree_hal_amd_gpu_cts_testdata(
+    name = "affine_testdata",
+    srcs = ["affine_i32.loom"],
+    backend_names = ["amd_cts_affine"],
     target_compatible_with = _EXECUTION_COMPATIBLE_WITH,
 )
 
@@ -137,11 +117,13 @@ iree_runtime_cc_test(
     ],
     target_compatible_with = _EXECUTION_COMPATIBLE_WITH,
     deps = [
-        ":affine_images",
+        ":affine_testdata",
         ":cpu_executable",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/cts:testdata",
         "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
         "//runtime/src/iree/hal/drivers/amd/registration",
         "//runtime/src/iree/hal/drivers/amd/xdna/image/testdata:mul_i32",
@@ -166,6 +148,9 @@ iree_runtime_cc_test(
         "runtime-resource=amd-xdna",
     ],
     target_compatible_with = ["@platforms//cpu:x86_64"] + select({
+        "//runtime/config/hal:driver_amd_xdna": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
         "//runtime/config/hal:driver_task": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }) + select({

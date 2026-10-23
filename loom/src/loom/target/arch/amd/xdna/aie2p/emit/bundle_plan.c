@@ -351,12 +351,6 @@ static iree_status_t loom_aie2p_bundle_plan_advance(
       (next_cycle - builder->next_issue_cycle) *
       loom_aie2p_bundle_encoding_single_slot_byte_length(
           builder->descriptor_set, AIE2P_CORE_DESCRIPTOR_REF_NOP);
-  if (gap_bytes >
-      LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE - builder->encoded_byte_length) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "AIE2P encoded leaf exceeds 16 KiB of core program memory");
-  }
   builder->encoded_byte_length += (iree_host_size_t)gap_bytes;
   builder->trailing_nop_byte_length += (iree_host_size_t)gap_bytes;
   builder->next_issue_cycle = (uint32_t)next_cycle;
@@ -419,12 +413,6 @@ static iree_status_t loom_aie2p_bundle_plan_append_bundle(
   const uint8_t byte_length =
       loom_aie2p_bundle_encoding_format_byte_length(format, slot_count);
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_advance(builder, issue_cycle));
-  if (builder->encoded_byte_length >
-      LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE - byte_length) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "AIE2P encoded leaf exceeds 16 KiB of core program memory");
-  }
   IREE_ASSERT_LT(builder->bundle_count, builder->bundle_capacity);
   const iree_host_size_t bundle_index = builder->bundle_count++;
   builder->bundles[bundle_index] = (loom_aie2p_planned_bundle_t){
@@ -649,13 +637,6 @@ static iree_status_t loom_aie2p_bundle_plan_try_place_control(
                 candidate_bundle->format, candidate_bundle->slot_count);
   const uint8_t new_byte_length = loom_aie2p_bundle_encoding_format_byte_length(
       format, candidate_slot_count);
-  if (new_byte_length > old_byte_length &&
-      builder->encoded_byte_length > LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE -
-                                         (new_byte_length - old_byte_length)) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "AIE2P encoded leaf exceeds 16 KiB of core program memory");
-  }
   if (inserts_bundle) {
     // The next row, or the stream endpoint, owns the end of this implicit NOP
     // run. Only the selected cycle becomes a row; the control reservation

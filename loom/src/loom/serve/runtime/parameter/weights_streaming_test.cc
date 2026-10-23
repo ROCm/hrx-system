@@ -10,6 +10,15 @@ namespace loom_serve::testing {
 class WindowedWeightsTest : public WeightsTest {
  protected:
   uint64_t SlabSize() const override { return 2 * 1024 * 1024; }
+  void SetUpDevice() override {
+    // The captured-source recipe packs two aligned halves into each of four
+    // staging lanes. These overlap both final parameter slabs during loading.
+    const uint64_t staging_bytes = 4 * 2 * iree_device_align(1048592, 64);
+    const uint64_t memory_limit =
+        2 * SlabSize() + iree_device_align(staging_bytes, SlabSize());
+    IREE_ASSERT_OK(AcquireWeightDeviceGroup(GetParam(), SlabSize(),
+                                            memory_limit, &group_));
+  }
   void WriteWindowedCheckpoint(const std::string& path, int32_t offset = 0) {
     constexpr size_t kElements = 524296;
     const std::string header =
@@ -114,9 +123,10 @@ TEST_P(WindowedWeightsTest, CapturedSourcesWaitForEveryDestinationSlab) {
   IREE_ASSERT_OK(CreateSourceRoots(0, 1, &root,
                                    {{path_.path()}, {adapter_path_.path()}},
                                    "streaming_policy.loom"));
-  IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0]));
-  IREE_ASSERT_OK(loom_serve_weights_import_readiness(plans_[0], execution_));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[0]));
   ASSERT_NO_FATAL_FAILURE(VerifyWindowedStorage(true));
+  loom_serve_residency_release(residencies_[0]);
   const auto activity = loom_serve_weights_activity(plans_[0]);
   EXPECT_EQ(activity.read_bytes, 2097248u);
   EXPECT_EQ(activity.prepared_bytes, 2097184u);

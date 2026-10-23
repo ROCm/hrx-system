@@ -462,6 +462,7 @@ function(hrx_installed_tests_standard_environment TEST_NAME OUT_ENV OUT_ENV_MOD)
   set(_ENV_MOD
     "PATH=path_list_prepend:\${_HRX_INSTALLED_TEST_BIN_ROOT}"
     "PATH=path_list_prepend:\${CMAKE_CURRENT_LIST_DIR}/${_PREFIX_BIN_FROM_CTEST}"
+    "PATH=path_list_prepend:\${_HRX_INSTALLED_TEST_LIB_ROOT}"
     "LD_LIBRARY_PATH=path_list_prepend:\${_HRX_INSTALLED_TEST_LIB_ROOT}"
     "LD_LIBRARY_PATH=path_list_prepend:\${CMAKE_CURRENT_LIST_DIR}/${_PREFIX_LIB_FROM_CTEST}"
   )

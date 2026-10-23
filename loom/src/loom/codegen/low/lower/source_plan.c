@@ -15,6 +15,7 @@
 #include "loom/codegen/low/lower/contract_query.h"
 #include "loom/codegen/low/lower/contract_selection.h"
 #include "loom/codegen/low/lower/function_boundary.h"
+#include "loom/codegen/low/lower/realization.h"
 #include "loom/codegen/low/lower/rule_match.h"
 #include "loom/codegen/low/lower/rule_plan.h"
 #include "loom/codegen/low/lower/rule_source_memory.h"
@@ -184,7 +185,8 @@ static bool loom_low_lower_op_is_structural(
     return true;
   }
   if (iree_any_bit_set(traits, LOOM_TRAIT_CALLABLE_BOUNDARY) &&
-      loom_low_lower_source_call_is_structural(context->module, op)) {
+      loom_low_lower_source_call_is_structural(context->module, op) &&
+      !loom_low_lower_source_call_requires_projection(context, op)) {
     return true;
   }
   switch (op->kind) {
@@ -473,7 +475,8 @@ static iree_status_t loom_low_lower_visit_region_plan_ops(
 
 static iree_status_t loom_low_lower_prepare_plan(
     loom_low_lower_context_t* context, loom_region_t* source_body,
-    loom_low_lower_source_candidate_plan_t* candidate_plan) {
+    loom_low_lower_source_candidate_plan_t* candidate_plan,
+    iree_arena_allocator_t* realization_construction_arena) {
   const loom_low_lower_source_plan_observer_t* observer =
       context->policy->source_plan_observer;
   void* observer_state = NULL;
@@ -502,7 +505,8 @@ static iree_status_t loom_low_lower_prepare_plan(
     IREE_RETURN_IF_ERROR(observer->end(observer_state, context));
   }
   if (!loom_low_lower_context_diagnostic_limit_reached(context)) {
-    IREE_RETURN_IF_ERROR(loom_low_lower_source_memory_prepare(context));
+    IREE_RETURN_IF_ERROR(loom_low_lower_source_memory_prepare(
+        context, realization_construction_arena));
   }
   if (context->result->error_count == 0) {
     IREE_RETURN_IF_ERROR(loom_low_lower_function_boundary_finalize(context));
@@ -571,15 +575,12 @@ static bool loom_low_lower_selected_plan_preserves_volatile_memory(
   return false;
 }
 
-static iree_status_t loom_low_lower_finalize_selected_plans(
-    loom_low_lower_context_t* context) {
+static iree_status_t loom_low_lower_finalize_selected_plan_phase(
+    loom_low_lower_context_t* context,
+    loom_low_lower_rule_source_memory_plan_builder_t* source_memory_builder,
+    bool finalize_rules_only, bool skip_elided_rules) {
   const loom_low_lower_source_plan_t* source_plan =
       &context->lowering->source_plan;
-  iree_arena_allocator_t construction_arena;
-  iree_arena_initialize(context->module->arena.block_pool, &construction_arena);
-  loom_low_lower_rule_source_memory_plan_builder_t source_memory_builder = {
-      .arena = &construction_arena,
-  };
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < source_plan->selected_plan_count && iree_status_is_ok(status) &&
@@ -587,15 +588,32 @@ static iree_status_t loom_low_lower_finalize_selected_plans(
        ++i) {
     loom_low_lower_selected_plan_t* selected_plan =
         &source_plan->selected_plans[i];
+    const bool elided = iree_any_bit_set(selected_plan->flags,
+                                         LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED);
+    const bool recurrence_producer =
+        finalize_rules_only && selected_plan->rule != NULL &&
+        loom_low_lower_rule_source_memory_plan_requires_producer(
+            context, source_memory_builder, selected_plan);
+    if (iree_any_bit_set(selected_plan->flags,
+                         LOOM_LOW_LOWER_SELECTED_PLAN_RULE_FINALIZED) ||
+        (finalize_rules_only && selected_plan->rule == NULL) ||
+        (finalize_rules_only && elided && !recurrence_producer) ||
+        (skip_elided_rules && selected_plan->rule != NULL && elided)) {
+      continue;
+    }
     if (selected_plan->rule != NULL) {
       loom_low_lower_planning_scope_begin(context);
-      status = loom_low_lower_rule_plan_finalize(
-          context, &source_memory_builder, selected_plan);
+      status = loom_low_lower_rule_plan_finalize(context, source_memory_builder,
+                                                 selected_plan);
       loom_low_lower_planning_scope_end(context);
+      if (recurrence_producer && iree_status_is_ok(status) &&
+          context->result->error_count == 0) {
+        loom_low_lower_rule_source_memory_plan_record_producer(
+            context, source_memory_builder, selected_plan);
+      }
     } else if (selected_plan->kind ==
                    LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX &&
-               !iree_any_bit_set(selected_plan->flags,
-                                 LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED)) {
+               !elided) {
       const loom_value_id_t result =
           loom_op_const_results(selected_plan->source_op)[0];
       loom_type_t result_type = loom_type_none();
@@ -615,6 +633,11 @@ static iree_status_t loom_low_lower_finalize_selected_plans(
     } else if (selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE) {
       status = loom_low_lower_source_invoke_finalize(
           context, selected_plan->source_op, selected_plan->data.invoke);
+    } else if (selected_plan->kind ==
+               LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL) {
+      status = loom_low_lower_projected_call_finalize(
+          context, selected_plan->source_op,
+          selected_plan->data.projected_call);
     }
     if (iree_status_is_ok(status) && context->result->error_count == 0 &&
         !loom_low_lower_selected_plan_preserves_volatile_memory(
@@ -623,6 +646,56 @@ static iree_status_t loom_low_lower_finalize_selected_plans(
           context, selected_plan->source_op, LOOM_ERR_TARGET_081,
           /*extra_params=*/NULL, /*extra_param_count=*/0);
     }
+    if (finalize_rules_only && iree_status_is_ok(status) &&
+        context->result->error_count == 0 && !elided) {
+      selected_plan->flags |= LOOM_LOW_LOWER_SELECTED_PLAN_RULE_FINALIZED;
+    }
+  }
+  return status;
+}
+
+static iree_status_t loom_low_lower_finalize_selected_plans(
+    loom_low_lower_context_t* context) {
+  const loom_low_lower_source_plan_t* source_plan =
+      &context->lowering->source_plan;
+  iree_arena_allocator_t construction_arena;
+  iree_arena_initialize(context->module->arena.block_pool, &construction_arena);
+  loom_low_lower_rule_source_memory_plan_builder_t source_memory_builder = {
+      .arena = &construction_arena,
+  };
+  iree_status_t status = iree_ok_status();
+  const bool prepare_recurrences = source_plan->has_source_memory_recurrences &&
+                                   source_plan->realizations != NULL;
+  if (prepare_recurrences) {
+    status = loom_low_lower_rule_source_memory_plan_prepare_producers(
+        context, &source_memory_builder);
+    if (iree_status_is_ok(status) && context->result->error_count == 0) {
+      // Selected plans follow definition-before-use source order. Finalizing
+      // table rules first makes producer descriptors available before memory
+      // rules offer recurrences. Target callbacks remain deferred until shared
+      // realization selection and storage refinement are complete.
+      status = loom_low_lower_finalize_selected_plan_phase(
+          context, &source_memory_builder, /*finalize_rules_only=*/true,
+          /*skip_elided_rules=*/false);
+    }
+    if (iree_status_is_ok(status) && context->result->error_count == 0) {
+      status = loom_low_lower_rule_source_memory_plan_offer_recurrences(
+          context, &source_memory_builder);
+    }
+  }
+  bool storage_refinement_required = false;
+  if (iree_status_is_ok(status) && context->result->error_count == 0) {
+    status = loom_low_lower_realizations_finalize(context,
+                                                  &storage_refinement_required);
+  }
+  if (iree_status_is_ok(status) && context->result->error_count == 0 &&
+      storage_refinement_required) {
+    loom_low_lower_source_value_storage_refine_selected_plans(context);
+  }
+  if (iree_status_is_ok(status) && context->result->error_count == 0) {
+    status = loom_low_lower_finalize_selected_plan_phase(
+        context, &source_memory_builder, /*finalize_rules_only=*/false,
+        /*skip_elided_rules=*/prepare_recurrences);
   }
   iree_arena_deinitialize(&construction_arena);
   return status;
@@ -668,9 +741,7 @@ static iree_status_t loom_low_lower_record_selected_rule_plan(
         (void**)&retained_source_memory));
     *retained_source_memory = (loom_low_lower_selected_source_memory_t){
         .access = *source_memory_state->access_plan,
-        .origin = memory_record->origin,
-        .dynamic_byte_offset_identity =
-            memory_record->dynamic_byte_offset_identity,
+        .record = memory_record,
     };
     source_memory = retained_source_memory;
   }
@@ -813,9 +884,7 @@ static iree_status_t loom_low_lower_source_candidate_add_rule(
           (void**)&retained_source_memory));
       *retained_source_memory = (loom_low_lower_selected_source_memory_t){
           .access = *source_memory_state->access_plan,
-          .origin = memory_record->origin,
-          .dynamic_byte_offset_identity =
-              memory_record->dynamic_byte_offset_identity,
+          .record = memory_record,
       };
       candidate_node->matched_source_memory = retained_source_memory;
     }
@@ -1601,6 +1670,27 @@ static iree_status_t loom_low_lower_plan_op(
         LOOM_LOW_LOWER_SOURCE_GRAPH_ALTERNATIVE_FIXED);
   }
 
+  if (loom_low_lower_source_call_requires_projection(context, source_op)) {
+    const loom_low_lower_projected_call_plan_t* plan = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_projected_call_plan(context, source_op, &plan));
+    if (plan == NULL && candidate_plan == NULL) {
+      return iree_ok_status();
+    }
+    const loom_low_lower_selected_plan_t selected_plan = {
+        .source_op = source_op,
+        .kind = plan != NULL ? LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL
+                             : LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK,
+        .flags = plan != NULL ? 0 : LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED,
+        .rule_set_index = UINT16_MAX,
+        .rule_index = UINT16_MAX,
+        .data.projected_call = plan,
+    };
+    return loom_low_lower_select_fixed_plan(
+        context, candidate_plan, &selected_plan,
+        LOOM_LOW_LOWER_SOURCE_GRAPH_ALTERNATIVE_FIXED);
+  }
+
   if (loom_buffer_alloca_isa(source_op)) {
     bool selected = false;
     const loom_low_lower_function_storage_plan_t* plan = NULL;
@@ -2308,6 +2398,9 @@ iree_status_t loom_low_lower_source_plan_build(
 
   iree_arena_initialize(context->module->arena.block_pool,
                         &context->planning_arena);
+  iree_arena_allocator_t realization_construction_arena;
+  iree_arena_initialize(context->module->arena.block_pool,
+                        &realization_construction_arena);
   loom_low_lower_source_candidate_plan_t candidate_plan;
   loom_low_lower_source_candidate_plan_t* active_candidate_plan = NULL;
   bool candidate_plan_initialized = false;
@@ -2321,8 +2414,9 @@ iree_status_t loom_low_lower_source_plan_build(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = loom_low_lower_prepare_plan(context, source_body,
-                                         active_candidate_plan);
+    status =
+        loom_low_lower_prepare_plan(context, source_body, active_candidate_plan,
+                                    &realization_construction_arena);
   }
   if (iree_status_is_ok(status) && active_candidate_plan != NULL) {
     status =
@@ -2410,6 +2504,7 @@ iree_status_t loom_low_lower_source_plan_build(
         context->policy->entry_setup.user_data, context);
     loom_low_lower_planning_scope_end(context);
   }
+  iree_arena_deinitialize(&realization_construction_arena);
   iree_arena_deinitialize(&context->planning_arena);
   return status;
 }

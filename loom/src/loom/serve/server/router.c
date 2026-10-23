@@ -1459,11 +1459,9 @@ static iree_status_t loom_serve_router_accept(
 static void loom_serve_router_advance(loom_serve_router_t* router,
                                       bool* out_progress) {
   router->stopping |= loom_serve_http_server_is_stopping(router->server);
-  if (iree_status_is_ok(router->status)) {
-    router->status = iree_status_join(
-        router->status, loom_serve_resources_query_status(&router->resources));
-    router->stopping |= !iree_status_is_ok(router->status);
-  }
+  router->status = iree_status_join(
+      router->status, loom_serve_resources_advance(&router->resources));
+  router->stopping |= !iree_status_is_ok(router->status);
   *out_progress = false;
   loom_serve_router_tokenizations_collect(router, out_progress);
   loom_serve_router_held_collect(router, out_progress);

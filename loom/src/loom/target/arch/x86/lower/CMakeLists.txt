@@ -12,6 +12,28 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
+    source_signature
+  HDRS
+    "source_signature.h"
+  SRCS
+    "source_signature.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::lower
+    loom::codegen::low::lower::c_abi_projection
+    loom::ir
+    loom::target::arch::x86::call_abi
+    loom::target::arch::x86::descriptors::entry
+    loom::target::arch::x86::register_classes
+    loom::target::arch::x86::source_signature
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
     lower
   HDRS
     "contraction.h"
@@ -26,6 +48,7 @@ loom_cc_library(
     "registry.c"
     "vector_construct.c"
   DEPS
+    ::source_signature
     iree::base
     loom::codegen::low::descriptors
     loom::codegen::low::lower

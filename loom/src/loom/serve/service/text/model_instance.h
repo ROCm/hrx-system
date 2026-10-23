@@ -65,6 +65,8 @@ struct loom_serve_text_model_t {
   iree_host_size_t stage_count;
   // Original native bindings borrowing stages, retained for explicit restore.
   loom_serve_stage_t* stage_bindings;
+  // Original command private peak, retained for explicit variant restoration.
+  uint64_t stage_workspace_bytes;
   // Number of target packed shapes, independent of auxiliary draft stages.
   iree_host_size_t shape_count;
   // Immutable prepared shape capacities, owned in epoch option order.

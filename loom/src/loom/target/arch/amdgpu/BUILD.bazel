@@ -7,6 +7,7 @@
 load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_SUPPORTED_TARGETS")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_instance_library",
     "loom_cc_library",
     "loom_cc_test",
     "loom_generated_cc_library",
@@ -22,8 +23,6 @@ package(
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
 )
-
-_AMDGPU_CHECK_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/check:__pkg__"]
 
 _AMDGPU_ANALYSIS_VISIBILITY = ["//loom/src/loom/target/arch/amdgpu/analysis:__pkg__"]
 
@@ -54,7 +53,7 @@ _AMDGPU_PROVIDER_VISIBILITY = [
     "//loom/src/loom/target/configured:__pkg__",
     "//loom/src/loom/target/emit/native/amdgpu:__pkg__",
     "//loom/src/loom/tooling/target/amdgpu:__pkg__",
-] + _AMDGPU_BINDING_VISIBILITY + _AMDGPU_CHECK_VISIBILITY
+] + _AMDGPU_BINDING_VISIBILITY
 
 #===------------------------------------------------------------------------===#
 # AMDGPU low descriptors
@@ -143,6 +142,7 @@ loom_generated_cc_library(
     generated_src_flags = ["--tables-header"],
     generated_srcs = ["target_info_tables.h"],
     generator = _AMDGPU_TARGET_INFO_GENERATOR,
+    instance_owned = True,
     source = "target_info_tables.c",
     visibility = (
         _AMDGPU_ANALYSIS_VISIBILITY +
@@ -174,7 +174,7 @@ loom_cc_test(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "target_identity",
     srcs = ["target_identity.c"],
     hdrs = ["target_identity.h"],
@@ -226,7 +226,7 @@ loom_cc_library(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "amdhsa_target_id",
     srcs = ["amdhsa_target_id.c"],
     hdrs = ["amdhsa_target_id.h"],
@@ -256,7 +256,7 @@ loom_cc_test(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "artifact_key",
     srcs = ["artifact_key.c"],
     hdrs = ["artifact_key.h"],
@@ -295,7 +295,7 @@ loom_cc_library(
     visibility = _AMDGPU_TOOLING_VISIBILITY,
     deps = [
         ":target_identity",
-        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target:types",
     ],
 )
 

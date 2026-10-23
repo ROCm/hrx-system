@@ -126,6 +126,7 @@ iree_cc_library(
     ::queue_plan
     ::sdma_queue
     amdf::headers
+    libamdf::src::gpu::umd::kfd::hdp
     libamdf::src::gpu::umd::kfd::topology
   PUBLIC
 )

@@ -115,6 +115,8 @@ enum amdf_queue_placement_e {
   AMDF_QUEUE_PLACEMENT_HOST_LOCAL = 1,
   /// Command storage is local to the queue's execution device.
   AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL = 2,
+  /// Number of entries in a placement-indexed table, including DEFAULT.
+  AMDF_QUEUE_PLACEMENT_COUNT = 3,
 };
 
 /// Supported explicit primary command-storage placements. DEFAULT is always
@@ -128,6 +130,25 @@ enum amdf_queue_placement_capability_bits_e {
   /// Device-local command storage can be required.
   AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL =
       1u << AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL,
+};
+
+/// Native requirements for publishing prepared commands from a host producer.
+/// These exclude command preparation, capacity waits, and execution. They are
+/// mechanism facts, not latency estimates or placement recommendations.
+typedef uint32_t amdf_queue_host_publication_flags_t;
+enum amdf_queue_host_publication_flag_bits_e {
+  /// Publication requirements are not exposed by this implementation.
+  AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN = 0,
+  /// Requirements are known. Absent DEVICE_READ and KERNEL_CALL bits guarantee
+  /// that publication needs neither operation. KNOWN alone means CPU ordering
+  /// and writes, potentially including a write-only MMIO notification.
+  AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN = 1u << 0,
+  /// Publication requires a synchronous device-control read, such as a posting
+  /// read completing an earlier write. Command-ring contents are not read.
+  AMDF_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ = 1u << 1,
+  /// Publication enters the native kernel driver. DEVICE_READ may also be set
+  /// when that call reads a device register.
+  AMDF_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL = 1u << 2,
 };
 
 /// Direct producer operations implemented by one user queue.
@@ -206,6 +227,11 @@ typedef struct amdf_queue_family_info_t {
   amdf_queue_priority_capabilities_t priority_capabilities;
   /// Supported explicit primary-ring placements for user publication.
   amdf_queue_placement_capabilities_t placement_capabilities;
+  /// Host publication requirements indexed by amdf_queue_placement_t.
+  /// DEFAULT describes the provider's chosen placement. Unsupported explicit
+  /// placements and families without direct host publication report UNKNOWN.
+  amdf_queue_host_publication_flags_t
+      host_publication[AMDF_QUEUE_PLACEMENT_COUNT];
   /// Optional sidecar metadata format.
   amdf_queue_metadata_format_t metadata;
   /// Minimum supported power-of-two primary user ring length in bytes.
@@ -312,9 +338,13 @@ typedef struct amdf_user_queue_mapping_info_t {
   uint32_t index_bits;
   /// Atomic write width of the doorbell aperture.
   uint32_t doorbell_bits;
-  /// Host fence between command-body stores and publication of a valid packet
-  /// header or producer index. NONE for device mappings, whose format defines
-  /// device release ordering. The format's doorbell ordering still applies.
+  /// Release executor between command-body stores and publication of a valid
+  /// packet header or producer index. NONE requires no release; HOST_DIRECT
+  /// executes host_publish_fence; HOST_API calls user_queue_mapping_flush.
+  /// Device mappings report NONE and follow their format's device protocol.
+  amdf_cache_transition_executor_t host_publish_executor;
+  /// Fence for HOST_DIRECT, and NONE for other executors. The format's
+  /// header/index and doorbell ordering still applies after this release.
   amdf_host_cache_fence_t host_publish_fence;
   /// Optional sidecar metadata format.
   amdf_queue_metadata_format_t metadata;

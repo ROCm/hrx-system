@@ -142,6 +142,14 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
       .execution_resources = kQueueExecutionResources,
       .placement_capabilities =
           IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL,
+      .host_publication =
+          {
+              IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KNOWN,
+              IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN,
+              IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KNOWN |
+                  IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ |
+                  IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL,
+          },
       .supported_queue_features =
           IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH,
       .timestamp_valid_bits = 64,
@@ -430,6 +438,10 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   EXPECT_EQ(parsed_family->execution_resources[2].execution_unit_count, 1u);
   EXPECT_EQ(parsed_family->placement_capabilities,
             IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL);
+  for (uint32_t i = 0; i < IREE_HAL_QUEUE_PLACEMENT_COUNT; ++i) {
+    EXPECT_EQ(parsed_family->host_publication[i],
+              queue_families[0].host_publication[i]);
+  }
   EXPECT_EQ(parsed_family->supported_queue_features,
             IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH);
   EXPECT_TRUE(
@@ -449,6 +461,69 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   iree_allocator_free(iree_allocator_system(), reparsed_serialized_bytes.data);
   iree_allocator_free(iree_allocator_system(), serialized_bytes.data);
   iree_hal_device_spec_release(spec);
+}
+
+TEST(DeviceSpecTest, ValidatesHostPublicationRequirements) {
+  const iree_hal_queue_priority_t priority = IREE_HAL_QUEUE_PRIORITY_NORMAL;
+  iree_hal_queue_family_spec_t family = {
+      .name = IREE_SV("compute"),
+      .provisioned_queue_count = 1,
+      .priority_count = 1,
+      .priorities = &priority,
+      .physical_device_affinity = 1,
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH,
+  };
+  const iree_hal_device_queue_spec_t queues = {
+      .family_count = 1,
+      .families = &family,
+  };
+  const iree_hal_device_spec_params_t params = {.queues = &queues};
+  // Opaque backends can expose only DEFAULT with unknown requirements.
+  iree_hal_device_spec_t* spec = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
+  const uint64_t unknown_fingerprint = iree_hal_device_spec_fingerprint(spec);
+  iree_hal_device_spec_release(spec);
+
+  family.host_publication[IREE_HAL_QUEUE_PLACEMENT_DEFAULT] =
+      IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KNOWN;
+  IREE_ASSERT_OK(
+      iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
+  EXPECT_NE(iree_hal_device_spec_fingerprint(spec), unknown_fingerprint);
+  iree_hal_device_spec_release(spec);
+
+  for (uint32_t placement = 0; placement < IREE_HAL_QUEUE_PLACEMENT_COUNT;
+       ++placement) {
+    SCOPED_TRACE(placement);
+    family.placement_capabilities =
+        IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
+        IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL;
+    const iree_hal_queue_host_publication_flags_t invalid_flags[] = {
+        IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ,
+        IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL,
+        UINT32_MAX,
+    };
+    for (auto flags : invalid_flags) {
+      SCOPED_TRACE(flags);
+      family.host_publication[placement] = flags;
+      spec = nullptr;
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_INVALID_ARGUMENT,
+          iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
+      EXPECT_EQ(spec, nullptr);
+    }
+    family.host_publication[placement] =
+        IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KNOWN;
+    family.placement_capabilities = 0;
+    if (placement != IREE_HAL_QUEUE_PLACEMENT_DEFAULT) {
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_INVALID_ARGUMENT,
+          iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
+      EXPECT_EQ(spec, nullptr);
+    }
+    family.host_publication[placement] =
+        IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN;
+  }
 }
 
 TEST(DeviceSpecTest, RejectsInvalidExternalTimepointHandleTypes) {

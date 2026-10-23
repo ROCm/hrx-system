@@ -18,6 +18,7 @@ loom_cc_library(
   SRCS
     "workspace.c"
   DEPS
+    ::retirement
     iree::base
     iree::base::internal
     iree::base::threading
@@ -25,6 +26,7 @@ loom_cc_library(
     iree::hal
     iree::hal::memory::slab_cache
     iree::hal::memory::tlsf_pool
+    loom::serve::runtime::storage::virtual_pool
   PUBLIC
 )
 endif()

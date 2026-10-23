@@ -203,7 +203,8 @@ func.def @entry() {
   auto module =
       DeserializeTextModule(context.get(), workspace.get(), source.get());
   for (auto presentation : {LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT,
-                            LOOMC_MODULE_TEXT_PRESENTATION_GENERIC}) {
+                            LOOMC_MODULE_TEXT_PRESENTATION_GENERIC,
+                            LOOMC_MODULE_TEXT_PRESENTATION_PRESERVE}) {
     for (bool print_locations : {false, true}) {
       const loomc_module_serialize_options_t options = {
           .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
@@ -789,6 +790,66 @@ TEST(ModuleTest, RejectsMalformedDeserializeIdentifier) {
   LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, status);
   EXPECT_EQ(module, nullptr);
   EXPECT_EQ(result, nullptr);
+}
+
+TEST(ModuleTest, DeserializationErrorBudgetUsesVersionedOptions) {
+  const auto* files = loomc_diagnostic_type_testdata_create();
+  const auto* files_end = files + loomc_diagnostic_type_testdata_size();
+  const auto* file = std::find_if(files, files_end, [](const auto& file) {
+    return strcmp(file.name, "scalar.loom-test") == 0;
+  });
+  ASSERT_NE(file, files_end);
+  auto context = CreateContext();
+  auto workspace = CreateWorkspace();
+  auto source = CreateTextSource(file->name, file->data);
+  std::vector<ResultPtr> results;
+  const loomc_module_deserialize_options_t cases[] = {
+      {},
+      {.structure_size = sizeof(loomc_module_deserialize_options_t)},
+      {
+          .structure_size = sizeof(loomc_module_deserialize_options_t),
+          .max_errors = 1,
+      },
+      {
+          .structure_size = sizeof(loomc_module_deserialize_options_t),
+          .max_errors = 100,
+      },
+      {
+          .structure_size =
+              offsetof(loomc_module_deserialize_options_t, max_errors),
+          .max_errors = 1,
+      },
+      {.max_errors = 1},
+  };
+  for (const auto& options : cases) {
+    loomc_module_t* module = nullptr;
+    loomc_result_t* result = nullptr;
+    LOOMC_ASSERT_OK(loomc_module_deserialize_from_source(
+        context.get(), workspace.get(), source.get(), &options,
+        loomc_allocator_system(), &module, &result));
+    results.emplace_back(result);
+    ModulePtr module_owner(module);
+    EXPECT_EQ(module, nullptr);
+    EXPECT_FALSE(loomc_result_succeeded(result));
+    const bool limited =
+        options.structure_size == sizeof(options) && options.max_errors == 1;
+    ASSERT_EQ(loomc_result_diagnostic_count(result), limited ? 2u : 1u);
+    EXPECT_EQ(ToString(loomc_result_diagnostic_at(result, 0)->code),
+              "TYPE/001");
+    if (limited) {
+      EXPECT_EQ(ToString(loomc_result_diagnostic_at(result, 1)->code),
+                "PARSE/012");
+    }
+  }
+  source.reset();
+  workspace.reset();
+  context.reset();
+  for (const auto& result : results) {
+    const auto* diagnostic = loomc_result_diagnostic_at(result.get(), 0);
+    ASSERT_NE(diagnostic->range.source, nullptr);
+    EXPECT_EQ(ToString(loomc_source_identifier(diagnostic->range.source)),
+              "scalar.loom-test");
+  }
 }
 
 const loomc_module_function_t* FindFunction(

@@ -112,24 +112,24 @@ func.def @advance_i32(%value: i32, %delta: i32) -> (i32) {
 }
 
 // ----
-low.func.def public target<vm.core> abi(vm_function) @call_loop(%43: reg<vm.value : i32>, %delta: reg<vm.value : i32>, %count: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
-  %47 = low.func.call pure @repeat_add(%43, %delta, %count) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i64>) -> (reg<vm.value : i32>)
-  return %47
+low.func.def public target<vm.core> abi(vm_function) @call_loop(%50: reg<vm.value : i32>, %delta: reg<vm.value : i32>, %count: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+  %54 = low.func.call pure @repeat_add(%50, %delta, %count) : (reg<vm.value : i32>, reg<vm.value : i32>, reg<vm.value : i64>) -> (reg<vm.value : i32>)
+  return %54
 }
 
-low.func.def target<vm.core> @repeat_add(%48: reg<vm.value : i32>, %delta: reg<vm.value : i32>, %count: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
+low.func.def target<vm.core> @repeat_add(%55: reg<vm.value : i32>, %delta: reg<vm.value : i32>, %count: reg<vm.value : i64>) -> (reg<vm.value : i32>) asm {
   %c0 = constant.i64 0
   %c1 = constant.i64 1
-  low.br ^_bb1(%c0: reg<vm.value : i64>, %48: reg<vm.value : i32>)
-^_bb1(%i: reg<vm.value : i64>, %53: reg<vm.value : i32>):
-  %56 = integer.compare.i64 %i, %count, "slt"
-  low.cond_br %56, ^_bb2, ^_bb3 : reg<vm.value : i1>
+  low.br ^_bb1(%c0: reg<vm.value : i64>, %55: reg<vm.value : i32>)
+^_bb1(%i: reg<vm.value : i64>, %current_slot_0: reg<vm.value : i32>):
+  %63 = integer.compare.i64 %i, %count, "slt"
+  low.cond_br %63, ^_bb2, ^_bb3 : reg<vm.value : i1>
 ^_bb2:
-  %next_value = low.func.call pure @advance_i32(%53, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
-  %58 = integer.add.i64 %i, %c1
-  low.br ^_bb1(%58: reg<vm.value : i64>, %next_value: reg<vm.value : i32>)
+  %next_value = low.func.call pure @advance_i32(%current_slot_0, %delta) : (reg<vm.value : i32>, reg<vm.value : i32>) -> (reg<vm.value : i32>)
+  %65 = integer.add.i64 %i, %c1
+  low.br ^_bb1(%65: reg<vm.value : i64>, %next_value: reg<vm.value : i32>)
 ^_bb3:
-  return %53
+  return %current_slot_0
 }
 
 low.func.def target<vm.core> @advance_i32(%value: reg<vm.value : i32>, %delta: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {

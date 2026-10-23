@@ -100,6 +100,20 @@ func.def target(@test_target) abi(object_function) export("semantic") @targeted_
 
 // ====
 
+// Retained source signatures must project to the function's exact High value
+// types rather than merely matching the flattened value count.
+// ERROR@+1: TYPE/001 {field_a="argument", type_a="f32", field_b="source_signature projection", type_b="i32"}
+func.decl source_signature(#func.abi.c.signature<arguments = [0], results = [], types = [#func.abi.c.type<signed_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @wrong_source_projection(%value: f32)
+
+// ====
+
+// Stored projection widths are checked against their source object kind so
+// later ABI planning consumes a trusted, direct query.
+// ERROR@+1: STRUCTURE/014 {attr_name="source_signature", actual_value="0", expected_constraint="an 8-, 16-, 32-, or 64-bit integer matching its object footprint"}
+func.decl source_signature(#func.abi.c.signature<arguments = [0], results = [], types = [#func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 2, bitwidth = 32>]>) @wrong_component_count(%lhs: i32, %rhs: i32)
+
+// ====
+
 // Ordinary functions may author target-local execution choices.
 target.generic<reference> @wave64_target {subgroup_size = 64}
 

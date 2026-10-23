@@ -451,7 +451,10 @@ static iree_status_t loom_serve_text_prepare_media(
         service->readiness.device.proactor, service->readiness.observer,
         service->host_allocator, &service->projector));
   }
-  loom_serve_text_media_projector_offer(service->projector, pending->media);
+  loom_serve_text_media_projector_offer(
+      service->projector, pending->media,
+      loom_serve_text_reservation_memory_footprint(
+          &pending->continuation.reservation));
   return loom_serve_text_media_request_take_status(pending->media);
 }
 
@@ -754,8 +757,10 @@ bool loom_serve_text_media_lookahead(loom_serve_text_service_t* service) {
     }
     if (request->continuation.session) {
       if (service->projector) {
-        loom_serve_text_media_projector_offer(service->projector,
-                                              request->media);
+        loom_serve_text_media_projector_offer(
+            service->projector, request->media,
+            loom_serve_text_reservation_memory_footprint(
+                &request->continuation.reservation));
       }
       continue;
     }

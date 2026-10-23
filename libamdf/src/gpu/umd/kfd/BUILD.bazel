@@ -42,7 +42,10 @@ amdf_cc_test(
     size = "medium",
     srcs = ["sparse_mapping_test.cc"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    tags = ["iree-run-requirement=libamdf.resource.amd_gpu"],
+    tags = [
+        "iree-run-requirement=libamdf.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [
         ":buffer",
@@ -92,6 +95,10 @@ amdf_cc_library(
 amdf_cc_test(
     name = "topology_test",
     srcs = ["topology_test.cc"],
+    linkopts = [
+        "-Wl,--wrap=amdf_linux_endpoint_open_file",
+        "-Wl,--wrap=ioctl",
+    ],
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [
         ":endpoint_profile",
@@ -102,6 +109,7 @@ amdf_cc_test(
         "//libamdf/src/platform/linux:file",
         "//third_party:google_test",
         "//third_party:google_test_main",
+        "//third_party:linux_amdgpu_uapi",
     ],
 )
 
@@ -198,7 +206,9 @@ amdf_cc_library(
     srcs = ["hdp.c"],
     hdrs = ["hdp.h"],
     target_compatible_with = KFD_COMPATIBILITY,
+    visibility = ["//libamdf/src/gpu/umd/kfd/target:__pkg__"],
     deps = [
+        ":buffer",
         ":device_state",
         "//libamdf/src:allocator",
         "//libamdf/src/platform/linux:file",
@@ -311,6 +321,7 @@ amdf_cc_library(
         ":buffer",
         ":device_state",
         ":doorbell",
+        ":hdp",
         "//libamdf/src/platform/linux:file",
         "//third_party:linux_amdgpu_uapi",
         "//third_party:linux_kfd_uapi",
@@ -517,7 +528,11 @@ amdf_cc_library(
 
 amdf_cc_test(
     name = "user_queue_test",
-    srcs = ["user_queue_test.cc"],
+    srcs = [
+        "user_queue_publication_test.cc",
+        "user_queue_test.cc",
+        "user_queue_test_fixture.h",
+    ],
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [
         ":aql",

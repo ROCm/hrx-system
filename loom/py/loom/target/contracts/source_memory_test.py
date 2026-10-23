@@ -41,6 +41,8 @@ def _validate(
     index_ref=None,
     multiply_add=None,
     static_bias=None,
+    increment=None,
+    increment_immediate=None,
     reuse_view_base=False,
 ):
     if index_ref is None:
@@ -68,9 +70,11 @@ def _validate(
             add=TEST_LOW_ADD_I32_DESCRIPTOR,
             multiply=TEST_LOW_MUL_I32_DESCRIPTOR,
             shift_left=None,
+            increment=increment,
             multiply_add=multiply_add,
             static_bias=static_bias,
             constant_immediate="i32_value",
+            increment_immediate=increment_immediate,
             integer_conversions=conversions,
         ),
     )
@@ -137,6 +141,51 @@ def test_complete_byte_offset_validates_fused_arithmetic_descriptors():
         _validate((), multiply_add=TEST_LOW_ADD_I32_DESCRIPTOR)
     with pytest.raises(ValueError, match=r"must use low\.op"):
         _validate((), static_bias=TEST_LOW_CONST_I32_DESCRIPTOR)
+
+
+def test_byte_offset_increment_is_unary_and_binds_its_immediate():
+    increment = replace(
+        TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
+        key="test.increment.i32",
+        immediates=(
+            Immediate(
+                "increment",
+                ImmediateKind.SIGNED,
+                bit_width=8,
+                signed_min=-128,
+                unsigned_max=127,
+            ),
+        ),
+    )
+    descriptors = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(*TEST_LOW_CORE_DESCRIPTOR_SET.descriptors, increment),
+    )
+    _validate(
+        (),
+        descriptors=descriptors,
+        increment=increment,
+        increment_immediate="increment",
+    )
+
+    with pytest.raises(ValueError, match="must be specified together"):
+        _validate((), descriptors=descriptors, increment=increment)
+    binary_increment = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        key="test.binary_increment.i32",
+        immediates=increment.immediates,
+    )
+    binary_descriptors = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(*TEST_LOW_CORE_DESCRIPTOR_SET.descriptors, binary_increment),
+    )
+    with pytest.raises(ValueError, match="exactly 1 packet inputs"):
+        _validate(
+            (),
+            descriptors=binary_descriptors,
+            increment=binary_increment,
+            increment_immediate="increment",
+        )
 
 
 def test_integer_conversion_domains_are_unique_fixed_width_integers():

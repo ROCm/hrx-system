@@ -53,11 +53,11 @@ class PixelProjectorExecutionTest : public SourceTextServiceTest {
     }
   }
 
-  static void Wait(loom_serve_execution_frontier_t ready) {
+  void Wait(loom_serve_execution_frontier_t ready) {
     for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
-      IREE_ASSERT_OK(iree_hal_semaphore_wait(
-          ready.semaphores[i], ready.values[i], iree_infinite_timeout(),
-          IREE_ASYNC_WAIT_FLAG_NONE));
+      IREE_ASSERT_OK(
+          loom_serve_workspace_wait(loom_serve_device_workspace(device_),
+                                    ready.semaphores[i], ready.values[i]));
     }
   }
 

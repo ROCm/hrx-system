@@ -46,8 +46,8 @@ class TestLogicalDevice {
     iree_hal_amdgpu_logical_device_options_initialize(&options);
     options.preallocate_pools = 0;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_create(
-        IREE_SV("amdgpu"), &options, libhsa, topology, create_context_.params(),
-        host_allocator, &device_));
+        IREE_SV("legacy-amdgpu"), &options, libhsa, topology,
+        create_context_.params(), host_allocator, &device_));
     IREE_RETURN_IF_ERROR(iree_hal_device_group_create_from_device(
         device_, create_context_.frontier_tracker(), host_allocator,
         &device_group_));

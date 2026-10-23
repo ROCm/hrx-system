@@ -22,6 +22,7 @@ static loomc_status_t loomc_module_decode_text_source(
   const loomc_byte_span_t contents = loomc_source_contents(source);
   loom_text_parse_options_t parse_options = {
       .diagnostic_sink = diagnostic_sink,
+      .max_errors = options->max_errors,
   };
   loomc_target_pass_environment_initialize_text_asm_environment(
       loomc_context_target_pass_environment(context),
@@ -46,12 +47,19 @@ static void loomc_module_text_print_options(
   loomc_target_pass_environment_initialize_text_asm_environment(
       loomc_context_target_pass_environment(loomc_module_context(module)),
       &out_options->low_asm_environment);
-  if (options->text_presentation == LOOMC_MODULE_TEXT_PRESENTATION_GENERIC) {
-    return;
-  }
-  out_options->flags |= LOOM_TEXT_PRINT_PREFER_LOW_ASM;
-  if (options->text_presentation == LOOMC_MODULE_TEXT_PRESENTATION_LOW_ASM) {
-    out_options->flags |= LOOM_TEXT_PRINT_REQUIRE_LOW_ASM;
+  switch (options->text_presentation) {
+    case LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT:
+      out_options->flags |= LOOM_TEXT_PRINT_PREFER_LOW_ASM;
+      break;
+    case LOOMC_MODULE_TEXT_PRESENTATION_GENERIC:
+      break;
+    case LOOMC_MODULE_TEXT_PRESENTATION_LOW_ASM:
+      out_options->flags |=
+          LOOM_TEXT_PRINT_PREFER_LOW_ASM | LOOM_TEXT_PRINT_REQUIRE_LOW_ASM;
+      break;
+    case LOOMC_MODULE_TEXT_PRESENTATION_PRESERVE:
+      out_options->flags |= LOOM_TEXT_PRINT_PRESERVE_LOW_ASM;
+      break;
   }
 }
 

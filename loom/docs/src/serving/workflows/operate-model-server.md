@@ -166,7 +166,7 @@ Automatic reclamation is opt-in. For example, this server releases unused
 command workspace after 30 seconds and unpinned weights after five minutes:
 
 ```sh
-loom-serve --device=amdgpu --model=/srv/models/scout/model.json \
+loom-serve --device=legacy-amdgpu --model=/srv/models/scout/model.json \
   --workspace_idle_ms=30000 --parameter_idle_ms=300000
 ```
 
@@ -274,7 +274,7 @@ Process limits and model capacities constrain different resources:
 | Text `context_capacity` | Logical token ceiling of one context. |
 | Text `pool_capacity` | Shared logical KV capacity, independent of maximum context times row count. |
 | Text `variant_capacity` | Native choices, including the original, pending JITs and failed attempts. |
-| `--memory_bytes` | Physical retained parameter/state backing under elastic policy on one device. |
+| `--memory_bytes` | Shared physical parameter/state/workspace backing under elastic policy on one device. |
 
 Holding capacity stays below connection capacity so held inference cannot
 consume every control connection. Live log streams and waiting variant-management
@@ -290,10 +290,17 @@ of smaller fitting requests to pass; its default is the execution-row count.
 Zero selects FIFO. This bounds successful overtakes, not elapsed waiting time:
 a slow active reader can retain its reservation.
 
-Elastic pressure can reclaim idle unpinned weights and eligible idle text
-history across models sharing the same device pool. Accepted work, prepared
-continuations and explicit checkpoint references remain protected. An evicted
-session can replay its full input history; a session name is not durable storage.
+Elastic parameters, mutable state, invocation input/output, and command scratch
+share one physical pool. Admission uses the model's prepared working-set peak
+and outstanding work, rather than probing free HAL memory. Command scratch can
+be reused after its ordered release; an escaping output remains charged until
+both its producer and final consumer retire, even if its model is removed.
+
+Elastic pressure first reclaims idle workspace, then idle unpinned weights and
+eligible idle text history across models sharing the same device pool. Accepted
+work, prepared continuations, and explicit checkpoint references remain protected.
+An evicted session can replay its full input history; a session name is not
+durable storage.
 Pool pressure does not automatically serialize conversations to disk. If all
 capacity is protected and no accepted work can release it, admission reports
 overload rather than reclaiming live storage.
@@ -313,9 +320,10 @@ reports subsequent completion; protected storage can prevent reaching the target
 Fixed weights are not reclaimable. Trim does not change the configured limit or
 discard compiled code.
 
-The [observation workflow](observe-model-server.md) explains retained versus
-workspace accounting. Their sum is not total VRAM or process RAM, and reported
-free bytes are not a guarantee that the next request can be admitted.
+The [observation workflow](observe-model-server.md) explains shared backing and
+its workspace subset. Adding those counters double-counts workspace; neither
+is total VRAM or process RAM. Reported free bytes are not a guarantee that the
+next request can be admitted.
 
 ## Shut down safely
 

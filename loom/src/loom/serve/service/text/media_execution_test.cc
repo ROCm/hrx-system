@@ -9,6 +9,7 @@
 
 #include "loom/serve/service/finite/embedding/protocol.h"
 #include "loom/serve/service/text/epoch.h"
+#include "loom/serve/service/text/epoch_upload.h"
 #include "loom/serve/service/text/media_epoch.h"
 #include "loom/serve/service/text/media_projector.h"
 #include "loom/serve/service/text/readiness.h"
@@ -57,11 +58,11 @@ class MediaExecutionTest : public SourceTextServiceTest {
     }
   }
 
-  static void Wait(loom_serve_execution_frontier_t ready) {
+  void Wait(loom_serve_execution_frontier_t ready) {
     for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
-      IREE_ASSERT_OK(iree_hal_semaphore_wait(
-          ready.semaphores[i], ready.values[i], iree_infinite_timeout(),
-          IREE_ASYNC_WAIT_FLAG_NONE));
+      IREE_ASSERT_OK(
+          loom_serve_workspace_wait(loom_serve_device_workspace(device_),
+                                    ready.semaphores[i], ready.values[i]));
     }
   }
 
@@ -280,9 +281,9 @@ TEST_F(MediaExecutionTest,
       1, &span, 4, 0, nullptr, 0, host_allocator_, &packet_));
   EXPECT_EQ(packet_.first_feature_count, 2u);
   EXPECT_EQ(packet_.transfer.result_count, 1u);
-  EXPECT_EQ(packet_.transfer.operation_count, 4u);
+  EXPECT_EQ(packet_.transfer.operation_count, 2u);
   EXPECT_EQ(packet_.device_length, 160u);
-  for (size_t i = 2; i < packet_.transfer.operation_count; ++i) {
+  for (size_t i = 0; i < packet_.transfer.operation_count; ++i) {
     EXPECT_EQ(packet_.transfer.operations[i].type,
               IREE_HAL_TRANSFER_OPERATION_TYPE_COPY);
   }
@@ -311,11 +312,23 @@ TEST_F(MediaExecutionTest,
                                              &buffers_[0]));
   IREE_ASSERT_OK(
       loom_serve_execution_alloca(consumer_, 1, &packet_request, &buffers_[1]));
+  uint8_t ranges[80];
+  const uint64_t fields[] = {
+      0, 0, 0, 0, sizeof(control_),
+      1, 0, 1, 0, packet_.packet_record_bytes.data_length};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(fields); ++i) {
+    iree_unaligned_store_le_u64(ranges + i * sizeof(uint64_t), fields[i]);
+  }
+  const iree_const_byte_span_t packets[] = {
+      iree_make_const_byte_span(&control_, sizeof(control_)),
+      iree_const_cast_byte_span(packet_.packet_record_bytes),
+  };
+  IREE_ASSERT_OK(loom_serve_text_epoch_upload(
+      consumer_, iree_make_const_byte_span(ranges, sizeof(ranges)), packets,
+      buffers_.data()));
   uint64_t value = 0;
-  IREE_ASSERT_OK(loom_serve_text_media_epoch_enqueue(
-      &packet_, consumer_,
-      iree_make_const_byte_span(&control_, sizeof(control_)), buffers_[0],
-      buffers_[1], &value));
+  IREE_ASSERT_OK(loom_serve_text_media_epoch_enqueue(&packet_, consumer_,
+                                                     buffers_[1], &value));
   EXPECT_EQ(packet_.transfer.operations, nullptr);
   ASSERT_NO_FATAL_FAILURE(RemoveProducer());
   IREE_ASSERT_OK(loom_serve_device_trim(device_, 0));
@@ -398,8 +411,8 @@ TEST_F(MediaExecutionTest, DenseRangesCoalesceAcrossRequestsAndContinuation) {
   EXPECT_EQ(packet_.next_feature_count, 1u);
   EXPECT_EQ(packet_.device_length, 144u);
   EXPECT_EQ(packet_.transfer.result_count, 3u);
-  ASSERT_EQ(packet_.transfer.operation_count, 3u);
-  const auto& copy = packet_.transfer.operations[2];
+  ASSERT_EQ(packet_.transfer.operation_count, 1u);
+  const auto& copy = packet_.transfer.operations[0];
   EXPECT_EQ(copy.type, IREE_HAL_TRANSFER_OPERATION_TYPE_COPY);
   EXPECT_EQ(copy.copy.source_offset, 0u);
   EXPECT_EQ(copy.copy.target_offset, 96u);

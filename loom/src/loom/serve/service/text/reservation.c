@@ -89,6 +89,24 @@ iree_status_t loom_serve_text_reservation_prepare(
   return iree_ok_status();
 }
 
+uint64_t loom_serve_text_reservation_memory_footprint(
+    const loom_serve_text_reservation_t* reservation) {
+  const loom_serve_text_model_t* model = reservation->row->model;
+  const uint64_t extents[] = {
+      loom_serve_residency_activation_footprint(model->residency),
+      loom_serve_text_state_reservation_footprint(reservation->state),
+      loom_serve_module_workspace_requirement(model->control.native_module)
+          .allocation_size,
+      2ull * model->source.prefill_capacity *
+          LOOM_SERVE_TEXT_MEDIA_PACKET_RECORD_BYTES,
+  };
+  uint64_t bytes = 0;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(extents); ++i) {
+    bytes += iree_min(extents[i], UINT64_MAX - bytes);
+  }
+  return bytes;
+}
+
 iree_status_t loom_serve_text_reservation_submit(
     loom_serve_text_reservation_t* reservation,
     loom_serve_text_reserve_result_t* out_result,

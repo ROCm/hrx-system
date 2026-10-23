@@ -13,8 +13,11 @@
 
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/pool_test_util.h"
+#include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
+#include "iree/hal/drivers/amd/gpu/cts/testdata.h"
 #include "iree/hal/drivers/amd/gpu/image/asan_images.h"
+#include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -41,12 +44,12 @@ class GpuAsanTest : public GpuNativeTest,
           AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS)) {
       GTEST_SKIP() << "Native shader notification is unavailable";
     }
-    const auto gfx = context_->target_info.gfx_ip;
     options_.asan.memory.shadow_slab_size = 1024 * 1024;
     options_.asan.shadow_backing =
         std::get<1>(GetParam())
             ? IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_HOST_LOCAL
             : IREE_HAL_AMD_GPU_ASAN_SHADOW_BACKING_DEVICE_LOCAL;
+    native_domain_ = context_;
     Create(IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_ASAN);
     if (HasFatalFailure() || IsSkipped()) {
       return;
@@ -80,23 +83,14 @@ class GpuAsanTest : public GpuNativeTest,
     IREE_ASSERT_OK(iree_hal_pool_resolve_binding(
         pool_, program_scope, IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
         &slot_));
-    const auto* files = iree_hal_amd_gpu_asan_images_create();
-    const char* selector = gfx.major == 9
-                               ? (gfx.minor == 4 ? "gfx9_4_generic" : "gfx90a")
-                           : gfx.major == 11 ? "gfx11_generic"
-                                             : "gfx12_generic";
-    iree_hal_executable_load_params_t load;
-    iree_hal_executable_load_params_initialize(&load);
-    for (size_t i = 0; i < iree_hal_amd_gpu_asan_images_size(); ++i) {
-      if (std::strstr(files[i].name, selector)) {
-        load.executable_data =
-            iree_make_const_byte_span(files[i].data, files[i].size);
-      }
-    }
-    ASSERT_NE(load.executable_data.data, nullptr);
     const auto* target =
         &iree_hal_device_spec_executables(iree_hal_device_spec(device_))
              ->targets[0];
+    iree_hal_executable_load_params_t load;
+    iree_hal_executable_load_params_initialize(&load);
+    IREE_ASSERT_OK(LookupCodeObject(iree_hal_amd_gpu_asan_images_create(),
+                                    iree_hal_amd_gpu_asan_images_size(),
+                                    target->target_key, &load.executable_data));
     IREE_ASSERT_OK(
         iree_hal_executable_load(family, target, &load, &executable_));
     IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
@@ -162,6 +156,8 @@ class GpuAsanTest : public GpuNativeTest,
 
   // Force configuration patching through staging before real shader execution.
   NativeMemoryGate memory_gate_;
+  // Dependency domain borrowed through the application's device ownership.
+  const void* native_domain_ = nullptr;
   // Explicit source shared by owned and imported buffers.
   iree_hal_pool_t* pool_ = nullptr;
   // Shader-readable device address slot fixed during pool construction.
@@ -201,6 +197,65 @@ TEST_P(GpuAsanTest, OwnedSlabReleasePoisonsAndQuarantinesBeforeFinalCleanup) {
       iree::hal::cts::WaitPoolCommittedBytes(pool_, before.bytes_committed));
   ExpectShadow(address, {0xfa, 0xfa, 0xfa, 0xfa});
   EXPECT_GE(Observe().quarantine_size, 19u + 2u * 256u);
+}
+
+TEST_P(GpuAsanTest, QueuedReleaseWaitsForHostSanitizerBoundary) {
+  using iree::hal::cts::Ref;
+  ASSERT_TRUE(iree_hal_pool_requires_asan_advice(pool_));
+  Ref<iree_hal_semaphore_t> allocated, producer, released, paused;
+  CreateSemaphore(allocated.out());
+  CreateSemaphore(producer.out());
+  CreateSemaphore(released.out());
+  CreateSemaphore(paused.out());
+  iree_hal_semaphore_t* allocated_handle = allocated;
+  iree_hal_semaphore_t* producer_handle = producer;
+  iree_hal_semaphore_t* released_handle = released;
+  iree_hal_semaphore_t* paused_handle = paused;
+  const auto request = iree_hal_make_pool_reservation_request(19, 8);
+  uint64_t one = 1;
+  Ref<iree_hal_buffer_t> buffer;
+  IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[1], {},
+                                       {1, &allocated_handle, &one}, pool_, 1,
+                                       &request, buffer.out()));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      allocated, one, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  const uint64_t address = Address(buffer);
+  ExpectShadow(address, {0, 0, 3});
+  iree_hal_pool_stats_t before;
+  iree_hal_pool_query_stats(pool_, &before);
+
+  CompletionPause pause{
+      reinterpret_cast<iree_async_semaphore_t*>(paused_handle)};
+  IREE_ASSERT_OK(pause.Arm(one));
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {},
+                                        {1, &paused_handle, &one}, nullptr, 0));
+  pause.entered.acquire();
+  IREE_ASSERT_OK(iree_hal_queue_barrier(
+      queues_[1], {}, {1, &producer_handle, &one}, nullptr, 0));
+  iree_hal_amd_gpu_semaphore_wait_t dependency = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_wait(
+      producer, one, native_domain_, &dependency));
+  EXPECT_EQ(dependency.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
+  iree_hal_amd_gpu_signal_release(dependency.signal);
+
+  iree_hal_buffer_t* handle = buffer;
+  IREE_ASSERT_OK(
+      iree_hal_queue_dealloca(queues_[1], {1, &producer_handle, &one},
+                              {1, &released_handle, &one}, 1, &handle));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_wait(
+      released, one, native_domain_, &dependency));
+  EXPECT_EQ(dependency.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_DEFERRED);
+  iree_hal_amd_gpu_signal_release(dependency.signal);
+  iree_hal_pool_stats_t pending;
+  iree_hal_pool_query_stats(pool_, &pending);
+  EXPECT_EQ(pending.reservation_count, before.reservation_count);
+  EXPECT_EQ(Address(buffer), address);
+
+  pause.Join();
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(released, one, iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  EXPECT_EQ(Address(buffer), 0u);
+  ExpectShadow(address, {0xfa, 0xfa, 0xfa});
 }
 
 TEST_P(GpuAsanTest, HostImportEnablesRegisteredEnvelopeAndBypassesQuarantine) {

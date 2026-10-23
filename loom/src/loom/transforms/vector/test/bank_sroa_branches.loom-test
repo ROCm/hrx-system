@@ -163,7 +163,7 @@ func.def @forwarding_chain(%left: vector<2xi32>, %right: vector<2xi32>, %conditi
 
 // ====
 // RUN: pass sroa-vector-banks
-// An observed whole value keeps the connected recurrence and join intact.
+// Whole-result observation reconstructs the connected recurrence and join.
 func.def @whole_branch_result(%initial: vector<2xi32>, %increment: i32, %condition: i1, %end: index) -> (vector<2xi32>) {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
@@ -185,17 +185,20 @@ func.def @whole_branch_result(%initial: vector<2xi32>, %increment: i32, %conditi
 func.def @whole_branch_result(%initial: vector<2xi32>, %increment: i32, %condition: i1, %end: index) -> (vector<2xi32>) {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
-  %result = scf.for %i = [%begin to %end step %step](%bank = %initial : vector<2xi32>) -> (vector<2xi32>) {
-    %old = vector.extract %bank[0] : vector<2xi32> -> i32
-    %next = scalar.addi %old, %increment : i32
-    %updated = vector.insert %next into %bank[0] : i32, vector<2xi32>
-    scf.yield %updated : vector<2xi32>
+  %initial_slot_0 = vector.extract %initial[0] : vector<2xi32> -> i32
+  %initial_slot_1 = vector.extract %initial[1] : vector<2xi32> -> i32
+  %result_slot_0, %result_slot_1 = scf.for %i = [%begin to %end step %step](%bank_slot_0 = %initial_slot_0 : i32, %bank_slot_1 = %initial_slot_1 : i32) -> (i32, i32) {
+    %next = scalar.addi %bank_slot_0, %increment : i32
+    scf.yield %next, %bank_slot_1 : i32, i32
   }
-  %choice = scf.if %condition -> (vector<2xi32>) {
-    scf.yield %result : vector<2xi32>
+  %14, %15 = scf.if %condition -> (i32, i32) {
+    scf.yield %result_slot_0, %result_slot_1 : i32, i32
   } else {
-    scf.yield %initial : vector<2xi32>
+    %23 = vector.extract %initial[0] : vector<2xi32> -> i32
+    %24 = vector.extract %initial[1] : vector<2xi32> -> i32
+    scf.yield %23, %24 : i32, i32
   }
+  %choice = vector.from_elements %14, %15 : vector<2xi32>
   func.return %choice : vector<2xi32>
 }
 

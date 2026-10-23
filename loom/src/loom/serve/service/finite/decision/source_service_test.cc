@@ -18,6 +18,7 @@
 #include "iree/base/internal/json.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/server/resources.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/finite/decision/protocol.h"
 #include "loom/serve/service/finite/embedding/protocol.h"
@@ -60,7 +61,8 @@ class SourceDecisionServiceTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_serve_test_application_acquire(
         &application_options, host_allocator_, &application));
     host_ = loom_serve_test_application_host(application);
-    group_ = loom_serve_test_application_device_group(application);
+    resources_.device_group =
+        loom_serve_test_application_device_group(application);
     device_ = loom_serve_test_application_device_at(application, 0);
     ASSERT_NO_FATAL_FAILURE(CreateModel(model_source_.c_str(), &models_[0]));
     IREE_ASSERT_OK(loom_serve_finite_service_allocate(
@@ -69,14 +71,15 @@ class SourceDecisionServiceTest : public ::testing::Test {
     interfaces_[0] = loom_serve_finite_service_interface(services_[0]);
     EXPECT_EQ(interfaces_[0].capacity_domain,
               loom_serve_device_residency_cache(device_));
-    interfaces_[0].set_observer(
-        interfaces_[0].self,
-        {[](void* self) {
-           auto* test = static_cast<SourceDecisionServiceTest*>(self);
-           test->wakes_.fetch_add(1);
-           iree_notification_post(&test->notification_, IREE_ALL_WAITERS);
-         },
-         this});
+    const loom_serve_wake_callback_t observer = {
+        [](void* self) {
+          auto* test = static_cast<SourceDecisionServiceTest*>(self);
+          test->wakes_.fetch_add(1);
+          iree_notification_post(&test->notification_, IREE_ALL_WAITERS);
+        },
+        this};
+    interfaces_[0].set_observer(interfaces_[0].self, observer);
+    loom_serve_resources_set_observer(&resources_, observer);
     auto http_options = loom_serve_http_server_options_default();
     IREE_ASSERT_OK(loom_serve_http_server_allocate(
         loom_serve_host_proactor_pool(host_), &http_options, host_allocator_,
@@ -103,6 +106,7 @@ class SourceDecisionServiceTest : public ::testing::Test {
     for (auto* model : models_) {
       IREE_EXPECT_OK(loom_serve_finite_model_free(model));
     }
+    loom_serve_resources_set_observer(&resources_, {});
     iree_notification_deinitialize(&notification_);
   }
   int Send(const std::string& body, const char* target = "/v1/systemone",
@@ -145,9 +149,11 @@ class SourceDecisionServiceTest : public ::testing::Test {
   }
   bool Step() {
     const uint64_t previous = wakes_.load();
+    IREE_EXPECT_OK(loom_serve_resources_advance(&resources_));
     bool progress = false;
     IREE_EXPECT_OK(interfaces_[0].advance(interfaces_[0].self, 0, &progress));
-    if (interfaces_[0].is_active(interfaces_[0].self)) {
+    if (interfaces_[0].is_active(interfaces_[0].self) ||
+        loom_serve_resources_is_pending(&resources_)) {
       struct loom_serve_test_decision_wait_t {
         // Shared release generation.
         std::atomic<uint64_t>* wakes;
@@ -162,8 +168,11 @@ class SourceDecisionServiceTest : public ::testing::Test {
             return wait->wakes->load() > wait->previous;
           },
           &wait, iree_infinite_timeout());
+      return true;
     }
-    return progress;
+    // A completion can publish a wake during advance after admission deferred.
+    // Consume it with another owner turn before declaring the drain complete.
+    return progress || wakes_.load() > previous;
   }
   void Drain() {
     while (Step()) {
@@ -177,6 +186,7 @@ class SourceDecisionServiceTest : public ::testing::Test {
         16, 16, 0, nullptr, host_allocator_, &services_[1]));
     interfaces_[1] = loom_serve_finite_service_interface(services_[1]);
     interfaces_[0].set_observer(interfaces_[0].self, {});
+    loom_serve_resources_set_observer(&resources_, {});
     http_.Start([this]() -> iree_status_t {
       loom_serve_registry_t* registry = nullptr;
       IREE_RETURN_IF_ERROR(loom_serve_registry_allocate(
@@ -186,7 +196,7 @@ class SourceDecisionServiceTest : public ::testing::Test {
           {
               .request_quota = 16,
               .holding_capacity = 8,
-              .resources = {.device_group = group_},
+              .resources = resources_,
           },
           host_allocator_);
       return iree_status_join(status, loom_serve_registry_free(registry));
@@ -200,8 +210,8 @@ class SourceDecisionServiceTest : public ::testing::Test {
   std::string embedding_source_;
   // Real shared CPU/JIT executor and asynchronous I/O owner.
   loom_serve_host_t* host_ = nullptr;
-  // Application group enclosing all model and device resources.
-  loom_serve_device_group_t* group_ = nullptr;
+  // Borrowed application resources progressed by the direct owner or router.
+  loom_serve_resources_t resources_ = {};
   // Borrowed device record within the application group.
   loom_serve_device_t* device_ = nullptr;
   // Independently compiled source models, not mock callbacks.

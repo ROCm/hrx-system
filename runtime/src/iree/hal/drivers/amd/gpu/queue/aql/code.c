@@ -129,7 +129,7 @@ iree_status_t iree_hal_amd_gpu_aql_code_allocate(
       (void*)(uintptr_t)mapping.read_index_address,
       (void*)(uintptr_t)mapping.write_index_address,
       (void*)(uintptr_t)mapping.doorbell_address,
-      code->queue.host_publish_fence, &code->ring);
+      code->queue.host_publish_executor, &code->ring);
   return iree_ok_status();
 }
 
@@ -168,10 +168,12 @@ iree_status_t iree_hal_amd_gpu_aql_code_publish(
     if (amdf_status_is_ok(code->failure)) {
       iree_hal_amd_gpu_aql_ring_write_body(&code->ring, position,
                                            &code->packet);
-      iree_hal_amd_gpu_aql_ring_publish_header(&code->ring, position,
-                                               code->packet.words[0]);
-      iree_hal_amd_gpu_aql_ring_notify(&code->ring);
-      published = true;
+      code->failure = iree_hal_amd_gpu_aql_ring_publish_header(
+          &code->ring, &code->queue, position, code->packet.words[0]);
+      if (amdf_status_is_ok(code->failure)) {
+        iree_hal_amd_gpu_aql_ring_notify(&code->ring);
+        published = true;
+      }
       while (amdf_status_is_ok(code->failure) &&
              iree_atomic_load((iree_atomic_int64_t*)&signal->value,
                               iree_memory_order_acquire) != 0) {

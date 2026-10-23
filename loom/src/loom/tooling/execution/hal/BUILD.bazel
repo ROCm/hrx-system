@@ -46,6 +46,7 @@ _AMDGPU_EXECUTION_TAGS = [
 
 exports_files([
     "testdata/buffer_bulk_hal_actual.loom",
+    "testdata/command_count_observations.loom",
     "testdata/command_scenario_dependent_stages.loom",
     "testdata/command_scenario_specializations.loom",
     "testdata/dynamic_workgroup_hal_actual.loom",
@@ -53,6 +54,17 @@ exports_files([
     "testdata/scenario_batch_hal_actual.loom",
     "testdata/scenario_compare_hal_vm.loom",
 ])
+
+iree_executable_test(
+    name = "command_count_observations_test",
+    src = "//loom/src/loom/tools/loom-test",
+    args = [
+        "$(rootpath testdata/command_count_observations.loom)",
+        "--device=task",
+    ],
+    data = ["testdata/command_count_observations.loom"],
+    target_compatible_with = _TASK_EXECUTION_COMPATIBLE_WITH,
+)
 
 iree_executable_test(
     name = "command_scenario_execution_test",
@@ -80,6 +92,7 @@ loom_test(
     name = "hardware_test",
     srcs = [
         "testdata/buffer_bulk_hal_actual.loom",
+        "testdata/command_count_observations.loom",
         "testdata/command_scenario_dependent_stages.loom",
         "testdata/dynamic_workgroup_hal_actual.loom",
         "testdata/launch_schedule_hal_actual.loom",
@@ -99,7 +112,7 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-benchmark",
     args = [
         "$(rootpath testdata/scenario_compare_hal_vm.loom)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--case=@scenario_scalar_results",
         "--benchmark=@scenario_scalar_results_throughput",
         "--sample=2",
@@ -124,7 +137,7 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-benchmark",
     args = [
         "$(rootpath testdata/scenario_compare_hal_vm.loom)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--compare=@scenario_benchmark_baseline_throughput,@scenario_benchmark_candidate_throughput",
         "--sample=2",
         "--repetitions=1",
@@ -206,7 +219,6 @@ loom_cc_library(
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/iree_hal",
         "//loom/src/loom/ir:builders",
-        "//loom/src/loom/target:profile",
         "//loom/src/loom/target:types",
         "//loom/src/loom/tooling/testbench:api",
         "//loom/src/loom/tooling/testbench:compiled_provider",
@@ -241,7 +253,7 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:source",
         "//loom/src/loom/ir:builders",
-        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:builders",
         "//loom/src/loom/ops/buffer:builders",
         "//loom/src/loom/ops/command:builders",
         "//loom/src/loom/ops/func:builders",

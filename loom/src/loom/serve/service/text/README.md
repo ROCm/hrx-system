@@ -253,9 +253,34 @@ implicit seed. Native code does not decode the packet or implement sampling.
 After row admission, `bind_request(control_state, row, options)` binds that
 policy to the source-owned row table. `encode_epoch` receives the epoch plans,
 known input IDs, optional projected-row records, and packet capacities, then
-writes the source's control metadata and input records. The
+writes the source's control metadata and input records. It returns
+`(output_count, transfer_plan, byte_offset, byte_length)`. The plan view contains
+little-endian u64 records
+`{source_binding, source_offset, target_binding, target_offset, length}`.
+Source and target binding tables each name metadata at ordinal zero and the
+input packet at ordinal one. Independent offsets allow compact source bytes to
+populate sparse destination storage. Capacity describes available storage, not
+transfer size; bytes outside these ranges are untouched. Source initializes
+every byte its device consumers will read.
+
+The shared [transfer plan](../../runtime/program/transfer_plan.h) boundary checks
+all bindings and extents before submission. Nonempty ranges are ordered by
+target binding and offset, with no overlapping targets. Source ranges may
+repeat. The records describe independent placements, not execution order, and
+contain no physical addresses or transport handles.
+
+The local adapter binds checked placements to HAL uploads. The plan view is
+consumed during submission and can reuse source control state without allocating
+a new buffer. Packet bytes remain immutable until accepted queue accesses
+retire, including partial submission failures. Transport source return,
+destination visibility, and final destination-consumer retirement are distinct;
+neither an early error nor successful placement alone authorizes target reuse.
+Media producer waits
+and device-feature gathers follow these host control uploads without uploading
+the feature storage. The
 [source control example](../../fixture/text/control.loom) implements this
-boundary, with media record layouts in [media_epoch.h](media_epoch.h).
+boundary, with upload ownership in [epoch_upload.h](epoch_upload.h) and media
+record layouts in [media_epoch.h](media_epoch.h).
 The serialized model owner excludes outstanding
 execution while changing those packets. Device selection returns only selected
 IDs through the existing completion path; logits and RNG state stay on device.

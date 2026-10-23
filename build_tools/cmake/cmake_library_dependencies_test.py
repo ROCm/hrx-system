@@ -55,7 +55,8 @@ class CMakeLibraryDependenciesTest(unittest.TestCase):
                     "iree_fixture_probe",
                     "iree_fixture_unified_probe",
                     "iree_fixture_collected_probe",
-                    "iree_fixture_runtime_probe",
+                    "iree_fixture_runtime_tool_probe",
+                    "iree_fixture_tool_probe",
                     "iree_fixture_source_less_test_with_a_long_target_name_matching_real_cts_binaries",
                 )
                 for program in programs:

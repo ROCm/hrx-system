@@ -114,7 +114,14 @@ class SourceMemoryByteOffsetMaterializer:
     complete byte offset with the arithmetic descriptors. ``multiply_add``
     optionally accumulates the plan's static bias into one multiplied term;
     ``static_bias`` optionally gives that semantic bias its target-specific
-    materialization instead of using the ordinary arithmetic constant.
+    materialization instead of using the ordinary arithmetic constant. An
+    ``increment`` descriptor lets shared loop planning advance a carried byte
+    offset by a constant without rebuilding its canonical terms.
+
+    Increment-capable materializers using the same physical carrier must agree
+    on their constant, add, and increment recipe within a composed target
+    policy. The contract-index generator enforces that shared-lowering
+    invariant.
 
     Both constant forms bind ``constant_immediate`` so that a target cannot
     accidentally encode the same byte offset with different immediate fields.
@@ -124,9 +131,11 @@ class SourceMemoryByteOffsetMaterializer:
     add: Descriptor
     multiply: Descriptor
     shift_left: Descriptor | None
+    increment: Descriptor | None = None
     multiply_add: Descriptor | None = None
     static_bias: Descriptor | None = None
     constant_immediate: str = "value"
+    increment_immediate: str | None = None
     integer_conversions: tuple[SourceMemoryIntegerConversion, ...] = ()
 
 

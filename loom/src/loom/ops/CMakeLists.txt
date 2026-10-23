@@ -11,24 +11,89 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
-    op_defs
+    headers
   HDRS
     "attribute_accessors.h"
     "builder.h"
     "builder_macros.h"
+    "format.h"
+    "mutation.h"
+    "op_defs.h"
+    "use_list.h"
+  TEXTUAL_HDRS
+    "keyword_enum.inc"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::error::emitter
+    loom::ir::headers
+    loom::ir::type_headers
+    loom::util::bstring
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    vocabulary
+  HDRS
+    "atomic.h"
+    "cache.h"
+    "combining.h"
+  DEPS
+    iree::base
+    loom::error::emitter
+    loom::ir::headers
+    loom::ir::type_headers
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    builders
+  HDRS
+    "attribute_accessors.h"
+    "builder.h"
+    "builder_macros.h"
+    "mutation.h"
     "op_defs.h"
     "use_list.h"
   SRCS
+    "builder.c"
     "op_defs.c"
     "use_list.c"
   DEPS
-    ::format
+    ::headers
     iree::base
     iree::base::internal::arena
     loom::error::emitter
     loom::ir::builders
-    loom::util::adaptive_sort
     loom::util::bstring
+  LINKABLE_MORE_THAN_ONCE
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    mutation
+  HDRS
+    "mutation.h"
+  SRCS
+    "mutation.c"
+  DEPS
+    ::builders
+    iree::base
+    iree::base::internal::arena
+    loom::ir::builders
+    loom::util::adaptive_sort
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
+    op_defs
+  DEPS
+    ::builders
+    ::mutation
   PUBLIC
 )
 
@@ -44,7 +109,7 @@ loom_cc_library(
     "format.c"
   DEPS
     iree::base
-    loom::ir::builders
+    loom::ir::headers
     loom::util::bstring
   PUBLIC
 )
@@ -362,6 +427,7 @@ loom_cc_library(
     iree::base
     loom::ir::builders
     loom::util::bstring
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -435,6 +501,58 @@ loom_cc_test(
     loom::util::fact_table
 )
 
+set(_declaration_boundary_deps_platform_deps "")
+if(LOOM_TARGET_ARCH_AMDGPU)
+  list(APPEND _declaration_boundary_deps_platform_deps loom::target::arch::amdgpu::ops::op_defs)
+endif()
+if(LOOM_TARGET_ARCH_SPIRV)
+  list(APPEND _declaration_boundary_deps_platform_deps loom::target::arch::spirv::ops::op_defs)
+endif()
+if(LOOM_TARGET_ARCH_VM)
+  list(APPEND _declaration_boundary_deps_platform_deps loom::target::arch::vm::ops::op_defs)
+endif()
+if(LOOM_TARGET_ARCH_WASM)
+  list(APPEND _declaration_boundary_deps_platform_deps loom::target::arch::wasm::ops::op_defs)
+endif()
+if(LOOM_TARGET_ARCH_X86)
+  list(APPEND _declaration_boundary_deps_platform_deps loom::target::arch::x86::ops::op_defs)
+endif()
+if(LOOM_TARGET_ARCH_XDNA)
+  list(APPEND _declaration_boundary_deps_platform_deps loom::target::arch::amd::xdna::aie2p::ops::op_defs)
+endif()
+iree_cc_library(
+  NAME
+    declaration_boundary_deps
+  DEPS
+    loom::ops::buffer::op_defs
+    loom::ops::cfg::op_defs
+    loom::ops::channel::op_defs
+    loom::ops::check::op_defs
+    loom::ops::command::op_defs
+    loom::ops::config::op_defs
+    loom::ops::encoding::op_defs
+    loom::ops::func::op_defs
+    loom::ops::global::op_defs
+    loom::ops::group::op_defs
+    loom::ops::index::op_defs
+    loom::ops::kernel::op_defs
+    loom::ops::low::op_defs
+    loom::ops::pass::op_defs
+    loom::ops::pipeline::op_defs
+    loom::ops::pool::op_defs
+    loom::ops::sanitizer::op_defs
+    loom::ops::scalar::op_defs
+    loom::ops::scf::op_defs
+    loom::ops::target::op_defs
+    loom::ops::template::op_defs
+    loom::ops::test::op_defs
+    loom::ops::vector::op_defs
+    loom::ops::view::op_defs
+    ${_declaration_boundary_deps_platform_deps}
+  TESTONLY
+  PUBLIC
+)
+
 set(_construction_boundary_deps_platform_deps "")
 if(LOOM_TARGET_ARCH_AMDGPU)
   list(APPEND _construction_boundary_deps_platform_deps loom::target::arch::amdgpu::ops::builders)
@@ -483,6 +601,7 @@ iree_cc_library(
     loom::ops::test::builders
     loom::ops::vector::builders
     loom::ops::view::builders
+    loom::pass::builder
     ${_construction_boundary_deps_platform_deps}
   TESTONLY
   PUBLIC

@@ -73,18 +73,17 @@ typedef struct loom_serve_speech_generator_t {
                            const loom_serve_speech_request_t* request,
                            void** out_invocation);
   // Releases an unadmitted request and its admission interest on the owner.
-  // Any accepted activation has completed and its pin has been released.
   void (*discard)(void* self, void* invocation);
-  // Shared-owner admission. ACQUIRED owns an activation pin and a frontier even
-  // when row backing cannot fit. Cancellation retains this operation until
-  // successful completion; failure leaves it under model retirement.
+  // Shared-owner admission of parameters, row backing, and cohort scratch.
+  // ACQUIRED owns the row, activation pin, and readiness frontier; denial owns
+  // neither row nor pin. Cancellation retains accepted work until successful
+  // completion; failure leaves it under model retirement.
   iree_status_t (*try_admit)(void* self, void* invocation,
                              loom_serve_residency_admission_t* out_admission,
                              loom_serve_execution_frontier_t* out_frontier);
-  // Consumes successful admission readiness. AVAILABLE retains the row and pin;
-  // CAPACITY/DEFERRED release the activation pin. DEFERRED preserves observed
-  // native progress even if it completed before this result is consumed.
-  loom_serve_memory_admission_t (*complete_admit)(void* self, void* invocation);
+  // Collects successful admission readiness, retaining the admitted row and
+  // pin. Capacity is decided before submission, never again at completion.
+  void (*complete_admit)(void* self, void* invocation);
   // CPU-only next-work preparation at a retired model cut. Does not advance
   // the request or submit work. Retained source bytes belong to the handle.
   // Requery after another batch completes; conditioning facts may have changed.

@@ -18,6 +18,7 @@
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/ops/vector/ops.h"
+#include "loom/target/facts.h"
 #include "loom/util/fact_cfg.h"
 #include "loom/util/fact_induction.h"
 #include "loom/util/fact_table.h"
@@ -109,6 +110,201 @@ class FactTableComputeTest : public ::testing::Test {
   const loom_type_t type_ = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_value_id_t inputs_[2];
 };
+
+// Exercises the immutable replay contract used by nested loop and CFG owners.
+class FactTableReplayTest : public FactTableComputeTest {
+ protected:
+  void SetUp() override {
+    FactTableComputeTest::SetUp();
+    lhs_ = DefineValue(integer_type_);
+    rhs_ = DefineValue(integer_type_);
+    SetInput(lhs_, 3);
+    SetInput(rhs_, 4);
+    IREE_ASSERT_OK(loom_scalar_addi_build(
+        &builder_, 0, lhs_, rhs_, integer_type_, LOOM_LOCATION_UNKNOWN, &sum_));
+    IREE_ASSERT_OK(loom_scalar_addi_build(
+        &builder_, 0, loom_scalar_addi_result(sum_), rhs_, integer_type_,
+        LOOM_LOCATION_UNKNOWN, &consumer_));
+    IREE_ASSERT_OK(loom_value_fact_table_enable_replay_generations(&table_));
+    Expect(sum_, 7);
+    Expect(consumer_, 11);
+    table_.replaying = true;
+  }
+
+  void SetInput(loom_value_id_t value, int64_t number) {
+    IREE_ASSERT_OK(loom_value_fact_table_define(
+        &table_, value, loom_value_facts_exact_i64(number)));
+  }
+
+  void Expect(loom_op_t* op, int64_t number) {
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, op));
+    const auto facts =
+        loom_value_fact_table_lookup(&table_, loom_scalar_addi_result(op));
+    ASSERT_TRUE(loom_value_facts_is_exact(facts));
+    EXPECT_EQ(facts.range_lo, number);
+  }
+
+  // Scalar arithmetic keeps the API fixture independent of origin families.
+  const loom_type_t integer_type_ = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  // Input whose numerical publications change between immutable visits.
+  loom_value_id_t lhs_;
+  // Independent input shared by the producer and its consumer.
+  loom_value_id_t rhs_;
+  // Producer revisited while an inner solve converges.
+  loom_op_t* sum_ = nullptr;
+  // Consumer that observes the producer after convergence.
+  loom_op_t* consumer_ = nullptr;
+};
+
+TEST_F(FactTableReplayTest, InnerConvergencePreservesUnconsumedChanges) {
+  SetInput(lhs_, 5);
+  Expect(sum_, 9);
+  Expect(sum_, 9);
+  Expect(consumer_, 13);
+  SetInput(lhs_, 3);
+  Expect(sum_, 7);
+  Expect(sum_, 7);
+  Expect(consumer_, 11);
+}
+
+TEST_F(FactTableReplayTest, ReplacedAndUndefinedResultsMustRecompute) {
+  const auto result = loom_scalar_addi_result(sum_);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table_, result,
+                                              loom_value_facts_unknown()));
+  Expect(sum_, 7);
+  loom_value_fact_table_undefine(&table_, result);
+  Expect(sum_, 7);
+}
+
+TEST_F(FactTableReplayTest, RefinementCanReadAnUnlistedValue) {
+  auto source = DefineValue(integer_type_);
+  table_.context.refine_operands.user_data = &source;
+  table_.context.refine_operands.fn =
+      [](void* user_data, const loom_value_fact_table_t* table,
+         const loom_op_t*, loom_value_facts_t* facts) {
+        facts[0] = loom_value_fact_table_lookup(
+            table, *static_cast<loom_value_id_t*>(user_data));
+      };
+  SetInput(source, 11);
+  Expect(sum_, 15);
+  SetInput(source, 13);
+  Expect(sum_, 17);
+  table_.context.refine_operands.fn = nullptr;
+  table_.context.refine_operands.user_data = nullptr;
+}
+
+TEST_F(FactTableReplayTest, CounterRestartExpiresEveryEvaluation) {
+  table_.replay.generation = UINT32_MAX - 1;
+  SetInput(lhs_, 5);
+  Expect(sum_, 9);
+  Expect(consumer_, 13);
+  SetInput(rhs_, 6);
+  Expect(sum_, 11);
+  Expect(consumer_, 17);
+}
+
+TEST_F(FactTableReplayTest, StorageGrowthAndScopeResetPreserveInvalidation) {
+  IREE_ASSERT_OK(loom_value_fact_table_reserve(&table_, 4096));
+  SetInput(lhs_, 5);
+  Expect(sum_, 9);
+  Expect(consumer_, 13);
+  loom_value_fact_table_clear_scope(&table_);
+  SetInput(lhs_, 11);
+  SetInput(rhs_, 7);
+  IREE_ASSERT_OK(loom_value_fact_table_enable_replay_generations(&table_));
+  Expect(sum_, 18);
+  Expect(consumer_, 25);
+}
+
+TEST_F(FactTableReplayTest, SemanticEditsStartOutsideReplay) {
+  table_.replaying = false;
+  IREE_ASSERT_OK(loom_op_set_operand(module_, sum_, 0, rhs_));
+  Expect(sum_, 8);
+  table_.replaying = true;
+  Expect(consumer_, 12);
+}
+
+TEST_F(FactTableReplayTest, EveryResultOfAnEquationMustRemainPublished) {
+  loom_op_t* division = nullptr;
+  const loom_type_t types[] = {integer_type_, integer_type_};
+  IREE_ASSERT_OK(loom_scalar_divremsi_build(&builder_, lhs_, rhs_, types,
+                                            LOOM_LOCATION_UNKNOWN, &division));
+  const auto quotient = loom_scalar_divremsi_quotient(division);
+  const auto remainder = loom_scalar_divremsi_remainder(division);
+  auto expect = [&](int64_t expected_quotient, int64_t expected_remainder) {
+    IREE_ASSERT_OK(
+        loom_value_fact_table_compute_op(&table_, module_, division));
+    EXPECT_EQ(loom_value_fact_table_lookup(&table_, quotient).range_lo,
+              expected_quotient);
+    EXPECT_EQ(loom_value_fact_table_lookup(&table_, remainder).range_lo,
+              expected_remainder);
+  };
+  SetInput(lhs_, 11);
+  SetInput(rhs_, 3);
+  expect(3, 2);
+  loom_value_fact_table_undefine(&table_, remainder);
+  expect(3, 2);
+  SetInput(lhs_, 12);
+  expect(4, 0);
+}
+
+TEST_F(FactTableReplayTest, ChangedExtensionInvalidatesEqualNumericEnvelope) {
+  const auto type = loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32,
+                                        loom_dim_pack_static(2), 0);
+  const auto input = DefineValue(type);
+  loom_op_t* sum = nullptr;
+  IREE_ASSERT_OK(loom_vector_addi_build(&builder_, 0, input, input, type,
+                                        LOOM_LOCATION_UNKNOWN, &sum));
+  for (int64_t first : {1, 9, 1}) {
+    const loom_value_facts_t lanes[] = {
+        loom_value_facts_exact_i64(first),
+        loom_value_facts_exact_i64(10 - first),
+    };
+    loom_value_facts_t facts;
+    IREE_ASSERT_OK(loom_value_facts_make_small_static_lanes(
+        &table_.context, {lanes, IREE_ARRAYSIZE(lanes)}, &facts));
+    IREE_ASSERT_OK(loom_value_fact_table_define(&table_, input, facts));
+    for (unsigned visit = 0; visit < 2; ++visit) {
+      IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, sum));
+      loom_value_fact_small_static_lanes_t result;
+      ASSERT_TRUE(loom_value_facts_query_small_static_lanes(
+          &table_.context,
+          loom_value_fact_table_lookup(&table_, loom_vector_addi_result(sum)),
+          &result));
+      ASSERT_EQ(result.count, 2u);
+      EXPECT_EQ(result.lanes[0].range_lo, 2 * first);
+      EXPECT_EQ(result.lanes[1].range_lo, 2 * (10 - first));
+    }
+  }
+}
+
+TEST_F(FactTableReplayTest, IdentityChangesDoNotRequireNumericChanges) {
+  for (auto input : {lhs_, rhs_}) {
+    IREE_ASSERT_OK(loom_value_fact_table_define(&table_, input,
+                                                loom_value_facts_unknown()));
+  }
+  loom_op_t* comparison = nullptr;
+  IREE_ASSERT_OK(
+      loom_scalar_cmpi_build(&builder_, LOOM_SCALAR_CMPI_PREDICATE_EQ, lhs_,
+                             rhs_, LOOM_LOCATION_UNKNOWN, &comparison));
+  const auto result = loom_scalar_cmpi_result(comparison);
+  IREE_ASSERT_OK(
+      loom_value_fact_table_compute_op(&table_, module_, comparison));
+  EXPECT_FALSE(
+      loom_value_facts_is_exact(loom_value_fact_table_lookup(&table_, result)));
+  IREE_ASSERT_OK(
+      loom_value_fact_table_define_identity(&table_, rhs_, lhs_, nullptr));
+  IREE_ASSERT_OK(
+      loom_value_fact_table_compute_op(&table_, module_, comparison));
+  EXPECT_TRUE(
+      loom_value_facts_is_exact(loom_value_fact_table_lookup(&table_, result)));
+  EXPECT_EQ(loom_value_fact_table_lookup(&table_, result).range_lo, 1);
+  loom_value_fact_table_undefine_identity(&table_, rhs_);
+  IREE_ASSERT_OK(
+      loom_value_fact_table_compute_op(&table_, module_, comparison));
+  EXPECT_FALSE(
+      loom_value_facts_is_exact(loom_value_fact_table_lookup(&table_, result)));
+}
 
 class FactTableScratchTest : public FactTableComputeTest {
  protected:
@@ -1041,6 +1237,59 @@ TEST_F(FactTableComputeTest, DependentResultsPublishOnlyFinalChanges) {
 
 class FactEntryInputTest : public FactTableComputeTest,
                            public ::testing::WithParamInterface<bool> {};
+
+TEST_F(FactTableComputeTest, SingleLaneTargetMakesScalarArgumentsUniform) {
+  std::vector<loom_type_t> arg_types;
+  for (loom_scalar_type_t scalar_type = LOOM_SCALAR_TYPE_NONE + 1;
+       scalar_type < LOOM_SCALAR_TYPE_COUNT_; ++scalar_type) {
+    arg_types.push_back(loom_type_scalar(scalar_type));
+  }
+  loom_string_id_t name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder_, IREE_SV("uniform"), &name));
+  uint16_t symbol = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, name, &symbol));
+  loom_op_t* definition = nullptr;
+  IREE_ASSERT_OK(loom_test_func_build(
+      &builder_, 0, 0, 0, {0, symbol}, arg_types.data(), arg_types.size(),
+      nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &definition));
+  const auto function = loom_func_like_cast(module_, definition);
+  loom_region_t* body = loom_func_like_body(function);
+  loom_builder_enter_region(&builder_, definition, body);
+  loom_op_t* terminator = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &terminator));
+  const loom_value_id_t index_argument = loom_region_entry_arg_id(body, 0);
+  loom_value_fact_table_t inputs;
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&inputs, &arena_, 0));
+  IREE_ASSERT_OK(loom_value_fact_table_define(
+      &inputs, index_argument, loom_value_facts_make(-8, 64, 4)));
+
+  for (uint32_t subgroup_size : {0u, 1u, 32u}) {
+    SCOPED_TRACE(subgroup_size);
+    loom_value_fact_table_clear_scope(&table_);
+    IREE_ASSERT_OK(loom_value_fact_table_seed_values(
+        &table_, {&inputs, &index_argument, 1}, module_));
+    loom_target_facts_t target = {};
+    target.storage.snapshot.index_bitwidth = 32;
+    target.storage.snapshot.subgroup_size = subgroup_size;
+    table_.context.target_facts = &target;
+    IREE_ASSERT_OK(loom_value_fact_table_compute(&table_, module_, function));
+    const loom_value_facts_t index_facts =
+        loom_value_fact_table_lookup(&table_, index_argument);
+    EXPECT_EQ(index_facts.range_lo, -8);
+    EXPECT_EQ(index_facts.range_hi, 64);
+    EXPECT_EQ(index_facts.known_divisor, 4);
+    const loom_block_t* entry_block = loom_region_const_entry_block(body);
+    for (uint16_t i = 0; i < entry_block->arg_count; ++i) {
+      SCOPED_TRACE(i);
+      EXPECT_EQ(
+          loom_value_facts_is_subgroup_uniform(loom_value_fact_table_lookup(
+              &table_, loom_region_entry_arg_id(body, i))),
+          subgroup_size == 1);
+    }
+  }
+}
 
 TEST_P(FactEntryInputTest, RefreshWithdrawsExtentConstraints) {
   const loom_type_t scalar_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);

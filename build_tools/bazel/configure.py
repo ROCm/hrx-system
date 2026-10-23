@@ -54,17 +54,20 @@ SDK_DRIVER_PACKAGES = {
     ),
 }
 ROCM_DRIVERS = frozenset(("amdgpu",))
+AMD_ENGINES = ("amd-gpu", "amd-xdna")
 DEPENDENCY_MODES = frozenset(("pinned", "package", "auto"))
 SUPPORTED_ENABLE_DRIVERS = frozenset(
-    (*HOST_DRIVERS, "amd", "amdgpu", "vulkan", "webgpu")
+    (*HOST_DRIVERS, *AMD_ENGINES, "amdgpu", "vulkan", "webgpu")
 )
-ALL_DRIVERS = tuple(HOST_DRIVERS) + tuple(SDK_DRIVER_PACKAGES) + ("amd",)
+ALL_DRIVERS = tuple(HOST_DRIVERS) + tuple(SDK_DRIVER_PACKAGES) + ("amd", *AMD_ENGINES)
 DRIVER_DEFINES = {
     "IREE_HAL_DRIVER_AMDGPU": "amdgpu",
     "IREE_HAL_DRIVER_TASK": "task",
     "IREE_HAL_DRIVER_VULKAN": "vulkan",
     "IREE_HAL_DRIVER_WEBGPU": "webgpu",
     "IREE_HAL_DRIVER_AMD": "amd",
+    "IREE_HAL_DRIVER_AMD_GPU": "amd-gpu",
+    "IREE_HAL_DRIVER_AMD_XDNA": "amd-xdna",
 }
 LOOM_TARGET_DEFINES = {
     "LOOM_TARGET_AMDGPU": "amdgpu",
@@ -118,6 +121,8 @@ class ConfigRequest:
     output: Path
     enabled_drivers: set[str] = field(default_factory=lambda: set(HOST_DRIVERS))
     driver_source: str | None = None
+    # Explicit engine selections override the AMD umbrella in either order.
+    amd_engine_overrides: dict[str, bool] = field(default_factory=dict)
     dependency_mode: str = "pinned"
     rocm_dependency_mode: str | None = None
     enabled_loom_targets: set[str] = field(
@@ -171,6 +176,8 @@ class ConfigRequest:
                 f"native {NATIVE_DRIVER_FLAG}=... Bazel option."
             )
         self.driver_source = "portable"
+        if driver in AMD_ENGINES:
+            self.amd_engine_overrides[driver] = enabled
         if enabled:
             self.enabled_drivers.add(driver)
         else:
@@ -766,6 +773,14 @@ def request_from_args(args: argparse.Namespace) -> ConfigRequest:
         apply_define(request, define)
     for native_bazel_arg in args.native_bazel_args:
         apply_native_bazel_arg(request, native_bazel_arg)
+    if "amd" in request.enabled_drivers:
+        request.enabled_drivers.remove("amd")
+        request.enabled_drivers.update(AMD_ENGINES)
+    for engine, enabled in request.amd_engine_overrides.items():
+        if enabled:
+            request.enabled_drivers.add(engine)
+        else:
+            request.enabled_drivers.discard(engine)
     return request
 
 
@@ -799,9 +814,11 @@ def bazelrc_line(command: str, option: str) -> str:
 
 def generate_config(args: argparse.Namespace) -> str:
     request = request_from_args(args)
-    if "amd" in request.enabled_drivers:
+    if request.enabled_drivers.intersection(AMD_ENGINES):
         if request.amdf_build_source is not None and not request.amdf_build:
-            raise SystemExit("AMDF_BUILD=OFF conflicts with IREE_HAL_DRIVER_AMD=ON")
+            raise SystemExit(
+                "AMDF_BUILD=OFF conflicts with an enabled native AMD HAL engine"
+            )
         request.amdf_build = True
     unsupported_enabled_drivers = request.enabled_drivers.difference(
         SUPPORTED_ENABLE_DRIVERS

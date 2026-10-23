@@ -50,3 +50,52 @@ func.def @access_assertions_do_not_cse(%layout: encoding<layout>, %view: view<4x
   sanitizer.assert.access<read> %view[%i] : view<4xf32, %layout>
   func.return
 }
+
+// ====
+
+// Repeated footprints and race events remain distinct observations in source
+// order even though they do not access the program's memory payload.
+// RUN: pass cse,dce
+func.def @observations_remain_ordered(%view: view<4x4xi32>, %fragment: vector<4xi32>, %extent: index) {
+  sanitizer.assert.accesses<read> %view[0, 0] {static_count = 4, static_extents = [1, 4], static_strides = [1, 0]} : view<4x4xi32>
+  sanitizer.assert.accesses<read> %view[0, 0] {static_count = 4, static_extents = [1, 4], static_strides = [1, 0]} : view<4x4xi32>
+  sanitizer.race.access<write> %view[0, 0] : view<4x4xi32>
+  sanitizer.race.access<write> %view[0, 0] : view<4x4xi32>
+  sanitizer.race.fragment_access<read> %fragment, %view[0, 0] shape [%extent, %extent] {role = lhs} : vector<4xi32>, view<4x4xi32>
+  sanitizer.race.fragment_access<read> %fragment, %view[0, 0] shape [%extent, %extent] {role = lhs} : vector<4xi32>, view<4x4xi32>
+  sanitizer.race.sync<workgroup> scope(workgroup) ordering(acq_rel)
+  sanitizer.race.sync<workgroup> scope(workgroup) ordering(acq_rel)
+  func.return
+}
+
+// ----
+func.def @observations_remain_ordered(%view: view<4x4xi32>, %fragment: vector<4xi32>, %extent: index) {
+  sanitizer.assert.accesses<read> %view[0, 0] {static_count = 4, static_extents = [1, 4], static_strides = [1, 0]} : view<4x4xi32>
+  sanitizer.assert.accesses<read> %view[0, 0] {static_count = 4, static_extents = [1, 4], static_strides = [1, 0]} : view<4x4xi32>
+  sanitizer.race.access<write> %view[0, 0] : view<4x4xi32>
+  sanitizer.race.access<write> %view[0, 0] : view<4x4xi32>
+  sanitizer.race.fragment_access<read> %fragment, %view[0, 0] shape [%extent, %extent] {role = lhs} : vector<4xi32>, view<4x4xi32>
+  sanitizer.race.fragment_access<read> %fragment, %view[0, 0] shape [%extent, %extent] {role = lhs} : vector<4xi32>, view<4x4xi32>
+  sanitizer.race.sync<workgroup> scope(workgroup) ordering(acq_rel)
+  sanitizer.race.sync<workgroup> scope(workgroup) ordering(acq_rel)
+  func.return
+}
+
+// ====
+
+// Loop-invariant diagnostic operands do not permit executing a check once
+// outside the loop or dropping the conditional region that contains it.
+// RUN: pass licm,dce
+func.def @observations_retain_control(%condition: i1, %count: index, %value: i32, %view: view<4xi32>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%begin to %count step %step] {
+    scf.if %condition {
+      sanitizer.assert.op %value [ge(%value, 0)] : i32
+      sanitizer.race.access<read> %view[0] : view<4xi32>
+      sanitizer.race.sync<workgroup> scope(workgroup) ordering(acq_rel)
+    } else {
+    }
+  }
+  func.return
+}

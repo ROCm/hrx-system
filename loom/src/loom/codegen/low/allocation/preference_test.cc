@@ -8,6 +8,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/target/test/descriptors.h"
 
 namespace loom {
 namespace {
@@ -353,6 +354,204 @@ TEST_F(LowAllocationPreferenceTest,
 
   const auto query = Prepare();
   EXPECT_EQ(Penalty(query, 0), 3u);
+  EXPECT_EQ(Penalty(query, 1), 0u);
+}
+
+class HardOrdinalCopyPreferenceTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    descriptor_set_ = loom_test_low_core_descriptor_set();
+    ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+        descriptor_set_, IREE_SV("test.coindexed.partner"), &tuple_class_,
+        nullptr));
+    ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+        descriptor_set_, IREE_SV("test.packed.narrow"), &copy_class_, nullptr));
+    ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+        descriptor_set_, IREE_SV("test.explicit_range32"), &source_class_,
+        nullptr));
+
+    intervals_[0].value_class = {
+        .type_kind = LOOM_TYPE_REGISTER,
+        .register_class_id = tuple_class_,
+    };
+    intervals_[1].value_class = {
+        .type_kind = LOOM_TYPE_REGISTER,
+        .register_class_id = copy_class_,
+    };
+    intervals_[2].value_class = {
+        .type_kind = LOOM_TYPE_REGISTER,
+        .register_class_id = source_class_,
+    };
+    intervals_[3].value_class = {
+        .type_kind = LOOM_TYPE_REGISTER,
+        .register_class_id = copy_class_,
+    };
+    for (uint32_t i = 0; i < IREE_ARRAYSIZE(intervals_); ++i) {
+      intervals_[i].value_id = value_ids_[i];
+      intervals_[i].unit_count = 1;
+      assignments_[i] = {
+          .value_id = value_ids_[i],
+          .descriptor_reg_class_id =
+              intervals_[i].value_class.register_class_id,
+          .unit_count = 1,
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_count = 1,
+      };
+    }
+    // The copy source is published. The hard-ordinal peer and its copy result
+    // remain unassigned when the tuple candidate is ranked.
+    assignment_indices_[2] = 2;
+    assignments_[2].location_base = 1;
+
+    liveness_.value_ids = value_ids_;
+    liveness_.value_count = IREE_ARRAYSIZE(value_ids_);
+    liveness_.intervals = intervals_;
+    liveness_.interval_count = IREE_ARRAYSIZE(intervals_);
+    liveness_.value_interval_indices = interval_indices_;
+    assignment_map_.liveness = &liveness_;
+    assignment_map_.assignments = assignments_;
+    assignment_map_.assignment_count = IREE_ARRAYSIZE(assignments_);
+    assignment_map_.assignment_indices_by_value_ordinal = assignment_indices_;
+
+    relations_[0] = {
+        .result_ordinal = 1,
+        .source_ordinal = 2,
+        .unit_count = 1,
+        .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE,
+        .cause = LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY,
+        .flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE,
+    };
+    relations_[1] = {
+        .result_ordinal = 0,
+        .source_ordinal = 1,
+        .unit_count = 1,
+        .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL,
+        .cause = LOOM_LOW_PLACEMENT_CAUSE_DESCRIPTOR_CONSTRAINT,
+        .flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD,
+        .priority = 7,
+    };
+    // Defining transfers occupy the producer-reserved first result relation.
+    result_ranges_[0] = {1, 1};
+    result_ranges_[1] = {0, 1};
+    // The hard relation is indexed under copy-result origin 1. Identity value
+    // 3 has the same origin and can replace its authored endpoint below.
+    source_ranges_[1] = {0, 1};
+    source_ranges_[2] = {1, 1};
+    placement_.relations = relations_;
+    placement_.relation_count = IREE_ARRAYSIZE(relations_);
+    placement_.location_relation_count = 1;
+    placement_.hard_location_relation_count = 1;
+    placement_.value_ids = value_ids_;
+    placement_.value_count = IREE_ARRAYSIZE(value_ids_);
+    placement_.tied_storage_origins_by_value_ordinal = origins_;
+    placement_.ranges_by_result_ordinal = result_ranges_;
+    placement_.ranges_by_source_ordinal = source_ranges_;
+    placement_.relation_indices_by_source_ordinal = source_relation_indices_;
+
+    target_.descriptor_set = descriptor_set_;
+    constraints_.target = &target_;
+  }
+
+  loom_low_allocation_preference_query_t Prepare() {
+    return loom_low_allocation_preference_prepare(
+        &preference_index_, &placement_, &assignment_map_, &constraints_, 0,
+        LOOM_VALUE_ORDINAL_INVALID, &workspace_);
+  }
+
+  uint32_t Penalty(const loom_low_allocation_preference_query_t& query,
+                   uint16_t tuple_ordinal) {
+    auto candidate = assignments_[0];
+    candidate.location_base =
+        loom_low_descriptor_set_physical_register_candidate(
+            descriptor_set_, tuple_class_, tuple_ordinal);
+    return loom_low_allocation_preference_penalty(descriptor_set_, &query,
+                                                  &candidate, nullptr);
+  }
+
+  const loom_low_descriptor_set_t* descriptor_set_ = nullptr;
+  uint16_t tuple_class_ = LOOM_LOW_REG_CLASS_NONE;
+  uint16_t copy_class_ = LOOM_LOW_REG_CLASS_NONE;
+  uint16_t source_class_ = LOOM_LOW_REG_CLASS_NONE;
+  const loom_value_id_t value_ids_[4] = {0, 1, 2, 3};
+  const uint32_t interval_indices_[4] = {0, 1, 2, 3};
+  uint32_t assignment_indices_[4] = {UINT32_MAX, UINT32_MAX, UINT32_MAX,
+                                     UINT32_MAX};
+  const uint32_t origins_[4] = {0, 1, 2, 1};
+  loom_liveness_interval_t intervals_[4] = {};
+  loom_low_allocation_assignment_t assignments_[4] = {};
+  loom_liveness_analysis_t liveness_ = {};
+  loom_low_allocation_assignment_map_t assignment_map_ = {};
+  loom_low_placement_relation_t relations_[2] = {};
+  loom_low_placement_relation_range_t result_ranges_[4] = {};
+  loom_low_placement_relation_range_t source_ranges_[4] = {};
+  const uint32_t source_relation_indices_[2] = {1, 0};
+  loom_low_placement_table_t placement_ = {};
+  loom_low_placement_preference_index_t preference_index_ = {};
+  loom_low_allocation_preference_workspace_t workspace_ = {};
+  loom_low_resolved_target_t target_ = {};
+  loom_low_allocation_target_constraints_t constraints_ = {};
+};
+
+TEST_F(HardOrdinalCopyPreferenceTest,
+       ProjectsCopyStorageThroughDestinationCandidateOrder) {
+  // The source class encodes r0 as candidate 1, while the copy-result class
+  // encodes the same physical register as candidate 0.
+  assignments_[2].location_base = 1;
+  auto query = Prepare();
+  EXPECT_EQ(Penalty(query, 0), 0u);
+  EXPECT_EQ(Penalty(query, 1), 7u);
+
+  // Reversing the source to r1 reverses the preferred tuple without assuming
+  // that the two classes share candidate ordinals or location encodings.
+  assignments_[2].location_base = 0;
+  query = Prepare();
+  EXPECT_EQ(Penalty(query, 0), 7u);
+  EXPECT_EQ(Penalty(query, 1), 0u);
+}
+
+TEST_F(HardOrdinalCopyPreferenceTest,
+       UsesIdentityForwardedPeerInEitherRelationDirection) {
+  relations_[1].source_ordinal = 3;
+  auto query = Prepare();
+  EXPECT_EQ(Penalty(query, 0), 0u);
+  EXPECT_EQ(Penalty(query, 1), 7u);
+
+  relations_[1].result_ordinal = 3;
+  relations_[1].source_ordinal = 0;
+  result_ranges_[0] = {};
+  result_ranges_[1] = {0, 2};
+  source_ranges_[0] = {0, 1};
+  source_ranges_[1] = {};
+  query = Prepare();
+  EXPECT_EQ(Penalty(query, 0), 0u);
+  EXPECT_EQ(Penalty(query, 1), 7u);
+}
+
+TEST_F(HardOrdinalCopyPreferenceTest,
+       IgnoresUnavailableAndNonAliasCopyPredictions) {
+  // Source candidate 3 is r2, which the two-register copy class cannot name.
+  assignments_[2].location_base = 3;
+  auto query = Prepare();
+  EXPECT_EQ(query.structural.placement, nullptr);
+  EXPECT_EQ(Penalty(query, 0), 0u);
+  EXPECT_EQ(Penalty(query, 1), 0u);
+
+  assignments_[2].location_base = 1;
+  relations_[0].flags = 0;
+  query = Prepare();
+  EXPECT_EQ(query.structural.placement, nullptr);
+  EXPECT_EQ(Penalty(query, 0), 0u);
+  EXPECT_EQ(Penalty(query, 1), 0u);
+}
+
+TEST_F(HardOrdinalCopyPreferenceTest, LeavesPublishedPeerToHardLegality) {
+  assignment_indices_[1] = 1;
+  assignments_[1].location_base =
+      loom_low_descriptor_set_physical_register_candidate(descriptor_set_,
+                                                          copy_class_, 1);
+  const auto query = Prepare();
+  EXPECT_EQ(query.structural.placement, nullptr);
+  EXPECT_EQ(Penalty(query, 0), 0u);
   EXPECT_EQ(Penalty(query, 1), 0u);
 }
 

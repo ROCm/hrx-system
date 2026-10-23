@@ -122,7 +122,7 @@ iree_amdgpu_hal_cts_testdata(
         "testdata/asan_executable_test.c",
         "testdata/asan_global_layout_test.c",
     ],
-    backend_name = "amdgpu_asan",
+    backend_name = "legacy_amdgpu_asan",
     identifier = "iree_cts_asan_executable_enabled_testdata_amdgpu",
     internal_hdrs = [
         "//runtime/src/iree/hal/drivers/amdgpu/abi:amdgpu_abi_bitcode_hdrs",
@@ -168,7 +168,7 @@ iree_amdgpu_hal_cts_testdata(
     srcs = [
         "testdata/tsan_executable_test.c",
     ],
-    backend_name = "amdgpu_tsan",
+    backend_name = "legacy_amdgpu_tsan",
     identifier = "iree_cts_tsan_executable_enabled_testdata_amdgpu",
     internal_hdrs = [
         "//runtime/src/iree/hal/drivers/amdgpu/abi:amdgpu_abi_bitcode_hdrs",
@@ -186,7 +186,7 @@ iree_amdgpu_hal_cts_testdata(
         "testdata/manual_asan_noop_test.c",
         "testdata/manual_asan_test.c",
     ],
-    backend_name = "amdgpu_asan",
+    backend_name = "legacy_amdgpu_asan",
     identifier = "iree_cts_asan_testdata_amdgpu",
     internal_hdrs = [
         "//runtime/src/iree/hal/drivers/amdgpu/abi:amdgpu_abi_bitcode_hdrs",

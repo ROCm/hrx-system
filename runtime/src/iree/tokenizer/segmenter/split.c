@@ -926,7 +926,7 @@ static iree_status_t iree_tokenizer_segmenter_split_state_finalize(
       if (!emitter.full) {
         iree_status_t finalize_status = iree_tokenizer_regex_exec_finalize(
             &segmenter->regex.dfa, &self->regex_state, input_end,
-            iree_tokenizer_split_inline_callback, &context);
+            remaining_input, iree_tokenizer_split_inline_callback, &context);
         if (iree_status_is_ok(finalize_status)) {
           iree_tokenizer_regex_exec_initialize(&self->regex_state,
                                                &segmenter->regex.dfa);
@@ -1030,6 +1030,11 @@ static bool iree_tokenizer_segmenter_split_state_has_pending(
 
   // Check if there's a buffered pending segment.
   if (self->has_pending) {
+    return true;
+  }
+
+  // The matcher finished, but the trailing flush ran out of output credit.
+  if (self->finalize_feed_done) {
     return true;
   }
 

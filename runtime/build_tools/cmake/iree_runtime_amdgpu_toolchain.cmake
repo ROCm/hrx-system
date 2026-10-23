@@ -176,7 +176,7 @@ endfunction()
 
 function(iree_runtime_configure_amdgpu_toolchain)
   _iree_amdgpu_reset_resolved_device_toolchain()
-  if(NOT IREE_HAL_DRIVER_AMDGPU)
+  if(NOT IREE_HAL_DRIVER_AMDGPU AND NOT IREE_HAL_DRIVER_AMD_GPU)
     return()
   endif()
   if(NOT IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE STREQUAL "prebuilt" AND

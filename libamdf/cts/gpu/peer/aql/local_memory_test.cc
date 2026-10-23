@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "libamdf/cts/gpu/aql/executable.h"
-#include "libamdf/cts/gpu/aql/publication.h"
+#include "libamdf/cts/gpu/aql/queue/publication.h"
 #include "libamdf/cts/gpu/kernels/transform.h"
 #include "libamdf/cts/gpu/kernels/transform_kernels.h"
 #include "libamdf/cts/gpu/peer/device_fixture.h"

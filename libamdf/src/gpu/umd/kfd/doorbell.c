@@ -125,18 +125,13 @@ amdf_status_t amdf_gpu_kfd_doorbell_create(
                KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED,
   };
   if (amdf_status_is_ok(status)) {
-    amdf_gpu_kfd_device_lock_memory(device,
-                                    AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
-    if (ioctl(device->descriptor, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocate) !=
-        0) {
-      status = amdf_linux_error(errno);
-    } else {
+    status = amdf_gpu_kfd_buffer_allocate_native(device, &allocate);
+    if (amdf_status_is_ok(status)) {
       doorbell->handle = allocate.handle;
       if (doorbell->handle == 0) {
         status = amdf_linux_error(EPROTO);
       }
     }
-    amdf_gpu_kfd_device_unlock_memory(device);
   }
   if (amdf_status_is_ok(status)) {
     uint32_t gpu_id = device->topology.gpu_id;

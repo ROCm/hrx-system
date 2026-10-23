@@ -87,7 +87,7 @@ static iree_status_t CreateAmdgpuCtsDevice(
 
   iree_hal_driver_t* driver = nullptr;
   iree_status_t status = iree_hal_amdgpu_driver_create(
-      IREE_SV("amdgpu"), &options, iree_allocator_system(), &driver);
+      IREE_SV("legacy-amdgpu"), &options, iree_allocator_system(), &driver);
 
   iree_hal_device_t* device = nullptr;
   if (iree_status_is_ok(status)) {

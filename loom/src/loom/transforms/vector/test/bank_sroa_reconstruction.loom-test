@@ -1,0 +1,226 @@
+// RUN: pass sroa-vector-banks,canonicalize,cse
+
+// The guarded update transports scalars through both joins. Two whole-vector
+// consumers share one reconstruction after the recurrence.
+func.def @guarded_accumulators(%initial: vector<4xf32>, %bias: vector<4xf32>, %increment: f32, %active: i1, %end: index) -> (vector<4xf32>, vector<4xf32>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %result = scf.for %i = [%begin to %end step %step](%bank = %initial : vector<4xf32>) -> (vector<4xf32>) {
+    %next = scf.if %active -> (vector<4xf32>) {
+      %old = vector.extract %bank[2] : vector<4xf32> -> f32
+      %sum = scalar.addf %old, %increment : f32
+      %updated = vector.insert %sum into %bank[2] : f32, vector<4xf32>
+      scf.yield %updated : vector<4xf32>
+    } else {
+      scf.yield %bank : vector<4xf32>
+    }
+    scf.yield %next : vector<4xf32>
+  }
+  %shifted = vector.addf %result, %bias : vector<4xf32>
+  func.return %result, %shifted : vector<4xf32>, vector<4xf32>
+}
+
+// ----
+func.def @guarded_accumulators(%initial: vector<4xf32>, %bias: vector<4xf32>, %increment: f32, %active: i1, %end: index) -> (vector<4xf32>, vector<4xf32>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial_slot_0 = vector.extract %initial[0] : vector<4xf32> -> f32
+  %initial_slot_1 = vector.extract %initial[1] : vector<4xf32> -> f32
+  %initial_slot_2 = vector.extract %initial[2] : vector<4xf32> -> f32
+  %initial_slot_3 = vector.extract %initial[3] : vector<4xf32> -> f32
+  %result_slot_2 = scf.for %i = [%begin to %end step %step](%bank_slot_2 = %initial_slot_2 : f32) -> (f32) {
+    %sum = scalar.addf %bank_slot_2, %increment : f32
+    %37 = scf.select %active, %sum, %bank_slot_2 : f32
+    scf.yield %37 : f32
+  }
+  %result = vector.from_elements %initial_slot_0, %initial_slot_1, %result_slot_2, %initial_slot_3 : vector<4xf32>
+  %shifted = vector.addf %result, %bias : vector<4xf32>
+  func.return %result, %shifted : vector<4xf32>, vector<4xf32>
+}
+
+// ====
+// RUN: pass sroa-vector-banks,canonicalize,cse
+
+// Condition/header and body/result domains keep their independent values;
+// reconstruction of the final result does not restore an aggregate recurrence.
+func.def @condition_result(%initial: vector<2xi32>, %keep_going: i1) -> (vector<2xi32>) {
+  %result = scf.while(%before = %initial : vector<2xi32>) -> (vector<2xi32>) {
+    %head = vector.extract %before[0] : vector<2xi32> -> i32
+    %prepared = vector.insert %head into %before[1] : i32, vector<2xi32>
+    scf.condition %keep_going, %prepared : i1, vector<2xi32>
+  } do(%body: vector<2xi32>) {
+    %left = vector.extract %body[0] : vector<2xi32> -> i32
+    %right = vector.extract %body[1] : vector<2xi32> -> i32
+    %sum = scalar.addi %left, %right : i32
+    %next = vector.insert %sum into %body[0] : i32, vector<2xi32>
+    scf.yield %next : vector<2xi32>
+  }
+  func.return %result : vector<2xi32>
+}
+
+// ----
+func.def @condition_result(%initial: vector<2xi32>, %keep_going: i1) -> (vector<2xi32>) {
+  %initial_slot_0 = vector.extract %initial[0] : vector<2xi32> -> i32
+  %initial_slot_1 = vector.extract %initial[1] : vector<2xi32> -> i32
+  %result_slot_0, %result_slot_1 = scf.while(%before_slot_0 = %initial_slot_0 : i32, %before_slot_1 = %initial_slot_1 : i32) -> (i32, i32) {
+    scf.condition %keep_going, %before_slot_0, %before_slot_0 : i1, i32, i32
+  } do(%body_slot_0: i32, %body_slot_1: i32) {
+    %sum = scalar.addi %body_slot_0, %body_slot_1 : i32
+    scf.yield %sum, %body_slot_1 : i32, i32
+  }
+  %result = vector.from_elements %result_slot_0, %result_slot_1 : vector<2xi32>
+  func.return %result : vector<2xi32>
+}
+
+// ====
+// RUN: pass sroa-vector-banks,canonicalize,cse
+
+// Scalar slot order follows the complete multidimensional prefix.
+func.def @scalar_matrix(%initial: vector<2x2xi32>, %increment: i32, %end: index) -> (vector<2x2xi32>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %result = scf.for %i = [%begin to %end step %step](%bank = %initial : vector<2x2xi32>) -> (vector<2x2xi32>) {
+    %old = vector.extract %bank[1, 0] : vector<2x2xi32> -> i32
+    %sum = scalar.addi %old, %increment : i32
+    %next = vector.insert %sum into %bank[1, 0] : i32, vector<2x2xi32>
+    scf.yield %next : vector<2x2xi32>
+  }
+  func.return %result : vector<2x2xi32>
+}
+
+// ----
+func.def @scalar_matrix(%initial: vector<2x2xi32>, %increment: i32, %end: index) -> (vector<2x2xi32>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial_slot_0 = vector.extract %initial[0, 0] : vector<2x2xi32> -> i32
+  %initial_slot_1 = vector.extract %initial[0, 1] : vector<2x2xi32> -> i32
+  %initial_slot_2 = vector.extract %initial[1, 0] : vector<2x2xi32> -> i32
+  %initial_slot_3 = vector.extract %initial[1, 1] : vector<2x2xi32> -> i32
+  %result_slot_2 = scf.for %i = [%begin to %end step %step](%bank_slot_2 = %initial_slot_2 : i32) -> (i32) {
+    %sum = scalar.addi %bank_slot_2, %increment : i32
+    scf.yield %sum : i32
+  }
+  %result = vector.from_elements %initial_slot_0, %initial_slot_1, %result_slot_2, %initial_slot_3 : vector<2x2xi32>
+  func.return %result : vector<2x2xi32>
+}
+
+// ====
+// RUN: pass sroa-vector-banks,canonicalize,cse
+
+// A partial update of a branch result can have whole-value consumers of both
+// the original and modified states. Trailing vectors remain whole components.
+func.def @branch_vector_tails(%initial: vector<2x2x2xi32>, %tail: vector<2xi32>, %active: i1) -> (vector<2x2x2xi32>, vector<2x2x2xi32>) {
+  %result = scf.if %active -> (vector<2x2x2xi32>) {
+    %old = vector.extract %initial[1, 0] : vector<2x2x2xi32> -> vector<2xi32>
+    %sum = vector.addi %old, %tail : vector<2xi32>
+    %next = vector.insert %sum into %initial[1, 0] : vector<2xi32>, vector<2x2x2xi32>
+    scf.yield %next : vector<2x2x2xi32>
+  } else {
+    scf.yield %initial : vector<2x2x2xi32>
+  }
+  %observed = vector.extract %result[0, 1] : vector<2x2x2xi32> -> vector<2xi32>
+  %modified = vector.insert %observed into %result[1, 1] : vector<2xi32>, vector<2x2x2xi32>
+  func.return %result, %modified : vector<2x2x2xi32>, vector<2x2x2xi32>
+}
+
+// ----
+func.def @branch_vector_tails(%initial: vector<2x2x2xi32>, %tail: vector<2xi32>, %active: i1) -> (vector<2x2x2xi32>, vector<2x2x2xi32>) {
+  %11, %12, %13, %14 = scf.if %active -> (vector<2xi32>, vector<2xi32>, vector<2xi32>, vector<2xi32>) {
+    %old = vector.extract %initial[1, 0] : vector<2x2x2xi32> -> vector<2xi32>
+    %sum = vector.addi %old, %tail : vector<2xi32>
+    %29 = vector.extract %initial[0, 0] : vector<2x2x2xi32> -> vector<2xi32>
+    %28 = vector.extract %initial[0, 1] : vector<2x2x2xi32> -> vector<2xi32>
+    %27 = vector.extract %initial[1, 1] : vector<2x2x2xi32> -> vector<2xi32>
+    scf.yield %29, %28, %sum, %27 : vector<2xi32>, vector<2xi32>, vector<2xi32>, vector<2xi32>
+  } else {
+    %19 = vector.extract %initial[0, 0] : vector<2x2x2xi32> -> vector<2xi32>
+    %20 = vector.extract %initial[0, 1] : vector<2x2x2xi32> -> vector<2xi32>
+    %21 = vector.extract %initial[1, 0] : vector<2x2x2xi32> -> vector<2xi32>
+    %22 = vector.extract %initial[1, 1] : vector<2x2x2xi32> -> vector<2xi32>
+    scf.yield %19, %20, %21, %22 : vector<2xi32>, vector<2xi32>, vector<2xi32>, vector<2xi32>
+  }
+  %23 = vector.broadcast %11 : vector<2xi32> -> vector<2x2x2xi32>
+  %24 = vector.insert %12 into %23[0, 1] : vector<2xi32>, vector<2x2x2xi32>
+  %25 = vector.insert %13 into %24[1, 0] : vector<2xi32>, vector<2x2x2xi32>
+  %result = vector.insert %14 into %25[1, 1] : vector<2xi32>, vector<2x2x2xi32>
+  %modified = vector.insert %12 into %25[1, 1] : vector<2xi32>, vector<2x2x2xi32>
+  func.return %result, %modified : vector<2x2x2xi32>, vector<2x2x2xi32>
+}
+
+// ====
+// RUN: pass sroa-vector-banks
+
+// Whole-vector arithmetic in the condition region keeps the recurrence native
+// even when the body addresses static scalar slots and the result escapes.
+func.def @native_header(%initial: vector<2xi32>, %bias: vector<2xi32>, %keep_going: i1) -> (vector<2xi32>) {
+  %result = scf.while(%before = %initial : vector<2xi32>) -> (vector<2xi32>) {
+    %prepared = vector.addi %before, %bias : vector<2xi32>
+    scf.condition %keep_going, %prepared : i1, vector<2xi32>
+  } do(%body: vector<2xi32>) {
+    %head = vector.extract %body[0] : vector<2xi32> -> i32
+    %next = vector.insert %head into %body[1] : i32, vector<2xi32>
+    scf.yield %next : vector<2xi32>
+  }
+  func.return %result : vector<2xi32>
+}
+
+// ====
+// RUN: pass sroa-vector-banks,canonicalize,cse
+
+// A multidimensional tail remains one component beside a native vector
+// recurrence. Only the result rebuilds the logical bank after cleanup.
+func.def @matrix_tails_with_native_sibling(%initial: vector<2x2x3xi32>, %native: vector<2x3xi32>, %increment: vector<2x3xi32>, %end: index) -> (vector<2x2x3xi32>, vector<2x3xi32>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %result, %native_result = scf.for %i = [%begin to %end step %step](%bank = %initial : vector<2x2x3xi32>, %whole = %native : vector<2x3xi32>) -> (vector<2x2x3xi32>, vector<2x3xi32>) {
+    %old = vector.extract %bank[1] : vector<2x2x3xi32> -> vector<2x3xi32>
+    %sum = vector.addi %old, %increment : vector<2x3xi32>
+    %next = vector.insert %sum into %bank[1] : vector<2x3xi32>, vector<2x2x3xi32>
+    %native_next = vector.addi %whole, %increment : vector<2x3xi32>
+    scf.yield %next, %native_next : vector<2x2x3xi32>, vector<2x3xi32>
+  }
+  func.return %result, %native_result : vector<2x2x3xi32>, vector<2x3xi32>
+}
+
+// ----
+func.def @matrix_tails_with_native_sibling(%initial: vector<2x2x3xi32>, %native: vector<2x3xi32>, %increment: vector<2x3xi32>, %end: index) -> (vector<2x2x3xi32>, vector<2x3xi32>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial_slot_0 = vector.extract %initial[0] : vector<2x2x3xi32> -> vector<2x3xi32>
+  %initial_slot_1 = vector.extract %initial[1] : vector<2x2x3xi32> -> vector<2x3xi32>
+  %result_slot_1, %native_result = scf.for %i = [%begin to %end step %step](%bank_slot_1 = %initial_slot_1 : vector<2x3xi32>, %whole = %native : vector<2x3xi32>) -> (vector<2x3xi32>, vector<2x3xi32>) {
+    %sum = vector.addi %bank_slot_1, %increment : vector<2x3xi32>
+    %native_next = vector.addi %whole, %increment : vector<2x3xi32>
+    scf.yield %sum, %native_next : vector<2x3xi32>, vector<2x3xi32>
+  }
+  %28 = vector.broadcast %initial_slot_0 : vector<2x3xi32> -> vector<2x2x3xi32>
+  %result = vector.insert %result_slot_1 into %28[1] : vector<2x3xi32>, vector<2x2x3xi32>
+  func.return %result, %native_result : vector<2x2x3xi32>, vector<2x3xi32>
+}
+
+// ====
+// RUN: pass sroa-vector-banks,canonicalize,cse
+
+// A single tail needs only a broadcast, with no remaining prefix inserts.
+func.def @single_tail(%left: vector<1x2xbf16>, %right: vector<1x2xbf16>, %active: i1) -> (vector<1x2xbf16>, vector<2xbf16>) {
+  %result = scf.if %active -> (vector<1x2xbf16>) {
+    scf.yield %left : vector<1x2xbf16>
+  } else {
+    scf.yield %right : vector<1x2xbf16>
+  }
+  %tail = vector.extract %result[0] : vector<1x2xbf16> -> vector<2xbf16>
+  func.return %result, %tail : vector<1x2xbf16>, vector<2xbf16>
+}
+
+// ----
+func.def @single_tail(%left: vector<1x2xbf16>, %right: vector<1x2xbf16>, %active: i1) -> (vector<1x2xbf16>, vector<2xbf16>) {
+  %7 = scf.if %active -> (vector<2xbf16>) {
+    %8 = vector.extract %left[0] : vector<1x2xbf16> -> vector<2xbf16>
+    scf.yield %8 : vector<2xbf16>
+  } else {
+    %9 = vector.extract %right[0] : vector<1x2xbf16> -> vector<2xbf16>
+    scf.yield %9 : vector<2xbf16>
+  }
+  %result = vector.broadcast %7 : vector<2xbf16> -> vector<1x2xbf16>
+  func.return %result, %7 : vector<1x2xbf16>, vector<2xbf16>
+}

@@ -128,7 +128,7 @@ iree_status_t loom_greedy_rewrite_run_region(
   driver->rewriter_initialized = true;
   loom_rewriter_attach_value_facts(&driver->rewriter, driver->fact_table);
   if (options) {
-    driver->rewriter.materialize_constant = options->materialize_constant;
+    driver->rewriter.constant_materializer = options->constant_materializer;
     driver->rewriter.pending_exact_relations_callback =
         options->pending_exact_relations_callback;
     driver->rewriter.math_policy = options->math_policy;

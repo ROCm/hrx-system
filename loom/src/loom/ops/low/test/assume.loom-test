@@ -88,6 +88,8 @@ low.kernel.def target<test.low.core>(@target) @assume_retains_external_fact(%val
 
 test.target<low_core> @target
 
+// Source constant materialization does not own Low register values. Exact
+// register facts remain available while scalar observations still fold.
 low.kernel.def target<test.low.core>(@target) @assume_exact_fact(%value: reg<test.i32>) asm {
   %exact = low.assume %value [eq(%value, 3)] : reg<test.i32>
   %lo = test.fact_all_equal_range_lo %exact : reg<test.i32> -> i64

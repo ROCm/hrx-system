@@ -118,6 +118,13 @@ iree_status_t loom_serve_finite_load_free(loom_serve_finite_load_t* load);
 // Direct stages have no checkpoint parameters. Source run uses runner.execute_2
 // for both kinds and publishes device results. Native consumers choose whether
 // to compose device work or explicitly download a host snapshot.
+// Cold prepare may call prepare.memory_forecast(root) to select a synchronous
+// control entry with signature (state, ranges, descriptors: buffer) ->
+// (private_peak, retained, expanded: i64). It forecasts the complete descriptor
+// set across all producer cohorts, before pixel decoding or device work. The
+// consumer defines descriptor contents; ranges use the same offset/length
+// pairs as prepare_batch. Values are trusted byte estimates, not limits checked
+// against later compilation or allocation. Negative values are invalid.
 // The cold outer-application constructor drives the same asynchronous load and
 // joins it outside the shared worker pool. Creation indexes weights without
 // loading them. The shared device outlives this model. Failure releases partial
@@ -164,6 +171,39 @@ const iree_tokenizer_t* loom_serve_finite_model_tokenizer(
     const loom_serve_finite_model_t* model);
 loom_serve_residency_t* loom_serve_finite_model_residency(
     const loom_serve_finite_model_t* model);
+
+// Source-owned forecast for producing one complete logical request, possibly
+// through several cohorts. Estimates exclude unrelated peers and host storage.
+typedef struct loom_serve_finite_memory_forecast_t {
+  // Peak producer parameters, activation staging, input, and private workspace;
+  // excludes outputs accounted by retained_bytes.
+  uint64_t private_peak_bytes;
+  // Aggregate output backing retained until downstream consumption. Counts
+  // complete cohort roots, including padding and shared peer rows when needed.
+  uint64_t retained_bytes;
+  // Total expanded feature storage if every output row is gathered separately,
+  // including 16-byte row alignment. Aliases need not occupy distinct backing
+  // in retained_bytes; source-private metadata stays on the host.
+  uint64_t expanded_bytes;
+} loom_serve_finite_memory_forecast_t;
+
+// Whether cold source preparation declared the optional forecast entry.
+bool loom_serve_finite_model_has_memory_forecast(
+    const loom_serve_finite_model_t* model);
+
+// Configured physical ceiling, not current native availability. UINT64_MAX
+// denotes an unbounded domain. Immutable and safe for a CPU planning loan.
+uint64_t loom_serve_finite_model_memory_limit(
+    const loom_serve_finite_model_t* model);
+
+// CPU-only source invocation, serialized with this model's other calls. Borrows
+// descriptor buffers through return and submits no device work. A missing
+// declaration reports UNIMPLEMENTED rather than inventing a bound. Source
+// failures and invalid estimates leave the output zeroed.
+iree_status_t loom_serve_finite_model_forecast_memory(
+    loom_serve_finite_model_t* model, iree_vm_buffer_t* ranges,
+    iree_vm_buffer_t* descriptors,
+    loom_serve_finite_memory_forecast_t* out_forecast);
 
 // Model-wide checkpoint accounting and policy, including idle cached banks.
 loom_serve_residency_snapshot_t loom_serve_finite_model_parameters(

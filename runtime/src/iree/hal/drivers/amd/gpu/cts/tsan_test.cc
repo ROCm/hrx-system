@@ -14,7 +14,7 @@
 #include "iree/hal/cts/util/profile_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
-#include "iree/hal/drivers/amd/gpu/cts/tsan_images.h"
+#include "iree/hal/drivers/amd/gpu/cts/testdata.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -47,18 +47,8 @@ class GpuTsanTest : public GpuNativeTest,
       GTEST_SKIP() << "Native shader notification is unavailable";
     }
     context_->event_sink = {Publish, this};
-    const auto gfx = context_->target_info.gfx_ip;
-    const auto* files = iree_hal_amd_gpu_tsan_images_create();
-    const char* selector = gfx.major == 9
-                               ? (gfx.minor == 4 ? "gfx9-4-generic" : "gfx90a")
-                           : gfx.major == 11 ? "gfx11-generic"
-                                             : "gfx12-generic";
-    for (size_t i = 0; i < iree_hal_amd_gpu_tsan_images_size(); ++i) {
-      if (std::strstr(files[i].name, selector)) {
-        artifact_ = iree_make_const_byte_span(files[i].data, files[i].size);
-      }
-    }
-    ASSERT_NE(artifact_.data, nullptr);
+    IREE_ASSERT_OK(LookupExecutableData("amd_gpu_tsan", context_->target_info,
+                                        IREE_SV("tsan.bin"), &artifact_));
     options_.tsan.memory.shadow_size = std::get<1>(GetParam());
   }
 

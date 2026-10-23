@@ -21,6 +21,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/serve/runtime/storage/memory.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/speech/model.h"
@@ -289,17 +290,16 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
                                               &admission, &frontier));
     EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
     IREE_RETURN_IF_ERROR(Wait(frontier));
-    EXPECT_EQ(generator_.complete_admit(generator_.self, invocation),
-              LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
+    generator_.complete_admit(generator_.self, invocation);
     return iree_ok_status();
   }
 
-  static iree_status_t Wait(const loom_serve_execution_frontier_t& frontier) {
+  iree_status_t Wait(const loom_serve_execution_frontier_t& frontier) {
     iree_status_t status = iree_ok_status();
     for (size_t i = 0; i < 2 && iree_status_is_ok(status); ++i) {
-      status = iree_hal_semaphore_wait(
-          frontier.semaphores[i], frontier.values[i], iree_infinite_timeout(),
-          IREE_ASYNC_WAIT_FLAG_NONE);
+      status = loom_serve_workspace_wait(
+          loom_serve_device_workspace(loom_serve_device_group_at(group_, 0)),
+          frontier.semaphores[i], frontier.values[i]);
     }
     return status;
   }
@@ -412,6 +412,56 @@ TEST_P(SourceSpeechServiceTest, SourceStagesPublishVariableAndEmptyBlocks) {
   }
 }
 
+TEST_P(SourceSpeechServiceTest, RowCapacityDenialLeavesParametersCold) {
+  auto* device = loom_serve_device_group_at(group_, 0);
+  auto* pool = loom_serve_device_memory_pool(device);
+  auto* residency = loom_serve_speech_model_residency(model_);
+  loom_serve_memory_statistics_t peer_statistics = {};
+  const auto release_peer = [](loom_serve_virtual_buffer_t* buffer) {
+    IREE_EXPECT_OK(loom_serve_virtual_buffer_free(buffer));
+  };
+  std::unique_ptr<loom_serve_virtual_buffer_t, decltype(release_peer)> peer(
+      nullptr, release_peer);
+  if (pool) {
+    // Leave room for parameters and two state pages, but the real source row
+    // requires input, conditioning, and stream pages as one admission.
+    const uint64_t peer_bytes =
+        loom_serve_memory_pool_limit(pool) -
+        loom_serve_residency_statistics(residency).reserved_bytes -
+        2 * kSpeechSlabSize;
+    loom_serve_virtual_buffer_t* buffer = nullptr;
+    IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+        pool, loom_serve_device_state_geometry(device), peer_bytes, 16,
+        &peer_statistics, &buffer));
+    peer.reset(buffer);
+    IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(buffer, 0, peer_bytes));
+  }
+  void* invocation = nullptr;
+  IREE_ASSERT_OK(Prepare("positive", 3, &invocation));
+  if (pool) {
+    const uint64_t live = loom_serve_memory_pool_live_bytes(pool);
+    loom_serve_residency_admission_t admission;
+    loom_serve_execution_frontier_t frontier;
+    IREE_ASSERT_OK(generator_.try_admit(generator_.self, invocation, &admission,
+                                        &frontier));
+    ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
+    EXPECT_EQ(loom_serve_memory_pool_live_bytes(pool), live);
+    EXPECT_EQ(loom_serve_residency_activity(residency).activations, 0u);
+    peer.reset();
+    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+  }
+  IREE_ASSERT_OK(Admit(invocation));
+  std::vector<float> samples;
+  std::vector<size_t> blocks;
+  IREE_ASSERT_OK(Generate(invocation, SIZE_MAX, &samples, &blocks));
+  std::vector<float> expected(17);
+  for (size_t i = 0; i < expected.size(); ++i) {
+    expected[i] = static_cast<float>((i + 3) % 8) * 0.125f;
+  }
+  EXPECT_EQ(samples, expected);
+  IREE_ASSERT_OK(Retire(invocation));
+}
+
 TEST_P(SourceSpeechServiceTest,
        ColdStateTransitionsPreserveWarmWaveformProgress) {
   void* warm = nullptr;
@@ -472,8 +522,7 @@ TEST_P(SourceSpeechServiceTest,
     ASSERT_EQ(warm_samples.size(), 6u);
   }
   IREE_ASSERT_OK(Wait(frontier));
-  ASSERT_EQ(cold.complete_admit(cold.self, invocation),
-            LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
+  cold.complete_admit(cold.self, invocation);
   std::vector<float> cold_samples;
   bool complete = false;
   while (!complete) {
@@ -615,7 +664,10 @@ TEST_P(SourceSpeechServiceTest, CohortsPreserveIndependentResidentProgress) {
   uint64_t full_live_bytes = 0;
   auto* device = loom_serve_device_group_at(group_, 0);
   const auto initial = loom_serve_device_memory_statistics(device).retained;
-  EXPECT_EQ(initial.committed_bytes, initial.cached_bytes);
+  const auto workspace =
+      loom_serve_workspace_memory_usage(loom_serve_device_workspace(device));
+  EXPECT_EQ(initial.committed_bytes,
+            initial.cached_bytes + workspace.committed_bytes);
   bool live = true;
   while (live) {
     if (tick < 4) {

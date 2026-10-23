@@ -20,17 +20,20 @@
 extern "C" {
 #endif
 
-// Source-selected checkpoint files and preparation policy for one fixed
-// binding.
+// Source-selected inputs and preparation policy for one fixed binding.
 typedef struct loom_serve_preparation_parameter_t {
   // Fixed-buffer ordinal in the compiled command's parameter reflection.
   uint32_t binding;
   // Number of independently indexed input checkpoints, in source order.
   uint32_t source_count;
-  // Owned typed shards per source, independent of the bootstrap VM/card.
+  // Finalized typed shard views in policy-local input order, borrowing the
+  // capture's shared source catalog. Checkpoint owners copy these when
+  // retaining identity.
   const loom_model_file_list_t* sources;
   // Owned preparation-policy path, relative to the bootstrap source directory.
   iree_string_view_t policy;
+  // Shared source ordinals corresponding to the policy-local input order.
+  const uint32_t* source_ordinals;
 } loom_serve_preparation_parameter_t;
 
 // Compares checkpoint domains by their ordered source file lists and
@@ -78,9 +81,9 @@ const loom_model_component_t* loom_serve_preparation_component(
 
 // Creates the source-facing "prepare" declaration capability. The caller
 // serializes begin/take with VM invocation and retains the module while linked.
-// No declaration storage is allocated until source code declares a stage.
-// An optional retained card supplies named parameter scopes and fixed JIT
-// configuration; captured declarations retain it and the selected component
+// No declaration storage is allocated until the first source declaration.
+// An optional retained card supplies named parameter scopes and fixed
+// JIT configuration; captured declarations retain it and the selected component
 // independently of the module.
 iree_status_t loom_serve_preparation_module_create(
     iree_vm_environment_t* environment, loom_model_card_t* card,
@@ -92,14 +95,21 @@ enum loom_serve_preparation_flag_bits_e {
   // Cold construction prepares the declared roots; request choices reuse or
   // prepare compatible domains before recording.
   LOOM_SERVE_PREPARATION_FLAG_PARAMETERS = 1u << 0,
+  // Allows the service to capture a host memory-forecast entry point. The
+  // service owns that entry's signature and invokes it before scheduling work.
+  LOOM_SERVE_PREPARATION_FLAG_MEMORY_FORECAST = 1u << 1,
 };
 typedef uint32_t loom_serve_preparation_flags_t;
 
 // Begins one declaration capture. The previous capture has been taken. Stage
 // ordinals start at first_stage, preserving a caller's existing cold table.
-// first_stage is at most INT32_MAX. Calls to prepare outside a capture fail.
+// first_stage is at most INT32_MAX. base supplies immutable cold sources;
+// request sources follow that prefix and cannot modify it. The caller keeps
+// base alive through this capture and every consumer of its result. NULL means
+// no prefix. Calls to prepare outside a capture fail.
 void loom_serve_preparation_module_begin(iree_vm_module_t* module,
                                          uint32_t first_stage,
+                                         const loom_serve_preparation_t* base,
                                          loom_serve_preparation_flags_t flags);
 
 // Ends the capture and transfers its declarations, including partial results
@@ -115,23 +125,24 @@ loom_serve_preparation_t* loom_serve_preparation_module_take(
 //   config(i32 stage, buffer key, buffer value)
 //   config_i64(i32 stage, buffer key, i64 value)
 //   workspace_limit(i32 stage, i64 bytes)
-//   parameter(i32 stage, i32 binding, i32 source, buffer directory, buffer
-//   path,
-//             buffer policy)
-//   parameter_scope(i32 stage, i32 binding, i32 source, buffer scope,
-//                   buffer policy)
+//   source(buffer directory, buffer path) -> i32 source
+//   source_append(i32 source, buffer directory, buffer path)
+//   source_scope(buffer scope) -> i32 source
+//   parameter(i32 stage, i32 binding, i32 input, i32 source, buffer policy)
+//   memory_forecast(buffer root)
 // All string buffers exclude NUL bytes. Config values use the public loomc
 // textual value syntax; config_i64 formats signed decimal values. Parameter
-// paths join directory and path in the server filesystem namespace for direct
-// programs. Card-backed programs use parameter_scope, expanding the selected
-// scope's typed files into one index. Repeated calls for the same binding and
-// source append shards to that index.
-// Distinct sources may contain identical tensor names. Source ordinals are
-// declared densely from zero, and all sources for a binding name one policy.
-// File order is preserved within each index. Policy paths resolve through the
-// source environment. A card supplies stage configuration defaults; explicit
-// source declarations override individual keys. Declarations copy their strings
-// and retain no references to arguments, source mappings,
+// sources join directory and path in the server filesystem namespace. source
+// declares the first shard of an independent index; source_append adds shards
+// in order. Card-backed programs use source_scope to select one named parameter
+// scope's typed shards from the card. Sources need no resident binding and may
+// contain identical keys.
+// parameter maps a dense policy-local input ordinal to a declared source. Each
+// input is bound once; all inputs for a binding name one policy. Several stages
+// and bindings may share a source. Policy paths resolve through the source
+// environment, under programs.directory for cards. A card supplies stage config
+// defaults; explicit declarations override individual keys. Declarations copy
+// their strings and retain no references to arguments, source mappings,
 // or the VM environment.
 // Additional caller libraries are linked beside the prepare module. Results
 // are ordinary VM variants owned by the caller; the environment must outlive
@@ -139,6 +150,9 @@ loom_serve_preparation_t* loom_serve_preparation_module_take(
 // dispatch declares a buffer-only kernel with a source-specialized launch
 // configuration. stage declares a command program with parameter reflection.
 // No device compilation, allocation or parameter IO occurs here.
+// flags selects declaration capabilities; unsupported declarations fail at
+// their source call. memory_forecast selects one host entry in the control
+// program, not a command/kernel root or a compiler-enforced workspace limit.
 // On failure all partial declarations are released and *out_preparation is
 // NULL.
 // report receives copied compiler diagnostics independently of this outcome.
@@ -148,9 +162,9 @@ iree_status_t loom_serve_preparation_allocate(
     loomc_target_environment_t* target_environment,
     iree_vm_environment_t* environment, const loom_serve_sources_t* sources,
     iree_string_view_t source_path, iree_string_view_t entry,
-    iree_vm_variant_span_t arguments, iree_vm_variant_span_t results,
-    iree_vm_module_span_t libraries, loom_serve_compilation_report_t* report,
-    iree_allocator_t host_allocator,
+    loom_serve_preparation_flags_t flags, iree_vm_variant_span_t arguments,
+    iree_vm_variant_span_t results, iree_vm_module_span_t libraries,
+    loom_serve_compilation_report_t* report, iree_allocator_t host_allocator,
     loom_serve_preparation_t** out_preparation);
 
 void loom_serve_preparation_free(loom_serve_preparation_t* preparation);
@@ -158,9 +172,29 @@ void loom_serve_preparation_free(loom_serve_preparation_t* preparation);
 iree_host_size_t loom_serve_preparation_stage_count(
     const loom_serve_preparation_t* preparation);
 
+// Number of shared sources, including the immutable cold prefix. NULL has no
+// sources. Source ordinals are scoped to this capture, never process-global.
+uint32_t loom_serve_preparation_source_count(
+    const loom_serve_preparation_t* preparation);
+
+// Borrows ordered typed shards for a previously declared source ordinal.
+loom_model_file_list_t loom_serve_preparation_source(
+    const loom_serve_preparation_t* preparation, uint32_t ordinal);
+
+// Borrows this capture's new shard lists, excluding its immutable cold prefix.
+// Returns their count; their ordinals follow the prefix's source_count. NULL
+// has no sources. The finalized lists outlive cold indexing consumers.
+uint32_t loom_serve_preparation_local_sources(
+    const loom_serve_preparation_t* preparation,
+    const loom_model_file_list_t** out_sources);
+
 // Requested owned bytes, including spare array capacity and copied strings.
 // NULL has no storage. This query does not traverse declarations.
 iree_host_size_t loom_serve_preparation_storage_size(
+    const loom_serve_preparation_t* preparation);
+
+// Borrowed source-selected host entry, or empty when none was declared.
+iree_string_view_t loom_serve_preparation_memory_forecast(
     const loom_serve_preparation_t* preparation);
 
 // Exact ordered declaration identity, including configuration spelling,

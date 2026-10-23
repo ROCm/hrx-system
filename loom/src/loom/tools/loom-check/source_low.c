@@ -249,9 +249,17 @@ static iree_status_t loom_check_emit_write_source_low_pipeline_text(
         "source-low pipeline outputs cannot be combined with diagnostics");
   }
 
+  loomc_module_interop_view_t view = {0};
+  bool projected = false;
+  IREE_RETURN_IF_ERROR(loom_check_compile_project_module(
+      provider_request->public_module, provider_request->diagnostic_collector,
+      provider_request->host_allocator, &view, &projected));
+  if (!projected) {
+    return iree_ok_status();
+  }
   loom_module_t* pipeline_module = NULL;
   iree_status_t status = loom_module_allocate(
-      provider_request->context, IREE_SV("__loom_check_source_low_pipeline"),
+      view.module->context, IREE_SV("__loom_check_source_low_pipeline"),
       provider_request->block_pool, NULL, provider_request->host_allocator,
       &pipeline_module);
   loom_op_t* pipeline_op = NULL;

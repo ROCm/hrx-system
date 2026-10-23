@@ -1,0 +1,32 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+
+# Native packet publication and queue fixtures need no generated device kernel.
+package(
+    default_visibility = ["//libamdf/cts:__subpackages__"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+amdf_cc_library(
+    name = "publication",
+    testonly = True,
+    hdrs = ["publication.h"],
+    deps = [
+        "//libamdf/cts/gpu/aql/encoding:packets",
+        "//libamdf/cts/gpu/util:user_queue",
+        "//third_party:google_test",
+    ],
+)
+
+amdf_cc_library(
+    name = "queue_fixture",
+    testonly = True,
+    hdrs = ["queue_fixture.h"],
+    deps = [
+        ":publication",
+        "//libamdf/cts/gpu/util:command_fixture",
+    ],
+)

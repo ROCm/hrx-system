@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -23,6 +24,7 @@ from build_tools.devtools.command_plan import CommandStep, quote_command
 BUILD_TARGETS_CATALOG_FILENAME = "iree_ctest_build_targets.json"
 REFRESH_TARGET = "iree-ctest-refresh"
 MAX_BUILD_COMMAND_LENGTH = 8192
+SKIP_GLOBAL_TMPDIR_CLEANUP_ENV = "IREE_CTEST_SKIP_GLOBAL_TMPDIR_CLEANUP"
 
 
 class CTestMetadataError(ValueError):
@@ -30,9 +32,58 @@ class CTestMetadataError(ValueError):
 
 
 @dataclass(frozen=True)
+class CTestTemporaryDirectory:
+    test_name: str
+    path: Path
+
+
+@dataclass(frozen=True)
 class CTestSelection:
     test_names: tuple[str, ...]
     build_targets: tuple[str, ...]
+    temporary_directory_root: Path
+    temporary_directories: tuple[CTestTemporaryDirectory, ...]
+
+
+def _parse_test_temporary_directory(
+    test: dict, test_index: int, test_name: str
+) -> CTestTemporaryDirectory | None:
+    properties = test.get("properties")
+    if not isinstance(properties, list):
+        raise CTestMetadataError(
+            f"CTest JSON test {test_name} at index {test_index} has no properties list"
+        )
+
+    temporary_directory = None
+    for property_index, property_value in enumerate(properties):
+        if not isinstance(property_value, dict):
+            raise CTestMetadataError(
+                f"CTest JSON property at index {property_index} for test "
+                f"{test_name} is not an object"
+            )
+        if property_value.get("name") != "ENVIRONMENT":
+            continue
+        environment = property_value.get("value")
+        if not isinstance(environment, list) or not all(
+            isinstance(value, str) for value in environment
+        ):
+            raise CTestMetadataError(
+                f"CTest JSON ENVIRONMENT for test {test_name} is not a string list"
+            )
+        for value in environment:
+            name, separator, path = value.partition("=")
+            if name != "TEST_TMPDIR":
+                continue
+            if not separator or not path:
+                raise CTestMetadataError(
+                    f"CTest test {test_name} has an empty TEST_TMPDIR"
+                )
+            if temporary_directory is not None:
+                raise CTestMetadataError(
+                    f"CTest test {test_name} has more than one TEST_TMPDIR"
+                )
+            temporary_directory = CTestTemporaryDirectory(test_name, Path(path))
+    return temporary_directory
 
 
 def parse_ctest_selection(
@@ -62,15 +113,25 @@ def parse_ctest_selection(
     if (
         not isinstance(build_target_catalog, dict)
         or build_target_catalog.get("kind") != "ireeCtestBuildTargets"
-        or build_target_catalog.get("version") != 1
+        or build_target_catalog.get("version") != 2
     ):
         raise CTestMetadataError("CMake build-target catalog has an invalid schema")
+    temporary_directory_root_value = build_target_catalog.get("temporaryDirectoryRoot")
+    if (
+        not isinstance(temporary_directory_root_value, str)
+        or not temporary_directory_root_value
+    ):
+        raise CTestMetadataError(
+            "CMake build-target catalog has no temporary-directory root"
+        )
+    temporary_directory_root = Path(temporary_directory_root_value)
     catalog_tests = build_target_catalog.get("tests")
     if not isinstance(catalog_tests, dict):
         raise CTestMetadataError("CMake build-target catalog has no tests object")
 
     test_names = []
     build_targets = []
+    temporary_directories = []
     seen_build_targets = set()
     for test_index, test in enumerate(tests):
         if not isinstance(test, dict):
@@ -83,6 +144,11 @@ def parse_ctest_selection(
                 f"CTest JSON test at index {test_index} has no name"
             )
         test_names.append(test_name)
+        temporary_directory = _parse_test_temporary_directory(
+            test, test_index, test_name
+        )
+        if temporary_directory is not None:
+            temporary_directories.append(temporary_directory)
 
         if test_name not in catalog_tests:
             raise CTestMetadataError(
@@ -107,7 +173,62 @@ def parse_ctest_selection(
             seen_build_targets.add(build_target)
             build_targets.append(build_target)
 
-    return CTestSelection(tuple(test_names), tuple(build_targets))
+    return CTestSelection(
+        tuple(test_names),
+        tuple(build_targets),
+        temporary_directory_root,
+        tuple(temporary_directories),
+    )
+
+
+def prepare_selected_test_temporary_directories(
+    selection: CTestSelection,
+) -> None:
+    """Creates empty TEST_TMPDIRs for exactly the selected CTest tests."""
+    if not selection.temporary_directory_root.is_absolute():
+        raise CTestMetadataError(
+            "CMake build-target catalog has a relative temporary-directory "
+            f"root: {selection.temporary_directory_root}"
+        )
+    temporary_root = selection.temporary_directory_root.resolve()
+    validated_directories = []
+    owners = {}
+    for temporary_directory in selection.temporary_directories:
+        path = temporary_directory.path
+        if not path.is_absolute():
+            raise CTestMetadataError(
+                f"CTest test {temporary_directory.test_name} has a relative "
+                f"TEST_TMPDIR: {path}"
+            )
+        resolved_path = path.resolve()
+        if resolved_path == temporary_root or not resolved_path.is_relative_to(
+            temporary_root
+        ):
+            raise CTestMetadataError(
+                f"CTest test {temporary_directory.test_name} has TEST_TMPDIR "
+                f"outside {temporary_root}: {path}"
+            )
+        previous_owner = owners.get(resolved_path)
+        if previous_owner is not None:
+            raise CTestMetadataError(
+                f"CTest tests {previous_owner} and {temporary_directory.test_name} "
+                f"share TEST_TMPDIR {path}"
+            )
+        owners[resolved_path] = temporary_directory.test_name
+        validated_directories.append((temporary_directory.test_name, path))
+
+    for test_name, path in validated_directories:
+        try:
+            if path.is_symlink() or path.is_file():
+                path.unlink()
+            elif path.exists():
+                shutil.rmtree(path)
+            path.mkdir(parents=True)
+        except OSError as exc:
+            raise CTestMetadataError(
+                f"failed to prepare TEST_TMPDIR for selected CTest test "
+                f"{test_name} at {path}: {exc}"
+            ) from exc
 
 
 def ctest_build_config(arguments: list[str]) -> str | None:
@@ -287,6 +408,8 @@ class CTestBuildAndRunStep:
 
     def run(self, verbose: bool = False) -> int:
         command_env = self.env if self.env is not None else os.environ
+        ctest_env = dict(command_env)
+        ctest_env[SKIP_GLOBAL_TMPDIR_CLEANUP_ENV] = "1"
         build_config = ctest_build_config(self.arguments)
         if build_config is None:
             build_config = command_env.get("CTEST_CONFIGURATION_TYPE")
@@ -327,7 +450,7 @@ class CTestBuildAndRunStep:
             selection_result = subprocess.run(
                 select_command,
                 cwd=self.cwd,
-                env=self.env,
+                env=ctest_env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -411,6 +534,16 @@ class CTestBuildAndRunStep:
             )
             return 1
 
+        try:
+            prepare_selected_test_temporary_directories(selection)
+        except (CTestMetadataError, OSError) as exc:
+            print(
+                f"dev.py: failed to prepare selected CTest temporary "
+                f"directories: {exc}",
+                file=sys.stderr,
+            )
+            return 1
+
         run_command = ctest_run_command(
             self.ctest,
             self.build_dir,
@@ -424,7 +557,7 @@ class CTestBuildAndRunStep:
             return subprocess.run(
                 run_command,
                 cwd=self.cwd,
-                env=self.env,
+                env=ctest_env,
             ).returncode
         except OSError as exc:
             print(

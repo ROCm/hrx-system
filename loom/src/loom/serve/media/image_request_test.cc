@@ -143,6 +143,20 @@ TEST_F(ImageRequestTest, MixedCodecsAndChannelsPreserveExactSourcePackets) {
     for (size_t j = pixel_end; j < bytes.data_length; ++j) {
       EXPECT_EQ(bytes.data[j], 0u);
     }
+    // Descriptor-only planning borrows no compressed data and emits exactly
+    // the execution packet's prefix, including empty and unaligned metadata.
+    iree_vm_buffer_t* descriptor = nullptr;
+    IREE_ASSERT_OK(loom_serve_media_image_request_describe(
+        &info, requests[i].metadata, requests[i].output_rows,
+        iree_allocator_system(), &descriptor));
+    iree_const_byte_span_t described;
+    IREE_EXPECT_OK(iree_vm_buffer_map_read(
+        descriptor, 0, iree_vm_buffer_length(descriptor), &described));
+    EXPECT_EQ(described.data_length, pixel_offset);
+    EXPECT_EQ(std::vector<uint8_t>(described.data,
+                                   described.data + described.data_length),
+              std::vector<uint8_t>(bytes.data, bytes.data + pixel_offset));
+    iree_vm_buffer_release(descriptor);
   }
 }
 

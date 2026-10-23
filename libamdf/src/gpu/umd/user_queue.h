@@ -90,7 +90,9 @@ typedef struct amdf_gpu_umd_user_queue_mapping_result_t {
   uint32_t index_bits;
   // Atomic write width of the notification aperture.
   uint32_t doorbell_bits;
-  // Host fence required before publishing a valid header or producer index.
+  // Release executor before publishing a valid header or producer index.
+  amdf_cache_transition_executor_t host_publish_executor;
+  // Host fence for HOST_DIRECT; NONE for other executors.
   amdf_host_cache_fence_t host_publish_fence;
   // Producer-local base address of the writable metadata ring.
   uint64_t metadata_ring_address;
@@ -115,6 +117,11 @@ amdf_status_t amdf_gpu_umd_user_queue_map(
 
 // Releases one producer-local native queue mapping.
 amdf_status_t amdf_gpu_umd_user_queue_mapping_destroy(
+    amdf_gpu_umd_user_queue_mapping_t* mapping);
+
+// Completes host stores through a mapping admitted for HOST_API publication.
+// Native failure is terminal and sticky, never completion or reuse permission.
+amdf_status_t amdf_gpu_umd_user_queue_mapping_flush(
     amdf_gpu_umd_user_queue_mapping_t* mapping);
 
 // Samples native publication, consumption, and sticky terminal state.

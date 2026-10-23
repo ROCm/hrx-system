@@ -1788,7 +1788,7 @@ LOOM_CHECK_BENCHMARK(update_benchmark, update_values);
 ```
 
 For an AMDGPU-enabled build, run this file with
-`loom-test native_checks.cxx --device=amdgpu`. The benchmark tool accepts
+`loom-test native_checks.cxx --device=legacy-amdgpu`. The benchmark tool accepts
 that same file and device selection. Build-integrated native tests select
 `AMDGPU_HARDWARE_PROFILE` or `AMDGPU_ACCESS_PROFILE` from
 `//loom/target/amdgpu:execution_profiles.bzl`.

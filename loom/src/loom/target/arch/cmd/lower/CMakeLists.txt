@@ -62,6 +62,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::analysis::liveness_uses
+    loom::analysis::motion
     loom::error::emitter
     loom::error::error_defs
     loom::error::parameter

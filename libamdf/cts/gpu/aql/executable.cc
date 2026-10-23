@@ -9,7 +9,7 @@
 #include <cstring>
 #include <string>
 
-#include "libamdf/cts/gpu/aql/publication.h"
+#include "libamdf/cts/gpu/aql/queue/publication.h"
 #include "libamdf/cts/gpu/gpu_device_fixture.h"
 
 namespace aql {

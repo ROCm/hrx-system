@@ -32,7 +32,7 @@ fixed backing for those drivers. The [command reference](../../../../docs/src/se
 describes the backend and serving requirements separately.
 
 Generic URI parameters request immutable device runtime services. For example,
-`--device=amdgpu:?feedback` uses the default AMDGPU device and provisions the
+`--device=legacy-amdgpu:?feedback` uses the default AMDGPU device and provisions the
 diagnostic channel used by authored kernel assertions. The parameters are
 additive: `?feedback&asan` and `?feedback&asan&tsan` are both valid. `asan` and
 `tsan` provision address- and race-sanitizer state and the report transport each

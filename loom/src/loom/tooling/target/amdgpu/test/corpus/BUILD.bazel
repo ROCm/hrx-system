@@ -38,7 +38,6 @@ _EXECUTION_TAGS = [
 
 _GENERIC_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/execute:amdgpu_hal",
-    "//runtime/config/hal:driver_amdgpu",
 ])
 
 _AMDGPU_SOURCE_COMPATIBLE_WITH = loom_config_compatible_with([
@@ -106,12 +105,14 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-test",
     args = [
         "$(rootpath :generic_test_module)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
     ],
     data = [":generic_test_module"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = _EXECUTION_TAGS,
-    target_compatible_with = _GENERIC_COMPATIBLE_WITH,
+    target_compatible_with = _GENERIC_COMPATIBLE_WITH + loom_config_compatible_with([
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
 )
 
 loom_test(
@@ -141,13 +142,15 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-test",
     args = [
         "$(rootpath :gfx11_test_module)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--config=benchmark.pair_count=16",
     ],
     data = [":gfx11_test_module"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = _EXECUTION_TAGS,
-    target_compatible_with = _GFX11_COMPATIBLE_WITH,
+    target_compatible_with = _GFX11_COMPATIBLE_WITH + loom_config_compatible_with([
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
 )
 
 loom_module(
@@ -165,13 +168,15 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-test",
     args = [
         "$(rootpath :gfx11_loop_entry_module)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--sanitizer=access",
     ],
     data = [":gfx11_loop_entry_module"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = _EXECUTION_TAGS + ["notsan"],
-    target_compatible_with = _GFX11_COMPATIBLE_WITH,
+    target_compatible_with = _GFX11_COMPATIBLE_WITH + loom_config_compatible_with([
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
 )
 
 loom_module(
@@ -185,12 +190,14 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-test",
     args = [
         "$(rootpath :gfx1100_test_module)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
     ],
     data = [":gfx1100_test_module"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = _EXECUTION_TAGS + ["manual"],
-    target_compatible_with = _GENERIC_COMPATIBLE_WITH,
+    target_compatible_with = _GENERIC_COMPATIBLE_WITH + loom_config_compatible_with([
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
 )
 
 loom_module(
@@ -204,12 +211,14 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-test",
     args = [
         "$(rootpath :gfx9_4_test_module)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
     ],
     data = [":gfx9_4_test_module"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = _EXECUTION_TAGS + ["manual"],
-    target_compatible_with = _GENERIC_COMPATIBLE_WITH,
+    target_compatible_with = _GENERIC_COMPATIBLE_WITH + loom_config_compatible_with([
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
 )
 
 loom_test_module(

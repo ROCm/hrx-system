@@ -12,9 +12,12 @@ static iree_status_t iree_hal_amd_driver_factory_enumerate(
     void* self, iree_host_size_t* out_count,
     const iree_hal_driver_info_t** out_infos) {
   static const iree_hal_driver_info_t infos[] = {
+#if IREE_HAL_AMD_XDNA_ENABLED
       {.driver_id = 0,
        .driver_name = IREE_SVL("xdna"),
        .full_name = IREE_SVL("AMD XDNA execution using libamdf")},
+#endif
+#if IREE_HAL_AMD_GPU_ENABLED
       {.driver_id = 0,
        .driver_name = IREE_SVL("rdna"),
        .full_name = IREE_SVL("AMD RDNA execution using libamdf")},
@@ -22,8 +25,9 @@ static iree_status_t iree_hal_amd_driver_factory_enumerate(
        .driver_name = IREE_SVL("cdna"),
        .full_name = IREE_SVL("AMD CDNA execution using libamdf")},
       {.driver_id = 0,
-       .driver_name = IREE_SVL("amdgpu2"),
+       .driver_name = IREE_SVL("amdgpu"),
        .full_name = IREE_SVL("AMD GPU execution using libamdf")},
+#endif
   };
   *out_count = IREE_ARRAYSIZE(infos);
   *out_infos = infos;

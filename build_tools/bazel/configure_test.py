@@ -181,7 +181,9 @@ class ConfigureBazelTest(unittest.TestCase):
         args = self.configure_bazel.parse_arguments(["-DIREE_HAL_DRIVER_AMD=ON"])
         config = self.configure_bazel.generate_config(args)
 
-        self.assertIn("build --//runtime/config/hal:drivers=task,amd", config)
+        self.assertIn(
+            "build --//runtime/config/hal:drivers=task,amd-gpu,amd-xdna\n", config
+        )
         self.assertIn("build --//libamdf/config:enabled=true", config)
 
     def test_amd_driver_native_families_are_independent(self):
@@ -198,11 +200,87 @@ class ConfigureBazelTest(unittest.TestCase):
                     ]
                 )
                 config = self.configure_bazel.generate_config(args)
-                self.assertIn("build --//runtime/config/hal:drivers=task,amd", config)
+                self.assertIn(
+                    "build --//runtime/config/hal:drivers=task,amd-gpu,amd-xdna\n",
+                    config,
+                )
                 self.assertIn(
                     "build --//libamdf/config:families=" + ",".join(selected),
                     config,
                 )
+
+    def test_amd_engines_override_umbrella_defaults(self):
+        for umbrella in (False, True):
+            for gpu in (None, False, True):
+                for xdna in (None, False, True):
+                    for reverse in (False, True):
+                        with self.subTest(
+                            umbrella=umbrella, gpu=gpu, xdna=xdna, reverse=reverse
+                        ):
+                            defines = [
+                                f"-DIREE_HAL_DRIVER_AMD={'ON' if umbrella else 'OFF'}"
+                            ]
+                            selected = []
+                            for engine, enabled in (("GPU", gpu), ("XDNA", xdna)):
+                                if enabled is not None:
+                                    defines.append(
+                                        f"-DIREE_HAL_DRIVER_AMD_{engine}={'ON' if enabled else 'OFF'}"
+                                    )
+                                effective = umbrella if enabled is None else enabled
+                                if effective:
+                                    selected.append("amd-" + engine.lower())
+                            if reverse:
+                                defines.reverse()
+                            args = self.configure_bazel.parse_arguments(defines)
+                            config = self.configure_bazel.generate_config(args)
+                            self.assertIn(
+                                "build --//runtime/config/hal:drivers="
+                                + ",".join(["task", *selected])
+                                + "\n",
+                                config,
+                            )
+                            self.assertIn(
+                                "build --//libamdf/config:enabled="
+                                + str(bool(selected)).lower()
+                                + "\n",
+                                config,
+                            )
+                            self.assertIn(
+                                "build --//libamdf/config:families=rdna,cdna,xdna\n",
+                                config,
+                            )
+
+    def test_native_amd_engine_selections(self):
+        for selection, expected in (
+            ("amd", "amd-gpu,amd-xdna"),
+            ("amd-gpu", "amd-gpu"),
+            ("amd-xdna", "amd-xdna"),
+            ("amd-gpu,amd-xdna", "amd-gpu,amd-xdna"),
+        ):
+            with self.subTest(selection=selection):
+                args = self.configure_bazel.parse_arguments(
+                    [
+                        "--//runtime/config/hal:drivers=" + selection,
+                    ]
+                )
+                config = self.configure_bazel.generate_config(args)
+                self.assertIn(
+                    "build --//runtime/config/hal:drivers=" + expected + "\n", config
+                )
+                self.assertIn("build --//libamdf/config:enabled=true\n", config)
+
+    def test_disabled_amd_engines_do_not_require_libamdf(self):
+        args = self.configure_bazel.parse_arguments(
+            [
+                "-DIREE_HAL_DRIVER_AMD=ON",
+                "-DIREE_HAL_DRIVER_AMD_GPU=OFF",
+                "-DIREE_HAL_DRIVER_AMD_XDNA=OFF",
+                "-DAMDF_BUILD=OFF",
+            ]
+        )
+        config = self.configure_bazel.generate_config(args)
+        self.assertIn("build --//runtime/config/hal:drivers=task\n", config)
+        self.assertIn("build --//libamdf/config:enabled=false\n", config)
 
     def test_libamdf_explicit_disable_is_independent_of_hal_driver(self):
         args = self.configure_bazel.parse_arguments(

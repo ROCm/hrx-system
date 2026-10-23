@@ -147,13 +147,12 @@ TEST_F(SourceEmbeddingServiceTest,
   ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(package));
   StartManagedRouter();
   auto declaration = Declaration("large", package);
-  const std::string assets = R"("assets":".")";
-  const auto offset = declaration.find(assets);
+  const std::string cohort = "\"batch_units\":" + std::to_string(BatchUnits());
+  const auto offset = declaration.find(cohort);
   ASSERT_NE(offset, std::string::npos);
-  declaration.insert(offset + assets.size(),
-                     R"(,"options":{"batch_units":256})");
-  ASSERT_EQ(Read(Send(declaration, "/v1/models/register")).find("HTTP/1.1 202"),
-            0u);
+  declaration.replace(offset, cohort.size(), R"("batch_units":256)");
+  const auto registered = Read(Send(declaration, "/v1/models/register"));
+  ASSERT_EQ(registered.find("HTTP/1.1 202"), 0u) << registered;
   const auto response = Read(Send(R"({"model":"large","input":"a"})"));
   if (loom_serve_device_memory_pool(device_)) {
     ASSERT_EQ(response.find("HTTP/1.1 503"), 0u) << response;

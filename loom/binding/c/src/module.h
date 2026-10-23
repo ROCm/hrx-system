@@ -30,6 +30,9 @@ typedef struct loomc_module_resolved_deserialize_options_t {
 
   // Identifier used for diagnostics and module provenance.
   loomc_string_view_t identifier;
+
+  // Maximum text parsing errors, or zero for the parser default.
+  uint32_t max_errors;
 } loomc_module_resolved_deserialize_options_t;
 
 // Fully resolved source serialization options.

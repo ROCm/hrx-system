@@ -10,6 +10,7 @@
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/runtime/execution/retirement.h"
+#include "loom/serve/runtime/parameter/residency.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -76,15 +77,17 @@ iree_status_t loom_serve_rows_allocate(
 iree_hal_buffer_t* loom_serve_rows_buffer(const loom_serve_rows_t* state,
                                           iree_host_size_t index);
 
-// At a retired model cut, admits one unowned row and the conditioning bank in
-// one physical commitment transaction. Parameter pins already protect needed
-// weights. CAPACITY/DEFERRED own no row and commit no new destination backing;
-// DEFERRED preserves observed native progress through later readiness queries.
+// At a retired model cut, admits parameters, one unowned row, and conditioning
+// in one commitment transaction. CAPACITY/DEFERRED own neither a row nor a
+// parameter pin and submit no activation or destination backing. The residency
+// and state belong to the same device and serialized model owner. Its prepared
+// private high-water covers the shared cohort work, not each resident row.
 // Mapping readiness precedes initialization on the model execution timeline.
 // Actual platform failures retain any partial backing for terminal teardown.
 iree_status_t loom_serve_rows_try_reserve(
     loom_serve_rows_t* state, iree_host_size_t row_index,
-    loom_serve_memory_admission_t* out_admission);
+    loom_serve_residency_t* residency,
+    loom_serve_residency_admission_t* out_admission);
 
 // Joins a native backing change after successful model readiness, or a no-op.
 void loom_serve_rows_complete_backing(loom_serve_rows_t* state);

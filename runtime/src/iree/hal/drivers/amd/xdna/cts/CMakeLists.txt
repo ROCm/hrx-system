@@ -9,7 +9,7 @@
 
 iree_add_all_subdirs()
 
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD AND AMDF_FAMILY_XDNA)
 iree_cc_library(
   NAME
     backends
@@ -25,11 +25,12 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD AND AMDF_FAMILY_XDNA)
 iree_runtime_hal_cts_test_suite(
   BACKENDS
     ::backends
   LABELS
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.xdna"
     "iree-run-requirement=libamdf.resource.xdna"
@@ -39,7 +40,7 @@ iree_runtime_hal_cts_test_suite(
 )
 endif()
 
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND IREE_HAL_DRIVER_AMD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD AND AMDF_FAMILY_XDNA)
 iree_cc_test(
   NAME
     native_test
@@ -62,6 +63,7 @@ iree_cc_test(
     iree::testing::gtest_main
     iree::testing::temp_file
   LABELS
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.xdna"
     "iree-run-requirement=libamdf.resource.xdna"
@@ -71,7 +73,7 @@ iree_cc_test(
 )
 endif()
 
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND IREE_HAL_DRIVER_AMD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD AND AMDF_FAMILY_XDNA)
 iree_cc_test(
   NAME
     native_replay_stress
@@ -93,6 +95,7 @@ iree_cc_test(
   LABELS
     "manual"
     "stress"
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.xdna"
     "iree-run-requirement=libamdf.resource.xdna"
@@ -102,7 +105,7 @@ iree_cc_test(
 )
 endif()
 
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD AND AMDF_FAMILY_XDNA)
 iree_cc_binary_benchmark(
   NAME
     queue_benchmark
@@ -127,6 +130,7 @@ iree_cc_binary_benchmark(
   TESTONLY
   LABELS
     "benchmark"
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.xdna"
     "iree-run-requirement=libamdf.resource.xdna"

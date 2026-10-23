@@ -159,8 +159,8 @@ void iree_task_worker_deinitialize(iree_task_worker_t* worker) {
   IREE_TRACE_ZONE_END(z0);
 }
 
-// Marks the worker as "active" (scheduling work or executing it).
-// The idle mask is accessed with 'relaxed' order because it's just a hint.
+// Ends the worker's idle enrollment when it becomes active. A producer may
+// already have cleared the bit to claim this worker for its wake.
 static void iree_task_worker_mark_active(iree_task_worker_t* worker) {
   iree_atomic_task_affinity_set_clear(&worker->executor->worker_idle_mask,
                                       worker->worker_bit,
@@ -173,8 +173,8 @@ static void iree_task_worker_mark_active(iree_task_worker_t* worker) {
                                          (float)worker->executor->worker_count);
 }
 
-// Marks the worker as "idle" (sleeping/spinning waiting to wake).
-// The idle mask is accessed with 'relaxed' order because it's just a hint.
+// Enrolls the worker for a wake. Its following wake-epoch RMW publishes this
+// relaxed bit update to any later producer selecting idle workers.
 static void iree_task_worker_mark_idle(iree_task_worker_t* worker) {
   iree_atomic_task_affinity_set_set(&worker->executor->worker_idle_mask,
                                     worker->worker_bit,
@@ -1088,10 +1088,15 @@ static void iree_task_worker_relay_wake(iree_task_worker_t* worker) {
     if (target < 0 || target >= (int)executor->worker_count) {
       break;
     }
+    iree_task_affinity_set_clear_index(&idle_mask, (iree_host_size_t)target);
+    if (!iree_atomic_task_affinity_set_clear(
+            &executor->worker_idle_mask, executor->workers[target].worker_bit,
+            iree_memory_order_relaxed)) {
+      continue;
+    }
     IREE_TRACE_ZONE_BEGIN_NAMED(z_post, "iree_task_worker_relay_wake_worker");
     iree_notification_post(&executor->workers[target].wake_notification, 1);
     IREE_TRACE_ZONE_END(z_post);
-    iree_task_affinity_set_clear_index(&idle_mask, (iree_host_size_t)target);
     --claimed;
   }
   // Any remaining |claimed| is dropped — the corresponding workers are
@@ -1120,12 +1125,13 @@ static void iree_task_worker_pump_until_exit(iree_task_worker_t* worker) {
   bool is_active = false;
 
   while (true) {
-    // In order to not miss any work that is enqueued after we've already
-    // checked a particular source we use an interruptible wait token that
-    // will prevent the wait from happening if anyone touches the data
-    // structures we use.
+    // The private token observes wakes directed to this worker, including
+    // shutdown. The shared epoch observes work published during our scan even
+    // when its producer selects a different worker for the wake.
     iree_wait_token_t wait_token =
         iree_notification_prepare_wait(&worker->wake_notification);
+    const uint64_t wake_epoch = iree_atomic_load(&worker->executor->wake_epoch,
+                                                 iree_memory_order_acquire);
 
     // Mark active on the first iteration or after waking from sleep.
     // While spinning with work, we stay active and skip the mask update.
@@ -1164,12 +1170,18 @@ static void iree_task_worker_pump_until_exit(iree_task_worker_t* worker) {
       // pick up new work on our next drain pass.
       iree_notification_cancel_wait(&worker->wake_notification);
     } else {
-      // No work found. Mark idle so schedule_process can target us for
-      // waking, then sleep. If no idle workers exist, schedule_process
-      // falls through to post to any live worker's notification, which
-      // we'll see when we eventually call commit_wait.
+      // Enroll before joining the producer's publication order. A producer
+      // before this RMW changed the epoch and requires another scan. One after
+      // it acquires this idle enrollment and can claim a worker for its wake.
+      // Posting some other worker's private notification cannot protect us.
+      // A plain epoch load would not publish our enrollment to later producers.
       iree_task_worker_mark_idle(worker);
       is_active = false;
+      if (iree_atomic_fetch_add(&worker->executor->wake_epoch, 0,
+                                iree_memory_order_acq_rel) != wake_epoch) {
+        iree_notification_cancel_wait(&worker->wake_notification);
+        continue;
+      }
 
       iree_notification_commit_wait(
           &worker->wake_notification, wait_token,

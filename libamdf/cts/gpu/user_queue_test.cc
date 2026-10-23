@@ -146,7 +146,6 @@ TEST_P(GpuUserQueueCapacityTest, CopiesAcrossWrapAndRetiredReuse) {
   std::vector<uint32_t> observed_input(payload_word_count);
   std::vector<uint32_t> observed_output(payload_word_count);
   std::vector<uint32_t> observed_completion(1024);
-  std::vector<uint32_t> observed_ring(expected_ring.size());
   const uint64_t marker_address =
       completion->device_address + kMarkerWord * sizeof(uint32_t);
   const uint64_t marker_host_address =
@@ -198,17 +197,15 @@ TEST_P(GpuUserQueueCapacityTest, CopiesAcrossWrapAndRetiredReuse) {
         (publication + 1) * half_word_count * (pm4 ? 1 : sizeof(uint32_t));
     ASSERT_NO_FATAL_FAILURE(queue->PublishStream(producer_index));
     ASSERT_TRUE(GpuWaitEqual<uint32_t>(marker_host_address, publication + 1));
-    // Snapshot payload and command backing before diagnostics or consumption
+    // Snapshot payload before diagnostics or consumption
     // waits can supply a visibility edge. Retirement precedes any next reuse.
     std::memcpy(observed_output.data(), target->host.pointer, payload_bytes);
     std::memcpy(observed_input.data(), source->host.pointer, payload_bytes);
     std::memcpy(observed_completion.data(), completion->host.pointer, 4096);
-    std::memcpy(observed_ring.data(), ring, capacity);
     ASSERT_NO_FATAL_FAILURE(queue->WaitConsumed(api_, producer_index));
     EXPECT_EQ(observed_output, expected_output);
     EXPECT_EQ(observed_input, expected_input);
     EXPECT_EQ(observed_completion, expected_completion);
-    EXPECT_EQ(observed_ring, expected_ring);
     amdf_user_queue_status_t status = {
         .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS,
         .structure_size = sizeof(status),
@@ -221,6 +218,80 @@ TEST_P(GpuUserQueueCapacityTest, CopiesAcrossWrapAndRetiredReuse) {
     EXPECT_EQ(status.terminal_status, AMDF_STATUS_OK);
   }
   RecordProperty("ring_wrap_count", kPublicationCount / 2);
+}
+
+// Small publications repeatedly replace fetched ring lines. Only coherent
+// payload completion is read, so no ring readback can mask missing publication.
+class GpuUserQueuePublicationTest : public GpuUserQueueCapacityTest {};
+
+TEST_P(GpuUserQueuePublicationTest, IncrementalStoresAcrossRingWrap) {
+  const auto& test = GetParam();
+  if (!(family_.placement_capabilities & (1u << test.placement))) {
+    GTEST_SKIP() << "family does not support requested ring placement";
+  }
+  const bool pm4 = test.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;
+  GpuUserQueue* queue = nullptr;
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(family_, &queue,
+                                      AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
+                                      AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
+                                      4096, 0, nullptr, test.placement));
+  GpuMemory* payload = nullptr;
+  ASSERT_NO_FATAL_FAILURE(CreateMemory(
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &payload));
+  auto* host = static_cast<uint32_t*>(payload->host.pointer);
+  std::memset(host, 0, 4096);
+  host[0] = 0x712395ab;
+  auto* ring = reinterpret_cast<uint32_t*>(queue->host.ring_address);
+  const uint64_t marker = payload->device_address + 64;
+  const uint64_t marker_host = reinterpret_cast<uintptr_t>(host + 16);
+  uint64_t position = 0;
+  for (uint32_t publication = 0; publication < 4096; ++publication) {
+    SCOPED_TRACE(publication);
+    size_t offset = position & 1023;
+    if (offset + 24 > 1024) {
+      if (pm4) {
+        Pm4CommandWriter padding(ring + offset, *pm4_profile_);
+        padding.Noop(1024 - offset);
+      } else {
+        std::memset(ring + offset, 0, (1024 - offset) * sizeof(uint32_t));
+      }
+      position += 1024 - offset;
+      offset = 0;
+    }
+    if (pm4) {
+      Pm4CommandWriter commands(ring + offset, *pm4_profile_);
+      commands.SystemBarrier();
+      commands.CopyData32(payload->device_address,
+                          payload->device_address + 128);
+      commands.ReleaseSystem32(marker, publication + 1);
+      ASSERT_EQ(commands.word_count(), 24u);
+    } else {
+      SdmaCommandWriter commands(ring + offset, family_.format_features);
+      const bool user_gcr = (family_.format_features &
+                             AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR) != 0;
+      if (user_gcr) {
+        commands.AcquireFromSystem();
+      }
+      commands.CopyLinear(payload->device_address,
+                          payload->device_address + 128, 4);
+      if (user_gcr) {
+        commands.ReleaseToSystem();
+      }
+      while (commands.word_count() < 20) {
+        commands.Noop();
+      }
+      commands.Fence32(marker, publication + 1);
+      ASSERT_EQ(commands.word_count(), 24u);
+    }
+    position += 24;
+    ASSERT_NO_FATAL_FAILURE(
+        queue->PublishStream(pm4 ? position : position * 4));
+    ASSERT_TRUE(GpuWaitEqual<uint32_t>(marker_host, publication + 1));
+    ASSERT_EQ(GpuLoadAcquire<uint32_t>(reinterpret_cast<uintptr_t>(host + 32)),
+              host[0]);
+  }
+  ASSERT_NO_FATAL_FAILURE(
+      queue->WaitConsumed(api_, pm4 ? position : position * 4));
 }
 
 constexpr RingCapacityCase kRingCases[] = {
@@ -241,6 +312,14 @@ constexpr RingCapacityCase kRingCases[] = {
     {AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA, 16384, "SdmaSixteenKiB"},
     {AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA, 65536, "SdmaSixtyFourKiB"},
 };
+
+INSTANTIATE_TEST_SUITE_P(
+    Placements, GpuUserQueuePublicationTest,
+    ::testing::Values(kRingCases[0], kRingCases[1], kRingCases[2],
+                      kRingCases[3]),
+    [](const ::testing::TestParamInfo<RingCapacityCase>& info) {
+      return info.param.name;
+    });
 
 INSTANTIATE_TEST_SUITE_P(
     Capacities, GpuUserQueueCapacityTest, ::testing::ValuesIn(kRingCases),

@@ -604,18 +604,26 @@ TEST_P(GreedyObservationTest, ObservesPublishedFacts) {
     }
   } state = {source, second};
   const loom_greedy_rewrite_options_t options = {
-      .materialize_constant =
-          [](loom_builder_t* builder, loom_value_facts_t facts,
-             loom_type_t type, loom_location_id_t location,
-             loom_value_id_t* out_value) {
-            int64_t value = 0;
-            EXPECT_TRUE(loom_value_facts_as_exact_i64(facts, &value));
-            loom_op_t* constant = nullptr;
-            IREE_RETURN_IF_ERROR(loom_test_constant_build(
-                builder, loom_attr_i64(value), type, location, &constant));
-            *out_value = loom_test_constant_result(constant);
-            return iree_ok_status();
-          },
+      .constant_materializer = {
+          .supports =
+              [](loom_value_facts_t facts, loom_type_t type) {
+                int64_t value = 0;
+                return loom_type_is_scalar(type) &&
+                       loom_value_facts_as_exact_i64(facts, &value);
+              },
+          .materialize =
+              [](loom_builder_t* builder, loom_value_facts_t facts,
+                 loom_type_t type, loom_location_id_t location,
+                 loom_value_id_t* out_value) {
+                int64_t value = 0;
+                EXPECT_TRUE(loom_value_facts_as_exact_i64(facts, &value));
+                loom_op_t* constant = nullptr;
+                IREE_RETURN_IF_ERROR(loom_test_constant_build(
+                    builder, loom_attr_i64(value), type, location, &constant));
+                *out_value = loom_test_constant_result(constant);
+                return iree_ok_status();
+              },
+      },
   };
   loom_greedy_rewrite_callbacks_t callbacks = {
       .user_data = &state,

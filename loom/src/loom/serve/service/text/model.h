@@ -66,8 +66,9 @@ iree_status_t loom_serve_text_model_compile_variant_async(
 // Selects a ready same-model candidate at a completed model boundary, excluding
 // concurrent VM invocation. NULL restores the initial native stages. Existing
 // rows, pinned checkpoints, request policies and pending predictions survive.
-// Private workspace may grow through the ordinary execution pool. Failure
-// leaves current code usable. Selection does not wait or copy retained state.
+// Private workspace may grow through the ordinary execution pool when its
+// replacement peak fits beside accepted peers. Failure preserves current code
+// and its admission allowance. Selection does not wait or copy retained state.
 // The native module retains selected commands independently of variant
 // lifetime.
 iree_status_t loom_serve_text_model_select_variant(

@@ -7,7 +7,6 @@
 #include "loom/target/arch/cmd/check/provider.h"
 
 #include "loom/target/arch/cmd/check/program_plan.h"
-#include "loom/target/arch/cmd/provider.h"
 
 static const loom_check_emit_provider_t* const kLoomCmdCheckEmitProviders[] = {
     &loom_cmd_program_plan_check_emit_provider,
@@ -15,7 +14,6 @@ static const loom_check_emit_provider_t* const kLoomCmdCheckEmitProviders[] = {
 
 const loom_check_provider_t loom_cmd_check_provider = {
     .name = IREE_SVL("cmd"),
-    .target_provider = &loom_cmd_target_provider,
     .emit_providers = kLoomCmdCheckEmitProviders,
     .emit_provider_count = IREE_ARRAYSIZE(kLoomCmdCheckEmitProviders),
 };

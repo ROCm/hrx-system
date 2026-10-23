@@ -15,6 +15,26 @@ iree_cc_library(
   DEPS
     ::builders
     ::facts
+    ::structural
+    ::symbol_map
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    structural
+  HDRS
+    "ancestry.h"
+    "function_version.h"
+    "local_value_domain.h"
+  SRCS
+    "ancestry.c"
+    "function_version.c"
+    "local_value_domain.c"
+  DEPS
+    ::builders
+    iree::base
+    iree::base::internal::arena
   PUBLIC
 )
 
@@ -23,8 +43,47 @@ iree_cc_library(
     builders
   DEPS
     ::storage
-    ::symbol_map
     ::types
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    type_headers
+  HDRS
+    "attribute.h"
+    "memory_space.h"
+    "scalar_type.h"
+    "structural_hash.h"
+    "type_constraint.h"
+    "types.h"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    headers
+  HDRS
+    "attribute_schema.h"
+    "encoding.h"
+    "intern_table.h"
+    "ir.h"
+    "location.h"
+    "parameterized_attr.h"
+    "parameterized_type.h"
+    "semantics.h"
+    "string_table.h"
+    "type_descriptor.h"
+    "type_table.h"
+  DEPS
+    ::type_headers
+    iree::base
+    iree::base::internal::arena
+    loom::error::emitter
+    loom::util::bstring
+    loom::util::segmented_storage_headers
   PUBLIC
 )
 
@@ -104,14 +163,11 @@ loom_cc_library(
   NAME
     storage
   HDRS
-    "ancestry.h"
     "attribute_schema.h"
     "context.h"
     "encoding.h"
-    "function_version.h"
     "intern_table.h"
     "ir.h"
-    "local_value_domain.h"
     "location.h"
     "module.h"
     "module_record.h"
@@ -131,12 +187,9 @@ loom_cc_library(
   TEXTUAL_HDRS
     "location_tag_table.inc"
   SRCS
-    "ancestry.c"
     "context.c"
     "encoding.c"
-    "function_version.c"
     "intern_table.c"
-    "local_value_domain.c"
     "location.c"
     "module.c"
     "module_record.c"
@@ -157,6 +210,7 @@ loom_cc_library(
     loom::util::adaptive_sort
     loom::util::bstring
     loom::util::segmented_storage
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -182,6 +236,7 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::arena
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 

@@ -17,6 +17,7 @@ TOOL = Path(sys.argv.pop(1)).resolve()
 SCENARIO_SOURCE = Path(sys.argv.pop(1)).resolve()
 COMMAND_SOURCE = Path(sys.argv.pop(1)).resolve()
 SEQUENCE_SOURCE = Path(sys.argv.pop(1)).resolve()
+HOST_VALUES_SOURCE = Path(sys.argv.pop(1)).resolve()
 
 
 class BenchmarkExecutionTest(unittest.TestCase):
@@ -134,6 +135,45 @@ class BenchmarkExecutionTest(unittest.TestCase):
         self.assertEqual(cache["materialized_storage_set_bytes"], 32)
         self.assertEqual(cache["materialized_storage_ring_bytes"], 96)
         self.assertTrue(cache["ring_byte_target_met"])
+
+    def test_dispatch_materialization_executes_host_value_prefixes(self):
+        result, rows = self.run_tool(
+            HOST_VALUES_SOURCE,
+            "--measure=dispatch_complete",
+            "--input-ring-count=2",
+            "--batch-size=1",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        benchmark_results = {
+            row["benchmark_result"]["benchmark"]: row["benchmark_result"]
+            for row in rows
+            if row["row"] == "benchmark"
+        }
+        self.assertEqual(
+            set(benchmark_results),
+            {
+                "single_host_value_throughput",
+                "sequence_host_value_throughput",
+            },
+        )
+        for benchmark_result in benchmark_results.values():
+            self.assertEqual(benchmark_result["state"], "ok")
+            self.assertEqual(benchmark_result["correctness"]["sample_count"], 1)
+            self.assertEqual(benchmark_result["correctness"]["failed_sample_count"], 0)
+            self.assertEqual(benchmark_result["data_cache"]["binding_ring_count"], 2)
+
+        single_result = benchmark_results["single_host_value_throughput"]
+        self.assertEqual(single_result["data_cache"]["binding_count"], 1)
+        self.assertEqual(
+            single_result["measurement"]["physical_dispatches_per_batch"], 1
+        )
+
+        sequence_result = benchmark_results["sequence_host_value_throughput"]
+        self.assertEqual(sequence_result["data_cache"]["binding_count"], 2)
+        self.assertEqual(
+            sequence_result["measurement"]["physical_dispatches_per_batch"], 2
+        )
 
     def test_scenario_result_binding_contributes_to_reachable_ranges(self):
         result, rows = self.run_tool(

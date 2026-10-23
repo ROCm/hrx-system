@@ -9,30 +9,6 @@
 
 iree_add_all_subdirs()
 
-loom_cc_library(
-  NAME
-    convert
-  HDRS
-    "convert.h"
-  SRCS
-    "convert.c"
-  DEPS
-    iree::base
-    iree::base::internal::arena
-    iree::io::stream
-    loom::error::diagnostic
-    loom::error::source
-    loom::format::bytecode::reader
-    loom::format::bytecode::writer
-    loom::format::text::low_asm
-    loom::format::text::parser
-    loom::format::text::printer
-    loom::ir
-    loom::tooling::io::module_format
-    loom::verify
-  PUBLIC
-)
-
 loomc_cc_binary(
   NAME
     loom-format
@@ -63,23 +39,6 @@ iree_execution_test_suite(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/input/testdata/duplicate_symbols.loom-test"
   LABELS
     "hostonly"
-)
-
-loom_cc_test(
-  NAME
-    convert_test
-  SRCS
-    "convert_test.cc"
-  DEPS
-    ::convert
-    iree::base
-    iree::base::internal::arena
-    iree::testing::gtest
-    iree::testing::gtest_main
-    loom::codegen::low::text_asm
-    loom::format::bytecode::format
-    loom::target::test::descriptors
-    loom::testing::context
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -4,7 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_library",
+    "loom_cc_test",
+)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -126,6 +130,20 @@ loom_cc_library(
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scalar",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "offset_expression_test",
+    srcs = ["offset_expression_test.cc"],
+    deps = [
+        ":offset_expression",
+        "//loom/src/loom/analysis:symbolic_expr",
+        "//loom/src/loom/analysis:symbolic_expr_test_fixture",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

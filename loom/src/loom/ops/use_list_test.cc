@@ -12,6 +12,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/mutation.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/target/registers.h"

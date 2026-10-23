@@ -37,12 +37,29 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "source_scf_projection",
+    srcs = ["source_scf_projection.c"],
+    hdrs = ["source_scf_projection.h"],
+    deps = [
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "source_to_low",
     srcs = ["source_to_low.c"],
     hdrs = ["source_to_low.h"],
     visibility = _PIPELINE_VISIBILITY,
     deps = [
         ":source_invocation_facts",
+        ":source_scf_projection",
         "//loom/src/loom/analysis:storage_access",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:launch_config_program",
@@ -115,7 +132,11 @@ loom_cc_library(
 
 loom_cc_test(
     name = "source_to_low_test",
-    srcs = ["source_to_low_test.cc"],
+    srcs = [
+        "source_signature_test_policy.c",
+        "source_signature_test_policy.h",
+        "source_to_low_test.cc",
+    ],
     deps = [
         ":source_invocation_facts",
         ":source_to_low",
@@ -147,6 +168,7 @@ loom_cc_test(
         "//loom/src/loom/target:function_contract",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:provider",
+        "//loom/src/loom/target:registers",
         "//loom/src/loom/target/test:alt_descriptors",
         "//loom/src/loom/target/test:descriptors",
         "//loom/src/loom/target/test:low_registry",

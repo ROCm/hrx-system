@@ -11,6 +11,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 
+#include "libamdf/src/gpu/umd/kfd/hdp.h"
 #include "libamdf/src/platform/linux/file.h"
 
 static amdf_status_t amdf_gpu_kfd_user_queue_buffer_create(
@@ -139,6 +140,13 @@ static void amdf_gpu_kfd_user_queue_device_doorbell_abandon(
   amdf_gpu_kfd_doorbell_abandon(doorbell);
 }
 
+static amdf_status_t amdf_gpu_kfd_user_queue_flush_host_writes(
+    void* user_data, amdf_gpu_umd_device_t* device) {
+  (void)user_data;
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
+  return amdf_gpu_kfd_hdp_publish_host_writes(device->hdp);
+}
+
 static const amdf_gpu_kfd_user_queue_native_api_t
     amdf_gpu_kfd_user_queue_native_api = {
         .buffer_create = amdf_gpu_kfd_user_queue_buffer_create,
@@ -156,6 +164,7 @@ static const amdf_gpu_kfd_user_queue_native_api_t
         .device_doorbell_abandon =
             amdf_gpu_kfd_user_queue_device_doorbell_abandon,
         .vm_fault_query = amdf_gpu_kfd_user_queue_vm_fault_query,
+        .flush_host_writes = amdf_gpu_kfd_user_queue_flush_host_writes,
 };
 
 const amdf_gpu_kfd_user_queue_native_api_t*

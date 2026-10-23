@@ -729,10 +729,16 @@ def check_empty_server(server_command, directory, device, backing):
                 assert physical["ordinal"] >= 0 and physical["name"], physical
             memory = actual["memory"]
             assert memory["backing"] == backing, memory
+            # The elastic workspace reserves reusable addresses at device
+            # creation, but no physical backing before the first allocation.
+            reserved_bytes = (
+                memory["retained"]["reserved_bytes"] if backing == "elastic" else 0
+            )
+            assert (reserved_bytes > 0) == (backing == "elastic"), memory
             assert memory["retained"] == (
                 {
                     "limit_bytes": memory_limit or None,
-                    "reserved_bytes": 0,
+                    "reserved_bytes": reserved_bytes,
                     "committed_bytes": 0,
                     "abandoned_bytes": 0,
                     "cached_bytes": 0,
@@ -1441,8 +1447,13 @@ def check_dynamic_catalog(
         for device in retired_status["resources"]["devices"]:
             retained = device["memory"]["retained"]
             if retained is not None:
-                assert retained["reserved_bytes"] == 0, retained
-                assert retained["committed_bytes"] == retained["cached_bytes"], retained
+                # Removing every model preserves shared workspace addresses
+                # and reusable backing, not any model-owned physical storage.
+                assert retained["reserved_bytes"] > 0, retained
+                assert retained["committed_bytes"] == (
+                    retained["cached_bytes"]
+                    + device["memory"]["workspace"]["committed_bytes"]
+                ), device["memory"]
                 assert retained["pending_bytes"] == retained["releasing_bytes"] == 0, (
                     retained
                 )
@@ -1644,7 +1655,7 @@ def run_from_command_line(*, stress=False):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", type=Path, required=True)
     parser.add_argument("--fixture", type=Path, action="append", required=True)
-    parser.add_argument("--device", default="amdgpu")
+    parser.add_argument("--device", default="legacy-amdgpu")
     parser.add_argument("--pool_backing", choices=("fixed", "elastic"), default="fixed")
     parser.add_argument("--rounds", type=int, default=1, choices=range(1, 17))
     arguments = parser.parse_args()

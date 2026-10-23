@@ -1,0 +1,277 @@
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @load_i8x32_dynamic(%source: buffer, %element0: index) -> (vector<32xi8>) {
+  %source_generic = buffer.assume.memory_space<generic> %source : buffer
+  %source_aligned = buffer.assume.alignment %source_generic {minimum_alignment = 2} : buffer
+  %element = index.assume %element0 [range(%element0, 0, 32)] : index
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<64xi8>
+  %value = vector.load %source_view[%element] : view<64xi8> -> vector<32xi8>
+  func.return %value : vector<32xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @load_i8x32_dynamic(%element: reg<aie2p.er>) -> (reg<aie2p.vec256 x2>) asm {
+  %source_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %12 = add.nc.immediate %element, 31
+  %13 = mov.modifier %12
+  %14 = copy %source_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %15 = padda.modifier %14, %13
+  %16, %17 = lda.u8.post %15, -1
+  %18 = vbcst.8 %16
+  %19, %20 = lda.u8.post %17, -1
+  %21 = vpush.lo.8 %19, %18
+  %22, %23 = lda.u8.post %20, -1
+  %24 = vpush.lo.8 %22, %21
+  %25, %26 = lda.u8.post %23, -1
+  %27 = vpush.lo.8 %25, %24
+  %28, %29 = lda.u8.post %26, -1
+  %30 = vpush.lo.8 %28, %27
+  %31, %32 = lda.u8.post %29, -1
+  %33 = vpush.lo.8 %31, %30
+  %34, %35 = lda.u8.post %32, -1
+  %36 = vpush.lo.8 %34, %33
+  %37, %38 = lda.u8.post %35, -1
+  %39 = vpush.lo.8 %37, %36
+  %40, %41 = lda.u8.post %38, -1
+  %42 = vpush.lo.8 %40, %39
+  %43, %44 = lda.u8.post %41, -1
+  %45 = vpush.lo.8 %43, %42
+  %46, %47 = lda.u8.post %44, -1
+  %48 = vpush.lo.8 %46, %45
+  %49, %50 = lda.u8.post %47, -1
+  %51 = vpush.lo.8 %49, %48
+  %52, %53 = lda.u8.post %50, -1
+  %54 = vpush.lo.8 %52, %51
+  %55, %56 = lda.u8.post %53, -1
+  %57 = vpush.lo.8 %55, %54
+  %58, %59 = lda.u8.post %56, -1
+  %60 = vpush.lo.8 %58, %57
+  %61, %62 = lda.u8.post %59, -1
+  %63 = vpush.lo.8 %61, %60
+  %64, %65 = lda.u8.post %62, -1
+  %66 = vpush.lo.8 %64, %63
+  %67, %68 = lda.u8.post %65, -1
+  %69 = vpush.lo.8 %67, %66
+  %70, %71 = lda.u8.post %68, -1
+  %72 = vpush.lo.8 %70, %69
+  %73, %74 = lda.u8.post %71, -1
+  %75 = vpush.lo.8 %73, %72
+  %76, %77 = lda.u8.post %74, -1
+  %78 = vpush.lo.8 %76, %75
+  %79, %80 = lda.u8.post %77, -1
+  %81 = vpush.lo.8 %79, %78
+  %82, %83 = lda.u8.post %80, -1
+  %84 = vpush.lo.8 %82, %81
+  %85, %86 = lda.u8.post %83, -1
+  %87 = vpush.lo.8 %85, %84
+  %88, %89 = lda.u8.post %86, -1
+  %90 = vpush.lo.8 %88, %87
+  %91, %92 = lda.u8.post %89, -1
+  %93 = vpush.lo.8 %91, %90
+  %94, %95 = lda.u8.post %92, -1
+  %96 = vpush.lo.8 %94, %93
+  %97, %98 = lda.u8.post %95, -1
+  %99 = vpush.lo.8 %97, %96
+  %100, %101 = lda.u8.post %98, -1
+  %102 = vpush.lo.8 %100, %99
+  %103, %104 = lda.u8.post %101, -1
+  %105 = vpush.lo.8 %103, %102
+  %106, %107 = lda.u8.post %104, -1
+  %108 = vpush.lo.8 %106, %105
+  %109, %110 = lda.u8.post %107, -1
+  %value = vpush.lo.8 %109, %108
+  return %value
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @load_i16x17_volatile_constant(%source: buffer) -> (vector<17xi16>) {
+  %source_constant = buffer.assume.memory_space<constant> %source : buffer
+  %source_aligned = buffer.assume.alignment %source_constant {minimum_alignment = 2} : buffer
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<17xi16>
+  %value = vector.load<volatile> %source_view[0] : view<17xi16> -> vector<17xi16>
+  func.return %value : vector<17xi16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @load_i16x17_volatile_constant() -> (reg<aie2p.vec256 x2>) asm {
+  %source_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %9 = mov.static-byte-offset 0
+  %10 = add.nc.immediate %9, 32
+  %11 = mov.modifier %10
+  %12 = copy %source_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %13 = padda.modifier %12, %11
+  %14, %15 = lda.u16.post.volatile<volatile> %13, -2
+  %16 = vbcst.16 %14
+  %17, %18 = lda.u16.post.volatile<volatile> %15, -2
+  %19 = vpush.lo.16 %17, %16
+  %20, %21 = lda.u16.post.volatile<volatile> %18, -2
+  %22 = vpush.lo.16 %20, %19
+  %23, %24 = lda.u16.post.volatile<volatile> %21, -2
+  %25 = vpush.lo.16 %23, %22
+  %26, %27 = lda.u16.post.volatile<volatile> %24, -2
+  %28 = vpush.lo.16 %26, %25
+  %29, %30 = lda.u16.post.volatile<volatile> %27, -2
+  %31 = vpush.lo.16 %29, %28
+  %32, %33 = lda.u16.post.volatile<volatile> %30, -2
+  %34 = vpush.lo.16 %32, %31
+  %35, %36 = lda.u16.post.volatile<volatile> %33, -2
+  %37 = vpush.lo.16 %35, %34
+  %38, %39 = lda.u16.post.volatile<volatile> %36, -2
+  %40 = vpush.lo.16 %38, %37
+  %41, %42 = lda.u16.post.volatile<volatile> %39, -2
+  %43 = vpush.lo.16 %41, %40
+  %44, %45 = lda.u16.post.volatile<volatile> %42, -2
+  %46 = vpush.lo.16 %44, %43
+  %47, %48 = lda.u16.post.volatile<volatile> %45, -2
+  %49 = vpush.lo.16 %47, %46
+  %50, %51 = lda.u16.post.volatile<volatile> %48, -2
+  %52 = vpush.lo.16 %50, %49
+  %53, %54 = lda.u16.post.volatile<volatile> %51, -2
+  %55 = vpush.lo.16 %53, %52
+  %56, %57 = lda.u16.post.volatile<volatile> %54, -2
+  %58 = vpush.lo.16 %56, %55
+  %59, %60 = lda.u16.post.volatile<volatile> %57, -2
+  %61 = vpush.lo.16 %59, %58
+  %62, %63 = lda.u16.post.volatile<volatile> %60, -2
+  %value = vpush.lo.16 %62, %61
+  return %value
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @load_i32x17_workgroup(%source: buffer) -> (vector<17xi32>) {
+  %source_workgroup = buffer.assume.memory_space<workgroup> %source : buffer
+  %source_aligned = buffer.assume.alignment %source_workgroup {minimum_alignment = 4} : buffer
+  %base = index.constant 4 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<17xi32>
+  %value = vector.load %source_view[0] : view<17xi32> -> vector<17xi32>
+  func.return %value : vector<17xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @load_i32x17_workgroup() -> (reg<aie2p.vec256 x4>) asm {
+  %source_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %9 = mov.static-byte-offset 4
+  %10 = mov.modifier %9
+  %11 = copy %source_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %12 = padda.modifier %11, %10
+  %13, %14 = lda.i32.post %12, 4
+  %15 = vbcst.32 %13
+  %16, %17 = lda.i32.post %14, 4
+  %18 = vpush.hi.32 %15, %16
+  %19, %20 = lda.i32.post %17, 4
+  %21 = vpush.hi.32 %18, %19
+  %22, %23 = lda.i32.post %20, 4
+  %24 = vpush.hi.32 %21, %22
+  %25, %26 = lda.i32.post %23, 4
+  %27 = vpush.hi.32 %24, %25
+  %28, %29 = lda.i32.post %26, 4
+  %30 = vpush.hi.32 %27, %28
+  %31, %32 = lda.i32.post %29, 4
+  %33 = vpush.hi.32 %30, %31
+  %34, %35 = lda.i32.post %32, 4
+  %36 = vpush.hi.32 %33, %34
+  %37, %38 = lda.i32.post %35, 4
+  %39 = vpush.hi.32 %36, %37
+  %40, %41 = lda.i32.post %38, 4
+  %42 = vpush.hi.32 %39, %40
+  %43, %44 = lda.i32.post %41, 4
+  %45 = vpush.hi.32 %42, %43
+  %46, %47 = lda.i32.post %44, 4
+  %48 = vpush.hi.32 %45, %46
+  %49, %50 = lda.i32.post %47, 4
+  %51 = vpush.hi.32 %48, %49
+  %52, %53 = lda.i32.post %50, 4
+  %54 = vpush.hi.32 %51, %52
+  %55, %56 = lda.i32.post %53, 4
+  %57 = vpush.hi.32 %54, %55
+  %58, %59 = lda.i32.post %56, 4
+  %60 = vpush.hi.32 %57, %58
+  %61 = add.nc.immediate %9, 64
+  %62 = mov.modifier %61
+  %63 = copy %source_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %64 = padda.modifier %63, %62
+  %65, %66 = lda.i32.post %64, -4
+  %67 = vbcst.32 %65
+  %value = concat(%60, %67) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  return %value
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @load_f64x9_private(%source: buffer) -> (vector<9xf64>) {
+  %source_private = buffer.assume.memory_space<private> %source : buffer
+  %source_aligned = buffer.assume.alignment %source_private {minimum_alignment = 8} : buffer
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source_aligned[%base] : buffer -> view<9xf64>
+  %value = vector.load %source_view[0] : view<9xf64> -> vector<9xf64>
+  func.return %value : vector<9xf64>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @load_f64x9_private() -> (reg<aie2p.vec256 x4>) asm {
+  %source_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %9 = mov.static-byte-offset 0
+  %10 = mov.modifier %9
+  %11 = copy %source_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %12 = padda.modifier %11, %10
+  %13, %14 = lda.i32.post %12, 4
+  %15, %16 = lda.i32.post %14, 4
+  %17 = concat(%13, %15) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %18 = vbcst.64 %17
+  %19, %20 = lda.i32.post %16, 4
+  %21, %22 = lda.i32.post %20, 4
+  %23 = concat(%19, %21) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %24 = vpush.hi.64 %18, %23
+  %25, %26 = lda.i32.post %22, 4
+  %27, %28 = lda.i32.post %26, 4
+  %29 = concat(%25, %27) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %30 = vpush.hi.64 %24, %29
+  %31, %32 = lda.i32.post %28, 4
+  %33, %34 = lda.i32.post %32, 4
+  %35 = concat(%31, %33) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %36 = vpush.hi.64 %30, %35
+  %37, %38 = lda.i32.post %34, 4
+  %39, %40 = lda.i32.post %38, 4
+  %41 = concat(%37, %39) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %42 = vpush.hi.64 %36, %41
+  %43, %44 = lda.i32.post %40, 4
+  %45, %46 = lda.i32.post %44, 4
+  %47 = concat(%43, %45) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %48 = vpush.hi.64 %42, %47
+  %49, %50 = lda.i32.post %46, 4
+  %51, %52 = lda.i32.post %50, 4
+  %53 = concat(%49, %51) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %54 = vpush.hi.64 %48, %53
+  %55, %56 = lda.i32.post %52, 4
+  %57, %58 = lda.i32.post %56, 4
+  %59 = concat(%55, %57) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %60 = vpush.hi.64 %54, %59
+  %61 = add.nc.immediate %9, 64
+  %62 = mov.modifier %61
+  %63 = copy %source_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
+  %64 = padda.modifier %63, %62
+  %65, %66 = lda.i32.post %64, 4
+  %67, %68 = lda.i32.post %66, -12
+  %69 = concat(%65, %67) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %70 = vbcst.64 %69
+  %value = concat(%60, %70) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  return %value
+}

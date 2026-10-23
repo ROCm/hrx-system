@@ -102,10 +102,11 @@ class LowLowerReportTest : public ::testing::Test {
         &module_builder, /*build_flags=*/0, /*visibility=*/0, /*linkage=*/0,
         /*retain=*/0,
         /*cc=*/0, /*effect_contract=*/0, /*temperature=*/0, /*inline_policy=*/0,
-        loom_symbol_ref_null(), /*abi=*/0, loom_named_attr_slice_empty(),
-        LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol,
-        argument_types, IREE_ARRAYSIZE(argument_types), &i32_type, 1, nullptr,
-        0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function_op));
+        loom_symbol_ref_null(), /*source_signature=*/loom_attr_absent(),
+        /*abi=*/0, loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
+        loom_named_attr_slice_empty(), symbol, argument_types,
+        IREE_ARRAYSIZE(argument_types), &i32_type, 1, nullptr, 0, nullptr, 0,
+        LOOM_LOCATION_UNKNOWN, &function_op));
     function_ = loom_func_like_cast(module_, function_op);
 
     loom_block_t* entry_block =

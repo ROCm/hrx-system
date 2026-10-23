@@ -223,6 +223,7 @@ loomc_status_t loomc_module_validate_serialize_options(
     case LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT:
     case LOOMC_MODULE_TEXT_PRESENTATION_GENERIC:
     case LOOMC_MODULE_TEXT_PRESENTATION_LOW_ASM:
+    case LOOMC_MODULE_TEXT_PRESENTATION_PRESERVE:
       break;
     default:
       return loomc_make_status(
@@ -279,7 +280,8 @@ loomc_status_t loomc_module_validate_deserialize_options(
           "module deserialize options have an unknown structure type");
     }
     if (options->structure_size != 0 &&
-        options->structure_size < sizeof(*options)) {
+        options->structure_size <
+            offsetof(loomc_module_deserialize_options_t, max_errors)) {
       return loomc_make_status(
           LOOMC_STATUS_INVALID_ARGUMENT,
           "module deserialize options structure_size is too small");
@@ -322,6 +324,12 @@ static loomc_status_t loomc_module_resolve_deserialize_options(
 
   out_options->format = required_format;
   out_options->identifier = identifier;
+  out_options->max_errors =
+      options && options->structure_size >=
+                     offsetof(loomc_module_deserialize_options_t, max_errors) +
+                         sizeof(options->max_errors)
+          ? options->max_errors
+          : 0;
   return loomc_ok_status();
 }
 

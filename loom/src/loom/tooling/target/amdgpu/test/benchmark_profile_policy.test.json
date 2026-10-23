@@ -7,7 +7,7 @@
         "tool": "loom-benchmark",
         "args": [
           "{srcdir}/benchmark_profile_policy.loom",
-          "--device=amdgpu",
+          "--device=legacy-amdgpu",
           "--measure=dispatch_complete",
           "--compare=@single_baseline,@single_candidate",
           "--repetitions=1",
@@ -45,7 +45,7 @@
         "tool": "loom-benchmark",
         "args": [
           "{srcdir}/benchmark_profile_policy.loom",
-          "--device=amdgpu",
+          "--device=legacy-amdgpu",
           "--measure=dispatch_complete",
           "--compare=@sequence_baseline,@sequence_candidate",
           "--repetitions=1",

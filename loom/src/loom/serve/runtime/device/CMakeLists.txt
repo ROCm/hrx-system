@@ -30,6 +30,7 @@ loom_cc_library(
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::storage::memory
+    loom::serve::runtime::storage::virtual_pool
   PUBLIC
 )
 endif()

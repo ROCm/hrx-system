@@ -534,6 +534,7 @@ static iree_status_t iree_tokenizer_regex_dfa_state_allocate(
   state->lookahead_data = 0;
   state->has_fallback = false;
   state->has_early_no_lookahead = false;
+  state->fallback_branch = 0;
   state->requires_start_anchor = false;
   state->requires_end_anchor = false;
   state->alive_branches = 0;
@@ -750,6 +751,7 @@ static iree_status_t iree_tokenizer_regex_extract_lookahead(
       // The executor must track BOTH positions and prefer lookahead-passed.
       // Use the WITH_FALLBACK lookahead type to signal this.
       dfa_state->has_fallback = true;
+      dfa_state->fallback_branch = min_no_lookahead_branch;
       // Compute has_early_no_lookahead based on branch indices of accepts
       // actually present in this DFA state. This correctly handles cases like
       // \s*[\r\n]+|\s+(?!\S)|\s+ where branch 0 may or may not contribute.
@@ -1384,13 +1386,13 @@ iree_status_t iree_tokenizer_regex_dfa_serialize(
             state->has_early_no_lookahead
                 ? IREE_TOKENIZER_UTIL_REGEX_LOOKAHEAD_FLAG_HAS_EARLY_NO_LOOKAHEAD
                 : IREE_TOKENIZER_UTIL_REGEX_LOOKAHEAD_FLAG_NONE;
-        lookahead[state_idx].reserved = 0;
+        lookahead[state_idx].fallback_branch = state->fallback_branch;
       } else {
         lookahead[state_idx].type = IREE_TOKENIZER_UTIL_REGEX_LOOKAHEAD_NONE;
         lookahead[state_idx].data = 0;
         lookahead[state_idx].flags =
             IREE_TOKENIZER_UTIL_REGEX_LOOKAHEAD_FLAG_NONE;
-        lookahead[state_idx].reserved = 0;
+        lookahead[state_idx].fallback_branch = 0;
       }
     }
   }

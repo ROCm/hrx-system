@@ -247,7 +247,8 @@ typedef struct amdf_gpu_device_info_t {
 /// operations expand the native counter to this monotonic frontier; the raw
 /// mapping continues to expose the native ring-relative read index.
 /// After storing complete commands, the host producer executes the mapping's
-/// host_publish_fence, then release-stores the new write index, executes a
+/// host_publish_executor (including its direct fence or native flush), then
+/// release-stores the new write index, executes a
 /// host-to-device store fence (SFENCE on x86-64), then stores
 /// the same value to the write-only 64-bit MMIO doorbell. A C/C++ release store
 /// alone does not supply that fence. Consumption proves ring storage can be
@@ -312,7 +313,8 @@ enum amdf_gpu_pm4_format_feature_bits_e {
 /// index selects storage modulo `ring_byte_length`. A producer never advances
 /// more than that capacity beyond the acquired read index. After storing
 /// complete packets into the ring, a host producer executes the mapping's
-/// host_publish_fence. The producer then performs a release store of
+/// host_publish_executor (including its direct fence or native flush). The
+/// producer then performs a release store of
 /// the new write index. A host producer then executes a host-to-device store
 /// fence (SFENCE on x86-64) before storing the same value to the write-only
 /// 64-bit MMIO doorbell; a C/C++ release store alone does not supply that
@@ -423,7 +425,8 @@ enum amdf_gpu_sdma_format_feature_bits_e {
 /// through the write index (atomic fetch-add for MULTI), wait until the
 /// reserved slot is below acquired read_index + ring_byte_length / 64, and
 /// write the packet body before release-storing its header/setup dword. A host
-/// producer executes the mapping's host_publish_fence before the header store;
+/// producer executes the mapping's host_publish_executor before the header
+/// store, including its direct fence or native flush;
 /// this orders write-combined ring stores even while firmware polls that slot.
 /// It then executes a host-to-device store fence (SFENCE on x86-64)
 /// before storing the packet's reservation index to the write-only 64-bit

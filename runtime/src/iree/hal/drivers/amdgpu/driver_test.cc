@@ -21,7 +21,7 @@ class DriverTest : public ::testing::Test {
     iree_hal_amdgpu_driver_options_t options;
     iree_hal_amdgpu_driver_options_initialize(&options);
     IREE_ASSERT_OK(iree_hal_amdgpu_driver_create(
-        IREE_SV("amdgpu"), &options, iree_allocator_system(), &driver_));
+        IREE_SV("legacy-amdgpu"), &options, iree_allocator_system(), &driver_));
   }
 
   void TearDown() override {
@@ -73,7 +73,7 @@ TEST_F(DriverTest, DefaultConstructionKeepsOneQueue) {
 
 TEST_F(DriverTest, UriProvisionsRequestedQueues) {
   IREE_ASSERT_OK(iree_hal_driver_create_device_by_uri(
-      driver_, IREE_SV("amdgpu://0?queue_count=0002"), context_.params(),
+      driver_, IREE_SV("legacy-amdgpu://0?queue_count=0002"), context_.params(),
       iree_allocator_system(), &device_));
   ASSERT_NO_FATAL_FAILURE(CheckQueues(2));
 }
@@ -99,7 +99,7 @@ TEST_F(DriverTest, InvalidCountsLeaveNoDevice) {
   };
   for (const auto& [value, expected_status] : cases) {
     SCOPED_TRACE(value);
-    std::string uri = "amdgpu://0?queue_count=";
+    std::string uri = "legacy-amdgpu://0?queue_count=";
     uri.append(value);
     IREE_EXPECT_STATUS_IS(
         expected_status,
@@ -114,7 +114,7 @@ TEST_F(DriverTest, QueueCountDoesNotHideUnknownParameters) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_hal_driver_create_device_by_uri(
-          driver_, IREE_SV("amdgpu://0?queue_count=2&unknown=value"),
+          driver_, IREE_SV("legacy-amdgpu://0?queue_count=2&unknown=value"),
           context_.params(), iree_allocator_system(), &device_));
   EXPECT_EQ(device_, nullptr);
 }

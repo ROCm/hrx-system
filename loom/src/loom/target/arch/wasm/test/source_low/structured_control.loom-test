@@ -220,12 +220,80 @@ low.func.def target<wasm.core.simd128>(@target) @scf_for_counter_requires_i32(%l
 }
 
 // ====
+
+wasm.target<simd128> @target
+
+func.def target(@target) @structured_switch(%selector: index, %lhs: i32, %rhs: i32) -> (i32) {
+  %result = scf.switch %selector -> (i32) {
+    case 0 {
+      %sum = scalar.addi %lhs, %rhs : i32
+      scf.yield %sum : i32
+    }
+    case 3 {
+      %difference = scalar.subi %lhs, %rhs : i32
+      scf.yield %difference : i32
+    }
+    default {
+      %product = scalar.muli %lhs, %rhs : i32
+      scf.yield %product : i32
+    }
+  }
+  func.return %result : i32
+}
+
+func.def target(@target) @pure_switch(%selector: index, %lhs: i32, %rhs: i32, %fallback: i32) -> (i32) {
+  %result = scf.switch %selector -> (i32) {
+    case -1 {
+      scf.yield %lhs : i32
+    }
+    case 7 {
+      scf.yield %rhs : i32
+    }
+    default {
+      scf.yield %fallback : i32
+    }
+  }
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @structured_switch(%selector: reg<wasm.i32>, %lhs: reg<wasm.i32>, %rhs: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %31 = i32.const 0
+  %32 = i32.eq %selector, %31
+  %result = low.scf.if %32 -> (reg<wasm.i32>) {
+    %sum = i32.add %lhs, %rhs
+    low.scf.yield %sum : reg<wasm.i32>
+  } else {
+    %35 = i32.const 3
+    %36 = i32.eq %selector, %35
+    %37 = low.scf.if %36 -> (reg<wasm.i32>) {
+      %difference = i32.sub %lhs, %rhs
+      low.scf.yield %difference : reg<wasm.i32>
+    } else {
+      %product = i32.mul %lhs, %rhs
+      low.scf.yield %product : reg<wasm.i32>
+    }
+    low.scf.yield %37 : reg<wasm.i32>
+  }
+  return %result
+}
+
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @pure_switch(%selector: reg<wasm.i32>, %lhs: reg<wasm.i32>, %rhs: reg<wasm.i32>, %fallback: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %45 = i32.const 7
+  %46 = i32.eq %selector, %45
+  %47 = i32.select %rhs, %fallback, %46
+  %48 = i32.const -1
+  %49 = i32.eq %selector, %48
+  %result = i32.select %lhs, %47, %49
+  return %result
+}
+
+// ====
 // RUN: pass source-to-low{control-flow=structured-low}
 
 wasm.target<simd128> @target
 
-func.def target(@target) @rejects_unsupported_structured_region_op(%selector: index, %a: vector<4xi32>, %b: vector<4xi32>) -> (vector<4xi32>) {
-  // ERROR@+1: TARGET/030 {op_name="scf.switch", region_count="2"}
+func.def target(@target) @projects_switch_at_source_to_low_boundary(%selector: index, %a: vector<4xi32>, %b: vector<4xi32>) -> (vector<4xi32>) {
   %result = scf.switch %selector -> (vector<4xi32>) {
     case 0 {
       scf.yield %a : vector<4xi32>
@@ -235,6 +303,20 @@ func.def target(@target) @rejects_unsupported_structured_region_op(%selector: in
     }
   }
   func.return %result : vector<4xi32>
+}
+
+// ----
+wasm.target<simd128> @target
+
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @projects_switch_at_source_to_low_boundary(%selector: reg<wasm.i32>, %a: reg<wasm.v128>, %b: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
+  %12 = i32.const 0
+  %13 = i32.eq %selector, %12
+  %result = low.scf.if %13 -> (reg<wasm.v128>) {
+    low.scf.yield %a : reg<wasm.v128>
+  } else {
+    low.scf.yield %b : reg<wasm.v128>
+  }
+  return %result
 }
 
 // ====

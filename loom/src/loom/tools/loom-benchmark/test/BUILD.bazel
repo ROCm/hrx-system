@@ -21,8 +21,10 @@ loom_py_test(
         "$(rootpath //loom/src/loom/tooling/execution/hal:testdata/scenario_compare_hal_vm.loom)",
         "$(rootpath //loom/src/loom/tooling/execution/hal:testdata/command_scenario_dependent_stages.loom)",
         "$(rootpath :sequence_storage.loom)",
+        "$(rootpath :host_derived_launch_values.loom)",
     ],
     data = [
+        ":host_derived_launch_values.loom",
         ":sequence_storage.loom",
         "//loom/src/loom/tooling/execution/hal:testdata/command_scenario_dependent_stages.loom",
         "//loom/src/loom/tooling/execution/hal:testdata/scenario_compare_hal_vm.loom",

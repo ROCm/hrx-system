@@ -86,3 +86,35 @@ low.func.def target<amdgpu.rdna4.core>(@rdna4_target) @rdna4_med3_numeric(%a: re
   global_store_b32 v4, v3, s[0:1] offset:0
   s_wait_storecnt storecnt(0)
   s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @wave32_physical_lane_id strategy=source waits=none fixed=%lane:physical_register:11:1
+
+amdgpu.target<gfx1100> @lane_target
+
+low.func.def target<amdgpu.rdna3.core>(@lane_target) @wave32_physical_lane_id() asm {
+  %lane = v_mbcnt_lo_u32_b32_lane_id
+  return
+}
+
+// ----
+  v_mbcnt_lo_u32_b32 v11, -1, 0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @wave64_physical_lane_id strategy=source waits=none fixed=%low_lane:physical_register:11:1 fixed=%lane:physical_register:13:1
+
+amdgpu.target<gfx950> @lane_target
+
+low.func.def target<amdgpu.cdna4.core>(@lane_target) @wave64_physical_lane_id() asm {
+  %low_lane = v_mbcnt_lo_u32_b32_lane_id
+  %lane = v_mbcnt_hi_u32_b32_lane_id %low_lane
+  return
+}
+
+// ----
+  v_mbcnt_lo_u32_b32 v11, -1, 0
+  v_mbcnt_hi_u32_b32 v13, -1, v11
+  s_endpgm

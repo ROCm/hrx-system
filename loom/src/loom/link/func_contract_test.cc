@@ -143,6 +143,31 @@ TEST_F(LinkFuncContractTest, ReportsFieldMismatch) {
       iree_string_view_equal(mismatch.field_name, IREE_SV("temperature")));
 }
 
+TEST_F(LinkFuncContractTest, AcceptsExactRetainedSourceSignature) {
+  const loom_link_func_contract_mismatch_t mismatch =
+      Check(IREE_SV("c_source"), IREE_SV("c_selected"));
+
+  EXPECT_EQ(mismatch.kind, LOOM_LINK_FUNC_CONTRACT_MISMATCH_NONE);
+}
+
+TEST_F(LinkFuncContractTest, RejectsMissingRetainedSourceSignature) {
+  const loom_link_func_contract_mismatch_t mismatch =
+      Check(IREE_SV("c_source"), IREE_SV("c_absent"));
+
+  EXPECT_EQ(mismatch.kind, LOOM_LINK_FUNC_CONTRACT_MISMATCH_FIELD);
+  EXPECT_TRUE(
+      iree_string_view_equal(mismatch.field_name, IREE_SV("source_signature")));
+}
+
+TEST_F(LinkFuncContractTest, RejectsDifferentRetainedSourceSignature) {
+  const loom_link_func_contract_mismatch_t mismatch =
+      Check(IREE_SV("c_source"), IREE_SV("c_unsigned"));
+
+  EXPECT_EQ(mismatch.kind, LOOM_LINK_FUNC_CONTRACT_MISMATCH_FIELD);
+  EXPECT_TRUE(
+      iree_string_view_equal(mismatch.field_name, IREE_SV("source_signature")));
+}
+
 TEST_F(LinkFuncContractTest, ReadonlyRequirementAcceptsPureProvider) {
   const loom_link_func_contract_mismatch_t mismatch =
       Check(IREE_SV("readonly_source"), IREE_SV("pure_selected"));

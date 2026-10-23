@@ -222,6 +222,56 @@ TEST(Compile, MaxAlternationBranchesSucceeds) {
   EXPECT_TRUE(pat.ok()) << pat.error_message();
 }
 
+TEST(Compile, TrackedAlternationCapacity) {
+  for (size_t count : {64u, 65u}) {
+    SCOPED_TRACE(count);
+    std::string pattern = "a(?!x)";
+    for (size_t i = 1; i < count; ++i) {
+      pattern += "|a" + std::to_string(i);
+    }
+    CompiledPattern compiled(pattern.c_str());
+    if (count == 64) {
+      ASSERT_TRUE(compiled.ok()) << compiled.error_message();
+      const auto* dfa = compiled.dfa();
+      EXPECT_EQ(dfa->alive_branches[dfa->header->start_state], UINT64_MAX);
+    } else {
+      EXPECT_EQ(compiled.status_code(), IREE_STATUS_RESOURCE_EXHAUSTED);
+    }
+  }
+}
+
+TEST(Compile, RetainsUnconditionalBranchIdentity) {
+  const char* patterns[] = {"a+|a+(?!c)", "a+(?!c)|a+", "a*b|a+(?!c)|a+"};
+  for (uint8_t branch = 0; branch < 3; ++branch) {
+    SCOPED_TRACE(patterns[branch]);
+    CompiledPattern compiled(patterns[branch]);
+    ASSERT_TRUE(compiled.ok()) << compiled.error_message();
+    const auto* dfa = compiled.dfa();
+    auto state =
+        iree_tokenizer_regex_dfa_step(dfa, dfa->header->start_state, 'a', 'a');
+    ASSERT_NE(state, IREE_TOKENIZER_UTIL_REGEX_NO_TRANSITION);
+    ASSERT_NE(dfa->lookahead, nullptr);
+    EXPECT_EQ(dfa->lookahead[state].fallback_branch, branch);
+  }
+}
+
+TEST(Compile, SerializedFallbackBranchValidation) {
+  CompiledPattern compiled("a(?!x)|a");
+  ASSERT_TRUE(compiled.ok()) << compiled.error_message();
+  const auto* dfa = compiled.dfa();
+  auto state =
+      iree_tokenizer_regex_dfa_step(dfa, dfa->header->start_state, 'a', 'a');
+  ASSERT_NE(state, IREE_TOKENIZER_UTIL_REGEX_NO_TRANSITION);
+  auto* lookahead =
+      const_cast<iree_tokenizer_regex_lookahead_t*>(dfa->lookahead);
+  for (uint8_t branch : {3, 64}) {
+    SCOPED_TRACE(branch);
+    lookahead[state].fallback_branch = branch;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                          iree_tokenizer_regex_dfa_validate(dfa));
+  }
+}
+
 TEST(Compile, MaxNestingDepthSucceeds) {
   // Build a pattern with exactly 100 nested groups - should succeed.
   std::string pattern;

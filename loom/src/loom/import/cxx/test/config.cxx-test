@@ -164,7 +164,7 @@ unsigned scale(unsigned value) { return value * factor; }
 // ----
 config.decl @tuning.factor : i32
 
-func.def public @scale(%value: i32) -> (i32) {
+func.def public source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @scale(%value: i32) -> (i32) {
   %factor = config.get @tuning.factor : i32
   %4 = scalar.muli %value, %factor : i32
   func.return %4 : i32

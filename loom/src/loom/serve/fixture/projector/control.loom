@@ -19,6 +19,57 @@ func.def @check(%condition: i1) {
   func.return
 }
 
+// Headers contain the future pixel extent, but the forecast input has no
+// pixels. Bound a complete request across independently retained cohorts.
+func.def public @forecast_memory(%state: buffer, %ranges: buffer, %descriptors: buffer) -> (i64, i64, i64) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c0_i64 = scalar.constant 0 : i64
+  %c16 = scalar.constant 16 : i64
+  %c15 = scalar.constant 15 : i64
+  %mask = scalar.constant -16 : i64
+  %range_bytes = buffer.length %ranges
+  %range_length = index.cast %range_bytes : offset to i64
+  %count_value = scalar.divui %range_length, %c16 : i64
+  %bounded_count = scalar.assume %count_value [range(%count_value, 1, 2147483647)] : i64
+  %count = index.cast %bounded_count : i64 to index
+  %records = buffer.view %ranges[%origin] : buffer -> view<[%count]x2xi64>
+  %total, %largest, %rows = scf.for %i = [%c0 to %count step %c1](%sum = %c0_i64 : i64, %peak = %c0_i64 : i64, %features = %c0_i64 : i64) -> (i64, i64, i64) {
+    %offset_value = view.load %records[%i, 0] : view<[%count]x2xi64> -> i64
+    %offset_bound = scalar.assume %offset_value [range(%offset_value, 0, 9223372036854775807)] : i64
+    %offset = index.cast %offset_bound : i64 to offset
+    %header = buffer.view %descriptors[%offset] : buffer -> view<16xi32>
+    %pixel_offset32 = view.load %header[10] : view<16xi32> -> i32
+    %pixel_length32 = view.load %header[11] : view<16xi32> -> i32
+    %rows32 = view.load %header[7] : view<16xi32> -> i32
+    %pixel_offset = scalar.extui %pixel_offset32 : i32 to i64
+    %pixel_length = scalar.extui %pixel_length32 : i32 to i64
+    %feature_count = scalar.extui %rows32 : i32 to i64
+    %end = scalar.addi %pixel_offset, %pixel_length : i64
+    %padded = scalar.addi %end, %c15 : i64
+    %bytes = scalar.andi %padded, %mask : i64
+    %next_sum = scalar.addi %sum, %bytes : i64
+    %larger = scalar.cmpi ugt, %bytes, %peak : i64
+    %next_peak = scf.select %larger, %bytes, %peak : i64
+    %next_features = scalar.addi %features, %feature_count : i64
+    scf.yield %next_sum, %next_peak, %next_features : i64, i64, i64
+  }
+  %window = scalar.constant 65536 : i64
+  %above_window = scalar.cmpi ugt, %total, %window : i64
+  %bounded_window = scf.select %above_window, %window, %total : i64
+  %oversized = scalar.cmpi ugt, %largest, %bounded_window : i64
+  %input = scf.select %oversized, %largest, %bounded_window : i64
+  // Includes the pixel work table and the weighted fixture's tiny parameter
+  // bank. The unweighted fixture conservatively shares the same bound.
+  %overhead = scalar.constant 5136 : i64
+  %private = scalar.addi %input, %overhead : i64
+  %output_capacity = scalar.constant 1024 : i64
+  %retained = scalar.muli %bounded_count, %output_capacity : i64
+  %expanded = scalar.muli %rows, %c16 : i64
+  func.return %private, %retained, %expanded : i64, i64, i64
+}
+
 // Preserve the native RGB/RGBA packet and report additive projection work.
 func.def public @prepare_request(%state: buffer, %request: buffer) -> (buffer, i64, i64) {
   %origin = index.constant 0 : offset

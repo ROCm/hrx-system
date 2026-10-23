@@ -20,8 +20,9 @@ const loom_pass_info_t* loom_vector_bank_sroa_pass_info(void);
 
 // Replaces statically addressed vector banks crossing LoopLike and RegionBranch
 // boundaries with one scalar or tail-vector value per slot. Insert-based
-// updates and whole-bank replacements preserve each transfer. Connected
-// aggregate uses that cannot be split retain their original representation.
+// updates and whole-bank replacements preserve each transfer. Whole-result
+// consumers receive a reconstructed vector. Opaque uses within a recurrence
+// retain its original vector representation.
 iree_status_t loom_vector_bank_sroa_run(loom_pass_t* pass,
                                         loom_module_t* module);
 

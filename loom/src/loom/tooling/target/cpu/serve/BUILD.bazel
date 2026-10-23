@@ -826,7 +826,7 @@ loom_py_test(
         "--source=$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
         "--device=task",
     ],
-    data = TEXT_SOURCES + [":loom-serve-test-tool"],
+    data = TEXT_SOURCES + PROJECTOR_SOURCES + [":loom-serve-test-tool"],
     main = "pressure_test.py",
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
@@ -860,6 +860,18 @@ loom_cc_test(
     deps = [
         ":test_device",
         "//loom/src/loom/serve/runtime/execution:queues_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "parameter_gather_test",
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_task",
+    ]),
+    deps = [
+        ":test_device",
+        "//loom/src/loom/serve/runtime/parameter:gather_tests",
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
@@ -1236,6 +1248,24 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "media_projector_test",
+    data = PROJECTOR_SOURCES,
+    env = {
+        "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:model.json)",
+    },
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//loom/config/execute:task_hal",
+    ]),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/service/text:media_projector_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "source_text_media_test",
     args = ["--gtest_filter=-Declarations/ManagedMediaServiceTest.*/1"],
     data = EMBEDDING_SOURCES + PROJECTOR_SOURCES + TEXT_SOURCES,
@@ -1535,6 +1565,7 @@ loom_cc_test(
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/parameter:activation",
         "//loom/src/loom/serve/runtime/parameter:bank",
+        "//loom/src/loom/serve/runtime/parameter:module",
         "//loom/src/loom/serve/runtime/parameter:residency",
         "//loom/src/loom/serve/runtime/parameter:weights",
         "//loom/src/loom/serve/runtime/program",

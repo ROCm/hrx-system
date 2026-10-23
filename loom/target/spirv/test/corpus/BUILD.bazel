@@ -277,8 +277,6 @@ _ALL_PROFILE_XFAILS = {
     "memory/atomic/workgroup/panel_stream.loom:@panel_stream": "TARGET/032",
     "memory/storage/private.loom:@private_selected_addresses": "TARGET/003",
     "memory/storage/private.loom:@private_vector_lookup": "TARGET/003",
-    "memory/storage/stability/switch.loom:@immutable_storage_switch": "TARGET/030",
-    "memory/storage/stability/switch.loom:@varying_storage_switch": "TARGET/030",
     "memory/view/subview.loom:@subview_atomic_origins": "TARGET/003",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_bf16": "TARGET/002",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_wide_bf16": "TARGET/002",
@@ -452,7 +450,6 @@ _ALL_ROOTS_XFAIL = [
     "memory/atomic/workgroup/observations.loom",
     "memory/atomic/workgroup/panel_stream.loom",
     "memory/storage/private.loom",
-    "memory/storage/stability/switch.loom",
     "numeric/integer/wide/address_comparison.loom",
 ]
 
@@ -502,8 +499,6 @@ _SPIRV_EXECUTION_XFAILS = {
     "memory/packed/tails.loom:@stage_private_i8_3_values": "TARGET/003",
     "memory/storage/private.loom:@private_selected_address_values": "TARGET/003",
     "memory/storage/private.loom:@private_vector_lookup_values": "TARGET/003",
-    "memory/storage/stability/switch.loom:@immutable_storage_switch_values": "TARGET/030",
-    "memory/storage/stability/switch.loom:@varying_storage_switch_values": "TARGET/030",
     "memory/storage/word.loom:@copy_word_index_coordinates": "TARGET/050",
     "memory/storage/word.loom:@copy_word_stride_coordinates": "TARGET/003,TARGET/050",
     "memory/storage/word.loom:@copy_word_tail_guards": "TARGET/050",

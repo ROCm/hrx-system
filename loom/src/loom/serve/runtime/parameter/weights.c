@@ -295,6 +295,9 @@ typedef struct loom_serve_weight_preparation_t {
   iree_hal_command_buffer_mode_t command_mode;
   // Borrowed checkpoint sources and policy, retained through completion.
   const loom_serve_preparation_parameter_t* parameter;
+  // Borrowed immutable source catalog through completion; input recipes retain
+  // their selected sources independently on the cold worker.
+  loom_serve_parameter_sources_t* indexed_sources;
   // Copied namespace descriptor borrowing its strings and package through
   // completion. Checkpoints use its filesystem base; policy uses its package.
   loom_serve_sources_t sources;
@@ -306,7 +309,7 @@ typedef struct loom_serve_weight_preparation_t {
   iree_host_size_t preparer_index;
   // Owned per-span preparer ordinal; SIZE_MAX preserves canonical file bytes.
   iree_host_size_t* span_preparers;
-  // CPU policy/indexing outcome, consumed by the initial task destructor.
+  // CPU policy outcome, consumed by the initial task destructor.
   iree_status_t status;
   // Joins the already-queued fixed root allocation before publication.
   iree_async_semaphore_timepoint_t backing_timepoint;
@@ -331,7 +334,7 @@ static iree_status_t loom_serve_weight_query_preparer(
   iree_vm_variant_t arguments[] = {
       iree_vm_buffer_variant_from_ptr_move(types, &key)};
   iree_vm_variant_t results[1] = {0};
-  loom_serve_preparation_module_begin(library, 0, 0);
+  loom_serve_preparation_module_begin(library, 0, NULL, 0);
   loom_serve_weight_inputs_module_begin(input_library);
   iree_status_t status =
       iree_vm_invoke(loom_serve_program_invocation(program), function,
@@ -574,9 +577,9 @@ static void loom_serve_weight_preparation_execute(
     loomc_task_t* task, loomc_host_size_t worker_ordinal) {
   loom_serve_weight_preparation_t* job = (loom_serve_weight_preparation_t*)task;
   const iree_allocator_t host_allocator = job->weights->host_allocator;
-  iree_status_t status = loom_serve_weight_inputs_allocate(
-      job->parameter, &job->sources, WEIGHT_LANES, host_allocator,
-      &job->weights->inputs);
+  iree_status_t status =
+      loom_serve_weight_inputs_allocate(job->parameter, job->indexed_sources,
+                                        host_allocator, &job->weights->inputs);
   if (iree_status_is_ok(status)) {
     status = loom_serve_weight_prepare_policy(job);
   }
@@ -609,6 +612,7 @@ iree_status_t loom_serve_weights_prepare_async(
     loom_serve_jit_t* jit, iree_hal_command_buffer_mode_t command_mode,
     const loom_serve_sources_t* sources,
     const loom_serve_preparation_parameter_t* parameter,
+    loom_serve_parameter_sources_t* indexed_sources,
     loom_serve_weights_completion_fn_t completion, void* user_data) {
   loom_serve_weight_preparation_t* job = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(weights->host_allocator,
@@ -620,6 +624,7 @@ iree_status_t loom_serve_weights_prepare_async(
   job->command_mode = command_mode;
   job->sources = *sources;
   job->parameter = parameter;
+  job->indexed_sources = indexed_sources;
   job->completion = completion;
   job->user_data = user_data;
   iree_status_t status =
@@ -663,12 +668,13 @@ iree_status_t loom_serve_weights_prepare(
     loom_serve_weights_t* weights, loom_serve_host_t* host,
     loom_serve_jit_t* jit, iree_hal_command_buffer_mode_t command_mode,
     const loom_serve_sources_t* sources,
-    const loom_serve_preparation_parameter_t* parameter) {
+    const loom_serve_preparation_parameter_t* parameter,
+    loom_serve_parameter_sources_t* indexed_sources) {
   loom_serve_weight_preparation_join_t join = {0};
   iree_slim_mutex_initialize(&join.mutex);
   iree_notification_initialize(&join.notification);
   iree_status_t status = loom_serve_weights_prepare_async(
-      weights, host, jit, command_mode, sources, parameter,
+      weights, host, jit, command_mode, sources, parameter, indexed_sources,
       loom_serve_weight_preparation_ready, &join);
   if (iree_status_is_ok(status)) {
     iree_notification_await(&join.notification,
@@ -1453,12 +1459,18 @@ iree_status_t loom_serve_weights_import_readiness(
 }
 
 iree_status_t loom_serve_weights_await(loom_serve_weights_t* weights) {
-  iree_status_t status = iree_hal_semaphore_list_wait(
-      (iree_hal_semaphore_list_t){weights->activation.count,
-                                  weights->activation.semaphores,
-                                  weights->activation.values},
-      iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
-  loom_serve_retirement_await(&weights->activation.retirement);
+  iree_status_t status = iree_ok_status();
+  // Every accepted lane must retire even if another lane fails. The outer
+  // owner also services cold staging requests from those queues.
+  for (iree_host_size_t i = 0; i < weights->activation.count; ++i) {
+    status = iree_status_join(
+        status, loom_serve_workspace_wait(weights->workspace,
+                                          weights->activation.semaphores[i],
+                                          weights->activation.values[i]));
+  }
+  status = iree_status_join(
+      status, loom_serve_workspace_await_retirement(
+                  weights->workspace, &weights->activation.retirement));
   loom_serve_weights_await_backing(weights);
   return iree_status_join(
       status, iree_status_clone(weights->activation.backing_status));
@@ -1536,6 +1548,17 @@ loom_serve_memory_statistics_t loom_serve_weights_statistics(
   return weights->statistics;
 }
 
+loom_serve_memory_usage_t loom_serve_weights_memory_usage(
+    const loom_serve_weights_t* weights) {
+  return (loom_serve_memory_usage_t){
+      .reserved_bytes = weights->statistics.reserved_bytes,
+      .committed_bytes = weights->statistics.committed_bytes,
+      .pending_bytes = weights->statistics.pending_bytes,
+      .releasing_bytes = weights->statistics.releasing_bytes,
+      .released_bytes = weights->statistics.released_bytes,
+  };
+}
+
 loom_serve_weight_activity_t loom_serve_weights_activity(
     const loom_serve_weights_t* weights) {
   return weights->activity;
@@ -1566,13 +1589,18 @@ bool loom_serve_weights_is_retired(loom_serve_weights_t* weights) {
           loom_serve_retirement_is_idle(&weights->activation.retirement));
 }
 
-void loom_serve_weights_await_retirement(loom_serve_weights_t* weights) {
-  if (weights) {
-    loom_serve_weights_await_backing(weights);
-    loom_serve_memory_operation_await(weights->deactivation);
-    loom_serve_retirement_await(&weights->retirement);
-    loom_serve_retirement_await(&weights->activation.retirement);
+iree_status_t loom_serve_weights_await_retirement(
+    loom_serve_weights_t* weights) {
+  if (!weights) {
+    return iree_ok_status();
   }
+  loom_serve_weights_await_backing(weights);
+  loom_serve_memory_operation_await(weights->deactivation);
+  iree_status_t status = loom_serve_workspace_await_retirement(
+      weights->workspace, &weights->retirement);
+  return iree_status_join(
+      status, loom_serve_workspace_await_retirement(
+                  weights->workspace, &weights->activation.retirement));
 }
 
 iree_status_t loom_serve_weights_free(loom_serve_weights_t* weights) {

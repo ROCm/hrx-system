@@ -54,6 +54,7 @@ _U32_MAX = 0xFFFF_FFFF
 _U64_MAX = 0xFFFF_FFFF_FFFF_FFFF
 _STRUCTURAL_EMIT_KINDS = (
     LowerEmitKind.REGISTER_SLICE,
+    LowerEmitKind.REGISTER_SLICE_CLASS,
     LowerEmitKind.REGISTER_CONCAT,
     LowerEmitKind.REGISTER_COPY,
     LowerEmitKind.REGISTER_MOVE,
@@ -1223,7 +1224,7 @@ def _validate_c_table_shape(
         if is_structural_emit:
             if row.attr_copy_start != 0 or row.attr_copy_count != 0 or row.tied_result_start != 0 or row.tied_result_count != 0:
                 raise ValueError(f"{row_subject} structural emit cannot carry descriptor table ranges")
-            if row.kind != LowerEmitKind.REGISTER_SLICE and (row.structural_offset != 0 or row.structural_unit_count != 0):
+            if row.kind not in (LowerEmitKind.REGISTER_SLICE, LowerEmitKind.REGISTER_SLICE_CLASS) and (row.structural_offset != 0 or row.structural_unit_count != 0):
                 raise ValueError(f"{row_subject} only register-slice emits can carry a structural payload")
         elif row.structural_offset != 0 or row.structural_unit_count != 0:
             raise ValueError(f"{row_subject} descriptor emit cannot carry a structural payload")
@@ -1259,6 +1260,10 @@ def _validate_c_table_shape(
             raise ValueError(f"{row_subject} accumulator operand index is outside operand-ref range: {row.accumulator_operand_index}")
         _require_u16(row.result_ref_start, f"{row_subject} result-ref start")
         _require_u16(
+            row.result_register_class_id,
+            f"{row_subject} result register class id",
+        )
+        _require_u16(
             row.result_type_pattern_start,
             f"{row_subject} result type-pattern start",
         )
@@ -1271,7 +1276,10 @@ def _validate_c_table_shape(
             raise ValueError(f"{row_subject} cannot use both result type-pattern and descriptor result-type flags")
         if row.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN and row.result_ref_count != 0 and not row.flags & LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS:
             raise ValueError(f"{row_subject} result type-pattern requires an explicit result bind range")
-        if row.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN:
+        if row.kind == LowerEmitKind.REGISTER_SLICE_CLASS:
+            if row.result_register_class_id >= len(source_contract.descriptor_set.reg_classes):
+                raise ValueError(f"{row_subject} result register class id is outside the descriptor-set range: {row.result_register_class_id}")
+        elif row.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN:
             _require_table_range(
                 row.result_type_pattern_start,
                 row.result_ref_count,
@@ -1466,7 +1474,7 @@ def _validate_c_table_shape(
                     emit.operand_ref_start + emit.operand_ref_count,
                 )
             )
-            if not emit.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN:
+            if emit.kind != LowerEmitKind.REGISTER_SLICE_CLASS and not emit.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN:
                 visible_value_ref_indices.extend(
                     range(
                         emit.result_ref_start,

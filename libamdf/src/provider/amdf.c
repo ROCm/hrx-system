@@ -19,9 +19,9 @@
 #include "libamdf/src/provider/extension.h"
 #include "libamdf/src/user_queue.h"
 
-static const amdf_api_t amdf_api_v13 = {
+static const amdf_api_t amdf_api_v14 = {
     .structure_size = sizeof(amdf_api_t),
-    .abi_version = AMDF_ABI_VERSION_13,
+    .abi_version = AMDF_ABI_VERSION_14,
     .instance_create = amdf_instance_create,
     .instance_destroy = amdf_instance_destroy,
     .endpoint_enumerate = amdf_endpoint_enumerate,
@@ -54,6 +54,7 @@ static const amdf_api_t amdf_api_v13 = {
     .user_queue_query_info = amdf_user_queue_query_info,
     .user_queue_map = amdf_user_queue_map,
     .user_queue_mapping_query_info = amdf_user_queue_mapping_query_info,
+    .user_queue_mapping_flush = amdf_user_queue_mapping_flush,
     .user_queue_mapping_destroy = amdf_user_queue_mapping_destroy,
     .user_queue_query_status = amdf_user_queue_query_status,
     .user_queue_wait_consumed = amdf_user_queue_wait_consumed,
@@ -85,10 +86,10 @@ amdf_status_t AMDF_CALL amdf_query_api(amdf_abi_version_t minimum_version,
   if (minimum_version > maximum_version) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  if (minimum_version > AMDF_ABI_VERSION_13 ||
-      maximum_version < AMDF_ABI_VERSION_13) {
+  if (minimum_version > AMDF_ABI_VERSION_14 ||
+      maximum_version < AMDF_ABI_VERSION_14) {
     return amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH);
   }
-  *out_api = &amdf_api_v13;
+  *out_api = &amdf_api_v14;
   return AMDF_STATUS_OK;
 }

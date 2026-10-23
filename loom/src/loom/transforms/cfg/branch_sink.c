@@ -14,6 +14,7 @@
 #include "loom/rewrite/materialize.h"
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/util/cfg_loop_nest.h"
 
 #define LOOM_BRANCH_SINK_STATISTICS(V, statistics_type)                  \
   V(statistics_type, branches_visited, "branches-visited",               \
@@ -53,6 +54,15 @@ typedef struct loom_branch_sink_region_stack_t {
   // Allocated region pointer capacity.
   iree_host_size_t capacity;
 } loom_branch_sink_region_stack_t;
+
+typedef struct loom_branch_sink_loop_region_t {
+  // CFG region described by loops.
+  const loom_region_t* region;
+  // Natural-loop structure built from retained graph and dominance facts.
+  loom_cfg_loop_nest_t loops;
+  // Next lazily analyzed CFG region.
+  struct loom_branch_sink_loop_region_t* next;
+} loom_branch_sink_loop_region_t;
 
 static iree_status_t loom_branch_sink_region_stack_initialize(
     iree_arena_allocator_t* arena, loom_branch_sink_region_stack_t* stack) {
@@ -95,6 +105,8 @@ typedef struct loom_branch_sink_context_t {
   iree_arena_allocator_t remap_arena;
   // Shared motion legality analysis.
   loom_motion_analysis_t motion;
+  // Natural-loop structure built only for cyclic rematerialization targets.
+  loom_branch_sink_loop_region_t* loop_regions;
   // Region DFS stack for finding region-branch ops in a function.
   loom_branch_sink_region_stack_t region_stack;
 } loom_branch_sink_context_t;
@@ -638,6 +650,77 @@ static iree_status_t loom_branch_sink_clone_cfg_candidate(
   return iree_ok_status();
 }
 
+static iree_status_t loom_branch_sink_loop_nest(
+    loom_branch_sink_context_t* context, const loom_region_t* region,
+    const loom_cfg_graph_t* graph, const loom_cfg_dominance_t* dominance,
+    const loom_cfg_loop_nest_t** out_loops) {
+  for (loom_branch_sink_loop_region_t* entry = context->loop_regions; entry;
+       entry = entry->next) {
+    if (entry->region == region) {
+      *out_loops = &entry->loops;
+      return iree_ok_status();
+    }
+  }
+
+  loom_branch_sink_loop_region_t* entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(context->pass->arena, sizeof(*entry),
+                                           (void**)&entry));
+  *entry = (loom_branch_sink_loop_region_t){
+      .region = region,
+      .next = context->loop_regions,
+  };
+  IREE_RETURN_IF_ERROR(loom_cfg_loop_nest_build(
+      graph, dominance, context->pass->arena, &entry->loops));
+  context->loop_regions = entry;
+  *out_loops = &entry->loops;
+  return iree_ok_status();
+}
+
+// Proves that inserting work in |target| cannot execute it more often than
+// |source|. Acyclic targets need only ordinary dominance. In a reducible cycle,
+// sharing the innermost natural loop means every target reentry crosses that
+// loop's header; source dominance then places source on every path to target.
+static iree_status_t loom_branch_sink_execution_is_bounded_by(
+    loom_branch_sink_context_t* context, const loom_block_t* target,
+    const loom_block_t* source, bool* out_bounded) {
+  *out_bounded = false;
+  if (!target || !source || target->parent_region != source->parent_region) {
+    return iree_ok_status();
+  }
+  const loom_cfg_graph_t* graph = NULL;
+  const loom_cfg_dominance_t* dominance = NULL;
+  if (!loom_dominance_info_lookup_cfg_region(
+          &context->motion.availability.dominance, target->parent_region,
+          &graph, &dominance)) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t target_index =
+      loom_cfg_graph_block_index(graph, target);
+  const iree_host_size_t source_index =
+      loom_cfg_graph_block_index(graph, source);
+  if (target_index == IREE_HOST_SIZE_MAX ||
+      source_index == IREE_HOST_SIZE_MAX || !dominance->available ||
+      !loom_cfg_dominance_block_dominates(dominance, (uint16_t)source_index,
+                                          (uint16_t)target_index)) {
+    return iree_ok_status();
+  }
+  if (!graph->blocks[target_index].component_is_cyclic) {
+    *out_bounded = true;
+    return iree_ok_status();
+  }
+
+  const loom_cfg_loop_nest_t* loops = NULL;
+  IREE_RETURN_IF_ERROR(loom_branch_sink_loop_nest(
+      context, target->parent_region, graph, dominance, &loops));
+  const uint16_t target_loop =
+      loom_cfg_loop_nest_innermost(loops, (uint16_t)target_index);
+  const uint16_t source_loop =
+      loom_cfg_loop_nest_innermost(loops, (uint16_t)source_index);
+  *out_bounded = loops->reducible && target_loop != LOOM_CFG_LOOP_NEST_NONE &&
+                 target_loop == source_loop;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_branch_sink_try_rematerialize_cfg_candidate(
     loom_branch_sink_context_t* context, loom_op_t* branch_op,
     const loom_block_t* successors[2], loom_op_t* candidate_op,
@@ -652,11 +735,15 @@ static iree_status_t loom_branch_sink_try_rematerialize_cfg_candidate(
     return iree_ok_status();
   }
 
-  const loom_dominance_info_t* dominance =
-      &context->motion.availability.dominance;
   loom_op_t* insertion_op = successors[target_successor]->first_op;
-  if (!insertion_op ||
-      loom_dominance_block_is_cyclic(dominance, successors[target_successor])) {
+  if (!insertion_op) {
+    return iree_ok_status();
+  }
+  bool execution_is_bounded = false;
+  IREE_RETURN_IF_ERROR(loom_branch_sink_execution_is_bounded_by(
+      context, successors[target_successor], branch_op->parent_block,
+      &execution_is_bounded));
+  if (!execution_is_bounded) {
     return iree_ok_status();
   }
   bool can_relocate = false;

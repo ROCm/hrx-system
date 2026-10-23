@@ -28,11 +28,12 @@ iree_status_t loom_serve_text_variant_compile_async(
     loom_serve_variant_completion_fn_t completion, void* user_data,
     iree_allocator_t host_allocator);
 
-// Checks that a successfully compiled candidate belongs to owner and rebinds
-// its native commands. The owner establishes the safe model boundary.
+// Checks candidate ownership and the replacement private peak before rebinding
+// native commands. The owner establishes the completed execution boundary and
+// excludes peer admission until the new peak has been published.
 iree_status_t loom_serve_text_variant_bind(
     const loom_serve_text_variant_t* variant, loom_serve_text_model_t* owner,
-    iree_vm_module_t* module);
+    iree_vm_module_t* module, loom_serve_residency_t* residency);
 
 #ifdef __cplusplus
 }  // extern "C"

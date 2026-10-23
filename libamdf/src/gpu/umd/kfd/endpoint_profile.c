@@ -55,8 +55,24 @@ amdf_status_t amdf_gpu_umd_create_endpoint_profile(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
+  // INFO_DEV_INFO reports cached package and virtualization facts. In
+  // particular, full CPU-visible VRAM does not imply that a virtual function
+  // exposes the register mapping required to publish host-written rings.
+  // This short-lived render file never acquires a KFD VM or execution storage.
+  int descriptor = -1;
+  status = amdf_linux_endpoint_open_file(endpoint, &descriptor);
+  if (amdf_status_is_ok(status)) {
+    status = amdf_gpu_kfd_topology_query_memory(
+        descriptor, endpoint->info.pci.device_id, &topology);
+  }
+  const amdf_status_t close_status = amdf_linux_file_close(&descriptor);
+  if (!amdf_status_is_ok(close_status)) {
+    status = close_status;
+  }
   amdf_gpu_endpoint_profile_t profile;
-  status = amdf_gpu_kfd_qualify_endpoint_profile(&topology, &profile);
+  if (amdf_status_is_ok(status)) {
+    status = amdf_gpu_kfd_qualify_endpoint_profile(&topology, &profile);
+  }
   amdf_gpu_endpoint_profile_t* owned_profile = NULL;
   if (amdf_status_is_ok(status)) {
     status = amdf_malloc(host_allocator, sizeof(*owned_profile),

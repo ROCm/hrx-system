@@ -21,8 +21,6 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-_X86_CHECK_PACKAGE_VISIBILITY = ["//loom/src/loom/target/arch/x86/check:__pkg__"]
-
 _X86_LOWER_VISIBILITY = ["//loom/src/loom/target/arch/x86/lower:__pkg__"]
 
 _X86_NATIVE_VISIBILITY = ["//loom/src/loom/target/emit/native/x86:__pkg__"]
@@ -38,7 +36,7 @@ _X86_FACTS_VISIBILITY = _X86_NATIVE_VISIBILITY + _X86_OPS_VISIBILITY + [
 _X86_PROVIDER_VISIBILITY = [
     "//loom/src/loom/target/all:__pkg__",
     "//loom/src/loom/target/configured:__pkg__",
-] + _X86_CHECK_PACKAGE_VISIBILITY
+]
 
 #===------------------------------------------------------------------------===#
 # x86 target support
@@ -77,6 +75,31 @@ loom_cc_library(
     deps = [
         ":register_classes",
         "//loom/src/loom/ir",
+    ],
+)
+
+loom_cc_library(
+    name = "source_signature",
+    srcs = ["source_signature.c"],
+    hdrs = ["source_signature.h"],
+    visibility = _X86_LOWER_VISIBILITY,
+    deps = [
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/target/abi/c:signature_layout",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "source_signature_test",
+    srcs = ["source_signature_test.cc"],
+    deps = [
+        ":source_signature",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/func",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

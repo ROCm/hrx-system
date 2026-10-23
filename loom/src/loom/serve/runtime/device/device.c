@@ -9,6 +9,7 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/tooling/device_profiling.h"
 #include "loom/serve/runtime/execution/queues.h"
+#include "loom/serve/runtime/storage/virtual_pool.h"
 
 struct loom_serve_device_t {
   // Borrowed enclosing application group, owning this record's storage.
@@ -25,6 +26,8 @@ struct loom_serve_device_t {
   iree_hal_pool_t* storage_pool;
   // Shared private command backing, independent of model timelines.
   loom_serve_workspace_t* workspace;
+  // Stable workspace ranges borrowing the physical domain; NULL when fixed.
+  loom_serve_virtual_pool_t* workspace_pool;
   // Owned physical domain shared by all model reservations; NULL when fixed.
   loom_serve_memory_pool_t* memory_pool;
   // Qualified bulk parameter geometry, independent of file read windows.
@@ -141,10 +144,8 @@ static iree_status_t loom_serve_device_initialize(
       .family_count = dispatch_family == transfer_family ? 1 : 2,
       .families = families,
   };
-  // This provider traces physical backing for ordinary retained buffers and
-  // workspace slabs, including reusable idle slabs. Elastic weights and state
-  // use a separately prepared mapping-source pool with their own physical
-  // budget.
+  // Fixed retained buffers use ordinary storage. Elastic model storage and
+  // workspace share the mapping-source pool and its physical budget below.
   const iree_hal_slab_pool_options_t storage_options = {
       .trace_name = IREE_SVL("loom-serve-storage-backing"),
   };
@@ -152,13 +153,6 @@ static iree_status_t loom_serve_device_initialize(
       iree_hal_slab_pool_create(group->handle, scope, &storage_options,
                                 group->host_allocator, &device->storage_pool),
       "creating serving storage pool");
-  iree_hal_asan_pool_options_t asan_options = {0};
-  if (iree_any_bit_set(sanitizer->flags, IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN)) {
-    asan_options = sanitizer->asan.pool_options;
-  }
-  IREE_RETURN_IF_ERROR(loom_serve_workspace_create(
-      group->handle, device->storage_pool, &asan_options, group->host_allocator,
-      &device->workspace));
   if (options->backing == LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
     iree_hal_pool_family_access_t source_families[IREE_ARRAYSIZE(families)];
     memcpy(source_families, families, sizeof(families));
@@ -198,9 +192,32 @@ static iree_status_t loom_serve_device_initialize(
     }
     iree_hal_pool_release(source_pool);
     IREE_RETURN_IF_ERROR(status);
+    IREE_RETURN_IF_ERROR(loom_serve_virtual_pool_allocate(
+        device->memory_pool, device->weight_geometry, group->host_allocator,
+        &device->workspace_pool));
+    // Match the command ABI's ordinary parameter alignment without rounding
+    // every small logical allocation to the native mapping granularity. Larger
+    // or more strongly aligned requests use dedicated virtual ranges.
+    const iree_hal_pool_reservation_request_t range = {
+        .allocation_size = device->weight_geometry.slab_size,
+        .min_alignment = 256,
+    };
+    IREE_RETURN_IF_ERROR(loom_serve_workspace_create_from_virtual(
+        group->handle, device->workspace_pool, range, group->host_allocator,
+        &device->workspace));
+  } else {
+    iree_hal_asan_pool_options_t asan_options = {0};
+    if (iree_any_bit_set(sanitizer->flags,
+                         IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN)) {
+      asan_options = sanitizer->asan.pool_options;
+    }
+    IREE_RETURN_IF_ERROR(loom_serve_workspace_create(
+        group->handle, device->storage_pool, &asan_options,
+        group->host_allocator, &device->workspace));
   }
   return loom_serve_residency_cache_allocate(
-      device->memory_pool, group->host_allocator, &device->residency_cache);
+      device->memory_pool, device->workspace, group->host_allocator,
+      &device->residency_cache);
 }
 
 iree_status_t loom_serve_device_group_allocate(
@@ -263,20 +280,41 @@ iree_status_t loom_serve_device_group_free(loom_serve_device_group_t* group) {
     return iree_ok_status();
   }
   for (iree_host_size_t i = 0; i < group->device_count; ++i) {
-    if (group->devices[i].memory_pool &&
-        loom_serve_memory_pool_statistics(group->devices[i].memory_pool)
-            .reserved_bytes) {
+    const loom_serve_device_t* device = &group->devices[i];
+    const uint64_t workspace_reserved =
+        device->workspace_pool
+            ? loom_serve_virtual_pool_memory_usage(device->workspace_pool)
+                  .reserved_bytes
+            : 0;
+    if (device->memory_pool &&
+        loom_serve_memory_pool_statistics(device->memory_pool).reserved_bytes !=
+            workspace_reserved) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
           "serving device %" PRIhsz " still owns model reservations", i);
     }
   }
   iree_status_t status = iree_hal_end_profiling_from_flags(group->profiling);
-  for (iree_host_size_t i = 0; i < group->device_count; ++i) {
+  group->profiling = NULL;
+  iree_status_t cleanup_status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < group->device_count && iree_status_is_ok(cleanup_status); ++i) {
     loom_serve_device_t* device = &group->devices[i];
     loom_serve_residency_cache_free(device->residency_cache);
-    loom_serve_memory_pool_free(device->memory_pool);
+    device->residency_cache = NULL;
     loom_serve_workspace_release(device->workspace);
+    device->workspace = NULL;
+    cleanup_status = loom_serve_virtual_pool_free(device->workspace_pool);
+    if (iree_status_is_ok(cleanup_status)) {
+      device->workspace_pool = NULL;
+    }
+  }
+  if (!iree_status_is_ok(cleanup_status)) {
+    return iree_status_join(status, cleanup_status);
+  }
+  for (iree_host_size_t i = 0; i < group->device_count; ++i) {
+    loom_serve_device_t* device = &group->devices[i];
+    loom_serve_memory_pool_free(device->memory_pool);
     iree_hal_pool_release(device->storage_pool);
     loom_serve_execution_queues_release(device->execution_queues);
   }
@@ -315,18 +353,19 @@ iree_status_t loom_serve_device_trim(loom_serve_device_t* device,
                                      uint64_t target_bytes) {
   const loom_serve_device_memory_statistics_t memory =
       loom_serve_device_memory_statistics(device);
-  if (memory.workspace.bytes_committed <= target_bytes &&
-      memory.retained.committed_bytes <=
-          target_bytes - memory.workspace.bytes_committed) {
+  const uint64_t committed = device->memory_pool
+                                 ? memory.retained.committed_bytes
+                                 : memory.workspace.bytes_committed;
+  if (committed <= target_bytes) {
     return iree_ok_status();
   }
-  const uint64_t workspace_bytes = loom_serve_workspace_trim(device->workspace);
-  const uint64_t retained_target =
-      workspace_bytes < target_bytes ? target_bytes - workspace_bytes : 0;
-  IREE_RETURN_IF_ERROR(loom_serve_residency_cache_trim(device->residency_cache,
-                                                       retained_target));
+  iree_device_size_t workspace_bytes = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_workspace_trim(device->workspace, &workspace_bytes));
   if (device->memory_pool) {
-    loom_serve_memory_pool_trim(device->memory_pool, retained_target);
+    IREE_RETURN_IF_ERROR(
+        loom_serve_residency_cache_trim(device->residency_cache, target_bytes));
+    loom_serve_memory_pool_trim(device->memory_pool, target_bytes);
   }
   return iree_ok_status();
 }

@@ -92,7 +92,7 @@ func.def public @absolute(%value: bf16) -> (bf16) {
 // INPUT: cxx std=c23
 __bf16 twice(__bf16 value) { return value * (__bf16)2.0f; }
 // ----
-func.def public @twice(%value: bf16) -> (bf16) {
+func.def public source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<floating, byte_length = 2, byte_alignment = 2, component_count = 1, format = bf16>]>) @twice(%value: bf16) -> (bf16) {
   %2 = scalar.constant 2.0 : f32
   %3 = scalar.fptrunc %2 : f32 to bf16
   %4 = scalar.mulf %value, %3 : bf16

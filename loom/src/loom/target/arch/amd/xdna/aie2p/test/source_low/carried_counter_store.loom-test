@@ -1,12 +1,11 @@
-// RUN: with-checks compile-report target=amd.xdna.aie2p:core source-to-low,low-dce
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 func.def @carried_counter_store(%output: buffer) {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
   %end = index.constant 4 : index
-  %base = index.constant 0 : offset
+  %row_stride = index.constant 4 : offset
   %aligned_output = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %output_view = buffer.view %aligned_output[%base] : buffer -> view<4xi32>
   cfg.br ^preheader
 ^preheader:
   cfg.br ^header(%begin: index)
@@ -14,8 +13,10 @@ func.def @carried_counter_store(%output: buffer) {
   %more = index.cmp slt, %position, %end : index
   cfg.cond_br %more, ^body, ^exit
 ^body:
+  %row_byte_offset = index.scale %position, %row_stride : index, offset -> offset
+  %row = buffer.view %aligned_output[%row_byte_offset] : buffer -> view<1xi32>
   %value = index.cast %position : index to i32
-  view.store %value, %output_view[%position] : i32, view<4xi32>
+  view.store %value, %row[0] : i32, view<1xi32>
   %next = index.add %position, %step : index
   cfg.br ^header(%next: index)
 ^exit:
@@ -23,4 +24,22 @@ func.def @carried_counter_store(%output: buffer) {
 }
 
 // ----
-CHECK: COMPILE-REPORT: source_low[*] * source_op=view.store * execution_count=4
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @carried_counter_store() asm {
+  %aligned_output = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %15 = mov.i32 0
+  %begin = mov.short 0
+  %step = mov.short 1
+  %end = mov.short 4
+  low.br ^header(%begin: reg<aie2p.er>, %15: reg<aie2p.er>)
+^header(%value: reg<aie2p.er>, %row_byte_offset: reg<aie2p.er>):
+  %more = lt %value, %end
+  low.cond_br %more, ^body, ^exit : reg<aie2p.er>
+^body:
+  %20 = mov.address-index %row_byte_offset
+  st.i32.index %value, %aligned_output, %20
+  %next = add.nc %value, %step
+  %22 = add.nc.immediate %row_byte_offset, 4
+  low.br ^header(%next: reg<aie2p.er>, %22: reg<aie2p.er>)
+^exit:
+  return
+}

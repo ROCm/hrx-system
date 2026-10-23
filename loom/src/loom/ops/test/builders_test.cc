@@ -193,6 +193,63 @@ TEST_F(BuilderStorageTest, SeparateResultTypesFollowDeclaredFields) {
       loom_type_equal(loom_module_value_type(module_, second), second_type));
 }
 
+TEST_F(BuilderStorageTest, FinalizationPublishesReferencesBeforeNotification) {
+  loom_string_id_t name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder_, IREE_SV("bound"), &name));
+  loom_predicate_t predicate = {LOOM_PREDICATE_LT,
+                                2,
+                                {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST},
+                                {},
+                                {input_, 64}};
+  const loom_named_attr_t attributes[] = {
+      {name, {}, loom_attr_predicate_list(&predicate, 1)}};
+  loom_value_id_t result = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_reserve_values(&builder_, 1, &result));
+  struct Notification {
+    // Builder whose completed publication the callback observes.
+    loom_builder_t* builder;
+    // Operation reported by the callback, borrowed from the module.
+    loom_op_t* op;
+    // Number of finalization notifications received.
+    int count;
+  } notification = {&builder_, nullptr, 0};
+  builder_.on_op_finalized = {
+      [](void* user_data, loom_op_t* op) -> iree_status_t {
+        auto& notification = *static_cast<Notification*>(user_data);
+        loom_module_t* module = notification.builder->module;
+        notification.op = op;
+        ++notification.count;
+        EXPECT_EQ(notification.builder->reserved_value_count, 0u);
+        EXPECT_EQ(notification.builder->reserved_value_ids, nullptr);
+        EXPECT_EQ(op->parent_block, notification.builder->ip.block);
+        const loom_value_id_t input = loom_test_attrs_input(op);
+        const loom_value_t* value = loom_module_value(module, input);
+        EXPECT_EQ(value->use_count, 1u);
+        EXPECT_EQ(loom_use_user_op(loom_value_uses(value)[0]), op);
+        EXPECT_EQ(loom_op_operand_use_indices(op)[0], 0u);
+        EXPECT_TRUE(loom_value_has_attribute_uses(value));
+        EXPECT_TRUE(loom_module_value_has_type_uses(module, input));
+        const loom_value_t* result =
+            loom_module_value(module, loom_test_attrs_result(op));
+        EXPECT_EQ(loom_value_def_op(result), op);
+        EXPECT_EQ(op->traits, loom_op_vtable(module, op)->traits);
+        EXPECT_NE(op->flags & LOOM_OP_FLAG_SUMMARIES_COUNTED, 0u);
+        return iree_ok_status();
+      },
+      &notification};
+
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_attrs_build(&builder_, LOOM_TEST_ATTRS_BUILD_FLAG_HAS_DICT,
+                            input_, loom_make_named_attr_slice(attributes, 1),
+                            loom_type_group_1d(loom_dim_pack_dynamic(input_)),
+                            LOOM_LOCATION_UNKNOWN, &op));
+  EXPECT_EQ(loom_test_attrs_result(op), result);
+  EXPECT_EQ(notification.count, 1);
+  EXPECT_EQ(notification.op, op);
+}
+
 TEST_F(BuilderStorageTest, ProjectedBlockArgumentGroupsShareOneEntrySignature) {
   const loom_type_t actual_types[] = {
       loom_type_scalar(LOOM_SCALAR_TYPE_F32),

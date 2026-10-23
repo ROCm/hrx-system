@@ -9,7 +9,9 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
+#include <bit>
 #include <cerrno>
 #include <climits>
 #include <cstdint>
@@ -815,8 +817,25 @@ TEST_F(GpuHostNumaMemoryTest, CopiesUsingPagesOnEveryAllowedHostNode) {
                     nullptr, MPOL_F_MEMS_ALLOWED),
             0)
       << std::strerror(errno);
+  uint64_t allowed_node_count = 0;
+  for (unsigned long word : allowed) {
+    allowed_node_count += std::popcount(word);
+  }
+  constexpr std::array<amdf_memory_flags_t, 2> kMemoryFlags = {
+      0, AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE};
+  constexpr uint32_t kEpochCount = 2;
+  // Each epoch has two copies, optional acquire/release, and a fence. The
+  // finite stream appends across all nodes and leaves one ring word free.
+  constexpr size_t kMaximumEpochWords = 2 * 7 + 2 * 5 + 4;
+  const uint64_t command_word_capacity = allowed_node_count *
+                                             kMemoryFlags.size() * kEpochCount *
+                                             kMaximumEpochWords +
+                                         1;
+  const uint64_t command_byte_length =
+      std::bit_ceil(std::max(family_.minimum_ring_byte_length,
+                             command_word_capacity * sizeof(uint32_t)));
   GpuCommandQueue* queue = nullptr;
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue, command_byte_length));
   SdmaCommandWriter commands(queue->words().data(), family_.format_features);
   uint32_t tested_nodes = 0;
   for (uint32_t node = 0; node < node_count; ++node) {
@@ -824,8 +843,7 @@ TEST_F(GpuHostNumaMemoryTest, CopiesUsingPagesOnEveryAllowedHostNode) {
       continue;
     }
     ++tested_nodes;
-    for (amdf_memory_flags_t flags : std::array<amdf_memory_flags_t, 2>{
-             0, AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE}) {
+    for (amdf_memory_flags_t flags : kMemoryFlags) {
       SCOPED_TRACE(::testing::Message()
                    << "node=" << node << " flags=" << flags);
       const amdf_memory_create_info_t create_info = {
@@ -904,12 +922,13 @@ TEST_F(GpuHostNumaMemoryTest, CopiesUsingPagesOnEveryAllowedHostNode) {
       const uint64_t completion =
           reinterpret_cast<uintptr_t>(bytes + page_size * 3);
       GpuStoreRelease<uint32_t>(completion, 0);
-      for (uint32_t epoch = 1; epoch <= 2; ++epoch) {
+      for (uint32_t epoch = 1; epoch <= kEpochCount; ++epoch) {
         for (long i = 0; i < page_size; ++i) {
           bytes[i] = (i * 17 + epoch + node) & 0xFF;
         }
         std::memset(bytes + page_size, 0xA5, page_size * 2);
-        ASSERT_GE(queue->words().size(), commands.word_count() + 32);
+        ASSERT_GT(queue->words().size(),
+                  commands.word_count() + kMaximumEpochWords);
         if ((cache_operations & AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM) !=
             0) {
           commands.AcquireFromSystem();
@@ -947,6 +966,7 @@ TEST_F(GpuHostNumaMemoryTest, CopiesUsingPagesOnEveryAllowedHostNode) {
   }
   EXPECT_GT(tested_nodes, 0u);
   RecordProperty("numa_nodes", tested_nodes);
+  RecordProperty("command_bytes", commands.word_count() * sizeof(uint32_t));
 }
 
 }  // namespace

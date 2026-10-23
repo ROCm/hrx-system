@@ -157,6 +157,9 @@ TEST_P(WeightPackingTest,
 
 TEST_P(WeightPackingTest,
        InvocationWorkingSetAdmitsStateAndParametersTogether) {
+  // One weight slab, one state slab, and captured input lanes fit together.
+  // Adding a second state slab leaves no space for those activation lanes.
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking(3 * kSlabBytes));
   WriteFactors(path_.path(), 0, 8);
   WriteFactors(adapter_path_.path(), 100, 4);
   IREE_ASSERT_OK(Compile(0, "packed_target"));
@@ -173,8 +176,9 @@ TEST_P(WeightPackingTest,
         pool_, loom_serve_device_weight_geometry(device_owner_), 2 * kSlabBytes,
         256, &state_statistics_, &state_));
     range = {state_, 0, 2 * kSlabBytes};
-    // Either resource fits alone. Their union does not: neither backing nor
-    // parameter I/O may start, and the caller retains no partial pin.
+    // Either resource fits alone. Their union plus activation staging does
+    // not: neither backing nor parameter I/O may start, and the caller retains
+    // no partial pin.
     IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
         residencies_[0], 1, &range, nullptr, 0, &admission, &operation));
     EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
@@ -294,6 +298,9 @@ TEST_P(WeightPackingTest,
     EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_LOADING);
     IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, 0));
   }
+  // The outer physical owner services cold staging while joining the accepted
+  // activation; its completion callback still owns the cancellation boundary.
+  IREE_ASSERT_OK(loom_serve_residency_await(residencies_[0]));
   wake.Await();
   IREE_ASSERT_OK(loom_serve_activation_advance(
       activation, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &phase));
@@ -335,7 +342,7 @@ TEST_P(WeightPackingTest,
                         loom_serve_weights_await(plans_[0]));
   iree_hal_buffer_release(buffers_[0][0]);
   buffers_[0][0] = nullptr;
-  loom_serve_weights_await_retirement(plans_[0]);
+  IREE_ASSERT_OK(loom_serve_weights_await_retirement(plans_[0]));
   EXPECT_TRUE(loom_serve_weights_is_retired(plans_[0]));
   const auto before = loom_serve_weights_activity(plans_[0]);
   IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0]));

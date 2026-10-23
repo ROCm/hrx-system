@@ -270,9 +270,11 @@ def _byte_offset_materializer() -> SourceMemoryByteOffsetMaterializer:
         add=_descriptor("amd.xdna.aie2p.add.no-carry.i32"),
         multiply=_descriptor("amd.xdna.aie2p.mul.i32"),
         shift_left=_descriptor("amd.xdna.aie2p.lshl.i32"),
+        increment=_descriptor("amd.xdna.aie2p.add.no-carry.i32.immediate"),
         multiply_add=_descriptor("amd.xdna.aie2p.madd.i32"),
         static_bias=_descriptor("amd.xdna.aie2p.materialize.static-byte-offset.i32"),
         constant_immediate="i",
+        increment_immediate="imm",
         integer_conversions=tuple(
             SourceMemoryIntegerConversion(
                 source_type, _descriptor(f"amd.xdna.aie2p.extend.signed.{source_type}")

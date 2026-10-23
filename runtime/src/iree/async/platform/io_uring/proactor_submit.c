@@ -1344,7 +1344,20 @@ iree_status_t iree_async_proactor_io_uring_submit(
 
     // Check SQ capacity.
     uint32_t available = iree_io_uring_ring_sq_space_left(&proactor->ring);
-    if (available < sqes_needed) {
+    iree_status_t admission_status = iree_ok_status();
+    if (available < sqes_needed && sqes_needed <= proactor->ring.sq_entries &&
+        iree_atomic_load(&proactor->polling.owner_tid,
+                         iree_memory_order_relaxed) ==
+            (int32_t)syscall(__NR_gettid)) {
+      // A callback cannot poll recursively to admit its next operation. Submit
+      // prepared SQEs without waiting for completions and retain the SQ lock
+      // until this batch reserves the freed slots. External producers cannot
+      // enter a SINGLE_ISSUER ring and retain their rejection contract.
+      admission_status =
+          iree_io_uring_ring_submit_pending_locked(&proactor->ring);
+      available = iree_io_uring_ring_sq_space_left(&proactor->ring);
+    }
+    if (!iree_status_is_ok(admission_status) || available < sqes_needed) {
       iree_io_uring_ring_sq_unlock(&proactor->ring);
       iree_async_proactor_io_uring_rollback_reservations(operations);
       while (software_operations) {
@@ -1352,10 +1365,13 @@ iree_status_t iree_async_proactor_io_uring_submit(
         software_operations = operation->next;
         operation->next = NULL;
       }
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "SQ has %u slots but %zu SQEs needed for %zu "
-                              "operations",
-                              available, sqes_needed, operations.count);
+      if (iree_status_is_ok(admission_status)) {
+        admission_status = iree_make_status(
+            IREE_STATUS_RESOURCE_EXHAUSTED,
+            "SQ has %u slots but %zu SQEs needed for %zu operations", available,
+            sqes_needed, operations.count);
+      }
+      return admission_status;
     }
 
     // The complete list is now accepted. The SQ lock keeps the capacity

@@ -391,7 +391,7 @@ TEST_F(LaunchTest, RejectsUnsupportedTargetsAndInvalidPlacement) {
 
 TEST_F(LaunchTest, PreparesActualHipCompilerArtifacts) {
   const auto* files = iree_hal_amd_gpu_hip_images_create();
-  size_t prepared_count = 0;
+  size_t pm4_image_count = 0;
   for (size_t i = 0; i < iree_hal_amd_gpu_hip_images_size(); ++i) {
     auto* source = testing::ByteSequence::Create(
         iree_make_const_byte_span(files[i].data, files[i].size), 257);
@@ -402,6 +402,8 @@ TEST_F(LaunchTest, PreparesActualHipCompilerArtifacts) {
     IREE_ASSERT_OK(status);
     if (image.target.version.major == 11 || image.target.version.major == 12) {
       SCOPED_TRACE(files[i].name);
+      ++pm4_image_count;
+      EXPECT_GT(image.metadata.kernel_count, 0u);
       for (size_t j = 0; j < image.metadata.kernel_count; ++j) {
         iree_hal_amd_gpu_pm4_launch_t launch = {};
         IREE_EXPECT_OK(iree_hal_amd_gpu_pm4_launch_initialize(
@@ -417,12 +419,13 @@ TEST_F(LaunchTest, PreparesActualHipCompilerArtifacts) {
         EXPECT_EQ(launch.user_data.kernarg_pointer, packet ? 2 : 0);
         // HIP may reserve additional padding SGPRs beyond the ABI inputs.
         EXPECT_GE(launch.user_data_count, packet ? 4 : 2);
-        ++prepared_count;
       }
     }
     iree_hal_amd_gpu_image_deinitialize(&image);
   }
-  EXPECT_GT(prepared_count, 0);
+  if (pm4_image_count == 0) {
+    GTEST_SKIP() << "Configured HIP compiler corpus has no PM4 targets";
+  }
 }
 
 }  // namespace

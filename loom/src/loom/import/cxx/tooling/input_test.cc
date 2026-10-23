@@ -17,6 +17,8 @@
 #include "loom/error/source.h"
 #include "loom/format/location.h"
 #include "loom/import/cxx/import.h"
+#include "loom/import/cxx/tooling/loomc_input.h"
+#include "loom/import/cxx/tooling/options.h"
 #include "loom/import/cxx/tooling/source_capture_test_data.h"
 #include "loom/ops/func/location.h"
 #include "loom/ops/func/location_capture.h"
@@ -28,6 +30,8 @@
 #include "loom/tools/loom-check/test_util.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
+#include "loomc/interop.h"
+#include "loomc/iree.h"
 
 namespace {
 
@@ -54,7 +58,7 @@ iree_status_t RegisterContext(void*, loom_context_t* context) {
   return loom_op_registry_register_all_dialects(context);
 }
 
-const loom_input_provider_t* const kInputs[] = {&loom_cxx_input_provider};
+const loom_input_format_t* const kInputFormats[] = {&loom_cxx_input_format};
 
 class InputTest : public ::testing::Test {
  protected:
@@ -65,17 +69,22 @@ class InputTest : public ::testing::Test {
     IREE_ASSERT_OK(RegisterContext(nullptr, &context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     target_provider_set_ = loom_target_provider_set_make(nullptr, 0);
-    IREE_ASSERT_OK(loom_target_environment_initialize(&target_provider_set_,
-                                                      &target_environment_));
-    environment_.input_providers = {kInputs, IREE_ARRAYSIZE(kInputs)};
-    environment_.register_context.fn = RegisterContext;
-    environment_.target_environment = &target_environment_;
+    IREE_ASSERT_OK(iree_status_from_loomc(
+        loomc_target_environment_create_from_provider_set(
+            &target_provider_set_, loomc_allocator_system(),
+            &compile_session_.target_environment)));
+    compile_session_.provider = &compile_provider_;
+    compile_session_.host_allocator = iree_allocator_system();
+    environment_.input_formats = {kInputFormats, IREE_ARRAYSIZE(kInputFormats)};
+    environment_.target_environment = loomc_target_environment_get_interop_view(
+        compile_session_.target_environment);
+    environment_.compile_session = &compile_session_;
   }
 
   void TearDown() override {
     loom_input_module_deinitialize(&input_);
     loom_context_deinitialize(&context_);
-    loom_target_environment_deinitialize(&target_environment_);
+    loom_check_compile_session_deinitialize(&compile_session_);
     iree_arena_block_pool_deinitialize(&pool_);
   }
 
@@ -113,8 +122,22 @@ class InputTest : public ::testing::Test {
   loom_input_module_t input_ = {};
   // Empty target contribution set used by target-neutral input checks.
   loom_target_provider_set_t target_provider_set_ = {};
-  // Composed target environment consumed by the generic check runner.
-  loom_target_environment_t target_environment_ = {};
+  // Public admission of C++ cases by the generic check runner.
+  const loom_check_compile_provider_t compile_provider_ = {
+      .import =
+          [](void*, iree_string_view_t, iree_string_view_t input_options,
+             const loom_tooling_source_path_options_t* source_paths,
+             loomc_context_t* context, loomc_workspace_t* workspace,
+             const loomc_source_t* source, iree_arena_block_pool_t* block_pool,
+             iree_allocator_t allocator, loomc_module_t** out_module,
+             loomc_result_t** out_result) {
+            return loom_cxx_input_import_loomc(
+                context, workspace, source, input_options, source_paths,
+                block_pool, allocator, out_module, out_result);
+          },
+  };
+  // Context and workspace retained across check cases.
+  loom_check_compile_session_t compile_session_ = {};
   // Generic check runner with the C++ input contribution.
   loom_check_environment_t environment_ = {};
 };
@@ -372,14 +395,14 @@ TEST_F(InputTest, UpdatePreservesInputAndIsIdempotent) {
   loom_check_process_options_t options = {.mode = LOOM_CHECK_PROCESS_UPDATE};
   iree_host_size_t passed = 0, failed = 0, skipped = 0;
   IREE_ASSERT_OK(loom_check_read_and_process(
-      path.path_view(), &options, &environment_, &context_, &pool_,
+      path.path_view(), &options, &environment_, &pool_,
       iree_allocator_system(), &passed, &failed, &skipped));
   const std::string updated = Read(path.path());
   EXPECT_EQ(updated.substr(0, source.size()), source);
   EXPECT_NE(updated.find("// ----\nfunc.def public @entry"), std::string::npos);
   passed = failed = skipped = 0;
   IREE_ASSERT_OK(loom_check_read_and_process(
-      path.path_view(), &options, &environment_, &context_, &pool_,
+      path.path_view(), &options, &environment_, &pool_,
       iree_allocator_system(), &passed, &failed, &skipped));
   EXPECT_EQ(passed, 1u);
   EXPECT_EQ(failed, 0u);

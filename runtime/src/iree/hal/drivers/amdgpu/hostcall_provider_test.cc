@@ -204,7 +204,7 @@ class LiveDevice {
     iree_hal_amdgpu_logical_device_options_t options;
     iree_hal_amdgpu_logical_device_options_initialize(&options);
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_create(
-        IREE_SV("amdgpu"), &options, libhsa, topology, create_params,
+        IREE_SV("legacy-amdgpu"), &options, libhsa, topology, create_params,
         host_allocator, &device_));
     return iree_hal_device_group_create_from_device(
         device_, frontier_tracker, host_allocator, &device_group_);
@@ -315,7 +315,7 @@ TEST_F(HostcallProviderTest, InvalidProviderFailsBeforeRequirementQuery) {
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   iree_hal_device_t* device = nullptr;
   iree_status_t status = iree_hal_amdgpu_logical_device_create(
-      IREE_SV("amdgpu"), &options, &libhsa_, &topology_, &create_params,
+      IREE_SV("legacy-amdgpu"), &options, &libhsa_, &topology_, &create_params,
       host_allocator_, &device);
   EXPECT_TRUE(iree_status_is_invalid_argument(status));
   iree_status_free(status);
@@ -339,7 +339,7 @@ TEST_F(HostcallProviderTest, DuplicateProviderFailsBeforeRequirementQuery) {
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   iree_hal_device_t* device = nullptr;
   iree_status_t status = iree_hal_amdgpu_logical_device_create(
-      IREE_SV("amdgpu"), &options, &libhsa_, &topology_, &create_params,
+      IREE_SV("legacy-amdgpu"), &options, &libhsa_, &topology_, &create_params,
       host_allocator_, &device);
   EXPECT_TRUE(iree_status_is_invalid_argument(status));
   iree_status_free(status);
@@ -361,7 +361,7 @@ TEST_F(HostcallProviderTest, InitializationFailureUnwindsProviderContext) {
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   iree_hal_device_t* device = nullptr;
   iree_status_t status = iree_hal_amdgpu_logical_device_create(
-      IREE_SV("amdgpu"), &options, &libhsa_, &topology_, &create_params,
+      IREE_SV("legacy-amdgpu"), &options, &libhsa_, &topology_, &create_params,
       host_allocator_, &device);
   EXPECT_TRUE(iree_status_is_data_loss(status));
   iree_status_free(status);
@@ -385,7 +385,7 @@ TEST_F(HostcallProviderTest, UnsupportedNotificationFailsBeforeInitialize) {
   iree_hal_amdgpu_logical_device_options_initialize(&options);
   iree_hal_device_t* device = nullptr;
   iree_status_t status = iree_hal_amdgpu_logical_device_create(
-      IREE_SV("amdgpu"), &options, &libhsa_, &topology_, &create_params,
+      IREE_SV("legacy-amdgpu"), &options, &libhsa_, &topology_, &create_params,
       host_allocator_, &device);
   EXPECT_TRUE(iree_status_is_unimplemented(status));
   iree_status_free(status);

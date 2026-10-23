@@ -262,3 +262,43 @@ low.kernel.def target<amdgpu.gfx12.generic.core>(@target) abi_layout({constant_c
   global_store_b32_saddr %21, %result, %output_view
   return
 }
+
+// ====
+
+amdgpu.target<gfx12-generic> @target {subgroup_size = 64}
+
+kernel.def target(@target) @subgroup_uniform_votes_wave64_gfx12() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch() {
+  %tid = kernel.workitem.id<x> : index
+  %lane = index.cast %tid : index to i32
+  %lower_bound = scalar.constant 5 : i32
+  %upper_bound = scalar.constant 10 : i32
+  %above_lower_bound = scalar.cmpi uge, %lane, %lower_bound : i32
+  %below_upper_bound = scalar.cmpi ult, %lane, %upper_bound : i32
+  %active = scalar.andi %above_lower_bound, %below_upper_bound : i1
+  cfg.cond_br %active, ^active, ^inactive
+^active:
+  %predicate = scalar.cmpi uge, %lane, %lower_bound : i32
+  // Convergent votes remain live; the exact output proves they need no mask ops.
+  %any = kernel.subgroup.vote.any %predicate : i1
+  %all = kernel.subgroup.vote.all %predicate : i1
+  cfg.br ^exit
+^inactive:
+  cfg.br ^exit
+^exit:
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx12.generic.core>(@target) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_uniform_votes_wave64_gfx12() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %above_lower_bound = v_cmp_ge_u32_src1_inline %lane {rhs = 5}
+  %below_upper_bound = v_cmp_lt_u32_src1_inline %lane {rhs = 10}
+  %active = s_and_b64 %above_lower_bound, %below_upper_bound
+  %16, %17 = s_and_saveexec_b64 %active
+  s_mov_b64_exec %16
+  return
+}

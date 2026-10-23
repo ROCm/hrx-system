@@ -54,7 +54,6 @@ loom_cc_library(
     ::bank_service
     ::occupancy
     iree::base
-    loom::target::arch::amdgpu::provider
     loom::target::emit::native::amdgpu::loom_check
     loom::tools::loom-check::provider
   PUBLIC

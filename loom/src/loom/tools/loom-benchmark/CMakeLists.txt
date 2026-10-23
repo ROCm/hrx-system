@@ -262,7 +262,7 @@ loom_cc_test(
 )
 
 set(_loom_benchmark_platform_copts "")
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD))
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD_GPU))
   list(APPEND _loom_benchmark_platform_copts "-DLOOM_BENCHMARK_HAVE_AMDGPU=1")
 endif()
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
@@ -274,11 +274,11 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
   list(APPEND _loom_benchmark_platform_copts "-DLOOM_BENCHMARK_HAVE_VM=1")
 endif()
-if(LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+if(LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD_XDNA)
   list(APPEND _loom_benchmark_platform_copts "-DLOOM_BENCHMARK_HAVE_XDNA=1")
 endif()
 set(_loom_benchmark_platform_deps "")
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD))
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD_GPU))
   list(APPEND _loom_benchmark_platform_deps loom::binding::c::target::amdgpu::iree_hal)
   list(APPEND _loom_benchmark_platform_deps loom::tooling::target::amdgpu::testbench_requirements)
 endif()
@@ -292,11 +292,10 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
   list(APPEND _loom_benchmark_platform_deps loom::tooling::target::vm::testbench)
 endif()
-if(LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+if(LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD_XDNA)
   list(APPEND _loom_benchmark_platform_deps loom::binding::c::target::amd::xdna::iree_hal)
 endif()
 loomc_cc_binary(
-  RUNTIME_ONLY
   NAME
     loom-benchmark
   SRCS

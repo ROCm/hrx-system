@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_library_group", "loom_generated_cc_library")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_instance_library", "loom_cc_library", "loom_cc_library_group", "loom_generated_cc_library")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -26,7 +26,7 @@ loom_cc_library(
     textual_hdrs = ["ops.inc"],
     visibility = ["//visibility:public"],
     deps = [
-        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:headers",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/spirv/records:record_defs",
     ],
@@ -42,14 +42,14 @@ loom_cc_library_group(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "op_builders",
     srcs = ["builders.c"],
     visibility = ["//visibility:private"],
     deps = [
         ":op_defs",
         "//loom/src/loom/ir:builders",
-        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:builders",
     ],
 )
 
@@ -108,7 +108,7 @@ loom_generated_cc_library(
 
 # Native value typing consumes the same construction API without the target's
 # semantic providers. Other compiler consumers retain the combined ops rule.
-loom_cc_library(
+loom_cc_instance_library(
     name = "type_builders",
     srcs = ["type_builders.c"],
     hdrs = ["type_builders.h"],
@@ -116,7 +116,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ir:builders",
         "//loom/src/loom/target/arch/spirv:isa",
-        "//loom/src/loom/target/arch/spirv:scalar_types",
+        "//loom/src/loom/target/arch/spirv:vocabulary",
         "//runtime/src/iree/base",
     ],
 )

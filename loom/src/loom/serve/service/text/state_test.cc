@@ -32,8 +32,10 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
         .checkpoint_capacity = 2,
     };
     loom_serve_text_state_initialize(&options, host_allocator, &state);
-    const auto application_options =
-        loom_serve_test_application_options_default();
+    auto application_options = loom_serve_test_application_options_default();
+    if (application_options.backing == LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
+      application_options.memory_limit = 64 * 1024 * 1024;
+    }
     loom_serve_test_application_t* application = nullptr;
     IREE_ASSERT_OK(loom_serve_test_application_acquire(
         &application_options, host_allocator, &application));
@@ -94,12 +96,12 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
 
   void TearDown() override {
     loom_serve_text_state_retire(&state, nullptr, nullptr);
-    loom_serve_text_state_await_retirement(&state);
-    IREE_EXPECT_OK(loom_serve_text_state_deinitialize(&state));
     if (execution) {
       IREE_EXPECT_OK(loom_serve_execution_drain(execution));
-      loom_serve_execution_release(execution);
     }
+    loom_serve_text_state_await_retirement(&state);
+    IREE_EXPECT_OK(loom_serve_text_state_deinitialize(&state));
+    loom_serve_execution_release(execution);
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
     iree_vm_environment_free(environment);
   }

@@ -65,6 +65,7 @@ iree_status_t iree_hal_amd_gpu_user_queue_initialize(
       z0,
       iree_hal_amd_fabric_memory_translate_host_fence(
           mapping_info.host_publish_fence, &out_storage->host_publish_fence));
+  out_storage->host_publish_executor = mapping_info.host_publish_executor;
   amdf_user_queue_mapping_info_t device_mapping_info;
   iree_status_t status = iree_ok_status();
   if (out_device_mapping_info) {
@@ -80,6 +81,19 @@ iree_status_t iree_hal_amd_gpu_user_queue_initialize(
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+amdf_status_t iree_hal_amd_gpu_user_queue_flush(
+    const iree_hal_amd_gpu_user_queue_t* storage) {
+  if (storage->host_publish_executor ==
+      AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API) {
+    return storage->context->api->user_queue_mapping_flush(storage->mapping);
+  }
+  const iree_hal_memory_transition_recipe_info_t fence = {
+      .host = {.fence_after = storage->host_publish_fence},
+  };
+  iree_hal_memory_transition_execute_host_direct(&fence, NULL, 1);
+  return AMDF_STATUS_OK;
 }
 
 amdf_status_t iree_hal_amd_gpu_user_queue_deinitialize(

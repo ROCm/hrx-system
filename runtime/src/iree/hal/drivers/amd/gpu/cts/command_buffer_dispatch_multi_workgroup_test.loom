@@ -1,0 +1,12 @@
+kernel.def export("command_buffer_dispatch_multi_workgroup_test") @workgroup_id(%groups_x: index) {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups_x, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%output: buffer) {
+  %group = kernel.workgroup.id<x> : index
+  %count = kernel.workgroup.count<x> : index
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%count]xi32>
+  %value = index.cast %group : index to i32
+  view.store %value, %output_view[%group] : i32, view<[%count]xi32>
+  kernel.return
+}

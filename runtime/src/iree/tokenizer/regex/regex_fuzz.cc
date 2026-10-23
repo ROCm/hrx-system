@@ -126,6 +126,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   }
 
   status = iree_tokenizer_regex_exec_finalize(&dfa, &exec_state, input.size,
+                                              iree_string_view_empty(),
                                               count_callback, NULL);
   iree_status_ignore(status);
 

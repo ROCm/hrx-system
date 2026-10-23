@@ -42,6 +42,7 @@ loom_cc_library(
         "//loom/src/loom/rewrite:materialize",
         "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:cfg_loop_nest",
         "//runtime/src/iree/base",
     ],
 )

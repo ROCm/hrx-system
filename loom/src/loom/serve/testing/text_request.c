@@ -12,14 +12,9 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
-#include "iree/tokenizer/format/huggingface/tokenizer_json.h"
-#include "loom/serve/runtime/program/input.h"
-#include "loom/serve/runtime/program/json.h"
-#include "loom/serve/service/text/chat.h"
+#include "loom/serve/testing/text_policy.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
-#include "loomc/iree.h"
-#include "loomc/target/vm.h"
 
 IREE_FLAG(string, control, "", "Chat control VM program (.loom or .loombc).");
 IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json path.");
@@ -166,68 +161,12 @@ static iree_status_t loom_serve_text_request_check_run(
         "--control, --tokenizer and --request are required; "
         "capacity is [1, 262144]");
   }
-  iree_vm_environment_t* environment = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_vm_environment_allocate(host_allocator, &environment));
-  iree_io_file_contents_t* tokenizer_contents = NULL;
-  iree_status_t status =
-      iree_io_file_contents_read(iree_make_cstring_view(FLAG_tokenizer),
-                                 host_allocator, &tokenizer_contents);
-  iree_tokenizer_t* tokenizer = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_tokenizer_from_huggingface_json(
-        loom_serve_text_request_check_file_text(tokenizer_contents),
-        host_allocator, &tokenizer);
-  }
-  iree_io_file_contents_free(tokenizer_contents);
-  iree_vm_module_t* libraries[3] = {0};
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_input_module_create(environment, tokenizer,
-                                            host_allocator, &libraries[0]);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_json_module_create(environment, host_allocator,
-                                           &libraries[1]);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_text_chat_tools_module_create(
-        environment, host_allocator, &libraries[2]);
-  }
-  const iree_string_view_t roots[] = {
-      IREE_SVL("model_name"),       IREE_SVL("chat_image_limits"),
-      IREE_SVL("chat_begin"),       IREE_SVL("chat_message"),
-      IREE_SVL("chat_end"),         IREE_SVL("render_tool"),
-      IREE_SVL("parse_tools"),      IREE_SVL("prepare_input"),
-      IREE_SVL("output_next"),      IREE_SVL("complete_text"),
-      IREE_SVL("request_defaults"), IREE_SVL("request_options")};
-  loom_serve_program_t* program = NULL;
-  const loom_serve_sources_t sources = {.base_directory = IREE_SV(".")};
-  loomc_target_environment_t* target_environment = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_status_from_loomc(loomc_target_environment_create_vm(
-        loomc_allocator_from_iree(host_allocator), &target_environment));
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_program_allocate(
-        target_environment, environment, &sources,
-        iree_make_cstring_view(FLAG_control), IREE_ARRAYSIZE(roots), roots,
-        iree_vm_module_span_from_array(libraries), &compilation, host_allocator,
-        &program);
-  }
-  loomc_target_environment_release(target_environment);
-  loom_serve_text_chat_policy_t policy = {0};
-  iree_vm_buffer_t* options = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_vm_buffer_clone(
-        IREE_VM_BUFFER_ACCESS_FLAG_READ,
-        iree_make_const_byte_span(FLAG_options, strlen(FLAG_options)), 1,
-        host_allocator, &options);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_text_chat_policy_initialize(environment, program,
-                                                    options, &policy);
-  }
-  iree_vm_buffer_release(options);
+  loom_serve_test_text_policy_t* policy_owner = NULL;
+  iree_status_t status = loom_serve_test_text_policy_allocate(
+      iree_make_cstring_view(FLAG_control),
+      iree_make_cstring_view(FLAG_tokenizer),
+      iree_make_cstring_view(FLAG_options), &compilation, host_allocator,
+      &policy_owner);
   iree_io_file_contents_t* request = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_io_file_contents_read(iree_make_cstring_view(FLAG_request),
@@ -236,8 +175,10 @@ static iree_status_t loom_serve_text_request_check_run(
   loom_serve_text_chat_t chat = {0};
   bool chat_initialized = false;
   if (iree_status_is_ok(status)) {
+    const loom_serve_text_chat_policy_t* policy =
+        loom_serve_test_text_policy_chat(policy_owner);
     status = loom_serve_text_chat_initialize(
-        &policy, policy.name, loom_serve_text_request_check_file_text(request),
+        policy, policy->name, loom_serve_text_request_check_file_text(request),
         1, 128, host_allocator, &chat);
     chat_initialized = iree_status_is_ok(status);
   }
@@ -316,13 +257,7 @@ static iree_status_t loom_serve_text_request_check_run(
     loom_serve_text_chat_deinitialize(&chat);
   }
   iree_io_file_contents_free(request);
-  loom_serve_text_chat_policy_deinitialize(&policy);
-  loom_serve_program_free(program);
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(libraries); ++i) {
-    iree_vm_module_release(libraries[i]);
-  }
-  iree_tokenizer_free(tokenizer);
-  iree_vm_environment_free(environment);
+  loom_serve_test_text_policy_free(policy_owner);
   loom_output_stream_t output;
   loom_output_stream_for_file(stderr, &output);
   status = iree_status_join(

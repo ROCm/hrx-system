@@ -184,7 +184,9 @@ loom_test(
 
 The sources own `check.case` or `check.benchmark` roots; `deps` contribute only
 reachable definitions. Execution and compilation consume the same linked test
-module. The owning test target includes both phases. Each
+module. The owning test target includes both phases, plus lint and format checks
+for its authored `.loom` files. Source checks run once regardless of workload
+or profile count and do not inherit execution profiles' device requirements. Each
 `_execute_<profile>_test` child requires only its execution profile's device,
 while `_compile_gfx942` and `_compile_gfx1151` run the offline compiler on the
 host. Compilation succeeds
@@ -193,7 +195,7 @@ only when final artifacts are produced; it does not execute numerical checks.
 `GPU_HARDWARE_PROFILES` selects native AMDGPU and Vulkan execution independently.
 Use `VM_REFERENCE_PROFILE` from `@hrx//loom/target/vm:execution_profiles.bzl`
 for reference function execution. An empty `execution_profiles` list creates
-only compiler checks; at least one execution or compiler profile is required.
+no execution checks; at least one execution or compiler profile is required.
 Adding profiles creates separate results without importing or linking the
 source closure again. Device availability never gates a sibling compiler check.
 
@@ -227,6 +229,13 @@ case selection, and compiler or execution profiles belong on each consumer.
 The shared module builds independently of device availability, and its runtime
 fixtures follow it into every consumer. `module` is exclusive with source and
 import arguments on `loom_test`.
+
+The corpus owns its lint and format checks in `//corpus:copy_cases_test`.
+Recursive test discovery includes that source suite; consumers such as
+`copy_test` contain only their selected compiler and execution checks. This keeps
+source checks independent of how many target packages consume the module.
+The checks retain the source owner's tags and source-provider constraints.
+Modules with no authored `.loom` inputs do not declare a source-check suite.
 
 ### Workload variants share one source owner
 

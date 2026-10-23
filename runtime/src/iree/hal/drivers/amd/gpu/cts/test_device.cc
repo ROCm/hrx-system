@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <optional>
 
+#include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/device_group.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/queue.h"
@@ -502,7 +503,7 @@ void GpuNativeTest::SetUp() {
       // still require activation to succeed for their advertised queue family.
       if (native_lifetime() == AMDF_NATIVE_LIFETIME_INSTANCE &&
           context_status.code() == iree::StatusCode::kUnimplemented) {
-        GTEST_SKIP() << context_status.ToString();
+        GTEST_SKIP() << iree::hal::cts::FormatSkipStatus(context_status);
       }
       IREE_ASSERT_OK(context_status);
     }
@@ -561,7 +562,7 @@ void GpuNativeTest::Create(
   if (iree_any_bit_set(runtime_features,
                        IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_ASAN) &&
       status.code() == iree::StatusCode::kUnimplemented) {
-    GTEST_SKIP() << status.ToString();
+    GTEST_SKIP() << iree::hal::cts::FormatSkipStatus(status);
   }
   IREE_ASSERT_OK(status);
   IREE_ASSERT_OK(iree_hal_device_group_create_from_device(

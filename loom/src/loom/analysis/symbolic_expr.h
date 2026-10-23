@@ -83,6 +83,10 @@ typedef struct loom_symbolic_term_t {
 enum loom_symbolic_expr_flag_bits_e {
   // The expression's terms exactly model the represented value.
   LOOM_SYMBOLIC_EXPR_FLAG_LINEAR = 1u << 0,
+
+  // Canonical terms do not independently carry all complete-expression facts;
+  // relation_value_id exactly materializes the fact-bearing value.
+  LOOM_SYMBOLIC_EXPR_FLAG_RELATION_VALUE = 1u << 1,
 };
 typedef uint32_t loom_symbolic_expr_flags_t;
 
@@ -102,6 +106,11 @@ typedef struct loom_symbolic_expr_t {
 
   // Bitfield of loom_symbolic_expr_flag_bits_e.
   loom_symbolic_expr_flags_t flags;
+
+  // Equal SSA value retaining facts unavailable from independent canonical
+  // terms in a completed expression. Meaningful only with
+  // LOOM_SYMBOLIC_EXPR_FLAG_RELATION_VALUE.
+  loom_value_id_t relation_value_id;
 
   // Optional producer-owned modular guarantee in addition to the exact terms.
   // This never substitutes for an exact address or integer-order expression.
@@ -222,8 +231,8 @@ typedef struct loom_symbolic_expr_context_t {
     iree_host_size_t capacity;
   } integer_casts;
 
-  // Exact products owned by this context. Only nonlinear multiplications
-  // allocate records; their memo slots retain indices into this array.
+  // Exact products owned by this context. Their memo slots retain indices into
+  // this sparse array without widening every memoized value.
   struct {
     // Arena-owned records; growth preserves previously returned summaries.
     loom_symbolic_product_t* values;
@@ -264,6 +273,12 @@ static inline bool loom_symbolic_expr_is_constant(
     const loom_symbolic_expr_t* expression) {
   return loom_symbolic_expr_is_linear(expression) &&
          expression->term_count == 0;
+}
+
+static inline bool loom_symbolic_expr_has_relation_value(
+    const loom_symbolic_expr_t* expression) {
+  return iree_any_bit_set(expression->flags,
+                          LOOM_SYMBOLIC_EXPR_FLAG_RELATION_VALUE);
 }
 
 // Initializes a symbolic expression context. The caller owns |arena| and may

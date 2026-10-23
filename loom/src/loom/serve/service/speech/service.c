@@ -520,8 +520,7 @@ static void loom_serve_speech_prepared(loom_serve_speech_service_t* service,
   }
   if (iree_status_is_ok(service->status) &&
       admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
-    // An unchanged, successfully consumed frontier needs no new wait. Warm
-    // state-capacity denial must not continually wake its own admission retry.
+    // An unchanged, successfully consumed frontier needs no new wait.
     const bool complete = previous.semaphores[0] == frontier.semaphores[0] &&
                           previous.semaphores[1] == frontier.semaphores[1] &&
                           previous.values[0] == frontier.values[0] &&
@@ -530,18 +529,10 @@ static void loom_serve_speech_prepared(loom_serve_speech_service_t* service,
       service->device.frontier = frontier;
       service->status = loom_serve_speech_wait(service, SPEECH_PHASE_RESERVING);
     } else {
-      const loom_serve_memory_admission_t state_admission =
-          service->generator.complete_admit(service->generator.self,
-                                            row->invocation);
-      if (state_admission == LOOM_SERVE_MEMORY_ADMISSION_DEFERRED) {
-        return;
-      }
-      if (state_admission == LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE) {
-        row->phase = SPEECH_ROW_READY;
-        service->admission = NULL;
-      } else {
-        admission = LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY;
-      }
+      service->generator.complete_admit(service->generator.self,
+                                        row->invocation);
+      row->phase = SPEECH_ROW_READY;
+      service->admission = NULL;
     }
   }
   if (iree_status_is_ok(service->status) &&
@@ -612,12 +603,9 @@ static void loom_serve_speech_collect(loom_serve_speech_service_t* service,
     }
   } else if (phase == SPEECH_PHASE_RESERVING) {
     loom_serve_speech_row_t* row = service->admission;
-    if (service->generator.complete_admit(service->generator.self,
-                                          row->invocation) ==
-        LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE) {
-      row->phase = SPEECH_ROW_READY;
-      service->admission = NULL;
-    }
+    service->generator.complete_admit(service->generator.self, row->invocation);
+    row->phase = SPEECH_ROW_READY;
+    service->admission = NULL;
   } else if (phase == SPEECH_PHASE_GENERATING) {
     ++service->telemetry.counters.batches;
     for (iree_host_size_t i = 0; i < service->batch.count; ++i) {

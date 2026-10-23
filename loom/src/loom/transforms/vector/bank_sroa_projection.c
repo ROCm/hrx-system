@@ -131,6 +131,8 @@ struct loom_vector_bank_sroa_bank_plan_t {
   loom_vector_bank_sroa_blocker_t blocker;
   // Whether an admitted condition/body access selected this bank.
   bool active;
+  // Whether aggregate result consumers need the logical value reconstructed.
+  bool reconstruct_results;
 };
 
 typedef struct loom_vector_bank_sroa_function_state_t {
@@ -603,7 +605,15 @@ static iree_status_t loom_vector_bank_sroa_scan_endpoint(
         }
         continue;
       }
-      endpoint->uses_supported = false;
+      if (endpoint == &bank->endpoints[0] &&
+          bank->domain != LOOM_VECTOR_BANK_SROA_BANK_DOMAIN_HEADER) {
+        // Result consumers can retain their logical vector without making the
+        // recurrence carry it. Opaque body/header uses retain the native bank:
+        // scalar observations alone must not split whole-vector computation.
+        bank->reconstruct_results = true;
+      } else {
+        endpoint->uses_supported = false;
+      }
     }
   }
   return iree_ok_status();
@@ -867,7 +877,9 @@ static iree_status_t loom_vector_bank_sroa_plan_slot(
       .component_types = bank->component_types,
       .component_name_suffixes = bank->component_name_suffixes,
       .component_count = bank->component_count,
-      .destination_mode = LOOM_BOUNDARY_PROJECTION_DESTINATION_ELIMINATE,
+      .destination_mode = bank->reconstruct_results
+                              ? LOOM_BOUNDARY_PROJECTION_DESTINATION_RECONSTRUCT
+                              : LOOM_BOUNDARY_PROJECTION_DESTINATION_ELIMINATE,
       .rule_plan = node->bank,
   };
   *out_claimed = true;
@@ -1042,6 +1054,54 @@ static iree_status_t loom_vector_bank_sroa_materialize_source(
           &plan->rewriter, aggregate_value_id, out_component_values[component],
           source_plan->bank->component_name_suffixes[component]));
     }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vector_bank_sroa_reconstruct(
+    const loom_boundary_projection_rule_t* rule,
+    loom_boundary_projection_plan_t* plan,
+    loom_boundary_projection_function_t* function,
+    loom_boundary_projection_slot_t* slot, loom_type_t logical_type,
+    loom_location_id_t location, loom_value_id_t* out_logical_value) {
+  (void)function;
+  const loom_vector_bank_sroa_bank_plan_t* bank = slot->schema.rule_plan;
+  if (!loom_type_is_vector(bank->payload_type)) {
+    loom_op_t* construction = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_from_elements_build(
+        &plan->rewriter.builder, slot->component_value_ids,
+        slot->schema.component_count, logical_type, location, &construction));
+    *out_logical_value = loom_vector_from_elements_result(construction);
+  } else {
+    loom_op_t* construction = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_broadcast_build(
+        &plan->rewriter.builder, slot->component_value_ids[0], logical_type,
+        location, &construction));
+    loom_value_id_t aggregate = loom_vector_broadcast_result(construction);
+    iree_status_t status = iree_ok_status();
+    // The retained prefix partition covers every lane, including
+    // multidimensional tails. Broadcasting the first payload keeps construction
+    // fully defined; each remaining component replaces its own disjoint prefix
+    // slot.
+    for (uint16_t component = 1;
+         component < bank->component_count && iree_status_is_ok(status);
+         ++component) {
+      int64_t indices[LOOM_TYPE_MAX_RANK] = {0};
+      loom_vector_bank_sroa_component_indices(bank, component, indices);
+      status = loom_vector_insert_build(
+          &plan->rewriter.builder, slot->component_value_ids[component],
+          aggregate, /*indices=*/NULL, /*indices_count=*/0, indices,
+          bank->prefix_rank, logical_type, location, &construction);
+      if (iree_status_is_ok(status)) {
+        aggregate = loom_vector_insert_result(construction);
+      }
+    }
+    IREE_RETURN_IF_ERROR(status);
+    *out_logical_value = aggregate;
+  }
+  if (slot->value_id == bank->endpoints[0].value_id) {
+    loom_boundary_projection_record(plan, rule, 1,
+                                    slot->schema.component_count);
   }
   return iree_ok_status();
 }
@@ -1273,6 +1333,7 @@ static const loom_boundary_projection_rule_t kVectorBankSroaRule = {
         {
             .plan_source = loom_vector_bank_sroa_plan_source,
             .materialize_source = loom_vector_bank_sroa_materialize_source,
+            .reconstruct = loom_vector_bank_sroa_reconstruct,
             .eliminate = loom_vector_bank_sroa_eliminate,
         },
 };

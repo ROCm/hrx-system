@@ -173,7 +173,7 @@ jobs:
 
       - name: Install CMake host tools
         run: |
-          "${HRX_PYTHON}" -m pip install --upgrade cmake==3.31.6 ninja
+          "${HRX_PYTHON}" -m pip install --upgrade cmake==4.4.4 ninja
           echo "${HRX_OUTPUT_DIR}/python/bin" >> "${GITHUB_PATH}"
 
       - name: Check tool versions
@@ -202,8 +202,8 @@ jobs:
         run: |
           "${HRX_PYTHON}" build_tools/ci/ci_core_linux.py test
 
-      - name: Upload failed test results
-        if: ${{ always() && steps.core_tests.outcome == 'failure' }}
+      - name: Upload native test results
+        if: ${{ always() && (steps.core_tests.outcome == 'success' || steps.core_tests.outcome == 'failure') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ctest-results-core-linux-gpu-source-attempt-${{ github.run_attempt }}

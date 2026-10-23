@@ -24,6 +24,8 @@ loom_cc_library(
     srcs = ["workspace.c"],
     hdrs = ["workspace.h"],
     deps = [
+        ":retirement",
+        "//loom/src/loom/serve/runtime/storage:virtual_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/threading",

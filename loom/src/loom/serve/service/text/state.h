@@ -305,6 +305,13 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
     loom_serve_text_state_checkpoint_t* checkpoint, iree_host_size_t extent,
     loom_serve_text_state_reservation_t** out_reservation);
 
+// Whole continuation's unique physical slab footprint, including shared
+// epoch/proposal storage and COW sources through retirement. Captured with the
+// plan, independent of current backing. Fixed backing has no finite budget and
+// returns zero rather than claiming a physical estimate.
+uint64_t loom_serve_text_state_reservation_footprint(
+    const loom_serve_text_state_reservation_t* reservation);
+
 // Commits the prepared union and installs its selected IDs on success. Denial
 // keeps the plan intact for retry. The owner excludes concurrent state edits
 // and joins prior backing work before submission. Native failure is terminal;

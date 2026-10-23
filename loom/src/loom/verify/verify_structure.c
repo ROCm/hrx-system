@@ -382,8 +382,13 @@ static void loom_verify_emit_named_placement_diagnostic(
 
 void loom_verify_op_placement(loom_verify_state_t* state, const loom_op_t* op,
                               const loom_op_vtable_t* vtable) {
-  if (iree_any_bit_set(vtable->traits, LOOM_TRAIT_MODULE_SCOPE) &&
-      op->parent_op) {
+  // Loom has one flat module-local symbol table. Symbol definitions and
+  // non-symbol module records must therefore be direct children of the module
+  // body; accepting a nested definition would make its unqualified name look
+  // module-scoped without giving it module-level presentation or lifetime.
+  if (iree_any_bit_set(vtable->traits,
+                       LOOM_TRAIT_SYMBOL_DEFINE | LOOM_TRAIT_MODULE_SCOPE) &&
+      !loom_op_is_direct_module_child(state->module, op)) {
     loom_diagnostic_param_t params[] = {
         loom_param_string(loom_op_vtable_name(vtable)),
     };

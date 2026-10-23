@@ -160,6 +160,7 @@ iree_py_test(
   ARGS
     "loom.gen.target.contracts.lower_rules_test"
   DEPS
+    loom::py::loom::gen::target::contracts::contract_table_family
     loom::py::loom::gen::target::contracts::lower_rules
     loom::py::loom::dialect::scalar::scalar
     loom::py::loom::dialect::vector::vector

@@ -147,6 +147,29 @@ static const loom_cfg_dominance_region_t* loom_dominance_lookup_cfg_region(
   return NULL;
 }
 
+bool loom_dominance_info_lookup_cfg_region(
+    const loom_dominance_info_t* info, const loom_region_t* region,
+    const loom_cfg_graph_t** out_graph,
+    const loom_cfg_dominance_t** out_dominance) {
+  if (out_graph) {
+    *out_graph = NULL;
+  }
+  if (out_dominance) {
+    *out_dominance = NULL;
+  }
+  if (!info || !region || !out_graph || !out_dominance) {
+    return false;
+  }
+  const loom_cfg_dominance_region_t* cache =
+      loom_dominance_lookup_cfg_region(info, region);
+  if (!cache) {
+    return false;
+  }
+  *out_graph = &cache->graph;
+  *out_dominance = &cache->dominance;
+  return true;
+}
+
 bool loom_dominates_block(const loom_dominance_info_t* info,
                           const loom_block_t* dominator_block,
                           const loom_block_t* dominated_block) {

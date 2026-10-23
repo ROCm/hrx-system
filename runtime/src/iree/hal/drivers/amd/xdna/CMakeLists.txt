@@ -9,7 +9,7 @@
 
 iree_add_all_subdirs()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     barrier
@@ -24,7 +24,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_test(
   NAME
     barrier_test
@@ -37,11 +37,12 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     context
@@ -61,7 +62,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     memory
@@ -80,7 +81,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     command_arena
@@ -97,7 +98,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     semaphore
@@ -114,7 +115,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_test(
   NAME
     semaphore_test
@@ -130,11 +131,12 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     queue_frontier
@@ -151,7 +153,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_test(
   NAME
     queue_frontier_test
@@ -167,11 +169,12 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     queue_storage
@@ -187,7 +190,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     queue_service
@@ -205,7 +208,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     queue_producer_index
@@ -220,7 +223,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_test(
   NAME
     queue_producer_index_test
@@ -233,11 +236,12 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_test(
   NAME
     queue_storage_test
@@ -249,11 +253,12 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     command_buffer
@@ -274,7 +279,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     profile_counters
@@ -296,7 +301,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     profile
@@ -316,7 +321,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     queue
@@ -358,7 +363,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     executable_measurement
@@ -374,7 +379,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_test(
   NAME
     executable_measurement_test
@@ -389,11 +394,12 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     executable
@@ -418,7 +424,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     executable_storage
@@ -435,7 +441,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_test(
   NAME
     executable_storage_test
@@ -449,11 +455,12 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     device
@@ -484,7 +491,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD)
 iree_cc_library(
   NAME
     allocation_tracker
@@ -498,7 +505,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD AND (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD AND (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
 iree_cc_library(
   NAME
     queue_test_util
@@ -529,7 +536,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD AND (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD AND (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
 iree_cc_test(
   NAME
     queue_test
@@ -555,11 +562,12 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
 )
 endif()
 
-if(AMDF_BUILD AND (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD AND (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
 iree_cc_test(
   NAME
     queue_memory_test
@@ -578,11 +586,12 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
 )
 endif()
 
-if(AMDF_BUILD AND (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD AND (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
 iree_cc_test(
   NAME
     command_buffer_test
@@ -598,11 +607,12 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
 )
 endif()
 
-if(AMDF_BUILD AND (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+if(IREE_HAL_DRIVER_AMD_XDNA AND AMDF_BUILD AND (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
 iree_cc_test(
   NAME
     profile_test
@@ -615,6 +625,7 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
+    "iree-build-requirement=runtime.hal.amd_xdna"
     "iree-build-requirement=libamdf"
 )
 endif()

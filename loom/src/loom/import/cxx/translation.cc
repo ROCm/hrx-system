@@ -1095,6 +1095,12 @@ class Translator final : private Initialization::Evaluation {
       returned.source = ast;
       return returned;
     }
+    if (cxx::ast_cast<cxx::SwitchStatementAST>(ast) &&
+        control_->returns(ast) != ExitFlow::None) {
+      fail(ast,
+           "returns inside runtime switches require a structured switch-exit "
+           "projection");
+    }
     if (control_->returns(ast) != ExitFlow::None) {
       fail(ast,
            "returns inside loops require a structured loop-exit projection");
@@ -3180,6 +3186,33 @@ class Translator final : private Initialization::Evaluation {
     loom_value_id_t reaches_latch;
   };
 
+  // Borrowed remaining statements from either the frontend's linked compound
+  // body or a retained contiguous switch clause. Copies advance independently
+  // without rebuilding or rescanning either source representation.
+  struct StatementSequence {
+    explicit StatementSequence(cxx::List<cxx::StatementAST*>* statements)
+        : linked(statements) {}
+    explicit StatementSequence(std::span<cxx::StatementAST* const> statements)
+        : contiguous(statements) {}
+
+    bool empty() const { return !linked && contiguous.empty(); }
+    cxx::StatementAST* take() {
+      if (linked) {
+        auto* statement = linked->value;
+        linked = linked->next;
+        return statement;
+      }
+      auto* statement = contiguous.front();
+      contiguous = contiguous.subspan(1);
+      return statement;
+    }
+
+    // Remaining frontend list, when traversing an ordinary compound body.
+    cxx::List<cxx::StatementAST*>* linked = nullptr;
+    // Remaining retained clause segment, when traversing a switch body.
+    std::span<cxx::StatementAST* const> contiguous;
+  };
+
   ExitFlow iteration_exit_flow(cxx::StatementAST* statement,
                                bool tracks_break) {
     return tracks_break ? control_->iteration_exits(statement)
@@ -3204,10 +3237,11 @@ class Translator final : private Initialization::Evaluation {
   // latch reachability followed by the live bindings it changed. Arm-local
   // declarations stay inside the arm.
   template <typename Then, typename Else>
-  IterationFlow iteration_branch(cxx::AST* owner, loom_value_id_t condition,
-                                 bool tracks_break, Then then_statement,
-                                 Else else_statement) {
-    auto written = live_mutations(owner);
+  IterationFlow iteration_branch(
+      cxx::AST* owner, loom_value_id_t condition, bool tracks_break,
+      std::span<cxx::Symbol* const> mutation_candidates, Then then_statement,
+      Else else_statement) {
+    auto written = live_mutations(mutation_candidates);
     auto outer_values = values_;
     std::vector<const cxx::Type*> sources = {unit_.control()->getBoolType()};
     if (tracks_break) {
@@ -3257,30 +3291,35 @@ class Translator final : private Initialization::Evaluation {
             tracks_break ? loom_op_results(op)[1] : LOOM_VALUE_ID_INVALID};
   }
 
-  IterationFlow iteration_sequence(cxx::CompoundStatementAST* owner,
-                                   cxx::List<cxx::StatementAST*>* remaining,
+  IterationFlow iteration_sequence(cxx::AST* owner, StatementSequence remaining,
                                    uint8_t fastmath, bool tracks_break) {
+    return iteration_sequence(owner, remaining, fastmath, tracks_break,
+                              control_->written(owner));
+  }
+
+  IterationFlow iteration_sequence(cxx::AST* owner, StatementSequence remaining,
+                                   uint8_t fastmath, bool tracks_break,
+                                   std::span<cxx::Symbol* const> mutations) {
     FastMathScope math_scope(lexical_fastmath_flags_, fastmath);
-    while (remaining) {
-      auto* child = remaining->value;
-      remaining = remaining->next;
+    while (!remaining.empty()) {
+      auto* child = remaining.take();
       auto flow = iteration_exit_flow(child, tracks_break);
       if (flow == ExitFlow::None) {
         statement(child);
         continue;
       }
-      return iteration_tail(owner, child, remaining, fastmath, tracks_break);
+      return iteration_tail(owner, child, remaining, fastmath, tracks_break,
+                            mutations);
     }
     return constant_iteration_flow(true, true, tracks_break, owner);
   }
 
   // A tail enters at most one arm directly. When both arms can reach it, join
   // their fallthrough values first and emit the shared source just once.
-  IterationFlow iteration_tail(cxx::CompoundStatementAST* owner,
-                               cxx::StatementAST* ast,
-                               cxx::List<cxx::StatementAST*>* remaining,
-                               uint8_t continuation_fastmath,
-                               bool tracks_break) {
+  IterationFlow iteration_tail(cxx::AST* owner, cxx::StatementAST* ast,
+                               StatementSequence remaining,
+                               uint8_t continuation_fastmath, bool tracks_break,
+                               std::span<cxx::Symbol* const> mutations) {
     FastMathScope math_scope(
         lexical_fastmath_flags_,
         resolve_fastmath(ast ? fastmath_.statement(ast) : std::nullopt));
@@ -3291,9 +3330,9 @@ class Translator final : private Initialization::Evaluation {
         statement(ast);
       }
       return iteration_sequence(owner, remaining, continuation_fastmath,
-                                tracks_break);
+                                tracks_break, mutations);
     }
-    if (flow == ExitFlow::All || !remaining) {
+    if (flow == ExitFlow::All || remaining.empty()) {
       return iteration_statement(ast, tracks_break);
     }
     if (auto* branch = cxx::ast_cast<cxx::IfStatementAST>(ast);
@@ -3303,22 +3342,24 @@ class Translator final : private Initialization::Evaluation {
                        ExitFlow::All)) {
       auto condition = branch_condition(branch);
       return iteration_branch(
-          owner, condition, tracks_break,
+          owner, condition, tracks_break, mutations,
           [&] {
             return iteration_tail(owner, branch->statement, remaining,
-                                  continuation_fastmath, tracks_break);
+                                  continuation_fastmath, tracks_break,
+                                  mutations);
           },
           [&] {
             return iteration_tail(owner, branch->elseStatement, remaining,
-                                  continuation_fastmath, tracks_break);
+                                  continuation_fastmath, tracks_break,
+                                  mutations);
           });
     }
     auto fallthrough = iteration_statement(ast, tracks_break);
     return iteration_branch(
-        owner, fallthrough.reaches_tail, tracks_break,
+        owner, fallthrough.reaches_tail, tracks_break, mutations,
         [&] {
           return iteration_sequence(owner, remaining, continuation_fastmath,
-                                    tracks_break);
+                                    tracks_break, mutations);
         },
         [&] {
           auto stopped =
@@ -3326,6 +3367,270 @@ class Translator final : private Initialization::Evaluation {
           stopped.reaches_latch = fallthrough.reaches_latch;
           return stopped;
         });
+  }
+
+  loom_value_id_t predicate_or(loom_value_id_t left, loom_value_id_t right,
+                               cxx::AST* owner) {
+    loom_op_t* op;
+    check(loom_scalar_ori_build(&builder_, left, right,
+                                loom_type_scalar(LOOM_SCALAR_TYPE_I1),
+                                locations_.get(owner), &op));
+    return result(op);
+  }
+
+  loom_value_id_t predicate_not(loom_value_id_t value, cxx::AST* owner) {
+    auto source = locations_.get(owner);
+    auto one = scalars_.integer(true, LOOM_SCALAR_TYPE_I1, source);
+    loom_op_t* op;
+    check(loom_scalar_xori_build(&builder_, value, one,
+                                 loom_type_scalar(LOOM_SCALAR_TYPE_I1), source,
+                                 &op));
+    return result(op);
+  }
+
+  loom_value_id_t switch_case_match(loom_value_id_t selector, std::int64_t key,
+                                    cxx::AST* owner) {
+    auto source = locations_.get(owner);
+    loom_op_t* constant;
+    check(loom_index_constant_build(&builder_, loom_attr_i64(key),
+                                    loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                                    source, &constant));
+    loom_op_t* comparison;
+    check(loom_index_cmp_build(&builder_, LOOM_INDEX_CMP_PREDICATE_EQ, selector,
+                               loom_index_constant_result(constant), source,
+                               &comparison));
+    return loom_index_cmp_result(comparison);
+  }
+
+  loom_value_id_t switch_selector(cxx::SwitchStatementAST* selection) {
+    if (selection->initializer) {
+      statement(selection->initializer);
+    }
+    initialize_condition(selection->condition);
+    auto selector = expression(selection->condition).ssa();
+    auto input_type = value_type(selector);
+    auto i64_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
+    auto source = locations_.get(selection->condition);
+    loom_op_t* op;
+    // index.cast interprets fixed-width payloads as signed. Preserve the C++
+    // value of a narrower unsigned selector before entering that domain.
+    if (types_.is_unsigned(selection->condition->type) &&
+        !loom_type_equal(input_type, i64_type)) {
+      check(loom_scalar_extui_build(&builder_, selector, input_type, i64_type,
+                                    source, &op));
+      selector = result(op);
+      input_type = i64_type;
+    }
+    check(loom_index_cast_build(&builder_, selector, input_type,
+                                loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                                source, &op));
+    return name(result(op), "switch_selector");
+  }
+
+  IterationFlow switch_clause_flow(const SwitchClause& clause) {
+    return iteration_sequence(
+        clause.labels.front().source, StatementSequence(clause.statements),
+        lexical_fastmath_flags_, /*tracks_break=*/true, clause.writes);
+  }
+
+  // A clause's internal break reaches the switch continuation, while continue
+  // skips that continuation for the enclosing iteration. Normal completion
+  // also reaches the switch continuation.
+  loom_value_id_t switch_reaches_tail(IterationFlow flow, cxx::AST* owner) {
+    return predicate_or(flow.reaches_tail,
+                        predicate_not(flow.reaches_latch, owner), owner);
+  }
+
+  IterationFlow direct_switch(cxx::SwitchStatementAST* selection,
+                              loom_value_id_t selector,
+                              const SwitchLayout& layout,
+                              bool tracks_outer_break) {
+    const bool tracks_continue =
+        control_->continues(selection) != ExitFlow::None;
+    auto written = live_mutations(selection);
+    std::vector<const cxx::Type*> sources;
+    if (tracks_continue) {
+      sources.push_back(unit_.control()->getBoolType());
+    }
+    const size_t control_count = sources.size();
+    sources.reserve(control_count + written.size());
+    for (auto* symbol : written) {
+      sources.push_back(types_.unqualified_value(symbol->type()));
+    }
+    auto signature = bind_signature(types_, sources, selection, &builder_);
+
+    struct Case {
+      std::int64_t key;
+      const SwitchClause* clause;
+    };
+    std::vector<Case> cases;
+    const SwitchClause* fallback = nullptr;
+    for (const auto& clause : layout.clauses) {
+      const auto& label = clause.labels.front();
+      if (label.key) {
+        cases.push_back({*label.key, &clause});
+      } else {
+        fallback = &clause;
+      }
+    }
+    std::ranges::sort(cases, {}, &Case::key);
+    std::vector<std::int64_t> keys;
+    keys.reserve(cases.size());
+    for (const auto& source_case : cases) {
+      keys.push_back(source_case.key);
+    }
+
+    auto source = locations_.get(selection);
+    loom_op_t* op;
+    check(loom_scf_switch_build(&builder_, selector, signature.types.data(),
+                                signature.types.size(), nullptr, 0, keys.data(),
+                                keys.size(), source, &op));
+    auto outer_values = values_;
+    auto yield_clause = [&](const SwitchClause* clause, loom_region_t* region) {
+      auto* clause_source = clause ? clause->labels.front().source : selection;
+      auto saved = loom_builder_enter_region(&builder_, op, region);
+      values_ = outer_values;
+      auto flow = clause ? switch_clause_flow(*clause)
+                         : constant_iteration_flow(
+                               true, true, /*tracks_break=*/true, selection);
+      std::vector<loom_value_id_t> yielded;
+      if (tracks_continue) {
+        yielded.push_back(switch_reaches_tail(flow, clause_source));
+      }
+      auto mutations = current(written);
+      yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+      loom_op_t* yield;
+      check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
+                                 locations_.get(clause_source), &yield));
+      loom_builder_restore(&builder_, saved);
+    };
+
+    auto case_regions = loom_scf_switch_case_regions(op);
+    for (size_t index = 0; index < cases.size(); ++index) {
+      yield_clause(cases[index].clause, case_regions.regions[index]);
+    }
+    yield_clause(fallback, loom_scf_switch_default_region(op));
+    values_ = std::move(outer_values);
+    bind_values(written, loom_op_results(op) + control_count);
+
+    auto reaches_tail =
+        tracks_continue ? loom_op_results(op)[0]
+                        : scalars_.integer(true, LOOM_SCALAR_TYPE_I1, source);
+    auto reaches_latch =
+        tracks_outer_break ? scalars_.integer(true, LOOM_SCALAR_TYPE_I1, source)
+                           : LOOM_VALUE_ID_INVALID;
+    return {reaches_tail, reaches_latch};
+  }
+
+  IterationFlow linear_switch(cxx::SwitchStatementAST* selection,
+                              loom_value_id_t selector,
+                              const SwitchLayout& layout,
+                              bool tracks_outer_break) {
+    auto source = locations_.get(selection);
+    auto false_value = scalars_.integer(false, LOOM_SCALAR_TYPE_I1, source);
+    auto true_value = scalars_.integer(true, LOOM_SCALAR_TYPE_I1, source);
+    std::vector<loom_value_id_t> activations(layout.clauses.size(),
+                                             false_value);
+    auto any_match = false_value;
+    std::optional<size_t> fallback;
+    for (size_t index = 0; index < layout.clauses.size(); ++index) {
+      for (const auto& label : layout.clauses[index].labels) {
+        if (!label.key) {
+          fallback = index;
+          continue;
+        }
+        auto match = switch_case_match(selector, *label.key, label.source);
+        activations[index] =
+            predicate_or(activations[index], match, label.source);
+        any_match = predicate_or(any_match, match, label.source);
+      }
+    }
+    if (fallback) {
+      activations[*fallback] =
+          predicate_or(activations[*fallback],
+                       predicate_not(any_match, selection), selection);
+    }
+
+    const bool tracks_continue =
+        control_->continues(selection) != ExitFlow::None;
+    auto active = false_value;
+    auto reaches_tail = true_value;
+    for (size_t index = 0; index < layout.clauses.size(); ++index) {
+      const auto& clause = layout.clauses[index];
+      auto entered = predicate_or(active, activations[index],
+                                  clause.labels.front().source);
+      auto written = live_mutations(clause.writes);
+      std::vector<const cxx::Type*> sources = {unit_.control()->getBoolType()};
+      if (tracks_continue) {
+        sources.push_back(unit_.control()->getBoolType());
+      }
+      const size_t control_count = sources.size();
+      sources.reserve(control_count + written.size());
+      for (auto* symbol : written) {
+        sources.push_back(types_.unqualified_value(symbol->type()));
+      }
+      auto signature = bind_signature(types_, sources, selection, &builder_);
+      loom_op_t* op;
+      check(loom_scf_if_build(
+          &builder_, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION, entered,
+          signature.types.data(), signature.types.size(), nullptr, 0,
+          locations_.get(clause.labels.front().source), &op));
+      auto outer_values = values_;
+      auto saved =
+          loom_builder_enter_region(&builder_, op, loom_scf_if_then_region(op));
+      auto flow = switch_clause_flow(clause);
+      std::vector<loom_value_id_t> yielded = {flow.reaches_tail};
+      if (tracks_continue) {
+        yielded.push_back(
+            switch_reaches_tail(flow, clause.labels.front().source));
+      }
+      auto mutations = current(written);
+      yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+      loom_op_t* yield;
+      check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
+                                 locations_.get(clause.labels.front().source),
+                                 &yield));
+      loom_builder_restore(&builder_, saved);
+      values_ = outer_values;
+
+      saved =
+          loom_builder_enter_region(&builder_, op, loom_scf_if_else_region(op));
+      yielded = {active};
+      if (tracks_continue) {
+        yielded.push_back(reaches_tail);
+      }
+      mutations = current(written);
+      yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+      check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
+                                 locations_.get(clause.labels.front().source),
+                                 &yield));
+      loom_builder_restore(&builder_, saved);
+      values_ = std::move(outer_values);
+      active = loom_op_results(op)[0];
+      if (tracks_continue) {
+        reaches_tail = loom_op_results(op)[1];
+      }
+      bind_values(written, loom_op_results(op) + control_count);
+    }
+
+    auto reaches_latch =
+        tracks_outer_break ? true_value : LOOM_VALUE_ID_INVALID;
+    return {reaches_tail, reaches_latch};
+  }
+
+  IterationFlow switch_statement(cxx::SwitchStatementAST* selection,
+                                 bool tracks_outer_break) {
+    auto selector = switch_selector(selection);
+    const auto& layout = control_->switch_layout(selection);
+    auto flow =
+        layout.direct
+            ? direct_switch(selection, selector, layout, tracks_outer_break)
+            : linear_switch(selection, selector, layout, tracks_outer_break);
+    if (auto* decision = condition_declaration(selection->condition)) {
+      values_.erase(decision->symbol);
+      locals_.erase(decision->symbol);
+    }
+    return flow;
   }
 
   IterationFlow iteration_statement(cxx::StatementAST* ast, bool tracks_break) {
@@ -3348,15 +3653,25 @@ class Translator final : private Initialization::Evaluation {
       return constant_iteration_flow(false, false, tracks_break, ast);
     }
     if (auto* compound = cxx::ast_cast<cxx::CompoundStatementAST>(ast)) {
-      return iteration_sequence(compound, compound->statementList,
+      return iteration_sequence(compound,
+                                StatementSequence(compound->statementList),
                                 lexical_fastmath_flags_, tracks_break);
     }
+    if (auto* selection = cxx::ast_cast<cxx::SwitchStatementAST>(ast)) {
+      return switch_statement(selection, tracks_break);
+    }
     // The retained path analysis propagates iteration exits through blocks
-    // and conditionals only; nested loops consume their own exits.
+    // and admitted control statements only; nested loops consume their own
+    // exits. A retained construct must still fail through the ordinary source
+    // diagnostic until translation admits it.
     auto* branch = cxx::ast_cast<cxx::IfStatementAST>(ast);
+    if (!branch) {
+      fail(ast, "unsupported statement: " +
+                    std::string(cxx::to_string(ast->kind())));
+    }
     auto condition = branch_condition(branch);
     return iteration_branch(
-        ast, condition, tracks_break,
+        ast, condition, tracks_break, control_->written(ast),
         [&] { return iteration_statement(branch->statement, tracks_break); },
         [&] {
           return branch->elseStatement
@@ -3518,6 +3833,10 @@ class Translator final : private Initialization::Evaluation {
         loom_builder_restore(&builder_, saved);
       }
       bind_values(written, loom_op_results(op));
+      return;
+    }
+    if (auto* selection = cxx::ast_cast<cxx::SwitchStatementAST>(ast)) {
+      switch_statement(selection, /*tracks_outer_break=*/false);
       return;
     }
     if (auto* loop = cxx::ast_cast<cxx::ForStatementAST>(ast)) {
@@ -3912,8 +4231,13 @@ class Translator final : private Initialization::Evaluation {
   }
 
   std::vector<cxx::Symbol*> live_mutations(cxx::AST* owner) {
+    return live_mutations(control_->written(owner));
+  }
+
+  std::vector<cxx::Symbol*> live_mutations(
+      std::span<cxx::Symbol* const> candidates) {
     std::vector<cxx::Symbol*> result;
-    for (auto* symbol : control_->written(owner)) {
+    for (auto* symbol : candidates) {
       if (values_.contains(symbol)) {
         result.push_back(symbol);
       }

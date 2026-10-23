@@ -1,0 +1,87 @@
+// RUN: format bytecode
+
+// Assembly markers survive serialization independently on function and nested
+// regions, without promoting neighboring generic regions to assembly.
+low.func.def target<test.low.core> @assembly(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
+low.func.def target<test.low.core> @generic(%value: reg<test.i32>) -> (reg<test.i32>) {
+  low.return %value : reg<test.i32>
+}
+
+low.func.def target<test.low.core> @select(%condition: reg<test.i32>, %then_value: reg<test.i32>, %else_value: reg<test.i32>) -> (reg<test.i32>) {
+  %result = low.scf.if %condition -> (reg<test.i32>) asm {
+    low.scf.yield %then_value : reg<test.i32>
+  } else {
+    low.scf.yield %else_value : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ----
+low.func.def target<test.low.core> @assembly(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
+low.func.def target<test.low.core> @generic(%value: reg<test.i32>) -> (reg<test.i32>) {
+  low.return %value : reg<test.i32>
+}
+
+low.func.def target<test.low.core> @select(%condition: reg<test.i32>, %then_value: reg<test.i32>, %else_value: reg<test.i32>) -> (reg<test.i32>) {
+  %result = low.scf.if %condition -> (reg<test.i32>) asm {
+    low.scf.yield %then_value : reg<test.i32>
+  } else {
+    low.scf.yield %else_value : reg<test.i32>
+  }
+  low.return %result : reg<test.i32>
+}
+
+// ====
+// RUN: format bytecode
+
+// Vertical grouping survives the bytecode roundtrip at symbol, block, and
+// operation boundaries.
+func.def @first() {
+  func.return
+}
+
+func.def @grouped() {
+
+^entry:
+
+  func.return
+}
+
+// ----
+func.def @first() {
+  func.return
+}
+
+func.def @grouped() {
+
+^entry:
+
+  func.return
+}
+
+// ====
+// RUN: format text
+
+// Text conversion preserves the same distinction as bytecode conversion.
+low.func.def target<test.low.core> @assembly(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
+low.func.def target<test.low.core> @generic(%value: reg<test.i32>) -> (reg<test.i32>) {
+  low.return %value : reg<test.i32>
+}
+
+// ----
+low.func.def target<test.low.core> @assembly(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
+low.func.def target<test.low.core> @generic(%value: reg<test.i32>) -> (reg<test.i32>) {
+  low.return %value : reg<test.i32>
+}

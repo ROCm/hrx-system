@@ -577,6 +577,7 @@ static iree_status_t loom_low_materialize_allocation_run_attempts(
     statistics->spills += (int64_t)result.spill_count;
     statistics->reloads += (int64_t)result.reload_count;
     loom_pass_mark_changed(pass);
+    allocation_options.has_allocation_repair = true;
     ++iteration_count;
   }
 }

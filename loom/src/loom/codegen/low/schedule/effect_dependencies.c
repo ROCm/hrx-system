@@ -23,6 +23,8 @@ typedef struct loom_low_schedule_effect_frontier_t {
   loom_low_schedule_effect_frontier_entry_t* writes;
   // Number of outstanding write entries.
   iree_host_size_t write_count;
+  // First node in the homogeneous WAW chain ending at the latest write.
+  uint32_t write_order_chain_start_node;
   // Last write cutoff used to retire canonical descriptor-only reads in each
   // normalized memory space. Zero cannot precede an earlier node.
   uint32_t read_retirement_nodes[LOOM_LOW_MEMORY_SPACE_WASM_MEMORY + 1];
@@ -123,6 +125,7 @@ static void loom_low_schedule_effect_frontier_reset(
   frontier->ordered_endpoint = loom_low_schedule_dependency_endpoint_none();
   frontier->read_count = 0;
   frontier->write_count = 0;
+  frontier->write_order_chain_start_node = LOOM_LOW_SCHEDULE_NODE_NONE;
   memset(frontier->read_retirement_nodes, 0,
          sizeof(frontier->read_retirement_nodes));
 }
@@ -232,7 +235,48 @@ static iree_status_t loom_low_schedule_effect_frontier_note_write(
     loom_low_schedule_dependency_endpoint_t producer_endpoint) {
   IREE_RETURN_IF_ERROR(loom_low_schedule_effect_frontier_depend_on_ordered(
       state, frontier, node_index, consumer_endpoint));
-  for (iree_host_size_t i = 0; i < frontier->write_count; ++i) {
+
+  // A homogeneous run of writes carries issue order transitively. Keep every
+  // write in the completion frontier for later reads, but omit older WAW edges
+  // already implied by the chain. Descriptor and effect identity make every
+  // edge in the chain use the same target timing relation.
+  uint32_t write_order_chain_start_node = node_index;
+  iree_host_size_t write_scan_count = frontier->write_count;
+  if (write_scan_count != 0) {
+    const loom_low_schedule_effect_frontier_entry_t* latest_write =
+        &frontier->writes[write_scan_count - 1];
+    if (latest_write->node_index != node_index) {
+      --write_scan_count;
+      if (loom_low_memory_access_summaries_may_alias(
+              summary, latest_write->summary,
+              LOOM_LOW_MEMORY_COMPARISON_SAME_EVALUATION)) {
+        IREE_RETURN_IF_ERROR(loom_low_schedule_add_dependency(
+            state, latest_write->node_index, node_index,
+            LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, LOOM_LOW_ID_NONE,
+            loom_low_schedule_effect_frontier_entry_endpoint(latest_write),
+            consumer_endpoint));
+        const loom_low_schedule_node_t* latest_node =
+            &state->nodes[latest_write->node_index];
+        const loom_low_schedule_node_t* current_node =
+            &state->nodes[node_index];
+        if (latest_node->descriptor != NULL &&
+            latest_node->descriptor == current_node->descriptor &&
+            latest_node->schedule_class == current_node->schedule_class &&
+            latest_write->effect_ordinal ==
+                producer_endpoint.attachment_index &&
+            latest_write->producer_event_id ==
+                producer_endpoint.timing_event_id) {
+          write_order_chain_start_node = frontier->write_order_chain_start_node;
+          while (write_scan_count != 0 &&
+                 frontier->writes[write_scan_count - 1].node_index >=
+                     write_order_chain_start_node) {
+            --write_scan_count;
+          }
+        }
+      }
+    }
+  }
+  for (iree_host_size_t i = 0; i < write_scan_count; ++i) {
     const loom_low_schedule_effect_frontier_entry_t* write =
         &frontier->writes[i];
     if (!loom_low_memory_access_summaries_may_alias(
@@ -275,6 +319,7 @@ static iree_status_t loom_low_schedule_effect_frontier_note_write(
           .summary = summary,
       };
   ++frontier->write_count;
+  frontier->write_order_chain_start_node = write_order_chain_start_node;
   return iree_ok_status();
 }
 

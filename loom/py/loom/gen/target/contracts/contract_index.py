@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 from loom.gen.support.c import c_identifier, c_pascal_identifier
 from loom.gen.support.generated_file import line_comment_header
@@ -16,7 +16,12 @@ from loom.gen.target.contracts.lower_rule_spelling import generated_symbol_name
 from loom.gen.target.contracts.lower_rules import (
     required_primary_descriptor_feature_class,
 )
-from loom.target.contracts import CompiledContractFragment, ContractFragment, ContractSystem
+from loom.target.contracts import (
+    CompiledContractFragment,
+    ContractFragment,
+    ContractSystem,
+    SourceMemoryByteOffsetMaterializer,
+)
 from loom.target.contracts.compile import compile_contract_index
 from loom.target.contracts.lower_rule_tables import CompiledLowerRuleSet
 from loom.target.contracts.selection import (
@@ -34,6 +39,33 @@ _LOWER_RULE_SYSTEMS = frozenset(
         ContractSystem.RECIPE_RULE,
     )
 )
+
+
+def validate_source_memory_recurrence_materializers(
+    name: str,
+    materializers: Iterable[tuple[str, SourceMemoryByteOffsetMaterializer]],
+) -> None:
+    """Requires one carried-offset recipe per physical carrier in a policy."""
+
+    recipes: dict[
+        tuple[str | None, int],
+        tuple[tuple[str, str, str, str, str | None], str],
+    ] = {}
+    for origin, materializer in materializers:
+        if materializer.increment is None:
+            continue
+        result = materializer.constant.operands[0]
+        carrier = (result.reg_alts[0].reg_class, result.unit_count)
+        recipe = (
+            materializer.constant.key,
+            materializer.add.key,
+            materializer.increment.key,
+            materializer.constant_immediate,
+            materializer.increment_immediate,
+        )
+        previous = recipes.setdefault(carrier, (recipe, origin))
+        if previous[0] != recipe:
+            raise ValueError(f"{name}: source-memory recurrence carrier {carrier[0]}x{carrier[1]} has conflicting recipes in fragments '{previous[1]}' and '{origin}'")
 
 
 def generate_contract_index(
@@ -57,6 +89,16 @@ def generate_contract_index(
     """
     if c_identifier(name) != name or not name:
         raise ValueError(f"invalid contract initializer name '{name}'")
+    validate_source_memory_recurrence_materializers(
+        name,
+        (
+            (table.name, source_memory.byte_offset_materializer)
+            for table, _, lower_rules in fragments
+            if lower_rules is not None
+            for source_memory in lower_rules.source_memories
+            if source_memory.byte_offset_materializer is not None
+        ),
+    )
     index = compile_contract_index([compiled for _, compiled, _ in fragments])
     selection = pack_contract_selection_index(
         compile_contract_selection_index(

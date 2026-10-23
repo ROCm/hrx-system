@@ -16,7 +16,7 @@ loom_cc_library(
   HDRS
     "target_records.h"
   DEPS
-    loom::target::arch::spirv::features
+    loom::target::arch::spirv::vocabulary
     loom::target::types
   PUBLIC
 )

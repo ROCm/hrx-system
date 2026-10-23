@@ -194,7 +194,7 @@ typedef float Float4 __attribute__((vector_size(16)));
 Float4 entry(Byte4 value) { return __builtin_convertvector(value, Float4); }
 
 // ----
-func.def public @entry(%value: vector<4xi8>) -> (vector<4xf32>) {
+func.def public source_signature(#func.abi.c.signature<arguments = [1], results = [3], types = [#func.abi.c.type<unsigned_integer, byte_length = 1, byte_alignment = 1, component_count = 1, bitwidth = 8>, #func.abi.c.type<vector, byte_length = 4, byte_alignment = 4, component_count = 1, element_type = 0, element_count = 4>, #func.abi.c.type<floating, byte_length = 4, byte_alignment = 4, component_count = 1, format = f32>, #func.abi.c.type<vector, byte_length = 16, byte_alignment = 16, component_count = 1, element_type = 2, element_count = 4>]>) @entry(%value: vector<4xi8>) -> (vector<4xf32>) {
   %2 = vector.uitofp %value : vector<4xi8> to vector<4xf32>
   func.return %2 : vector<4xf32>
 }

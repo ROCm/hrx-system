@@ -655,12 +655,16 @@ static_assert(sizeof(loom_low_lower_source_memory_integer_conversion_t) == 24,
 typedef struct loom_low_lower_source_memory_byte_offset_materializer_t {
   // Shared immediate field for arithmetic constants and the static bias.
   loom_string_ref_t constant_immediate_string_ref;
+  // Immediate field ordinal in the increment descriptor, or NONE.
+  uint16_t increment_immediate_ordinal;
   // Descriptor ref defining the arithmetic carrier and materializing constants.
   loom_low_lower_descriptor_ref_t constant_descriptor_ref;
   // Descriptor ref used to materialize additions in the arithmetic carrier.
   loom_low_lower_descriptor_ref_t add_descriptor_ref;
   // Descriptor ref used to materialize multiplies in the arithmetic carrier.
   loom_low_lower_descriptor_ref_t multiply_descriptor_ref;
+  // Unary descriptor adding an immediate to a carried offset, or NONE.
+  loom_low_lower_descriptor_ref_t increment_descriptor_ref;
   // Descriptor ref used to accumulate a multiplied term, or NONE.
   loom_low_lower_descriptor_ref_t multiply_add_descriptor_ref;
   // Descriptor ref used to materialize the complete static bias, or NONE.
@@ -675,8 +679,8 @@ typedef struct loom_low_lower_source_memory_byte_offset_materializer_t {
       integer_conversions[LOOM_SCALAR_TYPE_I64 - LOOM_SCALAR_TYPE_I1 + 1];
 } loom_low_lower_source_memory_byte_offset_materializer_t;
 static_assert(sizeof(loom_low_lower_source_memory_byte_offset_materializer_t) ==
-                  136,
-              "source-memory byte-offset materializer must be 136 bytes");
+                  144,
+              "source-memory byte-offset materializer must be 144 bytes");
 
 typedef struct loom_low_lower_source_memory_address_materializer_t {
   // Minimum accepted complete address coordinate.
@@ -1042,6 +1046,9 @@ enum loom_low_lower_emit_kind_e {
   LOOM_LOW_LOWER_EMIT_REGISTER_MOVE = 10,
   // Emits a descriptor-backed low.op.cond_br terminator.
   LOOM_LOW_LOWER_EMIT_DESCRIPTOR_COND_BR = 11,
+  // Projects consecutive register units, then constrains the projected value
+  // to an explicitly selected descriptor register class.
+  LOOM_LOW_LOWER_EMIT_REGISTER_SLICE_CLASS = 12,
   // Maximum emit kind plus one.
   LOOM_LOW_LOWER_EMIT_COUNT_,
 };
@@ -1107,6 +1114,8 @@ typedef struct loom_low_lower_emit_t {
     uint16_t value_ref_start;
     // First exact type-pattern table row mapped as a low result type.
     uint16_t type_pattern_start;
+    // Descriptor-set register class selected by REGISTER_SLICE_CLASS.
+    uint16_t register_class_id;
   } result_type;
   // First value-ref table row receiving emitted low results when
   // BIND_RESULTS_TO_REFS is set.

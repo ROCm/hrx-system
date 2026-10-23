@@ -142,8 +142,8 @@ static iree_status_t iree_hal_amdgpu_driver_factory_enumerate(
     const iree_hal_driver_info_t** out_driver_infos) {
   static const iree_hal_driver_info_t default_driver_info = {
       .driver_id = 0,
-      .driver_name = IREE_SVL("amdgpu"),
-      .full_name = IREE_SVL("AMD GPU Driver (HSA/ROCR)"),
+      .driver_name = IREE_SVL("legacy-amdgpu"),
+      .full_name = IREE_SVL("Legacy AMD GPU Driver (HSA/ROCR)"),
   };
   *out_driver_info_count = 1;
   *out_driver_infos = &default_driver_info;
@@ -342,7 +342,7 @@ static iree_status_t iree_hal_amdgpu_driver_factory_try_create(
   device_options->wait_active_for_ns = FLAG_amdgpu_wait_active_for_ns;
 
   iree_status_t status = iree_hal_amdgpu_driver_create(
-      IREE_SV("amdgpu"), &options, host_allocator, out_driver);
+      IREE_SV("legacy-amdgpu"), &options, host_allocator, out_driver);
 
   return status;
 }

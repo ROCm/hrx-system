@@ -19,7 +19,6 @@ loom_cc_library(
     "provider.c"
   DEPS
     iree::base
-    loom::target::arch::x86::provider
     loom::target::emit::native::x86::loom_check
     loom::tools::loom-check::provider
   PUBLIC

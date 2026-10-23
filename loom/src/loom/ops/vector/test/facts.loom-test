@@ -1135,9 +1135,9 @@ func.def @extract_rank2_small_static_lanes() -> (i32, i32) {
 }
 // ----
 func.def @extract_rank2_small_static_lanes() -> (i32, i32) {
-  %element = scalar.constant 6 : i32
+  %c6 = scalar.constant 6 : i32
   %sum = scalar.constant 15 : i32
-  func.return %element, %sum : i32, i32
+  func.return %c6, %sum : i32, i32
 }
 
 // ====

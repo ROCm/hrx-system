@@ -37,6 +37,13 @@ iree_status_t loom_serve_text_reservation_prepare(
     loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
     loom_serve_text_reservation_t* out_reservation);
 
+// Conservative language-side completion footprint: parameter activation,
+// the prepared state union, peak private commands, and both epoch packet
+// headers. Image feature roots and their gathered payload are additional.
+// Queries the logical plan without activating or pinning parameters.
+uint64_t loom_serve_text_reservation_memory_footprint(
+    const loom_serve_text_reservation_t* reservation);
+
 // Submits the same plan after earlier model work has completed. Capacity or
 // deferred admission leaves it intact; ACQUIRED transfers logical ownership
 // into the row and requires successful ALL readiness and row_complete_reserve.

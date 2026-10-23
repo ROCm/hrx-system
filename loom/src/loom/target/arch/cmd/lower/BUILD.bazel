@@ -59,6 +59,7 @@ loom_cc_library(
     hdrs = ["launch_count_realization.h"],
     deps = [
         "//loom/src/loom/analysis:liveness_uses",
+        "//loom/src/loom/analysis:motion",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:parameter",

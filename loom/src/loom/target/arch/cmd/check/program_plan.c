@@ -11,12 +11,14 @@
 #include "loom/ir/module.h"
 #include "loom/link/module_index.h"
 #include "loom/ops/command/ops.h"
-#include "loom/pass/builtin_registry.h"
+#include "loom/pass/registry.h"
 #include "loom/target/arch/cmd/artifact_set.h"
 #include "loom/target/arch/cmd/lower/program_plan.h"
 #include "loom/target/arch/cmd/lower/program_plan_index.h"
 #include "loom/target/arch/cmd/program.h"
 #include "loom/tools/loom-check/diagnostics.h"
+#include "loomc/interop.h"
+#include "loomc/iree.h"
 
 typedef struct loom_cmd_program_plan_check_options_t {
   // Command program symbol names selected in caller order.
@@ -148,6 +150,11 @@ static iree_status_t loom_cmd_program_plan_check_build_from_roots(
   *out_valid = false;
   *out_plan = (loom_cmd_program_plan_t){0};
 
+  loom_pass_registry_storage_t pass_registry_storage;
+  IREE_RETURN_IF_ERROR(
+      iree_status_from_loomc(loomc_target_environment_get_native_pass_registry(
+          /*target_environment=*/NULL, &pass_registry_storage)));
+
   loom_link_module_index_t* index = NULL;
   IREE_RETURN_IF_ERROR(loom_link_module_index_allocate(
       source_module->context, block_pool, host_allocator, &index));
@@ -190,8 +197,9 @@ static iree_status_t loom_cmd_program_plan_check_build_from_roots(
     };
     status = loom_cmd_program_plan_build_from_index(
         index, root_symbol_ordinals, root_count, /*options=*/NULL,
-        loom_pass_builtin_registry(), cleanup_pattern_provider_set,
-        diagnostic_emitter, &environment, arena, out_valid, out_plan);
+        loom_pass_registry_storage_registry(&pass_registry_storage),
+        cleanup_pattern_provider_set, diagnostic_emitter, &environment, arena,
+        out_valid, out_plan);
   }
 
   loom_link_module_index_free(index);

@@ -28,20 +28,6 @@ _EMIT_AMDGPU_CHECK_DEPS = iree_select({
     "//conditions:default": [],
 })
 
-_TARGET_SPIRV_CHECK_COPTS = iree_select({
-    "//loom/config/target/arch:spirv": [
-        "-DLOOM_CHECK_HAVE_TARGET_SPIRV=1",
-    ],
-    "//conditions:default": [],
-})
-
-_TARGET_SPIRV_CHECK_DEPS = iree_select({
-    "//loom/config/target/arch:spirv": [
-        "//loom/src/loom/target/arch/spirv/check:check_provider",
-    ],
-    "//conditions:default": [],
-})
-
 _EMIT_SPIRV_CHECK_COPTS = iree_select({
     "//loom/config/emit:spirv": [
         "-DLOOM_CHECK_HAVE_EMIT_SPIRV=1",
@@ -56,13 +42,6 @@ _EMIT_SPIRV_CHECK_DEPS = iree_select({
     "//conditions:default": [],
 })
 
-_TARGET_WASM_CHECK_COPTS = iree_select({
-    "//loom/config/target/arch:wasm": [
-        "-DLOOM_CHECK_HAVE_TARGET_WASM=1",
-    ],
-    "//conditions:default": [],
-})
-
 _TARGET_VM_CHECK_COPTS = iree_select({
     "//loom/config/target/arch:vm": ["-DLOOM_CHECK_HAVE_TARGET_VM=1"],
     "//conditions:default": [],
@@ -70,15 +49,7 @@ _TARGET_VM_CHECK_COPTS = iree_select({
 
 _TARGET_VM_CHECK_DEPS = iree_select({
     "//loom/config/target/arch:vm": [
-        "//loom/src/loom/target/arch/vm/check:check_provider",
         "//loom/src/loom/tooling/target/vm:check_provider",
-    ],
-    "//conditions:default": [],
-})
-
-_TARGET_WASM_CHECK_DEPS = iree_select({
-    "//loom/config/target/arch:wasm": [
-        "//loom/src/loom/target/arch/wasm/check:check_provider",
     ],
     "//conditions:default": [],
 })
@@ -132,9 +103,7 @@ _TARGET_XDNA_CHECK_TEST_DEPS = iree_select({
 
 _LOOM_CHECK_PROVIDER_COPTS = (
     _EMIT_AMDGPU_CHECK_COPTS +
-    _TARGET_SPIRV_CHECK_COPTS +
     _EMIT_SPIRV_CHECK_COPTS +
-    _TARGET_WASM_CHECK_COPTS +
     _TARGET_VM_CHECK_COPTS +
     _EMIT_WASM_CHECK_COPTS +
     _TARGET_X86_CHECK_COPTS +
@@ -143,9 +112,7 @@ _LOOM_CHECK_PROVIDER_COPTS = (
 
 _LOOM_CHECK_PROVIDER_DEPS = (
     _EMIT_AMDGPU_CHECK_DEPS +
-    _TARGET_SPIRV_CHECK_DEPS +
     _EMIT_SPIRV_CHECK_DEPS +
-    _TARGET_WASM_CHECK_DEPS +
     _TARGET_VM_CHECK_DEPS +
     _EMIT_WASM_CHECK_DEPS +
     _TARGET_X86_CHECK_DEPS +
@@ -175,7 +142,6 @@ loom_cc_library(
         "diagnostics.c",
         "emit.c",
         "execute.c",
-        "input.c",
         "low_emit.c",
         "low_report.c",
         "requirements.c",
@@ -189,7 +155,6 @@ loom_cc_library(
         "compile_diagnostics.h",
         "diagnostics.h",
         "execute.h",
-        "input.h",
         "low_emit.h",
         "low_report.h",
         "requirements.h",
@@ -205,7 +170,6 @@ loom_cc_library(
         "//loom/src/loom/analysis:storage_access",
         "//loom/src/loom/analysis:storage_interference",
         "//loom/src/loom/analysis:symbol_facts",
-        "//loom/src/loom/codegen:pass_environment",
         "//loom/src/loom/codegen/low:allocation",
         "//loom/src/loom/codegen/low:allocation_json",
         "//loom/src/loom/codegen/low:descriptors",
@@ -217,9 +181,6 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:packet_json",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/codegen/low:text_asm",
-        "//loom/src/loom/codegen/low:verify",
-        "//loom/src/loom/codegen/low/lower",
-        "//loom/src/loom/codegen/low/pipeline:legalizer_registry",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/codegen/low/schedule:json",
         "//loom/src/loom/error:diagnostic",
@@ -229,7 +190,6 @@ loom_cc_library(
         "//loom/src/loom/error:parameter",
         "//loom/src/loom/error:renderer",
         "//loom/src/loom/error:source",
-        "//loom/src/loom/format/text:parser",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
@@ -240,11 +200,9 @@ loom_cc_library(
         "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/pipeline",
         "//loom/src/loom/ops/target",
-        "//loom/src/loom/pass:builtin_registry",
         "//loom/src/loom/pass:pipeline",
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:report",
-        "//loom/src/loom/pass:tooling",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:entry_selection",
@@ -256,10 +214,8 @@ loom_cc_library(
         "//loom/src/loom/target:math_policy",
         "//loom/src/loom/target:pipeline",
         "//loom/src/loom/target:pipeline_options",
-        "//loom/src/loom/target:predicate",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:selection",
-        "//loom/src/loom/target:specialization",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/reporting:format",
         "//loom/src/loom/target/reporting:low",
@@ -269,15 +225,14 @@ loom_cc_library(
         "//loom/src/loom/testing:test_diagnostic_native",
         "//loom/src/loom/testing:test_file",
         "//loom/src/loom/tooling/cli:loomc_diagnostic_json",
-        "//loom/src/loom/tooling/input",
+        "//loom/src/loom/tooling/input:format",
+        "//loom/src/loom/tooling/input:loomc",
+        "//loom/src/loom/tooling/io:module_format",
         "//loom/src/loom/tooling/io:source_path",
-        "//loom/src/loom/tools/loom-format:convert",
-        "//loom/src/loom/transforms/cleanup:patterns",
         "//loom/src/loom/util:diff",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
-        "//loom/src/loom/verify",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:file_handle",
@@ -293,7 +248,6 @@ loom_cc_library(
     deps = [
         ":execute",
         ":report",
-        "//loom/src/loom/ir",
         "//loom/src/loom/testing:test_file",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -321,10 +275,8 @@ loom_cc_test(
         "//loom/binding/c:interop",
         "//loom/binding/c:loomc",
         "//loom/src/loom/error:parameter",
-        "//loom/src/loom/ir",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/test:provider",
-        "//loom/src/loom/testing:context",
         "//loom/src/loom/testing:test_file",
         "//loom/src/loom/transforms/cleanup:configured",
         "//runtime/src/iree/base",
@@ -419,8 +371,8 @@ loom_cc_library(
         ":output",
         ":report",
         ":update",
-        "//loom/src/loom/ir",
         "//loom/src/loom/testing:test_file",
+        "//loom/src/loom/tooling/input:format",
         "//loom/src/loom/tooling/io:file",
         "//loom/src/loom/tooling/io:source_path",
         "//loom/src/loom/util:stream",
@@ -434,10 +386,11 @@ loom_cc_test(
     name = "file_test",
     srcs = ["file_test.cc"],
     deps = [
+        ":execute",
         ":file",
-        "//loom/src/loom/ir",
+        "//loom/binding/c:interop",
+        "//loom/binding/c:loomc",
         "//loom/src/loom/target:provider",
-        "//loom/src/loom/testing:context",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:file_handle",
@@ -469,7 +422,7 @@ loom_cc_library(
         "//loom/src/loom/tooling/cli:help",
         "//loom/src/loom/tooling/cli:loomc_options",
         "//loom/src/loom/tooling/config:input",
-        "//loom/src/loom/tooling/context",
+        "//loom/src/loom/tooling/input:format",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/tooling:flags",
@@ -485,9 +438,7 @@ loom_cc_library(
         ":source_low",
         "//loom/binding/c:interop",
         "//loom/binding/c:loomc",
-        "//loom/src/loom/target:provider",
-        "//loom/src/loom/tooling/context",
-        "//loom/src/loom/tooling/input",
+        "//loom/src/loom/tooling/input:format",
         "//loom/src/loom/transforms/cleanup:configured",
         "//runtime/src/iree/base",
     ],
@@ -508,7 +459,6 @@ loom_cc_library(
     deps = [
         ":execute",
         ":provider",
-        "//loom/src/loom/target/test:provider",
         "//loom/src/loom/tools/loom-check/test/config:providers",
         "//loom/src/loom/tools/loom-check/test/low:providers",
         "//runtime/src/iree/base",
@@ -540,10 +490,14 @@ loomc_cc_binary(
     deps = [
         ":execute",
         ":provider",
+        "//loom/binding/c:interop",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/configured",
+        "//loom/binding/c/target/configured:target",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/cmd/check:check_provider",
-        "//loom/src/loom/target/configured:compiler_provider_set",
         "//loom/src/loom/tooling/export/cxx:loom_check",
-        "//loom/src/loom/tooling/input:configured",
         "//loom/src/loom/tooling/input:loomc_configured",
         "//runtime/src/iree/base",
     ] + _LOOM_CHECK_PROVIDER_DEPS,
@@ -559,10 +513,15 @@ loomc_cc_binary(
         ":execute",
         ":provider",
         ":test_provider",
+        "//loom/binding/c:interop",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/configured",
+        "//loom/binding/c/target/configured:target",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/cmd/check:check_provider",
-        "//loom/src/loom/target/configured:compiler_provider_set",
+        "//loom/src/loom/target/test:provider",
         "//loom/src/loom/tooling/export/cxx:loom_check",
-        "//loom/src/loom/tooling/input:configured",
         "//loom/src/loom/tooling/input:loomc_configured",
         "//runtime/src/iree/base",
     ] + _LOOM_CHECK_PROVIDER_DEPS + _TARGET_XDNA_CHECK_TEST_DEPS,

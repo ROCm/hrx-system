@@ -7,7 +7,9 @@
 #include <sys/eventfd.h>
 
 #include <condition_variable>
+#include <functional>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 #include "iree/async/file.h"
@@ -18,8 +20,10 @@
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/platform/io_uring/api.h"
 #include "iree/async/util/proactor_thread.h"
+#include "iree/io/file_contents.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/testing/temp_file.h"
 
 extern "C" iree_async_operation_t*
 iree_async_proactor_io_uring_build_software_submission_list(
@@ -286,6 +290,130 @@ TEST_F(IoUringSubmitTest, FullSqRejectsSequenceWithoutStartingIt) {
             (std::vector<iree_status_code_t>{IREE_STATUS_OK}));
   EXPECT_EQ(timer_completion.status_codes,
             (std::vector<iree_status_code_t>{IREE_STATUS_OK}));
+}
+
+TEST_F(IoUringSubmitTest, FileSequenceProgressesFullSubmissionQueue) {
+  iree::testing::TempFilePath path("iree_async_sequence_admission");
+  const uint8_t expected[] = {0x17, 0x83, 0x49, 0xBA, 0x25, 0xFC, 0x61, 0xD2};
+  IREE_ASSERT_OK(iree_io_file_contents_write(
+      path.path_view(), iree_make_const_byte_span(expected, sizeof(expected)),
+      iree_allocator_system()));
+
+  struct State {
+    // Runs on the poll owner after open and before the dependent read.
+    std::function<void()> before_read;
+    // Terminal status of the accepted sequence.
+    CompletionState completion;
+  } state;
+  state.before_read = [&] {
+    // Hold the poll owner in this callback while an external producer fills
+    // the SQ. The sequence's next step must progress that prepared work,
+    // without dispatching its callbacks recursively, to admit the read.
+    std::thread producer([&] { FillSubmissionQueue(); });
+    producer.join();
+    EXPECT_EQ(filler_completion_.call_count, 0);
+  };
+
+  iree_async_file_open_operation_t open = {};
+  open.base.type = IREE_ASYNC_OPERATION_TYPE_FILE_OPEN;
+  open.path = path.path().c_str();
+  open.open_flags = IREE_ASYNC_FILE_OPEN_FLAG_READ;
+  uint8_t actual[sizeof(expected)] = {};
+  iree_async_file_read_operation_t read = {};
+  read.base.type = IREE_ASYNC_OPERATION_TYPE_FILE_READ;
+  read.buffer = iree_async_span_from_ptr(actual, sizeof(actual));
+  iree_async_operation_t* steps[] = {&open.base, &read.base};
+  iree_async_sequence_operation_t sequence = {};
+  iree_async_operation_initialize(
+      &sequence.base, IREE_ASYNC_OPERATION_TYPE_SEQUENCE,
+      IREE_ASYNC_OPERATION_FLAG_NONE,
+      [](void* user_data, iree_async_operation_t* operation,
+         iree_status_t status, iree_async_completion_flags_t flags) {
+        auto* state = static_cast<State*>(user_data);
+        CompletionState::Callback(&state->completion, operation, status, flags);
+      },
+      &state);
+  sequence.steps = steps;
+  sequence.step_count = IREE_ARRAYSIZE(steps);
+  sequence.step_fn = [](void* user_data, iree_async_operation_t* completed_step,
+                        iree_async_operation_t* next_step) {
+    if (next_step) {
+      auto* state = static_cast<State*>(user_data);
+      auto* open =
+          reinterpret_cast<iree_async_file_open_operation_t*>(completed_step);
+      auto* read =
+          reinterpret_cast<iree_async_file_read_operation_t*>(next_step);
+      read->file = open->opened_file;
+      state->before_read();
+    }
+    return iree_ok_status();
+  };
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &sequence.base));
+  PollUntil(proactor_, [&] { return state.completion.call_count == 1; });
+  EXPECT_EQ(state.completion.status_codes,
+            (std::vector<iree_status_code_t>{IREE_STATUS_OK}));
+  EXPECT_EQ(sequence.current_step, IREE_ARRAYSIZE(steps));
+  EXPECT_EQ(read.bytes_read, sizeof(expected));
+  EXPECT_EQ(std::vector<uint8_t>(actual, actual + sizeof(actual)),
+            std::vector<uint8_t>(expected, expected + sizeof(expected)));
+  DrainFillers();
+  iree_async_file_release(open.opened_file);
+  EXPECT_TRUE(path.Remove());
+}
+
+TEST_F(IoUringSubmitTest, OwnerCallbackAdmitsOnlyBatchesThatFitRing) {
+  for (uint32_t request_count :
+       {1u, kSubmissionQueueEntries, kSubmissionQueueEntries + 1}) {
+    SCOPED_TRACE(request_count);
+    CompletionState completion;
+    std::vector<iree_async_timer_operation_t> timers(request_count);
+    std::vector<iree_async_operation_t*> operations(request_count);
+    for (uint32_t i = 0; i < request_count; ++i) {
+      iree_async_operation_initialize(&timers[i].base,
+                                      IREE_ASYNC_OPERATION_TYPE_TIMER,
+                                      IREE_ASYNC_OPERATION_FLAG_NONE,
+                                      CompletionState::Callback, &completion);
+      timers[i].deadline_ns = iree_time_now();
+      operations[i] = &timers[i].base;
+    }
+    bool attempted = false;
+    iree_status_code_t submit_code = IREE_STATUS_UNKNOWN;
+    std::function<void()> submit = [&] {
+      std::thread producer([&] { FillSubmissionQueue(); });
+      producer.join();
+      iree_status_t status = iree_async_proactor_submit(
+          proactor_,
+          iree_async_operation_list_make(operations.data(), operations.size()));
+      submit_code = iree_status_code(status);
+      iree_status_free(status);
+      EXPECT_EQ(completion.call_count, 0);
+      EXPECT_EQ(filler_completion_.call_count, 0);
+      attempted = true;
+    };
+    iree_async_nop_operation_t callback = {};
+    iree_async_operation_initialize(
+        &callback.base, IREE_ASYNC_OPERATION_TYPE_NOP,
+        IREE_ASYNC_OPERATION_FLAG_NONE,
+        [](void* user_data, iree_async_operation_t*, iree_status_t status,
+           iree_async_completion_flags_t) {
+          IREE_EXPECT_OK(status);
+          (*static_cast<std::function<void()>*>(user_data))();
+        },
+        &submit);
+    IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &callback.base));
+    PollUntil(proactor_, [&] { return attempted; });
+    EXPECT_EQ(submit_code, request_count <= kSubmissionQueueEntries
+                               ? IREE_STATUS_OK
+                               : IREE_STATUS_RESOURCE_EXHAUSTED);
+    if (submit_code == IREE_STATUS_OK) {
+      PollUntil(proactor_, [&] {
+        return completion.call_count == static_cast<int>(request_count);
+      });
+      EXPECT_EQ(completion.status_codes,
+                std::vector<iree_status_code_t>(request_count, IREE_STATUS_OK));
+    }
+    DrainFillers();
+  }
 }
 
 TEST_F(IoUringSubmitTest, FailedPredecessorDoesNotPublishNotification) {

@@ -38,20 +38,6 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "configured",
-    srcs = ["configured.c"],
-    hdrs = ["configured.h"],
-    copts = iree_select({
-        "//loom/config/import:cxx": ["-DLOOM_CONFIG_INPUT_HAVE_CXX=1"],
-        "//conditions:default": [],
-    }),
-    deps = [":input"] + iree_select({
-        "//loom/config/import:cxx": ["//loom/src/loom/import/cxx/tooling:input"],
-        "//conditions:default": [],
-    }),
-)
-
-loom_cc_library(
     name = "flags",
     srcs = ["flags.c"],
     hdrs = ["flags.h"],

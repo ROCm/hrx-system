@@ -62,7 +62,8 @@ class ChannelCompletionTest : public ::testing::Test {
                                      loom_type_scalar(LOOM_SCALAR_TYPE_I1)};
     IREE_ASSERT_OK(loom_func_def_build(
         &builder_, 0, 0, /*linkage=*/0, 0, 0, 0, 0, 0, loom_symbol_ref_null(),
-        0, loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
+        /*source_signature=*/loom_attr_absent(), 0,
+        loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
         loom_named_attr_slice_empty(), {0, symbol}, arguments,
         IREE_ARRAYSIZE(arguments), nullptr, 0, nullptr, 0, nullptr, 0,
         LOOM_LOCATION_UNKNOWN, &function_));

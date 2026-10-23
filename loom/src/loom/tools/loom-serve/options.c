@@ -15,12 +15,14 @@
 IREE_FLAG(int32_t, workers, 8,
           "Shared CPU workers for compilation, scheduling and media jobs.");
 IREE_FLAG(string, pool_backing, "elastic",
-          "elastic demand-commits parameter/state slabs; fixed backs storage "
-          "eagerly and supports device address sanitization.");
+          "elastic shares demand-committed parameter/state/workspace slabs; "
+          "fixed backs retained storage eagerly and supports device address "
+          "sanitization.");
 IREE_FLAG(int64_t, weight_slab_bytes, 1073741824,
-          "Reusable physical slab size for elastic parameters (default 1 GiB). "
-          "Coarse slabs reduce native allocation and mapping work; loading "
-          "streams through independent bounded read windows. Zero selects "
+          "Reusable physical slab size for elastic parameters and shared "
+          "workspace (default 1 GiB). Coarse slabs reduce native allocation "
+          "and mapping work; loading streams through independent bounded "
+          "read windows. Zero selects "
           "the allocator recommendation. Ignored for fixed backing.");
 IREE_FLAG(int64_t, state_slab_bytes, 67108864,
           "Physical commitment/reclamation granularity for elastic mutable "
@@ -28,9 +30,9 @@ IREE_FLAG(int64_t, state_slab_bytes, 67108864,
           "unchanged. Zero selects the allocator recommendation. Ignored "
           "for fixed backing.");
 IREE_FLAG(int64_t, memory_bytes, 0,
-          "Shared physical parameter/state budget; a nonzero limit requires "
-          "one device. Zero imposes no serving limit. Invocation workspace "
-          "is accounted separately.");
+          "Shared physical parameter/state/workspace budget; a nonzero limit "
+          "requires elastic backing and one device. Zero imposes no serving "
+          "limit. Host snapshots and driver overhead are outside this budget.");
 
 iree_status_t loom_serve_host_create_from_flags(
     const loom_serve_compiler_options_t* compiler_options,

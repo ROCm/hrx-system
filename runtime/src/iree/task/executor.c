@@ -91,6 +91,7 @@ iree_status_t iree_task_executor_create(iree_task_executor_options_t options,
   executor->numa_node_id = iree_task_topology_query_numa_node(topology);
   executor->scheduling_mode = options.scheduling_mode;
   executor->worker_spin_ns = options.worker_spin_ns;
+  iree_atomic_store(&executor->wake_epoch, 0, iree_memory_order_relaxed);
   iree_task_process_slist_initialize(&executor->immediate_list);
   iree_task_process_slist_initialize(&executor->compute_overflow);
 
@@ -275,6 +276,11 @@ void iree_task_executor_wake_workers(iree_task_executor_t* executor,
   }
   IREE_TRACE_ZONE_BEGIN_NAMED(z_wake, "iree_task_executor_wake_workers");
 
+  // Pair with a worker's final sleep enrollment on this same atomic word.
+  // Publishing first makes that worker recheck work; enrolling first makes
+  // this producer acquire its idle bit before selecting a wake target.
+  iree_atomic_fetch_add(&executor->wake_epoch, 1, iree_memory_order_acq_rel);
+
   int32_t remaining_count = count;
 
   // Wake currently-idle workers directly. Compute work is usually a short burst
@@ -287,18 +293,23 @@ void iree_task_executor_wake_workers(iree_task_executor_t* executor,
     if (idle_target < 0 || idle_target >= (int)executor->worker_count) {
       break;
     }
+    iree_task_affinity_set_clear_index(&idle_mask,
+                                       (iree_host_size_t)idle_target);
+    if (!iree_atomic_task_affinity_set_clear(
+            &executor->worker_idle_mask,
+            executor->workers[idle_target].worker_bit,
+            iree_memory_order_relaxed)) {
+      continue;
+    }
     IREE_TRACE_ZONE_BEGIN_NAMED(z_post, "iree_task_executor_wake_idle_worker");
     iree_notification_post(&executor->workers[idle_target].wake_notification,
                            1);
     IREE_TRACE_ZONE_END(z_post);
-    iree_task_affinity_set_clear_index(&idle_mask,
-                                       (iree_host_size_t)idle_target);
     --remaining_count;
   }
 
-  // Active workers are already looping and can pick up the remaining demand via
-  // relay_wake. If nobody was idle, post to one live worker so it interrupts a
-  // pending wait and observes desired_wake.
+  // Active workers relay the remaining demand. A worker racing into sleep
+  // observes the epoch above even if the seed worker is blocked in a drain.
   if (remaining_count > 0) {
     iree_atomic_fetch_add(&executor->desired_wake, remaining_count,
                           iree_memory_order_release);

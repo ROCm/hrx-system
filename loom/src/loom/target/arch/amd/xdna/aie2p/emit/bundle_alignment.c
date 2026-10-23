@@ -469,6 +469,7 @@ iree_status_t loom_aie2p_bundle_alignment_try_loop_boundary(
                                           original_region_slot_count +
                                           selected_slot_record_count;
   if (new_slot_count > builder->slot_capacity ||
+      builder->encoded_byte_length > LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE ||
       selected_added_byte_count >
           LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE - builder->encoded_byte_length) {
     return iree_ok_status();
@@ -778,12 +779,6 @@ iree_status_t loom_aie2p_bundle_alignment_align_call_continuation(
     IREE_ASSERT(found && format_info.bit_count % 8 == 0);
     aligned_byte_length += format_info.bit_count / 8;
   }
-  if (aligned_byte_length > LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "AIE2P encoded leaf exceeds 16 KiB of core program memory");
-  }
-
   builder->bundle_count = call_bundle_index;
   builder->slot_count = region_slot_start;
   builder->encoded_byte_length = call_bundle.byte_offset;

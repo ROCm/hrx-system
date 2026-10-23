@@ -64,14 +64,15 @@ typedef struct loom_serve_recognition_generator_t {
                            void** out_invocation);
   // Owner-side release of an unadmitted request and its admission interest.
   void (*discard)(void* self, void* invocation);
-  // ACQUIRED owns an activation pin/frontier, including a row-capacity denial.
+  // Admits parameters, row backing, and cohort scratch together. ACQUIRED owns
+  // the row, activation pin, and readiness frontier; denial owns neither row
+  // nor pin. Accepted work remains under model retirement on readiness failure.
   iree_status_t (*try_admit)(void* self, void* invocation,
                              loom_serve_residency_admission_t* out_admission,
                              loom_serve_execution_frontier_t* out_frontier);
-  // Consumes successful admission readiness. AVAILABLE retains the row and pin;
-  // CAPACITY/DEFERRED release the activation pin. DEFERRED preserves observed
-  // native progress even if it completed before this result is consumed.
-  loom_serve_memory_admission_t (*complete_admit)(void* self, void* invocation);
+  // Collects successful admission readiness, retaining the admitted row and
+  // pin. Capacity is decided before submission, never again at completion.
+  void (*complete_admit)(void* self, void* invocation);
   // CPU-only offer over a captured input snapshot. Neither source progress nor
   // the input clock advances. Snapshot bytes are borrowed only through this
   // call; source owns any PCM needed by subsequent preparation or execution.

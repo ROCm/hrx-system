@@ -13,7 +13,8 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "loom/target/provider.h"
-#include "loom/testing/context.h"
+#include "loomc/interop.h"
+#include "loomc/iree.h"
 
 namespace loom {
 namespace {
@@ -22,12 +23,6 @@ using ::testing::HasSubstr;
 
 iree_string_view_t StringView(const std::string& value) {
   return iree_make_string_view(value.data(), value.size());
-}
-
-iree_status_t RegisterFileTestContext(void* user_data,
-                                      loom_context_t* context) {
-  (void)user_data;
-  return loom_testing_context_register_all_dialects(context);
 }
 
 struct CaseCounts {
@@ -42,19 +37,19 @@ class FileTest : public ::testing::Test {
     iree_arena_block_pool_initialize(4096, iree_allocator_system(),
                                      &block_pool_);
     target_provider_set_ = loom_target_provider_set_make(nullptr, 0);
-    IREE_ASSERT_OK(loom_target_environment_initialize(&target_provider_set_,
-                                                      &target_environment_));
-    loom_context_initialize(iree_allocator_system(), &context_);
+    compile_session_.host_allocator = iree_allocator_system();
+    IREE_ASSERT_OK(iree_status_from_loomc(
+        loomc_target_environment_create_from_provider_set(
+            &target_provider_set_, loomc_allocator_system(),
+            &compile_session_.target_environment)));
     environment_ = {};
-    environment_.register_context.fn = RegisterFileTestContext;
-    environment_.target_environment = &target_environment_;
-    IREE_ASSERT_OK(
-        loom_check_context_register_and_finalize(&environment_, &context_));
+    environment_.target_environment = loomc_target_environment_get_interop_view(
+        compile_session_.target_environment);
+    environment_.compile_session = &compile_session_;
   }
 
   void TearDown() override {
-    loom_context_deinitialize(&context_);
-    loom_target_environment_deinitialize(&target_environment_);
+    loom_check_compile_session_deinitialize(&compile_session_);
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
@@ -86,15 +81,14 @@ class FileTest : public ::testing::Test {
                         CaseCounts* out_counts) {
     loom_check_process_options_t options = {.mode = mode};
     return loom_check_read_and_process(
-        StringView(path), &options, &environment_, &context_, &block_pool_,
+        StringView(path), &options, &environment_, &block_pool_,
         iree_allocator_system(), &out_counts->pass_count,
         &out_counts->fail_count, &out_counts->skip_count);
   }
 
   iree_arena_block_pool_t block_pool_;
-  loom_context_t context_;
   loom_target_provider_set_t target_provider_set_;
-  loom_target_environment_t target_environment_;
+  loom_check_compile_session_t compile_session_ = {};
   loom_check_environment_t environment_;
 };
 
@@ -126,7 +120,7 @@ TEST_F(FileTest, JsonDoesNotSuggestReplacingChecksWithGoldens) {
   CaseCounts counts;
   ::testing::internal::CaptureStdout();
   iree_status_t status = loom_check_read_and_process(
-      StringView(path.path()), &options, &environment_, &context_, &block_pool_,
+      StringView(path.path()), &options, &environment_, &block_pool_,
       iree_allocator_system(), &counts.pass_count, &counts.fail_count,
       &counts.skip_count);
   const std::string output = ::testing::internal::GetCapturedStdout();

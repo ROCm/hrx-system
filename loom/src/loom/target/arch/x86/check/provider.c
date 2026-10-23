@@ -6,7 +6,6 @@
 
 #include "loom/target/arch/x86/check/provider.h"
 
-#include "loom/target/arch/x86/provider.h"
 #include "loom/target/emit/native/x86/check/loom_check.h"
 
 static const loom_check_emit_provider_t* const kLoomX86CheckEmitProviders[] = {
@@ -15,7 +14,6 @@ static const loom_check_emit_provider_t* const kLoomX86CheckEmitProviders[] = {
 
 const loom_check_provider_t loom_x86_check_provider = {
     .name = IREE_SVL("x86"),
-    .target_provider = &loom_x86_target_provider,
     .emit_providers = kLoomX86CheckEmitProviders,
     .emit_provider_count = IREE_ARRAYSIZE(kLoomX86CheckEmitProviders),
 };

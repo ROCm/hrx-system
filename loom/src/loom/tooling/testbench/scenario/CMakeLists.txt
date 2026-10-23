@@ -20,7 +20,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::arena
     loom::ir::builders
-    loom::ops::op_defs
+    loom::ops::headers
     loom::tooling::testbench::api
     loom::tooling::testbench::operation_plan
   PUBLIC

@@ -183,6 +183,14 @@ a producer, while intervening possible writes separate their observations.
 The serialized artifact contains those producers and indirect consumers; it
 never delegates count evaluation to an implicit host callback.
 
+The generated producer must preserve each captured load's observation. The
+shared read-motion analysis checks that a load can reach its originating
+consumer without crossing a memory or execution boundary. A scalar loaded
+before an intervening write instead gets a count producer at its source
+observation. If one count expression combines incompatible observation epochs,
+retain those values in explicit device storage before consuming them together.
+All count clusters are planned and validated before any source root is rewritten.
+
 ## Storage
 
 Command-program buffers have two materialization roles:

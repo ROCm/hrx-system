@@ -63,6 +63,36 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    transfer_plan
+  HDRS
+    "transfer_plan.h"
+  SRCS
+    "transfer_plan.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    transfer_plan_test
+  SRCS
+    "transfer_plan_test.cc"
+  DEPS
+    ::transfer_plan
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     parameter_layout
   HDRS
     "parameter_layout.h"
@@ -330,11 +360,17 @@ loom_cc_test(
   NAME
     program_test
   SRCS
+    "jit_vm_test.cc"
     "program_test.cc"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/binding.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/compilation/invalid.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/jit/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/jit/private_vm_helper.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/jit/vm_helpers.loom"
   DEPS
     ::input
+    ::jit
     ::package
     ::program
     iree::base
@@ -348,6 +384,8 @@ loom_cc_test(
     loom::model::card
   ARGS
     "--binding_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/binding.loom}}"
+    "--vm_sources={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/jit/control.loom}}"
+    "--vm_invalid_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/compilation/invalid.loom}}"
   LABELS
     "iree-build-requirement=loom.target.arch.vm"
 )
@@ -498,6 +536,7 @@ loom_cc_test(
     iree::vm
     loom::binding::c::loomc
     loom::binding::c::target::vm
+    loom::model::card
   ARGS
     "--boundary_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/program/testdata/preparation/boundaries.loom}}"
   LABELS

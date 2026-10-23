@@ -27,8 +27,28 @@ typedef struct loom_x86_entry_descriptors_t {
   uint32_t load_u32;
   // Pointer or doubleword load to a GPR64 carrier.
   uint32_t load_u64;
+  // Byte store from a GPR32 carrier.
+  uint32_t store_u8;
+  // Halfword store from a GPR32 carrier.
+  uint32_t store_u16;
+  // Word store from a GPR32 carrier.
+  uint32_t store_u32;
+  // Pointer or doubleword store from a GPR64 carrier.
+  uint32_t store_u64;
+  // Pointer-sized address addition.
+  uint32_t add_u64;
+  // Word bit masking with an immediate.
+  uint32_t mask_u32;
   // Zero extension of a word to a pointer-sized carrier.
   uint32_t widen_u32;
+  // Truncation of a pointer-sized carrier to its low word.
+  uint32_t truncate_u64;
+  // Pointer-sized immediate left shift.
+  uint32_t shift_left_u64;
+  // Pointer-sized immediate logical right shift.
+  uint32_t shift_right_u64;
+  // Pointer-sized bitwise union.
+  uint32_t or_u64;
   // Word immediate materialization.
   uint32_t constant_u32;
   // Pointer-sized immediate materialization.
@@ -39,6 +59,12 @@ typedef struct loom_x86_entry_descriptors_t {
   uint32_t symbol_address;
   // Four-byte bit move from a GPR32 carrier into XMM.
   uint32_t move_u32_xmm;
+  // Eight-byte bit move from a GPR64 carrier into XMM.
+  uint32_t move_u64_xmm;
+  // Four-byte bit move from XMM into a GPR32 carrier.
+  uint32_t move_xmm_u32;
+  // Eight-byte bit move from XMM into a GPR64 carrier.
+  uint32_t move_xmm_u64;
   // Four-byte memory load into the low XMM bits.
   uint32_t load_32_xmm;
   // Eight-byte memory load into the low XMM bits.
@@ -49,6 +75,12 @@ typedef struct loom_x86_entry_descriptors_t {
   uint32_t load_256_ymm;
   // Full 64-byte ZMM memory load.
   uint32_t load_512_zmm;
+  // Full 16-byte XMM memory store.
+  uint32_t store_128_xmm;
+  // Full 32-byte YMM memory store.
+  uint32_t store_256_ymm;
+  // Full 64-byte ZMM memory store.
+  uint32_t store_512_zmm;
   // Zero-valued XMM materialization.
   uint32_t zero_xmm;
   // Zero-valued YMM materialization.

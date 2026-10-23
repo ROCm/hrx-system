@@ -134,6 +134,119 @@ InlinePolicyAttr = EnumDef(
     c_include="loom/ir/ir.h",
 )
 
+CAbiTypeKind = EnumDef(
+    "CAbiTypeKind",
+    [
+        EnumCase("boolean", 1, doc="C or C++ boolean object."),
+        EnumCase("signed_integer", 2, doc="Signed integer object."),
+        EnumCase("unsigned_integer", 3, doc="Unsigned integer object."),
+        EnumCase("floating", 4, doc="Floating-point object."),
+        EnumCase("pointer", 5, doc="Object pointer."),
+        EnumCase("vector", 6, doc="Native compiler vector object."),
+        EnumCase("array", 7, doc="Fixed-size array object."),
+        EnumCase("record", 8, doc="Trivial aggregate record object."),
+    ],
+    doc="Semantic source object kind in a retained C ABI signature.",
+)
+
+CAbiFloatFormat = EnumDef(
+    "CAbiFloatFormat",
+    [
+        EnumCase("f8e4m3fn", 1, doc="Finite-only E4M3 8-bit float."),
+        EnumCase("f8e5m2", 2, doc="E5M2 8-bit float."),
+        EnumCase("f16", 3, doc="IEEE binary16 float."),
+        EnumCase("bf16", 4, doc="Bfloat16 float."),
+        EnumCase("f32", 5, doc="IEEE binary32 float."),
+        EnumCase("f64", 6, doc="IEEE binary64 float."),
+    ],
+    doc="Floating representation in a retained C ABI source object.",
+)
+
+func_abi_c_field_attr = ParameterizedAttrDef(
+    "func.abi.c.field",
+    group=func_ops,
+    parameters=[
+        AttrDef("name", "string", doc="Source field name used for diagnostics."),
+        AttrDef("type", "i64", doc="Index of the field type node."),
+        AttrDef("byte_offset", "i64", doc="Field origin in its containing record."),
+    ],
+    primary_parameter="name",
+    doc="One named field in a retained C ABI record layout.",
+)
+
+func_abi_c_type_attr = ParameterizedAttrDef(
+    "func.abi.c.type",
+    group=func_ops,
+    parameters=[
+        AttrDef("kind", "enum", enum_def=CAbiTypeKind, doc="Source object kind."),
+        AttrDef("byte_length", "i64", doc="Complete source object footprint."),
+        AttrDef("byte_alignment", "i64", doc="Required source object alignment."),
+        AttrDef(
+            "component_count",
+            "i64",
+            doc="Number of values in the flattened High projection.",
+        ),
+        AttrDef("bitwidth", "i64", optional=True, doc="Integer value bit width."),
+        AttrDef(
+            "format",
+            "enum",
+            enum_def=CAbiFloatFormat,
+            optional=True,
+            doc="Floating representation.",
+        ),
+        AttrDef(
+            "address_space",
+            "i64",
+            optional=True,
+            doc="Source object-pointer address space; absent means generic.",
+        ),
+        AttrDef(
+            "element_type",
+            "i64",
+            optional=True,
+            doc="Index of a preceding vector or array element type node.",
+        ),
+        AttrDef(
+            "element_count",
+            "i64",
+            optional=True,
+            doc="Fixed vector lane or array element count.",
+        ),
+        AttrDef(
+            "element_stride",
+            "i64",
+            optional=True,
+            doc="Array element stride in bytes.",
+        ),
+        AttrDef("name", "string", optional=True, doc="Diagnostic record name."),
+        AttrDef(
+            "fields",
+            "parameterized_array",
+            parameterized_attr=func_abi_c_field_attr,
+            optional=True,
+            doc="Declaration-order record fields.",
+        ),
+    ],
+    primary_parameter="kind",
+    doc=("One postorder source object type node. Composite references name only preceding nodes."),
+)
+
+func_abi_c_signature_attr = ParameterizedAttrDef(
+    "func.abi.c.signature",
+    group=func_ops,
+    parameters=[
+        AttrDef("arguments", "i64_array", doc="Root type index per source argument."),
+        AttrDef("results", "i64_array", doc="Root type index per source result."),
+        AttrDef(
+            "types",
+            "parameterized_array",
+            parameterized_attr=func_abi_c_type_attr,
+            doc="Flat postorder source object type table.",
+        ),
+    ],
+    doc=("C-compatible source signature retained independently of its flattened Loom value projection and selected output ABI."),
+)
+
 _RETAIN_ATTR = AttrDef("retain", "enum", enum_def=Retain, optional=True)
 
 # ============================================================================
@@ -175,6 +288,20 @@ _ABI_FORMAT: list[FormatElement] = [
             RPAREN,
         ],
         anchor="abi",
+    ),
+]
+
+_SOURCE_SIGNATURE_FORMAT: list[FormatElement] = [
+    OptionalGroup(
+        [
+            kw("source_signature"),
+            GLUE,
+            LPAREN,
+            Attr("source_signature"),
+            GLUE,
+            RPAREN,
+        ],
+        anchor="source_signature",
     ),
 ]
 
@@ -244,6 +371,12 @@ _MODIFIER_ATTRS = [
 
 _CONTRACT_ATTRS = [
     AttrDef(
+        "source_signature",
+        "parameterized",
+        optional=True,
+        doc=("Source-language boundary contract retained independently of the selected output ABI."),
+    ),
+    AttrDef(
         "target",
         "symbol",
         optional=True,
@@ -293,6 +426,7 @@ _FUNC_LIKE_COMMON: dict[str, Any] = dict(
 
 _FUNC_LIKE_CONTRACT: dict[str, Any] = dict(
     **_FUNC_LIKE_COMMON,
+    source_signature="source_signature",
     target="target",
     abi="abi",
     abi_attrs="abi_attrs",
@@ -338,6 +472,7 @@ func_def = Op(
     format=[
         *_MODIFIER_FORMAT,
         *_TARGET_FORMAT,
+        *_SOURCE_SIGNATURE_FORMAT,
         *_ABI_FORMAT,
         *_EXPORT_FORMAT,
         *_SIGNATURE_FORMAT,
@@ -384,6 +519,7 @@ func_decl = Op(
         OptionalGroup([Attr("temperature")], anchor="temperature"),
         OptionalGroup([Attr("inline_policy")], anchor="inline_policy"),
         *_TARGET_FORMAT,
+        *_SOURCE_SIGNATURE_FORMAT,
         *_ABI_FORMAT,
         *_EXPORT_FORMAT,
         *_SIGNATURE_FORMAT,
@@ -586,6 +722,9 @@ ALL_FUNC_PARAMETERIZED_ATTRS = (
     func_location_fused_attr,
     func_location_opaque_attr,
     func_location_tagged_attr,
+    func_abi_c_field_attr,
+    func_abi_c_type_attr,
+    func_abi_c_signature_attr,
 )
 
 func_location = Op(

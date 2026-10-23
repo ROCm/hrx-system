@@ -78,6 +78,7 @@ kernel.def target(@repeated_wmma_target) @repeated_wmma_jobs() {
 }
 
 check.case public @repeated_wmma_jobs_0 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %lhs = check.generate.fill value(1.0) : tensor<16x32xbf16>
   %rhs = check.generate.iota offset(1.0) step(1.0) period(32) : tensor<16x32xbf16>
   %output = check.generate.fill value(-1.0) : tensor<256xf32>
@@ -89,6 +90,7 @@ check.case public @repeated_wmma_jobs_0 {
 }
 
 check.case public @repeated_wmma_jobs_1 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %lhs = check.generate.fill value(1.0) : tensor<16x32xbf16>
   %rhs = check.generate.iota offset(1.0) step(1.0) period(32) : tensor<16x32xbf16>
   %output = check.generate.fill value(-1.0) : tensor<256xf32>
@@ -100,6 +102,7 @@ check.case public @repeated_wmma_jobs_1 {
 }
 
 check.case public @repeated_wmma_jobs_2 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %lhs = check.generate.fill value(1.0) : tensor<16x32xbf16>
   %rhs = check.generate.iota offset(1.0) step(1.0) period(32) : tensor<16x32xbf16>
   %output = check.generate.fill value(-1.0) : tensor<512xf32>
@@ -111,6 +114,7 @@ check.case public @repeated_wmma_jobs_2 {
 }
 
 check.case public @repeated_wmma_jobs_4 {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
   %lhs = check.generate.fill value(1.0) : tensor<16x32xbf16>
   %rhs = check.generate.iota offset(1.0) step(1.0) period(32) : tensor<16x32xbf16>
   %output = check.generate.fill value(-1.0) : tensor<1024xf32>

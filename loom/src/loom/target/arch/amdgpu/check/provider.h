@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-// AMDGPU target-low descriptor, lowering, requirement, and emission package.
+// AMDGPU native emission, occupancy, and bank-service inspection handlers.
 extern const loom_check_provider_t loom_amdgpu_check_provider;
 
 #ifdef __cplusplus

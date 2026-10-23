@@ -18,6 +18,18 @@ Roundtrip mode and successful pass IR output are reparsed and printed again
 before comparison. An expectation can only be updated when the output parses
 and its canonical text remains stable.
 
+All modes share LoomC's module admission, context, and reusable workspace.
+Roundtrip and format modes use the same text and bytecode APIs as other Loom
+tools. Native inspection providers borrow admitted modules; they do not parse
+another copy or register a second compiler context.
+
+The final binary composes configured target and compiler support through
+LoomC. Target capabilities and artifact emitters are selected separately.
+Check providers contribute only inspection and requirement handlers; they
+borrow that environment rather than registering compiler capabilities. The
+test binary separately adds its synthetic target and passes. The shipping
+binary accepts `test.*` syntax without those synthetic compiler extensions.
+
 ## Choosing The Test Boundary
 
 C++ unit tests own API contracts and focused functionality. IR programs belong
@@ -71,6 +83,10 @@ bindings constrain locations through the production allocation interface.
 `reverse-blocks` reverses the nonentry block table after parsing, preserving the
 CFG and SSA dominance while exercising allocation when physical block order
 differs from dominance order. Authored text still defines values before uses.
+`spill-free` runs the complete production repair loop before querying the final
+allocation. With `spill-count`, it also reports inserted store/reload traffic,
+so a zero final spill count cannot hide materialized spills. `materialize-spills`
+instead applies one allocation batch and prints the resulting IR.
 
 Focused lowering examples use exact goldens. When a case lowers one operation
 and the output is small, the complete before/after IR is the assertion and
@@ -138,6 +154,12 @@ Pass, pass-report, and compile-report modes verify input before any target
 specialization or transformation, and verify successful pipeline output before
 comparison. Input verification errors use the same diagnostic annotations as
 `verify` mode and prevent the pipeline from running.
+
+These modes use LoomC's prepared programs and module-owned compilation state.
+Pass IR output inspects the transformed module directly; unlike durable module
+serialization, it does not materialize retained target facts as new definitions.
+Pass and compile reports are consumed while their module and target providers
+remain live.
 
 Pass, pass-report, and compile-report modes accept the same target selection
 before the pipeline. An optional `entry=@function` selects an explicit entry;

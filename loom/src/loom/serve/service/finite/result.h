@@ -89,7 +89,7 @@ typedef struct loom_serve_finite_snapshot_t loom_serve_finite_snapshot_t;
 // after successful returned readiness. Snapshot readers retain no device output
 // after the download capture retires.
 iree_status_t loom_serve_finite_result_download(
-    loom_serve_finite_result_t* result,
+    const loom_serve_finite_result_t* result,
     loom_serve_finite_snapshot_t** out_snapshot,
     loom_serve_execution_frontier_t* out_frontier);
 

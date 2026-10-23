@@ -31,7 +31,9 @@ typedef struct iree_hal_amd_gpu_user_queue_t {
   amdf_status_t removal_status;
   // Achieved native primary-ring locality, captured once during construction.
   iree_hal_queue_placement_t placement;
-  // Host ordering before publishing a valid header or producer index.
+  // Native release selected once before any command publication.
+  amdf_cache_transition_executor_t host_publish_executor;
+  // Direct host ordering before publishing a valid header or producer index.
   iree_hal_host_cache_fence_t host_publish_fence;
 } iree_hal_amd_gpu_user_queue_t;
 
@@ -55,6 +57,12 @@ iree_status_t iree_hal_amd_gpu_user_queue_initialize(
     iree_hal_amd_gpu_user_queue_t* out_storage,
     amdf_user_queue_mapping_info_t* out_mapping_info,
     amdf_user_queue_mapping_info_t* out_device_mapping_info);
+
+// Executes the captured release before a format commits its header/index.
+// NONE needs no call. HOST_API preserves the exact native failure; the caller
+// terminally fails its existing queue owner without reclaiming accepted work.
+amdf_status_t iree_hal_amd_gpu_user_queue_flush(
+    const iree_hal_amd_gpu_user_queue_t* storage);
 
 // Joins the final already-published primary-ring index, then removes its device
 // and host mappings and native queue. Publishers, callbacks and execution uses

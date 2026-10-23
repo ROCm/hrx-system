@@ -112,7 +112,9 @@ loom_cc_library(
     loom::serve::runtime::execution::dispatch
     loom::serve::runtime::execution::retirement
     loom::serve::runtime::host
+    loom::serve::runtime::parameter::module
     loom::serve::runtime::parameter::residency
+    loom::serve::runtime::parameter::sources
     loom::serve::runtime::parameter::weights
     loom::serve::runtime::program
     loom::serve::runtime::program::compilation
@@ -155,6 +157,7 @@ loom_cc_library(
     loom::serve::runtime::execution
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
+    loom::serve::runtime::storage::memory
     loom::serve::server::model_registration
     loom::serve::server::registry
     loom::serve::server::router

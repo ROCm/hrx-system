@@ -23,4 +23,17 @@ loom_check_test_suite(
     "verify.loom-test"
 )
 
+iree_native_test(
+  NAME
+    "verify_tool"
+  WORKING_DIRECTORY "${IREE_ROOT_DIR}"
+  ARGS
+    "--source-prefix-map==logical/"
+    "{{${CMAKE_CURRENT_SOURCE_DIR}/verify.loom-test}}"
+  SRC
+    loom::tools::loom-check::loom-check
+  LABELS
+    "loom-check"
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -35,8 +35,6 @@ typedef struct loom_kernel_launch_resolution_state_t {
   loom_ir_remap_t type_remap;
   // Rewriter maintaining use lists and module summaries.
   loom_rewriter_t rewriter;
-  // Whether an actual rewritten launch used a read-only configuration.
-  bool has_readonly_launches;
 } loom_kernel_launch_resolution_state_t;
 
 static iree_string_view_t loom_kernel_launch_resolution_symbol_name(
@@ -215,8 +213,6 @@ static iree_status_t loom_kernel_launch_resolution_rewrite_launch(
   IREE_ASSERT(
       configuration_effect_contract == LOOM_CALLABLE_EFFECT_CONTRACT_PURE ||
       configuration_effect_contract == LOOM_CALLABLE_EFFECT_CONTRACT_READONLY);
-  resolution->has_readonly_launches |=
-      configuration_effect_contract == LOOM_CALLABLE_EFFECT_CONTRACT_READONLY;
 
   loom_op_t* entry_op = resolution->entry_ops[kernel_ref.symbol_id];
   if (entry_op == NULL) {
@@ -336,7 +332,6 @@ iree_status_t loom_kernel_resolve_launches(
     *out_resolution = (loom_kernel_launch_resolution_t){
         .entry_ops = entry_ops,
         .entry_count = references->symbol_count,
-        .has_readonly_launches = resolution.has_readonly_launches,
     };
     *out_valid = valid;
   }

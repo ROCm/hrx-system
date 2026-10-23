@@ -9,7 +9,16 @@
 # very big in general and they are only in the build directory. When this was
 # created, the test temp directories constituted about 0.1% of the build
 # directory size.
-set(CTEST_CUSTOM_PRE_TEST
-"\"@CMAKE_COMMAND@\" -E rm -rf \"@IREE_TEST_TMPDIR_ROOT@\""
-@IREE_CREATE_TEST_TMPDIRS_COMMANDS@
-)
+if("$ENV{IREE_CTEST_SKIP_GLOBAL_TMPDIR_CLEANUP}" STREQUAL "1")
+  # Managed inspection does not mutate scratch state. Managed execution has
+  # already refreshed exactly the selected test directories. Keep this
+  # controller-only marker out of test processes and any nested CTest runs.
+  set(CTEST_CUSTOM_PRE_TEST)
+  unset(ENV{IREE_CTEST_SKIP_GLOBAL_TMPDIR_CLEANUP})
+else()
+  # Raw CTest invocations retain the historical fresh-tree behavior.
+  set(CTEST_CUSTOM_PRE_TEST
+    "\"@CMAKE_COMMAND@\" -E rm -rf \"@IREE_TEST_TMPDIR_ROOT@\""
+    @IREE_CREATE_TEST_TMPDIRS_COMMANDS@
+  )
+endif()

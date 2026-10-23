@@ -19,7 +19,7 @@ load(
     "//loom/requirements:package_policy.bzl",
     "apply_loom_target_policy",
 )
-load(":cc.bzl", _loom_cc_binary = "loom_cc_binary", _loom_cc_library = "loom_cc_library", _loom_cc_library_group = "loom_cc_library_group")
+load(":cc.bzl", _loom_cc_binary = "loom_cc_binary", _loom_cc_instance_library = "loom_cc_instance_library", _loom_cc_library = "loom_cc_library", _loom_cc_library_group = "loom_cc_library_group")
 load(":cc_benchmark.bzl", _loom_cc_benchmark = "loom_cc_benchmark")
 load(":cc_fuzz.bzl", _loom_cc_fuzz = "loom_cc_fuzz")
 load(":cc_test.bzl", _loom_cc_test = "loom_cc_test")
@@ -31,6 +31,7 @@ iree_select = _iree_select
 loom_cc_benchmark = _loom_cc_benchmark
 loom_cc_binary = _loom_cc_binary
 loom_cc_fuzz = _loom_cc_fuzz
+loom_cc_instance_library = _loom_cc_instance_library
 loom_cc_library = _loom_cc_library
 loom_cc_library_group = _loom_cc_library_group
 loom_cc_test = _loom_cc_test
@@ -658,6 +659,7 @@ def loom_generated_cc_library(
         extra_output_flags = [],
         extra_outputs = [],
         deps = [],
+        instance_owned = False,
         tags = [],
         testonly = False,
         visibility = None,
@@ -686,6 +688,8 @@ def loom_generated_cc_library(
       extra_output_flags: Generator flags paired with extra_outputs.
       extra_outputs: Additional generated files produced by the action.
       deps: Runtime C library dependencies.
+      instance_owned: Apply the loom_cc_instance_library ownership contract to
+        the compiled library, without changing generated output ownership.
       tags: Additional Bazel tags for the generator action and runtime library.
       testonly: Passed through to the runtime C library.
       visibility: Passed through to the generator action and runtime library.
@@ -740,7 +744,8 @@ def loom_generated_cc_library(
         "//%s:%s" % (package_name, header)
         for header in generated_hdrs
     ]
-    loom_cc_library(
+    library = loom_cc_instance_library if instance_owned else loom_cc_library
+    library(
         name = name,
         srcs = srcs + generated_sources,
         hdrs = hdrs + generated_headers,

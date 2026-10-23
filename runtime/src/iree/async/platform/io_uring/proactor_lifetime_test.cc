@@ -952,33 +952,36 @@ class ProactorLifetimeTest : public ::testing::Test {
   }
 
   void FillSubmissionQueue() {
-    // Submit without polling until get_sqe() reports the queue full. These
-    // SQEs remain unpublished, guaranteeing cancellation cannot allocate an
-    // SQE on its first attempt.
+    // External producers cannot advance native submission. Fill from another
+    // task so these SQEs remain unpublished even after the poll owner is bound,
+    // guaranteeing cancellation cannot allocate an SQE on its first attempt.
     timer_operations_.resize(1024);
-    for (auto& timer : timer_operations_) {
-      memset(&timer, 0, sizeof(timer));
-      timer.base.type = IREE_ASYNC_OPERATION_TYPE_TIMER;
-      timer.deadline_ns = iree_time_now();
-      timer.base.completion_fn =
-          +[](void* user_data, iree_async_operation_t* operation,
-              iree_status_t status, iree_async_completion_flags_t flags) {
-            auto* state = static_cast<TimerCompletionState*>(user_data);
-            (void)operation;
-            (void)flags;
-            IREE_EXPECT_OK(status);
-            ++state->count;
-          };
-      timer.base.user_data = &timer_state_;
-      iree_status_t submit_status =
-          iree_async_proactor_submit_one(proactor_, &timer.base);
-      if (iree_status_is_resource_exhausted(submit_status)) {
-        IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, submit_status);
-        break;
+    std::thread producer([&] {
+      for (auto& timer : timer_operations_) {
+        memset(&timer, 0, sizeof(timer));
+        timer.base.type = IREE_ASYNC_OPERATION_TYPE_TIMER;
+        timer.deadline_ns = iree_time_now();
+        timer.base.completion_fn =
+            +[](void* user_data, iree_async_operation_t* operation,
+                iree_status_t status, iree_async_completion_flags_t flags) {
+              auto* state = static_cast<TimerCompletionState*>(user_data);
+              (void)operation;
+              (void)flags;
+              IREE_EXPECT_OK(status);
+              ++state->count;
+            };
+        timer.base.user_data = &timer_state_;
+        iree_status_t submit_status =
+            iree_async_proactor_submit_one(proactor_, &timer.base);
+        if (iree_status_is_resource_exhausted(submit_status)) {
+          IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, submit_status);
+          break;
+        }
+        IREE_ASSERT_OK(submit_status);
+        ++submitted_count_;
       }
-      IREE_ASSERT_OK(submit_status);
-      ++submitted_count_;
-    }
+    });
+    producer.join();
     ASSERT_GT(submitted_count_, 0u);
     ASSERT_LT(submitted_count_, timer_operations_.size());
   }

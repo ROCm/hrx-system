@@ -20,6 +20,7 @@ from build_tools.devtools import (
     cmake_file_api,
     cmake_fuzz,
     cmake_try,
+    ctest,
     environment,
     fuzz,
 )
@@ -214,6 +215,10 @@ class CMakeTest(unittest.TestCase):
         )
         self.assertIn("ctest", inspect_plan.describe())
         self.assertNotIn("cmake --build", inspect_plan.describe())
+        self.assertEqual(
+            inspect_plan.steps[0].env[ctest.SKIP_GLOBAL_TMPDIR_CLEANUP_ENV],
+            "1",
+        )
 
     def test_build_announces_targets_generator_and_tree(self):
         tool_env = ToolEnvironment(ToolMode.SYSTEM, None)

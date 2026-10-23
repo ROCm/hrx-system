@@ -101,7 +101,7 @@ int missing_result(int value) {
 }
 int wrong_result(int value) {
   return loom::low::assembly<Contract, int>(R"(
-      // ERROR@+1: TYPE/009 "yielded value has type reg<...>, but expected reg<...>"
+      // ERROR@+1: TYPE/009 "yielded value has type reg<test.i32>, but expected reg<test.i32 x2>"
       (%value: reg<test.i32>) -> (reg<test.i32 x2>) { return %value }
   )", value);
 }

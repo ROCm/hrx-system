@@ -109,6 +109,11 @@ static iree_status_t TestProfileSinkWrite(
                 records[i].record_length);
       EXPECT_NE(UINT32_MAX, records[i].physical_device_ordinal);
       EXPECT_GT(records[i].queue_count, 0u);
+      if (iree_any_bit_set(records[i].flags,
+                           IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY)) {
+        EXPECT_GT(records[i].timestamp_frequency_hz, 0u);
+      }
+      test_sink->devices.push_back(records[i]);
     }
     test_sink->saw_device_metadata = true;
     ++test_sink->device_metadata_count;
@@ -550,14 +555,19 @@ static bool HasInvalidDeviceTickAlignment(const TestProfileSink& sink,
   return false;
 }
 
-void ExpectDispatchEventsHaveClockCorrelations(const TestProfileSink& sink) {
-  ASSERT_GE(sink.clock_correlations.size(), 2u);
+void ExpectDispatchEventsHaveClockMetadata(const TestProfileSink& sink) {
   ASSERT_EQ(sink.dispatch_events.size(),
             sink.dispatch_event_physical_device_ordinals.size());
   for (iree_host_size_t event_index = 0;
        event_index < sink.dispatch_events.size(); ++event_index) {
     const uint32_t physical_device_ordinal =
         sink.dispatch_event_physical_device_ordinals[event_index];
+    auto device_it = std::find_if(
+        sink.devices.rbegin(), sink.devices.rend(),
+        [&](const iree_hal_profile_device_record_t& device) {
+          return device.physical_device_ordinal == physical_device_ordinal;
+        });
+    ASSERT_NE(sink.devices.rend(), device_it);
     if (HasInvalidDeviceTickAlignment(sink, physical_device_ordinal)) {
       continue;
     }
@@ -580,7 +590,13 @@ void ExpectDispatchEventsHaveClockCorrelations(const TestProfileSink& sink) {
       previous_device_tick = correlation.device_tick;
       ++correlation_count;
     }
-    EXPECT_GE(correlation_count, 2u);
+    const bool has_timestamp_frequency =
+        iree_any_bit_set(device_it->flags,
+                         IREE_HAL_PROFILE_DEVICE_FLAG_TIMESTAMP_FREQUENCY) &&
+        device_it->timestamp_frequency_hz != 0;
+    EXPECT_TRUE(correlation_count >= 2u || has_timestamp_frequency)
+        << "physical device " << physical_device_ordinal
+        << " needs clock correlations or an authoritative timestamp frequency";
   }
 }
 

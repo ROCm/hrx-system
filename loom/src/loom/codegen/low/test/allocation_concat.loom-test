@@ -146,6 +146,48 @@ value %pair: test.explicit32 -> physical_register[4:2]
 
 // ====
 
+// RUN: emit low-allocation-query @shared_tail_concat_source spill-count values=%shared,%initial0,%initial1,%initial2,%initial,%temporary0,%renewed0,%temporary1,%renewed1,%blocker,%temporary2,%renewed2,%renewed
+
+test.target<low_core> @target
+
+// The shared tail first assembles with initial, then remains live for renewed.
+// Its committed unit cannot anchor both aggregates. Renewed's unique sources
+// reserve units 4..6, move the independent blocker, and copy only the shared
+// tail into unit 7.
+low.func.def schedule(locked) target<test.low.core>(@target) @shared_tail_concat_source(%shared: reg<test.phys>) -> (reg<test.phys x4>, reg<test.phys x4>, reg<test.phys>) asm {
+  %initial0 = test.add.phys %shared, %shared
+  %initial1 = test.add.phys %shared, %shared
+  %initial2 = test.add.phys %shared, %shared
+  %initial = concat(%initial0, %initial1, %initial2, %shared) : (reg<test.phys>, reg<test.phys>, reg<test.phys>, reg<test.phys>) -> reg<test.phys x4>
+  %temporary0 = test.add.phys %shared, %shared
+  %renewed0 = test.add.phys %temporary0, %temporary0
+  %temporary1 = test.add.phys %shared, %shared
+  %renewed1 = test.add.phys %temporary1, %temporary1
+  %blocker = test.add.phys %shared, %shared
+  %temporary2 = test.add.phys %shared, %shared
+  %renewed2 = test.add.phys %temporary2, %temporary2
+  %renewed = concat(%renewed0, %renewed1, %renewed2, %shared) : (reg<test.phys>, reg<test.phys>, reg<test.phys>, reg<test.phys>) -> reg<test.phys x4>
+  return %initial, %renewed, %blocker
+}
+
+// ----
+spills: 0
+value %shared: test.phys -> physical_register[3:1]
+value %initial0: test.phys -> physical_register[0:1]
+value %initial1: test.phys -> physical_register[1:1]
+value %initial2: test.phys -> physical_register[2:1]
+value %initial: test.phys -> physical_register[0:4]
+value %temporary0: test.phys -> physical_register[4:1]
+value %renewed0: test.phys -> physical_register[4:1]
+value %temporary1: test.phys -> physical_register[5:1]
+value %renewed1: test.phys -> physical_register[5:1]
+value %blocker: test.phys -> physical_register[8:1]
+value %temporary2: test.phys -> physical_register[6:1]
+value %renewed2: test.phys -> physical_register[6:1]
+value %renewed: test.phys -> physical_register[4:4]
+
+// ====
+
 // RUN: emit low-allocation-query @partial_concat_keeps_live_source spill-count values=%low,%high,%tuple,%copy copies=%copy fixed=%low:physical_register:0:2 fixed=%high:physical_register:4:2
 
 test.target<low_core> @target

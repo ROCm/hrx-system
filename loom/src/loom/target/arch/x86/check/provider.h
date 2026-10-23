@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-// x86 target-low descriptor and lowering provider package.
+// x86 native emission inspection handlers.
 extern const loom_check_provider_t loom_x86_check_provider;
 
 #ifdef __cplusplus

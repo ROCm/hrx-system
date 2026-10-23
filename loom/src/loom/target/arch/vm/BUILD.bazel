@@ -165,7 +165,6 @@ loom_cc_library(
     textual_hdrs = ["//loom/src/loom/target/arch/vm/contracts:tables.inl"],
     visibility = [
         "//loom/src/loom/target/all:__pkg__",
-        "//loom/src/loom/target/arch/vm/check:__pkg__",
         "//loom/src/loom/target/configured:__pkg__",
         "//loom/src/loom/target/emit/vm:__pkg__",
     ],

@@ -281,7 +281,7 @@ iree_status_t iree_io_uring_ring_submit(iree_io_uring_ring_t* ring,
 // Submits pending entries without waiting for completions or dispatching
 // callbacks. The poll owner must hold the SQ lock across this call and the
 // following get_sqe to prevent concurrent producers taking the freed slots.
-// Used by cold control admission when the SQ is full. Platform failures are
+// Used by cold admission paths when the SQ is full. Platform failures are
 // returned without discarding published work.
 iree_status_t iree_io_uring_ring_submit_pending_locked(
     iree_io_uring_ring_t* ring);

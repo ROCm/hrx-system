@@ -9,7 +9,7 @@
 #include <cstring>
 
 #include "libamdf/cts/gpu/aql/barrier_or_payload_fixture.h"
-#include "libamdf/cts/gpu/aql/queue_fixture.h"
+#include "libamdf/cts/gpu/aql/queue/queue_fixture.h"
 
 namespace {
 

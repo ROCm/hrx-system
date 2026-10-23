@@ -29,6 +29,8 @@ typedef struct loom_low_representation_plan_t loom_low_representation_plan_t;
 typedef struct loom_low_lower_realizations_t loom_low_lower_realizations_t;
 typedef struct loom_low_lower_source_invoke_plan_t
     loom_low_lower_source_invoke_plan_t;
+typedef struct loom_low_lower_projected_call_plan_t
+    loom_low_lower_projected_call_plan_t;
 
 enum loom_low_lower_value_flag_bits_e {
   // The source value must be materialized as a target-Low SSA value.
@@ -47,6 +49,9 @@ enum loom_low_lower_value_flag_bits_e {
   LOOM_LOW_LOWER_VALUE_MATERIALIZED = (uint8_t)1u << 4,
   // The planned binding inherits its carrier from one flattened source ordinal.
   LOOM_LOW_LOWER_VALUE_INHERITED_TYPE = (uint8_t)1u << 5,
+  // Source observation retained this exact product as a memory recurrence
+  // producer. The fact survives storage-demand refinement.
+  LOOM_LOW_LOWER_VALUE_MEMORY_RECURRENCE_PRODUCER = (uint8_t)1u << 6,
 };
 typedef uint8_t loom_low_lower_value_flags_t;
 
@@ -54,8 +59,11 @@ enum loom_low_lower_selected_plan_flag_bits_e {
   // The selected source op is intentionally skipped because none of its
   // results require a target-Low SSA value.
   LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED = (uint8_t)1u << 0,
-  // The source op is emitted by another selected rule spanning a source DAG.
+  // The source op is emitted by another plan spanning a source DAG or shared
+  // physical realization.
   LOOM_LOW_LOWER_SELECTED_PLAN_CLAIMED = (uint8_t)1u << 1,
+  // Target-dependent rule payload finalization is complete for this plan.
+  LOOM_LOW_LOWER_SELECTED_PLAN_RULE_FINALIZED = (uint8_t)1u << 2,
 };
 typedef uint8_t loom_low_lower_selected_plan_flags_t;
 
@@ -70,18 +78,18 @@ typedef enum loom_low_lower_selected_plan_kind_e {
   LOOM_LOW_LOWER_SELECTED_PLAN_FUNCTION_STORAGE = 3,
   // Shared normalization of a semantic invocation into a native helper call.
   LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE = 4,
+  // Shared physical projection of a direct source-ABI call edge.
+  LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL = 5,
   // Shared structural lowering retained as an exact-cover alternative.
-  LOOM_LOW_LOWER_SELECTED_PLAN_STRUCTURAL = 5,
+  LOOM_LOW_LOWER_SELECTED_PLAN_STRUCTURAL = 6,
 } loom_low_lower_selected_plan_kind_t;
 
 // Canonical source-memory data retained with a selected table rule.
 typedef struct loom_low_lower_selected_source_memory_t {
   // Root-adjusted canonical access consumed by the selected rule.
   loom_low_source_memory_access_plan_t access;
-  // Dynamic origin proof captured from the unadjusted source access.
-  const loom_low_lower_memory_origin_t* origin;
-  // Canonical dynamic byte-sum identity retained from source observation.
-  iree_host_size_t dynamic_byte_offset_identity;
+  // Function-owned canonical facts captured from the unadjusted source access.
+  const loom_low_lower_source_memory_record_t* record;
 } loom_low_lower_selected_source_memory_t;
 
 // One source operation's lowering decision retained between planning and
@@ -118,6 +126,8 @@ typedef struct loom_low_lower_selected_plan_t {
   union {
     // Helper signature and proved preconditions owned by the function plan.
     const loom_low_lower_source_invoke_plan_t* invoke;
+    // Physical callee projection and proved logical preconditions.
+    const loom_low_lower_projected_call_plan_t* projected_call;
     // Shared bounded-allocation plan owned by the function lowering arena.
     const loom_low_lower_function_storage_plan_t* function_storage;
     // Target-owned plan selected during planning.
@@ -173,6 +183,8 @@ typedef struct loom_low_lower_source_plan_t {
   // True only while backward selected-plan storage demands are being marked.
   // Requirements established before this phase survive plan refinement.
   bool is_analyzing_storage_demands;
+  // True when source observation retained at least one memory recurrence.
+  bool has_source_memory_recurrences;
   // Canonical accesses joined across observation and selection without an op
   // lookup table or a second address-analysis walk.
   struct {

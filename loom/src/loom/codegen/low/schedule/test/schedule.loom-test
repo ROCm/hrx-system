@@ -1335,6 +1335,26 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_stays_below_nea
 }
 
 // ====
+// A near-cliff candidate in one register bank enables pressure recovery, but
+// it must not make the scheduler idle while safe work in another bank is
+// ready. Fill the issue gap, then resume recovery before crossing the cliff.
+// RUN: emit low-schedule-json @resource_stall_fills_issue_gap_during_unrelated_pressure_recovery strategy=resource-stall cliff=test.i32:73:15:14 diagnostics=candidates output=none
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_fills_issue_gap_during_unrelated_pressure_recovery(%pad: reg<test.i32 x60>, %ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %lhs: reg<test.i32 x4>, %flhs: reg<test.f32>, %frhs: reg<test.f32>) -> (reg<test.i32 x60>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.f32>, reg<test.f32>, reg<test.f32>) asm {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.load.v4i32", rejected_packet="test.load.v4i32"}
+  %load0 = test.load.v4i32 %ptr0
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.add.v4i32", rejected_packet="test.load.v4i32", chosen_pressure_cliff_penalty="0", rejected_units_until_pressure_cliff="1"}
+  %use0 = test.add.v4i32 %load0, %lhs
+  %load1 = test.load.v4i32 %ptr1
+  %use1 = test.add.v4i32 %load1, %use0
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.f32", rejected_packet="test.add.v4i32", chosen_effective_stall_cycles="0", rejected_effective_stall_cycles="4", chosen_pressure_cliff_penalty="0"}
+  %independent = test.add.f32 %flhs, %frhs
+  return %pad, %lhs, %use1, %flhs, %frhs, %independent
+}
+
+// ====
 // RUN: emit low-schedule-json @resource_stall_accounts_for_cfg_live_through_pressure strategy=resource-stall diagnostics=candidates cliff=test.i32:9:15:14 output=none
 
 test.target<low_core> @test_target

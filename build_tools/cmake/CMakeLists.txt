@@ -108,6 +108,13 @@ _iree_cmake_integration_test(
 
 _iree_cmake_integration_test(
   NAME
+    cmake_hal_cts_test
+  SRCS
+    cmake_hal_cts_test.py
+)
+
+_iree_cmake_integration_test(
+  NAME
     cmake_installed_tests_test
   SRCS
     cmake_installed_tests_test.py

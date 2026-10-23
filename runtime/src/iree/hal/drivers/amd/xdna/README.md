@@ -7,11 +7,11 @@ admits `.xdna` ELFs and applies their declared storage and binding contracts.
 
 ## Running a Loom scenario
 
-Enable the shared AMD HAL driver. This selects libamdf automatically; the default
+Enable the XDNA HAL engine. This selects libamdf automatically; the default
 Loom product already includes XDNA emission and the VM reference target:
 
 ```sh
-python dev.py bazel configure -DIREE_HAL_DRIVER_AMD=ON
+python dev.py bazel configure -DIREE_HAL_DRIVER_AMD_XDNA=ON
 python dev.py bazel run //loom/src/loom/tools/loom-test -- \
   loom/src/loom/tooling/target/amd/xdna/test/hal_execution.loom --device=xdna
 ```

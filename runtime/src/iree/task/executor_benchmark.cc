@@ -73,9 +73,11 @@ static void budget1_bench_release(iree_task_process_t* process) {
   released->store(true, std::memory_order_release);
 }
 
-// Context for wake_budget > 1 benchmarks with cooperative multi-worker
-// draining.
-struct ComputeBenchmarkContext {
+// Context for cooperative draining. Independent processes use separate cache
+// lines so their tile claims measure scheduling, not unrelated false sharing.
+struct alignas(iree_hardware_destructive_interference_size)
+    ComputeBenchmarkContext {
+  // Tiles still available for this process's drainers.
   std::atomic<int32_t> tiles_remaining;
   // Signaled by completion_fn (eager — may precede full release).
   std::atomic<bool> completed{false};

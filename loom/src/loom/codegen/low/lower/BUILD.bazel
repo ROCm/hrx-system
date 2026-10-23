@@ -61,6 +61,7 @@ loom_cc_library(
         "source_memory.c",
         "source_plan.c",
         "source_query.c",
+        "source_signature_projection.c",
         "source_value_storage.c",
         "structural_plan.c",
         "visibility.c",
@@ -97,6 +98,7 @@ loom_cc_library(
         "source_memory.h",
         "source_plan.h",
         "source_query.h",
+        "source_signature_projection.h",
         "source_value_storage.h",
         "structural_plan.h",
         "visibility.h",
@@ -145,6 +147,7 @@ loom_cc_library(
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/encoding",
+        "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/kernel",
@@ -162,6 +165,7 @@ loom_cc_library(
         "//loom/src/loom/target:low_legality",
         "//loom/src/loom/target:registers",
         "//loom/src/loom/target:types",
+        "//loom/src/loom/target/abi/c:signature_layout",
         "//loom/src/loom/util:cfg_execution",
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:cfg_loop_nest",
@@ -172,6 +176,35 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "c_abi_projection",
+    srcs = ["abi/c/projection.c"],
+    hdrs = ["abi/c/projection.h"],
+    visibility = _LOWER_VISIBILITY,
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "c_abi_projection_test",
+    srcs = ["abi/c/projection_test.cc"],
+    deps = [
+        ":c_abi_projection",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

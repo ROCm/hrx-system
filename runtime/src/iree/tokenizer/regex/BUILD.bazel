@@ -168,10 +168,14 @@ iree_runtime_cc_benchmark(
 # For executor-only tests with hand-built DFAs, see exec_test.
 iree_runtime_cc_test(
     name = "regex_test",
-    srcs = ["regex_test.cc"],
+    srcs = [
+        "regex_branch_test.cc",
+        "regex_test.cc",
+    ],
     deps = [
         ":compile",
         ":exec",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:unicode",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

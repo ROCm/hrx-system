@@ -139,7 +139,7 @@ also expose missing or crossed stores.
 On a compatible AMDGPU device, check a candidate with access instrumentation:
 
 ```shell
-loom-test paired-read-ahead.loombc --device=amdgpu \
+loom-test paired-read-ahead.loombc --device=legacy-amdgpu \
   --target=amdgpu:gfx1151 --sanitizer=access \
   --config=paired_rows.left_lookahead=3 --config=paired_rows.left_unroll=4 \
   --config=paired_rows.right_lookahead=0 --config=paired_rows.right_unroll=1
@@ -149,7 +149,7 @@ Measure with optimized, uninstrumented tools using the same settings:
 
 ```shell
 loom-benchmark paired-read-ahead.loombc --benchmark=@paired_rows_time \
-  --device=amdgpu --target=amdgpu:gfx1151 \
+  --device=legacy-amdgpu --target=amdgpu:gfx1151 \
   --config=paired_rows.left_lookahead=3 --config=paired_rows.left_unroll=4 \
   --config=paired_rows.right_lookahead=0 --config=paired_rows.right_unroll=1 \
   --measure=dispatch_complete --batch-size=128 --input-ring-count=1 \

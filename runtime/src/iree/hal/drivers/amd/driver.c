@@ -8,10 +8,15 @@
 
 #include <stdlib.h>
 
+#include "amdf/gpu.h"
 #include "iree/hal/drivers/amd/fabric/fabric.h"
-#include "iree/hal/drivers/amd/gpu/device.h"
 #include "iree/hal/drivers/amd/status.h"
+#if IREE_HAL_AMD_GPU_ENABLED
+#include "iree/hal/drivers/amd/gpu/device.h"
+#endif
+#if IREE_HAL_AMD_XDNA_ENABLED
 #include "iree/hal/drivers/amd/xdna/device.h"
+#endif
 
 typedef struct iree_hal_amd_driver_scheme_t {
   // URI scheme selecting this independent ordinal namespace.
@@ -25,14 +30,18 @@ typedef struct iree_hal_amd_driver_scheme_t {
 } iree_hal_amd_driver_scheme_t;
 
 static const iree_hal_amd_driver_scheme_t iree_hal_amd_driver_schemes[] = {
+#if IREE_HAL_AMD_XDNA_ENABLED
     {IREE_SVL("xdna"), "HAL_VISIBLE_XDNA_DEVICES", AMDF_ENGINE_KIND_XDNA,
      AMDF_GPU_ARCHITECTURE_UNKNOWN},
+#endif
+#if IREE_HAL_AMD_GPU_ENABLED
     {IREE_SVL("rdna"), "HAL_VISIBLE_RDNA_DEVICES", AMDF_ENGINE_KIND_GPU,
      AMDF_GPU_ARCHITECTURE_RDNA},
     {IREE_SVL("cdna"), "HAL_VISIBLE_CDNA_DEVICES", AMDF_ENGINE_KIND_GPU,
      AMDF_GPU_ARCHITECTURE_CDNA},
-    {IREE_SVL("amdgpu2"), "HAL_VISIBLE_AMDGPU2_DEVICES", AMDF_ENGINE_KIND_GPU,
+    {IREE_SVL("amdgpu"), "HAL_VISIBLE_AMDGPU_DEVICES", AMDF_ENGINE_KIND_GPU,
      AMDF_GPU_ARCHITECTURE_UNKNOWN},
+#endif
 };
 
 typedef struct iree_hal_amd_driver_view_t {
@@ -116,18 +125,15 @@ static iree_status_t iree_hal_amd_driver_select_view(
                           (int)driver_name.size, driver_name.data);
 }
 
+#if IREE_HAL_AMD_GPU_ENABLED
 // Captures architecture and compute support through query-only handles. This
 // creates no native device, address space, queue, or event.
-static iree_status_t iree_hal_amd_driver_query_endpoint_support(
+static iree_status_t iree_hal_amd_driver_query_gpu_support(
     iree_hal_amd_fabric_t* fabric, const amdf_gpu_api_t* gpu,
     const amdf_endpoint_summary_t* summary,
     amdf_gpu_architecture_t* out_architecture, bool* out_supported) {
   *out_architecture = AMDF_GPU_ARCHITECTURE_UNKNOWN;
   *out_supported = false;
-  if (summary->engine_kind != AMDF_ENGINE_KIND_GPU) {
-    *out_supported = summary->engine_kind == AMDF_ENGINE_KIND_XDNA;
-    return iree_ok_status();
-  }
   amdf_endpoint_t* endpoint = NULL;
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       fabric->api->endpoint_open(fabric->instance, &summary->id, &endpoint),
@@ -158,6 +164,7 @@ static iree_status_t iree_hal_amd_driver_query_endpoint_support(
   }
   return status;
 }
+#endif  // IREE_HAL_AMD_GPU_ENABLED
 
 static iree_status_t iree_hal_amd_driver_query_available_devices(
     iree_hal_driver_t* base, iree_string_view_t driver_name,
@@ -207,9 +214,7 @@ static iree_status_t iree_hal_amd_driver_resolve_id(
     const amdf_endpoint_summary_t** out_endpoint) {
   const iree_hal_amd_fabric_t* fabric = driver->fabric;
   if (id == IREE_HAL_DEVICE_ID_DEFAULT) {
-    const iree_hal_amd_driver_view_t* view = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_hal_amd_driver_select_view(driver, IREE_SV("xdna"), &view));
+    const iree_hal_amd_driver_view_t* view = &driver->all_view;
     if (view->count) {
       *out_endpoint = &fabric->endpoints[view->indices[0]];
       return iree_ok_status();
@@ -231,6 +236,7 @@ static iree_status_t iree_hal_amd_driver_dump_device_info(
                                            endpoint->name);
 }
 
+#if IREE_HAL_AMD_GPU_ENABLED
 static iree_status_t iree_hal_amd_driver_create_gpu_device(
     iree_hal_amd_fabric_t* fabric, const amdf_endpoint_summary_t* endpoint,
     iree_host_size_t param_count, const iree_string_pair_t* params,
@@ -296,32 +302,39 @@ static iree_status_t iree_hal_amd_driver_create_gpu_device(
       context, iree_make_cstring_view(endpoint->name), &options, create_params,
       host_allocator, out_device);
 }
+#endif  // IREE_HAL_AMD_GPU_ENABLED
 
 static iree_status_t iree_hal_amd_driver_create_device(
     iree_hal_amd_driver_t* driver, const amdf_endpoint_summary_t* endpoint,
     iree_host_size_t param_count, const iree_string_pair_t* params,
     const iree_hal_device_create_params_t* create_params,
     iree_allocator_t host_allocator, iree_hal_device_t** out_device) {
-  if (endpoint->engine_kind == AMDF_ENGINE_KIND_GPU) {
-    return iree_hal_amd_driver_create_gpu_device(
-        driver->fabric, endpoint, param_count, params, create_params,
-        host_allocator, out_device);
+  switch (endpoint->engine_kind) {
+#if IREE_HAL_AMD_GPU_ENABLED
+    case AMDF_ENGINE_KIND_GPU:
+      return iree_hal_amd_driver_create_gpu_device(
+          driver->fabric, endpoint, param_count, params, create_params,
+          host_allocator, out_device);
+#endif
+#if IREE_HAL_AMD_XDNA_ENABLED
+    case AMDF_ENGINE_KIND_XDNA: {
+      iree_hal_amd_xdna_context_t* context = NULL;
+      IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_context_allocate(
+          driver->fabric, &endpoint->id, param_count, params,
+          create_params->event_sink, host_allocator, &context));
+      iree_status_t status = iree_hal_amd_xdna_device_create(
+          context, iree_make_cstring_view(endpoint->name), create_params,
+          host_allocator, out_device);
+      if (!iree_status_is_ok(status)) {
+        iree_hal_amd_xdna_context_free(context);
+      }
+      return status;
+    }
+#endif
+    default:
+      return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "AMD endpoint has no built-in execution engine");
   }
-  if (endpoint->engine_kind != AMDF_ENGINE_KIND_XDNA) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "AMD endpoint has no supported execution engine");
-  }
-  iree_hal_amd_xdna_context_t* context = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_context_allocate(
-      driver->fabric, &endpoint->id, param_count, params,
-      create_params->event_sink, host_allocator, &context));
-  iree_status_t status = iree_hal_amd_xdna_device_create(
-      context, iree_make_cstring_view(endpoint->name), create_params,
-      host_allocator, out_device);
-  if (!iree_status_is_ok(status)) {
-    iree_hal_amd_xdna_context_free(context);
-  }
-  return status;
 }
 
 static iree_status_t iree_hal_amd_driver_create_device_by_id(
@@ -458,6 +471,7 @@ static iree_status_t iree_hal_amd_driver_initialize_views(
   }
 
   iree_status_t status = iree_ok_status();
+#if IREE_HAL_AMD_GPU_ENABLED
   const amdf_gpu_api_t* gpu = NULL;
   for (uint32_t i = 0; i < endpoint_count && !gpu && iree_status_is_ok(status);
        ++i) {
@@ -472,12 +486,22 @@ static iree_status_t iree_hal_amd_driver_initialize_views(
         "query_extension(GPU)");
     gpu = extension;
   }
+#endif
   for (uint32_t i = 0; i < endpoint_count && iree_status_is_ok(status); ++i) {
     const amdf_endpoint_summary_t* endpoint = &driver->fabric->endpoints[i];
     amdf_gpu_architecture_t architecture = AMDF_GPU_ARCHITECTURE_UNKNOWN;
     bool supported = false;
-    status = iree_hal_amd_driver_query_endpoint_support(
-        driver->fabric, gpu, endpoint, &architecture, &supported);
+#if IREE_HAL_AMD_GPU_ENABLED
+    if (endpoint->engine_kind == AMDF_ENGINE_KIND_GPU) {
+      status = iree_hal_amd_driver_query_gpu_support(
+          driver->fabric, gpu, endpoint, &architecture, &supported);
+    }
+#endif
+#if IREE_HAL_AMD_XDNA_ENABLED
+    if (endpoint->engine_kind == AMDF_ENGINE_KIND_XDNA) {
+      supported = true;
+    }
+#endif
     if (!supported) {
       continue;
     }

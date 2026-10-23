@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_instance_library", "loom_cc_library", "loom_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -178,9 +178,11 @@ loom_cc_test(
         ":rewriter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/ops/vector",
         "//loom/src/loom/pass:value_facts",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
@@ -211,7 +213,7 @@ loom_cc_test(
     ],
 )
 
-loom_cc_library(
+loom_cc_instance_library(
     name = "remap",
     srcs = [
         "remap.c",

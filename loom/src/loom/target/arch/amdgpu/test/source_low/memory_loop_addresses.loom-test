@@ -183,6 +183,106 @@ CHECK-NOT: * = s_max_u32 *
 
 // ====
 
+// A preheader access publishes an exact plane origin. Each loop access adds a
+// distinct lane term and the same clamped iteration term, so the retained
+// origin covers only part of each invariant address. The target composes each
+// lane residual once and still shifts one resource descriptor by the uniform
+// loop term.
+kernel.def @partial_retained_buffer_origins() {
+  %unit_count = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit_count, %unit_count, %unit_count) workgroup_size(%threads, %unit_count, %unit_count) : index
+} launch(%input: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %c2 = index.constant 2 : index
+  %plane = index.rem %lane, %c2 : index
+  %row_group = index.div %lane, %c2 : index
+  %plane_stride = index.constant 16 : index
+  %plane_row = index.madd %plane, %plane_stride, %row_group : index
+  %plane_extent = index.constant 32768 : index
+  %plane_base = index.mul %plane_row, %plane_extent : index
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<1048576xi32>
+  %seed = vector.load<volatile> %source[%plane_base] : view<1048576xi32> -> vector<4xi32>
+  %row_stride = index.constant 16 : index
+  %distance_one = index.constant 128 : index
+  %distance_two = index.constant 256 : index
+  %distance_three = index.constant 384 : index
+  %distance_four = index.constant 512 : index
+  %distance_five = index.constant 640 : index
+  %distance_six = index.constant 768 : index
+  %distance_seven = index.constant 896 : index
+  %lane_two = index.mul %lane, %c2 : index
+  %c3 = index.constant 3 : index
+  %lane_three = index.mul %lane, %c3 : index
+  %c4 = index.constant 4 : index
+  %lane_four = index.mul %lane, %c4 : index
+  %c5 = index.constant 5 : index
+  %lane_five = index.mul %lane, %c5 : index
+  %c6 = index.constant 6 : index
+  %lane_six = index.mul %lane, %c6 : index
+  %c7 = index.constant 7 : index
+  %lane_seven = index.mul %lane, %c7 : index
+  %c8 = index.constant 8 : index
+  %lane_eight = index.mul %lane, %c8 : index
+  %row_one = index.add %lane_two, %distance_one : index
+  %row_two = index.add %lane_three, %distance_two : index
+  %row_three = index.add %lane_four, %distance_three : index
+  %row_four = index.add %lane_five, %distance_four : index
+  %row_five = index.add %lane_six, %distance_five : index
+  %row_six = index.add %lane_seven, %distance_six : index
+  %row_seven = index.add %lane_eight, %distance_seven : index
+  %row_zero_base = index.madd %lane, %row_stride, %plane_base : index
+  %row_one_base = index.madd %row_one, %row_stride, %plane_base : index
+  %row_two_base = index.madd %row_two, %row_stride, %plane_base : index
+  %row_three_base = index.madd %row_three, %row_stride, %plane_base : index
+  %row_four_base = index.madd %row_four, %row_stride, %plane_base : index
+  %row_five_base = index.madd %row_five, %row_stride, %plane_base : index
+  %row_six_base = index.madd %row_six, %row_stride, %plane_base : index
+  %row_seven_base = index.madd %row_seven, %row_stride, %plane_base : index
+  %begin = index.constant 0 : index
+  %end = index.constant 32 : index
+  %step = index.constant 1 : index
+  %last = index.constant 2 : index
+  %width = index.constant 4 : index
+  scf.for %iteration = [%begin to %end step %step] {
+    %clamped = index.min %iteration, %last : index
+    %position_zero = index.madd %clamped, %width, %row_zero_base : index
+    %position_one = index.madd %clamped, %width, %row_one_base : index
+    %position_two = index.madd %clamped, %width, %row_two_base : index
+    %position_three = index.madd %clamped, %width, %row_three_base : index
+    %position_four = index.madd %clamped, %width, %row_four_base : index
+    %position_five = index.madd %clamped, %width, %row_five_base : index
+    %position_six = index.madd %clamped, %width, %row_six_base : index
+    %position_seven = index.madd %clamped, %width, %row_seven_base : index
+    %zero = vector.load<volatile> %source[%position_zero] : view<1048576xi32> -> vector<4xi32>
+    %one = vector.load<volatile> %source[%position_one] : view<1048576xi32> -> vector<4xi32>
+    %two_value = vector.load<volatile> %source[%position_two] : view<1048576xi32> -> vector<4xi32>
+    %three_value = vector.load<volatile> %source[%position_three] : view<1048576xi32> -> vector<4xi32>
+    %four_value = vector.load<volatile> %source[%position_four] : view<1048576xi32> -> vector<4xi32>
+    %five_value = vector.load<volatile> %source[%position_five] : view<1048576xi32> -> vector<4xi32>
+    %six_value = vector.load<volatile> %source[%position_six] : view<1048576xi32> -> vector<4xi32>
+    %seven_value = vector.load<volatile> %source[%position_seven] : view<1048576xi32> -> vector<4xi32>
+  }
+  kernel.return
+}
+
+// ----
+CHECK-COUNT-1: %plane_base = v_lshlrev_b32_src0_inline *
+CHECK: %clamped = s_min_i32 %iteration, *
+CHECK: * = s_lshl_b32_rhs_inline %clamped, 4
+CHECK-COUNT-8: * = buffer_load_b128<volatile> *
+CHECK-NOT: %zero = global_load_b128_saddr *
+CHECK-NOT: %one = global_load_b128_saddr *
+CHECK-NOT: %two_value = global_load_b128_saddr *
+CHECK-NOT: %three_value = global_load_b128_saddr *
+CHECK-NOT: %four_value = global_load_b128_saddr *
+CHECK-NOT: %five_value = global_load_b128_saddr *
+CHECK-NOT: %six_value = global_load_b128_saddr *
+CHECK-NOT: %seven_value = global_load_b128_saddr *
+
+// ====
+
 // Duplicate volatile reads share one address calculation, not four savings.
 // The second loop has distinct biases but too few trips to pay for setup.
 kernel.def @unamortized_buffer_origins() {

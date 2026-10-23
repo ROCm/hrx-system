@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Offline compiler qualification, independent of execution resources.
+// Public module ownership and compiler invocation for checker modes.
 
 #ifndef LOOM_TOOLS_LOOM_CHECK_COMPILE_H_
 #define LOOM_TOOLS_LOOM_CHECK_COMPILE_H_
@@ -12,9 +12,11 @@
 #include "loom/sanitizer/options.h"
 #include "loom/target/pipeline_options.h"
 #include "loom/target/reporting/report.h"
+#include "loom/tooling/input/loomc.h"
 #include "loom/tools/loom-check/execute.h"
 #include "loomc/compile.h"
 #include "loomc/compile_report.h"
+#include "loomc/interop.h"
 #include "loomc/sanitizer.h"
 #include "loomc/target.h"
 
@@ -22,29 +24,18 @@
 extern "C" {
 #endif
 
-// Imports one optional foreign source format through LoomC. Builtin Loom text
-// and bytecode admission do not use this callback.
-typedef iree_status_t (*loom_check_compile_import_fn_t)(
-    void* user_data, iree_string_view_t format,
-    iree_string_view_t input_options,
-    const loom_tooling_source_path_options_t* source_path_options,
-    loomc_context_t* context, loomc_workspace_t* workspace,
-    const loomc_source_t* source, iree_arena_block_pool_t* block_pool,
-    iree_allocator_t host_allocator, loomc_module_t** out_module,
-    loomc_result_t** out_result);
-
 // Compiler integrations supplied by the final loom-check binary. The generic
 // runner does not choose a configured target set or optional source frontend.
 typedef struct loom_check_compile_provider_t {
   // Optional foreign-source importer dispatch.
-  loom_check_compile_import_fn_t import;
+  loom_tooling_input_import_loomc_fn_t import;
   // Opaque state forwarded to |import|.
   void* import_user_data;
 } loom_check_compile_provider_t;
 
-// Lazily prepared public compiler state shared by checker cases. Initializing a
-// session does not construct a target environment, context, workspace, or
-// compiler; the first public compile operation prepares all four together.
+// Lazily prepared public compiler state shared by checker cases. The runner
+// supplies the retained target environment; the first use prepares the context,
+// workspace, and compiler together.
 typedef struct loom_check_compile_session_t {
   // Binary-owned compiler integrations used when the session is prepared.
   const loom_check_compile_provider_t* provider;
@@ -52,15 +43,19 @@ typedef struct loom_check_compile_session_t {
   iree_allocator_t host_allocator;
   // Retained public target environment composed by the checker runner.
   loomc_target_environment_t* target_environment;
-  // Public context, or NULL before the first compile operation.
+  // Public context, or NULL before the first use.
   loomc_context_t* context;
-  // Reusable invocation workspace, or NULL before the first compile operation.
+  // Reusable invocation workspace, or NULL before the first use.
   loomc_workspace_t* workspace;
-  // Prepared compiler, or NULL before the first compile operation.
+  // Prepared compiler, or NULL before the first use.
   loomc_compiler_t* compiler;
   // Cached empty, source-to-Low CFG, and source-to-Low structured programs.
   loomc_pass_program_t* artifact_pass_programs[3];
 } loom_check_compile_session_t;
+
+// Prepares the session's context, workspace, and compiler on first use.
+iree_status_t loom_check_compile_session_prepare(
+    loom_check_compile_session_t* session);
 
 typedef struct loom_check_compile_options_t {
   // Lazily prepared public compiler state owned by the runner.
@@ -148,16 +143,34 @@ iree_status_t loom_check_compile_session_select_target_profile(
     loomc_target_profile_t** out_target_profile);
 
 // Admits one checker case through the shared public compiler session. Public
-// diagnostics are appended to |diagnostic_collector|. A successful module is
+// diagnostics are appended to |diagnostic_collector|. |max_errors| limits text
+// parser recovery; zero selects the parser default. A successful module is
 // owned by the caller and must be released with loomc_module_release.
+// |filename| is the reader's logical source identity, already path-mapped.
+// Foreign importers receive |input_request->path| for include resolution and
+// apply the request's path policy to sources they discover.
 iree_status_t loom_check_compile_admit_module(
     const loom_test_case_t* test_case, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
+    const loom_check_input_t* input_request,
     loom_check_compile_session_t* session,
-    const loom_check_environment_t* environment,
+    const loom_check_environment_t* environment, uint32_t max_errors,
     loom_check_diagnostic_collector_t* diagnostic_collector,
     iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
     loomc_module_t** out_module);
+
+// Selects the explicit function name, sole definition, or unique public/kernel
+// entry among private helpers. The returned name borrows module storage.
+iree_status_t loom_check_compile_select_source_function(
+    const loom_module_t* module, iree_string_view_t function_name,
+    iree_string_view_t* out_function_name);
+
+// Borrows verified IR for native inspection. The view remains valid until the
+// public module is mutated or released. Rejection diagnostics are copied into
+// |collector| and reported through |out_succeeded|.
+iree_status_t loom_check_compile_project_module(
+    loomc_module_t* module, loom_check_diagnostic_collector_t* collector,
+    iree_allocator_t allocator, loomc_module_interop_view_t* out_view,
+    bool* out_succeeded);
 
 // Projects, invokes, and re-verifies the admitted public module in |request|.
 // Public verification diagnostics suppress the callback and return OK for
@@ -192,7 +205,7 @@ iree_status_t loom_check_compile_source_low(
 iree_status_t loom_check_execute_compile(
     const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
+    const loom_check_input_t* input_request,
     const loom_check_compile_options_t* options,
     const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,

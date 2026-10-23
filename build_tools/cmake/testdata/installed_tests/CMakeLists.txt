@@ -55,6 +55,16 @@ if(IREE_TEST_DECLARE_TOOL)
     TARGET tool
     DATA first::library second::library
   )
+
+  add_library(shared SHARED shared.c)
+  set_target_properties(shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  add_executable(shared_consumer shared_consumer.c)
+  target_link_libraries(shared_consumer PRIVATE shared)
+  hrx_register_installed_test(
+    NAME shared-library-consumer
+    TARGET shared_consumer
+    DATA shared
+  )
 endif()
 
 hrx_create_installed_tests()

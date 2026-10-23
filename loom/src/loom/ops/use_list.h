@@ -16,6 +16,26 @@
 extern "C" {
 #endif
 
+// Initial overflow capacity when transitioning from inline to overflow.
+// 8 covers the common case of values used 4-8 times without further
+// reallocation. Values used more than 8 times get geometric growth.
+#define LOOM_USE_INITIAL_OVERFLOW_CAPACITY 8
+
+// Updates exact ownership summaries retained beside an overflow use list.
+static inline void loom_value_update_overflow_use_counts(
+    loom_value_t* value, loom_use_flags_t old_flags,
+    loom_use_flags_t new_flags) {
+  if (old_flags == new_flags || !loom_value_has_overflow_uses(value)) {
+    return;
+  }
+  value->overflow_ownership_use_count -= old_flags != 0;
+  value->overflow_ownership_use_count += new_flags != 0;
+  value->overflow_consuming_use_count -=
+      iree_any_bit_set(old_flags, LOOM_USE_FLAG_CONSUMES);
+  value->overflow_consuming_use_count +=
+      iree_any_bit_set(new_flags, LOOM_USE_FLAG_CONSUMES);
+}
+
 // Registers a newly constructed operation's operand occurrences and their
 // ownership classifications. Called once by finalization or use reconstruction
 // after operands, result descriptors and explicit ties are available.
@@ -42,37 +62,6 @@ void loom_value_remove_use(loom_module_t* module, loom_value_id_t value_id,
 iree_status_t loom_op_set_operand(loom_module_t* module, loom_op_t* op,
                                   uint16_t operand_index,
                                   loom_value_id_t new_value_id);
-
-// Replaces all uses of |old_id| with |new_id|. Walks old's operand use list,
-// patches each user op's operand slot, bulk-transfers those use entries to
-// new's list, and rewrites SSA references embedded in value types and operation
-// attributes with one shared immutable substitution context. Each embedded
-// reference owner publishes consistently with its index, but an allocation
-// failure can leave earlier owners changed. Ordinary operands are transferred
-// only after all embedded references succeed. No-op if old_id == new_id.
-iree_status_t loom_value_replace_all_uses_with(loom_module_t* module,
-                                               loom_value_id_t old_id,
-                                               loom_value_id_t new_id);
-
-// Same as replace_all_uses_with, but skips uses where the user op is
-// |except_op|. This filtered form only rewrites operand slots; embedded type
-// references have no user op to predicate against. Used during pattern rewrites
-// where the replacement op also references the old value.
-iree_status_t loom_value_replace_all_uses_except(loom_module_t* module,
-                                                 loom_value_id_t old_id,
-                                                 loom_value_id_t new_id,
-                                                 const loom_op_t* except_op);
-
-// Predicate-based RAUW. Replaces operand uses of |old_id| with |new_id| only
-// where |predicate| returns true for the user op. Embedded type references are
-// intentionally not rewritten by this filtered form.
-typedef bool (*loom_use_predicate_fn)(const loom_op_t* user_op,
-                                      void* user_data);
-iree_status_t loom_value_replace_uses_if(loom_module_t* module,
-                                         loom_value_id_t old_id,
-                                         loom_value_id_t new_id,
-                                         loom_use_predicate_fn predicate,
-                                         void* user_data);
 
 // Rebuilds all use lists from scratch by walking every live op in the
 // module. Clears all values' use data, then re-adds uses from operands.

@@ -45,6 +45,8 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::Drain(
     iree_task_process_drain_result_t* result) {
   auto* self = static_cast<loom_serve_test_embedding_model_lifecycle_t*>(
       process->user_data);
+  self->status = iree_status_join(
+      self->status, loom_serve_workspace_advance(self->workspace));
   if (!self->complete && self->retiring) {
     if (!self->retirement_started) {
       self->retirement_started = true;
@@ -52,10 +54,11 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::Drain(
     }
     self->complete = loom_serve_finite_model_is_retired(self->model);
     if (self->complete) {
-      self->status = loom_serve_finite_model_free_retired(self->model);
-      if (iree_status_is_ok(self->status)) {
+      iree_status_t status = loom_serve_finite_model_free_retired(self->model);
+      if (iree_status_is_ok(status)) {
         self->model = nullptr;
       }
+      self->status = iree_status_join(self->status, status);
     }
   } else if (!self->complete) {
     self->status = iree_status_join(
@@ -78,14 +81,14 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::Drain(
           loom_serve_finite_load_free(std::exchange(self->load, nullptr)));
     }
   }
-  bool pending = false;
+  bool pending = loom_serve_workspace_is_pending(self->workspace);
   if (self->service) {
     const auto flags =
         self->complete ? 0 : LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY;
     self->status = iree_status_join(
         self->status,
         self->service->advance(self->service->self, flags, &result->did_work));
-    pending = self->service->is_pending(self->service->self);
+    pending |= self->service->is_pending(self->service->self);
   }
   if (self->pool) {
     pending |= loom_serve_memory_pool_is_pending(self->pool);
@@ -93,6 +96,9 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::Drain(
   result->completed = self->complete && !pending;
   if (result->completed && self->pool) {
     loom_serve_memory_pool_set_observer(self->pool, nullptr, nullptr);
+  }
+  if (result->completed) {
+    loom_serve_workspace_set_observer(self->workspace, {});
   }
   return iree_ok_status();
 }
@@ -131,6 +137,8 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::RunOwner(
     service->set_observer(service->self, {Wake, this});
   }
   pool = loom_serve_device_memory_pool(device);
+  workspace = loom_serve_device_workspace(device);
+  loom_serve_workspace_set_observer(workspace, {Wake, this});
   if (pool) {
     loom_serve_memory_pool_set_observer(pool, Wake, this);
   }
@@ -145,15 +153,18 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::RunOwner(
 
 iree_host_size_t SourceEmbeddingServiceTest::DeviceCount() const { return 1; }
 
+uint64_t SourceEmbeddingServiceTest::BatchUnits() const { return 64; }
+
 void SourceEmbeddingServiceTest::SetUp() {
   iree_notification_initialize(&notification_);
   auto application_options = loom_serve_test_application_options_default();
   application_options.device_count = DeviceCount();
   if (application_options.backing == LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
-    // One parameter page plus the fixture's 3344-byte invocation fits. Two
-    // parameter pages do not: a peer must reuse backing after deactivation.
+    // One parameter slab plus one shared workspace slab fits. The concurrent
+    // pressure cases use 32-unit invocations so two pack into that workspace.
+    // Two parameter slabs plus invocation workspace do not fit.
     application_options.slab_size = 4096;
-    application_options.memory_limit = 7680;
+    application_options.memory_limit = 8192;
   }
   loom_serve_test_application_t* application = nullptr;
   IREE_ASSERT_OK(loom_serve_test_application_acquire(
@@ -200,15 +211,17 @@ iree_status_t SourceEmbeddingServiceTest::ListenerAllocatorControl(
 void SourceEmbeddingServiceTest::CreateModel(const std::string& directory) {
   loom_serve::testing::ModelDocument document;
   IREE_ASSERT_OK(document.Load(directory + "/model.json"));
+  const std::string options =
+      "{\"batch_units\":" + std::to_string(BatchUnits()) + "}";
   const loom_serve_finite_model_options_t model_options = {
       .sources = document.value().sources,
       .asset_directory = IREE_SV("."),
-      .options = IREE_SV("{\"batch_units\":64}"),
+      .options = iree_make_string_view(options.data(), options.size()),
   };
   loom_serve_test_embedding_model_lifecycle_t load;
   IREE_ASSERT_OK(load.Run(device_, model_options));
   model_ = load.model;
-  EXPECT_EQ(loom_serve_finite_model_batch_limit(model_), 64u);
+  EXPECT_EQ(loom_serve_finite_model_batch_limit(model_), BatchUnits());
 }
 
 void SourceEmbeddingServiceTest::CreateService(
@@ -227,6 +240,8 @@ void SourceEmbeddingServiceTest::CreateService(
       },
       this};
   interface_.set_observer(interface_.self, observer);
+  loom_serve_workspace_set_observer(loom_serve_device_workspace(device_),
+                                    observer);
   if (auto* pool = loom_serve_device_memory_pool(device_)) {
     loom_serve_memory_pool_set_observer(pool, observer.wake,
                                         observer.user_data);
@@ -246,6 +261,7 @@ void SourceEmbeddingServiceTest::TearDown() {
   loom_serve_http_server_free(server_);
   IREE_EXPECT_OK(loom_serve_finite_model_free(model_));
   IREE_EXPECT_OK(loom_serve_finite_model_free(retained_));
+  loom_serve_workspace_set_observer(loom_serve_device_workspace(device_), {});
   if (auto* pool = loom_serve_device_memory_pool(device_)) {
     loom_serve_memory_pool_set_observer(pool, nullptr, nullptr);
   }
@@ -294,10 +310,13 @@ void SourceEmbeddingServiceTest::Accept(
 
 bool SourceEmbeddingServiceTest::Step(loom_serve_service_flags_t flags) {
   const uint64_t previous = wakes_.load();
+  auto* workspace = loom_serve_device_workspace(device_);
+  IREE_EXPECT_OK(loom_serve_workspace_advance(workspace));
   bool progress = false;
   IREE_EXPECT_OK(interface_.advance(interface_.self, flags, &progress));
   auto* pool = loom_serve_device_memory_pool(device_);
   if (interface_.is_active(interface_.self) ||
+      loom_serve_workspace_is_pending(workspace) ||
       (pool && loom_serve_memory_pool_is_pending(pool))) {
     struct loom_serve_test_embedding_wait_t {
       // Shared release counter.
@@ -604,13 +623,15 @@ void SourceEmbeddingServiceTest::WriteCheckpointPackage(
   ASSERT_NE(result_position, std::string::npos);
   prepare.insert(result_position, R"(
   %parameter_index = scalar.constant 0 : i32
-  %parameter_source = scalar.constant 0 : i32
+  %parameter_input = scalar.constant 0 : i32
   %parameter_path = global.load @checkpoint : buffer
   %parameter_policy = global.load @policy : buffer
-  func.call @parameter(%stage, %parameter_index, %parameter_source, %directory, %parameter_path, %parameter_policy) : (i32, i32, i32, buffer, buffer, buffer) -> ()
+  %parameter_source = func.call @source(%directory, %parameter_path) : (buffer, buffer) -> (i32)
+  func.call @parameter(%stage, %parameter_index, %parameter_input, %parameter_source, %parameter_policy) : (i32, i32, i32, i32, buffer) -> ()
 )");
   const std::string declarations = R"(
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
 global.rodata.def @checkpoint = bytes("776569676874732e7361666574656e736f7273")
 global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
 )";
@@ -620,7 +641,8 @@ global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
   ASSERT_TRUE(bootstrap.good());
   std::ofstream manifest(target + "/model.json");
   manifest
-      << R"({"name":"checkpoint","definition":{"kind":"embedding","prepare":"prepare.loom","control":"control.loom","sources":["config.loom","embed.loom","weights.loom"],"assets":"."}})";
+      << R"({"name":"checkpoint","definition":{"kind":"embedding","prepare":"prepare.loom","control":"control.loom","sources":["config.loom","embed.loom","weights.loom"],"assets":".","options":{"batch_units":)"
+      << BatchUnits() << "}}}";
   manifest.close();
   ASSERT_TRUE(manifest.good());
   std::string header =

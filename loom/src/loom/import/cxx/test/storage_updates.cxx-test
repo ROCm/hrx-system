@@ -278,7 +278,7 @@ unsigned update(unsigned char* bytes, unsigned amount) {
 }
 
 // ----
-func.def public @update(%bytes: buffer, %bytes_byte_offset: offset, %amount: i32) -> (i32) {
+func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], results = [1], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @update(%bytes: buffer, %bytes_byte_offset: offset, %amount: i32) -> (i32) {
   %4 = buffer.view %bytes[%bytes_byte_offset] : buffer -> view<1xi8>
   %5 = view.load %4[0] : view<1xi8> -> i8
   %6 = scalar.extui %5 : i8 to i32

@@ -499,6 +499,7 @@ loom_cc_library(
     "lower/shuffle.h"
     "lower/transpose.h"
     "lower/vector_construct.h"
+    "lower/vector_load.h"
     "lower/vector_packet.h"
   TEXTUAL_HDRS
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/contracts/core_index.inl"
@@ -513,15 +514,19 @@ loom_cc_library(
     "lower/shuffle.c"
     "lower/transpose.c"
     "lower/vector_construct.c"
+    "lower/vector_load.c"
     "lower/vector_packet.c"
   DEPS
     ::core_descriptors
     ::gather
     ::vector_carrier
     iree::base
+    iree::base::internal
     loom::analysis::contract_vector
+    loom::codegen::low::builder
     loom::codegen::low::lower
     loom::codegen::low::lower::representation_observer
+    loom::codegen::low::source_memory_plan
     loom::error::error_defs
     loom::ir
     loom::ir::facts
@@ -760,7 +765,6 @@ loom_cc_library(
     ::encoding
     ::leaf_compile
     ::machine
-    ::provider
     iree::base
     iree::schemas::xdna_executable
     loom::analysis::symbol_facts
@@ -800,7 +804,7 @@ loom_cc_library(
     loom::ops::low
     loom::pass::report
     loom::target::pass_environment
-    loom::tools::loom-check::provider
+    loom::target::provider
   TESTONLY
   PUBLIC
 )
@@ -979,6 +983,23 @@ iree_execution_test_suite(
 )
 endif()
 
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND AMDF_BUILD)
+iree_execution_test_suite(
+  NAME
+    native_program_capacity_test
+  MANIFESTS
+    "test/native_program_capacity.test.json"
+  TOOLS
+    "loom-compile=loom::tools::loom-compile"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/test/native_program_capacity.loom"
+  LABELS
+    "hostonly"
+  TIMEOUT
+    60
+)
+endif()
+
 if(LOOM_TARGET_ARCH_XDNA)
 loom_check_test_suite(
   NAME
@@ -1074,6 +1095,7 @@ loom_check_test_suite(
     "test/native_endpoint_addresses.loom-test"
     "test/native_helper_effects.loom-test"
     "test/native_local_buffers.loom-test"
+    "test/native_program_capacity.loom-test"
     "test/native_repetition.loom-test"
     "test/native_strands.loom-test"
     "test/native_stream_routes.loom-test"
@@ -1188,6 +1210,7 @@ loom_check_test_suite(
     "test/source_low/shared_conditional_values.loom-test"
     "test/source_low/split_barrier.loom-test"
     "test/source_low/static_vector_shape.loom-test"
+    "test/source_low/structured_switch.loom-test"
     "test/source_low/table_quantize.loom-test"
     "test/source_low/target_legalize_scalar_multiply_add.loom-test"
     "test/source_low/uniform_predicate_control.loom-test"
@@ -1206,6 +1229,8 @@ loom_check_test_suite(
     "test/source_low/vector_index_conversion.loom-test"
     "test/source_low/vector_interleave.loom-test"
     "test/source_low/vector_large_insert.loom-test"
+    "test/source_low/vector_load_underaligned.loom-test"
+    "test/source_low/vector_load_underaligned_family.loom-test"
     "test/source_low/vector_mask_select.loom-test"
     "test/source_low/vector_memory.loom-test"
     "test/source_low/vector_partial_carriers.loom-test"
@@ -1426,6 +1451,25 @@ endif()
 if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
+    program_capacity
+  HDRS
+    "emit/program_capacity.h"
+  SRCS
+    "emit/program_capacity.c"
+  DEPS
+    ::leaf_program
+    iree::base
+    loom::codegen::low::diagnostics
+    loom::error::diagnostic
+    loom::error::emitter
+    loom::target::arch::amd::xdna::error_defs
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_library(
+  NAME
     leaf_compile
   HDRS
     "emit/leaf_compile.h"
@@ -1435,6 +1479,7 @@ loom_cc_library(
     ::bundle_plan
     ::leaf_object
     ::low_registry
+    ::program_capacity
     iree::base
     iree::base::internal::arena
     loom::analysis::symbol_facts
@@ -1462,7 +1507,6 @@ loom_cc_library(
   SRCS
     "emit/program_object.c"
   DEPS
-    ::bundle_plan
     ::leaf_object
     ::relocation
     iree::base
@@ -1483,6 +1527,7 @@ loom_cc_library(
     ::call_abi
     ::core_descriptors
     ::leaf_compile
+    ::program_capacity
     ::program_object
     iree::base
     iree::base::internal::arena

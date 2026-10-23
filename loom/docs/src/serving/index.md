@@ -40,17 +40,19 @@ controls, pressure, counters and telemetry cursors.
 | `--heartbeat_ms=N` | `1000` | Per-model stderr JSONL heartbeat interval; `0` disables periodic reporting, not cumulative counters. |
 | `--workspace_idle_ms=N` | `0` | Trim reusable command-workspace backing after the device's last workspace allocation retires and stays idle for this interval; `0` disables expiry. |
 | `--parameter_idle_ms=N` | `0` | Deactivate unpinned elastic model weights after this idle interval; `0` disables expiry. Sessions and KV/prefix history survive. |
-| `--pool_backing=elastic\|fixed` | `elastic` | Demand-committed retained slabs or eagerly backed retained storage. |
-| `--weight_slab_bytes=N` | `1073741824` | Reusable elastic parameter slab size in bytes (1 GiB); loading uses independent bounded read windows. `0` uses the allocator recommendation. Ignored for fixed backing. |
+| `--pool_backing=elastic\|fixed` | `elastic` | Shared demand-committed parameter/state/workspace slabs or eagerly backed retained storage. |
+| `--weight_slab_bytes=N` | `1073741824` | Reusable elastic parameter and shared-workspace slab size in bytes (1 GiB); loading uses independent bounded read windows. `0` uses the allocator recommendation. Ignored for fixed backing. |
 | `--state_slab_bytes=N` | `67108864` | Elastic mutable-state commitment/reclamation size in bytes (64 MiB); `0` uses the allocator recommendation. Ignored for fixed backing. |
-| `--memory_bytes=N` | `0` | Serving-managed physical parameter/state limit; `0` imposes no serving limit. |
+| `--memory_bytes=N` | `0` | Shared serving-managed physical parameter/state/workspace limit; `0` imposes no serving limit. |
 
 Model, connection and body capacities must be positive. Holding credit must
 remain below connection capacity. Heartbeat/idle intervals, slab sizes and memory
 limits are nonnegative. A nonzero memory limit requires elastic backing and
 exactly one device: independent device pools cannot enforce a shared byte limit.
-It excludes invocation workspace, host allocations and driver overhead; it is
-not a whole-process or whole-device memory cap.
+Invocation input/output storage and command workspace share this limit with
+parameters and mutable model state. Host snapshots, other host allocations and
+driver overhead remain outside it; it is not a whole-process or whole-device
+memory cap.
 
 `--help` shows serving options; `--help=all` also shows linked runtime options.
 `--agents_md` prints compact integration guidance without initializing devices.
@@ -67,8 +69,8 @@ Device URI query parameters request immutable runtime services. `feedback`
 provisions device-to-host diagnostics used by authored kernel assertions and
 other UBSAN-style reports. `asan` and `tsan` provision address- and race-
 sanitizer state and start the report transport each requires. They are bare,
-additive parameters. `--device=amdgpu:?feedback` configures the default AMDGPU
-device, while `--device=amdgpu://GPU-0e12865a3bf5b7ab?feedback&asan` configures
+additive parameters. `--device=legacy-amdgpu:?feedback` configures the default AMDGPU
+device, while `--device=legacy-amdgpu://GPU-0e12865a3bf5b7ab?feedback&asan` configures
 a specific device. `?feedback&asan&tsan` is also valid; explicit `feedback`
 adds general authored diagnostics to the sanitizer services. A backend that
 cannot provide a requested service rejects the URI during device creation.
@@ -83,7 +85,7 @@ there are more live executions than queues.
 For independent AMDGPU model submissions, provision extra queues at startup:
 
 ```sh
-loom-serve --device='amdgpu://0?queue_count=2' \
+loom-serve --device='legacy-amdgpu://0?queue_count=2' \
   --model=models/chat/model.json --model=models/speech/model.json
 ```
 
@@ -102,12 +104,17 @@ programs rather than assuming a GPU command program also runs on the NPU.
 Device-group membership alone does not distribute a model or share its memory
 between members.
 
-Elastic backing supports retained-memory budgets and reclamation of idle,
+Elastic backing supports shared physical-memory budgets and reclamation of idle,
 unpinned parameters on task and AMDGPU. It requires virtual reservations,
 mapping-source allocations, and bind/unbind operations from the selected device.
 Task uses host virtual memory where available; Vulkan requires suitable
 sparse-memory capabilities. Fixed backing eagerly retains storage and does not
-support parameter deactivation or a retained-memory budget.
+support parameter deactivation or a serving physical-memory budget.
+
+Elastic command workspace preserves its virtual ranges across model changes and
+physical trim. Logical queue allocations reuse those ranges; physical backing
+shares the model-storage pool rather than a separate scratch budget. Idle
+workspace is reclaimed before reloadable model data under pressure.
 
 Elastic backing fails during device-group initialization when the required
 mapping capabilities are unavailable. Model-specific resource requirements are

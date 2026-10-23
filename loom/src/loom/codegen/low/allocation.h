@@ -88,6 +88,9 @@ typedef struct loom_low_allocation_options_t {
   loom_target_residency_view_t residency;
   // Immutable instruction preferences for the resolved descriptor set.
   loom_low_placement_instruction_preferences_t instruction_preferences;
+  // Whether the current function snapshot contains traffic introduced by an
+  // earlier allocation-repair iteration.
+  bool has_allocation_repair;
   // Borrowed bitmap indexed by module value ID. Set values require register
   // storage throughout allocation.
   iree_bitmap_t required_register_values;

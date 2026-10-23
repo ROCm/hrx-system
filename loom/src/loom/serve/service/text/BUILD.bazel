@@ -148,10 +148,6 @@ loom_cc_library(
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
         ":source_service_fixture",
-        "//loom/src/loom/serve/media:image_codec",
-        "//loom/src/loom/serve/media:image_codecs",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/vm:test_support",
     ],
     alwayslink = True,
 )
@@ -244,13 +240,17 @@ loom_cc_library(
     testonly = True,
     srcs = [
         "capture_execution_test.cc",
+        "epoch_upload_test.cc",
+        "model_instance.h",
         "source_execution_test.cc",
         "state_test.cc",
+        "workspace_test.cc",
     ],
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
         ":capture",
+        ":epoch_upload",
         ":model",
         ":source_service_fixture",
         ":storage",
@@ -259,6 +259,29 @@ loom_cc_library(
         "//loom/src/loom/serve/testing:service_application",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/vm",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "media_projector_tests",
+    testonly = True,
+    srcs = ["media_projector_test.cc"],
+    visibility = ["//loom/src/loom/serve:implementation"],
+    deps = [
+        ":media_projector",
+        "//loom/src/loom/serve/media:image",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/service/finite:model",
+        "//loom/src/loom/serve/service/finite:result",
+        "//loom/src/loom/serve/testing:model",
+        "//loom/src/loom/serve/testing:service_application",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
     ],
     alwayslink = True,
 )
@@ -276,6 +299,7 @@ loom_cc_library(
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
         ":epoch",
+        ":epoch_upload",
         ":media_projector",
         ":model",
         ":readiness",
@@ -389,6 +413,33 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "chat_policy_test",
+    srcs = ["chat_policy_test.cc"],
+    data = [
+        "//loom/src/loom/serve/fixture/text:control.loom",
+        "//loom/src/loom/serve/fixture/text:tokenizer.json",
+    ],
+    env = {
+        "LOOM_SERVE_TEST_CHAT_CONTROL": "$(rootpath //loom/src/loom/serve/fixture/text:control.loom)",
+        "LOOM_SERVE_TEST_CHAT_TOKENIZER": "$(rootpath //loom/src/loom/serve/fixture/text:tokenizer.json)",
+    },
+    deps = [
+        ":chat",
+        ":input",
+        "//loom/src/loom/serve/media:image_codec",
+        "//loom/src/loom/serve/media:image_codecs",
+        "//loom/src/loom/serve/runtime/program:compilation",
+        "//loom/src/loom/serve/testing:text_policy",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm:test_support",
+    ],
+)
+
+loom_cc_test(
     name = "tool_calls_test",
     srcs = ["tool_calls_test.cc"],
     deps = [
@@ -481,6 +532,18 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "epoch_upload",
+    srcs = ["epoch_upload.c"],
+    hdrs = ["epoch_upload.h"],
+    deps = [
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/program:transfer_plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
     name = "model",
     srcs = [
         "control.c",
@@ -512,6 +575,7 @@ loom_cc_library(
     deps = [
         ":capture",
         ":chat",
+        ":epoch_upload",
         ":packing",
         ":storage",
         "//loom/binding/c:loomc",
@@ -519,7 +583,9 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/execution:retirement",
         "//loom/src/loom/serve/runtime/parameter:activation",
+        "//loom/src/loom/serve/runtime/parameter:module",
         "//loom/src/loom/serve/runtime/parameter:residency",
+        "//loom/src/loom/serve/runtime/parameter:sources",
         "//loom/src/loom/serve/runtime/parameter:weights",
         "//loom/src/loom/serve/runtime/program",
         "//loom/src/loom/serve/runtime/program:compilation",
@@ -934,6 +1000,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/parameter:residency",
         "//loom/src/loom/serve/service",
+        "//loom/src/loom/serve/service:prepared_request",
         "//loom/src/loom/serve/service/finite:model",
         "//loom/src/loom/serve/service/finite:result",
         "//runtime/src/iree/base",

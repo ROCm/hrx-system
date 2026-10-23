@@ -108,24 +108,6 @@ class VariantCompilation {
   loom_serve_text_variant_t* variant_ = nullptr;
 };
 
-// Mutating a copy models an author editing a native provider between JITs.
-// The full authored program remains the same fixture used by HTTP serving.
-void EditNativeProvider(const std::string& source_path,
-                        const std::string& target_path,
-                        const std::string& original,
-                        const std::string& replacement) {
-  std::ifstream input(source_path);
-  ASSERT_TRUE(input.good());
-  std::string source((std::istreambuf_iterator<char>(input)), {});
-  const size_t position = source.find(original);
-  ASSERT_NE(position, std::string::npos);
-  source.replace(position, original.size(), replacement);
-  std::ofstream output(target_path);
-  output << source;
-  output.close();
-  ASSERT_TRUE(output.good());
-}
-
 TEST_F(SourceTextServiceTest, NativeVariantPreservesLiveRowsAndPinnedPrefix) {
   auto* source = loom_serve_text_model_row(model_, 0);
   auto* branch = loom_serve_text_model_row(model_, 1);

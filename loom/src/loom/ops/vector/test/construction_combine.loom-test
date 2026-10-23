@@ -204,3 +204,80 @@ func.def @subvector_insert(%base: vector<2x2xi32>, %row: vector<2xi32>) -> (vect
   %result = vector.insert %row into %base[1] : vector<2xi32>, vector<2x2xi32>
   func.return %result : vector<2x2xi32>
 }
+
+// ====
+// RUN: pass canonicalize
+
+// Unequal extents expose the row-major stride when selecting scalar operands.
+func.def @constructed_matrix_elements(%a: i16, %b: i16, %c: i16, %d: i16, %e: i16, %f: i16) -> (vector<2x3xi16>, i16, i16) {
+  %matrix = vector.from_elements %a, %b, %c, %d, %e, %f : vector<2x3xi16>
+  %identity = vector.extract %matrix[] : vector<2x3xi16> -> vector<2x3xi16>
+  %upper = vector.extract %matrix[0, 2] : vector<2x3xi16> -> i16
+  %lower = vector.extract %matrix[1, 0] : vector<2x3xi16> -> i16
+  func.return %identity, %upper, %lower : vector<2x3xi16>, i16, i16
+}
+
+// ----
+func.def @constructed_matrix_elements(%a: i16, %b: i16, %c: i16, %d: i16, %e: i16, %f: i16) -> (vector<2x3xi16>, i16, i16) {
+  %matrix = vector.from_elements %a, %b, %c, %d, %e, %f : vector<2x3xi16>
+  func.return %matrix, %c, %d : vector<2x3xi16>, i16, i16
+}
+
+// ====
+// RUN: pass canonicalize
+
+// Every static prefix selects original scalar operands without conversions.
+func.def @constructed_prefixes(%a: bf16, %b: bf16, %c: bf16, %d: bf16, %e: bf16, %f: bf16, %g: bf16, %h: bf16) -> (vector<2x2xbf16>, vector<2xbf16>, bf16) {
+  %cube = vector.from_elements %a, %b, %c, %d, %e, %f, %g, %h : vector<2x2x2xbf16>
+  %plane = vector.extract %cube[1] : vector<2x2x2xbf16> -> vector<2x2xbf16>
+  %row = vector.extract %cube[0, 1] : vector<2x2x2xbf16> -> vector<2xbf16>
+  %scalar = vector.extract %cube[1, 0, 1] : vector<2x2x2xbf16> -> bf16
+  func.return %plane, %row, %scalar : vector<2x2xbf16>, vector<2xbf16>, bf16
+}
+
+// ----
+func.def @constructed_prefixes(%a: bf16, %b: bf16, %c: bf16, %d: bf16, %e: bf16, %f: bf16, %g: bf16, %h: bf16) -> (vector<2x2xbf16>, vector<2xbf16>, bf16) {
+  %plane = vector.from_elements %e, %f, %g, %h : vector<2x2xbf16>
+  %row = vector.from_elements %c, %d : vector<2xbf16>
+  func.return %plane, %row, %f : vector<2x2xbf16>, vector<2xbf16>, bf16
+}
+
+// ====
+// RUN: pass canonicalize
+
+// A nonempty prefix may select an empty tail without reading any operand.
+func.def @constructed_empty_tail() -> (vector<0xf32>) {
+  %matrix = vector.from_elements : vector<2x0xf32>
+  %row = vector.extract %matrix[1] : vector<2x0xf32> -> vector<0xf32>
+  func.return %row : vector<0xf32>
+}
+
+// ----
+func.def @constructed_empty_tail() -> (vector<0xf32>) {
+  %row = vector.empty : vector<0xf32>
+  func.return %row : vector<0xf32>
+}
+
+// ====
+// RUN: pass canonicalize
+
+// Unknown coordinates do not select a static subset of the scalar operands.
+func.def @constructed_dynamic_prefix(%a: i32, %b: i32, %c: i32, %d: i32, %row: index) -> (i32) {
+  %matrix = vector.from_elements %a, %b, %c, %d : vector<2x2xi32>
+  %value = vector.extract %matrix[%row, 1] : vector<2x2xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+// RUN: pass canonicalize
+
+// An empty prefix retains the original value, including dynamic extents.
+func.def @identity_prefix(%extent: index, %value: vector<[%extent]x2xf32>) -> (vector<[%extent]x2xf32>) {
+  %result = vector.extract %value[] : vector<[%extent]x2xf32> -> vector<[%extent]x2xf32>
+  func.return %result : vector<[%extent]x2xf32>
+}
+
+// ----
+func.def @identity_prefix(%extent: index, %value: vector<[%extent]x2xf32>) -> (vector<[%extent]x2xf32>) {
+  func.return %value : vector<[%extent]x2xf32>
+}

@@ -124,26 +124,38 @@ static iree_status_t loom_vector_canonicalize_extract_from_broadcast(
 
 static iree_status_t loom_vector_canonicalize_extract_from_elements(
     loom_op_t* op, loom_rewriter_t* rewriter, loom_op_t* source_def_op,
-    loom_type_t result_type, bool* out_changed) {
+    loom_type_t source_type, loom_type_t result_type, bool* out_changed) {
   *out_changed = false;
-  if (!loom_type_is_scalar(result_type)) {
+  const loom_attribute_t static_indices =
+      loom_vector_extract_static_indices(op);
+  if (!loom_vector_static_indices_are_proven_in_bounds(source_type,
+                                                       static_indices)) {
     return iree_ok_status();
   }
-
-  loom_attribute_t static_indices = loom_vector_extract_static_indices(op);
-  if (static_indices.count != 1 || static_indices.i64_array[0] < 0 ||
-      static_indices.i64_array[0] == INT64_MIN) {
-    return iree_ok_status();
-  }
-  loom_value_slice_t elements =
+  const loom_value_slice_t elements =
       loom_vector_from_elements_elements(source_def_op);
-  iree_host_size_t lane = (iree_host_size_t)static_indices.i64_array[0];
-  if (lane >= elements.count) {
-    return iree_ok_status();
+  iree_host_size_t offset = 0;
+  iree_host_size_t count = elements.count;
+  // A static leading prefix selects a contiguous row-major operand range.
+  // In-bounds coordinates imply nonzero indexed extents; the verified
+  // constructor's operand count bounds every intermediate offset and count.
+  for (uint16_t axis = 0; axis < static_indices.count; ++axis) {
+    count /= (iree_host_size_t)loom_type_dim_static_size_at(source_type, axis);
+    offset += (iree_host_size_t)static_indices.i64_array[axis] * count;
   }
-
-  IREE_RETURN_IF_ERROR(loom_vector_replace_single_result_with_value(
-      op, rewriter, elements.values[lane]));
+  if (loom_type_is_scalar(result_type)) {
+    IREE_RETURN_IF_ERROR(loom_vector_replace_single_result_with_value(
+        op, rewriter, elements.values[offset]));
+  } else {
+    loom_builder_set_before(&rewriter->builder, op);
+    const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+    loom_op_t* construction = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_from_elements_build(
+        &rewriter->builder, count ? elements.values + offset : NULL, count,
+        result_type, op->location, &construction));
+    IREE_RETURN_IF_ERROR(loom_vector_replace_single_result_with_new_op(
+        op, rewriter, construction, checkpoint));
+  }
   *out_changed = true;
   return iree_ok_status();
 }
@@ -549,6 +561,12 @@ iree_status_t loom_vector_fold_constant_lanes(loom_op_t* op,
       loom_module_value_type(rewriter->module, result);
   const loom_type_t element_type =
       loom_type_scalar(loom_type_element_type(result_type));
+  for (iree_host_size_t lane = 0; lane < lanes.count; ++lane) {
+    if (!loom_rewriter_can_materialize_constant(rewriter, lanes.lanes[lane],
+                                                element_type)) {
+      return iree_ok_status();
+    }
+  }
   loom_builder_set_before(&rewriter->builder, op);
   const loom_value_id_t value_checkpoint =
       loom_rewriter_value_checkpoint(rewriter);
@@ -1293,14 +1311,21 @@ iree_status_t loom_vector_project_structure(loom_op_t* op,
   }
   *out_changed = false;
   const loom_value_id_t source = loom_vector_extract_source(op);
-  loom_op_t* producer = loom_rewriter_value_defining_op(rewriter, source);
-  if (!producer) {
-    return iree_ok_status();
-  }
   const loom_type_t source_type =
       loom_module_value_type(rewriter->module, source);
   const loom_type_t result_type =
       loom_module_value_type(rewriter->module, loom_vector_extract_result(op));
+  if (loom_vector_extract_static_indices(op).count == 0 &&
+      loom_type_equal(source_type, result_type)) {
+    IREE_RETURN_IF_ERROR(
+        loom_vector_replace_single_result_with_value(op, rewriter, source));
+    *out_changed = true;
+    return iree_ok_status();
+  }
+  loom_op_t* producer = loom_rewriter_value_defining_op(rewriter, source);
+  if (!producer) {
+    return iree_ok_status();
+  }
   if (loom_vector_broadcast_isa(producer)) {
     return loom_vector_canonicalize_extract_from_broadcast(
         op, rewriter, producer, source_type, result_type, out_changed);
@@ -1311,7 +1336,7 @@ iree_status_t loom_vector_project_structure(loom_op_t* op,
   }
   if (loom_vector_from_elements_isa(producer)) {
     return loom_vector_canonicalize_extract_from_elements(
-        op, rewriter, producer, result_type, out_changed);
+        op, rewriter, producer, source_type, result_type, out_changed);
   }
   if (loom_vector_slice_isa(producer)) {
     return loom_vector_canonicalize_extract_from_slice(

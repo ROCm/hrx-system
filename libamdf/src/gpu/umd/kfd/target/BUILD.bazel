@@ -80,6 +80,7 @@ amdf_cc_library(
         ":pm4_queue",
         ":queue_plan",
         ":sdma_queue",
+        "//libamdf/src/gpu/umd/kfd:hdp",
         "//libamdf/src/gpu/umd/kfd:topology",
     ],
 )

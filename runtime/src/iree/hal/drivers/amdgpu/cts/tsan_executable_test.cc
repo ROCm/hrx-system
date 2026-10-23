@@ -264,7 +264,8 @@ TEST_P(TsanExecutableTest, ReportsTsanPacketThroughFeedback) {
   EXPECT_EQ(data_race.prior_workitem_id[2], 0u);
 
   iree_hal_device_event_source_t source = recorder()->last_source();
-  EXPECT_TRUE(iree_string_view_equal(source.driver_id, IREE_SV("amdgpu")));
+  EXPECT_TRUE(
+      iree_string_view_equal(source.driver_id, IREE_SV("legacy-amdgpu")));
   EXPECT_NE(source.executable_id, 0u);
   EXPECT_NE(source.physical_device_ordinal, UINT32_MAX);
 }

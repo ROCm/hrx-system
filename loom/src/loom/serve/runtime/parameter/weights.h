@@ -8,6 +8,7 @@
 
 #include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/runtime/execution/workspace.h"
+#include "loom/serve/runtime/parameter/sources.h"
 #include "loom/serve/runtime/program/jit.h"
 #include "loom/serve/runtime/program/preparation.h"
 #include "loom/serve/runtime/storage/memory.h"
@@ -98,15 +99,17 @@ typedef void (*loom_serve_weights_completion_fn_t)(void* user_data,
                                                    iree_status_t status);
 
 // Exclusively prepares a newly created plan without mutating its pool or
-// submitting device work. CPU source policy/indexing and native compilation
+// submitting device work. CPU source policy and native compilation
 // run on the shared host. Payload reads wait for activation; open checkpoint
 // handles and recorded preparers remain cached, not a second weight copy.
 //
-// Each declared source's ordered shards populate an independent parameter
-// index; files may use any supported format. Relative checkpoint paths use the
-// source environment's server-local base_directory. The declaration's policy
-// uses its package when present. Absolute paths name server-local files in both
-// cases. The environment and declaration are borrowed until completion.
+// indexed_sources retains the already opened immutable source catalog. The
+// declaration maps policy-local inputs to its source ordinals. Source indexes
+// and imported-file caches are shared, while each plan owns its input recipes.
+// The declaration's policy uses the source environment's package when present;
+// absolute paths name server-local files. The environment, declaration, and
+// indexed_sources are borrowed until completion; the plan retains its selected
+// indexes/providers independently after preparation, not unused catalog peers.
 // The policy names a text or bytecode source with the VM export:
 //   prepare_weight(buffer key) -> i64 byte_length
 // The key is a read-only, non-NUL-terminated tensor name. The policy declares
@@ -139,6 +142,7 @@ iree_status_t loom_serve_weights_prepare_async(
     loom_serve_jit_t* jit, iree_hal_command_buffer_mode_t command_mode,
     const loom_serve_sources_t* sources,
     const loom_serve_preparation_parameter_t* parameter,
+    loom_serve_parameter_sources_t* indexed_sources,
     loom_serve_weights_completion_fn_t completion, void* user_data);
 
 // Cold outer-application join over the same preparation. Never called by a
@@ -147,7 +151,8 @@ iree_status_t loom_serve_weights_prepare(
     loom_serve_weights_t* weights, loom_serve_host_t* host,
     loom_serve_jit_t* jit, iree_hal_command_buffer_mode_t command_mode,
     const loom_serve_sources_t* sources,
-    const loom_serve_preparation_parameter_t* parameter);
+    const loom_serve_preparation_parameter_t* parameter,
+    loom_serve_parameter_sources_t* indexed_sources);
 
 // Borrowed placement facts retained independently of the original compiler
 // product. Rows remain in construction order; index is below parameter_count.
@@ -204,6 +209,12 @@ iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights,
 loom_serve_memory_statistics_t loom_serve_weights_statistics(
     loom_serve_weights_t* weights);
 
+// Copies already-published reservation accounting without collecting native
+// operations. Admission can combine multiple plans and the shared range ledger
+// in one owner snapshot; callbacks do not mutate any of these counters.
+loom_serve_memory_usage_t loom_serve_weights_memory_usage(
+    const loom_serve_weights_t* weights);
+
 // Copies cumulative submission counters on the serialized activation owner.
 loom_serve_weight_activity_t loom_serve_weights_activity(
     const loom_serve_weights_t* weights);
@@ -221,7 +232,9 @@ bool loom_serve_weights_is_retired(loom_serve_weights_t* weights);
 
 // Cold outer-thread join of the ownership above, independent of readiness.
 // Live owners use the wake and query instead of waiting on a shared worker.
-void loom_serve_weights_await_retirement(loom_serve_weights_t* weights);
+// Cold workspace progress failures return only after all views have retired.
+iree_status_t loom_serve_weights_await_retirement(
+    loom_serve_weights_t* weights);
 
 // Destruction after is_retired or await_retirement proved every consumer and
 // activation view retired. Native unmapping/release is synchronous; no queue or

@@ -387,7 +387,7 @@ static void iree_hal_amdgpu_host_queue_publish_driver_failure(
   event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
   event.source.device = queue->logical_device;
   event.source.device_id = logical_device->identifier;
-  event.source.driver_id = IREE_SV("amdgpu");
+  event.source.driver_id = IREE_SV("legacy-amdgpu");
   event.source.physical_device_ordinal = (uint32_t)queue->device_ordinal;
   event.source.queue_ordinal = (uint32_t)queue->physical_queue_ordinal;
   event.payload = iree_make_const_byte_span(&payload, sizeof(payload));

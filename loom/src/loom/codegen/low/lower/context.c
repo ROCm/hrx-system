@@ -177,6 +177,14 @@ iree_status_t loom_low_lower_emit_branch_condition_type_unsupported(
       context, source_op, LOOM_ERR_TARGET_035, params, IREE_ARRAYSIZE(params));
 }
 
+iree_status_t loom_low_lower_emit_source_signature_unsupported(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    iree_string_view_t reason) {
+  const loom_diagnostic_param_t params[] = {loom_param_string(reason)};
+  return loom_low_lower_emit_target_context_error(
+      context, source_op, LOOM_ERR_TARGET_032, params, IREE_ARRAYSIZE(params));
+}
+
 iree_status_t loom_low_lower_emit_error_ref(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_error_ref_t error_ref, const loom_diagnostic_param_t* params,
@@ -463,6 +471,8 @@ loom_low_lower_selected_plan_view_t loom_low_lower_context_selected_plan_view(
                   selected_plan->kind ==
                       LOOM_LOW_LOWER_SELECTED_PLAN_FUNCTION_STORAGE ||
                   selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE ||
+                  selected_plan->kind ==
+                      LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL ||
                   selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_STRUCTURAL
               ? loom_low_lower_plan_empty()
               : selected_plan->data.target_plan,

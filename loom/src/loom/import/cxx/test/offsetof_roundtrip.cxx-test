@@ -48,7 +48,7 @@ unsigned long long offset(void) {
   return __builtin_offsetof(struct Packet, items[1].value);
 }
 // ----
-func.def public @offset() -> (i64) {
+func.def public source_signature(#func.abi.c.signature<arguments = [], results = [0], types = [#func.abi.c.type<unsigned_integer, byte_length = 8, byte_alignment = 8, component_count = 1, bitwidth = 64>]>) @offset() -> (i64) {
   %1 = scalar.constant 16 : i64
   func.return %1 : i64
 }

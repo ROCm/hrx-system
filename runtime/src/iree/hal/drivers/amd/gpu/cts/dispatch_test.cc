@@ -15,6 +15,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
+#include "iree/hal/drivers/amd/gpu/cts/testdata.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
 #include "iree/hal/drivers/amd/gpu/image/hsaco.h"
 #include "iree/hal/drivers/amd/gpu/kernarg.h"
@@ -54,28 +55,20 @@ class GpuNativeDispatchTest
       memory_gate_.RequireCodeUpload();
     }
     GpuNativeTest::SetUp();
-    if (HasFatalFailure() || IsSkipped()) {
-      return;
-    }
-    const auto gfx = context_->target_info.gfx_ip;
-    const char* selector = gfx.major == 9
-                               ? (gfx.minor == 4       ? "gfx9_4_generic"
-                                  : gfx.stepping == 10 ? "gfx90a"
-                                                       : "gfx9_generic")
-                           : gfx.major == 11 ? "gfx11_generic"
-                                             : "gfx12_generic";
-    const auto* files = iree_hal_amd_gpu_hip_images_create();
-    for (size_t i = 0; i < iree_hal_amd_gpu_hip_images_size(); ++i) {
-      if (std::strstr(files[i].name, selector)) {
-        artifact_ = iree_make_const_byte_span(files[i].data, files[i].size);
-      }
-    }
-    ASSERT_NE(artifact_.data, nullptr);
   }
 
   void Create() {
     GpuNativeTest::Create();
-    if (HasFatalFailure() || !GetParam().mixed_placement) {
+    if (HasFatalFailure() || IsSkipped()) {
+      return;
+    }
+    const auto* target =
+        &iree_hal_device_spec_executables(iree_hal_device_spec(device_))
+             ->targets[0];
+    IREE_ASSERT_OK(iree::hal::amd::gpu::cts::LookupCodeObject(
+        iree_hal_amd_gpu_hip_images_create(),
+        iree_hal_amd_gpu_hip_images_size(), target->target_key, &artifact_));
+    if (!GetParam().mixed_placement) {
       return;
     }
     const auto* family = iree_hal_queue_family(queues_[0]);

@@ -67,7 +67,8 @@ TEST_F(SymbolicProductTest, ReassociationPreservesMaterializedValues) {
   const auto rows = DefineBounded(LOOM_SCALAR_TYPE_INDEX, 0, 7);
   const auto columns = DefineBounded(LOOM_SCALAR_TYPE_INDEX, 0, 8);
   const auto width = loom_index_constant_result(BuildIndexConstant(16));
-  const auto expanded = Multiply(rows, Multiply(columns, width));
+  const auto column_bytes = Multiply(columns, width);
+  const auto expanded = Multiply(rows, column_bytes);
   const auto shared = Multiply(Multiply(columns, rows), width);
   ExpectEqual(expanded, shared);
 
@@ -82,10 +83,37 @@ TEST_F(SymbolicProductTest, ReassociationPreservesMaterializedValues) {
   ASSERT_EQ(product->factor_count, 2u);
   EXPECT_EQ(product->factors[0], rows);
   EXPECT_EQ(product->factors[1], columns);
+  EXPECT_EQ(product->operand_values[0], rows);
+  EXPECT_EQ(product->operand_values[1], column_bytes);
   loom_symbolic_expr_summary_t summary;
   ASSERT_TRUE(loom_symbolic_expr_context_try_lookup_summary(
       &expression_context_, expanded, &summary));
   EXPECT_EQ(summary.materialized_dynamic_value_id, expanded);
+}
+
+TEST_F(SymbolicProductTest, LinearProductRetainsAuthoredOperands) {
+  const auto position = DefineBounded(LOOM_SCALAR_TYPE_INDEX, 0, 7);
+  const auto stride = loom_index_constant_result(BuildIndexConstant(16));
+  const auto product_value = Multiply(position, stride);
+
+  const auto expression = Expand(product_value);
+  ASSERT_EQ(expression.constant, 0);
+  ASSERT_EQ(expression.term_count, 1u);
+  EXPECT_EQ(expression.terms[0].value_id, position);
+  EXPECT_EQ(expression.terms[0].coefficient, 16);
+
+  const auto* product =
+      loom_symbolic_expr_lookup_product(&expression_context_, product_value);
+  ASSERT_NE(product, nullptr);
+  ASSERT_EQ(product->factor_count, 2u);
+  EXPECT_EQ(product->operand_values[0], position);
+  EXPECT_EQ(product->operand_values[1], stride);
+
+  loom_symbolic_expr_summary_t summary;
+  ASSERT_TRUE(loom_symbolic_expr_context_try_lookup_summary(
+      &expression_context_, product_value, &summary));
+  EXPECT_EQ(summary.materialized_dynamic_value_id, product_value);
+  EXPECT_EQ(summary.materialized_component_value_id, LOOM_VALUE_ID_INVALID);
 }
 
 TEST_F(SymbolicProductTest, FactorOrderAndMultiplicityArePreserved) {

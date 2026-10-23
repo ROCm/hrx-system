@@ -40,6 +40,8 @@ add_subdirectory("nested package")
 # An unselected target must never enter the requested build closure.
 add_executable(unselected unselected.c)
 add_test(NAME unselected COMMAND unselected)
+iree_configure_test(unselected)
 iree_register_test_build_targets(unselected TARGETS unselected)
 
 iree_finalize_test_build_targets()
+iree_create_ctest_customization()

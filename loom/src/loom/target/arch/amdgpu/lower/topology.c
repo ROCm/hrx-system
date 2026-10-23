@@ -62,6 +62,37 @@ bool loom_amdgpu_required_flat_workgroup_size_from_facts(
   return true;
 }
 
+bool loom_amdgpu_resolve_subgroup_wave_shape(
+    const loom_module_t* module, loom_func_like_t function,
+    const loom_target_bundle_t* bundle, uint32_t wavefront_size,
+    loom_amdgpu_subgroup_wave_shape_t* out_shape) {
+  *out_shape = (loom_amdgpu_subgroup_wave_shape_t){0};
+  if (!loom_amdgpu_wavefront_size_is_valid(wavefront_size)) {
+    return false;
+  }
+
+  uint32_t flat_workgroup_size = 0;
+  if (!loom_amdgpu_required_flat_workgroup_size(module, function, bundle,
+                                                &flat_workgroup_size) ||
+      flat_workgroup_size == 0) {
+    return false;
+  }
+
+  const uint32_t tail_lane_count = flat_workgroup_size % wavefront_size;
+  const bool has_partial_tail =
+      flat_workgroup_size > wavefront_size && tail_lane_count != 0;
+  *out_shape = (loom_amdgpu_subgroup_wave_shape_t){
+      .flat_workgroup_size = flat_workgroup_size,
+      .active_lane_count = flat_workgroup_size < wavefront_size
+                               ? flat_workgroup_size
+                               : wavefront_size,
+      .tail_lane_count =
+          tail_lane_count != 0 ? tail_lane_count : wavefront_size,
+      .has_partial_tail = has_partial_tail,
+  };
+  return true;
+}
+
 uint32_t loom_amdgpu_target_wavefront_size(const loom_target_bundle_t* bundle) {
   if (bundle == NULL || bundle->snapshot == NULL) {
     IREE_ASSERT_UNREACHABLE("selected AMDGPU preamble target snapshot");

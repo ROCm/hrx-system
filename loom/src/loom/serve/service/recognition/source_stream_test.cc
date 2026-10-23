@@ -18,6 +18,7 @@
 #include "iree/hal/api.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/server/resources.h"
 #include "loom/serve/service/recognition/model.h"
 #include "loom/serve/service/recognition/stream.h"
 #include "loom/serve/telemetry/record.h"
@@ -48,6 +49,8 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_serve_test_application_acquire(&options, allocator_,
                                                        &application));
     host_ = loom_serve_test_application_host(application);
+    resources_.device_group =
+        loom_serve_test_application_device_group(application);
     device_ = loom_serve_test_application_device_at(application, 0);
     const auto directory =
         std::filesystem::path(FLAG_model_source).parent_path().string();
@@ -90,7 +93,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     };
     observed.complete_admit = [](void* self, void* invocation) {
       auto* test = static_cast<SourceRecognitionStreamTest*>(self);
-      return test->actual_.complete_admit(test->actual_.self, invocation);
+      test->actual_.complete_admit(test->actual_.self, invocation);
     };
     observed.prepare_work =
         [](void* self, void* invocation,
@@ -161,13 +164,14 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     };
     IREE_ASSERT_OK(loom_serve_recognition_stream_service_allocate(
         host_, observed, &service_options, allocator_, &service_));
-    loom_serve_recognition_stream_service_set_observer(
-        service_, {[](void* self) {
-                     iree_notification_post(
-                         static_cast<iree_notification_t*>(self),
-                         IREE_ALL_WAITERS);
-                   },
-                   &notification_});
+    const loom_serve_wake_callback_t observer = {
+        [](void* self) {
+          iree_notification_post(static_cast<iree_notification_t*>(self),
+                                 IREE_ALL_WAITERS);
+        },
+        &notification_};
+    loom_serve_recognition_stream_service_set_observer(service_, observer);
+    loom_serve_resources_set_observer(&resources_, observer);
   }
 
   void TearDown() override {
@@ -176,6 +180,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
       loom_serve_recognition_stream_close(stream);
     }
     iree_hal_semaphore_release(failed_readiness_);
+    loom_serve_resources_set_observer(&resources_, {});
     iree_notification_deinitialize(&notification_);
   }
 
@@ -205,8 +210,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      auto status = loom_serve_recognition_stream_service_advance(
-          service_, stopping, false, &progress);
+      auto status = Advance(stopping, &progress);
       if (ready() || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(&notification_);
       } else {
@@ -218,15 +222,22 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     }
   }
 
+  iree_status_t Advance(bool stopping, bool* progress) {
+    auto status = loom_serve_resources_advance(&resources_);
+    return iree_status_join(status,
+                            loom_serve_recognition_stream_service_advance(
+                                service_, stopping, false, progress));
+  }
+
   void Settle(bool stopping = false) {
     while (true) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      auto status = loom_serve_recognition_stream_service_advance(
-          service_, stopping, false, &progress);
+      auto status = Advance(stopping, &progress);
       const bool idle =
           !progress &&
-          !loom_serve_recognition_stream_service_is_pending(service_);
+          !loom_serve_recognition_stream_service_is_pending(service_) &&
+          !loom_serve_resources_is_pending(&resources_);
       if (idle || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(&notification_);
       } else {
@@ -246,8 +257,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     while (iree_status_is_ok(status)) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      status = loom_serve_recognition_stream_service_advance(service_, false,
-                                                             false, &progress);
+      status = Advance(false, &progress);
       if (progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(&notification_);
       } else {
@@ -329,6 +339,8 @@ class SourceRecognitionStreamTest : public ::testing::Test {
   loom_serve_host_t* host_ = nullptr;
   // Borrowed physical device, also used for independent failure readiness.
   loom_serve_device_t* device_ = nullptr;
+  // Borrowed application resources progressed by this test's router role.
+  loom_serve_resources_t resources_ = {};
   // Real source owner, destroyed only after service callbacks retire.
   loom_serve_recognition_model_t* model_ = nullptr;
   // Unmodified source callbacks behind the observation adapter.

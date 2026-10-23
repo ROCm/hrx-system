@@ -96,6 +96,14 @@ iree_status_t loom_dominance_info_add_cfg_graph(
     loom_dominance_info_t* info, const loom_cfg_graph_t* graph,
     const loom_cfg_dominance_t* dominance);
 
+// Looks up the retained graph and dominator tree for |region| without
+// rebuilding either analysis. Both results borrow storage from |info| and
+// remain valid until the analyzed CFG topology changes.
+bool loom_dominance_info_lookup_cfg_region(
+    const loom_dominance_info_t* info, const loom_region_t* region,
+    const loom_cfg_graph_t** out_graph,
+    const loom_cfg_dominance_t** out_dominance);
+
 //===----------------------------------------------------------------------===//
 // Dominance queries
 //===----------------------------------------------------------------------===//

@@ -1,0 +1,126 @@
+// RUN: emit source-low output=low
+
+test.target<low_core> @target
+
+func.def target(@target) @switch_cfg(%selector: index, %lhs: i32, %rhs: i32) -> (i32) {
+  %result = scf.switch %selector -> (i32) {
+    case 0 {
+      %sum = scalar.addi %lhs, %rhs : i32
+      scf.yield %sum : i32
+    }
+    default {
+      %product = scalar.muli %lhs, %rhs : i32
+      scf.yield %product : i32
+    }
+  }
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<test.low.core>(@target) abi(object_function) @switch_cfg(%selector: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %15 = test.const.i32 0
+  %16 = test.cmp.eq.i32 %selector, %15
+  low.cond_br %16, ^_bb1, ^_bb2 : reg<test.i32>
+^_bb1:
+  %sum = test.add.i32 %lhs, %rhs
+  low.br ^_bb3(%sum: reg<test.i32>)
+^_bb2:
+  %product = test.mul.i32 %lhs, %rhs
+  low.br ^_bb3(%product: reg<test.i32>)
+^_bb3(%result: reg<test.i32>):
+  return %result
+}
+
+// ====
+// RUN: emit source-low output=low control-flow=structured-low
+
+test.target<low_core> @target
+
+func.def target(@target) @switch_structured(%selector: index, %lhs: i32, %rhs: i32) -> (i32) {
+  %result = scf.switch %selector -> (i32) {
+    case 0 {
+      %sum = scalar.addi %lhs, %rhs : i32
+      scf.yield %sum : i32
+    }
+    default {
+      %product = scalar.muli %lhs, %rhs : i32
+      scf.yield %product : i32
+    }
+  }
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<test.low.core>(@target) abi(object_function) @switch_structured(%selector: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %14 = test.const.i32 0
+  %15 = test.cmp.eq.i32 %selector, %14
+  %result = low.scf.if %15 -> (reg<test.i32>) {
+    %sum = test.add.i32 %lhs, %rhs
+    low.scf.yield %sum : reg<test.i32>
+  } else {
+    %product = test.mul.i32 %lhs, %rhs
+    low.scf.yield %product : reg<test.i32>
+  }
+  return %result
+}
+
+// ====
+// RUN: emit source-low output=low control-flow=structured-low
+
+test.target<low_core> @target
+
+func.def target(@target) @nested_switch_structured(%outer: index, %inner: index, %lhs: i32, %rhs: i32) -> (i32) {
+  %result = scf.switch %outer -> (i32) {
+    case 0 {
+      %nested = scf.switch %inner -> (i32) {
+        case 3 {
+          %sum = scalar.addi %lhs, %rhs : i32
+          scf.yield %sum : i32
+        }
+        default {
+          scf.yield %lhs : i32
+        }
+      }
+      scf.yield %nested : i32
+    }
+    default {
+      scf.yield %rhs : i32
+    }
+  }
+  func.return %result : i32
+}
+
+func.def target(@target) @default_only_structured(%selector: index, %lhs: i32, %rhs: i32) -> (i32) {
+  %result = scf.switch %selector -> (i32) {
+    default {
+      %sum = scalar.addi %lhs, %rhs : i32
+      scf.yield %sum : i32
+    }
+  }
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<test.low.core>(@target) abi(object_function) @nested_switch_structured(%outer: reg<test.i32>, %inner: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %30 = test.const.i32 0
+  %31 = test.cmp.eq.i32 %outer, %30
+  %result = low.scf.if %31 -> (reg<test.i32>) {
+    %33 = test.const.i32 3
+    %34 = test.cmp.eq.i32 %inner, %33
+    %nested = low.scf.if %34 -> (reg<test.i32>) {
+      %sum = test.add.i32 %lhs, %rhs
+      low.scf.yield %sum : reg<test.i32>
+    } else {
+      low.scf.yield %lhs : reg<test.i32>
+    }
+    low.scf.yield %nested : reg<test.i32>
+  } else {
+    low.scf.yield %rhs : reg<test.i32>
+  }
+  return %result
+}
+
+low.func.def target<test.low.core>(@target) abi(object_function) @default_only_structured(%selector: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = test.add.i32 %lhs, %rhs
+  return %result
+}

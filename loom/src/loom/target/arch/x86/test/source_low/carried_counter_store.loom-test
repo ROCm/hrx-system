@@ -1,12 +1,14 @@
-// RUN: with-checks compile-report target=x86:avx2 source-to-low,low-dce
+// RUN: emit source-low target=x86:avx2 output=low
 
-func.def @carried_counter_store(%output: buffer) {
+func.def @carried_counter_store(%output_a: buffer, %output_b: buffer, %row_stride_input: offset) {
+  %row_stride_base = index.assume %row_stride_input [range(%row_stride_input, 4, 4096), multiple_of(%row_stride_input, 4)] : offset
+  %row_stride_bias = index.constant 4 : offset
+  %row_stride = index.add %row_stride_base, %row_stride_bias : offset
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
   %end = index.constant 4 : index
-  %base = index.constant 0 : offset
-  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
-  %output_view = buffer.view %aligned_output[%base] : buffer -> view<4xi32>
+  %aligned_output_a = buffer.assume.alignment %output_a {minimum_alignment = 4} : buffer
+  %aligned_output_b = buffer.assume.alignment %output_b {minimum_alignment = 4} : buffer
   cfg.br ^preheader
 ^preheader:
   cfg.br ^header(%begin: index)
@@ -14,8 +16,13 @@ func.def @carried_counter_store(%output: buffer) {
   %more = index.cmp slt, %position, %end : index
   cfg.cond_br %more, ^body, ^exit
 ^body:
+  %row_byte_offset_a = index.scale %position, %row_stride : index, offset -> offset
+  %row_a = buffer.view %aligned_output_a[%row_byte_offset_a] : buffer -> view<1xi32>
+  %row_byte_offset_b = index.scale %position, %row_stride : index, offset -> offset
+  %row_b = buffer.view %aligned_output_b[%row_byte_offset_b] : buffer -> view<1xi32>
   %value = index.cast %position : index to i32
-  view.store %value, %output_view[%position] : i32, view<4xi32>
+  view.store %value, %row_a[0] : i32, view<1xi32>
+  view.store %value, %row_b[0] : i32, view<1xi32>
   %next = index.add %position, %step : index
   cfg.br ^header(%next: index)
 ^exit:
@@ -23,4 +30,280 @@ func.def @carried_counter_store(%output: buffer) {
 }
 
 // ----
-CHECK: COMPILE-REPORT: source_low[*] * source_op=view.store * execution_count=4
+low.func.def target<x86.avx2.core> abi(object_function) @carried_counter_store(%aligned_output_a: reg<x86.gpr64>, %aligned_output_b: reg<x86.gpr64>, %row_stride_base: reg<x86.gpr64>) asm {
+  %row_stride = lea.disp %row_stride_base {disp32 = 4}
+  %25 = mov.imm64 0
+  low.br ^header(%25: reg<x86.gpr64>, %25: reg<x86.gpr64>)
+^header(%position: reg<x86.gpr64>, %row_byte_offset_a: reg<x86.gpr64>):
+  low.op.cond_br<x86.scalar.cmp.branch.imm.gpr64>(%position) {imm32 = 4, predicate = 12}, ^body, ^exit : (reg<x86.gpr64>)
+^body:
+  %value = mov.trunc.gpr32.gpr64 %position
+  mov.store.indexed.gpr32 %value, %aligned_output_a, %row_byte_offset_a {disp32 = 0, scale = 1}
+  mov.store.indexed.gpr32 %value, %aligned_output_b, %row_byte_offset_a {disp32 = 0, scale = 1}
+  %next = lea.disp %position {disp32 = 1}
+  %29 = add.gpr64 %row_byte_offset_a, %row_stride
+  low.br ^header(%next: reg<x86.gpr64>, %29: reg<x86.gpr64>)
+^exit:
+  return
+}
+
+// ====
+// RUN: emit source-low output=low
+
+x86.target<avx2> @target {tune = znver5}
+
+func.def target(@target) @constant_stride_store(%output: buffer, %row_stride_input: offset) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %row_stride = index.assume %row_stride_input [range(%row_stride_input, 12, 12), multiple_of(%row_stride_input, 4)] : offset
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  cfg.br ^preheader
+^preheader:
+  cfg.br ^header(%begin: index)
+^header(%position: index):
+  %more = index.cmp slt, %position, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %row_byte_offset = index.scale %position, %row_stride : index, offset -> offset
+  %row = buffer.view %aligned_output[%row_byte_offset] : buffer -> view<1xi32>
+  %value = index.cast %position : index to i32
+  view.store %value, %row[0] : i32, view<1xi32>
+  %next = index.add %position, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @constant_stride_store(%aligned_output: reg<x86.gpr64>, %row_stride_input: reg<x86.gpr64>) asm {
+  %18 = mov.imm64 0
+  low.br ^header(%18: reg<x86.gpr64>, %18: reg<x86.gpr64>)
+^header(%position: reg<x86.gpr64>, %row_byte_offset: reg<x86.gpr64>):
+  low.op.cond_br<x86.scalar.cmp.branch.imm.gpr64>(%position) {imm32 = 4, predicate = 12}, ^body, ^exit : (reg<x86.gpr64>)
+^body:
+  %value = mov.trunc.gpr32.gpr64 %position
+  mov.store.indexed.gpr32 %value, %aligned_output, %row_byte_offset {disp32 = 0, scale = 1}
+  %next = lea.disp %position {disp32 = 1}
+  %22 = lea.disp %row_byte_offset {disp32 = 12}
+  low.br ^header(%next: reg<x86.gpr64>, %22: reg<x86.gpr64>)
+^exit:
+  return
+}
+
+// ====
+// RUN: emit source-low target=x86:avx2 output=low
+
+func.def @ambiguous_square_store(%output: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  cfg.br ^preheader
+^preheader:
+  cfg.br ^header(%begin: index)
+^header(%position: index):
+  %more = index.cmp slt, %position, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %position_offset = index.cast %position : index to offset
+  %row_byte_offset = index.scale %position, %position_offset : index, offset -> offset
+  %row = buffer.view %output[%row_byte_offset] : buffer -> view<1xi32>
+  %value = index.cast %position : index to i32
+  view.store %value, %row[0] : i32, view<1xi32>
+  %next = index.add %position, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @ambiguous_square_store(%output: reg<x86.gpr64>) asm {
+  %begin = mov.imm64 0
+  low.br ^header(%begin: reg<x86.gpr64>)
+^header(%position_offset: reg<x86.gpr64>):
+  low.op.cond_br<x86.scalar.cmp.branch.imm.gpr64>(%position_offset) {imm32 = 4, predicate = 12}, ^body, ^exit : (reg<x86.gpr64>)
+^body:
+  %14 = copy %position_offset : reg<x86.gpr64> -> reg<x86.gpr64>
+  %row_byte_offset = imul.gpr64 %14, %position_offset
+  %value = mov.trunc.gpr32.gpr64 %position_offset
+  mov.store.indexed.gpr32 %value, %output, %row_byte_offset {disp32 = 0, scale = 1}
+  %next = lea.disp %position_offset {disp32 = 1}
+  low.br ^header(%next: reg<x86.gpr64>)
+^exit:
+  return
+}
+
+// ====
+// RUN: emit source-low target=x86:avx2 output=low
+
+func.def @varying_stride_store(%output: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 4 : index
+  %initial_stride = index.constant 4 : offset
+  %stride_step = index.constant 4 : offset
+  cfg.br ^preheader
+^preheader:
+  cfg.br ^header(%begin: index, %initial_stride: offset)
+^header(%position: index, %row_stride: offset):
+  %more = index.cmp slt, %position, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %row_byte_offset = index.scale %position, %row_stride : index, offset -> offset
+  %row = buffer.view %output[%row_byte_offset] : buffer -> view<1xi32>
+  %value = index.cast %position : index to i32
+  view.store %value, %row[0] : i32, view<1xi32>
+  %next = index.add %position, %step : index
+  %next_stride = index.add %row_stride, %stride_step : offset
+  cfg.br ^header(%next: index, %next_stride: offset)
+^exit:
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @varying_stride_store(%output: reg<x86.gpr64>) asm {
+  %begin = mov.imm64 0
+  %initial_stride = mov.imm64 4
+  low.br ^header(%begin: reg<x86.gpr64>, %initial_stride: reg<x86.gpr64>)
+^header(%position: reg<x86.gpr64>, %row_stride: reg<x86.gpr64>):
+  low.op.cond_br<x86.scalar.cmp.branch.imm.gpr64>(%position) {imm32 = 4, predicate = 12}, ^body, ^exit : (reg<x86.gpr64>)
+^body:
+  %19 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
+  %row_byte_offset = imul.gpr64 %19, %row_stride
+  %value = mov.trunc.gpr32.gpr64 %position
+  mov.store.indexed.gpr32 %value, %output, %row_byte_offset {disp32 = 0, scale = 1}
+  %next = lea.disp %position {disp32 = 1}
+  %next_stride = lea.disp %row_stride {disp32 = 4}
+  low.br ^header(%next: reg<x86.gpr64>, %next_stride: reg<x86.gpr64>)
+^exit:
+  return
+}
+
+// ====
+// RUN: emit source-low target=x86:avx2 output=low
+
+func.def @wide_constant_stride_store(%output: buffer, %row_stride_input: offset) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.constant 2 : index
+  %row_stride = index.assume %row_stride_input [range(%row_stride_input, 2147483648, 2147483648), multiple_of(%row_stride_input, 4)] : offset
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  cfg.br ^preheader
+^preheader:
+  cfg.br ^header(%begin: index)
+^header(%position: index):
+  %more = index.cmp slt, %position, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %row_byte_offset = index.scale %position, %row_stride : index, offset -> offset
+  %row = buffer.view %aligned_output[%row_byte_offset] : buffer -> view<1xi32>
+  %value = index.cast %position : index to i32
+  view.store %value, %row[0] : i32, view<1xi32>
+  %next = index.add %position, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @wide_constant_stride_store(%aligned_output: reg<x86.gpr64>, %row_stride_input: reg<x86.gpr64>) asm {
+  %begin = mov.imm64 0
+  %row_stride = mov.imm64 2147483648
+  low.br ^header(%begin: reg<x86.gpr64>, %begin: reg<x86.gpr64>)
+^header(%position: reg<x86.gpr64>, %row_byte_offset: reg<x86.gpr64>):
+  low.op.cond_br<x86.scalar.cmp.branch.imm.gpr64>(%position) {imm32 = 2, predicate = 12}, ^body, ^exit : (reg<x86.gpr64>)
+^body:
+  %value = mov.trunc.gpr32.gpr64 %position
+  mov.store.indexed.gpr32 %value, %aligned_output, %row_byte_offset {disp32 = 0, scale = 1}
+  %next = lea.disp %position {disp32 = 1}
+  %23 = add.gpr64 %row_byte_offset, %row_stride
+  low.br ^header(%next: reg<x86.gpr64>, %23: reg<x86.gpr64>)
+^exit:
+  return
+}
+
+// ====
+// RUN: emit source-low target=x86:avx2 output=low
+
+func.def @nonzero_initial_store(%output: buffer) {
+  %begin = index.constant 2 : index
+  %step = index.constant 1 : index
+  %end = index.constant 6 : index
+  %row_stride = index.constant 12 : offset
+  cfg.br ^preheader
+^preheader:
+  cfg.br ^header(%begin: index)
+^header(%position: index):
+  %more = index.cmp slt, %position, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %row_byte_offset = index.scale %position, %row_stride : index, offset -> offset
+  %row = buffer.view %output[%row_byte_offset] : buffer -> view<1xi32>
+  %value = index.cast %position : index to i32
+  view.store %value, %row[0] : i32, view<1xi32>
+  %next = index.add %position, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @nonzero_initial_store(%output: reg<x86.gpr64>) asm {
+  %begin = mov.imm64 2
+  low.br ^header(%begin: reg<x86.gpr64>)
+^header(%position: reg<x86.gpr64>):
+  low.op.cond_br<x86.scalar.cmp.branch.imm.gpr64>(%position) {imm32 = 6, predicate = 12}, ^body, ^exit : (reg<x86.gpr64>)
+^body:
+  %value = mov.trunc.gpr32.gpr64 %position
+  %15 = mov.imm64 12
+  %16 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
+  %17 = imul.gpr64 %16, %15
+  mov.store.indexed.gpr32 %value, %output, %17 {disp32 = 0, scale = 1}
+  %next = lea.disp %position {disp32 = 1}
+  low.br ^header(%next: reg<x86.gpr64>)
+^exit:
+  return
+}
+
+// ====
+// RUN: emit source-low target=x86:avx2 output=low
+
+func.def @nonunit_step_store(%output: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 2 : index
+  %end = index.constant 8 : index
+  %row_stride = index.constant 12 : offset
+  cfg.br ^preheader
+^preheader:
+  cfg.br ^header(%begin: index)
+^header(%position: index):
+  %more = index.cmp slt, %position, %end : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %row_byte_offset = index.scale %position, %row_stride : index, offset -> offset
+  %row = buffer.view %output[%row_byte_offset] : buffer -> view<1xi32>
+  %value = index.cast %position : index to i32
+  view.store %value, %row[0] : i32, view<1xi32>
+  %next = index.add %position, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @nonunit_step_store(%output: reg<x86.gpr64>) asm {
+  %begin = mov.imm64 0
+  low.br ^header(%begin: reg<x86.gpr64>)
+^header(%position: reg<x86.gpr64>):
+  low.op.cond_br<x86.scalar.cmp.branch.imm.gpr64>(%position) {imm32 = 8, predicate = 12}, ^body, ^exit : (reg<x86.gpr64>)
+^body:
+  %value = mov.trunc.gpr32.gpr64 %position
+  %15 = mov.imm64 12
+  %16 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
+  %17 = imul.gpr64 %16, %15
+  mov.store.indexed.gpr32 %value, %output, %17 {disp32 = 0, scale = 1}
+  %next = lea.disp %position {disp32 = 2}
+  low.br ^header(%next: reg<x86.gpr64>)
+^exit:
+  return
+}

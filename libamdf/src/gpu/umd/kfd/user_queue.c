@@ -309,12 +309,17 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
       if (create_info->placement == AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL) {
         out_plan->ring.placement = AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL;
         if (!device->topology.integrated) {
+          if (device->hdp == NULL) {
+            return false;
+          }
           out_plan->ring.storage.native_flags =
               (out_plan->ring.storage.native_flags &
                ~KFD_IOC_ALLOC_MEM_FLAGS_GTT) |
               KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
               KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED;
-          out_plan->ring.host_publish_fence = AMDF_HOST_CACHE_FENCE_X86_SFENCE;
+          out_plan->ring.host_publish_executor =
+              AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
+          out_plan->ring.host_publish_fence = AMDF_HOST_CACHE_FENCE_NONE;
         }
       }
       if (create_info->ring_byte_length != 0) {
@@ -439,6 +444,14 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
     }
   }
 
+  // AQL INVALID headers must reach the ring before native queue activation.
+  // This also publishes initial PM4/SDMA padding without reading it back.
+  if (amdf_status_is_ok(status) &&
+      queue->plan.ring.host_publish_executor ==
+          AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API) {
+    status = queue->native_api->flush_host_writes(queue->native_api->user_data,
+                                                  device);
+  }
   struct kfd_ioctl_create_queue_args arguments = {0};
   if (amdf_status_is_ok(status)) {
     arguments = (struct kfd_ioctl_create_queue_args){
@@ -560,6 +573,9 @@ amdf_status_t amdf_gpu_umd_user_queue_map(
                                           : (uintptr_t)queue->doorbell,
       .index_bits = queue->plan.control.index_bit_count,
       .doorbell_bits = queue->plan.doorbell.bit_count,
+      .host_publish_executor = device_producer
+                                   ? AMDF_CACHE_TRANSITION_EXECUTOR_NONE
+                                   : queue->plan.ring.host_publish_executor,
       .host_publish_fence = device_producer
                                 ? AMDF_HOST_CACHE_FENCE_NONE
                                 : queue->plan.ring.host_publish_fence,
@@ -582,6 +598,22 @@ amdf_status_t amdf_gpu_umd_user_queue_mapping_destroy(
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
   return AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_gpu_umd_user_queue_mapping_flush(
+    amdf_gpu_umd_user_queue_mapping_t* mapping) {
+  amdf_gpu_umd_user_queue_t* queue = (amdf_gpu_umd_user_queue_t*)mapping;
+  amdf_status_t status =
+      amdf_atomic_uint64_load_acquire(&queue->terminal_status);
+  if (amdf_status_is_ok(status)) {
+    status = queue->native_api->flush_host_writes(queue->native_api->user_data,
+                                                  queue->device);
+    if (!amdf_status_is_ok(status)) {
+      amdf_gpu_kfd_user_queue_record_failure(queue, status);
+      status = amdf_atomic_uint64_load_acquire(&queue->terminal_status);
+    }
+  }
+  return status;
 }
 
 // Firmware's wave64 and wave32 insufficient-scratch notifications. Unrelated
@@ -851,7 +883,11 @@ amdf_status_t amdf_gpu_umd_user_queue_wait_consumed(
     return status;
   }
   if (published_index > queue_status.producer_index) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+    // A terminal release failure may prevent the producer-index commitment.
+    // Preserve that failure when an owner joins its final reserved extent.
+    return amdf_status_is_ok(queue_status.terminal_status)
+               ? amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE)
+               : queue_status.terminal_status;
   }
   for (;;) {
     if (!amdf_status_is_ok(queue_status.terminal_status)) {

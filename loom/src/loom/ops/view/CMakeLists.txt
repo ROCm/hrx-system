@@ -17,9 +17,8 @@ loom_cc_library(
   TEXTUAL_HDRS
     "ops.inc"
   DEPS
-    loom::ops::atomic
-    loom::ops::cache
-    loom::ops::op_defs
+    loom::ops::headers
+    loom::ops::vocabulary
   PUBLIC
 )
 
@@ -34,9 +33,9 @@ loom_cc_library(
     "builders.c"
   DEPS
     loom::ir::builders
-    loom::ops::atomic
-    loom::ops::cache
-    loom::ops::op_defs
+    loom::ops::builders
+    loom::ops::vocabulary
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 

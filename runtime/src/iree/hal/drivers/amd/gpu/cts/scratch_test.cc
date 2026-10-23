@@ -5,14 +5,16 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <array>
-#include <cstring>
+#include <thread>
 #include <vector>
 
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/pool_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
-#include "iree/hal/drivers/amd/gpu/cts/scratch_images.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
+#include "iree/hal/drivers/amd/gpu/cts/testdata.h"
+#include "iree/hal/drivers/amd/gpu/queue/aql/queue.h"
+#include "iree/hal/drivers/amd/gpu/queue/pm4/queue.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -42,9 +44,13 @@ class GpuScratchTest : public GpuNativeTest {
     if (!available) {
       GTEST_SKIP() << "Native private-memory service is unavailable";
     }
-    const auto gfx = context_->target_info.gfx_ip;
     options_.queue.ring_byte_length = 4096;
     options_.queue.retirement_capacity = 128;
+    iree_hal_executable_load_params_t load;
+    iree_hal_executable_load_params_initialize(&load);
+    IREE_ASSERT_OK(
+        LookupExecutableData("amd_gpu_scratch", context_->target_info,
+                             IREE_SV("scratch.bin"), &load.executable_data));
     Create();
     if (HasFatalFailure()) {
       return;
@@ -54,20 +60,7 @@ class GpuScratchTest : public GpuNativeTest {
         group_, family, IREE_HAL_BUFFER_USAGE_STORAGE,
         {IREE_HAL_MEMORY_ACCESS_READ, IREE_HAL_MAPPING_MODE_SCOPED},
         iree_allocator_system(), pool_.out()));
-    const auto* files = iree_hal_amd_gpu_scratch_images_create();
-    const char* selector = gfx.major == 9
-                               ? (gfx.minor == 4 ? "gfx9-4-generic" : "gfx90a")
-                           : gfx.major == 11 ? "gfx11-generic"
-                                             : "gfx12-generic";
-    iree_hal_executable_load_params_t load;
-    iree_hal_executable_load_params_initialize(&load);
-    for (size_t i = 0; i < iree_hal_amd_gpu_scratch_images_size(); ++i) {
-      if (std::strstr(files[i].name, selector)) {
-        load.executable_data =
-            iree_make_const_byte_span(files[i].data, files[i].size);
-      }
-    }
-    ASSERT_NE(load.executable_data.data, nullptr);
+
     const auto* target =
         &iree_hal_device_spec_executables(iree_hal_device_spec(device_))
              ->targets[0];
@@ -120,8 +113,16 @@ class GpuScratchTest : public GpuNativeTest {
         iree_hal_semaphore_wait(done, value, iree_infinite_timeout(), 0));
   }
 
-  // A subsequent retirement proves the preceding scratch last_use has also
-  // reached the queue's completed count before explicit trim observes it.
+  // Public completion can precede the final retirement callback return. AQL
+  // trim leaves busy queues bound, so full reclamation requires actual idle.
+  void AwaitIdle(uint32_t queue) {
+    while (!(command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                 ? iree_hal_amd_gpu_aql_queue_is_idle(queues_[queue])
+                 : iree_hal_amd_gpu_pm4_queue_is_idle(queues_[queue]))) {
+      std::this_thread::yield();
+    }
+  }
+
   void Drain(uint32_t queue, iree_hal_semaphore_t* done, uint64_t value) {
     IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[queue], {},
                                           {1, &done, &value}, nullptr, 0));
@@ -183,6 +184,7 @@ TEST_P(GpuProtocolScratchTest, DirectGrowthReuseTrimAndRegrowth) {
     ASSERT_FALSE(HasFatalFailure());
   }
   Drain(0, done, ++value);
+  ASSERT_FALSE(HasFatalFailure());
   const auto warm = memory_gate_.QueryUsage();
   EXPECT_GT(warm.live_bytes, before.live_bytes);
   for (uint32_t i = 0; i < 8; ++i) {
@@ -192,7 +194,9 @@ TEST_P(GpuProtocolScratchTest, DirectGrowthReuseTrimAndRegrowth) {
     Check(output, i % 2, i, 7);
   }
   Drain(0, done, ++value);
+  ASSERT_FALSE(HasFatalFailure());
   EXPECT_EQ(memory_gate_.QueryUsage().allocation_count, warm.allocation_count);
+  AwaitIdle(0);
   IREE_ASSERT_OK(iree_hal_device_trim(device_));
   const auto trimmed = memory_gate_.WaitForBytes(before.live_bytes);
   EXPECT_EQ(trimmed.destroy_failures, 0u);
@@ -219,6 +223,46 @@ class GpuAqlScratchTest : public GpuScratchTest {
     return AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
   }
 };
+
+TEST_F(GpuAqlScratchTest, TrimRetainsScratchUntilRetirementCompletes) {
+  Ref<iree_hal_buffer_t> output;
+  Allocate(output.out());
+  Ref<iree_hal_semaphore_t> done;
+  CreateSemaphore(done.out());
+  ASSERT_FALSE(HasFatalFailure());
+  const auto before = memory_gate_.QueryUsage();
+  Dispatch(0, 0, output, 37, 5, done, 1);
+  ASSERT_FALSE(HasFatalFailure());
+  Wait(done, 1);
+  Check(output, 0, 37, 5);
+  ASSERT_FALSE(HasFatalFailure());
+  const auto warm = memory_gate_.QueryUsage();
+  ASSERT_GT(warm.live_bytes, before.live_bytes);
+
+  // Hold the real completion callback after signaling, before its final queue
+  // access. A cold trim must neither wait for that callback nor detach scratch
+  // while the queue still owns retirement. No timing assumption is required.
+  CompletionPause pause{reinterpret_cast<iree_async_semaphore_t*>(done.get())};
+  uint64_t value = 2;
+  IREE_ASSERT_OK(pause.Arm(value));
+  auto* semaphore = done.get();
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {}, {1, &semaphore, &value},
+                                        nullptr, 0));
+  pause.entered.acquire();
+  IREE_ASSERT_OK(iree_hal_device_trim(device_));
+  EXPECT_EQ(memory_gate_.QueryUsage().live_bytes, warm.live_bytes);
+  pause.Join();
+
+  AwaitIdle(0);
+  IREE_ASSERT_OK(iree_hal_device_trim(device_));
+  const auto trimmed = memory_gate_.WaitForBytes(before.live_bytes);
+  EXPECT_EQ(trimmed.destroy_failures, 0u);
+  EXPECT_EQ(trimmed.live_bytes, before.live_bytes);
+  Dispatch(0, 0, output, 123, 11, done, 3);
+  ASSERT_FALSE(HasFatalFailure());
+  Wait(done, 3);
+  Check(output, 0, 123, 11);
+}
 
 TEST_F(GpuAqlScratchTest, PausedFullRingResumesWhileAnotherQueueProgresses) {
   Ref<iree_hal_buffer_t> small, large;

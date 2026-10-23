@@ -58,8 +58,8 @@ class TestLogicalDevice {
       iree_allocator_t host_allocator, CaptureStrategy strategy) {
     IREE_RETURN_IF_ERROR(create_context_.Initialize(host_allocator));
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_create(
-        IREE_SV("amdgpu"), options, libhsa, topology, create_context_.params(),
-        host_allocator, &base_device_));
+        IREE_SV("legacy-amdgpu"), options, libhsa, topology,
+        create_context_.params(), host_allocator, &base_device_));
     // Host queues are created when the device is assigned a frontier by the
     // group, so the strategy override has to follow that.
     IREE_RETURN_IF_ERROR(iree_hal_device_group_create_from_device(

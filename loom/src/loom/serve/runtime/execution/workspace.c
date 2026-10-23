@@ -13,15 +13,15 @@
 #include "iree/hal/memory/tlsf_pool.h"
 
 typedef struct loom_serve_workspace_generation_t {
-  // Owned pool, also retained by each outstanding execution root record.
+  // Owned logical pool, retained independently by queue allocation roots.
   iree_hal_pool_t* pool;
-  // Owned backing-class cache retaining slabs returned by the logical pool.
+  // Owned exact native cache for fixed backing; null for virtual backing.
   iree_hal_pool_t* cache;
-  // Maximum reservation and slab bytes for this immutable pool geometry.
+  // Preferred range size for this allocator.
   iree_device_size_t length;
-  // Minimum base alignment of this pool's slabs, in bytes.
+  // Regular range alignment.
   iree_device_size_t alignment;
-  // Older generation still accounted until its roots and queue captures retire.
+  // Earlier fixed geometry still retained by raw roots; null for virtual.
   struct loom_serve_workspace_generation_t* next;
 } loom_serve_workspace_generation_t;
 
@@ -54,23 +54,25 @@ struct loom_serve_workspace_scope_t {
 struct loom_serve_workspace_t {
   // Ownership shared by resource bindings and independent execution domains.
   iree_atomic_ref_count_t ref_count;
-  // Allocation policy for this owner and cold generation metadata.
+  // Allocation policy for this owner and raw capture metadata.
   iree_allocator_t host_allocator;
   // Retained group enclosing native owners and captured memory scopes.
   iree_hal_device_group_t* group;
   // Immutable allocation-shaping policy selected for all consumers.
   iree_hal_asan_pool_options_t asan;
-  // Owned native backing source shared by all geometry generations.
+  // Retained prepared source, native for fixed storage or a virtual source.
   iree_hal_pool_t* backing_pool;
-  // Protects geometry, generations and archived statistics, never device waits.
+  // Borrowed serialized physical owner, present only for elastic backing.
+  loom_serve_virtual_pool_t* virtual_pool;
+  // Protects pool construction and raw captures, never device waits.
   iree_slim_mutex_t mutex;
-  // Largest registered searchable slab size, in bytes.
+  // Regular range size; virtual backing fixes this independently of models.
   iree_device_size_t length;
-  // Largest registered slab base alignment, in bytes.
+  // Regular range alignment, independent of later dedicated reservations.
   iree_device_size_t alignment;
-  // Newest allocated geometry followed by still-retained older pools.
+  // One persistent virtual-backed allocator, or fixed geometry generations.
   loom_serve_workspace_generation_t* current;
-  // Cumulative counters preserved when an idle old generation is destroyed.
+  // Counters of retired fixed generations; virtual backing retains its pool.
   iree_hal_pool_stats_t retired;
   // Raw allocation bookkeeping shared with active and released executions.
   loom_serve_workspace_scope_t* scopes;
@@ -155,9 +157,8 @@ static void loom_serve_workspace_generation_destroy(
 }
 
 // Execution records retain the pool until the last root/queue user retires.
-// The owner's sole reference therefore proves an old generation can be freed,
-// independently of semaphore success or failure. Active scopes are collected
-// too: idle models must not require another submission to enable backing trim.
+// Active scopes are collected too: idle models must not require another
+// submission to enable backing trim.
 static bool loom_serve_workspace_collect(
     loom_serve_workspace_t* workspace,
     loom_serve_workspace_collection_mode_t mode) {
@@ -245,11 +246,26 @@ iree_status_t loom_serve_workspace_create(
   return iree_ok_status();
 }
 
+iree_status_t loom_serve_workspace_create_from_virtual(
+    iree_hal_device_group_t* group, loom_serve_virtual_pool_t* virtual_pool,
+    iree_hal_pool_reservation_request_t range, iree_allocator_t host_allocator,
+    loom_serve_workspace_t** out_workspace) {
+  const iree_hal_asan_pool_options_t asan = {0};
+  IREE_RETURN_IF_ERROR(loom_serve_workspace_create(
+      group, loom_serve_virtual_pool_handle(virtual_pool), &asan,
+      host_allocator, out_workspace));
+  loom_serve_workspace_t* workspace = *out_workspace;
+  workspace->virtual_pool = virtual_pool;
+  workspace->length = range.allocation_size;
+  workspace->alignment = range.min_alignment;
+  return iree_ok_status();
+}
+
 iree_status_t loom_serve_workspace_reserve(loom_serve_workspace_t* workspace,
                                            iree_device_size_t length,
                                            iree_device_size_t alignment) {
   iree_slim_mutex_lock(&workspace->mutex);
-  if (!length ||
+  if (workspace->virtual_pool || !length ||
       (length <= workspace->length && alignment <= workspace->alignment)) {
     iree_slim_mutex_unlock(&workspace->mutex);
     return iree_ok_status();
@@ -283,23 +299,23 @@ iree_status_t loom_serve_workspace_acquire_pool(
   loom_serve_workspace_collect(workspace, WORKSPACE_COLLECTION_PREFIX);
   loom_serve_workspace_generation_t* current = workspace->current;
   iree_status_t status = iree_ok_status();
-  if (!current || current->length < workspace->length ||
-      current->alignment < workspace->alignment) {
+  if (!current || (!workspace->virtual_pool &&
+                   (current->length < workspace->length ||
+                    current->alignment < workspace->alignment))) {
     loom_serve_workspace_generation_t* generation = NULL;
     status = iree_allocator_malloc(workspace->host_allocator,
                                    sizeof(*generation), (void**)&generation);
-    if (iree_status_is_ok(status)) {
-      generation->length = workspace->length;
-      generation->alignment = workspace->alignment;
-      const iree_hal_tlsf_pool_options_t options = {
-          .tlsf_options = {.range_length = generation->length,
-                           .alignment = generation->alignment},
-          .asan = workspace->asan,
-          .trace_name = IREE_SVL("loom_serve_workspace"),
-      };
+    const iree_hal_tlsf_pool_options_t options = {
+        .tlsf_options = {.range_length = workspace->length,
+                         .alignment = workspace->alignment},
+        .asan = workspace->asan,
+        .trace_name = IREE_SVL("loom-serve-workspace"),
+    };
+    iree_hal_pool_t* source = workspace->backing_pool;
+    if (iree_status_is_ok(status) && !workspace->virtual_pool) {
       iree_hal_slab_cache_options_t cache_options = {
           .max_count = UINT32_MAX,
-          .trace_name = IREE_SVL("loom_serve_workspace_cache"),
+          .trace_name = IREE_SVL("loom-serve-workspace-cache"),
       };
       status = iree_hal_tlsf_pool_query_backing_request(
           workspace->backing_pool, &options, &cache_options.slab);
@@ -308,13 +324,15 @@ iree_status_t loom_serve_workspace_acquire_pool(
             workspace->backing_pool, &cache_options, workspace->host_allocator,
             &generation->cache);
       }
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_tlsf_pool_create(generation->cache, &options,
-                                           workspace->host_allocator,
-                                           &generation->pool);
-      }
+      source = generation->cache;
     }
     if (iree_status_is_ok(status)) {
+      status = iree_hal_tlsf_pool_create(
+          source, &options, workspace->host_allocator, &generation->pool);
+    }
+    if (iree_status_is_ok(status)) {
+      generation->length = workspace->length;
+      generation->alignment = workspace->alignment;
       generation->next = current;
       workspace->current = generation;
       loom_serve_workspace_collect(workspace, WORKSPACE_COLLECTION_COMPLETE);
@@ -341,10 +359,16 @@ iree_hal_pool_stats_t loom_serve_workspace_statistics(
     iree_hal_pool_stats_t statistics;
     iree_hal_pool_query_stats(generation->pool, &statistics);
     iree_hal_pool_stats_t backing;
-    iree_hal_pool_query_stats(generation->cache, &backing);
+    iree_hal_pool_query_stats(
+        generation->cache ? generation->cache : workspace->backing_pool,
+        &backing);
     total.bytes_reserved += statistics.bytes_reserved;
     total.bytes_free += statistics.bytes_free + backing.bytes_free;
-    total.bytes_committed += backing.bytes_committed;
+    total.bytes_committed +=
+        workspace->virtual_pool
+            ? loom_serve_virtual_pool_memory_usage(workspace->virtual_pool)
+                  .committed_bytes
+            : backing.bytes_committed;
     total.bytes_quarantined += statistics.bytes_quarantined;
     total.reservation_count += statistics.reservation_count;
     total.slab_count += backing.slab_count;
@@ -443,7 +467,9 @@ static iree_device_size_t loom_serve_workspace_trim_locked(
   for (loom_serve_workspace_generation_t* generation = workspace->current;
        generation; generation = generation->next) {
     iree_hal_pool_trim(generation->pool, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
-    iree_hal_pool_trim(generation->cache, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
+    iree_hal_pool_trim(
+        generation->cache ? generation->cache : workspace->backing_pool,
+        IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
     // Child returns reach the cache synchronously. After trimming both layers,
     // only backing still retained by the child contributes to reclamation.
     iree_hal_pool_stats_t statistics;
@@ -454,14 +480,20 @@ static iree_device_size_t loom_serve_workspace_trim_locked(
   return retained_bytes;
 }
 
-iree_device_size_t loom_serve_workspace_trim(
-    loom_serve_workspace_t* workspace) {
+iree_status_t loom_serve_workspace_trim(
+    loom_serve_workspace_t* workspace, iree_device_size_t* out_retained_bytes) {
   iree_slim_mutex_lock(&workspace->mutex);
   loom_serve_workspace_collect(workspace, WORKSPACE_COLLECTION_COMPLETE);
-  const iree_device_size_t retained =
-      loom_serve_workspace_trim_locked(workspace);
+  *out_retained_bytes = loom_serve_workspace_trim_locked(workspace);
   iree_slim_mutex_unlock(&workspace->mutex);
-  return retained;
+  return workspace->virtual_pool
+             ? loom_serve_virtual_pool_reclaim(workspace->virtual_pool)
+             : iree_ok_status();
+}
+
+bool loom_serve_workspace_is_reclaiming(loom_serve_workspace_t* workspace) {
+  return workspace->virtual_pool &&
+         loom_serve_virtual_pool_is_reclaiming(workspace->virtual_pool);
 }
 
 bool loom_serve_workspace_trim_idle(loom_serve_workspace_t* workspace,
@@ -476,4 +508,65 @@ bool loom_serve_workspace_trim_idle(loom_serve_workspace_t* workspace,
   }
   iree_slim_mutex_unlock(&workspace->mutex);
   return pending;
+}
+
+void loom_serve_workspace_set_observer(loom_serve_workspace_t* workspace,
+                                       loom_serve_wake_callback_t observer) {
+  if (workspace->virtual_pool) {
+    loom_serve_virtual_pool_set_observer(workspace->virtual_pool, observer);
+  }
+}
+
+loom_serve_memory_usage_t loom_serve_workspace_memory_usage(
+    const loom_serve_workspace_t* workspace) {
+  return workspace->virtual_pool
+             ? loom_serve_virtual_pool_memory_usage(workspace->virtual_pool)
+             : (loom_serve_memory_usage_t){0};
+}
+
+uint64_t loom_serve_workspace_round_size(
+    const loom_serve_workspace_t* workspace, uint64_t byte_length) {
+  return workspace->virtual_pool ? loom_serve_virtual_pool_round_size(
+                                       workspace->virtual_pool, byte_length)
+                                 : byte_length;
+}
+
+iree_status_t loom_serve_workspace_advance(loom_serve_workspace_t* workspace) {
+  iree_slim_mutex_lock(&workspace->mutex);
+  loom_serve_workspace_collect(workspace, WORKSPACE_COLLECTION_COMPLETE);
+  iree_slim_mutex_unlock(&workspace->mutex);
+  return workspace->virtual_pool
+             ? loom_serve_virtual_pool_advance(workspace->virtual_pool)
+             : iree_ok_status();
+}
+
+bool loom_serve_workspace_is_pending(loom_serve_workspace_t* workspace) {
+  return workspace->virtual_pool &&
+         loom_serve_virtual_pool_is_pending(workspace->virtual_pool);
+}
+
+iree_status_t loom_serve_workspace_wait(loom_serve_workspace_t* workspace,
+                                        iree_hal_semaphore_t* semaphore,
+                                        uint64_t value) {
+  return workspace->virtual_pool
+             ? loom_serve_virtual_pool_wait(workspace->virtual_pool, semaphore,
+                                            value)
+             : iree_hal_semaphore_wait(semaphore, value,
+                                       iree_infinite_timeout(),
+                                       IREE_ASYNC_WAIT_FLAG_NONE);
+}
+
+static bool loom_serve_workspace_is_retired(void* user_data) {
+  return loom_serve_retirement_is_idle(user_data);
+}
+
+iree_status_t loom_serve_workspace_await_retirement(
+    loom_serve_workspace_t* workspace, loom_serve_retirement_t* retirement) {
+  if (!workspace->virtual_pool) {
+    loom_serve_retirement_await(retirement);
+    return iree_ok_status();
+  }
+  return loom_serve_virtual_pool_await(
+      workspace->virtual_pool, &retirement->notification,
+      loom_serve_workspace_is_retired, retirement);
 }

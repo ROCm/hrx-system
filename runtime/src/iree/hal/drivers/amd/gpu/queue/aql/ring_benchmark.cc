@@ -19,9 +19,9 @@ void BM_HostMemoryPublication(benchmark::State& state) {
   iree_atomic_int64_t write_index = IREE_ATOMIC_VAR_INIT(0);
   uint64_t doorbell = 0;
   iree_hal_amd_gpu_aql_ring_t ring;
-  iree_hal_amd_gpu_aql_ring_initialize(packets.data(), 0x1000, packets.size(),
-                                       &read_index, &write_index, &doorbell,
-                                       IREE_HAL_HOST_CACHE_FENCE_NONE, &ring);
+  iree_hal_amd_gpu_aql_ring_initialize(
+      packets.data(), 0x1000, packets.size(), &read_index, &write_index,
+      &doorbell, AMDF_CACHE_TRANSITION_EXECUTOR_NONE, &ring);
   const auto packet = iree_hal_amd_gpu_aql_packet_barrier(
       IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND, 0, nullptr, 0x2000);
   const uint32_t count = state.range(0);
@@ -33,7 +33,7 @@ void BM_HostMemoryPublication(benchmark::State& state) {
     }
     for (uint32_t i = 0; i < count; ++i) {
       iree_hal_amd_gpu_aql_ring_write_body(&ring, position + i, &packet);
-      iree_hal_amd_gpu_aql_ring_publish_header(&ring, position + i,
+      iree_hal_amd_gpu_aql_ring_publish_header(&ring, nullptr, position + i,
                                                packet.words[0]);
     }
     iree_hal_amd_gpu_aql_ring_notify(&ring);

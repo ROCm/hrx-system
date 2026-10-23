@@ -16,6 +16,7 @@ void GpuUserQueue::Initialize(
     amdf_user_queue_capabilities_t required_capabilities,
     uint64_t ring_byte_length, amdf_gpu_user_queue_flags_t flags,
     const void* next, amdf_queue_placement_t placement) {
+  publication_api = api;
   amdf_gpu_user_queue_create_info_t create = {
       .type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,
       .structure_size = sizeof(create),
@@ -130,9 +131,21 @@ bool GpuUserQueue::Release(const amdf_api_t* api) {
   return true;
 }
 
+amdf_status_t GpuUserQueue::Flush() const {
+  if (host.host_publish_executor == AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API) {
+    return publication_api->user_queue_mapping_flush(mapping);
+  }
+  if (host.host_publish_fence == AMDF_HOST_CACHE_FENCE_X86_SFENCE) {
+    _mm_sfence();
+  } else if (host.host_publish_fence == AMDF_HOST_CACHE_FENCE_X86_MFENCE) {
+    _mm_mfence();
+  }
+  return AMDF_STATUS_OK;
+}
+
 void GpuUserQueue::PublishStream(uint64_t producer_index) {
   ASSERT_NE(info.command_type, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
-  GpuPublishFence(host);
+  ASSERT_EQ(Flush(), AMDF_STATUS_OK);
   GpuStoreRelease(host.write_index_address, producer_index);
   GpuRingDoorbell(host.doorbell_address, producer_index);
 }

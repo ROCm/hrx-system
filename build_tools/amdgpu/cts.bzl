@@ -96,7 +96,7 @@ def iree_amdgpu_hal_cts_testdata(
         target_selectors_flag,
         target_name,
         identifier,
-        backend_name = "amdgpu",
+        backend_name = "legacy_amdgpu",
         target_family = "amdgpu",
         target = "amdgcn-amd-amdhsa",
         source_format = "freestanding_c",

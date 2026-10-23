@@ -568,8 +568,8 @@ check.case @buffer_mismatch {
 TEST_F(ExpectationTest, EvaluatesDeviceEventExpectations) {
   loom_module_t* module = ParseModule(R"(
 check.case @device_event {
-  check.expect.event<device> {type = "tsan_report", severity = "error", count = 1, driver = "amdgpu", tsan = {check = "data_race", memory = "workgroup", current_access = "write", prior_access = "read", access_length = 4, memory_address = 12, current_atomic = false, prior_atomic = false}}
-  check.expect.event<device> {type = "tsan_report", severity = "error", count = 1, driver = "amdgpu", tsan = {check = "synchronization_capacity", current_site_id = 23}}
+  check.expect.event<device> {type = "tsan_report", severity = "error", count = 1, driver = "legacy-amdgpu", tsan = {check = "data_race", memory = "workgroup", current_access = "write", prior_access = "read", access_length = 4, memory_address = 12, current_atomic = false, prior_atomic = false}}
+  check.expect.event<device> {type = "tsan_report", severity = "error", count = 1, driver = "legacy-amdgpu", tsan = {check = "synchronization_capacity", current_site_id = 23}}
   check.expect.event<device> {type = "ubsan_report", count = 1, ubsan = {check = "assertion", site_id = 17, operand0 = 3, operand1 = 4}}
   check.return
 }
@@ -614,7 +614,7 @@ check.case @device_event {
   iree_hal_device_event_t tsan_event = iree_hal_device_event_default();
   tsan_event.type = IREE_HAL_DEVICE_EVENT_TYPE_TSAN_REPORT;
   tsan_event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
-  tsan_event.source.driver_id = IREE_SV("amdgpu");
+  tsan_event.source.driver_id = IREE_SV("legacy-amdgpu");
   tsan_event.payload =
       iree_make_const_byte_span(&tsan_report, sizeof(tsan_report));
   iree_hal_device_event_sink_publish(
@@ -636,7 +636,7 @@ check.case @device_event {
   synchronization_capacity_event.type = IREE_HAL_DEVICE_EVENT_TYPE_TSAN_REPORT;
   synchronization_capacity_event.severity =
       IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
-  synchronization_capacity_event.source.driver_id = IREE_SV("amdgpu");
+  synchronization_capacity_event.source.driver_id = IREE_SV("legacy-amdgpu");
   synchronization_capacity_event.payload =
       iree_make_const_byte_span(&synchronization_capacity_report,
                                 sizeof(synchronization_capacity_report));

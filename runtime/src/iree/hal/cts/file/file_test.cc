@@ -591,7 +591,7 @@ TEST_P(AsyncFileTest, DirectFileRoundTripUsesReportedRequirements) {
       &file, IREE_IO_FILE_MODE_DIRECT);
   if (status.code() == iree::StatusCode::kUnavailable ||
       status.code() == iree::StatusCode::kUnimplemented) {
-    GTEST_SKIP() << status.ToString();
+    GTEST_SKIP() << FormatSkipStatus(status);
   }
   IREE_ASSERT_OK(status);
   const auto& requirements = *iree_hal_file_requirements(file.get());
@@ -1266,7 +1266,7 @@ TEST_P(AsyncFileTest, NativeFileChainRetainsDeferredResources) {
       &source_file);
   if (file_status.code() == iree::StatusCode::kUnavailable ||
       file_status.code() == iree::StatusCode::kUnimplemented) {
-    GTEST_SKIP() << file_status.ToString();
+    GTEST_SKIP() << FormatSkipStatus(file_status);
   }
   IREE_ASSERT_OK(file_status);
   IREE_ASSERT_OK(CreateNativeTestFile(IREE_HAL_MEMORY_ACCESS_WRITE,
@@ -1331,7 +1331,7 @@ TEST_P(AsyncFileTest, TruncatedFileFailsItsConsumer) {
       CreateNativeTestFile(IREE_HAL_MEMORY_ACCESS_READ, contents, &file);
   if (file_status.code() == iree::StatusCode::kUnavailable ||
       file_status.code() == iree::StatusCode::kUnimplemented) {
-    GTEST_SKIP() << file_status.ToString();
+    GTEST_SKIP() << FormatSkipStatus(file_status);
   }
   IREE_ASSERT_OK(file_status);
   Ref<iree_hal_buffer_t> buffer = CreateZeroedBuffer(contents.size());

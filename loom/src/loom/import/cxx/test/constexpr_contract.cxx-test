@@ -161,7 +161,7 @@ unsigned configured_c23(void) {
 // ----
 config.decl @schedule.c23 : i32
 
-func.def public @configured_c23() -> (i32) {
+func.def public source_signature(#func.abi.c.signature<arguments = [], results = [0], types = [#func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @configured_c23() -> (i32) {
   %tile = config.get @schedule.c23 : i32
   %width = scalar.constexpr %tile : i32
   func.return %width : i32

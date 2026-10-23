@@ -13,13 +13,15 @@ namespace iree::hal::cts {
 
 static bool amdgpu_sanitizer_backends_registered_ =
     (CtsRegistry::RegisterBackend({
-         "amdgpu_asan",
-         MakeAmdgpuCtsBackendInfo("amdgpu_asan", AmdgpuCtsBackendMode::kAsan),
+         "legacy_amdgpu_asan",
+         MakeAmdgpuCtsBackendInfo("legacy_amdgpu_asan",
+                                  AmdgpuCtsBackendMode::kAsan),
          {"async_queue"},
      }),
      CtsRegistry::RegisterBackend({
-         "amdgpu_tsan",
-         MakeAmdgpuCtsBackendInfo("amdgpu_tsan", AmdgpuCtsBackendMode::kTsan),
+         "legacy_amdgpu_tsan",
+         MakeAmdgpuCtsBackendInfo("legacy_amdgpu_tsan",
+                                  AmdgpuCtsBackendMode::kTsan),
          {"async_queue"},
      }),
      true);

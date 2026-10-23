@@ -50,49 +50,53 @@ kernel.def @ordinary_vector_structure_i32() {
 low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @ordinary_vector_structure_i32() asm {
   %input_aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output_aligned = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %37 = OpConstant.offset64 0
-  %38 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %37
-  %a = OpLoad.storage_buffer.i32 %38
-  %40 = OpConstant.offset64 4
-  %41 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %40
-  %b = OpLoad.storage_buffer.i32 %41
-  %43 = OpConstant.offset64 8
-  %44 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %43
-  %c = OpLoad.storage_buffer.i32 %44
-  %46 = OpConstant.offset64 12
-  %47 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %46
-  %d = OpLoad.storage_buffer.i32 %47
+  %51 = OpConstant.offset64 0
+  %52 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %51
+  %a = OpLoad.storage_buffer.i32 %52
+  %54 = OpConstant.offset64 4
+  %55 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %54
+  %b = OpLoad.storage_buffer.i32 %55
+  %57 = OpConstant.offset64 8
+  %58 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %57
+  %c = OpLoad.storage_buffer.i32 %58
+  %60 = OpConstant.offset64 12
+  %61 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input_aligned, %60
+  %d = OpLoad.storage_buffer.i32 %61
   %condition = OpSGreaterThan %a, %b
   %singleton_constant_value = OpConstant.i32 10
   %from = OpCompositeConstruct.v4i32 %a, %b, %c, %d
   %shuffled = OpVectorShuffle.v4i32.v4i32 %from, %from, 3, 1, 1, 0
   %constant = OpCompositeConstruct.v4i32 %singleton_constant_value, %singleton_constant_value, %singleton_constant_value, %singleton_constant_value
-  %splat = OpCompositeConstruct.v4i32 %a, %a, %a, %a
-  %56 = OpCompositeConstruct.v4bool %condition, %condition, %condition, %condition
-  %candidate = OpSelect.v4i32 %56, %shuffled, %constant
-  %selected = low.scf.if %condition -> (reg<spirv.id : vector<4xi32>>) {
-    %60 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %37
-    OpStore.storage_buffer.i32 %60, %a
-    low.scf.yield %candidate : reg<spirv.id : vector<4xi32>>
+  %69 = OpCompositeConstruct.v4bool %condition, %condition, %condition, %condition
+  %candidate = OpSelect.v4i32 %69, %shuffled, %constant
+  %71, %72, %73, %74 = low.scf.if %condition -> (reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>) {
+    %76 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %51
+    OpStore.storage_buffer.i32 %76, %a
+    %77 = OpCompositeExtract.v4i32.i32 %candidate, 0
+    %78 = OpCompositeExtract.v4i32.i32 %candidate, 1
+    %79 = OpCompositeExtract.v4i32.i32 %candidate, 2
+    %80 = OpCompositeExtract.v4i32.i32 %candidate, 3
+    low.scf.yield %77, %78, %79, %80 : reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>
   } else {
-    %62 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %37
-    OpStore.storage_buffer.i32 %62, %b
-    low.scf.yield %splat : reg<spirv.id : vector<4xi32>>
+    %82 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %51
+    OpStore.storage_buffer.i32 %82, %b
+    low.scf.yield %a, %a, %a, %a : reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>, reg<spirv.id : i32>
   }
+  %selected = OpCompositeConstruct.v4i32 %71, %72, %73, %74
   %inserted = OpCompositeInsert.i32.v4i32 %singleton_constant_value, %selected, 2
-  %final = OpSelect.v4i32 %56, %selected, %inserted
+  %final = OpSelect.v4i32 %69, %selected, %inserted
   %result0 = OpCompositeExtract.v4i32.i32 %final, 0
   %result1 = OpCompositeExtract.v4i32.i32 %final, 1
   %result2 = OpCompositeExtract.v4i32.i32 %final, 2
   %result3 = OpCompositeExtract.v4i32.i32 %final, 3
-  %71 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %37
-  OpStore.storage_buffer.i32 %71, %result0
-  %73 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %40
-  OpStore.storage_buffer.i32 %73, %result1
-  %75 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %43
-  OpStore.storage_buffer.i32 %75, %result2
-  %77 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %46
-  OpStore.storage_buffer.i32 %77, %result3
+  %92 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %51
+  OpStore.storage_buffer.i32 %92, %result0
+  %94 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %54
+  OpStore.storage_buffer.i32 %94, %result1
+  %96 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %57
+  OpStore.storage_buffer.i32 %96, %result2
+  %98 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output_aligned, %60
+  OpStore.storage_buffer.i32 %98, %result3
   return
 }
 

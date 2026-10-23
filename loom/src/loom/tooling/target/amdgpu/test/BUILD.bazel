@@ -332,6 +332,7 @@ loom_test(
         AMDGPU_HARDWARE_PROFILE,
         AMD_GPU_HARDWARE_PROFILE,
     ],
+    tags = ["requires-amd-gpu-feedback"],
 )
 
 loom_test(

@@ -16,6 +16,7 @@ loom_check_test_suite(
     "callable_effect_contracts.loom-test"
     "catalog_order.loom-test"
     "scoped_type_interop.loom-test"
+    "source_presentation.loom-test"
     "type_bindings.loom-test"
 )
 

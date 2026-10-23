@@ -15,6 +15,9 @@ from loom_binary import LoomBinaryBuildFileFunctions
 class RuntimeBuildFileFunctions(
     LoomBinaryBuildFileFunctions, bazel_to_cmake_converter.BuildFileFunctions
 ):
+    def _declarative_load_bindings(self):
+        return {**super()._declarative_load_bindings(), "select": self.select}
+
     def _custom_initialize(self):
         self._runtime_requirement_policy = (
             bazel_to_cmake_requirements.load_project_policy(
@@ -109,6 +112,65 @@ class RuntimeBuildFileFunctions(
             include_run_requirements=True,
         )
         self._iree_runtime_hal_cts_test_suite(**kwargs)
+
+    def iree_runtime_hal_cts_testdata(
+        self,
+        name,
+        srcs,
+        backend_names,
+        target_name,
+        target_family,
+        target_key,
+        **kwargs,
+    ):
+        kwargs = self._apply_runtime_cmake_policy(kwargs)
+        compatibility = kwargs.pop("target_compatible_with", None)
+        if self._should_skip_target(**kwargs):
+            return
+        self._emit_platform_guard_begin(compatibility)
+        self._converter.body += (
+            "iree_runtime_hal_cts_testdata(\n"
+            + self._convert_string_arg_block("NAME", name)
+            + self._convert_data_srcs_block(srcs, sort=False)
+            + self._convert_string_list_block("BACKEND_NAMES", backend_names)
+            + self._convert_string_arg_block("TARGET_NAME", target_name)
+            + self._convert_string_arg_block("TARGET_FAMILY", target_family)
+            + self._convert_string_arg_block("TARGET_KEY", target_key)
+            + ")\n\n"
+        )
+        self._emit_platform_guard_end(compatibility)
+
+    def iree_hal_amd_gpu_cts_testdata(self, name, srcs, backend_names, **kwargs):
+        if not getattr(self, "_amd_gpu_cts_profiles_emitted", False):
+            self._amd_gpu_cts_profiles_emitted = True
+            capabilities = self._loaded_modules.symbol(
+                "//loom/build_tools/amdgpu:target_config.bzl",
+                "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET",
+                self._build_dir,
+            )
+            self._converter.body += (
+                'include("${IREE_SOURCE_DIR}/runtime/src/iree/hal/drivers/amd/gpu/cts/testdata.cmake")\n\n'
+                "set(_IREE_HAL_AMD_GPU_CTS_TARGETS\n"
+                + "".join(
+                    f'  "{target}=LOOM_TARGET_AMDGPU_{capability.upper()}"\n'
+                    for target, capability in capabilities.items()
+                )
+                + ")\n\n"
+            )
+        kwargs = self._apply_runtime_cmake_policy(kwargs)
+        compatibility = (kwargs.pop("target_compatible_with", None) or []) + [
+            "//loom/config/target:amdgpu_artifacts"
+        ]
+        self._emit_platform_guard_begin(compatibility)
+        self._converter.body += (
+            "iree_hal_amd_gpu_cts_testdata(\n"
+            + self._convert_string_arg_block("NAME", name)
+            + self._convert_data_srcs_block(srcs, sort=False)
+            + self._convert_string_list_block("BACKEND_NAMES", backend_names)
+            + "  TARGETS ${_IREE_HAL_AMD_GPU_CTS_TARGETS}\n"
+            + ")\n\n"
+        )
+        self._emit_platform_guard_end(compatibility)
 
     def iree_amdgpu_hal_cts_testdata(self, **kwargs):
         kwargs = self._apply_runtime_cmake_policy(kwargs)

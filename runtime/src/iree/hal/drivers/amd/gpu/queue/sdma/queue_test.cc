@@ -155,6 +155,49 @@ class QueueTest : public ::testing::Test {
     api_.kernel_queue_destroy = [](amdf_kernel_queue_t*) {
       return AMDF_STATUS_OK;
     };
+    gpu_.user_queue_create = [](amdf_device_t* device,
+                                const amdf_gpu_user_queue_create_info_t* info,
+                                amdf_user_queue_t** queue) {
+      auto* self = reinterpret_cast<QueueTest*>(device);
+      self->user_.words.resize(info->ring_byte_length / 4);
+      *queue = reinterpret_cast<amdf_user_queue_t*>(self);
+      return AMDF_STATUS_OK;
+    };
+    api_.user_queue_map = [](amdf_user_queue_t* queue, amdf_device_t*,
+                             amdf_user_queue_mapping_t** mapping) {
+      *mapping = reinterpret_cast<amdf_user_queue_mapping_t*>(queue);
+      return AMDF_STATUS_OK;
+    };
+    api_.user_queue_mapping_query_info =
+        [](amdf_user_queue_mapping_t* mapping,
+           amdf_user_queue_mapping_info_t* info) {
+          auto* self = reinterpret_cast<QueueTest*>(mapping);
+          info->ring_address =
+              reinterpret_cast<uintptr_t>(self->user_.words.data());
+          info->ring_byte_length = self->user_.words.size() * 4;
+          info->write_index_address =
+              reinterpret_cast<uintptr_t>(&self->user_.write_index);
+          info->doorbell_address =
+              reinterpret_cast<uintptr_t>(&self->user_.doorbell);
+          info->index_bits = info->doorbell_bits = 64;
+          info->host_publish_executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;
+          return AMDF_STATUS_OK;
+        };
+    api_.user_queue_mapping_flush = [](amdf_user_queue_mapping_t* mapping) {
+      auto* self = reinterpret_cast<QueueTest*>(mapping);
+      ++self->user_.flush_count;
+      EXPECT_EQ(self->user_.write_index, 0u);
+      EXPECT_EQ(self->user_.doorbell, 0u);
+      return self->user_.status;
+    };
+    api_.user_queue_wait_consumed = [](amdf_user_queue_t* queue, uint64_t,
+                                       uint64_t, uint64_t) {
+      return reinterpret_cast<QueueTest*>(queue)->user_.status;
+    };
+    api_.user_queue_mapping_destroy = [](amdf_user_queue_mapping_t*) {
+      return AMDF_STATUS_OK;
+    };
+    api_.user_queue_destroy = [](amdf_user_queue_t*) { return AMDF_STATUS_OK; };
     IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(),
                                          sizeof(*fabric_),
                                          reinterpret_cast<void**>(&fabric_)));
@@ -178,6 +221,7 @@ class QueueTest : public ::testing::Test {
   void TearDown() override {
     // Native ownership is joined explicitly even after an observer failure.
     retired_ = submitted_;
+    user_.status = AMDF_STATUS_OK;
     if (queue_) {
       EXPECT_EQ(iree_hal_amd_gpu_sdma_queue_free(queue_), AMDF_STATUS_OK);
     }
@@ -186,7 +230,8 @@ class QueueTest : public ::testing::Test {
     iree_hal_amd_fabric_release(fabric_);
   }
 
-  void Allocate() {
+  void Allocate(amdf_queue_publication_modes_t mode =
+                    AMDF_QUEUE_PUBLICATION_MODE_KERNEL) {
     const iree_hal_amd_fabric_memory_options_t control = {
         .scope = reinterpret_cast<amdf_memory_scope_t*>(this),
         .profile =
@@ -202,8 +247,8 @@ class QueueTest : public ::testing::Test {
         .host_access = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
     };
     IREE_ASSERT_OK(iree_hal_amd_gpu_sdma_queue_allocate(
-        &context_, 0, AMDF_QUEUE_PUBLICATION_MODE_KERNEL, &control,
-        &publication_, 0, iree_allocator_system(), &queue_));
+        &context_, 0, mode, &control, &publication_, 0, iree_allocator_system(),
+        &queue_));
   }
 
   void Publish() {
@@ -226,6 +271,19 @@ class QueueTest : public ::testing::Test {
   amdf_gpu_api_t gpu_ = {};
   // Native control allocation, retained until the production owner releases it.
   std::vector<uint64_t> storage_;
+  // Native USER publication operands and release dependency.
+  struct {
+    // Command storage returned by the native mapping.
+    std::vector<uint32_t> words;
+    // Coherent producer index, untouched until release succeeds.
+    uint64_t write_index = 0;
+    // Notification aperture, untouched until index commitment.
+    uint64_t doorbell = 0;
+    // Number of attempted native releases.
+    uint32_t flush_count = 0;
+    // Terminal native result independently supplied to release and join.
+    amdf_status_t status = AMDF_STATUS_OK;
+  } user_;
   // Last native command range, captured before return from submission.
   std::vector<uint32_t> last_commands_;
   // Number of completed native backing destructions.
@@ -259,6 +317,32 @@ class QueueTest : public ::testing::Test {
   // Production object under test.
   iree_hal_amd_gpu_sdma_queue_t* queue_ = nullptr;
 };
+
+TEST_F(QueueTest,
+       FailedUserReleaseFailsWaitersWithoutReturningAcceptedOperands) {
+  ASSERT_NO_FATAL_FAILURE(Allocate(AMDF_QUEUE_PUBLICATION_MODE_USER));
+  user_.status = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
+  Copy accepted;
+  iree_hal_amd_gpu_sdma_queue_submit(queue_, &accepted.operation);
+  Publish();
+  EXPECT_EQ(user_.flush_count, 1u);
+  EXPECT_EQ(user_.write_index, 0u);
+  EXPECT_EQ(user_.doorbell, 0u);
+  EXPECT_EQ(accepted.notifications, 1u);
+  EXPECT_EQ(accepted.status, user_.status);
+  EXPECT_EQ(accepted.retirement, IREE_HAL_AMD_GPU_SDMA_UNRETIRED);
+  EXPECT_FALSE(iree_hal_amd_gpu_sdma_queue_is_idle(queue_));
+  EXPECT_EQ(iree_hal_amd_gpu_sdma_queue_free(queue_), user_.status);
+  EXPECT_EQ(destroyed_, 0u);
+  Copy rejected;
+  iree_hal_amd_gpu_sdma_queue_submit(queue_, &rejected.operation);
+  EXPECT_EQ(rejected.notifications, 1u);
+  EXPECT_EQ(rejected.status, user_.status);
+  EXPECT_EQ(rejected.retirement, IREE_HAL_AMD_GPU_SDMA_RETIRED);
+  EXPECT_EQ(user_.flush_count, 1u);
+  Publish();
+  EXPECT_EQ(accepted.notifications, 1u);
+}
 
 TEST_F(QueueTest, KernelRetirementOwnsCapacityAndCommandBytes) {
   capacity_ = 2;

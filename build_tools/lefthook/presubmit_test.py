@@ -808,6 +808,101 @@ class PresubmitTest(unittest.TestCase):
         self.assertIn(f"--output_groups={presubmit.CLANG_TIDY_OUTPUT_GROUP}", command)
         self.assertEqual(command[-1], "//runtime/src/iree/base:all")
 
+    def test_clang_tidy_selection_does_not_change_target_configuration(self):
+        command = presubmit.clang_tidy_bazel_command(
+            ["//runtime/src/iree/base:all"],
+            selected_files=["runtime/src/iree/base/status.c"],
+            emit_fixes=True,
+        )
+
+        self.assertIn(
+            '--aspects_parameters=selected_files=["runtime/src/iree/base/status.c"]',
+            command,
+        )
+        self.assertIn("--aspects_parameters=emit_fixes=true", command)
+        self.assertFalse(
+            any(arg.startswith("--//build_tools/clang_tidy:") for arg in command)
+        )
+
+    def test_hook_repository_environment_is_inherited_and_restored(self):
+        inputs = input_scope(["runtime/src/iree/base/status.c"])
+        for previous in (None, "disabled"):
+            for explicit in (False, True):
+                for fail in (False, True):
+                    with self.subTest(previous=previous, explicit=explicit, fail=fail):
+                        args = types.SimpleNamespace(
+                            clang_tidy=explicit,
+                            static_analysis=not explicit,
+                            profile="paranoid",
+                            lane="bazel",
+                        )
+                        environment = dict(os.environ)
+                        environment.pop("IREE_CLANG_TIDY_LLVM", None)
+                        if previous is not None:
+                            environment["IREE_CLANG_TIDY_LLVM"] = previous
+                        with (
+                            mock.patch.dict(os.environ, environment, clear=True),
+                            mock.patch.object(presubmit.sys, "platform", "linux"),
+                            mock.patch.object(
+                                presubmit,
+                                "clang_tidy_llvm_available",
+                                return_value=True,
+                            ),
+                        ):
+                            try:
+                                with presubmit.clang_tidy_repository_environment(
+                                    args, inputs
+                                ):
+                                    child = subprocess.check_output(
+                                        [
+                                            sys.executable,
+                                            "-B",
+                                            "-c",
+                                            "import os; print(os.environ['IREE_CLANG_TIDY_LLVM'])",
+                                        ],
+                                        text=True,
+                                    )
+                                    self.assertEqual(child.strip(), "auto")
+                                    if fail:
+                                        raise RuntimeError("hook failed")
+                            except RuntimeError as error:
+                                self.assertTrue(fail)
+                                self.assertEqual(str(error), "hook failed")
+                            self.assertEqual(
+                                os.environ.get("IREE_CLANG_TIDY_LLVM"), previous
+                            )
+
+    def test_hooks_without_bazel_clang_tidy_preserve_repository_selection(self):
+        for lane, profile, platform, available, paths in (
+            ("cmake", "paranoid", "linux", True, ["runtime/src/iree/base/status.c"]),
+            ("bazel", "fast", "linux", True, ["runtime/src/iree/base/status.c"]),
+            ("bazel", "paranoid", "win32", True, ["runtime/src/iree/base/status.c"]),
+            ("bazel", "paranoid", "linux", False, ["runtime/src/iree/base/status.c"]),
+            ("bazel", "paranoid", "linux", True, ["README.md"]),
+            ("bazel", "paranoid", "linux", True, []),
+        ):
+            with self.subTest(
+                lane=lane,
+                profile=profile,
+                platform=platform,
+                available=available,
+                paths=paths,
+            ):
+                args = types.SimpleNamespace(
+                    clang_tidy=False, static_analysis=True, profile=profile, lane=lane
+                )
+                with (
+                    mock.patch.dict(os.environ, {"IREE_CLANG_TIDY_LLVM": "disabled"}),
+                    mock.patch.object(presubmit.sys, "platform", platform),
+                    mock.patch.object(
+                        presubmit, "clang_tidy_llvm_available", return_value=available
+                    ),
+                    presubmit.clang_tidy_repository_environment(
+                        args, input_scope(paths)
+                    ),
+                ):
+                    self.assertEqual(os.environ["IREE_CLANG_TIDY_LLVM"], "disabled")
+
     def test_clang_tidy_bazel_command_enables_optional_loom_targets(self):
         targets = [
             "//loom/src/loom/target/emit/wasm:all",
@@ -1558,6 +1653,44 @@ class PresubmitTest(unittest.TestCase):
         self.assertFalse(ok)
         run_command.assert_not_called()
         self.assertIn("query failed", output.getvalue())
+
+    def test_clang_tidy_all_scope_uses_packages_without_file_filter(self):
+        paths = [
+            "runtime/src/iree/base/status.c",
+            "runtime/src/iree/hal/drivers/amd/gpu/cts/driver_test.cc",
+        ]
+        with (
+            mock.patch.object(presubmit.sys, "platform", "linux"),
+            mock.patch.object(
+                presubmit, "clang_tidy_llvm_available", return_value=True
+            ),
+            mock.patch.object(
+                presubmit, "run_command", return_value=True
+            ) as run_command,
+        ):
+            self.assertTrue(
+                presubmit.run_clang_tidy(
+                    input_scope(paths, mode="all", tracked_paths=paths),
+                    profile="ci",
+                    lane="bazel",
+                    verbose=False,
+                )
+            )
+
+        command = run_command.call_args.args[0]
+        self.assertEqual(
+            command[command.index("--") + 1 :],
+            [
+                "//runtime/src/iree/base:all",
+                "//runtime/src/iree/hal/drivers/amd/gpu/cts:all",
+            ],
+        )
+        self.assertFalse(
+            any(
+                argument.startswith(presubmit.CLANG_TIDY_SELECTED_FILES_FLAG + "=")
+                for argument in command
+            )
+        )
 
     def test_clang_tidy_base_implementation_scope_stays_bounded(self):
         inputs = input_scope(

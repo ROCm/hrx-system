@@ -5,18 +5,21 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "loom/ops/func/ops.h"
+#include "loom/ops/func/source_signature.h"
 #include "loom/ops/function_contract_verify.h"
 
 iree_status_t loom_func_def_verify(const loom_module_t* module,
                                    const loom_op_t* op,
                                    iree_diagnostic_emitter_t emitter) {
-  return loom_function_contract_verify(module, op, emitter);
+  IREE_RETURN_IF_ERROR(loom_function_contract_verify(module, op, emitter));
+  return loom_func_source_signature_verify(module, op, emitter);
 }
 
 iree_status_t loom_func_decl_verify(const loom_module_t* module,
                                     const loom_op_t* op,
                                     iree_diagnostic_emitter_t emitter) {
-  return loom_function_contract_verify(module, op, emitter);
+  IREE_RETURN_IF_ERROR(loom_function_contract_verify(module, op, emitter));
+  return loom_func_source_signature_verify(module, op, emitter);
 }
 
 iree_status_t loom_func_call_verify(const loom_module_t* module,

@@ -219,7 +219,7 @@ static void iree_hal_amdgpu_feedback_state_publish_asan_event(
   event.sequence = packet->sequence;
   event.source.device = state->device;
   event.source.device_id = state->device_id;
-  event.source.driver_id = IREE_SV("amdgpu");
+  event.source.driver_id = IREE_SV("legacy-amdgpu");
   event.source.executable_id =
       iree_hal_amdgpu_source_context_executable_id(source_context);
   event.source.physical_device_ordinal =
@@ -329,7 +329,7 @@ static void iree_hal_amdgpu_feedback_state_publish_ubsan_event(
   event.sequence = packet->sequence;
   event.source.device = state->device;
   event.source.device_id = state->device_id;
-  event.source.driver_id = IREE_SV("amdgpu");
+  event.source.driver_id = IREE_SV("legacy-amdgpu");
   event.source.executable_id =
       iree_hal_amdgpu_source_context_executable_id(source_context);
   event.source.physical_device_ordinal =
@@ -483,7 +483,7 @@ static void iree_hal_amdgpu_feedback_state_publish_tsan_event(
   event.sequence = packet->sequence;
   event.source.device = state->device;
   event.source.device_id = state->device_id;
-  event.source.driver_id = IREE_SV("amdgpu");
+  event.source.driver_id = IREE_SV("legacy-amdgpu");
   event.source.executable_id =
       iree_hal_amdgpu_source_context_executable_id(source_context);
   event.source.physical_device_ordinal =

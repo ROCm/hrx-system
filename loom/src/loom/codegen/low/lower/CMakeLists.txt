@@ -44,6 +44,7 @@ loom_cc_library(
     "source_memory.h"
     "source_plan.h"
     "source_query.h"
+    "source_signature_projection.h"
     "source_value_storage.h"
     "structural_plan.h"
     "visibility.h"
@@ -80,6 +81,7 @@ loom_cc_library(
     "source_memory.c"
     "source_plan.c"
     "source_query.c"
+    "source_signature_projection.c"
     "source_value_storage.c"
     "structural_plan.c"
     "visibility.c"
@@ -126,6 +128,7 @@ loom_cc_library(
     loom::ops::callable_effects
     loom::ops::cfg
     loom::ops::encoding
+    loom::ops::func
     loom::ops::func_symbol_facts
     loom::ops::global
     loom::ops::index
@@ -139,6 +142,7 @@ loom_cc_library(
     loom::rewrite::materialize
     loom::rewrite::remap
     loom::sanitizer::options
+    loom::target::abi::c::signature_layout
     loom::target::contract
     loom::target::facts
     loom::target::function_contract
@@ -154,6 +158,38 @@ loom_cc_library(
     loom::util::string_pool
     loom::util::walk
   PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    c_abi_projection
+  HDRS
+    "abi/c/projection.h"
+  SRCS
+    "abi/c/projection.c"
+  DEPS
+    ::lower
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::builder
+    loom::codegen::low::descriptors
+    loom::ir
+    loom::ops::low
+    loom::target::registers
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    c_abi_projection_test
+  SRCS
+    "abi/c/projection_test.cc"
+  DEPS
+    ::c_abi_projection
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::registers
 )
 
 loom_cc_library(

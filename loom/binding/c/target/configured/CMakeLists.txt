@@ -74,6 +74,7 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::binding::c::loomc
+    loom::pass::testing::registry_verify
     loom::target::configured::compiler_provider_set
 )
 

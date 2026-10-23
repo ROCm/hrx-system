@@ -41,7 +41,7 @@ loom_cc_test(
         "--pool_backing=fixed",
         "--workers=8",
         "--stream_count=8",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--fixture_transcription_device=1",
     ],
     data = RECOGNITION_SOURCES + ["//loom/src/loom/serve/fixture/recognition:activity.json"],
@@ -118,7 +118,7 @@ loom_cc_library(
 
 loom_cc_test(
     name = "execution_queues_test",
-    args = ["--execution_device_uri=amdgpu://0?queue_count=2"],
+    args = ["--execution_device_uri=legacy-amdgpu://0?queue_count=2"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = _ROCR_TEST_TAGS,
     target_compatible_with = loom_config_compatible_with([
@@ -131,41 +131,22 @@ loom_cc_test(
     ],
 )
 
-loom_cc_test(
-    name = "finite_component_test",
-    data = COMPONENT_SOURCES,
-    env = {
-        "LOOM_SERVE_TEST_COMPONENT_SOURCE": "$(rootpath //loom/src/loom/serve/service/finite:testdata/component/prepare.loom)",
-    },
-    resource_group = GPU_DEVICE_RESOURCE_GROUP,
-    tags = _ROCR_TEST_TAGS,
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/execute:amdgpu_hal",
-    ]),
-    deps = [
-        ":test_compiler",
-        ":test_device",
-        "//loom/src/loom/serve/service/finite:component_tests",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
 # Both runtimes consume the same compiler and serving contracts. Their device
 # leaves and runtime dependencies remain independent.
 _SERVING_DEVICES = [
     (
         "",
         ":test_device",
-        "amdgpu",
+        "legacy-amdgpu",
         ["//runtime/config/hal:driver_amdgpu"],
         _ROCR_TEST_TAGS,
     ),
     (
         "gpu_",
         ":test_device_gpu",
-        "amdgpu2",
+        "amdgpu",
         [
-            "//runtime/config/hal:driver_amd",
+            "//runtime/config/hal:driver_amd_gpu",
             "//libamdf/config:enabled_setting",
             "//libamdf/config/family:gpu",
         ],
@@ -173,12 +154,34 @@ _SERVING_DEVICES = [
     ),
 ]
 
+[
+    loom_cc_test(
+        name = prefix + "finite_component_test",
+        data = COMPONENT_SOURCES,
+        env = {
+            "LOOM_SERVE_TEST_COMPONENT_SOURCE": "$(rootpath //loom/src/loom/serve/service/finite:testdata/component/prepare.loom)",
+        },
+        resource_group = GPU_DEVICE_RESOURCE_GROUP,
+        tags = runtime_tags,
+        target_compatible_with = loom_config_compatible_with([
+            "//loom/config/execute:amdgpu_hal",
+        ] + runtime_requirements),
+        deps = [
+            ":test_compiler",
+            device,
+            "//loom/src/loom/serve/service/finite:component_tests",
+            "//runtime/src/iree/testing:gtest_main",
+        ],
+    )
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
+]
+
 loom_cc_library(
     name = "test_device_gpu",
     testonly = True,
     srcs = ["test_device_gpu.c"],
     target_compatible_with = loom_config_compatible_with([
-        "//runtime/config/hal:driver_amd",
+        "//runtime/config/hal:driver_amd_gpu",
         "//libamdf/config:enabled_setting",
         "//libamdf/config/family:gpu",
     ]),
@@ -190,6 +193,21 @@ loom_cc_library(
     ],
     alwayslink = True,
 )
+
+[
+    loom_cc_test(
+        name = prefix + "parameter_gather_test",
+        resource_group = GPU_DEVICE_RESOURCE_GROUP,
+        tags = runtime_tags,
+        target_compatible_with = loom_config_compatible_with(runtime_requirements),
+        deps = [
+            device,
+            "//loom/src/loom/serve/runtime/parameter:gather_tests",
+            "//runtime/src/iree/testing:gtest_main",
+        ],
+    )
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
+]
 
 [
     loom_cc_test(
@@ -268,7 +286,7 @@ loom_py_test(
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/decision:model.json)",
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/speech:model.json)",
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--pool_backing=fixed",
     ],
     data = DECISION_SOURCES + EMBEDDING_SOURCES + IMAGE_SOURCES + SPEECH_SOURCES + TEXT_SOURCES + [
@@ -303,7 +321,7 @@ loom_py_test(
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/decision:model.json)",
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/speech:model.json)",
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--pool_backing=elastic",
     ],
     data = DECISION_SOURCES + EMBEDDING_SOURCES + IMAGE_SOURCES + SPEECH_SOURCES + TEXT_SOURCES + [
@@ -341,7 +359,7 @@ loom_py_test(
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/decision:model.json)",
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/speech:model.json)",
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--pool_backing=fixed",
     ],
     data = DECISION_SOURCES + EMBEDDING_SOURCES + IMAGE_SOURCES + SPEECH_SOURCES + TEXT_SOURCES + [
@@ -375,9 +393,9 @@ loom_py_test(
     args = [
         "--server=$(rootpath :loom-serve-test-tool)",
         "--source=$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
     ],
-    data = TEXT_SOURCES + [
+    data = TEXT_SOURCES + PROJECTOR_SOURCES + [
         ":loom-serve-test-tool",
     ],
     main = "pressure_test.py",
@@ -403,9 +421,9 @@ loom_py_test(
     args = [
         "--server=$(rootpath :loom-serve-test-tool)",
         "--source=$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
     ],
-    data = TEXT_SOURCES + [
+    data = TEXT_SOURCES + PROJECTOR_SOURCES + [
         ":loom-serve-test-tool",
     ],
     main = "pressure_stress_test.py",
@@ -614,6 +632,7 @@ loom_cc_test(
     tags = _ROCR_TEST_TAGS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/execute:amdgpu_hal",
+        "//runtime/config/hal:driver_amdgpu",
     ]) + select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
@@ -637,6 +656,7 @@ loom_cc_test(
     tags = _ROCR_TEST_TAGS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/execute:amdgpu_hal",
+        "//runtime/config/hal:driver_amdgpu",
     ]) + select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
@@ -659,6 +679,7 @@ loom_cc_test(
     tags = _ROCR_TEST_TAGS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/execute:amdgpu_hal",
+        "//runtime/config/hal:driver_amdgpu",
     ]) + select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
@@ -682,6 +703,7 @@ loom_cc_test(
     tags = _ROCR_TEST_TAGS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/execute:amdgpu_hal",
+        "//runtime/config/hal:driver_amdgpu",
     ]) + select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
@@ -704,6 +726,7 @@ loom_cc_test(
     tags = _ROCR_TEST_TAGS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/execute:amdgpu_hal",
+        "//runtime/config/hal:driver_amdgpu",
     ]) + select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
@@ -727,6 +750,7 @@ loom_cc_test(
     tags = _ROCR_TEST_TAGS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/execute:amdgpu_hal",
+        "//runtime/config/hal:driver_amdgpu",
     ]) + select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
@@ -749,6 +773,7 @@ loom_cc_test(
     tags = _ROCR_TEST_TAGS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/execute:amdgpu_hal",
+        "//runtime/config/hal:driver_amdgpu",
     ]) + select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
@@ -771,6 +796,7 @@ loom_cc_test(
     tags = _ROCR_TEST_TAGS,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/execute:amdgpu_hal",
+        "//runtime/config/hal:driver_amdgpu",
     ]) + select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
@@ -934,7 +960,6 @@ loom_cc_test(
         "//loom/src/loom/serve/runtime/program:testdata/jit/config.loom",
         "//loom/src/loom/serve/runtime/program:testdata/jit/control.loom",
         "//loom/src/loom/serve/runtime/program:testdata/jit/preparation.loom",
-        "//loom/src/loom/serve/runtime/program:testdata/jit/private_vm_helper.loom",
         "//loom/src/loom/serve/runtime/program:testdata/jit/stage.loom",
         "//loom/src/loom/serve/runtime/program:testdata/jit/vm_helpers.loom",
     ],
@@ -977,6 +1002,7 @@ loom_cc_binary(
     tags = ["manual"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/execute:amdgpu_hal",
+        "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
         ":test_compiler",
@@ -1053,7 +1079,9 @@ loom_cc_binary(
             "//loom/src/loom/serve/runtime/execution",
             "//loom/src/loom/serve/runtime/parameter:activation",
             "//loom/src/loom/serve/runtime/parameter:bank",
+            "//loom/src/loom/serve/runtime/parameter:module",
             "//loom/src/loom/serve/runtime/parameter:residency",
+            "//loom/src/loom/serve/runtime/parameter:sources",
             "//loom/src/loom/serve/runtime/parameter:weights",
             "//loom/src/loom/serve/runtime/program",
             "//loom/src/loom/serve/runtime/program:jit",

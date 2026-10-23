@@ -11,13 +11,17 @@
 // tools and production pipeline contributors without inventing a second pass
 // representation. Execution still goes through pass.program compilation and the
 // interpreter.
+//
+// The destination module owns constructed IR and resolves operation metadata
+// through its context. The pass dialect must already be registered there;
+// construction does not register dialects or select pass implementations.
 
 #ifndef LOOM_PASS_BUILDER_H_
 #define LOOM_PASS_BUILDER_H_
 
 #include "iree/base/api.h"
 #include "loom/ir/ir.h"
-#include "loom/ops/op_defs.h"
+#include "loom/ops/builder.h"
 #include "loom/ops/pass/ops.h"
 
 #ifdef __cplusplus

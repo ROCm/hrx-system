@@ -154,11 +154,6 @@ static const loom_pass_registry_t kConfigurationCheckRegistry = {
     .descriptor_count = IREE_ARRAYSIZE(kConfigurationCheckPasses),
 };
 
-static const loom_target_provider_t kConfigurationCheckTargetProvider = {
+const loom_target_provider_t loom_aie2p_configuration_check_target_provider = {
     .pass_registry = &kConfigurationCheckRegistry,
-};
-
-const loom_check_provider_t loom_aie2p_configuration_check_provider = {
-    .name = IREE_SVL("test-amd-xdna-aie2p-configuration"),
-    .target_provider = &kConfigurationCheckTargetProvider,
 };

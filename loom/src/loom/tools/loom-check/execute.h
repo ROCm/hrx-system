@@ -18,9 +18,9 @@
 // diagnostics flow through loom_diagnostic_sink_t callbacks — but the
 // result aggregates them into a test-framework report.
 //
-// The execution engine does not own the loom_context_t or block pool. A
-// loom_check_environment_t supplies dialect registration and the target
-// environment selected by each test runner binary or embedding.
+// The execution engine borrows a public compilation session and block pool.
+// A loom_check_environment_t supplies the target environment selected by each
+// test runner binary or embedding.
 
 #ifndef LOOM_TOOLS_LOOM_CHECK_EXECUTE_H_
 #define LOOM_TOOLS_LOOM_CHECK_EXECUTE_H_
@@ -29,14 +29,13 @@
 #include "iree/base/internal/arena.h"
 #include "loom/error/diagnostic.h"
 #include "loom/error/source.h"
-#include "loom/format/text/printer.h"
-#include "loom/ir/context.h"
 #include "loom/target/low_descriptor_registry.h"
 #include "loom/testing/test_file.h"
-#include "loom/tooling/input/input.h"
+#include "loom/tooling/input/format.h"
 #include "loom/tools/loom-check/report.h"
 #include "loom/tools/loom-check/update.h"
 #include "loom/util/json.h"
+#include "loomc/module.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -48,11 +47,22 @@ typedef struct loom_target_environment_t loom_target_environment_t;
 typedef struct loom_check_diagnostic_collector_t
     loom_check_diagnostic_collector_t;
 typedef struct loom_check_compile_session_t loom_check_compile_session_t;
-typedef struct loomc_module_t loomc_module_t;
+typedef struct loom_module_t loom_module_t;
 
 //===----------------------------------------------------------------------===//
 // Types
 //===----------------------------------------------------------------------===//
+
+// Source selection accompanying a parsed check case. All views are borrowed
+// for execution; source bytes and per-case options come from the test case.
+typedef struct loom_check_input_t {
+  // Physical source path used for suffix selection and relative include lookup.
+  iree_string_view_t path;
+  // Explicit input format, overridden by a case's INPUT directive when present.
+  iree_string_view_t format;
+  // Display remapping for sources discovered by an optional importer.
+  loom_tooling_source_path_options_t source_path_options;
+} loom_check_input_t;
 
 // Whether a single test case passed, failed, or was skipped by an unavailable
 // declared requirement.
@@ -102,10 +112,10 @@ typedef struct loom_check_result_t {
   // source; apply multiple edits atomically or in descending range order.
   loom_json_value_list_t annotation_edits;
 
-  // Structured diagnostic JSON objects. Internal checker stages preserve the
-  // complete parser/verifier shape; public compiler qualification preserves
-  // the code, message, source range, related locations, and rendered params
-  // exposed by LoomC.
+  // Structured diagnostic JSON objects. Native emit providers preserve their
+  // complete diagnostic shape; public module operations preserve the code,
+  // message, source range, related locations, and rendered params exposed by
+  // LoomC.
   loom_json_value_list_t diagnostics;
 } loom_check_result_t;
 
@@ -123,19 +133,6 @@ typedef struct loom_check_diagnostic_capture_t {
   // File-level result receiving structured diagnostic JSON, or NULL.
   loom_check_result_t* result;
 } loom_check_diagnostic_capture_t;
-
-// Registers dialects into |context| before loom-check finalizes it.
-typedef iree_status_t (*loom_check_register_context_fn_t)(
-    void* user_data, loom_context_t* context);
-
-// Callback for dialect registration. The callback must not finalize the
-// context; loom-check finalizes it after registration succeeds.
-typedef struct loom_check_register_context_callback_t {
-  // Function that registers the dialect surface selected by this environment.
-  loom_check_register_context_fn_t fn;
-  // Opaque callback state forwarded to |fn|.
-  void* user_data;
-} loom_check_register_context_callback_t;
 
 typedef struct loom_check_environment_t loom_check_environment_t;
 typedef struct loom_check_emit_provider_t loom_check_emit_provider_t;
@@ -161,8 +158,6 @@ typedef struct loom_check_emit_provider_request_t {
   iree_string_view_t filename;
   // Parsed test case being executed.
   const loom_test_case_t* test_case;
-  // Finalized runner context for checker-owned inspection IR.
-  loom_context_t* context;
   // Runner environment that selected this provider.
   const loom_check_environment_t* environment;
   // Public module admitted once through LoomC for this emit case.
@@ -285,13 +280,11 @@ typedef struct loom_check_requirement_provider_registry_t {
 
 // Execution environment supplied by each loom-check binary or embedding.
 struct loom_check_environment_t {
-  // Optional source input providers linked into this runner.
-  loom_input_provider_list_t input_providers;
-  // Dialect registration callback for the IR surface accepted by this runner.
-  loom_check_register_context_callback_t register_context;
+  // Optional source format metadata linked into this runner.
+  loom_input_format_list_t input_formats;
   // Composed target environment used by target-aware check modes.
   const loom_target_environment_t* target_environment;
-  // Lazy public compiler session used to admit every module-dependent case.
+  // Lazy public session shared by all check modes.
   loom_check_compile_session_t* compile_session;
   // Cleanup rewrite providers linked into this runner.
   const loom_cleanup_pattern_provider_set_t* cleanup_pattern_provider_set;
@@ -337,13 +330,6 @@ iree_status_t loom_check_result_append_annotation_edit(
     loom_test_source_range_t range, iree_host_size_t target_line,
     iree_string_view_t text);
 
-// Registers the dialects selected by |environment|, then finalizes |context|.
-//
-// The context must have been initialized with loom_context_initialize() before
-// calling this.
-iree_status_t loom_check_context_register_and_finalize(
-    const loom_check_environment_t* environment, loom_context_t* context);
-
 // Executes a single test case: checks declared environment requirements,
 // dispatches to the mode-specific function, then applies XFAIL inversion to
 // IR/test-subject outcomes. Requirement harness failures and skips are final
@@ -357,26 +343,26 @@ iree_status_t loom_check_context_register_and_finalize(
 iree_status_t loom_check_execute_case(
     const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_input_t* input_request,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result);
 
 // Reparses printed IR and checks that canonical printing is stable. Content
 // failures set |out_valid| to false and append diagnostics to |result|.
 iree_status_t loom_check_validate_printed_ir(
-    iree_string_view_t source, loom_context_t* context,
+    iree_string_view_t source, loom_check_compile_session_t* session,
     iree_arena_block_pool_t* block_pool,
-    const loom_text_print_options_t* print_options, loom_check_result_t* result,
-    bool* out_valid);
+    const loomc_module_serialize_options_t* print_options,
+    loom_check_result_t* result, bool* out_valid);
 
 // Loads the input module, prints Loom text, reparses it, and compares against
 // the expected section. On mismatch, appends a unified diff to result->detail
 // and copies the printed output to result->actual_output for --update.
 iree_status_t loom_check_execute_roundtrip(
     const loom_test_case_t* test_case, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_input_t* input_request,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result);
 
@@ -387,8 +373,8 @@ iree_status_t loom_check_execute_roundtrip(
 iree_status_t loom_check_execute_verify(
     const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_input_t* input_request,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result);
 
@@ -399,8 +385,8 @@ iree_status_t loom_check_execute_verify(
 iree_status_t loom_check_execute_pass(
     const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_input_t* input_request,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result);
 
@@ -410,8 +396,8 @@ iree_status_t loom_check_execute_pass(
 iree_status_t loom_check_execute_pass_report(
     const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_input_t* input_request,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result);
 
@@ -422,8 +408,8 @@ iree_status_t loom_check_execute_pass_report(
 iree_status_t loom_check_execute_compile_report(
     const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_input_t* input_request,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result);
 
@@ -433,8 +419,8 @@ iree_status_t loom_check_execute_compile_report(
 // as roundtrip.
 iree_status_t loom_check_execute_format(
     const loom_test_case_t* test_case, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_input_t* input_request,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result);
 
@@ -444,8 +430,8 @@ iree_status_t loom_check_execute_format(
 iree_status_t loom_check_execute_emit(
     const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_input_t* input_request,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result);
 

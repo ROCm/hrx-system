@@ -92,6 +92,7 @@ loom_cc_library(
     hdrs = ["resources.h"],
     deps = [
         "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution:workspace",
         "//loom/src/loom/serve/runtime/host:wake",
         "//loom/src/loom/serve/runtime/parameter:residency",
         "//loom/src/loom/serve/runtime/storage:memory",
@@ -302,6 +303,7 @@ loom_cc_library(
         ":configuration",
         ":model_registration",
         ":registry",
+        ":resources",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/service",
         "//loom/src/loom/serve/service/speech:output",
@@ -335,6 +337,7 @@ loom_cc_library(
         ":configuration",
         ":model_registration",
         ":registry",
+        ":resources",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/service",
         "//loom/src/loom/serve/service/recognition:document",

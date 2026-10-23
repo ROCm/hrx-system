@@ -61,6 +61,17 @@ iree_status_t loom_serve_media_image_request_size(
     const loom_serve_media_image_info_t* info, iree_host_size_t metadata_length,
     iree_host_size_t* out_length);
 
+// Creates only the header and source metadata for memory forecasting, without
+// retaining the compressed image or decoding pixels. The descriptor is the
+// exact prefix of the eventual packet, ending at PIXEL_OFFSET. PIXEL_LENGTH
+// still describes the future plane; the descriptor does not contain it and is
+// not an execution input. The inspected info and metadata are borrowed only
+// through this call. Success transfers one VM buffer.
+iree_status_t loom_serve_media_image_request_describe(
+    const loom_serve_media_image_info_t* info, iree_const_byte_span_t metadata,
+    uint32_t output_rows, iree_allocator_t host_allocator,
+    iree_vm_buffer_t** out_descriptor);
+
 // Realizes a cohort directly into exact source packets, with no intermediate
 // pixel planes. Inputs/metadata remain borrowed through return. Each successful
 // output owns one VM buffer; a per-image error leaves that output null without

@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "oversized native programs retain their compile report",
+      "steps": [
+        {
+          "name": "compile-oversized-program",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/native_program_capacity.loom",
+              "--root=@oversized_native_program",
+              "--format=xdna",
+              "--output={tmp}/oversized-native-program.xdna",
+              "--compile-report=summary",
+              "--compile-report-output={tmp}/oversized-native-program.json"
+            ]
+          },
+          "exit": 1,
+          "stderr": {
+            "contains": {
+              "unordered": [
+                "error [XDNA/058]",
+                "requires 16390 code bytes",
+                "has 16384 bytes of program memory"
+              ]
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/oversized-native-program.xdna",
+              "exists": false
+            },
+            {
+              "path": "{tmp}/oversized-native-program.json",
+              "contains": {
+                "unordered": [
+                  "\"status\":{\"code\":9,\"name\":\"FAILED_PRECONDITION\"}",
+                  "\"entries\":{\"count\":0,\"rows\":[]}",
+                  "\"code_byte_count\":16390"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

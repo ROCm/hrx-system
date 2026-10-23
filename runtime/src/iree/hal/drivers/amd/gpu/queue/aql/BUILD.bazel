@@ -112,7 +112,7 @@ iree_runtime_cc_library(
     srcs = ["code.c"],
     hdrs = ["code.h"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -157,10 +157,16 @@ iree_runtime_cc_library(
     name = "ring",
     srcs = ["ring.c"],
     hdrs = ["ring.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":packet",
+        "//libamdf:headers",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:user_queue",
     ],
 )
 
@@ -177,6 +183,10 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "ring_test",
     srcs = ["ring_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":packet",
         ":ring",
@@ -189,6 +199,10 @@ iree_runtime_cc_test(
 iree_runtime_cc_benchmark(
     name = "ring_benchmark",
     srcs = ["ring_benchmark.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":packet",
         ":ring",
@@ -202,7 +216,7 @@ iree_runtime_cc_library(
     srcs = ["signal.c"],
     hdrs = ["signal.h"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -217,7 +231,7 @@ iree_runtime_cc_test(
     name = "signal_test",
     srcs = ["signal_test.cc"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -240,7 +254,7 @@ iree_runtime_cc_library(
     srcs = ["dispatch.c"],
     hdrs = ["dispatch.h"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -255,7 +269,7 @@ iree_runtime_cc_library(
     srcs = ["indirect.c"],
     hdrs = ["indirect.h"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -269,7 +283,7 @@ iree_runtime_cc_test(
     name = "indirect_test",
     srcs = ["indirect_test.cc"],
     target_compatible_with = _PROGRAM_COMPATIBLE_WITH + select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -289,7 +303,7 @@ iree_runtime_cc_test(
     name = "dispatch_test",
     srcs = ["dispatch_test.cc"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -320,7 +334,7 @@ iree_runtime_cc_library(
     srcs = ["command_buffer.c"],
     hdrs = ["command_buffer.h"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -343,7 +357,7 @@ iree_runtime_cc_library(
     srcs = ["submission.c"],
     hdrs = ["submission.h"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -352,6 +366,7 @@ iree_runtime_cc_library(
         ":transfer",
         "//runtime/src/iree/hal/drivers/amd/gpu:completion",
         "//runtime/src/iree/hal/drivers/amd/gpu:profile",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:allocation",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:buffer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:capture_pool",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:control",
@@ -378,7 +393,7 @@ iree_runtime_cc_test(
     name = "submission_test",
     srcs = ["submission_test.cc"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -404,7 +419,7 @@ iree_runtime_cc_library(
     srcs = ["growth.c"],
     hdrs = ["growth.h"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -421,7 +436,7 @@ iree_runtime_cc_library(
     srcs = ["scratch.c"],
     hdrs = ["scratch.h"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -435,7 +450,7 @@ iree_runtime_cc_library(
     srcs = ["queue.c"],
     hdrs = ["queue.h"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -486,7 +501,7 @@ iree_runtime_cc_test(
     name = "queue_test",
     srcs = ["queue_test.cc"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -517,7 +532,7 @@ iree_runtime_cc_library(
     srcs = ["program.c"],
     hdrs = ["program.h"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -528,5 +543,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu:code",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:blit",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:program",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:user_queue",
     ],
 )

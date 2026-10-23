@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-// AIE2P target-Low descriptor and lowering provider package.
+// AIE2P array-plan, artifact, and leaf compilation inspection handlers.
 extern const loom_check_provider_t loom_aie2p_check_provider;
 
 #ifdef __cplusplus

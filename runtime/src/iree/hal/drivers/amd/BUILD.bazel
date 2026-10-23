@@ -40,6 +40,17 @@ iree_runtime_cc_library(
     name = "driver",
     srcs = ["driver.c"],
     hdrs = ["driver.h"],
+    defines = select({
+        "//runtime/config/hal:driver_amd_gpu": ["IREE_HAL_AMD_GPU_ENABLED=1"],
+        "//conditions:default": ["IREE_HAL_AMD_GPU_ENABLED=0"],
+    }) + select({
+        "//runtime/config/hal:driver_amd_xdna": ["IREE_HAL_AMD_XDNA_ENABLED=1"],
+        "//conditions:default": ["IREE_HAL_AMD_XDNA_ENABLED=0"],
+    }),
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":status",
         "//libamdf:amdf_static",
@@ -47,11 +58,19 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd/fabric",
-        "//runtime/src/iree/hal/drivers/amd/gpu:context",
-        "//runtime/src/iree/hal/drivers/amd/gpu:device",
-        "//runtime/src/iree/hal/drivers/amd/xdna:context",
-        "//runtime/src/iree/hal/drivers/amd/xdna:device",
-    ],
+    ] + select({
+        "//runtime/config/hal:driver_amd_gpu": [
+            "//runtime/src/iree/hal/drivers/amd/gpu:context",
+            "//runtime/src/iree/hal/drivers/amd/gpu:device",
+        ],
+        "//conditions:default": [],
+    }) + select({
+        "//runtime/config/hal:driver_amd_xdna": [
+            "//runtime/src/iree/hal/drivers/amd/xdna:context",
+            "//runtime/src/iree/hal/drivers/amd/xdna:device",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 iree_runtime_cc_test(

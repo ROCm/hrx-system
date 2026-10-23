@@ -44,29 +44,6 @@ loom_cc_library(
   PUBLIC
 )
 
-set(_configured_platform_copts "")
-if(LOOM_IMPORT_CXX)
-  list(APPEND _configured_platform_copts "-DLOOM_CONFIG_INPUT_HAVE_CXX=1")
-endif()
-set(_configured_platform_deps "")
-if(LOOM_IMPORT_CXX)
-  list(APPEND _configured_platform_deps loom::import::cxx::tooling::input)
-endif()
-loom_cc_library(
-  NAME
-    configured
-  COPTS
-    ${_configured_platform_copts}
-  HDRS
-    "configured.h"
-  SRCS
-    "configured.c"
-  DEPS
-    ::input
-    ${_configured_platform_deps}
-  PUBLIC
-)
-
 loom_cc_library(
   NAME
     flags

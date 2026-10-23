@@ -250,7 +250,7 @@ int main(int argc, char** argv) {
               ",\"parameter_committed\":%" PRIu64 "}\n",
               memory.retained.reserved_bytes, memory.retained.committed_bytes);
   loom_serve_parameter_bank_retire(bank, nullptr, nullptr);
-  loom_serve_parameter_bank_await_retirement(bank);
+  IREE_CHECK_OK(loom_serve_parameter_bank_await_retirement(bank));
   IREE_CHECK_OK(loom_serve_parameter_bank_free(bank));
   loom_serve_jit_stage_free(stage);
   loom_serve_jit_release(jit);

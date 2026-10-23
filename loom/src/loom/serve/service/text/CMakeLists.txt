@@ -172,10 +172,6 @@ loom_cc_library(
     "source_cache_test.cc"
   DEPS
     ::source_service_fixture
-    iree::base::internal::arena
-    iree::vm::test_support
-    loom::serve::media::image_codec
-    loom::serve::media::image_codecs
   TESTONLY
   ALWAYSLINK
   PUBLIC
@@ -283,10 +279,14 @@ loom_cc_library(
     source_execution_tests
   SRCS
     "capture_execution_test.cc"
+    "epoch_upload_test.cc"
+    "model_instance.h"
     "source_execution_test.cc"
     "state_test.cc"
+    "workspace_test.cc"
   DEPS
     ::capture
+    ::epoch_upload
     ::model
     ::source_service_fixture
     ::storage
@@ -294,6 +294,32 @@ loom_cc_library(
     iree::vm
     loom::serve::runtime::device
     loom::serve::runtime::execution
+    loom::serve::testing::service_application
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    media_projector_tests
+  SRCS
+    "media_projector_test.cc"
+  DEPS
+    ::media_projector
+    iree::async
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::testing::gtest
+    loom::serve::media::image
+    loom::serve::runtime::device
+    loom::serve::runtime::host
+    loom::serve::service::finite::model
+    loom::serve::service::finite::result
+    loom::serve::testing::model
     loom::serve::testing::service_application
   TESTONLY
   ALWAYSLINK
@@ -312,6 +338,7 @@ loom_cc_library(
     "projector_execution_test.cc"
   DEPS
     ::epoch
+    ::epoch_upload
     ::media_projector
     ::model
     ::readiness
@@ -442,6 +469,36 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_test(
   NAME
+    chat_policy_test
+  SRCS
+    "chat_policy_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/tokenizer.json"
+  DEPS
+    ::chat
+    ::input
+    iree::base
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm::test_support
+    loom::serve::media::image_codec
+    loom::serve::media::image_codecs
+    loom::serve::runtime::program::compilation
+    loom::serve::testing::text_policy
+    loom::util::stream
+  ENV
+    "LOOM_SERVE_TEST_CHAT_CONTROL={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/control.loom}}"
+    "LOOM_SERVE_TEST_CHAT_TOKENIZER={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/tokenizer.json}}"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
     tool_calls_test
   SRCS
     "tool_calls_test.cc"
@@ -557,6 +614,23 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    epoch_upload
+  HDRS
+    "epoch_upload.h"
+  SRCS
+    "epoch_upload.c"
+  DEPS
+    iree::base
+    iree::hal
+    loom::serve::runtime::execution
+    loom::serve::runtime::program::transfer_plan
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     model
   HDRS
     "control.h"
@@ -586,6 +660,7 @@ loom_cc_library(
   DEPS
     ::capture
     ::chat
+    ::epoch_upload
     ::packing
     ::storage
     iree::async
@@ -603,7 +678,9 @@ loom_cc_library(
     loom::serve::runtime::execution
     loom::serve::runtime::execution::retirement
     loom::serve::runtime::parameter::activation
+    loom::serve::runtime::parameter::module
     loom::serve::runtime::parameter::residency
+    loom::serve::runtime::parameter::sources
     loom::serve::runtime::parameter::weights
     loom::serve::runtime::program
     loom::serve::runtime::program::compilation
@@ -1130,6 +1207,7 @@ loom_cc_library(
     loom::serve::service
     loom::serve::service::finite::model
     loom::serve::service::finite::result
+    loom::serve::service::prepared_request
   PUBLIC
 )
 endif()

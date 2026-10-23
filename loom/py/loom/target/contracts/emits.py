@@ -109,6 +109,7 @@ class EmitRegisterSlice:
     unit_offset: int = 0
     unit_count: int | None = None
     result_type: ResultTypeBinding | None = None
+    result_register_class: str | None = None
 
     def __post_init__(self) -> None:
         if self.unit_offset < 0 or self.unit_offset > 0xFFFF:
@@ -121,6 +122,16 @@ class EmitRegisterSlice:
             raise ValueError(
                 "register slice cannot specify both unit count and result type"
             )
+        if self.result_register_class is not None:
+            if not self.result_register_class:
+                raise ValueError(
+                    "register slice result register class must be non-empty"
+                )
+            if self.unit_count is None:
+                raise ValueError(
+                    "register slice result register class requires an explicit "
+                    "unit count"
+                )
         if (
             self.unit_count is not None
             and self.result.kind is not SourceValueKind.TEMPORARY
@@ -137,7 +148,6 @@ class EmitRegisterSlice:
         *,
         source_ops: Mapping[str, Op] | None = None,
     ) -> tuple[str, ...]:
-        del descriptor_set
         _validate_structural_source(
             source_op,
             self.source,
@@ -145,15 +155,26 @@ class EmitRegisterSlice:
             defined_temporaries,
             source_ops,
         )
-        return _validate_structural_result(
+        produced_temporaries = _validate_structural_result(
             source_op,
             self.result,
             self.result_type,
             "register slice result",
             defined_temporaries,
-            has_derived_type=self.unit_count is not None,
+            has_derived_type=(
+                self.unit_count is not None or self.result_register_class is not None
+            ),
             source_ops=source_ops,
         )
+        if self.result_register_class is not None and all(
+            row.name != self.result_register_class for row in descriptor_set.reg_classes
+        ):
+            raise ValueError(
+                f"{source_op.name}: register slice result register class "
+                f"'{self.result_register_class}' is absent from descriptor set "
+                f"'{descriptor_set.key}'"
+            )
+        return produced_temporaries
 
 
 @dataclass(frozen=True, slots=True)
@@ -636,6 +657,7 @@ class EmitDescriptorOp:
                 materializer.add,
                 materializer.multiply,
                 materializer.shift_left,
+                materializer.increment,
                 materializer.multiply_add,
                 materializer.static_bias,
                 *(
@@ -1167,6 +1189,21 @@ def _validate_byte_offset_materializer(
                 input_carriers=(carrier, carrier),
                 result_carrier=carrier,
             )
+    if (materializer.increment is None) != (materializer.increment_immediate is None):
+        raise ValueError(
+            f"{source_op.name}: source-memory byte-offset increment descriptor "
+            "and immediate must be specified together"
+        )
+    if materializer.increment is not None:
+        _validate_materializer_descriptor(
+            source_op,
+            materializer.increment,
+            subject="source-memory byte-offset increment",
+            op_kind=DescriptorOpKind.OP,
+            input_carriers=(carrier,),
+            result_carrier=carrier,
+            bound_immediate=materializer.increment_immediate,
+        )
     if materializer.multiply_add is not None:
         _validate_materializer_descriptor(
             source_op,

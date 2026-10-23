@@ -9,7 +9,7 @@
 
 iree_add_all_subdirs()
 
-if(LOOM_IMPORT_CXX AND (LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)))
+if(LOOM_IMPORT_CXX AND (LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD_GPU)))
 iree_c_embed_data(
   NAME
     kernels
@@ -26,7 +26,7 @@ iree_c_embed_data(
 )
 endif()
 
-if(LOOM_IMPORT_CXX AND (LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)))
+if(LOOM_IMPORT_CXX AND (LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD_GPU)))
 loom_cc_binary(
   NAME
     jit_amdgpu
@@ -47,7 +47,7 @@ loom_cc_binary(
 )
 endif()
 
-if(LOOM_IMPORT_CXX AND (LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND LOOM_IMPORT_CXX_EMBED_INCLUDES AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_IMPORT_CXX AND (LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD_GPU)) AND LOOM_IMPORT_CXX_EMBED_INCLUDES AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_test(
   NAME
     jit_amdgpu_test
@@ -73,6 +73,67 @@ loom_cc_test(
   SANITIZER_SUPPRESSIONS
     lsan
     rocm
+)
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_X86 AND IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_generated_file(
+  NAME
+    native_abi_module
+  GENERATOR
+    loom::tools::loom-import-cxx::loom-import-cxx
+  OUTPUT
+    "native_abi.loombc"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "${PROJECT_SOURCE_DIR}/loom/binding/c/example/cxx/native_abi_library.cxx"
+    "--to=bc"
+  INPUTS
+    "native_abi.h"
+    "native_abi_library.cxx"
+)
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_X86 AND IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_generated_file(
+  NAME
+    native_abi_object
+  GENERATOR
+    loom::tools::loom-compile::loom-compile
+  OUTPUT
+    "native_abi.o"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "${CMAKE_CURRENT_BINARY_DIR}/native_abi.loombc"
+    "--target=x86:avx2"
+  INPUTS
+    "native_abi.loombc"
+)
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_X86 AND IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_binary(
+  NAME
+    native_abi
+  SRCS
+    "native_abi.h"
+    "native_abi.o"
+    "native_abi_main.cc"
+  COPTS
+    "-mavx2"
+  DEPS
+
+)
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_X86 AND IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_native_test(
+  NAME
+    "native_abi_test"
+  SRC
+    ::native_abi
 )
 endif()
 

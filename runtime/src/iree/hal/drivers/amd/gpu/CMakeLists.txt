@@ -38,7 +38,7 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_library(
   NAME
     device
@@ -91,7 +91,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_library(
   NAME
     code
@@ -113,7 +113,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_test(
   NAME
     code_test
@@ -135,7 +135,7 @@ iree_cc_test(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_library(
   NAME
     executable
@@ -175,7 +175,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_library(
   NAME
     tsan
@@ -209,7 +209,7 @@ iree_cc_library(
   PUBLIC
 )
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_test(
   NAME
     tsan_test
@@ -247,7 +247,7 @@ iree_cc_fuzz(
     iree::hal
 )
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_library(
   NAME
     feedback
@@ -269,7 +269,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_test(
   NAME
     feedback_test
@@ -287,7 +287,7 @@ iree_cc_test(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_test(
   NAME
     executable_test
@@ -364,7 +364,7 @@ iree_cc_binary_benchmark(
   TESTONLY
 )
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_library(
   NAME
     context
@@ -386,7 +386,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_test(
   NAME
     context_test
@@ -405,7 +405,7 @@ iree_cc_test(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_library(
   NAME
     completion
@@ -426,7 +426,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_test(
   NAME
     completion_test
@@ -475,7 +475,7 @@ iree_cc_test(
     iree::testing::gtest_main
 )
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_library(
   NAME
     dispatch
@@ -494,7 +494,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_test(
   NAME
     dispatch_test
@@ -511,7 +511,7 @@ iree_cc_test(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU)
 iree_cc_binary_benchmark(
   NAME
     dispatch_benchmark

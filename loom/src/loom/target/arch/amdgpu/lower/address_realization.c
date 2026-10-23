@@ -31,7 +31,7 @@ typedef enum loom_amdgpu_address_realization_kind_e {
 } loom_amdgpu_address_realization_kind_t;
 
 typedef struct loom_amdgpu_address_component_key_t {
-  // Constant byte coefficient of each invariant source term.
+  // Constant byte coefficient of each address materialization term.
   int64_t coefficients[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
   // ABI lane-coordinate recipe; all unused entries are zero.
   loom_amdgpu_fragment_memory_lane_term_t
@@ -42,7 +42,7 @@ typedef struct loom_amdgpu_address_component_key_t {
   uint32_t bank_bit;
   // Initial bank contribution to the physical address.
   uint32_t initial_byte_offset;
-  // Number of invariant source terms.
+  // Number of address materialization terms.
   uint16_t term_count;
   // Number of lane projection terms.
   uint16_t lane_term_count;
@@ -160,7 +160,9 @@ static iree_status_t loom_amdgpu_request_address_component(
     const loom_low_lower_realization_loop_t* loop,
     const loom_low_source_memory_access_plan_t* source,
     const loom_amdgpu_fragment_memory_address_layout_t* layout,
-    uint16_t invariant_mask, uint32_t bank_bit, uint32_t initial_byte_offset,
+    uint16_t invariant_mask,
+    const loom_low_source_memory_dynamic_component_t* retained_component,
+    uint32_t bank_bit, uint32_t initial_byte_offset,
     const loom_low_lower_realization_t** out_realization) {
   loom_amdgpu_address_component_key_t key;
   memset(&key, 0, sizeof(key));
@@ -170,8 +172,15 @@ static iree_status_t loom_amdgpu_request_address_component(
       inputs[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY + 1];
   uint16_t input_count = 0;
   loom_amdgpu_memory_dynamic_term_sequence_t terms = {0};
+  uint16_t covered_mask = 0;
+  if (retained_component != NULL) {
+    const loom_low_source_memory_dynamic_term_t* term =
+        retained_component->term;
+    terms.terms[terms.count++] = term;
+    covered_mask = retained_component->term_mask;
+  }
   for (uint8_t i = 0; i < source->dynamic_term_count; ++i) {
-    if (invariant_mask & (1u << i)) {
+    if ((invariant_mask & (1u << i)) && !(covered_mask & (1u << i))) {
       terms.terms[terms.count++] = &source->dynamic_terms[i];
     }
   }
@@ -400,6 +409,8 @@ typedef struct loom_amdgpu_global_address_replacement_t {
   loom_amdgpu_memory_access_t* access;
   // Selected buffer packet descriptor.
   const loom_low_descriptor_t* descriptor;
+  // Exact shared source component used within the invariant vector sum.
+  const loom_low_source_memory_dynamic_component_t* retained_component;
   // Static byte offset encoded in the buffer packet.
   int64_t immediate_offset;
   // Invariant scalar bytes outside the buffer packet's immediate range.
@@ -411,7 +422,9 @@ typedef struct loom_amdgpu_global_address_replacement_t {
 } loom_amdgpu_global_address_replacement_t;
 
 static iree_status_t loom_amdgpu_apply_global_address_realizations(
-    loom_low_lower_context_t* context, const loom_op_t* source_op, void* data) {
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_realization_t* realization, void* data) {
+  (void)realization;
   const loom_amdgpu_global_address_replacement_t* replacement = data;
   loom_amdgpu_memory_access_t candidate = *replacement->access;
   candidate.address_form = LOOM_AMDGPU_MEMORY_ADDRESS_FORM_DEFAULT;
@@ -424,8 +437,8 @@ static iree_status_t loom_amdgpu_apply_global_address_realizations(
   const loom_low_source_memory_access_plan_t* source =
       replacement->access->source;
   IREE_RETURN_IF_ERROR(loom_amdgpu_request_address_component(
-      context, source_op, NULL, source, NULL, replacement->invariant_mask, 0, 0,
-      &candidate.realization.vaddr));
+      context, source_op, NULL, source, NULL, replacement->invariant_mask,
+      replacement->retained_component, 0, 0, &candidate.realization.vaddr));
   if (candidate.realization.vaddr == NULL) {
     return iree_ok_status();
   }
@@ -492,13 +505,18 @@ static iree_status_t loom_amdgpu_prepare_global_address_realizations(
                                            &invariant_maximum)) {
     return iree_ok_status();
   }
-  // The setup estimate covers a single retained invariant term and its byte
-  // conversion. Larger sums need a shared source realization, not an assumed
-  // cheap reconstruction of arbitrary canonical expressions.
+  const loom_low_source_memory_dynamic_component_t* retained_component = NULL;
+  if (access->retained_component_kind ==
+          LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_VADDR &&
+      source->retained_component.term != NULL &&
+      (source->retained_component.term_mask & (uint16_t)~invariant_mask) == 0) {
+    retained_component = &source->retained_component;
+  }
+  // Multiple canonical terms need an exact shared source component. Remaining
+  // simple terms are composed once in the invariant initializer and charged
+  // to the offer instead of being rebuilt in the loop.
   if ((invariant_mask & (invariant_mask - 1u)) != 0 &&
-      (access->retained_component_kind !=
-           LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_VADDR ||
-       source->retained_component.term_mask != invariant_mask)) {
+      retained_component == NULL) {
     return iree_ok_status();
   }
   for (uint8_t i = 0; i < source->dynamic_term_count; ++i) {
@@ -561,10 +579,16 @@ static iree_status_t loom_amdgpu_prepare_global_address_realizations(
       .immediate_offset = candidate.immediate_offset,
       .scalar_byte_offset = candidate.scalar_byte_offset,
       .invariant_mask = invariant_mask,
+      .retained_component = retained_component,
       .varying_index = varying_index,
   };
   const uint64_t key[] = {source->view_value_id, term->index,
                           (uint64_t)term->byte_stride};
+  const uint16_t retained_mask =
+      retained_component != NULL ? retained_component->term_mask : 0;
+  const uint32_t invariant_materialization_count =
+      iree_math_count_ones_u32(invariant_mask & (uint16_t)~retained_mask) +
+      (retained_component != NULL);
   // Each distinct biased SADDR costs a full-width add/carry pair. The shared
   // SRD costs an add/carry pair, extent subtraction and uniform byte scaling
   // per iteration. Root setup and each packet's invariant conversion/constant
@@ -577,7 +601,8 @@ static iree_status_t loom_amdgpu_prepare_global_address_realizations(
       .group_iteration_cost = 4,
       .removed_key = access->scalar_byte_offset,
       .removed_iteration_cost = access->scalar_byte_offset ? 2 : 0,
-      .setup_cost = 2 + (candidate.scalar_byte_offset != 0),
+      .setup_cost = 2 * invariant_materialization_count +
+                    (candidate.scalar_byte_offset != 0),
       .apply = loom_amdgpu_apply_global_address_realizations,
       .data = replacement,
   };
@@ -617,8 +642,9 @@ iree_status_t loom_amdgpu_prepare_memory_address_realizations(
     return iree_ok_status();
   }
   return loom_amdgpu_request_address_component(
-      context, source_op, loop, access->source, NULL, invariant_mask, bank_bit,
-      initial_byte_offset, &access->realization.vaddr);
+      context, source_op, loop, access->source, NULL, invariant_mask,
+      /*retained_component=*/NULL, bank_bit, initial_byte_offset,
+      &access->realization.vaddr);
 }
 
 iree_status_t loom_amdgpu_prepare_fragment_address_realization(
@@ -675,6 +701,6 @@ iree_status_t loom_amdgpu_prepare_fragment_address_realization(
   }
   return loom_amdgpu_request_address_component(
       context, source_op, loop, &plan->source, &plan->address_layout,
-      invariant_mask, bank_bit, initial_byte_offset,
-      &plan->address_realization);
+      invariant_mask, /*retained_component=*/NULL, bank_bit,
+      initial_byte_offset, &plan->address_realization);
 }

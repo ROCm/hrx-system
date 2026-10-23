@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <condition_variable>
+#include <cstring>
 #include <mutex>
 #include <tuple>
 #include <utility>
@@ -253,8 +254,10 @@ TEST_F(SnapshotTest, LargeSparseStateSurvivesBackingReuseAndFreshPlacement) {
   IREE_ASSERT_OK(loom_serve_execution_transfer(execution, downloads.size(),
                                                downloads.data(), &completion));
   IREE_ASSERT_OK(loom_serve_execution_wait(execution, completion));
-  for (size_t i = 0; i < observed.size(); ++i) {
-    ASSERT_EQ(observed[i], expected[i]) << "before capture, word " << i;
+  if (std::memcmp(observed.data(), expected.data(), kPayloadBytes) != 0) {
+    for (size_t i = 0; i < observed.size(); ++i) {
+      ASSERT_EQ(observed[i], expected[i]) << "before capture, word " << i;
+    }
   }
   IREE_ASSERT_OK(loom_serve_snapshot_capture(
       execution, roots.size(), roots.data(), ranges.size(), ranges.data(),
@@ -293,9 +296,12 @@ TEST_F(SnapshotTest, LargeSparseStateSurvivesBackingReuseAndFreshPlacement) {
   IREE_ASSERT_OK(loom_serve_execution_wait(execution, completion));
   offset = 0;
   for (size_t i = 0; i < ranges.size(); ++i) {
-    for (size_t j = 0; j < ranges[i].length / sizeof(uint32_t); ++j) {
-      ASSERT_EQ(observed[offset + j], expected[offset + j])
-          << "range " << i << ", word " << j;
+    if (std::memcmp(observed.data() + offset, expected.data() + offset,
+                    ranges[i].length) != 0) {
+      for (size_t j = 0; j < ranges[i].length / sizeof(uint32_t); ++j) {
+        ASSERT_EQ(observed[offset + j], expected[offset + j])
+            << "range " << i << ", word " << j;
+      }
     }
     offset += ranges[i].length / sizeof(uint32_t);
   }

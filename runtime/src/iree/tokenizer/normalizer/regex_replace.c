@@ -22,6 +22,14 @@ typedef struct iree_tokenizer_normalizer_regex_replace_t {
   // Trailing data: [content_data]
 } iree_tokenizer_normalizer_regex_replace_t;
 
+// Matching continues the streaming state until output credit is exhausted.
+// Re-entry then replays only the accepted suffix after committed output.
+typedef enum iree_tokenizer_regex_replace_phase_e {
+  IREE_TOKENIZER_REGEX_REPLACE_CONTINUE = 0,
+  IREE_TOKENIZER_REGEX_REPLACE_REPLAY,
+  IREE_TOKENIZER_REGEX_REPLACE_DONE,
+} iree_tokenizer_regex_replace_phase_t;
+
 // State structure. Uses inline callback processing like split.c.
 typedef struct iree_tokenizer_normalizer_regex_replace_state_t {
   iree_tokenizer_normalizer_state_t base;
@@ -47,8 +55,8 @@ typedef struct iree_tokenizer_normalizer_regex_replace_state_t {
   const uint8_t* content;
   uint8_t content_length;
 
-  // Set after finalize's regex phase completes.
-  bool finalize_done;
+  // Whether matching continues, replays after output pressure, or is finalized.
+  uint8_t phase;
 
   // Regex execution state.
   iree_tokenizer_regex_exec_state_t regex_state;
@@ -183,10 +191,15 @@ static void iree_tokenizer_normalizer_regex_replace_state_deinitialize(
 
 // Callback context for inline match processing.
 typedef struct iree_tokenizer_regex_replace_context_t {
-  // Input/output pointers.
+  // Incoming bytes, or the complete retained tail during finalization.
   const uint8_t* input_base;
+  // Absolute offset of input_base.
   iree_host_size_t chunk_base;
+  // Previously accepted bytes ending at chunk_base, stable during the call.
+  iree_string_view_t preceding_input;
+  // Cursor advanced as bytes are committed to the caller's output.
   uint8_t** out_ptr;
+  // End of the caller's output credit.
   uint8_t* out_end;
 
   // Mutable state (updated per-match on successful emit).
@@ -203,27 +216,35 @@ typedef struct iree_tokenizer_regex_replace_context_t {
   uint8_t content_length;
 } iree_tokenizer_regex_replace_context_t;
 
-// Emits bytes from input that aren't part of a match (passthrough).
-// Returns the number of bytes written.
-static iree_host_size_t iree_tokenizer_regex_replace_emit_passthrough(
+// Copies confirmed non-matching bytes from the retained prefix or incoming
+// chunk. A consumer must never index the incoming chunk with an older offset.
+static iree_status_t iree_tokenizer_regex_replace_emit_passthrough(
     iree_tokenizer_regex_replace_context_t* context,
     iree_host_size_t target_position) {
-  if (target_position <= context->output_position) {
-    return 0;
-  }
-  iree_host_size_t to_copy = target_position - context->output_position;
-  iree_host_size_t output_available =
-      (iree_host_size_t)(context->out_end - *context->out_ptr);
-  iree_host_size_t to_write =
-      to_copy < output_available ? to_copy : output_available;
-  if (to_write > 0) {
-    iree_host_size_t input_offset =
-        context->output_position - context->chunk_base;
-    memcpy(*context->out_ptr, context->input_base + input_offset, to_write);
+  while (context->output_position < target_position &&
+         *context->out_ptr < context->out_end) {
+    const uint8_t* source = context->input_base;
+    iree_host_size_t source_base = context->chunk_base;
+    iree_host_size_t source_end = target_position;
+    if (context->output_position < context->chunk_base) {
+      source_base -= context->preceding_input.size;
+      if (context->output_position < source_base) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "regex replacement requires passthrough "
+                                "before the retained input");
+      }
+      source = (const uint8_t*)context->preceding_input.data;
+      source_end = iree_min(source_end, context->chunk_base);
+    }
+    iree_host_size_t to_write =
+        iree_min(source_end - context->output_position,
+                 (iree_host_size_t)(context->out_end - *context->out_ptr));
+    memcpy(*context->out_ptr, source + context->output_position - source_base,
+           to_write);
     *context->out_ptr += to_write;
     context->output_position += to_write;
   }
-  return to_write;
+  return iree_ok_status();
 }
 
 // Emits replacement content. Returns true if all content was emitted.
@@ -260,7 +281,8 @@ static iree_status_t iree_tokenizer_regex_replace_match_callback(
       (iree_tokenizer_regex_replace_context_t*)user_data;
 
   // Emit passthrough bytes from output_position to match.start.
-  iree_tokenizer_regex_replace_emit_passthrough(context, match.start);
+  IREE_RETURN_IF_ERROR(
+      iree_tokenizer_regex_replace_emit_passthrough(context, match.start));
   if (context->output_position < match.start) {
     return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
   }
@@ -328,10 +350,21 @@ static iree_status_t iree_tokenizer_normalizer_regex_replace_state_process(
     state->has_pending_match = false;
   }
 
-  // Set up callback context.
+  // The executor refreshes its retained tail after feeding the new chunk.
+  // Preserve any older accepted bytes still awaiting passthrough so output
+  // callbacks and post-scan emission see the same immutable input.
+  uint8_t preceding_bytes[IREE_TOKENIZER_UTIL_REGEX_REWIND_BUFFER_SIZE];
+  iree_string_view_t preceding_input = iree_string_view_empty();
+  if (state->output_position < chunk_base) {
+    memcpy(preceding_bytes, state->regex_state.rewind_buffer,
+           state->regex_state.rewind_buffer_length);
+    preceding_input = iree_make_string_view(
+        (const char*)preceding_bytes, state->regex_state.rewind_buffer_length);
+  }
   iree_tokenizer_regex_replace_context_t context = {
       .input_base = (const uint8_t*)input.data,
       .chunk_base = chunk_base,
+      .preceding_input = preceding_input,
       .out_ptr = &out_ptr,
       .out_end = out_end,
       .output_position = state->output_position,
@@ -342,63 +375,72 @@ static iree_status_t iree_tokenizer_normalizer_regex_replace_state_process(
       .content_length = state->content_length,
   };
 
-  // Feed regex; matches are processed inline via callback.
-  iree_status_t feed_status = iree_tokenizer_regex_exec_feed(
-      &normalizer->dfa, &state->regex_state, input, chunk_base,
-      normalizer->stride, iree_tokenizer_regex_replace_match_callback,
-      &context);
-
-  // Handle feed result.
+  iree_status_t feed_status = iree_ok_status();
+  if (state->phase == IREE_TOKENIZER_REGEX_REPLACE_REPLAY) {
+    iree_tokenizer_regex_exec_initialize(&state->regex_state, &normalizer->dfa);
+    if (state->output_position < chunk_base) {
+      iree_host_size_t prefix_start = chunk_base - preceding_input.size;
+      if (state->output_position < prefix_start) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "regex replacement requires replay before "
+                                "the retained input");
+      }
+      feed_status = iree_tokenizer_regex_exec_feed(
+          &normalizer->dfa, &state->regex_state,
+          iree_make_string_view(
+              preceding_input.data + state->output_position - prefix_start,
+              chunk_base - state->output_position),
+          state->output_position, normalizer->stride,
+          iree_tokenizer_regex_replace_match_callback, &context);
+    }
+  }
+  if (iree_status_is_ok(feed_status)) {
+    feed_status = iree_tokenizer_regex_exec_feed(
+        &normalizer->dfa, &state->regex_state, input, chunk_base,
+        normalizer->stride, iree_tokenizer_regex_replace_match_callback,
+        &context);
+  }
   if (!iree_status_is_ok(feed_status) &&
       !iree_status_is_resource_exhausted(feed_status)) {
     return feed_status;
   }
   bool output_full = iree_status_is_resource_exhausted(feed_status);
   iree_status_ignore(feed_status);
-
   iree_host_size_t input_end = chunk_base + input.size;
-
-  if (output_full) {
-    // Output filled mid-chunk. Save state for resume.
-    state->output_position = context.output_position;
-    state->content_emitted = context.content_emitted;
-    state->has_pending_match = context.has_pending_match;
-    state->pending_match_end = context.pending_match_end;
-
-    // Reset regex for re-entry. If we have a pending match, the match's input
-    // has been consumed but content emission was interrupted. Regex resumes
-    // from pending_match_end (after the match). Otherwise, resume from
-    // output_position.
-    iree_host_size_t resume_position = context.has_pending_match
-                                           ? context.pending_match_end
-                                           : context.output_position;
-    state->bytes_processed = resume_position;
-    iree_tokenizer_regex_exec_initialize(&state->regex_state, &normalizer->dfa);
-    *out_consumed = resume_position - chunk_base;
-  } else {
-    // Normal case: all input was scanned. Emit passthrough up to confirmed end.
-    // If regex is tracking a partial match, only emit up to match_start.
+  if (!output_full) {
     iree_host_size_t confirmed_end = state->regex_state.in_match
                                          ? state->regex_state.match_start
                                          : input_end;
-    iree_tokenizer_regex_replace_emit_passthrough(&context, confirmed_end);
-
-    // Only consume up to what we actually emitted. If output was full during
-    // passthrough, output_position will be less than confirmed_end, and we
-    // need to re-process the remaining bytes next call.
-    state->output_position = context.output_position;
-    if (context.output_position < confirmed_end) {
-      // Output filled during final passthrough. Re-feed from output_position.
-      state->bytes_processed = context.output_position;
-      iree_tokenizer_regex_exec_initialize(&state->regex_state,
-                                           &normalizer->dfa);
-      *out_consumed = context.output_position - chunk_base;
-    } else {
-      // All confirmed bytes emitted. Consume all input.
-      state->bytes_processed = input_end;
-      *out_consumed = input.size;
-    }
+    IREE_RETURN_IF_ERROR(
+        iree_tokenizer_regex_replace_emit_passthrough(&context, confirmed_end));
+    output_full = context.output_position < confirmed_end;
   }
+
+  state->output_position = context.output_position;
+  state->content_emitted = context.content_emitted;
+  state->has_pending_match = context.has_pending_match;
+  state->pending_match_end = context.pending_match_end;
+  if (output_full) {
+    // Already accepted input stays owned by this state even if output stopped
+    // inside the prior chunk. Only newly accepted bytes count as consumption.
+    iree_host_size_t resume_position = context.has_pending_match
+                                           ? context.pending_match_end
+                                           : context.output_position;
+    state->bytes_processed = iree_max(chunk_base, resume_position);
+    state->phase = IREE_TOKENIZER_REGEX_REPLACE_REPLAY;
+    iree_tokenizer_regex_exec_initialize(&state->regex_state, &normalizer->dfa);
+    if (resume_position < chunk_base) {
+      memcpy(state->regex_state.rewind_buffer, preceding_input.data,
+             preceding_input.size);
+      state->regex_state.rewind_buffer_start =
+          chunk_base - preceding_input.size;
+      state->regex_state.rewind_buffer_length = preceding_input.size;
+    }
+  } else {
+    state->bytes_processed = input_end;
+    state->phase = IREE_TOKENIZER_REGEX_REPLACE_CONTINUE;
+  }
+  *out_consumed = state->bytes_processed - chunk_base;
 
   *out_written = (iree_host_size_t)(out_ptr - (uint8_t*)output.data);
   return iree_ok_status();
@@ -438,10 +480,10 @@ static iree_status_t iree_tokenizer_normalizer_regex_replace_state_finalize(
     state->has_pending_match = false;
   }
 
-  if (!state->finalize_done) {
+  if (state->phase != IREE_TOKENIZER_REGEX_REPLACE_DONE) {
     iree_tokenizer_regex_replace_context_t context = {
-        .input_base = NULL,  // No input for passthrough in callback.
-        .chunk_base = state->bytes_processed,
+        .input_base = state->regex_state.rewind_buffer,
+        .chunk_base = state->regex_state.rewind_buffer_start,
         .out_ptr = &out_ptr,
         .out_end = out_end,
         .output_position = state->output_position,
@@ -452,33 +494,52 @@ static iree_status_t iree_tokenizer_normalizer_regex_replace_state_finalize(
         .content_length = state->content_length,
     };
 
-    // Finalize regex (may produce one final match at end-of-input).
-    iree_status_t finalize_status = iree_tokenizer_regex_exec_finalize(
-        &normalizer->dfa, &state->regex_state, state->bytes_processed,
-        iree_tokenizer_regex_replace_match_callback, &context);
-
-    if (iree_status_is_ok(finalize_status)) {
-      state->finalize_done = true;
-      state->output_position = context.output_position;
-      state->content_emitted = context.content_emitted;
-      state->has_pending_match = context.has_pending_match;
-      state->pending_match_end = context.pending_match_end;
-    } else if (iree_status_is_resource_exhausted(finalize_status)) {
-      // Output full. Commit what we have and return for re-entry.
-      // Mark finalize_done so re-entry skips exec_finalize and resumes content
-      // emission. Without this, exec_finalize would be called again,
-      // potentially double-emitting matches.
-      state->finalize_done = true;
-      state->output_position = context.output_position;
-      state->content_emitted = context.content_emitted;
-      state->has_pending_match = context.has_pending_match;
-      state->pending_match_end = context.pending_match_end;
+    // Retained bytes remain owned by the original state. Re-entry uses a
+    // transient executor so scanning cannot overwrite pending passthrough.
+    iree_tokenizer_regex_exec_state_t replay_state;
+    iree_tokenizer_regex_exec_state_t* exec_state = &state->regex_state;
+    iree_status_t finalize_status = iree_ok_status();
+    if (state->phase == IREE_TOKENIZER_REGEX_REPLACE_REPLAY &&
+        state->output_position < state->bytes_processed) {
+      if (state->output_position < state->regex_state.rewind_buffer_start) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "regex replacement requires input before "
+                                "the retained finalization buffer");
+      }
+      iree_tokenizer_regex_exec_initialize(&replay_state, &normalizer->dfa);
+      exec_state = &replay_state;
+      iree_host_size_t offset =
+          state->output_position - state->regex_state.rewind_buffer_start;
+      finalize_status = iree_tokenizer_regex_exec_feed(
+          &normalizer->dfa, exec_state,
+          iree_make_string_view(
+              (const char*)state->regex_state.rewind_buffer + offset,
+              state->bytes_processed - state->output_position),
+          state->output_position, normalizer->stride,
+          iree_tokenizer_regex_replace_match_callback, &context);
+    }
+    if (iree_status_is_ok(finalize_status) &&
+        state->output_position < state->bytes_processed) {
+      finalize_status = iree_tokenizer_regex_exec_finalize(
+          &normalizer->dfa, exec_state, state->bytes_processed,
+          iree_string_view_empty(), iree_tokenizer_regex_replace_match_callback,
+          &context);
+    }
+    if (!iree_status_is_ok(finalize_status) &&
+        !iree_status_is_resource_exhausted(finalize_status)) {
+      return finalize_status;
+    }
+    state->output_position = context.output_position;
+    state->content_emitted = context.content_emitted;
+    state->has_pending_match = context.has_pending_match;
+    state->pending_match_end = context.pending_match_end;
+    if (iree_status_is_resource_exhausted(finalize_status)) {
+      state->phase = IREE_TOKENIZER_REGEX_REPLACE_REPLAY;
       iree_status_ignore(finalize_status);
       *out_written = (iree_host_size_t)(out_ptr - (uint8_t*)output.data);
       return iree_ok_status();
-    } else {
-      return finalize_status;
     }
+    state->phase = IREE_TOKENIZER_REGEX_REPLACE_DONE;
   }
 
   // Emit trailing passthrough bytes that process() couldn't emit because the

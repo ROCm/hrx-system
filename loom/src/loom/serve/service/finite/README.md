@@ -93,6 +93,48 @@ shares its generation's immutable source index. The original source namespace
 is retained for preparation policies; filesystem inputs remain immutable while
 registered. Cancellation joins accepted work before releasing its borrows.
 
+### Forecasting a composed request
+
+A finite component may produce several cohorts whose outputs must remain live
+for a downstream consumer. An image projector feeding text is one example:
+admitting each projection separately cannot establish that the complete set
+of features and the language continuation will fit.
+
+Cold preparation can select a host control entry with
+`prepare.memory_forecast(root)`. Its signature is:
+
+```
+forecast_memory(state, ranges, descriptors)
+    -> (private_peak_bytes, retained_bytes, expanded_bytes)
+```
+
+The three inputs are buffers, and the three results are nonnegative i64 byte
+estimates for the complete logical request, not just the next producer cohort:
+
+| Estimate | Live storage represented |
+| --- | --- |
+| `private_peak_bytes` | Peak producer parameters, activation staging, input, and private command workspace, excluding retained output. |
+| `retained_bytes` | All output roots carried into the consumer, including padding and other rows sharing those roots. |
+| `expanded_bytes` | Gather storage for every output row with 16-byte row alignment, including separate copies of aliased rows. |
+
+The consumer supplies descriptors and the same LE i64 offset/length range
+table used by batch preparation. For image-to-text composition, each descriptor
+contains the image request header and source-authored metadata, but no pixel
+plane. The pixel offset and length describe the eventual execution packet.
+The source therefore has its image geometry and resize decisions before RGB
+decoding, request specialization, or weight activation. Source state remains
+immutable, and this call submits no device work.
+
+Under a finite serving memory limit, the text consumer requires this forecast.
+It checks the producer peak plus retained outputs, and separately the language
+continuation plus retained outputs and gather storage. A request that cannot
+fit alone receives a capacity error before either model activates. These are
+trusted source estimates, not limits checked against subsequent compiled
+programs. This preflight does not reserve capacity against concurrent requests
+or establish that a producer or consumer has retired.
+
+### Retaining specialized programs and checkpoints
+
 `specialization_cache` limits idle choices by count and retained payload bytes.
 Zero disables idle retention, not specialization. One active choice can exceed
 the idle budget and retire afterward. LRU eviction first releases any runner

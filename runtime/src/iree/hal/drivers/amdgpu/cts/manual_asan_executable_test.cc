@@ -435,7 +435,8 @@ TEST_P(ManualAsanExecutableTest, ReportsCompatibleHooksThroughFeedback) {
 
     iree_hal_device_event_source_t source =
         asan_device.recorder()->last_source();
-    EXPECT_TRUE(iree_string_view_equal(source.driver_id, IREE_SV("amdgpu")))
+    EXPECT_TRUE(
+        iree_string_view_equal(source.driver_id, IREE_SV("legacy-amdgpu")))
         << hook_case.name;
     EXPECT_NE(source.executable_id, 0u) << hook_case.name;
     EXPECT_NE(source.physical_device_ordinal, UINT32_MAX) << hook_case.name;

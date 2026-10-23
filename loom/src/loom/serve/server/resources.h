@@ -28,28 +28,33 @@ typedef struct loom_serve_resources_t {
   loom_serve_http_listener_t* const* listeners;
 } loom_serve_resources_t;
 
-// Registers the router's nonblocking scheduling wake with native capacity work.
+// Registers the router's nonblocking scheduling wake with native capacity work
+// and final output retirement, including cold workspace requests.
 // An empty observer detaches and joins callback access before router teardown.
 void loom_serve_resources_set_observer(const loom_serve_resources_t* resources,
                                        loom_serve_wake_callback_t observer);
 
-// Publishes completed native capacity work and retires its parameter admission
-// interests before services advance. A terminal platform failure stops
-// admission and initiates ordinary draining; it never destroys shared owners.
-iree_status_t loom_serve_resources_query_status(
+// Advances accepted workspace growth/trim, publishes completed native capacity
+// work, and retires parameter admission interests before services advance.
+// Continue advancing during error draining until accepted work retires.
+// A terminal platform failure stops admission and initiates ordinary draining;
+// it never destroys shared owners.
+iree_status_t loom_serve_resources_advance(
     const loom_serve_resources_t* resources);
 
-// Whether native capacity work still borrows application resources. Router
-// shutdown joins this independently of model readiness or semaphore failure.
+// Whether cold workspace, native capacity work, or accepted outputs borrow
+// application resources. Router shutdown joins this independently of readiness
+// or semaphore failure.
 bool loom_serve_resources_is_pending(const loom_serve_resources_t* resources);
 
 // Writes a JSON object with bound listeners, immutable device identities and
 // serving-managed memory observations. Called on the serialized serving owner;
 // never waits for devices, polls hardware or changes residency. Retained pool
 // accounting is null for fixed backing; an elastic limit is null when
-// unbounded. Workspace values are independent atomic observations, not a
-// coherent total. Workspace acquisition/release counters accumulate across
-// models and retired pool generations for the device owner's lifetime.
+// unbounded. With elastic backing, workspace is a subset of retained physical
+// usage, not an additional amount. Workspace values are independent atomic
+// observations, not a coherent total. Acquisition/release counters accumulate
+// across models and retired pool generations for the device owner's lifetime.
 // wait_count counts reservations needing a reuse prerequisite, not host waits
 // or elapsed time. These values exclude fixed buffers, loader/driver storage
 // and hidden padding; they cannot be interpreted as device-wide usage or

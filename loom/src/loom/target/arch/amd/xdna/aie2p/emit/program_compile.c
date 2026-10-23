@@ -13,6 +13,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/amd/xdna/aie2p/call_abi.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/program_capacity.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_object.h"
 #include "loom/target/registers.h"
 
@@ -355,8 +356,17 @@ static iree_status_t loom_aie2p_program_compile_impl(
   for (iree_host_size_t i = 0; i < direct_callees.count; ++i) {
     contributions[i + 1] = helpers[i].contribution;
   }
+  loom_aie2p_leaf_contribution_t program = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_object_merge(
-      contributions, direct_callees.count + 1, arena, out_contribution));
+      contributions, direct_callees.count + 1, arena, &program));
+  bool capacity_admitted = false;
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_capacity_admit(
+      module, entry_function_op, program.realization.code.byte_length,
+      entry_options->diagnostic_emitter, &capacity_admitted));
+  if (!capacity_admitted) {
+    return iree_ok_status();
+  }
+  *out_contribution = program;
   *out_compiled = true;
   return iree_ok_status();
 }

@@ -6,12 +6,14 @@
 
 #include <array>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/runtime/storage/memory.h"
 #include "loom/serve/service/recognition/model.h"
 #include "loom/serve/testing/service_application.h"
 
@@ -20,6 +22,8 @@ IREE_FLAG(bool, test_elastic, false,
           "Use elastic backing for recognition rows.");
 
 namespace {
+
+constexpr uint64_t kRecognitionSlabSize = 4096;
 
 class SourceRecognitionModelTest : public ::testing::Test {
  protected:
@@ -36,10 +40,12 @@ class SourceRecognitionModelTest : public ::testing::Test {
     auto options = loom_serve_test_application_options_default();
     options.backing = FLAG_test_elastic ? LOOM_SERVE_DEVICE_BACKING_ELASTIC
                                         : LOOM_SERVE_DEVICE_BACKING_FIXED;
-    options.slab_size = FLAG_test_elastic ? 2 * 1024 * 1024 : 0;
+    options.slab_size = FLAG_test_elastic ? kRecognitionSlabSize : 0;
+    options.memory_limit = FLAG_test_elastic ? 64 * 1024 : 0;
     loom_serve_test_application_t* application = nullptr;
     IREE_ASSERT_OK(loom_serve_test_application_acquire(&options, allocator_,
                                                        &application));
+    device_ = loom_serve_test_application_device_at(application, 0);
     const auto directory =
         std::filesystem::path(FLAG_model_source).parent_path().string();
     const iree_string_view_t sources[] = {IREE_SVL("generate.loom")};
@@ -54,8 +60,7 @@ class SourceRecognitionModelTest : public ::testing::Test {
             },
     };
     IREE_ASSERT_OK(loom_serve_recognition_model_allocate(
-        loom_serve_test_application_device_at(application, 0), &model_options,
-        allocator_, &model_));
+        device_, &model_options, allocator_, &model_));
     generator_ = loom_serve_recognition_model_generator(model_);
     EXPECT_EQ(generator_.format.sample_rate, 16000u);
     EXPECT_EQ(generator_.format.channels, 1u);
@@ -87,14 +92,14 @@ class SourceRecognitionModelTest : public ::testing::Test {
     }
   }
 
-  static iree_status_t Wait(const loom_serve_execution_frontier_t& frontier) {
+  iree_status_t Wait(const loom_serve_execution_frontier_t& frontier) {
     iree_status_t status = iree_ok_status();
     for (size_t i = 0;
          i < IREE_ARRAYSIZE(frontier.semaphores) && iree_status_is_ok(status);
          ++i) {
-      status = iree_hal_semaphore_wait(
-          frontier.semaphores[i], frontier.values[i], iree_infinite_timeout(),
-          IREE_ASYNC_WAIT_FLAG_NONE);
+      status =
+          loom_serve_workspace_wait(loom_serve_device_workspace(device_),
+                                    frontier.semaphores[i], frontier.values[i]);
     }
     return status;
   }
@@ -115,8 +120,7 @@ class SourceRecognitionModelTest : public ::testing::Test {
                                         &admission, &frontier));
     ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
     IREE_ASSERT_OK(Wait(frontier));
-    ASSERT_EQ(generator_.complete_admit(generator_.self, row.invocation),
-              LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
+    generator_.complete_admit(generator_.self, row.invocation);
   }
 
   void Release(size_t index) {
@@ -205,6 +209,8 @@ class SourceRecognitionModelTest : public ::testing::Test {
   }
 
   iree_allocator_t allocator_ = iree_allocator_system();
+  // Borrowed process device and finite state pool, enclosing model lifetime.
+  loom_serve_device_t* device_ = nullptr;
   loom_serve_recognition_model_t* model_ = nullptr;
   loom_serve_recognition_generator_t generator_ = {};
   // Native backing releases observed before their completion frontier retires.
@@ -325,6 +331,58 @@ TEST_F(SourceRecognitionModelTest, RepeatedOffersDoNotAdvanceSourceState) {
   rows_[0].input.complete = true;
   ASSERT_NO_FATAL_FAILURE(Submit({0}));
   ASSERT_NO_FATAL_FAILURE(Collect({'M'}, {3}, {true}));
+  ASSERT_NO_FATAL_FAILURE(Release(0));
+}
+
+TEST_F(SourceRecognitionModelTest, RowCapacityDenialPreservesPreparedRequest) {
+  auto* pool = loom_serve_device_memory_pool(device_);
+  auto* residency = loom_serve_recognition_model_residency(model_);
+  loom_serve_memory_statistics_t peer_statistics = {};
+  const auto release_peer = [](loom_serve_virtual_buffer_t* buffer) {
+    IREE_EXPECT_OK(loom_serve_virtual_buffer_free(buffer));
+  };
+  std::unique_ptr<loom_serve_virtual_buffer_t, decltype(release_peer)> peer(
+      nullptr, release_peer);
+  if (pool) {
+    // Tiny row roots each occupy one minimum native extent, not a full slab.
+    // Leave two extents free; admission needs all three roots together.
+    const auto geometry = loom_serve_device_state_geometry(device_);
+    const uint64_t peer_bytes =
+        loom_serve_memory_pool_limit(pool) - 2 * geometry.minimum_size;
+    loom_serve_virtual_buffer_t* buffer = nullptr;
+    IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+        pool, loom_serve_device_state_geometry(device_), peer_bytes, 16,
+        &peer_statistics, &buffer));
+    peer.reset(buffer);
+    IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(buffer, 0, peer_bytes));
+  }
+  auto& row = rows_[0];
+  const loom_serve_recognition_request_t request = {
+      .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+  };
+  IREE_ASSERT_OK(
+      generator_.prepare(generator_.self, 0, &request, &row.invocation));
+  loom_serve_residency_admission_t admission;
+  loom_serve_execution_frontier_t frontier;
+  if (pool) {
+    const uint64_t live = loom_serve_memory_pool_live_bytes(pool);
+    IREE_ASSERT_OK(generator_.try_admit(generator_.self, row.invocation,
+                                        &admission, &frontier));
+    ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
+    EXPECT_EQ(loom_serve_memory_pool_live_bytes(pool), live);
+    EXPECT_EQ(loom_serve_residency_activity(residency).activations, 0u);
+    peer.reset();
+    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+  }
+  IREE_ASSERT_OK(generator_.try_admit(generator_.self, row.invocation,
+                                      &admission, &frontier));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  IREE_ASSERT_OK(Wait(frontier));
+  generator_.complete_admit(generator_.self, row.invocation);
+  ASSERT_NO_FATAL_FAILURE(Append(0, {1, 1, 1}));
+  row.input.complete = true;
+  ASSERT_NO_FATAL_FAILURE(Submit({0}));
+  ASSERT_NO_FATAL_FAILURE(Collect({'D'}, {3}, {true}));
   ASSERT_NO_FATAL_FAILURE(Release(0));
 }
 

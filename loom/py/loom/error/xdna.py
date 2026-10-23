@@ -872,6 +872,24 @@ ERR_XDNA_057 = ErrorDef(
     fix_hint="Place one complete measurement interval in the invocation function.",
 )
 
+# ERR_XDNA_058: An AIE2P tile program exceeds core program memory.
+ERR_XDNA_058 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=58,
+    severity=Severity.ERROR,
+    summary="AIE2P tile program exceeds core program memory.",
+    message=(
+        "AIE2P tile program '@{function_name}' requires {required} code bytes, "
+        "but the core has {capacity} bytes of program memory"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("required", ParamKind.U64),
+        ErrorParam("capacity", ParamKind.U64),
+    ),
+    fix_hint="Reduce or split the program's native instruction footprint.",
+)
+
 ALL_XDNA_ERRORS = (
     ERR_XDNA_001,
     ERR_XDNA_005,
@@ -922,4 +940,5 @@ ALL_XDNA_ERRORS = (
     ERR_XDNA_055,
     ERR_XDNA_056,
     ERR_XDNA_057,
+    ERR_XDNA_058,
 )

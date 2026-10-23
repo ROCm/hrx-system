@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "loom/serve/runtime/host/wake.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -131,6 +132,12 @@ void loom_serve_memory_pool_trim(loom_serve_memory_pool_t* pool,
 // This is the configured budget, not currently available backing.
 uint64_t loom_serve_memory_pool_limit(const loom_serve_memory_pool_t* pool);
 
+// Owner-maintained bytes attached or promised to live virtual reservations.
+// Includes pending commitments and excludes reusable idle backing. This reads
+// the existing range ledger without collecting work or querying native pools.
+uint64_t loom_serve_memory_pool_live_bytes(
+    const loom_serve_memory_pool_t* pool);
+
 // Clones a shared capacity-observation or reclamation failure, or returns OK.
 // Those failures apply to the shared domain; the serialized owner stops new
 // work and drains consumers before cleanup. Individual allocation, mapping,
@@ -143,9 +150,11 @@ iree_status_t loom_serve_memory_pool_query_status(
 // native work. Passing NULL detaches and joins the last callback access. The
 // callback only schedules its owner and cannot reenter this pool. This owner
 // observes completion/failure independently of any individual model lifetime.
-void loom_serve_memory_pool_set_observer(loom_serve_memory_pool_t* pool,
-                                         void (*wake)(void* user_data),
-                                         void* user_data);
+// Returns the previous observer so an exclusive blocking outer owner can
+// temporarily route capacity wakes to its wait and restore them afterward.
+loom_serve_wake_callback_t loom_serve_memory_pool_set_observer(
+    loom_serve_memory_pool_t* pool, void (*wake)(void* user_data),
+    void* user_data);
 
 // Collects completed operations and observes remaining native borrowers. True
 // requires another owner pass even if its capacity wake has already arrived;
@@ -246,6 +255,20 @@ typedef struct loom_serve_memory_range_t {
   iree_device_size_t length;
 } loom_serve_memory_range_t;
 
+typedef struct loom_serve_memory_footprint_t {
+  // Full physical extent of the range union, including unbacked slabs.
+  uint64_t total_bytes;
+  // Additional commitment, excluding live or already accepted backing.
+  uint64_t missing_bytes;
+} loom_serve_memory_footprint_t;
+
+// Physical footprint of the caller-validated range union. Overlapping views
+// count each slot once. Runs on the pool's serialized owner without querying
+// native availability, committing storage, or changing trim/admission state.
+// Saturates if the sum exceeds uint64_t.
+loom_serve_memory_footprint_t loom_serve_memory_ranges_footprint(
+    iree_host_size_t range_count, const loom_serve_memory_range_t* ranges);
+
 // Admits and commits the union of missing slabs across all ranges. Overlapping
 // ranges and views sharing a slab are counted once. False is ordinary capacity
 // backpressure: no destination slabs were added. The pressure policy may have
@@ -269,7 +292,9 @@ iree_status_t loom_serve_memory_pool_try_commit(
 // The caller keeps every reservation and its accounting alive until the
 // returned operation retires, independently of readiness success/failure. No
 // other commitment or trim may touch its pending slabs. Ranges are copied; the
-// readiness semaphore is retained. Completion may precede return. Inline
+// readiness semaphore is retained. Mapping edits to one reservation are ordered
+// even for disjoint slabs; source allocations and separate reservations remain
+// independent. Completion may precede return. Inline
 // readiness callbacks may schedule the owner but cannot collect or await this
 // operation; the owner joins publication through is_complete before freeing it.
 iree_status_t loom_serve_memory_pool_commit_async(

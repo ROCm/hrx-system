@@ -57,3 +57,25 @@ low.func.def target<test.low.core>(@target) @generated_edge_store_source_spill(%
   %25 = low.reload %generated_edge_store_source_spill_spill_storage_2 : low.storage<private> -> reg<test.i32>
   return %a0, %24, %25
 }
+
+// ====
+
+// Three live four-unit loads exceed the eight-unit bank. The complete repair
+// finishes with no unresolved spills but retains its inserted memory traffic.
+// RUN: emit low-allocation-query @materialized_spill_traffic strategy=source spill-free spill-count copy-count test.i32=8
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @materialized_spill_traffic(%address: reg<test.ptr>) -> (reg<test.i32 x4>) asm {
+  %first = test.load.v4i32 %address
+  %second = test.load.v4i32 %address
+  %third = test.load.v4i32 %address
+  %pair = test.add.v4i32 %first, %second
+  %result = test.add.v4i32 %pair, %third
+  return %result
+}
+
+// ----
+spills: 0
+materialized traffic: stores=2 reloads=2
+copies: coalesced=0 materialized=0

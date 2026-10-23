@@ -57,6 +57,7 @@ from loom.dsl import (
     INTEGER,
     ISOLATED_FROM_ABOVE,
     MEMORY_FENCE,
+    OBSERVABLE_EFFECT,
     PURE,
     SCALAR,
     SYMBOL_DEFINE,
@@ -558,7 +559,7 @@ kernel_assert = Op(
             doc="Optional human-readable assertion message.",
         ),
     ],
-    traits=[UNKNOWN_EFFECTS, _KERNEL_EXECUTION_CONTEXT],
+    traits=[OBSERVABLE_EFFECT, _KERNEL_EXECUTION_CONTEXT],
     format=[
         Ref("condition"),
         OptionalGroup(

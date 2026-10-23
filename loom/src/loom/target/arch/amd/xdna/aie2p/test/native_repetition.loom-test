@@ -291,14 +291,25 @@ CHECK: COMPILE-REPORT: pipeline root=repeated_egress realization=resident-config
 // ====
 // RUN: with-checks emit aie2p-xdna input=source-low output=pipeline-report
 
-// A Low leaf reads core storage and changes rounding state without invalidating
-// external input. Repeated SRAM ingress therefore remains DMA-owned.
+// A Low leaf reads core storage and an immutable artifact while changing
+// rounding state. Neither reference can invalidate the distinct external input,
+// so repeated SRAM ingress remains DMA-owned.
 aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
 
-low.func.def inline target<amd.xdna.aie2p.core> @read_local(%storage: reg<aie2p.ep>) -> (reg<aie2p.er>) asm {
+global.rodata.def @identity = align(4) bytes("07000000")
+
+low.func.def inline target<amd.xdna.aie2p.core> @read_local(%storage: reg<aie2p.ep>, %identity: reg<aie2p.ep>) -> (reg<aie2p.er>) asm {
   set.rounding 12
-  %value = lda %storage, 0
+  %local_value = lda %storage, 0
+  %identity_value = lda %identity, 0
+  %value = add.rr %local_value, %identity_value
   return %value
+}
+
+func.def inline @read_local_identity(%storage: buffer) -> (i32) {
+  %identity = global.load @identity : buffer
+  %value = low.invoke @read_local(%storage, %identity) : (buffer, buffer) -> (i32)
+  func.return %value : i32
 }
 
 pipeline.def<kernel> public retain target(@device) @readonly_call_ingress() run(%input_arg: buffer, %output_arg: buffer) {
@@ -340,7 +351,7 @@ pipeline.def<kernel> public retain target(@device) @readonly_call_ingress() run(
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
     scf.for %record = [%begin to %count step %c1] {
       %read, %payload = channel.acquire<mutable> %local : channel<tile<1xi32>> -> (read<tile<1xi32>, mutable>, view<1xi32>)
-      %value = low.invoke @read_local(%core_storage) : (buffer) -> (i32)
+      %value = func.call @read_local_identity(%core_storage) : (buffer) -> (i32)
       %factor = scalar.constant 2 : i32
       %scaled = scalar.muli %value, %factor : i32
       view.store %scaled, %payload[0] : i32, view<1xi32>

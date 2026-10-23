@@ -26,7 +26,7 @@ loom_execution_test(
   MODULE
     "::mxfp8_bpad8_record_decode_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -75,7 +75,7 @@ loom_execution_test(
   MODULE
     "::mxfp8_bpad8_record_decode_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"

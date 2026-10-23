@@ -1725,6 +1725,27 @@ TEST(SplitSegmenterTest, DeepSeekV3NumberPattern) {
 // whitespace up to a non-whitespace character: the lookahead fails, so the
 // engine must backtrack to find a shorter match where lookahead passes.
 
+TEST(SplitSegmenterTest, GreedyBlankLinesAndLongTrailingIndentation) {
+  ScopedSplitSegmenter segmenter(R"(\s*[\r\n]+|\s+(?!\S)|\s+)",
+                                 IREE_TOKENIZER_UTIL_REGEX_SPLIT_ISOLATED);
+  IREE_ASSERT_OK(segmenter.status());
+  TestWithAllChunkSizes(segmenter.get(), IREE_SVL(" \n    \n    x"),
+                        {" \n    \n", "   ", " ", "x"}, false);
+  std::string spaces(512, ' ');
+  std::string input = "\n" + spaces;
+  auto view = iree_make_string_view(input.data(), input.size());
+  TestWithAllChunkSizes(segmenter.get(), view, {"\n", spaces}, false);
+  TestLimitedOutputCapacity(segmenter.get(), view, {"\n", spaces});
+}
+
+TEST(SplitSegmenterTest, ReplayedMatchesWithLimitedOutput) {
+  ScopedSplitSegmenter segmenter(R"(a[bc]*z|a(?!x)|b)",
+                                 IREE_TOKENIZER_UTIL_REGEX_SPLIT_ISOLATED);
+  IREE_ASSERT_OK(segmenter.status());
+  TestLimitedOutputCapacity(segmenter.get(), IREE_SVL("abbbc"),
+                            {"a", "b", "b", "b", "c"});
+}
+
 TEST(SplitSegmenterTest, LookaheadBacktrackingWithInvert) {
   // Pattern: [^\r\n\p{L}]?[\p{L}]+|\s+(?!\S)|\s+
   // Input: "    if" (4 spaces + "if")

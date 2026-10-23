@@ -476,7 +476,7 @@ TEST_F(ExecutorTest, FailsOnUnhandledDeviceError) {
   iree_hal_device_event_t event = iree_hal_device_event_default();
   event.type = IREE_HAL_DEVICE_EVENT_TYPE_ASAN_REPORT;
   event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
-  event.source.driver_id = IREE_SV("amdgpu");
+  event.source.driver_id = IREE_SV("legacy-amdgpu");
   event.site = &site;
   DeviceEventExecutionResult result = RunDeviceEventCase("", &event, 1);
 

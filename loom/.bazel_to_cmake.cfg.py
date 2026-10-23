@@ -95,13 +95,13 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
     "//loom/config/emit:spirv": "LOOM_EMIT_SPIRV",
     "//loom/config/emit:wasm": "LOOM_EMIT_WASM",
     "//loom/config/emit:xdna": "LOOM_EMIT_XDNA",
-    "//loom/config/execute:amdgpu_hal": "LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)",
+    "//loom/config/execute:amdgpu_hal": "LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD_GPU)",
     "//loom/config/execute:iree_hal": "LOOM_EXECUTE_IREE_HAL",
-    "//loom/config/execute:iree_hal_amdgpu": "LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)",
+    "//loom/config/execute:iree_hal_amdgpu": "LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD_GPU)",
     "//loom/config/execute:iree_hal_vulkan": "LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN",
     "//loom/config/execute:spirv_vulkan_hal": "LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN",
     "//loom/config/execute:task_hal": "LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK",
-    "//loom/config/execute:xdna_hal": "LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD",
+    "//loom/config/execute:xdna_hal": "LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD_XDNA",
     "//loom/config/import/cxx:embed_includes_enabled": "LOOM_IMPORT_CXX_EMBED_INCLUDES",
     "//loom/config/import:cxx": "LOOM_IMPORT_CXX",
     "//loom/config/import:mlir": "LOOM_IMPORT_MLIR",
@@ -817,6 +817,9 @@ class LoomBuildFileFunctions(
         # The existing dependency-only CMake library is an INTERFACE target.
         self.cc_library(**self._apply_loom_cmake_policy(kwargs))
 
+    def loom_cc_instance_library(self, tags=None, **kwargs):
+        self.loom_cc_library(tags=(tags or []) + ["LINKABLE_MORE_THAN_ONCE"], **kwargs)
+
     def loom_cc_binary(self, deps=[], **kwargs):
         kwargs = self._apply_loom_cmake_policy(kwargs)
         self._emit_rewritten_cmake_rule(
@@ -1208,6 +1211,7 @@ class LoomBuildFileFunctions(
         extra_output_flags=None,
         extra_outputs=None,
         deps=None,
+        instance_owned=False,
         tags=None,
         testonly=None,
         target_compatible_with=None,
@@ -1262,7 +1266,8 @@ class LoomBuildFileFunctions(
         testonly_block = self._convert_option_block("TESTONLY", testonly)
 
         duplicate_safe_block = self._convert_option_block(
-            "LINKABLE_MORE_THAN_ONCE", "LINKABLE_MORE_THAN_ONCE" in (tags or [])
+            "LINKABLE_MORE_THAN_ONCE",
+            instance_owned or "LINKABLE_MORE_THAN_ONCE" in (tags or []),
         )
 
         self._emit_platform_guard_begin(target_compatible_with)

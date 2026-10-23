@@ -93,6 +93,12 @@ static iree_status_t iree_hal_amd_xdna_operation_prepare_alloca_storage(
       }
     }
   }
+  for (iree_host_size_t i = 0;
+       i < operation->alloca.request_count && iree_status_is_ok(status); ++i) {
+    status = iree_hal_amd_fabric_transient_buffer_stage_backing(
+        operation->alloca.transient_buffers[i],
+        &operation->alloca.reservation_views[i]);
+  }
   if (iree_status_is_ok(status)) {
     iree_hal_pool_advise_asan_reservations(
         operation->alloca.pool, operation->alloca.request_count,
@@ -105,9 +111,6 @@ static iree_status_t iree_hal_amd_xdna_operation_prepare_alloca_storage(
     }
     operation->alloca.reservations_held = false;
     for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
-      iree_hal_amd_fabric_transient_buffer_stage_backing(
-          operation->alloca.transient_buffers[i],
-          &operation->alloca.reservation_views[i]);
       iree_hal_buffer_release(operation->alloca.materialized_buffers[i]);
       operation->alloca.materialized_buffers[i] = NULL;
     }

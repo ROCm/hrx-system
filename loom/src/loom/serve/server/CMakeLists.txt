@@ -100,6 +100,7 @@ loom_cc_library(
     iree::base::internal::json
     iree::hal
     loom::serve::runtime::device
+    loom::serve::runtime::execution::workspace
     loom::serve::runtime::host::wake
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::storage::memory
@@ -341,6 +342,7 @@ loom_cc_library(
     ::configuration
     ::model_registration
     ::registry
+    ::resources
     iree::base
     iree::base::threading
     iree::base::tooling::flags
@@ -374,6 +376,7 @@ loom_cc_library(
     ::configuration
     ::model_registration
     ::registry
+    ::resources
     iree::base
     iree::base::threading
     iree::base::tooling::flags

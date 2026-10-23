@@ -185,7 +185,10 @@ class WorkspaceTest : public ::testing::TestWithParam<uint32_t> {
     return loom_serve_execution_drain(independent_.execution);
   }
 
-  void Trim() { loom_serve_workspace_trim(workspace_); }
+  void Trim() {
+    iree_device_size_t retained = 0;
+    IREE_ASSERT_OK(loom_serve_workspace_trim(workspace_, &retained));
+  }
 
   static iree_status_t AllocateExecution(void* self,
                                          iree_allocator_command_t command,
@@ -400,7 +403,9 @@ TEST_P(WorkspaceTest, TrimReturnsUnusedSlabsAndPreservesLiveContents) {
   // Logical returns propagate through TLSF and the shared cache immediately.
   // The one live slab remains available with its contents unchanged; detached
   // native returns are no longer part of workspace retention accounting.
-  EXPECT_EQ(loom_serve_workspace_trim(workspace_), kSlabBytes);
+  iree_device_size_t retained_bytes = 0;
+  IREE_ASSERT_OK(loom_serve_workspace_trim(workspace_, &retained_bytes));
+  EXPECT_EQ(retained_bytes, kSlabBytes);
   const auto retained = loom_serve_workspace_statistics(workspace_);
   EXPECT_EQ(retained.reservation_count, 1u);
   EXPECT_EQ(retained.bytes_committed, kSlabBytes);

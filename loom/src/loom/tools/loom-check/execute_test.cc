@@ -13,10 +13,8 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/error/parameter.h"
-#include "loom/ir/context.h"
 #include "loom/target/provider.h"
 #include "loom/target/test/provider.h"
-#include "loom/testing/context.h"
 #include "loom/testing/test_file.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/diagnostics.h"
@@ -50,14 +48,6 @@ static iree_string_view_t LookupArrayElement(iree_string_view_t array,
   iree_string_view_t value = iree_string_view_empty();
   IREE_EXPECT_OK(iree_json_array_get(array, index, &value));
   return value;
-}
-
-iree_status_t RegisterTestContext(void* user_data, loom_context_t* context) {
-  (void)user_data;
-  // loom-check execute tests are integration coverage for the test runner's
-  // production registration surface plus the synthetic test dialect providers.
-  // Narrow parser/printer/unit tests should not copy this helper.
-  return loom_testing_context_register_all_dialects(context);
 }
 
 const loom_target_provider_t* const kTestTargetProviders[] = {
@@ -211,37 +201,17 @@ const loom_check_emit_provider_t* const kTestEmitProviders[] = {
     &kTestNativeEmitProvider,
 };
 
-iree_status_t TestForeignInputNativeLoad(const loom_input_request_t* request,
-                                         loom_input_source_capture_t capture,
-                                         loom_context_t* context,
-                                         iree_arena_block_pool_t* block_pool,
-                                         iree_allocator_t host_allocator,
-                                         loom_module_t** out_module) {
-  (void)request;
-  (void)capture;
-  (void)context;
-  (void)block_pool;
-  (void)host_allocator;
-  *out_module = nullptr;
-  return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                          "foreign input bypassed public admission");
-}
-
 const loom_input_format_t kTestForeignInputFormat = {
     .name = IREE_SVL("test-foreign"),
     .suffixes = {},
 };
 
-const loom_input_provider_t kTestForeignInputProvider = {
-    .format = &kTestForeignInputFormat,
-    .load = TestForeignInputNativeLoad,
-};
-
-const loom_input_provider_t* const kTestForeignInputProviders[] = {
-    &kTestForeignInputProvider,
+const loom_input_format_t* const kTestForeignInputFormats[] = {
+    &kTestForeignInputFormat,
 };
 
 struct TestForeignImportState {
+  // Number of public importer invocations for the selected check case.
   iree_host_size_t import_count = 0;
 };
 
@@ -286,12 +256,7 @@ iree_status_t TestForeignInputImport(
 }
 
 const loom_check_environment_t kExecuteTestEnvironment = {
-    .input_providers = {},
-    .register_context =
-        {
-            .fn = RegisterTestContext,
-            .user_data = nullptr,
-        },
+    .input_formats = {},
     .target_environment = {},
     .compile_session = nullptr,
     .cleanup_pattern_provider_set =
@@ -299,12 +264,7 @@ const loom_check_environment_t kExecuteTestEnvironment = {
 };
 
 const loom_check_environment_t kExecuteTestProviderEnvironment = {
-    .input_providers = {},
-    .register_context =
-        {
-            .fn = RegisterTestContext,
-            .user_data = nullptr,
-        },
+    .input_formats = {},
     .target_environment = {},
     .compile_session = nullptr,
     .cleanup_pattern_provider_set =
@@ -350,13 +310,9 @@ class ExecuteTest : public ::testing::Test {
     provider_environment_ = kExecuteTestProviderEnvironment;
     provider_environment_.target_environment = target_environment_;
     provider_environment_.compile_session = &compile_session_;
-    loom_context_initialize(iree_allocator_system(), &context_);
-    IREE_ASSERT_OK(loom_check_context_register_and_finalize(
-        &execute_environment_, &context_));
   }
 
   void TearDown() override {
-    loom_context_deinitialize(&context_);
     loom_check_compile_session_deinitialize(&compile_session_);
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
@@ -391,11 +347,11 @@ class ExecuteTest : public ::testing::Test {
     if (iree_status_is_ok(status)) {
       loom_check_result_initialize(iree_allocator_system(), out_result);
       result_initialized = true;
-      loom_input_request_t input_request = {.path = IREE_SV("test.loom-test")};
+      loom_check_input_t input_request = {.path = IREE_SV("test.loom-test")};
       status = loom_check_execute_case(
           &file.cases[0], 0, &report, iree_make_cstring_view("test.loom-test"),
-          &input_request, environment, &context_, &block_pool_,
-          iree_allocator_system(), out_result);
+          &input_request, environment, &block_pool_, iree_allocator_system(),
+          out_result);
     }
     iree_arena_deinitialize(&arena);
     if (!iree_status_is_ok(status) && result_initialized) {
@@ -446,7 +402,6 @@ class ExecuteTest : public ::testing::Test {
   }
 
   iree_arena_block_pool_t block_pool_;
-  loom_context_t context_;
   loom_target_provider_set_t target_provider_set_;
   const loom_target_environment_t* target_environment_;
   loom_check_compile_session_t compile_session_;
@@ -581,13 +536,13 @@ TEST_F(ExecuteTest, RoundtripActualOutputPopulated) {
 TEST_F(ExecuteTest, PrintedIRMustParseBeforeUpdating) {
   loom_check_result_t result;
   loom_check_result_initialize(iree_allocator_system(), &result);
-  const loom_text_print_options_t options = {
-      .flags = LOOM_TEXT_PRINT_DEFAULT,
-      .low_asm_environment = {},
+  const loomc_module_serialize_options_t options = {
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
   };
   bool valid = true;
   IREE_ASSERT_OK(loom_check_validate_printed_ir(IREE_SV("%undefined\n"),
-                                                &context_, &block_pool_,
+                                                &compile_session_, &block_pool_,
                                                 &options, &result, &valid));
   EXPECT_FALSE(valid);
   EXPECT_FALSE(result.has_actual_output);
@@ -600,13 +555,13 @@ TEST_F(ExecuteTest, PrintedIRMustParseBeforeUpdating) {
 TEST_F(ExecuteTest, PrintedIRMustBeStableBeforeUpdating) {
   loom_check_result_t result;
   loom_check_result_initialize(iree_allocator_system(), &result);
-  const loom_text_print_options_t options = {
-      .flags = LOOM_TEXT_PRINT_DEFAULT,
-      .low_asm_environment = {},
+  const loomc_module_serialize_options_t options = {
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
   };
   bool valid = true;
   IREE_ASSERT_OK(loom_check_validate_printed_ir(IREE_SV("func.def @f() {}"),
-                                                &context_, &block_pool_,
+                                                &compile_session_, &block_pool_,
                                                 &options, &result, &valid));
   EXPECT_FALSE(valid);
   EXPECT_FALSE(result.has_actual_output);
@@ -1294,53 +1249,18 @@ TEST_F(ExecuteTest, PassModePassesOptionsToPassCreate) {
 }
 
 TEST_F(ExecuteTest, PassModeRejectsOptionsForUnsupportedPass) {
-  loom_check_result_t result;
-  IREE_ASSERT_OK(
-      ExecuteFirst("// RUN: pass dce{max-iterations=1}\n"
-                   "func.def @f() {\n"
-                   "  func.return\n"
-                   "}\n",
-                   &result));
-  EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
-  EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
-  EXPECT_NE(DetailString(result).find("INVALID_ARGUMENT"), std::string::npos);
-  loom_check_result_deinitialize(&result);
+  ExpectFirstFailsWithDetail("// RUN: pass dce{max-iterations=1}\n",
+                             "pass 'dce' does not accept options");
 }
 
 TEST_F(ExecuteTest, PassModeRejectsMalformedOptions) {
-  loom_check_result_t result;
-  IREE_ASSERT_OK(
-      ExecuteFirst("// RUN: pass canonicalize{bogus=1}\n"
-                   "func.def @f() {\n"
-                   "  func.return\n"
-                   "}\n",
-                   &result));
-  EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
-  EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
-  EXPECT_NE(DetailString(result).find("INVALID_ARGUMENT"), std::string::npos);
-  loom_check_result_deinitialize(&result);
-
-  IREE_ASSERT_OK(
-      ExecuteFirst("// RUN: pass canonicalize{max-iterations=1\n"
-                   "func.def @f() {\n"
-                   "  func.return\n"
-                   "}\n",
-                   &result));
-  EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
-  EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
-  EXPECT_NE(DetailString(result).find("INVALID_ARGUMENT"), std::string::npos);
-  loom_check_result_deinitialize(&result);
-
-  IREE_ASSERT_OK(ExecuteFirst(
-      "// RUN: pass canonicalize{max-iterations=1,max-iterations=2}\n"
-      "func.def @f() {\n"
-      "  func.return\n"
-      "}\n",
-      &result));
-  EXPECT_EQ(result.raw_outcome, LOOM_CHECK_FAIL);
-  EXPECT_EQ(result.final_outcome, LOOM_CHECK_FAIL);
-  EXPECT_NE(DetailString(result).find("INVALID_ARGUMENT"), std::string::npos);
-  loom_check_result_deinitialize(&result);
+  ExpectFirstFailsWithDetail("// RUN: pass canonicalize{bogus=1}\n",
+                             "unknown option 'bogus'");
+  ExpectFirstFailsWithDetail("// RUN: pass canonicalize{max-iterations=1\n",
+                             "unterminated");
+  ExpectFirstFailsWithDetail(
+      "// RUN: pass canonicalize{max-iterations=1,max-iterations=2}\n",
+      "duplicate option 'max-iterations'");
 }
 
 TEST_F(ExecuteTest, RequiresUnavailableSkipsCaseBeforeParsingIr) {
@@ -1354,6 +1274,16 @@ TEST_F(ExecuteTest, RequiresUnavailableSkipsCaseBeforeParsingIr) {
   EXPECT_EQ(result.final_outcome, LOOM_CHECK_SKIP);
   EXPECT_NE(DetailString(result).find("fake-target"), std::string::npos);
   loom_check_result_deinitialize(&result);
+}
+
+TEST_F(ExecuteTest, UnknownInputFormatFailsBeforeRequirementSkip) {
+  loom_check_result_t result;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNIMPLEMENTED,
+      ExecuteFirstWithEnvironment("// INPUT: missing-format\n"
+                                  "// RUN: roundtrip\n"
+                                  "// REQUIRES: fake-target\n",
+                                  &provider_environment_, &result));
 }
 
 TEST_F(ExecuteTest, UnknownRequiresWithProviderListsSupportedNames) {
@@ -1439,9 +1369,9 @@ TEST_F(ExecuteTest, NativeEmitProviderUsesOnePublicAdmission) {
       .import_user_data = &import_state,
   };
   compile_session_.provider = &compile_provider;
-  provider_environment_.input_providers = {
-      .values = kTestForeignInputProviders,
-      .count = IREE_ARRAYSIZE(kTestForeignInputProviders),
+  provider_environment_.input_formats = {
+      .values = kTestForeignInputFormats,
+      .count = IREE_ARRAYSIZE(kTestForeignInputFormats),
   };
 
   loom_check_result_t result;

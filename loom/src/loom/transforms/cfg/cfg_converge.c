@@ -88,6 +88,8 @@ typedef struct loom_cfg_converge_plan_t {
   iree_host_size_t replacement_count;
   // Reserved replacement operand capacity.
   iree_host_size_t replacement_capacity;
+  // Whether a direct true continuation needs its own single-entry arm.
+  bool isolate_true_passthrough;
   // Successor ordinal whose subtree is being inspected by the reference walk.
   uint8_t arm;
   // False when a capture cannot travel through an ordinary scalar argument.
@@ -113,8 +115,11 @@ static bool loom_cfg_converge_may_reach(const loom_cfg_graph_t* graph,
 
 // A decision with an externally shared arm moves behind that arm's incoming
 // alternatives. Retained reachability bounds prove the redirected edges cannot
-// create a cycle. Transparent forwarding arms already converge without moving
-// work.
+// create a cycle. A false forwarding passthrough already has the canonical
+// conditional body shape and remains untouched. A direct false continuation
+// contributes bypasses only after another shared arm requires a join; those
+// bypasses can close an enclosing decision. A true passthrough has inverted
+// sense and must itself be inspected for external entries.
 static iree_status_t loom_cfg_converge_select(loom_cfg_converge_plan_t* plan,
                                               bool* out_selected) {
   *out_selected = false;
@@ -128,6 +133,7 @@ static iree_status_t loom_cfg_converge_select(loom_cfg_converge_plan_t* plan,
       plan->destinations[0] == plan->destinations[1]) {
     return iree_ok_status();
   }
+  plan->isolate_true_passthrough = plan->destinations[0] == continuation;
   const loom_cfg_loop_nest_t* loops = &plan->facts->loops;
   uint16_t loop_index = loom_cfg_loop_nest_innermost(loops, plan->source);
   if (graph->blocks[plan->source].component_is_cyclic) {
@@ -159,19 +165,28 @@ static iree_status_t loom_cfg_converge_select(loom_cfg_converge_plan_t* plan,
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       plan->arena, capacity, sizeof(*plan->incoming), (void**)&plan->incoming));
   plan->parent = plan->source;
-  // A continuation contributes upstream bypasses only when a real shared arm
-  // already requires a join. Visit that arm first, regardless of predicate
-  // sense.
-  uint16_t destinations[2] = {plan->destinations[0], plan->destinations[1]};
-  if (destinations[0] == continuation) {
-    destinations[0] = plan->destinations[1];
-    destinations[1] = plan->destinations[0];
+  // A false continuation contributes upstream bypasses only when a real shared
+  // arm already requires a join. Visit the non-continuation first, regardless
+  // of predicate sense. True passthroughs are always inspected because their
+  // inverted sense cannot form a target masked region while externally shared.
+  uint8_t arms[2] = {0, 1};
+  if (plan->destinations[0] == continuation) {
+    arms[0] = 1;
+    arms[1] = 0;
   }
-  for (uint8_t arm = 0; arm < 2; ++arm) {
-    uint16_t destination = destinations[arm];
-    if ((destination == continuation && !plan->incoming_count) ||
-        loom_cfg_converge_is_forwarding(graph->blocks[destination].block,
-                                        graph->blocks[continuation].block)) {
+  for (uint8_t order = 0; order < 2; ++order) {
+    uint8_t arm = arms[order];
+    uint16_t destination = plan->destinations[arm];
+    // A dominated successor has no reachable incoming edge outside this
+    // decision and needs no predecessor scan.
+    if (loom_cfg_dominance_block_dominates(dominance, plan->source,
+                                           destination)) {
+      continue;
+    }
+    if (arm == 1 &&
+        ((destination == continuation && !plan->incoming_count) ||
+         loom_cfg_converge_is_forwarding(graph->blocks[destination].block,
+                                         graph->blocks[continuation].block))) {
       continue;
     }
     loom_cfg_edge_index_span_t incoming =
@@ -403,10 +418,22 @@ static iree_status_t loom_cfg_converge_apply(loom_cfg_converge_plan_t* plan,
   loom_value_id_t selector = loom_cfg_cond_br_condition(plan->branch);
   loom_location_id_t location = plan->branch->location;
   builder->ip.parent_op = plan->branch->parent_op;
+  loom_op_t* op = NULL;
+  if (plan->isolate_true_passthrough) {
+    loom_block_t* passthrough = NULL;
+    IREE_RETURN_IF_ERROR(loom_region_insert_block(
+        plan->module, body, destinations[0]->region_index, &passthrough));
+    loom_builder_set_block(builder, passthrough);
+    IREE_RETURN_IF_ERROR(loom_cfg_br_build(builder, destinations[0],
+                                           /*operands=*/NULL,
+                                           /*operand_count=*/0, location, &op));
+    destinations[0] = passthrough;
+  }
   loom_block_t* join = NULL;
   IREE_RETURN_IF_ERROR(loom_region_insert_block(
       plan->module, body,
-      iree_min(plan->destinations[0], plan->destinations[1]), &join));
+      iree_min(destinations[0]->region_index, destinations[1]->region_index),
+      &join));
   loom_value_id_t choice = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_builder_define_block_arg(
       builder, join, loom_type_scalar(LOOM_SCALAR_TYPE_I1), &choice));
@@ -417,7 +444,6 @@ static iree_status_t loom_cfg_converge_apply(loom_cfg_converge_plan_t* plan,
         &plan->captures[i].argument));
   }
   loom_builder_set_block(builder, join);
-  loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(loom_cfg_cond_br_build(builder, choice, destinations[0],
                                               destinations[1], location, &op));
   uint16_t payload_count = (uint16_t)(plan->capture_count + 1);

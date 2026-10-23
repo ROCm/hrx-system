@@ -25,6 +25,7 @@ enum loom_check_test_low_allocation_option_flag_bits_e {
   LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_EDGE_MOVES = 1u << 6,
   LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_REVERSE_BLOCKS = 1u << 7,
   LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_MATERIALIZE_SPILLS = 1u << 8,
+  LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_SPILL_FREE = 1u << 9,
 };
 typedef uint32_t loom_check_test_low_allocation_option_flags_t;
 
@@ -184,6 +185,16 @@ static iree_status_t loom_check_test_low_allocation_parse_option(
     options->flags |= LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_MATERIALIZE_SPILLS;
     return iree_ok_status();
   }
+  if (iree_string_view_equal(token, IREE_SV("spill-free"))) {
+    if (iree_any_bit_set(options->flags,
+                         LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_SPILL_FREE)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "duplicate low-allocation-query option 'spill-free'");
+    }
+    options->flags |= LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_SPILL_FREE;
+    return iree_ok_status();
+  }
 
   iree_string_view_t name = iree_string_view_empty();
   iree_string_view_t value = iree_string_view_empty();
@@ -268,6 +279,15 @@ static iree_status_t loom_check_test_low_allocation_parse_options(
           loom_check_test_low_allocation_parse_option(token, out_options));
     }
     option_text = iree_string_view_trim(option_text);
+  }
+  if (iree_all_bits_set(
+          out_options->flags,
+          LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_SPILL_FREE |
+              LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_MATERIALIZE_SPILLS)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "'spill-free' and 'materialize-spills' select different repair "
+        "boundaries");
   }
   return iree_ok_status();
 }
@@ -626,11 +646,15 @@ static iree_status_t loom_check_test_low_allocation_execute(
       .allocation_diagnostic_flags = options.allocation_diagnostic_flags,
   };
   loom_low_emission_frame_t frame = {0};
+  const bool spill_free = iree_any_bit_set(
+      options.flags, LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_SPILL_FREE);
+  const loom_low_emission_frame_spill_free_options_t spill_free_options = {0};
   bool accepted = false;
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
       request, native_module, options.function_symbol_name, &frame_options,
       options.allocation_fixed_values.specs,
-      options.allocation_fixed_values.count, NULL, &frame, &accepted));
+      options.allocation_fixed_values.count,
+      spill_free ? &spill_free_options : NULL, &frame, &accepted));
   const bool failure_requested = iree_any_bit_set(
       options.flags, LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_FAILURE);
   const bool has_error =
@@ -659,6 +683,13 @@ static iree_status_t loom_check_test_low_allocation_execute(
                        LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_SPILL_COUNT)) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         output, "spills: %" PRIhsz "\n", allocation->spill_count));
+    if (spill_free) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          output,
+          "materialized traffic: stores=%" PRIu64 " reloads=%" PRIu64 "\n",
+          frame.materialized_spill_store_count,
+          frame.materialized_reload_count));
+    }
   }
   if (iree_any_bit_set(options.flags,
                        LOOM_CHECK_TEST_ALLOCATION_OPTION_FLAG_COPY_COUNT)) {

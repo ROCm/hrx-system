@@ -94,14 +94,34 @@ configuration and checkpoint domains. Shared preparation capabilities include:
 | `config(stage, key, value)` | Bind a public Loom configuration value in textual syntax. |
 | `config_i64(stage, key, value)` | Bind a signed integer configuration value. |
 | `workspace_limit(stage, bytes)` | Bound command workspace, including compatible live replacements. |
-| `parameter(stage, binding, directory, path, policy)` | Append a checkpoint file to a reflected fixed binding's parameter domain. |
+| `memory_forecast(root)` | Select a finite component's host control entry for complete-request memory estimates. |
+| `source(directory, path)` | Declare the first shard of a checkpoint and return its source ordinal. |
+| `source_append(source, directory, path)` | Append a shard to that checkpoint's ordered index. |
+| `source_scope(scope)` | Select a model card's named, typed parameter files as one shared checkpoint source. |
+| `parameter(stage, binding, input, source, policy)` | Bind a checkpoint to one policy-local input of a reflected fixed parameter binding. |
 
-A split checkpoint uses one `parameter` call per file with the same binding
-and preparation policy. The files populate one parameter index in declaration
-order, so their tensors share one residency plan. Stages naming the same ordered
-file list and policy share that domain. File selection belongs to the model's
-cold source; the loader accepts explicit GGUF, safetensors, and other supported
-parameter files without inferring filenames.
+A split checkpoint uses `source` for its first file and `source_append` for
+each additional shard. The files populate one index in declaration order.
+The same source can supply several resident bindings or stages without repeating
+the file list. Sources identify bytes, independently of resident placement or
+preparation policy; a source declaration by itself loads no parameter payload.
+Cold preparation opens each declared source once and shares its index and
+imported-file cache across consuming bindings. Request choices retain the cold
+prefix and index new sources on the preparation worker; warm execution does not
+reopen checkpoint paths. A missing or invalid checkpoint fails preparation
+before its parameter placement or activation.
+
+Each fixed binding declares its policy inputs once, densely from zero. A policy
+can combine independent checkpoints containing the same keys: its `weights`
+imports use those local input ordinals, not model-wide source ordinals. Stages
+naming the same ordered file lists and policy share a resident domain. The
+loader accepts explicit GGUF, safetensors, and other supported parameter files
+without inferring filenames.
+
+Request preparation can declare additional sources after the immutable cold
+source prefix, or bind that prefix to new stages. It cannot append shards to a
+cold source. Each request choice owns its declarations independently; selecting
+another choice does not change the checkpoint identity of accepted work.
 
 The exact signatures and ownership are in the
 [preparation contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/runtime/program/preparation.h).
@@ -122,6 +142,73 @@ on work/feedback timelines and preserves buffers until their actual last use.
 The [runner-module contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/runtime/program/module.h)
 defines arity, buffer types and lifetime. This is a coarse serving capability,
 not a source program's ownership of the entire device or process scheduler.
+
+Independent work can use explicit dependencies. `runner.fence(work)` returns a
+`hal.fence` for a previously accepted work value. It captures that producer,
+not later submissions or the separate feedback branch. `runner.join(ready)`
+orders subsequent model work after the supplied fence without waiting on the
+CPU or synchronizing other models. A null fence represents no external work.
+Completion describes readiness; storage ownership still extends through the
+last accepted consumer, including when a dependency fails.
+
+### Read checkpoint bytes on demand
+
+Large lookup tables and paged experts can remain in checkpoint files instead
+of occupying a resident parameter binding. The warm `parameters` capability
+reads demanded byte ranges from the same sources declared during preparation:
+
+```text
+parameters.gather(source, key, wait, descriptors, descriptor_offset, count, target)
+    -> hal.fence
+```
+
+`source` is the selected invocation's source ordinal, and `key` is a host byte
+buffer naming an entry in that checkpoint. Independent sources may use the
+same key. `descriptors` and `target` are `hal.buffer` references. Starting at
+`descriptor_offset`, each 24-byte record contains three little-endian `u64`
+values: the entry-relative byte offset, destination-buffer byte offset, and
+byte length. Destination ranges are disjoint; zero-length records require no
+payload transfer. Hashing, deduplication, packing, and cache placement remain
+model-program decisions, not tensor interpretations in the server.
+
+A control program can enqueue independent reads before joining either one:
+
+```text
+producer = runner.execute_N(descriptor_stage, ...)
+produced = runner.fence(producer)
+first = parameters.gather(source_a, key_a, produced, ranges_a, 0, count_a, target_a)
+second = parameters.gather(source_b, key_b, produced, ranges_b, 0, count_b, target_b)
+runner.execute_N(independent_stage, ...)
+runner.join(first)
+runner.execute_N(first_consumer, ...)
+runner.join(second)
+runner.execute_N(second_consumer, ...)
+```
+
+The supplied fence covers descriptor production and destination availability,
+including any earlier readers of reused storage. The returned fence orders
+payload consumers and descriptor reuse. An empty gather preserves its incoming
+dependency without touching storage. Changing a request's source choice or
+removing its model does not redirect or release accepted reads: each read
+retains its original provider and buffer captures until actual retirement.
+Failed readiness is not permission to recycle those buffers.
+
+This implementation asynchronously snapshots the descriptors to host memory,
+then submits the ranges through the parameter provider and HAL file queues.
+The VM call never waits for completion or synchronizes unrelated models. It
+requires queue download and deferred host-call support. Checkpoint opening
+uses the configured parameter-file mode; direct I/O requires appropriately
+aligned file ranges and destinations and does not silently fall back to
+buffered reads. A snapshot costs 24 bytes per descriptor plus one copied key;
+checkpoint payloads are not materialized in a separate model-owned host array.
+
+This is host-VM-initiated asynchronous I/O, not a persistent GPU request
+service. A kernel that requests data while continuing other work needs a
+device-side progress and credit protocol beyond this call. The shared source
+identity and byte-range contract do not impose a model-wide barrier on that
+separate execution mechanism.
+
+### Tokenize request inputs
 
 Request preparation can use the `input` capability to encode text and decode
 token spans with the deployment's tokenizer. `encode(text, flags, capacity)`
@@ -165,8 +252,9 @@ It uses the same `stage`, `dispatch`, `config`, `config_i64`, and
 `workspace_limit` imports as cold preparation. Returned ordinals follow the
 cold stages and are valid for that invocation. This lets a package specialize
 an actual image geometry or cohort extent without enumerating a size catalog
-at registration. Checkpoint domains remain the cold program's responsibility;
-request stages must preserve their layout and cannot declare new parameters.
+at registration. A request can also declare sources and parameter bindings;
+omitting parameter declarations preserves the cold layout. New source ordinals
+follow the immutable cold prefix and belong to that exact request choice.
 
 The server reuses an exact declaration set within its selected source generation
 or compiles it asynchronously before parameter admission. Other models keep
@@ -245,6 +333,32 @@ may be null. Control exports `epoch`, `encode_epoch`, `publish_epoch`,
 `capture_epoch`. Isolated `step`, tokenizer/chat roots, and drafting are not
 required. Every submitted span has selection/proposal flags zero, and completed
 progress contains no native output-token selection.
+
+`encode_epoch` writes metadata and input packets, then returns
+`(output_count, transfer_plan, byte_offset, byte_length)`. The plan view contains
+little-endian u64 records
+`{source_binding, source_offset, target_binding, target_offset, length}`.
+The source and target tables each bind metadata at ordinal zero and input at
+ordinal one. Source and destination offsets are independent: compact host data
+can populate a sparse device layout without transferring its holes.
+Only listed bytes are uploaded:
+preparing capacity for a large packed epoch does not make a one-token epoch
+transfer that entire capacity. Source initializes all bytes its numerical
+stages read. Nonempty records are ordered by target binding and offset, with
+no overlapping targets. Repeated source ranges are permitted. Records describe
+independent placements, not an ordered sequence of copies.
+
+The plan names logical storage, not pointers, registrations, or completion
+handles. The execution owner binds physical resources and establishes readiness.
+The plan can reuse retained control state and is consumed during submission;
+packet bytes stay immutable until accepted transfers retire, including failure.
+Source reuse, destination visibility, and destination reuse after consumption
+are separate ownership boundaries. See the
+[byte-placement contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/runtime/program/transfer_plan.h)
+for the encoding and validation rules.
+The same contract applies to generative text and media epochs. See
+[epoch uploads](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/text/epoch_upload.h)
+for local HAL binding and payload ownership.
 
 `capture_epoch(control_state, shape_index, span_count, plan)` returns a buffer
 of little-endian i64 triples: `[span_ordinal, residual_byte_offset, byte_length]`.
@@ -365,6 +479,29 @@ defines the host control records separately from device features. Projector
 weights and completed features have independent lifetimes; live requests retain
 features only until their language consumers finish.
 
+With a finite serving memory limit, the projector's cold preparation selects a
+control entry with `prepare.memory_forecast(root)`. The selected function has
+this signature:
+
+```text
+forecast_memory(state, ranges, descriptors)
+    -> (private_peak_bytes, retained_bytes, expanded_bytes)
+```
+
+The three inputs are buffers. The range table uses little-endian i64
+offset/length pairs for descriptors containing image headers and source metadata,
+without decoded pixel planes. The three results are nonnegative i64 byte
+estimates for the complete logical request: the producer's private peak
+(parameters, activation staging, input and command workspace), all retained
+output roots, and gathered output rows with 16-byte row alignment. Retained
+output is excluded from the private peak and includes padded/shared roots;
+gather storage includes separate copies of aliased rows.
+
+These trusted source estimates let the server reject a request that cannot fit
+alone before pixel decoding or weight activation. It checks producer and
+language-consumer phases separately. The forecast does not reserve future
+capacity against concurrent requests; each phase still passes ordinary admission.
+
 ## Recognize continuing audio
 
 A recognition package accepts a continuing sequence of normalized F32 PCM frames
@@ -465,6 +602,11 @@ part of the port; current key/extent checks do not establish model identity.
 
 Private command workspace comes from compiler reflection and queue-ordered
 allocation. It is not a permanently resident per-session tensor arena.
+Under elastic backing it draws from the same physical pool and serving budget
+as parameters and model state. Stable workspace addresses can survive physical
+trim without retaining the pages. Prepared working-set peaks drive admission;
+the physical slab size determines the minimum commitment, not each small
+logical allocation's size.
 Escaping output remains live through its final device or transfer consumer;
 copied host feedback survives CPU encoding. A slow network reader receives
 copied response storage rather than retaining device workspace.

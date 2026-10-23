@@ -20,8 +20,6 @@ static iree_status_t loom_benchmark_initialize_sequence_compile_context(
   const loom_testbench_case_plan_t* case_plan = selection->case_plan;
   context->uses_sequence = true;
   context->execution_options = *options->case_execution_options;
-  context->benchmark_materializer =
-      options->case_execution_options->materializer;
 
   iree_status_t status = loom_run_hal_testbench_context_ensure_runtime(
       &options->hal_context->execution);
@@ -46,8 +44,8 @@ static iree_status_t loom_benchmark_initialize_sequence_compile_context(
         &options->hal_context->execution,
         context->execution_options.materializer.host_allocator,
         &context->reference_oracles, &context->execution_options);
-    context->benchmark_materializer = context->execution_options.materializer;
-    context->benchmark_materializer.target_pool =
+    context->benchmark_execution_options = context->execution_options;
+    context->benchmark_execution_options.materializer.target_pool =
         options->hal_context->execution.runtime.device_pool;
     status = loom_benchmark_hal_actual_sequence_compile(&context->hal_sequence);
   }
@@ -66,8 +64,6 @@ static iree_status_t loom_benchmark_initialize_single_compile_context(
   const loom_testbench_invocation_plan_t* kernel_launch = NULL;
   const loom_testbench_case_plan_t* case_plan = selection->case_plan;
   context->execution_options = *options->case_execution_options;
-  context->benchmark_materializer =
-      options->case_execution_options->materializer;
 
   iree_status_t status =
       loom_run_hal_testbench_select_kernel_launch(case_plan, &kernel_launch);
@@ -96,8 +92,8 @@ static iree_status_t loom_benchmark_initialize_single_compile_context(
         &options->hal_context->execution,
         context->execution_options.materializer.host_allocator,
         &context->reference_oracles, &context->execution_options);
-    context->benchmark_materializer = context->execution_options.materializer;
-    context->benchmark_materializer.target_pool =
+    context->benchmark_execution_options = context->execution_options;
+    context->benchmark_execution_options.materializer.target_pool =
         options->hal_context->execution.runtime.device_pool;
     status = loom_benchmark_hal_actual_provider_compile(&context->hal_provider);
   }

@@ -46,8 +46,8 @@ class BlitBenchmark : public benchmark::Fixture {
 
     if (iree_status_is_ok(status)) {
       status = iree_hal_driver_registry_acquire_driver(
-          iree_hal_driver_registry_default(), iree_make_cstring_view("amdgpu"),
-          &driver_);
+          iree_hal_driver_registry_default(),
+          iree_make_cstring_view("legacy-amdgpu"), &driver_);
     }
 
     iree_async_proactor_pool_t* proactor_pool = nullptr;

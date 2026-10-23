@@ -17,10 +17,10 @@ package(
     licenses = ["notice"],
 )
 
-# Native device integration requires libamdf; pure image/packet/queue utilities
+# Native device integration requires the GPU HAL; pure image/packet/queue utilities
 # remain available in CPU-only builds.
 _NATIVE_DEVICE_COMPATIBLE_WITH = select({
-    "//libamdf/config:enabled_setting": [],
+    "//runtime/config/hal:driver_amd_gpu": [],
     "//conditions:default": ["@platforms//:incompatible"],
 })
 
@@ -329,6 +329,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu:executable",
         "//runtime/src/iree/hal/drivers/amd/gpu:kernarg",
         "//runtime/src/iree/hal/drivers/amd/gpu:profile",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:allocation",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:buffer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:capture_pool",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:control",
@@ -566,8 +567,10 @@ iree_runtime_cc_library(
     name = "ring",
     srcs = ["ring.c"],
     hdrs = ["ring.h"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
         ":commands",
+        "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],
@@ -576,6 +579,7 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "ring_test",
     srcs = ["ring_test.cc"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
         ":commands",
         ":ring",
@@ -587,6 +591,7 @@ iree_runtime_cc_test(
 iree_runtime_cc_benchmark(
     name = "ring_benchmark",
     srcs = ["ring_benchmark.cc"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
         ":ring",
         "//runtime/src/iree/testing:benchmark_main",

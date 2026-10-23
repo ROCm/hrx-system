@@ -11,7 +11,7 @@ func.def public linkonce @source_sum(%left: i32, %right: i32) -> (i32) {
   func.return %3 : i32 loc("loom/src/loom/import/cxx/tooling/test/source_capture.h":11:11 to 11:42)
 } loc("loom/src/loom/import/cxx/tooling/test/source_capture.h":10:1 to 12:2)
 
-func.def public @captured_sum(%left: i32, %right: i32) -> (i32) {
+func.def public source_signature(#func.abi.c.signature<arguments = [0, 0], results = [0], types = [#func.abi.c.type<signed_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @captured_sum(%left: i32, %right: i32) -> (i32) {
   %7 = func.call pure @source_sum(%left, %right) : (i32, i32) -> (i32) loc("loom/src/loom/import/cxx/tooling/test/source_capture.cxx-test":4:10 to 4:33)
   func.return %7 : i32 loc("loom/src/loom/import/cxx/tooling/test/source_capture.cxx-test":4:3 to 4:34)
 } loc("loom/src/loom/import/cxx/tooling/test/source_capture.cxx-test":3:12 to 5:2)

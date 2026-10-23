@@ -27,7 +27,6 @@ exports_files(
         "testdata/jit/config.loom",
         "testdata/jit/control.loom",
         "testdata/jit/preparation.loom",
-        "testdata/jit/private_vm_helper.loom",
         "testdata/jit/stage.loom",
         "testdata/jit/vm_helpers.loom",
     ],
@@ -64,6 +63,24 @@ loom_cc_test(
     srcs = ["variant_pool_test.cc"],
     deps = [
         ":variant_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "transfer_plan",
+    srcs = ["transfer_plan.c"],
+    hdrs = ["transfer_plan.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "transfer_plan_test",
+    srcs = ["transfer_plan_test.cc"],
+    deps = [
+        ":transfer_plan",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -267,11 +284,25 @@ loom_cc_library(
 
 loom_cc_test(
     name = "program_test",
-    srcs = ["program_test.cc"],
-    args = ["--binding_source=$(rootpath :testdata/binding.loom)"],
-    data = ["testdata/binding.loom"],
+    srcs = [
+        "jit_vm_test.cc",
+        "program_test.cc",
+    ],
+    args = [
+        "--binding_source=$(rootpath :testdata/binding.loom)",
+        "--vm_sources=$(rootpath :testdata/jit/control.loom)",
+        "--vm_invalid_source=$(rootpath :testdata/compilation/invalid.loom)",
+    ],
+    data = [
+        "testdata/binding.loom",
+        "testdata/compilation/invalid.loom",
+        "testdata/jit/control.loom",
+        "testdata/jit/private_vm_helper.loom",
+        "testdata/jit/vm_helpers.loom",
+    ],
     deps = [
         ":input",
+        ":jit",
         ":package",
         ":program",
         "//loom/binding/c:loomc",
@@ -391,6 +422,7 @@ loom_cc_test(
         ":program",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/vm",
+        "//loom/src/loom/model:card",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/testing:gtest",

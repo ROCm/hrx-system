@@ -38,7 +38,7 @@ loom_cc_library(
     testonly = True,
     srcs = ["test_device.c"],
     target_compatible_with = loom_config_compatible_with([
-        "//runtime/config/hal:driver_amd",
+        "//runtime/config/hal:driver_amd_xdna",
     ]),
     deps = [
         "//loom/src/loom/serve/testing:device",

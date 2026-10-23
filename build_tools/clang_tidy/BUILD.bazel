@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load("@iree_clang_tidy_llvm//:config.bzl", "CLANG_TIDY_LLVM_COPTS", "CLANG_TIDY_LLVM_TARGET_COMPATIBLE_WITH")
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
@@ -23,12 +22,6 @@ exports_files([
     "clang_tidy.bzl",
     "llvm_repo.bzl",
 ])
-
-string_flag(
-    name = "selected_files",
-    build_setting_default = "",
-    visibility = ["//visibility:private"],
-)
 
 filegroup(
     name = "plugin_sources",
@@ -428,5 +421,5 @@ iree_clang_tidy(
 
 clang_tidy_aspect_selection_test_suite(
     name = "aspect_selection_tests",
-    target = ":action_smoke",
+    target = ":action_smoke_subject",
 )

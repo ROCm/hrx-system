@@ -2,7 +2,9 @@
 
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
-func.decl import("prepare") @parameter_scope(%stage: i32, %binding: i32, %source: i32, %scope: buffer, %policy: buffer)
+func.decl import("prepare") @source_scope(%scope: buffer) -> (i32)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
 
 global.rodata.def @root = bytes("77656967687465645f70726f6a656374")
 
@@ -23,7 +25,8 @@ func.def public @text_image_prepare_v1(%directory: buffer, %options: buffer) -> 
   %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
   %scope = global.load @vision_scope : buffer
   %policy = global.load @policy : buffer
-  func.call @parameter_scope(%stage, %binding, %c0_source, %scope, %policy) : (i32, i32, i32, buffer, buffer)
+  %checkpoint = func.call @source_scope(%scope) : (buffer) -> (i32)
+  func.call @parameter(%stage, %binding, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
   %units = scalar.constant 64 : i64
   %input_capacity = scalar.constant 65536 : i64
   %output_capacity = scalar.constant 1024 : i64

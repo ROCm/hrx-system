@@ -1,0 +1,48 @@
+func.def @double_index(%value: index) -> (index) {
+  %result = index.add %value, %value : index
+  func.return %result : index
+}
+
+kernel.def @dynamic_fill(%workgroup_count: index) {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%workgroup_count: index, %output: buffer) {
+  %bounded_count = index.assume %workgroup_count [range(%workgroup_count, 1, 4)] : index
+  %workgroup_id = kernel.workgroup.id<x> : index
+  %element_count = index.constant 4 : index
+  %origin = index.constant 0 : offset
+  %value = scalar.constant 42 : i32
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %output_view = buffer.view %output_aligned[%origin] : buffer -> view<4xi32>
+  scf.for %i = [%workgroup_id to %element_count step %bounded_count] {
+    view.store %value, %output_view[%i] : i32, view<4xi32>
+  }
+  kernel.return
+}
+
+check.case @single_host_value {
+  %base = check.literal value(2) : index
+  %workgroup_count = func.call pure @double_index(%base) : (index) -> (index)
+  %output = check.generate.fill value(0) : tensor<4xi32>
+  kernel.launch @dynamic_fill[%workgroup_count](%workgroup_count, %output) : [index](index, tensor<4xi32>)
+  %expected = check.generate.fill value(42) : tensor<4xi32>
+  check.expect.equal actual(%output) expected(%expected) : tensor<4xi32>
+  check.return
+}
+
+check.benchmark<@single_host_value> @single_host_value_throughput
+
+check.case @sequence_host_value {
+  %base = check.literal value(1) : index
+  %workgroup_count = func.call pure @double_index(%base) : (index) -> (index)
+  %first = check.generate.fill value(0) : tensor<4xi32>
+  %second = check.generate.fill value(0) : tensor<4xi32>
+  kernel.launch @dynamic_fill[%workgroup_count](%workgroup_count, %first) : [index](index, tensor<4xi32>)
+  kernel.launch @dynamic_fill[%workgroup_count](%workgroup_count, %second) : [index](index, tensor<4xi32>)
+  %expected = check.generate.fill value(42) : tensor<4xi32>
+  check.expect.equal actual(%first) expected(%expected) : tensor<4xi32>
+  check.expect.equal actual(%second) expected(%expected) : tensor<4xi32>
+  check.return
+}
+
+check.benchmark<@sequence_host_value> @sequence_host_value_throughput

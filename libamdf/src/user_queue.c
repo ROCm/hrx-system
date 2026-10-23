@@ -121,6 +121,19 @@ amdf_user_queue_mapping_query_info(amdf_user_queue_mapping_t* mapping,
 }
 
 amdf_status_t AMDF_CALL
+amdf_user_queue_mapping_flush(amdf_user_queue_mapping_t* mapping) {
+  if (mapping == NULL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  if (mapping->producer_device != NULL ||
+      mapping->info.host_publish_executor !=
+          AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  return mapping->vtable->flush(mapping);
+}
+
+amdf_status_t AMDF_CALL
 amdf_user_queue_mapping_destroy(amdf_user_queue_mapping_t* mapping) {
   if (mapping == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);

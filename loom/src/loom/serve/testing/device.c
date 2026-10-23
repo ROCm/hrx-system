@@ -10,6 +10,7 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 #include "iree/hal/pool_wait.h"
+#include "loom/serve/runtime/execution/workspace.h"
 
 static iree_once_flag loom_serve_test_driver_once = IREE_ONCE_FLAG_INIT;
 static iree_status_t loom_serve_test_driver_registration_status = 0;
@@ -75,6 +76,8 @@ iree_status_t loom_serve_test_device_trim_and_drain(loom_serve_device_t* device,
   // from retiring. Join the native source before returning either diagnosis.
   iree_status_t status =
       memory ? loom_serve_memory_pool_await(memory) : iree_ok_status();
+  status = iree_status_join(status, loom_serve_workspace_advance(
+                                        loom_serve_device_workspace(device)));
   iree_hal_pool_t* pool = loom_serve_device_storage_pool(device);
   iree_hal_pool_wait_t* capacity = NULL;
   iree_status_t capacity_status =

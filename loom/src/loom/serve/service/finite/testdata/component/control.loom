@@ -8,11 +8,12 @@ func.def public @prepare_request(%state: buffer, %input: buffer) -> (buffer, i64
   buffer.copy %input[%origin], %packet[%origin], %values_bytes
   %counts = buffer.view %packet[%values_bytes] : buffer -> view<4xi32>
   %workgroup_count = scalar.constant 1 : i32
-  %padding = scalar.constant 0 : i32
+  %requested_length = buffer.view %input[%values_bytes] : buffer -> view<1xi32>
+  %output_length = view.load %requested_length[0] : view<1xi32> -> i32
   view.store %workgroup_count, %counts[0] : i32, view<4xi32>
   view.store %workgroup_count, %counts[1] : i32, view<4xi32>
   view.store %workgroup_count, %counts[2] : i32, view<4xi32>
-  view.store %padding, %counts[3] : i32, view<4xi32>
+  view.store %output_length, %counts[3] : i32, view<4xi32>
   %c1 = scalar.constant 1 : i64
   %c0 = scalar.constant 0 : i64
   func.return %packet, %c1, %c0 : buffer, i64, i64
@@ -27,7 +28,10 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %
   %c1 = scalar.constant 1 : i64
   %c4 = scalar.constant 4 : i64
   %c16 = scalar.constant 16 : i64
-  view.store %c16, %values[0] : i64, view<9xi64>
+  %packet = buffer.view %input[%origin] : buffer -> view<8xi32>
+  %output_length32 = view.load %packet[7] : view<8xi32> -> i32
+  %output_length = scalar.extui %output_length32 : i32 to i64
+  view.store %output_length, %values[0] : i64, view<9xi64>
   view.store %c16, %values[1] : i64, view<9xi64>
   view.store %c1, %values[2] : i64, view<9xi64>
   view.store %c1, %values[3] : i64, view<9xi64>

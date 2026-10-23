@@ -22,6 +22,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/lower/shuffle.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/transpose.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/vector_construct.h"
+#include "loom/target/arch/amd/xdna/aie2p/lower/vector_load.h"
 #include "loom/target/arch/amd/xdna/aie2p/ops/fifo.h"
 #include "loom/target/arch/amd/xdna/aie2p/vector_carrier.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
@@ -33,6 +34,11 @@ static iree_status_t loom_aie2p_query_op_contract(
     const loom_op_t* source_op,
     loom_target_contract_query_result_t* out_result) {
   IREE_RETURN_IF_ERROR(loom_aie2p_query_fifo_state_contract(
+      user_data, environment, source_op, out_result));
+  if (out_result->outcome != LOOM_TARGET_CONTRACT_QUERY_UNHANDLED) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_aie2p_query_vector_load_contract(
       user_data, environment, source_op, out_result));
   if (out_result->outcome != LOOM_TARGET_CONTRACT_QUERY_UNHANDLED) {
     return iree_ok_status();
@@ -301,6 +307,8 @@ static void loom_aie2p_mark_plan_storage_demands(
   (void)user_data;
   if (loom_aie2p_fifo_state_plan_isa(plan)) {
     return;
+  } else if (loom_aie2p_vector_load_plan_isa(plan)) {
+    loom_aie2p_mark_vector_load_plan_demands(context, source_op, plan);
   } else if (loom_aie2p_vector_construct_plan_isa(plan)) {
     loom_low_lower_require_source_operands_storage(context, source_op);
   } else if (loom_aie2p_matrix_plan_isa(plan)) {
@@ -330,6 +338,8 @@ static iree_status_t loom_aie2p_describe_plan(
   (void)execution_count_plus_one;
   if (loom_aie2p_fifo_state_plan_isa(plan)) {
     loom_aie2p_describe_fifo_state_plan(out_report);
+  } else if (loom_aie2p_vector_load_plan_isa(plan)) {
+    loom_aie2p_describe_vector_load_plan(out_report);
   } else if (loom_aie2p_vector_construct_plan_isa(plan)) {
     loom_aie2p_describe_vector_construct_plan(out_report);
   } else if (loom_aie2p_matrix_plan_isa(plan)) {
@@ -371,6 +381,9 @@ static iree_status_t loom_aie2p_emit_op(void* user_data,
   (void)user_data;
   if (loom_aie2p_fifo_state_plan_isa(plan)) {
     return loom_aie2p_emit_fifo_state_plan(context, source_op, plan);
+  }
+  if (loom_aie2p_vector_load_plan_isa(plan)) {
+    return loom_aie2p_emit_vector_load_plan(context, source_op, plan);
   }
   if (loom_aie2p_vector_construct_plan_isa(plan)) {
     return loom_aie2p_emit_vector_construct_plan(context, source_op, plan);
@@ -484,6 +497,11 @@ static const loom_low_lower_policy_t kAie2pCoreLowLowerPolicy = {
             .user_data = NULL,
         },
     .source_plan_observer = &loom_aie2p_f32_representation_observer,
+    .prepare_source_memory =
+        {
+            .fn = loom_aie2p_prepare_vector_load_plan,
+            .user_data = NULL,
+        },
     .preselect_op = {.fn = loom_aie2p_preselect_op, .user_data = NULL},
     .mark_plan_storage_demands =
         {

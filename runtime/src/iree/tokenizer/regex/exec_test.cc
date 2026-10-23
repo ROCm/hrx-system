@@ -294,14 +294,16 @@ TEST(DfaLoad, InvalidMagic) {
 }
 
 TEST(DfaLoad, UnsupportedVersion) {
-  auto data = BuildAbcDfa();
-  // Set version to 99.
-  auto* header = (iree_tokenizer_regex_dfa_header_t*)data.data();
-  header->version = 99;
-  iree_tokenizer_regex_dfa_t dfa;
-  iree_status_t status = iree_tokenizer_regex_dfa_load(
-      iree_make_const_byte_span(data.data(), data.size()), &dfa);
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED, status);
+  for (uint16_t version : {0, 1, 3}) {
+    SCOPED_TRACE(version);
+    auto data = BuildAbcDfa();
+    auto* header = (iree_tokenizer_regex_dfa_header_t*)data.data();
+    header->version = version;
+    iree_tokenizer_regex_dfa_t dfa;
+    iree_status_t status = iree_tokenizer_regex_dfa_load(
+        iree_make_const_byte_span(data.data(), data.size()), &dfa);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED, status);
+  }
 }
 
 TEST(DfaLoad, TruncatedData) {
@@ -646,8 +648,8 @@ TEST(DfaStreaming, ChunkedInput) {
 
   // Finalize to flush pending match.
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, strlen(chunk1) + strlen(chunk2), MatchCollector::Callback,
-      &collector));
+      &dfa, &state, strlen(chunk1) + strlen(chunk2), iree_string_view_empty(),
+      MatchCollector::Callback, &collector));
 
   ASSERT_EQ(collector.matches.size(), 2);
   EXPECT_EQ(collector.matches[1].first, 6);
@@ -683,7 +685,8 @@ TEST(DfaStreaming, MatchAcrossChunks) {
 
   // Finalize emits the match.
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 3, MatchCollector::Callback, &collector));
+      &dfa, &state, 3, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   ASSERT_EQ(collector.matches.size(), 1);
   EXPECT_EQ(collector.matches[0].first, 0);
@@ -771,7 +774,8 @@ TEST(Streaming, LookaheadAcrossChunk_Reject) {
 
   // Finalize.
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 2, MatchCollector::Callback, &collector));
+      &dfa, &state, 2, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Should NOT match - 'b' follows 'a'.
   EXPECT_EQ(collector.matches.size(), 0);
@@ -802,7 +806,8 @@ TEST(Streaming, LookaheadAcrossChunk_Accept) {
 
   // Finalize.
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 2, MatchCollector::Callback, &collector));
+      &dfa, &state, 2, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Should match "a" - 'c' doesn't reject the lookahead.
   ASSERT_EQ(collector.matches.size(), 1);
@@ -830,7 +835,8 @@ TEST(Streaming, LookaheadAtRealEOS) {
 
   // Finalize (no more input).
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 1, MatchCollector::Callback, &collector));
+      &dfa, &state, 1, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Should match "a" - at EOS, negative lookahead passes.
   ASSERT_EQ(collector.matches.size(), 1);
@@ -894,7 +900,8 @@ TEST(Streaming, WhitespaceNegLookahead_Reject) {
 
   // Finalize.
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 3, MatchCollector::Callback, &collector));
+      &dfa, &state, 3, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // DFA matches the first space (followed by whitespace, not non-whitespace).
   ASSERT_EQ(collector.matches.size(), 1);
@@ -922,7 +929,8 @@ TEST(Streaming, WhitespaceNegLookahead_AtEOS) {
 
   // Finalize.
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 2, MatchCollector::Callback, &collector));
+      &dfa, &state, 2, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Should match "  " - at EOS, negative lookahead for \S passes.
   ASSERT_EQ(collector.matches.size(), 1);
@@ -1041,7 +1049,8 @@ TEST(Streaming, WhitespaceNegLookahead_ChunkBoundaryVariants) {
       /*stride=*/NULL, MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 4, MatchCollector::Callback, &collector));
+      &dfa, &state, 4, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // The first two spaces pass lookahead, third space fails.
   // So we get match at [0, 2).
@@ -1239,8 +1248,8 @@ TEST(Streaming, AcceptThenFailAcrossChunk) {
       sizeof(chunk1), /*stride=*/NULL, MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, sizeof(chunk1) + sizeof(chunk2), MatchCollector::Callback,
-      &collector));
+      &dfa, &state, sizeof(chunk1) + sizeof(chunk2), iree_string_view_empty(),
+      MatchCollector::Callback, &collector));
 
   // Should match "a" at [0,1).
   ASSERT_EQ(collector.matches.size(), 1);
@@ -1348,8 +1357,8 @@ TEST(Streaming, EmptyChunk) {
       sizeof(chunk1), /*stride=*/NULL, MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, sizeof(chunk1) + sizeof(chunk2), MatchCollector::Callback,
-      &collector));
+      &dfa, &state, sizeof(chunk1) + sizeof(chunk2), iree_string_view_empty(),
+      MatchCollector::Callback, &collector));
 
   // Should match "abcd" at [0,4)
   ASSERT_EQ(collector.matches.size(), 1);
@@ -1393,7 +1402,8 @@ TEST(Streaming, MultipleLookaheadDefers) {
 
   // Finalize
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 2, MatchCollector::Callback, &collector));
+      &dfa, &state, 2, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Should have match "a" at [0,1)
   ASSERT_EQ(collector.matches.size(), 1);
@@ -1425,7 +1435,8 @@ TEST(Utf8Validation, InvalidContinuationByte) {
       &dfa, &state, iree_make_string_view((const char*)input, sizeof(input)), 0,
       /*stride=*/NULL, MatchCollector::Callback, &collector));
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, sizeof(input), MatchCollector::Callback, &collector));
+      &dfa, &state, sizeof(input), iree_string_view_empty(),
+      MatchCollector::Callback, &collector));
 
   // 0xC3 becomes replacement char (no match), 0x40='@' (no match), "bc"
   // matches.
@@ -1454,7 +1465,8 @@ TEST(Utf8Validation, OverlongTwoByte) {
       &dfa, &state, iree_make_string_view((const char*)input, sizeof(input)), 0,
       /*stride=*/NULL, MatchCollector::Callback, &collector));
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, sizeof(input), MatchCollector::Callback, &collector));
+      &dfa, &state, sizeof(input), iree_string_view_empty(),
+      MatchCollector::Callback, &collector));
 
   // Overlong sequence becomes replacement char (no match), then "ab" matches.
   ASSERT_EQ(collector.matches.size(), 1);
@@ -1481,7 +1493,8 @@ TEST(Utf8Validation, OverlongThreeByte) {
       &dfa, &state, iree_make_string_view((const char*)input, sizeof(input)), 0,
       /*stride=*/NULL, MatchCollector::Callback, &collector));
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, sizeof(input), MatchCollector::Callback, &collector));
+      &dfa, &state, sizeof(input), iree_string_view_empty(),
+      MatchCollector::Callback, &collector));
 
   // Overlong becomes replacement char, then "xy" matches.
   ASSERT_EQ(collector.matches.size(), 1);
@@ -1509,7 +1522,8 @@ TEST(Utf8Validation, SurrogateCodepoint) {
       &dfa, &state, iree_make_string_view((const char*)input, sizeof(input)), 0,
       /*stride=*/NULL, MatchCollector::Callback, &collector));
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, sizeof(input), MatchCollector::Callback, &collector));
+      &dfa, &state, sizeof(input), iree_string_view_empty(),
+      MatchCollector::Callback, &collector));
 
   // Surrogate becomes replacement char, then "z" matches.
   ASSERT_EQ(collector.matches.size(), 1);
@@ -1535,7 +1549,8 @@ TEST(Utf8Validation, InvalidLeadingByte) {
       &dfa, &state, iree_make_string_view((const char*)input, sizeof(input)), 0,
       /*stride=*/NULL, MatchCollector::Callback, &collector));
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, sizeof(input), MatchCollector::Callback, &collector));
+      &dfa, &state, sizeof(input), iree_string_view_empty(),
+      MatchCollector::Callback, &collector));
 
   // 0xFF and 0xFE become replacement chars, then "ab" matches.
   ASSERT_EQ(collector.matches.size(), 1);
@@ -1561,7 +1576,8 @@ TEST(Utf8Validation, StrayContiunationByte) {
       &dfa, &state, iree_make_string_view((const char*)input, sizeof(input)), 0,
       /*stride=*/NULL, MatchCollector::Callback, &collector));
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, sizeof(input), MatchCollector::Callback, &collector));
+      &dfa, &state, sizeof(input), iree_string_view_empty(),
+      MatchCollector::Callback, &collector));
 
   // Each stray continuation byte becomes replacement char, then "cd" matches.
   ASSERT_EQ(collector.matches.size(), 1);
@@ -1606,8 +1622,8 @@ TEST(CrossChunkBacktrack, AabPatternCrossChunk) {
       sizeof(chunk1), /*stride=*/NULL, MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, sizeof(chunk1) + sizeof(chunk2), MatchCollector::Callback,
-      &collector));
+      &dfa, &state, sizeof(chunk1) + sizeof(chunk2), iree_string_view_empty(),
+      MatchCollector::Callback, &collector));
 
   // Should match "aab" at [1,4).
   ASSERT_EQ(collector.matches.size(), 1);
@@ -1658,8 +1674,8 @@ TEST(CrossChunkBacktrack, AbaPatternCrossChunk) {
       sizeof(chunk1), /*stride=*/NULL, MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, sizeof(chunk1) + sizeof(chunk2), MatchCollector::Callback,
-      &collector));
+      &dfa, &state, sizeof(chunk1) + sizeof(chunk2), iree_string_view_empty(),
+      MatchCollector::Callback, &collector));
 
   // Should match "aba" at [0,3) from chunk1 "ab" + chunk2 first 'a'.
   // After emitting this match, we continue from position 3.
@@ -1695,7 +1711,8 @@ TEST(CrossChunkBacktrack, SingleByteChunks) {
   }
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, offset, MatchCollector::Callback, &collector));
+      &dfa, &state, offset, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Should match "aab" at [1,4).
   ASSERT_EQ(collector.matches.size(), 1);
@@ -1729,8 +1746,8 @@ TEST(CrossChunkBacktrack, BacktrackMultipleTimes) {
       sizeof(chunk1), /*stride=*/NULL, MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, sizeof(chunk1) + sizeof(chunk2), MatchCollector::Callback,
-      &collector));
+      &dfa, &state, sizeof(chunk1) + sizeof(chunk2), iree_string_view_empty(),
+      MatchCollector::Callback, &collector));
 
   // Should match "aab" at [2,5).
   ASSERT_EQ(collector.matches.size(), 1);
@@ -1925,7 +1942,8 @@ TEST(BacktrackStateReset, StreamingBacktrackWithFallback) {
       MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 4, MatchCollector::Callback, &collector));
+      &dfa, &state, 4, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Should have three matches (same as SingleChunkAaXa):
   // - [0,1): Position 0 'a' where lookahead passed
@@ -2007,7 +2025,8 @@ TEST(ShorthandFallbackStreaming, ChunkBoundaryMidWhitespaceRun) {
       MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 4, MatchCollector::Callback, &collector));
+      &dfa, &state, 4, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Two matches: lookahead-passed match, then fallback for final space.
   ASSERT_EQ(collector.matches.size(), 2);
@@ -2052,7 +2071,8 @@ TEST(ShorthandFallbackStreaming, LookaheadDeferredThenFails) {
       MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 2, MatchCollector::Callback, &collector));
+      &dfa, &state, 2, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Single space matches via fallback.
   ASSERT_EQ(collector.matches.size(), 1);
@@ -2094,7 +2114,8 @@ TEST(ShorthandFallbackStreaming, LookaheadDeferredThenPasses) {
       MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 2, MatchCollector::Callback, &collector));
+      &dfa, &state, 2, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Both spaces match (lookahead passed).
   ASSERT_EQ(collector.matches.size(), 1);
@@ -2140,7 +2161,8 @@ TEST(ShorthandFallbackStreaming, BacktrackAcrossChunksWithFallback) {
       /*stride=*/NULL, MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 6, MatchCollector::Callback, &collector));
+      &dfa, &state, 6, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Three matches (same as single-chunk "  xy  "):
   ASSERT_EQ(collector.matches.size(), 3);
@@ -2184,7 +2206,8 @@ TEST(ShorthandFallbackStreaming, MultipleSectionsAcrossManyChunks) {
       MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 7, MatchCollector::Callback, &collector));
+      &dfa, &state, 7, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Four matches (same as single-chunk "a  b  c"):
   // - [1,2): first space after 'a' (lookahead passed: next is ' ')
@@ -2224,7 +2247,8 @@ TEST(ShorthandFallbackStreaming, SingleByteChunksStressTest) {
   }
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 5, MatchCollector::Callback, &collector));
+      &dfa, &state, 5, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Three matches (same as single-chunk "  x  "):
   // - [0,1): first space (lookahead passed: next is ' ')
@@ -2309,7 +2333,8 @@ TEST(ShorthandFallbackStreaming, StreamingFallbackStateNotLeaked) {
       MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 4, MatchCollector::Callback, &collector));
+      &dfa, &state, 4, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   ASSERT_EQ(collector.matches.size(), 2);
   EXPECT_EQ(collector.matches[0].first, 0);
@@ -2343,7 +2368,8 @@ TEST(ShorthandFallbackStreaming, TabAndNewlineHandling) {
       MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 3, MatchCollector::Callback, &collector));
+      &dfa, &state, 3, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Two matches (same as single-chunk "\t\nx"):
   // - [0,1): tab (lookahead passed: next is '\n', not \S)
@@ -2418,7 +2444,8 @@ TEST(AnchorState, StartAnchorResetsInMatch) {
 
   // Finalize should not produce additional matches.
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, strlen(text), MatchCollector::Callback, &collector));
+      &dfa, &state, strlen(text), iree_string_view_empty(),
+      MatchCollector::Callback, &collector));
   EXPECT_EQ(collector.matches.size(), 1);  // Still just one match.
 }
 
@@ -2582,7 +2609,8 @@ TEST(ConsecutiveNewlines, StreamingTwoNewlinesBeforeText) {
       /*stride=*/NULL, MatchCollector::Callback, &collector));
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 3, MatchCollector::Callback, &collector));
+      &dfa, &state, 3, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Should have TWO matches: [0,1) and [1,2)
   ASSERT_EQ(collector.matches.size(), 2)
@@ -2623,7 +2651,8 @@ TEST(StreamingByteByByte, TwoNewlinesBeforeText) {
   }
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 3, MatchCollector::Callback, &collector));
+      &dfa, &state, 3, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Should have TWO matches: [0,1) and [1,2)
   ASSERT_EQ(collector.matches.size(), 2)
@@ -2656,7 +2685,8 @@ TEST(StreamingByteByByte, ThreeNewlinesBeforeText) {
   }
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 4, MatchCollector::Callback, &collector));
+      &dfa, &state, 4, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Should have TWO matches: [0,2) and [2,3)
   // First two newlines pass lookahead, third fails.
@@ -2689,7 +2719,8 @@ TEST(StreamingByteByByte, TwoSpacesBeforeText) {
   }
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 3, MatchCollector::Callback, &collector));
+      &dfa, &state, 3, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Should have TWO matches: [0,1) and [1,2)
   ASSERT_EQ(collector.matches.size(), 2)
@@ -2722,7 +2753,8 @@ TEST(StreamingByteByByte, TrailingWhitespace) {
   }
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 3, MatchCollector::Callback, &collector));
+      &dfa, &state, 3, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Should have ONE match: [1,3) - both trailing spaces combined.
   ASSERT_EQ(collector.matches.size(), 1);
@@ -2751,7 +2783,8 @@ TEST(StreamingByteByByte, MixedWhitespaceAndText) {
   }
 
   IREE_EXPECT_OK(iree_tokenizer_regex_exec_finalize(
-      &dfa, &state, 4, MatchCollector::Callback, &collector));
+      &dfa, &state, 4, iree_string_view_empty(), MatchCollector::Callback,
+      &collector));
 
   // Should have TWO matches: [1,2) and [2,3)
   // First space passes lookahead (next is space), second fails (next is 'b').
@@ -2790,7 +2823,8 @@ void TestWithChunkSizes(
     }
 
     IREE_ASSERT_OK(iree_tokenizer_regex_exec_finalize(
-        dfa, &state, input_len, MatchCollector::Callback, &collector))
+        dfa, &state, input_len, iree_string_view_empty(),
+        MatchCollector::Callback, &collector))
         << "Finalize failed with chunk_size " << chunk_size;
 
     ASSERT_EQ(collector.matches.size(), expected_matches.size())

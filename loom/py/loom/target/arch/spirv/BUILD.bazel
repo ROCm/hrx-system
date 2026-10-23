@@ -45,13 +45,13 @@ iree_py_test(
     size = "small",
     srcs = ["dialect_test.py"],
     args = [
-        "$(location //loom/src/loom/target/arch/spirv:scalar_types.h)",
+        "$(location //loom/src/loom/target/arch/spirv:scalar_type.h)",
         "$(location //loom/src/loom/target/arch/spirv:isa.h)",
         "$(location @spirv_headers//:spirv_core_grammar_unified1)",
     ],
     data = [
         "//loom/src/loom/target/arch/spirv:isa.h",
-        "//loom/src/loom/target/arch/spirv:scalar_types.h",
+        "//loom/src/loom/target/arch/spirv:scalar_type.h",
         "@spirv_headers//:spirv_core_grammar_unified1",
     ],
     target_compatible_with = _SPIRV_COMPATIBLE_WITH,

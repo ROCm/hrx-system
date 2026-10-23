@@ -6,6 +6,8 @@
 
 #include "iree/tooling/buffer_view_matchers.h"
 
+#include <vector>
+
 #include "iree/base/api.h"
 #include "iree/base/internal/math.h"
 #include "iree/base/internal/span.h"
@@ -564,6 +566,78 @@ TEST_F(BufferViewMatchersTest, CompareBroadcastBF16NERelative) {
       IREE_ARRAYSIZE(rhs), iree_make_const_byte_span(rhs, sizeof(rhs)),
       &index));
   EXPECT_EQ(index, 1);
+}
+
+TEST_F(BufferViewMatchersTest, CompareElementwiseExactDense) {
+  constexpr iree_host_size_t kElementCount = 10003;
+  for (auto element_type :
+       {IREE_HAL_ELEMENT_TYPE_INT_8, IREE_HAL_ELEMENT_TYPE_INT_16,
+        IREE_HAL_ELEMENT_TYPE_INT_32, IREE_HAL_ELEMENT_TYPE_INT_64}) {
+    const iree_host_size_t element_size =
+        iree_hal_element_dense_byte_count(element_type);
+    const iree_host_size_t byte_length = kElementCount * element_size;
+    // Deliberately unaligned spans with different bytes outside their extent.
+    std::vector<uint8_t> expected(byte_length + 2, 0x5A);
+    std::vector<uint8_t> actual(byte_length + 2, 0x5A);
+    actual.front() = actual.back() = 0;
+    auto expected_span =
+        iree_make_const_byte_span(expected.data() + 1, byte_length);
+    auto actual_span =
+        iree_make_const_byte_span(actual.data() + 1, byte_length);
+    iree_host_size_t index = 0;
+    ASSERT_TRUE(iree_hal_compare_buffer_elements_elementwise(
+        kExactEquality, element_type, kElementCount, expected_span, actual_span,
+        &index));
+    for (iree_host_size_t position : {0, 2047, 4095, 4096, 8191, 8192, 10002}) {
+      SCOPED_TRACE(::testing::Message() << "element_size=" << element_size
+                                        << " position=" << position);
+      // A mismatch in the final byte still identifies the enclosing element.
+      actual[1 + position * element_size + element_size - 1] ^= 0x80;
+      ASSERT_FALSE(iree_hal_compare_buffer_elements_elementwise(
+          kExactEquality, element_type, kElementCount, expected_span,
+          actual_span, &index));
+      EXPECT_EQ(index, position);
+      actual[1 + position * element_size + element_size - 1] ^= 0x80;
+    }
+    // The requested element count, rather than trailing span capacity, bounds
+    // the comparison. Multiple mismatches report the first element.
+    actual[1 + 19 * element_size] ^= 1;
+    actual[1 + 9000 * element_size] ^= 1;
+    EXPECT_TRUE(iree_hal_compare_buffer_elements_elementwise(
+        kExactEquality, element_type, 19, expected_span, actual_span, &index));
+    EXPECT_FALSE(iree_hal_compare_buffer_elements_elementwise(
+        kExactEquality, element_type, kElementCount, expected_span, actual_span,
+        &index));
+    EXPECT_EQ(index, 19);
+  }
+}
+
+TEST_F(BufferViewMatchersTest, CompareElementwiseExactFloatingBits) {
+  const uint32_t expected[] = {0x7FC00001, 0x00000000, 0x80000000};
+  uint32_t actual[] = {0x7FC00001, 0x00000000, 0x80000000};
+  iree_host_size_t index = 0;
+  auto compare = [&]() {
+    return iree_hal_compare_buffer_elements_elementwise(
+        kExactEquality, IREE_HAL_ELEMENT_TYPE_FLOAT_32,
+        IREE_ARRAYSIZE(expected),
+        iree_make_const_byte_span(expected, sizeof(expected)),
+        iree_make_const_byte_span(actual, sizeof(actual)), &index);
+  };
+  EXPECT_TRUE(compare());
+  actual[0] = 0x7FC00002;
+  EXPECT_FALSE(compare());
+  EXPECT_EQ(index, 0);
+  actual[0] = expected[0];
+  actual[1] = 0x80000000;
+  EXPECT_FALSE(compare());
+  EXPECT_EQ(index, 1);
+}
+
+TEST_F(BufferViewMatchersTest, CompareElementwiseExactEmpty) {
+  iree_host_size_t index = 0;
+  EXPECT_TRUE(iree_hal_compare_buffer_elements_elementwise(
+      kExactEquality, IREE_HAL_ELEMENT_TYPE_INT_16, 0,
+      iree_const_byte_span_empty(), iree_const_byte_span_empty(), &index));
 }
 
 TEST_F(BufferViewMatchersTest, CompareElementwiseF16EQ) {

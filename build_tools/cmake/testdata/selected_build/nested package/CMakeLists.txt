@@ -10,5 +10,6 @@ foreach(_NAME left right)
   add_test(NAME ${_NAME} COMMAND "$<TARGET_FILE:${_NAME}>"
     "${PROJECT_SOURCE_DIR}/expected.txt"
     "${PROJECT_BINARY_DIR}/${_NAME}.ran")
+  iree_configure_test(${_NAME})
   iree_register_test_build_targets(${_NAME} TARGETS ${_NAME}_test_deps)
 endforeach()

@@ -42,7 +42,27 @@ iree_cc_test(
 )
 endif()
 
-if(AMDF_BUILD)
+if(AMDF_BUILD AND (IREE_HAL_DRIVER_AMD_GPU OR IREE_HAL_DRIVER_AMD_XDNA))
+set(_driver_platform_defines "")
+if(IREE_HAL_DRIVER_AMD_GPU)
+  list(APPEND _driver_platform_defines "IREE_HAL_AMD_GPU_ENABLED=1")
+else()
+  list(APPEND _driver_platform_defines "IREE_HAL_AMD_GPU_ENABLED=0")
+endif()
+if(IREE_HAL_DRIVER_AMD_XDNA)
+  list(APPEND _driver_platform_defines "IREE_HAL_AMD_XDNA_ENABLED=1")
+else()
+  list(APPEND _driver_platform_defines "IREE_HAL_AMD_XDNA_ENABLED=0")
+endif()
+set(_driver_platform_deps "")
+if(IREE_HAL_DRIVER_AMD_GPU)
+  list(APPEND _driver_platform_deps iree::hal::drivers::amd::gpu::context)
+  list(APPEND _driver_platform_deps iree::hal::drivers::amd::gpu::device)
+endif()
+if(IREE_HAL_DRIVER_AMD_XDNA)
+  list(APPEND _driver_platform_deps iree::hal::drivers::amd::xdna::context)
+  list(APPEND _driver_platform_deps iree::hal::drivers::amd::xdna::device)
+endif()
 iree_cc_library(
   NAME
     driver
@@ -57,15 +77,14 @@ iree_cc_library(
     iree::base
     iree::hal
     iree::hal::drivers::amd::fabric
-    iree::hal::drivers::amd::gpu::context
-    iree::hal::drivers::amd::gpu::device
-    iree::hal::drivers::amd::xdna::context
-    iree::hal::drivers::amd::xdna::device
+    ${_driver_platform_deps}
+  DEFINES
+    ${_driver_platform_defines}
   PUBLIC
 )
 endif()
 
-if(AMDF_BUILD AND IREE_HAL_DRIVER_AMD)
+if(AMDF_BUILD AND (IREE_HAL_DRIVER_AMD_GPU OR IREE_HAL_DRIVER_AMD_XDNA))
 iree_cc_test(
   NAME
     driver_test

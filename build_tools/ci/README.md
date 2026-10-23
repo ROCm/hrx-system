@@ -80,13 +80,16 @@ python build_tools/devtools/ci.py iree-bazel-amdgpu-native-asan --amdgpu-target 
 
 This profile uses native libamdf GPU queues without requiring ROCr or an NPU.
 The `iree-bazel-amd-client[-asan]` profiles cover the GPU/NPU client configuration;
-their admitted resources depend on the host platform. The ordinary
-`iree-bazel-amdgpu[-<sanitizer>]` profiles include the ROCr-backed runtime.
+their admitted resources depend on the host platform. The Linux
+`iree-bazel-amdgpu[-<sanitizer>]` and `iree-cmake-amdgpu[-<sanitizer>]` profiles
+also use native libamdf GPU queues, with the legacy AMDGPU HAL disabled. They
+retain the ROCm device compiler for HIP code-object fixtures; execution does
+not load the ROCr-backed HAL.
 The [profile definitions](../devtools/ci_config.py) specify the package scope
 and resources for each.
 
 AMD profiles forward `HAL_VISIBLE_XDNA_DEVICES`, `HAL_VISIBLE_RDNA_DEVICES`,
-`HAL_VISIBLE_CDNA_DEVICES`, and `HAL_VISIBLE_AMDGPU2_DEVICES` into Bazel test
+`HAL_VISIBLE_CDNA_DEVICES`, and `HAL_VISIBLE_AMDGPU_DEVICES` into Bazel test
 actions. Each list selects that HAL scheme's unmasked supported device ordinals;
 the lists are independent, and empty values remain empty. For example, a runner
 can set `HAL_VISIBLE_RDNA_DEVICES=1` so ordinary `--device=rdna` callers use its

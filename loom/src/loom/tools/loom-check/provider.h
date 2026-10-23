@@ -6,17 +6,16 @@
 
 // loom-check provider composition.
 //
-// Target packages expose reusable loom_target_provider_t records for compiler
-// capabilities and may wrap them in loom_check_provider_t records for
-// check-only emit or requirement namespaces. The provider layer assembles those
-// records into the loom_check_environment_t consumed by the shared CLI runner.
+// Target packages contribute check-only emit and requirement namespaces. The
+// final binary supplies its public compiler environment separately; inspection
+// handlers borrow that environment without owning compiler registration.
 
 #ifndef LOOM_TOOLS_LOOM_CHECK_PROVIDER_H_
 #define LOOM_TOOLS_LOOM_CHECK_PROVIDER_H_
 
 #include "iree/base/api.h"
-#include "loom/target/provider.h"
-#include "loom/tooling/input/input.h"
+#include "loom/tooling/input/format.h"
+#include "loomc/target.h"
 
 struct loom_check_compile_provider_t;
 
@@ -30,10 +29,8 @@ typedef struct loom_check_requirement_provider_t
 
 // Target-owned contribution linked into a loom-check environment.
 typedef struct loom_check_provider_t {
-  // Stable provider name used in diagnostics and help text.
+  // Stable name identifying this check-only contribution.
   iree_string_view_t name;
-  // Optional target provider contribution reused by production tools.
-  const loom_target_provider_t* target_provider;
   // Optional emit provider table contributed by this provider.
   const loom_check_emit_provider_t* const* emit_providers;
   // Number of entries in |emit_providers|.
@@ -50,17 +47,17 @@ typedef struct loom_check_provider_set_t {
   const loom_check_provider_t* const* providers;
   // Number of entries in |providers|.
   iree_host_size_t provider_count;
-  // Optional binary-wide target provider contribution.
-  const loom_target_provider_set_t* target_provider_set;
+  // Compiler environment borrowed from the final binary for the run.
+  loomc_target_environment_t* target_environment;
   // Public compiler integrations owned by the final runner binary.
   const struct loom_check_compile_provider_t* compile_provider;
 } loom_check_provider_set_t;
 
-// Runs loom-check using tool dialects plus |provider_set|'s target/check
-// contributions.
+// Runs loom-check using |provider_set|'s compiler environment and check
+// handlers. The caller keeps the environment alive until this returns.
 int loom_check_provider_main(int argc, char** argv,
                              const loom_check_provider_set_t* provider_set,
-                             loom_input_provider_list_t input_providers);
+                             loom_input_format_list_t input_formats);
 
 #ifdef __cplusplus
 }  // extern "C"

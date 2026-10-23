@@ -9,7 +9,7 @@
 
 #include "iree/base/internal/atomics.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/packet.h"
-#include "iree/hal/memory_scope.h"
+#include "iree/hal/drivers/amd/gpu/queue/user_queue.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,8 +32,8 @@ typedef struct iree_hal_amd_gpu_aql_ring_t {
   uint64_t device_address;
   // Native power-of-two capacity in 64-byte packets.
   uint32_t capacity;
-  // Native host ordering required between packet-body and header stores.
-  iree_hal_host_cache_fence_t host_publish_fence;
+  // Native release required between packet-body and header stores.
+  amdf_cache_transition_executor_t host_publish_executor;
   // Exclusive end of all accepted reservations, in monotonic packet indices.
   uint64_t reserved;
   // Last acquired native consumption, refreshed only when capacity is short.
@@ -48,14 +48,15 @@ void iree_hal_amd_gpu_aql_ring_initialize(
     iree_hal_amd_gpu_aql_packet_t* packets, uint64_t device_address,
     uint32_t capacity, const iree_atomic_int64_t* read_index,
     iree_atomic_int64_t* write_index, volatile uint64_t* doorbell,
-    iree_hal_host_cache_fence_t host_publish_fence,
+    amdf_cache_transition_executor_t host_publish_executor,
     iree_hal_amd_gpu_aql_ring_t* out_ring);
 
 // Reserves an admitted nonempty bounded chunk of at most capacity packets.
 // Success publishes its native write index before any header can become valid.
 // The current publisher owns encoding and notification through this chunk.
-// No fallible step follows reservation; GPU-produced later headers may remain
-// INVALID when the host notifies. False changes no reservation, native storage,
+// A native release failure terminally fails the owning queue; it cannot
+// roll back this reservation. GPU-produced later headers may remain INVALID
+// when the host notifies. False changes no reservation, native storage,
 // or output; the caller defers on completion progress instead of spin-waiting.
 bool iree_hal_amd_gpu_aql_ring_try_reserve(iree_hal_amd_gpu_aql_ring_t* ring,
                                            uint32_t packet_count,
@@ -71,8 +72,12 @@ void iree_hal_amd_gpu_aql_ring_write_body(
 // Release-publishes one host-owned header after its body is complete. Device
 // fixup slots are never passed here. The enclosing chunk's notification follows
 // all host header stores and explicitly permits later GPU-owned INVALID slots.
-void iree_hal_amd_gpu_aql_ring_publish_header(
-    const iree_hal_amd_gpu_aql_ring_t* ring, uint64_t position,
+// A failed native release leaves this header INVALID. The owner retains
+// accepted work, stops publication, and propagates failure through its terminal
+// path.
+amdf_status_t iree_hal_amd_gpu_aql_ring_publish_header(
+    const iree_hal_amd_gpu_aql_ring_t* ring,
+    const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
     uint32_t header);
 
 // Fences host device stores and notifies the last reserved packet index.

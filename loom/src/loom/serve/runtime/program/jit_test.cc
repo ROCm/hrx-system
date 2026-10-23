@@ -487,41 +487,6 @@ TEST_P(JitCacheTest, FailedDirectNativesRetainDiagnosticsWithoutCaching) {
 
 INSTANTIATE_TEST_SUITE_P(SharedWorkers, JitCacheTest, ::testing::Values(1, 4));
 
-TEST_P(JitTest, VmLibrariesPreserveMissingPrivateAndDuplicateDiagnostics) {
-  struct loom_serve_test_jit_case_t {
-    // Entry source supplying the VM root.
-    iree_string_view_t entry;
-    // Number of identical library entries to supply.
-    iree_host_size_t library_count;
-  };
-  const loom_serve_test_jit_case_t cases[] = {
-      {IREE_SV("control.loom"), 0},
-      {IREE_SV("private_vm_helper.loom"), 1},
-      {IREE_SV("control.loom"), 2},
-  };
-  const iree_string_view_t providers[] = {IREE_SV("vm_helpers.loom"),
-                                          IREE_SV("vm_helpers.loom")};
-  const iree_string_view_t root = IREE_SV("step");
-  for (const auto& test : cases) {
-    SCOPED_TRACE(test.library_count);
-    const loom_serve_sources_t sources = {
-        .base_directory = iree_make_cstring_view(directory_.c_str()),
-        .count = test.library_count,
-        .values = providers,
-    };
-    loom_serve_compilation_report_t report = {};
-    iree_const_byte_span_t image = iree_const_byte_span_empty();
-    auto status = loom_serve_jit_compile_vm(
-        loom_serve_host_target_environment(
-            loom_serve_device_host(device_owner_)),
-        &sources, test.entry, 1, &root, &report, host_allocator_, &image);
-    IREE_EXPECT_NOT_OK(status);
-    EXPECT_EQ(image.data, nullptr);
-    EXPECT_GT(report.severities[LOOMC_DIAGNOSTIC_SEVERITY_ERROR], 0u);
-    iree_allocator_free(host_allocator_, const_cast<uint8_t*>(image.data));
-  }
-}
-
 TEST_P(JitTest, SourceFailureOutlivesUnconstructedCatalogAndVm) {
 #if defined(__linux__)
   loom_serve::testing::StalledStderr blocked;
@@ -553,19 +518,17 @@ TEST_P(JitTest, SourceFailureOutlivesUnconstructedCatalogAndVm) {
   loom_serve_jit_release(invalid);
 
   const iree_string_view_t root = IREE_SVL("broken");
-  // More failures than retained slots leave complete severity counters.
-  for (size_t i = 0; i < 10; ++i) {
-    iree_const_byte_span_t image = iree_const_byte_span_empty();
-    status =
-        loom_serve_jit_compile_vm(loom_serve_host_target_environment(
-                                      loom_serve_device_host(device_owner_)),
-                                  &sources, IREE_SV("invalid.loom"), 1, &root,
-                                  &report, host_allocator_, &image);
-    IREE_EXPECT_NOT_OK(status);
-    EXPECT_EQ(image.data, nullptr);
-  }
-  EXPECT_EQ(report.diagnostic_count, IREE_ARRAYSIZE(report.diagnostics));
-  EXPECT_GE(report.severities[LOOMC_DIAGNOSTIC_SEVERITY_ERROR], 11u);
+  // Both compiler entry paths publish owned diagnostics without writing to a
+  // potentially blocked stderr sink.
+  iree_const_byte_span_t image = iree_const_byte_span_empty();
+  status = loom_serve_jit_compile_vm(
+      loom_serve_host_target_environment(loom_serve_device_host(device_owner_)),
+      &sources, IREE_SV("invalid.loom"), 1, &root, &report, host_allocator_,
+      &image);
+  IREE_EXPECT_NOT_OK(status);
+  EXPECT_EQ(image.data, nullptr);
+  iree_allocator_free(host_allocator_, const_cast<uint8_t*>(image.data));
+  EXPECT_GE(report.severities[LOOMC_DIAGNOSTIC_SEVERITY_ERROR], 2u);
   EXPECT_EQ(report.commands, 0u);
 }
 

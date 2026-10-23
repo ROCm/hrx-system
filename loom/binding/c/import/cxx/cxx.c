@@ -54,6 +54,8 @@ typedef struct loomc_cxx_source_path_t {
 typedef struct loomc_cxx_invocation_t {
   // Result receiving copied diagnostics and their source contents.
   loomc_result_t* result;
+  // Context-owned target type formatting, borrowed during synchronous import.
+  const loom_text_print_options_t* text_print_options;
   // Caller-owned source provider configuration.
   loomc_cxx_source_provider_t provider;
   // Most recent provider reference, valid until the next callback or teardown.
@@ -336,9 +338,8 @@ static iree_status_t loomc_cxx_capture_diagnostic(
   if (diagnostic->related_location_count != 0) {
     mapped.related_locations = related_locations;
   }
-  return iree_status_from_loomc(
-      loomc_result_add_loom_diagnostic(invocation->result, NULL, &mapped,
-                                       /*text_print_options=*/NULL));
+  return iree_status_from_loomc(loomc_result_add_loom_diagnostic(
+      invocation->result, NULL, &mapped, invocation->text_print_options));
 }
 
 static iree_status_t loomc_cxx_capture_source(void* user_data,
@@ -476,6 +477,11 @@ loomc_status_t loomc_module_import_cxx(
   }
   if (loomc_status_is_ok(status)) {
     invocation.module = module;
+    const loomc_target_pass_environment_t* pass_environment =
+        loomc_context_target_pass_environment(context);
+    invocation.text_print_options =
+        pass_environment ? &pass_environment->diagnostic_type_print_options
+                         : NULL;
     if (options && options->source_path_mapper.fn) {
       invocation.source_path_mapper = options->source_path_mapper;
       iree_arena_initialize(loomc_module_block_pool(module),
@@ -490,8 +496,7 @@ loomc_status_t loomc_module_import_cxx(
           (loom_cxx_source_observer_t){loomc_cxx_capture_source, &invocation};
     }
     loomc_target_pass_environment_initialize_text_asm_environment(
-        loomc_context_target_pass_environment(context),
-        &native_options.low_asm_environment);
+        pass_environment, &native_options.low_asm_environment);
     if (options && options->source_provider.fn) {
       invocation.provider = options->source_provider;
       native_options.source_provider =

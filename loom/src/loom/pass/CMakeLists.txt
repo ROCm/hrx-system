@@ -107,9 +107,10 @@ loom_cc_library(
     "builder.c"
   DEPS
     iree::base
-    loom::ir
-    loom::ops::op_defs
-    loom::ops::pass
+    loom::ir::builders
+    loom::ops::builders
+    loom::ops::pass::builders
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -123,8 +124,7 @@ loom_cc_test(
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
-    loom::ir
-    loom::ops::op_registry
+    loom::ir::builders
     loom::ops::pass
     loom::testing::module_ptr
 )

@@ -17,7 +17,7 @@ iree_runtime_cc_test(
     name = "queue_test",
     srcs = ["queue_test.cc"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -39,7 +39,7 @@ iree_runtime_cc_library(
     srcs = ["queue.c"],
     hdrs = ["queue.h"],
     target_compatible_with = select({
-        "//libamdf/config:enabled_setting": [],
+        "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -48,6 +48,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd:status",
         "//runtime/src/iree/hal/drivers/amd/fabric:memory",
+        "//runtime/src/iree/hal/drivers/amd/fabric:memory_transition",
         "//runtime/src/iree/hal/drivers/amd/gpu:completion",
         "//runtime/src/iree/hal/drivers/amd/gpu:context",
         "//runtime/src/iree/hal/drivers/amd/gpu:publication",

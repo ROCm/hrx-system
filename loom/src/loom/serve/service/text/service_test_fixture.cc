@@ -13,9 +13,28 @@
 
 namespace loom_serve::testing::text {
 
+void SourceTextServiceTest::EditNativeProvider(const std::string& source_path,
+                                               const std::string& target_path,
+                                               const std::string& original,
+                                               const std::string& replacement) {
+  std::ifstream input(source_path);
+  ASSERT_TRUE(input.good());
+  std::string source((std::istreambuf_iterator<char>(input)), {});
+  const size_t position = source.find(original);
+  ASSERT_NE(position, std::string::npos);
+  source.replace(position, original.size(), replacement);
+  std::ofstream output(target_path);
+  output << source;
+  output.close();
+  ASSERT_TRUE(output.good());
+}
+
 void SourceTextServiceTest::SetUp() {
   auto application_options = loom_serve_test_application_options_default();
   application_options.worker_count = WorkerCount();
+  if (application_options.backing == LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
+    application_options.memory_limit = 64 * 1024 * 1024;
+  }
   loom_serve_test_application_t* application = nullptr;
   IREE_ASSERT_OK(loom_serve_test_application_acquire(
       &application_options, host_allocator_, &application));

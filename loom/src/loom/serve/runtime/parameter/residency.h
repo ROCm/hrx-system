@@ -7,29 +7,42 @@
 #define LOOM_SERVE_RUNTIME_PARAMETER_RESIDENCY_H_
 
 #include "loom/serve/runtime/execution/execution.h"
+#include "loom/serve/runtime/execution/workspace.h"
 #include "loom/serve/runtime/parameter/weights.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Single-host-owner parameter admission and LRU policy. Mutable state remains
-// model-owned; optional idle-cache owners can schedule reclamation when idle
-// parameters alone cannot meet pressure and pinned parameters do not already
-// make the request impossible. The common physical pool invokes this policy
-// during both parameter activation and mutable-state growth.
+// Single-host-owner admission of registered working sets and parameter LRU
+// policy. Mutable state remains model-owned; optional idle-cache owners can
+// schedule reclamation when idle parameters alone cannot meet pressure and
+// pinned parameters do not already make the request impossible. The common
+// physical pool invokes this policy during both parameter activation and
+// mutable-state growth.
 typedef struct loom_serve_residency_cache_t loom_serve_residency_cache_t;
 typedef struct loom_serve_residency_group_t loom_serve_residency_group_t;
 typedef struct loom_serve_residency_t loom_serve_residency_t;
 
-// Borrows pool. NULL pool supports fixed-backed consumers but
-// cannot reclaim their storage. Installs the pool's sole pressure policy.
+// Borrows pool and its optional shared workspace. NULL pool supports
+// fixed-backed consumers but cannot reclaim their storage. Installs the pool's
+// sole pressure policy; idle workspace backing is reclaimed before model data.
 iree_status_t loom_serve_residency_cache_allocate(
-    loom_serve_memory_pool_t* pool, iree_allocator_t host_allocator,
-    loom_serve_residency_cache_t** out_cache);
+    loom_serve_memory_pool_t* pool, loom_serve_workspace_t* workspace,
+    iree_allocator_t host_allocator, loom_serve_residency_cache_t** out_cache);
 
-// All residencies and groups must have been destroyed. Removes pressure policy.
+// All residencies, groups, and downstream output views must have retired.
+// Removes pressure policy.
 void loom_serve_residency_cache_free(loom_serve_residency_cache_t* cache);
+
+// Final output retirement wakes the serialized admission owner. Detachment
+// joins callback access; observers never wait or reenter the cache.
+void loom_serve_residency_cache_set_observer(
+    loom_serve_residency_cache_t* cache, loom_serve_wake_callback_t observer);
+
+// Accepted outputs still borrow this cache, independently of producer model
+// removal or failed readiness. Final credit retirement wakes the owner.
+bool loom_serve_residency_cache_is_pending(loom_serve_residency_cache_t* cache);
 
 // Collects completed parameter releases on the serialized owner without
 // starting new release work. Call on native-capacity wakes before advancing
@@ -109,13 +122,52 @@ void loom_serve_residency_free(loom_serve_residency_t* residency);
 
 // Checks whether one invocation can fit by itself, before acquiring any pins
 // or submitting activation. Each extent describes additional simultaneously
-// live storage beyond the distinct parameter groups: model state, cohort I/O,
-// and the peak of ordered private commands. This checks the configured serving
-// ceiling, not available HAL memory, and neither reserves credit nor admits
-// work against other invocations. Fixed backing has no configured ceiling.
+// live workspace beyond the distinct parameter groups: cohort I/O and the peak
+// of ordered private commands. Their aggregate is rounded to the workspace's
+// physical slab geometry. This checks the configured serving ceiling, not
+// available HAL memory, and neither reserves credit nor admits work against
+// other invocations. Mutable state is accounted at admission. Fixed backing has
+// no configured ceiling.
 iree_status_t loom_serve_residency_check_working_set(
     const loom_serve_residency_t* residency, iree_host_size_t extent_count,
     const iree_device_size_t* extents);
+
+// Sets the next serialized invocation's private peak and escaping output bound
+// before admission. Private bytes include cohort input and ordered command
+// scratch; output bytes survive independently of the producer after
+// publication. Ordered activation staging shares the invocation's private
+// high-water. The caller owns no invocation pin while replacing these prepared
+// bounds.
+iree_status_t loom_serve_residency_prepare_working_set(
+    loom_serve_residency_t* residency, uint64_t private_bytes,
+    uint64_t output_bytes);
+
+// Checks a replacement command peak at a completed execution boundary. Live
+// rows may retain parameter pins; an increase must fit alongside their state
+// and accepted peers. This neither changes accounting nor reclaims history.
+// Ordered activation staging remains part of the private high-water.
+iree_status_t loom_serve_residency_check_private_peak(
+    const loom_serve_residency_t* residency, uint64_t private_bytes);
+
+// Publishes a checked replacement after its command binding succeeds, on the
+// same serialized owner turn as check_private_peak. No work, parameter pin,
+// escaping output, or retained state changes. Publication cannot fail.
+void loom_serve_residency_set_private_peak(loom_serve_residency_t* residency,
+                                           uint64_t private_bytes);
+
+// Replaces an owned output reference with an independently retained credit
+// view. The producer's pin and the final view retirement must both complete
+// before its admission credit returns. The cache outlives every consumer;
+// the view retains neither the producer model nor its parameter groups.
+// Allocation failure leaves the input reference and producer credit unchanged.
+iree_status_t loom_serve_residency_track_output(
+    loom_serve_residency_t* residency, iree_hal_buffer_t** buffer);
+
+// Physical parameter footprint plus concurrent activation lanes. The source
+// plans are already prepared; this neither activates nor pins them. Shared
+// groups count once in this residency, not across independent callers.
+uint64_t loom_serve_residency_activation_footprint(
+    const loom_serve_residency_t* residency);
 
 // Borrowed admission/LRU owner, outliving this registration. Equal cache
 // identities share pressure; activity in another cache cannot release it.
@@ -175,7 +227,7 @@ iree_status_t loom_serve_residency_try_acquire(
     loom_serve_residency_t* residency, bool* out_admitted);
 
 typedef enum loom_serve_residency_admission_e {
-  // Parameter backing cannot currently fit. No pin or partial load is owned.
+  // Declared working set cannot fit. No pin or partial load is owned.
   LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY = 0,
   // An older waiter has priority or idle-cache maintenance is releasing
   // backing.

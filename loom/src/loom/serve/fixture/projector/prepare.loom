@@ -1,5 +1,7 @@
 func.decl import("prepare") @dispatch(%root: buffer, %tag: i64) -> (i32)
 
+func.decl import("prepare") @memory_forecast(%root: buffer)
+
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
@@ -7,6 +9,8 @@ func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 func.decl import("json") @parse_i64(%json: buffer, %offset: i64, %length: i64) -> (i64)
 
 global.rodata.def @root = bytes("70726f6a656374")
+
+global.rodata.def @forecast_root = bytes("666f7265636173745f6d656d6f7279")
 
 global.rodata.def @empty = bytes("")
 
@@ -76,6 +80,8 @@ func.def @batch_units(%options: buffer) -> (i64) {
 
 // Up to 64 feature rows across arbitrary positive image request counts.
 func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer) {
+  %forecast = global.load @forecast_root : buffer
+  func.call @memory_forecast(%forecast) : (buffer)
   %tag = scalar.constant 0 : i64
   %root = global.load @root : buffer
   %stage = func.call @dispatch(%root, %tag) : (buffer, i64) -> (i32)

@@ -885,10 +885,15 @@ static iree_status_t loom_canonicalizer_run_precomputed_region(
   loom_greedy_rewrite_options_t rewrite_options = {
       .prepared_patterns = state.patterns.fact_independent,
       .max_iterations = max_iterations,
-      .materialize_constant =
+      .constant_materializer =
           canonicalizer->special_value_policy
-              ? canonicalizer->special_value_policy->materialize_constant
-              : NULL,
+              ? (loom_constant_materializer_t){
+                    .supports = canonicalizer->special_value_policy
+                                    ->can_materialize_constant,
+                    .materialize = canonicalizer->special_value_policy
+                                       ->materialize_constant,
+                }
+              : (loom_constant_materializer_t){0},
       .pending_exact_relations_callback =
           {
               .user_data = (void*)canonicalizer->fact_refinement_policy,

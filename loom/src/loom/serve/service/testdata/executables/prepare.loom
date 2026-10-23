@@ -1,6 +1,8 @@
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
 
 func.decl import("prepare") @workspace_limit(%stage: i32, %bytes: i64)
 
@@ -20,11 +22,13 @@ func.def public @declare(%root: buffer, %left: buffer, %right: buffer, %policy: 
   %empty = global.load @empty : buffer
   %has_left = scalar.cmpi sgt, %count, %c0 : i32
   scf.if %has_left {
-    func.call @parameter(%stage, %c0, %c0, %empty, %left, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+    %source = func.call @source(%empty, %left) : (buffer, buffer) -> (i32)
+    func.call @parameter(%stage, %c0, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
   }
   %has_right = scalar.cmpi sgt, %count, %c1 : i32
   scf.if %has_right {
-    func.call @parameter(%stage, %c1, %c0, %empty, %right, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+    %source = func.call @source(%empty, %right) : (buffer, buffer) -> (i32)
+    func.call @parameter(%stage, %c1, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
   }
   func.return
 }
@@ -39,4 +43,11 @@ func.def public @mixed(%root: buffer, %left: buffer, %right: buffer, %policy: bu
 func.def public @submit(%stage: i32, %output: hal.buffer) -> (i64) {
   %completion = func.call @execute_1(%stage, %output) : (i32, hal.buffer) -> (i64)
   func.return %completion : i64
+}
+
+func.def public @sources_only(%root: buffer, %left: buffer, %right: buffer, %policy: buffer, %count: i32, %tag: i64, %limit: i64) {
+  %empty = global.load @empty : buffer
+  %left_source = func.call @source(%empty, %left) : (buffer, buffer) -> (i32)
+  %right_source = func.call @source(%empty, %right) : (buffer, buffer) -> (i32)
+  func.return
 }

@@ -1406,6 +1406,8 @@ struct loom_serve_text_state_reservation_t {
   loom_serve_memory_range_t* commitments;
   // Number of physical ranges, zero for fixed-backed state.
   iree_host_size_t commitment_count;
+  // Complete physical footprint of this continuation and shared model state.
+  uint64_t footprint_bytes;
   // Selected row pages followed by cold checkpoint pages when present.
   uint32_t blocks[];
 };
@@ -1552,9 +1554,16 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
   }
   loom_serve_memory_range_t* commitments = NULL;
   if (iree_status_is_ok(status) && state->memory.pool) {
-    status = iree_allocator_malloc_array(
-        state->host_allocator, range_count + restore_count,
-        sizeof(*commitments), (void**)&commitments);
+    iree_host_size_t capacity = range_count + restore_count +
+                                LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT + 1;
+    if (tail != UINT32_MAX) {
+      for (iree_host_size_t i = 0; i < state->storage.region_count; ++i) {
+        capacity += state->storage.regions[i].blocks.count;
+      }
+    }
+    status =
+        iree_allocator_malloc_array(state->host_allocator, capacity,
+                                    sizeof(*commitments), (void**)&commitments);
   }
   iree_host_size_t commitment_count = 0;
   if (iree_status_is_ok(status) && state->memory.pool) {
@@ -1568,11 +1577,44 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
             (loom_serve_memory_range_t){buffer, range->offset, range->length};
       }
     }
+    // Completion needs shared epoch/proposal storage as well as the selected
+    // row. COW readers remain live until their copies retire, even though
+    // their backing was acquired by the previous endpoint.
+    for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
+         ++i) {
+      if (state->memory.buffers[i] && state->memory.private_lengths[i]) {
+        commitments[commitment_count++] = (loom_serve_memory_range_t){
+            state->memory.buffers[i], 0, state->memory.private_lengths[i]};
+      }
+    }
+    if (reader != UINT32_MAX) {
+      iree_hal_buffer_t* view = state->recurrent.buffers[reader];
+      commitments[commitment_count++] = (loom_serve_memory_range_t){
+          state->memory.buffers[1], iree_hal_buffer_byte_offset(view),
+          iree_hal_buffer_byte_length(view)};
+    }
+    if (tail != UINT32_MAX) {
+      for (iree_host_size_t i = 0; i < state->storage.region_count; ++i) {
+        const loom_serve_text_cache_region_t* region =
+            &state->storage.regions[i];
+        for (iree_host_size_t plane = 0; plane < region->blocks.count;
+             ++plane) {
+          commitments[commitment_count++] = (loom_serve_memory_range_t){
+              state->memory.buffers[region->allocation],
+              region->blocks.origin + plane * region->blocks.stride +
+                  tail * region->blocks.block_bytes,
+              region->blocks.block_bytes};
+        }
+      }
+    }
   }
   reservation->restore_ranges = restore_ranges;
   reservation->restore_count = restore_count;
   reservation->commitments = commitments;
   reservation->commitment_count = commitment_count;
+  reservation->footprint_bytes =
+      loom_serve_memory_ranges_footprint(commitment_count, commitments)
+          .total_bytes;
   iree_allocator_free(state->host_allocator, ranges);
   if (iree_status_is_ok(status)) {
     *out_reservation = reservation;
@@ -1580,6 +1622,11 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
     loom_serve_text_state_reservation_free(reservation);
   }
   return status;
+}
+
+uint64_t loom_serve_text_state_reservation_footprint(
+    const loom_serve_text_state_reservation_t* reservation) {
+  return reservation->footprint_bytes;
 }
 
 iree_status_t loom_serve_text_state_reservation_submit(

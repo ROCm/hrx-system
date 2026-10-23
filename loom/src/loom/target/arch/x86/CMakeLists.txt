@@ -57,6 +57,40 @@ endif()
 if(LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
+    source_signature
+  HDRS
+    "source_signature.h"
+  SRCS
+    "source_signature.c"
+  DEPS
+    iree::base
+    loom::ops::func
+    loom::target::abi::c::signature_layout
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_test(
+  NAME
+    source_signature_test
+  SRCS
+    "source_signature_test.cc"
+  DEPS
+    ::source_signature
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::func
+  LABELS
+    "iree-build-requirement=loom.target.arch.x86"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
     math_policy
   HDRS
     "math_policy.h"

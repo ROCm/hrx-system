@@ -759,8 +759,7 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
   }
 
   loom_cmd_launch_count_realization_t launch_count_realization = {0};
-  if (valid && iree_status_is_ok(status) &&
-      launch_resolution.has_readonly_launches) {
+  if (valid && iree_status_is_ok(status)) {
     loom_op_t** root_ops = NULL;
     status = iree_arena_allocate_array(&scratch_arena, program_count,
                                        sizeof(*root_ops), (void**)&root_ops);

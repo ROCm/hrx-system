@@ -55,7 +55,10 @@
 //   for Unicode-aware digit/word matching.
 //
 // Matching Semantics:
-//   - Leftmost-longest: Matches start as early as possible, longest wins
+//   - Matches start as early as possible; alternatives are leftmost-longest
+//     unless mixed lookahead branches carry explicit alternation priorities
+//   - With branch priorities, the earliest viable branch wins and extends
+//     greedily while that branch remains live
 //   - Search mode: The executor finds matches anywhere in input (not anchored)
 //   - After failed partial match, executor rescans from match_start + 1
 //   - Example: Pattern "ab" on "aab" finds match at position 1
@@ -65,15 +68,16 @@
 //   backtracking. When a partial match starts in chunk A and fails in chunk B,
 //   the executor can backtrack properly using buffered bytes from chunk A.
 //
-//   This covers all practical tokenizer patterns (whitespace runs, word
-//   boundaries, punctuation). If a pattern requires backtracking more than the
-//   buffer size, exec_feed() returns IREE_STATUS_OUT_OF_RANGE.
+//   Cross-chunk replay is bounded by the retained buffer. If required bytes
+//   have already been discarded, execution returns IREE_STATUS_OUT_OF_RANGE.
+//   Finalization can use a caller-retained suffix to avoid discarding input
+//   that is still available. One-shot execution retains the complete view.
 //
 // Why DFA:
-//   - O(n) guaranteed time complexity (patterns run millions of times)
+//   - Constant-time transition lookup for each consumed codepoint
 //   - Streamable execution with checkpoint/resume support
 //   - Pre-compilable to compact binary format
-//   - No backtracking means predictable, bounded memory usage
+//   - Fixed-size streaming state with bounded cross-chunk replay storage
 //
 // API Organization:
 //
@@ -123,10 +127,7 @@ extern "C" {
 // The accepting_bitmap uses uint64_t which requires 8-byte alignment on
 // strict architectures (ARM, SPARC). Unaligned data will be rejected by
 // iree_tokenizer_regex_dfa_load() with INVALID_ARGUMENT status.
-#define IREE_TOKENIZER_UTIL_REGEX_DFA_VERSION 1
-
-// Maximum supported DFA version (for forward compatibility).
-#define IREE_TOKENIZER_UTIL_REGEX_DFA_MAX_VERSION 1
+#define IREE_TOKENIZER_UTIL_REGEX_DFA_VERSION 2
 
 // Sentinel value for "no transition" in the transition table.
 #define IREE_TOKENIZER_UTIL_REGEX_NO_TRANSITION 0xFFFFu
@@ -335,10 +336,14 @@ typedef uint8_t iree_tokenizer_regex_lookahead_flags_t;
 // For LOOKAHEAD_NEG_SHORTHAND: data encodes the shorthand type.
 // For LOOKAHEAD_NEG_CLASS: data is offset into extended lookahead bitmap table.
 typedef struct iree_tokenizer_regex_lookahead_t {
+  // Predicate evaluated against the next codepoint.
   iree_tokenizer_regex_lookahead_type_t type;
-  uint8_t data;                                  // Type-specific data
-  iree_tokenizer_regex_lookahead_flags_t flags;  // PCRE-compatibility flags
-  uint8_t reserved;                              // Padding for alignment
+  // Character or shorthand selected by the predicate type.
+  uint8_t data;
+  // Ordering of conditional and unconditional accept paths.
+  iree_tokenizer_regex_lookahead_flags_t flags;
+  // Highest-priority unconditional accept for WITH_FALLBACK states.
+  uint8_t fallback_branch;
 } iree_tokenizer_regex_lookahead_t;
 static_assert(sizeof(iree_tokenizer_regex_lookahead_t) == 4,
               "lookahead entry must be 4 bytes");
@@ -416,7 +421,8 @@ typedef struct iree_tokenizer_regex_dfa_t {
 //     iree_tokenizer_regex_exec_feed(&dfa, &state, chunk, offset, stride, cb,
 //     ud); offset += chunk.data_length;
 //   }
-//   iree_tokenizer_regex_exec_finalize(&dfa, &state, total_length, cb, ud);
+//   iree_tokenizer_regex_exec_finalize(&dfa, &state, total_length,
+//                                     iree_string_view_empty(), cb, ud);
 //
 // Cross-Chunk Backtracking:
 //   The executor implements leftmost-longest matching, which requires trying
@@ -424,9 +430,8 @@ typedef struct iree_tokenizer_regex_dfa_t {
 //   begins in chunk A and fails in chunk B, the executor uses an internal
 //   rewind buffer (IREE_TOKENIZER_UTIL_REGEX_REWIND_BUFFER_SIZE bytes).
 //
-//   This handles all practical tokenizer patterns (whitespace, word boundaries,
-//   punctuation). If a pattern requires backtracking more than the buffer size,
-//   exec_feed() returns IREE_STATUS_OUT_OF_RANGE.
+//   Replay beyond the retained buffer returns IREE_STATUS_OUT_OF_RANGE.
+//   Finalization may additionally use a caller-retained suffix.
 typedef struct iree_tokenizer_regex_exec_state_t {
   // Start position of current potential match.
   iree_host_size_t match_start;
@@ -481,9 +486,8 @@ typedef struct iree_tokenizer_regex_exec_state_t {
   // we can then re-process from the buffer instead of silently skipping
   // matches.
   //
-  // The buffer size covers all practical tokenizer patterns (whitespace runs,
-  // word boundaries, punctuation). If a pattern requires more, exec_feed()
-  // returns IREE_STATUS_OUT_OF_RANGE.
+  // Required replay outside this buffer returns IREE_STATUS_OUT_OF_RANGE
+  // unless the caller provides the missing input to finalization.
   uint8_t rewind_buffer[IREE_TOKENIZER_UTIL_REGEX_REWIND_BUFFER_SIZE];
   iree_host_size_t rewind_buffer_length;  // Valid bytes in buffer.
   iree_host_size_t rewind_buffer_start;   // Absolute offset of buffer[0].
@@ -733,7 +737,8 @@ void iree_tokenizer_regex_exec_initialize(
 //
 // This implements leftmost-longest matching semantics:
 // - Matches start as early as possible in the text
-// - Among matches starting at the same position, the longest is chosen
+// - Among matches starting at the same position, the earliest viable tracked
+//   branch wins and extends greedily; untracked DFAs choose the longest
 // - After a match, scanning resumes from the end of the match
 //
 // Matches are emitted via |callback| with positions relative to the overall
@@ -764,13 +769,18 @@ iree_status_t iree_tokenizer_regex_exec_feed(
 // |dfa| is the DFA that was executed.
 // |state| is the execution state.
 // |total_length| is the total length of all input fed (for match end position).
-// |callback| is invoked if there's a pending match (may be NULL).
+// |available_tail| optionally provides trailing bytes of already-fed input,
+// ending at |total_length|. It remains caller-owned and is used only during
+// this call. Providing it permits replay beyond the internal streaming buffer;
+// an empty view uses only that buffer.
+// |callback| is invoked for each remaining match (may be NULL).
 // |user_data| is passed to the callback.
 //
 // Returns status from callback if it returns non-OK.
 iree_status_t iree_tokenizer_regex_exec_finalize(
     const iree_tokenizer_regex_dfa_t* dfa,
     iree_tokenizer_regex_exec_state_t* state, iree_host_size_t total_length,
+    iree_string_view_t available_tail,
     iree_tokenizer_regex_match_callback_fn_t callback, void* user_data);
 
 //===----------------------------------------------------------------------===//

@@ -65,6 +65,12 @@ bool loom_low_lower_source_value_storage_plans_preserve_fact_demands(
 void loom_low_lower_source_value_storage_prepare_refinement(
     loom_low_lower_context_t* context);
 
+// Recomputes source demands after a deferred target replacement without
+// rerunning rule selection. Newly demanded producers are reactivated, claimed
+// results remain elided, and the reverse walk propagates the new demands.
+void loom_low_lower_source_value_storage_refine_selected_plans(
+    loom_low_lower_context_t* context);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

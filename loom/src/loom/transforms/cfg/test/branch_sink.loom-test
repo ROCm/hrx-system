@@ -238,6 +238,55 @@ func.def @keeps_cfg_reference_call(%outer: i1, %inner: i1, %buffer: buffer) {
 
 // ====
 
+// A successor in the same natural-loop iteration cannot reexecute without its
+// dominating source decision. Rebuild reference metadata in that successor
+// while retaining the guard's original load.
+func.def @rematerializes_cfg_loop_local_reference(%running: i1, %outer: i1, %inner: i1, %buffer: buffer, %offset: offset) {
+  cfg.br ^header
+^header:
+  cfg.cond_br %running, ^body, ^exit
+^body:
+  cfg.cond_br %outer, ^shared, ^decision
+^decision:
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  cfg.cond_br %inner, ^selected, ^shared
+^selected:
+  view.store %value, %view[0] : i32, view<1xi32>
+  cfg.br ^latch
+^shared:
+  cfg.br ^latch
+^latch:
+  cfg.br ^header
+^exit:
+  func.return
+}
+
+// ----
+func.def @rematerializes_cfg_loop_local_reference(%running: i1, %outer: i1, %inner: i1, %buffer: buffer, %offset: offset) {
+  cfg.br ^header
+^header:
+  cfg.cond_br %running, ^body, ^exit
+^body:
+  cfg.cond_br %outer, ^shared, ^decision
+^decision:
+  %view = buffer.view %buffer[%offset] : buffer -> view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  cfg.cond_br %inner, ^selected, ^shared
+^selected:
+  %view_remat = buffer.view %buffer[%offset] : buffer -> view<1xi32>
+  view.store %value, %view_remat[0] : i32, view<1xi32>
+  cfg.br ^latch
+^shared:
+  cfg.br ^latch
+^latch:
+  cfg.br ^header
+^exit:
+  func.return
+}
+
+// ====
+
 // A cyclic successor can execute the cloned metadata more often than the
 // source decision, so reference rematerialization retains the original value.
 func.def @keeps_cfg_loop_reference(%outer: i1, %enter: i1, %again: i1, %buffer: buffer, %offset: offset) {

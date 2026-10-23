@@ -320,7 +320,12 @@ loom_kernel_binary(name="program", srcs=["program.loom"], deps=[":support"], tar
                 self.assertEqual("  RUNTIME_ONLY\n" in output, runtime_only)
 
     def test_shared_bindings_preserve_configuration_and_helper_ownership(self):
-        repo_cfg = SimpleNamespace(PROJECTS=[self.project], REPO_MAP={"@hrx": ""})
+        runtime_project = bazel_to_cmake_config.include_project(
+            REPO_ROOT / ".bazel_to_cmake.cfg.py", "runtime/.bazel_to_cmake.cfg.py"
+        )
+        repo_cfg = SimpleNamespace(
+            PROJECTS=[runtime_project, self.project], REPO_MAP={"@hrx": ""}
+        )
         output = bazel_to_cmake_converter.convert_build_file(
             """
 loomc_shared_libraries(
@@ -331,8 +336,8 @@ loomc_shared_libraries(
     }),
     runtime_deps=["//runtime/src/iree/base"],
 )
-cc_library(name="helper", tags=["LINKABLE_MORE_THAN_ONCE"])
-loom_generated_cc_library(name="catalog", generator=":generate", tags=["LINKABLE_MORE_THAN_ONCE"])
+loom_cc_instance_library(name="helper", srcs=["helper.c"], deps=[":owner"])
+loom_generated_cc_library(name="catalog", generator=":generate", instance_owned=True)
 """,
             repo_cfg,
             str(REPO_ROOT / "loom/binding/c"),

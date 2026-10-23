@@ -170,8 +170,12 @@ static iree_status_t loom_serve_stage_set_job_create(
   const iree_host_size_t count =
       loom_serve_preparation_stage_count(preparation);
   loom_serve_stage_set_job_t* job = NULL;
-  iree_status_t status = iree_allocator_malloc_array(
-      host_allocator, count, sizeof(*stages->values), (void**)&stages->values);
+  iree_status_t status = iree_ok_status();
+  if (count) {
+    status = iree_allocator_malloc_array(host_allocator, count,
+                                         sizeof(*stages->values),
+                                         (void**)&stages->values);
+  }
   if (iree_status_is_ok(status)) {
     stages->count = count;
     status =

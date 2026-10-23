@@ -416,6 +416,7 @@ loom_cc_library(
         "lower/shuffle.c",
         "lower/transpose.c",
         "lower/vector_construct.c",
+        "lower/vector_load.c",
         "lower/vector_packet.c",
     ],
     hdrs = [
@@ -429,6 +430,7 @@ loom_cc_library(
         "lower/shuffle.h",
         "lower/transpose.h",
         "lower/vector_construct.h",
+        "lower/vector_load.h",
         "lower/vector_packet.h",
     ],
     textual_hdrs = ["//loom/src/loom/target/arch/amd/xdna/aie2p/contracts:core_index.inl"],
@@ -437,6 +439,8 @@ loom_cc_library(
         ":gather",
         ":vector_carrier",
         "//loom/src/loom/analysis:contract_vector",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:source_memory_plan",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/codegen/low/lower:representation_observer",
         "//loom/src/loom/error:error_defs",
@@ -455,6 +459,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amd/xdna/aie2p/ops",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )
 
@@ -653,7 +658,6 @@ loom_cc_library(
         ":encoding",
         ":leaf_compile",
         ":machine",
-        ":provider",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:function_requirements",
@@ -689,7 +693,7 @@ loom_cc_library(
         "//loom/src/loom/ops/low",
         "//loom/src/loom/pass:report",
         "//loom/src/loom/target:pass_environment",
-        "//loom/src/loom/tools/loom-check:provider",
+        "//loom/src/loom/target:provider",
         "//runtime/src/iree/base",
     ],
 )
@@ -800,6 +804,18 @@ iree_execution_test_suite(
     },
 )
 
+iree_execution_test_suite(
+    name = "native_program_capacity_test",
+    size = "small",
+    data = ["test/native_program_capacity.loom"],
+    manifests = ["test/native_program_capacity.test.json"],
+    tags = ["hostonly"],
+    target_compatible_with = _XDNA_IMAGE_COMPATIBLE_WITH,
+    tools = {
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+    },
+)
+
 loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
@@ -893,6 +909,7 @@ loom_check_test_suite(
         "test/native_endpoint_addresses.loom-test",
         "test/native_helper_effects.loom-test",
         "test/native_local_buffers.loom-test",
+        "test/native_program_capacity.loom-test",
         "test/native_repetition.loom-test",
         "test/native_strands.loom-test",
         "test/native_stream_routes.loom-test",
@@ -1007,6 +1024,7 @@ loom_check_test_suite(
         "test/source_low/shared_conditional_values.loom-test",
         "test/source_low/split_barrier.loom-test",
         "test/source_low/static_vector_shape.loom-test",
+        "test/source_low/structured_switch.loom-test",
         "test/source_low/table_quantize.loom-test",
         "test/source_low/target_legalize_scalar_multiply_add.loom-test",
         "test/source_low/uniform_predicate_control.loom-test",
@@ -1025,6 +1043,8 @@ loom_check_test_suite(
         "test/source_low/vector_index_conversion.loom-test",
         "test/source_low/vector_interleave.loom-test",
         "test/source_low/vector_large_insert.loom-test",
+        "test/source_low/vector_load_underaligned.loom-test",
+        "test/source_low/vector_load_underaligned_family.loom-test",
         "test/source_low/vector_mask_select.loom-test",
         "test/source_low/vector_memory.loom-test",
         "test/source_low/vector_partial_carriers.loom-test",
@@ -1198,6 +1218,20 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "program_capacity",
+    srcs = ["emit/program_capacity.c"],
+    hdrs = ["emit/program_capacity.h"],
+    deps = [
+        ":leaf_program",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/target/arch/amd/xdna:error_defs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "leaf_compile",
     srcs = ["emit/leaf_compile.c"],
     hdrs = ["emit/leaf_compile.h"],
@@ -1205,6 +1239,7 @@ loom_cc_library(
         ":bundle_plan",
         ":leaf_object",
         ":low_registry",
+        ":program_capacity",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
@@ -1227,7 +1262,6 @@ loom_cc_library(
     srcs = ["emit/program_object.c"],
     hdrs = ["emit/program_object.h"],
     deps = [
-        ":bundle_plan",
         ":leaf_object",
         ":relocation",
         "//runtime/src/iree/base",
@@ -1243,6 +1277,7 @@ loom_cc_library(
         ":call_abi",
         ":core_descriptors",
         ":leaf_compile",
+        ":program_capacity",
         ":program_object",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",

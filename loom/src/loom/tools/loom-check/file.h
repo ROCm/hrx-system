@@ -11,7 +11,6 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/ir/context.h"
 #include "loom/tooling/io/source_path.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/execute.h"
@@ -50,7 +49,7 @@ typedef struct loom_check_process_options_t {
 // |path| is "-" or empty for stdin, otherwise a filesystem path.
 iree_status_t loom_check_read_and_process(
     iree_string_view_t path, const loom_check_process_options_t* options,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
     iree_host_size_t* pass_count, iree_host_size_t* fail_count,
     iree_host_size_t* skip_count);

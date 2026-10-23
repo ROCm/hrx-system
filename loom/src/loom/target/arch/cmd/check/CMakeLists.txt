@@ -19,12 +19,14 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::arena
+    loom::binding::c::interop
+    loom::binding::c::loomc
     loom::codegen::low::text_asm
     loom::format::text::printer
     loom::ir
     loom::link::module_index
     loom::ops::command
-    loom::pass::builtin_registry
+    loom::pass::registry
     loom::target::arch::cmd::artifact_set
     loom::target::arch::cmd::lower::program_plan
     loom::target::arch::cmd::lower::program_plan_index
@@ -43,7 +45,6 @@ loom_cc_library(
   DEPS
     ::program_plan
     iree::base
-    loom::target::arch::cmd::provider
     loom::tools::loom-check::provider
   PUBLIC
 )

@@ -20,13 +20,11 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-_WASM_CHECK_PACKAGE_VISIBILITY = ["//loom/src/loom/target/arch/wasm/check:__pkg__"]
-
 _WASM_PROVIDER_VISIBILITY = [
     "//loom/src/loom/target/all:__pkg__",
     "//loom/src/loom/target/configured:__pkg__",
     "//loom/src/loom/target/emit/wasm:__pkg__",
-] + _WASM_CHECK_PACKAGE_VISIBILITY
+]
 
 #===------------------------------------------------------------------------===#
 # Wasm low descriptors

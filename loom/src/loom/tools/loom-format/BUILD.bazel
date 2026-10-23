@@ -6,33 +6,11 @@
 
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load("//loom/binding/c:shared.bzl", "loomc_cc_binary")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
-)
-
-loom_cc_library(
-    name = "convert",
-    srcs = ["convert.c"],
-    hdrs = ["convert.h"],
-    deps = [
-        "//loom/src/loom/error:diagnostic",
-        "//loom/src/loom/error:source",
-        "//loom/src/loom/format/bytecode:reader",
-        "//loom/src/loom/format/bytecode:writer",
-        "//loom/src/loom/format/text:low_asm",
-        "//loom/src/loom/format/text:parser",
-        "//loom/src/loom/format/text:printer",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/tooling/io:module_format",
-        "//loom/src/loom/verify",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/io:stream",
-    ],
 )
 
 loomc_cc_binary(
@@ -61,20 +39,4 @@ iree_execution_test_suite(
     tools = {
         "loom-format": ":loom-format",
     },
-)
-
-loom_cc_test(
-    name = "convert_test",
-    srcs = ["convert_test.cc"],
-    deps = [
-        ":convert",
-        "//loom/src/loom/codegen/low:text_asm",
-        "//loom/src/loom/format/bytecode:format",
-        "//loom/src/loom/target/test:descriptors",
-        "//loom/src/loom/testing:context",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
 )

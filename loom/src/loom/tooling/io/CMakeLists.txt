@@ -67,4 +67,16 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    module_format_test
+  SRCS
+    "module_format_test.cc"
+  DEPS
+    ::module_format
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -132,7 +132,8 @@ class SpeechReadinessTest : public ::testing::Test {
             [](void* self, void*, loom_serve_residency_admission_t* out,
                loom_serve_execution_frontier_t* frontier) {
               auto* test = static_cast<SpeechReadinessTest*>(self);
-              *out = LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED;
+              ++test->admission_attempts_;
+              *out = test->admission_;
               *frontier = loom_serve_execution_frontier(test->execution_);
               return iree_ok_status();
             },
@@ -140,7 +141,6 @@ class SpeechReadinessTest : public ::testing::Test {
             [](void* self, void*) {
               auto* test = static_cast<SpeechReadinessTest*>(self);
               ++test->admission_completions_;
-              return test->state_admission_;
             },
         .prepare_work =
             [](void*, void*, loom_serve_speech_work_t* out) {
@@ -515,8 +515,10 @@ class SpeechReadinessTest : public ::testing::Test {
   // Minimum cohort size importing the held dependency.
   size_t held_members_ = 1;
   // Dependency result changed only between manually driven owner turns.
-  loom_serve_memory_admission_t state_admission_ =
-      LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE;
+  loom_serve_residency_admission_t admission_ =
+      LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED;
+  // Owner-only admission attempts, including deferred capacity decisions.
+  size_t admission_attempts_ = 0;
   // Owner-only completion count, including unchanged readiness frontiers.
   size_t admission_completions_ = 0;
   // Model-owned rows; terminal failures leave them here for actual teardown.
@@ -643,9 +645,9 @@ INSTANTIATE_TEST_SUITE_P(SourceAndEncoding, SpeechOutputFailureTest,
                          ::testing::Bool());
 
 TEST_F(SpeechReadinessTest,
-       DeferredStateAdmissionRetainsRequestUntilCapacityReturns) {
+       DeferredAdmissionRetainsRequestUntilCapacityReturns) {
   ASSERT_NO_FATAL_FAILURE(Initialize(3, 1, UINT64_MAX, 1, 1, false));
-  state_admission_ = LOOM_SERVE_MEMORY_ADMISSION_DEFERRED;
+  admission_ = LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED;
   loom_serve::testing::HttpClient client;
   IREE_ASSERT_OK(Send(&client));
   loom_serve_http_connection_t* connection = nullptr;
@@ -653,22 +655,26 @@ TEST_F(SpeechReadinessTest,
   IREE_ASSERT_OK(http_.TakeRequest(client.get(), &connection, &request));
   IREE_ASSERT_OK(actual_.accept(actual_.self, connection, request, 0));
 
-  // Consume the initial frontier, then retry with an unchanged frontier. A
-  // completed native release may have no pending work left to query, but the
-  // original DEFERRED result still preserves this request for its owner turn.
+  // Deferred admission retains preparation without accepting any activation
+  // or waiting on a frontier. A retry waits for the capacity owner's wake.
   ASSERT_NO_FATAL_FAILURE(
-      AdvanceUntil([&] { return admission_completions_ >= 2; }));
+      AdvanceUntil([&] { return admission_attempts_ != 0; }));
+  bool progress = false;
+  IREE_ASSERT_OK(actual_.advance(actual_.self, 0, &progress));
+  EXPECT_FALSE(progress);
+  EXPECT_EQ(admission_completions_, 0u);
   ASSERT_EQ(actual_.telemetry.counters->rejected, 0u);
   EXPECT_EQ(actual_.telemetry.counters->completed, 0u);
   EXPECT_EQ(submitted_.load(), 0u);
 
-  state_admission_ = LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE;
+  admission_ = LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED;
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return released_.load() == 1; }));
   std::string response;
   IREE_ASSERT_OK(http_.Read(client.release(), false, &response));
   CheckPcm(response, 3);
   EXPECT_EQ(actual_.telemetry.counters->completed, 1u);
   EXPECT_EQ(actual_.telemetry.counters->rejected, 0u);
+  EXPECT_EQ(admission_completions_, 1u);
 }
 
 TEST_F(SpeechReadinessTest, NativePressureMovesOnlyAcceptedInput) {
@@ -767,9 +773,9 @@ TEST_F(SpeechReadinessTest, ClosedNativeHandleRetainsAcceptedEncodingStorage) {
   // the outer test thread before holding the workers for the encoding cut.
   const auto frontier = loom_serve_execution_frontier(execution_);
   for (size_t i = 0; i < 2; ++i) {
-    IREE_ASSERT_OK(iree_hal_semaphore_wait(
-        frontier.semaphores[i], frontier.values[i], iree_infinite_timeout(),
-        IREE_ASYNC_WAIT_FLAG_NONE));
+    IREE_ASSERT_OK(loom_serve_workspace_wait(
+        loom_serve_device_workspace(loom_serve_device_group_at(group_, 0)),
+        frontier.semaphores[i], frontier.values[i]));
   }
   for (int i = 0; i < SpeechWorkerCount(); ++i) {
     workers.push_back(std::make_unique<loom_serve::testing::WorkerGate>(

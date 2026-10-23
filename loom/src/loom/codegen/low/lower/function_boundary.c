@@ -6,6 +6,8 @@
 
 #include "loom/codegen/low/lower/function_boundary.h"
 
+#include <string.h>
+
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/lower/context.h"
 #include "loom/error/error_catalog.h"
@@ -156,6 +158,51 @@ static iree_status_t loom_low_lower_initialize_argument_map(
 
 iree_status_t loom_low_lower_function_boundary_validate(
     loom_low_lower_context_t* context) {
+  const loom_symbol_ref_t callee =
+      loom_func_like_callee(context->source_function);
+  const loom_low_source_signature_projection_plan_t*
+      source_signature_projection =
+          loom_low_source_signature_projection_index_find(
+              context->options->source_signature_projections, callee.symbol_id);
+  if (source_signature_projection != NULL) {
+    loom_low_lower_function_boundary_t* boundary = &context->lowering->boundary;
+    boundary->source_signature_projection = source_signature_projection;
+    uint16_t logical_argument_count = 0;
+    const loom_type_t* logical_argument_types =
+        loom_low_source_signature_projection_logical_argument_types(
+            source_signature_projection, &logical_argument_count);
+    uint16_t source_argument_count = 0;
+    (void)loom_func_like_arg_ids(context->source_function,
+                                 &source_argument_count);
+    IREE_ASSERT_EQ(logical_argument_count, source_argument_count);
+    boundary->argument_map_count = logical_argument_count;
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
+        context, logical_argument_count, sizeof(*boundary->argument_map),
+        (void**)&boundary->argument_map));
+    for (uint16_t i = 0; i < logical_argument_count; ++i) {
+      boundary->argument_map[i] = (loom_low_lower_abi_argument_t){
+          .kind = LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT,
+          .abi_type = logical_argument_types[i],
+          .body_type = loom_type_none(),
+      };
+    }
+
+    uint16_t logical_result_count = 0;
+    const loom_type_t* logical_result_types =
+        loom_low_source_signature_projection_logical_result_types(
+            source_signature_projection, &logical_result_count);
+    IREE_ASSERT_EQ(logical_result_count,
+                   context->source_function.op->result_count);
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
+        context, logical_result_count, sizeof(*boundary->result_types),
+        (void**)&boundary->result_types));
+    if (logical_result_count != 0) {
+      memcpy(boundary->result_types, logical_result_types,
+             logical_result_count * sizeof(*logical_result_types));
+    }
+    return iree_ok_status();
+  }
+
   IREE_RETURN_IF_ERROR(loom_low_lower_initialize_argument_map(context));
 
   const uint16_t result_count = context->source_function.op->result_count;
@@ -182,6 +229,9 @@ iree_status_t loom_low_lower_function_boundary_validate(
 
 iree_status_t loom_low_lower_function_boundary_observe_exit(
     loom_low_lower_context_t* context, const loom_op_t* exit_op) {
+  if (context->lowering->boundary.source_signature_projection != NULL) {
+    return iree_ok_status();
+  }
   const loom_value_id_t* operands = loom_op_const_operands(exit_op);
   for (uint16_t i = 0; i < exit_op->operand_count; ++i) {
     loom_type_t incoming_type = loom_type_none();
@@ -226,6 +276,9 @@ iree_status_t loom_low_lower_function_boundary_observe_exit(
 
 iree_status_t loom_low_lower_function_boundary_finalize(
     loom_low_lower_context_t* context) {
+  if (context->lowering->boundary.source_signature_projection != NULL) {
+    return iree_ok_status();
+  }
   const loom_op_t* function_op = context->source_function.op;
   const loom_value_id_t* result_ids = loom_op_const_results(function_op);
   for (uint16_t i = 0; i < function_op->result_count; ++i) {
@@ -266,6 +319,20 @@ static iree_status_t loom_low_lower_plan_abi_layout(
 iree_status_t loom_low_lower_function_boundary_plan(
     loom_low_lower_context_t* context, iree_arena_allocator_t* scratch_arena) {
   loom_low_lower_function_boundary_t* boundary = &context->lowering->boundary;
+  if (boundary->source_signature_projection != NULL) {
+    boundary->argument_types = (loom_type_t*)
+        loom_low_source_signature_projection_physical_argument_types(
+            boundary->source_signature_projection, &boundary->argument_count);
+    boundary->physical_result_types =
+        loom_low_source_signature_projection_physical_result_types(
+            boundary->source_signature_projection,
+            &boundary->physical_result_count);
+    boundary->tied_results = loom_low_source_signature_projection_tied_results(
+        boundary->source_signature_projection, &boundary->tied_result_count);
+    boundary->abi_layout = loom_low_source_signature_projection_abi_layout(
+        boundary->source_signature_projection);
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
       context, boundary->argument_count, sizeof(*boundary->argument_types),
       (void**)&boundary->argument_types));
@@ -276,6 +343,8 @@ iree_status_t loom_low_lower_function_boundary_plan(
           boundary->argument_map[i].abi_type;
     }
   }
+  boundary->physical_result_types = boundary->result_types;
+  boundary->physical_result_count = context->source_function.op->result_count;
   return loom_low_lower_plan_abi_layout(
       context,
       loom_kernel_def_isa(context->source_function.op)
@@ -337,7 +406,8 @@ static iree_status_t loom_low_lower_create_func_op(
     loom_low_lower_context_t* context, loom_region_t* source_body,
     loom_symbol_ref_t low_func_ref, const loom_type_t* arg_types,
     iree_host_size_t arg_count, const loom_type_t* result_types,
-    iree_host_size_t result_count) {
+    iree_host_size_t result_count, const loom_tied_result_t* tied_results,
+    iree_host_size_t tied_result_count) {
   loom_low_func_def_build_flags_t build_flags = 0;
   uint8_t visibility = loom_func_like_visibility(context->source_function);
   uint8_t cc = loom_func_like_cc(context->source_function);
@@ -404,8 +474,7 @@ static iree_status_t loom_low_lower_create_func_op(
       inline_policy, /*allocation=*/0, /*schedule=*/0, descriptor_set_key,
       context->options->target_ref, abi, abi_attrs, abi_layout, export_symbol,
       export_attrs, low_func_ref, arg_types, arg_count, result_types,
-      result_count,
-      /*tied_results=*/NULL, /*tied_result_count=*/0,
+      result_count, tied_results, tied_result_count,
       /*predicates=*/NULL, /*predicates_count=*/0,
       context->source_function.op->location, &context->low_func_op));
 
@@ -492,6 +561,9 @@ static iree_status_t loom_low_lower_create_kernel_op(
 
 iree_status_t loom_low_lower_function_boundary_remap_predicates(
     loom_low_lower_context_t* context) {
+  if (context->lowering->boundary.source_signature_projection != NULL) {
+    return iree_ok_status();
+  }
   uint16_t predicate_count = 0;
   (void)loom_func_like_predicates(context->source_function, &predicate_count);
   if (predicate_count == 0) {
@@ -541,7 +613,8 @@ iree_status_t loom_low_lower_function_boundary_create(
   const loom_type_t* arg_types = boundary->argument_types;
   const uint16_t arg_count = boundary->argument_count;
   const loom_type_t* result_types = boundary->result_types;
-  const uint16_t result_count = context->source_function.op->result_count;
+  const uint16_t result_count = boundary->physical_result_count;
+  result_types = boundary->physical_result_types;
 
   if (loom_low_lower_source_is_kernel_def(context)) {
     IREE_ASSERT_EQ(result_count, 0);
@@ -550,18 +623,20 @@ iree_status_t loom_low_lower_function_boundary_create(
   } else {
     IREE_RETURN_IF_ERROR(loom_low_lower_create_func_op(
         context, source_body, low_func_ref, arg_types, arg_count, result_types,
-        result_count));
+        result_count, boundary->tied_results, boundary->tied_result_count));
   }
   context->result->low_func_op = context->low_func_op;
   context->result->low_func_ref = low_func_ref;
 
-  const loom_value_id_t* source_results =
-      loom_op_const_results(context->source_function.op);
-  const loom_value_id_t* low_results =
-      loom_op_const_results(context->low_func_op);
-  for (uint16_t i = 0; i < context->source_function.op->result_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_low_lower_copy_value_name(
-        context, source_results[i], low_results[i]));
+  if (boundary->source_signature_projection == NULL) {
+    const loom_value_id_t* source_results =
+        loom_op_const_results(context->source_function.op);
+    const loom_value_id_t* low_results =
+        loom_op_const_results(context->low_func_op);
+    for (uint16_t i = 0; i < context->source_function.op->result_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_low_lower_copy_value_name(
+          context, source_results[i], low_results[i]));
+    }
   }
   return iree_ok_status();
 }
@@ -571,6 +646,11 @@ iree_status_t loom_low_lower_function_boundary_bind_entry_arguments(
     loom_block_t* low_entry_block) {
   IREE_ASSERT_EQ(source_entry_block->arg_count,
                  context->lowering->boundary.argument_map_count);
+  if (context->lowering->boundary.source_signature_projection != NULL) {
+    IREE_ASSERT_EQ(low_entry_block->arg_count,
+                   context->lowering->boundary.argument_count);
+    return iree_ok_status();
+  }
   const uint16_t direct_argument_count =
       context->lowering->boundary.argument_count;
   IREE_ASSERT_EQ(low_entry_block->arg_count, direct_argument_count);
@@ -589,10 +669,162 @@ iree_status_t loom_low_lower_function_boundary_bind_entry_arguments(
   return iree_ok_status();
 }
 
+static bool loom_low_lower_predicate_references_only(
+    const loom_predicate_t* predicate, const loom_value_id_t* values,
+    uint16_t value_count) {
+  for (uint8_t i = 0; i < predicate->arg_count; ++i) {
+    if (predicate->arg_tags[i] != LOOM_PRED_ARG_VALUE) {
+      continue;
+    }
+    const int64_t raw_value = predicate->args[i];
+    bool found = false;
+    if (raw_value >= 0 && raw_value <= UINT32_MAX) {
+      for (uint16_t j = 0; j < value_count; ++j) {
+        found |= values[j] == (loom_value_id_t)raw_value;
+      }
+    }
+    if (!found) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static iree_status_t loom_low_lower_assume_projected_arguments(
+    loom_low_lower_context_t* context, const loom_value_id_t* source_arguments,
+    uint16_t argument_count, loom_value_id_t* logical_arguments) {
+  uint16_t source_predicate_count = 0;
+  const loom_predicate_t* source_predicates = loom_func_like_predicates(
+      context->source_function, &source_predicate_count);
+  uint16_t argument_predicate_count = 0;
+  for (uint16_t i = 0; i < source_predicate_count; ++i) {
+    argument_predicate_count += loom_low_lower_predicate_references_only(
+        &source_predicates[i], source_arguments, argument_count);
+  }
+  if (argument_predicate_count == 0) {
+    return iree_ok_status();
+  }
+
+  loom_predicate_t* argument_predicates = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+      context, argument_predicate_count, sizeof(*argument_predicates),
+      (void**)&argument_predicates));
+  uint16_t argument_predicate_index = 0;
+  for (uint16_t i = 0; i < source_predicate_count; ++i) {
+    if (loom_low_lower_predicate_references_only(
+            &source_predicates[i], source_arguments, argument_count)) {
+      argument_predicates[argument_predicate_index++] = source_predicates[i];
+    }
+  }
+
+  loom_ir_remap_t remap;
+  IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
+      context->module, context->module,
+      loom_low_lower_context_emission_arena(context), NULL, &remap));
+  IREE_RETURN_IF_ERROR(loom_ir_remap_map_values(
+      &remap, source_arguments, logical_arguments, argument_count));
+  loom_predicate_t* remapped_predicates = NULL;
+  IREE_RETURN_IF_ERROR(loom_ir_remap_predicate_list(&remap, argument_predicates,
+                                                    argument_predicate_count,
+                                                    &remapped_predicates));
+
+  loom_type_t* logical_types = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+      context, argument_count, sizeof(*logical_types), (void**)&logical_types));
+  for (uint16_t i = 0; i < argument_count; ++i) {
+    logical_types[i] =
+        loom_module_value_type(context->module, logical_arguments[i]);
+  }
+  loom_op_t* assume_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_assume_build(
+      &context->builder, logical_arguments, argument_count, remapped_predicates,
+      argument_predicate_count, logical_types, argument_count,
+      context->source_function.op->location, &assume_op));
+  memcpy(logical_arguments, loom_op_const_results(assume_op),
+         argument_count * sizeof(*logical_arguments));
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_lower_function_boundary_emit_entry(
+    loom_low_lower_context_t* context) {
+  loom_low_lower_function_boundary_t* boundary = &context->lowering->boundary;
+  if (boundary->source_signature_projection == NULL) {
+    return iree_ok_status();
+  }
+
+  const loom_func_like_t low_function =
+      loom_func_like_cast(context->module, context->low_func_op);
+  uint16_t physical_argument_count = 0;
+  const loom_value_id_t* physical_arguments =
+      loom_func_like_arg_ids(low_function, &physical_argument_count);
+  uint16_t logical_argument_count = 0;
+  (void)loom_low_source_signature_projection_logical_argument_types(
+      boundary->source_signature_projection, &logical_argument_count);
+  loom_value_id_t* logical_arguments = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+      context, logical_argument_count, sizeof(*logical_arguments),
+      (void**)&logical_arguments));
+
+  loom_region_t* low_body = loom_low_lower_low_body(context);
+  loom_builder_ip_t saved_ip = loom_builder_enter_region(
+      &context->builder, context->low_func_op, low_body);
+  loom_builder_set_block(&context->builder, loom_region_entry_block(low_body));
+  iree_status_t status = loom_low_source_signature_projection_emit(
+      boundary->source_signature_projection, context,
+      LOOM_LOW_LOWER_SOURCE_SIGNATURE_EMISSION_DEFINITION_ENTRY,
+      context->source_function.op, physical_arguments, physical_argument_count,
+      logical_arguments, logical_argument_count, context->function_arena,
+      &boundary->source_signature_state);
+  uint16_t source_argument_count = 0;
+  const loom_value_id_t* source_arguments =
+      loom_func_like_arg_ids(context->source_function, &source_argument_count);
+  if (iree_status_is_ok(status)) {
+    IREE_ASSERT_EQ(source_argument_count, logical_argument_count);
+    status = loom_low_lower_assume_projected_arguments(
+        context, source_arguments, source_argument_count, logical_arguments);
+  }
+  if (iree_status_is_ok(status)) {
+    for (uint16_t i = 0; i < logical_argument_count; ++i) {
+      status = loom_low_lower_copy_value_name(context, source_arguments[i],
+                                              logical_arguments[i]);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+      status = loom_low_lower_bind_value(context, source_arguments[i],
+                                         logical_arguments[i]);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+    }
+  }
+  loom_builder_restore(&context->builder, saved_ip);
+  return status;
+}
+
 static iree_status_t loom_low_lower_plan_decl_signature(
     loom_low_lower_context_t* context, iree_arena_allocator_t* arena,
     iree_arena_allocator_t* scratch_arena) {
   loom_low_lower_function_boundary_t* boundary = &context->lowering->boundary;
+  const loom_symbol_ref_t callee =
+      loom_func_like_callee(context->source_function);
+  boundary->source_signature_projection =
+      loom_low_source_signature_projection_index_find(
+          context->options->source_signature_projections, callee.symbol_id);
+  if (boundary->source_signature_projection != NULL) {
+    boundary->argument_types = (loom_type_t*)
+        loom_low_source_signature_projection_physical_argument_types(
+            boundary->source_signature_projection, &boundary->argument_count);
+    boundary->physical_result_types =
+        loom_low_source_signature_projection_physical_result_types(
+            boundary->source_signature_projection,
+            &boundary->physical_result_count);
+    boundary->result_types = (loom_type_t*)boundary->physical_result_types;
+    boundary->tied_results = loom_low_source_signature_projection_tied_results(
+        boundary->source_signature_projection, &boundary->tied_result_count);
+    boundary->abi_layout = loom_low_source_signature_projection_abi_layout(
+        boundary->source_signature_projection);
+    return iree_ok_status();
+  }
   const loom_value_id_t* argument_ids = loom_func_like_arg_ids(
       context->source_function, &boundary->argument_count);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -618,12 +850,17 @@ static iree_status_t loom_low_lower_plan_decl_signature(
   if (context->result->error_count != 0) {
     return iree_ok_status();
   }
+  boundary->physical_result_types = boundary->result_types;
+  boundary->physical_result_count = result_count;
   return loom_low_lower_plan_abi_layout(
       context, LOOM_LOW_LOWER_ABI_LAYOUT_KIND_FUNC, scratch_arena);
 }
 
 static iree_status_t loom_low_lower_copy_decl_signature_names(
     loom_low_lower_context_t* context) {
+  if (context->lowering->boundary.source_signature_projection != NULL) {
+    return iree_ok_status();
+  }
   uint16_t argument_count = 0;
   const loom_value_id_t* source_arguments =
       loom_func_like_arg_ids(context->source_function, &argument_count);
@@ -647,6 +884,9 @@ static iree_status_t loom_low_lower_copy_decl_signature_names(
 
 static iree_status_t loom_low_lower_remap_decl_predicates(
     loom_low_lower_context_t* context) {
+  if (context->lowering->boundary.source_signature_projection != NULL) {
+    return iree_ok_status();
+  }
   uint16_t predicate_count = 0;
   (void)loom_func_like_predicates(context->source_function, &predicate_count);
   if (predicate_count == 0) {
@@ -847,9 +1087,9 @@ static iree_status_t loom_low_lower_create_decl_op(
       (uint8_t)plan->import_kind, code_symbol, import_module,
       descriptor_set_key, plan->target_ref, abi, abi_attrs, abi_layout,
       export_symbol, export_attrs, low_func_ref, boundary->argument_types,
-      boundary->argument_count, boundary->result_types,
-      source_declaration.op->result_count,
-      /*tied_results=*/NULL, /*tied_result_count=*/0, /*predicates=*/NULL,
+      boundary->argument_count, boundary->physical_result_types,
+      boundary->physical_result_count, boundary->tied_results,
+      boundary->tied_result_count, /*predicates=*/NULL,
       /*predicates_count=*/0, source_declaration.op->location,
       &context->low_func_op);
 }
@@ -864,7 +1104,9 @@ iree_status_t loom_low_lower_emit_declaration(
   const loom_func_like_t source_declaration = plan->source_declaration;
   const loom_symbol_ref_t low_func_ref =
       loom_func_like_callee(source_declaration);
-  loom_low_lowering_frame_t frame = {0};
+  loom_low_lowering_frame_t frame = {
+      .boundary = plan->boundary,
+  };
   iree_arena_allocator_t function_arena;
   iree_arena_initialize(module->arena.block_pool, &function_arena);
   loom_low_lower_context_t context = {

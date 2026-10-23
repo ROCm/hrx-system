@@ -9,7 +9,9 @@
 #include <memory>
 
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
 #include "loom/binding/c/src/target.h"
+#include "loom/pass/testing/registry_verify.h"
 #include "loom/target/configured/compiler_provider_set.h"
 
 namespace {
@@ -20,7 +22,7 @@ struct TargetEnvironmentDeleter {
   }
 };
 
-TEST(ConfiguredTargetTest, BorrowsConfiguredCompilerProviders) {
+TEST(ConfiguredTargetTest, BorrowsValidConfiguredCompilerProviders) {
   loomc_target_environment_t* raw_environment = nullptr;
   loomc_status_t status = loomc_target_environment_create_configured(
       loomc_allocator_system(), &raw_environment);
@@ -33,6 +35,13 @@ TEST(ConfiguredTargetTest, BorrowsConfiguredCompilerProviders) {
   ASSERT_NE(internal_environment, nullptr);
   EXPECT_EQ(internal_environment->provider_set,
             loom_configured_compiler_provider_set());
+  const auto* provider_set = internal_environment->provider_set;
+  for (iree_host_size_t i = 0; i < provider_set->provider_count; ++i) {
+    const auto* registry = provider_set->providers[i]->pass_registry;
+    if (registry != nullptr) {
+      IREE_EXPECT_OK(loom_pass_registry_verify(registry));
+    }
+  }
 }
 
 }  // namespace

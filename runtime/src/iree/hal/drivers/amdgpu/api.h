@@ -393,10 +393,10 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_driver_options_parse(
 //
 // Device creation accepts a `queue_count` parameter specifying the positive
 // decimal number of provisioned queues per selected GPU. It defaults to one
-// and may also be set by URI, such as `amdgpu://0?queue_count=2`. The selected
-// GPU count times queue_count must fit the topology's queue-axis capacity.
-// This changes only driver-constructed topology; direct logical-device
-// creation preserves the caller's supplied topology.
+// and may also be set by URI, such as `legacy-amdgpu://0?queue_count=2`. The
+// selected GPU count times queue_count must fit the topology's queue-axis
+// capacity. This changes only driver-constructed topology; direct
+// logical-device creation preserves the caller's supplied topology.
 //
 // The provided |identifier| will be used by programs to distinguish the device
 // type from other HAL implementations. If compiling programs with the IREE

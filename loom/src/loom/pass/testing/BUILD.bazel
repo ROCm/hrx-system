@@ -12,6 +12,7 @@ load(
 
 package(
     default_visibility = [
+        "//loom/binding/c/target/configured:__pkg__",
         "//loom/src/loom/pass:__pkg__",
         "//loom/src/loom/pass/test:__pkg__",
         "//loom/src/loom/target/arch/amdgpu:__pkg__",

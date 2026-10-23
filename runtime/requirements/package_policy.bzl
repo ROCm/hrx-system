@@ -31,6 +31,8 @@ load(
     "AMDGPU_RESOURCE",
     "HAL_AMD",
     "HAL_AMDGPU",
+    "HAL_AMD_GPU",
+    "HAL_AMD_XDNA",
     "HAL_VULKAN",
     "HAL_WEBGPU",
     "WEBGPU_DEVICE_RESOURCE",
@@ -39,7 +41,7 @@ load(
 PACKAGE_POLICIES = [
     package_policy(
         packages = ["runtime/src/iree/hal/drivers/amd/gpu/cts"],
-        build_requirements = [LIBAMDF, LIBAMDF_GPU],
+        build_requirements = [HAL_AMD_GPU, LIBAMDF, LIBAMDF_GPU],
         run_requirements = [LIBAMDF_GPU_RESOURCE],
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
     ),
@@ -60,7 +62,7 @@ PACKAGE_POLICIES = [
     ),
     package_policy(
         packages = ["runtime/src/iree/hal/drivers/amd/xdna/cts"],
-        build_requirements = [LIBAMDF, LIBAMDF_XDNA],
+        build_requirements = [HAL_AMD_XDNA, LIBAMDF, LIBAMDF_XDNA],
         run_requirements = [XDNA_RESOURCE],
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
     ),
@@ -68,11 +70,19 @@ PACKAGE_POLICIES = [
         packages = [
             "runtime/src/iree/hal/drivers/amd",
             "runtime/src/iree/hal/drivers/amd/fabric",
-            "runtime/src/iree/hal/drivers/amd/gpu/queue/pm4/kmq",
-            "runtime/src/iree/hal/drivers/amd/gpu/queue/pm4/umq",
-            "runtime/src/iree/hal/drivers/amd/xdna",
         ],
         build_requirements = [LIBAMDF],
+    ),
+    package_policy(
+        packages = ["runtime/src/iree/hal/drivers/amd/xdna"],
+        build_requirements = [HAL_AMD_XDNA, LIBAMDF],
+    ),
+    package_policy(
+        packages = [
+            "runtime/src/iree/hal/drivers/amd/gpu/queue/pm4/kmq",
+            "runtime/src/iree/hal/drivers/amd/gpu/queue/pm4/umq",
+        ],
+        build_requirements = [HAL_AMD_GPU, LIBAMDF],
     ),
     package_policy(
         packages = ["runtime/src/iree/hal/drivers/amdgpu/..."],

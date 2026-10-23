@@ -59,6 +59,26 @@ static int amdf_gpu_kfd_buffer_ioctl(amdf_gpu_umd_device_t* device,
   return result;
 }
 
+amdf_status_t amdf_gpu_kfd_buffer_allocate_native(
+    amdf_gpu_umd_device_t* device,
+    struct kfd_ioctl_alloc_memory_of_gpu_args* arguments) {
+  // Interrupted allocation and invalidated USERPTR construction roll back
+  // before publishing a handle. Preserve the request while yielding native
+  // priority between attempts so pending releases can return storage.
+  int error;
+  do {
+    amdf_gpu_kfd_device_lock_memory(device,
+                                    AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
+    const int result =
+        ioctl(device->descriptor, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, arguments);
+    error = result == 0 ? 0 : errno;
+    amdf_gpu_kfd_device_unlock_memory(device);
+  } while (error == EINTR ||
+           (error == EAGAIN &&
+            (arguments->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)));
+  return error == 0 ? AMDF_STATUS_OK : amdf_linux_error(error);
+}
+
 static amdf_status_t amdf_gpu_kfd_buffer_release_native(
     amdf_gpu_kfd_buffer_t* buffer) {
   if (buffer->mapped_gpu_count != 0) {
@@ -235,13 +255,7 @@ amdf_status_t amdf_gpu_kfd_buffer_prepare(
         (uintptr_t)create_info->host_pointer - create_info->host_byte_offset;
   }
   if (amdf_status_is_ok(status)) {
-    amdf_gpu_kfd_device_lock_memory(device,
-                                    AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
-    if (ioctl(device->descriptor, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocate) !=
-        0) {
-      status = amdf_linux_error(errno);
-    }
-    amdf_gpu_kfd_device_unlock_memory(device);
+    status = amdf_gpu_kfd_buffer_allocate_native(device, &allocate);
   }
   if (amdf_status_is_ok(status)) {
     buffer->handle = allocate.handle;

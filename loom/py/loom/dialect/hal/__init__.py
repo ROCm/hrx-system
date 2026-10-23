@@ -15,6 +15,8 @@ hal.buffer — an opaque device buffer handle. Produced by pool.buffer,
 consumed by HAL queue operations (copies, fills, etc.).
 
 hal.buffer_view — a managed buffer range with shape, element type and encoding.
+
+hal.fence — a retained set of device semaphore timepoints.
 """
 
 from loom.dsl import ReferenceTypeKey, TypeDef
@@ -35,14 +37,25 @@ hal_buffer_view_type = TypeDef(
     reference=ReferenceTypeKey("hal", "buffer_view"),
 )
 
+hal_fence_type = TypeDef(
+    name="hal.fence",
+    doc="Retained completion set of HAL semaphore timepoints.",
+    reference=ReferenceTypeKey("hal", "fence"),
+)
+
 # ============================================================================
 # Registry
 # ============================================================================
 
-ALL_HAL_TYPES: tuple[TypeDef, ...] = (hal_buffer_type, hal_buffer_view_type)
+ALL_HAL_TYPES: tuple[TypeDef, ...] = (
+    hal_buffer_type,
+    hal_buffer_view_type,
+    hal_fence_type,
+)
 
 __all__ = [
     "hal_buffer_type",
     "hal_buffer_view_type",
+    "hal_fence_type",
     "ALL_HAL_TYPES",
 ]

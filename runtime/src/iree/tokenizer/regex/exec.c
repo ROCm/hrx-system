@@ -203,12 +203,11 @@ iree_status_t iree_tokenizer_regex_dfa_load(
   }
 
   // Validate version.
-  if (header->version < 1 ||
-      header->version > IREE_TOKENIZER_UTIL_REGEX_DFA_MAX_VERSION) {
+  if (header->version != IREE_TOKENIZER_UTIL_REGEX_DFA_VERSION) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "unsupported DFA version: %u (supported: 1-%u)",
+                            "unsupported DFA version: %u (supported: %u)",
                             header->version,
-                            IREE_TOKENIZER_UTIL_REGEX_DFA_MAX_VERSION);
+                            IREE_TOKENIZER_UTIL_REGEX_DFA_VERSION);
   }
 
   // Validate state count.
@@ -450,6 +449,16 @@ iree_status_t iree_tokenizer_regex_dfa_validate(
                                 "LOOKAHEAD_NEG_CLASS at state %u requires "
                                 "bitmap support (not yet implemented)",
                                 state);
+      }
+      if (dfa->accepting_branches &&
+          type >= IREE_TOKENIZER_UTIL_REGEX_LOOKAHEAD_NEG_CHAR_WITH_FALLBACK) {
+        uint8_t branch = dfa->lookahead[state].fallback_branch;
+        if (branch >= 64 ||
+            !(dfa->accepting_branches[state] & (1ULL << branch))) {
+          return iree_make_status(
+              IREE_STATUS_DATA_LOSS,
+              "fallback branch %u does not accept at state %u", branch, state);
+        }
       }
     }
   }
@@ -712,14 +721,13 @@ static inline iree_status_t iree_tokenizer_regex_emit_match(
     const iree_tokenizer_regex_dfa_t* dfa,
     iree_tokenizer_regex_match_callback_fn_t callback, void* user_data,
     iree_host_size_t* out_match_end) {
-  if (!callback) {
-    return iree_ok_status();
-  }
-
   iree_host_size_t match_end = 0;
   bool has_match = false;
 
-  if (state->has_accept && state->has_accept_fallback) {
+  if (state->best_branch_idx < 64) {
+    match_end = state->best_match_end;
+    has_match = true;
+  } else if (state->has_accept && state->has_accept_fallback) {
     // Both lookahead-passed and fallback positions exist.
     // Decision depends on whether an early non-lookahead branch exists.
     bool prefer_longer =
@@ -755,7 +763,9 @@ static inline iree_status_t iree_tokenizer_regex_emit_match(
     if (out_match_end) {
       *out_match_end = match_end;
     }
-    IREE_RETURN_IF_ERROR(callback(user_data, match));
+    if (callback) {
+      IREE_RETURN_IF_ERROR(callback(user_data, match));
+    }
   }
   return iree_ok_status();
 }
@@ -808,61 +818,44 @@ static inline bool iree_tokenizer_regex_has_branches(
   return dfa->alive_branches != NULL && dfa->accepting_branches != NULL;
 }
 
-// Update best candidate if a higher-priority branch accepts at this state.
-// Returns true if we should try to commit (all higher-priority branches dead).
-//
-// |lookahead_confirmed| indicates whether any lookahead at this state has been
-// evaluated and passed. When false (lookahead pending or failed), we skip
-// recording best_match_end but still check if we can commit a previously
-// recorded candidate.
-static inline bool iree_tokenizer_regex_update_best_candidate(
+// Records an acceptance at the boundary where its predicates become known.
+// A pending or rejected lookahead still permits an unconditional fallback.
+static inline void iree_tokenizer_regex_record_candidate(
     const iree_tokenizer_regex_dfa_t* dfa,
     iree_tokenizer_regex_exec_state_t* state, uint16_t dfa_state,
     iree_host_size_t match_end, bool lookahead_confirmed) {
   if (!iree_tokenizer_regex_has_branches(dfa)) {
-    return false;
+    return;
   }
 
   uint64_t accepting = dfa->accepting_branches[dfa_state];
   if (!accepting) {
-    return false;
+    return;
   }
 
-  // Find highest-priority accepting branch (lowest bit set).
-  int highest_accepting = iree_math_count_trailing_zeros_u64(accepting);
-
-  // Only record the match position if lookahead has been confirmed.
-  // This prevents committing matches where lookahead was deferred (pending)
-  // or failed. Without this check, patterns like `a(?!b)|ab` could incorrectly
-  // match "a" when lookahead is deferred at chunk boundary and later fails.
-  if (lookahead_confirmed) {
-    if (highest_accepting < state->best_branch_idx) {
-      // Higher priority branch accepts - update best candidate.
-      state->best_branch_idx = (uint8_t)highest_accepting;
-      state->best_match_end = match_end;
-    } else if (highest_accepting == state->best_branch_idx) {
-      // Same branch accepting again - extend greedily.
-      state->best_match_end = match_end;
+  uint8_t branch = (uint8_t)iree_math_count_trailing_zeros_u64(accepting);
+  if (!lookahead_confirmed) {
+    if (!iree_tokenizer_regex_lookahead_has_fallback(dfa, dfa_state)) {
+      return;
     }
+    branch = dfa->lookahead[dfa_state].fallback_branch;
   }
+  if (branch <= state->best_branch_idx) {
+    state->best_branch_idx = branch;
+    state->best_match_end = match_end;
+  }
+}
 
-  // Check if we can commit: the best branch is no longer accepting AND
-  // no higher-priority branches can take over.
-  // Higher priority = lower branch index.
+// A non-accepting state can still extend the winning greedy branch. Commit
+// only when neither that branch nor any earlier alternative remains alive.
+static inline bool iree_tokenizer_regex_can_commit_candidate(
+    const iree_tokenizer_regex_dfa_t* dfa,
+    const iree_tokenizer_regex_exec_state_t* state) {
   if (state->best_branch_idx < 64) {
-    uint64_t alive = dfa->alive_branches[dfa_state];
+    uint64_t alive = dfa->alive_branches[state->dfa_state];
     uint64_t higher_priority_mask = (1ULL << state->best_branch_idx) - 1;
-
-    // Commit when:
-    // 1. No higher-priority branches are alive (they can't win anymore)
-    // 2. The best branch is no longer ACCEPTING at this state (it accepted
-    //    earlier and the accepting path has died, even if other paths remain)
     uint64_t best_branch_mask = 1ULL << state->best_branch_idx;
-    bool best_branch_accepting = (accepting & best_branch_mask) != 0;
-
-    if ((alive & higher_priority_mask) == 0 && !best_branch_accepting) {
-      return true;
-    }
+    return (alive & (higher_priority_mask | best_branch_mask)) == 0;
   }
   return false;
 }
@@ -925,6 +918,7 @@ static inline void iree_tokenizer_regex_reset_to_start(
   state->has_accept = false;
   state->has_accept_fallback = false;
   state->in_match = false;
+  state->pending_lookahead = false;
   // Reset branch tracking for new match attempt.
   iree_tokenizer_regex_reset_best_candidate(state);
 }
@@ -945,6 +939,8 @@ static inline void iree_tokenizer_regex_evaluate_accepting_state(
     if (has_fallback) {
       state->last_accept_fallback = accept_pos;
       state->has_accept_fallback = true;
+      iree_tokenizer_regex_record_candidate(dfa, state, accepting_state,
+                                            accept_pos, false);
     }
 
     if (peek_offset < peek_view.size) {
@@ -958,6 +954,8 @@ static inline void iree_tokenizer_regex_evaluate_accepting_state(
         state->last_accept = accept_pos;
         state->has_accept = true;
         state->pending_lookahead = false;
+        iree_tokenizer_regex_record_candidate(dfa, state, accepting_state,
+                                              accept_pos, true);
       }
     } else {
       // At boundary - defer lookahead to next chunk or finalize.
@@ -969,211 +967,34 @@ static inline void iree_tokenizer_regex_evaluate_accepting_state(
     // No lookahead or end anchor - accept unconditionally.
     state->has_accept = true;
     state->last_accept = accept_pos;
+    iree_tokenizer_regex_record_candidate(dfa, state, accepting_state,
+                                          accept_pos, true);
   }
 }
 
-// Forward declaration for process_rewind_buffer (called by
-// backtrack_via_buffer and resume_via_buffer).
-static iree_status_t iree_tokenizer_regex_process_rewind_buffer(
-    const iree_tokenizer_regex_dfa_t* dfa,
-    iree_tokenizer_regex_exec_state_t* state, iree_host_size_t next_start_abs);
-
-// Resumes matching from a position in a previous chunk after emitting a match.
-// After a successful match, we restart matching from the match end position.
-// If that position is in a previous chunk (before base_offset), we use the
-// rewind buffer to replay those bytes. Returns IREE_STATUS_OUT_OF_RANGE if
-// |resume_position| is not in the rewind buffer.
-static iree_status_t iree_tokenizer_regex_resume_via_buffer(
-    const iree_tokenizer_regex_dfa_t* dfa,
-    iree_tokenizer_regex_exec_state_t* state,
-    iree_host_size_t resume_position) {
-  iree_host_size_t buffer_end_abs =
-      state->rewind_buffer_start + state->rewind_buffer_length;
-
-  if (resume_position < state->rewind_buffer_start ||
-      resume_position >= buffer_end_abs) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "streaming regex resume failed: "
-                            "resume_position=%" PRIhsz
-                            " not in rewind buffer "
-                            "[%" PRIhsz ", %" PRIhsz ")",
-                            resume_position, state->rewind_buffer_start,
-                            buffer_end_abs);
-  }
-
-  return iree_tokenizer_regex_process_rewind_buffer(dfa, state,
-                                                    resume_position);
-}
-
-// Attempts cross-chunk backtracking using the rewind buffer.
-//
-// When a partial match fails and match_start is in a previous chunk, we need
-// to restart matching from match_start + 1. This function checks if the rewind
-// buffer contains the necessary bytes and processes them if so.
-//
-// Parameters:
-//   dfa: The DFA being executed.
-//   state: Executor state (match_start must be set before calling).
-//   base_offset: Absolute byte offset of the current chunk's first byte.
-//   context: Human-readable context for error message (e.g., "main loop").
-//
-// Returns:
-//   - IREE_STATUS_OK if backtracking succeeded (state is updated for
-//     continuing with current chunk from position 0).
-//   - IREE_STATUS_OUT_OF_RANGE if match_start is not in the rewind buffer.
-static iree_status_t iree_tokenizer_regex_backtrack_via_buffer(
-    const iree_tokenizer_regex_dfa_t* dfa,
-    iree_tokenizer_regex_exec_state_t* state, iree_host_size_t base_offset,
-    const char* context) {
-  iree_host_size_t buffer_end_abs =
-      state->rewind_buffer_start + state->rewind_buffer_length;
-
-  // Check if match_start is within the rewind buffer.
-  if (state->match_start < state->rewind_buffer_start ||
-      state->match_start >= buffer_end_abs) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "streaming regex backtrack failed (%s): "
-                            "match_start=%" PRIhsz
-                            " not in rewind buffer "
-                            "[%" PRIhsz ", %" PRIhsz ")",
-                            context, state->match_start,
-                            state->rewind_buffer_start, buffer_end_abs);
-  }
-
-  // Calculate next start position (match_start + 1 codepoint).
-  iree_host_size_t local_match_start =
-      state->match_start - state->rewind_buffer_start;
-  iree_host_size_t next_start =
-      local_match_start + iree_unicode_utf8_sequence_length(
-                              state->rewind_buffer[local_match_start]);
-  iree_host_size_t next_start_abs = state->rewind_buffer_start + next_start;
-
-  // Process buffer bytes to set up state for continuing with current chunk.
-  return iree_tokenizer_regex_process_rewind_buffer(dfa, state, next_start_abs);
-}
-
-// Processes bytes from the rewind buffer for cross-chunk backtracking.
-//
-// When a partial match fails and match_start is in a previous chunk, we need
-// to restart matching from match_start + 1. If those bytes are in the rewind
-// buffer, this function processes them through the DFA to set up the correct
-// state for continuing with the current chunk.
-//
-// This is called when:
-//   1. A partial match failed (NO_TRANSITION encountered)
-//   2. match_start is in a previous chunk (match_start < base_offset)
-//   3. match_start is within the rewind buffer range
-//
-// The function steps through the buffered bytes, updating the DFA state and
-// match tracking. After returning, the main loop continues processing the
-// current chunk from position 0 with the updated state.
-//
-// Parameters:
-//   dfa: The DFA being executed.
-//   state: Executor state to update.
-//   next_start_abs: Absolute position to start from (match_start + 1).
-//
-// Returns:
-//   - IREE_STATUS_OK on success.
-//   - Error status if a callback fails.
-static iree_status_t iree_tokenizer_regex_process_rewind_buffer(
-    const iree_tokenizer_regex_dfa_t* dfa,
-    iree_tokenizer_regex_exec_state_t* state, iree_host_size_t next_start_abs) {
-  // Find the starting position within the buffer.
-  iree_host_size_t buffer_offset = next_start_abs - state->rewind_buffer_start;
-  iree_host_size_t buffer_end = state->rewind_buffer_length;
-
-  // Reset state for new match attempt.
-  state->dfa_state = (next_start_abs == 0)
-                         ? dfa->header->start_state
-                         : dfa->header->unanchored_start_state;
-  state->match_start = next_start_abs;
-  state->in_match = false;
-  state->has_accept = false;
-  state->has_accept_fallback = false;
-  iree_tokenizer_regex_reset_best_candidate(state);
-
-  // Process buffer bytes through the DFA.
-  // This is a simplified version of the main loop - we don't emit matches here
-  // because matches that complete within the buffer would have been found in
-  // a previous chunk. We're just setting up state to continue into the current
-  // chunk.
-
-  // Create string view for entire rewind buffer - reused across iterations.
-  const iree_string_view_t buffer_view = iree_make_string_view(
-      (const char*)state->rewind_buffer, state->rewind_buffer_length);
-
-  while (buffer_offset < buffer_end) {
-    iree_host_size_t abs_pos = state->rewind_buffer_start + buffer_offset;
-
-    // Decode UTF-8 codepoint and map to pseudo-byte for DFA transition.
-    // Complete UTF-8 is guaranteed by the caller, so rewind buffer only
-    // contains complete codepoints.
-    uint32_t codepoint = iree_unicode_utf8_decode(buffer_view, &buffer_offset);
-    uint8_t byte = iree_tokenizer_regex_codepoint_to_byte(codepoint);
-
-    // Step the DFA (check exact codepoint ranges first, then byte lookup).
-    uint16_t next_state =
-        iree_tokenizer_regex_dfa_step(dfa, state->dfa_state, codepoint, byte);
-
-    if (next_state == IREE_TOKENIZER_UTIL_REGEX_NO_TRANSITION) {
-      // Failed transition - if we were in a match, we need to backtrack.
-      if (state->in_match) {
-        // Restart from match_start + 1 codepoint within buffer.
-        iree_host_size_t local_match_start =
-            state->match_start - state->rewind_buffer_start;
-        iree_host_size_t next_start =
-            local_match_start + iree_unicode_utf8_sequence_length(
-                                    state->rewind_buffer[local_match_start]);
-
-        if (next_start < buffer_end) {
-          // Continue backtracking within buffer.
-          // Clear all match state including fallback and branch tracking.
-          buffer_offset = next_start;
-          iree_host_size_t restart_abs =
-              state->rewind_buffer_start + next_start;
-          state->dfa_state = (restart_abs == 0)
-                                 ? dfa->header->start_state
-                                 : dfa->header->unanchored_start_state;
-          state->match_start = restart_abs;
-          state->in_match = false;
-          state->has_accept = false;
-          state->has_accept_fallback = false;
-          iree_tokenizer_regex_reset_best_candidate(state);
-          continue;
-        }
-        // Past end of buffer - main loop will handle the rest.
-        // Clear all match state before falling through to retry.
-        state->in_match = false;
-        state->has_accept = false;
-        state->has_accept_fallback = false;
-        iree_tokenizer_regex_reset_best_candidate(state);
-      }
-      // Try current byte from start state.
-      // Note: buffer_offset is already advanced past this character by decode.
-      state->dfa_state = (abs_pos == 0) ? dfa->header->start_state
-                                        : dfa->header->unanchored_start_state;
-      state->match_start = abs_pos;
-      continue;
+// Selects a prior chunk when a failed continuation must be replayed. Buffered
+// bytes use the ordinary scan loop, including its predicates and callbacks.
+static iree_status_t iree_tokenizer_regex_seek(
+    const iree_tokenizer_regex_exec_state_t* state,
+    iree_host_size_t absolute_position, iree_string_view_t* chunk,
+    iree_host_size_t* base_offset, iree_host_size_t* position) {
+  if (absolute_position < *base_offset) {
+    iree_host_size_t buffer_end =
+        state->rewind_buffer_start + state->rewind_buffer_length;
+    if (absolute_position < state->rewind_buffer_start ||
+        absolute_position >= buffer_end) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "streaming regex requires byte %" PRIhsz
+          " before the available input and outside the retained buffer "
+          "[%" PRIhsz ", %" PRIhsz ")",
+          absolute_position, state->rewind_buffer_start, buffer_end);
     }
-
-    // Valid transition.
-    if (!state->in_match) {
-      state->match_start = abs_pos;
-      state->in_match = true;
-      state->has_accept = false;
-    }
-    state->dfa_state = next_state;
-
-    // Track accepting states (but don't emit - that happens in main loop).
-    // buffer_offset is already advanced past this character by decode.
-    if (iree_tokenizer_regex_dfa_is_accepting(dfa, next_state)) {
-      iree_host_size_t accept_pos = state->rewind_buffer_start + buffer_offset;
-      iree_tokenizer_regex_evaluate_accepting_state(
-          dfa, state, next_state, accept_pos, buffer_view, buffer_offset);
-    }
+    *chunk = iree_make_string_view((const char*)state->rewind_buffer,
+                                   state->rewind_buffer_length);
+    *base_offset = state->rewind_buffer_start;
   }
-
+  *position = absolute_position - *base_offset;
   return iree_ok_status();
 }
 
@@ -1287,38 +1108,14 @@ static void iree_tokenizer_regex_update_rewind_buffer(
   }
 }
 
-// Updates pending lookahead for an accepting state.
-//
-// With quantifiers like \s+(?!\S), we may visit an accepting state multiple
-// times. The lookahead should only be evaluated at the FINAL position where
-// the match cannot extend further. This function just records that a lookahead
-// needs to be checked; actual evaluation happens at NO_TRANSITION boundary.
-//
-// Algorithm:
-//   Always defer lookahead by recording the pending state. The lookahead will
-//   be evaluated when we hit NO_TRANSITION or end of input.
-//
-// Evaluates pending lookahead at a boundary.
-//
-// Called when we hit NO_TRANSITION and need to resolve any pending lookahead.
-// At this point, we know the match cannot extend further, so we can safely
-// evaluate the lookahead condition.
-//
-// Returns:
-//   true if lookahead passed (or no lookahead pending), false if it failed.
-static inline bool iree_tokenizer_regex_resolve_pending_lookahead(
+// Resolves a deferred predicate at the next actual character boundary. This
+// includes the boundary between a replayed prefix and the incoming chunk.
+static inline void iree_tokenizer_regex_resolve_pending_lookahead(
     const iree_tokenizer_regex_dfa_t* dfa,
     iree_tokenizer_regex_exec_state_t* state, iree_string_view_t chunk_view,
     iree_host_size_t peek_offset) {
   if (!state->pending_lookahead) {
-    return true;  // No pending lookahead - always passes.
-  }
-
-  // Check if we're at end of chunk.
-  if (peek_offset >= chunk_view.size) {
-    // At end of chunk with pending lookahead - keep pending for next chunk.
-    // The lookahead will be resolved when more data arrives or at finalize.
-    return true;  // Don't resolve yet.
+    return;
   }
 
   // Decode the next character for lookahead evaluation.
@@ -1335,13 +1132,15 @@ static inline bool iree_tokenizer_regex_resolve_pending_lookahead(
     // Lookahead passed - record acceptance.
     state->last_accept = state->pending_match_end;
     state->has_accept = true;
+    iree_tokenizer_regex_record_candidate(dfa, state,
+                                          state->pending_lookahead_state,
+                                          state->pending_match_end, true);
   }
 
   state->pending_lookahead = false;
-  return !rejected;
 }
 
-iree_status_t iree_tokenizer_regex_exec_feed(
+static iree_status_t iree_tokenizer_regex_scan(
     const iree_tokenizer_regex_dfa_t* dfa,
     iree_tokenizer_regex_exec_state_t* state, iree_string_view_t chunk,
     iree_host_size_t base_offset, const iree_tokenizer_regex_stride_t* stride,
@@ -1356,15 +1155,22 @@ iree_status_t iree_tokenizer_regex_exec_feed(
     return iree_ok_status();
   }
 
+  // The active view may temporarily select retained bytes. Returning to the
+  // incoming chunk preserves a single execution path for both kinds of input.
+  const iree_string_view_t incoming_chunk = chunk;
+  const iree_host_size_t incoming_base = base_offset;
   iree_host_size_t position = 0;
-
-  // Resolve pending lookahead from previous chunk if we have new data.
-  if (state->pending_lookahead && chunk.size > 0) {
-    iree_tokenizer_regex_resolve_pending_lookahead(dfa, state, chunk, 0);
-  }
-
-  // Main processing loop.
-  while (position < chunk.size) {
+  while (true) {
+    if (position == chunk.size) {
+      if (base_offset == incoming_base) {
+        break;
+      }
+      chunk = incoming_chunk;
+      base_offset = incoming_base;
+      position = 0;
+      continue;
+    }
+    iree_tokenizer_regex_resolve_pending_lookahead(dfa, state, chunk, position);
     iree_host_size_t char_start = position;
     iree_host_size_t abs_pos = base_offset + char_start;
 
@@ -1453,13 +1259,8 @@ iree_status_t iree_tokenizer_regex_exec_feed(
 
     if (next_state == IREE_TOKENIZER_UTIL_REGEX_NO_TRANSITION) {
       // No transition - end of current match attempt.
-      // First, resolve any pending lookahead at the current boundary.
-      iree_tokenizer_regex_resolve_pending_lookahead(dfa, state, chunk,
-                                                     char_start);
-
       if (state->has_accept || state->has_accept_fallback) {
-        // Emit the match we found. emit_match prefers lookahead-passed
-        // position over fallback for patterns like \s+(?!\S)|\s+.
+        // Emit the selected branch at its last valid greedy endpoint.
         iree_host_size_t match_end = 0;
         IREE_RETURN_IF_ERROR(iree_tokenizer_regex_emit_match(
             state, dfa, callback, user_data, &match_end));
@@ -1468,10 +1269,7 @@ iree_status_t iree_tokenizer_regex_exec_feed(
         // Once we've emitted that match, no more matches can occur.
         // Reset state before returning so callers see in_match=false.
         if (requires_start) {
-          state->in_match = false;
-          state->has_accept = false;
-          state->has_accept_fallback = false;
-          iree_tokenizer_regex_reset_best_candidate(state);
+          iree_tokenizer_regex_reset_to_start(state, dfa, match_end);
           return iree_ok_status();
         }
 
@@ -1480,66 +1278,21 @@ iree_status_t iree_tokenizer_regex_exec_feed(
         // start new matches.
         iree_host_size_t resume_position = match_end;
         iree_tokenizer_regex_reset_to_start(state, dfa, resume_position);
-        if (resume_position >= base_offset) {
-          position = resume_position - base_offset;
-        } else {
-          // Match ended in previous chunk - replay from rewind buffer.
-          IREE_RETURN_IF_ERROR(iree_tokenizer_regex_resume_via_buffer(
-              dfa, state, resume_position));
-          position = 0;
-        }
+        IREE_RETURN_IF_ERROR(iree_tokenizer_regex_seek(
+            state, resume_position, &chunk, &base_offset, &position));
         continue;
       } else if (state->in_match) {
-        // Failed partial match - need to restart from match_start + 1.
-        state->in_match = false;
-
-        // With start anchor (^), matching can only start at position 0.
-        // If we're already past position 0 and the partial match failed,
-        // there's no point in trying further positions.
-        if (requires_start && state->match_start > 0) {
+        if (requires_start) {
+          iree_tokenizer_regex_reset_to_start(state, dfa, abs_pos);
           return iree_ok_status();
         }
-
-        // Can we backtrack to match_start + 1?
-        // Only possible if match_start is in the current chunk.
-        if (state->match_start >= base_offset) {
-          // match_start is in this chunk - we can backtrack within it.
-          iree_host_size_t match_start_local = state->match_start - base_offset;
-          // Advance by one codepoint from match_start.
-          iree_host_size_t next_start =
-              match_start_local + iree_unicode_utf8_sequence_length(
-                                      (uint8_t)chunk.data[match_start_local]);
-
-          // With start anchor, don't restart if next_start > 0.
-          if (requires_start && next_start > 0) {
-            return iree_ok_status();
-          }
-
-          if (next_start < chunk.size) {
-            // Restart from next_start (match_start + 1 codepoint).
-            // Use reset_to_start to properly clear all match state including
-            // fallback acceptance and branch tracking.
-            iree_host_size_t restart_abs = base_offset + next_start;
-            iree_tokenizer_regex_reset_to_start(state, dfa, restart_abs);
-            position = next_start;
-            continue;
-          }
-          // Exhausted all positions in this chunk. In streaming mode, the next
-          // chunk will continue. In one-shot mode, finalize handles cleanup.
-          break;
-        }
-
-        // match_start is in a previous chunk - use rewind buffer.
-        IREE_RETURN_IF_ERROR(iree_tokenizer_regex_backtrack_via_buffer(
-            dfa, state, base_offset, "main loop"));
-
-        // With start anchor, don't restart if we've moved past position 0.
-        if (requires_start && state->match_start > 0) {
-          return iree_ok_status();
-        }
-
-        // Continue processing current chunk from the beginning.
-        position = 0;
+        // Retry one complete codepoint after the failed match's start. Select
+        // retained input first when the start belongs to an earlier chunk.
+        IREE_RETURN_IF_ERROR(iree_tokenizer_regex_seek(
+            state, state->match_start, &chunk, &base_offset, &position));
+        position +=
+            iree_unicode_utf8_sequence_length((uint8_t)chunk.data[position]);
+        iree_tokenizer_regex_reset_to_start(state, dfa, base_offset + position);
         continue;
       } else {
         // Not in a match - just try current char from start state.
@@ -1583,106 +1336,109 @@ iree_status_t iree_tokenizer_regex_exec_feed(
                                                     abs_end, chunk, position);
     }
 
-    // Branch-aware commit check: If we have branch tracking data and
-    // all higher-priority branches are dead, emit the best candidate now
-    // instead of waiting for NO_TRANSITION.
-    //
-    // We only record match positions when lookahead has been confirmed at this
-    // exact position. This prevents the race condition where lookahead is
-    // deferred at chunk boundary and the branch fast-path commits a match
-    // before lookahead can be evaluated.
-    iree_host_size_t branch_check_end = base_offset + position;
-    bool lookahead_confirmed =
-        !iree_tokenizer_regex_has_lookahead(dfa, next_state) ||
-        (state->has_accept && state->last_accept == branch_check_end);
-    if (iree_tokenizer_regex_update_best_candidate(
-            dfa, state, next_state, branch_check_end, lookahead_confirmed)) {
-      // Higher-priority branches are dead - emit best candidate.
-      // Use best_match_end as the match end position.
-      if (state->best_branch_idx < 64) {
+    if (iree_tokenizer_regex_can_commit_candidate(dfa, state)) {
+      iree_host_size_t resume_position = state->best_match_end;
+      if (callback) {
         iree_tokenizer_regex_match_t match = {
             .start = state->match_start,
-            .end = state->best_match_end,
+            .end = resume_position,
         };
-        if (callback) {
-          IREE_RETURN_IF_ERROR(callback(user_data, match));
-        }
-
-        // With start anchor (^), only one match at position 0 is possible.
-        // Reset state before returning so callers see in_match=false.
-        if (requires_start) {
-          state->in_match = false;
-          state->has_accept = false;
-          state->has_accept_fallback = false;
-          iree_tokenizer_regex_reset_best_candidate(state);
-          return iree_ok_status();
-        }
-
-        // Resume scanning from the end of the emitted match.
-        iree_host_size_t resume_position = state->best_match_end;
-        iree_tokenizer_regex_reset_to_start(state, dfa, resume_position);
-        state->last_accept = resume_position;
-        if (resume_position >= base_offset) {
-          position = resume_position - base_offset;
-        } else {
-          // Match ended in previous chunk - replay from rewind buffer.
-          IREE_RETURN_IF_ERROR(iree_tokenizer_regex_resume_via_buffer(
-              dfa, state, resume_position));
-          position = 0;
-        }
-        continue;
+        IREE_RETURN_IF_ERROR(callback(user_data, match));
       }
+      iree_tokenizer_regex_reset_to_start(state, dfa, resume_position);
+      if (requires_start) {
+        return iree_ok_status();
+      }
+      IREE_RETURN_IF_ERROR(iree_tokenizer_regex_seek(
+          state, resume_position, &chunk, &base_offset, &position));
     }
   }
 
-  // Preserve bytes for potential cross-chunk backtracking in next chunk.
-  iree_tokenizer_regex_update_rewind_buffer(state, chunk, base_offset);
+  return iree_ok_status();
+}
 
+iree_status_t iree_tokenizer_regex_exec_feed(
+    const iree_tokenizer_regex_dfa_t* dfa,
+    iree_tokenizer_regex_exec_state_t* state, iree_string_view_t chunk,
+    iree_host_size_t base_offset, const iree_tokenizer_regex_stride_t* stride,
+    iree_tokenizer_regex_match_callback_fn_t callback, void* user_data) {
+  IREE_RETURN_IF_ERROR(iree_tokenizer_regex_scan(dfa, state, chunk, base_offset,
+                                                 stride, callback, user_data));
+  iree_tokenizer_regex_update_rewind_buffer(state, chunk, base_offset);
   return iree_ok_status();
 }
 
 iree_status_t iree_tokenizer_regex_exec_finalize(
     const iree_tokenizer_regex_dfa_t* dfa,
     iree_tokenizer_regex_exec_state_t* state, iree_host_size_t total_length,
+    iree_string_view_t available_tail,
     iree_tokenizer_regex_match_callback_fn_t callback, void* user_data) {
-  // Resolve pending lookahead at end of stream.
-  // With no following character, negative lookahead unconditionally passes:
-  //   - a(?!b) at EOS: no 'b' follows, so passes
-  //   - \s+(?!\S) at EOS: no non-whitespace follows, so passes
-  //
-  // Only use pending_match_end if we don't already have a better
-  // accept position from a different pattern branch. This can happen when:
-  //   1. Whitespace pattern defers lookahead at chunk boundary
-  //   2. A different branch (e.g., letter pattern) subsequently matches
-  //   3. The letter match sets last_accept to a longer position
-  //   4. We must not overwrite that better position with pending_match_end
-  if (state->pending_lookahead) {
-    // Only use pending lookahead position if no better accept exists,
-    // or if pending extends beyond current accept (same match, extended).
-    if (!state->has_accept || state->pending_match_end > state->last_accept) {
-      state->last_accept = state->pending_match_end;
-      state->has_accept = true;
+  if (available_tail.size > total_length) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "available regex tail exceeds the input length");
+  }
+  // Both views end at total_length. Keep the larger one, without copying or
+  // mutating the retained bytes: streaming consumers may still need them for
+  // unmatched passthrough after finalization.
+  if (available_tail.size < state->rewind_buffer_length) {
+    available_tail = iree_make_string_view((const char*)state->rewind_buffer,
+                                           state->rewind_buffer_length);
+  }
+  const iree_host_size_t tail_start = total_length - available_tail.size;
+  const bool requires_start =
+      iree_tokenizer_regex_requires_start_anchor(dfa, dfa->header->start_state);
+  while (state->in_match) {
+    // No following character means negative lookahead passes. An end anchor
+    // also becomes valid, even if a lower-priority alternative accepted sooner.
+    if (state->pending_lookahead) {
+      iree_tokenizer_regex_record_candidate(dfa, state,
+                                            state->pending_lookahead_state,
+                                            state->pending_match_end, true);
+      if (!state->has_accept || state->pending_match_end > state->last_accept) {
+        state->last_accept = state->pending_match_end;
+        state->has_accept = true;
+      }
+      state->pending_lookahead = false;
     }
-    state->pending_lookahead = false;
-  }
+    if (iree_tokenizer_regex_dfa_is_accepting(dfa, state->dfa_state) &&
+        iree_tokenizer_regex_requires_end_anchor(dfa, state->dfa_state)) {
+      state->last_accept = total_length;
+      state->has_accept = true;
+      iree_tokenizer_regex_record_candidate(dfa, state, state->dfa_state,
+                                            total_length, true);
+    }
 
-  // Handle end anchor ($) at end of stream.
-  // If we're in an accepting state with end anchor requirement and at end of
-  // input, the match is now valid.
-  if (state->in_match && !state->has_accept && !state->has_accept_fallback &&
-      iree_tokenizer_regex_dfa_is_accepting(dfa, state->dfa_state) &&
-      iree_tokenizer_regex_requires_end_anchor(dfa, state->dfa_state)) {
-    // End anchor satisfied - we're at end of input.
-    state->last_accept = total_length;
-    state->has_accept = true;
+    iree_host_size_t resume_position = state->match_start;
+    bool matched = state->has_accept || state->has_accept_fallback;
+    if (matched) {
+      IREE_RETURN_IF_ERROR(iree_tokenizer_regex_emit_match(
+          state, dfa, callback, user_data, &resume_position));
+    }
+    if (resume_position == total_length || requires_start) {
+      iree_tokenizer_regex_reset_to_start(state, dfa, total_length);
+      return iree_ok_status();
+    }
+    if (resume_position < tail_start) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "regex finalization requires byte %" PRIhsz
+                              " before the available tail at %" PRIhsz,
+                              resume_position, tail_start);
+    }
+    if (!matched) {
+      // An unfinished match can conceal a later complete match at EOF.
+      resume_position += iree_unicode_utf8_sequence_length(
+          (uint8_t)available_tail.data[resume_position - tail_start]);
+    }
+    iree_tokenizer_regex_reset_to_start(state, dfa, resume_position);
+    // Replay the unconsumed suffix through the same scan loop. Do not update
+    // the retained buffer: available_tail may point directly into it.
+    IREE_RETURN_IF_ERROR(iree_tokenizer_regex_scan(
+        dfa, state,
+        iree_make_string_view(
+            available_tail.data + resume_position - tail_start,
+            total_length - resume_position),
+        resume_position, /*stride=*/NULL, callback, user_data));
   }
-
-  // Emit any pending match.
-  if (state->has_accept || state->has_accept_fallback) {
-    IREE_RETURN_IF_ERROR(iree_tokenizer_regex_emit_match(
-        state, dfa, callback, user_data, /*out_match_end=*/NULL));
-  }
-
   return iree_ok_status();
 }
 
@@ -1699,8 +1455,8 @@ iree_status_t iree_tokenizer_regex_exec(
   IREE_RETURN_IF_ERROR(iree_tokenizer_regex_exec_feed(
       dfa, &state, text, 0, /*stride=*/NULL, callback, user_data));
 
-  return iree_tokenizer_regex_exec_finalize(dfa, &state, text.size, callback,
-                                            user_data);
+  return iree_tokenizer_regex_exec_finalize(dfa, &state, text.size, text,
+                                            callback, user_data);
 }
 
 // Callback for counting matches.

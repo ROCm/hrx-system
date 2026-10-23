@@ -69,9 +69,10 @@ typedef struct loom_benchmark_hal_compile_context_t {
   const loom_benchmark_hal_actual_provider_t* rejected_sequence_provider;
   // Execution options with HAL actual and reference providers wired in.
   loom_testbench_case_execution_options_t execution_options;
-  // Materializer options used by HAL benchmark timing batches.
-  loom_testbench_value_materializer_options_t benchmark_materializer;
-  // Reference oracle storage borrowed by |execution_options|.
+  // Execution options used to prepare HAL benchmark timing batches. Host-side
+  // invocations remain enabled while shaped values target device-local storage.
+  loom_testbench_case_execution_options_t benchmark_execution_options;
+  // Reference oracle storage borrowed by both execution option sets.
   loom_benchmark_reference_oracles_t reference_oracles;
 } loom_benchmark_hal_compile_context_t;
 

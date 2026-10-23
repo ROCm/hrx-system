@@ -6,7 +6,7 @@
 #endif
 int entry(void) { return 1; }
 // ----
-func.def public @entry() -> (i32) {
+func.def public source_signature(#func.abi.c.signature<arguments = [], results = [0], types = [#func.abi.c.type<signed_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @entry() -> (i32) {
   %1 = scalar.constant 1 : i32
   func.return %1 : i32
 }

@@ -6,12 +6,11 @@
 
 #include <array>
 #include <atomic>
-#include <cstring>
 #include <memory>
 
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/amd/gpu/cts/feedback_images.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
+#include "iree/hal/drivers/amd/gpu/cts/testdata.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -36,23 +35,11 @@ class GpuFeedbackTest
           AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS)) {
       GTEST_SKIP() << "Native shader notification is unavailable";
     }
-    const auto gfx = context_->target_info.gfx_ip;
     context_->event_sink = {Publish, this};
+    IREE_ASSERT_OK(LookupExecutableData("amd_gpu_feedback",
+                                        context_->target_info,
+                                        IREE_SV("feedback.bin"), &artifact_));
     Create(IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_FEEDBACK);
-    if (HasFatalFailure()) {
-      return;
-    }
-    const auto* files = iree_hal_amd_gpu_feedback_images_create();
-    const char* selector = gfx.major == 9
-                               ? (gfx.minor == 4 ? "gfx9-4-generic" : "gfx90a")
-                           : gfx.major == 11 ? "gfx11-generic"
-                                             : "gfx12-generic";
-    for (size_t i = 0; i < iree_hal_amd_gpu_feedback_images_size(); ++i) {
-      if (std::strstr(files[i].name, selector)) {
-        artifact_ = iree_make_const_byte_span(files[i].data, files[i].size);
-      }
-    }
-    ASSERT_NE(artifact_.data, nullptr);
   }
   void TearDown() override {
     for (auto* recording : recordings_) {

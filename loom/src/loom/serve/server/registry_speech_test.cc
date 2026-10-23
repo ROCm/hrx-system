@@ -19,6 +19,7 @@
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/registry.h"
+#include "loom/serve/server/resources.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/speech/output.h"
 #include "loom/serve/service/speech/request.h"
@@ -86,6 +87,10 @@ class RegistrySpeechTest : public ::testing::Test {
       reader_.join();
     }
     iree_status_free(read_status_);
+    const loom_serve_resources_t resources = {
+        .device_group = registration_options_.device_group,
+    };
+    loom_serve_resources_set_observer(&resources, {});
     IREE_EXPECT_OK(loom_serve_http_listener_free(listener_));
     loom_serve_http_server_free(server_);
   }
@@ -118,15 +123,20 @@ class RegistrySpeechTest : public ::testing::Test {
                                  IREE_ALL_WAITERS);
         },
         notification};
+    const loom_serve_resources_t resources = {
+        .device_group = registration_options_.device_group,
+    };
+    loom_serve_resources_set_observer(&resources, wake);
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      iree_status_t status = iree_ok_status();
+      iree_status_t status = loom_serve_resources_advance(&resources);
       if (Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
         auto& service = Model()->service;
-        status = service.advance(service.self,
-                                 loom_serve_registry_service_flags(Model()),
-                                 &progress);
+        status = iree_status_join(
+            status, service.advance(service.self,
+                                    loom_serve_registry_service_flags(Model()),
+                                    &progress));
         loom_serve_telemetry_record_t record;
         loom_serve_telemetry_read_t result;
         while ((result = loom_serve_telemetry_stream_read(

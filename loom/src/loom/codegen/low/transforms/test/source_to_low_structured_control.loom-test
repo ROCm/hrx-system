@@ -170,8 +170,7 @@ low.func.def target<test.low.core>(@test_target) abi(object_function) @nested_if
 
 test.target<low_core> @test_target
 
-func.def target(@test_target) @rejects_unsupported_structured_region_op(%selector: index, %a: i32, %b: i32) -> (i32) {
-  // ERROR@+1: TARGET/030 {op_name="scf.switch", region_count="2"}
+func.def target(@test_target) @projects_switch_at_structured_boundary(%selector: index, %a: i32, %b: i32) -> (i32) {
   %result = scf.switch %selector -> (i32) {
     case 0 {
       scf.yield %a : i32
@@ -181,4 +180,18 @@ func.def target(@test_target) @rejects_unsupported_structured_region_op(%selecto
     }
   }
   func.return %result : i32
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @projects_switch_at_structured_boundary(%selector: reg<test.i32>, %a: reg<test.i32>, %b: reg<test.i32>) -> (reg<test.i32>) asm {
+  %12 = test.const.i32 0
+  %13 = test.cmp.eq.i32 %selector, %12
+  %result = low.scf.if %13 -> (reg<test.i32>) {
+    low.scf.yield %a : reg<test.i32>
+  } else {
+    low.scf.yield %b : reg<test.i32>
+  }
+  return %result
 }

@@ -323,7 +323,7 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       placements |= IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL;
     }
   }
-  const iree_hal_queue_family_spec_t family = {
+  iree_hal_queue_family_spec_t family = {
       .name = device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
                   ? IREE_SV("aql")
                   : IREE_SV("pm4"),
@@ -350,6 +350,20 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
                                .system_scope_32 = wait_conditions_32,
                                .system_scope_64 = wait_conditions_64}},
   };
+  static_assert(
+      (uint32_t)AMDF_QUEUE_PLACEMENT_COUNT ==
+              (uint32_t)IREE_HAL_QUEUE_PLACEMENT_COUNT &&
+          (uint32_t)AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN ==
+              (uint32_t)IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KNOWN &&
+          (uint32_t)AMDF_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ ==
+              (uint32_t)IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ &&
+          (uint32_t)AMDF_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL ==
+              (uint32_t)IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL,
+      "native and HAL publication requirements agree");
+  if (placements) {
+    memcpy(family.host_publication, native_family->host_publication,
+           sizeof(family.host_publication));
+  }
   const iree_hal_device_queue_spec_t queues = {
       .family_count = 1,
       .families = &family,
@@ -1025,8 +1039,8 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
       (iree_hal_amd_fabric_memory_storage_t*)(device->publication_sources +
                                               publication_count);
   iree_hal_amd_gpu_allocation_context_initialize(
-      (iree_hal_device_t*)device, context, &device->publication,
-      options->queue_count, host_allocator, &device->memory.allocations);
+      (iree_hal_device_t*)device, &device->publication, options->queue_count,
+      host_allocator, &device->memory.allocations);
   iree_hal_amd_gpu_memory_mapping_context_initialize(
       (iree_hal_device_t*)device, context, &device->publication,
       options->queue_count + 1, host_allocator, &device->memory.mappings);
@@ -1129,7 +1143,6 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
         .tsan_enabled = tsan_enabled};
     iree_hal_amd_gpu_device_prepare_feedback(&prepare);
     status = prepare.status;
-    device->memory.allocations.failure = &device->feedback.failure_code;
     device->memory.mappings.failure = &device->feedback.failure_code;
   }
   if (iree_status_is_ok(status)) {
@@ -1533,7 +1546,6 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_begin(
       &device->membership, profile);
   if (iree_status_is_ok(status)) {
     device->profile = profile;
-    device->memory.allocations.profile = profile;
     device->memory.mappings.profile = profile;
   } else {
     // Membership has already cleared all queue borrows after a failed begin.
@@ -1553,7 +1565,6 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_end(
   iree_hal_amd_gpu_device_t* device = (void*)base;
   iree_hal_amd_gpu_profile_t* profile = device->profile;
   device->profile = NULL;
-  device->memory.allocations.profile = NULL;
   device->memory.mappings.profile = NULL;
   iree_status_t status =
       iree_hal_amd_gpu_queue_membership_set_profile(&device->membership, NULL);

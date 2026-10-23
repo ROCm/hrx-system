@@ -6,38 +6,23 @@
 
 #include "loom/tools/loom-check/execute.h"
 
-#include "loom/codegen/low/lower/lower.h"
-#include "loom/codegen/low/pipeline/legalizer_registry.h"
 #include "loom/codegen/low/text_asm.h"
-#include "loom/codegen/low/verify.h"
-#include "loom/codegen/pass_environment.h"
 #include "loom/error/diagnostic.h"
 #include "loom/error/json_sink.h"
 #include "loom/error/source.h"
-#include "loom/format/text/parser.h"
 #include "loom/format/text/printer.h"
-#include "loom/ir/context.h"
-#include "loom/ir/function_version.h"
-#include "loom/ir/module.h"
-#include "loom/ops/op_defs.h"
-#include "loom/pass/builtin_registry.h"
 #include "loom/pass/report.h"
-#include "loom/pass/tooling.h"
-#include "loom/target/predicate.h"
 #include "loom/target/provider.h"
 #include "loom/target/reporting/format.h"
-#include "loom/target/selection.h"
-#include "loom/target/specialization.h"
 #include "loom/tools/loom-check/comparison.h"
+#include "loom/tools/loom-check/compile.h"
+#include "loom/tools/loom-check/compile_diagnostics.h"
 #include "loom/tools/loom-check/diagnostics.h"
-#include "loom/tools/loom-check/input.h"
 #include "loom/tools/loom-check/requirements.h"
-#include "loom/tools/loom-format/convert.h"
-#include "loom/transforms/cleanup/patterns.h"
 #include "loom/util/diff.h"
 #include "loom/util/json.h"
 #include "loom/util/stream.h"
-#include "loom/verify/verify.h"
+#include "loomc/iree.h"
 
 void loom_check_result_initialize(iree_allocator_t allocator,
                                   loom_check_result_t* out_result) {
@@ -208,13 +193,6 @@ iree_status_t loom_check_diagnostic_capture_sink(
   return iree_ok_status();
 }
 
-iree_status_t loom_check_context_register_and_finalize(
-    const loom_check_environment_t* environment, loom_context_t* context) {
-  IREE_RETURN_IF_ERROR(environment->register_context.fn(
-      environment->register_context.user_data, context));
-  return loom_context_finalize(context);
-}
-
 //===----------------------------------------------------------------------===//
 // Execution
 //===----------------------------------------------------------------------===//
@@ -222,16 +200,16 @@ iree_status_t loom_check_context_register_and_finalize(
 iree_status_t loom_check_execute_case(
     const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_input_t* input_request,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result) {
-  const loom_input_provider_t* input_provider = NULL;
-  IREE_RETURN_IF_ERROR(loom_input_provider_select(
-      environment->input_providers,
+  const loom_input_format_t* input_format = NULL;
+  IREE_RETURN_IF_ERROR(loom_input_format_select(
+      environment->input_formats,
       test_case->input_options.format.size ? test_case->input_options.format
                                            : input_request->format,
-      input_request->path, &input_provider));
+      input_request->path, &input_format, /*out_ordinal=*/NULL));
   bool continue_execution = true;
   IREE_RETURN_IF_ERROR(loom_check_preflight_requirements(
       test_case, environment, allocator, result, &continue_execution));
@@ -242,44 +220,44 @@ iree_status_t loom_check_execute_case(
   switch (test_case->mode) {
     case LOOM_TEST_MODE_ROUNDTRIP: {
       IREE_RETURN_IF_ERROR(loom_check_execute_roundtrip(
-          test_case, filename, input_request, environment, context, block_pool,
+          test_case, filename, input_request, environment, block_pool,
           allocator, result));
       break;
     }
     case LOOM_TEST_MODE_VERIFY: {
       IREE_RETURN_IF_ERROR(loom_check_execute_verify(
           test_case, case_index, report, filename, input_request, environment,
-          context, block_pool, allocator, result));
+          block_pool, allocator, result));
       break;
     }
     case LOOM_TEST_MODE_PASS: {
       IREE_RETURN_IF_ERROR(loom_check_execute_pass(
           test_case, case_index, report, filename, input_request, environment,
-          context, block_pool, allocator, result));
+          block_pool, allocator, result));
       break;
     }
     case LOOM_TEST_MODE_PASS_REPORT: {
       IREE_RETURN_IF_ERROR(loom_check_execute_pass_report(
           test_case, case_index, report, filename, input_request, environment,
-          context, block_pool, allocator, result));
+          block_pool, allocator, result));
       break;
     }
     case LOOM_TEST_MODE_COMPILE_REPORT: {
       IREE_RETURN_IF_ERROR(loom_check_execute_compile_report(
           test_case, case_index, report, filename, input_request, environment,
-          context, block_pool, allocator, result));
+          block_pool, allocator, result));
       break;
     }
     case LOOM_TEST_MODE_FORMAT: {
       IREE_RETURN_IF_ERROR(loom_check_execute_format(
-          test_case, filename, input_request, environment, context, block_pool,
+          test_case, filename, input_request, environment, block_pool,
           allocator, result));
       break;
     }
     case LOOM_TEST_MODE_EMIT: {
       IREE_RETURN_IF_ERROR(loom_check_execute_emit(
           test_case, case_index, report, filename, input_request, environment,
-          context, block_pool, allocator, result));
+          block_pool, allocator, result));
       break;
     }
     default:
@@ -309,55 +287,25 @@ iree_status_t loom_check_execute_case(
 }
 
 static iree_status_t loom_check_verify_pass_module(
-    loom_source_resolver_t source_resolver,
-    const loom_check_environment_t* environment,
+    loomc_module_t* module,
     loom_check_diagnostic_collector_t* diagnostic_collector,
-    loom_module_t* module,
-    const loom_function_version_list_t* function_versions,
-    bool* out_failed_verification) {
-  *out_failed_verification = false;
-  loom_verify_options_t verify_options = {
-      .sink = {.fn = loom_check_diagnostic_collector_sink,
-               .user_data = diagnostic_collector},
+    iree_allocator_t allocator, bool* out_succeeded) {
+  *out_succeeded = false;
+  const loomc_module_verify_options_t options = {
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_VERIFY_OPTIONS,
+      .structure_size = sizeof(options),
       .max_errors = 100,
-      .source_resolver = source_resolver,
   };
-  loom_verify_result_t verify_result = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_verify_module(module, &verify_options, &verify_result));
-  *out_failed_verification = verify_result.error_count > 0;
-  if (*out_failed_verification) {
-    return iree_ok_status();
+  loomc_result_t* verification = NULL;
+  iree_status_t status = iree_status_from_loomc(loomc_module_verify(
+      module, &options, loomc_allocator_from_iree(allocator), &verification));
+  if (iree_status_is_ok(status)) {
+    *out_succeeded = loomc_result_succeeded(verification);
+    status = loom_check_compile_append_result_diagnostics(diagnostic_collector,
+                                                          verification);
   }
-
-  const loom_target_low_descriptor_registry_t low_registry =
-      loom_target_environment_low_descriptor_registry(
-          environment->target_environment);
-  loom_check_diagnostic_emitter_capture_t low_diagnostic_capture = {
-      .diagnostic_collector = diagnostic_collector,
-      .module = module,
-      .source_resolver = source_resolver,
-      .emitter = LOOM_EMITTER_VERIFIER,
-  };
-  loom_low_verify_options_t low_verify_options = {
-      .descriptor_registry = &low_registry.registry,
-      .emitter =
-          {
-              .fn = loom_check_diagnostic_emitter_capture_emit,
-              .user_data = &low_diagnostic_capture,
-          },
-      .provider_list = loom_target_environment_low_verify_provider_list(
-          environment->target_environment),
-      .function_versions = function_versions,
-      .max_errors = 100,
-  };
-  loom_low_verify_result_t low_verify_result = {0};
-  loom_low_verify_scratch_t low_verify_scratch =
-      loom_low_verify_scratch_for_module(module);
-  IREE_RETURN_IF_ERROR(loom_low_verify_module(
-      module, &low_verify_options, &low_verify_scratch, &low_verify_result));
-  *out_failed_verification = low_verify_result.error_count > 0;
-  return iree_ok_status();
+  loomc_result_release(verification);
+  return status;
 }
 
 static iree_status_t loom_check_finish_diagnostics_if_needed(
@@ -464,78 +412,17 @@ static iree_status_t loom_check_parse_pass_target(
   return iree_ok_status();
 }
 
-static iree_status_t loom_check_resolve_pass_target(
-    const loom_module_t* module, const loom_target_environment_t* environment,
-    iree_string_view_t function_name,
-    const loom_target_specification_t* specification,
-    loom_target_specialization_request_t* out_request) {
-  *out_request = (loom_target_specialization_request_t){0};
-  loom_symbol_id_t symbol_id = LOOM_SYMBOL_ID_INVALID;
-  if (iree_string_view_is_empty(function_name)) {
-    iree_host_size_t definition_count = 0;
-    iree_host_size_t public_count = 0;
-    for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
-      const loom_symbol_t* symbol = &module->symbols.entries[i];
-      const loom_func_like_t function =
-          loom_func_like_const_cast(module, symbol->defining_op);
-      if (loom_func_like_body(function) == NULL) {
-        continue;
-      }
-      ++definition_count;
-      const bool is_public =
-          iree_any_bit_set(symbol->flags, LOOM_SYMBOL_FLAG_PUBLIC);
-      public_count += is_public;
-      if (definition_count == 1 || is_public) {
-        symbol_id = i;
-      }
-    }
-    if (definition_count == 0 || (definition_count > 1 && public_count != 1)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "target compile option requires one function definition or one "
-          "public entry with private helpers; specify @function for an "
-          "ambiguous module (got %" PRIhsz " definitions and %" PRIhsz
-          " public entries)",
-          definition_count, public_count);
-    }
-  } else {
-    function_name = iree_string_view_trim(function_name);
-    (void)iree_string_view_consume_prefix_char(&function_name, '@');
-    function_name = iree_string_view_trim(function_name);
-    const loom_string_id_t name_id =
-        loom_module_lookup_string(module, function_name);
-    symbol_id = name_id != LOOM_STRING_ID_INVALID
-                    ? loom_module_find_symbol(module, name_id)
-                    : LOOM_SYMBOL_ID_INVALID;
-    if (symbol_id == LOOM_SYMBOL_ID_INVALID) {
-      return iree_make_status(
-          IREE_STATUS_NOT_FOUND,
-          "target specialization function '@%.*s' does not exist",
-          (int)function_name.size, function_name.data);
-    }
-  }
-  const loom_func_like_t function = loom_func_like_const_cast(
-      module, module->symbols.entries[symbol_id].defining_op);
-  if (!loom_func_like_isa(function) ||
-      function.vtable->target_attr_index == LOOM_ATTR_INDEX_NONE) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "target specialization entry is not a target-assignable function");
-  }
-  out_request->function_ref = loom_func_like_callee(function);
-  return loom_target_environment_select_profile(environment, specification,
-                                                &out_request->target_profile);
-}
-
 static iree_status_t loom_check_execute_pass_with_output(
     const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_input_t* input_request,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result, loom_check_pass_output_kind_t output_kind) {
-  loom_input_module_t input = {0};
-  loom_module_t* module = NULL;
+  loom_check_compile_session_t* session = environment->compile_session;
+  const loomc_allocator_t public_allocator =
+      loomc_allocator_from_iree(allocator);
+  loomc_module_t* module = NULL;
   iree_arena_allocator_t diagnostic_arena;
   iree_arena_initialize(block_pool, &diagnostic_arena);
   loom_check_diagnostic_collector_t diagnostic_collector = {
@@ -544,65 +431,22 @@ static iree_status_t loom_check_execute_pass_with_output(
       .filename = filename,
       .result = result,
   };
-  loom_text_parse_options_t parse_options = {
-      .diagnostic_sink = {.fn = loom_check_diagnostic_collector_sink,
-                          .user_data = &diagnostic_collector},
-      .max_errors = 20,
-  };
-  loom_low_descriptor_text_asm_environment_storage_t low_asm_storage = {0};
-  const loom_target_low_descriptor_registry_t low_registry =
-      loom_target_environment_low_descriptor_registry(
-          environment->target_environment);
-  loom_low_descriptor_text_print_context_initialize(
-      &low_registry.registry, &diagnostic_collector.type_print_context);
-  loom_low_descriptor_text_asm_environment_initialize_with_diagnostics(
-      &low_registry.registry,
-      loom_target_environment_low_asm_diagnostic_provider_list(
-          environment->target_environment),
-      &low_asm_storage, &parse_options.low_asm_environment);
-  iree_status_t status =
-      loom_check_load_input(test_case, input_request, environment, context,
-                            block_pool, &parse_options, allocator, &input);
-  module = input.module;
-  diagnostic_collector.module = module;
-  if (!module) {
+  iree_status_t status = loom_check_compile_admit_module(
+      test_case, filename, input_request, session, environment,
+      /*max_errors=*/20, &diagnostic_collector, block_pool, allocator, &module);
+  if (!iree_status_is_ok(status) || module == NULL ||
+      diagnostic_collector.count > 0) {
     if (iree_status_is_ok(status)) {
       status = loom_check_diagnostic_collector_finish(
           &diagnostic_collector, test_case, case_index, report, allocator,
           result);
     }
-    loom_input_module_deinitialize(&input);
+    loomc_module_release(module);
     iree_arena_deinitialize(&diagnostic_arena);
     return status;
   }
 
-  if (iree_status_is_ok(status) && diagnostic_collector.count > 0) {
-    status = loom_check_diagnostic_collector_finish(&diagnostic_collector,
-                                                    test_case, case_index,
-                                                    report, allocator, result);
-  }
-  if (!iree_status_is_ok(status) || diagnostic_collector.count > 0) {
-    loom_input_module_deinitialize(&input);
-    iree_arena_deinitialize(&diagnostic_arena);
-    return status;
-  }
-
-  // Build and run the pass pipeline.
-  loom_source_resolver_t source_resolver =
-      loom_input_module_source_resolver(&input);
-  loom_check_diagnostic_emitter_capture_t pass_diagnostic_capture = {
-      .diagnostic_collector = &diagnostic_collector,
-      .module = module,
-      .source_resolver = source_resolver,
-      .emitter = LOOM_EMITTER_PASS,
-  };
-  iree_diagnostic_emitter_t pass_diagnostic_emitter = {
-      .fn = loom_check_diagnostic_emitter_capture_emit,
-      .user_data = &pass_diagnostic_capture,
-  };
-  loom_pass_run_result_t run_result = {0};
-  loom_function_version_owner_t function_versions;
-  loom_function_version_owner_initialize(&diagnostic_arena, &function_versions);
+  bool succeeded = false;
   iree_string_view_t pipeline = test_case->pipeline;
   loom_check_pass_target_request_t target_request;
   if (iree_status_is_ok(status)) {
@@ -610,43 +454,52 @@ static iree_status_t loom_check_execute_pass_with_output(
   }
   // Admit input before any transformation can erase an invalid operation.
   if (iree_status_is_ok(status)) {
-    bool failed_verification = false;
-    status = loom_check_verify_pass_module(
-        source_resolver, environment, &diagnostic_collector, module,
-        &function_versions.list, &failed_verification);
-    if (failed_verification) {
-      run_result.error_count = 1;
+    status = loom_check_verify_pass_module(module, &diagnostic_collector,
+                                           allocator, &succeeded);
+  }
+  loomc_target_profile_t* target_profile = NULL;
+  if (iree_status_is_ok(status) && succeeded && target_request.has_target) {
+    status = loom_check_compile_session_select_target_profile(
+        session, target_request.target, &target_profile);
+    if (iree_status_is_ok(status) &&
+        iree_string_view_is_empty(target_request.function_name)) {
+      loomc_module_interop_view_t view = {0};
+      status = loom_check_compile_project_module(module, &diagnostic_collector,
+                                                 allocator, &view, &succeeded);
+      if (iree_status_is_ok(status) && succeeded) {
+        status = loom_check_compile_select_source_function(
+            view.module, target_request.function_name,
+            &target_request.function_name);
+      }
     }
   }
-  if (iree_status_is_ok(status) && run_result.error_count == 0 &&
-      target_request.has_target) {
-    loom_target_specification_t target = {0};
-    loom_target_specialization_request_t specialization;
-    status = loom_target_specification_parse(target_request.target, &target);
-    if (iree_status_is_ok(status)) {
-      status = loom_check_resolve_pass_target(
-          module, environment->target_environment, target_request.function_name,
-          &target, &specialization);
+  loomc_pass_program_t* pass_program = NULL;
+  if (iree_status_is_ok(status) && succeeded) {
+    loomc_result_t* preparation = NULL;
+    if (iree_string_view_starts_with(pipeline, IREE_SV("@"))) {
+      status =
+          iree_status_from_loomc(loomc_pass_program_create_from_module_symbol(
+              module, loomc_string_view_from_iree(pipeline), /*options=*/NULL,
+              public_allocator, &pass_program, &preparation));
+    } else {
+      status =
+          iree_status_from_loomc(loomc_pass_program_create_from_pipeline_text(
+              session->context, loomc_string_view_from_iree(pipeline),
+              /*options=*/NULL, public_allocator, &pass_program, &preparation));
     }
     if (iree_status_is_ok(status)) {
-      uint32_t specialization_error_count = 0;
-      status = loom_target_specialize_functions(
-          environment->target_environment, module,
-          (loom_target_specialization_request_list_t){&specialization, 1},
-          (loom_target_declaration_binding_list_t){0}, pass_diagnostic_emitter,
-          &function_versions, &specialization_error_count);
-      run_result.error_count = specialization_error_count;
+      succeeded = loomc_result_succeeded(preparation);
+      status = loom_check_compile_append_result_diagnostics(
+          &diagnostic_collector, preparation);
     }
+    loomc_result_release(preparation);
   }
   loom_pass_report_t pass_report = {0};
-  loom_pass_report_t* pass_report_ref = NULL;
   if (iree_status_is_ok(status) &&
       output_kind == LOOM_CHECK_PASS_OUTPUT_PASS_REPORT) {
     loom_pass_report_initialize(allocator, &pass_report);
-    pass_report_ref = &pass_report;
   }
   loom_target_compile_report_t compile_report = {0};
-  loom_target_compile_report_t* compile_report_ref = NULL;
   if (iree_status_is_ok(status) &&
       output_kind == LOOM_CHECK_PASS_OUTPUT_COMPILE_REPORT) {
     loom_target_compile_report_initialize(
@@ -665,141 +518,98 @@ static iree_status_t loom_check_execute_pass_with_output(
         LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN |
         LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_CAPABILITY_ROWS |
         LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS;
-    compile_report_ref = &compile_report;
   }
-  if (iree_status_is_ok(status) && run_result.error_count == 0) {
-    const loom_low_lower_policy_registry_t low_lower_policy_registry =
-        loom_target_environment_low_lower_policy_registry(
-            environment->target_environment);
-    const loom_target_math_policy_registry_t math_policy_registry =
-        loom_target_environment_math_policy_registry(
-            environment->target_environment);
-    loom_codegen_pass_environment_storage_t codegen_environment_storage;
-    loom_target_pass_predicate_provider_storage_t predicate_storage;
-    loom_target_pass_predicate_provider_storage_initialize(block_pool,
-                                                           &predicate_storage);
-    const loom_pass_registry_t* target_pass_registry =
-        loom_target_environment_pass_registry(environment->target_environment);
-    loom_pass_registry_storage_t pass_registry_storage = {0};
-    if (iree_status_is_ok(status)) {
-      status = loom_pass_registry_storage_initialize_with_builtins(
-          target_pass_registry, &pass_registry_storage);
-    }
-    const loom_pass_registry_t* pass_registry =
-        loom_pass_registry_storage_registry(&pass_registry_storage);
-    loom_target_legalizer_registry_storage_t legalizer_registry_storage = {0};
-    if (iree_status_is_ok(status)) {
-      const loom_target_legalizer_provider_list_t legalizer_provider_list =
-          loom_target_environment_legalizer_provider_list(
-              environment->target_environment);
-      status = loom_low_legalizer_registry_storage_initialize(
-          legalizer_provider_list, iree_arena_allocator(&diagnostic_arena),
-          &legalizer_registry_storage);
-    }
-    loom_cleanup_pattern_registry_storage_t cleanup_pattern_registry_storage = {
-        0};
-    const loom_cleanup_pattern_registry_t* cleanup_pattern_registry = NULL;
-    if (iree_status_is_ok(status) &&
-        environment->cleanup_pattern_provider_set != NULL) {
-      status = loom_cleanup_pattern_registry_storage_initialize(
-          environment->cleanup_pattern_provider_set,
-          iree_arena_allocator(&diagnostic_arena),
-          &cleanup_pattern_registry_storage);
-      if (iree_status_is_ok(status)) {
-        cleanup_pattern_registry =
-            loom_cleanup_pattern_registry_storage_registry(
-                &cleanup_pattern_registry_storage);
-      }
-    }
-    const loom_target_low_legality_provider_list_t low_legality_provider_list =
-        loom_target_environment_low_legality_provider_list(
-            environment->target_environment);
-    const loom_codegen_pass_environment_options_t environment_options = {
-        .descriptor_registry = &low_registry.registry,
-        .lower_policy_registry = &low_lower_policy_registry,
-        .legality_provider_list = &low_legality_provider_list,
-        .legalizer_registry = loom_target_legalizer_registry_storage_registry(
-            &legalizer_registry_storage),
-        .math_policy_registry = &math_policy_registry,
-        .compile_report = compile_report_ref,
-        .target_environment = environment->target_environment,
-        .cleanup_pattern_registry = cleanup_pattern_registry,
+  if (iree_status_is_ok(status) && succeeded) {
+    const loomc_native_pass_report_options_t pass_report_options = {
+        .type = LOOMC_STRUCTURE_TYPE_NATIVE_PASS_REPORT_OPTIONS,
+        .structure_size = sizeof(pass_report_options),
+        .report = &pass_report,
     };
-    loom_pass_tool_run_options_t run_options = {
-        .registry = pass_registry,
-        .environment = loom_codegen_pass_environment_storage_initialize_mutable(
-            &environment_options, &function_versions,
-            &codegen_environment_storage),
-        .function_versions = &function_versions.list,
-        .predicate_provider =
-            loom_target_pass_predicate_provider(&predicate_storage),
-        .block_pool = block_pool,
-        .diagnostic_emitter = pass_diagnostic_emitter,
-        .report = pass_report_ref,
+    const loomc_native_compile_report_options_t compile_report_options = {
+        .type = LOOMC_STRUCTURE_TYPE_NATIVE_COMPILE_REPORT_OPTIONS,
+        .structure_size = sizeof(compile_report_options),
+        .report = &compile_report,
     };
-    if (iree_status_is_ok(status)) {
-      if (pipeline.size > 0 && pipeline.data[0] == '@') {
-        status = loom_pass_tool_run_pipeline_symbol(module, pipeline,
-                                                    &run_options, &run_result);
-      } else {
-        status = loom_pass_tool_run_flat_pipeline(module, pipeline,
-                                                  &run_options, &run_result);
-      }
+    const void* report_options = NULL;
+    if (output_kind == LOOM_CHECK_PASS_OUTPUT_PASS_REPORT) {
+      report_options = &pass_report_options;
+    } else if (output_kind == LOOM_CHECK_PASS_OUTPUT_COMPILE_REPORT) {
+      report_options = &compile_report_options;
     }
-    loom_target_legalizer_registry_storage_deinitialize(
-        &legalizer_registry_storage);
-    loom_cleanup_pattern_registry_storage_deinitialize(
-        &cleanup_pattern_registry_storage);
+    loomc_result_t* execution = NULL;
+    if (target_profile != NULL) {
+      const loomc_target_specialization_t specialization = {
+          .function_symbol =
+              loomc_string_view_from_iree(target_request.function_name),
+          .target_profile = target_profile,
+      };
+      const loomc_target_specialization_options_t target_options = {
+          .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+          .structure_size = sizeof(target_options),
+          .next = report_options,
+          .specializations = &specialization,
+          .specialization_count = 1,
+      };
+      const loomc_compile_options_t options = {
+          .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+          .structure_size = sizeof(options),
+          .next = &target_options,
+      };
+      status = iree_status_from_loomc(loomc_compile_module(
+          session->compiler, session->workspace, pass_program, module, &options,
+          public_allocator, &execution));
+    } else {
+      const loomc_pass_run_options_t options = {
+          .type = LOOMC_STRUCTURE_TYPE_PASS_RUN_OPTIONS,
+          .structure_size = sizeof(options),
+          .next = report_options,
+      };
+      status = iree_status_from_loomc(
+          loomc_pass_program_run(pass_program, session->workspace, module,
+                                 &options, public_allocator, &execution));
+    }
+    if (iree_status_is_ok(status)) {
+      succeeded = loomc_result_succeeded(execution);
+      status = loom_check_compile_append_result_diagnostics(
+          &diagnostic_collector, execution);
+    }
+    loomc_result_release(execution);
   }
+  bool verified = false;
+  if (iree_status_is_ok(status) && succeeded) {
+    status = loom_check_verify_pass_module(module, &diagnostic_collector,
+                                           allocator, &verified);
+  }
+
+  bool emit_output = false;
   if (!iree_status_is_ok(status)) {
     status = loom_check_execute_finish_status_failure(
         status, IREE_SV("pass pipeline"), result);
-    loom_pass_report_deinitialize(&pass_report);
-    loom_input_module_deinitialize(&input);
-    iree_arena_deinitialize(&diagnostic_arena);
-    return status;
-  }
-  bool has_expected_output = loom_check_case_has_expected_output(test_case);
-  if (run_result.error_count > 0) {
+  } else {
     bool diagnostics_failed = false;
     status = loom_check_finish_diagnostics_if_needed(
         &diagnostic_collector, test_case, case_index, report, allocator, result,
         &diagnostics_failed);
-    if (!iree_status_is_ok(status) || diagnostics_failed ||
-        output_kind == LOOM_CHECK_PASS_OUTPUT_IR || !has_expected_output) {
-      loom_pass_report_deinitialize(&pass_report);
-      loom_input_module_deinitialize(&input);
-      iree_arena_deinitialize(&diagnostic_arena);
-      return status;
-    }
-  } else {
-    bool failed_verification = false;
-    status = loom_check_verify_pass_module(
-        source_resolver, environment, &diagnostic_collector, module,
-        &function_versions.list, &failed_verification);
-    bool diagnostics_failed = false;
-    if (iree_status_is_ok(status)) {
-      status = loom_check_finish_diagnostics_if_needed(
-          &diagnostic_collector, test_case, case_index, report, allocator,
-          result, &diagnostics_failed);
-    }
-    if (!iree_status_is_ok(status) || diagnostics_failed ||
-        failed_verification ||
-        (diagnostic_collector.count > 0 && !has_expected_output)) {
-      loom_pass_report_deinitialize(&pass_report);
-      loom_input_module_deinitialize(&input);
-      iree_arena_deinitialize(&diagnostic_arena);
-      return status;
+    const bool has_expected_output =
+        loom_check_case_has_expected_output(test_case);
+    if (iree_status_is_ok(status) && !diagnostics_failed) {
+      if (succeeded) {
+        emit_output = verified &&
+                      (diagnostic_collector.count == 0 || has_expected_output);
+      } else {
+        // A diagnosed pass failure may still have a partial report to inspect.
+        emit_output =
+            output_kind != LOOM_CHECK_PASS_OUTPUT_IR && has_expected_output;
+      }
     }
   }
-
-  if (output_kind == LOOM_CHECK_PASS_OUTPUT_COMPILE_REPORT) {
+  if (emit_output && output_kind == LOOM_CHECK_PASS_OUTPUT_COMPILE_REPORT) {
     loom_target_compile_report_format_options_t report_options;
     loom_target_compile_report_format_options_initialize(&report_options);
     report_options.mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS;
     status = loom_target_compile_report_format_text(
         &compile_report, &report_options, &result->actual_output);
-  } else if (output_kind == LOOM_CHECK_PASS_OUTPUT_PASS_REPORT) {
+  } else if (emit_output && output_kind == LOOM_CHECK_PASS_OUTPUT_PASS_REPORT) {
     // Wall-clock duration is observational data, not part of the stable
     // compiler-semantic contract checked by golden fixtures.
     for (iree_host_size_t i = 0; i < pass_report.invocation_count; ++i) {
@@ -808,7 +618,15 @@ static iree_status_t loom_check_execute_pass_with_output(
     loom_output_stream_t output_stream;
     loom_output_stream_for_builder(&result->actual_output, &output_stream);
     status = loom_pass_report_format_json(&pass_report, &output_stream);
-  } else {
+  } else if (emit_output) {
+    // Inspect the transformed IR, not the durable export projection that
+    // materializes retained target contexts as additional definitions.
+    loomc_module_interop_view_t view = {0};
+    status = loom_check_compile_project_module(module, &diagnostic_collector,
+                                               allocator, &view, &verified);
+    const loom_target_low_descriptor_registry_t low_registry =
+        loom_target_environment_low_descriptor_registry(
+            environment->target_environment);
     loom_text_low_asm_environment_t low_asm_environment = {0};
     loom_low_descriptor_text_asm_environment_initialize(&low_registry.registry,
                                                         &low_asm_environment);
@@ -816,32 +634,46 @@ static iree_status_t loom_check_execute_pass_with_output(
         .flags = loom_check_pass_print_flags(test_case),
         .low_asm_environment = low_asm_environment,
     };
-    status = loom_text_print_module_to_builder_with_options(
-        module, &result->actual_output, &print_options);
-    if (iree_status_is_ok(status) && run_result.error_count == 0) {
+    if (iree_status_is_ok(status) && verified) {
+      status = loom_text_print_module_to_builder_with_options(
+          view.module, &result->actual_output, &print_options);
+    }
+    if (iree_status_is_ok(status) && verified) {
       bool valid_output = false;
+      const loomc_module_serialize_options_t reprint_options = {
+          .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+          .structure_size = sizeof(reprint_options),
+          .format = LOOMC_SOURCE_FORMAT_TEXT,
+          .text_presentation = iree_all_bits_set(test_case->output_flags,
+                                                 LOOM_TEST_OUTPUT_LOW_ASM)
+                                   ? LOOMC_MODULE_TEXT_PRESENTATION_PRESERVE
+                                   : LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT,
+          .print_locations = iree_all_bits_set(test_case->output_flags,
+                                               LOOM_TEST_OUTPUT_LOCATIONS),
+      };
       status = loom_check_validate_printed_ir(
-          iree_string_builder_view(&result->actual_output), context, block_pool,
-          &print_options, result, &valid_output);
+          iree_string_builder_view(&result->actual_output), session, block_pool,
+          &reprint_options, result, &valid_output);
       if (iree_status_is_ok(status) && !valid_output) {
         result->raw_outcome = LOOM_CHECK_FAIL;
-        loom_input_module_deinitialize(&input);
-        loom_pass_report_deinitialize(&pass_report);
-        iree_arena_deinitialize(&diagnostic_arena);
-        return iree_ok_status();
+        emit_output = false;
       }
     }
   }
-  loom_input_module_deinitialize(&input);
-  if (iree_status_is_ok(status)) {
+  // Reports borrow target and module identities until formatting completes.
+  loom_pass_report_deinitialize(&pass_report);
+  loom_target_compile_report_deinitialize(&compile_report);
+  loomc_pass_program_release(pass_program);
+  loomc_target_profile_release(target_profile);
+  loomc_module_release(module);
+  if (iree_status_is_ok(status) && emit_output) {
     result->has_actual_output = true;
   }
 
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && emit_output) {
     status = loom_check_compare_output(test_case, allocator, result);
   }
 
-  loom_pass_report_deinitialize(&pass_report);
   iree_arena_deinitialize(&diagnostic_arena);
   return status;
 }
@@ -849,126 +681,35 @@ static iree_status_t loom_check_execute_pass_with_output(
 iree_status_t loom_check_execute_pass(
     const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_input_t* input_request,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result) {
   return loom_check_execute_pass_with_output(
       test_case, case_index, report, filename, input_request, environment,
-      context, block_pool, allocator, result, LOOM_CHECK_PASS_OUTPUT_IR);
+      block_pool, allocator, result, LOOM_CHECK_PASS_OUTPUT_IR);
 }
 
 iree_status_t loom_check_execute_pass_report(
     const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_input_t* input_request,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result) {
   return loom_check_execute_pass_with_output(
       test_case, case_index, report, filename, input_request, environment,
-      context, block_pool, allocator, result,
-      LOOM_CHECK_PASS_OUTPUT_PASS_REPORT);
+      block_pool, allocator, result, LOOM_CHECK_PASS_OUTPUT_PASS_REPORT);
 }
 
 iree_status_t loom_check_execute_compile_report(
     const loom_test_case_t* test_case, iree_host_size_t case_index,
     loom_check_file_report_t* report, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_input_t* input_request,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result) {
   return loom_check_execute_pass_with_output(
       test_case, case_index, report, filename, input_request, environment,
-      context, block_pool, allocator, result,
-      LOOM_CHECK_PASS_OUTPUT_COMPILE_REPORT);
-}
-
-iree_status_t loom_check_execute_format(
-    const loom_test_case_t* test_case, iree_string_view_t filename,
-    const loom_input_request_t* input_request,
-    const loom_check_environment_t* environment, loom_context_t* context,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_check_result_t* result) {
-  loom_module_format_t format = LOOM_MODULE_FORMAT_AUTO;
-  IREE_RETURN_IF_ERROR(loom_module_format_parse(test_case->format_target,
-                                                /*allow_auto=*/false, &format));
-
-  loom_check_diagnostic_capture_t diagnostic_capture = {
-      .detail = &result->detail,
-      .result = result,
-  };
-  const loom_target_low_descriptor_registry_t low_registry =
-      loom_target_environment_low_descriptor_registry(
-          environment->target_environment);
-  loom_text_low_asm_environment_t low_asm_environment = {0};
-  loom_low_descriptor_text_asm_environment_storage_t low_asm_storage = {0};
-  loom_low_descriptor_text_asm_environment_initialize_with_diagnostics(
-      &low_registry.registry,
-      loom_target_environment_low_asm_diagnostic_provider_list(
-          environment->target_environment),
-      &low_asm_storage, &low_asm_environment);
-  const loom_text_parse_options_t parse_options = {
-      .diagnostic_sink = {.fn = loom_check_diagnostic_capture_sink,
-                          .user_data = &diagnostic_capture},
-      .low_asm_environment = low_asm_environment,
-      .max_errors = 20,
-  };
-  loom_input_module_t input = {0};
-  iree_status_t status =
-      loom_check_load_input(test_case, input_request, environment, context,
-                            block_pool, &parse_options, allocator, &input);
-  if (iree_status_is_ok(status) && !input.module) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "input failed to produce a module");
-  }
-  if (iree_status_is_ok(status)) {
-    const loom_verify_options_t verify_options = {
-        .sink = parse_options.diagnostic_sink,
-        .source_resolver = loom_input_module_source_resolver(&input),
-    };
-    loom_verify_result_t verification = {0};
-    status = loom_verify_module(input.module, &verify_options, &verification);
-    if (iree_status_is_ok(status) && verification.error_count) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "input module failed verification");
-    }
-  }
-  loom_format_output_t formatted_output = {0};
-  if (iree_status_is_ok(status)) {
-    status = loom_format_write_module(
-        input.module, format,
-        LOOM_TEXT_PRINT_DEFAULT | LOOM_TEXT_PRINT_PRESERVE_LOW_ASM, block_pool,
-        low_asm_environment, &formatted_output, allocator);
-  }
-  loom_input_module_deinitialize(&input);
-
-  loom_format_output_t text_output = {0};
-  loom_format_convert_options_t to_text_options = {
-      .input_format = format,
-      .output_format = LOOM_MODULE_FORMAT_TEXT,
-      .diagnostic_sink = {.fn = loom_check_diagnostic_capture_sink,
-                          .user_data = &diagnostic_capture},
-      .low_asm_environment = low_asm_environment,
-  };
-  if (iree_status_is_ok(status)) {
-    status =
-        loom_format_convert(iree_make_const_byte_span(formatted_output.data,
-                                                      formatted_output.length),
-                            filename, context, block_pool, &to_text_options,
-                            &text_output, allocator);
-  }
-  loom_format_output_deinitialize(&formatted_output, allocator);
-
-  if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_string(
-        &result->actual_output,
-        iree_make_string_view((const char*)text_output.data,
-                              text_output.length));
-  }
-  loom_format_output_deinitialize(&text_output, allocator);
-  IREE_RETURN_IF_ERROR(status);
-  result->has_actual_output = true;
-
-  return loom_check_compare_output(test_case, allocator, result);
+      block_pool, allocator, result, LOOM_CHECK_PASS_OUTPUT_COMPILE_REPORT);
 }

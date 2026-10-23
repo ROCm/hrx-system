@@ -131,6 +131,25 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
     const loom_low_source_memory_access_plan_t* source_memory_access,
     loom_value_id_t* out_value_id);
 
+// Resolves a generated source-memory arithmetic descriptor against the active
+// target profile. Planning may retain the result for deferred emission.
+iree_status_t loom_low_lower_rule_source_memory_resolve_materializer_descriptor(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_rule_set_t* rule_set,
+    loom_low_lower_descriptor_ref_t descriptor_ref,
+    loom_low_lower_resolved_descriptor_t* out_descriptor);
+
+// Emits one previously resolved source-memory arithmetic descriptor. The
+// generated contract owns result ties; bits in |consumable_operand_mask| allow
+// the corresponding operands to be consumed without defensive copies.
+iree_status_t loom_low_lower_rule_source_memory_emit_resolved_op(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_resolved_descriptor_t* descriptor,
+    loom_value_id_t* operands, uint16_t operand_count,
+    uint16_t consumable_operand_mask, loom_type_t result_type,
+    loom_named_attr_slice_t attributes, loom_location_id_t location,
+    loom_value_id_t* out_value_id);
+
 // Materializes the complete byte offset, including the static bias selected by
 // the source-memory plan, in the descriptor-declared carrier.
 iree_status_t

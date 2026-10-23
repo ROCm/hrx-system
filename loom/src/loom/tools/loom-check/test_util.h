@@ -14,7 +14,6 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/ir/context.h"
 #include "loom/tools/loom-check/execute.h"
 
 namespace loom::testing {
@@ -27,12 +26,11 @@ class LoomCheckHarness {
 
   ~LoomCheckHarness();
 
-  // Initializes the parser/execution state using |environment|. The
-  // environment and its callback state are borrowed and must outlive the
-  // harness.
+  // Initializes test-file storage using |environment|. The environment and
+  // its public compilation session are borrowed and must outlive the harness.
   iree_status_t Initialize(const loom_check_environment_t* environment);
 
-  // Releases context and arena storage. Safe to call repeatedly.
+  // Releases arena storage. Safe to call repeatedly.
   void Deinitialize();
 
   // Executes the first case from |source|. The caller owns |out_result| on
@@ -51,16 +49,12 @@ class LoomCheckHarness {
   std::string DiagnosticJsonString(const loom_check_result_t& result) const;
 
  private:
-  // Arena block pool backing parsed check files and modules.
+  // Arena block pool backing parsed check files and diagnostic metadata.
   iree_arena_block_pool_t block_pool_ = {};
-  // Parser and verifier context selected by |environment_|.
-  loom_context_t context_ = {};
   // Borrowed loom-check execution environment.
   const loom_check_environment_t* environment_ = nullptr;
   // True after |block_pool_| has been initialized.
   bool block_pool_initialized_ = false;
-  // True after |context_| has been initialized.
-  bool context_initialized_ = false;
 };
 
 }  // namespace loom::testing

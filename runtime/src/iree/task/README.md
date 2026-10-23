@@ -153,10 +153,34 @@ State transitions:
 - **Parked → Spinning**: notification posted (new process activated, budget
   increase).
 
-The spin timeout is adaptive: when aggregate worker budget is high (lots of
-compute work available), spinning workers wait longer before parking. When
-budget is low (few processes, low parallelism), they park quickly to avoid
-wasting CPU.
+The executor's `worker_spin_ns` option controls spinning before a private
+notification wait. Its default is zero. Process-local warm retention has a
+separate policy for cooperative compute handoffs.
+
+### Sleep publication
+
+Each worker snapshots the executor's work-publication epoch before scanning.
+After an empty scan it publishes an idle bit, then joins that same epoch's
+atomic modification order before committing its private notification wait.
+Producers advance the epoch after publishing work and before selecting idle
+workers. Both joins are acquire/release read-modify-write operations:
+
+- If the producer comes first, the worker observes the changed epoch and scans
+  again instead of sleeping.
+- If the worker comes first, the producer acquires its idle enrollment and can
+  select an available worker for the wake.
+
+Selecting an idle worker atomically clears its bit. Concurrent producers cannot
+assign two wake responsibilities to the same enrollment. The private
+notification preserves a selected wake through the chosen worker's sleep
+transition; the shared epoch covers publications that selected someone else.
+That distinction matters when an active worker is inside a blocking native
+allocation: notifying it does not make it available to drain independent work.
+
+The epoch adds no allocation or broadcast. Active drain loops read it; only
+work publication and the final transition toward sleep modify it. Idle-bit
+snapshots remain hints, and atomic claims establish ownership per bit without
+requiring a consistent snapshot across the whole worker mask.
 
 ### Worker loop
 

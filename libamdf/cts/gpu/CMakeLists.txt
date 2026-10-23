@@ -38,7 +38,7 @@ iree_cc_library(
     ::gpu_device_fixture
     amdf::headers
     iree::third_party::google_test
-    libamdf::cts::gpu::aql::publication
+    libamdf::cts::gpu::aql::queue::publication
     libamdf::cts::gpu::pm4::encoding::commands
     libamdf::cts::gpu::pm4::encoding::memory_commands
     libamdf::cts::gpu::sdma::encoding::commands

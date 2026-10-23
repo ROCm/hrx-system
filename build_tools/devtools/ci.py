@@ -37,12 +37,16 @@ BAZEL_HAL_DRIVER_DEFINES = (
     ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
     ("webgpu", "IREE_HAL_DRIVER_WEBGPU"),
     ("amd", "IREE_HAL_DRIVER_AMD"),
+    ("amd-gpu", "IREE_HAL_DRIVER_AMD_GPU"),
+    ("amd-xdna", "IREE_HAL_DRIVER_AMD_XDNA"),
 )
 CMAKE_HAL_DRIVER_DEFINES = (
     ("amdgpu", "IREE_HAL_DRIVER_AMDGPU"),
     ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
     ("webgpu", "IREE_HAL_DRIVER_WEBGPU"),
     ("amd", "IREE_HAL_DRIVER_AMD"),
+    ("amd-gpu", "IREE_HAL_DRIVER_AMD_GPU"),
+    ("amd-xdna", "IREE_HAL_DRIVER_AMD_XDNA"),
 )
 CMAKE_LOOM_TARGET_DEFINES = (
     ("amdgpu", "LOOM_TARGET_AMDGPU"),
@@ -263,15 +267,8 @@ AMD_DEVICE_VISIBILITY_ENV_VARS = (
     "HAL_VISIBLE_XDNA_DEVICES",
     "HAL_VISIBLE_RDNA_DEVICES",
     "HAL_VISIBLE_CDNA_DEVICES",
-    "HAL_VISIBLE_AMDGPU2_DEVICES",
+    "HAL_VISIBLE_AMDGPU_DEVICES",
     "AMDF_CTS_GPU_NATIVE_IDENTITY",
-)
-AMDGPU_DEVICE_VISIBILITY_ENV_VARS = (
-    "ROCR_VISIBLE_DEVICES",
-    "HIP_VISIBLE_DEVICES",
-    "CUDA_VISIBLE_DEVICES",
-    "GPU_DEVICE_ORDINAL",
-    *AMD_DEVICE_VISIBILITY_ENV_VARS,
 )
 
 
@@ -283,26 +280,26 @@ def amd_test_env() -> tuple[tuple[str, str], ...]:
     )
 
 
-def amdgpu_test_env() -> tuple[tuple[str, str], ...]:
-    test_env = []
-    for name in AMDGPU_DEVICE_VISIBILITY_ENV_VARS:
-        value = os.environ.get(name)
-        if value is not None:
-            test_env.append((name, value))
-
-    libhsa_path = os.environ.get("IREE_HAL_AMDGPU_LIBHSA_PATH")
-    if not libhsa_path:
-        rocm_root = os.environ.get("HRX_ROCM_ROOT")
-        if not rocm_root:
-            return tuple(test_env)
-        relative_path = (
-            Path("bin/hsa-runtime64.dll")
-            if sys.platform == "win32"
-            else Path("lib/libhsa-runtime64.so.1")
-        )
-        libhsa_path = str(Path(rocm_root) / relative_path)
-    test_env.append(("IREE_HAL_AMDGPU_LIBHSA_PATH", libhsa_path))
-    return tuple(test_env)
+def amd_gpu_cts_test_env(target_selector: str) -> tuple[tuple[str, str], ...]:
+    # Exclude only HAL backend suffixes. Native AQL/PM4/SDMA tests retain their
+    # own capability admission regardless of the selected GPU architecture.
+    selectors = target_selector.split(",")
+    family = next(
+        (
+            name
+            for name, prefixes in ci_config.AMD_GPU_CTS_TARGET_PREFIXES.items()
+            if all(selector.startswith(prefixes) for selector in selectors)
+        ),
+        None,
+    )
+    if family is None:
+        return ()
+    positive, _, negative = os.environ.get("GTEST_FILTER", "*").partition("-")
+    exclusions = [negative] if negative else []
+    for name in ci_config.AMD_GPU_CTS_TARGET_PREFIXES:
+        if name != family:
+            exclusions.extend((f"CTS*/*/{name}", f"CTS*/*/{name}_*"))
+    return (("GTEST_FILTER", positive + "-" + ":".join(exclusions)),)
 
 
 def vulkan_device_test_env() -> tuple[tuple[str, str], ...]:
@@ -345,6 +342,8 @@ def validate_enabled_drivers(enabled_drivers: tuple[str, ...]) -> frozenset[str]
         raise ValueError(
             "unsupported CI HAL driver(s): " + ", ".join(sorted(unsupported_drivers))
         )
+    if "amd" in enabled_driver_set:
+        enabled_driver_set |= {"amd-gpu", "amd-xdna"}
     return enabled_driver_set
 
 
@@ -796,7 +795,7 @@ def xdna_steps(targets: tuple[str, ...], config: str | None) -> list[CiStep]:
     # Native ELF consumers and the HAL share the XDNA provider.
     options = (
         "--//libamdf/config:families=xdna",
-        "--//runtime/config/hal:drivers=task,amd",
+        "--//runtime/config/hal:drivers=task,amd-xdna",
         "--//loom/config/execute:enable=iree_hal",
     )
     return [
@@ -834,8 +833,10 @@ def amd_client_steps(targets: tuple[str, ...], config: str | None) -> list[CiSte
         options = ci_config.AMD_CLIENT_WINDOWS_BAZEL_OPTIONS
         default_targets = ci_config.AMD_CLIENT_WINDOWS_BAZEL_TARGETS
         resources = ci_config.AMD_CLIENT_WINDOWS_RESOURCES
-        test_tag_filters += ci_config.VULKAN_BAZEL_TEST_TAG_FILTERS + (
-            ci_config.AMD_GPU_RUN_REQUIREMENT_TAG,
+        test_tag_filters += (
+            ci_config.VULKAN_BAZEL_TEST_TAG_FILTERS
+            + (ci_config.AMD_GPU_RUN_REQUIREMENT_TAG,)
+            + ci_config.AMD_GPU_WINDOWS_TEST_TAG_FILTERS
         )
         native_options = (
             ci_config.AMD_GPU_BAZEL_OPTIONS + amd_gpu_device_compiler_options()
@@ -862,7 +863,7 @@ def amd_client_steps(targets: tuple[str, ...], config: str | None) -> list[CiSte
             config=config,
             test_tag_filters=test_tag_filters,
             available_resources=resources,
-            test_env=amd_test_env(),
+            test_env=amd_test_env() + amd_gpu_cts_test_env("rdna"),
             bazel_options=options + native_options,
         ),
         *additional_steps,
@@ -878,10 +879,16 @@ def amdgpu_test_steps(
     config_name = f" / {config.upper()}" if config is not None else ""
     scoped_targets = targets + ci_config.AMDGPU_BAZEL_TARGET_EXCLUDES
     bazel_options = (
-        amdgpu_bazel_options(target_selector)
-        + ci_config.AMDGPU_BAZEL_OPTIONS
+        ci_config.AMDGPU_BAZEL_OPTIONS
         + ci_config.AMD_GPU_BAZEL_OPTIONS
-        + ("--//runtime/config/hal:drivers=task,amdgpu,amd",)
+        + amd_gpu_device_compiler_options()
+        + (
+            # Hardware fixtures and HIP images follow the execution selector;
+            # compiler-only coverage keeps its independent target selection.
+            "--//runtime/src/iree/hal/drivers/amdgpu:targets=" + target_selector,
+            "--//runtime/src/iree/hal/drivers/amd/gpu:targets=" + target_selector,
+            "--//runtime/config/hal:drivers=task,amd-gpu",
+        )
     )
     host_sanitizer_tag_filters = (
         (f"-{ci_config.HOST_TSAN_INCOMPATIBLE_TEST_LABEL}",) if config == "tsan" else ()
@@ -903,7 +910,7 @@ def amdgpu_test_steps(
                 ci_config.AMDGPU_BAZEL_TEST_TAG_FILTERS + host_sanitizer_tag_filters
             ),
             available_resources=ci_config.AMDGPU_RESOURCES,
-            test_env=amdgpu_test_env(),
+            test_env=amd_test_env() + amd_gpu_cts_test_env(target_selector),
             bazel_options=bazel_options,
         ),
     ]
@@ -916,6 +923,7 @@ def amdgpu_windows_steps(
         ci_config.AMDGPU_WINDOWS_BAZEL_OPTIONS
         + ci_config.AMD_GPU_BAZEL_OPTIONS
         + amd_gpu_device_compiler_options()
+        + ("--//runtime/src/iree/hal/drivers/amd/gpu:targets=" + target_selector,)
     )
     config_name = f" / {config.upper()}" if config is not None else ""
     # A required finite PM4 copy establishes the exact GPU and usable native
@@ -982,8 +990,9 @@ def amdgpu_windows_steps(
             f"Test IREE / Windows AMDGPU{config_name}",
             targets or ci_config.AMDGPU_WINDOWS_BAZEL_TARGETS,
             config=config,
+            test_tag_filters=ci_config.AMD_GPU_WINDOWS_TEST_TAG_FILTERS,
             available_resources=ci_config.AMDGPU_WINDOWS_RESOURCES,
-            test_env=amd_test_env(),
+            test_env=amd_test_env() + amd_gpu_cts_test_env(target_selector),
             bazel_options=options + ("--test_env=GTEST_FAIL_FAST=1",),
         )
     )
@@ -1010,7 +1019,7 @@ def amdgpu_steps(
 ) -> list[CiStep]:
     return [
         bazel_configure_step(
-            enabled_drivers=("amdgpu", "amd"),
+            enabled_drivers=("amd-gpu",),
             enabled_loom_targets=("amdgpu", "vm"),
             enabled_loom_importers=enabled_loom_importers,
         ),
@@ -1037,7 +1046,9 @@ def loom_amdgpu_bazel_steps() -> list[CiStep]:
 
 
 def amdgpu_config_steps(
-    targets: tuple[str, ...], target_selector: str, config: str
+    targets: tuple[str, ...],
+    target_selector: str,
+    config: str,
 ) -> list[CiStep]:
     xfail_targets = (
         ci_config.AMDGPU_TSAN_SANITIZERS_XFAIL_TARGETS
@@ -1210,7 +1221,7 @@ def cmake_xdna_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
     steps = [
         cmake_configure_step(
             command_name,
-            enabled_drivers=("amd",),
+            enabled_drivers=("amd-xdna",),
             enabled_loom_targets=("vm", "xdna"),
             sanitizer=sanitizer,
             extra_options=(
@@ -1270,9 +1281,8 @@ def cmake_amdgpu_steps(
     steps = [
         cmake_configure_step(
             command_name,
-            enabled_drivers=("amdgpu", "amd"),
+            enabled_drivers=("amd-gpu",),
             enabled_loom_targets=("amdgpu", "vm"),
-            amdgpu_target_selector=target_selector,
             sanitizer=sanitizer,
             extra_options=(
                 "-DAMDF_BUILD=ON",
@@ -1280,11 +1290,12 @@ def cmake_amdgpu_steps(
                 "-DAMDF_FAMILY_CDNA=ON",
                 "-DAMDF_FAMILY_XDNA=OFF",
                 "-DLOOM_BUILD=ON",
-                "-DIREE_HAL_AMD_GPU_TARGETS="
-                + ";".join(ci_config.AMD_GPU_BINARY_TARGETS),
+                "-DIREE_HAL_AMDGPU_TARGETS=" + target_selector,
+                "-DIREE_HAL_AMD_GPU_TARGETS=" + target_selector,
                 "-DLOOM_TARGET_AMDGPU_TARGETS="
                 + ";".join(ci_config.AMD_GPU_LOOM_TARGETS),
-            ),
+            )
+            + cmake_amdgpu_device_binary_options(),
         ),
         *cmake_explicit_build_steps(
             command_name,
@@ -1303,7 +1314,9 @@ def cmake_amdgpu_steps(
             regex=ci_config.AMDGPU_CMAKE_PACKAGE_REGEX,
             exclude_regex=xfail_regex,
             available_resources=ci_config.AMDGPU_RESOURCES,
-            env=sanitizer_env(sanitizer) + amdgpu_test_env(),
+            env=sanitizer_env(sanitizer)
+            + amd_test_env()
+            + amd_gpu_cts_test_env(target_selector),
             parallelism=1,
         )
     )
@@ -1324,7 +1337,9 @@ def cmake_amdgpu_steps(
             label_exclude_regex=resource_label_exclude_regex,
             exclude_regex=resource_exclude_regex,
             available_resources=ci_config.AMDGPU_RESOURCES,
-            env=sanitizer_env(sanitizer) + amdgpu_test_env(),
+            env=sanitizer_env(sanitizer)
+            + amd_test_env()
+            + amd_gpu_cts_test_env(target_selector),
             parallelism=1,
         )
     )
@@ -1628,11 +1643,15 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
         if sanitizer is not None:
             return [
                 bazel_configure_step(
-                    enabled_drivers=("amdgpu", "amd"),
+                    enabled_drivers=("amd-gpu",),
                     enabled_loom_targets=("amdgpu", "vm"),
                     enabled_loom_importers=enabled_loom_importers,
                 ),
-                *amdgpu_config_steps(targets, amdgpu_target_selector, sanitizer),
+                *amdgpu_config_steps(
+                    targets,
+                    amdgpu_target_selector,
+                    sanitizer,
+                ),
             ]
         return amdgpu_steps(
             targets,

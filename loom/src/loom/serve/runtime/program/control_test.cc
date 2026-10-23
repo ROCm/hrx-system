@@ -154,9 +154,17 @@ class ControlTest
   void TearDown() override {
     // Host transfer payloads are fixture members so even a failed assertion
     // leaves their storage alive until all accepted work has retired here.
+    if (gate_) {
+      // Advance beyond the normal release value so teardown also releases a
+      // gate left pending by an earlier assertion without signaling it twice.
+      IREE_EXPECT_OK(iree_hal_semaphore_signal(gate_, 2, nullptr));
+    }
     if (execution_) {
       IREE_EXPECT_OK(loom_serve_execution_drain(execution_));
     }
+    iree_hal_fence_release(produced_);
+    iree_hal_fence_release(dependency_);
+    iree_hal_semaphore_release(gate_);
     iree_vm_process_release(process_);
     if (invocation_) {
       iree_vm_invocation_deinitialize(invocation_);
@@ -245,7 +253,8 @@ class ControlTest
         &types_, execution_, options, host_allocator_, &native_module_));
     const std::string path = directory_ + "/control.loom";
     iree_const_byte_span_t image;
-    const iree_string_view_t roots[] = {IREE_SVL("step"), IREE_SVL("fork")};
+    const iree_string_view_t roots[] = {IREE_SVL("step"), IREE_SVL("fork"),
+                                        IREE_SVL("dependencies")};
     const loom_serve_sources_t sources = {.base_directory = IREE_SV(".")};
     IREE_RETURN_IF_ERROR(loom_serve_jit_compile_vm(
         loom_serve_host_target_environment(host_), &sources,
@@ -381,6 +390,12 @@ class ControlTest
   loom_serve_execution_queues_t* execution_queues_ = nullptr;
   // Owned model execution capability.
   loom_serve_execution_t* execution_ = nullptr;
+  // Explicit external producer, released during teardown even after failure.
+  iree_hal_semaphore_t* gate_ = nullptr;
+  // Retained external dependency imported by the source controller.
+  iree_hal_fence_t* dependency_ = nullptr;
+  // Escaped source-produced completion independent of later submissions.
+  iree_hal_fence_t* produced_ = nullptr;
   // Source directory shared by the catalog and VM program.
   std::string directory_;
   // One source index and compiler for all prepared control stages.
@@ -706,6 +721,76 @@ TEST_P(ControlTest, SourceForkAndPartialFailureRetireBorrowedStorage) {
   IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
   EXPECT_EQ(outputs_[0].control[0], 22);
   EXPECT_EQ(outputs_[0].tokens[3], 19);
+}
+
+TEST_P(ControlTest, SourceFencesExcludeLaterWorkAndJoinExternalDependencies) {
+  inputs_[0].control = {3, 17, 99};
+  inputs_[0].tokens[0] = 7;
+  inputs_[1].control = {4, 100, 31};
+  inputs_[1].tokens[0] = 11;
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
+  IREE_ASSERT_OK(Upload(1, 0, 3, &completion));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &gate_));
+  IREE_ASSERT_OK(
+      iree_hal_fence_create_at(gate_, 1, host_allocator_, &dependency_));
+  iree_vm_function_t function = {};
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process_, IREE_SV("model"), IREE_SV("dependencies"), &function));
+  iree_vm_variant_t arguments[7] = {
+      iree_hal_fence_variant_from_ptr_borrowed(&types_, dependency_)};
+  for (size_t row = 0; row < 2; ++row) {
+    for (size_t i = 0; i < 3; ++i) {
+      arguments[1 + row * 3 + i] =
+          iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[row][i]);
+    }
+  }
+  iree_vm_variant_t result = {};
+  auto status = iree_vm_invoke(invocation_, function,
+                               iree_vm_variant_span_from_array(arguments),
+                               iree_vm_variant_span_from_ptr(&result, 1));
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_fence_ptr_from_variant_move(&types_, &result, &produced_);
+  }
+  iree_vm_variant_reset(&result);
+  IREE_ASSERT_OK(status);
+  const auto frontier = loom_serve_execution_frontier(execution_);
+  const auto produced = iree_hal_fence_semaphore_list(produced_);
+  ASSERT_EQ(produced.count, 1u);
+  EXPECT_EQ(produced.semaphores[0], frontier.semaphores[0]);
+  EXPECT_EQ(produced.payload_values[0], 3u);
+  EXPECT_EQ(frontier.values[0], 5u);
+  // Waiting for the earlier producer cannot require releasing the later gate.
+  IREE_ASSERT_OK(loom_serve_execution_wait(execution_, 3));
+  IREE_ASSERT_OK(iree_hal_fence_query(produced_));
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(frontier.semaphores[0], &value));
+  EXPECT_EQ(value, 3u);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 1, nullptr));
+  IREE_ASSERT_OK(Download(1, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(outputs_[1].control[0], 105);
+  EXPECT_EQ(outputs_[1].tokens[2], 11);
+}
+
+TEST_P(ControlTest, FutureWorkFenceIsRejectedWithoutAdvancingTheTimeline) {
+  iree_vm_function_t function = {};
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(process_, IREE_SV("runner"),
+                                                 IREE_SV("fence"), &function));
+  for (int64_t value : {int64_t{1}, int64_t{-1}}) {
+    auto argument = iree_vm_variant_from_i64(value);
+    iree_vm_variant_t result = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        iree_vm_invoke(invocation_, function,
+                       iree_vm_variant_span_from_ptr(&argument, 1),
+                       iree_vm_variant_span_from_ptr(&result, 1)));
+    iree_vm_variant_reset(&result);
+    EXPECT_EQ(loom_serve_execution_frontier(execution_).values[0], 0u);
+  }
 }
 
 TEST_P(ControlTest, DeviceProducedCountsGateConcurrentContinuation) {

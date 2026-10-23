@@ -91,10 +91,11 @@ TEST_P(TextReservationTest,
   IREE_ASSERT_OK(
       loom_serve_text_reservation_submit(&reservation_, &admitted, &frontier));
   ASSERT_EQ(admitted, LOOM_SERVE_TEXT_RESERVE_ACQUIRED);
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-      {IREE_ARRAYSIZE(frontier.semaphores), frontier.semaphores,
-       frontier.values},
-      iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  for (size_t i = 0; i < IREE_ARRAYSIZE(frontier.semaphores); ++i) {
+    IREE_ASSERT_OK(
+        loom_serve_workspace_wait(loom_serve_device_workspace(device_),
+                                  frontier.semaphores[i], frontier.values[i]));
+  }
   loom_serve_text_row_complete_reserve(branch);
   loom_serve_text_reservation_deinitialize(&reservation_);
   EXPECT_EQ(loom_serve_text_row_position(branch), 3u);

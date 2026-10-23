@@ -15,7 +15,7 @@ load(
     "EXECUTE_IREE_HAL",
     "TARGET_ARCH_XDNA",
 )
-load("//runtime/requirements:defs.bzl", "HAL_AMD")
+load("//runtime/requirements:defs.bzl", "HAL_AMD_XDNA")
 
 XDNA_HARDWARE_PROFILE = loom_execution_profile(
     name = "xdna_hardware",
@@ -25,7 +25,7 @@ XDNA_HARDWARE_PROFILE = loom_execution_profile(
         TARGET_ARCH_XDNA,
         EMIT_XDNA,
         EXECUTE_IREE_HAL,
-        HAL_AMD,
+        HAL_AMD_XDNA,
     ],
     executor = "hardware",
     resource_group = GPU_DEVICE_RESOURCE_GROUP,

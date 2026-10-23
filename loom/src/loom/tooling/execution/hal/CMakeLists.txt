@@ -12,6 +12,20 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_X86 AND IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM AND IREE_ARCH STREQUAL "x86_64")
 iree_native_test(
   NAME
+    "command_count_observations_test"
+  ARGS
+    "{{${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/command_count_observations.loom}}"
+    "--device=task"
+  SRC
+    loom::tools::loom-test
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/command_count_observations.loom"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86 AND IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK AND LOOM_TARGET_ARCH_VM AND IREE_ARCH STREQUAL "x86_64")
+iree_native_test(
+  NAME
     "command_scenario_execution_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/command_scenario_dependent_stages.loom}}"
@@ -42,6 +56,7 @@ loom_test_module(
     hardware_test_module
   SRCS
     "testdata/buffer_bulk_hal_actual.loom"
+    "testdata/command_count_observations.loom"
     "testdata/command_scenario_dependent_stages.loom"
     "testdata/dynamic_workgroup_hal_actual.loom"
     "testdata/launch_schedule_hal_actual.loom"
@@ -55,7 +70,7 @@ loom_execution_test(
   MODULE
     "::hardware_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -97,21 +112,21 @@ loom_execution_test(
 )
 endif()
 
-if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD_GPU)
 loom_execution_test(
   NAME
     hardware_test_execute_amd_gpu_hardware_test
   MODULE
     "::hardware_test_module"
   RUNNER_ARGS
-    "--device=amdgpu2"
+    "--device=amdgpu"
   LABELS
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
     "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.amd"
+    "iree-build-requirement=runtime.hal.amd_gpu"
     "iree-run-requirement=libamdf.resource.amd_gpu"
     "runtime-resource=amd-gpu"
     "loom-execution-profile=amd_gpu_hardware"
@@ -137,7 +152,7 @@ loom_execution_test(
   MODULE
     "::scenario_compare_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -179,21 +194,21 @@ loom_execution_test(
 )
 endif()
 
-if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD_GPU)
 loom_execution_test(
   NAME
     scenario_compare_test_execute_amd_gpu_hardware_test
   MODULE
     "::scenario_compare_test_module"
   RUNNER_ARGS
-    "--device=amdgpu2"
+    "--device=amdgpu"
   LABELS
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
     "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.amd"
+    "iree-build-requirement=runtime.hal.amd_gpu"
     "iree-run-requirement=libamdf.resource.amd_gpu"
     "runtime-resource=amd-gpu"
     "loom-execution-profile=amd_gpu_hardware"
@@ -205,13 +220,13 @@ loom_execution_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMDGPU)
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD_GPU)) AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
     "scenario_benchmark_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/scenario_compare_hal_vm.loom}}"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--case=@scenario_scalar_results"
     "--benchmark=@scenario_scalar_results_throughput"
     "--sample=2"
@@ -237,13 +252,13 @@ iree_native_test(
 )
 endif()
 
-if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD)) AND IREE_HAL_DRIVER_AMDGPU)
+if((LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD_GPU)) AND IREE_HAL_DRIVER_AMDGPU)
 iree_native_test(
   NAME
     "scenario_benchmark_comparison_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/scenario_compare_hal_vm.loom}}"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--compare=@scenario_benchmark_baseline_throughput,@scenario_benchmark_candidate_throughput"
     "--sample=2"
     "--repetitions=1"
@@ -348,7 +363,6 @@ loom_cc_library(
     loom::binding::c::loomc
     loom::binding::c::target::iree_hal
     loom::ir::builders
-    loom::target::profile
     loom::target::types
     loom::tooling::testbench::api
     loom::tooling::testbench::compiled_provider
@@ -383,11 +397,11 @@ loom_cc_library(
     loom::error::source
     loom::ir::builders
     loom::ops::buffer::builders
+    loom::ops::builders
     loom::ops::command::builders
     loom::ops::func::builders
     loom::ops::index::builders
     loom::ops::kernel::builders
-    loom::ops::op_defs
     loom::ops::scalar::builders
     loom::ops::view::builders
     loom::target::arch::cmd::hal_command_buffer

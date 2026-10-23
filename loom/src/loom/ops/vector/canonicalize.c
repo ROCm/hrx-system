@@ -282,16 +282,16 @@ static iree_status_t loom_vector_replace_single_result_with_negf(
 static iree_status_t loom_vector_replace_single_result_with_scalar_i64(
     loom_op_t* op, loom_rewriter_t* rewriter, int64_t value,
     loom_type_t result_type) {
-  if (!rewriter->materialize_constant) {
+  const loom_value_facts_t facts = loom_value_facts_exact_i64(value);
+  if (!loom_rewriter_can_materialize_constant(rewriter, facts, result_type)) {
     return iree_ok_status();
   }
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
 
   loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_build_constant(rewriter, loom_value_facts_exact_i64(value),
-                                   result_type, op->location, &replacement));
+  IREE_RETURN_IF_ERROR(loom_rewriter_build_constant(
+      rewriter, facts, result_type, op->location, &replacement));
 
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, value_checkpoint));
@@ -321,12 +321,17 @@ static iree_status_t loom_vector_build_iota_lane_symbolic(
   loom_value_id_t scaled_step = step;
   loom_value_id_t lane_value = LOOM_VALUE_ID_INVALID;
   if (lane > 1) {
-    if (!rewriter->materialize_constant || lane > (iree_host_size_t)INT64_MAX) {
+    if (lane > (iree_host_size_t)INT64_MAX) {
+      return iree_ok_status();
+    }
+    const loom_value_facts_t lane_facts =
+        loom_value_facts_exact_i64((int64_t)lane);
+    if (!loom_rewriter_can_materialize_constant(rewriter, lane_facts,
+                                                result_type)) {
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(loom_rewriter_build_constant(
-        rewriter, loom_value_facts_exact_i64((int64_t)lane), result_type,
-        op->location, &lane_value));
+        rewriter, lane_facts, result_type, op->location, &lane_value));
     if (element_type != LOOM_SCALAR_TYPE_INDEX) {
       loom_op_t* multiply_op = NULL;
       IREE_RETURN_IF_ERROR(loom_scalar_muli_build(
@@ -741,10 +746,6 @@ static iree_status_t loom_vector_canonicalize_iota(loom_op_t* op,
           &iota)) {
     return iree_ok_status();
   }
-  if (!rewriter->materialize_constant) {
-    return iree_ok_status();
-  }
-
   loom_value_facts_t lanes[LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT];
   for (uint64_t i = 0; i < lane_count; ++i) {
     lanes[i] = loom_value_fact_vector_iota_element(iota, i);
@@ -753,11 +754,18 @@ static iree_status_t loom_vector_canonicalize_iota(loom_op_t* op,
     }
   }
 
+  loom_type_t element_type =
+      loom_type_scalar(loom_type_element_type(result_type));
+  for (uint64_t i = 0; i < lane_count; ++i) {
+    if (!loom_rewriter_can_materialize_constant(rewriter, lanes[i],
+                                                element_type)) {
+      return iree_ok_status();
+    }
+  }
+
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
 
-  loom_type_t element_type =
-      loom_type_scalar(loom_type_element_type(result_type));
   loom_value_id_t elements[LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT] = {
       LOOM_VALUE_ID_INVALID};
   for (uint64_t i = 0; i < lane_count; ++i) {

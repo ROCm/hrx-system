@@ -477,6 +477,23 @@ X86_ZNVER5_FLOAT_SCHEDULE_GROUPS: tuple[X86ScheduleBehaviorGroup, ...] = (
     X86ScheduleBehaviorGroup(21, 36, 1, ("x86.avx512.vsqrtpd.zmm",)),
 )
 
+# The same offline query covers every scalar integer multiply without an
+# attached memory access. Memory forms retain their load-sensitive classes.
+X86_ZNVER5_INTEGER_MULTIPLY_SCHEDULE_GROUPS: tuple[X86ScheduleBehaviorGroup, ...] = (
+    X86ScheduleBehaviorGroup(
+        3,
+        2,
+        1,
+        (
+            "x86.scalar.imul.gpr32",
+            "x86.scalar.imul.gpr64",
+            "x86.scalar.imul.imm.gpr32",
+            "x86.scalar.imul.imm.gpr64",
+        ),
+    ),
+    X86ScheduleBehaviorGroup(3, 6, 2, ("x86.scalar.mul.high.gpr64",)),
+)
+
 
 def _validate_behavior_groups(
     groups: tuple[X86ScheduleBehaviorGroup, ...],
@@ -505,11 +522,14 @@ def _validate_behavior_groups(
 X86_ZNVER5_FLOAT_SCHEDULE_BEHAVIORS = _validate_behavior_groups(
     X86_ZNVER5_FLOAT_SCHEDULE_GROUPS
 )
+X86_ZNVER5_SCHEDULE_BEHAVIORS = _validate_behavior_groups(
+    X86_ZNVER5_FLOAT_SCHEDULE_GROUPS + X86_ZNVER5_INTEGER_MULTIPLY_SCHEDULE_GROUPS
+)
 
 _X86_SCHEDULE_BEHAVIORS_BY_MODEL_KEY = MappingProxyType(
     {
-        "x86.znver5": X86_ZNVER5_FLOAT_SCHEDULE_BEHAVIORS,
-        "x86.znver6": X86_ZNVER5_FLOAT_SCHEDULE_BEHAVIORS,
+        "x86.znver5": X86_ZNVER5_SCHEDULE_BEHAVIORS,
+        "x86.znver6": X86_ZNVER5_SCHEDULE_BEHAVIORS,
     }
 )
 
@@ -549,6 +569,21 @@ def x86_register_only_floating_descriptor_keys(
         descriptor.key
         for descriptor in descriptor_set.descriptors
         if _is_floating_schedule_descriptor(descriptor)
+        and _is_register_only(descriptor)
+    )
+
+
+def x86_register_only_integer_multiply_descriptor_keys(
+    descriptor_set: DescriptorSet,
+) -> frozenset[str]:
+    """Returns the complete register-only scalar integer multiply family."""
+
+    return frozenset(
+        descriptor.key
+        for descriptor in descriptor_set.descriptors
+        if descriptor.key.startswith("x86.scalar.")
+        and descriptor.semantic_tag is not None
+        and descriptor.semantic_tag.startswith("integer.mul.")
         and _is_register_only(descriptor)
     )
 
@@ -625,14 +660,16 @@ def project_x86_machine_schedule_classes(
     }
     inline_schedule_classes = list(descriptor_set.schedule_classes)
     projected_descriptors = []
-    required_behavior_keys = x86_register_only_floating_descriptor_keys(descriptor_set)
+    required_behavior_keys = x86_register_only_floating_descriptor_keys(
+        descriptor_set
+    ) | x86_register_only_integer_multiply_descriptor_keys(descriptor_set)
     for descriptor in descriptor_set.descriptors:
-        behavior = X86_ZNVER5_FLOAT_SCHEDULE_BEHAVIORS.get(descriptor.key)
+        behavior = X86_ZNVER5_SCHEDULE_BEHAVIORS.get(descriptor.key)
         if behavior is None:
             if descriptor.key in required_behavior_keys:
                 raise ValueError(
-                    f"x86 register-only floating descriptor '{descriptor.key}' "
-                    "has no processor schedule data"
+                    f"x86 modeled descriptor '{descriptor.key}' has no processor "
+                    "schedule data"
                 )
             projected_descriptors.append(descriptor)
             continue

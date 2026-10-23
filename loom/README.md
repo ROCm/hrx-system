@@ -100,7 +100,7 @@ python dev.py bazel run \
   //loom/src/loom/tools/loom-benchmark:loom-benchmark -- \
   loom/src/loom/test/corpus/authoring/mlp_down_projection_residual_bf16.loom \
   --config=mlp_down_projection_residual_bf16.row_capacity=3584 \
-  --device=amdgpu \
+  --device=legacy-amdgpu \
   --measure=dispatch_complete \
   --iterations=1 \
   --warmup-iterations=0 \

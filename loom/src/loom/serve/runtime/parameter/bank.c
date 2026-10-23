@@ -277,15 +277,18 @@ bool loom_serve_parameter_bank_is_retired(loom_serve_parameter_bank_t* bank) {
   return retired;
 }
 
-void loom_serve_parameter_bank_await_retirement(
+iree_status_t loom_serve_parameter_bank_await_retirement(
     loom_serve_parameter_bank_t* bank) {
   if (!bank) {
-    return;
+    return iree_ok_status();
   }
   loom_serve_weights_t** plans = loom_serve_parameter_bank_plans(bank);
+  iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < bank->count; ++i) {
-    loom_serve_weights_await_retirement(plans[i]);
+    status =
+        iree_status_join(status, loom_serve_weights_await_retirement(plans[i]));
   }
+  return status;
 }
 
 iree_status_t loom_serve_parameter_bank_free(

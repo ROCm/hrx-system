@@ -14,7 +14,11 @@ loom_cc_test(
     srcs = ["input_test.cc"],
     deps = [
         ":input",
+        ":loomc_input",
+        ":options",
         ":source_capture_test_data",
+        "//loom/binding/c:interop",
+        "//loom/binding/c:loomc",
         "//loom/src/loom/error:source",
         "//loom/src/loom/format:location",
         "//loom/src/loom/import/cxx",

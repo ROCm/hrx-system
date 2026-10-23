@@ -63,7 +63,9 @@ typedef struct loom_aie2p_bundle_plan_options_t {
 // resource imports anchor physical assignments without occupying an instruction
 // slot. The returned plan owns its function name, resource bindings, storage
 // requirements, and physical tables in |arena|. It contains no compiler frame
-// or IR references.
+// or IR references. Planning retains the exact encoded length beyond the
+// architectural program-memory capacity so leaf compilation can record that
+// evidence before applying the authored-program admission contract.
 iree_status_t loom_aie2p_bundle_plan_build(
     const loom_low_emission_frame_t* frame,
     const loom_aie2p_bundle_plan_options_t* options,

@@ -28,7 +28,8 @@ class StageSetTest : public loom_serve::testing::JitTest {
     IREE_RETURN_IF_ERROR(loom_serve_preparation_allocate(
         loom_serve_host_target_environment(
             loom_serve_device_host(device_owner_)),
-        environment_, &sources, IREE_SV("preparation.loom"), root, inputs,
+        environment_, &sources, IREE_SV("preparation.loom"), root,
+        LOOM_SERVE_PREPARATION_FLAG_PARAMETERS, inputs,
         iree_vm_variant_span_empty(), iree_vm_module_span_empty(),
         &preparation_report, host_allocator_, &preparation_));
     auto status =

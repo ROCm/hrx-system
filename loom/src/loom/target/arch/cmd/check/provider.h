@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-// Portable command-machine target-low descriptor package.
+// Portable command-program planning inspection handlers.
 extern const loom_check_provider_t loom_cmd_check_provider;
 
 #ifdef __cplusplus

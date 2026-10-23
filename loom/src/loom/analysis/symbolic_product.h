@@ -18,8 +18,10 @@ extern "C" {
 // Represents scale * product(factors). Factors are sorted SSA identities with
 // multiplicity preserved, including factors that may be zero. The expansion
 // owner establishes nonwrapping arithmetic before composing this record.
-// Storage shares the symbolic context's arena and invalidation boundary. This
-// is a numeric proof, not a recipe for replacing materialized SSA arithmetic.
+// Storage shares the symbolic context's arena and invalidation boundary. The
+// flattened factors prove numeric equivalence, while |operand_values| retains
+// the authored binary partition so consumers can reuse values already present
+// in SSA without reconstructing discarded source operations.
 typedef struct loom_symbolic_product_t {
   // Nonzero signed coefficient multiplying all factors.
   int64_t scale;
@@ -27,6 +29,15 @@ typedef struct loom_symbolic_product_t {
   const loom_value_id_t* factors;
   // Number of factors, or zero when composition exceeds the proof budget.
   iree_host_size_t factor_count;
+  // Exact SSA operands of the multiplication producing this value. These
+  // preserve one authored product partition alongside the flattened factors.
+  loom_value_id_t operand_values[2];
+  // SSA value materializing the normalized expression's dynamic terms, or
+  // invalid when no exact spelling was retained.
+  loom_value_id_t materialized_expression_value_id;
+  // SSA value materializing a strict subset of the normalized expression, or
+  // invalid when no reusable component was selected.
+  loom_value_id_t materialized_component_value_id;
 } loom_symbolic_product_t;
 
 // Computes the mathematical product range without saturating its endpoints.

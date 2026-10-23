@@ -183,6 +183,18 @@ loom_cc_library(
     "stable_id.c"
   DEPS
     iree::base
+  LINKABLE_MORE_THAN_ONCE
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    segmented_storage_headers
+  HDRS
+    "segmented_storage.h"
+  DEPS
+    iree::base
+    iree::base::internal::arena
   PUBLIC
 )
 
@@ -196,6 +208,7 @@ loom_cc_library(
   DEPS
     iree::base
     iree::base::internal::arena
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -567,6 +580,7 @@ loom_cc_test(
     loom::ops::scf
     loom::ops::test
     loom::ops::vector
+    loom::target::facts
 )
 
 loom_cc_library(

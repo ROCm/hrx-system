@@ -138,11 +138,12 @@ static iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_program_dispatch(
   return iree_hal_amd_gpu_aql_packet_dispatch(&dispatch);
 }
 
-void iree_hal_amd_gpu_aql_program_emit(
+amdf_status_t iree_hal_amd_gpu_aql_program_emit(
     const iree_hal_amd_gpu_aql_program_pool_t* pool,
     const iree_hal_amd_gpu_program_t* program,
     const iree_hal_amd_gpu_program_instance_t* instance, uint32_t block_offset,
-    uint32_t packet_count, iree_hal_amd_gpu_aql_ring_t* ring, uint64_t position,
+    uint32_t packet_count, iree_hal_amd_gpu_aql_ring_t* ring,
+    const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
     uint64_t argument_address, uint64_t signal_address, void* upload,
     iree_hal_amd_gpu_aql_program_flags_t flags) {
   const bool profiling = (flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_PROFILE) != 0;
@@ -220,9 +221,11 @@ void iree_hal_amd_gpu_aql_program_emit(
       IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
           IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM);
   // Every argument is complete before a valid header can run ahead of the host.
-  for (uint32_t i = 0; i < count; ++i) {
+  amdf_status_t status = AMDF_STATUS_OK;
+  for (uint32_t i = 0; i < count && amdf_status_is_ok(status); ++i) {
     iree_hal_amd_gpu_aql_ring_write_body(ring, position + i, &prefix[i]);
-    iree_hal_amd_gpu_aql_ring_publish_header(ring, position + i,
-                                             prefix[i].words[0]);
+    status = iree_hal_amd_gpu_aql_ring_publish_header(
+        ring, storage, position + i, prefix[i].words[0]);
   }
+  return status;
 }

@@ -169,10 +169,12 @@ iree_cc_test(
   NAME
     regex_test
   SRCS
+    "regex_branch_test.cc"
     "regex_test.cc"
   DEPS
     ::compile
     ::exec
+    iree::base
     iree::base::internal::unicode
     iree::testing::gtest
     iree::testing::gtest_main

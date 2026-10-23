@@ -28,6 +28,10 @@ struct NativeDoorbellState {
   kfd_ioctl_alloc_memory_of_gpu_args allocation = {};
   // Allocation failure before acquiring native backing, or zero.
   int allocation_error = 0;
+  // Number of allocation attempts interrupted before native ownership exists.
+  uint32_t allocation_interruptions = 0;
+  // Total native allocation attempts, including interruptions.
+  uint32_t allocation_count = 0;
   // Map failure after the reported prefix, or zero.
   int map_error = 0;
   // Prefix reported by map, including on a final synchronization error.
@@ -77,6 +81,13 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
       auto* allocate =
           static_cast<kfd_ioctl_alloc_memory_of_gpu_args*>(argument);
       native_state->allocation = *allocate;
+      EXPECT_FALSE(native_state->allocated);
+      ++native_state->allocation_count;
+      if (native_state->allocation_interruptions != 0) {
+        --native_state->allocation_interruptions;
+        errno = EINTR;
+        return -1;
+      }
       if (native_state->allocation_error != 0) {
         errno = native_state->allocation_error;
         return -1;
@@ -199,8 +210,10 @@ class KfdDoorbellTest : public ::testing::Test {
 };
 
 TEST_F(KfdDoorbellTest, OwnsUncachedExactDeviceMapping) {
+  native_.allocation_interruptions = 2;
   ASSERT_EQ(amdf_gpu_kfd_doorbell_create(&device_, 8192, &doorbell_, &address_),
             AMDF_STATUS_OK);
+  EXPECT_EQ(native_.allocation_count, 3u);
   EXPECT_EQ(address_, native_.allocation.va_addr);
   EXPECT_EQ(native_.allocation.size, 8192u);
   EXPECT_EQ(native_.allocation.gpu_id, 19u);
@@ -243,9 +256,11 @@ TEST_F(KfdDoorbellTest, FailedMapRollsBackCompletedAccessWithoutPublishing) {
 }
 
 TEST_F(KfdDoorbellTest, AllocationFailureCreatesNoNativeCleanupObligation) {
+  native_.allocation_interruptions = 1;
   native_.allocation_error = ENOMEM;
   EXPECT_EQ(amdf_gpu_kfd_doorbell_create(&device_, 8192, &doorbell_, &address_),
             amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, ENOMEM));
+  EXPECT_EQ(native_.allocation_count, 2u);
   EXPECT_EQ(doorbell_, nullptr);
   EXPECT_EQ(address_, 0u);
   EXPECT_TRUE(native_.map_progress.empty());

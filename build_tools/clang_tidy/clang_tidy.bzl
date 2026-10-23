@@ -6,7 +6,6 @@
 
 """Bazel actions for running IREE clang-tidy checks."""
 
-load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load(
     "@iree_clang_tidy_llvm//:config.bzl",
     "CLANG_TIDY_CLANG_RESOURCE_DIR",
@@ -295,7 +294,7 @@ def _run_recursion_summary_action(ctx, target, cc_toolchain, feature_configurati
 
 def _selected_clang_tidy_sources(target, ctx):
     sources = iree_cc_source_files(ctx)
-    encoded_files = ctx.attr._selected_files[BuildSettingInfo].value
+    encoded_files = ctx.attr.selected_files
     if not encoded_files:
         return sources
 
@@ -377,62 +376,77 @@ def _collect_clang_tidy_aspect_impl(target, ctx):
         ),
     ]
 
-collect_clang_tidy_aspect = aspect(
-    implementation = _collect_clang_tidy_aspect_impl,
-    attr_aspects = [
-        "actual",
-        "deps",
-        "implementation_deps",
-    ],
-    attrs = dict(CC_TOOLCHAIN_ATTRS, **{
-        "emit_fixes": attr.string(
-            default = "false",
-            values = ["false", "true"],
-            doc = "When true, emit clang-tidy replacement YAML files instead of failing on diagnostics.",
-        ),
-        "_clang_resource_headers": attr.label(
-            allow_files = True,
-            cfg = "exec",
-            default = Label("@iree_clang_tidy_llvm//:clang_resource_headers"),
-        ),
-        "_clang_resource_overlay": attr.label(
-            allow_single_file = True,
-            cfg = "exec",
-            default = Label("@iree_clang_tidy_llvm//:clang_resource_overlay"),
-        ),
-        "_clang_tidy": attr.label(
-            cfg = "exec",
-            default = Label("@iree_clang_tidy_llvm//:clang-tidy"),
-            executable = True,
-        ),
-        "_config": attr.label(
-            allow_single_file = True,
-            default = Label("//build_tools/clang_tidy:clang_tidy_config.yaml"),
-            doc = "Repository clang-tidy policy configuration.",
-        ),
-        "_plugin": attr.label(
-            cfg = "exec",
-            default = Label("//build_tools/clang_tidy:IREEClangTidyPlugin.so"),
-            executable = True,
-        ),
-        "_runner": attr.label(
-            cfg = "exec",
-            default = Label("//build_tools/clang_tidy:run_clang_tidy_action"),
-            executable = True,
-        ),
-        "_selected_files": attr.label(
-            default = Label("//build_tools/clang_tidy:selected_files"),
-            doc = "Changed source and header paths restricting emitted actions.",
-        ),
-        "_warnings_as_errors": attr.string(
-            default = "*",
-            doc = "clang-tidy warning globs promoted to errors.",
-        ),
-    }),
-    fragments = ["cpp"],
-    required_providers = [CcInfo],
-    toolchains = use_cc_toolchain(),
-)
+def make_clang_tidy_aspect(selected_files_values = []):
+    """Creates a clang-tidy aspect with selection owned by the aspect instance.
+
+    Args:
+      selected_files_values: Finite JSON selections for rule-attached aspects.
+        An empty list allows arbitrary command-line selections. Bazel requires
+        a finite domain when an aspect is propagated from a rule attribute.
+
+    Returns:
+      An aspect using the shared clang-tidy action and report implementation.
+    """
+    return aspect(
+        implementation = _collect_clang_tidy_aspect_impl,
+        attr_aspects = [
+            "actual",
+            "deps",
+            "implementation_deps",
+        ],
+        attrs = dict(CC_TOOLCHAIN_ATTRS, **{
+            "emit_fixes": attr.string(
+                default = "false",
+                values = ["false", "true"],
+                doc = "When true, emit clang-tidy replacement YAML files instead of failing on diagnostics.",
+            ),
+            "selected_files": attr.string(
+                default = "",
+                values = selected_files_values,
+                doc = "JSON source/header paths restricting actions; empty string selects all sources.",
+            ),
+            "_clang_resource_headers": attr.label(
+                allow_files = True,
+                cfg = "exec",
+                default = Label("@iree_clang_tidy_llvm//:clang_resource_headers"),
+            ),
+            "_clang_resource_overlay": attr.label(
+                allow_single_file = True,
+                cfg = "exec",
+                default = Label("@iree_clang_tidy_llvm//:clang_resource_overlay"),
+            ),
+            "_clang_tidy": attr.label(
+                cfg = "exec",
+                default = Label("@iree_clang_tidy_llvm//:clang-tidy"),
+                executable = True,
+            ),
+            "_config": attr.label(
+                allow_single_file = True,
+                default = Label("//build_tools/clang_tidy:clang_tidy_config.yaml"),
+                doc = "Repository clang-tidy policy configuration.",
+            ),
+            "_plugin": attr.label(
+                cfg = "exec",
+                default = Label("//build_tools/clang_tidy:IREEClangTidyPlugin.so"),
+                executable = True,
+            ),
+            "_runner": attr.label(
+                cfg = "exec",
+                default = Label("//build_tools/clang_tidy:run_clang_tidy_action"),
+                executable = True,
+            ),
+            "_warnings_as_errors": attr.string(
+                default = "*",
+                doc = "clang-tidy warning globs promoted to errors.",
+            ),
+        }),
+        fragments = ["cpp"],
+        required_providers = [CcInfo],
+        toolchains = use_cc_toolchain(),
+    )
+
+collect_clang_tidy_aspect = make_clang_tidy_aspect()
+_full_clang_tidy_aspect = make_clang_tidy_aspect(selected_files_values = [""])
 
 def _collect_recursion_aspect_impl(target, ctx):
     transitive_reports = []
@@ -567,8 +581,13 @@ def _iree_clang_tidy_impl(ctx):
 _iree_clang_tidy_rule = rule(
     implementation = _iree_clang_tidy_impl,
     attrs = {
+        "selected_files": attr.string(
+            default = "",
+            values = [""],
+            doc = "Rule-attached analysis always selects every source of its targets.",
+        ),
         "targets": attr.label_list(
-            aspects = [collect_clang_tidy_aspect],
+            aspects = [_full_clang_tidy_aspect],
             doc = "C/C++ targets to analyze with clang-tidy.",
             mandatory = True,
             providers = [CcInfo],

@@ -84,6 +84,7 @@ loom_cc_test(
     deps = [
         ":configured",
         "//loom/binding/c:loomc",
+        "//loom/src/loom/pass/testing:registry_verify",
         "//loom/src/loom/target/configured:compiler_provider_set",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

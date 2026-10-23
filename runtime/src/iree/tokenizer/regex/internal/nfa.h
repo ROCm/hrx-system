@@ -40,6 +40,9 @@ typedef enum iree_tokenizer_regex_nfa_state_type_e {
 // Patterns with >255 branches should use a trie-based approach instead.
 #define IREE_TOKENIZER_UTIL_REGEX_MAX_ALTERNATION_BRANCHES 255
 
+// Mixed lookahead alternatives retain branch identities in 64-bit DFA masks.
+#define IREE_TOKENIZER_UTIL_REGEX_MAX_TRACKED_BRANCHES 64
+
 //===----------------------------------------------------------------------===//
 // NFA State Structure
 //===----------------------------------------------------------------------===//

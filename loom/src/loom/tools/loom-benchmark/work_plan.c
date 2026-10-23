@@ -29,6 +29,26 @@ static iree_status_t loom_benchmark_duration_ms_to_ns(
   return iree_ok_status();
 }
 
+static iree_status_t loom_benchmark_validate_dispatch_sequence(
+    const loom_testbench_module_plan_t* module_plan,
+    const loom_testbench_benchmark_plan_t* benchmark_plan) {
+  const loom_testbench_case_plan_t* case_plan =
+      &module_plan->cases[benchmark_plan->case_index];
+  for (iree_host_size_t i = 1; i < case_plan->kernel_launch_count; ++i) {
+    if (case_plan->kernel_launches[i] !=
+        case_plan->kernel_launches[i - 1] + 1) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "dispatch_complete benchmark `%.*s` selects check.case `%.*s`, "
+          "whose kernel launches are separated by a non-kernel invocation; "
+          "kernel launches must form one contiguous device sequence",
+          (int)benchmark_plan->name.size, benchmark_plan->name.data,
+          (int)case_plan->name.size, case_plan->name.data);
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_benchmark_policy_from_benchmark(
     const loom_testbench_module_plan_t* module_plan,
     const loom_testbench_benchmark_plan_t* benchmark_plan,
@@ -66,6 +86,11 @@ static iree_status_t loom_benchmark_policy_from_benchmark(
         IREE_STATUS_INVALID_ARGUMENT,
         "scenario benchmark `%.*s` requires measure = \"dispatch_complete\"",
         (int)benchmark_plan->name.size, benchmark_plan->name.data);
+  }
+  if (!is_scenario &&
+      measure_kind == LOOM_BENCHMARK_MEASURE_DISPATCH_COMPLETE) {
+    IREE_RETURN_IF_ERROR(
+        loom_benchmark_validate_dispatch_sequence(module_plan, benchmark_plan));
   }
   if (measure_kind != LOOM_BENCHMARK_MEASURE_DISPATCH_COMPLETE &&
       (!iree_string_view_is_empty(options->profile_artifacts_dir) ||

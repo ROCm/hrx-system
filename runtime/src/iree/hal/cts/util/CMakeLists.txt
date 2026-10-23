@@ -37,6 +37,36 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_runtime_hal_cts_testdata(
+  NAME
+    "testdata_fixture"
+  SRCS
+    "testdata/first.txt"
+    "testdata/second.txt"
+  BACKEND_NAMES
+    "fixture_primary"
+    "fixture_alias"
+  TARGET_NAME
+    "fixture_target"
+  TARGET_FAMILY
+    "fixture_family"
+  TARGET_KEY
+    "fixture:target"
+)
+
+iree_cc_test(
+  NAME
+    testdata_test
+  SRCS
+    "testdata_test.cc"
+  DEPS
+    ::registry
+    ::testdata_fixture
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 iree_cc_library(
   NAME
     pool_test_util

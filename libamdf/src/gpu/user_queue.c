@@ -51,8 +51,16 @@ static amdf_status_t amdf_gpu_user_queue_mapping_destroy_native(
   return status;
 }
 
+static amdf_status_t amdf_gpu_user_queue_mapping_flush(
+    amdf_user_queue_mapping_t* base_mapping) {
+  amdf_gpu_user_queue_mapping_t* mapping =
+      (amdf_gpu_user_queue_mapping_t*)base_mapping;
+  return amdf_gpu_umd_user_queue_mapping_flush(mapping->umd);
+}
+
 static const amdf_user_queue_mapping_vtable_t
     amdf_gpu_user_queue_mapping_vtable = {
+        .flush = amdf_gpu_user_queue_mapping_flush,
         .destroy_native = amdf_gpu_user_queue_mapping_destroy_native,
 };
 
@@ -120,6 +128,7 @@ static amdf_status_t amdf_gpu_user_queue_map(
     mapping->base.info.doorbell_address = result.doorbell_address;
     mapping->base.info.index_bits = result.index_bits;
     mapping->base.info.doorbell_bits = result.doorbell_bits;
+    mapping->base.info.host_publish_executor = result.host_publish_executor;
     mapping->base.info.host_publish_fence = result.host_publish_fence;
     mapping->base.info.metadata_ring_address = result.metadata_ring_address;
     *out_mapping = &mapping->base;

@@ -93,11 +93,13 @@ typedef struct loom_low_lower_realization_recipe_t {
   const void* data;
 } loom_low_lower_realization_recipe_t;
 
-// Deferred packet replacement, applied only after the shared owner selects the
-// complete reuse group. The callback requests physical values and updates its
-// retained target plan; it does not emit IR or traverse source operations.
+// Deferred plan replacement, applied only after the shared owner selects the
+// complete reuse group. The owner passes the requested physical value to the
+// callback, which updates retained plans without emitting IR or traversing
+// source operations.
 typedef iree_status_t (*loom_low_lower_realization_apply_fn_t)(
-    loom_low_lower_context_t* context, const loom_op_t* source_op, void* data);
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_realization_t* realization, void* data);
 
 typedef struct loom_low_lower_realization_offer_t {
   // Target recipe family defining the cost units and opaque keys.
@@ -114,9 +116,12 @@ typedef struct loom_low_lower_realization_offer_t {
   uint64_t removed_key;
   // Per-iteration cost of the removed direct calculation.
   uint32_t removed_iteration_cost;
-  // Conservative setup cost for this packet's additional invariant values.
+  // Conservative setup cost for this offer's additional invariant values.
   uint32_t setup_cost;
-  // Applies the selected replacement to the retained target packet plan.
+  // Physical value requested only when the complete offer group wins. NULL
+  // leaves physical realization entirely to the target callback.
+  const loom_low_lower_realization_recipe_t* recipe;
+  // Applies the selected replacement to its retained target plan.
   loom_low_lower_realization_apply_fn_t apply;
   // Function-owned callback payload, including the retained packet plan.
   void* data;
@@ -129,6 +134,12 @@ typedef struct loom_low_lower_realization_offer_t {
 iree_status_t loom_low_lower_realizations_create(
     loom_low_lower_context_t* context,
     iree_arena_allocator_t* construction_arena);
+
+// Selects and applies offers made during target source-memory preparation,
+// then marks every retained source input before source-graph selection. The
+// owner remains open for shared offers derived from exact selected rules.
+iree_status_t loom_low_lower_realizations_prepare_selection(
+    loom_low_lower_context_t* context);
 
 // Returns the admitted innermost loop, or NULL outside the candidate domain.
 const loom_low_lower_realization_loop_t* loom_low_lower_realization_loop(
@@ -146,19 +157,26 @@ iree_status_t loom_low_lower_realization_offer(
 // Interns a physical value and retains its source-use boundary. A NULL result
 // means the input definitions cannot be placed in the requested scope. Loop
 // recipes initialize before entry and produce a supplemental header argument;
-// invariant recipes initialize immediately after their last dependency.
-// Called during shared memory preparation, before operation selection.
+// invariant recipes initialize immediately after their last dependency. Calls
+// are valid while realization construction remains open.
 iree_status_t loom_low_lower_realization_request(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_realization_loop_t* loop,
     const loom_low_lower_realization_recipe_t* recipe,
     const loom_low_lower_realization_t** out_realization);
 
-// Selects complete reuse groups, freezes placement/use boundaries and marks
-// source dependencies before the backward operation demand walk. No subsequent
-// request is permitted.
+// Binds one source result to a selected carried realization before body
+// emission. Multiple source producers may alias the same physical value.
+iree_status_t loom_low_lower_realization_bind_source_value(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_realization_t* realization,
+    loom_value_id_t source_value_id);
+
+// Selects any remaining complete reuse groups, freezes placement/use
+// boundaries and marks source dependencies. No subsequent request is
+// permitted.
 iree_status_t loom_low_lower_realizations_finalize(
-    loom_low_lower_context_t* context);
+    loom_low_lower_context_t* context, bool* out_storage_refinement_required);
 
 // Creates supplemental block arguments after all authored arguments exist.
 iree_status_t loom_low_lower_realizations_map_blocks(

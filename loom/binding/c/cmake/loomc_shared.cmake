@@ -71,6 +71,7 @@ endfunction()
 function(_loomc_collect roots mode out_objects out_libraries out_owned out_options)
   set(_pending ${roots})
   set(_visited)
+  set(_owned)
   set(_objects)
   set(_libraries)
   set(_options)
@@ -111,15 +112,20 @@ function(_loomc_collect roots mode out_objects out_libraries out_owned out_optio
     if(NOT _recorded)
       get_property(_type TARGET "${_target}" PROPERTY TYPE)
       get_property(_imported TARGET "${_target}" PROPERTY IMPORTED)
-      if(mode STREQUAL "runtime" AND NOT WIN32 AND NOT _imported AND
-          _type STREQUAL "STATIC_LIBRARY")
+      if(NOT _imported AND _type STREQUAL "STATIC_LIBRARY")
         # Opaque support libraries, including the allocator, share this owner.
         # The final export list still limits the companion's symbol surface.
-        target_compile_options("${_target}" PRIVATE -fvisibility=default)
+        list(APPEND _owned "${_target}")
+        if(mode STREQUAL "runtime" AND NOT WIN32)
+          target_compile_options("${_target}" PRIVATE -fvisibility=default)
+        endif()
       endif()
       list(APPEND _libraries "${_target}")
       continue()
     endif()
+    # Only composed implementations and their recorded dependency groups have
+    # this owner. Visiting an external link requirement does not absorb it.
+    list(APPEND _owned "${_target}")
     if(_object)
       get_property(_target_objects TARGET "${_target}" PROPERTY IREE_CC_OBJECTS)
       list(APPEND _objects ${_target_objects})
@@ -139,7 +145,7 @@ function(_loomc_collect roots mode out_objects out_libraries out_owned out_optio
   list(REMOVE_DUPLICATES _options)
   set(${out_objects} "${_objects}" PARENT_SCOPE)
   set(${out_libraries} "${_libraries}" PARENT_SCOPE)
-  set(${out_owned} "${_visited}" PARENT_SCOPE)
+  set(${out_owned} "${_owned}" PARENT_SCOPE)
   set(${out_options} "${_options}" PARENT_SCOPE)
 endfunction()
 

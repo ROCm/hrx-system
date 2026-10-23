@@ -154,7 +154,7 @@ class SpirvDialectTest(unittest.TestCase):
 def _paths_from_argv(argv: list[str]) -> tuple[Path, Path, Path]:
     if len(argv) != 4:
         raise SystemExit(
-            f"usage: {argv[0]} <scalar_types.h> <isa.h> <spirv.core.grammar.json>"
+            f"usage: {argv[0]} <scalar_type.h> <isa.h> <spirv.core.grammar.json>"
         )
     paths = tuple(Path(value) for value in argv[1:])
     for path in paths:

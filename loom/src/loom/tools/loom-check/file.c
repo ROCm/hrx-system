@@ -10,6 +10,7 @@
 
 #include "iree/io/file_contents.h"
 #include "loom/testing/test_file.h"
+#include "loom/tooling/input/format.h"
 #include "loom/tooling/io/file.h"
 #include "loom/tools/loom-check/json_output.h"
 #include "loom/tools/loom-check/output.h"
@@ -50,7 +51,7 @@ static iree_status_t loom_check_process_file(
     iree_string_view_t path, iree_string_view_t filename,
     iree_string_view_t source, bool is_stdin,
     const loom_check_process_options_t* options,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_arena_allocator_t* arena,
     iree_allocator_t allocator, iree_host_size_t* pass_count,
     iree_host_size_t* fail_count, iree_host_size_t* skip_count) {
@@ -63,7 +64,7 @@ static iree_status_t loom_check_process_file(
       iree_string_view_is_empty(options->input_format)
           ? iree_string_view_ends_with(path, IREE_SV(".loombc"))
           : iree_string_view_equal(options->input_format,
-                                   loom_input_bytecode_provider.format->name);
+                                   loom_input_bytecode_format.name);
   iree_status_t status = iree_ok_status();
   loom_test_case_t bytecode_case = {.input = source};
   if (bytecode) {
@@ -124,8 +125,7 @@ static iree_status_t loom_check_process_file(
 
     loom_check_result_initialize(allocator, &results[i]);
     ++initialized_result_count;
-    const loom_input_request_t input_request = {
-        .source = test_case->input,
+    const loom_check_input_t input_request = {
         .path = is_stdin ? IREE_SV("<stdin>") : path,
         .format = options->input_format,
         .source_path_options = options->source_path_options,
@@ -136,8 +136,8 @@ static iree_status_t loom_check_process_file(
           environment, block_pool, allocator, &results[i]);
     } else {
       status = loom_check_execute_case(test_case, i, &report, filename,
-                                       &input_request, environment, context,
-                                       block_pool, allocator, &results[i]);
+                                       &input_request, environment, block_pool,
+                                       allocator, &results[i]);
     }
     if (!iree_status_is_ok(status)) {
       break;
@@ -230,7 +230,7 @@ static iree_status_t loom_check_process_file(
 
 iree_status_t loom_check_read_and_process(
     iree_string_view_t path, const loom_check_process_options_t* options,
-    const loom_check_environment_t* environment, loom_context_t* context,
+    const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
     iree_host_size_t* pass_count, iree_host_size_t* fail_count,
     iree_host_size_t* skip_count) {
@@ -251,10 +251,9 @@ iree_status_t loom_check_read_and_process(
     if (iree_status_is_ok(status)) {
       iree_arena_allocator_t arena;
       iree_arena_initialize(block_pool, &arena);
-      status = loom_check_process_file(path, filename, source, is_stdin,
-                                       options, environment, context,
-                                       block_pool, &arena, host_allocator,
-                                       pass_count, fail_count, skip_count);
+      status = loom_check_process_file(
+          path, filename, source, is_stdin, options, environment, block_pool,
+          &arena, host_allocator, pass_count, fail_count, skip_count);
       iree_arena_deinitialize(&arena);
     }
     iree_allocator_free(host_allocator, filename_storage);

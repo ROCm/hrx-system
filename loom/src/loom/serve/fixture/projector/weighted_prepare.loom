@@ -1,8 +1,14 @@
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
+
+func.decl import("prepare") @memory_forecast(%root: buffer)
 
 global.rodata.def @root = bytes("77656967687465645f70726f6a656374")
+
+global.rodata.def @forecast_root = bytes("666f7265636173745f6d656d6f7279")
 
 global.rodata.def @checkpoint = bytes("776569676874732e7361666574656e736f7273")
 
@@ -14,6 +20,8 @@ global.rodata.def @name = bytes("77656967687465642d70726f6a6563746f72")
 
 // The pixel protocol is unchanged; a real checkpoint conditions every row.
 func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer) {
+  %forecast = global.load @forecast_root : buffer
+  func.call @memory_forecast(%forecast) : (buffer)
   %c0_source = scalar.constant 0 : i32
   %binding = scalar.constant 0 : i32
   %tag = scalar.constant 1 : i64
@@ -21,7 +29,8 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
   %checkpoint = global.load @checkpoint : buffer
   %policy = global.load @policy : buffer
-  func.call @parameter(%stage, %binding, %c0_source, %directory, %checkpoint, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+  %source = func.call @source(%directory, %checkpoint) : (buffer, buffer) -> (i32)
+  func.call @parameter(%stage, %binding, %c0_source, %source, %policy) : (i32, i32, i32, i32, buffer)
   %units = scalar.constant 64 : i64
   %input_capacity = scalar.constant 65536 : i64
   %output_capacity = scalar.constant 1024 : i64

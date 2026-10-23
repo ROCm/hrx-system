@@ -30,6 +30,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/runtime/parameter:residency",
         "//loom/src/loom/serve/runtime/storage:memory",
+        "//loom/src/loom/serve/runtime/storage:virtual_pool",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",

@@ -106,7 +106,8 @@ void loom_serve_parameter_bank_retire(loom_serve_parameter_bank_t* bank,
 bool loom_serve_parameter_bank_is_retired(loom_serve_parameter_bank_t* bank);
 
 // Cold outer-thread join after retire; shared workers use the observer/query.
-void loom_serve_parameter_bank_await_retirement(
+// Workspace progress failures return only after every plan has retired.
+iree_status_t loom_serve_parameter_bank_await_retirement(
     loom_serve_parameter_bank_t* bank);
 
 // Destroys a retired bank after all borrowing residencies have been destroyed.

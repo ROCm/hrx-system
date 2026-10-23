@@ -173,7 +173,9 @@ function(iree_finalize_test_build_targets)
   # growing catalog for every test. Publish only the completed JSON document.
   set(_CATALOG_TEMP "${IREE_CTEST_BUILD_TARGETS_FILE}.tmp")
   file(WRITE "${_CATALOG_TEMP}"
-    "{\n  \"kind\": \"ireeCtestBuildTargets\",\n  \"version\": 1,\n  \"tests\": {")
+    "{\n  \"kind\": \"ireeCtestBuildTargets\",\n  \"version\": 2,"
+    "\n  \"temporaryDirectoryRoot\": \"${IREE_TEST_TMPDIR_ROOT}\","
+    "\n  \"tests\": {")
   set(_ENTRY_SEPARATOR "")
   foreach(_TEST_KEY IN LISTS _TEST_METADATA_KEYS)
     get_property(_TEST_NAME

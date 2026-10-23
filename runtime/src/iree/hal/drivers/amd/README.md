@@ -36,11 +36,11 @@ registry/driver for devices using that native process context. Direct driver
 construction with INSTANCE bounds native reclamation to the fabric at the cost
 of services unsupported by secondary KFD contexts, including host registration.
 
-The `xdna`, `rdna`, `cdna`, and `amdgpu2` schemes share that driver identity. `xdna`
-selects NPUs, `rdna` selects RDNA GPUs, `cdna` selects CDNA GPUs, and `amdgpu2`
+The `xdna`, `rdna`, `cdna`, and `amdgpu` schemes share that driver identity. `xdna`
+selects NPUs, `rdna` selects RDNA GPUs, `cdna` selects CDNA GPUs, and `amdgpu`
 selects all GPUs supported by this build. Both `rdna:0` and `rdna://0` select the
 first visible RDNA device;
-`xdna:0?columns=4` configures an NPU context. The legacy `amdgpu` driver remains
+`xdna:0?columns=4` configures an NPU context. The `legacy-amdgpu` driver remains
 independent.
 
 Each scheme has its own dense ordinal namespace. Driver creation captures these
@@ -51,7 +51,7 @@ optional environment variables:
 | `xdna` | `HAL_VISIBLE_XDNA_DEVICES` |
 | `rdna` | `HAL_VISIBLE_RDNA_DEVICES` |
 | `cdna` | `HAL_VISIBLE_CDNA_DEVICES` |
-| `amdgpu2` | `HAL_VISIBLE_AMDGPU2_DEVICES` |
+| `amdgpu` | `HAL_VISIBLE_AMDGPU_DEVICES` |
 
 A list indexes that scheme's unmasked supported devices in native enumeration
 order. Unset exposes all devices; an empty or whitespace-only value exposes
@@ -63,10 +63,10 @@ view does not filter the RDNA view or alter libamdf topology.
 For example, given native endpoints NPU A, RDNA B, RDNA C:
 
 ```sh
-HAL_VISIBLE_RDNA_DEVICES=1,0 HAL_VISIBLE_AMDGPU2_DEVICES=0 iree-run-module ...
+HAL_VISIBLE_RDNA_DEVICES=1,0 HAL_VISIBLE_AMDGPU_DEVICES=0 iree-run-module ...
 ```
 
-The process sees `xdna:0` as A, `rdna:0` as C, `rdna:1` as B, and `amdgpu2:0`
+The process sees `xdna:0` as A, `rdna:0` as C, `rdna:1` as B, and `amdgpu:0`
 as B. All aliases share the same native fabric. Existing drivers retain their
 captured selections if the environment changes later.
 

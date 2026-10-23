@@ -59,6 +59,9 @@ typedef struct iree_tokenizer_regex_dfa_state_t {
   // See nfa.h accept struct comment for full documentation on limitations.
   bool has_early_no_lookahead;
 
+  // Highest-priority accepting branch that requires no lookahead.
+  uint8_t fallback_branch;
+
   // Anchor requirements.
   // A state requires start anchor if ALL paths to it went through ^.
   // A state requires end anchor if it's accepting and needs $ to be valid.

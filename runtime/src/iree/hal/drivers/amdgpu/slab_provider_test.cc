@@ -76,8 +76,8 @@ class TestLogicalDevice {
       iree_allocator_t host_allocator) {
     IREE_RETURN_IF_ERROR(create_context.Initialize(host_allocator));
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_create(
-        IREE_SV("amdgpu"), options, libhsa, topology, create_context.params(),
-        host_allocator, &base_device));
+        IREE_SV("legacy-amdgpu"), options, libhsa, topology,
+        create_context.params(), host_allocator, &base_device));
     return iree_hal_device_group_create_from_device(
         base_device, create_context.frontier_tracker(), host_allocator,
         &device_group);

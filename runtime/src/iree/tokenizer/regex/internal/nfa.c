@@ -500,6 +500,15 @@ static iree_status_t iree_tokenizer_regex_nfa_build_alternation(
       (has_lookahead_branch && has_non_lookahead_branch) ||
       has_conflicting_lookaheads;
 
+  if (needs_separate_accepts &&
+      child_count > IREE_TOKENIZER_UTIL_REGEX_MAX_TRACKED_BRANCHES) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "mixed lookahead alternation has %" PRIhsz
+                            " branches but branch tracking supports at most %d",
+                            child_count,
+                            IREE_TOKENIZER_UTIL_REGEX_MAX_TRACKED_BRANCHES);
+  }
+
   if (needs_separate_accepts) {
     // Create SEPARATE accept states for each branch to preserve branch index.
     // This is necessary for PCRE-compatible match selection: we need to know

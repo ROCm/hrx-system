@@ -11,6 +11,7 @@
 #include "iree/vm/buffer.h"
 #include "iree/vm/environment.h"
 #include "iree/vm/module.h"
+#include "loom/serve/runtime/parameter/sources.h"
 #include "loom/serve/runtime/program/compilation.h"
 #include "loom/serve/runtime/program/preparation.h"
 #include "loom/serve/service/text/model.h"
@@ -39,6 +40,8 @@ typedef struct loom_serve_text_source_t {
   iree_hal_module_types_t types;
   // Owned source declarations and parameter policies.
   loom_serve_preparation_t* preparation;
+  // Owned immutable checkpoint indexes shared by resident and demand reads.
+  loom_serve_parameter_sources_t* parameter_sources;
   // Compiled control bytecode awaiting native capability linking.
   iree_vm_module_t* module;
   // Opaque source state retained independently of the bootstrap invocation.

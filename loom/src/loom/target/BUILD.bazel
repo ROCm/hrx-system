@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_benchmark",
@@ -21,9 +22,15 @@ package(
 # Target-neutral data shapes
 #===------------------------------------------------------------------------===#
 
+# Borrowed target views need only declarations. Implementation libraries also
+# expose their own public headers so direct callers retain layering checks.
 loom_cc_library(
     name = "types",
-    hdrs = ["types.h"],
+    hdrs = [
+        "facts.h",
+        "profile.h",
+        "types.h",
+    ],
     deps = ["//runtime/src/iree/base"],
 )
 
@@ -252,7 +259,19 @@ loom_cc_test(
 loom_cc_library(
     name = "projection",
     hdrs = ["projection.h"],
-    deps = [":facts"],
+    deps = [":types"],
+)
+
+# Profile/fact inspection and authored projection metadata share declarations,
+# not the algorithms that construct, specialize, or project their values.
+iree_assert_dependency_boundary(
+    name = "declaration_dependency_boundary",
+    allowed_dependencies = [
+        "//loom/src/loom/target:projection",
+        "//loom/src/loom/target:types",
+    ],
+    forbidden_subtrees = ["//loom/src/loom/target/..."],
+    target = ":projection",
 )
 
 loom_cc_library(

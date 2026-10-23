@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/internal/arena.h"
 #include "loom/target/arch/spirv/records/target_records.h"
 
 static iree_status_t loom_spirv_target_profile_allocate_copy(

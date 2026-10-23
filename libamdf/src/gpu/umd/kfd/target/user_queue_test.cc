@@ -50,6 +50,19 @@ TEST(KfdTargetUserQueueTest, DiscoversPlacementWithoutAnAddressDomain) {
                 AMDF_QUEUE_PLACEMENT_HOST_LOCAL);
       EXPECT_EQ(plans.values[i].ring.host_publish_fence,
                 AMDF_HOST_CACHE_FENCE_NONE);
+      EXPECT_EQ(
+          plans.values[i].family.host_publication[AMDF_QUEUE_PLACEMENT_DEFAULT],
+          AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
+      EXPECT_EQ(plans.values[i]
+                    .family.host_publication[AMDF_QUEUE_PLACEMENT_HOST_LOCAL],
+                AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
+      EXPECT_EQ(plans.values[i]
+                    .family.host_publication[AMDF_QUEUE_PLACEMENT_DEVICE_LOCAL],
+                mode == 0   ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN
+                : mode == 1 ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN
+                            : AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN |
+                                  AMDF_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ |
+                                  AMDF_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL);
     }
   }
   topology.vram.visible_byte_length /= 2;

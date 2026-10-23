@@ -61,7 +61,6 @@ loom_cc_library(
     deps = [
         ":bank_service",
         ":occupancy",
-        "//loom/src/loom/target/arch/amdgpu:provider",
         "//loom/src/loom/target/emit/native/amdgpu:loom_check",
         "//loom/src/loom/tools/loom-check:provider",
         "//runtime/src/iree/base",

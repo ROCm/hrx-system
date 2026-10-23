@@ -99,7 +99,9 @@ def _byte_offset_materializer(
         add=descriptor_lookup("x86.scalar.add.gpr64"),
         multiply=descriptor_lookup("x86.scalar.imul.gpr64"),
         shift_left=None,
+        increment=descriptor_lookup("x86.scalar.lea.disp.gpr64"),
         constant_immediate="imm64",
+        increment_immediate="disp32",
         integer_conversions=(
             SourceMemoryIntegerConversion(
                 "i1", descriptor_lookup("x86.scalar.movzx.gpr64.gpr32")

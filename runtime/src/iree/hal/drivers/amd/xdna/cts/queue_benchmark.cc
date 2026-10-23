@@ -148,8 +148,8 @@ class XdnaQueueBenchmark : public benchmark::Fixture {
         iree_hal_device_create_params_default();
     params.proactor_pool = pool_;
     params.event_sink = iree_hal_device_event_sink_stderr();
-    IREE_RETURN_IF_ERROR(iree_hal_driver_create_default_device(
-        driver_, &params, iree_allocator_system(), &device_));
+    IREE_RETURN_IF_ERROR(iree_hal_driver_create_device_by_uri(
+        driver_, IREE_SV("xdna"), &params, iree_allocator_system(), &device_));
     // The selected proactor entry keeps the runner alive with the device.
     iree_async_proactor_pool_release(pool_);
     pool_ = nullptr;

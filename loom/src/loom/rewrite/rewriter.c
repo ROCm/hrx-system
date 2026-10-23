@@ -363,12 +363,12 @@ iree_status_t loom_rewriter_build_constant(loom_rewriter_t* rewriter,
                                            loom_type_t result_type,
                                            loom_location_id_t location,
                                            loom_value_id_t* out_value_id) {
-  if (!rewriter->materialize_constant) {
+  if (!loom_rewriter_has_constant_materializer(rewriter)) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "no materialize_constant callback set");
+                            "no constant materializer policy set");
   }
-  return rewriter->materialize_constant(&rewriter->builder, facts, result_type,
-                                        location, out_value_id);
+  return rewriter->constant_materializer.materialize(
+      &rewriter->builder, facts, result_type, location, out_value_id);
 }
 
 iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
@@ -387,9 +387,9 @@ iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
     return iree_ok_status();
   }
 
-  // Cannot materialize without a callback, and don't replace
+  // Cannot materialize without a complete policy, and don't replace
   // constant-like ops with themselves.
-  if (!rewriter->materialize_constant) {
+  if (!loom_rewriter_has_constant_materializer(rewriter)) {
     return iree_ok_status();
   }
   if (!vtable->infer_facts) {
@@ -401,9 +401,8 @@ iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
     return iree_ok_status();
   }
 
-  // Dense exact facts describe scalar values. An aggregate may carry the
-  // same numeric envelope for every element without being a scalar constant;
-  // its dialect-owned patterns materialize the aggregate representation.
+  // Preflight the complete replacement family. Exact facts do not imply that
+  // the selected dialect policy can represent the value as a constant.
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (results[i] == LOOM_VALUE_ID_INVALID) {
@@ -414,9 +413,10 @@ iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
 #endif
     loom_value_facts_t facts =
         loom_value_fact_table_lookup(rewriter->fact_table, results[i]);
+    loom_type_t result_type =
+        loom_module_value_type(rewriter->module, results[i]);
     if (!loom_value_facts_is_exact(facts) ||
-        !loom_type_is_scalar(
-            loom_module_value_type(rewriter->module, results[i]))) {
+        !loom_rewriter_can_materialize_constant(rewriter, facts, result_type)) {
       return iree_ok_status();
     }
   }

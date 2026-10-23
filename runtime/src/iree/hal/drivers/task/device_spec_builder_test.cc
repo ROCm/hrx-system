@@ -157,6 +157,11 @@ TEST(TaskDeviceSpecBuilderTest, CapturesCommonTaskFacts) {
   ASSERT_NE(queues, nullptr);
   ASSERT_EQ(queues->family_count, 1);
   EXPECT_EQ(queues->families[0].provisioned_queue_count, 2);
+  for (uint32_t placement = 0; placement < IREE_HAL_QUEUE_PLACEMENT_COUNT;
+       ++placement) {
+    EXPECT_EQ(queues->families[0].host_publication[placement],
+              IREE_HAL_QUEUE_HOST_PUBLICATION_FLAG_KNOWN);
+  }
   EXPECT_TRUE(iree_all_bits_set(queues->families[0].role_flags,
                                 IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC));
   EXPECT_EQ(queues->families[0].atomic_capabilities.operations.device_scope_32,

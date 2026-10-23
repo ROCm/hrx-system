@@ -20,12 +20,81 @@ CHECK-NOT: scf-to-cfg
 CHECK-NOT: cfg-simplify
 
 // ====
+// RUN: emit source-low output=low control-flow=structured-low
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @structured_switch(%selector: index, %lhs: i32, %rhs: i32) -> (i32) {
+  %result = scf.switch %selector -> (i32) {
+    case 0 {
+      %sum = scalar.addi %lhs, %rhs : i32
+      scf.yield %sum : i32
+    }
+    case 3 {
+      %difference = scalar.subi %lhs, %rhs : i32
+      scf.yield %difference : i32
+    }
+    default {
+      %product = scalar.muli %lhs, %rhs : i32
+      scf.yield %product : i32
+    }
+  }
+  func.return %result : i32
+}
+
+func.def target(@target) @pure_switch(%selector: index, %lhs: i32, %rhs: i32, %fallback: i32) -> (i32) {
+  %result = scf.switch %selector -> (i32) {
+    case -1 {
+      scf.yield %lhs : i32
+    }
+    case 7 {
+      scf.yield %rhs : i32
+    }
+    default {
+      scf.yield %fallback : i32
+    }
+  }
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @structured_switch(%selector: reg<spirv.id : index>, %lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %31 = OpConstant.i32 0 : reg<spirv.id : index>
+  %32 = OpIEqual %selector, %31
+  %result = low.scf.if %32 -> (reg<spirv.id : i32>) {
+    %sum = OpIAdd %lhs, %rhs
+    low.scf.yield %sum : reg<spirv.id : i32>
+  } else {
+    %35 = OpConstant.i32 3 : reg<spirv.id : index>
+    %36 = OpIEqual %selector, %35
+    %37 = low.scf.if %36 -> (reg<spirv.id : i32>) {
+      %difference = OpISub %lhs, %rhs
+      low.scf.yield %difference : reg<spirv.id : i32>
+    } else {
+      %product = OpIMul %lhs, %rhs
+      low.scf.yield %product : reg<spirv.id : i32>
+    }
+    low.scf.yield %37 : reg<spirv.id : i32>
+  }
+  return %result
+}
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @pure_switch(%selector: reg<spirv.id : index>, %lhs: reg<spirv.id : i32>, %rhs: reg<spirv.id : i32>, %fallback: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %45 = OpConstant.i32 7 : reg<spirv.id : index>
+  %46 = OpIEqual %selector, %45
+  %47 = OpSelect %46, %rhs, %fallback
+  %48 = OpConstant.i32 -1 : reg<spirv.id : index>
+  %49 = OpIEqual %selector, %48
+  %result = OpSelect %49, %lhs, %47
+  return %result
+}
+
+// ====
 // RUN: pass source-to-low{control-flow=structured-low}
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @rejects_unsupported_structured_region_op(%selector: index, %a: i32, %b: i32) -> (i32) {
-  // ERROR@+1: TARGET/030 {op_name="scf.switch", region_count="2"}
+func.def target(@target) @projects_switch_at_source_to_low_boundary(%selector: index, %a: i32, %b: i32) -> (i32) {
   %result = scf.switch %selector -> (i32) {
     case 0 {
       scf.yield %a : i32
@@ -35,4 +104,38 @@ func.def target(@target) @rejects_unsupported_structured_region_op(%selector: in
     }
   }
   func.return %result : i32
+}
+
+func.def target(@target) @projects_lookup_at_source_to_low_boundary(%selector: index, %a: i32, %b: i32, %fallback: i32) -> (i32, i32) {
+  %first, %second = scf.lookup %selector {
+    -1 = (%a, %b),
+    7 = (%b, %a)
+  } default(%fallback, %fallback) : i32, i32
+  func.return %first, %second : i32, i32
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @projects_switch_at_source_to_low_boundary(%selector: reg<spirv.id : index>, %a: reg<spirv.id : i32>, %b: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %28 = OpConstant.i32 0 : reg<spirv.id : index>
+  %29 = OpIEqual %selector, %28
+  %result = low.scf.if %29 -> (reg<spirv.id : i32>) {
+    low.scf.yield %a : reg<spirv.id : i32>
+  } else {
+    low.scf.yield %b : reg<spirv.id : i32>
+  }
+  return %result
+}
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @projects_lookup_at_source_to_low_boundary(%selector: reg<spirv.id : index>, %a: reg<spirv.id : i32>, %b: reg<spirv.id : i32>, %fallback: reg<spirv.id : i32>) -> (reg<spirv.id : i32>, reg<spirv.id : i32>) asm {
+  %37 = OpConstant.i32 7 : reg<spirv.id : index>
+  %38 = OpIEqual %selector, %37
+  %39 = OpSelect %38, %b, %fallback
+  %40 = OpSelect %38, %a, %fallback
+  %41 = OpConstant.i32 -1 : reg<spirv.id : index>
+  %42 = OpIEqual %selector, %41
+  %first = OpSelect %42, %a, %39
+  %second = OpSelect %42, %b, %40
+  return %first, %second
 }

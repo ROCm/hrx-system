@@ -192,9 +192,11 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::ir
     loom::ops::cfg
+    loom::ops::index
     loom::ops::scalar
     loom::ops::scf
     loom::ops::test
+    loom::ops::vector
     loom::pass::value_facts
 )
 
@@ -235,6 +237,7 @@ loom_cc_library(
     iree::base::internal
     iree::base::internal::arena
     loom::ir::builders
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 

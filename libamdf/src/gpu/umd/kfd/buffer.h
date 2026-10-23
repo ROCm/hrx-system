@@ -17,6 +17,17 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct amdf_gpu_kfd_buffer_t amdf_gpu_kfd_buffer_t;
+struct kfd_ioctl_alloc_memory_of_gpu_args;
+
+// Performs native allocation under the connection's memory admission lock.
+// KFD rolls back interrupted construction before publishing its handle, so
+// EINTR resumes the same request. USERPTR invalidation (EAGAIN) also restarts
+// registration. Each attempt releases native priority before retrying. The
+// caller owns the returned allocation and its reserved VA; ordinary and special
+// allocations keep their own release contracts. Other errors are terminal.
+amdf_status_t amdf_gpu_kfd_buffer_allocate_native(
+    amdf_gpu_umd_device_t* device,
+    struct kfd_ioctl_alloc_memory_of_gpu_args* arguments);
 
 // Host-view ownership selected for one native KFD allocation.
 typedef uint32_t amdf_gpu_kfd_buffer_host_access_t;

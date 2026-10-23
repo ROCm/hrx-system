@@ -140,10 +140,9 @@ struct iree_task_executor_t {
   // Hot shared state — each on its own cache line
   //===--------------------------------------------------------------------===//
   //
-  // These atomics are accessed by every worker on every pump cycle (idle mask)
-  // or by every schedule_process call (live mask, idle mask). Placing them on
-  // separate cache lines prevents workers from invalidating each other's L1
-  // when they update unrelated masks.
+  // Producers and workers share wake demand and enrollment state. Separate
+  // cache lines keep updates to one mask from invalidating another mask or
+  // the ready-list head.
 
   // A bitset indicating which workers are likely to be live and usable; all
   // attempts to push work onto a particular worker should check first with this
@@ -159,14 +158,14 @@ struct iree_task_executor_t {
   iree_alignas(iree_hardware_destructive_interference_size)
       iree_atomic_task_affinity_set_t worker_live_mask;
 
-  // A bitset indicating which workers are currently idle. Used to bias incoming
-  // tasks to workers that aren't doing much else. This is a balance of latency
-  // to wake the idle workers vs. latency to wait for existing work to complete
-  // on already woken workers.
+  // Workers enrolled for a wake. A worker sets its bit before joining the wake
+  // epoch and committing sleep. Producers clear a bit atomically to claim that
+  // worker, so concurrent submissions cannot assign their wakes to the same
+  // idle enrollment. A worker also clears its bit when becoming active.
   //
   // Contention profile: every worker writes this via fetch_or (mark_idle) and
-  // fetch_and (mark_active) once per pump cycle, and every schedule_process
-  // call reads it to select a wake target. On its own cache line to avoid
+  // fetch_and (mark_active) at sleep transitions; producers claim bits from
+  // their snapshots to select wake targets. On its own cache line to avoid
   // invalidating the live mask or immediate_list head pointer.
   iree_alignas(iree_hardware_destructive_interference_size)
       iree_atomic_task_affinity_set_t worker_idle_mask;
@@ -174,17 +173,13 @@ struct iree_task_executor_t {
   // Desired wake count for the wake tree protocol. Set via fetch_add by
   // schedule_process callers (any thread), claimed via CAS by waking workers.
   //
-  // When a process is scheduled with wake_budget > 1, the activating thread
-  // adds the wake budget to this counter and wakes one idle worker (the seed).
-  // Each waking worker claims min(desired_wake, IREE_TASK_WAKE_FANOUT) and
-  // wakes that many additional idle workers before starting to drain. This
-  // forms a tree that fills in log2(N) rounds, rather than N serial futex posts
-  // from the activating thread.
+  // The activating thread first claims available idle workers directly. Demand
+  // not satisfied by that snapshot is added here. Active workers claim up to
+  // IREE_TASK_WAKE_FANOUT and relay wakes before draining.
   //
   // Concurrent activations (multiple calls to schedule_process) merge
   // naturally: both add to the same counter, and workers claim from the
-  // combined pool. The counter may briefly go negative if a worker claims
-  // more than is available (corrected by the CAS loop in relay_wake).
+  // combined pool. The claiming CAS never removes more than is available.
   //
   // On its own cache line because every waking worker CAS-es it during the
   // wake burst, and we don't want that traffic to invalidate the idle mask
@@ -192,25 +187,32 @@ struct iree_task_executor_t {
   iree_alignas(iree_hardware_destructive_interference_size)
       iree_atomic_int32_t desired_wake;
 
+  // Work-publication epoch shared by producers and workers entering sleep.
+  // Producers advance it after publishing work and before claiming idle bits.
+  // Workers snapshot it before scanning and join its RMW order after enrolling
+  // as idle: they either observe a racing publication or publish their idle
+  // enrollment to the next producer. This protects private notification waits
+  // even when an earlier producer selected a different, blocked worker.
+  iree_atomic_uint64_t wake_epoch;
+
   // Count of workers currently marked idle. Maintained by mark_active
   // (fetch_sub) and mark_idle (fetch_add). Used for tracing the idle
   // percentage without needing to popcount the multi-word idle mask.
-  // Shares desired_wake's cache line: both are written by workers each pump
-  // cycle and read by schedule_process, so co-locating them avoids an extra
-  // cache line on the hot path.
+  // Shares the wake publication cache line. An enrollment claimed by a
+  // producer remains counted until the worker actually becomes active.
   iree_atomic_int32_t worker_idle_count;
 
   //===--------------------------------------------------------------------===//
   // Process scheduling
   //===--------------------------------------------------------------------===//
 
-  // Lock-free MPSC list for wake_budget == 1 processes (queue management, host
-  // callbacks, retire/signal). Workers try_pop from this before scanning
-  // for tasks. A failed pop on an empty list costs one atomic load (~1ns).
+  // Shared ready list for wake_budget == 1 processes (queue management, host
+  // callbacks, retire/signal). Empty pops only read the atomic head; mutations
+  // serialize through the list's mutex.
   //
   // Multiple producers (any thread that calls schedule_process) push
-  // concurrently. Each worker pops at most one process per drain cycle
-  // and drains it to completion or sleep before popping the next.
+  // concurrently. Workers interleave ready-list draining with compute passes
+  // and drain each popped process to completion or sleep.
   iree_alignas(iree_hardware_destructive_interference_size)
       iree_task_process_slist_t immediate_list;
 

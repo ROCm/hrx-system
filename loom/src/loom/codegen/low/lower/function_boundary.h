@@ -26,12 +26,20 @@
 #define LOOM_CODEGEN_LOW_LOWER_FUNCTION_BOUNDARY_H_
 
 #include "loom/codegen/low/lower/lower.h"
+#include "loom/codegen/low/lower/source_signature_projection.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct loom_low_lower_function_boundary_t {
+  // Whole-callable physical source signature projection, or NULL for the
+  // ordinary native Low boundary.
+  const loom_low_source_signature_projection_plan_t*
+      source_signature_projection;
+  // Target-owned state retained from projected definition entry emission for
+  // every callable exit.
+  void* source_signature_state;
   // Source argument ABI mappings, in source argument order. Declarations have
   // no resource imports and retain only their direct signature below.
   loom_low_lower_abi_argument_t* argument_map;
@@ -44,6 +52,15 @@ typedef struct loom_low_lower_function_boundary_t {
   // Result carriers joined during source planning, in source result order.
   // None until an exit is observed or result mapping is finalized.
   loom_type_t* result_types;
+  // Physical result carriers in the emitted Low signature. Ordinary
+  // boundaries alias result_types.
+  const loom_type_t* physical_result_types;
+  // Number of physical result carriers.
+  uint16_t physical_result_count;
+  // Physical result-to-argument ties.
+  const loom_tied_result_t* tied_results;
+  // Number of physical result ties.
+  uint16_t tied_result_count;
   // Canonical module-owned ABI layout selected from the final signature.
   loom_named_attr_slice_t abi_layout;
 } loom_low_lower_function_boundary_t;
@@ -96,6 +113,12 @@ iree_status_t loom_low_lower_function_boundary_create(
 iree_status_t loom_low_lower_function_boundary_bind_entry_arguments(
     loom_low_lower_context_t* context, const loom_block_t* source_entry_block,
     loom_block_t* low_entry_block);
+
+// Emits a projected physical-to-logical entry conversion and binds its
+// logical values. Ordinary boundaries have already been bound while blocks
+// were mapped and require no work.
+iree_status_t loom_low_lower_function_boundary_emit_entry(
+    loom_low_lower_context_t* context);
 
 // Remaps source callable predicates across the retained argument and result
 // boundary and attaches them to the target-Low definition.

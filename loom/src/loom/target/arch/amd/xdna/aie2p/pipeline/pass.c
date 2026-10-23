@@ -55,14 +55,14 @@ iree_status_t loom_aie2p_pipeline_lower_run(loom_pass_t* pass,
 
 static const loom_pass_descriptor_t kAie2pPipelinePassDescriptors[] = {
     {
-        .key = IREE_SVL("aie2p-realize-kernel"),
-        .info = loom_aie2p_kernel_realization_pass_info,
-        .function_run = loom_aie2p_kernel_realization_run,
-    },
-    {
         .key = IREE_SVL("aie2p-lower-pipeline"),
         .info = loom_aie2p_pipeline_lower_pass_info,
         .function_run = loom_aie2p_pipeline_lower_run,
+    },
+    {
+        .key = IREE_SVL("aie2p-realize-kernel"),
+        .info = loom_aie2p_kernel_realization_pass_info,
+        .function_run = loom_aie2p_kernel_realization_run,
     },
 };
 

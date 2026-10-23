@@ -68,15 +68,15 @@ loom_example_run_tool loom-compile "${loom_compile}" \
 
 if [[ -z "${mode}" ]]; then
   loom_example_section "Execute every correctness sample on AMDGPU"
-  printf '  $ loom-test saxpy.loom --device=amdgpu > %q\n' \
+  printf '  $ loom-test saxpy.loom --device=legacy-amdgpu > %q\n' \
     "${output_dir}/saxpy-test.json"
-  "${loom_test}" saxpy.loom --device=amdgpu \
+  "${loom_test}" saxpy.loom --device=legacy-amdgpu \
     >"${output_dir}/saxpy-test.json"
 
   loom_example_section "Benchmark the proven 64K workload"
   loom_example_run_tool loom-benchmark "${loom_benchmark}" \
     saxpy.loom \
-    --device=amdgpu \
+    --device=legacy-amdgpu \
     --benchmark=@saxpy_f32_64k \
     --measure=dispatch_complete \
     --batch-size=64 \

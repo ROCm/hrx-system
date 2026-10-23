@@ -296,7 +296,7 @@ on cross-lane LDS traffic, not private register roundtripping.
 Proof command:
 
 ```bash
-loom-test shared_memory_tile.loom --device=amdgpu
+loom-test shared_memory_tile.loom --device=legacy-amdgpu
 ```
 
 Target compile evidence:
@@ -363,7 +363,7 @@ Proof commands from this directory:
 ```bash
 source=../../../../tooling/target/amdgpu/test/corpus/split_barrier_reuse.loom
 
-loom-test "${source}" --device=amdgpu
+loom-test "${source}" --device=legacy-amdgpu
 loom-compile "${source}" --root=@selected_barrier_reuse \
   --target=amdgpu:gfx1200 --format=amdgpu-hsaco \
   --output=/tmp/split-barrier.hsaco --compile-report=details \
@@ -424,7 +424,7 @@ transposing through LDS twice must reproduce the original row-major iota.
 Proof command:
 
 ```bash
-loom-test shared_memory_transpose.loom --device=amdgpu
+loom-test shared_memory_transpose.loom --device=legacy-amdgpu
 ```
 
 Target compile evidence:
@@ -493,7 +493,7 @@ target supports it.
 Proof command:
 
 ```bash
-loom-test shared_memory_vector_tile.loom --device=amdgpu
+loom-test shared_memory_vector_tile.loom --device=legacy-amdgpu
 ```
 
 Target compile evidence:

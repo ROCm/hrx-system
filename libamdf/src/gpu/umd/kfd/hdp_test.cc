@@ -32,6 +32,10 @@ struct NativeHdpState {
   off_t mapping_offset = 0;
   // Error injected at the special-allocation boundary, or zero for success.
   int allocation_error = 0;
+  // Number of allocation attempts interrupted before native ownership exists.
+  uint32_t allocation_interruptions = 0;
+  // Total native allocation attempts, including interruptions.
+  uint32_t allocation_count = 0;
   // Error injected at the posting-read boundary, or zero for success.
   int posting_error = 0;
   // Number of posting reads interrupted before normal native completion.
@@ -99,6 +103,13 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
       auto* allocate =
           static_cast<kfd_ioctl_alloc_memory_of_gpu_args*>(argument);
       native_state->allocation = *allocate;
+      EXPECT_FALSE(native_state->allocated);
+      ++native_state->allocation_count;
+      if (native_state->allocation_interruptions != 0) {
+        --native_state->allocation_interruptions;
+        errno = EINTR;
+        return -1;
+      }
       if (native_state->allocation_error != 0) {
         errno = native_state->allocation_error;
         return -1;
@@ -193,13 +204,19 @@ TEST(KfdHdpPolicyTest, QualifiesExactPublicationFamilies) {
         Topology(12, 0, 0), Topology(9, 5, 0), Topology(12, 0, 1),
         Topology(12, 5, 0), Topology(12, 5, 3), Topology(11, 0, 0),
         Topology(11, 0, 3), Topology(11, 5, 0), Topology(11, 5, 1)}) {
-    EXPECT_TRUE(amdf_gpu_kfd_hdp_supports_host_publication(&topology));
+    EXPECT_EQ(amdf_gpu_kfd_hdp_host_publication(&topology),
+              AMDF_QUEUE_HOST_PUBLICATION_FLAG_KNOWN |
+                  AMDF_QUEUE_HOST_PUBLICATION_FLAG_DEVICE_READ |
+                  (topology.properties.gfx_ip.major == 11
+                       ? AMDF_QUEUE_HOST_PUBLICATION_FLAG_KERNEL_CALL
+                       : 0));
   }
   for (const auto& topology :
        {Topology(9, 0, 9), Topology(9, 0, 11), Topology(9, 4, 3),
         Topology(9, 5, 3), Topology(10, 3, 0), Topology(11, 1, 0),
         Topology(11, 6, 0), Topology(12, 1, 0), Topology(12, 6, 0)}) {
-    EXPECT_FALSE(amdf_gpu_kfd_hdp_supports_host_publication(&topology));
+    EXPECT_EQ(amdf_gpu_kfd_hdp_host_publication(&topology),
+              AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN);
   }
 }
 
@@ -237,7 +254,9 @@ class KfdHdpTest : public ::testing::Test {
 };
 
 TEST_F(KfdHdpTest, MapsPublishesAndReleasesExactRegisterPage) {
+  native_.allocation_interruptions = 2;
   ASSERT_EQ(amdf_gpu_kfd_hdp_create(&device_, &hdp_), AMDF_STATUS_OK);
+  EXPECT_EQ(native_.allocation_count, 3u);
   ASSERT_NE(hdp_, nullptr);
   EXPECT_EQ(native_.allocation.va_addr,
             reinterpret_cast<uintptr_t>(native_.reservation));
@@ -312,21 +331,36 @@ TEST_F(KfdHdpTest, RestartsInterruptedPostingRead) {
   EXPECT_EQ(native_.posting_count, 2u);
 }
 
-TEST_F(KfdHdpTest, TreatsMissingNativeRemapAsOptional) {
-  native_.allocation_error = ENOMEM;
+TEST_F(KfdHdpTest, VirtualFunctionNeedsNoNativeRegisterMapping) {
+  device_.topology.virtual_function = true;
+  EXPECT_EQ(amdf_gpu_kfd_hdp_host_publication(&device_.topology),
+            AMDF_QUEUE_HOST_PUBLICATION_FLAG_UNKNOWN);
   ASSERT_EQ(amdf_gpu_kfd_hdp_create(&device_, &hdp_), AMDF_STATUS_OK);
   EXPECT_EQ(hdp_, nullptr);
+  EXPECT_EQ(native_.reservation, nullptr);
+  EXPECT_EQ(native_.allocation.size, 0u);
+}
+
+TEST_F(KfdHdpTest, AcquisitionFailureDoesNotChangeAdvertisedSupport) {
+  native_.allocation_error = ENOMEM;
+  auto* const sentinel = reinterpret_cast<amdf_gpu_kfd_hdp_t*>(uintptr_t{1});
+  auto* output = sentinel;
+  EXPECT_EQ(amdf_gpu_kfd_hdp_create(&device_, &output),
+            amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, ENOMEM));
+  EXPECT_EQ(output, sentinel);
   EXPECT_EQ(native_.cpu_mapping_count, 0u);
   EXPECT_EQ(native_.gpu_mapping_count, 0u);
   EXPECT_EQ(native_.release_count, 0u);
 }
 
 TEST_F(KfdHdpTest, PropagatesNativeFailuresOtherThanAbsence) {
+  native_.allocation_interruptions = 1;
   native_.allocation_error = EIO;
   auto* const sentinel = reinterpret_cast<amdf_gpu_kfd_hdp_t*>(uintptr_t{1});
   amdf_gpu_kfd_hdp_t* output = sentinel;
   EXPECT_EQ(amdf_gpu_kfd_hdp_create(&device_, &output),
             amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO));
+  EXPECT_EQ(native_.allocation_count, 2u);
   EXPECT_EQ(output, sentinel);
 }
 

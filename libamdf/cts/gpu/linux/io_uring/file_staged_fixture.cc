@@ -13,6 +13,7 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -554,11 +555,65 @@ void GpuFileStagedTest::Run(const StagedCase& test_case) {
   aql::PublishBatch(*upload_queue, upload_index, uploads);
   aql::PublishBatch(*file_queue, file_packet_index, files);
   uint64_t wake_count = 0;
+  // Failure-only observations locate the outstanding ownership edge without
+  // publishing work or consuming native completions. These are independent
+  // samples, not an atomic snapshot of queues that may still be progressing.
+  const auto progress = [&] {
+    std::ostringstream description;
+    const auto queue_progress = [&](const char* name,
+                                    const GpuUserQueue& queue) {
+      description << "\n  " << name << " read="
+                  << GpuLoadAcquire<uint64_t>(queue.host.read_index_address)
+                  << " write="
+                  << GpuLoadAcquire<uint64_t>(queue.host.write_index_address);
+    };
+    queue_progress("file AQL packets", *file_queue);
+    queue_progress("upload AQL packets", *upload_queue);
+    queue_progress("reader AQL packets", *reader_queue);
+    queue_progress("SDMA bytes", *transfer);
+    description
+        << "\n  SQ head="
+        << GpuLoadAcquire<uint32_t>(RingWord(ring_->parameters.sq_off.head))
+        << " tail="
+        << GpuLoadAcquire<uint32_t>(RingWord(ring_->parameters.sq_off.tail))
+        << " flags="
+        << GpuLoadAcquire<uint32_t>(RingWord(ring_->parameters.sq_off.flags))
+        << " wakes=" << wake_count << "\n  CQ head="
+        << GpuLoadAcquire<uint32_t>(RingWord(ring_->parameters.cq_off.head))
+        << " tail="
+        << GpuLoadAcquire<uint32_t>(RingWord(ring_->parameters.cq_off.tail));
+    const uintptr_t control_address =
+        reinterpret_cast<uintptr_t>(control->host.pointer);
+    description
+        << "\n  file ticket="
+        << GpuLoadAcquire<uint32_t>(control_address + kFileStateOffset)
+        << " status="
+        << GpuLoadAcquire<int32_t>(control_address + kFileStateOffset + 4)
+        << " upload frontier="
+        << GpuLoadAcquire<uint64_t>(control_address + kFrontierOffset)
+        << " SDMA completion=" << GpuLoadAcquire<uint32_t>(completion_host)
+        << " joined="
+        << GpuLoadAcquire<int64_t>(reinterpret_cast<uintptr_t>(&joined.value));
+    for (uint32_t job = 0; job < test_case.job_count; ++job) {
+      const auto signal_value = [](const aql::Signal& signal) {
+        return GpuLoadAcquire<int64_t>(
+            reinterpret_cast<uintptr_t>(&signal.value));
+      };
+      description << "\n  job " << job
+                  << " file=" << signal_value(job_signals[job].file)
+                  << " upload=" << signal_value(job_signals[job].upload);
+      for (uint32_t reader = 0; reader < test_case.reader_count; ++reader) {
+        description << " reader" << reader << "="
+                    << signal_value(job_signals[job].readers[reader]);
+      }
+    }
+    return description.str();
+  };
   const amdf::cts::WaitDeadline deadline;
   while (GpuLoadAcquire<int64_t>(reinterpret_cast<uintptr_t>(&joined.value)) !=
          0) {
     ASSERT_TRUE(deadline.Pause())
-        << "timed out waiting for staged file completion";
+        << "timed out waiting for staged file completion" << progress();
     // Idle wake only: the GPU owns every SQE, CQE and dependent dispatch.
     if ((GpuLoadAcquire<uint32_t>(RingWord(ring_->parameters.sq_off.flags)) &
          IORING_SQ_NEED_WAKEUP) &&

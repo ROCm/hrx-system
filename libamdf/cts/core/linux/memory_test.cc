@@ -122,10 +122,12 @@ TEST_F(HostNumaMemoryTest, PlacesEveryPageAndPreservesHostAliases) {
   constexpr size_t kWordBits = sizeof(unsigned long) * CHAR_BIT;
   std::vector<unsigned long> allowed(page_size_ / sizeof(unsigned long));
   const size_t node_count = allowed.size() * kWordBits;
-  ASSERT_EQ(syscall(SYS_get_mempolicy, nullptr, allowed.data(), node_count + 1,
-                    nullptr, MPOL_F_MEMS_ALLOWED),
-            0)
-      << std::strerror(errno);
+  const long result = syscall(SYS_get_mempolicy, nullptr, allowed.data(),
+                              node_count + 1, nullptr, MPOL_F_MEMS_ALLOWED);
+  if (result == -1 && (errno == EPERM || errno == ENOSYS)) {
+    GTEST_SKIP() << "NUMA policy queries unavailable: " << std::strerror(errno);
+  }
+  ASSERT_EQ(result, 0) << std::strerror(errno);
   uint32_t tested_nodes = 0;
   for (uint32_t node = 0; node < node_count; ++node) {
     if ((allowed[node / kWordBits] & (1UL << (node % kWordBits))) == 0) {

@@ -120,6 +120,39 @@ struct CountedLoop {
 // path.
 enum class ExitFlow { None, Some, All };
 
+// One resolved source label selecting a lexical switch clause. A missing key
+// denotes the unique default label.
+struct SwitchLabel {
+  // Case or default statement retained for diagnostics and source locations.
+  cxx::StatementAST* source;
+  // Converted case value, or no value for the default label.
+  std::optional<std::int64_t> key;
+};
+
+// Adjacent labels and the following lexical source segment. Statements appear
+// exactly once even when several labels select the same clause.
+struct SwitchClause {
+  // Labels selecting this one source destination, in lexical order.
+  std::vector<SwitchLabel> labels;
+  // Statements through, but excluding, the next top-level switch label.
+  std::vector<cxx::StatementAST*> statements;
+  // Unique automatic bindings changed by this segment, in encounter order.
+  std::vector<cxx::Symbol*> writes;
+  // Whether some path reaches the next lexical clause or the switch tail.
+  bool falls_through = false;
+};
+
+// Complete retained structure of one ordinary compound switch body.
+struct SwitchLayout {
+  // Lexical clauses, including adjacent labels grouped at one destination.
+  std::vector<SwitchClause> clauses;
+  // Whether one clause owns the source's unique default label.
+  bool has_default = false;
+  // Whether every selector destination admits one independent switch region.
+  // Shared destinations and fallthrough require linear guarded translation.
+  bool direct = true;
+};
+
 // One analysis owns control facts for an immutable source function body.
 // Ordered writes include nested constructs and preserve source symbol identity.
 // Constexpr branches visit their initializers, decision and source-selected
@@ -152,6 +185,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool storage_backed(cxx::MemberExpressionAST* expression) const;
   // Null retains ordinary while semantics; a result permits scf.for lowering.
   const CountedLoop* counted(cxx::ForStatementAST* loop) const;
+  // Retained lexical clauses for a supported runtime switch. Construction
+  // rejects switch shapes that cannot provide this complete structure.
+  const SwitchLayout& switch_layout(cxx::SwitchStatementAST* statement) const;
   // Retained return/fallthrough summary, including nested statements.
   ExitFlow returns(cxx::StatementAST* statement) const;
   // Continues escaping this statement to its enclosing loop. A nested loop
@@ -194,7 +230,11 @@ class ControlFlow final : private cxx::ASTVisitor {
 
   bool preVisit(cxx::AST* ast) override;
   void postVisit(cxx::AST* ast) override;
+  void visit(cxx::CaseStatementAST* ast) override;
+  void visit(cxx::DefaultStatementAST* ast) override;
+  void visit(cxx::CompoundStatementAST* ast) override;
   void visit(cxx::IfStatementAST* ast) override;
+  void visit(cxx::SwitchStatementAST* ast) override;
   void visit(cxx::AssignmentExpressionAST* ast) override;
   void visit(cxx::CompoundAssignmentExpressionAST* ast) override;
   void visit(cxx::PostIncrExpressionAST* ast) override;
@@ -246,6 +286,7 @@ class ControlFlow final : private cxx::ASTVisitor {
       cxx::ForStatementAST* loop, cxx::Symbol* induction,
       cxx::BinaryExpressionAST* condition);
   unsigned paths(cxx::StatementAST* statement) const;
+  unsigned sequence_paths(std::span<cxx::StatementAST* const> statements) const;
   unsigned classify_paths(cxx::StatementAST* statement) const;
   ExitFlow exits(cxx::StatementAST* statement, unsigned selected_paths) const;
 
@@ -288,6 +329,18 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unordered_map<cxx::ForStatementAST*, CountedLoop> counted_;
   // Sparse path sets retain statements with function or iteration exits.
   std::unordered_map<cxx::StatementAST*, unsigned> paths_;
+  struct SwitchFacts {
+    // Public lexical structure consumed directly by translation.
+    SwitchLayout layout;
+    // Per-clause path sets retained for aggregate switch classification.
+    std::vector<unsigned> clause_paths;
+  };
+  // Runtime switches retained during their one source-body traversal.
+  std::unordered_map<cxx::SwitchStatementAST*, SwitchFacts> switches_;
+  // Nested switches whose compound bodies are currently being traversed.
+  std::vector<cxx::SwitchStatementAST*> switch_stack_;
+  // Top-level case/default label currently admitted by the owning switch walk.
+  cxx::StatementAST* active_switch_label_ = nullptr;
   // Canonical implicit constructor bodies visited once for this function.
   std::unordered_set<cxx::FunctionSymbol*> analyzed_constructors_;
 };

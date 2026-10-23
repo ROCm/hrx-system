@@ -9,7 +9,7 @@
 
 iree_add_all_subdirs()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU AND AMDF_BUILD)
 iree_cc_library(
   NAME
     storage
@@ -31,7 +31,7 @@ iree_cc_library(
 )
 endif()
 
-if(AMDF_BUILD)
+if(IREE_HAL_DRIVER_AMD_GPU AND AMDF_BUILD)
 iree_cc_test(
   NAME
     storage_test
@@ -48,6 +48,7 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
+    "iree-build-requirement=runtime.hal.amd_gpu"
     "iree-build-requirement=libamdf"
 )
 endif()

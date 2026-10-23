@@ -239,7 +239,7 @@ application:
 ```bash
 export HRX_ROOT=/tmp/hrx-root
 export LD_LIBRARY_PATH="${HRX_ROOT}/lib:${HRX_ROOT}/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH:-}"
-export HRX_GPU_DRIVER=amdgpu
+export HRX_GPU_DRIVER=legacy-amdgpu
 
 LD_PRELOAD="${HRX_ROOT}/lib/libamdhip64.so" ./my_hip_application
 ```

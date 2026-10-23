@@ -75,13 +75,13 @@ loom_cc_library(
 )
 
 set(_loom_test_platform_copts "")
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD))
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD_GPU))
   list(APPEND _loom_test_platform_copts "-DLOOM_TEST_HAVE_AMDGPU=1")
 endif()
 if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_VULKAN)
   list(APPEND _loom_test_platform_copts "-DLOOM_TEST_HAVE_SPIRV=1")
 endif()
-if(LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+if(LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD_XDNA)
   list(APPEND _loom_test_platform_copts "-DLOOM_TEST_HAVE_XDNA=1")
 endif()
 if(LOOM_TARGET_ARCH_VM)
@@ -94,7 +94,7 @@ if(LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK)
   list(APPEND _loom_test_platform_copts "-DLOOM_TEST_HAVE_TASK=1")
 endif()
 set(_loom_test_platform_deps "")
-if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD))
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND (IREE_HAL_DRIVER_AMDGPU OR IREE_HAL_DRIVER_AMD_GPU))
   list(APPEND _loom_test_platform_deps loom::binding::c::target::amdgpu::iree_hal)
   list(APPEND _loom_test_platform_deps loom::tooling::target::amdgpu::testbench_requirements)
 endif()
@@ -102,7 +102,7 @@ if(LOOM_TARGET_ARCH_SPIRV AND LOOM_EMIT_SPIRV AND LOOM_EXECUTE_IREE_HAL AND IREE
   list(APPEND _loom_test_platform_deps loom::binding::c::target::spirv::iree_hal)
   list(APPEND _loom_test_platform_deps loom::tooling::target::spirv::testbench_requirements)
 endif()
-if(LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+if(LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD_XDNA)
   list(APPEND _loom_test_platform_deps loom::binding::c::target::amd::xdna::iree_hal)
 endif()
 if(LOOM_TARGET_ARCH_VM)
@@ -115,7 +115,6 @@ if(LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_TASK)
   list(APPEND _loom_test_platform_deps loom::binding::c::target::cpu::iree_hal)
 endif()
 loomc_cc_binary(
-  RUNTIME_ONLY
   NAME
     loom-test
   SRCS

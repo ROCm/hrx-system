@@ -187,7 +187,7 @@ static void loom_serve_finite_snapshot_retired(void* user_data,
 }
 
 iree_status_t loom_serve_finite_result_download(
-    loom_serve_finite_result_t* result,
+    const loom_serve_finite_result_t* result,
     loom_serve_finite_snapshot_t** out_snapshot,
     loom_serve_execution_frontier_t* out_frontier) {
   *out_snapshot = NULL;

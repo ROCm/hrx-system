@@ -22,6 +22,8 @@ struct loom_serve_text_variant_t {
   loom_serve_text_stage_t* stages;
   // Owned descriptors borrowing this candidate's commands.
   loom_serve_stage_t* bindings;
+  // Reflected command private high-water, published with recorded bindings.
+  uint64_t workspace_bytes;
   // True only after every stage compiled, validated and recorded successfully.
   bool ready;
 };
@@ -80,13 +82,17 @@ const loom_serve_compilation_report_t* loom_serve_text_variant_report(
 
 iree_status_t loom_serve_text_variant_bind(
     const loom_serve_text_variant_t* variant, loom_serve_text_model_t* owner,
-    iree_vm_module_t* module) {
+    iree_vm_module_t* module, loom_serve_residency_t* residency) {
   if (variant->owner != owner || !variant->ready) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "variant is not ready for this model");
   }
-  return loom_serve_module_bind_stages(module, variant->stage_count,
-                                       variant->bindings);
+  IREE_RETURN_IF_ERROR(loom_serve_residency_check_private_peak(
+      residency, variant->workspace_bytes));
+  IREE_RETURN_IF_ERROR(loom_serve_module_bind_stages(
+      module, variant->stage_count, variant->bindings));
+  loom_serve_residency_set_private_peak(residency, variant->workspace_bytes);
+  return iree_ok_status();
 }
 
 static iree_status_t loom_serve_text_variant_record(
@@ -109,6 +115,9 @@ static iree_status_t loom_serve_text_variant_record(
                                          stage->fixed_buffers, &stage->command);
     if (iree_status_is_ok(status)) {
       variant->bindings[i] = loom_serve_text_stage_binding(stage);
+      variant->workspace_bytes =
+          iree_max(variant->workspace_bytes,
+                   variant->bindings[i].transient.required_byte_length);
     }
   }
   return status;

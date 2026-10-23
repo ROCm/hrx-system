@@ -4,18 +4,50 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("//build_tools/bazel:cc.bzl", "iree_cc_library")
 
 package(default_visibility = ["//visibility:private"])
 
-exports_files(["threaded_cache_reads.patch"])
+exports_files([
+    "libbacktrace.BUILD.bazel",
+    "threaded_cache_reads.patch",
+])
+
+expand_template(
+    name = "config_h",
+    out = "config.h",
+    substitutions = {
+        "@LIBBACKTRACE_DL_ITERATE_PHDR_DEF@": "#define HAVE_DL_ITERATE_PHDR 1",
+        "@LIBBACKTRACE_LINK_H_DEF@": "#define HAVE_LINK_H 1",
+    },
+    template = "config.h.in",
+)
+
+# This is the Linux configuration used by the upstream Bazel package. CMake
+# uses the same template with target-libc feature detection for embedded libc.
+iree_cc_library(
+    name = "configuration",
+    hdrs = [
+        "backtrace-supported.h",
+        ":config_h",
+    ],
+    includes = ["."],
+    textual_hdrs = ["symbol_prefix.h"],
+    visibility = ["@libbacktrace//:__pkg__"],
+)
 
 iree_cc_library(
     name = "libbacktrace_linux",
     hdrs = ["iree_libbacktrace.h"],
-    defines = ["IREE_HAVE_LIBBACKTRACE=1"],
+    defines = [
+        "IREE_HAVE_LIBBACKTRACE=1",
+        "IREE_LIBBACKTRACE_PRIVATE=1",
+    ],
     includes = ["."],
     target_compatible_with = ["@platforms//os:linux"],
+    textual_hdrs = ["symbol_prefix.h"],
     deps = [
         "//build_tools/bazel:dl",
         "//build_tools/bazel:pthreads",
@@ -34,4 +66,18 @@ alias(
         "//conditions:default": ":libbacktrace_disabled",
     }),
     visibility = ["//third_party:__pkg__"],
+)
+
+# Model an embedding application using ordinary shared-library selection, not
+# the IREE test wrapper's forced-static closure.
+cc_test(
+    name = "symbol_isolation_test",
+    srcs = ["symbol_isolation_test.cc"],
+    linkstatic = False,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )

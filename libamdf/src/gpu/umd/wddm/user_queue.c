@@ -65,6 +65,12 @@ amdf_status_t amdf_gpu_umd_user_queue_mapping_destroy(
   return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
 }
 
+amdf_status_t amdf_gpu_umd_user_queue_mapping_flush(
+    amdf_gpu_umd_user_queue_mapping_t* mapping) {
+  (void)mapping;
+  return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+}
+
 amdf_status_t amdf_gpu_umd_user_queue_query_status(
     amdf_gpu_umd_user_queue_t* queue, amdf_user_queue_status_t* out_status) {
   (void)queue;

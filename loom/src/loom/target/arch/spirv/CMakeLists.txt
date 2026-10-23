@@ -117,6 +117,20 @@ endif()
 if(LOOM_TARGET_ARCH_SPIRV)
 loom_cc_library(
   NAME
+    vocabulary
+  HDRS
+    "features.h"
+    "scalar_type.h"
+  DEPS
+    ::isa
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_SPIRV)
+loom_cc_library(
+  NAME
     scalar_types
   HDRS
     "scalar_types.h"
@@ -124,6 +138,7 @@ loom_cc_library(
     "scalar_types.c"
   DEPS
     ::features
+    ::vocabulary
     iree::base
     loom::util::numeric_format
   PUBLIC
@@ -280,6 +295,7 @@ loom_cc_library(
   DEPS
     ::facts
     iree::base
+    iree::base::internal::arena
     loom::target::arch::spirv::records::target_records
     loom::target::profile
   PUBLIC
@@ -638,6 +654,7 @@ loom_check_test_suite(
     "test/source_low/ordinary_vector_structure.loom-test"
     "test/source_low/packed_bitstream_words.loom-test"
     "test/source_low/packed_memory_alignment.loom-test"
+    "test/source_low/pass_specialization.loom-test"
     "test/source_low/predicate_truncation.loom-test"
     "test/source_low/predicate_truncation_diagnostics.loom-test"
     "test/source_low/predicate_vector_packets.loom-test"

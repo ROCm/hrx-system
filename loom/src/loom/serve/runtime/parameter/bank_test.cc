@@ -21,8 +21,8 @@ class ParameterBankTest : public WeightsTest {
     }
     loom_serve_parameter_bank_retire(bank_, nullptr, nullptr);
     loom_serve_parameter_bank_retire(adapter_bank_, nullptr, nullptr);
-    loom_serve_parameter_bank_await_retirement(bank_);
-    loom_serve_parameter_bank_await_retirement(adapter_bank_);
+    IREE_EXPECT_OK(loom_serve_parameter_bank_await_retirement(bank_));
+    IREE_EXPECT_OK(loom_serve_parameter_bank_await_retirement(adapter_bank_));
     loom_serve_residency_free(bank_residency_);
     IREE_EXPECT_OK(loom_serve_parameter_bank_free(bank_));
     IREE_EXPECT_OK(loom_serve_parameter_bank_free(adapter_bank_));
@@ -35,16 +35,8 @@ class ParameterBankTest : public WeightsTest {
 
   iree_status_t PrepareBank(loom_serve_parameter_bank_t* bank, size_t index,
                             const char* path) {
-    const std::string policy = directory_ + "/policy.loom";
-    const loom_model_file_t file = {iree_make_cstring_view(path), {}};
-    const loom_model_file_list_t source = {1, &file};
-    loom_serve_test_weight_preparation_t preparation;
-    preparation.weights = loom_serve_parameter_bank_weights(bank, index);
-    preparation.host = loom_serve_device_host(device_owner_);
-    preparation.jit = jit_;
-    preparation.parameter = {static_cast<uint32_t>(index), 1, &source,
-                             iree_make_cstring_view(policy.c_str())};
-    return preparation.Run();
+    return WeightsTest::Prepare(loom_serve_parameter_bank_weights(bank, index),
+                                {path});
   }
 
   // Owned checkpoint roots, including partially prepared construction.
@@ -85,7 +77,7 @@ TEST_P(ParameterBankTest, RecordingsRetainPreparedRootsAfterBankRetirement) {
   EXPECT_FALSE(loom_serve_parameter_bank_is_retired(bank_));
   iree_hal_command_buffer_release(commands_[0]);
   commands_[0] = nullptr;
-  loom_serve_parameter_bank_await_retirement(bank_);
+  IREE_ASSERT_OK(loom_serve_parameter_bank_await_retirement(bank_));
   EXPECT_TRUE(loom_serve_parameter_bank_is_retired(bank_));
 }
 
@@ -98,7 +90,7 @@ TEST_P(ParameterBankTest, FailedDomainPreparationRetiresAllOwnedRoots) {
   IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND,
                         Prepare(1, adapter_path_.path().c_str()));
   loom_serve_parameter_bank_retire(bank_, nullptr, nullptr);
-  loom_serve_parameter_bank_await_retirement(bank_);
+  IREE_ASSERT_OK(loom_serve_parameter_bank_await_retirement(bank_));
   EXPECT_TRUE(loom_serve_parameter_bank_is_retired(bank_));
   for (size_t i = 0; i < loom_serve_parameter_bank_count(bank_); ++i) {
     EXPECT_EQ(

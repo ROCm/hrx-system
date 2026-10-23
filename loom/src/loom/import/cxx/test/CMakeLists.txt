@@ -54,6 +54,8 @@ loom_check_test_suite(
     "buffer_alloca_invalid.cxx-test"
     "buffer_memory_space.cxx-test"
     "buffer_memory_space_invalid.cxx-test"
+    "c_abi.cxx-test"
+    "c_abi_invalid.cxx-test"
     "callable_effects.cxx-test"
     "check.cxx-test"
     "check_close.cxx-test"
@@ -180,6 +182,7 @@ loom_check_test_suite(
     "subgroup_shuffles_invalid.cxx-test"
     "subgroups.cxx-test"
     "subgroups_invalid.cxx-test"
+    "switches.cxx-test"
     "symbols.cxx-test"
     "symbols_invalid.cxx-test"
     "targets.cxx-test"
@@ -338,6 +341,32 @@ loom_execution_test(
     condition_values_test_execute_vm_reference_test
   MODULE
     "::condition_values_test_module"
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+    "loom-execution-profile=vm_reference"
+    "loom-target-family=vm"
+    "loom-target-class=cpu"
+    "loom-executor=reference"
+)
+endif()
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_VM)
+loom_test_module(
+  NAME
+    switch_values_test_module
+  SRCS
+    "switch_values.cxx"
+)
+endif()
+
+if(LOOM_IMPORT_CXX AND LOOM_TARGET_ARCH_VM)
+if(LOOM_TARGET_ARCH_VM)
+loom_execution_test(
+  NAME
+    switch_values_test_execute_vm_reference_test
+  MODULE
+    "::switch_values_test_module"
   LABELS
     "iree-build-requirement=loom.target.arch.vm"
     "loom-execution-profile=vm_reference"
@@ -1262,6 +1291,7 @@ loom_check_test_suite(
   NAME
     x86_compiler_test
   SRCS
+    "x86_c_abi_lowering.cxx-test"
     "x86_lowering.cxx-test"
 )
 endif()

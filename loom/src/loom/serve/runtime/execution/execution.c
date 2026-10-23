@@ -393,16 +393,14 @@ iree_status_t loom_serve_execution_feedback(
 
 iree_status_t loom_serve_execution_wait(loom_serve_execution_t* execution,
                                         uint64_t value) {
-  return iree_hal_semaphore_wait(execution->work.semaphore, value,
-                                 iree_infinite_timeout(),
-                                 IREE_ASYNC_WAIT_FLAG_NONE);
+  return loom_serve_workspace_wait(execution->workspace,
+                                   execution->work.semaphore, value);
 }
 
 iree_status_t loom_serve_execution_feedback_wait(
     loom_serve_execution_t* execution, uint64_t value) {
-  return iree_hal_semaphore_wait(execution->feedback.semaphore, value,
-                                 iree_infinite_timeout(),
-                                 IREE_ASYNC_WAIT_FLAG_NONE);
+  return loom_serve_workspace_wait(execution->workspace,
+                                   execution->feedback.semaphore, value);
 }
 
 iree_status_t loom_serve_execution_drain(loom_serve_execution_t* execution) {
@@ -415,6 +413,7 @@ iree_status_t loom_serve_execution_drain(loom_serve_execution_t* execution) {
       status, loom_serve_execution_feedback_wait(execution, feedback_value));
   // Consumer captures protect model payloads after early failed readiness.
   // Raw allocation objects independently remain protected by the shared pool.
-  loom_serve_retirement_await(&execution->consumers);
-  return status;
+  return iree_status_join(
+      status, loom_serve_workspace_await_retirement(execution->workspace,
+                                                    &execution->consumers));
 }

@@ -69,6 +69,12 @@ class SourceTextServiceTest : public ::testing::Test {
 
   void TearDown() override;
 
+  // Mutates a copied provider while retaining the actual source-model ABI.
+  static void EditNativeProvider(const std::string& source_path,
+                                 const std::string& target_path,
+                                 const std::string& original,
+                                 const std::string& replacement);
+
   void WriteWeights(uint32_t bias) {
     std::string header =
         R"({"bias":{"dtype":"I32","shape":[1],"data_offsets":[0,4]}})";

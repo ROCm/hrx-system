@@ -26,6 +26,7 @@
 #include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/runtime/parameter/activation.h"
 #include "loom/serve/runtime/parameter/residency.h"
+#include "loom/serve/runtime/parameter/sources.h"
 #include "loom/serve/runtime/parameter/weights.h"
 #include "loom/serve/testing/compiler.h"
 #include "loom/serve/testing/device.h"
@@ -45,7 +46,7 @@ iree_status_t AcquireWeightDeviceGroup(bool elastic, uint64_t slab_size,
                                        uint64_t memory_limit,
                                        loom_serve_device_group_t** out_group);
 
-// Models the loader's owner turn: submit private policy/index/JIT preparation
+// Models the loader's owner turn: submit private policy/JIT preparation
 // and return so that the same sole worker can execute the accepted work.
 struct loom_serve_test_weight_preparation_t {
   static iree_status_t Submit(iree_task_process_t* process,
@@ -56,7 +57,7 @@ struct loom_serve_test_weight_preparation_t {
     auto status = loom_serve_weights_prepare_async(
         self->weights, self->host, self->jit,
         IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, &self->sources, &self->parameter,
-        Complete, self);
+        self->indexed_sources, Complete, self);
     if (!iree_status_is_ok(status)) {
       Complete(self, status);
     }
@@ -103,6 +104,8 @@ struct loom_serve_test_weight_preparation_t {
   // Borrowed source declarations retained by the outer owner through
   // completion.
   loom_serve_preparation_parameter_t parameter = {};
+  // Borrowed immutable catalog opened by cold registration before policy work.
+  loom_serve_parameter_sources_t* indexed_sources = nullptr;
   // Loader's finite submitting turn, not a thread or waiting worker.
   iree_task_process_t process = {};
   // Joins both terminal callbacks with the test thread's final access.
@@ -387,7 +390,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
       }
     }
     for (auto* plan : plans_) {
-      loom_serve_weights_await_retirement(plan);
+      IREE_EXPECT_OK(loom_serve_weights_await_retirement(plan));
     }
     for (auto* residency : residencies_) {
       loom_serve_residency_free(residency);
@@ -420,7 +423,10 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     IREE_EXPECT_OK(loom_serve_device_trim(device_owner_, 0));
     DrainNativeReturns();
     const auto memory = loom_serve_device_memory_statistics(device_owner_);
-    EXPECT_EQ(memory.retained.reserved_bytes, 0u);
+    EXPECT_EQ(memory.retained.reserved_bytes,
+              loom_serve_workspace_memory_usage(
+                  loom_serve_device_workspace(device_owner_))
+                  .reserved_bytes);
     EXPECT_EQ(memory.retained.committed_bytes, 0u);
     EXPECT_EQ(memory.workspace.bytes_committed, 0u);
     if (path_.Exists()) {
@@ -431,7 +437,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     }
   }
 
-  void UseDeferredBacking() {
+  void UseDeferredBacking(uint64_t memory_limit = 2 * kSlabBytes) {
     if (!pool_) {
       return;
     }
@@ -469,11 +475,11 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
         &capabilities, deferred_backing_, kSlabBytes, &geometry));
     const loom_serve_memory_geometry_t geometries[] = {geometry, geometry};
     IREE_ASSERT_OK(loom_serve_memory_pool_allocate(
-        group, scope, deferred_backing_, transfer_, geometries, 2 * kSlabBytes,
+        group, scope, deferred_backing_, transfer_, geometries, memory_limit,
         host_allocator_, &owned_pool_));
     pool_ = owned_pool_;
-    IREE_ASSERT_OK(loom_serve_residency_cache_allocate(pool_, host_allocator_,
-                                                       &owned_cache_));
+    IREE_ASSERT_OK(loom_serve_residency_cache_allocate(
+        pool_, nullptr, host_allocator_, &owned_cache_));
   }
 
   loom_serve_residency_cache_t* ResidencyCache() {
@@ -529,17 +535,26 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     preparation.jit = jit_;
     std::vector<std::vector<loom_model_file_t>> shards;
     std::vector<loom_model_file_list_t> checkpoints;
+    std::vector<uint32_t> ordinals;
     for (const auto& source : sources) {
       auto& paths = shards.emplace_back();
       for (const auto& path : source) {
         paths.push_back({iree_make_cstring_view(path.c_str()), {}});
       }
       checkpoints.push_back({paths.size(), paths.data()});
+      ordinals.push_back(static_cast<uint32_t>(ordinals.size()));
     }
-    preparation.parameter = {0, static_cast<uint32_t>(checkpoints.size()),
-                             checkpoints.data(),
-                             iree_make_cstring_view(policy.c_str())};
-    auto status = preparation.Run();
+    preparation.parameter = {
+        0, static_cast<uint32_t>(checkpoints.size()), checkpoints.data(),
+        iree_make_cstring_view(policy.c_str()), ordinals.data()};
+    auto status = loom_serve_parameter_sources_create(
+        nullptr, &preparation.sources,
+        static_cast<uint32_t>(checkpoints.size()), checkpoints.data(),
+        host_allocator_, &preparation.indexed_sources);
+    if (iree_status_is_ok(status)) {
+      status = preparation.Run();
+    }
+    loom_serve_parameter_sources_release(preparation.indexed_sources);
     const auto after = loom_serve_weights_statistics(plan);
     EXPECT_EQ(after.reserved_bytes, before.reserved_bytes);
     EXPECT_EQ(after.committed_bytes, before.committed_bytes);

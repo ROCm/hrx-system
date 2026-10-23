@@ -17,8 +17,8 @@ loom_cc_library(
   TEXTUAL_HDRS
     "ops.inc"
   DEPS
-    loom::ir::builders
-    loom::ops::op_defs
+    loom::ir::headers
+    loom::ops::headers
     loom::target::test::record_defs
     loom::target::types
   PUBLIC
@@ -42,7 +42,8 @@ loom_cc_library(
   DEPS
     ::op_defs
     loom::ir::builders
-    loom::ops::op_defs
+    loom::ops::builders
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 
@@ -113,6 +114,7 @@ loom_cc_library(
   DEPS
     iree::base
     loom::ir::builders
+  LINKABLE_MORE_THAN_ONCE
   PUBLIC
 )
 

@@ -7,7 +7,7 @@
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_CHECK_CONFIGURATION_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_CHECK_CONFIGURATION_H_
 
-#include "loom/tools/loom-check/provider.h"
+#include "loom/target/provider.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,7 +15,8 @@ extern "C" {
 
 // Check-only pass comparing worker analysis across configuration
 // materialization.
-extern const loom_check_provider_t loom_aie2p_configuration_check_provider;
+extern const loom_target_provider_t
+    loom_aie2p_configuration_check_target_provider;
 
 #ifdef __cplusplus
 }  // extern "C"

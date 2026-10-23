@@ -9,7 +9,7 @@
 
 iree_add_all_subdirs()
 
-if(IREE_HAL_DRIVER_AMD AND AMDF_BUILD)
+if((IREE_HAL_DRIVER_AMD_GPU OR IREE_HAL_DRIVER_AMD_XDNA) AND AMDF_BUILD)
 iree_cc_library(
   NAME
     registration

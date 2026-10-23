@@ -22,7 +22,7 @@
 // emitted in source order. The format contains no native structs, alignment
 // gaps, or padding bytes.
 #define IREE_HAL_DEVICE_SPEC_MAGIC UINT32_C(0x43505344)  // DSPC
-#define IREE_HAL_DEVICE_SPEC_VERSION UINT32_C(10)
+#define IREE_HAL_DEVICE_SPEC_VERSION UINT32_C(11)
 #define IREE_HAL_DEVICE_SPEC_FNV1A64_OFFSET_BASIS UINT64_C(0xcbf29ce484222325)
 #define IREE_HAL_DEVICE_SPEC_FNV1A64_PRIME UINT64_C(0x100000001b3)
 
@@ -318,6 +318,10 @@ static iree_status_t iree_hal_device_spec_encode_queue_family(
   }
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_writer_write_u32(
       writer, value->placement_capabilities));
+  for (uint32_t i = 0; i < IREE_HAL_QUEUE_PLACEMENT_COUNT; ++i) {
+    IREE_RETURN_IF_ERROR(iree_hal_device_spec_writer_write_u32(
+        writer, value->host_publication[i]));
+  }
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_writer_write_u64(
       writer, value->supported_queue_features));
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_writer_write_u32(
@@ -1118,6 +1122,10 @@ static iree_status_t iree_hal_device_spec_decode_queue_family(
   *inout_execution_resource_offset += out_value->execution_resource_count;
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u32(
       reader, &out_value->placement_capabilities));
+  for (uint32_t i = 0; i < IREE_HAL_QUEUE_PLACEMENT_COUNT; ++i) {
+    IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u32(
+        reader, &out_value->host_publication[i]));
+  }
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u64(
       reader, &out_value->supported_queue_features));
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_reader_read_u32(

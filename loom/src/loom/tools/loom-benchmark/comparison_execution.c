@@ -348,18 +348,19 @@ static iree_status_t loom_benchmark_run_comparison_window(
     if (compile_context->uses_sequence) {
       status = loom_benchmark_run_hal_sequence_benchmark_sample(
           options->run, &candidate->selection->identity, options->module_plan,
-          candidate->selection->benchmark_plan, candidate->selection->case_plan,
-          &measurement_policy, options->benchmark_options, options->hal_context,
+          candidate->selection->benchmark_plan, &measurement_policy,
+          options->benchmark_options, options->hal_context,
           &compile_context->hal_sequence,
-          &compile_context->benchmark_materializer, candidate->begin_sample,
+          &compile_context->benchmark_execution_options,
+          options->execution_arena, candidate->begin_sample,
           options->host_allocator, &benchmark_result);
     } else {
       status = loom_benchmark_run_hal_benchmark_sample(
           options->run, &candidate->selection->identity, options->module_plan,
-          candidate->selection->benchmark_plan, candidate->selection->case_plan,
-          &measurement_policy, options->benchmark_options,
-          &compile_context->hal_provider,
-          &compile_context->benchmark_materializer, candidate->begin_sample,
+          candidate->selection->benchmark_plan, &measurement_policy,
+          options->benchmark_options, &compile_context->hal_provider,
+          &compile_context->benchmark_execution_options,
+          options->execution_arena, candidate->begin_sample,
           options->host_allocator, &benchmark_result);
     }
     benchmark_result.compile_item = compile_context->compile_item;

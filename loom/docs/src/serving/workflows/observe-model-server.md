@@ -225,10 +225,12 @@ content.
 
 ## Interpret memory and packing evidence
 
-`server.resources.devices[].memory` separates elastic retained backing from
-invocation workspace. Retained values cover serving-managed parameters/state
-on that device; fixed retained accounting is `null`, not zero. An elastic
-`limit_bytes:null` means unbounded by serving policy.
+`server.resources.devices[].memory.retained` reports the shared elastic backing
+for parameters, mutable state and invocation workspace on that device.
+`memory.workspace` describes the workspace portion of that same backing,
+including reusable idle ranges; adding it to `retained` double-counts storage.
+Fixed retained accounting is `null`, not zero. An elastic `limit_bytes:null`
+means unbounded by serving policy.
 
 Workspace values are independent HAL observations, not one coherent device-wide
 snapshot. Its cumulative acquire/release/reuse counters survive model removal
@@ -236,9 +238,12 @@ and pool trimming. `wait_count` counts reservations needing a reuse prerequisite
 not blocked host threads or elapsed wait time. An exhausted attempt can be
 followed by growth and success; it is not a failed-request counter.
 
+Virtual `reserved_bytes` can remain nonzero after physical backing is trimmed:
+the reusable addresses are still owned without retaining those physical pages.
 Neither scope includes all host allocations, fixed buffers, executable/driver
-storage or physical padding. Their sum is not peak process RAM, whole-device
-VRAM or immediately available memory. Status does not poll hardware sensors.
+storage or hidden physical padding. These values are not peak process RAM,
+whole-device VRAM or immediately available memory. Status does not poll hardware
+sensors.
 
 | Question | Useful evidence |
 | --- | --- |

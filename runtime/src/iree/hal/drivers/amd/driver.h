@@ -26,18 +26,21 @@ extern "C" {
 // INSTANCE bounds acquired native state to this fabric's lifetime; unsupported
 // native services fail explicitly. It does not promise isolated GPU addresses.
 //
-// The execution schemes are `xdna`, `rdna`, `cdna`, and `amdgpu2`. Each has an
-// independent ordinal namespace: NPUs, RDNA GPUs, CDNA GPUs, and all supported
-// GPUs, respectively. GPU discovery requires a usable native compute family;
-// architecture alone is insufficient. A bare scheme selects visible ordinal
-// zero; `rdna:N` and `rdna://N` index the same visible list.
+// The XDNA engine exposes `xdna`; the GPU engine exposes `rdna`, `cdna`, and
+// `amdgpu`. Only engines selected at build time are available. Each scheme has
+// an independent ordinal namespace: NPUs, RDNA GPUs, CDNA GPUs, and all
+// supported GPUs, respectively. GPU discovery requires a usable native compute
+// family; architecture alone is insufficient. A bare scheme selects visible
+// ordinal zero; `rdna:N` and `rdna://N` index the same visible list.
+// The scheme-less default is the first visible endpoint in native order.
 //
-// Driver creation captures HAL_VISIBLE_XDNA_DEVICES, HAL_VISIBLE_RDNA_DEVICES,
-// HAL_VISIBLE_CDNA_DEVICES, and HAL_VISIBLE_AMDGPU2_DEVICES. Each list selects
-// and orders ordinals from that scheme's unmasked supported endpoints. Unset
+// Driver creation captures the enabled schemes' HAL_VISIBLE_XDNA_DEVICES,
+// HAL_VISIBLE_RDNA_DEVICES, HAL_VISIBLE_CDNA_DEVICES, and
+// HAL_VISIBLE_AMDGPU_DEVICES variables. Each list selects and orders ordinals
+// from that scheme's unmasked supported endpoints. Unset
 // exposes all; empty or whitespace-only exposes none. Duplicate, malformed, and
 // out-of-range ordinals fail driver creation with INVALID_ARGUMENT. Variables
-// are independent: filtering amdgpu2 does not filter rdna. Changing environment
+// are independent: filtering amdgpu does not filter rdna. Changing environment
 // values afterward does not change this driver or its native topology.
 //
 // Enumeration emits `id/<32 hexadecimal digits>` paths naming
