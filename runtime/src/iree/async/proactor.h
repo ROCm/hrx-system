@@ -899,9 +899,14 @@ iree_async_proactor_query_capabilities(iree_async_proactor_t* proactor) {
 //
 // Batch semantics:
 //   All operations in the batch are submitted atomically where possible.
-//   io_uring: Single io_uring_submit() call.
-//   IOCP: Individual PostQueuedCompletionStatus calls (no atomic batch).
-//   kqueue: Single kevent() call with all changes.
+//   - io_uring: SQEs prepared together; the poll owner submits them to the
+//   kernel.
+//   - IOCP: Individual PostQueuedCompletionStatus calls (no atomic batch).
+//   - kqueue: Single kevent() call with all changes.
+//
+//   On io_uring, the poll owner may first submit previously prepared SQEs to
+//   reclaim capacity. This neither waits for completion nor dispatches another
+//   callback. Other threads cannot perform that native admission step.
 //
 // Region lifetime:
 //   A successful submit acquires resources for every operation in the list,

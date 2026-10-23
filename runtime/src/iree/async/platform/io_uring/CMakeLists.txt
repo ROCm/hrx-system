@@ -361,8 +361,10 @@ iree_cc_test(
     iree::async
     iree::async::util::proactor_thread
     iree::base
+    iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::testing::temp_file
   RESOURCE_GROUP
     io_uring
 )
