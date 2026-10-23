@@ -65,10 +65,10 @@ kernel.def target(@flash_next_hc_wave32) @hc_normalize() {
   kernel.return
 }
 
-// Larger epochs reuse each decoded Q8 block across four tokens. Small epochs
-// keep one token per workgroup to expose enough independent work. Capacity
-// selects this schedule during specialization, before device execution.
-func.def pure inline @hc_token_batch_size() -> (index) {
+// Down/inject keeps one token per workgroup at small capacities so each F32
+// injection row can use all four waves. Larger epochs share each decoded Q8
+// block across four tokens. Capacity selects the schedule during specialization.
+func.def pure inline @hc_down_token_batch_size() -> (index) {
   %tokens = config.get @flash_next.token_count : index
   %c1 = index.constant 1 : index
   %c4 = index.constant 4 : index
@@ -89,7 +89,7 @@ func.def inline @hc_down_inject_body(%first_row: index, %q8_injection: i1, %span
   %span, %normalized, %down_weight, %injection_weight, %lowrank, %injection = buffer.assume.noalias %span_arg, %normalized_arg, %down_weight_arg, %injection_weight_arg, %lowrank_arg, %injection_arg : buffer, buffer, buffer, buffer, buffer, buffer
   %tokens = config.get @flash_next.token_count : index
   %token_group = kernel.workgroup.id<y> : index
-  %batch_size = func.call pure @hc_token_batch_size() : () -> (index)
+  %batch_size = func.call pure @hc_down_token_batch_size() : () -> (index)
   %first = index.mul %token_group, %batch_size : index
   %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
   %active = index.cmp ult, %first, %end : index
@@ -258,7 +258,7 @@ kernel.def target(@flash_next_hc_wave32) @hc_down_inject() {
   %groups = scf.select %narrow, %parallel_groups, %original_groups : index
   %c1 = index.constant 1 : index
   %threads = index.constant 128 : index
-  %batch_size = func.call pure @hc_token_batch_size() : () -> (index)
+  %batch_size = func.call pure @hc_down_token_batch_size() : () -> (index)
   %tail = index.sub %batch_size, %c1 : index
   %padded = index.add %tokens, %tail : index
   %rows = index.div %padded, %batch_size : index
@@ -282,7 +282,7 @@ kernel.def target(@flash_next_hc_wave32) @hc_down_inject_q8() {
   %groups = index.constant 81 : index
   %c1 = index.constant 1 : index
   %threads = index.constant 128 : index
-  %batch_size = func.call pure @hc_token_batch_size() : () -> (index)
+  %batch_size = func.call pure @hc_down_token_batch_size() : () -> (index)
   %tail = index.sub %batch_size, %c1 : index
   %padded = index.add %tokens, %tail : index
   %rows = index.div %padded, %batch_size : index
@@ -302,7 +302,7 @@ kernel.def target(@flash_next_hc_wave32) @hc_inject_only() {
   %groups = index.constant 1 : index
   %c1 = index.constant 1 : index
   %threads = index.constant 128 : index
-  %batch_size = func.call pure @hc_token_batch_size() : () -> (index)
+  %batch_size = func.call pure @hc_down_token_batch_size() : () -> (index)
   %tail = index.sub %batch_size, %c1 : index
   %padded = index.add %tokens, %tail : index
   %rows = index.div %padded, %batch_size : index
@@ -319,7 +319,7 @@ kernel.def target(@flash_next_hc_wave32) @hc_inject_only_q8() {
   %groups = index.constant 1 : index
   %c1 = index.constant 1 : index
   %threads = index.constant 128 : index
-  %batch_size = func.call pure @hc_token_batch_size() : () -> (index)
+  %batch_size = func.call pure @hc_down_token_batch_size() : () -> (index)
   %tail = index.sub %batch_size, %c1 : index
   %padded = index.add %tokens, %tail : index
   %rows = index.div %padded, %batch_size : index
@@ -331,14 +331,17 @@ kernel.def target(@flash_next_hc_wave32) @hc_inject_only_q8() {
   kernel.return
 }
 
-// Four eight-lane clusters compute the four gates for one feature. A wave
-// combines their gated normalized values without materializing a gate tensor.
+// Four eight-lane clusters compute the four gates for one feature. Up to four
+// tokens share each decoded weight block, including small verification cohorts.
+// Each token retains its original contraction and four-stream reduction order;
+// the wave publishes mixed values without materializing a gate tensor.
 kernel.def target(@flash_next_hc_wave32) @hc_up_mix() {
   %tokens = config.get @flash_next.token_count : index
   %groups = index.constant 640 : index
   %c1 = index.constant 1 : index
   %threads = index.constant 128 : index
-  %batch_size = func.call pure @hc_token_batch_size() : () -> (index)
+  %batch_limit = index.constant 4 : index
+  %batch_size = index.min %tokens, %batch_limit : index
   %tail = index.sub %batch_size, %c1 : index
   %padded = index.add %tokens, %tail : index
   %rows = index.div %padded, %batch_size : index
@@ -347,7 +350,8 @@ kernel.def target(@flash_next_hc_wave32) @hc_up_mix() {
   %span, %normalized, %lowrank, %weight, %mixed = buffer.assume.noalias %span_arg, %normalized_arg, %lowrank_arg, %weight_arg, %mixed_arg : buffer, buffer, buffer, buffer, buffer
   %tokens = config.get @flash_next.token_count : index
   %token_group = kernel.workgroup.id<y> : index
-  %batch_size = func.call pure @hc_token_batch_size() : () -> (index)
+  %batch_limit = index.constant 4 : index
+  %batch_size = index.min %tokens, %batch_limit : index
   %first = index.mul %token_group, %batch_size : index
   %end = func.call @flash_next_token_count(%span, %tokens) : (buffer, index) -> (index)
   %active = index.cmp ult, %first, %end : index
