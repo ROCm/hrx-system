@@ -1,0 +1,36 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["LICENSE"])
+
+cc_library(
+    name = "libbacktrace",
+    srcs = [
+        "atomic.c",
+        "backtrace.c",
+        "dwarf.c",
+        "elf.c",
+        "fileline.c",
+        "filenames.h",
+        "internal.h",
+        "mmap.c",
+        "mmapio.c",
+        "posix.c",
+        "print.c",
+        "simple.c",
+        "sort.c",
+        "state.c",
+    ],
+    hdrs = ["backtrace.h"],
+    includes = ["."],
+    # Retain the implementation with its consumer instead of adding a runtime
+    # DSO. Prefixed symbols keep ordinary visibility because Bazel's per-library
+    # DSOs can leave dependency references for the final executable link.
+    linkstatic = True,
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = ["@hrx//build_tools/third_party/libbacktrace:configuration"],
+)

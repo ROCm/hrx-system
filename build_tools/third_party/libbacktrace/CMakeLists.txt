@@ -85,11 +85,14 @@ configure_file(
   ${LIBBACKTRACE_SOURCE_DIR}/iree_libbacktrace.h
   COPYONLY
 )
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/symbol_prefix.h
+  ${LIBBACKTRACE_SOURCE_DIR}/symbol_prefix.h
+  COPYONLY
+)
 
-# Source files - include all platforms, let preprocessor handle selection.
-# Order matters for archive linking: implementations must come before stubs.
-# The linker picks the first symbol definition it finds when resolving from
-# an archive, so we list real implementations first and fallback stubs last.
+# Linux has ELF, mmap and unwind support. Select those implementations instead
+# of placing competing definitions and fallback stubs in the same archive.
 set(LIBBACKTRACE_SOURCES
   # Core files (always needed).
   ${LIBBACKTRACE_SOURCE_DIR}/atomic.c
@@ -99,59 +102,57 @@ set(LIBBACKTRACE_SOURCES
   ${LIBBACKTRACE_SOURCE_DIR}/print.c
   ${LIBBACKTRACE_SOURCE_DIR}/sort.c
   ${LIBBACKTRACE_SOURCE_DIR}/state.c
-  # Unwinding - real implementations before stub.
   ${LIBBACKTRACE_SOURCE_DIR}/backtrace.c
   ${LIBBACKTRACE_SOURCE_DIR}/simple.c
-  ${LIBBACKTRACE_SOURCE_DIR}/nounwind.c  # Stub, must be after backtrace.c/simple.c.
-  # Executable format - ELF/Mach-O/PE before unknown stub.
   ${LIBBACKTRACE_SOURCE_DIR}/elf.c
-  ${LIBBACKTRACE_SOURCE_DIR}/macho.c
-  ${LIBBACKTRACE_SOURCE_DIR}/pecoff.c
-  ${LIBBACKTRACE_SOURCE_DIR}/unknown.c  # Stub, must be after format files.
-  # File I/O - mmap before read fallback.
   ${LIBBACKTRACE_SOURCE_DIR}/mmap.c
   ${LIBBACKTRACE_SOURCE_DIR}/mmapio.c
-  ${LIBBACKTRACE_SOURCE_DIR}/read.c  # Fallback, must be after mmapio.c.
 )
 
-# Build libbacktrace as a STATIC library.
-# libbacktrace has multiple implementations of the same functions for different
-# platforms (e.g., elf.c vs pecoff.c vs macho.c). The autotools build selects
-# files at configure time, but we include all files and rely on archive linking
-# semantics - the linker only pulls in object files needed to resolve symbols,
-# so the first implementation wins and duplicates are ignored.
-add_library(libbacktrace_impl STATIC ${LIBBACKTRACE_SOURCES})
-target_include_directories(libbacktrace_impl
+add_library(iree_libbacktrace_impl STATIC ${LIBBACKTRACE_SOURCES})
+target_include_directories(iree_libbacktrace_impl
   PUBLIC $<BUILD_INTERFACE:${LIBBACKTRACE_SOURCE_DIR}>
 )
-target_compile_definitions(libbacktrace_impl
+target_compile_definitions(iree_libbacktrace_impl
   PRIVATE _GNU_SOURCE  # Required for dl_iterate_phdr on glibc.
 )
 # Suppress warnings in third-party code.
-target_compile_options(libbacktrace_impl
+target_compile_options(iree_libbacktrace_impl
   PRIVATE
     -Wno-unused-parameter
     -Wno-cast-function-type
 )
 
-# Create libbacktrace::libbacktrace as an IMPORTED INTERFACE library.
+# Create the private wrapper as an IMPORTED INTERFACE library.
 # IMPORTED libraries don't get tracked for export, which is what we want
 # since libbacktrace is only used internally during build.
 # Threads::Threads is needed for pthread_once used in status_stack_trace.c.
 # CMAKE_DL_LIBS is needed for dladdr used in status_stack_trace.c.
 # On modern glibc (2.34+), dladdr is in libc, but older systems need libdl.
-add_library(libbacktrace_libbacktrace INTERFACE IMPORTED GLOBAL)
-target_link_libraries(libbacktrace_libbacktrace
+add_library(iree_libbacktrace INTERFACE IMPORTED GLOBAL)
+target_link_libraries(iree_libbacktrace
   INTERFACE
-    libbacktrace_impl
+    iree_libbacktrace_impl
     Threads::Threads
     ${CMAKE_DL_LIBS}
 )
-target_include_directories(libbacktrace_libbacktrace
+target_include_directories(iree_libbacktrace
   INTERFACE $<BUILD_INTERFACE:${LIBBACKTRACE_SOURCE_DIR}>
 )
-target_compile_definitions(libbacktrace_libbacktrace
-  INTERFACE IREE_HAVE_LIBBACKTRACE=1
+target_compile_definitions(iree_libbacktrace
+  INTERFACE IREE_HAVE_LIBBACKTRACE=1 IREE_LIBBACKTRACE_PRIVATE=1
 )
-add_library(libbacktrace::libbacktrace ALIAS libbacktrace_libbacktrace)
-iree_add_alias_interface(iree::third_party::libbacktrace libbacktrace::libbacktrace)
+iree_add_alias_interface(iree::third_party::libbacktrace iree_libbacktrace)
+
+iree_setup_c_src_root(PACKAGE_ROOT_PREFIX iree/third_party/libbacktrace)
+
+iree_cc_test(
+  NAME
+    symbol_isolation_test
+  SRCS
+    "symbol_isolation_test.cc"
+  DEPS
+    iree::base::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)

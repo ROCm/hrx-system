@@ -7,8 +7,12 @@
 #ifndef IREE_BUILD_TOOLS_THIRD_PARTY_LIBBACKTRACE_IREE_LIBBACKTRACE_H_
 #define IREE_BUILD_TOOLS_THIRD_PARTY_LIBBACKTRACE_IREE_LIBBACKTRACE_H_
 
-// Re-exports the BCR libbacktrace header through this package so Bazel layering
-// checks can see the direct dependency that provides it.
+// The pinned implementation has private symbols. An explicitly supplied CMake
+// package retains its own public ABI and does not set this definition. This
+// wrapper is used only by the formatter, not by IREE's public headers.
+#if defined(IREE_LIBBACKTRACE_PRIVATE)
+#include "symbol_prefix.h"
+#endif
 #include <backtrace.h>
 
 #endif  // IREE_BUILD_TOOLS_THIRD_PARTY_LIBBACKTRACE_IREE_LIBBACKTRACE_H_
