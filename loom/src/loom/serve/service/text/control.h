@@ -43,7 +43,7 @@ typedef struct loom_serve_text_control_t {
   iree_vm_function_t step;
   // Source-owned packed execution sequence.
   iree_vm_function_t epoch_step;
-  // Semantic spans to opaque device uploads.
+  // Semantic spans to packets and a source-owned view of exact upload ranges.
   iree_vm_function_t encode_epoch;
   // Retired feedback to semantic row progress.
   iree_vm_function_t publish_epoch;

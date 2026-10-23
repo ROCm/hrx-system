@@ -63,7 +63,7 @@ typedef struct loom_serve_text_media_epoch_t {
   struct {
     // One allocation containing copy operations followed by cohort pointers.
     iree_hal_transfer_operation_t* operations;
-    // Two host control uploads followed by coalesced device copies.
+    // Coalesced device feature copies; source control uploads are independent.
     iree_host_size_t operation_count;
     // Borrowed producer results for intersecting images.
     const loom_serve_finite_result_t** results;
@@ -85,13 +85,13 @@ iree_status_t loom_serve_text_media_epoch_initialize(
     iree_host_size_t next_packet_capacity, iree_allocator_t host_allocator,
     loom_serve_text_media_epoch_t* out_epoch);
 
-// Imports producer readiness and uploads source-written control records while
-// gathering device rows into target. No host feature transfer or wait occurs.
-// HAL captures device views before return. Host control storage stays owned by
-// the invocation through successful completion or actual terminal retirement.
+// Imports producer readiness and gathers device rows into target.
+// Source-written control records use the ordinary epoch upload plan. No host
+// feature transfer or wait occurs. HAL captures device views before return.
+// Host control storage stays owned by the invocation through successful
+// completion or actual terminal retirement.
 iree_status_t loom_serve_text_media_epoch_enqueue(
     loom_serve_text_media_epoch_t* epoch, loom_serve_execution_t* execution,
-    iree_const_byte_span_t metadata, iree_hal_buffer_t* metadata_target,
     iree_hal_buffer_t* target, uint64_t* out_value);
 
 // Releases unsubmitted or retired metadata; accepts zero state.

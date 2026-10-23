@@ -244,6 +244,8 @@ loom_cc_library(
     testonly = True,
     srcs = [
         "capture_execution_test.cc",
+        "epoch_upload_test.cc",
+        "model_instance.h",
         "source_execution_test.cc",
         "state_test.cc",
     ],
@@ -251,6 +253,7 @@ loom_cc_library(
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
         ":capture",
+        ":epoch_upload",
         ":model",
         ":source_service_fixture",
         ":storage",
@@ -276,6 +279,7 @@ loom_cc_library(
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
         ":epoch",
+        ":epoch_upload",
         ":media_projector",
         ":model",
         ":readiness",
@@ -481,6 +485,18 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "epoch_upload",
+    srcs = ["epoch_upload.c"],
+    hdrs = ["epoch_upload.h"],
+    deps = [
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/program:transfer_plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
     name = "model",
     srcs = [
         "control.c",
@@ -512,6 +528,7 @@ loom_cc_library(
     deps = [
         ":capture",
         ":chat",
+        ":epoch_upload",
         ":packing",
         ":storage",
         "//loom/binding/c:loomc",

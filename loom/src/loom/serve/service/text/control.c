@@ -154,6 +154,7 @@ iree_status_t loom_serve_text_control_initialize(
   const iree_vm_signature_type_t encode_arguments[] = {
       buffer, buffer, buffer, buffer, i32, i32,    i32,
       i32,    i32,    i32,    i32,    i32, buffer, buffer};
+  const iree_vm_signature_type_t encode_results[] = {i32, buffer, i64, i64};
   const iree_vm_signature_type_t publish_arguments[] = {
       buffer, buffer, i32,    i32,    i32,    i32,
       i32,    i32,    buffer, buffer, buffer, buffer};
@@ -167,7 +168,7 @@ iree_status_t loom_serve_text_control_initialize(
   const loom_serve_program_binding_t bindings[] = {
       {IREE_SVL("encode_epoch"),
        {encode_arguments, IREE_ARRAYSIZE(encode_arguments)},
-       {&i32, 1},
+       {encode_results, IREE_ARRAYSIZE(encode_results)},
        &control->encode_epoch},
       {IREE_SVL("publish_epoch"),
        {publish_arguments, IREE_ARRAYSIZE(publish_arguments)},

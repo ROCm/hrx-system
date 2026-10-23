@@ -86,8 +86,8 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %checkpoint = func.call @source(%empty, %weights) : (buffer, buffer) -> (i32)
   func.call @parameter(%stage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
   func.call @parameter(%media_stage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
-  %state_bytes = index.constant 8 : offset
-  %state = buffer.alloca<private> align(4) %state_bytes : buffer
+  %state_bytes = index.constant 88 : offset
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
   %state_view = buffer.view %state[%origin] : buffer -> view<2xi32>
   view.store %stage, %state_view[0] : i32, view<2xi32>
   view.store %media_stage, %state_view[1] : i32, view<2xi32>

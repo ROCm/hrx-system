@@ -63,6 +63,36 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    transfer_plan
+  HDRS
+    "transfer_plan.h"
+  SRCS
+    "transfer_plan.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    transfer_plan_test
+  SRCS
+    "transfer_plan_test.cc"
+  DEPS
+    ::transfer_plan
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     parameter_layout
   HDRS
     "parameter_layout.h"

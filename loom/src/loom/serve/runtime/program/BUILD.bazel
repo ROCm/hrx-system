@@ -71,6 +71,24 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "transfer_plan",
+    srcs = ["transfer_plan.c"],
+    hdrs = ["transfer_plan.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "transfer_plan_test",
+    srcs = ["transfer_plan_test.cc"],
+    deps = [
+        ":transfer_plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "parameter_layout",
     srcs = ["parameter_layout.c"],
     hdrs = ["parameter_layout.h"],

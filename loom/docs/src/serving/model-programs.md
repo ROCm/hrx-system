@@ -332,6 +332,32 @@ may be null. Control exports `epoch`, `encode_epoch`, `publish_epoch`,
 required. Every submitted span has selection/proposal flags zero, and completed
 progress contains no native output-token selection.
 
+`encode_epoch` writes metadata and input packets, then returns
+`(output_count, transfer_plan, byte_offset, byte_length)`. The plan view contains
+little-endian u64 records
+`{source_binding, source_offset, target_binding, target_offset, length}`.
+The source and target tables each bind metadata at ordinal zero and input at
+ordinal one. Source and destination offsets are independent: compact host data
+can populate a sparse device layout without transferring its holes.
+Only listed bytes are uploaded:
+preparing capacity for a large packed epoch does not make a one-token epoch
+transfer that entire capacity. Source initializes all bytes its numerical
+stages read. Nonempty records are ordered by target binding and offset, with
+no overlapping targets. Repeated source ranges are permitted. Records describe
+independent placements, not an ordered sequence of copies.
+
+The plan names logical storage, not pointers, registrations, or completion
+handles. The execution owner binds physical resources and establishes readiness.
+The plan can reuse retained control state and is consumed during submission;
+packet bytes stay immutable until accepted transfers retire, including failure.
+Source reuse, destination visibility, and destination reuse after consumption
+are separate ownership boundaries. See the
+[byte-placement contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/runtime/program/transfer_plan.h)
+for the encoding and validation rules.
+The same contract applies to generative text and media epochs. See
+[epoch uploads](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/serve/service/text/epoch_upload.h)
+for local HAL binding and payload ownership.
+
 `capture_epoch(control_state, shape_index, span_count, plan)` returns a buffer
 of little-endian i64 triples: `[span_ordinal, residual_byte_offset, byte_length]`.
 Ranges are grouped in submitted span order, with at least one nonempty range
