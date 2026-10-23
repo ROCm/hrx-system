@@ -208,10 +208,14 @@ iree_runtime_cc_test(
     srcs = ["asan_test.cc"],
     deps = [
         ":test_device",
+        "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:pool_test_util",
+        "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/drivers/amd/gpu/image:asan_images",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:semaphore",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:signal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -422,6 +426,7 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "native_test",
     srcs = [
+        "allocation_test.cc",
         "aql_program_test.cc",
         "dispatch_test.cc",
         "native_test.cc",

@@ -351,6 +351,11 @@ bool iree_hal_amd_gpu_aql_submission_retirement_ready(
 
 void iree_hal_amd_gpu_aql_submission_release_payload(
     iree_hal_amd_gpu_aql_submission_t* submission) {
+  if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_ALLOCATION) {
+    iree_hal_amd_gpu_allocation_destroy(submission->allocation.operation);
+    submission->allocation.operation = NULL;
+    return;
+  }
   if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE) {
     iree_hal_amd_gpu_aql_command_invocation_deinitialize(&submission->execute);
     return;

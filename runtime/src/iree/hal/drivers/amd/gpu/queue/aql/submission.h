@@ -9,6 +9,7 @@
 
 #include "iree/hal/drivers/amd/gpu/completion.h"
 #include "iree/hal/drivers/amd/gpu/profile.h"
+#include "iree/hal/drivers/amd/gpu/queue/allocation.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/barrier.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/command_buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/transfer.h"
@@ -53,6 +54,7 @@ typedef enum iree_hal_amd_gpu_aql_entry_kind_e {
   IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE,
   IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER,
   IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_ALLOCATION,
   IREE_HAL_AMD_GPU_AQL_ENTRY_PROGRAM,
   IREE_HAL_AMD_GPU_AQL_ENTRY_REUSE_PROGRAM,
   IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS,
@@ -101,6 +103,13 @@ typedef struct iree_hal_amd_gpu_aql_submission_t {
   // Retained HAL signal timelines and copied values in inline storage.
   iree_hal_semaphore_list_t signals;
   union {
+    // Pool transaction whose native ordering belongs to this submission.
+    struct {
+      // Owned through rejection or terminal native retirement.
+      iree_hal_amd_gpu_allocation_t* operation;
+      // Exact publication owner, borrowed through callback-tail admission.
+      iree_hal_queue_t* queue;
+    } allocation;
     // Scalar operation and target retained through terminal native retirement.
     struct {
       // Prepared address slot, resolved only after allocation dependencies.
