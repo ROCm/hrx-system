@@ -8,7 +8,9 @@ func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
 
 // qwen38_prefill
 global.rodata.def @prefill_root = bytes("7177656e33385f70726566696c6c")
@@ -161,7 +163,7 @@ global.rodata.def @pool_key = bytes("7177656e33382e617474656e74696f6e2e706f6f6c5
 // runner.qwen38.mixed_inputs
 global.rodata.def @mixed_key = bytes("72756e6e65722e7177656e33382e6d697865645f696e70757473")
 
-func.def @declare_stage(%root: buffer, %tokens: i64, %spans: i64, %capacity: i64, %q8_capacity: i64, %context: i64, %pool: i64, %roots: i32, %mixed: i64, %weights: buffer) -> (i32) {
+func.def @declare_stage(%root: buffer, %tokens: i64, %spans: i64, %capacity: i64, %q8_capacity: i64, %context: i64, %pool: i64, %roots: i32, %mixed: i64, %checkpoint: i32) -> (i32) {
   %stage = func.call @stage(%root, %tokens) : (buffer, i64) -> (i32)
   %mixed_key = global.load @mixed_key : buffer
   func.call @config_i64(%stage, %mixed_key, %mixed) : (i32, buffer, i64)
@@ -196,12 +198,11 @@ func.def @declare_stage(%root: buffer, %tokens: i64, %spans: i64, %capacity: i64
   %c1 = index.constant 1 : index
   %bounded_roots = scalar.assume %roots [range(%roots, 0, 7)] : i32
   %root_count = index.cast %bounded_roots : i32 to index
-  %source = scalar.constant 0 : i32
-  %empty = global.load @empty : buffer
+  %input = scalar.constant 0 : i32
   %policy = global.load @policy : buffer
   scf.for %i = [%c0 to %root_count step %c1] {
     %binding = index.cast %i : index to i32
-    func.call @parameter(%stage, %binding, %source, %empty, %weights, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+    func.call @parameter(%stage, %binding, %input, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
   }
   func.return %stage : i32
 }
@@ -411,7 +412,7 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %pins: i64, %packed: i1
 // Ordinary and mixed input catalogs differ only in their input specialization.
 // Their immutable parameter domains remain identical and are shared by the
 // materializer; mixed records never create a second checkpoint allocation.
-func.def @declare_packed_stages(%shapes: buffer, %shape_count: i64, %context: i64, %pool: i64, %rows: i64, %weights: buffer, %draft_weights: buffer, %enabled: i1, %dflash: i1, %width: i64, %mixed: i64) -> (i32, i32, i64) {
+func.def @declare_packed_stages(%shapes: buffer, %shape_count: i64, %context: i64, %pool: i64, %rows: i64, %checkpoint: i32, %draft_source: i32, %enabled: i1, %dflash: i1, %width: i64, %mixed: i64) -> (i32, i32, i64) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -435,7 +436,7 @@ func.def @declare_packed_stages(%shapes: buffer, %shape_count: i64, %context: i6
     func.call @require(%fits32, %capacity_error) : (i32, buffer)
     // Packed projection arguments describe the shared activation workspace;
     // the epoch shape independently bounds the dispatched token grid.
-    %target = func.call @declare_stage(%epoch_root, %tokens, %spans, %capacity, %capacity, %context, %pool, %one32, %mixed, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, buffer) -> (i32)
+    %target = func.call @declare_stage(%epoch_root, %tokens, %spans, %capacity, %capacity, %context, %pool, %one32, %mixed, %checkpoint) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, i32) -> (i32)
     scf.if %dflash {
       %capture_key = global.load @capture_key : buffer
       func.call @config_i64(%target, %capture_key, %one64) : (i32, buffer, i64)
@@ -459,28 +460,27 @@ func.def @declare_packed_stages(%shapes: buffer, %shape_count: i64, %context: i6
     %five32 = scalar.constant 5 : i32
     %proposal_roots = scf.select %dflash, %two32, %five32 : i32
     %warm_roots = scf.select %dflash, %zero32, %seven32 : i32
-    %empty = global.load @empty : buffer
     %dflash_policy = global.load @dflash_policy : buffer
-    %proposal = func.call @declare_stage(%proposal_root, %proposal_tokens, %rows, %capacity, %capacity, %context, %pool, %proposal_roots, %mixed, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, buffer) -> (i32)
+    %proposal = func.call @declare_stage(%proposal_root, %proposal_tokens, %rows, %capacity, %capacity, %context, %pool, %proposal_roots, %mixed, %checkpoint) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, i32) -> (i32)
     %width_key = global.load @width_key : buffer
     func.call @config_i64(%proposal, %width_key, %width) : (i32, buffer, i64)
     scf.if %dflash {
-      func.call @parameter(%proposal, %two32, %zero32, %empty, %draft_weights, %dflash_policy) : (i32, i32, i32, buffer, buffer, buffer)
-      func.call @parameter(%proposal, %three32, %zero32, %empty, %draft_weights, %dflash_policy) : (i32, i32, i32, buffer, buffer, buffer)
+      func.call @parameter(%proposal, %two32, %zero32, %draft_source, %dflash_policy) : (i32, i32, i32, i32, buffer)
+      func.call @parameter(%proposal, %three32, %zero32, %draft_source, %dflash_policy) : (i32, i32, i32, i32, buffer)
     }
     scf.for %i = [%c0 to %count step %c1] {
       %tokens = view.load %view[%i, 0] : view<[%count]x2xi64> -> i64
       %spans = view.load %view[%i, 1] : view<[%count]x2xi64> -> i64
-      %warm = func.call @declare_stage(%warm_root, %tokens, %spans, %capacity, %capacity, %context, %pool, %warm_roots, %mixed, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, buffer) -> (i32)
+      %warm = func.call @declare_stage(%warm_root, %tokens, %spans, %capacity, %capacity, %context, %pool, %warm_roots, %mixed, %checkpoint) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, i32) -> (i32)
       scf.if %dflash {
-        func.call @parameter(%warm, %zero32, %zero32, %empty, %draft_weights, %dflash_policy) : (i32, i32, i32, buffer, buffer, buffer)
-        func.call @parameter(%warm, %one32, %zero32, %empty, %draft_weights, %dflash_policy) : (i32, i32, i32, buffer, buffer, buffer)
+        func.call @parameter(%warm, %zero32, %zero32, %draft_source, %dflash_policy) : (i32, i32, i32, i32, buffer)
+        func.call @parameter(%warm, %one32, %zero32, %draft_source, %dflash_policy) : (i32, i32, i32, i32, buffer)
       }
     }
     scf.for %i = [%c0 to %count step %c1] {
       %tokens = view.load %view[%i, 0] : view<[%count]x2xi64> -> i64
       %spans = view.load %view[%i, 1] : view<[%count]x2xi64> -> i64
-      %verify = func.call @declare_stage(%verify_root, %tokens, %spans, %capacity, %capacity, %context, %pool, %one32, %mixed, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, buffer) -> (i32)
+      %verify = func.call @declare_stage(%verify_root, %tokens, %spans, %capacity, %capacity, %context, %pool, %one32, %mixed, %checkpoint) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, i32) -> (i32)
       func.call @config_i64(%verify, %width_key, %width) : (i32, buffer, i64)
       scf.if %dflash {
         %capture_key = global.load @capture_key : buffer
@@ -488,7 +488,7 @@ func.def @declare_packed_stages(%shapes: buffer, %shape_count: i64, %context: i6
       }
     }
     %continue_root = global.load @continue_root : buffer
-    %continuation = func.call @declare_stage(%continue_root, %one64, %rows, %capacity, %one64, %context, %pool, %zero32, %mixed, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, buffer) -> (i32)
+    %continuation = func.call @declare_stage(%continue_root, %one64, %rows, %capacity, %one64, %context, %pool, %zero32, %mixed, %checkpoint) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, i32) -> (i32)
     scf.yield %proposal : i32
   } else {
     scf.yield %zero32 : i32
@@ -521,13 +521,21 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %prefill_fits32 = scalar.extui %prefill_fits : i1 to i32
   %capacity_error = global.load @token_capacity_error : buffer
   func.call @require(%prefill_fits32, %capacity_error) : (i32, buffer)
+  %empty = global.load @empty : buffer
+  %checkpoint = func.call @source(%empty, %weights) : (buffer, buffer) -> (i32)
+  %draft_source = scf.if %dflash -> (i32) {
+    %source = func.call @source(%empty, %draft_weights) : (buffer, buffer) -> (i32)
+    scf.yield %source : i32
+  } else {
+    scf.yield %checkpoint : i32
+  }
   %prefill_root = global.load @prefill_root : buffer
   %decode_root = global.load @decode_root : buffer
-  %prefill_stage = func.call @declare_stage(%prefill_root, %prefill, %rows, %capacity, %one64, %context, %pool, %one32, %zero64, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, buffer) -> (i32)
-  %decode_stage = func.call @declare_stage(%decode_root, %prefill, %rows, %one64, %one64, %context, %pool, %one32, %zero64, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, buffer) -> (i32)
+  %prefill_stage = func.call @declare_stage(%prefill_root, %prefill, %rows, %capacity, %one64, %context, %pool, %one32, %zero64, %checkpoint) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, i32) -> (i32)
+  %decode_stage = func.call @declare_stage(%decode_root, %prefill, %rows, %one64, %one64, %context, %pool, %one32, %zero64, %checkpoint) : (buffer, i64, i64, i64, i64, i64, i64, i32, i64, i32) -> (i32)
   %enabled = scalar.cmpi ne, %draft_depth, %zero32 : i32
-  %target_first, %proposal_stage, %maximum = func.call @declare_packed_stages(%shapes, %shape_count, %context, %pool, %rows, %weights, %draft_weights, %enabled, %dflash, %width, %zero64) : (buffer, i64, i64, i64, i64, buffer, buffer, i1, i1, i64, i64) -> (i32, i32, i64)
-  %mixed_target_first, %mixed_proposal_stage, %mixed_maximum = func.call @declare_packed_stages(%shapes, %shape_count, %context, %pool, %rows, %weights, %draft_weights, %enabled, %dflash, %width, %one64) : (buffer, i64, i64, i64, i64, buffer, buffer, i1, i1, i64, i64) -> (i32, i32, i64)
+  %target_first, %proposal_stage, %maximum = func.call @declare_packed_stages(%shapes, %shape_count, %context, %pool, %rows, %checkpoint, %draft_source, %enabled, %dflash, %width, %zero64) : (buffer, i64, i64, i64, i64, i32, i32, i1, i1, i64, i64) -> (i32, i32, i64)
+  %mixed_target_first, %mixed_proposal_stage, %mixed_maximum = func.call @declare_packed_stages(%shapes, %shape_count, %context, %pool, %rows, %checkpoint, %draft_source, %enabled, %dflash, %width, %one64) : (buffer, i64, i64, i64, i64, i32, i32, i1, i1, i64, i64) -> (i32, i32, i64)
   %pooled = scalar.cmpi ne, %pool, %zero64 : i64
   %uses_packed = scalar.ori %pooled, %enabled : i1
   %smaller = scalar.cmpi ult, %maximum, %prefill : i64

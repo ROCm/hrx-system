@@ -4,7 +4,9 @@ func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl @krea2.declare_image_stage(%height: i64, %width: i64, %text: i64, %workspace_limit: i64, %adapted: i1, %int8_flag: i64) -> (i32)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
 
 // tokenizer/tokenizer.json
 global.rodata.def @tokenizer = bytes("746f6b656e697a65722f746f6b656e697a65722e6a736f6e")
@@ -129,33 +131,22 @@ func.def @parse_options(%options: buffer) -> (buffer, i64) {
   func.return %checkpoint, %workspace : buffer, i64
 }
 
-func.def @declare_stage(%height: i64, %width: i64, %text: i64, %workspace_limit: i64, %directory: buffer, %adapter: buffer, %adapted: i1, %int8_checkpoint: buffer, %int8_flag: i64) {
+func.def @declare_stage(%height: i64, %width: i64, %text: i64, %workspace_limit: i64, %encoder: i32, %transformer: i32, %adapter: i32, %vae: i32, %adapted: i1, %int8_flag: i64) {
   %stage = func.call @krea2.declare_image_stage(%height, %width, %text, %workspace_limit, %adapted, %int8_flag) : (i64, i64, i64, i64, i1, i64) -> (i32)
-  %c0_64 = scalar.constant 0 : i64
-  %is_int8 = scalar.cmpi ne, %int8_flag, %c0_64 : i64
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
   %c2 = scalar.constant 2 : i32
-  %encoder = global.load @encoder : buffer
-  %transformer = global.load @transformer : buffer
   %policy = global.load @policy : buffer
-  func.call @parameter(%stage, %c0, %c0, %directory, %encoder, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-  scf.if %is_int8 {
-    %empty = global.load @empty : buffer
-    func.call @parameter(%stage, %c1, %c0, %int8_checkpoint, %empty, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-  } else {
-    func.call @parameter(%stage, %c1, %c0, %directory, %transformer, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-  }
+  func.call @parameter(%stage, %c0, %c0, %encoder, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%stage, %c1, %c0, %transformer, %policy) : (i32, i32, i32, i32, buffer)
   %vae_binding = scf.if %adapted -> (i32) {
-    %empty = global.load @empty : buffer
-    func.call @parameter(%stage, %c2, %c0, %adapter, %empty, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+    func.call @parameter(%stage, %c2, %c0, %adapter, %policy) : (i32, i32, i32, i32, buffer)
     %c3 = scalar.constant 3 : i32
     scf.yield %c3 : i32
   } else {
     scf.yield %c2 : i32
   }
-  %vae = global.load @vae : buffer
-  func.call @parameter(%stage, %vae_binding, %c0, %directory, %vae, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+  func.call @parameter(%stage, %vae_binding, %c0, %vae, %policy) : (i32, i32, i32, i32, buffer)
   func.return
 }
 
@@ -170,7 +161,26 @@ func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buff
   %int8_length = buffer.length %int8_checkpoint
   %is_int8 = index.cmp ne, %int8_length, %c0_2 : offset
   %int8_flag = scalar.extui %is_int8 : i1 to i64
-  func.call @declare_stage(%height, %width, %text, %workspace_limit, %directory, %adapter, %adapted, %int8_checkpoint, %int8_flag) : (i64, i64, i64, i64, buffer, buffer, i1, buffer, i64)
+  %empty = global.load @empty : buffer
+  %encoder_path = global.load @encoder : buffer
+  %transformer_path = global.load @transformer : buffer
+  %vae_path = global.load @vae : buffer
+  %encoder = func.call @source(%directory, %encoder_path) : (buffer, buffer) -> (i32)
+  %transformer = scf.if %is_int8 -> (i32) {
+    %source = func.call @source(%int8_checkpoint, %empty) : (buffer, buffer) -> (i32)
+    scf.yield %source : i32
+  } else {
+    %source = func.call @source(%directory, %transformer_path) : (buffer, buffer) -> (i32)
+    scf.yield %source : i32
+  }
+  %adapter_source = scf.if %adapted -> (i32) {
+    %source = func.call @source(%adapter, %empty) : (buffer, buffer) -> (i32)
+    scf.yield %source : i32
+  } else {
+    scf.yield %transformer : i32
+  }
+  %vae = func.call @source(%directory, %vae_path) : (buffer, buffer) -> (i32)
+  func.call @declare_stage(%height, %width, %text, %workspace_limit, %encoder, %transformer, %adapter_source, %vae, %adapted, %int8_flag) : (i64, i64, i64, i64, i32, i32, i32, i32, i1, i64)
   %c0 = scalar.constant 0 : i64
   %alignment = scalar.constant 64 : i64
   %small = scalar.constant 128 : i64
@@ -179,7 +189,7 @@ func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buff
   %aligned = scalar.cmpi eq, %remainder, %c0 : i64
   %retain_small = scalar.andi %larger, %aligned : i1
   scf.if %retain_small {
-    func.call @declare_stage(%height, %width, %small, %workspace_limit, %directory, %adapter, %adapted, %int8_checkpoint, %int8_flag) : (i64, i64, i64, i64, buffer, buffer, i1, buffer, i64)
+    func.call @declare_stage(%height, %width, %small, %workspace_limit, %encoder, %transformer, %adapter_source, %vae, %adapted, %int8_flag) : (i64, i64, i64, i64, i32, i32, i32, i32, i1, i64)
   }
   %framing = scalar.constant 34 : i64
   %c4 = scalar.constant 4 : i64

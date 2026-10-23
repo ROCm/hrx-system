@@ -14,7 +14,9 @@ func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %source: i32, %directory: buffer, %path: buffer, %policy: buffer)
+func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
+func.decl import("prepare") @source_append(%source: i32, %directory: buffer, %path: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
 
 // flash_next_epoch
 global.rodata.def @root = bytes("666c6173685f6e6578745f65706f6368")
@@ -178,7 +180,7 @@ func.def @check_options(%options: buffer, %enabled: i1) -> (buffer) {
 // Each root selects a contiguous view of the shared parameter bank. Proposal
 // keeps target embedding and vocabulary in separate roots; warm selects three
 // sidecar subviews for input fusion, attention mixing, and cache append.
-func.def @declare_stage(%root: buffer, %tokens: i64, %spans: i64, %context: i64, %pool: i64, %directory: buffer, %draft_path: buffer, %sidecar_roots: i32, %target_roots: i32, %verification: i64) -> (i32) {
+func.def @declare_stage(%root: buffer, %tokens: i64, %spans: i64, %context: i64, %pool: i64, %target_source: i32, %draft_source: i32, %sidecar_roots: i32, %target_roots: i32, %verification: i64) -> (i32) {
   %stage = func.call @stage(%root, %tokens) : (buffer, i64) -> (i32)
   %tokens_key = global.load @tokens_key : buffer
   %spans_key = global.load @spans_key : buffer
@@ -197,23 +199,15 @@ func.def @declare_stage(%root: buffer, %tokens: i64, %spans: i64, %context: i64,
   %target_value = index.cast %target_roots : i32 to index
   %target_count = index.assume %target_value [range(%target_value, 1, 2)] : index
   %policy = global.load @policy : buffer
-  %empty = global.load @empty : buffer
-  %source = scalar.constant 0 : i32
+  %input = scalar.constant 0 : i32
   scf.for %root = [%c0 to %sidecar_count step %c1] {
     %binding = index.cast %root : index to i32
-    func.call @parameter(%stage, %binding, %source, %empty, %draft_path, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+    func.call @parameter(%stage, %binding, %input, %draft_source, %policy) : (i32, i32, i32, i32, buffer)
   }
-  %shard_1 = global.load @shard_1 : buffer
-  %shard_2 = global.load @shard_2 : buffer
-  %shard_3 = global.load @shard_3 : buffer
-  %shard_4 = global.load @shard_4 : buffer
   scf.for %root = [%c0 to %target_count step %c1] {
     %ordinal = index.add %sidecar_count, %root : index
     %binding = index.cast %ordinal : index to i32
-    func.call @parameter(%stage, %binding, %source, %directory, %shard_1, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-    func.call @parameter(%stage, %binding, %source, %directory, %shard_2, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-    func.call @parameter(%stage, %binding, %source, %directory, %shard_3, %policy) : (i32, i32, i32, buffer, buffer, buffer)
-    func.call @parameter(%stage, %binding, %source, %directory, %shard_4, %policy) : (i32, i32, i32, buffer, buffer, buffer)
+    func.call @parameter(%stage, %binding, %input, %target_source, %policy) : (i32, i32, i32, i32, buffer)
   }
   func.return %stage : i32
 }
@@ -436,6 +430,21 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %diagnostic = global.load @limits_error : buffer
   func.call @require(%condition, %diagnostic) : (i32, buffer)
   %draft_path = func.call @check_options(%options, %enabled) : (buffer, i1) -> (buffer)
+  %shard_1 = global.load @shard_1 : buffer
+  %shard_2 = global.load @shard_2 : buffer
+  %shard_3 = global.load @shard_3 : buffer
+  %shard_4 = global.load @shard_4 : buffer
+  %target_source = func.call @source(%weights, %shard_1) : (buffer, buffer) -> (i32)
+  func.call @source_append(%target_source, %weights, %shard_2) : (i32, buffer, buffer)
+  func.call @source_append(%target_source, %weights, %shard_3) : (i32, buffer, buffer)
+  func.call @source_append(%target_source, %weights, %shard_4) : (i32, buffer, buffer)
+  %draft_source = scf.if %enabled -> (i32) {
+    %empty = global.load @empty : buffer
+    %source = func.call @source(%empty, %draft_path) : (buffer, buffer) -> (i32)
+    scf.yield %source : i32
+  } else {
+    scf.yield %c0_i32 : i32
+  }
   %full_root = global.load @root : buffer
   %selected_root = global.load @output_only_root : buffer
   %root = scf.select %enabled, %full_root, %selected_root : buffer
@@ -451,14 +460,14 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
     %fits = scalar.cmpi ule, %tokens, %limit : i64
     %fits_word = scalar.extui %fits : i1 to i32
     func.call @require(%fits_word, %diagnostic) : (i32, buffer)
-    %stage = func.call @declare_stage(%root, %tokens, %spans, %context, %pool, %weights, %draft_path, %c0_i32, %one_root, %c0_i64) : (buffer, i64, i64, i64, i64, buffer, buffer, i32, i32, i64) -> (i32)
+    %stage = func.call @declare_stage(%root, %tokens, %spans, %context, %pool, %target_source, %draft_source, %c0_i32, %one_root, %c0_i64) : (buffer, i64, i64, i64, i64, i32, i32, i32, i32, i64) -> (i32)
     %larger = scalar.cmpi ugt, %tokens, %previous : i64
     %next = scf.select %larger, %tokens, %previous : i64
     scf.yield %next : i64
   }
   %proposal = scf.if %enabled -> (i32) {
     %proposal_root = global.load @proposal_root : buffer
-    %proposal = func.call @declare_stage(%proposal_root, %rows, %rows, %context, %pool, %weights, %draft_path, %one_root, %two_roots, %c0_i64) : (buffer, i64, i64, i64, i64, buffer, buffer, i32, i32, i64) -> (i32)
+    %proposal = func.call @declare_stage(%proposal_root, %rows, %rows, %context, %pool, %target_source, %draft_source, %one_root, %two_roots, %c0_i64) : (buffer, i64, i64, i64, i64, i32, i32, i32, i32, i64) -> (i32)
     %depth = scalar.extui %draft_depth : i32 to i64
     %draft_depth_key = global.load @draft_depth_key : buffer
     func.call @config_i64(%proposal, %draft_depth_key, %depth) : (i32, buffer, i64)
@@ -471,12 +480,12 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
     scf.for %i = [%c0 to %count step %c1] {
       %tokens = view.load %view[%i, 0] : view<[%count]x2xi64> -> i64
       %spans = view.load %view[%i, 1] : view<[%count]x2xi64> -> i64
-      %warm = func.call @declare_stage(%warm_root, %tokens, %spans, %context, %pool, %weights, %draft_path, %three_roots, %one_root, %c0_i64) : (buffer, i64, i64, i64, i64, buffer, buffer, i32, i32, i64) -> (i32)
+      %warm = func.call @declare_stage(%warm_root, %tokens, %spans, %context, %pool, %target_source, %draft_source, %three_roots, %one_root, %c0_i64) : (buffer, i64, i64, i64, i64, i32, i32, i32, i32, i64) -> (i32)
     }
     scf.for %i = [%c0 to %count step %c1] {
       %tokens = view.load %view[%i, 0] : view<[%count]x2xi64> -> i64
       %spans = view.load %view[%i, 1] : view<[%count]x2xi64> -> i64
-      %verify = func.call @declare_stage(%verify_root, %tokens, %spans, %context, %pool, %weights, %draft_path, %c0_i32, %one_root, %verification) : (buffer, i64, i64, i64, i64, buffer, buffer, i32, i32, i64) -> (i32)
+      %verify = func.call @declare_stage(%verify_root, %tokens, %spans, %context, %pool, %target_source, %draft_source, %c0_i32, %one_root, %verification) : (buffer, i64, i64, i64, i64, i32, i32, i32, i32, i64) -> (i32)
     }
     %continue_root = global.load @continue_root : buffer
     %continuation = func.call @stage(%continue_root, %c0_i64) : (buffer, i64) -> (i32)
