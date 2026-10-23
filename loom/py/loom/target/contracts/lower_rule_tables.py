@@ -113,6 +113,7 @@ class LowerAttrCopyKind(Enum):
     )
     SOURCE_MEMORY_DYNAMIC_BYTE_STRIDE = "source_memory_dynamic_byte_stride"
     SOURCE_OP_INSTANCE_FLAGS = "source_op_instance_flags"
+    SOURCE_OP_INSTANCE_FLAG = "source_op_instance_flag"
     I64_LOW_BIT_MASK = "i64_low_bit_mask"
     I64_SHIFTED_LOW_BIT_MASK = "i64_shifted_low_bit_mask"
     I64_SHIFTED_LOW_BIT_CLEAR_MASK = "i64_shifted_low_bit_clear_mask"

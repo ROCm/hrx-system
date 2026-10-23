@@ -144,6 +144,7 @@ from loom.target.low_descriptors import (
     EnumDomain,
     EnumValue,
     Immediate,
+    ImmediateFlag,
     ImmediateKind,
     InstructionClass,
     IssueUse,
@@ -196,6 +197,14 @@ _OFFSET64_VALUE_IMMEDIATE = Immediate(
     bit_width=64,
     signed_min=-(2**63),
     unsigned_max=(2**63) - 1,
+)
+
+_ALLOW_CONTRACTION_IMMEDIATE = Immediate(
+    "allow_contraction",
+    ImmediateKind.UNSIGNED,
+    flags=(ImmediateFlag.DEFAULT_VALUE,),
+    bit_width=1,
+    unsigned_max=1,
 )
 
 
@@ -360,12 +369,14 @@ def _binary_same_type_descriptor(
     operands: tuple[Operand, Operand, Operand],
     result_value_type: AsmResultValueType | None,
     feature_bits: int = 0,
+    immediates: tuple[Immediate, ...] = (),
 ) -> Descriptor:
     return Descriptor(
         key=key,
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
         operands=operands,
+        immediates=immediates,
         feature_mask_words=(feature_bits,) if feature_bits else (),
         asm_forms=_asm(
             results=("dst",),
@@ -642,7 +653,11 @@ def _ordinary_vector_result_value_type(
     return AsmResultValueType(element_type, vector_lane_count=lane_count)
 
 
-def _ordinary_vector_descriptor(row: OrdinaryVectorInstruction) -> Descriptor:
+def _ordinary_vector_descriptor(
+    row: OrdinaryVectorInstruction,
+    *,
+    controls_contraction: bool = False,
+) -> Descriptor:
     has_component_index = row.component_index_maximum is not None
     result_value_type = _ordinary_vector_result_value_type(row.result_type)
     immediates = (
@@ -657,6 +672,8 @@ def _ordinary_vector_descriptor(row: OrdinaryVectorInstruction) -> Descriptor:
         if has_component_index
         else ()
     )
+    if controls_contraction:
+        immediates += (_ALLOW_CONTRACTION_IMMEDIATE,)
     return Descriptor(
         key=row.key,
         mnemonic=row.mnemonic,
@@ -1556,6 +1573,8 @@ def _cooperative_matrix_descriptors() -> tuple[Descriptor, ...]:
 def _scalar_binary_descriptor(
     scalar: ScalarAluType,
     operation: ScalarBinaryOperation,
+    *,
+    controls_contraction: bool = False,
 ) -> Descriptor:
     key = f"spirv.op_{operation.descriptor_suffix}.{scalar.suffix}"
     mnemonic = (
@@ -1570,6 +1589,7 @@ def _scalar_binary_descriptor(
         operands=(_id_result(), _id_operand("lhs"), _id_operand("rhs")),
         result_value_type=_scalar_alu_result_value_type(scalar),
         feature_bits=scalar.feature_bits,
+        immediates=((_ALLOW_CONTRACTION_IMMEDIATE,) if controls_contraction else ()),
     )
 
 
@@ -1661,7 +1681,11 @@ def _scalar_binary_descriptors() -> tuple[Descriptor, ...]:
         for operation in UNSIGNED_INTEGER_BINARY_OPERATIONS
     )
     descriptors.extend(
-        _scalar_binary_descriptor(scalar, operation)
+        _scalar_binary_descriptor(
+            scalar,
+            operation,
+            controls_contraction=True,
+        )
         for scalar in FLOAT_SCALAR_ALU_TYPES
         for operation in FLOAT_BINARY_OPERATIONS
     )
@@ -1971,10 +1995,15 @@ SPIRV_LOGICAL_CORE_DESCRIPTOR_SET = DescriptorSet(
             for row in ORDINARY_VECTOR_SHUFFLE_INSTRUCTIONS
         ),
         *(
-            _ordinary_vector_descriptor(row)
+            _ordinary_vector_descriptor(row, controls_contraction=True)
             for row in (
                 *ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
                 *ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
+            )
+        ),
+        *(
+            _ordinary_vector_descriptor(row)
+            for row in (
                 *ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
                 *ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
             )

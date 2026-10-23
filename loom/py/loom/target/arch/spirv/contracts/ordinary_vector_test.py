@@ -6,6 +6,7 @@
 
 from collections import Counter
 
+from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scf import defs as scf
 from loom.dialect.vector import defs as vector
 from loom.target.arch.spirv.contracts.logical_core import (
@@ -27,9 +28,14 @@ from loom.target.arch.spirv.ordinary_vector_bit_layout import (
     ORDINARY_VECTOR_BIT_LAYOUT_CASES,
     ORDINARY_VECTOR_BIT_LAYOUT_DIRECT_CASES,
 )
+from loom.target.arch.spirv.scalar_alu import (
+    FLOAT_BINARY_OPERATIONS,
+    FLOAT_SCALAR_ALU_TYPES,
+)
 from loom.target.contracts import (
     DescriptorRule,
     GuardKind,
+    SourceOpProject,
     SourceValueKind,
     TypePattern,
     ValueAliasRule,
@@ -419,6 +425,9 @@ def test_vector_scale_uses_same_type_scalar_origins_on_either_side() -> None:
             "vector": ValueRef.operand("rhs" if broadcast == "lhs" else "lhs"),
             "scalar": ValueRef.uniform_element_origin_operand(broadcast),
         }
+        assert emit.immediates == {
+            "allow_contraction": SourceOpProject.instance_flag("fastmath", "contract"),
+        }
         vector_guard = next(
             guard
             for guard in rule.guards
@@ -545,10 +554,43 @@ def test_shipping_float_arithmetic_covers_widths_lanes_and_capabilities() -> Non
             if guard.kind == GuardKind.DESCRIPTOR_AVAILABLE
         ]
         assert bool(availability_guards) == (pattern.element != "f32")
+        assert rule.emit[0].immediates == {
+            "allow_contraction": SourceOpProject.instance_flag("fastmath", "contract"),
+        }
     assert len(rules) == 60
     assert actual == {
         (operation, element, lanes)
         for operation in operations
         for element in ("f16", "f32", "f64")
         for lanes in (1, 2, 3, 4)
+    }
+
+
+def test_scalar_float_arithmetic_projects_contraction_control() -> None:
+    source_ops = {
+        getattr(scalar_arithmetic, f"scalar_{operation.source_op_key}")
+        for operation in FLOAT_BINARY_OPERATIONS
+    }
+    rules = tuple(
+        case
+        for case in SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT.cases
+        if isinstance(case, DescriptorRule) and case.source_op in source_ops
+    )
+    actual = set()
+    for rule in rules:
+        pattern = next(
+            guard.type_pattern
+            for guard in rule.guards
+            if guard.kind == GuardKind.VALUE_TYPE and guard.field == "result"
+        )
+        actual.add((rule.source_op.name, pattern.element))
+        assert rule.emit[0].immediates == {
+            "allow_contraction": SourceOpProject.instance_flag("fastmath", "contract"),
+        }
+
+    assert len(rules) == 15
+    assert actual == {
+        (f"scalar.{operation.source_op_key}", scalar.source_type)
+        for operation in FLOAT_BINARY_OPERATIONS
+        for scalar in FLOAT_SCALAR_ALU_TYPES
     }

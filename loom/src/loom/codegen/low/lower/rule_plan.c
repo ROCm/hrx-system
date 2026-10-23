@@ -1018,6 +1018,10 @@ static iree_status_t loom_low_lower_rule_build_attrs(
       case LOOM_LOW_LOWER_ATTR_COPY_SOURCE_OP_INSTANCE_FLAGS:
         attrs[i].value = loom_attr_i64(source_op->instance_flags);
         break;
+      case LOOM_LOW_LOWER_ATTR_COPY_SOURCE_OP_INSTANCE_FLAG:
+        attrs[i].value = loom_attr_i64(
+            (source_op->instance_flags & (uint8_t)attr_copy->literal_i64) != 0);
+        break;
       default:
         IREE_ASSERT_UNREACHABLE("unknown generated attr copy kind");
         IREE_BUILTIN_UNREACHABLE();

@@ -2354,43 +2354,57 @@ def test_generate_lower_rule_set_emits_exact_view_shape_type_pattern() -> None:
 
 def test_generate_lower_rule_set_emits_source_instance_flags_projection() -> None:
     descriptor, descriptor_set = _add_f32_flags_descriptor_set()
-    table = ContractFragment(
-        name="test.low.flags",
-        descriptor_set=descriptor_set,
-        public_header=_TEST_PUBLIC_HEADER,
-        cases=[
-            DescriptorRule(
-                source_op=scalar_arithmetic.scalar_divf,
-                descriptor=descriptor,
-                guards=(
-                    Guard.value_type("lhs", Scalar("f32")),
-                    Guard.value_type("rhs", Scalar("f32")),
-                    Guard.value_type("result", Scalar("f32")),
-                ),
-                emit=(
-                    EmitDescriptorOp(
-                        descriptor=descriptor,
-                        operands={
-                            "lhs": ValueRef.operand("lhs"),
-                            "rhs": ValueRef.operand("rhs"),
-                        },
-                        results={"dst": ValueRef.result("result")},
-                        immediates={"fast_math_flags": SourceOpProject.instance_flags()},
+    for project, c_kind, literal in (
+        (
+            SourceOpProject.instance_flags(),
+            "LOOM_LOW_LOWER_ATTR_COPY_SOURCE_OP_INSTANCE_FLAGS",
+            None,
+        ),
+        (
+            SourceOpProject.instance_flag("fastmath", "contract"),
+            "LOOM_LOW_LOWER_ATTR_COPY_SOURCE_OP_INSTANCE_FLAG",
+            32,
+        ),
+    ):
+        table = ContractFragment(
+            name="test.low.flags",
+            descriptor_set=descriptor_set,
+            public_header=_TEST_PUBLIC_HEADER,
+            cases=[
+                DescriptorRule(
+                    source_op=scalar_arithmetic.scalar_divf,
+                    descriptor=descriptor,
+                    guards=(
+                        Guard.value_type("lhs", Scalar("f32")),
+                        Guard.value_type("rhs", Scalar("f32")),
+                        Guard.value_type("result", Scalar("f32")),
                     ),
-                ),
-            )
-        ],
-    )
+                    emit=(
+                        EmitDescriptorOp(
+                            descriptor=descriptor,
+                            operands={
+                                "lhs": ValueRef.operand("lhs"),
+                                "rhs": ValueRef.operand("rhs"),
+                            },
+                            results={"dst": ValueRef.result("result")},
+                            immediates={"fast_math_flags": project},
+                        ),
+                    ),
+                )
+            ],
+        )
 
-    compiled = compile_lower_rule_set(
-        table,
-        dialect_ops={"scalar": ALL_SCALAR_OPS},
-    )
-    generated = generate_lower_rule_set_from_compiled(table, compiled=compiled)
+        compiled = compile_lower_rule_set(
+            table,
+            dialect_ops={"scalar": ALL_SCALAR_OPS},
+        )
+        generated = generate_lower_rule_set_from_compiled(table, compiled=compiled)
 
-    assert "LOOM_LOW_LOWER_ATTR_COPY_SOURCE_OP_INSTANCE_FLAGS" in generated.source
-    assert [attr_copy.target_name for attr_copy in compiled.attr_copies] == ["fast_math_flags"]
-    assert ".target_name_string_ref = " in generated.source
+        assert c_kind in generated.source
+        assert [attr_copy.target_name for attr_copy in compiled.attr_copies] == ["fast_math_flags"]
+        if literal is not None:
+            assert f".literal_i64 = INT64_C({literal})" in generated.source
+        assert ".target_name_string_ref = " in generated.source
 
 
 def test_generate_lower_rule_set_emits_balanced_accumulator_flag() -> None:

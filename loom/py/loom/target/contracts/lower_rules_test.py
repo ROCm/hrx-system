@@ -4131,40 +4131,64 @@ def test_compile_lower_rule_set_compiles_fact_or_instance_flag_guard() -> None:
 
 def test_compile_lower_rule_set_projects_source_instance_flags() -> None:
     descriptor, descriptor_set = _add_f32_flags_descriptor_set()
-    table = ContractFragment(
-        name="test.flags",
-        descriptor_set=descriptor_set,
-        cases=[
-            DescriptorRule(
-                source_op=scalar_arithmetic.scalar_divf,
-                descriptor=descriptor,
-                guards=(
-                    Guard.value_type("lhs", Scalar("f32")),
-                    Guard.value_type("rhs", Scalar("f32")),
-                    Guard.value_type("result", Scalar("f32")),
-                ),
-                emit=(
-                    EmitDescriptorOp(
-                        descriptor=descriptor,
-                        operands={
-                            "lhs": ValueRef.operand("lhs"),
-                            "rhs": ValueRef.operand("rhs"),
-                        },
-                        results={"dst": ValueRef.result("result")},
-                        immediates={
-                            "fast_math_flags": SourceOpProject.instance_flags()
-                        },
+    for project, expected_kind, expected_literal in (
+        (
+            SourceOpProject.instance_flags(),
+            LowerAttrCopyKind.SOURCE_OP_INSTANCE_FLAGS,
+            0,
+        ),
+        (
+            SourceOpProject.instance_flag("fastmath", "contract"),
+            LowerAttrCopyKind.SOURCE_OP_INSTANCE_FLAG,
+            32,
+        ),
+    ):
+        table = ContractFragment(
+            name="test.flags",
+            descriptor_set=descriptor_set,
+            cases=[
+                DescriptorRule(
+                    source_op=scalar_arithmetic.scalar_divf,
+                    descriptor=descriptor,
+                    guards=(
+                        Guard.value_type("lhs", Scalar("f32")),
+                        Guard.value_type("rhs", Scalar("f32")),
+                        Guard.value_type("result", Scalar("f32")),
                     ),
-                ),
-            )
-        ],
+                    emit=(
+                        EmitDescriptorOp(
+                            descriptor=descriptor,
+                            operands={
+                                "lhs": ValueRef.operand("lhs"),
+                                "rhs": ValueRef.operand("rhs"),
+                            },
+                            results={"dst": ValueRef.result("result")},
+                            immediates={"fast_math_flags": project},
+                        ),
+                    ),
+                )
+            ],
+        )
+
+        compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
+
+        assert compiled.emits[0].attr_copy_count == 1
+        assert len(compiled.attr_copies) == 1
+        assert compiled.attr_copies[0].kind == expected_kind
+        assert compiled.attr_copies[0].literal_i64 == expected_literal
+
+
+def test_source_instance_flag_projection_rejects_composite_flag() -> None:
+    descriptor, _ = _add_f32_flags_descriptor_set()
+
+    _expect_value_error(
+        lambda: SourceOpProject.instance_flag("fastmath", "fast").validate(
+            scalar_arithmetic.scalar_divf,
+            descriptor,
+            "fast_math_flags",
+        ),
+        "must have a single-bit value",
     )
-
-    compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
-
-    assert compiled.emits[0].attr_copy_count == 1
-    assert len(compiled.attr_copies) == 1
-    assert compiled.attr_copies[0].kind == LowerAttrCopyKind.SOURCE_OP_INSTANCE_FLAGS
 
 
 def test_compile_lower_rule_set_compiles_float_equals_guard() -> None:

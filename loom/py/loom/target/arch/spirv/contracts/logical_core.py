@@ -172,6 +172,7 @@ from loom.target.contracts import (
     Scalar,
     SourceMemoryAddressCoordinateType,
     SourceMemoryOperation,
+    SourceOpProject,
     SourceValueKind,
     TypePattern,
     ValueAliasRule,
@@ -341,6 +342,8 @@ def _binary_rule(
     source_op: Op,
     type_pattern: TypePattern,
     descriptor_key: str,
+    *,
+    project_allow_contraction: bool = False,
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     return DescriptorRule(
@@ -358,6 +361,15 @@ def _binary_rule(
                     "rhs": ValueRef.operand("rhs"),
                 },
                 results={"dst": ValueRef.result("result")},
+                immediates=(
+                    {
+                        "allow_contraction": SourceOpProject.instance_flag(
+                            "fastmath", "contract"
+                        ),
+                    }
+                    if project_allow_contraction
+                    else None
+                ),
             ),
         ),
     )
@@ -1172,11 +1184,14 @@ def _scalar_binary_rule(
     scalar: ScalarAluType,
     operation: ScalarBinaryOperation,
     source_ops: dict[str, Op],
+    *,
+    project_allow_contraction: bool = False,
 ) -> DescriptorRule:
     return _binary_rule(
         source_ops[operation.source_op_key],
         _numeric_type_pattern(scalar),
         f"spirv.op_{operation.descriptor_suffix}.{scalar.suffix}",
+        project_allow_contraction=project_allow_contraction,
     )
 
 
@@ -1197,7 +1212,12 @@ def _scalar_binary_rules() -> tuple[DescriptorRule, ...]:
         for operation in UNSIGNED_INTEGER_BINARY_OPERATIONS
     )
     rules.extend(
-        _scalar_binary_rule(scalar, operation, _FLOAT_BINARY_SOURCE_OPS)
+        _scalar_binary_rule(
+            scalar,
+            operation,
+            _FLOAT_BINARY_SOURCE_OPS,
+            project_allow_contraction=True,
+        )
         for scalar in FLOAT_SCALAR_ALU_TYPES
         for operation in FLOAT_BINARY_OPERATIONS
     )
@@ -1219,6 +1239,7 @@ def _vector_float_binary_rules() -> tuple[DescriptorRule, ...]:
             Vector(scalar.source_type, lanes=lane_count),
             f"spirv.op_{operation.descriptor_suffix}."
             + (scalar.suffix if lane_count == 1 else f"v{lane_count}{scalar.suffix}"),
+            project_allow_contraction=True,
         )
         for scalar in FLOAT_SCALAR_ALU_TYPES
         for lane_count in (1, 2, 3, 4)
@@ -1256,6 +1277,11 @@ def _vector_float_scale_rules() -> tuple[DescriptorRule, ...]:
                                     ),
                                 },
                                 results={"dst": ValueRef.result("result")},
+                                immediates={
+                                    "allow_contraction": SourceOpProject.instance_flag(
+                                        "fastmath", "contract"
+                                    ),
+                                },
                             ),
                         ),
                     )

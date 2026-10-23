@@ -1,0 +1,65 @@
+// RUN: emit spirv-dis validate
+// REQUIRES: spirv-dis, spirv-val
+
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_contraction_control() asm {
+  %one = OpConstant.f32 1065353216
+  %two = OpConstant.f32 1073741824
+  %strict_product = OpFMul.f32 %one, %two
+  %strict_sum = OpFAdd.f32 %strict_product, %one
+  %relaxed_product = OpFMul.f32 %one, %two {allow_contraction = 1}
+  %relaxed_sum = OpFAdd.f32 %relaxed_product, %one {allow_contraction = 1}
+  %pair = OpCompositeConstruct.v2f32 %one, %two
+  %strict_vector_product = OpFMul.v2f32 %pair, %pair
+  %strict_vector_sum = OpFAdd.v2f32 %strict_vector_product, %pair
+  %relaxed_vector_product = OpFMul.v2f32 %pair, %pair {allow_contraction = 1}
+  %relaxed_vector_sum = OpFAdd.v2f32 %relaxed_vector_product, %pair {allow_contraction = 1}
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %spirv_contraction_control "spirv_contraction_control"
+               OpExecutionMode %spirv_contraction_control LocalSize 1 1 1
+               OpName %spirv_contraction_control "spirv_contraction_control"
+               OpName %one "one"
+               OpName %two "two"
+               OpName %strict_product "strict_product"
+               OpName %strict_sum "strict_sum"
+               OpName %relaxed_product "relaxed_product"
+               OpName %relaxed_sum "relaxed_sum"
+               OpName %pair "pair"
+               OpName %strict_vector_product "strict_vector_product"
+               OpName %strict_vector_sum "strict_vector_sum"
+               OpName %relaxed_vector_product "relaxed_vector_product"
+               OpName %relaxed_vector_sum "relaxed_vector_sum"
+               OpDecorate %strict_product NoContraction
+               OpDecorate %strict_sum NoContraction
+               OpDecorate %strict_vector_product NoContraction
+               OpDecorate %strict_vector_sum NoContraction
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+      %float = OpTypeFloat 32
+        %one = OpConstant %float 1
+        %two = OpConstant %float 2
+    %v2float = OpTypeVector %float 2
+%spirv_contraction_control = OpFunction %void None %3
+          %4 = OpLabel
+%strict_product = OpFMul %float %one %two
+ %strict_sum = OpFAdd %float %strict_product %one
+%relaxed_product = OpFMul %float %one %two
+%relaxed_sum = OpFAdd %float %relaxed_product %one
+       %pair = OpCompositeConstruct %v2float %one %two
+%strict_vector_product = OpFMul %v2float %pair %pair
+%strict_vector_sum = OpFAdd %v2float %strict_vector_product %pair
+%relaxed_vector_product = OpFMul %v2float %pair %pair
+%relaxed_vector_sum = OpFAdd %v2float %relaxed_vector_product %pair
+               OpReturn
+               OpFunctionEnd

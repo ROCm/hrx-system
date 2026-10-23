@@ -83,14 +83,25 @@ def _lower_source_op_project(
     target_name: str,
     project: SourceOpProject,
 ) -> LowerAttrCopy:
-    if project.kind != SourceOpProjectKind.INSTANCE_FLAGS:
-        raise ValueError(
-            f"{source_op.name}: immediate projection '{project.kind.value}' is "
-            "not representable by generated lower rules yet"
+    if project.kind == SourceOpProjectKind.INSTANCE_FLAGS:
+        return LowerAttrCopy(
+            kind=LowerAttrCopyKind.SOURCE_OP_INSTANCE_FLAGS,
+            target_name=target_name,
         )
-    return LowerAttrCopy(
-        kind=LowerAttrCopyKind.SOURCE_OP_INSTANCE_FLAGS,
-        target_name=target_name,
+    if project.kind == SourceOpProjectKind.INSTANCE_FLAG:
+        attr = source_op.attr(project.field or "")
+        if attr is None or attr.enum_def is None or project.enum_keyword is None:
+            raise ValueError(
+                f"{source_op.name}: instance-flag projection needs an enum keyword"
+            )
+        return LowerAttrCopy(
+            kind=LowerAttrCopyKind.SOURCE_OP_INSTANCE_FLAG,
+            target_name=target_name,
+            literal_i64=attr.enum_def.case(project.enum_keyword).value,
+        )
+    raise ValueError(
+        f"{source_op.name}: immediate projection '{project.kind.value}' is "
+        "not representable by generated lower rules yet"
     )
 
 

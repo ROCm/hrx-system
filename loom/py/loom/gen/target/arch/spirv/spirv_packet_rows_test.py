@@ -788,6 +788,8 @@ def _expected_ordinary_vector_value(
 
 def _assert_generated_ordinary_vector_instructions(
     instructions: tuple[OrdinaryVectorInstruction, ...],
+    *,
+    controls_contraction: bool = False,
 ) -> None:
     instruction_keys = {instruction.key for instruction in instructions}
     packet_rows_by_key = {row.descriptor_key: row for row in _packet_rows() if row.descriptor_key in instruction_keys}
@@ -803,13 +805,24 @@ def _assert_generated_ordinary_vector_instructions(
         assert row.result_type == _expected_ordinary_vector_value(instruction.result_type)
         assert row.operand_types == tuple(_expected_ordinary_vector_value(operand_type) for operand_type in instruction.operand_types)
         assert row.result_count == 1
-        assert row.immediate_count == 0
+        assert row.immediate_count == int(controls_contraction)
+        assert row.contraction_controlled == controls_contraction
 
         descriptor = descriptors_by_key[instruction.key]
         assert descriptor.mnemonic == instruction.mnemonic
         assert descriptor.semantic_tag == instruction.key
         assert descriptor.feature_mask_words == ((instruction.feature_bits,) if instruction.feature_bits else ())
-        assert descriptor.immediates == ()
+        if controls_contraction:
+            assert len(descriptor.immediates) == 1
+            immediate = descriptor.immediates[0]
+            assert immediate.field_name == "allow_contraction"
+            assert immediate.kind is ImmediateKind.UNSIGNED
+            assert immediate.flags == (ImmediateFlag.DEFAULT_VALUE,)
+            assert immediate.bit_width == 1
+            assert immediate.unsigned_max == 1
+            assert immediate.default_value == 0
+        else:
+            assert descriptor.immediates == ()
         assert tuple(operand.reg_alts[0].reg_class for operand in descriptor.operands) == ("spirv.id",) * (len(instruction.operand_types) + 1)
 
 
@@ -818,9 +831,15 @@ def test_generation_emits_complete_ordinary_vector_integer_matrix() -> None:
     _assert_generated_ordinary_vector_instructions(ORDINARY_VECTOR_INTEGER_INSTRUCTIONS)
 
 
-def test_floating_packets_preserve_operation_rounding() -> None:
-    _assert_generated_ordinary_vector_instructions(ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS)
-    _assert_generated_ordinary_vector_instructions(ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS)
+def test_floating_packets_control_operation_contraction() -> None:
+    _assert_generated_ordinary_vector_instructions(
+        ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
+        controls_contraction=True,
+    )
+    _assert_generated_ordinary_vector_instructions(
+        ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
+        controls_contraction=True,
+    )
     rows = {row.descriptor_key: row for row in _packet_rows()}
     expected_keys = {f"spirv.op_{operation}.{prefix}{scalar}" for operation in ("fadd", "fsub", "fmul", "fdiv", "frem") for prefix in ("", "v2", "v3", "v4") for scalar in ("f16", "f32", "f64")}
     expected_keys.update(f"spirv.op_vector_times_scalar.v{lanes}{element}" for lanes in (2, 3, 4) for element in ("f16", "f32", "f64"))
@@ -838,6 +857,11 @@ def test_floating_packets_preserve_operation_rounding() -> None:
                 )
     expected_keys.update(("spirv.op_f_convert.bf16.f32", "spirv.op_f_convert.f32.bf16"))
     assert {key for key, row in rows.items() if row.no_contraction} == expected_keys
+    arithmetic_keys = {f"spirv.op_{operation}.{prefix}{scalar}" for operation in ("fadd", "fsub", "fmul", "fdiv", "frem") for prefix in ("", "v2", "v3", "v4") for scalar in ("f16", "f32", "f64")}
+    arithmetic_keys.update(f"spirv.op_vector_times_scalar.v{lanes}{element}" for lanes in (2, 3, 4) for element in ("f16", "f32", "f64"))
+    assert {key for key, row in rows.items() if row.contraction_controlled} == arithmetic_keys
+    generated_fmul = _generated_row(generate_tables(), "spirv.op_fmul.f32")
+    assert (".flags = LOOM_SPIRV_PACKET_FLAG_NO_CONTRACTION | LOOM_SPIRV_PACKET_FLAG_CONTRACTION_CONTROLLED,") in generated_fmul
 
 
 def test_generation_emits_complete_ordinary_vector_float_comparisons() -> None:

@@ -8,8 +8,8 @@ func.def @scalar_contract(%a: f32, %b: f32, %c: f32) -> (f32) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_contract(%a: reg<spirv.id : f32>, %b: reg<spirv.id : f32>, %c: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
-  %product = OpFMul.f32 %a, %b
-  %result = OpFAdd.f32 %product, %c
+  %product = OpFMul.f32 %a, %b {allow_contraction = 1}
+  %result = OpFAdd.f32 %product, %c {allow_contraction = 1}
   return %result
 }
 
@@ -23,8 +23,8 @@ func.def @scalar_swapped(%a: f32, %b: f32, %c: f32) -> (f32) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_swapped(%a: reg<spirv.id : f32>, %b: reg<spirv.id : f32>, %c: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
-  %product = OpFMul.f32 %a, %b
-  %result = OpFAdd.f32 %c, %product
+  %product = OpFMul.f32 %a, %b {allow_contraction = 1}
+  %result = OpFAdd.f32 %c, %product {allow_contraction = 1}
   return %result
 }
 
@@ -39,9 +39,9 @@ func.def @scalar_nonadjacent(%a: f32, %b: f32, %c: f32) -> (f32) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_nonadjacent(%a: reg<spirv.id : f32>, %b: reg<spirv.id : f32>, %c: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
-  %product = OpFMul.f32 %a, %b
+  %product = OpFMul.f32 %a, %b {allow_contraction = 1}
   %addend = OpFMul.f32 %c, %c
-  %result = OpFAdd.f32 %product, %addend
+  %result = OpFAdd.f32 %product, %addend {allow_contraction = 1}
   return %result
 }
 
@@ -55,8 +55,8 @@ func.def @scalar_multiuse(%a: f32, %b: f32, %c: f32) -> (f32, f32) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_multiuse(%a: reg<spirv.id : f32>, %b: reg<spirv.id : f32>, %c: reg<spirv.id : f32>) -> (reg<spirv.id : f32>, reg<spirv.id : f32>) asm {
-  %product = OpFMul.f32 %a, %b
-  %result = OpFAdd.f32 %product, %c
+  %product = OpFMul.f32 %a, %b {allow_contraction = 1}
+  %result = OpFAdd.f32 %product, %c {allow_contraction = 1}
   return %product, %result
 }
 
@@ -70,7 +70,7 @@ func.def @scalar_one_flag(%a: f32, %b: f32, %c: f32) -> (f32) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_one_flag(%a: reg<spirv.id : f32>, %b: reg<spirv.id : f32>, %c: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
-  %product = OpFMul.f32 %a, %b
+  %product = OpFMul.f32 %a, %b {allow_contraction = 1}
   %result = OpFAdd.f32 %product, %c
   return %result
 }

@@ -78,6 +78,8 @@ typedef uint16_t loom_spirv_packet_value_type_ref_t;
 enum loom_spirv_packet_flag_bits_e {
   // Preserves the operation's separate rounding and arithmetic ordering.
   LOOM_SPIRV_PACKET_FLAG_NO_CONTRACTION = 1u << 0,
+  // The packet's allow_contraction immediate controls NoContraction emission.
+  LOOM_SPIRV_PACKET_FLAG_CONTRACTION_CONTROLLED = 1u << 1,
 };
 typedef uint8_t loom_spirv_packet_flags_t;
 

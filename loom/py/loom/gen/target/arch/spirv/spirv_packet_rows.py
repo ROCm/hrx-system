@@ -249,6 +249,7 @@ class _PacketRow:
     literal_word_count: int = 0
     memory_alignment: int = 0
     no_contraction: bool = False
+    contraction_controlled: bool = False
     coordinate_byte_shift: int = 0
     builtin_variable: str | None = None
     component_index: int | None = None
@@ -342,8 +343,13 @@ class _PacketRow:
         lines.append(f"            .operand_count = {len(self.operand_types)},")
         if self.memory_alignment:
             lines.append(f"            .memory_alignment = {self.memory_alignment},")
+        flags = []
         if self.no_contraction:
-            lines.append("            .flags = LOOM_SPIRV_PACKET_FLAG_NO_CONTRACTION,")
+            flags.append("LOOM_SPIRV_PACKET_FLAG_NO_CONTRACTION")
+        if self.contraction_controlled:
+            flags.append("LOOM_SPIRV_PACKET_FLAG_CONTRACTION_CONTROLLED")
+        if flags:
+            lines.append(f"            .flags = {' | '.join(flags)},")
         lines.append("        },")
         return "\n".join(lines)
 
@@ -794,13 +800,16 @@ def _cooperative_matrix_rows() -> list[_PacketRow]:
 
 def _scalar_binary_row(scalar: ScalarAluType, operation: ScalarBinaryOperation) -> _PacketRow:
     scalar_value = _alu_scalar_value(scalar)
+    controls_contraction = operation.opcode in _FLOAT_BINARY_OPCODES
     return _PacketRow(
         f"spirv.op_{operation.descriptor_suffix}.{scalar.suffix}",
         opcode=operation.opcode,
         form="LOOM_SPIRV_PACKET_FORM_BINARY_LHS_TYPE",
         result_type=scalar_value,
         operand_types=(scalar_value, scalar_value),
-        no_contraction=operation.opcode in _FLOAT_BINARY_OPCODES,
+        immediate_count=int(controls_contraction),
+        no_contraction=controls_contraction,
+        contraction_controlled=controls_contraction,
     )
 
 
@@ -921,29 +930,33 @@ def _conversion_rows() -> list[_PacketRow]:
 
 
 def _ordinary_vector_rows() -> list[_PacketRow]:
-    return [
-        _PacketRow(
-            row.key,
-            opcode=row.opcode,
-            form=row.packet_form,
-            result_type=_ordinary_vector_instruction_value(row.result_type),
-            operand_types=tuple(_ordinary_vector_instruction_value(operand_type) for operand_type in row.operand_types),
-            immediate_count=int(row.component_index_maximum is not None),
-            no_contraction=row.opcode in _FLOAT_BINARY_OPCODES or row.opcode in _FLOAT_CONVERSION_OPCODES,
+    rows = []
+    for row in (
+        *ORDINARY_VECTOR_INSTRUCTIONS,
+        *ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
+        *ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
+        *ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
+        *ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
+        *ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
+        *INTEGER_BIT_COUNT_INSTRUCTIONS,
+        *ORDINARY_VECTOR_CONVERSION_INSTRUCTIONS,
+        *ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS,
+        *SPIRV_SUBGROUP_BALLOT_PACKING_INSTRUCTIONS,
+    ):
+        controls_contraction = row.opcode in _FLOAT_BINARY_OPCODES
+        rows.append(
+            _PacketRow(
+                row.key,
+                opcode=row.opcode,
+                form=row.packet_form,
+                result_type=_ordinary_vector_instruction_value(row.result_type),
+                operand_types=tuple(_ordinary_vector_instruction_value(operand_type) for operand_type in row.operand_types),
+                immediate_count=int(row.component_index_maximum is not None) + int(controls_contraction),
+                no_contraction=controls_contraction or row.opcode in _FLOAT_CONVERSION_OPCODES,
+                contraction_controlled=controls_contraction,
+            )
         )
-        for row in (
-            *ORDINARY_VECTOR_INSTRUCTIONS,
-            *ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
-            *ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
-            *ORDINARY_VECTOR_FLOAT_COMPARE_INSTRUCTIONS,
-            *ORDINARY_VECTOR_FLOAT_PRESERVE_COMPARE_INSTRUCTIONS,
-            *ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
-            *INTEGER_BIT_COUNT_INSTRUCTIONS,
-            *ORDINARY_VECTOR_CONVERSION_INSTRUCTIONS,
-            *ORDINARY_VECTOR_BIT_LAYOUT_INSTRUCTIONS,
-            *SPIRV_SUBGROUP_BALLOT_PACKING_INSTRUCTIONS,
-        )
-    ]
+    return rows
 
 
 def _ordinary_vector_shuffle_rows() -> list[_PacketRow]:
@@ -1299,10 +1312,25 @@ def _validate_rows(rows: tuple[_PacketRow, ...], descriptors: tuple[Descriptor, 
         if row.result_type == _unknown_value() or row.result_count != result_count:
             raise ValueError(f"{row.descriptor_key}: packet result type must match descriptor result count")
         immediates = descriptor.immediates
-        if len(immediates) != row.immediate_count or any(
-            immediate.kind not in (ImmediateKind.SIGNED, ImmediateKind.UNSIGNED, ImmediateKind.ENUM) or ImmediateFlag.DEFAULT_VALUE in immediate.flags for immediate in immediates
-        ):
+        if row.contraction_controlled:
+            valid_immediates = (
+                row.no_contraction
+                and row.immediate_count == 1
+                and len(immediates) == 1
+                and immediates[0].field_name == "allow_contraction"
+                and immediates[0].kind is ImmediateKind.UNSIGNED
+                and immediates[0].flags == (ImmediateFlag.DEFAULT_VALUE,)
+                and immediates[0].bit_width == 1
+                and immediates[0].unsigned_max == 1
+                and immediates[0].default_value == 0
+            )
+            expected = "one defaulted 1-bit allow_contraction immediate"
+        else:
+            valid_immediates = len(immediates) == row.immediate_count and all(
+                immediate.kind in (ImmediateKind.SIGNED, ImmediateKind.UNSIGNED, ImmediateKind.ENUM) and ImmediateFlag.DEFAULT_VALUE not in immediate.flags for immediate in immediates
+            )
             expected = "no immediates" if row.immediate_count == 0 else ("one required integer immediate" if row.immediate_count == 1 else f"{row.immediate_count} required integer immediates")
+        if not valid_immediates:
             raise ValueError(f"{row.descriptor_key}: emission requires {expected}")
 
     over_capacity_rows = sorted(row.descriptor_key for row in rows if len(row.operand_types) > _PACKET_MAX_OPERAND_COUNT)

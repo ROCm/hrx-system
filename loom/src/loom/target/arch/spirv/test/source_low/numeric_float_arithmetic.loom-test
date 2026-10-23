@@ -16,8 +16,8 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @float_arithmeti
 // ====
 
 func.def @float_arithmetic_bf16(%a: bf16, %b: bf16) -> (bf16, bf16) {
-  %sum = scalar.addf %a, %b : bf16
-  %product = scalar.mulf %a, %b : bf16
+  %sum = scalar.addf<contract> %a, %b : bf16
+  %product = scalar.mulf<contract> %a, %b : bf16
   func.return %sum, %product : bf16, bf16
 }
 
@@ -25,7 +25,7 @@ func.def @float_arithmetic_bf16(%a: bf16, %b: bf16) -> (bf16, bf16) {
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @float_arithmetic_bf16(%a: reg<spirv.id : bf16>, %b: reg<spirv.id : bf16>) -> (reg<spirv.id : bf16>, reg<spirv.id : bf16>) asm {
   %18 = OpFConvert.bf16.f32 %a
   %19 = OpFConvert.bf16.f32 %b
-  %20 = OpFAdd.f32 %18, %19
+  %20 = OpFAdd.f32 %18, %19 {allow_contraction = 1}
   %21 = OpBitcast.f32.i32 %20 : reg<spirv.id>
   %22 = OpConstant.i32 16 : reg<spirv.id>
   %23 = OpShiftRightLogical %21, %22 : reg<spirv.id>
@@ -44,7 +44,7 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @float_arithmeti
   %36 = OpSelect %33, %35, %29 : reg<spirv.id>
   %37 = OpBitcast.i32.v2bf16 %36 : reg<spirv.id>
   %sum = OpCompositeExtract.v2bf16.bf16 %37, 0
-  %39 = OpFMul.f32 %18, %19
+  %39 = OpFMul.f32 %18, %19 {allow_contraction = 1}
   %40 = OpBitcast.f32.i32 %39 : reg<spirv.id>
   %42 = OpShiftRightLogical %40, %22 : reg<spirv.id>
   %44 = OpBitwiseAnd %42, %24 : reg<spirv.id>

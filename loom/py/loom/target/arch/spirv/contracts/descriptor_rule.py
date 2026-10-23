@@ -16,6 +16,7 @@ from loom.target.contracts import (
     ResultTypeBinding,
     SourceMemoryAddressMaterializer,
     SourceMemoryConstraint,
+    SourceOpProject,
     SourceValueKind,
     ValueRef,
     descriptor_by_key,
@@ -213,7 +214,7 @@ def emit_descriptor_op(
     operands: dict[str, ValueRef] | None = None,
     results: dict[str, ValueRef] | None = None,
     result_types: dict[str, ResultTypeBinding] | None = None,
-    immediates: dict[str, AttrProject | int] | None = None,
+    immediates: dict[str, AttrProject | SourceOpProject | int] | None = None,
     source_memory: SourceMemoryConstraint | None = None,
     source_memory_address_materializer: SourceMemoryAddressMaterializer | None = None,
 ) -> EmitDescriptorOp:

@@ -91,7 +91,9 @@ iree_py_test(
     main = "pytest_style_runner.py",
     deps = [
         ":contracts",
+        "//loom/py/loom/dialect/scalar",
         "//loom/py/loom/target/arch/spirv:ordinary_vector_bit_layout",
+        "//loom/py/loom/target/arch/spirv:scalar_alu",
         "//loom/py/loom/target/contracts",
     ],
 )

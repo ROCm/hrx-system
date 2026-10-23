@@ -311,6 +311,7 @@ loom_check_test_suite(
         "test/barrier.loom-test",
         "test/buffer_raw.loom-test",
         "test/builtin_queries.loom-test",
+        "test/contraction.loom-test",
         "test/cooperative_matrix.loom-test",
         "test/entry_point.loom-test",
         "test/extended_math.loom-test",

@@ -94,9 +94,52 @@ from loom.target.low_descriptors import (
     AsmResultValueType,
     EffectFlag,
     EffectKind,
+    ImmediateFlag,
+    ImmediateKind,
     InstructionClass,
     MemorySpace,
 )
+
+
+def test_float_arithmetic_descriptors_carry_contraction_control() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors
+    }
+    expected_keys = {
+        f"spirv.op_{operation.descriptor_suffix}.{scalar.suffix}"
+        for scalar in FLOAT_SCALAR_ALU_TYPES
+        for operation in FLOAT_BINARY_OPERATIONS
+    }
+    expected_keys.update(
+        instruction.key
+        for instruction in (
+            *ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
+            *ORDINARY_VECTOR_FLOAT_SCALE_INSTRUCTIONS,
+        )
+    )
+    actual_keys = {
+        descriptor.key
+        for descriptor in descriptors.values()
+        if any(
+            immediate.field_name == "allow_contraction"
+            for immediate in descriptor.immediates
+        )
+    }
+
+    assert len(expected_keys) == 69
+    assert actual_keys == expected_keys
+    for key in expected_keys:
+        descriptor = descriptors[key]
+        assert len(descriptor.immediates) == 1
+        immediate = descriptor.immediates[0]
+        assert immediate.field_name == "allow_contraction"
+        assert immediate.kind is ImmediateKind.UNSIGNED
+        assert immediate.flags == (ImmediateFlag.DEFAULT_VALUE,)
+        assert immediate.bit_width == 1
+        assert immediate.unsigned_max == 1
+        assert immediate.default_value == 0
+        assert descriptor.asm_forms[0].immediates == ()
 
 
 def test_vector_shuffle_descriptors_retain_every_native_selector() -> None:

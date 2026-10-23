@@ -389,6 +389,9 @@ enum loom_low_lower_attr_copy_kind_e {
   // Interns generated literal bytes and emits the reserved read-only data
   // symbol.
   LOOM_LOW_LOWER_ATTR_COPY_READ_ONLY_DATA_LITERAL = 50,
+  // Emits one when the source op has the single instance flag selected by
+  // literal_i64, or zero when it does not.
+  LOOM_LOW_LOWER_ATTR_COPY_SOURCE_OP_INSTANCE_FLAG = 51,
   // Maximum attribute-copy kind plus one.
   LOOM_LOW_LOWER_ATTR_COPY_COUNT_,
 };
@@ -403,7 +406,7 @@ typedef struct loom_low_lower_attr_copy_t {
   // SOURCE_MEMORY quotient and remainder rows, divisor used by
   // I64_ARRAY_ELEMENT quotient and remainder rows, the width adjustment for
   // divisor magic projections, or the low 63 bits of a packed enum-remap
-  // table.
+  // table, or source instance flag selected by SOURCE_OP_INSTANCE_FLAG.
   int64_t literal_i64;
   // Rule-set string reference for the target low packet attribute name.
   loom_string_ref_t target_name_string_ref;

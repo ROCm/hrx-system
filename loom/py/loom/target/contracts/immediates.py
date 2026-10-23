@@ -13,7 +13,14 @@ from dataclasses import dataclass, replace
 from enum import Enum, unique
 from typing import Self
 
-from loom.dsl import ATTR_TYPE_ENUM, ATTR_TYPE_I64, ATTR_TYPE_I64_ARRAY, Op
+from loom.dsl import (
+    ATTR_TYPE_ENUM,
+    ATTR_TYPE_FLAGS,
+    ATTR_TYPE_I64,
+    ATTR_TYPE_I64_ARRAY,
+    EnumCase,
+    Op,
+)
 from loom.target.contracts.descriptors import (
     _require_immediate,
     _validate_immediate_literal,
@@ -157,6 +164,7 @@ class SourceOpProjectKind(Enum):
     """Projection from source op state to descriptor immediates."""
 
     INSTANCE_FLAGS = "instance_flags"
+    INSTANCE_FLAG = "instance_flag"
 
 
 @dataclass(frozen=True, slots=True)
@@ -994,10 +1002,22 @@ class SourceOpProject:
     """Descriptor immediate projection from source operation state."""
 
     kind: SourceOpProjectKind
+    field: str | None = None
+    enum_keyword: str | None = None
 
     @classmethod
     def instance_flags(cls) -> Self:
         return cls(kind=SourceOpProjectKind.INSTANCE_FLAGS)
+
+    @classmethod
+    def instance_flag(cls, field: str, enum_case: str | EnumCase) -> Self:
+        """Projects whether one single-bit source instance flag is present."""
+        keyword = enum_case.keyword if isinstance(enum_case, EnumCase) else enum_case
+        return cls(
+            kind=SourceOpProjectKind.INSTANCE_FLAG,
+            field=field,
+            enum_keyword=keyword,
+        )
 
     def validate(
         self,
@@ -1006,7 +1026,37 @@ class SourceOpProject:
         bound_immediate_name: str | None,
     ) -> None:
         subject = f"immediate projection {self.kind.value}"
-        if self.kind != SourceOpProjectKind.INSTANCE_FLAGS:
+        if self.kind == SourceOpProjectKind.INSTANCE_FLAG:
+            if self.field is None:
+                raise ValueError(
+                    f"{source_op.name}: {subject} needs a flags attribute field"
+                )
+            attr = _require_attr(source_op, self.field, subject)
+            if attr.attr_type != ATTR_TYPE_FLAGS:
+                raise ValueError(
+                    f"{source_op.name}: {subject} field '{self.field}' must be "
+                    "a flags attr"
+                )
+            if self.enum_keyword is None:
+                raise ValueError(f"{source_op.name}: {subject} needs a flag keyword")
+            enum_def = attr.enum_def
+            if enum_def is None:
+                raise ValueError(
+                    f"{source_op.name}: {subject} field '{self.field}' has no "
+                    "enum definition"
+                )
+            if self.enum_keyword not in enum_def.keywords:
+                raise ValueError(
+                    f"{source_op.name}: {subject} field '{self.field}' has no "
+                    f"enum case '{self.enum_keyword}'"
+                )
+            enum_value = enum_def.case(self.enum_keyword).value
+            if enum_value == 0 or enum_value & (enum_value - 1):
+                raise ValueError(
+                    f"{source_op.name}: {subject} flag '{self.enum_keyword}' "
+                    "must have a single-bit value"
+                )
+        elif self.kind != SourceOpProjectKind.INSTANCE_FLAGS:
             raise ValueError(
                 f"{source_op.name}: {subject} is not representable by "
                 "generated lower rules yet"
@@ -1020,6 +1070,14 @@ class SourceOpProject:
             raise ValueError(
                 f"{source_op.name}: {subject} descriptor immediate "
                 f"'{bound_immediate_name}' must be an unsigned immediate"
+            )
+        if (
+            self.kind == SourceOpProjectKind.INSTANCE_FLAG
+            and immediate.unsigned_max < 1
+        ):
+            raise ValueError(
+                f"{source_op.name}: {subject} descriptor immediate "
+                f"'{bound_immediate_name}' must represent both 0 and 1"
             )
 
 
