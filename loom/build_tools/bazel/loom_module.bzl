@@ -103,7 +103,7 @@ def loom_module(
         output_args = {
             output.split("/")[-1]: "--output={path}",
         },
-        tool = "//loom/src/loom/tools/loom-link",
+        tool = Label("//loom/src/loom/tools/loom-link"),
         mnemonic = "LoomLink",
         progress_message = "Linking Loom module %s" % output,
         **rule_kwargs
