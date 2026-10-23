@@ -135,8 +135,11 @@ command.program.def public @flash_next_qsa_queries(%layer: index, %key_origin: o
   %query_zero = index.constant 0 : index
   %matrix_threshold = index.constant 32 : index
   %matrix_cohort = index.cmp uge, %tokens, %matrix_threshold : index
+  // Scoring shares one key panel across four queries, independently of the
+  // larger cohort needed to amortize the final attention union.
+  %matrix_score = index.cmp uge, %query_capacity, %c4 : index
   scf.for %query_begin = [%query_zero to %tokens step %query_capacity] unroll {
-    scf.if %matrix_cohort {
+    scf.if %matrix_score {
       kernel.launch @qsa_score_tiled(%query_begin, %index_origin, %span, %mapping, %rows, %index_query, %arena, %scores) : (index, offset, buffer, buffer, buffer, buffer, buffer, buffer)
     } else {
       kernel.launch @qsa_score_blocks(%query_begin, %index_origin, %span, %mapping, %rows, %index_query, %arena, %scores) : (index, offset, buffer, buffer, buffer, buffer, buffer, buffer)

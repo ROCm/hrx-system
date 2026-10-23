@@ -245,7 +245,9 @@ by F32 ReLU and head summation. A span dimension establishes common resident
 cache ownership before sharing keys. Neighboring spans that cross a query tile
 publish disjoint score rows; each query retains its own causal extent. The
 16-by-136 query panel and 64-by-136 key panel occupy 21,760 bytes of LDS.
-Capacities below 32 retain the one-wave dot-product scorer.
+Scoring cohorts of four or more queries use this shared panel, including
+speculative verification. Smaller cohorts retain the one-wave dot-product
+scorer. Final attention chooses its cohort geometry independently.
 
 By default, scoring and exact top-512 selection process 512 queries at a time
 while the complete epoch can contain 16K or more tokens. The score workspace consumes

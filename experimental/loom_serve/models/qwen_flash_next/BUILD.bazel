@@ -132,24 +132,32 @@ loom_test(
     deps = [":residual_programs"],
 )
 
-loom_test(
-    name = "scoring_test",
-    srcs = ["tests/scoring.loom"],
-    benchmark_smoke = False,
-    configs = {
-        "flash_next.context_capacity": "2112",
-        "flash_next.pool_capacity": "2112",
-        "flash_next.span_capacity": "16",
-        "flash_next.token_count": "32",
-        "qsa.query_tile": "13",
-    },
-    execution_profiles = [
-        AMD_GPU_HARDWARE_PROFILE,
-        AMD_GPU_ACCESS_PROFILE,
-        AMD_GPU_TSAN_PROFILE,
-    ],
-    deps = [":residual_programs"],
-)
+[
+    loom_test(
+        name = "scoring_test" if capacity == 32 else "scoring_{}_test".format(capacity),
+        srcs = ["tests/scoring.loom"],
+        benchmark_smoke = False,
+        configs = {
+            "flash_next.context_capacity": "2112",
+            "flash_next.pool_capacity": "2112",
+            "flash_next.span_capacity": "16",
+            "flash_next.token_count": str(capacity),
+            "qsa.query_tile": "13",
+        },
+        execution_profiles = [
+            AMD_GPU_HARDWARE_PROFILE,
+            AMD_GPU_ACCESS_PROFILE,
+            AMD_GPU_TSAN_PROFILE,
+        ],
+        deps = [":residual_programs"],
+    )
+    for capacity in [
+        4,
+        8,
+        16,
+        32,
+    ]
+]
 
 loom_test(
     name = "projection_test",
