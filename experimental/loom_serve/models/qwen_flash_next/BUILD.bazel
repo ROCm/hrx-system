@@ -414,7 +414,10 @@ loom_test(
 
 [
     loom_test(
-        name = "expert_matrix_{}_test".format(rows),
+        name = "expert_matrix_{}{}_test".format(
+            rows,
+            "_prepacked" if capacity == 2048 else "",
+        ),
         srcs = [
             "tests/expert_matrix.loom",
             "tests/expert_matrix_reference.loom",
@@ -422,7 +425,7 @@ loom_test(
         benchmark_smoke = False,
         configs = {
             "expert_test.tile_rows": str(rows),
-            "flash_next.token_count": str(rows + 3),
+            "flash_next.token_count": str(capacity),
         },
         execution_profiles = [
             AMD_GPU_HARDWARE_PROFILE,
@@ -434,9 +437,10 @@ loom_test(
             ":residual_programs",
         ],
     )
-    for rows in [
-        64,
-        128,
+    for rows, capacity in [
+        (64, 67),
+        (128, 131),
+        (128, 2048),
     ]
 ]
 

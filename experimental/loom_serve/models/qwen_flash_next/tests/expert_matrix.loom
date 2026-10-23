@@ -1,3 +1,6 @@
+func.decl pure @expert_gate_input_is_prepacked() -> (i1)
+kernel.decl @expert_input_half() launch(%input: buffer, %epoch: buffer, %output: buffer)
+
 // Each original-format consumer receives a reversed full record and a
 // one-route tail for ten experts. The producer's separate ownership test
 // establishes publication. Independent F64 arithmetic ignores record order
@@ -100,7 +103,7 @@ check.scenario public @gate_up_q4k {
     %up_weight = check.generate.random.uniform seed(%up_seed) range(-128 to 127) : tensor<[%up_bytes]xi8>
     check.generate<@expert_matrix_fixture>(%down, %format, %input, %weight, %up_weight, %tasks) : (i1, index, tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%task_words]xi32>) -> ()
     %output = check.generate.fill value(-17.0) : tensor<[%routes]x[%outputs]xbf16>
-    check.compare<@matrix_gate_up_q4k, @reference_gate_up_q4k>(%input, %tasks, %weight, %up_weight, %output) : (tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%task_words]xi32>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%routes]x[%outputs]xbf16>) -> () {
+    check.compare<@packed_gate_up_q4k, @reference_gate_up_q4k>(%input, %tasks, %weight, %up_weight, %output) : (tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%task_words]xi32>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%routes]x[%outputs]xbf16>) -> () {
       check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<[%routes]x[%outputs]xbf16>
       check.expect.bitwise actual(%input) expected(%input) : tensor<[%input_rows]x[%inputs]xbf16>
       check.expect.bitwise actual(%tasks) expected(%tasks) : tensor<[%task_words]xi32>
@@ -146,7 +149,7 @@ check.scenario public @gate_up_q5k {
     %up_weight = check.generate.random.uniform seed(%up_seed) range(-128 to 127) : tensor<[%up_bytes]xi8>
     check.generate<@expert_matrix_fixture>(%down, %format, %input, %weight, %up_weight, %tasks) : (i1, index, tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%task_words]xi32>) -> ()
     %output = check.generate.fill value(-17.0) : tensor<[%routes]x[%outputs]xbf16>
-    check.compare<@matrix_gate_up_q5k, @reference_gate_up_q5k>(%input, %tasks, %weight, %up_weight, %output) : (tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%task_words]xi32>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%routes]x[%outputs]xbf16>) -> () {
+    check.compare<@packed_gate_up_q5k, @reference_gate_up_q5k>(%input, %tasks, %weight, %up_weight, %output) : (tensor<[%input_rows]x[%inputs]xbf16>, tensor<[%task_words]xi32>, tensor<[%weight_bytes]xi8>, tensor<[%up_bytes]xi8>, tensor<[%routes]x[%outputs]xbf16>) -> () {
       check.expect.close actual(%output) expected(%output) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<[%routes]x[%outputs]xbf16>
       check.expect.bitwise actual(%input) expected(%input) : tensor<[%input_rows]x[%inputs]xbf16>
       check.expect.bitwise actual(%tasks) expected(%tasks) : tensor<[%task_words]xi32>
@@ -293,4 +296,56 @@ check.scenario public @down_q8 {
     }
   }
   check.return
+}
+
+kernel.def @packing_epoch() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%epoch: buffer) {
+  %rows = config.get @expert_test.tile_rows : index
+  %one = index.constant 1 : index
+  %count = index.add %rows, %one : index
+  %word = index.cast %count : index to i32
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<1xi32>
+  view.store %word, %header[0] : i32, view<1xi32>
+  kernel.return
+}
+
+command.program.def @packed_gate_up_q4k() launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
+  %prepacked = func.call pure @expert_gate_input_is_prepacked() : () -> (i1)
+  %operand = scf.if %prepacked -> (buffer) {
+    %capacity = config.get @flash_next.token_count : index
+    %stride = index.constant 5120 : offset
+    %bytes = index.scale %capacity, %stride : index, offset -> offset
+    %header_bytes = index.constant 12 : offset
+    %epoch = buffer.alloca<global> align(16) %header_bytes : buffer
+    %packed = buffer.alloca<global> align(256) %bytes : buffer
+    kernel.launch @packing_epoch(%epoch) : (buffer)
+    kernel.launch @expert_input_half(%input, %epoch, %packed) : (buffer, buffer, buffer)
+    scf.yield %packed : buffer
+  } else {
+    scf.yield %input : buffer
+  }
+  kernel.launch @matrix_gate_up_q4k(%operand, %tasks, %weight, %up_weight, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def @packed_gate_up_q5k() launch(%input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
+  %prepacked = func.call pure @expert_gate_input_is_prepacked() : () -> (i1)
+  %operand = scf.if %prepacked -> (buffer) {
+    %capacity = config.get @flash_next.token_count : index
+    %stride = index.constant 5120 : offset
+    %bytes = index.scale %capacity, %stride : index, offset -> offset
+    %header_bytes = index.constant 12 : offset
+    %epoch = buffer.alloca<global> align(16) %header_bytes : buffer
+    %packed = buffer.alloca<global> align(256) %bytes : buffer
+    kernel.launch @packing_epoch(%epoch) : (buffer)
+    kernel.launch @expert_input_half(%input, %epoch, %packed) : (buffer, buffer, buffer)
+    scf.yield %packed : buffer
+  } else {
+    scf.yield %input : buffer
+  }
+  kernel.launch @matrix_gate_up_q5k(%operand, %tasks, %weight, %up_weight, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
 }

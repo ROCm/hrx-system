@@ -4,17 +4,20 @@
 // Q4_K/Q5_K retain a K256 quantization block, including its common header.
 // Q8 fills the same bank with four independent K32 blocks.
 // Decode physical coefficients to F16 once per shared panel. F32 matrix
-// accumulators span the full reduction; global activations remain BF16.
+// accumulators span the full reduction. The 2K QK schedule shares one F16
+// conversion across all routed consumers; other schedules read BF16 input.
 // One masked activation refill overlaps computation of the current window.
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
 template.decl @ggml.qk.scale_min.header(%header_words: vector<4xi32>, %group: index) -> (f32, f32)
 
+func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
+
 func.decl pure @expert_record_extent(%capacity: index, %record_rows: index) -> (index, index, offset)
 
 func.decl @expert_fragment_pair(%own: vector<8xi32>, %second_half: i1) -> (vector<8xi32>, vector<8xi32>)
 
-func.def inline @expert_block_input(%input: buffer, %ids: vector<4xi32>, %live: vector<4xi1>, %group: index, %thread: index, %enabled: i1) -> (vector<4x8xbf16>) {
+func.def inline @expert_block_input(%input: buffer, %ids: vector<4xi32>, %live: vector<4xi1>, %group: index, %thread: index, %enabled: i1) -> (vector<4x8xi16>) {
   %capacity = config.get @flash_next.token_count : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -26,25 +29,26 @@ func.def inline @expert_block_input(%input: buffer, %ids: vector<4xi32>, %live: 
   %local_k = index.mul %packet, %c8 : index
   %bounded_group = index.assume %group [range(%group, 0, 39)] : index
   %k = index.madd %bounded_group, %c64, %local_k : index
-  %view = buffer.view %input[%origin] : buffer -> view<[%capacity]x2560xbf16>
-  %seed = vector.constant 0.0 : vector<4x8xbf16>
-  %empty = vector.constant 0.0 : vector<8xbf16>
-  %values = scf.for %round = [%c0 to %c4 step %c1](%bank = %seed : vector<4x8xbf16>) -> (vector<4x8xbf16>) unroll schedule(linear) {
+  %view = buffer.view %input[%origin] : buffer -> view<[%capacity]x2560xi16>
+  %seed = vector.constant 0 : vector<4x8xi16>
+  %empty = vector.constant 0 : vector<8xi16>
+  %values = scf.for %round = [%c0 to %c4 step %c1](%bank = %seed : vector<4x8xi16>) -> (vector<4x8xi16>) unroll schedule(linear) {
     %row_active = vector.extract %live[%round] : vector<4xi1> -> i1
     %active = scalar.andi %row_active, %enabled : i1
     %word = vector.extract %ids[%round] : vector<4xi32> -> i32
     %value = index.cast %word : i32 to index
     %row = index.assume %value [ge(%value, 0), lt(%value, %capacity)] : index
     %mask = vector.splat %active : vector<8xi1>
-    %packet_values = vector.load.mask %view[%row, %k], %mask, %empty : view<[%capacity]x2560xbf16>, vector<8xi1>, vector<8xbf16>
-    %next = vector.insert %packet_values into %bank[%round] : vector<8xbf16>, vector<4x8xbf16>
-    scf.yield %next : vector<4x8xbf16>
+    %packet_values = vector.load.mask %view[%row, %k], %mask, %empty : view<[%capacity]x2560xi16>, vector<8xi1>, vector<8xi16>
+    %next = vector.insert %packet_values into %bank[%round] : vector<8xi16>, vector<4x8xi16>
+    scf.yield %next : vector<4x8xi16>
   }
-  func.return %values : vector<4x8xbf16>
+  func.return %values : vector<4x8xi16>
 }
 
-// A padded 129-row pitch stages FP16 activations. Global input remains BF16.
-func.def inline @expert_block_publish_input(%arena: buffer, %thread: index, %values: vector<4x8xbf16>) {
+// A padded 129-row pitch stages F16 activations. The prepacked choice is
+// resolved during specialization and has no runtime branch or metadata.
+func.def inline @expert_block_publish_input(%prepacked: i1, %arena: buffer, %thread: index, %values: vector<4x8xi16>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c4 = index.constant 4 : index
@@ -56,9 +60,16 @@ func.def inline @expert_block_publish_input(%arena: buffer, %thread: index, %val
   %view = buffer.view %arena[%origin] : buffer -> view<8x129x8xf16>
   scf.for %round = [%c0 to %c4 step %c1] unroll schedule(linear) {
     %row = index.madd %round, %c32, %row_base : index
-    %packet = vector.extract %values[%round] : vector<4x8xbf16> -> vector<8xbf16>
-    %wide = vector.extf %packet : vector<8xbf16> to vector<8xf32>
-    %converted = vector.fptrunc %wide : vector<8xf32> to vector<8xf16>
+    %bits = vector.extract %values[%round] : vector<4x8xi16> -> vector<8xi16>
+    %converted = scf.if %prepacked -> (vector<8xf16>) {
+      %values = vector.bitcast %bits : vector<8xi16> to vector<8xf16>
+      scf.yield %values : vector<8xf16>
+    } else {
+      %packet = vector.bitcast %bits : vector<8xi16> to vector<8xbf16>
+      %wide = vector.extf %packet : vector<8xbf16> to vector<8xf32>
+      %values = vector.fptrunc %wide : vector<8xf32> to vector<8xf16>
+      scf.yield %values : vector<8xf16>
+    }
     vector.store %converted, %view[%chunk, %row, 0] : vector<8xf16>, view<8x129x8xf16>
   }
   func.return
@@ -249,6 +260,9 @@ func.def inline @expert_block_compute(%q8: i1, %q5: i1, %arena: buffer, %header:
 func.def public inline @expert_block_gate(%q8: i1, %q5: i1, %input_arg: buffer, %tasks_arg: buffer, %gate_arg: buffer, %up_arg: buffer, %output_arg: buffer) {
   %input, %tasks, %gate, %up, %output = buffer.assume.noalias %input_arg, %tasks_arg, %gate_arg, %up_arg, %output_arg : buffer, buffer, buffer, buffer, buffer
   %capacity = config.get @flash_next.token_count : index
+  %packed_shape = func.call pure @expert_gate_input_is_prepacked() : () -> (i1)
+  %false = scalar.constant false : i1
+  %prepacked = scf.select %q8, %false, %packed_shape : i1
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -331,11 +345,11 @@ func.def public inline @expert_block_gate(%q8: i1, %q5: i1, %input_arg: buffer, 
       scf.yield %next_ids, %next_live : vector<4xi32>, vector<4xi1>
     }
     %first_enabled = scalar.constant true : i1
-    %first_input = func.call @expert_block_input(%input, %ids, %masks, %c0, %thread, %first_enabled) : (buffer, vector<4xi32>, vector<4xi1>, index, index, i1) -> (vector<4x8xbf16>)
-    %result, %unused_queue = scf.for %block = [%c0 to %outer_blocks step %c1](%accumulators = %accumulator_seed : vector<8x8xf32>, %pending = %first_input : vector<4x8xbf16>) -> (vector<8x8xf32>, vector<4x8xbf16>) {
+    %first_input = func.call @expert_block_input(%input, %ids, %masks, %c0, %thread, %first_enabled) : (buffer, vector<4xi32>, vector<4xi1>, index, index, i1) -> (vector<4x8xi16>)
+    %result, %unused_queue = scf.for %block = [%c0 to %outer_blocks step %c1](%accumulators = %accumulator_seed : vector<8x8xf32>, %pending = %first_input : vector<4x8xi16>) -> (vector<8x8xf32>, vector<4x8xi16>) {
       %metadata, %high, %cache = func.call @expert_block_load(%q8, %q5, %selected_weight, %weight_origin, %block, %half) : (i1, i1, buffer, offset, index, index) -> (vector<4xi32>, vector<4xi32>, vector<4x4xi32>)
-      %next, %next_queue = scf.for %stage = [%c0 to %stages step %c1](%stage_accumulator = %accumulators : vector<8x8xf32>, %queued = %pending : vector<4x8xbf16>) -> (vector<8x8xf32>, vector<4x8xbf16>) unroll schedule(linear) {
-        func.call @expert_block_publish_input(%arena, %thread, %queued) : (buffer, index, vector<4x8xbf16>)
+      %next, %next_queue = scf.for %stage = [%c0 to %stages step %c1](%stage_accumulator = %accumulators : vector<8x8xf32>, %queued = %pending : vector<4x8xi16>) -> (vector<8x8xf32>, vector<4x8xi16>) unroll schedule(linear) {
+        func.call @expert_block_publish_input(%prepacked, %arena, %thread, %queued) : (i1, buffer, index, vector<4x8xi16>)
         kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
         %current = index.madd %block, %stages, %stage : index
         %following = index.add %current, %c1 : index
@@ -344,12 +358,12 @@ func.def public inline @expert_block_gate(%q8: i1, %q5: i1, %input_arg: buffer, 
         // Keeping its result out of a branch join lets completion wait until
         // the next LDS publication, after this window's matrix work.
         %safe_group = scf.select %has_next, %following, %c0 : index
-        %refill = func.call @expert_block_input(%input, %ids, %masks, %safe_group, %thread, %has_next) : (buffer, vector<4xi32>, vector<4xi1>, index, index, i1) -> (vector<4x8xbf16>)
+        %refill = func.call @expert_block_input(%input, %ids, %masks, %safe_group, %thread, %has_next) : (buffer, vector<4xi32>, vector<4xi1>, index, index, i1) -> (vector<4x8xi16>)
         %computed = func.call @expert_block_compute(%q8, %q5, %arena, %metadata, %high, %cache, %stage, %live, %stage_accumulator) : (i1, i1, buffer, vector<4xi32>, vector<4xi32>, vector<4x4xi32>, index, index, vector<8x8xf32>) -> (vector<8x8xf32>)
         kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-        scf.yield %computed, %refill : vector<8x8xf32>, vector<4x8xbf16>
+        scf.yield %computed, %refill : vector<8x8xf32>, vector<4x8xi16>
       }
-      scf.yield %next, %next_queue : vector<8x8xf32>, vector<4x8xbf16>
+      scf.yield %next, %next_queue : vector<8x8xf32>, vector<4x8xi16>
     }
     scf.for %fragment = [%c0 to %c8 step %c1] unroll schedule(linear) {
       %projection = vector.extract %result[%fragment] : vector<8x8xf32> -> vector<8xf32>
@@ -390,4 +404,52 @@ func.def public inline @expert_block_gate(%q8: i1, %q5: i1, %input_arg: buffer, 
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   }
   func.return
+}
+
+// Keep producer and consumer representation selection at the same specialization boundary.
+func.def public pure inline @expert_gate_input_is_prepacked() -> (i1) {
+  %capacity = config.get @flash_next.token_count : index
+  %selected = index.constant 2048 : index
+  %enabled = index.cmp eq, %capacity, %selected : index
+  func.return %enabled : i1
+}
+
+amdgpu.target<gfx11-generic> @expert_operand_wave32 {subgroup_size = 32}
+
+// Convert the reused live operand once. Epoch stays on the GPU; no host count.
+kernel.def target(@expert_operand_wave32) @expert_input_half() {
+  %capacity = config.get @flash_next.token_count : index
+  %features = index.constant 2560 : index
+  %span = index.constant 2048 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  %elements = index.mul %capacity, %features : index
+  %rounding = index.constant 2047 : index
+  %rounded = index.add %elements, %rounding : index
+  %groups = index.div %rounded, %span : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input_arg: buffer, %epoch_arg: buffer, %output_arg: buffer) {
+  %input, %epoch, %output = buffer.assume.noalias %input_arg, %epoch_arg, %output_arg : buffer, buffer, buffer
+  %capacity = config.get @flash_next.token_count : index
+  %c8 = index.constant 8 : index
+  %features = index.constant 2560 : index
+  %span = index.constant 2048 : index
+  %zero = index.constant 0 : offset
+  %live = func.call @flash_next_token_count(%epoch, %capacity) : (buffer, index) -> (index)
+  %elements = index.mul %capacity, %features : index
+  %live_elements = index.mul %live, %features : index
+  %group = kernel.workgroup.id<x> : index
+  %thread = kernel.workitem.id<x> : index
+  %local = index.mul %thread, %c8 : index
+  %base = index.madd %group, %span, %local : index
+  %active = index.cmp ult, %base, %live_elements : index
+  scf.if %active {
+    %input_view = buffer.view %input[%zero] : buffer -> view<[%elements]xbf16>
+    %output_view = buffer.view %output[%zero] : buffer -> view<[%elements]xf16>
+    %packet = vector.load %input_view[%base] : view<[%elements]xbf16> -> vector<8xbf16>
+    %wide = vector.extf %packet : vector<8xbf16> to vector<8xf32>
+    %half = vector.fptrunc %wide : vector<8xf32> to vector<8xf16>
+    vector.store %half, %output_view[%base] : vector<8xf16>, view<[%elements]xf16>
+  }
+  kernel.return
 }

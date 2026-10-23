@@ -1,3 +1,6 @@
+func.decl pure @expert_gate_input_is_prepacked() -> (i1)
+kernel.decl @expert_input_half() launch(%input: buffer, %epoch: buffer, %output: buffer)
+
 // Original Q4_K/Q5_K/Q8_0 gate/up and Q5_1/Q8_0 down weights stay compressed. Selected
 // experts publish BF16 SwiGLU and down results; routing and shared-expert
 // weighting accumulate in F32 before the final BF16 branch publication.
@@ -359,7 +362,17 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
       %up_weight = command.parameter %parameters, "blk.{}.ffn_up_exps.weight"[%layer] : view<512x640x10x176xi8>
       scf.if %bucketed {
         scf.if %matrix {
-          kernel.launch @expert_matrix(%c0, %c3, %record_rows, %input, %routing, %gate_weight, %up_weight, %hidden) : (index, index, index, buffer, buffer, view<512x640x10x176xi8>, view<512x640x10x176xi8>, buffer)
+          %prepacked = func.call pure @expert_gate_input_is_prepacked() : () -> (i1)
+          %operand = scf.if %prepacked -> (buffer) {
+            %row_bytes = index.constant 5120 : offset
+            %packed_bytes = index.scale %tokens, %row_bytes : index, offset -> offset
+            %packed_input = buffer.alloca<global> align(256) %packed_bytes : buffer
+            kernel.launch @expert_input_half(%input, %span, %packed_input) : (buffer, buffer, buffer)
+            scf.yield %packed_input : buffer
+          } else {
+            scf.yield %input : buffer
+          }
+          kernel.launch @expert_matrix(%c0, %c3, %record_rows, %operand, %routing, %gate_weight, %up_weight, %hidden) : (index, index, index, buffer, buffer, view<512x640x10x176xi8>, view<512x640x10x176xi8>, buffer)
         } else {
           kernel.launch @expert_bucket_gate_up_q5k(%input, %routing, %gate_weight, %up_weight, %hidden) : (buffer, buffer, view<512x640x10x176xi8>, view<512x640x10x176xi8>, buffer)
         }
@@ -371,7 +384,17 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
       %up_weight = command.parameter %parameters, "blk.{}.ffn_up_exps.weight"[%layer] : view<512x640x10x144xi8>
       scf.if %bucketed {
         scf.if %matrix {
-          kernel.launch @expert_matrix(%c0, %c2, %record_rows, %input, %routing, %gate_weight, %up_weight, %hidden) : (index, index, index, buffer, buffer, view<512x640x10x144xi8>, view<512x640x10x144xi8>, buffer)
+          %prepacked = func.call pure @expert_gate_input_is_prepacked() : () -> (i1)
+          %operand = scf.if %prepacked -> (buffer) {
+            %row_bytes = index.constant 5120 : offset
+            %packed_bytes = index.scale %tokens, %row_bytes : index, offset -> offset
+            %packed_input = buffer.alloca<global> align(256) %packed_bytes : buffer
+            kernel.launch @expert_input_half(%input, %span, %packed_input) : (buffer, buffer, buffer)
+            scf.yield %packed_input : buffer
+          } else {
+            scf.yield %input : buffer
+          }
+          kernel.launch @expert_matrix(%c0, %c2, %record_rows, %operand, %routing, %gate_weight, %up_weight, %hidden) : (index, index, index, buffer, buffer, view<512x640x10x144xi8>, view<512x640x10x144xi8>, buffer)
         } else {
           kernel.launch @expert_bucket_gate_up_q4k(%input, %routing, %gate_weight, %up_weight, %hidden) : (buffer, buffer, view<512x640x10x144xi8>, view<512x640x10x144xi8>, buffer)
         }

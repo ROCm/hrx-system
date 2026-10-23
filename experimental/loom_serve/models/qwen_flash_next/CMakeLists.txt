@@ -3746,6 +3746,108 @@ endif()
 
 loom_test_module(
   NAME
+    expert_matrix_128_prepacked_test_module
+  SRCS
+    "tests/expert_matrix.loom"
+    "tests/expert_matrix_reference.loom"
+  LIBRARIES
+    "::quantized_reference"
+    "::residual_programs"
+)
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    expert_matrix_128_prepacked_test_execute_amd_gpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::expert_matrix_128_prepacked_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu2"
+    "--config=expert_test.tile_rows=128"
+    "--config=flash_next.token_count=2048"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amd_gpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    expert_matrix_128_prepacked_test_execute_amd_gpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::expert_matrix_128_prepacked_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu2"
+    "--sanitizer=access"
+    "--config=expert_test.tile_rows=128"
+    "--config=flash_next.token_count=2048"
+  LABELS
+    "notsan"
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amd_gpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    expert_matrix_128_prepacked_test_execute_amd_gpu_tsan_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::expert_matrix_128_prepacked_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu2://?tsan_report_policy=report-only"
+    "--sanitizer=tsan"
+    "--sanitizer-reporting=report-only"
+    "--config=expert_test.tile_rows=128"
+    "--config=flash_next.token_count=2048"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amd_gpu_tsan"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_test_module(
+  NAME
     quantized_test_module
   SRCS
     "tests/quantized.loom"
