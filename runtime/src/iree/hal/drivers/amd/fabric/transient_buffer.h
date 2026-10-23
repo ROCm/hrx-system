@@ -38,9 +38,8 @@ typedef struct iree_hal_amd_fabric_transient_buffer_t
 // |source_pool| is borrowed for the complete logical allocation lifetime and
 // may be queried before queue ordering allows a physical reservation to be
 // acquired. |block_pool| supplies one reusable wrapper block; unusually large
-// native tables use its allocator directly. The placement device is retained
-// until the storage is returned, keeping the metadata owner live without
-// tracking individual buffers.
+// native tables use its allocator directly. The application's device ownership
+// keeps this metadata owner alive through the root's final release.
 iree_status_t iree_hal_amd_fabric_transient_buffer_create(
     iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,
     iree_hal_memory_access_t allowed_access,
@@ -57,9 +56,11 @@ void iree_hal_amd_fabric_transient_buffer_attach_reservation(
 
 // Stages an existing reservation view for a future commit. The backing buffer
 // is retained, but remains invisible to map/flush/invalidate calls until
-// iree_hal_amd_fabric_transient_buffer_commit() publishes it. The remaining
-// view fields borrow the attached reservation and source pool.
-void iree_hal_amd_fabric_transient_buffer_stage_backing(
+// iree_hal_amd_fabric_transient_buffer_commit() publishes it. Reuse history is
+// copied so logical reservation return cannot invalidate the old root's view.
+// Ordinary roots hold the history in their existing cached metadata block;
+// larger histories can fail allocation before staging any backing.
+iree_status_t iree_hal_amd_fabric_transient_buffer_stage_backing(
     iree_hal_buffer_t* buffer, const iree_hal_pool_reservation_view_t* backing);
 
 // Publishes the staged backing buffer. Must be called exactly once while the

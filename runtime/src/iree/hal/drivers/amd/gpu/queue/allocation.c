@@ -205,6 +205,13 @@ static iree_status_t iree_hal_amd_gpu_allocation_materialize(
       };
     }
   }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < operation->count && iree_status_is_ok(status); ++i) {
+    status = iree_hal_amd_fabric_transient_buffer_stage_backing(
+        operation->buffers[i], &operation->acquire.views[i]);
+  }
+  IREE_RETURN_IF_ERROR(status);
   iree_hal_pool_advise_asan_reservations(
       pool, operation->count, operation->reservations,
       IREE_HAL_ASAN_RANGE_ADVICE_FLAG_ALLOCATED);
@@ -218,8 +225,6 @@ static iree_status_t iree_hal_amd_gpu_allocation_materialize(
   for (iree_host_size_t i = 0; i < operation->count; ++i) {
     iree_hal_amd_fabric_transient_buffer_attach_reservation(
         operation->buffers[i], pool, &operation->reservations[i]);
-    iree_hal_amd_fabric_transient_buffer_stage_backing(
-        operation->buffers[i], &operation->acquire.views[i]);
   }
   operation->acquire.held = false;
   for (iree_host_size_t i = 0; i < operation->count; ++i) {
