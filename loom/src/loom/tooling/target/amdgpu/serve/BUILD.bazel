@@ -548,6 +548,7 @@ loom_cc_test(
 [
     loom_cc_test(
         name = prefix + "source_text_media_test",
+        args = ["--gtest_filter=-Declarations/ManagedMediaServiceTest.*/1"],
         data = EMBEDDING_SOURCES + PROJECTOR_SOURCES + TEXT_SOURCES,
         env = {
             "LOOM_SERVE_TEST_MEDIA_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/embedding:model.json)",
@@ -556,6 +557,35 @@ loom_cc_test(
         },
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
         tags = runtime_tags,
+        target_compatible_with = loom_config_compatible_with([
+            "//loom/config/execute:amdgpu_hal",
+        ] + runtime_requirements) + select({
+            "@platforms//os:linux": [],
+            "//conditions:default": ["@platforms//:incompatible"],
+        }),
+        deps = [
+            ":test_compiler",
+            device,
+            "//loom/src/loom/serve/service/text:source_media_tests",
+            "//runtime/src/iree/testing:gtest_main",
+        ],
+    )
+    for prefix, device, device_uri, runtime_requirements, runtime_tags in _SERVING_DEVICES
+]
+
+[
+    loom_cc_test(
+        name = prefix + "card_text_media_test",
+        args = ["--gtest_filter=Declarations/ManagedMediaServiceTest.*/1"],
+        data = EMBEDDING_SOURCES + PROJECTOR_SOURCES + TEXT_SOURCES + ["//loom/src/loom/serve/fixture/text:image_model"],
+        env = {
+            "LOOM_SERVE_TEST_MEDIA_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/embedding:model.json)",
+            "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+            "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:model.json)",
+            "LOOM_SERVE_TEST_TEXT_IMAGE_CARD": "$(rootpath //loom/src/loom/serve/fixture/text:image_model)",
+        },
+        resource_group = GPU_DEVICE_RESOURCE_GROUP,
+        tags = runtime_tags + ["skip-bazel_to_cmake"],
         target_compatible_with = loom_config_compatible_with([
             "//loom/config/execute:amdgpu_hal",
         ] + runtime_requirements) + select({

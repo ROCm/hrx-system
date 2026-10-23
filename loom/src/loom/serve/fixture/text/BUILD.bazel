@@ -97,6 +97,7 @@ filegroup(
 iree_py_binary(
     name = "parameters",
     srcs = ["parameters.py"],
+    main = "parameters.py",
 )
 
 loom_generated_file(
