@@ -412,6 +412,17 @@ python dev.py bazel build `
   --config=windows-msvc
 ```
 
+Native Windows compiler features and runtime artifacts belong to HRX's module
+toolchains, including when another project depends on HRX. They use Bazel's
+normal `BAZEL_LLVM` and Visual Studio discovery; consumers do not need patched
+`rules_cc` repositories or extra compiler-runtime link flags. Clang's builtins
+are declared link inputs, and ASAN deploys the runtime DLL from the selected
+compiler installation. Compiler and runtime selection must agree.
+
+Configuration presets in HRX's `.bazelrc` are local to the HRX checkout. An
+external root selects MSVC with
+`--@hrx//build_tools/windows:compiler=msvc`; native Clang is the default.
+
 For a fresh CMake build limited to Loom's VM and x86 compiler targets, use:
 
 ```powershell

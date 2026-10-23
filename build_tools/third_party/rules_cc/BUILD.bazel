@@ -10,5 +10,4 @@
 exports_files([
     "optimized_profile.patch",
     "sanitizer_debug_info.patch",
-    "windows_toolchain.patch",
 ])

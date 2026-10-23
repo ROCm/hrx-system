@@ -4,9 +4,13 @@
 # Bazel toolchain analysis tests have no CMake target surface.
 # bazel-to-cmake: skip
 
+# buildifier: disable=bzl-visibility
+load("@rules_cc//cc/private/toolchain:windows_cc_toolchain_config.bzl", "cc_toolchain_config")
 load("@rules_cc//cc/toolchains:cc_toolchain.bzl", "cc_toolchain")
-load("//build_tools/windows:toolchain_config.bzl", "windows_cross_toolchain_config")
-load(":toolchain_config_test.bzl", "toolchain_config_test_suite")
+load("//build_tools/windows:cc_toolchain.bzl", "windows_cc_toolchain")
+load("//build_tools/windows:native_runtime.bzl", "native_windows_runtime")
+load("//build_tools/windows:toolchain_config.bzl", "windows_cross_toolchain_config", "windows_native_toolchain_config")
+load(":toolchain_config_test.bzl", "NATIVE_ROOT", "toolchain_config_test_suite")
 
 filegroup(name = "empty")
 
@@ -40,3 +44,70 @@ cc_toolchain(
 )
 
 toolchain_config_test_suite(name = "toolchain_config_tests")
+
+cc_toolchain_config(
+    name = "native_base_configuration",
+    abi_libc_version = "msvcrt",
+    abi_version = "msvc",
+    compiler = "clang-cl",
+    cpu = "x64_windows",
+    host_system_name = "local",
+    msvc_cl_path = "wrapper/clang-cl.exe",
+    msvc_lib_path = "C:/LLVM/bin/llvm-lib.exe",
+    msvc_link_path = "C:/LLVM/bin/lld-link.exe",
+    msvc_ml_path = "wrapper/clang-cl.exe",
+    target_libc = "msvcrt",
+    target_system_name = "x86_64-pc-windows-msvc",
+    tool_paths = {
+        "gcc": "wrapper/clang-cl.exe",
+        "nm": "wrapper/msvc_nop.bat",
+    },
+    toolchain_identifier = "native-feature-test",
+)
+
+native_windows_runtime(
+    name = "native_runtime",
+    compiler_executable = NATIVE_ROOT + "configuration/wrapper/clang-cl.exe",
+    configuration_directory = NATIVE_ROOT + "configuration",
+    resource_directory = "C:/LLVM/lib/clang/23",
+)
+
+windows_native_toolchain_config(
+    name = "native_configuration",
+    base = ":native_base_configuration",
+    native_runtime = ":native_runtime",
+)
+
+cc_toolchain(
+    name = "native_compiler",
+    all_files = ":empty",
+    ar_files = ":empty",
+    as_files = ":empty",
+    compiler_files = ":empty",
+    dwp_files = ":empty",
+    linker_files = ":empty",
+    objcopy_files = ":empty",
+    strip_files = ":empty",
+    toolchain_config = ":native_configuration",
+)
+
+windows_cc_toolchain(
+    name = "native_wrapped_compiler",
+    cc = ":native_compiler",
+    masm = "//build_tools/bazel:msvc_masm_wrapper.bat",
+    native_runtime = ":native_runtime",
+)
+
+native_windows_runtime(
+    name = "wrong_compiler_runtime",
+    compiler_executable = "C:/different/clang-cl.exe",
+    configuration_directory = NATIVE_ROOT + "configuration",
+)
+
+windows_cc_toolchain(
+    name = "wrong_compiler_binding",
+    cc = ":native_compiler",
+    masm = "//build_tools/bazel:msvc_masm_wrapper.bat",
+    native_runtime = ":wrong_compiler_runtime",
+    tags = ["manual"],
+)

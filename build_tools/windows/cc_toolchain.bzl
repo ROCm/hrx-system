@@ -7,11 +7,20 @@ load("@platforms//host:constraints.bzl", "HOST_CONSTRAINTS")
 load("@rules_cc//cc:find_cc_toolchain.bzl", "CC_TOOLCHAIN_TYPE", "find_cc_toolchain", "use_cc_toolchain")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("@rules_cc//cc/toolchains:cc_toolchain.bzl", "cc_toolchain")
+load(":native_runtime.bzl", "NativeWindowsRuntimeInfo")
+load(":toolchain_config.bzl", "windows_native_toolchain_config")
 
 _WINDOWS_X86_64 = ["@platforms//cpu:x86_64", "@platforms//os:windows"]
 
 def _windows_cc_toolchain_impl(ctx):
     cc = ctx.attr.cc[cc_common.CcToolchainInfo]
+    address_sanitizer_files = ctx.files.address_sanitizer_files
+    if ctx.attr.native_runtime:
+        runtime = ctx.attr.native_runtime[NativeWindowsRuntimeInfo]
+        if cc.compiler_executable.replace("\\", "/").lower() != runtime.compiler_executable.replace("\\", "/").lower():
+            fail("Native Windows runtime compiler %s does not match the selected C/C++ compiler %s. Select one installation through Bazel's compiler environment. See BUILDING.md." % (runtime.compiler_executable, cc.compiler_executable))
+        address_sanitizer_files = runtime.address_sanitizer_files
     return [
         cc,
         ctx.attr.cc[DefaultInfo],
@@ -29,7 +38,7 @@ def _windows_cc_toolchain_impl(ctx):
                 files = depset([ctx.file.masm] + ctx.files.masm_files),
             ),
             # Compiler-owned Windows runtime artifacts, indexed by filename.
-            address_sanitizer_files = {file.basename: file for file in ctx.files.address_sanitizer_files},
+            address_sanitizer_files = {file.basename: file for file in address_sanitizer_files},
         ),
     ]
 
@@ -41,12 +50,14 @@ windows_cc_toolchain = rule(
         "masm": attr.label(allow_single_file = True, cfg = "exec", mandatory = True),
         "masm_arguments": attr.string_list(doc = "MASM flags preceding output and source paths."),
         "masm_files": attr.label_list(allow_files = True, cfg = "exec", doc = "MASM executable and loader dependencies."),
+        "native_runtime": attr.label(providers = [NativeWindowsRuntimeInfo], doc = "Runtime artifacts from the same native compiler installation."),
     },
     doc = "Preserves a C/C++ toolchain and binds its Windows assembler and runtime artifacts.",
 )
 
 def _address_sanitizer_runtime_impl(ctx):
-    files = ctx.toolchains[CC_TOOLCHAIN_TYPE].address_sanitizer_files
+    toolchain = ctx.toolchains[CC_TOOLCHAIN_TYPE]
+    files = toolchain.address_sanitizer_files
     cc = find_cc_toolchain(ctx)
     configuration = cc_common.configure_features(
         ctx = ctx,
@@ -115,20 +126,43 @@ _runtimes_toolchain = rule(
 def windows_toolchains():
     """Declares local Windows toolchains without configuring unused SDKs."""
     if "@platforms//os:windows" in HOST_CONSTRAINTS:
-        for compiler, cc_target in [
-            ("clang_cl", "cc-compiler-x64_windows-clang-cl"),
-            ("msvc", "cc-compiler-x64_windows"),
+        for compiler, cc_target, configuration, compiler_files in [
+            ("clang_cl", "cc-compiler-x64_windows-clang-cl", "clang_cl_x64", "clangcl_compiler_files"),
+            ("msvc", "cc-compiler-x64_windows", "msvc_x64", "msvc_compiler_files"),
         ]:
-            windows_cc_toolchain(
-                name = "native_" + compiler,
+            prefix = "native_" + compiler
+            runtime = "@hrx_windows_" + compiler + "_runtime//:runtime"
+            windows_native_toolchain_config(
+                name = prefix + "_configuration",
+                base = "@local_config_cc//:" + configuration,
+                native_runtime = runtime,
                 tags = ["manual"],
-                cc = "@local_config_cc//:" + cc_target,
+            )
+            native.filegroup(name = prefix + "_runtime_compiler_files", srcs = [runtime], output_group = "compiler_files")
+            native.filegroup(name = prefix + "_linker_files", srcs = [runtime], output_group = "linker_files")
+            native.filegroup(name = prefix + "_compiler_files", srcs = ["@local_config_cc//:" + compiler_files, ":" + prefix + "_runtime_compiler_files"])
+            native.filegroup(name = prefix + "_all_files", srcs = ["@local_config_cc//:" + cc_target, ":" + prefix + "_compiler_files", runtime])
+            cc_toolchain(
+                name = prefix + "_cc",
+                toolchain_config = ":" + prefix + "_configuration",
+                all_files = ":" + prefix + "_all_files",
+                ar_files = "@local_config_cc//:empty",
+                as_files = ":" + prefix + "_compiler_files",
+                compiler_files = ":" + prefix + "_compiler_files",
+                dwp_files = "@local_config_cc//:empty",
+                linker_files = ":" + prefix + "_linker_files",
+                objcopy_files = "@local_config_cc//:empty",
+                strip_files = "@local_config_cc//:empty",
+                supports_param_files = 1,
+                tags = ["manual"],
+            )
+            windows_cc_toolchain(
+                name = prefix,
+                tags = ["manual"],
+                cc = ":" + prefix + "_cc",
                 masm = "//build_tools/bazel:msvc_masm_wrapper.bat",
                 masm_arguments = ["/nologo", "/Zi", "/c"],
-                address_sanitizer_files = select({
-                    "//build_tools/bazel:address_sanitizer_target": ["@local_config_cc//:" + compiler + "_x64_asan_files"],
-                    "//conditions:default": [],
-                }),
+                native_runtime = runtime,
             )
             native.toolchain(
                 name = "windows_x86_64_" + compiler,

@@ -12,15 +12,13 @@ bazel_dep(name = "rules_cc", version = "0.2.21")
 bazel_dep(name = "rules_python", version = "2.4.3")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 
-# Windows toolchains expose compiler-owned builtins and sanitizer artifacts and
-# declare whether the linker supports Bazel's automatic DLL export helper.
-# Sanitizer debug information uses compiler-specific feature flags on all hosts.
+# Unix host profiles provide optimized and sanitizer debug-information features.
+# Windows compiler features and artifacts are owned by this module's toolchains.
 single_version_override(
     module_name = "rules_cc",
     patch_strip = 1,
     patches = [
         "//build_tools/third_party/rules_cc:sanitizer_debug_info.patch",
-        "//build_tools/third_party/rules_cc:windows_toolchain.patch",
         "//build_tools/third_party/rules_cc:optimized_profile.patch",
     ],
     version = "0.2.21",
@@ -49,6 +47,21 @@ windows_toolchain_repository = use_repo_rule(
 )
 
 windows_toolchain_repository(name = "iree_windows_toolchain")
+
+native_windows_runtime_repository = use_repo_rule(
+    "//build_tools/windows:native_runtime.bzl",
+    "native_windows_runtime_repository",
+)
+
+native_windows_runtime_repository(
+    name = "hrx_windows_clang_cl_runtime",
+    compiler = "clang-cl",
+)
+
+native_windows_runtime_repository(
+    name = "hrx_windows_msvc_runtime",
+    compiler = "msvc",
+)
 
 register_toolchains("//build_tools/windows:all")
 
