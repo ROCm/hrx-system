@@ -2,7 +2,7 @@
 // and matrix tests reuse these oracles, independently of production vector
 // decoders, coefficient planes, and reduction order. Format indices are
 // Q8_0, Q5_1, Q4_K, and Q5_K.
-func.def public @quantized_qk_weight(%q5_encoding: i1, %table: buffer, %inputs: index, %row0: index, %column: index) -> (f64) {
+func.def @quantized_qk_weight_arithmetic(%half_coefficients: i1, %q5_encoding: i1, %table: buffer, %inputs: index, %row0: index, %column: index) -> (f64) {
   %block_width = index.constant 256 : index
   %block = index.div %column, %block_width : index
   %channel0 = index.rem %column, %block_width : index
@@ -93,9 +93,32 @@ func.def public @quantized_qk_weight(%q5_encoding: i1, %table: buffer, %inputs: 
   %minimum_f = scalar.uitofp %minimum : i32 to f64
   %q = scalar.uitofp %code : i32 to f64
   %scaled = scalar.mulf %d, %s : f64
-  %positive = scalar.mulf %scaled, %q : f64
   %negative = scalar.mulf %m, %minimum_f : f64
-  %value = scalar.subf %positive, %negative : f64
+  // Native half reconstruction rounds the physical scale and bias before
+  // its fused multiply-add, then rounds the resulting coefficient once.
+  // Evaluate that contract with scalar F64 arithmetic, without sharing any
+  // production vector decoding, lane mapping, or matrix operations.
+  %value = scf.if %half_coefficients -> (f64) {
+    %scale_half = scalar.fptrunc %scaled : f64 to f16
+    %minimum_half = scalar.fptrunc %negative : f64 to f16
+    %scale_rounded = scalar.extf %scale_half : f16 to f64
+    %minimum_rounded = scalar.extf %minimum_half : f16 to f64
+    %positive = scalar.mulf %scale_rounded, %q : f64
+    %coefficient = scalar.subf %positive, %minimum_rounded : f64
+    %half = scalar.fptrunc %coefficient : f64 to f16
+    %rounded = scalar.extf %half : f16 to f64
+    scf.yield %rounded : f64
+  } else {
+    %positive = scalar.mulf %scaled, %q : f64
+    %coefficient = scalar.subf %positive, %negative : f64
+    scf.yield %coefficient : f64
+  }
+  func.return %value : f64
+}
+
+func.def public @quantized_qk_weight(%q5_encoding: i1, %table: buffer, %inputs: index, %row: index, %column: index) -> (f64) {
+  %half_coefficients = scalar.constant false : i1
+  %value = func.call @quantized_qk_weight_arithmetic(%half_coefficients, %q5_encoding, %table, %inputs, %row, %column) : (i1, i1, buffer, index, index, index) -> (f64)
   func.return %value : f64
 }
 
@@ -250,7 +273,7 @@ func.def public inline @quantized_sparse_input(%capacity_value: index, %count_va
 // Decode original coefficients independently and accumulate nonzero input
 // coordinates in F64. The device still traverses every K block, while the
 // CPU oracle avoids a full model-sized matrix multiply for each trial.
-func.def public inline @quantized_sparse_dot(%format: index, %width: index, %input_row: index, %weight_row: index, %input: buffer, %weight: buffer) -> (f64) {
+func.def public inline @quantized_sparse_dot_arithmetic(%half_coefficients: i1, %format: index, %width: index, %input_row: index, %weight_row: index, %input: buffer, %weight: buffer) -> (f64) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -269,7 +292,7 @@ func.def public inline @quantized_sparse_dot(%format: index, %width: index, %inp
     %last_column = index.sub %width, %c1 : index
     %column = index.assume %column_value [range(%column_value, 0, %last_column)] : index
     %coefficient = scf.if %large -> (f64) {
-      %value = func.call @quantized_qk_weight(%q5, %weight, %width, %weight_row, %column) : (i1, buffer, index, index, index) -> (f64)
+      %value = func.call @quantized_qk_weight_arithmetic(%half_coefficients, %q5, %weight, %width, %weight_row, %column) : (i1, i1, buffer, index, index, index) -> (f64)
       scf.yield %value : f64
     } else {
       %value = func.call @quantized_small_weight(%q8, %weight, %width, %weight_row, %column) : (i1, buffer, index, index, index) -> (f64)
@@ -277,9 +300,25 @@ func.def public inline @quantized_sparse_dot(%format: index, %width: index, %inp
     }
     %packed = view.load %values[%column] : view<[%width]xbf16> -> bf16
     %x = scalar.extf %packed : bf16 to f64
-    %product = scalar.mulf %x, %coefficient : f64
+    %input_value, %weight_value = scf.if %half_coefficients -> (f64, f64) {
+      %input_half = scalar.fptrunc %x : f64 to f16
+      %coefficient_half = scalar.fptrunc %coefficient : f64 to f16
+      %input_rounded = scalar.extf %input_half : f16 to f64
+      %coefficient_rounded = scalar.extf %coefficient_half : f16 to f64
+      scf.yield %input_rounded, %coefficient_rounded : f64, f64
+    } else {
+      scf.yield %x, %coefficient : f64, f64
+    }
+    %product = scalar.mulf %input_value, %weight_value : f64
     %next = scalar.addf %sum, %product : f64
     scf.yield %next : f64
   }
   func.return %result : f64
+}
+
+// The small scalar consumers retain original coefficient arithmetic.
+func.def public inline @quantized_sparse_dot(%format: index, %width: index, %input_row: index, %weight_row: index, %input: buffer, %weight: buffer) -> (f64) {
+  %half_coefficients = scalar.constant false : i1
+  %value = func.call @quantized_sparse_dot_arithmetic(%half_coefficients, %format, %width, %input_row, %weight_row, %input, %weight) : (i1, index, index, index, index, buffer, buffer) -> (f64)
+  func.return %value : f64
 }

@@ -2,6 +2,8 @@
 // one-route tail for ten experts. The producer's separate ownership test
 // establishes publication. Independent F64 arithmetic ignores record order
 // and checks every output, inactive sentinels, and immutable input storage.
+// The reference models each consumer's coefficient rounding before its F64
+// reduction; original-checkpoint model quality is evaluated independently.
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
 config.decl @expert_test.tile_rows : %value: index where [range(%value, 64, 128), multiple_of(%value, 64)]

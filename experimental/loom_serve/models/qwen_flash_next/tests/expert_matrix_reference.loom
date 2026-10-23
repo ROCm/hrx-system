@@ -8,7 +8,7 @@ func.decl @quantized_finite_headers(%format: index, %width: index, %rows: index,
 
 func.decl @quantized_sparse_input(%capacity: index, %count: index, %width: index, %input: buffer)
 
-func.decl @quantized_sparse_dot(%format: index, %width: index, %input_row: index, %weight_row: index, %input: buffer, %weight: buffer) -> (f64)
+func.decl @quantized_sparse_dot_arithmetic(%half_coefficients: i1, %format: index, %width: index, %input_row: index, %weight_row: index, %input: buffer, %weight: buffer) -> (f64)
 
 // One more active token than the record width gives each of ten distinct
 // experts a reversed full record and a one-route tail.
@@ -76,8 +76,12 @@ func.def public @expert_matrix_fixture(%down: i1, %format: index, %input: buffer
 
 // Original route identity determines the expected expert and activation row;
 // the oracle never reads the GPU-produced record order or its live counts.
+// Wide consumers reconstruct F16 coefficients; narrow consumers retain original
+// scales. Both use independent scalar decoding and F64 accumulation here.
 func.def public inline @expert_matrix_reference(%down: i1, %format: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
   %record_rows = config.get @expert_test.tile_rows : index
+  %wide_rows = index.constant 128 : index
+  %half_coefficients = index.cmp eq, %record_rows, %wide_rows : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c10 = index.constant 10 : index
@@ -98,12 +102,12 @@ func.def public inline @expert_matrix_reference(%down: i1, %format: index, %inpu
     %input_row = scf.select %down, %route, %token : index
     scf.for %channel = [%c0 to %features step %c1] {
       %weight_row = index.madd %expert, %features, %channel : index
-      %sum = func.call @quantized_sparse_dot(%format, %width, %input_row, %weight_row, %input, %weight) : (index, index, index, index, buffer, buffer) -> (f64)
+      %sum = func.call @quantized_sparse_dot_arithmetic(%half_coefficients, %format, %width, %input_row, %weight_row, %input, %weight) : (i1, index, index, index, index, buffer, buffer) -> (f64)
       %value = scf.if %down -> (f32) {
         %rounded = scalar.fptrunc %sum : f64 to f32
         scf.yield %rounded : f32
       } else {
-        %up_sum = func.call @quantized_sparse_dot(%format, %width, %input_row, %weight_row, %input, %up_weight) : (index, index, index, index, buffer, buffer) -> (f64)
+        %up_sum = func.call @quantized_sparse_dot_arithmetic(%half_coefficients, %format, %width, %input_row, %weight_row, %input, %up_weight) : (i1, index, index, index, index, buffer, buffer) -> (f64)
         %gate = scalar.fptrunc %sum : f64 to f32
         %up = scalar.fptrunc %up_sum : f64 to f32
         %negative = scalar.negf %gate : f32

@@ -3,7 +3,8 @@
 // gate and up share one padded K64 activation window in workgroup memory.
 // Q4_K/Q5_K retain a K256 quantization block, including its common header.
 // Q8 fills the same bank with four independent K32 blocks.
-// Integer codes are exact in BF16; physical scales and affine bias remain F32.
+// Decode physical coefficients to F16 once per shared panel. F32 matrix
+// accumulators span the full reduction; global activations remain BF16.
 // One masked activation refill overlaps computation of the current window.
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
@@ -42,42 +43,23 @@ func.def inline @expert_block_input(%input: buffer, %ids: vector<4xi32>, %live: 
   func.return %values : vector<4x8xbf16>
 }
 
-// A padded 129-row pitch separates LDS banks. Four lanes reduce each K32
-// activation sum for affine correction; Q8 needs no sums or correction plane.
-func.def inline @expert_block_publish_input(%affine: i1, %arena: buffer, %thread: index, %values: vector<4x8xbf16>) {
+// A padded 129-row pitch stages FP16 activations. Global input remains BF16.
+func.def inline @expert_block_publish_input(%arena: buffer, %thread: index, %values: vector<4x8xbf16>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c4 = index.constant 4 : index
   %c8 = index.constant 8 : index
   %c32 = index.constant 32 : index
   %origin = index.constant 0 : offset
-  %sum_origin = index.constant 16512 : offset
   %chunk = index.rem %thread, %c8 : index
   %row_base = index.div %thread, %c8 : index
-  %sum_group = index.div %chunk, %c4 : index
-  %sum_lane = index.rem %chunk, %c4 : index
-  %sum_owner = index.cmp eq, %sum_lane, %c0 : index
-  %c0_f32 = scalar.constant 0.0 : f32
-  %xor_one = scalar.constant 1 : i32
-  %xor_two = scalar.constant 2 : i32
-  %width = scalar.constant 32 : i32
-  %view = buffer.view %arena[%origin] : buffer -> view<8x129x8xbf16>
+  %view = buffer.view %arena[%origin] : buffer -> view<8x129x8xf16>
   scf.for %round = [%c0 to %c4 step %c1] unroll schedule(linear) {
     %row = index.madd %round, %c32, %row_base : index
     %packet = vector.extract %values[%round] : vector<4x8xbf16> -> vector<8xbf16>
-    vector.store %packet, %view[%chunk, %row, 0] : vector<8xbf16>, view<8x129x8xbf16>
-    scf.if %affine {
-      %sums = buffer.view %arena[%sum_origin] : buffer -> view<2x129xf32>
-      %wide = vector.extf %packet : vector<8xbf16> to vector<8xf32>
-      %partial = vector.reduce<addf> %wide, %c0_f32 : vector<8xf32>, f32
-      %peer_one, %valid_one = kernel.subgroup.shuffle<xor> %partial, %xor_one, %width : f32, i32, i32
-      %pair = scalar.addf %partial, %peer_one : f32
-      %peer_two, %valid_two = kernel.subgroup.shuffle<xor> %pair, %xor_two, %width : f32, i32, i32
-      %total = scalar.addf %pair, %peer_two : f32
-      scf.if %sum_owner {
-        view.store %total, %sums[%sum_group, %row] : f32, view<2x129xf32>
-      }
-    }
+    %wide = vector.extf %packet : vector<8xbf16> to vector<8xf32>
+    %converted = vector.fptrunc %wide : vector<8xf32> to vector<8xf16>
+    vector.store %converted, %view[%chunk, %row, 0] : vector<8xf16>, view<8x129x8xf16>
   }
   func.return
 }
@@ -152,7 +134,7 @@ func.def inline @expert_block_load(%q8: i1, %q5: i1, %weight: buffer, %row_origi
 
 // Decode one K32 half from the retained original bytes. QK nibbles share
 // one packet across adjacent scale groups; Q5's high plane supplies bit four.
-func.def inline @expert_block_coefficients(%q8: i1, %q5: i1, %header: vector<4xi32>, %high: vector<4xi32>, %packets: vector<4x4xi32>, %stage: index, %part: index) -> (vector<16xbf16>, f32, f32) {
+func.def inline @expert_block_coefficients(%q8: i1, %q5: i1, %header: vector<4xi32>, %high: vector<4xi32>, %packets: vector<4x4xi32>, %stage: index, %part: index) -> (vector<16xf16>) {
   %c2 = index.constant 2 : index
   %c4 = index.constant 4 : index
   %c0_f32 = scalar.constant 0.0 : f32
@@ -192,15 +174,20 @@ func.def inline @expert_block_coefficients(%q8: i1, %q5: i1, %header: vector<4xi
     %values = vector.uitofp %bytes : vector<16xi8> to vector<16xf32>
     scf.yield %values, %scale_value, %bias_value : vector<16xf32>, f32, f32
   }
-  %narrow = vector.fptrunc %codes : vector<16xf32> to vector<16xbf16>
-  func.return %narrow, %scale, %bias : vector<16xbf16>, f32, f32
+  %scale_half = scalar.fptrunc %scale : f32 to f16
+  %bias_half = scalar.fptrunc %bias : f32 to f16
+  %scales_half = vector.splat %scale_half : vector<16xf16>
+  %biases_half = vector.splat %bias_half : vector<16xf16>
+  %codes_half = vector.fptrunc %codes : vector<16xf32> to vector<16xf16>
+  %coefficients = vector.fmaf %codes_half, %scales_half, %biases_half : vector<16xf16>
+  func.return %coefficients : vector<16xf16>
 }
 
 // Each half-wave supplies one K16 packet; lane exchange constructs the
 // replicated RHS fragments. A subgroup owns eight gate and eight up channels
 // and visits eight token fragments, retaining only one operand fragment at a
 // time. Empty token fragments skip arithmetic without changing barrier counts.
-func.def inline @expert_block_compute(%q8: i1, %q5: i1, %affine: i1, %arena: buffer, %header: vector<4xi32>, %high: vector<4xi32>, %packets: vector<4x4xi32>, %stage: index, %live: index, %accumulator: vector<8x8xf32>) -> (vector<8x8xf32>) {
+func.def inline @expert_block_compute(%q8: i1, %q5: i1, %arena: buffer, %header: vector<4xi32>, %high: vector<4xi32>, %packets: vector<4x4xi32>, %stage: index, %live: index, %accumulator: vector<8x8xf32>) -> (vector<8x8xf32>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -208,28 +195,23 @@ func.def inline @expert_block_compute(%q8: i1, %q5: i1, %affine: i1, %arena: buf
   %c8 = index.constant 8 : index
   %c16 = index.constant 16 : index
   %origin = index.constant 0 : offset
-  %sum_origin = index.constant 16512 : offset
   %lane = kernel.subgroup.lane.id : index
   %lane_row = index.rem %lane, %c16 : index
   %half = index.div %lane, %c16 : index
   %second_half = index.cmp ne, %half, %c0 : index
-  %bf16_view = buffer.view %arena[%origin] : buffer -> view<8x129x8xbf16>
-  %initial = vector.constant 0.0 : vector<8xf32>
-  %zero_fragment = vector.fragment<init> %initial shape [%c16, %c16] : vector<8xf32>
+  %operand_view = buffer.view %arena[%origin] : buffer -> view<8x129x8xf16>
   %result = scf.for %block32 = [%c0 to %c2 step %c1](%accumulators = %accumulator : vector<8x8xf32>) -> (vector<8x8xf32>) unroll schedule(linear) {
-    %narrow, %scale_value, %bias_value = func.call @expert_block_coefficients(%q8, %q5, %header, %high, %packets, %stage, %block32) : (i1, i1, vector<4xi32>, vector<4xi32>, vector<4x4xi32>, index, index) -> (vector<16xbf16>, f32, f32)
+    %narrow = func.call @expert_block_coefficients(%q8, %q5, %header, %high, %packets, %stage, %block32) : (i1, i1, vector<4xi32>, vector<4xi32>, vector<4x4xi32>, index, index) -> (vector<16xf16>)
     %first_chunk = index.mul %block32, %c4 : index
     %chunk1 = index.add %first_chunk, %c1 : index
     %chunk2 = index.add %first_chunk, %c2 : index
     %chunk3 = index.add %chunk2, %c1 : index
-    %packed_codes = vector.bitcast %narrow : vector<16xbf16> to vector<8xi32>
+    %packed_codes = vector.bitcast %narrow : vector<16xf16> to vector<8xi32>
     %w0, %w1 = func.call @expert_fragment_pair(%packed_codes, %second_half) : (vector<8xi32>, i1) -> (vector<8xi32>, vector<8xi32>)
-    %codes0 = vector.bitcast %w0 : vector<8xi32> to vector<16xbf16>
-    %codes1 = vector.bitcast %w1 : vector<8xi32> to vector<16xbf16>
-    %rhs0 = vector.fragment<rhs> %codes0 shape [%c16, %c16] : vector<16xbf16>
-    %rhs1 = vector.fragment<rhs> %codes1 shape [%c16, %c16] : vector<16xbf16>
-    %scale = vector.splat %scale_value : vector<8xf32>
-    %bias = vector.splat %bias_value : vector<8xf32>
+    %codes0 = vector.bitcast %w0 : vector<8xi32> to vector<16xf16>
+    %codes1 = vector.bitcast %w1 : vector<8xi32> to vector<16xf16>
+    %rhs0 = vector.fragment<rhs> %codes0 shape [%c16, %c16] : vector<16xf16>
+    %rhs1 = vector.fragment<rhs> %codes1 shape [%c16, %c16] : vector<16xf16>
     %next = scf.for %fragment = [%c0 to %c8 step %c1](%tile = %accumulators : vector<8x8xf32>) -> (vector<8x8xf32>) unroll schedule(linear) {
       scf.schedule.fence
       %row_base = index.mul %fragment, %c16 : index
@@ -237,32 +219,18 @@ func.def inline @expert_block_compute(%q8: i1, %q5: i1, %affine: i1, %arena: buf
       %old = vector.extract %tile[%fragment] : vector<8x8xf32> -> vector<8xf32>
       %new = scf.if %active -> (vector<8xf32>) {
         %row = index.add %row_base, %lane_row : index
-        %q0 = vector.load %bf16_view[%first_chunk, %row, 0] : view<8x129x8xbf16> -> vector<8xbf16>
-        %q1 = vector.load %bf16_view[%chunk1, %row, 0] : view<8x129x8xbf16> -> vector<8xbf16>
-        %q2 = vector.load %bf16_view[%chunk2, %row, 0] : view<8x129x8xbf16> -> vector<8xbf16>
-        %q3 = vector.load %bf16_view[%chunk3, %row, 0] : view<8x129x8xbf16> -> vector<8xbf16>
-        %input0 = vector.concat<0> %q0, %q1 : vector<8xbf16>, vector<8xbf16> -> vector<16xbf16>
-        %input1 = vector.concat<0> %q2, %q3 : vector<8xbf16>, vector<8xbf16> -> vector<16xbf16>
-        %lhs0 = vector.fragment<lhs> %input0 shape [%c16, %c16] : vector<16xbf16>
-        %lhs1 = vector.fragment<lhs> %input1 shape [%c16, %c16] : vector<16xbf16>
-        %dot0 = vector.mma %lhs0, %rhs0, %zero_fragment : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-        %dot = vector.mma %lhs1, %rhs1, %dot0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-        %scaled = vector.fmaf %dot, %scale, %old : vector<8xf32>
-        %corrected = scf.if %affine -> (vector<8xf32>) {
-          %sums = buffer.view %arena[%sum_origin] : buffer -> view<2x129xf32>
-          %row_sums = scf.for %element = [%c0 to %c8 step %c1](%values = %initial : vector<8xf32>) -> (vector<8xf32>) unroll schedule(linear) {
-            %row_part = index.madd %element, %c2, %half : index
-            %sum_row = index.add %row_base, %row_part : index
-            %sum = view.load %sums[%block32, %sum_row] : view<2x129xf32> -> f32
-            %values_next = vector.insert %sum into %values[%element] : f32, vector<8xf32>
-            scf.yield %values_next : vector<8xf32>
-          }
-          %corrected = vector.fmaf %row_sums, %bias, %scaled : vector<8xf32>
-          scf.yield %corrected : vector<8xf32>
-        } else {
-          scf.yield %scaled : vector<8xf32>
-        }
-        scf.yield %corrected : vector<8xf32>
+        %q0 = vector.load %operand_view[%first_chunk, %row, 0] : view<8x129x8xf16> -> vector<8xf16>
+        %q1 = vector.load %operand_view[%chunk1, %row, 0] : view<8x129x8xf16> -> vector<8xf16>
+        %q2 = vector.load %operand_view[%chunk2, %row, 0] : view<8x129x8xf16> -> vector<8xf16>
+        %q3 = vector.load %operand_view[%chunk3, %row, 0] : view<8x129x8xf16> -> vector<8xf16>
+        %input0 = vector.concat<0> %q0, %q1 : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+        %input1 = vector.concat<0> %q2, %q3 : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+        %lhs0 = vector.fragment<lhs> %input0 shape [%c16, %c16] : vector<16xf16>
+        %lhs1 = vector.fragment<lhs> %input1 shape [%c16, %c16] : vector<16xf16>
+        %previous = vector.fragment<init> %old shape [%c16, %c16] : vector<8xf32>
+        %dot0 = vector.mma %lhs0, %rhs0, %previous : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %dot = vector.mma %lhs1, %rhs1, %dot0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        scf.yield %dot : vector<8xf32>
       } else {
         scf.yield %old : vector<8xf32>
       }
@@ -305,11 +273,7 @@ func.def public inline @expert_block_gate(%q8: i1, %q5: i1, %input_arg: buffer, 
   %row_bytes = scf.select %q8, %q8_row_bytes, %qk_row_bytes : offset
   %outer_blocks = scf.select %q8, %c20, %c10 : index
   %stages = scf.select %q8, %c2, %c4 : index
-  %false = scalar.constant false : i1
-  %affine = scalar.cmpi eq, %q8, %false : i1
-  %q8_bytes = index.constant 16896 : offset
-  %affine_bytes = index.constant 17544 : offset
-  %arena_bytes = scf.select %q8, %q8_bytes, %affine_bytes : offset
+  %arena_bytes = index.constant 16896 : offset
   %arena = buffer.alloca<workgroup> align(16) %arena_bytes : buffer
   %route_capacity = index.mul %capacity, %c10 : index
   %record_capacity, %record_fields, %record_bytes = func.call pure @expert_record_extent(%capacity, %rows) : (index, index) -> (index, index, offset)
@@ -371,7 +335,7 @@ func.def public inline @expert_block_gate(%q8: i1, %q5: i1, %input_arg: buffer, 
     %result, %unused_queue = scf.for %block = [%c0 to %outer_blocks step %c1](%accumulators = %accumulator_seed : vector<8x8xf32>, %pending = %first_input : vector<4x8xbf16>) -> (vector<8x8xf32>, vector<4x8xbf16>) {
       %metadata, %high, %cache = func.call @expert_block_load(%q8, %q5, %selected_weight, %weight_origin, %block, %half) : (i1, i1, buffer, offset, index, index) -> (vector<4xi32>, vector<4xi32>, vector<4x4xi32>)
       %next, %next_queue = scf.for %stage = [%c0 to %stages step %c1](%stage_accumulator = %accumulators : vector<8x8xf32>, %queued = %pending : vector<4x8xbf16>) -> (vector<8x8xf32>, vector<4x8xbf16>) unroll schedule(linear) {
-        func.call @expert_block_publish_input(%affine, %arena, %thread, %queued) : (i1, buffer, index, vector<4x8xbf16>)
+        func.call @expert_block_publish_input(%arena, %thread, %queued) : (buffer, index, vector<4x8xbf16>)
         kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
         %current = index.madd %block, %stages, %stage : index
         %following = index.add %current, %c1 : index
@@ -381,7 +345,7 @@ func.def public inline @expert_block_gate(%q8: i1, %q5: i1, %input_arg: buffer, 
         // the next LDS publication, after this window's matrix work.
         %safe_group = scf.select %has_next, %following, %c0 : index
         %refill = func.call @expert_block_input(%input, %ids, %masks, %safe_group, %thread, %has_next) : (buffer, vector<4xi32>, vector<4xi1>, index, index, i1) -> (vector<4x8xbf16>)
-        %computed = func.call @expert_block_compute(%q8, %q5, %affine, %arena, %metadata, %high, %cache, %stage, %live, %stage_accumulator) : (i1, i1, i1, buffer, vector<4xi32>, vector<4xi32>, vector<4x4xi32>, index, index, vector<8x8xf32>) -> (vector<8x8xf32>)
+        %computed = func.call @expert_block_compute(%q8, %q5, %arena, %metadata, %high, %cache, %stage, %live, %stage_accumulator) : (i1, i1, buffer, vector<4xi32>, vector<4xi32>, vector<4x4xi32>, index, index, vector<8x8xf32>) -> (vector<8x8xf32>)
         kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
         scf.yield %computed, %refill : vector<8x8xf32>, vector<4x8xbf16>
       }

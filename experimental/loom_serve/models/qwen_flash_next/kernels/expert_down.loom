@@ -1,7 +1,8 @@
 // Original Q5_1/Q8 down projection over 128 routed rows and 128 output
 // features per workgroup. Eight wave32 subgroups share each packed K64 panel;
 // each wave retains eight 16x16 output fragments across the K640 reduction.
-// Integer codes remain exact in BF16, with F32 scale/bias correction per K32.
+// F16 coefficients feed full-reduction F32 matrix accumulators. Global
+// activations and published results remain BF16.
 // Two 64-row scatter stages reuse the operand arena after matrix work retires.
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
@@ -41,55 +42,23 @@ func.def inline @expert_down_input(%input: buffer, %ids: vector<4xi32>, %live: v
   func.return %values : vector<4x8xbf16>
 }
 
-// Eight K8 planes use a padded 129-row pitch to separate LDS banks. Four
-// neighboring lanes reduce each K32 activation sum for Q5_1 affine correction.
-// Q8 specializes away the sum plane and its subgroup reductions.
-func.def inline @expert_down_publish_input(%affine: i1, %arena: buffer, %thread: index, %values: vector<4x8xbf16>) {
+// Eight K8 planes stage FP16 activations with a padded 129-row pitch.
+func.def inline @expert_down_publish_input(%arena: buffer, %thread: index, %values: vector<4x8xbf16>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c4 = index.constant 4 : index
   %c8 = index.constant 8 : index
   %c32 = index.constant 32 : index
   %origin = index.constant 0 : offset
-  %sum_origin = index.constant 22656 : offset
   %chunk = index.rem %thread, %c8 : index
   %row_base = index.div %thread, %c8 : index
-  %sum_group = index.div %chunk, %c4 : index
-  %sum_lane = index.rem %chunk, %c4 : index
-  %sum_owner = index.cmp eq, %sum_lane, %c0 : index
-  %c0_f32 = scalar.constant 0.0 : f32
-  %xor_one = scalar.constant 1 : i32
-  %xor_two = scalar.constant 2 : i32
-  %width = scalar.constant 32 : i32
-  %view = buffer.view %arena[%origin] : buffer -> view<8x129x8xbf16>
-  %seed = vector.constant 0.0 : vector<4xf32>
-  %totals = scf.for %round = [%c0 to %c4 step %c1](%sums = %seed : vector<4xf32>) -> (vector<4xf32>) unroll schedule(linear) {
+  %view = buffer.view %arena[%origin] : buffer -> view<8x129x8xf16>
+  scf.for %round = [%c0 to %c4 step %c1] unroll schedule(linear) {
     %row = index.madd %round, %c32, %row_base : index
     %packet = vector.extract %values[%round] : vector<4x8xbf16> -> vector<8xbf16>
-    vector.store %packet, %view[%chunk, %row, 0] : vector<8xbf16>, view<8x129x8xbf16>
-    %sum = scf.if %affine -> (f32) {
-      %wide = vector.extf %packet : vector<8xbf16> to vector<8xf32>
-      %partial = vector.reduce<addf> %wide, %c0_f32 : vector<8xf32>, f32
-      %peer_one, %valid_one = kernel.subgroup.shuffle<xor> %partial, %xor_one, %width : f32, i32, i32
-      %pair = scalar.addf %partial, %peer_one : f32
-      %peer_two, %valid_two = kernel.subgroup.shuffle<xor> %pair, %xor_two, %width : f32, i32, i32
-      %total = scalar.addf %pair, %peer_two : f32
-      scf.yield %total : f32
-    } else {
-      scf.yield %c0_f32 : f32
-    }
-    %next = vector.insert %sum into %sums[%round] : f32, vector<4xf32>
-    scf.yield %next : vector<4xf32>
-  }
-  scf.if %affine {
-    %mask = vector.splat %sum_owner : vector<1xi1>
-    %sums = buffer.view %arena[%sum_origin] : buffer -> view<2x129xf32>
-    scf.for %round = [%c0 to %c4 step %c1] unroll schedule(linear) {
-      %row = index.madd %round, %c32, %row_base : index
-      %sum = vector.extract %totals[%round] : vector<4xf32> -> f32
-      %value = vector.splat %sum : vector<1xf32>
-      vector.store.mask %value, %sums[%sum_group, %row], %mask : vector<1xf32>, view<2x129xf32>, vector<1xi1>
-    }
+    %wide = vector.extf %packet : vector<8xbf16> to vector<8xf32>
+    %converted = vector.fptrunc %wide : vector<8xf32> to vector<8xf16>
+    vector.store %converted, %view[%chunk, %row, 0] : vector<8xf16>, view<8x129x8xf16>
   }
   func.return
 }
@@ -172,7 +141,7 @@ func.def inline @expert_down_publish_weight(%q8: i1, %arena: buffer, %thread: in
   func.return
 }
 
-func.def inline @expert_down_coefficients(%q8: i1, %arena: buffer, %part: index, %half: index) -> (vector<16xbf16>, f32, f32) {
+func.def inline @expert_down_coefficients(%q8: i1, %arena: buffer, %part: index, %half: index) -> (vector<16xf16>) {
   %c2 = index.constant 2 : index
   %c4 = index.constant 4 : index
   %c16 = index.constant 16 : index
@@ -189,10 +158,10 @@ func.def inline @expert_down_coefficients(%q8: i1, %arena: buffer, %part: index,
   %dm = view.load %metadata[%part, %column] : view<2x128xi32> -> i32
   %packed_dm = vector.splat %dm : vector<1xi32>
   %half_dm = vector.bitcast %packed_dm : vector<1xi32> to vector<2xf16>
-  %scale_half = vector.extract %half_dm[0] : vector<2xf16> -> f16
-  %bias_half = vector.extract %half_dm[1] : vector<2xf16> -> f16
-  %scale = scalar.extf %scale_half : f16 to f32
-  %bias = scalar.extf %bias_half : f16 to f32
+  %stored_scale = vector.extract %half_dm[0] : vector<2xf16> -> f16
+  %stored_bias = vector.extract %half_dm[1] : vector<2xf16> -> f16
+  %scale = scalar.extf %stored_scale : f16 to f32
+  %bias = scalar.extf %stored_bias : f16 to f32
   %codes = scf.if %q8 -> (vector<16xi8>) {
     %row_pair = index.div %column, %c2 : index
     %rotation = index.rem %row_pair, %c4 : index
@@ -216,11 +185,16 @@ func.def inline @expert_down_coefficients(%q8: i1, %arena: buffer, %part: index,
     scf.yield %decoded : vector<16xi8>
   }
   %wide = vector.sitofp %codes : vector<16xi8> to vector<16xf32>
-  %values = vector.fptrunc %wide : vector<16xf32> to vector<16xbf16>
-  func.return %values, %scale, %bias : vector<16xbf16>, f32, f32
+  %scale_half = scalar.fptrunc %scale : f32 to f16
+  %bias_half = scalar.fptrunc %bias : f32 to f16
+  %scales_half = vector.splat %scale_half : vector<16xf16>
+  %biases_half = vector.splat %bias_half : vector<16xf16>
+  %codes_half = vector.fptrunc %wide : vector<16xf32> to vector<16xf16>
+  %coefficients = vector.fmaf %codes_half, %scales_half, %biases_half : vector<16xf16>
+  func.return %coefficients : vector<16xf16>
 }
 
-func.def inline @expert_down_compute(%q8: i1, %affine: i1, %arena: buffer, %live: index, %accumulator: vector<8x8xf32>) -> (vector<8x8xf32>) {
+func.def inline @expert_down_compute(%q8: i1, %arena: buffer, %live: index, %accumulator: vector<8x8xf32>) -> (vector<8x8xf32>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -228,60 +202,41 @@ func.def inline @expert_down_compute(%q8: i1, %affine: i1, %arena: buffer, %live
   %c8 = index.constant 8 : index
   %c16 = index.constant 16 : index
   %origin = index.constant 0 : offset
-  %sum_origin = index.constant 22656 : offset
   %lane = kernel.subgroup.lane.id : index
   %lane_row = index.rem %lane, %c16 : index
   %half = index.div %lane, %c16 : index
   %second_half = index.cmp ne, %half, %c0 : index
-  %bf16_view = buffer.view %arena[%origin] : buffer -> view<8x129x8xbf16>
-  %initial = vector.constant 0.0 : vector<8xf32>
-  %zero_fragment = vector.fragment<init> %initial shape [%c16, %c16] : vector<8xf32>
+  %operand_view = buffer.view %arena[%origin] : buffer -> view<8x129x8xf16>
   %result = scf.for %block32 = [%c0 to %c2 step %c1](%accumulators = %accumulator : vector<8x8xf32>) -> (vector<8x8xf32>) unroll schedule(linear) {
-    %narrow, %scale_value, %bias_value = func.call @expert_down_coefficients(%q8, %arena, %block32, %half) : (i1, buffer, index, index) -> (vector<16xbf16>, f32, f32)
+    %narrow = func.call @expert_down_coefficients(%q8, %arena, %block32, %half) : (i1, buffer, index, index) -> (vector<16xf16>)
     %first_chunk = index.mul %block32, %c4 : index
     %second_chunk = index.add %first_chunk, %c1 : index
     %third_chunk = index.add %first_chunk, %c2 : index
     %fourth_chunk = index.add %third_chunk, %c1 : index
-    %packed_codes = vector.bitcast %narrow : vector<16xbf16> to vector<8xi32>
+    %packed_codes = vector.bitcast %narrow : vector<16xf16> to vector<8xi32>
     %first_words, %second_words = func.call @expert_fragment_pair(%packed_codes, %second_half) : (vector<8xi32>, i1) -> (vector<8xi32>, vector<8xi32>)
-    %first_codes = vector.bitcast %first_words : vector<8xi32> to vector<16xbf16>
-    %second_codes = vector.bitcast %second_words : vector<8xi32> to vector<16xbf16>
-    %first_rhs = vector.fragment<rhs> %first_codes shape [%c16, %c16] : vector<16xbf16>
-    %second_rhs = vector.fragment<rhs> %second_codes shape [%c16, %c16] : vector<16xbf16>
-    %scale = vector.splat %scale_value : vector<8xf32>
-    %bias = vector.splat %bias_value : vector<8xf32>
+    %first_codes = vector.bitcast %first_words : vector<8xi32> to vector<16xf16>
+    %second_codes = vector.bitcast %second_words : vector<8xi32> to vector<16xf16>
+    %first_rhs = vector.fragment<rhs> %first_codes shape [%c16, %c16] : vector<16xf16>
+    %second_rhs = vector.fragment<rhs> %second_codes shape [%c16, %c16] : vector<16xf16>
     %next = scf.for %fragment = [%c0 to %c8 step %c1](%tile = %accumulators : vector<8x8xf32>) -> (vector<8x8xf32>) unroll schedule(linear) {
       %row_base = index.mul %fragment, %c16 : index
       %active = index.cmp ult, %row_base, %live : index
       %old = vector.extract %tile[%fragment] : vector<8x8xf32> -> vector<8xf32>
       %new = scf.if %active -> (vector<8xf32>) {
         %row = index.add %row_base, %lane_row : index
-        %first_quarter = vector.load %bf16_view[%first_chunk, %row, 0] : view<8x129x8xbf16> -> vector<8xbf16>
-        %second_quarter = vector.load %bf16_view[%second_chunk, %row, 0] : view<8x129x8xbf16> -> vector<8xbf16>
-        %third_quarter = vector.load %bf16_view[%third_chunk, %row, 0] : view<8x129x8xbf16> -> vector<8xbf16>
-        %fourth_quarter = vector.load %bf16_view[%fourth_chunk, %row, 0] : view<8x129x8xbf16> -> vector<8xbf16>
-        %first_input = vector.concat<0> %first_quarter, %second_quarter : vector<8xbf16>, vector<8xbf16> -> vector<16xbf16>
-        %second_input = vector.concat<0> %third_quarter, %fourth_quarter : vector<8xbf16>, vector<8xbf16> -> vector<16xbf16>
-        %first_lhs = vector.fragment<lhs> %first_input shape [%c16, %c16] : vector<16xbf16>
-        %second_lhs = vector.fragment<lhs> %second_input shape [%c16, %c16] : vector<16xbf16>
-        %first_dot = vector.mma %first_lhs, %first_rhs, %zero_fragment : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-        %dot = vector.mma %second_lhs, %second_rhs, %first_dot : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-        %scaled = vector.fmaf %dot, %scale, %old : vector<8xf32>
-        %corrected = scf.if %affine -> (vector<8xf32>) {
-          %sums = buffer.view %arena[%sum_origin] : buffer -> view<2x129xf32>
-          %row_sums = scf.for %element = [%c0 to %c8 step %c1](%values = %initial : vector<8xf32>) -> (vector<8xf32>) unroll schedule(linear) {
-            %row_part = index.madd %element, %c2, %half : index
-            %sum_row = index.add %row_base, %row_part : index
-            %sum = view.load %sums[%block32, %sum_row] : view<2x129xf32> -> f32
-            %values_next = vector.insert %sum into %values[%element] : f32, vector<8xf32>
-            scf.yield %values_next : vector<8xf32>
-          }
-          %corrected = vector.fmaf %row_sums, %bias, %scaled : vector<8xf32>
-          scf.yield %corrected : vector<8xf32>
-        } else {
-          scf.yield %scaled : vector<8xf32>
-        }
-        scf.yield %corrected : vector<8xf32>
+        %first_quarter = vector.load %operand_view[%first_chunk, %row, 0] : view<8x129x8xf16> -> vector<8xf16>
+        %second_quarter = vector.load %operand_view[%second_chunk, %row, 0] : view<8x129x8xf16> -> vector<8xf16>
+        %third_quarter = vector.load %operand_view[%third_chunk, %row, 0] : view<8x129x8xf16> -> vector<8xf16>
+        %fourth_quarter = vector.load %operand_view[%fourth_chunk, %row, 0] : view<8x129x8xf16> -> vector<8xf16>
+        %first_input = vector.concat<0> %first_quarter, %second_quarter : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+        %second_input = vector.concat<0> %third_quarter, %fourth_quarter : vector<8xf16>, vector<8xf16> -> vector<16xf16>
+        %first_lhs = vector.fragment<lhs> %first_input shape [%c16, %c16] : vector<16xf16>
+        %second_lhs = vector.fragment<lhs> %second_input shape [%c16, %c16] : vector<16xf16>
+        %previous = vector.fragment<init> %old shape [%c16, %c16] : vector<8xf32>
+        %first_dot = vector.mma %first_lhs, %first_rhs, %previous : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        %dot = vector.mma %second_lhs, %second_rhs, %first_dot : vector<16xf16>, vector<16xf16>, vector<8xf32>
+        scf.yield %dot : vector<8xf32>
       } else {
         scf.yield %old : vector<8xf32>
       }
@@ -298,11 +253,11 @@ func.def inline @expert_down_compute(%q8: i1, %affine: i1, %arena: buffer, %live
 // both input and output rows. Masks suppress inactive rows within a record.
 //
 // The arena starts with 16512 activation bytes. Q5_1 follows with 4096 packed
-// code bytes, 1024 high-bit bytes, 1024 header bytes, and 1032 activation-sum
-// bytes. Q8 instead uses 8192 code bytes and 1024 header bytes. After the final
+// code bytes, 1024 high-bit bytes, and 1024 header bytes.
+// Q8 instead uses 8192 code bytes and 1024 header bytes. After the final
 // operand-retirement barrier, this storage holds two successive 64x130 BF16
 // result tiles for coalesced scatter. Publishing one half at a time fits inside
-// the 23688-byte Q5_1 or 25728-byte Q8 operand arena, without a global temporary.
+// the 22656-byte Q5_1 or 25728-byte Q8 operand arena, without a global temporary.
 func.def public inline @expert_down_stream(%q8: i1, %input_arg: buffer, %tasks_arg: buffer, %weight_arg: buffer, %output_arg: buffer) {
   %input, %tasks, %weight, %output = buffer.assume.noalias %input_arg, %tasks_arg, %weight_arg, %output_arg : buffer, buffer, buffer, buffer
   %capacity = config.get @flash_next.token_count : index
@@ -326,12 +281,10 @@ func.def public inline @expert_down_stream(%q8: i1, %input_arg: buffer, %tasks_a
   %q51_row_bytes = index.constant 480 : offset
   %q8_row_bytes = index.constant 680 : offset
   %row_bytes = scf.select %q8, %q8_row_bytes, %q51_row_bytes : offset
-  %q51_arena = index.constant 23688 : offset
+  %q51_arena = index.constant 22656 : offset
   %q8_arena = index.constant 25728 : offset
   %arena_bytes = scf.select %q8, %q8_arena, %q51_arena : offset
   %arena = buffer.alloca<workgroup> align(16) %arena_bytes : buffer
-  %false = scalar.constant false : i1
-  %affine = scalar.cmpi eq, %q8, %false : i1
   %route_capacity = index.mul %capacity, %c10 : index
   %record_capacity, %record_fields, %record_bytes = func.call pure @expert_record_extent(%capacity, %c128) : (index, index) -> (index, index, offset)
   %header = buffer.view %tasks[%origin] : buffer -> view<1xi32>
@@ -382,10 +335,10 @@ func.def public inline @expert_down_stream(%q8: i1, %input_arg: buffer, %tasks_a
       %codes, %metadata = func.call @expert_down_fetch(%q8, %weight, %weight_origin, %stage, %weight_part) : (i1, buffer, offset, index, index) -> (vector<8xi32>, vector<2xi32>)
       %activations = func.call @expert_down_input(%input, %ids, %masks, %stage, %thread) : (buffer, vector<4xi32>, vector<4xi1>, index, index) -> (vector<4x8xbf16>)
       func.call @expert_down_publish_weight(%q8, %arena, %thread, %codes, %metadata) : (i1, buffer, index, vector<8xi32>, vector<2xi32>)
-      func.call @expert_down_publish_input(%affine, %arena, %thread, %activations) : (i1, buffer, index, vector<4x8xbf16>)
+      func.call @expert_down_publish_input(%arena, %thread, %activations) : (buffer, index, vector<4x8xbf16>)
       // Publish the current operands to every wave before matrix reads.
       kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-      %next = func.call @expert_down_compute(%q8, %affine, %arena, %live, %accumulators) : (i1, i1, buffer, index, vector<8x8xf32>) -> (vector<8x8xf32>)
+      %next = func.call @expert_down_compute(%q8, %arena, %live, %accumulators) : (i1, buffer, index, vector<8x8xf32>) -> (vector<8x8xf32>)
       // Retire all readers before the next stage overwrites shared storage.
       kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
       scf.yield %next : vector<8x8xf32>
