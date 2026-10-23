@@ -296,6 +296,14 @@ the final BF16 store. No global gate tensor or decoded weight bank is allocated.
 The separate four-row injection retains its original F32 or Q8 arithmetic;
 smaller epochs and selected output-head rows retain packed dot products.
 
+At capacities of up to four tokens, each target injection row uses an entire
+128-thread workgroup. Four wave sums cross a 16-byte shared-memory exchange,
+reducing the serial accumulation from forty iterations to ten. The first
+80 groups retain the low-rank projection; four more groups produce the
+injection gates. The coefficients and F32 accumulation remain unchanged,
+apart from reduction order. Larger token cohorts and Q8 predictor injection
+retain their existing coefficient-reuse schedules.
+
 MTP catch-up also uses the shared Q8 contraction at capacities of at least 128.
 The original projection rows contain adjacent embedding and hidden halves;
 explicit row stride and byte origin select each half without copying weights.
