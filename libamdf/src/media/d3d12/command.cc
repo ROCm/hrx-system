@@ -96,6 +96,13 @@ amdf_status_t AMDF_CALL
 CommandCreate(amdf_kernel_queue_t* queue,
               const amdf_media_command_create_info_t* create_info,
               amdf_media_command_t** out_command) {
+  if (create_info->codec != AMDF_MEDIA_CODEC_H264 &&
+      create_info->codec != AMDF_MEDIA_CODEC_HEVC &&
+      create_info->codec != AMDF_MEDIA_CODEC_VP9 &&
+      create_info->codec != AMDF_MEDIA_CODEC_AV1) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  const size_t slice_byte_length = DecodeSliceByteLength(create_info->codec);
   auto* device = reinterpret_cast<Device*>(queue->device);
   Memory* feedback = nullptr;
   amdf_status_t status = ValidateBuffer(
@@ -105,7 +112,7 @@ CommandCreate(amdf_kernel_queue_t* queue,
     return status;
   }
   if (create_info->maximum_reference_count > 16 ||
-      create_info->maximum_slice_count > UINT32_MAX / kDecodeSliceByteLength ||
+      create_info->maximum_slice_count > UINT32_MAX / slice_byte_length ||
       create_info->maximum_activation_count > UINT32_MAX - 38) {
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
@@ -114,7 +121,7 @@ CommandCreate(amdf_kernel_queue_t* queue,
       2 * (uint64_t(create_info->maximum_reference_count) + 2);
   const uint64_t trailing_length =
       barrier_count * sizeof(D3D12_RESOURCE_BARRIER) +
-      uint64_t(create_info->maximum_slice_count) * kDecodeSliceByteLength;
+      uint64_t(create_info->maximum_slice_count) * slice_byte_length;
   if (trailing_length > SIZE_MAX - sizeof(Command)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
   }
@@ -127,6 +134,7 @@ CommandCreate(amdf_kernel_queue_t* queue,
   }
   auto* command = new (storage) Command{};
   command->base.queue = queue;
+  command->base.codec = create_info->codec;
   command->feedback = create_info->feedback;
   command->feedback_resource = feedback->resource.Get();
   command->feedback_pointer =
@@ -178,6 +186,9 @@ amdf_status_t AMDF_CALL CommandPrepare(
   amdf_status_t status = QueueTerminalStatus(queue);
   if (!amdf_status_is_ok(status)) {
     return status;
+  }
+  if (command_base->codec != session->info.configuration.codec) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
   if (prepare_info->operation != AMDF_MEDIA_COMMAND_OPERATION_PICTURE) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);

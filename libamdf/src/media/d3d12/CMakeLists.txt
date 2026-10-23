@@ -101,6 +101,7 @@ iree_cc_library(
   NAME
     execution
   HDRS
+    "av1.h"
     "command.h"
     "decode.h"
     "h264.h"
@@ -109,6 +110,7 @@ iree_cc_library(
     "session.h"
     "vp9.h"
   SRCS
+    "av1.cc"
     "command.cc"
     "decode.cc"
     "h264.cc"
@@ -127,6 +129,7 @@ iree_cc_library(
     libamdf::src::atomics
     libamdf::src::child_tracker
     libamdf::src::kernel_queue
+    libamdf::src::media::av1
     libamdf::src::media::h264
     libamdf::src::media::hevc
     libamdf::src::media::vp9

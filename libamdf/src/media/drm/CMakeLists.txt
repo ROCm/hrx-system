@@ -34,6 +34,8 @@ iree_cc_library(
   NAME
     execution
   HDRS
+    "av1_context.h"
+    "av1_grain.h"
     "command.h"
     "jpeg.h"
     "queue.h"
@@ -41,6 +43,8 @@ iree_cc_library(
     "vcn.h"
     "vp9_context.h"
   SRCS
+    "av1_context.c"
+    "av1_grain.c"
     "command.c"
     "jpeg.c"
     "queue.c"
@@ -54,6 +58,7 @@ iree_cc_library(
     amdf::headers
     libamdf::src::allocator
     libamdf::src::atomics
+    libamdf::src::media::av1
     libamdf::src::media::h264
     libamdf::src::media::hevc
     libamdf::src::media::vp9
@@ -178,6 +183,22 @@ iree_cc_test(
     libamdf::src::kernel_queue
     libamdf::src::platform::linux::endpoint
     libamdf::src::platform::linux::file
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+iree_cc_test(
+  NAME
+    av1_context_test
+  SRCS
+    "av1_context_test.cc"
+  DEPS
+    ::execution
+    amdf::headers
+    iree::third_party::google_test
+    iree::third_party::google_test_main
   LABELS
     "iree-build-requirement=libamdf"
 )

@@ -1,6 +1,6 @@
 # Native media and GPU ownership witness
 
-The H264, HEVC, and VP9 corpora exercise media and compute through runtime-loaded
+The H264, HEVC, VP9, and AV1 corpora exercise media and compute through runtime-loaded
 libamdf tables. H264's twelve pictures include seven B pictures, three simultaneously live
 short-term references, and display order different from decode order. A second
 case repeats the stream through 32 pictures using four recording owners, two
@@ -20,6 +20,16 @@ application-owned reference slots. Exact GPU sample fingerprints distinguish
 correct pixels from successful native feedback. Admission keeps coded dimensions
 separate from reference padding and rejects unsupported precision without
 silently converting the output.
+
+AV1 uses the [shared independent fixtures](../../../media/README.md#av1-fixture-provenance)
+at both sample precisions. Its baseline and extended 520×200 streams exercise
+64/128-pixel superblocks, four tiles, super-resolution, restoration, and film
+grain. Separate streams activate segmentation, quantization matrices, and nonidentity
+global motion, and
+128×128 lossless streams retain every source sample. Nine reference slots keep
+reconstruction free of display grain while four recordings and two output slots
+are reused through 24 pictures. The GPU hashes every decoded sample and computes
+the same crop/color output used by the other video corpora.
 
 The GPU publishes compressed bytes, waits natively for decode, reads the shared
 NV12 or P010 output, and produces a moving 64x64 RGB crop. A decode that reuses

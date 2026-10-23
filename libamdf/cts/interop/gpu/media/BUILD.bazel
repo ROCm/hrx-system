@@ -19,6 +19,7 @@ package(
 test_suite(
     name = "media",
     tests = [
+        ":av1",
         ":h264",
         ":hevc",
         ":vp9",
@@ -104,6 +105,21 @@ amdf_cts_test_suite(
     deps = [
         ":decode_fixture",
         "//libamdf/cts/media:vp9_fixture",
+        "//third_party:google_test",
+    ],
+)
+
+amdf_cts_test_suite(
+    name = "av1",
+    srcs = ["av1_test.cc"],
+    target_compatible_with = [
+        "@platforms//os:windows",
+        "@platforms//cpu:x86_64",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":decode_fixture",
+        "//libamdf/cts/media:av1_fixture",
         "//third_party:google_test",
     ],
 )

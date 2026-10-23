@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "libamdf/src/media/drm/av1_grain.h"
 #include "libamdf/src/media/hevc.h"
 
 // The firmware ABI consists of little-endian DWORD messages. These offsets
@@ -28,6 +29,7 @@ enum {
   STREAM_H264 = 7,
   STREAM_HEVC = 16,
   STREAM_VP9 = 17,
+  STREAM_AV1 = 19,
 };
 
 // DWORD offsets within the unified DECODE_BUFFER package. Each address pair
@@ -199,7 +201,8 @@ static void amdf_media_drm_vcn_address(uint32_t* words, uint64_t address) {
 static uint32_t amdf_media_drm_vcn_stream(amdf_media_codec_t codec) {
   return codec == AMDF_MEDIA_CODEC_H264   ? STREAM_H264
          : codec == AMDF_MEDIA_CODEC_HEVC ? STREAM_HEVC
-                                          : STREAM_VP9;
+         : codec == AMDF_MEDIA_CODEC_VP9  ? STREAM_VP9
+                                          : STREAM_AV1;
 }
 
 static uint32_t amdf_media_drm_vcn_ib(amdf_media_drm_buffer_t* storage,
@@ -221,19 +224,23 @@ static uint32_t amdf_media_drm_vcn_ib(amdf_media_drm_buffer_t* storage,
   amdf_media_drm_vcn_address(buffers + BINDING_SESSION,
                              session->storage->address);
   if (compressed != 0) {
-    const bool vp9 =
-        session->requirements.configuration.codec == AMDF_MEDIA_CODEC_VP9;
+    const amdf_media_codec_t codec = session->requirements.configuration.codec;
+    const bool probabilities =
+        codec == AMDF_MEDIA_CODEC_VP9 || codec == AMDF_MEDIA_CODEC_AV1;
+    const uint32_t auxiliary_offset =
+        codec == AMDF_MEDIA_CODEC_AV1 ? AMDF_MEDIA_DRM_VCN_AV1_AUXILIARY_OFFSET
+        : probabilities               ? AMDF_MEDIA_DRM_VCN_PROBABILITY_OFFSET
+                                      : AMDF_MEDIA_DRM_VCN_SCALING_OFFSET;
     // Bitstream, target, collocated state, and scaling or probabilities.
-    buffers[BINDING_FLAGS] |= vp9 ? 0x180c : 0xa0c;
+    buffers[BINDING_FLAGS] |= probabilities ? 0x180c : 0xa0c;
     amdf_media_drm_vcn_address(buffers + BINDING_OUTPUT, output);
     amdf_media_drm_vcn_address(buffers + BINDING_COMPRESSED, compressed);
     amdf_media_drm_vcn_address(
         buffers + BINDING_CONTEXT,
         session->storage->address + SESSION_CONTEXT_BYTES);
     amdf_media_drm_vcn_address(
-        buffers + (vp9 ? BINDING_PROBABILITIES : BINDING_SCALING),
-        storage->address + (vp9 ? AMDF_MEDIA_DRM_VCN_PROBABILITY_OFFSET
-                                : AMDF_MEDIA_DRM_VCN_SCALING_OFFSET));
+        buffers + (probabilities ? BINDING_PROBABILITIES : BINDING_SCALING),
+        storage->address + auxiliary_offset);
   }
   return INDIRECT_BUFFER_BYTES;
 }
@@ -369,8 +376,10 @@ static uint8_t* amdf_media_drm_vcn_decode(
   decode[DECODE_SESSION_CONTEXT_BYTES] = SESSION_CONTEXT_BYTES;
   // Message, compressed, output, context, and codec-specific auxiliary storage.
   decode[DECODE_BUFFER_FLAGS] =
-      session->requirements.configuration.codec == AMDF_MEDIA_CODEC_VP9 ? 0x180d
-                                                                        : 0xa0d;
+      (session->requirements.configuration.codec == AMDF_MEDIA_CODEC_VP9 ||
+       session->requirements.configuration.codec == AMDF_MEDIA_CODEC_AV1)
+          ? 0x180d
+          : 0xa0d;
   decode[DECODE_REFERENCE_PITCH] = current->row_pitches[0] / sample_bytes;
   decode[DECODE_REFERENCE_ROWS] = current->row_counts[0];
   const amdf_media_drm_device_t* device =
@@ -589,6 +598,22 @@ uint32_t amdf_media_drm_vcn_hevc(
                                output->addresses[0]);
 }
 
+static void amdf_media_drm_vcn_reference_map(
+    const uint8_t map[8], const amdf_media_reference_t* bindings,
+    const amdf_media_drm_frame_t* references, uint32_t* dynamic,
+    uint8_t slots[8]) {
+  for (uint32_t i = 0; i < 8; ++i) {
+    const uint32_t index = map[i];
+    slots[i] = index == 255 ? 127 : (uint8_t)bindings[index].slot_index;
+    if (index != 255) {
+      dynamic[DYNAMIC_REFERENCE_LOW + i] =
+          (uint32_t)references[index].addresses[0];
+      dynamic[DYNAMIC_REFERENCE_HIGH + i] =
+          (uint32_t)(references[index].addresses[0] >> 32);
+    }
+  }
+}
+
 static uint8_t amdf_media_drm_vcn_vp9_filter_level(int32_t value) {
   return (uint8_t)(value < 0 ? 0 : value > 63 ? 63 : value);
 }
@@ -659,17 +684,9 @@ uint32_t amdf_media_drm_vcn_vp9(
   // Tier-2 VP9 addresses follow the eight logical map entries. Aliasing those
   // entries is legal; the residency list retains each unique physical binding.
   uint32_t* dynamic = (uint32_t*)(codec - DYNAMIC_WORDS * 4);
-  for (uint32_t i = 0; i < 8; ++i) {
-    const uint32_t index = picture->reference_map[i];
-    codec[VP9_BYTE_REFERENCE_MAP + i] =
-        index == 255 ? 127 : (uint8_t)picture->references[index].slot_index;
-    if (index != 255) {
-      dynamic[DYNAMIC_REFERENCE_LOW + i] =
-          (uint32_t)references[index].addresses[0];
-      dynamic[DYNAMIC_REFERENCE_HIGH + i] =
-          (uint32_t)(references[index].addresses[0] >> 32);
-    }
-  }
+  amdf_media_drm_vcn_reference_map(picture->reference_map, picture->references,
+                                   references, dynamic,
+                                   codec + VP9_BYTE_REFERENCE_MAP);
   for (uint32_t i = 0; i < 3; ++i) {
     const uint32_t index = picture->active_reference_indices[i];
     codec[VP9_BYTE_ACTIVE_REFERENCES + i] =
@@ -690,6 +707,270 @@ uint32_t amdf_media_drm_vcn_vp9(
     memcpy(probabilities + 2343, segments->prediction_probabilities, 3);
     probabilities[2346] = (uint8_t)segments->absolute_values;
     memcpy(probabilities + 2347, segments->feature_masks, 8);
+  }
+  return amdf_media_drm_vcn_ib(storage, session, compressed_address,
+                               output->addresses[0]);
+}
+
+// Byte offsets in the VCN4 AV1 picture message.
+enum {
+  AV1_FRAME_HEADER_FLAGS = 0,
+  AV1_CURRENT_FRAME_ID = 4,
+  AV1_FRAME_OFFSET = 8,
+  AV1_PROFILE = 12,
+  AV1_IS_ANNEXB = 13,
+  AV1_FRAME_TYPE = 14,
+  AV1_PRIMARY_REF_FRAME = 15,
+  AV1_CURR_PIC_IDX = 16,
+  AV1_SB_SIZE = 17,
+  AV1_INTERP_FILTER = 18,
+  AV1_FILTER_LEVEL = 19,
+  AV1_FILTER_LEVEL_U = 21,
+  AV1_FILTER_LEVEL_V = 22,
+  AV1_SHARPNESS_LEVEL = 23,
+  AV1_REF_DELTAS = 24,
+  AV1_MODE_DELTAS = 32,
+  AV1_BASE_QINDEX = 34,
+  AV1_Y_DC_DELTA_Q = 35,
+  AV1_U_DC_DELTA_Q = 36,
+  AV1_V_DC_DELTA_Q = 37,
+  AV1_U_AC_DELTA_Q = 38,
+  AV1_V_AC_DELTA_Q = 39,
+  AV1_QM_Y = 40,
+  AV1_QM_U = 41,
+  AV1_QM_V = 42,
+  AV1_DELTA_Q_RES = 43,
+  AV1_DELTA_LF_RES = 44,
+  AV1_TILE_COLS = 45,
+  AV1_TILE_ROWS = 46,
+  AV1_TX_MODE = 47,
+  AV1_REFERENCE_MODE = 48,
+  AV1_CHROMA_FORMAT = 49,
+  AV1_TILE_SIZE_BYTES = 52,
+  AV1_CONTEXT_UPDATE_TILE_ID = 56,
+  AV1_TILE_COL_START_SB = 60,
+  AV1_TILE_ROW_START_SB = 320,
+  AV1_MAX_WIDTH = 580,
+  AV1_MAX_HEIGHT = 584,
+  AV1_WIDTH = 588,
+  AV1_HEIGHT = 592,
+  AV1_SUPERRES_UPSCALED_WIDTH = 596,
+  AV1_SUPERRES_SCALE_DENOMINATOR = 600,
+  AV1_ORDER_HINT_BITS = 601,
+  AV1_REF_FRAME_MAP = 602,
+  AV1_REF_FRAME_OFFSET = 612,
+  AV1_FRAME_REFS = 644,
+  AV1_REF_FRAME_SIGN_BIAS = 651,
+  AV1_BIT_DEPTH_LUMA_MINUS8 = 658,
+  AV1_BIT_DEPTH_CHROMA_MINUS8 = 659,
+  AV1_FEATURE_DATA = 660,
+  AV1_FEATURE_MASK = 916,
+  AV1_CDEF_DAMPING = 924,
+  AV1_CDEF_BITS = 925,
+  AV1_CDEF_STRENGTHS = 926,
+  AV1_CDEF_UV_STRENGTHS = 958,
+  AV1_FRAME_RESTORATION_TYPE = 990,
+  AV1_LOG2_RESTORATION_UNIT_SIZE_MINUS5 = 993,
+  AV1_P010_MODE = 996,
+  AV1_MSB_MODE = 997,
+  AV1_LUMA_10TO8 = 998,
+  AV1_CHROMA_10TO8 = 999,
+  AV1_PRESKIP_SEGID = 1000,
+  AV1_LAST_ACTIVE_SEGID = 1001,
+  AV1_SEG_LOSSLESS_FLAG = 1002,
+  AV1_CODED_LOSSLESS = 1003,
+  AV1_FILM_GRAIN = 1004,
+  AV1_UNCOMPRESSED_HEADER_SIZE = 1172,
+  AV1_GLOBAL_MOTION = 1176,
+  AV1_TILE_INFO = 1528,
+  AV1_RESERVED = 3576,
+  AV1_AV1_INTRABC_WORKAROUND = 3580,
+  AV1_SIZE = 3584,
+};
+
+uint32_t amdf_media_drm_vcn_av1(
+    amdf_media_drm_buffer_t* storage, const amdf_media_drm_session_t* session,
+    uint64_t compressed_address, uint32_t compressed_byte_length,
+    const amdf_media_drm_frame_t* output, const amdf_media_drm_frame_t* current,
+    const amdf_media_drm_frame_t* references, uint32_t current_slot,
+    const amdf_media_av1_decode_picture_info_t* picture) {
+  uint8_t* codec =
+      amdf_media_drm_vcn_decode(storage, session, compressed_byte_length,
+                                output, current, NULL, 0, 8, 0x11, AV1_SIZE);
+  const amdf_media_av1_sequence_parameters_t* sequence = &picture->sequence;
+  const amdf_media_av1_loop_filter_t* filter = &picture->loop_filter;
+  const amdf_media_av1_quantization_t* quantization = &picture->quantization;
+  const amdf_media_av1_segmentation_t* segments = &picture->segmentation;
+  uint32_t flags = picture->show_frame |
+                   ((!picture->disable_frame_end_cdf_update) << 2) |
+                   ((picture->frame_type == 2) << 3) |
+                   ((quantization->matrix_levels[0] != 255) << 8) |
+                   ((sequence->order_hint_bit_count != 0) << 15) |
+                   ((uint32_t)!sequence->reference_frame_motion_vectors << 31);
+  flags |= picture->disable_cdf_update << 1;
+  flags |= picture->intra_block_copy << 4;
+  flags |= picture->high_precision_motion_vectors << 5;
+  flags |= picture->skip_mode << 7;
+  flags |= sequence->filter_intra << 9;
+  flags |= sequence->intra_edge_filter << 10;
+  flags |= sequence->interintra_compound << 11;
+  flags |= sequence->masked_compound << 12;
+  flags |= picture->warped_motion << 13;
+  flags |= sequence->dual_filter << 14;
+  flags |= sequence->joint_compound << 16;
+  flags |= picture->use_reference_motion_vectors << 17;
+  flags |= picture->screen_content_tools << 18;
+  flags |= picture->integer_motion_vectors << 19;
+  flags |= filter->deltas_enabled << 20;
+  flags |= filter->deltas_updated << 21;
+  flags |= quantization->delta_present << 22;
+  flags |= filter->delta_present << 23;
+  flags |= picture->reduced_transform_set << 24;
+  flags |= segments->enabled << 25;
+  flags |= segments->update_map << 26;
+  flags |= segments->temporal_update << 27;
+  flags |= filter->delta_multi << 28;
+  flags |= picture->switchable_motion_mode << 29;
+  *(uint32_t*)(codec + AV1_FRAME_HEADER_FLAGS) = flags;
+  *(uint32_t*)(codec + AV1_FRAME_OFFSET) = picture->order_hint;
+  *(uint32_t*)(codec + AV1_TILE_SIZE_BYTES) = 255;
+  *(uint32_t*)(codec + AV1_CONTEXT_UPDATE_TILE_ID) =
+      picture->context_update_tile;
+  *(uint32_t*)(codec + AV1_MAX_WIDTH) =
+      session->requirements.configuration.coded_width;
+  *(uint32_t*)(codec + AV1_MAX_HEIGHT) =
+      session->requirements.configuration.coded_height;
+  *(uint32_t*)(codec + AV1_WIDTH) =
+      (session->requirements.configuration.coded_width * 8 +
+       picture->superres_denominator / 2) /
+      picture->superres_denominator;
+  *(uint32_t*)(codec + AV1_HEIGHT) =
+      session->requirements.configuration.coded_height;
+  *(uint32_t*)(codec + AV1_SUPERRES_UPSCALED_WIDTH) =
+      session->requirements.configuration.coded_width;
+  codec[AV1_PROFILE] = (uint8_t)(session->codec.av1.profile);
+  codec[AV1_FRAME_TYPE] = (uint8_t)(picture->frame_type);
+  codec[AV1_PRIMARY_REF_FRAME] = (uint8_t)(picture->primary_reference);
+  codec[AV1_CURR_PIC_IDX] = (uint8_t)(current_slot);
+  codec[AV1_SB_SIZE] = (uint8_t)(sequence->use_128x128_superblock);
+  codec[AV1_INTERP_FILTER] = (uint8_t)(picture->interpolation_filter);
+  codec[AV1_FILTER_LEVEL_U] = (uint8_t)(filter->levels[2]);
+  codec[AV1_FILTER_LEVEL_V] = (uint8_t)(filter->levels[3]);
+  codec[AV1_SHARPNESS_LEVEL] = (uint8_t)(filter->sharpness);
+  codec[AV1_BASE_QINDEX] = (uint8_t)(quantization->base_index);
+  codec[AV1_Y_DC_DELTA_Q] = (uint8_t)(quantization->y_dc_delta);
+  codec[AV1_U_DC_DELTA_Q] = (uint8_t)(quantization->chroma_dc_deltas[0]);
+  codec[AV1_V_DC_DELTA_Q] = (uint8_t)(quantization->chroma_dc_deltas[1]);
+  codec[AV1_U_AC_DELTA_Q] = (uint8_t)(quantization->chroma_ac_deltas[0]);
+  codec[AV1_V_AC_DELTA_Q] = (uint8_t)(quantization->chroma_ac_deltas[1]);
+  codec[AV1_QM_Y] = (uint8_t)(quantization->matrix_levels[0]);
+  codec[AV1_QM_U] = (uint8_t)(quantization->matrix_levels[1]);
+  codec[AV1_QM_V] = (uint8_t)(quantization->matrix_levels[2]);
+  codec[AV1_DELTA_Q_RES] = (uint8_t)(1u << quantization->delta_resolution);
+  codec[AV1_DELTA_LF_RES] = (uint8_t)(1u << filter->delta_resolution);
+  codec[AV1_TILE_COLS] = (uint8_t)(picture->tile_column_count);
+  codec[AV1_TILE_ROWS] = (uint8_t)(picture->tile_row_count);
+  codec[AV1_TX_MODE] = (uint8_t)(picture->transform_mode);
+  codec[AV1_REFERENCE_MODE] = (uint8_t)(picture->reference_select ? 2 : 0);
+  codec[AV1_CHROMA_FORMAT] = (uint8_t)(1);
+  codec[AV1_SUPERRES_SCALE_DENOMINATOR] =
+      (uint8_t)(picture->superres_denominator);
+  codec[AV1_ORDER_HINT_BITS] = (uint8_t)(sequence->order_hint_bit_count);
+  codec[AV1_BIT_DEPTH_LUMA_MINUS8] =
+      (uint8_t)(session->codec.av1.sample_bit_depth - 8);
+  codec[AV1_BIT_DEPTH_CHROMA_MINUS8] =
+      (uint8_t)(session->codec.av1.sample_bit_depth - 8);
+  codec[AV1_P010_MODE] = (uint8_t)(session->codec.av1.sample_bit_depth == 10);
+  codec[AV1_MSB_MODE] = (uint8_t)(session->codec.av1.sample_bit_depth == 10);
+  codec[AV1_CDEF_DAMPING] = (uint8_t)(picture->cdef.damping_minus3 + 3);
+  codec[AV1_CDEF_BITS] = (uint8_t)(picture->cdef.bits);
+  memcpy(codec + AV1_FILTER_LEVEL, filter->levels, 2);
+  memcpy(codec + AV1_REF_DELTAS, filter->reference_deltas, 8);
+  memcpy(codec + AV1_MODE_DELTAS, filter->mode_deltas, 2);
+  uint32_t* columns = (uint32_t*)(codec + AV1_TILE_COL_START_SB);
+  uint32_t* rows = (uint32_t*)(codec + AV1_TILE_ROW_START_SB);
+  for (uint32_t i = 0; i <= picture->tile_column_count; ++i) {
+    columns[i] = picture->tile_column_starts[i];
+  }
+  for (uint32_t i = 0; i <= picture->tile_row_count; ++i) {
+    rows[i] = picture->tile_row_starts[i];
+  }
+  uint32_t* dynamic = (uint32_t*)(codec - DYNAMIC_WORDS * 4);
+  amdf_media_drm_vcn_reference_map(picture->reference_map, picture->references,
+                                   references, dynamic,
+                                   codec + AV1_REF_FRAME_MAP);
+  for (uint32_t i = 0; i < 7; ++i) {
+    const uint32_t index = picture->active_reference_indices[i];
+    codec[AV1_FRAME_REFS + i] =
+        index == 255 ? 127 : codec[AV1_REF_FRAME_MAP + index];
+    codec[AV1_REF_FRAME_SIGN_BIAS + i] = picture->reference_sign_bias[i];
+    // The firmware array includes INTRA at zero. LAST through ALTREF follow.
+    uint32_t* motion = (uint32_t*)(codec + AV1_GLOBAL_MOTION + (i + 1) * 44);
+    motion[0] = picture->global_motion[i].type;
+    memcpy(motion + 1, picture->global_motion[i].parameters, 24);
+  }
+  uint8_t* auxiliary =
+      (uint8_t*)storage->host_pointer + AMDF_MEDIA_DRM_VCN_AV1_AUXILIARY_OFFSET;
+  memset(auxiliary, 0, AMDF_MEDIA_DRM_VCN_AV1_AUXILIARY_BYTES);
+  const bool zero_deltas = quantization->y_dc_delta == 0 &&
+                           quantization->chroma_dc_deltas[0] == 0 &&
+                           quantization->chroma_dc_deltas[1] == 0 &&
+                           quantization->chroma_ac_deltas[0] == 0 &&
+                           quantization->chroma_ac_deltas[1] == 0;
+  int32_t* features = (int32_t*)(codec + AV1_FEATURE_DATA);
+  for (uint32_t segment = 0; segment < 8; ++segment) {
+    const uint32_t mask =
+        segments->enabled ? segments->feature_masks[segment] : 0;
+    int32_t index = (int32_t)quantization->base_index;
+    if ((mask & 1) != 0) {
+      index += segments->feature_values[segment][0];
+    }
+    if (index <= 0 && zero_deltas) {
+      codec[AV1_SEG_LOSSLESS_FLAG] |= (uint8_t)(1u << segment);
+    }
+    if (segments->enabled) {
+      codec[AV1_FEATURE_MASK + segment] = (uint8_t)mask;
+      for (uint32_t feature = 0; feature < 8; ++feature) {
+        features[segment * 8 + feature] =
+            segments->feature_values[segment][feature];
+        if ((mask & (1u << feature)) != 0) {
+          codec[AV1_LAST_ACTIVE_SEGID] = (uint8_t)segment;
+          if (feature >= 5) {
+            codec[AV1_PRESKIP_SEGID] = 1;
+          }
+        }
+      }
+    }
+  }
+  if (segments->enabled) {
+    memcpy(auxiliary, segments->feature_values,
+           sizeof(segments->feature_values));
+    memcpy(auxiliary + 128, segments->feature_masks,
+           sizeof(segments->feature_masks));
+  }
+  uint16_t* cdef_luma = (uint16_t*)(codec + AV1_CDEF_STRENGTHS);
+  uint16_t* cdef_chroma = (uint16_t*)(codec + AV1_CDEF_UV_STRENGTHS);
+  for (uint32_t i = 0; i < 8; ++i) {
+    cdef_luma[i] = (uint16_t)((picture->cdef.luma_primary[i] << 2) |
+                              picture->cdef.luma_secondary[i]);
+    cdef_chroma[i] = (uint16_t)((picture->cdef.chroma_primary[i] << 2) |
+                                picture->cdef.chroma_secondary[i]);
+  }
+  for (uint32_t i = 0; i < 3; ++i) {
+    codec[AV1_FRAME_RESTORATION_TYPE + i] = filter->restoration_types[i];
+    codec[AV1_LOG2_RESTORATION_UNIT_SIZE_MINUS5 + i] =
+        (uint8_t)(filter->log2_restoration_unit_sizes[i] - 5);
+  }
+  if (picture->film_grain.apply) {
+    amdf_media_drm_av1_grain(&picture->film_grain,
+                             session->codec.av1.sample_bit_depth,
+                             codec + AV1_FILM_GRAIN, auxiliary + 256);
+  }
+  uint32_t* tiles = (uint32_t*)(codec + AV1_TILE_INFO);
+  for (uint32_t i = 0; i < picture->tile_column_count * picture->tile_row_count;
+       ++i) {
+    tiles[i * 2] = picture->tiles[i].byte_offset;
+    tiles[i * 2 + 1] = picture->tiles[i].byte_length;
   }
   return amdf_media_drm_vcn_ib(storage, session, compressed_address,
                                output->addresses[0]);

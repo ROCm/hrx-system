@@ -366,4 +366,98 @@ iree_native_test(
 )
 endif()
 
+iree_c_embed_data(
+  NAME
+    av1_inputs
+  SRCS
+    "av1_baseline_10.packet"
+    "av1_baseline_8.packet"
+    "av1_extended_10.packet"
+    "av1_extended_8.packet"
+    "av1_lossless_10.packet"
+    "av1_lossless_8.packet"
+    "av1_lossless_crop_10.packet"
+    "av1_lossless_crop_8.packet"
+    "av1_tools_10.packet"
+    "av1_tools_8.packet"
+  C_FILE_OUTPUT
+    "av1_inputs.c"
+  H_FILE_OUTPUT
+    "av1_inputs.h"
+  IDENTIFIER
+    "amdf_cts_media_av1_inputs"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    av1_fixture
+  HDRS
+    "av1_fixture.h"
+  SRCS
+    "av1_fixture.cc"
+  DEPS
+    ::av1_inputs
+    amdf::headers
+    iree::third_party::google_test
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+iree_cc_library(
+  NAME
+    av1_cases
+  SRCS
+    "av1_test.cc"
+  DEPS
+    ::av1_fixture
+    ::decode_fixture
+    amdf::headers
+    iree::third_party::google_test
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+amdf_cts_binary(
+  NAME
+    av1_dynamic_bin
+  DATA
+    amdf::amdf
+  DEPS
+    ::av1_cases
+    amdf::headers
+    libamdf::cts::util::dynamic_provider
+    libamdf::cts::util::test_main
+  TESTONLY
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+iree_native_test(
+  NAME
+    "av1_dynamic"
+  ARGS
+    "--amdf_native_lifetime=process"
+    "--amdf_library={{$<TARGET_FILE:amdf::amdf>}}"
+  SRC
+    ::av1_dynamic_bin
+  DATA
+    "amdf::amdf"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -83,4 +83,18 @@ iree_cc_library(
 )
 endif()
 
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    av1
+  HDRS
+    "av1.h"
+  SRCS
+    "av1.c"
+  DEPS
+    amdf::headers
+  PUBLIC
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

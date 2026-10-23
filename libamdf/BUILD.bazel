@@ -44,6 +44,7 @@ amdf_library(
         "include/amdf/gpu.h",
         "include/amdf/media.h",
         "include/amdf/media/api.h",
+        "include/amdf/media/av1.h",
         "include/amdf/media/command.h",
         "include/amdf/media/device.h",
         "include/amdf/media/gfx11.h",

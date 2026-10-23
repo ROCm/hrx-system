@@ -7,6 +7,7 @@
 #ifndef AMDF_SRC_MEDIA_DRM_SESSION_H_
 #define AMDF_SRC_MEDIA_DRM_SESSION_H_
 
+#include "amdf/media/av1.h"
 #include "amdf/media/h264.h"
 #include "amdf/media/hevc.h"
 #include "amdf/media/vp9.h"
@@ -32,6 +33,8 @@ typedef struct amdf_media_drm_session_t {
     amdf_media_hevc_configuration_t hevc;
     // VP9 profile and actual sample precision.
     amdf_media_vp9_configuration_t vp9;
+    // AV1 profile and actual sample precision.
+    amdf_media_av1_configuration_t av1;
   } codec;
   // Owned firmware session and collocated context; no pixel storage.
   amdf_media_drm_buffer_t* storage;

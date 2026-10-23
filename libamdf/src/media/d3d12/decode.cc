@@ -6,6 +6,7 @@
 
 #include "libamdf/src/media/d3d12/decode.h"
 
+#include "libamdf/src/media/av1.h"
 #include "libamdf/src/media/vp9.h"
 #include "libamdf/src/structure.h"
 
@@ -173,6 +174,43 @@ amdf_status_t PrepareDecode(const Session& session, const void* input,
       arguments.FrameArguments[1] = {
           D3D12_VIDEO_DECODE_ARGUMENT_TYPE_SLICE_CONTROL,
           sizeof(DXVA_Slice_VPx_Short), slices};
+      break;
+    }
+    case AMDF_MEDIA_CODEC_AV1: {
+      amdf_status_t status = amdf_structure_validate_input(
+          input, AMDF_STRUCTURE_TYPE_MEDIA_AV1_DECODE_PICTURE_INFO,
+          sizeof(amdf_media_av1_decode_picture_info_t));
+      if (!amdf_status_is_ok(status)) {
+        return status;
+      }
+      const auto& picture =
+          *static_cast<const amdf_media_av1_decode_picture_info_t*>(input);
+      status = amdf_media_av1_validate(&session.info.configuration, &picture,
+                                       compressed_byte_length);
+      if (!amdf_status_is_ok(status)) {
+        return status;
+      }
+      const uint32_t tile_count =
+          picture.tile_column_count * picture.tile_row_count;
+      if (picture.reference_count > maximum_reference_count ||
+          tile_count > maximum_slice_count) {
+        return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+      }
+      status = PrepareReferences(session, current_reference_slot,
+                                 picture.reference_count, picture.references,
+                                 result);
+      if (!amdf_status_is_ok(status)) {
+        return status;
+      }
+      LowerAv1(session, current_reference_slot, picture,
+               &result->parameters.av1, static_cast<DXVA_Tile_AV1*>(slices));
+      arguments.NumFrameArguments = 2;
+      arguments.FrameArguments[0] = {
+          D3D12_VIDEO_DECODE_ARGUMENT_TYPE_PICTURE_PARAMETERS,
+          sizeof(result->parameters.av1), &result->parameters.av1};
+      arguments.FrameArguments[1] = {
+          D3D12_VIDEO_DECODE_ARGUMENT_TYPE_SLICE_CONTROL,
+          static_cast<UINT>(tile_count * sizeof(DXVA_Tile_AV1)), slices};
       break;
     }
     default:

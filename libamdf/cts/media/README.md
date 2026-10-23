@@ -100,6 +100,58 @@ column. Their SHA-256 values are
 `a1379b0a975b7d0b71a96e9ef0c0a372d61c4968e629ebe58cb791a3cfd017f0`
 and `e0dae4268e54a5dd3f86cb5eb1b9b87ea86cd56caec05df306f1d2a320fed953`.
 
+### AV1 fixture provenance
+
+The AV1 profile 0 corpus covers NV12 and P010 at both 64×64 and 128×128
+superblock sizes. Baseline and extended streams each contain twelve 520×200
+pictures and four tiles. Extended streams enable super-resolution with
+denominator ten, restoration, and film grain; displayed samples differ from
+the separately retained reconstructed references. Additional streams exercise
+enabled segmentation with quantization matrices, nonidentity global motion,
+and 16×16 lossless output.
+The GPU interop corpus also uses 128×128 lossless variants for its 64×64 crop.
+All streams are independently decoded with dav1d through FFmpeg 8.0.1.
+
+Baseline inputs use the same plane equations as VP9 above, encoded with
+`libaom-av1`, `cpu-used=6`, `crf=30`, two threads, keyframe interval eight,
+zero lookahead, no alternate references, `aq-mode=1`, and a 2×2 tile grid.
+Extended streams use aomenc 3.13.1 with `cpu-used=4`, `cq-level=30`,
+`superres-mode=1`, both super-resolution denominators ten,
+`film-grain-test=1`, and restoration enabled. Lossless variants use the same
+source at their stated size with `lossless=1`, `aq-mode=0`, and one tile.
+
+The active-tool streams use `cpu-used=0`, `aq-mode=3`, global motion, and
+quantization matrices with levels three through seven. Their warped texture, for
+sample range `R`, uses plane-local coordinates:
+
+```text
+A = floor((X + N*Y/32) / 8)
+B = floor((Y + N*X/64) / 8)
+Y = (37*A + 61*B + 17*((A*B) % 29)) % R
+U = (7*(X + 2*N) + 11*Y) % R
+V = (5*(X + 2*N) + 13*Y) % R
+```
+
+Each `AV1CTSF1` packet holds precision, dimensions, twelve resolved picture
+records, tile ranges, stable physical slots and logical maps, a per-pixel
+Y/U/V FNV-1a fingerprint, and compressed low-overhead OBUs padded to 128 bytes.
+Syntax comes from FFmpeg `trace_headers`, with inferred and inherited state
+resolved offline. Fixtures are selected by embedded name. No runtime parser
+or software codec participates in either CTS or libamdf.
+
+Fixture | SHA-256
+--- | ---
+`av1_baseline_10.packet` | `0afd5d4b2c5291aeb6fb6f6171e6b08f94674b45fb857242fdef2f7cff8bfb34`
+`av1_baseline_8.packet` | `98b368ae69b42e33a7ca4e29ed10d6a6bb793acf9fee9044ec9c20e86feb1890`
+`av1_extended_10.packet` | `939d1b7b5655bd056d0c4dac2ef48bd0bff91b8c1db9878ae7db40f7d0aec609`
+`av1_extended_8.packet` | `f8c7aab9a42f1b8c809a6fa3d877d3ffda082081537b074a956edf4eba7db45d`
+`av1_lossless_10.packet` | `16acbbb7f35e5af97baf23341248175496fc1e7f47541f7539bb39a67fd366e3`
+`av1_lossless_8.packet` | `54bd666e92c836de8adc894cc660c75f4359cbfa645c5639a2379b56b222cf01`
+`av1_lossless_crop_10.packet` | `a2e77cf9bee5b5b2116f4462025cabe6deffcc0bf8c0e3b2e8273129f7b5256d`
+`av1_lossless_crop_8.packet` | `ccf0acb583e2f7c7dee6844090f372cdbe6915ab06298513fac4906c9181e06a`
+`av1_tools_10.packet` | `7280ed4b86fc9793405e048e845fa2e070cbf9c4614019486d6be9348acf7672`
+`av1_tools_8.packet` | `b25a5a9efa5d59e95b3da59c9e872328979b3d52d33f932ba6a3daad3c1ccad5`
+
 ## Running
 
 Build `//libamdf/cts/media:jpeg_dynamic_bin` and

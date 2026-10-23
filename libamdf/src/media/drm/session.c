@@ -10,6 +10,7 @@
 #include <sys/random.h>
 
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/media/drm/av1_context.h"
 #include "libamdf/src/media/drm/vp9_context.h"
 #include "libamdf/src/platform/linux/file.h"
 
@@ -53,6 +54,11 @@ amdf_status_t AMDF_CALL amdf_media_drm_session_create(
       session->context_byte_length =
           references *
           (((width / 16) * (((height / 16) + 1) & ~1u) * 192 + 255) & ~255u);
+    } else if (create_info->configuration.codec == AMDF_MEDIA_CODEC_AV1) {
+      session->codec.av1 =
+          *(const amdf_media_av1_configuration_t*)create_info->next;
+      session->codec.av1.next = NULL;
+      session->context_byte_length = AMDF_MEDIA_DRM_AV1_CONTEXT_BYTES;
     } else if (create_info->configuration.codec == AMDF_MEDIA_CODEC_VP9) {
       session->codec.vp9 =
           *(const amdf_media_vp9_configuration_t*)create_info->next;
@@ -84,7 +90,10 @@ amdf_status_t AMDF_CALL amdf_media_drm_session_create(
                                            &session->storage);
     if (amdf_status_is_ok(status)) {
       memset(session->storage->host_pointer, 0, length);
-      if (create_info->configuration.codec == AMDF_MEDIA_CODEC_VP9) {
+      if (create_info->configuration.codec == AMDF_MEDIA_CODEC_AV1) {
+        amdf_media_drm_av1_context_initialize(
+            (uint8_t*)session->storage->host_pointer + 131072);
+      } else if (create_info->configuration.codec == AMDF_MEDIA_CODEC_VP9) {
         amdf_media_drm_vp9_context_initialize(
             (uint8_t*)session->storage->host_pointer + 131072);
       }

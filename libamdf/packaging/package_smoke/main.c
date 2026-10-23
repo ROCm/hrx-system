@@ -6,6 +6,7 @@
 
 #include "amdf/amdf.h"
 #include "amdf/media.h"
+#include "amdf/media/av1.h"
 #include "amdf/media/gfx11.h"
 #include "amdf/media/h264.h"
 #include "amdf/media/hevc.h"

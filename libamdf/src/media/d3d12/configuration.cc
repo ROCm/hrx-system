@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "amdf/media/av1.h"
 #include "amdf/media/hevc.h"
 #include "amdf/media/vp9.h"
 #include "libamdf/src/endpoint.h"
@@ -181,6 +182,32 @@ amdf_status_t QueryConfiguration(
       maximum_reference_count = 9;
       break;
     }
+    case AMDF_MEDIA_CODEC_AV1: {
+      status = amdf_structure_validate_input(
+          codec_configuration, AMDF_STRUCTURE_TYPE_MEDIA_AV1_CONFIGURATION,
+          sizeof(amdf_media_av1_configuration_t));
+      if (!amdf_status_is_ok(status)) {
+        return status;
+      }
+      const auto& av1 = *static_cast<const amdf_media_av1_configuration_t*>(
+          codec_configuration);
+      if (av1.profile != 0 ||
+          (av1.sample_bit_depth != 8 && av1.sample_bit_depth != 10)) {
+        info.reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC;
+      } else if (configuration.format != (av1.sample_bit_depth == 8
+                                              ? AMDF_MEDIA_PIXEL_FORMAT_NV12
+                                              : AMDF_MEDIA_PIXEL_FORMAT_P010)) {
+        info.reason = AMDF_MEDIA_CONFIGURATION_REASON_FORMAT;
+      }
+      support.Configuration.DecodeProfile = {
+          0xb8be4ccb,
+          0xcf53,
+          0x46ba,
+          {0x8d, 0x59, 0xd6, 0xb8, 0xa6, 0xda, 0x5d, 0x2a}};
+      dimension_alignment = 2;
+      maximum_reference_count = 9;
+      break;
+    }
     default:
       info.reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC;
       break;
@@ -255,13 +282,15 @@ amdf_status_t QueryConfiguration(
   amdf_media_image_description_t description = {
       configuration.format, configuration.coded_width, storage_height, 1,
       AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT};
-  // VP9 reference sampling needs complete sixteen-row reconstruction blocks,
-  // including the chroma border. Native admission does not report this through
-  // HEIGHT_ALIGNMENT_MULTIPLE_32_REQUIRED. Keep coded and output extents exact
-  // when a separate reference allocation carries this padding.
-  const uint32_t reference_height = configuration.codec == AMDF_MEDIA_CODEC_VP9
-                                        ? (storage_height + 15) & ~15u
-                                        : storage_height;
+  // VP9/AV1 reference sampling needs complete sixteen-row reconstruction
+  // blocks, including the chroma border. Native admission does not report this
+  // through HEIGHT_ALIGNMENT_MULTIPLE_32_REQUIRED. Keep coded and output
+  // extents exact when a separate reference allocation carries this padding.
+  const uint32_t reference_height =
+      (configuration.codec == AMDF_MEDIA_CODEC_VP9 ||
+       configuration.codec == AMDF_MEDIA_CODEC_AV1)
+          ? (storage_height + 15) & ~15u
+          : storage_height;
   if (!separate_reference) {
     description.roles |= AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE;
     description.height = reference_height;

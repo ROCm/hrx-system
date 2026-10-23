@@ -7,6 +7,7 @@
 #include "libamdf/src/media/drm/command.h"
 
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/media/av1.h"
 #include "libamdf/src/media/drm/jpeg.h"
 #include "libamdf/src/media/drm/vcn.h"
 #include "libamdf/src/media/h264.h"
@@ -30,6 +31,13 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_create(
   }
   const bool jpeg =
       ((const amdf_media_drm_queue_t*)queue)->ip_type == AMDGPU_HW_IP_VCN_JPEG;
+  if (jpeg ? create_info->codec != AMDF_MEDIA_CODEC_JPEG
+           : create_info->codec != AMDF_MEDIA_CODEC_H264 &&
+                 create_info->codec != AMDF_MEDIA_CODEC_HEVC &&
+                 create_info->codec != AMDF_MEDIA_CODEC_VP9 &&
+                 create_info->codec != AMDF_MEDIA_CODEC_AV1) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
   const uint32_t capacity =
       jpeg ? 4 : 7 + 2 * create_info->maximum_reference_count;
   amdf_status_t status =
@@ -40,12 +48,19 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_create(
     return status;
   }
   command->base.queue = queue;
+  command->base.codec = create_info->codec;
   command->maximum_activation_count = create_info->maximum_activation_count;
   command->maximum_slice_count = create_info->maximum_slice_count;
   command->maximum_reference_count = create_info->maximum_reference_count;
   command->buffers = (struct drm_amdgpu_bo_list_entry*)(command + 1);
   amdf_media_drm_device_t* device = (amdf_media_drm_device_t*)queue->device;
-  status = amdf_media_drm_buffer_prepare(device, -1, device->page_size, true,
+  const uint64_t storage_length =
+      create_info->codec == AMDF_MEDIA_CODEC_AV1
+          ? (AMDF_MEDIA_DRM_VCN_AV1_AUXILIARY_OFFSET +
+             AMDF_MEDIA_DRM_VCN_AV1_AUXILIARY_BYTES + device->page_size - 1) &
+                ~(device->page_size - 1)
+          : device->page_size;
+  status = amdf_media_drm_buffer_prepare(device, -1, storage_length, true,
                                          &command->storage);
   if (amdf_status_is_ok(status)) {
     status = amdf_child_tracker_register(&queue->children);
@@ -120,6 +135,9 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
+  if (command_base->codec != session->requirements.configuration.codec) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
   const bool jpeg =
       session->requirements.configuration.codec == AMDF_MEDIA_CODEC_JPEG;
   const bool picture_operation =
@@ -143,6 +161,7 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
   const amdf_media_h264_decode_picture_info_t* h264 = NULL;
   const amdf_media_hevc_decode_picture_info_t* hevc = NULL;
   const amdf_media_vp9_decode_picture_info_t* vp9 = NULL;
+  const amdf_media_av1_decode_picture_info_t* av1 = NULL;
   uint32_t reference_count = 0, slice_count = 0;
   if (picture_operation) {
     status = amdf_structure_validate_header(
@@ -195,6 +214,23 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
         reference_count = h264->reference_count;
         slice_count = h264->slice_count;
       } else if (session->requirements.configuration.codec ==
+                 AMDF_MEDIA_CODEC_AV1) {
+        av1 = decode->next;
+        status = amdf_structure_validate_input(
+            av1, AMDF_STRUCTURE_TYPE_MEDIA_AV1_DECODE_PICTURE_INFO,
+            sizeof(*av1));
+        if (!amdf_status_is_ok(status)) {
+          return status;
+        }
+        // Validation owns tile multiplication/range safety before sizing.
+        status = amdf_media_av1_validate(&session->requirements.configuration,
+                                         av1, decode->compressed.byte_length);
+        if (!amdf_status_is_ok(status)) {
+          return status;
+        }
+        reference_count = av1->reference_count;
+        slice_count = av1->tile_column_count * av1->tile_row_count;
+      } else if (session->requirements.configuration.codec ==
                  AMDF_MEDIA_CODEC_VP9) {
         vp9 = decode->next;
         status = amdf_structure_validate_input(
@@ -223,7 +259,8 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
         return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
       }
       status =
-          h264 != NULL
+          av1 != NULL ? AMDF_STATUS_OK
+          : h264 != NULL
               ? amdf_media_h264_validate(&session->requirements.configuration,
                                          &session->codec.h264, h264,
                                          decode->compressed.byte_length)
@@ -253,6 +290,7 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
            ++i) {
         const amdf_media_reference_t* binding =
             h264 != NULL  ? &h264->references[i].binding
+            : av1 != NULL ? &av1->references[i]
             : vp9 != NULL ? &vp9->references[i]
                           : &hevc->references[i].binding;
         if (binding->slot_index >=
@@ -337,7 +375,12 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
         }
       }
       command->byte_length =
-          h264 != NULL
+          av1 != NULL
+              ? amdf_media_drm_vcn_av1(command->storage, session, address,
+                                       (uint32_t)decode->compressed.byte_length,
+                                       &output, &current, references,
+                                       decode->reference_slot_index, av1)
+          : h264 != NULL
               ? amdf_media_drm_vcn_h264(
                     command->storage, session, address,
                     (uint32_t)decode->compressed.byte_length, &output, &current,

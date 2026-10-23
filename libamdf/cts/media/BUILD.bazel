@@ -17,6 +17,7 @@ package(
 test_suite(
     name = "media",
     tests = [
+        ":av1",
         ":h264",
         ":hevc",
         ":jpeg",
@@ -195,6 +196,54 @@ amdf_cts_test_suite(
     deps = [
         ":decode_fixture",
         ":vp9_fixture",
+        "//third_party:google_test",
+    ],
+)
+
+iree_c_embed_data(
+    name = "av1_inputs",
+    testonly = True,
+    srcs = [
+        "av1_baseline_10.packet",
+        "av1_baseline_8.packet",
+        "av1_extended_10.packet",
+        "av1_extended_8.packet",
+        "av1_lossless_10.packet",
+        "av1_lossless_8.packet",
+        "av1_lossless_crop_10.packet",
+        "av1_lossless_crop_8.packet",
+        "av1_tools_10.packet",
+        "av1_tools_8.packet",
+    ],
+    c_file_output = "av1_inputs.c",
+    flatten = True,
+    h_file_output = "av1_inputs.h",
+    identifier = "amdf_cts_media_av1_inputs",
+)
+
+amdf_cc_library(
+    name = "av1_fixture",
+    testonly = True,
+    srcs = ["av1_fixture.cc"],
+    hdrs = ["av1_fixture.h"],
+    visibility = ["//libamdf/cts/interop/gpu/media:__pkg__"],
+    deps = [
+        ":av1_inputs",
+        "//third_party:google_test",
+    ],
+)
+
+amdf_cts_test_suite(
+    name = "av1",
+    srcs = ["av1_test.cc"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":av1_fixture",
+        ":decode_fixture",
         "//third_party:google_test",
     ],
 )

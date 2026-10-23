@@ -82,6 +82,7 @@ amdf_cc_library(
 amdf_cc_library(
     name = "execution",
     srcs = [
+        "av1.cc",
         "command.cc",
         "decode.cc",
         "h264.cc",
@@ -91,6 +92,7 @@ amdf_cc_library(
         "vp9.cc",
     ],
     hdrs = [
+        "av1.h",
         "command.h",
         "decode.h",
         "h264.h",
@@ -112,6 +114,7 @@ amdf_cc_library(
         "//libamdf/src:kernel_queue",
         "//libamdf/src:structure",
         "//libamdf/src:wait",
+        "//libamdf/src/media:av1",
         "//libamdf/src/media:h264",
         "//libamdf/src/media:hevc",
         "//libamdf/src/media:vp9",

@@ -12,8 +12,8 @@ profile/format/dimension/reference admission is a separate query:
 
 | Provider | Decode schemas | Output storage |
 | --- | --- | --- |
-| Windows D3D12 | H264; HEVC Main/Main10; VP9 profiles 0/2 | NV12 or P010 according to actual sample depth; application-placed native images |
-| Linux DRM VCN | H264; HEVC Main/Main10; VP9 profiles 0/2 on VCN 4 unified queues | Linear NV12/P010 output and separate application-owned references |
+| Windows D3D12 | H264; HEVC Main/Main10; VP9 profiles 0/2; AV1 profile 0 | NV12 or P010 according to actual sample depth; application-placed native images |
+| Linux DRM VCN | H264; HEVC Main/Main10; VP9 profiles 0/2; AV1 profile 0 on VCN 4 unified queues | Linear NV12/P010 output and separate application-owned references |
 | Linux DRM JPEG | Eight-bit baseline sequential 4:2:0 JPEG on the layout-2 JPEG engine | Linear NV12 planes, directly or through a placed image identity |
 
 A native driver's broader codec list does not advertise schemas implemented by
@@ -28,6 +28,14 @@ unique physical bindings; active LAST/GOLDEN/ALTREF entries select that map.
 The caller resolves loop-filter and segmentation state, while the session
 retains native probability contexts. A show-existing-frame header reuses the
 application's existing image without submitting a decode command.
+
+AV1 profile 0 admits eight-bit and ten-bit 4:2:0 pictures. The session extent
+is the upscaled extent; super-resolution changes the entropy-coded sample count
+without changing the output allocation. The caller supplies resolved tile
+boundaries, quantization, segmentation, loop filters, restoration, global motion,
+and film grain. Seven active references select an eight-entry logical map over
+stable physical reference slots. Grain-free reconstructed references remain
+separate from the displayed output, including when film grain is enabled.
 
 ## Ownership through one picture
 
@@ -63,7 +71,9 @@ These operations share ordinary recording/retirement rules. Rejected publication
 changes no session state; accepted END prevents later submissions to that
 session. Construction and destruction publish no hidden firmware work.
 
-Each command is one reusable native recording. `command_prepare` consumes the
+Each command is one reusable native recording, provisioned for an explicit
+codec and maximum slice/tile, reference, and activation counts. Matching sessions
+can reuse that storage. `command_prepare` consumes the
 caller's temporary parsed metadata and records into that owner. Compressed
 payload and pixel backing remain borrowed through accepted execution. JPEG
 consumes a complete marker/header stream; the caller's admitted dimensions,
@@ -114,8 +124,9 @@ wake hint prompting that same status check.
 
 VCN sessions own firmware context, with charges reported by `session_query_info`;
 all output and reconstructed-reference images remain application-owned. One
-recording provisions the IB, parsed firmware message, and codec auxiliary data in one
-native page. Preparation writes only that retired recording, and submission
+recording provisions the IB, parsed firmware message, and codec auxiliary data.
+JPEG, H264, HEVC, and VP9 use one native page; AV1 uses 28 KiB with 4 KiB pages,
+including its 20 KiB grain tables. Preparation writes only that retired recording, and submission
 selects its provisioned residency list. Codec feedback is unavailable on these
 Linux decode paths; successful queue retirement is not reported as a codec
 success result.
@@ -124,7 +135,14 @@ VP9's firmware context reserves about 10.4 MiB even for small images. This
 generation-specific native cost is included in `session_query_info`; it is
 separate from application-owned decoded and reference pixels. Reference storage
 queries also expose reconstruction padding: sixteen rows on D3D12 and sixty-four
-on VCN for VP9, with exact coded dimensions retained in the session.
+on VCN for VP9 and AV1, with exact coded dimensions retained in the session.
+
+VCN 4 AV1 reserves 36,389,888 bytes of context plus 128 KiB of session storage,
+also reported by `session_query_info`. Four standard CDF contexts expand from
+26,546 immutable library bytes during session construction. Grain-enabled
+preparation computes the native Gaussian/autoregression tables into the
+recording's provisioned auxiliary storage; no codec library, pixel readback,
+or per-picture allocation participates.
 
 ## Compute integration
 

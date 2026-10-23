@@ -55,12 +55,19 @@ SessionCreate(amdf_kernel_queue_t* queue,
   if (create_info->configuration.codec == AMDF_MEDIA_CODEC_H264) {
     session->h264 =
         *static_cast<const amdf_media_h264_configuration_t*>(create_info->next);
+    session->h264.next = nullptr;
   } else if (create_info->configuration.codec == AMDF_MEDIA_CODEC_HEVC) {
     session->hevc =
         *static_cast<const amdf_media_hevc_configuration_t*>(create_info->next);
+    session->hevc.next = nullptr;
+  } else if (create_info->configuration.codec == AMDF_MEDIA_CODEC_AV1) {
+    session->av1 =
+        *static_cast<const amdf_media_av1_configuration_t*>(create_info->next);
+    session->av1.next = nullptr;
   } else {
     session->vp9 =
         *static_cast<const amdf_media_vp9_configuration_t*>(create_info->next);
+    session->vp9.next = nullptr;
   }
   session->info.type = AMDF_STRUCTURE_TYPE_MEDIA_SESSION_INFO;
   session->info.structure_size = sizeof(session->info);

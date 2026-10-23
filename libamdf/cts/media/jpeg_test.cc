@@ -165,6 +165,7 @@ class MediaJpegTest : public ::testing::TestWithParam<Shape> {
     const amdf_media_command_create_info_t command_create = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_CREATE_INFO,
         .structure_size = sizeof(command_create),
+        .codec = AMDF_MEDIA_CODEC_JPEG,
         .maximum_slice_count = 1,
     };
     for (auto& command : channel.commands) {

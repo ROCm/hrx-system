@@ -84,6 +84,8 @@ static const struct {
      AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_HEVC},
     {AMDF_MEDIA_CODEC_VP9, AMDGPU_HW_IP_VCN_ENC,
      AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_VP9},
+    {AMDF_MEDIA_CODEC_AV1, AMDGPU_HW_IP_VCN_ENC,
+     AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_AV1},
 };
 
 enum {
@@ -146,11 +148,26 @@ amdf_status_t amdf_media_drm_configuration(
   const bool jpeg = configuration->codec == AMDF_MEDIA_CODEC_JPEG;
   const bool hevc = configuration->codec == AMDF_MEDIA_CODEC_HEVC;
   const bool vp9 = configuration->codec == AMDF_MEDIA_CODEC_VP9;
+  const bool av1 = configuration->codec == AMDF_MEDIA_CODEC_AV1;
   amdf_media_pixel_format_t format = AMDF_MEDIA_PIXEL_FORMAT_NV12;
   if (jpeg) {
     if (next != NULL) {
       return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
     }
+  } else if (av1) {
+    const amdf_status_t status = amdf_structure_validate_input(
+        next, AMDF_STRUCTURE_TYPE_MEDIA_AV1_CONFIGURATION,
+        sizeof(amdf_media_av1_configuration_t));
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    const amdf_media_av1_configuration_t* syntax = next;
+    if (syntax->profile != 0 ||
+        (syntax->sample_bit_depth != 8 && syntax->sample_bit_depth != 10)) {
+      info.reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC;
+    }
+    format = syntax->sample_bit_depth == 10 ? AMDF_MEDIA_PIXEL_FORMAT_P010
+                                            : AMDF_MEDIA_PIXEL_FORMAT_NV12;
   } else if (vp9) {
     const amdf_status_t status = amdf_structure_validate_input(
         next, AMDF_STRUCTURE_TYPE_MEDIA_VP9_CONFIGURATION,
@@ -203,23 +220,23 @@ amdf_status_t amdf_media_drm_configuration(
       info.reason = AMDF_MEDIA_CONFIGURATION_REASON_FORMAT;
     } else if (jpeg ? configuration->reference_image_count != 0
                     : configuration->reference_image_count == 0 ||
-                          configuration->reference_image_count > (vp9 ? 9u
-                                                                  : hevc
-                                                                      ? 16u
-                                                                      : 17u)) {
+                          configuration->reference_image_count >
+                              (vp9 || av1 ? 9u
+                               : hevc     ? 16u
+                                          : 17u)) {
       info.reason = AMDF_MEDIA_CONFIGURATION_REASON_REFERENCE_STORAGE;
-    } else if (configuration->coded_width < (vp9 ? 16u : 64u) ||
-               configuration->coded_height < (vp9 ? 16u : 64u) ||
+    } else if (configuration->coded_width < (vp9 || av1 ? 16u : 64u) ||
+               configuration->coded_height < (vp9 || av1 ? 16u : 64u) ||
                ((configuration->coded_width | configuration->coded_height) &
-                (jpeg || vp9 ? 1u
-                 : hevc      ? 7u
-                             : 15u)) != 0 ||
+                (jpeg || vp9 || av1 ? 1u
+                 : hevc             ? 7u
+                                    : 15u)) != 0 ||
                configuration->coded_width > limits->max_width ||
                configuration->coded_height > limits->max_height ||
-               (!jpeg &&
-                (configuration->coded_width > (hevc || vp9 ? 8192u : 4096u) ||
-                 configuration->coded_height >
-                     (hevc || vp9 ? 8192u : 4096u))) ||
+               (!jpeg && (configuration->coded_width >
+                              (hevc || vp9 || av1 ? 8192u : 4096u) ||
+                          configuration->coded_height >
+                              (hevc || vp9 || av1 ? 8192u : 4096u))) ||
                (uint64_t)configuration->coded_width *
                        configuration->coded_height >
                    limits->max_pixels_per_frame) {
@@ -241,9 +258,10 @@ amdf_status_t amdf_media_drm_configuration(
       &device->base.base, &description, &info.output);
   if (amdf_status_is_ok(status) && !jpeg) {
     description.roles = AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE;
-    if (vp9) {
-      // VP9 reconstruction operates on 64-row superblocks in both precisions.
-      // The returned storage shape stays distinct from exact coded dimensions.
+    if (vp9 || av1) {
+      // VP9/AV1 reconstruction operates on 64-row superblocks in both
+      // precisions. The returned storage shape stays distinct from exact coded
+      // dimensions.
       description.height = (description.height + 63) & ~63u;
     }
     status = amdf_media_drm_image_requirements(&device->base.base, &description,

@@ -33,6 +33,8 @@ struct amdf_media_session_t {
 struct amdf_media_command_t {
   // Borrowed queue defining recording ownership and provider identity.
   amdf_kernel_queue_t* queue;
+  // Codec whose native argument storage was provisioned at construction.
+  amdf_media_codec_t codec;
 };
 
 // Returns operations for an already-validated media activation.

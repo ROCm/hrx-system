@@ -38,6 +38,8 @@ amdf_cc_library(
 amdf_cc_library(
     name = "execution",
     srcs = [
+        "av1_context.c",
+        "av1_grain.c",
         "command.c",
         "jpeg.c",
         "queue.c",
@@ -46,6 +48,8 @@ amdf_cc_library(
         "vp9_context.c",
     ],
     hdrs = [
+        "av1_context.h",
+        "av1_grain.h",
         "command.h",
         "jpeg.h",
         "queue.h",
@@ -62,6 +66,7 @@ amdf_cc_library(
         "//libamdf/src:atomics",
         "//libamdf/src:structure",
         "//libamdf/src:wait",
+        "//libamdf/src/media:av1",
         "//libamdf/src/media:h264",
         "//libamdf/src/media:hevc",
         "//libamdf/src/media:vp9",
@@ -156,5 +161,16 @@ amdf_cc_test(
         "//third_party:google_test_main",
         "//third_party:linux_amdgpu_uapi",
         "//third_party:linux_drm_uapi",
+    ],
+)
+
+amdf_cc_test(
+    name = "av1_context_test",
+    srcs = ["av1_context_test.cc"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        ":execution",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
     ],
 )

@@ -55,3 +55,10 @@ amdf_cc_library(
         "//libamdf/src:structure",
     ],
 )
+
+amdf_cc_library(
+    name = "av1",
+    srcs = ["av1.c"],
+    hdrs = ["av1.h"],
+    visibility = ["//libamdf/src/media:__subpackages__"],
+)

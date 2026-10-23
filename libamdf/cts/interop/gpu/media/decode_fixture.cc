@@ -271,7 +271,10 @@ void MediaDecodeInteropTest::CreateRecordings(uint32_t count) {
     const amdf_media_command_create_info_t command_create = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_CREATE_INFO,
         .structure_size = sizeof(command_create),
-        .maximum_slice_count = 1,
+        .codec = configuration_.configuration.codec,
+        .maximum_slice_count =
+            configuration_.configuration.codec == AMDF_MEDIA_CODEC_AV1 ? 256u
+                                                                       : 1u,
         .maximum_reference_count =
             configuration_.configuration.reference_image_count - 1,
         .maximum_activation_count = 2,

@@ -31,6 +31,7 @@ enum amdf_media_codec_e {
   /// includes its marker headers; no parsed-picture extension is required.
   AMDF_MEDIA_CODEC_JPEG = 3,
   AMDF_MEDIA_CODEC_VP9 = 4,
+  AMDF_MEDIA_CODEC_AV1 = 5,
 };
 
 typedef uint32_t amdf_media_direction_t;
