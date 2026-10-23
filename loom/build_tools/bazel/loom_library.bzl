@@ -703,6 +703,39 @@ def _declare_execution_tests(name, module, profiles, **kwargs):
         )
     return tests.keys()
 
+def _declare_source_tests(name, srcs, tags, target_compatible_with):
+    """Checks authored text once at its owner, independently of execution."""
+    tests = []
+    for index, src in enumerate(srcs):
+        if not str(src).endswith(".loom"):
+            continue
+        lint_test_name = "%s_lint_%d_test" % (name, index)
+        _declare_launcher_test(
+            name = lint_test_name,
+            launcher_rule = _loom_lint_test_launcher,
+            launcher_attrs = {"src": src},
+            test_kwargs = {
+                "tags": tags + ["hostonly"],
+                "target_compatible_with": target_compatible_with,
+                "visibility": ["//visibility:private"],
+            },
+        )
+        tests.append(lint_test_name)
+
+        test_name = "%s_format_%d_test" % (name, index)
+        _declare_launcher_test(
+            name = test_name,
+            launcher_rule = _loom_format_test_launcher,
+            launcher_attrs = {"src": src},
+            test_kwargs = {
+                "tags": tags + ["hostonly"],
+                "target_compatible_with": target_compatible_with,
+                "visibility": ["//visibility:private"],
+            },
+        )
+        tests.append(test_name)
+    return tests
+
 def _declare_library(
         name,
         srcs,
@@ -730,34 +763,7 @@ def _declare_library(
         target_compatible_with = target_compatible_with,
         visibility = module_visibility,
     )
-
-    tests = []
-    for index, src in enumerate(srcs):
-        if not str(src).endswith(".loom"):
-            continue
-        lint_test_name = "%s_lint_%d_test" % (name, index)
-        _declare_launcher_test(
-            name = lint_test_name,
-            launcher_rule = _loom_lint_test_launcher,
-            launcher_attrs = {"src": src},
-            test_kwargs = {
-                "tags": tags + ["hostonly"],
-                "visibility": ["//visibility:private"],
-            },
-        )
-        tests.append(lint_test_name)
-
-        test_name = "%s_format_%d_test" % (name, index)
-        _declare_launcher_test(
-            name = test_name,
-            launcher_rule = _loom_format_test_launcher,
-            launcher_attrs = {"src": src},
-            test_kwargs = {
-                "tags": tags + ["hostonly"],
-                "visibility": ["//visibility:private"],
-            },
-        )
-        tests.append(test_name)
+    tests = _declare_source_tests(name, srcs, tags, target_compatible_with)
 
     test_module = None
     if plan_benchmarks or execution_profiles:
@@ -831,14 +837,13 @@ def _declare_library(
         )
         tests.append(binary_test_name)
 
-    suite_kwargs = {
-        "name": name + "_test",
-        "tags": tags,
-        "tests": tests,
-    }
-    if visibility != None:
-        suite_kwargs["visibility"] = visibility
-    native.test_suite(**suite_kwargs)
+    if tests:
+        native.test_suite(
+            name = name + "_test",
+            tests = tests,
+            tags = tags,
+            visibility = visibility,
+        )
 
 def loom_library(
         name,
@@ -904,36 +909,16 @@ def _test_config_args(name, configs):
             fail("%s configs must map symbol names to string values" % name)
     return ["--config=%s=%s" % (key, configs[key]) for key in sorted(configs.keys())]
 
-def loom_test_module(
+def _declare_test_module(
         name,
         srcs,
-        deps = [],
-        data = [],
-        input_format = "",
-        inputopts = [],
-        tags = [],
-        visibility = None,
-        target_compatible_with = []):
-    """Owns a reusable linked test module and its runtime fixtures.
-
-    Direct sources jointly own all check cases and benchmarks in the module.
-    Dependencies supply reachable definitions, not additional test roots.
-    Import options and data belong here; consumers select their workload and
-    execution or compiler profiles with ``loom_test(module = ...)``.
-    The module requires only its source providers, independently of consumers'
-    device requirements. Its default output is the linked bytecode file.
-
-    Args:
-      name: Public module target name.
-      srcs: Authored source modules jointly owning the test roots.
-      deps: Libraries available only for dependency resolution.
-      data: Headers and runtime fixtures retained by the source owner.
-      input_format: Source provider override, or empty for filename selection.
-      inputopts: Provider-scoped import options, with location expansion.
-      tags: Additional tags for the source module.
-      visibility: Bazel visibility of the reusable module.
-      target_compatible_with: Source-provider build configuration constraints.
-    """
+        deps,
+        data,
+        input_format,
+        inputopts,
+        tags,
+        visibility,
+        target_compatible_with):
     if not srcs:
         fail("%s requires at least one authored test source" % name)
     library_name = name + "_library"
@@ -959,6 +944,60 @@ def loom_test_module(
         visibility = visibility,
         target_compatible_with = target_compatible_with,
     )
+
+def loom_test_module(
+        name,
+        srcs,
+        deps = [],
+        data = [],
+        input_format = "",
+        inputopts = [],
+        tags = [],
+        visibility = None,
+        target_compatible_with = []):
+    """Owns a reusable linked test module and its runtime fixtures.
+
+    Direct sources jointly own all check cases and benchmarks in the module.
+    Dependencies supply reachable definitions, not additional test roots.
+    Import options and data belong here; consumers select their workload and
+    execution or compiler profiles with ``loom_test(module = ...)``.
+    The module requires only its source providers, independently of consumers'
+    device requirements. Its default output is the linked bytecode file.
+    Authored ``.loom`` inputs also produce lint and format checks in a
+    ``<name>_test`` suite. These belong to this source owner, not to each
+    workload or profile consuming the module. Other input formats do not
+    produce Loom-text checks or a source suite.
+
+    Args:
+      name: Public module target name.
+      srcs: Authored source modules jointly owning the test roots.
+      deps: Libraries available only for dependency resolution.
+      data: Headers and runtime fixtures retained by the source owner.
+      input_format: Source provider override, or empty for filename selection.
+      inputopts: Provider-scoped import options, with location expansion.
+      tags: Additional tags for the source module and its source checks.
+      visibility: Bazel visibility of the reusable module.
+      target_compatible_with: Source-provider build configuration constraints.
+    """
+    _declare_test_module(
+        name = name,
+        srcs = srcs,
+        deps = deps,
+        data = data,
+        input_format = input_format,
+        inputopts = inputopts,
+        tags = tags,
+        visibility = visibility,
+        target_compatible_with = target_compatible_with,
+    )
+    tests = _declare_source_tests(name, srcs, tags, target_compatible_with)
+    if tests:
+        native.test_suite(
+            name = name + "_test",
+            tests = tests,
+            tags = tags,
+            visibility = visibility,
+        )
 
 def loom_test(
         name,
@@ -998,7 +1037,7 @@ def loom_test(
     directly, while artifact-presence checks accept none.
 
     Args:
-      name: Name of the suite containing all compilation and execution children.
+      name: Name of the suite containing source, compilation, and execution checks.
       srcs: Authored source modules jointly owning the test module.
       data: Headers and runtime fixtures available during import and execution.
       input_format: Source provider override, or empty for filename selection.
@@ -1006,7 +1045,8 @@ def loom_test(
       deps: Loom libraries available only for dependency resolution.
       module: Existing loom_test_module to qualify without importing or linking
           again. Exclusive with srcs, deps, data, input_format, and inputopts;
-          the source owner retains those inputs and its runtime fixtures.
+          the source owner retains those inputs, its source checks, and its
+          runtime fixtures.
       args: Additional arguments passed to the correctness runner.
       configs: String-valued configuration bindings shared by compiler checks
           and selected execution runners.
@@ -1034,9 +1074,10 @@ def loom_test(
         fail("%s requires execution_profiles or compile_targets" % name)
     _reject_workload_args(name, args)
     workloads = _test_variants(name, configs, case, variants)
+    tests = []
     if not module:
         module_name = name + "_module"
-        loom_test_module(
+        _declare_test_module(
             name = module_name,
             srcs = srcs,
             deps = deps,
@@ -1048,7 +1089,7 @@ def loom_test(
             target_compatible_with = target_compatible_with,
         )
         module = ":" + module_name
-    tests = []
+        tests.extend(_declare_source_tests(name, srcs, tags, target_compatible_with))
     for workload_name, workload in workloads.items():
         config_args = _test_config_args(workload_name, workload.configs)
         if type(workload.case) != "string":
