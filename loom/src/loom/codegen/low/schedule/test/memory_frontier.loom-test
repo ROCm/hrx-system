@@ -15,10 +15,11 @@ low.func.def target<test.low.core>(@target) @read_only(%address: reg<test.ptr>, 
 none
 
 // ====
-// RUN: emit low-schedule-query @unobserved_stores kind=effect strategy=resource-stall consumer=3
+// RUN: emit low-schedule-query @unobserved_stores kind=effect strategy=resource-stall consumer=*
 
-// All three stores must remain predecessors of the read; WAW issue order does
-// not establish completion.
+// Homogeneous WAW order forms a chain, while all three stores remain direct
+// predecessors of the read because WAW issue order does not establish
+// completion.
 test.target<low_core> @target
 
 low.func.def target<test.low.core>(@target) @unobserved_stores(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
@@ -30,7 +31,27 @@ low.func.def target<test.low.core>(@target) @unobserved_stores(%address: reg<tes
 }
 
 // ----
+node 1 <- 0
+node 2 <- 1
 node 3 <- 0, 1, 2
+
+// ====
+// RUN: emit low-schedule-query @heterogeneous_store_timing kind=effect strategy=resource-stall consumer=*
+
+// A different descriptor timing identity breaks the homogeneous chain. Keep
+// the direct edge from the first store to the third.
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @heterogeneous_store_timing(%address: reg<test.ptr>, %vector: reg<test.i32 x4>, %scalar: reg<test.i32>) asm {
+  test.store.v4i32 %address, %vector
+  test.event.memory.write.i32 %scalar
+  test.store.v4i32 %address, %vector
+  return
+}
+
+// ----
+node 1 <- 0
+node 2 <- 0, 1
 
 // ====
 // RUN: emit low-schedule-query @read_write_read_chain kind=effect strategy=resource-stall consumer=2,3,4,5
@@ -75,7 +96,7 @@ low.func.def target<test.low.core>(@target) @write_read_write_chain(%address: re
 // ----
 node 1 <- 0
 node 2 <- 0, 1
-node 3 <- 0, 1, 2
+node 3 <- 1, 2
 node 4 <- 2, 3
 node 5 <- 3, 4
 
@@ -131,7 +152,7 @@ node 3 <- 0, 1, 2
 node 4 <- 0, 1, 2, 3
 node 5 <- 3, 4
 node 6 <- 3, 4
-node 7 <- 3, 4, 5, 6
+node 7 <- 4, 5, 6
 node 8 <- 5, 6, 7
 node 9 <- 7, 8
 
