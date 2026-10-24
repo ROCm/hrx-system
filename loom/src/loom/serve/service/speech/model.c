@@ -428,6 +428,13 @@ static iree_status_t loom_serve_speech_prepare(
       model->format.channels = (uint32_t)capacities[10];
     }
   }
+  if (iree_status_is_ok(status) && options->sources.card &&
+      loom_model_card_selection(options->sources.card)->voice_count >
+          model->voice_capacity) {
+    status = iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "model-card voice count exceeds the speech program's voice capacity");
+  }
   if (iree_status_is_ok(status)) {
     char* name = NULL;
     status = iree_allocator_clone(host_allocator, metadata[1], (void**)&name);

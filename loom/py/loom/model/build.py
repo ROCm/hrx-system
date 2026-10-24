@@ -141,6 +141,8 @@ def build(plan: dict, linker: str | None = None) -> None:
     for parameter in variant.get("parameters", {}).values():
         parameter.pop("origin", None)
         parameter["files"] = [output_file(item) for item in parameter["files"]]
+    for voice in variant.get("voices", {}).values():
+        voice["file"] = output_file(voice["file"])
     variant["tokenizers"] = {
         name: output_file(value)
         for name, value in variant.get("tokenizers", {}).items()

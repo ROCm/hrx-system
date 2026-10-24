@@ -31,6 +31,7 @@
 #include "loom/serve/service/speech/service_test.h"
 #include "loom/serve/service/speech/stream.h"
 #include "loom/serve/service/speech/voice.h"
+#include "loom/serve/service/speech/voice_load.h"
 #include "loom/serve/telemetry/latency.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model.h"
@@ -1420,6 +1421,131 @@ TEST_P(SourceVoiceServiceTest, CancelledAndMalformedUploadsNeverPublish) {
       OpenSpeech(service_, IREE_SV("hi"), IREE_SV("voice"), 3, &speech));
   ASSERT_NO_FATAL_FAILURE(CheckNative(speech, 0.125f));
 }
+
+class SourceStockVoiceServiceTest : public SourceVoiceServiceTest {
+ protected:
+  void TearDown() override {
+    if (load_) {
+      if (!complete_) {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                              PumpUntil([&] { return complete_; }, true));
+      }
+      loom_serve_speech_voice_load_free(load_);
+    }
+    SourceVoiceServiceTest::TearDown();
+  }
+
+  void Allocate(bool missing = false) {
+    loom_serve::testing::ModelDocument document;
+    IREE_ASSERT_OK(document.Load(directory_ + "/stock_voice_card.json"));
+    auto sources = document.value().sources;
+    const std::string absent = directory_ + "/absent-originals";
+    if (missing) {
+      sources.base_directory = iree_make_cstring_view(absent.c_str());
+    }
+    IREE_ASSERT_OK(loom_serve_speech_voice_load_allocate(
+        host_, &sources, service_,
+        {[](void* self) {
+           iree_notification_post(static_cast<iree_notification_t*>(self),
+                                  IREE_ALL_WAITERS);
+         },
+         loom_serve_http_server_notification(server_)},
+        allocator_, &load_));
+    ASSERT_NE(load_, nullptr);
+    // Namespace and card ownership must survive this document's destruction.
+  }
+
+  template <typename Predicate>
+  iree_status_t PumpUntil(Predicate ready, bool cancel = false) {
+    auto* notification = loom_serve_http_server_notification(server_);
+    iree_status_t status = iree_ok_status();
+    while (iree_status_is_ok(status) && !complete_ && !ready()) {
+      const auto ticket = iree_notification_prepare_wait(notification);
+      status = loom_serve_speech_voice_load_advance(load_, cancel, &complete_);
+      if (complete_ || ready() || !iree_status_is_ok(status)) {
+        iree_notification_cancel_wait(notification);
+      } else {
+        iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+    }
+    return status;
+  }
+
+  // Owned until every accepted read and service operation retires.
+  loom_serve_speech_voice_load_t* load_ = nullptr;
+  // Terminal ownership boundary reported by native advancement.
+  bool complete_ = false;
+};
+
+TEST_P(SourceStockVoiceServiceTest, OriginalRecordingsBecomeReusableVoices) {
+  ASSERT_NO_FATAL_FAILURE(Allocate());
+  IREE_ASSERT_OK(PumpUntil([&] { return complete_; }));
+  ASSERT_TRUE(complete_);
+  for (int repeat = 0; repeat < 2; ++repeat) {
+    for (bool positive : {true, false}) {
+      SpeechStream stream(nullptr, loom_serve_speech_stream_close);
+      IREE_ASSERT_OK(OpenSpeech(
+          service_, IREE_SV("hi"),
+          positive ? IREE_SV("positive") : IREE_SV("negative"), 3, &stream));
+      ASSERT_NO_FATAL_FAILURE(CheckNative(stream, positive ? 0.125f : -0.125f));
+    }
+  }
+}
+
+TEST_P(SourceStockVoiceServiceTest, CancellationJoinsQueuedRecordingRead) {
+  ASSERT_NO_FATAL_FAILURE(Allocate());
+  std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> gates;
+  for (int i = 0; i < SpeechWorkerCount(); ++i) {
+    gates.push_back(std::make_unique<loom_serve::testing::WorkerGate>(
+        loom_serve_host_executor(host_)));
+  }
+  IREE_ASSERT_OK(
+      loom_serve_speech_voice_load_advance(load_, false, &complete_));
+  EXPECT_FALSE(complete_);
+  IREE_ASSERT_OK(loom_serve_speech_voice_load_advance(load_, true, &complete_));
+  EXPECT_FALSE(complete_);
+  gates.clear();
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        PumpUntil([&] { return complete_; }));
+  EXPECT_TRUE(complete_);
+  EXPECT_FALSE(interface_.is_pending(interface_.self));
+  EXPECT_EQ(interface_.telemetry.counters->completed, 0u);
+}
+
+TEST_P(SourceStockVoiceServiceTest, CancellationJoinsAcceptedVoiceEncoding) {
+  ASSERT_NO_FATAL_FAILURE(Allocate());
+  IREE_ASSERT_OK(PumpUntil([&] {
+    return std::string(interface_.snapshot(interface_.self).phase) ==
+           "generating";
+  }));
+  ASSERT_FALSE(complete_);
+  std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> gates;
+  for (int i = 0; i < SpeechWorkerCount(); ++i) {
+    gates.push_back(std::make_unique<loom_serve::testing::WorkerGate>(
+        loom_serve_host_executor(host_)));
+  }
+  IREE_ASSERT_OK(loom_serve_speech_voice_load_advance(load_, true, &complete_));
+  EXPECT_FALSE(complete_);
+  gates.clear();
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        PumpUntil([&] { return complete_; }));
+  EXPECT_TRUE(complete_);
+  EXPECT_FALSE(interface_.is_pending(interface_.self));
+  EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
+}
+
+TEST_P(SourceStockVoiceServiceTest, MissingOriginalFailsBeforePublication) {
+  ASSERT_NO_FATAL_FAILURE(Allocate(true));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        PumpUntil([&] { return complete_; }));
+  EXPECT_TRUE(complete_);
+  EXPECT_FALSE(interface_.is_pending(interface_.self));
+  EXPECT_EQ(interface_.telemetry.counters->completed, 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(Originals, SourceStockVoiceServiceTest,
+                         ::testing::Values(false));
 
 INSTANTIATE_TEST_SUITE_P(Uploaded, SourceVoiceServiceTest,
                          ::testing::Values(false));

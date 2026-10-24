@@ -439,3 +439,47 @@ def test_projection_excludes_other_selections():
     assert set(selected.document["programs"]) == {"source"}
     assert set(selected.document["services"]) == {"chat"}
     assert set(selected.document["variants"]) == {"fixture"}
+
+
+def test_original_voice_recordings_are_selected_deduplicated_and_projected():
+    document = _document()
+    recording = {
+        "file": {
+            "path": "voice/recording.data",
+            "origin": "https://example.com/original.wav",
+        }
+    }
+    _service(document)["voices"] = {
+        "first": recording,
+        "second": copy.deepcopy(recording),
+    }
+    selected = ModelCard(document).select("check")
+    assert selected.files["voice/recording.data"].roles == frozenset({"voice"})
+    assert (
+        selected.files["voice/recording.data"].origin
+        == "https://example.com/original.wav"
+    )
+    assert ModelCard(selected.document).select().voices == selected.voices
+    selected.voices["first"]["file"]["path"] = "changed.data"
+    assert (
+        ModelCard(document).select("check").voices["first"]["file"]["path"]
+        == "voice/recording.data"
+    )
+
+
+@pytest.mark.parametrize(
+    "voice",
+    [
+        "recording.wav",
+        {},
+        {"file": "../recording.wav"},
+        {"file": {"path": "recording.wav", "format": "wav"}},
+        {"file": "recording.data", "content_type": ""},
+        {"file": "recording.data", "prepared": True},
+    ],
+)
+def test_voice_recordings_require_one_explicit_role_and_format_contract(voice):
+    document = _document()
+    _service(document)["voices"] = {"narrator": voice}
+    with pytest.raises(ManifestError):
+        ModelCard(document)

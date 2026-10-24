@@ -216,6 +216,7 @@ loom_cc_library(
     ::service
     ::stream
     ::voice
+    ::voice_load
     iree::base
     iree::base::threading
     iree::base::tooling::flags
@@ -335,6 +336,29 @@ loom_cc_library(
     loom::serve::telemetry::tracing
     loom::serve::transport::http::request
     loom::serve::transport::http::server
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    voice_load
+  HDRS
+    "voice_load.h"
+  SRCS
+    "voice_load.c"
+  DEPS
+    ::service
+    ::voice
+    iree::base
+    iree::base::threading
+    loom::binding::c::loomc
+    loom::model::card
+    loom::serve::runtime::host
+    loom::serve::runtime::host::wake
+    loom::serve::runtime::program::sources
+    loom::serve::service
   PUBLIC
 )
 endif()

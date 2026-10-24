@@ -753,3 +753,36 @@ def test_shared_logical_source_is_downloaded_only_once(tmp_path):
         assert os.path.samefile(
             tmp_path / "output/code.loom", tmp_path / "output/copy.loom"
         )
+
+
+def test_voice_recording_lock_and_fetch_preserve_original_bytes_and_content_type(
+    tmp_path,
+):
+    document = _card()
+    document["variants"]["v"]["services"]["text"]["voices"] = {
+        "narrator": {
+            "file": {"path": "voice.data", "origin": "original.pcm"},
+            "content_type": "audio/pcm;rate=44100;channels=2;format=f32le",
+        }
+    }
+    for name, payload in [
+        ("code.loom", b"code"),
+        ("weights.data", b"weights"),
+        ("original.pcm", b"original recording"),
+    ]:
+        (tmp_path / name).write_bytes(payload)
+    card = ModelCard(document)
+    cache = ContentCache(tmp_path / "cache")
+    source = Document(str(tmp_path / "model.json"), json.dumps(document))
+    plan = plan_fetch(source, card.select(), cache, update_lock=True)
+    output = tmp_path / "installed"
+    install(plan, cache, output)
+    selected = ModelCard.parse((output / "model.json").read_text()).select()
+    assert (
+        selected.voices["narrator"]["content_type"]
+        == "audio/pcm;rate=44100;channels=2;format=f32le"
+    )
+    assert (output / "voice.data").read_bytes() == b"original recording"
+    assert selected.files["voice.data"].roles == frozenset({"voice"})
+    lock = ModelLock.parse((output / "model.json.lock").read_text())
+    lock.cover(selected)

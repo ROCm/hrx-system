@@ -397,3 +397,23 @@ def test_overview_is_an_explicit_input_and_cannot_be_overwritten(tmp_path, capsy
         == 2
     )
     assert output.read_text() == "previous publication"
+
+
+def test_original_voice_documentation_names_roles_formats_and_exact_origins():
+    document = _card().document
+    service = document["variants"]["original"]["partitions"]["node-0"]["services"][
+        "chat"
+    ]
+    service["voices"] = {
+        "narrator": {
+            "file": {"path": "voice.data", "origin": "@checkpoint/original.wav"},
+            "content_type": "audio/wav",
+        }
+    }
+    rendered = render_markdown(ModelCard(document))
+    assert "voices.narrator" in rendered
+    assert (
+        "https://huggingface.co/org/trained/resolve/candidate%2Fv2/original.wav"
+        in rendered
+    )
+    assert '"content_type": "audio/wav"' in rendered

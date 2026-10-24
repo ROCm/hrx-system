@@ -143,8 +143,9 @@ curl --fail --silent --show-error --no-buffer \
 
 The package determines available voices, voice conditioning, text preparation,
 sampling and EOS. A voice selector may also be an object such as `{"id":"alba"}`.
-Reference waveforms or other conditioning assets belong to the package; this
-endpoint does not upload or persist voice samples. Playback buffering belongs
+Speech ABI 2 models also accept [reference uploads](../http-profiles.md#voice-registration)
+using the same audio formats as dictation. An upload prepares a named voice once;
+subsequent synthesis requests reuse it. Playback buffering belongs
 to the client, so incremental HTTP output alone does not establish audible
 latency for a particular player.
 

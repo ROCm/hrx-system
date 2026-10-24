@@ -129,6 +129,8 @@ def _uses(selection: Selection) -> tuple[dict[str, list[str]], dict]:
             add(value, f"parameters.{scope}[{index}]")
     for name, tokenizer in selection.tokenizers.items():
         add(tokenizer, "tokenizers." + name)
+    for name, voice in selection.voices.items():
+        add(voice["file"], "voices." + name)
     for role in ("inputs", "libraries"):
         for index, value in enumerate(selection.program[role]):
             add(value, f"{role}[{index}]")
@@ -298,6 +300,8 @@ def render_markdown(
                 + " |"
             )
         lines.append("")
+        if selection.voices:
+            lines += ["Original voice recordings:", "", *_json(selection.voices)]
         if options:
             lines += ["Importer options:", "", *_json(options)]
         transforms = {

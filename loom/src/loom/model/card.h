@@ -59,6 +59,15 @@ typedef struct loom_model_tokenizer_t {
   loom_model_file_t file;
 } loom_model_tokenizer_t;
 
+typedef struct loom_model_voice_t {
+  // Published voice identity used by speech requests.
+  iree_string_view_t name;
+  // Original recording; acquisition never prepares learned conditioning.
+  loom_model_file_t file;
+  // Upload content type, including raw PCM geometry, or empty for sniffing.
+  iree_string_view_t content_type;
+} loom_model_voice_t;
+
 // A caller may select a canonical preset and override its choices.
 // Empty choices use that preset, or the sole available compatible
 // choice. Ambiguity is an error; no hardware or payload inspection occurs.
@@ -132,6 +141,10 @@ typedef struct loom_model_selection_t {
   iree_host_size_t tokenizer_count;
   // Borrowed tokenizer declarations.
   const loom_model_tokenizer_t* tokenizers;
+  // Number of original recordings registered before speech becomes ready.
+  iree_host_size_t voice_count;
+  // Borrowed immutable recording declarations, in publication order.
+  const loom_model_voice_t* voices;
   // Canonical preparation options, or an empty JSON object.
   iree_string_view_t options;
   // Canonical execution settings, interpreted by the service host.

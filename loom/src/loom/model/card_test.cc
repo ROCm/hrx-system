@@ -158,6 +158,40 @@ TEST_F(CardTest, SelectionOwnsMixedProvidersAndScopedInputs) {
   EXPECT_EQ(String(selection->execution), R"({"rows": 2})");
 }
 
+TEST_F(CardTest, OriginalVoiceRecordingsOwnTheirNamesAndMediaTypes) {
+  std::string json = Replace(
+      "\"config\": {\"width\": 8, \"dtype\": \"f32\"},",
+      R"("voices":{"one":{"file":"voice/original.data"},)"
+      R"("two":{"file":{"path":"voice/raw.data","origin":"@recordings/source"},)"
+      R"("content_type":"audio/pcm;rate=44100;channels=2;format=f32le"}},)");
+  IREE_ASSERT_OK(Parse(json));
+  json.assign(json.size(), 'x');
+  const auto* selection = loom_model_card_selection(card_);
+  ASSERT_EQ(selection->voice_count, 2u);
+  EXPECT_EQ(String(selection->voices[0].name), "one");
+  EXPECT_EQ(String(selection->voices[0].file.path), "voice/original.data");
+  EXPECT_TRUE(iree_string_view_is_empty(selection->voices[0].content_type));
+  EXPECT_EQ(String(selection->voices[1].name), "two");
+  EXPECT_EQ(String(selection->voices[1].file.path), "voice/raw.data");
+  EXPECT_EQ(String(selection->voices[1].content_type),
+            "audio/pcm;rate=44100;channels=2;format=f32le");
+}
+
+TEST_F(CardTest, OriginalVoiceRecordingsRejectAmbiguousAndInvalidDeclarations) {
+  for (const char* voice :
+       {R"("original.wav")", R"({})", R"({"file":"../original.wav"})",
+        R"({"file":{"path":"original.wav","format":"wav"}})",
+        R"({"file":"original.data","content_type":""})",
+        R"({"file":"original.data","prepared":true})"}) {
+    const std::string declaration =
+        "\"voices\":{\"narrator\":" + std::string(voice) + "},";
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        Parse(Replace("\"config\": {\"width\": 8, \"dtype\": \"f32\"},",
+                      declaration.c_str())));
+  }
+}
+
 TEST_F(CardTest, ComponentsOwnIndependentVersionsAndCanonicalSettings) {
   std::string json = Replace(
       "\"kind\": \"text\", \"version\": 1",

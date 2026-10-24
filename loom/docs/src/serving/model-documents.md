@@ -179,6 +179,28 @@ encoding:
 an explicit `format` supports renamed assets, while shorthand strings use the
 loader's format inference. Ambiguous or unsupported encodings fail.
 
+Speech service variants may declare original recordings under `voices`. Each
+key is the ID used by speech requests; `file` follows the same destination and
+origin rules as other assets. Optional `content_type` uses the upload media-type
+syntax. Encoded recordings can omit it and use container detection; raw PCM
+requires its rate, channels, and optional `format=f32le` (`s16le` is the default).
+The `file` itself has no `format`, since the media type owns that distinction:
+
+```json
+"voices": {
+  "narrator": {
+    "file": {"path": "voice/narrator.wav", "origin": "@recordings/original.wav"},
+    "content_type": "audio/wav"
+  }
+}
+```
+
+`loom-fetch` acquires and locks these original bytes. Speech ABI 2 prepares each
+recording through the native upload lifecycle before the model becomes ready;
+failed preparation fails model registration. Models can also accept
+[uploaded voices](http-profiles.md#voice-registration) after startup. Prepared
+conditioning belongs to the loaded model and is not a parameter archive.
+
 Variant `config` values override program defaults and reach both preparation
 and generated native stages. Values are compiler scalars: booleans, finite
 numbers, or strings. Source preparation may specialize individual stage keys.

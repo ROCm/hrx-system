@@ -267,6 +267,7 @@ loom_cc_library(
         "//loom/src/loom/serve/service/recognition:service",
         "//loom/src/loom/serve/service/speech:model",
         "//loom/src/loom/serve/service/speech:service",
+        "//loom/src/loom/serve/service/speech:voice_load",
         "//loom/src/loom/serve/service/text:model",
         "//loom/src/loom/serve/service/text:schedule",
         "//loom/src/loom/serve/service/text:service",

@@ -439,10 +439,50 @@ and accepts 0.25–4. The seed extension accepts an unsigned 64-bit integer or
 decimal string and defaults to zero.
 
 `stream_format` may be omitted or set to `"audio"`. Encoded formats, SSE and an
-omitted response format return an input error. Voice registration and sample
-persistence are not supplied by this endpoint; conditioning assets belong to
-the loaded package. File-based players require an encoded-audio profile rather
-than raw PCM.
+omitted response format return an input error. Uploaded reference recordings
+use the separate voice-registration endpoint below. File-based players require
+an encoded-audio profile rather than raw PCM.
+
+## Voice registration
+
+`POST /v1/audio/voices` registers a reference recording with a speech ABI 2
+model. Its multipart fields are `model`, a nonempty UTF-8 `id`, and `file`.
+The file accepts the same WAV, MP3, FLAC, and raw PCM inputs as
+[audio transcription](#audio-transcription), through the same native parser and
+decoder. The model determines which recording lengths and geometry it can use.
+
+```sh
+curl --fail-with-body -H 'Expect:' \
+  http://127.0.0.1:8080/v1/audio/voices \
+  -F model=speaker -F id=narrator \
+  -F 'file=@reference.wav;type=audio/wav'
+```
+
+A successful response is `{"id":"narrator"}`. It arrives only after CPU audio
+preparation and learned conditioning have completed; subsequent speech requests
+can then select `"voice":"narrator"`. Registration decodes the original geometry
+once, and the model's CPU Loom program owns mixing, resampling, and trimming.
+Synthesis reuses the resulting conditioning. The server does not write a
+prepared recording or weight archive to disk.
+
+IDs are local to the loaded model. A duplicate ID returns 409, exhausted voice
+or admission capacity returns 503, and an unavailable ID returns 404. A service
+without the upload ABI returns 501. Disconnecting an unfinished upload cancels
+publication, while accepted CPU and device work finish retiring safely.
+
+Remove a voice with:
+
+```sh
+curl --fail-with-body http://127.0.0.1:8080/v1/audio/voices/remove \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"speaker","id":"narrator"}'
+```
+
+Removal hides the ID from new requests. Already admitted requests retain their
+conditioning until completion, so its slot becomes reusable only after those
+readers retire. Uploaded voices live until removal or model unloading. A
+[model card](model-documents.md) can name original recordings to register on
+every load.
 
 ## Audio transcription
 
@@ -465,7 +505,7 @@ order, separated by newlines; segment identities break equal-time ties.
 | Field | Contract |
 | --- | --- |
 | `model` | Required registered recognition deployment. |
-| `file` | Required nonempty recording in an enabled format, or PCM16LE with explicit geometry; the filename never names a server path. |
+| `file` | Required nonempty recording in an enabled format, or raw PCM with explicit geometry; the filename never names a server path. |
 | `language` | Optional UTF-8 language hint interpreted by the package. |
 | `prompt` | Optional UTF-8 context interpreted by the package. |
 | `temperature` | Finite number from 0 through 1, default 0; source policy may restrict it. |
@@ -478,7 +518,7 @@ label. `audio/wav`, `audio/mpeg`, and `audio/flac` are conventional labels;
 codec or unsupported container returns an error. Direct WebM/Opus and MP4/AAC
 uploads are not accepted; clients must convert them to an enabled format.
 
-Raw PCM16LE works in every build. Its file part explicitly declares `audio/pcm`
+Raw PCM16LE and F32LE work in every build. The file part declares `audio/pcm`
 with a positive sample rate and the interleaved channel count required by the
 selected model. The server converts the declared rate to the model's rate.
 For a 24 kHz mono recording sent to a 16 kHz mono recognizer:
@@ -490,7 +530,9 @@ curl --fail-with-body -H 'Expect:' \
   -F 'file=@recording.pcm;headers="Content-Type: audio/pcm;rate=24000;channels=1"'
 ```
 
-These bytes contain whole PCM16 frames without a WAV header. Missing or duplicate
+These bytes contain whole PCM16 frames without a WAV header. Add `format=f32le`
+to the media type for interleaved little-endian F32 samples; every sample must
+be finite and between -1 and 1. `format=s16le` is the default. Missing or duplicate
 geometry, nonpositive rates, mismatched channel counts, and partial frames reject.
 Raw PCM uses bandlimited rate conversion with continuous filter history across
 worker chunks; it does not mix channels. Equal rates preserve each sample.

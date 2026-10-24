@@ -495,6 +495,8 @@ def _installation_card(plan: FetchPlan) -> tuple[dict, dict[str, str | dict], di
             for parameter in service.get("parameters", {}).values():
                 parameter.pop("origin", None)
                 parameter["files"] = [file(value) for value in parameter["files"]]
+            for voice in service.get("voices", {}).values():
+                voice["file"] = file(voice["file"])
             service["tokenizers"] = {
                 name: file(value)
                 for name, value in service.get("tokenizers", {}).items()

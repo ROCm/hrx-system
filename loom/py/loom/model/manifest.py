@@ -355,6 +355,8 @@ class Selection:
     parameters: dict
     # Code-facing tokenizer declarations.
     tokenizers: dict
+    # Named original speech recordings and their upload content types.
+    voices: dict
     # Canonical execution, request, workload, and preparation options.
     settings: dict
     # Deduplicated destinations with resolved group-origin inheritance.
@@ -542,7 +544,7 @@ class ModelCard:
                         variant_service,
                         current,
                         ("programs",),
-                        ("config", "parameters", "tokenizers"),
+                        ("config", "parameters", "tokenizers", "voices"),
                     )
                     for program in _strings(
                         variant_service["programs"], current + ".programs", empty=False
@@ -583,6 +585,21 @@ class ModelCard:
                         empty=True,
                     ).items():
                         _file(tokenizer, origins, current + ".tokenizers." + identity)
+                    for identity, voice in _mapping(
+                        variant_service.get("voices", {}),
+                        current + ".voices",
+                        empty=True,
+                    ).items():
+                        path = current + ".voices." + identity
+                        _object(voice, path, ("file",), ("content_type",))
+                        _file(voice["file"], origins, path + ".file")
+                        if (
+                            isinstance(voice["file"], dict)
+                            and "format" in voice["file"]
+                        ):
+                            _fail(path, "use content_type instead of file.format")
+                        if "content_type" in voice:
+                            _string(voice["content_type"], path + ".content_type")
 
     def choices(self) -> list[dict[str, str]]:
         """Enumerates declared compatible choices without reading any payload."""
@@ -727,6 +744,8 @@ class ModelCard:
                 add(value, "parameter", parameter.get("origin", ""))
         for value in variant_service.get("tokenizers", {}).values():
             add(value, "tokenizer")
+        for voice in variant_service.get("voices", {}).values():
+            add(voice["file"], "voice")
         paths = set(files)
         for path in paths:
             if any(str(parent) in paths for parent in PurePosixPath(path).parents):
@@ -782,6 +801,7 @@ class ModelCard:
             ),
             parameters=copy.deepcopy(variant_service.get("parameters", {})),
             tokenizers=copy.deepcopy(variant_service.get("tokenizers", {})),
+            voices=copy.deepcopy(variant_service.get("voices", {})),
             settings=settings,
             files=files,
             document=projected,

@@ -1,0 +1,69 @@
+{
+  "$schema": "../../../../../py/loom/model/model-card.v1.schema.json",
+  "schema_version": 1,
+  "model": {
+    "id": "loom-fixture/stock-speech-voices",
+    "name": "Original recording voice fixture"
+  },
+  "programs": {
+    "fixture": {
+      "inputs": [
+        "prepare.loom",
+        "control.loom",
+        "voice_service.loom"
+      ],
+      "libraries": [
+        "generate.loom",
+        "voice_generate.loom"
+      ]
+    },
+    "mixed": {
+      "inputs": [
+        "prepare.loom",
+        "control.loom",
+        "voice_service.loom"
+      ],
+      "libraries": [
+        "voice_numerics.loombc"
+      ]
+    }
+  },
+  "services": {
+    "serve": {
+      "kind": "speech",
+      "version": 2
+    }
+  },
+  "variants": {
+    "fixture": {
+      "services": {
+        "serve": {
+          "programs": [
+            "fixture",
+            "mixed"
+          ],
+          "voices": {
+            "positive": {
+              "file": "positive.data",
+              "content_type": "audio/pcm;rate=44100;channels=2;format=f32le"
+            },
+            "negative": {
+              "file": "negative.data",
+              "content_type": "audio/pcm;rate=44100;channels=2;format=f32le"
+            }
+          }
+        }
+      }
+    }
+  },
+  "presets": {
+    "check": {
+      "service": "serve",
+      "variant": "fixture",
+      "programs": "fixture",
+      "execution": {
+        "pending_requests": 1
+      }
+    }
+  }
+}

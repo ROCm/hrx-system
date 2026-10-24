@@ -19,6 +19,7 @@
 #include "loom/serve/service/recognition/service.h"
 #include "loom/serve/service/speech/model.h"
 #include "loom/serve/service/speech/service.h"
+#include "loom/serve/service/speech/voice_load.h"
 #include "loom/serve/service/text/schedule.h"
 #include "loom/serve/service/text/service.h"
 
@@ -429,6 +430,8 @@ typedef struct loom_serve_speech_registration_t {
   loom_serve_speech_model_t* model;
   // Owned HTTP service, destroyed after CPU and external borrowers retire.
   loom_serve_speech_service_t* service;
+  // Original card recordings, joined before publication or retirement.
+  loom_serve_speech_voice_load_t* voices;
   // Explicit warmup, joined before service/model retirement.
   loom_serve_activation_t* activation;
   // Model consumers have been relinquished with an ownership wake installed.
@@ -440,38 +443,60 @@ static iree_status_t loom_serve_speech_registration_prepare(
     bool* out_complete, loom_serve_service_t* out_service,
     loom_serve_compilation_report_t* out_report) {
   loom_serve_speech_registration_t* registration = self;
-  iree_status_t status = loom_serve_speech_load_advance(
-      registration->load,
-      iree_any_bit_set(flags, LOOM_SERVE_REGISTRATION_PREPARE_FLAG_CANCEL)
-          ? LOOM_SERVE_SPEECH_LOAD_FLAG_CANCEL
-          : 0,
-      out_complete);
-  if (!*out_complete) {
-    return status;
-  }
-  *out_report = *loom_serve_speech_load_report(registration->load);
-  if (iree_status_is_ok(status)) {
-    registration->model = loom_serve_speech_load_take_model(registration->load);
-    status = loom_serve_speech_load_free(registration->load);
+  const bool cancel =
+      iree_any_bit_set(flags, LOOM_SERVE_REGISTRATION_PREPARE_FLAG_CANCEL);
+  *out_complete = false;
+  iree_status_t status = iree_ok_status();
+  if (registration->load) {
+    bool loaded = false;
+    status = loom_serve_speech_load_advance(
+        registration->load, cancel ? LOOM_SERVE_SPEECH_LOAD_FLAG_CANCEL : 0,
+        &loaded);
+    if (!loaded) {
+      return status;
+    }
+    *out_report = *loom_serve_speech_load_report(registration->load);
     if (iree_status_is_ok(status)) {
-      registration->load = NULL;
+      registration->model =
+          loom_serve_speech_load_take_model(registration->load);
+      status = loom_serve_speech_load_free(registration->load);
+      if (iree_status_is_ok(status)) {
+        registration->load = NULL;
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      const loom_serve_model_configuration_t* configuration =
+          registration->configuration;
+      const loom_serve_speech_service_options_t service_options = {
+          .name = configuration->name,
+          .pending_capacity = configuration->pending_requests,
+          .heartbeat_interval = registration->options->heartbeat_interval};
+      status = loom_serve_speech_service_allocate(
+          loom_serve_device_host(registration->device),
+          loom_serve_speech_model_generator(registration->model),
+          &service_options, registration->stream, registration->host_allocator,
+          &registration->service);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_speech_voice_load_allocate(
+          loom_serve_device_host(registration->device),
+          &registration->configuration->sources, registration->service,
+          registration->observer, registration->host_allocator,
+          &registration->voices);
+    }
+    if (!iree_status_is_ok(status)) {
+      *out_complete = true;
+      return status;
     }
   }
-  if (iree_status_is_ok(status)) {
-    const loom_serve_model_configuration_t* configuration =
-        registration->configuration;
-    const loom_serve_speech_service_options_t service_options = {
-        .name = configuration->name,
-        .pending_capacity = configuration->pending_requests,
-        .heartbeat_interval = registration->options->heartbeat_interval};
-    status = loom_serve_speech_service_allocate(
-        loom_serve_device_host(registration->device),
-        loom_serve_speech_model_generator(registration->model),
-        &service_options, registration->stream, registration->host_allocator,
-        &registration->service);
-  }
-  if (iree_status_is_ok(status)) {
-    *out_service = loom_serve_speech_service_interface(registration->service);
+  status = loom_serve_speech_voice_load_advance(registration->voices, cancel,
+                                                out_complete);
+  if (*out_complete) {
+    loom_serve_speech_voice_load_free(registration->voices);
+    registration->voices = NULL;
+    if (iree_status_is_ok(status)) {
+      *out_service = loom_serve_speech_service_interface(registration->service);
+    }
   }
   return status;
 }

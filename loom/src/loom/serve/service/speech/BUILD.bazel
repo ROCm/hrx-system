@@ -179,6 +179,7 @@ loom_cc_library(
         ":service",
         ":stream",
         ":voice",
+        ":voice_load",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/host",
@@ -273,5 +274,23 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/task",
+    ],
+)
+
+loom_cc_library(
+    name = "voice_load",
+    srcs = ["voice_load.c"],
+    hdrs = ["voice_load.h"],
+    deps = [
+        ":service",
+        ":voice",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/model:card",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/serve/runtime/program:sources",
+        "//loom/src/loom/serve/service",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
     ],
 )

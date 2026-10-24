@@ -10,6 +10,7 @@ import base64
 import http.client
 import json
 import struct
+import subprocess
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -116,7 +117,7 @@ def check_speech(client, model, *, tokenizer=True):
         }
 
 
-def check_speech_voice(client, model):
+def check_speech_voice(client, model, *, stock=False):
     def upload(voice, value, expected=200):
         boundary = "voice-boundary"
         body = (
@@ -145,8 +146,9 @@ def check_speech_voice(client, model):
         finally:
             connection.close()
 
-    upload("positive", 0.125)
-    upload("negative", -0.125)
+    if not stock:
+        upload("positive", 0.125)
+        upload("negative", -0.125)
     upload("positive", 0.25, 409)
     upload("third", 0.25, 503)
     check_speech(client, model, tokenizer=False)
@@ -248,6 +250,9 @@ def check_service(server, kind, deployment, model):
                     "decision": check_decision,
                     "speech": check_speech,
                     "speech_voice": check_speech_voice,
+                    "speech_stock_voice": lambda client, model: check_speech_voice(
+                        client, model, stock=True
+                    ),
                     "sequence": check_sequence,
                 }[kind](client, model)
             except (AssertionError, RuntimeError) as error:
@@ -258,7 +263,7 @@ def check_service(server, kind, deployment, model):
         assert process.returncode == 0, log.read_text()
 
 
-def main(server, kind, deployment):
+def main(server, kind, deployment, fetch=None):
     deployment = Path(deployment).absolute()
     for path in (deployment, deployment.parent / "model.json"):
         document = json.loads(path.read_text())
@@ -268,6 +273,23 @@ def main(server, kind, deployment):
             else document["name"]
         )
         check_service(server, kind, str(path), model)
+
+    if fetch:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "installed"
+            subprocess.run(
+                [
+                    str(Path(fetch).absolute()),
+                    str(deployment.parent / "model.json"),
+                    "--offline",
+                    "--update-lock",
+                    "--lockfile=" + str(Path(temporary) / "publication.lock"),
+                    "--cache=" + str(Path(temporary) / "cache"),
+                    "--output=" + str(output),
+                ],
+                check=True,
+            )
+            check_service(server, kind, str(output / "model.json"), model)
 
 
 if __name__ == "__main__":

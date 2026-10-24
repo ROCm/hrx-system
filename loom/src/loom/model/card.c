@@ -458,6 +458,55 @@ static iree_status_t loom_model_tokenizers(
   return status;
 }
 
+static iree_status_t loom_model_voices(const loom_model_json_object_t* variant,
+                                       loom_model_selection_t* selection) {
+  loom_model_json_object_t voices;
+  IREE_RETURN_IF_ERROR(
+      loom_model_object_field(variant, "voices", false, NULL, &voices));
+  loom_model_voice_t* values = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      &variant->card->arena, voices.count, sizeof(*values), (void**)&values));
+  selection->voices = values;
+  selection->voice_count = voices.count;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < voices.count && iree_status_is_ok(status);
+       ++i) {
+    const loom_model_json_field_t* field = &voices.fields[i];
+    values[i].name = field->key;
+    if (field->type != IREE_JSON_VALUE_TYPE_OBJECT) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "voices require recording objects");
+      continue;
+    }
+    loom_model_json_object_t voice;
+    status = loom_model_object(variant->card, field->value, "file content_type",
+                               &voice);
+    const loom_model_json_field_t* file = NULL;
+    if (iree_status_is_ok(status)) {
+      file = loom_model_field(&voice, IREE_SV("file"));
+      if (!file) {
+        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "voice recording requires a file");
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      loom_model_json_object_t file_object;
+      status = loom_model_file(variant->card, file->type, file->value, false,
+                               false, &file_object, &values[i].file);
+      if (iree_status_is_ok(status) && values[i].file.format.size) {
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "voice recordings use content_type instead of file.format");
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_model_string_field(&voice, "content_type", false,
+                                       &values[i].content_type);
+    }
+  }
+  return status;
+}
+
 static iree_status_t loom_model_config_append(
     const loom_model_json_field_t* field, bool* comma,
     iree_string_builder_t* builder) {
@@ -795,8 +844,8 @@ static iree_status_t loom_model_select(loom_model_card_t* card,
       &selection->selector.service, &service_variant_json));
   loom_model_json_object_t service_variant;
   IREE_RETURN_IF_ERROR(loom_model_object(
-      card, service_variant_json, "programs config parameters tokenizers",
-      &service_variant));
+      card, service_variant_json,
+      "programs config parameters tokenizers voices", &service_variant));
   loom_model_json_object_t services;
   IREE_RETURN_IF_ERROR(
       loom_model_object_field(&root, "services", true, NULL, &services));
@@ -863,6 +912,7 @@ static iree_status_t loom_model_select(loom_model_card_t* card,
       loom_model_config(&programs, &service_variant, &selection->config));
   IREE_RETURN_IF_ERROR(loom_model_parameters(&service_variant, selection));
   IREE_RETURN_IF_ERROR(loom_model_tokenizers(&service_variant, selection));
+  IREE_RETURN_IF_ERROR(loom_model_voices(&service_variant, selection));
   IREE_RETURN_IF_ERROR(loom_model_settings(
       &service, &preset, &selection->options, &selection->execution));
   IREE_RETURN_IF_ERROR(loom_model_value(&preset, "request",

@@ -455,6 +455,16 @@
             "$ref": "#/$defs/file"
           },
           "description": "Code-facing tokenizer identities. Role is explicit and independent of filename extensions."
+        },
+        "voices": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/name"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/voice"
+          },
+          "description": "Original reference recordings registered as reusable voices before the speech service becomes ready. Paths and acquisition origins belong to file; decoding and model preparation happen once at registration."
         }
       },
       "additionalProperties": false
@@ -786,6 +796,35 @@
       },
       "additionalProperties": false,
       "description": "Service-owned component sharing the selected providers and parameter scopes. Its ABI revision is independent of its parent service."
+    },
+    "voice": {
+      "type": "object",
+      "required": [
+        "file"
+      ],
+      "properties": {
+        "file": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/file"
+            },
+            {
+              "not": {
+                "type": "object",
+                "required": [
+                  "format"
+                ]
+              }
+            }
+          ]
+        },
+        "content_type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The same content type as a native or HTTP voice upload. Omit for encoded-container sniffing; raw PCM supplies rate, channels, and optional format=f32le."
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

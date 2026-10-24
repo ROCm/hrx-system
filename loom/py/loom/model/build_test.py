@@ -146,3 +146,31 @@ def test_runtime_acquisition_survives_build_without_reading_weights(tmp_path):
     assert selected.files["weights.loom"].origin == "weights.loom"
     assert selected.files["prepare.loom"].origin == "prepare.loom"
     assert not (tmp_path / "bias.data").exists()
+
+
+def test_original_recording_survives_build_without_reading_its_payload(tmp_path):
+    plan = _plan()
+    document = json.loads(Path(plan["card"]).read_text())
+    document["variants"]["fixture"]["services"]["chat"]["voices"] = {
+        "narrator": {
+            "file": {
+                "path": "voice.data",
+                "origin": "https://example.com/original.wav",
+            },
+            "content_type": "audio/wav",
+        }
+    }
+    source = tmp_path / "input.json"
+    source.write_text(json.dumps(document))
+    plan.update(
+        card=str(source),
+        encoding="preserve",
+        name="fixture",
+        output_card=str(tmp_path / "model.json"),
+        output_deployment=str(tmp_path / "serve.json"),
+    )
+    build(plan)
+    selected = ModelCard.parse((tmp_path / "model.json").read_text()).select("check")
+    assert selected.voices["narrator"]["content_type"] == "audio/wav"
+    assert selected.files["voice.data"].origin == "https://example.com/original.wav"
+    assert not (tmp_path / "voice.data").exists()
