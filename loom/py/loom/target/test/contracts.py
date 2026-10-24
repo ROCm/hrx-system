@@ -744,14 +744,14 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
                 emit=(
                     EmitRegisterSlice(
                         source=ValueRef.operand("source"),
-                        result=ValueRef.temporary("slice"),
+                        result=ValueRef.temporary("reclassified"),
                         unit_offset=unit_offset,
                         unit_count=1,
+                        result_register_class="test.f32",
                     ),
-                    EmitRegisterMove(
-                        source=ValueRef.temporary("slice"),
+                    EmitRegisterCopy(
+                        source=ValueRef.temporary("reclassified"),
                         result=ValueRef.result("result"),
-                        result_type=ValueRef.temporary("slice"),
                     ),
                 ),
             )

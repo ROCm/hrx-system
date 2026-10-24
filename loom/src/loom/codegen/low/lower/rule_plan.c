@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/codegen/low/builder.h"
 #include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/lower/module_state.h"
 #include "loom/codegen/low/lower/rule_descriptor.h"
@@ -1181,8 +1182,11 @@ static iree_status_t loom_low_lower_rule_plan_carriers(
     loom_type_id_t* result_type_ids, loom_low_lower_lane_plan_t* lanes) {
   const loom_low_lower_emit_t* emit = resolved->emit;
   const bool explicit_slice =
-      emit->kind == LOOM_LOW_LOWER_EMIT_REGISTER_SLICE &&
+      (emit->kind == LOOM_LOW_LOWER_EMIT_REGISTER_SLICE ||
+       emit->kind == LOOM_LOW_LOWER_EMIT_REGISTER_SLICE_CLASS) &&
       emit->payload.structural.unit_count != 0;
+  const bool explicit_register_class_slice =
+      emit->kind == LOOM_LOW_LOWER_EMIT_REGISTER_SLICE_CLASS;
   const bool expands_lanes =
       emit->kind == LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP_PER_LANE;
   const bool accumulates_lanes =
@@ -1276,7 +1280,28 @@ static iree_status_t loom_low_lower_rule_plan_carriers(
         (uint16_t)iree_math_count_trailing_zeros_u32(remaining_mask);
     remaining_mask &= (uint16_t)(remaining_mask - 1u);
     loom_type_t result_type = loom_type_none();
-    if (explicit_slice) {
+    if (explicit_register_class_slice) {
+      const loom_type_t source_type = operand_types[0];
+      const uint32_t result_unit_count = emit->payload.structural.unit_count;
+      loom_type_t sliced_source_type = loom_type_none();
+      if (!loom_low_lower_rule_try_register_type_with_unit_count(
+              source_type, result_unit_count, &sliced_source_type)) {
+        return loom_low_lower_emit_register_width_relation_unsupported(
+            context, source->source_op, source_type, result_unit_count);
+      }
+      const loom_type_t* value_type =
+          loom_type_register_value_type(sliced_source_type);
+      if (value_type) {
+        IREE_RETURN_IF_ERROR(loom_low_build_typed_register_type(
+            context->module, context->descriptor_set,
+            emit->result_type.register_class_id, result_unit_count, *value_type,
+            &result_type));
+      } else {
+        IREE_RETURN_IF_ERROR(loom_low_build_register_type(
+            context->descriptor_set, emit->result_type.register_class_id,
+            result_unit_count, &result_type));
+      }
+    } else if (explicit_slice) {
       if (!loom_low_lower_rule_try_register_type_with_unit_count(
               operand_types[0], emit->payload.structural.unit_count,
               &result_type)) {

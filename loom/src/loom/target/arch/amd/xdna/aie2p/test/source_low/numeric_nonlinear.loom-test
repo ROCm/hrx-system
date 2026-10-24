@@ -18,7 +18,7 @@ func.def @nonlinear_selection(%scalar: f32, %vector: vector<4xf32>) -> (f32, vec
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=12 emitted_ops=394 rows=12 unkeyed_maximum_emitted_ops=0
+COMPILE-REPORT: source_low selected_ops=12 emitted_ops=460 rows=12 unkeyed_maximum_emitted_ops=0
 COMPILE-REPORT: source_low_target[0] function=nonlinear_selection source=specialization target=- bundle=aie2p-core config=amd.xdna.aie2p.core
 COMPILE-REPORT: source_low[0] function=nonlinear_selection source_op=scalar.expf selection=rule plan_key=native_bf16_exp_scalar_f32 descriptor_key=amd.xdna.aie2p.exp2.f32x16.to.bf16x16 descriptor_semantic_tag=floating.exp2.f32x16.to.bf16x16 emitted_ops=14
 COMPILE-REPORT: source_low[1] function=nonlinear_selection source_op=vector.expf selection=rule plan_key=native_bf16_exp_vector_f32 descriptor_key=amd.xdna.aie2p.exp2.f32x16.to.bf16x16 descriptor_semantic_tag=floating.exp2.f32x16.to.bf16x16 emitted_ops=12
@@ -28,8 +28,8 @@ COMPILE-REPORT: source_low[4] function=nonlinear_selection source_op=scalar.tanh
 COMPILE-REPORT: source_low[5] function=nonlinear_selection source_op=vector.tanhf selection=rule plan_key=native_bf16_tanh_vector_f32 descriptor_key=amd.xdna.aie2p.tanh.f32x16.to.bf16x16 descriptor_semantic_tag=floating.tanh.f32x16.to.bf16x16 emitted_ops=4
 COMPILE-REPORT: source_low[6] function=nonlinear_selection source_op=scalar.sqrtf selection=rule plan_key=native_approximate_sqrt_f32 descriptor_key=amd.xdna.aie2p.sqrt.f32 descriptor_semantic_tag=floating.sqrt.f32 emitted_ops=1
 COMPILE-REPORT: source_low[7] function=nonlinear_selection source_op=scalar.rsqrtf selection=rule plan_key=native_approximate_reciprocal_sqrt_f32 descriptor_key=amd.xdna.aie2p.reciprocal-sqrt.f32 descriptor_semantic_tag=floating.reciprocal-sqrt.f32 emitted_ops=1
-COMPILE-REPORT: source_low[8] function=nonlinear_selection source_op=scalar.sinf selection=rule plan_key=native_bf16_mac_sin_radians descriptor_key=amd.xdna.aie2p.multiply.bf16x32.configured descriptor_semantic_tag=floating.multiply.bf16x32.configured emitted_ops=94
-COMPILE-REPORT: source_low[9] function=nonlinear_selection source_op=scalar.cosf selection=rule plan_key=native_bf16_mac_cos_radians descriptor_key=amd.xdna.aie2p.multiply.bf16x32.configured descriptor_semantic_tag=floating.multiply.bf16x32.configured emitted_ops=91
+COMPILE-REPORT: source_low[8] function=nonlinear_selection source_op=scalar.sinf selection=rule plan_key=native_bf16_mac_sin_radians descriptor_key=amd.xdna.aie2p.multiply.bf16x32.configured descriptor_semantic_tag=floating.multiply.bf16x32.configured emitted_ops=127
+COMPILE-REPORT: source_low[9] function=nonlinear_selection source_op=scalar.cosf selection=rule plan_key=native_bf16_mac_cos_radians descriptor_key=amd.xdna.aie2p.multiply.bf16x32.configured descriptor_semantic_tag=floating.multiply.bf16x32.configured emitted_ops=124
 COMPILE-REPORT: source_low[10] function=nonlinear_selection source_op=scalar.sinturnsf selection=rule plan_key=native_bf16_mac_sin_turns descriptor_key=amd.xdna.aie2p.multiply.bf16x32.configured descriptor_semantic_tag=floating.multiply.bf16x32.configured emitted_ops=82
 COMPILE-REPORT: source_low[11] function=nonlinear_selection source_op=scalar.costurnsf selection=rule plan_key=native_bf16_mac_cos_turns descriptor_key=amd.xdna.aie2p.multiply.bf16x32.configured descriptor_semantic_tag=floating.multiply.bf16x32.configured emitted_ops=79
 

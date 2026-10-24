@@ -24,6 +24,7 @@ from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
     vector_data_path_control,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.f32_accumulator import (
+    F32AccumulatorProgram,
     emit_f32_scalar_accumulator_binary,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.scalar_program import ScalarProgram
@@ -59,9 +60,11 @@ _BF16X32_VECTOR = Vector("bf16", lanes=32)
 # therefore necessarily approximate and, under afn, narrows its input and
 # log2(e) scale to bfloat16 so the scale can use the native vector datapath.
 _LOG2_E_BF16_BITS = 0x3FB9
-# Radian inputs are narrowed under afn before scaling to turns. The remaining
-# polynomial evaluates sin(2*pi*t) for t in [0, 0.25] after quadrant folding.
-_INVERSE_TWO_PI_BF16_BITS = 0x3E23
+# The correctly rounded F32 value of 1/(2*pi) is exactly the F32 sum of these
+# BF16 limbs. Radian inputs use the same three-limb representation so their
+# phase survives the native BF16 multiply-accumulate scale to turns. The
+# remaining polynomial evaluates sin(2*pi*t) for t in [0, 0.25] after folding.
+_INVERSE_TWO_PI_BF16_BITS = (0x3E23, 0xB7D0, 0x3340)
 # Coefficients are ordered from t through t^7 and tuned for the bfloat16
 # rounding points between AIE2P VMAC stages. The maximum absolute error of the
 # polynomial over the folded interval is below 0.005.
@@ -185,40 +188,170 @@ def _scalar_f32_to_bf16x32_emits(
     ], result
 
 
-def _radians_to_turns_emits() -> tuple[list[ContractEmit], ValueRef]:
-    emits, radians = _scalar_f32_to_bf16x32_emits(ValueRef.operand("input"), "radians")
-    coefficient_emits, inverse_two_pi = _bf16_splat_emits(
-        "inverse_two_pi", _INVERSE_TWO_PI_BF16_BITS
+def _f32_to_bf16_limb_vectors_emits(
+    input_value: ValueRef,
+    prefix: str,
+) -> tuple[list[ContractEmit], tuple[ValueRef, ValueRef, ValueRef]]:
+    """Preserves one finite F32 value as three RNE BF16 residual limbs."""
+
+    program = F32AccumulatorProgram(prefix)
+    input_vector = program.temporary("input_f32x16")
+    residual_accumulator = program.temporary("residual_0_accumulator")
+    program.emits.extend(
+        (
+            _inferred_emit(
+                "amd.xdna.aie2p.splat.i32x16",
+                operands={"src": input_value},
+                result=input_vector,
+            ),
+            _inferred_emit(
+                "amd.xdna.aie2p.move.vector512.to.accumulator512.low",
+                operands={"src": input_vector},
+                result=residual_accumulator,
+            ),
+            _emit(
+                "amd.xdna.aie2p.state.rounding.immediate",
+                immediates={"i": BF16_CONVERSION_ROUNDING},
+            ),
+        )
     )
-    emits.extend(coefficient_emits)
+
+    limb_vectors: list[ValueRef] = []
+    for limb_index in range(3):
+        narrow = program.temporary(f"limb_{limb_index}_bf16x16")
+        limb_vector = program.temporary(f"limb_{limb_index}_x32")
+        program.emits.extend(
+            (
+                _inferred_emit(
+                    "amd.xdna.aie2p.convert.f32x16.to.bf16x16.low",
+                    operands={"src": residual_accumulator},
+                    result=narrow,
+                ),
+                EmitRegisterConcat(
+                    sources=(narrow, narrow),
+                    result=limb_vector,
+                    result_type=_BF16X32_VECTOR,
+                ),
+            )
+        )
+        limb_vectors.append(limb_vector)
+        if limb_index == 2:
+            break
+
+        widened_accumulator = program.temporary(
+            f"limb_{limb_index}_widened_accumulator"
+        )
+        program.emits.append(
+            _inferred_emit(
+                "amd.xdna.aie2p.convert.bf16x16.to.f32x16.low",
+                operands={"src": narrow},
+                result=widened_accumulator,
+            )
+        )
+        next_residual_accumulator = program.binary(
+            f"residual_{limb_index + 1}",
+            residual_accumulator,
+            widened_accumulator,
+            "amd.xdna.aie2p.sub.f32x16.configured",
+        )
+        residual_accumulator = program.temporary(f"residual_{limb_index + 1}_low")
+        program.emits.append(
+            EmitRegisterSlice(
+                source=next_residual_accumulator,
+                result=residual_accumulator,
+                unit_count=1,
+                result_register_class="aie2p.ebmll",
+            )
+        )
+
+    return program.emits, (limb_vectors[0], limb_vectors[1], limb_vectors[2])
+
+
+def _radians_to_turns_emits() -> tuple[list[ContractEmit], ValueRef]:
+    emits, radian_limbs = _f32_to_bf16_limb_vectors_emits(
+        ValueRef.operand("input"), "radian_scale_"
+    )
     multiply_control = ValueRef.temporary("radian_scale_control")
-    scaled_accumulator = ValueRef.temporary("scaled_turns_accumulator")
+    emits.append(
+        _constant_emit(
+            "amd.xdna.aie2p.constant.i32.mova",
+            multiply_control,
+            _BF16_ELEMENTWISE_MULTIPLY_CONTROL,
+        )
+    )
+    coefficient_vectors: dict[int, ValueRef] = {}
+
+    def coefficient_vector(index: int) -> ValueRef:
+        vector_value = coefficient_vectors.get(index)
+        if vector_value is None:
+            coefficient_emits, vector_value = _bf16_splat_emits(
+                f"inverse_two_pi_limb_{index}",
+                _INVERSE_TWO_PI_BF16_BITS[index],
+            )
+            emits.extend(coefficient_emits)
+            coefficient_vectors[index] = vector_value
+        return vector_value
+
+    # Accumulate from least-significant to most-significant diagonal. Reversing
+    # this order loses low products when the F32 accumulator rounds each sum.
+    products = ((2, 0), (1, 1), (0, 2), (1, 0), (0, 1), (0, 0))
+    first_radian_index, first_coefficient_index = products[0]
+    scaled_accumulator = ValueRef.temporary("radian_scale_stage_0_accumulator")
+    emits.append(
+        _inferred_emit(
+            "amd.xdna.aie2p.multiply.bf16x32.configured",
+            operands={
+                "s1": radian_limbs[first_radian_index],
+                "s2": coefficient_vector(first_coefficient_index),
+                "acc": multiply_control,
+            },
+            result=scaled_accumulator,
+        )
+    )
+    for product_index, (radian_index, coefficient_index) in enumerate(
+        products[1:], start=1
+    ):
+        accumulator_unit = ValueRef.temporary(
+            f"radian_scale_stage_{product_index - 1}_accumulator_unit"
+        )
+        next_accumulator = ValueRef.temporary(
+            f"radian_scale_stage_{product_index}_accumulator"
+        )
+        emits.extend(
+            (
+                EmitRegisterSlice(
+                    source=scaled_accumulator,
+                    result=accumulator_unit,
+                    unit_count=1,
+                    result_register_class="aie2p.ebmll",
+                ),
+                _inferred_emit(
+                    "amd.xdna.aie2p.accumulate.bf16x16.configured",
+                    operands={
+                        "acc1": accumulator_unit,
+                        "s1": radian_limbs[radian_index],
+                        "s2": coefficient_vector(coefficient_index),
+                        "acc": multiply_control,
+                    },
+                    result=next_accumulator,
+                ),
+            )
+        )
+        scaled_accumulator = next_accumulator
+
     scaled_accumulator_unit = ValueRef.temporary("scaled_turns_accumulator_unit")
     scaled_vector = ValueRef.temporary("scaled_turns_vector")
     turns = ValueRef.temporary("turns")
     emits.extend(
         (
-            _constant_emit(
-                "amd.xdna.aie2p.constant.i32.mova",
-                multiply_control,
-                _BF16_ELEMENTWISE_MULTIPLY_CONTROL,
-            ),
-            _inferred_emit(
-                "amd.xdna.aie2p.multiply.bf16x32.configured",
-                operands={
-                    "s1": radians,
-                    "s2": inverse_two_pi,
-                    "acc": multiply_control,
-                },
-                result=scaled_accumulator,
-            ),
             EmitRegisterSlice(
                 source=scaled_accumulator,
                 result=scaled_accumulator_unit,
                 unit_count=1,
+                result_register_class="aie2p.ebmll",
             ),
             _inferred_emit(
-                "amd.xdna.aie2p.move.accumulator512.to.vector512",
+                "amd.xdna.aie2p.move.accumulator512.low.to.vector512",
                 operands={"src": scaled_accumulator_unit},
                 result=scaled_vector,
             ),
@@ -367,8 +500,8 @@ def _sine_polynomial_emits(
 
     polynomial = coefficient(len(_SINE_POLYNOMIAL_BF16_BITS) - 1)
     for coefficient_index in range(len(_SINE_POLYNOMIAL_BF16_BITS) - 2, -1, -1):
-        coefficient_accumulator = ValueRef.temporary(
-            f"trig_polynomial_coefficient_{coefficient_index}_accumulator"
+        product_accumulator = ValueRef.temporary(
+            f"trig_polynomial_stage_{coefficient_index}_product_accumulator"
         )
         polynomial_accumulator = ValueRef.temporary(
             f"trig_polynomial_stage_{coefficient_index}_accumulator"
@@ -384,18 +517,18 @@ def _sine_polynomial_emits(
                 _inferred_emit(
                     "amd.xdna.aie2p.multiply.bf16x32.configured",
                     operands={
-                        "s1": coefficient(coefficient_index),
-                        "s2": one,
+                        "s1": argument_squared,
+                        "s2": polynomial,
                         "acc": multiply_control,
                     },
-                    result=coefficient_accumulator,
+                    result=product_accumulator,
                 ),
                 _inferred_emit(
                     "amd.xdna.aie2p.accumulate.bf16x32.configured",
                     operands={
-                        "acc1": coefficient_accumulator,
-                        "s1": argument_squared,
-                        "s2": polynomial,
+                        "acc1": product_accumulator,
+                        "s1": coefficient(coefficient_index),
+                        "s2": one,
                         "acc": multiply_control,
                     },
                     result=polynomial_accumulator,

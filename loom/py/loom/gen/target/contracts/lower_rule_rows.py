@@ -1022,7 +1022,14 @@ def emit_row(row: LowerEmit) -> list[str]:
             always=True,
         )
     if row.result_ref_count:
-        if row.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN:
+        if row.kind == LowerEmitKind.REGISTER_SLICE_CLASS:
+            _append_field(
+                fields,
+                "result_type.register_class_id",
+                row.result_register_class_id,
+                always=True,
+            )
+        elif row.flags & LOWER_EMIT_FLAG_RESULT_TYPE_PATTERN:
             _append_field(
                 fields,
                 "result_type.type_pattern_start",
@@ -1068,7 +1075,10 @@ def emit_row(row: LowerEmit) -> list[str]:
             row.source_memory_ordinal,
             always=True,
         )
-    if row.kind == LowerEmitKind.REGISTER_SLICE:
+    if row.kind in (
+        LowerEmitKind.REGISTER_SLICE,
+        LowerEmitKind.REGISTER_SLICE_CLASS,
+    ):
         _append_field(
             fields,
             "payload.structural.offset",

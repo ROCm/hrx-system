@@ -1315,11 +1315,11 @@ def _derive_el_subregister_adapters(
     )
 
 
-def _derive_vector_storage_adapters(
+def _derive_restricted_storage_adapters(
     source_adapters: tuple[RegisterAdapter, ...],
     register_classes: tuple[RegisterClass, ...],
 ) -> tuple[RegisterAdapter, ...]:
-    """Restricts VMOV encodings to its vector and accumulator storage domains."""
+    """Restricts permissive instruction fields to exact Low storage domains."""
 
     classes = {
         register_class.name: register_class for register_class in register_classes
@@ -1352,6 +1352,8 @@ def _derive_vector_storage_adapters(
         restrict_adapter("LOOM_eBMLL_OP_mMvBMXSrc", "OP_mMvBMXSrc", "eBMLL"),
         restrict_adapter("LOOM_mBMs_OP_mMvBMXDst", "OP_mMvBMXDst", "mBMs"),
         restrict_adapter("LOOM_mBMs_OP_mMvBMXSrc", "OP_mMvBMXSrc", "mBMs"),
+        restrict_adapter("LOOM_eBMLL_OP_mBMm", "OP_mBMm", "eBMLL"),
+        restrict_adapter("LOOM_eBMLL_OP_mBMs", "OP_mBMs", "eBMLL"),
     )
 
 
@@ -1529,7 +1531,7 @@ _REGISTER_ADAPTERS = (
         _REGISTER_CLASSES,
         _PHYSICAL_REGISTERS,
     ),
-    *_derive_vector_storage_adapters(
+    *_derive_restricted_storage_adapters(
         _SOURCE_REGISTER_ADAPTERS,
         _REGISTER_CLASSES,
     ),

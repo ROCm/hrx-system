@@ -1042,6 +1042,9 @@ enum loom_low_lower_emit_kind_e {
   LOOM_LOW_LOWER_EMIT_REGISTER_MOVE = 10,
   // Emits a descriptor-backed low.op.cond_br terminator.
   LOOM_LOW_LOWER_EMIT_DESCRIPTOR_COND_BR = 11,
+  // Projects consecutive register units, then constrains the projected value
+  // to an explicitly selected descriptor register class.
+  LOOM_LOW_LOWER_EMIT_REGISTER_SLICE_CLASS = 12,
   // Maximum emit kind plus one.
   LOOM_LOW_LOWER_EMIT_COUNT_,
 };
@@ -1107,6 +1110,8 @@ typedef struct loom_low_lower_emit_t {
     uint16_t value_ref_start;
     // First exact type-pattern table row mapped as a low result type.
     uint16_t type_pattern_start;
+    // Descriptor-set register class selected by REGISTER_SLICE_CLASS.
+    uint16_t register_class_id;
   } result_type;
   // First value-ref table row receiving emitted low results when
   // BIND_RESULTS_TO_REFS is set.

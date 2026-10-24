@@ -49,6 +49,7 @@ class LowerEmitKind(Enum):
     REGISTER_SLICE = "register_slice"
     REGISTER_CONCAT = "register_concat"
     REGISTER_COPY = "register_copy"
+    REGISTER_SLICE_CLASS = "register_slice_class"
     REGISTER_MOVE = "register_move"
 
 
@@ -334,6 +335,7 @@ class LowerEmit:
     copy_operand_mask: int = 0
     accumulator_operand_index: int = 0
     result_ref_start: int = 0
+    result_register_class_id: int = 0
     result_type_pattern_start: int = 0
     result_ref_count: int = 0
     result_bind_ref_start: int = 0
