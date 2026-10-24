@@ -22,6 +22,20 @@ amdf_status_t amdf_media_h264_validate(
     const amdf_media_h264_decode_picture_info_t* picture,
     uint64_t compressed_byte_length);
 
+// Validates the selected IP-only H264 encode envelope and extension chain.
+amdf_status_t amdf_media_h264_validate_encode_configuration(
+    const amdf_media_configuration_t* configuration,
+    const amdf_media_h264_configuration_t* h264,
+    const amdf_media_encode_configuration_t* encode,
+    const amdf_media_h264_encode_configuration_t* h264_encode);
+
+// Validates H264 picture ordering and references before native recording.
+amdf_status_t amdf_media_h264_validate_encode_picture(
+    const amdf_media_configuration_info_t* requirements,
+    const amdf_media_encode_picture_info_t* picture,
+    const amdf_media_h264_encode_configuration_t* h264_encode,
+    const amdf_media_h264_encode_picture_info_t* h264_picture);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -134,9 +134,10 @@ typedef struct amdf_media_configuration_info_t {
   amdf_memory_scope_t* image_heap_memory_scope;
   /// Core scope-local profile for application-owned image heaps.
   uint32_t image_heap_memory_profile_ordinal;
-  /// Borrowed core scope for compressed bytes; may equal the image-heap scope.
+  /// Borrowed core scope for compressed input or output bytes; may equal the
+  /// image-heap scope.
   amdf_memory_scope_t* compressed_memory_scope;
-  /// Core scope-local profile for compressed input backing.
+  /// Core scope-local profile for compressed input or output backing.
   uint32_t compressed_memory_profile_ordinal;
   /// Borrowed core scope for application-owned host-readable result storage,
   /// or NULL when feedback_byte_length is zero.
@@ -144,18 +145,27 @@ typedef struct amdf_media_configuration_info_t {
   /// Core scope-local profile for result storage, with this media device in
   /// the explicit access set. A profile query qualifies any additional peers.
   uint32_t feedback_memory_profile_ordinal;
-  /// Required alignment of compressed input offsets.
+  /// Required alignment of compressed input or output offsets.
   uint64_t compressed_byte_offset_alignment;
-  /// Required alignment of complete compressed input extents.
+  /// Required alignment of complete compressed input or output extents.
   uint64_t compressed_byte_length_alignment;
+  /// Minimum accessible compressed range for each picture. Decode reports zero
+  /// because the stream supplies its input extent; encode reports the complete
+  /// native writable bound that must remain owned through retirement.
+  uint64_t minimum_compressed_byte_length;
   /// Feedback bytes provisioned for one reusable recording owner.
   uint64_t feedback_byte_length;
   /// Required alignment of the feedback range within its memory.
   uint64_t feedback_byte_offset_alignment;
+  /// Placement requirements for one uncompressed encode input, or zero
+  /// byte_length for decode.
+  amdf_media_image_requirements_t input;
   /// Placement requirements for one independently consumable decoded output.
+  /// Encode reports zero byte_length.
   amdf_media_image_requirements_t output;
-  /// Separate native reconstructed-reference placement, or zero byte_length
-  /// when output and reference can use the same identity.
+  /// Native reconstructed-reference placement. Decode describes one image, or
+  /// zero byte_length when output carries that role. Encode describes the
+  /// complete application-owned array containing every reconstruction slot.
   amdf_media_image_requirements_t reference;
 } amdf_media_configuration_info_t;
 

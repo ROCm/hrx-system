@@ -7,7 +7,7 @@
 #ifndef AMDF_MEDIA_COMMAND_H_
 #define AMDF_MEDIA_COMMAND_H_
 
-#include "amdf/media/session.h"
+#include "amdf/media/encode.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -101,6 +101,8 @@ typedef struct amdf_media_command_prepare_info_t {
   const amdf_media_image_activation_t* activations;
   /// Required decode operands for a decode PICTURE operation, otherwise NULL.
   const amdf_media_decode_picture_info_t* decode;
+  /// Required encode operands for an encode PICTURE operation, otherwise NULL.
+  const amdf_media_encode_picture_info_t* encode;
 } amdf_media_command_prepare_info_t;
 
 /// Publishes a prepared recording and already-realized native dependencies.

@@ -193,6 +193,9 @@ amdf_status_t AMDF_CALL CommandPrepare(
   if (prepare_info->operation != AMDF_MEDIA_COMMAND_OPERATION_PICTURE) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
+  if (prepare_info->encode != nullptr) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
   if (prepare_info->activation_count > command->maximum_activation_count) {
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }

@@ -239,6 +239,9 @@ static amdf_status_t AMDF_CALL amdf_media_command_prepare(
       prepare_info->activations == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
+  if (prepare_info->decode != NULL && prepare_info->encode != NULL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
   return amdf_media_device_operations(command->queue->device)
       ->command_prepare(session, command, prepare_info);
 }
@@ -312,7 +315,7 @@ amdf_media_session_destroy(amdf_media_session_t* session) {
 
 static const amdf_media_api_t amdf_media_api = {
     .structure_size = sizeof(amdf_media_api_t),
-    .extension_version = AMDF_MEDIA_EXTENSION_VERSION_1,
+    .extension_version = AMDF_MEDIA_EXTENSION_VERSION_2,
     .device_create = amdf_media_device_create,
     .device_enumerate_codecs = amdf_media_device_enumerate_codecs,
     .device_query_configuration = amdf_media_device_query_configuration,
@@ -335,8 +338,8 @@ static const amdf_media_api_t amdf_media_api = {
 amdf_status_t amdf_media_extension_query(uint32_t minimum_version,
                                          uint32_t maximum_version,
                                          const void** out_extension_api) {
-  if (minimum_version > AMDF_MEDIA_EXTENSION_VERSION_1 ||
-      maximum_version < AMDF_MEDIA_EXTENSION_VERSION_1) {
+  if (minimum_version > AMDF_MEDIA_EXTENSION_VERSION_2 ||
+      maximum_version < AMDF_MEDIA_EXTENSION_VERSION_2) {
     return amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH);
   }
   *out_extension_api = &amdf_media_api;

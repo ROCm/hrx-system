@@ -43,6 +43,10 @@ enum amdf_media_image_role_bits_e {
   AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT = 1u << 0,
   /// Decoder-private reference storage; raw consumers are not implied.
   AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE = 1u << 1,
+  /// Uncompressed encode input, including a qualified GPU producer layout.
+  AMDF_MEDIA_IMAGE_ROLE_ENCODE_INPUT = 1u << 2,
+  /// Encoder-private reconstructed reference storage.
+  AMDF_MEDIA_IMAGE_ROLE_ENCODE_RECONSTRUCTION = 1u << 3,
 };
 
 /// Immutable native image shape. Construction never adjusts these dimensions.

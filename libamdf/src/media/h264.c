@@ -6,6 +6,9 @@
 
 #include "libamdf/src/media/h264.h"
 
+#include "libamdf/src/media/encode.h"
+#include "libamdf/src/structure.h"
+
 amdf_status_t amdf_media_h264_validate(
     const amdf_media_configuration_t* configuration,
     const amdf_media_h264_configuration_t* h264,
@@ -84,6 +87,91 @@ amdf_status_t amdf_media_h264_validate(
   const uint8_t* scaling = (const uint8_t*)picture->scaling_matrices;
   for (uint32_t i = 0; i < sizeof(*picture->scaling_matrices); ++i) {
     if (scaling[i] == 0) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+  }
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_media_h264_validate_encode_configuration(
+    const amdf_media_configuration_t* configuration,
+    const amdf_media_h264_configuration_t* h264,
+    const amdf_media_encode_configuration_t* encode,
+    const amdf_media_h264_encode_configuration_t* h264_encode) {
+  amdf_status_t status = amdf_structure_validate_header(
+      h264, AMDF_STRUCTURE_TYPE_MEDIA_H264_CONFIGURATION, sizeof(*h264));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  status = amdf_media_encode_validate_configuration(configuration, encode);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  status = amdf_structure_validate_input(
+      h264_encode, AMDF_STRUCTURE_TYPE_MEDIA_H264_ENCODE_CONFIGURATION,
+      sizeof(*h264_encode));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  if (h264->next != encode || encode->next != h264_encode ||
+      h264->profile != AMDF_MEDIA_H264_PROFILE_MAIN || h264->level_idc == 0 ||
+      h264->level_idc > 52 ||
+      configuration->format != AMDF_MEDIA_PIXEL_FORMAT_NV12 ||
+      h264_encode->picture_order_count_type != 2 ||
+      h264_encode->log2_max_frame_number_minus4 > 12 ||
+      h264_encode->log2_max_picture_order_count_lsb_minus4 != 0) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_media_h264_validate_encode_picture(
+    const amdf_media_configuration_info_t* requirements,
+    const amdf_media_encode_picture_info_t* picture,
+    const amdf_media_h264_encode_configuration_t* h264_encode,
+    const amdf_media_h264_encode_picture_info_t* h264_picture) {
+  amdf_status_t status =
+      amdf_media_encode_validate_picture(requirements, picture);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  status = amdf_structure_validate_input(
+      h264_picture, AMDF_STRUCTURE_TYPE_MEDIA_H264_ENCODE_PICTURE_INFO,
+      sizeof(*h264_picture));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  if (picture->next != h264_picture || h264_picture->used_as_reference > 1 ||
+      (h264_picture->reference_count != 0 &&
+       h264_picture->references == NULL)) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  const uint32_t maximum_frame_number =
+      1u << (h264_encode->log2_max_frame_number_minus4 + 4);
+  if (h264_picture->frame_number >= maximum_frame_number) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+  }
+  if (h264_picture->frame_type == AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR) {
+    if (h264_picture->frame_number != 0 ||
+        h264_picture->picture_order_count != 0 ||
+        h264_picture->reference_count != 0) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+  } else if (h264_picture->frame_type == AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_P) {
+    if (h264_picture->reference_count != 1) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+  } else {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  for (uint32_t index = 0; index < h264_picture->reference_count; ++index) {
+    const amdf_media_h264_encode_reference_t* reference =
+        &h264_picture->references[index];
+    if (reference->binding.frame == NULL ||
+        reference->binding.slot_index >=
+            requirements->configuration.reference_image_count ||
+        reference->binding.slot_index == picture->reconstruction_slot_index ||
+        reference->frame_number >= maximum_frame_number) {
       return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
     }
   }

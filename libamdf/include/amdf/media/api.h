@@ -14,7 +14,8 @@ extern "C" {
 #endif
 
 #define AMDF_MEDIA_EXTENSION_VERSION_1 1u
-#define AMDF_MEDIA_EXTENSION_VERSION_LATEST AMDF_MEDIA_EXTENSION_VERSION_1
+#define AMDF_MEDIA_EXTENSION_VERSION_2 2u
+#define AMDF_MEDIA_EXTENSION_VERSION_LATEST AMDF_MEDIA_EXTENSION_VERSION_2
 
 /// Optional typed media operations on core devices, memory, and kernel queues.
 /// Activation is independent of compute. Loading or negotiating this table

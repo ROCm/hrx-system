@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+load("//libamdf/build_tools/bazel:cc_test.bzl", "amdf_cc_test")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -23,10 +24,22 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "encode",
+    srcs = ["encode.c"],
+    hdrs = ["encode.h"],
+    visibility = ["//libamdf/src/media:__subpackages__"],
+    deps = ["//libamdf/src:structure"],
+)
+
+amdf_cc_library(
     name = "h264",
     srcs = ["h264.c"],
     hdrs = ["h264.h"],
     visibility = ["//libamdf/src/media:__subpackages__"],
+    deps = [
+        ":encode",
+        "//libamdf/src:structure",
+    ],
 )
 
 amdf_cc_library(
@@ -34,6 +47,10 @@ amdf_cc_library(
     srcs = ["hevc.c"],
     hdrs = ["hevc.h"],
     visibility = ["//libamdf/src/media:__subpackages__"],
+    deps = [
+        ":encode",
+        "//libamdf/src:structure",
+    ],
 )
 
 amdf_cc_library(
@@ -61,4 +78,21 @@ amdf_cc_library(
     srcs = ["av1.c"],
     hdrs = ["av1.h"],
     visibility = ["//libamdf/src/media:__subpackages__"],
+    deps = [
+        ":encode",
+        "//libamdf/src:structure",
+    ],
+)
+
+amdf_cc_test(
+    name = "encode_test",
+    srcs = ["encode_test.cc"],
+    deps = [
+        ":av1",
+        ":encode",
+        ":h264",
+        ":hevc",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
 )

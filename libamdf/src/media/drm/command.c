@@ -148,8 +148,12 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   if (!picture_operation &&
-      (prepare_info->decode != NULL || prepare_info->activation_count != 0)) {
+      (prepare_info->decode != NULL || prepare_info->encode != NULL ||
+       prepare_info->activation_count != 0)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  if (picture_operation && prepare_info->encode != NULL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   if (prepare_info->activation_count > command->maximum_activation_count) {
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);

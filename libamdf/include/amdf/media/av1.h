@@ -7,7 +7,7 @@
 #ifndef AMDF_MEDIA_AV1_H_
 #define AMDF_MEDIA_AV1_H_
 
-#include "amdf/media/session.h"
+#include "amdf/media/encode.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,6 +17,12 @@ extern "C" {
   ((amdf_structure_type_t)0x00040701u)
 #define AMDF_STRUCTURE_TYPE_MEDIA_AV1_DECODE_PICTURE_INFO \
   ((amdf_structure_type_t)0x00040702u)
+#define AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_CONFIGURATION \
+  ((amdf_structure_type_t)0x00040703u)
+#define AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_PICTURE_INFO \
+  ((amdf_structure_type_t)0x00040704u)
+#define AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_RESULT_INFO \
+  ((amdf_structure_type_t)0x00040705u)
 
 /// Profile 0, 4:2:0 eight/ten-bit decoding. The session's coded extent is the
 /// upscaled picture extent; super-resolution changes the coded sample count,
@@ -294,6 +300,114 @@ typedef struct amdf_media_av1_decode_picture_info_t {
   /// Borrowed row-major tile_column_count * tile_row_count payload ranges.
   const amdf_media_av1_tile_t* tiles;
 } amdf_media_av1_decode_picture_info_t;
+
+typedef uint32_t amdf_media_av1_encode_feature_flags_t;
+enum amdf_media_av1_encode_feature_flag_bits_e {
+  /// Enables order hints and reference-order tools.
+  AMDF_MEDIA_AV1_ENCODE_FEATURE_ORDER_HINT = 1u << 0,
+  /// Enables constrained directional enhancement filtering.
+  AMDF_MEDIA_AV1_ENCODE_FEATURE_CDEF = 1u << 1,
+};
+
+typedef uint32_t amdf_media_av1_tier_t;
+enum amdf_media_av1_tier_e {
+  AMDF_MEDIA_AV1_TIER_MAIN = 1,
+  AMDF_MEDIA_AV1_TIER_HIGH = 2,
+};
+
+/// AV1 encoder tools chained from amdf_media_encode_configuration_t.
+typedef struct amdf_media_av1_encode_configuration_t {
+  /// AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_CONFIGURATION.
+  amdf_structure_type_t type;
+  /// Size of this caller-provided structure.
+  uint32_t structure_size;
+  /// Further typed configuration, or NULL.
+  const void* next;
+  /// AV1 level index selected by the application.
+  uint32_t level;
+  /// Main or high tier at the selected level.
+  amdf_media_av1_tier_t tier;
+  /// Explicitly enabled encode features.
+  amdf_media_av1_encode_feature_flags_t feature_flags;
+  /// OrderHintBits in [1,8] when order hints are enabled, otherwise zero.
+  uint32_t order_hint_bit_count;
+} amdf_media_av1_encode_configuration_t;
+
+/// One AV1 encode reference and its application-owned reconstruction slot.
+typedef struct amdf_media_av1_encode_reference_t {
+  /// Borrowed reconstructed picture and stable physical slot.
+  amdf_media_reference_t binding;
+  /// KEY=0, INTER=1, INTRA_ONLY=2, or SWITCH=3.
+  uint32_t frame_type;
+  /// Reference order hint in the configured bit width.
+  uint32_t order_hint;
+  /// Application picture index carried through native metadata.
+  uint32_t picture_index;
+} amdf_media_av1_encode_reference_t;
+
+/// Parsed AV1 picture controls chained from amdf_media_encode_picture_info_t.
+/// The initial envelope admits one full-frame tile and no temporal/spatial
+/// layers, segmentation map, restoration, super-resolution, or B pictures.
+typedef struct amdf_media_av1_encode_picture_info_t {
+  /// AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_PICTURE_INFO.
+  amdf_structure_type_t type;
+  /// Size of this caller-provided structure.
+  uint32_t structure_size;
+  /// Further typed picture input, or NULL.
+  const void* next;
+  /// KEY=0, INTER=1, INTRA_ONLY=2, or SWITCH=3.
+  uint32_t frame_type;
+  /// Order hint in the configured bit width.
+  uint32_t order_hint;
+  /// Application picture index carried through native metadata.
+  uint32_t picture_index;
+  /// primary_ref_frame in [0,7]; seven means PRIMARY_REF_NONE.
+  uint32_t primary_reference;
+  /// Eight refresh-frame bits for the logical AV1 reference map.
+  uint32_t refresh_frame_flags;
+  /// EIGHTTAP=0, SMOOTH=1, SHARP=2, BILINEAR=3, SWITCHABLE=4.
+  uint32_t interpolation_filter;
+  /// TxMode: ONLY_4X4=0, TX_MODE_LARGEST=1, TX_MODE_SELECT=2.
+  uint32_t transform_mode;
+  /// Initial loop-filter state; native post values are reported separately.
+  amdf_media_av1_loop_filter_t loop_filter;
+  /// Initial quantization state; native post values are reported separately.
+  amdf_media_av1_quantization_t quantization;
+  /// Initial CDEF state; native post values are reported separately.
+  amdf_media_av1_cdef_t cdef;
+  /// Number of unique live reconstructed references, at most eight.
+  uint32_t reference_count;
+  /// Borrowed reference records consumed during preparation.
+  const amdf_media_av1_encode_reference_t* references;
+  /// LAST through ALTREF indices into references; 255 means absent.
+  uint8_t reference_indices[7];
+} amdf_media_av1_encode_picture_info_t;
+
+/// Optional AV1 post-encode output chained from
+/// amdf_media_encode_result_info_t. Fields are valid when the returned encoded
+/// region is tile payload requiring application-authored OBU framing.
+typedef struct amdf_media_av1_encode_result_info_t {
+  /// AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_RESULT_INFO.
+  amdf_structure_type_t type;
+  /// Size of caller-provided result storage.
+  uint32_t structure_size;
+  /// Further typed result output, or NULL.
+  void* next;
+  /// Native-selected compound prediction type.
+  uint32_t compound_prediction_type;
+  /// Native-selected loop-filter state.
+  amdf_media_av1_loop_filter_t loop_filter;
+  /// Native-selected quantization state.
+  amdf_media_av1_quantization_t quantization;
+  /// Native-selected CDEF state.
+  amdf_media_av1_cdef_t cdef;
+  /// Native-selected segmentation state.
+  amdf_media_av1_segmentation_t segmentation;
+  /// Native-selected primary reference.
+  uint32_t primary_reference;
+  /// Native-selected LAST through ALTREF logical reference indices.
+  uint8_t reference_indices[7];
+} amdf_media_av1_encode_result_info_t;
 
 #ifdef __cplusplus
 }  // extern "C"

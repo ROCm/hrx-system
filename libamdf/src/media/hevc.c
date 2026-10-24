@@ -6,6 +6,9 @@
 
 #include "libamdf/src/media/hevc.h"
 
+#include "libamdf/src/media/encode.h"
+#include "libamdf/src/structure.h"
+
 static bool amdf_media_hevc_reference_set_valid(
     const amdf_media_hevc_decode_picture_info_t* picture,
     const amdf_media_hevc_reference_set_t* set, uint32_t kind, uint32_t* used) {
@@ -226,4 +229,102 @@ void amdf_media_hevc_scan_scaling_list(const uint8_t* source, uint32_t width,
   for (uint32_t index = 0; index < width * width; ++index) {
     target[index] = source[scan[index]];
   }
+}
+
+amdf_status_t amdf_media_hevc_validate_encode_configuration(
+    const amdf_media_configuration_t* configuration,
+    const amdf_media_hevc_configuration_t* hevc,
+    const amdf_media_encode_configuration_t* encode,
+    const amdf_media_hevc_encode_configuration_t* hevc_encode) {
+  amdf_status_t status = amdf_structure_validate_header(
+      hevc, AMDF_STRUCTURE_TYPE_MEDIA_HEVC_CONFIGURATION, sizeof(*hevc));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  status = amdf_media_encode_validate_configuration(configuration, encode);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  status = amdf_structure_validate_input(
+      hevc_encode, AMDF_STRUCTURE_TYPE_MEDIA_HEVC_ENCODE_CONFIGURATION,
+      sizeof(*hevc_encode));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  if (hevc->next != encode || encode->next != hevc_encode ||
+      (hevc->profile != AMDF_MEDIA_HEVC_PROFILE_MAIN &&
+       hevc->profile != AMDF_MEDIA_HEVC_PROFILE_MAIN10) ||
+      (hevc->sample_bit_depth != 8 && hevc->sample_bit_depth != 10) ||
+      (hevc->profile == AMDF_MEDIA_HEVC_PROFILE_MAIN &&
+       hevc->sample_bit_depth != 8) ||
+      configuration->format != (hevc->sample_bit_depth == 8
+                                    ? AMDF_MEDIA_PIXEL_FORMAT_NV12
+                                    : AMDF_MEDIA_PIXEL_FORMAT_P010) ||
+      hevc_encode->level_idc == 0 || hevc_encode->level_idc > 255 ||
+      (hevc_encode->tier != AMDF_MEDIA_HEVC_TIER_MAIN &&
+       hevc_encode->tier != AMDF_MEDIA_HEVC_TIER_HIGH) ||
+      hevc_encode->minimum_luma_coding_unit_log2 < 3 ||
+      hevc_encode->maximum_luma_coding_unit_log2 > 6 ||
+      hevc_encode->minimum_luma_coding_unit_log2 >
+          hevc_encode->maximum_luma_coding_unit_log2 ||
+      hevc_encode->minimum_luma_transform_unit_log2 < 2 ||
+      hevc_encode->maximum_luma_transform_unit_log2 > 5 ||
+      hevc_encode->minimum_luma_transform_unit_log2 >
+          hevc_encode->maximum_luma_transform_unit_log2 ||
+      hevc_encode->maximum_luma_transform_unit_log2 >
+          hevc_encode->maximum_luma_coding_unit_log2 ||
+      hevc_encode->maximum_transform_hierarchy_depth_inter >
+          hevc_encode->maximum_luma_coding_unit_log2 -
+              hevc_encode->minimum_luma_transform_unit_log2 ||
+      hevc_encode->maximum_transform_hierarchy_depth_intra >
+          hevc_encode->maximum_luma_coding_unit_log2 -
+              hevc_encode->minimum_luma_transform_unit_log2) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_media_hevc_validate_encode_picture(
+    const amdf_media_configuration_info_t* requirements,
+    const amdf_media_encode_picture_info_t* picture,
+    const amdf_media_hevc_encode_picture_info_t* hevc_picture) {
+  amdf_status_t status =
+      amdf_media_encode_validate_picture(requirements, picture);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  status = amdf_structure_validate_input(
+      hevc_picture, AMDF_STRUCTURE_TYPE_MEDIA_HEVC_ENCODE_PICTURE_INFO,
+      sizeof(*hevc_picture));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  if (picture->next != hevc_picture || hevc_picture->used_as_reference > 1 ||
+      (hevc_picture->reference_count != 0 &&
+       hevc_picture->references == NULL)) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  if (hevc_picture->frame_type == AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_IDR) {
+    if (hevc_picture->picture_order_count != 0 ||
+        hevc_picture->reference_count != 0) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+  } else if (hevc_picture->frame_type == AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_P) {
+    if (hevc_picture->reference_count != 1) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+  } else {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  for (uint32_t index = 0; index < hevc_picture->reference_count; ++index) {
+    const amdf_media_hevc_encode_reference_t* reference =
+        &hevc_picture->references[index];
+    if (reference->binding.frame == NULL || reference->long_term != 0 ||
+        reference->binding.slot_index >=
+            requirements->configuration.reference_image_count ||
+        reference->binding.slot_index == picture->reconstruction_slot_index) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+  }
+  return AMDF_STATUS_OK;
 }

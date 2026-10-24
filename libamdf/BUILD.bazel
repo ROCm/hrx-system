@@ -47,6 +47,7 @@ amdf_library(
         "include/amdf/media/av1.h",
         "include/amdf/media/command.h",
         "include/amdf/media/device.h",
+        "include/amdf/media/encode.h",
         "include/amdf/media/gfx11.h",
         "include/amdf/media/h264.h",
         "include/amdf/media/hevc.h",

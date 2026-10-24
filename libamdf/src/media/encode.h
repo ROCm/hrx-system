@@ -1,0 +1,32 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef AMDF_SRC_MEDIA_ENCODE_H_
+#define AMDF_SRC_MEDIA_ENCODE_H_
+
+#include "amdf/media/encode.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Validates the shared public encode envelope before a native capability query.
+// Codec-specific configuration chained from encode remains with its owner.
+amdf_status_t amdf_media_encode_validate_configuration(
+    const amdf_media_configuration_t* configuration,
+    const amdf_media_encode_configuration_t* encode);
+
+// Validates shared picture operands and the exact admitted compressed range.
+// Provider-native image identity and codec syntax remain separate checks.
+amdf_status_t amdf_media_encode_validate_picture(
+    const amdf_media_configuration_info_t* requirements,
+    const amdf_media_encode_picture_info_t* picture);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+#endif  // AMDF_SRC_MEDIA_ENCODE_H_

@@ -7,7 +7,7 @@
 #ifndef AMDF_MEDIA_HEVC_H_
 #define AMDF_MEDIA_HEVC_H_
 
-#include "amdf/media/session.h"
+#include "amdf/media/encode.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,6 +17,10 @@ extern "C" {
   ((amdf_structure_type_t)0x00040501u)
 #define AMDF_STRUCTURE_TYPE_MEDIA_HEVC_DECODE_PICTURE_INFO \
   ((amdf_structure_type_t)0x00040502u)
+#define AMDF_STRUCTURE_TYPE_MEDIA_HEVC_ENCODE_CONFIGURATION \
+  ((amdf_structure_type_t)0x00040503u)
+#define AMDF_STRUCTURE_TYPE_MEDIA_HEVC_ENCODE_PICTURE_INFO \
+  ((amdf_structure_type_t)0x00040504u)
 
 typedef uint32_t amdf_media_hevc_profile_t;
 enum amdf_media_hevc_profile_e {
@@ -253,6 +257,75 @@ typedef struct amdf_media_hevc_decode_picture_info_t {
   /// RefPicSetLtCurr in the application-resolved HEVC order.
   amdf_media_hevc_reference_set_t long_term;
 } amdf_media_hevc_decode_picture_info_t;
+
+typedef uint32_t amdf_media_hevc_tier_t;
+enum amdf_media_hevc_tier_e {
+  AMDF_MEDIA_HEVC_TIER_MAIN = 1,
+  AMDF_MEDIA_HEVC_TIER_HIGH = 2,
+};
+
+/// HEVC encoder geometry chained from amdf_media_encode_configuration_t.
+typedef struct amdf_media_hevc_encode_configuration_t {
+  /// AMDF_STRUCTURE_TYPE_MEDIA_HEVC_ENCODE_CONFIGURATION.
+  amdf_structure_type_t type;
+  /// Size of this caller-provided structure.
+  uint32_t structure_size;
+  /// Further typed configuration, or NULL.
+  const void* next;
+  /// General profile level_idc selected by the application.
+  uint32_t level_idc;
+  /// Main or high tier at level_idc.
+  amdf_media_hevc_tier_t tier;
+  /// log2 of the minimum luma coding-unit size.
+  uint32_t minimum_luma_coding_unit_log2;
+  /// log2 of the maximum luma coding-unit size.
+  uint32_t maximum_luma_coding_unit_log2;
+  /// log2 of the minimum luma transform-unit size.
+  uint32_t minimum_luma_transform_unit_log2;
+  /// log2 of the maximum luma transform-unit size.
+  uint32_t maximum_luma_transform_unit_log2;
+  /// Maximum inter transform hierarchy depth.
+  uint32_t maximum_transform_hierarchy_depth_inter;
+  /// Maximum intra transform hierarchy depth.
+  uint32_t maximum_transform_hierarchy_depth_intra;
+} amdf_media_hevc_encode_configuration_t;
+
+typedef uint32_t amdf_media_hevc_encode_frame_type_t;
+enum amdf_media_hevc_encode_frame_type_e {
+  AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_IDR = 1,
+  AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_P = 2,
+};
+
+/// One HEVC encode reference and its application-owned reconstruction slot.
+typedef struct amdf_media_hevc_encode_reference_t {
+  /// Borrowed reconstructed picture and stable physical slot.
+  amdf_media_reference_t binding;
+  /// Full picture order count.
+  int32_t picture_order_count;
+  /// Nonzero for a long-term reference; unsupported by the initial envelope.
+  uint32_t long_term;
+} amdf_media_hevc_encode_reference_t;
+
+/// Parsed HEVC picture controls chained from amdf_media_encode_picture_info_t.
+/// Parameter sets and container framing remain application-owned.
+typedef struct amdf_media_hevc_encode_picture_info_t {
+  /// AMDF_STRUCTURE_TYPE_MEDIA_HEVC_ENCODE_PICTURE_INFO.
+  amdf_structure_type_t type;
+  /// Size of this caller-provided structure.
+  uint32_t structure_size;
+  /// Further typed picture input, or NULL.
+  const void* next;
+  /// IDR or forward-predicted picture type.
+  amdf_media_hevc_encode_frame_type_t frame_type;
+  /// Full picture order count.
+  int32_t picture_order_count;
+  /// Nonzero when this picture remains available as a later reference.
+  uint32_t used_as_reference;
+  /// Number of supplied references: zero for IDR and one for P.
+  uint32_t reference_count;
+  /// Borrowed reference records consumed during preparation.
+  const amdf_media_hevc_encode_reference_t* references;
+} amdf_media_hevc_encode_picture_info_t;
 
 #ifdef __cplusplus
 }  // extern "C"

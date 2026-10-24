@@ -10,6 +10,7 @@
 #include "amdf/media/api.h"
 #include "amdf/media/command.h"
 #include "amdf/media/device.h"
+#include "amdf/media/encode.h"
 #include "amdf/media/image.h"
 #include "amdf/media/session.h"
 

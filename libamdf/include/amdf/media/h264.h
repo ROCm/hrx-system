@@ -7,7 +7,7 @@
 #ifndef AMDF_MEDIA_H264_H_
 #define AMDF_MEDIA_H264_H_
 
-#include "amdf/media/session.h"
+#include "amdf/media/encode.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,6 +17,10 @@ extern "C" {
   ((amdf_structure_type_t)0x00040401u)
 #define AMDF_STRUCTURE_TYPE_MEDIA_H264_DECODE_PICTURE_INFO \
   ((amdf_structure_type_t)0x00040402u)
+#define AMDF_STRUCTURE_TYPE_MEDIA_H264_ENCODE_CONFIGURATION \
+  ((amdf_structure_type_t)0x00040403u)
+#define AMDF_STRUCTURE_TYPE_MEDIA_H264_ENCODE_PICTURE_INFO \
+  ((amdf_structure_type_t)0x00040404u)
 
 typedef uint32_t amdf_media_h264_profile_t;
 enum amdf_media_h264_profile_e {
@@ -159,6 +163,65 @@ typedef struct amdf_media_h264_decode_picture_info_t {
   /// Explicit reference identities and markings, consumed during preparation.
   const amdf_media_h264_reference_t* references;
 } amdf_media_h264_decode_picture_info_t;
+
+/// H264 syntax controls chained from amdf_media_encode_configuration_t.
+typedef struct amdf_media_h264_encode_configuration_t {
+  /// AMDF_STRUCTURE_TYPE_MEDIA_H264_ENCODE_CONFIGURATION.
+  amdf_structure_type_t type;
+  /// Size of this caller-provided structure.
+  uint32_t structure_size;
+  /// Further typed configuration, or NULL.
+  const void* next;
+  /// pic_order_cnt_type, currently two for the admitted IP-only envelope.
+  uint32_t picture_order_count_type;
+  /// log2_max_frame_num_minus4, in [0,12].
+  uint32_t log2_max_frame_number_minus4;
+  /// log2_max_pic_order_cnt_lsb_minus4 for type zero, otherwise zero.
+  uint32_t log2_max_picture_order_count_lsb_minus4;
+} amdf_media_h264_encode_configuration_t;
+
+typedef uint32_t amdf_media_h264_encode_frame_type_t;
+enum amdf_media_h264_encode_frame_type_e {
+  AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR = 1,
+  AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_P = 2,
+};
+
+/// One H264 encode reference and its application-owned reconstruction slot.
+typedef struct amdf_media_h264_encode_reference_t {
+  /// Borrowed reconstructed picture and stable physical slot.
+  amdf_media_reference_t binding;
+  /// frame_num used when this reference was encoded.
+  uint32_t frame_number;
+  /// Full picture order count used when this reference was encoded.
+  int32_t picture_order_count;
+  /// Monotonic decoding-order number supplied for native bookkeeping.
+  uint32_t frame_decoding_order_number;
+} amdf_media_h264_encode_reference_t;
+
+/// Parsed H264 picture controls chained from amdf_media_encode_picture_info_t.
+/// Parameter sets and container framing remain application-owned.
+typedef struct amdf_media_h264_encode_picture_info_t {
+  /// AMDF_STRUCTURE_TYPE_MEDIA_H264_ENCODE_PICTURE_INFO.
+  amdf_structure_type_t type;
+  /// Size of this caller-provided structure.
+  uint32_t structure_size;
+  /// Further typed picture input, or NULL.
+  const void* next;
+  /// IDR or forward-predicted picture type.
+  amdf_media_h264_encode_frame_type_t frame_type;
+  /// Current frame_num in the configured modulus.
+  uint32_t frame_number;
+  /// Full picture order count.
+  int32_t picture_order_count;
+  /// Monotonic decoding-order number.
+  uint32_t frame_decoding_order_number;
+  /// Nonzero when this picture remains available as a later reference.
+  uint32_t used_as_reference;
+  /// Number of supplied references: zero for IDR and one for P.
+  uint32_t reference_count;
+  /// Borrowed reference records consumed during preparation.
+  const amdf_media_h264_encode_reference_t* references;
+} amdf_media_h264_encode_picture_info_t;
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -6,6 +6,9 @@
 
 #include "libamdf/src/media/av1.h"
 
+#include "libamdf/src/media/encode.h"
+#include "libamdf/src/structure.h"
+
 static bool amdf_media_av1_grain_points_valid(const uint8_t (*points)[2],
                                               uint32_t count) {
   for (uint32_t i = 1; i < count; ++i) {
@@ -195,6 +198,157 @@ amdf_status_t amdf_media_av1_validate(
        !amdf_media_av1_grain_points_valid(grain->v_points,
                                           grain->v_point_count))) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_media_av1_validate_encode_configuration(
+    const amdf_media_configuration_t* configuration,
+    const amdf_media_av1_configuration_t* av1,
+    const amdf_media_encode_configuration_t* encode,
+    const amdf_media_av1_encode_configuration_t* av1_encode) {
+  amdf_status_t status = amdf_structure_validate_header(
+      av1, AMDF_STRUCTURE_TYPE_MEDIA_AV1_CONFIGURATION, sizeof(*av1));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  status = amdf_media_encode_validate_configuration(configuration, encode);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  status = amdf_structure_validate_input(
+      av1_encode, AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_CONFIGURATION,
+      sizeof(*av1_encode));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  const uint32_t known_features = AMDF_MEDIA_AV1_ENCODE_FEATURE_ORDER_HINT |
+                                  AMDF_MEDIA_AV1_ENCODE_FEATURE_CDEF;
+  const bool order_hint = (av1_encode->feature_flags &
+                           AMDF_MEDIA_AV1_ENCODE_FEATURE_ORDER_HINT) != 0;
+  if (av1->next != encode || encode->next != av1_encode || av1->profile != 0 ||
+      (av1->sample_bit_depth != 8 && av1->sample_bit_depth != 10) ||
+      configuration->format != (av1->sample_bit_depth == 8
+                                    ? AMDF_MEDIA_PIXEL_FORMAT_NV12
+                                    : AMDF_MEDIA_PIXEL_FORMAT_P010) ||
+      av1_encode->level > 31 ||
+      (av1_encode->tier != AMDF_MEDIA_AV1_TIER_MAIN &&
+       av1_encode->tier != AMDF_MEDIA_AV1_TIER_HIGH) ||
+      (av1_encode->feature_flags & ~known_features) != 0 ||
+      (order_hint ? av1_encode->order_hint_bit_count == 0 ||
+                        av1_encode->order_hint_bit_count > 8
+                  : av1_encode->order_hint_bit_count != 0)) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  return AMDF_STATUS_OK;
+}
+
+static bool amdf_media_av1_encode_tools_valid(
+    const amdf_media_av1_encode_configuration_t* configuration,
+    const amdf_media_av1_encode_picture_info_t* picture) {
+  const amdf_media_av1_loop_filter_t* filter = &picture->loop_filter;
+  const amdf_media_av1_quantization_t* quantization = &picture->quantization;
+  const amdf_media_av1_cdef_t* cdef = &picture->cdef;
+  if ((filter->deltas_enabled | filter->deltas_updated | filter->delta_present |
+       filter->delta_multi | quantization->delta_present) > 1 ||
+      filter->sharpness > 7 || filter->delta_resolution > 3 ||
+      quantization->base_index > 255 || quantization->y_dc_delta < -64 ||
+      quantization->y_dc_delta > 63 || quantization->delta_resolution > 3 ||
+      cdef->damping_minus3 > 3 || cdef->bits > 3 ||
+      (filter->deltas_updated && !filter->deltas_enabled) ||
+      (filter->delta_present && !quantization->delta_present) ||
+      (filter->delta_multi && !filter->delta_present)) {
+    return false;
+  }
+  for (uint32_t index = 0; index < 4; ++index) {
+    if (filter->levels[index] > 63) {
+      return false;
+    }
+  }
+  for (uint32_t index = 0; index < 3; ++index) {
+    if (filter->restoration_types[index] != 0 ||
+        (quantization->matrix_levels[0] == 255
+             ? quantization->matrix_levels[index] != 255
+             : quantization->matrix_levels[index] > 15)) {
+      return false;
+    }
+  }
+  for (uint32_t index = 0; index < 2; ++index) {
+    if (filter->mode_deltas[index] < -64 || filter->mode_deltas[index] > 63 ||
+        quantization->chroma_dc_deltas[index] < -64 ||
+        quantization->chroma_dc_deltas[index] > 63 ||
+        quantization->chroma_ac_deltas[index] < -64 ||
+        quantization->chroma_ac_deltas[index] > 63) {
+      return false;
+    }
+  }
+  const bool cdef_enabled =
+      (configuration->feature_flags & AMDF_MEDIA_AV1_ENCODE_FEATURE_CDEF) != 0;
+  for (uint32_t index = 0; index < 8; ++index) {
+    if (filter->reference_deltas[index] < -64 ||
+        filter->reference_deltas[index] > 63 ||
+        cdef->luma_primary[index] > 15 || cdef->luma_secondary[index] > 3 ||
+        cdef->chroma_primary[index] > 15 || cdef->chroma_secondary[index] > 3 ||
+        (!cdef_enabled &&
+         (cdef->luma_primary[index] != 0 || cdef->luma_secondary[index] != 0 ||
+          cdef->chroma_primary[index] != 0 ||
+          cdef->chroma_secondary[index] != 0))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+amdf_status_t amdf_media_av1_validate_encode_picture(
+    const amdf_media_configuration_info_t* requirements,
+    const amdf_media_encode_picture_info_t* picture,
+    const amdf_media_av1_encode_configuration_t* av1_encode,
+    const amdf_media_av1_encode_picture_info_t* av1_picture) {
+  amdf_status_t status =
+      amdf_media_encode_validate_picture(requirements, picture);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  status = amdf_structure_validate_input(
+      av1_picture, AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_PICTURE_INFO,
+      sizeof(*av1_picture));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  if (picture->next != av1_picture || av1_picture->frame_type > 1 ||
+      av1_picture->primary_reference > 7 ||
+      av1_picture->refresh_frame_flags > 255 ||
+      av1_picture->interpolation_filter > 4 ||
+      av1_picture->transform_mode > 2 || av1_picture->reference_count > 8 ||
+      (av1_picture->reference_count != 0 && av1_picture->references == NULL) ||
+      av1_picture->order_hint >= (1u << av1_encode->order_hint_bit_count) ||
+      !amdf_media_av1_encode_tools_valid(av1_encode, av1_picture)) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  const bool key_frame = av1_picture->frame_type == 0;
+  if (key_frame ? av1_picture->reference_count != 0 ||
+                      av1_picture->primary_reference != 7
+                : av1_picture->reference_count != 1 ||
+                      av1_picture->primary_reference >= 7) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  for (uint32_t index = 0; index < 7; ++index) {
+    if (key_frame ? av1_picture->reference_indices[index] != 255
+                  : av1_picture->reference_indices[index] >=
+                        av1_picture->reference_count) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+  }
+  for (uint32_t index = 0; index < av1_picture->reference_count; ++index) {
+    const amdf_media_av1_encode_reference_t* reference =
+        &av1_picture->references[index];
+    if (reference->binding.frame == NULL || reference->frame_type > 3 ||
+        reference->binding.slot_index >=
+            requirements->configuration.reference_image_count ||
+        reference->binding.slot_index == picture->reconstruction_slot_index ||
+        reference->order_hint >= (1u << av1_encode->order_hint_bit_count)) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
   }
   return AMDF_STATUS_OK;
 }

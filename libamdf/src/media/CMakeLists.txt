@@ -26,13 +26,30 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    encode
+  HDRS
+    "encode.h"
+  SRCS
+    "encode.c"
+  DEPS
+    amdf::headers
+    libamdf::src::structure
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     h264
   HDRS
     "h264.h"
   SRCS
     "h264.c"
   DEPS
+    ::encode
     amdf::headers
+    libamdf::src::structure
   PUBLIC
 )
 endif()
@@ -46,7 +63,9 @@ iree_cc_library(
   SRCS
     "hevc.c"
   DEPS
+    ::encode
     amdf::headers
+    libamdf::src::structure
   PUBLIC
 )
 endif()
@@ -92,8 +111,29 @@ iree_cc_library(
   SRCS
     "av1.c"
   DEPS
+    ::encode
     amdf::headers
+    libamdf::src::structure
   PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    encode_test
+  SRCS
+    "encode_test.cc"
+  DEPS
+    ::av1
+    ::encode
+    ::h264
+    ::hevc
+    amdf::headers
+    iree::third_party::google_test
+    iree::third_party::google_test_main
+  LABELS
+    "iree-build-requirement=libamdf"
 )
 endif()
 
