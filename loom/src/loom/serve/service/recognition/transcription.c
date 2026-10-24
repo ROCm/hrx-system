@@ -12,94 +12,6 @@
 #include "iree/base/internal/unicode.h"
 #include "loom/util/json.h"
 
-// PCM metadata is positive decimal, optionally MIME-quoted. Quoted pairs may
-// escape digits but never change their numeric meaning.
-static bool loom_serve_transcription_decimal(iree_string_view_t value,
-                                             uint32_t* out_value) {
-  const bool quoted = iree_string_view_consume_prefix(&value, IREE_SV("\""));
-  if (quoted && !iree_string_view_consume_suffix(&value, IREE_SV("\""))) {
-    return false;
-  }
-  uint32_t number = 0;
-  for (iree_host_size_t i = 0; i < value.size; ++i) {
-    if (quoted && value.data[i] == '\\') {
-      if (++i == value.size) {
-        return false;
-      }
-    }
-    const uint32_t digit = (uint8_t)value.data[i] - (uint32_t)'0';
-    if (digit > 9 || number > (UINT32_MAX - digit) / 10) {
-      return false;
-    }
-    number = number * 10 + digit;
-  }
-  *out_value = number;
-  return number != 0;
-}
-
-static iree_status_t loom_serve_transcription_audio(
-    iree_string_view_t content_type, iree_const_byte_span_t audio,
-    loom_serve_recognition_format_t format, uint32_t* out_sample_rate,
-    uint64_t* out_frame_count) {
-  *out_sample_rate = 0;
-  *out_frame_count = 0;
-  iree_string_view_t media_type;
-  iree_string_view_t parameters;
-  iree_string_view_split(content_type, ';', &media_type, &parameters);
-  if (!iree_string_view_equal_case(iree_string_view_trim(media_type),
-                                   IREE_SV("audio/pcm"))) {
-    return iree_ok_status();
-  }
-  uint32_t rate = 0;
-  uint32_t channels = 0;
-  while (parameters.size) {
-    iree_string_view_t parameter;
-    iree_string_view_split(parameters, ';', &parameter, &parameters);
-    iree_string_view_t name;
-    iree_string_view_t value;
-    iree_string_view_split(parameter, '=', &name, &value);
-    name = iree_string_view_trim(name);
-    value = iree_string_view_trim(value);
-    uint32_t* target = NULL;
-    if (iree_string_view_equal_case(name, IREE_SV("rate"))) {
-      target = &rate;
-    } else if (iree_string_view_equal_case(name, IREE_SV("channels"))) {
-      target = &channels;
-    }
-    if (!target || *target ||
-        !loom_serve_transcription_decimal(value, target)) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "audio/pcm requires unique positive decimal rate and channels");
-    }
-  }
-  if (!rate || !channels || channels != format.channels) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "audio/pcm requires a positive rate and channels=%u", format.channels);
-  }
-  if (audio.data_length % ((uint64_t)channels * sizeof(int16_t))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "audio/pcm requires complete PCM16LE frames");
-  }
-  const uint64_t input_frames =
-      audio.data_length / ((uint64_t)channels * sizeof(int16_t));
-  // Separate whole seconds before scaling so large uploads cannot overflow
-  // input_frames * output_rate. Both rates are U32, bounding the remainder.
-  const uint64_t remainder =
-      ((input_frames % rate) * format.sample_rate + rate - 1) / rate;
-  uint64_t frame_count = 0;
-  if (!iree_checked_mul_u64(input_frames / rate, format.sample_rate,
-                            &frame_count) ||
-      !iree_checked_add_u64(frame_count, remainder, &frame_count)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "PCM duration exceeds the normalized sample clock");
-  }
-  *out_sample_rate = rate;
-  *out_frame_count = frame_count;
-  return iree_ok_status();
-}
-
 iree_status_t loom_serve_transcription_parse(
     loom_serve_http_part_list_t parts, iree_string_view_t model,
     loom_serve_recognition_format_t format,
@@ -167,17 +79,26 @@ iree_status_t loom_serve_transcription_parse(
   }
   const iree_const_byte_span_t audio =
       iree_make_const_byte_span(values[1].data, values[1].size);
-  uint32_t pcm_sample_rate = 0;
+  loom_serve_audio_source_t source;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_audio_source_parse(content_type, audio, &source));
   uint64_t normalized_frame_count = 0;
-  IREE_RETURN_IF_ERROR(loom_serve_transcription_audio(
-      content_type, audio, format, &pcm_sample_rate, &normalized_frame_count));
+  if (source.encoding != LOOM_SERVE_AUDIO_ENCODING_CONTAINER) {
+    if (source.channels != format.channels) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "audio/pcm requires channels=%u",
+                              format.channels);
+    }
+    IREE_RETURN_IF_ERROR(loom_serve_audio_frame_count(
+        source.frame_count, source.sample_rate, format.sample_rate,
+        &normalized_frame_count));
+  }
   *out_request = (loom_serve_transcription_t){
       .request = {.language = values[2],
                   .prompt = values[3],
                   .temperature = temperature,
                   .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT},
-      .audio = audio,
-      .pcm_sample_rate = pcm_sample_rate,
+      .audio = source,
       .normalized_frame_count = normalized_frame_count,
       .text_response = text_response};
   return iree_ok_status();

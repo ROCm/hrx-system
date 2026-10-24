@@ -96,7 +96,12 @@ validation or allocation failure and admission pressure accept no request.
 
 HTTP upload decoding and PCM conversion run as bounded tasks on the shared
 executor. Encoded WAV, MP3, and FLAC support follows the optional audio codec
-configuration; declared PCM16 uploads and native F32 input use the core path.
+configuration; declared S16LE/F32LE uploads and native F32 input use the core
+path. Raw uploads use `audio/pcm;rate=24000;channels=1`, with optional
+`format=f32le` for F32 samples (`s16le` is the default). The shared
+[audio source](../../media/audio_source.h) validates geometry and decodes raw
+samples without interpreting filenames. F32 input is finite and normalized to
+`[-1, 1]`; invalid samples reject only their request.
 Each upload retains its own decoder and resampling history through cancellation.
 Raw PCM declares its input rate and matching channel count. The core
 [resampler](../../media/audio_resampler.h) retains a rational sample clock and

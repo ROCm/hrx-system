@@ -250,6 +250,24 @@ loom_py_test(
 )
 
 loom_cc_library(
+    name = "audio_source",
+    srcs = ["audio_source.c"],
+    hdrs = ["audio_source.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "audio_source_test",
+    srcs = ["audio_source_test.cc"],
+    deps = [
+        ":audio_source",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "audio_resampler",
     srcs = ["audio_resampler.c"],
     hdrs = ["audio_resampler.h"],

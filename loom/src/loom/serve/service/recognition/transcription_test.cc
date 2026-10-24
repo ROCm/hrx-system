@@ -73,9 +73,9 @@ TEST_F(TranscriptionTest, BorrowsAudioAndSourceOptionsIndependentOfPartOrder) {
                         Field(IREE_SV("model"), IREE_SV("recognition")),
                         Field(IREE_SV("response_format"), IREE_SV("text")),
                         Field(IREE_SV("stream"), IREE_SV("false"))}));
-  EXPECT_EQ(request_.audio.data, reinterpret_cast<const uint8_t*>(audio));
-  EXPECT_EQ(request_.audio.data_length, sizeof(audio));
-  EXPECT_EQ(request_.pcm_sample_rate, 16000u);
+  EXPECT_EQ(request_.audio.data.data, reinterpret_cast<const uint8_t*>(audio));
+  EXPECT_EQ(request_.audio.data.data_length, sizeof(audio));
+  EXPECT_EQ(request_.audio.sample_rate, 16000u);
   EXPECT_EQ(request_.normalized_frame_count, 2u);
   EXPECT_TRUE(request_.text_response);
   EXPECT_EQ(request_.request.outputs, LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT);
@@ -105,9 +105,9 @@ TEST_F(TranscriptionTest,
        }) {
     file.content_type = content_type;
     IREE_ASSERT_OK(Parse({file, model}));
-    EXPECT_EQ(request_.audio.data,
+    EXPECT_EQ(request_.audio.data.data,
               reinterpret_cast<const uint8_t*>(file.contents.data));
-    EXPECT_EQ(request_.pcm_sample_rate, 16000u);
+    EXPECT_EQ(request_.audio.sample_rate, 16000u);
     EXPECT_EQ(request_.normalized_frame_count, 2u);
   }
   for (const auto content_type : {
@@ -120,11 +120,11 @@ TEST_F(TranscriptionTest,
            IREE_SV("audio/pcm;rate=4294983296;channels=1"),
            IREE_SV("audio/pcm;rate=16e3;channels=1"),
            IREE_SV("audio/pcm;rate=16000;channels=1;RATE=16000"),
-           IREE_SV("audio/pcm;rate=16000;channels=1;format=f32le"),
+           IREE_SV("audio/pcm;rate=16000;channels=1;format=f32be"),
        }) {
     file.content_type = content_type;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse({file, model}));
-    EXPECT_EQ(request_.audio.data, nullptr);
+    EXPECT_EQ(request_.audio.data.data, nullptr);
   }
   file.content_type = IREE_SV("audio/pcm;rate=16000;channels=1");
   file.contents.size = 3;
@@ -143,6 +143,17 @@ TEST_F(TranscriptionTest,
                                      {16000, 2}, &request_));
 }
 
+TEST_F(TranscriptionTest, FloatingPcmRetainsExplicitEncodingAndDuration) {
+  const char bytes[16] = {0};
+  auto file = Field(IREE_SV("file"), {bytes, sizeof(bytes)});
+  file.content_type = IREE_SV("audio/pcm;rate=24000;channels=1;format=f32le");
+  IREE_ASSERT_OK(
+      Parse({Field(IREE_SV("model"), IREE_SV("recognition")), file}));
+  EXPECT_EQ(request_.audio.encoding, LOOM_SERVE_AUDIO_ENCODING_F32LE);
+  EXPECT_EQ(request_.audio.frame_count, 4u);
+  EXPECT_EQ(request_.normalized_frame_count, 3u);
+}
+
 TEST_F(TranscriptionTest, RawPcmRetainsExactNormalizedDuration) {
   const auto model = Field(IREE_SV("model"), IREE_SV("recognition"));
   for (uint32_t rate : {8000u, 16000u, 16001u, 22050u, 24000u, 44100u, 48000u,
@@ -156,7 +167,7 @@ TEST_F(TranscriptionTest, RawPcmRetainsExactNormalizedDuration) {
       auto file = Field(IREE_SV("file"), {audio.data(), audio.size()});
       file.content_type = {content_type.data(), content_type.size()};
       IREE_ASSERT_OK(Parse({file, model}));
-      EXPECT_EQ(request_.pcm_sample_rate, rate);
+      EXPECT_EQ(request_.audio.sample_rate, rate);
       EXPECT_EQ(request_.normalized_frame_count,
                 (uint64_t{frames} * 16000 + rate - 1) / rate);
     }
@@ -176,11 +187,11 @@ TEST_F(TranscriptionTest, EncodedAudioDefersFormatSelectionToContainerBytes) {
        }) {
     file.content_type = content_type;
     IREE_ASSERT_OK(Parse({file, model}));
-    EXPECT_EQ(request_.pcm_sample_rate, 0u);
+    EXPECT_EQ(request_.audio.sample_rate, 0u);
     EXPECT_EQ(request_.normalized_frame_count, 0u);
-    EXPECT_EQ(request_.audio.data,
+    EXPECT_EQ(request_.audio.data.data,
               reinterpret_cast<const uint8_t*>(file.contents.data));
-    EXPECT_EQ(request_.audio.data_length, file.contents.size);
+    EXPECT_EQ(request_.audio.data.data_length, file.contents.size);
   }
 }
 
@@ -207,7 +218,7 @@ TEST_F(TranscriptionTest, RejectsAmbiguousOrUnsupportedOptionsBeforeModelWork) {
     auto parts = required;
     parts.push_back(option);
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Parse(parts));
-    EXPECT_EQ(request_.audio.data, nullptr);
+    EXPECT_EQ(request_.audio.data.data, nullptr);
   }
   auto parts = required;
   parts.push_back(Field(IREE_SV("prompt"), {}));

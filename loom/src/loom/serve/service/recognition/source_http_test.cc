@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -30,9 +31,10 @@ IREE_FLAG(int32_t, test_workers, 1, "Shared application worker count.");
 
 namespace {
 
-// Zero rate selects encoded WAV; positive rates select declared PCM16LE.
+// Zero rate selects encoded WAV; other inputs declare their raw PCM encoding.
 std::string Request(uint32_t sample_rate, size_t frame_count = 0,
-                    int16_t sample = 8192) {
+                    int16_t sample = 8192, bool floating = false,
+                    bool nonfinite = false) {
   const bool encoded = sample_rate == 0;
   if (encoded) {
     sample_rate = 16000;
@@ -41,25 +43,36 @@ std::string Request(uint32_t sample_rate, size_t frame_count = 0,
     frame_count =
         sample_rate == 16000 ? 19 : (18ull * sample_rate + 15999) / 16000;
   }
-  std::string pcm(frame_count * sizeof(int16_t), '\0');
+  const size_t sample_bytes = floating ? sizeof(float) : sizeof(int16_t);
+  std::string pcm(frame_count * sample_bytes, '\0');
   for (size_t i = 0; i < frame_count; ++i) {
-    iree_unaligned_store_le_u16(pcm.data() + i * sizeof(int16_t),
-                                static_cast<uint16_t>(sample));
+    if (floating) {
+      iree_unaligned_store_le_f32(pcm.data() + i * sample_bytes,
+                                  nonfinite
+                                      ? std::numeric_limits<float>::quiet_NaN()
+                                      : static_cast<float>(sample) / 32768.0f);
+    } else {
+      iree_unaligned_store_le_u16(pcm.data() + i * sample_bytes,
+                                  static_cast<uint16_t>(sample));
+    }
   }
   std::string content_type =
       "audio/pcm;rate=" + std::to_string(sample_rate) + ";channels=1";
+  if (floating) {
+    content_type += ";format=f32le";
+  }
   if (encoded) {
     std::string header(44, '\0');
     memcpy(header.data(), "RIFF", 4);
     iree_unaligned_store_le_u32(header.data() + 4, 36 + pcm.size());
     memcpy(header.data() + 8, "WAVEfmt ", 8);
     iree_unaligned_store_le_u32(header.data() + 16, 16);
-    iree_unaligned_store_le_u16(header.data() + 20, 1);
+    iree_unaligned_store_le_u16(header.data() + 20, floating ? 3 : 1);
     iree_unaligned_store_le_u16(header.data() + 22, 1);
     iree_unaligned_store_le_u32(header.data() + 24, 16000);
-    iree_unaligned_store_le_u32(header.data() + 28, 32000);
-    iree_unaligned_store_le_u16(header.data() + 32, 2);
-    iree_unaligned_store_le_u16(header.data() + 34, 16);
+    iree_unaligned_store_le_u32(header.data() + 28, 16000 * sample_bytes);
+    iree_unaligned_store_le_u16(header.data() + 32, sample_bytes);
+    iree_unaligned_store_le_u16(header.data() + 34, sample_bytes * 8);
     memcpy(header.data() + 36, "data", 4);
     iree_unaligned_store_le_u32(header.data() + 40, pcm.size());
     pcm = header + pcm;
@@ -209,7 +222,7 @@ class SourceRecognitionHttpTest : public ::testing::Test {
 
 class SourceRecognitionHttpRetirementTest
     : public SourceRecognitionHttpTest,
-      public ::testing::WithParamInterface<std::tuple<bool, uint32_t>> {};
+      public ::testing::WithParamInterface<std::tuple<bool, bool, uint32_t>> {};
 
 TEST_F(SourceRecognitionHttpTest, DeploymentRoleRequiresItsDeclaredOutput) {
   interface_.set_observer(interface_.self, {});
@@ -280,9 +293,10 @@ TEST_F(SourceRecognitionHttpTest, DeploymentRoleRequiresItsDeclaredOutput) {
 
 TEST_P(SourceRecognitionHttpRetirementTest,
        CancellationRetainsAcceptedDecodeBorrow) {
-  const auto [stopping, sample_rate] = GetParam();
+  const auto [stopping, floating, sample_rate] = GetParam();
   loom_serve::testing::HttpClient client;
-  IREE_ASSERT_OK(http_.Send(Request(sample_rate), client.put()));
+  IREE_ASSERT_OK(
+      http_.Send(Request(sample_rate, 0, 8192, floating), client.put()));
   loom_serve_http_connection_t* connection = nullptr;
   const loom_serve_http_request_t* request = nullptr;
   ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection, &request));
@@ -328,7 +342,8 @@ TEST_P(SourceRecognitionHttpRetirementTest,
   EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 0u);
   EXPECT_FALSE(interface_.is_active(interface_.self));
   if (!stopping) {
-    IREE_ASSERT_OK(http_.Send(Request(sample_rate), client.put()));
+    IREE_ASSERT_OK(
+        http_.Send(Request(sample_rate, 0, 8192, floating), client.put()));
     ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection, &request));
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
         [&] { return interface_.telemetry.counters->completed == 1; }));
@@ -350,7 +365,35 @@ std::vector<uint32_t> InputRates() {
 INSTANTIATE_TEST_SUITE_P(DisconnectAndShutdown,
                          SourceRecognitionHttpRetirementTest,
                          ::testing::Combine(::testing::Bool(),
+                                            ::testing::Bool(),
                                             ::testing::ValuesIn(InputRates())));
+
+TEST_F(SourceRecognitionHttpTest, FloatingPcmUsesTheSameStreamingConversion) {
+  uint64_t completed = 0;
+  for (uint32_t rate : {8000, 16000, 22050, 24000, 44100, 48000}) {
+    for (bool invalid : {true, false}) {
+      loom_serve::testing::HttpClient client;
+      IREE_ASSERT_OK(
+          http_.Send(Request(rate, 0, 8192, true, invalid), client.put()));
+      loom_serve_http_connection_t* connection = nullptr;
+      const loom_serve_http_request_t* request = nullptr;
+      ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection, &request));
+      ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+          [&] { return !interface_.is_pending(interface_.self); }));
+      std::string response;
+      IREE_ASSERT_OK(http_.Read(client.release(), false, &response));
+      if (invalid) {
+        EXPECT_NE(response.find("HTTP/1.1 400 Bad Request\r\n"),
+                  std::string::npos);
+      } else {
+        EXPECT_NE(response.find("HTTP/1.1 200 OK\r\n"), std::string::npos);
+        EXPECT_NE(response.find(R"({"text":"E"})"), std::string::npos);
+        ++completed;
+      }
+      EXPECT_EQ(interface_.telemetry.counters->completed, completed);
+    }
+  }
+}
 
 TEST_F(SourceRecognitionHttpTest, RawPcmLimitsRejectOnlyTheAffectedRequest) {
   // The first upload exceeds normalized duration before admission. The second

@@ -24,6 +24,7 @@ loom_cc_library(
     ::transcript
     iree::base
     iree::base::internal::unicode
+    loom::serve::media::audio_source
     loom::serve::transport::http::multipart
     loom::util::json
     loom::util::stream
@@ -48,6 +49,7 @@ loom_cc_library(
     iree::task
     loom::serve::media::audio_decoder
     loom::serve::media::audio_resampler
+    loom::serve::media::audio_source
     loom::serve::runtime::host
     loom::serve::runtime::host::wake
     loom::serve::runtime::parameter::telemetry

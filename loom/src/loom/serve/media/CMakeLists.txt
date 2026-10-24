@@ -311,6 +311,36 @@ file(GLOB _GLOB_TESTDATA_IMAGE_FUZZ_X_TXT LIST_DIRECTORIES false RELATIVE ${CMAK
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    audio_source
+  HDRS
+    "audio_source.h"
+  SRCS
+    "audio_source.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    audio_source_test
+  SRCS
+    "audio_source_test.cc"
+  DEPS
+    ::audio_source
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     audio_resampler
   HDRS
     "audio_resampler.h"
