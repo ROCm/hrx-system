@@ -1,0 +1,83 @@
+config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
+
+kernel.decl @flash_next_vocabulary() launch(%epoch: buffer, %input: buffer, %weight: buffer, %output: buffer)
+
+func.decl @flash_next_q8_reference_dot(%inputs: index, %token: index, %row: index, %input: buffer, %weight: buffer) -> (f64)
+
+kernel.def @vocabulary_fixture() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%count_value: index, %epoch: buffer, %input: buffer) {
+  %count = index.assume %count_value [range(%count_value, 0, 19)] : index
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %word = index.cast %count : index to i32
+  view.store %word, %header[0] : i32, view<3xi32>
+  %capacity = config.get @flash_next.token_count : index
+  %values = buffer.view %input[%origin] : buffer -> view<[%capacity]x2560xbf16>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %width = index.constant 2560 : index
+  %nan_bits = scalar.constant 32705 : i16
+  %nan = scalar.bitcast %nan_bits : i16 to bf16
+  scf.for %row = [%count to %capacity step %one] {
+    scf.for %column = [%zero to %width step %one] {
+      view.store %nan, %values[%row, %column] : bf16, view<[%capacity]x2560xbf16>
+    }
+  }
+  kernel.return
+}
+
+// The finite Q8 byte fixture repeats every 31 vocabulary rows. Each reference
+// thread independently decodes one complete row in F64, then replicates that
+// result across its equivalence class. This checks the full production grid
+// without reproducing its block partition, dot tree, or query grouping.
+kernel.def @vocabulary_reference() {
+  %capacity = config.get @flash_next.token_count : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%one, %capacity, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %word = view.load %header[0] : view<3xi32> -> i32
+  %count = index.cast %word : i32 to index
+  %token = kernel.workgroup.id<y> : index
+  %row = kernel.workitem.id<x> : index
+  %period = index.constant 31 : index
+  %live = index.cmp ult, %token, %count : index
+  %valid = index.cmp ult, %row, %period : index
+  %active = scalar.andi %live, %valid : i1
+  scf.if %active {
+    %width = index.constant 2560 : index
+    %sum = func.call @flash_next_q8_reference_dot(%width, %token, %row, %input, %weight) : (index, index, index, buffer, buffer) -> (f64)
+    %packed = scalar.fptrunc %sum : f64 to bf16
+    %value = scalar.extf %packed : bf16 to f32
+    %columns = index.constant 248320 : index
+    %values = buffer.view %output[%origin] : buffer -> view<20x248320xf32>
+    scf.for %column = [%row to %columns step %period] {
+      view.store %value, %values[%token, %column] : f32, view<20x248320xf32>
+    }
+  }
+  kernel.return
+}
+
+// Nineteen queries span two complete eight-query groups and a partial third.
+// Poisoned inputs and the extra output row expose inactive-row publication.
+check.case public @vocabulary_query_groups {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  %count = check.param.choice values([0, 8, 9, 19]) name("active") : index
+  %seed = check.literal value(384781) : i64
+  %epoch = check.generate.fill value(0) : tensor<3xi32>
+  %input = check.generate.random.uniform seed(%seed) range(-0.125 to 0.125) : tensor<19x2560xbf16>
+  // Every scale made from bytes in [0, 30] is finite; codes and scales vary
+  // across blocks and rows. No serialized weight fixture is needed.
+  %weight = check.generate.iota offset(0) step(1) period(31) : tensor<248320x80x34xi8>
+  kernel.launch @vocabulary_fixture(%count, %epoch, %input) : (index, tensor<3xi32>, tensor<19x2560xbf16>)
+  %output = check.generate.fill value(-17.0) : tensor<20x248320xf32>
+  %expected = check.generate.fill value(-17.0) : tensor<20x248320xf32>
+  kernel.launch @flash_next_vocabulary(%epoch, %input, %weight, %output) : (tensor<3xi32>, tensor<19x2560xbf16>, tensor<248320x80x34xi8>, tensor<20x248320xf32>)
+  kernel.launch @vocabulary_reference(%epoch, %input, %weight, %expected) : (tensor<3xi32>, tensor<19x2560xbf16>, tensor<248320x80x34xi8>, tensor<20x248320xf32>)
+  check.expect.close actual(%output) expected(%expected) atol(6.103515625e-05) rtol(0.0078125) nan(different) : tensor<20x248320xf32>
+  check.return
+}

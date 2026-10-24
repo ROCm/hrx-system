@@ -530,6 +530,25 @@ loom_test(
 )
 
 loom_test(
+    name = "vocabulary_test",
+    srcs = ["tests/vocabulary.loom"],
+    benchmark_smoke = False,
+    configs = {
+        "flash_next.span_capacity": "16",
+        "flash_next.token_count": "19",
+        "flash_next.verification_width": "8",
+    },
+    execution_profiles = [
+        AMD_GPU_HARDWARE_PROFILE,
+        AMD_GPU_ACCESS_PROFILE,
+    ],
+    deps = [
+        ":q8_reference",
+        ":residual_programs",
+    ],
+)
+
+loom_test(
     name = "draft_vocab_test",
     srcs = ["tests/draft_vocab.loom"],
     benchmark_smoke = False,

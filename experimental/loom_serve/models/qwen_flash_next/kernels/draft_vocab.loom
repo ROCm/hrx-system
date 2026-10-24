@@ -6,7 +6,7 @@ func.decl @flash_next_mtp_span(%epoch: buffer, %span: index) -> (index, index, i
 
 func.decl @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
 
-func.decl @flash_next_q8_batch_partial(%width: index, %batch_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
+func.decl @flash_next_q8_batch_partial(%width: index, %group_size: index, %batch_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<[%group_size]xf32>)
 
 func.decl @sampling_key(%value: f32, %id: i32) -> (i64)
 
@@ -286,14 +286,14 @@ kernel.def target(@flash_next_draft_wave32) @flash_next_draft_common_head() {
           scf.yield %control : index
         }
         %id = index.assume %id_value [range(%id_value, 0, 248076)] : index
-        %partial = func.call @flash_next_q8_batch_partial(%width, %c4_value, %first, %count, %id, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
-        %sums = kernel.subgroup.reduce<addf> %partial : vector<4xf32>
+        %partial = func.call @flash_next_q8_batch_partial(%width, %c4_value, %c4_value, %first, %count, %id, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, index, index, buffer, buffer) -> (vector<[%c4_value]xf32>)
+        %sums = kernel.subgroup.reduce<addf> %partial : vector<[%c4_value]xf32>
         scf.if %leader {
           scf.for %ordinal = [%c0_value to %c4_value step %c1_value] unroll schedule(linear) {
             %token = index.add %first, %ordinal : index
             %live = index.cmp ult, %token, %count : index
             scf.if %live {
-              %sum = vector.extract %sums[%ordinal] : vector<4xf32> -> f32
+              %sum = vector.extract %sums[%ordinal] : vector<[%c4_value]xf32> -> f32
               %packed = scalar.fptrunc %sum : f32 to bf16
               %logit = scalar.extf %packed : bf16 to f32
               view.store %logit, %logits[%token, %id] : f32, view<[%capacity]x248320xf32>

@@ -67,12 +67,12 @@ func.def public inline @flash_next_q8_partial(%width: index, %token: index, %row
   func.return %result : f32
 }
 
-// Up to four consecutive tokens share weight loads and code conversion. The
-// constant batch size bounds the unrolled loop; unused result elements remain
+// Consecutive tokens share weight loads and code conversion. Result capacity
+// and the constant live batch size are separate; unused result elements remain
 // zero. Each live element keeps its own block-stride accumulator, and inactive
 // rows never read activations. Scale/code byte strides describe storage
 // independently of the lane stride. The caller reduces and publishes.
-func.def inline @flash_next_q8_batch_dot(%width: index, %batch_size: index, %first: index, %end: index, %lane: index, %stride: index, %scale_origin: offset, %code_origin: offset, %scale_stride: offset, %code_stride: offset, %input: buffer, %weight: buffer) -> (vector<4xf32>) {
+func.def inline @flash_next_q8_batch_dot(%width: index, %group_size: index, %batch_size: index, %first: index, %end: index, %lane: index, %stride: index, %scale_origin: offset, %code_origin: offset, %scale_stride: offset, %code_stride: offset, %input: buffer, %weight: buffer) -> (vector<[%group_size]xf32>) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %block_size = index.constant 32 : index
@@ -80,38 +80,38 @@ func.def inline @flash_next_q8_batch_dot(%width: index, %batch_size: index, %fir
   %element_bytes = index.constant 2 : offset
   %blocks = index.div %width, %block_size : index
   %input_row_bytes = index.scale %width, %element_bytes : index, offset -> offset
-  %c0_vector = vector.constant 0.0 : vector<4xf32>
-  %result = scf.for %block = [%lane to %blocks step %stride](%sums = %c0_vector : vector<4xf32>) -> (vector<4xf32>) {
+  %c0_vector = vector.constant 0.0 : vector<[%group_size]xf32>
+  %result = scf.for %block = [%lane to %blocks step %stride](%sums = %c0_vector : vector<[%group_size]xf32>) -> (vector<[%group_size]xf32>) {
     %scale_delta = index.scale %block, %scale_stride : index, offset -> offset
     %block_scale = index.add %scale_origin, %scale_delta : offset
     %code_delta = index.scale %block, %code_stride : index, offset -> offset
     %block_codes = index.add %code_origin, %code_delta : offset
     %codes, %scale = func.call @flash_next_q8_load_block(%block_scale, %block_codes, %weight) : (offset, offset, buffer) -> (vector<32xbf16>, f32)
     %input_delta = index.scale %block, %input_block_bytes : index, offset -> offset
-    %next_sums = scf.for %ordinal = [%c0 to %batch_size step %c1](%current = %sums : vector<4xf32>) -> (vector<4xf32>) unroll schedule(linear) {
+    %next_sums = scf.for %ordinal = [%c0 to %batch_size step %c1](%current = %sums : vector<[%group_size]xf32>) -> (vector<[%group_size]xf32>) unroll schedule(linear) {
       %token = index.add %first, %ordinal : index
       %active = index.cmp ult, %token, %end : index
-      %next = scf.if %active -> (vector<4xf32>) {
+      %prior = vector.extract %current[%ordinal] : vector<[%group_size]xf32> -> f32
+      %next_scalar = scf.if %active -> (f32) {
         %input_row_origin = index.scale %token, %input_row_bytes : index, offset -> offset
         %input_origin = index.add %input_row_origin, %input_delta : offset
         %dot = func.call @flash_next_q8_block_dot(%input_origin, %codes, %input) : (offset, vector<32xbf16>, buffer) -> (f32)
         %scaled = scalar.mulf %dot, %scale : f32
-        %prior = vector.extract %current[%ordinal] : vector<4xf32> -> f32
         %sum = scalar.addf %prior, %scaled : f32
-        %updated = vector.insert %sum into %current[%ordinal] : f32, vector<4xf32>
-        scf.yield %updated : vector<4xf32>
+        scf.yield %sum : f32
       } else {
-        scf.yield %current : vector<4xf32>
+        scf.yield %prior : f32
       }
-      scf.yield %next : vector<4xf32>
+      %next = vector.insert %next_scalar into %current[%ordinal] : f32, vector<[%group_size]xf32>
+      scf.yield %next : vector<[%group_size]xf32>
     }
-    scf.yield %next_sums : vector<4xf32>
+    scf.yield %next_sums : vector<[%group_size]xf32>
   }
-  func.return %result : vector<4xf32>
+  func.return %result : vector<[%group_size]xf32>
 }
 
 // Original GGUF rows interleave a two-byte scale and 32 codes in each block.
-func.def public inline @flash_next_q8_batch_partial(%width: index, %batch_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>) {
+func.def public inline @flash_next_q8_batch_partial(%width: index, %group_size: index, %batch_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<[%group_size]xf32>) {
   %block_size = index.constant 32 : index
   %block_bytes = index.constant 34 : offset
   %scale_bytes = index.constant 2 : offset
@@ -119,14 +119,14 @@ func.def public inline @flash_next_q8_batch_partial(%width: index, %batch_size: 
   %row_bytes = index.scale %blocks, %block_bytes : index, offset -> offset
   %scale_origin = index.scale %row, %row_bytes : index, offset -> offset
   %code_origin = index.add %scale_origin, %scale_bytes : offset
-  %result = func.call @flash_next_q8_batch_dot(%width, %batch_size, %first, %end, %lane, %stride, %scale_origin, %code_origin, %block_bytes, %block_bytes, %input, %weight) : (index, index, index, index, index, index, offset, offset, offset, offset, buffer, buffer) -> (vector<4xf32>)
-  func.return %result : vector<4xf32>
+  %result = func.call @flash_next_q8_batch_dot(%width, %group_size, %batch_size, %first, %end, %lane, %stride, %scale_origin, %code_origin, %block_bytes, %block_bytes, %input, %weight) : (index, index, index, index, index, index, index, offset, offset, offset, offset, buffer, buffer) -> (vector<[%group_size]xf32>)
+  func.return %result : vector<[%group_size]xf32>
 }
 
 // Prepared groups hold four channels: all K32 scales first, then all codes.
 // Both planes order blocks before channels. Their total size equals four GGUF
 // rows, and the dot arithmetic remains shared with canonical consumers.
-func.def public inline @flash_next_q8_channel4_partial(%width: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>) {
+func.def public inline @flash_next_q8_channel4_partial(%width: index, %group_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<[%group_size]xf32>) {
   %channels = index.constant 4 : index
   %block_size = index.constant 32 : index
   %group_block_bytes = index.constant 136 : offset
@@ -146,8 +146,8 @@ func.def public inline @flash_next_q8_channel4_partial(%width: index, %first: in
   %code_delta = index.scale %channel, %code_bytes : index, offset -> offset
   %code_origin = index.add %code_plane, %code_delta : offset
   %batch_size = index.constant 4 : index
-  %result = func.call @flash_next_q8_batch_dot(%width, %batch_size, %first, %end, %lane, %stride, %scale_origin, %code_origin, %scale_stride, %code_stride, %input, %weight) : (index, index, index, index, index, index, offset, offset, offset, offset, buffer, buffer) -> (vector<4xf32>)
-  func.return %result : vector<4xf32>
+  %result = func.call @flash_next_q8_batch_dot(%width, %group_size, %batch_size, %first, %end, %lane, %stride, %scale_origin, %code_origin, %scale_stride, %code_stride, %input, %weight) : (index, index, index, index, index, index, index, offset, offset, offset, offset, buffer, buffer) -> (vector<[%group_size]xf32>)
+  func.return %result : vector<[%group_size]xf32>
 }
 
 // Arbitrary row identities reuse the same decoded Q8 block. Inactive record

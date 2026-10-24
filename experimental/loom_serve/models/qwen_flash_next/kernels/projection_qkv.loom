@@ -1,6 +1,6 @@
 config.decl @flash_next.token_count : %value: index where [range(%value, 1, 32768)]
 
-func.decl @flash_next_q8_channel4_partial(%width: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
+func.decl @flash_next_q8_channel4_partial(%width: index, %group_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<[%group_size]xf32>)
 
 // GDN QKV consumes four-channel Q8 scale/code planes. Each workgroup shares
 // exact integer-code BF16 operands across a 64-channel by 32-token tile, then
@@ -61,8 +61,8 @@ kernel.def target(@flash_next_qkv_wave32) @flash_next_project_qkv(%output_width:
       %row = index.madd %group, %c8, %wave : index
       %valid = index.cmp ult, %row, %outputs : index
       scf.if %valid {
-        %partial = func.call @flash_next_q8_channel4_partial(%inputs, %first, %end, %row, %lane, %c32, %input, %weight) : (index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
-        %sums = kernel.subgroup.reduce<addf> %partial : vector<4xf32>
+        %partial = func.call @flash_next_q8_channel4_partial(%inputs, %c4, %first, %end, %row, %lane, %c32, %input, %weight) : (index, index, index, index, index, index, index, buffer, buffer) -> (vector<[%c4]xf32>)
+        %sums = kernel.subgroup.reduce<addf> %partial : vector<[%c4]xf32>
         %leader = index.cmp eq, %lane, %c0 : index
         scf.if %leader {
           %origin = index.constant 0 : offset
@@ -71,7 +71,7 @@ kernel.def target(@flash_next_qkv_wave32) @flash_next_project_qkv(%output_width:
             %token = index.add %first, %ordinal : index
             %live = index.cmp ult, %token, %end : index
             scf.if %live {
-              %value = vector.extract %sums[%ordinal] : vector<4xf32> -> f32
+              %value = vector.extract %sums[%ordinal] : vector<[%c4]xf32> -> f32
               %packed = scalar.fptrunc %value : f32 to bf16
               view.store %packed, %output_view[%token, %row] : bf16, view<[%tokens]x[%outputs]xbf16>
             }

@@ -14,7 +14,7 @@ command.program.decl @flash_next_gdn_state(%layer: index, %state_origin: offset)
 
 kernel.decl @flash_next_project_qkv(%configured_output_width: index) launch(%output_width: index, %span: buffer, %input: buffer, %weight: buffer, %output: buffer)
 
-func.decl @flash_next_q8_batch_partial(%width: index, %batch_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
+func.decl @flash_next_q8_batch_partial(%width: index, %group_size: index, %batch_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<[%group_size]xf32>)
 
 // A subgroup contracts one output column for four packed tokens. Reusing the
 // original Q8 codes reduces weight traffic without repacking, extra activation
@@ -50,8 +50,8 @@ kernel.def target(@flash_next_projection_wave32) @flash_next_linear_q8(%output_w
     %row = index.madd %group, %c4, %wave : index
     %valid = index.cmp ult, %row, %outputs : index
     scf.if %valid {
-      %partial = func.call @flash_next_q8_batch_partial(%inputs, %c4, %first, %end, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
-      %sums = kernel.subgroup.reduce<addf> %partial : vector<4xf32>
+      %partial = func.call @flash_next_q8_batch_partial(%inputs, %c4, %c4, %first, %end, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, index, index, buffer, buffer) -> (vector<[%c4]xf32>)
+      %sums = kernel.subgroup.reduce<addf> %partial : vector<[%c4]xf32>
       %leader = index.cmp eq, %lane, %c0 : index
       scf.if %leader {
         %origin = index.constant 0 : offset
@@ -60,7 +60,7 @@ kernel.def target(@flash_next_projection_wave32) @flash_next_linear_q8(%output_w
           %token = index.add %first, %ordinal : index
           %live = index.cmp ult, %token, %end : index
           scf.if %live {
-            %sum = vector.extract %sums[%ordinal] : vector<4xf32> -> f32
+            %sum = vector.extract %sums[%ordinal] : vector<[%c4]xf32> -> f32
             %packed = scalar.fptrunc %sum : f32 to bf16
             view.store %packed, %view[%token, %row] : bf16, view<[%tokens]x[%outputs]xbf16>
           }

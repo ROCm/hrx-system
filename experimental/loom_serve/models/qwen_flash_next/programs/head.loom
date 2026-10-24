@@ -8,7 +8,7 @@ func.decl @flash_next_token_count(%epoch: buffer, %capacity: index) -> (index)
 
 func.decl @flash_next_q8_partial(%width: index, %token: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (f32)
 
-func.decl @flash_next_q8_batch_partial(%width: index, %batch_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<4xf32>)
+func.decl @flash_next_q8_batch_partial(%width: index, %group_size: index, %batch_size: index, %first: index, %end: index, %row: index, %lane: index, %stride: index, %input: buffer, %weight: buffer) -> (vector<[%group_size]xf32>)
 
 kernel.decl @hc_normalize() launch(%span: buffer, %residual: buffer, %gamma: buffer, %normalized: buffer)
 
@@ -102,45 +102,52 @@ kernel.def target(@flash_next_head_wave32) @flash_next_head_down() {
   kernel.return
 }
 
-// Selected output rows share original vocabulary codes in groups of four.
+// Selected output rows share original vocabulary codes across a constant
+// query group: four for small capacities and eight for larger capacities.
 // Sampling still observes the checkpoint's BF16 logit publication boundary.
 kernel.def target(@flash_next_head_wave32) @flash_next_vocabulary() {
   %groups = index.constant 62080 : index
   %rows = func.call pure @flash_next_output_capacity() : () -> (index)
   %c1 = index.constant 1 : index
-  %c3 = index.constant 3 : index
   %c4 = index.constant 4 : index
-  %padded = index.add %rows, %c3 : index
-  %batches = index.div %padded, %c4 : index
+  %c8 = index.constant 8 : index
+  %wide = index.cmp ugt, %rows, %c4 : index
+  %batch_size = scf.select %wide, %c8, %c4 : index
+  %rounding = index.sub %batch_size, %c1 : index
+  %padded = index.add %rows, %rounding : index
+  %batches = index.div %padded, %batch_size : index
   %threads = index.constant 128 : index
-  kernel.launch.config workgroups(%groups, %batches, %c1) workgroup_size(%threads, %c1, %c1) : index
+  kernel.launch.config workgroups(%batches, %groups, %c1) workgroup_size(%threads, %c1, %c1) : index
 } launch(%epoch: buffer, %input: buffer, %weight: buffer, %output: buffer) {
   %rows = func.call pure @flash_next_output_capacity() : () -> (index)
-  %batch = kernel.workgroup.id<y> : index
+  %batch = kernel.workgroup.id<x> : index
   %c4 = index.constant 4 : index
-  %first = index.mul %batch, %c4 : index
+  %c8 = index.constant 8 : index
+  %wide = index.cmp ugt, %rows, %c4 : index
+  %batch_size = scf.select %wide, %c8, %c4 : index
+  %first = index.mul %batch, %batch_size : index
   %count = func.call @flash_next_token_count(%epoch, %rows) : (buffer, index) -> (index)
   %active = index.cmp ult, %first, %count : index
   scf.if %active {
-    %group = kernel.workgroup.id<x> : index
+    %group = kernel.workgroup.id<y> : index
     %wave = kernel.subgroup.id : index
     %lane = kernel.subgroup.lane.id : index
     %c1 = index.constant 1 : index
     %row = index.madd %group, %c4, %wave : index
     %width = index.constant 2560 : index
     %stride = index.constant 32 : index
-    %part = func.call @flash_next_q8_batch_partial(%width, %c4, %first, %count, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, index, buffer, buffer) -> (vector<4xf32>)
-    %sums = kernel.subgroup.reduce<addf> %part : vector<4xf32>
+    %part = func.call @flash_next_q8_batch_partial(%width, %batch_size, %batch_size, %first, %count, %row, %lane, %stride, %input, %weight) : (index, index, index, index, index, index, index, index, buffer, buffer) -> (vector<[%batch_size]xf32>)
+    %sums = kernel.subgroup.reduce<addf> %part : vector<[%batch_size]xf32>
     %c0 = index.constant 0 : index
     %leader = index.cmp eq, %lane, %c0 : index
     scf.if %leader {
       %origin = index.constant 0 : offset
       %view = buffer.view %output[%origin] : buffer -> view<[%rows]x248320xf32>
-      scf.for %ordinal = [%c0 to %c4 step %c1] unroll schedule(linear) {
+      scf.for %ordinal = [%c0 to %batch_size step %c1] unroll schedule(linear) {
         %token = index.add %first, %ordinal : index
         %live = index.cmp ult, %token, %count : index
         scf.if %live {
-          %sum = vector.extract %sums[%ordinal] : vector<4xf32> -> f32
+          %sum = vector.extract %sums[%ordinal] : vector<[%batch_size]xf32> -> f32
           %packed = scalar.fptrunc %sum : f32 to bf16
           %logit = scalar.extf %packed : bf16 to f32
           view.store %logit, %view[%token, %row] : f32, view<[%rows]x248320xf32>
