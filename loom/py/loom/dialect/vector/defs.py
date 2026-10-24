@@ -4585,13 +4585,21 @@ vector_mma = Op(
     phase=OpPhase.EXECUTABLE,
     doc=(
         "Compute a matrix multiply-accumulate over target-shaped vector "
-        "fragments. The op consumes only the physical lhs, rhs, and init "
-        "vectors; logical M/N/K shape, fragment role, packed storage schema, "
-        "scales, codebooks, sparse metadata, and other interpretation data are "
-        "carried by vector.fragment facts on those operands. Lowering queries "
-        "those facts to select native matrix instructions or a reference "
-        "decomposition without baking target-specific witnesses into the MMA "
-        "syntax. The optional saturate flag clamps an integer accumulation "
+        "fragments using native matrix arithmetic. Floating intermediate "
+        "precision, association, rounding, subnormal handling, and special-value "
+        "behavior follow the selected target's arithmetic contract; the result "
+        "type does not promise the bits of an ordered scalar FMA sequence. A "
+        "target-independent reference decomposition converts each logical input "
+        "to the accumulator type and applies scalar.fmaf in increasing K order "
+        "from the initial accumulator. That reference evaluation remains "
+        "permitted even when native execution differs. Use explicit scalar.fmaf "
+        "operations or vector.dotf on widened inputs when ordered fused "
+        "accumulation is required. The op consumes only the physical lhs, rhs, "
+        "and init vectors; logical M/N/K shape, fragment role, packed storage "
+        "schema, scales, codebooks, sparse metadata, and other interpretation "
+        "data are carried by vector.fragment facts on those operands. Lowering "
+        "queries those facts without baking target-specific witnesses into the "
+        "MMA syntax. The optional saturate flag clamps an integer accumulation "
         "result to its destination range."
     ),
     operands=[

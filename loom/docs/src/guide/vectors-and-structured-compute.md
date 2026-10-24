@@ -242,10 +242,15 @@ scale, table, or sparse metadata in the keyed `using` dictionary.
 [`vector.mma`](../reference/dialects/vector/ops/mma.md) consumes the fragment
 facts rather than spelling an AMDGPU, SPIR-V, or other target instruction in
 source. Provider selection can choose a native matrix operation, a carrier
-repack, or a valid decomposition while preserving the same contraction
-contract. If no implementation satisfies the fragment shape and numeric
-contract, compilation fails at the selection boundary instead of silently
-changing the computation.
+repack, or a reference decomposition. Floating `vector.mma` uses native matrix
+arithmetic: intermediate precision, association, rounding, subnormal handling,
+and special-value behavior follow the selected target. Target-independent
+scalar lowering uses ordered fused multiply-adds as its reference evaluation
+and remains a valid implementation even when its result bits differ from a
+native instruction. Use explicit `scalar.fmaf` operations or `vector.dotf` on
+widened inputs when ordered fused accumulation is required. If no
+implementation satisfies the fragment shape and numeric contract, compilation
+fails at the selection boundary.
 
 Fragment roles are not general-purpose layout casts. Use
 [`vector.fragment.repack`](../reference/dialects/vector/ops/fragment-repack.md)
