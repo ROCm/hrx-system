@@ -13,6 +13,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/tokenizer/vocab/vocab.h"
+#include "loom/model/card.h"
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/runtime/program/package.h"
 #include "loomc/iree.h"
@@ -24,10 +25,15 @@ class TokenizerLoadTest : public ::testing::Test {
   void SetUp() override {
     const auto json = IREE_SV(
         R"({"model":{"type":"BPE","vocab":{"a":0,"b":1},"merges":[]}})");
-    const loom_serve_package_file_t file = {
-        IREE_SV("tokenizer.json"),
-        iree_make_const_byte_span(json.data, json.size)};
-    IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("model.json"), 1, &file,
+    const loom_serve_package_file_t files[] = {
+        {IREE_SV("tokenizer.json"),
+         iree_make_const_byte_span(json.data, json.size)},
+        {IREE_SV("vocabulary.data"),
+         iree_make_const_byte_span(json.data, json.size)},
+        {IREE_SV("asset/tokenizer.json"),
+         iree_make_const_byte_span(json.data, json.size)},
+    };
+    IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("model.json"), 3, files,
                                              iree_allocator_system(),
                                              &sources_.package));
   }
@@ -39,6 +45,7 @@ class TokenizerLoadTest : public ::testing::Test {
     IREE_EXPECT_OK(status_);
     iree_tokenizer_free(tokenizer_);
     loom_serve_package_release(sources_.package);
+    loom_model_card_release(sources_.card);
   }
 
   static loomc_status_t Submit(void* user_data, loomc_task_t* task) {
@@ -54,9 +61,29 @@ class TokenizerLoadTest : public ::testing::Test {
     return loomc_ok_status();
   }
 
-  iree_status_t Start(iree_string_view_t locator = IREE_SV("tokenizer.json")) {
+  iree_status_t Start(iree_string_view_t locator = IREE_SV("tokenizer.json"),
+                      iree_string_view_t directory = iree_string_view_empty()) {
     return loom_serve_tokenizer_load_start(
-        {Submit, this}, &sources_, locator,
+        {Submit, this}, &sources_, directory, locator,
+        [](void* self) { ++static_cast<TokenizerLoadTest*>(self)->wakes_; },
+        this, iree_allocator_system(), &load_);
+  }
+
+  iree_status_t SelectTokenizer(const std::string& tokenizer) {
+    const std::string card =
+        R"({"schema_version":1,"model":{"id":"test","name":"test"},
+            "programs":{"source":{"inputs":["unused.loom"],"libraries":[]}},
+            "services":{"transcription":{"kind":"recognition","version":1}},
+            "variants":{"fixture":{"services":{"transcription":{
+              "programs":["source"],"tokenizers":{"vocabulary":)" +
+        tokenizer + R"(}}}}}})";
+    return loom_model_card_parse(iree_make_cstring_view(card.c_str()), nullptr,
+                                 iree_allocator_system(), &sources_.card);
+  }
+
+  iree_status_t StartNamed(iree_string_view_t name = IREE_SV("vocabulary")) {
+    return loom_serve_tokenizer_load_start(
+        {Submit, this}, &sources_, IREE_SV("ignored-for-card"), name,
         [](void* self) { ++static_cast<TokenizerLoadTest*>(self)->wakes_; },
         this, iree_allocator_system(), &load_);
   }
@@ -99,6 +126,52 @@ class TokenizerLoadTest : public ::testing::Test {
   // Number of terminal notifications received by the serialized owner.
   int wakes_ = 0;
 };
+
+TEST_F(TokenizerLoadTest, LegacyPathResolvesAgainstItsDeclaredDirectory) {
+  IREE_ASSERT_OK(Start(IREE_SV("tokenizer.json"), IREE_SV("asset")));
+  RunQueued();
+  CheckResult();
+}
+
+TEST_F(TokenizerLoadTest, NamedTokenizerUsesExplicitFormatAndIndependentPath) {
+  IREE_ASSERT_OK(SelectTokenizer(
+      R"({"path":"vocabulary.data","format":"huggingface-json"})"));
+  IREE_ASSERT_OK(StartNamed());
+  RunQueued();
+  CheckResult();
+}
+
+TEST_F(TokenizerLoadTest, NamedTokenizerInfersJsonEncoding) {
+  IREE_ASSERT_OK(SelectTokenizer(R"("tokenizer.json")"));
+  IREE_ASSERT_OK(StartNamed());
+  RunQueued();
+  CheckResult();
+}
+
+TEST_F(TokenizerLoadTest, MissingIdentityFailsWithoutSubmission) {
+  IREE_ASSERT_OK(SelectTokenizer(R"("tokenizer.json")"));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND, StartNamed(IREE_SV("other")));
+  EXPECT_EQ(load_, nullptr);
+  EXPECT_EQ(queued_, nullptr);
+  EXPECT_EQ(wakes_, 0);
+}
+
+TEST_F(TokenizerLoadTest, AmbiguousFormatFailsWithoutSubmission) {
+  IREE_ASSERT_OK(SelectTokenizer(R"("vocabulary.data")"));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED, StartNamed());
+  EXPECT_EQ(load_, nullptr);
+  EXPECT_EQ(queued_, nullptr);
+  EXPECT_EQ(wakes_, 0);
+}
+
+TEST_F(TokenizerLoadTest, ExplicitUnsupportedFormatNeverFallsBackToFilename) {
+  IREE_ASSERT_OK(
+      SelectTokenizer(R"({"path":"tokenizer.json","format":"other"})"));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED, StartNamed());
+  EXPECT_EQ(load_, nullptr);
+  EXPECT_EQ(queued_, nullptr);
+  EXPECT_EQ(wakes_, 0);
+}
 
 TEST_F(TokenizerLoadTest, PendingTakePreservesOwnershipAndCopiesLocator) {
   std::string locator = "tokenizer.json";
@@ -174,7 +247,8 @@ void TokenizerLoadTest::CheckSingleWorker() {
             reinterpret_cast<loom_serve_test_tokenizer_load_parent_t*>(task);
         auto* test = parent->test;
         test->status_ = loom_serve_tokenizer_load_start(
-            parent->sink, &test->sources_, IREE_SV("tokenizer.json"),
+            parent->sink, &test->sources_, iree_string_view_empty(),
+            IREE_SV("tokenizer.json"),
             [](void* data) {
               iree_notification_post(static_cast<iree_notification_t*>(data),
                                      IREE_ALL_WAITERS);

@@ -287,6 +287,8 @@ typedef struct loom_amdgpu_encoding_table_t {
   uint16_t s_mov_b32_opcode;
   // VOP1 opcode used for target-inserted v_mov_b32 register/immediate moves.
   uint16_t v_mov_b32_opcode;
+  // VOP1 opcode used for full-unit physical VGPR exchanges.
+  uint16_t v_swap_b32_opcode;
   // VOP1 opcode used for target-inserted v_nop issue slots.
   uint16_t v_nop_opcode;
   // Unified source field value selecting the literal word after a packet.
@@ -459,6 +461,12 @@ iree_status_t loom_amdgpu_encoding_pack_s_mov_b32_u32(
 // Packs a 32-bit VGPR-to-VGPR v_mov_b32 packet using the target table's VOP1
 // layout.
 iree_status_t loom_amdgpu_encoding_pack_v_mov_b32_vgpr(
+    const loom_amdgpu_encoding_table_t* table, uint16_t vdst, uint16_t vsrc0,
+    loom_amdgpu_encoding_packet_t* out_packet);
+
+// Packs a full-word VGPR exchange using the selected target's VOP1 layout.
+// Both register selectors name a read and a write in the same instruction.
+iree_status_t loom_amdgpu_encoding_pack_v_swap_b32(
     const loom_amdgpu_encoding_table_t* table, uint16_t vdst, uint16_t vsrc0,
     loom_amdgpu_encoding_packet_t* out_packet);
 

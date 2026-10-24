@@ -1,0 +1,57 @@
+// Text-owned projector ABI. Providers and scoped parameters share the parent card.
+
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
+func.decl import("prepare") @source_scope(%scope: buffer) -> (i32)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
+
+global.rodata.def @root = bytes("77656967687465645f70726f6a656374")
+
+global.rodata.def @vision_scope = bytes("766973696f6e")
+
+global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
+
+global.rodata.def @empty = bytes("")
+
+global.rodata.def @name = bytes("77656967687465642d70726f6a6563746f72")
+
+// The pixel protocol is unchanged; a real checkpoint conditions every row.
+func.def public @text_image_prepare_v1(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer) {
+  %c0_source = scalar.constant 0 : i32
+  %binding = scalar.constant 0 : i32
+  %tag = scalar.constant 1 : i64
+  %root = global.load @root : buffer
+  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %scope = global.load @vision_scope : buffer
+  %policy = global.load @policy : buffer
+  %checkpoint = func.call @source_scope(%scope) : (buffer) -> (i32)
+  func.call @parameter(%stage, %binding, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
+  %units = scalar.constant 64 : i64
+  %input_capacity = scalar.constant 65536 : i64
+  %output_capacity = scalar.constant 1024 : i64
+  %empty = global.load @empty : buffer
+  %name = global.load @name : buffer
+  func.return %units, %input_capacity, %output_capacity, %output_capacity, %empty, %name, %root : i64, i64, i64, i64, buffer, buffer, buffer
+}
+
+func.decl @prepare_request(%state: buffer, %request: buffer) -> (buffer, i64, i64)
+
+func.def public @text_image_prepare_request_v1(%state: buffer, %request: buffer) -> (buffer, i64, i64) {
+  %prepared, %units, %tag = func.call @prepare_request(%state, %request) : (buffer, buffer) -> (buffer, i64, i64)
+  func.return %prepared, %units, %tag : buffer, i64, i64
+}
+
+func.decl @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer)
+
+func.def public @text_image_prepare_batch_v1(%state: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer) {
+  %stage, %input, %plan = func.call @prepare_batch(%state, %tags, %ranges, %packed) : (buffer, buffer, buffer, buffer) -> (i32, buffer, buffer)
+  func.return %stage, %input, %plan : i32, buffer, buffer
+}
+
+func.decl @run(%stage: i32, %input: hal.buffer, %output: hal.buffer)
+
+func.def public @text_image_run_v1(%stage: i32, %input: hal.buffer, %output: hal.buffer) {
+  func.call @run(%stage, %input, %output) : (i32, hal.buffer, hal.buffer)
+  func.return
+}

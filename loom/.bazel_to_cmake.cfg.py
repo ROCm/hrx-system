@@ -371,6 +371,12 @@ class LoomBuildFileFunctions(
         )
         self._emit_platform_guard_end(target_compatible_with)
 
+    def loom_model(self, tags=None, **kwargs):
+        # Model publication actions use Bazel's declared runfiles layout. Native
+        # serving coverage remains available through ordinary CMake fixtures.
+        if not self._should_skip_target(tags=tags):
+            raise NotImplementedError("loom_model requires the skip-bazel_to_cmake tag")
+
     def loom_library(
         self,
         name,

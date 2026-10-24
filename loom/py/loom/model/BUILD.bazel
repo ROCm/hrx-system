@@ -1,0 +1,378 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "model-card.v1.schema.json",
+    "model-catalog.v1.schema.json",
+    "model-lock.v1.schema.json",
+])
+
+iree_py_library(
+    name = "manifest",
+    srcs = [
+        "__init__.py",
+        "manifest.py",
+    ],
+    imports = ["../.."],
+)
+
+iree_py_library(
+    name = "catalog",
+    srcs = ["catalog.py"],
+    deps = [":manifest"],
+)
+
+iree_py_test(
+    name = "catalog_test",
+    srcs = [
+        "catalog_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.model.catalog_test"],
+    data = ["testdata/moonshine.json"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":catalog",
+        ":fetch_catalog",
+        ":fetch_source",
+        ":fetch_storage",
+        ":manifest",
+    ],
+)
+
+iree_py_binary(
+    name = "catalog_generate",
+    srcs = ["catalog.py"],
+    main = "catalog.py",
+    deps = [":catalog"],
+)
+
+iree_py_library(
+    name = "fetch_catalog",
+    srcs = ["fetch_catalog.py"],
+    deps = [
+        ":catalog",
+        ":fetch_source",
+        ":fetch_storage",
+        ":manifest",
+    ],
+)
+
+iree_py_library(
+    name = "lock",
+    srcs = ["lock.py"],
+    deps = [":manifest"],
+)
+
+iree_py_library(
+    name = "documentation",
+    srcs = ["documentation.py"],
+    deps = [
+        ":lock",
+        ":manifest",
+        ":memory",
+    ],
+)
+
+iree_py_library(
+    name = "memory",
+    srcs = ["memory.py"],
+)
+
+iree_py_binary(
+    name = "documentation_generate",
+    srcs = ["documentation.py"],
+    main = "documentation.py",
+    deps = [":documentation"],
+)
+
+iree_py_test(
+    name = "documentation_test",
+    srcs = [
+        "documentation_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.model.documentation_test"],
+    data = ["testdata/moonshine.json"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":documentation",
+        ":lock",
+        ":manifest",
+    ],
+)
+
+iree_py_library(
+    name = "fetch_source",
+    srcs = ["fetch_source.py"],
+    deps = [
+        ":lock",
+        ":manifest",
+    ],
+)
+
+iree_py_library(
+    name = "fetch_transfer",
+    srcs = ["fetch_transfer.py"],
+    deps = [
+        ":fetch_source",
+        ":manifest",
+    ],
+)
+
+iree_py_library(
+    name = "fetch_range",
+    srcs = ["fetch_range.py"],
+    deps = [
+        ":fetch_source",
+        ":manifest",
+    ],
+)
+
+iree_py_library(
+    name = "fetch_safetensors",
+    srcs = ["fetch_safetensors.py"],
+    deps = [
+        ":fetch_range",
+        ":fetch_source",
+        ":manifest",
+    ],
+)
+
+iree_py_library(
+    name = "fetch_hf",
+    srcs = ["fetch_hf.py"],
+    deps = [
+        ":fetch_safetensors",
+        ":fetch_source",
+        ":fetch_transfer",
+        ":manifest",
+    ],
+)
+
+iree_py_library(
+    name = "fetch_storage",
+    srcs = ["fetch_storage.py"],
+    deps = [
+        ":fetch_hf",
+        ":fetch_safetensors",
+        ":fetch_source",
+        ":fetch_transfer",
+        ":lock",
+        ":manifest",
+    ],
+)
+
+iree_py_library(
+    name = "fetch",
+    srcs = ["fetch.py"],
+    deps = [
+        ":fetch_hf",
+        ":fetch_source",
+        ":fetch_storage",
+        ":lock",
+        ":manifest",
+    ],
+)
+
+iree_py_library(
+    name = "fetch_console",
+    srcs = [
+        "fetch_console.py",
+        "fetch_windows.py",
+    ],
+    deps = [
+        ":fetch_hf",
+        ":fetch_source",
+    ],
+)
+
+iree_py_library(
+    name = "fetch_picker",
+    srcs = ["fetch_picker.py"],
+    deps = [
+        ":fetch_console",
+        ":fetch_source",
+        ":manifest",
+        ":memory",
+    ],
+)
+
+iree_py_library(
+    name = "fetch_cli",
+    srcs = ["fetch_main.py"],
+    deps = [
+        ":fetch",
+        ":fetch_catalog",
+        ":fetch_console",
+        ":fetch_hf",
+        ":fetch_picker",
+        ":fetch_source",
+        ":fetch_storage",
+        ":manifest",
+        ":memory",
+    ],
+)
+
+iree_py_binary(
+    name = "loom-fetch",
+    srcs = ["fetch_main.py"],
+    main = "fetch_main.py",
+    deps = [":fetch_cli"],
+)
+
+iree_py_test(
+    name = "picker_test",
+    srcs = [
+        "picker_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.model.picker_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":catalog",
+        ":fetch_cli",
+        ":fetch_picker",
+        ":fetch_source",
+        ":manifest",
+    ],
+)
+
+iree_py_test(
+    name = "windows_console_test",
+    srcs = [
+        "windows_console_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.model.windows_console_test"],
+    main = "pytest_style_runner.py",
+    deps = [":fetch_console"],
+)
+
+iree_py_test(
+    name = "fetch_test",
+    srcs = [
+        "fetch_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.model.fetch_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":fetch",
+        ":fetch_cli",
+        ":fetch_source",
+        ":fetch_storage",
+        ":lock",
+        ":manifest",
+    ],
+)
+
+iree_py_test(
+    name = "repack_test",
+    srcs = [
+        "repack_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.model.repack_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":fetch_safetensors",
+        ":fetch_source",
+        ":fetch_storage",
+        ":lock",
+        ":manifest",
+    ],
+)
+
+iree_py_test(
+    name = "fetch_storage_test",
+    srcs = [
+        "fetch_storage_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.model.fetch_storage_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":fetch_source",
+        ":fetch_storage",
+        ":lock",
+        ":manifest",
+    ],
+)
+
+iree_py_test(
+    name = "lock_test",
+    srcs = [
+        "lock_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.model.lock_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":lock",
+        ":manifest",
+    ],
+)
+
+iree_py_test(
+    name = "fetch_source_test",
+    srcs = [
+        "fetch_source_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.model.fetch_source_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":fetch_source",
+        ":manifest",
+    ],
+)
+
+iree_py_test(
+    name = "manifest_test",
+    srcs = [
+        "manifest_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.model.manifest_test"],
+    data = [
+        "testdata/moonshine.json",
+        "//loom/src/loom/serve/fixture/text:native.card.json",
+    ],
+    main = "pytest_style_runner.py",
+    deps = [":manifest"],
+)
+
+iree_py_binary(
+    name = "inline_file",
+    srcs = ["inline_file.py"],
+    main = "inline_file.py",
+    deps = [":manifest"],
+)
+
+iree_py_binary(
+    name = "build",
+    srcs = ["build.py"],
+    main = "build.py",
+    deps = [":manifest"],
+)
+
+iree_py_test(
+    name = "build_test",
+    srcs = [
+        "build.py",
+        "build_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.model.build_test"],
+    data = ["//loom/src/loom/serve/fixture/text:native.card.json"],
+    main = "pytest_style_runner.py",
+    deps = [":manifest"],
+)

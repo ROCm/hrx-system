@@ -6,7 +6,9 @@
 
 #include "loom/codegen/low/allocation/move_sequence.h"
 
+#include <array>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "iree/base/internal/arena.h"
@@ -97,6 +99,26 @@ const loom_low_descriptor_set_t* ExplicitDescriptorSet() {
   return &kDescriptorSet;
 }
 
+const loom_low_descriptor_set_t* ExchangeDescriptorSet() {
+  static const auto kRegClasses = [] {
+    std::array<loom_low_reg_class_t, 3> classes = {};
+    for (size_t i = 0; i < classes.size(); ++i) {
+      classes[i] = AliasDescriptorSet()->reg_classes[i];
+      if (classes[i].alloc_unit_bits != 0) {
+        classes[i].flags |=
+            LOOM_LOW_REG_CLASS_FLAG_PHYSICAL | LOOM_LOW_REG_CLASS_FLAG_EXCHANGE;
+      }
+    }
+    return classes;
+  }();
+  static const auto kDescriptorSet = [] {
+    auto descriptor_set = *AliasDescriptorSet();
+    descriptor_set.reg_classes = kRegClasses.data();
+    return descriptor_set;
+  }();
+  return &kDescriptorSet;
+}
+
 loom_low_move_location_t Location(uint32_t ordinal,
                                   uint16_t register_class_id = 0) {
   return loom_low_move_location_t{
@@ -126,7 +148,8 @@ loom_low_move_t MoveBetween(uint32_t destination,
 
 std::string MoveString(const loom_low_move_t& move) {
   return std::to_string(move.destination.descriptor_reg_class_id) + ":" +
-         std::to_string(move.destination.location) + "<-" +
+         std::to_string(move.destination.location) +
+         (move.kind == LOOM_LOW_MOVE_KIND_EXCHANGE ? "<->" : "<-") +
          std::to_string(move.source.location);
 }
 
@@ -315,6 +338,136 @@ TEST(LowMoveSequenceTest, UsesTemporaryForCycle) {
 
   EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), &temporary, 1),
               ::testing::ElementsAre("0:9<-1", "0:1<-0", "0:0<-9"));
+}
+
+TEST(LowMoveSequenceTest, ExchangesHomogeneousCycleWithoutTemporary) {
+  const loom_low_move_t moves[] = {Move(0, 1), Move(1, 2), Move(2, 0)};
+  EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0,
+                           ExchangeDescriptorSet()),
+              ::testing::ElementsAre("0:1<->2", "0:2<->0"));
+}
+
+TEST(LowMoveSequenceTest, ExchangesDisjointExplicitPhysicalRegisters) {
+  auto descriptor_set = *ExplicitDescriptorSet();
+  loom_low_reg_class_t register_classes[] = {descriptor_set.reg_classes[0],
+                                             descriptor_set.reg_classes[1]};
+  register_classes[0].flags |= LOOM_LOW_REG_CLASS_FLAG_EXCHANGE;
+  descriptor_set.reg_classes = register_classes;
+  const loom_low_move_t moves[] = {Move(0, 2), Move(2, 0)};
+  EXPECT_THAT(
+      ResolveMoves(moves, IREE_ARRAYSIZE(moves), nullptr, 0, &descriptor_set),
+      ::testing::ElementsAre("0:2<->0"));
+}
+
+TEST(LowMoveSequenceTest, ExchangeCapabilityPreservesMixedAliasViews) {
+  const loom_low_move_t moves[] = {Move(1, 0, 0), Move(0, 1, 1)};
+  const loom_low_move_location_t temporaries[] = {Location(2, 0),
+                                                  Location(2, 1)};
+  EXPECT_THAT(
+      ResolveMoves(moves, IREE_ARRAYSIZE(moves), temporaries,
+                   IREE_ARRAYSIZE(temporaries), ExchangeDescriptorSet()),
+      ::testing::ElementsAre("0:2<-0", "1:0<-1", "0:1<-2"));
+}
+
+TEST(LowMoveSequenceTest, ExchangesSaturatedPhysicalRegisterBank) {
+  TestArena arena;
+  loom_low_move_sequence_scratch_t scratch = {};
+  constexpr uint32_t kLocationCount = 256;
+  IREE_ASSERT_OK(loom_low_move_sequence_scratch_initialize(
+      arena.arena(), kLocationCount, &scratch));
+  for (uint32_t i = 0; i < kLocationCount; ++i) {
+    scratch.moves[i] = Move(i, i < 8 ? i ^ 4 : i);
+  }
+  TemporaryResolver resolver = {};
+  const loom_low_move_sequence_options_t options = {
+      .descriptor_set = ExchangeDescriptorSet(),
+      .resolve_temporary = {ResolveTemporary, &resolver},
+  };
+  loom_low_move_t output[4] = {};
+  iree_host_size_t output_count = 0;
+  bool complete = false;
+  IREE_ASSERT_OK(loom_low_move_sequence_resolve(
+      &scratch, kLocationCount, &options, IREE_ARRAYSIZE(output), output,
+      &output_count, /*out_input_flags=*/nullptr, &complete));
+  ASSERT_TRUE(complete);
+  ASSERT_EQ(output_count, 4u);
+  EXPECT_EQ(resolver.call_count, 0u);
+  uint32_t registers[kLocationCount];
+  for (uint32_t i = 0; i < kLocationCount; ++i) {
+    registers[i] = i;
+  }
+  for (const auto& move : output) {
+    ASSERT_EQ(move.kind, LOOM_LOW_MOVE_KIND_EXCHANGE);
+    const uint32_t source = registers[move.source.location];
+    registers[move.source.location] = registers[move.destination.location];
+    registers[move.destination.location] = source;
+  }
+  for (uint32_t i = 0; i < kLocationCount; ++i) {
+    EXPECT_EQ(registers[i], i < 8 ? i ^ 4 : i);
+  }
+  EXPECT_EQ(scratch.temporaries, nullptr);
+}
+
+TEST(LowMoveSequenceTest, ExhaustiveHomogeneousParallelAssignments) {
+  TestArena arena;
+  loom_low_move_sequence_scratch_t scratch = {};
+  constexpr uint32_t kMaximumLocations = 6;
+  IREE_ASSERT_OK(loom_low_move_sequence_scratch_initialize(
+      arena.arena(), kMaximumLocations, &scratch));
+  TemporaryResolver resolver = {};
+  const loom_low_move_sequence_options_t options = {
+      .descriptor_set = ExchangeDescriptorSet(),
+      .resolve_temporary = {ResolveTemporary, &resolver},
+  };
+  const std::array<uint32_t, 8> original = {0x00000000, 0x80000000, 0x7fc01234,
+                                            0x7f800001, 0x00000001, 0xffffffff,
+                                            0x01234567, 0x89abcdef};
+  loom_low_move_t output[kMaximumLocations] = {};
+  for (uint32_t locations = 0; locations <= kMaximumLocations; ++locations) {
+    SCOPED_TRACE(locations);
+    uint32_t case_count = 1;
+    for (uint32_t i = 0; i < locations; ++i) {
+      case_count *= locations + 1;
+    }
+    for (uint32_t case_index = 0; case_index < case_count; ++case_index) {
+      SCOPED_TRACE(case_index);
+      auto expected = original;
+      uint32_t digits = case_index;
+      iree_host_size_t move_count = 0;
+      for (uint32_t destination = 0; destination < locations; ++destination) {
+        const uint32_t source = digits % (locations + 1);
+        digits /= locations + 1;
+        // One digit omits the destination; the others name every source.
+        if (source == locations) {
+          continue;
+        }
+        scratch.moves[move_count++] = Move(destination, source);
+        expected[destination] = original[source];
+      }
+      iree_host_size_t output_count = 0;
+      bool complete = false;
+      IREE_ASSERT_OK(loom_low_move_sequence_resolve(
+          &scratch, move_count, &options, IREE_ARRAYSIZE(output), output,
+          &output_count, /*out_input_flags=*/nullptr, &complete));
+      ASSERT_TRUE(complete);
+      ASSERT_LE(output_count, move_count);
+      auto actual = original;
+      for (iree_host_size_t i = 0; i < output_count; ++i) {
+        const auto& move = output[i];
+        const uint32_t access_count = loom_low_move_access_count(&move);
+        uint32_t values[2] = {};
+        for (uint32_t j = 0; j < access_count; ++j) {
+          values[j] = actual[loom_low_move_read(&move, j)->location];
+        }
+        for (uint32_t j = 0; j < access_count; ++j) {
+          actual[loom_low_move_write(&move, j)->location] = values[j];
+        }
+      }
+      ASSERT_EQ(actual, expected);
+    }
+  }
+  EXPECT_EQ(resolver.call_count, 0u);
+  EXPECT_EQ(scratch.temporaries, nullptr);
 }
 
 TEST(LowMoveSequenceTest, ReusesMemoryTemporaryAcrossCycles) {
@@ -540,6 +693,58 @@ TEST(LowMoveSequenceTest, ReusesBoundedSolverStorageAcrossIncreasingGroups) {
     }
     EXPECT_EQ(arena.arena()->used_allocation_size, storage_bytes);
     EXPECT_EQ(scratch.temporaries, nullptr);
+    EXPECT_EQ(scratch.cycle_indices, nullptr);
+  }
+}
+
+TEST(LowMoveSequenceTest, ReusesExchangeStorageForLongCyclesAndRegisterWidths) {
+  TestArena arena;
+  constexpr uint32_t kCapacity = 256;
+  loom_low_move_sequence_scratch_t scratch = {};
+  IREE_ASSERT_OK(loom_low_move_sequence_scratch_initialize(
+      arena.arena(), kCapacity, &scratch));
+  TemporaryResolver resolver = {};
+  loom_low_move_sequence_options_t options = {
+      .descriptor_set = ExchangeDescriptorSet(),
+      .resolve_temporary = {ResolveTemporary, &resolver},
+  };
+  loom_low_move_t output[kCapacity - 1] = {};
+  iree_host_size_t storage_bytes = 0;
+  for (uint32_t count = 2; count <= kCapacity; ++count) {
+    SCOPED_TRACE(count);
+    const uint16_t register_class = count % 2;
+    for (uint32_t i = 0; i < count; ++i) {
+      scratch.moves[i] = Move(i, (i + 1) % count, register_class);
+    }
+    iree_host_size_t output_count = 0;
+    bool complete = false;
+    IREE_ASSERT_OK(loom_low_move_sequence_resolve(
+        &scratch, count, &options, IREE_ARRAYSIZE(output), output,
+        &output_count, /*out_input_flags=*/nullptr, &complete));
+    ASSERT_TRUE(complete);
+    ASSERT_EQ(output_count, count - 1);
+    uint64_t values[kCapacity];
+    for (uint32_t i = 0; i < kCapacity; ++i) {
+      values[i] = UINT64_C(0x7ff8000080000000) | i;
+    }
+    for (iree_host_size_t i = 0; i < output_count; ++i) {
+      const auto& move = output[i];
+      ASSERT_EQ(move.kind, LOOM_LOW_MOVE_KIND_EXCHANGE);
+      EXPECT_EQ(move.destination.descriptor_reg_class_id, register_class);
+      EXPECT_EQ(move.source.descriptor_reg_class_id, register_class);
+      std::swap(values[move.destination.location],
+                values[move.source.location]);
+    }
+    for (uint32_t i = 0; i < kCapacity; ++i) {
+      EXPECT_EQ(values[i], UINT64_C(0x7ff8000080000000) |
+                               (i < count ? (i + 1) % count : i));
+    }
+    if (count == 2) {
+      storage_bytes = arena.arena()->used_allocation_size;
+    }
+    EXPECT_EQ(arena.arena()->used_allocation_size, storage_bytes);
+    EXPECT_EQ(scratch.temporaries, nullptr);
+    EXPECT_EQ(resolver.call_count, 0u);
   }
 }
 

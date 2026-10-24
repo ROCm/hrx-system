@@ -870,8 +870,9 @@ static iree_status_t loom_amdgpu_encode_s_mov_b32_register(
   return iree_ok_status();
 }
 
-static iree_status_t loom_amdgpu_encode_v_mov_b32_vgpr(
-    loom_amdgpu_encode_state_t* state, uint16_t vdst, uint16_t src0) {
+static iree_status_t loom_amdgpu_encode_vgpr_transfer(
+    loom_amdgpu_encode_state_t* state, uint16_t vdst, uint16_t src0,
+    loom_low_move_kind_t kind) {
   if (state->inputs.encoding_table == NULL) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -881,8 +882,12 @@ static iree_status_t loom_amdgpu_encode_v_mov_b32_vgpr(
   }
 
   loom_amdgpu_encoding_packet_t encoded_packet;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_encoding_pack_v_mov_b32_vgpr(
-      state->inputs.encoding_table, vdst, src0, &encoded_packet));
+  IREE_RETURN_IF_ERROR(
+      kind == LOOM_LOW_MOVE_KIND_EXCHANGE
+          ? loom_amdgpu_encoding_pack_v_swap_b32(state->inputs.encoding_table,
+                                                 vdst, src0, &encoded_packet)
+          : loom_amdgpu_encoding_pack_v_mov_b32_vgpr(
+                state->inputs.encoding_table, vdst, src0, &encoded_packet));
   loom_amdgpu_append_encoding_packet(state, &encoded_packet);
   return iree_ok_status();
 }
@@ -924,7 +929,7 @@ static iree_status_t loom_amdgpu_encode_v_mov_b32_u32(
 static iree_status_t loom_amdgpu_encode_vgpr_move_location(
     loom_amdgpu_encode_state_t* state,
     const loom_low_move_location_t* destination,
-    const loom_low_move_location_t* source) {
+    const loom_low_move_location_t* source, loom_low_move_kind_t kind) {
   const bool source_is_vgpr =
       source->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR;
   if (source_is_vgpr && destination->location == source->location) {
@@ -956,8 +961,8 @@ static iree_status_t loom_amdgpu_encode_vgpr_move_location(
       loom_amdgpu_encode_vgpr_msb_requirement(state, mask, value));
   if (source_is_vgpr) {
     const uint16_t source_low_register = (uint16_t)(source->location % window);
-    return loom_amdgpu_encode_v_mov_b32_vgpr(state, destination_low_register,
-                                             source_low_register);
+    return loom_amdgpu_encode_vgpr_transfer(state, destination_low_register,
+                                            source_low_register, kind);
   }
   return loom_amdgpu_encode_v_mov_b32_sgpr(
       state, destination_low_register, loom_amdgpu_move_location_sgpr(source));
@@ -998,7 +1003,8 @@ static iree_status_t loom_amdgpu_encode_move(
   if (destination->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR &&
       (source->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR ||
        source->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR)) {
-    return loom_amdgpu_encode_vgpr_move_location(state, destination, source);
+    return loom_amdgpu_encode_vgpr_move_location(state, destination, source,
+                                                 LOOM_LOW_MOVE_KIND_COPY);
   }
   if (destination->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR &&
       source->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
@@ -1197,7 +1203,11 @@ static iree_status_t loom_amdgpu_encode_move_range(
     const loom_low_move_t* move =
         &state->inputs.allocation->moves[move_range.start + i];
     IREE_RETURN_IF_ERROR(
-        loom_amdgpu_encode_move(state, &move->destination, &move->source));
+        move->kind == LOOM_LOW_MOVE_KIND_EXCHANGE
+            ? loom_amdgpu_encode_vgpr_move_location(state, &move->destination,
+                                                    &move->source, move->kind)
+            : loom_amdgpu_encode_move(state, &move->destination,
+                                      &move->source));
     IREE_RETURN_IF_ERROR(loom_amdgpu_encode_wait_states(
         state, &state->traversal.current_packet, (uint32_t)i + 1));
   }

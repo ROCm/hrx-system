@@ -125,8 +125,8 @@ class ParameterModuleTest : public ::testing::TestWithParam<uint32_t> {
     file.close();
     ASSERT_TRUE(file.good());
     const loom_serve_sources_t names = {.base_directory = IREE_SV(".")};
-    const auto path = paths_[domain].path_view();
-    const iree_string_view_list_t files = {1, &path};
+    const loom_model_file_t path = {paths_[domain].path_view(), {}};
+    const loom_model_file_list_t files = {1, &path};
     IREE_ASSERT_OK(loom_serve_parameter_sources_create(
         nullptr, &names, 1, &files, allocator_, &sources_));
     if (!module_) {

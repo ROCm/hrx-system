@@ -32,7 +32,8 @@ IREE_FLAG(string, model, "", "Activity model document.");
 IREE_FLAG(string, input, "", "Mono F32LE audio for learned qualification.");
 IREE_FLAG(string, reference, "", "Independent per-hop F32LE probabilities.");
 IREE_FLAG(string, transcription_model, "",
-          "Optional learned STT model document.");
+          "Transcription model document; required with deterministic fixture "
+          "inputs.");
 IREE_FLAG(string, expected_text, "", "Expected learned final transcript.");
 IREE_FLAG(int32_t, sample_rate, 16000, "Input audio sample rate.");
 IREE_FLAG(int32_t, stream_count, 4, "Independent membership histories.");
@@ -150,16 +151,15 @@ class NativeActivityTest : public ::testing::Test {
     }
     ASSERT_FALSE(samples_.empty());
     registration_.device_group = activity_environment->group();
-    model_count_ = FLAG_fixture || FLAG_transcription_model[0] ? 2 : 1;
+    ASSERT_TRUE(!FLAG_fixture || FLAG_transcription_model[0]);
+    model_count_ = FLAG_transcription_model[0] ? 2 : 1;
     IREE_ASSERT_OK(loom_serve_registry_allocate(
         0, nullptr, model_count_,
         loom_serve_model_registration_factory(&registration_), allocator_,
         &registry_));
     ASSERT_NO_FATAL_FAILURE(Register(FLAG_model, 0));
     if (model_count_ == 2) {
-      ASSERT_NO_FATAL_FAILURE(Register(
-          FLAG_transcription_model[0] ? FLAG_transcription_model : FLAG_model,
-          1));
+      ASSERT_NO_FATAL_FAILURE(Register(FLAG_transcription_model, 1));
     }
     IREE_ASSERT_OK(Until(
         [&] {
@@ -192,30 +192,15 @@ class NativeActivityTest : public ::testing::Test {
   void Register(const char* path, size_t role) {
     loom_serve_model_configuration_t configuration;
     IREE_ASSERT_OK(loom_serve_model_configuration_load(
-        iree_make_cstring_view(path), allocator_, &configuration));
-    auto status = iree_ok_status();
+        iree_make_cstring_view(path), iree_string_view_empty(), allocator_,
+        &configuration));
     if (FLAG_fixture) {
       configuration.device_index = role ? FLAG_fixture_transcription_device : 0;
-      if (role == 0) {
-        configuration.kind = LOOM_SERVE_MODEL_KIND_ACTIVITY;
-        const char name[] = "activity";
-        void* owned_name = nullptr;
-        status = iree_allocator_clone(
-            configuration.host_allocator,
-            iree_make_const_byte_span(name, sizeof(name)), &owned_name);
-        if (iree_status_is_ok(status)) {
-          iree_allocator_free(configuration.host_allocator,
-                              const_cast<char*>(configuration.name.data));
-          configuration.name =
-              iree_make_cstring_view(static_cast<const char*>(owned_name));
-        }
-      }
     }
     names_[role].assign(configuration.name.data, configuration.name.size);
     iree_host_size_t index = 0;
-    if (iree_status_is_ok(status)) {
-      status = loom_serve_registry_register(registry_, &configuration, &index);
-    }
+    auto status =
+        loom_serve_registry_register(registry_, &configuration, &index);
     loom_serve_model_configuration_deinitialize(&configuration);
     IREE_ASSERT_OK(status);
     EXPECT_EQ(index, role);

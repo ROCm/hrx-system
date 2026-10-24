@@ -1,0 +1,172 @@
+{
+  "$schema": "../model-card.v1.schema.json",
+  "schema_version": 1,
+  "model": {
+    "id": "moonshine-ai/moonshine-streaming-tiny",
+    "name": "Moonshine Streaming Tiny",
+    "description": "Streaming English speech recognition from 16 kHz mono audio.",
+    "origin": {
+      "kind": "hf",
+      "repository": "moonshine-ai/moonshine-streaming-tiny",
+      "revision": "f8e9dfd8c562c257c151a907b7b7f2fe8ff8511a"
+    },
+    "license": "MIT",
+    "implementation": {
+      "repository": "https://github.com/ROCm/hrx-system",
+      "revision": "61417137f334cfa828b38d6e9b0f2d7190503f16",
+      "path": "experimental/loom_serve/models/moonshine"
+    }
+  },
+  "programs": {
+    "development": {
+      "inputs": [
+        {
+          "path": "program/prepare.loom",
+          "origin": "@implementation/prepare.loom",
+          "data": [
+            {
+              "path": "program/weights.loom",
+              "origin": "@implementation/weights.loom"
+            }
+          ]
+        },
+        {
+          "path": "program/control.loom",
+          "origin": "@implementation/control.loom"
+        }
+      ],
+      "libraries": [
+        {
+          "path": "program/convolution.loom",
+          "origin": "@implementation/convolution.loom"
+        },
+        {
+          "path": "program/decoder.loom",
+          "origin": "@implementation/decoder.loom"
+        },
+        {
+          "path": "program/decoder_attention.loom",
+          "origin": "@implementation/decoder_attention.loom"
+        },
+        {
+          "path": "program/decoder_state.loom",
+          "origin": "@implementation/decoder_state.loom"
+        },
+        {
+          "path": "program/encoder.loom",
+          "origin": "@implementation/encoder.loom"
+        },
+        {
+          "path": "program/encoder_attention.loom",
+          "origin": "@implementation/encoder_attention.loom"
+        },
+        {
+          "path": "program/encoder_state.loom",
+          "origin": "@implementation/encoder_state.loom"
+        },
+        {
+          "path": "program/frontend.loom",
+          "origin": "@implementation/frontend.loom"
+        },
+        {
+          "path": "program/initialize.loom",
+          "origin": "@implementation/initialize.loom"
+        },
+        {
+          "path": "program/normalization.loom",
+          "origin": "@implementation/normalization.loom"
+        },
+        {
+          "path": "program/pointwise.loom",
+          "origin": "@implementation/pointwise.loom"
+        },
+        {
+          "path": "program/projection.loom",
+          "origin": "@implementation/projection.loom"
+        },
+        {
+          "path": "program/reset.loom",
+          "origin": "@implementation/reset.loom"
+        }
+      ],
+      "directory": "program"
+    }
+  },
+  "services": {
+    "transcription": {
+      "kind": "recognition",
+      "interface": {
+        "input": {
+          "encoding": "f32",
+          "sample_rate": 16000,
+          "channels": 1
+        },
+        "output": "revisable-transcript"
+      },
+      "constraints": {
+        "input_samples": 655360,
+        "encoder_positions": 2048,
+        "decoder_tokens": 512,
+        "resident_requests": 4
+      }
+    }
+  },
+  "variants": {
+    "original": {
+      "description": "Original trained F32 checkpoint.",
+      "services": {
+        "transcription": {
+          "programs": [
+            "development"
+          ],
+          "parameters": {
+            "model": {
+              "files": [
+                {
+                  "path": "asset/model.safetensors",
+                  "origin": "@checkpoint/model.safetensors"
+                }
+              ]
+            },
+            "rotary": {
+              "files": [
+                {
+                  "path": "asset/rotary.safetensors",
+                  "origin": {
+                    "kind": "inline",
+                    "base64": "QAAAAAAAAAB7ImludmVyc2UiOnsiZHR5cGUiOiJGMzIiLCJzaGFwZSI6WzE2XSwiZGF0YV9vZmZzZXRzIjpbMCw2NF19fSAgAACAP5r1Dz+b6KE+hxg2Ps3MzD3CVWY944YBPTmtkTwK1yM8nES4Ozg+TzsoFek6bxKDOhZqEzpgy6U5U3c6OQ=="
+                  }
+                }
+              ]
+            }
+          },
+          "tokenizers": {
+            "text": {
+              "path": "asset/text-vocabulary.data",
+              "origin": "@checkpoint/tokenizer.json",
+              "format": "huggingface-json"
+            }
+          }
+        }
+      }
+    }
+  },
+  "presets": {
+    "streaming": {
+      "variant": "original",
+      "programs": "development",
+      "service": "transcription"
+    }
+  },
+  "origins": {
+    "checkpoint": {
+      "kind": "hf",
+      "repository": "moonshine-ai/moonshine-streaming-tiny",
+      "revision": "f8e9dfd8c562c257c151a907b7b7f2fe8ff8511a"
+    },
+    "implementation": {
+      "kind": "url",
+      "url": "https://raw.githubusercontent.com/ROCm/hrx-system/61417137f334cfa828b38d6e9b0f2d7190503f16/experimental/loom_serve/models/moonshine/"
+    }
+  }
+}

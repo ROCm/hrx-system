@@ -751,14 +751,16 @@ static iree_status_t loom_serve_checkpoint_allocate(
       sizeof(*declaration->sources), &size);
   fits &= iree_host_size_checked_add(size, declaration->policy.size, &size);
   for (uint32_t i = 0; i < declaration->source_count && fits; ++i) {
-    const iree_string_view_list_t source = declaration->sources[i];
+    const loom_model_file_list_t source = declaration->sources[i];
     fits = iree_host_size_checked_add(shard_count, source.count, &shard_count);
     for (iree_host_size_t j = 0; j < source.count && fits; ++j) {
-      fits = iree_host_size_checked_add(size, source.values[j].size, &size);
+      fits =
+          iree_host_size_checked_add(size, source.values[j].path.size, &size) &&
+          iree_host_size_checked_add(size, source.values[j].format.size, &size);
     }
   }
   fits &= iree_host_size_checked_mul_add(size, shard_count,
-                                         sizeof(iree_string_view_t), &size);
+                                         sizeof(loom_model_file_t), &size);
   fits &= iree_host_size_checked_mul_add(size, declaration->source_count,
                                          sizeof(uint32_t), &size);
   if (!fits) {
@@ -769,9 +771,9 @@ static iree_status_t loom_serve_checkpoint_allocate(
   loom_serve_checkpoint_t* checkpoint = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(executables->host_allocator, size,
                                              (void**)&checkpoint));
-  iree_string_view_list_t* sources = (iree_string_view_list_t*)(checkpoint + 1);
-  iree_string_view_t* shards =
-      (iree_string_view_t*)(sources + declaration->source_count);
+  loom_model_file_list_t* sources = (loom_model_file_list_t*)(checkpoint + 1);
+  loom_model_file_t* shards =
+      (loom_model_file_t*)(sources + declaration->source_count);
   uint32_t* ordinals = (uint32_t*)(shards + shard_count);
   char* bytes = (char*)(ordinals + declaration->source_count);
   checkpoint->declaration = *declaration;
@@ -785,12 +787,19 @@ static iree_status_t loom_serve_checkpoint_allocate(
   bytes += declaration->policy.size;
   for (uint32_t i = 0; i < declaration->source_count; ++i) {
     sources[i] =
-        (iree_string_view_list_t){declaration->sources[i].count, shards};
+        (loom_model_file_list_t){declaration->sources[i].count, shards};
     for (iree_host_size_t j = 0; j < sources[i].count; ++j) {
-      const iree_string_view_t path = declaration->sources[i].values[j];
-      *shards++ = iree_make_string_view(bytes, path.size);
+      const loom_model_file_t file = declaration->sources[i].values[j];
+      const iree_string_view_t path = file.path;
+      shards->path = iree_make_string_view(bytes, path.size);
       memcpy(bytes, path.data, path.size);
       bytes += path.size;
+      shards->format = iree_make_string_view(bytes, file.format.size);
+      if (file.format.size) {
+        memcpy(bytes, file.format.data, file.format.size);
+      }
+      bytes += file.format.size;
+      ++shards;
     }
   }
   checkpoint->generation = choice->generation;
@@ -1022,7 +1031,7 @@ static void loom_serve_choice_index_execute(loomc_task_t* task,
                                             loomc_host_size_t worker) {
   loom_serve_choice_job_t* job = (loom_serve_choice_job_t*)task;
   loom_serve_choice_t* choice = job->choice;
-  const iree_string_view_list_t* paths = NULL;
+  const loom_model_file_list_t* paths = NULL;
   const uint32_t count =
       loom_serve_preparation_local_sources(choice->preparation, &paths);
   job->status = loom_serve_parameter_sources_create(

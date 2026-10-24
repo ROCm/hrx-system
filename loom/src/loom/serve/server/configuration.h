@@ -17,9 +17,12 @@ extern "C" {
 
 // Optional model-owned finite computation with independent preparation and
 // parameter residency. The enclosing deployment supplies the source package,
-// provider catalog, local path base and device. An empty prepare path means
-// absent; a present declaration owns all four strings.
+// provider catalog, local path base, and device. Presence is established by a
+// selected card contract or an authored prepare path. Options are owned; direct
+// declarations also own their program and asset locators.
 typedef struct loom_serve_finite_component_configuration_t {
+  // Borrowed role contract owned by sources.card; NULL for direct programs.
+  const loom_model_component_t* contract;
   // Owned cold VM program declaring component stages and parameter domains.
   iree_string_view_t prepare;
   // Owned warm VM program implementing the finite invocation contract.
@@ -98,6 +101,12 @@ typedef struct loom_serve_model_configuration_t {
   // Owned program paths, provider array/strings, local directory base, and
   // retained source package when registration supplied one.
   loom_serve_sources_t sources;
+  // Owned namespace after cold card resolution; sources borrows this value.
+  // NULL while a local card reference is pending or for direct declarations.
+  loom_serve_sources_t* resolved_sources;
+  // Owned deployment JSON while a card reference awaits cold resolution.
+  // Retains authored overrides until canonical defaults are available.
+  iree_string_view_t document;
   // Owned JSON object interpreted by the source prepare program.
   iree_string_view_t options;
   // Bounded host request credit. Text/speech/recognition exclude active model
@@ -123,15 +132,19 @@ typedef struct loom_serve_model_configuration_t {
   };
 } loom_serve_model_configuration_t;
 
-// Parses a complete {name, definition, device?, admission?, base_directory?}
-// model document. The definition owns kind, prepare/control paths, sources
-// array, modality-specific inputs/capacities, and source-owned options.
+// Parses a deployment with name, definition, optional model reference, device,
+// admission, and base_directory. A model reference selects a local portable
+// card. Its definition supplies kind and deployment overrides; cold resolution
+// supplies the program and asset closure and canonical preset defaults.
+// Direct definitions supply their own prepare/control paths, sources array,
+// modality-specific inputs/capacities, and source-owned options.
 // Unknown, duplicate, wrong-kind and invalid fields reject before any model
 // I/O. Admission defaults to "open"; "drained" defers preparation. Device
 // selection is a nonnegative group ordinal; membership is resolved separately.
-// document_directory supplies the local base for file input. HTTP passes an
-// empty base: filesystem references then require an explicit absolute
-// base_directory in the document. That explicit base overrides the file base.
+// document_directory supplies the local base for file input; a relative
+// base_directory resolves within it. HTTP passes an empty document directory:
+// relative filesystem references then require an explicit absolute base.
+// An absolute base_directory overrides the document directory.
 // package, when present, supplies a separate namespace for relative source and
 // metadata references; parameter checkpoints remain filesystem references.
 // All strings are copied and package is retained through deinitialization.
@@ -143,11 +156,24 @@ iree_status_t loom_serve_model_configuration_initialize(
 void loom_serve_model_configuration_deinitialize(
     loom_serve_model_configuration_t* model);
 
-// Reads one model document and supplies its directory to the shared parser.
+// Resolves a pending local card on a preparation worker, then reapplies the
+// authored deployment over its canonical execution defaults. Returns a wholly
+// independent declaration. The original remains owned by its registration.
+// Device binding is preserved; no device resources are created here.
+iree_status_t loom_serve_model_configuration_resolve(
+    const loom_serve_model_configuration_t* model,
+    iree_allocator_t host_allocator,
+    loom_serve_model_configuration_t* out_model);
+
+// Reads a model card or deployment document. A card uses its model identity as
+// the routing alias and its selected preset's canonical hosting defaults.
+// preset chooses among a card's named presets; empty requires an unambiguous
+// selection. Deployments own their selectors and reject a nonempty preset.
 // This cold file-I/O entry belongs on a startup thread or preparation worker,
 // never on the HTTP owner. No program or parameter payload is read here.
 iree_status_t loom_serve_model_configuration_load(
-    iree_string_view_t path, iree_allocator_t host_allocator,
+    iree_string_view_t path, iree_string_view_t preset,
+    iree_allocator_t host_allocator,
     loom_serve_model_configuration_t* out_model);
 
 // Resolves this deployment's device against the caller's immutable group size.

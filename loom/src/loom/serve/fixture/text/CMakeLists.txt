@@ -9,4 +9,192 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_TARGET_ARCH_VM)
+loom_module(
+  NAME
+    service_module
+  SRCS
+    "control.loom"
+    "prepare.loom"
+    "service.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_module(
+  NAME
+    control_module
+  SRCS
+    "control.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_module(
+  NAME
+    advance_module
+  SRCS
+    "advance.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+endif()
+
+iree_package_target_name(_FILEGROUP_TARGET "::native_card_assets")
+add_custom_command(OUTPUT native_card_assets.stamp
+    COMMAND ${CMAKE_COMMAND} -E touch native_card_assets.stamp
+  DEPENDS
+    "bias.data"
+    "metadata.safetensors"
+    "native.card.json"
+    "tokenizer.json"
+    "weights.loom"
+)
+
+add_custom_target(${_FILEGROUP_TARGET}
+    DEPENDS native_card_assets.stamp
+)
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/native_card_assets.stamp"
+)
+
+iree_package_target_name(_FILEGROUP_TARGET "::native_source_files")
+add_custom_command(OUTPUT native_source_files.stamp
+    COMMAND ${CMAKE_COMMAND} -E touch native_source_files.stamp
+  DEPENDS
+    "advance.loom"
+    "control.loom"
+    "native_card_assets.stamp"
+    "prepare.loom"
+    "service.loom"
+)
+
+add_custom_target(${_FILEGROUP_TARGET}
+    DEPENDS native_source_files.stamp
+)
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/native_source_files.stamp"
+)
+
+iree_package_target_name(_FILEGROUP_TARGET "::native_archive_files")
+add_custom_command(OUTPUT native_archive_files.stamp
+    COMMAND ${CMAKE_COMMAND} -E touch native_archive_files.stamp
+  DEPENDS
+    "advance_module.stamp"
+    "native_card_assets.stamp"
+    "service_module.stamp"
+)
+
+add_custom_target(${_FILEGROUP_TARGET}
+    DEPENDS native_archive_files.stamp
+)
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/native_archive_files.stamp"
+)
+
+iree_package_target_name(_FILEGROUP_TARGET "::native_mixed_files")
+add_custom_command(OUTPUT native_mixed_files.stamp
+    COMMAND ${CMAKE_COMMAND} -E touch native_mixed_files.stamp
+  DEPENDS
+    "advance_module.stamp"
+    "control_module.stamp"
+    "native_card_assets.stamp"
+    "prepare.loom"
+    "service.loom"
+)
+
+add_custom_target(${_FILEGROUP_TARGET}
+    DEPENDS native_mixed_files.stamp
+)
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/native_mixed_files.stamp"
+)
+
+iree_py_library(
+  NAME
+    parameters
+  MAIN
+    "parameters.py"
+  SRCS
+    "parameters.py"
+)
+
+if(LOOM_TARGET_ARCH_VM)
+loom_generated_file(
+  NAME
+    metadata_shard
+  GENERATOR
+    ::parameters
+  OUTPUT
+    "metadata.safetensors"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "--key=unused"
+    "--value=0"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_generated_file(
+  NAME
+    bias_shard
+  GENERATOR
+    ::parameters
+  OUTPUT
+    "bias.data"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "--key=bias"
+    "--value=2"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_generated_file(
+  NAME
+    partition_bias_shard
+  GENERATOR
+    ::parameters
+  OUTPUT
+    "alternate.data"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "--key=bias"
+    "--value=3"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_module(
+  NAME
+    multimodal
+  SRCS
+    "advance.loom"
+    "control.loom"
+    "prepare.loom"
+    "service.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/control.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/project.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/service.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/weighted_project.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

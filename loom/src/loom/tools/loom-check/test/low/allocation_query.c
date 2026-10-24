@@ -598,7 +598,8 @@ static iree_status_t loom_check_test_low_allocation_append_edge_moves(
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "move "));
     IREE_RETURN_IF_ERROR(loom_check_test_low_allocation_append_move_location(
         allocation, &move->destination, builder));
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, " <- "));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+        builder, move->kind == LOOM_LOW_MOVE_KIND_EXCHANGE ? " <-> " : " <- "));
     IREE_RETURN_IF_ERROR(loom_check_test_low_allocation_append_move_location(
         allocation, &move->source, builder));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));

@@ -119,8 +119,9 @@ iree_status_t loom_serve_text_control_initialize(
         source->environment, host_allocator, &libraries[4]);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_program_link(
-        source->module,
+    status = loom_serve_program_link_service(
+        source->module, loom_serve_preparation_card(source->preparation),
+        loom_serve_preparation_component(source->preparation),
         iree_vm_module_span_from_ptr(libraries, generates ? 5 : 4),
         host_allocator, &control->program);
   }

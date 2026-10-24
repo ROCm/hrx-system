@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "iree/base/internal/arena.h"
+#include "iree/hal/memory/heap_pool.h"
 #include "iree/tooling/device_flags.h"
 #include "loom/config/text_binding.h"
 #include "loom/ir/module.h"
@@ -219,6 +220,7 @@ iree_status_t loom_benchmark_run_file(
                                    allocator, &block_pool);
   loom_benchmark_artifact_bundle_t artifact_bundle = {0};
   loom_benchmark_file_provider_t file_provider = {0};
+  iree_hal_pool_t* host_pool = NULL;
   loom_benchmark_hal_context_t hal_context = {0};
   loom_benchmark_hal_context_initialize(options->configuration, allocator,
                                         &hal_context);
@@ -509,6 +511,18 @@ iree_status_t loom_benchmark_run_file(
     loom_testbench_case_execution_options_t execution_options = {0};
     loom_testbench_case_execution_options_initialize(&execution_options);
     execution_options.materializer.host_allocator = allocator;
+    if (iree_status_is_ok(status) && !benchmark_options->dry_run &&
+        !benchmark_options->compile_only) {
+      const iree_hal_pool_host_access_t host_access = {
+          .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+          .modes =
+              IREE_HAL_MAPPING_MODE_SCOPED | IREE_HAL_MAPPING_MODE_PERSISTENT,
+          .cacheability = IREE_HAL_HOST_CACHEABILITY_WRITE_BACK,
+      };
+      status = iree_hal_heap_pool_create(host_access, allocator, allocator,
+                                         &host_pool);
+      execution_options.materializer.target_pool = host_pool;
+    }
     execution_options.materializer.open_read_file =
         (loom_testbench_file_open_callback_t){
             .fn = loom_benchmark_open_file_for_read,
@@ -844,6 +858,7 @@ iree_status_t loom_benchmark_run_file(
   iree_arena_deinitialize(&execution_arena);
   iree_arena_deinitialize(&plan_arena);
   loom_benchmark_hal_context_deinitialize(&hal_context);
+  iree_hal_pool_release(host_pool);
   if (device_event_capture_initialized) {
     loom_testbench_device_event_capture_deinitialize(&device_event_capture);
   }

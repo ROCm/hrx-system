@@ -9,4 +9,46 @@
 
 iree_add_all_subdirs()
 
+iree_package_target_name(_FILEGROUP_TARGET "::activity_card")
+add_custom_command(OUTPUT activity_card.stamp
+    COMMAND ${CMAKE_COMMAND} -E touch activity_card.stamp
+  DEPENDS
+    "card_activity.stamp"
+)
+
+add_custom_target(${_FILEGROUP_TARGET}
+    DEPENDS activity_card.stamp
+)
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/activity_card.stamp"
+)
+
+iree_package_target_name(_FILEGROUP_TARGET "::transcription_card_text")
+add_custom_command(OUTPUT transcription_card_text.stamp
+    COMMAND ${CMAKE_COMMAND} -E touch transcription_card_text.stamp
+  DEPENDS
+    "card_model_text.stamp"
+)
+
+add_custom_target(${_FILEGROUP_TARGET}
+    DEPENDS transcription_card_text.stamp
+)
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
+  OUTPUTS
+    "${CMAKE_CURRENT_BINARY_DIR}/transcription_card_text.stamp"
+)
+
+if(LOOM_TARGET_ARCH_VM)
+loom_module(
+  NAME
+    generate_module
+  SRCS
+    "generate.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

@@ -31,13 +31,41 @@ typedef struct loom_low_move_location_t {
 static_assert(sizeof(loom_low_move_location_t) == 8,
               "physical unit locations must remain compact");
 
-// One physical move from an old source unit to a destination unit.
+enum loom_low_move_kind_e {
+  // Reads the source unit and overwrites the destination unit.
+  LOOM_LOW_MOVE_KIND_COPY = 0,
+  // Reads both units and exchanges their contents in one native operation.
+  LOOM_LOW_MOVE_KIND_EXCHANGE = 1,
+};
+typedef uint8_t loom_low_move_kind_t;
+
+// One synchronous physical transfer between allocation units.
 typedef struct loom_low_move_t {
-  // Unit overwritten by the move.
+  // Unit overwritten by the transfer, and also read by an exchange.
   loom_low_move_location_t destination;
-  // Unit read by the move.
+  // Unit read by the transfer, and also overwritten by an exchange.
   loom_low_move_location_t source;
+  // Copy or full-unit exchange semantics retained by allocation.
+  loom_low_move_kind_t kind;
 } loom_low_move_t;
+
+// Each transfer has the same number of reads and writes. An exchange's two
+// reads precede both writes at one native issue position.
+static inline uint32_t loom_low_move_access_count(const loom_low_move_t* move) {
+  return move->kind == LOOM_LOW_MOVE_KIND_EXCHANGE ? 2 : 1;
+}
+
+// Returns read |index|, which is less than loom_low_move_access_count(move).
+static inline const loom_low_move_location_t* loom_low_move_read(
+    const loom_low_move_t* move, uint32_t index) {
+  return index == 0 ? &move->source : &move->destination;
+}
+
+// Returns write |index|, which is less than loom_low_move_access_count(move).
+static inline const loom_low_move_location_t* loom_low_move_write(
+    const loom_low_move_t* move, uint32_t index) {
+  return index == 0 ? &move->destination : &move->source;
+}
 
 // Invocation-owned cell for a final synchronous transport temporary. Cells
 // are disjoint from each other, authored storage, and outgoing ABI packets.

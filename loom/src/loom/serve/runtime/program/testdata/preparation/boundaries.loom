@@ -10,6 +10,8 @@ func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
 
 func.decl import("prepare") @source_append(%source: i32, %directory: buffer, %path: buffer)
 
+func.decl import("prepare") @source_scope(%scope: buffer) -> (i32)
+
 func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
 
 func.decl import("prepare") @workspace_limit(%stage: i32, %bytes: i64)
@@ -309,6 +311,11 @@ func.def public @shared_source(%path: buffer) -> (i32) {
   func.call @parameter(%first, %c1, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
   func.call @parameter(%second, %c0, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
   func.call @source_append(%source, %directory, %policy) : (i32, buffer, buffer)
+  func.return %source : i32
+}
+
+func.def public @scoped_source(%scope: buffer) -> (i32) {
+  %source = func.call @source_scope(%scope) : (buffer) -> (i32)
   func.return %source : i32
 }
 

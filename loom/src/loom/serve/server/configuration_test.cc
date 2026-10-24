@@ -8,8 +8,11 @@
 
 #include <string>
 
+#include "iree/io/file_contents.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/testing/temp_file.h"
+#include "loom/model/card.h"
 
 namespace {
 
@@ -49,9 +52,122 @@ class ConfigurationTest : public ::testing::Test {
     return std::string(value.data, value.size);
   }
 
+  iree_status_t Load(const std::string& json,
+                     iree_string_view_t preset = iree_string_view_empty()) {
+    iree::testing::TempFilePath path("model-card", ".json");
+    IREE_RETURN_IF_ERROR(iree_io_file_contents_write(
+        path.path_view(), iree_make_const_byte_span(json.data(), json.size()),
+        iree_allocator_system()));
+    loom_serve_model_configuration_deinitialize(&model_);
+    iree_status_t status = loom_serve_model_configuration_load(
+        path.path_view(), preset, iree_allocator_system(), &model_);
+    EXPECT_TRUE(path.Remove());
+    return status;
+  }
+
   // Owned declaration independent of parser input lifetime.
   loom_serve_model_configuration_t model_ = {};
 };
+
+std::string Card(const std::string& kind, int version = 1,
+                 const std::string& identity = "publisher/model") {
+  return R"({"schema_version":1,"model":{"id":")" + identity +
+         R"(","name":"A readable model name"},
+    "programs":{"mixed":{"inputs":["absent.loom","absent.loombc"],"libraries":[]}},
+    "services":{"serve":{"kind":")" +
+         kind + R"(","version":)" + std::to_string(version) +
+         R"(,"options":["batch_units"]}},
+    "variants":{"original":{"services":{"serve":{"programs":["mixed"]}}}},
+    "presets":{"interactive":{"service":"serve","variant":"original",
+      "programs":"mixed","options":{"batch_units":64},
+      "execution":{"pending_requests":7}}}})";
+}
+
+class CardConfigurationTest
+    : public ConfigurationTest,
+      public ::testing::WithParamInterface<const char*> {};
+
+TEST_P(CardConfigurationTest, DirectCardOwnsPresetWithoutReadingPrograms) {
+  auto json = Card(GetParam());
+  IREE_ASSERT_OK(Load(json));
+  json.assign(json.size(), 'x');
+  EXPECT_EQ(String(model_.name), "publisher/model");
+  EXPECT_EQ(model_.device_index, IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(model_.pending_requests, 7u);
+  EXPECT_EQ(String(model_.options), R"({"batch_units":64})");
+  ASSERT_NE(model_.resolved_sources, nullptr);
+  ASSERT_NE(model_.sources.card, nullptr);
+  const auto* selection = loom_model_card_selection(model_.sources.card);
+  EXPECT_EQ(String(selection->kind), GetParam());
+  EXPECT_EQ(String(selection->selector.preset), "interactive");
+  EXPECT_EQ(selection->inputs.count, 2u);
+  EXPECT_EQ(String(selection->inputs.values[0].file.path), "absent.loom");
+  EXPECT_EQ(model_.sources.reference.path.size, 0u);
+  EXPECT_EQ(model_.document.size, 0u);
+  EXPECT_FALSE(model_.start_drained);
+}
+
+TEST_P(CardConfigurationTest, DirectCardRejectsUnsupportedAbiBeforeProgramIo) {
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED, Load(Card(GetParam(), 2)));
+  EXPECT_EQ(model_.sources.card, nullptr);
+  EXPECT_EQ(model_.name.data, nullptr);
+}
+
+INSTANTIATE_TEST_SUITE_P(NativeServices, CardConfigurationTest,
+                         ::testing::Values("text", "sequence", "image",
+                                           "embedding", "decision", "speech",
+                                           "recognition", "activity"));
+
+TEST_F(ConfigurationTest,
+       DirectCardSelectsNamedPresetAndPreservesDecodedIdentity) {
+  IREE_ASSERT_OK(
+      Load(Card("text", 1, R"(publisher/a\\b)"), IREE_SV("interactive")));
+  EXPECT_EQ(String(model_.name), R"(publisher/a\b)");
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        Load(Card("text"), IREE_SV("absent")));
+  EXPECT_EQ(model_.name.data, nullptr);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Load(Card("text", 1, "invalid alias")));
+  EXPECT_EQ(model_.sources.card, nullptr);
+}
+
+TEST_F(ConfigurationTest, DeploymentOwnsItsPresetSelection) {
+  IREE_ASSERT_OK(Load(Text()));
+  EXPECT_EQ(String(model_.name), "scout");
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Load(Text(), IREE_SV("interactive")));
+  EXPECT_EQ(model_.name.data, nullptr);
+}
+
+TEST_F(ConfigurationTest, DirectCardRetainsLazyImageContractAndDefaults) {
+  auto json = Card("text");
+  json.insert(json.find("\"version\":1"),
+              R"("components":{"image":{"version":1,"options":["patches"]}},)");
+  json.insert(
+      json.find("\"execution\""),
+      R"("components":{"image":{"options":{"patches":4},"execution":{"specialization_cache":{"capacity":3}}}},)");
+  IREE_ASSERT_OK(Load(json));
+  ASSERT_NE(model_.text.image.contract, nullptr);
+  EXPECT_EQ(String(model_.text.image.contract->export_prefix), "text_image");
+  EXPECT_EQ(String(model_.text.image.options), R"({"patches":4})");
+  EXPECT_EQ(model_.text.image.specialization_cache.capacity, 3u);
+  EXPECT_EQ(model_.text.image.prepare.size, 0u);
+  EXPECT_EQ(model_.text.image.assets.size, 0u);
+}
+
+TEST_F(ConfigurationTest, UnsupportedComponentsFailBeforeProgramIo) {
+  for (const char* declaration :
+       {R"({"audio":{"version":1}})", R"({"image":{"version":2}})"}) {
+    auto json = Card("text");
+    json.insert(json.find("\"version\":1"),
+                std::string("\"components\":") + declaration + ",");
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED, Load(json));
+    EXPECT_EQ(model_.sources.card, nullptr);
+  }
+  auto json = Card("speech");
+  json.insert(json.find("\"version\":1"), R"("components":{"image":{}},)");
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED, Load(json));
+}
 
 TEST_F(ConfigurationTest, OwnsAuthoredPathsAndBaseSeparately) {
   auto json =
@@ -119,6 +235,29 @@ TEST_F(ConfigurationTest, SequenceRequiresWeightsButNoTokenizerOrSampler) {
         Parse(Document("sequence",
                        std::string(R"(,"weights":"model.irpa")") + field)));
     EXPECT_EQ(model_.name.data, nullptr);
+  }
+}
+
+TEST_F(ConfigurationTest, CardReferenceOwnsItsPartitionSelection) {
+  std::string json = R"({"name":"part","model":{"path":"model.json",
+    "variant":"small","partition":"node-1"},"definition":{"kind":"text"}})";
+  IREE_ASSERT_OK(Parse(json));
+  json.assign(json.size(), 'x');
+  EXPECT_EQ(String(model_.sources.reference.selector.partition), "node-1");
+}
+
+TEST_F(ConfigurationTest, ImageCardRejectsDeploymentAssetAndAdapterPaths) {
+  const std::string prefix =
+      R"({"name":"pixels","model":{"path":"model.json"},
+        "definition":{"kind":"image")";
+  IREE_ASSERT_OK(Parse(prefix + "}}"));
+  EXPECT_EQ(model_.image.checkpoint.size, 0u);
+  EXPECT_EQ(model_.image.adapter.size, 0u);
+  for (const char* field :
+       {R"(,"checkpoint":"weights")", R"(,"adapter":"adapter.safetensors")"}) {
+    SCOPED_TRACE(field);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          Parse(prefix + field + "}}"));
   }
 }
 
@@ -356,7 +495,17 @@ TEST_F(ConfigurationTest, HttpRelativePathsRequireAnExplicitBase) {
                         Parse(Document("embedding", R"(,"assets":".")"), {}));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse(Document("embedding", R"(,"assets":".")",
-                                       R"(,"base_directory":"relative")")));
+                                       R"(,"base_directory":"relative")"),
+                              {}));
+}
+
+TEST_F(ConfigurationTest, RelativeBaseUsesTheContainingDocumentDirectory) {
+  IREE_ASSERT_OK(Parse(Document("embedding", R"(,"assets":".")",
+                                R"(,"base_directory":"program/model")")));
+  EXPECT_EQ(String(model_.sources.base_directory),
+            "models/local/program/model");
+  EXPECT_EQ(String(model_.sources.prepare), "boot.loombc");
+  EXPECT_EQ(String(model_.assets), ".");
 }
 
 TEST_F(ConfigurationTest,

@@ -1,0 +1,137 @@
+{
+  "$schema": "../../../../../py/loom/model/model-card.v1.schema.json",
+  "schema_version": 1,
+  "model": {
+    "id": "loom-fixture/text-image",
+    "name": "Weighted text and image projector fixture"
+  },
+  "programs": {
+    "source": {
+      "inputs": [
+        {
+          "path": "prepare.loom",
+          "data": [
+            "weights.loom"
+          ]
+        },
+        "control.loom",
+        "service.loom",
+        "image/service.loom",
+        "image/control.loom"
+      ],
+      "libraries": [
+        "advance.loom",
+        "image/project.loom",
+        "image/weighted_project.loom"
+      ],
+      "config": {
+        "fixture.bias_delta": 7
+      }
+    },
+    "archive": {
+      "inputs": [
+        {
+          "path": "multimodal.loombc",
+          "data": [
+            "weights.loom"
+          ]
+        }
+      ],
+      "libraries": []
+    },
+    "mixed": {
+      "inputs": [
+        {
+          "path": "prepare.loom",
+          "data": [
+            "weights.loom"
+          ]
+        },
+        "service.loom",
+        "control_module.loombc",
+        "image/service.loom",
+        "image/control.loom"
+      ],
+      "libraries": [
+        "advance_module.loombc",
+        "image/project.loom",
+        "image/weighted_project.loom"
+      ]
+    }
+  },
+  "services": {
+    "chat": {
+      "kind": "text",
+      "version": 1,
+      "components": {
+        "image": {
+          "version": 1
+        }
+      }
+    }
+  },
+  "variants": {
+    "fixture": {
+      "services": {
+        "chat": {
+          "programs": [
+            "source",
+            "archive",
+            "mixed"
+          ],
+          "config": {
+            "fixture.card": true,
+            "fixture.bias_delta": 0
+          },
+          "parameters": {
+            "model": {
+              "files": [
+                "metadata.safetensors",
+                {
+                  "path": "bias.data",
+                  "format": "safetensors"
+                }
+              ]
+            },
+            "vision": {
+              "files": [
+                {
+                  "path": "bias.data",
+                  "format": "safetensors"
+                }
+              ]
+            }
+          },
+          "tokenizers": {
+            "text": "tokenizer.json"
+          }
+        }
+      }
+    }
+  },
+  "presets": {
+    "check": {
+      "service": "chat",
+      "variant": "fixture",
+      "programs": "source",
+      "execution": {
+        "rows": 4,
+        "context_capacity": 96,
+        "pool_capacity": 256,
+        "prefill_capacity": 32,
+        "max_tokens": 16,
+        "checkpoint_capacity": 2,
+        "draft_depth": 0
+      },
+      "components": {
+        "image": {
+          "execution": {
+            "specialization_cache": {
+              "capacity": 3
+            }
+          }
+        }
+      }
+    }
+  }
+}

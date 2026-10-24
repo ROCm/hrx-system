@@ -10,6 +10,7 @@
 
 #include "iree/base/threading/mutex.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
+#include "loom/model/card.h"
 #include "loomc/iree.h"
 
 struct loom_serve_tokenizer_load_t {
@@ -67,7 +68,7 @@ static const loomc_task_vtable_t tokenizer_load_vtable = {
     .destroy = loom_serve_tokenizer_load_release,
 };
 
-iree_status_t loom_serve_tokenizer_load_start(
+static iree_status_t loom_serve_tokenizer_load_schedule(
     loomc_task_sink_t sink, const loom_serve_sources_t* sources,
     iree_string_view_t locator, void (*wake)(void* user_data), void* user_data,
     iree_allocator_t host_allocator, loom_serve_tokenizer_load_t** out_load) {
@@ -94,6 +95,48 @@ iree_status_t loom_serve_tokenizer_load_start(
     iree_slim_mutex_deinitialize(&load->mutex);
     iree_allocator_free(host_allocator, load);
   }
+  return status;
+}
+
+iree_status_t loom_serve_tokenizer_load_start(
+    loomc_task_sink_t sink, const loom_serve_sources_t* sources,
+    iree_string_view_t directory, iree_string_view_t name,
+    void (*wake)(void* user_data), void* user_data,
+    iree_allocator_t host_allocator, loom_serve_tokenizer_load_t** out_load) {
+  *out_load = NULL;
+  if (sources->card) {
+    const loom_model_tokenizer_t* tokenizer = loom_model_selection_tokenizer(
+        loom_model_card_selection(sources->card), name);
+    if (!tokenizer) {
+      return iree_make_status(IREE_STATUS_NOT_FOUND,
+                              "model does not declare tokenizers.%.*s",
+                              (int)name.size, name.data);
+    }
+    const loom_model_file_t* file = &tokenizer->file;
+    if ((file->format.size &&
+         !iree_string_view_equal(file->format, IREE_SV("huggingface-json"))) ||
+        (!file->format.size &&
+         !iree_string_view_ends_with(file->path, IREE_SV(".json")))) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "tokenizers.%.*s requires huggingface-json format; specify format "
+          "for a renamed file",
+          (int)name.size, name.data);
+    }
+    return loom_serve_tokenizer_load_schedule(
+        sink, sources, file->path, wake, user_data, host_allocator, out_load);
+  }
+  if (iree_string_view_is_empty(directory)) {
+    return loom_serve_tokenizer_load_schedule(
+        sink, sources, name, wake, user_data, host_allocator, out_load);
+  }
+  char* path = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_path_resolve(directory, name, host_allocator, &path));
+  iree_status_t status = loom_serve_tokenizer_load_schedule(
+      sink, sources, iree_make_cstring_view(path), wake, user_data,
+      host_allocator, out_load);
+  iree_allocator_free(host_allocator, path);
   return status;
 }
 

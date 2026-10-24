@@ -22,9 +22,13 @@
 
 IREE_FLAG_LIST(
     string, model,
-    "Model JSON document; repeat to register multiple models. "
+    "Model card or serving deployment JSON; repeat to register multiple "
+    "models. "
     "Omit to start empty. Relative arguments use the working directory; "
     "paths within each document use its directory.");
+IREE_FLAG(string, preset, "",
+          "Named preset for a single --model card. Fetched cards retain their "
+          "selected preset. Deployment documents select their own presets.");
 IREE_FLAG(int32_t, model_capacity, 32,
           "Maximum registered models, including drained, failed and removing "
           "entries.");
@@ -94,9 +98,15 @@ static int loom_serve_main_agents_markdown(void) {
              "`--device=amdgpu:?feedback`. Combine services with `&`; "
              "address-sanitized devices require fixed backing.\n\n"
              "## Register models\n\n"
-             "Repeated `--model=path/model.json` values register startup "
-             "deployments. Omitting them starts an empty server. The same "
-             "JSON object is accepted by `POST /v1/models/register`: "
+             "Pass a fetched model card with `--model=path/model.json`. "
+             "Its model ID becomes the request's model name, and its selected "
+             "preset supplies the service and execution settings. A card with "
+             "several presets requires `--preset=NAME` with one `--model`. "
+             "Programs and weights are prepared on workers.\n\n"
+             "Repeated `--model` values register multiple cards or serving "
+             "deployments. Omitting them starts an empty server. A deployment "
+             "supplies routing aliases, device placement, and execution "
+             "overrides. `POST /v1/models/register` accepts deployment JSON: "
              "`name`, `definition`, and optional `device`, `admission` and "
              "`base_directory`. Admission defaults to `open`; `drained` "
              "registers metadata without loading programs or weights.\n\n"
@@ -229,7 +239,12 @@ int loom_serve_main(int argc, char** argv,
   const iree_flag_string_list_t models = FLAG_model_list();
   loom_serve_model_configuration_t* configurations = NULL;
   iree_status_t status = iree_ok_status();
-  if (models.count > (iree_host_size_t)FLAG_model_capacity) {
+  if (FLAG_preset[0] && models.count != 1) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "--preset requires exactly one --model card");
+  }
+  if (iree_status_is_ok(status) &&
+      models.count > (iree_host_size_t)FLAG_model_capacity) {
     status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "startup models exceed model_capacity");
   }
@@ -241,7 +256,8 @@ int loom_serve_main(int argc, char** argv,
   for (iree_host_size_t i = 0; i < models.count && iree_status_is_ok(status);
        ++i) {
     status = loom_serve_model_configuration_load(
-        models.values[i], host_allocator, &configurations[i]);
+        models.values[i], iree_make_cstring_view(FLAG_preset), host_allocator,
+        &configurations[i]);
   }
   if (iree_status_is_ok(status)) {
     status = iree_async_signal_block_default();

@@ -530,13 +530,13 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     preparation.weights = plan;
     preparation.host = loom_serve_device_host(device_owner_);
     preparation.jit = jit_;
-    std::vector<std::vector<iree_string_view_t>> shards;
-    std::vector<iree_string_view_list_t> checkpoints;
+    std::vector<std::vector<loom_model_file_t>> shards;
+    std::vector<loom_model_file_list_t> checkpoints;
     std::vector<uint32_t> ordinals;
     for (const auto& source : sources) {
       auto& paths = shards.emplace_back();
       for (const auto& path : source) {
-        paths.push_back(iree_make_cstring_view(path.c_str()));
+        paths.push_back({iree_make_cstring_view(path.c_str()), {}});
       }
       checkpoints.push_back({paths.size(), paths.data()});
       ordinals.push_back(static_cast<uint32_t>(ordinals.size()));

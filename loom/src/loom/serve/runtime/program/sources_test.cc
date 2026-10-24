@@ -30,6 +30,7 @@ TEST(SourcesTest, CloneOwnsAllLocatorsInOneAllocation) {
   std::string control = "control.loom";
   std::string first = "../shared/first.loom";
   std::string second = "/models/second.loom";
+  std::string partition = "node-1";
   iree_string_view_t providers[] = {iree_make_cstring_view(first.c_str()),
                                     iree_make_cstring_view(second.c_str())};
   const loom_serve_sources_t sources = {
@@ -38,11 +39,18 @@ TEST(SourcesTest, CloneOwnsAllLocatorsInOneAllocation) {
       .control = iree_make_cstring_view(control.c_str()),
       .count = IREE_ARRAYSIZE(providers),
       .values = providers,
+      .reference =
+          {
+              .selector =
+                  {
+                      .partition = iree_make_cstring_view(partition.c_str()),
+                  },
+          },
   };
   loom_serve_sources_t* copy = nullptr;
   IREE_ASSERT_OK(loom_serve_sources_clone(&sources, allocator, &copy));
   EXPECT_EQ(allocations, 1u);
-  for (auto* text : {&base, &prepare, &control, &first, &second}) {
+  for (auto* text : {&base, &prepare, &control, &first, &second, &partition}) {
     text->assign(text->size(), '?');
   }
   providers[0] = {};
@@ -56,6 +64,7 @@ TEST(SourcesTest, CloneOwnsAllLocatorsInOneAllocation) {
   ASSERT_EQ(copy->count, 2u);
   EXPECT_EQ(string(copy->values[0]), "../shared/first.loom");
   EXPECT_EQ(string(copy->values[1]), "/models/second.loom");
+  EXPECT_EQ(string(copy->reference.selector.partition), "node-1");
   loom_serve_sources_free(copy, allocator);
 }
 

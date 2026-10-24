@@ -31,7 +31,7 @@ typedef struct loom_serve_parameter_sources_t loom_serve_parameter_sources_t;
 // catalog-imposed concurrency limit; actual queue/backend credits bound I/O.
 iree_status_t loom_serve_parameter_sources_create(
     loom_serve_parameter_sources_t* prefix, const loom_serve_sources_t* sources,
-    uint32_t count, const iree_string_view_list_t* paths,
+    uint32_t count, const loom_model_file_list_t* paths,
     iree_allocator_t host_allocator,
     loom_serve_parameter_sources_t** out_sources);
 void loom_serve_parameter_sources_retain(

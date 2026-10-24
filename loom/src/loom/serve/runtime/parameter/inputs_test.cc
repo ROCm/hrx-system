@@ -34,11 +34,12 @@ class WeightInputsTest : public ::testing::Test {
     WriteCheckpoint(second_.path(),
                     R"({"shape":[8],"dtype":"BF16","data_offsets":[0,16]})",
                     16);
-    const iree_string_view_t paths[] = {
-        iree_make_cstring_view(first_.path().c_str()),
-        iree_make_cstring_view(second_.path().c_str())};
-    const iree_string_view_list_t checkpoints[] = {{1, &paths[0]},
-                                                   {1, &paths[1]}};
+    const loom_model_file_t paths[] = {
+        {iree_make_cstring_view(first_.path().c_str()), {}},
+        {iree_make_cstring_view(second_.path().c_str()),
+         IREE_SV("safetensors")}};
+    const loom_model_file_list_t checkpoints[] = {{1, &paths[0]},
+                                                  {1, &paths[1]}};
     IREE_ASSERT_OK(loom_serve_parameter_sources_create(
         nullptr, &sources_, 2, checkpoints, allocator_, &catalog_));
     const uint32_t ordinals[] = {0, 1};
@@ -146,7 +147,7 @@ class WeightInputsTest : public ::testing::Test {
   // Input checkpoints, removed after index/file ownership has retired.
   iree::testing::TempFilePath first_{"weight_input_first", ".safetensors"};
   // Independent source with the same tensor name and different metadata.
-  iree::testing::TempFilePath second_{"weight_input_second", ".safetensors"};
+  iree::testing::TempFilePath second_{"weight_input_second", ".data"};
   // Owned indexes and captured ranges, outliving every borrowed VM buffer.
   loom_serve_weight_inputs_t* inputs_ = nullptr;
   // Shared immutable source catalog, independent of the selected input recipe.

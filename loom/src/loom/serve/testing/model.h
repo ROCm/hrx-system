@@ -46,7 +46,8 @@ class ModelDocument {
   iree_status_t Load(const std::string& path) {
     loom_serve_model_configuration_deinitialize(&value_);
     return loom_serve_model_configuration_load(
-        iree_make_cstring_view(path.c_str()), iree_allocator_system(), &value_);
+        iree_make_cstring_view(path.c_str()), iree_string_view_empty(),
+        iree_allocator_system(), &value_);
   }
 
   const loom_serve_model_configuration_t& value() const { return value_; }

@@ -29,6 +29,13 @@ iree_status_t iree_tooling_append_parameter_file_to_index(
     iree_string_view_t path, iree_io_parameter_index_t* index,
     iree_allocator_t host_allocator);
 
+// Appends one file with an explicit archive format (irpa, gguf, safetensors),
+// independent of its local filename. Empty format uses ordinary path inference
+// and safetensors manifest expansion. Uses the same --parameter_mode policy.
+iree_status_t iree_tooling_append_parameter_file_to_index_with_format(
+    iree_string_view_t path, iree_string_view_t format,
+    iree_io_parameter_index_t* index, iree_allocator_t host_allocator);
+
 // Populates |scope_map| with parameter indices as specified by flags.
 iree_status_t iree_tooling_build_parameter_indices_from_flags(
     iree_io_scope_map_t* scope_map);

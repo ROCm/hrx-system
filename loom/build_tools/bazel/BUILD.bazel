@@ -34,6 +34,7 @@ exports_files([
     "loom_corpus_execution.bzl",
     "loom_library.bzl",
     "loom_linking.bzl",
+    "loom_model.bzl",
     "loom_module.bzl",
     "loom_target_profile.bzl",
     "loom_toolchain.bzl",

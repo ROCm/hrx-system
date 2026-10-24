@@ -1,0 +1,126 @@
+{
+  "$schema": "../../../../../py/loom/model/model-card.v1.schema.json",
+  "schema_version": 1,
+  "model": {
+    "id": "loom-fixture/parameter-swatch",
+    "name": "Streaming parameter swatch fixture"
+  },
+  "origins": {
+    "checkpoint": {
+      "kind": "hf",
+      "repository": "loom-fixture/weights",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "programs": {
+    "source": {
+      "inputs": [
+        {
+          "path": "prepare.loom",
+          "data": [
+            "weights.loom"
+          ]
+        },
+        "control.loom",
+        "service.loom"
+      ],
+      "libraries": [
+        "advance.loom"
+      ],
+      "config": {
+        "fixture.bias_delta": 7
+      }
+    }
+  },
+  "services": {
+    "chat": {
+      "kind": "text",
+      "version": 1
+    }
+  },
+  "variants": {
+    "full": {
+      "services": {
+        "chat": {
+          "programs": [
+            "source"
+          ],
+          "config": {
+            "fixture.card": true,
+            "fixture.bias_delta": 1
+          },
+          "parameters": {
+            "model": {
+              "files": [
+                "metadata.safetensors",
+                {
+                  "path": "bias.data",
+                  "format": "safetensors",
+                  "origin": "@checkpoint/source.safetensors",
+                  "transform": {
+                    "kind": "safetensors",
+                    "version": 1,
+                    "alignment": 4096
+                  }
+                }
+              ]
+            }
+          },
+          "tokenizers": {
+            "text": "tokenizer.json"
+          }
+        }
+      }
+    },
+    "swatch": {
+      "services": {
+        "chat": {
+          "programs": [
+            "source"
+          ],
+          "config": {
+            "fixture.card": true,
+            "fixture.bias_delta": 1
+          },
+          "parameters": {
+            "model": {
+              "files": [
+                "metadata.safetensors",
+                {
+                  "path": "bias.data",
+                  "format": "safetensors",
+                  "origin": "@checkpoint/source.safetensors",
+                  "transform": {
+                    "kind": "safetensors",
+                    "version": 1,
+                    "alignment": 4096,
+                    "tensors": [
+                      "bias"
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "tokenizers": {
+            "text": "tokenizer.json"
+          }
+        }
+      }
+    }
+  },
+  "presets": {
+    "check": {
+      "service": "chat",
+      "variant": "swatch",
+      "programs": "source",
+      "execution": {
+        "rows": 4,
+        "context_capacity": 96,
+        "pool_capacity": 256,
+        "prefill_capacity": 32,
+        "max_tokens": 16
+      }
+    }
+  }
+}

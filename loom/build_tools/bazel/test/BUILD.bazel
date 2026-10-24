@@ -45,6 +45,16 @@ load(
 
 package(default_visibility = ["//visibility:public"])
 
+constraint_setting(
+    name = "source_provider",
+    default_constraint_value = ":source_provider_available",
+)
+
+constraint_value(
+    name = "source_provider_available",
+    constraint_setting = ":source_provider",
+)
+
 loom_amdgpu_target_profile(
     name = "test_amdgpu_profile",
     target = "gfx942",
@@ -171,7 +181,22 @@ loom_test_module(
         "profile_cases.loom",
     ],
     tags = ["manual"],
+    target_compatible_with = [":source_provider_available"],
     deps = [":library_dependency"],
+)
+
+loom_test(
+    name = "direct_source_test",
+    srcs = ["profile_cases.loom"],
+    execution_profiles = [
+        REFERENCE_PROFILE,
+        SERIALIZED_REFERENCE_PROFILE,
+    ],
+    target_compatible_with = [":source_provider_available"],
+    variants = {
+        "all": {},
+        "selected": {"case": "scalar_case"},
+    },
 )
 
 loom_test(
@@ -363,6 +388,7 @@ sh_test(
 test_suite(
     name = "test",
     tests = [
+        ":direct_source_test",
         ":kernel_binary_direct_test",
         ":kernel_binary_linked_module_test",
         ":library_launcher_test",
@@ -375,6 +401,7 @@ test_suite(
         ":loom_library_rules_tests",
         ":loom_module_direct_test",
         ":loom_target_profile_rules_tests",
+        ":profiled_module_test",
         ":profiled_test",
         ":public_kernel_library_test",
         ":relocatable_library_direct_test",

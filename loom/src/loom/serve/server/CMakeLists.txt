@@ -205,6 +205,25 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    model_resolution
+  HDRS
+    "model_resolution.h"
+  SRCS
+    "model_resolution.c"
+  DEPS
+    ::configuration
+    iree::base
+    iree::base::threading
+    loom::binding::c::loomc
+    loom::binding::c::task_pool
+    loom::serve::runtime::host::wake
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     registry
   HDRS
     "registry.h"
@@ -212,6 +231,7 @@ loom_cc_library(
     "registry.c"
   DEPS
     ::configuration
+    ::model_resolution
     iree::base
     loom::serve::runtime::host::clock
     loom::serve::runtime::host::wake
@@ -226,6 +246,28 @@ loom_cc_library(
     loom::serve::telemetry::stream
     loom::serve::telemetry::tracing
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    model_resolution_test
+  SRCS
+    "model_resolution_test.cc"
+  DEPS
+    ::configuration
+    ::model_resolution
+    ::registry
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::binding::c::task_pool
+    loom::model::card
+    loom::serve::runtime::program::package
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
 )
 endif()
 
@@ -364,8 +406,11 @@ loom_cc_test(
   DEPS
     ::configuration
     iree::base
+    iree::io::file_handle
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::testing::temp_file
+    loom::model::card
   LABELS
     "iree-build-requirement=loom.target.arch.vm"
 )

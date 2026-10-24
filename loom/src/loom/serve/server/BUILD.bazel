@@ -187,11 +187,26 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "model_resolution",
+    srcs = ["model_resolution.c"],
+    hdrs = ["model_resolution.h"],
+    deps = [
+        ":configuration",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c:task_pool",
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+loom_cc_library(
     name = "registry",
     srcs = ["registry.c"],
     hdrs = ["registry.h"],
     deps = [
         ":configuration",
+        ":model_resolution",
         "//loom/src/loom/serve/runtime/host:clock",
         "//loom/src/loom/serve/runtime/host:wake",
         "//loom/src/loom/serve/runtime/parameter:activation",
@@ -205,6 +220,23 @@ loom_cc_library(
         "//loom/src/loom/serve/telemetry:stream",
         "//loom/src/loom/serve/telemetry:tracing",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "model_resolution_test",
+    srcs = ["model_resolution_test.cc"],
+    deps = [
+        ":configuration",
+        ":model_resolution",
+        ":registry",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c:task_pool",
+        "//loom/src/loom/model:card",
+        "//loom/src/loom/serve/runtime/program:package",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -329,8 +361,11 @@ loom_cc_test(
     srcs = ["configuration_test.cc"],
     deps = [
         ":configuration",
+        "//loom/src/loom/model:card",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
     ],
 )

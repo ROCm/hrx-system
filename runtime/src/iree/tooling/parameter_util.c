@@ -85,8 +85,8 @@ IREE_FLAG_LIST(
 
 // Appends one ordinary parameter file located at |path| to |index|.
 static iree_status_t iree_tooling_append_single_parameter_file_to_index(
-    iree_string_view_t path, iree_io_parameter_index_t* index,
-    iree_allocator_t host_allocator) {
+    iree_string_view_t path, iree_string_view_t format,
+    iree_io_parameter_index_t* index, iree_allocator_t host_allocator) {
   IREE_ASSERT_ARGUMENT(index);
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -95,9 +95,9 @@ static iree_status_t iree_tooling_append_single_parameter_file_to_index(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_io_open_parameter_file(path, host_allocator, &file_handle));
 
-  // Index the file based on its (inferred) format.
-  iree_status_t status =
-      iree_io_parse_file_index(path, file_handle, index, host_allocator);
+  // Explicit format is independent of the local storage name.
+  iree_status_t status = iree_io_parse_file_index(
+      format.size ? format : path, file_handle, index, host_allocator);
 
   // Release our file reference - it's still retained by the index if it had any
   // parameters in it.
@@ -245,7 +245,7 @@ static iree_status_t iree_tooling_append_safetensors_index_manifest_to_index(
   for (iree_host_size_t i = 0;
        iree_status_is_ok(status) && i < shard_list.path_count; ++i) {
     status = iree_tooling_append_single_parameter_file_to_index(
-        shard_list.paths[i], index, host_allocator);
+        shard_list.paths[i], iree_string_view_empty(), index, host_allocator);
   }
   iree_tooling_safetensors_shard_list_deinitialize(&shard_list);
   iree_io_file_contents_free(file_contents);
@@ -255,11 +255,18 @@ static iree_status_t iree_tooling_append_safetensors_index_manifest_to_index(
 iree_status_t iree_tooling_append_parameter_file_to_index(
     iree_string_view_t path, iree_io_parameter_index_t* index,
     iree_allocator_t host_allocator) {
-  if (iree_tooling_path_is_safetensors_index_manifest(path)) {
+  return iree_tooling_append_parameter_file_to_index_with_format(
+      path, iree_string_view_empty(), index, host_allocator);
+}
+
+iree_status_t iree_tooling_append_parameter_file_to_index_with_format(
+    iree_string_view_t path, iree_string_view_t format,
+    iree_io_parameter_index_t* index, iree_allocator_t host_allocator) {
+  if (!format.size && iree_tooling_path_is_safetensors_index_manifest(path)) {
     return iree_tooling_append_safetensors_index_manifest_to_index(
         path, index, host_allocator);
   }
-  return iree_tooling_append_single_parameter_file_to_index(path, index,
+  return iree_tooling_append_single_parameter_file_to_index(path, format, index,
                                                             host_allocator);
 }
 

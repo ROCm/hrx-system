@@ -18,6 +18,7 @@ load(":cc_benchmark_rules_test.bzl", "cc_benchmark_rules_test_suite")
 load(":cc_fuzz_rules_test.bzl", "cc_fuzz_rules_test_suite")
 load(":cc_link_test.bzl", "cc_link_test_suite")
 load(":cc_rules_test.bzl", "cc_rules_test_suite", "execution_platform_runner")
+load(":cc_shared_library_test.bzl", "cc_shared_library_test_suite")
 load(":cc_static_library_test.bzl", "cc_static_library_test_suite")
 load(":compile_commands_rules_test.bzl", "compile_commands_rules_test_suite")
 load(
@@ -173,6 +174,8 @@ cc_rules_test_suite(name = "cc_tests")
 cc_link_test_suite(name = "cc_link_tests")
 
 cc_static_library_test_suite(name = "cc_static_library_tests")
+
+cc_shared_library_test_suite(name = "cc_shared_library_tests")
 
 compile_commands_rules_test_suite(name = "compile_commands_tests")
 

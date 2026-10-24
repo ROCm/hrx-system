@@ -4,11 +4,101 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//loom/build_tools/bazel:loom_library.bzl", "loom_library")
+load("//loom/build_tools/bazel:loom_model.bzl", "loom_model")
 load(":sources.bzl", "SOURCE_FILES")
 
 package(default_visibility = ["//visibility:private"])
 
 exports_files(
-    SOURCE_FILES,
+    SOURCE_FILES + [
+        "activity.json",
+        "card.json",
+        "service.loom",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "activity_card",
+    srcs = [":card_activity"],
+    output_group = "model_card",
+    tags = ["skip-bazel_to_cmake"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "transcription_card_text",
+    srcs = [":card_model_text"],
+    output_group = "model_card",
+    tags = ["skip-bazel_to_cmake"],
+    visibility = ["//visibility:public"],
+)
+
+loom_library(
+    name = "generate_module",
+    srcs = ["generate.loom"],
+)
+
+loom_model(
+    name = "card_model",
+    card = "card.json",
+    files = {
+        ":generate_module": "generate.loombc",
+        "control.loom": "control.loom",
+        "prepare.loom": "prepare.loom",
+        "service.loom": "service.loom",
+    },
+    model_name = "recognition",
+    preset = "default",
+    tags = ["skip-bazel_to_cmake"],
+    visibility = ["//visibility:public"],
+)
+
+loom_model(
+    name = "card_model_text",
+    card = "card.json",
+    encoding = "text",
+    files = {
+        ":generate_module": "generate.loombc",
+        "control.loom": "control.loom",
+        "prepare.loom": "prepare.loom",
+        "service.loom": "service.loom",
+    },
+    model_name = "recognition",
+    preset = "default",
+    tags = ["skip-bazel_to_cmake"],
+    visibility = ["//visibility:public"],
+)
+
+loom_model(
+    name = "card_activity",
+    card = "card.json",
+    encoding = "bc",
+    files = {
+        ":generate_module": "generate.loombc",
+        "control.loom": "control.loom",
+        "prepare.loom": "prepare.loom",
+        "service.loom": "service.loom",
+    },
+    model_name = "activity",
+    preset = "activity",
+    tags = ["skip-bazel_to_cmake"],
+    visibility = ["//visibility:public"],
+)
+
+loom_model(
+    name = "card_activity_text",
+    card = "card.json",
+    encoding = "text",
+    files = {
+        ":generate_module": "generate.loombc",
+        "control.loom": "control.loom",
+        "prepare.loom": "prepare.loom",
+        "service.loom": "service.loom",
+    },
+    model_name = "activity",
+    preset = "activity",
+    tags = ["skip-bazel_to_cmake"],
     visibility = ["//visibility:public"],
 )

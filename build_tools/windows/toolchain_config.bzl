@@ -13,19 +13,25 @@ load("@rules_cc//cc/private/toolchain:windows_cc_toolchain_config.bzl", "all_com
 load("@rules_cc//cc/toolchains:cc_toolchain_config_info.bzl", "CcToolchainConfigInfo")
 load(":native_runtime.bzl", "NativeWindowsRuntimeInfo")
 
-def _static_crt_feature():
+def _crt_feature(linkage):
+    name = linkage + "_link_msvcrt"
+    release_feature = name + "_release"
+    dynamic = linkage == "dynamic"
+    excluded = ["static_link_msvcrt"] if dynamic else []
+    compile_flag = "/MD" if dynamic else "/MT"
+    library = "msvcrt" if dynamic else "libcmt"
     flag_sets = []
     for actions, release, debug in [
-        ([ACTION_NAMES.c_compile, ACTION_NAMES.cpp_compile], "/MT", "/MTd"),
-        (all_link_actions, "/DEFAULTLIB:libcmt.lib", "/DEFAULTLIB:libcmtd.lib"),
+        ([ACTION_NAMES.c_compile, ACTION_NAMES.cpp_compile], compile_flag, compile_flag + "d"),
+        (all_link_actions, "/DEFAULTLIB:" + library + ".lib", "/DEFAULTLIB:" + library + "d.lib"),
     ]:
         flag_sets.extend([
             flag_set(
                 actions = actions,
                 flag_groups = [flag_group(flags = [release])],
                 with_features = [
-                    with_feature_set(not_features = ["dbg"]),
-                    with_feature_set(features = ["static_link_msvcrt_release"]),
+                    with_feature_set(not_features = excluded + ["dbg"]),
+                    with_feature_set(features = [release_feature], not_features = excluded),
                 ],
             ),
             flag_set(
@@ -33,11 +39,11 @@ def _static_crt_feature():
                 flag_groups = [flag_group(flags = [debug])],
                 with_features = [with_feature_set(
                     features = ["dbg"],
-                    not_features = ["static_link_msvcrt_release"],
+                    not_features = excluded + [release_feature],
                 )],
             ),
         ])
-    return feature(name = "static_link_msvcrt", flag_sets = flag_sets)
+    return feature(name = name, enabled = dynamic, flag_sets = flag_sets)
 
 def _native_tool_path(path, directory):
     # Windows drive paths are absolute even when analysis runs on Linux.
@@ -77,6 +83,7 @@ def _configuration_impl(ctx):
             )],
         ),
         feature(name = "static_link_msvcrt_release", implies = ["static_link_msvcrt"]),
+        feature(name = "dynamic_link_msvcrt_release", implies = ["dynamic_link_msvcrt"]),
         # The base configuration already expanded legacy features and actions.
         feature(name = "no_legacy_features"),
     ])
@@ -85,8 +92,10 @@ def _configuration_impl(ctx):
         # Bazel's automatic DLL export helper is a Windows executable. A Linux
         # cross toolchain uses explicit exports and cannot execute that helper.
         replacements["no_windows_export_all_symbols"] = feature(name = "no_windows_export_all_symbols", enabled = True)
-    if "static_link_msvcrt_release" not in names:
-        replacements["static_link_msvcrt"] = _static_crt_feature()
+    for linkage in ["static", "dynamic"]:
+        name = linkage + "_link_msvcrt"
+        if name + "_release" not in names:
+            replacements[name] = _crt_feature(linkage)
     features = [replacements.get(item.name, item) for item in base._features_DO_NOT_USE]
     position = [item.name for item in features].index("user_compile_flags")
     features = features[:position] + [item for item in additions if item.name not in names] + features[position:]

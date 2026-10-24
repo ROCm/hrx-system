@@ -225,6 +225,35 @@ static iree_status_t loom_serve_jit_index_sources(
     }
     loomc_source_release(source);
   }
+  if (sources->card) {
+    const loom_model_selection_t* model =
+        loom_model_card_selection(sources->card);
+    const loom_model_provider_list_t lists[] = {model->inputs,
+                                                model->libraries};
+    for (iree_host_size_t l = 0;
+         l < IREE_ARRAYSIZE(lists) && iree_status_is_ok(status); ++l) {
+      for (iree_host_size_t i = 0;
+           i < lists[l].count && iree_status_is_ok(status); ++i) {
+        const loom_model_provider_t* provider = &lists[l].values[i];
+        loomc_source_t* source = NULL;
+        status = loom_serve_sources_open_provider(sources, provider,
+                                                  host_allocator, &source);
+        if (iree_status_is_ok(status) &&
+            (!primary ||
+             !iree_string_view_equal(
+                 iree_string_view_from_loomc(loomc_source_identifier(source)),
+                 primary_name))) {
+          const loomc_link_index_source_options_t options = {
+              .provider_name = loomc_string_view_from_iree(provider->file.path),
+              .role = l == 0 ? LOOMC_LINK_PROVIDER_ROLE_INPUT
+                             : LOOMC_LINK_PROVIDER_ROLE_LIBRARY};
+          status = iree_status_from_loomc(loomc_link_index_builder_add_source(
+              builder, source, &options, NULL));
+        }
+        loomc_source_release(source);
+      }
+    }
+  }
   if (iree_status_is_ok(status)) {
     loomc_result_t* result = NULL;
     const loomc_status_t operation =
@@ -1554,7 +1583,7 @@ iree_status_t loom_serve_jit_compile_vm(
         &compiler.profile));
   }
   loomc_source_t* source = NULL;
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && source_path.size) {
     status =
         loom_serve_sources_open(sources, source_path, host_allocator, &source);
   }
@@ -1600,6 +1629,12 @@ iree_status_t loom_serve_jit_compile_vm(
         .mode = LOOMC_LINK_MODE_LINK,
         .root_symbols = root_symbols,
         .root_symbol_count = root_count,
+        .config =
+            {.json_object =
+                 sources->card
+                     ? loomc_string_view_from_iree(
+                           loom_model_card_selection(sources->card)->config)
+                     : loomc_string_view_empty()},
     };
     loomc_result_t* result = NULL;
     const loomc_status_t operation =

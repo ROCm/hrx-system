@@ -206,6 +206,11 @@ typedef uint32_t loom_low_register_part_mask_t;
 // physical IDs and declared aggregate-register views.
 #define LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES \
   ((uint16_t)1u << 6)
+// Distinct locations in this exact class are disjoint physical units whose
+// complete contents can exchange in one synchronous native instruction without
+// temporary storage or writes to other storage or architectural state. Aliased
+// views do not inherit this capability.
+#define LOOM_LOW_REG_CLASS_FLAG_EXCHANGE ((uint16_t)1u << 7)
 
 typedef enum loom_low_spill_slot_space_e {
   // Unknown or uninitialized spill storage space.

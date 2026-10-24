@@ -146,7 +146,8 @@ class RegistryRecognitionTest : public ::testing::Test {
   void Register() {
     loom_serve_model_configuration_t configuration;
     IREE_ASSERT_OK(loom_serve_model_configuration_load(
-        iree_make_cstring_view(FLAG_model), allocator_, &configuration));
+        iree_make_cstring_view(FLAG_model), iree_string_view_empty(),
+        allocator_, &configuration));
     Configure(&configuration);
     name_.assign(configuration.name.data, configuration.name.size);
     configuration.start_drained = true;

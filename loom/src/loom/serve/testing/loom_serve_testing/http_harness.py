@@ -16,12 +16,12 @@ The outer runner owns hang detection for valid submitted work.
 import contextlib
 import http.client
 import json
-import signal
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from loom_serve_testing.logs import LogClient
+from loom_serve_testing.process import creation_options, shutdown
 
 
 def control(address, method, path, expected, *, session=None, body=None, headers=None):
@@ -227,7 +227,7 @@ def collect_events(client, models, stopped, record, *, ready=None):
 
 
 @contextlib.contextmanager
-def running_server(command, log_path, on_event=None, *, cwd=None):
+def running_server(command, log_path, on_event=None, *, cwd=None, environment=None):
     """Own a child and optional independent HTTP capture through joined shutdown.
 
     log_path holds cold stdout/stderr diagnostics. Its .events.jsonl sibling
@@ -236,16 +236,19 @@ def running_server(command, log_path, on_event=None, *, cwd=None):
     a pull endpoint whose lifetime ends with the server.
     An explicit cwd selects the child's deployment root without changing the
     client's working directory or interpreting its catalog paths.
+    An explicit environment isolates installed tools from developer search paths.
     """
     with log_path.open("x") as log, ThreadPoolExecutor(max_workers=2) as readers:
         process = subprocess.Popen(
             command,
             cwd=cwd,
+            env=environment,
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            **creation_options(),
         )
         address = None
         drain = observer = None
@@ -300,14 +303,14 @@ def running_server(command, log_path, on_event=None, *, cwd=None):
                 if observer:
                     observer.result()
             finally:
-                if process.poll() is None:
-                    process.send_signal(signal.SIGTERM)
-                returncode = process.wait()
                 try:
-                    if drain:
-                        drain.result()
+                    returncode = shutdown(process)
                 finally:
-                    process.stderr.close()
+                    try:
+                        if drain:
+                            drain.result()
+                    finally:
+                        process.stderr.close()
                 if failure is not None:
                     failure.add_note(
                         f"server diagnostics (exit {returncode}): {log_path}\n"

@@ -100,8 +100,8 @@ class ExecutablesTest : public WeightsTest {
     iree_vm_module_t* capture = nullptr;
     loom_serve_program_t* program = nullptr;
     if (iree_status_is_ok(status)) {
-      status = loom_serve_preparation_module_create(environment_,
-                                                    host_allocator_, &capture);
+      status = loom_serve_preparation_module_create(
+          environment_, nullptr, nullptr, host_allocator_, &capture);
     }
     if (iree_status_is_ok(status)) {
       loom_serve_preparation_module_begin(
@@ -156,7 +156,7 @@ class ExecutablesTest : public WeightsTest {
     const char* root_name = single_domain ? "raw" : "domains";
     IREE_RETURN_IF_ERROR(
         Declare(root_name, false, single_domain ? 1 : 2, 0, 0, &preparation_));
-    const iree_string_view_list_t* paths = nullptr;
+    const loom_model_file_list_t* paths = nullptr;
     const uint32_t source_count =
         loom_serve_preparation_local_sources(preparation_, &paths);
     IREE_RETURN_IF_ERROR(loom_serve_parameter_sources_create(

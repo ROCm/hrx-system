@@ -96,6 +96,7 @@ configuration and checkpoint domains. Shared preparation capabilities include:
 | `workspace_limit(stage, bytes)` | Bound command workspace, including compatible live replacements. |
 | `source(directory, path)` | Declare the first shard of a checkpoint and return its source ordinal. |
 | `source_append(source, directory, path)` | Append a shard to that checkpoint's ordered index. |
+| `source_scope(scope)` | Select a model card's named, typed parameter files as one shared checkpoint source. |
 | `parameter(stage, binding, input, source, policy)` | Bind a checkpoint to one policy-local input of a reflected fixed parameter binding. |
 
 A split checkpoint uses `source` for its first file and `source_append` for

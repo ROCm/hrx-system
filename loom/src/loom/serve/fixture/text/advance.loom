@@ -6,6 +6,8 @@ config.decl @fixture.tokens : %value: index where [range(%value, 1, 524288)]
 
 config.decl @fixture.media : %value: index where [range(%value, 0, 1)]
 
+config.def @fixture.bias_delta = 0 : i32
+
 target.decl @target
 
 // Logical positions resolve through the native row-major page map. The opaque
@@ -105,7 +107,9 @@ kernel.def target(@target) @consume() {
       %k = view.load %last[0] : view<1xi32> -> i32
       scf.yield %h, %k : i32, i32
     }
-    %bias_value = view.load %bias[0] : view<1xi32> -> i32
+    %checkpoint_bias = view.load %bias[0] : view<1xi32> -> i32
+    %bias_delta = config.get @fixture.bias_delta : i32
+    %bias_value = scalar.addi %checkpoint_bias, %bias_delta : i32
     %capacity = config.get @fixture.tokens : index
     %media_mode = config.get @fixture.media : index
     %is_media = index.cmp ne, %media_mode, %c0 : index

@@ -1,0 +1,129 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: Release Loom SDK
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-loom-sdk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  identity:
+    name: Validate release identity
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Require the canonical release tag and catalog
+        run: |
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then
+            echo 'Select a release tag when dispatching this workflow.' >&2
+            exit 1
+          fi
+          python3 loom/packaging/python/release.py check-tag "$GITHUB_REF_NAME"
+
+  build:
+    name: Build and qualify SDK
+    needs: identity
+    uses: ./.github/workflows/build_loom_sdk.yml
+    permissions:
+      contents: read
+
+  bundle:
+    name: Verify complete artifact set
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: loom-sdk-wheel-*
+          merge-multiple: true
+          path: release-assets
+      - name: Verify wheel identities and record exact bytes
+        run: |
+          python3 loom/packaging/python/release.py bundle release-assets --tag="$GITHUB_REF_NAME"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: loom-sdk-checksums
+          path: release-assets/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  github:
+    name: Publish GitHub assets
+    needs: bundle
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: loom-sdk-wheel-*
+          merge-multiple: true
+          path: release-assets
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: loom-sdk-checksums
+          path: release-assets
+      - name: Upload only absent matching release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -m build_tools.ci.loom_release github --tag="$GITHUB_REF_NAME"
+
+  pypi:
+    name: Publish normal wheels to PyPI
+    needs: github
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/hrx-loom
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: loom-sdk-wheel-*
+          merge-multiple: true
+          path: release-assets
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: loom-sdk-checksums
+          path: release-assets
+      - name: Check PyPI retry state and stage missing normal wheels
+        id: pypi
+        run: |
+          python3 -m build_tools.ci.loom_release pypi-stage \
+            --tag="$GITHUB_REF_NAME" --output=pypi-assets
+      - name: Publish with OIDC
+        if: steps.pypi.outputs.pending == 'true'
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        with:
+          packages-dir: pypi-assets
+          attestations: true
+          print-hash: true

@@ -1,0 +1,11 @@
+{
+  "name": "fixture-text",
+  "model": {
+    "path": "native.card.json",
+    "preset": "check",
+    "programs": "archive"
+  },
+  "definition": {
+    "kind": "text"
+  }
+}

@@ -519,8 +519,9 @@ static iree_status_t loom_test_configure_hal_actual_sequence(
   IREE_RETURN_IF_ERROR(
       loom_run_hal_testbench_context_ensure_runtime(hal_context));
 
-  execution_options->materializer.target_pool =
-      hal_context->runtime.staging_pool;
+  // CPU oracles and comparisons own the fixture values. The launch sequence
+  // stages their allocation roots into device memory and reads results back;
+  // a host-mappable device pool may expose uncached VRAM to CPU observations.
   execution_options->materializer.staging_pool =
       hal_context->runtime.staging_pool;
   execution_options->materializer.transfer_queue =

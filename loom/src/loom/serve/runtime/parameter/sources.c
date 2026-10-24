@@ -33,7 +33,7 @@ struct loom_serve_parameter_sources_t {
 
 iree_status_t loom_serve_parameter_sources_create(
     loom_serve_parameter_sources_t* prefix, const loom_serve_sources_t* sources,
-    uint32_t count, const iree_string_view_list_t* paths,
+    uint32_t count, const loom_model_file_list_t* paths,
     iree_allocator_t host_allocator,
     loom_serve_parameter_sources_t** out_sources) {
   *out_sources = NULL;
@@ -59,11 +59,13 @@ iree_status_t loom_serve_parameter_sources_create(
     for (iree_host_size_t p = 0;
          p < paths[s].count && iree_status_is_ok(status); ++p) {
       char* path = NULL;
-      status = loom_serve_path_resolve(
-          sources->base_directory, paths[s].values[p], host_allocator, &path);
+      status = loom_serve_path_resolve(sources->base_directory,
+                                       paths[s].values[p].path, host_allocator,
+                                       &path);
       if (iree_status_is_ok(status)) {
-        status = iree_tooling_append_parameter_file_to_index(
-            iree_make_cstring_view(path), source->index, host_allocator);
+        status = iree_tooling_append_parameter_file_to_index_with_format(
+            iree_make_cstring_view(path), paths[s].values[p].format,
+            source->index, host_allocator);
       }
       iree_allocator_free(host_allocator, path);
     }

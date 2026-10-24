@@ -76,8 +76,11 @@ iree_status_t loom_serve_recognition_load_free(
 //    tokenizer_asset, name, model_state, initial_conditioning: buffer).
 // Positive geometry is checked at this external source boundary. Input/stream
 // strides are alignment multiples; whole arenas fit signed device offsets.
-// Tokenizer is optional and relative to asset_root. Initial conditioning and
-// model_state survive the cold program. Checkpoints use prepare.parameter.
+// Tokenizer is optional: a code-facing tokenizer identity for a card-backed
+// model, otherwise a path relative to asset_root. Initial conditioning and
+// model_state survive the cold program. Card checkpoints use
+// prepare.source_scope; direct programs declare prepare.source. Both bind
+// sources to resident policy inputs with prepare.parameter.
 // outputs declares a nonempty subset of recognition/events.h output flags.
 // Request preparation receives the explicitly selected subset, and completion
 // may emit only those event types. event_capacity bounds decoded event count;

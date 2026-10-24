@@ -1,0 +1,178 @@
+{
+  "$schema": "../../../../../py/loom/model/model-card.v1.schema.json",
+  "schema_version": 1,
+  "model": {
+    "id": "loom-fixture/text",
+    "name": "Weighted text fixture"
+  },
+  "programs": {
+    "source": {
+      "inputs": [
+        {
+          "path": "prepare.loom",
+          "data": [
+            "weights.loom"
+          ]
+        },
+        "control.loom",
+        "service.loom"
+      ],
+      "libraries": [
+        "advance.loom"
+      ],
+      "config": {
+        "fixture.bias_delta": 7
+      }
+    },
+    "archive": {
+      "inputs": [
+        {
+          "path": "service_module.loombc",
+          "data": [
+            "weights.loom"
+          ]
+        }
+      ],
+      "libraries": [
+        "advance_module.loombc"
+      ]
+    },
+    "mixed": {
+      "inputs": [
+        {
+          "path": "prepare.loom",
+          "data": [
+            "weights.loom"
+          ]
+        },
+        "service.loom",
+        "control_module.loombc"
+      ],
+      "libraries": [
+        "advance_module.loombc"
+      ]
+    }
+  },
+  "services": {
+    "chat": {
+      "kind": "text",
+      "version": 1
+    },
+    "development": {
+      "kind": "text"
+    },
+    "encode": {
+      "kind": "sequence",
+      "version": 1
+    }
+  },
+  "variants": {
+    "fixture": {
+      "services": {
+        "chat": {
+          "programs": [
+            "source",
+            "archive",
+            "mixed"
+          ],
+          "config": {
+            "fixture.card": true,
+            "fixture.bias_delta": 1
+          },
+          "parameters": {
+            "model": {
+              "files": [
+                "metadata.safetensors",
+                {
+                  "path": "bias.data",
+                  "format": "safetensors"
+                }
+              ]
+            }
+          },
+          "tokenizers": {
+            "text": "tokenizer.json"
+          }
+        },
+        "development": {
+          "programs": [
+            "source",
+            "archive",
+            "mixed"
+          ],
+          "config": {
+            "fixture.card": true,
+            "fixture.bias_delta": 1
+          },
+          "parameters": {
+            "model": {
+              "files": [
+                "metadata.safetensors",
+                {
+                  "path": "bias.data",
+                  "format": "safetensors"
+                }
+              ]
+            }
+          },
+          "tokenizers": {
+            "text": "tokenizer.json"
+          }
+        },
+        "encode": {
+          "programs": [
+            "source",
+            "archive",
+            "mixed"
+          ],
+          "config": {
+            "fixture.card": true,
+            "fixture.bias_delta": 0
+          },
+          "parameters": {
+            "model": {
+              "files": [
+                "metadata.safetensors",
+                {
+                  "path": "bias.data",
+                  "format": "safetensors"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "presets": {
+    "check": {
+      "service": "chat",
+      "variant": "fixture",
+      "programs": "source",
+      "execution": {
+        "rows": 4,
+        "context_capacity": 96,
+        "pool_capacity": 256,
+        "prefill_capacity": 32,
+        "max_tokens": 16
+      },
+      "memory": {
+        "weights_bytes": 4,
+        "workload": "One resident I32 bias; unused metadata, tokenization, state, workspace, and allocator overhead excluded."
+      }
+    },
+    "encode": {
+      "service": "encode",
+      "variant": "fixture",
+      "programs": "source",
+      "execution": {
+        "rows": 4,
+        "context_capacity": 96,
+        "pool_capacity": 256,
+        "prefill_capacity": 32,
+        "checkpoint_capacity": 4,
+        "session_cache_capacity": 4
+      }
+    }
+  }
+}

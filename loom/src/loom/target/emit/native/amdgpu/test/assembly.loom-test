@@ -2420,9 +2420,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_loop_arg_cycle(%lhs
 
 // ----
 .Lbb1:
-  v_mov_b32 v2, v0
-  v_mov_b32 v0, v1
-  v_mov_b32 v1, v2
+  v_swap_b32 v0, v1
   s_branch .Lbb1
 
 // ====
@@ -3978,10 +3976,8 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_concat_late_packet_
 
 // ----
   v_mov_b32 v4, v2
-  v_mov_b32 v1, v6
-  v_mov_b32 v6, v7
-  v_mov_b32 v7, v5
-  v_mov_b32 v5, v1
+  v_swap_b32 v6, v7
+  v_swap_b32 v7, v5
   buffer_store_b128 v[4:7], v0, s[0:3], s4 offen offset:0
   s_endpgm
 
@@ -3997,12 +3993,8 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_concat_two_packet_c
 }
 
 // ----
-  v_mov_b32 v5, v1
-  v_mov_b32 v1, v0
-  v_mov_b32 v0, v5
-  v_mov_b32 v5, v3
-  v_mov_b32 v3, v2
-  v_mov_b32 v2, v5
+  v_swap_b32 v1, v0
+  v_swap_b32 v3, v2
   buffer_store_b128 v[0:3], v4, s[0:3], s4 offen offset:0
   s_endpgm
 
@@ -4018,19 +4010,17 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_concat_packet_cycle
 }
 
 // ----
-  v_mov_b32 v5, v2
-  v_mov_b32 v2, v3
-  v_mov_b32 v3, v1
-  v_mov_b32 v1, v5
+  v_swap_b32 v2, v3
+  v_swap_b32 v3, v1
   buffer_store_b128 v[0:3], v4, s[0:3], s4 offen offset:0
   s_endpgm
 
 // ====
 
-// RUN: emit amdgpu-assembly @gfx11_edge_cycle_scratch_wait strategy=source fixed=%vaddr:physical_register:3:1 fixed=%loaded:physical_register:0:1 fixed=%lhs:physical_register:1:1 fixed=%rhs:physical_register:2:1 fixed=%keep0:physical_register:0:1 fixed=%a:physical_register:1:1 fixed=%b:physical_register:2:1 fixed=%keep3:physical_register:3:1
+// RUN: emit amdgpu-assembly @gfx11_edge_exchange_preserves_pending_load strategy=source fixed=%vaddr:physical_register:3:1 fixed=%loaded:physical_register:0:1 fixed=%lhs:physical_register:1:1 fixed=%rhs:physical_register:2:1 fixed=%keep0:physical_register:0:1 fixed=%a:physical_register:1:1 fixed=%b:physical_register:2:1 fixed=%keep3:physical_register:3:1
 amdgpu.target<gfx1100> @gfx11_target
 
-low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_edge_cycle_scratch_wait(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_edge_exchange_preserves_pending_load(%resource: reg<amdgpu.sgpr x4>, %vaddr: reg<amdgpu.vgpr>, %soffset: reg<amdgpu.sgpr>, %lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
   %loaded = buffer_load_dword %resource, %vaddr, %soffset
   low.br ^join(%loaded: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %lhs: reg<amdgpu.vgpr>, %vaddr: reg<amdgpu.vgpr>)
 ^join(%keep0: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %keep3: reg<amdgpu.vgpr>):
@@ -4041,9 +4031,7 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_edge_cycle_scratch_
 
 // ----
   buffer_load_dword v0, v3, s[0:3], s4 offen offset:0
-  v_mov_b32 v4, v2
-  v_mov_b32 v2, v1
-  v_mov_b32 v1, v4
+  v_swap_b32 v2, v1
 .Lbb1:
   v_add_u32 v1, v1, v2
   s_waitcnt vmcnt(0) lgkmcnt(63)

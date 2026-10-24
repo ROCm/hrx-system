@@ -6,6 +6,27 @@
 
 """Bazel module fragment for Loom-specific dependencies."""
 
+bazel_dep(name = "patchelf", version = "0.18.0.bcr.1")
+
+sdk_version = use_repo_rule(
+    "//loom/packaging/python:version.bzl",
+    "sdk_version",
+)
+
+sdk_version(
+    name = "hrx_loom_version",
+    version_file = "//loom/packaging/python:version.json",
+)
+
+# Release tooling is an execution dependency, independent of installed SDK APIs.
+wheel_pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+wheel_pip.parse(
+    hub_name = "loom_wheel_pip",
+    python_version = "3.12",
+    requirements_lock = "//loom/packaging/python:requirements.lock.txt",
+)
+use_repo(wheel_pip, "loom_wheel_pip")
+
 hygiene_sources = use_repo_rule(
     "//loom/build_tools/hygiene:sources.bzl",
     "hygiene_sources",
@@ -27,3 +48,17 @@ http_archive(
     sha256 = "1f17587abc9d0d355cf6f65bdba7496838b4e8313922769199689615c434965c",
     urls = ["https://gpuopen.com/download/AMD_GPU_MR_ISA_XML_2026_03_05.zip"],
 )
+
+# Only provider integration tests import this SDK. The production fetch package
+# loads an optional user-installed provider and has no mandatory pip closure.
+model_test_pip = use_extension(
+    "@rules_python//python/extensions:pip.bzl",
+    "pip",
+    dev_dependency = True,
+)
+model_test_pip.parse(
+    hub_name = "loom_model_test_pip",
+    python_version = "3.12",
+    requirements_lock = "//loom/py/loom/model/hf_test:requirements.lock.txt",
+)
+use_repo(model_test_pip, "loom_model_test_pip")

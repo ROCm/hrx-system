@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loom model lock, version 1",
+  "description": "Complete output commitments, independent of destinations and model preset. For a transformed parameter file, size and SHA-256 identify the resulting archive, not the encoded parent source.",
+  "type": "object",
+  "required": ["schema_version", "origins", "files"],
+  "properties": {
+    "$schema": {"type": "string", "minLength": 1},
+    "schema_version": {"type": "integer", "const": 1},
+    "origins": {
+      "type": "object",
+      "propertyNames": {"$ref": "model-card.v1.schema.json#/$defs/name"},
+      "additionalProperties": {
+        "type": "object",
+        "required": ["requested"],
+        "properties": {
+          "requested": {"$ref": "model-card.v1.schema.json#/$defs/originRoot"},
+          "resolved": {"$ref": "#/$defs/resolved"}
+        },
+        "if": {"properties": {"requested": {"properties": {"kind": {"const": "hf"}}}}},
+        "then": {"required": ["resolved"]},
+        "else": {"not": {"required": ["resolved"]}},
+        "additionalProperties": false
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["origin", "size", "sha256"],
+        "properties": {
+          "origin": {"$ref": "model-card.v1.schema.json#/$defs/fileOrigin"},
+          "size": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "resolved": {"$ref": "#/$defs/resolved"},
+          "transform": {"$ref": "model-card.v1.schema.json#/$defs/transform"}
+        },
+        "if": {"properties": {"origin": {"type": "object", "required": ["kind"], "properties": {"kind": {"const": "hf"}}}}},
+        "then": {"required": ["resolved"]},
+        "else": {"not": {"required": ["resolved"]}},
+        "additionalProperties": false
+      },
+      "description": "One record per logical origin and optional transform. Aliased roots carry their repository resolution once. Updates replace the exact requested output set."
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "resolved": {
+      "type": "object",
+      "required": ["revision"],
+      "properties": {"revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"}},
+      "additionalProperties": false
+    }
+  }
+}

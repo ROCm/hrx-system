@@ -23,12 +23,13 @@ loom_cc_test(
     srcs = ["activity_test_main.c"],
     args = [
         "--fixture=true",
-        "--model=$(rootpath //loom/src/loom/serve/fixture/recognition:model.json)",
+        "--model=$(rootpath //loom/src/loom/serve/fixture/recognition:activity.json)",
+        "--transcription_model=$(rootpath //loom/src/loom/serve/fixture/recognition:model.json)",
         "--device=task",
         "--pool_backing=fixed",
         "--workers=1",
     ],
-    data = RECOGNITION_SOURCES,
+    data = RECOGNITION_SOURCES + ["//loom/src/loom/serve/fixture/recognition:activity.json"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//runtime/config/hal:driver_task",
@@ -51,13 +52,81 @@ loom_cc_test(
     srcs = ["activity_test_main.c"],
     args = [
         "--fixture=true",
-        "--model=$(rootpath //loom/src/loom/serve/fixture/recognition:model.json)",
+        "--model=$(rootpath //loom/src/loom/serve/fixture/recognition:activity.json)",
+        "--transcription_model=$(rootpath //loom/src/loom/serve/fixture/recognition:model.json)",
         "--device=task",
         "--pool_backing=fixed",
         "--workers=8",
         "--stream_count=8",
     ],
-    data = RECOGNITION_SOURCES,
+    data = RECOGNITION_SOURCES + ["//loom/src/loom/serve/fixture/recognition:activity.json"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/binding/c/target/cpu:iree_hal",
+        "//loom/binding/c/target/x86",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/tools/loom-serve:activity_tests",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "activity_model_test",
+    srcs = ["activity_test_main.c"],
+    args = [
+        "--fixture=true",
+        "--model=$(rootpath //loom/src/loom/serve/fixture/recognition:activity_card)",
+        "--transcription_model=$(rootpath //loom/src/loom/serve/fixture/recognition:card_model)",
+        "--device=task",
+        "--pool_backing=fixed",
+        "--workers=1",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/recognition:activity_card",
+        "//loom/src/loom/serve/fixture/recognition:card_model",
+    ],
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/binding/c/target/cpu:iree_hal",
+        "//loom/binding/c/target/x86",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/tools/loom-serve:activity_tests",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "activity_model_parallel_test",
+    srcs = ["activity_test_main.c"],
+    args = [
+        "--fixture=true",
+        "--model=$(rootpath //loom/src/loom/serve/fixture/recognition:card_activity_text)",
+        "--transcription_model=$(rootpath //loom/src/loom/serve/fixture/recognition:transcription_card_text)",
+        "--device=task",
+        "--pool_backing=fixed",
+        "--workers=8",
+        "--stream_count=8",
+    ],
+    data = [
+        "//loom/src/loom/serve/fixture/recognition:card_activity_text",
+        "//loom/src/loom/serve/fixture/recognition:transcription_card_text",
+    ],
+    tags = ["skip-bazel_to_cmake"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//runtime/config/hal:driver_task",
@@ -149,8 +218,585 @@ loom_cc_test(
     ],
 )
 
+# Acquires locked source, bytecode, and mixed packages before native execution.
+loom_py_test(
+    name = "fetch_model_card_test",
+    size = "small",
+    srcs = [
+        "fetch_model_card_test.py",
+        "model_card_test.py",
+    ],
+    args = [
+        "$(rootpath //loom/py/loom/model:loom-fetch)",
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:native.card.json)",
+    ],
+    data = [
+        ":loom-serve-test-tool",
+        "//loom/py/loom/model:loom-fetch",
+        "//loom/src/loom/serve/fixture/text:native.card.json",
+        "//loom/src/loom/serve/fixture/text:native_archive_files",
+        "//loom/src/loom/serve/fixture/text:native_mixed_files",
+        "//loom/src/loom/serve/fixture/text:native_source_files",
+    ],
+    imports = ["."],
+    main = "fetch_model_card_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/py/loom/model:lock",
+        "//loom/py/loom/model:manifest",
+        "//loom/src/loom/serve/testing:http",
+    ],
+)
+
+# Runtime assets enter the published installation separately from compiled programs.
+loom_py_test(
+    name = "build_fetch_model_card_test",
+    size = "small",
+    srcs = [
+        "build_fetch_model_card_test.py",
+        "model_card_test.py",
+    ],
+    args = [
+        "$(rootpath //loom/py/loom/model:loom-fetch)",
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:native.card.json)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:fetch_model_source)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:fetch_model_archive)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:fetch_model_mixed)",
+    ],
+    data = [
+        ":loom-serve-test-tool",
+        "//loom/py/loom/model:loom-fetch",
+        "//loom/src/loom/serve/fixture/text:fetch_model_archive",
+        "//loom/src/loom/serve/fixture/text:fetch_model_mixed",
+        "//loom/src/loom/serve/fixture/text:fetch_model_source",
+        "//loom/src/loom/serve/fixture/text:native.card.json",
+        "//loom/src/loom/serve/fixture/text:native_source_files",
+    ],
+    imports = ["."],
+    main = "build_fetch_model_card_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/py/loom/model:lock",
+        "//loom/py/loom/model:manifest",
+        "//loom/src/loom/serve/testing:http",
+    ],
+)
+
+# Runtime assets are staged separately from the current compiler outputs.
+loom_py_test(
+    name = "staged_model_card_test",
+    size = "small",
+    srcs = [
+        "model_card_test.py",
+        "staged_model_card_test.py",
+    ],
+    args = [
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:native.card.json)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:fetch_model_source)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:fetch_model_archive)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:fetch_model_mixed)",
+    ],
+    data = [
+        ":loom-serve-test-tool",
+        "//loom/src/loom/serve/fixture/text:fetch_model_archive",
+        "//loom/src/loom/serve/fixture/text:fetch_model_mixed",
+        "//loom/src/loom/serve/fixture/text:fetch_model_source",
+        "//loom/src/loom/serve/fixture/text:native.card.json",
+        "//loom/src/loom/serve/fixture/text:native_source_files",
+    ],
+    imports = ["."],
+    main = "staged_model_card_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/py/loom/model:lock",
+        "//loom/py/loom/model:manifest",
+        "//loom/src/loom/serve/testing:http",
+        "//loom/src/loom/serve/testing:model_staging",
+    ],
+)
+
+loom_py_test(
+    name = "build_fetch_text_image_card_test",
+    size = "small",
+    srcs = [
+        "build_fetch_model_card_test.py",
+        "model_card_test.py",
+    ],
+    args = [
+        "$(rootpath //loom/py/loom/model:loom-fetch)",
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:image.card.json)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:image_fetch_source)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:image_fetch_archive)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:image_fetch_mixed)",
+    ],
+    data = [
+        ":loom-serve-test-tool",
+        "//loom/py/loom/model:loom-fetch",
+        "//loom/src/loom/serve/fixture/text:image.card.json",
+        "//loom/src/loom/serve/fixture/text:image_fetch_archive",
+        "//loom/src/loom/serve/fixture/text:image_fetch_mixed",
+        "//loom/src/loom/serve/fixture/text:image_fetch_source",
+        "//loom/src/loom/serve/fixture/text:native_source_files",
+    ],
+    imports = ["."],
+    main = "build_fetch_model_card_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//loom/config/serve:image_input_enabled",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/py/loom/model:lock",
+        "//loom/py/loom/model:manifest",
+        "//loom/src/loom/serve/testing:http",
+    ],
+)
+
+# Optional HF SDK acquisition shares its cache through the native runtime boundary.
+loom_py_test(
+    name = "hf_model_card_test",
+    size = "small",
+    srcs = [
+        "hf_model_card_test.py",
+        "model_card_test.py",
+    ],
+    args = [
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:native.card.json)",
+    ],
+    data = [
+        ":loom-serve-test-tool",
+        "//loom/src/loom/serve/fixture/text:native.card.json",
+        "//loom/src/loom/serve/fixture/text:native_archive_files",
+        "//loom/src/loom/serve/fixture/text:native_mixed_files",
+        "//loom/src/loom/serve/fixture/text:native_source_files",
+    ],
+    imports = ["."],
+    main = "hf_model_card_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/py/loom/model:fetch_cli",
+        "//loom/py/loom/model:fetch_hf",
+        "//loom/py/loom/model:lock",
+        "//loom/py/loom/model:manifest",
+        "//loom/py/loom/model/hf_test:fixture",
+        "//loom/src/loom/serve/testing:http",
+    ],
+)
+
+loom_py_test(
+    name = "wheel_model_card_test",
+    size = "small",
+    srcs = [
+        "model_card_test.py",
+        "wheel_model_card_test.py",
+    ],
+    args = [
+        "$(rootpath //loom/packaging/python:release_wheel)",
+        "$(rootpath //loom/packaging/python/test:associated_wheel)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:card_model_mixed)",
+    ] + select({
+        "@platforms//os:linux": ["$(rootpath @patchelf//:patchelf)"],
+        "//conditions:default": ["unused"],
+    }) + [
+        "$(rootpath //loom/packaging/python:version.json)",
+        "$(rootpath //loom/packaging/python:PYPI_README.md)",
+    ],
+    data = [
+        "//loom/packaging/python:PYPI_README.md",
+        "//loom/packaging/python:release_wheel",
+        "//loom/packaging/python:version.json",
+        "//loom/packaging/python/test:associated_wheel",
+        "//loom/src/loom/serve/fixture/text:card_model_mixed",
+    ] + select({
+        "@platforms//os:linux": ["@patchelf"],
+        "//conditions:default": [],
+    }),
+    imports = ["."],
+    main = "wheel_model_card_test.py",
+    # The SDK matrix explicitly qualifies this complete C++23 artifact with
+    # its release toolchains; ordinary core builds may use older compilers.
+    tags = [
+        "manual",
+        "skip-bazel_to_cmake",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/packaging/python:release_lib",
+        "//loom/src/loom/serve/testing:http",
+    ],
+)
+
+loom_py_test(
+    name = "publication_model_card_test",
+    size = "small",
+    srcs = [
+        "model_card_test.py",
+        "publication_model_card_test.py",
+    ],
+    args = [
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:native.card.json)",
+    ],
+    data = [
+        ":loom-serve-test-tool",
+        "//loom/src/loom/serve/fixture/text:native.card.json",
+        "//loom/src/loom/serve/fixture/text:native_archive_files",
+        "//loom/src/loom/serve/fixture/text:native_mixed_files",
+        "//loom/src/loom/serve/fixture/text:native_source_files",
+    ],
+    imports = ["."],
+    main = "publication_model_card_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/py/loom/model:fetch",
+        "//loom/py/loom/model:fetch_storage",
+        "//loom/py/loom/model:manifest",
+        "//loom/src/loom/serve/testing:http",
+    ],
+)
+
+loom_py_test(
+    name = "partition_model_card_test",
+    size = "small",
+    srcs = [
+        "model_card_test.py",
+        "partition_model_card_test.py",
+    ],
+    args = [
+        "$(rootpath //loom/py/loom/model:loom-fetch)",
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:partition.card.json)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:partition_model_text)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:partition_model_bc)",
+    ],
+    data = [
+        ":loom-serve-test-tool",
+        "//loom/py/loom/model:loom-fetch",
+        "//loom/src/loom/serve/fixture/text:alternate.data",
+        "//loom/src/loom/serve/fixture/text:native_source_files",
+        "//loom/src/loom/serve/fixture/text:partition.card.json",
+        "//loom/src/loom/serve/fixture/text:partition_model_bc",
+        "//loom/src/loom/serve/fixture/text:partition_model_text",
+    ],
+    imports = ["."],
+    main = "partition_model_card_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/py/loom/model:manifest",
+        "//loom/src/loom/serve/testing:http",
+    ],
+)
+
+loom_py_test(
+    name = "swatch_model_card_test",
+    size = "small",
+    srcs = [
+        "model_card_test.py",
+        "swatch_model_card_test.py",
+    ],
+    args = [
+        "$(rootpath //loom/py/loom/model:loom-fetch)",
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:swatch.card.json)",
+    ],
+    data = [
+        ":loom-serve-test-tool",
+        "//loom/py/loom/model:loom-fetch",
+        "//loom/src/loom/serve/fixture/text:native_source_files",
+        "//loom/src/loom/serve/fixture/text:swatch.card.json",
+    ],
+    imports = ["."],
+    main = "swatch_model_card_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//loom/py/loom/model:manifest",
+        "//loom/src/loom/serve/testing:http",
+    ],
+)
+
+# Exercises independently namespaced services from text and bytecode packages.
+[
+    loom_py_test(
+        name = kind + "_model_card_" + encoding + "_test",
+        size = "small",
+        srcs = ["service_model_card_test.py"],
+        args = [
+            "$(rootpath :loom-serve-test-tool)",
+            kind,
+            "$(rootpath " + fixture + encoding + ")",
+        ],
+        data = [
+            ":loom-serve-test-tool",
+            fixture + encoding,
+        ],
+        main = "service_model_card_test.py",
+        tags = ["skip-bazel_to_cmake"],
+        target_compatible_with = loom_config_compatible_with([
+            "//loom/config/target/arch:x86",
+            "//runtime/config/hal:driver_task",
+            "//runtime/config/hal:executable_loader_embedded_elf",
+        ]) + ["@platforms//cpu:x86_64"] + select({
+            "@platforms//os:linux": [],
+            "//conditions:default": ["@platforms//:incompatible"],
+        }),
+        deps = [
+            "//loom/src/loom/serve/server:catalog_test_util",
+            "//loom/src/loom/serve/testing:http",
+        ],
+    )
+    for kind, fixture in [
+        ("image", "//loom/src/loom/serve/fixture/image:card_model_"),
+        ("embedding", "//loom/src/loom/serve/fixture/embedding:card_model_"),
+        ("decision", "//loom/src/loom/serve/fixture/decision:card_model_"),
+        ("speech", "//loom/src/loom/serve/fixture/speech:card_model_"),
+        ("sequence", "//loom/src/loom/serve/fixture/text:sequence_card_model_"),
+    ]
+    for encoding in [
+        "text",
+        "bc",
+    ]
+]
+
 # JITs an external source package and executes its command program through the
 # task HAL using the exact CPU serving composition.
+loom_py_test(
+    name = "model_card_test",
+    size = "small",
+    srcs = ["model_card_test.py"],
+    args = [
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:card_model)",
+        "abab",
+    ],
+    data = [
+        ":loom-serve-test-tool",
+        "//loom/src/loom/serve/fixture/text:card_model",
+    ],
+    main = "model_card_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ["//loom/src/loom/serve/testing:http"],
+)
+
+loom_py_test(
+    name = "model_card_mixed_test",
+    size = "small",
+    srcs = ["model_card_test.py"],
+    args = [
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:card_model_mixed)",
+        "abab",
+        "prepare.loom=text",
+        "service.loom=text",
+        "control_module.loombc=bc",
+        "advance_module.loombc=bc",
+    ],
+    data = [
+        ":loom-serve-test-tool",
+        "//loom/src/loom/serve/fixture/text:card_model_mixed",
+    ],
+    main = "model_card_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ["//loom/src/loom/serve/testing:http"],
+)
+
+loom_py_test(
+    name = "native_model_card_source_test",
+    size = "small",
+    srcs = ["model_card_test.py"],
+    args = [
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:native.source.json)",
+        "abab",
+    ],
+    data = [
+        ":loom-serve-test-tool",
+        "//loom/src/loom/serve/fixture/text:native.source.json",
+        "//loom/src/loom/serve/fixture/text:native_source_files",
+    ],
+    main = "model_card_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ["//loom/src/loom/serve/testing:http"],
+)
+
+loom_py_test(
+    name = "native_model_card_archive_test",
+    size = "small",
+    srcs = ["model_card_test.py"],
+    args = [
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:native.archive.json)",
+        "abab",
+    ],
+    data = [
+        ":loom-serve-test-tool",
+        "//loom/src/loom/serve/fixture/text:native.archive.json",
+        "//loom/src/loom/serve/fixture/text:native_archive_files",
+    ],
+    main = "model_card_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ["//loom/src/loom/serve/testing:http"],
+)
+
+loom_py_test(
+    name = "native_model_card_mixed_test",
+    size = "small",
+    srcs = ["model_card_test.py"],
+    args = [
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:native.mixed.json)",
+        "abab",
+    ],
+    data = [
+        ":loom-serve-test-tool",
+        "//loom/src/loom/serve/fixture/text:native.mixed.json",
+        "//loom/src/loom/serve/fixture/text:native_mixed_files",
+    ],
+    main = "model_card_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ["//loom/src/loom/serve/testing:http"],
+)
+
+loom_py_test(
+    name = "native_model_card_development_test",
+    size = "small",
+    srcs = ["model_card_test.py"],
+    args = [
+        "$(rootpath :loom-serve-test-tool)",
+        "$(rootpath //loom/src/loom/serve/fixture/text:native.development.json)",
+        "abab",
+    ],
+    data = [
+        ":loom-serve-test-tool",
+        "//loom/src/loom/serve/fixture/text:native.development.json",
+        "//loom/src/loom/serve/fixture/text:native_source_files",
+    ],
+    main = "model_card_test.py",
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]) + ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ["//loom/src/loom/serve/testing:http"],
+)
+
 loom_py_test(
     name = "serve_command_test",
     size = "small",
@@ -608,12 +1254,39 @@ loom_cc_test(
 
 loom_cc_test(
     name = "source_text_media_test",
+    args = ["--gtest_filter=-Declarations/ManagedMediaServiceTest.*/1"],
     data = EMBEDDING_SOURCES + PROJECTOR_SOURCES + TEXT_SOURCES,
     env = {
         "LOOM_SERVE_TEST_MEDIA_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/embedding:model.json)",
         "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
         "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:model.json)",
     },
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+        "//loom/config/execute:task_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/service/text:source_media_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "card_text_media_test",
+    args = ["--gtest_filter=Declarations/ManagedMediaServiceTest.*/1"],
+    data = EMBEDDING_SOURCES + PROJECTOR_SOURCES + TEXT_SOURCES + ["//loom/src/loom/serve/fixture/text:image_model"],
+    env = {
+        "LOOM_SERVE_TEST_MEDIA_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/embedding:model.json)",
+        "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+        "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:model.json)",
+        "LOOM_SERVE_TEST_TEXT_IMAGE_CARD": "$(rootpath //loom/src/loom/serve/fixture/text:image_model)",
+    },
+    tags = ["skip-bazel_to_cmake"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//loom/config/execute:task_hal",

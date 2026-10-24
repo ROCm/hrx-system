@@ -1,3 +1,5 @@
+config.def @fixture.card = false : i1
+
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
@@ -9,6 +11,10 @@ func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
 
 func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
+
+func.decl import("prepare") @source_scope(%scope: buffer) -> (i32)
+
+global.rodata.def @model_scope = bytes("6d6f64656c")
 
 global.rodata.def @root = bytes("616476616e6365")
 
@@ -83,7 +89,15 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   func.call @config_i64(%media_stage, %media_key, %c1_i64) : (i32, buffer, i64)
   %empty = global.load @empty : buffer
   %policy = global.load @policy : buffer
-  %checkpoint = func.call @source(%empty, %weights) : (buffer, buffer) -> (i32)
+  %card = config.get @fixture.card : i1
+  %checkpoint = scf.if %card -> (i32) {
+    %scope = global.load @model_scope : buffer
+    %scoped = func.call @source_scope(%scope) : (buffer) -> (i32)
+    scf.yield %scoped : i32
+  } else {
+    %direct = func.call @source(%empty, %weights) : (buffer, buffer) -> (i32)
+    scf.yield %direct : i32
+  }
   func.call @parameter(%stage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
   func.call @parameter(%media_stage, %c0_i32, %c0_source, %checkpoint, %policy) : (i32, i32, i32, i32, buffer)
   %state_bytes = index.constant 88 : offset

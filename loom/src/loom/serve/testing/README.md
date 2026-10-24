@@ -8,18 +8,32 @@ SDK. Integration tests stay beside the server or service they exercise.
 reproduces a full Linux stderr pipe so a lifecycle test can prove that a blocked
 diagnostic sink cannot stop inference on its only worker.
 
-The test-only native text request observer loads a source VM policy and
-tokenizer, prepares a real chat request and reports its tokens and completed
-transcript. Both the deterministic text fixture and external model checks use
-this path without loading numerical weights or acquiring a device.
+The test-only native text request observer loads a VM policy and tokenizer,
+prepares a real chat request, and reports its tokens and completed transcript.
+`--model=card.json --preset=chat` selects providers and versioned service exports
+through the same card resolver as the server; `--control=policy.loom` selects a
+direct program with exact export names. Both the deterministic text fixture and
+external model checks use this path without loading numerical weights or
+acquiring a device. The tokenizer remains an explicit `--tokenizer` input so
+small vocabulary fixtures can check exact token output.
 
 The local `loom_serve_testing` Python package contains these helpers:
 
 - `http_harness` owns child-process startup, HTTP control calls, joined shutdown,
   and explicitly fallible telemetry history. Readiness and completion come from
-  server state and counters, not sleeps or promised event retention.
+  server state and counters, not sleeps or promised event retention. Its
+  `process` helper requests graceful shutdown with SIGTERM on POSIX or Ctrl+Break
+  in a privately owned Windows console, and joins the child on every path.
 - `logs` owns an observer's cursors. Gaps, model removal and stream reincarnation
   remain explicit; a reader never owns server resources.
+- `model_staging.stage_model(card, assets, output)` creates a fresh model
+  directory with current built providers and auxiliary inputs from `card` and
+  provisioned parameters and tokenizers from `assets`. File roles come from the
+  selected card. Files are hardlinked or symlinked; weights are never copied,
+  hashed, or downloaded. The caller owns the output directory's cleanup,
+  including partial failure, and declares the built model with its authored
+  `lockfile` as test data. The lock identifies external assets for Bazel caching;
+  asset changes without a lock update intentionally do not invalidate tests.
 - `chat` consumes complete chat/SSE responses, validates terminal outcomes and
   records monotonic request, first-text and output-chunk times. An optional
   content observer receives answer deltas with their receipt timestamps while

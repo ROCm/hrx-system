@@ -186,7 +186,7 @@ iree_status_t loom_serve_text_source_initialize(
   out_source->host_allocator = host_allocator;
   IREE_RETURN_IF_ERROR(loom_serve_text_prepare(target_environment, out_source,
                                                options, out_storage));
-  const iree_string_view_list_t* paths = NULL;
+  const loom_model_file_list_t* paths = NULL;
   const uint32_t source_count =
       loom_serve_preparation_local_sources(out_source->preparation, &paths);
   IREE_RETURN_IF_ERROR(loom_serve_parameter_sources_create(
@@ -224,13 +224,13 @@ iree_status_t loom_serve_text_source_initialize(
                                                IREE_SVL("request_defaults"),
                                                IREE_SVL("request_options")};
   const bool encodes = options->mode == LOOM_SERVE_TEXT_MODE_ENCODE;
-  return loom_serve_program_compile(target_environment, out_source->environment,
-                                    &options->sources, options->sources.control,
-                                    encodes ? IREE_ARRAYSIZE(encoding_roots)
-                                            : IREE_ARRAYSIZE(generation_roots),
-                                    encodes ? encoding_roots : generation_roots,
-                                    &out_source->compilation, host_allocator,
-                                    &out_source->module);
+  return loom_serve_program_compile_service(
+      target_environment, out_source->environment, &options->sources,
+      options->sources.control,
+      encodes ? IREE_ARRAYSIZE(encoding_roots)
+              : IREE_ARRAYSIZE(generation_roots),
+      encodes ? encoding_roots : generation_roots, &out_source->compilation,
+      host_allocator, &out_source->module);
 }
 
 void loom_serve_text_source_deinitialize(loom_serve_text_source_t* source) {

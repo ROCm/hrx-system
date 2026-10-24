@@ -578,21 +578,25 @@ loom_amdgpu_short_wait_match_t loom_amdgpu_short_wait_begin_packet(
     for (iree_host_size_t i = 0; i < structural->moves.count && i < 3; ++i) {
       const loom_low_move_t* move =
           &state->allocation->moves[structural->moves.start + i];
-      if (dot_reasons && move->source.location_kind ==
-                             LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+      for (uint32_t j = 0; j < loom_low_move_access_count(move); ++j) {
+        const loom_low_move_location_t* read = loom_low_move_read(move, j);
+        const loom_low_move_location_t* write = loom_low_move_write(move, j);
+        if (dot_reasons && read->location_kind ==
+                               LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+          loom_amdgpu_short_wait_match_t candidate =
+              loom_amdgpu_short_wait_query(state, read->descriptor_reg_class_id,
+                                           read->location, 1, (uint32_t)i,
+                                           dot_reasons);
+          if (candidate.cycles > match.cycles) {
+            match = candidate;
+          }
+        }
         loom_amdgpu_short_wait_match_t candidate = loom_amdgpu_short_wait_query(
-            state, move->source.descriptor_reg_class_id, move->source.location,
-            1, (uint32_t)i, dot_reasons);
+            state, write->descriptor_reg_class_id, write->location, 1,
+            (uint32_t)i, LOOM_AMDGPU_SHORT_WAIT_STORE_VALU | dot_reasons);
         if (candidate.cycles > match.cycles) {
           match = candidate;
         }
-      }
-      loom_amdgpu_short_wait_match_t candidate = loom_amdgpu_short_wait_query(
-          state, move->destination.descriptor_reg_class_id,
-          move->destination.location, 1, (uint32_t)i,
-          LOOM_AMDGPU_SHORT_WAIT_STORE_VALU | dot_reasons);
-      if (candidate.cycles > match.cycles) {
-        match = candidate;
       }
     }
   } else if (state->pending_cycles != 0) {

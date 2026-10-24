@@ -1,0 +1,133 @@
+// Recognition service exports wrap the shared direct-program fixture.
+
+func.decl @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer)
+
+func.def public @recognition_prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer) {
+  %result_0, %result_1, %result_2, %result_3, %result_4, %result_5, %result_6, %result_7, %result_8, %result_9, %result_10, %result_11, %result_12, %result_13, %result_14, %result_15, %result_16, %result_17, %result_18 = func.call @prepare(%directory, %options) : (buffer, buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer)
+  func.return %result_0, %result_1, %result_2, %result_3, %result_4, %result_5, %result_6, %result_7, %result_8, %result_9, %result_10, %result_11, %result_12, %result_13, %result_14, %result_15, %result_16, %result_17, %result_18 : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer
+}
+
+func.def public @recognition_prepare_v1(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer) {
+  %result_0, %result_1, %result_2, %result_3, %result_4, %result_5, %result_6, %result_7, %result_8, %result_9, %result_10, %result_11, %result_12, %result_13, %result_14, %result_15, %result_16, %result_17, %result_18 = func.call @prepare(%directory, %options) : (buffer, buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer)
+  func.return %result_0, %result_1, %result_2, %result_3, %result_4, %result_5, %result_6, %result_7, %result_8, %result_9, %result_10, %result_11, %result_12, %result_13, %result_14, %result_15, %result_16, %result_17, %result_18 : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer
+}
+
+func.decl @prepare_request(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32, %outputs: i32) -> (buffer, buffer)
+
+func.def public @recognition_prepare_request(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32, %outputs: i32) -> (buffer, buffer) {
+  %result_0, %result_1 = func.call @prepare_request(%model, %language, %prompt, %temperature, %outputs) : (buffer, buffer, buffer, f32, i32) -> (buffer, buffer)
+  func.return %result_0, %result_1 : buffer, buffer
+}
+
+func.def public @recognition_prepare_request_v1(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32, %outputs: i32) -> (buffer, buffer) {
+  %result_0, %result_1 = func.call @prepare_request(%model, %language, %prompt, %temperature, %outputs) : (buffer, buffer, buffer, f32, i32) -> (buffer, buffer)
+  func.return %result_0, %result_1 : buffer, buffer
+}
+
+func.decl @prepare_work(%model: buffer, %state: buffer, %pcm: buffer, %position: i64, %eof: i32) -> (buffer, i64, i64)
+
+func.def public @recognition_prepare_work(%model: buffer, %state: buffer, %pcm: buffer, %position: i64, %eof: i32) -> (buffer, i64, i64) {
+  %result_0, %result_1, %result_2 = func.call @prepare_work(%model, %state, %pcm, %position, %eof) : (buffer, buffer, buffer, i64, i32) -> (buffer, i64, i64)
+  func.return %result_0, %result_1, %result_2 : buffer, i64, i64
+}
+
+func.def public @recognition_prepare_work_v1(%model: buffer, %state: buffer, %pcm: buffer, %position: i64, %eof: i32) -> (buffer, i64, i64) {
+  %result_0, %result_1, %result_2 = func.call @prepare_work(%model, %state, %pcm, %position, %eof) : (buffer, buffer, buffer, i64, i32) -> (buffer, i64, i64)
+  func.return %result_0, %result_1, %result_2 : buffer, i64, i64
+}
+
+func.decl @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer)
+
+func.def public @recognition_prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer) {
+  %result_0, %result_1 = func.call @prepare_batch(%model, %tags, %ranges, %packed) : (buffer, buffer, buffer, buffer) -> (buffer, buffer)
+  func.return %result_0, %result_1 : buffer, buffer
+}
+
+func.def public @recognition_prepare_batch_v1(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer) {
+  %result_0, %result_1 = func.call @prepare_batch(%model, %tags, %ranges, %packed) : (buffer, buffer, buffer, buffer) -> (buffer, buffer)
+  func.return %result_0, %result_1 : buffer, buffer
+}
+
+func.decl @generate(%plan: buffer, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer)
+
+func.def public @recognition_generate(%plan: buffer, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer) {
+  func.call @generate(%plan, %work, %requests, %conditioning, %streams, %output) : (buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer)
+  func.return
+}
+
+func.def public @recognition_generate_v1(%plan: buffer, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer) {
+  func.call @generate(%plan, %work, %requests, %conditioning, %streams, %output) : (buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer)
+  func.return
+}
+
+func.decl @complete(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, buffer, i64, i32)
+
+func.def public @recognition_complete(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, buffer, i64, i32) {
+  %result_0, %result_1, %result_2, %result_3 = func.call @complete(%model, %state, %plan, %ordinal, %feedback) : (buffer, buffer, buffer, i64, buffer) -> (i64, buffer, i64, i32)
+  func.return %result_0, %result_1, %result_2, %result_3 : i64, buffer, i64, i32
+}
+
+func.def public @recognition_complete_v1(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, buffer, i64, i32) {
+  %result_0, %result_1, %result_2, %result_3 = func.call @complete(%model, %state, %plan, %ordinal, %feedback) : (buffer, buffer, buffer, i64, buffer) -> (i64, buffer, i64, i32)
+  func.return %result_0, %result_1, %result_2, %result_3 : i64, buffer, i64, i32
+}
+
+func.def public @activity_prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer) {
+  %result_0, %result_1, %result_2, %result_3, %result_4, %result_5, %result_6, %result_7, %result_8, %result_9, %result_10, %result_11, %result_12, %result_13, %result_14, %result_15, %result_16, %result_17, %result_18 = func.call @prepare(%directory, %options) : (buffer, buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer)
+  func.return %result_0, %result_1, %result_2, %result_3, %result_4, %result_5, %result_6, %result_7, %result_8, %result_9, %result_10, %result_11, %result_12, %result_13, %result_14, %result_15, %result_16, %result_17, %result_18 : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer
+}
+
+func.def public @activity_prepare_v1(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer) {
+  %result_0, %result_1, %result_2, %result_3, %result_4, %result_5, %result_6, %result_7, %result_8, %result_9, %result_10, %result_11, %result_12, %result_13, %result_14, %result_15, %result_16, %result_17, %result_18 = func.call @prepare(%directory, %options) : (buffer, buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer)
+  func.return %result_0, %result_1, %result_2, %result_3, %result_4, %result_5, %result_6, %result_7, %result_8, %result_9, %result_10, %result_11, %result_12, %result_13, %result_14, %result_15, %result_16, %result_17, %result_18 : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer
+}
+
+func.def public @activity_prepare_request(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32, %outputs: i32) -> (buffer, buffer) {
+  %result_0, %result_1 = func.call @prepare_request(%model, %language, %prompt, %temperature, %outputs) : (buffer, buffer, buffer, f32, i32) -> (buffer, buffer)
+  func.return %result_0, %result_1 : buffer, buffer
+}
+
+func.def public @activity_prepare_request_v1(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32, %outputs: i32) -> (buffer, buffer) {
+  %result_0, %result_1 = func.call @prepare_request(%model, %language, %prompt, %temperature, %outputs) : (buffer, buffer, buffer, f32, i32) -> (buffer, buffer)
+  func.return %result_0, %result_1 : buffer, buffer
+}
+
+func.def public @activity_prepare_work(%model: buffer, %state: buffer, %pcm: buffer, %position: i64, %eof: i32) -> (buffer, i64, i64) {
+  %result_0, %result_1, %result_2 = func.call @prepare_work(%model, %state, %pcm, %position, %eof) : (buffer, buffer, buffer, i64, i32) -> (buffer, i64, i64)
+  func.return %result_0, %result_1, %result_2 : buffer, i64, i64
+}
+
+func.def public @activity_prepare_work_v1(%model: buffer, %state: buffer, %pcm: buffer, %position: i64, %eof: i32) -> (buffer, i64, i64) {
+  %result_0, %result_1, %result_2 = func.call @prepare_work(%model, %state, %pcm, %position, %eof) : (buffer, buffer, buffer, i64, i32) -> (buffer, i64, i64)
+  func.return %result_0, %result_1, %result_2 : buffer, i64, i64
+}
+
+func.def public @activity_prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer) {
+  %result_0, %result_1 = func.call @prepare_batch(%model, %tags, %ranges, %packed) : (buffer, buffer, buffer, buffer) -> (buffer, buffer)
+  func.return %result_0, %result_1 : buffer, buffer
+}
+
+func.def public @activity_prepare_batch_v1(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer) {
+  %result_0, %result_1 = func.call @prepare_batch(%model, %tags, %ranges, %packed) : (buffer, buffer, buffer, buffer) -> (buffer, buffer)
+  func.return %result_0, %result_1 : buffer, buffer
+}
+
+func.def public @activity_generate(%plan: buffer, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer) {
+  func.call @generate(%plan, %work, %requests, %conditioning, %streams, %output) : (buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer)
+  func.return
+}
+
+func.def public @activity_generate_v1(%plan: buffer, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer) {
+  func.call @generate(%plan, %work, %requests, %conditioning, %streams, %output) : (buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer)
+  func.return
+}
+
+func.def public @activity_complete(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, buffer, i64, i32) {
+  %result_0, %result_1, %result_2, %result_3 = func.call @complete(%model, %state, %plan, %ordinal, %feedback) : (buffer, buffer, buffer, i64, buffer) -> (i64, buffer, i64, i32)
+  func.return %result_0, %result_1, %result_2, %result_3 : i64, buffer, i64, i32
+}
+
+func.def public @activity_complete_v1(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, buffer, i64, i32) {
+  %result_0, %result_1, %result_2, %result_3 = func.call @complete(%model, %state, %plan, %ordinal, %feedback) : (buffer, buffer, buffer, i64, buffer) -> (i64, buffer, i64, i32)
+  func.return %result_0, %result_1, %result_2, %result_3 : i64, buffer, i64, i32
+}

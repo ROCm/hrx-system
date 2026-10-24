@@ -99,7 +99,8 @@ TEST_P(RegistryTest, FileRegistrationOwnsAuthoredPathsAndSelectedBase) {
       iree_make_const_byte_span(document.data(), document.size()),
       iree_allocator_system()));
   IREE_ASSERT_OK(loom_serve_model_configuration_load(
-      path_.path_view(), iree_allocator_system(), &configuration_));
+      path_.path_view(), iree_string_view_empty(), iree_allocator_system(),
+      &configuration_));
   ASSERT_TRUE(path_.Remove());
 
   iree_host_size_t index = IREE_HOST_SIZE_MAX;

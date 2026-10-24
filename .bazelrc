@@ -66,6 +66,21 @@ build:opt --features=thin_lto_link
 build:opt --features=optimize_for_speed
 build:opt --host_features=optimize_for_speed
 
+# The SDK has one native feature set, independent of worktree configuration.
+# Optimization and instrumentation remain separate profiles so every wheel
+# variant exposes the same devices, compiler targets, and media formats.
+build:loom-sdk --features=dynamic_link_msvcrt_release
+build:loom-sdk --//runtime/config/hal:drivers=task,amd
+build:loom-sdk --//libamdf/config:enabled=true
+build:loom-sdk --//libamdf/config:families=rdna,cdna,xdna
+build:loom-sdk --//loom/config/target:enable=amdgpu,spirv,vm,xdna,x86
+build:loom-sdk --//loom/config/target/arch:enable=
+build:loom-sdk --//loom/config/emit:enable=
+build:loom-sdk --//loom/config/execute:enable=iree_hal
+build:loom-sdk --//loom/config/serve:audio_codecs=wav,mp3,flac
+build:loom-sdk --//loom/config/serve:image_input=true
+build:loom-sdk --//loom/config/serve:image_codecs=png,jpeg,gif,webp
+
 # Restore native CPython symbols without changing project optimization or ASAN.
 build:python-runtime-debug --//build_tools/bazel:python_runtime_debug=true
 

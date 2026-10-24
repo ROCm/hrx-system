@@ -13,6 +13,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
+#include "loom/model/card.h"
 #include "loom/serve/runtime/program/program.h"
 #include "loomc/iree.h"
 #include "loomc/target/vm.h"
@@ -135,12 +136,12 @@ TEST_F(PreparationTest, CatalogGrowthPreservesEveryDeclaration) {
       ASSERT_EQ(parameter.source_count, 1);
       ASSERT_EQ(parameter.sources[0].count, 3);
       const auto* paths = parameter.sources[0].values;
-      EXPECT_EQ(std::string(paths[0].data, paths[0].size),
+      EXPECT_EQ(std::string(paths[0].path.data, paths[0].path.size),
                 "/checkpoints/model.safetensors");
-      EXPECT_EQ(std::string(paths[1].data, paths[1].size),
+      EXPECT_EQ(std::string(paths[1].path.data, paths[1].path.size),
                 std::string(j < 10 ? "/checkpoints/k0" : "/checkpoints/k") +
                     std::to_string(j));
-      EXPECT_EQ(std::string(paths[2].data, paths[2].size),
+      EXPECT_EQ(std::string(paths[2].path.data, paths[2].path.size),
                 "/checkpoints/weights.loom");
       EXPECT_EQ(std::string(parameter.policy.data, parameter.policy.size),
                 "weights.loom");
@@ -149,22 +150,26 @@ TEST_F(PreparationTest, CatalogGrowthPreservesEveryDeclaration) {
 }
 
 TEST_F(PreparationTest, CheckpointIdentityIncludesEveryFileAndPolicy) {
-  const iree_string_view_t files[] = {IREE_SV("first.gguf"),
-                                      IREE_SV("second.gguf")};
-  const iree_string_view_list_t sources[] = {{IREE_ARRAYSIZE(files), files}};
+  const loom_model_file_t files[] = {{IREE_SV("first.gguf"), {}},
+                                     {IREE_SV("second.gguf"), {}}};
+  const loom_model_file_list_t sources[] = {{IREE_ARRAYSIZE(files), files}};
   const loom_serve_preparation_parameter_t base = {0, 1, sources,
                                                    IREE_SV("weights.loom")};
   auto peer = base;
   peer.binding = 1;
   EXPECT_TRUE(loom_serve_preparation_parameter_equal(&base, &peer));
-  const iree_string_view_t different[] = {files[0], IREE_SV("other.gguf")};
-  iree_string_view_list_t peer_sources[] = {{2, different}, {1, files}};
+  const loom_model_file_t different[] = {files[0], {IREE_SV("other.gguf"), {}}};
+  loom_model_file_list_t peer_sources[] = {{2, different}, {1, files}};
   peer.sources = peer_sources;
   EXPECT_FALSE(loom_serve_preparation_parameter_equal(&base, &peer));
   peer_sources[0] = {1, files};
   EXPECT_FALSE(loom_serve_preparation_parameter_equal(&base, &peer));
-  const iree_string_view_t reversed[] = {files[1], files[0]};
+  const loom_model_file_t reversed[] = {files[1], files[0]};
   peer_sources[0] = {2, reversed};
+  EXPECT_FALSE(loom_serve_preparation_parameter_equal(&base, &peer));
+  const loom_model_file_t reinterpreted[] = {
+      files[0], {files[1].path, IREE_SV("safetensors")}};
+  peer_sources[0] = {2, reinterpreted};
   EXPECT_FALSE(loom_serve_preparation_parameter_equal(&base, &peer));
   peer_sources[0] = sources[0];
   EXPECT_TRUE(loom_serve_preparation_parameter_equal(&base, &peer));
@@ -188,10 +193,12 @@ TEST_F(PreparationTest, IndependentSourcesPreserveShardOrderAndDuplicateNames) {
   for (uint32_t s = 0; s < parameter.source_count; ++s) {
     const auto& source = parameter.sources[s];
     ASSERT_EQ(source.count, 2);
-    EXPECT_EQ(std::string(source.values[0].data, source.values[0].size),
-              "/checkpoints/model.safetensors");
-    EXPECT_EQ(std::string(source.values[1].data, source.values[1].size),
-              "/checkpoints/weights.loom");
+    EXPECT_EQ(
+        std::string(source.values[0].path.data, source.values[0].path.size),
+        "/checkpoints/model.safetensors");
+    EXPECT_EQ(
+        std::string(source.values[1].path.data, source.values[1].path.size),
+        "/checkpoints/weights.loom");
   }
 }
 
@@ -250,12 +257,13 @@ class PreparationCaptureTest : public PreparationTest {
   void SetUp() override {
     PreparationTest::SetUp();
     IREE_ASSERT_OK(loom_serve_preparation_module_create(
-        environment, host_allocator, &module));
+        environment, card, nullptr, host_allocator, &module));
     const iree_string_view_t roots[] = {IREE_SV("request_stages"),
                                         IREE_SV("configure_cold_stage"),
                                         IREE_SV("conflicting_parameter_policy"),
                                         IREE_SV("no_stages"),
                                         IREE_SV("shared_source"),
+                                        IREE_SV("scoped_source"),
                                         IREE_SV("cold_source"),
                                         IREE_SV("bind_source"),
                                         IREE_SV("append_source")};
@@ -270,6 +278,7 @@ class PreparationCaptureTest : public PreparationTest {
     loom_serve_preparation_free(second);
     loom_serve_program_free(program);
     iree_vm_module_release(module);
+    loom_model_card_release(card);
     PreparationTest::TearDown();
   }
 
@@ -313,7 +322,114 @@ class PreparationCaptureTest : public PreparationTest {
   iree_vm_module_t* module = nullptr;
   // Second capture kept live beside the first to prove independent ownership.
   loom_serve_preparation_t* second = nullptr;
+  // Optional selected facts retained independently by the declaration module.
+  loom_model_card_t* card = nullptr;
 };
+
+TEST_F(PreparationCaptureTest, NamedSourcesRequireASelectedCard) {
+  loom_serve_preparation_module_begin(module, 0, nullptr,
+                                      LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
+  int32_t ordinal = -1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      DeclareSource(IREE_SV("scoped_source"), IREE_SV("model"), &ordinal));
+  preparation = loom_serve_preparation_module_take(module);
+  EXPECT_EQ(loom_serve_preparation_source_count(preparation), 0u);
+}
+
+class PreparationCardCaptureTest : public PreparationCaptureTest {
+ protected:
+  void SetUp() override {
+    constexpr char kCard[] = R"json({
+      "schema_version": 1,
+      "model": {"id": "fixture/text", "name": "Shared source fixture"},
+      "programs": {"source": {"directory": "program",
+        "inputs": ["program/prepare.loom"], "libraries": [],
+        "config": {"width": 8}}},
+      "services": {"chat": {"kind": "text", "version": 1}},
+      "variants": {"small": {"services": {"chat": {
+        "programs": ["source"],
+        "parameters": {"model": {"files": ["weight/first.safetensors",
+          {"path": "weight/second.data", "format": "safetensors"}]}}
+      }}}}
+    })json";
+    IREE_ASSERT_OK(loom_model_card_parse(iree_make_cstring_view(kCard), nullptr,
+                                         host_allocator, &card));
+    PreparationCaptureTest::SetUp();
+  }
+};
+
+TEST_F(PreparationCardCaptureTest, SharedTypedSourcesOutliveTheCardAndModule) {
+  loom_serve_preparation_module_begin(module, 0, nullptr,
+                                      LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
+  int32_t ordinal = -1;
+  IREE_ASSERT_OK(
+      DeclareSource(IREE_SV("scoped_source"), IREE_SV("model"), &ordinal));
+  for (int i = 0; i < 2; ++i) {
+    iree_vm_variant_t argument = iree_vm_variant_from_i32(ordinal);
+    IREE_ASSERT_OK(Invoke(IREE_SV("bind_source"), {&argument, 1}));
+  }
+  preparation = loom_serve_preparation_module_take(module);
+  loom_serve_program_free(program);
+  program = nullptr;
+  iree_vm_module_release(module);
+  module = nullptr;
+  loom_model_card_release(card);
+  card = nullptr;
+
+  ASSERT_EQ(loom_serve_preparation_source_count(preparation), 1u);
+  const auto files = loom_serve_preparation_source(preparation, ordinal);
+  ASSERT_EQ(files.count, 2u);
+  EXPECT_EQ(std::string(files.values[0].path.data, files.values[0].path.size),
+            "weight/first.safetensors");
+  EXPECT_EQ(files.values[0].format.size, 0u);
+  EXPECT_EQ(std::string(files.values[1].path.data, files.values[1].path.size),
+            "weight/second.data");
+  EXPECT_EQ(
+      std::string(files.values[1].format.data, files.values[1].format.size),
+      "safetensors");
+  ASSERT_EQ(loom_serve_preparation_stage_count(preparation), 2u);
+  for (int i = 0; i < 2; ++i) {
+    const auto* stage = loom_serve_preparation_stage(preparation, i);
+    ASSERT_EQ(stage->parameter_count, 1u);
+    const auto& parameter = stage->parameters[0];
+    EXPECT_EQ(parameter.source_ordinals[0], ordinal);
+    EXPECT_EQ(parameter.sources[0].values, files.values);
+    EXPECT_EQ(std::string(parameter.policy.data, parameter.policy.size),
+              "program/weights.loom");
+    EXPECT_EQ(std::string(stage->config.json_object.data,
+                          stage->config.json_object.size),
+              "{\"width\":8}");
+  }
+}
+
+TEST_F(PreparationCardCaptureTest, MissingScopesCannotDeclareASource) {
+  loom_serve_preparation_module_begin(module, 0, nullptr,
+                                      LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
+  int32_t ordinal = -1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      DeclareSource(IREE_SV("scoped_source"), IREE_SV("missing"), &ordinal));
+  preparation = loom_serve_preparation_module_take(module);
+  EXPECT_EQ(loom_serve_preparation_source_count(preparation), 0u);
+}
+
+TEST_F(PreparationCardCaptureTest, CardScopesOwnTheirCompleteFileLists) {
+  loom_serve_preparation_module_begin(module, 0, nullptr,
+                                      LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
+  int32_t ordinal = -1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      DeclareSource(IREE_SV("cold_source"), IREE_SV("other.irpa"), &ordinal));
+  IREE_ASSERT_OK(
+      DeclareSource(IREE_SV("scoped_source"), IREE_SV("model"), &ordinal));
+  iree_vm_variant_t argument = iree_vm_variant_from_i32(ordinal);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Invoke(IREE_SV("append_source"), {&argument, 1}));
+  preparation = loom_serve_preparation_module_take(module);
+  EXPECT_EQ(loom_serve_preparation_source_count(preparation), 1u);
+  EXPECT_EQ(loom_serve_preparation_source(preparation, ordinal).count, 2u);
+}
 
 TEST_F(PreparationCaptureTest, RequestDeclarationsOwnValuesAcrossInvocations) {
   iree_vm_variant_t arguments[] = {iree_vm_variant_from_i64(11)};
@@ -462,9 +578,9 @@ TEST_F(PreparationCaptureTest, OneSourceServesMultipleBindingsAndStages) {
   ASSERT_EQ(loom_serve_preparation_source_count(preparation), 1u);
   const auto files = loom_serve_preparation_source(preparation, ordinal);
   ASSERT_EQ(files.count, 2u);
-  EXPECT_EQ(std::string(files.values[0].data, files.values[0].size),
+  EXPECT_EQ(std::string(files.values[0].path.data, files.values[0].path.size),
             "/checkpoints/model.irpa");
-  EXPECT_EQ(std::string(files.values[1].data, files.values[1].size),
+  EXPECT_EQ(std::string(files.values[1].path.data, files.values[1].path.size),
             "/checkpoints/weights.loom");
   ASSERT_EQ(loom_serve_preparation_stage_count(preparation), 2u);
   for (size_t i = 0; i < 2; ++i) {

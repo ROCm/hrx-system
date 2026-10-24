@@ -26,6 +26,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 import traceback
 import unittest
 from collections.abc import Callable, Iterable, Sequence
@@ -33,6 +34,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+
+# Monotonic origin for case progress, including test-module import time.
+_START_TIME = time.monotonic()
 
 
 class TestRunnerError(ValueError):
@@ -381,7 +385,11 @@ def _short_value(value: object) -> str:
 
 
 def _run_test_case(test_case: TestCase, *, include_exhaustive: bool) -> None:
-    sys.stdout.write(f"RUN {test_case.module_name}.{test_case.test_name}\n")
+    sys.stdout.write(
+        f"RUN {test_case.module_name}.{test_case.test_name} "
+        f"(+{time.monotonic() - _START_TIME:.3f}s)\n"
+    )
+    sys.stdout.flush()
     if test_case.exhaustive and not include_exhaustive:
         raise unittest.SkipTest("requires --include-exhaustive")
     kwargs = dict(test_case.parameters)

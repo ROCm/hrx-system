@@ -1,0 +1,57 @@
+{
+  "$schema": "../../../../../py/loom/model/model-card.v1.schema.json",
+  "schema_version": 1,
+  "model": {
+    "id": "loom-fixture/embedding",
+    "name": "Deterministic embedding fixture"
+  },
+  "programs": {
+    "fixture": {
+      "inputs": [
+        "prepare.loom",
+        "control.loom",
+        "service.loom"
+      ],
+      "libraries": [
+        "config.loom",
+        "embed.loom"
+      ]
+    }
+  },
+  "services": {
+    "serve": {
+      "kind": "embedding",
+      "version": 1
+    }
+  },
+  "variants": {
+    "fixture": {
+      "services": {
+        "serve": {
+          "programs": [
+            "fixture"
+          ],
+          "tokenizers": {
+            "prompt": {
+              "path": "vocabulary.data",
+              "format": "huggingface-json"
+            }
+          }
+        }
+      }
+    }
+  },
+  "presets": {
+    "check": {
+      "service": "serve",
+      "variant": "fixture",
+      "programs": "fixture",
+      "execution": {
+        "pending_requests": 4,
+        "options": {
+          "batch_units": 64
+        }
+      }
+    }
+  }
+}

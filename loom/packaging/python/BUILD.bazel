@@ -1,0 +1,179 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# bazel-to-cmake: skip
+
+load("@hrx_loom_version//:version.bzl", "MODEL_CATALOG", "PACKAGE_VERSION")
+load("@rules_python//python:packaging.bzl", "py_package")
+load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_library", "iree_py_test")
+load(":defs.bzl", "loom_python_wheel")
+load(":manylinux.bzl", "manylinux_wheel")
+load(":native.bzl", "loom_native_files")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "PYPI_README.md",
+    "README.md",
+    "defs.bzl",
+    "requirements.lock.txt",
+    "version.json",
+])
+
+[
+    config_setting(
+        name = name,
+        constraint_values = constraints,
+    )
+    for name, constraints in {
+        "linux_aarch64": [
+            "@platforms//os:linux",
+            "@platforms//cpu:aarch64",
+        ],
+        "linux_x86_64": [
+            "@platforms//os:linux",
+            "@platforms//cpu:x86_64",
+        ],
+        "windows_x86_64": [
+            "@platforms//os:windows",
+            "@platforms//cpu:x86_64",
+        ],
+    }.items()
+]
+
+# Wheel identities describe the selected native configuration. Release and Tracy
+# builds use the ordinary optimized profile; instrumentation is never selected
+# by an optional Python dependency.
+[
+    config_setting(
+        name = "profile_" + profile,
+        flag_values = {
+            "//build_tools/bazel:sanitizer": sanitizer,
+            "//runtime/config/base/tracing:provider": tracing,
+        },
+        values = values,
+    )
+    for profile, sanitizer, tracing, values in [
+        (
+            "release",
+            "false",
+            "disabled",
+            {"compilation_mode": "opt"},
+        ),
+        (
+            "tracy",
+            "false",
+            "tracy",
+            {"compilation_mode": "opt"},
+        ),
+        (
+            "debug",
+            "false",
+            "disabled",
+            {"compilation_mode": "dbg"},
+        ),
+        (
+            "asan",
+            "true",
+            "disabled",
+            {
+                "cc_output_directory_tag": "asan",
+                "features": "asan",
+            },
+        ),
+        (
+            "development",
+            "false",
+            "disabled",
+            {"compilation_mode": "fastbuild"},
+        ),
+    ]
+]
+
+loom_native_files(
+    name = "native",
+    elf_patcher = select({
+        "@platforms//os:linux": "@patchelf//:patchelf",
+        "//conditions:default": None,
+    }),
+)
+
+filegroup(
+    name = "schemas",
+    srcs = [
+        "//loom/py/loom/model:model-card.v1.schema.json",
+        "//loom/py/loom/model:model-catalog.v1.schema.json",
+        "//loom/py/loom/model:model-lock.v1.schema.json",
+    ],
+)
+
+py_package(
+    name = "package",
+    packages = ["loom.py.loom"],
+    deps = [
+        "//loom/py/loom:package",
+        "//loom/py/loom/format/bytecode",
+        "//loom/py/loom/format/text",
+        "//loom/py/loom/model:documentation",
+        "//loom/py/loom/model:fetch_cli",
+        "//loom/py/loom/tools:compile_report",
+        "//loom/py/loom/tools:export_cxx",
+        "//loom/py/loom/tools:source_lint",
+    ],
+)
+
+loom_python_wheel(
+    name = "wheel",
+    catalog = MODEL_CATALOG or "",
+    version = PACKAGE_VERSION,
+)
+
+iree_py_binary(
+    name = "manylinux",
+    srcs = ["manylinux.py"],
+    visibility = ["//visibility:private"],
+    deps = ["@loom_wheel_pip//auditwheel"],
+)
+
+manylinux_wheel(
+    name = "manylinux_wheel",
+    platform = "manylinux_2_39_x86_64",
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    wheel = ":wheel",
+)
+
+alias(
+    name = "release_wheel",
+    actual = select({
+        ":linux_x86_64": ":manylinux_wheel",
+        ":windows_x86_64": ":wheel",
+    }),
+)
+
+iree_py_library(
+    name = "release_lib",
+    srcs = ["release.py"],
+    imports = ["."],
+)
+
+iree_py_binary(
+    name = "release",
+    srcs = ["release.py"],
+    data = [
+        "PYPI_README.md",
+        "version.json",
+    ],
+)
+
+iree_py_test(
+    name = "release_test",
+    size = "small",
+    srcs = ["release_test.py"],
+    deps = [":release_lib"],
+)

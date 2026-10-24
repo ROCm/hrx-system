@@ -390,7 +390,8 @@ static iree_status_t loom_serve_weight_prepare_policy(
   iree_vm_module_t* libraries[4] = {NULL, NULL, NULL, NULL};
   const iree_string_view_t roots[] = {IREE_SVL("prepare_weight")};
   iree_status_t status = loom_serve_preparation_module_create(
-      environment, host_allocator, &libraries[0]);
+      environment, job->sources.card, job->sources.component, host_allocator,
+      &libraries[0]);
   if (iree_status_is_ok(status)) {
     status = loom_serve_weight_inputs_module_create(
         weights->inputs, environment, host_allocator, &libraries[1]);

@@ -1013,6 +1013,8 @@ def validate_register_classes(
             f"{description} alias-set ID",
         )
         uses_explicit_physical_registers = RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS in register_class.flags
+        if RegClassFlag.EXCHANGE in register_class.flags and RegClassFlag.PHYSICAL not in register_class.flags:
+            raise ValueError(f"{description} supports physical exchange without the physical flag")
         uses_contiguous_physical_register_candidates = RegClassFlag.CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES in register_class.flags
         if uses_contiguous_physical_register_candidates and not uses_explicit_physical_registers:
             raise ValueError(f"{description} uses contiguous physical register candidates without explicit physical registers")

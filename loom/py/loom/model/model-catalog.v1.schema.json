@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loom model catalog, version 1",
+  "description": "Generated discovery metadata. Relative card paths remain in the selected publication snapshot; cards own model semantics and qualification.",
+  "type": "object",
+  "required": ["schema_version", "models"],
+  "properties": {
+    "$schema": {"type": "string", "minLength": 1},
+    "schema_version": {"type": "integer", "const": 1},
+    "models": {
+      "type": "object",
+      "propertyNames": {"$ref": "model-card.v1.schema.json#/$defs/name"},
+      "additionalProperties": {
+        "type": "object",
+        "required": ["name", "card", "services", "variants", "presets"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "description": {"type": "string"},
+          "card": {"$ref": "model-card.v1.schema.json#/$defs/path"},
+          "services": {
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": {"$ref": "model-card.v1.schema.json#/$defs/name"},
+            "additionalProperties": {
+              "type": "object",
+              "required": ["kind"],
+              "properties": {
+                "kind": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+                "version": {"type": "integer", "minimum": 1, "maximum": 4294967295}
+              },
+              "additionalProperties": false
+            }
+          },
+          "variants": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "model-card.v1.schema.json#/$defs/name"}},
+          "presets": {"type": "array", "uniqueItems": true, "items": {"$ref": "model-card.v1.schema.json#/$defs/name"}}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

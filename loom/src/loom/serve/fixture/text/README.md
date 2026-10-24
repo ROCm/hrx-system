@@ -9,6 +9,30 @@ This is deterministic arithmetic, not learned language generation or a
 throughput proxy. It makes retained-session failures observable without a model
 download. Other modalities have their own [source fixtures](../README.md).
 
+The [portable card](native.card.json) names independent text and sequence
+services backed by the same provider set. [service.loom](service.loom) exports
+their distinct ABI names. The `encode` preset selects sequence requests,
+the ordered checkpoint shards, and zero JIT bias adjustment; it requires no
+tokenizer. `sequence_card_model_text` and `sequence_card_model_bc` build runnable
+packages whose CPU checks append known token IDs to a retained session and
+compare every returned activation against the dense recurrence below.
+
+The [partitioned card](partition.card.json) gives the same variant two named
+executable partitions, `node-0` and `other side`. Each selects a complete text
+service with its own checkpoint source. Their effective bias values are 3 and
+4, producing `abab` and `xbbx` for prompt `a`. Acquisition checks that each
+installation fetches only its selected weights; native checks consume those
+installations after their HTTP origin shuts down. The `partition_model_text`
+and `partition_model_bc` targets check an explicit partition override through
+the ordinary model build rule.
+
+The [swatch card](swatch.card.json) selects the `bias` tensor from a larger
+safetensors checkpoint and aligns the local archive's payload base to 4096
+bytes. The acquisition test serves both the complete and selected archives
+through the native server and checks `abab` after shutting down the origin.
+It checks exact HTTP ranges, optional source preservation, a compact local
+mirror, and offline reuse without requiring external model weights.
+
 ## Definition and independent oracle
 
 Token IDs are `a=0`, `b=1`, `x=2`, `#=3`. `#` is the terminal token and the

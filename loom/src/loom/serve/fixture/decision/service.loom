@@ -1,0 +1,29 @@
+// Decision service roles share the fixture implementation and numerical oracle.
+
+func.decl @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer)
+
+func.def public @decision_prepare_v1(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer) {
+  %result_0, %result_1, %result_2, %result_3, %result_4, %result_5, %result_6 = func.call @prepare(%directory, %options) : (buffer, buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer)
+  func.return %result_0, %result_1, %result_2, %result_3, %result_4, %result_5, %result_6 : i64, i64, i64, i64, buffer, buffer, buffer
+}
+
+func.decl @prepare_request(%state: buffer, %request: buffer) -> (buffer, i64, i64)
+
+func.def public @decision_prepare_request_v1(%state: buffer, %request: buffer) -> (buffer, i64, i64) {
+  %result_0, %result_1, %result_2 = func.call @prepare_request(%state, %request) : (buffer, buffer) -> (buffer, i64, i64)
+  func.return %result_0, %result_1, %result_2 : buffer, i64, i64
+}
+
+func.decl @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer)
+
+func.def public @decision_prepare_batch_v1(%state: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer) {
+  %result_0, %result_1, %result_2 = func.call @prepare_batch(%state, %tags, %ranges, %packed) : (buffer, buffer, buffer, buffer) -> (i32, buffer, buffer)
+  func.return %result_0, %result_1, %result_2 : i32, buffer, buffer
+}
+
+func.decl @run(%stage: i32, %input: hal.buffer, %output: hal.buffer)
+
+func.def public @decision_run_v1(%stage: i32, %input: hal.buffer, %output: hal.buffer) {
+  func.call @run(%stage, %input, %output) : (i32, hal.buffer, hal.buffer)
+  func.return
+}

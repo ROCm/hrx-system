@@ -999,12 +999,13 @@ static iree_status_t loom_serve_text_registration_create(
           (text->session_cache_capacity ? text->session_cache_capacity + 1 : 0),
       .options = configuration->options};
   iree_status_t status = iree_ok_status();
-  if (text->image.prepare.size) {
+  if (text->image.contract || text->image.prepare.size) {
     loom_serve_finite_model_options_t image_options = {
         .sources = configuration->sources,
         .asset_directory = text->image.assets,
         .options = text->image.options,
         .specialization_cache = text->image.specialization_cache};
+    image_options.sources.component = text->image.contract;
     image_options.sources.prepare = text->image.prepare;
     image_options.sources.control = text->image.control;
     status = loom_serve_finite_component_allocate(
@@ -1084,6 +1085,8 @@ loom_serve_registration_factory_t loom_serve_model_registration_factory(
                (1u << LOOM_SERVE_MODEL_KIND_SEQUENCE) |
                (1u << LOOM_SERVE_MODEL_KIND_TEXT),
       .device_count = loom_serve_device_group_count(options->device_group),
+      .resolution_sink = loom_serve_host_compiler_sink(loom_serve_device_host(
+          loom_serve_device_group_at(options->device_group, 0))),
       .create = loom_serve_model_registration_create,
       .query_status = loom_serve_model_registration_query_status};
 }

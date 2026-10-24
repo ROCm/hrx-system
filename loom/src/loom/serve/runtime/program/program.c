@@ -5,6 +5,9 @@
 
 #include "loom/serve/runtime/program/program.h"
 
+#include <stdio.h>
+#include <string.h>
+
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/sync.h"
 #include "loom/serve/runtime/program/jit.h"
@@ -16,6 +19,11 @@ struct loom_serve_program_t {
   iree_vm_program_t* program;
   // Borrowed executable module retained by the linked program.
   iree_vm_module_t* module;
+  // Optional retained service contract; generic programs use exact symbols.
+  loom_model_card_t* card;
+  // Borrowed component contract owned by card; NULL selects its primary
+  // service.
+  const loom_model_component_t* component;
   // Owned process borrowing no session state.
   iree_vm_process_t* process;
   // Fixed invocation backing, independent of request and token counts.
@@ -33,6 +41,7 @@ void loom_serve_program_free(loom_serve_program_t* program) {
     iree_vm_invocation_deinitialize(program->invocation);
   }
   iree_vm_program_release(program->program);
+  loom_model_card_release(program->card);
   iree_allocator_free(program->host_allocator, program);
 }
 
@@ -59,6 +68,120 @@ iree_status_t loom_serve_program_compile(
     }
   }
   IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_status_t loom_serve_program_service_names(
+    const loom_model_selection_t* model,
+    const loom_model_component_t* component, iree_host_size_t count,
+    const iree_string_view_t* roles, iree_allocator_t host_allocator,
+    iree_string_view_t** out_names) {
+  *out_names = NULL;
+  const iree_string_view_t prefix =
+      component ? component->export_prefix : model->kind;
+  const uint32_t version = component ? component->version : model->version;
+  char suffix[16] = {0};
+  const iree_host_size_t suffix_length =
+      version
+          ? (iree_host_size_t)snprintf(suffix, sizeof(suffix), "_v%u", version)
+          : 0;
+  iree_host_size_t size = 0;
+  bool representable =
+      iree_host_size_checked_mul(count, sizeof(**out_names), &size);
+  for (iree_host_size_t i = 0; i < count && representable; ++i) {
+    representable = iree_host_size_checked_add(size, prefix.size, &size) &&
+                    iree_host_size_checked_add(size, roles[i].size, &size) &&
+                    iree_host_size_checked_add(size, 1 + suffix_length, &size);
+  }
+  if (!representable) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "service export names exceed host storage");
+  }
+  iree_string_view_t* names = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, size, (void**)&names));
+  char* cursor = (char*)(names + count);
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    char* begin = cursor;
+    memcpy(cursor, prefix.data, prefix.size);
+    cursor += prefix.size;
+    *cursor++ = '_';
+    memcpy(cursor, roles[i].data, roles[i].size);
+    cursor += roles[i].size;
+    memcpy(cursor, suffix, suffix_length);
+    cursor += suffix_length;
+    names[i] = iree_make_string_view(begin, cursor - begin);
+  }
+  *out_names = names;
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_program_compile_service(
+    loomc_target_environment_t* target_environment,
+    iree_vm_environment_t* environment, const loom_serve_sources_t* sources,
+    iree_string_view_t source_path, iree_host_size_t root_count,
+    const iree_string_view_t* roles, loom_serve_compilation_report_t* report,
+    iree_allocator_t host_allocator, iree_vm_module_t** out_module) {
+  *out_module = NULL;
+  iree_string_view_t* names = NULL;
+  if (sources->card) {
+    IREE_RETURN_IF_ERROR(loom_serve_program_service_names(
+        loom_model_card_selection(sources->card), sources->component,
+        root_count, roles, host_allocator, &names));
+  }
+  iree_status_t status = loom_serve_program_compile(
+      target_environment, environment, sources, source_path, root_count,
+      names ? names : roles, report, host_allocator, out_module);
+  iree_allocator_free(host_allocator, names);
+  return status;
+}
+
+iree_status_t loom_serve_program_link_service(
+    iree_vm_module_t* module, loom_model_card_t* card,
+    const loom_model_component_t* component, iree_vm_module_span_t libraries,
+    iree_allocator_t host_allocator, loom_serve_program_t** out_program) {
+  IREE_RETURN_IF_ERROR(
+      loom_serve_program_link(module, libraries, host_allocator, out_program));
+  (*out_program)->card = card;
+  (*out_program)->component = component;
+  loom_model_card_retain(card);
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_program_allocate_service(
+    loomc_target_environment_t* target_environment,
+    iree_vm_environment_t* environment, const loom_serve_sources_t* sources,
+    iree_string_view_t source_path, iree_host_size_t root_count,
+    const iree_string_view_t* roles, iree_vm_module_span_t libraries,
+    loom_serve_compilation_report_t* report, iree_allocator_t host_allocator,
+    loom_serve_program_t** out_program) {
+  *out_program = NULL;
+  iree_vm_module_t* module = NULL;
+  iree_status_t status = loom_serve_program_compile_service(
+      target_environment, environment, sources, source_path, root_count, roles,
+      report, host_allocator, &module);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_program_link_service(module, sources->card,
+                                             sources->component, libraries,
+                                             host_allocator, out_program);
+  }
+  iree_vm_module_release(module);
+  return status;
+}
+
+iree_status_t loom_serve_program_lookup(loom_serve_program_t* program,
+                                        iree_string_view_t name,
+                                        iree_vm_function_t* out_function) {
+  iree_string_view_t* names = NULL;
+  if (program->card) {
+    IREE_RETURN_IF_ERROR(loom_serve_program_service_names(
+        loom_model_card_selection(program->card), program->component, 1, &name,
+        program->host_allocator, &names));
+  }
+  iree_status_t status =
+      iree_vm_process_lookup_function(program->process, IREE_SV("model"),
+                                      names ? names[0] : name, out_function);
+  iree_allocator_free(program->host_allocator, names);
   return status;
 }
 
@@ -178,14 +301,16 @@ static iree_status_t loom_serve_program_check_fields(
   return iree_ok_status();
 }
 
-iree_status_t loom_serve_program_bind(
+static iree_status_t loom_serve_program_bind_names(
     loom_serve_program_t* program, iree_host_size_t binding_count,
-    const loom_serve_program_binding_t* bindings) {
+    const loom_serve_program_binding_t* bindings,
+    const iree_string_view_t* names) {
   for (iree_host_size_t i = 0; i < binding_count; ++i) {
     const loom_serve_program_binding_t* binding = &bindings[i];
+    const iree_string_view_t name = names ? names[i] : binding->name;
     iree_vm_export_t export_value = {0};
-    IREE_RETURN_IF_ERROR(iree_vm_module_lookup_export(
-        program->module, binding->name, &export_value));
+    IREE_RETURN_IF_ERROR(
+        iree_vm_module_lookup_export(program->module, name, &export_value));
     iree_vm_module_export_declaration_t declaration = {0};
     IREE_RETURN_IF_ERROR(iree_vm_module_query_export(
         program->module, export_value.ordinal, &declaration));
@@ -197,18 +322,44 @@ iree_status_t loom_serve_program_bind(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "model export '%.*s' must be synchronous; source "
                               "declares a yielding function",
-                              (int)binding->name.size, binding->name.data);
+                              (int)name.size, name.data);
     }
     IREE_RETURN_IF_ERROR(loom_serve_program_check_fields(
-        program->module, binding->name, "argument", binding->arguments,
+        program->module, name, "argument", binding->arguments,
         callable.signature.arguments));
     IREE_RETURN_IF_ERROR(loom_serve_program_check_fields(
-        program->module, binding->name, "result", binding->results,
+        program->module, name, "result", binding->results,
         callable.signature.results));
     IREE_RETURN_IF_ERROR(iree_vm_function_from_export(
         program->process, export_value, binding->function));
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_serve_program_bind(
+    loom_serve_program_t* program, iree_host_size_t binding_count,
+    const loom_serve_program_binding_t* bindings) {
+  if (!program->card) {
+    return loom_serve_program_bind_names(program, binding_count, bindings,
+                                         NULL);
+  }
+  iree_string_view_t* roles = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      program->host_allocator, binding_count, sizeof(*roles), (void**)&roles));
+  for (iree_host_size_t i = 0; i < binding_count; ++i) {
+    roles[i] = bindings[i].name;
+  }
+  iree_string_view_t* names = NULL;
+  iree_status_t status = loom_serve_program_service_names(
+      loom_model_card_selection(program->card), program->component,
+      binding_count, roles, program->host_allocator, &names);
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_serve_program_bind_names(program, binding_count, bindings, names);
+  }
+  iree_allocator_free(program->host_allocator, names);
+  iree_allocator_free(program->host_allocator, roles);
+  return status;
 }
 
 iree_vm_process_t* loom_serve_program_process(loom_serve_program_t* program) {

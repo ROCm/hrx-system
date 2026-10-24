@@ -1,0 +1,114 @@
+// Three backedges exchange the active lanes' raw words. Restoring EXEC exposes
+// the untouched lanes as well as NaN-like and sign-bit payloads.
+amdgpu.target<gfx11-generic> @wave32 {subgroup_size = 32}
+
+amdgpu.target<gfx11-generic> @wave64 {subgroup_size = 64}
+
+low.func.def schedule(locked) target<amdgpu.gfx11.generic.core> @masked_exchange(%lane: reg<amdgpu.vgpr>, %input: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
+  %offset = v_lshlrev_b32_src0_inline %lane, 3
+  %loaded = global_load_b64_saddr %offset, %input
+  %left = slice %loaded[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %right = slice %loaded[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %saved_exec = s_mov_b64_exec_read
+  %limit = v_mov_b32 32
+  %count = s_mov_b32 4
+  %step = s_mov_b32 1
+  %c0 = s_mov_b32 0
+  low.br ^loop(%left: reg<amdgpu.vgpr>, %right: reg<amdgpu.vgpr>, %count: reg<amdgpu.sgpr>)
+^loop(%a: reg<amdgpu.vgpr>, %b: reg<amdgpu.vgpr>, %remaining: reg<amdgpu.sgpr>):
+  %active = v_cmp_lt_u32 %lane, %limit
+  %previous, %any = s_and_saveexec_b64 %active
+  %next = s_sub_u32 %remaining, %step
+  %again = s_cmp_gt_u32 %next, %c0
+  low.cond_br %again, ^back, ^exit : reg<amdgpu.scc>
+^back:
+  low.br ^loop(%b: reg<amdgpu.vgpr>, %a: reg<amdgpu.vgpr>, %next: reg<amdgpu.sgpr>)
+^exit:
+  s_mov_b64_exec %saved_exec
+  %packed = concat(%a, %b) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %offset, %packed, %output
+  return
+}
+
+kernel.def target(@wave32) @exchange_wave32() {
+  %unit = index.constant 1 : index
+  %lanes = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane_index = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane_index : index to i32
+  %lane = vector.splat %lane_i32 : vector<1xi32>
+  low.invoke @masked_exchange(%lane, %input, %output) : (vector<1xi32>, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@wave64) @exchange_wave64() {
+  %unit = index.constant 1 : index
+  %lanes = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%lanes, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %lane_index = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane_index : index to i32
+  %lane = vector.splat %lane_i32 : vector<1xi32>
+  low.invoke @masked_exchange(%lane, %input, %output) : (vector<1xi32>, buffer, buffer)
+  kernel.return
+}
+
+func.def @exchange_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<64x2xi32>
+  %target = buffer.view %output[%origin] : buffer -> view<64x2xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %limit = index.constant 32 : index
+  %end = index.constant 64 : index
+  scf.for %lane = [%c0 to %end step %c1] {
+    %active = index.cmp ult, %lane, %limit : index
+    scf.for %column = [%c0 to %c2 step %c1] {
+      %opposite = index.sub %c1, %column : index
+      %source_column = scf.select %active, %opposite, %column : index
+      %value = view.load %source[%lane, %source_column] : view<64x2xi32> -> i32
+      view.store %value, %target[%lane, %column] : i32, view<64x2xi32>
+    }
+  }
+  func.return
+}
+
+check.scenario @exchange_wave32_preserves_inactive_lanes {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(2139095040) step(37) : tensor<64x2xi32>
+    %output = check.generate.fill value(-1) : tensor<64x2xi32>
+    check.compare<@exchange_wave32, @exchange_oracle>(%input, %output) : (tensor<64x2xi32>, tensor<64x2xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64x2xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(-1) : tensor<64x2xi32>
+    %signs = check.generate.iota offset(-2147483648) step(1) : tensor<64x2xi32>
+    check.compare<@exchange_wave32, @exchange_oracle>(%signs, %output) : (tensor<64x2xi32>, tensor<64x2xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64x2xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @exchange_wave64_preserves_inactive_lanes {
+  check.requires<hal.amdgpu.target> {target = "gfx11-generic"}
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(2139095040) step(37) : tensor<64x2xi32>
+    %output = check.generate.fill value(-1) : tensor<64x2xi32>
+    check.compare<@exchange_wave64, @exchange_oracle>(%input, %output) : (tensor<64x2xi32>, tensor<64x2xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64x2xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(-1) : tensor<64x2xi32>
+    %signs = check.generate.iota offset(-2147483648) step(1) : tensor<64x2xi32>
+    check.compare<@exchange_wave64, @exchange_oracle>(%signs, %output) : (tensor<64x2xi32>, tensor<64x2xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64x2xi32>
+    }
+  }
+  check.return
+}

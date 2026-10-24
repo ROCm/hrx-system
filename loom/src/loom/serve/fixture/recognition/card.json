@@ -1,0 +1,64 @@
+{
+  "$schema": "../../../../../py/loom/model/model-card.v1.schema.json",
+  "schema_version": 1,
+  "model": {
+    "id": "loom-fixture/recognition",
+    "name": "Continuing recognition fixture"
+  },
+  "programs": {
+    "development": {
+      "inputs": [
+        "prepare.loom",
+        "control.loom",
+        "service.loom"
+      ],
+      "libraries": [
+        "generate.loombc"
+      ]
+    }
+  },
+  "services": {
+    "transcription": {
+      "kind": "recognition",
+      "version": 1
+    },
+    "activity": {
+      "kind": "activity",
+      "version": 1
+    }
+  },
+  "variants": {
+    "fixture": {
+      "services": {
+        "transcription": {
+          "programs": [
+            "development"
+          ]
+        },
+        "activity": {
+          "programs": [
+            "development"
+          ]
+        }
+      }
+    }
+  },
+  "presets": {
+    "default": {
+      "service": "transcription",
+      "variant": "fixture",
+      "programs": "development",
+      "execution": {
+        "pending_requests": 4
+      }
+    },
+    "activity": {
+      "service": "activity",
+      "variant": "fixture",
+      "programs": "development",
+      "execution": {
+        "pending_requests": 4
+      }
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "origins": {},
+  "files": [
+    {
+      "origin": "advance.loom",
+      "size": 14132,
+      "sha256": "398f8dade7449fc3a697f4b7bfcb7231c8c76d8c675682c77b366c3c19c6a1ae"
+    },
+    {
+      "origin": "bias.data",
+      "size": 76,
+      "sha256": "ffad45c5dd6fd5aa71e98414507ee8cf854d2934e778ccdfebfd116e8f4961f6"
+    },
+    {
+      "origin": "control.loom",
+      "size": 36612,
+      "sha256": "dbb5f46e163715b64b1af48be513a24de8dc54e7f37d24b027e6f00042adac09"
+    },
+    {
+      "origin": "metadata.safetensors",
+      "size": 76,
+      "sha256": "8c172416b535ccc7abccaaedc0caa976c6b64a400c72f25dc8cb88a0eef0ff80"
+    },
+    {
+      "origin": "prepare.loom",
+      "size": 11557,
+      "sha256": "09d6e25e0c78c91897ddfcced6bf677b71df926011439be1fa1775f8b4b05527"
+    },
+    {
+      "origin": "service.loom",
+      "size": 23817,
+      "sha256": "c0137da9b7fafeb050deae0b1d90905c81b3bcbeb5218ca2372e0549f4b0180a"
+    },
+    {
+      "origin": "tokenizer.json",
+      "size": 281,
+      "sha256": "b5da12a5215c1bf232871b15ad84de3204b43cf847d46b7b3a13600c4d3e211d"
+    },
+    {
+      "origin": "weights.loom",
+      "size": 121,
+      "sha256": "fb3c96e131283f9f78f45b2fff79bd3b2e86f292e012f1f37d752e15edafc916"
+    }
+  ]
+}

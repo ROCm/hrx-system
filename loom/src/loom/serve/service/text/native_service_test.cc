@@ -111,8 +111,8 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
     loom_serve_model_configuration_t configuration;
     if (FLAG_native_text_model[0]) {
       IREE_ASSERT_OK(loom_serve_model_configuration_load(
-          iree_make_cstring_view(FLAG_native_text_model), host_allocator_,
-          &configuration));
+          iree_make_cstring_view(FLAG_native_text_model),
+          iree_string_view_empty(), host_allocator_, &configuration));
     } else {
       const auto declaration =
           Declaration("fixture-text", directory_, "drained");

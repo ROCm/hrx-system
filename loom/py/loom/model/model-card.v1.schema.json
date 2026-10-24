@@ -1,0 +1,791 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loom model card, version 1",
+  "description": "Portable model definition, service contracts, typed inputs, and acquisition origins. Authored as plain JSON for standard JSON tools.",
+  "$comment": "The bundled contract is selected by schema_version. Semantic validation additionally checks references, compatible selections, file collisions, and ownership of source paths.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "model",
+    "programs",
+    "services",
+    "variants"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Editor schema association. Consumers use their bundled contract selected by schema_version and never fetch this URI to admit a model."
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Model-card format revision, independent of SDK releases, service ABI revisions, and provider file encodings."
+    },
+    "model": {
+      "$ref": "#/$defs/model"
+    },
+    "origins": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/originRoot"
+      },
+      "description": "Shared acquisition roots. Invocation overrides change transport without changing locked logical identities."
+    },
+    "programs": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/programSet"
+      },
+      "description": "Named provider sets. Names have no source/bytecode or target semantics."
+    },
+    "services": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/service"
+      },
+      "description": "Named service implementations. Several entries may implement different ABI revisions of the same kind using the same provider files."
+    },
+    "variants": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/variant"
+      },
+      "description": "Named parameter/configuration variants and their compatible service/program selections."
+    },
+    "presets": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/preset"
+      },
+      "description": "Canonical runnable, test, or benchmark selections. HTTP deployment policy belongs to a separate document."
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\u0000]+$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!\\.{1,2}(?:/|$))(?!.*?/\\.{1,2}(?:/|$))[^/\\\\:\u0000]+(?:/[^/\\\\:\u0000]+)*$",
+      "description": "Normalized relative destination under the materialized card directory. It is independent of the upstream origin path."
+    },
+    "names": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/name"
+      },
+      "uniqueItems": true
+    },
+    "originRoot": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "repository"
+          ],
+          "properties": {
+            "kind": {
+              "const": "hf"
+            },
+            "repository": {
+              "$ref": "#/$defs/name"
+            },
+            "revision": {
+              "$ref": "#/$defs/name"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Hugging Face repository root. A floating or omitted revision is resolved once per acquisition; locks retain the immutable result."
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "url"
+          ],
+          "properties": {
+            "kind": {
+              "const": "url"
+            },
+            "url": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "description": "HTTP(S) directory root. Source resolution validates its scheme and relative joining."
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "local"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "description": "Local source root owned by a local card or caller override; a remote card cannot grant itself arbitrary host filesystem access."
+        }
+      ]
+    },
+    "fileOrigin": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "description": "Complete logical source locator, such as @checkpoint/tokenizer/tokenizer.json, independent of local placement."
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "repository",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "hf"
+            },
+            "repository": {
+              "$ref": "#/$defs/name"
+            },
+            "revision": {
+              "$ref": "#/$defs/name"
+            },
+            "path": {
+              "$ref": "#/$defs/path"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "url"
+          ],
+          "properties": {
+            "kind": {
+              "const": "url"
+            },
+            "url": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "local"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "base64"
+          ],
+          "properties": {
+            "kind": {
+              "const": "inline"
+            },
+            "base64": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Inline content, useful for small constant parameter tables; decoding is validated before acquisition."
+        }
+      ]
+    },
+    "groupOrigin": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Source directory locator such as @checkpoint/. Appends each destination path exactly once, only when that entry has no explicit origin."
+    },
+    "file": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/path"
+        },
+        {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "$ref": "#/$defs/path"
+            },
+            "origin": {
+              "$ref": "#/$defs/fileOrigin"
+            },
+            "format": {
+              "$ref": "#/$defs/name",
+              "description": "Format within the containing semantic role. Filename inference is permitted only when unambiguous for that role."
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "provider": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/path"
+        },
+        {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "$ref": "#/$defs/path"
+            },
+            "origin": {
+              "$ref": "#/$defs/fileOrigin"
+            },
+            "format": {
+              "$ref": "#/$defs/name"
+            },
+            "options": {
+              "$ref": "#/$defs/names",
+              "description": "Explicit importer options, interpreted by the selected importer."
+            },
+            "data": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/file"
+              },
+              "description": "Declared auxiliary files needed by this provider, including preparation inputs outside the link index."
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "programSet": {
+      "type": "object",
+      "required": [
+        "inputs",
+        "libraries"
+      ],
+      "properties": {
+        "origin": {
+          "$ref": "#/$defs/groupOrigin"
+        },
+        "directory": {
+          "oneOf": [
+            {
+              "const": "."
+            },
+            {
+              "$ref": "#/$defs/path"
+            }
+          ],
+          "description": "Program execution context. This never rebases file paths authored in the card."
+        },
+        "inputs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/provider"
+          }
+        },
+        "libraries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/provider"
+          }
+        },
+        "config": {
+          "$ref": "#/$defs/config"
+        }
+      },
+      "additionalProperties": false
+    },
+    "service": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "examples": [
+            "text",
+            "sequence",
+            "image",
+            "embedding",
+            "decision",
+            "speech",
+            "recognition",
+            "activity"
+          ],
+          "description": "Service contract family. Support for a selected kind/version is checked by the host; an unselected newer service does not invalidate an older supported service."
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Exact service ABI revision. Omission explicitly means unversioned development behavior, not version 1 or automatic compatibility negotiation.",
+          "maximum": 4294967295
+        },
+        "options": {
+          "$ref": "#/$defs/names",
+          "description": "Model-owned preparation options accepted from canonical presets."
+        },
+        "interface": {
+          "type": "object",
+          "description": "Service-owned public input/output description."
+        },
+        "constraints": {
+          "type": "object",
+          "description": "Service-owned admission constraints; shape does not establish executable support."
+        },
+        "components": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/component"
+          },
+          "description": "Roles defined by the service, such as text.image for image projection. Exports use <kind>_<role>_<entry>_vN."
+        }
+      },
+      "additionalProperties": false
+    },
+    "parameterIndex": {
+      "type": "object",
+      "required": [
+        "files"
+      ],
+      "properties": {
+        "origin": {
+          "$ref": "#/$defs/groupOrigin"
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/parameterFile"
+          },
+          "description": "Ordered files/shards loaded into this one parameter scope."
+        }
+      },
+      "additionalProperties": false
+    },
+    "serviceVariant": {
+      "type": "object",
+      "required": [
+        "programs"
+      ],
+      "properties": {
+        "programs": {
+          "$ref": "#/$defs/names",
+          "minItems": 1,
+          "description": "Compatible named provider sets."
+        },
+        "config": {
+          "$ref": "#/$defs/config"
+        },
+        "parameters": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/name"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/parameterIndex"
+          },
+          "description": "Code-facing parameter index scopes; several shards can populate one scope."
+        },
+        "tokenizers": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/name"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/file"
+          },
+          "description": "Code-facing tokenizer identities. Role is explicit and independent of filename extensions."
+        }
+      },
+      "additionalProperties": false
+    },
+    "variant": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "services": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/name"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/serviceVariant"
+          }
+        },
+        "partitions": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/name"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/partition"
+          },
+          "description": "Arbitrary named executable partitions. Each owns a complete service closure; names imply no machine, device, or scheduling policy."
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "services"
+          ]
+        },
+        {
+          "required": [
+            "partitions"
+          ]
+        }
+      ]
+    },
+    "preset": {
+      "type": "object",
+      "required": [
+        "service",
+        "variant",
+        "programs"
+      ],
+      "properties": {
+        "service": {
+          "$ref": "#/$defs/name"
+        },
+        "variant": {
+          "$ref": "#/$defs/name"
+        },
+        "programs": {
+          "$ref": "#/$defs/name"
+        },
+        "options": {
+          "type": "object",
+          "description": "Values for options explicitly accepted by the selected service."
+        },
+        "execution": {
+          "type": "object",
+          "description": "Service-owned canonical execution settings."
+        },
+        "request": {
+          "type": "object",
+          "description": "Service-owned canonical request settings."
+        },
+        "workload": {
+          "type": "object",
+          "description": "Canonical check/scenario/benchmark workload settings."
+        },
+        "partition": {
+          "$ref": "#/$defs/name",
+          "description": "One partition of the selected variant. Omitted only when the variant has no named partitions or a single choice."
+        },
+        "memory": {
+          "$ref": "#/$defs/memory",
+          "description": "Optional author estimates for this exact selection and assumed workload. Informational only; not a scheduler or hardware-fit contract."
+        },
+        "components": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "options": {
+                "type": "object"
+              },
+              "execution": {
+                "type": "object"
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Canonical options and execution defaults for components declared by the selected service."
+        }
+      },
+      "additionalProperties": false
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/name",
+          "description": "Canonical base model identity, normally original-training HF organization/model."
+        },
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "description": {
+          "type": "string"
+        },
+        "license": {
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/$defs/originRoot",
+          "description": "Model provenance, not an implicit acquisition default."
+        },
+        "implementation": {
+          "type": "object",
+          "required": [
+            "repository",
+            "revision",
+            "path"
+          ],
+          "properties": {
+            "repository": {
+              "$ref": "#/$defs/name"
+            },
+            "revision": {
+              "$ref": "#/$defs/name"
+            },
+            "path": {
+              "$ref": "#/$defs/path"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "config": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "type": [
+          "string",
+          "boolean",
+          "integer",
+          "number"
+        ]
+      }
+    },
+    "partition": {
+      "type": "object",
+      "required": [
+        "services"
+      ],
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "services": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/name"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/serviceVariant"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "parameterFile": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/file"
+        },
+        {
+          "type": "object",
+          "required": [
+            "path",
+            "format",
+            "transform"
+          ],
+          "properties": {
+            "path": {
+              "$ref": "#/$defs/path"
+            },
+            "origin": {
+              "$ref": "#/$defs/fileOrigin"
+            },
+            "format": {
+              "const": "safetensors"
+            },
+            "transform": {
+              "$ref": "#/$defs/transform"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "transform": {
+      "type": "object",
+      "required": [
+        "kind",
+        "version"
+      ],
+      "properties": {
+        "kind": {
+          "const": "safetensors"
+        },
+        "version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "alignment": {
+          "type": "integer",
+          "enum": [
+            8,
+            16,
+            32,
+            64,
+            128,
+            256,
+            512,
+            1024,
+            2048,
+            4096,
+            8192,
+            16384,
+            32768,
+            65536,
+            131072,
+            262144,
+            524288,
+            1048576
+          ],
+          "default": 8,
+          "description": "Align the payload base by padding header whitespace; tensor bytes are unchanged."
+        },
+        "tensors": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          },
+          "description": "Select these complete named tensors. Omission preserves all tensors."
+        }
+      },
+      "additionalProperties": false
+    },
+    "memory": {
+      "type": "object",
+      "required": [
+        "workload"
+      ],
+      "properties": {
+        "weights_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "description": "Approximate resident prepared-parameter bytes. Omit when unknown."
+        },
+        "transient_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "description": "Approximate additional request/state/workspace bytes for the stated workload. Omit when unknown."
+        },
+        "workload": {
+          "$ref": "#/$defs/name",
+          "description": "Assumptions and coverage of these estimates, including excluded overhead."
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "weights_bytes"
+          ]
+        },
+        {
+          "required": [
+            "transient_bytes"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "component": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Exact component ABI revision. Omission explicitly means unversioned development behavior, not version 1 or automatic compatibility negotiation.",
+          "maximum": 4294967295
+        },
+        "options": {
+          "$ref": "#/$defs/names",
+          "description": "Model-owned preparation options accepted from canonical presets."
+        },
+        "interface": {
+          "type": "object",
+          "description": "Service-owned public input/output description."
+        },
+        "constraints": {
+          "type": "object",
+          "description": "Service-owned admission constraints; shape does not establish executable support."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Service-owned component sharing the selected providers and parameter scopes. Its ABI revision is independent of its parent service."
+    }
+  }
+}

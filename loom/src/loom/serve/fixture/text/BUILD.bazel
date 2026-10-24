@@ -4,6 +4,10 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:python.bzl", "iree_py_binary")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_generated_file")
+load("//loom/build_tools/bazel:loom_library.bzl", "loom_library")
+load("//loom/build_tools/bazel:loom_model.bzl", "loom_model")
 load(":sources.bzl", "SOURCE_FILES")
 
 package(default_visibility = ["//visibility:private"])
@@ -12,6 +16,306 @@ exports_files(
     SOURCE_FILES + [
         "portable_chat.loom",
         "tokenizer_merging.json",
+        "service.loom",
+        "native.card.json",
+        "native.card.json.lock",
+        "image.card.json",
+        "partition.card.json",
+        "swatch.card.json",
+        "native.source.json",
+        "native.archive.json",
+        "native.mixed.json",
+        "native.development.json",
     ],
     visibility = ["//visibility:public"],
 )
+
+loom_library(
+    name = "service_module",
+    srcs = [
+        "control.loom",
+        "prepare.loom",
+        "service.loom",
+    ],
+)
+
+loom_library(
+    name = "control_module",
+    srcs = ["control.loom"],
+)
+
+loom_library(
+    name = "advance_module",
+    srcs = ["advance.loom"],
+)
+
+filegroup(
+    name = "native_card_assets",
+    srcs = [
+        "native.card.json",
+        "tokenizer.json",
+        "weights.loom",
+        ":bias.data",
+        ":metadata.safetensors",
+    ],
+)
+
+filegroup(
+    name = "native_source_files",
+    srcs = [
+        "advance.loom",
+        "control.loom",
+        "prepare.loom",
+        "service.loom",
+        ":native_card_assets",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "native_archive_files",
+    srcs = [
+        ":advance_module",
+        ":native_card_assets",
+        ":service_module",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "native_mixed_files",
+    srcs = [
+        "prepare.loom",
+        "service.loom",
+        ":advance_module",
+        ":control_module",
+        ":native_card_assets",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+iree_py_binary(
+    name = "parameters",
+    srcs = ["parameters.py"],
+    main = "parameters.py",
+)
+
+loom_generated_file(
+    name = "metadata_shard",
+    args = [
+        "--key=unused",
+        "--value=0",
+    ],
+    generator = ":parameters",
+    output = "metadata.safetensors",
+    output_flag = "--output=",
+)
+
+loom_generated_file(
+    name = "bias_shard",
+    args = [
+        "--key=bias",
+        "--value=2",
+    ],
+    generator = ":parameters",
+    output = "bias.data",
+    output_flag = "--output=",
+    visibility = ["//visibility:public"],
+)
+
+loom_model(
+    name = "card_model",
+    assets = {
+        ":bias.data": "bias.data",
+        ":metadata.safetensors": "metadata.safetensors",
+        "tokenizer.json": "tokenizer.json",
+    },
+    card = "native.card.json",
+    data = {"weights.loom": "weights.loom"},
+    files = {
+        "advance.loom": "advance.loom",
+        "control.loom": "control.loom",
+        "prepare.loom": "prepare.loom",
+        "service.loom": "service.loom",
+    },
+    model_name = "fixture-text",
+    preset = "check",
+    tags = ["skip-bazel_to_cmake"],
+    visibility = ["//visibility:public"],
+)
+
+loom_generated_file(
+    name = "partition_bias_shard",
+    args = [
+        "--key=bias",
+        "--value=3",
+    ],
+    generator = ":parameters",
+    output = "alternate.data",
+    output_flag = "--output=",
+    visibility = ["//visibility:public"],
+)
+
+[
+    loom_model(
+        name = "partition_model_" + encoding,
+        assets = {
+            ":alternate.data": "bias.data",
+            ":metadata.safetensors": "metadata.safetensors",
+            "tokenizer.json": "tokenizer.json",
+        },
+        card = "partition.card.json",
+        data = {"weights.loom": "weights.loom"},
+        encoding = encoding,
+        files = {
+            "advance.loom": "advance.loom",
+            "control.loom": "control.loom",
+            "prepare.loom": "prepare.loom",
+            "service.loom": "service.loom",
+        },
+        model_name = "fixture-text",
+        partition = "other side",
+        preset = "check",
+        tags = ["skip-bazel_to_cmake"],
+        visibility = ["//visibility:public"],
+    )
+    for encoding in [
+        "text",
+        "bc",
+    ]
+]
+
+loom_model(
+    name = "card_model_mixed",
+    assets = {
+        ":bias.data": "bias.data",
+        ":metadata.safetensors": "metadata.safetensors",
+        "tokenizer.json": "tokenizer.json",
+    },
+    card = "native.card.json",
+    data = {"weights.loom": "weights.loom"},
+    encoding = "preserve",
+    files = {
+        ":advance_module": "advance_module.loombc",
+        ":control_module": "control_module.loombc",
+        "prepare.loom": "prepare.loom",
+        "service.loom": "service.loom",
+    },
+    model_name = "fixture-text",
+    preset = "check",
+    programs = "mixed",
+    tags = ["skip-bazel_to_cmake"],
+    visibility = ["//visibility:public"],
+)
+
+[
+    loom_model(
+        name = "sequence_card_model_" + encoding,
+        assets = {
+            ":bias.data": "bias.data",
+            ":metadata.safetensors": "metadata.safetensors",
+        },
+        card = "native.card.json",
+        data = {"weights.loom": "weights.loom"},
+        encoding = encoding,
+        files = {
+            "advance.loom": "advance.loom",
+            "control.loom": "control.loom",
+            "prepare.loom": "prepare.loom",
+            "service.loom": "service.loom",
+        },
+        model_name = "fixture-sequence",
+        preset = "encode",
+        tags = ["skip-bazel_to_cmake"],
+        visibility = ["//visibility:public"],
+    )
+    for encoding in [
+        "text",
+        "bc",
+    ]
+]
+
+# Publish compiler artifacts without bringing runtime parameters into the build.
+[
+    loom_model(
+        name = "fetch_model_" + name,
+        card = "native.card.json",
+        data = {"weights.loom": "weights.loom"},
+        encoding = encoding,
+        files = {
+            ":advance_module": "advance_module.loombc",
+            ":control_module": "control_module.loombc",
+            "prepare.loom": "prepare.loom",
+            "service.loom": "service.loom",
+        } if programs == "mixed" else {
+            "advance.loom": "advance.loom",
+            "control.loom": "control.loom",
+            "prepare.loom": "prepare.loom",
+            "service.loom": "service.loom",
+        },
+        lockfile = "native.card.json.lock",
+        model_name = "fixture-text",
+        preset = "check",
+        programs = programs,
+        tags = ["skip-bazel_to_cmake"],
+        visibility = ["//visibility:public"],
+    )
+    for name, encoding, programs in [
+        ("source", "preserve", "source"),
+        ("archive", "bc", "source"),
+        ("mixed", "preserve", "mixed"),
+    ]
+]
+
+loom_library(
+    name = "multimodal",
+    srcs = [
+        "advance.loom",
+        "control.loom",
+        "prepare.loom",
+        "service.loom",
+        "//loom/src/loom/serve/fixture/projector:control.loom",
+        "//loom/src/loom/serve/fixture/projector:project.loom",
+        "//loom/src/loom/serve/fixture/projector:service.loom",
+        "//loom/src/loom/serve/fixture/projector:weighted_project.loom",
+    ],
+)
+
+[
+    loom_model(
+        name = "image_" + name,
+        assets = {
+            ":bias.data": "bias.data",
+            ":metadata.safetensors": "metadata.safetensors",
+            "tokenizer.json": "tokenizer.json",
+        } if name == "model" else {},
+        card = "image.card.json",
+        data = {"weights.loom": "weights.loom"},
+        encoding = "preserve",
+        files = {":multimodal": "multimodal.loombc"} if programs == "archive" else ({
+            "//loom/src/loom/serve/fixture/projector:control.loom": "image/control.loom",
+            "//loom/src/loom/serve/fixture/projector:project.loom": "image/project.loom",
+            "//loom/src/loom/serve/fixture/projector:service.loom": "image/service.loom",
+            "//loom/src/loom/serve/fixture/projector:weighted_project.loom": "image/weighted_project.loom",
+            "prepare.loom": "prepare.loom",
+            "service.loom": "service.loom",
+        } | ({
+            ":advance_module": "advance_module.loombc",
+            ":control_module": "control_module.loombc",
+        } if programs == "mixed" else {
+            "advance.loom": "advance.loom",
+            "control.loom": "control.loom",
+        })),
+        model_name = "fixture-text",
+        preset = "check",
+        programs = programs,
+        tags = ["skip-bazel_to_cmake"],
+        visibility = ["//visibility:public"],
+    )
+    for name, programs in [
+        ("model", "source"),
+        ("fetch_source", "source"),
+        ("fetch_archive", "archive"),
+        ("fetch_mixed", "mixed"),
+    ]
+]

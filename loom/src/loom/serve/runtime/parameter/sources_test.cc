@@ -68,8 +68,7 @@ class ParameterSourcesTest : public ::testing::Test {
   // Original immutable model source.
   iree::testing::TempFilePath first_{"parameter_source_first", ".safetensors"};
   // Request source deliberately reusing the first source's key.
-  iree::testing::TempFilePath second_{"parameter_source_second",
-                                      ".safetensors"};
+  iree::testing::TempFilePath second_{"parameter_source_second", ".data"};
   // Additional shard in the original source's namespace.
   iree::testing::TempFilePath shard_{"parameter_source_shard", ".safetensors"};
   // Absent path used to exercise partially accepted cold indexing.
@@ -82,12 +81,12 @@ class ParameterSourcesTest : public ::testing::Test {
 };
 
 TEST_F(ParameterSourcesTest, OrderedShardsAndIndependentKeysRetainTheirPrefix) {
-  const iree_string_view_t paths[] = {
-      iree_make_cstring_view(first_.path().c_str()),
-      iree_make_cstring_view(shard_.path().c_str()),
-      iree_make_cstring_view(second_.path().c_str())};
-  const iree_string_view_list_t base = {2, paths};
-  const iree_string_view_list_t extension = {1, paths + 2};
+  const loom_model_file_t paths[] = {
+      {iree_make_cstring_view(first_.path().c_str()), {}},
+      {iree_make_cstring_view(shard_.path().c_str()), {}},
+      {iree_make_cstring_view(second_.path().c_str()), IREE_SV("safetensors")}};
+  const loom_model_file_list_t base = {2, paths};
+  const loom_model_file_list_t extension = {1, paths + 2};
   IREE_ASSERT_OK(loom_serve_parameter_sources_create(
       nullptr, &namespace_, 1, &base, allocator_, &prefix_));
   auto* provider = loom_serve_parameter_sources_provider(prefix_, 0);
@@ -110,8 +109,9 @@ TEST_F(ParameterSourcesTest, EmptyExtensionRetainsWithoutAllocatingOrOpening) {
       nullptr, &namespace_, 0, nullptr, iree_allocator_null(), &catalog_));
   EXPECT_EQ(catalog_, nullptr);
   EXPECT_EQ(loom_serve_parameter_sources_count(catalog_), 0u);
-  const auto path = iree_make_cstring_view(first_.path().c_str());
-  const iree_string_view_list_t files = {1, &path};
+  const loom_model_file_t path = {iree_make_cstring_view(first_.path().c_str()),
+                                  {}};
+  const loom_model_file_list_t files = {1, &path};
   IREE_ASSERT_OK(loom_serve_parameter_sources_create(
       nullptr, &namespace_, 1, &files, allocator_, &prefix_));
   IREE_ASSERT_OK(loom_serve_parameter_sources_create(
@@ -123,12 +123,12 @@ TEST_F(ParameterSourcesTest, EmptyExtensionRetainsWithoutAllocatingOrOpening) {
 }
 
 TEST_F(ParameterSourcesTest, FailedExtensionDoesNotChangeThePrefix) {
-  const iree_string_view_t paths[] = {
-      iree_make_cstring_view(first_.path().c_str()),
-      iree_make_cstring_view(second_.path().c_str()),
-      iree_make_cstring_view(missing_.path().c_str())};
-  const iree_string_view_list_t base = {1, paths};
-  const iree_string_view_list_t extension[] = {{1, paths + 1}, {1, paths + 2}};
+  const loom_model_file_t paths[] = {
+      {iree_make_cstring_view(first_.path().c_str()), {}},
+      {iree_make_cstring_view(second_.path().c_str()), IREE_SV("safetensors")},
+      {iree_make_cstring_view(missing_.path().c_str()), {}}};
+  const loom_model_file_list_t base = {1, paths};
+  const loom_model_file_list_t extension[] = {{1, paths + 1}, {1, paths + 2}};
   IREE_ASSERT_OK(loom_serve_parameter_sources_create(
       nullptr, &namespace_, 1, &base, allocator_, &prefix_));
   IREE_EXPECT_STATUS_IS(

@@ -1,0 +1,30 @@
+{
+  "$schema": "../../../../../py/loom/model/model-card.v1.schema.json",
+  "schema_version": 1,
+  "model": {"id": "loom-fixture/image", "name": "Deterministic image fixture"},
+  "programs": {
+    "fixture": {
+      "inputs": ["prepare.loom", "control.loom", "service.loom"],
+      "libraries": ["config.loom", "generate.loom"]
+    }
+  },
+  "services": {"render": {"kind": "image", "version": 1}},
+  "variants": {
+    "fixture": {
+      "services": {
+        "render": {
+          "programs": ["fixture"],
+          "tokenizers": {
+            "prompt": {"path": "vocabulary.data", "format": "huggingface-json"}
+          }
+        }
+      }
+    }
+  },
+  "presets": {
+    "check": {
+      "service": "render", "variant": "fixture", "programs": "fixture",
+      "execution": {"width": 7, "height": 5, "text_tokens": 32, "pending_requests": 4}
+    }
+  }
+}

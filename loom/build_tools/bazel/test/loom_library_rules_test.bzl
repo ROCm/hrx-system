@@ -16,6 +16,7 @@ load(
     "LoomExecutionTestInfo",
     "LoomLibraryInfo",
     "loom_execution_profile",
+    "loom_test_module",
 )
 
 REFERENCE_PROFILE = loom_execution_profile(
@@ -137,6 +138,8 @@ def _test_library_keeps_dependency_module_separate_impl(env, target):
     _expect_basename(env, reports, "library_consumer.dependencies.json")
 
 def _test_deps_only_library_propagates_dependencies(name, **kwargs):
+    if native.existing_rule("library_aggregate_test"):
+        fail("deps-only libraries must not create an implicit all-package test suite")
     analysis_test(
         name = name,
         attr_values = {
@@ -487,20 +490,123 @@ def _test_execution_module_links_root_tests_impl(env, target):
     _expect_no_basename(env, inputs, "profile_cases.loom")
     _expect_no_basename(env, inputs, "profile_benchmarks.loom")
 
+def _test_direct_sources_own_checks_once(name, **kwargs):
+    analysis_test(
+        name = name,
+        impl = _test_direct_sources_own_checks_once_impl,
+        targets = {
+            "format": ":direct_source_test_format_0_test",
+            "format_launcher": ":direct_source_test_format_0_test_launcher",
+            "library": ":direct_source_test_module_library",
+            "lint": ":direct_source_test_lint_0_test",
+            "lint_launcher": ":direct_source_test_lint_0_test_launcher",
+            "module": ":direct_source_test_module",
+            "suite": ":direct_source_test",
+        },
+        **kwargs
+    )
+
+def _expect_source_check(env, target, source, manual):
+    attributes = target[TestingAspectInfo].attrs
+    env.expect.that_collection(attributes.tags).contains_exactly(
+        ["hostonly", "manual"] if manual else ["hostonly"],
+    )
+    env.expect.that_collection([
+        constraint.label.name
+        for constraint in attributes.target_compatible_with
+    ]).contains_exactly(["source_provider_available"])
+    files = target[DefaultInfo].default_runfiles.files.to_list()
+    _expect_basename(env, files, source)
+    for file in files:
+        if file.basename.endswith(".loombc"):
+            env.fail("source check depends on a linked artifact: %s" % file)
+
+def _test_direct_sources_own_checks_once_impl(env, targets):
+    env.expect.that_collection([
+        test.label.name
+        for test in targets.suite[TestingAspectInfo].attrs.tests
+    ]).contains_exactly([
+        "direct_source_test_lint_0_test",
+        "direct_source_test_format_0_test",
+        "direct_source_test_all_execute_reference_test",
+        "direct_source_test_all_execute_serialized_reference_test",
+        "direct_source_test_selected_execute_reference_test",
+        "direct_source_test_selected_execute_serialized_reference_test",
+    ])
+    for check in [targets.lint, targets.format]:
+        _expect_source_check(env, check, "profile_cases.loom", manual = False)
+    for check in [targets.lint_launcher, targets.format_launcher]:
+        _expect_source_check(env, check, "profile_cases.loom", manual = True)
+    for artifact in [targets.module, targets.library]:
+        env.expect.that_collection(artifact[TestingAspectInfo].attrs.tags).contains("manual")
+
+def _test_reusable_module_owns_source_checks(name, **kwargs):
+    analysis_test(
+        name = name,
+        impl = _test_reusable_module_owns_source_checks_impl,
+        targets = {
+            "consumer": ":correctness_only_test",
+            "format": ":profiled_module_format_1_test",
+            "lint": ":profiled_module_lint_1_test",
+            "suite": ":profiled_module_test",
+        },
+        **kwargs
+    )
+
+def _test_reusable_module_owns_source_checks_impl(env, targets):
+    env.expect.that_collection([
+        test.label.name
+        for test in targets.suite[TestingAspectInfo].attrs.tests
+    ]).contains_exactly([
+        "profiled_module_lint_0_test",
+        "profiled_module_format_0_test",
+        "profiled_module_lint_1_test",
+        "profiled_module_format_1_test",
+    ])
+    env.expect.that_collection([
+        test.label.name
+        for test in targets.consumer[TestingAspectInfo].attrs.tests
+    ]).contains_exactly(["correctness_only_test_execute_reference_test"])
+    for check in [targets.lint, targets.format]:
+        _expect_source_check(env, check, "profile_cases.loom", manual = True)
+
+def _test_nontext_module_has_no_source_suite(name, **kwargs):
+    module_name = name + "_module"
+    loom_test_module(
+        name = module_name,
+        srcs = [":profiled_module"],
+        tags = ["manual"],
+    )
+    if native.existing_rule(module_name + "_test"):
+        fail("non-text inputs must not create an implicit all-package test suite")
+    analysis_test(
+        name = name,
+        impl = _test_nontext_module_has_no_source_suite_impl,
+        target = ":" + module_name + "_library",
+        **kwargs
+    )
+
+def _test_nontext_module_has_no_source_suite_impl(env, target):
+    action = _find_action(env, target[TestingAspectInfo].actions, "LoomLibrary")
+    _expect_basename(env, action.inputs.to_list(), "profiled_module.loombc")
+
 def loom_library_rules_test_suite(name):
     test_suite(
         name = name,
         tests = [
             _test_correctness_only_profile_omits_benchmark_runner,
             _test_deps_only_library_propagates_dependencies,
+            _test_direct_sources_own_checks_once,
             _test_execution_module_links_root_tests,
             _test_execution_profile_contract,
             _test_explicit_runner_owns_profile_execution,
             _test_generated_kernel_binary_is_testonly,
             _test_grouped_execution_root_sources,
             _test_library_keeps_dependency_module_separate,
+            _test_nontext_module_has_no_source_suite,
             _test_redundant_direct_dependency_is_not_transitive,
             _test_resource_profile_preserves_direct_execution,
+            _test_reusable_module_owns_source_checks,
             _test_transitive_audit_universe_is_separate,
         ],
     )

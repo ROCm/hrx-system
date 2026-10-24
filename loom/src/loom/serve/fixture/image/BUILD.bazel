@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//loom/build_tools/bazel:loom_model.bzl", "loom_model")
 load(":sources.bzl", "SOURCE_FILES")
 
 package(default_visibility = ["//visibility:private"])
@@ -12,3 +13,27 @@ exports_files(
     SOURCE_FILES,
     visibility = ["//visibility:public"],
 )
+
+[
+    loom_model(
+        name = "card_model_" + encoding,
+        assets = {"tokenizer.json": "vocabulary.data"},
+        card = "card.json",
+        encoding = encoding,
+        files = {
+            "config.loom": "config.loom",
+            "control.loom": "control.loom",
+            "generate.loom": "generate.loom",
+            "prepare.loom": "prepare.loom",
+            "service.loom": "service.loom",
+        },
+        model_name = "pixels",
+        preset = "check",
+        tags = ["skip-bazel_to_cmake"],
+        visibility = ["//visibility:public"],
+    )
+    for encoding in [
+        "text",
+        "bc",
+    ]
+]

@@ -456,6 +456,17 @@ def test_exact_descriptor_storage_orders_portable_view_as_prefix() -> None:
 
 
 @pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+def test_only_full_vgpr_units_support_physical_exchange(target) -> None:
+    for register_class in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target].base.reg_classes:
+        assert (RegClassFlag.EXCHANGE in register_class.flags) == (
+            register_class.name == _REG_VGPR
+        )
+        if RegClassFlag.EXCHANGE in register_class.flags:
+            assert RegClassFlag.PHYSICAL in register_class.flags
+            assert register_class.alloc_unit_bits == 32
+
+
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
 def test_v_readlane_b32_reserves_unused_vop3_source(target) -> None:
     overlays = {
         overlay.descriptor_key: overlay

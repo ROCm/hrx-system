@@ -21,6 +21,8 @@ _CommandInfo = provider("Expanded commands and enabled cross-toolchain capabilit
     "compiler": "Compiler action executable path.",
     # Whether the unsupported native-Windows export helper is disabled.
     "explicit_exports": "Automatic exports disabled.",
+    # Fully expanded shared-library link arguments from the same configuration.
+    "link_arguments": "Link arguments.",
     # Whether the ELF-style ThinLTO indexing/backend graph is enabled.
     "split_lto": "ELF ThinLTO enabled.",
 })
@@ -39,11 +41,22 @@ def _command_impl(ctx):
         output_file = "probe.obj",
         user_compile_flags = ctx.attr.copts,
     )
+    link_variables = cc_common.create_link_variables(
+        cc_toolchain = compiler,
+        feature_configuration = configuration,
+        output_file = "probe.dll",
+        is_linking_dynamic_library = True,
+    )
     return [_CommandInfo(
         arguments = cc_common.get_memory_inefficient_command_line(
             feature_configuration = configuration,
             action_name = ACTION_NAMES.cpp_compile,
             variables = variables,
+        ),
+        link_arguments = cc_common.get_memory_inefficient_command_line(
+            feature_configuration = configuration,
+            action_name = ACTION_NAMES.cpp_link_dynamic_library,
+            variables = link_variables,
         ),
         explicit_exports = cc_common.is_enabled(feature_configuration = configuration, feature_name = "no_windows_export_all_symbols"),
         split_lto = cc_common.is_enabled(feature_configuration = configuration, feature_name = "thin_lto"),
@@ -87,23 +100,42 @@ def _test_sanitizer_impl(env, target):
     env.expect.that_collection(command.arguments).not_contains("/clang:-flto=thin")
     env.expect.that_collection(command.arguments).not_contains("/clang:-O3")
 
-def _test_static_release_crt(name, **kwargs):
-    _command(name = name + "_subject", profile = ["dbg", "static_link_msvcrt_release"])
-    analysis_test(name = name, target = name + "_subject", impl = _test_static_release_crt_impl, **kwargs)
+_CRT_CASES = {
+    "dynamic_debug": (["dbg"], "/MDd", "msvcrtd"),
+    "dynamic_debug_release_crt": (["dbg", "dynamic_link_msvcrt_release"], "/MD", "msvcrt"),
+    "dynamic_fastbuild": (["fastbuild"], "/MD", "msvcrt"),
+    "dynamic_optimized": (["opt"], "/MD", "msvcrt"),
+    "dynamic_optimized_release_crt": (["opt", "dynamic_link_msvcrt_release"], "/MD", "msvcrt"),
+    "static_debug": (["dbg", "static_link_msvcrt"], "/MTd", "libcmtd"),
+    "static_debug_release_crt": (["dbg", "static_link_msvcrt_release"], "/MT", "libcmt"),
+    "static_optimized": (["opt", "static_link_msvcrt"], "/MT", "libcmt"),
+    "static_overrides_dynamic": (["dbg", "static_link_msvcrt", "dynamic_link_msvcrt_release"], "/MTd", "libcmtd"),
+    "static_release_overrides_dynamic": (["dbg", "static_link_msvcrt_release", "dynamic_link_msvcrt_release"], "/MT", "libcmt"),
+}
 
-def _test_static_release_crt_impl(env, target):
-    arguments = target[_CommandInfo].arguments
-    env.expect.that_collection(arguments).contains("/MT")
-    env.expect.that_collection(arguments).not_contains("/MTd")
+def _test_crt_commands(name, **kwargs):
+    targets = {}
+    for kind, compiler in [("cross", ":compiler"), ("native", ":native_wrapped_compiler")]:
+        for case, (profile, _, _) in _CRT_CASES.items():
+            key = kind + "_" + case
+            subject = name + "_" + key
+            _command(name = subject, compiler = compiler, profile = profile)
+            targets[key] = subject
+    analysis_test(name = name, targets = targets, impl = _test_crt_commands_impl, **kwargs)
 
-def _test_static_debug_crt(name, **kwargs):
-    _command(name = name + "_subject", profile = ["dbg", "static_link_msvcrt"])
-    analysis_test(name = name, target = name + "_subject", impl = _test_static_debug_crt_impl, **kwargs)
-
-def _test_static_debug_crt_impl(env, target):
-    arguments = target[_CommandInfo].arguments
-    env.expect.that_collection(arguments).contains("/MTd")
-    env.expect.that_collection(arguments).not_contains("/MT")
+def _test_crt_commands_impl(env, targets):
+    for kind in ["cross", "native"]:
+        for case, (profile, compile_flag, library) in _CRT_CASES.items():
+            key = kind + "_" + case
+            command = getattr(targets, key)[_CommandInfo]
+            compile_flags = [flag for flag in command.arguments if flag in ["/MD", "/MDd", "/MT", "/MTd"]]
+            link_flags = [flag for flag in command.link_arguments if flag in ["/DEFAULTLIB:" + name + ".lib" for name in ["msvcrt", "msvcrtd", "libcmt", "libcmtd"]]]
+            if compile_flags != [compile_flag] or link_flags != ["/DEFAULTLIB:" + library + ".lib"]:
+                env.fail("%s: inconsistent CRT selection: compile=%s link=%s" % (key, compile_flags, link_flags))
+            if "dbg" in profile:
+                for flag in ["/Od", "/Z7"]:
+                    env.expect.that_collection(command.arguments).contains(flag)
+                env.expect.that_collection(command.arguments).not_contains("/DNDEBUG")
 
 def _test_native_configuration(name, **kwargs):
     analysis_test(name = name, target = ":native_configuration", impl = _test_native_configuration_impl, **kwargs)
@@ -157,7 +189,7 @@ def _test_native_linker_inputs_impl(env, target):
         env.expect.that_collection(link.argv).contains(builtins[0].path)
 
 def toolchain_config_test_suite(name):
-    tests = [_test_optimized, _test_sanitizer, _test_static_release_crt, _test_static_debug_crt, _test_native_configuration, _test_native_command, _test_native_compiler_mismatch]
+    tests = [_test_optimized, _test_sanitizer, _test_crt_commands, _test_native_configuration, _test_native_command, _test_native_compiler_mismatch]
     if "@platforms//os:windows" in HOST_CONSTRAINTS:
         tests.append(_test_native_linker_inputs)
     test_suite(

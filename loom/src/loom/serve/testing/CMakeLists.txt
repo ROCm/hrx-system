@@ -295,10 +295,12 @@ loom_cc_binary(
     iree::vm
     loom::binding::c::loomc
     loom::binding::c::target::vm
+    loom::model::card
     loom::serve::runtime::program
     loom::serve::runtime::program::compilation
     loom::serve::runtime::program::input
     loom::serve::runtime::program::json
+    loom::serve::runtime::program::sources
     loom::serve::service::text::chat
     loom::util::json
     loom::util::stream
@@ -413,10 +415,25 @@ iree_py_library(
     http
   SRCS
     "loom_serve_testing/http_harness.py"
+    "loom_serve_testing/process.py"
   IMPORTS
     "."
   DEPS
     loom::serve::testing::logs
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+iree_py_library(
+  NAME
+    model_staging
+  SRCS
+    "loom_serve_testing/model_staging.py"
+  IMPORTS
+    "."
+  DEPS
+    loom::py::loom::model::fetch_storage
+    loom::py::loom::model::manifest
 )
 endif()
 
@@ -431,6 +448,27 @@ iree_py_test(
   DEPS
     loom::serve::testing::http
     loom::serve::testing::logs
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+  TIMEOUT
+    60
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+iree_py_test(
+  NAME
+    process_test
+  MAIN
+    "loom_serve_testing/process_test.py"
+  SRCS
+    "loom_serve_testing/process_test.py"
+  DEPS
+    loom::serve::testing::http
   LABELS
     "iree-build-requirement=loom.target.arch.vm"
   PACKAGE_DIRS

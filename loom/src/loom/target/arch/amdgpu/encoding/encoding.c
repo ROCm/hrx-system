@@ -670,14 +670,9 @@ iree_status_t loom_amdgpu_encoding_pack_s_mov_b32_u32(
       out_packet);
 }
 
-iree_status_t loom_amdgpu_encoding_pack_v_mov_b32_vgpr(
-    const loom_amdgpu_encoding_table_t* table, uint16_t vdst, uint16_t vsrc0,
-    loom_amdgpu_encoding_packet_t* out_packet) {
-  if (table == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "AMDGPU v_mov_b32 encoding requires an encoding table");
-  }
+static iree_status_t loom_amdgpu_encoding_pack_vop1_vgpr(
+    const loom_amdgpu_encoding_table_t* table, uint16_t opcode, uint16_t vdst,
+    uint16_t vsrc0, loom_amdgpu_encoding_packet_t* out_packet) {
   loom_amdgpu_encoding_field_value_t field_values[] = {
       {
           .field_id = LOOM_AMDGPU_ENCODING_FIELD_VDST,
@@ -689,8 +684,27 @@ iree_status_t loom_amdgpu_encoding_pack_v_mov_b32_vgpr(
       },
   };
   return loom_amdgpu_encoding_pack(table, LOOM_AMDGPU_ENCODING_FORMAT_VOP1,
-                                   table->v_mov_b32_opcode, field_values,
+                                   opcode, field_values,
                                    IREE_ARRAYSIZE(field_values), out_packet);
+}
+
+iree_status_t loom_amdgpu_encoding_pack_v_mov_b32_vgpr(
+    const loom_amdgpu_encoding_table_t* table, uint16_t vdst, uint16_t vsrc0,
+    loom_amdgpu_encoding_packet_t* out_packet) {
+  if (table == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "AMDGPU v_mov_b32 encoding requires an encoding table");
+  }
+  return loom_amdgpu_encoding_pack_vop1_vgpr(table, table->v_mov_b32_opcode,
+                                             vdst, vsrc0, out_packet);
+}
+
+iree_status_t loom_amdgpu_encoding_pack_v_swap_b32(
+    const loom_amdgpu_encoding_table_t* table, uint16_t vdst, uint16_t vsrc0,
+    loom_amdgpu_encoding_packet_t* out_packet) {
+  return loom_amdgpu_encoding_pack_vop1_vgpr(table, table->v_swap_b32_opcode,
+                                             vdst, vsrc0, out_packet);
 }
 
 iree_status_t loom_amdgpu_encoding_pack_v_mov_b32_sgpr(

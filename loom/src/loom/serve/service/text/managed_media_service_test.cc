@@ -32,7 +32,8 @@ bool HasField(const std::string& object, const char* name) {
   return !iree_string_view_is_empty(value);
 }
 
-class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest {
+class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest,
+                                public ::testing::WithParamInterface<bool> {
  protected:
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(RegisteredSourceTextServiceTest::SetUp());
@@ -46,6 +47,13 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest {
         std::filesystem::copy_file(weights_, assets_ + "/weights.safetensors"));
     ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/weights.loom",
                                            assets_ + "/weights.loom"));
+    if (GetParam()) {
+      const char* declaration = std::getenv("LOOM_SERVE_TEST_TEXT_IMAGE_CARD");
+      ASSERT_NE(declaration, nullptr);
+      std::filesystem::copy(
+          std::filesystem::absolute(declaration).parent_path(),
+          assets_ + "/card", std::filesystem::copy_options::recursive);
+    }
   }
 
   void TearDown() override {
@@ -56,6 +64,34 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest {
   }
 
   std::string ImageDeclaration(const std::string& assets = "") {
+    if (GetParam()) {
+      auto path = assets_ + "/card/model.json";
+      if (!assets.empty()) {
+        std::ifstream input(path);
+        std::string json((std::istreambuf_iterator<char>(input)), {});
+        iree_string_view_t value =
+            iree_make_string_view(json.data(), json.size());
+        for (const char* name : {"variants", "fixture", "services", "chat",
+                                 "parameters", "vision"}) {
+          iree_string_view_t next;
+          IREE_EXPECT_OK(iree_json_lookup_object_value(
+              value, iree_make_cstring_view(name), &next));
+          value = next;
+        }
+        json.replace(
+            value.data - json.data(), value.size,
+            R"({"files":[{"path":"missing.safetensors","format":"safetensors"}]})");
+        path = assets_ + "/card/missing.json";
+        std::ofstream output(path);
+        output << json;
+        output.close();
+        EXPECT_TRUE(output.good());
+      }
+      return "{\"name\":\"fixture-text\",\"admission\":\"drained\",\"model\":{"
+             "\"path\":\"" +
+             path +
+             "\",\"preset\":\"check\"},\"definition\":{\"kind\":\"text\"}}";
+    }
     const std::string image =
         ",\"image\":{\"prepare\":\"" + projector_directory_ +
         "/weighted_prepare.loom\",\"control\":\"" + projector_directory_ +
@@ -71,6 +107,9 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest {
     const auto declaration = ImageDeclaration(assets);
     const auto response = Read(Send(declaration, "", "/v1/models/register"));
     ASSERT_EQ(response.find("HTTP/1.1 202"), 0u) << response;
+    if (GetParam()) {
+      ASSERT_FALSE(WaitModel("fixture-text", "\"image\":").empty());
+    }
   }
 
   void Control(const char* operation, const char* component = "",
@@ -236,7 +275,7 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest {
   std::string assets_;
 };
 
-TEST_F(ManagedMediaServiceTest, ExplicitWarmupAndPinPolicyAreComponentScoped) {
+TEST_P(ManagedMediaServiceTest, ExplicitWarmupAndPinPolicyAreComponentScoped) {
   ASSERT_NO_FATAL_FAILURE(Register());
   ASSERT_NO_FATAL_FAILURE(Control("pin", "image"));
   EXPECT_EQ(Field(Parameters("image"), "pinned"), "true");
@@ -282,7 +321,7 @@ TEST_F(ManagedMediaServiceTest, ExplicitWarmupAndPinPolicyAreComponentScoped) {
   EXPECT_EQ(Field(Parameters("image"), "pinned"), "false");
 }
 
-TEST_F(ManagedMediaServiceTest,
+TEST_P(ManagedMediaServiceTest,
        ImageTrimPreservesTextCheckpointAndCachedMedia) {
   ASSERT_NO_FATAL_FAILURE(Register());
   ASSERT_NO_FATAL_FAILURE(Activate());
@@ -350,7 +389,7 @@ TEST_F(ManagedMediaServiceTest,
       0u);
 }
 
-TEST_F(ManagedMediaServiceTest, FailedImageWarmupLeavesTextAvailable) {
+TEST_P(ManagedMediaServiceTest, FailedImageWarmupLeavesTextAvailable) {
   ASSERT_NO_FATAL_FAILURE(Register(assets_ + "/missing"));
   ASSERT_NO_FATAL_FAILURE(Activate("image"));
   EXPECT_EQ(Field(State(), "registration"), "ready");
@@ -372,7 +411,7 @@ TEST_F(ManagedMediaServiceTest, FailedImageWarmupLeavesTextAvailable) {
   EXPECT_FALSE(http_.failed());
 }
 
-TEST_F(ManagedMediaServiceTest, ComponentSelectorsValidateTheDeclaredBoundary) {
+TEST_P(ManagedMediaServiceTest, ComponentSelectorsValidateTheDeclaredBoundary) {
   ASSERT_NO_FATAL_FAILURE(Register());
   for (const char* fields : {R"("component":"missing")", R"("component":0)",
                              R"("component":"image","component":"primary")"}) {
@@ -393,12 +432,15 @@ TEST_F(ManagedMediaServiceTest, ComponentSelectorsValidateTheDeclaredBoundary) {
   EXPECT_EQ(Field(State(), "registration"), "registered");
 }
 
-TEST_F(ManagedMediaServiceTest, RemovalJoinsAcceptedImagePreparation) {
+TEST_P(ManagedMediaServiceTest, RemovalJoinsAcceptedImagePreparation) {
   RemoveDuring(LOOM_SERVE_PARAMETER_OPERATION_WAITING);
 }
 
-TEST_F(ManagedMediaServiceTest, RemovalJoinsAcceptedImageActivation) {
+TEST_P(ManagedMediaServiceTest, RemovalJoinsAcceptedImageActivation) {
   RemoveDuring(LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING);
 }
+
+INSTANTIATE_TEST_SUITE_P(Declarations, ManagedMediaServiceTest,
+                         ::testing::Bool());
 
 }  // namespace

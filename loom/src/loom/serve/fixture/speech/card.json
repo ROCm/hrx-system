@@ -1,0 +1,53 @@
+{
+  "$schema": "../../../../../py/loom/model/model-card.v1.schema.json",
+  "schema_version": 1,
+  "model": {
+    "id": "loom-fixture/speech",
+    "name": "Deterministic speech fixture"
+  },
+  "programs": {
+    "fixture": {
+      "inputs": [
+        "prepare.loom",
+        "control.loom",
+        "service.loom"
+      ],
+      "libraries": [
+        "generate.loom"
+      ]
+    }
+  },
+  "services": {
+    "serve": {
+      "kind": "speech",
+      "version": 1
+    }
+  },
+  "variants": {
+    "fixture": {
+      "services": {
+        "serve": {
+          "programs": [
+            "fixture"
+          ],
+          "tokenizers": {
+            "prompt": {
+              "path": "vocabulary.data",
+              "format": "huggingface-json"
+            }
+          }
+        }
+      }
+    }
+  },
+  "presets": {
+    "check": {
+      "service": "serve",
+      "variant": "fixture",
+      "programs": "fixture",
+      "execution": {
+        "pending_requests": 4
+      }
+    }
+  }
+}
