@@ -8,10 +8,10 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 #include "amdf/media/av1.h"
-#include "amdf/media/gfx11.h"
 #include "amdf/media/h264.h"
 #include "amdf/media/hevc.h"
 #include "libamdf/cts/gpu/pm4/encoding/commands.h"
@@ -65,6 +65,208 @@ ExpectedComponents ExpectedPixel(uint32_t x, uint32_t y, bool p010) {
     v = v * 4 + chroma_y % 4;
   }
   return {luma, u, v};
+}
+
+class Av1BitReader {
+ public:
+  Av1BitReader(const uint8_t* bytes, uint64_t byte_length, uint64_t byte_offset)
+      : bytes_(bytes),
+        bit_capacity_(byte_length * 8),
+        bit_offset_(byte_offset * 8) {}
+
+  uint32_t Read(uint32_t bit_count) {
+    if (!valid_ || bit_count > 32 ||
+        bit_count > bit_capacity_ - std::min(bit_offset_, bit_capacity_)) {
+      valid_ = false;
+      return 0;
+    }
+    uint32_t value = 0;
+    for (uint32_t index = 0; index < bit_count; ++index) {
+      value = (value << 1) |
+              ((bytes_[bit_offset_ / 8] >> (7 - bit_offset_ % 8)) & 1u);
+      ++bit_offset_;
+    }
+    return value;
+  }
+
+  int32_t ReadSigned(uint32_t bit_count) {
+    const uint32_t value = Read(bit_count);
+    return (value & (1u << (bit_count - 1))) != 0
+               ? static_cast<int32_t>(value | (~uint32_t{0} << bit_count))
+               : static_cast<int32_t>(value);
+  }
+
+  bool AlignWithZero() {
+    while (valid_ && bit_offset_ % 8 != 0) {
+      if (Read(1) != 0) {
+        return false;
+      }
+    }
+    return valid_;
+  }
+
+  bool valid() const { return valid_; }
+  uint64_t byte_offset() const { return bit_offset_ / 8; }
+
+ private:
+  const uint8_t* bytes_;
+  uint64_t bit_capacity_;
+  uint64_t bit_offset_;
+  bool valid_ = true;
+};
+
+// Linux VCN emits the complete sized frame OBU while the decode API takes the
+// frame controls and tile payload separately. Recover exactly the shown,
+// single-tile key-frame envelope produced by this CTS configuration.
+::testing::AssertionResult ParseAv1KeyFrameObu(
+    const uint8_t* bytes, uint64_t byte_length,
+    amdf_media_av1_decode_picture_info_t* picture,
+    amdf_media_av1_tile_t* tile) {
+  if (bytes == nullptr || byte_length < 3 || bytes[0] != 0x32) {
+    return ::testing::AssertionFailure() << "expected one sized AV1 frame OBU";
+  }
+  uint64_t position = 1;
+  uint64_t obu_byte_length = 0;
+  uint32_t shift = 0;
+  for (;;) {
+    if (position >= byte_length || shift > 56) {
+      return ::testing::AssertionFailure() << "invalid AV1 OBU size";
+    }
+    const uint8_t value = bytes[position++];
+    obu_byte_length |= static_cast<uint64_t>(value & 127) << shift;
+    if ((value & 128) == 0) {
+      break;
+    }
+    shift += 7;
+  }
+  if (obu_byte_length != byte_length - position) {
+    return ::testing::AssertionFailure()
+           << "AV1 frame OBU size " << obu_byte_length
+           << " does not cover the encoded region " << byte_length;
+  }
+
+  Av1BitReader reader(bytes, byte_length, position);
+  if (reader.Read(1) != 0 || reader.Read(2) != 0 || reader.Read(1) != 1) {
+    return ::testing::AssertionFailure() << "expected a shown AV1 key frame";
+  }
+  picture->disable_cdf_update = reader.Read(1);
+  const uint32_t frame_size_override = reader.Read(1);
+  picture->order_hint = reader.Read(4);
+  const uint32_t render_size_differs = reader.Read(1);
+  picture->disable_frame_end_cdf_update = reader.Read(1);
+  if (picture->disable_cdf_update != 0 || frame_size_override != 0 ||
+      picture->order_hint != 0 || render_size_differs != 0 ||
+      picture->disable_frame_end_cdf_update != 0) {
+    return ::testing::AssertionFailure()
+           << "AV1 key-frame controls exceed the admitted encode envelope";
+  }
+
+  const uint32_t uniform_tiles = reader.Read(1);
+  const uint32_t additional_tile_column = reader.Read(1);
+  const uint32_t additional_tile_row = reader.Read(1);
+  if (uniform_tiles != 1 || additional_tile_column != 0 ||
+      additional_tile_row != 0) {
+    return ::testing::AssertionFailure() << "expected one uniform AV1 tile";
+  }
+
+  auto read_delta = [&]() -> int32_t {
+    return reader.Read(1) != 0 ? reader.ReadSigned(7) : 0;
+  };
+  auto& quantization = picture->quantization;
+  quantization.base_index = reader.Read(8);
+  quantization.y_dc_delta = read_delta();
+  const int32_t chroma_dc_delta = read_delta();
+  const int32_t chroma_ac_delta = read_delta();
+  quantization.chroma_dc_deltas[0] = chroma_dc_delta;
+  quantization.chroma_dc_deltas[1] = chroma_dc_delta;
+  quantization.chroma_ac_deltas[0] = chroma_ac_delta;
+  quantization.chroma_ac_deltas[1] = chroma_ac_delta;
+  const uint32_t using_quantization_matrix = reader.Read(1);
+  if (using_quantization_matrix != 0) {
+    quantization.matrix_levels[0] = reader.Read(4);
+    quantization.matrix_levels[1] = reader.Read(4);
+    quantization.matrix_levels[2] = reader.Read(4);
+  } else {
+    std::fill(std::begin(quantization.matrix_levels),
+              std::end(quantization.matrix_levels), UINT8_MAX);
+  }
+  if (reader.Read(1) != 0) {
+    return ::testing::AssertionFailure()
+           << "AV1 segmentation exceeds the admitted encode envelope";
+  }
+
+  if (quantization.base_index != 0) {
+    quantization.delta_present = reader.Read(1);
+    if (quantization.delta_present != 0) {
+      quantization.delta_resolution = reader.Read(2);
+    }
+  }
+  auto& filter = picture->loop_filter;
+  if (quantization.delta_present != 0) {
+    filter.delta_present = reader.Read(1);
+    if (filter.delta_present != 0) {
+      filter.delta_resolution = reader.Read(2);
+      filter.delta_multi = reader.Read(1);
+    }
+  }
+
+  const bool coded_lossless = quantization.base_index == 0 &&
+                              quantization.y_dc_delta == 0 &&
+                              chroma_dc_delta == 0 && chroma_ac_delta == 0;
+  if (!coded_lossless) {
+    filter.levels[0] = static_cast<uint8_t>(reader.Read(6));
+    filter.levels[1] = static_cast<uint8_t>(reader.Read(6));
+    if (filter.levels[0] != 0 || filter.levels[1] != 0) {
+      filter.levels[2] = static_cast<uint8_t>(reader.Read(6));
+      filter.levels[3] = static_cast<uint8_t>(reader.Read(6));
+    }
+    filter.sharpness = reader.Read(3);
+    filter.deltas_enabled = reader.Read(1);
+    const int8_t reference_defaults[8] = {1, 0, 0, 0, -1, 0, -1, -1};
+    std::copy(std::begin(reference_defaults), std::end(reference_defaults),
+              filter.reference_deltas);
+    if (filter.deltas_enabled != 0) {
+      filter.deltas_updated = reader.Read(1);
+      if (filter.deltas_updated != 0) {
+        for (auto& delta : filter.reference_deltas) {
+          if (reader.Read(1) != 0) {
+            delta = static_cast<int8_t>(reader.ReadSigned(7));
+          }
+        }
+        for (auto& delta : filter.mode_deltas) {
+          if (reader.Read(1) != 0) {
+            delta = static_cast<int8_t>(reader.ReadSigned(7));
+          }
+        }
+      }
+    }
+
+    auto& cdef = picture->cdef;
+    cdef.damping_minus3 = reader.Read(2);
+    cdef.bits = reader.Read(2);
+    for (uint32_t index = 0; index < (1u << cdef.bits); ++index) {
+      cdef.luma_primary[index] = static_cast<uint8_t>(reader.Read(4));
+      cdef.luma_secondary[index] = static_cast<uint8_t>(reader.Read(2));
+      cdef.chroma_primary[index] = static_cast<uint8_t>(reader.Read(4));
+      cdef.chroma_secondary[index] = static_cast<uint8_t>(reader.Read(2));
+    }
+    picture->transform_mode = reader.Read(1) != 0 ? 2u : 1u;
+  }
+  picture->reduced_transform_set = reader.Read(1);
+  if (picture->reduced_transform_set != 0 || !reader.AlignWithZero()) {
+    return ::testing::AssertionFailure()
+           << "invalid AV1 key-frame byte alignment";
+  }
+  if (!reader.valid() || reader.byte_offset() >= byte_length ||
+      reader.byte_offset() > std::numeric_limits<uint32_t>::max() ||
+      byte_length - reader.byte_offset() >
+          std::numeric_limits<uint32_t>::max()) {
+    return ::testing::AssertionFailure()
+           << "AV1 frame OBU contains no bounded tile payload";
+  }
+  tile->byte_offset = static_cast<uint32_t>(reader.byte_offset());
+  tile->byte_length = static_cast<uint32_t>(byte_length - tile->byte_offset);
+  return ::testing::AssertionSuccess();
 }
 
 void CheckRoundTripPixels(const uint32_t* pixels, uint32_t width,
@@ -125,6 +327,8 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
     const EncodeExecutionCase& test_case, uint32_t width, uint32_t height,
     amdf_memory_t* compressed_memory, uint64_t compressed_byte_offset,
     uint64_t compressed_byte_length, uint64_t compressed_byte_capacity,
+    amdf_media_encoded_region_kind_t region_kind,
+    const uint8_t* compressed_bytes,
     const amdf_media_av1_encode_result_info_t* av1_result,
     uint64_t encode_point) {
   ASSERT_EQ(decode_session_, nullptr);
@@ -209,46 +413,49 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
       media_->session_create(decode_queue_, &session_create, &decode_session_),
       AMDF_STATUS_OK);
 
-  const uint64_t feedback_offset =
-      AlignUp(64, configuration.feedback_byte_offset_alignment);
-  const uint64_t feedback_length =
-      feedback_offset + configuration.feedback_byte_length + 64;
-  const amdf_memory_device_access_t feedback_access = {
-      media_device_,
-      {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE}};
-  const amdf_memory_create_info_t feedback_create = {
-      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
-      .structure_size = sizeof(feedback_create),
-      .memory_profile_ordinal = configuration.feedback_memory_profile_ordinal,
-      .access_count = 1,
-      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
-      .byte_length = feedback_length,
-      .minimum_alignment = configuration.feedback_byte_offset_alignment,
-      .accesses = &feedback_access,
-  };
+  uint64_t feedback_offset = 0;
+  uint64_t feedback_length = 0;
   amdf_memory_t* feedback_memory = nullptr;
-  ASSERT_EQ(api_->memory_create(configuration.feedback_memory_scope,
-                                &feedback_create, &feedback_memory, nullptr),
-            AMDF_STATUS_OK);
-  memories_.push_back(feedback_memory);
-  const amdf_memory_map_info_t feedback_map = {
-      .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
-      .structure_size = sizeof(feedback_map),
-      .byte_length = feedback_length,
-      .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
-  };
-  ASSERT_EQ(api_->memory_map(feedback_memory, &feedback_map,
-                             &decode_feedback_mapping_),
-            AMDF_STATUS_OK);
-  amdf_host_mapping_info_t feedback_mapping = {
-      .type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO,
-      .structure_size = sizeof(feedback_mapping),
-  };
-  ASSERT_EQ(api_->host_mapping_query_info(decode_feedback_mapping_,
-                                          &feedback_mapping),
-            AMDF_STATUS_OK);
-  decode_feedback_ = static_cast<uint8_t*>(feedback_mapping.pointer);
-  std::memset(decode_feedback_, 0xa5, feedback_length);
+  if (configuration.feedback_byte_length != 0) {
+    ASSERT_NE(configuration.feedback_byte_offset_alignment, 0u);
+    feedback_offset = AlignUp(64, configuration.feedback_byte_offset_alignment);
+    feedback_length = feedback_offset + configuration.feedback_byte_length + 64;
+    const amdf_memory_device_access_t feedback_access = {
+        media_device_,
+        {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE}};
+    const amdf_memory_create_info_t feedback_create = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+        .structure_size = sizeof(feedback_create),
+        .memory_profile_ordinal = configuration.feedback_memory_profile_ordinal,
+        .access_count = 1,
+        .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+        .byte_length = feedback_length,
+        .minimum_alignment = configuration.feedback_byte_offset_alignment,
+        .accesses = &feedback_access,
+    };
+    ASSERT_EQ(api_->memory_create(configuration.feedback_memory_scope,
+                                  &feedback_create, &feedback_memory, nullptr),
+              AMDF_STATUS_OK);
+    memories_.push_back(feedback_memory);
+    const amdf_memory_map_info_t feedback_map = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
+        .structure_size = sizeof(feedback_map),
+        .byte_length = feedback_length,
+        .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+    };
+    ASSERT_EQ(api_->memory_map(feedback_memory, &feedback_map,
+                               &decode_feedback_mapping_),
+              AMDF_STATUS_OK);
+    amdf_host_mapping_info_t feedback_mapping = {
+        .type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO,
+        .structure_size = sizeof(feedback_mapping),
+    };
+    ASSERT_EQ(api_->host_mapping_query_info(decode_feedback_mapping_,
+                                            &feedback_mapping),
+              AMDF_STATUS_OK);
+    decode_feedback_ = static_cast<uint8_t*>(feedback_mapping.pointer);
+    std::memset(decode_feedback_, 0xa5, feedback_length);
+  }
   const amdf_media_command_create_info_t command_create = {
       .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_CREATE_INFO,
       .structure_size = sizeof(command_create),
@@ -262,6 +469,12 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
   ASSERT_EQ(media_->command_create(decode_session_, &command_create,
                                    &decode_command_),
             AMDF_STATUS_OK);
+  if (configuration.requires_begin_end != 0) {
+    ASSERT_NO_FATAL_FAILURE(
+        SubmitMediaControl(decode_queue_, decode_command_,
+                           AMDF_MEDIA_COMMAND_OPERATION_BEGIN, &decode_point_));
+    decode_session_active_ = true;
+  }
 
   const uint64_t output_offset =
       AlignUp(65536, configuration.output.byte_offset_alignment);
@@ -317,26 +530,8 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
       Frame(reference_memory, reference_image, reference_offset,
             configuration.reference.description);
 
-  amdf_media_gfx11_image_layout_t layout = {
-      .type = AMDF_STRUCTURE_TYPE_MEDIA_GFX11_IMAGE_LAYOUT,
-      .structure_size = sizeof(layout),
-  };
-  amdf_media_image_info_t image_info = {
-      .type = AMDF_STRUCTURE_TYPE_MEDIA_IMAGE_INFO,
-      .structure_size = sizeof(image_info),
-      .next = &layout,
-  };
-  const amdf_media_image_query_t image_query = {
-      .type = AMDF_STRUCTURE_TYPE_MEDIA_IMAGE_QUERY,
-      .structure_size = sizeof(image_query),
-  };
-  ASSERT_EQ(
-      media_->image_query_info(output_image, 1, &image_query, &image_info),
-      AMDF_STATUS_OK);
-  ASSERT_EQ(layout.plane_count, 2u);
-  for (const auto& plane : layout.planes) {
-    ASSERT_EQ(plane.swizzle_mode, 26u);
-  }
+  MediaKernelImageLayout layout;
+  ASSERT_NO_FATAL_FAILURE(QueryKernelImageLayout(output_image, 0, &layout));
 
   amdf_media_h264_scaling_matrices_t h264_matrices;
   std::memset(&h264_matrices, 16, sizeof(h264_matrices));
@@ -407,15 +602,21 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
   av1_picture.tile_column_starts[1] = (width + 63) / 64;
   av1_picture.tile_row_starts[1] = (height + 63) / 64;
   if (test_case.codec == AMDF_MEDIA_CODEC_AV1) {
-    ASSERT_NE(av1_result, nullptr);
-    av1_picture.loop_filter = av1_result->loop_filter;
+    if (region_kind == AMDF_MEDIA_ENCODED_REGION_AV1_FRAME_OBU) {
+      ASSERT_TRUE(ParseAv1KeyFrameObu(compressed_bytes, compressed_byte_length,
+                                      &av1_picture, &av1_tile));
+    } else {
+      ASSERT_EQ(region_kind, AMDF_MEDIA_ENCODED_REGION_AV1_TILE_GROUP_PAYLOAD);
+      ASSERT_NE(av1_result, nullptr);
+      av1_picture.loop_filter = av1_result->loop_filter;
+      av1_picture.quantization = av1_result->quantization;
+      av1_picture.cdef = av1_result->cdef;
+      av1_picture.segmentation = av1_result->segmentation;
+    }
     for (auto& unit_size :
          av1_picture.loop_filter.log2_restoration_unit_sizes) {
       unit_size = 5;
     }
-    av1_picture.quantization = av1_result->quantization;
-    av1_picture.cdef = av1_result->cdef;
-    av1_picture.segmentation = av1_result->segmentation;
   }
   const void* codec_picture = test_case.codec == AMDF_MEDIA_CODEC_H264
                                   ? static_cast<const void*>(&h264_picture)
@@ -481,20 +682,22 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
       {64, 1, 1},
   };
   const uint64_t pointers[] = {
-      output_address + layout.planes[0].byte_offset,
+      output_address + layout.byte_offsets[0],
       results->device_address + 64,
   };
   const uint32_t constants[] = {
       0,
       0,
       0,
-      static_cast<uint32_t>(layout.planes[1].byte_offset -
-                            layout.planes[0].byte_offset),
-      layout.planes[0].pipe_bank_xor,
-      layout.planes[1].pipe_bank_xor,
+      static_cast<uint32_t>(layout.byte_offsets[1] - layout.byte_offsets[0]),
+      layout.pipe_bank_xors[0],
+      layout.pipe_bank_xors[1],
       width,
       height,
       test_case.sample_bit_depth == 10 ? 1u : 0u,
+      layout.linear,
+      layout.row_pitches[0],
+      layout.row_pitches[1],
   };
   std::memcpy(control_bytes, pointers, sizeof(pointers));
   std::memcpy(control_bytes + sizeof(pointers), constants, sizeof(constants));
@@ -553,7 +756,7 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
       .type = AMDF_STRUCTURE_TYPE_MEDIA_KERNEL_QUEUE_SUBMISSION_INFO,
       .structure_size = sizeof(submit),
       .command = decode_command_,
-      .wait_count = 2,
+      .wait_count = gpu_queue_ != nullptr ? 2u : 1u,
       .waits = decode_waits,
   };
   uint64_t point = 0;
@@ -565,11 +768,19 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
   ASSERT_EQ(status, AMDF_STATUS_OK);
   ASSERT_NE(point, 0u);
   const amdf_kernel_queue_dependency_wait_t decoded = {decode_to_gpu_, point};
-  ASSERT_NO_FATAL_FAILURE(SubmitGpu(consume, &decoded));
+  if (gpu_queue_ == nullptr) {
+    ASSERT_EQ(
+        api_->kernel_queue_wait(decode_queue_, point, AMDF_TIMEOUT_INFINITE, 0),
+        AMDF_STATUS_OK);
+  }
+  ASSERT_NO_FATAL_FAILURE(
+      SubmitGpu(consume, gpu_queue_ != nullptr ? &decoded : nullptr));
   ASSERT_NO_FATAL_FAILURE(SubmitGpu(capture));
-  ASSERT_EQ(
-      api_->kernel_queue_wait(gpu_queue_, gpu_point_, AMDF_TIMEOUT_INFINITE, 0),
-      AMDF_STATUS_OK);
+  if (gpu_queue_ != nullptr) {
+    ASSERT_EQ(api_->kernel_queue_wait(gpu_queue_, gpu_point_,
+                                      AMDF_TIMEOUT_INFINITE, 0),
+              AMDF_STATUS_OK);
+  }
   amdf_kernel_queue_status_t progress = {
       .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
       .structure_size = sizeof(progress),
@@ -584,7 +795,9 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
   };
   ASSERT_EQ(media_->command_query_result(decode_command_, &result),
             AMDF_STATUS_OK);
-  ASSERT_EQ(result.codec_result, AMDF_MEDIA_CODEC_RESULT_SUCCEEDED);
+  ASSERT_EQ(result.codec_result, configuration.feedback_byte_length != 0
+                                     ? AMDF_MEDIA_CODEC_RESULT_SUCCEEDED
+                                     : AMDF_MEDIA_CODEC_RESULT_UNAVAILABLE);
   ASSERT_EQ(result.operation, AMDF_MEDIA_COMMAND_OPERATION_PICTURE);
   ASSERT_EQ(result.submission, decode_point_);
   ASSERT_NO_FATAL_FAILURE(results->TransferHostCache(
@@ -626,6 +839,12 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
   ASSERT_EQ(std::memcmp(control_bytes + consume.byte_offset,
                         immutable_consumer.data(), immutable_consumer.size()),
             0);
+  if (configuration.requires_begin_end != 0) {
+    ASSERT_NO_FATAL_FAILURE(SubmitMediaControl(decode_queue_, decode_command_,
+                                               AMDF_MEDIA_COMMAND_OPERATION_END,
+                                               &decode_point_));
+    decode_session_active_ = false;
+  }
   RecordProperty("round_trip_psnr_db", psnr);
   RecordProperty("round_trip_compressed_bytes", compressed_byte_length);
   RecordProperty("round_trip_device_only_payload", 1);

@@ -18,16 +18,26 @@ loom_target_profile(
     "gfx1150"
 )
 
+loom_target_profile(
+  NAME
+    "gfx1151"
+  FAMILY
+    "amdgpu"
+  SELECTOR
+    "gfx1151"
+)
+
 if(LOOM_IMPORT_CXX AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE)
 amdf_cts_gpu_kernel_set(
   NAME
     "consume"
   SRCS
-    "gfx1150_image.cxx"
+    "image.cxx"
   INPUTOPTS
     "cxx:root=media_consume"
   TARGETS
     "gfx1150"
+    "gfx1151"
   ENTRY_POINT
     "media_consume"
   NAMESPACE
@@ -40,11 +50,12 @@ amdf_cts_gpu_kernel_set(
   NAME
     "produce"
   SRCS
-    "gfx1150_image.cxx"
+    "image.cxx"
   INPUTOPTS
     "cxx:root=media_produce"
   TARGETS
     "gfx1150"
+    "gfx1151"
   ENTRY_POINT
     "media_produce"
   NAMESPACE
@@ -74,7 +85,12 @@ iree_cc_library(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+if(IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+set(_encode_fixture_platform_linkopts "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+  list(APPEND _encode_fixture_platform_linkopts "d3d12.lib")
+  list(APPEND _encode_fixture_platform_linkopts "dxgi.lib")
+endif()
 iree_cc_library(
   NAME
     encode_fixture
@@ -92,13 +108,12 @@ iree_cc_library(
     libamdf::cts::gpu::util::command_fixture
   TESTONLY
   LINKOPTS
-    "d3d12.lib"
-    "dxgi.lib"
+    ${_encode_fixture_platform_linkopts}
   PUBLIC
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+if(IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
 iree_cc_library(
   NAME
     encode_cases
@@ -114,7 +129,7 @@ iree_cc_library(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+if(IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
 amdf_cts_binary(
   NAME
     encode_dynamic_bin
@@ -129,7 +144,7 @@ amdf_cts_binary(
 )
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+if(IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
 iree_native_test(
   NAME
     "encode_dynamic"

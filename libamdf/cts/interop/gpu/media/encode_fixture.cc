@@ -6,7 +6,9 @@
 
 #include "libamdf/cts/interop/gpu/media/encode_fixture.h"
 
+#if defined(_WIN32)
 #include <dxgi1_4.h>
+#endif  // _WIN32
 
 #include <algorithm>
 #include <array>
@@ -19,7 +21,9 @@
 #include "libamdf/cts/gpu/pm4/encoding/commands.h"
 #include "libamdf/cts/interop/gpu/media/produce.h"
 
+#if defined(_WIN32)
 using Microsoft::WRL::ComPtr;
+#endif  // _WIN32
 
 namespace {
 
@@ -231,15 +235,18 @@ MediaEncodeInteropTest::MediaEncodeInteropTest()
           .cache_operations = AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM |
                               AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM,
           .cache_transition_kinds = AMDF_CACHE_TRANSITION_KINDS_GLOBAL,
-          .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
+          .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_USER |
+                               AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
       }) {}
 
 void MediaEncodeInteropTest::SetUp() {
+#if defined(_WIN32)
   ComPtr<ID3D12Debug> debug;
   if (FAILED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)))) {
     GTEST_SKIP() << "D3D12 media validation requires Windows Graphics Tools";
   }
   debug->EnableDebugLayer();
+#endif  // _WIN32
   GpuCommandTest::SetUp();
   if (HasFatalFailure() || IsSkipped()) {
     return;
@@ -260,6 +267,7 @@ void MediaEncodeInteropTest::SetUp() {
   ASSERT_EQ(media_->device_create(endpoint_, &create, &media_device_),
             AMDF_STATUS_OK);
 
+#if defined(_WIN32)
   amdf_endpoint_info_t endpoint = {
       .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
       .structure_size = sizeof(endpoint),
@@ -279,6 +287,7 @@ void MediaEncodeInteropTest::SetUp() {
   ASSERT_TRUE(SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0,
                                           IID_PPV_ARGS(&native))));
   ASSERT_TRUE(SUCCEEDED(native.As(&validation_)));
+#endif  // _WIN32
 
   amdf_device_info_t device_info = {
       .type = AMDF_STRUCTURE_TYPE_DEVICE_INFO,
@@ -345,6 +354,7 @@ void MediaEncodeInteropTest::SetUp() {
   ASSERT_EQ(media_->kernel_queue_create(media_device_, &decode_queue_create,
                                         &decode_queue_),
             AMDF_STATUS_OK);
+#if defined(_WIN32)
   const amdf_gpu_kernel_queue_create_info_t gpu_queue_create = {
       .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
       .structure_size = sizeof(gpu_queue_create),
@@ -356,26 +366,43 @@ void MediaEncodeInteropTest::SetUp() {
   ASSERT_EQ(
       gpu_api_->kernel_queue_create(device_, &gpu_queue_create, &gpu_queue_),
       AMDF_STATUS_OK);
+#else
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(&gpu_command_queue_, 65536));
+  ASSERT_NE(gpu_command_queue_, nullptr);
+  ASSERT_NO_FATAL_FAILURE(
+      CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096,
+                   &gpu_completion_));
+  std::memset(gpu_completion_->host.pointer, 0,
+              gpu_completion_->info.byte_length);
+#endif  // _WIN32
   const amdf_kernel_queue_dependency_create_info_t dependency_create = {
       .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_DEPENDENCY_CREATE_INFO,
       .structure_size = sizeof(dependency_create),
   };
-  ASSERT_EQ(api_->kernel_queue_dependency_create(
-                gpu_queue_, encode_queue_, &dependency_create, &gpu_to_encode_),
-            AMDF_STATUS_OK);
-  ASSERT_EQ(api_->kernel_queue_dependency_create(
-                encode_queue_, gpu_queue_, &dependency_create, &encode_to_gpu_),
-            AMDF_STATUS_OK);
-  ASSERT_EQ(api_->kernel_queue_dependency_create(
-                gpu_queue_, decode_queue_, &dependency_create, &gpu_to_decode_),
-            AMDF_STATUS_OK);
+  if (gpu_queue_ != nullptr) {
+    ASSERT_EQ(
+        api_->kernel_queue_dependency_create(
+            gpu_queue_, encode_queue_, &dependency_create, &gpu_to_encode_),
+        AMDF_STATUS_OK);
+    ASSERT_EQ(
+        api_->kernel_queue_dependency_create(
+            encode_queue_, gpu_queue_, &dependency_create, &encode_to_gpu_),
+        AMDF_STATUS_OK);
+    ASSERT_EQ(
+        api_->kernel_queue_dependency_create(
+            gpu_queue_, decode_queue_, &dependency_create, &gpu_to_decode_),
+        AMDF_STATUS_OK);
+  }
   ASSERT_EQ(
       api_->kernel_queue_dependency_create(
           encode_queue_, decode_queue_, &dependency_create, &encode_to_decode_),
       AMDF_STATUS_OK);
-  ASSERT_EQ(api_->kernel_queue_dependency_create(
-                decode_queue_, gpu_queue_, &dependency_create, &decode_to_gpu_),
-            AMDF_STATUS_OK);
+  if (gpu_queue_ != nullptr) {
+    ASSERT_EQ(
+        api_->kernel_queue_dependency_create(
+            decode_queue_, gpu_queue_, &dependency_create, &decode_to_gpu_),
+        AMDF_STATUS_OK);
+  }
 }
 
 void MediaEncodeInteropTest::CreateSharedMemory(amdf_memory_scope_t* scope,
@@ -405,14 +432,27 @@ void MediaEncodeInteropTest::CreateSharedMemory(amdf_memory_scope_t* scope,
                 scope, profile_ordinal, 2, accesses, &profile, capabilities),
             AMDF_STATUS_OK);
   ASSERT_EQ(profile.availability, AMDF_STATUS_OK);
+  ASSERT_NE(profile.roles & AMDF_MEMORY_PROFILE_ROLE_CREATE, 0u);
+  ASSERT_NE(profile.allocation.byte_length_granularity, 0u);
+  for (uint32_t index = 0; index < std::size(accesses); ++index) {
+    ASSERT_EQ(accesses[index].requirements.access &
+                  ~capabilities[index].supported_access,
+              0u);
+    ASSERT_EQ(accesses[index].requirements.flags &
+                  ~capabilities[index].supported_flags,
+              0u);
+  }
+  const uint64_t allocation_length =
+      AlignUp(byte_length, profile.allocation.byte_length_granularity);
   const amdf_memory_create_info_t create = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
       .structure_size = sizeof(create),
       .memory_profile_ordinal = profile_ordinal,
       .access_count = 2,
-      .required_flags = AMDF_MEMORY_FLAG_SHAREABLE,
-      .byte_length = byte_length,
-      .minimum_alignment = 65536,
+      .required_flags = profile.supported_flags & AMDF_MEMORY_FLAG_SHAREABLE
+                            ? AMDF_MEMORY_FLAG_SHAREABLE
+                            : 0u,
+      .byte_length = allocation_length,
       .accesses = accesses,
   };
   amdf_memory_t* memory = nullptr;
@@ -428,6 +468,33 @@ void MediaEncodeInteropTest::CreateSharedMemory(amdf_memory_scope_t* scope,
 void MediaEncodeInteropTest::SubmitGpu(
     const amdf_gpu_kernel_command_t& command,
     const amdf_kernel_queue_dependency_wait_t* wait) {
+  if (gpu_queue_ == nullptr) {
+    ASSERT_EQ(wait, nullptr);
+    uint64_t command_address = 0;
+    ASSERT_EQ(api_->memory_query_address(
+                  command.memory, 0, AMDF_MEMORY_ADDRESS_GPU, &command_address),
+              AMDF_STATUS_OK);
+    ASSERT_EQ(command.byte_offset % sizeof(uint32_t), 0u);
+    ASSERT_EQ(command.byte_length % sizeof(uint32_t), 0u);
+    const auto* profile = Pm4CommandProfile::Find(gpu_endpoint_info_);
+    ASSERT_NE(profile, nullptr);
+    Pm4CommandWriter writer(
+        gpu_command_queue_->words().data() + gpu_command_word_count_, *profile);
+    writer.CallIndirectBuffer(command_address + command.byte_offset,
+                              static_cast<uint32_t>(command.byte_length / 4));
+    ++gpu_point_;
+    writer.ReleaseSystem32(gpu_completion_->device_address,
+                           static_cast<uint32_t>(gpu_point_));
+    writer.PadToEightWords();
+    gpu_command_word_count_ += writer.word_count();
+    ASSERT_NO_FATAL_FAILURE(
+        gpu_command_queue_->Publish(api_, gpu_api_, gpu_command_word_count_));
+    ASSERT_TRUE(GpuWaitEqual<uint32_t>(
+        reinterpret_cast<uintptr_t>(gpu_completion_->host.pointer),
+        static_cast<uint32_t>(gpu_point_)));
+    ASSERT_NO_FATAL_FAILURE(gpu_command_queue_->WaitRetired(api_));
+    return;
+  }
   const amdf_gpu_kernel_queue_submission_info_t submit = {
       .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO,
       .structure_size = sizeof(submit),
@@ -445,6 +512,82 @@ void MediaEncodeInteropTest::SubmitGpu(
   ASSERT_EQ(status, AMDF_STATUS_OK);
 }
 
+void MediaEncodeInteropTest::SubmitMediaControl(
+    amdf_kernel_queue_t* queue, amdf_media_command_t* command,
+    amdf_media_command_operation_t operation, uint64_t* out_point) {
+  const amdf_media_command_prepare_info_t prepare = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_PREPARE_INFO,
+      .structure_size = sizeof(prepare),
+      .operation = operation,
+  };
+  ASSERT_EQ(media_->command_prepare(command, &prepare), AMDF_STATUS_OK);
+  const amdf_media_kernel_queue_submission_info_t submit = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_KERNEL_QUEUE_SUBMISSION_INFO,
+      .structure_size = sizeof(submit),
+      .command = command,
+  };
+  uint64_t point = 0;
+  ASSERT_EQ(media_->kernel_queue_submit(queue, &submit, &point),
+            AMDF_STATUS_OK);
+  ASSERT_NE(point, 0u);
+  *out_point = point;
+  ASSERT_EQ(api_->kernel_queue_wait(queue, point, AMDF_TIMEOUT_INFINITE, 0),
+            AMDF_STATUS_OK);
+  amdf_media_command_result_info_t result = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_RESULT_INFO,
+      .structure_size = sizeof(result),
+  };
+  ASSERT_EQ(media_->command_query_result(command, &result), AMDF_STATUS_OK);
+  ASSERT_EQ(result.operation, operation);
+  ASSERT_EQ(result.submission, point);
+  ASSERT_EQ(result.codec_result, AMDF_MEDIA_CODEC_RESULT_UNAVAILABLE);
+}
+
+void MediaEncodeInteropTest::QueryKernelImageLayout(
+    amdf_media_image_t* image, uint32_t array_layer,
+    MediaKernelImageLayout* out_layout) {
+  *out_layout = {};
+  const amdf_media_image_query_t query = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_IMAGE_QUERY,
+      .structure_size = sizeof(query),
+      .array_layer = array_layer,
+  };
+  amdf_media_image_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_IMAGE_INFO,
+      .structure_size = sizeof(info),
+  };
+#if defined(_WIN32)
+  amdf_media_gfx11_image_layout_t native = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_GFX11_IMAGE_LAYOUT,
+      .structure_size = sizeof(native),
+  };
+  info.next = &native;
+  ASSERT_EQ(media_->image_query_info(image, 1, &query, &info), AMDF_STATUS_OK);
+  ASSERT_EQ(native.plane_count, 2u);
+  for (uint32_t plane = 0; plane < native.plane_count; ++plane) {
+    ASSERT_EQ(native.planes[plane].swizzle_mode, 26u);
+    out_layout->byte_offsets[plane] = native.planes[plane].byte_offset;
+    out_layout->pipe_bank_xors[plane] = native.planes[plane].pipe_bank_xor;
+  }
+#else
+  amdf_media_linear_image_layout_t native = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_LINEAR_IMAGE_LAYOUT,
+      .structure_size = sizeof(native),
+  };
+  info.next = &native;
+  ASSERT_EQ(media_->image_query_info(image, 1, &query, &info), AMDF_STATUS_OK);
+  ASSERT_EQ(native.plane_count, 2u);
+  ASSERT_EQ(native.array_layer, array_layer);
+  out_layout->linear = 1;
+  for (uint32_t plane = 0; plane < native.plane_count; ++plane) {
+    ASSERT_LE(native.planes[plane].row_pitch, UINT32_MAX);
+    out_layout->byte_offsets[plane] = native.planes[plane].byte_offset;
+    out_layout->row_pitches[plane] =
+        static_cast<uint32_t>(native.planes[plane].row_pitch);
+  }
+#endif  // _WIN32
+}
+
 void MediaEncodeInteropTest::RunPictures(
     const EncodeExecutionCase& test_case,
     amdf_media_encode_rate_control_mode_t rate_control_mode, uint32_t width,
@@ -456,7 +599,7 @@ void MediaEncodeInteropTest::RunPictures(
   const auto* kernel =
       kernels::media_produce::kKernels.Find(gpu_endpoint_info_);
   if (kernel == nullptr) {
-    GTEST_SKIP() << "the raw-layout witness targets gfx1150";
+    GTEST_SKIP() << "no media image kernel for this GPU";
   }
   const auto* profile = Pm4CommandProfile::Find(gpu_endpoint_info_);
   ASSERT_NE(profile, nullptr);
@@ -559,6 +702,12 @@ void MediaEncodeInteropTest::RunPictures(
         AMDF_STATUS_OK);
     commands_.push_back(command);
   }
+  if (configuration.requires_begin_end != 0) {
+    ASSERT_NO_FATAL_FAILURE(
+        SubmitMediaControl(encode_queue_, commands_[0],
+                           AMDF_MEDIA_COMMAND_OPERATION_BEGIN, &encode_point_));
+    encode_session_active_ = true;
+  }
 
   const uint64_t input_start =
       AlignUp(65536, configuration.input.byte_offset_alignment);
@@ -585,7 +734,7 @@ void MediaEncodeInteropTest::RunPictures(
                          &reconstruction_address));
 
   std::array<amdf_media_frame_t, 2> input_frames = {};
-  std::array<amdf_media_gfx11_image_layout_t, 2> input_layouts = {};
+  std::array<MediaKernelImageLayout, 2> input_layouts = {};
   std::array<amdf_media_image_t*, 2> input_images = {};
   const uint32_t gpu_access_ordinal = 1;
   for (uint32_t index = 0; index < input_frames.size(); ++index) {
@@ -605,25 +754,8 @@ void MediaEncodeInteropTest::RunPictures(
     images_.push_back(input_images[index]);
     input_frames[index] = Frame(input_memory, input_images[index], offset,
                                 configuration.input.description);
-    auto& layout = input_layouts[index];
-    layout.type = AMDF_STRUCTURE_TYPE_MEDIA_GFX11_IMAGE_LAYOUT;
-    layout.structure_size = sizeof(layout);
-    amdf_media_image_info_t image_info = {
-        .type = AMDF_STRUCTURE_TYPE_MEDIA_IMAGE_INFO,
-        .structure_size = sizeof(image_info),
-        .next = &layout,
-    };
-    const amdf_media_image_query_t image_query = {
-        .type = AMDF_STRUCTURE_TYPE_MEDIA_IMAGE_QUERY,
-        .structure_size = sizeof(image_query),
-    };
-    ASSERT_EQ(media_->image_query_info(input_images[index], 1, &image_query,
-                                       &image_info),
-              AMDF_STATUS_OK);
-    ASSERT_EQ(layout.plane_count, 2u);
-    for (const auto& plane : layout.planes) {
-      ASSERT_EQ(plane.swizzle_mode, 26u);
-    }
+    ASSERT_NO_FATAL_FAILURE(
+        QueryKernelImageLayout(input_images[index], 0, &input_layouts[index]));
   }
   amdf_media_image_t* reconstruction_image = nullptr;
   const amdf_media_image_create_info_t reconstruction_create = {
@@ -762,16 +894,19 @@ void MediaEncodeInteropTest::RunPictures(
       const uint32_t reconstruction_slot = generation % 2;
       const uint32_t reference_slot = 1 - reconstruction_slot;
       const auto& layout = input_layouts[input_slot];
-      const uint64_t pointer = input_address + layout.planes[0].byte_offset;
+      const uint64_t pointer = input_address + layout.byte_offsets[0];
       const uint32_t arguments[] = {
           generation,
-          static_cast<uint32_t>(layout.planes[1].byte_offset -
-                                layout.planes[0].byte_offset),
-          layout.planes[0].pipe_bank_xor,
-          layout.planes[1].pipe_bank_xor,
+          static_cast<uint32_t>(layout.byte_offsets[1] -
+                                layout.byte_offsets[0]),
+          layout.pipe_bank_xors[0],
+          layout.pipe_bank_xors[1],
           width,
           height,
           test_case.sample_bit_depth == 10 ? 1u : 0u,
+          layout.linear,
+          layout.row_pitches[0],
+          layout.row_pitches[1],
       };
       std::memcpy(control_bytes + index * 4096, &pointer, sizeof(pointer));
       std::memcpy(control_bytes + index * 4096 + sizeof(pointer), arguments,
@@ -821,17 +956,24 @@ void MediaEncodeInteropTest::RunPictures(
       const uint32_t input_slot = generation % 2;
       amdf_kernel_queue_dependency_wait_t reusable = {
           encode_to_gpu_, input_last_use[input_slot]};
-      ASSERT_NO_FATAL_FAILURE(
-          SubmitGpu(producers[index],
-                    input_last_use[input_slot] != 0 ? &reusable : nullptr));
+      if (gpu_queue_ == nullptr && input_last_use[input_slot] != 0) {
+        ASSERT_EQ(
+            api_->kernel_queue_wait(encode_queue_, input_last_use[input_slot],
+                                    AMDF_TIMEOUT_INFINITE, 0),
+            AMDF_STATUS_OK);
+      }
+      ASSERT_NO_FATAL_FAILURE(SubmitGpu(
+          producers[index],
+          gpu_queue_ != nullptr && input_last_use[input_slot] != 0 ? &reusable
+                                                                   : nullptr));
       const amdf_kernel_queue_dependency_wait_t produced = {gpu_to_encode_,
                                                             gpu_point_};
       const amdf_media_kernel_queue_submission_info_t submit = {
           .type = AMDF_STRUCTURE_TYPE_MEDIA_KERNEL_QUEUE_SUBMISSION_INFO,
           .structure_size = sizeof(submit),
           .command = commands_[index],
-          .wait_count = 1,
-          .waits = &produced,
+          .wait_count = gpu_queue_ != nullptr ? 1u : 0u,
+          .waits = gpu_queue_ != nullptr ? &produced : nullptr,
       };
       uint64_t point = 0;
       const auto status =
@@ -846,10 +988,18 @@ void MediaEncodeInteropTest::RunPictures(
     }
     const amdf_kernel_queue_dependency_wait_t encoded = {encode_to_gpu_,
                                                          last_encode};
-    ASSERT_NO_FATAL_FAILURE(SubmitGpu(capture, &encoded));
-    ASSERT_EQ(api_->kernel_queue_wait(gpu_queue_, gpu_point_,
-                                      AMDF_TIMEOUT_INFINITE, 0),
-              AMDF_STATUS_OK);
+    if (gpu_queue_ == nullptr) {
+      ASSERT_EQ(api_->kernel_queue_wait(encode_queue_, last_encode,
+                                        AMDF_TIMEOUT_INFINITE, 0),
+                AMDF_STATUS_OK);
+    }
+    ASSERT_NO_FATAL_FAILURE(
+        SubmitGpu(capture, gpu_queue_ != nullptr ? &encoded : nullptr));
+    if (gpu_queue_ != nullptr) {
+      ASSERT_EQ(api_->kernel_queue_wait(gpu_queue_, gpu_point_,
+                                        AMDF_TIMEOUT_INFINITE, 0),
+                AMDF_STATUS_OK);
+    }
     amdf_kernel_queue_status_t progress = {
         .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
         .structure_size = sizeof(progress),
@@ -904,6 +1054,8 @@ void MediaEncodeInteropTest::RunPictures(
               ? AMDF_MEDIA_ENCODED_REGION_H264_ANNEX_B_SLICE
           : test_case.codec == AMDF_MEDIA_CODEC_HEVC
               ? AMDF_MEDIA_ENCODED_REGION_HEVC_ANNEX_B_SLICE
+          : configuration.requires_begin_end != 0
+              ? AMDF_MEDIA_ENCODED_REGION_AV1_FRAME_OBU
               : AMDF_MEDIA_ENCODED_REGION_AV1_TILE_GROUP_PAYLOAD;
       ASSERT_EQ(region.kind, expected_kind);
       const uint64_t output_offset =
@@ -922,6 +1074,7 @@ void MediaEncodeInteropTest::RunPictures(
         ASSERT_NO_FATAL_FAILURE(DecodeKeyPicture(
             test_case, width, height, compressed_memory, output_offset,
             region.byte_length, compressed_stride - region.byte_offset,
+            region.kind, output,
             test_case.codec == AMDF_MEDIA_CODEC_AV1 ? &av1_result : nullptr,
             last_encode));
       }
@@ -940,6 +1093,12 @@ void MediaEncodeInteropTest::RunPictures(
                             immutable_commands[index].size()),
                 0);
     }
+  }
+  if (configuration.requires_begin_end != 0) {
+    ASSERT_NO_FATAL_FAILURE(SubmitMediaControl(encode_queue_, commands_[0],
+                                               AMDF_MEDIA_COMMAND_OPERATION_END,
+                                               &encode_point_));
+    encode_session_active_ = false;
   }
   for (uint64_t index = 0; index < feedback_length; ++index) {
     bool result_byte = false;
@@ -966,7 +1125,7 @@ void MediaEncodeInteropTest::TearDown() {
                                       AMDF_TIMEOUT_INFINITE, 0),
               AMDF_STATUS_OK);
   }
-  if (gpu_point_ != 0) {
+  if (gpu_queue_ != nullptr && gpu_point_ != 0) {
     ASSERT_EQ(api_->kernel_queue_wait(gpu_queue_, gpu_point_,
                                       AMDF_TIMEOUT_INFINITE, 0),
               AMDF_STATUS_OK);
@@ -975,6 +1134,19 @@ void MediaEncodeInteropTest::TearDown() {
     ASSERT_EQ(api_->kernel_queue_wait(decode_queue_, decode_point_,
                                       AMDF_TIMEOUT_INFINITE, 0),
               AMDF_STATUS_OK);
+  }
+  if (decode_session_active_) {
+    ASSERT_NO_FATAL_FAILURE(SubmitMediaControl(decode_queue_, decode_command_,
+                                               AMDF_MEDIA_COMMAND_OPERATION_END,
+                                               &decode_point_));
+    decode_session_active_ = false;
+  }
+  if (encode_session_active_) {
+    ASSERT_FALSE(commands_.empty());
+    ASSERT_NO_FATAL_FAILURE(SubmitMediaControl(encode_queue_, commands_[0],
+                                               AMDF_MEDIA_COMMAND_OPERATION_END,
+                                               &encode_point_));
+    encode_session_active_ = false;
   }
   for (auto* command : commands_) {
     ASSERT_EQ(media_->command_destroy(command), AMDF_STATUS_OK);
@@ -1009,14 +1181,21 @@ void MediaEncodeInteropTest::TearDown() {
                 AMDF_STATUS_OK);
     }
   }
-  for (auto* queue : {encode_queue_, decode_queue_, gpu_queue_}) {
+  for (auto* queue : {encode_queue_, decode_queue_}) {
     if (queue != nullptr) {
       ASSERT_EQ(api_->kernel_queue_destroy(queue), AMDF_STATUS_OK);
     }
   }
+#if defined(_WIN32)
+  if (gpu_queue_ != nullptr) {
+    ASSERT_EQ(api_->kernel_queue_destroy(gpu_queue_), AMDF_STATUS_OK);
+    gpu_queue_ = nullptr;
+  }
+#endif  // _WIN32
   if (media_device_ != nullptr) {
     ASSERT_EQ(api_->device_destroy(media_device_), AMDF_STATUS_OK);
   }
+#if defined(_WIN32)
   if (validation_ != nullptr) {
     for (UINT64 index = 0; index < validation_->GetNumStoredMessages();
          ++index) {
@@ -1030,5 +1209,6 @@ void MediaEncodeInteropTest::TearDown() {
     }
     validation_.Reset();
   }
+#endif  // _WIN32
   GpuCommandTest::TearDown();
 }

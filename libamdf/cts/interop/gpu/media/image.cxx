@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Gfx1150 64K_D_X NV12/P010 addressing for media ownership witnesses. Each
-// caller checks the returned swizzle and XOR before launching either recipe.
+// Native NV12/P010 addressing for media ownership witnesses. Gfx1150 uses its
+// qualified 64K_D_X swizzle while Linux VCN images use explicit linear pitches.
 #include <loomcxx/kernel.h>
 #include <loomcxx/scalar.h>
 
@@ -54,8 +54,26 @@ struct Components {
 
 static Components sample(const unsigned char* planes, unsigned x, unsigned y,
                          unsigned width, unsigned p010, unsigned uv_offset,
-                         unsigned y_xor, unsigned uv_xor) {
+                         unsigned y_xor, unsigned uv_xor, unsigned linear,
+                         unsigned y_pitch, unsigned uv_pitch) {
   Components result = {};
+  if (linear) {
+    if (p010) {
+      result.y = *reinterpret_cast<const unsigned short*>(planes + y * y_pitch +
+                                                          x * 2);
+      unsigned uv = *reinterpret_cast<const unsigned*>(
+          planes + uv_offset + (y / 2) * uv_pitch + (x / 2) * 4);
+      result.u = uv & 65535;
+      result.v = uv >> 16;
+    } else {
+      result.y = planes[y * y_pitch + x];
+      unsigned uv = *reinterpret_cast<const unsigned short*>(
+          planes + uv_offset + (y / 2) * uv_pitch + (x / 2) * 2);
+      result.u = uv & 255;
+      result.v = uv >> 8;
+    }
+    return result;
+  }
   if (p010) {
     unsigned y_block = (y / 128) * ((width + 255) / 256) + x / 256;
     unsigned uv_block = (y / 256) * ((width + 255) / 256) + x / 256;
@@ -93,19 +111,21 @@ static unsigned quantize(float value) {
 void media_consume(const unsigned char* planes, unsigned* output,
                    unsigned crop_x, unsigned crop_y, unsigned generation,
                    unsigned uv_offset, unsigned y_xor, unsigned uv_xor,
-                   unsigned width, unsigned height, unsigned p010) {
+                   unsigned width, unsigned height, unsigned p010,
+                   unsigned linear, unsigned y_pitch, unsigned uv_pitch) {
   unsigned pixel = unsigned(loom::kernel::workgroup::id.x) * 64 +
                    unsigned(loom::kernel::workitem::id.x);
   if (pixel < width * height) {
-    Components values = sample(planes, pixel % width, pixel / width, width,
-                               p010, uv_offset, y_xor, uv_xor);
+    Components values =
+        sample(planes, pixel % width, pixel / width, width, p010, uv_offset,
+               y_xor, uv_xor, linear, y_pitch, uv_pitch);
     output[pixel * 2] = values.y | (values.u << 16);
     output[pixel * 2 + 1] = values.v | (generation << 16);
   }
   if (pixel < 4096) {
-    Components values =
-        sample(planes, crop_x + (pixel % 64) * 2, crop_y + (pixel / 64) * 2,
-               width, p010, uv_offset, y_xor, uv_xor);
+    Components values = sample(
+        planes, crop_x + (pixel % 64) * 2, crop_y + (pixel / 64) * 2, width,
+        p010, uv_offset, y_xor, uv_xor, linear, y_pitch, uv_pitch);
     float scale = p010 ? 1.0f / 256.0f : 1.0f;
     float luma = float(values.y) * scale;
     float u = float(values.u) * scale - 128.0f;
@@ -121,7 +141,8 @@ void media_consume(const unsigned char* planes, unsigned* output,
   loom::workgroup_count(2048, 1, 1)]]
 void media_produce(unsigned char* planes, unsigned generation,
                    unsigned uv_offset, unsigned y_xor, unsigned uv_xor,
-                   unsigned width, unsigned height, unsigned p010) {
+                   unsigned width, unsigned height, unsigned p010,
+                   unsigned linear, unsigned y_pitch, unsigned uv_pitch) {
   unsigned pixel = unsigned(loom::kernel::workgroup::id.x) * 64 +
                    unsigned(loom::kernel::workitem::id.x);
   if (pixel >= width * height) {
@@ -137,7 +158,13 @@ void media_produce(unsigned char* planes, unsigned generation,
       y < 128) {
     value = 224;
   }
-  if (p010) {
+  if (linear && p010) {
+    *reinterpret_cast<unsigned short*>(planes + y * y_pitch + x * 2) =
+        static_cast<unsigned short>((value * 4 + (x + y + generation) % 4)
+                                    << 6);
+  } else if (linear) {
+    planes[y * y_pitch + x] = static_cast<unsigned char>(value);
+  } else if (p010) {
     unsigned y_block = (y / 128) * ((width + 255) / 256) + x / 256;
     unsigned y_address = y_block * 65536 + (chroma_offset(x, y) ^ y_xor);
     *reinterpret_cast<unsigned short*>(planes + y_address) =
@@ -155,7 +182,16 @@ void media_produce(unsigned char* planes, unsigned generation,
   unsigned chroma_y = y / 2;
   unsigned u = 96 + x / 8 + generation;
   unsigned v = 160 - y / 8 - generation;
-  if (p010) {
+  if (linear && p010) {
+    u = (u * 4 + (chroma_x + generation) % 4) << 6;
+    v = (v * 4 + (chroma_y + generation) % 4) << 6;
+    *reinterpret_cast<unsigned*>(planes + uv_offset + chroma_y * uv_pitch +
+                                 chroma_x * 4) = u | (v << 16);
+  } else if (linear) {
+    *reinterpret_cast<unsigned short*>(planes + uv_offset +
+                                       chroma_y * uv_pitch + chroma_x * 2) =
+        static_cast<unsigned short>(u | (v << 8));
+  } else if (p010) {
     unsigned uv_block = (y / 256) * ((width + 255) / 256) + x / 256;
     unsigned uv_address = uv_offset + uv_block * 65536 +
                           (chroma16_offset(chroma_x, chroma_y) ^ uv_xor);

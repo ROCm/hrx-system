@@ -34,24 +34,36 @@ loom_target_profile(
     selector = "gfx1150",
 )
 
+loom_target_profile(
+    name = "gfx1151",
+    family = "amdgpu",
+    selector = "gfx1151",
+)
+
 amdf_cts_gpu_kernel_set(
     name = "consume",
-    srcs = ["gfx1150_image.cxx"],
+    srcs = ["image.cxx"],
     entry_point = "media_consume",
     inputopts = ["cxx:root=media_consume"],
     namespace = "kernels::media_consume",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-    targets = ["gfx1150"],
+    targets = [
+        "gfx1150",
+        "gfx1151",
+    ],
 )
 
 amdf_cts_gpu_kernel_set(
     name = "produce",
-    srcs = ["gfx1150_image.cxx"],
+    srcs = ["image.cxx"],
     entry_point = "media_produce",
     inputopts = ["cxx:root=media_produce"],
     namespace = "kernels::media_produce",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-    targets = ["gfx1150"],
+    targets = [
+        "gfx1150",
+        "gfx1151",
+    ],
 )
 
 amdf_cc_library(
@@ -83,14 +95,18 @@ amdf_cc_library(
         "encode_fixture.cc",
     ],
     hdrs = ["encode_fixture.h"],
-    linkopts = [
-        "d3d12.lib",
-        "dxgi.lib",
-    ],
-    target_compatible_with = [
-        "@platforms//os:windows",
-        "@platforms//cpu:x86_64",
-    ],
+    linkopts = select({
+        "@platforms//os:windows": [
+            "d3d12.lib",
+            "dxgi.lib",
+        ],
+        "//conditions:default": [],
+    }),
+    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":consume",
         ":produce",
@@ -103,10 +119,11 @@ amdf_cc_library(
 amdf_cts_test_suite(
     name = "encode",
     srcs = ["encode_test.cc"],
-    target_compatible_with = [
-        "@platforms//os:windows",
-        "@platforms//cpu:x86_64",
-    ],
+    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     visibility = ["//visibility:public"],
     deps = [
         ":encode_fixture",

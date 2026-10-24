@@ -7,6 +7,7 @@
 #ifndef LIBAMDF_CTS_INTEROP_GPU_MEDIA_ENCODE_FIXTURE_H_
 #define LIBAMDF_CTS_INTEROP_GPU_MEDIA_ENCODE_FIXTURE_H_
 
+#if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -16,6 +17,7 @@
 #include <d3d12.h>
 #include <d3d12sdklayers.h>
 #include <wrl/client.h>
+#endif  // _WIN32
 
 #include <vector>
 
@@ -32,7 +34,18 @@ struct EncodeExecutionCase {
   uint32_t sample_bit_depth;
 };
 
-// Shared application ownership flow for a GPU producer, D3D12 video encoder,
+struct MediaKernelImageLayout {
+  // Plane starts relative to the memory object's logical byte zero.
+  uint64_t byte_offsets[2];
+  // Tiled address XORs; zero for linear storage.
+  uint32_t pipe_bank_xors[2];
+  // Linear row pitches; zero for tiled storage.
+  uint32_t row_pitches[2];
+  // Nonzero when the kernel uses row-pitch addressing.
+  uint32_t linear;
+};
+
+// Shared application ownership flow for a GPU producer, native video encoder,
 // and GPU observer over caller-owned memory and native dependencies.
 class MediaEncodeInteropTest : public GpuCommandTest {
  protected:
@@ -50,13 +63,21 @@ class MediaEncodeInteropTest : public GpuCommandTest {
                           uint64_t* out_address);
   void SubmitGpu(const amdf_gpu_kernel_command_t& command,
                  const amdf_kernel_queue_dependency_wait_t* wait = nullptr);
+  void SubmitMediaControl(amdf_kernel_queue_t* queue,
+                          amdf_media_command_t* command,
+                          amdf_media_command_operation_t operation,
+                          uint64_t* out_point);
   void DecodeKeyPicture(const EncodeExecutionCase& test_case, uint32_t width,
                         uint32_t height, amdf_memory_t* compressed_memory,
                         uint64_t compressed_byte_offset,
                         uint64_t compressed_byte_length,
                         uint64_t compressed_byte_capacity,
+                        amdf_media_encoded_region_kind_t region_kind,
+                        const uint8_t* compressed_bytes,
                         const amdf_media_av1_encode_result_info_t* av1_result,
                         uint64_t encode_point);
+  void QueryKernelImageLayout(amdf_media_image_t* image, uint32_t array_layer,
+                              MediaKernelImageLayout* out_layout);
 
   // Optional typed media table negotiated independently of compute.
   const amdf_media_api_t* media_ = nullptr;
@@ -70,8 +91,14 @@ class MediaEncodeInteropTest : public GpuCommandTest {
   amdf_kernel_queue_t* encode_queue_ = nullptr;
   // Independent native video-decode ordering domain.
   amdf_kernel_queue_t* decode_queue_ = nullptr;
-  // Separate native GPU KMQ producing and observing shared bytes.
+  // Windows GPU KMQ producing and observing shared bytes.
   amdf_kernel_queue_t* gpu_queue_ = nullptr;
+  // Linux PM4 publisher using the admitted user or kernel publication mode.
+  GpuCommandQueue* gpu_command_queue_ = nullptr;
+  // Host-visible completion storage for Linux PM4 user publication.
+  GpuMemory* gpu_completion_ = nullptr;
+  // Cumulative Linux PM4 ring frontier in DWORDs.
+  size_t gpu_command_word_count_ = 0;
   // Cold GPU-to-encode dependency binding.
   amdf_kernel_queue_dependency_t* gpu_to_encode_ = nullptr;
   // Cold encode-to-GPU dependency binding.
@@ -88,6 +115,10 @@ class MediaEncodeInteropTest : public GpuCommandTest {
   uint64_t decode_point_ = 0;
   // Last accepted GPU prefix, retained through failure and teardown.
   uint64_t gpu_point_ = 0;
+  // True after native encode BEGIN retires and before END is accepted.
+  bool encode_session_active_ = false;
+  // True after native decode BEGIN retires and before END is accepted.
+  bool decode_session_active_ = false;
   // Application-owned backing destroyed after identities and last uses.
   std::vector<amdf_memory_t*> memories_;
   // Explicit placed identities destroyed before their backing.
@@ -108,8 +139,10 @@ class MediaEncodeInteropTest : public GpuCommandTest {
   amdf_host_mapping_t* decode_feedback_mapping_ = nullptr;
   // Direct pointer borrowed from decode_feedback_mapping_.
   uint8_t* decode_feedback_ = nullptr;
+#if defined(_WIN32)
   // Native debug view kept through complete media teardown.
   Microsoft::WRL::ComPtr<ID3D12InfoQueue> validation_;
+#endif  // _WIN32
 };
 
 #endif  // LIBAMDF_CTS_INTEROP_GPU_MEDIA_ENCODE_FIXTURE_H_
