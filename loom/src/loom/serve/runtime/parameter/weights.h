@@ -77,6 +77,9 @@ typedef struct loom_serve_weight_activity_t {
 // address interval instead of separate reservations. It belongs to pool and
 // outlives the plan and every resolved root. Layout and source preparation are
 // unchanged; the plan owns only its ranges' backing and accounting.
+// Arena-backed plans complete deactivation after their consumers retire and
+// before freeing the plan. Shared workers advance this release asynchronously;
+// terminal native-target failure instead requires arena-owner checked detach.
 //
 // On failure both populated root slots and a non-NULL *out_weights remain
 // caller-owned for teardown. Release consumer commands and root slots before
@@ -201,6 +204,7 @@ iree_status_t loom_serve_weights_import_readiness(
 iree_status_t loom_serve_weights_await(loom_serve_weights_t* weights);
 
 // Advances native backing release, preserving parameter roots and replay plans.
+// Includes backing accepted by an activation whose later submission failed.
 // The caller first retires all consuming work and excludes new submission.
 // Retained mutable state is independent. The pool owner receives a completion
 // wake; repeated calls join the accepted operation without submitting it again.

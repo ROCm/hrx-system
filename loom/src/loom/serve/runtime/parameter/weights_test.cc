@@ -1683,6 +1683,10 @@ TEST_P(ArenaWeightsTest, IndependentPreparedRangesReloadAndRecycleAbove4GiB) {
   iree_hal_command_buffer_release(commands_[0]);
   commands_[0] = nullptr;
   IREE_ASSERT_OK(loom_serve_weights_await_retirement(plans_[0]));
+  IREE_ASSERT_OK(loom_serve_residency_deactivate(residencies_[0], &complete));
+  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_serve_residency_deactivate(residencies_[0], &complete));
+  ASSERT_TRUE(complete);
   loom_serve_residency_free(residencies_[0]);
   residencies_[0] = nullptr;
   loom_serve_residency_group_free(parameter_groups_[0]);

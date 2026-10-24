@@ -1595,16 +1595,12 @@ iree_status_t loom_serve_virtual_buffer_free(
   loom_serve_memory_pool_collect(pool);
   if (buffer->arena && !buffer->target->detached) {
     // A range cannot clear the native target's failure by detaching siblings.
-    // Healthy range cleanup uses the same ordered unmap path as eviction.
+    // Its owner completes ordinary asynchronous trim before returning the
+    // lease; freeing metadata must never wait on another bank's mapping
+    // frontier.
     IREE_RETURN_IF_ERROR(iree_status_clone(buffer->target->failure));
-    loom_serve_virtual_buffer_begin_trim(buffer);
-    loom_serve_memory_operation_t* operation = NULL;
-    IREE_RETURN_IF_ERROR(loom_serve_memory_pool_trim_async(
-        pool, 1, &buffer, NULL, 0, &operation));
-    loom_serve_memory_operation_await(operation);
-    iree_status_t status = loom_serve_memory_operation_query_status(operation);
-    loom_serve_memory_operation_free(operation);
-    IREE_RETURN_IF_ERROR(status);
+    IREE_ASSERT(!buffer->backed_regular_count &&
+                !buffer->slabs[buffer->slab_count - 1].physical);
   }
   // Checked removal remains available after a partial failed mapping batch.
   // Sources stay owned if detach fails, so the caller can retry cleanup. A

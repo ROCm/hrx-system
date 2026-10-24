@@ -236,7 +236,9 @@ iree_hal_buffer_t* loom_serve_memory_arena_handle(
 // Reserves an independent range, initially without physical payload. Physical
 // slabs and short tails are local to this range; it shares no replacement
 // extent with another range. The arena outlives this buffer and all its views.
-// Freeing the buffer after its consumers retire makes its offset reusable.
+// The owner retires consumers and completes asynchronous trim before freeing
+// the buffer to make its offset reusable; metadata release never waits on
+// peers.
 iree_status_t loom_serve_virtual_buffer_allocate_in_arena(
     loom_serve_memory_arena_t* arena, iree_device_size_t length,
     iree_device_size_t alignment, loom_serve_memory_statistics_t* statistics,
@@ -415,7 +417,9 @@ iree_status_t loom_serve_virtual_buffer_trim(
 
 // All device uses and borrowed HAL references must have retired. On a platform
 // cleanup failure the object retains unreleased ownership and may be retried;
-// the pool must remain alive. Null is accepted.
+// the pool must remain alive. Arena ranges additionally require completed trim
+// or terminal arena detach: this call never submits or waits on their mappings.
+// Null is accepted.
 iree_status_t loom_serve_virtual_buffer_free(
     loom_serve_virtual_buffer_t* buffer);
 

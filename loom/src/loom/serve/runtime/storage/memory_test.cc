@@ -1364,6 +1364,8 @@ TEST_F(MemoryTest, ArenaRangesShareMappingOrderButNotPhysicalOwnership) {
   }
   mapping_queue.observe_mappings = false;
   RoundTrip(loom_serve_virtual_buffer_handle(second), 0, 0x12345678);
+  loom_serve_virtual_buffer_begin_trim(first);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(first));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_free(first));
   first = nullptr;
   EXPECT_EQ(statistics[0].committed_bytes, 0u);

@@ -1499,7 +1499,7 @@ iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights,
     }
     return iree_ok_status();
   }
-  if (!weights->active) {
+  if (!weights->active && !weights->activation.backing_count) {
     *out_complete = true;
     return iree_ok_status();
   }

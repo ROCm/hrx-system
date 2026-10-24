@@ -223,6 +223,14 @@ class MemoryTest : public ::testing::Test {
       iree_hal_pool_release(logical_pool);
     }
     IREE_ASSERT_OK(loom_serve_virtual_pool_free(virtual_pool));
+    if (arena) {
+      for (auto* buffer : {first, second, third}) {
+        if (buffer) {
+          loom_serve_virtual_buffer_begin_trim(buffer);
+          IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(buffer));
+        }
+      }
+    }
     IREE_ASSERT_OK(loom_serve_virtual_buffer_free(first));
     IREE_ASSERT_OK(loom_serve_virtual_buffer_free(second));
     IREE_ASSERT_OK(loom_serve_virtual_buffer_free(third));

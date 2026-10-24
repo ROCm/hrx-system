@@ -391,6 +391,13 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     }
     for (auto* plan : plans_) {
       IREE_EXPECT_OK(loom_serve_weights_await_retirement(plan));
+      if (arena_ && plan) {
+        bool complete = false;
+        IREE_EXPECT_OK(loom_serve_weights_deactivate(plan, &complete));
+        IREE_EXPECT_OK(loom_serve_memory_pool_await(pool_));
+        IREE_EXPECT_OK(loom_serve_weights_deactivate(plan, &complete));
+        EXPECT_TRUE(complete);
+      }
     }
     for (auto* residency : residencies_) {
       loom_serve_residency_free(residency);
