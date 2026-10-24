@@ -1712,6 +1712,96 @@ TEST_P(ArenaWeightsTest, IndependentPreparedRangesReloadAndRecycleAbove4GiB) {
 
 INSTANTIATE_TEST_SUITE_P(Elastic, ArenaWeightsTest, ::testing::Values(true));
 
+class RejectedPreparationWeightsTest : public ArenaWeightsTest {
+ protected:
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(ArenaWeightsTest::SetUp());
+    const iree_hal_queue_params_t params = {
+        .priority = dispatch_->priority,
+        .features = dispatch_->features,
+        .execution_resources = dispatch_->execution_resources,
+    };
+    static const iree_hal_queue_vtable_t vtable = {
+        .destroy = [](iree_hal_queue_t*) {},
+        .execute =
+            [](iree_hal_queue_t*, iree_hal_semaphore_list_t,
+               iree_hal_semaphore_list_t, iree_hal_command_buffer_t*,
+               iree_hal_buffer_binding_table_t,
+               iree_hal_queue_execute_flags_t) {
+              return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+            },
+    };
+    iree_hal_queue_initialize(iree_hal_queue_family(dispatch_), &params,
+                              &vtable, &rejected_dispatch_);
+    initialized_ = true;
+  }
+
+  void TearDown() override {
+    ArenaWeightsTest::TearDown();
+    if (initialized_) {
+      iree_hal_queue_release(&rejected_dispatch_);
+    }
+  }
+
+  // Rejects preparation dispatch after the real mapping and file submissions.
+  iree_hal_queue_t rejected_dispatch_ = {};
+  // The queue is released only if device setup reached its initialization.
+  bool initialized_ = false;
+};
+
+TEST_P(RejectedPreparationWeightsTest,
+       FailedActivationDeactivatesAcceptedArenaBacking) {
+  const auto geometry = loom_serve_device_weight_geometry(device_owner_);
+  IREE_ASSERT_OK(loom_serve_memory_arena_allocate(
+      pool_, geometry, 2 * geometry.minimum_size, &arena_));
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0, 0);
+  IREE_ASSERT_OK(loom_serve_weights_allocate(
+      device_, transfer_, &rejected_dispatch_,
+      loom_serve_device_storage_pool(device_owner_), pool_, geometry, arena_,
+      loom_serve_device_workspace(device_owner_), 0, 1, &root, host_allocator_,
+      &plans_[0]));
+  IREE_ASSERT_OK(Prepare(plans_[0], {path_.path()}));
+  const auto original = iree_hal_buffer_virtual_view(buffers_[0][0]);
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_weights_activate(plans_[0]));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_weights_await(plans_[0]));
+  EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations, 0u);
+  EXPECT_GT(loom_serve_weights_activity(plans_[0]).read_bytes, 0u);
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
+            geometry.minimum_size);
+
+  // Submission failure did not publish an active plan, but accepted backing
+  // still needs ordinary asynchronous deactivation before its lease is free.
+  iree_hal_buffer_release(buffers_[0][0]);
+  buffers_[0][0] = nullptr;
+  IREE_ASSERT_OK(loom_serve_weights_await_retirement(plans_[0]));
+  bool complete = false;
+  IREE_ASSERT_OK(loom_serve_weights_deactivate(plans_[0], &complete));
+  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_serve_weights_deactivate(plans_[0], &complete));
+  ASSERT_TRUE(complete);
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
+  IREE_ASSERT_OK(loom_serve_weights_free(plans_[0]));
+  plans_[0] = nullptr;
+
+  // A healthy plan prepares into the retired offset without replacing the
+  // native arena or inheriting the failed preparation's private readiness.
+  WriteCheckpoint(path_.path(), 100);
+  IREE_ASSERT_OK(Compile(1, "target"));
+  const auto replacement = Root(1, 0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &replacement, {path_.path()}));
+  const auto reused = iree_hal_buffer_virtual_view(buffers_[1][0]);
+  EXPECT_EQ(reused.root, original.root);
+  EXPECT_EQ(reused.byte_offset, original.byte_offset);
+  IREE_ASSERT_OK(Register(1, 0, 1));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 370));
+}
+
+INSTANTIATE_TEST_SUITE_P(Elastic, RejectedPreparationWeightsTest,
+                         ::testing::Values(true));
+
 // The failed reclaimer belongs to a private pool; native devices remain shared.
 class RejectedAdmissionWeightsTest : public WeightsTest {};
 

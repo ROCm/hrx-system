@@ -1373,6 +1373,64 @@ TEST_F(MemoryTest, ArenaRangesShareMappingOrderButNotPhysicalOwnership) {
   CheckRetained(loom_serve_virtual_buffer_handle(second), 0, 0x12345678);
 }
 
+TEST_F(MemoryTest, TrimmedArenaRangeRecyclesWhilePeerMappingIsPending) {
+  mapping_queue.Initialize(loom_serve_device_transfer_queue(device));
+  ASSERT_NO_FATAL_FAILURE(UseBacking(false, 2 * kSlabSize, &mapping_queue));
+  const auto geometry = loom_serve_device_weight_geometry(device);
+  IREE_ASSERT_OK(
+      loom_serve_memory_arena_allocate(pool, geometry, 2 * kSlabSize, &arena));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate_in_arena(
+      arena, kSlabSize, 256, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate_in_arena(
+      arena, kSlabSize, 256, &statistics[1], &second));
+  const auto original =
+      iree_hal_buffer_virtual_view(loom_serve_virtual_buffer_handle(first));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, kSlabSize));
+  loom_serve_virtual_buffer_begin_trim(first);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(first));
+  EXPECT_EQ(statistics[0].committed_bytes, 0u);
+
+  auto release_gate = [](iree_hal_semaphore_t* semaphore) {
+    IREE_EXPECT_OK(iree_hal_semaphore_signal(semaphore, 1, nullptr));
+    iree_hal_semaphore_release(semaphore);
+  };
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      loom_serve_device_handle(device), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+  std::unique_ptr<iree_hal_semaphore_t, decltype(release_gate)> gate(
+      semaphore, release_gate);
+  mapping_queue.gate_next_mapping = semaphore;
+  const loom_serve_memory_range_t range = {second, 0, kSlabSize};
+  loom_serve_memory_admission_t admission;
+  loom_serve_memory_operation_t* operation = nullptr;
+  IREE_ASSERT_OK(loom_serve_memory_pool_commit_async(
+      pool, 1, &range, nullptr, 0, &admission, &operation));
+  ASSERT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
+  EXPECT_FALSE(loom_serve_memory_operation_is_complete(operation));
+
+  // Returning an already trimmed lease must not join the shared target's
+  // newer frontier. That mapping belongs to the still-live peer alone.
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_free(first));
+  first = nullptr;
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate_in_arena(
+      arena, kSlabSize, 256, &statistics[0], &first));
+  const auto replacement =
+      iree_hal_buffer_virtual_view(loom_serve_virtual_buffer_handle(first));
+  EXPECT_EQ(replacement.root, original.root);
+  EXPECT_EQ(replacement.byte_offset, original.byte_offset);
+  EXPECT_FALSE(loom_serve_memory_operation_is_complete(operation));
+
+  gate.reset();
+  loom_serve_memory_operation_await(operation);
+  IREE_ASSERT_OK(loom_serve_memory_operation_query_status(operation));
+  loom_serve_memory_operation_free(operation);
+  RoundTrip(loom_serve_virtual_buffer_handle(second), 0, 0x12345678);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, kSlabSize));
+  RoundTrip(loom_serve_virtual_buffer_handle(first), 0, 0x87654321);
+  CheckRetained(loom_serve_virtual_buffer_handle(second), 0, 0x12345678);
+}
+
 TEST_F(MemoryTest, FailedArenaEditRequiresOwnerDetachBeforeRangeRelease) {
   mapping_queue.Initialize(loom_serve_device_transfer_queue(device));
   ASSERT_NO_FATAL_FAILURE(UseBacking(false, 3 * kSlabSize, &mapping_queue));
