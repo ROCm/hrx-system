@@ -382,6 +382,7 @@ def _short_value(value: object) -> str:
 
 def _run_test_case(test_case: TestCase, *, include_exhaustive: bool) -> None:
     sys.stdout.write(f"RUN {test_case.module_name}.{test_case.test_name}\n")
+    sys.stdout.flush()
     if test_case.exhaustive and not include_exhaustive:
         raise unittest.SkipTest("requires --include-exhaustive")
     kwargs = dict(test_case.parameters)
