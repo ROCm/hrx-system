@@ -1253,3 +1253,94 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   global_store_b64_saddr %53, %result, %output_view
   return
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @subgroup_vote_uniform_predicate() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: i32, %output: buffer) {
+  %c0 = scalar.constant 0 : i32
+  %predicate = scalar.cmpi sgt, %value, %c0 : i32
+  %mask = kernel.subgroup.vote.ballot %predicate : i1 -> i32
+  %any = kernel.subgroup.vote.any %predicate : i1
+  %all = kernel.subgroup.vote.all %predicate : i1
+  cfg.cond_br %any, ^check_all, ^exit
+^check_all:
+  cfg.cond_br %all, ^store, ^exit
+^store:
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %mask, %output_view[0] : i32, view<1xi32>
+  cfg.br ^exit
+^exit:
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "value"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_vote_uniform_predicate(%value: reg<amdgpu.sgpr>) asm {
+  %output_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %c0 = s_mov_b32 0
+  %predicate = s_cmp_gt_i32 %value, %c0
+  %15 = s_mov_b64_exec_read
+  %16 = slice %15[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %17 = slice %15[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %19 = s_cselect_b32 %16, %c0, %predicate
+  %20 = s_cselect_b32 %17, %c0, %predicate
+  %21 = concat(%19, %20) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %23 = s_and_b64 %21, %15
+  %mask = slice %23[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %31 = concat(%19, %20) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %33 = s_and_b64 %31, %15
+  %34 = slice %33[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %any = s_cmp_lg_i32_src1_inline %34 {rhs = 0}
+  %42 = concat(%19, %20) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %44 = s_and_b64 %42, %15
+  %45 = slice %44[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %all = s_cmp_eq_i32 %45, %16
+  low.cond_br %any, ^check_all, ^exit : reg<amdgpu.scc>
+^check_all:
+  low.cond_br %all, ^store, ^exit : reg<amdgpu.scc>
+^store:
+  %48 = v_mov_b32_copy %mask
+  %49 = v_mov_b32 0
+  global_store_b32_saddr %49, %48, %output_view
+  low.br ^exit
+^exit:
+  return
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+kernel.def target(@target) @subgroup_vote_exact_predicates() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: buffer) {
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  %mask = kernel.subgroup.vote.ballot %true : i1 -> i32
+  %any = kernel.subgroup.vote.any %false : i1
+  %all = kernel.subgroup.vote.all %true : i1
+  %base = index.constant 0 : offset
+  %output_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %mask, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @subgroup_vote_exact_predicates() asm {
+  %output_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %15 = s_mov_b64_exec_read
+  %17 = s_and_b64 %15, %15
+  %mask = slice %17[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = v_mov_b32_copy %mask
+  %33 = v_mov_b32 0
+  global_store_b32_saddr %33, %32, %output_view
+  return
+}
