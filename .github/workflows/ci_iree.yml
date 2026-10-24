@@ -351,6 +351,8 @@ jobs:
           result_args=()
           if [[ "${{ matrix.kind }}" == amdgpu ]]; then
             result_args=(--bazel-test-results-dir "${RUNNER_TEMP}/native-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
+          elif [[ "${{ matrix.command }}" != iree-bazel-repository-build ]]; then
+            result_args=(--bazel-test-results-dir "${RUNNER_TEMP}/repository-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
           fi
           python3 build_tools/devtools/ci.py ${{ matrix.command }} \
             "${target_args[@]}" "${importer_args[@]}" "${scope_args[@]}" "${result_args[@]}" \
@@ -384,13 +386,11 @@ jobs:
           retention-days: 7
 
       - name: Upload failed test results
-        if: ${{ always() && steps.iree_bazel_ci.outcome == 'failure' }}
+        if: ${{ always() && steps.iree_bazel_ci.outcome == 'failure' && matrix.kind != 'amdgpu' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-results-${{ matrix.command }}-${{ matrix.target_selector || 'host' }}-attempt-${{ github.run_attempt }}
-          path: |
-            bazel-testlogs/**/test.log
-            bazel-testlogs/**/test.xml
+          path: ${{ runner.temp }}/repository-test-results-${{ github.run_id }}-${{ github.run_attempt }}/**/bazel-testlogs/**
           if-no-files-found: warn
           retention-days: 7
 
@@ -752,8 +752,10 @@ jobs:
           if ("${{ matrix.platform_coverage }}" -ne 'true') {
             $pythonTestArgs += '--exclude-python-tests'
           }
+          $repositoryResultsDir = Join-Path $env:RUNNER_TEMP "repository-test-results-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           python build_tools/devtools/ci.py iree-bazel-repository-integration `
             @pythonTestArgs --amdgpu-target gfx11-generic `
+            --bazel-test-results-dir $repositoryResultsDir `
             --bazel-profile-dir "$env:RUNNER_TEMP\bazel-profiles" --keep-going
           exit $LASTEXITCODE
 
@@ -837,9 +839,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-results-iree-bazel-repository-integration-${{ matrix.host_toolchain }}-attempt-${{ github.run_attempt }}
-          path: |
-            bazel-testlogs/**/test.log
-            bazel-testlogs/**/test.xml
+          path: ${{ runner.temp }}/repository-test-results-${{ github.run_id }}-${{ github.run_attempt }}/**/bazel-testlogs/**
           if-no-files-found: warn
           retention-days: 7
 
