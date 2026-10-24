@@ -48,6 +48,24 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    lookup_to_select
+  HDRS
+    "lookup_to_select.h"
+  SRCS
+    "lookup_to_select.c"
+  DEPS
+    iree::base
+    loom::ir
+    loom::ops::index
+    loom::ops::scf
+    loom::pass::types
+    loom::rewrite::rewriter
+    loom::util::walk
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     scf_memory
   HDRS
     "scf_memory.h"
@@ -158,6 +176,24 @@ loom_cc_library(
     loom::rewrite::rewriter
     loom::target::function_version
     loom::util::predicate_facts
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    switch_to_if
+  HDRS
+    "switch_to_if.h"
+  SRCS
+    "switch_to_if.c"
+  DEPS
+    iree::base
+    loom::ir
+    loom::ops::index
+    loom::ops::scf
+    loom::pass::types
+    loom::rewrite::rewriter
+    loom::util::walk
   PUBLIC
 )
 

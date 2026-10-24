@@ -1,0 +1,71 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @structured_switch(%selector: index, %lhs: i32, %rhs: i32) -> (i32) {
+  %result = scf.switch %selector -> (i32) {
+    case 0 {
+      %sum = scalar.addi %lhs, %rhs : i32
+      scf.yield %sum : i32
+    }
+    case 3 {
+      %difference = scalar.subi %lhs, %rhs : i32
+      scf.yield %difference : i32
+    }
+    default {
+      %product = scalar.muli %lhs, %rhs : i32
+      scf.yield %product : i32
+    }
+  }
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @structured_switch(%selector: reg<aie2p.er>, %lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %18 = mov.short 0
+  %19 = eq %selector, %18
+  low.cond_br %19, ^_bb2, ^_bb1 : reg<aie2p.er>
+^_bb1:
+  %20 = mov.short 3
+  %21 = eq %selector, %20
+  low.cond_br %21, ^_bb3, ^_bb4 : reg<aie2p.er>
+^_bb2:
+  %sum = add.nc %lhs, %rhs
+  low.br ^_bb5(%sum: reg<aie2p.er>)
+^_bb3:
+  %difference = sub %lhs, %rhs
+  low.br ^_bb5(%difference: reg<aie2p.er>)
+^_bb4:
+  %product = mul %lhs, %rhs
+  low.br ^_bb5(%product: reg<aie2p.er>)
+^_bb5(%result: reg<aie2p.er>):
+  return %result
+}
+
+// ====
+
+func.def @pure_switch(%selector: index, %lhs: i32, %rhs: i32, %fallback: i32) -> (i32) {
+  %result = scf.switch %selector -> (i32) {
+    case -1 {
+      scf.yield %lhs : i32
+    }
+    case 7 {
+      scf.yield %rhs : i32
+    }
+    default {
+      scf.yield %fallback : i32
+    }
+  }
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @pure_switch(%selector: reg<aie2p.er>, %lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %fallback: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %18 = mov.short 7
+  %19 = eq %selector, %18
+  %20 = copy %19 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %21 = sel.nez %rhs, %fallback, %20
+  %22 = mov.short -1
+  %23 = eq %selector, %22
+  %24 = copy %23 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %result = sel.nez %lhs, %21, %24
+  return %result
+}

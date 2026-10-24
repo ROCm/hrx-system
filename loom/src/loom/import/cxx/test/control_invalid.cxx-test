@@ -9,17 +9,43 @@ void entry() { continue; }
 void entry() { break; }
 
 // ====
-// Structured iteration exits do not admit unsupported switch conditions.
-void entry(unsigned count) {
-  while (count) {
-    // ERROR@+1: LOWERING/059 "unsupported statement: switch-statement"
-    switch (count) {
-      case 1:
-        continue;
-      default:
-        --count;
+// Runtime switches require a flat compound clause structure.
+void entry(int value) {
+  // ERROR@+1: LOWERING/059 "runtime switch requires a compound statement body"
+  switch (value) case 1: break;
+}
+
+// ====
+// Runtime switches require a flat compound clause structure.
+void entry(int value) {
+  switch (value) {
+    case 0:
+    if (value) {
+      // ERROR@+1: LOWERING/059 "case labels must be direct children of a compound switch body"
+      case 1: break;
     }
   }
+}
+
+// ====
+// Runtime switches do not execute an unlabeled source prefix.
+void entry(int value) {
+  switch (value) {
+    // ERROR@+1: LOWERING/059 "switch body statements require a preceding case or default label"
+    ++value;
+    case 1: break;
+  }
+}
+
+// ====
+// Runtime switch returns await the shared structured-exit projection.
+int entry(int value) {
+  // ERROR@+1: LOWERING/059 "returns inside runtime switches require a structured switch-exit projection"
+  switch (value) {
+    case 1: return value;
+    default: break;
+  }
+  return 0;
 }
 
 // ====

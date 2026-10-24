@@ -15,6 +15,7 @@ loom_check_test_suite(
   SRCS
     "callgraph_specialization.loom-test"
     "source_motion.loom-test"
+    "source_switch_projection.loom-test"
     "source_tied_carriers.loom-test"
     "strand_callgraph.loom-test"
 )

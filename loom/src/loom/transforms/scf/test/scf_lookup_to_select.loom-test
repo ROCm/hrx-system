@@ -1,0 +1,22 @@
+// RUN: pass scf-lookup-to-select
+
+func.def @projects_lookup_columns(%selector: index, %a: i32, %b: i32, %fallback: i32, %x: i64, %y: i64, %wide_fallback: i64) -> (i32, i64) {
+  %selected, %wide = scf.lookup %selector {
+    -1 = (%a, %x),
+    7 = (%b, %y)
+  } default(%fallback, %wide_fallback) : i32, i64
+  func.return %selected, %wide : i32, i64
+}
+
+// ----
+func.def @projects_lookup_columns(%selector: index, %a: i32, %b: i32, %fallback: i32, %x: i64, %y: i64, %wide_fallback: i64) -> (i32, i64) {
+  %11 = index.constant 7 : index
+  %12 = index.cmp eq, %selector, %11 : index
+  %13 = scf.select %12, %b, %fallback : i32
+  %14 = scf.select %12, %y, %wide_fallback : i64
+  %15 = index.constant -1 : index
+  %16 = index.cmp eq, %selector, %15 : index
+  %selected = scf.select %16, %a, %13 : i32
+  %wide = scf.select %16, %x, %14 : i64
+  func.return %selected, %wide : i32, i64
+}

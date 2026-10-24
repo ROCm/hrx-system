@@ -1,0 +1,128 @@
+// RUN: pass scf-switch-to-if
+
+func.def @inlines_default_only(%selector: index, %lhs: i32, %rhs: i32) -> (i32) {
+  %result = scf.switch %selector -> (i32) {
+    default {
+      %sum = test.addi %lhs, %rhs : i32
+      scf.yield %sum : i32
+    }
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @inlines_default_only(%selector: index, %lhs: i32, %rhs: i32) -> (i32) {
+  %sum = test.addi %lhs, %rhs : i32
+  func.return %sum : i32
+}
+
+// ====
+
+func.def @projects_cases_and_results(%selector: index, %lhs: i32, %rhs: i32, %fallback: i32) -> (i32) {
+  %result = scf.switch %selector -> (i32) {
+    case -1 {
+      %first = test.addi %lhs, %rhs : i32
+      scf.yield %first : i32
+    }
+    case 7 {
+      %second = test.addi %lhs, %lhs : i32
+      scf.yield %second : i32
+    }
+    default {
+      %other = test.addi %fallback, %rhs : i32
+      scf.yield %other : i32
+    }
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @projects_cases_and_results(%selector: index, %lhs: i32, %rhs: i32, %fallback: i32) -> (i32) {
+  %9 = index.constant -1 : index
+  %10 = index.cmp eq, %selector, %9 : index
+  %result = scf.if %10 -> (i32) {
+    %first = test.addi %lhs, %rhs : i32
+    scf.yield %first : i32
+  } else {
+    %12 = index.constant 7 : index
+    %13 = index.cmp eq, %selector, %12 : index
+    %14 = scf.if %13 -> (i32) {
+      %second = test.addi %lhs, %lhs : i32
+      scf.yield %second : i32
+    } else {
+      %other = test.addi %fallback, %rhs : i32
+      scf.yield %other : i32
+    }
+    scf.yield %14 : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
+func.def @projects_effectful_cases(%selector: index, %pool: pool, %lhs: i32, %rhs: i32) {
+  scf.switch %selector {
+    case 0 {
+      test.write_resource %pool, %lhs : pool, i32
+    }
+    default {
+      test.write_resource %pool, %rhs : pool, i32
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @projects_effectful_cases(%selector: index, %pool: pool, %lhs: i32, %rhs: i32) {
+  %4 = index.constant 0 : index
+  %5 = index.cmp eq, %selector, %4 : index
+  scf.if %5 {
+    test.write_resource %pool, %lhs : pool, i32
+  } else {
+    test.write_resource %pool, %rhs : pool, i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @projects_nested_switches(%outer: index, %inner: index, %lhs: i32, %rhs: i32) -> (i32) {
+  %result = scf.switch %outer -> (i32) {
+    case 0 {
+      %nested = scf.switch %inner -> (i32) {
+        case 3 {
+          %sum = test.addi %lhs, %rhs : i32
+          scf.yield %sum : i32
+        }
+        default {
+          scf.yield %lhs : i32
+        }
+      }
+      scf.yield %nested : i32
+    }
+    default {
+      scf.yield %rhs : i32
+    }
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @projects_nested_switches(%outer: index, %inner: index, %lhs: i32, %rhs: i32) -> (i32) {
+  %11 = index.constant 0 : index
+  %12 = index.cmp eq, %outer, %11 : index
+  %result = scf.if %12 -> (i32) {
+    %8 = index.constant 3 : index
+    %9 = index.cmp eq, %inner, %8 : index
+    %nested = scf.if %9 -> (i32) {
+      %sum = test.addi %lhs, %rhs : i32
+      scf.yield %sum : i32
+    } else {
+      scf.yield %lhs : i32
+    }
+    scf.yield %nested : i32
+  } else {
+    scf.yield %rhs : i32
+  }
+  func.return %result : i32
+}

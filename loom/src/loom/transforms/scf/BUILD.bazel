@@ -44,6 +44,21 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "lookup_to_select",
+    srcs = ["lookup_to_select.c"],
+    hdrs = ["lookup_to_select.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:walk",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "scf_memory",
     srcs = ["scf_memory.c"],
     hdrs = ["scf_memory.h"],
@@ -139,6 +154,21 @@ loom_cc_library(
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/util:predicate_facts",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "switch_to_if",
+    srcs = ["switch_to_if.c"],
+    hdrs = ["switch_to_if.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
     ],
 )

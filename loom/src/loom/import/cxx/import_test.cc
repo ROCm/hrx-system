@@ -470,9 +470,9 @@ TEST_F(ImportTest, RejectedSourceDoesNotPoisonNextImport) {
   EXPECT_NE(Print().find("@repaired"), std::string::npos);
 }
 
-TEST_F(ImportTest, UnsupportedSourceHasDiagnosticInsteadOfInvalidModule) {
+TEST_F(ImportTest, UnsupportedSwitchShapeHasDiagnosticInsteadOfInvalidModule) {
   IREE_ASSERT_OK(
-      Import(IREE_SV("int entry(int x) { switch (x) {} return x; }")));
+      Import(IREE_SV("int entry(int x) { switch (x) case 1: return x; }")));
   EXPECT_EQ(module_, nullptr);
   EXPECT_EQ(diagnostic_count_, 1);
   EXPECT_EQ(diagnostic_filename_, "/app/source.cpp");

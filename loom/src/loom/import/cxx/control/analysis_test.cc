@@ -622,6 +622,150 @@ TEST(ControlFlowTest, ConditionalValuesRetainOrderedBindingMutations) {
   }
 }
 
+TEST(ControlFlowTest,
+     SwitchClausesRetainLexicalLabelsWritesAndEscapingContinues) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    void entry(int selector, int x, int y) {
+      for (unsigned i = 0; i < 4u; ++i) {
+        switch (selector) {
+          case -2:
+          case 4:
+            ++x;
+            if (x) break;
+            ++y;
+          default:
+            ++y;
+            continue;
+          case 7:
+            break;
+        }
+        ++x;
+      }
+    }
+  )"),
+                IREE_SV("switch.cpp"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  auto* loop = cxx::ast_cast<cxx::ForStatementAST>(body->statementList->value);
+  ASSERT_NE(loop, nullptr);
+  auto* loop_body = cxx::ast_cast<cxx::CompoundStatementAST>(loop->statement);
+  ASSERT_NE(loop_body, nullptr);
+  auto* selection =
+      cxx::ast_cast<cxx::SwitchStatementAST>(loop_body->statementList->value);
+  ASSERT_NE(selection, nullptr);
+
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
+  const auto& layout = analysis.switch_layout(selection);
+  ASSERT_EQ(layout.clauses.size(), 3u);
+  EXPECT_TRUE(layout.has_default);
+  EXPECT_FALSE(layout.direct);
+
+  const auto& first = layout.clauses[0];
+  ASSERT_EQ(first.labels.size(), 2u);
+  ASSERT_TRUE(first.labels[0].key.has_value());
+  EXPECT_EQ(*first.labels[0].key, -2);
+  ASSERT_TRUE(first.labels[1].key.has_value());
+  EXPECT_EQ(*first.labels[1].key, 4);
+  EXPECT_EQ(first.statements.size(), 3u);
+  EXPECT_TRUE(first.falls_through);
+
+  const auto& fallback = layout.clauses[1];
+  ASSERT_EQ(fallback.labels.size(), 1u);
+  EXPECT_FALSE(fallback.labels[0].key.has_value());
+  EXPECT_EQ(fallback.statements.size(), 2u);
+  EXPECT_FALSE(fallback.falls_through);
+
+  const auto& last = layout.clauses[2];
+  ASSERT_EQ(last.labels.size(), 1u);
+  ASSERT_TRUE(last.labels[0].key.has_value());
+  EXPECT_EQ(*last.labels[0].key, 7);
+  EXPECT_EQ(last.statements.size(), 1u);
+  EXPECT_FALSE(last.falls_through);
+
+  auto parameters = function->symbol->parameters();
+  ASSERT_EQ(first.writes.size(), 2u);
+  EXPECT_EQ(first.writes[0], parameters[1]);
+  EXPECT_EQ(first.writes[1], parameters[2]);
+  ASSERT_EQ(fallback.writes.size(), 1u);
+  EXPECT_EQ(fallback.writes[0], parameters[2]);
+  EXPECT_TRUE(last.writes.empty());
+  auto switch_writes = analysis.written(selection);
+  ASSERT_EQ(switch_writes.size(), 2u);
+  EXPECT_EQ(switch_writes[0], parameters[1]);
+  EXPECT_EQ(switch_writes[1], parameters[2]);
+
+  EXPECT_EQ(analysis.breaks(selection), ExitFlow::None);
+  EXPECT_EQ(analysis.continues(selection), ExitFlow::Some);
+  EXPECT_EQ(analysis.iteration_exits(selection), ExitFlow::Some);
+  EXPECT_EQ(analysis.returns(selection), ExitFlow::None);
+  EXPECT_EQ(analysis.breaks(loop->statement), ExitFlow::None);
+  EXPECT_EQ(analysis.continues(loop->statement), ExitFlow::Some);
+  EXPECT_EQ(analysis.breaks(loop), ExitFlow::None);
+  EXPECT_EQ(analysis.continues(loop), ExitFlow::None);
+}
+
+TEST(ControlFlowTest, DirectAndNestedSwitchesConsumeTheirOwnBreaks) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    int entry(int selector, int value) {
+      switch (selector) {
+        case 2:
+          switch (value) {
+            case 0: ++value; break;
+            default: break;
+          }
+          value += 3;
+          break;
+        default:
+          value += 5;
+          break;
+        case -4:
+          value += 7;
+      }
+      return value;
+    }
+  )"),
+                IREE_SV("switch.cpp"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  auto* outer =
+      cxx::ast_cast<cxx::SwitchStatementAST>(body->statementList->value);
+  ASSERT_NE(outer, nullptr);
+  auto* outer_body = cxx::ast_cast<cxx::CompoundStatementAST>(outer->statement);
+  ASSERT_NE(outer_body, nullptr);
+  auto* nested = cxx::ast_cast<cxx::SwitchStatementAST>(
+      outer_body->statementList->next->value);
+  ASSERT_NE(nested, nullptr);
+
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body);
+  const auto& outer_layout = analysis.switch_layout(outer);
+  ASSERT_EQ(outer_layout.clauses.size(), 3u);
+  EXPECT_TRUE(outer_layout.has_default);
+  EXPECT_TRUE(outer_layout.direct);
+  EXPECT_EQ(analysis.breaks(outer), ExitFlow::None);
+  EXPECT_EQ(analysis.continues(outer), ExitFlow::None);
+  EXPECT_EQ(analysis.returns(outer), ExitFlow::None);
+
+  const auto& nested_layout = analysis.switch_layout(nested);
+  ASSERT_EQ(nested_layout.clauses.size(), 2u);
+  EXPECT_TRUE(nested_layout.has_default);
+  EXPECT_TRUE(nested_layout.direct);
+  EXPECT_EQ(analysis.breaks(nested), ExitFlow::None);
+  EXPECT_EQ(analysis.continues(nested), ExitFlow::None);
+  EXPECT_EQ(analysis.returns(nested), ExitFlow::None);
+}
+
 TEST(ControlFlowTest, IterationExitsStopAtTheirLoopAndExcludeUnreachablePaths) {
   struct Case {
     // Statements inside the outer counted loop's body.

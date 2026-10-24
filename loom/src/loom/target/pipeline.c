@@ -441,6 +441,14 @@ loom_target_pipeline_build_post_expansion_private_storage_promotion(
   return loom_target_pipeline_build_cleanup_if_changed(builder);
 }
 
+static iree_status_t loom_target_pipeline_build_source_lookup_projection(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_run(builder, IREE_SV("scf-lookup-to-select")));
+  return loom_target_pipeline_build_cleanup_if_changed(builder);
+}
+
 // Motion consumes structured loop entry and effect facts before CFG conversion
 // erases those boundaries, including when lexical workers are still inline.
 static iree_status_t loom_target_pipeline_build_source_cfg_lowering(
@@ -457,7 +465,9 @@ static iree_status_t loom_target_pipeline_build_structured_source_finalization(
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_view_root_selection_decomposition(builder,
                                                                    user_data));
-  return loom_target_pipeline_build_run(builder, IREE_SV("licm"));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_run(builder, IREE_SV("licm")));
+  return loom_target_pipeline_build_run(builder, IREE_SV("scf-switch-to-if"));
 }
 
 static iree_status_t
@@ -819,6 +829,12 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
       builder, IREE_SV("source"),
       loom_target_pipeline_build_post_expansion_private_storage_promotion, NULL,
       &for_op));
+  // Canonicalization retains pure keyed selection as scf.lookup while source
+  // optimization can still reason about whole table rows. Project those rows
+  // to ordinary comparisons and selects before complete target legalization.
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_for_target_functions(
+      builder, IREE_SV("source"),
+      loom_target_pipeline_build_source_lookup_projection, NULL, &for_op));
   // Finish reference rewrites after source expansion exposes static lanes and
   // before CFG finalization. Source-to-low owns the final legality check.
   IREE_RETURN_IF_ERROR(

@@ -382,9 +382,11 @@ loom_cc_library(
     loom::transforms::math::legalize
     loom::transforms::ownership::ownership_lifetime
     loom::transforms::pipeline::outline
+    loom::transforms::scf::lookup_to_select
     loom::transforms::scf::scf_pipeline
     loom::transforms::scf::scf_to_cfg
     loom::transforms::scf::scf_unroll
+    loom::transforms::scf::switch_to_if
     loom::transforms::symbol::inline_callables
     loom::transforms::symbol::refine_boundaries
     loom::transforms::symbol::symbol_dce
