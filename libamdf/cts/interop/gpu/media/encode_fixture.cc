@@ -284,6 +284,7 @@ void MediaEncodeInteropTest::SetUp() {
   ASSERT_EQ(api_->device_query_info(media_device_, &device_info),
             AMDF_STATUS_OK);
   encode_family_ = device_info.queue_family_count;
+  decode_family_ = device_info.queue_family_count;
   for (uint32_t ordinal = 0; ordinal < device_info.queue_family_count;
        ++ordinal) {
     uint32_t count = 0;
@@ -294,20 +295,30 @@ void MediaEncodeInteropTest::SetUp() {
     ASSERT_EQ(media_->device_enumerate_codecs(media_device_, ordinal, count,
                                               codecs.data(), &count),
               AMDF_STATUS_OK);
-    const auto supports = [&](amdf_media_codec_t codec) {
+    const auto supports = [&](amdf_media_codec_t codec,
+                              amdf_media_direction_t direction) {
       return std::any_of(codecs.begin(), codecs.end(), [&](const auto& entry) {
-        return entry.codec == codec &&
-               entry.direction == AMDF_MEDIA_DIRECTION_ENCODE;
+        return entry.codec == codec && entry.direction == direction;
       });
     };
-    if (supports(AMDF_MEDIA_CODEC_H264) && supports(AMDF_MEDIA_CODEC_HEVC) &&
-        supports(AMDF_MEDIA_CODEC_AV1)) {
+    if (encode_family_ == device_info.queue_family_count &&
+        supports(AMDF_MEDIA_CODEC_H264, AMDF_MEDIA_DIRECTION_ENCODE) &&
+        supports(AMDF_MEDIA_CODEC_HEVC, AMDF_MEDIA_DIRECTION_ENCODE) &&
+        supports(AMDF_MEDIA_CODEC_AV1, AMDF_MEDIA_DIRECTION_ENCODE)) {
       encode_family_ = ordinal;
-      break;
+    }
+    if (decode_family_ == device_info.queue_family_count &&
+        supports(AMDF_MEDIA_CODEC_H264, AMDF_MEDIA_DIRECTION_DECODE) &&
+        supports(AMDF_MEDIA_CODEC_HEVC, AMDF_MEDIA_DIRECTION_DECODE) &&
+        supports(AMDF_MEDIA_CODEC_AV1, AMDF_MEDIA_DIRECTION_DECODE)) {
+      decode_family_ = ordinal;
     }
   }
   if (encode_family_ == device_info.queue_family_count) {
     GTEST_SKIP() << "no complete native encode family";
+  }
+  if (decode_family_ == device_info.queue_family_count) {
+    GTEST_SKIP() << "no complete native decode family";
   }
   const amdf_media_kernel_queue_create_info_t encode_queue_create = {
       .type = AMDF_STRUCTURE_TYPE_MEDIA_KERNEL_QUEUE_CREATE_INFO,
@@ -319,6 +330,17 @@ void MediaEncodeInteropTest::SetUp() {
   };
   ASSERT_EQ(media_->kernel_queue_create(media_device_, &encode_queue_create,
                                         &encode_queue_),
+            AMDF_STATUS_OK);
+  const amdf_media_kernel_queue_create_info_t decode_queue_create = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_KERNEL_QUEUE_CREATE_INFO,
+      .structure_size = sizeof(decode_queue_create),
+      .queue_family_ordinal = decode_family_,
+      .required_capabilities =
+          AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION,
+      .maximum_pending_submission_count = 4,
+  };
+  ASSERT_EQ(media_->kernel_queue_create(media_device_, &decode_queue_create,
+                                        &decode_queue_),
             AMDF_STATUS_OK);
   const amdf_gpu_kernel_queue_create_info_t gpu_queue_create = {
       .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
@@ -340,6 +362,16 @@ void MediaEncodeInteropTest::SetUp() {
             AMDF_STATUS_OK);
   ASSERT_EQ(api_->kernel_queue_dependency_create(
                 encode_queue_, gpu_queue_, &dependency_create, &encode_to_gpu_),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(api_->kernel_queue_dependency_create(
+                gpu_queue_, decode_queue_, &dependency_create, &gpu_to_decode_),
+            AMDF_STATUS_OK);
+  ASSERT_EQ(
+      api_->kernel_queue_dependency_create(
+          encode_queue_, decode_queue_, &dependency_create, &encode_to_decode_),
+      AMDF_STATUS_OK);
+  ASSERT_EQ(api_->kernel_queue_dependency_create(
+                decode_queue_, gpu_queue_, &dependency_create, &decode_to_gpu_),
             AMDF_STATUS_OK);
 }
 
@@ -460,8 +492,9 @@ void MediaEncodeInteropTest::RunPictures(
       .next = codec_configuration,
       .configuration = configuration.configuration,
   };
-  ASSERT_EQ(media_->session_create(encode_queue_, &session_create, &session_),
-            AMDF_STATUS_OK);
+  ASSERT_EQ(
+      media_->session_create(encode_queue_, &session_create, &encode_session_),
+      AMDF_STATUS_OK);
 
   const uint64_t feedback_start =
       AlignUp(64, configuration.feedback_byte_offset_alignment);
@@ -494,17 +527,18 @@ void MediaEncodeInteropTest::RunPictures(
       .byte_length = feedback_length,
       .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
   };
-  ASSERT_EQ(
-      api_->memory_map(feedback_memory, &feedback_map, &feedback_mapping_),
-      AMDF_STATUS_OK);
+  ASSERT_EQ(api_->memory_map(feedback_memory, &feedback_map,
+                             &encode_feedback_mapping_),
+            AMDF_STATUS_OK);
   amdf_host_mapping_info_t feedback_mapping = {
       .type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO,
       .structure_size = sizeof(feedback_mapping),
   };
-  ASSERT_EQ(api_->host_mapping_query_info(feedback_mapping_, &feedback_mapping),
+  ASSERT_EQ(api_->host_mapping_query_info(encode_feedback_mapping_,
+                                          &feedback_mapping),
             AMDF_STATUS_OK);
-  feedback_ = static_cast<uint8_t*>(feedback_mapping.pointer);
-  std::memset(feedback_, 0xa5, feedback_length);
+  encode_feedback_ = static_cast<uint8_t*>(feedback_mapping.pointer);
+  std::memset(encode_feedback_, 0xa5, feedback_length);
   for (uint32_t index = 0; index < recording_count; ++index) {
     const amdf_media_command_create_info_t command_create = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_CREATE_INFO,
@@ -517,8 +551,9 @@ void MediaEncodeInteropTest::RunPictures(
                      configuration.feedback_byte_length},
     };
     amdf_media_command_t* command = nullptr;
-    ASSERT_EQ(media_->command_create(session_, &command_create, &command),
-              AMDF_STATUS_OK);
+    ASSERT_EQ(
+        media_->command_create(encode_session_, &command_create, &command),
+        AMDF_STATUS_OK);
     commands_.push_back(command);
   }
 
@@ -693,6 +728,11 @@ void MediaEncodeInteropTest::RunPictures(
                          static_cast<uint32_t>(reconstruction_heap_length));
         writer.DmaFill32(compressed_address, 0xa5a5a5a5,
                          static_cast<uint32_t>(compressed_length));
+        for (uint32_t index = 0; index < recording_count; ++index) {
+          writer.DmaFill32(
+              compressed_address + compressed_start + index * compressed_stride,
+              0, static_cast<uint32_t>(compressed_stride));
+        }
       });
   const auto capture =
       make_transfer(recording_count + 1, [&](Pm4CommandWriter& writer) {
@@ -875,6 +915,13 @@ void MediaEncodeInteropTest::RunPictures(
         EXPECT_EQ(output[2], 0u);
         EXPECT_EQ(output[3], 1u);
       }
+      if (batch == 0 && index == 0) {
+        ASSERT_NO_FATAL_FAILURE(DecodeKeyPicture(
+            test_case, width, height, compressed_memory, output_offset,
+            region.byte_length, compressed_stride - region.byte_offset,
+            test_case.codec == AMDF_MEDIA_CODEC_AV1 ? &av1_result : nullptr,
+            last_encode));
+      }
     }
     for (uint64_t index = 0; index < compressed_start; ++index) {
       ASSERT_EQ(captured_bytes[index], 0xa5u);
@@ -899,7 +946,7 @@ void MediaEncodeInteropTest::RunPictures(
           index >= begin && index < begin + configuration.feedback_byte_length;
     }
     if (!result_byte) {
-      ASSERT_EQ(feedback_[index], 0xa5u);
+      ASSERT_EQ(encode_feedback_[index], 0xa5u);
     }
   }
   RecordProperty("codec", test_case.codec);
@@ -921,28 +968,45 @@ void MediaEncodeInteropTest::TearDown() {
                                       AMDF_TIMEOUT_INFINITE, 0),
               AMDF_STATUS_OK);
   }
+  if (decode_point_ != 0) {
+    ASSERT_EQ(api_->kernel_queue_wait(decode_queue_, decode_point_,
+                                      AMDF_TIMEOUT_INFINITE, 0),
+              AMDF_STATUS_OK);
+  }
   for (auto* command : commands_) {
     ASSERT_EQ(media_->command_destroy(command), AMDF_STATUS_OK);
   }
-  if (session_ != nullptr) {
-    ASSERT_EQ(media_->session_destroy(session_), AMDF_STATUS_OK);
+  if (decode_command_ != nullptr) {
+    ASSERT_EQ(media_->command_destroy(decode_command_), AMDF_STATUS_OK);
+  }
+  if (encode_session_ != nullptr) {
+    ASSERT_EQ(media_->session_destroy(encode_session_), AMDF_STATUS_OK);
+  }
+  if (decode_session_ != nullptr) {
+    ASSERT_EQ(media_->session_destroy(decode_session_), AMDF_STATUS_OK);
   }
   for (auto* image : images_) {
     media_->image_destroy(image);
   }
-  if (feedback_mapping_ != nullptr) {
-    ASSERT_EQ(api_->host_mapping_destroy(feedback_mapping_), AMDF_STATUS_OK);
+  if (encode_feedback_mapping_ != nullptr) {
+    ASSERT_EQ(api_->host_mapping_destroy(encode_feedback_mapping_),
+              AMDF_STATUS_OK);
+  }
+  if (decode_feedback_mapping_ != nullptr) {
+    ASSERT_EQ(api_->host_mapping_destroy(decode_feedback_mapping_),
+              AMDF_STATUS_OK);
   }
   for (auto* memory : memories_) {
     ASSERT_EQ(api_->memory_destroy(memory, nullptr), AMDF_STATUS_OK);
   }
-  for (auto* dependency : {gpu_to_encode_, encode_to_gpu_}) {
+  for (auto* dependency : {gpu_to_encode_, encode_to_gpu_, gpu_to_decode_,
+                           encode_to_decode_, decode_to_gpu_}) {
     if (dependency != nullptr) {
       ASSERT_EQ(api_->kernel_queue_dependency_destroy(dependency),
                 AMDF_STATUS_OK);
     }
   }
-  for (auto* queue : {encode_queue_, gpu_queue_}) {
+  for (auto* queue : {encode_queue_, decode_queue_, gpu_queue_}) {
     if (queue != nullptr) {
       ASSERT_EQ(api_->kernel_queue_destroy(queue), AMDF_STATUS_OK);
     }

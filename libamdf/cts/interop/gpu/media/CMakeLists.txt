@@ -81,8 +81,10 @@ iree_cc_library(
   HDRS
     "encode_fixture.h"
   SRCS
+    "encode_decode.cc"
     "encode_fixture.cc"
   DEPS
+    ::consume
     ::produce
     amdf::headers
     iree::third_party::google_test
