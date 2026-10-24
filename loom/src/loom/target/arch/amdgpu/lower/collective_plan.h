@@ -390,8 +390,10 @@ typedef struct loom_amdgpu_subgroup_ballot_plan_t {
 } loom_amdgpu_subgroup_ballot_plan_t;
 
 typedef struct loom_amdgpu_subgroup_vote_any_plan_t {
-  // Source predicate to materialize as a native EXEC-width mask at this use.
+  // Source predicate represented as either a uniform i1 or native lane mask.
   loom_value_id_t predicate;
+  // Whether the uniform result directly aliases the uniform predicate.
+  bool result_aliases_predicate;
   // Optional exact predicate recipe; NULL materializes the canonical carrier.
   const void* predicate_plan;
   // Descriptors that restrict the predicate to lanes active at this use.
@@ -407,8 +409,10 @@ typedef struct loom_amdgpu_subgroup_vote_any_plan_t {
 } loom_amdgpu_subgroup_vote_any_plan_t;
 
 typedef struct loom_amdgpu_subgroup_vote_all_plan_t {
-  // Source predicate to materialize as a native EXEC-width mask at this use.
+  // Source predicate represented as either a uniform i1 or native lane mask.
   loom_value_id_t predicate;
+  // Whether the uniform result directly aliases the uniform predicate.
+  bool result_aliases_predicate;
   // Optional exact predicate recipe; NULL materializes the canonical carrier.
   const void* predicate_plan;
   // Descriptor row selected to compare predicate and active EXEC masks.
