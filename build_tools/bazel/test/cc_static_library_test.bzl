@@ -7,6 +7,7 @@ load("@rules_cc//cc:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("@rules_cc//cc/common:cc_shared_library_info.bzl", "CcSharedLibraryInfo")
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test")
 load("@rules_testing//lib:truth.bzl", "matching")
 load("@rules_testing//lib:util.bzl", "TestingAspectInfo")
@@ -50,6 +51,10 @@ def _archive_lto_metadata_impl(env, target):
     env.expect.that_bool(bool(archive.pic_lto_bitcode_files)).equals(True)
 
 def _shared_metadata_impl(env, target):
+    exported = target[CcSharedLibraryInfo].linker_input
+    env.expect.that_collection(exported.user_link_flags).contains("-pthread")
+    env.expect.that_collection([file.basename for file in exported.additional_inputs]).contains("empty_suppressions.txt")
+    env.expect.that_collection(exported.linkstamps).contains_exactly([])
     actions = target[TestingAspectInfo].actions
     stamps = [action for action in actions if action.mnemonic == "CppLinkstampCompile"]
     env.expect.that_int(len(stamps)).equals(1)
