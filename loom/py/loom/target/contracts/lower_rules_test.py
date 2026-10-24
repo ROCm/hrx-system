@@ -240,17 +240,18 @@ def test_compile_structural_register_emits() -> None:
                 emit=(
                     EmitRegisterSlice(
                         source=ValueRef.operand("source"),
-                        result=ValueRef.temporary("element"),
+                        result=ValueRef.temporary("reclassified"),
                         unit_offset=1,
                         unit_count=1,
+                        result_register_class="test.i32",
                     ),
                     EmitRegisterMove(
-                        source=ValueRef.temporary("element"),
-                        result=ValueRef.temporary("reclassified"),
-                        result_type=ValueRef.temporary("element"),
+                        source=ValueRef.temporary("reclassified"),
+                        result=ValueRef.temporary("moved"),
+                        result_type=ValueRef.temporary("reclassified"),
                     ),
                     EmitRegisterSlice(
-                        source=ValueRef.temporary("reclassified"),
+                        source=ValueRef.temporary("moved"),
                         result=ValueRef.result("result"),
                     ),
                 ),
@@ -297,19 +298,25 @@ def test_compile_structural_register_emits() -> None:
         extract_rule.emit_start : extract_rule.emit_start + extract_rule.emit_count
     ]
     assert tuple(emit.kind for emit in slice_emits) == (
-        LowerEmitKind.REGISTER_SLICE,
+        LowerEmitKind.REGISTER_SLICE_CLASS,
         LowerEmitKind.REGISTER_MOVE,
         LowerEmitKind.REGISTER_SLICE,
     )
     assert slice_emits[0].operand_ref_count == 1
     assert slice_emits[0].structural_offset == 1
     assert slice_emits[0].structural_unit_count == 1
-    assert slice_emits[0].flags == 0
-    typed_slice_result = compiled.value_refs[slice_emits[0].result_bind_ref_start]
-    assert typed_slice_result.kind is SourceValueKind.TEMPORARY
+    assert slice_emits[0].flags == LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS
+    assert slice_emits[0].result_register_class_id == next(
+        index
+        for index, register_class in enumerate(TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes)
+        if register_class.name == "test.i32"
+    )
     temporary_type_ref = compiled.value_refs[slice_emits[1].result_ref_start]
     assert temporary_type_ref.kind is SourceValueKind.TEMPORARY
-    assert temporary_type_ref.index == typed_slice_result.index
+    assert (
+        temporary_type_ref.index
+        == compiled.value_refs[slice_emits[0].result_bind_ref_start].index
+    )
     assert slice_emits[2].operand_ref_count == 1
     assert slice_emits[2].structural_offset == 0
 

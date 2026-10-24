@@ -1819,7 +1819,11 @@ class _LowerRuleSetCompiler:
         if isinstance(emit, EmitRegisterSlice):
             self._append_structural_emit(
                 source_op,
-                LowerEmitKind.REGISTER_SLICE,
+                (
+                    LowerEmitKind.REGISTER_SLICE_CLASS
+                    if emit.result_register_class is not None
+                    else LowerEmitKind.REGISTER_SLICE
+                ),
                 (emit.source,),
                 emit.result,
                 emit.result_type,
@@ -1827,6 +1831,7 @@ class _LowerRuleSetCompiler:
                 temporary_definition_slots,
                 structural_offset=emit.unit_offset,
                 structural_unit_count=emit.unit_count or 0,
+                structural_register_class=emit.result_register_class,
             )
             return
         if isinstance(emit, EmitRegisterConcat):
@@ -2089,6 +2094,7 @@ class _LowerRuleSetCompiler:
         source_memory: SourceMemoryConstraint | None = None,
         structural_offset: int = 0,
         structural_unit_count: int = 0,
+        structural_register_class: str | None = None,
     ) -> None:
         operand_refs = tuple(
             self._lower_value_ref(source_op, source, temporary_ordinals)
@@ -2107,8 +2113,20 @@ class _LowerRuleSetCompiler:
 
         flags = 0
         result_type_pattern_start = 0
+        result_register_class_id = 0
         type_binding = result if result_type is None else result_type
-        if structural_unit_count != 0:
+        if structural_register_class is not None:
+            result_register_class_id = self._register_class_ordinals.get(
+                structural_register_class, -1
+            )
+            if result_register_class_id < 0:
+                raise ValueError(
+                    f"{source_op.name}: descriptor set has no register class "
+                    f"'{structural_register_class}'"
+                )
+            result_ref_start = 0
+            flags |= LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS
+        elif structural_unit_count != 0:
             result_ref_start = result_bind_ref_start
         elif isinstance(type_binding, TypePattern):
             _require_exact_result_type_pattern(
@@ -2158,6 +2176,7 @@ class _LowerRuleSetCompiler:
                 operand_ref_start=operand_ref_start,
                 operand_ref_count=len(operand_refs),
                 result_ref_start=result_ref_start,
+                result_register_class_id=result_register_class_id,
                 result_type_pattern_start=result_type_pattern_start,
                 result_ref_count=1,
                 result_bind_ref_start=result_bind_ref_start,

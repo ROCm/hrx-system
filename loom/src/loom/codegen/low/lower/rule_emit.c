@@ -559,12 +559,34 @@ static iree_status_t loom_low_lower_rule_emit_register_slice(
       &context->module->types,
       loom_low_lower_resolved_emit_result_type_id(resolved_emit, 0));
 
+  loom_type_t slice_result_type = result_type;
+  if (emit->kind == LOOM_LOW_LOWER_EMIT_REGISTER_SLICE_CLASS) {
+    const loom_type_t source_type =
+        loom_module_value_type(context->module, low_operands[0]);
+    if (emit->payload.structural.unit_count ==
+        loom_low_register_type_unit_count(source_type)) {
+      slice_result_type = source_type;
+    } else {
+      IREE_ASSERT(!loom_type_register_has_value_type(source_type),
+                  "planned width-changing register slice must be untyped");
+      slice_result_type = loom_low_register_carrier_type_with_unit_count(
+          source_type, emit->payload.structural.unit_count);
+    }
+  }
+
   loom_op_t* slice_op = NULL;
   IREE_RETURN_IF_ERROR(
       loom_low_slice_build(loom_low_lower_context_builder(context),
                            low_operands[0], emit->payload.structural.offset,
-                           result_type, source_op->location, &slice_op));
-  const loom_value_id_t low_result = loom_low_slice_result(slice_op);
+                           slice_result_type, source_op->location, &slice_op));
+  loom_value_id_t low_result = loom_low_slice_result(slice_op);
+  if (emit->kind == LOOM_LOW_LOWER_EMIT_REGISTER_SLICE_CLASS) {
+    loom_op_t* copy_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_copy_build(
+        loom_low_lower_context_builder(context), low_result,
+        /*detached=*/false, result_type, source_op->location, &copy_op));
+    low_result = loom_low_copy_result(copy_op);
+  }
   return loom_low_lower_rule_bind_results(context, rule_set, source_op, state,
                                           emit, &low_result);
 }
@@ -1192,7 +1214,8 @@ iree_status_t loom_low_lower_rule_set_emit_rule(
                 context, rule_set, source_op, &state, resolved_emit));
         break;
       }
-      case LOOM_LOW_LOWER_EMIT_REGISTER_SLICE: {
+      case LOOM_LOW_LOWER_EMIT_REGISTER_SLICE:
+      case LOOM_LOW_LOWER_EMIT_REGISTER_SLICE_CLASS: {
         IREE_RETURN_IF_ERROR(loom_low_lower_rule_emit_register_slice(
             context, rule_set, source_op, &state, resolved_emit));
         break;

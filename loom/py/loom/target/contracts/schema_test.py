@@ -502,6 +502,19 @@ def test_structural_register_emits_validate_program_shape() -> None:
             unit_count=1,
             result_type=Scalar("i32"),
         )
+    with pytest.raises(ValueError, match="result register class must be non-empty"):
+        EmitRegisterSlice(
+            source=ValueRef.operand("source"),
+            result=ValueRef.temporary("element"),
+            unit_count=1,
+            result_register_class="",
+        )
+    with pytest.raises(ValueError, match="requires an explicit unit count"):
+        EmitRegisterSlice(
+            source=ValueRef.operand("source"),
+            result=ValueRef.temporary("element"),
+            result_register_class="test.i32",
+        )
     with pytest.raises(ValueError, match="only valid for temporary results"):
         EmitRegisterSlice(
             source=ValueRef.operand("source"),
@@ -541,6 +554,27 @@ def test_structural_register_emits_validate_program_shape() -> None:
                         EmitRegisterCopy(
                             source=ValueRef.operand("values"),
                             result=ValueRef.temporary("copy"),
+                        ),
+                    ),
+                ),
+            ),
+        )
+    with pytest.raises(
+        ValueError,
+        match=r"result register class 'test\.missing' is absent from descriptor set",
+    ):
+        ContractFragment(
+            name="register.slice.unknown-class",
+            descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+            cases=(
+                DescriptorRule(
+                    source_op=scalar_analysis.scalar_assume,
+                    emit=(
+                        EmitRegisterSlice(
+                            source=ValueRef.operand("values"),
+                            result=ValueRef.temporary("slice"),
+                            unit_count=1,
+                            result_register_class="test.missing",
                         ),
                     ),
                 ),
