@@ -19,7 +19,7 @@ sample recording come from the same revision. The following commands use a POSIX
 shell; the Windows acquisition command follows below.
 
 ```sh
-model_url=https://raw.githubusercontent.com/ROCm/hrx-loom-library/21637a18079d1f1dd9b8e20d26f700a62e60db4f/model/moonshine-ai/moonshine-streaming-tiny
+model_url=https://raw.githubusercontent.com/ROCm/hrx-loom-library/bedb7bbf149066c7979f45ce753da3b9b8875842/model/moonshine-ai/moonshine-streaming-tiny
 loom-fetch "$model_url/model.json" --list
 ```
 
@@ -45,7 +45,7 @@ loom-fetch "$model_url/model.json" --preset=streaming --output=./moonshine
 On Windows PowerShell, the same acquisition is:
 
 ```powershell
-$modelUrl = 'https://raw.githubusercontent.com/ROCm/hrx-loom-library/21637a18079d1f1dd9b8e20d26f700a62e60db4f/model/moonshine-ai/moonshine-streaming-tiny'
+$modelUrl = 'https://raw.githubusercontent.com/ROCm/hrx-loom-library/bedb7bbf149066c7979f45ce753da3b9b8875842/model/moonshine-ai/moonshine-streaming-tiny'
 loom-fetch "$modelUrl/model.json" --preset=streaming --output=./moonshine
 ```
 
@@ -100,7 +100,7 @@ so no `--preset` or separate `serve.json` is needed here.
 In another terminal, download the small reference recording and submit it:
 
 ```sh
-curl --fail --location https://raw.githubusercontent.com/ROCm/hrx-loom-library/21637a18079d1f1dd9b8e20d26f700a62e60db4f/model/moonshine-ai/moonshine-streaming-tiny/test/short.pcm --output=short.pcm
+curl --fail --location https://raw.githubusercontent.com/ROCm/hrx-loom-library/bedb7bbf149066c7979f45ce753da3b9b8875842/model/moonshine-ai/moonshine-streaming-tiny/test/short.pcm --output=short.pcm
 curl --fail-with-body -H 'Expect:' http://127.0.0.1:8080/v1/audio/transcriptions -F model=moonshine-ai/moonshine-streaming-tiny -F 'file=@short.pcm;headers="Content-Type: audio/pcm;rate=16000;channels=1"'
 ```
 
@@ -108,7 +108,7 @@ On Windows PowerShell, download the same recording and preserve the multipart
 header's quotes with the `--%` stop-parsing token:
 
 ```powershell
-curl.exe --fail --location https://raw.githubusercontent.com/ROCm/hrx-loom-library/21637a18079d1f1dd9b8e20d26f700a62e60db4f/model/moonshine-ai/moonshine-streaming-tiny/test/short.pcm --output=short.pcm
+curl.exe --fail --location https://raw.githubusercontent.com/ROCm/hrx-loom-library/bedb7bbf149066c7979f45ce753da3b9b8875842/model/moonshine-ai/moonshine-streaming-tiny/test/short.pcm --output=short.pcm
 curl.exe --% --fail-with-body -H "Expect:" http://127.0.0.1:8080/v1/audio/transcriptions -F model=moonshine-ai/moonshine-streaming-tiny -F "file=@short.pcm;headers=\"Content-Type: audio/pcm;rate=16000;channels=1\""
 ```
 
@@ -135,8 +135,12 @@ A release SDK can name a compatible library catalog. With that association,
 picker. A development SDK requires a card URL or explicit catalog:
 
 ```sh
-loom-fetch --catalog=github:ROCm/hrx-loom-library@21637a18079d1f1dd9b8e20d26f700a62e60db4f --list --json
+loom-fetch --catalog=github:ROCm/hrx-loom-library@bedb7bbf149066c7979f45ce753da3b9b8875842 --list --json
 ```
+
+This snapshot lists Moonshine speech recognition, Pocket speech synthesis, and
+Qwen3.8 Flash-Next text generation. Pocket's `streaming` preset uses Alba,
+Marius, and Anna; `streaming-noncommercial` adds Jean.
 
 A catalog entry describes a runnable package. The library also contains model
 descriptions whose executable ports are still being developed; they enter
