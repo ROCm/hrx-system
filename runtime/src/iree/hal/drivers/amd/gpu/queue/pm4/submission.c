@@ -511,6 +511,8 @@ void iree_hal_amd_gpu_pm4_submission_release_payload(
     iree_hal_buffer_release(submission->control.target.buffer);
   } else if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE) {
     iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&submission->execute);
+  } else if (submission->entry.kind == IREE_HAL_AMD_GPU_PM4_ENTRY_ALLOCATION) {
+    iree_hal_amd_gpu_allocation_destroy(submission->allocation.operation);
   }
   submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_BARRIER;
 }

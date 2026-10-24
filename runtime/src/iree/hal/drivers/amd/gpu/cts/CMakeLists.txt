@@ -509,10 +509,14 @@ iree_cc_test(
     "asan_test.cc"
   DEPS
     ::test_device
+    iree::async
     iree::base
     iree::hal
     iree::hal::cts::util::pool_test_util
+    iree::hal::cts::util::test_base
     iree::hal::drivers::amd::gpu::image::asan_images
+    iree::hal::drivers::amd::gpu::queue::semaphore
+    iree::hal::drivers::amd::gpu::queue::signal
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS
@@ -934,6 +938,37 @@ iree_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     libamdf::cts::util::native_identity
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND IREE_HAL_DRIVER_AMD)
+iree_cc_test(
+  NAME
+    allocation_test
+  SRCS
+    "allocation_test.cc"
+  DEPS
+    ::test_device
+    iree::async
+    iree::base
+    iree::hal
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::amd::fabric
+    iree::hal::drivers::amd::gpu::device
+    iree::hal::drivers::amd::gpu::image::hip_images
+    iree::hal::drivers::amd::gpu::queue::semaphore
+    iree::hal::drivers::amd::gpu::queue::signal
+    iree::hal::drivers::amd::status
+    iree::hal::memory::fixed_block_pool
+    iree::testing::gtest
+    iree::testing::gtest_main
   LABELS
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"

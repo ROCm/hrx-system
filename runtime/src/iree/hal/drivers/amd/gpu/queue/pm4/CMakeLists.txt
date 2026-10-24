@@ -469,6 +469,7 @@ iree_cc_library(
     iree::hal::drivers::amd::gpu::executable
     iree::hal::drivers::amd::gpu::kernarg
     iree::hal::drivers::amd::gpu::profile
+    iree::hal::drivers::amd::gpu::queue::allocation
     iree::hal::drivers::amd::gpu::queue::buffer
     iree::hal::drivers::amd::gpu::queue::capture_pool
     iree::hal::drivers::amd::gpu::queue::control

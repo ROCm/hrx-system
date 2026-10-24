@@ -366,6 +366,7 @@ iree_runtime_cc_library(
         ":transfer",
         "//runtime/src/iree/hal/drivers/amd/gpu:completion",
         "//runtime/src/iree/hal/drivers/amd/gpu:profile",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:allocation",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:buffer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:capture_pool",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:control",

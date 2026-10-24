@@ -6,18 +6,23 @@
 
 #include "iree/hal/drivers/amd/fabric/transient_buffer.h"
 
+#include <tuple>
+
 #include "iree/hal/memory/heap_pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
 
-class TransientBufferTest : public ::testing::TestWithParam<size_t> {};
+IREE_ASYNC_FIXED_FRONTIER_TYPE(ReuseHistory, UINT8_MAX);
+
+class TransientBufferTest
+    : public ::testing::TestWithParam<std::tuple<size_t, uint8_t>> {};
 
 TEST_P(TransientBufferTest, SubspanTracksCommitAndExplicitDecommit) {
   iree_arena_block_pool_t blocks;
-  iree_arena_block_pool_initialize(GetParam(), iree_allocator_system(),
-                                   &blocks);
+  iree_arena_block_pool_initialize(std::get<0>(GetParam()),
+                                   iree_allocator_system(), &blocks);
   const iree_hal_pool_host_access_t access = {
       .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
       .modes = IREE_HAL_MAPPING_MODE_SCOPED,
@@ -52,17 +57,35 @@ TEST_P(TransientBufferTest, SubspanTracksCommitAndExplicitDecommit) {
   IREE_ASSERT_OK(iree_hal_pool_materialize_reservations(
       pool, 1, &request, &reservation, IREE_HAL_POOL_MATERIALIZE_FLAG_NONE,
       &backing));
-  const iree_hal_pool_reservation_view_t view = {
+  ReuseHistory history = {};
+  const uint8_t history_count = std::get<1>(GetParam());
+  history.entry_count = history_count;
+  for (uint32_t i = 0; i < history_count; ++i) {
+    history.entries[i] = {i + 1, 41};
+  }
+  iree_hal_pool_reservation_view_t view = {
       .buffer = backing,
       .byte_offset = iree_hal_buffer_byte_offset(backing),
       .byte_length = iree_hal_buffer_byte_length(backing),
       .memory = iree_hal_buffer_memory_view(backing),
   };
+  view.memory.reuse_frontier =
+      history_count ? iree_async_fixed_frontier_as_const_frontier(&history)
+                    : nullptr;
   iree_hal_amd_fabric_transient_buffer_attach_reservation(root, pool,
                                                           &reservation);
-  iree_hal_amd_fabric_transient_buffer_stage_backing(root, &view);
+  IREE_ASSERT_OK(
+      iree_hal_amd_fabric_transient_buffer_stage_backing(root, &view));
   iree_hal_buffer_release(backing);
   iree_hal_amd_fabric_transient_buffer_commit(root);
+  // The reservation owner may recycle its history before the old native view
+  // retires. Every already-published view must keep the old epoch's facts.
+  const auto published = iree_hal_buffer_memory_view(root);
+  for (uint32_t i = 0; i < history_count; ++i) {
+    history.entries[i].epoch = 99;
+    EXPECT_EQ(published.reuse_frontier->entries[i].epoch, 41u);
+  }
+  EXPECT_EQ(published.reuse_frontier != nullptr, history_count != 0);
   IREE_ASSERT_OK(iree_hal_buffer_map_range(
       span, IREE_HAL_MAPPING_MODE_SCOPED, access.access,
       IREE_HAL_BUFFER_MAP_FLAG_NONE, 0, IREE_HAL_WHOLE_BUFFER, &mapping));
@@ -92,8 +115,13 @@ TEST_P(TransientBufferTest, SubspanTracksCommitAndExplicitDecommit) {
       iree_hal_buffer_allocation_begin_dealloca(root, &returned_pool));
   iree_hal_buffer_allocation_take_dealloca_reservation(root, &returned_pool,
                                                        &reservation);
-  iree_hal_buffer_allocation_decommit(root);
   iree_hal_pool_release_reservations(returned_pool, 1, &reservation, nullptr);
+  EXPECT_NE(iree_hal_buffer_native_binding(root, host_slot).host_pointer,
+            nullptr);
+  for (uint32_t i = 0; i < history_count; ++i) {
+    EXPECT_EQ(published.reuse_frontier->entries[i].epoch, 41u);
+  }
+  iree_hal_buffer_allocation_decommit(root);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
       iree_hal_buffer_map_range(span, IREE_HAL_MAPPING_MODE_SCOPED,
@@ -112,6 +140,7 @@ TEST_P(TransientBufferTest, SubspanTracksCommitAndExplicitDecommit) {
 // Both dedicated oversized metadata and ordinary reusable blocks own exactly
 // the same buffer lifecycle; block geometry is not a native-table size limit.
 INSTANTIATE_TEST_SUITE_P(MetadataStorage, TransientBufferTest,
-                         ::testing::Values(128, 4096));
+                         ::testing::Combine(::testing::Values(128, 4096),
+                                            ::testing::Values(0, 1, 255)));
 
 }  // namespace

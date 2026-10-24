@@ -10,6 +10,7 @@
 #include "iree/hal/drivers/amd/gpu/completion.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/profile.h"
+#include "iree/hal/drivers/amd/gpu/queue/allocation.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/drivers/amd/gpu/queue/control.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/barrier.h"
@@ -62,6 +63,7 @@ typedef enum iree_hal_amd_gpu_pm4_entry_kind_e {
   IREE_HAL_AMD_GPU_PM4_ENTRY_DISPATCH,
   IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER,
   IREE_HAL_AMD_GPU_PM4_ENTRY_CONTROL,
+  IREE_HAL_AMD_GPU_PM4_ENTRY_ALLOCATION,
   IREE_HAL_AMD_GPU_PM4_ENTRY_EXECUTE,
   IREE_HAL_AMD_GPU_PM4_ENTRY_TRIM,
   IREE_HAL_AMD_GPU_PM4_ENTRY_FRONTIERS,
@@ -124,6 +126,13 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
   // Exact initialized extent, computed once by the capture constructor.
   iree_host_size_t capture_size;
   union {
+    // Pool transaction whose native ordering belongs to this submission.
+    struct {
+      // Owned through rejection or terminal native retirement.
+      iree_hal_amd_gpu_allocation_t* operation;
+      // Exact publication owner, borrowed through callback-tail admission.
+      iree_hal_queue_t* queue;
+    } allocation;
     // Scalar operation and target retained through terminal native retirement.
     struct {
       // Prepared address slot, resolved only after allocation dependencies.

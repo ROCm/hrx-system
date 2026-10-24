@@ -40,8 +40,8 @@ struct iree_hal_amd_fabric_transient_buffer_t {
   // Guards all backing commitment and reservation state.
   iree_slim_mutex_t mutex;
 
-  // Prepared reservation view staged for commitment. Its buffer is retained
-  // while |backing_staged| is true; remaining fields borrow the reservation.
+  // Prepared view staged for commitment. Owns its buffer reference and reuse
+  // history until decommit, independently of logical reservation return.
   iree_hal_pool_reservation_view_t backing;
 
   // True after |backing| has been staged and until decommit.
@@ -189,19 +189,52 @@ void iree_hal_amd_fabric_transient_buffer_attach_reservation(
   iree_slim_mutex_unlock(&buffer->mutex);
 }
 
-void iree_hal_amd_fabric_transient_buffer_stage_backing(
+// Uses the unused tail of the ordinary cached wrapper block for history.
+// Large native binding tables can consume that tail; those roots use a
+// separately allocated history whose extent is the actual entry count.
+static uint8_t* iree_hal_amd_fabric_transient_buffer_history_storage(
+    iree_hal_amd_fabric_transient_buffer_t* buffer,
+    iree_host_size_t* out_capacity) {
+  const iree_host_size_t offset = iree_host_align(
+      sizeof(*buffer) + iree_hal_amd_fabric_transient_buffer_binding_layout(
+                            buffer->source_pool)
+                            ->byte_length,
+      iree_alignof(iree_async_frontier_t));
+  *out_capacity =
+      buffer->storage_block && offset < buffer->block_pool->usable_block_size
+          ? buffer->block_pool->usable_block_size - offset
+          : 0;
+  return *out_capacity ? (uint8_t*)buffer + offset : NULL;
+}
+
+iree_status_t iree_hal_amd_fabric_transient_buffer_stage_backing(
     iree_hal_buffer_t* base_buffer,
     const iree_hal_pool_reservation_view_t* backing) {
   iree_hal_amd_fabric_transient_buffer_t* buffer =
       iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
-  IREE_ASSERT_ARGUMENT(backing);
+  iree_async_frontier_t* history = NULL;
+  if (backing->memory.reuse_frontier) {
+    const iree_async_frontier_t* source = backing->memory.reuse_frontier;
+    const iree_host_size_t length =
+        sizeof(*source) + source->entry_count * sizeof(source->entries[0]);
+    iree_host_size_t capacity = 0;
+    history = (void*)iree_hal_amd_fabric_transient_buffer_history_storage(
+        buffer, &capacity);
+    if (length > capacity) {
+      IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+          buffer->block_pool->block_allocator, length, (void**)&history));
+    }
+    memcpy(history, source, length);
+  }
   iree_slim_mutex_lock(&buffer->mutex);
   IREE_ASSERT_FALSE(buffer->backing_staged);
   IREE_ASSERT_FALSE(buffer->backing_committed);
   iree_hal_buffer_retain(backing->buffer);
   buffer->backing = *backing;
+  buffer->backing.memory.reuse_frontier = history;
   buffer->backing_staged = true;
   iree_slim_mutex_unlock(&buffer->mutex);
+  return iree_ok_status();
 }
 
 void iree_hal_amd_fabric_transient_buffer_commit(
@@ -236,6 +269,7 @@ static void iree_hal_amd_fabric_transient_buffer_decommit(
       iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
   iree_slim_mutex_lock(&buffer->mutex);
   iree_hal_buffer_t* backing_buffer = buffer->backing.buffer;
+  const iree_async_frontier_t* history = buffer->backing.memory.reuse_frontier;
   memset(&buffer->backing, 0, sizeof(buffer->backing));
   buffer->backing_staged = false;
   buffer->backing_committed = false;
@@ -244,6 +278,12 @@ static void iree_hal_amd_fabric_transient_buffer_decommit(
       iree_hal_amd_fabric_transient_buffer_binding_layout(buffer->source_pool)
           ->byte_length);
   iree_slim_mutex_unlock(&buffer->mutex);
+  iree_host_size_t capacity = 0;
+  if (history && (const void*)history !=
+                     iree_hal_amd_fabric_transient_buffer_history_storage(
+                         buffer, &capacity)) {
+    iree_allocator_free(buffer->block_pool->block_allocator, (void*)history);
+  }
   iree_hal_buffer_release(backing_buffer);
 }
 
