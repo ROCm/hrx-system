@@ -13,12 +13,15 @@
 #include "libamdf/src/media/drm/av1_context.h"
 #include "libamdf/src/media/drm/vp9_context.h"
 #include "libamdf/src/platform/linux/file.h"
+#include "libamdf/src/structure.h"
 
 amdf_status_t AMDF_CALL amdf_media_drm_session_create(
     amdf_kernel_queue_t* queue,
     const amdf_media_session_create_info_t* create_info,
     amdf_media_session_t** out_session) {
-  if (create_info->configuration.direction != AMDF_MEDIA_DIRECTION_DECODE) {
+  const amdf_media_direction_t direction = create_info->configuration.direction;
+  if (direction != AMDF_MEDIA_DIRECTION_DECODE &&
+      direction != AMDF_MEDIA_DIRECTION_ENCODE) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   amdf_media_configuration_info_t requirements = {
@@ -45,44 +48,78 @@ amdf_status_t AMDF_CALL amdf_media_drm_session_create(
   session->requirements = requirements;
   amdf_child_tracker_initialize(&session->commands);
   if (requirements.requires_begin_end) {
-    const uint32_t width = (create_info->configuration.coded_width + 15) & ~15u;
-    const uint32_t height =
-        (create_info->configuration.coded_height + 15) & ~15u;
-    const uint32_t references =
-        create_info->configuration.reference_image_count;
     if (create_info->configuration.codec == AMDF_MEDIA_CODEC_H264) {
       session->codec.h264 =
           *(const amdf_media_h264_configuration_t*)create_info->next;
-      session->codec.h264.next = NULL;
-      session->context_byte_length =
-          references *
-          (((width / 16) * (((height / 16) + 1) & ~1u) * 192 + 255) & ~255u);
     } else if (create_info->configuration.codec == AMDF_MEDIA_CODEC_AV1) {
       session->codec.av1 =
           *(const amdf_media_av1_configuration_t*)create_info->next;
-      session->codec.av1.next = NULL;
-      session->context_byte_length = AMDF_MEDIA_DRM_AV1_CONTEXT_BYTES;
     } else if (create_info->configuration.codec == AMDF_MEDIA_CODEC_VP9) {
       session->codec.vp9 =
           *(const amdf_media_vp9_configuration_t*)create_info->next;
-      session->codec.vp9.next = NULL;
-      session->context_byte_length = amdf_media_drm_vp9_context_byte_length(
-          session->codec.vp9.sample_bit_depth);
     } else {
       session->codec.hevc =
           *(const amdf_media_hevc_configuration_t*)create_info->next;
-      session->codec.hevc.next = NULL;
-      if (session->codec.hevc.sample_bit_depth == 10) {
-        // Collocated 16x16 state within 64x64 CTBs, plus left-tile context and
-        // ten-bit pixel storage. Sizes are the native HEVC firmware contract.
-        const uint32_t row_context = (((width + 63) / 64) * 256 + 255) & ~255u;
-        session->context_byte_length =
-            references * row_context * ((height + 63) / 64) + 24576 +
-            2 * (((height + 255) / 256) * 4096 + 1024);
+    }
+    if (direction == AMDF_MEDIA_DIRECTION_ENCODE) {
+      const amdf_media_encode_configuration_t* encode =
+          ((const amdf_input_structure_t*)create_info->next)->next;
+      session->encode = *encode;
+      if (create_info->configuration.codec == AMDF_MEDIA_CODEC_H264) {
+        session->encode_codec.h264 =
+            *(const amdf_media_h264_encode_configuration_t*)encode->next;
+        session->codec.h264.next = &session->encode;
+        session->encode.next = &session->encode_codec.h264;
+        session->encode_codec.h264.next = NULL;
+      } else if (create_info->configuration.codec == AMDF_MEDIA_CODEC_HEVC) {
+        session->encode_codec.hevc =
+            *(const amdf_media_hevc_encode_configuration_t*)encode->next;
+        session->codec.hevc.next = &session->encode;
+        session->encode.next = &session->encode_codec.hevc;
+        session->encode_codec.hevc.next = NULL;
       } else {
+        session->encode_codec.av1 =
+            *(const amdf_media_av1_encode_configuration_t*)encode->next;
+        session->codec.av1.next = &session->encode;
+        session->encode.next = &session->encode_codec.av1;
+        session->encode_codec.av1.next = NULL;
+        session->context_byte_length = AMDF_MEDIA_DRM_AV1_ENCODE_CDF_BYTES;
+      }
+    } else {
+      const uint32_t width =
+          (create_info->configuration.coded_width + 15) & ~15u;
+      const uint32_t height =
+          (create_info->configuration.coded_height + 15) & ~15u;
+      const uint32_t references =
+          create_info->configuration.reference_image_count;
+      if (create_info->configuration.codec == AMDF_MEDIA_CODEC_H264) {
+        session->codec.h264.next = NULL;
         session->context_byte_length =
-            ((width + 255) / 16) * ((height + 255) / 16) * 16 * references +
-            52 * 1024;
+            references *
+            (((width / 16) * (((height / 16) + 1) & ~1u) * 192 + 255) & ~255u);
+      } else if (create_info->configuration.codec == AMDF_MEDIA_CODEC_AV1) {
+        session->codec.av1.next = NULL;
+        session->context_byte_length = AMDF_MEDIA_DRM_AV1_CONTEXT_BYTES;
+      } else if (create_info->configuration.codec == AMDF_MEDIA_CODEC_VP9) {
+        session->codec.vp9.next = NULL;
+        session->context_byte_length = amdf_media_drm_vp9_context_byte_length(
+            session->codec.vp9.sample_bit_depth);
+      } else {
+        session->codec.hevc.next = NULL;
+        if (session->codec.hevc.sample_bit_depth == 10) {
+          // Collocated 16x16 state within 64x64 CTBs, plus left-tile context
+          // and ten-bit pixel storage. Sizes are the native HEVC firmware
+          // contract.
+          const uint32_t row_context =
+              (((width + 63) / 64) * 256 + 255) & ~255u;
+          session->context_byte_length =
+              references * row_context * ((height + 63) / 64) + 24576 +
+              2 * (((height + 255) / 256) * 4096 + 1024);
+        } else {
+          session->context_byte_length =
+              ((width + 255) / 16) * ((height + 255) / 16) * 16 * references +
+              52 * 1024;
+        }
       }
     }
     amdf_media_drm_device_t* device = (amdf_media_drm_device_t*)queue->device;
@@ -94,8 +131,13 @@ amdf_status_t AMDF_CALL amdf_media_drm_session_create(
     if (amdf_status_is_ok(status)) {
       memset(session->storage->host_pointer, 0, length);
       if (create_info->configuration.codec == AMDF_MEDIA_CODEC_AV1) {
-        amdf_media_drm_av1_context_initialize(
-            (uint8_t*)session->storage->host_pointer + 131072);
+        if (direction == AMDF_MEDIA_DIRECTION_ENCODE) {
+          amdf_media_drm_av1_encode_cdf_initialize(
+              (uint8_t*)session->storage->host_pointer + 131072);
+        } else {
+          amdf_media_drm_av1_context_initialize(
+              (uint8_t*)session->storage->host_pointer + 131072);
+        }
       } else if (create_info->configuration.codec == AMDF_MEDIA_CODEC_VP9) {
         amdf_media_drm_vp9_context_initialize(
             (uint8_t*)session->storage->host_pointer + 131072);

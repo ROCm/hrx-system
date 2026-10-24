@@ -36,6 +36,17 @@ typedef struct amdf_media_drm_session_t {
     // AV1 profile and actual sample precision.
     amdf_media_av1_configuration_t av1;
   } codec;
+  // Common immutable encode controls, valid only for encode sessions.
+  amdf_media_encode_configuration_t encode;
+  // Codec-specific immutable encode geometry selected by the codec field.
+  union {
+    // H264 frame-number and picture-order geometry.
+    amdf_media_h264_encode_configuration_t h264;
+    // HEVC block, level, tier, and picture-order geometry.
+    amdf_media_hevc_encode_configuration_t hevc;
+    // AV1 level, tier, and sequence-tool geometry.
+    amdf_media_av1_encode_configuration_t av1;
+  } encode_codec;
   // Owned firmware session and collocated context; no pixel storage.
   amdf_media_drm_buffer_t* storage;
   // Bytes of codec-specific context following the 128 KiB session prefix.

@@ -48,6 +48,7 @@ amdf_cc_library(
         "queue.c",
         "session.c",
         "vcn.c",
+        "vcn_encode.c",
         "vp9_context.c",
     ],
     hdrs = [
@@ -58,6 +59,7 @@ amdf_cc_library(
         "queue.h",
         "session.h",
         "vcn.h",
+        "vcn_encode.h",
         "vp9_context.h",
     ],
     target_compatible_with = DRM_COMPATIBILITY,
@@ -170,6 +172,17 @@ amdf_cc_test(
 amdf_cc_test(
     name = "av1_context_test",
     srcs = ["av1_context_test.cc"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        ":execution",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "vcn_encode_test",
+    srcs = ["vcn_encode_test.cc"],
     target_compatible_with = DRM_COMPATIBILITY,
     deps = [
         ":execution",
