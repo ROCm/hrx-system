@@ -1266,3 +1266,28 @@ void amdf_media_drm_av1_context_initialize(void* context) {
     }
   }
 }
+
+void amdf_media_drm_av1_encode_cdf_initialize(void* context) {
+  // Reuse the compact decoder representation for the normative values, then
+  // install the encoder firmware's sentinel in its eight reserved runs. The
+  // run geometry repeats in each of the four quantizer contexts.
+  static const struct {
+    uint16_t word_offset;
+    uint16_t word_count;
+  } reserved_runs[] = {
+      {1368, 8}, {1740, 4},  {5014, 10}, {5322, 6},
+      {6111, 1}, {6918, 10}, {7318, 10}, {9776, 464},
+  };
+  amdf_media_drm_av1_context_initialize(context);
+  uint16_t* words = context;
+  for (uint32_t group = 0; group < 4; ++group) {
+    for (uint32_t run = 0;
+         run < sizeof(reserved_runs) / sizeof(reserved_runs[0]); ++run) {
+      uint16_t* destination =
+          words + group * 10240 + reserved_runs[run].word_offset;
+      for (uint32_t i = 0; i < reserved_runs[run].word_count; ++i) {
+        destination[i] = UINT16_C(0xCDCD);
+      }
+    }
+  }
+}
