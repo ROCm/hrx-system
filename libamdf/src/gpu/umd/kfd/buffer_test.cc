@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <cstdarg>
 #include <cstring>
+#include <functional>
+#include <thread>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -81,6 +83,14 @@ struct NativeBufferState {
   size_t byte_length = 4096;
   // Exact allocation arguments before the dependency publishes its handle.
   kfd_ioctl_alloc_memory_of_gpu_args allocation = {};
+  // Input identities observed before each native construction attempt.
+  std::vector<kfd_ioctl_alloc_memory_of_gpu_args> allocation_attempts;
+  // Per-attempt errors before native ownership is published; zero succeeds.
+  std::vector<int> allocation_errors;
+  // Optional observation after recording an attempt, under native ownership.
+  std::function<void()> observe_allocation;
+  // Successful host unmaps at the recorded native allocation address.
+  uint32_t reservation_release_count = 0;
   // Number of buffer metadata allocations returned to the host allocator.
   uint32_t metadata_free_count = 0;
   // Input map progress observed by every native call.
@@ -124,7 +134,12 @@ extern "C" int __wrap_munmap(void* address, size_t byte_length) {
     errno = native_state->munmap_error;
     return -1;
   }
-  return __real_munmap(address, byte_length);
+  const int result = __real_munmap(address, byte_length);
+  if (result == 0 && native_state != nullptr &&
+      address == reinterpret_cast<void*>(native_state->address)) {
+    ++native_state->reservation_release_count;
+  }
+  return result;
 }
 
 extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
@@ -195,8 +210,18 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
       EXPECT_EQ(allocate->size, native_state->byte_length);
       EXPECT_FALSE(native_state->allocation_live);
       native_state->allocation = *allocate;
-      allocate->handle = 0x1234;
       native_state->address = allocate->va_addr;
+      const size_t attempt = native_state->allocation_attempts.size();
+      native_state->allocation_attempts.push_back(*allocate);
+      if (native_state->observe_allocation) {
+        native_state->observe_allocation();
+      }
+      if (attempt < native_state->allocation_errors.size() &&
+          native_state->allocation_errors[attempt] != 0) {
+        errno = native_state->allocation_errors[attempt];
+        return -1;
+      }
+      allocate->handle = 0x1234;
       native_state->allocation_live = true;
       return 0;
     }
@@ -343,6 +368,14 @@ class KfdBufferNativeTest : public ::testing::Test {
   amdf_status_t Create() {
     return amdf_gpu_kfd_buffer_create(&device_, &create_info_, &buffer_,
                                       &result_);
+  }
+
+  void UseRegisteredPages(void* pages) {
+    create_info_.native_flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR |
+                                KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                                KFD_IOC_ALLOC_MEM_FLAGS_COHERENT;
+    create_info_.host_access = AMDF_GPU_KFD_BUFFER_HOST_ACCESS_BORROWED;
+    create_info_.host_pointer = pages;
   }
 
   amdf_status_t Destroy() {
@@ -561,6 +594,134 @@ TEST_F(KfdBufferNativeTest, RegisteredGroupPreservesCallerPagesThroughUnmap) {
   EXPECT_EQ(native_.free_count, 1u);
   std::memset(pages, 0x69, 12288);
   EXPECT_EQ(munmap(pages, 12288), 0);
+}
+
+TEST_F(KfdBufferNativeTest, RestartsInvalidatedUserPagesWithoutNewOwnership) {
+  alignas(4096) uint8_t pages[4096] = {};
+  pages[0] = 0xA7;
+  pages[sizeof(pages) - 1] = 0x69;
+  UseRegisteredPages(pages);
+  native_.allocation_errors = {EAGAIN, EAGAIN, 0};
+  EXPECT_EQ(Create(), AMDF_STATUS_OK);
+  EXPECT_EQ(native_.allocation_attempts.size(), 3u);
+  for (const auto& attempt : native_.allocation_attempts) {
+    EXPECT_EQ(attempt.va_addr, native_.address);
+    EXPECT_EQ(attempt.mmap_offset, reinterpret_cast<uintptr_t>(pages));
+    EXPECT_EQ(attempt.size, sizeof(pages));
+    EXPECT_EQ(attempt.gpu_id, device_.topology.gpu_id);
+    EXPECT_EQ(attempt.flags, create_info_.native_flags);
+    EXPECT_EQ(attempt.handle, 0u);
+  }
+  EXPECT_EQ(native_.map_progress, (std::vector<uint32_t>{0}));
+  if (buffer_) {
+    EXPECT_EQ(result_.host_pointer, pages);
+    EXPECT_EQ(Destroy(), AMDF_STATUS_OK);
+  }
+  EXPECT_EQ(native_.free_count, 1u);
+  EXPECT_EQ(native_.reservation_release_count, 1u);
+  EXPECT_EQ(pages[0], 0xA7);
+  EXPECT_EQ(pages[sizeof(pages) - 1], 0x69);
+}
+
+TEST_F(KfdBufferNativeTest, UserPageRestartPreservesTerminalFailureAndOutputs) {
+  alignas(4096) uint8_t pages[4096] = {};
+  UseRegisteredPages(pages);
+  native_.allocation_errors = {EAGAIN, ENOMEM};
+  std::memset(&result_, 0xA5, sizeof(result_));
+  const auto original_result = result_;
+  EXPECT_EQ(Create(), amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, ENOMEM));
+  EXPECT_EQ(native_.allocation_attempts.size(), 2u);
+  EXPECT_EQ(buffer_, nullptr);
+  EXPECT_EQ(std::memcmp(&result_, &original_result, sizeof(result_)), 0);
+  EXPECT_TRUE(native_.map_progress.empty());
+  EXPECT_EQ(native_.free_count, 0u);
+  EXPECT_EQ(native_.reservation_release_count, 1u);
+}
+
+TEST_F(KfdBufferNativeTest, NonUserPageAllocationDoesNotRestartEagain) {
+  native_.allocation_errors = {EAGAIN, 0};
+  expected_metadata_free_count_ = 2;
+  for (const auto flags :
+       {KFD_IOC_ALLOC_MEM_FLAGS_GTT, KFD_IOC_ALLOC_MEM_FLAGS_VRAM}) {
+    SCOPED_TRACE(flags);
+    create_info_.native_flags = flags;
+    native_.allocation_attempts.clear();
+    EXPECT_EQ(Create(), amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EAGAIN));
+    EXPECT_EQ(native_.allocation_attempts.size(), 1u);
+    EXPECT_EQ(buffer_, nullptr);
+    EXPECT_TRUE(native_.map_progress.empty());
+    if (buffer_) {
+      EXPECT_EQ(Destroy(), AMDF_STATUS_OK);
+    }
+    EXPECT_EQ(native_.free_count, 0u);
+  }
+  EXPECT_EQ(native_.reservation_release_count, 2u);
+}
+
+TEST_F(KfdBufferNativeTest, UserPageAllocationDoesNotRestartInterruption) {
+  alignas(4096) uint8_t pages[4096] = {};
+  UseRegisteredPages(pages);
+  native_.allocation_errors = {EINTR, 0};
+  EXPECT_EQ(Create(), amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EINTR));
+  EXPECT_EQ(native_.allocation_attempts.size(), 1u);
+  EXPECT_EQ(buffer_, nullptr);
+  EXPECT_TRUE(native_.map_progress.empty());
+  EXPECT_EQ(native_.free_count, 0u);
+  EXPECT_EQ(native_.reservation_release_count, 1u);
+}
+
+TEST_F(KfdBufferNativeTest, UserPageRestartRollsBackLaterMapFailure) {
+  alignas(4096) uint8_t pages[4096] = {};
+  UseRegisteredPages(pages);
+  native_.allocation_errors = {EAGAIN, 0};
+  native_.map_error = EIO;
+  EXPECT_EQ(Create(), amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO));
+  EXPECT_EQ(native_.allocation_attempts.size(), 2u);
+  EXPECT_EQ(buffer_, nullptr);
+  EXPECT_EQ(native_.map_progress, (std::vector<uint32_t>{0}));
+  EXPECT_EQ(native_.free_count, 1u);
+  EXPECT_EQ(native_.reservation_release_count, 1u);
+}
+
+TEST_F(KfdBufferNativeTest, UserPageRestartYieldsToEnrolledRelease) {
+  alignas(4096) uint8_t pages[4096] = {};
+  UseRegisteredPages(pages);
+  native_.allocation_errors = {EAGAIN, 0};
+  bool release_completed = false;
+  std::thread release;
+  native_.observe_allocation = [&] {
+    if (native_.allocation_attempts.size() == 1) {
+      release = std::thread([&] {
+        amdf_gpu_kfd_memory_lock_acquire(&native_.memory_lock,
+                                         AMDF_GPU_KFD_MEMORY_PRIORITY_RELEASE);
+        release_completed = true;
+        amdf_gpu_kfd_memory_lock_release(&native_.memory_lock);
+      });
+      // The real native lock, not thread startup, establishes the waiter.
+      while (true) {
+        EXPECT_EQ(pthread_mutex_lock(&native_.memory_lock.mutex), 0);
+        const bool enrolled =
+            native_.memory_lock.buckets[AMDF_GPU_KFD_MEMORY_PRIORITY_RELEASE]
+                .head != nullptr;
+        EXPECT_EQ(pthread_mutex_unlock(&native_.memory_lock.mutex), 0);
+        if (enrolled) {
+          break;
+        }
+        std::this_thread::yield();
+      }
+    } else {
+      EXPECT_TRUE(release_completed);
+    }
+  };
+  EXPECT_EQ(Create(), AMDF_STATUS_OK);
+  release.join();
+  EXPECT_TRUE(release_completed);
+  EXPECT_EQ(native_.allocation_attempts.size(), 2u);
+  if (buffer_) {
+    EXPECT_EQ(Destroy(), AMDF_STATUS_OK);
+  }
+  EXPECT_EQ(native_.free_count, 1u);
+  EXPECT_EQ(native_.reservation_release_count, 1u);
 }
 
 TEST_F(KfdBufferNativeTest, GroupRetainsProgressThroughFinalSynchronization) {

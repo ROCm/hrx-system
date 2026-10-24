@@ -235,13 +235,22 @@ amdf_status_t amdf_gpu_kfd_buffer_prepare(
         (uintptr_t)create_info->host_pointer - create_info->host_byte_offset;
   }
   if (amdf_status_is_ok(status)) {
-    amdf_gpu_kfd_device_lock_memory(device,
-                                    AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
-    if (ioctl(device->descriptor, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocate) !=
-        0) {
-      status = amdf_linux_error(errno);
+    // Invalidated USERPTR construction rolls back before publishing a handle.
+    // Keep its pages and VA while yielding native priority between attempts;
+    // other operations and errors retain their own contracts.
+    int error;
+    do {
+      amdf_gpu_kfd_device_lock_memory(device,
+                                      AMDF_GPU_KFD_MEMORY_PRIORITY_ACQUIRE);
+      const int result =
+          ioctl(device->descriptor, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocate);
+      error = result == 0 ? 0 : errno;
+      amdf_gpu_kfd_device_unlock_memory(device);
+    } while (error == EAGAIN &&
+             (create_info->native_flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR));
+    if (error != 0) {
+      status = amdf_linux_error(error);
     }
-    amdf_gpu_kfd_device_unlock_memory(device);
   }
   if (amdf_status_is_ok(status)) {
     buffer->handle = allocate.handle;
