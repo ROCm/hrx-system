@@ -33,6 +33,13 @@ typedef struct loom_serve_preparation_stage_storage_t {
   iree_host_size_t* input_capacities;
 } loom_serve_preparation_stage_storage_t;
 
+typedef struct loom_serve_preparation_source_storage_t {
+  // Allocated shard-list capacity during the owning declaration capture.
+  iree_host_size_t path_capacity;
+  // Card scopes keep their complete file lists even during their first capture.
+  bool is_card_scope;
+} loom_serve_preparation_source_storage_t;
+
 struct loom_serve_preparation_t {
   // Allocator owning the catalog and every copied string.
   iree_allocator_t host_allocator;
@@ -60,8 +67,8 @@ struct loom_serve_preparation_t {
   iree_host_size_t source_capacity;
   // Owned ordered shard lists, independent of resident placement.
   loom_model_file_list_t* sources;
-  // Allocated shard-list capacity for each owned source.
-  iree_host_size_t* path_capacities;
+  // Owned shard allocation and declaration provenance for each local source.
+  loom_serve_preparation_source_storage_t* source_storage;
 };
 
 typedef struct loom_serve_preparation_module_t {
@@ -164,7 +171,7 @@ void loom_serve_preparation_free(loom_serve_preparation_t* preparation) {
     iree_allocator_free(host_allocator, (void*)paths.values);
   }
   iree_allocator_free(host_allocator, preparation->sources);
-  iree_allocator_free(host_allocator, preparation->path_capacities);
+  iree_allocator_free(host_allocator, preparation->source_storage);
   iree_allocator_free(host_allocator, preparation->stages);
   loom_model_card_release(preparation->card);
   iree_allocator_free(host_allocator, preparation);
@@ -365,19 +372,21 @@ static iree_status_t loom_serve_preparation_append_source(
           (void**)&preparation->sources));
       IREE_RETURN_IF_ERROR(iree_allocator_realloc_array(
           preparation->host_allocator, preparation->source_capacity,
-          sizeof(*preparation->path_capacities),
-          (void**)&preparation->path_capacities));
+          sizeof(*preparation->source_storage),
+          (void**)&preparation->source_storage));
       preparation->storage_size +=
           (preparation->source_capacity - previous_capacity) *
-          sizeof(*preparation->path_capacities);
+          sizeof(*preparation->source_storage);
     }
     preparation->sources[preparation->source_count] =
         (loom_model_file_list_t){0};
-    preparation->path_capacities[preparation->source_count++] = 0;
+    preparation->source_storage[preparation->source_count++] =
+        (loom_serve_preparation_source_storage_t){0};
   }
   const uint32_t local = ordinal - preparation->first_source;
   loom_model_file_list_t* files = &preparation->sources[local];
-  iree_host_size_t* capacity = &preparation->path_capacities[local];
+  iree_host_size_t* capacity =
+      &preparation->source_storage[local].path_capacity;
   loom_model_file_t* paths = (loom_model_file_t*)files->values;
   if (files->count == *capacity) {
     IREE_RETURN_IF_ERROR(loom_serve_preparation_grow_array(
@@ -428,10 +437,6 @@ static iree_status_t loom_serve_preparation_add_parameter(
 static iree_status_t loom_serve_preparation_add_source(
     loom_serve_preparation_t* preparation, const iree_vm_call_packet_t* call,
     bool append) {
-  if (preparation->card) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "card-backed parameters require source_scope");
-  }
   iree_string_view_t directory = iree_string_view_empty();
   loom_model_file_t file = {0};
   IREE_RETURN_IF_ERROR(
@@ -450,6 +455,11 @@ static iree_status_t loom_serve_preparation_add_source(
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "source %u is not declared in this capture",
                               ordinal);
+    }
+    if (preparation->source_storage[ordinal - preparation->first_source]
+            .is_card_scope) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "card parameter scopes cannot append files");
     }
   }
   IREE_RETURN_IF_ERROR(loom_serve_preparation_append_source(
@@ -484,6 +494,8 @@ static iree_status_t loom_serve_preparation_add_scope(
                                                   parameter->files.values[i]);
   }
   if (iree_status_is_ok(status)) {
+    preparation->source_storage[ordinal - preparation->first_source]
+        .is_card_scope = true;
     iree_vm_call_value_result_store(call, 0, ordinal);
   }
   return status;

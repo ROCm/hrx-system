@@ -425,9 +425,6 @@ TEST_F(PreparationCardCaptureTest, CardScopesOwnTheirCompleteFileLists) {
   loom_serve_preparation_module_begin(module, 0, nullptr,
                                       LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
   int32_t ordinal = -1;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      DeclareSource(IREE_SV("cold_source"), IREE_SV("other.irpa"), &ordinal));
   IREE_ASSERT_OK(
       DeclareSource(IREE_SV("scoped_source"), IREE_SV("model"), &ordinal));
   iree_vm_variant_t argument = iree_vm_variant_from_i32(ordinal);
@@ -436,6 +433,68 @@ TEST_F(PreparationCardCaptureTest, CardScopesOwnTheirCompleteFileLists) {
   preparation = loom_serve_preparation_module_take(module);
   EXPECT_EQ(loom_serve_preparation_source_count(preparation), 1u);
   EXPECT_EQ(loom_serve_preparation_source(preparation, ordinal).count, 2u);
+}
+
+TEST_F(PreparationCardCaptureTest, DeploymentSourcesExtendTheScopedCatalog) {
+  loom_serve_preparation_module_begin(module, 0, nullptr,
+                                      LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
+  int32_t scoped = -1;
+  IREE_ASSERT_OK(
+      DeclareSource(IREE_SV("scoped_source"), IREE_SV("model"), &scoped));
+  int32_t adapter = -1;
+  IREE_ASSERT_OK(DeclareSource(IREE_SV("cold_source"),
+                               IREE_SV("adapter.safetensors"), &adapter));
+  iree_vm_variant_t argument = iree_vm_variant_from_i32(adapter);
+  IREE_ASSERT_OK(Invoke(IREE_SV("append_source"), {&argument, 1}));
+  argument = iree_vm_variant_from_i32(adapter);
+  IREE_ASSERT_OK(Invoke(IREE_SV("bind_source"), {&argument, 1}));
+  preparation = loom_serve_preparation_module_take(module);
+
+  EXPECT_EQ(scoped, 0);
+  EXPECT_EQ(adapter, 1);
+  ASSERT_EQ(loom_serve_preparation_source_count(preparation), 2u);
+  const auto scoped_files = loom_serve_preparation_source(preparation, scoped);
+  ASSERT_EQ(scoped_files.count, 2u);
+  EXPECT_EQ(std::string(scoped_files.values[1].format.data,
+                        scoped_files.values[1].format.size),
+            "safetensors");
+  const auto adapter_files =
+      loom_serve_preparation_source(preparation, adapter);
+  ASSERT_EQ(adapter_files.count, 2u);
+  EXPECT_EQ(std::string(adapter_files.values[0].path.data,
+                        adapter_files.values[0].path.size),
+            "/checkpoints/adapter.safetensors");
+  EXPECT_EQ(std::string(adapter_files.values[1].path.data,
+                        adapter_files.values[1].path.size),
+            "/checkpoints/model.safetensors");
+  const auto* stage = loom_serve_preparation_stage(preparation, 1);
+  ASSERT_EQ(stage->parameter_count, 1u);
+  EXPECT_EQ(stage->parameters[0].source_ordinals[0], adapter);
+  EXPECT_EQ(stage->parameters[0].sources[0].values, adapter_files.values);
+  EXPECT_EQ(std::string(stage->parameters[0].policy.data,
+                        stage->parameters[0].policy.size),
+            "program/weights.loom");
+
+  loom_serve_preparation_module_begin(module, 2, preparation,
+                                      LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
+  int32_t requested = -1;
+  IREE_ASSERT_OK(DeclareSource(IREE_SV("cold_source"),
+                               IREE_SV("request.safetensors"), &requested));
+  argument = iree_vm_variant_from_i32(requested);
+  IREE_ASSERT_OK(Invoke(IREE_SV("append_source"), {&argument, 1}));
+  for (int32_t ordinal : {scoped, adapter}) {
+    argument = iree_vm_variant_from_i32(ordinal);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                          Invoke(IREE_SV("append_source"), {&argument, 1}));
+  }
+  second = loom_serve_preparation_module_take(module);
+  EXPECT_EQ(requested, 2);
+  ASSERT_EQ(loom_serve_preparation_source_count(second), 3u);
+  EXPECT_EQ(loom_serve_preparation_source(second, scoped).values,
+            scoped_files.values);
+  EXPECT_EQ(loom_serve_preparation_source(second, adapter).values,
+            adapter_files.values);
+  EXPECT_EQ(loom_serve_preparation_source(second, requested).count, 2u);
 }
 
 TEST_F(PreparationCaptureTest, RequestDeclarationsOwnValuesAcrossInvocations) {

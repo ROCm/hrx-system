@@ -134,9 +134,12 @@ loom_serve_preparation_t* loom_serve_preparation_module_take(
 // textual value syntax; config_i64 formats signed decimal values. Parameter
 // sources join directory and path in the server filesystem namespace. source
 // declares the first shard of an independent index; source_append adds shards
-// in order. Card-backed programs use source_scope to select one named parameter
-// scope's typed shards from the card. Sources need no resident binding and may
-// contain identical keys.
+// in order during the declaring capture. Card-backed programs use source_scope
+// to select one named parameter scope's complete typed shard list. Explicit
+// deployment inputs, such as request-selectable adapters, use source and
+// source_append alongside card scopes. Neither a card scope nor an inherited
+// cold source can be extended. Sources need no resident binding and may contain
+// identical keys.
 // parameter maps a dense policy-local input ordinal to a declared source. Each
 // input is bound once; all inputs for a binding name one policy. Several stages
 // and bindings may share a source. Policy paths resolve through the source
