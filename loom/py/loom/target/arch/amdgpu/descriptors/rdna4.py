@@ -93,7 +93,7 @@ _AMDGPU_RDNA4_CORE_DESCRIPTOR_SET_BASE = _amdgpu_core_descriptor_set(
             _REG_VGPR,
             32,
             SpillSlotSpace.SCRATCH,
-            flags=(RegClassFlag.PHYSICAL,),
+            flags=(RegClassFlag.PHYSICAL, RegClassFlag.EXCHANGE),
             allocatable_count=256,
             full_register_part_mask=_REG_PART_VGPR_FULL32_MASK,
         ),

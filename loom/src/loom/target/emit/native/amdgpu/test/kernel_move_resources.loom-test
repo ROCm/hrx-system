@@ -1,7 +1,7 @@
 // RUN: emit amdgpu-kernel-assembly
 
-// Swapping loop-carried words requires a temporary beyond the SSA assignments.
-// The kernel descriptor and metadata include that temporary's register.
+// Exchanging loop-carried VGPR words uses no temporary. The descriptor and
+// metadata count only the two registers holding the loop's values.
 amdgpu.target<gfx1151> @target
 
 low.kernel.def target<amdgpu.rdna3_5.core>(@target) workgroup_size(32, 1, 1) @swap_words() asm {
@@ -41,9 +41,7 @@ swap_words:
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb2:
-  v_mov_b32 v2, v1
-  v_mov_b32 v1, v0
-  v_mov_b32 v0, v2
+  v_swap_b32 v1, v0
   s_branch .Lbb1
 .Lbb3:
   s_endpgm
@@ -70,7 +68,7 @@ swap_words:
   .amdhsa_system_sgpr_workgroup_id_z 0
   .amdhsa_system_sgpr_workgroup_info 0
   .amdhsa_system_vgpr_workitem_id 0
-  .amdhsa_next_free_vgpr 3
+  .amdhsa_next_free_vgpr 2
   .amdhsa_next_free_sgpr 3
   .amdhsa_reserve_vcc 0
   .amdhsa_float_round_mode_32 0
@@ -108,7 +106,7 @@ swap_words:
       .kernarg_segment_align: 8
       .wavefront_size: 32
       .sgpr_count: 3
-      .vgpr_count: 3
+      .vgpr_count: 2
       .max_flat_workgroup_size: 32
       .reqd_workgroup_size:
         - 32

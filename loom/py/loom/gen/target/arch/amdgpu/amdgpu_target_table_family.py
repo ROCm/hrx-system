@@ -86,4 +86,6 @@ def amdgpu_target_table_instruction_names_by_isa_key(
     instruction_names_by_isa_key = {isa_key: set(instruction_names) for isa_key, instruction_names in amdgpu_core_descriptor_set_instruction_names_by_isa_key(family.descriptor_set_infos).items()}
     for isa_info in family.storage_info.isa_infos:
         instruction_names_by_isa_key[isa_info.isa_xml_key].add("V_NOP")
+    for instruction_names in instruction_names_by_isa_key.values():
+        instruction_names.add("V_SWAP_B32")
     return instruction_names_by_isa_key

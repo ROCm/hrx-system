@@ -680,20 +680,24 @@ static uint16_t loom_amdgpu_matrix_coexecution_query_moves(
         LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
       continue;
     }
-    if (move->source.descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
+    for (uint32_t j = 0; j < loom_low_move_access_count(move); ++j) {
+      const loom_low_move_location_t* read = loom_low_move_read(move, j);
+      const loom_low_move_location_t* write = loom_low_move_write(move, j);
+      if (read->descriptor_reg_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
+        loom_amdgpu_matrix_coexecution_query_range(
+            coexecution, read->location, 1,
+            LOOM_AMDGPU_MATRIX_COEXECUTION_CHANNEL_VALU_RESULT,
+            vector_issue_count, query_flags, inout_match);
+      }
       loom_amdgpu_matrix_coexecution_query_range(
-          coexecution, move->source.location, 1,
+          coexecution, write->location, 1,
           LOOM_AMDGPU_MATRIX_COEXECUTION_CHANNEL_VALU_RESULT,
           vector_issue_count, query_flags, inout_match);
+      loom_amdgpu_matrix_coexecution_query_range(
+          coexecution, write->location, 1,
+          LOOM_AMDGPU_MATRIX_COEXECUTION_CHANNEL_VALU_SOURCE,
+          vector_issue_count, query_flags, inout_match);
     }
-    loom_amdgpu_matrix_coexecution_query_range(
-        coexecution, move->destination.location, 1,
-        LOOM_AMDGPU_MATRIX_COEXECUTION_CHANNEL_VALU_RESULT, vector_issue_count,
-        query_flags, inout_match);
-    loom_amdgpu_matrix_coexecution_query_range(
-        coexecution, move->destination.location, 1,
-        LOOM_AMDGPU_MATRIX_COEXECUTION_CHANNEL_VALU_SOURCE, vector_issue_count,
-        query_flags, inout_match);
     if (vector_issue_count < coexecution->profile->maximum_issue_distance) {
       ++vector_issue_count;
     }

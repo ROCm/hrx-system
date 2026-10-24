@@ -1287,7 +1287,10 @@ static iree_status_t loom_check_emit_write_low_allocation_summary(
         const iree_string_view_t kind =
             loom_low_allocation_location_kind_name(location->location_kind);
         IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-            &result->actual_output, "%s%.*s:%.*s:%u%s", j == 0 ? "  " : " <- ",
+            &result->actual_output, "%s%.*s:%.*s:%u%s",
+            j == 0                                      ? "  "
+            : move->kind == LOOM_LOW_MOVE_KIND_EXCHANGE ? " <-> "
+                                                        : " <- ",
             (int)class_name.size, class_name.data, (int)kind.size, kind.data,
             location->location, j == 1 ? "\n" : ""));
       }

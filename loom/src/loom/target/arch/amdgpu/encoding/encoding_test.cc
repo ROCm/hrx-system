@@ -262,6 +262,37 @@ TEST(AmdgpuEncodingTest, PacksVMovB32FromSgpr) {
   EXPECT_EQ(packet.words[0], UINT32_C(0x7e020202));
 }
 
+TEST(AmdgpuEncodingTest, PacksPhysicalExchangeAcrossSelectedFamilies) {
+  for (uint16_t ordinal = 0;
+       ordinal < loom_amdgpu_target_info_descriptor_set_count(); ++ordinal) {
+    const loom_amdgpu_encoding_table_t* table =
+        loom_amdgpu_encoding_table_for_descriptor_set_ordinal(ordinal);
+    if (table == nullptr) {
+      continue;
+    }
+    SCOPED_TRACE(ordinal);
+    const bool cdna =
+        ordinal == LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA2 ||
+        ordinal == LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA3 ||
+        ordinal == LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_CDNA4 ||
+        ordinal == LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_GFX9_4_GENERIC;
+    // Independent ISA words: CDNA uses VOP1 opcode 81, RDNA uses 101.
+    // Include both register-selector endpoints to catch truncated fields.
+    const uint32_t opcode_word = cdna ? 0x7e00a300 : 0x7e00cb00;
+    for (uint16_t destination : {0, 1, 255}) {
+      for (uint16_t source : {0, 2, 255}) {
+        loom_amdgpu_encoding_packet_t packet = {};
+        IREE_ASSERT_OK(loom_amdgpu_encoding_pack_v_swap_b32(table, destination,
+                                                            source, &packet));
+        EXPECT_EQ(packet.word_count, 1u);
+        EXPECT_EQ(packet.bit_count, 32u);
+        EXPECT_EQ(packet.words[0],
+                  opcode_word | (uint32_t(destination) << 17) | source);
+      }
+    }
+  }
+}
+
 TEST(AmdgpuEncodingTest, SMovB32UsesInlineSourceForSmallU32) {
   LOOM_AMDGPU_REQUIRE_ENCODING_TABLE(
       table, LOOM_AMDGPU_DESCRIPTOR_SET_ORDINAL_RDNA3, "amdgpu.rdna3.core");

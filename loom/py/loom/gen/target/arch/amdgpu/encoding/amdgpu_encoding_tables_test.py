@@ -53,6 +53,7 @@ def _encoding_contract(*descriptor_keys: str) -> _EncodingContract:
         vector_source_vgprs=(256, 256),
         s_mov_b32_opcode=0,
         v_mov_b32_opcode=1,
+        v_swap_b32_opcode=101,
     )
 
 

@@ -61,12 +61,11 @@ state[0] reason=delay_alu_dependency action=amdgpu.s_delay_alu at=b0:n3/o3 produ
 
 // ====
 
-// RUN: emit amdgpu-wait-state-plan @cycle_scratch_overwrites_old_producer strategy=source fixed=%stale:physical_register:0:1 fixed=%first:physical_register:1:1 fixed=%second:physical_register:2:1 fixed=%swapped:physical_register:1:2
+// RUN: emit amdgpu-wait-state-plan @cycle_ignores_unread_producer strategy=source fixed=%stale:physical_register:0:1 fixed=%first:physical_register:1:1 fixed=%second:physical_register:2:1 fixed=%swapped:physical_register:1:2
 amdgpu.target<gfx1151> @target
 
-// The cycle saves v1 into v0 before reading v0. Its previous producer is not
-// an input to the move group.
-low.func.def target<amdgpu.rdna3_5.core>(@target) @cycle_scratch_overwrites_old_producer(%input: reg<amdgpu.vgpr>, %first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.sgpr>) asm {
+// The exchange reads only v1 and v2; the producer in v0 is not an input.
+low.func.def target<amdgpu.rdna3_5.core>(@target) @cycle_ignores_unread_producer(%input: reg<amdgpu.vgpr>, %first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.sgpr>) asm {
   %stale = v_add_f32 %input, %input
   %gap = s_mov_b32 0
   %swapped = concat(%second, %first) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>

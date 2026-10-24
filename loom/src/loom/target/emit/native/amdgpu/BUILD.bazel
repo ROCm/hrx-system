@@ -9,6 +9,7 @@ load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load(
     "//loom/build_tools/amdgpu:descriptor_sets.bzl",
+    "loom_amdgpu_descriptor_set_compatible_with",
     "loom_amdgpu_iree_hal_representation_compatible_with",
 )
 load(
@@ -27,7 +28,7 @@ load(
     "//loom/build_tools/bazel:loom_check.bzl",
     "loom_check_test_suite",
 )
-load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_HARDWARE_PROFILE")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_HARDWARE_PROFILE", "AMD_GPU_HARDWARE_PROFILE")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -192,6 +193,7 @@ loom_check_test_suite(
         "test/packet.loom-test",
         "test/packet_json.loom-test",
         "test/permlane_swap.loom-test",
+        "test/physical_exchange.loom-test",
         "test/private_segment_limit.loom-test",
         "test/private_setup_recovery.loom-test",
         "test/register_banks.loom-test",
@@ -934,6 +936,16 @@ loom_test(
     execution_profiles = [AMDGPU_HARDWARE_PROFILE],
     target_compatible_with = loom_amdgpu_iree_hal_representation_compatible_with(
         LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.rdna3.core"],
+    ),
+)
+
+loom_test(
+    name = "physical_exchange_execution_test",
+    srcs = ["test/physical_exchange.loom"],
+    compile_targets = ["//loom/target/amdgpu:gfx11-generic"],
+    execution_profiles = [AMD_GPU_HARDWARE_PROFILE],
+    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(
+        LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.gfx11.generic.core"],
     ),
 )
 

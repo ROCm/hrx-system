@@ -2357,14 +2357,29 @@ static iree_status_t loom_amdgpu_wait_plan_handle_packet_move_writes(
   const loom_low_move_t* moves =
       &builder->allocation->moves[move_group->moves.start];
   iree_host_size_t move_index = 0;
-  while (move_index < move_group->moves.count) {
-    const loom_low_move_location_t* destination =
-        &moves[move_index].destination;
+  iree_status_t status = iree_ok_status();
+  while (move_index < move_group->moves.count && iree_status_is_ok(status)) {
+    const loom_low_move_t* move = &moves[move_index];
+    if (move->kind == LOOM_LOW_MOVE_KIND_EXCHANGE) {
+      for (uint32_t i = 0;
+           i < loom_low_move_access_count(move) && iree_status_is_ok(status);
+           ++i) {
+        const loom_low_move_location_t* write = loom_low_move_write(move, i);
+        status = loom_amdgpu_wait_plan_handle_physical_write_range(
+            builder, node_index, LOOM_LOW_SCHEDULE_NODE_NONE,
+            write->location_kind, write->descriptor_reg_class_id,
+            write->location, 1);
+      }
+      ++move_index;
+      continue;
+    }
+    const loom_low_move_location_t* destination = &move->destination;
     uint32_t location_count = 1;
     while (move_index + location_count < move_group->moves.count) {
       const loom_low_move_location_t* next_destination =
           &moves[move_index + location_count].destination;
-      if (next_destination->location_kind != destination->location_kind ||
+      if (moves[move_index + location_count].kind != LOOM_LOW_MOVE_KIND_COPY ||
+          next_destination->location_kind != destination->location_kind ||
           next_destination->descriptor_reg_class_id !=
               destination->descriptor_reg_class_id ||
           (uint64_t)next_destination->location !=
@@ -2373,13 +2388,13 @@ static iree_status_t loom_amdgpu_wait_plan_handle_packet_move_writes(
       }
       ++location_count;
     }
-    IREE_RETURN_IF_ERROR(loom_amdgpu_wait_plan_handle_physical_write_range(
+    status = loom_amdgpu_wait_plan_handle_physical_write_range(
         builder, node_index, LOOM_LOW_SCHEDULE_NODE_NONE,
         destination->location_kind, destination->descriptor_reg_class_id,
-        destination->location, location_count));
+        destination->location, location_count);
     move_index += location_count;
   }
-  return iree_ok_status();
+  return status;
 }
 
 static iree_status_t loom_amdgpu_wait_plan_handle_materialized_result_writes(

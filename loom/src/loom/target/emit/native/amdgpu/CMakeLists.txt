@@ -188,6 +188,7 @@ loom_check_test_suite(
     "test/packet.loom-test"
     "test/packet_json.loom-test"
     "test/permlane_swap.loom-test"
+    "test/physical_exchange.loom-test"
     "test/private_segment_limit.loom-test"
     "test/private_setup_recovery.loom-test"
     "test/register_banks.loom-test"
@@ -1252,6 +1253,52 @@ loom_check_compile_tests(
     "::operand_ties_execution_test_module"
   TARGETS
     loom::target::amdgpu::gfx1100
+)
+endif()
+
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+loom_test_module(
+  NAME
+    physical_exchange_execution_test_module
+  SRCS
+    "test/physical_exchange.loom"
+)
+endif()
+
+if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+loom_execution_test(
+  NAME
+    physical_exchange_execution_test_execute_amd_gpu_hardware_test
+  MODULE
+    "::physical_exchange_execution_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu2"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amd"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amd_gpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_check_compile_tests(
+  NAME
+    "physical_exchange_execution_test"
+  SRC
+    "::physical_exchange_execution_test_module"
+  TARGETS
+    loom::target::amdgpu::gfx11-generic
 )
 endif()
 
