@@ -23,7 +23,7 @@ amdf_cts_gpu_kernel_set(
   NAME
     "consume"
   SRCS
-    "consume.cxx"
+    "gfx1150_image.cxx"
   INPUTOPTS
     "cxx:root=media_consume"
   TARGETS
@@ -32,6 +32,23 @@ amdf_cts_gpu_kernel_set(
     "media_consume"
   NAMESPACE
     "kernels::media_consume"
+)
+endif()
+
+if(LOOM_IMPORT_CXX AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE)
+amdf_cts_gpu_kernel_set(
+  NAME
+    "produce"
+  SRCS
+    "gfx1150_image.cxx"
+  INPUTOPTS
+    "cxx:root=media_produce"
+  TARGETS
+    "gfx1150"
+  ENTRY_POINT
+    "media_produce"
+  NAMESPACE
+    "kernels::media_produce"
 )
 endif()
 
@@ -54,6 +71,80 @@ iree_cc_library(
     "d3d12.lib"
     "dxgi.lib"
   PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_library(
+  NAME
+    encode_fixture
+  HDRS
+    "encode_fixture.h"
+  SRCS
+    "encode_fixture.cc"
+  DEPS
+    ::produce
+    amdf::headers
+    iree::third_party::google_test
+    libamdf::cts::gpu::pm4::encoding::commands
+    libamdf::cts::gpu::util::command_fixture
+  TESTONLY
+  LINKOPTS
+    "d3d12.lib"
+    "dxgi.lib"
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_library(
+  NAME
+    encode_cases
+  SRCS
+    "encode_test.cc"
+  DEPS
+    ::encode_fixture
+    amdf::headers
+    iree::third_party::google_test
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+amdf_cts_binary(
+  NAME
+    encode_dynamic_bin
+  DATA
+    amdf::amdf
+  DEPS
+    ::encode_cases
+    amdf::headers
+    libamdf::cts::util::dynamic_provider
+    libamdf::cts::util::test_main
+  TESTONLY
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_native_test(
+  NAME
+    "encode_dynamic"
+  ARGS
+    "--amdf_native_lifetime=process"
+    "--amdf_library={{$<TARGET_FILE:amdf::amdf>}}"
+  SRC
+    ::encode_dynamic_bin
+  DATA
+    "amdf::amdf"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
 )
 endif()
 

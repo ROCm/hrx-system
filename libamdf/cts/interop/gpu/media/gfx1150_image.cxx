@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Gfx1150 64K_D_X NV12/P010 addressing for the media ownership witness.
-// This test checks the returned swizzle and XOR before launching this recipe.
+// Gfx1150 64K_D_X NV12/P010 addressing for media ownership witnesses. Each
+// caller checks the returned swizzle and XOR before launching either recipe.
 #include <loomcxx/kernel.h>
 #include <loomcxx/scalar.h>
 
@@ -89,7 +89,7 @@ static unsigned quantize(float value) {
   return unsigned(loom::scalar::roundevenf(value));
 }
 [[loom::kernel, loom::workgroup_size(64, 1, 1),
-  loom::workgroup_count(1024, 1, 1)]]
+  loom::workgroup_count(2048, 1, 1)]]
 void media_consume(const unsigned char* planes, unsigned* output,
                    unsigned crop_x, unsigned crop_y, unsigned generation,
                    unsigned uv_offset, unsigned y_xor, unsigned uv_xor,
@@ -114,5 +114,59 @@ void media_consume(const unsigned char* planes, unsigned* output,
     unsigned g = quantize(luma - 0.344136f * u - 0.714136f * v);
     unsigned b = quantize(luma + 1.772f * u);
     output[width * height * 2 + pixel] = r | (g << 8) | (b << 16) | 0xff000000u;
+  }
+}
+
+[[loom::kernel, loom::workgroup_size(64, 1, 1),
+  loom::workgroup_count(2048, 1, 1)]]
+void media_produce(unsigned char* planes, unsigned generation,
+                   unsigned uv_offset, unsigned y_xor, unsigned uv_xor,
+                   unsigned width, unsigned height, unsigned p010) {
+  unsigned pixel = unsigned(loom::kernel::workgroup::id.x) * 64 +
+                   unsigned(loom::kernel::workitem::id.x);
+  if (pixel >= width * height) {
+    return;
+  }
+  unsigned x = pixel % width;
+  unsigned y = pixel / width;
+  unsigned value = 16 + x / 3 + y / 5 + generation * 4;
+  if (y < 32) {
+    value = 40 + generation * 12;
+  }
+  if (x >= 32 + generation * 8 && x < 64 + generation * 8 && y >= 96 &&
+      y < 128) {
+    value = 224;
+  }
+  if (p010) {
+    unsigned y_block = (y / 128) * ((width + 255) / 256) + x / 256;
+    unsigned y_address = y_block * 65536 + (chroma_offset(x, y) ^ y_xor);
+    *reinterpret_cast<unsigned short*>(planes + y_address) =
+        static_cast<unsigned short>((value * 4 + (x + y + generation) % 4)
+                                    << 6);
+  } else {
+    unsigned y_block = (y / 256) * ((width + 255) / 256) + x / 256;
+    unsigned y_address = y_block * 65536 + (luma_offset(x, y) ^ y_xor);
+    planes[y_address] = static_cast<unsigned char>(value);
+  }
+  if ((x & 1u) != 0 || (y & 1u) != 0) {
+    return;
+  }
+  unsigned chroma_x = x / 2;
+  unsigned chroma_y = y / 2;
+  unsigned u = 96 + x / 8 + generation;
+  unsigned v = 160 - y / 8 - generation;
+  if (p010) {
+    unsigned uv_block = (y / 256) * ((width + 255) / 256) + x / 256;
+    unsigned uv_address = uv_offset + uv_block * 65536 +
+                          (chroma16_offset(chroma_x, chroma_y) ^ uv_xor);
+    u = (u * 4 + (chroma_x + generation) % 4) << 6;
+    v = (v * 4 + (chroma_y + generation) % 4) << 6;
+    *reinterpret_cast<unsigned*>(planes + uv_address) = u | (v << 16);
+  } else {
+    unsigned uv_block = (y / 256) * ((width + 511) / 512) + x / 512;
+    unsigned uv_address = uv_offset + uv_block * 65536 +
+                          (chroma_offset(chroma_x, chroma_y) ^ uv_xor);
+    *reinterpret_cast<unsigned short*>(planes + uv_address) =
+        static_cast<unsigned short>(u | (v << 8));
   }
 }
