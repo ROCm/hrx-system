@@ -951,9 +951,39 @@ endif()
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND IREE_HAL_DRIVER_AMD)
 iree_cc_test(
   NAME
-    native_test
+    allocation_test
   SRCS
     "allocation_test.cc"
+  DEPS
+    ::test_device
+    iree::async
+    iree::base
+    iree::hal
+    iree::hal::cts::util::test_base
+    iree::hal::drivers::amd::fabric
+    iree::hal::drivers::amd::gpu::device
+    iree::hal::drivers::amd::gpu::image::hip_images
+    iree::hal::drivers::amd::gpu::queue::semaphore
+    iree::hal::drivers::amd::gpu::queue::signal
+    iree::hal::drivers::amd::status
+    iree::hal::memory::fixed_block_pool
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND IREE_HAL_DRIVER_AMD)
+iree_cc_test(
+  NAME
+    native_test
+  SRCS
     "aql_program_test.cc"
     "dispatch_test.cc"
     "native_test.cc"

@@ -152,22 +152,26 @@ TEST_P(GpuNativeOrderedAllocationTest,
         pool_, iree_hal_make_pool_reservation_request(sizeof(actual[0]), 4),
         iree_infinite_timeout(), snapshot.out()));
   }
+  Ref<iree_hal_semaphore_t> fill_complete;
+  CreateSemaphore(fill_complete.out());
+  if (HasFatalFailure()) {
+    return;
+  }
+  uint64_t fill_value = 0;
   auto transfer = [&](iree_hal_buffer_t* buffer, size_t index,
                       iree_hal_semaphore_list_t waits,
                       iree_hal_semaphore_list_t signals) {
-    std::array<iree_hal_transfer_operation_t, 2> operations = {};
-    operations[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
-    operations[0].fill.target_buffer = buffer;
-    operations[0].fill.length = sizeof(actual[index]);
-    operations[0].fill.pattern = &patterns[index];
-    operations[0].fill.pattern_length = sizeof(patterns[index]);
-    operations[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY;
-    operations[1].copy.source_buffer = buffer;
-    operations[1].copy.target_buffer = snapshots[index];
-    operations[1].copy.length = sizeof(actual[index]);
-    return iree_hal_queue_transfer(queues_[1], waits, signals,
-                                   operations.size(), operations.data(),
-                                   nullptr);
+    // Transfer batch operations are unordered. The snapshot must follow the
+    // fill through a native dependency, including while host retirement pauses.
+    iree_hal_semaphore_t* filled = fill_complete;
+    uint64_t value = ++fill_value;
+    IREE_RETURN_IF_ERROR(iree_hal_queue_fill(
+        queues_[1], waits, {1, &filled, &value}, buffer, 0,
+        sizeof(actual[index]), &patterns[index], sizeof(patterns[index]),
+        nullptr, IREE_HAL_FILL_FLAG_NONE));
+    return iree_hal_queue_copy(
+        queues_[1], {1, &filled, &value}, signals, buffer, 0, snapshots[index],
+        0, sizeof(actual[index]), nullptr, IREE_HAL_COPY_FLAG_NONE);
   };
   // Warm the actual native transfer path before holding retirement. Host
   // downloads intentionally follow the native chain: their CPU copy would
