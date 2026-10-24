@@ -43,6 +43,7 @@ loom_cc_library(
     iree::base::threading
     iree::hal
     iree::hal::memory::slab_cache
+    iree::hal::memory::tlsf
     loom::serve::runtime::host::wake
   PUBLIC
 )

@@ -198,7 +198,7 @@ iree_status_t loom_serve_text_stages_bind(
           loom_serve_device_dispatch_queue(device),
           loom_serve_device_storage_pool(device),
           loom_serve_device_memory_pool(device),
-          loom_serve_device_weight_geometry(device),
+          loom_serve_device_weight_geometry(device), NULL,
           loom_serve_device_workspace(device), domain == 0 ? shared_count : 0,
           count, roots, host_allocator, &parameters->plans[domain]);
     }

@@ -73,6 +73,10 @@ typedef struct loom_serve_weight_activity_t {
 // storage_pool supplies fixed roots, is qualified for dispatch and transfer,
 // and outlives the plan and every resolved root. workspace supplies bounded
 // transient staging for out-of-place preparation and outlives the plan.
+// An optional arena supplies independently owned ranges within one shared
+// address interval instead of separate reservations. It belongs to pool and
+// outlives the plan and every resolved root. Layout and source preparation are
+// unchanged; the plan owns only its ranges' backing and accounting.
 //
 // On failure both populated root slots and a non-NULL *out_weights remain
 // caller-owned for teardown. Release consumer commands and root slots before
@@ -81,9 +85,10 @@ iree_status_t loom_serve_weights_allocate(
     iree_hal_device_t* device, iree_hal_queue_t* transfer,
     iree_hal_queue_t* dispatch, iree_hal_pool_t* storage_pool,
     loom_serve_memory_pool_t* pool, loom_serve_memory_geometry_t geometry,
-    loom_serve_workspace_t* workspace, iree_host_size_t shared_root_count,
-    iree_host_size_t root_count, const loom_serve_weight_root_t* roots,
-    iree_allocator_t host_allocator, loom_serve_weights_t** out_weights);
+    loom_serve_memory_arena_t* arena, loom_serve_workspace_t* workspace,
+    iree_host_size_t shared_root_count, iree_host_size_t root_count,
+    const loom_serve_weight_root_t* roots, iree_allocator_t host_allocator,
+    loom_serve_weights_t** out_weights);
 
 // Folds the missing backing of unique roots, excluding accepted commitments.
 // Shared root bindings contribute once; fixed backing has no elastic demand.

@@ -226,6 +226,7 @@ class MemoryTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_serve_virtual_buffer_free(first));
     IREE_ASSERT_OK(loom_serve_virtual_buffer_free(second));
     IREE_ASSERT_OK(loom_serve_virtual_buffer_free(third));
+    loom_serve_memory_arena_free(arena);
     if (pool) {
       loom_serve_memory_pool_trim(pool, 0);
       // Intentional failure cases retain their original status while native
@@ -458,6 +459,9 @@ class MemoryTest : public ::testing::Test {
   MappingQueue mapping_queue;
   // Per-case physical owner, isolating statistics and terminal pool failures.
   loom_serve_memory_pool_t* owned_pool = nullptr;
+  // Optional shared address interval, outliving every independently owned
+  // range.
+  loom_serve_memory_arena_t* arena = nullptr;
   // Optional adapter retaining real parent tokens beyond logical completion.
   iree::hal::testing::DeferredBackingPool* deferred_backing = nullptr;
   // Shared production workspace, outliving its execution's raw root captures.

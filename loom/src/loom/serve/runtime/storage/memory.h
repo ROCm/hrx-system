@@ -21,6 +21,7 @@ extern "C" {
 // use public HAL queues. These are capacity transitions, not per-token work.
 // Backing supports storage, transfers, and indirect dispatch parameters.
 typedef struct loom_serve_memory_pool_t loom_serve_memory_pool_t;
+typedef struct loom_serve_memory_arena_t loom_serve_memory_arena_t;
 typedef struct loom_serve_virtual_buffer_t loom_serve_virtual_buffer_t;
 typedef struct loom_serve_memory_operation_t loom_serve_memory_operation_t;
 
@@ -217,6 +218,39 @@ iree_status_t loom_serve_virtual_buffer_allocate(
     iree_device_size_t length, iree_device_size_t alignment,
     loom_serve_memory_statistics_t* statistics,
     loom_serve_virtual_buffer_t** out_buffer);
+
+// Reserves one address interval for independently backed parameter ranges.
+// The arena owns address allocation, mapping order and the native target's
+// failure domain, but no physical payload. Its owner serializes allocation and
+// retirement with pool and destroys every range before freeing the arena.
+// Metadata follows allocated ranges, not the unoccupied address interval.
+iree_status_t loom_serve_memory_arena_allocate(
+    loom_serve_memory_pool_t* pool, loom_serve_memory_geometry_t geometry,
+    iree_device_size_t length, loom_serve_memory_arena_t** out_arena);
+
+// Borrowed full address interval, suitable for a single indexed binding.
+// Retaining this handle preserves addresses, not range leases or backing.
+iree_hal_buffer_t* loom_serve_memory_arena_handle(
+    const loom_serve_memory_arena_t* arena);
+
+// Reserves an independent range, initially without physical payload. Physical
+// slabs and short tails are local to this range; it shares no replacement
+// extent with another range. The arena outlives this buffer and all its views.
+// Freeing the buffer after its consumers retire makes its offset reusable.
+iree_status_t loom_serve_virtual_buffer_allocate_in_arena(
+    loom_serve_memory_arena_t* arena, iree_device_size_t length,
+    iree_device_size_t alignment, loom_serve_memory_statistics_t* statistics,
+    loom_serve_virtual_buffer_t** out_buffer);
+
+// Terminal checked removal after every arena consumer and accepted mapping
+// has retired. Required before range cleanup following a failed shared-target
+// edit. Failure preserves all backing ownership for another cleanup attempt.
+// Successful detach permits range destruction, never further execution.
+iree_status_t loom_serve_memory_arena_detach(loom_serve_memory_arena_t* arena);
+
+// Destroys an arena after every allocated range has been freed. NULL is valid.
+void loom_serve_memory_arena_free(loom_serve_memory_arena_t* arena);
+
 iree_hal_buffer_t* loom_serve_virtual_buffer_handle(
     const loom_serve_virtual_buffer_t* buffer);
 

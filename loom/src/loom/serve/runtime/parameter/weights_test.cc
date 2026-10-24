@@ -266,7 +266,7 @@ TEST_P(WeightsTest, PreparationPublishesOnlyRecordableRootAddresses) {
     return loom_serve_weights_allocate(
         device_, transfer_, dispatch_,
         loom_serve_device_storage_pool(device_owner_), pool_,
-        loom_serve_device_weight_geometry(device_owner_),
+        loom_serve_device_weight_geometry(device_owner_), nullptr,
         loom_serve_device_workspace(device_owner_), 0, 1, &root,
         host_allocator_, &plans_[plan_count_++]);
   };
@@ -481,7 +481,7 @@ TEST_P(WeightsTest, InitialBackingRetirementMatchesAcceptedWork) {
     IREE_ASSERT_OK(loom_serve_weights_allocate(
         device_, transfer_, dispatch_,
         loom_serve_device_storage_pool(device_owner_), pool_,
-        loom_serve_device_weight_geometry(device_owner_),
+        loom_serve_device_weight_geometry(device_owner_), nullptr,
         loom_serve_device_workspace(device_owner_), 0, 1, &root,
         host_allocator_, &plans_[0]));
     iree_hal_buffer_release(buffers_[0][0]);
@@ -1602,6 +1602,111 @@ INSTANTIATE_TEST_SUITE_P(Backing, SmallRootWeightsTest,
                          ::testing::Values(false, true));
 
 INSTANTIATE_TEST_SUITE_P(Backing, WeightsTest, ::testing::Values(false, true));
+
+class ArenaWeightsTest : public WeightsTest {
+ protected:
+  // A large address-only prefix needs few slab records and no payload.
+  uint64_t SlabSize() const override { return 64 * 1024 * 1024; }
+};
+
+TEST_P(ArenaWeightsTest, IndependentPreparedRangesReloadAndRecycleAbove4GiB) {
+  WriteCheckpoint(adapter_path_.path(), 100);
+  const auto geometry = loom_serve_device_weight_geometry(device_owner_);
+  constexpr uint64_t kPrefixBytes = UINT64_C(1) << 32;
+  const uint64_t arena_bytes = kPrefixBytes + 2 * geometry.minimum_size;
+  const auto before = loom_serve_memory_pool_statistics(pool_);
+  IREE_ASSERT_OK(
+      loom_serve_memory_arena_allocate(pool_, geometry, arena_bytes, &arena_));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate_in_arena(
+      arena_, kPrefixBytes, 256, &state_statistics_, &state_));
+  EXPECT_EQ(state_statistics_.committed_bytes, 0u);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).reserved_bytes,
+            before.reserved_bytes + arena_bytes);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes,
+            before.committed_bytes);
+
+  for (size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0, 0);
+    ASSERT_LE(root.root.required_byte_length, geometry.minimum_size);
+    IREE_ASSERT_OK(
+        CreateRoots(0, 1, &root, {i ? adapter_path_.path() : path_.path()}));
+    IREE_ASSERT_OK(Register(i, i, 1));
+    const auto usage = loom_serve_weights_memory_usage(plans_[i]);
+    EXPECT_EQ(usage.reserved_bytes, geometry.minimum_size);
+    EXPECT_EQ(usage.committed_bytes, 0u);
+  }
+  const auto first_view = iree_hal_buffer_virtual_view(buffers_[0][0]);
+  const auto second_view = iree_hal_buffer_virtual_view(buffers_[1][0]);
+  EXPECT_EQ(first_view.root, second_view.root);
+  EXPECT_EQ(first_view.root,
+            iree_hal_buffer_virtual_view(loom_serve_memory_arena_handle(arena_))
+                .root);
+  EXPECT_EQ(first_view.byte_offset, kPrefixBytes);
+  EXPECT_EQ(second_view.byte_offset, kPrefixBytes + geometry.minimum_size);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).reserved_bytes,
+            before.reserved_bytes + arena_bytes);
+
+  loom_serve_residency_set_pinned(residencies_[1], true);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 370));
+  const auto peer_activity = loom_serve_weights_activity(plans_[1]);
+  EXPECT_EQ(loom_serve_weights_memory_usage(plans_[0]).committed_bytes,
+            geometry.minimum_size);
+  EXPECT_EQ(loom_serve_weights_memory_usage(plans_[1]).committed_bytes,
+            geometry.minimum_size);
+
+  // Deactivation preserves the first recording and its address while returning
+  // only that bank's backing. The peer remains live throughout native return.
+  bool complete = false;
+  IREE_ASSERT_OK(loom_serve_residency_deactivate(residencies_[0], &complete));
+  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_serve_residency_deactivate(residencies_[0], &complete));
+  ASSERT_TRUE(complete);
+  EXPECT_EQ(loom_serve_weights_memory_usage(plans_[0]).committed_bytes, 0u);
+  EXPECT_EQ(loom_serve_weights_memory_usage(plans_[1]).committed_bytes,
+            geometry.minimum_size);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 370));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations, 2u);
+  EXPECT_EQ(loom_serve_weights_activity(plans_[1]).activations,
+            peer_activity.activations);
+  EXPECT_EQ(loom_serve_weights_activity(plans_[1]).prepared_bytes,
+            peer_activity.prepared_bytes);
+
+  // A recorded view keeps its lease after the caller drops the public view.
+  // Only actual recording retirement permits the same offset to name a new
+  // checkpoint. Neither the peer range nor the untouched prefix is recycled.
+  iree_hal_buffer_release(buffers_[0][0]);
+  buffers_[0][0] = nullptr;
+  EXPECT_FALSE(loom_serve_weights_is_retired(plans_[0]));
+  iree_hal_command_buffer_release(commands_[0]);
+  commands_[0] = nullptr;
+  IREE_ASSERT_OK(loom_serve_weights_await_retirement(plans_[0]));
+  loom_serve_residency_free(residencies_[0]);
+  residencies_[0] = nullptr;
+  loom_serve_residency_group_free(parameter_groups_[0]);
+  parameter_groups_[0] = nullptr;
+  IREE_ASSERT_OK(loom_serve_weights_free(plans_[0]));
+  plans_[0] = nullptr;
+
+  WriteCheckpoint(path_.path(), 200);
+  IREE_ASSERT_OK(Compile(2, "target"));
+  const auto replacement = Root(2, 0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &replacement, {path_.path()}));
+  IREE_ASSERT_OK(Register(2, 2, 1));
+  const auto replacement_view = iree_hal_buffer_virtual_view(buffers_[2][0]);
+  EXPECT_EQ(replacement_view.root, first_view.root);
+  EXPECT_EQ(replacement_view.byte_offset, first_view.byte_offset);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(2, 670));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 370));
+  EXPECT_EQ(loom_serve_weights_activity(plans_[1]).prepared_bytes,
+            peer_activity.prepared_bytes);
+  EXPECT_EQ(state_statistics_.committed_bytes, 0u);
+  loom_serve_residency_set_pinned(residencies_[1], false);
+}
+
+INSTANTIATE_TEST_SUITE_P(Elastic, ArenaWeightsTest, ::testing::Values(true));
 
 // The failed reclaimer belongs to a private pool; native devices remain shared.
 class RejectedAdmissionWeightsTest : public WeightsTest {};

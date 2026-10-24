@@ -1313,6 +1313,105 @@ TEST_F(MemoryTest, DisjointMappingsFollowTheirReservationNotTheSharedPool) {
   mapping_queue.observe_mappings = false;
 }
 
+TEST_F(MemoryTest, ArenaRangesShareMappingOrderButNotPhysicalOwnership) {
+  mapping_queue.Initialize(loom_serve_device_transfer_queue(device));
+  ASSERT_NO_FATAL_FAILURE(UseBacking(false, 3 * kSlabSize, &mapping_queue));
+  const auto geometry = loom_serve_device_weight_geometry(device);
+  IREE_ASSERT_OK(
+      loom_serve_memory_arena_allocate(pool, geometry, 2 * kSlabSize, &arena));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate_in_arena(
+      arena, kSlabSize, 256, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate_in_arena(
+      arena, kSlabSize, 256, &statistics[1], &second));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool, geometry, kSlabSize, 256, &statistics[2], &third));
+  auto release_gate = [](iree_hal_semaphore_t* semaphore) {
+    IREE_EXPECT_OK(iree_hal_semaphore_signal(semaphore, 1, nullptr));
+    iree_hal_semaphore_release(semaphore);
+  };
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      loom_serve_device_handle(device), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &semaphore));
+  std::unique_ptr<iree_hal_semaphore_t, decltype(release_gate)> gate(
+      semaphore, release_gate);
+  mapping_queue.gate_next_mapping = semaphore;
+  mapping_queue.observe_mappings = true;
+  loom_serve_memory_operation_t* operations[3] = {};
+  loom_serve_virtual_buffer_t* buffers[] = {first, second, third};
+  for (size_t i = 0; i < 3; ++i) {
+    const loom_serve_memory_range_t range = {buffers[i], 0, kSlabSize};
+    loom_serve_memory_admission_t admission;
+    IREE_ASSERT_OK(loom_serve_memory_pool_commit_async(
+        pool, 1, &range, nullptr, 0, &admission, &operations[i]));
+    ASSERT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
+  }
+  const auto& waits = mapping_queue.mapping_waits;
+  ASSERT_EQ(waits.size(), 3u);
+  EXPECT_NE(std::find(waits[1].begin(), waits[1].end(),
+                      mapping_queue.mapping_signals[0]),
+            waits[1].end());
+  EXPECT_EQ(waits[2].size(), 1u);
+  loom_serve_memory_operation_await(operations[2]);
+  IREE_ASSERT_OK(loom_serve_memory_operation_query_status(operations[2]));
+  EXPECT_FALSE(loom_serve_memory_operation_is_complete(operations[0]));
+  EXPECT_FALSE(loom_serve_memory_operation_is_complete(operations[1]));
+  gate.reset();
+  for (auto* operation : operations) {
+    loom_serve_memory_operation_await(operation);
+    IREE_EXPECT_OK(loom_serve_memory_operation_query_status(operation));
+    loom_serve_memory_operation_free(operation);
+  }
+  mapping_queue.observe_mappings = false;
+  RoundTrip(loom_serve_virtual_buffer_handle(second), 0, 0x12345678);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_free(first));
+  first = nullptr;
+  EXPECT_EQ(statistics[0].committed_bytes, 0u);
+  EXPECT_EQ(statistics[1].committed_bytes, kSlabSize);
+  CheckRetained(loom_serve_virtual_buffer_handle(second), 0, 0x12345678);
+}
+
+TEST_F(MemoryTest, FailedArenaEditRequiresOwnerDetachBeforeRangeRelease) {
+  mapping_queue.Initialize(loom_serve_device_transfer_queue(device));
+  ASSERT_NO_FATAL_FAILURE(UseBacking(false, 3 * kSlabSize, &mapping_queue));
+  const auto geometry = loom_serve_device_weight_geometry(device);
+  IREE_ASSERT_OK(
+      loom_serve_memory_arena_allocate(pool, geometry, 3 * kSlabSize, &arena));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate_in_arena(
+      arena, kSlabSize, 256, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate_in_arena(
+      arena, kSlabSize, 256, &statistics[1], &second));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(second, 0, kSlabSize));
+  RoundTrip(loom_serve_virtual_buffer_handle(second), 0, 0x12345678);
+  mapping_queue.fail_next_map = true;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_virtual_buffer_commit(first, 0, kSlabSize));
+  EXPECT_EQ(statistics[0].committed_bytes, kSlabSize);
+  EXPECT_EQ(statistics[1].committed_bytes, kSlabSize);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_virtual_buffer_free(first));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_virtual_buffer_free(second));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_virtual_buffer_commit(second, 0, kSlabSize));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_virtual_buffer_allocate_in_arena(
+                            arena, kSlabSize, 256, &statistics[2], &third));
+  EXPECT_EQ(third, nullptr);
+  // This injected failure rejected the edit before native mutation. The
+  // peer's original content proves neither failed child cleanup detached it;
+  // executing after an actual partial native failure is not a valid contract.
+  CheckRetained(loom_serve_virtual_buffer_handle(second), 0, 0x12345678);
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+  IREE_ASSERT_OK(loom_serve_memory_arena_detach(arena));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_free(first));
+  first = nullptr;
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_free(second));
+  second = nullptr;
+  EXPECT_EQ(statistics[0].committed_bytes, 0u);
+  EXPECT_EQ(statistics[1].committed_bytes, 0u);
+}
+
 TEST_F(MemoryTest, NativeAllocationFailurePreservesWarmWorkAndAllowsRetry) {
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool, loom_serve_device_weight_geometry(device), kSlabSize, 256,

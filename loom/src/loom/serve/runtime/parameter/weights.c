@@ -1230,9 +1230,10 @@ iree_status_t loom_serve_weights_allocate(
     iree_hal_device_t* device, iree_hal_queue_t* transfer,
     iree_hal_queue_t* dispatch, iree_hal_pool_t* storage_pool,
     loom_serve_memory_pool_t* pool, loom_serve_memory_geometry_t geometry,
-    loom_serve_workspace_t* workspace, iree_host_size_t shared_root_count,
-    iree_host_size_t root_count, const loom_serve_weight_root_t* roots,
-    iree_allocator_t host_allocator, loom_serve_weights_t** out_weights) {
+    loom_serve_memory_arena_t* arena, loom_serve_workspace_t* workspace,
+    iree_host_size_t shared_root_count, iree_host_size_t root_count,
+    const loom_serve_weight_root_t* roots, iree_allocator_t host_allocator,
+    loom_serve_weights_t** out_weights) {
   *out_weights = NULL;
   loom_serve_weights_t* weights = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*weights),
@@ -1326,10 +1327,14 @@ iree_status_t loom_serve_weights_allocate(
        i < weights->storage_count && iree_status_is_ok(status); ++i) {
     loom_serve_weight_storage_t* storage = &weights->storages[i];
     if (pool) {
-      status = loom_serve_virtual_buffer_allocate(
-          pool, geometry, requests[i].allocation_size,
-          requests[i].min_alignment, &weights->statistics,
-          &storage->reservation);
+      status = arena ? loom_serve_virtual_buffer_allocate_in_arena(
+                           arena, requests[i].allocation_size,
+                           requests[i].min_alignment, &weights->statistics,
+                           &storage->reservation)
+                     : loom_serve_virtual_buffer_allocate(
+                           pool, geometry, requests[i].allocation_size,
+                           requests[i].min_alignment, &weights->statistics,
+                           &storage->reservation);
       if (iree_status_is_ok(status)) {
         buffers[i] = loom_serve_virtual_buffer_handle(storage->reservation);
         iree_hal_buffer_retain(buffers[i]);

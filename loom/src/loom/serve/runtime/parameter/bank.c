@@ -63,8 +63,8 @@ static iree_status_t loom_serve_parameter_bank_allocate_range(
                                     loom_serve_device_storage_pool(device),
                                     loom_serve_device_memory_pool(device),
                                     loom_serve_device_weight_geometry(device),
-                                    loom_serve_device_workspace(device), 0, 1,
-                                    &root, host_allocator, &plans[i]);
+                                    NULL, loom_serve_device_workspace(device),
+                                    0, 1, &root, host_allocator, &plans[i]);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_residency_group_allocate(

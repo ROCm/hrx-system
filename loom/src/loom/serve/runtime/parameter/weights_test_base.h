@@ -402,6 +402,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
       IREE_EXPECT_OK(loom_serve_weights_free(plan));
     }
     IREE_EXPECT_OK(loom_serve_virtual_buffer_free(state_));
+    loom_serve_memory_arena_free(arena_);
     if (owned_pool_) {
       loom_serve_memory_pool_trim(owned_pool_, 0);
       IREE_EXPECT_STATUS_IS(retirement_code_,
@@ -517,7 +518,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     IREE_RETURN_IF_ERROR(loom_serve_weights_allocate(
         device_, transfer_, dispatch_,
         loom_serve_device_storage_pool(device_owner_), pool_,
-        loom_serve_device_weight_geometry(device_owner_),
+        loom_serve_device_weight_geometry(device_owner_), arena_,
         loom_serve_device_workspace(device_owner_), shared_count, root_count,
         roots, host_allocator_, plan));
     return PrepareSources(*plan, sources, policy_name);
@@ -701,6 +702,8 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   iree_hal_semaphore_t* consumer_gate_ = nullptr;
   // Explicitly elastic backing or NULL for the fixed comparison arm.
   loom_serve_memory_pool_t* pool_ = nullptr;
+  // Optional shared address owner, destroyed after all parameter ranges retire.
+  loom_serve_memory_arena_t* arena_ = nullptr;
   // Terminal pool result expected while all accepted native work is drained.
   iree_status_code_t retirement_code_ = IREE_STATUS_OK;
   // Optional real pool whose parent reservations can outlive logical return.
