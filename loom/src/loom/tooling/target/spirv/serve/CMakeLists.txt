@@ -257,6 +257,9 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/generate.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/voice_card.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/voice_generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/voice_service.loom"
   DEPS
     ::test_compiler
     ::test_device
@@ -314,6 +317,9 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/prepare.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/weights.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/voice_card.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/voice_generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/voice_service.loom"
   DEPS
     ::test_compiler
     ::test_device
@@ -345,6 +351,9 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/prepare.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/variants/weights.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/voice_card.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/voice_generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/voice_service.loom"
   DEPS
     ::test_compiler
     ::test_device
@@ -402,6 +411,9 @@ iree_py_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/generate.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/voice_card.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/voice_generate.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/voice_service.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/advance.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/model.json"

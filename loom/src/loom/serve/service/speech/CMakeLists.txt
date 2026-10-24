@@ -51,6 +51,7 @@ loom_cc_library(
     ::request
     iree::base
     iree::tokenizer
+    loom::serve::media::audio_source
     loom::serve::runtime::execution
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::storage::memory
@@ -92,6 +93,64 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    voice
+  HDRS
+    "voice.h"
+  SRCS
+    "voice.c"
+  DEPS
+    ::consumer
+    ::generator
+    iree::base
+    iree::base::internal::unicode
+    loom::serve::media::audio_source
+    loom::serve::telemetry::record
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    voice_http
+  HDRS
+    "voice_http.h"
+  SRCS
+    "voice_http.c"
+  DEPS
+    ::voice
+    iree::base
+    iree::base::internal::json
+    iree::base::internal::unicode
+    loom::serve::transport::http::multipart
+    loom::serve::transport::http::request
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    voice_http_test
+  SRCS
+    "voice_http_test.cc"
+  DEPS
+    ::voice
+    ::voice_http
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::serve::media::audio_source
+    loom::serve::transport::http::multipart
+    loom::serve::transport::http::request
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     model
   HDRS
     "model.h"
@@ -107,6 +166,9 @@ loom_cc_library(
     iree::tooling::device_profiling
     iree::vm
     loom::binding::c::loomc
+    loom::model::card
+    loom::serve::media::audio_recording
+    loom::serve::media::audio_source
     loom::serve::runtime::device
     loom::serve::runtime::execution
     loom::serve::runtime::execution::dispatch
@@ -132,6 +194,12 @@ loom_cc_library(
 endif()
 
 if(LOOM_TARGET_ARCH_VM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+set(_source_service_tests_platform_defines "")
+if(LOOM_SERVE_AUDIO_CODEC_WAV)
+  list(APPEND _source_service_tests_platform_defines "LOOM_TEST_AUDIO_WAV=1")
+else()
+  list(APPEND _source_service_tests_platform_defines "LOOM_TEST_AUDIO_WAV=0")
+endif()
 loom_cc_library(
   NAME
     source_service_tests
@@ -147,6 +215,7 @@ loom_cc_library(
     ::request
     ::service
     ::stream
+    ::voice
     iree::base
     iree::base::threading
     iree::base::tooling::flags
@@ -158,6 +227,7 @@ loom_cc_library(
     loom::serve::runtime::host
     loom::serve::runtime::parameter::residency
     loom::serve::runtime::storage::memory
+    loom::serve::server::configuration
     loom::serve::server::model_registration
     loom::serve::server::registry
     loom::serve::server::router
@@ -172,6 +242,8 @@ loom_cc_library(
     loom::serve::testing::worker_gate
     loom::serve::transport::http::listener
     loom::serve::transport::http::server
+  DEFINES
+    ${_source_service_tests_platform_defines}
   TESTONLY
   ALWAYSLINK
   PUBLIC
@@ -243,6 +315,8 @@ loom_cc_library(
     ::http
     ::request
     ::stream
+    ::voice
+    ::voice_http
     iree::async
     iree::async::util::proactor_pool
     iree::base

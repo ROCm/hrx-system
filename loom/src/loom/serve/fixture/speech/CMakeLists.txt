@@ -9,4 +9,17 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_TARGET_ARCH_VM)
+loom_module(
+  NAME
+    voice_numerics
+  SRCS
+    "generate.loom"
+    "voice_generate.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

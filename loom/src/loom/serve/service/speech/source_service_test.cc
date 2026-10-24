@@ -12,6 +12,7 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -22,12 +23,14 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "loom/serve/runtime/storage/memory.h"
+#include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/speech/model.h"
 #include "loom/serve/service/speech/service.h"
 #include "loom/serve/service/speech/service_test.h"
 #include "loom/serve/service/speech/stream.h"
+#include "loom/serve/service/speech/voice.h"
 #include "loom/serve/telemetry/latency.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model.h"
@@ -278,7 +281,7 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
         iree_make_string_view(json.data(), json.size()), IREE_SV("speech"),
         allocator_, &request));
     iree_status_t status =
-        generator_.prepare(generator_.self, row, &request, invocation);
+        generator_.prepare(generator_.self, row, &request, nullptr, invocation);
     loom_serve_speech_request_deinitialize(&request);
     return status;
   }
@@ -498,7 +501,8 @@ TEST_P(SourceSpeechServiceTest,
               R"("seed":5,"response_format":"pcm"})"),
       IREE_SV("speech"), allocator_, &request));
   void* invocation = nullptr;
-  iree_status_t prepared = cold.prepare(cold.self, 0, &request, &invocation);
+  iree_status_t prepared =
+      cold.prepare(cold.self, 0, &request, nullptr, &invocation);
   loom_serve_speech_request_deinitialize(&request);
   IREE_ASSERT_OK(prepared);
   const auto hold_native = [&]() {
@@ -1089,6 +1093,336 @@ TEST_P(SourceSpeechServiceTest, NativeSourceRejectionPreservesService) {
       [&] { return interface_.telemetry.counters->completed == 1; }));
   CheckAudio(Read(client), 17);
 }
+
+using VoiceUpload =
+    std::unique_ptr<loom_serve_speech_voice_upload_t,
+                    decltype(&loom_serve_speech_voice_upload_close)>;
+
+class SourceVoiceServiceTest : public SourceSpeechServiceTest {
+ protected:
+  bool NeedsStandaloneModel() const override { return false; }
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(SourceSpeechServiceTest::SetUp());
+    loom_serve::testing::ModelDocument document;
+    IREE_ASSERT_OK(document.Load(directory_ + "/voice_card.json"));
+    const auto& configuration = document.value();
+    const loom_serve_speech_model_options_t options = {
+        .sources = configuration.sources,
+        .asset_directory = configuration.assets,
+        .options = configuration.options,
+    };
+    auto status = loom_serve_speech_model_allocate(
+        loom_serve_device_group_at(group_, 0), &options, allocator_, &model_);
+    IREE_ASSERT_OK(status);
+    generator_ = loom_serve_speech_model_generator(model_);
+    EXPECT_EQ(generator_.voice_capacity, 2u);
+    ASSERT_NO_FATAL_FAILURE(StartManual());
+  }
+
+  iree_status_t Upload(const char* id, float value, VoiceUpload* upload,
+                       bool floating = true, uint32_t channels = 2) {
+    const size_t sample_bytes = floating ? 4 : 2;
+    std::vector<uint8_t> samples(7 * channels * sample_bytes);
+    for (size_t i = 0; i < 7 * channels; ++i) {
+      if (floating) {
+        iree_unaligned_store_le_f32(samples.data() + i * 4, value);
+      } else {
+        iree_unaligned_store_le_u16(samples.data() + i * 2,
+                                    static_cast<int16_t>(value * 32768));
+      }
+    }
+    const std::string type =
+        "audio/pcm;rate=44100;channels=" + std::to_string(channels) +
+        (floating ? ";format=f32le" : ";format=s16le");
+    loom_serve_speech_voice_request_t request;
+    IREE_RETURN_IF_ERROR(loom_serve_speech_voice_request_initialize(
+        iree_make_cstring_view(id), iree_make_cstring_view(type.c_str()),
+        iree_make_const_byte_span(samples.data(), samples.size()), allocator_,
+        &request));
+    loom_serve_speech_voice_upload_t* raw = nullptr;
+    auto status =
+        loom_serve_speech_service_try_upload_voice(service_, &request, &raw);
+    upload->reset(raw);
+    loom_serve_speech_voice_request_deinitialize(&request);
+    return status;
+  }
+
+  int SendUpload(const char* id, const std::string& type,
+                 const std::vector<uint8_t>& samples) {
+    const std::string body =
+        "--voice-boundary\r\nContent-Disposition: form-data; "
+        "name=\"model\"\r\n\r\nspeech\r\n"
+        "--voice-boundary\r\nContent-Disposition: form-data; "
+        "name=\"id\"\r\n\r\n" +
+        std::string(id) +
+        "\r\n--voice-boundary\r\nContent-Disposition: form-data; "
+        "name=\"file\"; filename=\"sample.bin\"\r\nContent-Type: " +
+        type + "\r\n\r\n" +
+        std::string(reinterpret_cast<const char*>(samples.data()),
+                    samples.size()) +
+        "\r\n--voice-boundary--\r\n";
+    const std::string request =
+        "POST /v1/audio/voices HTTP/1.1\r\nHost: local\r\n"
+        "Content-Type: multipart/form-data; "
+        "boundary=voice-boundary\r\nContent-Length: " +
+        std::to_string(body.size()) + "\r\n\r\n" + body;
+    int client = -1;
+    [&] { IREE_ASSERT_OK(http_.Send(request, &client)); }();
+    return client;
+  }
+
+  void FinishUpload(VoiceUpload& upload) {
+    ASSERT_NE(upload, nullptr);
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+      return loom_serve_speech_voice_upload_is_complete(upload.get());
+    }));
+    IREE_ASSERT_OK(loom_serve_speech_voice_upload_status(upload.get()));
+  }
+
+  void CheckNative(SpeechStream& stream, float gain) {
+    std::vector<float> samples;
+    ASSERT_NE(stream, nullptr);
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+      if (const auto* block = loom_serve_speech_stream_peek(stream.get())) {
+        for (size_t i = 0; i < block->frame_count; ++i) {
+          samples.push_back(
+              iree_unaligned_load_le_f32(block->samples.data + i * 4));
+        }
+        loom_serve_speech_stream_consume(stream.get());
+      }
+      return loom_serve_speech_stream_is_complete(stream.get());
+    }));
+    IREE_ASSERT_OK(loom_serve_speech_stream_status(stream.get()));
+    ASSERT_EQ(samples.size(), 17u);
+    for (size_t i = 0; i < samples.size(); ++i) {
+      EXPECT_EQ(samples[i], static_cast<float>((i + 3) % 8) * gain);
+    }
+  }
+};
+
+TEST_P(SourceVoiceServiceTest,
+       UploadRetiresBeforePublicationAndReusesConditioning) {
+  for (bool floating : {false, true}) {
+    for (uint32_t channels : {1u, 2u, 6u}) {
+      VoiceUpload upload(nullptr, loom_serve_speech_voice_upload_close);
+      IREE_ASSERT_OK(Upload("my voice", 0.125f, &upload, floating, channels));
+      SpeechStream early(nullptr, loom_serve_speech_stream_close);
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_NOT_FOUND,
+          OpenSpeech(service_, IREE_SV("hi"), IREE_SV("my voice"), 3, &early));
+      VoiceUpload duplicate(nullptr, loom_serve_speech_voice_upload_close);
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
+                            Upload("my voice", 0.25f, &duplicate));
+      ASSERT_NO_FATAL_FAILURE(FinishUpload(upload));
+      for (int repeat = 0; repeat < 2; ++repeat) {
+        SpeechStream stream(nullptr, loom_serve_speech_stream_close);
+        IREE_ASSERT_OK(OpenSpeech(service_, IREE_SV("hi"), IREE_SV("my voice"),
+                                  3, &stream));
+        ASSERT_NO_FATAL_FAILURE(CheckNative(stream, 0.125f));
+      }
+      IREE_ASSERT_OK(loom_serve_speech_service_remove_voice(
+          service_, IREE_SV("my voice")));
+    }
+  }
+}
+
+TEST_P(SourceVoiceServiceTest,
+       RemovalPreservesQueuedCapturesAndAllowsNewIncarnation) {
+  VoiceUpload upload(nullptr, loom_serve_speech_voice_upload_close);
+  IREE_ASSERT_OK(Upload("voice", 0.125f, &upload));
+  ASSERT_NO_FATAL_FAILURE(FinishUpload(upload));
+  std::vector<SpeechStream> old;
+  for (int i = 0; i < 6; ++i) {
+    old.emplace_back(nullptr, loom_serve_speech_stream_close);
+    IREE_ASSERT_OK(
+        OpenSpeech(service_, IREE_SV("hi"), IREE_SV("voice"), 3, &old.back()));
+    ASSERT_NE(old.back(), nullptr);
+  }
+  IREE_ASSERT_OK(
+      loom_serve_speech_service_remove_voice(service_, IREE_SV("voice")));
+  SpeechStream absent(nullptr, loom_serve_speech_stream_close);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      OpenSpeech(service_, IREE_SV("hi"), IREE_SV("voice"), 3, &absent));
+  VoiceUpload replacement(nullptr, loom_serve_speech_voice_upload_close);
+  IREE_ASSERT_OK(Upload("voice", -0.125f, &replacement));
+  ASSERT_NE(replacement, nullptr);
+  for (auto& stream : old) {
+    ASSERT_NO_FATAL_FAILURE(CheckNative(stream, 0.125f));
+  }
+  ASSERT_NO_FATAL_FAILURE(FinishUpload(replacement));
+  SpeechStream fresh(nullptr, loom_serve_speech_stream_close);
+  IREE_ASSERT_OK(
+      OpenSpeech(service_, IREE_SV("hi"), IREE_SV("voice"), 3, &fresh));
+  ASSERT_NO_FATAL_FAILURE(CheckNative(fresh, -0.125f));
+}
+
+TEST_P(SourceVoiceServiceTest, HttpUploadProducesReusableNativeAndHttpVoice) {
+  std::vector<uint8_t> samples(44 + 8 * sizeof(float));
+  memcpy(samples.data(), "RIFF", 4);
+  iree_unaligned_store_le_u32(samples.data() + 4, samples.size() - 8);
+  memcpy(samples.data() + 8, "WAVEfmt ", 8);
+  iree_unaligned_store_le_u32(samples.data() + 16, 16);
+  iree_unaligned_store_le_u16(samples.data() + 20, 3);
+  iree_unaligned_store_le_u16(samples.data() + 22, 2);
+  iree_unaligned_store_le_u32(samples.data() + 24, 44100);
+  iree_unaligned_store_le_u32(samples.data() + 28, 44100 * 8);
+  iree_unaligned_store_le_u16(samples.data() + 32, 8);
+  iree_unaligned_store_le_u16(samples.data() + 34, 32);
+  memcpy(samples.data() + 36, "data", 4);
+  iree_unaligned_store_le_u32(samples.data() + 40, samples.size() - 44);
+  for (size_t i = 0; i < 8; ++i) {
+    // CPU source processing must combine both channels of the original PCM.
+    iree_unaligned_store_le_f32(samples.data() + 44 + i * 4,
+                                i % 2 ? 0.25f : 0.0f);
+  }
+  for (bool encoded : {true, false}) {
+    const auto recording =
+        encoded ? samples
+                : std::vector<uint8_t>(samples.begin() + 44, samples.end());
+    const int client = SendUpload(
+        "voice",
+        encoded ? "audio/wav" : "audio/pcm;format=f32le;rate=44100;channels=2",
+        recording);
+    loom_serve_http_connection_t* connection = nullptr;
+    const auto before = interface_.telemetry.counters->completed;
+    const auto rejected_before = interface_.telemetry.counters->rejected;
+    ASSERT_NO_FATAL_FAILURE(Accept(client, &connection));
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+      return interface_.telemetry.counters->completed > before ||
+             interface_.telemetry.counters->rejected > rejected_before;
+    }));
+    const std::string response = Read(client);
+#if !LOOM_TEST_AUDIO_WAV
+    if (encoded) {
+      ASSERT_EQ(response.find("HTTP/1.1 400 Bad Request"), 0u) << response;
+      EXPECT_NE(response.find("encoded audio input is disabled"),
+                std::string::npos);
+      continue;
+    }
+#endif
+    ASSERT_EQ(response.find("HTTP/1.1 200 OK"), 0u) << response;
+    EXPECT_NE(response.find("{\"id\":\"voice\"}"), std::string::npos);
+    SpeechStream stream(nullptr, loom_serve_speech_stream_close);
+    IREE_ASSERT_OK(
+        OpenSpeech(service_, IREE_SV("hi"), IREE_SV("voice"), 3, &stream));
+    ASSERT_NO_FATAL_FAILURE(CheckNative(stream, 0.125f));
+    const int speech = Send("POST", "/v1/audio/speech", Request("voice"));
+    const auto completed = interface_.telemetry.counters->completed;
+    ASSERT_NO_FATAL_FAILURE(Accept(speech, &connection));
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+        [&] { return interface_.telemetry.counters->completed > completed; }));
+    CheckAudio(Read(speech), 17);
+    const int remove = Send("POST", "/v1/audio/voices/remove",
+                            R"({"model":"speech","id":"voice"})");
+    ASSERT_NO_FATAL_FAILURE(Accept(remove, &connection));
+    EXPECT_EQ(Read(remove).find("HTTP/1.1 200 OK"), 0u);
+    SpeechStream absent(nullptr, loom_serve_speech_stream_close);
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_NOT_FOUND,
+        OpenSpeech(service_, IREE_SV("hi"), IREE_SV("voice"), 3, &absent));
+  }
+}
+
+TEST_P(SourceVoiceServiceTest,
+       CancellationRetainsAcceptedCpuAndDevicePreparation) {
+  for (bool submitted : {false, true}) {
+    VoiceUpload upload(nullptr, loom_serve_speech_voice_upload_close);
+    IREE_ASSERT_OK(Upload("voice", 0.125f, &upload));
+    if (submitted) {
+      ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+        return std::string(interface_.snapshot(interface_.self).phase) ==
+               "generating";
+      }));
+    }
+    std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> gates;
+    for (int i = 0; i < SpeechWorkerCount(); ++i) {
+      gates.push_back(std::make_unique<loom_serve::testing::WorkerGate>(
+          loom_serve_host_executor(host_)));
+    }
+    bool progress = false;
+    IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+    EXPECT_TRUE(interface_.is_pending(interface_.self));
+    const auto cancelled = interface_.telemetry.counters->cancelled;
+    upload.reset();
+    IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+    VoiceUpload duplicate(nullptr, loom_serve_speech_voice_upload_close);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
+                          Upload("voice", 0.25f, &duplicate));
+    EXPECT_EQ(interface_.telemetry.counters->cancelled, cancelled);
+    gates.clear();
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+        [&] { return interface_.telemetry.counters->cancelled > cancelled; }));
+    VoiceUpload replacement(nullptr, loom_serve_speech_voice_upload_close);
+    IREE_ASSERT_OK(Upload("voice", -0.125f, &replacement));
+    ASSERT_NO_FATAL_FAILURE(FinishUpload(replacement));
+    SpeechStream stream(nullptr, loom_serve_speech_stream_close);
+    IREE_ASSERT_OK(
+        OpenSpeech(service_, IREE_SV("hi"), IREE_SV("voice"), 3, &stream));
+    ASSERT_NO_FATAL_FAILURE(CheckNative(stream, -0.125f));
+    IREE_ASSERT_OK(
+        loom_serve_speech_service_remove_voice(service_, IREE_SV("voice")));
+  }
+}
+
+TEST_P(SourceVoiceServiceTest,
+       ShutdownJoinsPreparationAndDetachesUploadResult) {
+  VoiceUpload upload(nullptr, loom_serve_speech_voice_upload_close);
+  IREE_ASSERT_OK(Upload("voice", 0.125f, &upload));
+  std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> gates;
+  for (int i = 0; i < SpeechWorkerCount(); ++i) {
+    gates.push_back(std::make_unique<loom_serve::testing::WorkerGate>(
+        loom_serve_host_executor(host_)));
+  }
+  bool progress = false;
+  IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+  IREE_ASSERT_OK(interface_.advance(
+      interface_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
+  EXPECT_FALSE(loom_serve_speech_voice_upload_is_complete(upload.get()));
+  EXPECT_TRUE(interface_.is_pending(interface_.self));
+  gates.clear();
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return loom_serve_speech_voice_upload_is_complete(upload.get()); },
+      LOOM_SERVE_SERVICE_FLAG_STOPPING));
+  interface_.set_observer(interface_.self, {});
+  loom_serve_speech_service_free(service_);
+  service_ = nullptr;
+  IREE_ASSERT_OK(loom_serve_speech_model_free(model_));
+  model_ = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        loom_serve_speech_voice_upload_status(upload.get()));
+}
+
+TEST_P(SourceVoiceServiceTest, CancelledAndMalformedUploadsNeverPublish) {
+  VoiceUpload cancelled(nullptr, loom_serve_speech_voice_upload_close);
+  IREE_ASSERT_OK(Upload("cancelled", 0.125f, &cancelled));
+  cancelled.reset();
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return interface_.telemetry.counters->cancelled == 1; }));
+  SpeechStream absent(nullptr, loom_serve_speech_stream_close);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      OpenSpeech(service_, IREE_SV("hi"), IREE_SV("cancelled"), 3, &absent));
+  VoiceUpload invalid(nullptr, loom_serve_speech_voice_upload_close);
+  IREE_ASSERT_OK(
+      Upload("voice", std::numeric_limits<float>::infinity(), &invalid));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return loom_serve_speech_voice_upload_is_complete(invalid.get());
+  }));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_speech_voice_upload_status(invalid.get()));
+  VoiceUpload valid(nullptr, loom_serve_speech_voice_upload_close);
+  IREE_ASSERT_OK(Upload("voice", 0.125f, &valid));
+  ASSERT_NO_FATAL_FAILURE(FinishUpload(valid));
+  SpeechStream speech(nullptr, loom_serve_speech_stream_close);
+  IREE_ASSERT_OK(
+      OpenSpeech(service_, IREE_SV("hi"), IREE_SV("voice"), 3, &speech));
+  ASSERT_NO_FATAL_FAILURE(CheckNative(speech, 0.125f));
+}
+
+INSTANTIATE_TEST_SUITE_P(Uploaded, SourceVoiceServiceTest,
+                         ::testing::Values(false));
 
 INSTANTIATE_TEST_SUITE_P(Parameters, SourceSpeechServiceTest,
                          ::testing::Bool());

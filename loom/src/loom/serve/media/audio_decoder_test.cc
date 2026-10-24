@@ -172,6 +172,35 @@ TEST(AudioDecoderTest, ResamplingAndChannelMixingSurviveReadBoundaries) {
   }
 }
 
+TEST(AudioDecoderTest, ZeroGeometryPreservesOriginalSamples) {
+  if (!LOOM_TEST_AUDIO_WAV) {
+    return;
+  }
+  for (uint32_t rate : {8000u, 16000u, 22050u, 24000u, 44100u, 48000u}) {
+    for (uint32_t channels : {1u, 2u, 6u}) {
+      std::vector<float> samples(31 * channels);
+      for (size_t i = 0; i < samples.size(); ++i) {
+        samples[i] = (static_cast<int>(i % 13) - 6) / 16.0f;
+      }
+      const auto encoded = Wave(rate, channels, samples, true);
+      loom_serve_audio_decoder_t* raw = nullptr;
+      IREE_ASSERT_OK(loom_serve_audio_decoder_allocate(
+          iree_make_const_byte_span(encoded.data(), encoded.size()), 0, 0,
+          iree_allocator_system(), &raw));
+      Decoder decoder(raw, loom_serve_audio_decoder_free);
+      EXPECT_EQ(loom_serve_audio_decoder_sample_rate(raw), rate);
+      EXPECT_EQ(loom_serve_audio_decoder_channels(raw), channels);
+      std::vector<float> output(samples.size());
+      iree_host_size_t count = 0;
+      bool complete = false;
+      IREE_ASSERT_OK(loom_serve_audio_decoder_read(raw, 31, output.data(),
+                                                   &count, &complete));
+      EXPECT_EQ(count, 31u);
+      EXPECT_EQ(output, samples);
+    }
+  }
+}
+
 TEST(AudioDecoderTest, InvalidInputRetainsNoDecoder) {
   for (const std::string bytes :
        {"", "not audio", "RIFF\x7f\x7f\x7f\x7fWAVE", "fLaC", "ID3"}) {

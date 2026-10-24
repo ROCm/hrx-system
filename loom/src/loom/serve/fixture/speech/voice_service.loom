@@ -1,0 +1,130 @@
+// Uploads produce device-resident conditioning used by ordinary speech requests.
+func.decl @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer)
+
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
+global.rodata.def @voice_stage_name = bytes("707265706172655f766f6963655f617564696f")
+
+func.def public @speech_prepare_v2(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer) {
+  %rows, %units, %input, %conditioning, %stream, %batch, %output, %feedback, %frames, %rate, %channels, %tokenizer, %name, %state, %initial = func.call @prepare(%directory, %options) : (buffer, buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer)
+  %tag = scalar.constant 2 : i64
+  %root = global.load @voice_stage_name : buffer
+  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %voices = scalar.constant 2 : i64
+  %audio_bytes = scalar.constant 1048576 : i64
+  func.return %rows, %units, %input, %conditioning, %stream, %batch, %output, %feedback, %frames, %rate, %channels, %voices, %audio_bytes, %tokenizer, %name, %state, %initial : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer
+}
+
+func.decl @check(%condition: i1)
+
+func.def public @speech_prepare_voice_v2(%model: buffer, %slot: i64, %samples: buffer, %rate: i64, %channels: i64) -> (buffer, buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = scalar.constant 0 : i64
+  %positive_rate = scalar.cmpi ugt, %rate, %c0 : i64
+  %positive_channels = scalar.cmpi ugt, %channels, %c0 : i64
+  %valid_geometry = scalar.andi %positive_rate, %positive_channels : i1
+  func.call @check(%valid_geometry) : (i1)
+  %bytes = buffer.length %samples
+  %length = index.cast %bytes : offset to i64
+  %sample_bytes = scalar.constant 4 : i64
+  %count64 = scalar.divui %length, %sample_bytes : i64
+  %bounded_count = scalar.assume %count64 [range(%count64, 1, 262144)] : i64
+  %count = index.cast %bounded_count : i64 to index
+  %values = buffer.view %samples[%origin] : buffer -> view<[%count]xf32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial_sum = scalar.constant 0.0 : f32
+  %sum = scf.for %i = [%begin to %count step %step](%total = %initial_sum : f32) -> (f32) {
+    %sample = view.load %values[%i] : view<[%count]xf32> -> f32
+    %next = scalar.addf %total, %sample : f32
+    scf.yield %next : f32
+  }
+  %denominator = scalar.uitofp %count64 : i64 to f32
+  %mean = scalar.divf %sum, %denominator : f32
+  %payload_size = index.constant 16 : offset
+  %payload = buffer.alloca<private> align(8) %payload_size : buffer
+  %header = buffer.view %payload[%origin] : buffer -> view<4xi32>
+  %slot32 = scalar.trunci %slot : i64 to i32
+  %mean32 = scalar.bitcast %mean : f32 to i32
+  view.store %slot32, %header[0] : i32, view<4xi32>
+  view.store %mean32, %header[1] : i32, view<4xi32>
+  %state_size = index.constant 4 : offset
+  %state = buffer.alloca<private> align(4) %state_size : buffer
+  %cursor = buffer.view %state[%origin] : buffer -> view<1xi32>
+  %phase = scalar.constant 2 : i32
+  view.store %phase, %cursor[0] : i32, view<1xi32>
+  %voice = buffer.alloca<private> align(4) %state_size : buffer
+  %voice_slot = buffer.view %voice[%origin] : buffer -> view<1xi32>
+  view.store %slot32, %voice_slot[0] : i32, view<1xi32>
+  func.return %voice, %state, %payload : buffer, buffer, buffer
+}
+
+func.decl @prepare_request(%model: buffer, %text: buffer, %voice: buffer, %instructions: buffer, %seed: i64, %speed: f32) -> (buffer, buffer)
+
+global.rodata.def @slot_zero_voice = bytes("706f736974697665")
+
+global.rodata.def @slot_one_voice = bytes("6e65676174697665")
+
+func.def public @speech_prepare_request_v2(%model: buffer, %text: buffer, %voice: buffer, %instructions: buffer, %seed: i64, %speed: f32) -> (buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %voice_slot = buffer.view %voice[%origin] : buffer -> view<1xi32>
+  %slot = view.load %voice_slot[0] : view<1xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %first = scalar.cmpi eq, %slot, %c0 : i32
+  %positive = global.load @slot_zero_voice : buffer
+  %negative = global.load @slot_one_voice : buffer
+  %name = scf.select %first, %positive, %negative : buffer
+  %state, %payload = func.call @prepare_request(%model, %text, %name, %instructions, %seed, %speed) : (buffer, buffer, buffer, buffer, i64, f32) -> (buffer, buffer)
+  func.return %state, %payload : buffer, buffer
+}
+
+func.decl @prepare_work(%model: buffer, %state: buffer) -> (buffer, i64, i64)
+
+func.def public @speech_prepare_work_v2(%model: buffer, %state: buffer) -> (buffer, i64, i64) {
+  %result_0, %result_1, %result_2 = func.call @prepare_work(%model, %state) : (buffer, buffer) -> (buffer, i64, i64)
+  func.return %result_0, %result_1, %result_2 : buffer, i64, i64
+}
+
+func.decl @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer)
+
+func.def public @speech_prepare_batch_v2(%model: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (buffer, buffer) {
+  %result_0, %result_1 = func.call @prepare_batch(%model, %tags, %ranges, %packed) : (buffer, buffer, buffer, buffer) -> (buffer, buffer)
+  func.return %result_0, %result_1 : buffer, buffer
+}
+
+func.decl @generate(%plan: buffer, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer)
+
+func.decl import("runner") @execute_5(%stage: i32, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer) -> (i64)
+
+func.def public @speech_generate_v2(%plan: buffer, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %plan[%origin] : buffer -> view<2xi32>
+  %stage = view.load %header[1] : view<2xi32> -> i32
+  %voice_stage = scalar.constant 2 : i32
+  %upload = scalar.cmpi eq, %stage, %voice_stage : i32
+  scf.if %upload {
+    %execution = func.call @execute_5(%stage, %work, %request, %conditioning, %stream, %output) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  } else {
+    func.call @generate(%plan, %work, %request, %conditioning, %stream, %output) : (buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer)
+  }
+  func.return
+}
+
+func.decl @complete(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, i64, i64, i32)
+
+func.def public @speech_complete_v2(%model: buffer, %state: buffer, %plan: buffer, %ordinal: i64, %feedback: buffer) -> (i64, i64, i64, i32) {
+  %origin = index.constant 0 : offset
+  %cursor = buffer.view %state[%origin] : buffer -> view<1xi32>
+  %stage = view.load %cursor[0] : view<1xi32> -> i32
+  %voice_stage = scalar.constant 2 : i32
+  %upload = scalar.cmpi eq, %stage, %voice_stage : i32
+  %position, %offset, %count, %done = scf.if %upload -> (i64, i64, i64, i32) {
+    %c0 = scalar.constant 0 : i64
+    %c1 = scalar.constant 1 : i32
+    scf.yield %c0, %c0, %c0, %c1 : i64, i64, i64, i32
+  } else {
+    %a, %b, %c, %d = func.call @complete(%model, %state, %plan, %ordinal, %feedback) : (buffer, buffer, buffer, i64, buffer) -> (i64, i64, i64, i32)
+    scf.yield %a, %b, %c, %d : i64, i64, i64, i32
+  }
+  func.return %position, %offset, %count, %done : i64, i64, i64, i32
+}

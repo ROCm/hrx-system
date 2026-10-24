@@ -148,23 +148,27 @@ class ServiceCardResolutionTest
 };
 
 TEST_P(ServiceCardResolutionTest, SupportedVersionResolvesWithoutProgramIo) {
-  InitializeService(1);
-  loom_serve_model_resolution_t* resolution = nullptr;
-  IREE_ASSERT_OK(loom_serve_model_resolution_start(
-      Sink(), &configuration_, Observer(), allocator_, &resolution));
-  Execute();
-  loom_serve_model_configuration_t resolved = {};
-  iree_status_t status = iree_ok_status();
-  ASSERT_TRUE(
-      loom_serve_model_resolution_take(&resolution, &status, &resolved));
-  IREE_EXPECT_OK(status);
-  EXPECT_NE(resolved.sources.card, nullptr);
-  EXPECT_EQ(resolved.kind, configuration_.kind);
-  loom_serve_model_configuration_deinitialize(&resolved);
+  const int latest = std::string(GetParam()) == "speech" ? 2 : 1;
+  for (int version = 1; version <= latest; ++version) {
+    SCOPED_TRACE(version);
+    InitializeService(version);
+    loom_serve_model_resolution_t* resolution = nullptr;
+    IREE_ASSERT_OK(loom_serve_model_resolution_start(
+        Sink(), &configuration_, Observer(), allocator_, &resolution));
+    Execute();
+    loom_serve_model_configuration_t resolved = {};
+    iree_status_t status = iree_ok_status();
+    ASSERT_TRUE(
+        loom_serve_model_resolution_take(&resolution, &status, &resolved));
+    IREE_EXPECT_OK(status);
+    EXPECT_NE(resolved.sources.card, nullptr);
+    EXPECT_EQ(resolved.kind, configuration_.kind);
+    loom_serve_model_configuration_deinitialize(&resolved);
+  }
 }
 
 TEST_P(ServiceCardResolutionTest, UnsupportedVersionFailsBeforeProgramIo) {
-  InitializeService(2);
+  InitializeService(std::string(GetParam()) == "speech" ? 3 : 2);
   loom_serve_model_resolution_t* resolution = nullptr;
   IREE_ASSERT_OK(loom_serve_model_resolution_start(
       Sink(), &configuration_, Observer(), allocator_, &resolution));

@@ -94,7 +94,8 @@ class SpeechReadinessTest : public ::testing::Test {
         .batch_units = capacity,
         .prepare =
             [](void* self, iree_host_size_t row,
-               const loom_serve_speech_request_t* request, void** out) {
+               const loom_serve_speech_request_t* request, const void* voice,
+               void** out) {
               auto* test = static_cast<SpeechReadinessTest*>(self);
               auto invocation =
                   std::make_unique<loom_serve_test_speech_invocation_t>();

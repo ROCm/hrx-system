@@ -22,6 +22,13 @@ iree_status_t loom_serve_speech_http_consumer_allocate(
     iree_host_size_t block_capacity, iree_allocator_t host_allocator,
     loom_serve_speech_consumer_t* out_consumer);
 
+// Creates a voice registration receipt. Preparation publishes no partial HTTP
+// output; end sends the prebuilt JSON only after the voice is ready to use.
+iree_status_t loom_serve_speech_http_voice_consumer_allocate(
+    loom_serve_http_connection_t* connection, iree_string_view_t id,
+    iree_allocator_t host_allocator,
+    loom_serve_speech_consumer_t* out_consumer);
+
 // Sends one complete JSON rejection and consumes the claim on every path.
 // The response is copied into the transport before this function returns.
 iree_status_t loom_serve_speech_http_reject(

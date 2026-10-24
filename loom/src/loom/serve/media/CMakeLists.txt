@@ -394,6 +394,48 @@ loom_cc_library(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
+    audio_recording
+  HDRS
+    "audio_recording.h"
+  SRCS
+    "audio_recording.c"
+  DEPS
+    ::audio_decoder
+    ::audio_source
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+set(_audio_recording_test_platform_defines "")
+if(LOOM_SERVE_AUDIO_CODEC_WAV)
+  list(APPEND _audio_recording_test_platform_defines "LOOM_TEST_AUDIO_WAV=1")
+else()
+  list(APPEND _audio_recording_test_platform_defines "LOOM_TEST_AUDIO_WAV=0")
+endif()
+loom_cc_test(
+  NAME
+    audio_recording_test
+  SRCS
+    "audio_recording_test.cc"
+  DEFINES
+    ${_audio_recording_test_platform_defines}
+  DEPS
+    ::audio_recording
+    ::audio_source
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm::test_support
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
 file(GLOB _GLOB_TESTDATA_AUDIO_X LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS testdata/audio/*)
 list(TRANSFORM _GLOB_TESTDATA_AUDIO_X PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/" OUTPUT_VARIABLE _GLOB_TESTDATA_AUDIO_X_ABSOLUTE)
 if(LOOM_TARGET_ARCH_VM)

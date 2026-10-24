@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "iree_select", "loom_cc_library", "loom_cc_test")
 
 package(
     default_visibility = ["//loom/src/loom/serve:implementation"],
@@ -39,6 +39,7 @@ loom_cc_library(
     hdrs = ["generator.h"],
     deps = [
         ":request",
+        "//loom/src/loom/serve/media:audio_source",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/parameter:residency",
         "//loom/src/loom/serve/runtime/storage:memory",
@@ -70,12 +71,58 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "voice",
+    srcs = ["voice.c"],
+    hdrs = ["voice.h"],
+    deps = [
+        ":consumer",
+        ":generator",
+        "//loom/src/loom/serve/media:audio_source",
+        "//loom/src/loom/serve/telemetry:record",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_library(
+    name = "voice_http",
+    srcs = ["voice_http.c"],
+    hdrs = ["voice_http.h"],
+    deps = [
+        ":voice",
+        "//loom/src/loom/serve/transport/http:multipart",
+        "//loom/src/loom/serve/transport/http:request",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_test(
+    name = "voice_http_test",
+    srcs = ["voice_http_test.cc"],
+    deps = [
+        ":voice",
+        ":voice_http",
+        "//loom/src/loom/serve/media:audio_source",
+        "//loom/src/loom/serve/transport/http:multipart",
+        "//loom/src/loom/serve/transport/http:request",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "model",
     srcs = ["model.c"],
     hdrs = ["model.h"],
     deps = [
         ":generator",
         "//loom/binding/c:loomc",
+        "//loom/src/loom/model:card",
+        "//loom/src/loom/serve/media:audio_recording",
+        "//loom/src/loom/serve/media:audio_source",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/execution:dispatch",
@@ -116,6 +163,10 @@ loom_cc_library(
         "source_service_test.cc",
     ],
     hdrs = ["service_test.h"],
+    defines = iree_select({
+        "//loom/config/serve:wav": ["LOOM_TEST_AUDIO_WAV=1"],
+        "//conditions:default": ["LOOM_TEST_AUDIO_WAV=0"],
+    }),
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
@@ -127,11 +178,13 @@ loom_cc_library(
         ":request",
         ":service",
         ":stream",
+        ":voice",
         "//loom/src/loom/serve/runtime/device",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/runtime/parameter:residency",
         "//loom/src/loom/serve/runtime/storage:memory",
+        "//loom/src/loom/serve/server:configuration",
         "//loom/src/loom/serve/server:model_registration",
         "//loom/src/loom/serve/server:registry",
         "//loom/src/loom/serve/server:router",
@@ -200,6 +253,8 @@ loom_cc_library(
         ":http",
         ":request",
         ":stream",
+        ":voice",
+        ":voice_http",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/runtime/host:timer",

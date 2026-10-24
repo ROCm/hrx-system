@@ -65,3 +65,21 @@ production service and TCP carrier. They verify health progress during device
 waits, bounded send-credit delivery, cancellation cleanup and failed-readiness
 ownership. Numerical model output is the substituted dependency in those cases;
 source compilation and exact waveform results are covered by this package.
+
+## Uploaded voices
+
+`voice_card.json` selects speech ABI2 and two dynamically registered voices. It
+accepts the same raw PCM and enabled audio containers as dictation. CPU Loom
+computes the recording's mean sample; a numerical command stores that gain in
+the reserved conditioning slot. Subsequent waveform requests read the stored
+gain through the ordinary fixture kernel. A mean of `0.125` produces the same
+positive oracle above. This isolates one-time processing and device ownership
+without a learned checkpoint.
+
+The native and HTTP tests verify publication after retirement, stereo and
+multichannel input, S16/F32 and WAV, repeated synthesis, duplicate IDs, capacity
+pressure, cancellation during accepted processing, joined shutdown, and removal
+with queued captures. Text, bytecode, and mixed-provider card tests repeat the
+HTTP upload-to-speech flow through the actual server binary, including removal
+while inference is drained. The fixture qualifies the serving contract; Pocket's
+learned encoder separately qualifies model-specific voice preparation.

@@ -67,7 +67,8 @@ loom_serve_speech_model_t* loom_serve_speech_load_take_model(
 // preserves the remaining ownership for the caller.
 iree_status_t loom_serve_speech_load_free(loom_serve_speech_load_t* load);
 
-// Source ABI: cold prepare(asset_root, options: buffer) ->
+// Speech ABI1 (and the unversioned development contract):
+// cold prepare(asset_root, options: buffer) ->
 //   (request_capacity, batch_units, input_stride, conditioning_capacity,
 //    stream_stride, batch_input_capacity, output_capacity, feedback_capacity,
 //    block_frames, sample_rate, channels: i64,
@@ -91,6 +92,33 @@ iree_status_t loom_serve_speech_load_free(loom_serve_speech_load_t* load);
 // complete(model_state, request_state, plan: buffer, ordinal: i64,
 //          feedback: buffer)
 //   -> (frame_position, pcm_byte_offset, frame_count: i64, complete: i32).
+//
+// Speech ABI2 retains the same numerical scheduler and waveform contract.
+// Cold speech_prepare_v2 inserts voice_capacity and voice_audio_capacity (i64)
+// after channels and before the four buffer results. Both are positive; the
+// latter bounds decoded original-recording bytes, not compressed upload size.
+// All service exports use the speech_*_v2 suffix in the selected model card.
+//
+// speech_prepare_voice_v2(model_state: buffer, voice_slot: i64,
+//                         original_pcm: buffer, sample_rate, channels: i64)
+//   -> (voice_state, request_state, payload: buffer).
+// PCM is finite interleaved F32LE at its original rate and channel count. This
+// CPU call owns model-specific mixing, resampling, trimming, and padding. Its
+// request proceeds through prepare_work/batch, generate, and complete as usual;
+// it must produce no waveform frames and report EOF after conditioning is
+// ready. voice_slot is reserved exclusively for this upload until it and every
+// later synthesis capture retire. The slot's numerical storage belongs to
+// conditioning. voice_state is immutable opaque CPU metadata, retained until
+// the last capture retires; source may retain PCM or derived buffers in its
+// request state.
+//
+// speech_prepare_request_v2 receives captured voice_state instead of a voice-ID
+// string. IDs and slot reuse belong to the native service. It publishes an ID
+// only after successful upload and row-release retirement. Cancellation cannot
+// publish unfinished conditioning; removal hides the ID while preserving
+// already accepted synthesis. Each slot reuse must overwrite all conditioning
+// that its new incarnation will read. Preparing a voice never runs again during
+// synthesis.
 //
 // Request payload may be empty when source carries all request inputs in its
 // host state or subsequent work. Admission uploads only nonempty payloads and

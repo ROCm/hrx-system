@@ -92,7 +92,7 @@ def check_decision(client, model):
         check_decision_result(result)
 
 
-def check_speech(client, model):
+def check_speech(client, model, *, tokenizer=True):
     def request(index):
         text = "ab" + "a" * index
         voice = "positive" if index % 2 else "negative"
@@ -110,9 +110,59 @@ def check_speech(client, model):
 
     with ThreadPoolExecutor(max_workers=4) as workers:
         list(workers.map(request, range(8)))
-    assert client.request("/tokenize", {"model": model, "content": "abba"}) == {
-        "tokens": [0, 1, 1, 0]
-    }
+    if tokenizer:
+        assert client.request("/tokenize", {"model": model, "content": "abba"}) == {
+            "tokens": [0, 1, 1, 0]
+        }
+
+
+def check_speech_voice(client, model):
+    def upload(voice, value, expected=200):
+        boundary = "voice-boundary"
+        body = (
+            (
+                f'--{boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n{model}\r\n'
+                f'--{boundary}\r\nContent-Disposition: form-data; name="id"\r\n\r\n{voice}\r\n'
+                f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="sample"\r\n'
+                "Content-Type: audio/pcm;rate=44100;channels=2;format=f32le\r\n\r\n"
+            ).encode()
+            + struct.pack("<8f", *([value] * 8))
+            + f"\r\n--{boundary}--\r\n".encode()
+        )
+        connection = http.client.HTTPConnection(client.address)
+        try:
+            connection.request(
+                "POST",
+                "/v1/audio/voices",
+                body,
+                {"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            )
+            response = connection.getresponse()
+            result = response.read()
+            assert response.status == expected, (response.status, result)
+            if expected == 200:
+                assert json.loads(result) == {"id": voice}, result
+        finally:
+            connection.close()
+
+    upload("positive", 0.125)
+    upload("negative", -0.125)
+    upload("positive", 0.25, 409)
+    upload("third", 0.25, 503)
+    check_speech(client, model, tokenizer=False)
+    # Removing voices remains available while inference admission is drained.
+    client.request("/v1/models/drain", {"model": model})
+    for voice in ("positive", "negative"):
+        assert client.request(
+            "/v1/audio/voices/remove", {"model": model, "id": voice}
+        ) == {"id": voice}
+    client.request(
+        "/v1/audio/voices/remove", {"model": model, "id": "missing"}, status=404
+    )
+    client.request("/v1/models/undrain", {"model": model})
+    upload("negative", -0.125)
+    upload("positive", 0.125)
+    check_speech(client, model, tokenizer=False)
 
 
 def check_sequence(client, model):
@@ -197,6 +247,7 @@ def check_service(server, kind, deployment, model):
                     "embedding": check_embedding,
                     "decision": check_decision,
                     "speech": check_speech,
+                    "speech_voice": check_speech_voice,
                     "sequence": check_sequence,
                 }[kind](client, model)
             except (AssertionError, RuntimeError) as error:

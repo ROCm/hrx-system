@@ -23,6 +23,10 @@ extern "C" {
 // Modality-owned input and detached output types used by native admission.
 typedef struct loom_serve_speech_request_t loom_serve_speech_request_t;
 typedef struct loom_serve_speech_stream_t loom_serve_speech_stream_t;
+typedef struct loom_serve_speech_voice_request_t
+    loom_serve_speech_voice_request_t;
+typedef struct loom_serve_speech_voice_upload_t
+    loom_serve_speech_voice_upload_t;
 typedef struct loom_serve_recognition_request_t
     loom_serve_recognition_request_t;
 typedef struct loom_serve_recognition_stream_t loom_serve_recognition_stream_t;
@@ -95,6 +99,13 @@ typedef struct loom_serve_service_t {
   iree_status_t (*try_open_speech)(void* self,
                                    loom_serve_speech_request_t* request,
                                    loom_serve_speech_stream_t** out_stream);
+  // Optional one-time voice preparation. Admission moves the owned recording
+  // only with a non-NULL receipt; pressure/failure preserves caller ownership.
+  iree_status_t (*try_upload_voice)(
+      void* self, loom_serve_speech_voice_request_t* request,
+      loom_serve_speech_voice_upload_t** out_upload);
+  // Hides an uploaded voice without invalidating accepted synthesis captures.
+  iree_status_t (*remove_voice)(void* self, iree_string_view_t id);
   // Optional native continuing-input recognition on this serialized owner.
   // Success with a stream copies request options and grants bounded PCM credit
   // in the stream's format. NULL success is pressure. The caller owns the

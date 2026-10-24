@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//loom/build_tools/bazel:loom_library.bzl", "loom_library")
 load("//loom/build_tools/bazel:loom_model.bzl", "loom_model")
 load(":sources.bzl", "SOURCE_FILES", "VARIANT_FILES")
 
@@ -34,5 +35,39 @@ exports_files(
     for encoding in [
         "text",
         "bc",
+    ]
+]
+
+loom_library(
+    name = "voice_numerics",
+    srcs = [
+        "generate.loom",
+        "voice_generate.loom",
+    ],
+)
+
+[
+    loom_model(
+        name = "voice_card_model_" + name,
+        card = "voice_card.json",
+        encoding = encoding,
+        files = {
+            "control.loom": "control.loom",
+            "prepare.loom": "prepare.loom",
+            "voice_service.loom": "voice_service.loom",
+        } | ({":voice_numerics": "voice_numerics.loombc"} if programs == "mixed" else {
+            "generate.loom": "generate.loom",
+            "voice_generate.loom": "voice_generate.loom",
+        }),
+        model_name = "speech",
+        preset = "check",
+        programs = programs,
+        tags = ["skip-bazel_to_cmake"],
+        visibility = ["//visibility:public"],
+    )
+    for name, encoding, programs in [
+        ("text", "text", "fixture"),
+        ("bc", "bc", "fixture"),
+        ("mixed", "preserve", "mixed"),
     ]
 ]

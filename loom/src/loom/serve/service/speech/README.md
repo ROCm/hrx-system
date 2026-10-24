@@ -15,16 +15,72 @@ TCP read boundaries need not coincide with waveform blocks.
 }
 ```
 
-Voice identifiers belong to the loaded package. A custom-voice object
-`{"id":"alba"}` passes the same identifier to source preparation. Optional
+Voice identifiers select the loaded package's voices or recordings registered
+with a model supporting voice uploads. A voice object `{"id":"alba"}` selects
+the same identifier as the string `"alba"`. Optional
 `instructions`, `speed` (0.25–4, default 1) and `seed` are also passed to source;
 the package rejects controls it cannot implement. `stream_format` accepts
 `"audio"`. Encoded-file formats, SSE and an omitted response format reject;
-they are not silently converted to raw PCM. This endpoint does not register or
-persist voice samples. Package assets supply its conditioning inputs.
+they are not silently converted to raw PCM.
 
 The [waveform fixture](../../fixture/speech/README.md) is an executable example
 of the model contract. It generates deterministic samples, not learned speech.
+
+## Register a voice recording
+
+Speech ABI2 models accept a recording through `POST /v1/audio/voices`. The file
+uses the same audio input path as dictation: WAV, MP3, and FLAC when those codecs
+are enabled, or raw PCM with explicit sample rate and channels. Filenames are
+opaque; container metadata or the raw PCM content type identifies the format.
+
+```sh
+curl --fail http://127.0.0.1:8080/v1/audio/voices \
+  -F model=speech -F id=my-voice -F 'file=@recording.wav;type=audio/wav'
+# {"id":"my-voice"}
+
+curl --fail http://127.0.0.1:8080/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"speech","input":"Good day.","voice":"my-voice","response_format":"pcm"}' \
+  --output speech.pcm
+```
+
+A successful upload response means preparation has finished and the voice is
+ready. The model processes the recording once, including its channel mixing,
+resampling, and learned voice encoding. Later speech requests reuse the resulting
+conditioning. Registration lasts for the loaded model's lifetime; it does not
+write a prepared checkpoint or change the model card.
+
+Raw input uses `audio/pcm;rate=44100;channels=2`, with optional `format=s16le`
+(the default) or `format=f32le`. F32 input contains finite normalized samples
+between -1 and 1. Both formats are little-endian and interleaved. The model
+bounds decoded recording storage and may reject recordings outside its duration
+or content requirements. The server also bounds the original HTTP body.
+
+An existing or preparing ID returns HTTP 409. When all voice slots are occupied,
+an upload returns 503. Removing a voice releases its name immediately:
+
+```sh
+curl --fail http://127.0.0.1:8080/v1/audio/voices/remove \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"speech","id":"my-voice"}'
+```
+
+Accepted speech, including queued requests, keeps its original voice through
+completion. A replacement upload with the same name uses another free slot until
+those captures retire. Removing an unknown or unfinished voice returns 404.
+Disconnecting an upload before successful completion cancels registration;
+accepted processing still retires safely. Voice removal also works while model
+admission is drained. ABI1 models retain their package-defined voices and reject
+uploads with 501.
+
+Native applications use `loom_serve_speech_voice_request_initialize` and
+`loom_serve_registry_try_upload_voice`. Successful admission moves the owned
+recording into the service and returns a completion handle; pressure preserves
+caller ownership. Check `loom_serve_speech_voice_upload_is_complete` and its
+terminal status before selecting the ID in a speech request. Closing the handle
+before completion cancels publication without waiting for CPU or device work.
+`loom_serve_registry_remove_voice` hides a published ID on the serving owner.
+The independent completion handle remains valid after model removal.
 
 ## Model ownership
 
@@ -121,6 +177,7 @@ after audio begins closes the response without appending another wire format.
 Dynamic registration and removal use the same constructors and teardown as
 startup model documents. Protocol rejection preserves the prepared service;
 terminal execution failures retain accepted consumers until registration
-retirement. Discovery reports text input and audio output. Common telemetry
+retirement. Discovery reports text input and audio output, plus audio input for
+models supporting uploaded voices. Common telemetry
 reports request outcomes and completed model units without treating waveform
 frames as text tokens.

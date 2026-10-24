@@ -623,12 +623,17 @@ loom_py_test(
         ("embedding", "//loom/src/loom/serve/fixture/embedding:card_model_"),
         ("decision", "//loom/src/loom/serve/fixture/decision:card_model_"),
         ("speech", "//loom/src/loom/serve/fixture/speech:card_model_"),
+        ("speech_voice", "//loom/src/loom/serve/fixture/speech:voice_card_model_"),
         ("sequence", "//loom/src/loom/serve/fixture/text:sequence_card_model_"),
     ]
-    for encoding in [
+    for encoding in ([
         "text",
         "bc",
-    ]
+        "mixed",
+    ] if kind == "speech_voice" else [
+        "text",
+        "bc",
+    ])
 ]
 
 # JITs an external source package and executes its command program through the

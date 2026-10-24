@@ -277,6 +277,19 @@ iree_status_t loom_serve_registry_try_open_speech(
     loom_serve_speech_request_t* request,
     loom_serve_speech_stream_t** out_stream);
 
+// Uses the same speech admission and ownership policy for one-time uploads.
+// The receipt publishes success only after the named voice is ready to use.
+iree_status_t loom_serve_registry_try_upload_voice(
+    loom_serve_registry_t* registry, iree_string_view_t name,
+    loom_serve_speech_voice_request_t* request,
+    loom_serve_speech_voice_upload_t** out_upload);
+
+// Removes a published voice without activating a cold or drained model. Already
+// accepted speech retains its captured voice through physical retirement.
+iree_status_t loom_serve_registry_remove_voice(loom_serve_registry_t* registry,
+                                               iree_string_view_t name,
+                                               iree_string_view_t id);
+
 // Resolves the current recognition registration under the same admission
 // policy. A stream copies request options and accepts continuing normalized PCM
 // with bounded frame credit. The caller owns its result until close; graceful

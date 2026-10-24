@@ -471,13 +471,15 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
           fields[DEFINITION_KIND].value.data, (int)selection->kind.size,
           selection->kind.data);
     }
-    if (selection->version && selection->version != 1) {
+    const uint32_t supported_version =
+        iree_string_view_equal(selection->kind, IREE_SV("speech")) ? 2 : 1;
+    if (selection->version > supported_version) {
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
           "selected service requires %.*s ABI %u; this host implements "
-          "ABI 1 and the unversioned development contract for the selected "
-          "kind",
-          (int)selection->kind.size, selection->kind.data, selection->version);
+          "ABI 1 through %u and the unversioned development contract",
+          (int)selection->kind.size, selection->kind.data, selection->version,
+          supported_version);
     }
     if (!fields[DEFINITION_KIND].value.data) {
       fields[DEFINITION_KIND].value = selection->kind;

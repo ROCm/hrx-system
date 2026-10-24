@@ -8,6 +8,7 @@
 #define LOOM_SERVE_SERVICE_SPEECH_GENERATOR_H_
 
 #include "iree/tokenizer/tokenizer.h"
+#include "loom/serve/media/audio_source.h"
 #include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/runtime/storage/memory.h"
@@ -64,14 +65,32 @@ typedef struct loom_serve_speech_generator_t {
   iree_host_size_t request_capacity;
   // Maximum sum of source work units in one compatible numerical batch.
   uint64_t batch_units;
+  // Bounded prepared voice slots; zero selects source-owned static voice IDs.
+  iree_host_size_t voice_capacity;
   // CPU preparation returns an owned request handle, with no device submission
   // or shared admission mutation. INVALID_ARGUMENT rejects a client request;
   // other failures are terminal. Failure retains no request and returns NULL.
   // row_index is a free service-owned slot below request_capacity and remains
-  // reserved until discard/release consumes the returned handle.
+  // reserved until discard/release consumes the returned handle. voice is the
+  // captured immutable state of a published upload, or NULL for static voices.
+  // Its slot cannot be reused until the invocation is discarded or released.
   iree_status_t (*prepare)(void* self, iree_host_size_t row_index,
                            const loom_serve_speech_request_t* request,
-                           void** out_invocation);
+                           const void* voice, void** out_invocation);
+  // Optional CPU preparation of an upload in a reserved voice slot. Decodes
+  // original audio and invokes model-owned processing once. The returned voice
+  // is immutable CPU metadata; numerical conditioning completes through the
+  // same request/batch lifecycle. Failure retains neither output.
+  // INVALID_ARGUMENT and UNIMPLEMENTED reject the upload without terminating
+  // the model.
+  iree_status_t (*prepare_voice)(void* self, iree_host_size_t row_index,
+                                 iree_host_size_t voice_index,
+                                 const loom_serve_audio_source_t* audio,
+                                 void** out_invocation, void** out_voice);
+  // Releases CPU voice metadata on the owner after its final capture retires.
+  // Device conditioning belongs to the slot and may be replaced by its next
+  // user.
+  void (*release_voice)(void* self, void* voice);
   // Releases an unadmitted request and its admission interest on the owner.
   void (*discard)(void* self, void* invocation);
   // Shared-owner admission of parameters, row backing, and cohort scratch.

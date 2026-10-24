@@ -18,6 +18,8 @@ typedef struct loom_serve_speech_http_consumer_t {
   iree_allocator_t host_allocator;
   // Owner-only claim; cancel relinquishes it without destroying the receipt.
   loom_serve_http_connection_t* connection;
+  // One-time registration produces a JSON receipt only after source release.
+  bool voice_upload;
   // First response publication has committed the HTTP headers. CPU encoding
   // only reads this between publication turns; cancellation never changes it.
   bool header_sent;
@@ -81,6 +83,9 @@ static bool loom_serve_speech_http_credit(void* self) {
 static iree_status_t loom_serve_speech_http_encode(
     void* self, const loom_serve_speech_block_t* block) {
   loom_serve_speech_http_consumer_t* consumer = self;
+  if (consumer->voice_upload) {
+    return iree_ok_status();
+  }
   iree_string_builder_reset(&consumer->response);
   if (!consumer->header_sent && (block->frame_count || block->complete)) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
@@ -93,6 +98,10 @@ static iree_status_t loom_serve_speech_http_publish(void* self,
                                                     bool* out_published) {
   loom_serve_speech_http_consumer_t* consumer = self;
   *out_published = false;
+  if (consumer->voice_upload) {
+    *out_published = true;
+    return iree_ok_status();
+  }
   const iree_string_view_t bytes =
       iree_string_builder_view(&consumer->response);
   if (bytes.size) {
@@ -123,7 +132,21 @@ static iree_status_t loom_serve_speech_http_end(
   iree_status_t status = iree_ok_status();
   if (consumer->connection) {
     if (outcome == LOOM_SERVE_TELEMETRY_COMPLETED) {
-      loom_serve_http_connection_finish(consumer->connection);
+      if (consumer->voice_upload) {
+        status = loom_serve_http_connection_send(
+            consumer->connection,
+            iree_string_builder_view(&consumer->response));
+      }
+      if (iree_status_is_ok(status)) {
+        loom_serve_http_connection_finish(consumer->connection);
+      } else {
+        loom_serve_http_connection_abort(consumer->connection);
+        if (iree_status_is_cancelled(status) ||
+            iree_status_is_unavailable(status)) {
+          iree_status_free(status);
+          status = iree_ok_status();
+        }
+      }
     } else if ((outcome == LOOM_SERVE_TELEMETRY_REJECTED ||
                 outcome == LOOM_SERVE_TELEMETRY_FAILED) &&
                !consumer->header_sent) {
@@ -184,4 +207,45 @@ iree_status_t loom_serve_speech_http_consumer_allocate(
       .end = loom_serve_speech_http_end,
   };
   return iree_ok_status();
+}
+
+iree_status_t loom_serve_speech_http_voice_consumer_allocate(
+    loom_serve_http_connection_t* connection, iree_string_view_t id,
+    iree_allocator_t host_allocator,
+    loom_serve_speech_consumer_t* out_consumer) {
+  *out_consumer = (loom_serve_speech_consumer_t){0};
+  loom_serve_speech_http_consumer_t* consumer = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*consumer),
+                                             (void**)&consumer));
+  consumer->host_allocator = host_allocator;
+  consumer->voice_upload = true;
+  iree_string_builder_initialize(host_allocator, &consumer->response);
+  iree_status_t status = iree_string_builder_append_cstring(
+      &consumer->response,
+      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+      "Cache-Control: no-store\r\nConnection: close\r\n\r\n{\"id\":");
+  if (iree_status_is_ok(status)) {
+    loom_output_stream_t output;
+    loom_output_stream_for_builder(&consumer->response, &output);
+    status = loom_json_write_escaped_string(&output, id);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(&consumer->response, "}");
+  }
+  if (iree_status_is_ok(status)) {
+    consumer->connection = connection;
+    *out_consumer = (loom_serve_speech_consumer_t){
+        .self = consumer,
+        .is_open = loom_serve_speech_http_open,
+        .can_write = loom_serve_speech_http_credit,
+        .encode = loom_serve_speech_http_encode,
+        .publish = loom_serve_speech_http_publish,
+        .cancel = loom_serve_speech_http_cancel,
+        .end = loom_serve_speech_http_end,
+    };
+  } else {
+    iree_string_builder_deinitialize(&consumer->response);
+    iree_allocator_free(host_allocator, consumer);
+  }
+  return status;
 }

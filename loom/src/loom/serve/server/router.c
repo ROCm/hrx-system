@@ -1415,11 +1415,16 @@ static iree_status_t loom_serve_router_accept(
             router->server, connection, 404, "Not Found",
             IREE_SV("model has no HTTP inference endpoint"), output);
       }
-      if (checkpoint && !post &&
-          (state->service.kind == LOOM_SERVE_MODEL_KIND_TEXT ||
-           state->service.kind == LOOM_SERVE_MODEL_KIND_SEQUENCE)) {
+      const bool voice_removal =
+          state->service.kind == LOOM_SERVE_MODEL_KIND_SPEECH &&
+          iree_string_view_equal(request->target,
+                                 IREE_SV("/v1/audio/voices/remove"));
+      if (voice_removal ||
+          (checkpoint && !post &&
+           (state->service.kind == LOOM_SERVE_MODEL_KIND_TEXT ||
+            state->service.kind == LOOM_SERVE_MODEL_KIND_SEQUENCE))) {
         // Deletion releases retained state without opening inference. The
-        // text adapter validates the command before occupying its control slot.
+        // owning modality validates and retires its retained references.
         if (state->phase != LOOM_SERVE_REGISTRATION_READY) {
           return loom_serve_http_response_reject(
               router->server, connection, 404, "Not Found",
@@ -1438,9 +1443,12 @@ static iree_status_t loom_serve_router_accept(
               IREE_SV("model admission holding capacity is full"), output);
         }
         const bool demands_parameters =
-            post && iree_string_view_equal(
-                        request->target,
-                        iree_make_cstring_view(state->service.endpoint));
+            post && (iree_string_view_equal(
+                         request->target,
+                         iree_make_cstring_view(state->service.endpoint)) ||
+                     (state->service.kind == LOOM_SERVE_MODEL_KIND_SPEECH &&
+                      iree_string_view_equal(request->target,
+                                             IREE_SV("/v1/audio/voices"))));
         router->held.values[router->held.count++] =
             (loom_serve_router_held_request_t){connection, request, i,
                                                demands_parameters};

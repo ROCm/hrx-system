@@ -107,8 +107,20 @@ TEST_P(CardConfigurationTest, DirectCardOwnsPresetWithoutReadingPrograms) {
   EXPECT_FALSE(model_.start_drained);
 }
 
+TEST_P(CardConfigurationTest, DirectCardAcceptsEverySupportedAbi) {
+  const int latest = std::string(GetParam()) == "speech" ? 2 : 1;
+  for (int version = 1; version <= latest; ++version) {
+    SCOPED_TRACE(version);
+    IREE_ASSERT_OK(Load(Card(GetParam(), version)));
+    ASSERT_NE(model_.sources.card, nullptr);
+    EXPECT_EQ(loom_model_card_selection(model_.sources.card)->version, version);
+  }
+}
+
 TEST_P(CardConfigurationTest, DirectCardRejectsUnsupportedAbiBeforeProgramIo) {
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED, Load(Card(GetParam(), 2)));
+  const int unsupported = std::string(GetParam()) == "speech" ? 3 : 2;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                        Load(Card(GetParam(), unsupported)));
   EXPECT_EQ(model_.sources.card, nullptr);
   EXPECT_EQ(model_.name.data, nullptr);
 }

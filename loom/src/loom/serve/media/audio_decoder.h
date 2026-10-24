@@ -16,7 +16,9 @@ extern "C" {
 typedef struct loom_serve_audio_decoder_t loom_serve_audio_decoder_t;
 
 // Opens an in-memory WAV, MP3, or FLAC stream, converting to interleaved F32
-// at the requested rate/channel count. The encoded bytes remain borrowed until
+// at the requested rate/channel count. A zero rate or channel count preserves
+// that component of the original geometry, allowing model-owned conversion.
+// The encoded bytes remain borrowed until
 // free. Container metadata selects the input format; filenames are never
 // interpreted. Initialization and reads belong on a CPU worker, not the serving
 // owner. No file access, device IO, or private workers are used. Each decoder
@@ -24,6 +26,12 @@ typedef struct loom_serve_audio_decoder_t loom_serve_audio_decoder_t;
 iree_status_t loom_serve_audio_decoder_allocate(
     iree_const_byte_span_t encoded, uint32_t sample_rate, uint32_t channels,
     iree_allocator_t host_allocator, loom_serve_audio_decoder_t** out_decoder);
+
+// Returns the resolved geometry, including original values requested with zero.
+uint32_t loom_serve_audio_decoder_sample_rate(
+    const loom_serve_audio_decoder_t* decoder);
+uint32_t loom_serve_audio_decoder_channels(
+    const loom_serve_audio_decoder_t* decoder);
 
 // Produces up to frame_capacity whole frames into caller-owned native F32
 // storage of frame_capacity * channels floats. Zero capacity does no work.

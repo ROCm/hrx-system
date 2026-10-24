@@ -11,6 +11,7 @@
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/speech/generator.h"
 #include "loom/serve/service/speech/stream.h"
+#include "loom/serve/service/speech/voice.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -48,6 +49,23 @@ iree_status_t loom_serve_speech_service_allocate(
 iree_status_t loom_serve_speech_service_try_open(
     loom_serve_speech_service_t* service, loom_serve_speech_request_t* request,
     loom_serve_speech_stream_t** out_stream);
+
+// Reserves a unique voice ID and prepares it through the ordinary bounded
+// scheduler. Success moves request and returns a completion handle; OK with
+// NULL is queue pressure and leaves request unchanged. An existing or pending
+// ID returns ALREADY_EXISTS; exhausted voice slots return RESOURCE_EXHAUSTED.
+// The ID becomes usable only after successful completion. Calls use the owner.
+iree_status_t loom_serve_speech_service_try_upload_voice(
+    loom_serve_speech_service_t* service,
+    loom_serve_speech_voice_request_t* request,
+    loom_serve_speech_voice_upload_t** out_upload);
+
+// Hides a published ID immediately. Accepted synthesis requests retain the old
+// voice until retirement, including requests waiting in the host queue. A new
+// upload may reuse the name in a different free slot. Pending uploads are not
+// published voices and cannot be removed; closing their handle cancels them.
+iree_status_t loom_serve_speech_service_remove_voice(
+    loom_serve_speech_service_t* service, iree_string_view_t id);
 
 // POST /v1/audio/speech owns one bounded encoded block per resident request,
 // outside copied carrier sends. Each request's credit independently determines

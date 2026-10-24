@@ -14,6 +14,16 @@ iree_status_t loom_serve_audio_decoder_allocate(
                           "encoded audio input is disabled in this build");
 }
 
+uint32_t loom_serve_audio_decoder_sample_rate(
+    const loom_serve_audio_decoder_t* decoder) {
+  return 0;
+}
+
+uint32_t loom_serve_audio_decoder_channels(
+    const loom_serve_audio_decoder_t* decoder) {
+  return 0;
+}
+
 iree_status_t loom_serve_audio_decoder_read(loom_serve_audio_decoder_t* decoder,
                                             iree_host_size_t frame_capacity,
                                             float* frames,

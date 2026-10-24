@@ -69,8 +69,7 @@ iree_status_t loom_serve_audio_decoder_allocate(
     iree_const_byte_span_t encoded, uint32_t sample_rate, uint32_t channels,
     iree_allocator_t host_allocator, loom_serve_audio_decoder_t** out_decoder) {
   *out_decoder = NULL;
-  if (!encoded.data_length || !sample_rate || !channels ||
-      channels > MA_MAX_CHANNELS) {
+  if (!encoded.data_length || channels > MA_MAX_CHANNELS) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "audio requires nonempty bytes and valid output "
                             "sample rate/channel count");
@@ -97,6 +96,16 @@ iree_status_t loom_serve_audio_decoder_allocate(
     loom_serve_audio_decoder_free(decoder);
   }
   return status;
+}
+
+uint32_t loom_serve_audio_decoder_sample_rate(
+    const loom_serve_audio_decoder_t* decoder) {
+  return decoder->decoder.outputSampleRate;
+}
+
+uint32_t loom_serve_audio_decoder_channels(
+    const loom_serve_audio_decoder_t* decoder) {
+  return decoder->decoder.outputChannels;
 }
 
 iree_status_t loom_serve_audio_decoder_read(loom_serve_audio_decoder_t* decoder,

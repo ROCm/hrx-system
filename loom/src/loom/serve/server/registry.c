@@ -252,6 +252,39 @@ iree_status_t loom_serve_registry_try_open_speech(
   return service->try_open_speech(service->self, request, out_stream);
 }
 
+iree_status_t loom_serve_registry_try_upload_voice(
+    loom_serve_registry_t* registry, iree_string_view_t name,
+    loom_serve_speech_voice_request_t* request,
+    loom_serve_speech_voice_upload_t** out_upload) {
+  *out_upload = NULL;
+  loom_serve_service_t* service = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
+      registry, name, 1u << LOOM_SERVE_MODEL_KIND_SPEECH, "voice upload", false,
+      &service));
+  if (!service) {
+    return iree_ok_status();
+  }
+  if (!service->try_upload_voice) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "speech model does not support voice uploads");
+  }
+  return service->try_upload_voice(service->self, request, out_upload);
+}
+
+iree_status_t loom_serve_registry_remove_voice(loom_serve_registry_t* registry,
+                                               iree_string_view_t name,
+                                               iree_string_view_t id) {
+  loom_serve_service_t* service = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
+      registry, name, 1u << LOOM_SERVE_MODEL_KIND_SPEECH, "voice removal", true,
+      &service));
+  if (!service->remove_voice) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "speech model does not support voice uploads");
+  }
+  return service->remove_voice(service->self, id);
+}
+
 iree_status_t loom_serve_registry_try_open_recognition(
     loom_serve_registry_t* registry, iree_string_view_t name,
     const loom_serve_recognition_request_t* request,
