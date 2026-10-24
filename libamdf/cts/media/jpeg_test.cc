@@ -293,11 +293,15 @@ class MediaJpegTest : public ::testing::TestWithParam<Shape> {
                    uint32_t layers, amdf_media_image_t** out) {
     auto description = channel.configuration.output.description;
     description.array_layer_count = layers;
+    amdf_media_image_requirements_t requirements = {};
+    ASSERT_EQ(media_->device_query_image_requirements(
+                  channel.device, &description, &requirements),
+              AMDF_STATUS_OK);
     const amdf_media_image_create_info_t create = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_IMAGE_CREATE_INFO,
         .structure_size = sizeof(create),
         .memory = memory,
-        .description = description,
+        .requirements = requirements,
         .byte_offset = offset,
     };
     ASSERT_EQ(media_->image_create(channel.device, &create, out),

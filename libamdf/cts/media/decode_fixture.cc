@@ -168,7 +168,7 @@ void MediaDecodeTest::CreateFrames(
       .type = AMDF_STRUCTURE_TYPE_MEDIA_IMAGE_CREATE_INFO,
       .structure_size = sizeof(create),
       .memory = memory->memory,
-      .description = description,
+      .requirements = array,
       .byte_offset = 256,
   };
   ASSERT_EQ(media_->image_create(device_, &create, image), AMDF_STATUS_OK);

@@ -630,6 +630,10 @@ void MediaDecodeInteropTest::CreateImage(
     amdf_memory_t* memory, uint64_t offset,
     const amdf_media_image_description_t& description,
     amdf_media_image_t** out_image) {
+  amdf_media_image_requirements_t requirements = {};
+  ASSERT_EQ(media_->device_query_image_requirements(media_device_, &description,
+                                                    &requirements),
+            AMDF_STATUS_OK);
   const uint32_t gpu_access = 1;
   const bool output =
       (description.roles & AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT) != 0;
@@ -637,7 +641,7 @@ void MediaDecodeInteropTest::CreateImage(
       .type = AMDF_STRUCTURE_TYPE_MEDIA_IMAGE_CREATE_INFO,
       .structure_size = sizeof(create),
       .memory = memory,
-      .description = description,
+      .requirements = requirements,
       .byte_offset = offset,
       .layout_access_count = output ? 1u : 0u,
       .layout_access_ordinals = output ? &gpu_access : nullptr,

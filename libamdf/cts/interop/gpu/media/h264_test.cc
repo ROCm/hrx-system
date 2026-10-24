@@ -195,7 +195,7 @@ TEST_F(MediaH264InteropTest, PlansArrayPlacementBeforeAllocatingItsBacking) {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_IMAGE_CREATE_INFO,
         .structure_size = sizeof(invalid),
         .memory = memory,
-        .description = description,
+        .requirements = requirements,
         .byte_offset = offset,
         .layout_access_count = 2,
         .layout_access_ordinals = duplicate_accesses,

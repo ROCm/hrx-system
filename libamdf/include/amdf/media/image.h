@@ -85,8 +85,10 @@ typedef struct amdf_media_image_create_info_t {
   amdf_memory_t* memory;
   /// Access ordinal naming the constructing media device in memory.
   uint32_t media_access_ordinal;
-  /// Immutable shape and uses to establish exactly.
-  amdf_media_image_description_t description;
+  /// Exact provider-returned placement contract to retain. Configuration
+  /// admission may include codec-private reconstruction state beyond the
+  /// codec-neutral pixel layout reported by an image-requirements query.
+  amdf_media_image_requirements_t requirements;
   /// Placement relative to the memory object's logical byte zero.
   uint64_t byte_offset;
   /// Number of additional memory accesses needing a qualified native layout.

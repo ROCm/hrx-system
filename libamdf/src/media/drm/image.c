@@ -64,9 +64,14 @@ amdf_status_t AMDF_CALL amdf_media_drm_image_create(
     amdf_media_image_t** out_image) {
   amdf_media_image_requirements_t requirements;
   amdf_status_t status = amdf_media_drm_image_requirements(
-      device, &create_info->description, &requirements);
+      device, &create_info->requirements.description, &requirements);
   if (!amdf_status_is_ok(status)) {
     return status;
+  }
+  if (create_info->requirements.byte_length != requirements.byte_length ||
+      create_info->requirements.byte_offset_alignment !=
+          requirements.byte_offset_alignment) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
   if (create_info->byte_offset % requirements.byte_offset_alignment != 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
