@@ -312,7 +312,7 @@ def _filter_inputs(
     )
 
     _throw_linked_but_not_exported_errors(linked_statically_but_not_exported)
-    return (exports, linker_inputs, curr_link_once_static_libs_set.keys(), precompiled_only_dynamic_libraries)
+    return (exports, linker_inputs, curr_link_once_static_libs_set.keys(), precompiled_only_dynamic_libraries, dependency_linker_inputs)
 
 def _same_package_or_above(label_a, label_b):
     if label_a.workspace_name != label_b.workspace_name:
@@ -364,7 +364,7 @@ def _cc_shared_library_impl(ctx):
 
     link_once_static_libs_map = _build_link_once_static_libs_map(merged_cc_shared_library_infos_list)
 
-    (exports, linker_inputs, curr_link_once_static_libs_set, precompiled_only_dynamic_libraries) = _filter_inputs(
+    (exports, linker_inputs, curr_link_once_static_libs_set, precompiled_only_dynamic_libraries, public_linker_inputs) = _filter_inputs(
         ctx,
         deps,
         exports_map,
@@ -500,6 +500,13 @@ def _cc_shared_library_impl(ctx):
             linker_input = cc_common.create_linker_input(
                 owner = ctx.label,
                 libraries = depset([linking_outputs.library_to_link] + precompiled_only_dynamic_libraries),
+                # CcInfo link options are transitive usage requirements. Inline
+                # header code still needs them after its implementation owner
+                # becomes dynamic. Preserve their declared inputs as well;
+                # neither linkstamps nor this DSO's private user_link_flags and
+                # additional_linker_inputs belong in a consumer's link.
+                user_link_flags = [flag for input in public_linker_inputs for flag in input.user_link_flags],
+                additional_inputs = depset([file for input in public_linker_inputs for file in input.additional_inputs]),
             ),
         ),
     ]
@@ -518,6 +525,8 @@ iree_cc_shared_library = rule(
 Direct deps are whole-archived without recreating their compiler backends or
 discarding linkstamps. Export ownership, duplicate-link checks, ordering and
 consumer providers follow rules_cc, allowing ordinary cc_binary/cc_test users.
+Transitive CcInfo link options and their inputs remain public usage requirements;
+user_link_flags and additional_linker_inputs affect only this shared library.
 """,
     attrs = {
         "additional_linker_inputs": attr.label_list(allow_files = True, doc = "Declared linker scripts and other non-code inputs."),
