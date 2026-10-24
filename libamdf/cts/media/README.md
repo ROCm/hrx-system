@@ -52,7 +52,61 @@ H264 and HEVC use the same resolved syntax and independent sample fingerprints
 as the [GPU interop corpora](../interop/gpu/media/README.md). The Linux cases
 exercise native image identities and direct plane operands with identical
 visible results, explicit session BEGIN/END, bounded recording reuse, and
-rejected preparation preserving the prior executable recording.
+rejected preparation preserving the prior executable recording. H264 Main
+drives the reordered-reference and storage-mode matrix. Separate constrained-
+baseline and High IDRs execute each additional advertised syntax profile and
+require exact visible pixels from native image storage.
+
+### H264 profile fixture provenance
+
+`h264_constrained_baseline.slice` and `h264_high.slice` are single 256x256 IDR
+pictures encoded with libx264 through FFmpeg 5.1.9. The source is planar
+YUV420. For plane-local column `C` and row `R`, before the final
+modulo-and-offset step:
+
+```text
+Y = 17 + 3*C + 5*R + 29*((C//8) xor (R//8))
+U = 31 + 7*C + 11*R + 13*((C//4) xor (R//4))
+V = 47 + 5*C + 9*R + 17*((C//4) xor (R//4))
+```
+
+Y uses `(value % 220) + 18`; U and V use `(value % 192) + 32`. Encode the
+source (SHA-256
+`c65da6ee01843331d24b645023c408a5667ae986e5751e007918933df510a9a3`)
+at one frame per second, QP 20, level 1.3, and the `veryslow` preset:
+
+```sh
+ffmpeg -f rawvideo -pix_fmt yuv420p -s:v 256x256 -r 1 -i source.yuv \
+  -frames:v 1 -c:v libx264 -preset veryslow -qp 20 \
+  -profile:v baseline -level:v 1.3 \
+  -x264-params keyint=1:min-keyint=1:scenecut=0:bframes=0:ref=1:cabac=0:8x8dct=0:repeat-headers=1:aud=0 \
+  -f h264 baseline.h264
+ffmpeg -f rawvideo -pix_fmt yuv420p -s:v 256x256 -r 1 -i source.yuv \
+  -frames:v 1 -c:v libx264 -preset veryslow -qp 20 \
+  -profile:v high -level:v 1.3 \
+  -x264-params keyint=1:min-keyint=1:scenecut=0:bframes=0:ref=1:cabac=1:8x8dct=1:cqm=flat:repeat-headers=1:aud=0 \
+  -f h264 high.h264
+```
+
+FFmpeg's native H264 decoder produces the independent planar reconstruction:
+
+```sh
+ffmpeg -c:v h264 -i INPUT.h264 -frames:v 1 -pix_fmt yuv420p \
+  -f rawvideo decoded.yuv
+```
+
+The CTS fixture removes the SPS, PPS, and encoder-information SEI, retains the
+three-byte Annex B start code and complete IDR NAL, and pads the native input
+extent to 128 bytes. The corresponding public structures carry the fully
+resolved SPS/PPS fields. The pixel oracle interleaves the decoder's independent
+U and V planes into declared NV12 storage before hashing every raster pixel's
+Y/U/V bytes.
+
+Artifact | Constrained baseline SHA-256 | High SHA-256
+--- | --- | ---
+Complete Annex B stream | `99dcbe526457c53740c399261cd28c61c1a9d346caa18d290c6a5e75011ea7ae` | `237b3c81b5dd43dcd6e6d2c0242eae143b6eae39298c8b1594eb988f6dcc33a7`
+Planar decoded oracle | `7cfbddb0966309cb1c5a2e7610046443cddee054165ff934ec64fba314c1b4dc` | `c831580ace52f50e74acc56118696bda6c5441924a9550c891bc541a7059a1d9`
+Embedded padded IDR | `5fc16e59fd5072eb615e0dc98db805013edabe5a677ec4d241b3f2356bca2e60` | `576b533a8da69f016282a5e6bcfac436ae4d8aab11438f9cdca1cafa962d69d9`
 
 The VP9 corpus adds profile 0/NV12 and profile 2/P010, each with twelve 520×200
 pictures. Two tile columns and partial bottom blocks exercise native reference

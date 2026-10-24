@@ -1,16 +1,19 @@
 # Native media and GPU ownership witness
 
 The H264, HEVC, VP9, and AV1 corpora exercise media and compute through runtime-loaded
-libamdf tables. H264's twelve pictures include seven B pictures, three simultaneously live
-short-term references, and display order different from decode order. A second
-case repeats the stream through 32 pictures using four recording owners, two
-decoded output images, four reconstructed reference images, and fixed input,
-feedback, and GPU result backing. The application supplies every reference,
-placement, recording slot, and native queue dependency. HEVC adds Main/NV12 and
-Main10/P010, four live references, five reconstructed slots, and nonuniform
-scaling lists. Each picture keeps its codec slot until its last reference use;
-reordering the reference list never renumbers that slot. The Main10 envelope
-also exercises compatible eight-bit syntax with NV12 storage.
+libamdf tables. H264's twelve Main pictures include seven B pictures, three
+simultaneously live short-term references, and display order different from
+decode order. A second case repeats the stream through 32 pictures using four
+recording owners, two decoded output images, four reconstructed reference
+images, and fixed input, feedback, and GPU result backing. Profile-specific
+constrained-baseline and High IDRs close the advertised decode matrix with
+[independent exact-pixel oracles](../../../media/README.md#h264-profile-fixture-provenance).
+The application supplies every reference, placement, recording slot, and native
+queue dependency. HEVC adds Main/NV12 and Main10/P010, four live references,
+five reconstructed slots, and nonuniform scaling lists. Each picture keeps its
+codec slot until its last reference use; reordering the reference list never
+renumbers that slot. The Main10 envelope also exercises compatible eight-bit
+syntax with NV12 storage.
 
 VP9's [shared corpus](../../../media/README.md#vp9-fixture-provenance) adds
 eight-bit profile 0 and ten-bit profile 2, adaptive entropy contexts, segmentation

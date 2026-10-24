@@ -87,6 +87,19 @@ iree_c_embed_data(
     identifier = "amdf_cts_media_reference_main",
 )
 
+iree_c_embed_data(
+    name = "h264_profile_inputs",
+    testonly = True,
+    srcs = [
+        "h264_constrained_baseline.slice",
+        "h264_high.slice",
+    ],
+    c_file_output = "h264_profile_inputs.c",
+    flatten = True,
+    h_file_output = "h264_profile_inputs.h",
+    identifier = "amdf_cts_media_h264_profile_inputs",
+)
+
 amdf_cc_library(
     name = "h264_fixture",
     testonly = True,
@@ -95,6 +108,18 @@ amdf_cc_library(
     visibility = ["//libamdf/cts/interop/gpu/media:__pkg__"],
     deps = [
         ":reference_main",
+        "//third_party:google_test",
+    ],
+)
+
+amdf_cc_library(
+    name = "h264_profile_fixture",
+    testonly = True,
+    srcs = ["h264_profile_fixture.cc"],
+    hdrs = ["h264_profile_fixture.h"],
+    visibility = ["//libamdf/cts/interop/gpu/media:__pkg__"],
+    deps = [
+        ":h264_profile_inputs",
         "//third_party:google_test",
     ],
 )
@@ -127,6 +152,7 @@ amdf_cts_test_suite(
     deps = [
         ":decode_fixture",
         ":h264_fixture",
+        ":h264_profile_fixture",
         "//third_party:google_test",
     ],
 )

@@ -5,10 +5,12 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cstring>
+#include <string>
 #include <utility>
 
 #include "libamdf/cts/media/decode_fixture.h"
 #include "libamdf/cts/media/h264_fixture.h"
+#include "libamdf/cts/media/h264_profile_fixture.h"
 
 namespace {
 
@@ -93,5 +95,50 @@ INSTANTIATE_TEST_SUITE_P(NativeAndLinear, MediaH264Test, ::testing::Bool(),
                          [](const ::testing::TestParamInfo<bool>& parameter) {
                            return parameter.param ? "Planes" : "Image";
                          });
+
+struct H264ProfileCase {
+  // Exact admitted syntax profile represented by the compressed picture.
+  amdf_media_h264_profile_t profile;
+  // Stable test suffix describing the syntax mechanism under test.
+  const char* name;
+};
+
+class MediaH264ProfileTest
+    : public amdf::cts::media::MediaDecodeTest,
+      public ::testing::WithParamInterface<H264ProfileCase> {
+ protected:
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(amdf::cts::media::LoadH264ProfileFixture(
+        GetParam().profile, &fixture_));
+    ASSERT_NO_FATAL_FAILURE(
+        SetUpMedia({AMDF_MEDIA_CODEC_H264, AMDF_MEDIA_DIRECTION_DECODE,
+                    AMDF_MEDIA_PIXEL_FORMAT_NV12, 256, 256, 1},
+                   &fixture_.configuration, false));
+    if (IsSkipped()) {
+      return;
+    }
+    input_ = {fixture_.bytes, fixture_.byte_length, 0, &fixture_.picture,
+              fixture_.pixel_hash};
+  }
+
+  // One independently encoded profile-specific IDR and its parsed syntax.
+  amdf::cts::media::H264ProfileFixture fixture_ = {};
+  // Borrowed submission view reused only after native retirement.
+  amdf::cts::media::DecodeInput input_ = {};
+};
+
+TEST_P(MediaH264ProfileTest, DecodesProfileSpecificSyntaxWithExactPixels) {
+  ASSERT_NO_FATAL_FAILURE(RunPictures(std::span(&input_, 1), 4));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AdvertisedProfiles, MediaH264ProfileTest,
+    ::testing::Values(
+        H264ProfileCase{AMDF_MEDIA_H264_PROFILE_CONSTRAINED_BASELINE,
+                        "ConstrainedBaseline"},
+        H264ProfileCase{AMDF_MEDIA_H264_PROFILE_HIGH, "High"}),
+    [](const ::testing::TestParamInfo<H264ProfileCase>& parameter) {
+      return std::string(parameter.param.name);
+    });
 
 }  // namespace

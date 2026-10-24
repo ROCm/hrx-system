@@ -156,6 +156,23 @@ iree_c_embed_data(
   PUBLIC
 )
 
+iree_c_embed_data(
+  NAME
+    h264_profile_inputs
+  SRCS
+    "h264_constrained_baseline.slice"
+    "h264_high.slice"
+  C_FILE_OUTPUT
+    "h264_profile_inputs.c"
+  H_FILE_OUTPUT
+    "h264_profile_inputs.h"
+  IDENTIFIER
+    "amdf_cts_media_h264_profile_inputs"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
@@ -166,6 +183,23 @@ iree_cc_library(
     "h264_fixture.cc"
   DEPS
     ::reference_main
+    amdf::headers
+    iree::third_party::google_test
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    h264_profile_fixture
+  HDRS
+    "h264_profile_fixture.h"
+  SRCS
+    "h264_profile_fixture.cc"
+  DEPS
+    ::h264_profile_inputs
     amdf::headers
     iree::third_party::google_test
   TESTONLY
@@ -201,6 +235,7 @@ iree_cc_library(
   DEPS
     ::decode_fixture
     ::h264_fixture
+    ::h264_profile_fixture
     amdf::headers
     iree::third_party::google_test
   TESTONLY

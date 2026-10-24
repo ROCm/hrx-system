@@ -142,6 +142,7 @@ amdf_cts_test_suite(
     deps = [
         ":decode_fixture",
         "//libamdf/cts/media:h264_fixture",
+        "//libamdf/cts/media:h264_profile_fixture",
         "//third_party:google_test",
     ],
 )

@@ -176,6 +176,7 @@ iree_cc_library(
     amdf::headers
     iree::third_party::google_test
     libamdf::cts::media::h264_fixture
+    libamdf::cts::media::h264_profile_fixture
   TESTONLY
   ALWAYSLINK
   PUBLIC
