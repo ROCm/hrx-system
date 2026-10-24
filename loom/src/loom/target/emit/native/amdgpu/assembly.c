@@ -2143,10 +2143,14 @@ static iree_status_t loom_amdgpu_emit_move_range(
   for (iree_host_size_t i = 0; i < move_range.count; ++i) {
     const loom_low_move_t* move =
         &context->allocation->moves[move_range.start + i];
-    IREE_RETURN_IF_ERROR(loom_amdgpu_copy_mnemonic(
-        context->schedule->target.descriptor_set,
-        move->destination.descriptor_reg_class_id,
-        move->source.descriptor_reg_class_id, &move_state.mnemonic));
+    if (move->kind == LOOM_LOW_MOVE_KIND_EXCHANGE) {
+      move_state.mnemonic = IREE_SV("v_swap_b32");
+    } else {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_copy_mnemonic(
+          context->schedule->target.descriptor_set,
+          move->destination.descriptor_reg_class_id,
+          move->source.descriptor_reg_class_id, &move_state.mnemonic));
+    }
     IREE_RETURN_IF_ERROR(loom_amdgpu_append_move(
         &move_state, &move->destination, &move->source));
     IREE_RETURN_IF_ERROR(loom_amdgpu_append_wait_states_after_instruction(

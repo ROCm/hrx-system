@@ -1,0 +1,627 @@
+// Incoming edges exchange two live words across CDNA and RDNA profiles.
+// High-bank exchanges select both MODE slots and restore the incoming MODE.
+// RUN: emit amdgpu-assembly @exchange strategy=source fixed=%first:physical_register:0:1 fixed=%second:physical_register:255:1 fixed=%carried_first:physical_register:255:1 fixed=%carried_second:physical_register:0:1
+
+amdgpu.target<gfx90a> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.cdna2.core>(@target) @exchange(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  low.br ^next(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>)
+^next(%carried_first: reg<amdgpu.vgpr>, %carried_second: reg<amdgpu.vgpr>):
+  return %carried_first, %carried_second
+}
+
+// ----
+  v_swap_b32 v0, v255
+.Lbb1:
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @exchange strategy=source fixed=%first:physical_register:0:1 fixed=%second:physical_register:255:1 fixed=%carried_first:physical_register:255:1 fixed=%carried_second:physical_register:0:1
+
+amdgpu.target<gfx90a> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.cdna2.core>(@target) @exchange(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  low.br ^next(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>)
+^next(%carried_first: reg<amdgpu.vgpr>, %carried_second: reg<amdgpu.vgpr>):
+  return %carried_first, %carried_second
+}
+
+// ----
+0x7E00A3FF
+0xBF810000
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange strategy=source fixed=%first:physical_register:0:1 fixed=%second:physical_register:255:1 fixed=%carried_first:physical_register:255:1 fixed=%carried_second:physical_register:0:1
+
+amdgpu.target<gfx942> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.cdna3.core>(@target) @exchange(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  low.br ^next(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>)
+^next(%carried_first: reg<amdgpu.vgpr>, %carried_second: reg<amdgpu.vgpr>):
+  return %carried_first, %carried_second
+}
+
+// ----
+  v_swap_b32 v0, v255
+.Lbb1:
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @exchange strategy=source fixed=%first:physical_register:0:1 fixed=%second:physical_register:255:1 fixed=%carried_first:physical_register:255:1 fixed=%carried_second:physical_register:0:1
+
+amdgpu.target<gfx942> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.cdna3.core>(@target) @exchange(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  low.br ^next(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>)
+^next(%carried_first: reg<amdgpu.vgpr>, %carried_second: reg<amdgpu.vgpr>):
+  return %carried_first, %carried_second
+}
+
+// ----
+0x7E00A3FF
+0xBF810000
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange strategy=source fixed=%first:physical_register:0:1 fixed=%second:physical_register:255:1 fixed=%carried_first:physical_register:255:1 fixed=%carried_second:physical_register:0:1
+
+amdgpu.target<gfx950> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.cdna4.core>(@target) @exchange(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  low.br ^next(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>)
+^next(%carried_first: reg<amdgpu.vgpr>, %carried_second: reg<amdgpu.vgpr>):
+  return %carried_first, %carried_second
+}
+
+// ----
+  v_swap_b32 v0, v255
+.Lbb1:
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @exchange strategy=source fixed=%first:physical_register:0:1 fixed=%second:physical_register:255:1 fixed=%carried_first:physical_register:255:1 fixed=%carried_second:physical_register:0:1
+
+amdgpu.target<gfx950> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.cdna4.core>(@target) @exchange(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  low.br ^next(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>)
+^next(%carried_first: reg<amdgpu.vgpr>, %carried_second: reg<amdgpu.vgpr>):
+  return %carried_first, %carried_second
+}
+
+// ----
+0x7E00A3FF
+0xBF810000
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange strategy=source fixed=%first:physical_register:0:1 fixed=%second:physical_register:255:1 fixed=%carried_first:physical_register:255:1 fixed=%carried_second:physical_register:0:1
+
+amdgpu.target<gfx1100> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @exchange(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  low.br ^next(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>)
+^next(%carried_first: reg<amdgpu.vgpr>, %carried_second: reg<amdgpu.vgpr>):
+  return %carried_first, %carried_second
+}
+
+// ----
+  v_swap_b32 v0, v255
+.Lbb1:
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @exchange strategy=source fixed=%first:physical_register:0:1 fixed=%second:physical_register:255:1 fixed=%carried_first:physical_register:255:1 fixed=%carried_second:physical_register:0:1
+
+amdgpu.target<gfx1100> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @exchange(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  low.br ^next(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>)
+^next(%carried_first: reg<amdgpu.vgpr>, %carried_second: reg<amdgpu.vgpr>):
+  return %carried_first, %carried_second
+}
+
+// ----
+0x7E00CBFF
+0xBFB00000
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange strategy=source fixed=%first:physical_register:0:1 fixed=%second:physical_register:255:1 fixed=%carried_first:physical_register:255:1 fixed=%carried_second:physical_register:0:1
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @exchange(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  low.br ^next(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>)
+^next(%carried_first: reg<amdgpu.vgpr>, %carried_second: reg<amdgpu.vgpr>):
+  return %carried_first, %carried_second
+}
+
+// ----
+  v_swap_b32 v0, v255
+.Lbb1:
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @exchange strategy=source fixed=%first:physical_register:0:1 fixed=%second:physical_register:255:1 fixed=%carried_first:physical_register:255:1 fixed=%carried_second:physical_register:0:1
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3_5.core>(@target) @exchange(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  low.br ^next(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>)
+^next(%carried_first: reg<amdgpu.vgpr>, %carried_second: reg<amdgpu.vgpr>):
+  return %carried_first, %carried_second
+}
+
+// ----
+0x7E00CBFF
+0xBFB00000
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange strategy=source fixed=%first:physical_register:0:1 fixed=%second:physical_register:255:1 fixed=%carried_first:physical_register:255:1 fixed=%carried_second:physical_register:0:1
+
+amdgpu.target<gfx1200> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna4.core>(@target) @exchange(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  low.br ^next(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>)
+^next(%carried_first: reg<amdgpu.vgpr>, %carried_second: reg<amdgpu.vgpr>):
+  return %carried_first, %carried_second
+}
+
+// ----
+  v_swap_b32 v0, v255
+.Lbb1:
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @exchange strategy=source fixed=%first:physical_register:0:1 fixed=%second:physical_register:255:1 fixed=%carried_first:physical_register:255:1 fixed=%carried_second:physical_register:0:1
+
+amdgpu.target<gfx1200> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna4.core>(@target) @exchange(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  low.br ^next(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>)
+^next(%carried_first: reg<amdgpu.vgpr>, %carried_second: reg<amdgpu.vgpr>):
+  return %carried_first, %carried_second
+}
+
+// ----
+0x7E00CBFF
+0xBFB00000
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange strategy=source fixed=%first:physical_register:255:1 fixed=%second:physical_register:768:1 fixed=%carried_first:physical_register:768:1 fixed=%carried_second:physical_register:255:1
+
+amdgpu.target<gfx1250> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @exchange(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  low.br ^next(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>)
+^next(%carried_first: reg<amdgpu.vgpr>, %carried_second: reg<amdgpu.vgpr>):
+  return %carried_first, %carried_second
+}
+
+// ----
+  s_set_vgpr_msb 3
+  v_swap_b32 v255, v0
+  s_set_vgpr_msb 768
+.Lbb1:
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @exchange strategy=source fixed=%first:physical_register:255:1 fixed=%second:physical_register:768:1 fixed=%carried_first:physical_register:768:1 fixed=%carried_second:physical_register:255:1
+
+amdgpu.target<gfx1250> @target {subgroup_size = 32}
+
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @exchange(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  low.br ^next(%first: reg<amdgpu.vgpr>, %second: reg<amdgpu.vgpr>)
+^next(%carried_first: reg<amdgpu.vgpr>, %carried_second: reg<amdgpu.vgpr>):
+  return %carried_first, %carried_second
+}
+
+// ----
+0xBF860003
+0x7FFECB00
+0xBF860300
+0xBFB00000
+
+// ====
+
+// RUN: emit amdgpu-assembly @saturated_bank strategy=source fixed=%left:physical_register:0:4 fixed=%right:physical_register:4:4 fixed=%pressure:physical_register:8:248 fixed=%result:physical_register:0:8
+
+amdgpu.target<gfx1151> @target {subgroup_size = 32}
+
+// All 256 registers are live. Four disjoint cycles need no scratch register.
+low.func.def target<amdgpu.rdna3_5.core>(@target) @saturated_bank(%left: reg<amdgpu.vgpr x4>, %right: reg<amdgpu.vgpr x4>, %pressure: reg<amdgpu.vgpr x248>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x248>) asm {
+  %result = concat(%right, %left) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  return %result, %pressure
+}
+
+// ----
+  v_swap_b32 v4, v0
+  v_swap_b32 v5, v1
+  v_swap_b32 v6, v2
+  v_swap_b32 v7, v3
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_dependencies strategy=source fixed=%fresh:physical_register:0:1 fixed=%other:physical_register:1:1 fixed=%result:physical_register:0:2
+
+amdgpu.target<gfx1151> @target {subgroup_size = 32}
+
+// Each input can carry a pending VALU result, and either output can be read
+// immediately. Both results belong to the same native issue.
+low.func.def target<amdgpu.rdna3_5.core>(@target) @exchange_dependencies(%input: reg<amdgpu.vgpr>, %other: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+  %fresh = v_add_f32 %input, %input
+  %result = concat(%other, %fresh) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %selected = slice %result[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %doubled = v_add_f32 %selected, %selected
+  return %doubled, %result
+}
+
+// ----
+  v_add_f32 v0, v0, v0
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+  v_swap_b32 v1, v0
+  v_add_f32 v3, v0, v0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_dependencies strategy=source fixed=%fresh:physical_register:0:1 fixed=%other:physical_register:1:1 fixed=%result:physical_register:0:2
+
+amdgpu.target<gfx1151> @target {subgroup_size = 32}
+
+// Each input can carry a pending VALU result, and either output can be read
+// immediately. Both results belong to the same native issue.
+low.func.def target<amdgpu.rdna3_5.core>(@target) @exchange_dependencies(%input: reg<amdgpu.vgpr>, %other: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+  %fresh = v_add_f32 %input, %input
+  %result = concat(%other, %fresh) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %selected = slice %result[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %doubled = v_add_f32 %selected, %selected
+  return %doubled, %result
+}
+
+// ----
+  v_add_f32 v0, v0, v0
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+  v_swap_b32 v1, v0
+  v_add_f32 v3, v1, v1
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_dependencies strategy=source fixed=%fresh:physical_register:1:1 fixed=%other:physical_register:0:1 fixed=%result:physical_register:0:2
+
+amdgpu.target<gfx1151> @target {subgroup_size = 32}
+
+// Each input can carry a pending VALU result, and either output can be read
+// immediately. Both results belong to the same native issue.
+low.func.def target<amdgpu.rdna3_5.core>(@target) @exchange_dependencies(%input: reg<amdgpu.vgpr>, %other: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+  %fresh = v_add_f32 %input, %input
+  %result = concat(%fresh, %other) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %selected = slice %result[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %doubled = v_add_f32 %selected, %selected
+  return %doubled, %result
+}
+
+// ----
+  v_add_f32 v1, v1, v1
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+  v_swap_b32 v1, v0
+  v_add_f32 v2, v0, v0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_dependencies strategy=source fixed=%fresh:physical_register:1:1 fixed=%other:physical_register:0:1 fixed=%result:physical_register:0:2
+
+amdgpu.target<gfx1151> @target {subgroup_size = 32}
+
+// Each input can carry a pending VALU result, and either output can be read
+// immediately. Both results belong to the same native issue.
+low.func.def target<amdgpu.rdna3_5.core>(@target) @exchange_dependencies(%input: reg<amdgpu.vgpr>, %other: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+  %fresh = v_add_f32 %input, %input
+  %result = concat(%fresh, %other) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %selected = slice %result[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %doubled = v_add_f32 %selected, %selected
+  return %doubled, %result
+}
+
+// ----
+  v_add_f32 v1, v1, v1
+  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
+  v_swap_b32 v1, v0
+  v_add_f32 v2, v1, v1
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_load_result strategy=source fixed=%address:physical_register:2:1 fixed=%loaded:physical_register:0:1 fixed=%other:physical_register:1:1 fixed=%result:physical_register:0:2
+
+amdgpu.target<gfx1250> @target {subgroup_size = 32}
+
+// Either exchange read can consume an outstanding asynchronous result.
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @exchange_load_result(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %other: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+  %loaded = global_load_b32_saddr %address, %base
+  %result = concat(%other, %loaded) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+// ----
+  global_load_b32 v0, v2, s[0:1] offset:0
+  s_wait_loadcnt loadcnt(0)
+  v_swap_b32 v1, v0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_load_result strategy=source fixed=%address:physical_register:2:1 fixed=%loaded:physical_register:1:1 fixed=%other:physical_register:0:1 fixed=%result:physical_register:0:2
+
+amdgpu.target<gfx1250> @target {subgroup_size = 32}
+
+// Either exchange read can consume an outstanding asynchronous result.
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @exchange_load_result(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %other: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+  %loaded = global_load_b32_saddr %address, %base
+  %result = concat(%loaded, %other) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+// ----
+  global_load_b32 v1, v2, s[0:1] offset:0
+  s_wait_loadcnt loadcnt(0)
+  v_swap_b32 v1, v0
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_store_source strategy=source fixed=%stored:physical_register:0:1 fixed=%other:physical_register:1:1 fixed=%result:physical_register:0:2
+
+amdgpu.target<gfx1250> @target {subgroup_size = 32}
+
+// Both exchange writes honor an outstanding store's source lease.
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @exchange_store_source(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %stored: reg<amdgpu.vgpr>, %other: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+  global_store_b32_saddr %address, %stored, %base
+  %result = concat(%other, %stored) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+// ----
+  global_store_b32 v2, v0, s[0:1] offset:0
+  s_wait_xcnt xcnt(0)
+  v_swap_b32 v1, v0
+  s_wait_storecnt storecnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_store_source strategy=source fixed=%stored:physical_register:1:1 fixed=%other:physical_register:0:1 fixed=%result:physical_register:0:2
+
+amdgpu.target<gfx1250> @target {subgroup_size = 32}
+
+// Both exchange writes honor an outstanding store's source lease.
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @exchange_store_source(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %stored: reg<amdgpu.vgpr>, %other: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+  global_store_b32_saddr %address, %stored, %base
+  %result = concat(%stored, %other) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %result
+}
+
+// ----
+  global_store_b32 v2, v1, s[0:1] offset:0
+  s_wait_xcnt xcnt(0)
+  v_swap_b32 v1, v0
+  s_wait_storecnt storecnt(0)
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_matrix_result strategy=source fixed=%lhs:physical_register:8:1 fixed=%rhs:physical_register:9:1 fixed=%seed:physical_register:0:4 fixed=%matrix:physical_register:0:4 fixed=%other:physical_register:4:4 fixed=%tuple:physical_register:0:8
+
+amdgpu.target<gfx90a> @target
+
+// Either exchange input can consume a pending MFMA result.
+low.func.def target<amdgpu.cdna2.core>(@target) @exchange_matrix_result(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr x4>, %other: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x8>) asm {
+  %matrix = v_mfma_f32_16x16x4f32 %lhs, %rhs, %seed
+  %tuple = concat(%other, %matrix) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  return %tuple
+}
+
+// ----
+  v_mfma_f32_16x16x4f32 v[0:3], v8, v9, v[0:3]
+  s_nop 10
+  v_swap_b32 v4, v0
+  v_swap_b32 v5, v1
+  v_swap_b32 v6, v2
+  v_swap_b32 v7, v3
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_matrix_result strategy=source fixed=%lhs:physical_register:8:1 fixed=%rhs:physical_register:9:1 fixed=%seed:physical_register:4:4 fixed=%matrix:physical_register:4:4 fixed=%other:physical_register:0:4 fixed=%tuple:physical_register:0:8
+
+amdgpu.target<gfx90a> @target
+
+// Either exchange input can consume a pending MFMA result.
+low.func.def target<amdgpu.cdna2.core>(@target) @exchange_matrix_result(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr x4>, %other: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x8>) asm {
+  %matrix = v_mfma_f32_16x16x4f32 %lhs, %rhs, %seed
+  %tuple = concat(%matrix, %other) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  return %tuple
+}
+
+// ----
+  v_mfma_f32_16x16x4f32 v[4:7], v8, v9, v[4:7]
+  s_nop 10
+  v_swap_b32 v4, v0
+  v_swap_b32 v5, v1
+  v_swap_b32 v6, v2
+  v_swap_b32 v7, v3
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_matrix_accumulator strategy=source fixed=%lhs:physical_register:8:1 fixed=%rhs:physical_register:9:1 fixed=%seed:physical_register:0:4 fixed=%matrix:physical_register:32:4 fixed=%other:physical_register:4:4 fixed=%tuple:physical_register:0:8
+
+amdgpu.target<gfx90a> @target
+
+// Either exchange destination can still be an MFMA accumulator source.
+low.func.def target<amdgpu.cdna2.core>(@target) @exchange_matrix_accumulator(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr x4>, %other: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x8>) asm {
+  %matrix = v_mfma_f32_16x16x4f32 %lhs, %rhs, %seed : reg<amdgpu.vgpr x4>
+  %tuple = concat(%other, %seed) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  return %matrix, %tuple
+}
+
+// ----
+  v_mfma_f32_16x16x4f32 v[32:35], v8, v9, v[0:3]
+  s_nop 6
+  v_swap_b32 v4, v0
+  v_swap_b32 v5, v1
+  v_swap_b32 v6, v2
+  v_swap_b32 v7, v3
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_matrix_accumulator strategy=source fixed=%lhs:physical_register:8:1 fixed=%rhs:physical_register:9:1 fixed=%seed:physical_register:4:4 fixed=%matrix:physical_register:32:4 fixed=%other:physical_register:0:4 fixed=%tuple:physical_register:0:8
+
+amdgpu.target<gfx90a> @target
+
+// Either exchange destination can still be an MFMA accumulator source.
+low.func.def target<amdgpu.cdna2.core>(@target) @exchange_matrix_accumulator(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %seed: reg<amdgpu.vgpr x4>, %other: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x8>) asm {
+  %matrix = v_mfma_f32_16x16x4f32 %lhs, %rhs, %seed : reg<amdgpu.vgpr x4>
+  %tuple = concat(%seed, %other) : (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) -> reg<amdgpu.vgpr x8>
+  return %matrix, %tuple
+}
+
+// ----
+  v_mfma_f32_16x16x4f32 v[32:35], v8, v9, v[4:7]
+  s_nop 6
+  v_swap_b32 v4, v0
+  v_swap_b32 v5, v1
+  v_swap_b32 v6, v2
+  v_swap_b32 v7, v3
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_wmma_result strategy=source fixed=%lhs:physical_register:16:8 fixed=%rhs:physical_register:24:8 fixed=%seed:physical_register:0:8 fixed=%matrix:physical_register:0:8 fixed=%other:physical_register:8:8 fixed=%tuple:physical_register:0:16
+
+amdgpu.target<gfx1250> @target {subgroup_size = 32}
+
+// The WMMA coexecution frontier protects both halves of each exchange.
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @exchange_wmma_result(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %seed: reg<amdgpu.vgpr x8>, %other: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x16>) asm {
+  %matrix = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %seed
+  %tuple = concat(%other, %matrix) : (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) -> reg<amdgpu.vgpr x16>
+  return %tuple
+}
+
+// ----
+  v_wmma_f32_16x16x32_bf16 v[0:7], v[16:23], v[24:31], v[0:7]
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_swap_b32 v8, v0
+  v_swap_b32 v9, v1
+  v_swap_b32 v10, v2
+  v_swap_b32 v11, v3
+  v_swap_b32 v12, v4
+  v_swap_b32 v13, v5
+  v_swap_b32 v14, v6
+  v_swap_b32 v15, v7
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_wmma_result strategy=source fixed=%lhs:physical_register:16:8 fixed=%rhs:physical_register:24:8 fixed=%seed:physical_register:8:8 fixed=%matrix:physical_register:8:8 fixed=%other:physical_register:0:8 fixed=%tuple:physical_register:0:16
+
+amdgpu.target<gfx1250> @target {subgroup_size = 32}
+
+// The WMMA coexecution frontier protects both halves of each exchange.
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @exchange_wmma_result(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %seed: reg<amdgpu.vgpr x8>, %other: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x16>) asm {
+  %matrix = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %seed
+  %tuple = concat(%matrix, %other) : (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) -> reg<amdgpu.vgpr x16>
+  return %tuple
+}
+
+// ----
+  v_wmma_f32_16x16x32_bf16 v[8:15], v[16:23], v[24:31], v[8:15]
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_swap_b32 v8, v0
+  v_swap_b32 v9, v1
+  v_swap_b32 v10, v2
+  v_swap_b32 v11, v3
+  v_swap_b32 v12, v4
+  v_swap_b32 v13, v5
+  v_swap_b32 v14, v6
+  v_swap_b32 v15, v7
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_wmma_source strategy=source fixed=%lhs:physical_register:0:8 fixed=%rhs:physical_register:24:8 fixed=%seed:physical_register:16:8 fixed=%matrix:physical_register:16:8 fixed=%other:physical_register:8:8 fixed=%tuple:physical_register:0:16
+
+amdgpu.target<gfx1250> @target {subgroup_size = 32}
+
+// The WMMA coexecution frontier protects both halves of each exchange.
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @exchange_wmma_source(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %seed: reg<amdgpu.vgpr x8>, %other: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x16>) asm {
+  %matrix = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %seed
+  %tuple = concat(%other, %lhs) : (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) -> reg<amdgpu.vgpr x16>
+  return %matrix, %tuple
+}
+
+// ----
+  v_wmma_f32_16x16x32_bf16 v[16:23], v[0:7], v[24:31], v[16:23]
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_swap_b32 v8, v0
+  v_swap_b32 v9, v1
+  v_swap_b32 v10, v2
+  v_swap_b32 v11, v3
+  v_swap_b32 v12, v4
+  v_swap_b32 v13, v5
+  v_swap_b32 v14, v6
+  v_swap_b32 v15, v7
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-assembly @exchange_wmma_source strategy=source fixed=%lhs:physical_register:8:8 fixed=%rhs:physical_register:24:8 fixed=%seed:physical_register:16:8 fixed=%matrix:physical_register:16:8 fixed=%other:physical_register:0:8 fixed=%tuple:physical_register:0:16
+
+amdgpu.target<gfx1250> @target {subgroup_size = 32}
+
+// The WMMA coexecution frontier protects both halves of each exchange.
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @exchange_wmma_source(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %seed: reg<amdgpu.vgpr x8>, %other: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x16>) asm {
+  %matrix = v_wmma_f32_16x16x32_bf16 %lhs, %rhs, %seed
+  %tuple = concat(%lhs, %other) : (reg<amdgpu.vgpr x8>, reg<amdgpu.vgpr x8>) -> reg<amdgpu.vgpr x16>
+  return %matrix, %tuple
+}
+
+// ----
+  v_wmma_f32_16x16x32_bf16 v[16:23], v[8:15], v[24:31], v[16:23]
+  v_nop
+  v_nop
+  v_nop
+  v_nop
+  v_swap_b32 v8, v0
+  v_swap_b32 v9, v1
+  v_swap_b32 v10, v2
+  v_swap_b32 v11, v3
+  v_swap_b32 v12, v4
+  v_swap_b32 v13, v5
+  v_swap_b32 v14, v6
+  v_swap_b32 v15, v7
+  s_endpgm

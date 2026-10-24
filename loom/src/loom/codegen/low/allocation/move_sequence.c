@@ -508,7 +508,7 @@ static iree_status_t loom_low_move_sequence_prepare(
 static void loom_low_move_sequence_append(
     loom_low_move_sequence_state_t* state,
     const loom_low_move_location_t* destination,
-    const loom_low_move_location_t* source) {
+    const loom_low_move_location_t* source, loom_low_move_kind_t kind) {
   if (loom_low_move_locations_share_target_storage(
           state->options->descriptor_set, destination, source)) {
     return;
@@ -518,13 +518,15 @@ static void loom_low_move_sequence_append(
   state->out_moves[state->out_move_count++] = (loom_low_move_t){
       .destination = *destination,
       .source = *source,
+      .kind = kind,
   };
 }
 
 static void loom_low_move_sequence_emit_ready_move(
     loom_low_move_sequence_state_t* state, iree_host_size_t move_index) {
   const loom_low_move_t move = state->scratch->moves[move_index];
-  loom_low_move_sequence_append(state, &move.destination, &move.source);
+  loom_low_move_sequence_append(state, &move.destination, &move.source,
+                                LOOM_LOW_MOVE_KIND_COPY);
   loom_low_move_sequence_deactivate_move(state, move_index);
 }
 
@@ -547,43 +549,86 @@ static iree_status_t loom_low_move_sequence_emit_cycle(
   // about to overwrite this storage may be narrower (for example EDX vs RDX).
   const loom_low_move_location_t saved_location =
       scratch->moves[first_move_index].source;
-  const loom_low_move_location_t* temporary_location = NULL;
-  bool first_temporary_use = false;
-  IREE_RETURN_IF_ERROR(loom_low_move_sequence_resolve_temporary(
-      state, &saved_location, &temporary_location, &first_temporary_use));
-  if (!state->complete) {
-    return iree_ok_status();
-  }
-  const iree_host_size_t scratch_move_index = state->out_move_count;
-  loom_low_move_sequence_append(state, temporary_location, &saved_location);
-  if (first_temporary_use && state->options->record_scratch.fn != NULL) {
-    IREE_RETURN_IF_ERROR(state->options->record_scratch.fn(
-        state->options->record_scratch.user_data, scratch_move_index));
-  }
 
+  // Retain the cycle order while classifying its complete storage contract.
+  // Emission consumes these indices instead of walking the location graph
+  // again. Mixed register views keep their original scratch-save semantics.
+  if (scratch->cycle_indices == NULL) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch->arena, scratch->move_capacity, sizeof(*scratch->cycle_indices),
+        (void**)&scratch->cycle_indices));
+  }
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->options->descriptor_set;
+  bool can_exchange =
+      saved_location.location_kind ==
+          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER &&
+      iree_any_bit_set(
+          descriptor_set->reg_classes[saved_location.descriptor_reg_class_id]
+              .flags,
+          LOOM_LOW_REG_CLASS_FLAG_EXCHANGE);
+  iree_host_size_t cycle_count = 0;
   const loom_low_move_sequence_location_entry_t* destination_entry =
       loom_low_move_sequence_require_location(state, &saved_location);
   for (;;) {
     IREE_ASSERT_NE(destination_entry->destination_move_index,
                    LOOM_LOW_MOVE_SEQUENCE_INDEX_NONE);
-    IREE_ASSERT(loom_low_move_sequence_node_is_active(
-        state, destination_entry->destination_move_index));
     const iree_host_size_t move_index =
         destination_entry->destination_move_index;
+    IREE_ASSERT(loom_low_move_sequence_node_is_active(state, move_index));
     const loom_low_move_t move = scratch->moves[move_index];
+    scratch->cycle_indices[cycle_count++] = move_index;
+    can_exchange &=
+        move.destination.location_kind == saved_location.location_kind &&
+        move.source.location_kind == saved_location.location_kind &&
+        move.destination.descriptor_reg_class_id ==
+            saved_location.descriptor_reg_class_id &&
+        move.source.descriptor_reg_class_id ==
+            saved_location.descriptor_reg_class_id;
     if (loom_low_move_locations_share_target_storage(
-            state->options->descriptor_set, &move.source, &saved_location)) {
-      loom_low_move_sequence_append(state, &move.destination,
-                                    temporary_location);
-      loom_low_move_sequence_deactivate_move(state, move_index);
-      return iree_ok_status();
+            descriptor_set, &move.source, &saved_location)) {
+      break;
     }
-
-    loom_low_move_sequence_append(state, &move.destination, &move.source);
-    loom_low_move_sequence_deactivate_move(state, move_index);
     destination_entry =
         loom_low_move_sequence_require_location(state, &move.source);
   }
+
+  const loom_low_move_location_t* temporary_location = NULL;
+  if (!can_exchange) {
+    bool first_temporary_use = false;
+    IREE_RETURN_IF_ERROR(loom_low_move_sequence_resolve_temporary(
+        state, &saved_location, &temporary_location, &first_temporary_use));
+    if (!state->complete) {
+      return iree_ok_status();
+    }
+    const iree_host_size_t scratch_move_index = state->out_move_count;
+    loom_low_move_sequence_append(state, temporary_location, &saved_location,
+                                  LOOM_LOW_MOVE_KIND_COPY);
+    if (first_temporary_use && state->options->record_scratch.fn != NULL) {
+      IREE_RETURN_IF_ERROR(state->options->record_scratch.fn(
+          state->options->record_scratch.user_data, scratch_move_index));
+    }
+  }
+
+  for (iree_host_size_t i = 0; i < cycle_count; ++i) {
+    const iree_host_size_t move_index = scratch->cycle_indices[i];
+    const loom_low_move_t move = scratch->moves[move_index];
+    const bool is_last = i + 1 == cycle_count;
+    if (can_exchange) {
+      // Each exchange places one result and carries the displaced value to
+      // the next destination. The final destination already has its result.
+      if (!is_last) {
+        loom_low_move_sequence_append(state, &move.destination, &move.source,
+                                      LOOM_LOW_MOVE_KIND_EXCHANGE);
+      }
+    } else {
+      loom_low_move_sequence_append(state, &move.destination,
+                                    is_last ? temporary_location : &move.source,
+                                    LOOM_LOW_MOVE_KIND_COPY);
+    }
+    loom_low_move_sequence_deactivate_move(state, move_index);
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_low_move_sequence_resolve(

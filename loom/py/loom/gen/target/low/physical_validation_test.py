@@ -147,6 +147,21 @@ def test_register_class_rejects_contiguous_candidates_without_explicit_storage()
         validation.validate_register_classes("test.invalid", (register_class,))
 
 
+def test_register_class_exchange_requires_physical_storage() -> None:
+    register_class = RegClass(
+        "test.exchange",
+        32,
+        SpillSlotSpace.PRIVATE,
+        flags=(RegClassFlag.EXCHANGE,),
+    )
+    with pytest.raises(ValueError, match=r"exchange.*physical"):
+        validation.validate_register_classes("test.invalid", (register_class,))
+    validation.validate_register_classes(
+        "test.physical",
+        (replace(register_class, flags=(RegClassFlag.PHYSICAL, RegClassFlag.EXCHANGE)),),
+    )
+
+
 def test_physical_descriptor_set_rejects_unproven_register_ordinal_tuple() -> None:
     register_classes = _coindexed_register_classes(partner_candidates=("test.r3", "test.r2"))
     descriptor = _descriptor(

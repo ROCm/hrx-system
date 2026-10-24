@@ -285,6 +285,7 @@ class _EncodingContract:
     vector_source_vgprs: tuple[int, int]
     s_mov_b32_opcode: int
     v_mov_b32_opcode: int
+    v_swap_b32_opcode: int
 
 
 def _parse_isa_xml_paths(
@@ -687,6 +688,12 @@ def _compile_encoding_contract(
             encoding_name="ENC_VOP1",
             condition_name="default",
         ),
+        v_swap_b32_opcode=_instruction_opcode(
+            spec.instructions,
+            instruction_name="V_SWAP_B32",
+            encoding_name="ENC_VOP1",
+            condition_name="default",
+        ),
     )
 
 
@@ -908,6 +915,12 @@ def _emit_source(
         encoding_name="ENC_VOP1",
         condition_name="default",
     )
+    v_swap_b32_opcode = _instruction_opcode(
+        instructions,
+        instruction_name="V_SWAP_B32",
+        encoding_name="ENC_VOP1",
+        condition_name="default",
+    )
     s_mov_b32_opcode = _instruction_opcode(
         instructions,
         instruction_name="S_MOV_B32",
@@ -1039,6 +1052,7 @@ def _emit_source(
                 f'    .descriptor_set_key = IREE_SVL("{table_view.descriptor_set_key}"),',
                 f"    .s_mov_b32_opcode = {s_mov_b32_opcode},",
                 f"    .v_mov_b32_opcode = {v_mov_b32_opcode},",
+                f"    .v_swap_b32_opcode = {v_swap_b32_opcode},",
                 f"    .v_nop_opcode = {v_nop_opcode},",
                 f"    .source_literal = {source_literal},",
                 f"    .scalar_inline_u32_zero = {scalar_inline_u32_zero},",

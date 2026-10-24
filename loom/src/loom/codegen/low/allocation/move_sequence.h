@@ -41,6 +41,9 @@ typedef struct loom_low_move_sequence_scratch_t {
   loom_low_move_sequence_node_t* nodes;
   // Ready queue storage with |move_capacity| entries.
   iree_host_size_t* ready_queue;
+  // Retained traversal order for one cycle, allocated on the first cycle and
+  // reused for later groups. Has |move_capacity| entries.
+  iree_host_size_t* cycle_indices;
   // Open-addressed location table used for destination and source-use lookup.
   loom_low_move_sequence_location_entry_t* location_entries;
   // Power-of-two entry count available in |location_entries|.
@@ -86,7 +89,7 @@ typedef struct loom_low_move_sequence_record_scratch_callback_t {
 typedef struct loom_low_move_sequence_options_t {
   // Descriptor set defining register-class alias contracts.
   const loom_low_descriptor_set_t* descriptor_set;
-  // Required resolver invoked only when a cycle is encountered.
+  // Required resolver invoked when a cycle cannot use full-unit exchanges.
   loom_low_move_sequence_resolve_temporary_callback_t resolve_temporary;
   // Optional cycle-scratch row recorder.
   loom_low_move_sequence_record_scratch_callback_t record_scratch;
@@ -115,8 +118,9 @@ iree_status_t loom_low_move_sequence_scratch_initialize(
     loom_low_move_sequence_scratch_t* out_scratch);
 
 // Resolves the first |move_count| caller-populated rows in |scratch->moves| to
-// an ordered move list in |out_moves|. Identity moves are elided and each
-// cycle adds one scratch-save move. Non-identity transfers retain their source
+// an ordered move list in |out_moves|. Identity moves are elided. Homogeneous
+// exchange-capable cycles use one fewer exchange than their input move count;
+// other cycles add one scratch-save move. Transfers retain their source
 // and destination register views; aliased views need not have the same width.
 // Scratch saves use the source view whose contents must survive the cycle.
 // When non-NULL, |out_input_flags| reports the identity and active rows already
