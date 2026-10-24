@@ -99,8 +99,12 @@ def _native_files_impl(ctx):
         # C++ runfiles include libraries and their loader aliases: solib links
         # on Unix and per-executable DLL copies on Windows. Install each name
         # once, retaining toolchain runtimes such as Windows AddressSanitizer.
+        # Other runfiles serve the Bazel launcher, including sanitizer
+        # suppression metadata; they are not native loader inputs.
         for file in tool[DefaultInfo].default_runfiles.files.to_list():
-            files.setdefault(file.basename, file)
+            name = file.basename.lower()
+            if name.endswith(".dll") or name.endswith(".so") or ".so." in name:
+                files.setdefault(file.basename, file)
 
     native_files = {file: True for file in files.values()}
     symbols = depset(transitive = [
