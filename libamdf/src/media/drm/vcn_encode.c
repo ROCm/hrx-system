@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "libamdf/src/structure.h"
+
 // VCN 4 encode tasks are flat little-endian DWORD packages. Length words count
 // their complete package in bytes, including the length and operation words.
 // The top-level unified-engine package contains one session package, one task
@@ -857,4 +859,110 @@ uint32_t amdf_media_drm_vcn_encode_av1(
 
   amdf_media_drm_vcn_encode_picture_end(&writer, session, resources);
   return amdf_media_drm_vcn_encode_task_end(&writer);
+}
+
+static amdf_status_t amdf_media_drm_vcn_encode_result_validate(
+    const amdf_media_drm_session_t* session,
+    amdf_media_encode_result_info_t* out_info,
+    amdf_media_av1_encode_result_info_t** out_av1) {
+  amdf_status_t status = amdf_structure_validate_header(
+      out_info, AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_RESULT_INFO,
+      sizeof(*out_info));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  if (out_info->region_capacity != 0 && out_info->regions == NULL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  *out_av1 = NULL;
+  if (session->requirements.configuration.codec == AMDF_MEDIA_CODEC_AV1) {
+    if (out_info->next != NULL) {
+      amdf_media_av1_encode_result_info_t* av1 = out_info->next;
+      status = amdf_structure_validate_output(
+          av1, AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_RESULT_INFO, sizeof(*av1));
+      if (!amdf_status_is_ok(status)) {
+        return status;
+      }
+      *out_av1 = av1;
+    }
+  } else if (out_info->next != NULL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  return AMDF_STATUS_OK;
+}
+
+static void amdf_media_drm_vcn_encode_result_reset(
+    amdf_media_encode_result_info_t* out_info,
+    amdf_media_av1_encode_result_info_t* av1) {
+  const uint32_t structure_size = out_info->structure_size;
+  void* next = out_info->next;
+  const uint32_t region_capacity = out_info->region_capacity;
+  amdf_media_encoded_region_t* regions = out_info->regions;
+  if (av1 != NULL) {
+    const uint32_t av1_structure_size = av1->structure_size;
+    *av1 = (amdf_media_av1_encode_result_info_t){
+        .type = AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_RESULT_INFO,
+        .structure_size = av1_structure_size,
+    };
+  }
+  *out_info = (amdf_media_encode_result_info_t){
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_RESULT_INFO,
+      .structure_size = structure_size,
+      .next = next,
+      .region_capacity = region_capacity,
+      .regions = regions,
+  };
+}
+
+amdf_status_t amdf_media_drm_vcn_encode_result_clear(
+    const amdf_media_drm_session_t* session,
+    amdf_media_encode_result_info_t* out_info) {
+  amdf_media_av1_encode_result_info_t* av1 = NULL;
+  const amdf_status_t status =
+      amdf_media_drm_vcn_encode_result_validate(session, out_info, &av1);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  amdf_media_drm_vcn_encode_result_reset(out_info, av1);
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_media_drm_vcn_encode_result(
+    const amdf_media_drm_session_t* session, const uint32_t feedback[10],
+    uint32_t compressed_byte_length,
+    amdf_media_encode_result_info_t* out_info) {
+  amdf_media_av1_encode_result_info_t* av1 = NULL;
+  amdf_status_t status =
+      amdf_media_drm_vcn_encode_result_validate(session, out_info, &av1);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  const uint32_t region_capacity = out_info->region_capacity;
+  amdf_media_encoded_region_t* regions = out_info->regions;
+  amdf_media_drm_vcn_encode_result_reset(out_info, av1);
+  if (feedback[1] == 0) {
+    return AMDF_STATUS_OK;
+  }
+  const uint32_t written_byte_length = feedback[6];
+  const uint32_t tail_padding_byte_length = feedback[8];
+  if (tail_padding_byte_length >= written_byte_length ||
+      written_byte_length > compressed_byte_length) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
+  }
+  out_info->written_byte_length = written_byte_length;
+  out_info->region_count = 1;
+  if (region_capacity == 0) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL);
+  }
+  regions[0] = (amdf_media_encoded_region_t){
+      .kind =
+          session->requirements.configuration.codec == AMDF_MEDIA_CODEC_H264
+              ? AMDF_MEDIA_ENCODED_REGION_H264_ANNEX_B_SLICE
+          : session->requirements.configuration.codec == AMDF_MEDIA_CODEC_HEVC
+              ? AMDF_MEDIA_ENCODED_REGION_HEVC_ANNEX_B_SLICE
+              : AMDF_MEDIA_ENCODED_REGION_AV1_FRAME_OBU,
+      .byte_offset = 0,
+      .byte_length = written_byte_length - tail_padding_byte_length,
+  };
+  return AMDF_STATUS_OK;
 }

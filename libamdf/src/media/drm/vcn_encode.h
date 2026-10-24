@@ -64,6 +64,17 @@ uint32_t amdf_media_drm_vcn_encode_av1(
     uint32_t reconstruction_slot,
     const amdf_media_av1_encode_picture_info_t* picture);
 
+// Validates and clears caller-owned typed result storage without reading
+// firmware feedback.
+amdf_status_t amdf_media_drm_vcn_encode_result_clear(
+    const amdf_media_drm_session_t* session,
+    amdf_media_encode_result_info_t* out_info);
+
+// Resolves one checked-retired firmware feedback record into public extents.
+amdf_status_t amdf_media_drm_vcn_encode_result(
+    const amdf_media_drm_session_t* session, const uint32_t feedback[10],
+    uint32_t compressed_byte_length, amdf_media_encode_result_info_t* out_info);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

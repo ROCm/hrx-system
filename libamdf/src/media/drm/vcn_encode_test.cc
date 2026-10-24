@@ -211,4 +211,84 @@ TEST_F(VcnEncodePacketTest, Av1MatchesPixelFirstQualifiedNativePackets) {
   }
 }
 
+TEST_F(VcnEncodePacketTest, RetiredFeedbackProducesOneBoundedRegion) {
+  amdf_media_encoded_region_t region = {};
+  amdf_media_encode_result_info_t result = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_RESULT_INFO,
+      .structure_size = sizeof(result),
+      .region_capacity = 1,
+      .regions = &region,
+  };
+  uint32_t feedback[10] = {};
+  feedback[1] = 1;
+  feedback[6] = 4096;
+  feedback[8] = 128;
+  EXPECT_EQ(
+      amdf_media_drm_vcn_encode_result(&session_, feedback, 8192, &result),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(result.written_byte_length, 4096u);
+  EXPECT_EQ(result.region_count, 1u);
+  EXPECT_EQ(region.kind, AMDF_MEDIA_ENCODED_REGION_H264_ANNEX_B_SLICE);
+  EXPECT_EQ(region.byte_offset, 0u);
+  EXPECT_EQ(region.byte_length, 3968u);
+
+  result.region_capacity = 0;
+  result.regions = nullptr;
+  EXPECT_EQ(
+      amdf_media_drm_vcn_encode_result(&session_, feedback, 8192, &result),
+      amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL));
+  EXPECT_EQ(result.written_byte_length, 4096u);
+  EXPECT_EQ(result.region_count, 1u);
+
+  feedback[6] = 8193;
+  EXPECT_EQ(
+      amdf_media_drm_vcn_encode_result(&session_, feedback, 8192, &result),
+      amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL));
+  EXPECT_EQ(result.written_byte_length, 0u);
+  EXPECT_EQ(result.region_count, 0u);
+
+  feedback[6] = 4096;
+  feedback[8] = 4096;
+  EXPECT_EQ(
+      amdf_media_drm_vcn_encode_result(&session_, feedback, 8192, &result),
+      amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL));
+  EXPECT_EQ(result.written_byte_length, 0u);
+  EXPECT_EQ(result.region_count, 0u);
+}
+
+TEST_F(VcnEncodePacketTest, Av1ResultExtensionClearsForCompleteFrameObu) {
+  session_.requirements.configuration.codec = AMDF_MEDIA_CODEC_AV1;
+  amdf_media_av1_encode_result_info_t av1 = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_RESULT_INFO,
+      .structure_size = sizeof(av1),
+      .primary_reference = 6,
+  };
+  amdf_media_encoded_region_t region = {};
+  amdf_media_encode_result_info_t result = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_RESULT_INFO,
+      .structure_size = sizeof(result),
+      .next = &av1,
+      .written_byte_length = 99,
+      .region_capacity = 1,
+      .region_count = 1,
+      .regions = &region,
+  };
+  EXPECT_EQ(amdf_media_drm_vcn_encode_result_clear(&session_, &result),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(result.written_byte_length, 0u);
+  EXPECT_EQ(result.region_count, 0u);
+  EXPECT_EQ(result.region_capacity, 1u);
+  EXPECT_EQ(result.regions, &region);
+  EXPECT_EQ(av1.primary_reference, 0u);
+
+  uint32_t feedback[10] = {};
+  feedback[1] = 1;
+  feedback[6] = 512;
+  feedback[8] = 16;
+  EXPECT_EQ(
+      amdf_media_drm_vcn_encode_result(&session_, feedback, 1024, &result),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(region.kind, AMDF_MEDIA_ENCODED_REGION_AV1_FRAME_OBU);
+}
+
 }  // namespace

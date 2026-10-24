@@ -20,6 +20,14 @@ typedef struct amdf_media_drm_command_t {
   amdf_media_command_t base;
   // Native command storage provisioned once, writable only after retirement.
   amdf_media_drm_buffer_t* storage;
+  // Caller-owned feedback backing borrowed through command destruction.
+  amdf_media_drm_buffer_t* feedback_buffer;
+  // Native address of the exact feedback record.
+  uint64_t feedback_address;
+  // Direct host view of the exact feedback record.
+  uint32_t* feedback_pointer;
+  // Compressed-output capacity retained for feedback-bound validation.
+  uint32_t compressed_byte_length;
   // Complete immutable native IB byte extent after preparation.
   uint32_t byte_length;
   // Provisioned bound for application-authored identity activations.
@@ -28,7 +36,7 @@ typedef struct amdf_media_drm_command_t {
   uint32_t maximum_slice_count;
   // Reference operand bound provisioned in the trailing residency storage.
   uint32_t maximum_reference_count;
-  // Native BO residency list; duplicate operands are legal in this protocol.
+  // Native BO residency list; repeated operands share one resident entry.
   struct drm_amdgpu_bo_list_entry* buffers;
   // Initialized residency prefix consumed by the publication ioctl.
   uint32_t buffer_count;

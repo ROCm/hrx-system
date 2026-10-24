@@ -370,6 +370,14 @@ TEST_F(EncodeConfigurationTest, UnsupportedTuplesHaveSpecificReasons) {
   ASSERT_EQ(media_->device_query_configuration(device_, &query, &result),
             AMDF_STATUS_OK);
   EXPECT_EQ(result.reason, AMDF_MEDIA_CONFIGURATION_REASON_CODEC);
+
+  codec_configuration =
+      chain.InitializeFor(h264_case, AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CBR);
+  query.next = codec_configuration;
+  chain.encode.rate_control.frame_rate_numerator = 0;
+  ASSERT_EQ(media_->device_query_configuration(device_, &query, &result),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(result.reason, AMDF_MEDIA_CONFIGURATION_REASON_CODEC);
 }
 
 TEST_F(EncodeConfigurationTest, SessionMatchesProviderExecutionSupport) {
@@ -394,16 +402,10 @@ TEST_F(EncodeConfigurationTest, SessionMatchesProviderExecutionSupport) {
       .configuration = requirements.configuration,
   };
   amdf_media_session_t* session = nullptr;
-#ifdef _WIN32
   ASSERT_EQ(media_->session_create(queue_, &session_create, &session),
             AMDF_STATUS_OK);
   ASSERT_NE(session, nullptr);
   ASSERT_EQ(media_->session_destroy(session), AMDF_STATUS_OK);
-#else
-  EXPECT_EQ(media_->session_create(queue_, &session_create, &session),
-            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
-  EXPECT_EQ(session, nullptr);
-#endif  // _WIN32
 }
 
 }  // namespace

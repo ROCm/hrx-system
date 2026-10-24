@@ -309,6 +309,25 @@ static void amdf_media_drm_answer_unsupported(
   *out_info = *info;
 }
 
+static bool amdf_media_drm_encode_rate_fits_vcn(
+    const amdf_media_encode_configuration_t* encode) {
+  if (encode->rate_control.mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP) {
+    return true;
+  }
+  const amdf_media_encode_bit_rate_t* bit_rate =
+      &encode->rate_control.control.bit_rate;
+  if (bit_rate->maximum_frame_bit_count > UINT32_MAX ||
+      bit_rate->target_bit_rate > UINT32_MAX ||
+      bit_rate->peak_bit_rate > UINT32_MAX ||
+      bit_rate->virtual_buffer_capacity > UINT32_MAX) {
+    return false;
+  }
+  const uint64_t denominator = encode->rate_control.frame_rate_denominator;
+  const uint64_t numerator = encode->rate_control.frame_rate_numerator;
+  return bit_rate->target_bit_rate * denominator / numerator <= UINT32_MAX &&
+         bit_rate->peak_bit_rate * denominator / numerator <= UINT32_MAX;
+}
+
 static amdf_status_t amdf_media_drm_encode_configuration(
     amdf_media_drm_device_t* device, uint32_t family_ordinal,
     const amdf_media_configuration_t* configuration, const void* next,
@@ -333,6 +352,13 @@ static amdf_status_t amdf_media_drm_encode_configuration(
   if (limits == NULL || !limits->valid) {
     amdf_media_drm_answer_unsupported(
         &info, AMDF_MEDIA_CONFIGURATION_REASON_CODEC, out_info);
+    return AMDF_STATUS_OK;
+  }
+  const uint32_t version =
+      device->engines[family_ordinal].information.ip_discovery_version;
+  if (((version >> 16) & 255) != 4) {
+    amdf_media_drm_answer_unsupported(
+        &info, AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION, out_info);
     return AMDF_STATUS_OK;
   }
 
@@ -470,6 +496,12 @@ static amdf_status_t amdf_media_drm_encode_configuration(
         &info, AMDF_MEDIA_CONFIGURATION_REASON_CODEC, out_info);
     return AMDF_STATUS_OK;
   }
+  if (configuration->reference_image_count > 34 ||
+      !amdf_media_drm_encode_rate_fits_vcn(encode)) {
+    amdf_media_drm_answer_unsupported(
+        &info, AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION, out_info);
+    return AMDF_STATUS_OK;
+  }
 
   amdf_media_image_description_t description = {
       .format = configuration->format,
@@ -490,14 +522,22 @@ static amdf_status_t amdf_media_drm_encode_configuration(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
+  if (info.reference.byte_length > UINT32_MAX) {
+    amdf_media_drm_answer_unsupported(
+        &info, AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION, out_info);
+    return AMDF_STATUS_OK;
+  }
   if (av1 != NULL) {
     const uint64_t auxiliary_byte_length =
         UINT64_C(947200) + (uint64_t)configuration->reference_image_count *
                                (UINT64_C(22528) + UINT64_C(1536));
-    if (info.reference.byte_length > UINT64_MAX - auxiliary_byte_length ||
+    if (info.reference.byte_length > UINT32_MAX - auxiliary_byte_length ||
         info.reference.byte_length + auxiliary_byte_length >
             device->address_end - device->address_begin) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+      amdf_media_drm_answer_unsupported(
+          &info, AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION,
+          out_info);
+      return AMDF_STATUS_OK;
     }
     info.reference.byte_length += auxiliary_byte_length;
   }
