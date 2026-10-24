@@ -171,6 +171,8 @@ amdf_status_t amdf_media_h264_validate_encode_picture(
         reference->binding.slot_index >=
             requirements->configuration.reference_image_count ||
         reference->binding.slot_index == picture->reconstruction_slot_index ||
+        (reference->frame_type != AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR &&
+         reference->frame_type != AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_P) ||
         reference->frame_number >= maximum_frame_number) {
       return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
     }

@@ -169,6 +169,9 @@ struct PictureControls {
       h264.used_as_reference = 1;
       if (!key) {
         h264_reference.binding = {reference, reference_slot};
+        h264_reference.frame_type = generation == 1
+                                        ? AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR
+                                        : AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_P;
         h264_reference.frame_number = generation - 1;
         h264_reference.picture_order_count =
             static_cast<int32_t>((generation - 1) * 2);

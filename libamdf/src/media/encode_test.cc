@@ -110,7 +110,7 @@ TEST_F(EncodeValidationTest, H264IPicturesUseStableReconstructionSlots) {
             AMDF_STATUS_OK);
 
   const amdf_media_h264_encode_reference_t reference = {
-      {&reference_frame_, 0}, 0, 0, 0};
+      {&reference_frame_, 0}, AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR, 0, 0, 0};
   h264_picture.frame_type = AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_P;
   h264_picture.frame_number = 1;
   h264_picture.picture_order_count = 2;
@@ -120,6 +120,14 @@ TEST_F(EncodeValidationTest, H264IPicturesUseStableReconstructionSlots) {
   EXPECT_EQ(amdf_media_h264_validate_encode_picture(
                 &requirements_, &picture_, &h264_encode, &h264_picture),
             AMDF_STATUS_OK);
+
+  auto invalid_reference = reference;
+  invalid_reference.frame_type = 0;
+  h264_picture.references = &invalid_reference;
+  EXPECT_EQ(amdf_media_h264_validate_encode_picture(
+                &requirements_, &picture_, &h264_encode, &h264_picture),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  h264_picture.references = &reference;
 
   picture_.reconstruction_slot_index = 0;
   EXPECT_EQ(amdf_media_h264_validate_encode_picture(
