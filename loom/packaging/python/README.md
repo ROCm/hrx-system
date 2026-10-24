@@ -72,7 +72,11 @@ console control events. Cross-building the target verifies its inputs; execution
 requires the matching operating system.
 
 The [SDK build workflow](../../../.github/workflows/build_loom_sdk.yml) runs
-this installed test for all four profiles on Linux and Windows. The producer
+this explicitly selected test for all four profiles on Linux and Windows.
+The test is tagged `manual` because the complete SDK includes the C++23
+frontend, whose toolchain requirements exceed the core project's compiler
+baseline. Linux SDK builds use Clang 19 with GCC 13's C++ standard library;
+Windows builds use ClangCL and the Visual Studio C++ toolchain. The producer
 exports the exact `release_wheel` target only after that test succeeds:
 
 ```sh

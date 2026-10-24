@@ -455,7 +455,12 @@ loom_py_test(
     }),
     imports = ["."],
     main = "wheel_model_card_test.py",
-    tags = ["skip-bazel_to_cmake"],
+    # The SDK matrix explicitly qualifies this complete C++23 artifact with
+    # its release toolchains; ordinary core builds may use older compilers.
+    tags = [
+        "manual",
+        "skip-bazel_to_cmake",
+    ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:x86",
         "//runtime/config/hal:driver_task",
