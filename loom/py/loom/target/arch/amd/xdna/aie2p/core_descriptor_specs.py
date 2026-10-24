@@ -1285,6 +1285,15 @@ _BASE_DESCRIPTOR_SPECS = (
         asm_mnemonic="vconv.bf16.fp32x16",
     ),
     _DescriptorSpec(
+        "VCONV_bf16_fp32_mv_w_srs_bf",
+        f"{_TARGET_KEY}.convert.f32x16.to.bf16x16.low",
+        "convert.floating.f32x16.to.bf16x16.low",
+        "II_VCONV_bf16_fp32_mv_w_srs_bf",
+        storage_overrides=(("dst", "VEC256"), ("src", "eBMLL")),
+        encoding_adapter_overrides=(("src", "LOOM_eBMLL_OP_mBMs"),),
+        asm_mnemonic="vconv.bf16.fp32x16.low",
+    ),
+    _DescriptorSpec(
         "VCONV_bf16_fp32_mv_x_srs_bf",
         f"{_TARGET_KEY}.convert.f32x32.to.bf16x32",
         "convert.floating.f32x32.to.bf16x32",
@@ -1307,6 +1316,15 @@ _BASE_DESCRIPTOR_SPECS = (
         "II_VCONV_fp32_bf16_mv_ups_wbf",
         storage_overrides=(("dst", "mBMs"), ("src", "VEC256")),
         asm_mnemonic="vconv.fp32.bf16x16",
+    ),
+    _DescriptorSpec(
+        "VCONV_fp32_bf16_mv_ups_wbf",
+        f"{_TARGET_KEY}.convert.bf16x16.to.f32x16.low",
+        "convert.floating.bf16x16.to.f32x16.low",
+        "II_VCONV_fp32_bf16_mv_ups_wbf",
+        storage_overrides=(("dst", "eBMLL"), ("src", "VEC256")),
+        encoding_adapter_overrides=(("dst", "LOOM_eBMLL_OP_mBMm"),),
+        asm_mnemonic="vconv.fp32.bf16x16.low",
     ),
     _DescriptorSpec(
         "VEXP2",
