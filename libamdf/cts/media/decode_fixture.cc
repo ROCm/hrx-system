@@ -124,14 +124,13 @@ void MediaDecodeTest::CreateCommand(amdf_media_command_t** out) {
   const amdf_media_command_create_info_t create = {
       .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_CREATE_INFO,
       .structure_size = sizeof(create),
-      .codec = configuration_.configuration.codec,
       .maximum_slice_count =
           configuration_.configuration.codec == AMDF_MEDIA_CODEC_AV1 ? 256u
                                                                      : 1u,
       .maximum_reference_count =
           configuration_.configuration.reference_image_count - 1,
   };
-  ASSERT_EQ(media_->command_create(queue_, &create, out), AMDF_STATUS_OK);
+  ASSERT_EQ(media_->command_create(session_, &create, out), AMDF_STATUS_OK);
 }
 
 void MediaDecodeTest::CreateMemory(uint64_t length, CtsMappedMemory* memory) {
@@ -247,7 +246,7 @@ amdf_status_t MediaDecodeTest::PreparePicture(const DecodeInput& entry,
       .operation = AMDF_MEDIA_COMMAND_OPERATION_PICTURE,
       .decode = &decode,
   };
-  return media_->command_prepare(session_, commands_[slot], &prepare);
+  return media_->command_prepare(commands_[slot], &prepare);
 }
 
 void MediaDecodeTest::PrepareControl(amdf_media_command_operation_t operation) {
@@ -256,8 +255,7 @@ void MediaDecodeTest::PrepareControl(amdf_media_command_operation_t operation) {
       .structure_size = sizeof(prepare),
       .operation = operation,
   };
-  ASSERT_EQ(media_->command_prepare(session_, control_, &prepare),
-            AMDF_STATUS_OK);
+  ASSERT_EQ(media_->command_prepare(control_, &prepare), AMDF_STATUS_OK);
 }
 
 amdf_status_t MediaDecodeTest::Submit(amdf_media_command_t* command) {

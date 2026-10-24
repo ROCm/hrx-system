@@ -165,12 +165,11 @@ class MediaJpegTest : public ::testing::TestWithParam<Shape> {
     const amdf_media_command_create_info_t command_create = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_CREATE_INFO,
         .structure_size = sizeof(command_create),
-        .codec = AMDF_MEDIA_CODEC_JPEG,
         .maximum_slice_count = 1,
     };
     for (auto& command : channel.commands) {
       ASSERT_EQ(
-          media_->command_create(channel.queue, &command_create, &command),
+          media_->command_create(channel.session, &command_create, &command),
           AMDF_STATUS_OK);
     }
   }
@@ -363,8 +362,7 @@ class MediaJpegTest : public ::testing::TestWithParam<Shape> {
         .operation = AMDF_MEDIA_COMMAND_OPERATION_PICTURE,
         .decode = &decode,
     };
-    ASSERT_EQ(media_->command_prepare(channel.session, channel.commands[slot],
-                                      &prepare),
+    ASSERT_EQ(media_->command_prepare(channel.commands[slot], &prepare),
               AMDF_STATUS_OK);
     amdf_media_command_result_info_t result = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_RESULT_INFO,
@@ -820,24 +818,20 @@ TEST_P(MediaJpegTest, RejectsUnsupportedEnvelopesAndInvalidPlaneExtents) {
   };
   const auto good = layout.planes[0];
   --layout.planes[0].byte_length;
-  EXPECT_EQ(
-      media_->command_prepare(channel.session, channel.commands[0], &prepare),
-      amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  EXPECT_EQ(media_->command_prepare(channel.commands[0], &prepare),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
   layout.planes[0] = good;
   --layout.planes[0].row_pitch;
-  EXPECT_EQ(
-      media_->command_prepare(channel.session, channel.commands[0], &prepare),
-      amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  EXPECT_EQ(media_->command_prepare(channel.commands[0], &prepare),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
   layout.planes[0] = good;
   layout.planes[0].access_ordinal = 1;
-  EXPECT_EQ(
-      media_->command_prepare(channel.session, channel.commands[0], &prepare),
-      amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  EXPECT_EQ(media_->command_prepare(channel.commands[0], &prepare),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
   layout.planes[0] = good;
   decode.compressed.memory = output->memory;
-  EXPECT_EQ(
-      media_->command_prepare(channel.session, channel.commands[0], &prepare),
-      amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  EXPECT_EQ(media_->command_prepare(channel.commands[0], &prepare),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
   decode.compressed.memory = input->memory;
   // A plane can describe a larger accessible range than its write footprint.
   // The disjoint luma/chroma write extents still fit their explicit pitches.
@@ -847,9 +841,8 @@ TEST_P(MediaJpegTest, RejectsUnsupportedEnvelopesAndInvalidPlaneExtents) {
                                              AMDF_HOST_CACHE_OPERATION_FLUSH, 0,
                                              output->info.byte_length),
             AMDF_STATUS_OK);
-  ASSERT_EQ(
-      media_->command_prepare(channel.session, channel.commands[0], &prepare),
-      AMDF_STATUS_OK);
+  ASSERT_EQ(media_->command_prepare(channel.commands[0], &prepare),
+            AMDF_STATUS_OK);
   ASSERT_NO_FATAL_FAILURE(Submit(channel, 0));
   ASSERT_NO_FATAL_FAILURE(Join(channel));
   ASSERT_NO_FATAL_FAILURE(CheckPixels(*output, image, 1));

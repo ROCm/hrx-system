@@ -380,6 +380,9 @@ QueueSubmit(amdf_kernel_queue_t* base,
             uint64_t* accepted_submission) {
   auto* queue = reinterpret_cast<Queue*>(base);
   auto* command = reinterpret_cast<Command*>(submission_info->command);
+  if (command->base.session->queue != base) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
   uint32_t expected = 0;
   if (!amdf_atomic_uint32_compare_exchange_acq_rel(&queue->publishing,
                                                    &expected, 1)) {
@@ -412,7 +415,7 @@ QueueSubmit(amdf_kernel_queue_t* base,
     }
   }
   if (amdf_status_is_ok(status)) {
-    ID3D12CommandList* native = command->native.Get();
+    ID3D12CommandList* native = command->executable;
     queue->native->ExecuteCommandLists(1, &native);
     executed = true;
     command->executed = true;

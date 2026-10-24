@@ -14,6 +14,8 @@ extern "C" {
 #endif
 
 /// One application-selected reusable native recording and result association.
+/// The recording is a child of one immutable session and cannot be retargeted
+/// to another session, even when that session has a matching configuration.
 typedef struct amdf_media_command_t amdf_media_command_t;
 
 #define AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_CREATE_INFO \
@@ -27,7 +29,8 @@ typedef struct amdf_media_command_t amdf_media_command_t;
 #define AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_RESULT_INFO \
   ((amdf_structure_type_t)0x00040305u)
 
-/// Native recording capacity and explicit result storage, provisioned cold.
+/// Native recording capacity and explicit result storage, provisioned cold for
+/// the session passed to command_create.
 typedef struct amdf_media_command_create_info_t {
   /// AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_CREATE_INFO.
   amdf_structure_type_t type;
@@ -35,9 +38,6 @@ typedef struct amdf_media_command_create_info_t {
   uint32_t structure_size;
   /// Typed provisioning extensions, or NULL.
   const void* next;
-  /// Codec for this recording's native storage. Prepared sessions must use
-  /// this codec; recordings can be reused across matching sessions.
-  amdf_media_codec_t codec;
   /// Maximum complete slices or AV1 tiles accepted by one preparation.
   uint32_t maximum_slice_count;
   /// Maximum reference bindings accepted by one preparation.

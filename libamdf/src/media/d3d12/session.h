@@ -11,6 +11,7 @@
 #include "amdf/media/h264.h"
 #include "amdf/media/hevc.h"
 #include "amdf/media/vp9.h"
+#include "libamdf/src/media/d3d12/configuration.h"
 #include "libamdf/src/media/d3d12/device.h"
 
 namespace amdf::media::d3d12 {
@@ -18,10 +19,14 @@ namespace amdf::media::d3d12 {
 struct Session {
   // Provider-neutral queue association and dispatch.
   amdf_media_session_t base;
-  // Native decoder implementing the admitted codec envelope.
+  // Native decoder implementing an admitted decode envelope.
   ComPtr<ID3D12VideoDecoder> decoder;
-  // Native codec state, with no hidden reconstructed-image pool.
-  ComPtr<ID3D12VideoDecoderHeap> heap;
+  // Native decoder state, with no hidden reconstructed-image pool.
+  ComPtr<ID3D12VideoDecoderHeap> decoder_heap;
+  // Native encoder implementing an admitted encode envelope.
+  ComPtr<ID3D12VideoEncoder> encoder;
+  // Native encoder state, with no hidden reconstruction pool.
+  ComPtr<ID3D12VideoEncoderHeap> encoder_heap;
   // Immutable realized configuration and native state charges.
   amdf_media_session_info_t info;
   // Parsed syntax envelope selected by info.configuration.codec.
@@ -35,6 +40,19 @@ struct Session {
     // AV1 profile and actual sample precision.
     amdf_media_av1_configuration_t av1;
   };
+  // Common immutable encode controls, valid only for encode sessions.
+  amdf_media_encode_configuration_t encode;
+  // Codec-specific immutable encode geometry selected by the codec field.
+  union {
+    // H264 frame-number and picture-order geometry.
+    amdf_media_h264_encode_configuration_t h264_encode;
+    // HEVC block, level, tier, and picture-order geometry.
+    amdf_media_hevc_encode_configuration_t hevc_encode;
+    // AV1 level, tier, and sequence-tool geometry.
+    amdf_media_av1_encode_configuration_t av1_encode;
+  };
+  // Self-contained native encoder descriptors retained for every recording.
+  EncodeConfiguration native_encode;
   // Retained placement and buffer requirements from native admission.
   amdf_media_configuration_info_t requirements;
   // Recording owners that still borrow this native session.

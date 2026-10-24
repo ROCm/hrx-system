@@ -203,10 +203,11 @@ static amdf_status_t AMDF_CALL amdf_media_session_query_info(
 }
 
 static amdf_status_t AMDF_CALL
-amdf_media_command_create(amdf_kernel_queue_t* queue,
+amdf_media_command_create(amdf_media_session_t* session,
                           const amdf_media_command_create_info_t* create_info,
                           amdf_media_command_t** out_command) {
-  amdf_status_t status = amdf_media_validate_queue(queue);
+  amdf_status_t status =
+      amdf_media_validate_queue(session != NULL ? session->queue : NULL);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -219,14 +220,14 @@ amdf_media_command_create(amdf_kernel_queue_t* queue,
   if (out_command == NULL || create_info->maximum_slice_count == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  return amdf_media_device_operations(queue->device)
-      ->command_create(queue, create_info, out_command);
+  return amdf_media_device_operations(session->queue->device)
+      ->command_create(session, create_info, out_command);
 }
 
 static amdf_status_t AMDF_CALL amdf_media_command_prepare(
-    amdf_media_session_t* session, amdf_media_command_t* command,
+    amdf_media_command_t* command,
     const amdf_media_command_prepare_info_t* prepare_info) {
-  if (session == NULL || command == NULL || session->queue != command->queue) {
+  if (command == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
   const amdf_status_t status = amdf_structure_validate_input(
@@ -242,8 +243,8 @@ static amdf_status_t AMDF_CALL amdf_media_command_prepare(
   if (prepare_info->decode != NULL && prepare_info->encode != NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  return amdf_media_device_operations(command->queue->device)
-      ->command_prepare(session, command, prepare_info);
+  return amdf_media_device_operations(command->session->queue->device)
+      ->command_prepare(command, prepare_info);
 }
 
 static amdf_status_t AMDF_CALL amdf_media_kernel_queue_submit(
@@ -265,7 +266,7 @@ static amdf_status_t AMDF_CALL amdf_media_kernel_queue_submit(
     return status;
   }
   if (submission_info->command == NULL ||
-      submission_info->command->queue != queue) {
+      submission_info->command->session->queue != queue) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
   if (submission_info->wait_count > queue->info.maximum_wait_count) {
@@ -285,13 +286,13 @@ static amdf_status_t AMDF_CALL amdf_media_command_query_result(
   if (command == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  const amdf_status_t status = amdf_structure_validate_output(
+  const amdf_status_t status = amdf_structure_validate_header(
       out_info, AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_RESULT_INFO,
       sizeof(*out_info));
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  return amdf_media_device_operations(command->queue->device)
+  return amdf_media_device_operations(command->session->queue->device)
       ->command_query_result(command, out_info);
 }
 
@@ -300,7 +301,7 @@ amdf_media_command_destroy(amdf_media_command_t* command) {
   if (command == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  return amdf_media_device_operations(command->queue->device)
+  return amdf_media_device_operations(command->session->queue->device)
       ->command_destroy(command);
 }
 

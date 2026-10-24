@@ -46,8 +46,10 @@ class MediaQueueTest : public ::testing::Test {
     amdf_kernel_queue_t* queue = nullptr;
     ASSERT_EQ(QueueCreate(&device_.base.base, &create, &queue), AMDF_STATUS_OK);
     queue_ = reinterpret_cast<Queue*>(queue);
-    command_.base.queue = queue;
-    command_.native.Attach(native_->command);
+    session_.queue = queue;
+    command_.base.session = &session_;
+    command_.decode.Attach(native_->command);
+    command_.executable = command_.decode.Get();
     command_.prepared = true;
   }
 
@@ -58,7 +60,7 @@ class MediaQueueTest : public ::testing::Test {
                   AMDF_STATUS_OK);
       }
     }
-    command_.native.Reset();
+    command_.decode.Reset();
     if (queue_ != nullptr) {
       // A failed signal or removed fake device deliberately leaves ownership
       // unretired. Ending this inert COM test domain is not a production
@@ -121,6 +123,8 @@ class MediaQueueTest : public ::testing::Test {
   Queue* queue_ = nullptr;
   // Prepared recording supplied by the queue's command dependency.
   Command command_ = {};
+  // Immutable session owner required by every recording.
+  amdf_media_session_t session_ = {};
   // Cold consumer imports whose accepted-use records are checked below.
   amdf_kernel_queue_dependency_t dependencies_[2] = {};
   // Ordered native wait prefix under test.

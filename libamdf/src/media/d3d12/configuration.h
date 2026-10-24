@@ -64,6 +64,12 @@ struct EncodeConfiguration {
   D3D12_VIDEO_ENCODER_PICTURE_RESOLUTION_DESC resolution;
   // Single-tile AV1 partition referenced by extended support queries.
   D3D12_VIDEO_ENCODER_AV1_PICTURE_CONTROL_SUBREGIONS_LAYOUT_DATA_TILES tiles;
+  // Exact native subregion mode admitted with the configuration.
+  D3D12_VIDEO_ENCODER_FRAME_SUBREGION_LAYOUT_MODE subregion_mode;
+  // Private per-recording metadata extent required by EncodeFrame.
+  uint32_t metadata_byte_length;
+  // Native alignment for raw and resolved metadata offsets.
+  uint32_t metadata_alignment;
 };
 
 // Copies a codec envelope after validating its public schema and native tuple.

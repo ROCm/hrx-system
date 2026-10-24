@@ -271,7 +271,6 @@ void MediaDecodeInteropTest::CreateRecordings(uint32_t count) {
     const amdf_media_command_create_info_t command_create = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_CREATE_INFO,
         .structure_size = sizeof(command_create),
-        .codec = configuration_.configuration.codec,
         .maximum_slice_count =
             configuration_.configuration.codec == AMDF_MEDIA_CODEC_AV1 ? 256u
                                                                        : 1u,
@@ -283,7 +282,7 @@ void MediaDecodeInteropTest::CreateRecordings(uint32_t count) {
                      configuration_.feedback_byte_length},
     };
     amdf_media_command_t* command = nullptr;
-    ASSERT_EQ(media_->command_create(decode_queue_, &command_create, &command),
+    ASSERT_EQ(media_->command_create(session_, &command_create, &command),
               AMDF_STATUS_OK);
     commands_.push_back(command);
   }
@@ -536,7 +535,7 @@ void MediaDecodeInteropTest::RunPictures(
           .activations = activations,
           .decode = &decode,
       };
-      ASSERT_EQ(media_->command_prepare(session_, commands_[index], &prepare),
+      ASSERT_EQ(media_->command_prepare(commands_[index], &prepare),
                 AMDF_STATUS_OK);
     }
     ASSERT_NO_FATAL_FAILURE(source->TransferHostCache(

@@ -16,10 +16,8 @@ extern "C" {
 #endif
 
 typedef struct amdf_media_drm_command_t {
-  // Exact borrowed queue and provider identity.
+  // Exact borrowed session and provider identity.
   amdf_media_command_t base;
-  // Session borrow retained after successful preparation, or NULL initially.
-  amdf_media_drm_session_t* session;
   // Native command storage provisioned once, writable only after retirement.
   amdf_media_drm_buffer_t* storage;
   // Complete immutable native IB byte extent after preparation.
@@ -41,11 +39,11 @@ typedef struct amdf_media_drm_command_t {
 } amdf_media_drm_command_t;
 
 amdf_status_t AMDF_CALL amdf_media_drm_command_create(
-    amdf_kernel_queue_t* queue,
+    amdf_media_session_t* session,
     const amdf_media_command_create_info_t* create_info,
     amdf_media_command_t** out_command);
 amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
-    amdf_media_session_t* session, amdf_media_command_t* command,
+    amdf_media_command_t* command,
     const amdf_media_command_prepare_info_t* prepare_info);
 amdf_status_t AMDF_CALL amdf_media_drm_command_query_result(
     amdf_media_command_t* command, amdf_media_command_result_info_t* out_info);

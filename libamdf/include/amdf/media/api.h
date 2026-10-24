@@ -102,20 +102,21 @@ typedef struct amdf_media_api_t {
       amdf_media_session_t* session, amdf_media_session_info_t* out_info);
 
   /// Provisions one native recording and association with caller-owned feedback
-  /// storage. The command borrows its queue and supplied backing through
-  /// release.
+  /// storage. The command borrows its immutable session and supplied backing
+  /// through release. Session-specific native storage is allocated here, never
+  /// during preparation.
   amdf_status_t(AMDF_CALL* command_create)(
-      amdf_kernel_queue_t* queue,
+      amdf_media_session_t* session,
       const amdf_media_command_create_info_t* create_info,
       amdf_media_command_t** out_command);
 
   /// Records one operation in an idle or checked-retired command. Temporary CPU
   /// arrays are consumed before return; native owners remain borrowed. BUSY
-  /// never waits, picks another slot, or grows a pool. Preparation can allocate
-  /// inside the native recording implementation. The caller serializes access
-  /// to a command and preserves session-required recording/execution order.
+  /// never waits, picks another slot, or grows a pool. The caller serializes
+  /// access to a command and preserves session-required recording/execution
+  /// order.
   amdf_status_t(AMDF_CALL* command_prepare)(
-      amdf_media_session_t* session, amdf_media_command_t* command,
+      amdf_media_command_t* command,
       const amdf_media_command_prepare_info_t* prepare_info);
 
   /// Publishes one prepared command. Zero accepted_submission means rejection

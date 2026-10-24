@@ -184,8 +184,9 @@ class MediaQueueTest : public ::testing::Test {
     ASSERT_EQ(amdf_media_drm_queue_create(&device_.base.base, &create, &queue_),
               AMDF_STATUS_OK);
     storage_.address = 4096;
+    session_.base.queue = queue_;
     for (auto& command : commands_) {
-      command.base.queue = queue_;
+      command.base.session = &session_.base;
       command.storage = &storage_;
       command.byte_length = 64;
     }
@@ -232,6 +233,8 @@ class MediaQueueTest : public ::testing::Test {
   amdf_media_drm_buffer_t storage_ = {};
   // Explicit application recording slots, without native command allocation.
   std::array<amdf_media_drm_command_t, 4> commands_ = {};
+  // Immutable session owner shared by the modeled recording slots.
+  amdf_media_drm_session_t session_ = {};
   // Native dependency state and counters, separate from production queue state.
   NativeQueue native_;
 };
@@ -295,13 +298,8 @@ class MediaVideoQueueTest : public MediaQueueTest {
 
 TEST_F(MediaVideoQueueTest,
        RejectedControlPublicationPreservesSessionLifetime) {
-  amdf_media_drm_session_t session = {};
-  session.base.queue = queue_;
-  commands_[0].session = &session;
   commands_[0].operation = AMDF_MEDIA_COMMAND_OPERATION_BEGIN;
-  commands_[1].session = &session;
   commands_[1].operation = AMDF_MEDIA_COMMAND_OPERATION_PICTURE;
-  commands_[2].session = &session;
   commands_[2].operation = AMDF_MEDIA_COMMAND_OPERATION_END;
   uint64_t accepted = 0;
   native_.submit_error = EBUSY;

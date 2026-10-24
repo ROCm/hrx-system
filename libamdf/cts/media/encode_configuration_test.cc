@@ -372,7 +372,7 @@ TEST_F(EncodeConfigurationTest, UnsupportedTuplesHaveSpecificReasons) {
   EXPECT_EQ(result.reason, AMDF_MEDIA_CONFIGURATION_REASON_CODEC);
 }
 
-TEST_F(EncodeConfigurationTest, QueueExistsBeforeExecutionImplementation) {
+TEST_F(EncodeConfigurationTest, SessionMatchesProviderExecutionSupport) {
   const EncodeCase test_case = {AMDF_MEDIA_CODEC_H264,
                                 AMDF_MEDIA_PIXEL_FORMAT_NV12, 8};
   ConfigurationChain chain;
@@ -394,9 +394,16 @@ TEST_F(EncodeConfigurationTest, QueueExistsBeforeExecutionImplementation) {
       .configuration = requirements.configuration,
   };
   amdf_media_session_t* session = nullptr;
+#ifdef _WIN32
+  ASSERT_EQ(media_->session_create(queue_, &session_create, &session),
+            AMDF_STATUS_OK);
+  ASSERT_NE(session, nullptr);
+  ASSERT_EQ(media_->session_destroy(session), AMDF_STATUS_OK);
+#else
   EXPECT_EQ(media_->session_create(queue_, &session_create, &session),
             amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
   EXPECT_EQ(session, nullptr);
+#endif  // _WIN32
 }
 
 }  // namespace

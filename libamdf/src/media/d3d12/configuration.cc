@@ -742,6 +742,8 @@ amdf_status_t QueryEncodeConfiguration(
     }
   }
   native->resolution = {configuration.coded_width, configuration.coded_height};
+  native->subregion_mode =
+      D3D12_VIDEO_ENCODER_FRAME_SUBREGION_LAYOUT_MODE_FULL_FRAME;
   D3D12_FEATURE_DATA_VIDEO_ENCODER_RESOLUTION_SUPPORT_LIMITS limits = {};
   D3D12_FEATURE_DATA_VIDEO_ENCODER_SUPPORT1 support = {
       .Codec = native->codec,
@@ -768,6 +770,7 @@ amdf_status_t QueryEncodeConfiguration(
     native->tiles.ColWidths[0] = (configuration.coded_width + 63) / 64;
     support.SubregionFrameEncoding =
         D3D12_VIDEO_ENCODER_FRAME_SUBREGION_LAYOUT_MODE_UNIFORM_GRID_PARTITION;
+    native->subregion_mode = support.SubregionFrameEncoding;
     support.SubregionFrameEncodingData = {sizeof(native->tiles)};
     support.SubregionFrameEncodingData.pTilesPartition_AV1 = &native->tiles;
   }
@@ -857,6 +860,8 @@ amdf_status_t QueryEncodeConfiguration(
         sizeof(native->tiles) +
         sizeof(D3D12_VIDEO_ENCODER_AV1_POST_ENCODE_VALUES);
   }
+  native->metadata_byte_length = resources.MaxEncoderOutputMetadataBufferSize;
+  native->metadata_alignment = resources.EncoderMetadataBufferAccessAlignment;
   *out_info = info;
   return AMDF_STATUS_OK;
 }

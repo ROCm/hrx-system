@@ -16,9 +16,12 @@
 #include "libamdf/src/structure.h"
 
 amdf_status_t AMDF_CALL amdf_media_drm_command_create(
-    amdf_kernel_queue_t* queue,
+    amdf_media_session_t* session_base,
     const amdf_media_command_create_info_t* create_info,
     amdf_media_command_t** out_command) {
+  amdf_media_drm_session_t* session = (amdf_media_drm_session_t*)session_base;
+  amdf_kernel_queue_t* queue = session_base->queue;
+  const amdf_media_codec_t codec = session->requirements.configuration.codec;
   if (create_info->feedback.memory != NULL ||
       create_info->feedback.access_ordinal != 0 ||
       create_info->feedback.byte_offset != 0 ||
@@ -31,11 +34,10 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_create(
   }
   const bool jpeg =
       ((const amdf_media_drm_queue_t*)queue)->ip_type == AMDGPU_HW_IP_VCN_JPEG;
-  if (jpeg ? create_info->codec != AMDF_MEDIA_CODEC_JPEG
-           : create_info->codec != AMDF_MEDIA_CODEC_H264 &&
-                 create_info->codec != AMDF_MEDIA_CODEC_HEVC &&
-                 create_info->codec != AMDF_MEDIA_CODEC_VP9 &&
-                 create_info->codec != AMDF_MEDIA_CODEC_AV1) {
+  if (jpeg ? codec != AMDF_MEDIA_CODEC_JPEG
+           : codec != AMDF_MEDIA_CODEC_H264 && codec != AMDF_MEDIA_CODEC_HEVC &&
+                 codec != AMDF_MEDIA_CODEC_VP9 &&
+                 codec != AMDF_MEDIA_CODEC_AV1) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   const uint32_t capacity =
@@ -47,15 +49,14 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_create(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  command->base.queue = queue;
-  command->base.codec = create_info->codec;
+  command->base.session = session_base;
   command->maximum_activation_count = create_info->maximum_activation_count;
   command->maximum_slice_count = create_info->maximum_slice_count;
   command->maximum_reference_count = create_info->maximum_reference_count;
   command->buffers = (struct drm_amdgpu_bo_list_entry*)(command + 1);
   amdf_media_drm_device_t* device = (amdf_media_drm_device_t*)queue->device;
   const uint64_t storage_length =
-      create_info->codec == AMDF_MEDIA_CODEC_AV1
+      codec == AMDF_MEDIA_CODEC_AV1
           ? (AMDF_MEDIA_DRM_VCN_AV1_AUXILIARY_OFFSET +
              AMDF_MEDIA_DRM_VCN_AV1_AUXILIARY_BYTES + device->page_size - 1) &
                 ~(device->page_size - 1)
@@ -64,6 +65,12 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_create(
                                          &command->storage);
   if (amdf_status_is_ok(status)) {
     status = amdf_child_tracker_register(&queue->children);
+  }
+  if (amdf_status_is_ok(status)) {
+    status = amdf_child_tracker_register(&session->commands);
+    if (!amdf_status_is_ok(status)) {
+      amdf_child_tracker_unregister(&queue->children);
+    }
   }
   if (!amdf_status_is_ok(status)) {
     const amdf_status_t cleanup =
@@ -120,11 +127,12 @@ static void amdf_media_drm_command_add_buffer(
 }
 
 amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
-    amdf_media_session_t* session_base, amdf_media_command_t* command_base,
+    amdf_media_command_t* command_base,
     const amdf_media_command_prepare_info_t* prepare_info) {
+  amdf_media_session_t* session_base = command_base->session;
   amdf_media_drm_command_t* command = (amdf_media_drm_command_t*)command_base;
   amdf_media_drm_session_t* session = (amdf_media_drm_session_t*)session_base;
-  amdf_media_drm_queue_t* queue = (amdf_media_drm_queue_t*)command_base->queue;
+  amdf_media_drm_queue_t* queue = (amdf_media_drm_queue_t*)session_base->queue;
   amdf_media_drm_device_t* device =
       (amdf_media_drm_device_t*)queue->base.device;
   if (command->submission > amdf_atomic_uint64_load_acquire(&queue->retired)) {
@@ -134,9 +142,6 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
       amdf_atomic_uint64_load_acquire(&queue->terminal_status);
   if (!amdf_status_is_ok(status)) {
     return status;
-  }
-  if (command_base->codec != session->requirements.configuration.codec) {
-    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
   const bool jpeg =
       session->requirements.configuration.codec == AMDF_MEDIA_CODEC_JPEG;
@@ -337,15 +342,6 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
       status = amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
     }
   }
-  if (amdf_status_is_ok(status) && command->session != session) {
-    status = amdf_child_tracker_register(&session->commands);
-    if (amdf_status_is_ok(status)) {
-      if (command->session != NULL) {
-        amdf_child_tracker_unregister(&command->session->commands);
-      }
-      command->session = session;
-    }
-  }
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -408,7 +404,7 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_query_result(
   const amdf_media_drm_command_t* command =
       (const amdf_media_drm_command_t*)base;
   const amdf_media_drm_queue_t* queue =
-      (const amdf_media_drm_queue_t*)base->queue;
+      (const amdf_media_drm_queue_t*)base->session->queue;
   if (command->submission == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_FAILED_PRECONDITION);
   }
@@ -430,15 +426,14 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_query_result(
 amdf_status_t AMDF_CALL
 amdf_media_drm_command_destroy(amdf_media_command_t* base) {
   amdf_media_drm_command_t* command = (amdf_media_drm_command_t*)base;
-  amdf_media_drm_queue_t* queue = (amdf_media_drm_queue_t*)base->queue;
+  amdf_media_drm_session_t* session = (amdf_media_drm_session_t*)base->session;
+  amdf_media_drm_queue_t* queue = (amdf_media_drm_queue_t*)base->session->queue;
   if (command->submission > amdf_atomic_uint64_load_acquire(&queue->retired)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
   }
   const amdf_status_t status = amdf_media_drm_buffer_release(&command->storage);
   amdf_media_drm_buffer_abandon(&command->storage);
-  if (command->session != NULL) {
-    amdf_child_tracker_unregister(&command->session->commands);
-  }
+  amdf_child_tracker_unregister(&session->commands);
   amdf_child_tracker_unregister(&queue->base.children);
   amdf_free(queue->base.host_allocator, command);
   return status;

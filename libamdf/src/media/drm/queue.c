@@ -457,6 +457,11 @@ amdf_status_t AMDF_CALL amdf_media_drm_queue_submit(
   amdf_media_drm_queue_t* queue = (amdf_media_drm_queue_t*)base;
   amdf_media_drm_command_t* command =
       (amdf_media_drm_command_t*)submission_info->command;
+  if (command->base.session->queue != base) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  amdf_media_drm_session_t* session =
+      (amdf_media_drm_session_t*)command->base.session;
   uint32_t expected = 0;
   if (!amdf_atomic_uint32_compare_exchange_acq_rel(&queue->publishing,
                                                    &expected, 1)) {
@@ -478,7 +483,7 @@ amdf_status_t AMDF_CALL amdf_media_drm_queue_submit(
     }
   }
   if (amdf_status_is_ok(status) && queue->ip_type != AMDGPU_HW_IP_VCN_JPEG) {
-    const amdf_media_command_operation_t prior = command->session->operation;
+    const amdf_media_command_operation_t prior = session->operation;
     const bool valid = command->operation == AMDF_MEDIA_COMMAND_OPERATION_BEGIN
                            ? prior == 0
                            : prior == AMDF_MEDIA_COMMAND_OPERATION_BEGIN;
@@ -542,7 +547,7 @@ amdf_status_t AMDF_CALL amdf_media_drm_queue_submit(
       command->submission = submission;
       if (queue->ip_type != AMDGPU_HW_IP_VCN_JPEG &&
           command->operation != AMDF_MEDIA_COMMAND_OPERATION_PICTURE) {
-        command->session->operation = command->operation;
+        session->operation = command->operation;
       }
       amdf_kernel_queue_dependency_record_waits(
           submission_info->wait_count, submission_info->waits, submission);
