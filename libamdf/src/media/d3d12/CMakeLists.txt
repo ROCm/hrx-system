@@ -171,6 +171,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD)
 iree_cc_library(
   NAME
     configuration
+  HDRS
+    "configuration.h"
   SRCS
     "configuration.cc"
   DEPS
@@ -179,6 +181,9 @@ iree_cc_library(
     amdf::headers
     libamdf::src::endpoint
     libamdf::src::instance
+    libamdf::src::media::av1
+    libamdf::src::media::h264
+    libamdf::src::media::hevc
     libamdf::src::structure
   PUBLIC
 )

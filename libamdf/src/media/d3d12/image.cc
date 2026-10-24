@@ -10,6 +10,7 @@
 
 #include "amdf/gpu.h"
 #include "libamdf/src/endpoint.h"
+#include "libamdf/src/media/d3d12/configuration.h"
 #include "libamdf/src/media/d3d12/memory.h"
 #include "libamdf/src/media/d3d12/object.h"
 #include "libamdf/src/structure.h"
@@ -103,7 +104,8 @@ amdf_status_t QualifyLayouts(
     return AMDF_STATUS_OK;
   }
   const auto& description = image->requirements.description;
-  if ((description.roles & AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT) == 0 ||
+  if ((description.roles & (AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT |
+                            AMDF_MEDIA_IMAGE_ROLE_ENCODE_INPUT)) == 0 ||
       device->native->GetDescriptorHandleIncrementSize(
           D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) != 32) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);

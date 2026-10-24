@@ -10,6 +10,7 @@
 
 #include "libamdf/src/endpoint.h"
 #include "libamdf/src/media/d3d12/command.h"
+#include "libamdf/src/media/d3d12/configuration.h"
 #include "libamdf/src/media/d3d12/image.h"
 #include "libamdf/src/media/d3d12/memory.h"
 #include "libamdf/src/media/d3d12/object.h"
@@ -36,6 +37,7 @@ amdf_status_t QueryReservationProfile(amdf_device_t*, uint32_t,
 
 amdf_status_t DestroyNative(amdf_device_t* base) {
   auto* device = reinterpret_cast<Device*>(base);
+  device->encoder.Reset();
   device->video.Reset();
   device->native.Reset();
   if (device->kmt_device != 0) {
@@ -64,17 +66,25 @@ amdf_status_t DestroyNative(amdf_device_t* base) {
   return AMDF_STATUS_OK;
 }
 
-amdf_status_t AMDF_CALL EnumerateCodecs(amdf_device_t*, uint32_t,
+amdf_status_t AMDF_CALL EnumerateCodecs(amdf_device_t*, uint32_t ordinal,
                                         uint32_t capacity,
                                         amdf_media_codec_info_t* codecs,
                                         uint32_t* count) {
-  static constexpr amdf_media_codec_info_t supported[] = {
+  static constexpr amdf_media_codec_info_t decode[] = {
       {AMDF_MEDIA_CODEC_H264, AMDF_MEDIA_DIRECTION_DECODE},
       {AMDF_MEDIA_CODEC_HEVC, AMDF_MEDIA_DIRECTION_DECODE},
       {AMDF_MEDIA_CODEC_VP9, AMDF_MEDIA_DIRECTION_DECODE},
       {AMDF_MEDIA_CODEC_AV1, AMDF_MEDIA_DIRECTION_DECODE},
   };
-  *count = sizeof(supported) / sizeof(supported[0]);
+  static constexpr amdf_media_codec_info_t encode[] = {
+      {AMDF_MEDIA_CODEC_H264, AMDF_MEDIA_DIRECTION_ENCODE},
+      {AMDF_MEDIA_CODEC_HEVC, AMDF_MEDIA_DIRECTION_ENCODE},
+      {AMDF_MEDIA_CODEC_AV1, AMDF_MEDIA_DIRECTION_ENCODE},
+  };
+  const amdf_media_codec_info_t* supported =
+      ordinal == kDecodeFamilyOrdinal ? decode : encode;
+  *count = ordinal == kDecodeFamilyOrdinal ? sizeof(decode) / sizeof(decode[0])
+                                           : sizeof(encode) / sizeof(encode[0]);
   if (capacity != 0 && capacity < *count) {
     return amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL);
   }
@@ -88,8 +98,8 @@ amdf_status_t AMDF_CALL QueryDeviceConfiguration(
     amdf_device_t* base, const amdf_media_configuration_query_t* query,
     amdf_media_configuration_info_t* out_info) {
   return QueryConfiguration(reinterpret_cast<Device*>(base),
-                            query->configuration, query->next, out_info,
-                            nullptr);
+                            query->queue_family_ordinal, query->configuration,
+                            query->next, out_info, nullptr, nullptr);
 }
 
 amdf_status_t AMDF_CALL QueryImageRequirements(
@@ -177,6 +187,12 @@ amdf_status_t InitializeNative(Device* device,
   if (amdf_status_is_ok(status)) {
     status = Hresult(device->native.As(&device->video));
   }
+  if (amdf_status_is_ok(status)) {
+    const HRESULT encoder_status = device->video.As(&device->encoder);
+    if (FAILED(encoder_status) && encoder_status != E_NOINTERFACE) {
+      status = Hresult(encoder_status);
+    }
+  }
   D3D12_FEATURE_DATA_GPU_VIRTUAL_ADDRESS_SUPPORT addresses = {};
   if (amdf_status_is_ok(status)) {
     status = Hresult(device->native->CheckFeatureSupport(
@@ -210,18 +226,24 @@ amdf_status_t InitializeNative(Device* device,
   if (device->kmt_device == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
   }
-  device->family.type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO;
-  device->family.structure_size = sizeof(device->family);
-  device->family.command_type = AMDF_QUEUE_COMMAND_TYPE_MEDIA;
-  device->family.publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL;
-  device->family.format_version = AMDF_MEDIA_EXTENSION_VERSION_2;
-  device->family.roles = AMDF_QUEUE_ROLE_MEDIA;
-  device->family.cache_operations = AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM |
-                                    AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM;
-  device->family.cache_transition_kinds = AMDF_CACHE_TRANSITION_KINDS_GLOBAL;
+  const amdf_queue_family_info_t family = {
+      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+      .structure_size = sizeof(family),
+      .command_type = AMDF_QUEUE_COMMAND_TYPE_MEDIA,
+      .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
+      .format_version = AMDF_MEDIA_EXTENSION_VERSION_2,
+      .roles = AMDF_QUEUE_ROLE_MEDIA,
+      .cache_operations = AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM |
+                          AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM,
+      .cache_transition_kinds = AMDF_CACHE_TRANSITION_KINDS_GLOBAL,
+  };
+  device->families[kDecodeFamilyOrdinal] = family;
+  device->families[kEncodeFamilyOrdinal] = family;
   if (amdf_windows_monitored_fence_is_supported(device->kmt)) {
-    device->family.kernel_queue_capabilities =
-        AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION;
+    for (auto& candidate : device->families) {
+      candidate.kernel_queue_capabilities =
+          AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION;
+    }
   }
   return AMDF_STATUS_OK;
 }
@@ -247,9 +269,10 @@ amdf_status_t amdf_media_provider_device_create(
   amdf_atomic_uint64_initialize(&device->removed_status, AMDF_STATUS_OK);
   status = InitializeNative(device, amdf_endpoint_get_platform(endpoint));
   if (amdf_status_is_ok(status)) {
-    status =
-        amdf_device_initialize(&device->base.base, &kDeviceVtable, endpoint,
-                               AMDF_EXTENSION_MEDIA, 1, &device->family);
+    const uint32_t family_count = device->encoder != nullptr ? kFamilyCount : 1;
+    status = amdf_device_initialize(&device->base.base, &kDeviceVtable,
+                                    endpoint, AMDF_EXTENSION_MEDIA,
+                                    family_count, device->families);
   }
   if (!amdf_status_is_ok(status)) {
     const amdf_status_t cleanup = DestroyNative(&device->base.base);

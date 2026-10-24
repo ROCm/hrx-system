@@ -263,6 +263,7 @@ amdf_status_t amdf_media_hevc_validate_encode_configuration(
       hevc_encode->level_idc == 0 || hevc_encode->level_idc > 255 ||
       (hevc_encode->tier != AMDF_MEDIA_HEVC_TIER_MAIN &&
        hevc_encode->tier != AMDF_MEDIA_HEVC_TIER_HIGH) ||
+      hevc_encode->log2_max_picture_order_count_lsb_minus4 > 12 ||
       hevc_encode->minimum_luma_coding_unit_log2 < 3 ||
       hevc_encode->maximum_luma_coding_unit_log2 > 6 ||
       hevc_encode->minimum_luma_coding_unit_log2 >

@@ -22,6 +22,9 @@ iree_cc_library(
     libamdf::src::allocator
     libamdf::src::endpoint
     libamdf::src::instance
+    libamdf::src::media::av1
+    libamdf::src::media::h264
+    libamdf::src::media::hevc
     libamdf::src::platform::linux::endpoint
     libamdf::src::platform::linux::file
     libamdf::src::structure

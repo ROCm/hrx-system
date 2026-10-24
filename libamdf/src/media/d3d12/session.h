@@ -8,6 +8,7 @@
 #define AMDF_SRC_MEDIA_D3D12_SESSION_H_
 
 #include "amdf/media/av1.h"
+#include "amdf/media/h264.h"
 #include "amdf/media/hevc.h"
 #include "amdf/media/vp9.h"
 #include "libamdf/src/media/d3d12/device.h"

@@ -11,16 +11,29 @@
 
 static uint64_t amdf_media_drm_image_pitch(
     const amdf_media_image_description_t* description) {
-  const uint64_t width =
-      (uint64_t)description->width *
-      (description->format == AMDF_MEDIA_PIXEL_FORMAT_P010 ? 2u : 1u);
-  return (width + 255) & ~UINT64_C(255);
+  const uint64_t sample_bytes =
+      description->format == AMDF_MEDIA_PIXEL_FORMAT_P010 ? 2u : 1u;
+  if ((description->roles & (AMDF_MEDIA_IMAGE_ROLE_ENCODE_INPUT |
+                             AMDF_MEDIA_IMAGE_ROLE_ENCODE_RECONSTRUCTION)) !=
+      0) {
+    return (((uint64_t)description->width + 255) & ~UINT64_C(255)) *
+           sample_bytes;
+  }
+  return ((uint64_t)description->width * sample_bytes + 255) & ~UINT64_C(255);
 }
 
 static uint32_t amdf_media_drm_image_rows(
     const amdf_media_image_description_t* description) {
-  // VCN's separate reference surfaces use a larger reconstruction extent than
-  // the linear decode output. Main10 references require complete 64-row tiles.
+  if (description->roles == AMDF_MEDIA_IMAGE_ROLE_ENCODE_INPUT) {
+    return description->height;
+  }
+  // VCN's encode reconstruction layout uses at least 256 luma rows and a
+  // common 64-row shape across codecs. Decode references retain their native
+  // precision-specific layout.
+  if (description->roles == AMDF_MEDIA_IMAGE_ROLE_ENCODE_RECONSTRUCTION) {
+    const uint32_t rows = (description->height + 63) & ~63u;
+    return rows < 256 ? 256 : rows;
+  }
   const uint32_t alignment =
       (description->roles & AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE) == 0 ? 16
       : description->format == AMDF_MEDIA_PIXEL_FORMAT_P010              ? 64
@@ -35,10 +48,16 @@ amdf_status_t AMDF_CALL amdf_media_drm_image_requirements(
       description->array_layer_count == 0 || description->roles == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
+  const bool supported_roles =
+      description->roles == AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT ||
+      description->roles == AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE ||
+      description->roles == (AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT |
+                             AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE) ||
+      description->roles == AMDF_MEDIA_IMAGE_ROLE_ENCODE_INPUT ||
+      description->roles == AMDF_MEDIA_IMAGE_ROLE_ENCODE_RECONSTRUCTION;
   if ((description->format != AMDF_MEDIA_PIXEL_FORMAT_NV12 &&
        description->format != AMDF_MEDIA_PIXEL_FORMAT_P010) ||
-      (description->roles & ~(AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT |
-                              AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE)) != 0 ||
+      !supported_roles ||
       ((description->width | description->height) & 1) != 0 ||
       description->width > 65534 || description->height > 65520) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
@@ -68,12 +87,19 @@ amdf_status_t AMDF_CALL amdf_media_drm_image_create(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  if (create_info->requirements.byte_length != requirements.byte_length ||
-      create_info->requirements.byte_offset_alignment !=
-          requirements.byte_offset_alignment) {
+  const bool reconstruction = requirements.description.roles ==
+                              AMDF_MEDIA_IMAGE_ROLE_ENCODE_RECONSTRUCTION;
+  const uint64_t supplied_alignment =
+      create_info->requirements.byte_offset_alignment;
+  if ((!reconstruction &&
+       create_info->requirements.byte_length != requirements.byte_length) ||
+      (reconstruction &&
+       create_info->requirements.byte_length < requirements.byte_length) ||
+      supplied_alignment < requirements.byte_offset_alignment ||
+      (supplied_alignment & (supplied_alignment - 1)) != 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  if (create_info->byte_offset % requirements.byte_offset_alignment != 0) {
+  if (create_info->byte_offset % supplied_alignment != 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
   amdf_media_drm_buffer_t* buffer;
@@ -81,11 +107,11 @@ amdf_status_t AMDF_CALL amdf_media_drm_image_create(
   status = amdf_media_drm_memory_range(
       (amdf_media_drm_device_t*)device, create_info->memory,
       create_info->media_access_ordinal, create_info->byte_offset,
-      requirements.byte_length, &buffer, &address);
+      create_info->requirements.byte_length, &buffer, &address);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  if (address % requirements.byte_offset_alignment != 0) {
+  if (address % supplied_alignment != 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   for (uint32_t i = 0;
@@ -104,7 +130,7 @@ amdf_status_t AMDF_CALL amdf_media_drm_image_create(
     return status;
   }
   image->base.device = (amdf_media_device_t*)device;
-  image->requirements = requirements;
+  image->requirements = create_info->requirements;
   image->memory = create_info->memory;
   image->access_ordinal = create_info->media_access_ordinal;
   image->byte_offset = create_info->byte_offset;

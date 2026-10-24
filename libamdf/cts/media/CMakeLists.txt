@@ -9,6 +9,58 @@
 
 iree_add_all_subdirs()
 
+if(IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+iree_cc_library(
+  NAME
+    encode_configuration_cases
+  SRCS
+    "encode_configuration_test.cc"
+  DEPS
+    amdf::headers
+    iree::third_party::google_test
+    libamdf::cts::util::device_cache
+    libamdf::cts::util::provider_headers
+  TESTONLY
+  ALWAYSLINK
+  PUBLIC
+)
+endif()
+
+if(IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+amdf_cts_binary(
+  NAME
+    encode_configuration_dynamic_bin
+  DATA
+    amdf::amdf
+  DEPS
+    ::encode_configuration_cases
+    amdf::headers
+    libamdf::cts::util::dynamic_provider
+    libamdf::cts::util::test_main
+  TESTONLY
+)
+endif()
+
+if(IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+iree_native_test(
+  NAME
+    "encode_configuration_dynamic"
+  ARGS
+    "--amdf_native_lifetime=process"
+    "--amdf_library={{$<TARGET_FILE:amdf::amdf>}}"
+  SRC
+    ::encode_configuration_dynamic_bin
+  DATA
+    "amdf::amdf"
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 iree_c_embed_data(
   NAME
     jpeg_fixtures

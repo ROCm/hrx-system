@@ -18,6 +18,9 @@ amdf_status_t AMDF_CALL amdf_media_drm_session_create(
     amdf_kernel_queue_t* queue,
     const amdf_media_session_create_info_t* create_info,
     amdf_media_session_t** out_session) {
+  if (create_info->configuration.direction != AMDF_MEDIA_DIRECTION_DECODE) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
   amdf_media_configuration_info_t requirements = {
       .type = AMDF_STRUCTURE_TYPE_MEDIA_CONFIGURATION_INFO,
       .structure_size = sizeof(requirements),

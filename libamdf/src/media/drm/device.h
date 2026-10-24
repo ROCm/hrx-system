@@ -45,6 +45,8 @@ typedef struct amdf_media_drm_device_t {
   amdf_status_t memory_status;
   // Native codec envelopes; advertising a schema also requires its lowering.
   struct drm_amdgpu_info_video_caps decode_limits;
+  // Native encode envelopes, kept distinct from decode support.
+  struct drm_amdgpu_info_video_caps encode_limits;
   // Native engines indexed by the corresponding public family ordinal.
   amdf_media_drm_engine_t engines[2];
   // Immutable execution families exposed by this activation.

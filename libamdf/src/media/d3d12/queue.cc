@@ -297,7 +297,8 @@ QueueCreate(amdf_device_t* base,
             amdf_kernel_queue_t** out_queue) {
   auto* device = reinterpret_cast<Device*>(base);
   if ((create_info->required_capabilities &
-       ~device->family.kernel_queue_capabilities) != 0) {
+       ~device->families[create_info->queue_family_ordinal]
+            .kernel_queue_capabilities) != 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   Queue* queue = nullptr;
@@ -311,7 +312,9 @@ QueueCreate(amdf_device_t* base,
   amdf_atomic_uint64_initialize(&queue->retired, 0);
   amdf_atomic_uint64_initialize(&queue->terminal_status, AMDF_STATUS_OK);
   D3D12_COMMAND_QUEUE_DESC description = {
-      .Type = D3D12_COMMAND_LIST_TYPE_VIDEO_DECODE,
+      .Type = create_info->queue_family_ordinal == kEncodeFamilyOrdinal
+                  ? D3D12_COMMAND_LIST_TYPE_VIDEO_ENCODE
+                  : D3D12_COMMAND_LIST_TYPE_VIDEO_DECODE,
   };
   status = Hresult(device->native->CreateCommandQueue(
       &description, IID_PPV_ARGS(&queue->native)));

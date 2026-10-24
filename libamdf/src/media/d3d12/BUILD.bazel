@@ -149,6 +149,7 @@ amdf_cc_library(
 amdf_cc_library(
     name = "configuration",
     srcs = ["configuration.cc"],
+    hdrs = ["configuration.h"],
     target_compatible_with = ["@platforms//os:windows"],
     deps = [
         ":device_state",
@@ -156,6 +157,9 @@ amdf_cc_library(
         "//libamdf/src:endpoint",
         "//libamdf/src:instance",
         "//libamdf/src:structure",
+        "//libamdf/src/media:av1",
+        "//libamdf/src/media:h264",
+        "//libamdf/src/media:hevc",
     ],
 )
 

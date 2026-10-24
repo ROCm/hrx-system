@@ -6,6 +6,7 @@
 
 #include "libamdf/src/media/d3d12/session.h"
 
+#include "libamdf/src/media/d3d12/configuration.h"
 #include "libamdf/src/media/d3d12/object.h"
 
 namespace amdf::media::d3d12 {
@@ -14,14 +15,17 @@ amdf_status_t AMDF_CALL
 SessionCreate(amdf_kernel_queue_t* queue,
               const amdf_media_session_create_info_t* create_info,
               amdf_media_session_t** out_session) {
+  if (create_info->configuration.direction != AMDF_MEDIA_DIRECTION_DECODE) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
   auto* device = reinterpret_cast<Device*>(queue->device);
   amdf_media_configuration_info_t requirements = {
       .structure_size = sizeof(requirements),
   };
   D3D12_VIDEO_DECODER_DESC decoder = {};
-  amdf_status_t status =
-      QueryConfiguration(device, create_info->configuration, create_info->next,
-                         &requirements, &decoder.Configuration);
+  amdf_status_t status = QueryConfiguration(
+      device, queue->info.queue_family_ordinal, create_info->configuration,
+      create_info->next, &requirements, &decoder.Configuration, nullptr);
   if (!amdf_status_is_ok(status)) {
     return status;
   }

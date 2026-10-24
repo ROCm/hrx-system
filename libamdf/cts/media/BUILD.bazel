@@ -18,12 +18,25 @@ test_suite(
     name = "media",
     tests = [
         ":av1",
+        ":encode_configuration",
         ":h264",
         ":hevc",
         ":jpeg",
         ":vp9",
     ],
     visibility = ["//visibility:public"],
+)
+
+amdf_cts_test_suite(
+    name = "encode_configuration",
+    srcs = ["encode_configuration_test.cc"],
+    target_compatible_with = ["@platforms//cpu:x86_64"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//libamdf/cts/util:device_cache",
+        "//libamdf/cts/util:provider_headers",
+        "//third_party:google_test",
+    ],
 )
 
 iree_c_embed_data(

@@ -12,7 +12,10 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/endpoint.h"
 #include "libamdf/src/instance.h"
+#include "libamdf/src/media/av1.h"
 #include "libamdf/src/media/drm/command.h"
+#include "libamdf/src/media/h264.h"
+#include "libamdf/src/media/hevc.h"
 #include "libamdf/src/platform/linux/endpoint.h"
 #include "libamdf/src/platform/linux/file.h"
 #include "libamdf/src/structure.h"
@@ -73,19 +76,24 @@ static const struct {
   amdf_media_codec_t codec;
   // Kernel engine carrying this codec's commands.
   uint32_t engine;
-  // Index in the kernel's decode-capability array.
+  // Index in the kernel's direction-specific codec-capability arrays.
   uint32_t capability;
+  // Bitset of implemented public directions on this engine.
+  uint32_t directions;
 } amdf_media_drm_codecs[] = {
     {AMDF_MEDIA_CODEC_JPEG, AMDGPU_HW_IP_VCN_JPEG,
-     AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_JPEG},
+     AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_JPEG, 1u << AMDF_MEDIA_DIRECTION_DECODE},
     {AMDF_MEDIA_CODEC_H264, AMDGPU_HW_IP_VCN_ENC,
-     AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_MPEG4_AVC},
+     AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_MPEG4_AVC,
+     (1u << AMDF_MEDIA_DIRECTION_DECODE) | (1u << AMDF_MEDIA_DIRECTION_ENCODE)},
     {AMDF_MEDIA_CODEC_HEVC, AMDGPU_HW_IP_VCN_ENC,
-     AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_HEVC},
+     AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_HEVC,
+     (1u << AMDF_MEDIA_DIRECTION_DECODE) | (1u << AMDF_MEDIA_DIRECTION_ENCODE)},
     {AMDF_MEDIA_CODEC_VP9, AMDGPU_HW_IP_VCN_ENC,
-     AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_VP9},
+     AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_VP9, 1u << AMDF_MEDIA_DIRECTION_DECODE},
     {AMDF_MEDIA_CODEC_AV1, AMDGPU_HW_IP_VCN_ENC,
-     AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_AV1},
+     AMDGPU_INFO_VIDEO_CAPS_CODEC_IDX_AV1,
+     (1u << AMDF_MEDIA_DIRECTION_DECODE) | (1u << AMDF_MEDIA_DIRECTION_ENCODE)},
 };
 
 enum {
@@ -99,13 +107,25 @@ static amdf_status_t AMDF_CALL amdf_media_drm_enumerate_codecs(
   const amdf_media_drm_device_t* native =
       (const amdf_media_drm_device_t*)device;
   uint32_t total = 0;
-  amdf_media_codec_info_t available[AMDF_MEDIA_DRM_CODEC_COUNT];
+  amdf_media_codec_info_t available[AMDF_MEDIA_DRM_CODEC_COUNT * 2];
   for (uint32_t i = 0; i < AMDF_MEDIA_DRM_CODEC_COUNT; ++i) {
-    if (native->engines[ordinal].ip_type == amdf_media_drm_codecs[i].engine &&
-        native->decode_limits.codec_info[amdf_media_drm_codecs[i].capability]
-            .valid) {
-      available[total++] = (amdf_media_codec_info_t){
-          amdf_media_drm_codecs[i].codec, AMDF_MEDIA_DIRECTION_DECODE};
+    if (native->engines[ordinal].ip_type != amdf_media_drm_codecs[i].engine) {
+      continue;
+    }
+    const amdf_media_direction_t directions[] = {
+        AMDF_MEDIA_DIRECTION_DECODE,
+        AMDF_MEDIA_DIRECTION_ENCODE,
+    };
+    for (uint32_t j = 0; j < 2; ++j) {
+      const amdf_media_direction_t direction = directions[j];
+      const struct drm_amdgpu_info_video_caps* limits =
+          direction == AMDF_MEDIA_DIRECTION_DECODE ? &native->decode_limits
+                                                   : &native->encode_limits;
+      if ((amdf_media_drm_codecs[i].directions & (1u << direction)) != 0 &&
+          limits->codec_info[amdf_media_drm_codecs[i].capability].valid) {
+        available[total++] = (amdf_media_codec_info_t){
+            amdf_media_drm_codecs[i].codec, direction};
+      }
     }
   }
   *count = total;
@@ -120,7 +140,7 @@ static amdf_status_t AMDF_CALL amdf_media_drm_enumerate_codecs(
   return AMDF_STATUS_OK;
 }
 
-amdf_status_t amdf_media_drm_configuration(
+static amdf_status_t amdf_media_drm_decode_configuration(
     amdf_media_drm_device_t* device, uint32_t family_ordinal,
     const amdf_media_configuration_t* configuration, const void* next,
     amdf_media_configuration_info_t* out_info) {
@@ -281,6 +301,251 @@ amdf_status_t amdf_media_drm_configuration(
   return AMDF_STATUS_OK;
 }
 
+static void amdf_media_drm_answer_unsupported(
+    amdf_media_configuration_info_t* info,
+    amdf_media_configuration_reason_t reason,
+    amdf_media_configuration_info_t* out_info) {
+  info->reason = reason;
+  *out_info = *info;
+}
+
+static amdf_status_t amdf_media_drm_encode_configuration(
+    amdf_media_drm_device_t* device, uint32_t family_ordinal,
+    const amdf_media_configuration_t* configuration, const void* next,
+    amdf_media_configuration_info_t* out_info) {
+  amdf_media_configuration_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_CONFIGURATION_INFO,
+      .structure_size = out_info->structure_size,
+      .configuration = *configuration,
+  };
+  const uint32_t engine = device->engines[family_ordinal].ip_type;
+  const struct drm_amdgpu_info_video_codec_info* limits = NULL;
+  for (uint32_t i = 0; i < AMDF_MEDIA_DRM_CODEC_COUNT; ++i) {
+    if (configuration->codec == amdf_media_drm_codecs[i].codec &&
+        engine == amdf_media_drm_codecs[i].engine &&
+        (amdf_media_drm_codecs[i].directions &
+         (1u << AMDF_MEDIA_DIRECTION_ENCODE)) != 0) {
+      limits = &device->encode_limits
+                    .codec_info[amdf_media_drm_codecs[i].capability];
+      break;
+    }
+  }
+  if (limits == NULL || !limits->valid) {
+    amdf_media_drm_answer_unsupported(
+        &info, AMDF_MEDIA_CONFIGURATION_REASON_CODEC, out_info);
+    return AMDF_STATUS_OK;
+  }
+
+  const amdf_media_encode_configuration_t* encode = NULL;
+  const amdf_media_h264_configuration_t* h264 = NULL;
+  const amdf_media_h264_encode_configuration_t* h264_encode = NULL;
+  const amdf_media_hevc_configuration_t* hevc = NULL;
+  const amdf_media_hevc_encode_configuration_t* hevc_encode = NULL;
+  const amdf_media_av1_configuration_t* av1 = NULL;
+  const amdf_media_av1_encode_configuration_t* av1_encode = NULL;
+  amdf_media_pixel_format_t expected_format = AMDF_MEDIA_PIXEL_FORMAT_UNKNOWN;
+  amdf_status_t status = AMDF_STATUS_OK;
+  if (configuration->codec == AMDF_MEDIA_CODEC_H264) {
+    status = amdf_structure_validate_header(
+        next, AMDF_STRUCTURE_TYPE_MEDIA_H264_CONFIGURATION, sizeof(*h264));
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    h264 = next;
+    encode = h264->next;
+    status = amdf_structure_validate_header(
+        encode, AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION,
+        sizeof(*encode));
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    h264_encode = encode->next;
+    status = amdf_structure_validate_input(
+        h264_encode, AMDF_STRUCTURE_TYPE_MEDIA_H264_ENCODE_CONFIGURATION,
+        sizeof(*h264_encode));
+    expected_format = AMDF_MEDIA_PIXEL_FORMAT_NV12;
+  } else if (configuration->codec == AMDF_MEDIA_CODEC_HEVC) {
+    status = amdf_structure_validate_header(
+        next, AMDF_STRUCTURE_TYPE_MEDIA_HEVC_CONFIGURATION, sizeof(*hevc));
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    hevc = next;
+    encode = hevc->next;
+    status = amdf_structure_validate_header(
+        encode, AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION,
+        sizeof(*encode));
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    hevc_encode = encode->next;
+    status = amdf_structure_validate_input(
+        hevc_encode, AMDF_STRUCTURE_TYPE_MEDIA_HEVC_ENCODE_CONFIGURATION,
+        sizeof(*hevc_encode));
+    if (hevc->sample_bit_depth == 8) {
+      expected_format = AMDF_MEDIA_PIXEL_FORMAT_NV12;
+    } else if (hevc->sample_bit_depth == 10) {
+      expected_format = AMDF_MEDIA_PIXEL_FORMAT_P010;
+    }
+  } else {
+    status = amdf_structure_validate_header(
+        next, AMDF_STRUCTURE_TYPE_MEDIA_AV1_CONFIGURATION, sizeof(*av1));
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    av1 = next;
+    encode = av1->next;
+    status = amdf_structure_validate_header(
+        encode, AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION,
+        sizeof(*encode));
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    av1_encode = encode->next;
+    status = amdf_structure_validate_input(
+        av1_encode, AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_CONFIGURATION,
+        sizeof(*av1_encode));
+    if (av1->sample_bit_depth == 8) {
+      expected_format = AMDF_MEDIA_PIXEL_FORMAT_NV12;
+    } else if (av1->sample_bit_depth == 10) {
+      expected_format = AMDF_MEDIA_PIXEL_FORMAT_P010;
+    }
+  }
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  if (configuration->format != expected_format) {
+    amdf_media_drm_answer_unsupported(
+        &info, AMDF_MEDIA_CONFIGURATION_REASON_FORMAT, out_info);
+    return AMDF_STATUS_OK;
+  }
+  if (configuration->reference_image_count < 2) {
+    amdf_media_drm_answer_unsupported(
+        &info, AMDF_MEDIA_CONFIGURATION_REASON_REFERENCE_STORAGE, out_info);
+    return AMDF_STATUS_OK;
+  }
+  const uint64_t pixel_count =
+      (uint64_t)configuration->coded_width * configuration->coded_height;
+  const bool av1_tile_too_large =
+      av1 != NULL && (configuration->coded_width > 4096 ||
+                      pixel_count > UINT64_C(4096) * UINT64_C(2304));
+  if (configuration->coded_width < 64 || configuration->coded_height < 64 ||
+      ((configuration->coded_width | configuration->coded_height) & 1) != 0 ||
+      configuration->coded_width > limits->max_width ||
+      configuration->coded_height > limits->max_height ||
+      pixel_count > limits->max_pixels_per_frame || av1_tile_too_large) {
+    amdf_media_drm_answer_unsupported(
+        &info, AMDF_MEDIA_CONFIGURATION_REASON_DIMENSIONS, out_info);
+    return AMDF_STATUS_OK;
+  }
+  if (h264 != NULL) {
+    status = amdf_media_h264_validate_encode_configuration(configuration, h264,
+                                                           encode, h264_encode);
+  } else if (hevc != NULL) {
+    status = amdf_media_hevc_validate_encode_configuration(configuration, hevc,
+                                                           encode, hevc_encode);
+    if (amdf_status_is_ok(status) &&
+        (hevc_encode->minimum_luma_coding_unit_log2 != 3 ||
+         hevc_encode->maximum_luma_coding_unit_log2 != 6 ||
+         hevc_encode->minimum_luma_transform_unit_log2 != 2 ||
+         hevc_encode->maximum_luma_transform_unit_log2 != 5 ||
+         hevc_encode->maximum_transform_hierarchy_depth_inter != 4 ||
+         hevc_encode->maximum_transform_hierarchy_depth_intra != 4)) {
+      status = amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
+  } else {
+    status = amdf_media_av1_validate_encode_configuration(configuration, av1,
+                                                          encode, av1_encode);
+    const uint32_t required_features =
+        AMDF_MEDIA_AV1_ENCODE_FEATURE_ORDER_HINT |
+        AMDF_MEDIA_AV1_ENCODE_FEATURE_CDEF;
+    if (amdf_status_is_ok(status) &&
+        (av1_encode->feature_flags != required_features ||
+         av1_encode->order_hint_bit_count != 4)) {
+      status = amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
+  }
+  if (!amdf_status_is_ok(status)) {
+    amdf_media_drm_answer_unsupported(
+        &info, AMDF_MEDIA_CONFIGURATION_REASON_CODEC, out_info);
+    return AMDF_STATUS_OK;
+  }
+
+  amdf_media_image_description_t description = {
+      .format = configuration->format,
+      .width = configuration->coded_width,
+      .height = configuration->coded_height,
+      .array_layer_count = 1,
+      .roles = AMDF_MEDIA_IMAGE_ROLE_ENCODE_INPUT,
+  };
+  status = amdf_media_drm_image_requirements(&device->base.base, &description,
+                                             &info.input);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  description.array_layer_count = configuration->reference_image_count;
+  description.roles = AMDF_MEDIA_IMAGE_ROLE_ENCODE_RECONSTRUCTION;
+  status = amdf_media_drm_image_requirements(&device->base.base, &description,
+                                             &info.reference);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  if (av1 != NULL) {
+    const uint64_t auxiliary_byte_length =
+        UINT64_C(947200) + (uint64_t)configuration->reference_image_count *
+                               (UINT64_C(22528) + UINT64_C(1536));
+    if (info.reference.byte_length > UINT64_MAX - auxiliary_byte_length ||
+        info.reference.byte_length + auxiliary_byte_length >
+            device->address_end - device->address_begin) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+    }
+    info.reference.byte_length += auxiliary_byte_length;
+  }
+  info.reference.byte_offset_alignment = device->page_size;
+
+  const uint64_t storage_width =
+      ((uint64_t)configuration->coded_width + 255) & ~UINT64_C(255);
+  const uint64_t storage_height =
+      ((uint64_t)configuration->coded_height + 63) & ~UINT64_C(63);
+  const uint64_t sample_bytes =
+      configuration->format == AMDF_MEDIA_PIXEL_FORMAT_P010 ? 2 : 1;
+  info.support = AMDF_MEDIA_CONFIGURATION_SUPPORT_SUPPORTED;
+  info.requires_begin_end = 1;
+  info.image_heap_memory_scope =
+      &device->base.base.provider_instance->system_memory_scope;
+  info.compressed_memory_scope = info.image_heap_memory_scope;
+  info.feedback_memory_scope = info.image_heap_memory_scope;
+  info.compressed_byte_offset_alignment = 256;
+  info.compressed_byte_length_alignment = 256;
+  info.minimum_compressed_byte_length =
+      storage_width * storage_height * 3 / 2 * sample_bytes;
+  info.feedback_byte_length = 40;
+  info.feedback_byte_offset_alignment = 256;
+  *out_info = info;
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_media_drm_configuration(
+    amdf_media_drm_device_t* device, uint32_t family_ordinal,
+    const amdf_media_configuration_t* configuration, const void* next,
+    amdf_media_configuration_info_t* out_info) {
+  if (configuration->direction == AMDF_MEDIA_DIRECTION_DECODE) {
+    return amdf_media_drm_decode_configuration(device, family_ordinal,
+                                               configuration, next, out_info);
+  }
+  if (configuration->direction == AMDF_MEDIA_DIRECTION_ENCODE) {
+    return amdf_media_drm_encode_configuration(device, family_ordinal,
+                                               configuration, next, out_info);
+  }
+  *out_info = (amdf_media_configuration_info_t){
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_CONFIGURATION_INFO,
+      .structure_size = out_info->structure_size,
+      .reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC,
+      .configuration = *configuration,
+  };
+  return AMDF_STATUS_OK;
+}
+
 static amdf_status_t AMDF_CALL amdf_media_drm_query_configuration(
     amdf_device_t* device, const amdf_media_configuration_query_t* query,
     amdf_media_configuration_info_t* out_info) {
@@ -349,6 +614,12 @@ static amdf_status_t amdf_media_drm_device_discover(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
+  status = amdf_media_drm_query(
+      device->descriptor, AMDGPU_INFO_VIDEO_CAPS, AMDGPU_INFO_VIDEO_CAPS_ENCODE,
+      &device->encode_limits, sizeof(device->encode_limits));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
   uint32_t count = 0;
   const uint32_t selectors[] = {AMDGPU_HW_IP_VCN_JPEG, AMDGPU_HW_IP_VCN_ENC};
   for (uint32_t i = 0; amdf_status_is_ok(status) && i < 2; ++i) {
@@ -364,10 +635,16 @@ static amdf_status_t amdf_media_drm_device_discover(
         i == 0 ? major >= 2 && major <= 4 && version != 0x040003 : major == 4;
     bool codec_present = false;
     for (uint32_t codec = 0; codec < AMDF_MEDIA_DRM_CODEC_COUNT; ++codec) {
-      codec_present |= amdf_media_drm_codecs[codec].engine == selectors[i] &&
-                       device->decode_limits
-                           .codec_info[amdf_media_drm_codecs[codec].capability]
-                           .valid;
+      if (amdf_media_drm_codecs[codec].engine != selectors[i]) {
+        continue;
+      }
+      const uint32_t capability = amdf_media_drm_codecs[codec].capability;
+      codec_present |= ((amdf_media_drm_codecs[codec].directions &
+                         (1u << AMDF_MEDIA_DIRECTION_DECODE)) != 0 &&
+                        device->decode_limits.codec_info[capability].valid) ||
+                       ((amdf_media_drm_codecs[codec].directions &
+                         (1u << AMDF_MEDIA_DIRECTION_ENCODE)) != 0 &&
+                        device->encode_limits.codec_info[capability].valid);
     }
     const uint32_t command_alignment = i == 0 ? 64 : 4;
     if (!admitted || !codec_present || engine.available_rings == 0 ||

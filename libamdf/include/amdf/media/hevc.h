@@ -276,6 +276,8 @@ typedef struct amdf_media_hevc_encode_configuration_t {
   uint32_t level_idc;
   /// Main or high tier at level_idc.
   amdf_media_hevc_tier_t tier;
+  /// log2_max_pic_order_cnt_lsb_minus4, in [0,12].
+  uint32_t log2_max_picture_order_count_lsb_minus4;
   /// log2 of the minimum luma coding-unit size.
   uint32_t minimum_luma_coding_unit_log2;
   /// log2 of the maximum luma coding-unit size.
