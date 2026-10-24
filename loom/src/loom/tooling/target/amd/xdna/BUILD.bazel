@@ -141,6 +141,13 @@ loom_test(
 )
 
 loom_test(
+    name = "radian_trigonometry_execution_test",
+    srcs = ["test/radian_trigonometry.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [XDNA_HARDWARE_PROFILE],
+)
+
+loom_test(
     name = "staging_stress",
     srcs = ["test/staging_stress.loom"],
     benchmark_smoke = False,
