@@ -8,6 +8,7 @@
 #include <array>
 #include <vector>
 
+#include "amdf/gpu.h"
 #include "amdf/media.h"
 #include "amdf/media/av1.h"
 #include "amdf/media/h264.h"
@@ -159,6 +160,15 @@ class EncodeConfigurationTest : public ::testing::Test {
     if (endpoint == nullptr) {
       GTEST_SKIP() << "no selected GPU endpoint";
     }
+    const void* gpu_extension = nullptr;
+    ASSERT_EQ(api_->query_extension(
+                  AMDF_EXTENSION_GPU, AMDF_GPU_EXTENSION_VERSION_1,
+                  AMDF_GPU_EXTENSION_VERSION_LATEST, &gpu_extension),
+              AMDF_STATUS_OK);
+    const auto* gpu = static_cast<const amdf_gpu_api_t*>(gpu_extension);
+    gpu_info_.type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO;
+    gpu_info_.structure_size = sizeof(gpu_info_);
+    ASSERT_EQ(gpu->endpoint_query_info(endpoint, &gpu_info_), AMDF_STATUS_OK);
     const amdf_media_device_create_info_t create = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_DEVICE_CREATE_INFO,
         .structure_size = sizeof(create),
@@ -192,13 +202,19 @@ class EncodeConfigurationTest : public ::testing::Test {
       };
       EXPECT_FALSE(supports(AMDF_MEDIA_CODEC_JPEG));
       EXPECT_FALSE(supports(AMDF_MEDIA_CODEC_VP9));
-      if (supports(AMDF_MEDIA_CODEC_H264) && supports(AMDF_MEDIA_CODEC_HEVC) &&
-          supports(AMDF_MEDIA_CODEC_AV1)) {
+      if (encode_family_ == info.queue_family_count &&
+          (supports(AMDF_MEDIA_CODEC_H264) || supports(AMDF_MEDIA_CODEC_HEVC) ||
+           supports(AMDF_MEDIA_CODEC_AV1))) {
         encode_family_ = ordinal;
+        for (const auto& candidate : codecs) {
+          if (candidate.direction == AMDF_MEDIA_DIRECTION_ENCODE) {
+            encode_codecs_.push_back(candidate.codec);
+          }
+        }
       }
     }
     if (encode_family_ == info.queue_family_count) {
-      GTEST_SKIP() << "no complete native encode family";
+      GTEST_SKIP() << "no native encode family";
     }
   }
 
@@ -238,14 +254,23 @@ class EncodeConfigurationTest : public ::testing::Test {
     return result;
   }
 
+  bool Supports(amdf_media_codec_t codec) const {
+    return std::find(encode_codecs_.begin(), encode_codecs_.end(), codec) !=
+           encode_codecs_.end();
+  }
+
   const amdf_api_t* api_ = nullptr;
   const amdf_media_api_t* media_ = nullptr;
   amdf_device_t* device_ = nullptr;
   amdf_kernel_queue_t* queue_ = nullptr;
   uint32_t encode_family_ = 0;
+  // Encode codecs advertised by encode_family_.
+  std::vector<amdf_media_codec_t> encode_codecs_;
+  // Compiler-visible identity of the media endpoint's GPU.
+  amdf_gpu_endpoint_info_t gpu_info_ = {};
 };
 
-TEST_F(EncodeConfigurationTest, ExactFamilyMatrixAndStorageContracts) {
+TEST_F(EncodeConfigurationTest, ExactAdvertisedMatrixAndStorageContracts) {
   static constexpr std::array<EncodeCase, 5> kCases = {{
       {AMDF_MEDIA_CODEC_H264, AMDF_MEDIA_PIXEL_FORMAT_NV12, 8},
       {AMDF_MEDIA_CODEC_HEVC, AMDF_MEDIA_PIXEL_FORMAT_NV12, 8},
@@ -259,7 +284,12 @@ TEST_F(EncodeConfigurationTest, ExactFamilyMatrixAndStorageContracts) {
           AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CBR,
           AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_VBR,
       }};
+  uint32_t tested_case_count = 0;
   for (const auto& test_case : kCases) {
+    if (!Supports(test_case.codec)) {
+      continue;
+    }
+    ++tested_case_count;
     amdf_media_configuration_info_t baseline = {};
     for (const auto mode : kRateControlModes) {
       ConfigurationChain chain;
@@ -305,8 +335,10 @@ TEST_F(EncodeConfigurationTest, ExactFamilyMatrixAndStorageContracts) {
 #ifndef _WIN32
       const uint64_t pixel_bytes =
           test_case.sample_bit_depth == 10 ? 786432u : 393216u;
-      const uint64_t codec_state_bytes =
-          test_case.codec == AMDF_MEDIA_CODEC_AV1 ? 995328u : 0u;
+      uint64_t codec_state_bytes = gpu_info_.gfx_ip.major == 12 ? 2048u : 0u;
+      if (test_case.codec == AMDF_MEDIA_CODEC_AV1) {
+        codec_state_bytes += 995328u;
+      }
       EXPECT_EQ(result.reference.byte_length, pixel_bytes + codec_state_bytes);
       EXPECT_EQ(result.feedback_byte_length, 40u);
 #endif  // _WIN32
@@ -321,9 +353,13 @@ TEST_F(EncodeConfigurationTest, ExactFamilyMatrixAndStorageContracts) {
       }
     }
   }
+  EXPECT_GT(tested_case_count, 0u);
 }
 
 TEST_F(EncodeConfigurationTest, UnsupportedTuplesHaveSpecificReasons) {
+  if (!Supports(AMDF_MEDIA_CODEC_H264)) {
+    GTEST_SKIP() << "H.264 encode is not advertised";
+  }
   const EncodeCase h264_case = {AMDF_MEDIA_CODEC_H264,
                                 AMDF_MEDIA_PIXEL_FORMAT_NV12, 8};
   ConfigurationChain chain;
@@ -381,6 +417,9 @@ TEST_F(EncodeConfigurationTest, UnsupportedTuplesHaveSpecificReasons) {
 }
 
 TEST_F(EncodeConfigurationTest, SessionMatchesProviderExecutionSupport) {
+  if (!Supports(AMDF_MEDIA_CODEC_H264)) {
+    GTEST_SKIP() << "H.264 encode is not advertised";
+  }
   const EncodeCase test_case = {AMDF_MEDIA_CODEC_H264,
                                 AMDF_MEDIA_PIXEL_FORMAT_NV12, 8};
   ConfigurationChain chain;

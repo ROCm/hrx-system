@@ -125,7 +125,9 @@ static bool amdf_media_drm_codec_direction_implemented(
       return (codec == AMDF_MEDIA_CODEC_H264 ||
               codec == AMDF_MEDIA_CODEC_HEVC || codec == AMDF_MEDIA_CODEC_VP9 ||
               codec == AMDF_MEDIA_CODEC_AV1) &&
-             direction == AMDF_MEDIA_DIRECTION_DECODE;
+             (direction == AMDF_MEDIA_DIRECTION_DECODE ||
+              (codec == AMDF_MEDIA_CODEC_H264 &&
+               direction == AMDF_MEDIA_DIRECTION_ENCODE));
   }
   return false;
 }

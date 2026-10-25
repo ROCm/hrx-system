@@ -314,10 +314,15 @@ void MediaEncodeInteropTest::SetUp() {
       });
     };
     if (encode_family_ == device_info.queue_family_count &&
-        supports(AMDF_MEDIA_CODEC_H264, AMDF_MEDIA_DIRECTION_ENCODE) &&
-        supports(AMDF_MEDIA_CODEC_HEVC, AMDF_MEDIA_DIRECTION_ENCODE) &&
-        supports(AMDF_MEDIA_CODEC_AV1, AMDF_MEDIA_DIRECTION_ENCODE)) {
+        (supports(AMDF_MEDIA_CODEC_H264, AMDF_MEDIA_DIRECTION_ENCODE) ||
+         supports(AMDF_MEDIA_CODEC_HEVC, AMDF_MEDIA_DIRECTION_ENCODE) ||
+         supports(AMDF_MEDIA_CODEC_AV1, AMDF_MEDIA_DIRECTION_ENCODE))) {
       encode_family_ = ordinal;
+      for (const auto& codec : codecs) {
+        if (codec.direction == AMDF_MEDIA_DIRECTION_ENCODE) {
+          encode_codecs_.push_back(codec.codec);
+        }
+      }
     }
     if (decode_family_ == device_info.queue_family_count &&
         supports(AMDF_MEDIA_CODEC_H264, AMDF_MEDIA_DIRECTION_DECODE) &&
@@ -327,7 +332,7 @@ void MediaEncodeInteropTest::SetUp() {
     }
   }
   if (encode_family_ == device_info.queue_family_count) {
-    GTEST_SKIP() << "no complete native encode family";
+    GTEST_SKIP() << "no native encode family";
   }
   if (decode_family_ == device_info.queue_family_count) {
     GTEST_SKIP() << "no complete native decode family";
@@ -592,6 +597,10 @@ void MediaEncodeInteropTest::RunPictures(
     const EncodeExecutionCase& test_case,
     amdf_media_encode_rate_control_mode_t rate_control_mode, uint32_t width,
     uint32_t height, uint32_t frame_count, uint32_t recording_count) {
+  if (std::find(encode_codecs_.begin(), encode_codecs_.end(),
+                test_case.codec) == encode_codecs_.end()) {
+    GTEST_SKIP() << "encode codec is not advertised";
+  }
   ASSERT_GT(frame_count, 0u);
   ASSERT_GT(recording_count, 0u);
   ASSERT_LE(recording_count, frame_count);
@@ -1007,6 +1016,7 @@ void MediaEncodeInteropTest::RunPictures(
         api_, family_.ordinal, AMDF_HOST_CACHE_OPERATION_INVALIDATE));
     const auto* captured_bytes =
         static_cast<const uint8_t*>(captured->host.pointer);
+    std::vector<EncodedPictureRegion> decoded_pictures;
     for (uint32_t index = 0; index < count; ++index) {
       amdf_media_encoded_region_t region = {};
       amdf_media_av1_encode_result_info_t av1_result = {
@@ -1079,14 +1089,22 @@ void MediaEncodeInteropTest::RunPictures(
         EXPECT_EQ(output[2], 0u);
         EXPECT_EQ(output[3], 1u);
       }
-      if (batch == 0 && index == 0) {
-        ASSERT_NO_FATAL_FAILURE(DecodeKeyPicture(
-            test_case, width, height, compressed_memory, output_offset,
-            region.byte_length, compressed_stride - region.byte_offset,
-            region.kind, output,
-            test_case.codec == AMDF_MEDIA_CODEC_AV1 ? &av1_result : nullptr,
-            last_encode));
+      if (batch == 0 &&
+          (index == 0 || test_case.codec == AMDF_MEDIA_CODEC_H264)) {
+        decoded_pictures.push_back({
+            .byte_offset = output_offset,
+            .byte_length = region.byte_length,
+            .byte_capacity = compressed_stride - region.byte_offset,
+            .kind = region.kind,
+            .bytes = output,
+            .av1_result = av1_result,
+        });
       }
+    }
+    if (batch == 0) {
+      ASSERT_NO_FATAL_FAILURE(DecodePictures(test_case, width, height,
+                                             compressed_memory,
+                                             decoded_pictures, last_encode));
     }
     for (uint64_t index = 0; index < compressed_start; ++index) {
       ASSERT_EQ(captured_bytes[index], 0xa5u);
@@ -1145,9 +1163,10 @@ void MediaEncodeInteropTest::TearDown() {
               AMDF_STATUS_OK);
   }
   if (decode_session_active_) {
-    ASSERT_NO_FATAL_FAILURE(SubmitMediaControl(decode_queue_, decode_command_,
-                                               AMDF_MEDIA_COMMAND_OPERATION_END,
-                                               &decode_point_));
+    ASSERT_FALSE(decode_commands_.empty());
+    ASSERT_NO_FATAL_FAILURE(
+        SubmitMediaControl(decode_queue_, decode_commands_[0],
+                           AMDF_MEDIA_COMMAND_OPERATION_END, &decode_point_));
     decode_session_active_ = false;
   }
   if (encode_session_active_) {
@@ -1160,8 +1179,8 @@ void MediaEncodeInteropTest::TearDown() {
   for (auto* command : commands_) {
     ASSERT_EQ(media_->command_destroy(command), AMDF_STATUS_OK);
   }
-  if (decode_command_ != nullptr) {
-    ASSERT_EQ(media_->command_destroy(decode_command_), AMDF_STATUS_OK);
+  for (auto* command : decode_commands_) {
+    ASSERT_EQ(media_->command_destroy(command), AMDF_STATUS_OK);
   }
   if (encode_session_ != nullptr) {
     ASSERT_EQ(media_->session_destroy(encode_session_), AMDF_STATUS_OK);

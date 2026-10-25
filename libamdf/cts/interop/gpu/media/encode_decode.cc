@@ -47,22 +47,24 @@ struct ExpectedComponents {
   uint32_t v;
 };
 
-ExpectedComponents ExpectedPixel(uint32_t x, uint32_t y, bool p010) {
-  uint32_t luma = 16 + x / 3 + y / 5;
+ExpectedComponents ExpectedPixel(uint32_t x, uint32_t y, bool p010,
+                                 uint32_t generation) {
+  uint32_t luma = 16 + x / 3 + y / 5 + generation * 4;
   if (y < 32) {
-    luma = 40;
+    luma = 40 + generation * 12;
   }
-  if (x >= 32 && x < 64 && y >= 96 && y < 128) {
+  if (x >= 32 + generation * 8 && x < 64 + generation * 8 && y >= 96 &&
+      y < 128) {
     luma = 224;
   }
   const uint32_t chroma_x = x / 2;
   const uint32_t chroma_y = y / 2;
-  uint32_t u = 96 + (chroma_x * 2) / 8;
-  uint32_t v = 160 - (chroma_y * 2) / 8;
+  uint32_t u = 96 + (chroma_x * 2) / 8 + generation;
+  uint32_t v = 160 - (chroma_y * 2) / 8 - generation;
   if (p010) {
-    luma = luma * 4 + (x + y) % 4;
-    u = u * 4 + chroma_x % 4;
-    v = v * 4 + chroma_y % 4;
+    luma = luma * 4 + (x + y + generation) % 4;
+    u = u * 4 + (chroma_x + generation) % 4;
+    v = v * 4 + (chroma_y + generation) % 4;
   }
   return {luma, u, v};
 }
@@ -270,7 +272,8 @@ class Av1BitReader {
 }
 
 void CheckRoundTripPixels(const uint32_t* pixels, uint32_t width,
-                          uint32_t height, bool p010, double* out_psnr) {
+                          uint32_t height, bool p010,
+                          uint32_t expected_generation, double* out_psnr) {
   double squared_error = 0.0;
   uint64_t sample_count = 0;
   double stripe_sum = 0.0;
@@ -280,14 +283,14 @@ void CheckRoundTripPixels(const uint32_t* pixels, uint32_t width,
       uint32_t actual_y = pixels[pixel * 2] & 65535u;
       uint32_t actual_u = pixels[pixel * 2] >> 16;
       uint32_t actual_v = pixels[pixel * 2 + 1] & 65535u;
-      ASSERT_EQ(pixels[pixel * 2 + 1] >> 16, 0u);
+      ASSERT_EQ(pixels[pixel * 2 + 1] >> 16, expected_generation);
       if (p010) {
         ASSERT_EQ((actual_y | actual_u | actual_v) & 63u, 0u);
         actual_y >>= 6;
         actual_u >>= 6;
         actual_v >>= 6;
       }
-      const auto expected = ExpectedPixel(x, y, p010);
+      const auto expected = ExpectedPixel(x, y, p010, expected_generation);
       const double y_error = double(actual_y) - expected.y;
       squared_error += y_error * y_error;
       ++sample_count;
@@ -311,7 +314,7 @@ void CheckRoundTripPixels(const uint32_t* pixels, uint32_t width,
       detected_generation = generation;
     }
   }
-  EXPECT_EQ(detected_generation, 0u) << "stripe=" << stripe;
+  EXPECT_EQ(detected_generation, expected_generation) << "stripe=" << stripe;
   if (squared_error == 0.0) {
     *out_psnr = INFINITY;
     return;
@@ -323,16 +326,16 @@ void CheckRoundTripPixels(const uint32_t* pixels, uint32_t width,
 
 }  // namespace
 
-void MediaEncodeInteropTest::DecodeKeyPicture(
+void MediaEncodeInteropTest::DecodePictures(
     const EncodeExecutionCase& test_case, uint32_t width, uint32_t height,
-    amdf_memory_t* compressed_memory, uint64_t compressed_byte_offset,
-    uint64_t compressed_byte_length, uint64_t compressed_byte_capacity,
-    amdf_media_encoded_region_kind_t region_kind,
-    const uint8_t* compressed_bytes,
-    const amdf_media_av1_encode_result_info_t* av1_result,
-    uint64_t encode_point) {
+    amdf_memory_t* compressed_memory,
+    std::span<const EncodedPictureRegion> pictures, uint64_t encode_point) {
   ASSERT_EQ(decode_session_, nullptr);
-  ASSERT_EQ(decode_command_, nullptr);
+  ASSERT_TRUE(decode_commands_.empty());
+  ASSERT_FALSE(pictures.empty());
+  if (test_case.codec != AMDF_MEDIA_CODEC_H264) {
+    ASSERT_EQ(pictures.size(), 1u);
+  }
   ASSERT_NE(encode_point, 0u);
   const auto* kernel =
       kernels::media_consume::kKernels.Find(gpu_endpoint_info_);
@@ -396,12 +399,17 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
   ASSERT_EQ(configuration.configuration.coded_height, height);
   ASSERT_NE(configuration.output.byte_length, 0u);
   ASSERT_NE(configuration.reference.byte_length, 0u);
-  ASSERT_EQ(
-      compressed_byte_offset % configuration.compressed_byte_offset_alignment,
-      0u);
-  const uint64_t decode_compressed_byte_length = AlignUp(
-      compressed_byte_length, configuration.compressed_byte_length_alignment);
-  ASSERT_LE(decode_compressed_byte_length, compressed_byte_capacity);
+  std::vector<uint64_t> decode_compressed_byte_lengths;
+  decode_compressed_byte_lengths.reserve(pictures.size());
+  for (const auto& picture : pictures) {
+    ASSERT_EQ(
+        picture.byte_offset % configuration.compressed_byte_offset_alignment,
+        0u);
+    const uint64_t decode_byte_length = AlignUp(
+        picture.byte_length, configuration.compressed_byte_length_alignment);
+    ASSERT_LE(decode_byte_length, picture.byte_capacity);
+    decode_compressed_byte_lengths.push_back(decode_byte_length);
+  }
 
   const amdf_media_session_create_info_t session_create = {
       .type = AMDF_STRUCTURE_TYPE_MEDIA_SESSION_CREATE_INFO,
@@ -414,12 +422,15 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
       AMDF_STATUS_OK);
 
   uint64_t feedback_offset = 0;
+  uint64_t feedback_stride = 0;
   uint64_t feedback_length = 0;
   amdf_memory_t* feedback_memory = nullptr;
   if (configuration.feedback_byte_length != 0) {
     ASSERT_NE(configuration.feedback_byte_offset_alignment, 0u);
     feedback_offset = AlignUp(64, configuration.feedback_byte_offset_alignment);
-    feedback_length = feedback_offset + configuration.feedback_byte_length + 64;
+    feedback_stride = AlignUp(configuration.feedback_byte_length,
+                              configuration.feedback_byte_offset_alignment);
+    feedback_length = feedback_offset + pictures.size() * feedback_stride + 64;
     const amdf_memory_device_access_t feedback_access = {
         media_device_,
         {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE}};
@@ -456,22 +467,27 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
     decode_feedback_ = static_cast<uint8_t*>(feedback_mapping.pointer);
     std::memset(decode_feedback_, 0xa5, feedback_length);
   }
-  const amdf_media_command_create_info_t command_create = {
-      .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_CREATE_INFO,
-      .structure_size = sizeof(command_create),
-      .maximum_slice_count = 1,
-      .maximum_reference_count =
-          configuration.configuration.reference_image_count - 1,
-      .maximum_activation_count = 2,
-      .feedback = {feedback_memory, 0, feedback_offset,
-                   configuration.feedback_byte_length},
-  };
-  ASSERT_EQ(media_->command_create(decode_session_, &command_create,
-                                   &decode_command_),
-            AMDF_STATUS_OK);
+  for (uint32_t index = 0; index < pictures.size(); ++index) {
+    const amdf_media_command_create_info_t command_create = {
+        .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_CREATE_INFO,
+        .structure_size = sizeof(command_create),
+        .maximum_slice_count = 1,
+        .maximum_reference_count =
+            configuration.configuration.reference_image_count - 1,
+        .maximum_activation_count = 2,
+        .feedback = {feedback_memory, 0,
+                     feedback_offset + index * feedback_stride,
+                     configuration.feedback_byte_length},
+    };
+    amdf_media_command_t* command = nullptr;
+    ASSERT_EQ(
+        media_->command_create(decode_session_, &command_create, &command),
+        AMDF_STATUS_OK);
+    decode_commands_.push_back(command);
+  }
   if (configuration.requires_begin_end != 0) {
     ASSERT_NO_FATAL_FAILURE(
-        SubmitMediaControl(decode_queue_, decode_command_,
+        SubmitMediaControl(decode_queue_, decode_commands_[0],
                            AMDF_MEDIA_COMMAND_OPERATION_BEGIN, &decode_point_));
     decode_session_active_ = true;
   }
@@ -482,8 +498,11 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
       output_offset + configuration.output.byte_length + 65536;
   const uint64_t reference_offset =
       AlignUp(65536, configuration.reference.byte_offset_alignment);
+  const uint32_t reference_count =
+      configuration.configuration.reference_image_count;
   const uint64_t reference_heap_length =
-      reference_offset + configuration.reference.byte_length + 65536;
+      reference_offset + reference_count * configuration.reference.byte_length +
+      65536;
   amdf_memory_t* output_memory = nullptr;
   amdf_memory_t* reference_memory = nullptr;
   uint64_t output_address = 0;
@@ -511,141 +530,174 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
   ASSERT_EQ(media_->image_create(media_device_, &output_create, &output_image),
             AMDF_STATUS_OK);
   images_.push_back(output_image);
-  const amdf_media_image_create_info_t reference_create = {
-      .type = AMDF_STRUCTURE_TYPE_MEDIA_IMAGE_CREATE_INFO,
-      .structure_size = sizeof(reference_create),
-      .memory = reference_memory,
-      .requirements = configuration.reference,
-      .byte_offset = reference_offset,
-  };
-  amdf_media_image_t* reference_image = nullptr;
-  ASSERT_EQ(
-      media_->image_create(media_device_, &reference_create, &reference_image),
-      AMDF_STATUS_OK);
-  images_.push_back(reference_image);
   const amdf_media_frame_t output =
       Frame(output_memory, output_image, output_offset,
             configuration.output.description);
-  const amdf_media_frame_t reference =
-      Frame(reference_memory, reference_image, reference_offset,
-            configuration.reference.description);
+  std::vector<amdf_media_image_t*> reference_images(reference_count);
+  std::vector<amdf_media_frame_t> references(reference_count);
+  for (uint32_t index = 0; index < reference_count; ++index) {
+    const uint64_t offset =
+        reference_offset + index * configuration.reference.byte_length;
+    const amdf_media_image_create_info_t reference_create = {
+        .type = AMDF_STRUCTURE_TYPE_MEDIA_IMAGE_CREATE_INFO,
+        .structure_size = sizeof(reference_create),
+        .memory = reference_memory,
+        .requirements = configuration.reference,
+        .byte_offset = offset,
+    };
+    ASSERT_EQ(media_->image_create(media_device_, &reference_create,
+                                   &reference_images[index]),
+              AMDF_STATUS_OK);
+    images_.push_back(reference_images[index]);
+    references[index] = Frame(reference_memory, reference_images[index], offset,
+                              configuration.reference.description);
+  }
 
   MediaKernelImageLayout layout;
   ASSERT_NO_FATAL_FAILURE(QueryKernelImageLayout(output_image, 0, &layout));
 
   amdf_media_h264_scaling_matrices_t h264_matrices;
   std::memset(&h264_matrices, 16, sizeof(h264_matrices));
-  const amdf_media_h264_slice_t h264_slice = {
-      0, static_cast<uint32_t>(compressed_byte_length)};
-  amdf_media_h264_decode_picture_info_t h264_picture = {
-      .type = AMDF_STRUCTURE_TYPE_MEDIA_H264_DECODE_PICTURE_INFO,
-      .structure_size = sizeof(h264_picture),
-      .sequence =
-          {
-              .maximum_reference_frame_count = 1,
-              .picture_order_count_type = 2,
-              .direct_8x8_inference = 1,
-          },
-      .picture = {.deblocking_filter_control_present = 1},
-      .scaling_matrices = &h264_matrices,
-      .is_reference = 1,
-      .is_intra = 1,
-      .slice_count = 1,
-      .slices = &h264_slice,
-  };
-  const amdf_media_hevc_slice_t hevc_slice = {
-      0, static_cast<uint32_t>(compressed_byte_length)};
-  amdf_media_hevc_decode_picture_info_t hevc_picture = {
-      .type = AMDF_STRUCTURE_TYPE_MEDIA_HEVC_DECODE_PICTURE_INFO,
-      .structure_size = sizeof(hevc_picture),
-      .sequence =
-          {
-              .maximum_decoded_picture_buffer_count_minus1 = 1,
-              .log2_diff_max_min_luma_coding_block_size = 3,
-              .log2_diff_max_min_luma_transform_block_size = 3,
-              .maximum_transform_hierarchy_depth_inter = 4,
-              .maximum_transform_hierarchy_depth_intra = 4,
-          },
-      .picture =
-          {
-              .cabac_initialization_present = 1,
-              .coding_unit_qp_delta_enabled = 1,
-              .slice_chroma_qp_offsets_present = 1,
-              .loop_filter_across_slices_enabled = 1,
-          },
-      .is_random_access = 1,
-      .is_idr = 1,
-      .is_intra = 1,
-      .slice_count = 1,
-      .slices = &hevc_slice,
-  };
-  amdf_media_av1_tile_t av1_tile = {
-      0, static_cast<uint32_t>(compressed_byte_length)};
-  amdf_media_av1_decode_picture_info_t av1_picture = {
-      .type = AMDF_STRUCTURE_TYPE_MEDIA_AV1_DECODE_PICTURE_INFO,
-      .structure_size = sizeof(av1_picture),
-      .sequence = {.cdef = 1, .order_hint_bit_count = 4},
-      .frame_type = 0,
-      .show_frame = 1,
-      .primary_reference = 7,
-      .interpolation_filter = 4,
-      .transform_mode = 1,
-      .superres_denominator = 8,
-      .tile_column_count = 1,
-      .tile_row_count = 1,
-      .tiles = &av1_tile,
-  };
-  std::fill(std::begin(av1_picture.reference_map),
-            std::end(av1_picture.reference_map), UINT8_MAX);
-  std::fill(std::begin(av1_picture.active_reference_indices),
-            std::end(av1_picture.active_reference_indices), UINT8_MAX);
-  av1_picture.tile_column_starts[1] = (width + 63) / 64;
-  av1_picture.tile_row_starts[1] = (height + 63) / 64;
-  if (test_case.codec == AMDF_MEDIA_CODEC_AV1) {
-    if (region_kind == AMDF_MEDIA_ENCODED_REGION_AV1_FRAME_OBU) {
-      ASSERT_TRUE(ParseAv1KeyFrameObu(compressed_bytes, compressed_byte_length,
-                                      &av1_picture, &av1_tile));
-    } else {
-      ASSERT_EQ(region_kind, AMDF_MEDIA_ENCODED_REGION_AV1_TILE_GROUP_PAYLOAD);
-      ASSERT_NE(av1_result, nullptr);
-      av1_picture.loop_filter = av1_result->loop_filter;
-      av1_picture.quantization = av1_result->quantization;
-      av1_picture.cdef = av1_result->cdef;
-      av1_picture.segmentation = av1_result->segmentation;
+  for (uint32_t index = 0; index < pictures.size(); ++index) {
+    const auto& encoded = pictures[index];
+    const uint32_t reference_slot = index % references.size();
+    const amdf_media_h264_slice_t h264_slice = {
+        0, static_cast<uint32_t>(encoded.byte_length)};
+    amdf_media_h264_reference_t h264_reference = {};
+    amdf_media_h264_decode_picture_info_t h264_picture = {
+        .type = AMDF_STRUCTURE_TYPE_MEDIA_H264_DECODE_PICTURE_INFO,
+        .structure_size = sizeof(h264_picture),
+        .sequence =
+            {
+                .maximum_reference_frame_count = 1,
+                .picture_order_count_type = 2,
+                .direct_8x8_inference = 1,
+            },
+        .picture = {.deblocking_filter_control_present = 1},
+        .scaling_matrices = &h264_matrices,
+        .frame_number = index,
+        .is_reference = 1,
+        .is_intra = index == 0,
+        .top_field_order_count = static_cast<int32_t>(index * 2),
+        .bottom_field_order_count = static_cast<int32_t>(index * 2),
+        .slice_count = 1,
+        .slices = &h264_slice,
+    };
+    if (index != 0) {
+      const uint32_t prior_slot = (index - 1) % references.size();
+      h264_reference.binding = {&references[prior_slot], prior_slot};
+      h264_reference.frame_number = index - 1;
+      h264_reference.top_field_order_count =
+          static_cast<int32_t>((index - 1) * 2);
+      h264_reference.bottom_field_order_count =
+          h264_reference.top_field_order_count;
+      h264_picture.reference_count = 1;
+      h264_picture.references = &h264_reference;
     }
-    for (auto& unit_size :
-         av1_picture.loop_filter.log2_restoration_unit_sizes) {
-      unit_size = 5;
+
+    const amdf_media_hevc_slice_t hevc_slice = {
+        0, static_cast<uint32_t>(encoded.byte_length)};
+    amdf_media_hevc_decode_picture_info_t hevc_picture = {
+        .type = AMDF_STRUCTURE_TYPE_MEDIA_HEVC_DECODE_PICTURE_INFO,
+        .structure_size = sizeof(hevc_picture),
+        .sequence =
+            {
+                .maximum_decoded_picture_buffer_count_minus1 = 1,
+                .log2_diff_max_min_luma_coding_block_size = 3,
+                .log2_diff_max_min_luma_transform_block_size = 3,
+                .maximum_transform_hierarchy_depth_inter = 4,
+                .maximum_transform_hierarchy_depth_intra = 4,
+            },
+        .picture =
+            {
+                .cabac_initialization_present = 1,
+                .coding_unit_qp_delta_enabled = 1,
+                .slice_chroma_qp_offsets_present = 1,
+                .loop_filter_across_slices_enabled = 1,
+            },
+        .is_random_access = 1,
+        .is_idr = 1,
+        .is_intra = 1,
+        .slice_count = 1,
+        .slices = &hevc_slice,
+    };
+    amdf_media_av1_tile_t av1_tile = {
+        0, static_cast<uint32_t>(encoded.byte_length)};
+    amdf_media_av1_decode_picture_info_t av1_picture = {
+        .type = AMDF_STRUCTURE_TYPE_MEDIA_AV1_DECODE_PICTURE_INFO,
+        .structure_size = sizeof(av1_picture),
+        .sequence = {.cdef = 1, .order_hint_bit_count = 4},
+        .frame_type = 0,
+        .show_frame = 1,
+        .primary_reference = 7,
+        .interpolation_filter = 4,
+        .transform_mode = 1,
+        .superres_denominator = 8,
+        .tile_column_count = 1,
+        .tile_row_count = 1,
+        .tiles = &av1_tile,
+    };
+    std::fill(std::begin(av1_picture.reference_map),
+              std::end(av1_picture.reference_map), UINT8_MAX);
+    std::fill(std::begin(av1_picture.active_reference_indices),
+              std::end(av1_picture.active_reference_indices), UINT8_MAX);
+    av1_picture.tile_column_starts[1] = (width + 63) / 64;
+    av1_picture.tile_row_starts[1] = (height + 63) / 64;
+    if (test_case.codec == AMDF_MEDIA_CODEC_AV1) {
+      if (encoded.kind == AMDF_MEDIA_ENCODED_REGION_AV1_FRAME_OBU) {
+        ASSERT_TRUE(ParseAv1KeyFrameObu(encoded.bytes, encoded.byte_length,
+                                        &av1_picture, &av1_tile));
+      } else {
+        ASSERT_EQ(encoded.kind,
+                  AMDF_MEDIA_ENCODED_REGION_AV1_TILE_GROUP_PAYLOAD);
+        av1_picture.loop_filter = encoded.av1_result.loop_filter;
+        av1_picture.quantization = encoded.av1_result.quantization;
+        av1_picture.cdef = encoded.av1_result.cdef;
+        av1_picture.segmentation = encoded.av1_result.segmentation;
+      }
+      for (auto& unit_size :
+           av1_picture.loop_filter.log2_restoration_unit_sizes) {
+        unit_size = 5;
+      }
     }
+    const void* codec_picture = test_case.codec == AMDF_MEDIA_CODEC_H264
+                                    ? static_cast<const void*>(&h264_picture)
+                                : test_case.codec == AMDF_MEDIA_CODEC_HEVC
+                                    ? static_cast<const void*>(&hevc_picture)
+                                    : static_cast<const void*>(&av1_picture);
+    amdf_media_image_activation_t activations[2] = {};
+    uint32_t activation_count = 0;
+    if (index == 0) {
+      activations[activation_count++].after = output_image;
+    }
+    if (index < reference_count) {
+      activations[activation_count++].after = reference_images[reference_slot];
+    }
+    const amdf_media_decode_picture_info_t decode = {
+        .type = AMDF_STRUCTURE_TYPE_MEDIA_DECODE_PICTURE_INFO,
+        .structure_size = sizeof(decode),
+        .next = codec_picture,
+        .compressed = {compressed_memory, 0, encoded.byte_offset,
+                       decode_compressed_byte_lengths[index]},
+        .output = &output,
+        .reference_output = &references[reference_slot],
+        .reference_slot_index = reference_slot,
+    };
+    const amdf_media_command_prepare_info_t prepare = {
+        .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_PREPARE_INFO,
+        .structure_size = sizeof(prepare),
+        .operation = AMDF_MEDIA_COMMAND_OPERATION_PICTURE,
+        .activation_count = activation_count,
+        .activations = activations,
+        .decode = &decode,
+    };
+    const amdf_status_t prepare_status =
+        media_->command_prepare(decode_commands_[index], &prepare);
+    ASSERT_EQ(prepare_status, AMDF_STATUS_OK)
+        << "picture=" << index
+        << " domain=" << amdf_status_domain(prepare_status)
+        << " code=" << amdf_status_code(prepare_status);
   }
-  const void* codec_picture = test_case.codec == AMDF_MEDIA_CODEC_H264
-                                  ? static_cast<const void*>(&h264_picture)
-                              : test_case.codec == AMDF_MEDIA_CODEC_HEVC
-                                  ? static_cast<const void*>(&hevc_picture)
-                                  : static_cast<const void*>(&av1_picture);
-  const amdf_media_image_activation_t activations[] = {
-      {nullptr, output_image},
-      {nullptr, reference_image},
-  };
-  const amdf_media_decode_picture_info_t decode = {
-      .type = AMDF_STRUCTURE_TYPE_MEDIA_DECODE_PICTURE_INFO,
-      .structure_size = sizeof(decode),
-      .next = codec_picture,
-      .compressed = {compressed_memory, 0, compressed_byte_offset,
-                     decode_compressed_byte_length},
-      .output = &output,
-      .reference_output = &reference,
-      .reference_slot_index = 0,
-  };
-  const amdf_media_command_prepare_info_t prepare = {
-      .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_PREPARE_INFO,
-      .structure_size = sizeof(prepare),
-      .operation = AMDF_MEDIA_COMMAND_OPERATION_PICTURE,
-      .activation_count = 2,
-      .activations = activations,
-      .decode = &decode,
-  };
-  ASSERT_EQ(media_->command_prepare(decode_command_, &prepare), AMDF_STATUS_OK);
 
   const uint64_t pixel_count = uint64_t(width) * height;
   const uint64_t result_byte_length = (pixel_count * 2 + 4096) * 4;
@@ -685,10 +737,11 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
       output_address + layout.byte_offsets[0],
       results->device_address + 64,
   };
+  const uint32_t final_generation = static_cast<uint32_t>(pictures.size() - 1);
   const uint32_t constants[] = {
       0,
       0,
-      0,
+      final_generation,
       static_cast<uint32_t>(layout.byte_offsets[1] - layout.byte_offsets[0]),
       layout.pipe_bank_xors[0],
       layout.pipe_bank_xors[1],
@@ -752,21 +805,27 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
       {encode_to_decode_, encode_point},
       {gpu_to_decode_, initialized_point},
   };
-  const amdf_media_kernel_queue_submission_info_t submit = {
-      .type = AMDF_STRUCTURE_TYPE_MEDIA_KERNEL_QUEUE_SUBMISSION_INFO,
-      .structure_size = sizeof(submit),
-      .command = decode_command_,
-      .wait_count = gpu_queue_ != nullptr ? 2u : 1u,
-      .waits = decode_waits,
-  };
   uint64_t point = 0;
-  const auto status =
-      media_->kernel_queue_submit(decode_queue_, &submit, &point);
-  if (point != 0) {
-    decode_point_ = point;
+  std::vector<uint64_t> decode_points;
+  decode_points.reserve(decode_commands_.size());
+  for (uint32_t index = 0; index < decode_commands_.size(); ++index) {
+    const amdf_media_kernel_queue_submission_info_t submit = {
+        .type = AMDF_STRUCTURE_TYPE_MEDIA_KERNEL_QUEUE_SUBMISSION_INFO,
+        .structure_size = sizeof(submit),
+        .command = decode_commands_[index],
+        .wait_count = index == 0 ? (gpu_queue_ != nullptr ? 2u : 1u) : 0u,
+        .waits = index == 0 ? decode_waits : nullptr,
+    };
+    point = 0;
+    const auto status =
+        media_->kernel_queue_submit(decode_queue_, &submit, &point);
+    if (point != 0) {
+      decode_point_ = point;
+    }
+    ASSERT_EQ(status, AMDF_STATUS_OK);
+    ASSERT_NE(point, 0u);
+    decode_points.push_back(point);
   }
-  ASSERT_EQ(status, AMDF_STATUS_OK);
-  ASSERT_NE(point, 0u);
   const amdf_kernel_queue_dependency_wait_t decoded = {decode_to_gpu_, point};
   if (gpu_queue_ == nullptr) {
     ASSERT_EQ(
@@ -789,17 +848,19 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
             AMDF_STATUS_OK);
   ASSERT_EQ(progress.terminal_status, AMDF_STATUS_OK);
   ASSERT_EQ(progress.retired_submission, decode_point_);
-  amdf_media_command_result_info_t result = {
-      .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_RESULT_INFO,
-      .structure_size = sizeof(result),
-  };
-  ASSERT_EQ(media_->command_query_result(decode_command_, &result),
-            AMDF_STATUS_OK);
-  ASSERT_EQ(result.codec_result, configuration.feedback_byte_length != 0
-                                     ? AMDF_MEDIA_CODEC_RESULT_SUCCEEDED
-                                     : AMDF_MEDIA_CODEC_RESULT_UNAVAILABLE);
-  ASSERT_EQ(result.operation, AMDF_MEDIA_COMMAND_OPERATION_PICTURE);
-  ASSERT_EQ(result.submission, decode_point_);
+  for (uint32_t index = 0; index < decode_commands_.size(); ++index) {
+    amdf_media_command_result_info_t result = {
+        .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_RESULT_INFO,
+        .structure_size = sizeof(result),
+    };
+    ASSERT_EQ(media_->command_query_result(decode_commands_[index], &result),
+              AMDF_STATUS_OK);
+    ASSERT_EQ(result.codec_result, configuration.feedback_byte_length != 0
+                                       ? AMDF_MEDIA_CODEC_RESULT_SUCCEEDED
+                                       : AMDF_MEDIA_CODEC_RESULT_UNAVAILABLE);
+    ASSERT_EQ(result.operation, AMDF_MEDIA_COMMAND_OPERATION_PICTURE);
+    ASSERT_EQ(result.submission, decode_points[index]);
+  }
   ASSERT_NO_FATAL_FAILURE(results->TransferHostCache(
       api_, family_.ordinal, AMDF_HOST_CACHE_OPERATION_INVALIDATE));
   ASSERT_NO_FATAL_FAILURE(heap_copy->TransferHostCache(
@@ -808,7 +869,7 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
   double psnr = 0.0;
   ASSERT_NO_FATAL_FAILURE(CheckRoundTripPixels(
       reinterpret_cast<const uint32_t*>(result_bytes + 64), width, height,
-      test_case.sample_bit_depth == 10, &psnr));
+      test_case.sample_bit_depth == 10, final_generation, &psnr));
   ASSERT_GE(psnr, 30.0);
   for (uint32_t guard = 0; guard < 64; ++guard) {
     ASSERT_EQ(result_bytes[guard], 0xa5u);
@@ -826,13 +887,19 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
   for (uint64_t index = 0; index < reference_offset; ++index) {
     ASSERT_EQ(heap_bytes[reference_copy_offset + index], 0xa5u);
   }
-  for (uint64_t index = reference_offset + configuration.reference.byte_length;
+  for (uint64_t index = reference_offset +
+                        reference_count * configuration.reference.byte_length;
        index < reference_heap_length; ++index) {
     ASSERT_EQ(heap_bytes[reference_copy_offset + index], 0xa5u);
   }
   for (uint64_t index = 0; index < feedback_length; ++index) {
-    if (index < feedback_offset ||
-        index >= feedback_offset + configuration.feedback_byte_length) {
+    bool result_byte = false;
+    for (uint32_t picture = 0; picture < pictures.size(); ++picture) {
+      const uint64_t begin = feedback_offset + picture * feedback_stride;
+      result_byte |=
+          index >= begin && index < begin + configuration.feedback_byte_length;
+    }
+    if (!result_byte) {
       ASSERT_EQ(decode_feedback_[index], 0xa5u);
     }
   }
@@ -840,12 +907,17 @@ void MediaEncodeInteropTest::DecodeKeyPicture(
                         immutable_consumer.data(), immutable_consumer.size()),
             0);
   if (configuration.requires_begin_end != 0) {
-    ASSERT_NO_FATAL_FAILURE(SubmitMediaControl(decode_queue_, decode_command_,
-                                               AMDF_MEDIA_COMMAND_OPERATION_END,
-                                               &decode_point_));
+    ASSERT_NO_FATAL_FAILURE(
+        SubmitMediaControl(decode_queue_, decode_commands_[0],
+                           AMDF_MEDIA_COMMAND_OPERATION_END, &decode_point_));
     decode_session_active_ = false;
+  }
+  uint64_t compressed_byte_length = 0;
+  for (const auto& picture : pictures) {
+    compressed_byte_length += picture.byte_length;
   }
   RecordProperty("round_trip_psnr_db", psnr);
   RecordProperty("round_trip_compressed_bytes", compressed_byte_length);
+  RecordProperty("round_trip_picture_count", pictures.size());
   RecordProperty("round_trip_device_only_payload", 1);
 }

@@ -19,6 +19,7 @@
 #include <wrl/client.h>
 #endif  // _WIN32
 
+#include <span>
 #include <vector>
 
 #include "amdf/media.h"
@@ -32,6 +33,21 @@ struct EncodeExecutionCase {
   amdf_media_pixel_format_t format;
   // Logical component precision used by codec syntax.
   uint32_t sample_bit_depth;
+};
+
+struct EncodedPictureRegion {
+  // Region start relative to the direct compressed-memory owner.
+  uint64_t byte_offset;
+  // Exact codec payload bytes reported by the encoder.
+  uint64_t byte_length;
+  // Accessible bytes from byte_offset through the end of its recording slot.
+  uint64_t byte_capacity;
+  // Codec framing represented by the region.
+  amdf_media_encoded_region_kind_t kind;
+  // Host-visible copy used to parse device-authored codec framing.
+  const uint8_t* bytes;
+  // AV1 controls returned with this picture, unused by other codecs.
+  amdf_media_av1_encode_result_info_t av1_result;
 };
 
 struct MediaKernelImageLayout {
@@ -67,15 +83,10 @@ class MediaEncodeInteropTest : public GpuCommandTest {
                           amdf_media_command_t* command,
                           amdf_media_command_operation_t operation,
                           uint64_t* out_point);
-  void DecodeKeyPicture(const EncodeExecutionCase& test_case, uint32_t width,
-                        uint32_t height, amdf_memory_t* compressed_memory,
-                        uint64_t compressed_byte_offset,
-                        uint64_t compressed_byte_length,
-                        uint64_t compressed_byte_capacity,
-                        amdf_media_encoded_region_kind_t region_kind,
-                        const uint8_t* compressed_bytes,
-                        const amdf_media_av1_encode_result_info_t* av1_result,
-                        uint64_t encode_point);
+  void DecodePictures(const EncodeExecutionCase& test_case, uint32_t width,
+                      uint32_t height, amdf_memory_t* compressed_memory,
+                      std::span<const EncodedPictureRegion> pictures,
+                      uint64_t encode_point);
   void QueryKernelImageLayout(amdf_media_image_t* image, uint32_t array_layer,
                               MediaKernelImageLayout* out_layout);
 
@@ -83,8 +94,10 @@ class MediaEncodeInteropTest : public GpuCommandTest {
   const amdf_media_api_t* media_ = nullptr;
   // Case-owned media activation on the selected compute endpoint.
   amdf_device_t* media_device_ = nullptr;
-  // Native encode family admitting every initial encode schema.
+  // Native video-encode family containing the advertised codec subset.
   uint32_t encode_family_ = 0;
+  // Encode codecs advertised by encode_family_.
+  std::vector<amdf_media_codec_t> encode_codecs_;
   // Native decode family independently consuming every encoded schema.
   uint32_t decode_family_ = 0;
   // Native video-encode ordering domain.
@@ -129,8 +142,8 @@ class MediaEncodeInteropTest : public GpuCommandTest {
   amdf_media_session_t* encode_session_ = nullptr;
   // Independent exact decode session.
   amdf_media_session_t* decode_session_ = nullptr;
-  // Single decode recording for the independently consumed key picture.
-  amdf_media_command_t* decode_command_ = nullptr;
+  // Fixed decode recordings for the independently consumed picture sequence.
+  std::vector<amdf_media_command_t*> decode_commands_;
   // Explicit host view of caller-owned feedback.
   amdf_host_mapping_t* encode_feedback_mapping_ = nullptr;
   // Direct pointer borrowed from encode_feedback_mapping_.

@@ -7,6 +7,7 @@
 load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
 load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
 load("//libamdf/build_tools/bazel:cts_gpu_kernel.bzl", "amdf_cts_gpu_kernel_set")
+load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_target_profile")
 
@@ -19,8 +20,17 @@ package(
 _MEDIA_GPU_KERNEL_COMPATIBILITY = loom_config_compatible_with([
     "//loom/config/import:cxx",
     "//loom/config/target:amdgpu_artifacts",
-    "//loom/config/target/amdgpu:descriptor_set_rdna3_5_core",
-])
+]) + select({
+    "//loom/config/target/amdgpu:descriptor_set_rdna3_5_core": [],
+    "//loom/config/target/amdgpu:descriptor_set_rdna4_core": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+_MEDIA_GPU_TARGETS = [
+    "gfx1150",
+    "gfx1151",
+    "gfx1201",
+]
 
 _HOST_MEDIA_GPU_COMPATIBILITY = _MEDIA_GPU_KERNEL_COMPATIBILITY + [
     "@platforms//cpu:x86_64",
@@ -47,17 +57,18 @@ test_suite(
     visibility = ["//visibility:public"],
 )
 
-loom_target_profile(
-    name = "gfx1150",
-    family = "amdgpu",
-    selector = "gfx1150",
-)
-
-loom_target_profile(
-    name = "gfx1151",
-    family = "amdgpu",
-    selector = "gfx1151",
-)
+[
+    loom_target_profile(
+        name = target,
+        family = "amdgpu",
+        selector = target,
+        target_compatible_with = select({
+            "//loom/config/target/amdgpu:" + LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET[target]: [],
+            "//conditions:default": ["@platforms//:incompatible"],
+        }),
+    )
+    for target in _MEDIA_GPU_TARGETS
+]
 
 amdf_cts_gpu_kernel_set(
     name = "consume",
@@ -66,10 +77,7 @@ amdf_cts_gpu_kernel_set(
     inputopts = ["cxx:root=media_consume"],
     namespace = "kernels::media_consume",
     target_compatible_with = _MEDIA_GPU_KERNEL_COMPATIBILITY,
-    targets = [
-        "gfx1150",
-        "gfx1151",
-    ],
+    targets = _MEDIA_GPU_TARGETS,
 )
 
 amdf_cts_gpu_kernel_set(
@@ -79,10 +87,7 @@ amdf_cts_gpu_kernel_set(
     inputopts = ["cxx:root=media_produce"],
     namespace = "kernels::media_produce",
     target_compatible_with = _MEDIA_GPU_KERNEL_COMPATIBILITY,
-    targets = [
-        "gfx1150",
-        "gfx1151",
-    ],
+    targets = _MEDIA_GPU_TARGETS,
 )
 
 amdf_cc_library(
