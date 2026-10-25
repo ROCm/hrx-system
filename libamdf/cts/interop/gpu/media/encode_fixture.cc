@@ -863,11 +863,6 @@ void MediaEncodeInteropTest::RunPictures(
                          static_cast<uint32_t>(reconstruction_heap_length));
         writer.DmaFill32(compressed_address, 0xa5a5a5a5,
                          static_cast<uint32_t>(compressed_length));
-        for (uint32_t index = 0; index < recording_count; ++index) {
-          writer.DmaFill32(
-              compressed_address + compressed_start + index * compressed_stride,
-              0, static_cast<uint32_t>(compressed_stride));
-        }
       });
   const auto capture =
       make_transfer(recording_count + 1, [&](Pm4CommandWriter& writer) {
@@ -1049,6 +1044,20 @@ void MediaEncodeInteropTest::RunPictures(
       ASSERT_GT(region.byte_length, 0u);
       ASSERT_LE(region.byte_offset + region.byte_length,
                 encode_result.written_byte_length);
+      if (batch == 0) {
+        const uint64_t output_start =
+            compressed_start + index * compressed_stride;
+        const auto* unwritten_begin =
+            captured_bytes + output_start + encode_result.written_byte_length;
+        const auto* unwritten_end =
+            captured_bytes + output_start + compressed_stride;
+        const auto* native_write =
+            std::find_if(unwritten_begin, unwritten_end,
+                         [](uint8_t value) { return value != 0xa5; });
+        ASSERT_EQ(native_write, unwritten_end)
+            << "native write after reported extent at byte "
+            << native_write - (captured_bytes + output_start);
+      }
       const auto expected_kind =
           test_case.codec == AMDF_MEDIA_CODEC_H264
               ? AMDF_MEDIA_ENCODED_REGION_H264_ANNEX_B_SLICE
