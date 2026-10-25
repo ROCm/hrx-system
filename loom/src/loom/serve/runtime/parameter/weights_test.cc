@@ -27,9 +27,9 @@ struct WeightDeviceGroup {
   uint64_t memory_limit;
   // Native allocator dependency outliving all resources allocated through it.
   NativeAllocator allocator;
-  // Process-owned device group, shared across suites with matching options.
+  // Device group borrowed by sequential tests with matching options.
   loom_serve_device_group_t* group = nullptr;
-  // Retained initialization result; a failed creation is never retried.
+  // Retained initialization result while this configuration is selected.
   iree_status_t status = iree_ok_status();
 };
 
@@ -42,17 +42,20 @@ class WeightDeviceEnvironment : public ::testing::Environment {
       slab_size = 0;
       memory_limit = 0;
     }
-    for (auto& entry : groups_) {
-      if (entry->elastic == elastic && entry->slab_size == slab_size &&
-          entry->memory_limit == memory_limit) {
-        if (iree_status_is_ok(entry->status)) {
-          *out_group = entry->group;
-        }
-        return iree_status_clone(entry->status);
+    if (entry_ && entry_->elastic == elastic &&
+        entry_->slab_size == slab_size &&
+        entry_->memory_limit == memory_limit) {
+      if (iree_status_is_ok(entry_->status)) {
+        *out_group = entry_->group;
       }
+      return iree_status_clone(entry_->status);
     }
 
-    auto& entry = groups_.emplace_back(std::make_unique<WeightDeviceGroup>());
+    // Each fixture retires its borrowers before the next setup. Keeping an
+    // unused configuration alive would also retain its finite native queues.
+    ReleaseGroup();
+    entry_ = std::make_unique<WeightDeviceGroup>();
+    auto& entry = entry_;
     entry->elastic = elastic;
     entry->slab_size = slab_size;
     entry->memory_limit = memory_limit;
@@ -89,12 +92,7 @@ class WeightDeviceEnvironment : public ::testing::Environment {
   }
 
   void TearDown() override {
-    for (auto& entry : groups_) {
-      IREE_EXPECT_OK(loom_serve_device_group_free(entry->group));
-      entry->allocator.AwaitReleased();
-      iree_status_free(entry->status);
-    }
-    groups_.clear();
+    ReleaseGroup();
     iree_hal_driver_release(driver_);
     driver_ = nullptr;
     loom_serve_host_release(host_);
@@ -102,12 +100,24 @@ class WeightDeviceEnvironment : public ::testing::Environment {
   }
 
  private:
+  void ReleaseGroup() {
+    if (!entry_) {
+      return;
+    }
+    // A failed retirement must stop this fixture before its allocator dies or
+    // another native configuration is constructed.
+    IREE_CHECK_OK(loom_serve_device_group_free(entry_->group));
+    entry_->allocator.AwaitReleased();
+    iree_status_free(entry_->status);
+    entry_.reset();
+  }
+
   // Shared host services retained through every native device's final release.
   loom_serve_host_t* host_ = nullptr;
   // Retained driver supplying every immutable fixture configuration.
   iree_hal_driver_t* driver_ = nullptr;
-  // Stable allocator storage for process-owned configurations.
-  std::vector<std::unique_ptr<WeightDeviceGroup>> groups_;
+  // Only the current configuration retains native queues and allocator state.
+  std::unique_ptr<WeightDeviceGroup> entry_;
 };
 
 auto* const weight_device_environment = static_cast<WeightDeviceEnvironment*>(

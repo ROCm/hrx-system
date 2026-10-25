@@ -39,9 +39,9 @@ const char* WeightSourcePath();
 // Optional URI including feedback requirements selected by the test target.
 const char* WeightDeviceUri();
 
-// Borrows a process-owned group for one immutable backing configuration.
-// Suites with matching options share native devices through environment
-// teardown.
+// Borrows the current immutable backing configuration. All previous borrowers
+// must have retired before acquiring another configuration; the environment
+// releases its native device and allocator before constructing the replacement.
 iree_status_t AcquireWeightDeviceGroup(bool elastic, uint64_t slab_size,
                                        uint64_t memory_limit,
                                        loom_serve_device_group_t** out_group);

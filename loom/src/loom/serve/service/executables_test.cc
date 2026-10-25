@@ -25,8 +25,8 @@ class ExecutablesTest : public WeightsTest {
   virtual uint64_t SlabCount() const { return 2; }
 
   void SetUpDevice() override {
-    // Native geometry is known after device construction. Reuse the
-    // process-owned configurations for the required number of physical slabs.
+    // Native geometry is known after device construction. Select a backing
+    // configuration with the required number of physical slabs.
     ASSERT_NO_FATAL_FAILURE(WeightsTest::SetUpDevice());
     if (GetParam()) {
       const uint64_t root_bytes = loom_serve_device_weight_geometry(
