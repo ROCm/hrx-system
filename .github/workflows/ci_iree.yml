@@ -8,6 +8,13 @@ name: Loom
 
 on:
   workflow_dispatch:
+    inputs:
+      configuration:
+        type: choice
+        options:
+          - asan
+          - fastbuild
+        default: asan
   pull_request:
     paths:
       - ".bazelrc"
@@ -61,6 +68,7 @@ permissions:
 
 jobs:
   bazel_linux:
+    if: github.event_name != 'workflow_dispatch'
     name: Bazel / Linux x86-64 / ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -405,7 +413,7 @@ jobs:
 
   bazel_linux_binary_size:
     name: Bazel / Linux x86-64 / Clang / Release / Binary Size
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    if: github.event_name != 'workflow_dispatch' && (github.event_name != 'push' || github.ref == 'refs/heads/main')
     concurrency:
       group: iree-bazel-linux-binary-size-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -514,6 +522,7 @@ jobs:
           retention-days: 45
 
   bazel_windows:
+    if: github.event_name != 'workflow_dispatch'
     name: Bazel / Windows x86-64 / ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -854,6 +863,7 @@ jobs:
           retention-days: 7
 
   cmake_linux:
+    if: github.event_name != 'workflow_dispatch'
     name: CMake / Linux x86-64 / ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -1039,6 +1049,7 @@ jobs:
           retention-days: 7
 
   cmake_windows:
+    if: github.event_name != 'workflow_dispatch'
     name: CMake / Windows x86-64 / ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -1130,5 +1141,137 @@ jobs:
         with:
           name: ctest-results-${{ matrix.command }}-attempt-${{ github.run_attempt }}
           path: build/ci/**/Testing/Temporary/
+          if-no-files-found: warn
+          retention-days: 7
+
+  sdma_capture:
+    if: github.event_name == 'workflow_dispatch'
+    name: gfx942 / ${{ inputs.configuration }} / native SDMA
+    runs-on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: >-
+        --ipc host --group-add video --device /dev/kfd --device /dev/dri --cap-add SYSLOG
+        --group-add 993 --group-add 992 --group-add 110
+        --ulimit memlock=-1:-1 --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings --user 0:0
+    env:
+      IREE_CI_PLATFORM_COVERAGE: "0"
+      HRX_ARTIFACT_SET: core
+      HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-gpu/downloads
+      HRX_OUTPUT_DIR: ${{ github.workspace }}/build/iree-bazel-gpu
+      HRX_PYTHON: ${{ github.workspace }}/build/iree-bazel-gpu/python/bin/python3
+      HRX_RELEASE_TYPE: nightly
+      HRX_ROCM_ROOT: ${{ github.workspace }}/build/iree-bazel-gpu/rocm-root
+      PIP_CACHE_DIR: ${{ github.workspace }}/build/iree-bazel-gpu/caches/pip
+      AR: ${{ github.workspace }}/build/iree-bazel-gpu/rocm-root/lib/llvm/bin/llvm-ar
+      CC: ${{ github.workspace }}/build/iree-bazel-gpu/rocm-root/lib/llvm/bin/clang
+      CXX: ${{ github.workspace }}/build/iree-bazel-gpu/rocm-root/lib/llvm/bin/clang++
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
+
+      - name: Adjust git config
+        run: |
+          mkdir -p "$HOME"
+          git config --global --add safe.directory "$PWD"
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch ROCm toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Install Bazel host tools
+        run: |
+          python3 dev.py bazel setup --venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check tool versions
+        run: |
+          bazel --version
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          bash .github/scripts/check_rocm_device_toolchain.sh
+          test -d "${HRX_ROCM_ROOT}/include"
+
+      - name: Report ROCm environment
+        timeout-minutes: 1
+        run: >-
+          bash .github/scripts/check_rocm_environment.sh
+          --export-libamdf-gpu-selection
+          --amdgpu-target gfx942
+
+      - name: Run bounded native reproducers
+        id: capture
+        env:
+          CAPTURE_CONFIGURATION: ${{ inputs.configuration }}
+        run: |
+          ulimit -c 0
+          python3 - <<'PYTHON'
+          from dataclasses import replace
+          import os
+          from pathlib import Path
+          from build_tools.devtools import ci
+
+          configuration = os.environ["CAPTURE_CONFIGURATION"]
+          command = "iree-bazel-amdgpu"
+          if configuration == "asan":
+              command += "-asan"
+          result_root = Path(os.environ["RUNNER_TEMP"]) / "native-sdma-capture"
+          targets = (
+              ("serial", "//libamdf/cts/gpu/recipes:recipes_dynamic"),
+              ("staged", "//libamdf/cts/gpu/linux/io_uring:file_staged_dynamic"),
+          )
+          options = (
+              "--nocache_test_results",
+              "--test_output=streamed",
+              "--test_arg=--gtest_repeat=100",
+              "--test_arg=--gtest_fail_fast=1",
+              "--test_arg=--gtest_throw_on_failure=1",
+              "--test_filter=DeviceGeneratedSdmaAqlTest.DependentCopiesReuseRingAndPayload:FileToSdma/*",
+          )
+          for name, target in targets:
+              result_dir = result_root / name
+              args = ci.parse_arguments([
+                  command,
+                  "--amdgpu-target=gfx942",
+                  "--target=" + target,
+                  "--bazel-test-results-dir=" + str(result_dir),
+              ])
+              steps = ci.steps_from_args(args)
+              for index, step in enumerate(steps):
+                  if step.test_results is not None:
+                      steps[index] = replace(
+                          step, argv=step.argv[:4] + options + step.argv[4:]
+                      )
+              ci.bazel_test_results.prepare_output_directory(result_dir)
+              result = ci.run_steps(
+                  steps, dry_run=False, keep_going=False, verbose=True
+              )
+              if result:
+                  raise SystemExit(result)
+          PYTHON
+
+      - name: Capture accelerator kernel errors
+        if: ${{ failure() }}
+        run: |
+          date -u
+          uname -a
+          timeout --kill-after=5s 15s dmesg --ctime --level=err,warn 2>&1 | tail -n 200
+
+      - name: Upload native test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-sdma-capture-${{ inputs.configuration }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/native-sdma-capture/**/bazel-testlogs/**
           if-no-files-found: warn
           retention-days: 7
