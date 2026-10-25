@@ -318,6 +318,112 @@ TEST_F(VcnEncodePacketTest, HevcMatchesQualifiedNativePackets) {
   }
 }
 
+TEST_F(VcnEncodePacketTest, HevcVcn5UsesDirectTier2References) {
+  ConfigureVcn5();
+  session_.requirements.configuration.codec = AMDF_MEDIA_CODEC_HEVC;
+  session_.encode_codec.hevc.minimum_luma_coding_unit_log2 = 3;
+  session_.encode_codec.hevc.log2_max_picture_order_count_lsb_minus4 = 0;
+
+  const uint64_t expected_picture_hashes[2][2] = {
+      {UINT64_C(0x14b8e705f95c7750), UINT64_C(0xacb53bcfbe19f251)},
+      {UINT64_C(0x7165c9a7aefcc247), UINT64_C(0xa3637d8cc0a25d2e)},
+  };
+  for (uint32_t depth_index = 0; depth_index < 2; ++depth_index) {
+    ConfigureSampleBitDepth(depth_index == 0 ? 8 : 10);
+    uint32_t length = amdf_media_drm_vcn_encode_control(
+        &command_, &session_, AMDF_MEDIA_COMMAND_OPERATION_BEGIN);
+    EXPECT_EQ(length, 312u);
+    EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x8943be6c1e791118));
+
+    amdf_media_hevc_encode_picture_info_t picture = {
+        .frame_type = AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_IDR,
+        .used_as_reference = 1,
+    };
+    length = amdf_media_drm_vcn_encode_hevc(&command_, &session_, &resources_,
+                                            0, &picture);
+    EXPECT_EQ(length, 4832u);
+    EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][0]);
+    EXPECT_LE(length, sizeof(words_));
+
+    PacketBlock block = FindPacketBlock(words_, length, 0x100002);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 10u);
+    EXPECT_EQ(block.payload[8], 0u);
+    EXPECT_EQ(block.payload[9], 1u);
+
+    block = FindPacketBlock(words_, length, 0x0f);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 10u);
+    EXPECT_EQ(block.payload[8], 0u);
+    EXPECT_EQ(block.payload[9], 0u);
+
+    block = FindPacketBlock(words_, length, 0x100004);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 17u);
+    EXPECT_EQ(block.payload[0], UINT32_MAX);
+    for (uint32_t i = 1; i < 17; ++i) {
+      EXPECT_EQ(block.payload[i], 0u) << "payload word " << i;
+    }
+
+    block = FindPacketBlock(words_, length, 0x11);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 1029u);
+    EXPECT_EQ(block.payload[0], 0u);
+    EXPECT_EQ(block.payload[1], 0u);
+    EXPECT_EQ(block.payload[2], 2u);
+    EXPECT_EQ(block.payload[3],
+              static_cast<uint32_t>(kReconstructionAddress >> 32));
+    EXPECT_EQ(block.payload[4], static_cast<uint32_t>(kReconstructionAddress));
+    EXPECT_EQ(block.payload[5], 512u);
+    EXPECT_EQ(block.payload[6],
+              static_cast<uint32_t>(kReconstructionAddress >> 32));
+    EXPECT_EQ(
+        block.payload[7],
+        static_cast<uint32_t>(kReconstructionAddress +
+                              resources_.reconstruction_luma_byte_length));
+    EXPECT_EQ(block.payload[8], 256u);
+    const uint64_t frame_context_address =
+        kReconstructionAddress +
+        2 * resources_.reconstruction_layer_byte_length;
+    EXPECT_EQ(block.payload[13],
+              static_cast<uint32_t>(frame_context_address >> 32));
+    EXPECT_EQ(block.payload[14], static_cast<uint32_t>(frame_context_address));
+    EXPECT_EQ(block.payload[15], 0u);
+    EXPECT_EQ(block.payload[16], 0u);
+    EXPECT_EQ(block.payload[17], 0u);
+    EXPECT_EQ(block.payload[1023], 512u);
+    EXPECT_EQ(block.payload[1024], 256u);
+
+    amdf_media_frame_t frame = {};
+    amdf_media_hevc_encode_reference_t reference = {
+        .binding = {&frame, 0},
+    };
+    picture.frame_type = AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_P;
+    picture.picture_order_count = 1;
+    picture.reference_count = 1;
+    picture.references = &reference;
+    length = amdf_media_drm_vcn_encode_hevc(&command_, &session_, &resources_,
+                                            1, &picture);
+    EXPECT_EQ(length, 4832u);
+    EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][1]);
+    block = FindPacketBlock(words_, length, 0x0f);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 10u);
+    EXPECT_EQ(block.payload[9], 1u);
+    block = FindPacketBlock(words_, length, 0x100004);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 17u);
+    EXPECT_EQ(block.payload[0], 0u);
+    EXPECT_EQ(block.payload[15], 1u);
+    EXPECT_EQ(block.payload[16], 0u);
+  }
+
+  const uint32_t length = amdf_media_drm_vcn_encode_control(
+      &command_, &session_, AMDF_MEDIA_COMMAND_OPERATION_END);
+  EXPECT_EQ(length, 68u);
+  EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x16e12386c181e8f1));
+}
+
 TEST_F(VcnEncodePacketTest, Av1MatchesPixelFirstQualifiedNativePackets) {
   session_.requirements.configuration.codec = AMDF_MEDIA_CODEC_AV1;
   session_.encode_codec.av1.order_hint_bit_count = 4;

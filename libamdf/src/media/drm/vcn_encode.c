@@ -22,6 +22,7 @@ enum {
   VCN_ENCODE_SESSION_CONTEXT_BYTES = 131072,
   VCN_ENCODE_RECONSTRUCTION_LIMIT = 34,
   VCN5_ENCODE_FRAME_CONTEXT_BYTES = 1024,
+  VCN5_ENCODE_HEVC_REFERENCE_LIMIT = 15,
   VCN_ENCODE_AV1_SDB_BYTES = 947200,
   VCN_ENCODE_AV1_CDF_BYTES = 22528,
   VCN_ENCODE_AV1_CDEF_BYTES = 1536,
@@ -669,7 +670,7 @@ static void amdf_media_drm_vcn4_encode_context(
   amdf_media_drm_vcn_encode_block_end(writer, block);
 }
 
-static void amdf_media_drm_vcn5_h264_encode_context(
+static void amdf_media_drm_vcn5_encode_context(
     amdf_media_drm_vcn_encode_writer_t* writer,
     const amdf_media_drm_session_t* session,
     const amdf_media_drm_vcn_encode_resources_t* resources) {
@@ -710,8 +711,13 @@ static void amdf_media_drm_vcn5_h264_encode_context(
       amdf_media_drm_vcn_encode_address(
           writer, frame_context_address +
                       (uint64_t)i * VCN5_ENCODE_FRAME_CONTEXT_BYTES);
-      // The admitted IP-only envelope has no collocated B-picture state.
-      amdf_media_drm_vcn_encode_word(writer, UINT32_MAX);
+      // H.264 reserves a collocated-buffer offset in its frame context. HEVC
+      // has no codec-specific frame-context offsets in the admitted envelope.
+      amdf_media_drm_vcn_encode_word(
+          writer,
+          session->requirements.configuration.codec == AMDF_MEDIA_CODEC_H264
+              ? UINT32_MAX
+              : 0);
       amdf_media_drm_vcn_encode_word(writer, 0);
       amdf_media_drm_vcn_encode_word(writer, 0);
     } else {
@@ -738,7 +744,7 @@ static void amdf_media_drm_vcn_encode_context(
     const amdf_media_drm_session_t* session,
     const amdf_media_drm_vcn_encode_resources_t* resources) {
   if (writer->vcn5) {
-    amdf_media_drm_vcn5_h264_encode_context(writer, session, resources);
+    amdf_media_drm_vcn5_encode_context(writer, session, resources);
   } else {
     amdf_media_drm_vcn4_encode_context(writer, session, resources);
   }
@@ -935,9 +941,13 @@ uint32_t amdf_media_drm_vcn_encode_hevc(
   for (uint32_t i = 0; i < 3; ++i) {
     amdf_media_drm_vcn_encode_word(&writer, 0);
   }
-  for (uint32_t i = 0; i < 4; ++i) {
+  for (uint32_t i = 0; i < 3; ++i) {
     amdf_media_drm_vcn_encode_word(&writer, 1);
   }
+  if (writer.vcn5) {
+    amdf_media_drm_vcn_encode_word(&writer, 0);
+  }
+  amdf_media_drm_vcn_encode_word(&writer, 1);
   amdf_media_drm_vcn_encode_block_end(&writer, block);
 
   block = amdf_media_drm_vcn_encode_block_begin(&writer, 0x100003);
@@ -954,6 +964,17 @@ uint32_t amdf_media_drm_vcn_encode_hevc(
       &writer, session, resources, idr ? 2 : 1,
       idr ? UINT32_MAX : picture->references[0].binding.slot_index,
       reconstruction_slot);
+  if (writer.vcn5) {
+    block = amdf_media_drm_vcn_encode_block_begin(&writer, 0x100004);
+    amdf_media_drm_vcn_encode_word(
+        &writer, idr ? UINT32_MAX : picture->references[0].binding.slot_index);
+    for (uint32_t i = 1; i < VCN5_ENCODE_HEVC_REFERENCE_LIMIT; ++i) {
+      amdf_media_drm_vcn_encode_word(&writer, 0);
+    }
+    amdf_media_drm_vcn_encode_word(&writer, idr ? 0 : 1);
+    amdf_media_drm_vcn_encode_word(&writer, 0);
+    amdf_media_drm_vcn_encode_block_end(&writer, block);
+  }
   amdf_media_drm_vcn_encode_picture_end(&writer, session, resources);
   return amdf_media_drm_vcn_encode_task_end(&writer);
 }
