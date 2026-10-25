@@ -231,7 +231,7 @@ After downloading `low_schedule.loom`, run its four correctness cases on an
 AMDGPU device supporting the example's GFX11 WMMA instructions:
 
 ```shell
-loom-test low_schedule.loom --device=legacy-amdgpu
+loom-test low_schedule.loom --device=amdgpu
 ```
 
 Numerical checks establish that every schedule consumes the intended tiles.
@@ -263,7 +263,7 @@ Here `%local_byte_offset` includes the workgroup allocation's base and the
 lane's offset. The [checked flat-pointer example](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11/flat_aperture.loom)
 passes a `buffer.alloca<workgroup>` allocation into a Low helper, exercises
 returning and non-returning atomics, and selects global or LDS addresses per
-lane. Download it and run `loom-test flat_aperture.loom --device=legacy-amdgpu`
+lane. Download it and run `loom-test flat_aperture.loom --device=amdgpu`
 on a GFX11 device.
 
 Flat completion differs across families. GFX9 can report early completion in

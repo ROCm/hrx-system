@@ -349,7 +349,7 @@ set false:
 ```shell
 loom-benchmark kernel.loom \
   --benchmark=@kernel_latency \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --measure=dispatch_complete \
   --profile-data=counter-ranges \
   --profile-counter=SQ_WAVES \

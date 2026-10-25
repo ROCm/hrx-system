@@ -166,7 +166,7 @@ Automatic reclamation is opt-in. For example, this server releases unused
 command workspace after 30 seconds and unpinned weights after five minutes:
 
 ```sh
-loom-serve --device=legacy-amdgpu --model=/srv/models/scout/model.json \
+loom-serve --device=amdgpu --model=/srv/models/scout/model.json \
   --workspace_idle_ms=30000 --parameter_idle_ms=300000
 ```
 

@@ -80,6 +80,12 @@ def amd_gpu_execution_profile(name, runner_args = [], tags = [], device = "amdgp
 
 AMD_GPU_HARDWARE_PROFILE = amd_gpu_execution_profile(name = "amd_gpu_hardware")
 
+AMD_GPU_ACCESS_PROFILE = amd_gpu_execution_profile(
+    name = "amd_gpu_access",
+    runner_args = ["--sanitizer=access"],
+    tags = ["notsan", "requires-amd-gpu-feedback"],
+)
+
 AMD_GPU_ASAN_PROFILE = amd_gpu_execution_profile(
     name = "amd_gpu_asan",
     runner_args = ["--sanitizer=asan", "--sanitizer-reporting=report-only"],

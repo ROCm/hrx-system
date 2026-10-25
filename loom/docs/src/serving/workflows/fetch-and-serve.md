@@ -72,7 +72,7 @@ approval can be delayed. Fetch never accepts terms on your behalf. In scripts,
 ## Start the server
 
 ```sh
-loom-serve --device=amdgpu2 --workers=4 --listen=127.0.0.1:8080 --model=./moonshine/model.json
+loom-serve --device=amdgpu --workers=4 --listen=127.0.0.1:8080 --model=./moonshine/model.json
 ```
 
 Leave this terminal running. The server loads only local files; it does not

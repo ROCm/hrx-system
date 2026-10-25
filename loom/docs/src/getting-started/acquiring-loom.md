@@ -77,7 +77,7 @@ Activating the environment puts its `bin/` directory on PATH on Linux and its
 libraries from the installation. If a command is not found, activate the same
 environment in which pip installed the wheel.
 
-`task` selects CPU execution, `amdgpu2` selects native AMD GPU execution, and
+`task` selects CPU execution, `amdgpu` selects native AMD GPU execution, and
 `xdna` selects AMD NPU execution. The driver list reports compiled-in drivers;
 creating a device still requires supported hardware and operating-system access.
 

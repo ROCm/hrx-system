@@ -48,10 +48,10 @@ For example, install the library's Moonshine Streaming Tiny model on an AMD GPU:
 
 ```sh
 loom-fetch https://raw.githubusercontent.com/ROCm/hrx-loom-library/21637a18079d1f1dd9b8e20d26f700a62e60db4f/model/moonshine-ai/moonshine-streaming-tiny/model.json --preset=streaming --output=./moonshine
-loom-serve --model=./moonshine/model.json --device=amdgpu2
+loom-serve --model=./moonshine/model.json --device=amdgpu
 ```
 
-Choose a device supported by the model: `task` for CPU, `amdgpu2` for AMD GPU,
+Choose a device supported by the model: `task` for CPU, `amdgpu` for AMD GPU,
 or `xdna` for AMD NPU. `loom-run --list_drivers` lists the installed drivers.
 The fetched card preserves the selected preset and can be served directly.
 Model weights are downloaded separately; the SDK does not contain checkpoints.

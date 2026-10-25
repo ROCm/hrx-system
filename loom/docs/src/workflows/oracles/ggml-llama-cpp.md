@@ -176,7 +176,7 @@ loom-format --check kernel.loom
 
 loom-test kernel.loom \
   --case=@raw_gguf_differential \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --sanitizer=access
 
 loom-benchmark kernel.loom \

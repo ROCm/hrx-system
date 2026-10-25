@@ -234,7 +234,7 @@ loom-benchmark kernel.loom \
 
 loom-test kernel.loom \
   --case=@production_cut_case \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --sanitizer=access
 ```
 
@@ -568,7 +568,7 @@ Two candidates in one module can run under an interleaved policy:
 
 ```shell
 loom-benchmark candidates.loom \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --compare=@baseline,@candidate \
   --sample=0 \
   --interleave=ABABA \

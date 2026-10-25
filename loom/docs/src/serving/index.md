@@ -73,8 +73,8 @@ Device URI query parameters request immutable runtime services. `feedback`
 provisions device-to-host diagnostics used by authored kernel assertions and
 other UBSAN-style reports. `asan` and `tsan` provision address- and race-
 sanitizer state and start the report transport each requires. They are bare,
-additive parameters. `--device=legacy-amdgpu:?feedback` configures the default AMDGPU
-device, while `--device=legacy-amdgpu://GPU-0e12865a3bf5b7ab?feedback&asan` configures
+additive parameters. `--device=amdgpu:?feedback` configures the default AMDGPU
+device, while `--device=amdgpu://0?feedback&asan` configures
 a specific device. `?feedback&asan&tsan` is also valid; explicit `feedback`
 adds general authored diagnostics to the sanitizer services. A backend that
 cannot provide a requested service rejects the URI during device creation.
@@ -89,7 +89,7 @@ there are more live executions than queues.
 For independent AMDGPU model submissions, provision extra queues at startup:
 
 ```sh
-loom-serve --device='legacy-amdgpu://0?queue_count=2' \
+loom-serve --device='amdgpu://0?queue_count=2' \
   --model=models/chat/model.json --model=models/speech/model.json
 ```
 

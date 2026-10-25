@@ -43,7 +43,7 @@ The default `auto` policy resolves a `check.case` benchmark to
 ```shell
 loom-benchmark program.loom \
   --benchmark=@decode_4096 \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --output=results.json
 ```
 
@@ -59,7 +59,7 @@ compatible devices:
 ```shell
 loom-benchmark program.loom \
   --benchmark=@decode_4096 \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --target=amdgpu:gfx11-generic \
   --output=generic-results.json
 ```
@@ -75,7 +75,7 @@ whole check program:
 ```shell
 loom-benchmark program.loom \
   --benchmark=@decode_4096 \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --measure=dispatch_complete \
   --batch-size=64 \
   --output=results.json
@@ -112,7 +112,7 @@ For occasional validation or a release gate, enable the authored checks:
 ```shell
 loom-benchmark program.loom \
   --benchmark=@decode_4096 \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --scenario-correctness=true \
   --output=checked-results.json
 ```
@@ -198,7 +198,7 @@ count. A deliberate hot-reuse experiment states that choice directly:
 ```shell
 loom-benchmark program.loom \
   --benchmark=@decode_4096 \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --measure=dispatch_complete \
   --input-ring-count=1 \
   --output=hot-reuse.json
@@ -217,7 +217,7 @@ of the same logical workload after the measured window:
 ```shell
 loom-benchmark program.loom \
   --benchmark=@decode_4096 \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --measure=dispatch_complete \
   --batch-size=64 \
   --profile-final-batch=true \
@@ -254,7 +254,7 @@ independent benchmark processes:
 
 ```shell
 loom-benchmark program.loom \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --compare=@baseline,@variant \
   --interleave=ABABA \
   --repetitions=2 \
@@ -274,7 +274,7 @@ candidate:
 
 ```shell
 loom-benchmark program.loom \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --compare=@baseline_scenario,@variant_scenario \
   --sample=3 \
   --interleave=ABABA \
@@ -336,7 +336,7 @@ identity, fixtures, and requested compiler or profile evidence:
 ```shell
 loom-benchmark program.loom \
   --benchmark=@decode_4096 \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --measure=dispatch_complete \
   --artifact-bundle-dir=decode-run
 ```

@@ -1266,21 +1266,21 @@ loom_test_module(
 endif()
 
 if(LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_GFX11_GENERIC_CORE AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
-if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD)
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMD_GPU)
 loom_execution_test(
   NAME
     physical_exchange_execution_test_execute_amd_gpu_hardware_test
   MODULE
     "::physical_exchange_execution_test_module"
   RUNNER_ARGS
-    "--device=amdgpu2"
+    "--device=amdgpu"
   LABELS
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
     "iree-build-requirement=loom.execute.iree_hal"
-    "iree-build-requirement=runtime.hal.amd"
+    "iree-build-requirement=runtime.hal.amd_gpu"
     "iree-run-requirement=libamdf.resource.amd_gpu"
     "runtime-resource=amd-gpu"
     "loom-execution-profile=amd_gpu_hardware"

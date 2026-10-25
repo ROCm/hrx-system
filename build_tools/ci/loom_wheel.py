@@ -36,7 +36,7 @@ def build_wheel(
             bazel,
             "test",
             *flags,
-            "--test_arg=task,amdgpu2,rdna,cdna,xdna",
+            "--test_arg=task,amdgpu,rdna,cdna,xdna",
             INSTALLED_TEST,
         ],
         cwd=root,

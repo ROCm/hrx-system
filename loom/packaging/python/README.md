@@ -91,9 +91,9 @@ permissions and produce test artifacts without publishing a release.
 `--config=loom-sdk` selects the SDK's CPU and libamdf runtime drivers, compiler
 targets, and media codecs independently of the worktree configuration. Native
 AMD execution uses the operating-system device driver; it requires no ROCm SDK.
-The `amdgpu2`, `rdna`, `cdna`, and `xdna` drivers use libamdf. The legacy `amdgpu`
-driver is excluded from this configuration. Instrumentation and optimization
-are selected separately, as shown below.
+The `amdgpu`, `rdna`, `cdna`, and `xdna` drivers use libamdf. The ROCr-based
+`legacy-amdgpu` driver is excluded from this configuration. Instrumentation and
+optimization are selected separately, as shown below.
 
 Windows SDK profiles use the redistributable dynamic C runtime. The debug
 profile keeps unoptimized code and assertions without requiring Visual Studio's

@@ -218,7 +218,7 @@ loom_test_module(
 loom_test(
     name = "copy_test",
     module = "//corpus:copy_cases",
-    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+    execution_profiles = [AMD_GPU_HARDWARE_PROFILE],
 )
 ```
 

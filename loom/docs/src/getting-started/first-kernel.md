@@ -18,9 +18,9 @@ compile the kernel for the selected device, materialize the tensors declared by
 the case, launch the work, check the result, and measure the same workload when
 requested.
 
-This page assumes the Loom tools are on `PATH` and that `--device=legacy-amdgpu` is
-available. [Acquiring Loom](acquiring-loom.md) describes the current
-source-build and Bazel setup.
+This page assumes the Loom tools are on `PATH` and that `--device=amdgpu` is
+available. [Acquiring Loom](acquiring-loom.md) describes SDK installation
+and source-build setup.
 
 ## Create one source file
 
@@ -69,7 +69,7 @@ not select a valid case sample.
 Run the checked program directly:
 
 ```shell
-loom-test saxpy.loom --device=legacy-amdgpu >saxpy-test.json
+loom-test saxpy.loom --device=amdgpu >saxpy-test.json
 ```
 
 The runner discovers `@saxpy_f32_case`, plans its six parameter assignments,
@@ -86,7 +86,7 @@ Select one sample while editing without changing the source:
 
 ```shell
 loom-test saxpy.loom \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --case=@saxpy_f32_case \
   --sample=3
 ```
@@ -100,7 +100,7 @@ Measure the named 64K dispatch workload:
 
 ```shell
 loom-benchmark saxpy.loom \
-  --device=legacy-amdgpu \
+  --device=amdgpu \
   --benchmark=@saxpy_f32_64k \
   --measure=dispatch_complete \
   --batch-size=64 \
@@ -138,7 +138,7 @@ correctness, and benchmark-smoke coverage with one rule:
 ```
 
 The built-in AMDGPU execution profile owns the compiler and driver
-requirements, `--device=legacy-amdgpu` argument, GPU resource serialization, and
+requirements, `--device=amdgpu` argument, GPU resource serialization, and
 stable query tags. The source remains target-independent; the profile chooses
 where this test instance runs.
 
