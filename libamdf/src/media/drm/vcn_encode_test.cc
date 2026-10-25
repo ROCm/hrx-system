@@ -22,10 +22,39 @@ uint64_t Fnv1a(const void* data, uint32_t byte_length) {
   return hash;
 }
 
+struct PacketBlock {
+  const uint32_t* payload = nullptr;
+  uint32_t payload_word_count = 0;
+};
+
+PacketBlock FindPacketBlock(const uint32_t* words, uint32_t byte_length,
+                            uint32_t operation) {
+  for (uint32_t index = 15; index < byte_length / sizeof(uint32_t);) {
+    const uint32_t block_byte_length = words[index];
+    if (block_byte_length < 2 * sizeof(uint32_t) ||
+        block_byte_length % sizeof(uint32_t) != 0 ||
+        index + block_byte_length / sizeof(uint32_t) >
+            byte_length / sizeof(uint32_t)) {
+      ADD_FAILURE() << "malformed packet block at word " << index;
+      return {};
+    }
+    if (words[index + 1] == operation) {
+      return {
+          words + index + 2,
+          static_cast<uint32_t>(block_byte_length / sizeof(uint32_t) - 2),
+      };
+    }
+    index += block_byte_length / sizeof(uint32_t);
+  }
+  ADD_FAILURE() << "missing packet operation 0x" << std::hex << operation;
+  return {};
+}
+
 class VcnEncodePacketTest : public ::testing::Test {
  protected:
   void SetUp() override {
     device_.engines[0].information.ip_discovery_version = 0x040006;
+    device_.engines[0].command_protocol = AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4;
     queue_.base.device = &device_.base.base;
     queue_.base.info.queue_family_ordinal = 0;
     session_.base.queue = &queue_.base;
@@ -69,6 +98,11 @@ class VcnEncodePacketTest : public ::testing::Test {
         512 * 256 * 3 / 2 * sample_byte_count;
     resources_.reconstruction_luma_byte_length = 512 * 256 * sample_byte_count;
     resources_.reconstruction_row_pitch = 512 * sample_byte_count;
+  }
+
+  void ConfigureVcn5() {
+    device_.engines[0].information.ip_discovery_version = 0x050000;
+    device_.engines[0].command_protocol = AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5;
   }
 
   static constexpr uint64_t kSessionAddress = UINT64_C(0x123400000000);
@@ -121,6 +155,104 @@ TEST_F(VcnEncodePacketTest, H264MatchesQualifiedNativePackets) {
                                              AMDF_MEDIA_COMMAND_OPERATION_END);
   EXPECT_EQ(length, 68u);
   EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0xf1375b730de6143c));
+}
+
+TEST_F(VcnEncodePacketTest, H264Vcn5UsesDirectTier2References) {
+  ConfigureVcn5();
+  session_.codec.h264.level_idc = 30;
+  uint32_t length = amdf_media_drm_vcn_encode_control(
+      &command_, &session_, AMDF_MEDIA_COMMAND_OPERATION_BEGIN);
+  EXPECT_EQ(length, 312u);
+  EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x93b78668cdf49f15));
+  EXPECT_EQ(words_[6], 0x0001000au);
+
+  amdf_media_h264_encode_picture_info_t picture = {
+      .frame_type = AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR,
+      .used_as_reference = 1,
+  };
+  length = amdf_media_drm_vcn_encode_h264(&command_, &session_, &resources_, 0,
+                                          &picture);
+  EXPECT_EQ(length, 5052u);
+  EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x427dcee169434969));
+  EXPECT_LE(length, sizeof(words_));
+
+  PacketBlock block = FindPacketBlock(words_, length, 0x200002);
+  ASSERT_NE(block.payload, nullptr);
+  EXPECT_EQ(block.payload_word_count, 10u);
+  EXPECT_EQ(block.payload[3], 0u);
+  EXPECT_EQ(block.payload[4], 1u);
+  EXPECT_EQ(block.payload[6], 77u);
+
+  block = FindPacketBlock(words_, length, 0x0f);
+  ASSERT_NE(block.payload, nullptr);
+  EXPECT_EQ(block.payload_word_count, 10u);
+  EXPECT_EQ(block.payload[8], 0u);
+  EXPECT_EQ(block.payload[9], 0u);
+
+  block = FindPacketBlock(words_, length, 0x200003);
+  ASSERT_NE(block.payload, nullptr);
+  ASSERT_EQ(block.payload_word_count, 75u);
+  EXPECT_EQ(block.payload[2], 1u);
+  EXPECT_EQ(block.payload[37], 0u);
+  EXPECT_EQ(block.payload[71], 0u);
+  EXPECT_EQ(block.payload[72], UINT32_MAX);
+  EXPECT_EQ(block.payload[74], UINT32_MAX);
+
+  block = FindPacketBlock(words_, length, 0x11);
+  ASSERT_NE(block.payload, nullptr);
+  ASSERT_EQ(block.payload_word_count, 1029u);
+  EXPECT_EQ(block.payload[0], 0u);
+  EXPECT_EQ(block.payload[1], 0u);
+  EXPECT_EQ(block.payload[2], 2u);
+  EXPECT_EQ(block.payload[3],
+            static_cast<uint32_t>(kReconstructionAddress >> 32));
+  EXPECT_EQ(block.payload[4], static_cast<uint32_t>(kReconstructionAddress));
+  EXPECT_EQ(block.payload[5], 512u);
+  EXPECT_EQ(block.payload[6],
+            static_cast<uint32_t>(kReconstructionAddress >> 32));
+  EXPECT_EQ(block.payload[7],
+            static_cast<uint32_t>(kReconstructionAddress + 512 * 256));
+  EXPECT_EQ(block.payload[8], 256u);
+  EXPECT_EQ(block.payload[12], 0u);
+  const uint64_t frame_context_address =
+      kReconstructionAddress + 2 * (512 * 256 * 3 / 2);
+  EXPECT_EQ(block.payload[13],
+            static_cast<uint32_t>(frame_context_address >> 32));
+  EXPECT_EQ(block.payload[14], static_cast<uint32_t>(frame_context_address));
+  EXPECT_EQ(block.payload[15], UINT32_MAX);
+  EXPECT_EQ(block.payload[17], 0u);
+  EXPECT_EQ(block.payload[1023], 512u);
+  EXPECT_EQ(block.payload[1024], 256u);
+
+  amdf_media_frame_t frame = {};
+  amdf_media_h264_encode_reference_t reference = {
+      .binding = {&frame, 0},
+      .frame_type = AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR,
+  };
+  picture.frame_type = AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_P;
+  picture.frame_number = 1;
+  picture.picture_order_count = 2;
+  picture.frame_decoding_order_number = 1;
+  picture.reference_count = 1;
+  picture.references = &reference;
+  length = amdf_media_drm_vcn_encode_h264(&command_, &session_, &resources_, 1,
+                                          &picture);
+  EXPECT_EQ(length, 5052u);
+  EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x9876aa3ec98ca8f8));
+  block = FindPacketBlock(words_, length, 0x200003);
+  ASSERT_NE(block.payload, nullptr);
+  ASSERT_EQ(block.payload_word_count, 75u);
+  EXPECT_EQ(block.payload[1], 2u);
+  EXPECT_EQ(block.payload[5], 0u);
+  EXPECT_EQ(block.payload[37], 1u);
+  EXPECT_EQ(block.payload[71], 0u);
+  EXPECT_EQ(block.payload[72], 0u);
+  EXPECT_EQ(block.payload[74], UINT32_MAX);
+
+  length = amdf_media_drm_vcn_encode_control(&command_, &session_,
+                                             AMDF_MEDIA_COMMAND_OPERATION_END);
+  EXPECT_EQ(length, 68u);
+  EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x16e12386c181e8f1));
 }
 
 TEST_F(VcnEncodePacketTest, HevcMatchesQualifiedNativePackets) {

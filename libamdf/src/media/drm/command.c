@@ -93,12 +93,18 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_create(
   command->maximum_slice_count = create_info->maximum_slice_count;
   command->maximum_reference_count = create_info->maximum_reference_count;
   command->buffers = (struct drm_amdgpu_bo_list_entry*)(command + 1);
-  const uint64_t storage_length =
-      !encode && codec == AMDF_MEDIA_CODEC_AV1
-          ? (AMDF_MEDIA_DRM_VCN_AV1_AUXILIARY_OFFSET +
-             AMDF_MEDIA_DRM_VCN_AV1_AUXILIARY_BYTES + device->page_size - 1) &
-                ~(device->page_size - 1)
-          : device->page_size;
+  const amdf_media_drm_engine_t* engine =
+      &device->engines[queue->info.queue_family_ordinal];
+  uint64_t storage_length = device->page_size;
+  if (!encode && codec == AMDF_MEDIA_CODEC_AV1) {
+    storage_length =
+        (AMDF_MEDIA_DRM_VCN_AV1_AUXILIARY_OFFSET +
+         AMDF_MEDIA_DRM_VCN_AV1_AUXILIARY_BYTES + device->page_size - 1) &
+        ~(device->page_size - 1);
+  } else if (encode &&
+             engine->command_protocol == AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5) {
+    storage_length = 2 * device->page_size;
+  }
   status = amdf_media_drm_buffer_prepare(device, -1, storage_length, true,
                                          &command->storage);
   if (amdf_status_is_ok(status)) {

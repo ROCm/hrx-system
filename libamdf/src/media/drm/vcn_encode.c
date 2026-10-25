@@ -10,16 +10,18 @@
 
 #include "libamdf/src/structure.h"
 
-// VCN 4 encode tasks are flat little-endian DWORD packages. Length words count
-// their complete package in bytes, including the length and operation words.
-// The top-level unified-engine package contains one session package, one task
-// package, and the operation-specific payload.
+// Unified VCN encode tasks are flat little-endian DWORD packages. Length words
+// count their complete package in bytes, including the length and operation
+// words. The top-level package contains one session package, one task package,
+// and the operation-specific payload.
 enum {
-  VCN_ENCODE_INTERFACE_VERSION = 0x0001000f,
+  VCN4_ENCODE_INTERFACE_VERSION = 0x0001000f,
+  VCN5_ENCODE_INTERFACE_VERSION = 0x0001000a,
   VCN_ENCODE_ENGINE_IDENTIFIER = 0x30000001,
   VCN_ENCODE_ENGINE_TYPE = 2,
   VCN_ENCODE_SESSION_CONTEXT_BYTES = 131072,
   VCN_ENCODE_RECONSTRUCTION_LIMIT = 34,
+  VCN5_ENCODE_FRAME_CONTEXT_BYTES = 1024,
   VCN_ENCODE_AV1_SDB_BYTES = 947200,
   VCN_ENCODE_AV1_CDF_BYTES = 22528,
   VCN_ENCODE_AV1_CDEF_BYTES = 1536,
@@ -34,7 +36,17 @@ typedef struct amdf_media_drm_vcn_encode_writer_t {
   uint32_t task_size_index;
   // First operation-specific payload word.
   uint32_t payload_index;
+  // Whether this task uses the VCN 5 firmware package schema.
+  bool vcn5;
 } amdf_media_drm_vcn_encode_writer_t;
+
+static bool amdf_media_drm_vcn_encode_is_vcn5(
+    const amdf_media_drm_session_t* session) {
+  const amdf_media_drm_device_t* device =
+      (const amdf_media_drm_device_t*)session->base.queue->device;
+  return device->engines[session->base.queue->info.queue_family_ordinal]
+             .command_protocol == AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5;
+}
 
 static void amdf_media_drm_vcn_encode_word(
     amdf_media_drm_vcn_encode_writer_t* writer, uint32_t value) {
@@ -69,14 +81,20 @@ static uint32_t amdf_media_drm_vcn_encode_codec(amdf_media_codec_t codec) {
 static void amdf_media_drm_vcn_encode_task_initialize(
     amdf_media_drm_vcn_encode_writer_t* writer, uint32_t* words,
     const amdf_media_drm_session_t* session, uint32_t task_id, bool feedback) {
-  *writer = (amdf_media_drm_vcn_encode_writer_t){.words = words, .count = 4};
+  *writer = (amdf_media_drm_vcn_encode_writer_t){
+      .words = words,
+      .count = 4,
+      .vcn5 = amdf_media_drm_vcn_encode_is_vcn5(session),
+  };
   words[0] = 16;
   words[1] = VCN_ENCODE_ENGINE_IDENTIFIER;
   words[2] = VCN_ENCODE_ENGINE_TYPE;
   words[3] = 0;
 
   uint32_t block = amdf_media_drm_vcn_encode_block_begin(writer, 1);
-  amdf_media_drm_vcn_encode_word(writer, VCN_ENCODE_INTERFACE_VERSION);
+  amdf_media_drm_vcn_encode_word(writer, writer->vcn5
+                                             ? VCN5_ENCODE_INTERFACE_VERSION
+                                             : VCN4_ENCODE_INTERFACE_VERSION);
   amdf_media_drm_vcn_encode_address(writer, session->storage->address);
   amdf_media_drm_vcn_encode_word(writer, 0);
   amdf_media_drm_vcn_encode_block_end(writer, block);
@@ -248,15 +266,17 @@ uint32_t amdf_media_drm_vcn_encode_control(
     for (uint32_t i = 0; i < 4; ++i) {
       amdf_media_drm_vcn_encode_word(&writer, 0);
     }
-    const amdf_media_drm_device_t* device =
-        (const amdf_media_drm_device_t*)session->base.queue->device;
-    const uint32_t version =
-        device->engines[session->base.queue->info.queue_family_ordinal]
-            .information.ip_discovery_version;
-    const bool av1_workaround =
-        configuration->codec == AMDF_MEDIA_CODEC_AV1 &&
-        (version == 0x040002 || version == 0x040005 || version == 0x040006);
-    amdf_media_drm_vcn_encode_word(&writer, av1_workaround);
+    if (!writer.vcn5) {
+      const amdf_media_drm_device_t* device =
+          (const amdf_media_drm_device_t*)session->base.queue->device;
+      const uint32_t version =
+          device->engines[session->base.queue->info.queue_family_ordinal]
+              .information.ip_discovery_version;
+      const bool av1_workaround =
+          configuration->codec == AMDF_MEDIA_CODEC_AV1 &&
+          (version == 0x040002 || version == 0x040005 || version == 0x040006);
+      amdf_media_drm_vcn_encode_word(&writer, av1_workaround);
+    }
     amdf_media_drm_vcn_encode_word(&writer, 0);
     amdf_media_drm_vcn_encode_block_end(&writer, block);
     amdf_media_drm_vcn_encode_rate_control(&writer, session);
@@ -566,12 +586,14 @@ static void amdf_media_drm_vcn_encode_parameters(
   amdf_media_drm_vcn_encode_word(
       writer, resources->input.row_pitches[1] / (2 * sample_bytes));
   amdf_media_drm_vcn_encode_word(writer, 0);
-  amdf_media_drm_vcn_encode_word(writer, reference_slot);
+  if (!writer->vcn5) {
+    amdf_media_drm_vcn_encode_word(writer, reference_slot);
+  }
   amdf_media_drm_vcn_encode_word(writer, reconstruction_slot);
   amdf_media_drm_vcn_encode_block_end(writer, block);
 }
 
-static void amdf_media_drm_vcn_encode_context(
+static void amdf_media_drm_vcn4_encode_context(
     amdf_media_drm_vcn_encode_writer_t* writer,
     const amdf_media_drm_session_t* session,
     const amdf_media_drm_vcn_encode_resources_t* resources) {
@@ -630,6 +652,81 @@ static void amdf_media_drm_vcn_encode_context(
   amdf_media_drm_vcn_encode_block_end(writer, block);
 }
 
+static void amdf_media_drm_vcn5_h264_encode_context(
+    amdf_media_drm_vcn_encode_writer_t* writer,
+    const amdf_media_drm_session_t* session,
+    const amdf_media_drm_vcn_encode_resources_t* resources) {
+  const uint32_t sample_bytes =
+      session->requirements.configuration.format == AMDF_MEDIA_PIXEL_FORMAT_P010
+          ? 2
+          : 1;
+  const uint32_t luma_pitch =
+      resources->reconstruction_row_pitch / sample_bytes;
+  const uint32_t chroma_pitch =
+      resources->reconstruction_row_pitch / (2 * sample_bytes);
+  const uint64_t frame_context_address =
+      resources->reconstruction_address +
+      (uint64_t)resources->reconstruction_layer_byte_length *
+          resources->reconstruction_slot_count;
+  const uint32_t block = amdf_media_drm_vcn_encode_block_begin(writer, 0x11);
+
+  // Tier-2 reconstruction supplies each plane directly instead of addressing
+  // offsets within one opaque firmware DPB.
+  amdf_media_drm_vcn_encode_address(writer, 0);
+  amdf_media_drm_vcn_encode_word(writer, resources->reconstruction_slot_count);
+  for (uint32_t i = 0; i < VCN_ENCODE_RECONSTRUCTION_LIMIT; ++i) {
+    if (i < resources->reconstruction_slot_count) {
+      const uint64_t luma_address =
+          resources->reconstruction_address +
+          (uint64_t)i * resources->reconstruction_layer_byte_length;
+      amdf_media_drm_vcn_encode_address(writer, luma_address);
+      amdf_media_drm_vcn_encode_word(writer, luma_pitch);
+      amdf_media_drm_vcn_encode_address(
+          writer, luma_address + resources->reconstruction_luma_byte_length);
+      amdf_media_drm_vcn_encode_word(writer, chroma_pitch);
+      for (uint32_t j = 0; j < 3; ++j) {
+        amdf_media_drm_vcn_encode_word(writer, 0);
+      }
+      // Public Linux reconstruction images are linear, so direct references
+      // request the firmware's linear reconstruction mode.
+      amdf_media_drm_vcn_encode_word(writer, 0);
+      amdf_media_drm_vcn_encode_address(
+          writer, frame_context_address +
+                      (uint64_t)i * VCN5_ENCODE_FRAME_CONTEXT_BYTES);
+      // The admitted IP-only envelope has no collocated B-picture state.
+      amdf_media_drm_vcn_encode_word(writer, UINT32_MAX);
+      amdf_media_drm_vcn_encode_word(writer, 0);
+      amdf_media_drm_vcn_encode_word(writer, 0);
+    } else {
+      for (uint32_t j = 0; j < 15; ++j) {
+        amdf_media_drm_vcn_encode_word(writer, 0);
+      }
+    }
+  }
+
+  // Pre-encoding is disabled, but its fixed-width slot table remains present.
+  for (uint32_t i = 0; i < VCN_ENCODE_RECONSTRUCTION_LIMIT * 15; ++i) {
+    amdf_media_drm_vcn_encode_word(writer, 0);
+  }
+  amdf_media_drm_vcn_encode_word(writer, luma_pitch);
+  amdf_media_drm_vcn_encode_word(writer, chroma_pitch);
+  for (uint32_t i = 0; i < 4; ++i) {
+    amdf_media_drm_vcn_encode_word(writer, 0);
+  }
+  amdf_media_drm_vcn_encode_block_end(writer, block);
+}
+
+static void amdf_media_drm_vcn_encode_context(
+    amdf_media_drm_vcn_encode_writer_t* writer,
+    const amdf_media_drm_session_t* session,
+    const amdf_media_drm_vcn_encode_resources_t* resources) {
+  if (writer->vcn5) {
+    amdf_media_drm_vcn5_h264_encode_context(writer, session, resources);
+  } else {
+    amdf_media_drm_vcn4_encode_context(writer, session, resources);
+  }
+}
+
 static void amdf_media_drm_vcn_encode_output(
     amdf_media_drm_vcn_encode_writer_t* writer,
     const amdf_media_drm_session_t* session,
@@ -672,7 +769,7 @@ static void amdf_media_drm_vcn_encode_output(
   amdf_media_drm_vcn_encode_block_end(writer, block);
 
   block = amdf_media_drm_vcn_encode_block_begin(writer, 0x0d);
-  for (uint32_t i = 0; i < 3; ++i) {
+  for (uint32_t i = 0; i < (writer->vcn5 ? 4u : 3u); ++i) {
     amdf_media_drm_vcn_encode_word(writer, 0);
   }
   amdf_media_drm_vcn_encode_word(writer, ten_bit);
@@ -719,6 +816,9 @@ uint32_t amdf_media_drm_vcn_encode_h264(
   amdf_media_drm_vcn_encode_word(&writer, 0);
   amdf_media_drm_vcn_encode_word(&writer, 0);
   amdf_media_drm_vcn_encode_word(&writer, 0);
+  if (writer.vcn5) {
+    amdf_media_drm_vcn_encode_word(&writer, 0);
+  }
   amdf_media_drm_vcn_encode_word(&writer, 1);
   amdf_media_drm_vcn_encode_word(&writer, 1);
   amdf_media_drm_vcn_encode_word(&writer, 77);
@@ -743,29 +843,51 @@ uint32_t amdf_media_drm_vcn_encode_h264(
                                        reference_slot, reconstruction_slot);
 
   block = amdf_media_drm_vcn_encode_block_begin(&writer, 0x200003);
-  amdf_media_drm_vcn_encode_word(&writer, 0);
-  amdf_media_drm_vcn_encode_word(&writer,
-                                 (uint32_t)picture->picture_order_count);
-  amdf_media_drm_vcn_encode_word(&writer, 0);
-  amdf_media_drm_vcn_encode_word(
-      &writer, reference != NULL && reference->frame_type ==
-                                        AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR
-                   ? 2
-                   : 1);
-  amdf_media_drm_vcn_encode_word(&writer, 0);
-  amdf_media_drm_vcn_encode_word(&writer, 0);
-  amdf_media_drm_vcn_encode_word(
-      &writer,
-      reference != NULL ? (uint32_t)reference->picture_order_count : 0);
-  amdf_media_drm_vcn_encode_word(&writer, UINT32_MAX);
-  for (uint32_t i = 0; i < 4; ++i) {
+  if (writer.vcn5) {
     amdf_media_drm_vcn_encode_word(&writer, 0);
-  }
-  amdf_media_drm_vcn_encode_word(&writer, UINT32_MAX);
-  for (uint32_t i = 0; i < 4; ++i) {
+    amdf_media_drm_vcn_encode_word(&writer,
+                                   (uint32_t)picture->picture_order_count);
+    amdf_media_drm_vcn_encode_word(&writer, picture->used_as_reference);
     amdf_media_drm_vcn_encode_word(&writer, 0);
+    amdf_media_drm_vcn_encode_word(&writer, 0);
+    for (uint32_t i = 0; i < 32; ++i) {
+      amdf_media_drm_vcn_encode_word(
+          &writer, reference != NULL && i == 0 ? reference_slot : 0);
+    }
+    amdf_media_drm_vcn_encode_word(&writer, reference != NULL ? 1 : 0);
+    for (uint32_t i = 0; i < 32; ++i) {
+      amdf_media_drm_vcn_encode_word(&writer, 0);
+    }
+    amdf_media_drm_vcn_encode_word(&writer, 0);
+    amdf_media_drm_vcn_encode_word(&writer, 0);
+    amdf_media_drm_vcn_encode_word(&writer, reference != NULL ? 0 : UINT32_MAX);
+    amdf_media_drm_vcn_encode_word(&writer, 0);
+    amdf_media_drm_vcn_encode_word(&writer, UINT32_MAX);
+  } else {
+    amdf_media_drm_vcn_encode_word(&writer, 0);
+    amdf_media_drm_vcn_encode_word(&writer,
+                                   (uint32_t)picture->picture_order_count);
+    amdf_media_drm_vcn_encode_word(&writer, 0);
+    amdf_media_drm_vcn_encode_word(
+        &writer, reference != NULL && reference->frame_type ==
+                                          AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR
+                     ? 2
+                     : 1);
+    amdf_media_drm_vcn_encode_word(&writer, 0);
+    amdf_media_drm_vcn_encode_word(&writer, 0);
+    amdf_media_drm_vcn_encode_word(
+        &writer,
+        reference != NULL ? (uint32_t)reference->picture_order_count : 0);
+    amdf_media_drm_vcn_encode_word(&writer, UINT32_MAX);
+    for (uint32_t i = 0; i < 4; ++i) {
+      amdf_media_drm_vcn_encode_word(&writer, 0);
+    }
+    amdf_media_drm_vcn_encode_word(&writer, UINT32_MAX);
+    for (uint32_t i = 0; i < 4; ++i) {
+      amdf_media_drm_vcn_encode_word(&writer, 0);
+    }
+    amdf_media_drm_vcn_encode_word(&writer, picture->used_as_reference);
   }
-  amdf_media_drm_vcn_encode_word(&writer, picture->used_as_reference);
   amdf_media_drm_vcn_encode_block_end(&writer, block);
 
   amdf_media_drm_vcn_encode_picture_end(&writer, session, resources);
