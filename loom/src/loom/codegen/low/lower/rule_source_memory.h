@@ -120,6 +120,24 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_dynamic_term(
     const loom_low_source_memory_access_plan_t* source_memory_access,
     uint8_t term_ordinal, loom_value_id_t* out_value_id);
 
+// One selected carried value replacing an otherwise materialized canonical
+// byte term. The selected byte-offset binding owns the replacement.
+typedef struct loom_low_lower_source_memory_term_replacement_t {
+  // Low value equal to the complete canonical term in bytes.
+  loom_value_id_t value_id;
+  // Dynamic-term ordinal replaced by |value_id|.
+  uint8_t term_ordinal;
+} loom_low_lower_source_memory_term_replacement_t;
+
+// Materializes the invariant stride suffix of one canonical byte term in the
+// target-selected offset carrier. The term must have at least one stride value.
+iree_status_t loom_low_lower_rule_materialize_source_memory_term_stride(
+    loom_low_lower_context_t* context,
+    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
+    const loom_low_lower_source_memory_byte_offset_materializer_t* materializer,
+    const loom_low_source_memory_dynamic_term_t* term, loom_type_t offset_type,
+    loom_value_id_t* out_value_id);
+
 // Materializes the recipe's dynamic byte offset in its declared carrier. When
 // reusing a complete view base this includes its embedded static contribution;
 // static_byte_offset above returns the matching residual displacement. Wider
@@ -129,6 +147,7 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_source_memory_t* source_memory,
     const loom_low_source_memory_access_plan_t* source_memory_access,
+    const loom_low_lower_source_memory_term_replacement_t* replacement,
     loom_value_id_t* out_value_id);
 
 // Resolves a generated source-memory arithmetic descriptor against the active
@@ -158,6 +177,7 @@ loom_low_lower_rule_materialize_source_memory_complete_byte_offset(
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
     const loom_low_lower_source_memory_t* source_memory,
     const loom_low_source_memory_access_plan_t* source_memory_access,
+    const loom_low_lower_source_memory_term_replacement_t* replacement,
     loom_value_id_t* out_value_id);
 
 // Materializes the complete target address using its planned semantic

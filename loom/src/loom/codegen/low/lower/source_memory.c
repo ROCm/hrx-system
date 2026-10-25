@@ -459,6 +459,42 @@ static iree_status_t loom_low_lower_memory_append_recurrence(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_lower_memory_append_term_recurrence(
+    loom_low_lower_source_memory_builder_t* builder,
+    loom_low_lower_context_t* context, const loom_cfg_loop_nest_t* loops,
+    uint16_t loop_index, loom_low_lower_source_memory_record_t* record,
+    uint8_t term_ordinal, loom_value_id_t induction_identity,
+    loom_low_lower_source_memory_term_recurrence_t* candidate,
+    uint8_t* inout_candidate_count) {
+  const loom_low_source_memory_dynamic_term_t* term =
+      &record->access.dynamic_terms[term_ordinal];
+  if (term->source != LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE ||
+      (term->stride_value_count == 0 && term->byte_stride == 1) ||
+      loom_value_fact_table_query_identity(context->fact_table, term->index) !=
+          induction_identity) {
+    return iree_ok_status();
+  }
+  for (uint8_t i = 0; i < term->stride_value_count; ++i) {
+    if (!loom_low_lower_memory_value_is_loop_invariant(
+            context->module, loops, loop_index, term->stride_values[i])) {
+      return iree_ok_status();
+    }
+  }
+  loom_low_lower_memory_component_entry_t* entry = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_memory_component_intern(
+      builder, &record->access, (uint16_t)(1u << term_ordinal), &entry));
+  if (*inout_candidate_count == 0) {
+    *candidate = (loom_low_lower_source_memory_term_recurrence_t){
+        .term_identity = entry->identity,
+        .term_ordinal = term_ordinal,
+    };
+    *inout_candidate_count = 1;
+  } else {
+    *inout_candidate_count = 2;
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_lower_memory_retain_recurrences(
     loom_low_lower_source_memory_builder_t* builder,
     loom_low_lower_context_t* context,
@@ -480,6 +516,8 @@ static iree_status_t loom_low_lower_memory_retain_recurrences(
       candidates[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY +
                  LOOM_LOW_SOURCE_MEMORY_DYNAMIC_REALIZATION_CAPACITY + 1];
   uint8_t candidate_count = 0;
+  loom_low_lower_source_memory_term_recurrence_t term_candidate = {0};
+  uint8_t term_candidate_count = 0;
   for (uint8_t i = 0; i < record->access.dynamic_term_count; ++i) {
     if (record->invariant_term_mask & (1u << i)) {
       continue;
@@ -488,6 +526,9 @@ static iree_status_t loom_low_lower_memory_retain_recurrences(
         context, &cfg->loops, loop_index, &record->access.dynamic_terms[i],
         record->access.dynamic_terms[i].index, induction_identity, candidates,
         &candidate_count));
+    IREE_RETURN_IF_ERROR(loom_low_lower_memory_append_term_recurrence(
+        builder, context, &cfg->loops, loop_index, record, i,
+        induction_identity, &term_candidate, &term_candidate_count));
   }
   if (record->access.dynamic_term_count == 1 &&
       loom_low_source_memory_access_dynamic_offset_has_materialized_view_base(
@@ -509,20 +550,35 @@ static iree_status_t loom_low_lower_memory_retain_recurrences(
         realization->term.index, induction_identity, candidates,
         &candidate_count));
   }
-  if (candidate_count == 0) {
+  // Replacing one term is unambiguous only when this access has one canonical
+  // term varying with the loop induction. Diagonal or otherwise repeated
+  // induction coordinates retain their complete direct calculation.
+  if (term_candidate_count != 1) {
+    term_candidate_count = 0;
+  }
+  if (candidate_count == 0 && term_candidate_count == 0) {
     return iree_ok_status();
   }
-  loom_low_lower_source_memory_recurrence_t* recurrences = NULL;
+  loom_low_lower_source_memory_recurrence_set_t* recurrence_set = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
-      context, candidate_count, sizeof(*recurrences), (void**)&recurrences));
-  memcpy(recurrences, candidates, candidate_count * sizeof(*recurrences));
-  record->recurrences = recurrences;
-  record->recurrence_count = candidate_count;
+      context, 1,
+      sizeof(*recurrence_set) + candidate_count * sizeof(*candidates),
+      (void**)&recurrence_set));
+  *recurrence_set = (loom_low_lower_source_memory_recurrence_set_t){
+      .term = term_candidate,
+      .producer_count = candidate_count,
+      .has_term = term_candidate_count != 0,
+  };
+  memcpy(recurrence_set->producers, candidates,
+         candidate_count * sizeof(*candidates));
+  record->recurrences = recurrence_set;
   for (uint8_t i = 0; i < candidate_count; ++i) {
     const loom_value_ordinal_t ordinal = loom_low_lowering_frame_value_ordinal(
         context->lowering, candidates[i].producer_value_id);
     context->lowering->source_plan.value_flags[ordinal] |=
         LOOM_LOW_LOWER_VALUE_MEMORY_RECURRENCE_PRODUCER;
+    context->lowering->source_plan.has_source_memory_producer_recurrences =
+        true;
   }
   context->lowering->source_plan.has_source_memory_recurrences = true;
   return iree_ok_status();

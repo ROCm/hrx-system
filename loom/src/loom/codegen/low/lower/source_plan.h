@@ -185,6 +185,9 @@ typedef struct loom_low_lower_source_plan_t {
   bool is_analyzing_storage_demands;
   // True when source observation retained at least one memory recurrence.
   bool has_source_memory_recurrences;
+  // True when a retained recurrence replaces an authored source producer and
+  // therefore needs the transient value-to-plan index during finalization.
+  bool has_source_memory_producer_recurrences;
   // Canonical accesses joined across observation and selection without an op
   // lookup table or a second address-analysis walk.
   struct {

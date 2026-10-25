@@ -339,6 +339,10 @@ typedef struct loom_low_lower_realization_cost_group_t {
   double direct_cost;
   // Shared loop cost plus every participating packet's setup cost.
   double replacement_cost;
+  // Number of distinct direct calculations credited to the group.
+  uint32_t removed_count;
+  // Largest minimum replacement count required by a member offer.
+  uint32_t minimum_removed_count;
 } loom_low_lower_realization_cost_group_t;
 
 typedef struct loom_low_lower_realization_cost_credit_t {
@@ -408,8 +412,12 @@ static iree_status_t loom_low_lower_realizations_select_offers(
           .first = record,
           .replacement_cost =
               offer->group_setup_cost + trips * offer->group_iteration_cost,
+          .minimum_removed_count = offer->minimum_removed_count,
       };
       group_buckets[bucket] = group;
+    } else {
+      group->minimum_removed_count =
+          iree_max(group->minimum_removed_count, offer->minimum_removed_count);
     }
     offer_groups[offer_index++] = group;
     group->replacement_cost += offer->setup_cost;
@@ -427,6 +435,7 @@ static iree_status_t loom_low_lower_realizations_select_offers(
       credits[bucket] = (loom_low_lower_realization_cost_credit_t){
           .group = group, .removed_key = offer->removed_key};
       group->direct_cost += trips * offer->removed_iteration_cost;
+      ++group->removed_count;
     }
   }
   offer_index = 0;
@@ -434,7 +443,8 @@ static iree_status_t loom_low_lower_realizations_select_offers(
        record; record = record->next) {
     const loom_low_lower_realization_cost_group_t* group =
         offer_groups[offer_index++];
-    record->selected = group->direct_cost > group->replacement_cost;
+    record->selected = group->removed_count >= group->minimum_removed_count &&
+                       group->direct_cost > group->replacement_cost;
   }
   iree_status_t status = iree_ok_status();
   for (loom_low_lower_realization_offer_record_t* record = state->offers.first;

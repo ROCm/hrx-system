@@ -667,8 +667,10 @@ static iree_status_t loom_low_lower_finalize_selected_plans(
   const bool prepare_recurrences = source_plan->has_source_memory_recurrences &&
                                    source_plan->realizations != NULL;
   if (prepare_recurrences) {
-    status = loom_low_lower_rule_source_memory_plan_prepare_producers(
-        context, &source_memory_builder);
+    if (source_plan->has_source_memory_producer_recurrences) {
+      status = loom_low_lower_rule_source_memory_plan_prepare_producers(
+          context, &source_memory_builder);
+    }
     if (iree_status_is_ok(status) && context->result->error_count == 0) {
       // Selected plans follow definition-before-use source order. Finalizing
       // table rules first makes producer descriptors available before memory

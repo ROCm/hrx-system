@@ -116,6 +116,9 @@ typedef struct loom_low_lower_realization_offer_t {
   uint64_t removed_key;
   // Per-iteration cost of the removed direct calculation.
   uint32_t removed_iteration_cost;
+  // Minimum number of distinct direct calculations the complete group must
+  // replace before its shared physical state is profitable.
+  uint32_t minimum_removed_count;
   // Conservative setup cost for this offer's additional invariant values.
   uint32_t setup_cost;
   // Physical value requested only when the complete offer group wins. NULL
