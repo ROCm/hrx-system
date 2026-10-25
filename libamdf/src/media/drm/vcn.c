@@ -215,6 +215,8 @@ bool amdf_media_drm_vcn_protocol(
         .command_protocol = AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4,
         .av1_protocol = AMDF_MEDIA_DRM_AV1_PROTOCOL_V1,
         .decode_array_mode = ip_discovery_version == 0x040003 ? 1 : 3,
+        .av1_encode_width_alignment = 64,
+        .av1_encode_height_alignment = 16,
         .decode_reference_swizzle_mode = 0,
         .encode_reconstruction_swizzle_mode = 0,
         .reference_height_alignment = 32,
@@ -226,6 +228,8 @@ bool amdf_media_drm_vcn_protocol(
         .command_protocol = AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5,
         .av1_protocol = AMDF_MEDIA_DRM_AV1_PROTOCOL_V2,
         .decode_array_mode = ip_discovery_version == 0x050001 ? 1 : 3,
+        .av1_encode_width_alignment = 8,
+        .av1_encode_height_alignment = 2,
         .decode_reference_swizzle_mode =
             AMDF_MEDIA_DRM_VCN_REFERENCE_SWIZZLE_256B_D,
         .encode_reconstruction_swizzle_mode =

@@ -47,6 +47,10 @@ typedef struct amdf_media_drm_engine_t {
   amdf_media_drm_av1_protocol_t av1_protocol;
   // Native address-library selector embedded in unified decode messages.
   uint32_t decode_array_mode;
+  // Required coded-width alignment for AV1 encode.
+  uint32_t av1_encode_width_alignment;
+  // Required coded-height alignment for AV1 encode.
+  uint32_t av1_encode_height_alignment;
   // Immutable native generation, rings, and command alignment.
   struct drm_amdgpu_info_hw_ip information;
 } amdf_media_drm_engine_t;

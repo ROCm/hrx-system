@@ -85,3 +85,14 @@ ordinary CTS kernel embedding rules. The test admits the exact returned layout b
 dispatch; this witness does not establish other swizzles, gfx12, or hardware
 image-instruction consumption of the returned descriptors.
 Those require their corresponding execution witnesses.
+
+The encode corpus runs H264 Main, HEVC Main/Main10, and AV1 Main at eight and
+ten bits where the profile permits. Every row executes CQP, CBR, and VBR over
+twelve GPU-produced pictures with four reusable recordings. Separate dependent-
+picture cases prove that application-owned reconstruction is consumed instead
+of replaying an intra picture. The first four compressed pictures are decoded
+through an independent native session, consumed by the GPU, and compared with
+the generated image. Output guards, the reported written extent, immutable
+recordings, native queue dependencies, checked retirement, and teardown are
+verified in the same process. Linux gfx1151 and gfx1201 use linear GPU input;
+Windows gfx1150 uses the qualified 64K_D_X image layout.

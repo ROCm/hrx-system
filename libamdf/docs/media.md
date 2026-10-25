@@ -10,12 +10,12 @@ it neither activates compute nor creates a queue or pixel allocation.
 The implemented codec set is queried per live queue family. Exact
 profile/format/dimension/reference admission is a separate query:
 
-| Provider | Decode schemas | Output storage |
-| --- | --- | --- |
-| Windows D3D12 | H264; HEVC Main/Main10; VP9 profiles 0/2; AV1 profile 0 | NV12 or P010 according to actual sample depth; application-placed native images |
-| Linux DRM VCN 4 | H264; HEVC Main/Main10; VP9 profiles 0/2; AV1 profile 0 | Linear NV12/P010 output and separate application-owned linear references |
-| Linux DRM VCN 5 | H264; HEVC Main/Main10; VP9 profiles 0/2; AV1 profile 0 | Linear NV12/P010 output and separate application-owned native references |
-| Linux DRM JPEG | Eight-bit baseline sequential 4:2:0 JPEG on the layout-2 JPEG engine | Linear NV12 planes, directly or through a placed image identity |
+| Provider | Decode schemas | Encode schemas | Image storage |
+| --- | --- | --- | --- |
+| Windows D3D12 | H264; HEVC Main/Main10; VP9 profiles 0/2; AV1 profile 0 | H264 Main; HEVC Main/Main10; AV1 Main, each with CQP/CBR/VBR | NV12 or P010 application-placed native images |
+| Linux DRM VCN 4 | H264; HEVC Main/Main10; VP9 profiles 0/2; AV1 profile 0 | H264 Main; HEVC Main/Main10; AV1 Main, each with CQP/CBR/VBR | Linear NV12/P010 output, input, and references |
+| Linux DRM VCN 5 | H264; HEVC Main/Main10; VP9 profiles 0/2; AV1 profile 0 | H264 Main; HEVC Main/Main10; AV1 Main, each with CQP/CBR/VBR | Linear NV12/P010 consumer output and encode input; application-owned native references and reconstruction |
+| Linux DRM JPEG | Eight-bit baseline sequential 4:2:0 JPEG on the layout-2 JPEG engine | None | Linear NV12 planes, directly or through a placed image identity |
 
 A native driver's broader codec list does not advertise schemas implemented by
 this extension. Configuration queries preserve requested dimensions and return
@@ -37,6 +37,15 @@ boundaries, quantization, segmentation, loop filters, restoration, global motion
 and film grain. Seven active references select an eight-entry logical map over
 stable physical reference slots. Grain-free reconstructed references remain
 separate from the displayed output, including when film grain is enabled.
+
+Encode admits IP pictures with application-owned reconstruction slots and CQP,
+CBR, or VBR rate control. H264 uses Main profile and picture-order-count type
+two. HEVC uses Main or Main10 without long-term references. AV1 uses profile 0,
+one full-frame tile, and no temporal/spatial layers, segmentation map,
+restoration, super-resolution, or B pictures. Linux VCN 4 AV1 coded dimensions
+must be 64x16 aligned; VCN 5 requires 8x2. Configuration queries reject a
+misaligned request rather than publishing a padded stream with different coded
+dimensions.
 
 ## Ownership through one picture
 

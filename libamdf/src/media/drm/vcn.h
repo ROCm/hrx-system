@@ -35,6 +35,10 @@ typedef struct amdf_media_drm_vcn_protocol_info_t {
   amdf_media_drm_av1_protocol_t av1_protocol;
   // Address-library selector embedded in decode-target and reference fields.
   uint32_t decode_array_mode;
+  // Required coded-width alignment for AV1 encode.
+  uint32_t av1_encode_width_alignment;
+  // Required coded-height alignment for AV1 encode.
+  uint32_t av1_encode_height_alignment;
   // Firmware swizzle selector for application-owned decode references.
   uint32_t decode_reference_swizzle_mode;
   // Firmware swizzle selector for application-owned encode reconstruction.

@@ -229,7 +229,8 @@ class EncodeConfigurationTest : public ::testing::Test {
 
   amdf_media_configuration_info_t Query(
       const EncodeCase& test_case, amdf_media_encode_rate_control_mode_t mode,
-      ConfigurationChain* chain) {
+      ConfigurationChain* chain, uint32_t coded_width = 320,
+      uint32_t coded_height = 192) {
     const amdf_media_configuration_query_t query = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_CONFIGURATION_QUERY,
         .structure_size = sizeof(query),
@@ -240,8 +241,8 @@ class EncodeConfigurationTest : public ::testing::Test {
                 .codec = test_case.codec,
                 .direction = AMDF_MEDIA_DIRECTION_ENCODE,
                 .format = test_case.format,
-                .coded_width = 320,
-                .coded_height = 192,
+                .coded_width = coded_width,
+                .coded_height = coded_height,
                 .reference_image_count = 2,
             },
     };
@@ -355,6 +356,21 @@ TEST_F(EncodeConfigurationTest, ExactAdvertisedMatrixAndStorageContracts) {
   }
   EXPECT_GT(tested_case_count, 0u);
 }
+
+#if !defined(_WIN32)
+TEST_F(EncodeConfigurationTest, RejectsUnrepresentableAv1CodedWidth) {
+  if (!Supports(AMDF_MEDIA_CODEC_AV1)) {
+    GTEST_SKIP() << "AV1 encode is not advertised";
+  }
+  const EncodeCase av1_case = {AMDF_MEDIA_CODEC_AV1,
+                               AMDF_MEDIA_PIXEL_FORMAT_NV12, 8};
+  ConfigurationChain chain;
+  const auto result = Query(av1_case, AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP,
+                            &chain, 322, 192);
+  EXPECT_EQ(result.support, AMDF_MEDIA_CONFIGURATION_SUPPORT_UNSUPPORTED);
+  EXPECT_EQ(result.reason, AMDF_MEDIA_CONFIGURATION_REASON_DIMENSIONS);
+}
+#endif  // !defined(_WIN32)
 
 TEST_F(EncodeConfigurationTest, UnsupportedTuplesHaveSpecificReasons) {
   if (!Supports(AMDF_MEDIA_CODEC_H264)) {

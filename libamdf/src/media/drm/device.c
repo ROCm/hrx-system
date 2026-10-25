@@ -483,11 +483,16 @@ static amdf_status_t amdf_media_drm_encode_configuration(
   const bool av1_tile_too_large =
       av1 != NULL && (configuration->coded_width > 4096 ||
                       pixel_count > UINT64_C(4096) * UINT64_C(2304));
+  const bool av1_dimensions_misaligned =
+      av1 != NULL &&
+      (configuration->coded_width % engine->av1_encode_width_alignment != 0 ||
+       configuration->coded_height % engine->av1_encode_height_alignment != 0);
   if (configuration->coded_width < 64 || configuration->coded_height < 64 ||
       ((configuration->coded_width | configuration->coded_height) & 1) != 0 ||
       configuration->coded_width > limits->max_width ||
       configuration->coded_height > limits->max_height ||
-      pixel_count > limits->max_pixels_per_frame || av1_tile_too_large) {
+      pixel_count > limits->max_pixels_per_frame || av1_tile_too_large ||
+      av1_dimensions_misaligned) {
     amdf_media_drm_answer_unsupported(
         &info, AMDF_MEDIA_CONFIGURATION_REASON_DIMENSIONS, out_info);
     return AMDF_STATUS_OK;
@@ -749,6 +754,10 @@ static amdf_status_t amdf_media_drm_device_discover(
         .av1_protocol = i == 1 ? vcn_protocol.av1_protocol
                                : AMDF_MEDIA_DRM_AV1_PROTOCOL_NONE,
         .decode_array_mode = i == 1 ? vcn_protocol.decode_array_mode : 0,
+        .av1_encode_width_alignment =
+            i == 1 ? vcn_protocol.av1_encode_width_alignment : 1,
+        .av1_encode_height_alignment =
+            i == 1 ? vcn_protocol.av1_encode_height_alignment : 1,
         .information = engine,
     };
   }
