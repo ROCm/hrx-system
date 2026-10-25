@@ -478,6 +478,7 @@ static amdf_status_t amdf_media_drm_command_prepare_encode(
           (uint32_t)(reconstruction_image->row_pitch *
                      reconstruction_image->allocated_height),
       .reconstruction_row_pitch = (uint32_t)reconstruction_image->row_pitch,
+      .reconstruction_swizzle_mode = reconstruction_image->swizzle_mode,
       .reconstruction_slot_count =
           session->requirements.configuration.reference_image_count,
       .compressed_address = compressed_address,

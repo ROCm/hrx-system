@@ -146,11 +146,15 @@ amdf_status_t AMDF_CALL amdf_media_drm_image_create(
   image->row_pitch = amdf_media_drm_image_pitch(&requirements.description);
   image->allocated_height = amdf_media_drm_image_rows(
       (const amdf_media_drm_device_t*)device, &requirements.description);
-  image->swizzle_mode = (requirements.description.roles &
-                         AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE) != 0
-                            ? ((const amdf_media_drm_device_t*)device)
-                                  ->decode_reference_swizzle_mode
-                            : 0;
+  const amdf_media_drm_device_t* drm_device =
+      (const amdf_media_drm_device_t*)device;
+  if ((requirements.description.roles &
+       AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE) != 0) {
+    image->swizzle_mode = drm_device->decode_reference_swizzle_mode;
+  } else if (requirements.description.roles ==
+             AMDF_MEDIA_IMAGE_ROLE_ENCODE_RECONSTRUCTION) {
+    image->swizzle_mode = drm_device->encode_reconstruction_swizzle_mode;
+  }
   image->layer_byte_length =
       requirements.byte_length / requirements.description.array_layer_count;
   *out_image = &image->base;

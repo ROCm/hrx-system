@@ -33,6 +33,8 @@ typedef struct amdf_media_drm_vcn_encode_resources_t {
   uint32_t reconstruction_luma_byte_length;
   // Common byte pitch of reconstruction luma and interleaved chroma planes.
   uint32_t reconstruction_row_pitch;
+  // Firmware swizzle selector established by the native image identity.
+  uint32_t reconstruction_swizzle_mode;
   // Number of application-owned reconstruction slots in the array.
   uint32_t reconstruction_slot_count;
   // Compressed output start.

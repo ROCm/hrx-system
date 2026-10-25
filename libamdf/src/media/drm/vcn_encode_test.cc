@@ -10,6 +10,7 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/media/drm/queue.h"
+#include "libamdf/src/media/drm/vcn.h"
 
 namespace {
 
@@ -23,8 +24,12 @@ uint64_t Fnv1a(const void* data, uint32_t byte_length) {
 }
 
 struct PacketBlock {
+  // First payload word after the length and operation header.
   const uint32_t* payload = nullptr;
+  // Number of payload words available through payload.
   uint32_t payload_word_count = 0;
+  // Offset of the block's length word in the complete packet.
+  uint32_t word_offset = UINT32_MAX;
 };
 
 PacketBlock FindPacketBlock(const uint32_t* words, uint32_t byte_length,
@@ -42,12 +47,57 @@ PacketBlock FindPacketBlock(const uint32_t* words, uint32_t byte_length,
       return {
           words + index + 2,
           static_cast<uint32_t>(block_byte_length / sizeof(uint32_t) - 2),
+          index,
       };
     }
     index += block_byte_length / sizeof(uint32_t);
   }
   ADD_FAILURE() << "missing packet operation 0x" << std::hex << operation;
   return {};
+}
+
+void ExpectPacketOperations(const PacketBlock& block,
+                            const uint32_t* expected_operations,
+                            uint32_t expected_operation_count) {
+  ASSERT_NE(block.payload, nullptr);
+  uint32_t operation_index = 0;
+  for (uint32_t word_index = 0; word_index < block.payload_word_count;
+       ++operation_index) {
+    ASSERT_LT(operation_index, expected_operation_count);
+    ASSERT_LT(word_index + 1, block.payload_word_count);
+    const uint32_t byte_length = block.payload[word_index];
+    ASSERT_GE(byte_length, 2 * sizeof(uint32_t));
+    ASSERT_EQ(byte_length % sizeof(uint32_t), 0u);
+    const uint32_t word_length = byte_length / sizeof(uint32_t);
+    ASSERT_LE(word_index + word_length, block.payload_word_count);
+    EXPECT_EQ(block.payload[word_index + 1],
+              expected_operations[operation_index])
+        << "nested operation " << operation_index;
+    word_index += word_length;
+  }
+  EXPECT_EQ(operation_index, expected_operation_count);
+}
+
+void ExpectVcn5RateControl(const uint32_t* words, uint32_t byte_length,
+                           uint32_t intra_qp, uint32_t predicted_qp,
+                           uint32_t bipredictive_qp, uint32_t minimum_qp,
+                           uint32_t maximum_qp,
+                           uint32_t maximum_frame_bits = 0) {
+  const PacketBlock block = FindPacketBlock(words, byte_length, 0x08);
+  ASSERT_NE(block.payload, nullptr);
+  ASSERT_EQ(block.payload_word_count, 16u);
+  EXPECT_EQ(block.payload[0], intra_qp);
+  EXPECT_EQ(block.payload[1], predicted_qp);
+  EXPECT_EQ(block.payload[2], bipredictive_qp);
+  for (uint32_t i = 0; i < 3; ++i) {
+    EXPECT_EQ(block.payload[3 + i * 2], minimum_qp);
+    EXPECT_EQ(block.payload[4 + i * 2], maximum_qp);
+    EXPECT_EQ(block.payload[9 + i], maximum_frame_bits);
+  }
+  EXPECT_EQ(block.payload[12], 1u);
+  EXPECT_EQ(block.payload[13], 0u);
+  EXPECT_EQ(block.payload[14], 1u);
+  EXPECT_EQ(block.payload[15], UINT32_MAX);
 }
 
 class VcnEncodePacketTest : public ::testing::Test {
@@ -103,6 +153,8 @@ class VcnEncodePacketTest : public ::testing::Test {
   void ConfigureVcn5() {
     device_.engines[0].information.ip_discovery_version = 0x050000;
     device_.engines[0].command_protocol = AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5;
+    resources_.reconstruction_swizzle_mode =
+        AMDF_MEDIA_DRM_VCN_REFERENCE_SWIZZLE_256B_D;
   }
 
   static constexpr uint64_t kSessionAddress = UINT64_C(0x123400000000);
@@ -179,14 +231,14 @@ TEST_F(VcnEncodePacketTest, H264MatchesQualifiedNativePackets) {
   EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0xf1375b730de6143c));
 }
 
-TEST_F(VcnEncodePacketTest, H264Vcn5UsesDirectTier2References) {
+TEST_F(VcnEncodePacketTest, Vcn5RateControlTracksEachPicture) {
   ConfigureVcn5();
   session_.codec.h264.level_idc = 30;
+  session_.encode.rate_control.control.cqp = {17, 29};
+
   uint32_t length = amdf_media_drm_vcn_encode_control(
       &command_, &session_, AMDF_MEDIA_COMMAND_OPERATION_BEGIN);
-  EXPECT_EQ(length, 312u);
-  EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x93b78668cdf49f15));
-  EXPECT_EQ(words_[6], 0x0001000au);
+  ExpectVcn5RateControl(words_, length, 17, 29, 29, 1, 51);
 
   amdf_media_h264_encode_picture_info_t picture = {
       .frame_type = AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR,
@@ -194,9 +246,58 @@ TEST_F(VcnEncodePacketTest, H264Vcn5UsesDirectTier2References) {
   };
   length = amdf_media_drm_vcn_encode_h264(&command_, &session_, &resources_, 0,
                                           &picture);
-  EXPECT_EQ(length, 5052u);
-  EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x427dcee169434969));
+  ExpectVcn5RateControl(words_, length, 17, 17, 17, 1, 51);
+
+  amdf_media_frame_t frame = {};
+  amdf_media_h264_encode_reference_t reference = {
+      .binding = {&frame, 0},
+      .frame_type = AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR,
+  };
+  picture.frame_type = AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_P;
+  picture.frame_number = 1;
+  picture.picture_order_count = 2;
+  picture.frame_decoding_order_number = 1;
+  picture.reference_count = 1;
+  picture.references = &reference;
+  length = amdf_media_drm_vcn_encode_h264(&command_, &session_, &resources_, 1,
+                                          &picture);
+  ExpectVcn5RateControl(words_, length, 29, 29, 29, 1, 51);
+
+  session_.encode.rate_control.mode = AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CBR;
+  session_.encode.rate_control.control.bit_rate = {
+      .minimum_quantization_parameter = 4,
+      .maximum_quantization_parameter = 44,
+      .maximum_frame_bit_count = 123456,
+      .target_bit_rate = 1000000,
+      .peak_bit_rate = 1000000,
+      .virtual_buffer_capacity = 1000000,
+      .initial_virtual_buffer_fullness = 500000,
+  };
+  length = amdf_media_drm_vcn_encode_control(
+      &command_, &session_, AMDF_MEDIA_COMMAND_OPERATION_BEGIN);
+  ExpectVcn5RateControl(words_, length, 20, 20, 20, 4, 44, 123456);
+}
+
+TEST_F(VcnEncodePacketTest, H264Vcn5UsesDirectTier2References) {
+  ConfigureVcn5();
+  session_.codec.h264.level_idc = 30;
+  uint32_t length = amdf_media_drm_vcn_encode_control(
+      &command_, &session_, AMDF_MEDIA_COMMAND_OPERATION_BEGIN);
+  EXPECT_EQ(length, 312u);
+  EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x12fd7d1434fd22f4));
+  EXPECT_EQ(words_[6], 0x0001000au);
+  ExpectVcn5RateControl(words_, length, 20, 20, 20, 1, 51);
+
+  amdf_media_h264_encode_picture_info_t picture = {
+      .frame_type = AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR,
+      .used_as_reference = 1,
+  };
+  length = amdf_media_drm_vcn_encode_h264(&command_, &session_, &resources_, 0,
+                                          &picture);
+  EXPECT_EQ(length, 5124u);
+  EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x8432e7709fed4d37));
   EXPECT_LE(length, sizeof(words_));
+  ExpectVcn5RateControl(words_, length, 20, 20, 20, 1, 51);
 
   PacketBlock block = FindPacketBlock(words_, length, 0x200002);
   ASSERT_NE(block.payload, nullptr);
@@ -235,7 +336,7 @@ TEST_F(VcnEncodePacketTest, H264Vcn5UsesDirectTier2References) {
   EXPECT_EQ(block.payload[7],
             static_cast<uint32_t>(kReconstructionAddress + 512 * 256));
   EXPECT_EQ(block.payload[8], 256u);
-  EXPECT_EQ(block.payload[12], 0u);
+  EXPECT_EQ(block.payload[12], AMDF_MEDIA_DRM_VCN_REFERENCE_SWIZZLE_256B_D);
   const uint64_t frame_context_address =
       kReconstructionAddress + 2 * (512 * 256 * 3 / 2);
   EXPECT_EQ(block.payload[13],
@@ -243,8 +344,8 @@ TEST_F(VcnEncodePacketTest, H264Vcn5UsesDirectTier2References) {
   EXPECT_EQ(block.payload[14], static_cast<uint32_t>(frame_context_address));
   EXPECT_EQ(block.payload[15], UINT32_MAX);
   EXPECT_EQ(block.payload[17], 0u);
-  EXPECT_EQ(block.payload[1023], 512u);
-  EXPECT_EQ(block.payload[1024], 256u);
+  EXPECT_EQ(block.payload[1023], 0u);
+  EXPECT_EQ(block.payload[1024], 0u);
 
   amdf_media_frame_t frame = {};
   amdf_media_h264_encode_reference_t reference = {
@@ -259,8 +360,9 @@ TEST_F(VcnEncodePacketTest, H264Vcn5UsesDirectTier2References) {
   picture.references = &reference;
   length = amdf_media_drm_vcn_encode_h264(&command_, &session_, &resources_, 1,
                                           &picture);
-  EXPECT_EQ(length, 5052u);
-  EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x9876aa3ec98ca8f8));
+  EXPECT_EQ(length, 5124u);
+  EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x70221d4e2cf7b5d6));
+  ExpectVcn5RateControl(words_, length, 20, 20, 20, 1, 51);
   block = FindPacketBlock(words_, length, 0x200003);
   ASSERT_NE(block.payload, nullptr);
   ASSERT_EQ(block.payload_word_count, 75u);
@@ -325,15 +427,16 @@ TEST_F(VcnEncodePacketTest, HevcVcn5UsesDirectTier2References) {
   session_.encode_codec.hevc.log2_max_picture_order_count_lsb_minus4 = 0;
 
   const uint64_t expected_picture_hashes[2][2] = {
-      {UINT64_C(0x14b8e705f95c7750), UINT64_C(0xacb53bcfbe19f251)},
-      {UINT64_C(0x7165c9a7aefcc247), UINT64_C(0xa3637d8cc0a25d2e)},
+      {UINT64_C(0x7b6a03aed7a92a53), UINT64_C(0x278f54b55a201e9a)},
+      {UINT64_C(0x7744e27da986fe88), UINT64_C(0xcc85864da8eb3211)},
   };
   for (uint32_t depth_index = 0; depth_index < 2; ++depth_index) {
     ConfigureSampleBitDepth(depth_index == 0 ? 8 : 10);
     uint32_t length = amdf_media_drm_vcn_encode_control(
         &command_, &session_, AMDF_MEDIA_COMMAND_OPERATION_BEGIN);
     EXPECT_EQ(length, 312u);
-    EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x8943be6c1e791118));
+    EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x245b3fa2257504f1));
+    ExpectVcn5RateControl(words_, length, 20, 20, 20, 1, 51);
 
     amdf_media_hevc_encode_picture_info_t picture = {
         .frame_type = AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_IDR,
@@ -341,9 +444,10 @@ TEST_F(VcnEncodePacketTest, HevcVcn5UsesDirectTier2References) {
     };
     length = amdf_media_drm_vcn_encode_hevc(&command_, &session_, &resources_,
                                             0, &picture);
-    EXPECT_EQ(length, 4832u);
+    EXPECT_EQ(length, 4904u);
     EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][0]);
     EXPECT_LE(length, sizeof(words_));
+    ExpectVcn5RateControl(words_, length, 20, 20, 20, 1, 51);
 
     PacketBlock block = FindPacketBlock(words_, length, 0x100002);
     ASSERT_NE(block.payload, nullptr);
@@ -382,6 +486,7 @@ TEST_F(VcnEncodePacketTest, HevcVcn5UsesDirectTier2References) {
         static_cast<uint32_t>(kReconstructionAddress +
                               resources_.reconstruction_luma_byte_length));
     EXPECT_EQ(block.payload[8], 256u);
+    EXPECT_EQ(block.payload[12], AMDF_MEDIA_DRM_VCN_REFERENCE_SWIZZLE_256B_D);
     const uint64_t frame_context_address =
         kReconstructionAddress +
         2 * resources_.reconstruction_layer_byte_length;
@@ -391,8 +496,8 @@ TEST_F(VcnEncodePacketTest, HevcVcn5UsesDirectTier2References) {
     EXPECT_EQ(block.payload[15], 0u);
     EXPECT_EQ(block.payload[16], 0u);
     EXPECT_EQ(block.payload[17], 0u);
-    EXPECT_EQ(block.payload[1023], 512u);
-    EXPECT_EQ(block.payload[1024], 256u);
+    EXPECT_EQ(block.payload[1023], 0u);
+    EXPECT_EQ(block.payload[1024], 0u);
 
     amdf_media_frame_t frame = {};
     amdf_media_hevc_encode_reference_t reference = {
@@ -404,8 +509,9 @@ TEST_F(VcnEncodePacketTest, HevcVcn5UsesDirectTier2References) {
     picture.references = &reference;
     length = amdf_media_drm_vcn_encode_hevc(&command_, &session_, &resources_,
                                             1, &picture);
-    EXPECT_EQ(length, 4832u);
+    EXPECT_EQ(length, 4904u);
     EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][1]);
+    ExpectVcn5RateControl(words_, length, 20, 20, 20, 1, 51);
     block = FindPacketBlock(words_, length, 0x0f);
     ASSERT_NE(block.payload, nullptr);
     ASSERT_EQ(block.payload_word_count, 10u);
@@ -478,8 +584,14 @@ TEST_F(VcnEncodePacketTest, Av1Vcn5UsesDirectTier2References) {
   session_.encode_codec.av1.order_hint_bit_count = 4;
 
   const uint64_t expected_picture_hashes[2][2] = {
-      {UINT64_C(0x9ab5f898fa9f0b79), UINT64_C(0x8a44d599e59df72e)},
-      {UINT64_C(0x4bef8d1761511fe0), UINT64_C(0xd4b7c1cfc99dcacf)},
+      {UINT64_C(0xd5e65a453d4d5685), UINT64_C(0x8e15d34486690cc5)},
+      {UINT64_C(0x0477bc500c2a40bc), UINT64_C(0x2dbee630d46d8ae4)},
+  };
+  static constexpr uint32_t kKeyObuOperations[] = {
+      2, 1, 3, 1, 10, 1, 11, 6, 8, 12, 13, 1, 14, 4, 0,
+  };
+  static constexpr uint32_t kInterObuOperations[] = {
+      2, 1, 3, 1, 5, 7, 1, 10, 1, 11, 6, 8, 12, 13, 1, 14, 4, 0,
   };
   for (uint32_t depth_index = 0; depth_index < 2; ++depth_index) {
     ConfigureSampleBitDepth(depth_index == 0 ? 8 : 10);
@@ -489,7 +601,8 @@ TEST_F(VcnEncodePacketTest, Av1Vcn5UsesDirectTier2References) {
     uint32_t length = amdf_media_drm_vcn_encode_control(
         &command_, &session_, AMDF_MEDIA_COMMAND_OPERATION_BEGIN);
     EXPECT_EQ(length, 312u);
-    EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x53fdaaea6dcd9c77));
+    EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0xa0ce22b30bf5d316));
+    ExpectVcn5RateControl(words_, length, 20, 20, 20, 8, 255);
 
     amdf_media_av1_encode_picture_info_t picture = {
         .frame_type = 0,
@@ -499,11 +612,18 @@ TEST_F(VcnEncodePacketTest, Av1Vcn5UsesDirectTier2References) {
     };
     length = amdf_media_drm_vcn_encode_av1(&command_, &session_, &resources_, 0,
                                            &picture);
-    EXPECT_EQ(length, 5276u);
+    EXPECT_EQ(length, 5316u);
     EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][0]);
     EXPECT_LE(length, sizeof(words_));
+    ExpectVcn5RateControl(words_, length, 20, 20, 20, 8, 255);
 
-    PacketBlock block = FindPacketBlock(words_, length, 0x300001);
+    const PacketBlock tile = FindPacketBlock(words_, length, 0x300002);
+    const PacketBlock specification = FindPacketBlock(words_, length, 0x300001);
+    ASSERT_NE(tile.payload, nullptr);
+    ASSERT_NE(specification.payload, nullptr);
+    EXPECT_LT(tile.word_offset, specification.word_offset);
+
+    PacketBlock block = specification;
     ASSERT_NE(block.payload, nullptr);
     ASSERT_EQ(block.payload_word_count, 48u);
     for (uint32_t i = 0; i < block.payload_word_count; ++i) {
@@ -511,8 +631,7 @@ TEST_F(VcnEncodePacketTest, Av1Vcn5UsesDirectTier2References) {
       EXPECT_EQ(block.payload[i], expected) << "payload word " << i;
     }
 
-    block = FindPacketBlock(words_, length, 0x300002);
-    ASSERT_NE(block.payload, nullptr);
+    block = tile;
     ASSERT_EQ(block.payload_word_count, 88u);
     for (uint32_t i = 0; i < block.payload_word_count; ++i) {
       uint32_t expected = 0;
@@ -540,6 +659,13 @@ TEST_F(VcnEncodePacketTest, Av1Vcn5UsesDirectTier2References) {
 
     block = FindPacketBlock(words_, length, 0x300003);
     ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 39u);
+    ExpectPacketOperations(
+        block, kKeyObuOperations,
+        sizeof(kKeyObuOperations) / sizeof(kKeyObuOperations[0]));
+    EXPECT_EQ(block.payload[2], 1u);
+    EXPECT_EQ(block.payload[5], 8u);
+    EXPECT_EQ(block.payload[6], 0x32000000u);
 
     block = FindPacketBlock(words_, length, 0x0f);
     ASSERT_NE(block.payload, nullptr);
@@ -582,6 +708,7 @@ TEST_F(VcnEncodePacketTest, Av1Vcn5UsesDirectTier2References) {
         static_cast<uint32_t>(kReconstructionAddress +
                               resources_.reconstruction_luma_byte_length));
     EXPECT_EQ(block.payload[8], 256u);
+    EXPECT_EQ(block.payload[12], AMDF_MEDIA_DRM_VCN_REFERENCE_SWIZZLE_256B_D);
     const uint64_t frame_context_address = auxiliary_address + 947200;
     EXPECT_EQ(block.payload[13],
               static_cast<uint32_t>(frame_context_address >> 32));
@@ -596,8 +723,8 @@ TEST_F(VcnEncodePacketTest, Av1Vcn5UsesDirectTier2References) {
     EXPECT_EQ(block.payload[30], 1024u);
     EXPECT_EQ(block.payload[31], 23552u);
     EXPECT_EQ(block.payload[32], 0u);
-    EXPECT_EQ(block.payload[1023], 512u);
-    EXPECT_EQ(block.payload[1024], 256u);
+    EXPECT_EQ(block.payload[1023], 0u);
+    EXPECT_EQ(block.payload[1024], 0u);
 
     amdf_media_frame_t frame = {};
     amdf_media_av1_encode_reference_t reference = {
@@ -614,8 +741,19 @@ TEST_F(VcnEncodePacketTest, Av1Vcn5UsesDirectTier2References) {
     }
     length = amdf_media_drm_vcn_encode_av1(&command_, &session_, &resources_, 1,
                                            &picture);
-    EXPECT_EQ(length, 5296u);
+    EXPECT_EQ(length, 5352u);
     EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][1]);
+    ExpectVcn5RateControl(words_, length, 20, 20, 20, 8, 255);
+
+    block = FindPacketBlock(words_, length, 0x300003);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 48u);
+    ExpectPacketOperations(
+        block, kInterObuOperations,
+        sizeof(kInterObuOperations) / sizeof(kInterObuOperations[0]));
+    EXPECT_EQ(block.payload[2], 1u);
+    EXPECT_EQ(block.payload[5], 8u);
+    EXPECT_EQ(block.payload[6], 0x32000000u);
 
     block = FindPacketBlock(words_, length, 0x0f);
     ASSERT_NE(block.payload, nullptr);

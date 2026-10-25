@@ -77,6 +77,8 @@ typedef struct amdf_media_drm_device_t {
   uint32_t decode_reference_swizzle_mode;
   // Luma-height alignment in rows for application-owned decode references.
   uint32_t decode_reference_height_alignment;
+  // Firmware swizzle selector for application-owned encode reconstruction.
+  uint32_t encode_reconstruction_swizzle_mode;
   // Native engines indexed by the corresponding public family ordinal.
   amdf_media_drm_engine_t engines[2];
   // Immutable execution families exposed by this activation.

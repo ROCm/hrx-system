@@ -161,39 +161,97 @@ static uint32_t amdf_media_drm_vcn_encode_per_picture_fraction(
   return (uint32_t)(((rate * denominator % numerator) << 32) / numerator);
 }
 
+typedef struct amdf_media_drm_vcn_encode_rate_control_state_t {
+  // Firmware rate-control method selected from the public mode.
+  uint32_t method;
+  // Average target bit rate in bits per second.
+  uint64_t target;
+  // Peak bit rate in bits per second.
+  uint64_t peak;
+  // Virtual-buffer capacity in bits.
+  uint64_t virtual_buffer;
+  // Initial virtual-buffer fullness in firmware 1/64 units.
+  uint32_t virtual_buffer_level;
+  // Quantization parameter selected for intra-coded pictures.
+  uint32_t intra_qp;
+  // Quantization parameter selected for predicted pictures.
+  uint32_t predicted_qp;
+  // Minimum quantization parameter available to firmware rate control.
+  uint32_t minimum_qp;
+  // Maximum quantization parameter available to firmware rate control.
+  uint32_t maximum_qp;
+  // Maximum encoded picture size in bits, or zero when unrestricted.
+  uint64_t maximum_frame_bits;
+} amdf_media_drm_vcn_encode_rate_control_state_t;
+
+static amdf_media_drm_vcn_encode_rate_control_state_t
+amdf_media_drm_vcn_encode_rate_control_state(
+    const amdf_media_drm_session_t* session) {
+  const amdf_media_encode_rate_control_t* rate = &session->encode.rate_control;
+  const bool av1 =
+      session->requirements.configuration.codec == AMDF_MEDIA_CODEC_AV1;
+  amdf_media_drm_vcn_encode_rate_control_state_t state = {
+      .method = amdf_media_drm_vcn_encode_rate_control_method(rate->mode),
+      .target = 1200000,
+      .peak = 1200000,
+      .virtual_buffer = 1200000,
+      .virtual_buffer_level = 32,
+      .intra_qp = rate->control.cqp.intra_quantization_parameter,
+      .predicted_qp = rate->control.cqp.predicted_quantization_parameter,
+      .minimum_qp = av1 ? 8 : 1,
+      .maximum_qp = av1 ? 255 : 51,
+  };
+  if (state.method != 0) {
+    const amdf_media_encode_bit_rate_t* bit_rate = &rate->control.bit_rate;
+    state.target = bit_rate->target_bit_rate;
+    state.peak = bit_rate->peak_bit_rate;
+    state.virtual_buffer = bit_rate->virtual_buffer_capacity;
+    state.virtual_buffer_level =
+        (uint32_t)((bit_rate->initial_virtual_buffer_fullness << 6) /
+                   state.virtual_buffer);
+    state.intra_qp = state.predicted_qp = 20;
+    state.minimum_qp = bit_rate->minimum_quantization_parameter;
+    state.maximum_qp = bit_rate->maximum_quantization_parameter;
+    state.maximum_frame_bits = bit_rate->maximum_frame_bit_count;
+  }
+  return state;
+}
+
+static void amdf_media_drm_vcn_encode_rate_control_per_picture(
+    amdf_media_drm_vcn_encode_writer_t* writer,
+    const amdf_media_drm_vcn_encode_rate_control_state_t* state,
+    uint32_t intra_qp, uint32_t predicted_qp, uint32_t bipredictive_qp) {
+  const uint32_t block =
+      amdf_media_drm_vcn_encode_block_begin(writer, writer->vcn5 ? 0x08 : 0x1d);
+  amdf_media_drm_vcn_encode_word(writer, intra_qp);
+  amdf_media_drm_vcn_encode_word(writer, predicted_qp);
+  amdf_media_drm_vcn_encode_word(writer, bipredictive_qp);
+  for (uint32_t i = 0; i < 3; ++i) {
+    amdf_media_drm_vcn_encode_word(writer, state->minimum_qp);
+    amdf_media_drm_vcn_encode_word(writer, state->maximum_qp);
+  }
+  for (uint32_t i = 0; i < 3; ++i) {
+    amdf_media_drm_vcn_encode_word(writer, (uint32_t)state->maximum_frame_bits);
+  }
+  // VCN 5's native per-picture schema enables the firmware's filler and HRD
+  // policy even when fixed QP makes those controls inert. The qualified VCN 4
+  // packet bytes remain unchanged.
+  amdf_media_drm_vcn_encode_word(writer, writer->vcn5 ? 1 : 0);
+  amdf_media_drm_vcn_encode_word(writer, 0);
+  amdf_media_drm_vcn_encode_word(writer, writer->vcn5 ? 1 : state->method != 0);
+  amdf_media_drm_vcn_encode_word(writer, writer->vcn5 ? UINT32_MAX : 0);
+  amdf_media_drm_vcn_encode_block_end(writer, block);
+}
+
 static void amdf_media_drm_vcn_encode_rate_control(
     amdf_media_drm_vcn_encode_writer_t* writer,
     const amdf_media_drm_session_t* session) {
   const amdf_media_encode_rate_control_t* rate = &session->encode.rate_control;
-  const uint32_t method =
-      amdf_media_drm_vcn_encode_rate_control_method(rate->mode);
-  const amdf_media_encode_bit_rate_t* bit_rate = &rate->control.bit_rate;
+  const amdf_media_drm_vcn_encode_rate_control_state_t state =
+      amdf_media_drm_vcn_encode_rate_control_state(session);
   // Disabled rate control still requires a complete layer record. Firmware
   // ignores its bitrate fields but the qualified native sequence uses one
   // deterministic nominal stream rather than leaving them undefined.
-  uint64_t target = 1200000;
-  uint64_t peak = 1200000;
-  uint64_t virtual_buffer = 1200000;
-  uint32_t virtual_buffer_level = 32;
-  uint32_t intra_qp = rate->control.cqp.intra_quantization_parameter;
-  uint32_t predicted_qp = rate->control.cqp.predicted_quantization_parameter;
-  const bool av1 =
-      session->requirements.configuration.codec == AMDF_MEDIA_CODEC_AV1;
-  uint32_t minimum_qp = av1 ? 8 : 1;
-  uint32_t maximum_qp = av1 ? 255 : 51;
-  uint64_t maximum_frame_bits = 0;
-  if (method != 0) {
-    target = bit_rate->target_bit_rate;
-    peak = bit_rate->peak_bit_rate;
-    virtual_buffer = bit_rate->virtual_buffer_capacity;
-    virtual_buffer_level =
-        (uint32_t)((bit_rate->initial_virtual_buffer_fullness << 6) /
-                   virtual_buffer);
-    intra_qp = predicted_qp = 20;
-    minimum_qp = bit_rate->minimum_quantization_parameter;
-    maximum_qp = bit_rate->maximum_quantization_parameter;
-    maximum_frame_bits = bit_rate->maximum_frame_bit_count;
-  }
 
   uint32_t block = amdf_media_drm_vcn_encode_block_begin(writer, 4);
   amdf_media_drm_vcn_encode_word(writer, 1);
@@ -201,8 +259,8 @@ static void amdf_media_drm_vcn_encode_rate_control(
   amdf_media_drm_vcn_encode_block_end(writer, block);
 
   block = amdf_media_drm_vcn_encode_block_begin(writer, 6);
-  amdf_media_drm_vcn_encode_word(writer, method);
-  amdf_media_drm_vcn_encode_word(writer, virtual_buffer_level);
+  amdf_media_drm_vcn_encode_word(writer, state.method);
+  amdf_media_drm_vcn_encode_word(writer, state.virtual_buffer_level);
   amdf_media_drm_vcn_encode_block_end(writer, block);
 
   block = amdf_media_drm_vcn_encode_block_begin(writer, 0x18);
@@ -214,45 +272,31 @@ static void amdf_media_drm_vcn_encode_rate_control(
   amdf_media_drm_vcn_encode_block_end(writer, block);
 
   block = amdf_media_drm_vcn_encode_block_begin(writer, 7);
-  amdf_media_drm_vcn_encode_word(writer, (uint32_t)target);
-  amdf_media_drm_vcn_encode_word(writer, (uint32_t)peak);
+  amdf_media_drm_vcn_encode_word(writer, (uint32_t)state.target);
+  amdf_media_drm_vcn_encode_word(writer, (uint32_t)state.peak);
   amdf_media_drm_vcn_encode_word(writer, rate->frame_rate_numerator);
   amdf_media_drm_vcn_encode_word(writer, rate->frame_rate_denominator);
-  amdf_media_drm_vcn_encode_word(writer, (uint32_t)virtual_buffer);
-  amdf_media_drm_vcn_encode_word(
-      writer,
-      amdf_media_drm_vcn_encode_per_picture_integer(
-          target, rate->frame_rate_numerator, rate->frame_rate_denominator));
-  amdf_media_drm_vcn_encode_word(
-      writer,
-      amdf_media_drm_vcn_encode_per_picture_integer(
-          peak, rate->frame_rate_numerator, rate->frame_rate_denominator));
-  amdf_media_drm_vcn_encode_word(
-      writer,
-      amdf_media_drm_vcn_encode_per_picture_fraction(
-          peak, rate->frame_rate_numerator, rate->frame_rate_denominator));
+  amdf_media_drm_vcn_encode_word(writer, (uint32_t)state.virtual_buffer);
+  amdf_media_drm_vcn_encode_word(writer,
+                                 amdf_media_drm_vcn_encode_per_picture_integer(
+                                     state.target, rate->frame_rate_numerator,
+                                     rate->frame_rate_denominator));
+  amdf_media_drm_vcn_encode_word(writer,
+                                 amdf_media_drm_vcn_encode_per_picture_integer(
+                                     state.peak, rate->frame_rate_numerator,
+                                     rate->frame_rate_denominator));
+  amdf_media_drm_vcn_encode_word(writer,
+                                 amdf_media_drm_vcn_encode_per_picture_fraction(
+                                     state.peak, rate->frame_rate_numerator,
+                                     rate->frame_rate_denominator));
   amdf_media_drm_vcn_encode_block_end(writer, block);
 
   block = amdf_media_drm_vcn_encode_block_begin(writer, 5);
   amdf_media_drm_vcn_encode_word(writer, 0);
   amdf_media_drm_vcn_encode_block_end(writer, block);
 
-  block = amdf_media_drm_vcn_encode_block_begin(writer, 0x1d);
-  amdf_media_drm_vcn_encode_word(writer, intra_qp);
-  amdf_media_drm_vcn_encode_word(writer, predicted_qp);
-  amdf_media_drm_vcn_encode_word(writer, predicted_qp);
-  for (uint32_t i = 0; i < 3; ++i) {
-    amdf_media_drm_vcn_encode_word(writer, minimum_qp);
-    amdf_media_drm_vcn_encode_word(writer, maximum_qp);
-  }
-  for (uint32_t i = 0; i < 3; ++i) {
-    amdf_media_drm_vcn_encode_word(writer, (uint32_t)maximum_frame_bits);
-  }
-  amdf_media_drm_vcn_encode_word(writer, 0);
-  amdf_media_drm_vcn_encode_word(writer, 0);
-  amdf_media_drm_vcn_encode_word(writer, method != 0);
-  amdf_media_drm_vcn_encode_word(writer, 0);
-  amdf_media_drm_vcn_encode_block_end(writer, block);
+  amdf_media_drm_vcn_encode_rate_control_per_picture(
+      writer, &state, state.intra_qp, state.predicted_qp, state.predicted_qp);
 
   amdf_media_drm_vcn_encode_empty_block(writer, 0x01000004);
   amdf_media_drm_vcn_encode_empty_block(writer, 0x01000005);
@@ -521,12 +565,102 @@ static void amdf_media_drm_vcn5_encode_av1_tile_configuration(
   amdf_media_drm_vcn_encode_block_end(writer, block);
 }
 
-static void amdf_media_drm_vcn_encode_av1_header(
+static void amdf_media_drm_vcn5_encode_av1_header(
     amdf_media_drm_vcn_encode_writer_t* writer,
     const amdf_media_drm_session_t* session,
     const amdf_media_av1_encode_picture_info_t* picture) {
-  const uint32_t outer = amdf_media_drm_vcn_encode_block_begin(
-      writer, writer->vcn5 ? 0x300003 : 0x300002);
+  const uint32_t outer =
+      amdf_media_drm_vcn_encode_block_begin(writer, 0x300003);
+  uint32_t block = amdf_media_drm_vcn_encode_block_begin(writer, 2);
+  amdf_media_drm_vcn_encode_word(writer, 1);
+  amdf_media_drm_vcn_encode_block_end(writer, block);
+
+  amdf_media_drm_vcn_encode_bits_t bits = {0};
+  amdf_media_drm_vcn_encode_bits_write(&bits, 0x32, 8);
+  amdf_media_drm_vcn_encode_av1_copy(writer, &bits);
+  amdf_media_drm_vcn_encode_av1_instruction(writer, 3);
+
+  const bool inter = picture->frame_type != 0;
+  bits = (amdf_media_drm_vcn_encode_bits_t){0};
+  amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+  amdf_media_drm_vcn_encode_bits_write(&bits, picture->frame_type, 2);
+  amdf_media_drm_vcn_encode_bits_write(&bits, 1, 1);
+  if (inter) {
+    amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+  }
+  amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+  amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+  amdf_media_drm_vcn_encode_bits_write(
+      &bits, picture->order_hint,
+      session->encode_codec.av1.order_hint_bit_count);
+  if (inter) {
+    amdf_media_drm_vcn_encode_bits_write(&bits, picture->primary_reference, 3);
+    amdf_media_drm_vcn_encode_bits_write(&bits, picture->refresh_frame_flags,
+                                         8);
+    amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+    for (uint32_t i = 0; i < 7; ++i) {
+      amdf_media_drm_vcn_encode_bits_write(&bits, picture->reference_indices[i],
+                                           3);
+    }
+  }
+  amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+
+  if (inter) {
+    amdf_media_drm_vcn_encode_av1_copy(writer, &bits);
+    amdf_media_drm_vcn_encode_av1_instruction(writer, 5);
+    amdf_media_drm_vcn_encode_av1_instruction(writer, 7);
+    bits = (amdf_media_drm_vcn_encode_bits_t){0};
+    amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+    amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+  } else {
+    amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+  }
+  // One uniform tile: uniform spacing followed by the terminating column and
+  // row subdivision bits. The copy boundary matches the VCN 5 template: key
+  // pictures carry the complete frame prefix in one block, while inter
+  // pictures resume after the dynamic motion instructions.
+  amdf_media_drm_vcn_encode_bits_write(&bits, 1, 1);
+  amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+  amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+  amdf_media_drm_vcn_encode_av1_copy(writer, &bits);
+
+  // VCN 5 supplies base_q_idx dynamically but consumes the zero Y/U
+  // quantizer deltas, disabled quantization matrices, and disabled
+  // segmentation syntax from the command stream.
+  amdf_media_drm_vcn_encode_av1_instruction(writer, 10);
+  bits = (amdf_media_drm_vcn_encode_bits_t){0};
+  for (uint32_t i = 0; i < 5; ++i) {
+    amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+  }
+  amdf_media_drm_vcn_encode_av1_copy(writer, &bits);
+  amdf_media_drm_vcn_encode_av1_instruction(writer, 11);
+  amdf_media_drm_vcn_encode_av1_instruction(writer, 6);
+  amdf_media_drm_vcn_encode_av1_instruction(writer, 8);
+  amdf_media_drm_vcn_encode_av1_instruction(writer, 12);
+  amdf_media_drm_vcn_encode_av1_instruction(writer, 13);
+  bits = (amdf_media_drm_vcn_encode_bits_t){0};
+  if (inter) {
+    amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+  }
+  amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+  if (inter) {
+    for (uint32_t i = 0; i < 7; ++i) {
+      amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+    }
+  }
+  amdf_media_drm_vcn_encode_av1_copy(writer, &bits);
+  amdf_media_drm_vcn_encode_av1_instruction(writer, 14);
+  amdf_media_drm_vcn_encode_av1_instruction(writer, 4);
+  amdf_media_drm_vcn_encode_av1_instruction(writer, 0);
+  amdf_media_drm_vcn_encode_block_end(writer, outer);
+}
+
+static void amdf_media_drm_vcn4_encode_av1_header(
+    amdf_media_drm_vcn_encode_writer_t* writer,
+    const amdf_media_drm_session_t* session,
+    const amdf_media_av1_encode_picture_info_t* picture) {
+  const uint32_t outer =
+      amdf_media_drm_vcn_encode_block_begin(writer, 0x300002);
   uint32_t block = amdf_media_drm_vcn_encode_block_begin(writer, 2);
   amdf_media_drm_vcn_encode_word(writer, 1);
   amdf_media_drm_vcn_encode_block_end(writer, block);
@@ -573,29 +707,10 @@ static void amdf_media_drm_vcn_encode_av1_header(
     amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
   }
   amdf_media_drm_vcn_encode_av1_copy(writer, &bits);
-  if (writer->vcn5) {
-    // One uniform tile: uniform spacing followed by the terminating column and
-    // row subdivision bits. VCN 5 consumes these syntax bits directly.
-    bits = (amdf_media_drm_vcn_encode_bits_t){0};
-    amdf_media_drm_vcn_encode_bits_write(&bits, 1, 1);
-    amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
-    amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
-    amdf_media_drm_vcn_encode_av1_copy(writer, &bits);
-
-    // VCN 5 supplies base_q_idx dynamically but consumes the zero Y/U
-    // quantizer deltas, disabled quantization matrices, and disabled
-    // segmentation syntax from the command stream.
-    amdf_media_drm_vcn_encode_av1_instruction(writer, 10);
-    bits = (amdf_media_drm_vcn_encode_bits_t){0};
-    for (uint32_t i = 0; i < 5; ++i) {
-      amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
-    }
-  } else {
-    amdf_media_drm_vcn_encode_av1_instruction(writer, 9);
-    amdf_media_drm_vcn_encode_av1_instruction(writer, 10);
-    bits = (amdf_media_drm_vcn_encode_bits_t){0};
-    amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
-  }
+  amdf_media_drm_vcn_encode_av1_instruction(writer, 9);
+  amdf_media_drm_vcn_encode_av1_instruction(writer, 10);
+  bits = (amdf_media_drm_vcn_encode_bits_t){0};
+  amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
   amdf_media_drm_vcn_encode_av1_copy(writer, &bits);
   amdf_media_drm_vcn_encode_av1_instruction(writer, 11);
   amdf_media_drm_vcn_encode_av1_instruction(writer, 6);
@@ -617,6 +732,17 @@ static void amdf_media_drm_vcn_encode_av1_header(
   amdf_media_drm_vcn_encode_av1_instruction(writer, 4);
   amdf_media_drm_vcn_encode_av1_instruction(writer, 0);
   amdf_media_drm_vcn_encode_block_end(writer, outer);
+}
+
+static void amdf_media_drm_vcn_encode_av1_header(
+    amdf_media_drm_vcn_encode_writer_t* writer,
+    const amdf_media_drm_session_t* session,
+    const amdf_media_av1_encode_picture_info_t* picture) {
+  if (writer->vcn5) {
+    amdf_media_drm_vcn5_encode_av1_header(writer, session, picture);
+  } else {
+    amdf_media_drm_vcn4_encode_av1_header(writer, session, picture);
+  }
 }
 
 static void amdf_media_drm_vcn_encode_layer_select(
@@ -766,9 +892,8 @@ static void amdf_media_drm_vcn5_encode_context(
       for (uint32_t j = 0; j < 3; ++j) {
         amdf_media_drm_vcn_encode_word(writer, 0);
       }
-      // Public Linux reconstruction images are linear, so direct references
-      // request the firmware's linear reconstruction mode.
-      amdf_media_drm_vcn_encode_word(writer, 0);
+      amdf_media_drm_vcn_encode_word(writer,
+                                     resources->reconstruction_swizzle_mode);
       amdf_media_drm_vcn_encode_address(
           writer,
           frame_context_address + (uint64_t)i * frame_context_byte_length);
@@ -797,9 +922,10 @@ static void amdf_media_drm_vcn5_encode_context(
   for (uint32_t i = 0; i < VCN_ENCODE_RECONSTRUCTION_LIMIT * 15; ++i) {
     amdf_media_drm_vcn_encode_word(writer, 0);
   }
-  amdf_media_drm_vcn_encode_word(writer, luma_pitch);
-  amdf_media_drm_vcn_encode_word(writer, chroma_pitch);
-  for (uint32_t i = 0; i < 4; ++i) {
+  // Pre-encoding is disabled, including the two pitches following its slot
+  // table. These fields describe pre-encode surfaces, not reconstruction
+  // geometry.
+  for (uint32_t i = 0; i < 6; ++i) {
     amdf_media_drm_vcn_encode_word(writer, 0);
   }
   amdf_media_drm_vcn_encode_block_end(writer, block);
@@ -870,10 +996,17 @@ static void amdf_media_drm_vcn_encode_output(
 static void amdf_media_drm_vcn_encode_picture_begin(
     amdf_media_drm_vcn_encode_writer_t* writer,
     amdf_media_drm_buffer_t* storage, const amdf_media_drm_session_t* session,
-    uint32_t task_id) {
+    uint32_t task_id, bool intra_picture) {
   amdf_media_drm_vcn_encode_task_initialize(writer, storage->host_pointer,
                                             session, task_id, true);
   amdf_media_drm_vcn_encode_layer_select(writer);
+  if (writer->vcn5) {
+    const amdf_media_drm_vcn_encode_rate_control_state_t state =
+        amdf_media_drm_vcn_encode_rate_control_state(session);
+    const uint32_t qp = intra_picture ? state.intra_qp : state.predicted_qp;
+    amdf_media_drm_vcn_encode_rate_control_per_picture(writer, &state, qp, qp,
+                                                       qp);
+  }
   amdf_media_drm_vcn_encode_quality(writer);
 }
 
@@ -892,7 +1025,8 @@ uint32_t amdf_media_drm_vcn_encode_h264(
     const amdf_media_h264_encode_picture_info_t* picture) {
   amdf_media_drm_vcn_encode_writer_t writer;
   amdf_media_drm_vcn_encode_picture_begin(
-      &writer, storage, session, picture->frame_decoding_order_number + 2);
+      &writer, storage, session, picture->frame_decoding_order_number + 2,
+      picture->frame_type == AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR);
   uint32_t block = amdf_media_drm_vcn_encode_block_begin(&writer, 0x200001);
   amdf_media_drm_vcn_encode_word(&writer, 0);
   amdf_media_drm_vcn_encode_word(
@@ -990,7 +1124,8 @@ uint32_t amdf_media_drm_vcn_encode_hevc(
     const amdf_media_hevc_encode_picture_info_t* picture) {
   amdf_media_drm_vcn_encode_writer_t writer;
   amdf_media_drm_vcn_encode_picture_begin(
-      &writer, storage, session, (uint32_t)picture->picture_order_count + 2);
+      &writer, storage, session, (uint32_t)picture->picture_order_count + 2,
+      picture->frame_type == AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_IDR);
   const uint32_t block_count =
       ((session->requirements.configuration.coded_width + 63) / 64) *
       ((session->requirements.configuration.coded_height + 63) / 64);
@@ -1088,11 +1223,12 @@ uint32_t amdf_media_drm_vcn_encode_av1(
     const amdf_media_av1_encode_picture_info_t* picture) {
   amdf_media_drm_vcn_encode_writer_t writer;
   amdf_media_drm_vcn_encode_picture_begin(&writer, storage, session,
-                                          picture->picture_index + 2);
-  amdf_media_drm_vcn_encode_av1_specification(&writer);
+                                          picture->picture_index + 2,
+                                          picture->frame_type == 0);
   if (writer.vcn5) {
     amdf_media_drm_vcn5_encode_av1_tile_configuration(&writer, session);
   }
+  amdf_media_drm_vcn_encode_av1_specification(&writer);
   amdf_media_drm_vcn_encode_av1_header(&writer, session, picture);
 
   const bool key = picture->frame_type == 0;

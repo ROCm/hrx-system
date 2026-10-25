@@ -127,7 +127,8 @@ static bool amdf_media_drm_codec_direction_implemented(
               codec == AMDF_MEDIA_CODEC_AV1) &&
              (direction == AMDF_MEDIA_DIRECTION_DECODE ||
               ((codec == AMDF_MEDIA_CODEC_H264 ||
-                codec == AMDF_MEDIA_CODEC_HEVC) &&
+                codec == AMDF_MEDIA_CODEC_HEVC ||
+                codec == AMDF_MEDIA_CODEC_AV1) &&
                direction == AMDF_MEDIA_DIRECTION_ENCODE));
   }
   return false;
@@ -683,6 +684,7 @@ static amdf_status_t amdf_media_drm_device_discover(
   }
   device->decode_reference_swizzle_mode = 0;
   device->decode_reference_height_alignment = 32;
+  device->encode_reconstruction_swizzle_mode = 0;
   uint32_t count = 0;
   const uint32_t selectors[] = {AMDGPU_HW_IP_VCN_JPEG, AMDGPU_HW_IP_VCN_ENC};
   for (uint32_t i = 0; amdf_status_is_ok(status) && i < 2; ++i) {
@@ -735,9 +737,11 @@ static amdf_status_t amdf_media_drm_device_discover(
     }
     if (i == 1) {
       device->decode_reference_swizzle_mode =
-          vcn_protocol.reference_swizzle_mode;
+          vcn_protocol.decode_reference_swizzle_mode;
       device->decode_reference_height_alignment =
           vcn_protocol.reference_height_alignment;
+      device->encode_reconstruction_swizzle_mode =
+          vcn_protocol.encode_reconstruction_swizzle_mode;
     }
     device->engines[count++] = (amdf_media_drm_engine_t){
         .ip_type = selectors[i],
