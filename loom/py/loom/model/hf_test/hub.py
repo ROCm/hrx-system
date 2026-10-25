@@ -19,6 +19,8 @@ from urllib.parse import unquote, urlsplit
 
 import huggingface_hub.constants as hf_constants
 
+from loom.model.http_test_server import serving_http
+
 
 class Hub:
     def __init__(self, root, files):
@@ -228,11 +230,8 @@ def running_hub(root, files=None):
 
         with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
             state.endpoint = f"http://127.0.0.1:{server.server_port}"
-            thread = threading.Thread(target=server.serve_forever)
-            thread.start()
-            try:
-                yield state
-            finally:
-                state.release_body.set()
-                server.shutdown()
-                thread.join()
+            with serving_http(server):
+                try:
+                    yield state
+                finally:
+                    state.release_body.set()

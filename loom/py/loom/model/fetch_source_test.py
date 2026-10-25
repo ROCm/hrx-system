@@ -5,7 +5,6 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import http.server
-import threading
 from contextlib import contextmanager
 
 import pytest
@@ -18,6 +17,7 @@ from loom.model.fetch_source import (
     SourceResolver,
     open_source,
 )
+from loom.model.http_test_server import serving_http
 
 
 def _selection(root):
@@ -59,14 +59,11 @@ def _server():
         def log_message(self, *_):
             pass
 
-    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
-        thread = threading.Thread(target=server.serve_forever)
-        thread.start()
-        try:
-            yield f"http://127.0.0.1:{server.server_port}"
-        finally:
-            server.shutdown()
-            thread.join()
+    with (
+        http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server,
+        serving_http(server),
+    ):
+        yield f"http://127.0.0.1:{server.server_port}"
 
 
 def test_http_redirect_retains_logical_coordinates():

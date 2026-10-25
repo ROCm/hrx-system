@@ -19,6 +19,7 @@ import pytest
 from loom.model import ManifestError, ModelCard
 from loom.model.fetch_source import FetchError, Source
 from loom.model.fetch_storage import ContentCache
+from loom.model.http_test_server import serving_http
 from loom.model.lock import FileIdentity, ModelLock
 
 
@@ -93,9 +94,10 @@ def serving(content, mode="normal"):
         def log_message(self, *_):
             pass
 
-    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
-        thread = threading.Thread(target=server.serve_forever)
-        thread.start()
+    with (
+        http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server,
+        serving_http(server),
+    ):
         try:
             yield (
                 Source(
@@ -111,8 +113,6 @@ def serving(content, mode="normal"):
             )
         finally:
             release.set()
-            server.shutdown()
-            thread.join()
 
 
 @pytest.mark.parametrize(

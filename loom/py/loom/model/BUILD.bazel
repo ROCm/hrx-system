@@ -15,6 +15,14 @@ exports_files([
 ])
 
 iree_py_library(
+    name = "http_test_server",
+    testonly = True,
+    srcs = ["http_test_server.py"],
+    imports = ["../.."],
+    visibility = ["//loom/py/loom/model:__subpackages__"],
+)
+
+iree_py_library(
     name = "manifest",
     srcs = [
         "__init__.py",
@@ -269,6 +277,7 @@ iree_py_test(
         ":fetch_cli",
         ":fetch_source",
         ":fetch_storage",
+        ":http_test_server",
         ":lock",
         ":manifest",
     ],
@@ -286,6 +295,7 @@ iree_py_test(
         ":fetch_safetensors",
         ":fetch_source",
         ":fetch_storage",
+        ":http_test_server",
         ":lock",
         ":manifest",
     ],
@@ -302,6 +312,7 @@ iree_py_test(
     deps = [
         ":fetch_source",
         ":fetch_storage",
+        ":http_test_server",
         ":lock",
         ":manifest",
     ],
@@ -331,6 +342,7 @@ iree_py_test(
     main = "pytest_style_runner.py",
     deps = [
         ":fetch_source",
+        ":http_test_server",
         ":manifest",
     ],
 )

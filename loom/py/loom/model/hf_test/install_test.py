@@ -11,7 +11,6 @@ import json
 import os
 import re
 import struct
-import threading
 
 import pytest
 
@@ -21,6 +20,7 @@ from loom.model.fetch_hf import HuggingFace
 from loom.model.fetch_source import FetchError, Source
 from loom.model.fetch_storage import ContentCache
 from loom.model.hf_test.hub import running_hub
+from loom.model.http_test_server import serving_http
 from loom.model.lock import FileIdentity, ModelLock
 
 
@@ -84,32 +84,29 @@ def test_range_redirect_strips_credentials_and_never_persists_signed_url(tmp_pat
         def log_message(self, *_):
             pass
 
-    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
-        thread = threading.Thread(target=server.serve_forever)
-        thread.start()
-        try:
-            with running_hub(tmp_path, {"weights.data": content}) as hub:
-                hub.approved = True
-                hub.credentials.write_text("fixture-first")
-                hub.redirects["weights.data"] = (
-                    f"http://127.0.0.1:{server.server_port}/payload?signature=private-fixture-value"
-                )
-                cache = _cache(tmp_path, hub)
-                source = Source("weights.data", hub.source("weights.data"))
-                result = cache.acquire_transformed(
-                    source,
-                    {"kind": "safetensors", "version": 1, "alignment": 4096},
-                    None,
-                    offline=False,
-                    preserve_sources=True,
-                )
-                assert result.identity.size == 4100
-                assert credentials == [False, False, False]
-                receipt = next((cache.root / "preserved").iterdir()).read_text()
-                assert "signature" not in receipt and "fixture-first" not in receipt
-        finally:
-            server.shutdown()
-            thread.join()
+    with (
+        http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server,
+        serving_http(server),
+        running_hub(tmp_path, {"weights.data": content}) as hub,
+    ):
+        hub.approved = True
+        hub.credentials.write_text("fixture-first")
+        hub.redirects["weights.data"] = (
+            f"http://127.0.0.1:{server.server_port}/payload?signature=private-fixture-value"
+        )
+        cache = _cache(tmp_path, hub)
+        source = Source("weights.data", hub.source("weights.data"))
+        result = cache.acquire_transformed(
+            source,
+            {"kind": "safetensors", "version": 1, "alignment": 4096},
+            None,
+            offline=False,
+            preserve_sources=True,
+        )
+        assert result.identity.size == 4100
+        assert credentials == [False, False, False]
+        receipt = next((cache.root / "preserved").iterdir()).read_text()
+        assert "signature" not in receipt and "fixture-first" not in receipt
 
 
 def test_streaming_transform_reuses_hub_auth_without_downloading_parent(tmp_path):

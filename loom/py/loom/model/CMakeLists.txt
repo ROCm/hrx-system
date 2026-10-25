@@ -11,6 +11,15 @@ iree_add_all_subdirs()
 
 iree_py_library(
   NAME
+    http_test_server
+  SRCS
+    "http_test_server.py"
+  IMPORTS
+    "../.."
+)
+
+iree_py_library(
+  NAME
     manifest
   SRCS
     "__init__.py"
@@ -321,6 +330,7 @@ iree_py_test(
     loom::py::loom::model::fetch_cli
     loom::py::loom::model::fetch_source
     loom::py::loom::model::fetch_storage
+    loom::py::loom::model::http_test_server
     loom::py::loom::model::lock
     loom::py::loom::model::manifest
   PACKAGE_DIRS
@@ -343,6 +353,7 @@ iree_py_test(
     loom::py::loom::model::fetch_safetensors
     loom::py::loom::model::fetch_source
     loom::py::loom::model::fetch_storage
+    loom::py::loom::model::http_test_server
     loom::py::loom::model::lock
     loom::py::loom::model::manifest
   PACKAGE_DIRS
@@ -364,6 +375,7 @@ iree_py_test(
   DEPS
     loom::py::loom::model::fetch_source
     loom::py::loom::model::fetch_storage
+    loom::py::loom::model::http_test_server
     loom::py::loom::model::lock
     loom::py::loom::model::manifest
   PACKAGE_DIRS
@@ -403,6 +415,7 @@ iree_py_test(
     "loom.model.fetch_source_test"
   DEPS
     loom::py::loom::model::fetch_source
+    loom::py::loom::model::http_test_server
     loom::py::loom::model::manifest
   PACKAGE_DIRS
     "${PROJECT_SOURCE_DIR}/loom/py"

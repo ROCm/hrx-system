@@ -20,7 +20,10 @@ iree_py_library(
     srcs = ["hub.py"],
     tags = ["skip-bazel_to_cmake"],
     visibility = ["//loom/src/loom/tooling/target/cpu/serve:__pkg__"],
-    deps = [requirement("huggingface_hub")],
+    deps = [
+        "//loom/py/loom/model:http_test_server",
+        requirement("huggingface_hub"),
+    ],
 )
 
 iree_py_test(
@@ -54,6 +57,7 @@ iree_py_test(
         "//loom/py/loom/model:fetch_hf",
         "//loom/py/loom/model:fetch_source",
         "//loom/py/loom/model:fetch_storage",
+        "//loom/py/loom/model:http_test_server",
         "//loom/py/loom/model:lock",
         "//loom/py/loom/model:manifest",
     ],

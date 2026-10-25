@@ -20,6 +20,7 @@ import pytest
 from loom.model import ManifestError
 from loom.model.fetch_source import FetchError, Source
 from loom.model.fetch_storage import ContentCache, installation_lock, share_file
+from loom.model.http_test_server import serving_http
 from loom.model.lock import FileIdentity
 
 
@@ -79,15 +80,14 @@ def _held_http_body():
             ):
                 self.wfile.write(b"code")
 
-    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
-        thread = threading.Thread(target=server.serve_forever)
-        thread.start()
+    with (
+        http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server,
+        serving_http(server),
+    ):
         try:
             yield f"http://127.0.0.1:{server.server_port}/code", started, release
         finally:
             release.set()
-            server.shutdown()
-            thread.join()
 
 
 def test_cancel_releases_http_reader_and_removes_its_temporary_file(tmp_path):

@@ -19,6 +19,7 @@ from loom.model.fetch import check_output, install, plan_fetch, plan_lock, updat
 from loom.model.fetch_main import main
 from loom.model.fetch_source import Document, FetchError
 from loom.model.fetch_storage import ContentCache
+from loom.model.http_test_server import serving_http
 from loom.model.lock import FileIdentity, ModelLock
 
 
@@ -214,14 +215,11 @@ def _server(card, files, *, parallel=False):
         def log_message(self, *_):
             pass
 
-    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
-        thread = threading.Thread(target=server.serve_forever)
-        thread.start()
-        try:
-            yield f"http://127.0.0.1:{server.server_port}", requests, resources
-        finally:
-            server.shutdown()
-            thread.join()
+    with (
+        http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server,
+        serving_http(server),
+    ):
+        yield f"http://127.0.0.1:{server.server_port}", requests, resources
 
 
 def _remote_plan(base, cache, **kwargs):
