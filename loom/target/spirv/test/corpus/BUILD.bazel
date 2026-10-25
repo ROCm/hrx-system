@@ -158,6 +158,8 @@ _SCENARIO_EXCLUDES = {
 }
 
 _ALL_PROFILE_XFAILS = {
+    # Fragment memory descriptors require matching register and storage types.
+    "control/branch/guards.loom:@selected_fragment_scale": "TARGET/002",
     # These static profiles do not promise exact floating comparison controls.
     "control/schedule/ordered_read_ahead.loom:@ordered_guarded_else_depth_2": "TARGET/003",
     "control/schedule/ordered_read_ahead.loom:@ordered_guarded_else_depth_3": "TARGET/003",
@@ -229,6 +231,8 @@ _ALL_PROFILE_XFAILS = {
     "kernel/workgroup/scan.loom:@workgroup_scan_vector": "TARGET/032",
     "memory/address/generic.loom:@generic_atomic_uniform_i64": "TARGET/003",
     "memory/address/generic.loom:@generic_workgroup_publication": "TARGET/032",
+    # Loaded i64 coordinates exceed the target's exact signed 32-bit index.
+    "memory/address/integer_casts.loom:@loaded_integer_address_joins": "SPIRV/026",
     "memory/address/scaling.loom:@scale_unsigned_offsets": "SPIRV/026",
     "memory/address/scaling.loom:@signed_wide_sum": "TARGET/005",
     "memory/atomic/float64_contention.loom:@contended_atomic_f64": "TARGET/003",
@@ -454,6 +458,7 @@ _ALL_ROOTS_XFAIL = [
 ]
 
 _SPIRV_EXECUTION_XFAILS = {
+    "control/branch/guards.loom:@selected_fragment_scale_values": "TARGET/002",
     "control/branch/structured.loom:@structured_branch_values": "TARGET/001",
     "function/buffer/arguments.loom:@buffer_argument_values": "TARGET/001",
     "function/buffer/arguments.loom:@buffer_extent_values": "TARGET/001",
@@ -479,6 +484,7 @@ _SPIRV_EXECUTION_XFAILS = {
     "kernel/workgroup/scan.loom:@workgroup_scan_vector_values": "TARGET/032",
     "memory/address/address.loom:@launch_arithmetic_values": "SPIRV/027,TARGET/005",
     "memory/address/generic.loom:@generic_workgroup_publication_values": "TARGET/032",
+    "memory/address/integer_casts.loom:@loaded_integer_address_join_values": "SPIRV/026",
     "memory/address/scaling.loom:@scaled_offset_values": "SPIRV/026",
     "memory/address/scaling.loom:@signed_wide_sum_values": "TARGET/005",
     "memory/atomic/float_bitwise.loom:@atomic_bitwise_f32_values": "TARGET/003",
