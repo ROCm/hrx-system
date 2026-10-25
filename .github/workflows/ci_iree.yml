@@ -1204,10 +1204,10 @@ jobs:
 
       - name: Report ROCm environment
         timeout-minutes: 1
-        run: >-
-          bash .github/scripts/check_rocm_environment.sh
-          --export-libamdf-gpu-selection
-          --amdgpu-target gfx942
+        run: |
+          uname -a
+          bash .github/scripts/check_rocm_environment.sh \
+            --export-libamdf-gpu-selection --amdgpu-target gfx942
 
       - name: Run bounded native reproducers
         id: capture
@@ -1236,7 +1236,7 @@ jobs:
               "--test_arg=--gtest_repeat=100",
               "--test_arg=--gtest_fail_fast=1",
               "--test_arg=--gtest_throw_on_failure=1",
-              "--test_filter=DeviceGeneratedSdmaAqlTest.DependentCopiesReuseRingAndPayload:FileToSdma/*",
+              "--test_arg=--gtest_filter=DeviceGeneratedSdmaAqlTest.DependentCopiesReuseRingAndPayload:FileToSdma/*",
           )
           for name, target in targets:
               result_dir = result_root / name
