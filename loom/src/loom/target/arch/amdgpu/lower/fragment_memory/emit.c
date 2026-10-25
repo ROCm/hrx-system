@@ -881,6 +881,10 @@ void loom_amdgpu_mark_fragment_memory_plan_storage_demands(
     } else {
       loom_low_lower_require_source_value_storage(context, plan->payload);
     }
+    if (plan->narrowed_result.scale_source != LOOM_VALUE_ID_INVALID) {
+      loom_low_lower_require_source_value_storage(
+          context, plan->narrowed_result.scale_source);
+    }
     return;
   }
   IREE_ASSERT_UNREACHABLE("unknown AMDGPU fragment memory operation kind");

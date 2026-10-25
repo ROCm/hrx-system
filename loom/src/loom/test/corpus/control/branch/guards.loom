@@ -551,3 +551,99 @@ check.scenario @nested_guard_bypass_values {
   }
   check.return
 }
+
+// A selected scalar strength remains live when a fragment store combines its
+// multiplication and narrowing. Distinct matrix elements prevent splat folding.
+kernel.def @selected_fragment_scale() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %first: f32, %second: f32, %condition: i1, %bfloat_output: buffer, %half_output: buffer) {
+  %base = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %tile_elements = index.constant 256 : index
+  %subgroup_size = target.subgroup.size : index
+  %fragment_lanes = index.div %tile_elements, %subgroup_size : index
+  %input_view = buffer.view %input[%base] : buffer -> view<16x16xf32>
+  %bfloat_view = buffer.view %bfloat_output[%base] : buffer -> view<16x16xbf16>
+  %half_view = buffer.view %half_output[%base] : buffer -> view<16x16xf16>
+  %payload = vector.fragment.load<init> %input_view[0, 0] shape [%tile, %tile] : view<16x16xf32> -> vector<[%fragment_lanes]xf32>
+  %scale = scf.select %condition, %first, %second : f32
+  %scales = vector.splat %scale : vector<[%fragment_lanes]xf32>
+  %scaled = vector.mulf %payload, %scales : vector<[%fragment_lanes]xf32>
+  vector.fragment.store<result> %scaled, %bfloat_view[0, 0] shape [%tile, %tile] : vector<[%fragment_lanes]xf32>, view<16x16xbf16>
+  vector.fragment.store<result> %scaled, %half_view[0, 0] shape [%tile, %tile] : vector<[%fragment_lanes]xf32>, view<16x16xf16>
+  kernel.return
+}
+
+func.def @selected_fragment_scale_oracle(%input: buffer, %first: f32, %second: f32, %condition: i1, %bfloat_output: buffer, %half_output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  %input_view = buffer.view %input[%base] : buffer -> view<256xf32>
+  %bfloat_view = buffer.view %bfloat_output[%base] : buffer -> view<256xbf16>
+  %half_view = buffer.view %half_output[%base] : buffer -> view<256xf16>
+  %scale = scf.select %condition, %first, %second : f32
+  scf.for %position = [%begin to %end step %step] {
+    %value = view.load %input_view[%position] : view<256xf32> -> f32
+    %scaled = scalar.mulf %value, %scale : f32
+    %bfloat = scalar.fptrunc %scaled : f32 to bf16
+    %half = scalar.fptrunc %scaled : f32 to f16
+    view.store %bfloat, %bfloat_view[%position] : bf16, view<256xbf16>
+    view.store %half, %half_view[%position] : f16, view<256xf16>
+  }
+  func.return
+}
+
+check.scenario @selected_fragment_scale_values {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-16.0 to 16.0) : tensor<256xf32>
+    %bfloat_storage = check.generate.fill value(-123.0) : tensor<288xbf16>
+    %half_storage = check.generate.fill value(-123.0) : tensor<288xf16>
+    %bfloat_output = check.tensor.view %bfloat_storage offset(32) : tensor<288xbf16> -> tensor<16x16xbf16>
+    %half_output = check.tensor.view %half_storage offset(32) : tensor<288xf16> -> tensor<16x16xf16>
+    %first = check.literal value(2.0) : f32
+    %second = check.literal value(-0.5) : f32
+    %condition = check.literal value(true) : i1
+    check.compare<@selected_fragment_scale, @selected_fragment_scale_oracle>(%input, %first, %second, %condition, %bfloat_output, %half_output) : (tensor<256xf32>, f32, f32, i1, tensor<16x16xbf16>, tensor<16x16xf16>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<256xf32>
+      check.expect.bitwise actual(%bfloat_storage) expected(%bfloat_storage) : tensor<288xbf16>
+      check.expect.bitwise actual(%half_storage) expected(%half_storage) : tensor<288xf16>
+    }
+  }
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-16.0 to 16.0) : tensor<256xf32>
+    %bfloat_storage = check.generate.fill value(-123.0) : tensor<288xbf16>
+    %half_storage = check.generate.fill value(-123.0) : tensor<288xf16>
+    %bfloat_output = check.tensor.view %bfloat_storage offset(32) : tensor<288xbf16> -> tensor<16x16xbf16>
+    %half_output = check.tensor.view %half_storage offset(32) : tensor<288xf16> -> tensor<16x16xf16>
+    %first = check.literal value(2.0) : f32
+    %second = check.literal value(-0.5) : f32
+    %condition = check.literal value(false) : i1
+    check.compare<@selected_fragment_scale, @selected_fragment_scale_oracle>(%input, %first, %second, %condition, %bfloat_output, %half_output) : (tensor<256xf32>, f32, f32, i1, tensor<16x16xbf16>, tensor<16x16xf16>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<256xf32>
+      check.expect.bitwise actual(%bfloat_storage) expected(%bfloat_storage) : tensor<288xbf16>
+      check.expect.bitwise actual(%half_storage) expected(%half_storage) : tensor<288xf16>
+    }
+  }
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-16.0 to 16.0) : tensor<256xf32>
+    %bfloat_storage = check.generate.fill value(-123.0) : tensor<288xbf16>
+    %half_storage = check.generate.fill value(-123.0) : tensor<288xf16>
+    %bfloat_output = check.tensor.view %bfloat_storage offset(32) : tensor<288xbf16> -> tensor<16x16xbf16>
+    %half_output = check.tensor.view %half_storage offset(32) : tensor<288xf16> -> tensor<16x16xf16>
+    %first = check.literal value(0.0) : f32
+    %second = check.literal value(2.0) : f32
+    %condition = check.literal value(true) : i1
+    check.compare<@selected_fragment_scale, @selected_fragment_scale_oracle>(%input, %first, %second, %condition, %bfloat_output, %half_output) : (tensor<256xf32>, f32, f32, i1, tensor<16x16xbf16>, tensor<16x16xf16>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<256xf32>
+      check.expect.bitwise actual(%bfloat_storage) expected(%bfloat_storage) : tensor<288xbf16>
+      check.expect.bitwise actual(%half_storage) expected(%half_storage) : tensor<288xf16>
+    }
+  }
+  check.return
+}
