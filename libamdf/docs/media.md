@@ -45,7 +45,9 @@ one full-frame tile, and no temporal/spatial layers, segmentation map,
 restoration, super-resolution, or B pictures. Linux VCN 4 AV1 coded dimensions
 must be 64x16 aligned; VCN 5 requires 8x2. Configuration queries reject a
 misaligned request rather than publishing a padded stream with different coded
-dimensions.
+dimensions. Windows maps D3D12's exact resolution rejection to the same
+dimensions reason; the application can select an admitted extent before it
+allocates or records the session.
 
 ## Ownership through one picture
 

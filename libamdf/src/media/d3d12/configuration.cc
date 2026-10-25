@@ -782,8 +782,12 @@ amdf_status_t QueryEncodeConfiguration(
   if (support.ValidationFlags != D3D12_VIDEO_ENCODER_VALIDATION_FLAG_NONE ||
       (support.SupportFlags &
        D3D12_VIDEO_ENCODER_SUPPORT_FLAG_GENERAL_SUPPORT_OK) == 0) {
-    AnswerUnsupported(
-        &info, AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION, out_info);
+    const auto reason =
+        support.ValidationFlags ==
+                D3D12_VIDEO_ENCODER_VALIDATION_FLAG_RESOLUTION_NOT_SUPPORTED_IN_LIST
+            ? AMDF_MEDIA_CONFIGURATION_REASON_DIMENSIONS
+            : AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION;
+    AnswerUnsupported(&info, reason, out_info);
     return AMDF_STATUS_OK;
   }
   D3D12_FEATURE_DATA_VIDEO_ENCODER_RESOURCE_REQUIREMENTS resources = {

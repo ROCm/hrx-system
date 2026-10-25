@@ -357,20 +357,23 @@ TEST_F(EncodeConfigurationTest, ExactAdvertisedMatrixAndStorageContracts) {
   EXPECT_GT(tested_case_count, 0u);
 }
 
-#if !defined(_WIN32)
-TEST_F(EncodeConfigurationTest, RejectsUnrepresentableAv1CodedWidth) {
+TEST_F(EncodeConfigurationTest, RejectsUnrepresentableAv1CodedGeometry) {
   if (!Supports(AMDF_MEDIA_CODEC_AV1)) {
     GTEST_SKIP() << "AV1 encode is not advertised";
   }
   const EncodeCase av1_case = {AMDF_MEDIA_CODEC_AV1,
                                AMDF_MEDIA_PIXEL_FORMAT_NV12, 8};
   ConfigurationChain chain;
+#if defined(_WIN32)
+  const auto result = Query(av1_case, AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP,
+                            &chain, 320, 180);
+#else
   const auto result = Query(av1_case, AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP,
                             &chain, 322, 192);
+#endif  // _WIN32
   EXPECT_EQ(result.support, AMDF_MEDIA_CONFIGURATION_SUPPORT_UNSUPPORTED);
   EXPECT_EQ(result.reason, AMDF_MEDIA_CONFIGURATION_REASON_DIMENSIONS);
 }
-#endif  // !defined(_WIN32)
 
 TEST_F(EncodeConfigurationTest, UnsupportedTuplesHaveSpecificReasons) {
   if (!Supports(AMDF_MEDIA_CODEC_H264)) {
