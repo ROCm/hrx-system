@@ -13,8 +13,9 @@ namespace iree::hal::cts {
 
 static bool amdgpu_registered_ =
     (CtsRegistry::RegisterBackend({
-         "amdgpu",
-         MakeAmdgpuCtsBackendInfo("amdgpu", AmdgpuCtsBackendMode::kDefault),
+         "legacy_amdgpu",
+         MakeAmdgpuCtsBackendInfo("legacy_amdgpu",
+                                  AmdgpuCtsBackendMode::kDefault),
          {"async_queue", "file_io"},
      }),
      true);

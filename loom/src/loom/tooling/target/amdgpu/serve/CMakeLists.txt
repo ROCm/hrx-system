@@ -38,7 +38,7 @@ loom_cc_test(
     "--pool_backing=fixed"
     "--workers=8"
     "--stream_count=8"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--fixture_transcription_device=1"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
@@ -105,7 +105,7 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::serve::runtime::execution::queues_tests
   ARGS
-    "--execution_device_uri=amdgpu://0?queue_count=2"
+    "--execution_device_uri=legacy-amdgpu://0?queue_count=2"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "notsan"
@@ -391,7 +391,7 @@ iree_py_test(
     "--fixture={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/decision/model.json}}"
     "--fixture={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json}}"
     "--fixture={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/model.json}}"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--pool_backing=fixed"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/decision/config.loom"
@@ -459,7 +459,7 @@ iree_py_test(
     "--fixture={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/decision/model.json}}"
     "--fixture={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json}}"
     "--fixture={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/model.json}}"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--pool_backing=elastic"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/decision/config.loom"
@@ -528,7 +528,7 @@ iree_py_test(
     "--fixture={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/decision/model.json}}"
     "--fixture={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/speech/model.json}}"
     "--fixture={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/model.json}}"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--pool_backing=fixed"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/decision/config.loom"
@@ -594,7 +594,7 @@ iree_py_test(
   ARGS
     "--server={{$<TARGET_FILE:loom::tooling::target::amdgpu::serve::loom-serve-test-tool>}}"
     "--source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom}}"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/model.json"
@@ -640,7 +640,7 @@ iree_py_test(
   ARGS
     "--server={{$<TARGET_FILE:loom::tooling::target::amdgpu::serve::loom-serve-test-tool>}}"
     "--source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/text/prepare.loom}}"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   DATA
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/control.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/projector/model.json"
@@ -1641,7 +1641,7 @@ loom_cc_test(
     loom::serve::testing::native_allocator
   ARGS
     "--weight_sources={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/stages.loom}}"
-    "--weight_device_uri=amdgpu:?feedback"
+    "--weight_device_uri=legacy-amdgpu:?feedback"
     "--executable_sources={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/testdata/executables/prepare.loom}}"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"

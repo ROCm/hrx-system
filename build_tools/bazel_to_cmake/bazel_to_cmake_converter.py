@@ -2292,7 +2292,7 @@ class BuildFileFunctions(object):
         target_selectors_flag,
         target_name,
         identifier,
-        backend_name="amdgpu",
+        backend_name="legacy_amdgpu",
         target_family="amdgpu",
         target="amdgcn-amd-amdhsa",
         deps=None,

@@ -1,4 +1,9 @@
-# AMD GPU HAL Driver (`amdgpu`)
+# Legacy AMD GPU HAL Driver (`legacy-amdgpu`)
+
+The ROCr-based driver uses the runtime name `legacy-amdgpu`. The native
+libamdf driver provides `rdna`, `cdna`, and the unified `amdgpu2` selector.
+Build options for this driver retain the `amdgpu` name, and both drivers
+consume the `amdgpu` executable target family.
 
 **NOTE**: the code is the authoritative documentation source. This document is an overview of the implementation and should be treated as informational only. See the linked files for details.
 
@@ -48,22 +53,22 @@ iree-bazel-build \
 
 Those exact selectors both expand to one `gfx9-4-generic` code object.
 
-Use `amdgpu` to specify devices at runtime:
+Use `legacy-amdgpu` to specify devices at runtime:
 
 ```sh
 # Single logical device with all available physical devices:
-loom-run --device=amdgpu --probe-hal
+loom-run --device=legacy-amdgpu --probe-hal
 # Device ordinal 0 (danger, this may change across reboots):
-loom-run --device=amdgpu:0 --probe-hal
+loom-run --device=legacy-amdgpu:0 --probe-hal
 # Device with a stable UUID for a device:
-loom-run --device=amdgpu://GPU-0e12865a3bf5b7ab --probe-hal
+loom-run --device=legacy-amdgpu://GPU-0e12865a3bf5b7ab --probe-hal
 # Single logical device with the two devices given by their UUIDs:
 loom-run \
-  --device=amdgpu://GPU-0e12865a3bf5b7ab,GPU-89e8bdf59a10cf6d \
+  --device=legacy-amdgpu://GPU-0e12865a3bf5b7ab,GPU-89e8bdf59a10cf6d \
   --probe-hal
 # Single logical device with physical devices with ordinals 2 and 3:
 ROCR_VISIBLE_DEVICES=2,3 loom-run \
-  --device=amdgpu --probe-hal
+  --device=legacy-amdgpu --probe-hal
 ```
 
 The device provisions one queue per selected GPU by default. Applications
@@ -71,7 +76,7 @@ that submit independent workloads can request a fixed inventory at device
 creation:
 
 ```sh
-loom-run --device='amdgpu://0?queue_count=2' --probe-hal
+loom-run --device='legacy-amdgpu://0?queue_count=2' --probe-hal
 ```
 
 `queue_count` is a positive decimal integer per selected GPU. The total across
@@ -85,7 +90,7 @@ Compile and run a Loom kernel with the AMDGPU HAL driver:
 
 ```sh
 loom-run /tmp/kernel.loom \
-  --device=amdgpu \
+  --device=legacy-amdgpu \
   --function=main \
   --kernel-input-buffer=1024xf32=0
 ```
@@ -115,7 +120,7 @@ TRACY_PORT=18086 TRACY_NO_EXIT=1 build_tools/bin/iree-bazel-run --config=opt \
   --//runtime/src/iree/hal/drivers/amdgpu:targets=gfx1100 \
   -- \
   /tmp/kernel.loom \
-  --device=amdgpu \
+  --device=legacy-amdgpu \
   --function=main \
   --kernel-input-buffer=1024xf32=0
 ```

@@ -61,7 +61,7 @@ class TestLogicalDevice {
     iree_hal_device_create_params_t create_params = *create_context_.params();
     create_params.runtime_features = runtime_features;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_create(
-        IREE_SV("amdgpu"), options, libhsa, topology, &create_params,
+        IREE_SV("legacy-amdgpu"), options, libhsa, topology, &create_params,
         host_allocator, &base_device_));
     return iree_hal_device_group_create_from_device(
         base_device_, create_context_.frontier_tracker(), host_allocator,
@@ -173,7 +173,7 @@ static iree_status_t LoadCtsExecutable(
     const iree_hal_queue_family_t* queue_family, iree_string_view_t file_name,
     iree_hal_executable_t** out_executable) {
   const auto targets =
-      iree::hal::cts::CtsRegistry::ListExecutableTargets("amdgpu");
+      iree::hal::cts::CtsRegistry::ListExecutableTargets("legacy_amdgpu");
   iree_hal_device_t* device = iree_hal_queue_family_device(queue_family);
   const iree_hal_physical_device_affinity_t physical_device_affinity =
       iree_hal_queue_family_spec(queue_family)->physical_device_affinity;

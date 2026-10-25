@@ -106,7 +106,7 @@ TEST(AmdgpuDriverOptionsTest, RejectsMissingSearchPathStorageBeforeLoadingHsa) {
   iree_hal_driver_t* driver = NULL;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_amdgpu_driver_create(IREE_SV("amdgpu"), &options,
+      iree_hal_amdgpu_driver_create(IREE_SV("legacy-amdgpu"), &options,
                                     iree_allocator_system(), &driver));
   iree_hal_driver_release(driver);
 }
@@ -123,7 +123,7 @@ TEST(AmdgpuDriverOptionsTest, RejectsMissingSearchPathDataBeforeLoadingHsa) {
   iree_hal_driver_t* driver = NULL;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      iree_hal_amdgpu_driver_create(IREE_SV("amdgpu"), &options,
+      iree_hal_amdgpu_driver_create(IREE_SV("legacy-amdgpu"), &options,
                                     iree_allocator_system(), &driver));
   iree_hal_driver_release(driver);
 }
@@ -135,7 +135,7 @@ static iree_status_t CreateDriverWithDefaultDeviceOptions(
   options.default_device_options = *device_options;
   iree_hal_driver_t* driver = NULL;
   iree_status_t status = iree_hal_amdgpu_driver_create(
-      IREE_SV("amdgpu"), &options, iree_allocator_system(), &driver);
+      IREE_SV("legacy-amdgpu"), &options, iree_allocator_system(), &driver);
   iree_hal_driver_release(driver);
   return status;
 }

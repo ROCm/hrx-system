@@ -193,8 +193,8 @@ class QueueBenchmark : public benchmark::Fixture {
 
     if (iree_status_is_ok(status)) {
       status = iree_hal_driver_registry_acquire_driver(
-          iree_hal_driver_registry_default(), iree_make_cstring_view("amdgpu"),
-          &driver_);
+          iree_hal_driver_registry_default(),
+          iree_make_cstring_view("legacy-amdgpu"), &driver_);
     }
 
     iree_async_proactor_pool_t* proactor_pool = nullptr;
@@ -1454,7 +1454,7 @@ class QueueBenchmark : public benchmark::Fixture {
       iree_string_view_t target_name_prefix, iree_string_view_t file_name,
       iree_hal_executable_t** out_executable) {
     const auto targets =
-        iree::hal::cts::CtsRegistry::ListExecutableTargets("amdgpu");
+        iree::hal::cts::CtsRegistry::ListExecutableTargets("legacy_amdgpu");
     const iree_hal_queue_family_t* queue_family =
         iree_hal_queue_family(queue0_);
     const iree_hal_device_queue_spec_t* queue_spec =

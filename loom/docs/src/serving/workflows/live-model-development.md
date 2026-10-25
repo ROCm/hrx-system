@@ -49,7 +49,7 @@ owns these deployment settings, independent of server process lifetime.
 Start an empty server on the inference machine with an explicit device:
 
 ```sh
-loom-serve --device=amdgpu --listen=127.0.0.1:8080
+loom-serve --device=legacy-amdgpu --listen=127.0.0.1:8080
 ```
 
 The device must support the model's programs. Other device and backing choices
@@ -150,10 +150,10 @@ oracle and declares `production_cut` and `production_bucket`:
 
 ```sh
 loom-format --check candidate/cut.loom
-loom-test candidate/cut.loom --case=@production_cut --device=amdgpu \
+loom-test candidate/cut.loom --case=@production_cut --device=legacy-amdgpu \
   >candidate.test.json
 loom-benchmark candidate/cut.loom \
-  --benchmark=@production_bucket --device=amdgpu \
+  --benchmark=@production_bucket --device=legacy-amdgpu \
   --measure=dispatch_complete --output=candidate.benchmark.json
 ```
 

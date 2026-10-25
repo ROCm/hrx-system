@@ -40,7 +40,7 @@ loom_cc_test(
         "--pool_backing=fixed",
         "--workers=8",
         "--stream_count=8",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--fixture_transcription_device=1",
     ],
     data = RECOGNITION_SOURCES,
@@ -117,7 +117,7 @@ loom_cc_library(
 
 loom_cc_test(
     name = "execution_queues_test",
-    args = ["--execution_device_uri=amdgpu://0?queue_count=2"],
+    args = ["--execution_device_uri=legacy-amdgpu://0?queue_count=2"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = _ROCR_TEST_TAGS,
     target_compatible_with = loom_config_compatible_with([
@@ -136,7 +136,7 @@ _SERVING_DEVICES = [
     (
         "",
         ":test_device",
-        "amdgpu",
+        "legacy-amdgpu",
         ["//runtime/config/hal:driver_amdgpu"],
         _ROCR_TEST_TAGS,
     ),
@@ -285,7 +285,7 @@ loom_py_test(
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/decision:model.json)",
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/speech:model.json)",
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--pool_backing=fixed",
     ],
     data = DECISION_SOURCES + EMBEDDING_SOURCES + IMAGE_SOURCES + SPEECH_SOURCES + TEXT_SOURCES + [
@@ -320,7 +320,7 @@ loom_py_test(
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/decision:model.json)",
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/speech:model.json)",
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--pool_backing=elastic",
     ],
     data = DECISION_SOURCES + EMBEDDING_SOURCES + IMAGE_SOURCES + SPEECH_SOURCES + TEXT_SOURCES + [
@@ -358,7 +358,7 @@ loom_py_test(
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/decision:model.json)",
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/speech:model.json)",
         "--fixture=$(rootpath //loom/src/loom/serve/fixture/text:model.json)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--pool_backing=fixed",
     ],
     data = DECISION_SOURCES + EMBEDDING_SOURCES + IMAGE_SOURCES + SPEECH_SOURCES + TEXT_SOURCES + [
@@ -392,7 +392,7 @@ loom_py_test(
     args = [
         "--server=$(rootpath :loom-serve-test-tool)",
         "--source=$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
     ],
     data = TEXT_SOURCES + PROJECTOR_SOURCES + [
         ":loom-serve-test-tool",
@@ -420,7 +420,7 @@ loom_py_test(
     args = [
         "--server=$(rootpath :loom-serve-test-tool)",
         "--source=$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
     ],
     data = TEXT_SOURCES + PROJECTOR_SOURCES + [
         ":loom-serve-test-tool",

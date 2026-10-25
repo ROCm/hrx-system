@@ -136,7 +136,7 @@ static iree_status_t iree_hal_amdgpu_device_spec_populate_identity(
   iree_hal_device_identity_spec_t identity = {
       .logical_device_id = params->logical_device_id,
       .display_name = params->display_name,
-      .driver_id = IREE_SV("amdgpu"),
+      .driver_id = IREE_SV("legacy-amdgpu"),
       .backend_id = IREE_SV("hsa"),
       .physical_device_count = params->physical_device_count,
       .physical_devices = physical_devices,

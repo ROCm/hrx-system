@@ -388,7 +388,7 @@ class AllocatorTest : public ::testing::Test {
         iree_allocator_t host_allocator) {
       IREE_RETURN_IF_ERROR(create_context_.Initialize(host_allocator));
       IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_create(
-          IREE_SV("amdgpu"), options, libhsa, topology,
+          IREE_SV("legacy-amdgpu"), options, libhsa, topology,
           create_context_.params(), host_allocator, &base_device_));
       return iree_hal_device_group_create_from_device(
           base_device_, create_context_.frontier_tracker(), host_allocator,
@@ -1510,7 +1510,8 @@ TEST_F(AllocatorTest, AmdgpuDeviceSpecExposesRepresentativePhysicalFacts) {
   const iree_hal_device_identity_spec_t* identity =
       iree_hal_device_spec_identity(device_spec);
   ASSERT_NE(identity, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(identity->driver_id, IREE_SV("amdgpu")));
+  EXPECT_TRUE(
+      iree_string_view_equal(identity->driver_id, IREE_SV("legacy-amdgpu")));
   EXPECT_TRUE(iree_string_view_equal(identity->backend_id, IREE_SV("hsa")));
   ASSERT_EQ(identity->physical_device_count, topology_.gpu_agent_count);
   ASSERT_GT(identity->physical_device_count, 0u);

@@ -112,7 +112,7 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-benchmark",
     args = [
         "$(rootpath testdata/scenario_compare_hal_vm.loom)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--case=@scenario_scalar_results",
         "--benchmark=@scenario_scalar_results_throughput",
         "--sample=2",
@@ -137,7 +137,7 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-benchmark",
     args = [
         "$(rootpath testdata/scenario_compare_hal_vm.loom)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--compare=@scenario_benchmark_baseline_throughput,@scenario_benchmark_candidate_throughput",
         "--sample=2",
         "--repetitions=1",

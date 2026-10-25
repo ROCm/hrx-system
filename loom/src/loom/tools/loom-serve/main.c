@@ -93,7 +93,7 @@ static int loom_serve_main_agents_markdown(void) {
              "overhead. Fixed backing eagerly retains storage. "
              "Device URI parameters `feedback`, `asan`, and `tsan` request "
              "additive diagnostic and sanitizer services; for example, "
-             "`--device=amdgpu:?feedback`. Combine services with `&`; "
+             "`--device=legacy-amdgpu:?feedback`. Combine services with `&`; "
              "address-sanitized devices require fixed backing.\n\n"
              "## Register models\n\n"
              "Repeated `--model=path/model.json` values register startup "

@@ -26,7 +26,7 @@ loom_execution_test(
   MODULE
     "::split_barrier_provider_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -50,7 +50,7 @@ loom_execution_test(
   MODULE
     "::split_barrier_provider_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -109,7 +109,7 @@ iree_native_test(
     "generic_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/generic_test_module.loombc}}"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   SRC
     loom::tools::loom-test
   DATA
@@ -140,7 +140,7 @@ loom_execution_test(
   MODULE
     "::gfx11_wave64_reductions_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -194,7 +194,7 @@ iree_native_test(
     "gfx11_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/gfx11_test_module.loombc}}"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--config=benchmark.pair_count=16"
   SRC
     loom::tools::loom-test
@@ -231,7 +231,7 @@ iree_native_test(
     "gfx11_loop_entry_access_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/gfx11_loop_entry_module.loombc}}"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   SRC
     loom::tools::loom-test
@@ -269,7 +269,7 @@ iree_native_test(
     "gfx1100_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/gfx1100_test_module.loombc}}"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   SRC
     loom::tools::loom-test
   DATA
@@ -306,7 +306,7 @@ iree_native_test(
     "gfx9_4_test"
   ARGS
     "{{${CMAKE_CURRENT_BINARY_DIR}/gfx9_4_test_module.loombc}}"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   SRC
     loom::tools::loom-test
   DATA
@@ -349,7 +349,7 @@ loom_execution_test(
   MODULE
     "::gfx950_v4_lds_shared_qk_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -373,7 +373,7 @@ loom_execution_test(
   MODULE
     "::gfx950_v4_lds_shared_qk_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"

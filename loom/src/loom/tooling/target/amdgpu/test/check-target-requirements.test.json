@@ -7,7 +7,7 @@
         "tool": "loom-test",
         "args": [
           "{srcdir}/check_target_requirements.loom",
-          "--device=amdgpu"
+          "--device=legacy-amdgpu"
         ]
       },
       "stdout": {
@@ -26,7 +26,7 @@
         "tool": "loom-benchmark",
         "args": [
           "{srcdir}/check_target_requirements.loom",
-          "--device=amdgpu",
+          "--device=legacy-amdgpu",
           "--iterations=1",
           "--warmup-iterations=0",
           "--min-time-ms=0",

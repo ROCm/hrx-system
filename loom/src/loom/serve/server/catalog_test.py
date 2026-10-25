@@ -1655,7 +1655,7 @@ def run_from_command_line(*, stress=False):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", type=Path, required=True)
     parser.add_argument("--fixture", type=Path, action="append", required=True)
-    parser.add_argument("--device", default="amdgpu")
+    parser.add_argument("--device", default="legacy-amdgpu")
     parser.add_argument("--pool_backing", choices=("fixed", "elastic"), default="fixed")
     parser.add_argument("--rounds", type=int, default=1, choices=range(1, 17))
     arguments = parser.parse_args()

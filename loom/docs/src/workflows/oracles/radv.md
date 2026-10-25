@@ -124,7 +124,7 @@ loom-test kernel.loom \
 
 loom-test kernel.loom \
   --case=@production_cut_case \
-  --device=amdgpu
+  --device=legacy-amdgpu
 ```
 
 Use the same checked benchmark catalog for controlled physical comparison:
@@ -138,7 +138,7 @@ loom-benchmark kernel.loom \
 
 loom-benchmark kernel.loom \
   --benchmark=@production_bucket \
-  --device=amdgpu \
+  --device=legacy-amdgpu \
   --output-format=jsonl \
   --output=amdgpu.jsonl
 ```

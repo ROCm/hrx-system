@@ -70,7 +70,7 @@ loom_execution_test(
   MODULE
     "::hardware_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -152,7 +152,7 @@ loom_execution_test(
   MODULE
     "::scenario_compare_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -226,7 +226,7 @@ iree_native_test(
     "scenario_benchmark_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/scenario_compare_hal_vm.loom}}"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--case=@scenario_scalar_results"
     "--benchmark=@scenario_scalar_results_throughput"
     "--sample=2"
@@ -258,7 +258,7 @@ iree_native_test(
     "scenario_benchmark_comparison_test"
   ARGS
     "{{${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/execution/hal/testdata/scenario_compare_hal_vm.loom}}"
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--compare=@scenario_benchmark_baseline_throughput,@scenario_benchmark_candidate_throughput"
     "--sample=2"
     "--repetitions=1"

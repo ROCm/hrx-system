@@ -105,7 +105,7 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-test",
     args = [
         "$(rootpath :generic_test_module)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
     ],
     data = [":generic_test_module"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
@@ -142,7 +142,7 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-test",
     args = [
         "$(rootpath :gfx11_test_module)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--config=benchmark.pair_count=16",
     ],
     data = [":gfx11_test_module"],
@@ -168,7 +168,7 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-test",
     args = [
         "$(rootpath :gfx11_loop_entry_module)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
         "--sanitizer=access",
     ],
     data = [":gfx11_loop_entry_module"],
@@ -190,7 +190,7 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-test",
     args = [
         "$(rootpath :gfx1100_test_module)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
     ],
     data = [":gfx1100_test_module"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
@@ -211,7 +211,7 @@ iree_executable_test(
     src = "//loom/src/loom/tools/loom-test",
     args = [
         "$(rootpath :gfx9_4_test_module)",
-        "--device=amdgpu",
+        "--device=legacy-amdgpu",
     ],
     data = [":gfx9_4_test_module"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,

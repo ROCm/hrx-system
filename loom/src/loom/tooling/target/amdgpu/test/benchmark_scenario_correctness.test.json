@@ -5,7 +5,7 @@
       "name": "native benchmark defaults to unchecked target-only timing",
       "run": {
         "tool": "benchmark",
-        "args": ["{srcdir}/../../../testbench/testdata/benchmark_scenarios.loom", "--device=amdgpu", "--benchmark=@wrong_latency", "--iterations=1", "--warmup-iterations=0", "--batch-size=1", "--min-time-ms=0", "--max-batches=1"]
+        "args": ["{srcdir}/../../../testbench/testdata/benchmark_scenarios.loom", "--device=legacy-amdgpu", "--benchmark=@wrong_latency", "--iterations=1", "--warmup-iterations=0", "--batch-size=1", "--min-time-ms=0", "--max-batches=1"]
       },
       "stdout": {
         "contains": {"unordered": ["\"sample_count\":0,\"failed_sample_count\":0,\"state\":\"unchecked\"", "\"validity\":\"unchecked\"", "\"operation_timing_ns\""]},
@@ -16,7 +16,7 @@
       "name": "native command timing does not require a VM command oracle",
       "run": {
         "tool": "benchmark",
-        "args": ["{srcdir}/../../../testbench/testdata/benchmark_scenarios.loom", "--device=amdgpu", "--benchmark=@command_without_vm_oracle_latency", "--iterations=1", "--warmup-iterations=0", "--batch-size=2", "--input-ring-count=2", "--min-time-ms=0", "--max-batches=1"]
+        "args": ["{srcdir}/../../../testbench/testdata/benchmark_scenarios.loom", "--device=legacy-amdgpu", "--benchmark=@command_without_vm_oracle_latency", "--iterations=1", "--warmup-iterations=0", "--batch-size=2", "--input-ring-count=2", "--min-time-ms=0", "--max-batches=1"]
       },
       "stdout": {
         "contains": {"unordered": ["\"state\":\"unchecked\"", "\"physical_dispatches_per_batch\":4", "\"operation_timing_ns\""]},
@@ -27,7 +27,7 @@
       "name": "native command correctness checks the complete program",
       "run": {
         "tool": "benchmark",
-        "args": ["{srcdir}/../../../testbench/testdata/benchmark_scenarios.loom", "--device=amdgpu", "--benchmark=@wrong_command_latency", "--scenario-correctness=true"]
+        "args": ["{srcdir}/../../../testbench/testdata/benchmark_scenarios.loom", "--device=legacy-amdgpu", "--benchmark=@wrong_command_latency", "--scenario-correctness=true"]
       },
       "exit": {"nonzero": true},
       "stdout": {
@@ -39,7 +39,7 @@
       "name": "native target differs from its independent VM oracle",
       "run": {
         "tool": "benchmark",
-        "args": ["{srcdir}/../../../testbench/testdata/benchmark_scenarios.loom", "--scenario-correctness=true", "--device=amdgpu", "--benchmark=@wrong_latency", "--output-format=jsonl", "--iterations=1", "--warmup-iterations=0", "--batch-size=1", "--min-time-ms=0", "--max-batches=1"]
+        "args": ["{srcdir}/../../../testbench/testdata/benchmark_scenarios.loom", "--scenario-correctness=true", "--device=legacy-amdgpu", "--benchmark=@wrong_latency", "--output-format=jsonl", "--iterations=1", "--warmup-iterations=0", "--batch-size=1", "--min-time-ms=0", "--max-batches=1"]
       },
       "exit": {"nonzero": true},
       "stdout": {
@@ -51,7 +51,7 @@
       "name": "native target agrees with its independent VM oracle",
       "run": {
         "tool": "benchmark",
-        "args": ["{srcdir}/../../../testbench/testdata/benchmark_scenarios.loom", "--scenario-correctness=true", "--device=amdgpu", "--benchmark=@right_latency", "--iterations=1", "--warmup-iterations=0", "--batch-size=1", "--min-time-ms=0", "--max-batches=1"]
+        "args": ["{srcdir}/../../../testbench/testdata/benchmark_scenarios.loom", "--scenario-correctness=true", "--device=legacy-amdgpu", "--benchmark=@right_latency", "--iterations=1", "--warmup-iterations=0", "--batch-size=1", "--min-time-ms=0", "--max-batches=1"]
       },
       "stdout": {
         "contains": {"unordered": ["\"state\":\"ok\"", "\"sample_count\":1,\"failed_sample_count\":0"]}
@@ -61,7 +61,7 @@
       "name": "invoke-only trials reject unhandled device assertions before timing",
       "run": {
         "tool": "benchmark",
-        "args": ["{srcdir}/../../../testbench/testdata/benchmark_device_events.loom", "--scenario-correctness=true", "--device=amdgpu", "--sanitizer=ubsan", "--sanitizer-reporting=report-only", "--iterations=1", "--warmup-iterations=0", "--batch-size=1", "--min-time-ms=0", "--max-batches=1"]
+        "args": ["{srcdir}/../../../testbench/testdata/benchmark_device_events.loom", "--scenario-correctness=true", "--device=legacy-amdgpu", "--sanitizer=ubsan", "--sanitizer-reporting=report-only", "--iterations=1", "--warmup-iterations=0", "--batch-size=1", "--min-time-ms=0", "--max-batches=1"]
       },
       "exit": {"nonzero": true},
       "stdout": {

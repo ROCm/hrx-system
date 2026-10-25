@@ -82,8 +82,8 @@ class TestLogicalDevice {
       iree_allocator_t host_allocator) {
     IREE_RETURN_IF_ERROR(create_context_.Initialize(host_allocator));
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_create(
-        IREE_SV("amdgpu"), options, libhsa, topology, create_context_.params(),
-        host_allocator, &base_device_));
+        IREE_SV("legacy-amdgpu"), options, libhsa, topology,
+        create_context_.params(), host_allocator, &base_device_));
     return iree_hal_device_group_create_from_device(
         base_device_, create_context_.frontier_tracker(), host_allocator,
         &device_group_);
@@ -138,7 +138,7 @@ class TestLogicalDeviceGroup {
     for (iree_host_size_t i = 0;
          i < IREE_ARRAYSIZE(devices_) && iree_status_is_ok(status); ++i) {
       status = iree_hal_amdgpu_logical_device_create(
-          IREE_SV("amdgpu"), options, libhsa, topology,
+          IREE_SV("legacy-amdgpu"), options, libhsa, topology,
           create_context_.params(), host_allocator, &devices_[i]);
     }
     if (!iree_status_is_ok(status)) {

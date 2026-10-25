@@ -47,7 +47,7 @@ def amdgpu_execution_profile(
         executor = "hardware",
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
         run_requirements = [AMDGPU_RESOURCE],
-        runner_args = ["--device=amdgpu"] + runner_args,
+        runner_args = ["--device=legacy-amdgpu"] + runner_args,
         tags = tags,
         target_class = "gpu",
         target_family = "amdgpu",

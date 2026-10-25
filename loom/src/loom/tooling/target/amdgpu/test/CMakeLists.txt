@@ -237,7 +237,7 @@ loom_execution_test(
   MODULE
     "::hal_tests_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -261,7 +261,7 @@ loom_execution_test(
   MODULE
     "::hal_tests_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -336,7 +336,7 @@ loom_execution_test(
   MODULE
     "::packed_integer_widening_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -360,7 +360,7 @@ loom_execution_test(
   MODULE
     "::packed_integer_widening_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -398,7 +398,7 @@ loom_execution_test(
   MODULE
     "::packed_f16_widening_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -423,7 +423,7 @@ loom_execution_test(
   MODULE
     "::packed_f16_widening_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -493,7 +493,7 @@ loom_execution_test(
   MODULE
     "::packed_table_lookup_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -517,7 +517,7 @@ loom_execution_test(
   MODULE
     "::packed_table_lookup_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -554,7 +554,7 @@ loom_execution_test(
   MODULE
     "::packed_nibble_unpack_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -578,7 +578,7 @@ loom_execution_test(
   MODULE
     "::packed_nibble_unpack_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -649,7 +649,7 @@ loom_execution_test(
   MODULE
     "::buffer_descriptor_extents_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -674,7 +674,7 @@ loom_execution_test(
   MODULE
     "::buffer_descriptor_extents_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -744,7 +744,7 @@ loom_execution_test(
   MODULE
     "::kernarg_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -768,7 +768,7 @@ loom_execution_test(
   MODULE
     "::kernarg_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -805,7 +805,7 @@ loom_execution_test(
   MODULE
     "::callable_values_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -829,7 +829,7 @@ loom_execution_test(
   MODULE
     "::callable_values_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -866,7 +866,7 @@ loom_execution_test(
   MODULE
     "::narrow_argument_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -890,7 +890,7 @@ loom_execution_test(
   MODULE
     "::narrow_argument_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -927,7 +927,7 @@ loom_execution_test(
   MODULE
     "::repeated_wmma_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -951,7 +951,7 @@ loom_execution_test(
   MODULE
     "::repeated_wmma_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -998,7 +998,7 @@ loom_execution_test(
   MODULE
     "::asan_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=asan"
     "--sanitizer-reporting=report-only"
     "--amdgpu_asan=true"
@@ -1070,7 +1070,7 @@ loom_execution_test(
   MODULE
     "::ubsan_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "requires-amd-gpu-feedback"
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -1133,7 +1133,7 @@ loom_execution_test(
   MODULE
     "::unroll_fences_access_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -1177,7 +1177,7 @@ loom_execution_test(
   MODULE
     "::indirection_access_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -1205,7 +1205,7 @@ loom_execution_test(
   MODULE
     "loom::test::corpus::checked_benchmarks::checked_benchmark_workload_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "manual"
     "iree-build-requirement=loom.target.arch.amdgpu"
@@ -1232,7 +1232,7 @@ loom_execution_test(
   MODULE
     "loom::test::corpus::authoring::authoring_benchmark_workload_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--config=mlp_down_projection_residual_bf16.row_capacity=3584"
   LABELS
     "manual"
@@ -1269,7 +1269,7 @@ loom_execution_test(
   MODULE
     "::split_kv_stage2_access_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -1329,7 +1329,7 @@ loom_execution_test(
   MODULE
     "::predicate_control_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -1353,7 +1353,7 @@ loom_execution_test(
   MODULE
     "::predicate_control_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -1401,7 +1401,7 @@ loom_execution_test(
   MODULE
     "::tsan_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=tsan"
     "--sanitizer-reporting=report-only"
     "--amdgpu_tsan=true"
@@ -1469,7 +1469,7 @@ loom_execution_test(
   MODULE
     "::tsan_collective_publication_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=tsan"
     "--sanitizer-reporting=report-only"
     "--amdgpu_tsan=true"
@@ -1537,7 +1537,7 @@ loom_execution_test(
   MODULE
     "::tsan_fragment_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=tsan"
     "--sanitizer-reporting=report-only"
     "--amdgpu_tsan=true"
@@ -1605,7 +1605,7 @@ loom_execution_test(
   MODULE
     "::tsan_subgroup_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=tsan"
     "--sanitizer-reporting=report-only"
     "--amdgpu_tsan=true"
@@ -1706,7 +1706,7 @@ loom_execution_test(
   MODULE
     "::tsan_capacity_test_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=tsan"
     "--sanitizer-reporting=report-only"
     "--amdgpu_tsan=true"

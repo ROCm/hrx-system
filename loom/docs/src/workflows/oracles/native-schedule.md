@@ -35,7 +35,7 @@ it through Loom rather than loading its artifact through an unrelated runtime:
 
 ```shell
 loom-run oracle.loom \
-  --device=amdgpu \
+  --device=legacy-amdgpu \
   --root=kernel \
   --pipeline=none \
   --kernel-input-buffer=64xf32=0 \
@@ -146,11 +146,11 @@ Acceptance returns to the ordinary production path:
 ```shell
 loom-test kernel.loom \
   --case=@oracle_case \
-  --device=amdgpu
+  --device=legacy-amdgpu
 
 loom-benchmark kernel.loom \
   --benchmark=@production_shape \
-  --device=amdgpu \
+  --device=legacy-amdgpu \
   --output=results.json
 ```
 

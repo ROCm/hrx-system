@@ -101,7 +101,7 @@ build_tools/bin/iree-bazel-run --config=opt \
 ```
 
 The CPU task device shares the server's worker pool and JITs native x86 code;
-it does not interpret the device kernels in the VM. `--device=amdgpu` or
+it does not interpret the device kernels in the VM. `--device=legacy-amdgpu` or
 `--device=vulkan` runs the same source on the corresponding GPU backend with
 fixed backing. Each backend must be enabled in the build configuration.
 A separate runner needs the exact built server, its runtime closure, these

@@ -284,8 +284,8 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
         iree_hal_device_create_params_default();
     create_params.proactor_pool = proactor_pool_;
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_create(
-        IREE_SV("amdgpu"), &options, &libhsa_, &topology_, &create_params,
-        host_allocator_, &out_bundle->device));
+        IREE_SV("legacy-amdgpu"), &options, &libhsa_, &topology_,
+        &create_params, host_allocator_, &out_bundle->device));
 
     iree_async_frontier_tracker_t* frontier_tracker = nullptr;
     iree_async_frontier_tracker_options_t frontier_options =
@@ -363,7 +363,7 @@ class Pm4CommandBufferBenchmark : public benchmark::Fixture {
 
   static iree_status_t LoadExecutable(DeviceBundle* bundle) {
     const auto targets =
-        iree::hal::cts::CtsRegistry::ListExecutableTargets("amdgpu");
+        iree::hal::cts::CtsRegistry::ListExecutableTargets("legacy_amdgpu");
     const iree_hal_queue_family_t* queue_family =
         iree_hal_queue_family(bundle->queue);
     const iree_hal_device_queue_spec_t* queue_spec =

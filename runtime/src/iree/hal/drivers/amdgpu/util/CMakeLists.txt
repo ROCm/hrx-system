@@ -1106,7 +1106,7 @@ iree_amdgpu_hal_cts_testdata(
   IDENTIFIER
     "iree_queue_benchmark_testdata_amdgpu"
   BACKEND_NAME
-    "amdgpu"
+    "legacy_amdgpu"
   TARGET_FAMILY
     "amdgpu"
   INTERNAL_HDRS

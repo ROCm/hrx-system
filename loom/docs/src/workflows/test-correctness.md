@@ -22,7 +22,7 @@ scenarios need no device. Cases that contain
 whose target runs through HAL, use the device selected for the run:
 
 ```shell
-loom-test program.loom --device=amdgpu
+loom-test program.loom --device=legacy-amdgpu
 ```
 
 The device normally selects the most specific compatible compiler target. An
@@ -31,7 +31,7 @@ baseline:
 
 ```shell
 loom-test program.loom \
-  --device=amdgpu \
+  --device=legacy-amdgpu \
   --target=amdgpu:gfx11-generic
 ```
 
@@ -100,7 +100,7 @@ for that device:
 ```shell
 loom-test program.loom \
   --case=@advance_sweep \
-  --device=amdgpu \
+  --device=legacy-amdgpu \
   --target=amdgpu:gfx1151 \
   >test-results.json
 ```
@@ -179,7 +179,7 @@ launches:
 
 ```shell
 loom-test program.loom \
-  --device=amdgpu \
+  --device=legacy-amdgpu \
   --config=model.hidden_size=4096
 ```
 
@@ -188,7 +188,7 @@ keys flatten with `.` separators:
 
 ```shell
 loom-test program.loom \
-  --device=amdgpu \
+  --device=legacy-amdgpu \
   --config-file=model-config.jsonc
 ```
 
@@ -204,11 +204,11 @@ expectations remain in use:
 
 ```shell
 loom-test program.loom \
-  --device=amdgpu \
+  --device=legacy-amdgpu \
   --sanitizer=access
 
 loom-test program.loom \
-  --device=amdgpu \
+  --device=legacy-amdgpu \
   --sanitizer=asan \
   --sanitizer-reporting=report-only
 ```

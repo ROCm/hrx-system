@@ -40,7 +40,7 @@ The `xdna`, `rdna`, `cdna`, and `amdgpu2` schemes share that driver identity. `x
 selects NPUs, `rdna` selects RDNA GPUs, `cdna` selects CDNA GPUs, and `amdgpu2`
 selects all GPUs supported by this build. Both `rdna:0` and `rdna://0` select the
 first visible RDNA device;
-`xdna:0?columns=4` configures an NPU context. The legacy `amdgpu` driver remains
+`xdna:0?columns=4` configures an NPU context. The `legacy-amdgpu` driver remains
 independent.
 
 Each scheme has its own dense ordinal namespace. Driver creation captures these

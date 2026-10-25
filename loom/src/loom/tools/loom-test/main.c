@@ -833,7 +833,7 @@ static void loom_test_print_agents_markdown(FILE* stream) {
       "loom-test module.loom --file-output-root=artifacts\n"
       "loom-test module.loom --max-samples-per-case=16\n"
       "loom-test module.loom --pipeline=@hal_actual_pipeline\n"
-      "loom-test module.loom --device=amdgpu "
+      "loom-test module.loom --device=legacy-amdgpu "
       "--target=amdgpu:gfx11-generic\n"
       "loom-test module.loom --config=model.hidden_size=4096\n"
       "loom-test module.loom --config-file=model_config.jsonc\n"

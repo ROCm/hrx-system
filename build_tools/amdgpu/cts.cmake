@@ -36,7 +36,7 @@ endfunction()
 # TARGETS: AMDGPU target selectors to expand to exact targets.
 # TARGET_NAME: CTS executable target prefix.
 # IDENTIFIER: C identifier prefix for generated TOC functions.
-# BACKEND_NAME: CTS backend name. Defaults to "amdgpu".
+# BACKEND_NAME: CTS backend name. Defaults to "legacy_amdgpu".
 # SOURCE_FORMAT: Device source compilation pipeline. See iree_amdgpu_binary.
 # SRCS: C sources. Each source basename maps to `<basename>.bin` in the CTS
 #       executable-data table of contents.
@@ -74,7 +74,7 @@ function(iree_amdgpu_hal_cts_testdata)
     message(FATAL_ERROR "iree_amdgpu_hal_cts_testdata requires IDENTIFIER")
   endif()
   if(NOT _RULE_BACKEND_NAME)
-    set(_RULE_BACKEND_NAME "amdgpu")
+    set(_RULE_BACKEND_NAME "legacy_amdgpu")
   endif()
   if(NOT _RULE_TARGET_FAMILY)
     set(_RULE_TARGET_FAMILY "amdgpu")

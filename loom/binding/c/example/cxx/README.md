@@ -71,7 +71,7 @@ iree-bazel-run --config=loom-importer-cxx \
   //loom/binding/c/example/cxx:jit_amdgpu
 ```
 
-The first optional argument is a HAL device URI, defaulting to `amdgpu`.
+The first optional argument is a HAL device URI, defaulting to `legacy-amdgpu`.
 The second supplies an external facade include root, disabling embedded
 headers for the import:
 
@@ -81,7 +81,7 @@ iree-bazel-run --config=loom-importer-cxx \
   --//loom/config/emit:enable=amdgpu \
   --//loom/config/import/cxx:embed_includes=false \
   //loom/binding/c/example/cxx:jit_amdgpu -- \
-  amdgpu loom/src/loom/import/cxx/include
+  legacy-amdgpu loom/src/loom/import/cxx/include
 ```
 
 The driver prepares the context, compiler and target pipeline before accepting

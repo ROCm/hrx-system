@@ -43,7 +43,7 @@ static void CreateDeviceSpecForProcessor(
       identity.version, /*execution_unit_count=*/40,
       /*partition_count=*/1, &physical_device.queue_execution_resources));
   iree_hal_amdgpu_device_spec_params_t params = {
-      .logical_device_id = IREE_SV("amdgpu://0"),
+      .logical_device_id = IREE_SV("legacy-amdgpu://0"),
       .display_name = IREE_SV("AMDGPU test device"),
       .physical_device_count = 1,
       .physical_devices = &physical_device,
@@ -67,7 +67,8 @@ TEST(DeviceSpecTest, CreatesSpecFromParams) {
   const iree_hal_device_identity_spec_t* identity =
       iree_hal_device_spec_identity(device_spec);
   ASSERT_NE(identity, nullptr);
-  EXPECT_TRUE(iree_string_view_equal(identity->driver_id, IREE_SV("amdgpu")));
+  EXPECT_TRUE(
+      iree_string_view_equal(identity->driver_id, IREE_SV("legacy-amdgpu")));
   EXPECT_TRUE(iree_string_view_equal(identity->backend_id, IREE_SV("hsa")));
   ASSERT_EQ(identity->physical_device_count, 1);
   EXPECT_EQ(identity->physical_devices[0].physical_ordinal, 7);
@@ -226,7 +227,7 @@ TEST(DeviceSpecTest, AdvertisesTargetsPerPhysicalDevice) {
         /*partition_count=*/1, &physical_devices[i].queue_execution_resources));
   }
   iree_hal_amdgpu_device_spec_params_t params = {
-      .logical_device_id = IREE_SV("amdgpu://group"),
+      .logical_device_id = IREE_SV("legacy-amdgpu://group"),
       .display_name = IREE_SV("AMDGPU test group"),
       .physical_device_count = IREE_ARRAYSIZE(physical_devices),
       .physical_devices = physical_devices,

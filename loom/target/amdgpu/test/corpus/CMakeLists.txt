@@ -557,7 +557,7 @@ loom_corpus_test(
     "@packed_mixed_nibble_dot_values"
     "TARGET/003"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
     "iree-build-requirement=loom.emit.amdgpu"
@@ -589,7 +589,7 @@ loom_corpus_test(
   SOURCES
     "numeric/vector/dynamic_windows.loom"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
     "--sanitizer=access"
   LABELS
     "notsan"
@@ -626,7 +626,7 @@ loom_execution_test(
   MODULE
     "::inverse_hyperbolic_stress_module"
   RUNNER_ARGS
-    "--device=amdgpu"
+    "--device=legacy-amdgpu"
   LABELS
     "manual"
     "stress"

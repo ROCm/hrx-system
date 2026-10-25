@@ -218,7 +218,7 @@ loomc::testing::target::IreeHalKernelExecutionTarget MakeExecutionTarget(
 
   loomc::testing::target::IreeHalKernelExecutionTarget target = {
       .label = "AMDGPU",
-      .device_uri = IREE_SV("amdgpu"),
+      .device_uri = IREE_SV("legacy-amdgpu"),
       .target_profile_identifier = loomc_make_cstring_view("live-amdgpu"),
       .source_identifier = loomc_make_cstring_view("live_amdgpu.loom"),
       .source_text = loomc_make_cstring_view(source_text),

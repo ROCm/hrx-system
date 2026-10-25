@@ -278,7 +278,7 @@ build:
 ```bash
 loom-benchmark \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
-  --device=amdgpu \
+  --device=legacy-amdgpu \
   --measure=dispatch_complete \
   --iterations=1 \
   --warmup-iterations=0 \

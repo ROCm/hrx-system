@@ -37,7 +37,7 @@ iree-bazel-run //loom/src/loom/tools/loom-serve:loom-serve -- \
   --device=task --pool_backing=fixed
 ```
 
-`--device=amdgpu` or `--device=vulkan` runs the identical source through that
+`--device=legacy-amdgpu` or `--device=vulkan` runs the identical source through that
 backend. Each compiler target and HAL driver must be enabled in the build.
 The CPU task device shares the server workers; device kernels compile to native
 x86 code while request/control programs execute in the VM.

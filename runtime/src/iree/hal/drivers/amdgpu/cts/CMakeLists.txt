@@ -79,7 +79,7 @@ iree_amdgpu_hal_cts_testdata(
   IDENTIFIER
     "iree_cts_testdata_amdgpu"
   BACKEND_NAME
-    "amdgpu"
+    "legacy_amdgpu"
   TARGET_FAMILY
     "amdgpu"
   INTERNAL_HDRS
@@ -113,7 +113,7 @@ iree_amdgpu_hal_cts_testdata(
   IDENTIFIER
     "iree_cts_cooperative_testdata_amdgpu"
   BACKEND_NAME
-    "amdgpu"
+    "legacy_amdgpu"
   TARGET_FAMILY
     "amdgpu"
   SRCS
@@ -137,7 +137,7 @@ iree_amdgpu_hal_cts_testdata(
   IDENTIFIER
     "iree_cts_asan_executable_testdata_amdgpu"
   BACKEND_NAME
-    "amdgpu"
+    "legacy_amdgpu"
   TARGET_FAMILY
     "amdgpu"
   INTERNAL_HDRS
@@ -162,7 +162,7 @@ iree_amdgpu_hal_cts_testdata(
   IDENTIFIER
     "iree_cts_asan_executable_enabled_testdata_amdgpu"
   BACKEND_NAME
-    "amdgpu_asan"
+    "legacy_amdgpu_asan"
   TARGET_FAMILY
     "amdgpu"
   INTERNAL_HDRS
@@ -188,7 +188,7 @@ iree_amdgpu_hal_cts_testdata(
   IDENTIFIER
     "iree_cts_feedback_executable_testdata_amdgpu"
   BACKEND_NAME
-    "amdgpu"
+    "legacy_amdgpu"
   TARGET_FAMILY
     "amdgpu"
   INTERNAL_HDRS
@@ -213,7 +213,7 @@ iree_amdgpu_hal_cts_testdata(
   IDENTIFIER
     "iree_cts_tsan_executable_testdata_amdgpu"
   BACKEND_NAME
-    "amdgpu"
+    "legacy_amdgpu"
   TARGET_FAMILY
     "amdgpu"
   INTERNAL_HDRS
@@ -238,7 +238,7 @@ iree_amdgpu_hal_cts_testdata(
   IDENTIFIER
     "iree_cts_tsan_executable_enabled_testdata_amdgpu"
   BACKEND_NAME
-    "amdgpu_tsan"
+    "legacy_amdgpu_tsan"
   TARGET_FAMILY
     "amdgpu"
   INTERNAL_HDRS
@@ -263,7 +263,7 @@ iree_amdgpu_hal_cts_testdata(
   IDENTIFIER
     "iree_cts_asan_testdata_amdgpu"
   BACKEND_NAME
-    "amdgpu_asan"
+    "legacy_amdgpu_asan"
   TARGET_FAMILY
     "amdgpu"
   INTERNAL_HDRS
