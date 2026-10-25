@@ -413,9 +413,9 @@ so each K32 contraction reuses their headers and code packets.
 
 The 128-row schedules decode weights into F16 panels, combining original
 scales and affine offsets before F32 matrix accumulation. Fused gate/up keeps
-F32 values through SiLU and the product before publishing BF16. At capacities
-of 2K or more, Q4_K and Q5_K gate/up consumers share one conversion of the live
-input rows to F16 across all selected experts. The same consumer handles
+F32 values through SiLU and the product before publishing BF16. At capacity
+2,048, Q4_K and Q5_K gate/up consumers share one conversion of the live input
+rows to F16 across all selected experts. The same consumer handles
 prepacked operands or converts BF16 values at shared-memory publication. Q8
 gate/up does its conversion there directly.
 
