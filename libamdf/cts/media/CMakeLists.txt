@@ -173,6 +173,23 @@ iree_c_embed_data(
   PUBLIC
 )
 
+iree_c_embed_data(
+  NAME
+    h264_geometry_inputs
+  SRCS
+    "h264_geometry_idr.slice"
+    "h264_geometry_p.slice"
+  C_FILE_OUTPUT
+    "h264_geometry_inputs.c"
+  H_FILE_OUTPUT
+    "h264_geometry_inputs.h"
+  IDENTIFIER
+    "amdf_cts_media_h264_geometry_inputs"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
@@ -182,6 +199,7 @@ iree_cc_library(
   SRCS
     "h264_fixture.cc"
   DEPS
+    ::h264_geometry_inputs
     ::reference_main
     amdf::headers
     iree::third_party::google_test

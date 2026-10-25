@@ -192,6 +192,17 @@ amdf_cc_test(
 )
 
 amdf_cc_test(
+    name = "vcn_test",
+    srcs = ["vcn_test.cc"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        ":execution",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
     name = "vcn_encode_test",
     srcs = ["vcn_encode_test.cc"],
     target_compatible_with = DRM_COMPATIBILITY,

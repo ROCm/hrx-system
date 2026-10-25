@@ -15,6 +15,7 @@
 #include "libamdf/src/media/av1.h"
 #include "libamdf/src/media/drm/command.h"
 #include "libamdf/src/media/drm/jpeg.h"
+#include "libamdf/src/media/drm/vcn.h"
 #include "libamdf/src/media/h264.h"
 #include "libamdf/src/media/hevc.h"
 #include "libamdf/src/platform/linux/endpoint.h"
@@ -102,6 +103,30 @@ enum {
       sizeof(amdf_media_drm_codecs) / sizeof(amdf_media_drm_codecs[0]),
 };
 
+static bool amdf_media_drm_codec_direction_implemented(
+    amdf_media_drm_command_protocol_t protocol, uint32_t codec_index,
+    amdf_media_direction_t direction) {
+  const amdf_media_codec_t codec = amdf_media_drm_codecs[codec_index].codec;
+  if ((amdf_media_drm_codecs[codec_index].directions & (1u << direction)) ==
+      0) {
+    return false;
+  }
+  switch (protocol) {
+    case AMDF_MEDIA_DRM_COMMAND_PROTOCOL_JPEG_INDEXED:
+    case AMDF_MEDIA_DRM_COMMAND_PROTOCOL_JPEG_DIRECT:
+      return codec == AMDF_MEDIA_CODEC_JPEG &&
+             direction == AMDF_MEDIA_DIRECTION_DECODE;
+    case AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4:
+      return codec != AMDF_MEDIA_CODEC_JPEG;
+    case AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5:
+      // Each generation-specific packet family is published only after its
+      // exact output and lifecycle have passed on that generation.
+      return codec == AMDF_MEDIA_CODEC_H264 &&
+             direction == AMDF_MEDIA_DIRECTION_DECODE;
+  }
+  return false;
+}
+
 static amdf_status_t AMDF_CALL amdf_media_drm_enumerate_codecs(
     amdf_device_t* device, uint32_t ordinal, uint32_t capacity,
     amdf_media_codec_info_t* codecs, uint32_t* count) {
@@ -122,7 +147,8 @@ static amdf_status_t AMDF_CALL amdf_media_drm_enumerate_codecs(
       const struct drm_amdgpu_info_video_caps* limits =
           direction == AMDF_MEDIA_DIRECTION_DECODE ? &native->decode_limits
                                                    : &native->encode_limits;
-      if ((amdf_media_drm_codecs[i].directions & (1u << direction)) != 0 &&
+      if (amdf_media_drm_codec_direction_implemented(
+              native->engines[ordinal].command_protocol, i, direction) &&
           limits->codec_info[amdf_media_drm_codecs[i].capability].valid) {
         available[total++] = (amdf_media_codec_info_t){
             amdf_media_drm_codecs[i].codec, direction};
@@ -150,11 +176,13 @@ static amdf_status_t amdf_media_drm_decode_configuration(
       .structure_size = out_info->structure_size,
       .configuration = *configuration,
   };
-  const uint32_t engine = device->engines[family_ordinal].ip_type;
+  const amdf_media_drm_engine_t* engine = &device->engines[family_ordinal];
   const struct drm_amdgpu_info_video_codec_info* limits = NULL;
   for (uint32_t i = 0; i < AMDF_MEDIA_DRM_CODEC_COUNT; ++i) {
     if (configuration->codec == amdf_media_drm_codecs[i].codec &&
-        engine == amdf_media_drm_codecs[i].engine) {
+        engine->ip_type == amdf_media_drm_codecs[i].engine &&
+        amdf_media_drm_codec_direction_implemented(
+            engine->command_protocol, i, AMDF_MEDIA_DIRECTION_DECODE)) {
       limits = &device->decode_limits
                     .codec_info[amdf_media_drm_codecs[i].capability];
       break;
@@ -338,13 +366,13 @@ static amdf_status_t amdf_media_drm_encode_configuration(
       .structure_size = out_info->structure_size,
       .configuration = *configuration,
   };
-  const uint32_t engine = device->engines[family_ordinal].ip_type;
+  const amdf_media_drm_engine_t* engine = &device->engines[family_ordinal];
   const struct drm_amdgpu_info_video_codec_info* limits = NULL;
   for (uint32_t i = 0; i < AMDF_MEDIA_DRM_CODEC_COUNT; ++i) {
     if (configuration->codec == amdf_media_drm_codecs[i].codec &&
-        engine == amdf_media_drm_codecs[i].engine &&
-        (amdf_media_drm_codecs[i].directions &
-         (1u << AMDF_MEDIA_DIRECTION_ENCODE)) != 0) {
+        engine->ip_type == amdf_media_drm_codecs[i].engine &&
+        amdf_media_drm_codec_direction_implemented(
+            engine->command_protocol, i, AMDF_MEDIA_DIRECTION_ENCODE)) {
       limits = &device->encode_limits
                     .codec_info[amdf_media_drm_codecs[i].capability];
       break;
@@ -355,14 +383,6 @@ static amdf_status_t amdf_media_drm_encode_configuration(
         &info, AMDF_MEDIA_CONFIGURATION_REASON_CODEC, out_info);
     return AMDF_STATUS_OK;
   }
-  const uint32_t version =
-      device->engines[family_ordinal].information.ip_discovery_version;
-  if (((version >> 16) & 255) != 4) {
-    amdf_media_drm_answer_unsupported(
-        &info, AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION, out_info);
-    return AMDF_STATUS_OK;
-  }
-
   const amdf_media_encode_configuration_t* encode = NULL;
   const amdf_media_h264_configuration_t* h264 = NULL;
   const amdf_media_h264_encode_configuration_t* h264_encode = NULL;
@@ -661,6 +681,8 @@ static amdf_status_t amdf_media_drm_device_discover(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
+  device->decode_reference_swizzle_mode = 0;
+  device->decode_reference_height_alignment = 32;
   uint32_t count = 0;
   const uint32_t selectors[] = {AMDGPU_HW_IP_VCN_JPEG, AMDGPU_HW_IP_VCN_ENC};
   for (uint32_t i = 0; amdf_status_is_ok(status) && i < 2; ++i) {
@@ -671,7 +693,6 @@ static amdf_status_t amdf_media_drm_device_discover(
       break;
     }
     const uint32_t version = engine.ip_discovery_version;
-    const uint32_t major = (version >> 16) & 255;
     amdf_media_drm_command_protocol_t command_protocol =
         AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4;
     const bool jpeg_protocol_known =
@@ -680,19 +701,30 @@ static amdf_status_t amdf_media_drm_device_discover(
         jpeg_protocol_known &&
         (command_protocol == AMDF_MEDIA_DRM_COMMAND_PROTOCOL_JPEG_INDEXED ||
          version == 0x050000);
-    const bool admitted = i == 0 ? jpeg_admitted : major == 4;
+    amdf_media_drm_vcn_protocol_info_t vcn_protocol = {0};
+    const bool vcn_protocol_known =
+        i == 1 && amdf_media_drm_vcn_protocol(version, &vcn_protocol);
+    const bool vcn_admitted =
+        vcn_protocol_known && (vcn_protocol.command_protocol ==
+                                   AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4 ||
+                               version == 0x050000);
+    if (vcn_protocol_known) {
+      command_protocol = vcn_protocol.command_protocol;
+    }
+    const bool admitted = i == 0 ? jpeg_admitted : vcn_admitted;
     bool codec_present = false;
     for (uint32_t codec = 0; codec < AMDF_MEDIA_DRM_CODEC_COUNT; ++codec) {
       if (amdf_media_drm_codecs[codec].engine != selectors[i]) {
         continue;
       }
       const uint32_t capability = amdf_media_drm_codecs[codec].capability;
-      codec_present |= ((amdf_media_drm_codecs[codec].directions &
-                         (1u << AMDF_MEDIA_DIRECTION_DECODE)) != 0 &&
-                        device->decode_limits.codec_info[capability].valid) ||
-                       ((amdf_media_drm_codecs[codec].directions &
-                         (1u << AMDF_MEDIA_DIRECTION_ENCODE)) != 0 &&
-                        device->encode_limits.codec_info[capability].valid);
+      codec_present |=
+          (amdf_media_drm_codec_direction_implemented(
+               command_protocol, codec, AMDF_MEDIA_DIRECTION_DECODE) &&
+           device->decode_limits.codec_info[capability].valid) ||
+          (amdf_media_drm_codec_direction_implemented(
+               command_protocol, codec, AMDF_MEDIA_DIRECTION_ENCODE) &&
+           device->encode_limits.codec_info[capability].valid);
     }
     const uint32_t command_alignment = i == 0 ? 64 : 4;
     if (!admitted || !codec_present || engine.available_rings == 0 ||
@@ -701,9 +733,16 @@ static amdf_status_t amdf_media_drm_device_discover(
         command_alignment % engine.ib_size_alignment != 0) {
       continue;
     }
+    if (i == 1) {
+      device->decode_reference_swizzle_mode =
+          vcn_protocol.reference_swizzle_mode;
+      device->decode_reference_height_alignment =
+          vcn_protocol.reference_height_alignment;
+    }
     device->engines[count++] = (amdf_media_drm_engine_t){
         .ip_type = selectors[i],
         .command_protocol = command_protocol,
+        .decode_array_mode = i == 1 ? vcn_protocol.decode_array_mode : 0,
         .information = engine,
     };
   }

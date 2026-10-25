@@ -37,10 +37,19 @@ struct H264FixturePicture {
   amdf_media_h264_reference_t references[3];
   // One complete slice, already packed for the native byte framing.
   amdf_media_h264_slice_t slice;
+  // Independent FNV-1a over every raster pixel's Y/U/V storage bytes.
+  uint64_t pixel_hash;
 };
 
 // Loads the fixed parsed stream; pointers borrow embedded bytes and |pictures|.
 void LoadH264Fixture(std::array<H264FixturePicture, 12>* pictures);
+
+// Loads an IDR/P pair whose 320x208 coded extent crosses both native
+// reference pitch and height alignment boundaries. Pointers borrow embedded
+// bytes and |pictures|.
+void LoadH264GeometryFixture(std::array<H264FixturePicture, 2>* pictures,
+                             amdf_media_h264_configuration_t* configuration,
+                             amdf_media_h264_scaling_matrices_t* matrices);
 
 }  // namespace amdf::cts::media
 

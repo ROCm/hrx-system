@@ -59,6 +59,7 @@ enum {
   DECODE_BUFFER_FLAGS = 17,
   DECODE_REFERENCE_PITCH = 18,
   DECODE_REFERENCE_ROWS = 19,
+  DECODE_REFERENCE_SWIZZLE = 21,
   DECODE_REFERENCE_ARRAY_MODE = 22,
   DECODE_OUTPUT_PITCH = 25,
   DECODE_OUTPUT_CHROMA_PITCH = 26,
@@ -203,6 +204,31 @@ static uint32_t amdf_media_drm_vcn_stream(amdf_media_codec_t codec) {
          : codec == AMDF_MEDIA_CODEC_HEVC ? STREAM_HEVC
          : codec == AMDF_MEDIA_CODEC_VP9  ? STREAM_VP9
                                           : STREAM_AV1;
+}
+
+bool amdf_media_drm_vcn_protocol(
+    uint32_t ip_discovery_version,
+    amdf_media_drm_vcn_protocol_info_t* out_protocol) {
+  const uint32_t major = (ip_discovery_version >> 16) & 255;
+  if (major == 4) {
+    *out_protocol = (amdf_media_drm_vcn_protocol_info_t){
+        .command_protocol = AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4,
+        .decode_array_mode = ip_discovery_version == 0x040003 ? 1 : 3,
+        .reference_swizzle_mode = 0,
+        .reference_height_alignment = 32,
+    };
+    return true;
+  }
+  if (major == 5) {
+    *out_protocol = (amdf_media_drm_vcn_protocol_info_t){
+        .command_protocol = AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5,
+        .decode_array_mode = ip_discovery_version == 0x050001 ? 1 : 3,
+        .reference_swizzle_mode = AMDF_MEDIA_DRM_VCN_REFERENCE_SWIZZLE_256B_D,
+        .reference_height_alignment = 64,
+    };
+    return true;
+  }
+  return false;
 }
 
 static uint32_t amdf_media_drm_vcn_ib(amdf_media_drm_buffer_t* storage,
@@ -354,10 +380,10 @@ static uint8_t* amdf_media_drm_vcn_decode(
   message[3] = 1;  // DECODE.
   message[4] = session->stream_handle;
   amdf_media_drm_vcn_index(message + 6, 2, decode_offset * 4, DECODE_WORDS * 4);
-  amdf_media_drm_vcn_index(message + 10, 0x10, dynamic_offset * 4,
-                           DYNAMIC_WORDS * 4);
-  amdf_media_drm_vcn_index(message + 14, codec_identifier, codec_offset * 4,
+  amdf_media_drm_vcn_index(message + 10, codec_identifier, codec_offset * 4,
                            codec_byte_length);
+  amdf_media_drm_vcn_index(message + 14, 0x10, dynamic_offset * 4,
+                           DYNAMIC_WORDS * 4);
   uint32_t* decode = message + decode_offset;
   const uint32_t sample_bytes =
       session->requirements.configuration.format == AMDF_MEDIA_PIXEL_FORMAT_P010
@@ -384,11 +410,10 @@ static uint8_t* amdf_media_drm_vcn_decode(
   decode[DECODE_REFERENCE_ROWS] = current->row_counts[0];
   const amdf_media_drm_device_t* device =
       (const amdf_media_drm_device_t*)session->base.queue->device;
-  const uint32_t version =
-      device->engines[session->base.queue->info.queue_family_ordinal]
-          .information.ip_discovery_version;
-  decode[DECODE_REFERENCE_ARRAY_MODE] =
-      version == 0x040003 ? 1 : 3;  // Native address-library selector.
+  const amdf_media_drm_engine_t* engine =
+      &device->engines[session->base.queue->info.queue_family_ordinal];
+  decode[DECODE_REFERENCE_SWIZZLE] = current->swizzle_mode;
+  decode[DECODE_REFERENCE_ARRAY_MODE] = engine->decode_array_mode;
   decode[DECODE_OUTPUT_PITCH] = output->row_pitches[0] / sample_bytes;
   decode[DECODE_OUTPUT_CHROMA_PITCH] =
       output->row_pitches[1] /

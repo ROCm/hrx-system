@@ -25,6 +25,8 @@ typedef enum amdf_media_drm_command_protocol_t {
   AMDF_MEDIA_DRM_COMMAND_PROTOCOL_JPEG_DIRECT = 1,
   // Unified VCN 4 decode and encode firmware package protocol.
   AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4 = 2,
+  // Unified VCN 5 decode and encode firmware package protocol.
+  AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5 = 3,
 } amdf_media_drm_command_protocol_t;
 
 typedef struct amdf_media_drm_engine_t {
@@ -32,6 +34,8 @@ typedef struct amdf_media_drm_engine_t {
   uint32_t ip_type;
   // Generation-specific command schema selected once during discovery.
   amdf_media_drm_command_protocol_t command_protocol;
+  // Native address-library selector embedded in unified decode messages.
+  uint32_t decode_array_mode;
   // Immutable native generation, rings, and command alignment.
   struct drm_amdgpu_info_hw_ip information;
 } amdf_media_drm_engine_t;
@@ -58,6 +62,10 @@ typedef struct amdf_media_drm_device_t {
   struct drm_amdgpu_info_video_caps decode_limits;
   // Native encode envelopes, kept distinct from decode support.
   struct drm_amdgpu_info_video_caps encode_limits;
+  // Firmware swizzle selector for decoder-private reference images.
+  uint32_t decode_reference_swizzle_mode;
+  // Luma-height alignment in rows for application-owned decode references.
+  uint32_t decode_reference_height_alignment;
   // Native engines indexed by the corresponding public family ordinal.
   amdf_media_drm_engine_t engines[2];
   // Immutable execution families exposed by this activation.

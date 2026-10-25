@@ -155,13 +155,17 @@ void MediaDecodeTest::CreateFrames(
     const amdf_media_image_requirements_t& requirements,
     CtsMappedMemory* memory, amdf_media_image_t** image,
     std::span<amdf_media_linear_image_layout_t> layouts,
-    std::span<amdf_media_frame_t> frames) {
+    std::span<amdf_media_frame_t> frames, bool* out_linear_layout,
+    uint64_t* out_layer_byte_length) {
   auto description = requirements.description;
   description.array_layer_count = static_cast<uint32_t>(frames.size());
   amdf_media_image_requirements_t array;
   ASSERT_EQ(
       media_->device_query_image_requirements(device_, &description, &array),
       AMDF_STATUS_OK);
+  ASSERT_EQ(array.byte_length % frames.size(), 0u);
+  *out_layer_byte_length = array.byte_length / frames.size();
+  *out_linear_layout = true;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(512 + array.byte_length, memory));
   const amdf_media_image_create_info_t create = {
       .type = AMDF_STRUCTURE_TYPE_MEDIA_IMAGE_CREATE_INFO,
@@ -185,16 +189,26 @@ void MediaDecodeTest::CreateFrames(
         .structure_size = sizeof(info),
         .next = &layout,
     };
-    ASSERT_EQ(media_->image_query_info(*image, 0, &query, &info),
-              AMDF_STATUS_OK);
-    ASSERT_EQ(layout.plane_count, 2u);
+    const auto layout_status =
+        media_->image_query_info(*image, 0, &query, &info);
+    const bool linear_layout = layout_status == AMDF_STATUS_OK;
+    if (!linear_layout) {
+      ASSERT_EQ(layout_status,
+                amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+      *out_linear_layout = false;
+      info.next = nullptr;
+      ASSERT_EQ(media_->image_query_info(*image, 0, &query, &info),
+                AMDF_STATUS_OK);
+    } else {
+      ASSERT_EQ(layout.plane_count, 2u);
+    }
     auto& frame = frames[i];
     frame.type = AMDF_STRUCTURE_TYPE_MEDIA_FRAME;
     frame.structure_size = sizeof(frame);
     frame.format = description.format;
     frame.width = description.width;
     frame.height = description.height;
-    if (linear_frames_) {
+    if (linear_frames_ && linear_layout) {
       frame.storage_kind = AMDF_MEDIA_FRAME_STORAGE_KIND_LINEAR_PLANES;
       frame.storage.linear = {2, layout.planes};
     } else {
@@ -206,12 +220,17 @@ void MediaDecodeTest::CreateFrames(
 
 void MediaDecodeTest::CreatePictures() {
   ASSERT_NO_FATAL_FAILURE(CreateMemory(4 * 65536 + 256, &input_));
-  ASSERT_NO_FATAL_FAILURE(CreateFrames(configuration_.output, &output_memory_,
-                                       &output_image_, output_layouts_,
-                                       outputs_));
-  ASSERT_NO_FATAL_FAILURE(CreateFrames(configuration_.reference,
-                                       &reference_memory_, &reference_image_,
-                                       reference_layouts_, references_));
+  bool output_linear_layout = false;
+  uint64_t output_layer_byte_length = 0;
+  ASSERT_NO_FATAL_FAILURE(CreateFrames(
+      configuration_.output, &output_memory_, &output_image_, output_layouts_,
+      outputs_, &output_linear_layout, &output_layer_byte_length));
+  ASSERT_TRUE(output_linear_layout);
+  ASSERT_NE(output_layer_byte_length, 0u);
+  ASSERT_NO_FATAL_FAILURE(
+      CreateFrames(configuration_.reference, &reference_memory_,
+                   &reference_image_, reference_layouts_, references_,
+                   &reference_linear_layout_, &reference_layer_byte_length_));
   for (auto& command : commands_) {
     ASSERT_NO_FATAL_FAILURE(CreateCommand(&command));
   }
@@ -328,37 +347,89 @@ void MediaDecodeTest::CheckGuards(
   }
 }
 
-void MediaDecodeTest::CheckPixels(std::span<const DecodeInput> fixture,
-                                  uint32_t first) {
-  ASSERT_NO_FATAL_FAILURE(CheckGuards(output_memory_, output_layouts_));
-  ASSERT_NO_FATAL_FAILURE(CheckGuards(reference_memory_, reference_layouts_));
+uint64_t MediaDecodeTest::HashFramePixels(
+    const CtsMappedMemory& memory,
+    const amdf_media_linear_image_layout_t& layout) const {
   const auto& shape = configuration_.configuration;
   const uint32_t sample_bytes =
       shape.format == AMDF_MEDIA_PIXEL_FORMAT_P010 ? 2 : 1;
-  for (uint32_t slot = 0; slot < 4; ++slot) {
-    const auto& y = output_layouts_[slot].planes[0];
-    const auto& uv = output_layouts_[slot].planes[1];
-    uint64_t hash = UINT64_C(14695981039346656037);
-    for (uint32_t row = 0; row < shape.coded_height; ++row) {
-      for (uint32_t column = 0; column < shape.coded_width; ++column) {
-        const uint64_t positions[3] = {
-            y.byte_offset + row * y.row_pitch + column * sample_bytes,
-            uv.byte_offset + (row / 2) * uv.row_pitch +
-                (column & ~1u) * sample_bytes,
-            uv.byte_offset + (row / 2) * uv.row_pitch +
-                ((column & ~1u) + 1) * sample_bytes};
-        for (uint64_t offset : positions) {
-          if (sample_bytes == 2) {
-            ASSERT_EQ(output_memory_.bytes()[offset] & 63u, 0u);
-          }
-          for (uint32_t byte = 0; byte < sample_bytes; ++byte) {
-            hash = (hash ^ output_memory_.bytes()[offset + byte]) *
-                   UINT64_C(1099511628211);
-          }
+  const auto& y = layout.planes[0];
+  const auto& uv = layout.planes[1];
+  uint64_t hash = UINT64_C(14695981039346656037);
+  for (uint32_t row = 0; row < shape.coded_height; ++row) {
+    for (uint32_t column = 0; column < shape.coded_width; ++column) {
+      const uint64_t positions[3] = {
+          y.byte_offset + row * y.row_pitch + column * sample_bytes,
+          uv.byte_offset + (row / 2) * uv.row_pitch +
+              (column & ~1u) * sample_bytes,
+          uv.byte_offset + (row / 2) * uv.row_pitch +
+              ((column & ~1u) + 1) * sample_bytes};
+      for (uint64_t offset : positions) {
+        if (sample_bytes == 2) {
+          EXPECT_EQ(memory.bytes()[offset] & 63u, 0u);
+        }
+        for (uint32_t byte = 0; byte < sample_bytes; ++byte) {
+          hash =
+              (hash ^ memory.bytes()[offset + byte]) * UINT64_C(1099511628211);
         }
       }
     }
-    EXPECT_EQ(hash, fixture[(first + slot) % fixture.size()].pixel_hash)
+  }
+  return hash;
+}
+
+void MediaDecodeTest::CheckFrameWritten(
+    const CtsMappedMemory& memory,
+    const amdf_media_linear_image_layout_t& layout, uint8_t initial_value) {
+  for (const auto& plane : layout.planes) {
+    const auto bytes =
+        memory.bytes().subspan(plane.byte_offset, plane.byte_length);
+    EXPECT_TRUE(
+        std::any_of(bytes.begin(), bytes.end(),
+                    [=](uint8_t value) { return value != initial_value; }))
+        << "plane offset=" << plane.byte_offset;
+  }
+}
+
+void MediaDecodeTest::CheckReferenceGuards() {
+  if (reference_linear_layout_) {
+    ASSERT_NO_FATAL_FAILURE(CheckGuards(reference_memory_, reference_layouts_));
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(
+      Cache(reference_memory_, AMDF_HOST_CACHE_OPERATION_INVALIDATE));
+  const uint64_t image_byte_length =
+      reference_layer_byte_length_ * reference_layouts_.size();
+  for (uint64_t offset = 0; offset < reference_memory_.bytes().size();
+       ++offset) {
+    if (offset < 256 || offset >= 256 + image_byte_length) {
+      ASSERT_EQ(reference_memory_.bytes()[offset], 0xa5) << "guard=" << offset;
+    }
+  }
+}
+
+void MediaDecodeTest::CheckReferenceWritten(uint32_t slot,
+                                            uint8_t initial_value) {
+  if (reference_linear_layout_) {
+    ASSERT_NO_FATAL_FAILURE(CheckFrameWritten(
+        reference_memory_, reference_layouts_[slot], initial_value));
+    return;
+  }
+  const auto bytes = reference_memory_.bytes().subspan(
+      256 + uint64_t(slot) * reference_layer_byte_length_,
+      reference_layer_byte_length_);
+  EXPECT_TRUE(std::any_of(bytes.begin(), bytes.end(), [=](uint8_t value) {
+    return value != initial_value;
+  }));
+}
+
+void MediaDecodeTest::CheckPixels(std::span<const DecodeInput> fixture,
+                                  uint32_t first) {
+  ASSERT_NO_FATAL_FAILURE(CheckGuards(output_memory_, output_layouts_));
+  ASSERT_NO_FATAL_FAILURE(CheckReferenceGuards());
+  for (uint32_t slot = 0; slot < 4; ++slot) {
+    EXPECT_EQ(HashFramePixels(output_memory_, output_layouts_[slot]),
+              fixture[(first + slot) % fixture.size()].pixel_hash)
         << "picture=" << first + slot;
   }
 }

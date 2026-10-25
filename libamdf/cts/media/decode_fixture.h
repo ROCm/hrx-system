@@ -42,7 +42,8 @@ class MediaDecodeTest : public ::testing::Test {
   void CreateFrames(const amdf_media_image_requirements_t& requirements,
                     CtsMappedMemory* memory, amdf_media_image_t** image,
                     std::span<amdf_media_linear_image_layout_t> layouts,
-                    std::span<amdf_media_frame_t> frames);
+                    std::span<amdf_media_frame_t> frames,
+                    bool* out_linear_layout, uint64_t* out_layer_byte_length);
   void CreatePictures();
   void Cache(CtsMappedMemory& memory, amdf_host_cache_operation_t operation);
   amdf_status_t PreparePicture(const DecodeInput& entry, uint32_t slot);
@@ -53,6 +54,14 @@ class MediaDecodeTest : public ::testing::Test {
   void End();
   void CheckGuards(CtsMappedMemory& memory,
                    std::span<const amdf_media_linear_image_layout_t> layouts);
+  uint64_t HashFramePixels(
+      const CtsMappedMemory& memory,
+      const amdf_media_linear_image_layout_t& layout) const;
+  void CheckFrameWritten(const CtsMappedMemory& memory,
+                         const amdf_media_linear_image_layout_t& layout,
+                         uint8_t initial_value);
+  void CheckReferenceGuards();
+  void CheckReferenceWritten(uint32_t slot, uint8_t initial_value);
   void CheckPixels(std::span<const DecodeInput> fixture, uint32_t first);
   void TearDown() override;
   void RunPictures(std::span<const DecodeInput> fixture,
@@ -93,13 +102,17 @@ class MediaDecodeTest : public ::testing::Test {
   std::array<amdf_media_linear_image_layout_t, 4> output_layouts_ = {};
   // Retained reference plane metadata and protected extents.
   std::vector<amdf_media_linear_image_layout_t> reference_layouts_ = {};
+  // Whether the reference identity exposes direct linear planes.
+  bool reference_linear_layout_ = false;
+  // Physical byte extent of each decoder-private reference layer.
+  uint64_t reference_layer_byte_length_ = 0;
   // Borrowed output frames, with either native identities or direct planes.
   std::array<amdf_media_frame_t, 4> outputs_ = {};
   // Stable application reference frame bindings.
   std::vector<amdf_media_frame_t> references_ = {};
   // Selected native codec queue family within this media device.
   uint32_t family_ = 0;
-  // Whether the caller supplies direct planes or native image identities.
+  // Whether the caller supplies direct planes for each linear native image.
   bool linear_frames_ = false;
 };
 

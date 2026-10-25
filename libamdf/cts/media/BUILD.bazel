@@ -100,6 +100,19 @@ iree_c_embed_data(
     identifier = "amdf_cts_media_h264_profile_inputs",
 )
 
+iree_c_embed_data(
+    name = "h264_geometry_inputs",
+    testonly = True,
+    srcs = [
+        "h264_geometry_idr.slice",
+        "h264_geometry_p.slice",
+    ],
+    c_file_output = "h264_geometry_inputs.c",
+    flatten = True,
+    h_file_output = "h264_geometry_inputs.h",
+    identifier = "amdf_cts_media_h264_geometry_inputs",
+)
+
 amdf_cc_library(
     name = "h264_fixture",
     testonly = True,
@@ -107,6 +120,7 @@ amdf_cc_library(
     hdrs = ["h264_fixture.h"],
     visibility = ["//libamdf/cts/interop/gpu/media:__pkg__"],
     deps = [
+        ":h264_geometry_inputs",
         ":reference_main",
         "//third_party:google_test",
     ],

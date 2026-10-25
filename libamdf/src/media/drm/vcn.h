@@ -24,7 +24,26 @@ enum {
   AMDF_MEDIA_DRM_VCN_PROBABILITY_OFFSET = 1024,
   AMDF_MEDIA_DRM_VCN_AV1_AUXILIARY_OFFSET = 4352,
   AMDF_MEDIA_DRM_VCN_AV1_AUXILIARY_BYTES = 20736,
+  // VCN 5's 256-byte displayable reference-surface swizzle.
+  AMDF_MEDIA_DRM_VCN_REFERENCE_SWIZZLE_256B_D = 1,
 };
+
+typedef struct amdf_media_drm_vcn_protocol_info_t {
+  // Unified firmware command family selected for this IP generation.
+  amdf_media_drm_command_protocol_t command_protocol;
+  // Address-library selector embedded in decode-target and reference fields.
+  uint32_t decode_array_mode;
+  // Firmware swizzle selector for decoder-private reference storage.
+  uint32_t reference_swizzle_mode;
+  // Required luma-height alignment for application-owned reference images.
+  uint32_t reference_height_alignment;
+} amdf_media_drm_vcn_protocol_info_t;
+
+// Selects immutable unified-decode facts for one native discovery version.
+// Returns false without producing output when the version family is unknown.
+bool amdf_media_drm_vcn_protocol(
+    uint32_t ip_discovery_version,
+    amdf_media_drm_vcn_protocol_info_t* out_protocol);
 
 // Infallible emission after public operand admission. The returned extent is
 // the unified-engine IB, separate from the embedded firmware message.

@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -42,8 +43,7 @@ class MediaH264Test : public amdf::cts::media::MediaDecodeTest,
                                        entry.reference_slots[i]};
       }
       inputs_[index] = {entry.bytes, entry.byte_length, entry.reference_slot,
-                        &entry.picture,
-                        amdf::cts::media::kH264PixelHashes[index]};
+                        &entry.picture, entry.pixel_hash};
     }
   }
 
@@ -62,6 +62,29 @@ class MediaH264Test : public amdf::cts::media::MediaDecodeTest,
 
 TEST_P(MediaH264Test, ReusesRecordingsAndReferenceSlotsWithExactPixels) {
   ASSERT_NO_FATAL_FAILURE(RunPictures(inputs_, 24));
+}
+
+TEST_P(MediaH264Test, WritesReferenceBeforeDependentPicture) {
+  ASSERT_NO_FATAL_FAILURE(CreatePictures());
+  ASSERT_NO_FATAL_FAILURE(Begin());
+  for (uint32_t index = 0; index < 2; ++index) {
+    std::fill(output_memory_.bytes().begin(), output_memory_.bytes().end(),
+              0xa5);
+    ASSERT_NO_FATAL_FAILURE(
+        Cache(output_memory_, AMDF_HOST_CACHE_OPERATION_FLUSH));
+    ASSERT_NO_FATAL_FAILURE(PreparePicture(index, index));
+    ASSERT_NO_FATAL_FAILURE(Cache(input_, AMDF_HOST_CACHE_OPERATION_FLUSH));
+    ASSERT_EQ(Submit(commands_[index]), AMDF_STATUS_OK);
+    ASSERT_NO_FATAL_FAILURE(Join());
+    ASSERT_NO_FATAL_FAILURE(CheckGuards(output_memory_, output_layouts_));
+    ASSERT_NO_FATAL_FAILURE(CheckReferenceGuards());
+    EXPECT_EQ(HashFramePixels(output_memory_, output_layouts_[index]),
+              inputs_[index].pixel_hash)
+        << "output picture=" << index;
+    ASSERT_NO_FATAL_FAILURE(
+        CheckReferenceWritten(inputs_[index].reference_slot, 0xa5));
+  }
+  ASSERT_NO_FATAL_FAILURE(End());
 }
 
 TEST_P(MediaH264Test, LifecycleRequiresExplicitAcceptedBeginAndEnd) {
@@ -91,9 +114,51 @@ TEST_P(MediaH264Test, LifecycleRequiresExplicitAcceptedBeginAndEnd) {
             amdf_make_api_status(AMDF_STATUS_CODE_FAILED_PRECONDITION));
 }
 
-INSTANTIATE_TEST_SUITE_P(NativeAndLinear, MediaH264Test, ::testing::Bool(),
+INSTANTIATE_TEST_SUITE_P(NativeAndLinearOutputs, MediaH264Test,
+                         ::testing::Bool(),
                          [](const ::testing::TestParamInfo<bool>& parameter) {
-                           return parameter.param ? "Planes" : "Image";
+                           return parameter.param ? "OutputPlanes" : "Images";
+                         });
+
+class MediaH264GeometryTest : public amdf::cts::media::MediaDecodeTest,
+                              public ::testing::WithParamInterface<bool> {
+ protected:
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(amdf::cts::media::LoadH264GeometryFixture(
+        &fixture_, &configuration_, &matrices_));
+    ASSERT_NO_FATAL_FAILURE(
+        SetUpMedia({AMDF_MEDIA_CODEC_H264, AMDF_MEDIA_DIRECTION_DECODE,
+                    AMDF_MEDIA_PIXEL_FORMAT_NV12, 320, 208, 2},
+                   &configuration_, GetParam()));
+    if (IsSkipped()) {
+      return;
+    }
+    for (uint32_t index = 0; index < fixture_.size(); ++index) {
+      auto& entry = fixture_[index];
+      for (uint32_t reference = 0; reference < entry.picture.reference_count;
+           ++reference) {
+        const uint32_t slot = entry.reference_slots[reference];
+        entry.references[reference].binding = {&references_[slot], slot};
+      }
+      inputs_[index] = {entry.bytes, entry.byte_length, entry.reference_slot,
+                        &entry.picture, entry.pixel_hash};
+    }
+  }
+
+  std::array<amdf::cts::media::H264FixturePicture, 2> fixture_ = {};
+  amdf_media_h264_configuration_t configuration_ = {};
+  amdf_media_h264_scaling_matrices_t matrices_ = {};
+  std::array<amdf::cts::media::DecodeInput, 2> inputs_ = {};
+};
+
+TEST_P(MediaH264GeometryTest, DecodesDependentPictureAcrossTileBoundaries) {
+  ASSERT_NO_FATAL_FAILURE(RunPictures(inputs_, 4));
+}
+
+INSTANTIATE_TEST_SUITE_P(NativeAndLinearOutputs, MediaH264GeometryTest,
+                         ::testing::Bool(),
+                         [](const ::testing::TestParamInfo<bool>& parameter) {
+                           return parameter.param ? "OutputPlanes" : "Images";
                          });
 
 struct H264ProfileCase {

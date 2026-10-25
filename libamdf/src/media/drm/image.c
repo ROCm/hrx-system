@@ -23,6 +23,7 @@ static uint64_t amdf_media_drm_image_pitch(
 }
 
 static uint32_t amdf_media_drm_image_rows(
+    const amdf_media_drm_device_t* device,
     const amdf_media_image_description_t* description) {
   if (description->roles == AMDF_MEDIA_IMAGE_ROLE_ENCODE_INPUT) {
     return description->height;
@@ -34,10 +35,13 @@ static uint32_t amdf_media_drm_image_rows(
     const uint32_t rows = (description->height + 63) & ~63u;
     return rows < 256 ? 256 : rows;
   }
-  const uint32_t alignment =
-      (description->roles & AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE) == 0 ? 16
-      : description->format == AMDF_MEDIA_PIXEL_FORMAT_P010              ? 64
-                                                                         : 32;
+  uint32_t alignment = 16;
+  if ((description->roles & AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE) != 0) {
+    alignment = device->decode_reference_height_alignment;
+    if (description->format == AMDF_MEDIA_PIXEL_FORMAT_P010 && alignment < 64) {
+      alignment = 64;
+    }
+  }
   return (description->height + alignment - 1) & ~(alignment - 1);
 }
 
@@ -63,8 +67,13 @@ amdf_status_t AMDF_CALL amdf_media_drm_image_requirements(
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   const amdf_media_drm_device_t* device = (const amdf_media_drm_device_t*)base;
+  if (description->roles == (AMDF_MEDIA_IMAGE_ROLE_DECODE_OUTPUT |
+                             AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE) &&
+      device->decode_reference_swizzle_mode != 0) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
   const uint64_t pitch = amdf_media_drm_image_pitch(description);
-  const uint64_t rows = amdf_media_drm_image_rows(description);
+  const uint64_t rows = amdf_media_drm_image_rows(device, description);
   const uint64_t layer_length = pitch * (rows + rows / 2);
   if (description->array_layer_count >
       (device->address_end - device->address_begin) / layer_length) {
@@ -135,8 +144,13 @@ amdf_status_t AMDF_CALL amdf_media_drm_image_create(
   image->access_ordinal = create_info->media_access_ordinal;
   image->byte_offset = create_info->byte_offset;
   image->row_pitch = amdf_media_drm_image_pitch(&requirements.description);
-  image->allocated_height =
-      amdf_media_drm_image_rows(&requirements.description);
+  image->allocated_height = amdf_media_drm_image_rows(
+      (const amdf_media_drm_device_t*)device, &requirements.description);
+  image->swizzle_mode = (requirements.description.roles &
+                         AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE) != 0
+                            ? ((const amdf_media_drm_device_t*)device)
+                                  ->decode_reference_swizzle_mode
+                            : 0;
   image->layer_byte_length =
       requirements.byte_length / requirements.description.array_layer_count;
   *out_image = &image->base;
@@ -174,6 +188,9 @@ amdf_status_t AMDF_CALL amdf_media_drm_image_query_info(
         layout, AMDF_STRUCTURE_TYPE_MEDIA_LINEAR_IMAGE_LAYOUT, sizeof(*layout));
     if (!amdf_status_is_ok(status)) {
       return status;
+    }
+    if (image->swizzle_mode != 0) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
     }
     layout->plane_count = 2;
     layout->array_layer = query->array_layer;
@@ -227,6 +244,10 @@ amdf_status_t amdf_media_drm_frame_prepare(
     planes = native_planes;
   } else if (frame->storage_kind ==
              AMDF_MEDIA_FRAME_STORAGE_KIND_LINEAR_PLANES) {
+    if ((description->roles & AMDF_MEDIA_IMAGE_ROLE_DECODE_REFERENCE) != 0 &&
+        device->decode_reference_swizzle_mode != 0) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
     if (frame->storage.linear.plane_count != 2 ||
         frame->storage.linear.planes == NULL) {
       return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
@@ -240,7 +261,7 @@ amdf_status_t amdf_media_drm_frame_prepare(
       (uint64_t)description->width *
       (description->format == AMDF_MEDIA_PIXEL_FORMAT_P010 ? 2u : 1u);
   for (uint32_t i = 0; amdf_status_is_ok(status) && i < 2; ++i) {
-    const uint64_t rows = amdf_media_drm_image_rows(description) >> i;
+    const uint64_t rows = amdf_media_drm_image_rows(device, description) >> i;
     if (planes[i].row_pitch < width || planes[i].row_pitch > UINT32_MAX ||
         planes[i].row_pitch % 256 != 0 ||
         planes[i].byte_length < planes[i].row_pitch * rows) {
@@ -261,10 +282,15 @@ amdf_status_t amdf_media_drm_frame_prepare(
        (result.buffers[0] == result.buffers[1] &&
         result.addresses[1] - result.addresses[0] <
             (uint64_t)result.row_pitches[0] *
-                amdf_media_drm_image_rows(description)))) {
+                amdf_media_drm_image_rows(device, description)))) {
     status = amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
   if (amdf_status_is_ok(status)) {
+    result.swizzle_mode =
+        frame->storage_kind == AMDF_MEDIA_FRAME_STORAGE_KIND_NATIVE_IMAGE
+            ? ((const amdf_media_drm_image_t*)frame->storage.image.image)
+                  ->swizzle_mode
+            : 0;
     *out_frame = result;
   }
   return status;

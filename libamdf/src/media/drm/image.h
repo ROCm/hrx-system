@@ -30,6 +30,8 @@ typedef struct amdf_media_drm_image_t {
   uint64_t row_pitch;
   // Allocated luma row count including native block padding.
   uint32_t allocated_height;
+  // Firmware swizzle selector; zero identifies linear component storage.
+  uint32_t swizzle_mode;
 } amdf_media_drm_image_t;
 
 typedef struct amdf_media_drm_frame_t {
@@ -41,6 +43,8 @@ typedef struct amdf_media_drm_frame_t {
   uint32_t row_pitches[2];
   // Native write footprint in rows, including codec-block padding.
   uint32_t row_counts[2];
+  // Firmware swizzle selector established by the native image identity.
+  uint32_t swizzle_mode;
 } amdf_media_drm_frame_t;
 
 amdf_status_t AMDF_CALL amdf_media_drm_image_requirements(

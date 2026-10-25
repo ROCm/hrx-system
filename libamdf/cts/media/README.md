@@ -102,6 +102,20 @@ resolved SPS/PPS fields. The pixel oracle interleaves the decoder's independent
 U and V planes into declared NV12 storage before hashing every raster pixel's
 Y/U/V bytes.
 
+The 320x208 geometry pair uses the same source equations with frame-number
+terms of 31 for Y, 17 for U, and 23 for V. FFmpeg 8.1.2 and OpenH264 2.6.0
+encode one IDR followed by one P picture at 200 kbit/s, Baseline level 1.1, one
+reference, and no B pictures. Its 320-byte raster pitch rounds to 512 bytes,
+while 208 coded rows require 256 VCN 5 reference rows, so the dependent
+P picture exercises both native storage boundaries. FFmpeg 5.1.9's native H264 decoder
+produces the independent two-picture pixel oracle and agrees bit for bit with
+OpenH264's decoder. The source SHA-256 is
+`22725316d9add0f73e22b23e697444d0ad555f9b767c5bbe22bb0ce1ab60ca59`;
+the complete stream SHA-256 is
+`1351f13d57148541c4e305e7d716a12b27e44a9fe672ca1c9530bcfde4fa9b26`;
+the decoded planar oracle SHA-256 is
+`2549941e93304bab29821c2163d68a4c73b1d077e81b004627bc52515503c42c`.
+
 Artifact | Constrained baseline SHA-256 | High SHA-256
 --- | --- | ---
 Complete Annex B stream | `99dcbe526457c53740c399261cd28c61c1a9d346caa18d290c6a5e75011ea7ae` | `237b3c81b5dd43dcd6e6d2c0242eae143b6eae39298c8b1594eb988f6dcc33a7`
