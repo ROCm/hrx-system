@@ -640,25 +640,12 @@ def cpu_steps(targets: tuple[str, ...]) -> list[CiStep]:
     return [
         bazel_configure_step(),
         *platform_coverage_build_steps(bazel_build_step("Build IREE", scoped_targets)),
-        model_acquisition_test_step(),
         bazel_test_step(
             "Test IREE",
-            scoped_targets
-            + ci_config.CPU_XFAIL_TARGETS
-            + ci_config.MODEL_ACQUISITION_BAZEL_EXCLUDES,
+            scoped_targets + ci_config.CPU_XFAIL_TARGETS,
             test_tag_filters=ci_config.CPU_RESOURCE_TAG_EXCLUDES,
         ),
     ]
-
-
-def model_acquisition_test_step(
-    bazel_options: tuple[str, ...] = (),
-) -> CiStep:
-    return bazel_test_step(
-        "Test model acquisition",
-        ci_config.MODEL_ACQUISITION_BAZEL_TARGETS,
-        bazel_options=bazel_options + ("--test_timeout=20",),
-    )
 
 
 def repository_configure_step() -> CiStep:
@@ -702,15 +689,9 @@ def repository_integration_steps(
             ci_config.BAZEL_REPOSITORY_INTEGRATION_DEVICE_TARGETS,
             bazel_options=ci_config.REPOSITORY_BAZEL_OPTIONS + amdgpu_options,
         ),
-        *(
-            [model_acquisition_test_step(ci_config.REPOSITORY_BAZEL_OPTIONS)]
-            if include_python_tests
-            else []
-        ),
         bazel_test_step(
             "Test repository",
-            ci_config.BAZEL_REPOSITORY_TEST_TARGETS
-            + ci_config.MODEL_ACQUISITION_BAZEL_EXCLUDES,
+            ci_config.BAZEL_REPOSITORY_TEST_TARGETS,
             test_tag_filters=ci_config.CPU_RESOURCE_TAG_EXCLUDES,
             test_language_filters=(
                 ()

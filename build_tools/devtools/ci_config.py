@@ -54,12 +54,6 @@ BAZEL_REPOSITORY_INTEGRATION_DEVICE_TARGETS = (
     "//runtime/src/iree/hal/drivers/amdgpu/util:pm4_dispatch_test_kernels",
 )
 BAZEL_REPOSITORY_TEST_TARGETS = ("//...",)
-# Tiny real-provider fixtures keep an explicit execution budget. Their complete
-# targets run together, separately from the repository's longer test deadlines.
-MODEL_ACQUISITION_BAZEL_TARGETS = ("//loom/py/loom/model/hf_test/...",)
-MODEL_ACQUISITION_BAZEL_EXCLUDES = tuple(
-    "-" + target for target in MODEL_ACQUISITION_BAZEL_TARGETS
-)
 BAZEL_REPOSITORY_INTEGRATION_DYNAMIC_LIBRARY_TARGET = (
     "//build_tools/bazel/test:dynamic_library_environment_binary_fixture"
 )
