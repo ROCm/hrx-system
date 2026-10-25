@@ -611,9 +611,17 @@ independent strength for each:
 This example requires registered `watercolor` and `ink` adapters. Each `id` is
 a nonempty string, not a path or URL to load. `scale` is a finite F32 number,
 defaults to one, and may be negative or zero. Omitting `loras`, or supplying an
-empty list, selects the base model. Unknown or repeated IDs reject the request.
-Selections affect only that request, including when it shares a batch with
-other requests.
+empty list, selects the base model. The list preserves order and repeated IDs,
+including a separate strength for each occurrence. Model request preparation
+resolves those names against the deployment's registrations. Selections affect
+only that request, including when it shares a batch with other requests.
+
+The [Krea 2 Turbo model guide](https://github.com/ROCm/hrx-loom-library/blob/main/model/krea/Krea-2-Turbo/OVERVIEW.md#select-an-adapter-per-request)
+shows a complete deployment using original adapter checkpoints. Krea rejects
+unregistered names even at zero strength, shares prepared factors across
+requests, and removes registered zero-strength occurrences before capture.
+Floating-point accumulation follows selection order, so deterministic replay
+uses the same ordered list.
 
 This endpoint is text-to-image; it does not accept reference-image uploads or
 imply image-editing support. Unknown fields reject.
