@@ -122,7 +122,8 @@ static bool amdf_media_drm_codec_direction_implemented(
       // Each generation-specific packet family is published only after its
       // exact output and lifecycle have passed on that generation.
       return (codec == AMDF_MEDIA_CODEC_H264 ||
-              codec == AMDF_MEDIA_CODEC_HEVC) &&
+              codec == AMDF_MEDIA_CODEC_HEVC ||
+              codec == AMDF_MEDIA_CODEC_VP9) &&
              direction == AMDF_MEDIA_DIRECTION_DECODE;
   }
   return false;

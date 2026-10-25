@@ -14,7 +14,7 @@ profile/format/dimension/reference admission is a separate query:
 | --- | --- | --- |
 | Windows D3D12 | H264; HEVC Main/Main10; VP9 profiles 0/2; AV1 profile 0 | NV12 or P010 according to actual sample depth; application-placed native images |
 | Linux DRM VCN 4 | H264; HEVC Main/Main10; VP9 profiles 0/2; AV1 profile 0 | Linear NV12/P010 output and separate application-owned linear references |
-| Linux DRM VCN 5 | H264; HEVC Main/Main10 | Linear NV12/P010 output and separate application-owned native references |
+| Linux DRM VCN 5 | H264; HEVC Main/Main10; VP9 profiles 0/2 | Linear NV12/P010 output and separate application-owned native references |
 | Linux DRM JPEG | Eight-bit baseline sequential 4:2:0 JPEG on the layout-2 JPEG engine | Linear NV12 planes, directly or through a placed image identity |
 
 A native driver's broader codec list does not advertise schemas implemented by
@@ -132,13 +132,13 @@ selects its provisioned residency list. Codec feedback is unavailable on these
 Linux decode paths; successful queue retirement is not reported as a codec
 success result.
 
-VCN 5 H264 and HEVC keep consumer output linear while storing decoder-private
-references in the firmware's 256B-D layout with 64-row luma alignment. The
-reference image still exposes its caller-owned memory identity, placement, and
-complete allocation requirements. It does not expose a linear plane layout or
-accept direct-plane reference bindings. The application binds it as a native
-image and preserves each slot through its last dependent picture; libamdf adds
-no reference pool, copy, or detile operation.
+VCN 5 H264, HEVC, and VP9 keep consumer output linear while storing
+decoder-private references in the firmware's 256B-D layout with 64-row luma
+alignment. The reference image still exposes its caller-owned memory identity,
+placement, and complete allocation requirements. It does not expose a linear
+plane layout or accept direct-plane reference bindings. The application binds
+it as a native image and preserves each slot through its last dependent
+picture; libamdf adds no reference pool, copy, or detile operation.
 
 VP9's firmware context reserves about 10.4 MiB even for small images. This
 generation-specific native cost is included in `session_query_info`; it is
