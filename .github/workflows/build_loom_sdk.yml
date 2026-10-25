@@ -64,7 +64,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            clang-19 lld-19 llvm-19 libclang-rt-19-dev
+            clang-19 lld-19 llvm-19 libclang-rt-19-dev patchelf
 
       - name: Build and test Linux wheel
         if: runner.os == 'Linux'
@@ -81,10 +81,13 @@ jobs:
           # by the embedded C++ frontend.
           # Keep the C++ ABI at Ubuntu 24.04's GCC 13 baseline even when the
           # runner also has a newer GCC installed. The ELF audit enforces it.
-          python -m build_tools.ci.loom_wheel \
-            --profile=${{ matrix.profile }} --output=wheel-artifact -- \
+          python -m build_tools.ci.loom_wheel build \
+            --profile=${{ matrix.profile }} --output=wheel-inputs -- \
             --cxxopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 \
             --linkopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13
+          python -m build_tools.ci.loom_wheel test \
+            --inputs=wheel-inputs --output=wheel-artifact \
+            --elf-inspector="$(command -v patchelf)"
 
       - name: Build and test Windows wheel
         if: runner.os == 'Windows'
@@ -119,8 +122,11 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $options += "--linkopt=/LIBPATH:$($companion.Replace('\', '/'))"
           }
-          python -m build_tools.ci.loom_wheel `
-            --profile=${{ matrix.profile }} --output=wheel-artifact -- @options
+          python -m build_tools.ci.loom_wheel build `
+            --profile=${{ matrix.profile }} --output=wheel-inputs -- @options
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m build_tools.ci.loom_wheel test `
+            --inputs=wheel-inputs --output=wheel-artifact
           exit $LASTEXITCODE
 
       - name: Upload tested wheel

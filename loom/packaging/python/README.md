@@ -77,16 +77,22 @@ The test is tagged `manual` because the complete SDK includes the C++23
 frontend, whose toolchain requirements exceed the core project's compiler
 baseline. Linux SDK builds use Clang 19 with GCC 13's C++ standard library;
 Windows builds use ClangCL and the Visual Studio C++ toolchain. The producer
-exports the exact `release_wheel` target only after that test succeeds:
+builds the exact `release_wheel` target and its small test fixture. Qualification
+runs separately on the destination operating system and exports the wheel only
+after the installed test succeeds:
 
 ```sh
-python -m build_tools.ci.loom_wheel --profile=release --output=wheel-artifact
+python -m build_tools.ci.loom_wheel build --profile=release --output=wheel-inputs
+python -m build_tools.ci.loom_wheel test --inputs=wheel-inputs --output=wheel-artifact
 ```
 
-Run it from the repository root with Bazelisk and the native compiler toolchain
-on PATH. The output directory receives one wheel and existing files are never
-replaced. Optional Bazel flags follow `--`. PR and manual build jobs have read
-permissions and produce test artifacts without publishing a release.
+Run both commands from the same repository revision. The build needs Bazelisk
+and a compiler toolchain on PATH; optional Bazel flags follow `--`. The test
+needs Python 3.12 or newer and, on Linux, `patchelf`. It invokes no build tool.
+For a Windows cross-build, add `-- --config=windows-x86_64` to the build command,
+transfer `wheel-inputs` to Windows, and run the test there. The final output
+directory receives one qualified wheel; existing files are never replaced.
+PR and manual build jobs have read permissions and publish no release.
 
 `--config=loom-sdk` selects the SDK's CPU and libamdf runtime drivers, compiler
 targets, and media codecs independently of the worktree configuration. Native
