@@ -3,6 +3,7 @@
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <array>
 #include <memory>
 
 #include "iree/base/tooling/flags.h"
@@ -19,8 +20,6 @@ const char* WeightDeviceUri() { return FLAG_weight_device_uri; }
 namespace {
 
 struct WeightDeviceGroup {
-  // Immutable physical backing policy.
-  bool elastic;
   // Requested slab bytes, zero for fixed backing.
   uint64_t slab_size;
   // Committed-byte budget, zero for fixed backing.
@@ -42,21 +41,20 @@ class WeightDeviceEnvironment : public ::testing::Environment {
       slab_size = 0;
       memory_limit = 0;
     }
-    if (entry_ && entry_->elastic == elastic &&
-        entry_->slab_size == slab_size &&
-        entry_->memory_limit == memory_limit) {
-      if (iree_status_is_ok(entry_->status)) {
-        *out_group = entry_->group;
+    auto& entry = entries_[elastic ? 1 : 0];
+    if (entry && entry->slab_size == slab_size &&
+        entry->memory_limit == memory_limit) {
+      if (iree_status_is_ok(entry->status)) {
+        *out_group = entry->group;
       }
-      return iree_status_clone(entry_->status);
+      return iree_status_clone(entry->status);
     }
 
-    // Each fixture retires its borrowers before the next setup. Keeping an
-    // unused configuration alive would also retain its finite native queues.
-    ReleaseGroup();
-    entry_ = std::make_unique<WeightDeviceGroup>();
-    auto& entry = entry_;
-    entry->elastic = elastic;
+    // Fixtures retire their borrowers before changing a policy's configuration.
+    // Retaining one of each policy amortizes alternating fixed/elastic cases
+    // while bounding native queues independently of slab and budget variants.
+    ReleaseGroup(entry);
+    entry = std::make_unique<WeightDeviceGroup>();
     entry->slab_size = slab_size;
     entry->memory_limit = memory_limit;
     auto& status = entry->status;
@@ -92,7 +90,9 @@ class WeightDeviceEnvironment : public ::testing::Environment {
   }
 
   void TearDown() override {
-    ReleaseGroup();
+    for (auto& entry : entries_) {
+      ReleaseGroup(entry);
+    }
     iree_hal_driver_release(driver_);
     driver_ = nullptr;
     loom_serve_host_release(host_);
@@ -100,24 +100,24 @@ class WeightDeviceEnvironment : public ::testing::Environment {
   }
 
  private:
-  void ReleaseGroup() {
-    if (!entry_) {
+  void ReleaseGroup(std::unique_ptr<WeightDeviceGroup>& entry) {
+    if (!entry) {
       return;
     }
     // A failed retirement must stop this fixture before its allocator dies or
     // another native configuration is constructed.
-    IREE_CHECK_OK(loom_serve_device_group_free(entry_->group));
-    entry_->allocator.AwaitReleased();
-    iree_status_free(entry_->status);
-    entry_.reset();
+    IREE_CHECK_OK(loom_serve_device_group_free(entry->group));
+    entry->allocator.AwaitReleased();
+    iree_status_free(entry->status);
+    entry.reset();
   }
 
   // Shared host services retained through every native device's final release.
   loom_serve_host_t* host_ = nullptr;
   // Retained driver supplying every immutable fixture configuration.
   iree_hal_driver_t* driver_ = nullptr;
-  // Only the current configuration retains native queues and allocator state.
-  std::unique_ptr<WeightDeviceGroup> entry_;
+  // One current configuration per backing policy: fixed, then elastic.
+  std::array<std::unique_ptr<WeightDeviceGroup>, 2> entries_;
 };
 
 auto* const weight_device_environment = static_cast<WeightDeviceEnvironment*>(
