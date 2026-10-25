@@ -125,6 +125,13 @@ void loom_serve_executables_set_observer(loom_serve_executables_t* executables,
 iree_status_t loom_serve_executables_advance(
     loom_serve_executables_t* executables, bool cancel, bool* out_complete);
 
+// Resolved arena-relative byte offsets in capture-ordinal order, encoded as
+// little-endian u64 values. Borrowed after successful advance until invocation
+// release; no selections yields an empty span. A VM consumer copies this span
+// into an owned read-only buffer before passing it to model source.
+iree_const_byte_span_t loom_serve_executables_parameter_offsets(
+    const loom_serve_executables_t* executables);
+
 // Releases an unsubmitted or fully retired invocation; no compiler/device wait.
 void loom_serve_executables_release(loom_serve_executables_t* executables);
 

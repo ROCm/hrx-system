@@ -303,3 +303,68 @@ command.program.def public @selected_target() launch(%weights: buffer, %request:
   kernel.launch @consume_selected(%a_base, %b_base, %raw_base, %request, %output) : (buffer, buffer, buffer, buffer, buffer)
   command.return
 }
+
+// Two items share immutable prepared banks but retain independent selection
+// counts and strengths. Four elements per item make the exact result visible.
+kernel.def @consume_bank_cohort() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c8, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%weights: buffer, %request: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %lane = kernel.workgroup.id<x> : index
+  %elements_per_item = index.constant 4 : index
+  %item = index.div %lane, %elements_per_item : index
+  %element = index.rem %lane, %elements_per_item : index
+  %word_bytes = index.constant 8 : offset
+  %header_offset = index.scale %item, %word_bytes : index, offset -> offset
+  %header = buffer.view %request[%header_offset] : buffer -> view<2xi32>
+  %first32 = view.load %header[0] : view<2xi32> -> i32
+  %count32 = view.load %header[1] : view<2xi32> -> i32
+  %first = index.cast %first32 : i32 to index
+  %count = index.cast %count32 : i32 to index
+  %end = index.add %first, %count : index
+  %step = index.constant 1 : index
+  %initial_sum = scalar.constant 0 : i32
+  %record_stride = index.constant 16 : offset
+  %sum = scf.for %i = [%first to %end step %step](%sum = %initial_sum : i32) -> (i32) {
+    %relative = index.scale %i, %record_stride : index, offset -> offset
+    %record_offset = index.add %record_stride, %relative : offset
+    %record = buffer.view %request[%record_offset] : buffer -> view<1xi64>
+    %bank_bits = view.load %record[0] : view<1xi64> -> i64
+    %nonnegative = scalar.assume %bank_bits [range(%bank_bits, 0, 9223372036854775807)] : i64
+    %bank = index.cast %nonnegative : i64 to offset
+    %strength_offset = index.add %record_offset, %word_bytes : offset
+    %strength_view = buffer.view %request[%strength_offset] : buffer -> view<1xi32>
+    %strength = view.load %strength_view[0] : view<1xi32> -> i32
+    %factor = buffer.view %weights[%bank] : buffer -> view<8xi32>
+    %value = view.load %factor[%element] : view<8xi32> -> i32
+    %scaled = scalar.muli %value, %strength : i32
+    %next = scalar.addi %sum, %scaled : i32
+    scf.yield %next : i32
+  }
+  %target = buffer.view %output[%origin] : buffer -> view<8xi32>
+  view.store %sum, %target[%lane] : i32, view<8xi32>
+  kernel.return
+}
+
+command.program.def public @bank_cohort() launch(%arena: buffer, %request: buffer, %output: buffer) {
+  %a = command.parameter %arena, "a" : view<8xi32>
+  %base = command.parameter.base %a : view<8xi32> -> buffer
+  kernel.launch @consume_bank_cohort(%base, %request, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @bank_missing() launch(%arena: buffer, %request: buffer, %output: buffer) {
+  %missing = command.parameter %arena, "missing" : view<8xi32>
+  %base = command.parameter.base %missing : view<8xi32> -> buffer
+  kernel.launch @consume_bank_cohort(%base, %request, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @bank_cold() launch(%weights: buffer, %request: buffer, %output: buffer) {
+  %raw = command.parameter %weights, "raw" : view<8xi32>
+  %base = command.parameter.base %raw : view<8xi32> -> buffer
+  kernel.launch @consume_bank_cohort(%base, %request, %output) : (buffer, buffer, buffer)
+  command.return
+}

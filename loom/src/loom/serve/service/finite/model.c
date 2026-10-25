@@ -472,7 +472,7 @@ static iree_status_t loom_serve_finite_create_control(
        {NULL, 0},
        &model->control.run},
   };
-  IREE_RETURN_IF_ERROR(loom_serve_program_bind(
+  IREE_RETURN_IF_ERROR(loom_serve_program_bind_service(
       model->control.program, IREE_ARRAYSIZE(bindings), bindings));
   const iree_string_view_t forecast_root =
       loom_serve_preparation_memory_forecast(model->preparation);
@@ -624,16 +624,17 @@ static iree_status_t loom_serve_finite_load_prepare(
       iree_hal_module_register_types(model->control.environment, &table));
   IREE_RETURN_IF_ERROR(
       iree_hal_module_types_resolve(table, &model->control.hal_types));
-  const iree_string_view_t roots[] = {
-      IREE_SVL("prepare_request"), IREE_SVL("prepare_batch"), IREE_SVL("run"),
-      loom_serve_preparation_memory_forecast(model->preparation)};
-  const iree_host_size_t root_count =
-      IREE_ARRAYSIZE(roots) - iree_string_view_is_empty(roots[3]);
+  const iree_string_view_t roles[] = {
+      IREE_SVL("prepare_request"), IREE_SVL("prepare_batch"), IREE_SVL("run")};
+  const iree_string_view_t forecast =
+      loom_serve_preparation_memory_forecast(model->preparation);
+  const iree_string_view_list_t additional_roots = {
+      !iree_string_view_is_empty(forecast), &forecast};
   iree_status_t status = loom_serve_program_compile_service(
       loom_serve_host_target_environment(loom_serve_device_host(model->owner)),
       model->control.environment, &load->options.sources,
-      load->options.sources.control, root_count, roots, &model->compilation,
-      host_allocator, &load->module);
+      load->options.sources.control, IREE_ARRAYSIZE(roles), roles,
+      additional_roots, &model->compilation, host_allocator, &load->module);
   IREE_RETURN_IF_ERROR(status);
   return loom_serve_jit_create(
       loom_serve_device_handle(model->owner),

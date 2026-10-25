@@ -6,6 +6,7 @@
 
 #include "loom/serve/runtime/program/preparation.h"
 
+#include <memory>
 #include <string>
 
 #include "iree/base/tooling/flags.h"
@@ -273,7 +274,10 @@ class PreparationCaptureTest : public PreparationTest {
                                         IREE_SV("cold_source"),
                                         IREE_SV("bind_source"),
                                         IREE_SV("append_source"),
-                                        IREE_SV("declare_forecast")};
+                                        IREE_SV("declare_forecast"),
+                                        IREE_SV("declare_arena"),
+                                        IREE_SV("declare_parameter_binding"),
+                                        IREE_SV("declare_banks")};
     IREE_ASSERT_OK(loom_serve_program_allocate(
         target_environment, environment, &sources,
         iree_make_cstring_view(FLAG_boundary_source), IREE_ARRAYSIZE(roots),
@@ -319,6 +323,43 @@ class PreparationCaptureTest : public PreparationTest {
       status = iree_vm_i32_from_variant(result, out_ordinal);
     }
     iree_vm_variant_reset(&argument);
+    iree_vm_variant_reset(&result);
+    return status;
+  }
+
+  iree_status_t DeclareArena(int64_t capacity, int32_t* out_ordinal) {
+    iree_vm_variant_t argument = iree_vm_variant_from_i64(capacity);
+    iree_vm_variant_t result = {};
+    auto status =
+        Invoke(IREE_SV("declare_arena"), {&argument, 1}, {&result, 1});
+    if (iree_status_is_ok(status)) {
+      status = iree_vm_i32_from_variant(result, out_ordinal);
+    }
+    iree_vm_variant_reset(&result);
+    return status;
+  }
+
+  iree_status_t DeclareBanks(int32_t arena, iree_const_byte_span_t bytes,
+                             int32_t count, int32_t* out_ordinal) {
+    iree_vm_ref_types_t types = {};
+    IREE_RETURN_IF_ERROR(iree_vm_ref_types_resolve(
+        iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
+        &types));
+    iree_vm_buffer_t* buffer = nullptr;
+    IREE_RETURN_IF_ERROR(iree_vm_buffer_clone(
+        IREE_VM_BUFFER_ACCESS_FLAG_READ, bytes, 4, host_allocator, &buffer));
+    iree_vm_variant_t arguments[] = {
+        iree_vm_variant_from_i32(arena),
+        iree_vm_buffer_variant_from_ptr_move(&types, &buffer),
+        iree_vm_variant_from_i32(count)};
+    iree_vm_variant_t result = {};
+    auto status =
+        Invoke(IREE_SV("declare_banks"),
+               iree_vm_variant_span_from_array(arguments), {&result, 1});
+    if (iree_status_is_ok(status)) {
+      status = iree_vm_i32_from_variant(result, out_ordinal);
+    }
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
     iree_vm_variant_reset(&result);
     return status;
   }
@@ -495,6 +536,48 @@ TEST_F(PreparationCardCaptureTest, DeploymentSourcesExtendTheScopedCatalog) {
   EXPECT_EQ(loom_serve_preparation_source(second, adapter).values,
             adapter_files.values);
   EXPECT_EQ(loom_serve_preparation_source(second, requested).count, 2u);
+}
+
+TEST_F(PreparationCardCaptureTest,
+       CapturedBanksRetainTypedShardsAndPolicyBase) {
+  loom_serve_preparation_module_begin(
+      module, 0, nullptr,
+      LOOM_SERVE_PREPARATION_FLAG_PARAMETERS |
+          LOOM_SERVE_PREPARATION_FLAG_PARAMETER_ARENAS);
+  int32_t source = -1;
+  IREE_ASSERT_OK(
+      DeclareSource(IREE_SV("scoped_source"), IREE_SV("model"), &source));
+  int32_t arena = -1;
+  IREE_ASSERT_OK(DeclareArena(4096, &arena));
+  preparation = loom_serve_preparation_module_take(module);
+  uint8_t ordinals[4] = {};
+  iree_unaligned_store_le_u32(ordinals, source);
+  loom_serve_preparation_module_begin(module, 0, preparation,
+                                      LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
+  int32_t last = -1;
+  IREE_ASSERT_OK(
+      DeclareBanks(arena, iree_make_const_byte_span(ordinals, 4), 2, &last));
+  second = loom_serve_preparation_module_take(module);
+  EXPECT_EQ(last, 1);
+  loom_serve_program_free(program);
+  program = nullptr;
+  iree_vm_module_release(module);
+  module = nullptr;
+  loom_model_card_release(card);
+  card = nullptr;
+  for (uint32_t index = 0; index < 2; ++index) {
+    const auto* bank = loom_serve_preparation_bank(second, index);
+    ASSERT_EQ(bank->source_count, 1u);
+    EXPECT_EQ(bank->source_ordinals[0], source);
+    EXPECT_EQ(bank->arena, 1u);
+    EXPECT_EQ(std::string(bank->policy.data, bank->policy.size),
+              "program/weights.loom");
+    ASSERT_EQ(bank->sources[0].count, 2u);
+    const auto& shard = bank->sources[0].values[1];
+    EXPECT_EQ(std::string(shard.path.data, shard.path.size),
+              "weight/second.data");
+    EXPECT_EQ(std::string(shard.format.data, shard.format.size), "safetensors");
+  }
 }
 
 TEST_F(PreparationCaptureTest, RequestDeclarationsOwnValuesAcrossInvocations) {
@@ -770,6 +853,108 @@ TEST_F(PreparationCaptureTest,
       loom_serve_preparation_free(second);
       second = nullptr;
     }
+  }
+}
+
+TEST_F(PreparationCaptureTest, ParameterArenaRegistrationIsFiniteAndColdOnly) {
+  int32_t arena = -1;
+  loom_serve_preparation_module_begin(module, 0, nullptr, 0);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        DeclareArena(INT64_C(1) << 34, &arena));
+  EXPECT_EQ(loom_serve_preparation_module_take(module), nullptr);
+  loom_serve_preparation_module_begin(
+      module, 0, nullptr, LOOM_SERVE_PREPARATION_FLAG_PARAMETER_ARENAS);
+  for (int64_t invalid : {INT64_C(-1), INT64_C(0)}) {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          DeclareArena(invalid, &arena));
+  }
+  IREE_ASSERT_OK(DeclareArena(INT64_C(1) << 34, &arena));
+  EXPECT_EQ(arena, 0);
+  IREE_ASSERT_OK(DeclareArena(4096, &arena));
+  EXPECT_EQ(arena, 1);
+  IREE_ASSERT_OK(Invoke(IREE_SV("declare_parameter_binding")));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
+                        Invoke(IREE_SV("declare_parameter_binding")));
+  preparation = loom_serve_preparation_module_take(module);
+  ASSERT_EQ(loom_serve_preparation_arena_count(preparation), 2u);
+  EXPECT_EQ(loom_serve_preparation_arena_capacity(preparation, 0), UINT64_C(1)
+                                                                       << 34);
+  const auto entry = loom_serve_preparation_bind_parameters(preparation);
+  EXPECT_EQ(std::string(entry.data, entry.size), "stage_root");
+  loom_serve_preparation_module_begin(
+      module, 0, preparation, LOOM_SERVE_PREPARATION_FLAG_PARAMETER_ARENAS);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        DeclareArena(8192, &arena));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Invoke(IREE_SV("declare_parameter_binding")));
+  EXPECT_EQ(loom_serve_preparation_module_take(module), nullptr);
+}
+
+TEST_F(PreparationCaptureTest,
+       BankSelectionsDoNotExpandBindingsOrCodeIdentity) {
+  loom_serve_preparation_module_begin(
+      module, 0, nullptr,
+      LOOM_SERVE_PREPARATION_FLAG_PARAMETER_ARENAS |
+          LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
+  int32_t ordinal = -1;
+  IREE_ASSERT_OK(DeclareArena(INT64_C(1) << 34, &ordinal));
+  IREE_ASSERT_OK(
+      DeclareSource(IREE_SV("cold_source"), IREE_SV("bank.irpa"), &ordinal));
+  preparation = loom_serve_preparation_module_take(module);
+  const uint8_t source_ordinals[] = {0, 0, 0, 0};
+  std::unique_ptr<loom_serve_preparation_t,
+                  decltype(&loom_serve_preparation_free)>
+      previous(nullptr, loom_serve_preparation_free);
+  for (int32_t count : {1, 5, 33}) {
+    loom_serve_preparation_module_begin(module, 1, preparation,
+                                        LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
+    IREE_ASSERT_OK(DeclareBanks(
+        0, iree_make_const_byte_span(source_ordinals, sizeof(source_ordinals)),
+        count, &ordinal));
+    EXPECT_EQ(ordinal, count - 1);
+    second = loom_serve_preparation_module_take(module);
+    ASSERT_EQ(loom_serve_preparation_bank_count(second), count);
+    ASSERT_EQ(loom_serve_preparation_stage_count(second), 1u);
+    const auto* stage = loom_serve_preparation_stage(second, 0);
+    ASSERT_EQ(stage->parameter_count, 1u);
+    EXPECT_EQ(stage->parameters[0].arena, 1u);
+    EXPECT_EQ(stage->parameters[0].source_count, 0u);
+    for (uint32_t i = 0; i < static_cast<uint32_t>(count); ++i) {
+      const auto* bank = loom_serve_preparation_bank(second, i);
+      EXPECT_EQ(bank->arena, 1u);
+      EXPECT_EQ(bank->binding, 0u);
+      ASSERT_EQ(bank->source_count, 1u);
+      EXPECT_EQ(bank->source_ordinals[0], 0u);
+      EXPECT_EQ(bank->sources[0].values,
+                loom_serve_preparation_source(preparation, 0).values);
+    }
+    if (previous) {
+      EXPECT_FALSE(loom_serve_preparation_equal(previous.get(), second));
+      EXPECT_TRUE(loom_serve_preparation_code_equal(previous.get(), second));
+    }
+    previous.reset(second);
+    second = nullptr;
+  }
+}
+
+TEST_F(PreparationCaptureTest,
+       BankSourcesAreValidatedBeforeCapturePublication) {
+  loom_serve_preparation_module_begin(
+      module, 0, nullptr, LOOM_SERVE_PREPARATION_FLAG_PARAMETER_ARENAS);
+  int32_t ordinal = -1;
+  IREE_ASSERT_OK(DeclareArena(4096, &ordinal));
+  preparation = loom_serve_preparation_module_take(module);
+  const uint8_t source_ordinals[] = {0, 0, 0, 0};
+  for (size_t length : {0u, 3u, 4u}) {
+    loom_serve_preparation_module_begin(module, 0, preparation,
+                                        LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
+    IREE_EXPECT_STATUS_IS(
+        length == 4 ? IREE_STATUS_OUT_OF_RANGE : IREE_STATUS_INVALID_ARGUMENT,
+        DeclareBanks(0, iree_make_const_byte_span(source_ordinals, length), 1,
+                     &ordinal));
+    second = loom_serve_preparation_module_take(module);
+    loom_serve_preparation_free(second);
+    second = nullptr;
   }
 }
 

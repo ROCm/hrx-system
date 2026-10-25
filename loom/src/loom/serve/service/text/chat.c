@@ -355,8 +355,8 @@ iree_status_t loom_serve_text_chat_policy_initialize(
        {&buffer, 1},
        &out_policy->request_options},
   };
-  iree_status_t status =
-      loom_serve_program_bind(program, IREE_ARRAYSIZE(bindings), bindings);
+  iree_status_t status = loom_serve_program_bind_service(
+      program, IREE_ARRAYSIZE(bindings), bindings);
   iree_vm_variant_t result = {0};
   if (iree_status_is_ok(status)) {
     status = iree_vm_invoke(out_policy->invocation, name_function,

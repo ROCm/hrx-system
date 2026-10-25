@@ -1651,13 +1651,17 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/weights_test.cc"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/weights_test_base.h"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/executables_test.cc"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/image/parameter_test.cc"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/image/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/boundaries.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/packing.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/packing_policy.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/policy.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/stages.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/streaming_policy.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/image/testdata/parameters.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/image/testdata/parameters.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/testdata/executables/prepare.loom"
   DEPS
     ::test_compiler
@@ -1675,6 +1679,7 @@ loom_cc_test(
     iree::testing::temp_file
     iree::vm
     loom::binding::c::loomc
+    loom::model::card
     loom::serve::runtime::device
     loom::serve::runtime::execution
     loom::serve::runtime::parameter::activation
@@ -1686,10 +1691,12 @@ loom_cc_test(
     loom::serve::runtime::program
     loom::serve::runtime::program::jit
     loom::serve::runtime::program::module
+    loom::serve::runtime::program::package
     loom::serve::runtime::program::preparation
     loom::serve::runtime::program::stage_table
     loom::serve::runtime::storage::memory
     loom::serve::service::executables
+    loom::serve::service::image::model
     loom::serve::testing::compiler
     loom::serve::testing::device
     loom::serve::testing::native_allocator
@@ -1697,6 +1704,8 @@ loom_cc_test(
     "--weight_sources={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/stages.loom}}"
     "--weight_device_uri=legacy-amdgpu:?feedback"
     "--executable_sources={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/testdata/executables/prepare.loom}}"
+    "--parameter_image_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/image/testdata/parameters.loom}}"
+    "--parameter_image_tokenizer={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/image/tokenizer.json}}"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
     "notsan"
@@ -1719,13 +1728,17 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/weights_test.cc"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/weights_test_base.h"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/executables_test.cc"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/image/parameter_test.cc"
   DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/image/tokenizer.json"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/boundaries.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/packing.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/packing_policy.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/policy.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/stages.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/streaming_policy.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/image/testdata/parameters.json"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/image/testdata/parameters.loom"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/testdata/executables/prepare.loom"
   DEPS
     ::test_compiler
@@ -1743,6 +1756,7 @@ loom_cc_test(
     iree::testing::temp_file
     iree::vm
     loom::binding::c::loomc
+    loom::model::card
     loom::serve::runtime::device
     loom::serve::runtime::execution
     loom::serve::runtime::parameter::activation
@@ -1754,10 +1768,12 @@ loom_cc_test(
     loom::serve::runtime::program
     loom::serve::runtime::program::jit
     loom::serve::runtime::program::module
+    loom::serve::runtime::program::package
     loom::serve::runtime::program::preparation
     loom::serve::runtime::program::stage_table
     loom::serve::runtime::storage::memory
     loom::serve::service::executables
+    loom::serve::service::image::model
     loom::serve::testing::compiler
     loom::serve::testing::device
     loom::serve::testing::native_allocator
@@ -1765,6 +1781,8 @@ loom_cc_test(
     "--weight_sources={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/runtime/parameter/testdata/weights/stages.loom}}"
     "--weight_device_uri=amdgpu:?feedback"
     "--executable_sources={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/testdata/executables/prepare.loom}}"
+    "--parameter_image_source={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/service/image/testdata/parameters.loom}}"
+    "--parameter_image_tokenizer={{${PROJECT_SOURCE_DIR}/loom/src/loom/serve/fixture/image/tokenizer.json}}"
   LABELS
     "iree-run-requirement=libamdf.resource.amd_gpu"
     "iree-build-requirement=loom.target.arch.vm"

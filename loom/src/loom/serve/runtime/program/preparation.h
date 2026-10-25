@@ -20,7 +20,8 @@
 extern "C" {
 #endif
 
-// Source-selected inputs and preparation policy for one fixed binding.
+// Source-selected inputs and preparation policy for one parameter bank, or a
+// fixed binding naming an arena without selecting one bank as its contents.
 typedef struct loom_serve_preparation_parameter_t {
   // Fixed-buffer ordinal in the compiled command's parameter reflection.
   uint32_t binding;
@@ -34,6 +35,10 @@ typedef struct loom_serve_preparation_parameter_t {
   iree_string_view_t policy;
   // Shared source ordinals corresponding to the policy-local input order.
   const uint32_t* source_ordinals;
+  // One-based cold arena ordinal, or zero for an ordinary whole-root bank.
+  // An arena binding has no sources or policy; selected banks name that same
+  // arena and carry their own complete sources and policy.
+  uint32_t arena;
 } loom_serve_preparation_parameter_t;
 
 // Compares checkpoint domains by their ordered source file lists and
@@ -98,6 +103,9 @@ enum loom_serve_preparation_flag_bits_e {
   // Allows the service to capture a host memory-forecast entry point. The
   // service owns that entry's signature and invokes it before scheduling work.
   LOOM_SERVE_PREPARATION_FLAG_MEMORY_FORECAST = 1u << 1,
+  // Allows cold arena capacities and the host parameter-binding entry. Request
+  // captures may select banks only from this immutable cold arena catalog.
+  LOOM_SERVE_PREPARATION_FLAG_PARAMETER_ARENAS = 1u << 2,
 };
 typedef uint32_t loom_serve_preparation_flags_t;
 
@@ -129,6 +137,10 @@ loom_serve_preparation_t* loom_serve_preparation_module_take(
 //   source_append(i32 source, buffer directory, buffer path)
 //   source_scope(buffer scope) -> i32 source
 //   parameter(i32 stage, i32 binding, i32 input, i32 source, buffer policy)
+//   parameter_arena(i64 capacity_bytes) -> i32 arena
+//   parameter_bank(i32 stage, i32 binding, i32 arena, buffer sources,
+//                  buffer policy) -> i32 bank
+//   bind_parameters(buffer root)
 //   memory_forecast(buffer root)
 // All string buffers exclude NUL bytes. Config values use the public loomc
 // textual value syntax; config_i64 formats signed decimal values. Parameter
@@ -147,6 +159,13 @@ loom_serve_preparation_t* loom_serve_preparation_module_take(
 // defaults; explicit declarations override individual keys. Declarations copy
 // their strings and retain no references to arguments, source mappings,
 // or the VM environment.
+// parameter_arena declares a finite cold VA-byte budget, not physical storage
+// or an adapter-count specialization. parameter_bank is request-only: sources
+// is a nonempty little-endian i32 array in policy-local input order. It binds
+// the full arena at the command root and returns a capture-local bank ordinal.
+// Repeated selections may resolve to one prepared bank while retaining distinct
+// ordinals. bind_parameters selects a host entry in the control program; its
+// caller owns the signature and publishes offsets only after complete capture.
 // Additional caller libraries are linked beside the prepare module. Results
 // are ordinary VM variants owned by the caller; the environment must outlive
 // any returned references. The source program is destroyed before return.
@@ -198,6 +217,24 @@ iree_host_size_t loom_serve_preparation_storage_size(
 
 // Borrowed source-selected host entry, or empty when none was declared.
 iree_string_view_t loom_serve_preparation_memory_forecast(
+    const loom_serve_preparation_t* preparation);
+
+// Cold arena catalog. Request captures borrow their base's immutable catalog.
+// NULL has no arenas; index is below the returned count.
+uint32_t loom_serve_preparation_arena_count(
+    const loom_serve_preparation_t* preparation);
+uint64_t loom_serve_preparation_arena_capacity(
+    const loom_serve_preparation_t* preparation, uint32_t index);
+
+// Invocation bank declarations in the source-visible returned ordinal order.
+// These own no device storage or VM references. NULL has no bank declarations.
+uint32_t loom_serve_preparation_bank_count(
+    const loom_serve_preparation_t* preparation);
+const loom_serve_preparation_parameter_t* loom_serve_preparation_bank(
+    const loom_serve_preparation_t* preparation, uint32_t index);
+
+// Cold-selected host entry, or empty if parameter arenas are not declared.
+iree_string_view_t loom_serve_preparation_bind_parameters(
     const loom_serve_preparation_t* preparation);
 
 // Exact ordered declaration identity, including configuration spelling,

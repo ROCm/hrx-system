@@ -85,7 +85,7 @@ class ProgramTest : public ::testing::Test {
                      iree_vm_signature_type_span_t results) {
     const loom_serve_program_binding_t binding = {name, arguments, results,
                                                   &function_};
-    return loom_serve_program_bind(program_, 1, &binding);
+    return loom_serve_program_bind_service(program_, 1, &binding);
   }
 
   // Host memory owning the actual JIT, linked program, and native capability.
@@ -144,13 +144,15 @@ TEST_F(ProgramTest, CardRolesNeverFallBackToBareExports) {
                                                  iree_vm_module_span_empty(),
                                                  host_allocator_, &program));
   iree_vm_function_t function = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                        loom_serve_program_lookup(program, role, &function));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      loom_serve_program_lookup_service(program, role, &function));
+  IREE_ASSERT_OK(loom_serve_program_lookup(program, role, &function));
   loom_serve_program_free(program);
   module_owner.reset();
   module = nullptr;
   iree::Status status = loom_serve_program_compile_service(
-      target_environment_, environment_, &card_sources, {}, 1, &role,
+      target_environment_, environment_, &card_sources, {}, 1, &role, {},
       &compilation_, host_allocator_, &module);
   EXPECT_FALSE(status.ok());
   EXPECT_EQ(module, nullptr);
@@ -205,7 +207,8 @@ TEST_F(ProgramTest, ComponentAbiSurvivesCompileLinkLookupAndBinding) {
         &program_));
     card_owner.reset();
     package_owner.reset();
-    IREE_ASSERT_OK(loom_serve_program_lookup(program_, role, &function_));
+    IREE_ASSERT_OK(
+        loom_serve_program_lookup_service(program_, role, &function_));
     const auto result_type = Scalar(IREE_VM_SCALAR_TYPE_I32);
     IREE_ASSERT_OK(Bind(role, {}, {&result_type, 1}));
     iree_vm_variant_t result = {};

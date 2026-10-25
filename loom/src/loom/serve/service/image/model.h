@@ -101,6 +101,7 @@ iree_status_t loom_serve_image_load_free(loom_serve_image_load_t* load);
 //                   tag)
 //   prepare_batch(buffer state, buffer i64_stage_tags, buffer ranges,
 //                 buffer bytes) -> (i32 stage, buffer payload)
+//   bind_parameters(buffer state, buffer payload, buffer bank_offsets)
 //   generate(i32 first_part, i32 part_count, i32 cursor, i64 output_bytes,
 //            hal.buffer payload, hal.buffer rgb, hal.buffer workspace) -> i32
 // The cursor starts at zero. Each invocation submits its next part and returns
@@ -119,6 +120,13 @@ iree_status_t loom_serve_image_load_free(loom_serve_image_load_t* load);
 // domains or prepare independent banks on demand; omitted declarations preserve
 // the cold layout. Stages declared by one cohort share a parameter binding
 // map, while retained cohort choices can bind different checkpoint banks. Each
+// cold-declared parameter arena can supply independently selected banks through
+// one fixed binding. Such a model declares a bind_parameters control entry at
+// registration. The owner invokes it once after successful bank resolution and
+// before the existing payload upload; bank_offsets is an owned read-only buffer
+// of little-endian u64 arena offsets in parameter_bank declaration order. The
+// source patches its opaque payload, retaining item order and strengths. The
+// invocation retains selected banks through actual execution retirement. Each
 // command has three dynamic bindings: opaque request bytes, output F32 CHW RGB
 // [-1,1], and workspace. External input/output roots promise only byte
 // alignment; stronger private storage and parameter alignments come from their

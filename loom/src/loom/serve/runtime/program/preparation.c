@@ -18,6 +18,23 @@
 #include "loom/serve/runtime/program/program.h"
 #include "loomc/iree.h"
 
+typedef enum loom_serve_preparation_function_e {
+  LOOM_SERVE_PREPARATION_FUNCTION_STAGE = 0,
+  LOOM_SERVE_PREPARATION_FUNCTION_CONFIG_I64,
+  LOOM_SERVE_PREPARATION_FUNCTION_CONFIG,
+  LOOM_SERVE_PREPARATION_FUNCTION_PARAMETER,
+  LOOM_SERVE_PREPARATION_FUNCTION_DISPATCH,
+  LOOM_SERVE_PREPARATION_FUNCTION_WORKSPACE_LIMIT,
+  LOOM_SERVE_PREPARATION_FUNCTION_SOURCE,
+  LOOM_SERVE_PREPARATION_FUNCTION_SOURCE_APPEND,
+  LOOM_SERVE_PREPARATION_FUNCTION_MEMORY_FORECAST,
+  LOOM_SERVE_PREPARATION_FUNCTION_PARAMETER_ARENA,
+  LOOM_SERVE_PREPARATION_FUNCTION_PARAMETER_BANK,
+  LOOM_SERVE_PREPARATION_FUNCTION_BIND_PARAMETERS,
+  LOOM_SERVE_PREPARATION_FUNCTION_SOURCE_SCOPE,
+  LOOM_SERVE_PREPARATION_FUNCTION_COUNT,
+} loom_serve_preparation_function_t;
+
 typedef struct loom_serve_preparation_stage_storage_t {
   // Public declaration; its array pointers refer to the owned storage below.
   loom_serve_preparation_stage_t declaration;
@@ -51,6 +68,26 @@ struct loom_serve_preparation_t {
   iree_host_size_t storage_size;
   // Owned source-selected host entry, empty without a forecast declaration.
   iree_string_view_t memory_forecast;
+  // Owned cold-selected host entry for binding resolved invocation parameters.
+  iree_string_view_t bind_parameters;
+  // Cold arena catalog, without device or physical ownership.
+  struct {
+    // Number of initialized finite VA-byte capacities.
+    uint32_t count;
+    // Allocated capacity of the owned table.
+    iree_host_size_t capacity;
+    // Owned capacity values in source-visible arena ordinal order.
+    uint64_t* values;
+  } arenas;
+  // Request banks selected independently of fixed command bindings.
+  struct {
+    // Initialized declarations, including partial construction on failure.
+    uint32_t count;
+    // Allocated capacity of the owned declaration table.
+    iree_host_size_t capacity;
+    // Owned declarations in source-visible capture ordinal order.
+    loom_serve_preparation_parameter_t* values;
+  } banks;
   // Number of initialized stages, including partial declarations on failure.
   iree_host_size_t stage_count;
   // Allocated stage capacity.
@@ -99,6 +136,24 @@ typedef struct loom_serve_preparation_module_t {
   } capture;
 } loom_serve_preparation_module_t;
 
+static void loom_serve_preparation_finalize_parameter(
+    const loom_serve_preparation_t* preparation,
+    loom_serve_preparation_parameter_t* parameter) {
+  loom_model_file_list_t* sources = (loom_model_file_list_t*)parameter->sources;
+  for (uint32_t i = 0; i < parameter->source_count; ++i) {
+    sources[i] = loom_serve_preparation_source(preparation,
+                                               parameter->source_ordinals[i]);
+  }
+}
+
+static void loom_serve_preparation_free_parameter(
+    iree_allocator_t host_allocator,
+    const loom_serve_preparation_parameter_t* parameter) {
+  iree_allocator_free(host_allocator, (void*)parameter->sources);
+  iree_allocator_free(host_allocator, (void*)parameter->source_ordinals);
+  iree_allocator_free(host_allocator, (void*)parameter->policy.data);
+}
+
 void loom_serve_preparation_module_begin(iree_vm_module_t* base,
                                          uint32_t first_stage,
                                          const loom_serve_preparation_t* prefix,
@@ -122,14 +177,13 @@ loom_serve_preparation_t* loom_serve_preparation_module_take(
        ++i) {
     loom_serve_preparation_stage_storage_t* stage = &preparation->stages[i];
     for (iree_host_size_t j = 0; j < stage->declaration.parameter_count; ++j) {
-      loom_serve_preparation_parameter_t* parameter = &stage->parameters[j];
-      loom_model_file_list_t* sources =
-          (loom_model_file_list_t*)parameter->sources;
-      for (uint32_t s = 0; s < parameter->source_count; ++s) {
-        sources[s] = loom_serve_preparation_source(
-            preparation, parameter->source_ordinals[s]);
-      }
+      loom_serve_preparation_finalize_parameter(preparation,
+                                                &stage->parameters[j]);
     }
+  }
+  for (uint32_t i = 0; preparation && i < preparation->banks.count; ++i) {
+    loom_serve_preparation_finalize_parameter(preparation,
+                                              &preparation->banks.values[i]);
   }
   module->capture.preparation = NULL;
   module->capture.active = false;
@@ -142,6 +196,13 @@ void loom_serve_preparation_free(loom_serve_preparation_t* preparation) {
   }
   const iree_allocator_t host_allocator = preparation->host_allocator;
   iree_allocator_free(host_allocator, (void*)preparation->memory_forecast.data);
+  iree_allocator_free(host_allocator, (void*)preparation->bind_parameters.data);
+  iree_allocator_free(host_allocator, preparation->arenas.values);
+  for (uint32_t i = 0; i < preparation->banks.count; ++i) {
+    loom_serve_preparation_free_parameter(host_allocator,
+                                          &preparation->banks.values[i]);
+  }
+  iree_allocator_free(host_allocator, preparation->banks.values);
   for (iree_host_size_t i = 0; i < preparation->stage_count; ++i) {
     loom_serve_preparation_stage_storage_t* stage = &preparation->stages[i];
     iree_allocator_free(host_allocator, (void*)stage->declaration.root.data);
@@ -151,12 +212,8 @@ void loom_serve_preparation_free(loom_serve_preparation_t* preparation) {
       iree_allocator_free(host_allocator, (void*)stage->config[j].value.data);
     }
     for (iree_host_size_t j = 0; j < stage->declaration.parameter_count; ++j) {
-      const loom_serve_preparation_parameter_t* parameter =
-          &stage->parameters[j];
-      iree_allocator_free(host_allocator, (void*)parameter->sources);
-      iree_allocator_free(host_allocator, (void*)parameter->source_ordinals);
-      iree_allocator_free(host_allocator,
-                          (void*)stage->parameters[j].policy.data);
+      loom_serve_preparation_free_parameter(host_allocator,
+                                            &stage->parameters[j]);
     }
     iree_allocator_free(host_allocator, stage->config);
     iree_allocator_free(host_allocator, stage->parameters);
@@ -280,23 +337,15 @@ static iree_status_t loom_serve_preparation_add_config(
   return iree_ok_status();
 }
 
-static iree_status_t loom_serve_preparation_bind_parameter(
+static iree_status_t loom_serve_preparation_get_parameter(
     loom_serve_preparation_t* preparation,
     loom_serve_preparation_stage_storage_t* stage, uint32_t binding,
-    uint32_t input, uint32_t source, iree_string_view_t policy) {
-  if (stage->declaration.kind != LOOM_SERVE_PREPARATION_STAGE_COMMAND) {
+    iree_host_size_t* out_index) {
+  if (stage->declaration.kind != LOOM_SERVE_PREPARATION_STAGE_COMMAND ||
+      binding > INT32_MAX) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "parameter placement requires a command reflection contract");
-  }
-  if (binding > INT32_MAX || input >= INT32_MAX) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "preparation parameter requires representable "
-                            "binding and input ordinals");
-  }
-  if (source >= loom_serve_preparation_source_count(preparation)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "parameter source %u is not declared", source);
+        "parameter placement requires an addressable command binding");
   }
   iree_host_size_t index = 0;
   for (; index < stage->declaration.parameter_count; ++index) {
@@ -322,14 +371,51 @@ static iree_status_t loom_serve_preparation_bind_parameter(
         (loom_serve_preparation_parameter_t){.binding = binding};
     stage->input_capacities[index] = 0;
     ++stage->declaration.parameter_count;
+  }
+  *out_index = index;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_serve_preparation_resolve_policy(
+    const loom_serve_preparation_t* preparation, iree_string_view_t policy,
+    char** out_path) {
+  return iree_file_path_join(
+      preparation->card
+          ? loom_model_card_selection(preparation->card)->directory
+          : iree_string_view_empty(),
+      policy, preparation->host_allocator, out_path);
+}
+
+static iree_status_t loom_serve_preparation_bind_parameter(
+    loom_serve_preparation_t* preparation,
+    loom_serve_preparation_stage_storage_t* stage, uint32_t binding,
+    uint32_t input, uint32_t source, iree_string_view_t policy) {
+  if (!policy.size || input >= INT32_MAX) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "preparation parameter requires a policy and input ordinal");
+  }
+  if (source >= loom_serve_preparation_source_count(preparation)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter source %u is not declared", source);
+  }
+  iree_host_size_t index = 0;
+  IREE_RETURN_IF_ERROR(loom_serve_preparation_get_parameter(preparation, stage,
+                                                            binding, &index));
+  loom_serve_preparation_parameter_t* parameter = &stage->parameters[index];
+  if (parameter->arena) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "arena binding %u cannot name one checkpoint",
+                            binding);
+  }
+  if (iree_string_view_is_empty(parameter->policy)) {
     IREE_RETURN_IF_ERROR(loom_serve_preparation_copy_string(
-        preparation, policy, &stage->parameters[index].policy));
-  } else if (!iree_string_view_equal(policy, stage->parameters[index].policy)) {
+        preparation, policy, &parameter->policy));
+  } else if (!iree_string_view_equal(policy, parameter->policy)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "parameter binding %u requires one preparation policy", binding);
   }
-  loom_serve_preparation_parameter_t* parameter = &stage->parameters[index];
   iree_host_size_t* capacity = &stage->input_capacities[index];
   if (input != parameter->source_count) {
     return iree_make_status(
@@ -354,6 +440,115 @@ static iree_status_t loom_serve_preparation_bind_parameter(
   ((uint32_t*)parameter->source_ordinals)[input] = source;
   ++parameter->source_count;
   return iree_ok_status();
+}
+
+static iree_status_t loom_serve_preparation_add_arena(
+    loom_serve_preparation_t* preparation, const iree_vm_call_packet_t* call) {
+  const int64_t bytes = (int64_t)iree_vm_call_value_argument_load(call, 0);
+  if (preparation->base || bytes <= 0 ||
+      preparation->arenas.count == INT32_MAX) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter arenas require a positive cold VA-byte capacity");
+  }
+  if (preparation->arenas.count == preparation->arenas.capacity) {
+    IREE_RETURN_IF_ERROR(loom_serve_preparation_grow_array(
+        preparation, preparation->arenas.count + 1,
+        sizeof(*preparation->arenas.values), &preparation->arenas.capacity,
+        (void**)&preparation->arenas.values));
+  }
+  const uint32_t ordinal = preparation->arenas.count++;
+  preparation->arenas.values[ordinal] = (uint64_t)bytes;
+  iree_vm_call_value_result_store(call, 0, ordinal);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_serve_preparation_add_bank(
+    loom_serve_preparation_t* preparation,
+    loom_serve_preparation_stage_storage_t* stage,
+    const iree_vm_call_packet_t* call) {
+  const uint32_t binding = (uint32_t)iree_vm_call_value_argument_load(call, 1);
+  const uint32_t arena = (uint32_t)iree_vm_call_value_argument_load(call, 2);
+  if (!preparation->base ||
+      arena >= loom_serve_preparation_arena_count(preparation->base)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "parameter arena %u is not cold-declared", arena);
+  }
+  iree_vm_ref_t ref = iree_vm_ref_null();
+  iree_vm_call_ref_argument_load_borrow(call, 0, &ref);
+  if (!ref.object) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter bank requires source ordinals");
+  }
+  iree_vm_buffer_t* source_buffer = (iree_vm_buffer_t*)ref.object;
+  iree_const_byte_span_t bytes = iree_const_byte_span_empty();
+  IREE_RETURN_IF_ERROR(iree_vm_buffer_map_read(
+      source_buffer, 0, iree_vm_buffer_length(source_buffer), &bytes));
+  const iree_host_size_t source_count = bytes.data_length / sizeof(uint32_t);
+  if (!source_count || source_count > INT32_MAX ||
+      bytes.data_length % sizeof(uint32_t)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter sources require a nonempty i32 array");
+  }
+  iree_string_view_t policy = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(
+      loom_serve_preparation_string_argument(call, 1, &policy));
+  if (iree_string_view_is_empty(policy) ||
+      preparation->banks.count == INT32_MAX) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter bank requires a policy and ordinal");
+  }
+  iree_host_size_t index = 0;
+  IREE_RETURN_IF_ERROR(loom_serve_preparation_get_parameter(preparation, stage,
+                                                            binding, &index));
+  loom_serve_preparation_parameter_t* root = &stage->parameters[index];
+  if (root->source_count || !iree_string_view_is_empty(root->policy) ||
+      (root->arena && root->arena != arena + 1)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "parameter binding %u names different storage",
+                            binding);
+  }
+  root->arena = arena + 1;
+  if (preparation->banks.count == preparation->banks.capacity) {
+    IREE_RETURN_IF_ERROR(loom_serve_preparation_grow_array(
+        preparation, preparation->banks.count + 1,
+        sizeof(*preparation->banks.values), &preparation->banks.capacity,
+        (void**)&preparation->banks.values));
+  }
+  const uint32_t ordinal = preparation->banks.count++;
+  loom_serve_preparation_parameter_t* bank =
+      &preparation->banks.values[ordinal];
+  *bank = (loom_serve_preparation_parameter_t){.binding = binding,
+                                               .arena = arena + 1};
+  char* policy_path = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_preparation_resolve_policy(preparation, policy, &policy_path));
+  bank->policy = iree_make_cstring_view(policy_path);
+  preparation->storage_size += bank->policy.size + 1;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      preparation->host_allocator, source_count, sizeof(*bank->sources),
+      (void**)&bank->sources));
+  preparation->storage_size += source_count * sizeof(*bank->sources);
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      preparation->host_allocator, source_count, sizeof(*bank->source_ordinals),
+      (void**)&bank->source_ordinals));
+  preparation->storage_size += source_count * sizeof(*bank->source_ordinals);
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0; i < source_count && iree_status_is_ok(status); ++i) {
+    const uint32_t source =
+        iree_unaligned_load_le_u32(bytes.data + i * sizeof(uint32_t));
+    if (source >= loom_serve_preparation_source_count(preparation)) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "parameter source %u is not declared", source);
+    } else {
+      ((uint32_t*)bank->source_ordinals)[i] = source;
+      ++bank->source_count;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    iree_vm_call_value_result_store(call, 0, ordinal);
+  }
+  return status;
 }
 
 static iree_status_t loom_serve_preparation_append_source(
@@ -422,14 +617,11 @@ static iree_status_t loom_serve_preparation_add_parameter(
                             "parameter requires a preparation policy");
   }
   char* policy_path = NULL;
-  if (preparation->card) {
-    IREE_RETURN_IF_ERROR(iree_file_path_join(
-        loom_model_card_selection(preparation->card)->directory, policy,
-        preparation->host_allocator, &policy_path));
-    policy = iree_make_cstring_view(policy_path);
-  }
+  IREE_RETURN_IF_ERROR(
+      loom_serve_preparation_resolve_policy(preparation, policy, &policy_path));
   iree_status_t status = loom_serve_preparation_bind_parameter(
-      preparation, stage, binding, input, source, policy);
+      preparation, stage, binding, input, source,
+      iree_make_cstring_view(policy_path));
   iree_allocator_free(preparation->host_allocator, policy_path);
   return status;
 }
@@ -557,16 +749,21 @@ static iree_status_t loom_serve_preparation_module_start(
   }
   loom_serve_preparation_t* preparation = module->capture.preparation;
   const iree_vm_call_packet_t* call = &params->call;
+  const loom_serve_preparation_function_t function =
+      (loom_serve_preparation_function_t)params->function_ordinal;
   iree_status_t status = iree_ok_status();
-  if ((params->function_ordinal == 3 || params->function_ordinal == 6 ||
-       params->function_ordinal == 7 || params->function_ordinal == 9) &&
+  if ((function == LOOM_SERVE_PREPARATION_FUNCTION_PARAMETER ||
+       function == LOOM_SERVE_PREPARATION_FUNCTION_SOURCE ||
+       function == LOOM_SERVE_PREPARATION_FUNCTION_SOURCE_APPEND ||
+       function == LOOM_SERVE_PREPARATION_FUNCTION_SOURCE_SCOPE ||
+       function == LOOM_SERVE_PREPARATION_FUNCTION_PARAMETER_BANK) &&
       !iree_any_bit_set(module->capture.flags,
                         LOOM_SERVE_PREPARATION_FLAG_PARAMETERS)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "parameter declarations are unavailable in this preparation capture");
   }
-  if (params->function_ordinal == 8 &&
+  if (function == LOOM_SERVE_PREPARATION_FUNCTION_MEMORY_FORECAST &&
       !iree_any_bit_set(module->capture.flags,
                         LOOM_SERVE_PREPARATION_FLAG_MEMORY_FORECAST)) {
     return iree_make_status(
@@ -574,8 +771,23 @@ static iree_status_t loom_serve_preparation_module_start(
         "memory forecast declarations are unavailable in this preparation "
         "capture");
   }
-  if (params->function_ordinal == 0 || params->function_ordinal == 4 ||
-      params->function_ordinal >= 6) {
+  if ((function == LOOM_SERVE_PREPARATION_FUNCTION_PARAMETER_ARENA ||
+       function == LOOM_SERVE_PREPARATION_FUNCTION_BIND_PARAMETERS) &&
+      (module->capture.base ||
+       !iree_any_bit_set(module->capture.flags,
+                         LOOM_SERVE_PREPARATION_FLAG_PARAMETER_ARENAS))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "parameter arena registration requires a supported cold capture");
+  }
+  if (function == LOOM_SERVE_PREPARATION_FUNCTION_STAGE ||
+      function == LOOM_SERVE_PREPARATION_FUNCTION_DISPATCH ||
+      function == LOOM_SERVE_PREPARATION_FUNCTION_SOURCE ||
+      function == LOOM_SERVE_PREPARATION_FUNCTION_SOURCE_APPEND ||
+      function == LOOM_SERVE_PREPARATION_FUNCTION_SOURCE_SCOPE ||
+      function == LOOM_SERVE_PREPARATION_FUNCTION_MEMORY_FORECAST ||
+      function == LOOM_SERVE_PREPARATION_FUNCTION_PARAMETER_ARENA ||
+      function == LOOM_SERVE_PREPARATION_FUNCTION_BIND_PARAMETERS) {
     if (!preparation) {
       IREE_RETURN_IF_ERROR(iree_allocator_malloc(
           module->host_allocator, sizeof(*preparation), (void**)&preparation));
@@ -589,30 +801,39 @@ static iree_status_t loom_serve_preparation_module_start(
           loom_serve_preparation_source_count(module->capture.base);
       module->capture.preparation = preparation;
     }
-    if (params->function_ordinal == 8) {
+    if (function == LOOM_SERVE_PREPARATION_FUNCTION_MEMORY_FORECAST ||
+        function == LOOM_SERVE_PREPARATION_FUNCTION_BIND_PARAMETERS) {
+      iree_string_view_t* entry =
+          function == LOOM_SERVE_PREPARATION_FUNCTION_MEMORY_FORECAST
+              ? &preparation->memory_forecast
+              : &preparation->bind_parameters;
       iree_string_view_t root = iree_string_view_empty();
       IREE_RETURN_IF_ERROR(
           loom_serve_preparation_string_argument(call, 0, &root));
       if (iree_string_view_is_empty(root)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "memory forecast root must not be empty");
+                                "host entry root must not be empty");
       }
-      if (!iree_string_view_is_empty(preparation->memory_forecast)) {
+      if (!iree_string_view_is_empty(*entry)) {
         return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
-                                "memory forecast declared twice");
+                                "host entry declared twice");
       }
-      status = loom_serve_preparation_copy_string(
-          preparation, root, &preparation->memory_forecast);
-    } else if (params->function_ordinal == 9) {
+      status = loom_serve_preparation_copy_string(preparation, root, entry);
+    } else if (function == LOOM_SERVE_PREPARATION_FUNCTION_SOURCE_SCOPE) {
       status = loom_serve_preparation_add_scope(preparation, call);
-    } else if (params->function_ordinal >= 6) {
-      status = loom_serve_preparation_add_source(preparation, call,
-                                                 params->function_ordinal == 7);
+    } else if (function == LOOM_SERVE_PREPARATION_FUNCTION_PARAMETER_ARENA) {
+      status = loom_serve_preparation_add_arena(preparation, call);
+    } else if (function == LOOM_SERVE_PREPARATION_FUNCTION_SOURCE ||
+               function == LOOM_SERVE_PREPARATION_FUNCTION_SOURCE_APPEND) {
+      status = loom_serve_preparation_add_source(
+          preparation, call,
+          function == LOOM_SERVE_PREPARATION_FUNCTION_SOURCE_APPEND);
     } else {
       status = loom_serve_preparation_add_stage(
           preparation, call, module->capture.first_stage,
-          params->function_ordinal == 4 ? LOOM_SERVE_PREPARATION_STAGE_DISPATCH
-                                        : LOOM_SERVE_PREPARATION_STAGE_COMMAND);
+          function == LOOM_SERVE_PREPARATION_FUNCTION_DISPATCH
+              ? LOOM_SERVE_PREPARATION_STAGE_DISPATCH
+              : LOOM_SERVE_PREPARATION_STAGE_COMMAND);
     }
   } else {
     const uint32_t index = (uint32_t)iree_vm_call_value_argument_load(call, 0);
@@ -623,9 +844,11 @@ static iree_status_t loom_serve_preparation_module_start(
     }
     loom_serve_preparation_stage_storage_t* stage =
         &preparation->stages[index - module->capture.first_stage];
-    if (params->function_ordinal == 3) {
+    if (function == LOOM_SERVE_PREPARATION_FUNCTION_PARAMETER) {
       status = loom_serve_preparation_add_parameter(preparation, stage, call);
-    } else if (params->function_ordinal == 5) {
+    } else if (function == LOOM_SERVE_PREPARATION_FUNCTION_PARAMETER_BANK) {
+      status = loom_serve_preparation_add_bank(preparation, stage, call);
+    } else if (function == LOOM_SERVE_PREPARATION_FUNCTION_WORKSPACE_LIMIT) {
       status = loom_serve_preparation_set_workspace_limit(stage, call);
     } else {
       iree_string_view_t key = iree_string_view_empty();
@@ -633,7 +856,7 @@ static iree_status_t loom_serve_preparation_module_start(
           loom_serve_preparation_string_argument(call, 0, &key));
       iree_string_view_t value = iree_string_view_empty();
       char digits[32];
-      if (params->function_ordinal == 1) {
+      if (function == LOOM_SERVE_PREPARATION_FUNCTION_CONFIG_I64) {
         const int length =
             snprintf(digits, sizeof(digits), "%" PRId64,
                      (int64_t)iree_vm_call_value_argument_load(call, 1));
@@ -680,12 +903,22 @@ static const iree_vm_module_signature_type_t preparation_parameter_arguments[] =
 static const iree_vm_module_signature_type_t preparation_source_arguments[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}};
+static const iree_vm_module_signature_type_t preparation_arena_arguments[] = {
+    {IREE_VM_SCALAR_TYPE_I64, 0}};
+static const iree_vm_module_signature_type_t preparation_bank_arguments[] = {
+    {IREE_VM_SCALAR_TYPE_I32, 0},
+    {IREE_VM_SCALAR_TYPE_I32, 0},
+    {IREE_VM_SCALAR_TYPE_I32, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}};
 
 static const iree_vm_module_signature_type_t preparation_scope_arguments[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}};
 
 static const iree_vm_module_callable_type_declaration_t
     preparation_callables[] = {
+        {.signature = {.arguments = {preparation_arena_arguments, 1, 1, 0, 0},
+                       .results = {preparation_stage_results, 1, 1, 0, 0}}},
         {.signature = {.arguments = {preparation_memory_forecast_arguments, 1,
                                      0, 1, 0}}},
         {.signature = {.arguments = {preparation_scope_arguments, 1, 0, 1, 0},
@@ -702,39 +935,50 @@ static const iree_vm_module_callable_type_declaration_t
                                      0}}},
         {.signature = {.arguments = {preparation_parameter_arguments, 5, 4, 1,
                                      0}}},
+        {.signature = {.arguments = {preparation_bank_arguments, 5, 3, 2, 0},
+                       .results = {preparation_stage_results, 1, 1, 0, 0}}},
 };
 
 static const iree_vm_module_export_declaration_t preparation_exports[] = {
-    {.export_name = IREE_SVL("config"),
-     .callable_type_ordinal = 6,
-     .function_ordinal = 2},
-    {.export_name = IREE_SVL("config_i64"),
-     .callable_type_ordinal = 5,
-     .function_ordinal = 1},
-    {.export_name = IREE_SVL("dispatch"),
-     .callable_type_ordinal = 3,
-     .function_ordinal = 4},
-    {.export_name = IREE_SVL("memory_forecast"),
-     .callable_type_ordinal = 0,
-     .function_ordinal = 8},
-    {.export_name = IREE_SVL("parameter"),
-     .callable_type_ordinal = 7,
-     .function_ordinal = 3},
-    {.export_name = IREE_SVL("source"),
-     .callable_type_ordinal = 4,
-     .function_ordinal = 6},
-    {.export_name = IREE_SVL("source_append"),
-     .callable_type_ordinal = 6,
-     .function_ordinal = 7},
-    {.export_name = IREE_SVL("source_scope"),
+    {.export_name = IREE_SVL("bind_parameters"),
      .callable_type_ordinal = 1,
-     .function_ordinal = 9},
-    {.export_name = IREE_SVL("stage"),
-     .callable_type_ordinal = 3,
-     .function_ordinal = 0},
-    {.export_name = IREE_SVL("workspace_limit"),
+     .function_ordinal = LOOM_SERVE_PREPARATION_FUNCTION_BIND_PARAMETERS},
+    {.export_name = IREE_SVL("config"),
+     .callable_type_ordinal = 7,
+     .function_ordinal = LOOM_SERVE_PREPARATION_FUNCTION_CONFIG},
+    {.export_name = IREE_SVL("config_i64"),
+     .callable_type_ordinal = 6,
+     .function_ordinal = LOOM_SERVE_PREPARATION_FUNCTION_CONFIG_I64},
+    {.export_name = IREE_SVL("dispatch"),
+     .callable_type_ordinal = 4,
+     .function_ordinal = LOOM_SERVE_PREPARATION_FUNCTION_DISPATCH},
+    {.export_name = IREE_SVL("memory_forecast"),
+     .callable_type_ordinal = 1,
+     .function_ordinal = LOOM_SERVE_PREPARATION_FUNCTION_MEMORY_FORECAST},
+    {.export_name = IREE_SVL("parameter"),
+     .callable_type_ordinal = 8,
+     .function_ordinal = LOOM_SERVE_PREPARATION_FUNCTION_PARAMETER},
+    {.export_name = IREE_SVL("parameter_arena"),
+     .callable_type_ordinal = 0,
+     .function_ordinal = LOOM_SERVE_PREPARATION_FUNCTION_PARAMETER_ARENA},
+    {.export_name = IREE_SVL("parameter_bank"),
+     .callable_type_ordinal = 9,
+     .function_ordinal = LOOM_SERVE_PREPARATION_FUNCTION_PARAMETER_BANK},
+    {.export_name = IREE_SVL("source"),
+     .callable_type_ordinal = 5,
+     .function_ordinal = LOOM_SERVE_PREPARATION_FUNCTION_SOURCE},
+    {.export_name = IREE_SVL("source_append"),
+     .callable_type_ordinal = 7,
+     .function_ordinal = LOOM_SERVE_PREPARATION_FUNCTION_SOURCE_APPEND},
+    {.export_name = IREE_SVL("source_scope"),
      .callable_type_ordinal = 2,
-     .function_ordinal = 5},
+     .function_ordinal = LOOM_SERVE_PREPARATION_FUNCTION_SOURCE_SCOPE},
+    {.export_name = IREE_SVL("stage"),
+     .callable_type_ordinal = 4,
+     .function_ordinal = LOOM_SERVE_PREPARATION_FUNCTION_STAGE},
+    {.export_name = IREE_SVL("workspace_limit"),
+     .callable_type_ordinal = 3,
+     .function_ordinal = LOOM_SERVE_PREPARATION_FUNCTION_WORKSPACE_LIMIT},
 };
 
 static void loom_serve_preparation_module_destroy(iree_vm_module_t* base) {
@@ -804,10 +1048,10 @@ iree_status_t loom_serve_preparation_module_create(
       .name = IREE_SVL("prepare"),
       .flags = IREE_VM_MODULE_FLAG_LINKABLE,
       .ref_types = {&module->buffer_type, 1},
-      .counts = {.function_count = 10,
-                 .callable_type_count = 8,
-                 .export_count = 10,
-                 .callable_fields = {.value_count = 13, .ref_count = 9}},
+      .counts = {.function_count = LOOM_SERVE_PREPARATION_FUNCTION_COUNT,
+                 .callable_type_count = IREE_ARRAYSIZE(preparation_callables),
+                 .export_count = IREE_ARRAYSIZE(preparation_exports),
+                 .callable_fields = {.value_count = 19, .ref_count = 11}},
   };
   iree_status_t status = iree_vm_module_initialize(
       &preparation_module_vtable, &module->descriptor, &module->base);
@@ -851,7 +1095,7 @@ iree_status_t loom_serve_preparation_allocate(
   iree_allocator_free(host_allocator, linked);
   if (iree_status_is_ok(status)) {
     iree_vm_function_t function = {0};
-    status = loom_serve_program_lookup(program, entry, &function);
+    status = loom_serve_program_lookup_service(program, entry, &function);
     if (iree_status_is_ok(status)) {
       status = iree_vm_invoke(loom_serve_program_invocation(program), function,
                               arguments, results);
@@ -920,6 +1164,34 @@ iree_string_view_t loom_serve_preparation_memory_forecast(
   return preparation->memory_forecast;
 }
 
+uint32_t loom_serve_preparation_arena_count(
+    const loom_serve_preparation_t* preparation) {
+  return preparation ? (preparation->base ? preparation->base->arenas.count
+                                          : preparation->arenas.count)
+                     : 0;
+}
+
+uint64_t loom_serve_preparation_arena_capacity(
+    const loom_serve_preparation_t* preparation, uint32_t index) {
+  return preparation->base ? preparation->base->arenas.values[index]
+                           : preparation->arenas.values[index];
+}
+
+uint32_t loom_serve_preparation_bank_count(
+    const loom_serve_preparation_t* preparation) {
+  return preparation ? preparation->banks.count : 0;
+}
+
+const loom_serve_preparation_parameter_t* loom_serve_preparation_bank(
+    const loom_serve_preparation_t* preparation, uint32_t index) {
+  return &preparation->banks.values[index];
+}
+
+iree_string_view_t loom_serve_preparation_bind_parameters(
+    const loom_serve_preparation_t* preparation) {
+  return preparation ? preparation->bind_parameters : iree_string_view_empty();
+}
+
 static bool loom_serve_preparation_stage_code_equal(
     const loom_serve_preparation_stage_t* a,
     const loom_serve_preparation_stage_t* b) {
@@ -969,8 +1241,26 @@ bool loom_serve_preparation_equal(const loom_serve_preparation_t* lhs,
   if (!lhs || !rhs || lhs->stage_count != rhs->stage_count ||
       loom_serve_preparation_source_count(lhs) !=
           loom_serve_preparation_source_count(rhs) ||
-      !iree_string_view_equal(lhs->memory_forecast, rhs->memory_forecast)) {
+      !iree_string_view_equal(lhs->memory_forecast, rhs->memory_forecast) ||
+      !iree_string_view_equal(lhs->bind_parameters, rhs->bind_parameters) ||
+      loom_serve_preparation_arena_count(lhs) !=
+          loom_serve_preparation_arena_count(rhs) ||
+      lhs->banks.count != rhs->banks.count) {
     return false;
+  }
+  for (uint32_t i = 0; i < loom_serve_preparation_arena_count(lhs); ++i) {
+    if (loom_serve_preparation_arena_capacity(lhs, i) !=
+        loom_serve_preparation_arena_capacity(rhs, i)) {
+      return false;
+    }
+  }
+  for (uint32_t i = 0; i < lhs->banks.count; ++i) {
+    if (lhs->banks.values[i].binding != rhs->banks.values[i].binding ||
+        lhs->banks.values[i].arena != rhs->banks.values[i].arena ||
+        !loom_serve_preparation_parameter_equal(&lhs->banks.values[i],
+                                                &rhs->banks.values[i])) {
+      return false;
+    }
   }
   for (uint32_t s = 0; s < loom_serve_preparation_source_count(lhs); ++s) {
     const loom_model_file_list_t a = loom_serve_preparation_source(lhs, s);
@@ -995,6 +1285,7 @@ bool loom_serve_preparation_equal(const loom_serve_preparation_t* lhs,
     }
     for (iree_host_size_t j = 0; j < a->parameter_count; ++j) {
       if (a->parameters[j].binding != b->parameters[j].binding ||
+          a->parameters[j].arena != b->parameters[j].arena ||
           !loom_serve_preparation_parameter_equal(&a->parameters[j],
                                                   &b->parameters[j])) {
         return false;
@@ -1050,6 +1341,7 @@ iree_status_t loom_serve_preparation_stage_check_parameters(
         loom_cmd_program_parameter_root_at(program, root);
     if (parameter->binding != root ||
         rhs.fixed_buffer_index != parameter->binding ||
+        parameter->arena != shared->arena ||
         !loom_serve_preparation_parameter_equal(parameter, shared)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,

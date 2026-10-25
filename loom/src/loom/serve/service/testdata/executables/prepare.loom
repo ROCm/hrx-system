@@ -6,7 +6,13 @@ func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, 
 
 func.decl import("prepare") @workspace_limit(%stage: i32, %bytes: i64)
 
+func.decl import("prepare") @parameter_arena(%bytes: i64) -> (i32)
+
+func.decl import("prepare") @parameter_bank(%stage: i32, %binding: i32, %arena: i32, %sources: buffer, %policy: buffer) -> (i32)
+
 func.decl import("runner") @execute_1(%stage: i32, %output: hal.buffer) -> (i64)
+
+func.decl import("runner") @execute_2(%stage: i32, %request: hal.buffer, %output: hal.buffer) -> (i64)
 
 global.rodata.def @empty = bytes("")
 
@@ -50,4 +56,47 @@ func.def public @sources_only(%root: buffer, %left: buffer, %right: buffer, %pol
   %left_source = func.call @source(%empty, %left) : (buffer, buffer) -> (i32)
   %right_source = func.call @source(%empty, %right) : (buffer, buffer) -> (i32)
   func.return
+}
+
+func.def public @declare_arena(%root: buffer, %left: buffer, %right: buffer, %policy: buffer, %count: i32, %tag: i64, %capacity: i64) {
+  %unlimited = scalar.constant 0 : i64
+  func.call @declare(%root, %left, %right, %policy, %count, %tag, %unlimited) : (buffer, buffer, buffer, buffer, i32, i64, i64)
+  %arena = func.call @parameter_arena(%capacity) : (i64) -> (i32)
+  func.return
+}
+
+// Each length-prefixed path is one selection, including repeated selections of
+// the same checkpoint. Capture ordinals preserve this source-owned order.
+func.def public @banks(%root: buffer, %paths: buffer, %unused: buffer, %policy: buffer, %count: i32, %tag: i64, %limit: i64) {
+  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %first_ordinal = scalar.constant 0 : i32
+  %empty = global.load @empty : buffer
+  %origin = index.constant 0 : offset
+  %source_bytes = index.constant 4 : offset
+  %sources = buffer.alloca<private> align(4) %source_bytes : buffer
+  %source_view = buffer.view %sources[%origin] : buffer -> view<1xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.cast %count : i32 to index
+  %header_bytes = index.constant 8 : offset
+  %end_position = scf.for %i = [%begin to %end step %step](%position = %origin : offset) -> (offset) {
+    %header = buffer.view %paths[%position] : buffer -> view<1xi64>
+    %loaded_length = view.load %header[0] : view<1xi64> -> i64
+    %length64 = scalar.assume %loaded_length [range(%loaded_length, 0, 9223372036854775807)] : i64
+    %length = index.cast %length64 : i64 to offset
+    %name_position = index.add %position, %header_bytes : offset
+    %name = buffer.alloca<private> align(1) %length : buffer
+    buffer.copy %paths[%name_position], %name[%origin], %length
+    %source = func.call @source(%empty, %name) : (buffer, buffer) -> (i32)
+    view.store %source, %source_view[0] : i32, view<1xi32>
+    %bank = func.call @parameter_bank(%stage, %first_ordinal, %first_ordinal, %sources, %policy) : (i32, i32, i32, buffer, buffer) -> (i32)
+    %next = index.add %name_position, %length : offset
+    scf.yield %next : offset
+  }
+  func.return
+}
+
+func.def public @submit_indexed(%stage: i32, %request: hal.buffer, %output: hal.buffer) -> (i64) {
+  %completion = func.call @execute_2(%stage, %request, %output) : (i32, hal.buffer, hal.buffer) -> (i64)
+  func.return %completion : i64
 }

@@ -111,6 +111,8 @@ struct loom_serve_image_model_t {
     iree_vm_function_t prepare_request;
     // Cold-resolved cohort packing and executable declaration function.
     iree_vm_function_t prepare_batch;
+    // Optional source entry binding resolved bank offsets into the cohort.
+    iree_vm_function_t bind_parameters;
     // Cold-resolved image-submission and feedback function.
     iree_vm_function_t generate;
   } control;
@@ -278,7 +280,9 @@ static iree_status_t loom_serve_image_prepare(
         loom_serve_host_target_environment(
             loom_serve_device_host(model->owner)),
         model->control.environment, &options->sources, options->sources.prepare,
-        IREE_SV("prepare"), LOOM_SERVE_PREPARATION_FLAG_PARAMETERS,
+        IREE_SV("prepare"),
+        LOOM_SERVE_PREPARATION_FLAG_PARAMETERS |
+            LOOM_SERVE_PREPARATION_FLAG_PARAMETER_ARENAS,
         iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
         (iree_vm_module_span_t){modules, IREE_ARRAYSIZE(modules)},
@@ -487,8 +491,20 @@ static iree_status_t loom_serve_image_create_control(
        {&i32, 1},
        &model->control.generate},
   };
-  return loom_serve_program_bind(model->control.program,
-                                 IREE_ARRAYSIZE(bindings), bindings);
+  IREE_RETURN_IF_ERROR(loom_serve_program_bind_service(
+      model->control.program, IREE_ARRAYSIZE(bindings), bindings));
+  const iree_string_view_t bind_parameters =
+      loom_serve_preparation_bind_parameters(model->preparation);
+  if (!iree_string_view_is_empty(bind_parameters)) {
+    const iree_vm_signature_type_t arguments[] = {buffer, buffer, buffer};
+    const loom_serve_program_binding_t binding = {
+        bind_parameters,
+        {arguments, IREE_ARRAYSIZE(arguments)},
+        {NULL, 0},
+        &model->control.bind_parameters};
+    return loom_serve_program_bind(model->control.program, 1, &binding);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_serve_image_model_bind(
@@ -628,14 +644,23 @@ static iree_status_t loom_serve_image_load_prepare(
       iree_hal_module_register_types(model->control.environment, &table));
   IREE_RETURN_IF_ERROR(
       iree_hal_module_types_resolve(table, &model->control.hal_types));
-  const iree_string_view_t roots[] = {IREE_SVL("prepare_request"),
+  const iree_string_view_t bind_parameters =
+      loom_serve_preparation_bind_parameters(model->preparation);
+  if (loom_serve_preparation_arena_count(model->preparation) &&
+      iree_string_view_is_empty(bind_parameters)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "image parameter arenas require a binding entry");
+  }
+  const iree_string_view_t roles[] = {IREE_SVL("prepare_request"),
                                       IREE_SVL("prepare_batch"),
                                       IREE_SVL("generate")};
+  const iree_string_view_list_t additional_roots = {
+      !iree_string_view_is_empty(bind_parameters), &bind_parameters};
   iree_status_t status = loom_serve_program_compile_service(
       loom_serve_host_target_environment(loom_serve_device_host(model->owner)),
       model->control.environment, &load->options.sources,
-      load->options.sources.control, IREE_ARRAYSIZE(roots), roots,
-      &model->compilation, host_allocator, &load->module);
+      load->options.sources.control, IREE_ARRAYSIZE(roles), roles,
+      additional_roots, &model->compilation, host_allocator, &load->module);
   IREE_RETURN_IF_ERROR(status);
   return loom_serve_jit_create(
       loom_serve_device_handle(model->owner),
@@ -1141,11 +1166,39 @@ void loom_serve_image_model_set_observer(loom_serve_image_model_t* model,
   loom_serve_executables_set_observer(model->executables, observer);
 }
 
+static iree_status_t loom_serve_image_bind_parameters(
+    loom_serve_image_model_t* model) {
+  const iree_const_byte_span_t offsets =
+      loom_serve_executables_parameter_offsets(model->executables);
+  if (!offsets.data_length) {
+    return iree_ok_status();
+  }
+  // Model source may retain its argument. This buffer owns the small offset
+  // table independently of native choice-cache eviction and reconfiguration.
+  iree_vm_buffer_t* buffer = NULL;
+  IREE_RETURN_IF_ERROR(iree_vm_buffer_clone(IREE_VM_BUFFER_ACCESS_FLAG_READ,
+                                            offsets, 8, model->host_allocator,
+                                            &buffer));
+  iree_vm_variant_t arguments[] = {
+      iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
+                                               model->control.state),
+      iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
+                                               model->invocation.payload),
+      iree_vm_buffer_variant_from_ptr_move(&model->control.vm_types, &buffer)};
+  iree_status_t status = iree_vm_invoke(
+      loom_serve_program_invocation(model->control.program),
+      model->control.bind_parameters,
+      iree_vm_variant_span_from_array(arguments), iree_vm_variant_span_empty());
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  return status;
+}
+
 iree_status_t loom_serve_image_model_advance_batch(
     loom_serve_image_model_t* model, bool cancel, bool* out_complete) {
   IREE_RETURN_IF_ERROR(
       loom_serve_executables_advance(model->executables, cancel, out_complete));
   if (!cancel && *out_complete) {
+    IREE_RETURN_IF_ERROR(loom_serve_image_bind_parameters(model));
     const loom_serve_stage_launch_t* stage = loom_serve_executables_stage(
         model->executables, model->invocation.stage);
     const iree_device_size_t alignment =

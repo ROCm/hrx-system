@@ -686,8 +686,8 @@ static iree_status_t loom_serve_recognition_create_control(
        {complete_results, IREE_ARRAYSIZE(complete_results)},
        &model->control.complete},
   };
-  return loom_serve_program_bind(model->control.program,
-                                 IREE_ARRAYSIZE(bindings), bindings);
+  return loom_serve_program_bind_service(model->control.program,
+                                         IREE_ARRAYSIZE(bindings), bindings);
 }
 
 // Cold binding records retain the source's checkpoint identity until all
@@ -920,7 +920,8 @@ static iree_status_t loom_serve_recognition_load_prepare(
       loom_serve_host_target_environment(loom_serve_device_host(model->owner)),
       model->control.environment, &load->options.sources,
       load->options.sources.control, IREE_ARRAYSIZE(roots), roots,
-      &model->compilation, host_allocator, &load->module);
+      (iree_string_view_list_t){0}, &model->compilation, host_allocator,
+      &load->module);
   IREE_RETURN_IF_ERROR(status);
   return loom_serve_jit_create(
       loom_serve_device_handle(model->owner),

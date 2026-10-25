@@ -21,7 +21,8 @@ typedef struct loom_serve_image_request_t {
   // Owned, validated LoRA selections in client order. Each eight-byte-aligned
   // record is a little-endian u64 ID byte length, F32 scale, four zero bytes,
   // and the decoded UTF-8 ID padded with zeros to eight bytes. Empty means no
-  // selections. Source policy resolves IDs and rejects duplicates after lookup.
+  // selections. Source policy resolves IDs; repeated selections retain their
+  // independent scales.
   // Total storage fits a nonnegative i64 source buffer extent.
   iree_string_builder_t loras;
   // Unsigned native noise key; zero when omitted.

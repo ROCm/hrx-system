@@ -31,8 +31,8 @@ static uint8_t* loom_serve_parameter_bank_alignments(
 
 static iree_status_t loom_serve_parameter_bank_allocate_range(
     loom_serve_device_t* device, const loom_cmd_program_t* program,
-    uint32_t first, uint32_t count, iree_allocator_t host_allocator,
-    loom_serve_parameter_bank_t** out_bank) {
+    uint32_t first, uint32_t count, loom_serve_memory_arena_t* arena,
+    iree_allocator_t host_allocator, loom_serve_parameter_bank_t** out_bank) {
   *out_bank = NULL;
   if (!count) {
     return iree_ok_status();
@@ -63,7 +63,7 @@ static iree_status_t loom_serve_parameter_bank_allocate_range(
                                     loom_serve_device_storage_pool(device),
                                     loom_serve_device_memory_pool(device),
                                     loom_serve_device_weight_geometry(device),
-                                    NULL, loom_serve_device_workspace(device),
+                                    arena, loom_serve_device_workspace(device),
                                     0, 1, &root, host_allocator, &plans[i]);
   }
   if (iree_status_is_ok(status)) {
@@ -79,16 +79,16 @@ iree_status_t loom_serve_parameter_bank_allocate(
     iree_allocator_t host_allocator, loom_serve_parameter_bank_t** out_bank) {
   return loom_serve_parameter_bank_allocate_range(
       device, program, 0,
-      program ? program->requirements.fixed_buffer_count : 0, host_allocator,
-      out_bank);
+      program ? program->requirements.fixed_buffer_count : 0, NULL,
+      host_allocator, out_bank);
 }
 
 iree_status_t loom_serve_parameter_bank_allocate_domain(
     loom_serve_device_t* device, const loom_cmd_program_t* program,
-    uint32_t domain, iree_allocator_t host_allocator,
-    loom_serve_parameter_bank_t** out_bank) {
-  return loom_serve_parameter_bank_allocate_range(device, program, domain, 1,
-                                                  host_allocator, out_bank);
+    uint32_t domain, loom_serve_memory_arena_t* arena,
+    iree_allocator_t host_allocator, loom_serve_parameter_bank_t** out_bank) {
+  return loom_serve_parameter_bank_allocate_range(
+      device, program, domain, 1, arena, host_allocator, out_bank);
 }
 
 iree_host_size_t loom_serve_parameter_bank_count(

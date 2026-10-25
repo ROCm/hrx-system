@@ -683,8 +683,8 @@ static iree_status_t loom_serve_speech_create_control(
        {voice_results, IREE_ARRAYSIZE(voice_results)},
        &model->control.prepare_voice},
   };
-  return loom_serve_program_bind(model->control.program,
-                                 model->voice_capacity ? 6 : 5, bindings);
+  return loom_serve_program_bind_service(
+      model->control.program, model->voice_capacity ? 6 : 5, bindings);
 }
 
 // Cold binding records retain the source's checkpoint identity until all
@@ -918,7 +918,8 @@ static iree_status_t loom_serve_speech_load_prepare(
       loom_serve_host_target_environment(loom_serve_device_host(model->owner)),
       model->control.environment, &load->options.sources,
       load->options.sources.control, model->voice_capacity ? 6 : 5, roots,
-      &model->compilation, host_allocator, &load->module);
+      (iree_string_view_list_t){0}, &model->compilation, host_allocator,
+      &load->module);
   IREE_RETURN_IF_ERROR(status);
   return loom_serve_jit_create(
       loom_serve_device_handle(model->owner),

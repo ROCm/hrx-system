@@ -18,6 +18,40 @@ func.decl import("prepare") @workspace_limit(%stage: i32, %bytes: i64)
 
 func.decl import("prepare") @memory_forecast(%root: buffer)
 
+func.decl import("prepare") @parameter_arena(%capacity: i64) -> (i32)
+
+func.decl import("prepare") @parameter_bank(%stage: i32, %binding: i32, %arena: i32, %sources: buffer, %policy: buffer) -> (i32)
+
+func.decl import("prepare") @bind_parameters(%root: buffer)
+
+func.def public @declare_arena(%capacity: i64) -> (i32) {
+  %arena = func.call @parameter_arena(%capacity) : (i64) -> (i32)
+  func.return %arena : i32
+}
+
+func.def public @declare_parameter_binding() {
+  %entry = global.load @root : buffer
+  func.call @bind_parameters(%entry) : (buffer)
+  func.return
+}
+
+func.def public @declare_banks(%arena: i32, %sources: buffer, %count: i32) -> (i32) {
+  %root = global.load @root : buffer
+  %policy = global.load @policy : buffer
+  %tag = scalar.constant 0 : i64
+  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %binding = scalar.constant 0 : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %end = index.cast %count : i32 to index
+  %none = scalar.constant -1 : i32
+  %last = scf.for %i = [%begin to %end step %step](%previous = %none : i32) -> (i32) {
+    %bank = func.call @parameter_bank(%stage, %binding, %arena, %sources, %policy) : (i32, i32, i32, buffer, buffer) -> (i32)
+    scf.yield %bank : i32
+  }
+  func.return %last : i32
+}
+
 global.rodata.def @empty_forecast = bytes("")
 
 // One entry exercises the cold declaration boundary without compiling a new

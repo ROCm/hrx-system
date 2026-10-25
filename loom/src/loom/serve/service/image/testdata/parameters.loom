@@ -1,0 +1,238 @@
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+
+func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
+
+func.decl import("prepare") @parameter_arena(%bytes: i64) -> (i32)
+
+func.decl import("prepare") @parameter_bank(%stage: i32, %binding: i32, %arena: i32, %sources: buffer, %policy: buffer) -> (i32)
+
+func.decl import("prepare") @bind_parameters(%root: buffer)
+
+func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
+
+func.decl import("runner") @execute_3(%stage: i32, %request: hal.buffer, %output: hal.buffer, %workspace: hal.buffer) -> (i64)
+
+func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+
+global.rodata.def @base = bytes("62616e6b5f696d6167655f62617365")
+
+global.rodata.def @adapted = bytes("62616e6b5f696d6167655f61646170746564")
+
+global.rodata.def @first = bytes("66697273742e7361666574656e736f7273")
+
+global.rodata.def @second = bytes("7365636f6e642e7361666574656e736f7273")
+
+global.rodata.def @policy = bytes("6c6f6f6d2f7372632f6c6f6f6d2f73657276652f72756e74696d652f706172616d657465722f74657374646174612f776569676874732f706f6c6963792e6c6f6f6d")
+
+global.rodata.def @binding = bytes("62696e645f62616e6b73")
+
+global.rodata.def @tokenizer = bytes("746f6b656e697a65722e6a736f6e")
+
+global.rodata.def @name = bytes("706172616d657465722d696d616765")
+
+// The same program exposes its direct and versioned image service contracts.
+// The source-selected bind_banks callback remains an exact, unqualified export.
+func.def public @image_prepare_v1(%height: i64, %width: i64, %text: i64, %directory: buffer, %adapter: buffer, %options: buffer) -> (i64, i64, buffer, buffer, buffer) {
+  %limit, %capacity, %tokenizer, %name, %state = func.call @prepare(%height, %width, %text, %directory, %adapter, %options) : (i64, i64, i64, buffer, buffer, buffer) -> (i64, i64, buffer, buffer, buffer)
+  func.return %limit, %capacity, %tokenizer, %name, %state : i64, i64, buffer, buffer, buffer
+}
+
+func.def public @image_prepare_request_v1(%state: buffer, %height: i64, %width: i64, %prompt: buffer, %seed: i64, %loras: buffer) -> (buffer, i64, i64) {
+  %payload, %units, %tag = func.call @prepare_request(%state, %height, %width, %prompt, %seed, %loras) : (buffer, i64, i64, buffer, i64, buffer) -> (buffer, i64, i64)
+  func.return %payload, %units, %tag : buffer, i64, i64
+}
+
+func.def public @image_prepare_batch_v1(%state: buffer, %tags: buffer, %ranges: buffer, %payload: buffer) -> (i32, buffer) {
+  %stage, %request = func.call @prepare_batch(%state, %tags, %ranges, %payload) : (buffer, buffer, buffer, buffer) -> (i32, buffer)
+  func.return %stage, %request : i32, buffer
+}
+
+func.def public @image_generate_v1(%first: i32, %count: i32, %cursor: i32, %output_bytes: i64, %request: hal.buffer, %output: hal.buffer, %workspace: hal.buffer) -> (i32) {
+  %next = func.call @generate(%first, %count, %cursor, %output_bytes, %request, %output, %workspace) : (i32, i32, i32, i64, hal.buffer, hal.buffer, hal.buffer) -> (i32)
+  func.return %next : i32
+}
+
+func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buffer, %adapter: buffer, %options: buffer) -> (i64, i64, buffer, buffer, buffer) {
+  %c0 = scalar.constant 0 : i32
+  %zero64 = scalar.constant 0 : i64
+  %first_path = global.load @first : buffer
+  %second_path = global.load @second : buffer
+  %first = func.call @source(%directory, %first_path) : (buffer, buffer) -> (i32)
+  %second = func.call @source(%directory, %second_path) : (buffer, buffer) -> (i32)
+  %root = global.load @base : buffer
+  %stage = func.call @stage(%root, %zero64) : (buffer, i64) -> (i32)
+  %policy = global.load @policy : buffer
+  func.call @parameter(%stage, %c0, %c0, %first, %policy) : (i32, i32, i32, i32, buffer)
+  %capacity = scalar.constant 1073741824 : i64
+  %arena = func.call @parameter_arena(%capacity) : (i64) -> (i32)
+  // The optional bind_parameters boolean controls the source declaration.
+  %fields, %type, %count = func.call @members(%options) : (buffer) -> (buffer, i32, i64)
+  %empty = scalar.cmpi eq, %count, %zero64 : i64
+  %declare_binding = scf.if %empty -> (i1) {
+    %yes = scalar.constant 1 : i1
+    scf.yield %yes : i1
+  } else {
+    %type_offset = index.constant 32 : offset
+    %type_view = buffer.view %fields[%type_offset] : buffer -> view<1xi64>
+    %field_type = view.load %type_view[0] : view<1xi64> -> i64
+    %false_type = scalar.constant 5 : i64
+    %enabled = scalar.cmpi ne, %field_type, %false_type : i64
+    scf.yield %enabled : i1
+  }
+  scf.if %declare_binding {
+    %binding = global.load @binding : buffer
+    func.call @bind_parameters(%binding) : (buffer)
+  }
+  %origin = index.constant 0 : offset
+  %length = index.constant 12 : offset
+  %state = buffer.alloca<private> align(4) %length : buffer
+  %values = buffer.view %state[%origin] : buffer -> view<3xi32>
+  view.store %arena, %values[0] : i32, view<3xi32>
+  view.store %first, %values[1] : i32, view<3xi32>
+  view.store %second, %values[2] : i32, view<3xi32>
+  %c1 = scalar.constant 1 : i64
+  %input_capacity = scalar.constant 24 : i64
+  %tokenizer = global.load @tokenizer : buffer
+  %name = global.load @name : buffer
+  func.return %c1, %input_capacity, %tokenizer, %name, %state : i64, i64, buffer, buffer, buffer
+}
+
+func.def public @prepare_request(%state: buffer, %height: i64, %width: i64, %prompt: buffer, %seed: i64, %loras: buffer) -> (buffer, i64, i64) {
+  %length = index.constant 24 : offset
+  %payload = buffer.alloca<private> align(8) %length : buffer
+  %origin = index.constant 0 : offset
+  %offsets = buffer.view %payload[%origin] : buffer -> view<2xi64>
+  %zero64 = scalar.constant 0 : i64
+  view.store %zero64, %offsets[0] : i64, view<2xi64>
+  view.store %zero64, %offsets[1] : i64, view<2xi64>
+  %values_offset = index.constant 16 : offset
+  %values = buffer.view %payload[%values_offset] : buffer -> view<2xi32>
+  %c0 = scalar.constant 0 : i32
+  %seed32 = scalar.trunci %seed : i64 to i32
+  view.store %c0, %values[0] : i32, view<2xi32>
+  view.store %seed32, %values[1] : i32, view<2xi32>
+  %c1 = scalar.constant 1 : i64
+  func.return %payload, %c1, %zero64 : buffer, i64, i64
+}
+
+func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %payload: buffer) -> (i32, buffer) {
+  %zero64 = scalar.constant 0 : i64
+  %root = global.load @adapted : buffer
+  %stage = func.call @stage(%root, %zero64) : (buffer, i64) -> (i32)
+  %origin = index.constant 0 : offset
+  %values = buffer.view %state[%origin] : buffer -> view<3xi32>
+  %arena = view.load %values[0] : view<3xi32> -> i32
+  %length = index.constant 4 : offset
+  %sources = buffer.alloca<private> align(4) %length : buffer
+  %source_view = buffer.view %sources[%origin] : buffer -> view<1xi32>
+  %policy = global.load @policy : buffer
+  %c0 = scalar.constant 0 : i32
+  %begin = index.constant 1 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%begin to %end step %step] {
+    %source = view.load %values[%i] : view<3xi32> -> i32
+    view.store %source, %source_view[0] : i32, view<1xi32>
+    %bank = func.call @parameter_bank(%stage, %c0, %arena, %sources, %policy) : (i32, i32, i32, buffer, buffer) -> (i32)
+  }
+  func.return %stage, %payload : i32, buffer
+}
+
+// Both nonzero bank placement and exactly-once invocation affect final pixels.
+func.def public @bind_banks(%state: buffer, %payload: buffer, %offsets: buffer) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 16 : offset
+  buffer.copy %offsets[%origin], %payload[%origin], %bytes
+  %counter = buffer.view %payload[%bytes] : buffer -> view<1xi32>
+  %previous = view.load %counter[0] : view<1xi32> -> i32
+  %c1 = scalar.constant 1 : i32
+  %next = scalar.addi %previous, %c1 : i32
+  view.store %next, %counter[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def public @generate(%first: i32, %count: i32, %cursor: i32, %output_bytes: i64, %request: hal.buffer, %output: hal.buffer, %workspace: hal.buffer) -> (i32) {
+  %completion = func.call @execute_3(%first, %request, %output, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %c0 = scalar.constant 0 : i32
+  %origin = scalar.constant 0 : i64
+  %feedback = func.call @feedback(%c0, %output, %origin, %output_bytes) : (i32, hal.buffer, i64, i64) -> (i64)
+  %done = scalar.constant -1 : i32
+  func.return %done : i32
+}
+
+kernel.def @bank_pixels() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%weights: buffer, %request: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %offsets = buffer.view %request[%origin] : buffer -> view<2xi64>
+  %first_loaded = view.load %offsets[0] : view<2xi64> -> i64
+  %second_loaded = view.load %offsets[1] : view<2xi64> -> i64
+  %first64 = scalar.assume %first_loaded [range(%first_loaded, 0, 9223372036854775807)] : i64
+  %second64 = scalar.assume %second_loaded [range(%second_loaded, 0, 9223372036854775807)] : i64
+  %first = index.cast %first64 : i64 to offset
+  %second = index.cast %second64 : i64 to offset
+  %left = buffer.view %weights[%first] : buffer -> view<8xi32>
+  %right = buffer.view %weights[%second] : buffer -> view<8xi32>
+  %a = view.load %left[0] : view<8xi32> -> i32
+  %b = view.load %right[0] : view<8xi32> -> i32
+  %values_offset = index.constant 16 : offset
+  %values = buffer.view %request[%values_offset] : buffer -> view<2xi32>
+  %counter = view.load %values[0] : view<2xi32> -> i32
+  %seed = view.load %values[1] : view<2xi32> -> i32
+  %bias = scalar.addi %counter, %seed : i32
+  %a_bias = scalar.addi %a, %bias : i32
+  %b_bias = scalar.addi %b, %bias : i32
+  %sum = scalar.addi %a, %b : i32
+  %sum_bias = scalar.addi %sum, %bias : i32
+  %r = scalar.sitofp %a_bias : i32 to f32
+  %g = scalar.sitofp %b_bias : i32 to f32
+  %sum_float = scalar.sitofp %sum_bias : i32 to f32
+  %scale = scalar.constant 0.00390625 : f32
+  %red = scalar.mulf %r, %scale : f32
+  %green = scalar.mulf %g, %scale : f32
+  %blue = scalar.mulf %sum_float, %scale : f32
+  %rgb = buffer.view %output[%origin] : buffer -> view<3xf32>
+  view.store %red, %rgb[0] : f32, view<3xf32>
+  view.store %green, %rgb[1] : f32, view<3xf32>
+  view.store %blue, %rgb[2] : f32, view<3xf32>
+  kernel.return
+}
+
+kernel.def @publish_pixels() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%colors: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %colors[%origin] : buffer -> view<3xf32>
+  %target = buffer.view %output[%origin] : buffer -> view<3xf32>
+  %red = view.load %source[0] : view<3xf32> -> f32
+  %green = view.load %source[1] : view<3xf32> -> f32
+  %blue = view.load %source[2] : view<3xf32> -> f32
+  view.store %red, %target[0] : f32, view<3xf32>
+  view.store %green, %target[1] : f32, view<3xf32>
+  view.store %blue, %target[2] : f32, view<3xf32>
+  kernel.return
+}
+
+command.program.def public @bank_image_base() launch(%weights: buffer, %request: buffer, %output: buffer) {
+  %a = command.parameter %weights, "a" : view<8xi32>
+  %base = command.parameter.base %a : view<8xi32> -> buffer
+  %length = index.constant 12 : offset
+  %colors = buffer.alloca<global> align(16) %length : buffer
+  kernel.launch @bank_pixels(%base, %request, %colors) : (buffer, buffer, buffer)
+  kernel.launch @publish_pixels(%colors, %output) : (buffer, buffer)
+  command.return
+}
+
+command.program.def public @bank_image_adapted() launch(%arena: buffer, %request: buffer, %output: buffer) {
+  %a = command.parameter %arena, "a" : view<8xi32>
+  %base = command.parameter.base %a : view<8xi32> -> buffer
+  %length = index.constant 12 : offset
+  %colors = buffer.alloca<global> align(16) %length : buffer
+  kernel.launch @bank_pixels(%base, %request, %colors) : (buffer, buffer, buffer)
+  kernel.launch @publish_pixels(%colors, %output) : (buffer, buffer)
+  command.return
+}

@@ -230,8 +230,8 @@ iree_status_t loom_serve_text_source_initialize(
       options->sources.control,
       encodes ? IREE_ARRAYSIZE(encoding_roots)
               : IREE_ARRAYSIZE(generation_roots),
-      encodes ? encoding_roots : generation_roots, &out_source->compilation,
-      host_allocator, &out_source->module);
+      encodes ? encoding_roots : generation_roots, (iree_string_view_list_t){0},
+      &out_source->compilation, host_allocator, &out_source->module);
 }
 
 void loom_serve_text_source_deinitialize(loom_serve_text_source_t* source) {

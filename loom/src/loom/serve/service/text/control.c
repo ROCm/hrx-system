@@ -188,7 +188,7 @@ iree_status_t loom_serve_text_control_initialize(
        {&i64, 1},
        &control->epoch_step},
   };
-  IREE_RETURN_IF_ERROR(loom_serve_program_bind(
+  IREE_RETURN_IF_ERROR(loom_serve_program_bind_service(
       control->program, IREE_ARRAYSIZE(bindings), bindings));
   if (generates) {
     const loom_serve_program_binding_t step = {
@@ -196,7 +196,7 @@ iree_status_t loom_serve_text_control_initialize(
         {step_arguments, IREE_ARRAYSIZE(step_arguments)},
         {step_results, IREE_ARRAYSIZE(step_results)},
         &control->step};
-    return loom_serve_program_bind(control->program, 1, &step);
+    return loom_serve_program_bind_service(control->program, 1, &step);
   }
   iree_vm_function_t defaults = {0};
   const iree_vm_signature_type_t capture_arguments[] = {buffer, i32, i32,
@@ -213,7 +213,7 @@ iree_status_t loom_serve_text_control_initialize(
        {&buffer, 1},
        &control->request_options},
   };
-  IREE_RETURN_IF_ERROR(loom_serve_program_bind(
+  IREE_RETURN_IF_ERROR(loom_serve_program_bind_service(
       control->program, IREE_ARRAYSIZE(encoding_bindings), encoding_bindings));
   iree_vm_variant_t argument = iree_vm_buffer_variant_from_ptr_borrowed(
       &source->vm_types, source->options);

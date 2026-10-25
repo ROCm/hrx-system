@@ -13,7 +13,12 @@ package(
 )
 
 exports_files(
-    ["service_linux_test.cc"],
+    [
+        "parameter_test.cc",
+        "service_linux_test.cc",
+        "testdata/parameters.json",
+        "testdata/parameters.loom",
+    ],
     visibility = ["//loom/src/loom/serve:implementation"],
 )
 

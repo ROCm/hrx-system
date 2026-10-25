@@ -20,6 +20,26 @@ extern "C" {
 iree_status_t loom_serve_parameter_layout_check(
     const loom_cmd_program_t* baseline, const loom_cmd_program_t* candidate);
 
+// Owned canonical placement for one parameter domain. Keeps only reflected
+// keys and layout facts, not an executable or its compiled/native products.
+typedef struct loom_serve_parameter_layout_t loom_serve_parameter_layout_t;
+
+// Copies one domain from a checked compiler product. The caller owns the
+// selected binding ordinal and publishes this layout only after its complete
+// preparation succeeds. No program storage is borrowed after this call.
+iree_status_t loom_serve_parameter_layout_allocate_domain(
+    const loom_cmd_program_t* program, uint32_t domain,
+    iree_allocator_t host_allocator,
+    loom_serve_parameter_layout_t** out_layout);
+
+// Checks a new source product against the retained domain. A different binding
+// ordinal is allowed; keys, order, placement, footprint, and alignment match.
+iree_status_t loom_serve_parameter_layout_check_domain(
+    const loom_serve_parameter_layout_t* layout,
+    const loom_cmd_program_t* program, uint32_t domain);
+
+void loom_serve_parameter_layout_free(loom_serve_parameter_layout_t* layout);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

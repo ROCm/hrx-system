@@ -149,11 +149,13 @@ loom_cc_library(
     loom::serve::runtime::program::compilation
     loom::serve::runtime::program::jit
     loom::serve::runtime::program::module
+    loom::serve::runtime::program::parameter_layout
     loom::serve::runtime::program::preparation
     loom::serve::runtime::program::sources
     loom::serve::runtime::program::stage_set
     loom::serve::runtime::program::stage_table
     loom::serve::runtime::program::variant_pool
+    loom::serve::runtime::storage::memory
     loom::serve::service::execution_reconfiguration
   PUBLIC
 )

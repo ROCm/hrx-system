@@ -120,8 +120,9 @@ iree_status_t loom_serve_program_compile_service(
     loomc_target_environment_t* target_environment,
     iree_vm_environment_t* environment, const loom_serve_sources_t* sources,
     iree_string_view_t source_path, iree_host_size_t root_count,
-    const iree_string_view_t* roles, loom_serve_compilation_report_t* report,
-    iree_allocator_t host_allocator, iree_vm_module_t** out_module) {
+    const iree_string_view_t* roles, iree_string_view_list_t additional_roots,
+    loom_serve_compilation_report_t* report, iree_allocator_t host_allocator,
+    iree_vm_module_t** out_module) {
   *out_module = NULL;
   iree_string_view_t* names = NULL;
   if (sources->card) {
@@ -129,9 +130,27 @@ iree_status_t loom_serve_program_compile_service(
         loom_model_card_selection(sources->card), sources->component,
         root_count, roles, host_allocator, &names));
   }
-  iree_status_t status = loom_serve_program_compile(
-      target_environment, environment, sources, source_path, root_count,
-      names ? names : roles, report, host_allocator, out_module);
+  iree_status_t status = iree_ok_status();
+  iree_string_view_t* combined_roots = NULL;
+  if (additional_roots.count) {
+    status = iree_allocator_malloc_array(
+        host_allocator, root_count + additional_roots.count,
+        sizeof(*combined_roots), (void**)&combined_roots);
+    if (iree_status_is_ok(status)) {
+      memcpy(combined_roots, names ? names : roles,
+             root_count * sizeof(*combined_roots));
+      memcpy(combined_roots + root_count, additional_roots.values,
+             additional_roots.count * sizeof(*combined_roots));
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_program_compile(
+        target_environment, environment, sources, source_path,
+        root_count + additional_roots.count,
+        combined_roots ? combined_roots : (names ? names : roles), report,
+        host_allocator, out_module);
+  }
+  iree_allocator_free(host_allocator, combined_roots);
   iree_allocator_free(host_allocator, names);
   return status;
 }
@@ -159,7 +178,7 @@ iree_status_t loom_serve_program_allocate_service(
   iree_vm_module_t* module = NULL;
   iree_status_t status = loom_serve_program_compile_service(
       target_environment, environment, sources, source_path, root_count, roles,
-      report, host_allocator, &module);
+      (iree_string_view_list_t){0}, report, host_allocator, &module);
   if (iree_status_is_ok(status)) {
     status = loom_serve_program_link_service(module, sources->card,
                                              sources->component, libraries,
@@ -172,6 +191,13 @@ iree_status_t loom_serve_program_allocate_service(
 iree_status_t loom_serve_program_lookup(loom_serve_program_t* program,
                                         iree_string_view_t name,
                                         iree_vm_function_t* out_function) {
+  return iree_vm_process_lookup_function(program->process, IREE_SV("model"),
+                                         name, out_function);
+}
+
+iree_status_t loom_serve_program_lookup_service(
+    loom_serve_program_t* program, iree_string_view_t name,
+    iree_vm_function_t* out_function) {
   iree_string_view_t* names = NULL;
   if (program->card) {
     IREE_RETURN_IF_ERROR(loom_serve_program_service_names(
@@ -179,8 +205,7 @@ iree_status_t loom_serve_program_lookup(loom_serve_program_t* program,
         program->host_allocator, &names));
   }
   iree_status_t status =
-      iree_vm_process_lookup_function(program->process, IREE_SV("model"),
-                                      names ? names[0] : name, out_function);
+      loom_serve_program_lookup(program, names ? names[0] : name, out_function);
   iree_allocator_free(program->host_allocator, names);
   return status;
 }
@@ -339,9 +364,14 @@ static iree_status_t loom_serve_program_bind_names(
 iree_status_t loom_serve_program_bind(
     loom_serve_program_t* program, iree_host_size_t binding_count,
     const loom_serve_program_binding_t* bindings) {
+  return loom_serve_program_bind_names(program, binding_count, bindings, NULL);
+}
+
+iree_status_t loom_serve_program_bind_service(
+    loom_serve_program_t* program, iree_host_size_t binding_count,
+    const loom_serve_program_binding_t* bindings) {
   if (!program->card) {
-    return loom_serve_program_bind_names(program, binding_count, bindings,
-                                         NULL);
+    return loom_serve_program_bind(program, binding_count, bindings);
   }
   iree_string_view_t* roles = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(

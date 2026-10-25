@@ -108,7 +108,9 @@ class ExecutablesTest : public WeightsTest {
     if (iree_status_is_ok(status)) {
       loom_serve_preparation_module_begin(
           capture, preparation_ ? 1 : 0, preparation_,
-          LOOM_SERVE_PREPARATION_FLAG_PARAMETERS);
+          LOOM_SERVE_PREPARATION_FLAG_PARAMETERS |
+              (preparation_ ? 0
+                            : LOOM_SERVE_PREPARATION_FLAG_PARAMETER_ARENAS));
       loom_serve_compilation_report_t report = {};
       const auto root = iree_make_cstring_view(entry);
       status = loom_serve_program_allocate(
@@ -144,7 +146,7 @@ class ExecutablesTest : public WeightsTest {
                        iree_host_size_t max_bytes = 16 * 1024 * 1024,
                        iree_host_size_t parameter_capacity = 4,
                        iree_host_size_t parameter_bytes = 1024 * 1024,
-                       bool single_domain = false) {
+                       bool single_domain = false, uint64_t arena_bytes = 0) {
     iree_notification_initialize(&notification_);
     WriteCheckpoint(adapter_path_.path(), 100);
     IREE_RETURN_IF_ERROR(
@@ -155,9 +157,11 @@ class ExecutablesTest : public WeightsTest {
     const iree_vm_ref_type_table_t* types = nullptr;
     IREE_RETURN_IF_ERROR(iree_hal_module_register_types(environment_, &types));
     IREE_RETURN_IF_ERROR(iree_hal_module_types_resolve(types, &hal_types_));
-    const char* root_name = single_domain ? "raw" : "domains";
-    IREE_RETURN_IF_ERROR(
-        Declare(root_name, false, single_domain ? 1 : 2, 0, 0, &preparation_));
+    const char* root_name =
+        arena_bytes ? "bank_cold" : (single_domain ? "raw" : "domains");
+    IREE_RETURN_IF_ERROR(Declare(root_name, false, single_domain ? 1 : 2, 0,
+                                 arena_bytes, &preparation_,
+                                 arena_bytes ? "declare_arena" : "declare"));
     const loom_model_file_list_t* paths = nullptr;
     const uint32_t source_count =
         loom_serve_preparation_local_sources(preparation_, &paths);
@@ -196,7 +200,7 @@ class ExecutablesTest : public WeightsTest {
             {
                 .queue_family = iree_hal_queue_family(dispatch_),
                 .parameters = loom_serve_parameter_bank_buffers(bank_),
-                .binding_count = 1,
+                .binding_count = static_cast<uint16_t>(arena_bytes ? 2 : 1),
             },
         .cache = {capacity, max_bytes},
         .parameter_cache = {parameter_capacity, parameter_bytes},
@@ -205,7 +209,7 @@ class ExecutablesTest : public WeightsTest {
         &options.recording, nullptr, 1, compiled_.data(), host_allocator_,
         &table_));
     const loom_serve_module_options_t module_options = {
-        .binding_capacity = 1,
+        .binding_capacity = static_cast<uint16_t>(arena_bytes ? 2 : 1),
         .stages = {table_->part_count, table_->parts},
     };
     IREE_RETURN_IF_ERROR(loom_serve_module_create(
@@ -226,16 +230,22 @@ class ExecutablesTest : public WeightsTest {
                              IREE_ALL_WAITERS);
                        },
                        &notification_});
-    const iree_string_view_t root = IREE_SV("submit");
+    const iree_string_view_t roots[] = {IREE_SV("submit"),
+                                        IREE_SV("submit_indexed")};
     loom_serve_compilation_report_t report = {};
     IREE_RETURN_IF_ERROR(loom_serve_program_allocate(
         loom_serve_host_target_environment(
             loom_serve_device_host(device_owner_)),
         environment_, &sources_,
-        iree_make_cstring_view(FLAG_executable_sources), 1, &root,
-        {&runner_, 1}, &report, host_allocator_, &control_));
-    return iree_vm_process_lookup_function(loom_serve_program_process(control_),
-                                           IREE_SV("model"), root, &submit_);
+        iree_make_cstring_view(FLAG_executable_sources), arena_bytes ? 2 : 1,
+        roots, {&runner_, 1}, &report, host_allocator_, &control_));
+    IREE_RETURN_IF_ERROR(
+        iree_vm_process_lookup_function(loom_serve_program_process(control_),
+                                        IREE_SV("model"), roots[0], &submit_));
+    return arena_bytes ? iree_vm_process_lookup_function(
+                             loom_serve_program_process(control_),
+                             IREE_SV("model"), roots[1], &submit_indexed_)
+                       : iree_ok_status();
   }
 
   iree_status_t Select(const char* root, bool swapped, int32_t count = 2,
@@ -321,6 +331,52 @@ class ExecutablesTest : public WeightsTest {
     }
   }
 
+  iree_status_t ReplaceSources() {
+    const iree_string_view_t providers[] = {IREE_SV("stages.loom"),
+                                            IREE_SV("packing.loom")};
+    const loom_serve_sources_t sources = {
+        .base_directory =
+            iree_make_string_view(directory_.data(), directory_.size()),
+        .count = IREE_ARRAYSIZE(providers),
+        .values = providers,
+    };
+    struct Completion {
+      // Joins the producer's final access before the owner takes its value.
+      std::mutex mutex;
+      // Notifies only the outer application thread, never the shared executor.
+      std::condition_variable condition;
+      // Owned producer outcome, transferred when ready is published.
+      iree_status_t status = iree_ok_status();
+      // Owned replacement generation until select/dispose below.
+      void* value = nullptr;
+      // Terminal compile/recording publication under mutex.
+      bool ready = false;
+    } completion;
+    auto update = loom_serve_executables_update(executables_);
+    IREE_RETURN_IF_ERROR(update.compile(
+        update.self, &sources,
+        [](void* self, iree_status_t status, void* value,
+           const loom_serve_compilation_report_t* report) {
+          auto* completion = static_cast<Completion*>(self);
+          std::lock_guard<std::mutex> lock(completion->mutex);
+          completion->status = status;
+          completion->value = value;
+          completion->ready = true;
+          completion->condition.notify_one();
+        },
+        &completion));
+    {
+      std::unique_lock<std::mutex> lock(completion.mutex);
+      completion.condition.wait(lock, [&] { return completion.ready; });
+    }
+    auto status = completion.status;
+    if (iree_status_is_ok(status)) {
+      status = update.select(update.self, completion.value);
+    }
+    update.dispose(completion.value);
+    return status;
+  }
+
   // Authored locators are rooted in the test's declared runfiles namespace.
   const loom_serve_sources_t sources_ = {.base_directory = IREE_SV(".")};
   // VM identities outliving every source capture and native module.
@@ -350,6 +406,8 @@ class ExecutablesTest : public WeightsTest {
   loom_serve_program_t* control_ = nullptr;
   // Bound request entry, borrowing control_.
   iree_vm_function_t submit_ = {};
+  // Bound two-buffer consumer for indexed bank cohorts.
+  iree_vm_function_t submit_indexed_ = {};
   // Outer-thread completion notification; no worker waits here.
   iree_notification_t notification_ = {};
   // Optional request checkpoint, distinct from both registered domains.
@@ -789,54 +847,13 @@ TEST_P(ExecutablesTest, ExactChoiceHitsRefreshCheckpointLru) {
 
 TEST_P(ExecutablesTest, ReplacementRecordingsRetireBeforeCheckpointJoin) {
   IREE_ASSERT_OK(Create(4, 16 * 1024 * 1024, 4, 1024 * 1024, true));
-  const iree_string_view_t providers[] = {IREE_SV("stages.loom"),
-                                          IREE_SV("packing.loom")};
-  const loom_serve_sources_t sources = {
-      .base_directory =
-          iree_make_string_view(directory_.data(), directory_.size()),
-      .count = IREE_ARRAYSIZE(providers),
-      .values = providers,
-  };
-  struct Completion {
-    // Joins the producer's final access before the owner takes its value.
-    std::mutex mutex;
-    // Notifies only the outer application thread, never the shared executor.
-    std::condition_variable condition;
-    // Owned producer outcome, transferred when ready is published.
-    iree_status_t status = iree_ok_status();
-    // Owned replacement generation until select/dispose below.
-    void* value = nullptr;
-    // Terminal compile/recording publication under mutex.
-    bool ready = false;
-  } completion;
-  auto update = loom_serve_executables_update(executables_);
-  IREE_ASSERT_OK(update.compile(
-      update.self, &sources,
-      [](void* self, iree_status_t status, void* value,
-         const loom_serve_compilation_report_t* report) {
-        auto* completion = static_cast<Completion*>(self);
-        std::lock_guard<std::mutex> lock(completion->mutex);
-        completion->status = status;
-        completion->value = value;
-        completion->ready = true;
-        completion->condition.notify_one();
-      },
-      &completion));
-  {
-    std::unique_lock<std::mutex> lock(completion.mutex);
-    completion.condition.wait(lock, [&] { return completion.ready; });
-  }
-  auto status = completion.status;
-  if (iree_status_is_ok(status)) {
-    status = update.select(update.self, completion.value);
-  }
-  update.dispose(completion.value);
-  IREE_ASSERT_OK(status);
+  IREE_ASSERT_OK(ReplaceSources());
   iree::testing::TempFilePath checkpoint("loom_request", ".safetensors");
   WriteCheckpoint(checkpoint.path(), 200);
   selected_checkpoint_ = checkpoint.path();
   IREE_ASSERT_OK(Select("raw", false, 1));
   ASSERT_NO_FATAL_FAILURE(Execute(690));
+  auto update = loom_serve_executables_update(executables_);
   IREE_ASSERT_OK(update.select(update.self, nullptr));
   IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
   retiring_ = true;
@@ -855,5 +872,313 @@ TEST_P(ExecutablesTest, ReplacementRecordingsRetireBeforeCheckpointJoin) {
 
 INSTANTIATE_TEST_SUITE_P(Native, ExecutablesTest, ::testing::Bool());
 INSTANTIATE_TEST_SUITE_P(Native, WorkspaceExecutablesTest, ::testing::Bool());
+
+class ArenaExecutablesTest : public ExecutablesTest {
+ protected:
+  uint64_t SlabCount() const override { return 8; }
+
+  iree_status_t CreateArena(uint64_t banks) {
+    return Create(
+        4, 16 * 1024 * 1024, 16, 1024 * 1024, true,
+        banks * loom_serve_device_weight_geometry(device_owner_).minimum_size);
+  }
+
+  iree_status_t BeginBanks(const std::vector<std::string>& paths,
+                           const char* root = "bank_cohort") {
+    selected_checkpoint_.clear();
+    for (const auto& path : paths) {
+      const size_t position = selected_checkpoint_.size();
+      selected_checkpoint_.resize(position + 8 + path.size());
+      iree_unaligned_store_le_u64(selected_checkpoint_.data() + position,
+                                  path.size());
+      memcpy(selected_checkpoint_.data() + position + 8, path.data(),
+             path.size());
+    }
+    auto status =
+        Begin(root, false, static_cast<int32_t>(paths.size()), 0, 0, "banks");
+    selected_checkpoint_.clear();
+    return status;
+  }
+
+  std::vector<uint64_t> Offsets() {
+    const auto bytes = loom_serve_executables_parameter_offsets(executables_);
+    std::vector<uint64_t> offsets(bytes.data_length / sizeof(uint64_t));
+    for (size_t i = 0; i < offsets.size(); ++i) {
+      offsets[i] =
+          iree_unaligned_load_le_u64(bytes.data + i * sizeof(uint64_t));
+    }
+    return offsets;
+  }
+
+  void ExecuteBanks(std::array<uint32_t, 2> counts,
+                    const std::vector<int32_t>& strengths,
+                    const std::vector<int32_t>& checkpoint_values) {
+    const auto offsets = Offsets();
+    ASSERT_EQ(offsets.size(), counts[0] + counts[1]);
+    ASSERT_EQ(offsets.size(), strengths.size());
+    ASSERT_EQ(offsets.size(), checkpoint_values.size());
+    std::vector<uint8_t> payload(16 + offsets.size() * 16);
+    iree_unaligned_store_le_u32(payload.data(), 0);
+    iree_unaligned_store_le_u32(payload.data() + 4, counts[0]);
+    iree_unaligned_store_le_u32(payload.data() + 8, counts[0]);
+    iree_unaligned_store_le_u32(payload.data() + 12, counts[1]);
+    for (size_t i = 0; i < offsets.size(); ++i) {
+      iree_unaligned_store_le_u64(payload.data() + 16 + i * 16, offsets[i]);
+      iree_unaligned_store_le_u32(payload.data() + 24 + i * 16,
+                                  static_cast<uint32_t>(strengths[i]));
+    }
+    iree_hal_buffer_release(workspace_);
+    workspace_ = nullptr;
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        loom_serve_device_storage_pool(device_owner_),
+        iree_hal_make_pool_reservation_request(payload.size(), 8),
+        iree_infinite_timeout(), &workspace_));
+    auto* residency = loom_serve_executables_residency(executables_);
+    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residency));
+    const iree_hal_transfer_operation_t upload = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+        .upload =
+            {
+                .source = payload.data(),
+                .target_buffer = workspace_,
+                .length = payload.size(),
+            },
+    };
+    uint64_t completion = 0;
+    IREE_ASSERT_OK(
+        loom_serve_execution_transfer(execution_, 1, &upload, &completion));
+    iree_vm_variant_t arguments[] = {
+        iree_vm_variant_from_i32(1),
+        iree_hal_buffer_variant_from_ptr_borrowed(&hal_types_, workspace_),
+        iree_hal_buffer_variant_from_ptr_borrowed(&hal_types_, output_buffer_)};
+    iree_vm_variant_t results[1] = {};
+    auto status =
+        iree_vm_invoke(loom_serve_program_invocation(control_), submit_indexed_,
+                       iree_vm_variant_span_from_array(arguments),
+                       iree_vm_variant_span_from_array(results));
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+    IREE_ASSERT_OK(status);
+    const iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download =
+            {
+                .source_buffer = output_buffer_,
+                .target = output_.data(),
+                .length = sizeof(output_),
+            },
+    };
+    IREE_ASSERT_OK(
+        loom_serve_execution_feedback(execution_, 1, &download, &completion));
+    IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
+    loom_serve_residency_release(residency);
+    size_t first = 0;
+    for (size_t item = 0; item < counts.size(); ++item) {
+      for (size_t element = 0; element < 4; ++element) {
+        int32_t expected = 0;
+        for (size_t i = first; i < first + counts[item]; ++i) {
+          expected += strengths[i] * (checkpoint_values[i] + 13 +
+                                      static_cast<int32_t>(element));
+        }
+        EXPECT_EQ(output_[item * 4 + element], expected);
+      }
+      first += counts[item];
+    }
+    loom_serve_executables_release(executables_);
+  }
+};
+
+TEST_P(ArenaExecutablesTest, MixedCountsSharePreparedBanksAndNativeCode) {
+  IREE_ASSERT_OK(CreateArena(4));
+  iree::testing::TempFilePath third("loom_bank_c", ".safetensors");
+  iree::testing::TempFilePath fourth("loom_bank_d", ".safetensors");
+  WriteCheckpoint(third.path(), 200);
+  WriteCheckpoint(fourth.path(), 300);
+  IREE_ASSERT_OK(BeginBanks({path_.path(), adapter_path_.path(), third.path(),
+                             adapter_path_.path(), fourth.path()}));
+  IREE_ASSERT_OK(Advance(false));
+  const auto offsets = Offsets();
+  ASSERT_EQ(offsets.size(), 5u);
+  EXPECT_EQ(offsets[1], offsets[3]);
+  EXPECT_NE(offsets[0], offsets[1]);
+  EXPECT_NE(offsets[1], offsets[2]);
+  EXPECT_NE(offsets[2], offsets[4]);
+  ASSERT_NO_FATAL_FAILURE(
+      ExecuteBanks({3, 2}, {1, 2, -1, -3, 2}, {0, 100, 200, 100, 300}));
+  const auto activity =
+      loom_serve_executables_parameters(executables_).activity;
+  EXPECT_EQ(activity.activations, 5u);  // One cold root and four shared banks.
+  EXPECT_EQ(activity.prepared_bytes, 4u * 8 * sizeof(int32_t));
+  const auto commands = compilation_.commands;
+  const auto kernels = compilation_.kernels;
+  IREE_ASSERT_OK(
+      BeginBanks({fourth.path(), adapter_path_.path(), path_.path()}));
+  IREE_ASSERT_OK(Advance(false));
+  ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 2}, {3, -2, 7}, {300, 100, 0}));
+  EXPECT_EQ(compilation_.commands, commands);
+  EXPECT_EQ(compilation_.kernels, kernels);
+  EXPECT_EQ(
+      loom_serve_executables_parameters(executables_).activity.activations,
+      activity.activations);
+  EXPECT_EQ(
+      loom_serve_executables_parameters(executables_).activity.prepared_bytes,
+      activity.prepared_bytes);
+}
+
+TEST_P(ArenaExecutablesTest, CapacityRecyclingProtectsLaterHits) {
+  IREE_ASSERT_OK(CreateArena(2));
+  iree::testing::TempFilePath third("loom_bank_c", ".safetensors");
+  WriteCheckpoint(third.path(), 200);
+  IREE_ASSERT_OK(BeginBanks({path_.path(), adapter_path_.path()}));
+  IREE_ASSERT_OK(Advance(false));
+  const auto original = Offsets();
+  ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 1}, {1, 1}, {0, 100}));
+  // A is the older hit but appears after C's miss. It must survive resolution.
+  IREE_ASSERT_OK(BeginBanks({third.path(), path_.path()}));
+  IREE_ASSERT_OK(Advance(false));
+  const auto replacement = Offsets();
+  EXPECT_EQ(replacement[0], original[1]);
+  EXPECT_EQ(replacement[1], original[0]);
+  ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 1}, {2, -1}, {200, 0}));
+  EXPECT_EQ(
+      loom_serve_executables_parameters(executables_).activity.activations, 4u);
+}
+
+TEST_P(ArenaExecutablesTest, FailedFirstPreparationDoesNotPublishLayout) {
+  IREE_ASSERT_OK(CreateArena(2));
+  const auto before = loom_serve_memory_pool_statistics(pool_).reserved_bytes;
+  IREE_ASSERT_OK(BeginBanks({path_.path()}, "bank_missing"));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Advance(false));
+  loom_serve_executables_release(executables_);
+  ASSERT_NO_FATAL_FAILURE(CollectIdle());
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).reserved_bytes, before);
+  IREE_ASSERT_OK(BeginBanks({path_.path(), adapter_path_.path()}));
+  IREE_ASSERT_OK(Advance(false));
+  ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 1}, {1, 2}, {0, 100}));
+}
+
+TEST_P(ArenaExecutablesTest, CancelledFirstCaptureReleasesProvisionalArena) {
+  IREE_ASSERT_OK(CreateArena(2));
+  const auto before = loom_serve_memory_pool_statistics(pool_).reserved_bytes;
+  IREE_ASSERT_OK(BeginBanks({path_.path(), adapter_path_.path()}));
+  bool complete = false;
+  while (loom_serve_memory_pool_statistics(pool_).reserved_bytes == before) {
+    const uint32_t ticket = iree_notification_prepare_wait(&notification_);
+    auto status =
+        loom_serve_executables_advance(executables_, false, &complete);
+    if (iree_status_is_ok(status) && !complete &&
+        loom_serve_memory_pool_statistics(pool_).reserved_bytes == before) {
+      iree_notification_commit_wait(&notification_, ticket, IREE_DURATION_ZERO,
+                                    IREE_TIME_INFINITE_FUTURE);
+    } else {
+      iree_notification_cancel_wait(&notification_);
+    }
+    IREE_ASSERT_OK(status);
+    ASSERT_FALSE(complete);
+  }
+  IREE_ASSERT_OK(Advance(true));
+  loom_serve_executables_release(executables_);
+  ASSERT_NO_FATAL_FAILURE(CollectIdle());
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).reserved_bytes, before);
+  IREE_ASSERT_OK(BeginBanks({adapter_path_.path(), path_.path()}));
+  IREE_ASSERT_OK(Advance(false));
+  ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 1}, {1, 3}, {100, 0}));
+}
+
+TEST_P(ArenaExecutablesTest, RepeatedSelectionsDoNotMultiplyBankStorage) {
+  IREE_ASSERT_OK(CreateArena(1));
+  std::vector<std::string> paths(33, path_.path());
+  IREE_ASSERT_OK(BeginBanks(paths));
+  IREE_ASSERT_OK(Advance(false));
+  const auto offsets = Offsets();
+  ASSERT_EQ(offsets.size(), 33u);
+  for (uint64_t offset : offsets) {
+    EXPECT_EQ(offset, offsets[0]);
+  }
+  ASSERT_NO_FATAL_FAILURE(ExecuteBanks({17, 16}, std::vector<int32_t>(33, 2),
+                                       std::vector<int32_t>(33, 0)));
+  const auto activity =
+      loom_serve_executables_parameters(executables_).activity;
+  EXPECT_EQ(activity.activations, 2u);
+  EXPECT_EQ(activity.prepared_bytes, 8u * sizeof(int32_t));
+  const auto commands = compilation_.commands;
+  IREE_ASSERT_OK(BeginBanks({path_.path()}));
+  IREE_ASSERT_OK(Advance(false));
+  ASSERT_NO_FATAL_FAILURE(ExecuteBanks({0, 1}, {-3}, {0}));
+  EXPECT_EQ(compilation_.commands, commands);
+  EXPECT_EQ(
+      loom_serve_executables_parameters(executables_).activity.activations,
+      activity.activations);
+}
+
+TEST_P(ArenaExecutablesTest, PublishedLayoutRejectsIncompatiblePacking) {
+  IREE_ASSERT_OK(CreateArena(2));
+  IREE_ASSERT_OK(BeginBanks({path_.path()}));
+  IREE_ASSERT_OK(Advance(false));
+  ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 0}, {1}, {0}));
+  IREE_ASSERT_OK(BeginBanks({path_.path()}, "bank_missing"));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Advance(false));
+  loom_serve_executables_release(executables_);
+  IREE_ASSERT_OK(BeginBanks({path_.path()}));
+  IREE_ASSERT_OK(Advance(false));
+  ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 0}, {2}, {0}));
+  EXPECT_EQ(
+      loom_serve_executables_parameters(executables_).activity.activations, 2u);
+}
+
+TEST_P(ArenaExecutablesTest, ImpossibleUnionPreservesUsableBanks) {
+  IREE_ASSERT_OK(CreateArena(2));
+  iree::testing::TempFilePath third("loom_bank_c", ".safetensors");
+  WriteCheckpoint(third.path(), 200);
+  IREE_ASSERT_OK(BeginBanks({path_.path(), adapter_path_.path()}));
+  IREE_ASSERT_OK(Advance(false));
+  ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 1}, {1, 1}, {0, 100}));
+  IREE_ASSERT_OK(
+      BeginBanks({third.path(), path_.path(), adapter_path_.path()}));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Advance(false));
+  loom_serve_executables_release(executables_);
+  IREE_ASSERT_OK(BeginBanks({path_.path(), adapter_path_.path()}));
+  IREE_ASSERT_OK(Advance(false));
+  ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 1}, {2, 3}, {0, 100}));
+  EXPECT_EQ(
+      loom_serve_executables_parameters(executables_).activity.activations, 3u);
+}
+
+TEST_P(ArenaExecutablesTest, ReconfigurationPreservesCapturedBanksAndArena) {
+  IREE_ASSERT_OK(CreateArena(2));
+  IREE_ASSERT_OK(BeginBanks({path_.path(), adapter_path_.path()}));
+  IREE_ASSERT_OK(Advance(false));
+  const auto offsets = Offsets();
+  const auto reserved = loom_serve_memory_pool_statistics(pool_).reserved_bytes;
+  // Selecting a new source generation cannot change the captured invocation.
+  IREE_ASSERT_OK(ReplaceSources());
+  EXPECT_EQ(Offsets(), offsets);
+  ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 1}, {2, -3}, {0, 100}));
+  const auto activations =
+      loom_serve_executables_parameters(executables_).activity.activations;
+
+  // The next capture uses new preparers but the same canonical arena layout.
+  // Finite capacity requires retirement of the old generation's idle banks.
+  IREE_ASSERT_OK(BeginBanks({adapter_path_.path(), path_.path()}));
+  IREE_ASSERT_OK(Advance(false));
+  ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 1}, {-1, 7}, {100, 0}));
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).reserved_bytes, reserved);
+  EXPECT_EQ(
+      loom_serve_executables_parameters(executables_).activity.activations,
+      activations + 2);
+
+  auto update = loom_serve_executables_update(executables_);
+  IREE_ASSERT_OK(update.select(update.self, nullptr));
+  IREE_ASSERT_OK(BeginBanks({path_.path(), adapter_path_.path()}));
+  IREE_ASSERT_OK(Advance(false));
+  ASSERT_NO_FATAL_FAILURE(ExecuteBanks({1, 1}, {5, 3}, {0, 100}));
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).reserved_bytes, reserved);
+  EXPECT_EQ(
+      loom_serve_executables_parameters(executables_).activity.activations,
+      activations + 4);
+}
+
+INSTANTIATE_TEST_SUITE_P(Elastic, ArenaExecutablesTest,
+                         ::testing::Values(true));
 
 }  // namespace loom_serve::testing

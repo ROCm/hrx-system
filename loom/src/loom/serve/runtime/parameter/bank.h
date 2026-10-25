@@ -36,11 +36,14 @@ iree_status_t loom_serve_parameter_bank_allocate(
 // has one domain at index zero, independent of its original binding ordinal.
 // The selected ordinal is below fixed_buffer_count. Ownership and partial
 // failure follow allocate above; other roots are neither allocated nor
-// borrowed.
+// borrowed. Optional arena selects one independently backed range in its shared
+// reservation. The arena outlives this bank; its owner completes asynchronous
+// group deactivation before free, or checked whole-arena detach after a failed
+// mapping and retirement of every arena consumer.
 iree_status_t loom_serve_parameter_bank_allocate_domain(
     loom_serve_device_t* device, const loom_cmd_program_t* program,
-    uint32_t domain, iree_allocator_t host_allocator,
-    loom_serve_parameter_bank_t** out_bank);
+    uint32_t domain, loom_serve_memory_arena_t* arena,
+    iree_allocator_t host_allocator, loom_serve_parameter_bank_t** out_bank);
 
 // Domain count and borrowed plans in allocation order.
 // A NULL bank has zero domains.

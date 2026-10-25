@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "model": {"id": "loom-fixture/parameter-image", "name": "Captured image parameters"},
+  "programs": {
+    "source": {"inputs": ["parameters.loom", "weights.loom"], "libraries": []}
+  },
+  "services": {"render": {"kind": "image", "version": 1}},
+  "variants": {
+    "fixture": {
+      "services": {
+        "render": {
+          "programs": ["source"],
+          "tokenizers": {
+            "tokenizer.json": {"path": "tokenizer.json", "format": "huggingface-json"}
+          }
+        }
+      }
+    }
+  }
+}

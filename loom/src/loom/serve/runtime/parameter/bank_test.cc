@@ -171,7 +171,7 @@ TEST_P(ParameterBankTest, SelectedDomainReusesBaseAtChangedBindingOrdinal) {
 
   IREE_ASSERT_OK(Compile(1, "domains"));
   IREE_ASSERT_OK(loom_serve_parameter_bank_allocate_domain(
-      device_owner_, loom_serve_jit_stage_program(compiled_[1]), 1,
+      device_owner_, loom_serve_jit_stage_program(compiled_[1]), 1, nullptr,
       host_allocator_, &adapter_bank_));
   ASSERT_EQ(loom_serve_parameter_bank_count(adapter_bank_), 1u);
   const auto after = loom_serve_device_memory_statistics(device_owner_);
