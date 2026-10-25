@@ -21,6 +21,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/threading/notification.h"
+#include "iree/task/affinity_set.h"
 #include "iree/task/process.h"
 #include "iree/task/topology.h"
 #include "iree/testing/gtest.h"
@@ -523,6 +524,112 @@ TEST(ExecutorProcessTest, SleepAndRewake) {
 
   context.WaitUntil([&] { return context.completed.load(); });
 
+  iree_task_executor_release(executor);
+}
+
+TEST(ExecutorProcessTest, IdleEnrollmentsHaveOneWakeOwner) {
+  constexpr iree_host_size_t kWorkerCount =
+      IREE_TASK_AFFINITY_SET_WORD_COUNT * 64;
+  iree_atomic_task_affinity_set_t idle;
+  iree_atomic_task_affinity_set_store(&idle,
+                                      iree_task_affinity_set_ones(kWorkerCount),
+                                      iree_memory_order_relaxed);
+  std::atomic<int> claims[kWorkerCount] = {};
+  std::thread producers[4];
+  for (auto& producer : producers) {
+    producer = std::thread([&] {
+      for (iree_host_size_t i = 0; i < kWorkerCount; ++i) {
+        if (iree_atomic_task_affinity_set_clear(
+                &idle, iree_task_affinity_bit_for_worker(i),
+                iree_memory_order_relaxed)) {
+          claims[i].fetch_add(1, std::memory_order_relaxed);
+        }
+      }
+    });
+  }
+  for (auto& producer : producers) {
+    producer.join();
+  }
+  for (iree_host_size_t i = 0; i < kWorkerCount; ++i) {
+    EXPECT_EQ(claims[i].load(), 1) << "worker " << i;
+  }
+}
+
+TEST(ExecutorProcessTest, ReadyProcessesProgressWhileAnotherWorkerIsBlocked) {
+  // A real native allocation can hold a worker while independent work arrives.
+  // Repeated arrivals exercise the remaining worker's active-to-idle boundary
+  // for both immediate and compute-slot publication.
+  struct BlockedContext : TestWaiter {
+    // Worker zero has entered its held drain call.
+    std::atomic<bool> entered{false};
+    // The independent output has finished and the held call may return.
+    std::atomic<bool> ready{false};
+    // Every drainer has left the blocking process.
+    std::atomic<bool> released{false};
+  } blocked;
+  iree_task_executor_t* executor = CreateExecutor(2);
+  iree_task_process_t blocker;
+  iree_task_process_initialize(
+      +[](iree_task_process_t* process,
+          const iree_task_worker_context_t* worker,
+          iree_task_process_drain_result_t* result) -> iree_status_t {
+        auto* context = static_cast<BlockedContext*>(process->user_data);
+        if (worker->worker_index == 0) {
+          context->entered.store(true, std::memory_order_release);
+          context->Notify();
+          context->WaitUntil(
+              [&] { return context->ready.load(std::memory_order_acquire); });
+        }
+        // Keep the slot available until worker zero has actually entered.
+        result->keep_active = !context->entered.load(std::memory_order_acquire);
+        result->completed = context->ready.load(std::memory_order_acquire);
+        return iree_ok_status();
+      },
+      0, 2, &blocker);
+  blocker.user_data = &blocked;
+  blocker.release_fn = +[](iree_task_process_t* process) {
+    auto* context = static_cast<BlockedContext*>(process->user_data);
+    context->released.store(true, std::memory_order_release);
+    context->Notify();
+  };
+  iree_task_executor_schedule_process(executor, &blocker);
+  blocked.WaitUntil(
+      [&] { return blocked.entered.load(std::memory_order_acquire); });
+
+  struct OutputContext : TestWaiter {
+    // Value produced by the sole unblocked worker.
+    uint32_t value = 0;
+    // The output process's storage can be initialized for another arrival.
+    std::atomic<bool> released{false};
+  } output;
+  iree_task_process_t process;
+  constexpr uint32_t kArrivals = 256;
+  for (uint32_t i = 0; i < kArrivals; ++i) {
+    output.released.store(false, std::memory_order_relaxed);
+    iree_task_process_initialize(
+        +[](iree_task_process_t* process, const iree_task_worker_context_t*,
+            iree_task_process_drain_result_t* result) -> iree_status_t {
+          auto* context = static_cast<OutputContext*>(process->user_data);
+          ++context->value;
+          result->completed = true;
+          return iree_ok_status();
+        },
+        0, (i % 2) + 1, &process);
+    process.user_data = &output;
+    process.release_fn = +[](iree_task_process_t* process) {
+      auto* context = static_cast<OutputContext*>(process->user_data);
+      context->released.store(true, std::memory_order_release);
+      context->Notify();
+    };
+    iree_task_executor_schedule_process(executor, &process);
+    output.WaitUntil(
+        [&] { return output.released.load(std::memory_order_acquire); });
+    EXPECT_EQ(output.value, i + 1);
+  }
+  blocked.ready.store(true, std::memory_order_release);
+  blocked.Notify();
+  blocked.WaitUntil(
+      [&] { return blocked.released.load(std::memory_order_acquire); });
   iree_task_executor_release(executor);
 }
 

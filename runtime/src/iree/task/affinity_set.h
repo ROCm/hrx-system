@@ -215,8 +215,8 @@ static inline iree_task_affinity_set_t iree_task_affinity_set_not(
 // An array of atomic 64-bit words matching the layout of
 // iree_task_affinity_set_t. Whole-set loads and stores are NOT atomically
 // consistent across words — this is intentional. The idle and live masks are
-// hints (explicitly documented with relaxed ordering), and no protocol depends
-// on cross-word consistency.
+// snapshots; no protocol depends on cross-word consistency. A caller claiming
+// a bit from a snapshot uses the atomic clear result to confirm ownership.
 
 typedef struct iree_atomic_task_affinity_set_t {
   iree_atomic_int64_t words[IREE_TASK_AFFINITY_SET_WORD_COUNT];
@@ -235,12 +235,14 @@ static inline void iree_atomic_task_affinity_set_set(
                        order);
 }
 
-// Atomically clears a single bit.
-static inline void iree_atomic_task_affinity_set_clear(
+// Atomically clears a single bit and returns whether this call cleared it.
+// A true result grants exclusive ownership until the bit is set again.
+static inline bool iree_atomic_task_affinity_set_clear(
     iree_atomic_task_affinity_set_t* set, iree_task_affinity_bit_t bit,
     iree_memory_order_t order) {
-  iree_atomic_fetch_and(&set->words[bit.word_index], (int64_t)~bit.bit_mask,
-                        order);
+  int64_t previous = iree_atomic_fetch_and(&set->words[bit.word_index],
+                                           (int64_t)~bit.bit_mask, order);
+  return ((uint64_t)previous & bit.bit_mask) != 0;
 }
 
 //===----------------------------------------------------------------------===//

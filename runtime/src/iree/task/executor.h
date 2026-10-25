@@ -28,18 +28,19 @@ extern "C" {
 //
 // Processes with wake_budget == 1 (immediate list):
 //   Sequential processes that need exclusive draining (one worker at a time).
-//   Pushed to a lock-free MPSC list; workers pop and drain to completion or
+//   Pushed to a shared ready list; workers pop and drain to completion or
 //   sleep. Used for queue management, host callbacks, and retire/signal paths.
 //
 // Processes with wake_budget > 1 (compute slots):
 //   Parallel processes that benefit from multiple workers draining
 //   concurrently. Placed into fixed slots (CAS on activation); workers scan
 //   round-robin and cooperatively drain bounded work from each occupied slot.
-//   The wake budget controls wake fan-out and active-drainer admission.
+//   The wake budget controls wake fan-out, not active-drainer admission.
 //
 // Workers alternate between draining immediate processes and scanning compute
-// slots. When no work is available, workers sleep via a notification-based
-// Dekker protocol until schedule_process wakes them.
+// slots. Before sleeping, workers join a shared publication epoch and expose
+// an exclusively claimable idle enrollment. Their private notifications carry
+// the selected wakes without relying on another active worker to make progress.
 //
 // The executor scales from single-worker configurations (useful for
 // deterministic testing or embedded systems) to
