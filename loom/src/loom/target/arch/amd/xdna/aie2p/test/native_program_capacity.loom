@@ -1,0 +1,20 @@
+aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+// The authored loop is compact, while full unrolling makes the native worker
+// larger than one core's architectural program memory.
+pipeline.def<kernel> public retain target(@device) @oversized_native_program() run() {
+  %memory = pipeline.memory<workgroup>[0, 3] : pool
+  %bytes = index.constant 4692 : offset
+  %storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 1173 : index
+  %step = index.constant 1 : index
+  %value = scalar.constant 1 : i32
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %values = buffer.view %storage[%origin] : buffer -> view<1173xi32>
+    scf.for %i = [%begin to %end step %step] unroll {
+      view.store %value, %values[%i] : i32, view<1173xi32>
+    }
+  }
+}

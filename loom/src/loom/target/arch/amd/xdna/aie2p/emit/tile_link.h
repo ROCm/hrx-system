@@ -85,7 +85,9 @@ typedef struct loom_aie2p_linked_tile_t {
   uint32_t entry_address;
 } loom_aie2p_linked_tile_t;
 
-// Places and links one leaf contribution without serializing an object file.
+// Places and links one admitted leaf contribution without serializing an
+// object file. The producer guarantees that executable contents fit the
+// generated program-memory layout and its 32-bit core address range.
 //
 // Section contributions are assembled, assigned the addresses from |layout|,
 // and fixed up in that order. The result owns no source IR and all of

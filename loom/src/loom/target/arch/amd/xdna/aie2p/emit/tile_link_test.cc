@@ -63,15 +63,7 @@ TEST(Aie2pTileLinkTest, PlacesExecutableContribution) {
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
-  const loom_aie2p_tile_link_layout_t undersized_layout = {
-      .program_address = 0,
-      .program_owner_offset = 0,
-      .program_byte_capacity = sizeof(code) - 1u,
-  };
   loom_aie2p_linked_tile_t linked_tile = {};
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        loom_aie2p_tile_link(&contribution, &undersized_layout,
-                                             &arena, &linked_tile));
   const loom_aie2p_tile_link_layout_t layout = {
       .program_address = 0,
       .program_owner_offset = 0,

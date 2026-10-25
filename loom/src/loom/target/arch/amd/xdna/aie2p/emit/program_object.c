@@ -6,10 +6,8 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_object.h"
 
-#include <inttypes.h>
 #include <string.h>
 
-#include "loom/target/arch/amd/xdna/aie2p/emit/bundle_plan.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/relocation.h"
 
 static bool loom_aie2p_program_object_is_code_section(
@@ -259,12 +257,6 @@ iree_status_t loom_aie2p_program_object_merge(
   IREE_ASSERT_EQ(section_start, section_count);
   IREE_ASSERT_EQ(symbol_start, symbol_count);
   IREE_ASSERT_EQ(fixup_start, fixup_count);
-  if (code_byte_length > LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE) {
-    return iree_make_status(
-        IREE_STATUS_RESOURCE_EXHAUSTED,
-        "AIE2P tile program requires %" PRIu64 " code bytes; capacity is %u",
-        code_byte_length, LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE);
-  }
   IREE_RETURN_IF_ERROR(loom_aie2p_program_object_resolve_calls(
       symbols, symbol_count, fixups, fixup_count));
 

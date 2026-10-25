@@ -25,7 +25,9 @@ extern "C" {
 // performs the final aligned concatenation. Direct-call imports are resolved
 // to exactly one helper entry. Helpers must be code-only leaves; the entry
 // continues to own all resources, immutable data, and function storage for the
-// tile program.
+// tile program. The result retains its exact combined code requirement even
+// when it exceeds one core's program memory; program compilation owns target
+// capacity admission after composition.
 iree_status_t loom_aie2p_program_object_merge(
     const loom_aie2p_leaf_contribution_t* contributions,
     iree_host_size_t contribution_count, iree_arena_allocator_t* arena,

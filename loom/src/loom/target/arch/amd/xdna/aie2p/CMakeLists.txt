@@ -984,6 +984,23 @@ iree_execution_test_suite(
 )
 endif()
 
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND AMDF_BUILD)
+iree_execution_test_suite(
+  NAME
+    native_program_capacity_test
+  MANIFESTS
+    "test/native_program_capacity.test.json"
+  TOOLS
+    "loom-compile=loom::tools::loom-compile"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/test/native_program_capacity.loom"
+  LABELS
+    "hostonly"
+  TIMEOUT
+    60
+)
+endif()
+
 if(LOOM_TARGET_ARCH_XDNA)
 loom_check_test_suite(
   NAME
@@ -1079,6 +1096,7 @@ loom_check_test_suite(
     "test/native_endpoint_addresses.loom-test"
     "test/native_helper_effects.loom-test"
     "test/native_local_buffers.loom-test"
+    "test/native_program_capacity.loom-test"
     "test/native_repetition.loom-test"
     "test/native_strands.loom-test"
     "test/native_stream_routes.loom-test"
@@ -1434,6 +1452,25 @@ endif()
 if(LOOM_TARGET_ARCH_XDNA)
 loom_cc_library(
   NAME
+    program_capacity
+  HDRS
+    "emit/program_capacity.h"
+  SRCS
+    "emit/program_capacity.c"
+  DEPS
+    ::leaf_program
+    iree::base
+    loom::codegen::low::diagnostics
+    loom::error::diagnostic
+    loom::error::emitter
+    loom::target::arch::amd::xdna::error_defs
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_library(
+  NAME
     leaf_compile
   HDRS
     "emit/leaf_compile.h"
@@ -1443,6 +1480,7 @@ loom_cc_library(
     ::bundle_plan
     ::leaf_object
     ::low_registry
+    ::program_capacity
     iree::base
     iree::base::internal::arena
     loom::analysis::symbol_facts
@@ -1470,7 +1508,6 @@ loom_cc_library(
   SRCS
     "emit/program_object.c"
   DEPS
-    ::bundle_plan
     ::leaf_object
     ::relocation
     iree::base
@@ -1491,6 +1528,7 @@ loom_cc_library(
     ::call_abi
     ::core_descriptors
     ::leaf_compile
+    ::program_capacity
     ::program_object
     iree::base
     iree::base::internal::arena

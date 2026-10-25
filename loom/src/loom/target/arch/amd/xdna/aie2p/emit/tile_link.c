@@ -67,13 +67,6 @@ static iree_status_t loom_aie2p_tile_link_assign_addresses(
         IREE_STATUS_FAILED_PRECONDITION,
         "AIE2P tile code section does not match its leaf realization");
   }
-  if (layout->program_byte_capacity == 0 ||
-      code_length > layout->program_byte_capacity ||
-      (uint64_t)layout->program_address + code_length >
-          (uint64_t)UINT32_MAX + 1u) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "AIE2P tile code exceeds program memory");
-  }
   if (code_section->alignment != 0 &&
       layout->program_address % code_section->alignment != 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

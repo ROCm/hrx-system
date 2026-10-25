@@ -805,6 +805,18 @@ iree_execution_test_suite(
     },
 )
 
+iree_execution_test_suite(
+    name = "native_program_capacity_test",
+    size = "small",
+    data = ["test/native_program_capacity.loom"],
+    manifests = ["test/native_program_capacity.test.json"],
+    tags = ["hostonly"],
+    target_compatible_with = _XDNA_IMAGE_COMPATIBLE_WITH,
+    tools = {
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+    },
+)
+
 loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
@@ -898,6 +910,7 @@ loom_check_test_suite(
         "test/native_endpoint_addresses.loom-test",
         "test/native_helper_effects.loom-test",
         "test/native_local_buffers.loom-test",
+        "test/native_program_capacity.loom-test",
         "test/native_repetition.loom-test",
         "test/native_strands.loom-test",
         "test/native_stream_routes.loom-test",
@@ -1206,6 +1219,20 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "program_capacity",
+    srcs = ["emit/program_capacity.c"],
+    hdrs = ["emit/program_capacity.h"],
+    deps = [
+        ":leaf_program",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/target/arch/amd/xdna:error_defs",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "leaf_compile",
     srcs = ["emit/leaf_compile.c"],
     hdrs = ["emit/leaf_compile.h"],
@@ -1213,6 +1240,7 @@ loom_cc_library(
         ":bundle_plan",
         ":leaf_object",
         ":low_registry",
+        ":program_capacity",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
@@ -1235,7 +1263,6 @@ loom_cc_library(
     srcs = ["emit/program_object.c"],
     hdrs = ["emit/program_object.h"],
     deps = [
-        ":bundle_plan",
         ":leaf_object",
         ":relocation",
         "//runtime/src/iree/base",
@@ -1251,6 +1278,7 @@ loom_cc_library(
         ":call_abi",
         ":core_descriptors",
         ":leaf_compile",
+        ":program_capacity",
         ":program_object",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",

@@ -12,6 +12,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/low_registry.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/bundle_plan.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/program_capacity.h"
 #include "loom/target/reporting/low.h"
 
 // Uses the scheduler's retained call inventory. A call-bearing frame is
@@ -144,10 +145,6 @@ iree_status_t loom_aie2p_leaf_compile(
     status = loom_aie2p_bundle_plan_build(&frame, &plan_options, &scratch_arena,
                                           &program_plan);
   }
-  if (iree_status_is_ok(status) && frame_accepted) {
-    status =
-        loom_aie2p_leaf_object_emit(&program_plan, arena, out_contribution);
-  }
   if (iree_status_is_ok(status) && frame_accepted &&
       options->compile_report != NULL) {
     loom_target_compile_report_emission_breakdown_t emission_breakdown = {
@@ -167,7 +164,17 @@ iree_status_t loom_aie2p_leaf_compile(
     loom_target_compile_report_record_emission_breakdown(
         options->compile_report, &emission_breakdown);
   }
+  bool capacity_admitted = false;
   if (iree_status_is_ok(status) && frame_accepted) {
+    status = loom_aie2p_program_capacity_admit(
+        module, function_op, program_plan.encoded_byte_length,
+        options->diagnostic_emitter, &capacity_admitted);
+  }
+  if (iree_status_is_ok(status) && frame_accepted && capacity_admitted) {
+    status =
+        loom_aie2p_leaf_object_emit(&program_plan, arena, out_contribution);
+  }
+  if (iree_status_is_ok(status) && frame_accepted && capacity_admitted) {
     *out_compiled = true;
   }
   iree_arena_deinitialize(&scratch_arena);
