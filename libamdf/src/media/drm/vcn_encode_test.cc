@@ -471,6 +471,173 @@ TEST_F(VcnEncodePacketTest, Av1MatchesPixelFirstQualifiedNativePackets) {
   }
 }
 
+TEST_F(VcnEncodePacketTest, Av1Vcn5UsesDirectTier2References) {
+  ConfigureVcn5();
+  session_.requirements.configuration.codec = AMDF_MEDIA_CODEC_AV1;
+  session_.requirements.configuration.coded_height = 208;
+  session_.encode_codec.av1.order_hint_bit_count = 4;
+
+  const uint64_t expected_picture_hashes[2][2] = {
+      {UINT64_C(0x9ab5f898fa9f0b79), UINT64_C(0x8a44d599e59df72e)},
+      {UINT64_C(0x4bef8d1761511fe0), UINT64_C(0xd4b7c1cfc99dcacf)},
+  };
+  for (uint32_t depth_index = 0; depth_index < 2; ++depth_index) {
+    ConfigureSampleBitDepth(depth_index == 0 ? 8 : 10);
+    const uint32_t sample_byte_count = depth_index == 0 ? 1 : 2;
+    resources_.input.addresses[1] =
+        kSourceAddress + 512 * 208 * sample_byte_count;
+    uint32_t length = amdf_media_drm_vcn_encode_control(
+        &command_, &session_, AMDF_MEDIA_COMMAND_OPERATION_BEGIN);
+    EXPECT_EQ(length, 312u);
+    EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x53fdaaea6dcd9c77));
+
+    amdf_media_av1_encode_picture_info_t picture = {
+        .frame_type = 0,
+        .picture_index = 0,
+        .primary_reference = 7,
+        .refresh_frame_flags = 255,
+    };
+    length = amdf_media_drm_vcn_encode_av1(&command_, &session_, &resources_, 0,
+                                           &picture);
+    EXPECT_EQ(length, 5276u);
+    EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][0]);
+    EXPECT_LE(length, sizeof(words_));
+
+    PacketBlock block = FindPacketBlock(words_, length, 0x300001);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 48u);
+    for (uint32_t i = 0; i < block.payload_word_count; ++i) {
+      const uint32_t expected = i == 1 ? 0x10 : i == 2 ? 1 : 0;
+      EXPECT_EQ(block.payload[i], expected) << "payload word " << i;
+    }
+
+    block = FindPacketBlock(words_, length, 0x300002);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 88u);
+    for (uint32_t i = 0; i < block.payload_word_count; ++i) {
+      uint32_t expected = 0;
+      switch (i) {
+        case 0:
+        case 1:
+        case 20:
+          expected = 1;
+          break;
+        case 2:
+          expected = 5;
+          break;
+        case 4:
+          expected = 4;
+          break;
+        case 85:
+          expected = 2;
+          break;
+        case 87:
+          expected = 3;
+          break;
+      }
+      EXPECT_EQ(block.payload[i], expected) << "payload word " << i;
+    }
+
+    block = FindPacketBlock(words_, length, 0x300003);
+    ASSERT_NE(block.payload, nullptr);
+
+    block = FindPacketBlock(words_, length, 0x0f);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 10u);
+    EXPECT_EQ(block.payload[9], 0u);
+
+    block = FindPacketBlock(words_, length, 0x300004);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 10u);
+    for (uint32_t i = 0; i < 9; ++i) {
+      EXPECT_EQ(block.payload[i], UINT32_MAX) << "payload word " << i;
+    }
+    EXPECT_EQ(block.payload[9], 0u);
+
+    block = FindPacketBlock(words_, length, 0x19);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 3u);
+    const uint64_t cdf_address = kSessionAddress + 131072;
+    EXPECT_EQ(block.payload[0], 1u);
+    EXPECT_EQ(block.payload[1], static_cast<uint32_t>(cdf_address >> 32));
+    EXPECT_EQ(block.payload[2], static_cast<uint32_t>(cdf_address));
+
+    block = FindPacketBlock(words_, length, 0x11);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 1029u);
+    const uint64_t auxiliary_address =
+        kReconstructionAddress +
+        2 * resources_.reconstruction_layer_byte_length;
+    EXPECT_EQ(block.payload[0], static_cast<uint32_t>(auxiliary_address >> 32));
+    EXPECT_EQ(block.payload[1], static_cast<uint32_t>(auxiliary_address));
+    EXPECT_EQ(block.payload[2], 2u);
+    EXPECT_EQ(block.payload[3],
+              static_cast<uint32_t>(kReconstructionAddress >> 32));
+    EXPECT_EQ(block.payload[4], static_cast<uint32_t>(kReconstructionAddress));
+    EXPECT_EQ(block.payload[5], 512u);
+    EXPECT_EQ(block.payload[6],
+              static_cast<uint32_t>(kReconstructionAddress >> 32));
+    EXPECT_EQ(
+        block.payload[7],
+        static_cast<uint32_t>(kReconstructionAddress +
+                              resources_.reconstruction_luma_byte_length));
+    EXPECT_EQ(block.payload[8], 256u);
+    const uint64_t frame_context_address = auxiliary_address + 947200;
+    EXPECT_EQ(block.payload[13],
+              static_cast<uint32_t>(frame_context_address >> 32));
+    EXPECT_EQ(block.payload[14], static_cast<uint32_t>(frame_context_address));
+    EXPECT_EQ(block.payload[15], 1024u);
+    EXPECT_EQ(block.payload[16], 23552u);
+    EXPECT_EQ(block.payload[17], 0u);
+    EXPECT_EQ(block.payload[28],
+              static_cast<uint32_t>((frame_context_address + 25088) >> 32));
+    EXPECT_EQ(block.payload[29],
+              static_cast<uint32_t>(frame_context_address + 25088));
+    EXPECT_EQ(block.payload[30], 1024u);
+    EXPECT_EQ(block.payload[31], 23552u);
+    EXPECT_EQ(block.payload[32], 0u);
+    EXPECT_EQ(block.payload[1023], 512u);
+    EXPECT_EQ(block.payload[1024], 256u);
+
+    amdf_media_frame_t frame = {};
+    amdf_media_av1_encode_reference_t reference = {
+        .binding = {&frame, 0},
+    };
+    picture.frame_type = 1;
+    picture.order_hint = 1;
+    picture.picture_index = 1;
+    picture.primary_reference = 0;
+    picture.reference_count = 1;
+    picture.references = &reference;
+    for (uint32_t index = 0; index < 7; ++index) {
+      picture.reference_indices[index] = 0;
+    }
+    length = amdf_media_drm_vcn_encode_av1(&command_, &session_, &resources_, 1,
+                                           &picture);
+    EXPECT_EQ(length, 5296u);
+    EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][1]);
+
+    block = FindPacketBlock(words_, length, 0x0f);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 10u);
+    EXPECT_EQ(block.payload[9], 1u);
+    block = FindPacketBlock(words_, length, 0x300004);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 10u);
+    for (uint32_t i = 0; i < 8; ++i) {
+      EXPECT_EQ(block.payload[i], 0u) << "payload word " << i;
+    }
+    EXPECT_EQ(block.payload[8], UINT32_MAX);
+    EXPECT_EQ(block.payload[9], 1u);
+    block = FindPacketBlock(words_, length, 0x19);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 3u);
+    EXPECT_EQ(block.payload[0], 0u);
+    EXPECT_EQ(block.payload[1], static_cast<uint32_t>(cdf_address >> 32));
+    EXPECT_EQ(block.payload[2], static_cast<uint32_t>(cdf_address));
+  }
+}
+
 TEST_F(VcnEncodePacketTest, RetiredFeedbackProducesOneBoundedRegion) {
   amdf_media_encoded_region_t region = {};
   amdf_media_encode_result_info_t result = {
