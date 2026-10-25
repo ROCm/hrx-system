@@ -31,6 +31,8 @@ enum {
 typedef struct amdf_media_drm_vcn_protocol_info_t {
   // Unified firmware command family selected for this IP generation.
   amdf_media_drm_command_protocol_t command_protocol;
+  // AV1 private-context and film-grain representation.
+  amdf_media_drm_av1_protocol_t av1_protocol;
   // Address-library selector embedded in decode-target and reference fields.
   uint32_t decode_array_mode;
   // Firmware swizzle selector for decoder-private reference storage.

@@ -13,6 +13,15 @@
 
 namespace {
 
+TEST(Av1ContextTest, SelectsPrivateContextExtentByFirmwareProtocol) {
+  EXPECT_EQ(
+      amdf_media_drm_av1_context_byte_length(AMDF_MEDIA_DRM_AV1_PROTOCOL_V1),
+      36389888u);
+  EXPECT_EQ(
+      amdf_media_drm_av1_context_byte_length(AMDF_MEDIA_DRM_AV1_PROTOCOL_V2),
+      36688896u);
+}
+
 TEST(Av1ContextTest, InstallsAllFourNormativeCdfSets) {
   alignas(uint16_t) std::array<uint8_t, 81920 + 64> context = {};
   std::fill(context.begin() + 81920, context.end(), 0xa5);

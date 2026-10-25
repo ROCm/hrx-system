@@ -19,19 +19,26 @@ TEST(VcnProtocolTest, SelectsGenerationFactsWithoutReinterpretingVersions) {
   struct ProtocolCase {
     uint32_t version;
     amdf_media_drm_command_protocol_t command_protocol;
+    amdf_media_drm_av1_protocol_t av1_protocol;
     uint32_t decode_array_mode;
     uint32_t reference_swizzle_mode;
     uint32_t reference_height_alignment;
   };
   constexpr ProtocolCase kCases[] = {
-      {0x040000, AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4, 3, 0, 32},
-      {0x040003, AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4, 1, 0, 32},
-      {0x040006, AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4, 3, 0, 32},
-      {0x050000, AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5, 3,
+      {0x040000, AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4,
+       AMDF_MEDIA_DRM_AV1_PROTOCOL_V1, 3, 0, 32},
+      {0x040003, AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4,
+       AMDF_MEDIA_DRM_AV1_PROTOCOL_V1, 1, 0, 32},
+      {0x040006, AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4,
+       AMDF_MEDIA_DRM_AV1_PROTOCOL_V1, 3, 0, 32},
+      {0x050000, AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5,
+       AMDF_MEDIA_DRM_AV1_PROTOCOL_V2, 3,
        AMDF_MEDIA_DRM_VCN_REFERENCE_SWIZZLE_256B_D, 64},
-      {0x050001, AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5, 1,
+      {0x050001, AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5,
+       AMDF_MEDIA_DRM_AV1_PROTOCOL_V2, 1,
        AMDF_MEDIA_DRM_VCN_REFERENCE_SWIZZLE_256B_D, 64},
-      {0x050300, AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5, 3,
+      {0x050300, AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5,
+       AMDF_MEDIA_DRM_AV1_PROTOCOL_V2, 3,
        AMDF_MEDIA_DRM_VCN_REFERENCE_SWIZZLE_256B_D, 64},
   };
   for (const ProtocolCase& test_case : kCases) {
@@ -39,6 +46,7 @@ TEST(VcnProtocolTest, SelectsGenerationFactsWithoutReinterpretingVersions) {
     amdf_media_drm_vcn_protocol_info_t protocol = {};
     ASSERT_TRUE(amdf_media_drm_vcn_protocol(test_case.version, &protocol));
     EXPECT_EQ(protocol.command_protocol, test_case.command_protocol);
+    EXPECT_EQ(protocol.av1_protocol, test_case.av1_protocol);
     EXPECT_EQ(protocol.decode_array_mode, test_case.decode_array_mode);
     EXPECT_EQ(protocol.reference_swizzle_mode,
               test_case.reference_swizzle_mode);
@@ -48,6 +56,7 @@ TEST(VcnProtocolTest, SelectsGenerationFactsWithoutReinterpretingVersions) {
 
   amdf_media_drm_vcn_protocol_info_t protocol = {
       .command_protocol = AMDF_MEDIA_DRM_COMMAND_PROTOCOL_JPEG_DIRECT,
+      .av1_protocol = AMDF_MEDIA_DRM_AV1_PROTOCOL_V2,
       .decode_array_mode = 7,
       .reference_swizzle_mode = 9,
       .reference_height_alignment = 128,
@@ -55,6 +64,7 @@ TEST(VcnProtocolTest, SelectsGenerationFactsWithoutReinterpretingVersions) {
   EXPECT_FALSE(amdf_media_drm_vcn_protocol(0x030000, &protocol));
   EXPECT_EQ(protocol.command_protocol,
             AMDF_MEDIA_DRM_COMMAND_PROTOCOL_JPEG_DIRECT);
+  EXPECT_EQ(protocol.av1_protocol, AMDF_MEDIA_DRM_AV1_PROTOCOL_V2);
   EXPECT_EQ(protocol.decode_array_mode, 7u);
   EXPECT_EQ(protocol.reference_swizzle_mode, 9u);
   EXPECT_EQ(protocol.reference_height_alignment, 128u);

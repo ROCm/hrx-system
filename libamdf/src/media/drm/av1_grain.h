@@ -8,12 +8,28 @@
 #define AMDF_SRC_MEDIA_DRM_AV1_GRAIN_H_
 
 #include "amdf/media/av1.h"
+#include "libamdf/src/media/drm/device.h"
 
-// Writes the native 166-byte grain parameters and 20480-byte VCN4 grain
-// tables into zeroed, provisioned recording storage. The public boundary has
-// validated point ordering, counts, coefficients, and bit precision.
-void amdf_media_drm_av1_grain(const amdf_media_av1_film_grain_t* grain,
+// Native grain parameter and auxiliary-table extents.
+enum {
+  AMDF_MEDIA_DRM_AV1_GRAIN_PARAMETER_BYTES = 166,
+  AMDF_MEDIA_DRM_AV1_GRAIN_AUXILIARY_BYTES = 20480,
+};
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Writes generation-selected native grain parameters and tables into zeroed,
+// provisioned recording storage. The public boundary has validated point
+// ordering, counts, coefficients, and bit precision.
+void amdf_media_drm_av1_grain(amdf_media_drm_av1_protocol_t protocol,
+                              const amdf_media_av1_film_grain_t* grain,
                               uint32_t sample_bit_depth, void* parameters,
                               void* auxiliary);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 #endif  // AMDF_SRC_MEDIA_DRM_AV1_GRAIN_H_

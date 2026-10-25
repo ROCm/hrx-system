@@ -99,7 +99,12 @@ amdf_status_t AMDF_CALL amdf_media_drm_session_create(
             (((width / 16) * (((height / 16) + 1) & ~1u) * 192 + 255) & ~255u);
       } else if (create_info->configuration.codec == AMDF_MEDIA_CODEC_AV1) {
         session->codec.av1.next = NULL;
-        session->context_byte_length = AMDF_MEDIA_DRM_AV1_CONTEXT_BYTES;
+        const amdf_media_drm_device_t* device =
+            (const amdf_media_drm_device_t*)queue->device;
+        const amdf_media_drm_engine_t* engine =
+            &device->engines[queue->info.queue_family_ordinal];
+        session->context_byte_length =
+            amdf_media_drm_av1_context_byte_length(engine->av1_protocol);
       } else if (create_info->configuration.codec == AMDF_MEDIA_CODEC_VP9) {
         session->codec.vp9.next = NULL;
         session->context_byte_length = amdf_media_drm_vp9_context_byte_length(

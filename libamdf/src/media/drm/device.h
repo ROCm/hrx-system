@@ -29,11 +29,22 @@ typedef enum amdf_media_drm_command_protocol_t {
   AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5 = 3,
 } amdf_media_drm_command_protocol_t;
 
+typedef enum amdf_media_drm_av1_protocol_t {
+  // Engine has no unified VCN AV1 protocol.
+  AMDF_MEDIA_DRM_AV1_PROTOCOL_NONE = 0,
+  // VCN 4 private context and padded film-grain tables.
+  AMDF_MEDIA_DRM_AV1_PROTOCOL_V1 = 1,
+  // VCN 5 private context and densely packed film-grain tables.
+  AMDF_MEDIA_DRM_AV1_PROTOCOL_V2 = 2,
+} amdf_media_drm_av1_protocol_t;
+
 typedef struct amdf_media_drm_engine_t {
   // Kernel hardware-IP selector for publication on this family.
   uint32_t ip_type;
   // Generation-specific command schema selected once during discovery.
   amdf_media_drm_command_protocol_t command_protocol;
+  // Generation-specific AV1 private-state schema selected during discovery.
+  amdf_media_drm_av1_protocol_t av1_protocol;
   // Native address-library selector embedded in unified decode messages.
   uint32_t decode_array_mode;
   // Immutable native generation, rings, and command alignment.

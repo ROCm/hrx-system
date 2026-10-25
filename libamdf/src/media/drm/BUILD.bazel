@@ -181,6 +181,17 @@ amdf_cc_test(
 )
 
 amdf_cc_test(
+    name = "av1_grain_test",
+    srcs = ["av1_grain_test.cc"],
+    target_compatible_with = DRM_COMPATIBILITY,
+    deps = [
+        ":execution",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
     name = "jpeg_test",
     srcs = ["jpeg_test.cc"],
     target_compatible_with = DRM_COMPATIBILITY,

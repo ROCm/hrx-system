@@ -107,9 +107,11 @@ typedef struct amdf_media_drm_av1_grain_buffer_t {
   unsigned short temp_tile_left_seed[256];
 } amdf_media_drm_av1_grain_buffer_t;
 
-_Static_assert(sizeof(amdf_media_drm_av1_grain_parameters_t) == 166,
+_Static_assert(sizeof(amdf_media_drm_av1_grain_parameters_t) ==
+                   AMDF_MEDIA_DRM_AV1_GRAIN_PARAMETER_BYTES,
                "VCN grain parameters");
-_Static_assert(sizeof(amdf_media_drm_av1_grain_buffer_t) == 20480,
+_Static_assert(sizeof(amdf_media_drm_av1_grain_buffer_t) ==
+                   AMDF_MEDIA_DRM_AV1_GRAIN_AUXILIARY_BYTES,
                "VCN grain tables");
 
 static const int16_t amdf_media_drm_av1_gaussian_sequence[2048] = {
@@ -355,6 +357,7 @@ static void amdf_media_drm_av1_scaling(const uint8_t scaling_points[][2],
 }
 
 static void amdf_media_drm_av1_grain_buffer(
+    amdf_media_drm_av1_protocol_t protocol,
     const amdf_media_drm_av1_grain_parameters_t* fg_params,
     amdf_media_drm_av1_grain_buffer_t* fg_buf) {
   const int32_t luma_block_size_y = LUMA_BLOCK_SIZE_Y;
@@ -500,7 +503,19 @@ static void amdf_media_drm_av1_grain_buffer(
   align_ptr0 = &fg_buf->cb_grain_block[0][0];
   align_ptr1 = &fg_buf->cr_grain_block[0][0];
 
-  {
+  if (protocol == AMDF_MEDIA_DRM_AV1_PROTOCOL_V2) {
+    for (i = 0; i < 64; ++i) {
+      for (j = 0; j < 64; ++j) {
+        *align_ptr++ = luma_grain_block_tmp[i][j];
+      }
+    }
+    for (i = 0; i < 32; ++i) {
+      for (j = 0; j < 32; ++j) {
+        *align_ptr0++ = cb_grain_block_tmp[i][j];
+        *align_ptr1++ = cr_grain_block_tmp[i][j];
+      }
+    }
+  } else {
     for (i = 0; i < 64; i++) {
       for (j = 0; j < 80; j++) {
         *align_ptr++ = luma_grain_block_tmp[i][j];
@@ -540,9 +555,12 @@ static void amdf_media_drm_av1_grain_buffer(
   }
 }
 
-void amdf_media_drm_av1_grain(const amdf_media_av1_film_grain_t* grain,
+void amdf_media_drm_av1_grain(amdf_media_drm_av1_protocol_t protocol,
+                              const amdf_media_av1_film_grain_t* grain,
                               uint32_t sample_bit_depth, void* parameters,
                               void* auxiliary) {
+  amdf_assert(protocol == AMDF_MEDIA_DRM_AV1_PROTOCOL_V1 ||
+              protocol == AMDF_MEDIA_DRM_AV1_PROTOCOL_V2);
   amdf_media_drm_av1_grain_parameters_t native = {0};
   native.apply_grain = 1;
   native.random_seed = (uint16_t)grain->seed;
@@ -576,5 +594,5 @@ void amdf_media_drm_av1_grain(const amdf_media_av1_film_grain_t* grain,
   native.chroma_scaling_from_luma = (uint8_t)grain->chroma_scaling_from_luma;
   native.grain_scale_shift = (uint8_t)grain->scale_shift;
   memcpy(parameters, &native, sizeof(native));
-  amdf_media_drm_av1_grain_buffer(&native, auxiliary);
+  amdf_media_drm_av1_grain_buffer(protocol, &native, auxiliary);
 }

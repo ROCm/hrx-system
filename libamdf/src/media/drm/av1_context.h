@@ -7,14 +7,16 @@
 #ifndef AMDF_SRC_MEDIA_DRM_AV1_CONTEXT_H_
 #define AMDF_SRC_MEDIA_DRM_AV1_CONTEXT_H_
 
-#include "amdf/base.h"
+#include "libamdf/src/media/drm/device.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// VCN4's fixed codec-state charge, independent of picture extent/precision.
-enum { AMDF_MEDIA_DRM_AV1_CONTEXT_BYTES = 36389888 };
+// Returns the fixed private codec-state charge for an AV1 firmware protocol.
+// It is independent of picture extent, precision, and reference count.
+uint32_t amdf_media_drm_av1_context_byte_length(
+    amdf_media_drm_av1_protocol_t protocol);
 
 // VCN4's immutable encoder probability table. This is session-private codec
 // state and is independent of picture extent, precision, and reference count.

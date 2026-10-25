@@ -35,6 +35,13 @@
 
 #include <string.h>
 
+uint32_t amdf_media_drm_av1_context_byte_length(
+    amdf_media_drm_av1_protocol_t protocol) {
+  amdf_assert(protocol == AMDF_MEDIA_DRM_AV1_PROTOCOL_V1 ||
+              protocol == AMDF_MEDIA_DRM_AV1_PROTOCOL_V2);
+  return protocol == AMDF_MEDIA_DRM_AV1_PROTOCOL_V2 ? 36688896 : 36389888;
+}
+
 // Standard AV1 CDFs in VCN4's four quantizer-dependent context layouts.
 // Derived from Mesa ac_vcn_av1_default.h and ac_vcn_vcn4_av1_* initialization,
 // revision 0ba4b08edc65075e9346d20d5310261939aaaf48. Expanded SHA-256:

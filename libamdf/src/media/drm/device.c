@@ -122,8 +122,8 @@ static bool amdf_media_drm_codec_direction_implemented(
       // Each generation-specific packet family is published only after its
       // exact output and lifecycle have passed on that generation.
       return (codec == AMDF_MEDIA_CODEC_H264 ||
-              codec == AMDF_MEDIA_CODEC_HEVC ||
-              codec == AMDF_MEDIA_CODEC_VP9) &&
+              codec == AMDF_MEDIA_CODEC_HEVC || codec == AMDF_MEDIA_CODEC_VP9 ||
+              codec == AMDF_MEDIA_CODEC_AV1) &&
              direction == AMDF_MEDIA_DIRECTION_DECODE;
   }
   return false;
@@ -744,6 +744,8 @@ static amdf_status_t amdf_media_drm_device_discover(
     device->engines[count++] = (amdf_media_drm_engine_t){
         .ip_type = selectors[i],
         .command_protocol = command_protocol,
+        .av1_protocol = i == 1 ? vcn_protocol.av1_protocol
+                               : AMDF_MEDIA_DRM_AV1_PROTOCOL_NONE,
         .decode_array_mode = i == 1 ? vcn_protocol.decode_array_mode : 0,
         .information = engine,
     };

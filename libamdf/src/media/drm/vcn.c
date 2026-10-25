@@ -213,6 +213,7 @@ bool amdf_media_drm_vcn_protocol(
   if (major == 4) {
     *out_protocol = (amdf_media_drm_vcn_protocol_info_t){
         .command_protocol = AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4,
+        .av1_protocol = AMDF_MEDIA_DRM_AV1_PROTOCOL_V1,
         .decode_array_mode = ip_discovery_version == 0x040003 ? 1 : 3,
         .reference_swizzle_mode = 0,
         .reference_height_alignment = 32,
@@ -222,6 +223,7 @@ bool amdf_media_drm_vcn_protocol(
   if (major == 5) {
     *out_protocol = (amdf_media_drm_vcn_protocol_info_t){
         .command_protocol = AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5,
+        .av1_protocol = AMDF_MEDIA_DRM_AV1_PROTOCOL_V2,
         .decode_array_mode = ip_discovery_version == 0x050001 ? 1 : 3,
         .reference_swizzle_mode = AMDF_MEDIA_DRM_VCN_REFERENCE_SWIZZLE_256B_D,
         .reference_height_alignment = 64,
@@ -987,7 +989,11 @@ uint32_t amdf_media_drm_vcn_av1(
         (uint8_t)(filter->log2_restoration_unit_sizes[i] - 5);
   }
   if (picture->film_grain.apply) {
-    amdf_media_drm_av1_grain(&picture->film_grain,
+    const amdf_media_drm_device_t* device =
+        (const amdf_media_drm_device_t*)session->base.queue->device;
+    const amdf_media_drm_engine_t* engine =
+        &device->engines[session->base.queue->info.queue_family_ordinal];
+    amdf_media_drm_av1_grain(engine->av1_protocol, &picture->film_grain,
                              session->codec.av1.sample_bit_depth,
                              codec + AV1_FILM_GRAIN, auxiliary + 256);
   }

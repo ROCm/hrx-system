@@ -14,7 +14,7 @@ profile/format/dimension/reference admission is a separate query:
 | --- | --- | --- |
 | Windows D3D12 | H264; HEVC Main/Main10; VP9 profiles 0/2; AV1 profile 0 | NV12 or P010 according to actual sample depth; application-placed native images |
 | Linux DRM VCN 4 | H264; HEVC Main/Main10; VP9 profiles 0/2; AV1 profile 0 | Linear NV12/P010 output and separate application-owned linear references |
-| Linux DRM VCN 5 | H264; HEVC Main/Main10; VP9 profiles 0/2 | Linear NV12/P010 output and separate application-owned native references |
+| Linux DRM VCN 5 | H264; HEVC Main/Main10; VP9 profiles 0/2; AV1 profile 0 | Linear NV12/P010 output and separate application-owned native references |
 | Linux DRM JPEG | Eight-bit baseline sequential 4:2:0 JPEG on the layout-2 JPEG engine | Linear NV12 planes, directly or through a placed image identity |
 
 A native driver's broader codec list does not advertise schemas implemented by
@@ -126,13 +126,13 @@ wake hint prompting that same status check.
 VCN sessions own firmware context, with charges reported by `session_query_info`;
 all output and reconstructed-reference images remain application-owned. One
 recording provisions the IB, parsed firmware message, and codec auxiliary data.
-JPEG, H264, HEVC, and VP9 use one native page; AV1 uses 28 KiB with 4 KiB pages,
-including its 20 KiB grain tables. Preparation writes only that retired recording, and submission
-selects its provisioned residency list. Codec feedback is unavailable on these
-Linux decode paths; successful queue retirement is not reported as a codec
-success result.
+JPEG, H264, HEVC, and VP9 use one native page; AV1 uses 28 KiB with 4 KiB
+pages, including its 20 KiB grain tables. Preparation writes only that retired
+recording, and submission selects its provisioned residency list. Codec
+feedback is unavailable on these Linux decode paths; successful queue
+retirement is not reported as a codec success result.
 
-VCN 5 H264, HEVC, and VP9 keep consumer output linear while storing
+VCN 5 H264, HEVC, VP9, and AV1 keep consumer output linear while storing
 decoder-private references in the firmware's 256B-D layout with 64-row luma
 alignment. The reference image still exposes its caller-owned memory identity,
 placement, and complete allocation requirements. It does not expose a linear
@@ -146,12 +146,13 @@ separate from application-owned decoded and reference pixels. Reference storage
 queries also expose reconstruction padding: sixteen rows on D3D12 and sixty-four
 on VCN for VP9 and AV1, with exact coded dimensions retained in the session.
 
-VCN 4 AV1 reserves 36,389,888 bytes of context plus 128 KiB of session storage,
-also reported by `session_query_info`. Four standard CDF contexts expand from
-26,546 immutable library bytes during session construction. Grain-enabled
-preparation computes the native Gaussian/autoregression tables into the
-recording's provisioned auxiliary storage; no codec library, pixel readback,
-or per-picture allocation participates.
+VCN 4 AV1 reserves 36,389,888 bytes of context and VCN 5 reserves 36,688,896,
+plus 128 KiB of session storage in either case. The complete charge is reported
+by `session_query_info`. Four standard CDF contexts expand from 26,546 immutable
+library bytes during session construction. Grain-enabled preparation computes
+the native Gaussian/autoregression tables into the recording's provisioned
+auxiliary storage, using the padded VCN 4 or dense VCN 5 block arrangement. No
+codec library, pixel readback, or per-picture allocation participates.
 
 ## Compute integration
 
