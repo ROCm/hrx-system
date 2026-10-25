@@ -16,6 +16,25 @@ package(
     licenses = ["notice"],
 )
 
+_MEDIA_GPU_KERNEL_COMPATIBILITY = loom_config_compatible_with([
+    "//loom/config/import:cxx",
+    "//loom/config/target:amdgpu_artifacts",
+    "//loom/config/target/amdgpu:descriptor_set_rdna3_5_core",
+])
+
+_HOST_MEDIA_GPU_COMPATIBILITY = _MEDIA_GPU_KERNEL_COMPATIBILITY + [
+    "@platforms//cpu:x86_64",
+] + select({
+    "@platforms//os:linux": [],
+    "@platforms//os:windows": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+_WINDOWS_MEDIA_GPU_COMPATIBILITY = _MEDIA_GPU_KERNEL_COMPATIBILITY + [
+    "@platforms//os:windows",
+    "@platforms//cpu:x86_64",
+]
+
 test_suite(
     name = "media",
     tests = [
@@ -46,7 +65,7 @@ amdf_cts_gpu_kernel_set(
     entry_point = "media_consume",
     inputopts = ["cxx:root=media_consume"],
     namespace = "kernels::media_consume",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    target_compatible_with = _MEDIA_GPU_KERNEL_COMPATIBILITY,
     targets = [
         "gfx1150",
         "gfx1151",
@@ -59,7 +78,7 @@ amdf_cts_gpu_kernel_set(
     entry_point = "media_produce",
     inputopts = ["cxx:root=media_produce"],
     namespace = "kernels::media_produce",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    target_compatible_with = _MEDIA_GPU_KERNEL_COMPATIBILITY,
     targets = [
         "gfx1150",
         "gfx1151",
@@ -75,10 +94,7 @@ amdf_cc_library(
         "d3d12.lib",
         "dxgi.lib",
     ],
-    target_compatible_with = [
-        "@platforms//os:windows",
-        "@platforms//cpu:x86_64",
-    ],
+    target_compatible_with = _WINDOWS_MEDIA_GPU_COMPATIBILITY,
     deps = [
         ":consume",
         "//libamdf/cts/gpu/pm4/encoding:commands",
@@ -102,11 +118,7 @@ amdf_cc_library(
         ],
         "//conditions:default": [],
     }),
-    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
-        "@platforms//os:linux": [],
-        "@platforms//os:windows": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _HOST_MEDIA_GPU_COMPATIBILITY,
     deps = [
         ":consume",
         ":produce",
@@ -119,11 +131,7 @@ amdf_cc_library(
 amdf_cts_test_suite(
     name = "encode",
     srcs = ["encode_test.cc"],
-    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
-        "@platforms//os:linux": [],
-        "@platforms//os:windows": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = _HOST_MEDIA_GPU_COMPATIBILITY,
     visibility = ["//visibility:public"],
     deps = [
         ":encode_fixture",
@@ -134,10 +142,7 @@ amdf_cts_test_suite(
 amdf_cts_test_suite(
     name = "h264",
     srcs = ["h264_test.cc"],
-    target_compatible_with = [
-        "@platforms//os:windows",
-        "@platforms//cpu:x86_64",
-    ],
+    target_compatible_with = _WINDOWS_MEDIA_GPU_COMPATIBILITY,
     visibility = ["//visibility:public"],
     deps = [
         ":decode_fixture",
@@ -150,10 +155,7 @@ amdf_cts_test_suite(
 amdf_cts_test_suite(
     name = "hevc",
     srcs = ["hevc_test.cc"],
-    target_compatible_with = [
-        "@platforms//os:windows",
-        "@platforms//cpu:x86_64",
-    ],
+    target_compatible_with = _WINDOWS_MEDIA_GPU_COMPATIBILITY,
     visibility = ["//visibility:public"],
     deps = [
         ":decode_fixture",
@@ -165,10 +167,7 @@ amdf_cts_test_suite(
 amdf_cts_test_suite(
     name = "vp9",
     srcs = ["vp9_test.cc"],
-    target_compatible_with = [
-        "@platforms//os:windows",
-        "@platforms//cpu:x86_64",
-    ],
+    target_compatible_with = _WINDOWS_MEDIA_GPU_COMPATIBILITY,
     visibility = ["//visibility:public"],
     deps = [
         ":decode_fixture",
@@ -180,10 +179,7 @@ amdf_cts_test_suite(
 amdf_cts_test_suite(
     name = "av1",
     srcs = ["av1_test.cc"],
-    target_compatible_with = [
-        "@platforms//os:windows",
-        "@platforms//cpu:x86_64",
-    ],
+    target_compatible_with = _WINDOWS_MEDIA_GPU_COMPATIBILITY,
     visibility = ["//visibility:public"],
     deps = [
         ":decode_fixture",
