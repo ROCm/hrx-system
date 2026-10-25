@@ -307,14 +307,10 @@ command.program.def public @flash_next_experts(%layer: index) launch(%parameters
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c3 = index.constant 3 : index
-  // Compact matrix tiles limit padded work for sparse expert populations.
-  // Larger epochs amortize each packed weight panel across wider records.
+  // Matrix work shares decoded F16 panels across 128-route records. The same
+  // row count owns table allocation and both consumers' specialization.
   %matrix_threshold = index.constant 256 : index
-  %wide_threshold = index.constant 2048 : index
-  %compact_rows = index.constant 64 : index
-  %wide_rows = index.constant 128 : index
-  %wide = index.cmp uge, %tokens, %wide_threshold : index
-  %matrix_rows = scf.select %wide, %wide_rows, %compact_rows : index
+  %matrix_rows = index.constant 128 : index
   %matrix = index.cmp uge, %tokens, %matrix_threshold : index
   %record_rows = scf.select %matrix, %matrix_rows, %c4 : index
   // Verification supplies a cohort of anchor and proposed tokens, even

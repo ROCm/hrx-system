@@ -378,15 +378,16 @@ record width and contraction schedule:
 | 1–4, ordinary or predictor work | Direct per-route projections. |
 | 1–4, speculative target verification | Four-route records and packed dot products. |
 | 5–255 | Four-route records and packed dot products. |
-| 256–2,047 | 64-route records and matrix contractions. |
-| 2,048–32,768 | 128-route records and matrix contractions. |
+| 256–32,768 | 128-route records and F16-panel matrix contractions. |
 
 A finite pool of workgroups visits live records and output features. Gate/up
 and down reuse the same table, and the final combination accumulates the
 original ten slots in order. Wider records amortize packed-weight reads and
-decoding; compact records limit padded matrix work when expert populations
-are smaller. These choices specialize into the command and kernel programs,
-without a host routing decision or a distinct prefill execution path.
+decoding; four-route records limit padding for smaller populations. Matrix
+capacities share the same panel arithmetic and record layout, including short
+prompts and bounded slices of longer requests. These choices specialize into
+the command and kernel programs, without a host routing decision or a distinct
+prefill execution path.
 
 The packed Q5_1 down projection computes two adjacent output features per
 wave. Each activation chunk and its affine input sum feed both features,
@@ -412,14 +413,14 @@ so each K32 contraction reuses their headers and code packets.
 
 The 128-row schedules decode weights into F16 panels, combining original
 scales and affine offsets before F32 matrix accumulation. Fused gate/up keeps
-F32 values through SiLU and the product before publishing BF16. At 2K capacity,
-Q4_K and Q5_K gate/up consumers share one conversion of the live input rows to
-F16 across all selected experts. The same consumer handles prepacked operands
-or converts BF16 values at shared-memory publication. Q8 gate/up does its
-conversion there directly.
+F32 values through SiLU and the product before publishing BF16. At capacities
+of 2K or more, Q4_K and Q5_K gate/up consumers share one conversion of the live
+input rows to F16 across all selected experts. The same consumer handles
+prepacked operands or converts BF16 values at shared-memory publication. Q8
+gate/up does its conversion there directly.
 
-Smaller routed and shared matrix schedules retain exact BF16 integer codes
-and F32 scale/correction application. All schedules consume original Q4_K,
+The shared matrix schedule retains exact BF16 integer codes and F32
+scale/correction application. All schedules consume original Q4_K,
 Q5_K, Q5_1, or Q8_0 storage without an expanded parameter bank. Tile and wave
 geometry remain SSA values selected during specialization.
 

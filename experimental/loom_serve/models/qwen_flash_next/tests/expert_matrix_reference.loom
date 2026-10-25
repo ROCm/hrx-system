@@ -76,8 +76,8 @@ func.def public @expert_matrix_fixture(%down: i1, %format: index, %input: buffer
 
 // Original route identity determines the expected expert and activation row;
 // the oracle never reads the GPU-produced record order or its live counts.
-// Wide consumers reconstruct F16 coefficients; narrow consumers retain original
-// scales. Both use independent scalar decoding and F64 accumulation here.
+// The 128-row consumers reconstruct F16 coefficients; 64-row consumers retain
+// original scales. Both use independent scalar decoding and F64 accumulation.
 func.def public inline @expert_matrix_reference(%down: i1, %format: index, %input: buffer, %tasks: buffer, %weight: buffer, %up_weight: buffer, %output: buffer) {
   %record_rows = config.get @expert_test.tile_rows : index
   %wide_rows = index.constant 128 : index

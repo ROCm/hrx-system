@@ -3990,7 +3990,7 @@ loom_execution_test(
   RUNNER_ARGS
     "--device=amdgpu2"
     "--config=expert_test.tile_rows=128"
-    "--config=flash_next.token_count=131"
+    "--config=flash_next.token_count=256"
   LABELS
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
@@ -4020,7 +4020,7 @@ loom_execution_test(
     "--device=amdgpu2"
     "--sanitizer=access"
     "--config=expert_test.tile_rows=128"
-    "--config=flash_next.token_count=131"
+    "--config=flash_next.token_count=256"
   LABELS
     "notsan"
     "iree-build-requirement=libamdf"
@@ -4052,7 +4052,7 @@ loom_execution_test(
     "--sanitizer=tsan"
     "--sanitizer-reporting=report-only"
     "--config=expert_test.tile_rows=128"
-    "--config=flash_next.token_count=131"
+    "--config=flash_next.token_count=256"
   LABELS
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"
