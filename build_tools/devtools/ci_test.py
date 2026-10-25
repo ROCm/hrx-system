@@ -852,13 +852,13 @@ class CiTest(unittest.TestCase):
                     ]
                     self.assertEqual(len(acquisition), int(include_python))
                     if acquisition:
-                        self.assertIn("--test_timeout=10", acquisition[0].argv)
+                        self.assertIn("--test_timeout=20", acquisition[0].argv)
                         self.assertIn("--fixture=repository", acquisition[0].argv)
                     repository = next(
                         step for step in steps if "//fixture/..." in step.argv
                     )
                     self.assertIn("-//fixture:fetch", repository.argv)
-                    self.assertNotIn("--test_timeout=10", repository.argv)
+                    self.assertNotIn("--test_timeout=20", repository.argv)
                     self.assertEqual(
                         "--test_lang_filters=-py" in repository.argv,
                         not include_python,
@@ -869,9 +869,9 @@ class CiTest(unittest.TestCase):
                 step for step in cpu_steps if "//fixture:fetch" in step.argv
             )
             ordinary = next(step for step in cpu_steps if step.name == "Test IREE")
-            self.assertIn("--test_timeout=10", acquisition.argv)
+            self.assertIn("--test_timeout=20", acquisition.argv)
             self.assertIn("-//fixture:fetch", ordinary.argv)
-            self.assertNotIn("--test_timeout=10", ordinary.argv)
+            self.assertNotIn("--test_timeout=20", ordinary.argv)
 
     def test_bazel_repository_integration_skips_ordinary_repository_build(self):
         args = ci.parse_arguments(["iree-bazel-repository-integration"])

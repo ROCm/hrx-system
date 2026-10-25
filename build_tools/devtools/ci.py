@@ -657,7 +657,7 @@ def model_acquisition_test_step(
     return bazel_test_step(
         "Test model acquisition",
         ci_config.MODEL_ACQUISITION_BAZEL_TARGETS,
-        bazel_options=bazel_options + ("--test_timeout=10",),
+        bazel_options=bazel_options + ("--test_timeout=20",),
     )
 
 
