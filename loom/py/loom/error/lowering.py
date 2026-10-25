@@ -682,6 +682,23 @@ ERR_LOWERING_067 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_068: A device count producer cannot preserve a source observation.
+ERR_LOWERING_068 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=68,
+    severity=Severity.ERROR,
+    summary="Launch-count realization requires incompatible memory observations.",
+    message=(
+        "launch-count realization for @{kernel_name} cannot evaluate its "
+        "captured reads at one memory observation"
+    ),
+    params=(ErrorParam("kernel_name", ParamKind.STRING),),
+    fix_hint=(
+        "Capture the earlier value in explicit device storage before the "
+        "boundary, or read the current value in the kernel launch configuration"
+    ),
+)
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -718,4 +735,5 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_065,
     ERR_LOWERING_066,
     ERR_LOWERING_067,
+    ERR_LOWERING_068,
 )

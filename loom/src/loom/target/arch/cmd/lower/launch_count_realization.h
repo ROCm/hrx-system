@@ -53,13 +53,21 @@ typedef struct loom_cmd_launch_count_realization_t {
 // |root_ops| names normalized command roots and may contain duplicates. Exact
 // counts remain direct. Compatible residual deterministic read-only closures
 // in one ordered command block are clustered into a target-matched 1x1x1
-// kernel that writes one transient array of XYZ tuples. The producer is placed
-// before the cluster's first consumer, and each consumer retains its authored
+// kernel that writes one transient array of XYZ tuples. The producer normally
+// precedes the cluster's first consumer, and each consumer retains its authored
 // position with an indirect view of its tuple. Possible intervening writes
 // split clusters unless explicit alias scopes prove them disjoint. A residual
 // consumer outside an ordered block is realized as a singleton nested serial
 // command. The generated source products remain owned by |out_realization|
 // until deinitialization.
+//
+// Captured reads must preserve their source observation. Root-local motion
+// analysis proves movement to the originating consumer before clustering may
+// hoist reads over explicitly disjoint consumer writes. An earlier observation
+// instead gets a singleton producer at its source position. A closure with no
+// common legal placement is diagnosed rather than reloading changed storage.
+// Every root is planned before source mutation; captured source operations
+// remain live until all generated products have been built.
 //
 // Authored contract failures emit diagnostics, clear |out_valid|, and return
 // OK. Unsupported compiler mappings and infrastructure failures return a

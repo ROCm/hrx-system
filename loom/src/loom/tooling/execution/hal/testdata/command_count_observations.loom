@@ -1,0 +1,159 @@
+// A count sampled before a device write keeps that observation through nested
+// program and template calls. Current configuration reads observe the new word.
+kernel.def @publish() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%value: i32, %storage: buffer) {
+  %origin = index.constant 0 : offset
+  %words = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  view.store %value, %words[0] : i32, view<1xi32>
+  kernel.return
+}
+
+kernel.def @mark_current(%storage: buffer) {
+  %origin = index.constant 0 : offset
+  %words = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  %word = view.load %words[0] : view<1xi32> -> i32
+  %c0_word = scalar.constant 0 : i32
+  %enabled = scalar.cmpi ne, %word, %c0_word : i32
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %count = scf.select %enabled, %c1, %c0 : index
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%slot: index, %output: buffer) where [range(%slot, 0, 1)] {
+  %origin = index.constant 0 : offset
+  %values = buffer.view %output[%origin] : buffer -> view<2xi32>
+  %c1 = scalar.constant 1 : i32
+  %value = view.load %values[%slot] : view<2xi32> -> i32
+  %next = scalar.addi %value, %c1 : i32
+  view.store %next, %values[%slot] : i32, view<2xi32>
+  kernel.return
+}
+
+kernel.def @mark_sampled(%earlier: i1) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %count = scf.select %earlier, %c1, %c0 : index
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %values = buffer.view %output[%origin] : buffer -> view<2xi32>
+  %c1 = scalar.constant 1 : i32
+  %value = view.load %values[0] : view<2xi32> -> i32
+  %next = scalar.addi %value, %c1 : i32
+  view.store %next, %values[0] : i32, view<2xi32>
+  kernel.return
+}
+
+template.decl @mark_earlier(%earlier: i1, %output: buffer)
+
+template.def<@mark_earlier> @mark_earlier_impl(%earlier: i1, %output: buffer) {
+  kernel.launch @mark_sampled[%earlier](%output) : [i1](buffer)
+  template.return
+}
+
+command.program.def @consume(%earlier: i1) launch(%storage: buffer, %output: buffer) {
+  %slot = index.constant 1 : index
+  command.concurrent {
+    kernel.launch @mark_current[%storage](%slot, %output) : [buffer](index, buffer)
+    template.apply<@mark_earlier>(%earlier, %output) : (i1, buffer)
+  }
+  template.apply<@mark_earlier>(%earlier, %output) : (i1, buffer)
+  command.return
+}
+
+command.program.def @observe(%initial: i32) launch(%output: buffer) {
+  %bytes = index.constant 4 : offset
+  %storage = buffer.alloca<global> align(16) %bytes : buffer
+  kernel.launch @publish(%initial, %storage) : (i32, buffer)
+  %origin = index.constant 0 : offset
+  %words = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  %word = view.load %words[0] : view<1xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %earlier = scalar.cmpi ne, %word, %c0 : i32
+  %c1 = scalar.constant 1 : i32
+  %replacement = scalar.xori %initial, %c1 : i32
+  kernel.launch @publish(%replacement, %storage) : (i32, buffer)
+  command.program.launch @consume[%earlier](%storage, %output) : [i1](buffer, buffer)
+  command.return
+}
+
+command.program.def @initially_zero() launch(%output: buffer) {
+  %c0 = scalar.constant 0 : i32
+  command.program.launch @observe[%c0](%output) : [i32](buffer)
+  command.return
+}
+
+command.program.def @initially_one() launch(%output: buffer) {
+  %c1 = scalar.constant 1 : i32
+  command.program.launch @observe[%c1](%output) : [i32](buffer)
+  command.return
+}
+
+// Every kernel configuration here is pure. Count realization still has to
+// handle the caller-authored device observation, without another read-only
+// configuration accidentally enabling it.
+command.program.def @only_earlier() launch(%output: buffer) {
+  %bytes = index.constant 4 : offset
+  %storage = buffer.alloca<global> align(16) %bytes : buffer
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  kernel.launch @publish(%c0, %storage) : (i32, buffer)
+  %origin = index.constant 0 : offset
+  %words = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  %word = view.load %words[0] : view<1xi32> -> i32
+  %earlier = scalar.cmpi ne, %word, %c0 : i32
+  kernel.launch @publish(%c1, %storage) : (i32, buffer)
+  template.apply<@mark_earlier>(%earlier, %output) : (i1, buffer)
+  command.return
+}
+
+func.def @unchanged(%output: buffer) {
+  func.return
+}
+
+func.def @expected_zero(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %values = buffer.view %output[%origin] : buffer -> view<2xi32>
+  %c1 = scalar.constant 1 : i32
+  view.store %c1, %values[1] : i32, view<2xi32>
+  func.return
+}
+
+func.def @expected_one(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %values = buffer.view %output[%origin] : buffer -> view<2xi32>
+  %c2 = scalar.constant 2 : i32
+  view.store %c2, %values[0] : i32, view<2xi32>
+  func.return
+}
+
+check.scenario @zero_before_one {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %first = check.generate.fill value(0) : tensor<2xi32>
+    check.compare<@initially_zero, @expected_zero>(%first) : (tensor<2xi32>) -> () {
+      check.expect.equal actual(%first) expected(%first) : tensor<2xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @one_before_zero {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %second = check.generate.fill value(0) : tensor<2xi32>
+    check.compare<@initially_one, @expected_one>(%second) : (tensor<2xi32>) -> () {
+      check.expect.equal actual(%second) expected(%second) : tensor<2xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @pure_configurations {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(7) : tensor<2xi32>
+    check.compare<@only_earlier, @unchanged>(%output) : (tensor<2xi32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<2xi32>
+    }
+  }
+  check.return
+}

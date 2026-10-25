@@ -217,7 +217,6 @@ TEST_F(ResolveLaunchesTest, PreservesConfigurationPlacement) {
       module_, &references, configurations.data(), configurations.size(),
       /*diagnostic_emitter=*/{}, &scratch_arena_, &resolution, &valid));
   ASSERT_TRUE(valid);
-  EXPECT_TRUE(resolution.has_readonly_launches);
 
   const loom_op_t* root_op =
       module_->symbols.entries[root.symbol_id].defining_op;
@@ -257,32 +256,6 @@ TEST_F(ResolveLaunchesTest, PreservesConfigurationPlacement) {
   EXPECT_EQ(loom_func_call_callee(readonly_call).symbol_id,
             readonly_config.symbol_id);
   EXPECT_TRUE(loom_kernel_dispatch_isa(readonly_call->next_op));
-
-  Verify();
-}
-
-TEST_F(ResolveLaunchesTest, ReportsNoReadonlyLaunches) {
-  const loom_symbol_ref_t pure_config = BuildConfiguration(
-      IREE_SV("pure_config"), LOOM_CALLABLE_EFFECT_CONTRACT_PURE,
-      loom_type_scalar(LOOM_SCALAR_TYPE_INDEX));
-  const loom_symbol_ref_t pure_kernel = BuildKernel(
-      IREE_SV("pure_kernel"), loom_type_scalar(LOOM_SCALAR_TYPE_INDEX));
-  BuildProgram(pure_kernel, pure_kernel, loom_symbol_ref_null());
-  Verify();
-
-  std::vector<loom_symbol_ref_t> configurations(module_->symbols.count,
-                                                loom_symbol_ref_null());
-  configurations[pure_kernel.symbol_id] = pure_config;
-  loom_symbol_reference_table_t references = {};
-  IREE_ASSERT_OK(
-      loom_symbol_reference_table_build(module_, &scratch_arena_, &references));
-  loom_kernel_launch_resolution_t resolution = {};
-  bool valid = false;
-  IREE_ASSERT_OK(loom_kernel_resolve_launches(
-      module_, &references, configurations.data(), configurations.size(),
-      /*diagnostic_emitter=*/{}, &scratch_arena_, &resolution, &valid));
-  ASSERT_TRUE(valid);
-  EXPECT_FALSE(resolution.has_readonly_launches);
 
   Verify();
 }

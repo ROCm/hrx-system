@@ -1,3 +1,39 @@
+// RUN: emit command-program @earlier_observation
+
+kernel.entry.decl @overwrite(%storage: buffer)
+
+kernel.def @combined(%earlier: i1, %storage: buffer) {
+  %origin = index.constant 0 : offset
+  %words = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  %word = view.load %words[0] : view<1xi32> -> i32
+  %c0_word = scalar.constant 0 : i32
+  %current = scalar.cmpi ne, %word, %c0_word : i32
+  %enabled = scalar.andi %earlier, %current : i1
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %count = scf.select %enabled, %c1, %c0 : index
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer) {
+  kernel.return
+}
+
+command.program.def public @earlier_observation() launch(%storage: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %words = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  // One expression needs both sides of the write. It cannot become one reload
+  // of the current word; preserve the earlier sample in explicit storage.
+  // ERROR@+1: LOWERING/068 {kernel_name="combined"}
+  %word = view.load %words[0] : view<1xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %enabled = scalar.cmpi ne, %word, %c0 : i32
+  %c1 = index.constant 1 : index
+  kernel.dispatch @overwrite[%c1](%storage) : [index](buffer)
+  kernel.launch @combined[%enabled, %storage](%output) : [i1, buffer](buffer)
+  command.return
+}
+
+// ====
+
 // RUN: emit command-program @entry
 
 command.program.def @recursive() launch() {

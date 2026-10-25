@@ -29,11 +29,6 @@ typedef struct loom_kernel_launch_resolution_t {
 
   // Number of pre-resolution module symbol slots.
   iree_host_size_t entry_count;
-
-  // True when an actual rewritten launch used a deterministic read-only
-  // configuration. Downstream planning consumes this retained result instead
-  // of rediscovering configuration effects after inlining.
-  bool has_readonly_launches;
 } loom_kernel_launch_resolution_t;
 
 // Resolves every logical kernel launch recorded in |references|.
