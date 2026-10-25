@@ -212,6 +212,22 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
 iree_cc_test(
   NAME
+    jpeg_test
+  SRCS
+    "jpeg_test.cc"
+  DEPS
+    ::execution
+    amdf::headers
+    iree::third_party::google_test
+    iree::third_party::google_test_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD)
+iree_cc_test(
+  NAME
     vcn_encode_test
   SRCS
     "vcn_encode_test.cc"

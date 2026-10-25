@@ -13,10 +13,17 @@
 extern "C" {
 #endif
 
-// Emits the qualified VCN 2/3/4 JPEG register protocol into at least 128
-// DWORDs. Operands are validated at preparation; emission neither parses input
-// nor reads output pixels. Returns the complete 64-byte-aligned IB byte extent.
-uint32_t amdf_media_drm_jpeg_emit(uint32_t* words, uint64_t compressed_address,
+// Selects the command schema corresponding to a native IP discovery version.
+// Returns false without producing a protocol when the version is unknown.
+bool amdf_media_drm_jpeg_protocol(
+    uint32_t ip_discovery_version,
+    amdf_media_drm_command_protocol_t* out_protocol);
+
+// Emits the selected JPEG register protocol into at least 128 DWORDs. Operands
+// are validated at preparation; emission neither parses input nor reads output
+// pixels. Returns the complete 64-byte-aligned IB byte extent.
+uint32_t amdf_media_drm_jpeg_emit(amdf_media_drm_command_protocol_t protocol,
+                                  uint32_t* words, uint64_t compressed_address,
                                   uint32_t compressed_byte_length,
                                   const amdf_media_drm_frame_t* output);
 

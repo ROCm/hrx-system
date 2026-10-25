@@ -18,9 +18,20 @@ extern "C" {
 
 typedef struct amdf_media_drm_buffer_t amdf_media_drm_buffer_t;
 
+typedef enum amdf_media_drm_command_protocol_t {
+  // VCN 2 through ordinary VCN 4 JPEG with indexed component-plane offsets.
+  AMDF_MEDIA_DRM_COMMAND_PROTOCOL_JPEG_INDEXED = 0,
+  // VCN 4.0.3 and VCN 5 JPEG with the second register bank and direct offsets.
+  AMDF_MEDIA_DRM_COMMAND_PROTOCOL_JPEG_DIRECT = 1,
+  // Unified VCN 4 decode and encode firmware package protocol.
+  AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4 = 2,
+} amdf_media_drm_command_protocol_t;
+
 typedef struct amdf_media_drm_engine_t {
   // Kernel hardware-IP selector for publication on this family.
   uint32_t ip_type;
+  // Generation-specific command schema selected once during discovery.
+  amdf_media_drm_command_protocol_t command_protocol;
   // Immutable native generation, rings, and command alignment.
   struct drm_amdgpu_info_hw_ip information;
 } amdf_media_drm_engine_t;

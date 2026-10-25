@@ -14,6 +14,7 @@
 #include "libamdf/src/instance.h"
 #include "libamdf/src/media/av1.h"
 #include "libamdf/src/media/drm/command.h"
+#include "libamdf/src/media/drm/jpeg.h"
 #include "libamdf/src/media/h264.h"
 #include "libamdf/src/media/hevc.h"
 #include "libamdf/src/platform/linux/endpoint.h"
@@ -671,8 +672,15 @@ static amdf_status_t amdf_media_drm_device_discover(
     }
     const uint32_t version = engine.ip_discovery_version;
     const uint32_t major = (version >> 16) & 255;
-    const bool admitted =
-        i == 0 ? major >= 2 && major <= 4 && version != 0x040003 : major == 4;
+    amdf_media_drm_command_protocol_t command_protocol =
+        AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4;
+    const bool jpeg_protocol_known =
+        i == 0 && amdf_media_drm_jpeg_protocol(version, &command_protocol);
+    const bool jpeg_admitted =
+        jpeg_protocol_known &&
+        (command_protocol == AMDF_MEDIA_DRM_COMMAND_PROTOCOL_JPEG_INDEXED ||
+         version == 0x050000);
+    const bool admitted = i == 0 ? jpeg_admitted : major == 4;
     bool codec_present = false;
     for (uint32_t codec = 0; codec < AMDF_MEDIA_DRM_CODEC_COUNT; ++codec) {
       if (amdf_media_drm_codecs[codec].engine != selectors[i]) {
@@ -693,7 +701,11 @@ static amdf_status_t amdf_media_drm_device_discover(
         command_alignment % engine.ib_size_alignment != 0) {
       continue;
     }
-    device->engines[count++] = (amdf_media_drm_engine_t){selectors[i], engine};
+    device->engines[count++] = (amdf_media_drm_engine_t){
+        .ip_type = selectors[i],
+        .command_protocol = command_protocol,
+        .information = engine,
+    };
   }
   if (!amdf_status_is_ok(status)) {
     return status;

@@ -732,8 +732,10 @@ amdf_status_t AMDF_CALL amdf_media_drm_command_prepare(
       amdf_media_drm_command_add_buffer(command, output.buffers[i]);
     }
     if (jpeg) {
+      const amdf_media_drm_engine_t* engine =
+          &device->engines[queue->base.info.queue_family_ordinal];
       command->byte_length = amdf_media_drm_jpeg_emit(
-          command->storage->host_pointer, address,
+          engine->command_protocol, command->storage->host_pointer, address,
           (uint32_t)decode->compressed.byte_length, &output);
     } else {
       for (uint32_t i = 0; i < 2; ++i) {
