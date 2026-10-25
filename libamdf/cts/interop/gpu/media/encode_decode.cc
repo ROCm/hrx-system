@@ -119,9 +119,11 @@ class Av1BitReader {
 
 // Linux VCN emits the complete sized frame OBU while the decode API takes the
 // frame controls and tile payload separately. Recover exactly the shown,
-// single-tile key-frame envelope produced by this CTS configuration.
-::testing::AssertionResult ParseAv1KeyFrameObu(
+// single-tile KEY/INTER envelope produced by this CTS configuration. INTER
+// frames inherit their retained loop-filter deltas from the prior picture.
+::testing::AssertionResult ParseAv1FrameObu(
     const uint8_t* bytes, uint64_t byte_length,
+    const amdf_media_av1_loop_filter_t* primary_filter,
     amdf_media_av1_decode_picture_info_t* picture,
     amdf_media_av1_tile_t* tile) {
   if (bytes == nullptr || byte_length < 3 || bytes[0] != 0x32) {
@@ -148,19 +150,54 @@ class Av1BitReader {
   }
 
   Av1BitReader reader(bytes, byte_length, position);
-  if (reader.Read(1) != 0 || reader.Read(2) != 0 || reader.Read(1) != 1) {
-    return ::testing::AssertionFailure() << "expected a shown AV1 key frame";
+  const uint32_t show_existing_frame = reader.Read(1);
+  picture->frame_type = reader.Read(2);
+  picture->show_frame = reader.Read(1);
+  const bool inter = picture->frame_type == 1;
+  if (show_existing_frame != 0 ||
+      (picture->frame_type != 0 && picture->frame_type != 1) ||
+      picture->show_frame != 1 || inter != (primary_filter != nullptr)) {
+    return ::testing::AssertionFailure()
+           << "expected the admitted shown AV1 KEY/INTER sequence";
   }
+  const uint32_t error_resilient = inter ? reader.Read(1) : 1u;
   picture->disable_cdf_update = reader.Read(1);
   const uint32_t frame_size_override = reader.Read(1);
   picture->order_hint = reader.Read(4);
+  picture->primary_reference = inter ? reader.Read(3) : 7u;
+  const uint32_t refresh_frame_flags = inter ? reader.Read(8) : 255u;
+  const uint32_t short_reference_signaling = inter ? reader.Read(1) : 0u;
+  if (inter) {
+    for (auto& reference_index : picture->active_reference_indices) {
+      reference_index = static_cast<uint8_t>(reader.Read(3));
+    }
+  }
   const uint32_t render_size_differs = reader.Read(1);
+  if (inter) {
+    picture->high_precision_motion_vectors = reader.Read(1);
+    if (reader.Read(1) != 0) {
+      picture->interpolation_filter = 4;
+    } else {
+      picture->interpolation_filter = reader.Read(2);
+    }
+    picture->switchable_motion_mode = reader.Read(1);
+  }
   picture->disable_frame_end_cdf_update = reader.Read(1);
-  if (picture->disable_cdf_update != 0 || frame_size_override != 0 ||
-      picture->order_hint != 0 || render_size_differs != 0 ||
+  const bool active_references_valid =
+      !inter || std::all_of(std::begin(picture->active_reference_indices),
+                            std::end(picture->active_reference_indices),
+                            [](uint8_t index) { return index == 0; });
+  if (error_resilient != (inter ? 0u : 1u) ||
+      picture->disable_cdf_update != 0 || frame_size_override != 0 ||
+      picture->primary_reference != (inter ? 0u : 7u) ||
+      refresh_frame_flags != 255 || short_reference_signaling != 0 ||
+      !active_references_valid || render_size_differs != 0 ||
+      picture->high_precision_motion_vectors != 0 ||
+      picture->interpolation_filter != 4 ||
+      picture->switchable_motion_mode != 0 ||
       picture->disable_frame_end_cdf_update != 0) {
     return ::testing::AssertionFailure()
-           << "AV1 key-frame controls exceed the admitted encode envelope";
+           << "AV1 frame controls exceed the admitted encode envelope";
   }
 
   const uint32_t uniform_tiles = reader.Read(1);
@@ -204,6 +241,17 @@ class Av1BitReader {
     }
   }
   auto& filter = picture->loop_filter;
+  if (primary_filter != nullptr) {
+    std::copy(std::begin(primary_filter->reference_deltas),
+              std::end(primary_filter->reference_deltas),
+              filter.reference_deltas);
+    std::copy(std::begin(primary_filter->mode_deltas),
+              std::end(primary_filter->mode_deltas), filter.mode_deltas);
+  } else {
+    const int8_t reference_defaults[8] = {1, 0, 0, 0, -1, 0, -1, -1};
+    std::copy(std::begin(reference_defaults), std::end(reference_defaults),
+              filter.reference_deltas);
+  }
   if (quantization.delta_present != 0) {
     filter.delta_present = reader.Read(1);
     if (filter.delta_present != 0) {
@@ -224,9 +272,6 @@ class Av1BitReader {
     }
     filter.sharpness = reader.Read(3);
     filter.deltas_enabled = reader.Read(1);
-    const int8_t reference_defaults[8] = {1, 0, 0, 0, -1, 0, -1, -1};
-    std::copy(std::begin(reference_defaults), std::end(reference_defaults),
-              filter.reference_deltas);
     if (filter.deltas_enabled != 0) {
       filter.deltas_updated = reader.Read(1);
       if (filter.deltas_updated != 0) {
@@ -254,10 +299,22 @@ class Av1BitReader {
     }
     picture->transform_mode = reader.Read(1) != 0 ? 2u : 1u;
   }
+  if (inter) {
+    picture->reference_select = reader.Read(1);
+  }
   picture->reduced_transform_set = reader.Read(1);
-  if (picture->reduced_transform_set != 0 || !reader.AlignWithZero()) {
+  bool identity_global_motion = true;
+  if (inter) {
+    for (auto& motion : picture->global_motion) {
+      identity_global_motion &= reader.Read(1) == 0;
+      motion.parameters[2] = 1 << 16;
+      motion.parameters[5] = 1 << 16;
+    }
+  }
+  if (picture->reference_select != 0 || picture->reduced_transform_set != 0 ||
+      !identity_global_motion || !reader.AlignWithZero()) {
     return ::testing::AssertionFailure()
-           << "invalid AV1 key-frame byte alignment";
+           << "invalid AV1 frame tail or byte alignment";
   }
   if (!reader.valid() || reader.byte_offset() >= byte_length ||
       reader.byte_offset() > std::numeric_limits<uint32_t>::max() ||
@@ -333,9 +390,6 @@ void MediaEncodeInteropTest::DecodePictures(
   ASSERT_EQ(decode_session_, nullptr);
   ASSERT_TRUE(decode_commands_.empty());
   ASSERT_FALSE(pictures.empty());
-  if (test_case.codec == AMDF_MEDIA_CODEC_AV1) {
-    ASSERT_EQ(pictures.size(), 1u);
-  }
   ASSERT_NE(encode_point, 0u);
   const auto* kernel =
       kernels::media_consume::kKernels.Find(gpu_endpoint_info_);
@@ -558,6 +612,7 @@ void MediaEncodeInteropTest::DecodePictures(
 
   amdf_media_h264_scaling_matrices_t h264_matrices;
   std::memset(&h264_matrices, 16, sizeof(h264_matrices));
+  amdf_media_av1_loop_filter_t av1_primary_filter = {};
   for (uint32_t index = 0; index < pictures.size(); ++index) {
     const auto& encoded = pictures[index];
     const uint32_t reference_slot = index % references.size();
@@ -638,15 +693,17 @@ void MediaEncodeInteropTest::DecodePictures(
     }
     amdf_media_av1_tile_t av1_tile = {
         0, static_cast<uint32_t>(encoded.byte_length)};
+    amdf_media_reference_t av1_reference = {};
     amdf_media_av1_decode_picture_info_t av1_picture = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_AV1_DECODE_PICTURE_INFO,
         .structure_size = sizeof(av1_picture),
         .sequence = {.cdef = 1, .order_hint_bit_count = 4},
-        .frame_type = 0,
+        .frame_type = index == 0 ? 0u : 1u,
         .show_frame = 1,
-        .primary_reference = 7,
+        .primary_reference = index == 0 ? 7u : 0u,
+        .order_hint = index,
         .interpolation_filter = 4,
-        .transform_mode = 1,
+        .transform_mode = index == 0 ? 1u : 2u,
         .superres_denominator = 8,
         .tile_column_count = 1,
         .tile_row_count = 1,
@@ -656,12 +713,17 @@ void MediaEncodeInteropTest::DecodePictures(
               std::end(av1_picture.reference_map), UINT8_MAX);
     std::fill(std::begin(av1_picture.active_reference_indices),
               std::end(av1_picture.active_reference_indices), UINT8_MAX);
+    for (auto& motion : av1_picture.global_motion) {
+      motion.parameters[2] = 1 << 16;
+      motion.parameters[5] = 1 << 16;
+    }
     av1_picture.tile_column_starts[1] = (width + 63) / 64;
     av1_picture.tile_row_starts[1] = (height + 63) / 64;
     if (test_case.codec == AMDF_MEDIA_CODEC_AV1) {
       if (encoded.kind == AMDF_MEDIA_ENCODED_REGION_AV1_FRAME_OBU) {
-        ASSERT_TRUE(ParseAv1KeyFrameObu(encoded.bytes, encoded.byte_length,
-                                        &av1_picture, &av1_tile));
+        ASSERT_TRUE(ParseAv1FrameObu(encoded.bytes, encoded.byte_length,
+                                     index == 0 ? nullptr : &av1_primary_filter,
+                                     &av1_picture, &av1_tile));
       } else {
         ASSERT_EQ(encoded.kind,
                   AMDF_MEDIA_ENCODED_REGION_AV1_TILE_GROUP_PAYLOAD);
@@ -669,11 +731,35 @@ void MediaEncodeInteropTest::DecodePictures(
         av1_picture.quantization = encoded.av1_result.quantization;
         av1_picture.cdef = encoded.av1_result.cdef;
         av1_picture.segmentation = encoded.av1_result.segmentation;
+        if (index != 0) {
+          av1_picture.primary_reference = encoded.av1_result.primary_reference;
+          std::copy(std::begin(encoded.av1_result.reference_indices),
+                    std::end(encoded.av1_result.reference_indices),
+                    av1_picture.active_reference_indices);
+        }
+      }
+      ASSERT_EQ(av1_picture.frame_type, index == 0 ? 0u : 1u);
+      ASSERT_EQ(av1_picture.order_hint, index);
+      ASSERT_EQ(av1_picture.primary_reference, index == 0 ? 7u : 0u);
+      ASSERT_EQ(av1_picture.interpolation_filter, 4u);
+      ASSERT_EQ(av1_picture.transform_mode, index == 0 ? 1u : 2u);
+      if (index != 0) {
+        ASSERT_TRUE(std::all_of(
+            std::begin(av1_picture.active_reference_indices),
+            std::end(av1_picture.active_reference_indices),
+            [](uint8_t reference_index) { return reference_index == 0; }));
+        const uint32_t prior_slot = (index - 1) % references.size();
+        av1_reference = {&references[prior_slot], prior_slot};
+        av1_picture.reference_count = 1;
+        av1_picture.references = &av1_reference;
+        std::fill(std::begin(av1_picture.reference_map),
+                  std::end(av1_picture.reference_map), uint8_t{0});
       }
       for (auto& unit_size :
            av1_picture.loop_filter.log2_restoration_unit_sizes) {
         unit_size = 5;
       }
+      av1_primary_filter = av1_picture.loop_filter;
     }
     const void* codec_picture = test_case.codec == AMDF_MEDIA_CODEC_H264
                                     ? static_cast<const void*>(&h264_picture)
