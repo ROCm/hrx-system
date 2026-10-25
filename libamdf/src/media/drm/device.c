@@ -121,7 +121,8 @@ static bool amdf_media_drm_codec_direction_implemented(
     case AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5:
       // Each generation-specific packet family is published only after its
       // exact output and lifecycle have passed on that generation.
-      return codec == AMDF_MEDIA_CODEC_H264 &&
+      return (codec == AMDF_MEDIA_CODEC_H264 ||
+              codec == AMDF_MEDIA_CODEC_HEVC) &&
              direction == AMDF_MEDIA_DIRECTION_DECODE;
   }
   return false;
