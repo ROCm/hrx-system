@@ -333,7 +333,7 @@ void MediaEncodeInteropTest::DecodePictures(
   ASSERT_EQ(decode_session_, nullptr);
   ASSERT_TRUE(decode_commands_.empty());
   ASSERT_FALSE(pictures.empty());
-  if (test_case.codec != AMDF_MEDIA_CODEC_H264) {
+  if (test_case.codec == AMDF_MEDIA_CODEC_AV1) {
     ASSERT_EQ(pictures.size(), 1u);
   }
   ASSERT_NE(encode_point, 0u);
@@ -597,6 +597,10 @@ void MediaEncodeInteropTest::DecodePictures(
 
     const amdf_media_hevc_slice_t hevc_slice = {
         0, static_cast<uint32_t>(encoded.byte_length)};
+    amdf_media_hevc_reference_t hevc_reference = {};
+    // P slices carry one inline negative reference as ue(1), ue(0), ue(0),
+    // and a used flag: six bits after short_term_ref_pic_set_sps_flag.
+    const uint32_t hevc_reference_set_bit_count = index == 0 ? 0u : 6u;
     amdf_media_hevc_decode_picture_info_t hevc_picture = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_HEVC_DECODE_PICTURE_INFO,
         .structure_size = sizeof(hevc_picture),
@@ -615,12 +619,23 @@ void MediaEncodeInteropTest::DecodePictures(
                 .slice_chroma_qp_offsets_present = 1,
                 .loop_filter_across_slices_enabled = 1,
             },
-        .is_random_access = 1,
-        .is_idr = 1,
-        .is_intra = 1,
+        .picture_order_count = static_cast<int32_t>(index),
+        .is_random_access = index == 0,
+        .is_idr = index == 0,
+        .is_intra = index == 0,
+        .short_term_reference_set_bit_count = hevc_reference_set_bit_count,
         .slice_count = 1,
         .slices = &hevc_slice,
     };
+    if (index != 0) {
+      const uint32_t prior_slot = (index - 1) % references.size();
+      hevc_reference.binding = {&references[prior_slot], prior_slot};
+      hevc_reference.picture_order_count = static_cast<int32_t>(index - 1);
+      hevc_picture.reference_count = 1;
+      hevc_picture.references = &hevc_reference;
+      hevc_picture.short_term_before.count = 1;
+      hevc_picture.short_term_before.indices[0] = 0;
+    }
     amdf_media_av1_tile_t av1_tile = {
         0, static_cast<uint32_t>(encoded.byte_length)};
     amdf_media_av1_decode_picture_info_t av1_picture = {

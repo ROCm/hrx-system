@@ -1090,7 +1090,8 @@ void MediaEncodeInteropTest::RunPictures(
         EXPECT_EQ(output[3], 1u);
       }
       if (batch == 0 &&
-          (index == 0 || test_case.codec == AMDF_MEDIA_CODEC_H264)) {
+          (index == 0 || test_case.codec == AMDF_MEDIA_CODEC_H264 ||
+           test_case.codec == AMDF_MEDIA_CODEC_HEVC)) {
         decoded_pictures.push_back({
             .byte_offset = output_offset,
             .byte_length = region.byte_length,

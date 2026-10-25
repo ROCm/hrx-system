@@ -28,6 +28,12 @@ TEST_F(MediaEncodeInteropTest, H264DependentPicture) {
                   AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP, 320, 192, 2, 2));
 }
 
+TEST_F(MediaEncodeInteropTest, HevcDependentPicture) {
+  ASSERT_NO_FATAL_FAILURE(
+      RunPictures({AMDF_MEDIA_CODEC_HEVC, AMDF_MEDIA_PIXEL_FORMAT_NV12, 8},
+                  AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP, 320, 192, 2, 2));
+}
+
 TEST_P(MediaEncodeMatrixTest, PipelinesGpuInputsAndReusesRecordings) {
   const auto& test_case = GetParam();
   ASSERT_NO_FATAL_FAILURE(
