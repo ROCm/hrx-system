@@ -83,7 +83,6 @@ jobs:
           # runner also has a newer GCC installed. The ELF audit enforces it.
           python -m build_tools.ci.loom_wheel \
             --profile=${{ matrix.profile }} --output=wheel-artifact -- \
-            --jobs=4 \
             --cxxopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 \
             --linkopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13
 
@@ -111,7 +110,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bazelisk --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $options = @('--jobs=4')
+          $options = @()
           if ('${{ matrix.profile }}' -eq 'asan') {
             $catalog = Join-Path $env:ProgramData "Microsoft\VisualStudio\Packages\_Instances\$($visualStudio.instanceId)\catalog.json"
             $companion = python build_tools/ci/windows_stl_asan.py `
