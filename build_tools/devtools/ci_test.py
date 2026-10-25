@@ -515,49 +515,25 @@ class CiTest(unittest.TestCase):
         )
 
     def test_bazel_profiles_are_named_for_each_selected_phase(self):
-        profile_dir = Path("/tmp/iree-bazel-profiles")
-        resolved_profile_dir = profile_dir.resolve()
-        args = ci.parse_arguments(
-            [
-                "iree-bazel-cpu",
-                "--target",
-                "//runtime/...",
-                "--bazel-profile-dir",
-                str(profile_dir),
-            ]
-        )
-
-        for selection, expected_names in (
-            ("0", ("test-iree.profile.gz",)),
-            ("1", ("build-iree.profile.gz", "test-iree.profile.gz")),
+        profile_dir = Path("/tmp/iree-bazel-profiles").resolve()
+        setup = ci.CiStep("Set up", ("python", "setup.py"))
+        selected = [setup]
+        for verb in ("build", "test", "run"):
+            selected.append(
+                ci.CiStep(
+                    f"Fixture / {verb.upper()}",
+                    ("python", "dev.py", "bazel", verb, "//fixture:target"),
+                )
+            )
+        steps = ci.add_bazel_profiles(selected, profile_dir)
+        self.assertEqual(steps[0], setup)
+        for step, name in zip(
+            steps[1:], ("fixture-build", "fixture-test", "fixture-run"), strict=True
         ):
-            with self.subTest(selection=selection):
-                with mock.patch.dict(
-                    os.environ,
-                    {"IREE_CI_PLATFORM_COVERAGE": selection},
-                    clear=True,
-                ):
-                    steps = ci.steps_from_args(args)
-                self.assertEqual(
-                    [
-                        arg
-                        for step in steps
-                        for arg in step.argv
-                        if arg.startswith("--profile=")
-                    ],
-                    [
-                        f"--profile={resolved_profile_dir / name}"
-                        for name in expected_names
-                    ],
-                )
-                self.assertEqual(
-                    [
-                        step.bazel_profile
-                        for step in steps
-                        if step.bazel_profile is not None
-                    ],
-                    [resolved_profile_dir / name for name in expected_names],
-                )
+            expected = profile_dir / (name + ".profile.gz")
+            self.assertEqual(step.bazel_profile, expected)
+            self.assertEqual(step.argv[4], f"--profile={expected}")
+            self.assertEqual(step.argv[-1], "//fixture:target")
 
     def test_profile_summary_is_published_after_success_and_failure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -850,81 +826,52 @@ class CiTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "repository-wide"):
             ci.steps_from_args(args)
 
-    def test_bazel_repository_integration_exercises_supported_repository_tests(self):
-        args = ci.parse_arguments(
-            [
-                "iree-bazel-repository-integration",
-                "--amdgpu-target",
-                "gfx11-generic",
-            ]
-        )
-
-        with mock.patch.dict(
-            ci.os.environ,
-            {
-                "HRX_ROCM_ROOT": "/tmp/rocm-root",
-                "IREE_CI_PLATFORM_COVERAGE": "1",
-            },
-            clear=True,
-        ):
-            steps = ci.steps_from_args(args)
-
-        self.assertEqual(
-            [step.name for step in steps],
-            [
-                "Configure Bazel",
-                "Build repository",
-                "Build AMDGPU device toolchain smoke",
-                "Test repository",
-                "Run dynamic library environment smoke",
-                "Run executable alias smoke",
-                "Test shared Loom tools",
-            ],
-        )
-        configure_step = steps[0]
-        self.assertIn("-DIREE_ROCM_PATH=/tmp/rocm-root", configure_step.argv)
-        device_build_step = steps[2]
-        for target in ci_config.BAZEL_REPOSITORY_INTEGRATION_DEVICE_TARGETS:
-            self.assertIn(target, device_build_step.argv)
-        self.assertIn(
-            "--//runtime/src/iree/hal/drivers/amdgpu:targets=gfx11-generic",
-            device_build_step.argv,
-        )
-        integration_test_step = steps[3]
-        self.assertEqual(integration_test_step.argv[-1], "//...")
-        self.assertIn(
-            "--test_tag_filters=" + ",".join(ci_config.CPU_RESOURCE_TAG_EXCLUDES),
-            integration_test_step.argv,
-        )
-        self.assertEqual(
-            steps[4].argv[-1],
-            ci_config.BAZEL_REPOSITORY_INTEGRATION_DYNAMIC_LIBRARY_TARGET,
-        )
-        self.assertEqual(
-            steps[5].argv[-3:],
-            (
-                ci_config.BAZEL_REPOSITORY_INTEGRATION_ALIAS_TARGET,
-                "--",
-                "--help",
+    def test_acquisition_phase_preserves_options_and_runs_only_with_python(self):
+        with (
+            mock.patch.dict(ci.os.environ, {"HRX_ROCM_ROOT": "/tmp/toolchain"}),
+            mock.patch.object(
+                ci_config, "REPOSITORY_BAZEL_OPTIONS", ("--fixture=repository",)
             ),
-        )
-        self.assertIn("--//loom/config:shared_tools", steps[6].argv)
-        self.assertIn("//loom/src/loom/tools/loom-opt:execution_test", steps[6].argv)
-        self.assertIn("//loom/src/loom/tools/loom-format:execution_test", steps[6].argv)
-        self.assertIn("//loom/src/loom/tools/loom-link:execution_test", steps[6].argv)
-        self.assertIn("//loom/src/loom/tools/loom-run:execution_test", steps[6].argv)
-        self.assertIn(
-            "//loom/src/loom/tooling/target/cpu:run_cxx_input_test", steps[6].argv
-        )
-        self.assertIn(
-            "//loom/src/loom/import/cxx/test:export_roundtrip_test", steps[6].argv
-        )
-        self.assertIn("//loom/src/loom/tooling/target/cpu/serve:all", steps[6].argv)
-        for tool in ("loom-check", "loom-test", "loom-benchmark"):
-            self.assertIn(f"//loom/src/loom/tools/{tool}:execution_test", steps[6].argv)
-        self.assertIn("//loom/src/loom/tools/loom-check/test:core_test", steps[6].argv)
-        for step in steps[:6]:
-            self.assertNotIn("--//loom/config:shared_tools", step.argv)
+            mock.patch.object(
+                ci_config, "MODEL_ACQUISITION_BAZEL_TARGETS", ("//fixture:fetch",)
+            ),
+            mock.patch.object(
+                ci_config, "MODEL_ACQUISITION_BAZEL_EXCLUDES", ("-//fixture:fetch",)
+            ),
+            mock.patch.object(
+                ci_config, "BAZEL_REPOSITORY_TEST_TARGETS", ("//fixture/...",)
+            ),
+        ):
+            for include_python in (False, True):
+                with self.subTest(include_python=include_python):
+                    steps = ci.repository_integration_steps(
+                        "gfx11-generic", include_python_tests=include_python
+                    )
+                    acquisition = [
+                        step for step in steps if "//fixture:fetch" in step.argv
+                    ]
+                    self.assertEqual(len(acquisition), int(include_python))
+                    if acquisition:
+                        self.assertIn("--test_timeout=10", acquisition[0].argv)
+                        self.assertIn("--fixture=repository", acquisition[0].argv)
+                    repository = next(
+                        step for step in steps if "//fixture/..." in step.argv
+                    )
+                    self.assertIn("-//fixture:fetch", repository.argv)
+                    self.assertNotIn("--test_timeout=10", repository.argv)
+                    self.assertEqual(
+                        "--test_lang_filters=-py" in repository.argv,
+                        not include_python,
+                    )
+
+            cpu_steps = ci.cpu_steps(("//fixture/...",))
+            acquisition = next(
+                step for step in cpu_steps if "//fixture:fetch" in step.argv
+            )
+            ordinary = next(step for step in cpu_steps if step.name == "Test IREE")
+            self.assertIn("--test_timeout=10", acquisition.argv)
+            self.assertIn("-//fixture:fetch", ordinary.argv)
+            self.assertNotIn("--test_timeout=10", ordinary.argv)
 
     def test_bazel_repository_integration_skips_ordinary_repository_build(self):
         args = ci.parse_arguments(["iree-bazel-repository-integration"])

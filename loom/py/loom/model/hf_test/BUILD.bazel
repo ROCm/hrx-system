@@ -5,6 +5,8 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 # The pinned optional SDK test environment is owned by Bazel's dev-only pip hub.
+# CLI and transfer processes load build-owned bytecode, as an installed wheel
+# does, instead of recompiling the SDK on each interpreter startup.
 # bazel-to-cmake: skip
 
 load("@loom_model_test_pip//:requirements.bzl", "requirement")
@@ -34,6 +36,7 @@ iree_py_test(
     ],
     args = ["loom.model.hf_test.provider_test"],
     main = "pytest_style_runner.py",
+    pyc_collection = "include_pyc",
     tags = ["skip-bazel_to_cmake"],
     deps = [
         ":fixture",
@@ -50,6 +53,7 @@ iree_py_test(
     ],
     args = ["loom.model.hf_test.install_test"],
     main = "pytest_style_runner.py",
+    pyc_collection = "include_pyc",
     tags = ["skip-bazel_to_cmake"],
     deps = [
         ":fixture",
@@ -71,6 +75,7 @@ iree_py_test(
     ],
     args = ["loom.model.hf_test.cli_test"],
     main = "pytest_style_runner.py",
+    pyc_collection = "include_pyc",
     deps = [
         ":fixture",
         "//loom/py/loom/model:fetch_cli",
