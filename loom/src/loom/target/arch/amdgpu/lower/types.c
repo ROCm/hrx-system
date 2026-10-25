@@ -79,8 +79,11 @@ bool loom_amdgpu_source_address_value_needs_64bit(
   if (element_type == LOOM_SCALAR_TYPE_OFFSET) {
     return true;
   }
+  // A join of signed logical coordinates and nonnegative wide addresses still
+  // needs both words. Requiring a nonnegative lower bound would truncate later
+  // arithmetic even when the join itself retained its wide input carrier.
   return element_type == LOOM_SCALAR_TYPE_INDEX &&
-         loom_value_facts_fit_unsigned_bit_count(facts, 63);
+         facts.range_lo >= INT32_MIN && facts.range_hi > (int64_t)UINT32_MAX;
 }
 
 bool loom_amdgpu_type_is_f32(loom_type_t type) {

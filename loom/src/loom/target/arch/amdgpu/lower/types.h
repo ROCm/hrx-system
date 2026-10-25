@@ -55,9 +55,9 @@ bool loom_amdgpu_type_is_address_scalar(loom_type_t type);
 
 // Returns true when an address-domain source value needs full 64-bit address
 // arithmetic. Offset values are physical byte counts and may require widening
-// whenever their range exceeds u32. Index values only widen when value facts
-// prove a nonnegative address-domain range, preserving diagnostics for ordinary
-// signed logical coordinate arithmetic that cannot be treated as an address.
+// whenever their range exceeds u32. Index values widen for nonnegative address
+// ranges and joins of those ranges with signed 32-bit logical coordinates.
+// Unknown logical-coordinate ranges retain the target's native index carrier.
 bool loom_amdgpu_source_address_value_needs_64bit(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_value_id_t source_value_id, loom_type_t source_type);

@@ -273,6 +273,26 @@ static void loom_amdgpu_address_representation_observe_fixed_cast(
 
   const uint32_t fixed_unit_count =
       ((uint32_t)loom_scalar_type_bitwidth(fixed_scalar_type) + 31u) / 32u;
+  if (!source_is_address && fixed_prefers_vgpr) {
+    // An integer producer already placed in vector registers cannot become a
+    // scalar address merely because the other inputs of a join are scalar.
+    // Casts preserve lanes; scalarization belongs to explicit uniformity
+    // operations or control-flow transport, not this numeric boundary.
+    loom_amdgpu_address_representation_constrain_value(context, address_value,
+                                                       recorder);
+    loom_low_representation_candidate_t candidates[2];
+    iree_host_size_t candidate_count = 0;
+    if (narrow_prefers_vgpr) {
+      candidates[candidate_count++] = (loom_low_representation_candidate_t){
+          .representation = LOOM_AMDGPU_ADDRESS_REPRESENTATION_NARROW,
+      };
+    }
+    candidates[candidate_count++] = (loom_low_representation_candidate_t){
+        .representation = LOOM_AMDGPU_ADDRESS_REPRESENTATION_WIDE_VGPR,
+    };
+    loom_low_lower_representation_record_candidates(
+        recorder, address_value, candidates, candidate_count);
+  }
   // The cast materializes one move for each word that crosses register banks.
   // Charge that cost to the address component so exact address relations can
   // retain the fixed side's bank across a cast cycle. Narrow addresses retain

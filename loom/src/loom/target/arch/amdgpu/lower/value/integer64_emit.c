@@ -235,15 +235,24 @@ iree_status_t loom_amdgpu_lookup_or_materialize_integer_operand(
   } else {
     low_value = loom_low_lower_lookup_value(context, source_value);
   }
+  const loom_type_t carrier_type = loom_module_value_type(module, low_value);
+  if (register_class_id == LOOM_AMDGPU_REG_CLASS_ID_SGPR &&
+      loom_low_register_type_class_id(carrier_type) ==
+          LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
+    // Scalar operand selection has already proved subgroup uniformity. Keep
+    // both words when projecting a wide vector carrier into the scalar bank.
+    loom_type_t scalar_type = loom_type_none();
+    IREE_RETURN_IF_ERROR(loom_amdgpu_make_sgpr_range_type(
+        context, loom_low_register_type_unit_count(carrier_type),
+        &scalar_type));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_scalar_carrier(
+        context, source_op, low_value, scalar_type, &low_value));
+  }
   const loom_type_t source_type = loom_module_value_type(module, source_value);
   if (loom_amdgpu_source_integer_representation_type_is_narrow(source_type)) {
     if (register_class_id == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
       IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_low_vgpr_b32_registers(
           context, source_op, low_value, &low_value));
-    } else if (!loom_amdgpu_low_value_is_register_class_count(
-                   context, low_value, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1)) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_uniform_sgpr_address(
-          context, source_op, source_value, &low_value));
     }
     const loom_type_t lane_type = loom_module_value_type(module, low_value);
     const loom_low_representation_id_t required_representation =

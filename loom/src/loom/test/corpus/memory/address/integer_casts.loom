@@ -88,3 +88,176 @@ check.scenario @offset_integer_cast_values {
   }
   check.return
 }
+
+// Loaded fixed-width integers retain their signed and unsigned interpretations
+// when a branch joins the converted coordinates with constant coordinates.
+kernel.def @loaded_integer_address_joins() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %condition: i32, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %halfword_offset = index.constant 2 : offset
+  %word_offset = index.constant 4 : offset
+  %pair_offset = index.constant 8 : offset
+  %byte_view = buffer.view %input[%origin] : buffer -> view<1xi8>
+  %halfword_view = buffer.view %input[%halfword_offset] : buffer -> view<1xi16>
+  %word_view = buffer.view %input[%word_offset] : buffer -> view<1xi32>
+  %pair_view = buffer.view %input[%pair_offset] : buffer -> view<1xi64>
+  %inactive = scalar.constant 0 : i32
+  %active = scalar.cmpi ne, %condition, %inactive : i32
+  %fallback_index = index.constant -17 : index
+  %fallback_offset = index.constant 17 : offset
+  %byte_index, %byte_offset, %halfword_index, %halfword_address, %word_index, %word_address, %pair_index, %pair_address = scf.if %active -> (index, offset, index, offset, index, offset, index, offset) {
+    %byte = view.load %byte_view[0] : view<1xi8> -> i8
+    %halfword = view.load %halfword_view[0] : view<1xi16> -> i16
+    %word = view.load %word_view[0] : view<1xi32> -> i32
+    %pair = view.load %pair_view[0] : view<1xi64> -> i64
+    %pair_bounded = scalar.assume %pair [range(%pair, 0, 1099511627775)] : i64
+    %bi = index.cast %byte : i8 to index
+    %bo = index.cast %byte : i8 to offset
+    %hi = index.cast %halfword : i16 to index
+    %ho = index.cast %halfword : i16 to offset
+    %wi = index.cast %word : i32 to index
+    %wo = index.cast %word : i32 to offset
+    %pi = index.cast %pair_bounded : i64 to index
+    %po = index.cast %pair_bounded : i64 to offset
+    scf.yield %bi, %bo, %hi, %ho, %wi, %wo, %pi, %po : index, offset, index, offset, index, offset, index, offset
+  } else {
+    scf.yield %fallback_index, %fallback_offset, %fallback_index, %fallback_offset, %fallback_index, %fallback_offset, %fallback_index, %fallback_offset : index, offset, index, offset, index, offset, index, offset
+  }
+  %index_step = index.constant 1 : index
+  %offset_step = index.constant 1 : offset
+  %bi_next = index.add %byte_index, %index_step : index
+  %bo_next = index.add %byte_offset, %offset_step : offset
+  %hi_next = index.add %halfword_index, %index_step : index
+  %ho_next = index.add %halfword_address, %offset_step : offset
+  %wi_next = index.add %word_index, %index_step : index
+  %wo_next = index.add %word_address, %offset_step : offset
+  %pi_next = index.add %pair_index, %index_step : index
+  %po_next = index.add %pair_address, %offset_step : offset
+  %bi_value = index.cast %bi_next : index to i64
+  %bo_value = index.cast %bo_next : offset to i64
+  %hi_value = index.cast %hi_next : index to i64
+  %ho_value = index.cast %ho_next : offset to i64
+  %wi_value = index.cast %wi_next : index to i64
+  %wo_value = index.cast %wo_next : offset to i64
+  %pi_value = index.cast %pi_next : index to i64
+  %po_value = index.cast %po_next : offset to i64
+  %lane = kernel.workitem.id<x> : index
+  %result = buffer.view %output[%origin] : buffer -> view<64x8xi64>
+  view.store %bi_value, %result[%lane, 0] : i64, view<64x8xi64>
+  view.store %bo_value, %result[%lane, 1] : i64, view<64x8xi64>
+  view.store %hi_value, %result[%lane, 2] : i64, view<64x8xi64>
+  view.store %ho_value, %result[%lane, 3] : i64, view<64x8xi64>
+  view.store %wi_value, %result[%lane, 4] : i64, view<64x8xi64>
+  view.store %wo_value, %result[%lane, 5] : i64, view<64x8xi64>
+  view.store %pi_value, %result[%lane, 6] : i64, view<64x8xi64>
+  view.store %po_value, %result[%lane, 7] : i64, view<64x8xi64>
+  kernel.return
+}
+
+func.def @initialize_address_integer_inputs(%input: buffer) {
+  %origin = index.constant 0 : offset
+  %halfword_offset = index.constant 2 : offset
+  %word_offset = index.constant 4 : offset
+  %pair_offset = index.constant 8 : offset
+  %byte_view = buffer.view %input[%origin] : buffer -> view<1xi8>
+  %halfword_view = buffer.view %input[%halfword_offset] : buffer -> view<1xi16>
+  %word_view = buffer.view %input[%word_offset] : buffer -> view<1xi32>
+  %pair_view = buffer.view %input[%pair_offset] : buffer -> view<1xi64>
+  %byte = scalar.constant -7 : i8
+  %halfword = scalar.constant -300 : i16
+  %word = scalar.constant -7 : i32
+  %pair = scalar.constant 4294967335 : i64
+  view.store %byte, %byte_view[0] : i8, view<1xi8>
+  view.store %halfword, %halfword_view[0] : i16, view<1xi16>
+  view.store %word, %word_view[0] : i32, view<1xi32>
+  view.store %pair, %pair_view[0] : i64, view<1xi64>
+  func.return
+}
+
+// The oracle operates entirely on fixed-width integers, independently of
+// index/offset representation planning and address-domain arithmetic.
+func.def @loaded_integer_address_joins_oracle(%input: buffer, %condition: i32, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %halfword_offset = index.constant 2 : offset
+  %word_offset = index.constant 4 : offset
+  %pair_offset = index.constant 8 : offset
+  %byte_view = buffer.view %input[%origin] : buffer -> view<1xi8>
+  %halfword_view = buffer.view %input[%halfword_offset] : buffer -> view<1xi16>
+  %word_view = buffer.view %input[%word_offset] : buffer -> view<1xi32>
+  %pair_view = buffer.view %input[%pair_offset] : buffer -> view<1xi64>
+  %byte = view.load %byte_view[0] : view<1xi8> -> i8
+  %halfword = view.load %halfword_view[0] : view<1xi16> -> i16
+  %word = view.load %word_view[0] : view<1xi32> -> i32
+  %pair = view.load %pair_view[0] : view<1xi64> -> i64
+  %bs = scalar.extsi %byte : i8 to i64
+  %bu = scalar.extui %byte : i8 to i64
+  %hs = scalar.extsi %halfword : i16 to i64
+  %hu = scalar.extui %halfword : i16 to i64
+  %ws = scalar.extsi %word : i32 to i64
+  %wu = scalar.extui %word : i32 to i64
+  %inactive = scalar.constant 0 : i32
+  %active = scalar.cmpi ne, %condition, %inactive : i32
+  %fallback_signed = scalar.constant -17 : i64
+  %fallback_unsigned = scalar.constant 17 : i64
+  %bsi = scf.select %active, %bs, %fallback_signed : i64
+  %bui = scf.select %active, %bu, %fallback_unsigned : i64
+  %hsi = scf.select %active, %hs, %fallback_signed : i64
+  %hui = scf.select %active, %hu, %fallback_unsigned : i64
+  %wsi = scf.select %active, %ws, %fallback_signed : i64
+  %wui = scf.select %active, %wu, %fallback_unsigned : i64
+  %psi = scf.select %active, %pair, %fallback_signed : i64
+  %pui = scf.select %active, %pair, %fallback_unsigned : i64
+  %increment = scalar.constant 1 : i64
+  %bi_value = scalar.addi %bsi, %increment : i64
+  %bo_value = scalar.addi %bui, %increment : i64
+  %hi_value = scalar.addi %hsi, %increment : i64
+  %ho_value = scalar.addi %hui, %increment : i64
+  %wi_value = scalar.addi %wsi, %increment : i64
+  %wo_value = scalar.addi %wui, %increment : i64
+  %pi_value = scalar.addi %psi, %increment : i64
+  %po_value = scalar.addi %pui, %increment : i64
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %result = buffer.view %output[%origin] : buffer -> view<64x8xi64>
+  scf.for %lane = [%begin to %end step %step] {
+    view.store %bi_value, %result[%lane, 0] : i64, view<64x8xi64>
+    view.store %bo_value, %result[%lane, 1] : i64, view<64x8xi64>
+    view.store %hi_value, %result[%lane, 2] : i64, view<64x8xi64>
+    view.store %ho_value, %result[%lane, 3] : i64, view<64x8xi64>
+    view.store %wi_value, %result[%lane, 4] : i64, view<64x8xi64>
+    view.store %wo_value, %result[%lane, 5] : i64, view<64x8xi64>
+    view.store %pi_value, %result[%lane, 6] : i64, view<64x8xi64>
+    view.store %po_value, %result[%lane, 7] : i64, view<64x8xi64>
+  }
+  func.return
+}
+
+check.scenario @loaded_integer_address_join_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(0) : tensor<16xi8>
+    check.generate<@initialize_address_integer_inputs>(%input) : (tensor<16xi8>) -> ()
+    %storage = check.generate.fill value(-123) : tensor<544xi64>
+    %output = check.tensor.view %storage offset(128) : tensor<544xi64> -> tensor<64x8xi64>
+    %condition = check.literal value(0) : i32
+    check.compare<@loaded_integer_address_joins, @loaded_integer_address_joins_oracle>(%input, %condition, %output) : (tensor<16xi8>, i32, tensor<64x8xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<544xi64>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(0) : tensor<16xi8>
+    check.generate<@initialize_address_integer_inputs>(%input) : (tensor<16xi8>) -> ()
+    %storage = check.generate.fill value(-123) : tensor<544xi64>
+    %output = check.tensor.view %storage offset(128) : tensor<544xi64> -> tensor<64x8xi64>
+    %condition = check.literal value(1) : i32
+    check.compare<@loaded_integer_address_joins, @loaded_integer_address_joins_oracle>(%input, %condition, %output) : (tensor<16xi8>, i32, tensor<64x8xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<544xi64>
+    }
+  }
+  check.return
+}
