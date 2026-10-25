@@ -6,7 +6,11 @@ func.decl import("prepare") @source_scope(%scope: buffer) -> (i32)
 
 func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
 
+func.decl import("prepare") @memory_forecast(%root: buffer)
+
 global.rodata.def @root = bytes("77656967687465645f70726f6a656374")
+
+global.rodata.def @forecast_root = bytes("666f7265636173745f6d656d6f7279")
 
 global.rodata.def @vision_scope = bytes("766973696f6e")
 
@@ -18,6 +22,8 @@ global.rodata.def @name = bytes("77656967687465642d70726f6a6563746f72")
 
 // The pixel protocol is unchanged; a real checkpoint conditions every row.
 func.def public @text_image_prepare_v1(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer) {
+  %forecast = global.load @forecast_root : buffer
+  func.call @memory_forecast(%forecast) : (buffer)
   %c0_source = scalar.constant 0 : i32
   %binding = scalar.constant 0 : i32
   %tag = scalar.constant 1 : i64
