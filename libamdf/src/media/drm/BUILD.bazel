@@ -158,9 +158,8 @@ amdf_cc_test(
     deps = [
         ":execution",
         ":image",
+        "//libamdf:amdf_static",
         "//libamdf/src:allocator",
-        "//libamdf/src:kernel_queue",
-        "//libamdf/src/platform/linux:endpoint",
         "//libamdf/src/platform/linux:file",
         "//third_party:google_test",
         "//third_party:google_test_main",

@@ -181,12 +181,11 @@ iree_cc_test(
     $<BUILD_LOCAL_INTERFACE:iree::third_party::linux_drm_uapi>
     ::execution
     ::image
+    amdf::amdf_static
     amdf::headers
     iree::third_party::google_test
     iree::third_party::google_test_main
     libamdf::src::allocator
-    libamdf::src::kernel_queue
-    libamdf::src::platform::linux::endpoint
     libamdf::src::platform::linux::file
   LABELS
     "iree-build-requirement=libamdf"
