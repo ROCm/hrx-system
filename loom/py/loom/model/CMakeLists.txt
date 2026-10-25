@@ -164,6 +164,25 @@ iree_py_library(
     loom::py::loom::model::manifest
 )
 
+iree_py_test(
+  NAME
+    fetch_transfer_test
+  MAIN
+    "../tools/pytest_style_runner.py"
+  SRCS
+    "fetch_transfer_test.py"
+    "../tools/pytest_style_runner.py"
+  ARGS
+    "loom.model.fetch_transfer_test"
+  DEPS
+    loom::py::loom::model::fetch_source
+    loom::py::loom::model::fetch_transfer
+  PACKAGE_DIRS
+    "${PROJECT_SOURCE_DIR}/loom/py"
+    "${PROJECT_BINARY_DIR}/loom/py"
+    "${PROJECT_SOURCE_DIR}"
+)
+
 iree_py_library(
   NAME
     fetch_range

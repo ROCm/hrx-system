@@ -140,6 +140,39 @@ def test_programmatic_caller_needs_no_process_entrypoint_guard(tmp_path):
         assert result.stdout.strip() == "code"
 
 
+def test_cancelling_one_cache_preserves_another_callers_transfer(tmp_path):
+    with _held_http_body() as first, _held_http_body() as second:
+        first_url, first_started, first_release = first
+        second_url, second_started, second_release = second
+        first_cache = ContentCache(tmp_path / "first")
+        second_cache = ContentCache(tmp_path / "second")
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            try:
+                first_result = executor.submit(
+                    first_cache.read_document, first_url, offline=False
+                )
+                second_result = executor.submit(
+                    second_cache.read_document, second_url, offline=False
+                )
+                first_result.add_done_callback(lambda _: first_started.set())
+                second_result.add_done_callback(lambda _: second_started.set())
+                first_started.wait()
+                second_started.wait()
+                assert not first_result.done(), first_result.result()
+                assert not second_result.done(), second_result.result()
+                first_cache.cancel()
+                with pytest.raises(FetchError, match="cancelled"):
+                    first_result.result()
+                assert not second_result.done(), second_result.result()
+                second_release.set()
+                assert second_result.result().text == "code"
+            finally:
+                first_cache.cancel()
+                second_cache.cancel()
+                first_release.set()
+                second_release.set()
+
+
 def test_cancel_stops_document_fetch_without_publishing_metadata(tmp_path):
     with _held_http_body() as (url, started, release):
         cache = ContentCache(tmp_path / "cache")

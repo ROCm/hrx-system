@@ -135,6 +135,20 @@ iree_py_library(
     ],
 )
 
+iree_py_test(
+    name = "fetch_transfer_test",
+    srcs = [
+        "fetch_transfer_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.model.fetch_transfer_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":fetch_source",
+        ":fetch_transfer",
+    ],
+)
+
 iree_py_library(
     name = "fetch_range",
     srcs = ["fetch_range.py"],

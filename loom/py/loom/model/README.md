@@ -391,6 +391,14 @@ files reusable, and removes its incomplete ordinary HTTP staging files. Hugging
 Face retains ownership of its cache and resumable partial downloads. The Python
 API exposes the same operation cancellation through `ContentCache.cancel()`.
 
+Blocking remote IO uses at most four reusable transfer interpreters per Python
+process. Reuse retains SDK imports between calls; each call exclusively owns its
+worker until it finishes. Cancellation terminates and joins that worker while
+other callers continue. A changed environment, import path, or working directory
+starts a fresh worker, and Python shutdown joins the remaining idle workers.
+Forked callers create their own workers without taking ownership of the parent's
+transfers.
+
 Files stream into verified content storage with bounded buffers and concurrent
 transfers. The default `--materialize=share` links cache or local-source files
 into the installation, so changing only preset does not copy weights.
