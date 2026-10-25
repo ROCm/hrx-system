@@ -48,6 +48,23 @@ static bool amdf_media_drm_vcn_encode_is_vcn5(
              .command_protocol == AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5;
 }
 
+uint64_t amdf_media_drm_vcn_encode_reconstruction_auxiliary_byte_length(
+    amdf_media_drm_command_protocol_t protocol, amdf_media_codec_t codec,
+    uint32_t reconstruction_slot_count) {
+  const uint64_t vcn5_metadata_byte_length =
+      protocol == AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5
+          ? (uint64_t)reconstruction_slot_count *
+                VCN5_ENCODE_FRAME_CONTEXT_BYTES
+          : 0;
+  const uint64_t av1_byte_length =
+      codec == AMDF_MEDIA_CODEC_AV1
+          ? VCN_ENCODE_AV1_SDB_BYTES +
+                (uint64_t)reconstruction_slot_count *
+                    (VCN_ENCODE_AV1_CDF_BYTES + VCN_ENCODE_AV1_CDEF_BYTES)
+          : 0;
+  return vcn5_metadata_byte_length + av1_byte_length;
+}
+
 static void amdf_media_drm_vcn_encode_word(
     amdf_media_drm_vcn_encode_writer_t* writer, uint32_t value) {
   writer->words[writer->count++] = value;

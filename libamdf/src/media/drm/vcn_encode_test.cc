@@ -119,6 +119,28 @@ class VcnEncodePacketTest : public ::testing::Test {
   amdf_media_drm_vcn_encode_resources_t resources_ = {};
 };
 
+TEST(VcnEncodeStorageTest, ProtocolAndCodecSelectExactAuxiliaryTail) {
+  struct Case {
+    amdf_media_drm_command_protocol_t protocol;
+    amdf_media_codec_t codec;
+    uint64_t expected_byte_length;
+  };
+  static constexpr Case kCases[] = {
+      {AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4, AMDF_MEDIA_CODEC_H264, 0},
+      {AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4, AMDF_MEDIA_CODEC_HEVC, 0},
+      {AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN4, AMDF_MEDIA_CODEC_AV1, 995328},
+      {AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5, AMDF_MEDIA_CODEC_H264, 2048},
+      {AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5, AMDF_MEDIA_CODEC_HEVC, 2048},
+      {AMDF_MEDIA_DRM_COMMAND_PROTOCOL_VCN5, AMDF_MEDIA_CODEC_AV1, 997376},
+  };
+  for (const auto& test_case : kCases) {
+    EXPECT_EQ(amdf_media_drm_vcn_encode_reconstruction_auxiliary_byte_length(
+                  test_case.protocol, test_case.codec, 2),
+              test_case.expected_byte_length)
+        << "protocol=" << test_case.protocol << " codec=" << test_case.codec;
+  }
+}
+
 TEST_F(VcnEncodePacketTest, H264MatchesQualifiedNativePackets) {
   session_.codec.h264.level_idc = 30;
   uint32_t length = amdf_media_drm_vcn_encode_control(

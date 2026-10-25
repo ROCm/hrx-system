@@ -43,6 +43,13 @@ typedef struct amdf_media_drm_vcn_encode_resources_t {
   uint64_t feedback_address;
 } amdf_media_drm_vcn_encode_resources_t;
 
+// Returns the codec-owned tail following all reconstruction pixel layers.
+// Configuration admission bounds reconstruction_slot_count before this trusted
+// protocol query.
+uint64_t amdf_media_drm_vcn_encode_reconstruction_auxiliary_byte_length(
+    amdf_media_drm_command_protocol_t protocol, amdf_media_codec_t codec,
+    uint32_t reconstruction_slot_count);
+
 // Infallible packet emission after public configuration and operand admission.
 // The returned extent is the complete unified encode-engine IB.
 uint32_t amdf_media_drm_vcn_encode_control(

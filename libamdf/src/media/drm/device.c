@@ -16,6 +16,7 @@
 #include "libamdf/src/media/drm/command.h"
 #include "libamdf/src/media/drm/jpeg.h"
 #include "libamdf/src/media/drm/vcn.h"
+#include "libamdf/src/media/drm/vcn_encode.h"
 #include "libamdf/src/media/h264.h"
 #include "libamdf/src/media/hevc.h"
 #include "libamdf/src/platform/linux/endpoint.h"
@@ -545,25 +546,19 @@ static amdf_status_t amdf_media_drm_encode_configuration(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  if (info.reference.byte_length > UINT32_MAX) {
+  const uint64_t auxiliary_byte_length =
+      amdf_media_drm_vcn_encode_reconstruction_auxiliary_byte_length(
+          engine->command_protocol, configuration->codec,
+          configuration->reference_image_count);
+  const uint64_t reference_byte_length =
+      info.reference.byte_length + auxiliary_byte_length;
+  if (reference_byte_length > UINT32_MAX ||
+      reference_byte_length > device->address_end - device->address_begin) {
     amdf_media_drm_answer_unsupported(
         &info, AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION, out_info);
     return AMDF_STATUS_OK;
   }
-  if (av1 != NULL) {
-    const uint64_t auxiliary_byte_length =
-        UINT64_C(947200) + (uint64_t)configuration->reference_image_count *
-                               (UINT64_C(22528) + UINT64_C(1536));
-    if (info.reference.byte_length > UINT32_MAX - auxiliary_byte_length ||
-        info.reference.byte_length + auxiliary_byte_length >
-            device->address_end - device->address_begin) {
-      amdf_media_drm_answer_unsupported(
-          &info, AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION,
-          out_info);
-      return AMDF_STATUS_OK;
-    }
-    info.reference.byte_length += auxiliary_byte_length;
-  }
+  info.reference.byte_length = reference_byte_length;
   info.reference.byte_offset_alignment = device->page_size;
 
   const uint64_t storage_width =
