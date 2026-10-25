@@ -58,6 +58,74 @@ first / second: workgroup_nonoverlap=yes
 
 // ====
 
+// Diagnostic address records retain their allocation even without payload
+// accesses. They do not expose unrelated scratch: checked aliases retain their
+// root, and the actual barrier still separates the two scratch phases.
+kernel.def @test() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%row: index, %value: i32, %fragment: vector<4xi32>, %condition: i1) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %extent = index.constant 4 : index
+  %first = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %first_view = buffer.view %first[%base] : buffer -> view<4x4xi32>
+  %checked_view = sanitizer.assert.layout %first_view : view<4x4xi32> -> view<4x4xi32>
+  %checked_row = sanitizer.assert.value %row [range(%row, 0, 4)] : index
+  sanitizer.assert.op %value [ge(%value, 0)] : i32
+  kernel.assert %condition : i1
+  %observed = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %observed_view = buffer.view %observed[%base] : buffer -> view<4x4xi32>
+  sanitizer.assert.access<write> %observed_view[%checked_row, 0] : view<4x4xi32>
+  sanitizer.assert.accesses<write> %observed_view[0, 0] {static_count = 4, static_extents = [1, 4], static_strides = [1, 0]} : view<4x4xi32>
+  sanitizer.race.access<write> %observed_view[%checked_row, 0] : view<4x4xi32>
+  sanitizer.race.access<read_write> %observed_view[%checked_row, 0] {atomic = true, ordering = acq_rel, scope = workgroup} : view<4x4xi32>
+  sanitizer.race.fragment_access<read> %fragment, %observed_view[0, 0] shape [%extent, %extent] {role = lhs} : vector<4xi32>, view<4x4xi32>
+  view.store %value, %checked_view[0, 0] : i32, view<4x4xi32>
+  %first_read = view.load %checked_view[0, 0] : view<4x4xi32> -> i32
+  sanitizer.race.sync<workgroup> scope(workgroup) ordering(acq_rel)
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %second = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %second_view = buffer.view %second[%base] : buffer -> view<4x4xi32>
+  view.store %first_read, %second_view[0, 0] : i32, view<4x4xi32>
+  kernel.return
+}
+
+// ----
+first: accessed=yes single_instance=yes
+observed: accessed=yes single_instance=yes
+second: accessed=yes single_instance=yes
+first / observed: workgroup_nonoverlap=unproven
+first / second: workgroup_nonoverlap=yes
+observed / second: workgroup_nonoverlap=unproven
+
+// ====
+
+// A checked alias used after the barrier keeps its original allocation live.
+// The assertion is not an escape, but it does not sever reference provenance.
+func.def @test() {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 16 : offset
+  %value = scalar.constant 1 : i32
+  %first = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %first_view = buffer.view %first[%base] : buffer -> view<4xi32>
+  %checked_view = sanitizer.assert.layout %first_view : view<4xi32> -> view<4xi32>
+  view.store %value, %first_view[0] : i32, view<4xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %second = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %second_view = buffer.view %second[%base] : buffer -> view<4xi32>
+  view.store %value, %second_view[0] : i32, view<4xi32>
+  %first_read = view.load %checked_view[0] : view<4xi32> -> i32
+  func.return
+}
+
+// ----
+first: accessed=yes single_instance=yes
+second: accessed=yes single_instance=yes
+first / second: workgroup_nonoverlap=unproven
+
+// ====
+
 // Barrier before final read does not end lifetime.
 func.def @test() {
   %base = index.constant 0 : offset

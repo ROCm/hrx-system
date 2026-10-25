@@ -40,8 +40,8 @@ from loom.dsl import (
     CONVERGENT,
     FACT_IDENTITY,
     INDEX,
+    OBSERVABLE_EFFECT,
     REFINABLE_RESULT_TYPE_REFS,
-    UNKNOWN_EFFECTS,
     VECTOR,
     VIEW,
     AttrDef,
@@ -82,7 +82,10 @@ sanitizer_ops = Dialect(
     doc=(
         "Executable diagnostic assertions. Assertions refine SSA facts on the "
         "continuing path while preserving the dynamic trap/report boundary "
-        "until canonicalization proves that boundary unreachable."
+        "until canonicalization proves that boundary unreachable. These "
+        "operations observe SSA values and references, not user memory "
+        "payload. Reports and race histories use diagnostic storage and may "
+        "retain observed addresses."
     ),
 )
 
@@ -168,7 +171,7 @@ sanitizer_assert_access = Op(
         "materializes address checks."
     ),
     operands=[
-        Operand("view", VIEW, doc="Typed view being accessed."),
+        Operand("view", VIEW, doc="Typed view whose address is checked."),
         Operand(
             "indices",
             INDEX,
@@ -195,7 +198,7 @@ sanitizer_assert_access = Op(
             doc=("Optional full-rank static logical footprint extents. Absent means a scalar element access."),
         ),
     ],
-    traits=[UNKNOWN_EFFECTS],
+    traits=[OBSERVABLE_EFFECT],
     verify="loom_sanitizer_assert_access_verify",
     format=[
         TemplateParam("kind"),
@@ -227,7 +230,7 @@ sanitizer_assert_accesses = Op(
         "source memory operation into many independent assertions."
     ),
     operands=[
-        Operand("view", VIEW, doc="Typed view being accessed."),
+        Operand("view", VIEW, doc="Typed view whose addresses are checked."),
         Operand(
             "indices",
             INDEX,
@@ -263,7 +266,7 @@ sanitizer_assert_accesses = Op(
             doc="Number of sub-accesses in the static sequence.",
         ),
     ],
-    traits=[UNKNOWN_EFFECTS],
+    traits=[OBSERVABLE_EFFECT],
     verify="loom_sanitizer_assert_accesses_verify",
     format=[
         TemplateParam("kind"),
@@ -317,7 +320,7 @@ sanitizer_assert_value = Op(
         ),
     ],
     constraints=[VariadicValuesMatch("values", "results")],
-    traits=[UNKNOWN_EFFECTS, FACT_IDENTITY],
+    traits=[OBSERVABLE_EFFECT, FACT_IDENTITY],
     canonicalize="loom_sanitizer_assert_value_canonicalize",
     facts="loom_sanitizer_assert_value_facts",
     verify="loom_sanitizer_assert_value_verify",
@@ -364,7 +367,7 @@ sanitizer_assert_op = Op(
             executable_predicates=True,
         ),
     ],
-    traits=[UNKNOWN_EFFECTS],
+    traits=[OBSERVABLE_EFFECT],
     canonicalize="loom_sanitizer_assert_op_canonicalize",
     verify="loom_sanitizer_assert_op_verify",
     format=[
@@ -404,7 +407,7 @@ sanitizer_assert_layout = Op(
         SameElementType("view", "result"),
         RanksMatch("view", "result"),
     ],
-    traits=[UNKNOWN_EFFECTS, REFINABLE_RESULT_TYPE_REFS, FACT_IDENTITY],
+    traits=[OBSERVABLE_EFFECT, REFINABLE_RESULT_TYPE_REFS, FACT_IDENTITY],
     facts="loom_sanitizer_assert_layout_facts",
     type_transfer="loom_sanitizer_assert_layout_type_transfer",
     verify="loom_sanitizer_assert_layout_verify",
@@ -436,7 +439,7 @@ sanitizer_race_access = Op(
         "unordered events in the selected race detector."
     ),
     operands=[
-        Operand("view", VIEW, doc="Typed view being accessed."),
+        Operand("view", VIEW, doc="Typed view whose address is recorded."),
         Operand(
             "indices",
             INDEX,
@@ -478,7 +481,7 @@ sanitizer_race_access = Op(
             doc="Static logical element indices with INT64_MIN sentinels for dynamics.",
         ),
     ],
-    traits=[UNKNOWN_EFFECTS],
+    traits=[OBSERVABLE_EFFECT],
     contracts=[ContractFamily.SANITIZER_RACE],
     verify="loom_sanitizer_race_access_verify",
     format=[
@@ -512,7 +515,7 @@ sanitizer_race_fragment_access = Op(
     ),
     operands=[
         Operand("fragment", VECTOR, doc="Physical matrix fragment payload."),
-        Operand("view", VIEW, doc="Typed view being accessed."),
+        Operand("view", VIEW, doc="Typed view whose addresses are recorded."),
         Operand(
             "indices",
             INDEX,
@@ -547,7 +550,7 @@ sanitizer_race_fragment_access = Op(
             doc="Static logical origin indices with INT64_MIN sentinels for dynamics.",
         ),
     ],
-    traits=[UNKNOWN_EFFECTS],
+    traits=[OBSERVABLE_EFFECT],
     contracts=[ContractFamily.SANITIZER_RACE],
     verify="loom_sanitizer_race_fragment_access_verify",
     format=[
@@ -610,7 +613,7 @@ sanitizer_race_sync = Op(
             doc="Synchronization scope.",
         ),
     ],
-    traits=[UNKNOWN_EFFECTS, CONVERGENT],
+    traits=[OBSERVABLE_EFFECT, CONVERGENT],
     contracts=[ContractFamily.SANITIZER_RACE],
     verify="loom_sanitizer_race_sync_verify",
     format=[
