@@ -7,6 +7,7 @@
 """Command-program source operations."""
 
 from loom.assembly import (
+    ARROW,
     COLON,
     COMMA,
     GLUE,
@@ -24,6 +25,7 @@ from loom.assembly import (
     ResultType,
     Scope,
     SymbolRef,
+    TypeOf,
     TypesOf,
     kw,
 )
@@ -303,6 +305,28 @@ command_parameter = Op(
 )
 
 
+command_parameter_base = Op(
+    "command.parameter.base",
+    group=command_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Borrow the containing command binding from the beginning of a named "
+        "parameter to the end of that binding. The source must resolve to one "
+        "command.parameter root; a projected view identifies the same parameter "
+        "and does not shift the returned base. The result permits parameter-relative "
+        "indexing across separately placed banks in that binding. It does not "
+        "allocate storage, make backing resident, or extend its lifetime. Ordinary "
+        "typed parameter views retain their declared bounds."
+    ),
+    operands=[Operand("source", VIEW, doc="View identifying the named parameter root.")],
+    results=[Result("result", BUFFER, doc="Borrowed parameter-relative buffer suffix.")],
+    traits=[PURE],
+    facts="loom_command_parameter_base_facts",
+    format=[Ref("source"), COLON, TypeOf("source"), ARROW, ResultType("result")],
+    examples=["%base = command.parameter.base %weight : view<32x64xbf16> -> buffer"],
+)
+
+
 command_return = Op(
     "command.return",
     group=command_ops,
@@ -368,4 +392,5 @@ ALL_COMMAND_OPS: tuple[Op, ...] = (
     command_serial,
     command_concurrent,
     command_parameter,
+    command_parameter_base,
 )

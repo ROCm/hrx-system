@@ -1,5 +1,13 @@
 // RUN: format bytecode
 
+command.program.def @parameter_base() launch(%parameters: buffer) {
+  %weight = command.parameter %parameters, "weight" : view<32x64xbf16>
+  %base = command.parameter.base %weight : view<32x64xbf16> -> buffer
+  command.return
+}
+
+// ====
+
 command.program.decl @decode(%token_count: index) launch(%parameters: buffer, %transient: buffer)
 
 command.program.def @driver(%token_count: index) launch(%parameters: buffer, %transient: buffer) {

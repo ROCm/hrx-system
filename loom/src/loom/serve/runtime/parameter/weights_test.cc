@@ -1710,6 +1710,105 @@ TEST_P(ArenaWeightsTest, IndependentPreparedRangesReloadAndRecycleAbove4GiB) {
   loom_serve_residency_set_pinned(residencies_[1], false);
 }
 
+TEST_P(ArenaWeightsTest, SelectedPreparedBanksShareOneParameterBinding) {
+  WriteCheckpoint(adapter_path_.path(), 100);
+  const auto geometry = loom_serve_device_weight_geometry(device_owner_);
+  constexpr uint64_t kPrefixBytes = UINT64_C(1) << 32;
+  IREE_ASSERT_OK(loom_serve_memory_arena_allocate(
+      pool_, geometry, kPrefixBytes + 2 * geometry.minimum_size, &arena_));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate_in_arena(
+      arena_, kPrefixBytes, 256, &state_statistics_, &state_));
+  for (size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0, 0);
+    ASSERT_LE(root.root.required_byte_length, geometry.minimum_size);
+    IREE_ASSERT_OK(
+        CreateRoots(0, 1, &root, {i ? adapter_path_.path() : path_.path()}));
+  }
+  IREE_ASSERT_OK(Compile(2, "selected_target"));
+  const auto* selected = loom_serve_jit_stage_program(compiled_[2]);
+  ASSERT_EQ(selected->parameter_roots.count, 1u);
+  const auto selected_root = Root(2, 0, 0);
+  EXPECT_EQ(selected_root.root.required_byte_length,
+            Root(0, 0, 0).root.required_byte_length);
+  EXPECT_EQ(selected->requirements.rebindable_binding_count, 2u);
+  IREE_ASSERT_OK(Register(2, 0, 2));
+
+  const std::array<uint64_t, 2> bank_offsets = {
+      iree_hal_buffer_virtual_view(buffers_[0][0]).byte_offset,
+      iree_hal_buffer_virtual_view(buffers_[1][0]).byte_offset};
+  EXPECT_EQ(bank_offsets[0], kPrefixBytes);
+  EXPECT_EQ(bank_offsets[1], kPrefixBytes + geometry.minimum_size);
+  std::array<uint64_t, 8> request_offsets;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      loom_serve_device_storage_pool(device_owner_),
+      iree_hal_make_pool_reservation_request(sizeof(request_offsets), 0),
+      iree_infinite_timeout(), &workspace_));
+
+  // Both views end exactly at the last bank's final parameter byte. The second
+  // borrows a nonzero-origin arena subspan; request offsets remain relative to
+  // that binding, not the native reservation or a factor's packed position.
+  const uint64_t binding_end =
+      bank_offsets[1] + selected_root.root.required_byte_length;
+  for (uint64_t binding_origin : {UINT64_C(0), UINT64_C(256)}) {
+    iree_hal_command_buffer_release(commands_[2]);
+    commands_[2] = nullptr;
+    iree_hal_buffer_release(buffers_[2][0]);
+    buffers_[2][0] = nullptr;
+    IREE_ASSERT_OK(iree_hal_buffer_subspan(
+        loom_serve_memory_arena_handle(arena_), binding_origin,
+        binding_end - binding_origin, host_allocator_, &buffers_[2][0]));
+    IREE_ASSERT_OK(loom_serve_jit_stage_record(
+        compiled_[2], iree_hal_queue_family(dispatch_),
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, buffers_[2].data(),
+        &commands_[2]));
+    for (size_t i = 0; i < request_offsets.size(); ++i) {
+      request_offsets[i] = bank_offsets[i % 2] - binding_origin;
+    }
+    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[2]));
+    auto run = [&]() -> iree_status_t {
+      uint64_t completion = 0;
+      iree_hal_transfer_operation_t upload = {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+      };
+      upload.upload.source = request_offsets.data();
+      upload.upload.target_buffer = workspace_;
+      upload.upload.length = sizeof(request_offsets);
+      IREE_RETURN_IF_ERROR(
+          loom_serve_execution_transfer(execution_, 1, &upload, &completion));
+      const iree_hal_buffer_binding_t bindings[] = {
+          {workspace_, 0, sizeof(request_offsets)},
+          {output_buffer_, 0, sizeof(output_)}};
+      IREE_RETURN_IF_ERROR(loom_serve_execution_execute(
+          execution_, commands_[2], {IREE_ARRAYSIZE(bindings), bindings},
+          &completion));
+      iree_hal_transfer_operation_t download = {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      };
+      download.download.source_buffer = output_buffer_;
+      download.download.target = output_.data();
+      download.download.length = sizeof(output_);
+      IREE_RETURN_IF_ERROR(
+          loom_serve_execution_feedback(execution_, 1, &download, &completion));
+      return loom_serve_execution_feedback_wait(execution_, completion);
+    };
+    auto status = run();
+    // Keep the host upload alive through accepted work on every error path.
+    status = iree_status_join(status, loom_serve_execution_drain(execution_));
+    loom_serve_residency_release(residencies_[2]);
+    IREE_ASSERT_OK(status);
+    for (size_t i = 0; i < output_.size(); ++i) {
+      EXPECT_EQ(output_[i], (i % 2 ? 370 : 70) + 3 * i);
+    }
+  }
+  EXPECT_EQ(state_statistics_.committed_bytes, 0u);
+  for (size_t i = 0; i < 2; ++i) {
+    EXPECT_EQ(loom_serve_weights_memory_usage(plans_[i]).committed_bytes,
+              geometry.minimum_size);
+    EXPECT_EQ(loom_serve_weights_activity(plans_[i]).activations, 1u);
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(Elastic, ArenaWeightsTest, ::testing::Values(true));
 
 class RejectedPreparationWeightsTest : public ArenaWeightsTest {

@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 #include "loom/target/arch/cmd/abi_layout.h"
 #include "loom/util/fact_table.h"
@@ -104,18 +105,22 @@ typedef struct loom_cmd_parameter_layout_t {
 // Exact view results rooted in storage bindings or parameter results are
 // preserved in the same lower plan. Parameter-relative offsets compose with
 // the parameter's placement; fixed/rebindable roles and subranges propagate
-// without per-launch rediscovery. |bindings| is populated in source
-// storage-binding order. |out_requirements| owns its tables through
+// without per-launch rediscovery. command.parameter.base borrows the suffix
+// beginning at its named parameter; its open-ended range does not enlarge
+// that parameter root's finite packed requirement. |bindings| is populated in
+// source storage-binding order. |out_requirements| owns its tables through
 // |host_allocator|. |out_layout| references only |scratch_arena| storage and
 // remains valid until that arena is reset. The module's value-ordinal scratch
-// is acquired temporarily; no source IR is changed.
+// is acquired temporarily; no source IR is changed. An unresolved parameter
+// base emits a diagnostic and leaves |out_valid| false without a layout.
 iree_status_t loom_cmd_parameter_layout_build(
     loom_module_t* module, loom_func_like_t program,
     const loom_value_fact_table_t* fact_table,
+    iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* scratch_arena, iree_allocator_t host_allocator,
     loom_cmd_buffer_binding_t* bindings, iree_host_size_t binding_count,
     loom_cmd_parameter_requirement_table_t* out_requirements,
-    loom_cmd_parameter_layout_t* out_layout);
+    loom_cmd_parameter_layout_t* out_layout, bool* out_valid);
 
 // Releases all storage owned by |table| and resets it to empty.
 void loom_cmd_parameter_requirement_table_deinitialize(

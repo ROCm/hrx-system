@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/error/error_catalog.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/command/ops.h"
@@ -62,7 +63,7 @@ typedef struct loom_cmd_parameter_source_range_t {
   // Byte offset relative to the parameter or source storage-binding range.
   uint64_t byte_offset;
 
-  // Exact byte length of the derived range.
+  // Exact byte length, or UINT64_MAX for the remainder of the supplied binding.
   uint64_t byte_length;
 } loom_cmd_parameter_source_range_t;
 
@@ -79,6 +80,9 @@ typedef struct loom_cmd_parameter_build_t {
 
   // Complete value facts for the source program.
   const loom_value_fact_table_t* fact_table;
+
+  // User-source diagnostics emitted while establishing named parameter roots.
+  iree_diagnostic_emitter_t diagnostic_emitter;
 
   // Scratch storage for source rows and formatted keys.
   iree_arena_allocator_t* scratch_arena;
@@ -247,14 +251,14 @@ static iree_status_t loom_cmd_parameter_reserve_buffer_range(
 }
 
 static iree_status_t loom_cmd_parameter_append_projected_ranges(
-    loom_cmd_parameter_build_t* build, const loom_op_t* op) {
+    loom_cmd_parameter_build_t* build, const loom_op_t* op,
+    loom_walk_result_t* out_result) {
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     const loom_value_id_t result = results[i];
     const loom_value_facts_t result_facts =
         loom_value_fact_table_lookup(build->fact_table, result);
     loom_value_id_t root_value = LOOM_VALUE_ID_INVALID;
-    iree_host_size_t parameter_row = 0;
     uint64_t byte_offset = 0;
     uint64_t byte_length = UINT64_MAX;
 
@@ -277,11 +281,6 @@ static iree_status_t loom_cmd_parameter_append_projected_ranges(
       }
       root_value = loom_value_fact_view_reference_resolve_root_value(
           view_reference, result);
-      const loom_value_ordinal_t parameter_ordinal =
-          loom_module_value_ordinal_scratch_lookup(build->module, root_value);
-      parameter_row = parameter_ordinal != LOOM_VALUE_ORDINAL_INVALID
-                          ? (iree_host_size_t)parameter_ordinal + 1
-                          : 0;
       byte_offset = (uint64_t)exact_byte_offset;
       byte_length = (uint64_t)exact_byte_length;
     } else if (loom_type_is_buffer(result_type)) {
@@ -296,6 +295,21 @@ static iree_status_t loom_cmd_parameter_append_projected_ranges(
       continue;
     }
 
+    const loom_value_ordinal_t parameter_ordinal =
+        loom_module_value_ordinal_scratch_lookup(build->module, root_value);
+    const iree_host_size_t parameter_row =
+        parameter_ordinal != LOOM_VALUE_ORDINAL_INVALID
+            ? (iree_host_size_t)parameter_ordinal + 1
+            : 0;
+    if (loom_command_parameter_base_isa(op) && !parameter_row) {
+      *out_result = LOOM_WALK_ABORT;
+      const loom_diagnostic_emission_t emission = {
+          .module = build->module,
+          .op = op,
+          .error = LOOM_ERR_LOWERING_069,
+      };
+      return iree_diagnostic_emit(build->diagnostic_emitter, &emission);
+    }
     const uint16_t source_binding_ordinal =
         parameter_row != 0
             ? build->rows[parameter_row - 1].source_binding_ordinal
@@ -323,7 +337,7 @@ static iree_status_t loom_cmd_parameter_visit(
   *out_result = LOOM_WALK_CONTINUE;
   loom_cmd_parameter_build_t* build = (loom_cmd_parameter_build_t*)user_data;
   if (!loom_command_parameter_isa(op)) {
-    return loom_cmd_parameter_append_projected_ranges(build, op);
+    return loom_cmd_parameter_append_projected_ranges(build, op, out_result);
   }
 
   const uint16_t source_binding_ordinal =
@@ -482,10 +496,12 @@ static iree_status_t loom_cmd_parameter_allocate_requirement_table(
 iree_status_t loom_cmd_parameter_layout_build(
     loom_module_t* module, loom_func_like_t program,
     const loom_value_fact_table_t* fact_table,
+    iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_allocator_t* scratch_arena, iree_allocator_t host_allocator,
     loom_cmd_buffer_binding_t* bindings, iree_host_size_t binding_count,
     loom_cmd_parameter_requirement_table_t* out_requirements,
-    loom_cmd_parameter_layout_t* out_layout) {
+    loom_cmd_parameter_layout_t* out_layout, bool* out_valid) {
+  *out_valid = false;
   IREE_ASSERT_ARGUMENT(module);
   IREE_ASSERT(loom_func_like_isa(program));
   IREE_ASSERT_ARGUMENT(fact_table);
@@ -512,6 +528,7 @@ iree_status_t loom_cmd_parameter_layout_build(
           binding_count != 0 ? argument_values + specialization_count : NULL,
       .binding_count = (uint16_t)binding_count,
       .fact_table = fact_table,
+      .diagnostic_emitter = diagnostic_emitter,
       .scratch_arena = scratch_arena,
   };
   loom_module_value_ordinal_scratch_acquire(module);
@@ -524,7 +541,9 @@ iree_status_t loom_cmd_parameter_layout_build(
   }
   loom_module_value_ordinal_scratch_release(module);
   IREE_RETURN_IF_ERROR(walk_status);
-  IREE_ASSERT_EQ(walk_result, LOOM_WALK_CONTINUE);
+  if (walk_result == LOOM_WALK_ABORT) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_cmd_parameter_group_rows(&build));
 
   bool* fixed_bindings = NULL;
@@ -663,7 +682,8 @@ iree_status_t loom_cmd_parameter_layout_build(
         };
   }
   IREE_ASSERT_EQ(build.buffer_range_count, required_buffer_range_count);
-  for (iree_host_size_t i = 0; i < build.buffer_range_count; ++i) {
+  for (iree_host_size_t i = 0;
+       i < build.buffer_range_count && iree_status_is_ok(status); ++i) {
     const loom_cmd_parameter_source_range_t* source = &build.buffer_ranges[i];
     IREE_ASSERT_LT(source->source_binding_ordinal, binding_count);
     const loom_cmd_buffer_binding_t binding =
@@ -675,12 +695,25 @@ iree_status_t loom_cmd_parameter_layout_build(
                                 .requirement_index]
                   .byte_offset
             : 0;
-    const uint64_t byte_offset = parameter_offset + source->byte_offset;
-    if (binding.role == LOOM_CMD_BUFFER_ROLE_FIXED) {
+    uint64_t byte_offset = 0;
+    uint64_t byte_end = 0;
+    const bool has_extent = source->byte_length != UINT64_MAX;
+    if (!iree_checked_add_u64(parameter_offset, source->byte_offset,
+                              &byte_offset) ||
+        (has_extent &&
+         !iree_checked_add_u64(byte_offset, source->byte_length, &byte_end))) {
+      status = iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "command parameter range exceeds the 64-bit buffer range");
+      break;
+    }
+    // A parameter-relative base borrows the rest of its supplied binding. It
+    // does not change the finite packed footprint required by named content.
+    if (binding.role == LOOM_CMD_BUFFER_ROLE_FIXED && has_extent) {
       loom_cmd_parameter_root_requirement_t* root =
           &out_requirements->roots[binding.resource_index];
-      root->required_byte_length = iree_max(root->required_byte_length,
-                                            byte_offset + source->byte_length);
+      root->required_byte_length =
+          iree_max(root->required_byte_length, byte_end);
     }
     IREE_ASSERT_LE(binding.byte_offset, UINT64_MAX - byte_offset);
     if (binding.byte_length != UINT64_MAX) {
@@ -695,12 +728,18 @@ iree_status_t loom_cmd_parameter_layout_build(
         .byte_length = source->byte_length,
     };
   }
+  if (!iree_status_is_ok(status)) {
+    loom_cmd_parameter_requirement_table_deinitialize(out_requirements,
+                                                      host_allocator);
+    return status;
+  }
   *out_layout = (loom_cmd_parameter_layout_t){
       .buffer_ranges = resolved_buffer_ranges,
       .buffer_range_count = build.buffer_range_count,
       .fixed_buffer_count = fixed_buffer_count,
       .rebindable_binding_count = rebindable_binding_count,
   };
+  *out_valid = true;
   return iree_ok_status();
 }
 

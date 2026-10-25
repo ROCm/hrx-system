@@ -592,10 +592,14 @@ static iree_status_t loom_cmd_program_plan_build_lower_plan(
         scratch_arena, binding_count, sizeof(*bindings), (void**)&bindings));
   }
   loom_cmd_parameter_layout_t parameter_layout = {0};
+  bool parameters_valid = false;
   IREE_RETURN_IF_ERROR(loom_cmd_parameter_layout_build(
-      plan_module, root_program, source_facts, scratch_arena,
-      plan->host_allocator, bindings, binding_count, out_parameters,
-      &parameter_layout));
+      plan_module, root_program, source_facts, diagnostic_emitter,
+      scratch_arena, plan->host_allocator, bindings, binding_count,
+      out_parameters, &parameter_layout, &parameters_valid));
+  if (!parameters_valid) {
+    return iree_ok_status();
+  }
   loom_cmd_transient_layout_t transient_layout = {0};
   bool transient_valid = false;
   IREE_RETURN_IF_ERROR(loom_cmd_transient_layout_build(

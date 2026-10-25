@@ -699,6 +699,16 @@ ERR_LOWERING_068 = ErrorDef(
     ),
 )
 
+# ERR_LOWERING_069: Parameter base has no named parameter root.
+ERR_LOWERING_069 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=69,
+    severity=Severity.ERROR,
+    summary="Parameter base has no named parameter root.",
+    message="command.parameter.base requires a view rooted in one named parameter",
+    params=(),
+)
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -736,4 +746,5 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_066,
     ERR_LOWERING_067,
     ERR_LOWERING_068,
+    ERR_LOWERING_069,
 )

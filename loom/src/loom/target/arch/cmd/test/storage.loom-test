@@ -285,6 +285,80 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 // ====
 
+// A base borrows the containing binding from the named parameter's beginning.
+// Duplicate declarations share canonical placement and the maximum footprint;
+// a projected operand does not move the base. Ordinary views remain bounded.
+// RUN: emit command-program @parameter_bases
+
+kernel.entry.decl @consume(%prefix: view<4xi8>, %base: buffer, %projected_base: buffer, %bounded: view<2xi32>, %derived: view<2xi64>, %tail: view<4xi8>)
+
+command.program.def public @parameter_bases() launch(%parameters: buffer) {
+  %prefix = command.parameter %parameters, "prefix" : view<4xi8>
+  %small = command.parameter %parameters, "table" : view<2xi32>
+  %large = command.parameter %parameters, "table" : view<64xi64>
+  %row = view.subview %large[8] : view<64xi64> -> view<2xi64>
+  %base = command.parameter.base %small : view<2xi32> -> buffer
+  %projected_base = command.parameter.base %row : view<2xi64> -> buffer
+  %offset = index.constant 16 : offset
+  %derived = buffer.view %projected_base[%offset] : buffer -> view<2xi64>
+  %tail = command.parameter %parameters, "tail" : view<4xi8>
+  %groups = index.constant 1 : index
+  kernel.dispatch @consume[%groups](%prefix, %base, %projected_base, %small, %derived, %tail) : [index](view<4xi8>, buffer, buffer, view<2xi32>, view<2xi64>, view<4xi8>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 1, rebindable_binding_count = 0}) @parameter_bases() asm {
+  %17 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>
+  %18 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %19 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %20 = cmd.constant.u64 0
+  %21 = cmd.constant.u64 -1
+  %22 = cmd.constant.u64 320
+  %23 = cmd.constant.u64 16
+  %24 = cmd.constant.u64 256
+  %25 = cmd.constant.u64 272
+  %26 = cmd.constant.u64 4
+  %27 = cmd.constant.u64 8
+  %28 = cmd.constant.u64 512
+  %29 = cmd.constant.u64 768
+  %30 = cmd.constant.u32 1
+  cmd.dispatch.direct<%18, %19>[%30, %30, %30](%17, %20, %26, %17, %24, %21, %17, %24, %21, %17, %24, %27, %17, %25, %23, %17, %29, %26)
+  return
+}
+
+// ====
+
+// Parameter placement and the borrowed suffix preserve offsets above 4 GiB.
+// RUN: emit command-program @wide_parameter_base
+
+kernel.entry.decl @consume(%prefix: view<1073741824xi32>, %base: buffer, %bounded: view<8xi32>)
+
+command.program.def public @wide_parameter_base() launch(%parameters: buffer) {
+  %prefix = command.parameter %parameters, "prefix" : view<1073741824xi32>
+  %weight = command.parameter %parameters, "weight" : view<8xi32>
+  %base = command.parameter.base %weight : view<8xi32> -> buffer
+  %groups = index.constant 1 : index
+  kernel.dispatch @consume[%groups](%prefix, %base, %weight) : [index](view<1073741824xi32>, buffer, view<8xi32>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 1, rebindable_binding_count = 0}) @wide_parameter_base() asm {
+  %8 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>
+  %9 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %10 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %11 = cmd.constant.u64 0
+  %12 = cmd.constant.u64 -1
+  %13 = cmd.constant.u64 4294967296
+  %14 = cmd.constant.u64 32
+  %15 = cmd.constant.u32 1
+  cmd.dispatch.direct<%9, %10>[%15, %15, %15](%8, %11, %13, %8, %13, %12, %8, %13, %14)
+  return
+}
+
+// ====
+
 // A strided crop retains the complete byte footprint, including gaps between
 // rows. Refinement preserves the same parameter identity and nested offset.
 // RUN: emit command-program @parameter_strided_view

@@ -119,6 +119,8 @@ loom_cc_library(
     iree::base
     iree::base::internal
     iree::base::internal::arena
+    loom::error::emitter
+    loom::error::error_defs
     loom::ir
     loom::ir::facts
     loom::ops::command

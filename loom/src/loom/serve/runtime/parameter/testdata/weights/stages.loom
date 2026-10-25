@@ -268,3 +268,38 @@ command.program.def public @coarse_raw() launch(%weights: buffer, %output: buffe
   kernel.launch @consume_coarse(%raw, %output) : (view<16777224xi32>, buffer)
   command.return
 }
+
+kernel.def @consume_selected() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c8, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%a_base: buffer, %b_base: buffer, %raw_base: buffer, %request: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %element = kernel.workgroup.id<x> : index
+  %offsets = buffer.view %request[%origin] : buffer -> view<8xi64>
+  %bank_bits = view.load %offsets[%element] : view<8xi64> -> i64
+  %nonnegative = scalar.assume %bank_bits [range(%bank_bits, 0, 9223372036854775807)] : i64
+  %bank = index.cast %nonnegative : i64 to offset
+  %a = buffer.view %a_base[%bank] : buffer -> view<8xi32>
+  %b = buffer.view %b_base[%bank] : buffer -> view<8xi32>
+  %raw = buffer.view %raw_base[%bank] : buffer -> view<8xi32>
+  %av = view.load %a[%element] : view<8xi32> -> i32
+  %bv = view.load %b[%element] : view<8xi32> -> i32
+  %rv = view.load %raw[%element] : view<8xi32> -> i32
+  %ab = scalar.addi %av, %bv : i32
+  %sum = scalar.addi %ab, %rv : i32
+  %target = buffer.view %output[%origin] : buffer -> view<8xi32>
+  view.store %sum, %target[%element] : i32, view<8xi32>
+  kernel.return
+}
+
+command.program.def public @selected_target() launch(%weights: buffer, %request: buffer, %output: buffer) {
+  %a = command.parameter %weights, "a" : view<8xi32>
+  %b = command.parameter %weights, "b" : view<8xi32>
+  %raw = command.parameter %weights, "raw" : view<8xi32>
+  %a_base = command.parameter.base %a : view<8xi32> -> buffer
+  %b_base = command.parameter.base %b : view<8xi32> -> buffer
+  %raw_base = command.parameter.base %raw : view<8xi32> -> buffer
+  kernel.launch @consume_selected(%a_base, %b_base, %raw_base, %request, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

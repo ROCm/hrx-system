@@ -190,3 +190,37 @@ command.program.def public @local_scratch() launch() {
   kernel.dispatch @consume_scratch[%workgroups](%scratch) : [index](buffer)
   command.return
 }
+
+// ====
+
+// RUN: emit command-program @unnamed_parameter_base
+
+kernel.entry.decl @consume(%storage: buffer)
+
+command.program.def public @unnamed_parameter_base() launch(%input: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %input[%origin] : buffer -> view<8xi32>
+  // ERROR@+1: LOWERING/069
+  %base = command.parameter.base %view : view<8xi32> -> buffer
+  %groups = index.constant 1 : index
+  kernel.dispatch @consume[%groups](%base) : [index](buffer)
+  command.return
+}
+
+// ====
+
+// RUN: emit command-program @transient_parameter_base
+
+kernel.entry.decl @consume(%storage: buffer)
+
+command.program.def public @transient_parameter_base() launch() {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 32 : offset
+  %scratch = buffer.alloca<global> align(256) %bytes : buffer
+  %view = buffer.view %scratch[%origin] : buffer -> view<8xi32>
+  // ERROR@+1: LOWERING/069
+  %base = command.parameter.base %view : view<8xi32> -> buffer
+  %groups = index.constant 1 : index
+  kernel.dispatch @consume[%groups](%base) : [index](buffer)
+  command.return
+}

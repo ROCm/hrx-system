@@ -73,6 +73,7 @@ def test_parameter_roundtrip() -> None:
         """command.program.def @parameters(%layer: index) launch(%parameters: buffer) {
   %embedding = command.parameter %parameters, "token_embd.weight" : view<1024xi8>
   %query = command.parameter %parameters, "blk.{}.attn_q.weight"[%layer] : view<256xi8>
+  %base = command.parameter.base %query : view<256xi8> -> buffer
   command.return
 }
 """
