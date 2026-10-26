@@ -141,6 +141,22 @@ TEST_F(EncodeValidationTest, TemporalLayersAreIndependentImmutableRecords) {
             amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
 }
 
+TEST(EncodeSafetyTest, Navi44Av1MultilayerRemainsUnadvertised) {
+  amdf_endpoint_info_t endpoint = {};
+  endpoint.pci.vendor_id = 0x1002;
+  endpoint.pci.device_id = 0x7590;
+  EXPECT_EQ(amdf_media_encode_restrict_temporal_layer_limit(
+                &endpoint, AMDF_MEDIA_CODEC_AV1, 4),
+            1u);
+  EXPECT_EQ(amdf_media_encode_restrict_temporal_layer_limit(
+                &endpoint, AMDF_MEDIA_CODEC_HEVC, 4),
+            4u);
+  endpoint.pci.device_id = 0x7550;
+  EXPECT_EQ(amdf_media_encode_restrict_temporal_layer_limit(
+                &endpoint, AMDF_MEDIA_CODEC_AV1, 4),
+            4u);
+}
+
 TEST_F(EncodeValidationTest, Av1RateControlExcludesZeroQuantization) {
   requirements_.configuration.codec = AMDF_MEDIA_CODEC_AV1;
   rate_control_layer_.control.cqp = {1, 255};

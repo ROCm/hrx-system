@@ -33,7 +33,8 @@ struct PacketBlock {
 };
 
 PacketBlock FindPacketBlock(const uint32_t* words, uint32_t byte_length,
-                            uint32_t operation) {
+                            uint32_t operation, uint32_t occurrence = 0) {
+  const uint32_t requested_occurrence = occurrence;
   for (uint32_t index = 15; index < byte_length / sizeof(uint32_t);) {
     const uint32_t block_byte_length = words[index];
     if (block_byte_length < 2 * sizeof(uint32_t) ||
@@ -44,15 +45,19 @@ PacketBlock FindPacketBlock(const uint32_t* words, uint32_t byte_length,
       return {};
     }
     if (words[index + 1] == operation) {
-      return {
-          words + index + 2,
-          static_cast<uint32_t>(block_byte_length / sizeof(uint32_t) - 2),
-          index,
-      };
+      if (occurrence == 0) {
+        return {
+            words + index + 2,
+            static_cast<uint32_t>(block_byte_length / sizeof(uint32_t) - 2),
+            index,
+        };
+      }
+      --occurrence;
     }
     index += block_byte_length / sizeof(uint32_t);
   }
-  ADD_FAILURE() << "missing packet operation 0x" << std::hex << operation;
+  ADD_FAILURE() << "missing packet operation 0x" << std::hex << operation
+                << " occurrence " << std::dec << requested_occurrence;
   return {};
 }
 
@@ -81,9 +86,10 @@ void ExpectPacketOperations(const PacketBlock& block,
 void ExpectVcn5RateControl(const uint32_t* words, uint32_t byte_length,
                            uint32_t intra_qp, uint32_t predicted_qp,
                            uint32_t bipredictive_qp, uint32_t minimum_qp,
-                           uint32_t maximum_qp,
-                           uint32_t maximum_frame_bits = 0) {
-  const PacketBlock block = FindPacketBlock(words, byte_length, 0x08);
+                           uint32_t maximum_qp, uint32_t maximum_frame_bits = 0,
+                           uint32_t occurrence = 0) {
+  const PacketBlock block =
+      FindPacketBlock(words, byte_length, 0x08, occurrence);
   ASSERT_NE(block.payload, nullptr);
   ASSERT_EQ(block.payload_word_count, 16u);
   EXPECT_EQ(block.payload[0], intra_qp);
@@ -159,6 +165,14 @@ class VcnEncodePacketTest : public ::testing::Test {
         AMDF_MEDIA_DRM_VCN_REFERENCE_SWIZZLE_256B_D;
   }
 
+  void ConfigureTwoTemporalLayers() {
+    session_.encode.rate_control.temporal_layer_count = 2;
+    session_.rate_control_layers[0].frame_rate_numerator = 15;
+    session_.rate_control_layers[1].frame_rate_numerator = 30;
+    session_.rate_control_layers[1].frame_rate_denominator = 1;
+    session_.rate_control_layers[1].control.cqp = {31, 37};
+  }
+
   static constexpr uint64_t kSessionAddress = UINT64_C(0x123400000000);
   static constexpr uint64_t kReconstructionAddress = UINT64_C(0x223400000000);
   static constexpr uint64_t kSourceAddress = UINT64_C(0x323400000000);
@@ -207,7 +221,7 @@ TEST_F(VcnEncodePacketTest, H264MatchesQualifiedNativePackets) {
       .used_as_reference = 1,
   };
   length = amdf_media_drm_vcn_encode_h264(&command_, &session_, &resources_, 0,
-                                          &picture);
+                                          0, &picture);
   EXPECT_EQ(length, 1844u);
   EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0xf594489fda3cbb27));
 
@@ -223,7 +237,7 @@ TEST_F(VcnEncodePacketTest, H264MatchesQualifiedNativePackets) {
   picture.reference_count = 1;
   picture.references = &reference;
   length = amdf_media_drm_vcn_encode_h264(&command_, &session_, &resources_, 1,
-                                          &picture);
+                                          0, &picture);
   EXPECT_EQ(length, 1844u);
   EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0xd2c52ce50dd373b8));
 
@@ -247,7 +261,7 @@ TEST_F(VcnEncodePacketTest, Vcn5RateControlTracksEachPicture) {
       .used_as_reference = 1,
   };
   length = amdf_media_drm_vcn_encode_h264(&command_, &session_, &resources_, 0,
-                                          &picture);
+                                          0, &picture);
   ExpectVcn5RateControl(words_, length, 17, 17, 17, 1, 51);
 
   amdf_media_frame_t frame = {};
@@ -262,7 +276,7 @@ TEST_F(VcnEncodePacketTest, Vcn5RateControlTracksEachPicture) {
   picture.reference_count = 1;
   picture.references = &reference;
   length = amdf_media_drm_vcn_encode_h264(&command_, &session_, &resources_, 1,
-                                          &picture);
+                                          0, &picture);
   ExpectVcn5RateControl(words_, length, 29, 29, 29, 1, 51);
 
   session_.encode.rate_control.mode = AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CBR;
@@ -280,6 +294,122 @@ TEST_F(VcnEncodePacketTest, Vcn5RateControlTracksEachPicture) {
   ExpectVcn5RateControl(words_, length, 20, 20, 20, 4, 44, 123456);
 }
 
+TEST_F(VcnEncodePacketTest, TemporalLayerControlSelectsIndependentRateRecords) {
+  ConfigureTwoTemporalLayers();
+  session_.codec.h264.level_idc = 30;
+
+  for (uint32_t protocol = 4; protocol <= 5; ++protocol) {
+    if (protocol == 5) {
+      ConfigureVcn5();
+    }
+    uint32_t length = amdf_media_drm_vcn_encode_control(
+        &command_, &session_, AMDF_MEDIA_COMMAND_OPERATION_BEGIN);
+    EXPECT_EQ(length, protocol == 5 ? 448u : 452u);
+
+    PacketBlock block = FindPacketBlock(words_, length, 4);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 2u);
+    EXPECT_EQ(block.payload[0], 2u);
+    EXPECT_EQ(block.payload[1], 2u);
+
+    static constexpr uint32_t kExpectedLayerSelections[] = {0, 0, 1, 1};
+    for (uint32_t occurrence = 0; occurrence < 4; ++occurrence) {
+      block = FindPacketBlock(words_, length, 5, occurrence);
+      ASSERT_NE(block.payload, nullptr);
+      ASSERT_EQ(block.payload_word_count, 1u);
+      EXPECT_EQ(block.payload[0], kExpectedLayerSelections[occurrence]);
+    }
+
+    block = FindPacketBlock(words_, length, 7, 0);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 8u);
+    EXPECT_EQ(block.payload[2], 15u);
+    EXPECT_EQ(block.payload[3], 1u);
+    block = FindPacketBlock(words_, length, 7, 1);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 8u);
+    EXPECT_EQ(block.payload[2], 30u);
+    EXPECT_EQ(block.payload[3], 1u);
+
+    if (protocol == 5) {
+      ExpectVcn5RateControl(words_, length, 20, 20, 20, 1, 51, 0, 0);
+      ExpectVcn5RateControl(words_, length, 31, 37, 37, 1, 51, 0, 1);
+    }
+
+    amdf_media_h264_encode_picture_info_t picture = {
+        .frame_type = AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR,
+        .used_as_reference = 1,
+    };
+    length = amdf_media_drm_vcn_encode_h264(&command_, &session_, &resources_,
+                                            0, 1, &picture);
+    block = FindPacketBlock(words_, length, 5);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 1u);
+    EXPECT_EQ(block.payload[0], 1u);
+    if (protocol == 5) {
+      ExpectVcn5RateControl(words_, length, 31, 31, 31, 1, 51);
+    }
+  }
+}
+
+TEST_F(VcnEncodePacketTest, MaximumTemporalLayerControlFitsOnePage) {
+  session_.encode.rate_control.temporal_layer_count = 4;
+  for (uint32_t index = 1; index < 4; ++index) {
+    session_.rate_control_layers[index] = session_.rate_control_layers[0];
+  }
+  uint32_t length = amdf_media_drm_vcn_encode_control(
+      &command_, &session_, AMDF_MEDIA_COMMAND_OPERATION_BEGIN);
+  EXPECT_EQ(length, 724u);
+  EXPECT_LE(length, 4096u);
+
+  ConfigureVcn5();
+  length = amdf_media_drm_vcn_encode_control(
+      &command_, &session_, AMDF_MEDIA_COMMAND_OPERATION_BEGIN);
+  EXPECT_EQ(length, 720u);
+  EXPECT_LE(length, 4096u);
+}
+
+TEST_F(VcnEncodePacketTest, HevcSliceCarriesTemporalLayerIdentifier) {
+  ConfigureTwoTemporalLayers();
+  session_.requirements.configuration.codec = AMDF_MEDIA_CODEC_HEVC;
+  session_.encode_codec.hevc.minimum_luma_coding_unit_log2 = 3;
+  session_.encode_codec.hevc.log2_max_picture_order_count_lsb_minus4 = 0;
+  amdf_media_hevc_encode_picture_info_t picture = {
+      .frame_type = AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_IDR,
+      .used_as_reference = 1,
+  };
+  const uint32_t length = amdf_media_drm_vcn_encode_hevc(
+      &command_, &session_, &resources_, 0, 1, &picture);
+  const PacketBlock slice = FindPacketBlock(words_, length, 0x0b);
+  ASSERT_NE(slice.payload, nullptr);
+  ASSERT_EQ(slice.payload_word_count, 48u);
+  EXPECT_EQ(slice.payload[0], 0x26020000u);
+}
+
+TEST_F(VcnEncodePacketTest, Av1FrameObuCarriesTemporalLayerExtension) {
+  ConfigureTwoTemporalLayers();
+  session_.requirements.configuration.codec = AMDF_MEDIA_CODEC_AV1;
+  amdf_media_av1_encode_picture_info_t picture = {
+      .frame_type = 0,
+      .picture_index = 0,
+      .primary_reference = 7,
+      .refresh_frame_flags = 255,
+  };
+
+  for (uint32_t protocol = 4; protocol <= 5; ++protocol) {
+    if (protocol == 5) {
+      ConfigureVcn5();
+    }
+    const uint32_t length = amdf_media_drm_vcn_encode_av1(
+        &command_, &session_, &resources_, 0, 1, &picture);
+    const PacketBlock obu =
+        FindPacketBlock(words_, length, protocol == 5 ? 0x300003 : 0x300002);
+    ASSERT_NE(obu.payload, nullptr);
+    EXPECT_EQ(obu.payload[5], 16u);
+    EXPECT_EQ(obu.payload[6], 0x36200000u);
+  }
+}
+
 TEST_F(VcnEncodePacketTest, H264Vcn5UsesDirectTier2References) {
   ConfigureVcn5();
   session_.codec.h264.level_idc = 30;
@@ -295,7 +425,7 @@ TEST_F(VcnEncodePacketTest, H264Vcn5UsesDirectTier2References) {
       .used_as_reference = 1,
   };
   length = amdf_media_drm_vcn_encode_h264(&command_, &session_, &resources_, 0,
-                                          &picture);
+                                          0, &picture);
   EXPECT_EQ(length, 5124u);
   EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x8432e7709fed4d37));
   EXPECT_LE(length, sizeof(words_));
@@ -361,7 +491,7 @@ TEST_F(VcnEncodePacketTest, H264Vcn5UsesDirectTier2References) {
   picture.reference_count = 1;
   picture.references = &reference;
   length = amdf_media_drm_vcn_encode_h264(&command_, &session_, &resources_, 1,
-                                          &picture);
+                                          0, &picture);
   EXPECT_EQ(length, 5124u);
   EXPECT_EQ(Fnv1a(words_, length), UINT64_C(0x70221d4e2cf7b5d6));
   ExpectVcn5RateControl(words_, length, 20, 20, 20, 1, 51);
@@ -403,7 +533,7 @@ TEST_F(VcnEncodePacketTest, HevcMatchesQualifiedNativePackets) {
         .used_as_reference = 1,
     };
     length = amdf_media_drm_vcn_encode_hevc(&command_, &session_, &resources_,
-                                            0, &picture);
+                                            0, 0, &picture);
     EXPECT_EQ(length, 1776u);
     EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][0]);
 
@@ -416,7 +546,7 @@ TEST_F(VcnEncodePacketTest, HevcMatchesQualifiedNativePackets) {
     picture.reference_count = 1;
     picture.references = &reference;
     length = amdf_media_drm_vcn_encode_hevc(&command_, &session_, &resources_,
-                                            1, &picture);
+                                            1, 0, &picture);
     EXPECT_EQ(length, 1776u);
     EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][1]);
   }
@@ -445,7 +575,7 @@ TEST_F(VcnEncodePacketTest, HevcVcn5UsesDirectTier2References) {
         .used_as_reference = 1,
     };
     length = amdf_media_drm_vcn_encode_hevc(&command_, &session_, &resources_,
-                                            0, &picture);
+                                            0, 0, &picture);
     EXPECT_EQ(length, 4904u);
     EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][0]);
     EXPECT_LE(length, sizeof(words_));
@@ -510,7 +640,7 @@ TEST_F(VcnEncodePacketTest, HevcVcn5UsesDirectTier2References) {
     picture.reference_count = 1;
     picture.references = &reference;
     length = amdf_media_drm_vcn_encode_hevc(&command_, &session_, &resources_,
-                                            1, &picture);
+                                            1, 0, &picture);
     EXPECT_EQ(length, 4904u);
     EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][1]);
     ExpectVcn5RateControl(words_, length, 20, 20, 20, 1, 51);
@@ -555,7 +685,7 @@ TEST_F(VcnEncodePacketTest, Av1MatchesPixelFirstQualifiedNativePackets) {
         .refresh_frame_flags = 255,
     };
     length = amdf_media_drm_vcn_encode_av1(&command_, &session_, &resources_, 0,
-                                           &picture);
+                                           0, &picture);
     EXPECT_EQ(length, 1732u);
     EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][0]);
 
@@ -573,7 +703,7 @@ TEST_F(VcnEncodePacketTest, Av1MatchesPixelFirstQualifiedNativePackets) {
       picture.reference_indices[index] = 0;
     }
     length = amdf_media_drm_vcn_encode_av1(&command_, &session_, &resources_, 1,
-                                           &picture);
+                                           0, &picture);
     EXPECT_EQ(length, 1752u);
     EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][1]);
   }
@@ -613,7 +743,7 @@ TEST_F(VcnEncodePacketTest, Av1Vcn5UsesDirectTier2References) {
         .refresh_frame_flags = 255,
     };
     length = amdf_media_drm_vcn_encode_av1(&command_, &session_, &resources_, 0,
-                                           &picture);
+                                           0, &picture);
     EXPECT_EQ(length, 5316u);
     EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][0]);
     EXPECT_LE(length, sizeof(words_));
@@ -742,7 +872,7 @@ TEST_F(VcnEncodePacketTest, Av1Vcn5UsesDirectTier2References) {
       picture.reference_indices[index] = 0;
     }
     length = amdf_media_drm_vcn_encode_av1(&command_, &session_, &resources_, 1,
-                                           &picture);
+                                           0, &picture);
     EXPECT_EQ(length, 5352u);
     EXPECT_EQ(Fnv1a(words_, length), expected_picture_hashes[depth_index][1]);
     ExpectVcn5RateControl(words_, length, 20, 20, 20, 8, 255);

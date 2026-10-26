@@ -17,6 +17,12 @@ extern "C" {
 // per-device maximum through amdf_media_encode_configuration_info_t.
 #define AMDF_MEDIA_ENCODE_TEMPORAL_LAYER_STORAGE_CAPACITY 4u
 
+// Applies native safety exclusions to a provider-reported temporal-layer
+// limit. The returned count is never greater than native_limit.
+uint32_t amdf_media_encode_restrict_temporal_layer_limit(
+    const amdf_endpoint_info_t* endpoint_info, amdf_media_codec_t codec,
+    uint32_t native_limit);
+
 // Validates the shared public encode envelope before a native capability query.
 // Codec-specific configuration chained from encode remains with its owner.
 amdf_status_t amdf_media_encode_validate_configuration(

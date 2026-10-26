@@ -17,6 +17,7 @@
 #include "libamdf/src/media/drm/jpeg.h"
 #include "libamdf/src/media/drm/vcn.h"
 #include "libamdf/src/media/drm/vcn_encode.h"
+#include "libamdf/src/media/encode.h"
 #include "libamdf/src/media/h264.h"
 #include "libamdf/src/media/hevc.h"
 #include "libamdf/src/platform/linux/endpoint.h"
@@ -351,6 +352,8 @@ static bool amdf_media_drm_encode_rate_fits_vcn(
   if (encode->rate_control.mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP) {
     return true;
   }
+  const amdf_media_encode_bit_rate_t* first_bit_rate =
+      &encode->rate_control.temporal_layers[0].control.bit_rate;
   for (uint32_t index = 0; index < encode->rate_control.temporal_layer_count;
        ++index) {
     const amdf_media_encode_rate_control_layer_t* layer =
@@ -359,7 +362,11 @@ static bool amdf_media_drm_encode_rate_fits_vcn(
     if (bit_rate->maximum_frame_bit_count > UINT32_MAX ||
         bit_rate->target_bit_rate > UINT32_MAX ||
         bit_rate->peak_bit_rate > UINT32_MAX ||
-        bit_rate->virtual_buffer_capacity > UINT32_MAX) {
+        bit_rate->virtual_buffer_capacity > UINT32_MAX ||
+        bit_rate->initial_virtual_buffer_fullness *
+                first_bit_rate->virtual_buffer_capacity !=
+            first_bit_rate->initial_virtual_buffer_fullness *
+                bit_rate->virtual_buffer_capacity) {
       return false;
     }
     const uint64_t denominator = layer->frame_rate_denominator;
@@ -370,6 +377,13 @@ static bool amdf_media_drm_encode_rate_fits_vcn(
     }
   }
   return true;
+}
+
+static uint32_t amdf_media_drm_encode_temporal_layer_limit(
+    const amdf_media_drm_device_t* device, amdf_media_codec_t codec) {
+  return amdf_media_encode_restrict_temporal_layer_limit(
+      amdf_endpoint_get_cached_info(device->base.base.endpoint), codec,
+      AMDF_MEDIA_ENCODE_TEMPORAL_LAYER_STORAGE_CAPACITY);
 }
 
 static amdf_status_t amdf_media_drm_encode_configuration(
@@ -449,7 +463,7 @@ static amdf_status_t amdf_media_drm_encode_configuration(
     } else if (hevc->sample_bit_depth == 10) {
       expected_format = AMDF_MEDIA_PIXEL_FORMAT_P010;
     }
-  } else {
+  } else if (configuration->codec == AMDF_MEDIA_CODEC_AV1) {
     status = amdf_structure_validate_header(
         next, AMDF_STRUCTURE_TYPE_MEDIA_AV1_CONFIGURATION, sizeof(*av1));
     if (!amdf_status_is_ok(status)) {
@@ -472,9 +486,20 @@ static amdf_status_t amdf_media_drm_encode_configuration(
     } else if (av1->sample_bit_depth == 10) {
       expected_format = AMDF_MEDIA_PIXEL_FORMAT_P010;
     }
+  } else {
+    amdf_media_drm_answer_unsupported(
+        &info, AMDF_MEDIA_CONFIGURATION_REASON_CODEC, out_info);
+    return AMDF_STATUS_OK;
   }
   if (!amdf_status_is_ok(status)) {
     return status;
+  }
+  const uint32_t temporal_layer_limit =
+      amdf_media_drm_encode_temporal_layer_limit(device, configuration->codec);
+  if (encode->rate_control.temporal_layer_count > temporal_layer_limit) {
+    amdf_media_drm_answer_unsupported(
+        &info, AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION, out_info);
+    return AMDF_STATUS_OK;
   }
   if (configuration->format != expected_format) {
     amdf_media_drm_answer_unsupported(
@@ -537,8 +562,7 @@ static amdf_status_t amdf_media_drm_encode_configuration(
         &info, AMDF_MEDIA_CONFIGURATION_REASON_CODEC, out_info);
     return AMDF_STATUS_OK;
   }
-  if (encode->rate_control.temporal_layer_count != 1 ||
-      configuration->reference_image_count > 34 ||
+  if (configuration->reference_image_count > 34 ||
       !amdf_media_drm_encode_rate_fits_vcn(encode)) {
     amdf_media_drm_answer_unsupported(
         &info, AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION, out_info);
@@ -652,7 +676,11 @@ static amdf_status_t AMDF_CALL amdf_media_drm_query_configuration(
     encode_value.type = AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION_INFO;
     encode_value.structure_size = encode_info->structure_size;
     encode_value.maximum_temporal_layer_count =
-        info.reason == AMDF_MEDIA_CONFIGURATION_REASON_CODEC ? 0 : 1;
+        info.reason == AMDF_MEDIA_CONFIGURATION_REASON_CODEC
+            ? 0
+            : amdf_media_drm_encode_temporal_layer_limit(
+                  (const amdf_media_drm_device_t*)device,
+                  query->configuration.codec);
   }
   info.next = encode_info;
   *out_info = info;

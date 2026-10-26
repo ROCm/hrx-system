@@ -8,6 +8,20 @@
 
 #include "libamdf/src/structure.h"
 
+uint32_t amdf_media_encode_restrict_temporal_layer_limit(
+    const amdf_endpoint_info_t* endpoint_info, amdf_media_codec_t codec,
+    uint32_t native_limit) {
+  // PCI device 0x7590 has lost its VCN engine while encoding high-complexity
+  // AV1 with multiple temporal layers. Keep that native cell unavailable until
+  // the device and driver combination is qualified.
+  if (endpoint_info->pci.vendor_id == 0x1002u &&
+      endpoint_info->pci.device_id == 0x7590u &&
+      codec == AMDF_MEDIA_CODEC_AV1 && native_limit > 1) {
+    return 1;
+  }
+  return native_limit;
+}
+
 amdf_status_t amdf_media_encode_validate_configuration(
     const amdf_media_configuration_t* configuration,
     const amdf_media_encode_configuration_t* encode) {

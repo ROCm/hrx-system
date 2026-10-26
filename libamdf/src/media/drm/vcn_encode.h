@@ -60,17 +60,17 @@ uint32_t amdf_media_drm_vcn_encode_control(
 uint32_t amdf_media_drm_vcn_encode_h264(
     amdf_media_drm_buffer_t* storage, const amdf_media_drm_session_t* session,
     const amdf_media_drm_vcn_encode_resources_t* resources,
-    uint32_t reconstruction_slot,
+    uint32_t reconstruction_slot, uint32_t temporal_layer_index,
     const amdf_media_h264_encode_picture_info_t* picture);
 uint32_t amdf_media_drm_vcn_encode_hevc(
     amdf_media_drm_buffer_t* storage, const amdf_media_drm_session_t* session,
     const amdf_media_drm_vcn_encode_resources_t* resources,
-    uint32_t reconstruction_slot,
+    uint32_t reconstruction_slot, uint32_t temporal_layer_index,
     const amdf_media_hevc_encode_picture_info_t* picture);
 uint32_t amdf_media_drm_vcn_encode_av1(
     amdf_media_drm_buffer_t* storage, const amdf_media_drm_session_t* session,
     const amdf_media_drm_vcn_encode_resources_t* resources,
-    uint32_t reconstruction_slot,
+    uint32_t reconstruction_slot, uint32_t temporal_layer_index,
     const amdf_media_av1_encode_picture_info_t* picture);
 
 // Validates and clears caller-owned typed result storage without reading

@@ -488,15 +488,18 @@ static amdf_status_t amdf_media_drm_command_prepare_encode(
       .feedback_address = command->feedback_address,
   };
   command->byte_length =
-      h264 != NULL   ? amdf_media_drm_vcn_encode_h264(
-                           command->storage, session, &resources,
-                           encode->reconstruction_slot_index, h264)
-      : hevc != NULL ? amdf_media_drm_vcn_encode_hevc(
-                           command->storage, session, &resources,
-                           encode->reconstruction_slot_index, hevc)
-                     : amdf_media_drm_vcn_encode_av1(
-                           command->storage, session, &resources,
-                           encode->reconstruction_slot_index, av1);
+      h264 != NULL ? amdf_media_drm_vcn_encode_h264(
+                         command->storage, session, &resources,
+                         encode->reconstruction_slot_index,
+                         encode->temporal_layer_index, h264)
+      : hevc != NULL
+          ? amdf_media_drm_vcn_encode_hevc(command->storage, session,
+                                           &resources,
+                                           encode->reconstruction_slot_index,
+                                           encode->temporal_layer_index, hevc)
+          : amdf_media_drm_vcn_encode_av1(command->storage, session, &resources,
+                                          encode->reconstruction_slot_index,
+                                          encode->temporal_layer_index, av1);
   return AMDF_STATUS_OK;
 }
 

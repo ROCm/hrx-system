@@ -97,8 +97,9 @@ typedef struct amdf_media_encode_configuration_info_t {
   uint32_t structure_size;
   /// Further caller-provided typed outputs, currently NULL.
   void* next;
-  /// Maximum admitted temporal-layer count for the queried codec tuple, or
-  /// zero when that tuple cannot encode.
+  /// Maximum temporal-layer count this queue family can admit for the queried
+  /// codec after device safety exclusions, or zero when the codec is absent.
+  /// Other configuration fields may independently make the query unsupported.
   uint32_t maximum_temporal_layer_count;
 } amdf_media_encode_configuration_info_t;
 
