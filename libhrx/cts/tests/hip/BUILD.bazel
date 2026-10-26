@@ -174,6 +174,7 @@ hrx_cc_test(
         ":amdgpu_hip_printf_test_kernels",
         "//build_tools/amdgpu:target_map_h",
         "//libhrx/cts/tests/executable:amdgpu_executable_test_kernels",
+        "//libhrx/src/binding/hip:hip_dso_test_util",
     ] + _HIP_TEST_DEPS,
 )
 

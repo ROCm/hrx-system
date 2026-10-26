@@ -289,8 +289,8 @@ CUDAAPI CUresult cuSetDevice(int device) {
   }
 
   // Set the primary context as current.
-  iree_hal_streaming_context_set_current(primary_context);
-  return CUDA_SUCCESS;
+  return iree_status_to_cu_result(
+      iree_hal_streaming_context_set_current(primary_context));
 }
 
 //===----------------------------------------------------------------------===//
@@ -359,9 +359,13 @@ CUDAAPI CUresult cuCtxCreate(CUcontext* pctx, unsigned int flags,
       device_registry->host_allocator, &context);
 
   if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_context_set_current(context);
+  }
+  if (iree_status_is_ok(status)) {
     *pctx = (CUcontext)context;
-    // Make it current.
-    iree_hal_streaming_context_set_current(context);
+  } else {
+    iree_hal_streaming_unregister_context(context);
+    iree_hal_streaming_context_release(context);
   }
 
   CUresult result = iree_status_to_cu_result(status);
@@ -380,7 +384,7 @@ CUDAAPI CUresult cuCtxDestroy(CUcontext ctx) {
   // If so, clear it from TLS to avoid a dangling reference.
   if (ctx == (CUcontext)iree_hal_streaming_context_current()) {
     // This will release the TLS reference.
-    iree_hal_streaming_context_set_current(NULL);
+    iree_hal_streaming_context_clear_current();
   }
 
   // Release the context.
@@ -413,9 +417,10 @@ CUDAAPI CUresult cuCtxPopCurrent(CUcontext* pctx) {
 
 CUDAAPI CUresult cuCtxSetCurrent(CUcontext ctx) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_streaming_context_set_current((iree_hal_streaming_context_t*)ctx);
+  iree_status_t status = iree_hal_streaming_context_set_current(
+      (iree_hal_streaming_context_t*)ctx);
   IREE_TRACE_ZONE_END(z0);
-  return CUDA_SUCCESS;
+  return iree_status_to_cu_result(status);
 }
 
 CUDAAPI CUresult cuCtxGetCurrent(CUcontext* pctx) {
@@ -1059,7 +1064,7 @@ CUDAAPI CUresult cuDevicePrimaryCtxReset(CUdevice dev) {
     iree_hal_streaming_context_t* current_context =
         iree_hal_streaming_context_current();
     if (current_context == device->primary_context) {
-      iree_hal_streaming_context_set_current(NULL);
+      iree_hal_streaming_context_clear_current();
     }
   }
 

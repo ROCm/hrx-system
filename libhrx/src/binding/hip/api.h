@@ -1635,7 +1635,9 @@ typedef struct hipGraphNodeParams {
 
 // Initialization
 HIPAPI hipError_t hipInit(unsigned int flags);
-// Deinitializes the embedded HRX runtime.
+// Synchronously deinitializes the embedded HRX runtime. The application
+// releases its resources and joins threads calling HIP before invoking this
+// operation.
 HIPAPI hipError_t hipHALDeinit(void);
 // Sets the event sink used by the embedded HRX runtime. Must be called before
 // hipInit or after hipHALDeinit; otherwise returns hipErrorSetOnActiveProcess.

@@ -9,6 +9,7 @@
 
 #include "common/context.h"
 #include "common/execution_resource.h"
+#include "common/tls.h"
 #include "hrx_runtime.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/threading/mutex.h"
@@ -135,6 +136,9 @@ typedef struct iree_hal_streaming_device_registry_t {
 
   // Global initialization state.
   bool initialized;
+
+  // Thread-exit cleanup for current and stacked context references.
+  iree_hal_streaming_tls_key_t context_key;
 
   iree_slim_mutex_t mutex;
 

@@ -264,9 +264,18 @@ iree_hal_streaming_context_flags_t iree_hal_streaming_context_flags(
 // Synchronization: none (thread-local access).
 uintptr_t iree_hal_streaming_current_thread_token(void);
 
+// Adopts a current context after registering thread-exit cleanup. A native
+// thread-storage failure preserves the previous context. NULL clears it.
 // Synchronization: none (thread-local modification).
-void iree_hal_streaming_context_set_current(
+iree_status_t iree_hal_streaming_context_set_current(
     iree_hal_streaming_context_t* context);
+
+// Clears the current context without changing stacked context ownership.
+void iree_hal_streaming_context_clear_current(void);
+
+// Releases the calling thread's context references and stack storage. Used as
+// the registry-owned TLS destructor and before global registry teardown.
+void iree_hal_streaming_context_cleanup_thread(void* state);
 
 // Synchronization: none (thread-local stack operation).
 iree_status_t iree_hal_streaming_context_push(

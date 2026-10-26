@@ -990,11 +990,8 @@ typedef struct iree_hip_per_thread_stream_state_t {
   iree_hal_streaming_stream_t* stream;
 } iree_hip_per_thread_stream_state_t;
 
-static iree_once_flag iree_hip_per_thread_stream_key_once = IREE_ONCE_FLAG_INIT;
 static iree_hal_streaming_tls_key_t iree_hip_per_thread_stream_key =
     IREE_HAL_STREAMING_TLS_KEY_INVALID;
-static iree_status_code_t iree_hip_per_thread_stream_key_status =
-    IREE_STATUS_OK;
 
 static void iree_hip_initialize_global_init_mutex(void) {
   iree_slim_mutex_initialize(&iree_hip_global_init_mutex);
@@ -1007,25 +1004,23 @@ static void iree_hip_per_thread_stream_state_destroy(void* value) {
   iree_allocator_free(iree_allocator_system(), state);
 }
 
-static void iree_hip_initialize_per_thread_stream_key(void) {
-  iree_status_t status = iree_hal_streaming_tls_key_create(
-      &iree_hip_per_thread_stream_key,
-      iree_hip_per_thread_stream_state_destroy);
-  iree_hip_per_thread_stream_key_status = iree_status_code(status);
-  iree_status_ignore(status);
+static void iree_hip_deinitialize_per_thread_stream_key(void) {
+  iree_hip_per_thread_stream_state_t* state =
+      iree_hal_streaming_tls_get(iree_hip_per_thread_stream_key);
+  iree_hal_streaming_tls_key_delete(iree_hip_per_thread_stream_key);
+  iree_hip_per_thread_stream_key = IREE_HAL_STREAMING_TLS_KEY_INVALID;
+  if (state) {
+    iree_hip_per_thread_stream_state_destroy(state);
+  }
 }
 
 static hipError_t iree_hip_get_per_thread_stream_state(
     bool create_state, iree_hip_per_thread_stream_state_t** out_state) {
   IREE_ASSERT_ARGUMENT(out_state);
-  iree_call_once(&iree_hip_per_thread_stream_key_once,
-                 iree_hip_initialize_per_thread_stream_key);
-  if (IREE_UNLIKELY(iree_hip_per_thread_stream_key_status != IREE_STATUS_OK)) {
+  if (!create_state &&
+      iree_hip_per_thread_stream_key == IREE_HAL_STREAMING_TLS_KEY_INVALID) {
     *out_state = NULL;
-    return iree_hip_per_thread_stream_key_status ==
-                   IREE_STATUS_RESOURCE_EXHAUSTED
-               ? hipErrorOutOfMemory
-               : hipErrorUnknown;
+    return hipSuccess;
   }
 
   iree_hip_per_thread_stream_state_t* state =
@@ -1587,7 +1582,7 @@ static void iree_hip_sync_thread_device_selection(uint32_t generation) {
     return;
   }
   iree_hip_clear_per_thread_stream(/*context=*/NULL);
-  iree_hal_streaming_context_set_current(NULL);
+  iree_hal_streaming_context_clear_current();
   iree_hip_thread_device_selection.generation = generation;
   iree_hip_thread_device_selection.preferred_device = 0;
   iree_hip_thread_device_selection.explicitly_selected = false;
@@ -1638,9 +1633,15 @@ static hipError_t iree_hip_ensure_initialized(void) {
   const iree_hal_device_create_params_extension_t* device_extension =
       iree_hip_blocking_printf_provider_device_extension(
           &iree_hip_blocking_printf_provider);
-  iree_status_t status =
-      iree_hal_streaming_init_global(device_extension, iree_allocator_system());
+  iree_status_t status = iree_hal_streaming_tls_key_create(
+      &iree_hip_per_thread_stream_key,
+      iree_hip_per_thread_stream_state_destroy);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_init_global(device_extension,
+                                            iree_allocator_system());
+  }
   if (!iree_status_is_ok(status)) {
+    iree_hip_deinitialize_per_thread_stream_key();
     const iree_status_code_t status_code = iree_status_code(status);
     iree_status_free(status);
     iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
@@ -1702,7 +1703,10 @@ static hipError_t iree_hip_ensure_context(
     }
 
     // Set as current context for thread.
-    iree_hal_streaming_context_set_current(context);
+    status = iree_hal_streaming_context_set_current(context);
+    if (!iree_status_is_ok(status)) {
+      return iree_status_to_hip_result(status);
+    }
   }
 
   if (out_context) {
@@ -1966,6 +1970,7 @@ HIPAPI hipError_t hipHALDeinit(void) {
                  iree_hip_initialize_global_init_mutex);
   iree_slim_mutex_lock(&iree_hip_global_init_mutex);
   const hipError_t result = iree_hip_execution_context_reset_all();
+  iree_hip_deinitialize_per_thread_stream_key();
   iree_hal_streaming_cleanup_global();
   iree_hip_stream_trim();
   iree_hip_function_handle_trim();
@@ -2100,7 +2105,11 @@ static hipError_t iree_hip_set_current_device(int device,
     return result;
   }
 
-  iree_hal_streaming_context_set_current(primary_context);
+  status = iree_hal_streaming_context_set_current(primary_context);
+  if (!iree_status_is_ok(status)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_status_to_hip_result(status);
+  }
   iree_hip_thread_device_selection.preferred_device = device;
   if (explicit_selection) {
     iree_hip_thread_device_selection.explicitly_selected = true;
@@ -2174,7 +2183,7 @@ HIPAPI hipError_t hipSetValidDevices(int* device_arr, int len) {
   if (current_context &&
       current_context->device_ordinal != (iree_host_size_t)device_arr[0]) {
     iree_hip_clear_per_thread_stream(current_context);
-    iree_hal_streaming_context_set_current(NULL);
+    iree_hal_streaming_context_clear_current();
   }
   iree_hip_thread_device_selection.preferred_device = device_arr[0];
   HIP_RETURN_ERROR(hipSuccess);
@@ -4600,7 +4609,7 @@ HIPAPI hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev) {
     iree_hal_streaming_context_t* current_context =
         iree_hal_streaming_context_current();
     if (current_context == device->primary_context) {
-      iree_hal_streaming_context_set_current(NULL);
+      iree_hal_streaming_context_clear_current();
     }
 
     // All allocations are released with the context — reset free memory.
@@ -4791,10 +4800,12 @@ HIPAPI hipError_t hipCtxCreate(hipCtx_t* pctx, unsigned int flags,
   }
 
   if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_context_set_current(context);
+  }
+  if (iree_status_is_ok(status)) {
     *pctx = (hipCtx_t)context;
-    // Make it current.
-    iree_hal_streaming_context_set_current(context);
   } else {
+    iree_hal_streaming_unregister_context(context);
     iree_hal_streaming_context_release(context);
   }
 
@@ -4842,7 +4853,7 @@ HIPAPI hipError_t hipCtxDestroy(hipCtx_t ctx) {
   // If so, clear it from TLS to avoid a dangling reference.
   if (ctx == (hipCtx_t)iree_hal_streaming_context_current()) {
     // This will release the TLS reference.
-    iree_hal_streaming_context_set_current(NULL);
+    iree_hal_streaming_context_clear_current();
   }
 
   // Release the context.
@@ -5018,9 +5029,10 @@ HIPAPI hipError_t hipCtxGetCurrent(hipCtx_t* pctx) {
 HIPAPI hipError_t hipCtxSetCurrent(hipCtx_t ctx) {
   HIP_API_BEGIN();
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_streaming_context_set_current((iree_hal_streaming_context_t*)ctx);
+  iree_status_t status = iree_hal_streaming_context_set_current(
+      (iree_hal_streaming_context_t*)ctx);
   IREE_TRACE_ZONE_END(z0);
-  HIP_RETURN_ERROR(hipSuccess);
+  HIP_RETURN_ERROR(iree_status_to_hip_result(status));
 }
 
 // Gets the device associated with the current context.

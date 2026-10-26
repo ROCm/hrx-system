@@ -495,16 +495,21 @@ iree_status_t iree_hal_streaming_init_global(
               /*flags=*/0, device_extensions)));
 
   // Create global registry.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_allocator_malloc(host_allocator,
-                                sizeof(iree_hal_streaming_device_registry_t),
-                                (void**)&iree_hal_streaming_global_registry));
+  iree_status_t status = iree_allocator_malloc(
+      host_allocator, sizeof(iree_hal_streaming_device_registry_t),
+      (void**)&iree_hal_streaming_global_registry);
+  if (!iree_status_is_ok(status)) {
+    status = iree_status_join(status, HRX_CALL(hrx_gpu_shutdown()));
+    IREE_TRACE_ZONE_END(z0);
+    return status;
+  }
 
   iree_hal_streaming_device_registry_t* device_registry =
       iree_hal_streaming_device_registry();
   memset(device_registry, 0, sizeof(*device_registry));
   device_registry->host_allocator = host_allocator;
   device_registry->device_extensions = device_extensions;
+  device_registry->context_key = IREE_HAL_STREAMING_TLS_KEY_INVALID;
   iree_slim_mutex_initialize(&device_registry->mutex);
 
   // Initialize context list.
@@ -515,7 +520,11 @@ iree_status_t iree_hal_streaming_init_global(
   // Enumerate the sealed HRX device inventory. Initialization is transactional:
   // a device failure preserves its cause and releases the initialized prefix.
   int gpu_count = 0;
-  iree_status_t status = HRX_CALL(hrx_gpu_device_count(&gpu_count));
+  status = iree_hal_streaming_tls_key_create(
+      &device_registry->context_key, iree_hal_streaming_context_cleanup_thread);
+  if (iree_status_is_ok(status)) {
+    status = HRX_CALL(hrx_gpu_device_count(&gpu_count));
+  }
 
   if (iree_status_is_ok(status)) {
     memset(device_registry->devices, 0, sizeof(device_registry->devices));
@@ -563,8 +572,9 @@ void iree_hal_streaming_cleanup_global(void) {
     return;
   }
 
-  // Clear the TLS current context first to avoid dangling references.
-  iree_hal_streaming_context_set_current(NULL);
+  // Release current and stacked context references before registry ownership.
+  iree_hal_streaming_context_cleanup_thread(
+      iree_hal_streaming_tls_get(device_registry->context_key));
 
   // Force destroy all remaining contexts from the global list.
   iree_slim_mutex_lock(&device_registry->context_list.mutex);
@@ -592,6 +602,8 @@ void iree_hal_streaming_cleanup_global(void) {
 
   // Shutdown pyre GPU subsystem.
   hrx_status_ignore(hrx_gpu_shutdown());
+
+  iree_hal_streaming_tls_key_delete(device_registry->context_key);
 
   iree_slim_mutex_unlock(&device_registry->mutex);
   iree_slim_mutex_deinitialize(&device_registry->mutex);

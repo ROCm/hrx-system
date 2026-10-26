@@ -32,8 +32,13 @@ static iree_atomic_uint64_t iree_hal_streaming_next_stream_id =
     IREE_ATOMIC_VAR_INIT(1);
 
 typedef struct iree_hal_streaming_context_stack_t {
+  // Storage allocator captured when the first stack array is acquired.
+  iree_allocator_t allocator;
+  // Owned references to contexts below the current one.
   iree_hal_streaming_context_t** contexts;
+  // Number of stacked references.
   iree_host_size_t depth;
+  // Allocated stack entry capacity.
   iree_host_size_t capacity;
 } iree_hal_streaming_context_stack_t;
 
@@ -379,26 +384,56 @@ uintptr_t iree_hal_streaming_current_thread_token(void) {
   return (uintptr_t)&iree_hal_streaming_thread_token_storage;
 }
 
-void iree_hal_streaming_context_set_current(
+iree_status_t iree_hal_streaming_context_set_current(
     iree_hal_streaming_context_t* context) {
+  if (!context) {
+    iree_hal_streaming_context_clear_current();
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_tls_set(
+      iree_hal_streaming_device_registry()->context_key,
+      &iree_hal_streaming_context_stack));
   IREE_TRACE_ZONE_BEGIN(z0);
 
   // Retain new context and release old one.
   iree_hal_streaming_context_t* old_context =
       iree_hal_streaming_current_context;
-  if (context) {
-    iree_hal_streaming_context_retain(context);
-  }
+  iree_hal_streaming_context_retain(context);
   iree_hal_streaming_current_context = context;
   iree_hal_streaming_context_release(old_context);
 
   IREE_TRACE_ZONE_END(z0);
+  return iree_ok_status();
+}
+
+void iree_hal_streaming_context_clear_current(void) {
+  iree_hal_streaming_context_t* context = iree_hal_streaming_current_context;
+  iree_hal_streaming_current_context = NULL;
+  iree_hal_streaming_context_release(context);
+}
+
+void iree_hal_streaming_context_cleanup_thread(void* state) {
+  iree_hal_streaming_context_stack_t* stack = state;
+  if (!stack) {
+    return;
+  }
+  iree_hal_streaming_context_clear_current();
+  while (stack->depth) {
+    iree_hal_streaming_context_release(stack->contexts[--stack->depth]);
+  }
+  iree_allocator_free(stack->allocator, stack->contexts);
+  *stack = (iree_hal_streaming_context_stack_t){0};
 }
 
 iree_status_t iree_hal_streaming_context_push(
     iree_hal_streaming_context_t* context) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_tls_set(
+              iree_hal_streaming_device_registry()->context_key,
+              &iree_hal_streaming_context_stack));
 
   // Grow stack if needed.
   if (iree_hal_streaming_context_stack.depth >=
@@ -407,9 +442,12 @@ iree_status_t iree_hal_streaming_context_push(
         iree_hal_streaming_context_stack.capacity
             ? iree_hal_streaming_context_stack.capacity * 2
             : 8;
+    if (!iree_hal_streaming_context_stack.contexts) {
+      iree_hal_streaming_context_stack.allocator = context->host_allocator;
+    }
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
         z0, iree_allocator_realloc(
-                context->host_allocator,
+                iree_hal_streaming_context_stack.allocator,
                 new_capacity * sizeof(iree_hal_streaming_context_t*),
                 (void**)&iree_hal_streaming_context_stack.contexts));
     iree_hal_streaming_context_stack.capacity = new_capacity;

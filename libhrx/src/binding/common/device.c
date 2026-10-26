@@ -439,7 +439,7 @@ iree_status_t iree_hal_streaming_device_release_primary_context(
                                                     iree_infinite_timeout());
 
       if (iree_hal_streaming_context_current() == retained_context) {
-        iree_hal_streaming_context_set_current(NULL);
+        iree_hal_streaming_context_clear_current();
       }
 
       // Release the device's primary-context ownership.

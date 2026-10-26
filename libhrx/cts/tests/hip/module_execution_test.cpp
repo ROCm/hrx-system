@@ -1,8 +1,6 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include <dlfcn.h>
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -10,7 +8,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -19,6 +16,7 @@
 #include <vector>
 
 #include "binding/hip/api.h"
+#include "binding/hip/hip_dso_test_util.h"
 #include "iree/testing/gtest.h"
 #include "libhrx/cts/core/amdgpu_executable_test_data.hpp"
 #include "libhrx/cts/core/amdgpu_hip_cooperative_test_data.hpp"
@@ -26,20 +24,34 @@
 
 namespace {
 
-const char* CandidateLibPath() {
-  if (const char* environment_path = std::getenv("HRX_TEST_LIBAMDHIP64");
-      environment_path && *environment_path != '\0') {
-    return environment_path;
+class HipModuleExecutionTest : public testing::Test {
+ protected:
+  static void SetUpTestSuite() {
+    ASSERT_TRUE(library_.Open()) << library_.error();
+    const auto initialize = library_.Resolve<decltype(&hipInit)>("hipInit");
+    ASSERT_NE(initialize, nullptr);
+    ASSERT_EQ(hipSuccess, initialize(0));
   }
-  return "libamdhip64.so";
-}
+
+  static void TearDownTestSuite() {
+    if (library_.is_open()) {
+      const auto deinitialize =
+          library_.Resolve<hipError_t (*)()>("hipHALDeinit");
+      ASSERT_NE(deinitialize, nullptr);
+      EXPECT_EQ(hipSuccess, deinitialize());
+      EXPECT_TRUE(library_.Close()) << library_.error();
+    }
+  }
+
+  // One exact HIP artifact and runtime shared through synchronous teardown.
+  static inline hrx::hip::testing::HipDso library_;
+};
 
 template <typename T>
-T ResolveHipSymbol(void* library, const char* name) {
-  return reinterpret_cast<T>(dlsym(library, name));
+T ResolveHipSymbol(hrx::hip::testing::HipDso& library, const char* name) {
+  return library.Resolve<T>(name);
 }
 
-using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipGetDeviceFn = hipError_t (*)(int* device);
 using HipSetDeviceFn = hipError_t (*)(int device);
 using HipGetDeviceCountFn = hipError_t (*)(int* device_count);
@@ -413,13 +425,8 @@ hipError_t AddPrintfGraphNode(HipGraphAddKernelNodeFn add_kernel_node,
   return add_result;
 }
 
-TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
-  void* library = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
-  if (!library) {
-    GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": " << dlerror();
-  }
-
-  const auto init = ResolveHipSymbol<HipInitFn>(library, "hipInit");
+TEST_F(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
+  auto& library = library_;
   const auto get_device =
       ResolveHipSymbol<HipGetDeviceFn>(library, "hipGetDevice");
   const auto get_device_properties =
@@ -453,7 +460,6 @@ TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
   const auto graph_exec_destroy =
       ResolveHipSymbol<HipGraphExecDestroyFn>(library, "hipGraphExecDestroy");
 
-  ASSERT_NE(nullptr, init);
   ASSERT_NE(nullptr, get_device);
   ASSERT_NE(nullptr, get_device_properties);
   ASSERT_NE(nullptr, module_load_data);
@@ -472,10 +478,6 @@ TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
   ASSERT_NE(nullptr, graph_launch);
   ASSERT_NE(nullptr, graph_exec_destroy);
 
-  const hipError_t init_result = init(/*flags=*/0);
-  if (init_result != hipSuccess) {
-    GTEST_SKIP() << "hipInit failed: " << init_result;
-  }
   int device = 0;
   ASSERT_EQ(hipSuccess, get_device(&device));
   hipDeviceProp_t properties = {};
@@ -637,14 +639,37 @@ TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
   EXPECT_EQ(hipSuccess, hip_free(input));
 }
 
-TEST(HipModuleExecutionTest,
-     ExtMultiKernelLaunchExecutesEntriesAndHonorsSynchronizationFlags) {
-  void* library = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
-  if (!library) {
-    GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": " << dlerror();
-  }
+TEST_F(HipModuleExecutionTest,
+       ThreadExitReleasesCurrentStackAndPerThreadStream) {
+  const auto get_device =
+      library_.Resolve<decltype(&hipGetDevice)>("hipGetDevice");
+  const auto get_current =
+      library_.Resolve<decltype(&hipCtxGetCurrent)>("hipCtxGetCurrent");
+  const auto push_current =
+      library_.Resolve<decltype(&hipCtxPushCurrent)>("hipCtxPushCurrent");
+  const auto synchronize =
+      library_.Resolve<decltype(&hipStreamSynchronize)>("hipStreamSynchronize");
+  ASSERT_NE(get_device, nullptr);
+  ASSERT_NE(get_current, nullptr);
+  ASSERT_NE(push_current, nullptr);
+  ASSERT_NE(synchronize, nullptr);
+  ASSERT_EQ(hipSuccess, synchronize(hipStreamPerThread));
+  std::thread worker([&] {
+    int device = -1;
+    ASSERT_EQ(hipSuccess, get_device(&device));
+    hipCtx_t context = nullptr;
+    ASSERT_EQ(hipSuccess, get_current(&context));
+    ASSERT_NE(context, nullptr);
+    ASSERT_EQ(hipSuccess, push_current(context));
+    ASSERT_EQ(hipSuccess, push_current(context));
+    ASSERT_EQ(hipSuccess, synchronize(hipStreamPerThread));
+  });
+  worker.join();
+}
 
-  const auto init = ResolveHipSymbol<HipInitFn>(library, "hipInit");
+TEST_F(HipModuleExecutionTest,
+       ExtMultiKernelLaunchExecutesEntriesAndHonorsSynchronizationFlags) {
+  auto& library = library_;
   const auto get_device =
       ResolveHipSymbol<HipGetDeviceFn>(library, "hipGetDevice");
   const auto set_device =
@@ -684,7 +709,6 @@ TEST(HipModuleExecutionTest,
   const auto register_function =
       ResolveHipSymbol<HipRegisterFunctionFn>(library, "__hipRegisterFunction");
 
-  ASSERT_NE(nullptr, init);
   ASSERT_NE(nullptr, get_device);
   ASSERT_NE(nullptr, set_device);
   ASSERT_NE(nullptr, get_device_count);
@@ -705,10 +729,6 @@ TEST(HipModuleExecutionTest,
   ASSERT_NE(nullptr, unregister_fat_binary);
   ASSERT_NE(nullptr, register_function);
 
-  const hipError_t init_result = init(/*flags=*/0);
-  if (init_result != hipSuccess) {
-    GTEST_SKIP() << "hipInit failed: " << init_result;
-  }
   int original_device = 0;
   ASSERT_EQ(hipSuccess, get_device(&original_device));
   ScopedDeviceSelection restore_device = {
@@ -938,17 +958,12 @@ TEST(HipModuleExecutionTest,
 // Requires device libraries using the stack/tag hostcall ABI; phase/occupancy
 // device libraries are incompatible with this provider. With a matching device
 // library, opt in using --gtest_also_run_disabled_tests.
-TEST(HipModuleExecutionTest, DISABLED_BlockingPrintfDirectAndGraphReplay) {
+TEST_F(HipModuleExecutionTest, DISABLED_BlockingPrintfDirectAndGraphReplay) {
   if (hrx_cts_amdgpu_hip_printf_test_kernels_size() == 0) {
     GTEST_SKIP() << "ROCm device libraries are unavailable";
   }
 
-  void* library = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
-  if (!library) {
-    GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": " << dlerror();
-  }
-
-  const auto init = ResolveHipSymbol<HipInitFn>(library, "hipInit");
+  auto& library = library_;
   const auto get_device =
       ResolveHipSymbol<HipGetDeviceFn>(library, "hipGetDevice");
   const auto get_device_properties =
@@ -980,7 +995,6 @@ TEST(HipModuleExecutionTest, DISABLED_BlockingPrintfDirectAndGraphReplay) {
   const auto graph_exec_destroy =
       ResolveHipSymbol<HipGraphExecDestroyFn>(library, "hipGraphExecDestroy");
 
-  ASSERT_NE(nullptr, init);
   ASSERT_NE(nullptr, get_device);
   ASSERT_NE(nullptr, get_device_properties);
   ASSERT_NE(nullptr, module_load_data);
@@ -998,10 +1012,6 @@ TEST(HipModuleExecutionTest, DISABLED_BlockingPrintfDirectAndGraphReplay) {
   ASSERT_NE(nullptr, graph_launch);
   ASSERT_NE(nullptr, graph_exec_destroy);
 
-  const hipError_t init_result = init(/*flags=*/0);
-  if (init_result != hipSuccess) {
-    GTEST_SKIP() << "hipInit failed: " << init_result;
-  }
   int device = 0;
   ASSERT_EQ(hipSuccess, get_device(&device));
   hipDeviceProp_t properties = {};
@@ -1139,17 +1149,13 @@ TEST(HipModuleExecutionTest, DISABLED_BlockingPrintfDirectAndGraphReplay) {
   EXPECT_EQ(hipSuccess, module_unload(module));
 }
 
-TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
+TEST_F(HipModuleExecutionTest,
+       CooperativeLaunchPreservesStreamAndGraphOrdering) {
   if (hrx_cts_amdgpu_hip_cooperative_test_kernels_size() == 0) {
     GTEST_SKIP() << "ROCm device libraries are unavailable";
   }
 
-  void* library = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
-  if (!library) {
-    GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": " << dlerror();
-  }
-
-  const auto init = ResolveHipSymbol<HipInitFn>(library, "hipInit");
+  auto& library = library_;
   const auto get_device =
       ResolveHipSymbol<HipGetDeviceFn>(library, "hipGetDevice");
   const auto get_device_properties =
@@ -1225,7 +1231,6 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
   const auto register_function =
       ResolveHipSymbol<HipRegisterFunctionFn>(library, "__hipRegisterFunction");
 
-  ASSERT_NE(nullptr, init);
   ASSERT_NE(nullptr, get_device);
   ASSERT_NE(nullptr, get_device_properties);
   ASSERT_NE(nullptr, module_load_data);
@@ -1261,10 +1266,6 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
   ASSERT_NE(nullptr, unregister_fat_binary);
   ASSERT_NE(nullptr, register_function);
 
-  const hipError_t init_result = init(/*flags=*/0);
-  if (init_result != hipSuccess) {
-    GTEST_SKIP() << "hipInit failed: " << init_result;
-  }
   int device = 0;
   ASSERT_EQ(hipSuccess, get_device(&device));
   hipDeviceProp_t properties = {};
