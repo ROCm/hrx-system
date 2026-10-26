@@ -208,6 +208,66 @@ TEST_F(ElasticTextServiceTest, PrefixNativeBackingRetiresBeforeTrim) {
   CheckPrefixBackingRetirement(/*trim_first=*/true);
 }
 
+TEST_F(ElasticTextServiceTest, PrefixTailRetiresBeforeCompactionAndPeerReuse) {
+  auto* hole = loom_serve_text_model_row(model_, 0);
+  auto* source = loom_serve_text_model_row(model_, 1);
+  auto* peer = loom_serve_text_model_row(model_, 2);
+  bool admitted = false;
+  IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
+      hole, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 32, &admitted));
+  ASSERT_TRUE(admitted);
+  IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
+      source, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 16, &admitted));
+  ASSERT_TRUE(admitted);
+  const int32_t tokens[] = {0, 1, 2};
+  IREE_ASSERT_OK(
+      loom_serve_text_row_prefill(source, IREE_ARRAYSIZE(tokens), tokens));
+  loom_serve_text_checkpoint_t* checkpoint = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_row_try_pin(source, &checkpoint));
+  ASSERT_NE(checkpoint, nullptr);
+  std::unique_ptr<loom_serve_text_checkpoint_t,
+                  decltype(&loom_serve_text_checkpoint_release)>
+      endpoint(checkpoint, loom_serve_text_checkpoint_release);
+
+  // The active pin copies the partial page into a private continuation. Free
+  // lower IDs so compaction moves both the endpoint and the reserved writer
+  // before the writer's next epoch. Its completed copy-source reference must
+  // not survive that relocation under the old identity.
+  IREE_ASSERT_OK(loom_serve_text_row_reset(hole));
+  loom_serve_text_trim_result_t trim;
+  IREE_ASSERT_OK(loom_serve_text_model_trim(model_, &trim));
+  ASSERT_GT(trim.moved_blocks, 0u);
+  IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
+      peer, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 16, &admitted));
+  ASSERT_TRUE(admitted);
+  const auto available = loom_serve_text_model_pool_usage(model_).available;
+  const int32_t suffix = 1;
+  IREE_ASSERT_OK(loom_serve_text_row_prefill(source, 1, &suffix));
+  Oracle oracle;
+  oracle.Consume("abxb");
+  EXPECT_EQ(loom_serve_text_row_token(source), oracle.Predict());
+  // Retirement must not release the old physical ID now owned by the peer.
+  ASSERT_EQ(loom_serve_text_model_pool_usage(model_).available, available);
+
+  IREE_ASSERT_OK(
+      loom_serve_text_row_prefill(peer, IREE_ARRAYSIZE(tokens), tokens));
+  Oracle prefix;
+  prefix.Consume("abx");
+  EXPECT_EQ(loom_serve_text_row_token(peer), prefix.Predict());
+  IREE_ASSERT_OK(loom_serve_text_model_trim(model_, &trim));
+  IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
+      hole, LOOM_SERVE_TEXT_RESERVE_CHECKPOINT, checkpoint, 16, &admitted));
+  ASSERT_TRUE(admitted);
+  IREE_ASSERT_OK(loom_serve_text_row_prefill(hole, 1, &suffix));
+  EXPECT_EQ(loom_serve_text_row_token(hole), oracle.Predict());
+  IREE_ASSERT_OK(loom_serve_text_row_reset(hole));
+  IREE_ASSERT_OK(loom_serve_text_row_reset(source));
+  IREE_ASSERT_OK(loom_serve_text_row_reset(peer));
+  EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 252u);
+  endpoint.reset();
+  EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 256u);
+}
+
 TEST_F(RegisteredElasticTextServiceTest,
        ColdStateCommitDoesNotBlockWarmHttpInferenceOnOneWorker) {
   CheckColdStateAdmission(/*cancel=*/false);

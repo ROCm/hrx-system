@@ -445,6 +445,16 @@ static void loom_serve_text_complete_backing(loom_serve_text_state_t* state) {
   state->memory.backing.operation = NULL;
 }
 
+// Successful copy readiness retires this source independently of the recurrent
+// reader, which remains authoritative until the next epoch or cancellation.
+static void loom_serve_text_row_release_tail(loom_serve_text_state_row_t* row) {
+  if (row->retiring_tail != UINT32_MAX) {
+    loom_serve_block_pool_release(&row->owner->cache.pool, 1,
+                                  &row->retiring_tail);
+    row->retiring_tail = UINT32_MAX;
+  }
+}
+
 // Reclaims only unowned physical slabs. The map need not be compact: a denied
 // relocation must still be able to release dead backing under pressure.
 static iree_status_t loom_serve_text_trim_backing(
@@ -460,7 +470,11 @@ static iree_status_t loom_serve_text_trim_backing(
     }
   }
   for (iree_host_size_t i = 0; i < state->row_count; ++i) {
-    const loom_serve_text_state_row_t* row = state->rows[i];
+    loom_serve_text_state_row_t* row = state->rows[i];
+    // An active prefix pin can leave a completed COW source until the next
+    // epoch. Retire it before moving IDs so no deferred release names a block
+    // that compaction has returned to the pool for another owner.
+    loom_serve_text_row_release_tail(row);
     if (row->recurrent.slot == UINT32_MAX) {
       continue;
     }
@@ -743,10 +757,7 @@ void loom_serve_text_state_row_trim(loom_serve_text_state_row_t* row) {
                                   &row->recurrent.anchor);
     row->recurrent.anchor = UINT32_MAX;
   }
-  if (row->retiring_tail != UINT32_MAX) {
-    loom_serve_block_pool_release(&state->cache.pool, 1, &row->retiring_tail);
-    row->retiring_tail = UINT32_MAX;
-  }
+  loom_serve_text_row_release_tail(row);
   if (!state->cache.capacity) {
     return;
   }
@@ -1859,11 +1870,7 @@ void loom_serve_text_state_row_complete_reserve(
     loom_serve_text_state_row_t* row) {
   loom_serve_text_state_t* state = row->owner;
   loom_serve_text_complete_backing(state);
-  if (row->retiring_tail != UINT32_MAX) {
-    loom_serve_block_pool_release(&row->owner->cache.pool, 1,
-                                  &row->retiring_tail);
-    row->retiring_tail = UINT32_MAX;
-  }
+  loom_serve_text_row_release_tail(row);
 }
 
 // The whole epoch has passed its capacity check. Publish only newly assigned
