@@ -47,17 +47,20 @@ jobs:
       CXX: /usr/bin/clang++-22
       AR: /usr/bin/llvm-ar-22
       LLVM_ROOT: /usr/lib/llvm-22
-      WINDOWS_CROSS_ROOT: ${{ github.workspace }}/build/loom-sdk/toolchain
-      WINSDK_ROOT: ${{ github.workspace }}/build/loom-sdk/toolchain/sdk
-      WINDOWS_COMPILER_RT_ROOT: ${{ github.workspace }}/build/loom-sdk/toolchain/compiler-rt
       PROFILE: ${{ matrix.profile }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Configure Git
-        run: git config --global --add safe.directory "$PWD"
+      - name: Configure workspace
+        run: |
+          git config --global --add safe.directory "$PWD"
+          {
+            echo "WINDOWS_CROSS_ROOT=$PWD/build/loom-sdk/toolchain"
+            echo "WINSDK_ROOT=$PWD/build/loom-sdk/toolchain/sdk"
+            echo "WINDOWS_COMPILER_RT_ROOT=$PWD/build/loom-sdk/toolchain/compiler-rt"
+          } >> "$GITHUB_ENV"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
@@ -65,11 +68,12 @@ jobs:
         run: |
           case "$PROFILE" in Release|Tracy|Debug|ASAN) ;; *) exit 2 ;; esac
           curl --fail --location --silent --show-error \
-            https://apt.llvm.org/llvm-snapshot.gpg.key --output /usr/share/keyrings/llvm.asc
-          echo '8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d  /usr/share/keyrings/llvm.asc' | sha256sum --check
-          echo 'deb [signed-by=/usr/share/keyrings/llvm.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' > /etc/apt/sources.list.d/llvm.list
-          apt-get update
-          apt-get install --yes --no-install-recommends \
+            https://apt.llvm.org/llvm-snapshot.gpg.key --output "$RUNNER_TEMP/llvm.asc"
+          echo "8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d  $RUNNER_TEMP/llvm.asc" | sha256sum --check
+          sudo install -m 644 "$RUNNER_TEMP/llvm.asc" /usr/share/keyrings/llvm.asc
+          echo 'deb [signed-by=/usr/share/keyrings/llvm.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
             "clang-22=$LLVM_APT_VERSION" "lld-22=$LLVM_APT_VERSION" \
             "llvm-22=$LLVM_APT_VERSION" "libclang-rt-22-dev=$LLVM_APT_VERSION" \
             g++-13 patchelf p7zip-full
@@ -95,7 +99,7 @@ jobs:
         run: |
           test "$("$LLVM_ROOT/bin/clang" -dumpversion)" = 22.1.8
           resource_dir="$("$LLVM_ROOT/bin/clang" -print-resource-dir)"
-          install -D "$WINDOWS_COMPILER_RT_ROOT/clang_rt.builtins-x86_64.lib" \
+          sudo install -D "$WINDOWS_COMPILER_RT_ROOT/clang_rt.builtins-x86_64.lib" \
             "$resource_dir/lib/windows/clang_rt.builtins-x86_64.lib"
       - name: Build and qualify Linux SDK
         run: |
