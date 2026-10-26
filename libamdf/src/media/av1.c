@@ -334,10 +334,27 @@ amdf_status_t amdf_media_av1_validate_encode_picture(
                       av1_picture->primary_reference >= 7) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
+  uint32_t mapped_reference_mask = 0;
+  for (uint32_t index = 0; index < 8; ++index) {
+    const uint32_t reference_index = av1_picture->reference_map[index];
+    if (key_frame ? reference_index != 255
+                  : reference_index != 255 &&
+                        reference_index >= av1_picture->reference_count) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+    if (reference_index != 255) {
+      mapped_reference_mask |= 1u << reference_index;
+    }
+  }
+  if (!key_frame &&
+      mapped_reference_mask != (1u << av1_picture->reference_count) - 1) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
   for (uint32_t index = 0; index < 7; ++index) {
-    if (key_frame ? av1_picture->reference_indices[index] != 255
-                  : av1_picture->reference_indices[index] >=
-                        av1_picture->reference_count) {
+    const uint32_t logical_index = av1_picture->reference_indices[index];
+    if (key_frame ? logical_index != 255
+                  : logical_index >= 8 ||
+                        av1_picture->reference_map[logical_index] == 255) {
       return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
     }
   }

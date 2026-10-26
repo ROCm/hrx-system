@@ -440,9 +440,16 @@ uint32_t RestrictTemporalLayerLimit(Device* device, amdf_media_codec_t codec,
       native_limit < AMDF_MEDIA_ENCODE_TEMPORAL_LAYER_STORAGE_CAPACITY
           ? native_limit
           : AMDF_MEDIA_ENCODE_TEMPORAL_LAYER_STORAGE_CAPACITY;
+  // The AMD D3D12 AV1 path currently advertises temporal scalability but emits
+  // unusable enhancement-layer payloads: encoding succeeds, resolved metadata
+  // reports QP zero, and decoding never displays the enhancement pictures.
+  // Capability answers expose qualified behavior, so retain the verified
+  // single-layer AV1 path until the native path passes the scalable CTS.
+  const uint32_t qualified_limit =
+      codec == AMDF_MEDIA_CODEC_AV1 && bounded_limit > 1 ? 1 : bounded_limit;
   return amdf_media_encode_restrict_temporal_layer_limit(
       amdf_endpoint_get_cached_info(device->base.base.endpoint), codec,
-      bounded_limit);
+      qualified_limit);
 }
 
 void PrepareRateControl(const amdf_media_encode_configuration_t& encode,

@@ -6,6 +6,8 @@
 
 #include "libamdf/src/media/d3d12/encode.h"
 
+#include <algorithm>
+
 #include "gtest/gtest.h"
 
 namespace amdf::media::d3d12 {
@@ -151,23 +153,37 @@ TEST_F(TemporalEncodePictureTest, Av1UsesOneBasedNativeScalabilityIdentity) {
   av1.quantization.matrix_levels[2] = UINT8_MAX;
   av1.reference_count = 1;
   av1.references = &reference;
+  std::fill(std::begin(av1.reference_map), std::end(av1.reference_map),
+            uint8_t{0});
+  std::fill(std::begin(av1.reference_indices), std::end(av1.reference_indices),
+            uint8_t{7});
   encode_.next = &av1;
 
   EncodePicture native = {};
   ASSERT_EQ(PrepareEncode(session_, encode_, 8, &native), AMDF_STATUS_OK);
   ExpectEnhancementLayerRateControl(native);
   EXPECT_EQ(native.av1.TemporalLayerIndexPlus1, 2u);
-  EXPECT_EQ(native.av1.ReferenceFramesReconPictureDescriptors[0]
-                .TemporalLayerIndexPlus1,
-            1u);
+  for (uint32_t index = 0; index < 8; ++index) {
+    EXPECT_EQ(native.av1.ReferenceFramesReconPictureDescriptors[index]
+                  .ReconstructedPictureResourceIndex,
+              0u);
+    EXPECT_EQ(native.av1.ReferenceFramesReconPictureDescriptors[index]
+                  .TemporalLayerIndexPlus1,
+              1u);
+  }
+  for (uint32_t index = 0; index < 7; ++index) {
+    EXPECT_EQ(native.av1.ReferenceIndices[index], 7u);
+  }
 
   session_.encode.rate_control.temporal_layer_count = 1;
   encode_.temporal_layer_index = 0;
   ASSERT_EQ(PrepareEncode(session_, encode_, 8, &native), AMDF_STATUS_OK);
   EXPECT_EQ(native.av1.TemporalLayerIndexPlus1, 0u);
-  EXPECT_EQ(native.av1.ReferenceFramesReconPictureDescriptors[0]
-                .TemporalLayerIndexPlus1,
-            0u);
+  for (uint32_t index = 0; index < 8; ++index) {
+    EXPECT_EQ(native.av1.ReferenceFramesReconPictureDescriptors[index]
+                  .TemporalLayerIndexPlus1,
+              0u);
+  }
 }
 
 }  // namespace

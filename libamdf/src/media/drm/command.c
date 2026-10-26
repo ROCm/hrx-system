@@ -227,8 +227,7 @@ static bool amdf_media_drm_av1_encode_picture_supported(
   const amdf_media_av1_quantization_t* quantization = &picture->quantization;
   const amdf_media_av1_cdef_t* cdef = &picture->cdef;
   const uint32_t transform_mode = picture->frame_type == 0 ? 1 : 2;
-  return picture->refresh_frame_flags == 255 &&
-         picture->interpolation_filter == 4 &&
+  return picture->interpolation_filter == 4 &&
          picture->transform_mode == transform_mode && filter->sharpness == 0 &&
          filter->deltas_enabled == 0 && filter->deltas_updated == 0 &&
          filter->delta_present == 0 && filter->delta_resolution == 0 &&
@@ -265,6 +264,18 @@ static bool amdf_media_drm_av1_encode_picture_supported(
                                        sizeof(cdef->chroma_primary)) &&
          amdf_media_drm_bytes_are_zero(cdef->chroma_secondary,
                                        sizeof(cdef->chroma_secondary));
+}
+
+static bool amdf_media_drm_hevc_encode_picture_supported(
+    const amdf_media_hevc_encode_picture_info_t* picture) {
+  if (picture->frame_type == AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_IDR) {
+    return true;
+  }
+  const int64_t reference_delta = (int64_t)picture->picture_order_count -
+                                  picture->references[0].picture_order_count;
+  // The VCN slice template authors one negative short-term reference. Its
+  // unsigned Exp-Golomb helper cannot represent UINT32_MAX.
+  return reference_delta > 0 && reference_delta < UINT32_MAX;
 }
 
 static const amdf_media_reference_t* amdf_media_drm_encode_reference(
@@ -319,6 +330,10 @@ static amdf_status_t amdf_media_drm_command_prepare_encode(
         &session->requirements, &session->encode, encode, hevc);
     if (amdf_status_is_ok(status)) {
       reference_count = hevc->reference_count;
+    }
+    if (amdf_status_is_ok(status) &&
+        !amdf_media_drm_hevc_encode_picture_supported(hevc)) {
+      status = amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
     }
   } else {
     av1 = encode != NULL ? encode->next : NULL;

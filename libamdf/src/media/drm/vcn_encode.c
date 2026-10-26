@@ -428,7 +428,10 @@ static void amdf_media_drm_vcn_encode_h264_slice(
   uint32_t instruction_count = 0;
   amdf_media_drm_vcn_encode_bits_t bits = {0};
   const bool idr = picture->frame_type == AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR;
-  amdf_media_drm_vcn_encode_bits_write(&bits, idr ? 0x65 : 0x41, 8);
+  const uint32_t nal_header = idr                          ? 0x65
+                              : picture->used_as_reference ? 0x41
+                                                           : 0x01;
+  amdf_media_drm_vcn_encode_bits_write(&bits, nal_header, 8);
   amdf_media_drm_vcn_encode_slice_copy(data, &data_count, instructions,
                                        &instruction_count, &bits);
   amdf_media_drm_vcn_encode_slice_instruction(instructions, &instruction_count,
@@ -446,7 +449,9 @@ static void amdf_media_drm_vcn_encode_h264_slice(
   } else {
     amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
     amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
-    amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+    if (picture->used_as_reference) {
+      amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
+    }
   }
   amdf_media_drm_vcn_encode_slice_copy(data, &data_count, instructions,
                                        &instruction_count, &bits);
@@ -496,6 +501,9 @@ static void amdf_media_drm_vcn_encode_hevc_slice(
   bits = (amdf_media_drm_vcn_encode_bits_t){0};
   amdf_media_drm_vcn_encode_bits_unsigned_exp_golomb(&bits, idr ? 2 : 1);
   if (!idr) {
+    const uint32_t reference_delta =
+        (uint32_t)((int64_t)picture->picture_order_count -
+                   picture->references[0].picture_order_count);
     const uint32_t order_bits =
         session->encode_codec.hevc.log2_max_picture_order_count_lsb_minus4 + 4;
     const uint32_t order_mask = (1u << order_bits) - 1;
@@ -504,7 +512,8 @@ static void amdf_media_drm_vcn_encode_hevc_slice(
     amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
     amdf_media_drm_vcn_encode_bits_unsigned_exp_golomb(&bits, 1);
     amdf_media_drm_vcn_encode_bits_unsigned_exp_golomb(&bits, 0);
-    amdf_media_drm_vcn_encode_bits_unsigned_exp_golomb(&bits, 0);
+    amdf_media_drm_vcn_encode_bits_unsigned_exp_golomb(&bits,
+                                                       reference_delta - 1);
     amdf_media_drm_vcn_encode_bits_write(&bits, 1, 1);
     amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
     amdf_media_drm_vcn_encode_bits_write(&bits, 0, 1);
@@ -1266,10 +1275,14 @@ uint32_t amdf_media_drm_vcn_encode_av1(
   if (writer.vcn5) {
     uint32_t block = amdf_media_drm_vcn_encode_block_begin(&writer, 0x300004);
     for (uint32_t i = 0; i < 7; ++i) {
-      amdf_media_drm_vcn_encode_word(
-          &writer, key ? UINT32_MAX
-                       : picture->references[picture->reference_indices[i]]
-                             .binding.slot_index);
+      if (key) {
+        amdf_media_drm_vcn_encode_word(&writer, UINT32_MAX);
+      } else {
+        const uint32_t logical_slot = picture->reference_indices[i];
+        const uint32_t reference_index = picture->reference_map[logical_slot];
+        amdf_media_drm_vcn_encode_word(
+            &writer, picture->references[reference_index].binding.slot_index);
+      }
     }
     amdf_media_drm_vcn_encode_word(&writer, key ? UINT32_MAX : 0);
     amdf_media_drm_vcn_encode_word(&writer, UINT32_MAX);

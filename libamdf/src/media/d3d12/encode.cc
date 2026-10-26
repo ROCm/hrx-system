@@ -215,10 +215,16 @@ amdf_status_t PrepareAv1(const Session& session,
     reference.ReconstructedPictureResourceIndex = kAv1InvalidDpbResourceIndex;
   }
   for (uint32_t index = 0; index < source->reference_count; ++index) {
-    const auto& reference = source->references[index];
-    picture->references[index] = reference.binding;
-    auto& native = picture->av1.ReferenceFramesReconPictureDescriptors[index];
-    native.ReconstructedPictureResourceIndex = index;
+    picture->references[index] = source->references[index].binding;
+  }
+  for (uint32_t slot = 0; slot < 8; ++slot) {
+    const uint32_t reference_index = source->reference_map[slot];
+    if (reference_index == UINT8_MAX) {
+      continue;
+    }
+    const auto& reference = source->references[reference_index];
+    auto& native = picture->av1.ReferenceFramesReconPictureDescriptors[slot];
+    native.ReconstructedPictureResourceIndex = reference_index;
     native.FrameType =
         static_cast<D3D12_VIDEO_ENCODER_AV1_FRAME_TYPE>(reference.frame_type);
     native.OrderHint = reference.order_hint;

@@ -461,6 +461,9 @@ TEST_F(EncodeValidationTest, Av1ReferencesPreserveLogicalAndPhysicalIdentity) {
   av1_picture.quantization.matrix_levels[0] = 255;
   av1_picture.quantization.matrix_levels[1] = 255;
   av1_picture.quantization.matrix_levels[2] = 255;
+  for (uint32_t index = 0; index < 8; ++index) {
+    av1_picture.reference_map[index] = 255;
+  }
   for (uint32_t index = 0; index < 7; ++index) {
     av1_picture.reference_indices[index] = 255;
   }
@@ -476,6 +479,9 @@ TEST_F(EncodeValidationTest, Av1ReferencesPreserveLogicalAndPhysicalIdentity) {
   av1_picture.primary_reference = 0;
   av1_picture.reference_count = 1;
   av1_picture.references = &reference;
+  for (uint32_t index = 0; index < 8; ++index) {
+    av1_picture.reference_map[index] = 0;
+  }
   for (uint32_t index = 0; index < 7; ++index) {
     av1_picture.reference_indices[index] = 0;
   }
@@ -491,7 +497,13 @@ TEST_F(EncodeValidationTest, Av1ReferencesPreserveLogicalAndPhysicalIdentity) {
             amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
   av1_picture.references = &reference;
 
-  av1_picture.reference_indices[3] = 1;
+  av1_picture.reference_indices[3] = 7;
+  av1_picture.reference_map[7] = 255;
+  EXPECT_EQ(amdf_media_av1_validate_encode_picture(
+                &requirements_, &encode_, &picture_, &av1_encode, &av1_picture),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  av1_picture.reference_indices[3] = 0;
+  av1_picture.reference_map[7] = 1;
   EXPECT_EQ(amdf_media_av1_validate_encode_picture(
                 &requirements_, &encode_, &picture_, &av1_encode, &av1_picture),
             amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));

@@ -63,9 +63,9 @@ typedef struct amdf_media_encode_bit_rate_t {
 
 /// Rate-control state for pictures targeting one temporal layer.
 typedef struct amdf_media_encode_rate_control_layer_t {
-  /// Target frame-rate numerator.
+  /// Target frame-rate numerator for pictures targeting this layer.
   uint32_t frame_rate_numerator;
-  /// Target frame-rate denominator.
+  /// Target frame-rate denominator for pictures targeting this layer.
   uint32_t frame_rate_denominator;
   /// Mode-specific controls.
   union {

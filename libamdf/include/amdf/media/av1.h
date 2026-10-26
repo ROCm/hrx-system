@@ -382,7 +382,9 @@ typedef struct amdf_media_av1_encode_picture_info_t {
   uint32_t reference_count;
   /// Borrowed reference records consumed during preparation.
   const amdf_media_av1_encode_reference_t* references;
-  /// LAST through ALTREF indices into references; 255 means absent.
+  /// Per-logical-DPB-slot indices into references; 255 means absent.
+  uint8_t reference_map[8];
+  /// LAST through ALTREF logical DPB slot indices; 255 means absent.
   uint8_t reference_indices[7];
 } amdf_media_av1_encode_picture_info_t;
 
@@ -408,7 +410,7 @@ typedef struct amdf_media_av1_encode_result_info_t {
   amdf_media_av1_segmentation_t segmentation;
   /// Native-selected primary reference.
   uint32_t primary_reference;
-  /// Native-selected LAST through ALTREF logical reference indices.
+  /// Native-selected LAST through ALTREF logical DPB slot indices.
   uint8_t reference_indices[7];
 } amdf_media_av1_encode_result_info_t;
 

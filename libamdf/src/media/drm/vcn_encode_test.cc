@@ -349,6 +349,26 @@ TEST_F(VcnEncodePacketTest, TemporalLayerControlSelectsIndependentRateRecords) {
     if (protocol == 5) {
       ExpectVcn5RateControl(words_, length, 31, 31, 31, 1, 51);
     }
+
+    amdf_media_frame_t frame = {};
+    amdf_media_h264_encode_reference_t reference = {
+        .binding = {&frame, 0},
+        .frame_type = AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR,
+    };
+    picture.frame_type = AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_P;
+    picture.frame_number = 1;
+    picture.picture_order_count = 1;
+    picture.frame_decoding_order_number = 1;
+    picture.used_as_reference = 0;
+    picture.reference_count = 1;
+    picture.references = &reference;
+    length = amdf_media_drm_vcn_encode_h264(&command_, &session_, &resources_,
+                                            1, 1, &picture);
+    block = FindPacketBlock(words_, length, 0x0b);
+    ASSERT_NE(block.payload, nullptr);
+    ASSERT_EQ(block.payload_word_count, 48u);
+    EXPECT_EQ(block.payload[0], 0x01000000u);
+    EXPECT_EQ(block.payload[21], 12u);
   }
 }
 
@@ -369,7 +389,7 @@ TEST_F(VcnEncodePacketTest, MaximumTemporalLayerControlFitsOnePage) {
   EXPECT_LE(length, 4096u);
 }
 
-TEST_F(VcnEncodePacketTest, HevcSliceCarriesTemporalLayerIdentifier) {
+TEST_F(VcnEncodePacketTest, HevcSliceCarriesLayerAndReferenceDistance) {
   ConfigureTwoTemporalLayers();
   session_.requirements.configuration.codec = AMDF_MEDIA_CODEC_HEVC;
   session_.encode_codec.hevc.minimum_luma_coding_unit_log2 = 3;
@@ -378,12 +398,29 @@ TEST_F(VcnEncodePacketTest, HevcSliceCarriesTemporalLayerIdentifier) {
       .frame_type = AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_IDR,
       .used_as_reference = 1,
   };
-  const uint32_t length = amdf_media_drm_vcn_encode_hevc(
-      &command_, &session_, &resources_, 0, 1, &picture);
-  const PacketBlock slice = FindPacketBlock(words_, length, 0x0b);
+  uint32_t length = amdf_media_drm_vcn_encode_hevc(&command_, &session_,
+                                                   &resources_, 0, 1, &picture);
+  PacketBlock slice = FindPacketBlock(words_, length, 0x0b);
   ASSERT_NE(slice.payload, nullptr);
   ASSERT_EQ(slice.payload_word_count, 48u);
   EXPECT_EQ(slice.payload[0], 0x26020000u);
+
+  amdf_media_frame_t frame = {};
+  amdf_media_hevc_encode_reference_t reference = {
+      .binding = {&frame, 0},
+      .picture_order_count = 0,
+  };
+  picture.frame_type = AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_P;
+  picture.picture_order_count = 2;
+  picture.reference_count = 1;
+  picture.references = &reference;
+  length = amdf_media_drm_vcn_encode_hevc(&command_, &session_, &resources_, 1,
+                                          1, &picture);
+  slice = FindPacketBlock(words_, length, 0x0b);
+  ASSERT_NE(slice.payload, nullptr);
+  ASSERT_EQ(slice.payload_word_count, 48u);
+  EXPECT_EQ(slice.payload[0], 0x02020000u);
+  EXPECT_EQ(slice.payload[2], 0x44552000u);
 }
 
 TEST_F(VcnEncodePacketTest, Av1FrameObuCarriesTemporalLayerExtension) {
@@ -699,6 +736,9 @@ TEST_F(VcnEncodePacketTest, Av1MatchesPixelFirstQualifiedNativePackets) {
     picture.primary_reference = 0;
     picture.reference_count = 1;
     picture.references = &reference;
+    for (uint32_t index = 0; index < 8; ++index) {
+      picture.reference_map[index] = 0;
+    }
     for (uint32_t index = 0; index < 7; ++index) {
       picture.reference_indices[index] = 0;
     }
@@ -868,6 +908,9 @@ TEST_F(VcnEncodePacketTest, Av1Vcn5UsesDirectTier2References) {
     picture.primary_reference = 0;
     picture.reference_count = 1;
     picture.references = &reference;
+    for (uint32_t index = 0; index < 8; ++index) {
+      picture.reference_map[index] = 0;
+    }
     for (uint32_t index = 0; index < 7; ++index) {
       picture.reference_indices[index] = 0;
     }
