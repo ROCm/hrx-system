@@ -1271,10 +1271,21 @@ TEST_F(HipExecutionResourceApiTest, CreatesStreamsAtClampedHardwarePriorities) {
   ASSERT_EQ(hipSuccess,
             api_.stream_get_priority(low_priority_stream, &actual_priority));
   EXPECT_EQ(actual_priority, least_priority);
+}
 
+TEST_F(HipExecutionResourceApiTest, PriorityPreservesTheFullExecutionResource) {
   hipDevResource full_resource;
   ASSERT_EQ(hipSuccess, api_.device_get_resource(device_, &full_resource,
                                                  hipDevResourceTypeSm));
+  int greatest_priority = 0;
+  ASSERT_EQ(hipSuccess,
+            api_.device_get_stream_priority_range(nullptr, &greatest_priority));
+  hipStream_t high_priority_stream = nullptr;
+  ASSERT_EQ(hipSuccess, api_.stream_create_with_priority(&high_priority_stream,
+                                                         hipStreamNonBlocking,
+                                                         greatest_priority));
+  ScopedStream high_priority_stream_guard(high_priority_stream,
+                                          StreamDeleter{api_.stream_destroy});
   hipDevResource stream_resource;
   ASSERT_EQ(hipSuccess,
             api_.stream_get_resource(high_priority_stream, &stream_resource,
