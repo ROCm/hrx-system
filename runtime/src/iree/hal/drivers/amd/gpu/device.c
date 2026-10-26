@@ -351,23 +351,27 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
                                       IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
   const amdf_queue_family_info_t* native_family =
       &device->context->families[family_ordinal];
+  const bool user_publication =
+      (iree_hal_amd_gpu_device_compute_publication_modes(native_family) &
+       AMDF_QUEUE_PUBLICATION_MODE_USER) != 0;
+  // KERNEL creation has no priority selector. USER creation supplies the
+  // independently qualified family priority levels.
+  const amdf_queue_priority_capabilities_t priority_capabilities =
+      user_publication ? native_family->priority_capabilities
+                       : AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL;
   iree_hal_queue_priority_t priorities[3];
   iree_host_size_t priority_count = 0;
-  if (native_family->priority_capabilities &
-      AMDF_QUEUE_PRIORITY_CAPABILITY_LOW) {
+  if (priority_capabilities & AMDF_QUEUE_PRIORITY_CAPABILITY_LOW) {
     priorities[priority_count++] = -1;
   }
-  if (native_family->priority_capabilities &
-      AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL) {
+  if (priority_capabilities & AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL) {
     priorities[priority_count++] = IREE_HAL_QUEUE_PRIORITY_NORMAL;
   }
-  if (native_family->priority_capabilities &
-      AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH) {
+  if (priority_capabilities & AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH) {
     priorities[priority_count++] = 1;
   }
   iree_hal_queue_placement_capabilities_t placements = 0;
-  if (iree_hal_amd_gpu_device_compute_publication_modes(native_family) &
-      AMDF_QUEUE_PUBLICATION_MODE_USER) {
+  if (user_publication) {
     if (native_family->placement_capabilities &
         AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL) {
       placements |= IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL;
