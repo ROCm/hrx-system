@@ -80,7 +80,10 @@ amdf_cc_library(
         "@platforms//os:windows": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    visibility = ["//libamdf/src:__pkg__"],
+    visibility = [
+        "//libamdf/src:__pkg__",
+        "//libamdf/src/gpu/umd/wddm:__pkg__",
+    ],
     deps = select({
         "@platforms//os:linux": ["//libamdf/src/platform/linux:host_memory"],
         "@platforms//os:windows": ["//libamdf/src/platform/windows:host_memory"],

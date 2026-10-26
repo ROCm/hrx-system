@@ -136,10 +136,23 @@ class HostMemoryTest : public ::testing::Test {
   NativeState native_;
 };
 
+TEST(HostBackingAlignmentTest, StrongAlignmentKeepsTheExactPayloadExtent) {
+  amdf_platform_host_backing_t backing = {};
+  ASSERT_EQ(
+      amdf_platform_host_backing_prepare(4096, UINT64_C(2) << 20, &backing),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(backing.pointer) % (UINT64_C(2) << 20),
+            0u);
+  EXPECT_EQ(lseek(static_cast<int>(backing.handle), 0, SEEK_END), 4096);
+  *static_cast<uint32_t*>(backing.pointer) = 0x13579BDFu;
+  EXPECT_EQ(*static_cast<uint32_t*>(backing.pointer), 0x13579BDFu);
+  EXPECT_EQ(amdf_platform_host_backing_destroy(&backing, 4096), AMDF_STATUS_OK);
+}
+
 TEST_F(HostMemoryTest, FailedPreparationRetainsItsSourceForOwnerCleanup) {
   native_.map_error = ENOMEM;
   amdf_platform_host_backing_t backing = {};
-  EXPECT_EQ(amdf_platform_host_backing_prepare(4096, &backing),
+  EXPECT_EQ(amdf_platform_host_backing_prepare(4096, 0, &backing),
             amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, ENOMEM));
   ASSERT_GE(native_.descriptor, 0);
   EXPECT_EQ(backing.handle, static_cast<uintptr_t>(native_.descriptor));
@@ -153,7 +166,8 @@ TEST_F(HostMemoryTest, FailedPreparationRetainsItsSourceForOwnerCleanup) {
 
 TEST_F(HostMemoryTest, FailedViewRemovalPreservesBackingAndReleaseProgress) {
   amdf_platform_host_backing_t backing = {};
-  ASSERT_EQ(amdf_platform_host_backing_prepare(4096, &backing), AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_platform_host_backing_prepare(4096, 0, &backing),
+            AMDF_STATUS_OK);
   auto* bytes = static_cast<uint8_t*>(backing.pointer);
   bytes[17] = 0xA5;
   native_.unmap_error = EIO;
@@ -168,7 +182,8 @@ TEST_F(HostMemoryTest, FailedViewRemovalPreservesBackingAndReleaseProgress) {
 
 TEST_F(HostMemoryTest, CloseErrorPreservesTheFactThatTheSourceWasConsumed) {
   amdf_platform_host_backing_t backing = {};
-  ASSERT_EQ(amdf_platform_host_backing_prepare(4096, &backing), AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_platform_host_backing_prepare(4096, 0, &backing),
+            AMDF_STATUS_OK);
   const int descriptor = native_.descriptor;
   native_.close_error = EIO;
   EXPECT_EQ(amdf_platform_host_backing_destroy(&backing, 4096),
@@ -200,7 +215,7 @@ class HostBackingTest : public ::testing::TestWithParam<
   }
 
   void CreateBacking() {
-    ASSERT_EQ(amdf_platform_host_backing_prepare(byte_length_, &backing_),
+    ASSERT_EQ(amdf_platform_host_backing_prepare(byte_length_, 0, &backing_),
               AMDF_STATUS_OK);
     if (std::get<1>(GetParam())) {
       // Exercise native refusal of huge-page promotion on an otherwise valid

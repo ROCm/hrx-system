@@ -154,6 +154,7 @@ TEST_P(Pm4HostMappingTest, ReplacesCpuAndGpuViewsBeforeImmediateUse) {
               AMDF_STATUS_OK);
     std::swap(query.producer, query.consumer);
   }
+  RecordProperty("backing_profile_ordinal", profile_ordinal);
   amdf_memory_reservation_capabilities_t capabilities = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CAPABILITIES,
       .structure_size = sizeof(capabilities),
@@ -164,6 +165,8 @@ TEST_P(Pm4HostMappingTest, ReplacesCpuAndGpuViewsBeforeImmediateUse) {
   const uint64_t unit =
       std::max({std::get<0>(GetParam()), capabilities.mapping_granularity,
                 gpu_capabilities.mapping_granularity,
+                capabilities.reservation_granularity,
+                gpu_capabilities.reservation_granularity,
                 profile.allocation.native_byte_length_granularity});
   const size_t words = unit / sizeof(uint32_t);
   const amdf_memory_reservation_access_t accesses[] = {

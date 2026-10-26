@@ -65,7 +65,9 @@ amdf_cc_library(
     visibility = ["//libamdf/src/platform:__pkg__"],
     deps = [
         ":host_cache",
+        ":host_reservation",
         "//libamdf/src/platform:host_memory",
+        "//libamdf/src/platform:host_reservation",
     ],
 )
 

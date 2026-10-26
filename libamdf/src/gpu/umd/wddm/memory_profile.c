@@ -137,9 +137,9 @@ amdf_status_t amdf_gpu_wddm_query_memory_profile(
     profile.guaranteed_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE |
                                AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
                                AMDF_MEMORY_FLAG_HOST_FILE_IO;
-    profile.supported_flags = profile.guaranteed_flags |
-                              AMDF_MEMORY_FLAG_QUEUE_STORAGE |
-                              AMDF_MEMORY_FLAG_MAPPING_SOURCE;
+    profile.supported_flags =
+        profile.guaranteed_flags | AMDF_MEMORY_FLAG_QUEUE_STORAGE |
+        AMDF_MEMORY_FLAG_MAPPING_SOURCE | AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE;
     if (capabilities->cache_coherent_memory_supported) {
       profile.supported_flags |= AMDF_MEMORY_FLAG_HOST_COHERENT;
       // WDDM's CPU-visible updates are at least 32 bits; the adapter reports

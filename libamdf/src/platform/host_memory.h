@@ -26,16 +26,19 @@ typedef struct amdf_platform_host_backing_t {
   // release. Explicit alias updates borrow this handle while the backing is
   // live.
   uintptr_t handle;
-  // Persistent host mapping owned alongside the native source.
+  // Owned host interval, mapped persistently after successful preparation.
   void* pointer;
 } amdf_platform_host_backing_t;
 
-// Prepares remappable system backing and its persistent host view in a live
-// owner's initially empty slot. This one-shot operation initializes both fields
-// before acquiring native resources. Failure retains partial ownership for
-// destruction; it performs no hidden rollback.
+// Prepares remappable system backing and its aligned persistent host view in a
+// live owner's initially empty slot. This one-shot operation initializes both
+// fields before acquiring native resources. Failure retains partial ownership
+// for destruction; it performs no hidden rollback. Zero alignment selects the
+// platform policy; stronger alignments are powers of two in the native
+// envelope.
 amdf_status_t amdf_platform_host_backing_prepare(
-    uint64_t byte_length, amdf_platform_host_backing_t* backing);
+    uint64_t byte_length, uint64_t minimum_alignment,
+    amdf_platform_host_backing_t* backing);
 
 // Materializes fresh backing and its writable host translations before the
 // first native export. Applies explicit NUMA placement before allocating any

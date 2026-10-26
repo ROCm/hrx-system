@@ -65,6 +65,8 @@ amdf_cc_library(
         ":memory_profile",
         "//libamdf/src:allocator",
         "//libamdf/src/gpu/umd:memory",
+        "//libamdf/src/platform:host_memory",
+        "//libamdf/src/platform:native_host_memory",
         "//libamdf/src/platform/windows:host_cache",
         "//libamdf/src/platform/windows:kmt_api",
     ],

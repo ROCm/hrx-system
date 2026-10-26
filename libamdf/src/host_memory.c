@@ -264,7 +264,7 @@ amdf_status_t amdf_host_memory_prepare(
           &amdf_host_backing_vtable;
       memory->accesses[memory->backing_access_ordinal].native = backing;
       memory->info.native_allocation_byte_length = native_length;
-      status = amdf_platform_host_backing_prepare(native_length, backing);
+      status = amdf_platform_host_backing_prepare(native_length, 0, backing);
     }
   } else {
     status = amdf_platform_host_memory_allocate(

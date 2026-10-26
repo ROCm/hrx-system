@@ -89,8 +89,14 @@ amdf_status_t amdf_platform_host_memory_sample_observation(
 
 static amdf_status_t amdf_linux_host_backing_map(int descriptor,
                                                  uint64_t byte_length,
+                                                 uint64_t minimum_alignment,
                                                  void** out_pointer) {
-  if (byte_length < AMDF_LINUX_HOST_FOLIO_SIZE) {
+  uint64_t alignment = minimum_alignment;
+  if (byte_length >= AMDF_LINUX_HOST_FOLIO_SIZE &&
+      alignment < AMDF_LINUX_HOST_FOLIO_SIZE) {
+    alignment = AMDF_LINUX_HOST_FOLIO_SIZE;
+  }
+  if (alignment == 0) {
     void* pointer = mmap(NULL, (size_t)byte_length, PROT_READ | PROT_WRITE,
                          MAP_SHARED, descriptor, 0);
     if (pointer == MAP_FAILED) {
@@ -101,7 +107,7 @@ static amdf_status_t amdf_linux_host_backing_map(int descriptor,
   }
   void* pointer = NULL;
   amdf_status_t status = amdf_platform_host_reservation_create(
-      byte_length, AMDF_LINUX_HOST_FOLIO_SIZE, 0, UINTPTR_MAX, &pointer);
+      byte_length, alignment, 0, UINTPTR_MAX, &pointer);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -121,7 +127,8 @@ static amdf_status_t amdf_linux_host_backing_map(int descriptor,
 }
 
 amdf_status_t amdf_platform_host_backing_prepare(
-    uint64_t byte_length, amdf_platform_host_backing_t* backing) {
+    uint64_t byte_length, uint64_t minimum_alignment,
+    amdf_platform_host_backing_t* backing) {
   *backing = (amdf_platform_host_backing_t){.handle = UINTPTR_MAX};
   const int descriptor =
       memfd_create("libamdf", MFD_CLOEXEC | MFD_ALLOW_SEALING);
@@ -137,7 +144,8 @@ amdf_status_t amdf_platform_host_backing_prepare(
                    F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) != 0) {
     status = amdf_linux_error(errno);
   } else {
-    status = amdf_linux_host_backing_map(descriptor, byte_length, &pointer);
+    status = amdf_linux_host_backing_map(descriptor, byte_length,
+                                         minimum_alignment, &pointer);
   }
   if (amdf_status_is_ok(status)) {
     backing->pointer = pointer;
