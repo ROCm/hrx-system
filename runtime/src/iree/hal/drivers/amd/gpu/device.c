@@ -13,6 +13,7 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/notification.h"
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
+#include "iree/hal/drivers/amd/fabric/memory_spec.h"
 #include "iree/hal/drivers/amd/gpu/code.h"
 #include "iree/hal/drivers/amd/gpu/device_failure.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
@@ -275,6 +276,31 @@ iree_status_t iree_hal_amd_gpu_device_query_support(const amdf_api_t* api,
   return status;
 }
 
+static iree_hal_amd_fabric_memory_spec_params_t
+iree_hal_amd_gpu_device_memory_spec_params(
+    const iree_hal_amd_gpu_device_t* device, uint32_t native_family_ordinal) {
+  return (iree_hal_amd_fabric_memory_spec_params_t){
+      .api = device->context->api,
+      .access =
+          {
+              .device = device->context->device,
+              .requirements =
+                  {
+                      .access =
+                          AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+                      .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+                      .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
+                  },
+          },
+      .queue_family_ordinal = native_family_ordinal,
+      .local_scope_count = device->context->memory_scope_count,
+      .local_scopes = device->context->memory_scopes,
+      .system_scope = device->context->fabric->system_scope,
+      .supported_usage =
+          IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_TRANSFER,
+  };
+}
+
 static iree_status_t iree_hal_amd_gpu_device_build_spec(
     iree_hal_amd_gpu_device_t* device, iree_string_view_t display_name,
     uint32_t family_ordinal, uint32_t queue_count,
@@ -359,6 +385,7 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       .role_flags =
           IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
           IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
+          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL |
           (iree_hal_atomic_operation_capabilities_is_empty(atomic_operations)
                ? 0
                : IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC),
@@ -407,6 +434,11 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
   iree_hal_device_spec_builder_initialize(device->host_allocator, &builder);
   iree_status_t status =
       iree_hal_device_spec_builder_set_identity(&builder, &identity);
+  if (iree_status_is_ok(status)) {
+    const iree_hal_amd_fabric_memory_spec_params_t memory =
+        iree_hal_amd_gpu_device_memory_spec_params(device, family_ordinal);
+    status = iree_hal_amd_fabric_memory_spec_populate(&memory, &builder);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_spec_builder_set_queues(&builder, &queues);
   }
@@ -1483,9 +1515,11 @@ static iree_status_t iree_hal_amd_gpu_device_sample_observation(
     iree_hal_device_observation_t* out_observation) {
   iree_hal_amd_gpu_device_t* device = (void*)base;
   if (iree_any_bit_set(flags, IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY)) {
-    IREE_RETURN_IF_ERROR(
-        iree_hal_device_observation_populate_memory_total_from_spec(
-            device->spec, out_observation));
+    const iree_hal_amd_fabric_memory_spec_params_t memory =
+        iree_hal_amd_gpu_device_memory_spec_params(
+            device, device->memory.family.queue_family_ordinal);
+    IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_memory_spec_sample_observation(
+        &memory, out_observation));
   }
   if (iree_any_bit_set(flags, IREE_HAL_DEVICE_OBSERVATION_FLAG_SANITIZER) &&
       device->memory.asan) {

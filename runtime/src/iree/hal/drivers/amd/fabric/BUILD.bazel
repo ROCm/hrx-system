@@ -55,6 +55,35 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "memory_spec",
+    srcs = ["memory_spec.c"],
+    hdrs = ["memory_spec.h"],
+    deps = [
+        ":memory",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "memory_spec_test",
+    srcs = ["memory_spec_test.cc"],
+    deps = [
+        ":memory_spec",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 # compiler-rt identifies libasan.so anywhere in a loaded library name, so a
 # library named asan is mistaken for a second sanitizer runtime.
 iree_runtime_cc_library(
