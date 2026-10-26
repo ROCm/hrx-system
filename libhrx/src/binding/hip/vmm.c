@@ -1599,6 +1599,27 @@ static hipError_t iree_hip_vmm_set_access_modern(
               reservation->virtual_buffer, scope, &projection));
     }
     if (result == hipSuccess) {
+      const iree_hal_buffer_memory_view_t memory =
+          iree_hal_buffer_memory_view(reservation->streaming_buffer->buffer);
+      const iree_hal_buffer_interface_t type =
+          host ? IREE_HAL_BUFFER_INTERFACE_HOST
+               : IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
+      const iree_hal_buffer_native_binding_slot_t slot = {
+          .index = memory.contract->scopes[scope.id].bindings[type],
+          .type = type,
+      };
+      const iree_hal_buffer_native_binding_t binding =
+          iree_hal_buffer_memory_native_binding(&memory, slot);
+      const uintptr_t address = host ? (uintptr_t)binding.host_pointer
+                                     : (uintptr_t)binding.device_address;
+      // HIP exposes one pointer, including values embedded in user bytes.
+      // A valid HAL projection at another address cannot satisfy that ABI.
+      if (descriptor->flags != hipMemAccessFlagsProtNone &&
+          address != reservation->base_address) {
+        result = hipErrorNotSupported;
+      }
+    }
+    if (result == hipSuccess) {
       size_t position = 0;
       while (position < plan_count && plans[position].scope.id != scope.id) {
         ++position;

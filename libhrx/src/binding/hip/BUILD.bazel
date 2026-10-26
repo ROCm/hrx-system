@@ -874,6 +874,7 @@ hrx_cc_test(
     srcs = ["hip_virtual_memory_api_test.cc"],
     data = [":amdhip64"],
     env = {
+        "HRX_GPU_DRIVER": "amdgpu",
         "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
     },
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
@@ -882,7 +883,37 @@ hrx_cc_test(
         "iree-run-requirement=runtime.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
-    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    target_compatible_with = _LINUX_COMPATIBILITY + select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":hip_dso_test_util",
+        ":launch_params",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_legacy_virtual_memory_api_test",
+    srcs = ["hip_virtual_memory_api_test.cc"],
+    args = ["--gtest_filter=-HipVirtualMemoryApiTest.Native*"],
+    data = [":amdhip64"],
+    env = {
+        "HRX_GPU_DRIVER": "legacy-amdgpu",
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    sanitizer_suppressions = hsa_suppressions,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _LINUX_COMPATIBILITY + select({
+        "//runtime/config/hal:driver_amdgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":hip_dso_test_util",
         ":launch_params",

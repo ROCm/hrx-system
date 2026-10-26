@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <array>
+#include <cstring>
 
 #include "binding/hip/api.h"
 #include "binding/hip/hip_dso_test_util.h"
@@ -183,6 +184,91 @@ TEST_F(HipVirtualMemoryApiTest, PermissionsPreserveAliasesAndHandleLifetime) {
   ASSERT_EQ(hipSuccess, unmap_(address_, 2 * unit_));
   mapped_[0] = mapped_[1] = false;
   EXPECT_EQ(hipErrorInvalidValue, close_(address_, 3 * unit_));
+  ASSERT_EQ(hipSuccess, copy_(observed.data(), Address(2), sizeof(observed),
+                              hipMemcpyDeviceToHost));
+  EXPECT_EQ(observed, expected);
+}
+
+TEST_F(HipVirtualMemoryApiTest,
+       NativeHostAccessPreservesTheSinglePointerContract) {
+  auto properties = Properties();
+  properties.location = {.type = hipMemLocationTypeHost, .id = 0};
+  ASSERT_EQ(hipSuccess, granularity_(&unit_, &properties,
+                                     hipMemAllocationGranularityMinimum));
+  ASSERT_EQ(hipSuccess, reserve_(&address_, 3 * unit_, unit_, nullptr, 0));
+  ASSERT_EQ(hipSuccess, create_(&handles_[0], unit_, &properties, 0));
+  for (size_t i = 0; i < 2; ++i) {
+    ASSERT_EQ(hipSuccess, map_(Address(i), unit_, 0, handles_[0], 0));
+    mapped_[i] = true;
+  }
+  const hipMemAccessDesc access[] = {
+      {
+          .location = {.type = hipMemLocationTypeHost, .id = 0},
+          .flags = hipMemAccessFlagsProtReadWrite,
+      },
+      {
+          .location = {.type = hipMemLocationTypeDevice, .id = device_},
+          .flags = hipMemAccessFlagsProtReadWrite,
+      },
+  };
+  const hipError_t host_result = set_access_(address_, 2 * unit_, access, 2);
+  if (host_result == hipErrorNotSupported) {
+    unsigned long long flags = hipMemAccessFlagsProtReadWrite;
+    ASSERT_EQ(hipSuccess, get_access_(&flags, &access[0].location, address_));
+    EXPECT_EQ(flags, hipMemAccessFlagsProtNone);
+    ASSERT_EQ(hipSuccess, set_access_(address_, 2 * unit_, &access[1], 1));
+  } else {
+    ASSERT_EQ(hipSuccess, host_result);
+  }
+  ASSERT_EQ(hipSuccess, release_(handles_[0]));
+  handles_[0] = nullptr;
+  const std::array<uint32_t, 4> expected = {11, 17, 29, 47};
+  if (host_result == hipSuccess) {
+    std::memcpy(Address(0), expected.data(), sizeof(expected));
+  } else {
+    ASSERT_EQ(hipSuccess, copy_(Address(0), expected.data(), sizeof(expected),
+                                hipMemcpyHostToDevice));
+  }
+  std::array<uint32_t, 4> observed = {};
+  ASSERT_EQ(hipSuccess, copy_(observed.data(), Address(1), sizeof(observed),
+                              hipMemcpyDeviceToHost));
+  EXPECT_EQ(observed, expected);
+  const std::array<uint32_t, 4> update = {53, 71, 89, 97};
+  ASSERT_EQ(hipSuccess, copy_(Address(1), update.data(), sizeof(update),
+                              hipMemcpyHostToDevice));
+  if (host_result == hipSuccess) {
+    std::memcpy(observed.data(), Address(0), sizeof(observed));
+  } else {
+    ASSERT_EQ(hipSuccess, copy_(observed.data(), Address(0), sizeof(observed),
+                                hipMemcpyDeviceToHost));
+  }
+  EXPECT_EQ(observed, update);
+}
+
+TEST_F(HipVirtualMemoryApiTest,
+       NativePartialUnmapRetainsTheRemainingBackingPieces) {
+  const auto properties = Properties();
+  ASSERT_EQ(hipSuccess, granularity_(&unit_, &properties,
+                                     hipMemAllocationGranularityMinimum));
+  ASSERT_EQ(hipSuccess, reserve_(&address_, 3 * unit_, unit_, nullptr, 0));
+  ASSERT_EQ(hipSuccess, create_(&handles_[0], 3 * unit_, &properties, 0));
+  ASSERT_EQ(hipSuccess, map_(address_, 3 * unit_, 0, handles_[0], 0));
+  mapped_.fill(true);
+  hipMemAccessDesc access = {
+      .location = properties.location,
+      .flags = hipMemAccessFlagsProtReadWrite,
+  };
+  ASSERT_EQ(hipSuccess, set_access_(address_, 3 * unit_, &access, 1));
+  ASSERT_EQ(hipSuccess, release_(handles_[0]));
+  handles_[0] = nullptr;
+  const std::array<uint32_t, 4> expected = {3, 5, 7, 11};
+  ASSERT_EQ(hipSuccess, copy_(Address(2), expected.data(), sizeof(expected),
+                              hipMemcpyHostToDevice));
+  ASSERT_EQ(hipSuccess, unmap_(Address(1), unit_));
+  mapped_[1] = false;
+  access.flags = hipMemAccessFlagsProtRead;
+  ASSERT_EQ(hipSuccess, set_access_(Address(2), unit_, &access, 1));
+  std::array<uint32_t, 4> observed = {};
   ASSERT_EQ(hipSuccess, copy_(observed.data(), Address(2), sizeof(observed),
                               hipMemcpyDeviceToHost));
   EXPECT_EQ(observed, expected);
