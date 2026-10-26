@@ -11,11 +11,24 @@ namespace {
 
 class HipVirtualMemoryApiTest : public testing::Test {
  protected:
-  void SetUp() override {
+  static void SetUpTestSuite() {
     ASSERT_TRUE(dso_.Open()) << dso_.error();
     const auto initialize = dso_.Resolve<decltype(&hipInit)>("hipInit");
     ASSERT_NE(initialize, nullptr);
     ASSERT_EQ(hipSuccess, initialize(0));
+  }
+
+  static void TearDownTestSuite() {
+    if (dso_.is_open()) {
+      const auto deinitialize = dso_.Resolve<hipError_t (*)()>("hipHALDeinit");
+      ASSERT_NE(deinitialize, nullptr);
+      EXPECT_EQ(hipSuccess, deinitialize());
+      EXPECT_TRUE(dso_.Close()) << dso_.error();
+    }
+  }
+
+  void SetUp() override {
+    ASSERT_TRUE(dso_.is_open());
     const auto get_device =
         dso_.Resolve<decltype(&hipGetDevice)>("hipGetDevice");
     const auto get_attribute =
@@ -28,7 +41,7 @@ class HipVirtualMemoryApiTest : public testing::Test {
                             hipDeviceAttributeVirtualMemoryManagementSupported,
                             device_));
     ASSERT_EQ(supported_, 1)
-        << "The ROCr HIP backend must retain native VMM support.";
+        << "The selected HIP GPU backend must support VMM.";
     reserve_ =
         dso_.Resolve<decltype(&hipMemAddressReserve)>("hipMemAddressReserve");
     close_ = dso_.Resolve<decltype(&hipMemAddressFree)>("hipMemAddressFree");
@@ -67,12 +80,6 @@ class HipVirtualMemoryApiTest : public testing::Test {
         EXPECT_EQ(hipSuccess, release_(handle));
       }
     }
-    if (dso_.is_open()) {
-      const auto deinitialize = dso_.Resolve<hipError_t (*)()>("hipHALDeinit");
-      ASSERT_NE(deinitialize, nullptr);
-      EXPECT_EQ(hipSuccess, deinitialize());
-      EXPECT_TRUE(dso_.Close()) << dso_.error();
-    }
   }
 
   hipMemAllocationProp Properties() const {
@@ -86,8 +93,8 @@ class HipVirtualMemoryApiTest : public testing::Test {
     return static_cast<uint8_t*>(address_) + index * unit_;
   }
 
-  // Exact runtime DSO whose public entry points are exercised.
-  hrx::hip::testing::HipDso dso_;
+  // One runtime/driver incarnation shared by the suite's public API cases.
+  static inline hrx::hip::testing::HipDso dso_;
   // Current physical placement device.
   int device_ = 0;
   // Public capability value required by this native GPU test.

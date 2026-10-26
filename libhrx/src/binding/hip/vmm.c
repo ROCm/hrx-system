@@ -326,6 +326,11 @@ static bool iree_hip_vmm_registry_remove_reservation_locked(
           (registry->reservation_count - position - 1) *
               sizeof(registry->reservations[0]));
   --registry->reservation_count;
+  if (!registry->reservation_count) {
+    iree_allocator_free(iree_allocator_system(), registry->reservations);
+    registry->reservations = NULL;
+    registry->reservation_capacity = 0;
+  }
   return true;
 }
 
@@ -400,6 +405,11 @@ static bool iree_hip_vmm_registry_remove_allocation_locked(
           (registry->allocation_count - position - 1) *
               sizeof(registry->allocations[0]));
   --registry->allocation_count;
+  if (!registry->allocation_count) {
+    iree_allocator_free(iree_allocator_system(), registry->allocations);
+    registry->allocations = NULL;
+    registry->allocation_capacity = 0;
+  }
   return true;
 }
 
@@ -609,34 +619,29 @@ static hipError_t iree_hip_vmm_reserve_mapping_capacity(
 
 static hipError_t iree_hip_vmm_retire_allocation(
     iree_hip_vmm_allocation_t* allocation, bool restore_public_on_failure) {
-  iree_hip_vmm_registry_t* registry = iree_hip_vmm_registry_lock();
-  const bool removed =
-      iree_hip_vmm_registry_remove_allocation_locked(registry, allocation);
-  iree_hip_vmm_registry_unlock();
-  if (!removed) {
-    return hipErrorInvalidValue;
-  }
-
   hipError_t result =
       iree_hip_vmm_from_hrx_status(hrx_allocator_physical_memory_free(
           allocation->allocator, allocation->physical_memory));
   if (result == hipSuccess) {
     allocation->physical_memory = NULL;
+    iree_hip_vmm_registry_t* registry = iree_hip_vmm_registry_lock();
+    const bool removed =
+        iree_hip_vmm_registry_remove_allocation_locked(registry, allocation);
+    iree_hip_vmm_registry_unlock();
+    // The retiring entry remains registered until its unique native free
+    // succeeds; no other operation can remove it during that call.
+    IREE_ASSERT(removed);
     iree_hip_vmm_allocation_release(allocation);  // Registry reference.
     return hipSuccess;
   }
 
-  registry = iree_hip_vmm_registry_lock();
-  const hipError_t insert_result =
-      iree_hip_vmm_registry_insert_allocation_locked(registry, allocation);
-  iree_hip_vmm_registry_unlock();
   iree_slim_mutex_lock(&allocation->mutex);
   allocation->retiring = false;
   if (restore_public_on_failure) {
     ++allocation->public_reference_count;
   }
   iree_slim_mutex_unlock(&allocation->mutex);
-  return insert_result == hipSuccess ? result : insert_result;
+  return result;
 }
 
 static hipError_t iree_hip_vmm_mapping_reference_add(
@@ -984,16 +989,6 @@ hipError_t iree_hip_vmm_address_free(void* device_ptr, size_t size) {
     return hipErrorInvalidValue;
   }
   reservation->retiring = true;
-  iree_hip_vmm_registry_t* registry = iree_hip_vmm_registry_lock();
-  const bool removed =
-      iree_hip_vmm_registry_remove_reservation_locked(registry, reservation);
-  iree_hip_vmm_registry_unlock();
-  if (!removed) {
-    reservation->retiring = false;
-    iree_slim_mutex_unlock(&reservation->mutex);
-    iree_hip_vmm_reservation_release(reservation);
-    return hipErrorInvalidValue;
-  }
 
   iree_hal_streaming_memory_prepare_virtual_reservation_release(
       reservation->streaming_buffer);
@@ -1005,20 +1000,20 @@ hipError_t iree_hip_vmm_address_free(void* device_ptr, size_t size) {
     iree_hal_streaming_memory_release_wrapped_buffer(
         reservation->streaming_buffer);
     reservation->streaming_buffer = NULL;
+    iree_hip_vmm_registry_t* registry = iree_hip_vmm_registry_lock();
+    const bool removed =
+        iree_hip_vmm_registry_remove_reservation_locked(registry, reservation);
+    iree_hip_vmm_registry_unlock();
+    // The reservation mutex excludes another terminal release, and retiring
+    // entries remain registered until native release succeeds.
+    IREE_ASSERT(removed);
   } else {
     iree_hal_streaming_memory_restore_virtual_reservation(
         reservation->streaming_buffer, reservation->virtual_buffer);
-    registry = iree_hip_vmm_registry_lock();
-    const hipError_t insert_result =
-        iree_hip_vmm_registry_insert_reservation_locked(registry, reservation);
-    iree_hip_vmm_registry_unlock();
     reservation->retiring = false;
-    if (insert_result != hipSuccess) {
-      result = insert_result;
-    }
   }
   iree_slim_mutex_unlock(&reservation->mutex);
-  if (removed && result == hipSuccess) {
+  if (result == hipSuccess) {
     iree_hip_vmm_reservation_release(reservation);  // Registry reference.
   }
   iree_hip_vmm_reservation_release(reservation);  // Operation reference.

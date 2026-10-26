@@ -90,27 +90,24 @@ static inline uint64_t iree_hal_streaming_symbol_pointer_hash(void* ptr) {
 // Global Symbol Registry
 //===----------------------------------------------------------------------===//
 
-// Static global registry instance, lazily initialized.
-static iree_hal_streaming_global_symbol_registry_t*
-    iree_hal_streaming_global_symbol_registry_ptr = NULL;
+// The process registry itself has static storage. Its module table is allocated
+// only while registrations exist, including across runtime reinitialization.
+static iree_hal_streaming_global_symbol_registry_t
+    iree_hal_streaming_global_symbol_registry_instance;
 
 // One-time initialization function for the global registry.
 static void iree_hal_streaming_initialize_global_registry(void) {
-  iree_status_t status = iree_hal_streaming_global_symbol_registry_allocate(
-      iree_allocator_system(), &iree_hal_streaming_global_symbol_registry_ptr);
-  if (!iree_status_is_ok(status)) {
-    // Log error but continue - registry will be NULL.
-    iree_status_fprint(stderr, status);
-    iree_status_free(status);
-  }
+  iree_hal_streaming_global_symbol_registry_instance.host_allocator =
+      iree_allocator_system();
+  iree_slim_mutex_initialize(
+      &iree_hal_streaming_global_symbol_registry_instance.mutex);
 }
 
 iree_hal_streaming_global_symbol_registry_t*
 iree_hal_streaming_global_symbol_registry(void) {
   static iree_once_flag once = IREE_ONCE_FLAG_INIT;
   iree_call_once(&once, iree_hal_streaming_initialize_global_registry);
-  IREE_ASSERT(iree_hal_streaming_global_symbol_registry_ptr);
-  return iree_hal_streaming_global_symbol_registry_ptr;
+  return &iree_hal_streaming_global_symbol_registry_instance;
 }
 
 iree_status_t iree_hal_streaming_global_symbol_registry_allocate(
@@ -224,8 +221,9 @@ iree_status_t iree_hal_streaming_global_symbol_registry_register_module(
   // Grow the module table if needed.
   iree_status_t status = iree_ok_status();
   if (registry->module_count >= registry->module_capacity) {
-    iree_host_size_t new_capacity = 0;
-    if (IREE_UNLIKELY(!iree_host_size_checked_mul(registry->module_capacity, 2,
+    iree_host_size_t new_capacity = 16;
+    if (registry->module_capacity &&
+        IREE_UNLIKELY(!iree_host_size_checked_mul(registry->module_capacity, 2,
                                                   &new_capacity))) {
       status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                 "global symbol registry capacity overflow");
@@ -260,6 +258,11 @@ iree_status_t iree_hal_streaming_global_symbol_registry_register_module(
     if (module) {
       iree_allocator_free(registry->host_allocator, module->symbols);
       iree_allocator_free(registry->host_allocator, module);
+    }
+    if (!registry->module_count) {
+      iree_allocator_free(registry->host_allocator, registry->modules);
+      registry->modules = NULL;
+      registry->module_capacity = 0;
     }
   }
 
@@ -329,6 +332,11 @@ iree_status_t iree_hal_streaming_global_symbol_registry_unregister_module(
                 sizeof(registry->modules[0]));
   }
   --registry->module_count;
+  if (!registry->module_count) {
+    iree_allocator_free(registry->host_allocator, registry->modules);
+    registry->modules = NULL;
+    registry->module_capacity = 0;
+  }
 
   iree_slim_mutex_unlock(&registry->mutex);
   IREE_TRACE_ZONE_END(z0);

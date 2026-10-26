@@ -153,9 +153,9 @@ typedef struct iree_hal_streaming_global_symbol_registry_t {
   iree_hal_streaming_context_symbol_map_t* context_maps_head;
 } iree_hal_streaming_global_symbol_registry_t;
 
-// Returns the global symbol registry, initializing it on first access.
-// Thread-safe via call_once semantics.
-// Returns NULL if initialization fails.
+// Borrows the process registry, initialized once without heap allocation.
+// Registrations survive runtime reinitialization. This registry has static
+// storage; only independently allocated registries use the free function.
 iree_hal_streaming_global_symbol_registry_t*
 iree_hal_streaming_global_symbol_registry(void);
 
