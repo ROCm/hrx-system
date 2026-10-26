@@ -191,6 +191,66 @@ struct StreamDeleter {
 
 using ScopedStream = std::unique_ptr<hipStream_st, StreamDeleter>;
 
+struct ScopedModule {
+  ~ScopedModule() {
+    if (value) {
+      EXPECT_EQ(hipSuccess, unload(value));
+    }
+  }
+
+  // Loaded executable released after its accepted work completes.
+  hipModule_t value = nullptr;
+  // Module release entry point from the exact DSO.
+  HipModuleUnloadFn unload = nullptr;
+};
+
+struct ScopedVirtualAliases {
+  ~ScopedVirtualAliases() {
+    if (address) {
+      const hipError_t completion = synchronize();
+      EXPECT_EQ(hipSuccess, completion);
+      if (completion != hipSuccess) {
+        return;
+      }
+      for (size_t i = 0; i < mapped.size(); ++i) {
+        if (!mapped[i]) {
+          continue;
+        }
+        const hipError_t result = unmap(Address(2 * i), 2 * unit);
+        EXPECT_EQ(hipSuccess, result);
+        if (result != hipSuccess) {
+          return;
+        }
+      }
+      EXPECT_EQ(hipSuccess, close(address, 4 * unit));
+    }
+    if (backing) {
+      EXPECT_EQ(hipSuccess, release(backing));
+    }
+  }
+
+  void* Address(size_t index) {
+    return static_cast<uint8_t*>(address) + index * unit;
+  }
+
+  // Native mapping unit queried for the selected physical device.
+  size_t unit = 0;
+  // Address interval containing two aliases of the same two-unit backing.
+  void* address = nullptr;
+  // Public backing reference until explicitly released before dispatch.
+  hipMemGenericAllocationHandle_t backing = nullptr;
+  // Successful native mappings requiring removal on every exit path.
+  std::array<bool, 2> mapped = {};
+  // Completion boundary before removing addresses used by accepted work.
+  HipDeviceSynchronizeFn synchronize = nullptr;
+  // Checked native alias removal from the exact DSO.
+  decltype(&hipMemUnmap) unmap = nullptr;
+  // Address owner release from the exact DSO.
+  decltype(&hipMemAddressFree) close = nullptr;
+  // Public physical-handle release from the exact DSO.
+  decltype(&hipMemRelease) release = nullptr;
+};
+
 struct ScopedRegistration {
   ~ScopedRegistration() {
     if (value) {
@@ -665,6 +725,109 @@ TEST_F(HipModuleExecutionTest,
     ASSERT_EQ(hipSuccess, synchronize(hipStreamPerThread));
   });
   worker.join();
+}
+
+TEST_F(HipModuleExecutionTest,
+       KernelUsesVirtualAliasesAfterBackingHandleRelease) {
+  const auto get_device =
+      library_.Resolve<decltype(&hipGetDevice)>("hipGetDevice");
+  const auto get_properties = library_.Resolve<HipGetDevicePropertiesR0600Fn>(
+      "hipGetDevicePropertiesR0600");
+  const auto granularity =
+      library_.Resolve<decltype(&hipMemGetAllocationGranularity)>(
+          "hipMemGetAllocationGranularity");
+  const auto reserve =
+      library_.Resolve<decltype(&hipMemAddressReserve)>("hipMemAddressReserve");
+  const auto create = library_.Resolve<decltype(&hipMemCreate)>("hipMemCreate");
+  const auto map = library_.Resolve<decltype(&hipMemMap)>("hipMemMap");
+  const auto set_access =
+      library_.Resolve<decltype(&hipMemSetAccess)>("hipMemSetAccess");
+  const auto load = library_.Resolve<HipModuleLoadDataFn>("hipModuleLoadData");
+  const auto get_function =
+      library_.Resolve<HipModuleGetFunctionFn>("hipModuleGetFunction");
+  const auto launch =
+      library_.Resolve<HipModuleLaunchKernelFn>("hipModuleLaunchKernel");
+  const auto copy = library_.Resolve<HipMemcpyFn>("hipMemcpy");
+  ScopedModule module = {
+      .unload = library_.Resolve<HipModuleUnloadFn>("hipModuleUnload"),
+  };
+  ScopedVirtualAliases aliases = {
+      .synchronize =
+          library_.Resolve<HipDeviceSynchronizeFn>("hipDeviceSynchronize"),
+      .unmap = library_.Resolve<decltype(&hipMemUnmap)>("hipMemUnmap"),
+      .close =
+          library_.Resolve<decltype(&hipMemAddressFree)>("hipMemAddressFree"),
+      .release = library_.Resolve<decltype(&hipMemRelease)>("hipMemRelease"),
+  };
+  ASSERT_NE(get_device, nullptr);
+  ASSERT_NE(get_properties, nullptr);
+  ASSERT_NE(granularity, nullptr);
+  ASSERT_NE(reserve, nullptr);
+  ASSERT_NE(create, nullptr);
+  ASSERT_NE(map, nullptr);
+  ASSERT_NE(set_access, nullptr);
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(get_function, nullptr);
+  ASSERT_NE(launch, nullptr);
+  ASSERT_NE(copy, nullptr);
+  ASSERT_NE(module.unload, nullptr);
+  ASSERT_NE(aliases.synchronize, nullptr);
+  ASSERT_NE(aliases.unmap, nullptr);
+  ASSERT_NE(aliases.close, nullptr);
+  ASSERT_NE(aliases.release, nullptr);
+
+  int device = 0;
+  ASSERT_EQ(hipSuccess, get_device(&device));
+  hipDeviceProp_t properties = {};
+  ASSERT_EQ(hipSuccess, get_properties(&properties, device));
+  const auto image =
+      hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);
+  ASSERT_NE(image.file, nullptr) << properties.gcnArchName;
+  ASSERT_EQ(hipSuccess, load(&module.value, image.file->data));
+  hipFunction_t function = nullptr;
+  ASSERT_EQ(hipSuccess, get_function(&function, module.value,
+                                     "hrx_transform_nested_pointers"));
+  const hipMemAllocationProp allocation = {
+      .type = hipMemAllocationTypePinned,
+      .location = {.type = hipMemLocationTypeDevice, .id = device},
+  };
+  ASSERT_EQ(hipSuccess, granularity(&aliases.unit, &allocation,
+                                    hipMemAllocationGranularityMinimum));
+  ASSERT_EQ(hipSuccess, reserve(&aliases.address, 4 * aliases.unit,
+                                aliases.unit, nullptr, 0));
+  ASSERT_EQ(hipSuccess,
+            create(&aliases.backing, 2 * aliases.unit, &allocation, 0));
+  for (size_t i = 0; i < aliases.mapped.size(); ++i) {
+    ASSERT_EQ(hipSuccess, map(aliases.Address(2 * i), 2 * aliases.unit, 0,
+                              aliases.backing, 0));
+    aliases.mapped[i] = true;
+  }
+  const hipMemAccessDesc access = {
+      .location = allocation.location,
+      .flags = hipMemAccessFlagsProtReadWrite,
+  };
+  ASSERT_EQ(hipSuccess,
+            set_access(aliases.address, 4 * aliases.unit, &access, 1));
+  ASSERT_EQ(hipSuccess, aliases.release(aliases.backing));
+  aliases.backing = nullptr;
+
+  const std::array<uint32_t, 4> input = {1, 2, 3, 4};
+  ASSERT_EQ(hipSuccess, copy(aliases.Address(0), input.data(), sizeof(input),
+                             hipMemcpyHostToDevice));
+  PointerArguments pointers = {
+      .input = static_cast<uint32_t*>(aliases.Address(2)),
+      .output = static_cast<uint32_t*>(aliases.Address(3)),
+  };
+  uint32_t scale = 4;
+  uint32_t offset = 1;
+  void* arguments[] = {&pointers, &scale, &offset};
+  ASSERT_EQ(hipSuccess,
+            launch(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr));
+  ASSERT_EQ(hipSuccess, aliases.synchronize());
+  std::array<uint32_t, 4> output = {};
+  ASSERT_EQ(hipSuccess, copy(output.data(), aliases.Address(1), sizeof(output),
+                             hipMemcpyDeviceToHost));
+  EXPECT_EQ(output, (std::array<uint32_t, 4>{5, 9, 13, 17}));
 }
 
 TEST_F(HipModuleExecutionTest,
