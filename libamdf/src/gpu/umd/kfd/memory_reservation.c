@@ -81,6 +81,7 @@ amdf_status_t amdf_gpu_umd_query_memory_reservation_capabilities(
       .supported_access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
                           AMDF_MEMORY_ACCESS_EXECUTE,
       .address_domain_ordinal = 0,
+      .supported_flags = AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS,
       .maximum_byte_length = maximum_length,
       .reservation_granularity = device->page_size,
       .maximum_alignment = maximum_alignment,
@@ -337,7 +338,7 @@ static amdf_status_t amdf_gpu_kfd_reservation_prepare_target(
 amdf_status_t amdf_gpu_umd_memory_reservation_create(
     amdf_allocator_t host_allocator, uint32_t device_count,
     amdf_gpu_umd_device_t* const* devices, uint64_t byte_length,
-    uint64_t minimum_alignment,
+    uint64_t minimum_alignment, uint64_t common_address,
     amdf_gpu_umd_memory_reservation_t** out_reservation) {
   amdf_gpu_umd_memory_reservation_t* reservation = NULL;
   amdf_status_t status = amdf_calloc_with_trailing(
@@ -363,17 +364,21 @@ amdf_status_t amdf_gpu_umd_memory_reservation_create(
       alignment = fragment_size;
     }
   }
-  reservation->host_reservation_byte_length =
-      (size_t)byte_length + alignment - devices[0]->page_size;
-  void* pointer =
-      mmap(NULL, reservation->host_reservation_byte_length, PROT_NONE,
-           MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-  if (pointer == MAP_FAILED) {
-    status = amdf_linux_error(errno);
+  if (common_address != 0) {
+    reservation->address = common_address;
   } else {
-    reservation->host_reservation = pointer;
-    reservation->address =
-        ((uintptr_t)pointer + alignment - 1) & ~(alignment - 1);
+    reservation->host_reservation_byte_length =
+        (size_t)byte_length + alignment - devices[0]->page_size;
+    void* pointer =
+        mmap(NULL, reservation->host_reservation_byte_length, PROT_NONE,
+             MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (pointer == MAP_FAILED) {
+      status = amdf_linux_error(errno);
+    } else {
+      reservation->host_reservation = pointer;
+      reservation->address =
+          ((uintptr_t)pointer + alignment - 1) & ~(alignment - 1);
+    }
   }
   for (uint32_t i = 0; i < device_count; ++i) {
     amdf_gpu_kfd_reservation_target_t* target = &reservation->targets[i];

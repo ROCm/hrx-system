@@ -497,6 +497,19 @@ TEST_F(MemoryReservationTest,
   EXPECT_EQ(devices_[0].create_call_count, previous_calls);
   EXPECT_EQ(output, native_.reservation);
   create.minimum_alignment = 0;
+  create.flags = UINT32_C(0x80000000);
+  EXPECT_EQ(amdf_status_code(
+                amdf_memory_reservation_create(&instance_, &create, &output)),
+            AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  EXPECT_EQ(output, native_.reservation);
+  EXPECT_EQ(devices_[0].create_call_count, previous_calls);
+  create.flags = AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS;
+  EXPECT_EQ(amdf_status_code(
+                amdf_memory_reservation_create(&instance_, &create, &output)),
+            AMDF_STATUS_CODE_UNSUPPORTED);
+  EXPECT_EQ(output, native_.reservation);
+  EXPECT_EQ(devices_[0].create_call_count, previous_calls);
+  create.flags = 0;
   EXPECT_EQ(amdf_status_code(
                 amdf_memory_reservation_create(&instance_, &create, &output)),
             AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);

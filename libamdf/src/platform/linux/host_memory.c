@@ -101,7 +101,7 @@ static amdf_status_t amdf_linux_host_backing_map(int descriptor,
   }
   void* pointer = NULL;
   amdf_status_t status = amdf_platform_host_reservation_create(
-      byte_length, AMDF_LINUX_HOST_FOLIO_SIZE, &pointer);
+      byte_length, AMDF_LINUX_HOST_FOLIO_SIZE, 0, UINTPTR_MAX, &pointer);
   if (!amdf_status_is_ok(status)) {
     return status;
   }

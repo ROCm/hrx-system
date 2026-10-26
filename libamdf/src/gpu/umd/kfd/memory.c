@@ -347,7 +347,7 @@ amdf_status_t amdf_gpu_umd_memory_prepare_import(
   if (amdf_status_is_ok(status) &&
       (memory->flags & AMDF_MEMORY_FLAG_DEVICE_ADDRESS) != 0) {
     status = amdf_gpu_umd_memory_reservation_create(
-        device->host_allocator, 1, &device, memory->byte_length, alignment,
+        device->host_allocator, 1, &device, memory->byte_length, alignment, 0,
         &memory->default_reservation);
     if (amdf_status_is_ok(status)) {
       const amdf_gpu_umd_mapping_update_t update = {

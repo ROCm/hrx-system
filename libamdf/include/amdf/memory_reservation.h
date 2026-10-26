@@ -17,6 +17,17 @@ extern "C" {
 /// The reservation borrows its live devices and owns no application backing.
 typedef struct amdf_memory_reservation_t amdf_memory_reservation_t;
 
+/// Explicit address constraints; zero preserves independent consumer addresses.
+typedef uint32_t amdf_memory_reservation_flags_t;
+enum amdf_memory_reservation_flag_bits_e {
+  /// Every requested consumer receives the same numeric base address. The
+  /// constructor owns one inaccessible process interval and reserves that exact
+  /// interval in each independent device VM. No application backing is
+  /// allocated. Unsupported combinations fail, and address availability can
+  /// still prevent construction after a successful capability query.
+  AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS = 1u << 0,
+};
+
 /// Live-domain limits for host-completed virtual-memory updates.
 typedef struct amdf_memory_reservation_capabilities_t {
   /// Must be AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CAPABILITIES.
@@ -31,8 +42,8 @@ typedef struct amdf_memory_reservation_capabilities_t {
   amdf_memory_access_t required_access;
   /// Consumer-local address domain described by these limits.
   uint32_t address_domain_ordinal;
-  /// Reserved for compatible growth; zero.
-  uint32_t reserved;
+  /// Opt-in constraints accepted by this domain's reservation provider.
+  amdf_memory_reservation_flags_t supported_flags;
   /// Largest reservation length in bytes.
   uint64_t maximum_byte_length;
   /// Required reservation length and minimum base alignment in bytes.
@@ -87,8 +98,8 @@ typedef struct amdf_memory_reservation_create_info_t {
   uint64_t minimum_alignment;
   /// Nonzero number of caller-ordered, unique host/live-device consumers.
   uint32_t access_count;
-  /// Reserved for compatible growth; must be zero.
-  uint32_t reserved;
+  /// Explicit address constraints; zero preserves independent addresses.
+  amdf_memory_reservation_flags_t flags;
   /// Consumers borrowed only for this call; live devices belong to instance.
   const amdf_memory_reservation_access_t* accesses;
 } amdf_memory_reservation_create_info_t;

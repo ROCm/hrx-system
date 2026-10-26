@@ -24,6 +24,7 @@ amdf_status_t amdf_platform_host_reservation_query_capabilities(
       .supported_access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
       .required_access = AMDF_MEMORY_ACCESS_READ,
       .address_domain_ordinal = AMDF_ADDRESS_DOMAIN_ORDINAL_NONE,
+      .supported_flags = AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS,
       .maximum_byte_length =
           (maximum - (uintptr_t)info.lpMinimumApplicationAddress + 1) &
           ~((uint64_t)info.dwPageSize - 1),
@@ -39,14 +40,27 @@ amdf_status_t amdf_platform_host_reservation_query_capabilities(
 
 amdf_status_t amdf_platform_host_reservation_create(uint64_t byte_length,
                                                     uint64_t minimum_alignment,
+                                                    uint64_t minimum_address,
+                                                    uint64_t maximum_address,
                                                     void** out_pointer) {
   SYSTEM_INFO info;
   GetSystemInfo(&info);
+  const uint64_t alignment = minimum_alignment > info.dwAllocationGranularity
+                                 ? minimum_alignment
+                                 : info.dwAllocationGranularity;
   MEM_ADDRESS_REQUIREMENTS requirements = {0};
-  requirements.Alignment =
-      (SIZE_T)(minimum_alignment > info.dwAllocationGranularity
-                   ? minimum_alignment
-                   : info.dwAllocationGranularity);
+  // Explicit lower bounds must satisfy the requested alignment too. Zero
+  // leaves system bounds implicit without constraining a stronger alignment.
+  requirements.LowestStartingAddress =
+      minimum_address > (uintptr_t)info.lpMinimumApplicationAddress
+          ? (void*)(uintptr_t)((minimum_address + alignment - 1) &
+                               ~(alignment - 1))
+          : NULL;
+  requirements.HighestEndingAddress =
+      maximum_address < (uintptr_t)info.lpMaximumApplicationAddress
+          ? (void*)(uintptr_t)maximum_address
+          : NULL;
+  requirements.Alignment = (SIZE_T)alignment;
   MEM_EXTENDED_PARAMETER parameter = {0};
   parameter.Type = MemExtendedParameterAddressRequirements;
   parameter.Pointer = &requirements;

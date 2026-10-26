@@ -67,6 +67,7 @@ amdf_status_t amdf_gpu_umd_query_memory_reservation_capabilities(
       .supported_access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
                           AMDF_MEMORY_ACCESS_EXECUTE,
       .required_access = amdf_gpu_wddm_required_mapping_access(device),
+      .supported_flags = AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS,
       .maximum_byte_length = maximum_length,
       .reservation_granularity = AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY,
       .maximum_alignment = maximum_alignment,
@@ -80,7 +81,7 @@ amdf_status_t amdf_gpu_umd_query_memory_reservation_capabilities(
 amdf_status_t amdf_gpu_umd_memory_reservation_create(
     amdf_allocator_t host_allocator, uint32_t device_count,
     amdf_gpu_umd_device_t* const* devices, uint64_t byte_length,
-    uint64_t minimum_alignment,
+    uint64_t minimum_alignment, uint64_t common_address,
     amdf_gpu_umd_memory_reservation_t** out_reservation) {
   // Separate logical KMT devices on one physical adapter share process page
   // tables. A cross-adapter group additionally needs coordinated address
@@ -110,8 +111,11 @@ amdf_status_t amdf_gpu_umd_memory_reservation_create(
           : AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY;
   D3DDDI_RESERVEGPUVIRTUALADDRESS native = {0};
   native.hAdapter = devices[0]->adapter;
+  native.BaseAddress = common_address;
   native.Size =
-      byte_length + alignment - AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY;
+      common_address != 0
+          ? byte_length
+          : byte_length + alignment - AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY;
   native.MinimumAddress = AMDF_WINDOWS_GPU_RESERVATION_GRANULARITY;
   status = amdf_kmt_make_status(
       devices[0]->kmt->reserve_gpu_virtual_address(&native));

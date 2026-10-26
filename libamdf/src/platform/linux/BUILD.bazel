@@ -155,6 +155,18 @@ amdf_cc_library(
 )
 
 amdf_cc_test(
+    name = "host_reservation_test",
+    srcs = ["host_reservation_test.cc"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":host_reservation",
+        "//libamdf/src/platform:host_reservation",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
     name = "host_memory_test",
     srcs = ["host_memory_test.cc"],
     linkopts = [

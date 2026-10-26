@@ -118,8 +118,11 @@ typedef uint32_t amdf_abi_version_t;
 /// Physical storage capacity and explicitly sampled native memory headroom.
 #define AMDF_ABI_VERSION_16 ((amdf_abi_version_t)16)
 
+/// Opt-in common process and device virtual-address reservations.
+#define AMDF_ABI_VERSION_17 ((amdf_abi_version_t)17)
+
 /// Latest ABI version implemented by these headers.
-#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_16
+#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_17
 
 /// The unmangled symbol used to acquire the immutable API table.
 #define AMDF_QUERY_API_SYMBOL "amdf_query_api"

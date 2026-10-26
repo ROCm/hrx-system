@@ -181,7 +181,7 @@ class WddmSparseMappingBackend final : public SparseMappingBackend {
     for (size_t i = 0; i < reservations_.size(); ++i) {
       RequireStatus(amdf_gpu_umd_memory_reservation_create(
                         amdf_allocator_system(), 1, &device_,
-                        reservation_byte_length_, 0, &reservations_[i]),
+                        reservation_byte_length_, 0, 0, &reservations_[i]),
                     "create provider GPU reservation");
       uint32_t owner = 0;
       uint64_t granularity = 0;

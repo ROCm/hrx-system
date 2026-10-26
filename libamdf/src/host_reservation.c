@@ -109,6 +109,9 @@ static amdf_status_t amdf_host_reservation_destroy(
     amdf_memory_reservation_t* reservation, uint32_t owner_ordinal) {
   const amdf_memory_reservation_access_state_t* owner =
       &reservation->accesses[owner_ordinal];
+  if (reservation->common_address != NULL) {
+    return AMDF_STATUS_OK;
+  }
   return amdf_platform_host_reservation_destroy(owner->native,
                                                 owner->info.byte_length);
 }
@@ -159,9 +162,14 @@ static amdf_status_t amdf_host_reservation_prepare(
   // Set the teardown extent before acquiring the address range. A later native
   // address-envelope failure leaves that range in the unpublished owner.
   owner->info.byte_length = create_info->byte_length;
-  amdf_status_t status = amdf_platform_host_reservation_create(
-      create_info->byte_length, alignment > native_alignment ? alignment : 0,
-      &owner->native);
+  amdf_status_t status = AMDF_STATUS_OK;
+  if (reservation->common_address != NULL) {
+    owner->native = reservation->common_address;
+  } else {
+    status = amdf_platform_host_reservation_create(
+        create_info->byte_length, alignment > native_alignment ? alignment : 0,
+        0, UINTPTR_MAX, &owner->native);
+  }
   for (uint32_t i = 0; i < group->access_count && amdf_status_is_ok(status);
        ++i) {
     const uint32_t ordinal = group->access_ordinals[i];

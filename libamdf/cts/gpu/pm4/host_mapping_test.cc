@@ -7,14 +7,18 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <string>
+#include <tuple>
 #include <vector>
 
 #include "libamdf/cts/gpu/pm4/command_fixture.h"
 
 namespace {
 
-class Pm4HostMappingTest : public Pm4CommandTest,
-                           public ::testing::WithParamInterface<uint64_t> {
+class Pm4HostMappingTest
+    : public Pm4CommandTest,
+      public ::testing::WithParamInterface<
+          std::tuple<uint64_t, amdf_memory_reservation_flags_t>> {
  protected:
   void ExpectPairEqual(const amdf_memory_pair_info_t& actual,
                        const amdf_memory_pair_info_t& expected) {
@@ -158,7 +162,7 @@ TEST_P(Pm4HostMappingTest, ReplacesCpuAndGpuViewsBeforeImmediateUse) {
                 instance_, &capabilities),
             AMDF_STATUS_OK);
   const uint64_t unit =
-      std::max({GetParam(), capabilities.mapping_granularity,
+      std::max({std::get<0>(GetParam()), capabilities.mapping_granularity,
                 gpu_capabilities.mapping_granularity,
                 profile.allocation.native_byte_length_granularity});
   const size_t words = unit / sizeof(uint32_t);
@@ -174,8 +178,11 @@ TEST_P(Pm4HostMappingTest, ReplacesCpuAndGpuViewsBeforeImmediateUse) {
       .byte_length = 2 * unit,
       .minimum_alignment = unit,
       .access_count = 2,
+      .flags = std::get<1>(GetParam()),
       .accesses = accesses,
   };
+  ASSERT_EQ(reservation_create.flags & ~capabilities.supported_flags, 0u);
+  ASSERT_EQ(reservation_create.flags & ~gpu_capabilities.supported_flags, 0u);
   ASSERT_EQ(api_->memory_reservation_create(instance_, &reservation_create,
                                             &reservation_),
             AMDF_STATUS_OK);
@@ -201,6 +208,9 @@ TEST_P(Pm4HostMappingTest, ReplacesCpuAndGpuViewsBeforeImmediateUse) {
   };
   ASSERT_EQ(api_->host_mapping_query_info(view_, &host), AMDF_STATUS_OK);
   auto* pointer = static_cast<uint32_t*>(host.pointer);
+  if (reservation_create.flags != 0) {
+    ASSERT_EQ(reinterpret_cast<uintptr_t>(pointer), gpu_address.address);
+  }
   const amdf_memory_create_info_t create = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
       .structure_size = sizeof(create),
@@ -326,10 +336,17 @@ TEST_P(Pm4HostMappingTest, ReplacesCpuAndGpuViewsBeforeImmediateUse) {
   ASSERT_EQ(api_->memory_reservation_detach(reservation_, 1), AMDF_STATUS_OK);
 }
 
-INSTANTIATE_TEST_SUITE_P(MappingUnit, Pm4HostMappingTest,
-                         ::testing::Values(uint64_t{0}, UINT64_C(2) << 20),
-                         [](const auto& info) {
-                           return info.param == 0 ? "Native" : "TwoMiB";
-                         });
+INSTANTIATE_TEST_SUITE_P(
+    MappingUnit, Pm4HostMappingTest,
+    ::testing::Combine(
+        ::testing::Values(uint64_t{0}, UINT64_C(2) << 20),
+        ::testing::Values(
+            amdf_memory_reservation_flags_t{0},
+            amdf_memory_reservation_flags_t{
+                AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS})),
+    [](const auto& info) {
+      return std::string(std::get<0>(info.param) == 0 ? "Native" : "TwoMiB") +
+             (std::get<1>(info.param) == 0 ? "Independent" : "Common");
+    });
 
 }  // namespace

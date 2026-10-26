@@ -112,6 +112,10 @@ typedef struct amdf_memory_reservation_access_state_t {
 struct amdf_memory_reservation_t {
   // Allocator copied from the instance, not a lifetime reference.
   amdf_allocator_t host_allocator;
+  // Owned inaccessible process interval when common addresses were requested.
+  void* common_address;
+  // Complete extent of the common address owner, even during failed creation.
+  uint64_t common_byte_length;
   // Number of caller-ordered borrowed consumer records.
   uint32_t access_count;
   // Records stored in this common owner's allocation tail.
