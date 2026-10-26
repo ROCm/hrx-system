@@ -186,28 +186,34 @@ TEST_P(QueueTest, DynamicallyAcquiredQueueExecutesBarrier) {
     GTEST_SKIP() << "device has no dynamically acquirable queue family";
   }
 
-  iree_hal_queue_params_t params;
-  iree_hal_queue_params_initialize(&params);
-  Ref<iree_hal_queue_t> queue;
-  IREE_ASSERT_OK(iree_hal_queue_acquire(family.identity, &params, queue.out()));
-  ASSERT_NE(nullptr, queue.get());
-  EXPECT_EQ(family.identity, iree_hal_queue_family(queue));
-  EXPECT_EQ(params.priority, iree_hal_queue_priority(queue));
-  EXPECT_EQ(params.features, iree_hal_queue_features(queue));
-  EXPECT_EQ(params.execution_resources.count,
-            iree_hal_queue_execution_resources(queue).count);
+  for (iree_host_size_t priority_index = 0;
+       priority_index < family.spec->priority_count; ++priority_index) {
+    SCOPED_TRACE(family.spec->priorities[priority_index]);
+    iree_hal_queue_params_t params;
+    iree_hal_queue_params_initialize(&params);
+    params.priority = family.spec->priorities[priority_index];
+    Ref<iree_hal_queue_t> queue;
+    IREE_ASSERT_OK(
+        iree_hal_queue_acquire(family.identity, &params, queue.out()));
+    ASSERT_NE(nullptr, queue.get());
+    EXPECT_EQ(family.identity, iree_hal_queue_family(queue));
+    EXPECT_EQ(params.priority, iree_hal_queue_priority(queue));
+    EXPECT_EQ(params.features, iree_hal_queue_features(queue));
+    EXPECT_EQ(params.execution_resources.count,
+              iree_hal_queue_execution_resources(queue).count);
 
-  for (iree_hal_queue_ordinal_t i = 0; i < family.spec->provisioned_queue_count;
-       ++i) {
-    EXPECT_NE(iree_hal_device_queue(device_, family.ordinal, i), queue.get());
+    for (iree_hal_queue_ordinal_t i = 0;
+         i < family.spec->provisioned_queue_count; ++i) {
+      EXPECT_NE(iree_hal_device_queue(device_, family.ordinal, i), queue.get());
+    }
+
+    SemaphoreList signal(device_, {0}, {1});
+    IREE_ASSERT_OK(iree_hal_queue_barrier(
+        queue, iree_hal_semaphore_list_empty(), signal, /*barriers=*/NULL,
+        IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
+                                                IREE_ASYNC_WAIT_FLAG_NONE));
   }
-
-  SemaphoreList signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_barrier(queue, iree_hal_semaphore_list_empty(),
-                                        signal, /*barriers=*/NULL,
-                                        IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(signal, iree_infinite_timeout(),
-                                              IREE_ASYNC_WAIT_FLAG_NONE));
 }
 
 TEST_P(QueueTest, ExplicitPlacementsPreserveQueueExecution) {
