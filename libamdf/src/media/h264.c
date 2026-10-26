@@ -9,6 +9,33 @@
 #include "libamdf/src/media/encode.h"
 #include "libamdf/src/structure.h"
 
+bool amdf_media_h264_level_idc_valid(uint32_t level_idc) {
+  switch (level_idc) {
+    case 10:
+    case 11:
+    case 12:
+    case 13:
+    case 20:
+    case 21:
+    case 22:
+    case 30:
+    case 31:
+    case 32:
+    case 40:
+    case 41:
+    case 42:
+    case 50:
+    case 51:
+    case 52:
+    case 60:
+    case 61:
+    case 62:
+      return true;
+    default:
+      return false;
+  }
+}
+
 amdf_status_t amdf_media_h264_validate(
     const amdf_media_configuration_t* configuration,
     const amdf_media_h264_configuration_t* h264,
@@ -114,7 +141,8 @@ amdf_status_t amdf_media_h264_validate_encode_configuration(
     return status;
   }
   if (h264->next != encode || encode->next != h264_encode ||
-      h264->profile != AMDF_MEDIA_H264_PROFILE_MAIN || h264->level_idc == 0 ||
+      h264->profile != AMDF_MEDIA_H264_PROFILE_MAIN ||
+      !amdf_media_h264_level_idc_valid(h264->level_idc) ||
       h264->level_idc > 52 ||
       configuration->format != AMDF_MEDIA_PIXEL_FORMAT_NV12 ||
       h264_encode->picture_order_count_type != 2 ||

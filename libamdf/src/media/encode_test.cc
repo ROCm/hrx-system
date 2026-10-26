@@ -6,6 +6,7 @@
 
 #include "libamdf/src/media/encode.h"
 
+#include <cstddef>
 #include <cstdint>
 
 #include "gtest/gtest.h"
@@ -19,6 +20,16 @@ template <typename T>
 void Initialize(T* value, amdf_structure_type_t type) {
   value->type = type;
   value->structure_size = sizeof(*value);
+}
+
+template <size_t N>
+bool Contains(const uint32_t (&values)[N], uint32_t value) {
+  for (uint32_t candidate : values) {
+    if (candidate == value) {
+      return true;
+    }
+  }
+  return false;
 }
 
 class EncodeValidationTest : public ::testing::Test {
@@ -118,6 +129,126 @@ TEST_F(EncodeValidationTest, Av1RateControlExcludesZeroQuantization) {
   encode_.rate_control.control.cqp = {0, 0};
   EXPECT_EQ(amdf_media_encode_validate_configuration(
                 &requirements_.configuration, &encode_),
+            AMDF_STATUS_OK);
+}
+
+TEST_F(EncodeValidationTest, CodecLevelsAdmitOnlyDefinedEncodeValues) {
+  static constexpr uint32_t kH264DecodeLevels[] = {
+      10, 11, 12, 13, 20, 21, 22, 30, 31, 32,
+      40, 41, 42, 50, 51, 52, 60, 61, 62,
+  };
+  static constexpr uint32_t kH264EncodeLevels[] = {
+      10, 11, 12, 13, 20, 21, 22, 30, 31, 32, 40, 41, 42, 50, 51, 52,
+  };
+  for (uint32_t level = 0; level <= UINT8_MAX; ++level) {
+    EXPECT_EQ(amdf_media_h264_level_idc_valid(level),
+              Contains(kH264DecodeLevels, level))
+        << "level_idc=" << level;
+  }
+  EXPECT_FALSE(amdf_media_h264_level_idc_valid(UINT32_MAX));
+
+  amdf_media_h264_encode_configuration_t h264_encode = {};
+  Initialize(&h264_encode, AMDF_STRUCTURE_TYPE_MEDIA_H264_ENCODE_CONFIGURATION);
+  h264_encode.picture_order_count_type = 2;
+  amdf_media_h264_configuration_t h264 = {};
+  Initialize(&h264, AMDF_STRUCTURE_TYPE_MEDIA_H264_CONFIGURATION);
+  h264.next = &encode_;
+  h264.profile = AMDF_MEDIA_H264_PROFILE_MAIN;
+  encode_.next = &h264_encode;
+  for (uint32_t level = 0; level <= UINT8_MAX; ++level) {
+    h264.level_idc = level;
+    const amdf_status_t expected =
+        Contains(kH264EncodeLevels, level)
+            ? AMDF_STATUS_OK
+            : amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    EXPECT_EQ(amdf_media_h264_validate_encode_configuration(
+                  &requirements_.configuration, &h264, &encode_, &h264_encode),
+              expected)
+        << "level_idc=" << level;
+  }
+  h264.level_idc = UINT32_MAX;
+  EXPECT_EQ(amdf_media_h264_validate_encode_configuration(
+                &requirements_.configuration, &h264, &encode_, &h264_encode),
+            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+
+  static constexpr uint32_t kHevcLevels[] = {
+      30, 60, 63, 90, 93, 120, 123, 150, 153, 156, 180, 183, 186,
+  };
+  requirements_.configuration.codec = AMDF_MEDIA_CODEC_HEVC;
+  requirements_.configuration.format = AMDF_MEDIA_PIXEL_FORMAT_P010;
+  amdf_media_hevc_encode_configuration_t hevc_encode = {};
+  Initialize(&hevc_encode, AMDF_STRUCTURE_TYPE_MEDIA_HEVC_ENCODE_CONFIGURATION);
+  hevc_encode.tier = AMDF_MEDIA_HEVC_TIER_MAIN;
+  hevc_encode.minimum_luma_coding_unit_log2 = 3;
+  hevc_encode.maximum_luma_coding_unit_log2 = 6;
+  hevc_encode.minimum_luma_transform_unit_log2 = 2;
+  hevc_encode.maximum_luma_transform_unit_log2 = 5;
+  hevc_encode.maximum_transform_hierarchy_depth_inter = 4;
+  hevc_encode.maximum_transform_hierarchy_depth_intra = 4;
+  amdf_media_hevc_configuration_t hevc = {};
+  Initialize(&hevc, AMDF_STRUCTURE_TYPE_MEDIA_HEVC_CONFIGURATION);
+  hevc.next = &encode_;
+  hevc.profile = AMDF_MEDIA_HEVC_PROFILE_MAIN10;
+  hevc.sample_bit_depth = 10;
+  encode_.next = &hevc_encode;
+  for (uint32_t level = 0; level <= UINT8_MAX; ++level) {
+    hevc_encode.level_idc = level;
+    const amdf_status_t expected =
+        Contains(kHevcLevels, level)
+            ? AMDF_STATUS_OK
+            : amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    EXPECT_EQ(amdf_media_hevc_validate_encode_configuration(
+                  &requirements_.configuration, &hevc, &encode_, &hevc_encode),
+              expected)
+        << "level_idc=" << level;
+  }
+  hevc_encode.level_idc = UINT32_MAX;
+  EXPECT_EQ(amdf_media_hevc_validate_encode_configuration(
+                &requirements_.configuration, &hevc, &encode_, &hevc_encode),
+            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+  hevc_encode.tier = AMDF_MEDIA_HEVC_TIER_HIGH;
+  hevc_encode.level_idc = 93;
+  EXPECT_EQ(amdf_media_hevc_validate_encode_configuration(
+                &requirements_.configuration, &hevc, &encode_, &hevc_encode),
+            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+  hevc_encode.level_idc = 120;
+  EXPECT_EQ(amdf_media_hevc_validate_encode_configuration(
+                &requirements_.configuration, &hevc, &encode_, &hevc_encode),
+            AMDF_STATUS_OK);
+
+  requirements_.configuration.codec = AMDF_MEDIA_CODEC_AV1;
+  requirements_.configuration.format = AMDF_MEDIA_PIXEL_FORMAT_NV12;
+  amdf_media_av1_encode_configuration_t av1_encode = {};
+  Initialize(&av1_encode, AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_CONFIGURATION);
+  av1_encode.tier = AMDF_MEDIA_AV1_TIER_MAIN;
+  amdf_media_av1_configuration_t av1 = {};
+  Initialize(&av1, AMDF_STRUCTURE_TYPE_MEDIA_AV1_CONFIGURATION);
+  av1.next = &encode_;
+  av1.profile = 0;
+  av1.sample_bit_depth = 8;
+  encode_.next = &av1_encode;
+  for (uint32_t level = 0; level <= 31; ++level) {
+    av1_encode.level = level;
+    const amdf_status_t expected =
+        level <= 23 ? AMDF_STATUS_OK
+                    : amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    EXPECT_EQ(amdf_media_av1_validate_encode_configuration(
+                  &requirements_.configuration, &av1, &encode_, &av1_encode),
+              expected)
+        << "seq_level_idx=" << level;
+  }
+  av1_encode.level = UINT32_MAX;
+  EXPECT_EQ(amdf_media_av1_validate_encode_configuration(
+                &requirements_.configuration, &av1, &encode_, &av1_encode),
+            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+  av1_encode.tier = AMDF_MEDIA_AV1_TIER_HIGH;
+  av1_encode.level = 7;
+  EXPECT_EQ(amdf_media_av1_validate_encode_configuration(
+                &requirements_.configuration, &av1, &encode_, &av1_encode),
+            amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+  av1_encode.level = 8;
+  EXPECT_EQ(amdf_media_av1_validate_encode_configuration(
+                &requirements_.configuration, &av1, &encode_, &av1_encode),
             AMDF_STATUS_OK);
 }
 

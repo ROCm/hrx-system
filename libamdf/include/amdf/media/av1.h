@@ -323,9 +323,9 @@ typedef struct amdf_media_av1_encode_configuration_t {
   uint32_t structure_size;
   /// Further typed configuration, or NULL.
   const void* next;
-  /// AV1 level index selected by the application.
+  /// AV1 seq_level_idx selected by the application, in [0,23].
   uint32_t level;
-  /// Main or high tier at the selected level.
+  /// Main or high tier; level indices below eight require main tier.
   amdf_media_av1_tier_t tier;
   /// Explicitly enabled encode features.
   amdf_media_av1_encode_feature_flags_t feature_flags;

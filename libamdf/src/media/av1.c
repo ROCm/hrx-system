@@ -231,9 +231,10 @@ amdf_status_t amdf_media_av1_validate_encode_configuration(
       configuration->format != (av1->sample_bit_depth == 8
                                     ? AMDF_MEDIA_PIXEL_FORMAT_NV12
                                     : AMDF_MEDIA_PIXEL_FORMAT_P010) ||
-      av1_encode->level > 31 ||
+      av1_encode->level > 23 ||
       (av1_encode->tier != AMDF_MEDIA_AV1_TIER_MAIN &&
        av1_encode->tier != AMDF_MEDIA_AV1_TIER_HIGH) ||
+      (av1_encode->tier == AMDF_MEDIA_AV1_TIER_HIGH && av1_encode->level < 8) ||
       (av1_encode->feature_flags & ~known_features) != 0 ||
       (order_hint ? av1_encode->order_hint_bit_count == 0 ||
                         av1_encode->order_hint_bit_count > 8

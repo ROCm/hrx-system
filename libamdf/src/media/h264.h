@@ -22,6 +22,10 @@ amdf_status_t amdf_media_h264_validate(
     const amdf_media_h264_decode_picture_info_t* picture,
     uint64_t compressed_byte_length);
 
+// Returns whether level_idc names a defined H264 level. Provider-specific
+// maximum-level support remains part of exact configuration admission.
+bool amdf_media_h264_level_idc_valid(uint32_t level_idc);
+
 // Validates the selected IP-only H264 encode envelope and extension chain.
 amdf_status_t amdf_media_h264_validate_encode_configuration(
     const amdf_media_configuration_t* configuration,

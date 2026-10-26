@@ -426,6 +426,12 @@ TEST_F(EncodeConfigurationTest, UnsupportedTuplesHaveSpecificReasons) {
             AMDF_STATUS_OK);
   EXPECT_EQ(result.reason, AMDF_MEDIA_CONFIGURATION_REASON_CODEC);
 
+  chain.h264.profile = AMDF_MEDIA_H264_PROFILE_MAIN;
+  chain.h264.level_idc = 14;
+  ASSERT_EQ(media_->device_query_configuration(device_, &query, &result),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(result.reason, AMDF_MEDIA_CONFIGURATION_REASON_CODEC);
+
   codec_configuration =
       chain.InitializeFor(h264_case, AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CBR);
   query.next = codec_configuration;
@@ -433,6 +439,42 @@ TEST_F(EncodeConfigurationTest, UnsupportedTuplesHaveSpecificReasons) {
   ASSERT_EQ(media_->device_query_configuration(device_, &query, &result),
             AMDF_STATUS_OK);
   EXPECT_EQ(result.reason, AMDF_MEDIA_CONFIGURATION_REASON_CODEC);
+
+  if (Supports(AMDF_MEDIA_CODEC_HEVC)) {
+    const EncodeCase hevc_case = {AMDF_MEDIA_CODEC_HEVC,
+                                  AMDF_MEDIA_PIXEL_FORMAT_NV12, 8};
+    query.next =
+        chain.InitializeFor(hevc_case, AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP);
+    query.configuration.codec = AMDF_MEDIA_CODEC_HEVC;
+    chain.hevc_encode.level_idc = 91;
+    ASSERT_EQ(media_->device_query_configuration(device_, &query, &result),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(result.reason, AMDF_MEDIA_CONFIGURATION_REASON_CODEC);
+
+    chain.hevc_encode.level_idc = 90;
+    chain.hevc_encode.tier = AMDF_MEDIA_HEVC_TIER_HIGH;
+    ASSERT_EQ(media_->device_query_configuration(device_, &query, &result),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(result.reason, AMDF_MEDIA_CONFIGURATION_REASON_CODEC);
+  }
+
+  if (Supports(AMDF_MEDIA_CODEC_AV1)) {
+    const EncodeCase av1_case = {AMDF_MEDIA_CODEC_AV1,
+                                 AMDF_MEDIA_PIXEL_FORMAT_NV12, 8};
+    query.next =
+        chain.InitializeFor(av1_case, AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP);
+    query.configuration.codec = AMDF_MEDIA_CODEC_AV1;
+    chain.av1_encode.level = 24;
+    ASSERT_EQ(media_->device_query_configuration(device_, &query, &result),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(result.reason, AMDF_MEDIA_CONFIGURATION_REASON_CODEC);
+
+    chain.av1_encode.level = 7;
+    chain.av1_encode.tier = AMDF_MEDIA_AV1_TIER_HIGH;
+    ASSERT_EQ(media_->device_query_configuration(device_, &query, &result),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(result.reason, AMDF_MEDIA_CONFIGURATION_REASON_CODEC);
+  }
 }
 
 TEST_F(EncodeConfigurationTest, SessionMatchesProviderExecutionSupport) {

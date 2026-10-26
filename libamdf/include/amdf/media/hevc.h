@@ -272,9 +272,10 @@ typedef struct amdf_media_hevc_encode_configuration_t {
   uint32_t structure_size;
   /// Further typed configuration, or NULL.
   const void* next;
-  /// General profile level_idc selected by the application.
+  /// General profile level_idc selected by the application: 30, 60, 63, 90,
+  /// 93, 120, 123, 150, 153, 156, 180, 183, or 186.
   uint32_t level_idc;
-  /// Main or high tier at level_idc.
+  /// Main or high tier at level_idc; levels below 120 require main tier.
   amdf_media_hevc_tier_t tier;
   /// log2_max_pic_order_cnt_lsb_minus4, in [0,12].
   uint32_t log2_max_picture_order_count_lsb_minus4;

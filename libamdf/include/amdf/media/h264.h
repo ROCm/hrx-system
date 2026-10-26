@@ -42,7 +42,10 @@ typedef struct amdf_media_h264_configuration_t {
   const void* next;
   /// Profile whose syntax the caller supplies.
   amdf_media_h264_profile_t profile;
-  /// Exact SPS level_idc; configuration admission does not rewrite the stream.
+  /// Exact SPS level_idc: 10-13, 20-22, 30-32, 40-42, 50-52, or 60-62.
+  /// Level 1b is not represented because its constraint_set3_flag is outside
+  /// this syntax envelope.
+  /// Configuration admission does not rewrite the stream.
   uint32_t level_idc;
 } amdf_media_h264_configuration_t;
 

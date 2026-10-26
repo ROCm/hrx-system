@@ -267,6 +267,7 @@ static amdf_status_t amdf_media_drm_decode_configuration(
     const amdf_media_h264_configuration_t* syntax = next;
     if (syntax->profile < AMDF_MEDIA_H264_PROFILE_CONSTRAINED_BASELINE ||
         syntax->profile > AMDF_MEDIA_H264_PROFILE_HIGH ||
+        !amdf_media_h264_level_idc_valid(syntax->level_idc) ||
         syntax->level_idc > 52) {
       info.reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC;
     }

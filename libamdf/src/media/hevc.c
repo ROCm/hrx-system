@@ -9,6 +9,27 @@
 #include "libamdf/src/media/encode.h"
 #include "libamdf/src/structure.h"
 
+static bool amdf_media_hevc_encode_level_valid(uint32_t level_idc) {
+  switch (level_idc) {
+    case 30:
+    case 60:
+    case 63:
+    case 90:
+    case 93:
+    case 120:
+    case 123:
+    case 150:
+    case 153:
+    case 156:
+    case 180:
+    case 183:
+    case 186:
+      return true;
+    default:
+      return false;
+  }
+}
+
 static bool amdf_media_hevc_reference_set_valid(
     const amdf_media_hevc_decode_picture_info_t* picture,
     const amdf_media_hevc_reference_set_t* set, uint32_t kind, uint32_t* used) {
@@ -260,9 +281,11 @@ amdf_status_t amdf_media_hevc_validate_encode_configuration(
       configuration->format != (hevc->sample_bit_depth == 8
                                     ? AMDF_MEDIA_PIXEL_FORMAT_NV12
                                     : AMDF_MEDIA_PIXEL_FORMAT_P010) ||
-      hevc_encode->level_idc == 0 || hevc_encode->level_idc > 255 ||
+      !amdf_media_hevc_encode_level_valid(hevc_encode->level_idc) ||
       (hevc_encode->tier != AMDF_MEDIA_HEVC_TIER_MAIN &&
        hevc_encode->tier != AMDF_MEDIA_HEVC_TIER_HIGH) ||
+      (hevc_encode->tier == AMDF_MEDIA_HEVC_TIER_HIGH &&
+       hevc_encode->level_idc < 120) ||
       hevc_encode->log2_max_picture_order_count_lsb_minus4 > 12 ||
       hevc_encode->minimum_luma_coding_unit_log2 < 3 ||
       hevc_encode->maximum_luma_coding_unit_log2 > 6 ||

@@ -104,7 +104,8 @@ static amdf_status_t QueryDecodeConfiguration(
       const auto& h264 = *static_cast<const amdf_media_h264_configuration_t*>(
           codec_configuration);
       if (h264.profile < AMDF_MEDIA_H264_PROFILE_CONSTRAINED_BASELINE ||
-          h264.profile > AMDF_MEDIA_H264_PROFILE_HIGH || h264.level_idc > 255) {
+          h264.profile > AMDF_MEDIA_H264_PROFILE_HIGH ||
+          !amdf_media_h264_level_idc_valid(h264.level_idc)) {
         info.reason = AMDF_MEDIA_CONFIGURATION_REASON_CODEC;
       } else if (configuration.format != AMDF_MEDIA_PIXEL_FORMAT_NV12) {
         info.reason = AMDF_MEDIA_CONFIGURATION_REASON_FORMAT;
@@ -344,31 +345,86 @@ static amdf_status_t QueryDecodeConfiguration(
 
 namespace {
 
-bool H264Level(uint32_t level_idc, D3D12_VIDEO_ENCODER_LEVELS_H264* out_level) {
-  static constexpr uint8_t kLevelIndicators[] = {
-      10, 9,  11, 12, 13, 20, 21, 22, 30, 31,
-      32, 40, 41, 42, 50, 51, 52, 60, 61, 62,
-  };
-  for (uint32_t index = 0; index < sizeof(kLevelIndicators); ++index) {
-    if (kLevelIndicators[index] == level_idc) {
-      *out_level = static_cast<D3D12_VIDEO_ENCODER_LEVELS_H264>(index);
-      return true;
-    }
+// Converts the syntax value already admitted by the shared H264 validator.
+D3D12_VIDEO_ENCODER_LEVELS_H264 H264Level(uint32_t level_idc) {
+  switch (level_idc) {
+    case 10:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_1;
+    case 11:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_11;
+    case 12:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_12;
+    case 13:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_13;
+    case 20:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_2;
+    case 21:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_21;
+    case 22:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_22;
+    case 30:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_3;
+    case 31:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_31;
+    case 32:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_32;
+    case 40:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_4;
+    case 41:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_41;
+    case 42:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_42;
+    case 50:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_5;
+    case 51:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_51;
+    case 52:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_52;
+    case 60:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_6;
+    case 61:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_61;
+    case 62:
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_62;
+    default:
+      amdf_assert(false && "shared validation admits every H264 level");
+      return D3D12_VIDEO_ENCODER_LEVELS_H264_1;
   }
-  return false;
 }
 
-bool HevcLevel(uint32_t level_idc, D3D12_VIDEO_ENCODER_LEVELS_HEVC* out_level) {
-  static constexpr uint8_t kLevelIndicators[] = {
-      30, 60, 63, 90, 93, 120, 123, 150, 153, 156, 180, 183, 186,
-  };
-  for (uint32_t index = 0; index < sizeof(kLevelIndicators); ++index) {
-    if (kLevelIndicators[index] == level_idc) {
-      *out_level = static_cast<D3D12_VIDEO_ENCODER_LEVELS_HEVC>(index);
-      return true;
-    }
+// Converts the syntax value already admitted by the shared HEVC validator.
+D3D12_VIDEO_ENCODER_LEVELS_HEVC HevcLevel(uint32_t level_idc) {
+  switch (level_idc) {
+    case 30:
+      return D3D12_VIDEO_ENCODER_LEVELS_HEVC_1;
+    case 60:
+      return D3D12_VIDEO_ENCODER_LEVELS_HEVC_2;
+    case 63:
+      return D3D12_VIDEO_ENCODER_LEVELS_HEVC_21;
+    case 90:
+      return D3D12_VIDEO_ENCODER_LEVELS_HEVC_3;
+    case 93:
+      return D3D12_VIDEO_ENCODER_LEVELS_HEVC_31;
+    case 120:
+      return D3D12_VIDEO_ENCODER_LEVELS_HEVC_4;
+    case 123:
+      return D3D12_VIDEO_ENCODER_LEVELS_HEVC_41;
+    case 150:
+      return D3D12_VIDEO_ENCODER_LEVELS_HEVC_5;
+    case 153:
+      return D3D12_VIDEO_ENCODER_LEVELS_HEVC_51;
+    case 156:
+      return D3D12_VIDEO_ENCODER_LEVELS_HEVC_52;
+    case 180:
+      return D3D12_VIDEO_ENCODER_LEVELS_HEVC_6;
+    case 183:
+      return D3D12_VIDEO_ENCODER_LEVELS_HEVC_61;
+    case 186:
+      return D3D12_VIDEO_ENCODER_LEVELS_HEVC_62;
+    default:
+      amdf_assert(false && "shared validation admits every HEVC level");
+      return D3D12_VIDEO_ENCODER_LEVELS_HEVC_1;
   }
-  return false;
 }
 
 void AnswerUnsupported(amdf_media_configuration_info_t* info,
@@ -539,13 +595,13 @@ amdf_status_t QueryEncodeConfiguration(
     if (!amdf_status_is_ok(status)) {
       return status;
     }
-    if (!codec_support.IsSupported ||
-        !H264Level(h264->level_idc, &native->h264_level)) {
+    if (!codec_support.IsSupported) {
       AnswerUnsupported(&info,
                         AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION,
                         out_info);
       return AMDF_STATUS_OK;
     }
+    native->h264_level = H264Level(h264->level_idc);
     native->codec_configuration = {sizeof(native->h264)};
     native->codec_configuration.pH264Config = &native->h264;
     native->h264_gop = {
@@ -609,13 +665,13 @@ amdf_status_t QueryEncodeConfiguration(
         D3D12_VIDEO_ENCODER_CODEC_CONFIGURATION_SUPPORT_HEVC_FLAG_CHROMA_QP_OFFSET_LIST_ENABLED_FLAG_REQUIRED;
     if (!codec_support.IsSupported ||
         (static_cast<uint32_t>(limits.SupportFlags) &
-         kUnmodeledRequiredFlags) != 0 ||
-        !HevcLevel(hevc_encode->level_idc, &native->hevc_level.Level)) {
+         kUnmodeledRequiredFlags) != 0) {
       AnswerUnsupported(&info,
                         AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION,
                         out_info);
       return AMDF_STATUS_OK;
     }
+    native->hevc_level.Level = HevcLevel(hevc_encode->level_idc);
     native->hevc_level.Tier = hevc_encode->tier == AMDF_MEDIA_HEVC_TIER_HIGH
                                   ? D3D12_VIDEO_ENCODER_TIER_HEVC_HIGH
                                   : D3D12_VIDEO_ENCODER_TIER_HEVC_MAIN;
@@ -664,7 +720,7 @@ amdf_status_t QueryEncodeConfiguration(
     if ((av1_encode->feature_flags & AMDF_MEDIA_AV1_ENCODE_FEATURE_CDEF) != 0) {
       requested_features |= D3D12_VIDEO_ENCODER_AV1_FEATURE_FLAG_CDEF_FILTERING;
     }
-    if (!codec_support.IsSupported || av1_encode->level > 23 ||
+    if (!codec_support.IsSupported ||
         (static_cast<uint32_t>(limits.RequiredFeatureFlags) &
          ~requested_features) != 0 ||
         (requested_features &
