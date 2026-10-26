@@ -16,10 +16,24 @@ namespace {
 
 class HipMemoryInteropApiTest : public testing::Test {
  protected:
-  void SetUp() override {
+  static void SetUpTestSuite() {
     ASSERT_TRUE(dso_.Open()) << dso_.error();
-    auto initialize = dso_.Resolve<decltype(&hipInit)>("hipInit");
-    deinitialize_ = dso_.Resolve<decltype(&hipHALDeinit)>("hipHALDeinit");
+    const auto initialize = dso_.Resolve<decltype(&hipInit)>("hipInit");
+    ASSERT_NE(initialize, nullptr);
+    ASSERT_EQ(hipSuccess, initialize(0));
+  }
+
+  static void TearDownTestSuite() {
+    if (dso_.is_open()) {
+      const auto deinitialize =
+          dso_.Resolve<decltype(&hipHALDeinit)>("hipHALDeinit");
+      ASSERT_NE(deinitialize, nullptr);
+      EXPECT_EQ(hipSuccess, deinitialize());
+      EXPECT_TRUE(dso_.Close()) << dso_.error();
+    }
+  }
+
+  void SetUp() override {
     allocate_ = dso_.Resolve<decltype(&hipMalloc)>("hipMalloc");
     allocate_async_ = dso_.Resolve<decltype(&hipMallocAsync)>("hipMallocAsync");
     free_ = dso_.Resolve<decltype(&hipFree)>("hipFree");
@@ -36,8 +50,6 @@ class HipMemoryInteropApiTest : public testing::Test {
     copy_ = dso_.Resolve<decltype(&hipMemcpy)>("hipMemcpy");
     synchronize_ =
         dso_.Resolve<decltype(&hipDeviceSynchronize)>("hipDeviceSynchronize");
-    ASSERT_NE(initialize, nullptr);
-    ASSERT_NE(deinitialize_, nullptr);
     ASSERT_NE(allocate_, nullptr);
     ASSERT_NE(allocate_async_, nullptr);
     ASSERT_NE(free_, nullptr);
@@ -49,12 +61,11 @@ class HipMemoryInteropApiTest : public testing::Test {
     ASSERT_NE(address_range_, nullptr);
     ASSERT_NE(copy_, nullptr);
     ASSERT_NE(synchronize_, nullptr);
-    ASSERT_EQ(hipSuccess, initialize(0));
-    initialized_ = true;
+    ready_ = true;
   }
 
   void TearDown() override {
-    if (initialized_) {
+    if (ready_) {
       EXPECT_EQ(hipSuccess, synchronize_());
       if (device_memory_) {
         EXPECT_EQ(hipSuccess, free_(device_memory_));
@@ -65,9 +76,7 @@ class HipMemoryInteropApiTest : public testing::Test {
       if (registered_) {
         EXPECT_EQ(hipSuccess, unregister_host_(storage_.data()));
       }
-      EXPECT_EQ(hipSuccess, deinitialize_());
     }
-    EXPECT_TRUE(dso_.Close()) << dso_.error();
   }
 
   void CheckHostRange(void* host_pointer) {
@@ -107,10 +116,10 @@ class HipMemoryInteropApiTest : public testing::Test {
     EXPECT_EQ(0, memcmp(expected.data(), host_bytes, expected.size()));
   }
 
-  // Exact built HIP runtime; no process-global ROCm symbol lookup.
-  hrx::hip::testing::HipDso dso_;
-  // True after runtime initialization succeeds.
-  bool initialized_ = false;
+  // One exact runtime incarnation shared through synchronous suite teardown.
+  static inline hrx::hip::testing::HipDso dso_;
+  // All per-case entry points are ready for checked resource cleanup.
+  bool ready_ = false;
   // User-owned storage retained through unregister and all device accesses.
   alignas(4096) std::array<uint8_t, 4096> storage_ = {};
   // True while the runtime has registered |storage_|.
@@ -119,8 +128,6 @@ class HipMemoryInteropApiTest : public testing::Test {
   void* host_memory_ = nullptr;
   // Runtime-owned device allocation, released after all copies complete.
   hipDeviceptr_t device_memory_ = nullptr;
-  // Releases the runtime before unloading its shared object.
-  decltype(&hipHALDeinit) deinitialize_ = nullptr;
   // Allocates ordinary device memory.
   decltype(&hipMalloc) allocate_ = nullptr;
   // Allocates device memory from the selected stream-ordered pool.
