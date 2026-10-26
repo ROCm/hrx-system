@@ -657,11 +657,7 @@ static bool loom_verify_predicate_semantic_type(loom_type_t carrier_type,
 }
 
 static bool loom_verify_predicate_requires_matching_types(
-    uint8_t predicate_kind, loom_verify_predicate_value_policy_t value_policy,
-    loom_type_t first_type, loom_type_t next_type) {
-  if (value_policy == LOOM_VERIFY_PREDICATE_VALUES_EXECUTABLE_OPERANDS) {
-    return true;
-  }
+    uint8_t predicate_kind, loom_type_t first_type, loom_type_t next_type) {
   switch ((loom_predicate_kind_t)predicate_kind) {
     case LOOM_PREDICATE_ULT:
     case LOOM_PREDICATE_ULE:
@@ -751,8 +747,7 @@ static void loom_verify_predicate(
       has_type_anchor = true;
     } else if (!loom_type_equal(anchor_semantic_type, semantic_type) &&
                loom_verify_predicate_requires_matching_types(
-                   predicate->kind, value_policy, anchor_semantic_type,
-                   semantic_type)) {
+                   predicate->kind, anchor_semantic_type, semantic_type)) {
       loom_verify_emit_predicate_type_mismatch(
           state, op, name, predicate_index, anchor_argument_index,
           anchor_carrier_type, argument_index, carrier_type);

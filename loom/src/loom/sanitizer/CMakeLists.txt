@@ -95,6 +95,7 @@ loom_cc_library(
     loom::ops::scalar
     loom::ops::view
     loom::pass::types
+    loom::pass::value_facts
     loom::rewrite::rewriter
   PUBLIC
 )

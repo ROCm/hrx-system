@@ -66,6 +66,21 @@ func.def @assume_with_relational_rhs_value(%n: index) -> (index) {
 
 // ====
 
+// Signed mathematical relations keep the authored operand domains. The
+// materialization pass owns conversion to an executable comparison domain.
+func.def @assume_with_mixed_relational_rhs(%candidate: i32, %tile_end: index) -> (i32) {
+  %bounded = scalar.assume %candidate [lt(%candidate, %tile_end)] : i32
+  func.return %bounded : i32
+}
+
+// ----
+func.def @assume_with_mixed_relational_rhs(%candidate: i32, %tile_end: index) -> (i32) {
+  %bounded, %5 = sanitizer.assert.value %candidate, %tile_end [lt(%candidate, %tile_end)] : i32, index
+  func.return %bounded : i32
+}
+
+// ====
+
 // Scalar floating-point assumes use the same assertion vocabulary as fast-math
 // checks.
 func.def @float_assume_becomes_value_assertion(%x: f32) -> (f32) {

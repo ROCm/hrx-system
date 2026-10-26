@@ -411,3 +411,125 @@ func.def @rejects_non_kernel_assertion(%value: i32) {
   sanitizer.assert.op %value [ne(%value, 0)] : i32
   func.return
 }
+
+// ====
+
+// RUN: pass sanitizer-materialize-assertions
+
+// Mixed signed relations use the narrowest exact common domain. Booleans
+// zero-extend, fixed-width integers sign-extend, and unbounded address values
+// use index.cast to i64. Checked aliases retain their types and predicates.
+kernel.def @mixed_mathematical_integer_predicates() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%bit: i1, %byte: i8, %half: i16, %word: i32, %wide: i64, %position: index, %offset: offset) {
+  %checked_bit, %checked_byte, %checked_half, %checked_word, %checked_wide, %checked_position, %checked_offset = sanitizer.assert.value %bit, %byte, %half, %word, %wide, %position, %offset [eq(%bit, %byte), ne(%byte, %half), lt(%half, %word), le(%word, %wide), gt(%wide, %position), ge(%position, %offset), range(%word, %half, %offset)] : i1, i8, i16, i32, i64, index, offset
+  sanitizer.assert.op %byte, %position [le(%byte, %position)] : i8, index
+  test.use %checked_bit, %checked_byte, %checked_half, %checked_word, %checked_wide, %checked_position, %checked_offset : i1, i8, i16, i32, i64, index, offset
+  kernel.return
+}
+
+// ----
+kernel.def @mixed_mathematical_integer_predicates() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%bit: i1, %byte: i8, %half: i16, %word: i32, %wide: i64, %position: index, %offset: offset) {
+  %18 = scalar.extui %bit : i1 to i8
+  %19 = scalar.cmpi eq, %18, %byte : i8
+  %20 = scalar.extsi %byte : i8 to i16
+  %21 = scalar.cmpi ne, %20, %half : i16
+  %22 = scalar.andi %19, %21 : i1
+  %23 = scalar.extsi %half : i16 to i32
+  %24 = scalar.cmpi slt, %23, %word : i32
+  %25 = scalar.andi %22, %24 : i1
+  %26 = scalar.extsi %word : i32 to i64
+  %27 = scalar.cmpi sle, %26, %wide : i64
+  %28 = scalar.andi %25, %27 : i1
+  %29 = index.cast %position : index to i64
+  %30 = scalar.cmpi sgt, %wide, %29 : i64
+  %31 = scalar.andi %28, %30 : i1
+  %32 = index.cast %position : index to i64
+  %33 = index.cast %offset : offset to i64
+  %34 = scalar.cmpi sge, %32, %33 : i64
+  %35 = scalar.andi %31, %34 : i1
+  %36 = scalar.extsi %half : i16 to i32
+  %37 = scalar.cmpi sge, %word, %36 : i32
+  %38 = scalar.extsi %word : i32 to i64
+  %39 = index.cast %offset : offset to i64
+  %40 = scalar.cmpi sle, %38, %39 : i64
+  %41 = scalar.andi %37, %40 : i1
+  %42 = scalar.andi %35, %41 : i1
+  kernel.assert %42 : i1
+  %checked_position, %checked_offset = index.assume %position, %offset [gt(%wide, %position), ge(%position, %offset), range(%word, %half, %offset)] : index, offset
+  %checked_bit, %checked_byte, %checked_half, %checked_word, %checked_wide = scalar.assume %bit, %byte, %half, %word, %wide [eq(%bit, %byte), ne(%byte, %half), lt(%half, %word), le(%word, %wide), gt(%wide, %position), range(%word, %half, %offset)] : i1, i8, i16, i32, i64
+  %15 = scalar.extsi %byte : i8 to i64
+  %16 = index.cast %position : index to i64
+  %17 = scalar.cmpi sle, %15, %16 : i64
+  kernel.assert %17 : i1
+  test.use %checked_bit, %checked_byte, %checked_half, %checked_word, %checked_wide, %checked_position, %checked_offset : i1, i8, i16, i32, i64, index, offset
+  kernel.return
+}
+
+// ====
+
+// RUN: pass sanitizer-materialize-assertions,canonicalize
+
+// A cross-domain relation refines every checked alias participating in it.
+// The original address value remains unconstrained before the runtime check.
+kernel.def @mixed_checked_aliases_preserve_relational_facts() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%candidate: i32, %limit: index) {
+  %checked_candidate, %checked_limit = sanitizer.assert.value %candidate, %limit [lt(%candidate, %limit)] : i32, index
+  %original_limit_lower = test.fact_range_lo %limit : index -> i64
+  %checked_limit_lower = test.fact_range_lo %checked_limit : index -> i64
+  test.use %checked_candidate, %original_limit_lower, %checked_limit_lower : i32, i64, i64
+  kernel.return
+}
+
+// ----
+kernel.def @mixed_checked_aliases_preserve_relational_facts() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%candidate: i32, %limit: index) {
+  %7 = scalar.extsi %candidate : i32 to i64
+  %8 = index.cast %limit : index to i64
+  %9 = scalar.cmpi slt, %7, %8 : i64
+  kernel.assert %9 : i1
+  %checked_candidate = scalar.assume %candidate [lt(%candidate, %limit)] : i32
+  %original_limit_lower = scalar.constant -9223372036854775808 : i64
+  %checked_limit_lower = scalar.constant -2147483647 : i64
+  test.use %checked_candidate, %original_limit_lower, %checked_limit_lower : i32, i64, i64
+  kernel.return
+}
+
+// ====
+
+// RUN: pass sanitizer-materialize-assertions
+
+// Proven address bounds select the authored fixed-width comparison domain.
+// This keeps common mixed instrumentation on native narrow comparisons.
+kernel.def @bounded_address_uses_fixed_comparison() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%candidate: i32, %limit: index) {
+  %bounded_limit = index.assume %limit [range(%limit, 0, 1024)] : index
+  %checked_candidate, %checked_limit = sanitizer.assert.value %candidate, %bounded_limit [lt(%candidate, %bounded_limit)] : i32, index
+  test.use %checked_candidate, %checked_limit : i32, index
+  kernel.return
+}
+
+// ----
+kernel.def @bounded_address_uses_fixed_comparison() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%candidate: i32, %limit: index) {
+  %bounded_limit = index.assume %limit [range(%limit, 0, 1024)] : index
+  %6 = index.cast %bounded_limit : index to i32
+  %7 = scalar.cmpi slt, %candidate, %6 : i32
+  kernel.assert %7 : i1
+  %checked_limit = index.assume %bounded_limit [lt(%candidate, %bounded_limit)] : index
+  %checked_candidate = scalar.assume %candidate [lt(%candidate, %bounded_limit)] : i32
+  test.use %checked_candidate, %checked_limit : i32, index
+  kernel.return
+}

@@ -191,9 +191,16 @@ func.def @predicate_subject_must_be_assert_operand(%x: index) -> (index) {
 
 // ====
 
-func.def @predicate_values_must_match_subject_type(%x: i32, %y: i64) {
-  // ERROR@+1: TYPE/001 "predicates[0].arg[0]" "i32" "predicates[0].arg[1]" "i64"
+func.def @signed_predicate_values_may_cross_integer_domains(%x: i32, %y: i64) {
   %checked_x, %checked_y = sanitizer.assert.value %x, %y [lt(%x, %y)] : i32, i64
+  func.return
+}
+
+// ====
+
+func.def @unsigned_predicate_values_must_match_subject_type(%x: i32, %y: i64) {
+  // ERROR@+1: TYPE/001 "predicates[0].arg[0]" "i32" "predicates[0].arg[1]" "i64"
+  %checked_x, %checked_y = sanitizer.assert.value %x, %y [ult(%x, %y)] : i32, i64
   func.return
 }
 

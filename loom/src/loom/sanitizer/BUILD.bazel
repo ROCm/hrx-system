@@ -86,6 +86,7 @@ loom_cc_library(
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/view",
         "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/rewrite:rewriter",
         "//runtime/src/iree/base",
     ],

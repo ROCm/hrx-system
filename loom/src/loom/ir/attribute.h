@@ -61,6 +61,9 @@ static inline loom_symbol_ref_t loom_symbol_ref_null(void) {
 typedef uint8_t loom_predicate_kind_t;
 
 enum loom_predicate_kind_e {
+  // Integer equality and signed ordering predicates compare mathematical
+  // values and may cross fixed-width, index, and offset domains. Floating and
+  // explicitly unsigned predicates require one exact semantic type.
   // eq(a, b)
   LOOM_PREDICATE_EQ = 0,
   // ne(a, b)

@@ -18,6 +18,8 @@
 #include "loom/ops/sanitizer/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/view/ops.h"
+#include "loom/pass/value_facts.h"
+#include "loom/rewrite/fact_propagation.h"
 #include "loom/rewrite/rewriter.h"
 
 static const loom_pass_info_t
@@ -37,6 +39,8 @@ typedef struct loom_sanitizer_predicate_materializer_t {
   loom_module_t* module;
   // Builder positioned immediately before the sanitizer assertion.
   loom_builder_t* builder;
+  // Facts established before the runtime assertion, or NULL when unavailable.
+  const loom_value_fact_table_t* fact_table;
   // Source assertion location copied to every executable predicate operation.
   loom_location_id_t location;
 } loom_sanitizer_predicate_materializer_t;
@@ -185,11 +189,102 @@ static iree_status_t loom_sanitizer_build_integer_comparison(
   return iree_ok_status();
 }
 
+static bool loom_sanitizer_value_fits_fixed_integer(
+    const loom_sanitizer_predicate_materializer_t* materializer,
+    loom_value_id_t value, loom_scalar_type_t fixed_type) {
+  const loom_value_facts_t facts =
+      materializer->fact_table
+          ? loom_value_fact_table_lookup(materializer->fact_table, value)
+          : loom_value_facts_unknown();
+  const uint8_t bit_count = (uint8_t)loom_scalar_type_bitwidth(fixed_type);
+  return fixed_type == LOOM_SCALAR_TYPE_I1
+             ? loom_value_facts_fit_unsigned_bit_count(facts, bit_count)
+             : loom_value_facts_fit_signed_bit_count(facts, bit_count);
+}
+
+static loom_type_t loom_sanitizer_mathematical_integer_comparison_type(
+    const loom_sanitizer_predicate_materializer_t* materializer,
+    loom_value_id_t lhs, loom_value_id_t rhs) {
+  const loom_type_t lhs_type =
+      loom_module_value_type(materializer->module, lhs);
+  const loom_type_t rhs_type =
+      loom_module_value_type(materializer->module, rhs);
+  const bool lhs_is_address = loom_sanitizer_is_address_scalar(lhs_type);
+  const bool rhs_is_address = loom_sanitizer_is_address_scalar(rhs_type);
+  if (!lhs_is_address && !rhs_is_address) {
+    // Widen fixed-width values to the largest authored domain. This preserves
+    // their signed mathematical values without introducing an i64 operation
+    // when a narrower native comparison is already sufficient.
+    return loom_scalar_type_bitwidth(loom_type_element_type(lhs_type)) >=
+                   loom_scalar_type_bitwidth(loom_type_element_type(rhs_type))
+               ? lhs_type
+               : rhs_type;
+  }
+
+  const loom_type_t i64_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
+  if (lhs_is_address && rhs_is_address) {
+    return i64_type;
+  }
+  const loom_value_id_t address_value = lhs_is_address ? lhs : rhs;
+  const loom_type_t fixed_type = lhs_is_address ? rhs_type : lhs_type;
+  // An address may use the authored fixed-width domain only when facts before
+  // the assertion prove that the cast preserves every possible value.
+  return loom_sanitizer_value_fits_fixed_integer(
+             materializer, address_value, loom_type_element_type(fixed_type))
+             ? fixed_type
+             : i64_type;
+}
+
+static iree_status_t loom_sanitizer_convert_mathematical_integer(
+    loom_sanitizer_predicate_materializer_t* materializer,
+    loom_value_id_t value, loom_type_t result_type,
+    loom_value_id_t* out_value) {
+  const loom_type_t input_type =
+      loom_module_value_type(materializer->module, value);
+  if (loom_type_equal(input_type, result_type)) {
+    *out_value = value;
+    return iree_ok_status();
+  }
+  const loom_scalar_type_t input_scalar_type =
+      loom_type_element_type(input_type);
+
+  loom_op_t* cast_op = NULL;
+  if (loom_sanitizer_is_address_scalar(input_type)) {
+    IREE_RETURN_IF_ERROR(
+        loom_index_cast_build(materializer->builder, value, input_type,
+                              result_type, materializer->location, &cast_op));
+    *out_value = loom_index_cast_result(cast_op);
+  } else if (input_scalar_type == LOOM_SCALAR_TYPE_I1) {
+    IREE_RETURN_IF_ERROR(
+        loom_scalar_extui_build(materializer->builder, value, input_type,
+                                result_type, materializer->location, &cast_op));
+    *out_value = loom_scalar_extui_result(cast_op);
+  } else {
+    IREE_RETURN_IF_ERROR(
+        loom_scalar_extsi_build(materializer->builder, value, input_type,
+                                result_type, materializer->location, &cast_op));
+    *out_value = loom_scalar_extsi_result(cast_op);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_sanitizer_build_numeric_comparison(
     loom_sanitizer_predicate_materializer_t* materializer, loom_type_t type,
     loom_predicate_kind_t kind, loom_value_id_t lhs, loom_value_id_t rhs,
     loom_value_id_t* out_condition) {
   if (!loom_scalar_type_is_float(loom_type_element_type(type))) {
+    const loom_type_t lhs_type =
+        loom_module_value_type(materializer->module, lhs);
+    const loom_type_t rhs_type =
+        loom_module_value_type(materializer->module, rhs);
+    if (!loom_type_equal(lhs_type, rhs_type)) {
+      type = loom_sanitizer_mathematical_integer_comparison_type(materializer,
+                                                                 lhs, rhs);
+      IREE_RETURN_IF_ERROR(loom_sanitizer_convert_mathematical_integer(
+          materializer, lhs, type, &lhs));
+      IREE_RETURN_IF_ERROR(loom_sanitizer_convert_mathematical_integer(
+          materializer, rhs, type, &rhs));
+    }
     return loom_sanitizer_build_integer_comparison(materializer, type, kind,
                                                    lhs, rhs, out_condition);
   }
@@ -486,7 +581,7 @@ typedef struct loom_sanitizer_assume_group_t {
   uint16_t* result_indices;
   // Number of populated value, result type, and result-index entries.
   uint16_t value_count;
-  // Predicates whose subject belongs to this scalar domain.
+  // Predicates referencing at least one value in this scalar domain.
   loom_predicate_t* predicates;
   // Number of populated predicates.
   uint16_t predicate_count;
@@ -570,6 +665,7 @@ static iree_status_t loom_sanitizer_materialize_value_assertion(
   loom_sanitizer_predicate_materializer_t materializer = {
       .module = module,
       .builder = &rewriter->builder,
+      .fact_table = rewriter->fact_table,
       .location = op->location,
   };
   loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
@@ -602,12 +698,30 @@ static iree_status_t loom_sanitizer_materialize_value_assertion(
   }
   for (uint16_t i = 0; i < predicates.count; ++i) {
     const loom_predicate_t predicate = predicates.predicate_list[i];
-    const loom_type_t subject_type =
-        loom_module_value_type(module, (loom_value_id_t)predicate.args[0]);
-    loom_sanitizer_assume_group_t* group =
-        loom_sanitizer_is_address_scalar(subject_type) ? &address_group
-                                                       : &payload_group;
-    group->predicates[group->predicate_count++] = predicate;
+    // A cross-domain relation can refine aliases on both sides. Reproduce the
+    // predicate in each mentioned assume domain so neither refinement is lost
+    // when the executable assertion is split into typed identity operations.
+    bool references_address = false;
+    bool references_payload = false;
+    for (uint8_t argument_index = 0; argument_index < predicate.arg_count;
+         ++argument_index) {
+      if (predicate.arg_tags[argument_index] != LOOM_PRED_ARG_VALUE) {
+        continue;
+      }
+      const loom_type_t argument_type = loom_module_value_type(
+          module, (loom_value_id_t)predicate.args[argument_index]);
+      if (loom_sanitizer_is_address_scalar(argument_type)) {
+        references_address = true;
+      } else if (loom_type_is_scalar(argument_type)) {
+        references_payload = true;
+      }
+    }
+    if (references_address) {
+      address_group.predicates[address_group.predicate_count++] = predicate;
+    }
+    if (references_payload) {
+      payload_group.predicates[payload_group.predicate_count++] = predicate;
+    }
   }
 
   IREE_RETURN_IF_ERROR(loom_sanitizer_build_assume_group(
@@ -632,6 +746,7 @@ static iree_status_t loom_sanitizer_materialize_operation_assertion(
   loom_sanitizer_predicate_materializer_t materializer = {
       .module = module,
       .builder = &rewriter->builder,
+      .fact_table = rewriter->fact_table,
       .location = op->location,
   };
   loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
@@ -670,6 +785,7 @@ static iree_status_t loom_sanitizer_materialize_layout_assertion(
   loom_sanitizer_predicate_materializer_t materializer = {
       .module = module,
       .builder = &rewriter->builder,
+      .fact_table = rewriter->fact_table,
       .location = op->location,
   };
   loom_value_id_t shape_condition = LOOM_VALUE_ID_INVALID;
@@ -734,6 +850,43 @@ static bool loom_sanitizer_is_semantic_assertion(const loom_op_t* op) {
          loom_sanitizer_assert_layout_isa(op);
 }
 
+static bool loom_sanitizer_assertion_needs_value_facts(
+    const loom_module_t* module, const loom_op_t* op) {
+  loom_attribute_t predicates = {0};
+  if (loom_sanitizer_assert_value_isa(op)) {
+    predicates = loom_sanitizer_assert_value_predicates(op);
+  } else if (loom_sanitizer_assert_op_isa(op)) {
+    predicates = loom_sanitizer_assert_op_predicates(op);
+  } else {
+    return false;
+  }
+  for (uint16_t predicate_index = 0; predicate_index < predicates.count;
+       ++predicate_index) {
+    const loom_predicate_t* predicate =
+        &predicates.predicate_list[predicate_index];
+    bool references_address = false;
+    bool references_fixed_integer = false;
+    for (uint8_t argument_index = 0; argument_index < predicate->arg_count;
+         ++argument_index) {
+      if (predicate->arg_tags[argument_index] != LOOM_PRED_ARG_VALUE) {
+        continue;
+      }
+      const loom_type_t type = loom_module_value_type(
+          module, (loom_value_id_t)predicate->args[argument_index]);
+      if (loom_sanitizer_is_address_scalar(type)) {
+        references_address = true;
+      } else if (loom_type_is_scalar(type) &&
+                 loom_scalar_type_is_integer(loom_type_element_type(type))) {
+        references_fixed_integer = true;
+      }
+      if (references_address && references_fixed_integer) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 iree_status_t loom_sanitizer_materialize_assertions_run(
     loom_pass_t* pass, loom_module_t* module, loom_func_like_t function) {
   if (!loom_func_like_body(function)) {
@@ -750,6 +903,29 @@ iree_status_t loom_sanitizer_materialize_assertions_run(
     if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD) ||
         !loom_sanitizer_is_semantic_assertion(op)) {
       continue;
+    }
+    // Only mixed address/fixed-width predicates need range facts to select an
+    // exact narrow carrier. Other assertions retain the pass's prior cost.
+    const bool needs_value_facts =
+        loom_sanitizer_assertion_needs_value_facts(module, op);
+    if (!rewriter.fact_table && needs_value_facts) {
+      loom_value_fact_table_t* value_facts = NULL;
+      status = loom_pass_value_facts_prepare(
+          pass, module, loom_pass_value_fact_scope_function(function),
+          &value_facts);
+      if (iree_status_is_ok(status)) {
+        status =
+            loom_rewriter_enable_analysis(&rewriter, function, value_facts);
+      }
+      if (!iree_status_is_ok(status)) {
+        continue;
+      }
+    }
+    if (rewriter.fact_table && needs_value_facts) {
+      status = loom_rewriter_propagate_value_facts(&rewriter);
+      if (!iree_status_is_ok(status)) {
+        continue;
+      }
     }
     if (!loom_func_like_is_kernel(function)) {
       status = loom_sanitizer_emit_materialization_failure(
