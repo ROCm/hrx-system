@@ -2283,7 +2283,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_prepare_native(
         .type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,
         .structure_size = sizeof(native),
         .queue_family_ordinal = queue->options.family_ordinal,
-        .priority = AMDF_QUEUE_PRIORITY_NORMAL,
+        .priority =
+            iree_hal_amd_gpu_user_queue_native_priority(queue->base.priority),
         .placement = (amdf_queue_placement_t)queue->base.placement,
         .producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE,
         .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,

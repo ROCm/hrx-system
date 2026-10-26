@@ -335,7 +335,6 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
           status, "device_query_queue_clock_info"));
     }
   }
-  const iree_hal_queue_priority_t priority = IREE_HAL_QUEUE_PRIORITY_NORMAL;
   const amdf_atomic_capabilities_t* native_atomics =
       &device->context->families[family_ordinal].atomic_capabilities;
   const iree_hal_atomic_operation_capabilities_t atomic_operations =
@@ -352,6 +351,20 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
                                       IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
   const amdf_queue_family_info_t* native_family =
       &device->context->families[family_ordinal];
+  iree_hal_queue_priority_t priorities[3];
+  iree_host_size_t priority_count = 0;
+  if (native_family->priority_capabilities &
+      AMDF_QUEUE_PRIORITY_CAPABILITY_LOW) {
+    priorities[priority_count++] = -1;
+  }
+  if (native_family->priority_capabilities &
+      AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL) {
+    priorities[priority_count++] = IREE_HAL_QUEUE_PRIORITY_NORMAL;
+  }
+  if (native_family->priority_capabilities &
+      AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH) {
+    priorities[priority_count++] = 1;
+  }
   iree_hal_queue_placement_capabilities_t placements = 0;
   if (iree_hal_amd_gpu_device_compute_publication_modes(native_family) &
       AMDF_QUEUE_PUBLICATION_MODE_USER) {
@@ -380,8 +393,8 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       // platform-specific rate. Zero rate leaves timestamp capture unavailable.
       .timestamp_valid_bits = clock.frequency_hz ? 64 : 0,
       .timestamp_frequency_hz = clock.frequency_hz,
-      .priority_count = 1,
-      .priorities = &priority,
+      .priority_count = priority_count,
+      .priorities = priorities,
       .physical_device_affinity = 1,
       .role_flags =
           IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |

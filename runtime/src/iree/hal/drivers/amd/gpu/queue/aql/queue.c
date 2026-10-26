@@ -2642,7 +2642,7 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
       .structure_size = sizeof(native),
       .next = &service,
       .queue_family_ordinal = options->family_ordinal,
-      .priority = AMDF_QUEUE_PRIORITY_NORMAL,
+      .priority = iree_hal_amd_gpu_user_queue_native_priority(params->priority),
       .placement = (amdf_queue_placement_t)params->placement,
       .producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE,
       .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
