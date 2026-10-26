@@ -23,6 +23,7 @@ loom_cc_library(
     iree::base::cpu_data
     loom::target::arch::x86::records::target_records
     loom::target::facts
+    loom::target::facts_builder
   PUBLIC
 )
 endif()

@@ -53,7 +53,10 @@ struct loom_target_profile_t {
   const loom_target_profile_type_t* type;
 
   // Target-neutral bundle projection, or NULL when the structured facts are
-  // not concrete enough to select one.
+  // not concrete enough to select one. A family profile retaining several
+  // executable choices projects the preferred bundle used when no narrower
+  // root requirement is present; specialization publishes an exact bundle
+  // before target lowering.
   const loom_target_bundle_t* target_bundle;
 
   // Common fields explicitly supplied by the profile producer. Presence is

@@ -12,6 +12,7 @@
 static void loom_x86_target_facts_project(
     const loom_target_record_view_t* record, loom_target_facts_t* base_facts) {
   loom_x86_target_facts_t* facts = (loom_x86_target_facts_t*)base_facts;
+  facts->executable_target_kinds = LOOM_X86_TARGET_KIND_BIT(record->selector);
   const loom_attribute_t tune_attr = loom_x86_target_tune_from_record(record);
   if (!loom_attr_is_absent(tune_attr)) {
     facts->tune = (loom_x86_target_tune_t)loom_attr_as_enum(tune_attr);

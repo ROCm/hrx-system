@@ -46,29 +46,60 @@ static_assert(IREE_ARRAYSIZE(kX86TargetTuneInfos) ==
                   LOOM_X86_TARGET_TUNE_COUNT_,
               "x86 target tune metadata must cover every tune");
 
-typedef struct loom_x86_processor_tune_match_t {
+// Keep names as compact B-strings so named selection never scans a C string.
+#define LOOM_X86_DEPLOYMENT_PROFILE(                                         \
+    enum_suffix, ordinal, name_length, name_arg, cpu_field0_bits,            \
+    executable_target_kinds, preferred_symbol_suffix, preferred_target_kind, \
+    tune_suffix)                                                             \
+  static const uint8_t kX86DeploymentProfileName##enum_suffix[] =            \
+      LOOM_BSTRING_LITERAL(name_length, name_arg);
+#include "loom/target/arch/x86/records/target_profiles.inl"
+#undef LOOM_X86_DEPLOYMENT_PROFILE
+
+static const loom_x86_deployment_profile_t kX86DeploymentProfiles[] = {
+#define LOOM_X86_DEPLOYMENT_PROFILE(                                       \
+    enum_suffix, ordinal_arg, name_length, name_arg, cpu_bits_arg,         \
+    executable_targets_arg, preferred_symbol_suffix, preferred_target_arg, \
+    tune_suffix)                                                           \
+  [ordinal_arg - 1] = {                                                    \
+      .name = kX86DeploymentProfileName##enum_suffix,                      \
+      .cpu_field0_bits = cpu_bits_arg,                                     \
+      .executable_target_kinds = executable_targets_arg,                   \
+      .ordinal = ordinal_arg,                                              \
+      .preferred_target_kind = preferred_target_arg,                       \
+      .tune = LOOM_X86_TARGET_TUNE_##tune_suffix,                          \
+  },
+#include "loom/target/arch/x86/records/target_profiles.inl"
+#undef LOOM_X86_DEPLOYMENT_PROFILE
+};
+static_assert(IREE_ARRAYSIZE(kX86DeploymentProfiles) + 1 ==
+                  LOOM_X86_DEPLOYMENT_PROFILE_COUNT_,
+              "x86 deployment metadata must cover every profile");
+
+typedef struct loom_x86_processor_deployment_match_t {
   uint64_t vendor_low;
   uint32_t vendor_high;
   uint16_t family;
   uint8_t first_model;
   uint8_t last_model;
-  loom_x86_target_tune_t tune;
-} loom_x86_processor_tune_match_t;
+  loom_x86_deployment_profile_ordinal_t profile_ordinal;
+} loom_x86_processor_deployment_match_t;
 
-static const loom_x86_processor_tune_match_t kX86ProcessorTuneMatches[] = {
-#define LOOM_X86_PROCESSOR_TUNE_MATCH(enum_suffix, vendor_low_arg,     \
-                                      vendor_high_arg, family_arg,     \
-                                      first_model_arg, last_model_arg) \
-  {                                                                    \
-      .vendor_low = vendor_low_arg,                                    \
-      .vendor_high = vendor_high_arg,                                  \
-      .family = family_arg,                                            \
-      .first_model = first_model_arg,                                  \
-      .last_model = last_model_arg,                                    \
-      .tune = LOOM_X86_TARGET_TUNE_##enum_suffix,                      \
+static const loom_x86_processor_deployment_match_t
+    kX86ProcessorDeploymentMatches[] = {
+#define LOOM_X86_PROCESSOR_DEPLOYMENT_MATCH(enum_suffix, vendor_low_arg,     \
+                                            vendor_high_arg, family_arg,     \
+                                            first_model_arg, last_model_arg) \
+  {                                                                          \
+      .vendor_low = vendor_low_arg,                                          \
+      .vendor_high = vendor_high_arg,                                        \
+      .family = family_arg,                                                  \
+      .first_model = first_model_arg,                                        \
+      .last_model = last_model_arg,                                          \
+      .profile_ordinal = LOOM_X86_DEPLOYMENT_PROFILE_##enum_suffix,          \
   },
 #include "loom/target/arch/x86/records/target_profiles.inl"
-#undef LOOM_X86_PROCESSOR_TUNE_MATCH
+#undef LOOM_X86_PROCESSOR_DEPLOYMENT_MATCH
 };
 
 const loom_x86_target_tune_info_t* loom_x86_target_tune_info_lookup(
@@ -77,10 +108,28 @@ const loom_x86_target_tune_info_t* loom_x86_target_tune_info_lookup(
   return &kX86TargetTuneInfos[tune];
 }
 
-loom_x86_target_tune_t loom_x86_target_tune_select_cpu(
+const loom_x86_deployment_profile_t* loom_x86_deployment_profile_at(
+    loom_x86_deployment_profile_ordinal_t ordinal) {
+  IREE_ASSERT(ordinal > LOOM_X86_DEPLOYMENT_PROFILE_NONE &&
+              ordinal < LOOM_X86_DEPLOYMENT_PROFILE_COUNT_);
+  return &kX86DeploymentProfiles[ordinal - 1];
+}
+
+const loom_x86_deployment_profile_t* loom_x86_deployment_profile_lookup(
+    iree_string_view_t name) {
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kX86DeploymentProfiles);
+       ++i) {
+    if (loom_bstring_equal(kX86DeploymentProfiles[i].name, name)) {
+      return &kX86DeploymentProfiles[i];
+    }
+  }
+  return NULL;
+}
+
+const loom_x86_deployment_profile_t* loom_x86_deployment_profile_select_cpu(
     const iree_cpu_data_t* cpu_data) {
   if (cpu_data->architecture != IREE_CPU_ARCHITECTURE_X86_64) {
-    return LOOM_X86_TARGET_TUNE_NONE;
+    return NULL;
   }
   const uint64_t vendor_low =
       (cpu_data->fields[1] & IREE_CPU_DATA1_X86_64_VENDOR_ID_LOW_MASK) >>
@@ -94,7 +143,7 @@ loom_x86_target_tune_t loom_x86_target_tune_select_cpu(
                   IREE_CPU_DATA2_X86_64_PROCESSOR_SIGNATURE_MASK) >>
                  IREE_CPU_DATA2_X86_64_PROCESSOR_SIGNATURE_SHIFT);
   if (vendor_low == 0 || vendor_high == 0 || signature == 0) {
-    return LOOM_X86_TARGET_TUNE_NONE;
+    return NULL;
   }
 
   const uint8_t base_family = (uint8_t)((signature >> 8) & 0x0F);
@@ -106,16 +155,17 @@ loom_x86_target_tune_t loom_x86_target_tune_select_cpu(
   const uint8_t model = base_family == 0x06 || base_family == 0x0F
                             ? base_model | (extended_model << 4)
                             : base_model;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kX86ProcessorTuneMatches);
-       ++i) {
-    const loom_x86_processor_tune_match_t* match = &kX86ProcessorTuneMatches[i];
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(kX86ProcessorDeploymentMatches); ++i) {
+    const loom_x86_processor_deployment_match_t* match =
+        &kX86ProcessorDeploymentMatches[i];
     if (vendor_low == match->vendor_low && vendor_high == match->vendor_high &&
         family == match->family && model >= match->first_model &&
         model <= match->last_model) {
-      return match->tune;
+      return loom_x86_deployment_profile_at(match->profile_ordinal);
     }
   }
-  return LOOM_X86_TARGET_TUNE_NONE;
+  return NULL;
 }
 
 #define LOOM_X86_LOW_SNAPSHOT(symbol, snapshot_name)           \

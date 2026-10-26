@@ -71,7 +71,7 @@ class NativeReportTest(unittest.TestCase):
     def test_callable_and_private_helper(self):
         self.check_report(
             callable_source,
-            "x86:scalar",
+            "x86:znver5",
             ["call_pair"],
             {"call_pair"},
             "draw_arguments",

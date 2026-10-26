@@ -125,14 +125,32 @@ class X86ProviderTest : public ::testing::Test {
     return facts;
   }
 
-  void ExpectStaticSelection(const iree_cpu_data_t* cpu_data,
-                             const loom_target_profile_t* profile,
-                             const loom_target_profile_t* expected_profile) {
+  void ExpectExplicitSelectionAccepted(const iree_cpu_data_t* cpu_data,
+                                       const loom_target_profile_t* profile) {
     loom_target_profile_selection_t selection =
         Select(cpu_data, nullptr, profile);
-    EXPECT_EQ(selection.profile, expected_profile);
-    EXPECT_EQ(selection.destroy, nullptr);
+    ASSERT_NE(selection.profile, nullptr);
+    EXPECT_NE(selection.destroy, nullptr);
+    const loom_x86_target_facts_t* facts = Project(selection.profile);
+    ASSERT_NE(facts, nullptr);
+    const loom_x86_target_facts_t* requested = Project(profile);
+    ASSERT_NE(requested, nullptr);
+    EXPECT_EQ(facts->base.selector, requested->base.selector);
+    EXPECT_EQ(facts->executable_target_kinds,
+              LOOM_X86_TARGET_KIND_BIT(facts->base.selector));
+    EXPECT_EQ(facts->cpu_data.architecture, cpu_data->architecture);
+    for (iree_host_size_t i = 0; i < IREE_CPU_DATA_FIELD_COUNT; ++i) {
+      EXPECT_EQ(facts->cpu_data.fields[i], cpu_data->fields[i]);
+    }
     loom_target_profile_selection_release(&selection, iree_allocator_system());
+  }
+
+  void ExpectExplicitSelectionRejected(const iree_cpu_data_t* cpu_data,
+                                       const loom_target_profile_t* profile) {
+    loom_target_profile_selection_t selection =
+        Select(cpu_data, nullptr, profile);
+    EXPECT_EQ(selection.profile, nullptr);
+    EXPECT_EQ(selection.destroy, nullptr);
   }
 
   ModulePtr Materialize(const loom_target_facts_t* facts,
@@ -188,16 +206,24 @@ TEST_F(X86ProviderTest, SelectsStrongestExecutableCpuProfile) {
   struct SelectionCase {
     uint64_t cpu_features;
     loom_x86_target_kind_t selector;
+    loom_x86_target_kind_set_t executable_target_kinds;
     uint64_t contract_set_stable_id;
     iree_string_view_t contract_set_spelling;
   } cases[] = {
-      {0, LOOM_X86_TARGET_KIND_SCALAR, UINT64_C(0x374da30c241d0cea),
-       IREE_SV("x86.scalar.core")},
+      {0, LOOM_X86_TARGET_KIND_SCALAR,
+       LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_SCALAR),
+       UINT64_C(0x374da30c241d0cea), IREE_SV("x86.scalar.core")},
       {IREE_CPU_DATA0_X86_64_AVX, LOOM_X86_TARGET_KIND_SCALAR,
+       LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_SCALAR),
        UINT64_C(0x374da30c241d0cea), IREE_SV("x86.scalar.core")},
       {kAvx2CpuFeatures, LOOM_X86_TARGET_KIND_AVX2,
+       LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_SCALAR) |
+           LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_AVX2),
        UINT64_C(0x4a4769fa07a2ddeb), IREE_SV("x86.avx2_features.core")},
       {kAvx512CpuFeatures, LOOM_X86_TARGET_KIND_AVX512,
+       LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_AVX512) |
+           LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_SCALAR) |
+           LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_AVX2),
        UINT64_C(0x7ddea86e8df4a0d5), IREE_SV("x86.avx512_features.core")},
   };
   for (const auto& selection_case : cases) {
@@ -220,6 +246,8 @@ TEST_F(X86ProviderTest, SelectsStrongestExecutableCpuProfile) {
         &facts->base, LOOM_TARGET_FACT_FIELD_CONTRACT_SET_KEY));
     EXPECT_FALSE(loom_target_facts_field_is_explicit(
         &facts->base, LOOM_TARGET_FACT_FIELD_CONTRACT_FEATURE_BITS));
+    EXPECT_EQ(facts->executable_target_kinds,
+              selection_case.executable_target_kinds);
     loom_target_profile_selection_release(&selection, iree_allocator_system());
   }
 }
@@ -240,14 +268,14 @@ TEST_F(X86ProviderTest, RequiresCompleteCpuFeatureClosures) {
         Profile(iree_make_cstring_view(profile_case.selector));
     cpu_data.fields[0] = profile_case.required_features;
     SCOPED_TRACE(profile_case.selector);
-    ExpectStaticSelection(&cpu_data, profile, profile);
+    ExpectExplicitSelectionAccepted(&cpu_data, profile);
     for (uint64_t feature = 1; feature != 0; feature <<= 1) {
       if (!iree_any_bit_set(profile_case.required_features, feature)) {
         continue;
       }
       cpu_data.fields[0] = profile_case.required_features & ~feature;
       SCOPED_TRACE(feature);
-      ExpectStaticSelection(&cpu_data, profile, nullptr);
+      ExpectExplicitSelectionRejected(&cpu_data, profile);
     }
   }
 }
@@ -274,8 +302,119 @@ TEST_F(X86ProviderTest, PreservesAuthoredRequirementIdentity) {
       &selected_facts->base, LOOM_TARGET_FACT_FIELD_CONTRACT_SET_KEY));
   EXPECT_FALSE(loom_target_facts_field_is_explicit(
       &selected_facts->base, LOOM_TARGET_FACT_FIELD_CONTRACT_FEATURE_BITS));
+  EXPECT_EQ(selected_facts->executable_target_kinds,
+            LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_AVX2));
   EXPECT_TRUE(loom_target_facts_satisfy_specialization_requirement(
       &selected_facts->base, &requirement->base));
+  loom_target_profile_selection_release(&selection, iree_allocator_system());
+}
+
+TEST_F(X86ProviderTest, RefinesAutomaticCpuProfileToAuthoredTarget) {
+  const iree_cpu_data_t cpu_data =
+      AmdCpuData(0x1A, 0x70,
+                 kAvx512CpuFeatures | IREE_CPU_DATA0_X86_64_F16C |
+                     IREE_CPU_DATA0_X86_64_BMI2);
+  loom_target_profile_selection_t selection = Select(&cpu_data);
+  ASSERT_NE(selection.profile, nullptr);
+  const loom_x86_target_facts_t* available = Project(selection.profile);
+  loom_x86_target_facts_t* requirement = FeatureRequirement(
+      IREE_SV("avx2"), LOOM_X86_FEATURE_F16C, LOOM_X86_FEATURE_BMI2);
+  ASSERT_NE(available, nullptr);
+  ASSERT_NE(requirement, nullptr);
+  requirement->tune = LOOM_X86_TARGET_TUNE_ZNVER5;
+  requirement->tune_is_explicit = true;
+  requirement->base.fact_type->rebind(&requirement->base);
+  ASSERT_EQ(available->base.selector, LOOM_X86_TARGET_KIND_AVX512);
+  ASSERT_EQ(available->executable_target_kinds,
+            LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_AVX512) |
+                LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_SCALAR) |
+                LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_AVX2));
+  ASSERT_TRUE(loom_target_facts_satisfy_specialization_requirement(
+      &available->base, &requirement->base));
+
+  loom_target_facts_t* refined_base = nullptr;
+  IREE_ASSERT_OK(loom_target_facts_builder_clone(&available->base, &arena_,
+                                                 &refined_base));
+  loom_target_facts_builder_apply_requirement(&requirement->base, refined_base);
+  const auto* refined =
+      reinterpret_cast<const loom_x86_target_facts_t*>(refined_base);
+  EXPECT_EQ(refined->base.selector, LOOM_X86_TARGET_KIND_AVX2);
+  EXPECT_EQ(refined->executable_target_kinds,
+            LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_AVX2));
+  EXPECT_TRUE(iree_string_view_equal(refined->base.storage.bundle.name,
+                                     IREE_SV("x86-avx2")));
+  EXPECT_TRUE(
+      iree_string_view_equal(refined->base.storage.config.contract_set.spelling,
+                             IREE_SV("x86.avx2_features.core")));
+  EXPECT_TRUE(
+      iree_all_bits_set(refined->base.storage.config.contract_feature_bits,
+                        LOOM_X86_FEATURE_F16C));
+  EXPECT_FALSE(
+      iree_any_bit_set(refined->base.storage.config.contract_feature_bits,
+                       LOOM_X86_FEATURE_BMI2));
+  EXPECT_TRUE(iree_all_bits_set(refined->positive_feature_assertions,
+                                LOOM_X86_FEATURE_F16C));
+  EXPECT_TRUE(iree_all_bits_set(refined->negative_feature_assertions,
+                                LOOM_X86_FEATURE_BMI2));
+  EXPECT_EQ(refined->tune, LOOM_X86_TARGET_TUNE_ZNVER5);
+  EXPECT_TRUE(refined->tune_is_explicit);
+  EXPECT_EQ(refined->cpu_data.architecture, cpu_data.architecture);
+  for (iree_host_size_t i = 0; i < IREE_CPU_DATA_FIELD_COUNT; ++i) {
+    EXPECT_EQ(refined->cpu_data.fields[i], cpu_data.fields[i]);
+  }
+
+  const loom_target_facts_t* execution = nullptr;
+  IREE_ASSERT_OK(loom_target_facts_builder_select_execution(
+      refined_base, &arena_, &execution));
+  EXPECT_EQ(execution, refined_base);
+  loom_target_profile_selection_release(&selection, iree_allocator_system());
+}
+
+TEST_F(X86ProviderTest, CommitsPreferredAutomaticTargetBeforeExecution) {
+  const iree_cpu_data_t cpu_data = {
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {kAvx512CpuFeatures},
+  };
+  loom_target_profile_selection_t selection = Select(&cpu_data);
+  ASSERT_NE(selection.profile, nullptr);
+  const loom_x86_target_facts_t* available = Project(selection.profile);
+  ASSERT_NE(available, nullptr);
+  ASSERT_EQ(available->executable_target_kinds,
+            LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_AVX512) |
+                LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_SCALAR) |
+                LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_AVX2));
+
+  const loom_target_facts_t* execution_base = nullptr;
+  IREE_ASSERT_OK(loom_target_facts_builder_select_execution(
+      &available->base, &arena_, &execution_base));
+  ASSERT_NE(execution_base, &available->base);
+  const auto* execution =
+      reinterpret_cast<const loom_x86_target_facts_t*>(execution_base);
+  EXPECT_EQ(execution->base.selector, LOOM_X86_TARGET_KIND_AVX512);
+  EXPECT_EQ(execution->executable_target_kinds,
+            LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_AVX512));
+  EXPECT_FALSE(
+      loom_target_facts_are_equivalent(&available->base, execution_base));
+
+  const loom_x86_target_facts_t* avx2 = Project(Profile(IREE_SV("avx2")));
+  ASSERT_NE(avx2, nullptr);
+  EXPECT_TRUE(loom_target_facts_satisfy_specialization_requirement(
+      &available->base, &avx2->base));
+  EXPECT_FALSE(loom_target_facts_satisfy_specialization_requirement(
+      execution_base, &avx2->base));
+  const loom_x86_target_facts_t* packed_dot =
+      Project(Profile(IREE_SV("packed_dot")));
+  ASSERT_NE(packed_dot, nullptr);
+  EXPECT_FALSE(loom_target_facts_satisfy_specialization_requirement(
+      &available->base, &packed_dot->base));
+
+  const loom_x86_target_facts_t* exact_avx512 =
+      Project(Profile(IREE_SV("avx512")));
+  ASSERT_NE(exact_avx512, nullptr);
+  EXPECT_EQ(exact_avx512->executable_target_kinds,
+            LOOM_X86_TARGET_KIND_BIT(LOOM_X86_TARGET_KIND_AVX512));
+  EXPECT_FALSE(loom_target_facts_satisfy_specialization_requirement(
+      &exact_avx512->base, &avx2->base));
   loom_target_profile_selection_release(&selection, iree_allocator_system());
 }
 
@@ -312,42 +451,102 @@ TEST_F(X86ProviderTest, ProjectsCompleteCpuFactsAndExecutableFeatures) {
   loom_target_profile_selection_release(&selection, iree_allocator_system());
 }
 
-TEST_F(X86ProviderTest, RecognizesSupportedProcessorTuneRanges) {
-  struct TuneCase {
+TEST_F(X86ProviderTest, RecognizesSupportedProcessorDeploymentRanges) {
+  struct DeploymentCase {
     uint16_t family;
     uint8_t model;
-    loom_x86_target_tune_t expected_tune;
+    loom_x86_deployment_profile_ordinal_t expected_profile;
   } cases[] = {
-      {0x1A, 0x00, LOOM_X86_TARGET_TUNE_ZNVER5},
-      {0x1A, 0x4F, LOOM_X86_TARGET_TUNE_ZNVER5},
-      {0x1A, 0x50, LOOM_X86_TARGET_TUNE_ZNVER6},
-      {0x1A, 0x5F, LOOM_X86_TARGET_TUNE_ZNVER6},
-      {0x1A, 0x60, LOOM_X86_TARGET_TUNE_ZNVER5},
-      {0x1A, 0x77, LOOM_X86_TARGET_TUNE_ZNVER5},
-      {0x1A, 0x78, LOOM_X86_TARGET_TUNE_NONE},
-      {0x1A, 0x80, LOOM_X86_TARGET_TUNE_ZNVER6},
-      {0x1A, 0xCF, LOOM_X86_TARGET_TUNE_ZNVER6},
-      {0x1A, 0xD0, LOOM_X86_TARGET_TUNE_ZNVER5},
-      {0x1A, 0xD7, LOOM_X86_TARGET_TUNE_ZNVER5},
-      {0x1A, 0xD8, LOOM_X86_TARGET_TUNE_ZNVER6},
-      {0x1A, 0xE7, LOOM_X86_TARGET_TUNE_ZNVER6},
-      {0x1A, 0xE8, LOOM_X86_TARGET_TUNE_NONE},
-      {0x19, 0x70, LOOM_X86_TARGET_TUNE_NONE},
+      {0x1A, 0x00, LOOM_X86_DEPLOYMENT_PROFILE_ZNVER5},
+      {0x1A, 0x4F, LOOM_X86_DEPLOYMENT_PROFILE_ZNVER5},
+      {0x1A, 0x50, LOOM_X86_DEPLOYMENT_PROFILE_ZNVER6},
+      {0x1A, 0x5F, LOOM_X86_DEPLOYMENT_PROFILE_ZNVER6},
+      {0x1A, 0x60, LOOM_X86_DEPLOYMENT_PROFILE_ZNVER5},
+      {0x1A, 0x77, LOOM_X86_DEPLOYMENT_PROFILE_ZNVER5},
+      {0x1A, 0x78, LOOM_X86_DEPLOYMENT_PROFILE_NONE},
+      {0x1A, 0x80, LOOM_X86_DEPLOYMENT_PROFILE_ZNVER6},
+      {0x1A, 0xCF, LOOM_X86_DEPLOYMENT_PROFILE_ZNVER6},
+      {0x1A, 0xD0, LOOM_X86_DEPLOYMENT_PROFILE_ZNVER5},
+      {0x1A, 0xD7, LOOM_X86_DEPLOYMENT_PROFILE_ZNVER5},
+      {0x1A, 0xD8, LOOM_X86_DEPLOYMENT_PROFILE_ZNVER6},
+      {0x1A, 0xE7, LOOM_X86_DEPLOYMENT_PROFILE_ZNVER6},
+      {0x1A, 0xE8, LOOM_X86_DEPLOYMENT_PROFILE_NONE},
+      {0x19, 0x70, LOOM_X86_DEPLOYMENT_PROFILE_NONE},
   };
-  for (const auto& tune_case : cases) {
+  for (const auto& deployment_case : cases) {
     const iree_cpu_data_t cpu_data =
-        AmdCpuData(tune_case.family, tune_case.model);
-    SCOPED_TRACE(tune_case.model);
-    EXPECT_EQ(loom_x86_target_tune_select_cpu(&cpu_data),
-              tune_case.expected_tune);
+        AmdCpuData(deployment_case.family, deployment_case.model);
+    SCOPED_TRACE(deployment_case.model);
+    const loom_x86_deployment_profile_t* profile =
+        loom_x86_deployment_profile_select_cpu(&cpu_data);
+    EXPECT_EQ(profile != nullptr ? profile->ordinal
+                                 : LOOM_X86_DEPLOYMENT_PROFILE_NONE,
+              deployment_case.expected_profile);
   }
 
   iree_cpu_data_t non_amd = AmdCpuData(0x1A, 0x70);
   non_amd.fields[1] = UINT64_C(0x756e65476c65746e);
   non_amd.fields[2] =
       (non_amd.fields[2] & UINT64_C(0xFFFFFFFF00000000)) | UINT32_C(0x49656e69);
-  EXPECT_EQ(loom_x86_target_tune_select_cpu(&non_amd),
-            LOOM_X86_TARGET_TUNE_NONE);
+  EXPECT_EQ(loom_x86_deployment_profile_select_cpu(&non_amd), nullptr);
+}
+
+TEST_F(X86ProviderTest, ProjectsNamedProcessorProfilesOffline) {
+  struct ProfileCase {
+    iree_string_view_t name;
+    uint8_t model;
+  } cases[] = {
+      {IREE_SV("znver5"), 0x70},
+      {IREE_SV("znver6"), 0x50},
+  };
+  for (const auto& profile_case : cases) {
+    const loom_x86_deployment_profile_t* deployment =
+        loom_x86_deployment_profile_lookup(profile_case.name);
+    ASSERT_NE(deployment, nullptr);
+    const loom_x86_target_facts_t* offline =
+        Project(Profile(profile_case.name));
+    ASSERT_NE(offline, nullptr);
+
+    const iree_cpu_data_t cpu_data =
+        AmdCpuData(0x1A, profile_case.model, deployment->cpu_field0_bits);
+    loom_target_profile_selection_t runtime_selection = Select(&cpu_data);
+    ASSERT_NE(runtime_selection.profile, nullptr);
+    const loom_x86_target_facts_t* runtime = Project(runtime_selection.profile);
+    ASSERT_NE(runtime, nullptr);
+
+    EXPECT_EQ(offline->base.selector, runtime->base.selector);
+    EXPECT_EQ(offline->executable_target_kinds,
+              runtime->executable_target_kinds);
+    EXPECT_EQ(offline->cpu_data.fields[0], runtime->cpu_data.fields[0]);
+    EXPECT_EQ(offline->tune, runtime->tune);
+    EXPECT_EQ(offline->base.storage.config.schedule_model_stable_id,
+              runtime->base.storage.config.schedule_model_stable_id);
+    EXPECT_EQ(offline->base.storage.config.contract_set.stable_id,
+              runtime->base.storage.config.contract_set.stable_id);
+    EXPECT_EQ(offline->base.storage.config.contract_feature_bits,
+              runtime->base.storage.config.contract_feature_bits);
+    loom_target_profile_selection_release(&runtime_selection,
+                                          iree_allocator_system());
+  }
+}
+
+TEST_F(X86ProviderTest, ValidatesNamedProcessorGuaranteesOnLiveCpu) {
+  const loom_x86_deployment_profile_t* znver5 =
+      loom_x86_deployment_profile_lookup(IREE_SV("znver5"));
+  ASSERT_NE(znver5, nullptr);
+  iree_cpu_data_t cpu_data = {
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {znver5->cpu_field0_bits},
+  };
+  const loom_target_profile_t* profile = Profile(IREE_SV("znver5"));
+  loom_target_profile_selection_t accepted =
+      Select(&cpu_data, nullptr, profile);
+  EXPECT_EQ(accepted.profile, profile);
+  EXPECT_EQ(accepted.destroy, nullptr);
+
+  cpu_data.fields[0] &= ~IREE_CPU_DATA0_X86_64_AVX512BF16;
+  ExpectExplicitSelectionRejected(&cpu_data, profile);
+  ExpectExplicitSelectionRejected(&cpu_data, Profile(IREE_SV("znver6")));
 }
 
 TEST_F(X86ProviderTest, ProjectsDetectedTuneIntoTargetConfig) {
@@ -571,7 +770,7 @@ TEST_F(X86ProviderTest, MaterializesSemanticFeatureAssertions) {
   EXPECT_EQ(loom_x86_target_features(empty_target).word_count, 0u);
 }
 
-TEST_F(X86ProviderTest, DynamicProfileRequiresItsExactCpuFacts) {
+TEST_F(X86ProviderTest, DynamicProfileReselectionOwnsExactCpuFacts) {
   iree_cpu_data_t cpu_data = {
       .architecture = IREE_CPU_ARCHITECTURE_X86_64,
       .fields = {kAvx2CpuFeatures | IREE_CPU_DATA0_X86_64_AVXVNNIINT8, 17},
@@ -585,15 +784,21 @@ TEST_F(X86ProviderTest, DynamicProfileRequiresItsExactCpuFacts) {
   EXPECT_FALSE(loom_target_facts_satisfy_specialization_requirement(
       &effective_facts->base, &different_facts.base));
 
-  loom_target_profile_selection_t borrowed =
+  loom_target_profile_selection_t reselected =
       Select(&cpu_data, nullptr, owned.profile);
-  EXPECT_EQ(borrowed.profile, owned.profile);
-  EXPECT_EQ(borrowed.destroy, nullptr);
+  ASSERT_NE(reselected.profile, nullptr);
+  EXPECT_NE(reselected.profile, owned.profile);
+  EXPECT_NE(reselected.destroy, nullptr);
+  const loom_x86_target_facts_t* reselected_facts = Project(reselected.profile);
+  ASSERT_NE(reselected_facts, nullptr);
+  EXPECT_TRUE(loom_target_facts_are_equivalent(&effective_facts->base,
+                                               &reselected_facts->base));
 
   cpu_data.fields[1] = 18;
   loom_target_profile_selection_t mismatched =
       Select(&cpu_data, nullptr, owned.profile);
   EXPECT_EQ(mismatched.profile, nullptr);
+  loom_target_profile_selection_release(&reselected, iree_allocator_system());
   loom_target_profile_selection_release(&owned, iree_allocator_system());
 }
 
@@ -604,11 +809,11 @@ TEST_F(X86ProviderTest, RejectsNonExecutableAndForeignProfiles) {
   };
   for (iree_string_view_t selector :
        {IREE_SV("packed_dot"), IREE_SV("avx512_packed_dot")}) {
-    ExpectStaticSelection(&cpu_data, Profile(selector), nullptr);
+    ExpectExplicitSelectionRejected(&cpu_data, Profile(selector));
   }
 
   cpu_data.architecture = IREE_CPU_ARCHITECTURE_ARM_64;
-  ExpectStaticSelection(&cpu_data, Profile(IREE_SV("scalar")), nullptr);
+  ExpectExplicitSelectionRejected(&cpu_data, Profile(IREE_SV("scalar")));
 }
 
 }  // namespace

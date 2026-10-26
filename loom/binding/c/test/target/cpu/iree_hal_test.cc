@@ -261,17 +261,22 @@ TargetProfilePtr SelectCpuTarget(
   return TargetProfilePtr(selection.target_profile);
 }
 
-TEST(LoomcCpuIreeHalTargetTest, PreservesExplicitNativeProfileIdentity) {
+TEST(LoomcCpuIreeHalTargetTest, EnrichesExplicitNativeProfileFromDevice) {
+  const iree_cpu_data_t cpu_data = {
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {IREE_CPU_DATA0_X86_64_AVX | IREE_CPU_DATA0_X86_64_FMA |
+                 IREE_CPU_DATA0_X86_64_AVX2 | IREE_CPU_DATA0_X86_64_F16C},
+  };
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(CreateCpuDeviceSpec(/*include_cpu_facet=*/true,
                                      /*include_loader_target=*/true,
-                                     &device_spec));
+                                     &device_spec, &cpu_data));
   FakeHalDevice device = {};
   InitializeFakeDevice(device_spec.get(), &device);
   TargetEnvironmentPtr target_environment = CreateConfiguredTargetEnvironment();
   loomc_target_profile_t* selected_profile = nullptr;
   LOOMC_ASSERT_OK(loomc_target_profile_select(
-      target_environment.get(), loomc_make_cstring_view("x86:scalar"),
+      target_environment.get(), loomc_make_cstring_view("x86:avx2"),
       loomc_allocator_system(), &selected_profile));
   TargetProfilePtr requested_profile(selected_profile);
 
@@ -283,7 +288,74 @@ TEST(LoomcCpuIreeHalTargetTest, PreservesExplicitNativeProfileIdentity) {
 
   ASSERT_NE(result_ptr.get(), nullptr);
   EXPECT_TRUE(loomc_result_succeeded(result_ptr.get()));
-  EXPECT_EQ(profile.get(), requested_profile.get());
+  ASSERT_NE(profile.get(), nullptr);
+  EXPECT_NE(profile.get(), requested_profile.get());
+  requested_profile.reset();
+
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  loom_target_facts_t* base_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_profile_project_facts(
+      loomc_target_profile_get_interop_view(profile.get()), &arena,
+      &base_facts));
+  const loom_x86_target_facts_t* facts = loom_x86_target_facts_cast(base_facts);
+  ASSERT_NE(facts, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(facts->base.storage.bundle.name,
+                                     IREE_SV("x86-avx2")));
+  EXPECT_EQ(facts->executable_target_kinds,
+            LOOM_X86_TARGET_KIND_BIT(facts->base.selector));
+  EXPECT_TRUE(iree_all_bits_set(
+      facts->base.storage.config.contract_feature_bits, LOOM_X86_FEATURE_F16C));
+  EXPECT_EQ(facts->cpu_data.architecture, cpu_data.architecture);
+  for (iree_host_size_t i = 0; i < IREE_CPU_DATA_FIELD_COUNT; ++i) {
+    EXPECT_EQ(facts->cpu_data.fields[i], cpu_data.fields[i]);
+  }
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
+}
+
+TEST(LoomcCpuIreeHalTargetTest,
+     PreservesNamedProcessorProfileAcrossDeviceBinding) {
+  TargetEnvironmentPtr target_environment = CreateConfiguredTargetEnvironment();
+  loomc_target_profile_t* selected_profile = nullptr;
+  LOOMC_ASSERT_OK(loomc_target_profile_select(
+      target_environment.get(), loomc_make_cstring_view("x86:znver5"),
+      loomc_allocator_system(), &selected_profile));
+  TargetProfilePtr requested_profile(selected_profile);
+
+  iree_arena_block_pool_t block_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool, &arena);
+  loom_target_facts_t* base_facts = nullptr;
+  IREE_ASSERT_OK(loom_target_profile_project_facts(
+      loomc_target_profile_get_interop_view(requested_profile.get()), &arena,
+      &base_facts));
+  const loom_x86_target_facts_t* requested_facts =
+      loom_x86_target_facts_cast(base_facts);
+  ASSERT_NE(requested_facts, nullptr);
+
+  DeviceSpecPtr device_spec;
+  IREE_ASSERT_OK(CreateCpuDeviceSpec(/*include_cpu_facet=*/true,
+                                     /*include_loader_target=*/true,
+                                     &device_spec, &requested_facts->cpu_data));
+  FakeHalDevice device = {};
+  InitializeFakeDevice(device_spec.get(), &device);
+  loomc_result_t* result = nullptr;
+  TargetProfilePtr profile = SelectCpuTarget(
+      target_environment.get(), &device, &result,
+      /*out_executable_target=*/nullptr, requested_profile.get());
+  ResultPtr result_ptr(result);
+
+  ASSERT_NE(result_ptr.get(), nullptr);
+  EXPECT_TRUE(loomc_result_succeeded(result_ptr.get()));
+  ASSERT_NE(profile.get(), nullptr);
+  EXPECT_EQ(loomc_target_profile_get_interop_view(profile.get()),
+            loomc_target_profile_get_interop_view(requested_profile.get()));
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&block_pool);
 }
 
 TEST(LoomcCpuIreeHalTargetTest, SelectsNativeProfileAndLoaderTogether) {
@@ -349,6 +421,84 @@ TEST(LoomcCpuIreeHalTargetTest, SelectsStrongestProfileFromDeviceFacts) {
   ASSERT_NE(native_profile->target_bundle, nullptr);
   EXPECT_TRUE(iree_string_view_equal(native_profile->target_bundle->name,
                                      IREE_SV("x86-avx512")));
+}
+
+TEST(LoomcCpuIreeHalTargetTest, CompilesMixedAuthoredTargetsFromDeviceFacts) {
+  const iree_cpu_data_t cpu_data = {
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {IREE_CPU_DATA0_X86_64_AVX | IREE_CPU_DATA0_X86_64_FMA |
+                 IREE_CPU_DATA0_X86_64_AVX2 | IREE_CPU_DATA0_X86_64_F16C |
+                 IREE_CPU_DATA0_X86_64_AVX512F |
+                 IREE_CPU_DATA0_X86_64_AVX512VL |
+                 IREE_CPU_DATA0_X86_64_AVX512DQ |
+                 IREE_CPU_DATA0_X86_64_AVX512BW},
+  };
+  DeviceSpecPtr device_spec;
+  IREE_ASSERT_OK(CreateCpuDeviceSpec(/*include_cpu_facet=*/true,
+                                     /*include_loader_target=*/true,
+                                     &device_spec, &cpu_data));
+  FakeHalDevice device = {};
+  InitializeFakeDevice(device_spec.get(), &device);
+  TargetEnvironmentPtr target_environment = CreateConfiguredTargetEnvironment();
+  loomc_result_t* selection_result = nullptr;
+  TargetProfilePtr profile =
+      SelectCpuTarget(target_environment.get(), &device, &selection_result);
+  ResultPtr selection_result_ptr(selection_result);
+  ASSERT_TRUE(loomc_result_succeeded(selection_result_ptr.get()));
+  ASSERT_NE(profile.get(), nullptr);
+
+  ContextPtr context = CreateConfiguredContext(target_environment.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  CompilerPtr compiler = CreateCompiler(context.get());
+  ModulePtr module = ParseModule(context.get(), workspace.get(), R"(
+x86.target<avx2> @avx2 {features = [f16c]}
+x86.target<avx512> @avx512
+
+func.def public target(@avx2) @widen(%input: vector<8xf16>) -> (vector<8xf32>) {
+  %result = vector.extf %input : vector<8xf16> to vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+func.def public target(@avx512) @add(%lhs: vector<16xf32>, %rhs: vector<16xf32>) -> (vector<16xf32>) {
+  %result = vector.addf %lhs, %rhs : vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+)");
+  const loomc_string_view_t roots[] = {
+      loomc_make_cstring_view("widen"),
+      loomc_make_cstring_view("add"),
+  };
+  const loomc_emit_options_t emit_options = {
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(emit_options),
+      .artifact_format = loomc_make_cstring_view("x86-elf"),
+      .identifier = loomc_make_cstring_view("mixed.o"),
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+  };
+  const loomc_compile_artifact_options_t compile_options = {
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
+      .structure_size = sizeof(compile_options),
+      .roots = roots,
+      .root_count = IREE_ARRAYSIZE(roots),
+      .target_profile = profile.get(),
+      .emit_options = &emit_options,
+  };
+  loomc_result_t* compile_result = nullptr;
+  LOOMC_ASSERT_OK(loomc_compile_artifact(
+      compiler.get(), workspace.get(), nullptr, module.get(), &compile_options,
+      loomc_allocator_system(), &compile_result));
+  ResultPtr result(compile_result);
+  if (!loomc_result_succeeded(result.get())) {
+    for (loomc_host_size_t i = 0;
+         i < loomc_result_diagnostic_count(result.get()); ++i) {
+      ADD_FAILURE() << ToString(
+          loomc_result_diagnostic_at(result.get(), i)->message);
+    }
+  }
+  ASSERT_TRUE(loomc_result_succeeded(result.get()));
+  const loomc_artifact_t* object =
+      FindArtifact(result.get(), LOOMC_ARTIFACT_KIND_EXECUTABLE, "x86-elf");
+  ASSERT_NE(object, nullptr);
 }
 
 TEST(LoomcCpuIreeHalTargetTest, CompilesSerializedAvxVnniInt8ProfileToObject) {

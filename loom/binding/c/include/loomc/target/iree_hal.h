@@ -23,10 +23,12 @@
 /// headers stay free of IREE HAL types; embedders opt in by linking this leaf
 /// and one or more target-family provider leaves.
 ///
-/// A successful selection preserves the exact executable-target row used to
-/// derive or validate the Loom profile. Callers compile with `target_profile`
-/// and load the resulting executable with `executable_target`; they never need
-/// to repeat target selection after compilation.
+/// A successful selection preserves one exact HAL loader target and the Loom
+/// profile it supports. A device-derived profile may retain several compiler
+/// execution choices when the same loader can consume all of them; compilation
+/// resolves each root to one exact choice. Callers compile with
+/// `target_profile` and load the resulting executable with `executable_target`;
+/// they never need to repeat target selection after compilation.
 ///
 /// Routing is explicit and ordered. Callers pass the provider table selected by
 /// the linked binary. A provider that cannot handle the requested profile or
@@ -157,12 +159,13 @@ struct loomc_iree_hal_target_options_t {
   /// A heterogeneous logical device may require an explicit affinity.
   iree_hal_physical_device_affinity_t physical_device_affinity;
 
-  /// Optional caller-selected profile that the HAL target must load exactly.
+  /// Optional caller-selected compiler profile to bind to this HAL device.
   ///
   /// When NULL, the selected provider derives the best compatible profile from
-  /// immutable device facts. When non-NULL, the provider validates that an
-  /// exact compatible executable target exists and retains this profile in the
-  /// returned selection.
+  /// immutable device facts. When non-NULL, the provider validates the profile
+  /// against those facts and returns the compatible profile that compilation
+  /// must use. A provider may enrich a static profile with device facts while
+  /// preserving its exact compiler choice.
   loomc_target_profile_t* target_profile;
 
   /// Ordered borrowed array of provider descriptors.

@@ -99,6 +99,13 @@ class X86TargetTuneInfo:
     spelling: str
     stable_value: int
     schedule_model_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class X86DeploymentProfileInfo:
+    spelling: str
+    tune_spelling: str
+    cpu_features: tuple[str, ...]
     processor_matches: tuple[X86ProcessorMatchInfo, ...]
 
 
@@ -107,16 +114,63 @@ X86_TARGET_TUNE_INFOS: tuple[X86TargetTuneInfo, ...] = (
         spelling="znver5",
         stable_value=1,
         schedule_model_key="x86.znver5",
+    ),
+    X86TargetTuneInfo(
+        spelling="znver6",
+        stable_value=2,
+        schedule_model_key="x86.znver6",
+    ),
+)
+
+_X86_ZNVER5_CPU_FEATURES = (
+    "SSE3",
+    "SSSE3",
+    "SSE41",
+    "SSE42",
+    "SSE4A",
+    "BMI",
+    "BMI2",
+    "POPCNT",
+    "LZCNT",
+    "AVX",
+    "FMA",
+    "F16C",
+    "AVX2",
+    "AVXVNNI",
+    "AVX512F",
+    "AVX512CD",
+    "AVX512VL",
+    "AVX512DQ",
+    "AVX512BW",
+    "AVX512IFMA",
+    "AVX512VBMI",
+    "AVX512VPOPCNTDQ",
+    "AVX512VNNI",
+    "AVX512VBMI2",
+    "AVX512BITALG",
+    "AVX512BF16",
+)
+
+X86_DEPLOYMENT_PROFILE_INFOS: tuple[X86DeploymentProfileInfo, ...] = (
+    X86DeploymentProfileInfo(
+        spelling="znver5",
+        tune_spelling="znver5",
+        cpu_features=_X86_ZNVER5_CPU_FEATURES,
         processor_matches=(
             X86ProcessorMatchInfo("AuthenticAMD", 0x1A, 0x00, 0x4F),
             X86ProcessorMatchInfo("AuthenticAMD", 0x1A, 0x60, 0x77),
             X86ProcessorMatchInfo("AuthenticAMD", 0x1A, 0xD0, 0xD7),
         ),
     ),
-    X86TargetTuneInfo(
+    X86DeploymentProfileInfo(
         spelling="znver6",
-        stable_value=2,
-        schedule_model_key="x86.znver6",
+        tune_spelling="znver6",
+        cpu_features=(
+            *_X86_ZNVER5_CPU_FEATURES,
+            "AVXVNNIINT8",
+            "AVXNECONVERT",
+            "AVX512FP16",
+        ),
         processor_matches=(
             X86ProcessorMatchInfo("AuthenticAMD", 0x1A, 0x50, 0x5F),
             X86ProcessorMatchInfo("AuthenticAMD", 0x1A, 0x80, 0xCF),
@@ -421,6 +475,37 @@ X86_NATIVE_TARGET_SELECTOR_PROFILE_KEYS: tuple[str | None, ...] = (
 )
 
 
+def x86_deployment_profile_executable_target_profiles(
+    deployment_profile: X86DeploymentProfileInfo,
+    target_profiles: tuple[X86TargetProfileInfo, ...] = X86_TARGET_PROFILE_INFOS,
+) -> tuple[X86TargetProfileInfo, ...]:
+    target_profiles_by_key = {info.profile_key: info for info in target_profiles}
+    available_cpu_features = frozenset(deployment_profile.cpu_features)
+    return tuple(
+        profile
+        for profile_key in X86_NATIVE_TARGET_SELECTOR_PROFILE_KEYS
+        if profile_key is not None
+        for profile in (target_profiles_by_key[profile_key],)
+        if profile.automatic_priority > 0
+        and frozenset(profile.required_cpu_features) <= available_cpu_features
+    )
+
+
+def x86_deployment_profile_preferred_target_profile(
+    deployment_profile: X86DeploymentProfileInfo,
+    target_profiles: tuple[X86TargetProfileInfo, ...] = X86_TARGET_PROFILE_INFOS,
+) -> X86TargetProfileInfo:
+    executable_profiles = x86_deployment_profile_executable_target_profiles(
+        deployment_profile, target_profiles
+    )
+    if not executable_profiles:
+        raise ValueError(
+            f"x86 deployment profile '{deployment_profile.spelling}' "
+            "cannot execute any native target profile"
+        )
+    return max(executable_profiles, key=lambda info: info.automatic_priority)
+
+
 def _validate_unique(values: Iterable[str], description: str) -> None:
     seen: set[str] = set()
     for value in values:
@@ -429,10 +514,22 @@ def _validate_unique(values: Iterable[str], description: str) -> None:
         seen.add(value)
 
 
+def _validate_bstring_spelling(value: str, description: str) -> None:
+    try:
+        encoded_value = value.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"x86 {description} '{value}' must be ASCII") from exc
+    if not encoded_value or len(encoded_value) > 255:
+        raise ValueError(f"x86 {description} '{value}' must contain 1-255 ASCII bytes")
+
+
 def validate_x86_target_info_tables(
     descriptor_sets: tuple[X86DescriptorSetInfo, ...] = X86_DESCRIPTOR_SET_INFOS,
     target_profiles: tuple[X86TargetProfileInfo, ...] = X86_TARGET_PROFILE_INFOS,
     target_tunes: tuple[X86TargetTuneInfo, ...] = X86_TARGET_TUNE_INFOS,
+    deployment_profiles: tuple[X86DeploymentProfileInfo, ...] = (
+        X86_DEPLOYMENT_PROFILE_INFOS
+    ),
 ) -> None:
     _validate_unique(
         (info.generator_target for info in descriptor_sets),
@@ -441,6 +538,9 @@ def validate_x86_target_info_tables(
     _validate_unique((info.key for info in descriptor_sets), "descriptor set key")
     _validate_unique((info.profile_key for info in target_profiles), "profile key")
     _validate_unique((info.spelling for info in target_tunes), "target tune")
+    _validate_unique(
+        (info.spelling for info in deployment_profiles), "deployment profile"
+    )
     _validate_unique(
         (info.schedule_model_key for info in target_tunes),
         "schedule model key",
@@ -538,12 +638,44 @@ def validate_x86_target_info_tables(
                 "unsupported features"
             )
 
+    execution_selectors = {
+        profile_key.removeprefix("x86.")
+        for profile_key in X86_NATIVE_TARGET_SELECTOR_PROFILE_KEYS
+        if profile_key is not None
+    }
+    tune_spellings = {info.spelling for info in target_tunes}
+    for deployment_profile in deployment_profiles:
+        _validate_bstring_spelling(
+            deployment_profile.spelling, "deployment profile spelling"
+        )
+        if deployment_profile.spelling in execution_selectors:
+            raise ValueError(
+                f"x86 deployment profile '{deployment_profile.spelling}' "
+                "collides with an execution profile"
+            )
+        if deployment_profile.tune_spelling not in tune_spellings:
+            raise ValueError(
+                f"x86 deployment profile '{deployment_profile.spelling}' "
+                f"references unknown tune '{deployment_profile.tune_spelling}'"
+            )
+        _validate_unique(
+            deployment_profile.cpu_features,
+            f"{deployment_profile.spelling} CPU feature",
+        )
+        if not x86_deployment_profile_executable_target_profiles(
+            deployment_profile, target_profiles
+        ):
+            raise ValueError(
+                f"x86 deployment profile '{deployment_profile.spelling}' "
+                "cannot execute any native target profile"
+            )
+
     stable_values = tuple(info.stable_value for info in target_tunes)
     if stable_values != tuple(range(1, len(target_tunes) + 1)):
         raise ValueError("x86 target tune values must be dense and start at one")
     processor_matches: dict[tuple[str, int, int], str] = {}
-    for tune in target_tunes:
-        for match in tune.processor_matches:
+    for deployment_profile in deployment_profiles:
+        for match in deployment_profile.processor_matches:
             if len(match.vendor.encode("ascii")) != 12:
                 raise ValueError(
                     f"x86 processor vendor '{match.vendor}' must be 12 ASCII bytes"
@@ -559,14 +691,14 @@ def validate_x86_target_info_tables(
                 )
             for model in range(match.first_model, match.last_model + 1):
                 key = (match.vendor, match.family, model)
-                prior_tune = processor_matches.get(key)
-                if prior_tune is not None:
+                prior_profile = processor_matches.get(key)
+                if prior_profile is not None:
                     raise ValueError(
                         f"x86 processor {match.vendor} family 0x{match.family:x} "
-                        f"model 0x{model:x} matches both '{prior_tune}' and "
-                        f"'{tune.spelling}'"
+                        f"model 0x{model:x} matches both '{prior_profile}' and "
+                        f"'{deployment_profile.spelling}'"
                     )
-                processor_matches[key] = tune.spelling
+                processor_matches[key] = deployment_profile.spelling
 
 
 def sorted_descriptor_set_infos() -> tuple[X86DescriptorSetInfo, ...]:
@@ -636,6 +768,10 @@ def x86_descriptor_set_view_infos_by_storage_generator_target(
 
 def sorted_target_profile_infos() -> tuple[X86TargetProfileInfo, ...]:
     return tuple(sorted(X86_TARGET_PROFILE_INFOS, key=lambda info: info.profile_key))
+
+
+def sorted_deployment_profile_infos() -> tuple[X86DeploymentProfileInfo, ...]:
+    return tuple(sorted(X86_DEPLOYMENT_PROFILE_INFOS, key=lambda info: info.spelling))
 
 
 def x86_target_profile_info_by_key(profile_key: str) -> X86TargetProfileInfo:

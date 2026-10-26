@@ -34,6 +34,7 @@ loom_cc_library(
     iree::base::cpu_data
     loom::target::arch::x86::feature_bits
     loom::target::types
+    loom::util::bstring
   PUBLIC
 )
 endif()
@@ -54,6 +55,7 @@ loom_cc_library(
     iree::schemas::cpu_data
     loom::target::arch::x86::feature_bits
     loom::target::types
+    loom::util::bstring
   PUBLIC
 )
 endif()

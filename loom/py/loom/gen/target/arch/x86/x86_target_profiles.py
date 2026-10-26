@@ -29,10 +29,15 @@ from loom.gen.support.files import write_text_file as _write_text  # noqa: E402
 from loom.gen.support.generated_file import line_comment_header  # noqa: E402
 from loom.target.arch.x86.feature_catalog import X86_FEATURE_INFOS  # noqa: E402
 from loom.target.arch.x86.target_info import (  # noqa: E402
+    X86_DEPLOYMENT_PROFILE_INFOS,
     X86_NATIVE_TARGET_SELECTOR_PROFILE_KEYS,
     X86_TARGET_TUNE_INFOS,
+    X86DeploymentProfileInfo,
     X86TargetProfileInfo,
     X86TargetTuneInfo,
+    sorted_deployment_profile_infos,
+    x86_deployment_profile_executable_target_profiles,
+    x86_deployment_profile_preferred_target_profile,
     x86_target_profile_info_by_key,
 )
 from loom.target.low_descriptors import descriptor_stable_id, schedule_model_stable_id  # noqa: E402
@@ -97,6 +102,7 @@ def _native_target_profiles() -> tuple[X86TargetProfileInfo, ...]:
 def _emit_native_profiles_inl(
     profiles: tuple[X86TargetProfileInfo, ...],
     tunes: tuple[X86TargetTuneInfo, ...] = X86_TARGET_TUNE_INFOS,
+    deployment_profiles: tuple[X86DeploymentProfileInfo, ...] = X86_DEPLOYMENT_PROFILE_INFOS,
 ) -> str:
     lines = [
         *line_comment_header("//", generator="loom.gen.target.arch.x86.x86_target_profiles"),
@@ -111,13 +117,34 @@ def _emit_native_profiles_inl(
         lines.append(f"LOOM_X86_CPU_FEATURE_MAPPING({cpu_feature_position})")
     lines.extend(["#endif", "", "#ifdef LOOM_X86_TARGET_TUNE"])
     lines.extend(f"LOOM_X86_TARGET_TUNE({_enum_suffix(tune.spelling)}, {tune.stable_value}, UINT64_C(0x{schedule_model_stable_id(tune.schedule_model_key):016x}))" for tune in tunes)
-    lines.extend(["#endif", "", "#ifdef LOOM_X86_PROCESSOR_TUNE_MATCH"])
-    for tune in tunes:
-        for match in tune.processor_matches:
+    profiles_by_key = {profile.profile_key: profile for profile in profiles}
+    target_kinds_by_key = {profile.profile_key: target_kind for target_kind, profile in enumerate(profiles, start=1)}
+    lines.extend(["#endif", "", "#ifdef LOOM_X86_DEPLOYMENT_PROFILE"])
+    for ordinal, deployment_profile in enumerate(sorted(deployment_profiles, key=lambda info: info.spelling), start=1):
+        executable_profiles = x86_deployment_profile_executable_target_profiles(deployment_profile, profiles)
+        executable_target_kinds = sum(1 << target_kinds_by_key[profile.profile_key] for profile in executable_profiles)
+        preferred_profile = x86_deployment_profile_preferred_target_profile(deployment_profile, profiles)
+        preferred_profile = profiles_by_key[preferred_profile.profile_key]
+        preferred_target_kind = target_kinds_by_key[preferred_profile.profile_key]
+        lines.append(
+            "LOOM_X86_DEPLOYMENT_PROFILE("
+            f"{_enum_suffix(deployment_profile.spelling)}, "
+            f"{ordinal}, "
+            f"{len(deployment_profile.spelling.encode('ascii'))}, "
+            f"{_c_arg(deployment_profile.spelling)}, "
+            f"{_cpu_feature_bits_expr(deployment_profile.cpu_features)}, "
+            f"UINT32_C(0x{executable_target_kinds:08x}), "
+            f"{_symbol_suffix(preferred_profile.profile_key)}, "
+            f"{preferred_target_kind}, "
+            f"{_enum_suffix(deployment_profile.tune_spelling)})"
+        )
+    lines.extend(["#endif", "", "#ifdef LOOM_X86_PROCESSOR_DEPLOYMENT_MATCH"])
+    for deployment_profile in deployment_profiles:
+        for match in deployment_profile.processor_matches:
             vendor_low, vendor_high = _processor_vendor_words(match.vendor)
             lines.append(
-                "LOOM_X86_PROCESSOR_TUNE_MATCH("
-                f"{_enum_suffix(tune.spelling)}, "
+                "LOOM_X86_PROCESSOR_DEPLOYMENT_MATCH("
+                f"{_enum_suffix(deployment_profile.spelling)}, "
                 f"UINT64_C(0x{vendor_low:016x}), "
                 f"UINT32_C(0x{vendor_high:08x}), "
                 f"UINT16_C(0x{match.family:03x}), "
@@ -174,7 +201,10 @@ def _parse_arguments(argv: Sequence[str] | None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_arguments(argv)
-    native_contents = _emit_native_profiles_inl(_native_target_profiles())
+    native_contents = _emit_native_profiles_inl(
+        _native_target_profiles(),
+        deployment_profiles=sorted_deployment_profile_infos(),
+    )
 
     if args.check:
         return 0

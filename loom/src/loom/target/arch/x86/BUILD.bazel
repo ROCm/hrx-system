@@ -50,6 +50,7 @@ loom_cc_library(
     deps = [
         ":feature_bits",
         "//loom/src/loom/target:facts",
+        "//loom/src/loom/target:facts_builder",
         "//loom/src/loom/target/arch/x86/records:target_records",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:cpu_data",

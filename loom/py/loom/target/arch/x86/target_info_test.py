@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 
 from loom.target.arch.x86.feature_bits import (
     FEATURE_AVX10_2,
@@ -21,6 +22,7 @@ from loom.target.arch.x86.feature_bits import (
     FEATURE_AVX_VNNI_INT16,
 )
 from loom.target.arch.x86.target_info import (
+    X86_DEPLOYMENT_PROFILE_INFOS,
     X86_DESCRIPTOR_SET_INFOS,
     X86_ISA_TIER_SCALAR,
     X86_NATIVE_TARGET_SELECTOR_PROFILE_KEYS,
@@ -31,11 +33,10 @@ from loom.target.arch.x86.target_info import (
     X86_REG_CLASS_YMM,
     X86_REG_CLASS_ZMM,
     X86_TARGET_PROFILE_INFOS,
-    X86_TARGET_TUNE_INFOS,
+    X86DeploymentProfileInfo,
     X86DescriptorSetInfo,
     X86ProcessorMatchInfo,
     X86TargetProfileInfo,
-    X86TargetTuneInfo,
     sorted_descriptor_set_infos,
     sorted_target_profile_infos,
     validate_x86_target_info_tables,
@@ -196,16 +197,31 @@ def test_target_profiles_are_profile_key_sorted() -> None:
     assert profile_keys == sorted(profile_keys)
 
 
-def test_target_tune_validation_rejects_overlapping_processor_ranges() -> None:
-    overlapping_tune = X86TargetTuneInfo(
+def test_deployment_validation_rejects_overlapping_processor_ranges() -> None:
+    overlapping_profile = X86DeploymentProfileInfo(
         spelling="overlap",
-        stable_value=3,
-        schedule_model_key="x86.overlap",
+        tune_spelling="znver5",
+        cpu_features=X86_DEPLOYMENT_PROFILE_INFOS[0].cpu_features,
         processor_matches=(X86ProcessorMatchInfo("AuthenticAMD", 0x1A, 0x70, 0x70),),
     )
     with _raises_value_error("matches both 'znver5' and 'overlap'"):
         validate_x86_target_info_tables(
-            target_tunes=(*X86_TARGET_TUNE_INFOS, overlapping_tune)
+            deployment_profiles=(
+                *X86_DEPLOYMENT_PROFILE_INFOS,
+                overlapping_profile,
+            )
+        )
+
+
+def test_deployment_validation_rejects_unrepresentable_spellings() -> None:
+    profile = X86_DEPLOYMENT_PROFILE_INFOS[0]
+    with _raises_value_error("must be ASCII"):
+        validate_x86_target_info_tables(
+            deployment_profiles=(replace(profile, spelling="zén"),)
+        )
+    with _raises_value_error("must contain 1-255 ASCII bytes"):
+        validate_x86_target_info_tables(
+            deployment_profiles=(replace(profile, spelling="z" * 256),)
         )
 
 

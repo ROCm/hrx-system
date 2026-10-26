@@ -141,8 +141,8 @@ end.
 
 ## Emit native callable functions
 
-An installation with x86 enabled can compile ordinary functions using the
-scalar profile's SysV ABI. Save this as `mix.loom`:
+An installation with x86 enabled can compile ordinary functions using the SysV
+ABI. Save this as `mix.loom`:
 
 ```loom
 func.def public @mix(%input: i64, %delta: i64) -> (i64) {
@@ -159,6 +159,16 @@ program. The explicit shared format produces a self-contained loadable image:
 loom-compile mix.loom --target=x86:scalar --output=mix.o
 loom-compile mix.loom --target=x86:scalar \
   --format=x86-elf-shared --output=mix.so
+```
+
+Exact execution profiles such as `x86:scalar`, `x86:avx2`, and `x86:avx512`
+set an ISA baseline directly. Named processor profiles carry the processor's
+complete modeled instruction guarantees and scheduling model while selecting
+the strongest compatible execution profile. For example, an object intended
+for Zen 5 systems uses:
+
+```shell
+loom-compile mix.loom --target=x86:znver5 --output=mix.o
 ```
 
 `x86-elf` emits ELF64 `ET_REL`; `x86-elf-shared` emits ELF64 `ET_DYN` directly,

@@ -18,6 +18,18 @@
 extern "C" {
 #endif
 
+// Set of executable x86 target kinds. Target kind zero is reserved, so each
+// generated nonzero kind maps directly to one bit.
+typedef uint32_t loom_x86_target_kind_set_t;
+
+#define LOOM_X86_TARGET_KIND_BIT(target_kind) \
+  ((loom_x86_target_kind_set_t)(UINT32_C(1) << (target_kind)))
+
+static inline bool loom_x86_target_kind_set_contains(
+    loom_x86_target_kind_set_t set, uint8_t target_kind) {
+  return iree_any_bit_set(set, LOOM_X86_TARGET_KIND_BIT(target_kind));
+}
+
 typedef struct loom_x86_target_facts_t {
   // Target-neutral facts shared by all target families.
   loom_target_facts_t base;
@@ -36,6 +48,10 @@ typedef struct loom_x86_target_facts_t {
 
   // Whether |tune| is an authored specialization requirement.
   bool tune_is_explicit;
+
+  // Executable target rows supported by the retained CPU facts. The set always
+  // contains |base.selector| and is a singleton once execution is selected.
+  loom_x86_target_kind_set_t executable_target_kinds;
 } loom_x86_target_facts_t;
 
 // Static fact type used by x86 target projection and structured profiles.

@@ -143,20 +143,16 @@ static loomc_status_t loomc_cpu_iree_hal_select_target(
   }
 
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
-    if (options->target_profile != NULL) {
-      loomc_target_profile_retain(options->target_profile);
-      target_profile = options->target_profile;
-    } else {
-      const loomc_string_view_t identifier =
-          loomc_string_view_is_empty(options->identifier)
-              ? loomc_string_view_from_iree(
-                    selected_profile.profile->target_bundle->name)
-              : options->identifier;
-      status = loomc_target_profile_create(
-          target_environment, identifier, selected_profile.profile,
-          selected_profile.destroy, allocator, &target_profile);
-      selected_profile = (loom_target_profile_selection_t){0};
-    }
+    const loomc_string_view_t identifier =
+        !loomc_string_view_is_empty(options->identifier) ? options->identifier
+        : options->target_profile != NULL
+            ? loomc_target_profile_identifier(options->target_profile)
+            : loomc_string_view_from_iree(
+                  selected_profile.profile->target_bundle->name);
+    status = loomc_target_profile_create(
+        target_environment, identifier, selected_profile.profile,
+        selected_profile.destroy, allocator, &target_profile);
+    selected_profile = (loom_target_profile_selection_t){0};
   }
 
   if (loomc_status_is_ok(status)) {
