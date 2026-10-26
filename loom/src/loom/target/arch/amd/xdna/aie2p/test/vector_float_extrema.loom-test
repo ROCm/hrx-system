@@ -250,6 +250,42 @@ func.def @ieee_clamp_f32(%value: vector<4xf32>, %lower: vector<4xf32>, %upper: v
 
 // ====
 
+// Relaxed extrema discard NaN classification and signed-zero normalization.
+// The F64 clamp is the highest-pressure form because each 512-bit packet
+// consumes the complete eight-lane predicate carrier.
+func.def @relaxed_clamp_f64(%value: vector<8xf64>, %lower: vector<8xf64>, %upper: vector<8xf64>) -> (vector<8xf64>) {
+  %result = vector.clampf<ieee, nnan|nsz> %value, %lower, %upper : vector<8xf64>
+  func.return %result : vector<8xf64>
+}
+
+// ----
+func.def @relaxed_clamp_f64(%value: vector<8xf64>, %lower: vector<8xf64>, %upper: vector<8xf64>) -> (vector<8xf64>) {
+  %5 = vector.constant 0 : vector<8xi64>
+  %6 = vector.constant -9223372036854775808 : vector<8xi64>
+  %7 = vector.constant -1 : vector<8xi64>
+  %8 = vector.bitcast %value : vector<8xf64> to vector<8xi64>
+  %9 = vector.cmpi slt, %8, %5 : vector<8xi64> -> vector<8xi1>
+  %10 = vector.select %9, %7, %6 : vector<8xi64>
+  %11 = vector.xori %8, %10 : vector<8xi64>
+  %12 = vector.bitcast %lower : vector<8xf64> to vector<8xi64>
+  %13 = vector.cmpi slt, %12, %5 : vector<8xi64> -> vector<8xi1>
+  %14 = vector.select %13, %7, %6 : vector<8xi64>
+  %15 = vector.xori %12, %14 : vector<8xi64>
+  %16 = vector.bitcast %upper : vector<8xf64> to vector<8xi64>
+  %17 = vector.cmpi slt, %16, %5 : vector<8xi64> -> vector<8xi1>
+  %18 = vector.select %17, %7, %6 : vector<8xi64>
+  %19 = vector.xori %16, %18 : vector<8xi64>
+  %20 = vector.cmpi ugt, %11, %15 : vector<8xi64> -> vector<8xi1>
+  %21 = vector.select %20, %8, %12 : vector<8xi64>
+  %22 = vector.select %20, %11, %15 : vector<8xi64>
+  %23 = vector.cmpi ult, %22, %19 : vector<8xi64> -> vector<8xi1>
+  %24 = vector.select %23, %21, %16 : vector<8xi64>
+  %result = vector.bitcast %24 : vector<8xi64> to vector<8xf64>
+  func.return %result : vector<8xf64>
+}
+
+// ====
+
 // The shaped F64 case crosses one 512-bit integer and predicate packet.
 func.def @wide_shaped_maximum_f64(%lhs: vector<3x3xf64>, %rhs: vector<3x3xf64>) -> (vector<3x3xf64>) {
   %result = vector.maximumf %lhs, %rhs : vector<3x3xf64>

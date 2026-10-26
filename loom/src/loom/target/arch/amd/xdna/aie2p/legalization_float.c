@@ -149,6 +149,14 @@ typedef struct loom_aie2p_float_ordering_value_t {
 // reference scalarizer before component packetization gets another turn.
 #define LOOM_AIE2P_FLOAT_ORDERING_PACKET_BIT_COUNT 512u
 
+static bool loom_aie2p_float_extremum_is_relaxed(const loom_op_t* op) {
+  // Infinities retain their ordinary numeric order. Only NaNs and signed zero
+  // require the strict semantic machinery omitted by this path.
+  const uint8_t required_flags =
+      LOOM_VECTOR_FASTMATHFLAGS_NNAN | LOOM_VECTOR_FASTMATHFLAGS_NSZ;
+  return (op->instance_flags & required_flags) == required_flags;
+}
+
 static loom_type_t loom_aie2p_vector_type_with_element(
     loom_type_t source_type, loom_scalar_type_t element_type) {
   source_type.header = loom_type_make_header(
@@ -237,24 +245,25 @@ static iree_status_t loom_aie2p_float_ordering_build_compare(
 
 static iree_status_t loom_aie2p_float_ordering_build_value(
     loom_aie2p_float_ordering_context_t* ordering, loom_value_id_t value,
-    loom_value_id_t magnitude_mask,
     loom_aie2p_float_ordering_value_t* out_value) {
   loom_op_t* bitcast_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
       ordering->builder, value, ordering->float_type, ordering->integer_type,
       ordering->location, &bitcast_op));
-  const loom_value_id_t bits = loom_vector_bitcast_result(bitcast_op);
+  *out_value = (loom_aie2p_float_ordering_value_t){
+      .bits = loom_vector_bitcast_result(bitcast_op),
+  };
+  return iree_ok_status();
+}
 
+static iree_status_t loom_aie2p_float_ordering_build_magnitude(
+    loom_aie2p_float_ordering_context_t* ordering,
+    loom_value_id_t magnitude_mask, loom_aie2p_float_ordering_value_t* value) {
   loom_op_t* magnitude_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_andi_build(
-      ordering->builder, bits, magnitude_mask, ordering->integer_type,
+      ordering->builder, value->bits, magnitude_mask, ordering->integer_type,
       ordering->location, &magnitude_op));
-  const loom_value_id_t magnitude = loom_vector_andi_result(magnitude_op);
-
-  *out_value = (loom_aie2p_float_ordering_value_t){
-      .bits = bits,
-      .magnitude = magnitude,
-  };
+  value->magnitude = loom_vector_andi_result(magnitude_op);
   return iree_ok_status();
 }
 
@@ -278,7 +287,7 @@ static iree_status_t loom_aie2p_float_ordering_build_key(
     loom_aie2p_float_zero_ordering_t zero_ordering,
     loom_aie2p_float_ordering_value_t* value) {
   // AIE2P has no packed i64 add/sub contract. Form the equivalent order key
-  // with bitwise operations; the caller normalizes signed zero afterward.
+  // with bitwise operations; strict callers normalize signed zero afterward.
   if (ordering->encoding.integer_type == LOOM_SCALAR_TYPE_I64) {
     loom_value_id_t is_negative = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_compare(
@@ -374,7 +383,7 @@ static iree_status_t loom_aie2p_float_ordering_select_extremum(
     loom_aie2p_float_ordering_context_t* ordering,
     loom_aie2p_float_extremum_kind_t kind,
     const loom_aie2p_float_ordering_value_t* lhs,
-    const loom_aie2p_float_ordering_value_t* rhs,
+    const loom_aie2p_float_ordering_value_t* rhs, bool is_relaxed,
     loom_aie2p_float_extremum_result_t result_kind,
     loom_aie2p_float_ordering_value_t* out_value) {
   loom_vector_cmpi_predicate_t comparison_predicate =
@@ -400,6 +409,10 @@ static iree_status_t loom_aie2p_float_ordering_select_extremum(
   loom_aie2p_float_ordering_value_t ordered_value = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_select_value(
       ordering, ordered_predicate, lhs, rhs, result_kind, &ordered_value));
+  if (is_relaxed) {
+    *out_value = ordered_value;
+    return iree_ok_status();
+  }
 
   const loom_aie2p_float_ordering_value_t* rhs_nan_value = NULL;
   const loom_aie2p_float_ordering_value_t* lhs_nan_value = NULL;
@@ -486,11 +499,15 @@ static iree_status_t loom_aie2p_float_compare_build_packet(
   IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_constant(
       &ordering, (int64_t)encoding.magnitude_mask, &magnitude_mask));
   loom_aie2p_float_ordering_value_t lhs_value = {0};
-  IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_value(
-      &ordering, lhs, magnitude_mask, &lhs_value));
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_float_ordering_build_value(&ordering, lhs, &lhs_value));
+  IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_magnitude(
+      &ordering, magnitude_mask, &lhs_value));
   loom_aie2p_float_ordering_value_t rhs_value = {0};
-  IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_value(
-      &ordering, rhs, magnitude_mask, &rhs_value));
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_float_ordering_build_value(&ordering, rhs, &rhs_value));
+  IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_magnitude(
+      &ordering, magnitude_mask, &rhs_value));
   loom_value_id_t special_magnitude = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_constant(
       &ordering, (int64_t)encoding.special_magnitude, &special_magnitude));
@@ -574,9 +591,10 @@ static iree_status_t loom_aie2p_float_compare_build_packet(
 
 static iree_status_t loom_aie2p_float_extrema_build_packet(
     loom_builder_t* builder, loom_location_id_t location,
-    loom_numeric_float_encoding_t encoding, loom_op_kind_t op_kind,
-    loom_vector_clampf_mode_t clamp_mode, const loom_value_id_t* operands,
-    loom_type_t float_type, loom_value_id_t* out_result) {
+    loom_numeric_float_encoding_t encoding, bool is_relaxed,
+    loom_op_kind_t op_kind, loom_vector_clampf_mode_t clamp_mode,
+    const loom_value_id_t* operands, loom_type_t float_type,
+    loom_value_id_t* out_result) {
   loom_aie2p_float_ordering_context_t ordering = {0};
   loom_aie2p_float_ordering_initialize(builder, float_type, encoding, location,
                                        &ordering);
@@ -584,17 +602,19 @@ static iree_status_t loom_aie2p_float_extrema_build_packet(
   IREE_RETURN_IF_ERROR(
       loom_aie2p_float_ordering_build_constant(&ordering, 0, &zero));
   loom_value_id_t magnitude_mask = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_constant(
-      &ordering, (int64_t)encoding.magnitude_mask, &magnitude_mask));
   loom_value_id_t special_magnitude = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_constant(
-      &ordering, (int64_t)encoding.special_magnitude, &special_magnitude));
   loom_value_id_t quiet_nan_bit = LOOM_VALUE_ID_INVALID;
-  if (encoding.special_layout == LOOM_NUMERIC_FLOAT_SPECIAL_LAYOUT_IEEE &&
-      (op_kind != LOOM_OP_VECTOR_CLAMPF ||
-       clamp_mode != LOOM_VECTOR_CLAMPF_MODE_ORDERED)) {
+  if (!is_relaxed) {
     IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_constant(
-        &ordering, (int64_t)encoding.quiet_nan_bit, &quiet_nan_bit));
+        &ordering, (int64_t)encoding.magnitude_mask, &magnitude_mask));
+    IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_constant(
+        &ordering, (int64_t)encoding.special_magnitude, &special_magnitude));
+    if (encoding.special_layout == LOOM_NUMERIC_FLOAT_SPECIAL_LAYOUT_IEEE &&
+        (op_kind != LOOM_OP_VECTOR_CLAMPF ||
+         clamp_mode != LOOM_VECTOR_CLAMPF_MODE_ORDERED)) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_constant(
+          &ordering, (int64_t)encoding.quiet_nan_bit, &quiet_nan_bit));
+    }
   }
   const uint64_t sign_bit = encoding.magnitude_mask + 1;
   const int64_t signed_sign_bit = encoding.integer_type == LOOM_SCALAR_TYPE_I64
@@ -611,9 +631,13 @@ static iree_status_t loom_aie2p_float_extrema_build_packet(
   loom_aie2p_float_ordering_value_t values[3] = {0};
   for (uint32_t i = 0; i < operand_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_value(
-        &ordering, operands[i], magnitude_mask, &values[i]));
-    IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_nan(
-        &ordering, special_magnitude, &values[i]));
+        &ordering, operands[i], &values[i]));
+    if (!is_relaxed) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_magnitude(
+          &ordering, magnitude_mask, &values[i]));
+      IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_nan(
+          &ordering, special_magnitude, &values[i]));
+    }
     IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_key(
         &ordering, zero, sign_mask, all_ones,
         LOOM_AIE2P_FLOAT_ZERO_ORDERING_DISTINCT, &values[i]));
@@ -629,9 +653,11 @@ static iree_status_t loom_aie2p_float_extrema_build_packet(
       case LOOM_VECTOR_CLAMPF_MODE_ORDERED:
         // Strict comparisons consider signed zeros equal and retain the value
         // operand on a tie.
-        for (uint32_t i = 0; i < operand_count; ++i) {
-          IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_normalize_zero(
-              &ordering, zero, sign_mask, &values[i]));
+        if (!is_relaxed) {
+          for (uint32_t i = 0; i < operand_count; ++i) {
+            IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_normalize_zero(
+                &ordering, zero, sign_mask, &values[i]));
+          }
         }
         break;
       case LOOM_VECTOR_CLAMPF_MODE_NUMBER:
@@ -648,10 +674,10 @@ static iree_status_t loom_aie2p_float_extrema_build_packet(
     }
     loom_aie2p_float_ordering_value_t lower_bounded = {0};
     IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_select_extremum(
-        &ordering, lower_kind, &values[0], &values[1],
+        &ordering, lower_kind, &values[0], &values[1], is_relaxed,
         LOOM_AIE2P_FLOAT_EXTREMUM_RESULT_BITS_AND_KEY, &lower_bounded));
     IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_select_extremum(
-        &ordering, upper_kind, &lower_bounded, &values[2],
+        &ordering, upper_kind, &lower_bounded, &values[2], is_relaxed,
         LOOM_AIE2P_FLOAT_EXTREMUM_RESULT_BITS, &result));
   } else {
     loom_aie2p_float_extremum_kind_t kind = LOOM_AIE2P_FLOAT_EXTREMUM_MINIMUM;
@@ -672,12 +698,12 @@ static iree_status_t loom_aie2p_float_extrema_build_packet(
         IREE_BUILTIN_UNREACHABLE();
     }
     IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_select_extremum(
-        &ordering, kind, &values[0], &values[1],
+        &ordering, kind, &values[0], &values[1], is_relaxed,
         LOOM_AIE2P_FLOAT_EXTREMUM_RESULT_BITS, &result));
   }
 
-  if (op_kind != LOOM_OP_VECTOR_CLAMPF ||
-      clamp_mode != LOOM_VECTOR_CLAMPF_MODE_ORDERED) {
+  if (!is_relaxed && (op_kind != LOOM_OP_VECTOR_CLAMPF ||
+                      clamp_mode != LOOM_VECTOR_CLAMPF_MODE_ORDERED)) {
     IREE_RETURN_IF_ERROR(
         loom_aie2p_float_ordering_quiet_nan(&ordering, quiet_nan_bit, &result));
   }
@@ -845,6 +871,7 @@ iree_status_t loom_aie2p_legalize_vector_float_extrema(
   const loom_vector_clampf_mode_t clamp_mode =
       loom_vector_clampf_isa(op) ? loom_vector_clampf_mode(op)
                                  : LOOM_VECTOR_CLAMPF_MODE_COUNT_;
+  const bool is_relaxed = loom_aie2p_float_extremum_is_relaxed(op);
   for (uint32_t packet_index = 0; packet_index < packet_count; ++packet_index) {
     const uint32_t lane_offset = packet_index * packet_lane_count;
     const uint32_t current_lane_count =
@@ -861,8 +888,8 @@ iree_status_t loom_aie2p_legalize_vector_float_extrema(
     const loom_type_t packet_type =
         loom_aie2p_linear_vector_type(float_type, current_lane_count);
     IREE_RETURN_IF_ERROR(loom_aie2p_float_extrema_build_packet(
-        &rewriter->builder, op->location, encoding, op->kind, clamp_mode,
-        packet_operands, packet_type, &packets[packet_index]));
+        &rewriter->builder, op->location, encoding, is_relaxed, op->kind,
+        clamp_mode, packet_operands, packet_type, &packets[packet_index]));
   }
 
   const loom_type_t result_type =
