@@ -40,6 +40,9 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
         hrx_virtual_buffer_query_capabilities(scope, &capabilities)));
     ASSERT_GT(capabilities.max_byte_length, 0u);
     EXPECT_EQ(0xFu, capabilities.operations);
+    EXPECT_NE(capabilities.supported_flags &
+                  HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
+              0u);
     hrx_memory_mapping_requirements_t requirements;
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_allocator_query_mapping_requirements(
         hrx_device_allocator(device_), HRX_MEMORY_TYPE_HOST_LOCAL,
@@ -52,6 +55,7 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
         .byte_length = 2 * unit,
         .min_alignment = 2 * unit,
         .mapping_granularity = unit,
+        .flags = HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
     };
     std::vector<hrx_buffer_t> reservations(count);
     for (auto& reservation : reservations) {

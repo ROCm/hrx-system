@@ -891,6 +891,14 @@ typedef enum hrx_memory_mapping_operation_t {
   HRX_MEMORY_MAPPING_OPERATION_PROTECT = 3,
 } hrx_memory_mapping_operation_t;
 
+// Explicit address constraints; zero leaves native address equality
+// unconstrained.
+typedef uint32_t hrx_virtual_buffer_flags_t;
+#define HRX_VIRTUAL_BUFFER_FLAG_NONE 0u
+// Every admitted host and program binding uses the same numeric base address.
+// Host access still requires an explicit host_access in the reservation scope.
+#define HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS (1u << 0)
+
 typedef struct hrx_virtual_buffer_capabilities_t {
   // Largest address interval in bytes; zero means the scope is unsupported.
   size_t max_byte_length;
@@ -902,6 +910,8 @@ typedef struct hrx_virtual_buffer_capabilities_t {
   size_t max_alignment;
   // Supported operations, with bit N corresponding to mapping operation N.
   uint32_t operations;
+  // Address constraints supported across the complete simultaneous scope.
+  hrx_virtual_buffer_flags_t supported_flags;
 } hrx_virtual_buffer_capabilities_t;
 
 // Cold query: prepares the allocation source metadata without acquiring
@@ -919,6 +929,8 @@ typedef struct hrx_virtual_buffer_options_t {
   size_t min_alignment;
   // Minimum power-of-two mapping unit; zero selects the native minimum.
   size_t mapping_granularity;
+  // Required address constraints; zero preserves independent native policy.
+  hrx_virtual_buffer_flags_t flags;
 } hrx_virtual_buffer_options_t;
 
 // Reserves addresses without physical payload and returns one owned ordinary

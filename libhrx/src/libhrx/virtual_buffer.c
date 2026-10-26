@@ -3,6 +3,9 @@
 
 #include "hrx_internal.h"
 
+IREE_STATIC_ASSERT_ENUM_EQ(HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
+                           IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
+                           "virtual buffer address constraints must match HAL");
 IREE_STATIC_ASSERT_ENUM_EQ(HRX_MEMORY_SITE_HOST, IREE_HAL_MEMORY_SITE_HOST,
                            "memory sites must match HAL");
 IREE_STATIC_ASSERT_ENUM_EQ(HRX_MEMORY_SITE_QUEUE, IREE_HAL_MEMORY_SITE_QUEUE,
@@ -198,6 +201,7 @@ hrx_status_t hrx_virtual_buffer_query_capabilities(
         .max_alignment =
             (size_t)iree_min(capabilities.max_alignment, (SIZE_MAX >> 1) + 1),
         .operations = capabilities.operations,
+        .supported_flags = capabilities.supported_flags,
     };
   }
   hrx_virtual_buffer_release_sources(scope.device_count, source_pools);
@@ -229,6 +233,7 @@ hrx_status_t hrx_virtual_buffer_create(
       .byte_length = options->byte_length,
       .min_alignment = options->min_alignment,
       .mapping_granularity = options->mapping_granularity,
+      .flags = options->flags,
   };
   if (iree_status_is_ok(status)) {
     status = iree_hal_virtual_buffer_create(

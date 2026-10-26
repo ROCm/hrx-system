@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <cstring>
 
 #include "hrx_test_fixture.hpp"
 
@@ -14,6 +15,11 @@ class VirtualMemoryResources {
   explicit VirtualMemoryResources(hrx_device_t device) : device(device) {}
 
   ~VirtualMemoryResources() {
+    if (host_mapped) {
+      hrx_status_t status = hrx().buffer_unmap(reservation);
+      CHECK(hrx_status_is_ok(status));
+      hrx().status_ignore(status);
+    }
     bool detached = true;
     if (reservation) {
       hrx_status_t status = hrx().virtual_buffer_detach(reservation, {});
@@ -51,6 +57,8 @@ class VirtualMemoryResources {
   hrx_semaphore_t completion = nullptr;
   // Last submitted completion value.
   uint64_t completion_value = 0;
+  // Whether the reservation has a live scoped public host mapping.
+  bool host_mapped = false;
 };
 
 }  // namespace
@@ -156,4 +164,79 @@ TEST_CASE_METHOD(HrxTestFixture,
     mapping.operation = HRX_MEMORY_MAPPING_OPERATION_UNBIND;
   }
   resources.Map(mappings.size(), mappings.data());
+}
+
+TEST_CASE_METHOD(HrxTestFixture,
+                 "common host and program aliases share one pointer",
+                 "[virtual_memory][common_address]") {
+  const hrx_virtual_buffer_scope_t scope = {
+      .device_count = 1,
+      .devices = &device_,
+      .host_access = HRX_MEMORY_ACCESS_ALL,
+  };
+  hrx_virtual_buffer_capabilities_t capabilities;
+  REQUIRE_OK(hrx().virtual_buffer_query_capabilities(scope, &capabilities));
+  if (!capabilities.max_byte_length ||
+      !(capabilities.supported_flags &
+        HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS)) {
+    SKIP("The selected scope cannot share host and program addresses.");
+  }
+  const hrx_memory_type_t memory_type =
+      HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT;
+  hrx_memory_mapping_requirements_t requirements;
+  REQUIRE_OK(hrx().allocator_query_mapping_requirements(
+      hrx().device_allocator(device_), memory_type, &requirements));
+  const size_t unit = std::max({capabilities.reservation_granularity,
+                                capabilities.mapping_granularity,
+                                requirements.recommended_granularity});
+  REQUIRE(unit > 0);
+  VirtualMemoryResources resources(device_);
+  const hrx_virtual_buffer_options_t options = {
+      .byte_length = 2 * unit,
+      .min_alignment = unit,
+      .mapping_granularity = unit,
+      .flags = HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
+  };
+  REQUIRE_OK(
+      hrx().virtual_buffer_create(scope, &options, &resources.reservation));
+  const hrx_buffer_params_t params = {
+      .type = memory_type,
+      .access = HRX_MEMORY_ACCESS_ALL,
+      .usage = HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_SOURCE,
+  };
+  REQUIRE_OK(hrx().allocator_allocate_buffer(hrx().device_allocator(device_),
+                                             params, unit, &resources.source));
+  REQUIRE_OK(hrx().semaphore_create(device_, 0, &resources.completion));
+  std::array<hrx_memory_mapping_t, 2> mappings;
+  for (size_t i = 0; i < mappings.size(); ++i) {
+    mappings[i] = {
+        .target = resources.reservation,
+        .target_offset = i * unit,
+        .byte_length = unit,
+        .source = resources.source,
+        .access = HRX_MEMORY_ACCESS_ALL,
+        .operation = HRX_MEMORY_MAPPING_OPERATION_BIND,
+    };
+  }
+  resources.Map(mappings.size(), mappings.data());
+  void* program_address = nullptr;
+  REQUIRE_OK(
+      hrx().buffer_get_device_ptr(resources.reservation, &program_address));
+  void* host_address = nullptr;
+  REQUIRE_OK(hrx().buffer_map(resources.reservation,
+                              HRX_MAP_READ | HRX_MAP_WRITE | HRX_MAP_MAY_ALIAS,
+                              0, 2 * unit, &host_address));
+  resources.host_mapped = true;
+  REQUIRE(host_address == program_address);
+  const std::array<uint32_t, 4> expected = {11, 17, 29, 47};
+  std::memcpy(host_address, expected.data(), sizeof(expected));
+  std::array<uint32_t, 4> observed = {};
+  REQUIRE_OK(hrx().synchronous_d2h(device_, resources.reservation, unit,
+                                   observed.data(), sizeof(observed)));
+  CHECK(observed == expected);
+  const std::array<uint32_t, 4> update = {53, 71, 89, 97};
+  REQUIRE_OK(hrx().synchronous_h2d(
+      device_, update.data(), resources.reservation, unit, sizeof(update)));
+  std::memcpy(observed.data(), host_address, sizeof(observed));
+  CHECK(observed == update);
 }

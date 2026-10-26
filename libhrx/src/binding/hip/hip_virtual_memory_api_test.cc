@@ -211,24 +211,11 @@ TEST_F(HipVirtualMemoryApiTest,
           .flags = hipMemAccessFlagsProtReadWrite,
       },
   };
-  const hipError_t host_result = set_access_(address_, 2 * unit_, access, 2);
-  if (host_result == hipErrorNotSupported) {
-    unsigned long long flags = hipMemAccessFlagsProtReadWrite;
-    ASSERT_EQ(hipSuccess, get_access_(&flags, &access[0].location, address_));
-    EXPECT_EQ(flags, hipMemAccessFlagsProtNone);
-    ASSERT_EQ(hipSuccess, set_access_(address_, 2 * unit_, &access[1], 1));
-  } else {
-    ASSERT_EQ(hipSuccess, host_result);
-  }
+  ASSERT_EQ(hipSuccess, set_access_(address_, 2 * unit_, access, 2));
   ASSERT_EQ(hipSuccess, release_(handles_[0]));
   handles_[0] = nullptr;
   const std::array<uint32_t, 4> expected = {11, 17, 29, 47};
-  if (host_result == hipSuccess) {
-    std::memcpy(Address(0), expected.data(), sizeof(expected));
-  } else {
-    ASSERT_EQ(hipSuccess, copy_(Address(0), expected.data(), sizeof(expected),
-                                hipMemcpyHostToDevice));
-  }
+  std::memcpy(Address(0), expected.data(), sizeof(expected));
   std::array<uint32_t, 4> observed = {};
   ASSERT_EQ(hipSuccess, copy_(observed.data(), Address(1), sizeof(observed),
                               hipMemcpyDeviceToHost));
@@ -236,12 +223,7 @@ TEST_F(HipVirtualMemoryApiTest,
   const std::array<uint32_t, 4> update = {53, 71, 89, 97};
   ASSERT_EQ(hipSuccess, copy_(Address(1), update.data(), sizeof(update),
                               hipMemcpyHostToDevice));
-  if (host_result == hipSuccess) {
-    std::memcpy(observed.data(), Address(0), sizeof(observed));
-  } else {
-    ASSERT_EQ(hipSuccess, copy_(observed.data(), Address(0), sizeof(observed),
-                                hipMemcpyDeviceToHost));
-  }
+  std::memcpy(observed.data(), Address(0), sizeof(observed));
   EXPECT_EQ(observed, update);
 }
 

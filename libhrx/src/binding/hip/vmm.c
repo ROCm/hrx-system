@@ -558,6 +558,10 @@ static hipError_t iree_hip_vmm_query_granularity(hrx_device_t device,
     return result;
   }
   if (capabilities.max_byte_length) {
+    if (!iree_all_bits_set(capabilities.supported_flags,
+                           HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS)) {
+      return hipErrorNotSupported;
+    }
     const uint32_t required = (1u << HRX_MEMORY_MAPPING_OPERATION_BIND) |
                               (1u << HRX_MEMORY_MAPPING_OPERATION_UNBIND) |
                               (1u << HRX_MEMORY_MAPPING_OPERATION_PROTECT);
@@ -1006,6 +1010,7 @@ hipError_t iree_hip_vmm_address_reserve(void** ptr, size_t size,
         .byte_length = size,
         .min_alignment = alignment,
         .mapping_granularity = granularity,
+        .flags = HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
     };
     if (result == hipSuccess) {
       result = iree_hip_vmm_from_hrx_status(

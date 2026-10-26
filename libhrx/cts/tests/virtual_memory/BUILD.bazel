@@ -40,3 +40,16 @@ hrx_cts_test(
     name = "virtual_memory",
     srcs = ["virtual_memory_test.cpp"],
 )
+
+hrx_cts_test(
+    name = "virtual_memory_gpu",
+    srcs = ["virtual_memory_test.cpp"],
+    args = ["--hrx-device=gpu:0"],
+    env = {"HRX_GPU_DRIVER": "amdgpu"},
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
