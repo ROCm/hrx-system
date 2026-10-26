@@ -23,16 +23,18 @@
 typedef struct loom_low_lower_rule_byte_offset_binding_t {
   // Resolved emit owning the arithmetic definition at its original position.
   const loom_low_lower_resolved_emit_t* definition;
-  // Selected carried value replacing one canonical dynamic term.
-  const loom_low_lower_realization_t* term_realization;
+  // Selected carried term or complete physical byte offset.
+  const loom_low_lower_realization_t* carried_realization;
   // Last physical use governing placement of the destructive backedge update.
   const loom_op_t* last_use_op;
   // Low SSA published by the definition and read directly by later uses.
   loom_value_id_t value;
   // First operand using the byte offset within the defining emit.
   uint16_t operand_ordinal;
-  // Dynamic-term ordinal replaced by |term_realization|.
+  // Dynamic-term ordinal replaced by |carried_realization|.
   uint8_t term_ordinal;
+  // Whether |carried_realization| replaces the complete physical byte offset.
+  bool realizes_complete_offset;
 } loom_low_lower_rule_byte_offset_binding_t;
 
 struct loom_low_lower_rule_byte_offset_entry_t {
@@ -116,6 +118,8 @@ static uint32_t loom_low_lower_rule_source_memory_descriptor_cost(
 typedef struct loom_low_lower_rule_source_memory_recurrence_key_t {
   // Function-local canonical term identity, or zero for an authored producer.
   iree_host_size_t term_identity;
+  // Static contribution included in a complete-offset initializer.
+  int64_t initial_bias;
   // Resolved initializer descriptor defining the carrier's zero value.
   loom_low_lower_resolved_descriptor_t initializer_descriptor;
   // Resolved update descriptor shared by every member of an offer group.
@@ -182,22 +186,34 @@ typedef struct loom_low_lower_rule_source_memory_term_recurrence_t {
   const loom_low_lower_source_memory_byte_offset_materializer_t* materializer;
   // Analysis-owned canonical term; its invariant suffix defines the stride.
   const loom_low_source_memory_dynamic_term_t* term;
+  // Selected source-memory reference whose complete offset may be carried.
+  const loom_low_lower_source_memory_t* source_memory;
+  // Analysis-owned canonical access retained for deferred initialization.
+  const loom_low_source_memory_access_plan_t* access;
   // Static byte factor advanced on each loop backedge.
   int64_t update_byte_stride;
   // Shift spelling of |update_byte_stride|, when available.
   uint32_t update_byte_shift;
-  // Deferred carried-term recipe requested only when the offer wins.
+  // Deferred carried-value recipe requested only when the offer wins.
   loom_low_lower_realization_recipe_t recipe;
   // Deferred invariant-stride recipe requested only when needed.
   loom_low_lower_realization_recipe_t stride_recipe;
+  // Stable invariant-stride identity retained before specializing |state|.
+  loom_low_lower_rule_source_memory_recurrence_key_t stride_key;
   // Exact invariant byte stride materialized outside the loop.
   int64_t constant_stride;
   // Canonical term ordinal replaced in |binding|.
   uint8_t term_ordinal;
+  // Whether the carried value is the complete physical byte offset.
+  bool carries_complete_offset;
+  // Whether the selected physical reference includes its static bias.
+  bool includes_static_offset;
 } loom_low_lower_rule_source_memory_term_recurrence_t;
 
 static const uint8_t kSourceMemoryRecurrencePlanId = 0;
 static const uint8_t kSourceMemoryStridePlanId = 0;
+static const uint8_t kSourceMemoryCompleteOffsetStrategyId = 0;
+static const uint8_t kSourceMemoryRecurrenceAlternativeId = 0;
 
 static uint32_t loom_low_lower_rule_source_memory_descriptor_cost(
     const loom_low_lower_context_t* context,
@@ -410,6 +426,28 @@ static iree_status_t loom_low_lower_rule_source_memory_update_term_recurrence(
       source_op->location, out_value);
 }
 
+static iree_status_t
+loom_low_lower_rule_source_memory_initialize_complete_offset_recurrence(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const void* data, loom_value_id_t carried_value,
+    loom_value_id_t* out_value) {
+  (void)carried_value;
+  const loom_low_lower_rule_source_memory_term_recurrence_t* recurrence =
+      (const loom_low_lower_rule_source_memory_term_recurrence_t*)data;
+  const loom_low_lower_source_memory_term_replacement_t omitted_term = {
+      .value_id = LOOM_VALUE_ID_INVALID,
+      .term_ordinal = recurrence->term_ordinal,
+  };
+  if (recurrence->includes_static_offset) {
+    return loom_low_lower_rule_materialize_source_memory_complete_byte_offset(
+        context, recurrence->rule_set, source_op, recurrence->source_memory,
+        recurrence->access, &omitted_term, out_value);
+  }
+  return loom_low_lower_rule_materialize_source_memory_byte_offset(
+      context, recurrence->rule_set, source_op, recurrence->source_memory,
+      recurrence->access, &omitted_term, out_value);
+}
+
 static iree_status_t loom_low_lower_rule_source_memory_apply(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_realization_t* realization, void* data) {
@@ -448,7 +486,22 @@ static iree_status_t loom_low_lower_rule_source_memory_materialize_stride(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_lower_rule_source_memory_apply_term_recurrence(
+static iree_status_t loom_low_lower_rule_source_memory_materialize_term_stride(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const void* data, loom_value_id_t carried_value,
+    loom_value_id_t* out_value) {
+  (void)carried_value;
+  const loom_low_lower_rule_source_memory_term_recurrence_t* recurrence =
+      (const loom_low_lower_rule_source_memory_term_recurrence_t*)data;
+  loom_low_source_memory_dynamic_term_t update_term = *recurrence->term;
+  update_term.byte_stride = recurrence->update_byte_stride;
+  update_term.byte_shift = recurrence->update_byte_shift;
+  return loom_low_lower_rule_materialize_source_memory_term_stride(
+      context, recurrence->rule_set, source_op, recurrence->materializer,
+      &update_term, recurrence->state.carrier_type, out_value);
+}
+
+static iree_status_t loom_low_lower_rule_source_memory_apply_offset_recurrence(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_lower_realization_t* realization, void* data) {
   (void)source_op;
@@ -466,17 +519,28 @@ static iree_status_t loom_low_lower_rule_source_memory_apply_term_recurrence(
         .kind = LOOM_LOW_LOWER_REALIZATION_INPUT_REALIZATION,
         .value.realization = stride_realization,
     };
-    recurrence->recipe.inputs = &recurrence->state.stride_input;
-    recurrence->recipe.input_count = 1;
+    loom_low_lower_realization_input_t* inputs = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
+        context, recurrence->recipe.input_count + 1, sizeof(*inputs),
+        (void**)&inputs));
+    if (recurrence->recipe.input_count != 0) {
+      memcpy(inputs, recurrence->recipe.inputs,
+             recurrence->recipe.input_count * sizeof(*inputs));
+    }
+    inputs[recurrence->recipe.input_count] = recurrence->state.stride_input;
+    recurrence->recipe.inputs = inputs;
+    ++recurrence->recipe.input_count;
   }
-  const loom_low_lower_realization_t* term_realization = NULL;
+  const loom_low_lower_realization_t* carried_realization = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_realization_request(
       context, recurrence->binding->last_use_op, recurrence->loop,
-      &recurrence->recipe, &term_realization));
-  IREE_ASSERT(term_realization != NULL,
-              "proved canonical term recurrence became unplaceable");
-  recurrence->binding->term_realization = term_realization;
+      &recurrence->recipe, &carried_realization));
+  IREE_ASSERT(carried_realization != NULL,
+              "proved byte-offset recurrence became unplaceable");
+  recurrence->binding->carried_realization = carried_realization;
   recurrence->binding->term_ordinal = recurrence->term_ordinal;
+  recurrence->binding->realizes_complete_offset =
+      recurrence->carries_complete_offset;
   return iree_ok_status();
 }
 
@@ -498,6 +562,100 @@ static bool loom_low_lower_rule_source_memory_exact_term_stride(
   return true;
 }
 
+static uint8_t loom_low_lower_rule_source_memory_select_offset_terms(
+    const loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* access,
+    uint8_t omitted_term_ordinal,
+    const loom_low_source_memory_dynamic_term_t** out_terms) {
+  const uint16_t omitted_mask =
+      omitted_term_ordinal < access->dynamic_term_count
+          ? (uint16_t)(1u << omitted_term_ordinal)
+          : 0;
+  const loom_low_source_memory_dynamic_component_t* component =
+      loom_low_source_memory_access_retained_component(access, 0, 1);
+  if (component != NULL && (component->term_mask & omitted_mask) != 0) {
+    component = NULL;
+  }
+  uint8_t term_count = 0;
+  uint16_t consumed_mask = component != NULL ? component->term_mask : 0;
+  if (component != NULL) {
+    out_terms[term_count++] = component->term;
+  }
+  for (uint8_t i = 0; i < access->dynamic_term_count; ++i) {
+    if ((consumed_mask & (1u << i)) != 0) {
+      continue;
+    }
+    if ((omitted_mask & (1u << i)) != 0) {
+      consumed_mask |= omitted_mask;
+      continue;
+    }
+    uint16_t materialized_mask = 0;
+    out_terms[term_count++] =
+        loom_low_lower_rule_source_memory_select_materialized_term(
+            context, access, i, omitted_mask, consumed_mask,
+            &materialized_mask);
+    consumed_mask |= materialized_mask;
+  }
+  return term_count;
+}
+
+static uint32_t loom_low_lower_rule_source_memory_offset_cost(
+    const loom_low_source_memory_dynamic_term_t* const* terms,
+    uint8_t term_count, uint32_t constant_cost, uint32_t multiply_cost,
+    uint32_t shift_cost, uint32_t add_cost, bool has_shift,
+    bool has_static_bias) {
+  uint32_t cost = term_count > 1 ? (term_count - 1u) * add_cost : 0;
+  for (uint8_t i = 0; i < term_count; ++i) {
+    const loom_low_source_memory_dynamic_term_t* term = terms[i];
+    cost += term->stride_value_count * multiply_cost;
+    if (term->byte_stride != 1) {
+      cost += constant_cost;
+      cost +=
+          term->byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE &&
+                  has_shift
+              ? shift_cost
+              : multiply_cost;
+    }
+  }
+  if (has_static_bias) {
+    cost += constant_cost + (term_count != 0 ? add_cost : 0);
+  }
+  return cost;
+}
+
+static iree_status_t loom_low_lower_rule_source_memory_set_recipe_inputs(
+    loom_low_lower_context_t* context,
+    const loom_low_source_memory_dynamic_term_t* const* terms,
+    uint8_t term_count, loom_low_lower_realization_recipe_t* recipe) {
+  uint16_t input_count = 0;
+  for (uint8_t i = 0; i < term_count; ++i) {
+    input_count += (uint16_t)(1u + terms[i]->stride_value_count);
+  }
+  if (input_count == 0) {
+    return iree_ok_status();
+  }
+  loom_low_lower_realization_input_t* inputs = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
+      context, input_count, sizeof(*inputs), (void**)&inputs));
+  uint16_t input_index = 0;
+  for (uint8_t i = 0; i < term_count; ++i) {
+    const loom_low_source_memory_dynamic_term_t* term = terms[i];
+    inputs[input_index++] = (loom_low_lower_realization_input_t){
+        .kind = LOOM_LOW_LOWER_REALIZATION_INPUT_SOURCE,
+        .value.identity = term->index,
+    };
+    for (uint8_t j = 0; j < term->stride_value_count; ++j) {
+      inputs[input_index++] = (loom_low_lower_realization_input_t){
+          .kind = LOOM_LOW_LOWER_REALIZATION_INPUT_SOURCE,
+          .value.identity = term->stride_values[j],
+      };
+    }
+  }
+  recipe->inputs = inputs;
+  recipe->input_count = input_count;
+  return iree_ok_status();
+}
+
 IREE_ATTRIBUTE_NOINLINE static iree_status_t
 loom_low_lower_rule_source_memory_consider_term_recurrence(
     loom_low_lower_context_t* context,
@@ -505,7 +663,8 @@ loom_low_lower_rule_source_memory_consider_term_recurrence(
     const loom_low_lower_source_memory_t* source_memory,
     const loom_low_lower_source_memory_byte_offset_materializer_t* materializer,
     const loom_low_lower_source_memory_term_recurrence_t* source_recurrence,
-    const loom_op_t* emission_op,
+    const loom_op_t* emission_op, iree_host_size_t byte_offset_identity,
+    int64_t static_bias, bool includes_static_offset,
     loom_low_lower_rule_byte_offset_binding_t* binding) {
   if (binding->term_ordinal != UINT8_MAX ||
       materializer->increment_descriptor_ref ==
@@ -531,6 +690,8 @@ loom_low_lower_rule_source_memory_consider_term_recurrence(
   }
   const loom_low_source_memory_dynamic_term_t* term =
       &access->dynamic_terms[source_recurrence->term_ordinal];
+  const bool can_carry_complete_offset =
+      source_recurrence->can_carry_complete_offset;
 
   const uint16_t term_mask = (uint16_t)(1u << source_recurrence->term_ordinal);
   if (access->retained_component.term != NULL &&
@@ -587,7 +748,8 @@ loom_low_lower_rule_source_memory_consider_term_recurrence(
           context, selected_plan->rule_set,
           materializer->multiply_descriptor_ref, &multiply_descriptor));
   loom_low_lower_resolved_descriptor_t shift_descriptor = {0};
-  if ((term->byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE ||
+  if ((can_carry_complete_offset ||
+       term->byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE ||
        update_byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE) &&
       materializer->shift_left_descriptor_ref !=
           LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE) {
@@ -596,11 +758,20 @@ loom_low_lower_rule_source_memory_consider_term_recurrence(
             context, selected_plan->rule_set,
             materializer->shift_left_descriptor_ref, &shift_descriptor));
   }
+  loom_low_lower_resolved_descriptor_t add_descriptor = {0};
+  if (can_carry_complete_offset) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_rule_source_memory_resolve_materializer_descriptor(
+            context, selected_plan->rule_set, materializer->add_descriptor_ref,
+            &add_descriptor));
+  }
   const uint32_t multiply_cost =
       loom_low_lower_rule_source_memory_descriptor_cost(
           context, multiply_descriptor.descriptor);
   const uint32_t shift_cost = loom_low_lower_rule_source_memory_descriptor_cost(
       context, shift_descriptor.descriptor);
+  const uint32_t add_cost = loom_low_lower_rule_source_memory_descriptor_cost(
+      context, add_descriptor.descriptor);
   const uint32_t direct_scale_cost =
       term->byte_shift != LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE &&
               shift_descriptor.descriptor != NULL
@@ -624,15 +795,28 @@ loom_low_lower_rule_source_memory_consider_term_recurrence(
       }
     }
   }
-  uint32_t direct_cost = term->stride_value_count * multiply_cost;
+  uint32_t term_direct_cost = term->stride_value_count * multiply_cost;
   if (term->byte_stride != 1) {
-    direct_cost += resolution.initializer_cost + direct_scale_cost;
+    term_direct_cost += resolution.initializer_cost + direct_scale_cost;
   }
 
-  loom_low_lower_rule_source_memory_term_recurrence_t* recurrence = NULL;
+  loom_low_lower_realization_input_t* stride_inputs = NULL;
+  if (resolution.uses_stride_operand && !has_constant_stride) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
+        context, term->stride_value_count, sizeof(*stride_inputs),
+        (void**)&stride_inputs));
+    for (uint8_t i = 0; i < term->stride_value_count; ++i) {
+      stride_inputs[i] = (loom_low_lower_realization_input_t){
+          .kind = LOOM_LOW_LOWER_REALIZATION_INPUT_SOURCE,
+          .value.identity = term->stride_values[i],
+      };
+    }
+  }
+
+  loom_low_lower_rule_source_memory_term_recurrence_t* term_recurrence = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
-      context, 1, sizeof(*recurrence), (void**)&recurrence));
-  *recurrence = (loom_low_lower_rule_source_memory_term_recurrence_t){
+      context, 1, sizeof(*term_recurrence), (void**)&term_recurrence));
+  *term_recurrence = (loom_low_lower_rule_source_memory_term_recurrence_t){
       .loop = loop,
       .binding = binding,
       .rule_set = selected_plan->rule_set,
@@ -644,49 +828,43 @@ loom_low_lower_rule_source_memory_consider_term_recurrence(
       .constant_stride = has_constant_stride ? constant_stride : 0,
       .term_ordinal = source_recurrence->term_ordinal,
   };
-  recurrence->recipe = (loom_low_lower_realization_recipe_t){
+  term_recurrence->recipe = (loom_low_lower_realization_recipe_t){
       .type = resolution.state.carrier_type,
       .id = (loom_low_lower_plan_id_t)(uintptr_t)&kSourceMemoryRecurrencePlanId,
-      .key = iree_make_const_byte_span(&recurrence->state.key,
-                                       sizeof(recurrence->state.key)),
+      .key = iree_make_const_byte_span(&term_recurrence->state.key,
+                                       sizeof(term_recurrence->state.key)),
       .initialize = loom_low_lower_rule_source_memory_initialize_recurrence,
       .update = loom_low_lower_rule_source_memory_update_recurrence,
-      .data = &recurrence->state,
+      .data = &term_recurrence->state,
   };
-
   if (resolution.uses_stride_operand) {
-    loom_low_lower_realization_input_t* inputs = NULL;
-    if (!has_constant_stride) {
-      recurrence->recipe.update =
-          loom_low_lower_rule_source_memory_update_term_recurrence;
-      recurrence->recipe.data = recurrence;
-      IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
-          context, term->stride_value_count, sizeof(*inputs), (void**)&inputs));
-      for (uint8_t i = 0; i < term->stride_value_count; ++i) {
-        inputs[i] = (loom_low_lower_realization_input_t){
-            .kind = LOOM_LOW_LOWER_REALIZATION_INPUT_SOURCE,
-            .value.identity = term->stride_values[i],
-        };
-      }
-      recurrence->recipe.inputs = inputs;
-      recurrence->recipe.input_count = term->stride_value_count;
-    } else {
-      recurrence->stride_recipe = (loom_low_lower_realization_recipe_t){
+    if (has_constant_stride) {
+      term_recurrence->stride_recipe = (loom_low_lower_realization_recipe_t){
           .type = resolution.state.carrier_type,
           .id = (loom_low_lower_plan_id_t)(uintptr_t)&kSourceMemoryStridePlanId,
-          .key = iree_make_const_byte_span(&recurrence->constant_stride,
-                                           sizeof(recurrence->constant_stride)),
+          .key = iree_make_const_byte_span(
+              &term_recurrence->constant_stride,
+              sizeof(term_recurrence->constant_stride)),
           .initialize = loom_low_lower_rule_source_memory_materialize_stride,
-          .data = recurrence,
+          .data = term_recurrence,
       };
+    } else {
+      term_recurrence->recipe.inputs = stride_inputs;
+      term_recurrence->recipe.input_count = term->stride_value_count;
+      term_recurrence->recipe.update =
+          loom_low_lower_rule_source_memory_update_term_recurrence;
+      term_recurrence->recipe.data = term_recurrence;
     }
   }
 
   binding->term_ordinal = source_recurrence->term_ordinal;
-  const loom_low_lower_realization_offer_t offer = {
+  const iree_const_byte_span_t alternative_key = iree_make_const_byte_span(
+      &term_recurrence->state.key, sizeof(term_recurrence->state.key));
+  const loom_low_lower_realization_offer_t term_offer = {
       .id = (loom_low_lower_plan_id_t)(uintptr_t)&kSourceMemoryRecurrencePlanId,
-      .key = iree_make_const_byte_span(&recurrence->state.key,
-                                       sizeof(recurrence->state.key)),
+      .key = alternative_key,
+      .alternative_id =
+          (loom_low_lower_plan_id_t)(uintptr_t)&kSourceMemoryRecurrenceAlternativeId,
       .group_setup_cost =
           resolution.initializer_cost +
           (has_constant_stride ? stride_materialization_cost : 0),
@@ -694,12 +872,116 @@ loom_low_lower_rule_source_memory_consider_term_recurrence(
           resolution.update_cost +
           (has_constant_stride ? 0 : stride_materialization_cost),
       .removed_key = (uint64_t)(uintptr_t)binding,
-      .removed_iteration_cost = direct_cost,
+      .removed_iteration_cost = term_direct_cost,
       .minimum_removed_count = 2,
-      .apply = loom_low_lower_rule_source_memory_apply_term_recurrence,
-      .data = recurrence,
+      .recipe = NULL,
+      .apply = loom_low_lower_rule_source_memory_apply_offset_recurrence,
+      .data = term_recurrence,
   };
-  return loom_low_lower_realization_offer(context, emission_op, loop, &offer);
+  IREE_RETURN_IF_ERROR(loom_low_lower_realization_offer(context, emission_op,
+                                                        loop, &term_offer));
+  if (!can_carry_complete_offset) {
+    return iree_ok_status();
+  }
+
+  const loom_low_source_memory_dynamic_term_t*
+      direct_terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
+  const uint8_t direct_term_count =
+      loom_low_lower_rule_source_memory_select_offset_terms(
+          context, access, UINT8_MAX, direct_terms);
+  const loom_low_source_memory_dynamic_term_t*
+      initializer_terms[LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_CAPACITY];
+  const uint8_t initializer_term_count =
+      loom_low_lower_rule_source_memory_select_offset_terms(
+          context, access, source_recurrence->term_ordinal, initializer_terms);
+  const bool has_static_bias = static_bias != 0;
+  const uint32_t complete_direct_cost =
+      loom_low_lower_rule_source_memory_offset_cost(
+          direct_terms, direct_term_count, resolution.initializer_cost,
+          multiply_cost, shift_cost, add_cost,
+          shift_descriptor.descriptor != NULL, has_static_bias);
+  const uint32_t complete_setup_cost =
+      loom_low_lower_rule_source_memory_offset_cost(
+          initializer_terms, initializer_term_count,
+          resolution.initializer_cost, multiply_cost, shift_cost, add_cost,
+          shift_descriptor.descriptor != NULL, has_static_bias);
+  const uint32_t complete_offer_setup_cost =
+      complete_setup_cost + stride_materialization_cost + 1;
+  const uint32_t complete_offer_iteration_cost = resolution.update_cost + 1;
+  const double trips = (double)loop->trip_count;
+  if (trips * complete_direct_cost <=
+      complete_offer_setup_cost + trips * complete_offer_iteration_cost) {
+    return iree_ok_status();
+  }
+
+  loom_low_lower_rule_source_memory_term_recurrence_t* complete = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
+      context, 1, sizeof(*complete), (void**)&complete));
+  *complete = *term_recurrence;
+  complete->state = resolution.state;
+  complete->state.key.term_identity = byte_offset_identity;
+  complete->state.key.initial_bias = static_bias;
+  complete->source_memory = source_memory;
+  complete->access = access;
+  complete->stride_key = resolution.state.key;
+  complete->carries_complete_offset = true;
+  complete->includes_static_offset = includes_static_offset;
+  complete->recipe = (loom_low_lower_realization_recipe_t){
+      .type = resolution.state.carrier_type,
+      .id =
+          (loom_low_lower_plan_id_t)(uintptr_t)&kSourceMemoryCompleteOffsetStrategyId,
+      .key = iree_make_const_byte_span(&complete->state.key,
+                                       sizeof(complete->state.key)),
+      .initialize =
+          loom_low_lower_rule_source_memory_initialize_complete_offset_recurrence,
+      .update = loom_low_lower_rule_source_memory_update_recurrence,
+      .data = complete,
+  };
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_set_recipe_inputs(
+      context, initializer_terms, initializer_term_count, &complete->recipe));
+  complete->stride_recipe = (loom_low_lower_realization_recipe_t){0};
+  if (resolution.uses_stride_operand) {
+    if (has_constant_stride) {
+      complete->stride_recipe = (loom_low_lower_realization_recipe_t){
+          .type = resolution.state.carrier_type,
+          .id = (loom_low_lower_plan_id_t)(uintptr_t)&kSourceMemoryStridePlanId,
+          .key = iree_make_const_byte_span(&complete->constant_stride,
+                                           sizeof(complete->constant_stride)),
+          .initialize = loom_low_lower_rule_source_memory_materialize_stride,
+          .data = complete,
+      };
+    } else {
+      complete->stride_recipe = (loom_low_lower_realization_recipe_t){
+          .type = resolution.state.carrier_type,
+          .id = (loom_low_lower_plan_id_t)(uintptr_t)&kSourceMemoryStridePlanId,
+          .key = iree_make_const_byte_span(&complete->stride_key,
+                                           sizeof(complete->stride_key)),
+          .inputs = stride_inputs,
+          .input_count = term->stride_value_count,
+          .initialize =
+              loom_low_lower_rule_source_memory_materialize_term_stride,
+          .data = complete,
+      };
+    }
+  }
+
+  const loom_low_lower_realization_offer_t complete_offer = {
+      .id =
+          (loom_low_lower_plan_id_t)(uintptr_t)&kSourceMemoryCompleteOffsetStrategyId,
+      .key = alternative_key,
+      .alternative_id =
+          (loom_low_lower_plan_id_t)(uintptr_t)&kSourceMemoryRecurrenceAlternativeId,
+      .removed_key = (uint64_t)(uintptr_t)binding,
+      .removed_iteration_cost = complete_direct_cost,
+      .minimum_removed_count = 1,
+      .setup_cost = complete_offer_setup_cost,
+      .iteration_cost = complete_offer_iteration_cost,
+      .recipe = NULL,
+      .apply = loom_low_lower_rule_source_memory_apply_offset_recurrence,
+      .data = complete,
+  };
+  return loom_low_lower_realization_offer(context, emission_op, loop,
+                                          &complete_offer);
 }
 
 IREE_ATTRIBUTE_NOINLINE static iree_status_t
@@ -958,7 +1240,9 @@ iree_status_t loom_low_lower_rule_source_memory_plan_byte_offset(
       IREE_RETURN_IF_ERROR(
           loom_low_lower_rule_source_memory_consider_term_recurrence(
               context, selected_plan, source_memory, materializer,
-              &recurrences->term, emission_op, binding));
+              &recurrences->term, emission_op, identity, static_bias,
+              ref->kind == LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_BYTE_OFFSET,
+              binding));
     }
   } else if (emission_op->block_ordinal < entry->block_ordinal ||
              (emission_op->block_ordinal == entry->block_ordinal &&
@@ -988,15 +1272,19 @@ iree_status_t loom_low_lower_rule_source_memory_emit_byte_offset(
       (loom_low_lower_rule_byte_offset_binding_t*)
           loom_low_lower_resolved_emit_materializer(resolved_emit,
                                                     operand_ordinal);
+  if (binding->realizes_complete_offset) {
+    *out_value = loom_low_lower_realization_value(binding->carried_realization);
+    return iree_ok_status();
+  }
   if (binding->definition == resolved_emit &&
       binding->operand_ordinal == operand_ordinal) {
     loom_low_lower_source_memory_term_replacement_t replacement = {0};
     const loom_low_lower_source_memory_term_replacement_t* replacement_ptr =
         NULL;
-    if (binding->term_realization != NULL) {
+    if (binding->carried_realization != NULL) {
       replacement = (loom_low_lower_source_memory_term_replacement_t){
           .value_id =
-              loom_low_lower_realization_value(binding->term_realization),
+              loom_low_lower_realization_value(binding->carried_realization),
           .term_ordinal = binding->term_ordinal,
       };
       replacement_ptr = &replacement;

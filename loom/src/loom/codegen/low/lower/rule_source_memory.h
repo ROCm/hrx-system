@@ -121,13 +121,25 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_dynamic_term(
     uint8_t term_ordinal, loom_value_id_t* out_value_id);
 
 // One selected carried value replacing an otherwise materialized canonical
-// byte term. The selected byte-offset binding owns the replacement.
+// byte term. An invalid value omits the term from a deferred initializer. The
+// selected byte-offset binding owns the replacement.
 typedef struct loom_low_lower_source_memory_term_replacement_t {
-  // Low value equal to the complete canonical term in bytes.
+  // Low value equal to the complete canonical term in bytes, or INVALID to
+  // omit the term.
   loom_value_id_t value_id;
   // Dynamic-term ordinal replaced by |value_id|.
   uint8_t term_ordinal;
 } loom_low_lower_source_memory_term_replacement_t;
+
+// Selects the retained source term used to materialize one canonical term.
+// |excluded_mask| prevents a realization containing replaced terms, and
+// |retained_mask| prevents overlap with an already selected component.
+const loom_low_source_memory_dynamic_term_t*
+loom_low_lower_rule_source_memory_select_materialized_term(
+    const loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source_memory_access,
+    uint8_t term_ordinal, uint16_t excluded_mask, uint16_t retained_mask,
+    uint16_t* out_materialized_mask);
 
 // Materializes the invariant stride suffix of one canonical byte term in the
 // target-selected offset carrier. The term must have at least one stride value.

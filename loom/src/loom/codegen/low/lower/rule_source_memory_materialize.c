@@ -542,6 +542,34 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_term_stride(
       /*exclude_index=*/true, offset_type, LOOM_VALUE_ID_INVALID, out_value_id);
 }
 
+const loom_low_source_memory_dynamic_term_t*
+loom_low_lower_rule_source_memory_select_materialized_term(
+    const loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source_memory_access,
+    uint8_t term_ordinal, uint16_t excluded_mask, uint16_t retained_mask,
+    uint16_t* out_materialized_mask) {
+  const loom_low_source_memory_dynamic_term_t* term =
+      &source_memory_access->dynamic_terms[term_ordinal];
+  *out_materialized_mask = (uint16_t)(1u << term_ordinal);
+  const uint16_t preceding_mask =
+      term_ordinal == 0 ? 0 : (uint16_t)((1u << term_ordinal) - 1u);
+  for (uint8_t i = 0; i < source_memory_access->dynamic_realization_count;
+       ++i) {
+    const loom_low_source_memory_dynamic_realization_t* realization =
+        &source_memory_access->dynamic_realizations[i];
+    if ((realization->term_mask & (1u << term_ordinal)) != 0 &&
+        (realization->term_mask & preceding_mask) == 0 &&
+        (realization->term_mask & excluded_mask) == 0 &&
+        (realization->term_mask & retained_mask) == 0 &&
+        loom_low_lower_source_value_has_low_mapping(context,
+                                                    realization->term.index)) {
+      *out_materialized_mask = realization->term_mask;
+      return &realization->term;
+    }
+  }
+  return term;
+}
+
 iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
     loom_low_lower_context_t* context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
@@ -598,29 +626,19 @@ iree_status_t loom_low_lower_rule_materialize_source_memory_byte_offset(
       ++term_ordinal;
       continue;
     }
+    uint16_t materialized_mask = 0;
     const loom_low_source_memory_dynamic_term_t* term =
-        &source_memory_access->dynamic_terms[term_ordinal];
-    uint16_t materialized_mask = (uint16_t)(1u << term_ordinal);
-    const uint16_t preceding_mask =
-        term_ordinal == 0 ? 0 : (uint16_t)((1u << term_ordinal) - 1u);
-    for (uint8_t i = 0; i < source_memory_access->dynamic_realization_count;
-         ++i) {
-      const loom_low_source_memory_dynamic_realization_t* realization =
-          &source_memory_access->dynamic_realizations[i];
-      if ((realization->term_mask & (1u << term_ordinal)) != 0 &&
-          (realization->term_mask & preceding_mask) == 0 &&
-          (realization->term_mask & replacement_mask) == 0 &&
-          !(retained_mask & realization->term_mask) &&
-          loom_low_lower_source_value_has_low_mapping(
-              context, realization->term.index)) {
-        term = &realization->term;
-        materialized_mask = realization->term_mask;
-        break;
-      }
-    }
+        loom_low_lower_rule_source_memory_select_materialized_term(
+            context, source_memory_access, term_ordinal, replacement_mask,
+            retained_mask, &materialized_mask);
     loom_value_id_t term_value = LOOM_VALUE_ID_INVALID;
     if ((replacement_mask & (1u << term_ordinal)) != 0) {
       term_value = replacement->value_id;
+      if (term_value == LOOM_VALUE_ID_INVALID) {
+        consumed_mask |= materialized_mask;
+        ++term_ordinal;
+        continue;
+      }
     } else {
       IREE_RETURN_IF_ERROR(loom_low_lower_rule_materialize_source_memory_term(
           context, rule_set, source_op, materializer, term, offset_type,

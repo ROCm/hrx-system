@@ -555,6 +555,14 @@ static iree_status_t loom_low_lower_memory_retain_recurrences(
   // induction coordinates retain their complete direct calculation.
   if (term_candidate_count != 1) {
     term_candidate_count = 0;
+  } else {
+    const uint16_t varying_term_mask =
+        (uint16_t)(1u << term_candidate.term_ordinal);
+    const uint16_t all_term_mask =
+        loom_low_lower_memory_term_range(0, record->access.dynamic_term_count);
+    term_candidate.can_carry_complete_offset =
+        record->access.dynamic_term_count > 1 &&
+        (record->invariant_term_mask | varying_term_mask) == all_term_mask;
   }
   if (candidate_count == 0 && term_candidate_count == 0) {
     return iree_ok_status();

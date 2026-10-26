@@ -326,6 +326,7 @@ static bool loom_low_lower_realization_offer_group_equal(
   const uint16_t left_block = left->source_op->parent_block->region_index;
   const uint16_t right_block = right->source_op->parent_block->region_index;
   return left_block == right_block && left->offer.id == right->offer.id &&
+         left->offer.alternative_id == right->offer.alternative_id &&
          left->offer.key.data_length == right->offer.key.data_length &&
          (left->offer.key.data_length == 0 ||
           memcmp(left->offer.key.data, right->offer.key.data,
@@ -337,12 +338,14 @@ typedef struct loom_low_lower_realization_cost_group_t {
   const loom_low_lower_realization_offer_record_t* first;
   // Total credit for distinct direct calculations removed by the group.
   double direct_cost;
-  // Shared loop cost plus every participating packet's setup cost.
+  // Group costs plus every participating offer's independent costs.
   double replacement_cost;
   // Number of distinct direct calculations credited to the group.
   uint32_t removed_count;
   // Largest minimum replacement count required by a member offer.
   uint32_t minimum_removed_count;
+  // True when this is the selected profitable strategy.
+  bool selected;
 } loom_low_lower_realization_cost_group_t;
 
 typedef struct loom_low_lower_realization_cost_credit_t {
@@ -351,6 +354,24 @@ typedef struct loom_low_lower_realization_cost_credit_t {
   // Identity of the displaced calculation credited once in this group.
   uint64_t removed_key;
 } loom_low_lower_realization_cost_credit_t;
+
+static bool loom_low_lower_realization_alternative_set_equal(
+    const loom_low_lower_realization_cost_group_t* left,
+    const loom_low_lower_realization_cost_group_t* right) {
+  const loom_low_lower_realization_offer_record_t* left_offer = left->first;
+  const loom_low_lower_realization_offer_record_t* right_offer = right->first;
+  const uint16_t left_block = left_offer->source_op->parent_block->region_index;
+  const uint16_t right_block =
+      right_offer->source_op->parent_block->region_index;
+  return left_block == right_block &&
+         left_offer->offer.alternative_id ==
+             right_offer->offer.alternative_id &&
+         left_offer->offer.key.data_length ==
+             right_offer->offer.key.data_length &&
+         (left_offer->offer.key.data_length == 0 ||
+          memcmp(left_offer->offer.key.data, right_offer->offer.key.data,
+                 left_offer->offer.key.data_length) == 0);
+}
 
 static iree_status_t loom_low_lower_realizations_select_offers(
     loom_low_lower_context_t* context,
@@ -394,6 +415,7 @@ static iree_status_t loom_low_lower_realizations_select_offers(
         loom_structural_hash_initialize(),
         record->source_op->parent_block->region_index);
     hash = loom_structural_hash_mix_u64(hash, offer->id);
+    hash = loom_structural_hash_mix_u64(hash, offer->alternative_id);
     hash = loom_structural_hash_finalize(loom_structural_hash_mix_bytes(
         hash, offer->key.data, offer->key.data_length));
     iree_host_size_t bucket = hash & (bucket_count - 1);
@@ -420,7 +442,8 @@ static iree_status_t loom_low_lower_realizations_select_offers(
           iree_max(group->minimum_removed_count, offer->minimum_removed_count);
     }
     offer_groups[offer_index++] = group;
-    group->replacement_cost += offer->setup_cost;
+    group->replacement_cost +=
+        offer->setup_cost + trips * offer->iteration_cost;
     hash = loom_structural_hash_mix_u64(loom_structural_hash_initialize(),
                                         (uint64_t)(group - groups));
     hash = loom_structural_hash_finalize(
@@ -438,13 +461,48 @@ static iree_status_t loom_low_lower_realizations_select_offers(
       ++group->removed_count;
     }
   }
+  loom_low_lower_realization_cost_group_t** alternative_buckets = group_buckets;
+  memset(alternative_buckets, 0, bucket_count * sizeof(*alternative_buckets));
+  for (iree_host_size_t i = 0; i < group_count; ++i) {
+    loom_low_lower_realization_cost_group_t* group = &groups[i];
+    if (group->removed_count < group->minimum_removed_count ||
+        group->direct_cost <= group->replacement_cost) {
+      continue;
+    }
+    const loom_low_lower_realization_offer_record_t* first = group->first;
+    const loom_low_lower_realization_offer_t* offer = &first->offer;
+    if (offer->alternative_id == 0) {
+      group->selected = true;
+      continue;
+    }
+    uint32_t hash = loom_structural_hash_mix_u16(
+        loom_structural_hash_initialize(),
+        first->source_op->parent_block->region_index);
+    hash = loom_structural_hash_mix_u64(hash, offer->alternative_id);
+    hash = loom_structural_hash_finalize(loom_structural_hash_mix_bytes(
+        hash, offer->key.data, offer->key.data_length));
+    iree_host_size_t bucket = hash & (bucket_count - 1);
+    while (alternative_buckets[bucket] != NULL &&
+           !loom_low_lower_realization_alternative_set_equal(
+               alternative_buckets[bucket], group)) {
+      bucket = (bucket + 1) & (bucket_count - 1);
+    }
+    loom_low_lower_realization_cost_group_t* selected =
+        alternative_buckets[bucket];
+    if (selected == NULL ||
+        group->direct_cost - group->replacement_cost >
+            selected->direct_cost - selected->replacement_cost) {
+      if (selected != NULL) {
+        selected->selected = false;
+      }
+      group->selected = true;
+      alternative_buckets[bucket] = group;
+    }
+  }
   offer_index = 0;
   for (loom_low_lower_realization_offer_record_t* record = state->offers.first;
        record; record = record->next) {
-    const loom_low_lower_realization_cost_group_t* group =
-        offer_groups[offer_index++];
-    record->selected = group->removed_count >= group->minimum_removed_count &&
-                       group->direct_cost > group->replacement_cost;
+    record->selected = offer_groups[offer_index++]->selected;
   }
   iree_status_t status = iree_ok_status();
   for (loom_low_lower_realization_offer_record_t* record = state->offers.first;

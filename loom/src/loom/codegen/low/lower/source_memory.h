@@ -41,6 +41,8 @@ typedef struct loom_low_lower_source_memory_term_recurrence_t {
   iree_host_size_t term_identity;
   // Dynamic-term ordinal in the containing canonical access.
   uint8_t term_ordinal;
+  // Whether every other canonical term is invariant in the containing loop.
+  bool can_carry_complete_offset;
 } loom_low_lower_source_memory_term_recurrence_t;
 
 // Sparse recurrence families retained only for accesses with candidates.

@@ -429,3 +429,41 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) @single_ranked_
 ^_bb3:
   return
 }
+
+// ====
+// RUN: emit source-low output=low
+
+x86.target<avx2> @target {tune = znver5}
+
+func.def target(@target) @complete_ranked_stride_store(%column_count: index, %output: view<4x2x[%column_count]xi32>) where [range(%column_count, 1, 128)] {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %value = scalar.constant 11 : i32
+  scf.for %row = [%c0 to %c4 step %c1] {
+    view.store %value, %output[%row, 1, 0] : i32, view<4x2x[%column_count]xi32>
+  }
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @complete_ranked_stride_store(%column_count: reg<x86.gpr64>, %output: reg<x86.gpr64>) where [range(%column_count, 1, 128)] asm {
+  %15 = mov.imm64 8
+  %16 = copy %column_count : reg<x86.gpr64> -> reg<x86.gpr64>
+  %17 = imul.gpr64 %16, %15
+  %18 = mov.imm64 4
+  %19 = copy %column_count : reg<x86.gpr64> -> reg<x86.gpr64>
+  %20 = imul.gpr64 %19, %18
+  %c0 = mov.imm64 0
+  %value = mov.imm32 11
+  low.br ^_bb1(%c0: reg<x86.gpr64>, %20: reg<x86.gpr64>)
+^_bb1(%row: reg<x86.gpr64>, %14: reg<x86.gpr64>):
+  low.op.cond_br<x86.scalar.cmp.branch.imm.gpr64>(%row) {imm32 = 4, predicate = 12}, ^_bb2, ^_bb3 : (reg<x86.gpr64>)
+^_bb2:
+  mov.store.indexed.gpr32 %value, %output, %14 {disp32 = 0, scale = 1}
+  %23 = add.gpr64 %14, %17
+  %24 = lea.disp %row {disp32 = 1}
+  low.br ^_bb1(%24: reg<x86.gpr64>, %23: reg<x86.gpr64>)
+^_bb3:
+  return
+}

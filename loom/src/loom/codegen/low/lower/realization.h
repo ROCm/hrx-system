@@ -102,11 +102,16 @@ typedef iree_status_t (*loom_low_lower_realization_apply_fn_t)(
     const loom_low_lower_realization_t* realization, void* data);
 
 typedef struct loom_low_lower_realization_offer_t {
-  // Target recipe family defining the cost units and opaque keys.
+  // Replacement strategy family defining the cost units and opaque keys.
   loom_low_lower_plan_id_t id;
-  // Shared replacement identity, excluding the loop and source block. Every
-  // byte is initialized; offers with equal keys use the same group costs.
+  // Replacement strategy identity, excluding the loop and source block.
+  // Offers with equal strategy IDs, alternative IDs, and keys share group
+  // costs and are selected together.
   iree_const_byte_span_t key;
+  // Optional family of mutually exclusive replacement strategies. Groups
+  // with different IDs but the same nonzero alternative ID and key compete by
+  // total savings; only the most profitable group is selected.
+  loom_low_lower_plan_id_t alternative_id;
   // Cost paid once to initialize the group's shared physical state.
   uint32_t group_setup_cost;
   // Cost paid once per iteration for the group's shared physical state.
@@ -116,12 +121,14 @@ typedef struct loom_low_lower_realization_offer_t {
   uint64_t removed_key;
   // Per-iteration cost of the removed direct calculation.
   uint32_t removed_iteration_cost;
-  // Minimum number of distinct direct calculations the complete group must
+  // Minimum number of distinct direct calculations the strategy group must
   // replace before its shared physical state is profitable.
   uint32_t minimum_removed_count;
   // Conservative setup cost for this offer's additional invariant values.
   uint32_t setup_cost;
-  // Physical value requested only when the complete offer group wins. NULL
+  // Per-iteration cost for this offer's independent physical state.
+  uint32_t iteration_cost;
+  // Physical value requested only when the offer group wins. NULL
   // leaves physical realization entirely to the target callback.
   const loom_low_lower_realization_recipe_t* recipe;
   // Applies the selected replacement to its retained target plan.
