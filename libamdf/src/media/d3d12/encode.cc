@@ -38,7 +38,8 @@ amdf_status_t PrepareH264(const Session& session,
   const auto* source =
       static_cast<const amdf_media_h264_encode_picture_info_t*>(encode.next);
   amdf_status_t status = amdf_media_h264_validate_encode_picture(
-      &session.requirements, &encode, &session.h264_encode, source);
+      &session.requirements, &session.encode, &encode, &session.h264_encode,
+      source);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -81,7 +82,7 @@ amdf_status_t PrepareHevc(const Session& session,
   const auto* source =
       static_cast<const amdf_media_hevc_encode_picture_info_t*>(encode.next);
   amdf_status_t status = amdf_media_hevc_validate_encode_picture(
-      &session.requirements, &encode, source);
+      &session.requirements, &session.encode, &encode, source);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -177,7 +178,8 @@ amdf_status_t PrepareAv1(const Session& session,
   const auto* source =
       static_cast<const amdf_media_av1_encode_picture_info_t*>(encode.next);
   amdf_status_t status = amdf_media_av1_validate_encode_picture(
-      &session.requirements, &encode, &session.av1_encode, source);
+      &session.requirements, &session.encode, &encode, &session.av1_encode,
+      source);
   if (!amdf_status_is_ok(status)) {
     return status;
   }

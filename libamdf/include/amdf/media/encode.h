@@ -19,6 +19,8 @@ extern "C" {
   ((amdf_structure_type_t)0x00040802u)
 #define AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_RESULT_INFO \
   ((amdf_structure_type_t)0x00040803u)
+#define AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION_INFO \
+  ((amdf_structure_type_t)0x00040804u)
 
 typedef uint32_t amdf_media_encode_rate_control_mode_t;
 enum amdf_media_encode_rate_control_mode_e {
@@ -59,10 +61,8 @@ typedef struct amdf_media_encode_bit_rate_t {
   uint64_t initial_virtual_buffer_fullness;
 } amdf_media_encode_bit_rate_t;
 
-/// Exact rate-control mode admitted for one encode session.
-typedef struct amdf_media_encode_rate_control_t {
-  /// Selects the active control member.
-  amdf_media_encode_rate_control_mode_t mode;
+/// Rate-control state for pictures targeting one temporal layer.
+typedef struct amdf_media_encode_rate_control_layer_t {
   /// Target frame-rate numerator.
   uint32_t frame_rate_numerator;
   /// Target frame-rate denominator.
@@ -74,7 +74,33 @@ typedef struct amdf_media_encode_rate_control_t {
     /// Controls selected when mode is CBR or VBR.
     amdf_media_encode_bit_rate_t bit_rate;
   } control;
+} amdf_media_encode_rate_control_layer_t;
+
+/// Exact rate-control topology admitted for one encode session. The caller
+/// owns temporal_layers through admission or session creation. A successful
+/// session creation retains its own copy.
+typedef struct amdf_media_encode_rate_control_t {
+  /// Mode shared by every temporal-layer record.
+  amdf_media_encode_rate_control_mode_t mode;
+  /// Nonzero number of immutable temporal-layer records.
+  uint32_t temporal_layer_count;
+  /// Borrowed array of temporal_layer_count independent layer records.
+  const amdf_media_encode_rate_control_layer_t* temporal_layers;
 } amdf_media_encode_rate_control_t;
+
+/// Optional typed output chained from amdf_media_configuration_info_t for an
+/// encode configuration query.
+typedef struct amdf_media_encode_configuration_info_t {
+  /// AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION_INFO.
+  amdf_structure_type_t type;
+  /// Size of caller-provided result storage.
+  uint32_t structure_size;
+  /// Further caller-provided typed outputs, currently NULL.
+  void* next;
+  /// Maximum admitted temporal-layer count for the queried codec tuple, or
+  /// zero when that tuple cannot encode.
+  uint32_t maximum_temporal_layer_count;
+} amdf_media_encode_configuration_info_t;
 
 /// Shared IP-only encode envelope chained after the codec configuration.
 /// Codec-specific encode configuration, when required, is chained from next.
@@ -109,6 +135,9 @@ typedef struct amdf_media_encode_picture_info_t {
   const amdf_media_frame_t* reconstruction;
   /// Stable application-owned reconstruction slot.
   uint32_t reconstruction_slot_index;
+  /// Temporal layer targeted by this picture, less than the session's
+  /// configured temporal-layer count.
+  uint32_t temporal_layer_index;
   /// Caller-owned compressed output range. Its accessible extent satisfies the
   /// complete minimum reported by configuration admission.
   amdf_media_buffer_range_t compressed;

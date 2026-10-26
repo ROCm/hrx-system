@@ -351,18 +351,25 @@ static bool amdf_media_drm_encode_rate_fits_vcn(
   if (encode->rate_control.mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP) {
     return true;
   }
-  const amdf_media_encode_bit_rate_t* bit_rate =
-      &encode->rate_control.control.bit_rate;
-  if (bit_rate->maximum_frame_bit_count > UINT32_MAX ||
-      bit_rate->target_bit_rate > UINT32_MAX ||
-      bit_rate->peak_bit_rate > UINT32_MAX ||
-      bit_rate->virtual_buffer_capacity > UINT32_MAX) {
-    return false;
+  for (uint32_t index = 0; index < encode->rate_control.temporal_layer_count;
+       ++index) {
+    const amdf_media_encode_rate_control_layer_t* layer =
+        &encode->rate_control.temporal_layers[index];
+    const amdf_media_encode_bit_rate_t* bit_rate = &layer->control.bit_rate;
+    if (bit_rate->maximum_frame_bit_count > UINT32_MAX ||
+        bit_rate->target_bit_rate > UINT32_MAX ||
+        bit_rate->peak_bit_rate > UINT32_MAX ||
+        bit_rate->virtual_buffer_capacity > UINT32_MAX) {
+      return false;
+    }
+    const uint64_t denominator = layer->frame_rate_denominator;
+    const uint64_t numerator = layer->frame_rate_numerator;
+    if (bit_rate->target_bit_rate * denominator / numerator > UINT32_MAX ||
+        bit_rate->peak_bit_rate * denominator / numerator > UINT32_MAX) {
+      return false;
+    }
   }
-  const uint64_t denominator = encode->rate_control.frame_rate_denominator;
-  const uint64_t numerator = encode->rate_control.frame_rate_numerator;
-  return bit_rate->target_bit_rate * denominator / numerator <= UINT32_MAX &&
-         bit_rate->peak_bit_rate * denominator / numerator <= UINT32_MAX;
+  return true;
 }
 
 static amdf_status_t amdf_media_drm_encode_configuration(
@@ -530,7 +537,8 @@ static amdf_status_t amdf_media_drm_encode_configuration(
         &info, AMDF_MEDIA_CONFIGURATION_REASON_CODEC, out_info);
     return AMDF_STATUS_OK;
   }
-  if (configuration->reference_image_count > 34 ||
+  if (encode->rate_control.temporal_layer_count != 1 ||
+      configuration->reference_image_count > 34 ||
       !amdf_media_drm_encode_rate_fits_vcn(encode)) {
     amdf_media_drm_answer_unsupported(
         &info, AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION, out_info);
@@ -617,9 +625,41 @@ amdf_status_t amdf_media_drm_configuration(
 static amdf_status_t AMDF_CALL amdf_media_drm_query_configuration(
     amdf_device_t* device, const amdf_media_configuration_query_t* query,
     amdf_media_configuration_info_t* out_info) {
-  return amdf_media_drm_configuration(
+  amdf_media_encode_configuration_info_t* encode_info = out_info->next;
+  if (encode_info != NULL) {
+    amdf_status_t status = amdf_structure_validate_output(
+        encode_info, AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION_INFO,
+        sizeof(*encode_info));
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    if (query->configuration.direction != AMDF_MEDIA_DIRECTION_ENCODE) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
+  }
+  amdf_media_configuration_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_CONFIGURATION_INFO,
+      .structure_size = out_info->structure_size,
+  };
+  amdf_status_t status = amdf_media_drm_configuration(
       (amdf_media_drm_device_t*)device, query->queue_family_ordinal,
-      &query->configuration, query->next, out_info);
+      &query->configuration, query->next, &info);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  amdf_media_encode_configuration_info_t encode_value = {0};
+  if (encode_info != NULL) {
+    encode_value.type = AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION_INFO;
+    encode_value.structure_size = encode_info->structure_size;
+    encode_value.maximum_temporal_layer_count =
+        info.reason == AMDF_MEDIA_CONFIGURATION_REASON_CODEC ? 0 : 1;
+  }
+  info.next = encode_info;
+  *out_info = info;
+  if (encode_info != NULL) {
+    *encode_info = encode_value;
+  }
+  return AMDF_STATUS_OK;
 }
 
 static const amdf_media_api_t amdf_media_drm_operations = {

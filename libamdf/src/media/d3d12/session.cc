@@ -6,6 +6,8 @@
 
 #include "libamdf/src/media/d3d12/session.h"
 
+#include <cstring>
+
 #include "libamdf/src/media/d3d12/configuration.h"
 #include "libamdf/src/media/d3d12/object.h"
 
@@ -103,6 +105,11 @@ SessionCreate(amdf_kernel_queue_t* queue,
     const auto* encode = static_cast<const amdf_media_encode_configuration_t*>(
         static_cast<const amdf_input_structure_t*>(create_info->next)->next);
     session->encode = *encode;
+    std::memcpy(session->rate_control_layers,
+                encode->rate_control.temporal_layers,
+                encode->rate_control.temporal_layer_count *
+                    sizeof(session->rate_control_layers[0]));
+    session->encode.rate_control.temporal_layers = session->rate_control_layers;
     if (create_info->configuration.codec == AMDF_MEDIA_CODEC_H264) {
       session->h264_encode =
           *static_cast<const amdf_media_h264_encode_configuration_t*>(

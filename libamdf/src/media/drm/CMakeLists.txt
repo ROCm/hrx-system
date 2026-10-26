@@ -64,6 +64,7 @@ iree_cc_library(
     libamdf::src::allocator
     libamdf::src::atomics
     libamdf::src::media::av1
+    libamdf::src::media::encode
     libamdf::src::media::h264
     libamdf::src::media::hevc
     libamdf::src::media::vp9

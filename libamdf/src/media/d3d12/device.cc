@@ -18,6 +18,7 @@
 #include "libamdf/src/media/d3d12/session.h"
 #include "libamdf/src/platform/windows/endpoint.h"
 #include "libamdf/src/platform/windows/endpoint_properties.h"
+#include "libamdf/src/structure.h"
 
 namespace amdf::media::d3d12 {
 namespace {
@@ -97,9 +98,42 @@ amdf_status_t AMDF_CALL EnumerateCodecs(amdf_device_t*, uint32_t ordinal,
 amdf_status_t AMDF_CALL QueryDeviceConfiguration(
     amdf_device_t* base, const amdf_media_configuration_query_t* query,
     amdf_media_configuration_info_t* out_info) {
-  return QueryConfiguration(reinterpret_cast<Device*>(base),
-                            query->queue_family_ordinal, query->configuration,
-                            query->next, out_info, nullptr, nullptr);
+  auto* encode_info =
+      static_cast<amdf_media_encode_configuration_info_t*>(out_info->next);
+  if (encode_info != nullptr) {
+    amdf_status_t status = amdf_structure_validate_output(
+        encode_info, AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION_INFO,
+        sizeof(*encode_info));
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    if (query->configuration.direction != AMDF_MEDIA_DIRECTION_ENCODE) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
+  }
+  amdf_media_configuration_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_CONFIGURATION_INFO,
+      .structure_size = out_info->structure_size,
+  };
+  amdf_status_t status = QueryConfiguration(
+      reinterpret_cast<Device*>(base), query->queue_family_ordinal,
+      query->configuration, query->next, &info, nullptr, nullptr);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  amdf_media_encode_configuration_info_t encode_value = {};
+  if (encode_info != nullptr) {
+    encode_value.type = AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION_INFO;
+    encode_value.structure_size = encode_info->structure_size;
+    encode_value.maximum_temporal_layer_count =
+        info.reason == AMDF_MEDIA_CONFIGURATION_REASON_CODEC ? 0 : 1;
+  }
+  info.next = encode_info;
+  *out_info = info;
+  if (encode_info != nullptr) {
+    *encode_info = encode_value;
+  }
+  return AMDF_STATUS_OK;
 }
 
 amdf_status_t AMDF_CALL QueryImageRequirements(

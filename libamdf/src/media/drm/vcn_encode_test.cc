@@ -118,9 +118,11 @@ class VcnEncodePacketTest : public ::testing::Test {
                                            192,
                                            2};
     session_.encode.rate_control.mode = AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP;
-    session_.encode.rate_control.frame_rate_numerator = 30;
-    session_.encode.rate_control.frame_rate_denominator = 1;
-    session_.encode.rate_control.control.cqp = {20, 20};
+    session_.encode.rate_control.temporal_layer_count = 1;
+    session_.encode.rate_control.temporal_layers = session_.rate_control_layers;
+    session_.rate_control_layers[0].frame_rate_numerator = 30;
+    session_.rate_control_layers[0].frame_rate_denominator = 1;
+    session_.rate_control_layers[0].control.cqp = {20, 20};
     resources_.input.addresses[0] = kSourceAddress;
     resources_.input.addresses[1] = kSourceAddress + 512 * 192;
     resources_.input.row_pitches[0] = 512;
@@ -234,7 +236,7 @@ TEST_F(VcnEncodePacketTest, H264MatchesQualifiedNativePackets) {
 TEST_F(VcnEncodePacketTest, Vcn5RateControlTracksEachPicture) {
   ConfigureVcn5();
   session_.codec.h264.level_idc = 30;
-  session_.encode.rate_control.control.cqp = {17, 29};
+  session_.rate_control_layers[0].control.cqp = {17, 29};
 
   uint32_t length = amdf_media_drm_vcn_encode_control(
       &command_, &session_, AMDF_MEDIA_COMMAND_OPERATION_BEGIN);
@@ -264,7 +266,7 @@ TEST_F(VcnEncodePacketTest, Vcn5RateControlTracksEachPicture) {
   ExpectVcn5RateControl(words_, length, 29, 29, 29, 1, 51);
 
   session_.encode.rate_control.mode = AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CBR;
-  session_.encode.rate_control.control.bit_rate = {
+  session_.rate_control_layers[0].control.bit_rate = {
       .minimum_quantization_parameter = 4,
       .maximum_quantization_parameter = 44,
       .maximum_frame_bit_count = 123456,

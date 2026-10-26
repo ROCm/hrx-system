@@ -188,6 +188,8 @@ static amdf_media_drm_vcn_encode_rate_control_state_t
 amdf_media_drm_vcn_encode_rate_control_state(
     const amdf_media_drm_session_t* session) {
   const amdf_media_encode_rate_control_t* rate = &session->encode.rate_control;
+  const amdf_media_encode_rate_control_layer_t* layer =
+      &rate->temporal_layers[0];
   const bool av1 =
       session->requirements.configuration.codec == AMDF_MEDIA_CODEC_AV1;
   amdf_media_drm_vcn_encode_rate_control_state_t state = {
@@ -196,13 +198,13 @@ amdf_media_drm_vcn_encode_rate_control_state(
       .peak = 1200000,
       .virtual_buffer = 1200000,
       .virtual_buffer_level = 32,
-      .intra_qp = rate->control.cqp.intra_quantization_parameter,
-      .predicted_qp = rate->control.cqp.predicted_quantization_parameter,
+      .intra_qp = layer->control.cqp.intra_quantization_parameter,
+      .predicted_qp = layer->control.cqp.predicted_quantization_parameter,
       .minimum_qp = av1 ? 8 : 1,
       .maximum_qp = av1 ? 255 : 51,
   };
   if (state.method != 0) {
-    const amdf_media_encode_bit_rate_t* bit_rate = &rate->control.bit_rate;
+    const amdf_media_encode_bit_rate_t* bit_rate = &layer->control.bit_rate;
     state.target = bit_rate->target_bit_rate;
     state.peak = bit_rate->peak_bit_rate;
     state.virtual_buffer = bit_rate->virtual_buffer_capacity;
@@ -247,6 +249,8 @@ static void amdf_media_drm_vcn_encode_rate_control(
     amdf_media_drm_vcn_encode_writer_t* writer,
     const amdf_media_drm_session_t* session) {
   const amdf_media_encode_rate_control_t* rate = &session->encode.rate_control;
+  const amdf_media_encode_rate_control_layer_t* layer =
+      &rate->temporal_layers[0];
   const amdf_media_drm_vcn_encode_rate_control_state_t state =
       amdf_media_drm_vcn_encode_rate_control_state(session);
   // Disabled rate control still requires a complete layer record. Firmware
@@ -274,21 +278,21 @@ static void amdf_media_drm_vcn_encode_rate_control(
   block = amdf_media_drm_vcn_encode_block_begin(writer, 7);
   amdf_media_drm_vcn_encode_word(writer, (uint32_t)state.target);
   amdf_media_drm_vcn_encode_word(writer, (uint32_t)state.peak);
-  amdf_media_drm_vcn_encode_word(writer, rate->frame_rate_numerator);
-  amdf_media_drm_vcn_encode_word(writer, rate->frame_rate_denominator);
+  amdf_media_drm_vcn_encode_word(writer, layer->frame_rate_numerator);
+  amdf_media_drm_vcn_encode_word(writer, layer->frame_rate_denominator);
   amdf_media_drm_vcn_encode_word(writer, (uint32_t)state.virtual_buffer);
   amdf_media_drm_vcn_encode_word(writer,
                                  amdf_media_drm_vcn_encode_per_picture_integer(
-                                     state.target, rate->frame_rate_numerator,
-                                     rate->frame_rate_denominator));
+                                     state.target, layer->frame_rate_numerator,
+                                     layer->frame_rate_denominator));
   amdf_media_drm_vcn_encode_word(writer,
                                  amdf_media_drm_vcn_encode_per_picture_integer(
-                                     state.peak, rate->frame_rate_numerator,
-                                     rate->frame_rate_denominator));
+                                     state.peak, layer->frame_rate_numerator,
+                                     layer->frame_rate_denominator));
   amdf_media_drm_vcn_encode_word(writer,
                                  amdf_media_drm_vcn_encode_per_picture_fraction(
-                                     state.peak, rate->frame_rate_numerator,
-                                     rate->frame_rate_denominator));
+                                     state.peak, layer->frame_rate_numerator,
+                                     layer->frame_rate_denominator));
   amdf_media_drm_vcn_encode_block_end(writer, block);
 
   block = amdf_media_drm_vcn_encode_block_begin(writer, 5);

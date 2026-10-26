@@ -303,6 +303,8 @@ enum amdf_media_hevc_encode_frame_type_e {
 typedef struct amdf_media_hevc_encode_reference_t {
   /// Borrowed reconstructed picture and stable physical slot.
   amdf_media_reference_t binding;
+  /// Temporal layer in which this reconstructed picture was encoded.
+  uint32_t temporal_layer_index;
   /// Full picture order count.
   int32_t picture_order_count;
   /// Nonzero for a long-term reference; unsupported by the initial envelope.

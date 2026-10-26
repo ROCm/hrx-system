@@ -302,11 +302,12 @@ static bool amdf_media_av1_encode_tools_valid(
 
 amdf_status_t amdf_media_av1_validate_encode_picture(
     const amdf_media_configuration_info_t* requirements,
+    const amdf_media_encode_configuration_t* configuration,
     const amdf_media_encode_picture_info_t* picture,
     const amdf_media_av1_encode_configuration_t* av1_encode,
     const amdf_media_av1_encode_picture_info_t* av1_picture) {
   amdf_status_t status =
-      amdf_media_encode_validate_picture(requirements, picture);
+      amdf_media_encode_validate_picture(requirements, configuration, picture);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -347,7 +348,9 @@ amdf_status_t amdf_media_av1_validate_encode_picture(
         reference->binding.slot_index >=
             requirements->configuration.reference_image_count ||
         reference->binding.slot_index == picture->reconstruction_slot_index ||
-        reference->order_hint >= (1u << av1_encode->order_hint_bit_count)) {
+        reference->order_hint >= (1u << av1_encode->order_hint_bit_count) ||
+        reference->temporal_layer_index >=
+            configuration->rate_control.temporal_layer_count) {
       return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
     }
   }

@@ -308,21 +308,23 @@ static amdf_status_t amdf_media_drm_command_prepare_encode(
   if (codec == AMDF_MEDIA_CODEC_H264) {
     h264 = encode != NULL ? encode->next : NULL;
     status = amdf_media_h264_validate_encode_picture(
-        &session->requirements, encode, &session->encode_codec.h264, h264);
+        &session->requirements, &session->encode, encode,
+        &session->encode_codec.h264, h264);
     if (amdf_status_is_ok(status)) {
       reference_count = h264->reference_count;
     }
   } else if (codec == AMDF_MEDIA_CODEC_HEVC) {
     hevc = encode != NULL ? encode->next : NULL;
-    status = amdf_media_hevc_validate_encode_picture(&session->requirements,
-                                                     encode, hevc);
+    status = amdf_media_hevc_validate_encode_picture(
+        &session->requirements, &session->encode, encode, hevc);
     if (amdf_status_is_ok(status)) {
       reference_count = hevc->reference_count;
     }
   } else {
     av1 = encode != NULL ? encode->next : NULL;
     status = amdf_media_av1_validate_encode_picture(
-        &session->requirements, encode, &session->encode_codec.av1, av1);
+        &session->requirements, &session->encode, encode,
+        &session->encode_codec.av1, av1);
     if (amdf_status_is_ok(status) &&
         !amdf_media_drm_av1_encode_picture_supported(av1)) {
       status = amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);

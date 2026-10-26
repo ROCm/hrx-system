@@ -29,6 +29,7 @@ amdf_status_t amdf_media_av1_validate_encode_configuration(
 // Validates AV1 picture tools, ordering, and references before recording.
 amdf_status_t amdf_media_av1_validate_encode_picture(
     const amdf_media_configuration_info_t* requirements,
+    const amdf_media_encode_configuration_t* configuration,
     const amdf_media_encode_picture_info_t* picture,
     const amdf_media_av1_encode_configuration_t* av1_encode,
     const amdf_media_av1_encode_picture_info_t* av1_picture);

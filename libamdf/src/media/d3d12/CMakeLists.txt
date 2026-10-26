@@ -132,6 +132,7 @@ iree_cc_library(
     libamdf::src::child_tracker
     libamdf::src::kernel_queue
     libamdf::src::media::av1
+    libamdf::src::media::encode
     libamdf::src::media::h264
     libamdf::src::media::hevc
     libamdf::src::media::vp9
@@ -165,6 +166,7 @@ iree_cc_library(
     libamdf::src::platform::windows::endpoint
     libamdf::src::platform::windows::endpoint_properties
     libamdf::src::platform::windows::monitored_fence
+    libamdf::src::structure
   PUBLIC
 )
 endif()

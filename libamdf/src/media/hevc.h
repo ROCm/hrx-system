@@ -32,6 +32,7 @@ amdf_status_t amdf_media_hevc_validate_encode_configuration(
 // Validates HEVC picture ordering and references before native recording.
 amdf_status_t amdf_media_hevc_validate_encode_picture(
     const amdf_media_configuration_info_t* requirements,
+    const amdf_media_encode_configuration_t* configuration,
     const amdf_media_encode_picture_info_t* picture,
     const amdf_media_hevc_encode_picture_info_t* hevc_picture);
 

@@ -193,6 +193,8 @@ enum amdf_media_h264_encode_frame_type_e {
 typedef struct amdf_media_h264_encode_reference_t {
   /// Borrowed reconstructed picture and stable physical slot.
   amdf_media_reference_t binding;
+  /// Temporal layer in which this reconstructed picture was encoded.
+  uint32_t temporal_layer_index;
   /// IDR or forward-predicted type used when this reference was encoded.
   amdf_media_h264_encode_frame_type_t frame_type;
   /// frame_num used when this reference was encoded.

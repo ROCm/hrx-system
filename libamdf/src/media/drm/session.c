@@ -65,6 +65,11 @@ amdf_status_t AMDF_CALL amdf_media_drm_session_create(
       const amdf_media_encode_configuration_t* encode =
           ((const amdf_input_structure_t*)create_info->next)->next;
       session->encode = *encode;
+      memcpy(session->rate_control_layers, encode->rate_control.temporal_layers,
+             encode->rate_control.temporal_layer_count *
+                 sizeof(session->rate_control_layers[0]));
+      session->encode.rate_control.temporal_layers =
+          session->rate_control_layers;
       if (create_info->configuration.codec == AMDF_MEDIA_CODEC_H264) {
         session->encode_codec.h264 =
             *(const amdf_media_h264_encode_configuration_t*)encode->next;

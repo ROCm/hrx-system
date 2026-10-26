@@ -310,10 +310,11 @@ amdf_status_t amdf_media_hevc_validate_encode_configuration(
 
 amdf_status_t amdf_media_hevc_validate_encode_picture(
     const amdf_media_configuration_info_t* requirements,
+    const amdf_media_encode_configuration_t* configuration,
     const amdf_media_encode_picture_info_t* picture,
     const amdf_media_hevc_encode_picture_info_t* hevc_picture) {
   amdf_status_t status =
-      amdf_media_encode_validate_picture(requirements, picture);
+      amdf_media_encode_validate_picture(requirements, configuration, picture);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -346,7 +347,9 @@ amdf_status_t amdf_media_hevc_validate_encode_picture(
     if (reference->binding.frame == NULL || reference->long_term != 0 ||
         reference->binding.slot_index >=
             requirements->configuration.reference_image_count ||
-        reference->binding.slot_index == picture->reconstruction_slot_index) {
+        reference->binding.slot_index == picture->reconstruction_slot_index ||
+        reference->temporal_layer_index >=
+            configuration->rate_control.temporal_layer_count) {
       return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
     }
   }

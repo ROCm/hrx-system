@@ -68,7 +68,7 @@ static amdf_status_t AMDF_CALL amdf_media_device_query_configuration(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  status = amdf_structure_validate_output(
+  status = amdf_structure_validate_header(
       out_info, AMDF_STRUCTURE_TYPE_MEDIA_CONFIGURATION_INFO,
       sizeof(*out_info));
   if (!amdf_status_is_ok(status)) {

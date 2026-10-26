@@ -337,6 +337,8 @@ typedef struct amdf_media_av1_encode_configuration_t {
 typedef struct amdf_media_av1_encode_reference_t {
   /// Borrowed reconstructed picture and stable physical slot.
   amdf_media_reference_t binding;
+  /// Temporal layer in which this reconstructed picture was encoded.
+  uint32_t temporal_layer_index;
   /// KEY=0, INTER=1, INTRA_ONLY=2, or SWITCH=3.
   uint32_t frame_type;
   /// Reference order hint in the configured bit width.
@@ -346,8 +348,9 @@ typedef struct amdf_media_av1_encode_reference_t {
 } amdf_media_av1_encode_reference_t;
 
 /// Parsed AV1 picture controls chained from amdf_media_encode_picture_info_t.
-/// The initial envelope admits one full-frame tile and no temporal/spatial
-/// layers, segmentation map, restoration, super-resolution, or B pictures.
+/// The initial envelope admits one full-frame tile and temporal scalability,
+/// but no spatial layers, segmentation map, restoration, super-resolution, or
+/// B pictures.
 typedef struct amdf_media_av1_encode_picture_info_t {
   /// AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_PICTURE_INFO.
   amdf_structure_type_t type;

@@ -49,9 +49,11 @@ class EncodeValidationTest : public ::testing::Test {
     encode_.intra_picture_period = 30;
     encode_.inter_picture_period = 1;
     encode_.rate_control.mode = AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP;
-    encode_.rate_control.frame_rate_numerator = 30;
-    encode_.rate_control.frame_rate_denominator = 1;
-    encode_.rate_control.control.cqp = {22, 24};
+    encode_.rate_control.temporal_layer_count = 1;
+    encode_.rate_control.temporal_layers = &rate_control_layer_;
+    rate_control_layer_.frame_rate_numerator = 30;
+    rate_control_layer_.frame_rate_denominator = 1;
+    rate_control_layer_.control.cqp = {22, 24};
 
     Initialize(&picture_, AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_PICTURE_INFO);
     picture_.input = &input_;
@@ -64,6 +66,7 @@ class EncodeValidationTest : public ::testing::Test {
 
   amdf_media_configuration_info_t requirements_ = {};
   amdf_media_encode_configuration_t encode_ = {};
+  amdf_media_encode_rate_control_layer_t rate_control_layer_ = {};
   amdf_media_encode_picture_info_t picture_ = {};
   amdf_media_frame_t input_ = {};
   amdf_media_frame_t reconstruction_ = {};
@@ -74,59 +77,100 @@ TEST_F(EncodeValidationTest, RateControlAndCompressedOutputAreExactContracts) {
   EXPECT_EQ(amdf_media_encode_validate_configuration(
                 &requirements_.configuration, &encode_),
             AMDF_STATUS_OK);
-  EXPECT_EQ(amdf_media_encode_validate_picture(&requirements_, &picture_),
-            AMDF_STATUS_OK);
+  EXPECT_EQ(
+      amdf_media_encode_validate_picture(&requirements_, &encode_, &picture_),
+      AMDF_STATUS_OK);
 
   picture_.compressed.byte_length = 91904;
-  EXPECT_EQ(amdf_media_encode_validate_picture(&requirements_, &picture_),
-            amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
+  EXPECT_EQ(
+      amdf_media_encode_validate_picture(&requirements_, &encode_, &picture_),
+      amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
   picture_.compressed.byte_length = 92160;
   picture_.compressed.byte_offset = 128;
-  EXPECT_EQ(amdf_media_encode_validate_picture(&requirements_, &picture_),
-            amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
+  EXPECT_EQ(
+      amdf_media_encode_validate_picture(&requirements_, &encode_, &picture_),
+      amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
 
   encode_.rate_control.mode = AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CBR;
-  encode_.rate_control.control.bit_rate = {10,      40,      0,      4000000,
-                                           4000000, 8000000, 4000000};
+  rate_control_layer_.control.bit_rate = {10,      40,      0,      4000000,
+                                          4000000, 8000000, 4000000};
   EXPECT_EQ(amdf_media_encode_validate_configuration(
                 &requirements_.configuration, &encode_),
             AMDF_STATUS_OK);
-  encode_.rate_control.control.bit_rate.peak_bit_rate = 5000000;
+  rate_control_layer_.control.bit_rate.peak_bit_rate = 5000000;
   EXPECT_EQ(amdf_media_encode_validate_configuration(
                 &requirements_.configuration, &encode_),
             amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
 }
 
-TEST_F(EncodeValidationTest, Av1RateControlExcludesZeroQuantization) {
-  requirements_.configuration.codec = AMDF_MEDIA_CODEC_AV1;
-  encode_.rate_control.control.cqp = {1, 255};
+TEST_F(EncodeValidationTest, TemporalLayersAreIndependentImmutableRecords) {
+  amdf_media_encode_rate_control_layer_t layers[2] = {rate_control_layer_,
+                                                      rate_control_layer_};
+  layers[0].frame_rate_numerator = 15;
+  layers[1].frame_rate_numerator = 15;
+  layers[1].control.cqp = {28, 30};
+  encode_.rate_control.temporal_layer_count = 2;
+  encode_.rate_control.temporal_layers = layers;
   EXPECT_EQ(amdf_media_encode_validate_configuration(
                 &requirements_.configuration, &encode_),
             AMDF_STATUS_OK);
 
-  encode_.rate_control.control.cqp.intra_quantization_parameter = 0;
+  picture_.temporal_layer_index = 1;
+  EXPECT_EQ(
+      amdf_media_encode_validate_picture(&requirements_, &encode_, &picture_),
+      AMDF_STATUS_OK);
+  picture_.temporal_layer_index = 2;
+  EXPECT_EQ(
+      amdf_media_encode_validate_picture(&requirements_, &encode_, &picture_),
+      amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
+  picture_.temporal_layer_index = 0;
+
+  layers[1].frame_rate_denominator = 0;
+  EXPECT_EQ(amdf_media_encode_validate_configuration(
+                &requirements_.configuration, &encode_),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  layers[1].frame_rate_denominator = 1;
+  encode_.rate_control.temporal_layer_count = 0;
+  EXPECT_EQ(amdf_media_encode_validate_configuration(
+                &requirements_.configuration, &encode_),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  encode_.rate_control.temporal_layer_count =
+      AMDF_MEDIA_ENCODE_TEMPORAL_LAYER_STORAGE_CAPACITY + 1;
   EXPECT_EQ(amdf_media_encode_validate_configuration(
                 &requirements_.configuration, &encode_),
             amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
-  encode_.rate_control.control.cqp = {1, 0};
+}
+
+TEST_F(EncodeValidationTest, Av1RateControlExcludesZeroQuantization) {
+  requirements_.configuration.codec = AMDF_MEDIA_CODEC_AV1;
+  rate_control_layer_.control.cqp = {1, 255};
+  EXPECT_EQ(amdf_media_encode_validate_configuration(
+                &requirements_.configuration, &encode_),
+            AMDF_STATUS_OK);
+
+  rate_control_layer_.control.cqp.intra_quantization_parameter = 0;
+  EXPECT_EQ(amdf_media_encode_validate_configuration(
+                &requirements_.configuration, &encode_),
+            amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
+  rate_control_layer_.control.cqp = {1, 0};
   EXPECT_EQ(amdf_media_encode_validate_configuration(
                 &requirements_.configuration, &encode_),
             amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
 
   encode_.rate_control.mode = AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CBR;
-  encode_.rate_control.control.bit_rate = {1,       255,     0,      4000000,
-                                           4000000, 8000000, 4000000};
+  rate_control_layer_.control.bit_rate = {1,       255,     0,      4000000,
+                                          4000000, 8000000, 4000000};
   EXPECT_EQ(amdf_media_encode_validate_configuration(
                 &requirements_.configuration, &encode_),
             AMDF_STATUS_OK);
-  encode_.rate_control.control.bit_rate.minimum_quantization_parameter = 0;
+  rate_control_layer_.control.bit_rate.minimum_quantization_parameter = 0;
   EXPECT_EQ(amdf_media_encode_validate_configuration(
                 &requirements_.configuration, &encode_),
             amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
 
   requirements_.configuration.codec = AMDF_MEDIA_CODEC_H264;
   encode_.rate_control.mode = AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP;
-  encode_.rate_control.control.cqp = {0, 0};
+  rate_control_layer_.control.cqp = {0, 0};
   EXPECT_EQ(amdf_media_encode_validate_configuration(
                 &requirements_.configuration, &encode_),
             AMDF_STATUS_OK);
@@ -271,34 +315,52 @@ TEST_F(EncodeValidationTest, H264IPicturesUseStableReconstructionSlots) {
   h264_picture.frame_type = AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR;
   h264_picture.used_as_reference = 1;
   picture_.next = &h264_picture;
-  EXPECT_EQ(amdf_media_h264_validate_encode_picture(
-                &requirements_, &picture_, &h264_encode, &h264_picture),
-            AMDF_STATUS_OK);
+  EXPECT_EQ(
+      amdf_media_h264_validate_encode_picture(
+          &requirements_, &encode_, &picture_, &h264_encode, &h264_picture),
+      AMDF_STATUS_OK);
 
   const amdf_media_h264_encode_reference_t reference = {
-      {&reference_frame_, 0}, AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR, 0, 0, 0};
+      {&reference_frame_, 0},
+      0,
+      AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR,
+      0,
+      0,
+      0};
   h264_picture.frame_type = AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_P;
   h264_picture.frame_number = 1;
   h264_picture.picture_order_count = 2;
   h264_picture.frame_decoding_order_number = 1;
   h264_picture.reference_count = 1;
   h264_picture.references = &reference;
-  EXPECT_EQ(amdf_media_h264_validate_encode_picture(
-                &requirements_, &picture_, &h264_encode, &h264_picture),
-            AMDF_STATUS_OK);
+  EXPECT_EQ(
+      amdf_media_h264_validate_encode_picture(
+          &requirements_, &encode_, &picture_, &h264_encode, &h264_picture),
+      AMDF_STATUS_OK);
+
+  auto invalid_layer_reference = reference;
+  invalid_layer_reference.temporal_layer_index = 1;
+  h264_picture.references = &invalid_layer_reference;
+  EXPECT_EQ(
+      amdf_media_h264_validate_encode_picture(
+          &requirements_, &encode_, &picture_, &h264_encode, &h264_picture),
+      amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  h264_picture.references = &reference;
 
   auto invalid_reference = reference;
   invalid_reference.frame_type = 0;
   h264_picture.references = &invalid_reference;
-  EXPECT_EQ(amdf_media_h264_validate_encode_picture(
-                &requirements_, &picture_, &h264_encode, &h264_picture),
-            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  EXPECT_EQ(
+      amdf_media_h264_validate_encode_picture(
+          &requirements_, &encode_, &picture_, &h264_encode, &h264_picture),
+      amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
   h264_picture.references = &reference;
 
   picture_.reconstruction_slot_index = 0;
-  EXPECT_EQ(amdf_media_h264_validate_encode_picture(
-                &requirements_, &picture_, &h264_encode, &h264_picture),
-            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  EXPECT_EQ(
+      amdf_media_h264_validate_encode_picture(
+          &requirements_, &encode_, &picture_, &h264_encode, &h264_picture),
+      amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
 }
 
 TEST_F(EncodeValidationTest, HevcMain10AndGeometryRemainOneAdmittedEnvelope) {
@@ -365,12 +427,12 @@ TEST_F(EncodeValidationTest, Av1ReferencesPreserveLogicalAndPhysicalIdentity) {
     av1_picture.reference_indices[index] = 255;
   }
   picture_.next = &av1_picture;
-  EXPECT_EQ(amdf_media_av1_validate_encode_picture(&requirements_, &picture_,
-                                                   &av1_encode, &av1_picture),
+  EXPECT_EQ(amdf_media_av1_validate_encode_picture(
+                &requirements_, &encode_, &picture_, &av1_encode, &av1_picture),
             AMDF_STATUS_OK);
 
   const amdf_media_av1_encode_reference_t reference = {
-      {&reference_frame_, 0}, 0, 0, 0};
+      {&reference_frame_, 0}, 0, 0, 0, 0};
   av1_picture.frame_type = 1;
   av1_picture.order_hint = 1;
   av1_picture.primary_reference = 0;
@@ -379,13 +441,13 @@ TEST_F(EncodeValidationTest, Av1ReferencesPreserveLogicalAndPhysicalIdentity) {
   for (uint32_t index = 0; index < 7; ++index) {
     av1_picture.reference_indices[index] = 0;
   }
-  EXPECT_EQ(amdf_media_av1_validate_encode_picture(&requirements_, &picture_,
-                                                   &av1_encode, &av1_picture),
+  EXPECT_EQ(amdf_media_av1_validate_encode_picture(
+                &requirements_, &encode_, &picture_, &av1_encode, &av1_picture),
             AMDF_STATUS_OK);
 
   av1_picture.reference_indices[3] = 1;
-  EXPECT_EQ(amdf_media_av1_validate_encode_picture(&requirements_, &picture_,
-                                                   &av1_encode, &av1_picture),
+  EXPECT_EQ(amdf_media_av1_validate_encode_picture(
+                &requirements_, &encode_, &picture_, &av1_encode, &av1_picture),
             amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
 }
 

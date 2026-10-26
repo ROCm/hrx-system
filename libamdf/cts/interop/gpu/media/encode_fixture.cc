@@ -57,6 +57,8 @@ amdf_media_frame_t Frame(amdf_memory_t* memory, amdf_media_image_t* image,
 }
 
 struct ConfigurationChain {
+  // Independent rate-control state for the one-layer baseline session.
+  amdf_media_encode_rate_control_layer_t rate_control_layer = {};
   // Direction-common GOP and rate-control configuration.
   amdf_media_encode_configuration_t encode = {};
   // H264 profile and level at the head of an H264 chain.
@@ -79,12 +81,14 @@ struct ConfigurationChain {
     encode.intra_picture_period = 12;
     encode.inter_picture_period = 1;
     encode.rate_control.mode = rate_control_mode;
-    encode.rate_control.frame_rate_numerator = 30;
-    encode.rate_control.frame_rate_denominator = 1;
+    encode.rate_control.temporal_layer_count = 1;
+    encode.rate_control.temporal_layers = &rate_control_layer;
+    rate_control_layer.frame_rate_numerator = 30;
+    rate_control_layer.frame_rate_denominator = 1;
     if (rate_control_mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP) {
-      encode.rate_control.control.cqp = {20, 20};
+      rate_control_layer.control.cqp = {20, 20};
     } else {
-      encode.rate_control.control.bit_rate = {
+      rate_control_layer.control.bit_rate = {
           .minimum_quantization_parameter =
               test_case.codec == AMDF_MEDIA_CODEC_AV1 ? 8u : 1u,
           .maximum_quantization_parameter =

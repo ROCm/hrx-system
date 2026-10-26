@@ -13,6 +13,7 @@
 #include "amdf/media/vp9.h"
 #include "libamdf/src/media/d3d12/configuration.h"
 #include "libamdf/src/media/d3d12/device.h"
+#include "libamdf/src/media/encode.h"
 
 namespace amdf::media::d3d12 {
 
@@ -42,6 +43,9 @@ struct Session {
   };
   // Common immutable encode controls, valid only for encode sessions.
   amdf_media_encode_configuration_t encode;
+  // Owned temporal-layer records referenced by encode after construction.
+  amdf_media_encode_rate_control_layer_t
+      rate_control_layers[AMDF_MEDIA_ENCODE_TEMPORAL_LAYER_STORAGE_CAPACITY];
   // Codec-specific immutable encode geometry selected by the codec field.
   union {
     // H264 frame-number and picture-order geometry.

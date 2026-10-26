@@ -572,6 +572,11 @@ amdf_status_t QueryEncodeConfiguration(
     AnswerUnsupported(&info, AMDF_MEDIA_CONFIGURATION_REASON_CODEC, out_info);
     return AMDF_STATUS_OK;
   }
+  if (encode->rate_control.temporal_layer_count != 1) {
+    AnswerUnsupported(
+        &info, AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION, out_info);
+    return AMDF_STATUS_OK;
+  }
 
   EncodeConfiguration local_native = {};
   EncodeConfiguration* native =
@@ -751,12 +756,11 @@ amdf_status_t QueryEncodeConfiguration(
     native->level.pAV1LevelSetting = &native->av1_level;
   }
 
-  native->rate_control.TargetFrameRate = {
-      encode->rate_control.frame_rate_numerator,
-      encode->rate_control.frame_rate_denominator,
-  };
+  const auto& rate_layer = encode->rate_control.temporal_layers[0];
+  native->rate_control.TargetFrameRate = {rate_layer.frame_rate_numerator,
+                                          rate_layer.frame_rate_denominator};
   if (encode->rate_control.mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP) {
-    const auto& source = encode->rate_control.control.cqp;
+    const auto& source = rate_layer.control.cqp;
     native->cqp = {source.intra_quantization_parameter,
                    source.predicted_quantization_parameter,
                    source.predicted_quantization_parameter};
@@ -764,7 +768,7 @@ amdf_status_t QueryEncodeConfiguration(
     native->rate_control.ConfigParams = {sizeof(native->cqp)};
     native->rate_control.ConfigParams.pConfiguration_CQP = &native->cqp;
   } else {
-    const auto& source = encode->rate_control.control.bit_rate;
+    const auto& source = rate_layer.control.bit_rate;
     native->rate_control.Flags =
         D3D12_VIDEO_ENCODER_RATE_CONTROL_FLAG_ENABLE_QP_RANGE |
         D3D12_VIDEO_ENCODER_RATE_CONTROL_FLAG_ENABLE_VBV_SIZES;
