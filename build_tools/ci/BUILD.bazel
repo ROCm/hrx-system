@@ -207,7 +207,10 @@ py_test(
         "loom_binary_size_test.py",
     ],
     main = "loom_binary_size_test.py",
-    deps = [":github_api"],
+    deps = [
+        ":github_api",
+        "//loom/packaging/python:release_lib",
+    ],
 )
 
 test_suite(

@@ -71,13 +71,21 @@ one leaves the other serving requests. Windows uses separate consoles and real
 console control events. Cross-building the target verifies its inputs; execution
 requires the matching operating system.
 
-The [SDK build workflow](../../../.github/workflows/build_loom_sdk.yml) runs
-this explicitly selected test for all four profiles on Linux and Windows.
-The test is tagged `manual` because the complete SDK includes the C++23
-frontend, whose toolchain requirements exceed the core project's compiler
-baseline. Linux SDK builds use Clang 19 with GCC 13's C++ standard library;
-Windows builds use ClangCL and the Visual Studio C++ toolchain. The producer
-builds the exact `release_wheel` target and its small test fixture. Qualification
+The [Loom CI workflow](../../../.github/workflows/ci_iree.yml) produces Linux
+and Windows Release wheels in its SDK job on a Linux runner. Linux uses
+Clang 22.1.8 and GCC 13's C++ standard library; Windows uses the Linux clang-cl cross-toolchain
+with a pinned Microsoft SDK. Linux installed qualification runs in the producer;
+the existing Windows Clang CL job qualifies the Windows wheel without rebuilding
+it. The size report measures those exact archives, their installed payloads, and
+each native executable and shared library. It invokes no compiler or stripper.
+
+The [reusable SDK workflow](../../../.github/workflows/build_loom_sdk.yml) also
+accepts explicit Debug, Tracy, and ASAN profiles for manual and release builds.
+These instrumented packages are qualified once on each destination OS. Ordinary
+PR sanitizer coverage stays in the existing source-test jobs. The installed-wheel
+Bazel target remains `manual` because the complete SDK includes the C++23
+frontend, whose toolchain requirements exceed the core compiler baseline. The
+producer builds the exact `release_wheel` target and its small test fixture. Qualification
 runs separately on the destination operating system and exports the wheel only
 after the installed test succeeds:
 
@@ -166,9 +174,9 @@ These commands prepare and check local files without publishing them.
 
 The [release workflow](../../../.github/workflows/release_loom_sdk.yml) runs on
 a matching `v` tag or a manual dispatch selecting that tag. It first checks the
-canonical version and catalog, then calls the SDK build workflow. All eight
-platform/profile wheels must pass their installed-artifact checks. An independent
-job checks the complete set and records `SHA256SUMS`; the publishing jobs verify
+canonical version and catalog, then calls the same SDK producer with all four
+profiles. All eight platform/profile wheels must pass their installed-artifact
+checks. An independent job checks the complete set and records `SHA256SUMS`; the publishing jobs verify
 those checksums again and use the same wheel bytes without rebuilding.
 
 GitHub receives all eight wheels and `SHA256SUMS`. The PyPI job follows GitHub

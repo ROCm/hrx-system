@@ -8,7 +8,7 @@ published model requires neither a repository checkout nor a build toolchain.
 !!! info "First release"
 
     The first PyPI release has not been published. Until then, install a tested
-    development wheel from the [Loom SDK build workflow](https://github.com/ROCm/hrx-system/actions/workflows/build_loom_sdk.yml).
+    development wheel from a successful [Loom CI run](https://github.com/ROCm/hrx-system/actions/workflows/ci_iree.yml).
     The PyPI commands below describe installation once a release is available.
 
 ## Platform requirements
@@ -48,9 +48,11 @@ The optional `[hf]` extra installs Hugging Face acquisition support. Plain
 `hrx-loom` is sufficient for models whose assets come from local directories
 or ordinary HTTP URLs. Both install the same native tools.
 
-For a development wheel, download the artifact from a successful job for your
-platform and extract its ZIP. Install the `.whl` inside it instead of the
-package name. For example, the Linux development release profile uses:
+For a development wheel, download `loom-sdk-wheel-linux-Release` or
+`loom-sdk-wheel-windows-Release` from a successful Loom CI run and extract its
+ZIP. These artifacts contain the qualified wheel for your platform. Install
+the `.whl` inside it instead of the package name. For example, the Linux
+development release profile uses:
 
 ```sh
 python -m pip install './hrx_loom-0.0.0.dev0-py3-none-manylinux_2_39_x86_64.whl[hf]'
@@ -61,7 +63,8 @@ artifact; its version changes with the build. The `release` profile is the
 ordinary optimized SDK. Explicit `tracy`, `debug`, and `asan` artifacts contain
 the same package with different native instrumentation. They replace the
 installed SDK in that environment; they are not pip extras. Separate virtual
-environments let these builds coexist.
+environments let these builds coexist. Instrumented wheels are available from
+releases and explicit [SDK workflow runs](https://github.com/ROCm/hrx-system/actions/workflows/build_loom_sdk.yml).
 
 ## Check the installation
 

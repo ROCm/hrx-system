@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -14,6 +15,7 @@ from io import BytesIO
 from pathlib import Path
 
 from build_tools.ci import loom_binary_size
+from loom.packaging.python import release
 
 COMMIT_A = "a" * 40
 COMMIT_B = "b" * 40
@@ -24,21 +26,20 @@ def witness(
     witness_id: str = "loomc-amdgpu-all",
     *,
     fingerprint: str = "sha256:stable",
-    stripped_bytes: int = 100,
+    size_bytes: int = 100,
 ) -> dict:
-    executable_bytes = stripped_bytes // 2
+    executable_bytes = size_bytes // 2
     return {
         "id": witness_id,
         "title": witness_id,
         "fingerprint": fingerprint,
-        "unstripped_bytes": stripped_bytes + 20,
-        "stripped_bytes": stripped_bytes,
+        "bytes": size_bytes,
         "sections": {
             "executable": executable_bytes,
             "read_only": 0,
             "writable": 0,
             "unwind": 0,
-            "other": stripped_bytes - executable_bytes,
+            "other": size_bytes - executable_bytes,
         },
         "sha256": "0" * 64,
     }
@@ -71,41 +72,38 @@ def history(*observations: dict) -> dict:
 
 
 class LoomBinarySizeTest(unittest.TestCase):
-    def test_build_plan_coalesces_witnesses_into_two_actions(self):
-        commands = loom_binary_size.build_commands(Path("/repo"))
+    def test_measures_the_final_archive_without_building_or_stripping(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            wheel_path = Path(temporary) / "hrx_loom-1.0-py3-none-win_amd64.whl"
+            payload = {
+                "hrx_loom-1.0.data/scripts/loom-run.exe": b"MZcommand",
+                "hrx_loom-1.0.data/scripts/loom-serve.exe": b"MZserver",
+                "hrx_loom-1.0.data/scripts/loomc.dll": b"MZshared",
+                "loom/__init__.py": b"python package",
+            }
+            with zipfile.ZipFile(wheel_path, "w") as archive:
+                for name, content in payload.items():
+                    archive.writestr(name, content)
+            original = wheel_path.read_bytes()
+            digest = hashlib.sha256(original).hexdigest()
+            wheel = release.Wheel(wheel_path, "release", "win_amd64", digest)
+            rows = loom_binary_size.measure_wheel(
+                wheel, Path("no-elf-reader-needed"), {}
+            )
+            sizes = {row["id"].rsplit("/", 1)[1]: row["bytes"] for row in rows}
+            self.assertEqual(sizes["wheel"], len(original))
+            self.assertEqual(sizes["installed"], sum(map(len, payload.values())))
+            self.assertEqual(sizes["native"], len(b"MZcommandMZserverMZshared"))
+            self.assertEqual(sizes["loomc.dll"], len(b"MZshared"))
+            self.assertEqual(wheel_path.read_bytes(), original)
 
-        self.assertEqual(len(commands), 2)
-        self.assertIn("//loom/binding/c/example:emit_amdgpu_offline", commands[0])
-        self.assertIn("//loom/src/loom/tools/loom-compile:loom-compile", commands[0])
-        self.assertIn("//loom/src/loom/tools/loom-check:loom-check", commands[0])
-        self.assertEqual(
-            [
-                arg
-                for arg in commands[0]
-                if arg.startswith("--//runtime/config/hal:drivers=")
-            ][-1],
-            "--//runtime/config/hal:drivers=task,vulkan",
-        )
-        self.assertEqual(
-            commands[1].count("//loom/binding/c/example:emit_amdgpu_offline"), 1
-        )
-        self.assertEqual(
-            [
-                arg
-                for arg in commands[1]
-                if arg.startswith("--//runtime/config/hal:drivers=")
-            ][-1],
-            "--//runtime/config/hal:drivers=task",
-        )
-        self.assertIn("--//loom/config/target/amdgpu:targets=gfx1151", commands[1])
-
-    def test_tool_identity_ignores_versioned_rocm_install_root(self):
+    def test_tool_identity_ignores_versioned_llvm_install_root(self):
         identity = loom_binary_size.normalize_tool_identity(
-            "InstalledDir: /opt/rocm-nightly-123/lib/llvm/bin",
-            Path("/opt/rocm-nightly-123"),
+            "InstalledDir: /opt/llvm-22.1.8/bin",
+            Path("/opt/llvm-22.1.8"),
         )
 
-        self.assertEqual(identity, "InstalledDir: $ROCM_ROOT/lib/llvm/bin")
+        self.assertEqual(identity, "InstalledDir: $LLVM_ROOT/bin")
 
     def test_section_classes_reconcile_file_bytes(self):
         file_record = {
@@ -202,12 +200,12 @@ class LoomBinarySizeTest(unittest.TestCase):
 
     def test_history_replaces_rerun_and_stays_bounded(self):
         observations = [
-            observation(f"{index:040x}", witness(stripped_bytes=index + 1))
+            observation(f"{index:040x}", witness(size_bytes=index + 1))
             for index in range(loom_binary_size.MAX_MAIN_OBSERVATIONS)
         ]
         rerun = current(
             f"{loom_binary_size.MAX_MAIN_OBSERVATIONS - 1:040x}",
-            witness(stripped_bytes=999),
+            witness(size_bytes=999),
         )
 
         merged = loom_binary_size.merge_history(
@@ -215,7 +213,7 @@ class LoomBinarySizeTest(unittest.TestCase):
         )
 
         self.assertEqual(len(merged["history"]), loom_binary_size.MAX_MAIN_OBSERVATIONS)
-        self.assertEqual(merged["history"][-1]["witnesses"][0]["stripped_bytes"], 999)
+        self.assertEqual(merged["history"][-1]["witnesses"][0]["bytes"], 999)
         self.assertEqual(
             len({item["commit"] for item in merged["history"]}),
             loom_binary_size.MAX_MAIN_OBSERVATIONS,
@@ -232,15 +230,13 @@ class LoomBinarySizeTest(unittest.TestCase):
 
     def test_summary_uses_only_compatible_fingerprint(self):
         baseline = history(
-            observation(COMMIT_A, witness(fingerprint="sha256:old", stripped_bytes=90)),
-            observation(
-                COMMIT_B, witness(fingerprint="sha256:new", stripped_bytes=110)
-            ),
+            observation(COMMIT_A, witness(fingerprint="sha256:old", size_bytes=90)),
+            observation(COMMIT_B, witness(fingerprint="sha256:new", size_bytes=110)),
         )
 
         summary = loom_binary_size.render_summary(
             baseline,
-            current(COMMIT_C, witness(fingerprint="sha256:old", stripped_bytes=100)),
+            current(COMMIT_C, witness(fingerprint="sha256:old", size_bytes=100)),
         )
 
         self.assertIn("100 B", summary)
@@ -351,7 +347,7 @@ class LoomBinarySizeTest(unittest.TestCase):
                 [COMMIT_A, COMMIT_B],
             )
             self.assertIn(
-                "Loom compiler product size",
+                "Loom SDK product size",
                 (output_dir / "summary.md").read_text(encoding="utf-8"),
             )
 

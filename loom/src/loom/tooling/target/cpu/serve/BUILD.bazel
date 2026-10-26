@@ -455,8 +455,8 @@ loom_py_test(
     }),
     imports = ["."],
     main = "wheel_model_card_test.py",
-    # The SDK matrix explicitly qualifies this complete C++23 artifact with
-    # its release toolchains; ordinary core builds may use older compilers.
+    # SDK qualification explicitly selects this complete C++23 artifact;
+    # ordinary core builds may use older compilers.
     tags = [
         "manual",
         "skip-bazel_to_cmake",

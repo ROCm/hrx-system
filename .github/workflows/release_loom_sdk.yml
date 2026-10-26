@@ -1,7 +1,7 @@
 # Copyright 2026 The IREE Authors
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-name: Release Loom SDK
+name: Loom / SDK / Release
 
 on:
   push:
@@ -35,7 +35,10 @@ jobs:
     name: Build and qualify SDK
     needs: identity
     uses: ./.github/workflows/build_loom_sdk.yml
+    with:
+      profiles: '["Release", "Tracy", "Debug", "ASAN"]'
     permissions:
+      actions: read
       contents: read
 
   bundle:

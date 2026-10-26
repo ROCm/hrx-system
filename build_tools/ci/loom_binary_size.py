@@ -4,21 +4,20 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Builds and reports stable Loom compiler binary-size witnesses."""
+"""Measures final SDK wheels and reports their product-size history."""
 
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import datetime as dt
 import hashlib
 import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 import zipfile
 from io import BytesIO
@@ -26,107 +25,16 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
 from build_tools.ci import github_api
+from loom.packaging.python import release
 
-SCHEMA = "loom.binary-size-history.v1"
-MAIN_ARTIFACT_NAME = "loom-binary-size-history-main-v1"
+SCHEMA = "loom.binary-size-history.v2"
+MAIN_ARTIFACT_NAME = "loom-binary-size-history-main-v2"
 MAX_MAIN_OBSERVATIONS = 40
 SPARKLINE_GLYPHS = "▁▂▃▄▅▆▇█"
 
 
 class BinarySizeError(RuntimeError):
     """Raised when a size witness or history record violates its contract."""
-
-
-@dataclasses.dataclass(frozen=True)
-class WitnessSpec:
-    id: str
-    title: str
-    target: str
-    bazel_output: str
-    emitted_processor: str | None = None
-
-
-@dataclasses.dataclass(frozen=True)
-class BuildConfiguration:
-    id: str
-    bazel_args: tuple[str, ...]
-    witnesses: tuple[WitnessSpec, ...]
-
-
-COMMON_BAZEL_ARGS = (
-    "--config=locked",
-    "-c",
-    "opt",
-    "--features=thin_lto",
-    "--strip=never",
-    "--nostamp",
-    "--copt=-O3",
-    "--cxxopt=-O3",
-    "--host_copt=-O3",
-    "--host_cxxopt=-O3",
-    "--copt=-march=x86-64-v3",
-    "--cxxopt=-march=x86-64-v3",
-    "--host_copt=-march=x86-64-v3",
-    "--host_cxxopt=-march=x86-64-v3",
-    "--copt=-DIREE_STATUS_MODE=2",
-    "--cxxopt=-DIREE_STATUS_MODE=2",
-    "--linkopt=-fuse-ld=lld",
-    "--//runtime/config/hal:drivers=task",
-    "--//runtime/config/hal:executable_loaders=embedded-elf,system-library",
-    "--//loom/config/execute:enable=iree_hal",
-    "--//loom/config/import:enable=",
-    "--//loom/config/emit:enable=",
-)
-
-
-BUILD_CONFIGURATIONS = (
-    BuildConfiguration(
-        id="shipping-defaults",
-        bazel_args=(
-            # SPIR-V is budgeted with Vulkan; opt into both for this full witness.
-            "--//runtime/config/hal:drivers=task,vulkan",
-            "--//loom/config/target:enable=amdgpu,spirv,x86",
-            "--//loom/config/target/amdgpu:targets=loom_defaults",
-        ),
-        witnesses=(
-            WitnessSpec(
-                id="loomc-amdgpu-all",
-                title="LoomC bytecode to HSACO (all AMDGPU)",
-                target="//loom/binding/c/example:emit_amdgpu_offline",
-                bazel_output="loom/binding/c/example/emit_amdgpu_offline",
-                emitted_processor="gfx1151",
-            ),
-            WitnessSpec(
-                id="loom-compile-default-targets",
-                title="loom-compile (default targets)",
-                target="//loom/src/loom/tools/loom-compile:loom-compile",
-                bazel_output="loom/src/loom/tools/loom-compile/loom-compile",
-            ),
-            WitnessSpec(
-                id="loom-check-default-targets",
-                title="loom-check (default targets)",
-                target="//loom/src/loom/tools/loom-check:loom-check",
-                bazel_output="loom/src/loom/tools/loom-check/loom-check",
-            ),
-        ),
-    ),
-    BuildConfiguration(
-        id="gfx1151",
-        bazel_args=(
-            "--//loom/config/target:enable=amdgpu",
-            "--//loom/config/target/amdgpu:targets=gfx1151",
-        ),
-        witnesses=(
-            WitnessSpec(
-                id="loomc-amdgpu-gfx1151",
-                title="LoomC bytecode to HSACO (gfx1151)",
-                target="//loom/binding/c/example:emit_amdgpu_offline",
-                bazel_output="loom/binding/c/example/emit_amdgpu_offline",
-                emitted_processor="gfx1151",
-            ),
-        ),
-    ),
-)
 
 
 def _run(
@@ -145,74 +53,48 @@ def _run(
     )
 
 
-def build_commands(repo_root: Path) -> list[list[str]]:
-    """Returns the two dependency-coalesced Bazel build invocations."""
-    wrapper = repo_root / "build_tools/bin/iree-bazel-build"
-    commands = []
-    for configuration in BUILD_CONFIGURATIONS:
-        targets = sorted({witness.target for witness in configuration.witnesses})
-        commands.append(
-            [
-                os.fspath(wrapper),
-                *COMMON_BAZEL_ARGS,
-                *configuration.bazel_args,
-                *targets,
-            ]
-        )
-    return commands
-
-
 def _command_version(command: Sequence[str]) -> str:
     result = _run([*command, "--version"], capture_output=True)
     return result.stdout.strip() or result.stderr.strip()
 
 
-def normalize_tool_identity(value: str, rocm_root: Path) -> str:
+def normalize_tool_identity(value: str, llvm_root: Path) -> str:
     """Removes the per-fetch install path from otherwise stable tool output."""
-    resolved_root = rocm_root.resolve()
+    resolved_root = llvm_root.resolve()
     root_spellings = {
-        os.fspath(rocm_root),
-        rocm_root.as_posix(),
+        os.fspath(llvm_root),
+        llvm_root.as_posix(),
         os.fspath(resolved_root),
         resolved_root.as_posix(),
     }
     for root_spelling in sorted(root_spellings, key=len, reverse=True):
-        value = value.replace(root_spelling, "$ROCM_ROOT")
+        value = value.replace(root_spelling, "$LLVM_ROOT")
     return value
 
 
 def _toolchain_identity(llvm_bin: Path, environment_id: str) -> dict[str, str]:
     compiler = shlex.split(os.environ.get("CC", "cc"))
     cxx_compiler = shlex.split(os.environ.get("CXX", "c++"))
-    rocm_root = llvm_bin.resolve().parents[2]
+    llvm_root = llvm_bin.resolve().parent
     identity = {
         "environment": environment_id,
         "cc": _command_version(compiler),
         "cxx": _command_version(cxx_compiler),
         "linker": _command_version([os.fspath(llvm_bin / "ld.lld")]),
-        "strip": _command_version([os.fspath(llvm_bin / "llvm-strip")]),
         "elf_reader": _command_version([os.fspath(llvm_bin / "llvm-readobj")]),
-        "bazel": _command_version(["bazel"]),
     }
     return {
-        name: normalize_tool_identity(value, rocm_root)
+        name: normalize_tool_identity(value, llvm_root)
         for name, value in identity.items()
     }
 
 
-def _fingerprint(
-    configuration: BuildConfiguration,
-    witness: WitnessSpec,
-    toolchain: dict[str, str],
-) -> str:
+def _fingerprint(platform: str, profile: str, toolchain: dict[str, str]) -> str:
     payload = {
         "schema": SCHEMA,
-        "configuration": configuration.id,
-        "common_bazel_args": COMMON_BAZEL_ARGS,
-        "configuration_bazel_args": configuration.bazel_args,
-        "target": witness.target,
-        "source_contract": "packaged-bytecode" if witness.emitted_processor else "cli",
-        "output_contract": "amdgpu-hsaco" if witness.emitted_processor else "host-elf",
+        "product": "hrx-loom",
+        "configuration": ["loom-sdk", profile],
+        "platform": platform,
         "toolchain": toolchain,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
@@ -302,106 +184,74 @@ def classify_elf_sections(
     return classes
 
 
-def _validate_hsaco(llvm_readobj: Path, hsaco_path: Path) -> None:
-    file_record = _read_elf_json(llvm_readobj, hsaco_path, "--file-headers")
-    try:
-        file_summary = file_record["FileSummary"]
-        machine = file_record["ElfHeader"]["Machine"]["Name"]
-    except (KeyError, TypeError) as exc:
-        raise BinarySizeError(f"invalid HSACO ELF header: {hsaco_path}") from exc
-    if file_summary.get("Format") != "elf64-amdgpu" or machine != "EM_AMDGPU":
-        raise BinarySizeError(
-            f"expected an AMDGPU code object from {hsaco_path}, got "
-            f"{file_summary.get('Format')!r}/{machine!r}"
-        )
+def measure_wheel(
+    wheel: release.Wheel, llvm_readobj: Path, toolchain: dict[str, str]
+) -> list[dict[str, Any]]:
+    """Reads the shipping archive without rebuilding, stripping, or repairing it."""
+    prefix = f"{wheel.platform}/{wheel.profile}"
+    fingerprint = _fingerprint(wheel.platform, wheel.profile, toolchain)
 
+    def record(name: str, title: str, size: int, digest: str) -> dict[str, Any]:
+        return {
+            "id": f"{prefix}/{name}",
+            "title": f"{wheel.platform} / {title}",
+            "fingerprint": fingerprint,
+            "bytes": size,
+            "sha256": digest,
+        }
 
-def _measure_binary(
-    source_path: Path,
-    stripped_path: Path,
-    *,
-    llvm_strip: Path,
-    llvm_readobj: Path,
-) -> dict[str, Any]:
-    stripped_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_path, stripped_path)
-    unstripped_bytes = source_path.stat().st_size
-    _run([os.fspath(llvm_strip), "--strip-all", os.fspath(stripped_path)])
-    stripped_bytes = stripped_path.stat().st_size
-    file_record = _read_elf_json(llvm_readobj, stripped_path, "--sections")
-    sections = classify_elf_sections(file_record, stripped_bytes)
-    return {
-        "unstripped_bytes": unstripped_bytes,
-        "stripped_bytes": stripped_bytes,
-        "sections": sections,
-        "sha256": hashlib.sha256(stripped_path.read_bytes()).hexdigest(),
-    }
+    with (
+        zipfile.ZipFile(wheel.path) as archive,
+        tempfile.TemporaryDirectory() as temporary,
+    ):
+        members = [member for member in archive.infolist() if not member.is_dir()]
+        native = [member for member in members if ".data/scripts/" in member.filename]
+        if not native:
+            raise BinarySizeError(f"SDK wheel has no native payload: {wheel.path}")
+        # Aggregate rows identify their containing archive; member rows identify
+        # the exact uncompressed file whose bytes they measure.
+        observations = [
+            record("wheel", "Download", wheel.path.stat().st_size, wheel.digest),
+            record(
+                "installed",
+                "Installed payload",
+                sum(member.file_size for member in members),
+                wheel.digest,
+            ),
+            record(
+                "native",
+                "Native payload",
+                sum(member.file_size for member in native),
+                wheel.digest,
+            ),
+        ]
+        for member in sorted(native, key=lambda member: member.filename):
+            name = Path(member.filename).name
+            contents = archive.read(member)
+            measurement = record(
+                name, name, len(contents), hashlib.sha256(contents).hexdigest()
+            )
+            if contents.startswith(b"\x7fELF"):
+                binary = Path(temporary) / name
+                binary.write_bytes(contents)
+                measurement["sections"] = classify_elf_sections(
+                    _read_elf_json(llvm_readobj, binary, "--sections"), len(contents)
+                )
+            observations.append(measurement)
+        return observations
 
 
 def collect(args: argparse.Namespace) -> None:
-    repo_root = args.repo_root.resolve()
-    output_dir = args.output_dir.resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    llvm_strip = args.llvm_bin / "llvm-strip"
-    llvm_readobj = args.llvm_bin / "llvm-readobj"
-    for required_path in (
-        repo_root / "build_tools/bin/iree-bazel-build",
-        llvm_strip,
-        llvm_readobj,
-        args.llvm_bin / "ld.lld",
-    ):
-        if not required_path.is_file():
-            raise BinarySizeError(f"required tool does not exist: {required_path}")
-
+    package = args.repo_root.resolve() / "loom/packaging/python"
+    identity = release.read_identity(package / "version.json")
+    readme = (package / "PYPI_README.md").read_text(encoding="utf-8")
     toolchain = _toolchain_identity(args.llvm_bin, args.environment_id)
     observations = []
-    commands = build_commands(repo_root)
-    for configuration, command in zip(BUILD_CONFIGURATIONS, commands, strict=True):
-        _run(command, cwd=repo_root)
-        for witness in configuration.witnesses:
-            source_path = repo_root / "bazel-bin" / witness.bazel_output
-            if not source_path.is_file():
-                raise BinarySizeError(
-                    f"Bazel did not produce {witness.target} at {source_path}"
-                )
-            stripped_path = output_dir / "stripped" / witness.id
-            measurement = _measure_binary(
-                source_path,
-                stripped_path,
-                llvm_strip=llvm_strip,
-                llvm_readobj=llvm_readobj,
-            )
-
-            emitted_output = None
-            if witness.emitted_processor:
-                hsaco_path = output_dir / "artifacts" / f"{witness.id}.hsaco"
-                hsaco_path.parent.mkdir(parents=True, exist_ok=True)
-                _run(
-                    [
-                        os.fspath(stripped_path),
-                        witness.emitted_processor,
-                        os.fspath(hsaco_path),
-                    ]
-                )
-                _validate_hsaco(llvm_readobj, hsaco_path)
-                emitted_output = {
-                    "format": "amdgpu-hsaco",
-                    "processor": witness.emitted_processor,
-                    "bytes": hsaco_path.stat().st_size,
-                    "sha256": hashlib.sha256(hsaco_path.read_bytes()).hexdigest(),
-                }
-            else:
-                _run([os.fspath(stripped_path), "--help"], capture_output=True)
-            record = {
-                "id": witness.id,
-                "title": witness.title,
-                "fingerprint": _fingerprint(configuration, witness, toolchain),
-                **measurement,
-            }
-            if emitted_output:
-                record["output"] = emitted_output
-            observations.append(record)
-
+    for path in args.wheel:
+        wheel = release.inspect_wheel(path, identity, readme)
+        observations.extend(
+            measure_wheel(wheel, args.llvm_bin / "llvm-readobj", toolchain)
+        )
     current = {
         "schema": SCHEMA,
         "observation": {
@@ -416,7 +266,7 @@ def collect(args: argparse.Namespace) -> None:
         },
     }
     validate_current(current)
-    _write_json(output_dir / "current.json", current)
+    _write_json(args.output_dir / "current.json", current)
 
 
 def _require_sha(value: Any, description: str) -> str:
@@ -431,16 +281,17 @@ def _validate_witness(witness: Any) -> None:
     for key in ("id", "title", "fingerprint", "sha256"):
         if not isinstance(witness.get(key), str) or not witness[key]:
             raise BinarySizeError(f"witness {key} must be a non-empty string")
-    for key in ("unstripped_bytes", "stripped_bytes"):
-        if not isinstance(witness.get(key), int) or witness[key] < 0:
-            raise BinarySizeError(f"witness {key} must be a non-negative integer")
+    if not isinstance(witness.get("bytes"), int) or witness["bytes"] < 0:
+        raise BinarySizeError("witness bytes must be a non-negative integer")
     sections = witness.get("sections")
+    if sections is None:
+        return
     expected_sections = {"executable", "read_only", "writable", "unwind", "other"}
     if not isinstance(sections, dict) or set(sections) != expected_sections:
         raise BinarySizeError("witness sections have an unexpected shape")
     if any(not isinstance(value, int) or value < 0 for value in sections.values()):
         raise BinarySizeError("witness section sizes must be non-negative integers")
-    if sum(sections.values()) != witness["stripped_bytes"]:
+    if sum(sections.values()) != witness["bytes"]:
         raise BinarySizeError("witness section sizes do not reconcile")
 
 
@@ -580,9 +431,9 @@ def render_summary(history: dict[str, Any], current: dict[str, Any]) -> str:
     validate_current(current)
     observation = current["observation"]
     rows = [
-        "# Loom compiler product size",
+        "# Loom SDK product size",
         "",
-        "| Product | Current stripped | Main baseline | Delta | Recent main |",
+        "| Product | Current artifact | Main baseline | Delta | Recent main |",
         "| --- | ---: | ---: | ---: | :--- |",
     ]
     for witness in observation["witnesses"]:
@@ -594,16 +445,13 @@ def render_summary(history: dict[str, Any], current: dict[str, Any]) -> str:
                 historical_witness
                 and historical_witness["fingerprint"] == witness["fingerprint"]
             ):
-                compatible_values.append(historical_witness["stripped_bytes"])
-        compatible_values = compatible_values[-11:] + [witness["stripped_bytes"]]
-        current_size = (
-            f"{_format_bytes(witness['stripped_bytes'])} "
-            f"({witness['stripped_bytes']:,} B)"
-        )
+                compatible_values.append(historical_witness["bytes"])
+        compatible_values = compatible_values[-11:] + [witness["bytes"]]
+        current_size = f"{_format_bytes(witness['bytes'])} ({witness['bytes']:,} B)"
         if baseline:
             _, baseline_witness = baseline
-            baseline_bytes = baseline_witness["stripped_bytes"]
-            difference = witness["stripped_bytes"] - baseline_bytes
+            baseline_bytes = baseline_witness["bytes"]
+            difference = witness["bytes"] - baseline_bytes
             percentage = difference * 100 / baseline_bytes if baseline_bytes else 0.0
             baseline_size = _format_bytes(baseline_bytes)
             delta = f"{_format_bytes(difference, signed=True)} ({percentage:+.2f}%)"
@@ -618,9 +466,11 @@ def render_summary(history: dict[str, Any], current: dict[str, Any]) -> str:
     rows.extend(
         [
             "",
-            "Fingerprints include the complete build configuration and host "
-            "toolchain. A changed fingerprint starts a new series instead of "
-            "reporting a false delta.",
+            "Sizes describe the exact wheel and its uncompressed members. Shared "
+            "libraries are counted once in the native payload; installed totals "
+            "include Python and metadata. No binary is rebuilt or stripped. "
+            "ELF section detail is included in the observation. A changed profile, "
+            "platform, or toolchain fingerprint starts a new series.",
             "",
             "<details>",
             "<summary>Current machine-readable observation</summary>",
@@ -805,6 +655,7 @@ def _add_collect_parser(subparsers: Any) -> None:
     parser = subparsers.add_parser("collect")
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--wheel", type=Path, action="append", required=True)
     parser.add_argument("--llvm-bin", type=Path, required=True)
     parser.add_argument("--environment-id", required=True)
     parser.add_argument("--commit", required=True)
@@ -850,7 +701,13 @@ def main(argv: Sequence[str]) -> int:
         args = parse_arguments(argv)
         args.func(args)
         return 0
-    except (BinarySizeError, OSError, subprocess.CalledProcessError) as exc:
+    except (
+        BinarySizeError,
+        ValueError,
+        OSError,
+        zipfile.BadZipFile,
+        subprocess.CalledProcessError,
+    ) as exc:
         print(f"loom binary size: {exc}", file=sys.stderr)
         return 1
 
