@@ -731,6 +731,9 @@ TEST_F(HipModuleExecutionTest,
        KernelUsesVirtualAliasesAfterBackingHandleRelease) {
   const auto get_device =
       library_.Resolve<decltype(&hipGetDevice)>("hipGetDevice");
+  const auto set_device = library_.Resolve<HipSetDeviceFn>("hipSetDevice");
+  const auto get_device_count =
+      library_.Resolve<HipGetDeviceCountFn>("hipGetDeviceCount");
   const auto get_properties = library_.Resolve<HipGetDevicePropertiesR0600Fn>(
       "hipGetDevicePropertiesR0600");
   const auto granularity =
@@ -748,9 +751,7 @@ TEST_F(HipModuleExecutionTest,
   const auto launch =
       library_.Resolve<HipModuleLaunchKernelFn>("hipModuleLaunchKernel");
   const auto copy = library_.Resolve<HipMemcpyFn>("hipMemcpy");
-  ScopedModule module = {
-      .unload = library_.Resolve<HipModuleUnloadFn>("hipModuleUnload"),
-  };
+  const auto unload = library_.Resolve<HipModuleUnloadFn>("hipModuleUnload");
   ScopedVirtualAliases aliases = {
       .synchronize =
           library_.Resolve<HipDeviceSynchronizeFn>("hipDeviceSynchronize"),
@@ -760,6 +761,8 @@ TEST_F(HipModuleExecutionTest,
       .release = library_.Resolve<decltype(&hipMemRelease)>("hipMemRelease"),
   };
   ASSERT_NE(get_device, nullptr);
+  ASSERT_NE(set_device, nullptr);
+  ASSERT_NE(get_device_count, nullptr);
   ASSERT_NE(get_properties, nullptr);
   ASSERT_NE(granularity, nullptr);
   ASSERT_NE(reserve, nullptr);
@@ -770,7 +773,7 @@ TEST_F(HipModuleExecutionTest,
   ASSERT_NE(get_function, nullptr);
   ASSERT_NE(launch, nullptr);
   ASSERT_NE(copy, nullptr);
-  ASSERT_NE(module.unload, nullptr);
+  ASSERT_NE(unload, nullptr);
   ASSERT_NE(aliases.synchronize, nullptr);
   ASSERT_NE(aliases.unmap, nullptr);
   ASSERT_NE(aliases.close, nullptr);
@@ -778,15 +781,13 @@ TEST_F(HipModuleExecutionTest,
 
   int device = 0;
   ASSERT_EQ(hipSuccess, get_device(&device));
-  hipDeviceProp_t properties = {};
-  ASSERT_EQ(hipSuccess, get_properties(&properties, device));
-  const auto image =
-      hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);
-  ASSERT_NE(image.file, nullptr) << properties.gcnArchName;
-  ASSERT_EQ(hipSuccess, load(&module.value, image.file->data));
-  hipFunction_t function = nullptr;
-  ASSERT_EQ(hipSuccess, get_function(&function, module.value,
-                                     "hrx_transform_nested_pointers"));
+  ScopedDeviceSelection restore_device = {
+      .original_device = device,
+      .set_device = set_device,
+  };
+  int device_count = 0;
+  ASSERT_EQ(hipSuccess, get_device_count(&device_count));
+  RecordProperty("participating_device_count", device_count);
   const hipMemAllocationProp allocation = {
       .type = hipMemAllocationTypePinned,
       .location = {.type = hipMemLocationTypeDevice, .id = device},
@@ -802,32 +803,51 @@ TEST_F(HipModuleExecutionTest,
                               aliases.backing, 0));
     aliases.mapped[i] = true;
   }
-  const hipMemAccessDesc access = {
-      .location = allocation.location,
-      .flags = hipMemAccessFlagsProtReadWrite,
-  };
-  ASSERT_EQ(hipSuccess,
-            set_access(aliases.address, 4 * aliases.unit, &access, 1));
+  std::vector<hipMemAccessDesc> accesses(device_count);
+  for (int i = 0; i < device_count; ++i) {
+    accesses[i] = {
+        .location = {.type = hipMemLocationTypeDevice, .id = i},
+        .flags = hipMemAccessFlagsProtReadWrite,
+    };
+  }
+  ASSERT_EQ(hipSuccess, set_access(aliases.address, 4 * aliases.unit,
+                                   accesses.data(), accesses.size()));
   ASSERT_EQ(hipSuccess, aliases.release(aliases.backing));
   aliases.backing = nullptr;
 
   const std::array<uint32_t, 4> input = {1, 2, 3, 4};
-  ASSERT_EQ(hipSuccess, copy(aliases.Address(0), input.data(), sizeof(input),
-                             hipMemcpyHostToDevice));
   PointerArguments pointers = {
       .input = static_cast<uint32_t*>(aliases.Address(2)),
       .output = static_cast<uint32_t*>(aliases.Address(3)),
   };
-  uint32_t scale = 4;
-  uint32_t offset = 1;
-  void* arguments[] = {&pointers, &scale, &offset};
-  ASSERT_EQ(hipSuccess,
-            launch(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr));
-  ASSERT_EQ(hipSuccess, aliases.synchronize());
-  std::array<uint32_t, 4> output = {};
-  ASSERT_EQ(hipSuccess, copy(output.data(), aliases.Address(1), sizeof(output),
-                             hipMemcpyDeviceToHost));
-  EXPECT_EQ(output, (std::array<uint32_t, 4>{5, 9, 13, 17}));
+  for (int i = 0; i < device_count; ++i) {
+    SCOPED_TRACE(i);
+    ASSERT_EQ(hipSuccess, set_device(i));
+    ASSERT_EQ(hipSuccess, copy(aliases.Address(0), input.data(), sizeof(input),
+                               hipMemcpyDefault));
+    hipDeviceProp_t properties = {};
+    ASSERT_EQ(hipSuccess, get_properties(&properties, i));
+    const auto image =
+        hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);
+    ASSERT_NE(image.file, nullptr) << properties.gcnArchName;
+    ScopedModule module = {.unload = unload};
+    ASSERT_EQ(hipSuccess, load(&module.value, image.file->data));
+    hipFunction_t function = nullptr;
+    ASSERT_EQ(hipSuccess, get_function(&function, module.value,
+                                       "hrx_transform_nested_pointers"));
+    uint32_t scale = 4 + i;
+    uint32_t offset = 1 + i;
+    void* arguments[] = {&pointers, &scale, &offset};
+    ASSERT_EQ(hipSuccess, launch(function, 1, 1, 1, 1, 1, 1, 0, nullptr,
+                                 arguments, nullptr));
+    ASSERT_EQ(hipSuccess, aliases.synchronize());
+    std::array<uint32_t, 4> output = {};
+    ASSERT_EQ(hipSuccess, copy(output.data(), aliases.Address(1),
+                               sizeof(output), hipMemcpyDefault));
+    for (size_t j = 0; j < output.size(); ++j) {
+      EXPECT_EQ(output[j], input[j] * scale + offset);
+    }
+  }
 }
 
 TEST_F(HipModuleExecutionTest,

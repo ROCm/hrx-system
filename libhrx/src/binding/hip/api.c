@@ -7008,7 +7008,7 @@ HIPAPI hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
 static bool iree_hip_buffer_ref_is_device_memory(
     iree_hal_streaming_buffer_ref_t buffer_ref) {
   return buffer_ref.buffer->is_managed ||
-         !iree_any_bit_set(
+         !iree_all_bits_set(
              (iree_hal_memory_type_t)buffer_ref.buffer->memory_type,
              IREE_HAL_MEMORY_TYPE_HOST_LOCAL);
 }
@@ -7239,8 +7239,9 @@ static hipError_t iree_hip_try_cross_context_h2d(
   }
   *out_handled = true;
   if (dst_ref.buffer->host_ptr &&
-      iree_any_bit_set((iree_hal_memory_type_t)dst_ref.buffer->memory_type,
-                       IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
+      iree_all_bits_set((iree_hal_memory_type_t)dst_ref.buffer->memory_type,
+                        IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                            IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
     iree_status_t sync_status = iree_hal_streaming_context_synchronize_all();
     if (iree_status_is_ok(sync_status)) {
       memcpy((uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset, src, size);
@@ -7298,8 +7299,9 @@ static hipError_t iree_hip_try_cross_context_d2h(
   }
   *out_handled = true;
   if (src_ref.buffer->host_ptr &&
-      iree_any_bit_set((iree_hal_memory_type_t)src_ref.buffer->memory_type,
-                       IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
+      iree_all_bits_set((iree_hal_memory_type_t)src_ref.buffer->memory_type,
+                        IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                            IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
     iree_status_t sync_status = iree_hal_streaming_context_synchronize_all();
     if (iree_status_is_ok(sync_status)) {
       memcpy(dst, (const uint8_t*)src_ref.buffer->host_ptr + src_ref.offset,
