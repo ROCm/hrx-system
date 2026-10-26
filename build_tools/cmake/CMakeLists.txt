@@ -175,6 +175,13 @@ _iree_cmake_integration_test(
 
 _iree_cmake_integration_test(
   NAME
+    cmake_test_results_test
+  SRCS
+    cmake_test_results_test.py
+)
+
+_iree_cmake_integration_test(
+  NAME
     ctest_integration_test
   SRCS
     ../devtools/ctest_integration_test.py

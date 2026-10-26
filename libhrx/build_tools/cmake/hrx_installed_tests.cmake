@@ -437,9 +437,12 @@ function(hrx_installed_tests_map_target_file_expressions OUT_VAR)
 endfunction()
 
 function(hrx_installed_tests_standard_environment TEST_NAME OUT_ENV OUT_ENV_MOD)
-  string(MAKE_C_IDENTIFIER "${TEST_NAME}" _SAFE_TEST_NAME)
+  # Preserve the build-tree name hierarchy: flattening punctuation aliases
+  # distinct invocations and lets concurrent tests overwrite each other's files.
+  set(_TEST_TMPDIR "\${_HRX_INSTALLED_TEST_TMP_ROOT}/${TEST_NAME}_test_tmpdir")
   set(_ENV
-    "TEST_TMPDIR=\${_HRX_INSTALLED_TEST_TMP_ROOT}/${_SAFE_TEST_NAME}"
+    "TEST_TMPDIR=${_TEST_TMPDIR}"
+    "XML_OUTPUT_FILE=${_TEST_TMPDIR}/test.xml"
     "IREE_BINARY_DIR=\${_HRX_INSTALLED_TEST_ROOT}"
     "IREE_DYLIB_EXT=${CMAKE_SHARED_LIBRARY_SUFFIX}"
     "TEST_SRCDIR=\${_HRX_INSTALLED_TEST_DATA_ROOT}"
@@ -468,7 +471,7 @@ function(hrx_installed_tests_standard_environment TEST_NAME OUT_ENV OUT_ENV_MOD)
   )
 
   set_property(GLOBAL APPEND PROPERTY HRX_INSTALLED_TEST_TMPDIRS
-    "\${_HRX_INSTALLED_TEST_TMP_ROOT}/${_SAFE_TEST_NAME}")
+    "${_TEST_TMPDIR}")
   set(${OUT_ENV} "${_ENV}" PARENT_SCOPE)
   set(${OUT_ENV_MOD} "${_ENV_MOD}" PARENT_SCOPE)
 endfunction()

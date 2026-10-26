@@ -254,6 +254,9 @@ function(iree_configure_test TEST_NAME)
   set(_TEST_TMPDIR "${IREE_TEST_TMPDIR_ROOT}/${TEST_NAME}_test_tmpdir")
   set_property(GLOBAL APPEND PROPERTY IREE_TEST_TMPDIRS ${_TEST_TMPDIR})
   set_property(TEST ${TEST_NAME} APPEND PROPERTY ENVIRONMENT "TEST_TMPDIR=${_TEST_TMPDIR}")
+  # GoogleTest's Bazel-compatible output contract preserves per-case properties,
+  # failures, and skips. Keep results within the invocation's scratch lifecycle.
+  set_property(TEST ${TEST_NAME} APPEND PROPERTY ENVIRONMENT "XML_OUTPUT_FILE=${_TEST_TMPDIR}/test.xml")
   set_property(TEST ${TEST_NAME} APPEND PROPERTY ENVIRONMENT "IREE_BINARY_DIR=${IREE_BINARY_DIR}")
 
   # File extension cmake uses for the target platform.

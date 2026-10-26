@@ -195,7 +195,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ctest-results-core-linux-${{ matrix.sanitizer }}-attempt-${{ github.run_attempt }}
-          path: build/linux/**/Testing/Temporary/
+          path: |
+            build/linux/**/Testing/Temporary/
+            build/linux/**/*_test_tmpdir/test.xml
           if-no-files-found: warn
           retention-days: 7
 
@@ -300,7 +302,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ctest-results-core-linux-gpu-source-attempt-${{ github.run_attempt }}
-          path: build/linux-gpu/**/Testing/Temporary/
+          path: |
+            build/linux-gpu/**/Testing/Temporary/
+            build/linux-gpu/**/*_test_tmpdir/test.xml
           if-no-files-found: warn
           retention-days: 7
 
@@ -397,7 +401,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ctest-results-core-linux-gpu-attempt-${{ github.run_attempt }}
-          path: build/linux-gpu/**/Testing/Temporary/
+          path: |
+            build/linux-gpu/**/Testing/Temporary/
+            build/linux-gpu/**/*_test_tmpdir/test.xml
           if-no-files-found: warn
           retention-days: 7
 
@@ -556,7 +562,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ctest-results-core-windows-${{ matrix.toolchain }}-attempt-${{ github.run_attempt }}
-          path: build/windows/${{ matrix.toolchain }}/**/Testing/Temporary/
+          path: |
+            build/windows/${{ matrix.toolchain }}/**/Testing/Temporary/
+            build/windows/${{ matrix.toolchain }}/**/*_test_tmpdir/test.xml
           if-no-files-found: warn
           retention-days: 7
 
