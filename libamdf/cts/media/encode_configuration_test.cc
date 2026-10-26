@@ -131,7 +131,7 @@ class EncodeConfigurationTest : public ::testing::Test {
               AMDF_STATUS_OK);
     const void* extension = nullptr;
     auto status = api_->query_extension(
-        AMDF_EXTENSION_MEDIA, AMDF_MEDIA_EXTENSION_VERSION_2,
+        AMDF_EXTENSION_MEDIA, AMDF_MEDIA_EXTENSION_VERSION_1,
         AMDF_MEDIA_EXTENSION_VERSION_LATEST, &extension);
     if (status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
       GTEST_SKIP() << "media encode extension is not enabled";

@@ -624,7 +624,7 @@ static amdf_status_t AMDF_CALL amdf_media_drm_query_configuration(
 
 static const amdf_media_api_t amdf_media_drm_operations = {
     .structure_size = sizeof(amdf_media_api_t),
-    .extension_version = AMDF_MEDIA_EXTENSION_VERSION_2,
+    .extension_version = AMDF_MEDIA_EXTENSION_VERSION_1,
     .device_enumerate_codecs = amdf_media_drm_enumerate_codecs,
     .device_query_configuration = amdf_media_drm_query_configuration,
     .device_query_image_requirements = amdf_media_drm_image_requirements,
@@ -773,7 +773,7 @@ static amdf_status_t amdf_media_drm_device_discover(
       .structure_size = sizeof(family),
       .command_type = AMDF_QUEUE_COMMAND_TYPE_MEDIA,
       .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
-      .format_version = AMDF_MEDIA_EXTENSION_VERSION_2,
+      .format_version = AMDF_MEDIA_EXTENSION_VERSION_1,
       .roles = AMDF_QUEUE_ROLE_MEDIA,
       .cache_operations = AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM |
                           AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM,

@@ -111,7 +111,7 @@ amdf_status_t AMDF_CALL QueryImageRequirements(
 
 const amdf_media_api_t kOperations = {
     .structure_size = sizeof(amdf_media_api_t),
-    .extension_version = AMDF_MEDIA_EXTENSION_VERSION_2,
+    .extension_version = AMDF_MEDIA_EXTENSION_VERSION_1,
     .device_enumerate_codecs = EnumerateCodecs,
     .device_query_configuration = QueryDeviceConfiguration,
     .device_query_image_requirements = QueryImageRequirements,
@@ -231,7 +231,7 @@ amdf_status_t InitializeNative(Device* device,
       .structure_size = sizeof(family),
       .command_type = AMDF_QUEUE_COMMAND_TYPE_MEDIA,
       .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
-      .format_version = AMDF_MEDIA_EXTENSION_VERSION_2,
+      .format_version = AMDF_MEDIA_EXTENSION_VERSION_1,
       .roles = AMDF_QUEUE_ROLE_MEDIA,
       .cache_operations = AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM |
                           AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM,
