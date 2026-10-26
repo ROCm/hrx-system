@@ -65,6 +65,8 @@ typedef struct loom_low_allocation_interval_assignment_state_t {
   uint64_t* full_entry_class_words;
   // Cached predicted spill traffic, dense by liveness value ordinal.
   loom_low_allocation_spill_plan_traffic_t* spill_traffic_by_value_ordinal;
+  // Block-local grouping scratch shared by all uncached traffic queries.
+  loom_low_allocation_spill_plan_traffic_workspace_t spill_traffic_workspace;
   // Lazily allocated decision array. Each allocatable interval spills at most
   // once, so the interval count is a fixed upper bound without growth.
   loom_low_allocation_spill_decision_t* spill_decisions;
@@ -147,6 +149,7 @@ loom_low_allocation_interval_assignment_search_context(
       .storage_leases = state->context->storage_leases,
       .expanded_execution_values = state->context->expanded_execution_values,
       .spill_traffic_by_value_ordinal = state->spill_traffic_by_value_ordinal,
+      .spill_traffic_workspace = &state->spill_traffic_workspace,
       .use_pressure_efficiency =
           state->context->search_strategy ==
           LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_PRESSURE_EFFICIENCY,
@@ -568,7 +571,7 @@ static iree_status_t loom_low_allocation_interval_assignment_spill_traffic(
   if (traffic->store_count == UINT32_MAX) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_traffic(
         state->context->module, state->context->function_cfg_graph, assignment,
-        alloc_unit_bits, traffic));
+        alloc_unit_bits, &state->spill_traffic_workspace, traffic));
   }
   *out_traffic = *traffic;
   return iree_ok_status();
@@ -1615,7 +1618,9 @@ loom_low_allocation_interval_assignment_initialize_spill_traffic_cache(
             .store_count = UINT32_MAX,
         };
   }
-  return iree_ok_status();
+  return loom_low_allocation_spill_plan_traffic_workspace_initialize(
+      state->context->function_cfg_graph->region, state->scratch_arena,
+      &state->spill_traffic_workspace);
 }
 
 static iree_status_t loom_low_allocation_interval_assignment_assign(

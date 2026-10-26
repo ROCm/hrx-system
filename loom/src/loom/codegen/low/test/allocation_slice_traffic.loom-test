@@ -1,0 +1,105 @@
+// Dense slices share one full reload; the selected spill cost must describe
+// the same traffic and operands that materialization emits.
+// RUN: emit low-allocation-query @dense_slices spill-plans=%wide test.i32=5 materialize-spills
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @dense_slices(%blocker: reg<test.i32>, %wide: reg<test.i32 x4>) -> (reg<test.i32>) asm {
+  %temporary = test.add.i32 %blocker, %blocker
+  %pressure = test.add.i32 %blocker, %temporary
+  %part0 = slice %wide[0] : reg<test.i32 x4> -> reg<test.i32>
+  %part1 = slice %wide[1] : reg<test.i32 x4> -> reg<test.i32>
+  %sum1 = test.add.i32 %part0, %part1
+  %part2 = slice %wide[2] : reg<test.i32 x4> -> reg<test.i32>
+  %sum2 = test.add.i32 %sum1, %part2
+  %part3 = slice %wide[3] : reg<test.i32 x4> -> reg<test.i32>
+  %sum3 = test.add.i32 %sum2, %part3
+  %part4 = slice %wide[0] : reg<test.i32 x4> -> reg<test.i32>
+  %sum4 = test.add.i32 %sum3, %part4
+  %part5 = slice %wide[1] : reg<test.i32 x4> -> reg<test.i32>
+  %sum5 = test.add.i32 %sum4, %part5
+  %part6 = slice %wide[2] : reg<test.i32 x4> -> reg<test.i32>
+  %sum6 = test.add.i32 %sum5, %part6
+  %part7 = slice %wide[3] : reg<test.i32 x4> -> reg<test.i32>
+  %sum7 = test.add.i32 %sum6, %part7
+  %result = test.add.i32 %sum7, %pressure
+  return %result
+}
+
+// ----
+spill %wide: private[0] bytes=16 align=16 stores=1 reloads=1
+storage: 1 reservations, 16 bytes
+traffic: 1 stores, 1 reloads
+errors: 0
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @dense_slices(%blocker: reg<test.i32>, %wide: reg<test.i32 x4>) -> (reg<test.i32>) asm {
+  %dense_slices_spill_storage_0 = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  low.spill %wide, %dense_slices_spill_storage_0 : reg<test.i32 x4>, low.storage<private>
+  %temporary = test.add.i32 %blocker, %blocker
+  %pressure = test.add.i32 %blocker, %temporary
+  %22 = low.reload %dense_slices_spill_storage_0 : low.storage<private> -> reg<test.i32 x4>
+  %part0 = slice %22[0] : reg<test.i32 x4> -> reg<test.i32>
+  %part1 = slice %22[1] : reg<test.i32 x4> -> reg<test.i32>
+  %sum1 = test.add.i32 %part0, %part1
+  %part2 = slice %22[2] : reg<test.i32 x4> -> reg<test.i32>
+  %sum2 = test.add.i32 %sum1, %part2
+  %part3 = slice %22[3] : reg<test.i32 x4> -> reg<test.i32>
+  %sum3 = test.add.i32 %sum2, %part3
+  %part4 = slice %22[0] : reg<test.i32 x4> -> reg<test.i32>
+  %sum4 = test.add.i32 %sum3, %part4
+  %part5 = slice %22[1] : reg<test.i32 x4> -> reg<test.i32>
+  %sum5 = test.add.i32 %sum4, %part5
+  %part6 = slice %22[2] : reg<test.i32 x4> -> reg<test.i32>
+  %sum6 = test.add.i32 %sum5, %part6
+  %part7 = slice %22[3] : reg<test.i32 x4> -> reg<test.i32>
+  %sum7 = test.add.i32 %sum6, %part7
+  %result = test.add.i32 %sum7, %pressure
+  return %result
+}
+
+// ====
+
+// Sparse slices retain narrow reloads, including their distinct byte offsets.
+// RUN: emit low-allocation-query @sparse_slices spill-plans=%wide test.i32=5 materialize-spills
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @sparse_slices(%blocker: reg<test.i32>, %wide: reg<test.i32 x4>) -> (reg<test.i32>) asm {
+  %temporary = test.add.i32 %blocker, %blocker
+  %pressure = test.add.i32 %blocker, %temporary
+  %first = slice %wide[0] : reg<test.i32 x4> -> reg<test.i32>
+  %second = slice %wide[1] : reg<test.i32 x4> -> reg<test.i32>
+  %first_sum = test.add.i32 %first, %second
+  %third = slice %wide[2] : reg<test.i32 x4> -> reg<test.i32>
+  %second_sum = test.add.i32 %first_sum, %third
+  %last = slice %wide[3] : reg<test.i32 x4> -> reg<test.i32>
+  %sum = test.add.i32 %second_sum, %last
+  %result = test.add.i32 %sum, %pressure
+  return %result
+}
+
+// ----
+spill %wide: private[0] bytes=16 align=16 stores=1 reloads=4
+storage: 1 reservations, 16 bytes
+traffic: 1 stores, 4 reloads
+errors: 0
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @sparse_slices(%blocker: reg<test.i32>, %wide: reg<test.i32 x4>) -> (reg<test.i32>) asm {
+  %sparse_slices_spill_storage_0 = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  low.spill %wide, %sparse_slices_spill_storage_0 : reg<test.i32 x4>, low.storage<private>
+  %temporary = test.add.i32 %blocker, %blocker
+  %pressure = test.add.i32 %blocker, %temporary
+  %14 = low.reload %sparse_slices_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  %15 = low.reload %sparse_slices_spill_storage_0 {offset = 4} : low.storage<private> -> reg<test.i32>
+  %first_sum = test.add.i32 %14, %15
+  %16 = low.reload %sparse_slices_spill_storage_0 {offset = 8} : low.storage<private> -> reg<test.i32>
+  %second_sum = test.add.i32 %first_sum, %16
+  %17 = low.reload %sparse_slices_spill_storage_0 {offset = 12} : low.storage<private> -> reg<test.i32>
+  %sum = test.add.i32 %second_sum, %17
+  %result = test.add.i32 %sum, %pressure
+  return %result
+}

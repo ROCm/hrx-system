@@ -68,6 +68,8 @@ typedef struct loom_low_allocation_search_context_t {
   // Cached predicted spill traffic, dense by liveness value ordinal. A
   // store_count of UINT32_MAX means the entry is not computed yet.
   loom_low_allocation_spill_plan_traffic_t* spill_traffic_by_value_ordinal;
+  // Attempt-local block grouping scratch for uncached traffic queries.
+  loom_low_allocation_spill_plan_traffic_workspace_t* spill_traffic_workspace;
   // Whether spill victims are ranked by traffic per remaining
   // register-pressure area instead of absolute traffic. Hard register-required
   // candidates use absolute traffic because they cannot select themselves as

@@ -31,6 +31,13 @@ typedef struct loom_low_allocation_spill_plan_traffic_t {
   uint64_t reload_bytes;
 } loom_low_allocation_spill_plan_traffic_t;
 
+// Reusable traffic-query scratch for one immutable function CFG. Contents are
+// empty between queries; storage belongs to the allocation attempt's arena.
+typedef struct loom_low_allocation_spill_plan_traffic_workspace_t {
+  // Slice-use totals and touched-list links, indexed by region block index.
+  struct loom_low_allocation_spill_plan_slice_group_t* slice_groups_by_block;
+} loom_low_allocation_spill_plan_traffic_workspace_t;
+
 // Reference to an original SSA value or a value produced by an earlier spill
 // materialization action. Exactly one field is valid.
 typedef struct loom_low_spill_materialization_value_ref_t {
@@ -270,13 +277,21 @@ iree_status_t loom_low_spill_materialization_plan_build(
     iree_host_size_t spill_plan_count, iree_arena_allocator_t* arena,
     loom_low_spill_materialization_plan_t* out_plan);
 
-// Computes the predicted memory traffic for spilling |assignment|. Block
-// arguments must belong to |cfg_graph|'s region; nested-region arguments are
-// excluded by spill-register requirement classification before planning.
+// Allocates traffic-query scratch once for |body|. Call when spill selection
+// first becomes necessary, using the owning allocation attempt's scratch arena.
+iree_status_t loom_low_allocation_spill_plan_traffic_workspace_initialize(
+    const loom_region_t* body, iree_arena_allocator_t* arena,
+    loom_low_allocation_spill_plan_traffic_workspace_t* out_workspace);
+
+// Computes the predicted memory traffic for spilling |assignment| using
+// |workspace| initialized for |cfg_graph|'s region. Queries are sequential.
+// Block arguments must belong to |cfg_graph|'s region; nested-region arguments
+// are excluded by spill-register requirement classification before planning.
 iree_status_t loom_low_allocation_spill_plan_traffic(
     const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
     const loom_low_allocation_assignment_t* assignment,
     uint16_t alloc_unit_bits,
+    loom_low_allocation_spill_plan_traffic_workspace_t* workspace,
     loom_low_allocation_spill_plan_traffic_t* out_traffic);
 
 // Appends the spill materialization plan for |assignment| using its previously

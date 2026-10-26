@@ -868,9 +868,13 @@ class LowRequiredRegisterRelocationTest
             fixed_count, &arena_));
     IREE_ASSERT_OK(loom_low_allocation_target_constraints_finalize_fixed_values(
         &constraints, &liveness, &unit_liveness, &arena_));
+    loom_cfg_graph_t function_cfg_graph = {};
+    IREE_ASSERT_OK(loom_cfg_graph_build(module, module->body, &arena_,
+                                        &function_cfg_graph));
     loom_low_allocation_storage_lease_state_t leases = {};
     const loom_low_allocation_interval_assignment_context_t context = {
         .module = module,
+        .body = module->body,
         .function_op = &function,
         .target = &target,
         .liveness = &liveness,
@@ -880,6 +884,7 @@ class LowRequiredRegisterRelocationTest
         .unit_liveness = &unit_liveness,
         .storage_leases = &leases,
         .arena = &arena_,
+        .function_cfg_graph = &function_cfg_graph,
         .required_register_values = {module->values.count, &required_bits},
     };
     loom_low_allocation_interval_assignment_result_t result = {};

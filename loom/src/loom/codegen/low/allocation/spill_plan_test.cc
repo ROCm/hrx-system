@@ -6,6 +6,8 @@
 
 #include "loom/codegen/low/allocation/spill_plan.h"
 
+#include <string>
+#include <tuple>
 #include <vector>
 
 #include "iree/base/internal/arena.h"
@@ -105,11 +107,14 @@ struct SliceReloadCase {
 
 class LowAllocationSliceReloadTest
     : public LowAllocationSpillPlanTest,
-      public ::testing::WithParamInterface<SliceReloadCase> {};
+      public ::testing::WithParamInterface<
+          std::tuple<SliceReloadCase, uint16_t>> {};
 
 TEST_P(LowAllocationSliceReloadTest, PredictsTraffic) {
-  const auto& test_case = GetParam();
+  const auto& [test_case, block_count] = GetParam();
   loom_module_t* module = AllocateModule();
+  loom_region_t* body = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate_region(module, block_count, &body));
   loom_type_t source_type = loom_low_register_type(
       /*descriptor_set_stable_id=*/23, /*register_class_id=*/0,
       test_case.source_unit_count);
@@ -117,56 +122,78 @@ TEST_P(LowAllocationSliceReloadTest, PredictsTraffic) {
 
   loom_value_id_t source_value = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_module_define_value(module, source_type, &source_value));
-  loom_builder_t builder;
-  loom_builder_initialize(module, &module->arena, loom_module_block(module),
-                          &builder);
-  for (const auto& range : test_case.slices) {
-    loom_type_t result_type = loom_low_register_carrier_type_with_unit_count(
-        source_type, range.unit_count);
-    IREE_ASSERT_OK(loom_module_intern_type(module, result_type, &result_type));
-    loom_op_t* slice = nullptr;
-    IREE_ASSERT_OK(loom_low_slice_build(&builder, source_value, range.offset,
-                                        result_type, LOOM_LOCATION_UNKNOWN,
-                                        &slice));
+  // Keep uses sparse in the CFG and group the first and last blocks separately.
+  const uint16_t used_block_count = block_count == 1 ? 1 : 2;
+  for (uint16_t i = 0; i < used_block_count; ++i) {
+    loom_builder_t builder;
+    loom_builder_initialize(module, &module->arena,
+                            body->blocks[i == 0 ? 0 : block_count - 1],
+                            &builder);
+    for (const auto& range : test_case.slices) {
+      loom_type_t result_type = loom_low_register_carrier_type_with_unit_count(
+          source_type, range.unit_count);
+      IREE_ASSERT_OK(
+          loom_module_intern_type(module, result_type, &result_type));
+      loom_op_t* slice = nullptr;
+      IREE_ASSERT_OK(loom_low_slice_build(&builder, source_value, range.offset,
+                                          result_type, LOOM_LOCATION_UNKNOWN,
+                                          &slice));
+    }
   }
 
   const loom_low_allocation_assignment_t assignment =
       Assignment(source_value, test_case.source_unit_count);
   loom_cfg_graph_t cfg_graph = {};
-  IREE_ASSERT_OK(
-      loom_cfg_graph_build(module, module->body, &arena_, &cfg_graph));
-  loom_low_allocation_spill_plan_traffic_t traffic = {};
-  IREE_ASSERT_OK(loom_low_allocation_spill_plan_traffic(
-      module, &cfg_graph, &assignment, test_case.alloc_unit_bits, &traffic));
-  EXPECT_EQ(traffic.store_count, 1u);
-  EXPECT_EQ(
-      traffic.store_bytes,
-      (test_case.source_unit_count * test_case.alloc_unit_bits + 7u) / 8u);
-  EXPECT_EQ(traffic.reload_count, test_case.reload_count);
-  EXPECT_EQ(traffic.reload_bytes, test_case.reload_bytes);
+  IREE_ASSERT_OK(loom_cfg_graph_build(module, body, &arena_, &cfg_graph));
+  loom_low_allocation_spill_plan_traffic_workspace_t workspace = {};
+  IREE_ASSERT_OK(loom_low_allocation_spill_plan_traffic_workspace_initialize(
+      body, &arena_, &workspace));
+  // A completed query leaves no counts or bytes for the next value to inherit.
+  for (int i = 0; i < 2; ++i) {
+    loom_low_allocation_spill_plan_traffic_t traffic = {};
+    IREE_ASSERT_OK(loom_low_allocation_spill_plan_traffic(
+        module, &cfg_graph, &assignment, test_case.alloc_unit_bits, &workspace,
+        &traffic));
+    EXPECT_EQ(traffic.store_count, 1u);
+    EXPECT_EQ(
+        traffic.store_bytes,
+        (test_case.source_unit_count * test_case.alloc_unit_bits + 7u) / 8u);
+    EXPECT_EQ(traffic.reload_count, used_block_count * test_case.reload_count);
+    EXPECT_EQ(traffic.reload_bytes, used_block_count * test_case.reload_bytes);
+  }
 
   loom_module_free(module);
 }
 
 INSTANTIATE_TEST_SUITE_P(
     SliceWidths, LowAllocationSliceReloadTest,
-    ::testing::Values(
-        SliceReloadCase{"SparseScalars", 4, 32, {{0, 1}, {3, 1}}, 2, 8},
-        SliceReloadCase{"SingleWideSlice", 4, 32, {{1, 3}}, 1, 12},
-        SliceReloadCase{"MixedWidths", 4, 32, {{0, 1}, {2, 2}}, 2, 12},
-        SliceReloadCase{"EqualBytes", 4, 32, {{0, 1}, {1, 3}}, 2, 16},
-        SliceReloadCase{"OverlappingWidths", 4, 32, {{0, 3}, {2, 2}}, 1, 16},
-        SliceReloadCase{"HalfwordUnits", 4, 16, {{0, 3}, {2, 2}}, 1, 8},
-        SliceReloadCase{
-            "DenseScalarUses",
-            8,
-            32,
-            {{0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 1}, {6, 1}, {7, 1}},
-            1,
-            32},
-        SliceReloadCase{"PackedBitUnits", 8, 1, {{0, 1}, {4, 4}}, 2, 2}),
-    [](const ::testing::TestParamInfo<SliceReloadCase>& info) {
-      return info.param.name;
+    ::testing::Combine(
+        ::testing::Values(
+            SliceReloadCase{"SparseScalars", 4, 32, {{0, 1}, {3, 1}}, 2, 8},
+            SliceReloadCase{"SingleWideSlice", 4, 32, {{1, 3}}, 1, 12},
+            SliceReloadCase{"MixedWidths", 4, 32, {{0, 1}, {2, 2}}, 2, 12},
+            SliceReloadCase{"EqualBytes", 4, 32, {{0, 1}, {1, 3}}, 2, 16},
+            SliceReloadCase{
+                "OverlappingWidths", 4, 32, {{0, 3}, {2, 2}}, 1, 16},
+            SliceReloadCase{"HalfwordUnits", 4, 16, {{0, 3}, {2, 2}}, 1, 8},
+            SliceReloadCase{"DenseScalarUses",
+                            8,
+                            32,
+                            {{0, 1},
+                             {1, 1},
+                             {2, 1},
+                             {3, 1},
+                             {4, 1},
+                             {5, 1},
+                             {6, 1},
+                             {7, 1}},
+                            1,
+                            32},
+            SliceReloadCase{"PackedBitUnits", 8, 1, {{0, 1}, {4, 4}}, 2, 2}),
+        ::testing::Values<uint16_t>(1, 64, 65, 257)),
+    [](const auto& info) {
+      return std::string(std::get<0>(info.param).name) + "Blocks" +
+             std::to_string(std::get<1>(info.param));
     });
 
 TEST_F(LowAllocationSpillPlanTest, RecordsSpillRemarks) {
