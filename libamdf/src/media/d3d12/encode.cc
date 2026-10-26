@@ -50,7 +50,9 @@ amdf_status_t PrepareH264(const Session& session,
           ? D3D12_VIDEO_ENCODER_FRAME_TYPE_H264_IDR_FRAME
           : D3D12_VIDEO_ENCODER_FRAME_TYPE_H264_P_FRAME;
   picture->h264.PictureOrderCountNumber = source->picture_order_count;
-  picture->h264.FrameDecodingOrderNumber = source->frame_decoding_order_number;
+  // D3D12 names this field by its decode-order role, but defines its syntax
+  // value as frame_num. libamdf keeps the provider task identity separate.
+  picture->h264.FrameDecodingOrderNumber = source->frame_number;
   picture->h264.TemporalLayerIndex = encode.temporal_layer_index;
   picture->h264.List0ReferenceFramesCount = source->reference_count;
   picture->h264.pList0ReferenceFrames =
@@ -67,7 +69,7 @@ amdf_status_t PrepareH264(const Session& session,
         .ReconstructedPictureResourceIndex = index,
         .PictureOrderCountNumber =
             static_cast<UINT>(reference.picture_order_count),
-        .FrameDecodingOrderNumber = reference.frame_decoding_order_number,
+        .FrameDecodingOrderNumber = reference.frame_number,
         .TemporalLayerIndex = reference.temporal_layer_index,
     };
   }

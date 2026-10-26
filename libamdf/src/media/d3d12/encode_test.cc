@@ -76,14 +76,19 @@ class TemporalEncodePictureTest : public ::testing::Test {
 TEST_F(TemporalEncodePictureTest, H264CarriesCurrentAndReferenceLayerIdentity) {
   session_.native_encode.codec = D3D12_VIDEO_ENCODER_CODEC_H264;
   amdf_media_h264_encode_reference_t reference = {
-      {&reference_frame_, 0}, 0, AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR, 0, 0, 0,
+      {&reference_frame_, 0},
+      0,
+      AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR,
+      7,
+      0,
+      41,
   };
   amdf_media_h264_encode_picture_info_t h264 = {};
   Initialize(&h264, AMDF_STRUCTURE_TYPE_MEDIA_H264_ENCODE_PICTURE_INFO);
   h264.frame_type = AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_P;
   h264.frame_number = 1;
   h264.picture_order_count = 2;
-  h264.frame_decoding_order_number = 1;
+  h264.frame_decoding_order_number = 42;
   h264.used_as_reference = 1;
   h264.reference_count = 1;
   h264.references = &reference;
@@ -92,8 +97,10 @@ TEST_F(TemporalEncodePictureTest, H264CarriesCurrentAndReferenceLayerIdentity) {
   EncodePicture native = {};
   ASSERT_EQ(PrepareEncode(session_, encode_, 8, &native), AMDF_STATUS_OK);
   ExpectEnhancementLayerRateControl(native);
+  EXPECT_EQ(native.h264.FrameDecodingOrderNumber, 1u);
   EXPECT_EQ(native.h264.TemporalLayerIndex, 1u);
   ASSERT_EQ(native.h264.ReferenceFramesReconPictureDescriptorsCount, 1u);
+  EXPECT_EQ(native.h264_references[0].FrameDecodingOrderNumber, 7u);
   EXPECT_EQ(native.h264_references[0].TemporalLayerIndex, 0u);
 }
 
