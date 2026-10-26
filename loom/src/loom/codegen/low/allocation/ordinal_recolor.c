@@ -53,13 +53,9 @@ loom_low_allocation_ordinal_recolor_prepare_assignment(
       state->search->unit_liveness;
   const uint32_t acquisition_start_point =
       unit_liveness->values[value_ordinal].acquisition_start_point;
-  if (interval->value_id < state->search->expanded_execution_values.bit_count &&
-      iree_bitmap_test(state->search->expanded_execution_values,
-                       interval->value_id)) {
-    IREE_ASSERT_EQ(interval->definition_point, acquisition_start_point);
-    stored_assignment.flags |=
-        LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION;
-  }
+  stored_assignment.flags |= loom_low_allocation_unit_liveness_assignment_flags(
+      unit_liveness, interval, value_ordinal,
+      state->search->expanded_execution_values);
   if (stored_assignment.start_point == acquisition_start_point) {
     stored_assignment.liveness_segments =
         loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(

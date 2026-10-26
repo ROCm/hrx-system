@@ -194,11 +194,11 @@ iree_status_t loom_low_allocation_storage_lease_state_record_release_actions(
 // Publishes every storage lease indexed under |value_ordinal| into preallocated
 // instances and the temporal unit index using |assignment_index|'s concrete
 // register-like storage. Initialization established each record's value, and
-// the lease producer established its unit subrange and issue-time start. The
-// |assignments| is the stable preallocated interval-assignment array and the
-// indexed assignment covers that subrange. |liveness| describes the lease
-// schedule. Each value's assignment is published exactly once, including
-// inherited ties.
+// the lease producer established its unit subrange and issuing packet. Leases
+// begin at that packet's write point, after its input reads. |assignments| is
+// the stable preallocated interval-assignment array and the indexed assignment
+// covers that subrange. |liveness| describes the lease schedule. Each value's
+// assignment is published exactly once, including inherited ties.
 void loom_low_allocation_storage_lease_state_record_assignment(
     loom_low_allocation_storage_lease_state_t* state,
     const loom_low_descriptor_set_t* descriptor_set,

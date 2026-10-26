@@ -976,7 +976,9 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:cfg_dominance",
         "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:cfg_loop_nest",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -1054,12 +1056,30 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "lane_liveness",
+    srcs = ["lane_liveness.c"],
+    hdrs = ["lane_liveness.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":live_range",
+        ":unit_liveness",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/util:cfg_loop_nest",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "unit_liveness_builder",
     srcs = ["unit_liveness_builder.c"],
     hdrs = ["unit_liveness_builder.h"],
     deps = [
         ":call",
         ":clobber_index",
+        ":lane_liveness",
         ":live_range",
         ":storage",
         ":storage_reservations",
@@ -1074,6 +1094,7 @@ loom_cc_library(
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
         "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:cfg_loop_nest",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -1116,7 +1137,9 @@ loom_cc_test(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:cfg_dominance",
         "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:cfg_loop_nest",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

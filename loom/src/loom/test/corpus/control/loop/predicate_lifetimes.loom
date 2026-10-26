@@ -1,6 +1,7 @@
 // Every lane retains its final scalar and vector predicates after a loop
 // whose trip count varies across the workgroup. The two carried predicates
-// rotate without becoming integer loop state in the authored CFG.
+// rotate without becoming integer loop state in the authored CFG. Exits
+// precede loop bodies so final observations do not end cyclic storage ownership.
 kernel.def @loop_predicate_lifetimes() {
   %unit = index.constant 1 : index
   %size = index.constant 64 : index
@@ -25,9 +26,6 @@ kernel.def @loop_predicate_lifetimes() {
   %predicates = vector.cmpi slt, %pair, %limits : vector<2xi32> -> vector<2xi1>
   %again = scalar.cmpi slt, %iteration, %limit : i32
   cfg.cond_br %again, ^body, ^exit
-^body:
-  %next = scalar.addi %iteration, %c1 : i32
-  cfg.br ^loop(%next: i32, %tail: i1, %head: i1)
 ^exit:
   %head_word = scf.select %head, %c1, %c0 : i32
   %tail_word = scf.select %tail, %c1, %c0 : i32
@@ -41,6 +39,9 @@ kernel.def @loop_predicate_lifetimes() {
   view.store %begin_word, %outputs[%lane, 3] : i32, view<64x6xi32>
   vector.store %predicate_words, %outputs[%lane, 4] : vector<2xi32>, view<64x6xi32>
   kernel.return
+^body:
+  %next = scalar.addi %iteration, %c1 : i32
+  cfg.br ^loop(%next: i32, %tail: i1, %head: i1)
 }
 
 // The oracle computes rotation parity directly, independently of the subject's
@@ -126,17 +127,12 @@ kernel.def @nested_predicate_lifetimes() {
   %empty = scalar.cmpi eq, %inner_iteration, %c0 : i32
   %inner_again = scalar.cmpi slt, %inner_iteration, %inner_limit : i32
   cfg.cond_br %inner_again, ^inner_body, ^inner_exit
-^inner_body:
-  %inner_next = scalar.addi %inner_iteration, %c1 : i32
-  cfg.br ^inner(%inner_next: i32)
 ^inner_exit:
   %empty_word = scf.select %empty, %c1, %c0 : i32
   %empty_next = scalar.addi %empty_count, %empty_word : i32
   %outer_next = scalar.addi %outer_iteration, %c1 : i32
   %outer_again = scalar.cmpi slt, %outer_next, %outer_limit : i32
   cfg.cond_br %outer_again, ^repeat, ^exit
-^repeat:
-  cfg.br ^outer(%outer_next: i32, %empty_next: i32)
 ^exit:
   %final_empty = scf.select %empty, %c1, %c0 : i32
   view.store %outer_next, %outputs[%lane, 0] : i32, view<64x4xi32>
@@ -144,6 +140,11 @@ kernel.def @nested_predicate_lifetimes() {
   view.store %final_empty, %outputs[%lane, 2] : i32, view<64x4xi32>
   view.store %empty_next, %outputs[%lane, 3] : i32, view<64x4xi32>
   kernel.return
+^inner_body:
+  %inner_next = scalar.addi %inner_iteration, %c1 : i32
+  cfg.br ^inner(%inner_next: i32)
+^repeat:
+  cfg.br ^outer(%outer_next: i32, %empty_next: i32)
 }
 
 func.def @nested_predicate_lifetimes_oracle(%input: buffer, %output: buffer) {

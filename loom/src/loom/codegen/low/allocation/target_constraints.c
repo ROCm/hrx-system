@@ -1643,6 +1643,8 @@ iree_status_t loom_low_allocation_target_constraints_finalize_fixed_values(
         loom_liveness_interval_for_value_ordinal(liveness,
                                                  fixed->value_ordinal);
     loom_low_allocation_assignment_t* assignment = &fixed->assignment;
+    assignment->flags |= loom_low_allocation_unit_liveness_assignment_flags(
+        unit_liveness, interval, fixed->value_ordinal, (iree_bitmap_t){0});
     assignment->start_point =
         unit_liveness->values[fixed->value_ordinal].acquisition_start_point;
     assignment->end_point =

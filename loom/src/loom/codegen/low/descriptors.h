@@ -211,6 +211,10 @@ typedef uint32_t loom_low_register_part_mask_t;
 // temporary storage or writes to other storage or architectural state. Aliased
 // views do not inherit this capability.
 #define LOOM_LOW_REG_CLASS_FLAG_EXCHANGE ((uint16_t)1u << 7)
+// Ordinary writes preserve inactive execution lanes. Values observed after
+// leaving a loop retain those lanes while other lanes continue iterating;
+// expanded-execution writes must respect that cyclic storage lifetime.
+#define LOOM_LOW_REG_CLASS_FLAG_LANE_MASKED ((uint16_t)1u << 8)
 
 typedef enum loom_low_spill_slot_space_e {
   // Unknown or uninitialized spill storage space.

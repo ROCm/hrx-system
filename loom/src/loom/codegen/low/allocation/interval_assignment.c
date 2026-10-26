@@ -91,17 +91,9 @@ loom_low_allocation_interval_assignment_flags_for_interval(
     const loom_low_allocation_interval_assignment_state_t* state,
     const loom_liveness_interval_t* interval,
     loom_value_ordinal_t value_ordinal) {
-  if (interval->value_id >=
-          state->context->expanded_execution_values.bit_count ||
-      !iree_bitmap_test(state->context->expanded_execution_values,
-                        interval->value_id)) {
-    return 0;
-  }
-  IREE_ASSERT_EQ(
-      interval->definition_point,
-      state->unit_liveness.values[value_ordinal].acquisition_start_point,
-      "expanded-execution values must acquire storage at their definition");
-  return LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION;
+  return loom_low_allocation_unit_liveness_assignment_flags(
+      &state->unit_liveness, interval, value_ordinal,
+      state->context->expanded_execution_values);
 }
 
 static uint32_t

@@ -11,6 +11,27 @@
 #include "loom/ir/module.h"
 #include "loom/target/registers.h"
 
+loom_low_allocation_assignment_flags_t
+loom_low_allocation_unit_liveness_assignment_flags(
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_liveness_interval_t* interval,
+    loom_value_ordinal_t value_ordinal,
+    iree_bitmap_t expanded_execution_values) {
+  const uint32_t start_point =
+      unit_liveness->values[value_ordinal].acquisition_start_point;
+  loom_low_allocation_assignment_flags_t flags =
+      interval->unit_count > 1 && start_point < interval->start_point
+          ? LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS
+          : 0;
+  if (interval->value_id < expanded_execution_values.bit_count &&
+      iree_bitmap_test(expanded_execution_values, interval->value_id)) {
+    IREE_ASSERT_EQ(interval->definition_point, start_point,
+                   "expanded definitions acquire storage at their instruction");
+    flags |= LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION;
+  }
+  return flags;
+}
+
 bool loom_low_allocation_unit_liveness_storage_is_ignored(
     const loom_low_allocation_unit_liveness_t* unit_liveness,
     loom_value_id_t value_id, const loom_value_id_t* ignored_value_ids,

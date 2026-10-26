@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/codegen/low/allocation/lane_liveness.h"
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/allocation/storage_reservations.h"
@@ -135,6 +136,8 @@ typedef struct loom_low_allocation_unit_use_index_t {
   const loom_cfg_graph_t* cfg_graph;
   // Canonical definition and block-boundary points, borrowed for construction.
   const loom_liveness_analysis_t* liveness;
+  // Cyclic inactive-lane retention, built from the canonical loop nest.
+  loom_low_allocation_lane_liveness_t lane_liveness;
   // Retained call effects, borrowed while collecting instruction uses.
   loom_low_call_contract_provider_t call_contracts;
   // Caller-profile effects shared by every retained call.
@@ -467,11 +470,18 @@ loom_low_allocation_unit_use_index_retain_backward_storage_demands(
 
 static iree_status_t loom_low_allocation_unit_liveness_record_unit_use_at_point(
     loom_low_allocation_unit_use_index_t* unit_use_index,
-    const loom_liveness_interval_t* interval, uint32_t unit_point_start,
+    const loom_liveness_interval_t* interval,
+    loom_value_ordinal_t value_ordinal, uint32_t unit_point_start,
     uint32_t unit_offset, uint32_t unit_count, uint32_t point,
     loom_low_allocation_unit_use_flags_t flags) {
   loom_low_allocation_unit_liveness_t* unit_liveness =
       unit_use_index->unit_liveness;
+  if (unit_use_index->lane_liveness.defining_loops != NULL) {
+    loom_low_allocation_lane_liveness_observe(
+        &unit_use_index->lane_liveness, value_ordinal,
+        unit_use_index->block_index, unit_point_start + unit_offset, unit_count,
+        unit_liveness);
+  }
   const uint32_t end_point = point + 1u;
   for (uint32_t i = 0; i < unit_count; ++i) {
     const iree_host_size_t unit_end_point_index =
@@ -538,8 +548,8 @@ static iree_status_t loom_low_allocation_unit_liveness_note_unit_use_at_point(
     }
   }
   return loom_low_allocation_unit_liveness_record_unit_use_at_point(
-      unit_use_index, interval, unit_point_start, unit_offset, unit_count,
-      point, flags);
+      unit_use_index, interval, value_ordinal, unit_point_start, unit_offset,
+      unit_count, point, flags);
 }
 
 static iree_status_t
@@ -592,8 +602,8 @@ loom_low_allocation_unit_liveness_note_value_ordinal_physical_read(
           unit_use_index->unit_liveness, liveness, value_ordinal);
   IREE_ASSERT_NE(unit_point_start, UINT32_MAX);
   return loom_low_allocation_unit_liveness_record_unit_use_at_point(
-      unit_use_index, interval, unit_point_start, /*unit_offset=*/0,
-      interval->unit_count, physical_point,
+      unit_use_index, interval, value_ordinal, unit_point_start,
+      /*unit_offset=*/0, interval->unit_count, physical_point,
       LOOM_LOW_ALLOCATION_UNIT_USE_FLAG_INDEPENDENT_STORAGE_DEMAND);
 }
 
@@ -1548,6 +1558,7 @@ iree_status_t loom_low_allocation_unit_liveness_initialize(
     const loom_low_placement_table_t* placement,
     const loom_local_value_domain_t* value_domain,
     const loom_liveness_analysis_t* liveness, const loom_cfg_graph_t* cfg_graph,
+    const loom_cfg_loop_nest_t* loop_nest,
     loom_low_call_contract_provider_t call_contracts,
     iree_arena_allocator_t* result_arena,
     iree_arena_allocator_t* decision_arena,
@@ -1671,6 +1682,11 @@ iree_status_t loom_low_allocation_unit_liveness_initialize(
       cfg_graph, liveness, out_unit_liveness, call_contracts,
       multi_unit_value_count, result_arena, decision_arena, &unit_use_index);
   loom_low_allocation_edge_use_index_t edge_use_index;
+  if (iree_status_is_ok(status)) {
+    status = loom_low_allocation_lane_liveness_initialize(
+        target->descriptor_set, value_domain, liveness, loop_nest, result_arena,
+        &unit_use_index.lane_liveness);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_low_allocation_edge_use_index_initialize(
         placement, liveness, result_arena, &edge_use_index);

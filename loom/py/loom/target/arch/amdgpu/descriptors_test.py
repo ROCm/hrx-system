@@ -44,6 +44,7 @@ from loom.target.arch.amdgpu.descriptors import (
     _EARLY_CLOBBER_RESULT_CONSTRAINTS,
     _GFX12_TH_ATOMIC_RETURN_VALUE,
     _MUBUF_SOFFSET_INLINE_ZERO,
+    _REG_AGPR,
     _REG_EXEC,
     _REG_M0,
     _REG_MODE,
@@ -464,6 +465,14 @@ def test_only_full_vgpr_units_support_physical_exchange(target) -> None:
         if RegClassFlag.EXCHANGE in register_class.flags:
             assert RegClassFlag.PHYSICAL in register_class.flags
             assert register_class.alloc_unit_bits == 32
+
+
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+def test_lane_storage_is_execution_masked(target) -> None:
+    for register_class in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target].base.reg_classes:
+        assert (RegClassFlag.LANE_MASKED in register_class.flags) == (
+            register_class.name in (_REG_VGPR, _REG_AGPR)
+        )
 
 
 @pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)

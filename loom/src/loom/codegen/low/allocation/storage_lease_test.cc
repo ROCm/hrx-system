@@ -373,7 +373,7 @@ TEST_F(LowAllocationStoragePressureSummaryTest,
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(record_flags); ++i) {
     const auto& lease = scenario.state.instances[i];
     EXPECT_EQ(lease.value_id, scenario.value_ids[i]);
-    EXPECT_EQ(lease.start_point, start_points[i]);
+    EXPECT_EQ(lease.start_point, start_points[i] + 1);
     EXPECT_EQ(lease.end_point, end_points[i]);
     loom_low_allocation_storage_lease_unit_query_t query = {};
     loom_low_allocation_storage_lease_unit_query_initialize(
@@ -415,30 +415,30 @@ TEST_F(LowAllocationStoragePressureSummaryTest,
 
   ASSERT_NE(scenario.state.availability_expiration_heap, nullptr);
   EXPECT_EQ(scenario.state.availability_expiration_count, 2u);
-  EXPECT_EQ(scenario.state.minimum_pressure_release_start_point, 10u);
+  EXPECT_EQ(scenario.state.minimum_pressure_release_start_point, 11u);
   EXPECT_FALSE(
       loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
           &scenario.state, &descriptor_set, /*allocation_point=*/0,
-          /*candidate_end_point=*/10));
+          /*candidate_end_point=*/11));
   EXPECT_TRUE(
       loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
           &scenario.state, &descriptor_set, /*allocation_point=*/0,
-          /*candidate_end_point=*/11));
+          /*candidate_end_point=*/12));
 
   EXPECT_FALSE(
       loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
           &scenario.state, &descriptor_set, /*allocation_point=*/20,
-          /*candidate_end_point=*/30));
+          /*candidate_end_point=*/31));
   EXPECT_EQ(scenario.state.availability_expiration_count, 1u);
-  EXPECT_EQ(scenario.state.minimum_pressure_release_start_point, 30u);
+  EXPECT_EQ(scenario.state.minimum_pressure_release_start_point, 31u);
   EXPECT_TRUE(
       loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
           &scenario.state, &descriptor_set, /*allocation_point=*/10,
-          /*candidate_end_point=*/10));
+          /*candidate_end_point=*/11));
   EXPECT_TRUE(
       loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
           &scenario.state, &descriptor_set, /*allocation_point=*/20,
-          /*candidate_end_point=*/31));
+          /*candidate_end_point=*/32));
 
   EXPECT_FALSE(
       loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
@@ -477,7 +477,7 @@ TEST_F(LowAllocationStoragePressureSummaryTest,
     RecordAssignments(&descriptor_set, &scenario);
     ASSERT_NE(scenario.state.availability_expiration_heap, nullptr);
     if (!initially_spilled) {
-      EXPECT_EQ(scenario.state.minimum_pressure_release_start_point, 10u);
+      EXPECT_EQ(scenario.state.minimum_pressure_release_start_point, 11u);
       scenario.assignments[0].location_kind =
           LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT;
       loom_low_allocation_storage_lease_state_record_spill(
@@ -485,15 +485,15 @@ TEST_F(LowAllocationStoragePressureSummaryTest,
           /*value_ordinal=*/0);
     }
     EXPECT_EQ(scenario.state.availability_expiration_count, 1u);
-    EXPECT_EQ(scenario.state.minimum_pressure_release_start_point, 30u);
+    EXPECT_EQ(scenario.state.minimum_pressure_release_start_point, 31u);
     EXPECT_FALSE(
         loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
             &scenario.state, &descriptor_set, /*allocation_point=*/0,
-            /*candidate_end_point=*/30));
+            /*candidate_end_point=*/31));
     EXPECT_TRUE(
         loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
             &scenario.state, &descriptor_set, /*allocation_point=*/0,
-            /*candidate_end_point=*/31));
+            /*candidate_end_point=*/32));
 
     scenario.assignments[1].location_kind =
         LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT;
@@ -1466,7 +1466,7 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
   EXPECT_EQ(state.availability_expiration_count, 1u);
   const loom_low_allocation_storage_lease_t* lease = &state.instances[0];
   EXPECT_EQ(lease->value_id, value_ids[0]);
-  EXPECT_EQ(lease->start_point, 0u);
+  EXPECT_EQ(lease->start_point, 1u);
   EXPECT_EQ(lease->end_point, 10u);
   EXPECT_EQ(lease->location_base, 11u);
   EXPECT_EQ(lease->location_count, 32u);
@@ -1479,6 +1479,14 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
       /*end_point=*/point.program_point + 1, /*location_base=*/11,
       /*location_count=*/1);
   candidate.unit_count = 1;
+  if (point.producer_node != LOOM_LOW_SCHEDULE_NODE_NONE) {
+    // Reserving storage before issue does not move the candidate's write.
+    auto early_reservation = candidate;
+    early_reservation.start_point = 0;
+    EXPECT_FALSE(loom_low_allocation_storage_lease_state_conflicts(
+        &state, &descriptor_set, &liveness, &early_reservation, nullptr, 0,
+        LOOM_LOW_ALLOCATION_STORAGE_RELEASE_ALLOWED));
+  }
   uint32_t available_base = UINT32_MAX;
   EXPECT_FALSE(
       loom_low_allocation_storage_lease_state_find_next_available_location(
@@ -1536,10 +1544,9 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
                                     ? point.program_point
                                     : point.producer_program_point);
     EXPECT_EQ(state.availability_expiration_count, 0u);
-    // Start point zero is also the permanent conservative sentinel. Releasing
-    // that lease cannot turn the whole-attempt summary back into a proof.
-    EXPECT_EQ(state.minimum_pressure_release_start_point, 0u);
-    EXPECT_TRUE(
+    // The only lease has retired; no pressure release remains to consider.
+    EXPECT_EQ(state.minimum_pressure_release_start_point, UINT32_MAX);
+    EXPECT_FALSE(
         loom_low_allocation_storage_lease_state_pressure_release_may_overlap(
             &state, &descriptor_set, /*allocation_point=*/point.program_point,
             /*candidate_end_point=*/candidate.end_point));
@@ -1593,7 +1600,7 @@ INSTANTIATE_TEST_SUITE_P(
                       ReleasePoint{9, 3, 2, 0, 3, 5}));
 
 TEST_F(LowAllocationStorageLeaseTest,
-       UsesExactProgressBoundAsPhysicalLeaseEndpoint) {
+       UsesInstructionBoundariesForPhysicalLease) {
   const loom_low_reg_class_t reg_classes[] = {
       RegClass(/*alias_set_id=*/1),
   };
@@ -1664,8 +1671,30 @@ TEST_F(LowAllocationStorageLeaseTest,
       &state, &descriptor_set, &liveness, &leased_assignment,
       /*assignment_index=*/0, /*value_ordinal=*/0);
   ASSERT_EQ(state.instance_count, 1u);
-  EXPECT_EQ(state.instances[0].start_point, 0u);
+  EXPECT_EQ(state.instances[0].start_point, 1u);
   EXPECT_EQ(state.instances[0].end_point, 4u);
+
+  // A final input read belongs to the issue point, before the packet's new
+  // lease. A simultaneous result write belongs to the following point and
+  // conflicts. Allocation order must not change either answer.
+  auto at_issue = Assignment(value_ids[1], /*descriptor_reg_class_id=*/0,
+                             /*start_point=*/0, /*end_point=*/1,
+                             /*location_base=*/11, /*location_count=*/1);
+  auto* index = state.unit_index;
+  for (bool indexed : {true, false}) {
+    SCOPED_TRACE(indexed);
+    state.unit_index = indexed ? index : nullptr;
+    EXPECT_FALSE(loom_low_allocation_storage_lease_state_conflicts(
+        &state, &descriptor_set, &liveness, &at_issue, nullptr, 0,
+        LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
+    auto after_issue = at_issue;
+    after_issue.start_point = 1;
+    after_issue.end_point = 2;
+    EXPECT_TRUE(loom_low_allocation_storage_lease_state_conflicts(
+        &state, &descriptor_set, &liveness, &after_issue, nullptr, 0,
+        LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
+  }
+  state.unit_index = index;
 
   // A result written by the packet before the bound begins at point 3 and
   // must still conflict with the lease.

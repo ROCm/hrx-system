@@ -341,15 +341,15 @@ low.func.def target<amdgpu.rdna3.core>(@target) @late_carried_read_requires_back
   ds_read_b32 v2, v0 offset:0
   s_waitcnt vmcnt(63) lgkmcnt(0)
 .Lbb1:
-  ds_read_b32 v3, v0 offset:4
+  ds_read_b32 v4, v0 offset:4
   v_add_u32 v2, v2, v1
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  ds_read_b32 v4, v0 offset:8
+  ds_read_b32 v3, v0 offset:8
   s_cbranch_scc0 .Lbb3
 .Lbb2:
-  v_mov_b32 v2, v3
+  v_mov_b32 v2, v4
   s_branch .Lbb1
 .Lbb3:
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v0, v2, v4
+  v_add_u32 v0, v2, v3
   s_endpgm

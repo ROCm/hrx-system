@@ -14,6 +14,7 @@
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/util/cfg_graph.h"
+#include "loom/util/cfg_loop_nest.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,6 +25,8 @@ extern "C" {
 // register intervals down to target allocation units across CFG boundaries,
 // low.slice uses, descriptor early-clobber hazards, and structured backedges.
 // Native result units occupy their definition point even without readers.
+// Masked lanes observed outside a loop retain storage through that loop's
+// complete execution, using the function model's layout-independent nest.
 // Structural transports write only units with nonempty destination lifetimes.
 // The complete register-unit extent is bounded before point allocation;
 // retained-read construction consumes subsets of this same bounded domain.
@@ -36,6 +39,7 @@ iree_status_t loom_low_allocation_unit_liveness_initialize(
     const loom_low_placement_table_t* placement,
     const loom_local_value_domain_t* value_domain,
     const loom_liveness_analysis_t* liveness, const loom_cfg_graph_t* cfg_graph,
+    const loom_cfg_loop_nest_t* loop_nest,
     loom_low_call_contract_provider_t call_contracts,
     iree_arena_allocator_t* result_arena,
     iree_arena_allocator_t* decision_arena,

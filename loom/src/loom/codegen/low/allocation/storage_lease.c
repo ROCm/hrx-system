@@ -572,9 +572,8 @@ static bool loom_low_allocation_storage_lease_can_release_before(
       LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS) {
     return false;
   }
-  if (candidate->start_point <= lease->start_point) {
-    return false;
-  }
+  // A cyclic or aggregate reservation can precede its defining write. Only
+  // the scheduled producer determines whether release can precede that write.
   iree_host_size_t packet_index = LOOM_LOW_STORAGE_LEASE_PACKET_NONE;
   uint32_t node_index = LOOM_LOW_STORAGE_LEASE_NODE_NONE;
   uint32_t block_index = UINT32_MAX;
@@ -1400,12 +1399,17 @@ void loom_low_allocation_storage_lease_state_record_assignment(
             : liveness->blocks[liveness->block_count - 1u].end_point;
     // The temporal index reserves nodes for exactly one insertion per lease.
     IREE_ASSERT_EQ(state->instance_written[lease_record_index], 0u);
+    // Inputs are read at the issue point; results and asynchronous ownership
+    // start at the following write point. A last input read may therefore
+    // share storage with this packet's result even if that result was assigned
+    // first to retain inactive lanes across a loop cycle.
     state->instances[lease_record_index] =
         (loom_low_allocation_storage_lease_t){
             .lease_record_index = lease_record_index,
             .assignment_index = assignment_index,
             .value_id = assignment->value_id,
-            .start_point = block_info->start_point + record->scheduled_ordinal,
+            .start_point =
+                block_info->start_point + record->scheduled_ordinal + 1u,
             .end_point = end_point,
             .release_action_index = LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
             .descriptor_reg_class_id = assignment->descriptor_reg_class_id,

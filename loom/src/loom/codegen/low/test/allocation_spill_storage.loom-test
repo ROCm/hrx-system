@@ -419,3 +419,72 @@ low.func.def target<test.low.core>(@target) @sparse_path(%condition: reg<test.i3
   %sum = test.add.i32 %de, %15
   return %sum
 }
+
+// ====
+
+// The last SSA read precedes a later-layout loop body. The escaped lane value
+// still owns its spill slot while other lanes continue around that cycle.
+// RUN: emit low-allocation-query @cyclic_lane_storage spill-count materialize-spills amdgpu.vgpr=3
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @cyclic_lane_storage(%condition: reg<amdgpu.scc>, %seed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %output = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  low.br ^header
+^header:
+  %a = v_add_u32 %seed, %seed
+  %b = v_add_u32 %seed, %seed
+  %retained = v_add_u32 %seed, %seed
+  %ab = v_add_u32 %a, %b
+  %abc = v_add_u32 %ab, %retained
+  low.spill %abc, %output : reg<amdgpu.vgpr>, low.storage<private>
+  low.cond_br %condition, ^body, ^exit : reg<amdgpu.scc>
+^exit:
+  return %retained
+^body:
+  %d = v_add_u32 %seed, %seed
+  %e = v_add_u32 %seed, %seed
+  %f = v_add_u32 %seed, %seed
+  %de = v_add_u32 %d, %e
+  %def = v_add_u32 %de, %f
+  low.spill %def, %output : reg<amdgpu.vgpr>, low.storage<private>
+  low.br ^header
+}
+
+// ----
+spills: 2
+storage: 2 reservations, 8 bytes
+traffic: 2 stores, 3 reloads
+errors: 0
+
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @cyclic_lane_storage(%condition: reg<amdgpu.scc>, %seed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %output = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %cyclic_lane_storage_spill_storage_1 = storage {byte_alignment = 4, byte_length = 4} : low.storage<scratch>
+  %cyclic_lane_storage_spill_storage_2 = storage {byte_alignment = 4, byte_length = 4} : low.storage<scratch>
+  low.br ^header
+^header:
+  %a = v_add_u32 %seed, %seed
+  %b = v_add_u32 %seed, %seed
+  %retained = v_add_u32 %seed, %seed
+  low.spill %retained, %cyclic_lane_storage_spill_storage_1 : reg<amdgpu.vgpr>, low.storage<scratch>
+  %ab = v_add_u32 %a, %b
+  %16 = low.reload %cyclic_lane_storage_spill_storage_1 : low.storage<scratch> -> reg<amdgpu.vgpr>
+  %abc = v_add_u32 %ab, %16
+  low.spill %abc, %output : reg<amdgpu.vgpr>, low.storage<private>
+  low.cond_br %condition, ^body, ^exit : reg<amdgpu.scc>
+^exit:
+  %17 = low.reload %cyclic_lane_storage_spill_storage_1 : low.storage<scratch> -> reg<amdgpu.vgpr>
+  return %17
+^body:
+  %d = v_add_u32 %seed, %seed
+  %e = v_add_u32 %seed, %seed
+  %f = v_add_u32 %seed, %seed
+  low.spill %f, %cyclic_lane_storage_spill_storage_2 : reg<amdgpu.vgpr>, low.storage<scratch>
+  %de = v_add_u32 %d, %e
+  %18 = low.reload %cyclic_lane_storage_spill_storage_2 : low.storage<scratch> -> reg<amdgpu.vgpr>
+  %def = v_add_u32 %de, %18
+  low.spill %def, %output : reg<amdgpu.vgpr>, low.storage<private>
+  low.br ^header
+}

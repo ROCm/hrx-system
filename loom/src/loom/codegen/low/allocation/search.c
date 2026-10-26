@@ -70,12 +70,9 @@ loom_low_allocation_search_candidate_assignment(
   loom_low_allocation_assignment_t candidate = {
       .value_id = interval->value_id,
       .descriptor_reg_class_id = reg_class_id,
-      .flags =
-          interval->value_id < context->expanded_execution_values.bit_count &&
-                  iree_bitmap_test(context->expanded_execution_values,
-                                   interval->value_id)
-              ? LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION
-              : 0,
+      .flags = loom_low_allocation_unit_liveness_assignment_flags(
+          context->unit_liveness, interval, value_ordinal,
+          context->expanded_execution_values),
       .start_point =
           context->unit_liveness->values[value_ordinal].acquisition_start_point,
       .end_point =
@@ -89,12 +86,6 @@ loom_low_allocation_search_candidate_assignment(
           loom_low_allocation_unit_liveness_point_start_for_value_ordinal(
               context->unit_liveness, context->liveness, value_ordinal),
   };
-  IREE_ASSERT(
-      !iree_any_bit_set(
-          candidate.flags,
-          LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_EXPANDED_EXECUTION_DEFINITION) ||
-          interval->definition_point == candidate.start_point,
-      "expanded-execution values must acquire storage at their definition");
   candidate.end_point =
       loom_low_allocation_live_range_assignment_max_unit_end_point(
           context->unit_liveness->end_points,

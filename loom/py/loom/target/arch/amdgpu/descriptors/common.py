@@ -469,6 +469,13 @@ def _amdgpu_core_descriptor_set(
     categories: tuple[DescriptorCategory, ...] = AMDGPU_DESCRIPTOR_CATEGORIES,
 ) -> DescriptorSet:
     _validate_amdgpu_reg_class_spill_slots(key, reg_classes)
+    reg_classes = tuple(
+        replace(reg_class, flags=(*reg_class.flags, RegClassFlag.LANE_MASKED))
+        if reg_class.name in (_REG_VGPR, _REG_AGPR)
+        and RegClassFlag.LANE_MASKED not in reg_class.flags
+        else reg_class
+        for reg_class in reg_classes
+    )
     file_stem = _amdgpu_descriptor_set_file_stem(key)
     c_suffix = _amdgpu_camel_case(file_stem)
     c_enum_stem = file_stem.upper()

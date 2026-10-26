@@ -1096,7 +1096,9 @@ loom_cc_test(
     loom::ir
     loom::ops::low
     loom::target::registers
+    loom::util::cfg_dominance
     loom::util::cfg_graph
+    loom::util::cfg_loop_nest
 )
 
 loom_cc_library(
@@ -1183,6 +1185,25 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    lane_liveness
+  HDRS
+    "lane_liveness.h"
+  SRCS
+    "lane_liveness.c"
+  DEPS
+    ::live_range
+    ::unit_liveness
+    iree::base
+    iree::base::internal::arena
+    loom::analysis::liveness
+    loom::codegen::low::descriptors
+    loom::ir
+    loom::util::cfg_loop_nest
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     unit_liveness_builder
   HDRS
     "unit_liveness_builder.h"
@@ -1191,6 +1212,7 @@ loom_cc_library(
   DEPS
     ::call
     ::clobber_index
+    ::lane_liveness
     ::live_range
     ::storage
     ::storage_reservations
@@ -1207,6 +1229,7 @@ loom_cc_library(
     loom::ops::low
     loom::target::registers
     loom::util::cfg_graph
+    loom::util::cfg_loop_nest
   PUBLIC
 )
 
@@ -1256,7 +1279,9 @@ loom_cc_test(
     loom::ir
     loom::ops::low
     loom::target::registers
+    loom::util::cfg_dominance
     loom::util::cfg_graph
+    loom::util::cfg_loop_nest
 )
 
 loom_cc_library(

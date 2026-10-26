@@ -121,6 +121,16 @@ typedef struct loom_low_allocation_unit_liveness_t {
   loom_low_allocation_write_interference_t* write_interference;
 } loom_low_allocation_unit_liveness_t;
 
+// Publishes the physical lifetime contract shared by search, fixed bindings,
+// assignment, and recoloring. Early-acquired tuples retain per-unit starts;
+// expanded definitions must acquire their storage at the defining instruction.
+loom_low_allocation_assignment_flags_t
+loom_low_allocation_unit_liveness_assignment_flags(
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_liveness_interval_t* interval,
+    loom_value_ordinal_t value_ordinal,
+    iree_bitmap_t expanded_execution_values);
+
 // Returns true when |value_id|'s required storage component is excluded by
 // |ignored_value_ids|. Callers establish alias or relocation legality before
 // excluding a component; its separate SSA names are one physical reservation.

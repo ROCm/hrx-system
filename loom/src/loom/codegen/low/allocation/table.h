@@ -287,7 +287,7 @@ typedef struct loom_low_allocation_storage_lease_t {
   uint32_t assignment_index;
   // SSA value whose assignment owns the leased units.
   loom_value_id_t value_id;
-  // Program point where the lease becomes active.
+  // Write point immediately after the issuing packet reads its inputs.
   uint32_t start_point;
   // Program point where allocation may reuse the leased units, or zero for a
   // provisional spilled assignment with no physical reservation.

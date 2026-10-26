@@ -20,7 +20,9 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/target/registers.h"
+#include "loom/util/cfg_dominance.h"
 #include "loom/util/cfg_graph.h"
+#include "loom/util/cfg_loop_nest.h"
 
 namespace loom {
 namespace {
@@ -323,6 +325,11 @@ class WriteInterferenceTest : public ::testing::Test {
         &domain_, loom_liveness_order_empty(), &module_->arena, &liveness_));
     IREE_ASSERT_OK(
         loom_cfg_graph_build(module_, body, &module_->arena, &graph_));
+    loom_cfg_dominance_t dominance = {};
+    IREE_ASSERT_OK(
+        loom_cfg_dominance_build(&graph_, &module_->arena, &dominance));
+    IREE_ASSERT_OK(loom_cfg_loop_nest_build(&graph_, &dominance,
+                                            &module_->arena, &loop_nest_));
     loom_low_placement_preference_index_t preferences = {};
     loom_low_allocation_target_constraints_t constraints = {};
     IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
@@ -380,8 +387,8 @@ class WriteInterferenceTest : public ::testing::Test {
 
   iree_status_t BuildTable(BindingKind binding = BindingKind::Free) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_unit_liveness_initialize(
-        &target_, &placement_, &domain_, &liveness_, &graph_, {}, &result_,
-        &decision_, &unit_liveness_));
+        &target_, &placement_, &domain_, &liveness_, &graph_, &loop_nest_, {},
+        &result_, &decision_, &unit_liveness_));
     IREE_RETURN_IF_ERROR(loom_low_allocation_unit_liveness_retain_storage(
         &unit_liveness_, &liveness_, &placement_, &result_, &decision_));
     loom_low_allocation_unit_liveness_propagate_storage_relations(
@@ -497,6 +504,8 @@ class WriteInterferenceTest : public ::testing::Test {
   loom_liveness_analysis_t liveness_ = {};
   // Real control-flow graph for the fixture's straight-line block.
   loom_cfg_graph_t graph_ = {};
+  // Canonical loop structure paired with the fixture CFG.
+  loom_cfg_loop_nest_t loop_nest_ = {};
   // Structural facts in the same local ordinal domain.
   loom_low_placement_table_t placement_ = {};
   // Completed physical lifetimes from the production event producer.

@@ -14,7 +14,7 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @alias_attached_source_l
 
 // ----
 CHECK: *"storage_lease_count":3,"storage_lease_instance_count":3,"storage_release_action_count":1,*
-CHECK: *"lease_record":1,"assignment":2,"value":{"id":3,"name":"identity","type":"reg<amdgpu.vgpr>"},"start_point":1,"end_point":2,"release_action":0,*"location":{"kind":"physical_register","base":0,"count":1}}*
+CHECK: *"lease_record":1,"assignment":2,"value":{"id":3,"name":"identity","type":"reg<amdgpu.vgpr>"},"start_point":2,"end_point":2,"release_action":0,*"location":{"kind":"physical_register","base":0,"count":1}}*
 CHECK: *"storage_release_actions":[{"index":0,"insertion_packet":2,"insertion_node":2,*"release_reason_name":"amdgpu.memory_source_reuse","required_progress":1,"lease_record":1}]*
 
 // ====

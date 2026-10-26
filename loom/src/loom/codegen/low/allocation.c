@@ -758,8 +758,8 @@ static iree_status_t loom_low_allocate_function_impl(
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_unit_liveness_initialize(
         &state.target, &state.placement, value_domain, &state.liveness,
-        &model->cfg_graph, options->call_contracts, arena, &decision_arena,
-        &state.unit_liveness);
+        &model->cfg_graph, &model->loop_nest, options->call_contracts, arena,
+        &decision_arena, &state.unit_liveness);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_unit_liveness_retain_storage(

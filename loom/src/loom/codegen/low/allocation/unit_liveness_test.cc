@@ -4,8 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
 #include <array>
 #include <tuple>
+#include <vector>
 
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
@@ -19,7 +21,9 @@
 #include "loom/ir/types.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/registers.h"
+#include "loom/util/cfg_dominance.h"
 #include "loom/util/cfg_graph.h"
+#include "loom/util/cfg_loop_nest.h"
 
 namespace loom {
 namespace {
@@ -45,6 +49,17 @@ class LowAllocationUnitLivenessTest : public ::testing::Test {
     loom_context_deinitialize(&context_);
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
+
+  const loom_cfg_loop_nest_t& BuildLoopNest(const loom_cfg_graph_t& graph) {
+    loom_cfg_dominance_t dominance = {};
+    IREE_CHECK_OK(loom_cfg_dominance_build(&graph, &arena_, &dominance));
+    IREE_CHECK_OK(
+        loom_cfg_loop_nest_build(&graph, &dominance, &arena_, &loop_nest_));
+    return loop_nest_;
+  }
+
+  // Semantic loop facts paired with the current fixture's graph.
+  loom_cfg_loop_nest_t loop_nest_ = {};
 
   loom_module_t* AllocateModule() {
     loom_module_t* module = nullptr;
@@ -275,8 +290,8 @@ TEST_P(LowAllocationUnitLivenessExtentTest, BoundsExtentBeforePointAllocation) {
   IREE_EXPECT_STATUS_IS(
       fits ? IREE_STATUS_RESOURCE_EXHAUSTED : IREE_STATUS_OUT_OF_RANGE,
       loom_low_allocation_unit_liveness_initialize(
-          &target, &placement, &domain, &liveness, &graph, {}, &result_arena,
-          &decision_arena_, &result));
+          &target, &placement, &domain, &liveness, &graph,
+          &BuildLoopNest(graph), {}, &result_arena, &decision_arena_, &result));
   // On a 32-bit host, a legal index extent may still overflow the byte size;
   // arena allocation rejects that before asking its backing allocator.
   EXPECT_EQ(allocation_count,
@@ -365,8 +380,8 @@ TEST_F(LowAllocationUnitLivenessTest, RetainsImplicitReadsWithoutClobbering) {
   IREE_ASSERT_OK(
       loom_cfg_graph_build(module, module->body, &arena_, &cfg_graph));
   IREE_ASSERT_OK(loom_low_allocation_unit_liveness_initialize(
-      &target, nullptr, &domain, &liveness, &cfg_graph, {}, &arena_,
-      &decision_arena_, &result));
+      &target, nullptr, &domain, &liveness, &cfg_graph,
+      &BuildLoopNest(cfg_graph), {}, &arena_, &decision_arena_, &result));
   ASSERT_NE(result.implicit_location_counts_by_reg_class, nullptr);
   EXPECT_EQ(result.implicit_location_counts_by_reg_class[0], 3u);
   EXPECT_EQ(result.implicit_location_counts_by_reg_class[1], 1u);
@@ -672,8 +687,8 @@ TEST_P(LowAllocationDefinitionLivenessTest, DistinguishesWritesFromTransport) {
   IREE_ASSERT_OK(loom_cfg_graph_build(module, module->body, &arena_, &graph));
   loom_low_allocation_unit_liveness_t result = {};
   IREE_ASSERT_OK(loom_low_allocation_unit_liveness_initialize(
-      &target, nullptr, &domain, &liveness, &graph, {}, &arena_,
-      &decision_arena_, &result));
+      &target, nullptr, &domain, &liveness, &graph, &BuildLoopNest(graph), {},
+      &arena_, &decision_arena_, &result));
   const auto ordinal = loom_local_value_domain_ordinal(&domain, result_value);
   const auto* interval =
       loom_liveness_interval_for_value_ordinal(&liveness, ordinal);
@@ -707,6 +722,143 @@ INSTANTIATE_TEST_SUITE_P(
                        ::testing::Values(ResultUseKind::kHighWord,
                                          ResultUseKind::kUnused),
                        ::testing::Values(2u, 4u, 8u)));
+
+class LowAllocationCyclicLivenessTest
+    : public LowAllocationUnitLivenessTest,
+      public ::testing::WithParamInterface<uint16_t> {};
+
+TEST_P(LowAllocationCyclicLivenessTest, RetainsOnlyEscapedTupleUnits) {
+  const uint16_t depth = GetParam();
+  auto* module = AllocateModule();
+  auto* entry = loom_module_block(module);
+  std::vector<loom_block_t*> headers(depth);
+  std::vector<loom_block_t*> latches(depth);
+  for (auto& header : headers) {
+    IREE_ASSERT_OK(loom_region_append_block(module, module->body, &header));
+  }
+  loom_block_t* exit = nullptr;
+  IREE_ASSERT_OK(loom_region_append_block(module, module->body, &exit));
+  for (uint16_t i = depth; i > 0; --i) {
+    IREE_ASSERT_OK(
+        loom_region_append_block(module, module->body, &latches[i - 1]));
+  }
+  // The deepest header dominates all latches and the exit. Each latch reads
+  // one tuple word and either repeats its own loop or leaves it. The exit is
+  // laid out before every latch, so its final read is not the end of the
+  // physical lifetime of an execution-masked value.
+  const auto tuple_type = loom_low_register_type(1, 0, depth + 2);
+  const auto word_type = loom_low_register_type(1, 0, 1);
+  loom_value_id_t seed = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_define_value(module, tuple_type, &seed));
+  IREE_ASSERT_OK(loom_block_add_arg(module, entry, seed));
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, entry, &builder);
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_low_br_build(&builder, headers[0], nullptr, 0,
+                                   LOOM_LOCATION_UNKNOWN, &op));
+  loom_value_id_t value = LOOM_VALUE_ID_INVALID;
+  for (uint16_t i = 0; i < depth; ++i) {
+    loom_builder_set_block(&builder, headers[i]);
+    if (i + 1 == depth) {
+      IREE_ASSERT_OK(loom_low_copy_build(&builder, seed, false, tuple_type,
+                                         LOOM_LOCATION_UNKNOWN, &op));
+      value = loom_op_results(op)[0];
+    }
+    IREE_ASSERT_OK(
+        loom_low_br_build(&builder, i + 1 < depth ? headers[i + 1] : latches[i],
+                          nullptr, 0, LOOM_LOCATION_UNKNOWN, &op));
+  }
+  for (uint16_t i = 0; i < depth; ++i) {
+    loom_builder_set_block(&builder, latches[i]);
+    IREE_ASSERT_OK(loom_low_slice_build(&builder, value, i, word_type,
+                                        LOOM_LOCATION_UNKNOWN, &op));
+    IREE_ASSERT_OK(loom_low_cond_br_build(&builder, loom_op_results(op)[0],
+                                          headers[i], i ? latches[i - 1] : exit,
+                                          LOOM_LOCATION_UNKNOWN, &op));
+  }
+  loom_builder_set_block(&builder, exit);
+  IREE_ASSERT_OK(loom_low_slice_build(&builder, value, depth, word_type,
+                                      LOOM_LOCATION_UNKNOWN, &op));
+  const loom_value_id_t returned = loom_op_results(op)[0];
+  IREE_ASSERT_OK(loom_low_return_build(&builder, &returned, 1,
+                                       LOOM_LOCATION_UNKNOWN, &op));
+
+  loom_local_value_domain_t domain = {};
+  IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
+      module, module->body, &arena_, &domain));
+  loom_liveness_analysis_t liveness = {};
+  IREE_ASSERT_OK(loom_liveness_analyze_local_value_domain(
+      &domain, loom_liveness_order_empty(), &arena_, &liveness));
+  loom_cfg_graph_t graph = {};
+  IREE_ASSERT_OK(loom_cfg_graph_build(module, module->body, &arena_, &graph));
+  const auto& nest = BuildLoopNest(graph);
+  ASSERT_EQ(nest.loop_count, depth);
+  loom_low_reg_class_t register_class = {.alloc_unit_bits = 32};
+  const loom_low_descriptor_set_t descriptors = {
+      .stable_id = 1,
+      .reg_classes = &register_class,
+      .reg_class_count = 1,
+  };
+  const loom_low_resolved_target_t target = {.descriptor_set = &descriptors};
+  loom_low_allocation_unit_liveness_t ordinary = {};
+  IREE_ASSERT_OK(loom_low_allocation_unit_liveness_initialize(
+      &target, nullptr, &domain, &liveness, &graph, &nest, {}, &arena_,
+      &decision_arena_, &ordinary));
+  register_class.flags = LOOM_LOW_REG_CLASS_FLAG_LANE_MASKED;
+  loom_low_allocation_unit_liveness_t masked = {};
+  IREE_ASSERT_OK(loom_low_allocation_unit_liveness_initialize(
+      &target, nullptr, &domain, &liveness, &graph, &nest, {}, &arena_,
+      &decision_arena_, &masked));
+  const auto ordinal = loom_local_value_domain_ordinal(&domain, value);
+  const auto* interval =
+      loom_liveness_interval_for_value_ordinal(&liveness, ordinal);
+  const uint32_t point_start = masked.values[ordinal].unit_point_start;
+  for (uint16_t unit = 0; unit < depth + 2; ++unit) {
+    SCOPED_TRACE(unit);
+    uint32_t expected_start = ordinary.start_points[point_start + unit];
+    uint32_t expected_end = ordinary.end_points[point_start + unit];
+    if (unit < depth - 1 || unit == depth) {
+      // A latch in loop i escapes loops i+1..depth-1. The exit escapes all
+      // loops. The deepest latch and unused final word escape none.
+      const uint16_t escaped = unit == depth ? 0 : unit + 1;
+      expected_start =
+          std::min(expected_start,
+                   liveness.blocks[loom_block_region_index(headers[escaped])]
+                       .start_point);
+      expected_end = std::max(
+          expected_end,
+          liveness.blocks[loom_block_region_index(latches[escaped])].end_point +
+              1u);
+    }
+    EXPECT_EQ(masked.start_points[point_start + unit], expected_start);
+    EXPECT_EQ(masked.end_points[point_start + unit], expected_end);
+  }
+  EXPECT_EQ(masked.values[ordinal].acquisition_start_point,
+            liveness.blocks[loom_block_region_index(headers[0])].start_point);
+  const auto ordinary_range =
+      loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+          &ordinary, &liveness, ordinal);
+  const auto masked_range =
+      loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
+          &masked, &liveness, ordinal);
+  ASSERT_EQ(masked_range.count, ordinary_range.count);
+  ASSERT_GT(masked_range.count, 0u);
+  for (uint32_t i = 0; i < ordinary_range.count; ++i) {
+    const auto& before =
+        ordinary.storage_segments.entries[ordinary_range.start + i];
+    const auto& after = masked.storage_segments.entries[masked_range.start + i];
+    EXPECT_EQ(after.start_point, before.start_point);
+    EXPECT_EQ(after.end_point, before.end_point);
+  }
+  EXPECT_EQ(loom_low_allocation_unit_liveness_assignment_flags(
+                &masked, interval, ordinal, {}),
+            LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS);
+  loom_local_value_domain_release(&domain);
+  loom_module_free(module);
+}
+
+INSTANTIATE_TEST_SUITE_P(Nesting, LowAllocationCyclicLivenessTest,
+                         ::testing::Values(1, 2, 17, 129));
 
 TEST_F(LowAllocationUnitLivenessTest, ExcludesRequiredStorageComponents) {
   loom_module_t* module = AllocateModule();
@@ -776,8 +928,9 @@ TEST_F(LowAllocationUnitLivenessTest, InitializesUnitStartsAndBoundaryUses) {
   loom_cfg_graph_t cfg_graph = {};
   IREE_ASSERT_OK(loom_cfg_graph_build(module, body, &arena_, &cfg_graph));
   IREE_ASSERT_OK(loom_low_allocation_unit_liveness_initialize(
-      &target, nullptr, &value_domain, &liveness, &cfg_graph, {}, &arena_,
-      &decision_arena_, &unit_liveness));
+      &target, nullptr, &value_domain, &liveness, &cfg_graph,
+      &BuildLoopNest(cfg_graph), {}, &arena_, &decision_arena_,
+      &unit_liveness));
 
   EXPECT_EQ(loom_low_allocation_unit_liveness_point_start_for_value_ordinal(
                 &unit_liveness, &liveness, /*value_ordinal=*/0),
@@ -854,8 +1007,9 @@ TEST_F(LowAllocationUnitLivenessTest, ExtendsTiedResultSourceUnits) {
   loom_cfg_graph_t cfg_graph = {};
   IREE_ASSERT_OK(loom_cfg_graph_build(module, body, &arena_, &cfg_graph));
   IREE_ASSERT_OK(loom_low_allocation_unit_liveness_initialize(
-      &target, nullptr, &value_domain, &liveness, &cfg_graph, {}, &arena_,
-      &decision_arena_, &unit_liveness));
+      &target, nullptr, &value_domain, &liveness, &cfg_graph,
+      &BuildLoopNest(cfg_graph), {}, &arena_, &decision_arena_,
+      &unit_liveness));
   ASSERT_EQ(unit_liveness.point_count, 4u);
   EXPECT_EQ(unit_liveness.end_points[0], 1u);
   EXPECT_EQ(unit_liveness.end_points[1], 1u);
@@ -1322,8 +1476,9 @@ TEST_F(LowAllocationUnitLivenessTest,
   loom_cfg_graph_t cfg_graph = {};
   IREE_ASSERT_OK(loom_cfg_graph_build(module, body, &arena_, &cfg_graph));
   IREE_ASSERT_OK(loom_low_allocation_unit_liveness_initialize(
-      &target, nullptr, &value_domain, &liveness, &cfg_graph, {}, &arena_,
-      &decision_arena_, &unit_liveness));
+      &target, nullptr, &value_domain, &liveness, &cfg_graph,
+      &BuildLoopNest(cfg_graph), {}, &arena_, &decision_arena_,
+      &unit_liveness));
 
   loom_low_placement_relation_t relations[] = {
       {

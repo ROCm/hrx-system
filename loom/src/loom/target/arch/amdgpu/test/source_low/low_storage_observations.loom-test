@@ -324,9 +324,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @recreated_component_ends_obse
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb6
 .Lbb2:
-  v_mov_b32 v3, v2
 .Lbb3:
-  v_add_u32 v3, v3, v1
+  v_add_u32 v2, v2, v1
   s_add_u32 s4, s4, 1
   s_cmp_lt_i32 s4, s1
   s_delay_alu instid0(SALU_CYCLE_1)

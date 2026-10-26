@@ -153,12 +153,12 @@ low.func.def target<amdgpu.cdna2.core>(@target) @pipeline_loop(%lhs: reg<amdgpu.
 // ----
 .Lbb1:
   s_nop 0
-  v_fma_f64 v[12:13], v[6:7], v[8:9], v[10:11]
+  v_fma_f64 v[14:15], v[6:7], v[8:9], v[10:11]
   s_nop 3
-  v_mov_b32 v14, v4
-  v_mov_b32 v15, v5
+  v_mov_b32 v12, v4
+  v_mov_b32 v13, v5
   s_nop 1
-  v_mfma_f64_4x4x4f64 v[14:15], v[0:1], v[2:3], v[14:15]
+  v_mfma_f64_4x4x4f64 v[12:13], v[0:1], v[2:3], v[12:13]
   s_cbranch_scc1 .Lbb1
 .Lbb2:
   s_nop 4
