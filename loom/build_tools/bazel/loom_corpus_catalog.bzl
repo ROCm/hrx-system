@@ -7,9 +7,12 @@
 """Target-neutral source catalogs for the Loom correctness corpus."""
 
 load("//build_tools/bazel:glob.bzl", "iree_checked_glob")
+load(":loom_library.bzl", "loom_test_module")
 
 _MANIFEST_KIND = "loom_corpus_manifest"
 _CATALOG_KIND = "loom_corpus_catalog"
+
+LOOM_CORPUS_TAG = "loom-corpus"
 
 def _target_stem(value):
     return value.replace("/", "_").replace(".", "_").replace("-", "_").replace("+", "_")
@@ -62,6 +65,7 @@ def loom_corpus_manifest(name, package, srcs):
             identity = name + "/" + source,
             label = package + ":" + source,
             manifest = name,
+            module_label = package + ":" + target_name,
             source = source,
             target_name = target_name,
         ))
@@ -112,12 +116,12 @@ def loom_corpus_catalog(manifests):
     )
 
 def loom_corpus_sources(name, manifest, visibility = ["//visibility:public"]):
-    """Checks and exports one semantic package's authored source inventory.
+    """Owns one reusable test module for each semantic corpus source.
 
     Args:
       name: Target-neutral filegroup name for the semantic package.
       manifest: Manifest owned by the current Bazel package.
-      visibility: Visibility of the exported sources and filegroup.
+      visibility: Visibility of the source modules and exported inventory.
     """
     _validate_manifest(manifest)
     current_package = "//" + native.package_name()
@@ -132,6 +136,13 @@ def loom_corpus_sources(name, manifest, visibility = ["//visibility:public"]):
         allow_empty = False,
     )
     native.exports_files(srcs, visibility = visibility)
+    for program in manifest.programs:
+        loom_test_module(
+            name = program.target_name,
+            srcs = [program.source],
+            tags = [LOOM_CORPUS_TAG],
+            visibility = visibility,
+        )
     native.filegroup(
         name = name,
         srcs = srcs,

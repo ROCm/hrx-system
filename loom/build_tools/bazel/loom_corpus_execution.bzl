@@ -6,10 +6,12 @@
 
 """Target-owned correctness execution for Loom corpus programs."""
 
-load(":loom_corpus_catalog.bzl", "loom_corpus_validate_catalog")
+load(
+    ":loom_corpus_catalog.bzl",
+    "LOOM_CORPUS_TAG",
+    "loom_corpus_validate_catalog",
+)
 load(":loom_library.bzl", "loom_test")
-
-_CORPUS_TEST_TAG = "loom-corpus"
 
 def _profile_with_runner_args(profile, runner_args):
     return struct(
@@ -88,7 +90,7 @@ def loom_corpus_test(
         target_compatible_with = []):
     """Expands a source catalog into independent correctness tests.
 
-    Each source is linked and executed independently so a source-only change
+    Each source-owned module is executed independently so a source-only change
     invalidates only that program. Trials remain batched inside the authored
     scenario. Benchmark runners are deliberately absent from these CI tests.
 
@@ -110,11 +112,11 @@ def loom_corpus_test(
       args: Additional arguments passed to each correctness runner.
       size: Bazel test size applied to every source execution.
       tags: Additional tags applied to every generated target.
-      visibility: Visibility of source, semantic, and whole-catalog suites.
-      target_compatible_with: Build constraints applied to every source test.
+      visibility: Visibility of semantic and whole-catalog execution suites.
+      target_compatible_with: Build constraints applied to every execution test.
     """
     catalog = loom_corpus_validate_catalog(catalog)
-    tags = tags + [_CORPUS_TEST_TAG]
+    tags = tags + [LOOM_CORPUS_TAG]
     if not execution_profiles:
         fail("loom_corpus_test requires at least one execution profile")
     if name in [manifest.name for manifest in catalog.manifests]:
@@ -230,8 +232,8 @@ def loom_corpus_test(
             args = args,
             benchmark_smoke = False,
             execution_profiles = program_profiles,
+            module = program.module_label,
             size = size,
-            srcs = [program.label],
             tags = tags,
             target_compatible_with = target_compatible_with,
             visibility = visibility,

@@ -4,7 +4,14 @@
 # See https://llvm.org/licenses/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# Checks one semantic package's authored source inventory.
+# Produces the stable target stem shared by source owners and consumers.
+function(_loom_corpus_program_stem OUTPUT SOURCE_ID)
+  string(REGEX REPLACE "\\.loom$" "" _PROGRAM_STEM "${SOURCE_ID}")
+  string(REGEX REPLACE "[/\\.+-]" "_" _PROGRAM_STEM "${_PROGRAM_STEM}")
+  set(${OUTPUT} "${_PROGRAM_STEM}" PARENT_SCOPE)
+endfunction()
+
+# Owns one reusable test module for each semantic corpus source.
 function(loom_corpus_sources)
   cmake_parse_arguments(_RULE "" "NAME;MANIFEST" "SRCS" ${ARGN})
   if(NOT _RULE_NAME)
@@ -40,20 +47,33 @@ function(loom_corpus_sources)
   endif()
   set(_SOURCE_IDS)
   set(_SOURCE_PATHS)
+  set(_SOURCE_MODULE_TARGETS)
   foreach(_SOURCE IN LISTS _RULE_SRCS)
-    list(APPEND _SOURCE_IDS "${_RULE_MANIFEST}/${_SOURCE}")
+    set(_SOURCE_ID "${_RULE_MANIFEST}/${_SOURCE}")
+    list(APPEND _SOURCE_IDS "${_SOURCE_ID}")
     list(APPEND _SOURCE_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/${_SOURCE}")
+    _loom_corpus_program_stem(_PROGRAM_STEM "${_SOURCE_ID}")
+    loom_test_module(
+      NAME "${_PROGRAM_STEM}"
+      SRCS "${_SOURCE}"
+    )
+    iree_package_target_name(_MODULE_TARGET "::${_PROGRAM_STEM}")
+    list(APPEND _SOURCE_MODULE_TARGETS "${_MODULE_TARGET}")
   endforeach()
   set_property(GLOBAL PROPERTY
     "${_MANIFEST_PROPERTY}_SOURCE_IDS" "${_SOURCE_IDS}")
   set_property(GLOBAL PROPERTY
     "${_MANIFEST_PROPERTY}_SOURCE_PATHS" "${_SOURCE_PATHS}")
+  set_property(GLOBAL PROPERTY
+    "${_MANIFEST_PROPERTY}_MODULE_TARGETS" "${_SOURCE_MODULE_TARGETS}")
 endfunction()
 
 # Resolves registered semantic manifests after the source tree is available.
-function(_loom_corpus_resolve_manifests OUTPUT_SOURCE_IDS OUTPUT_SOURCE_PATHS)
+function(_loom_corpus_resolve_manifests
+    OUTPUT_SOURCE_IDS OUTPUT_SOURCE_PATHS OUTPUT_MODULE_TARGETS)
   set(_SOURCE_IDS)
   set(_SOURCE_PATHS)
+  set(_MODULE_TARGETS)
   foreach(_MANIFEST IN LISTS ARGN)
     set(_MANIFEST_PROPERTY "LOOM_CORPUS_MANIFEST_${_MANIFEST}")
     get_property(_REGISTERED GLOBAL
@@ -65,8 +85,11 @@ function(_loom_corpus_resolve_manifests OUTPUT_SOURCE_IDS OUTPUT_SOURCE_PATHS)
       PROPERTY "${_MANIFEST_PROPERTY}_SOURCE_IDS")
     get_property(_MANIFEST_SOURCE_PATHS GLOBAL
       PROPERTY "${_MANIFEST_PROPERTY}_SOURCE_PATHS")
+    get_property(_MANIFEST_MODULE_TARGETS GLOBAL
+      PROPERTY "${_MANIFEST_PROPERTY}_MODULE_TARGETS")
     list(APPEND _SOURCE_IDS ${_MANIFEST_SOURCE_IDS})
     list(APPEND _SOURCE_PATHS ${_MANIFEST_SOURCE_PATHS})
+    list(APPEND _MODULE_TARGETS ${_MANIFEST_MODULE_TARGETS})
   endforeach()
   set(_UNIQUE_SOURCE_IDS ${_SOURCE_IDS})
   list(REMOVE_DUPLICATES _UNIQUE_SOURCE_IDS)
@@ -77,6 +100,7 @@ function(_loom_corpus_resolve_manifests OUTPUT_SOURCE_IDS OUTPUT_SOURCE_PATHS)
   endif()
   set(${OUTPUT_SOURCE_IDS} ${_SOURCE_IDS} PARENT_SCOPE)
   set(${OUTPUT_SOURCE_PATHS} ${_SOURCE_PATHS} PARENT_SCOPE)
+  set(${OUTPUT_MODULE_TARGETS} ${_MODULE_TARGETS} PARENT_SCOPE)
 endfunction()
 
 # Registers target-owned corpus declarations until every target profile exists.
@@ -165,7 +189,7 @@ function(_loom_declare_corpus_build ID)
       "loom_corpus_build(${_RULE_NAME}) requires PROFILES")
   endif()
   _loom_corpus_resolve_manifests(
-    _SOURCE_IDS _SOURCES ${_RULE_MANIFESTS})
+    _SOURCE_IDS _SOURCES _SOURCE_MODULE_TARGETS ${_RULE_MANIFESTS})
   list(LENGTH _SOURCE_IDS _SOURCE_ID_COUNT)
   list(LENGTH _SOURCES _SOURCE_COUNT)
   if(NOT _SOURCE_ID_COUNT EQUAL _SOURCE_COUNT)
@@ -412,8 +436,7 @@ function(_loom_declare_corpus_build ID)
     endif()
     set(_SEMANTIC_NAME "${CMAKE_MATCH_1}")
     list(APPEND _SEMANTIC_NAMES "${_SEMANTIC_NAME}")
-    string(REGEX REPLACE "\\.loom$" "" _PROGRAM_STEM "${_SOURCE_ID}")
-    string(REGEX REPLACE "[/\\.+-]" "_" _PROGRAM_STEM "${_PROGRAM_STEM}")
+    _loom_corpus_program_stem(_PROGRAM_STEM "${_SOURCE_ID}")
     set(_PROGRAM_TARGET "${_PACKAGE_NAME}_${_PROGRAM_STEM}")
     set(_PROGRAM_OUTPUTS)
     set(_PROGRAM_ARTIFACTS)
@@ -603,12 +626,15 @@ function(_loom_declare_corpus_test ID)
   endif()
 
   _loom_corpus_resolve_manifests(
-    _SOURCE_IDS _SOURCES ${_RULE_MANIFESTS})
+    _SOURCE_IDS _SOURCES _SOURCE_MODULE_TARGETS ${_RULE_MANIFESTS})
   list(LENGTH _SOURCE_IDS _SOURCE_ID_COUNT)
   list(LENGTH _SOURCES _SOURCE_COUNT)
-  if(NOT _SOURCE_ID_COUNT EQUAL _SOURCE_COUNT)
+  list(LENGTH _SOURCE_MODULE_TARGETS _SOURCE_MODULE_TARGET_COUNT)
+  if(NOT _SOURCE_ID_COUNT EQUAL _SOURCE_COUNT OR
+     NOT _SOURCE_ID_COUNT EQUAL _SOURCE_MODULE_TARGET_COUNT)
     message(FATAL_ERROR
-      "loom_corpus_test(${_RULE_NAME}) source identities and paths must correspond")
+      "loom_corpus_test(${_RULE_NAME}) source identities, paths, and modules "
+      "must correspond")
   endif()
 
   set(_SELECTED_SOURCES)
@@ -729,21 +755,12 @@ function(_loom_declare_corpus_test ID)
     endif()
     get_property(_SOURCE_FAILURE_QUALIFICATION_ARGS GLOBAL PROPERTY
       "${ID}_FAILURE_QUALIFICATION_${_SOURCE_ID}")
-    list(GET _SOURCES ${_SOURCE_INDEX} _SOURCE)
-    string(REGEX REPLACE "\\.loom$" "" _PROGRAM_STEM "${_SOURCE_ID}")
-    string(REGEX REPLACE "[/\\.+-]" "_" _PROGRAM_STEM "${_PROGRAM_STEM}")
-    set(_MODULE_NAME "${_PROGRAM_STEM}_test_module")
-    iree_package_target_name(_MODULE_TARGET "::${_MODULE_NAME}")
-    if(NOT TARGET "${_MODULE_TARGET}")
-      loom_test_module(
-        NAME "${_MODULE_NAME}"
-        SRCS "${_SOURCE}"
-      )
-    endif()
+    list(GET _SOURCE_MODULE_TARGETS ${_SOURCE_INDEX} _MODULE_TARGET)
+    _loom_corpus_program_stem(_PROGRAM_STEM "${_SOURCE_ID}")
     loom_execution_test(
       NAME "${_PROGRAM_STEM}_test_execute_${_PROFILE_STEM}_test"
       CORRECTNESS_ONLY
-      MODULE "::${_MODULE_NAME}"
+      MODULE "${_MODULE_TARGET}"
       ARGS ${_RULE_ARGS} ${_SOURCE_FAILURE_QUALIFICATION_ARGS}
       RUNNER_ARGS ${_RULE_RUNNER_ARGS}
       LABELS ${_RULE_LABELS}

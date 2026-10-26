@@ -15,6 +15,7 @@ load(
 )
 
 _FIXTURE = "//loom/build_tools/bazel/test/testdata/corpus/target"
+_SOURCE_FIXTURE = "//loom/build_tools/bazel/test/testdata/corpus/source"
 
 def _actions_with_mnemonic(actions, mnemonic):
     return [action for action in actions if action.mnemonic == mnemonic]
@@ -258,6 +259,39 @@ def _test_execution_carries_allowed_failures_impl(env, target):
     ]:
         env.fail("unexpected corpus correctness arguments %r" % info.test_runner_args)
 
+def _test_source_owner_supplies_execution_module(name, **kwargs):
+    analysis_test(
+        name = name,
+        impl = _test_source_owner_supplies_execution_module_impl,
+        targets = {
+            "consumer_suite": ":sample_nested_fixture_test",
+            "execution": ":sample_nested_fixture_test_execute_reference_test_launcher",
+            "source_suite": _SOURCE_FIXTURE + ":sample_nested_fixture_test",
+        },
+        **kwargs
+    )
+
+def _test_source_owner_supplies_execution_module_impl(env, targets):
+    source_test_targets = targets.source_suite[TestingAspectInfo].attrs.tests
+    source_tests = [test.label.name for test in source_test_targets]
+    if sorted(source_tests) != [
+        "sample_nested_fixture_format_0_test",
+        "sample_nested_fixture_lint_0_test",
+    ]:
+        env.fail("unexpected source-owned checks %r" % source_tests)
+    consumer_tests = [
+        test.label.name
+        for test in targets.consumer_suite[TestingAspectInfo].attrs.tests
+    ]
+    if consumer_tests != ["sample_nested_fixture_test_execute_reference_test"]:
+        env.fail("target consumer owns non-execution tests %r" % consumer_tests)
+    module = targets.execution[LoomExecutionTestInfo].module
+    if module.short_path != (
+        "loom/build_tools/bazel/test/testdata/corpus/source/" +
+        "sample_nested_fixture.loombc"
+    ):
+        env.fail("execution did not consume its source-owned module: %s" % module.short_path)
+
 def loom_corpus_rules_test_suite(name):
     test_suite(
         name = name,
@@ -269,5 +303,6 @@ def loom_corpus_rules_test_suite(name):
             _test_program_exposes_outputs_and_batched_xfails,
             _test_program_fans_out_by_profile,
             _test_program_supports_all_roots_xfail,
+            _test_source_owner_supplies_execution_module,
         ],
     )

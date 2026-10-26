@@ -35,17 +35,24 @@ class CMakeLoomCorpusTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="cmake loom corpus ") as temporary:
             source, build = Path(temporary) / "source", Path(temporary) / "build"
             shutil.copytree(FIXTURE, source)
-            converter = SimpleNamespace(body="")
-            functions = project.build_file_functions(
-                converter=converter,
+            source_converter = SimpleNamespace(body="")
+            source_functions = project.build_file_functions(
+                converter=source_converter,
                 targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
                 build_dir=str(source),
                 repo_root=str(REPO_ROOT),
             )
-            manifest = functions.loom_corpus_manifest(
+            target_converter = SimpleNamespace(body="")
+            target_functions = project.build_file_functions(
+                converter=target_converter,
+                targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
+                build_dir=str(source),
+                repo_root=str(REPO_ROOT),
+            )
+            manifest = source_functions.loom_corpus_manifest(
                 "examples", "//fixture", ["identity.loom"]
             )
-            functions.loom_corpus_sources("sources", manifest)
+            source_functions.loom_corpus_sources("sources", manifest)
             profiles = []
             for name, expression in (
                 ("unconditional", None),
@@ -68,7 +75,7 @@ class CMakeLoomCorpusTest(unittest.TestCase):
                             name, "//config:" + name, name, expression
                         )
                     )
-                functions.loom_target_profile(
+                target_functions.loom_target_profile(
                     name,
                     "amdgpu",
                     "gfx90a",
@@ -81,7 +88,7 @@ class CMakeLoomCorpusTest(unittest.TestCase):
                     ],
                 )
                 profiles.append(
-                    functions.loom_execution_profile(
+                    target_functions.loom_execution_profile(
                         name,
                         "amdgpu",
                         "hardware",
@@ -89,19 +96,22 @@ class CMakeLoomCorpusTest(unittest.TestCase):
                         build_requirements=requirements,
                     )
                 )
-            functions.loom_corpus_test(
+            target_functions.loom_corpus_test(
                 "execution",
-                functions.loom_corpus_catalog([manifest]),
+                target_functions.loom_corpus_catalog([manifest]),
                 execution_profiles=profiles,
             )
-            converted = source / "converted.cmake"
-            converted.write_text(converter.body)
+            converted_source = source / "converted_source.cmake"
+            converted_source.write_text(source_converter.body)
+            converted_target = source / "converted_target.cmake"
+            converted_target.write_text(target_converter.body)
             for enabled in (True, False):
                 with self.subTest(enabled=enabled):
                     configure_project(
                         source,
                         build,
-                        f"-DLOOM_CONVERTED_RULES={converted}",
+                        f"-DLOOM_CONVERTED_SOURCE_RULES={converted_source}",
+                        f"-DLOOM_CONVERTED_TARGET_RULES={converted_target}",
                         f"-DFEATURE_ENABLED={'ON' if enabled else 'OFF'}",
                         "-DFEATURE_DISABLED=OFF",
                     )
@@ -120,9 +130,16 @@ class CMakeLoomCorpusTest(unittest.TestCase):
                     self.assertEqual(
                         {test["name"] for test in tests},
                         {
-                            f"fixture/examples_identity_test_execute_{name}_test"
+                            f"fixture/target/examples_identity_test_execute_{name}_test"
                             for name in expected_profiles
                         },
+                    )
+                    self.assertEqual(
+                        (build / "module_targets.txt").read_text().split(";"),
+                        [
+                            "fixture_source_examples_identity",
+                            "fixture_source_examples_identity_library",
+                        ],
                     )
                     for test in tests:
                         labels = next(
