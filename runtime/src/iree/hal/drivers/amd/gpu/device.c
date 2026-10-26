@@ -12,6 +12,7 @@
 #include "iree/async/notification.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/notification.h"
+#include "iree/hal/drivers/amd/fabric/fabric.h"
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
 #include "iree/hal/drivers/amd/fabric/memory_spec.h"
 #include "iree/hal/drivers/amd/gpu/code.h"
@@ -307,10 +308,12 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
     uint32_t family_ordinal, uint32_t queue_count,
     const iree_hal_amd_fabric_asan_options_t* asan_options) {
   iree_hal_physical_device_spec_t physical = {
-      .identity = {.display_name = display_name, .vendor_id = 0x1002},
       .partition_count = 1,
       .physical_device_affinity = 1,
   };
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_query_physical_device_identity(
+      device->context->api, device->context->endpoint, display_name,
+      &physical.identity));
   if (device->context->host_numa_node != UINT32_MAX) {
     physical.identity.numa.node_id = device->context->host_numa_node;
     physical.identity.flags |= IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NUMA_NODE;
@@ -321,7 +324,9 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       .driver_id = IREE_SV("amd"),
       .backend_id = IREE_SV("libamdf"),
       .vendor_name = IREE_SV("AMD"),
-      .vendor_id = 0x1002,
+      .vendor_id = physical.identity.vendor_id,
+      .device_id = physical.identity.device_id,
+      .revision_id = physical.identity.revision_id,
       .physical_device_count = 1,
       .physical_devices = &physical,
   };

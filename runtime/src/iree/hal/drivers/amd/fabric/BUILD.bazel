@@ -35,6 +35,7 @@ iree_runtime_cc_test(
         ":fabric",
         "//libamdf:headers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

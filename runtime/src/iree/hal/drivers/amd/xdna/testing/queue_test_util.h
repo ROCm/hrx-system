@@ -113,6 +113,8 @@ struct NativeProvider {
     api.instance_create = InstanceCreate;
     api.instance_enumerate_memory_scopes = EnumerateMemoryScopes;
     api.endpoint_enumerate = EnumerateEndpoints;
+    api.endpoint_query_info = QueryEndpointInfo;
+    api.endpoint_close = CloseEndpoint;
     api.memory_create = MemoryCreate;
     api.memory_query_info = MemoryQueryInfo;
     api.memory_destroy = MemoryDestroy;
@@ -169,6 +171,24 @@ struct NativeProvider {
       endpoints[0] = {};
       endpoints[0].engine_kind = AMDF_ENGINE_KIND_XDNA;
     }
+    return AMDF_STATUS_OK;
+  }
+
+  static amdf_status_t AMDF_CALL QueryEndpointInfo(amdf_endpoint_t* endpoint,
+                                                   amdf_endpoint_info_t* info) {
+    const auto* self = reinterpret_cast<NativeProvider*>(endpoint);
+    info->engine_kind = AMDF_ENGINE_KIND_XDNA;
+    info->pci = {.vendor_id = 0x1022, .device_id = 0x17f0, .revision_id = 0x11};
+    auto* address = static_cast<amdf_endpoint_pci_address_t*>(info->next);
+    address->available = self->pci_address.available;
+    address->domain = self->pci_address.domain;
+    address->bus = self->pci_address.bus;
+    address->device = self->pci_address.device;
+    address->function = self->pci_address.function;
+    return AMDF_STATUS_OK;
+  }
+
+  static amdf_status_t AMDF_CALL CloseEndpoint(amdf_endpoint_t* endpoint) {
     return AMDF_STATUS_OK;
   }
 
@@ -787,6 +807,8 @@ struct NativeProvider {
   } result;
   // Common native services consumed by the real HAL.
   amdf_api_t api = {};
+  // Optional passive PCI address copied during device-spec construction.
+  amdf_endpoint_pci_address_t pci_address = {};
   // Native XDNA services consumed by the real HAL.
   amdf_xdna_api_t xdna = {};
   // Selected externally possible submission/observation outcome.
@@ -882,6 +904,7 @@ class QueueHarness {
     NativeProvider::construction_instance = nullptr;
     IREE_ASSERT_OK(fabric_status);
     context->api = &native.api;
+    context->endpoint = reinterpret_cast<amdf_endpoint_t*>(&native);
     context->xdna = &native.xdna;
     context->handle = reinterpret_cast<amdf_xdna_context_t*>(&native);
     context->target = iree::hal::amd::xdna::testing::MakeImageTarget();

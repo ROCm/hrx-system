@@ -8,6 +8,7 @@
 
 #include "iree/async/notification.h"
 #include "iree/async/util/proactor_pool.h"
+#include "iree/hal/drivers/amd/fabric/fabric.h"
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
 #include "iree/hal/drivers/amd/xdna/command_arena.h"
 #include "iree/hal/drivers/amd/xdna/command_buffer.h"
@@ -59,10 +60,11 @@ static iree_status_t iree_hal_amd_xdna_device_build_spec(
     iree_hal_amd_xdna_context_t* context, iree_string_view_t display_name,
     iree_allocator_t host_allocator, iree_hal_device_spec_t** out_spec) {
   iree_hal_physical_device_spec_t physical = {
-      .identity = {.display_name = display_name, .vendor_id = 0x1022},
       .partition_count = 1,
       .physical_device_affinity = 1,
   };
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_query_physical_device_identity(
+      context->api, context->endpoint, display_name, &physical.identity));
   if (context->host_numa_node != UINT32_MAX) {
     physical.identity.numa.node_id = context->host_numa_node;
     physical.identity.flags |= IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NUMA_NODE;
@@ -73,7 +75,9 @@ static iree_status_t iree_hal_amd_xdna_device_build_spec(
       .driver_id = IREE_SV("xdna"),
       .backend_id = IREE_SV("libamdf"),
       .vendor_name = IREE_SV("AMD"),
-      .vendor_id = 0x1022,
+      .vendor_id = physical.identity.vendor_id,
+      .device_id = physical.identity.device_id,
+      .revision_id = physical.identity.revision_id,
       .physical_device_count = 1,
       .physical_devices = &physical,
   };
