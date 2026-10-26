@@ -127,6 +127,8 @@ amdf_cc_library(
         ":kernel_queue",
         ":user_queue",
         "//libamdf/src:endpoint",
+        "//libamdf/src:instance",
+        "//libamdf/src:memory_scope_state",
         "//libamdf/src:structure",
         "//libamdf/src/gpu/umd:endpoint_profile",
     ],

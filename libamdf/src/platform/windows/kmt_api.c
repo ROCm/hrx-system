@@ -20,6 +20,8 @@ static void amdf_kmt_resolve_procedures(amdf_kmt_api_t* api) {
       api->module, "D3DKMTOpenAdapterFromLuid");
   api->query_adapter_info = (PFND3DKMT_QUERYADAPTERINFO)GetProcAddress(
       api->module, "D3DKMTQueryAdapterInfo");
+  api->query_video_memory_info = (PFND3DKMT_QUERYVIDEOMEMORYINFO)GetProcAddress(
+      api->module, "D3DKMTQueryVideoMemoryInfo");
   api->escape = (PFND3DKMT_ESCAPE)GetProcAddress(api->module, "D3DKMTEscape");
   api->create_device =
       (PFND3DKMT_CREATEDEVICE)GetProcAddress(api->module, "D3DKMTCreateDevice");

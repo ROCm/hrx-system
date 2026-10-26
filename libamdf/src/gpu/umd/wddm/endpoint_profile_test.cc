@@ -34,11 +34,29 @@ struct FakeKmtState {
   uint32_t virtual_address_bit_count = 48;
   // Number of native memory-capability queries.
   uint32_t memory_query_count = 0;
+  // Exact native local segment capacity for the selected physical adapter.
+  uint64_t local_capacity = UINT64_C(8) << 30;
+  // Current per-process native residency budget.
+  uint64_t budget = UINT64_C(6) << 30;
+  // Current resident usage charged against the native budget.
+  uint64_t usage = UINT64_C(2) << 30;
+  // Native result returned by the explicit residency observation.
+  NTSTATUS observation_status = kSuccess;
 };
 
 FakeKmtState* current_state = nullptr;
 
 NTSTATUS APIENTRY FakeQueryAdapterInfo(const D3DKMT_QUERYADAPTERINFO* query) {
+  if (query->Type == KMTQAITYPE_GETSEGMENTGROUPSIZE) {
+    EXPECT_EQ(query->hAdapter, 0x08u);
+    EXPECT_EQ(query->PrivateDriverDataSize,
+              sizeof(D3DKMT_SEGMENTGROUPSIZEINFO));
+    auto* sizes =
+        static_cast<D3DKMT_SEGMENTGROUPSIZEINFO*>(query->pPrivateDriverData);
+    EXPECT_EQ(sizes->PhysicalAdapterIndex, 0u);
+    sizes->LocalMemory = current_state->local_capacity;
+    return kSuccess;
+  }
   ++current_state->memory_query_count;
   EXPECT_EQ(query->hAdapter, 0x08u);
   EXPECT_EQ(query->Type, KMTQAITYPE_QUERY_GPUMMU_CAPS);
@@ -55,6 +73,16 @@ NTSTATUS APIENTRY FakeQueryAdapterInfo(const D3DKMT_QUERYADAPTERINFO* query) {
   gpu_mmu->Caps.Flags.NoExecuteMemorySupported = 1;
   gpu_mmu->Caps.Flags.CacheCoherentMemorySupported = 1;
   return kSuccess;
+}
+
+NTSTATUS APIENTRY FakeQueryVideoMemoryInfo(D3DKMT_QUERYVIDEOMEMORYINFO* query) {
+  EXPECT_EQ(query->hProcess, GetCurrentProcess());
+  EXPECT_EQ(query->hAdapter, 0x08u);
+  EXPECT_EQ(query->PhysicalAdapterIndex, 0u);
+  EXPECT_EQ(query->MemorySegmentGroup, D3DKMT_MEMORY_SEGMENT_GROUP_LOCAL);
+  query->Budget = current_state->budget;
+  query->CurrentUsage = current_state->usage;
+  return current_state->observation_status;
 }
 
 // These native dependencies are present but must never be invoked by discovery.
@@ -76,6 +104,8 @@ class WindowsGpuEndpointProfileTest : public ::testing::Test {
     current_state = &state_;
     instance_.host_allocator = amdf_allocator_system();
     instance_.kmt.close_adapter = FakeCloseAdapter;
+    instance_.kmt.query_adapter_info = FakeQueryAdapterInfo;
+    instance_.kmt.query_video_memory_info = FakeQueryVideoMemoryInfo;
 
     ASSERT_EQ(amdf_calloc(instance_.host_allocator, sizeof(*endpoint_),
                           amdf_alignof(amdf_platform_endpoint_t),
@@ -217,7 +247,8 @@ TEST_F(WindowsGpuEndpointProfileTest,
   EXPECT_EQ(state_.adapter_close_success_count, 1u);
 }
 
-TEST_F(WindowsGpuEndpointProfileTest, DiscoveryDoesNotQueryMemory) {
+TEST_F(WindowsGpuEndpointProfileTest,
+       DiscoveryDoesNotAcquireMemoryOrQueryGpuMmu) {
   set_bridge_close_failures_(0);
   EnableMemoryOperations();
   state_.memory_capabilities_status = kFailure;
@@ -246,6 +277,52 @@ TEST_F(WindowsGpuEndpointProfileTest, DiscoveryDoesNotQueryMemory) {
   }
   EXPECT_EQ(state_.query_bridge_close_success_count(), 1u);
   amdf_free(instance_.host_allocator, profile);
+}
+
+TEST_F(WindowsGpuEndpointProfileTest,
+       LocalObservationUsesTheNativeResidencyBudget) {
+  amdf_memory_scope_observation_t observation = {};
+  ASSERT_EQ(
+      amdf_gpu_umd_sample_memory_scope(
+          endpoint_, AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES, &observation),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(observation.capacity_byte_length, state_.local_capacity);
+  EXPECT_EQ(observation.available_byte_length, UINT64_C(4) << 30);
+  state_.usage = state_.budget + 1;
+  ASSERT_EQ(
+      amdf_gpu_umd_sample_memory_scope(
+          endpoint_, AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES, &observation),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(observation.available_byte_length, 0u);
+}
+
+TEST_F(WindowsGpuEndpointProfileTest,
+       UnifiedObservationSharesSystemPhysicalCapacity) {
+  amdf_memory_scope_observation_t observation = {};
+  ASSERT_EQ(amdf_gpu_umd_sample_memory_scope(
+                endpoint_,
+                AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED |
+                    AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES,
+                &observation),
+            AMDF_STATUS_OK);
+  EXPECT_GT(observation.capacity_byte_length, 0u);
+  EXPECT_LE(observation.available_byte_length,
+            observation.capacity_byte_length);
+  EXPECT_LE(observation.available_byte_length, state_.budget - state_.usage);
+}
+
+TEST_F(WindowsGpuEndpointProfileTest, FailedObservationPreservesCallerOutput) {
+  amdf_memory_scope_observation_t observation = {
+      .capacity_byte_length = UINT64_MAX,
+      .available_byte_length = UINT64_MAX,
+  };
+  const auto expected = observation;
+  state_.observation_status = kFailure;
+  EXPECT_EQ(
+      amdf_gpu_umd_sample_memory_scope(
+          endpoint_, AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES, &observation),
+      amdf_kmt_make_status(kFailure));
+  EXPECT_EQ(std::memcmp(&observation, &expected, sizeof(observation)), 0);
 }
 
 }  // namespace

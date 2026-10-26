@@ -16,6 +16,8 @@
 #include "libamdf/src/gpu/kernel_queue.h"
 #include "libamdf/src/gpu/umd/endpoint_profile.h"
 #include "libamdf/src/gpu/user_queue.h"
+#include "libamdf/src/instance.h"
+#include "libamdf/src/memory_scope.h"
 #include "libamdf/src/structure.h"
 
 static amdf_status_t AMDF_CALL amdf_gpu_endpoint_query_info(
@@ -159,6 +161,14 @@ static const amdf_gpu_api_t amdf_gpu_api_v6 = {
     .kernel_queue_inactivate = amdf_gpu_kernel_queue_inactivate,
 };
 
+static amdf_status_t amdf_gpu_scope_sample_observation(
+    const amdf_memory_scope_t* scope,
+    amdf_memory_scope_observation_t* out_observation) {
+  return amdf_gpu_umd_sample_memory_scope(
+      amdf_endpoint_get_platform(scope->owner.endpoint), scope->flags,
+      out_observation);
+}
+
 void amdf_gpu_extension_initialize_endpoint(amdf_endpoint_t* endpoint) {
   const amdf_endpoint_info_t* endpoint_info =
       amdf_endpoint_get_cached_info(endpoint);
@@ -173,6 +183,14 @@ void amdf_gpu_extension_initialize_endpoint(amdf_endpoint_t* endpoint) {
   if (!amdf_status_is_ok(status)) {
     amdf_endpoint_store_engine_profile_error(endpoint, status);
   } else {
+    amdf_memory_scope_t* scope = amdf_endpoint_local_memory_scope(endpoint);
+    scope->flags = profile->memory.flags;
+    scope->capacity_byte_length =
+        scope->flags & AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED
+            ? amdf_endpoint_get_instance(endpoint)
+                  ->system_memory_scope.capacity_byte_length
+            : profile->memory.capacity_byte_length;
+    scope->sample_observation = amdf_gpu_scope_sample_observation;
     amdf_endpoint_store_engine_profile(endpoint, profile);
   }
 }

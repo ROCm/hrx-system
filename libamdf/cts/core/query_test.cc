@@ -33,6 +33,7 @@ TEST(QueryApiTest, NegotiatesSupportedVersion) {
   EXPECT_NE(api->instance_enumerate_memory_scopes, nullptr);
   EXPECT_NE(api->device_enumerate_memory_scopes, nullptr);
   EXPECT_NE(api->memory_scope_query_info, nullptr);
+  EXPECT_NE(api->memory_scope_sample_observation, nullptr);
   EXPECT_NE(api->memory_scope_query_device_profile, nullptr);
   EXPECT_NE(api->memory_scope_query_pair_info, nullptr);
   EXPECT_NE(api->memory_create, nullptr);

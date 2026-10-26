@@ -13,6 +13,17 @@
 
 #include "libamdf/src/platform/windows/host_cache.h"
 
+amdf_status_t amdf_platform_host_memory_sample_observation(
+    amdf_memory_scope_observation_t* out_observation) {
+  MEMORYSTATUSEX memory = {.dwLength = sizeof(memory)};
+  if (!GlobalMemoryStatusEx(&memory)) {
+    return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
+  }
+  out_observation->capacity_byte_length = memory.ullTotalPhys;
+  out_observation->available_byte_length = memory.ullAvailPhys;
+  return AMDF_STATUS_OK;
+}
+
 amdf_status_t amdf_platform_host_backing_prepare(
     uint64_t byte_length, amdf_platform_host_backing_t* backing) {
   *backing = (amdf_platform_host_backing_t){.handle = UINTPTR_MAX};

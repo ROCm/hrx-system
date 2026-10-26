@@ -8,9 +8,11 @@
 #include "libamdf/src/platform/host_memory.h"
 
 #include <fcntl.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <linux/mempolicy.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <sys/utsname.h>
@@ -30,6 +32,60 @@ enum {
   // PMD geometry on the supported Linux x86-64 host platform.
   AMDF_LINUX_HOST_FOLIO_SIZE = 2u << 20,
 };
+
+amdf_status_t amdf_platform_host_memory_sample_observation(
+    amdf_memory_scope_observation_t* out_observation) {
+  const int descriptor = open("/proc/meminfo", O_RDONLY | O_CLOEXEC);
+  if (descriptor < 0) {
+    return amdf_linux_error(errno);
+  }
+  // Both fields precede the detailed native counters. Retain only this small
+  // snapshot; the kernel owns the source and no monitoring state survives.
+  char buffer[4096];
+  size_t length = 0;
+  uint64_t capacity_kib = 0;
+  uint64_t available_kib = 0;
+  bool has_capacity = false;
+  bool has_available = false;
+  amdf_status_t status = AMDF_STATUS_OK;
+  while (amdf_status_is_ok(status) && !(has_capacity && has_available)) {
+    ssize_t count;
+    do {
+      count = read(descriptor, buffer + length, sizeof(buffer) - 1 - length);
+    } while (count < 0 && errno == EINTR);
+    if (count < 0) {
+      status = amdf_linux_error(errno);
+    } else if (count == 0) {
+      status = amdf_linux_error(EPROTO);
+    } else {
+      length += (size_t)count;
+      buffer[length] = 0;
+      const char* capacity = strstr(buffer, "MemTotal:");
+      const char* available = strstr(buffer, "MemAvailable:");
+      has_capacity =
+          capacity != NULL && strchr(capacity, '\n') != NULL &&
+          sscanf(capacity, "MemTotal: %" SCNu64 " kB", &capacity_kib) == 1;
+      has_available = available != NULL && strchr(available, '\n') != NULL &&
+                      sscanf(available, "MemAvailable: %" SCNu64 " kB",
+                             &available_kib) == 1;
+      if (!(has_capacity && has_available) && length == sizeof(buffer) - 1) {
+        status = amdf_linux_error(EOVERFLOW);
+      }
+    }
+  }
+  int owned_descriptor = descriptor;
+  const amdf_status_t close_status = amdf_linux_file_close(&owned_descriptor);
+  if (!amdf_status_is_ok(close_status)) {
+    status = close_status;
+  }
+  if (amdf_status_is_ok(status)) {
+    out_observation->capacity_byte_length = capacity_kib * UINT64_C(1024);
+    out_observation->available_byte_length =
+        (available_kib < capacity_kib ? available_kib : capacity_kib) *
+        UINT64_C(1024);
+  }
+  return status;
+}
 
 static amdf_status_t amdf_linux_host_backing_map(int descriptor,
                                                  uint64_t byte_length,

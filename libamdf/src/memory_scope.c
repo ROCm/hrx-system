@@ -109,6 +109,8 @@ amdf_status_t AMDF_CALL amdf_memory_scope_query_info(
       .next = out_info->next,
       .kind = scope->kind,
       .memory_profile_count = amdf_memory_scope_profile_count(scope),
+      .capacity_byte_length = scope->capacity_byte_length,
+      .flags = scope->flags,
   };
   if (scope->kind == AMDF_MEMORY_SCOPE_KIND_LOCAL) {
     info.physical_endpoint_id =
@@ -116,6 +118,35 @@ amdf_status_t AMDF_CALL amdf_memory_scope_query_info(
   }
   *out_info = info;
   return AMDF_STATUS_OK;
+}
+
+amdf_status_t AMDF_CALL amdf_memory_scope_sample_observation(
+    amdf_memory_scope_t* scope,
+    amdf_memory_scope_observation_t* out_observation) {
+  if (scope == NULL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+  amdf_status_t status = amdf_structure_validate_output(
+      out_observation, AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_OBSERVATION,
+      sizeof(*out_observation));
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  if (!(scope->flags & AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES)) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  amdf_memory_scope_observation_t observation = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_OBSERVATION,
+      .structure_size = out_observation->structure_size,
+      .next = out_observation->next,
+  };
+  status = scope->kind == AMDF_MEMORY_SCOPE_KIND_SYSTEM
+               ? amdf_host_memory_sample_observation(&observation)
+               : scope->sample_observation(scope, &observation);
+  if (amdf_status_is_ok(status)) {
+    *out_observation = observation;
+  }
+  return status;
 }
 
 static const amdf_memory_access_requirements_t*

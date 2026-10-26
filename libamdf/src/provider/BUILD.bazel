@@ -40,6 +40,7 @@ amdf_cc_library(
         "//libamdf/src:device",
         "//libamdf/src:endpoint",
         "//libamdf/src:host_mapping",
+        "//libamdf/src:host_memory",
         "//libamdf/src:instance",
         "//libamdf/src:kernel_queue",
         "//libamdf/src:memory",

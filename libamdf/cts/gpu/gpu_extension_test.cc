@@ -105,6 +105,49 @@ TEST_F(GpuDeviceFixture, InactivatesAdvertisedQueuesBeforeReleasingOwners) {
   }
 }
 
+class GpuMemoryObservationTest : public GpuDeviceFixture {};
+
+TEST_F(GpuMemoryObservationTest, PhysicalStorageReportsCapacityAndHeadroom) {
+  amdf_memory_scope_info_t system_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+      .structure_size = sizeof(system_info),
+  };
+  ASSERT_EQ(api_->memory_scope_query_info(system_scope_, &system_info),
+            AMDF_STATUS_OK);
+  for (amdf_memory_scope_t* scope : {system_scope_, local_scope_}) {
+    if (!scope) {
+      continue;
+    }
+    amdf_memory_scope_info_t info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+        .structure_size = sizeof(info),
+    };
+    ASSERT_EQ(api_->memory_scope_query_info(scope, &info), AMDF_STATUS_OK);
+    SCOPED_TRACE(info.kind);
+    EXPECT_GT(info.capacity_byte_length, 0u);
+    if (info.flags & AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED) {
+      EXPECT_EQ(info.capacity_byte_length, system_info.capacity_byte_length);
+    }
+    amdf_memory_scope_observation_t observation = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_OBSERVATION,
+        .structure_size = sizeof(observation),
+    };
+    if (info.flags & AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES) {
+      ASSERT_EQ(api_->memory_scope_sample_observation(scope, &observation),
+                AMDF_STATUS_OK);
+      EXPECT_GT(observation.capacity_byte_length, 0u);
+      if (!(info.flags & AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED)) {
+        EXPECT_EQ(observation.capacity_byte_length, info.capacity_byte_length);
+      }
+      EXPECT_LE(observation.available_byte_length,
+                observation.capacity_byte_length);
+    } else {
+      EXPECT_EQ(api_->memory_scope_sample_observation(scope, &observation),
+                amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+    }
+  }
+}
+
 TEST(GpuExtensionTest, ReportsCompiledAvailabilityBeforeCreatingInstance) {
   const amdf_api_t* api = QueryApi();
   ASSERT_NE(api, nullptr);

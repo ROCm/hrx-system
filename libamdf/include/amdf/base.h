@@ -115,8 +115,11 @@ typedef uint32_t amdf_abi_version_t;
 /// Independent host memory guarantees and prospective mapping properties.
 #define AMDF_ABI_VERSION_15 ((amdf_abi_version_t)15)
 
+/// Physical storage capacity and explicitly sampled native memory headroom.
+#define AMDF_ABI_VERSION_16 ((amdf_abi_version_t)16)
+
 /// Latest ABI version implemented by these headers.
-#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_15
+#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_16
 
 /// The unmangled symbol used to acquire the immutable API table.
 #define AMDF_QUERY_API_SYMBOL "amdf_query_api"
@@ -259,6 +262,8 @@ enum amdf_structure_type_e {
   AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_ACCESS_INFO = 24,
   /// Host CPU locality captured while opening an endpoint.
   AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY = 25,
+  /// An `amdf_memory_scope_observation_t` output structure.
+  AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_OBSERVATION = 26,
 };
 
 /// Identifier of an optional API table compiled into the providing library.

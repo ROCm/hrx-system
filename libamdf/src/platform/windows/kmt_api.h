@@ -39,6 +39,8 @@ typedef struct amdf_kmt_api_t {
   PFND3DKMT_OPENADAPTERFROMLUID open_adapter_from_luid;
   // Queries immutable adapter and physical-device properties.
   PFND3DKMT_QUERYADAPTERINFO query_adapter_info;
+  // Samples process residency budget and usage for one physical memory group.
+  PFND3DKMT_QUERYVIDEOMEMORYINFO query_video_memory_info;
   // Issues provider-specific queries on an explicitly created device.
   PFND3DKMT_ESCAPE escape;
   // Creates one logical KMT device from an opened adapter.

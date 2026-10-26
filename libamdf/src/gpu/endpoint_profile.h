@@ -107,6 +107,13 @@ typedef struct amdf_gpu_endpoint_profile_t {
   uint32_t queue_family_count;
   // Public queue-family records with dense endpoint-local ordinals.
   amdf_queue_family_info_t queue_families[AMDF_GPU_QUEUE_FAMILY_CAPACITY];
+  // Physical allocation storage and native observation facts from discovery.
+  struct {
+    // Shared-system identity and availability-query capabilities.
+    amdf_memory_scope_flags_t flags;
+    // Physical local bytes; SYSTEM_BACKED scopes use the instance's capacity.
+    uint64_t capacity_byte_length;
+  } memory;
 } amdf_gpu_endpoint_profile_t;
 
 // Returns MEC PM4 command encoding capabilities, independent of kernel or user

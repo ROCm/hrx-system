@@ -13,6 +13,13 @@
 extern "C" {
 #endif
 
+// Samples physical system capacity and available pages, including reclaimable
+// file cache where the OS reports it. This explicit cold native query neither
+// allocates library state nor synchronizes with device work. Only data fields
+// are written, after complete success; the caller owns the output header.
+amdf_status_t amdf_platform_host_memory_sample_observation(
+    amdf_memory_scope_observation_t* out_observation);
+
 // Owned preparation state for a WRITE_BACK source and its ordinary host view.
 typedef struct amdf_platform_host_backing_t {
   // Native section/file handle, or UINTPTR_MAX before acquisition/after

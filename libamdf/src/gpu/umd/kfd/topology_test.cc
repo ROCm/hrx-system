@@ -34,6 +34,15 @@ struct NativeDeviceInfo {
       .virtual_address_alignment = 4096,
       .pte_fragment_size = 2 * 1024 * 1024,
   };
+  // Native local-memory capacity, reserved bytes, and global usage snapshot.
+  drm_amdgpu_memory_info memory = {
+      .vram =
+          {
+              .total_heap_size = UINT64_C(2) << 30,
+              .usable_heap_size = UINT64_C(1536) << 20,
+              .heap_usage = UINT64_C(512) << 20,
+          },
+  };
   // Real descriptor borrowed by the query and closed by profile construction.
   int descriptor = -1;
   // Error at native file opening, or zero for success.
@@ -81,15 +90,21 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
   EXPECT_EQ(descriptor, native_device_info->descriptor);
   EXPECT_EQ(request, DRM_IOCTL_AMDGPU_INFO);
   const auto* query = static_cast<const drm_amdgpu_info*>(argument);
-  EXPECT_EQ(query->query, AMDGPU_INFO_DEV_INFO);
-  EXPECT_EQ(query->return_size, sizeof(drm_amdgpu_info_device));
   ++native_device_info->query_count;
   if (native_device_info->query_error != 0) {
     errno = native_device_info->query_error;
     return -1;
   }
-  *reinterpret_cast<drm_amdgpu_info_device*>(query->return_pointer) =
-      native_device_info->info;
+  if (query->query == AMDGPU_INFO_MEMORY) {
+    EXPECT_EQ(query->return_size, sizeof(drm_amdgpu_memory_info));
+    *reinterpret_cast<drm_amdgpu_memory_info*>(query->return_pointer) =
+        native_device_info->memory;
+  } else {
+    EXPECT_EQ(query->query, AMDGPU_INFO_DEV_INFO);
+    EXPECT_EQ(query->return_size, sizeof(drm_amdgpu_info_device));
+    *reinterpret_cast<drm_amdgpu_info_device*>(query->return_pointer) =
+        native_device_info->info;
+  }
   return 0;
 }
 
@@ -809,6 +824,59 @@ TEST_F(KfdTopologyTest, MissingEndpointLeavesOutputUnchanged) {
                 &endpoint_, amdf_allocator_system(), &topology),
             amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
   EXPECT_EQ(std::memcmp(&topology, &original, sizeof(topology)), 0);
+}
+
+TEST_F(KfdTopologyTest,
+       LocalMemoryObservationIncludesNativeReservationsAndUsage) {
+  amdf_memory_scope_observation_t observation = {};
+  ASSERT_EQ(
+      amdf_gpu_umd_sample_memory_scope(
+          &endpoint_, AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES, &observation),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(observation.capacity_byte_length, UINT64_C(2) << 30);
+  EXPECT_EQ(observation.available_byte_length, UINT64_C(1) << 30);
+  EXPECT_EQ(native_.query_count, 1u);
+  EXPECT_EQ(fcntl(native_.descriptor, F_GETFD), -1);
+  EXPECT_EQ(errno, EBADF);
+
+  native_.memory.vram.heap_usage = UINT64_C(2) << 30;
+  ASSERT_EQ(
+      amdf_gpu_umd_sample_memory_scope(
+          &endpoint_, AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES, &observation),
+      AMDF_STATUS_OK);
+  EXPECT_EQ(observation.available_byte_length, 0u);
+}
+
+TEST_F(KfdTopologyTest, FailedLocalMemoryObservationPreservesOutput) {
+  amdf_memory_scope_observation_t observation = {
+      .capacity_byte_length = UINT64_MAX,
+      .available_byte_length = UINT64_MAX,
+  };
+  const auto expected = observation;
+  native_.query_error = EIO;
+  EXPECT_EQ(
+      amdf_gpu_umd_sample_memory_scope(
+          &endpoint_, AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES, &observation),
+      amdf_linux_error(EIO));
+  EXPECT_EQ(std::memcmp(&observation, &expected, sizeof(observation)), 0);
+  EXPECT_EQ(fcntl(native_.descriptor, F_GETFD), -1);
+  EXPECT_EQ(errno, EBADF);
+}
+
+TEST_F(KfdTopologyTest, UnifiedMemoryObservationDoesNotOpenAnExecutionFile) {
+  amdf_memory_scope_observation_t observation = {};
+  native_.open_error = EACCES;
+  ASSERT_EQ(amdf_gpu_umd_sample_memory_scope(
+                &endpoint_,
+                AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED |
+                    AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES,
+                &observation),
+            AMDF_STATUS_OK);
+  EXPECT_GT(observation.capacity_byte_length, 0u);
+  EXPECT_LE(observation.available_byte_length,
+            observation.capacity_byte_length);
+  EXPECT_EQ(native_.query_count, 0u);
+  EXPECT_EQ(native_.descriptor, -1);
 }
 
 TEST_F(KfdTopologyTest, IncompleteCpuRouteDoesNotPublishTopology) {

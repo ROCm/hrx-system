@@ -11,6 +11,11 @@
 #include "libamdf/src/memory_resource.h"
 #include "libamdf/src/platform/host_memory.h"
 
+amdf_status_t amdf_host_memory_sample_observation(
+    amdf_memory_scope_observation_t* out_observation) {
+  return amdf_platform_host_memory_sample_observation(out_observation);
+}
+
 amdf_status_t amdf_host_memory_query_description(
     amdf_memory_host_description_t* out_description) {
   amdf_cache_transition_t transition;

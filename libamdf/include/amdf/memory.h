@@ -586,6 +586,16 @@ enum amdf_memory_scope_kind_e {
   AMDF_MEMORY_SCOPE_KIND_PRIVATE = 2,
 };
 
+/// Physical storage and observation properties of a borrowed scope.
+typedef uint32_t amdf_memory_scope_flags_t;
+enum amdf_memory_scope_flag_bits_e {
+  /// Shares general system RAM with the instance's SYSTEM scope. Multiple
+  /// profiles or endpoint-local views do not contribute additional capacity.
+  AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED = UINT32_C(1) << 0,
+  /// Supports memory_scope_sample_observation without waiting for device work.
+  AMDF_MEMORY_SCOPE_FLAG_AVAILABLE_BYTES = UINT32_C(1) << 1,
+};
+
 /// Complete immutable facts of one borrowed storage scope.
 typedef struct amdf_memory_scope_info_t {
   /// Must be `AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO`.
@@ -600,7 +610,32 @@ typedef struct amdf_memory_scope_info_t {
   uint32_t memory_profile_count;
   /// Physical storage endpoint for LOCAL; all zero otherwise.
   amdf_endpoint_id_t physical_endpoint_id;
+  /// Physical storage capacity captured at discovery, or zero when unknown.
+  /// All profiles of this scope share these bytes. This is neither an
+  /// allocation limit nor a reservation or currently available budget.
+  uint64_t capacity_byte_length;
+  /// Physical sharing and native observation capabilities.
+  amdf_memory_scope_flags_t flags;
+  /// Reserved; zero.
+  uint32_t reserved;
 } amdf_memory_scope_info_t;
+
+/// Explicit snapshot of native memory capacity and allocation headroom.
+/// Other processes, reclaimable system pages, and native residency budgets may
+/// affect availability. The values promise neither a successful allocation nor
+/// residency, and sampling introduces no ordering with submitted work.
+typedef struct amdf_memory_scope_observation_t {
+  /// Must be `AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_OBSERVATION`.
+  amdf_structure_type_t type;
+  /// Must be at least `sizeof(amdf_memory_scope_observation_t)`.
+  uint32_t structure_size;
+  /// Optional output extension chain. No extensions are currently defined.
+  void* next;
+  /// Current physical capacity in bytes; may change after discovery.
+  uint64_t capacity_byte_length;
+  /// Current native allocation headroom, no greater than physical capacity.
+  uint64_t available_byte_length;
+} amdf_memory_scope_observation_t;
 
 /// Parameters obtaining one backing and all requested live-device accesses.
 typedef struct amdf_memory_create_info_t {
