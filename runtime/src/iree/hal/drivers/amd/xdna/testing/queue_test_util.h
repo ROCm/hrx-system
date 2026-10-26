@@ -53,6 +53,12 @@ enum class Outcome {
 // loading, buffer capture, native notification, proactor polling, semaphore
 // publication, and teardown all use their production implementations.
 struct NativeProvider {
+  enum class SubmissionGate {
+    kNone,
+    kBeforeAcceptance,
+    kBeforeReturn,
+  };
+
   // Holds a selected native call while independent production work progresses.
   struct MemoryGate {
     // Guards this dependency's explicit readiness predicates.
@@ -176,10 +182,21 @@ struct NativeProvider {
     return self->submission_released.load(std::memory_order_acquire);
   }
 
-  void BlockSubmission() {
+  void BlockSubmission(
+      SubmissionGate gate = SubmissionGate::kBeforeAcceptance) {
     submission_entered.store(false, std::memory_order_relaxed);
     submission_released.store(false, std::memory_order_relaxed);
-    block_submission.store(true, std::memory_order_release);
+    submission_gate.store(gate, std::memory_order_release);
+  }
+
+  void HoldSubmission(SubmissionGate gate) {
+    if (submission_gate.load(std::memory_order_acquire) != gate) {
+      return;
+    }
+    submission_entered.store(true, std::memory_order_release);
+    iree_notification_post(&submission_notification, IREE_ALL_WAITERS);
+    iree_notification_await(&submission_notification, SubmissionReleased, this,
+                            iree_infinite_timeout());
   }
 
   void AwaitBlockedSubmission() {
@@ -189,7 +206,7 @@ struct NativeProvider {
 
   void ReleaseSubmission() {
     submission_released.store(true, std::memory_order_release);
-    block_submission.store(false, std::memory_order_release);
+    submission_gate.store(SubmissionGate::kNone, std::memory_order_release);
     iree_notification_post(&submission_notification, IREE_ALL_WAITERS);
   }
 
@@ -219,6 +236,11 @@ struct NativeProvider {
     wait_released.store(true, std::memory_order_release);
     block_wait.store(false, std::memory_order_release);
     iree_notification_post(&submission_notification, IREE_ALL_WAITERS);
+  }
+
+  void HoldRetirement() {
+    retirement_limit =
+        checked_retired_submission.load(std::memory_order_acquire);
   }
 
   size_t FlushCount() {
@@ -476,13 +498,7 @@ struct NativeProvider {
         1;
     EXPECT_GT(info->command_count, 0u);
     EXPECT_LE(info->command_count, self->maximum_command_count);
-    if (self->block_submission.load(std::memory_order_acquire)) {
-      self->submission_entered.store(true, std::memory_order_release);
-      iree_notification_post(&self->submission_notification, IREE_ALL_WAITERS);
-      iree_notification_await(&self->submission_notification,
-                              SubmissionReleased, self,
-                              iree_infinite_timeout());
-    }
+    self->HoldSubmission(SubmissionGate::kBeforeAcceptance);
     if (self->preceding_completion && submission_ordinal == 2) {
       uint64_t value = 0;
       IREE_EXPECT_OK(
@@ -517,6 +533,7 @@ struct NativeProvider {
     self->last_accepted_submission.store(*out_submission,
                                          std::memory_order_release);
     self->submission_count.fetch_add(1, std::memory_order_release);
+    self->HoldSubmission(SubmissionGate::kBeforeReturn);
     return AMDF_STATUS_OK;
   }
   static amdf_status_t AMDF_CALL Notify(amdf_kernel_queue_t* queue,
@@ -528,7 +545,7 @@ struct NativeProvider {
       return amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
     }
     self->notification = *event;
-    if (!self->hold_retirement) {
+    if (submission <= self->retirement_limit) {
       self->Wake();
     }
     return AMDF_STATUS_OK;
@@ -706,10 +723,10 @@ struct NativeProvider {
   // Nonunit stride verifies that the HAL does not derive ring slots from
   // points.
   uint64_t point_stride = 1;
-  // Highest native point that a checked refresh may retire.
+  // Highest completed native point; zero holds work and UINT64_MAX completes
+  // every accepted point. Both late wake requests and checked refreshes observe
+  // this frontier independently of the HAL's submission acknowledgement.
   uint64_t retirement_limit = UINT64_MAX;
-  // Test controls native retirement independently of HAL readiness processing.
-  bool hold_retirement = false;
   // Borrowed notification destination live through each accepted obligation.
   amdf_native_event_t notification = {};
   // Command bytes that must remain unchanged while accepted work is pending.
@@ -726,8 +743,8 @@ struct NativeProvider {
   inline static thread_local NativeProvider* construction_instance = nullptr;
   // Explicit gate used to hold one native publication without wall-clock waits.
   iree_notification_t submission_notification;
-  // True when the next native submission must wait at the explicit gate.
-  std::atomic<bool> block_submission{false};
+  // Native submission boundary held until the test releases its gate.
+  std::atomic<SubmissionGate> submission_gate{SubmissionGate::kNone};
   // True after the publisher has entered the explicit gate.
   std::atomic<bool> submission_entered{false};
   // True when the publisher may leave the explicit gate.

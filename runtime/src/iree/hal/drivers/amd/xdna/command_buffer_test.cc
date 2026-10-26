@@ -38,7 +38,7 @@ TEST(XdnaCommandBufferTest, WindowedPublicationDoesNotSignalAnAcceptedPrefix) {
   harness.native.pending_capacity = 16;
   harness.native.maximum_command_count = 8;
   harness.native.point_stride = 7;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   ASSERT_NO_FATAL_FAILURE(harness.SealDeviceGroup());
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
@@ -71,7 +71,6 @@ TEST(XdnaCommandBufferTest, WindowedPublicationDoesNotSignalAnAcceptedPrefix) {
   IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &completed_value));
   EXPECT_EQ(completed_value, 0u);
   harness.native.retirement_limit = UINT64_MAX;
-  harness.native.hold_retirement = false;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(harness.done, 1));
 }
@@ -101,7 +100,7 @@ TEST_P(XdnaCommandBufferReplayTest,
   }
   HostAllocationSnapshot warmed = {};
   for (uint64_t iteration = 1; iteration <= 5; ++iteration) {
-    harness.native.hold_retirement = true;
+    harness.native.HoldRetirement();
     for (size_t i = 0; i < buffers.size(); ++i) {
       iree_hal_buffer_binding_t binding = {buffers[(i + iteration) % 2], 0, 64};
       IREE_ASSERT_OK(iree_hal_queue_execute(harness.queue, {},
@@ -130,7 +129,7 @@ TEST_P(XdnaCommandBufferReplayTest,
                   harness.native.pending_commands[i].offset);
       }
     }
-    harness.native.hold_retirement = false;
+    harness.native.retirement_limit = UINT64_MAX;
     harness.native.Wake();
     for (auto* completion : completions) {
       ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(completion, iteration));
@@ -159,7 +158,7 @@ TEST(XdnaCommandBufferTest,
   QueueHarness harness;
   harness.native.pending_capacity = 24;
   harness.native.maximum_command_count = 8;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   harness.native.busy_submission_attempt = 2;
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
@@ -175,7 +174,7 @@ TEST(XdnaCommandBufferTest,
   EXPECT_EQ(harness.native.submission_count, 1u);
   EXPECT_EQ(harness.native.submission_attempt_count, 2u);
   const size_t flush_count = harness.native.FlushCount();
-  harness.native.hold_retirement = false;
+  harness.native.retirement_limit = UINT64_MAX;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(harness.done, 1));
   EXPECT_EQ(harness.native.submission_count, 3u);
@@ -192,7 +191,7 @@ TEST(XdnaCommandBufferTest,
   QueueHarness harness;
   harness.native.pending_capacity = 32;
   harness.native.maximum_command_count = 8;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   harness.native.reject_submission_attempt = 3;
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
@@ -212,7 +211,7 @@ TEST(XdnaCommandBufferTest,
   IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &observed));
   EXPECT_EQ(observed, 0u);
   EXPECT_GT(harness.native.live_memories, 1u);
-  harness.native.hold_retirement = false;
+  harness.native.retirement_limit = UINT64_MAX;
   harness.native.Wake();
   iree_status_t status = iree_ok_status();
   while (iree_status_is_ok(status)) {
@@ -266,7 +265,7 @@ TEST(XdnaCommandBufferTest, PreparationFailureReleasesUnacceptedArray) {
 static void AbandonWindowedRecording() {
   QueueHarness harness;
   harness.native.pending_capacity = 2;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
   iree_hal_command_buffer_t* command_buffer = nullptr;

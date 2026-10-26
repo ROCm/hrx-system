@@ -344,7 +344,7 @@ TEST(XdnaQueueTest, QueueWaitPublishesContractBindingBeforePreparation) {
   constexpr iree_device_size_t kBindingLength = 32;
 
   QueueHarness harness;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   ASSERT_NO_FATAL_FAILURE(harness.SealDeviceGroup());
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
@@ -393,7 +393,7 @@ TEST(XdnaQueueTest, QueueWaitPublishesContractBindingBeforePreparation) {
   EXPECT_EQ(iree_unaligned_load_le_u32(command_bytes.data() + 12),
             UINT32_C(0xA5A50000) | (uint32_t)(patched_address >> 32));
 
-  harness.native.hold_retirement = false;
+  harness.native.retirement_limit = UINT64_MAX;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK, completion));
   iree_hal_semaphore_release(completion);
@@ -403,7 +403,7 @@ TEST(XdnaQueueTest, QueueWaitPublishesContractBindingBeforePreparation) {
 
 TEST(XdnaQueueTest, ReadyDispatchCommitsBeforeProactorProgress) {
   QueueHarness harness;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
 
@@ -414,7 +414,7 @@ TEST(XdnaQueueTest, ReadyDispatchCommitsBeforeProactorProgress) {
   IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &value));
   EXPECT_EQ(value, 0u);
 
-  harness.native.hold_retirement = false;
+  harness.native.retirement_limit = UINT64_MAX;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
 }
@@ -456,7 +456,7 @@ TEST(XdnaQueueTest, ExactWaitWithoutTopologyRetiresBeforeProactorProgress) {
 
 TEST(XdnaQueueTest, ExactWaitOwnsRetirementBeforeNativeNotification) {
   QueueHarness harness;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   ASSERT_NO_FATAL_FAILURE(harness.SealDeviceGroup());
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
@@ -484,7 +484,7 @@ TEST(XdnaQueueTest, ExactWaitOwnsRetirementBeforeNativeNotification) {
   } wait_release_guard = {&harness.native, &waiter};
   harness.native.AwaitBlockedWait();
 
-  harness.native.hold_retirement = false;
+  harness.native.retirement_limit = UINT64_MAX;
   harness.native.Wake();
   IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
                                           iree_infinite_timeout(), nullptr));
@@ -542,7 +542,7 @@ TEST(XdnaQueueTest, InexactReachedFrontierPublishesDirectly) {
 TEST(XdnaQueueTest, AcceptedSignalChainUsesNativeFifoBeforeRetirement) {
   QueueHarness harness;
   harness.native.pending_capacity = 2;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   iree_async_frontier_tracker_t* tracker = nullptr;
   IREE_ASSERT_OK(iree_async_frontier_tracker_create(
@@ -568,7 +568,7 @@ TEST(XdnaQueueTest, AcceptedSignalChainUsesNativeFifoBeforeRetirement) {
   IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &value));
   EXPECT_EQ(value, 0u);
 
-  harness.native.hold_retirement = false;
+  harness.native.retirement_limit = UINT64_MAX;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
   EXPECT_FALSE(iree_async_semaphore_is_value_tainted(
@@ -589,7 +589,7 @@ TEST(XdnaQueueTest, AcceptedSignalChainUsesNativeFifoBeforeRetirement) {
 TEST(XdnaQueueTest, DeferredConsumersTargetLowestPendingSignal) {
   QueueHarness harness;
   harness.native.pending_capacity = 4;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   iree_async_frontier_tracker_t* tracker = nullptr;
   IREE_ASSERT_OK(iree_async_frontier_tracker_create(
@@ -657,7 +657,7 @@ TEST(XdnaQueueTest, DeferredConsumersTargetLowestPendingSignal) {
   EXPECT_EQ(value, 0u);
 
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, 1, nullptr));
-  harness.native.hold_retirement = false;
+  harness.native.retirement_limit = UINT64_MAX;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK, anchor_done));
   for (iree_hal_semaphore_t* completion : consumer_done) {
@@ -753,7 +753,7 @@ TEST(XdnaQueueTest, LargeSignalSetUsesPooledProducerChunks) {
 TEST(XdnaQueueTest, ConsumerSubmittedBeforeProducerDefersUntilRetirement) {
   QueueHarness harness;
   harness.native.pending_capacity = 2;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   iree_async_frontier_tracker_t* tracker = nullptr;
   IREE_ASSERT_OK(iree_async_frontier_tracker_create(
@@ -795,7 +795,7 @@ TEST(XdnaQueueTest, ConsumerSubmittedBeforeProducerDefersUntilRetirement) {
 
 TEST(XdnaQueueTest, FullNativeCapacityUsesQueuedPublication) {
   QueueHarness harness;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
   iree_hal_semaphore_t* following = nullptr;
@@ -811,7 +811,7 @@ TEST(XdnaQueueTest, FullNativeCapacityUsesQueuedPublication) {
                                           iree_infinite_timeout(), nullptr));
   EXPECT_EQ(harness.native.submission_count, 1u);
 
-  harness.native.hold_retirement = false;
+  harness.native.retirement_limit = UINT64_MAX;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK, following));
@@ -836,7 +836,7 @@ TEST(XdnaQueueTest, NativeBusyWithoutPendingWorkFailsQueueInvariant) {
 TEST(XdnaQueueTest, NativeBusyRetainsDirectPublicationUntilCheckedProgress) {
   QueueHarness harness;
   harness.native.pending_capacity = 2;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   iree_async_frontier_tracker_t* tracker = nullptr;
   IREE_ASSERT_OK(iree_async_frontier_tracker_create(
@@ -872,7 +872,6 @@ TEST(XdnaQueueTest, NativeBusyRetainsDirectPublicationUntilCheckedProgress) {
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilNotificationCount(2));
 
   harness.native.retirement_limit = UINT64_MAX;
-  harness.native.hold_retirement = false;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK, first));
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
@@ -884,7 +883,7 @@ TEST(XdnaQueueTest, NativeBusyRetainsDirectPublicationUntilCheckedProgress) {
 TEST(XdnaQueueTest, NativeBusyRetainsQueuedPublicationUntilCheckedProgress) {
   QueueHarness harness;
   harness.native.pending_capacity = 2;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
   iree_hal_semaphore_t* first = nullptr;
@@ -928,7 +927,6 @@ TEST(XdnaQueueTest, NativeBusyRetainsQueuedPublicationUntilCheckedProgress) {
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilNotificationCount(2));
 
   harness.native.retirement_limit = UINT64_MAX;
-  harness.native.hold_retirement = false;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
   EXPECT_EQ(harness.diagnostic_count, 0u);
@@ -939,7 +937,7 @@ TEST(XdnaQueueTest, NativeBusyRetainsQueuedPublicationUntilCheckedProgress) {
 TEST(XdnaQueueTest, PublicationClaimContentionUsesQueuedPublication) {
   QueueHarness harness;
   harness.native.pending_capacity = 2;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
   iree_hal_executable_t* executable = nullptr;
@@ -982,7 +980,7 @@ TEST(XdnaQueueTest, PublicationClaimContentionUsesQueuedPublication) {
   first_submitter.join();
   EXPECT_TRUE(first_submission_returned.load(std::memory_order_acquire));
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(2));
-  harness.native.hold_retirement = false;
+  harness.native.retirement_limit = UINT64_MAX;
   harness.native.Wake();
   for (auto* completion : completions) {
     ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK, completion));
@@ -1018,7 +1016,7 @@ TEST(XdnaQueueTest, PendingInvocationsKeepPrivateBindingsAndReuseBacking) {
   // One instruction aperture, one static DMA catalog, and three caller buffers.
   EXPECT_EQ(harness.native.memory_create_count, 5u);
   for (uint64_t iteration = 1; iteration <= 4; ++iteration) {
-    harness.native.hold_retirement = true;
+    harness.native.HoldRetirement();
     harness.native.flushes.clear();
     for (size_t i = 0; i < completions.size(); ++i) {
       auto binding =
@@ -1043,7 +1041,7 @@ TEST(XdnaQueueTest, PendingInvocationsKeepPrivateBindingsAndReuseBacking) {
     if (iteration > 1) {
       EXPECT_TRUE(harness.native.flushes.empty());
     }
-    harness.native.hold_retirement = false;
+    harness.native.retirement_limit = UINT64_MAX;
     harness.native.Wake();
     for (auto* completion : completions) {
       uint64_t value = 0;
@@ -1109,12 +1107,16 @@ TEST(XdnaQueueTest, GrowableCommandArenaReusesPersistentSlabs) {
   iree_hal_executable_release(executables[1]);
 }
 
-TEST(XdnaQueueTest, PartialRetirementReturnsCapacityWithOpaquePoints) {
+class XdnaPartialRetirementTest : public ::testing::TestWithParam<bool> {};
+
+TEST_P(XdnaPartialRetirementTest, ReturnsCapacityWithOpaquePoints) {
+  const bool delay_acknowledgement = GetParam();
   QueueHarness harness;
   harness.native.pending_capacity = 2;
   harness.native.point_stride = 7;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
   std::array<iree_hal_semaphore_t*, 2> following = {};
   for (auto& completion : following) {
     IREE_ASSERT_OK(iree_hal_semaphore_create(
@@ -1127,10 +1129,29 @@ TEST(XdnaQueueTest, PartialRetirementReturnsCapacityWithOpaquePoints) {
   }
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(2));
   EXPECT_EQ(harness.native.submission_count, 2u);
+  // The first two calls commit synchronously; only capacity blocks the third.
+  // Hold its native return so retirement can precede its HAL acknowledgement.
+  if (delay_acknowledgement) {
+    harness.native.BlockSubmission(
+        NativeProvider::SubmissionGate::kBeforeReturn);
+  }
+  struct SubmissionReleaseGuard {
+    // Borrowed dependency resumed before fixture teardown on assertion exits.
+    NativeProvider* provider;
+    ~SubmissionReleaseGuard() {
+      provider->retirement_limit = UINT64_MAX;
+      provider->ReleaseSubmission();
+      provider->Wake();
+    }
+  } submission_release_guard = {&harness.native};
   harness.native.retirement_limit = 7;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
-  ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(3));
+  if (delay_acknowledgement) {
+    harness.native.AwaitBlockedSubmission();
+  } else {
+    ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(3));
+  }
   EXPECT_EQ(harness.native.live_memories, 5u);
   EXPECT_EQ(harness.native.pending_commands.size(), 2u);
   for (auto* completion : following) {
@@ -1139,8 +1160,28 @@ TEST(XdnaQueueTest, PartialRetirementReturnsCapacityWithOpaquePoints) {
     EXPECT_EQ(value, 0u);
   }
   for (size_t i = 0; i < following.size(); ++i) {
+    if (delay_acknowledgement && i == 1) {
+      // With both visible entries retired and the publisher held, drain only
+      // stale wakes. The next poll must consume the third completion hint while
+      // the HAL has no acknowledged submission to refresh.
+      while (true) {
+        iree_status_t status = iree_async_proactor_poll(
+            harness.proactor, iree_immediate_timeout(), nullptr);
+        if (iree_status_is_deadline_exceeded(status)) {
+          iree_status_free(status);
+          break;
+        }
+        IREE_ASSERT_OK(status);
+      }
+    }
     harness.native.retirement_limit = (i + 2) * 7;
     harness.native.Wake();
+    if (delay_acknowledgement && i == 1) {
+      IREE_ASSERT_OK(iree_async_proactor_poll(
+          harness.proactor, iree_infinite_timeout(), nullptr));
+      EXPECT_EQ(harness.native.checked_retired_submission, 14u);
+      harness.native.ReleaseSubmission();
+    }
     ASSERT_NO_FATAL_FAILURE(
         harness.PollUntilDone(IREE_STATUS_OK, following[i]));
     iree_hal_semaphore_release(following[i]);
@@ -1148,10 +1189,17 @@ TEST(XdnaQueueTest, PartialRetirementReturnsCapacityWithOpaquePoints) {
   EXPECT_EQ(harness.native.live_memories, 1u);
 }
 
+INSTANTIATE_TEST_SUITE_P(XdnaQueueTest, XdnaPartialRetirementTest,
+                         ::testing::Bool(),
+                         [](const ::testing::TestParamInfo<bool>& info) {
+                           return info.param ? "RetirementBeforeAcknowledgement"
+                                             : "ConcurrentAcknowledgement";
+                         });
+
 TEST(XdnaQueueTest, PrivateAddressesPropagateThroughImmutableClosure) {
   QueueHarness harness;
   harness.native.pending_capacity = 2;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   iree::hal::amd::xdna::testing::ImageFixture fixture;
   // Command -> immutable A -> immutable B -> device-written scratch. The
@@ -1205,7 +1253,7 @@ TEST(XdnaQueueTest, PrivateAddressesPropagateThroughImmutableClosure) {
   const auto& first = harness.native.pending_commands[0].bytes;
   const auto& second = harness.native.pending_commands[1].bytes;
   EXPECT_FALSE(std::equal(first.begin(), first.begin() + 8, second.begin()));
-  harness.native.hold_retirement = false;
+  harness.native.retirement_limit = UINT64_MAX;
   harness.native.Wake();
   for (auto* completion : completions) {
     ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK, completion));
@@ -1218,7 +1266,7 @@ TEST(XdnaQueueTest, PrivateAddressesPropagateThroughImmutableClosure) {
 
 TEST(XdnaQueueTest, HostProducerProgressesWithFullNativeQueue) {
   QueueHarness harness;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   iree_async_frontier_tracker_t* tracker = nullptr;
   IREE_ASSERT_OK(iree_async_frontier_tracker_create(
@@ -1253,7 +1301,7 @@ TEST(XdnaQueueTest, HostProducerProgressesWithFullNativeQueue) {
   IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &value));
   EXPECT_EQ(value, 0u);
   EXPECT_FALSE(iree_async_frontier_tracker_query_epoch(tracker, axis, 1));
-  harness.native.hold_retirement = false;
+  harness.native.retirement_limit = UINT64_MAX;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
   EXPECT_TRUE(iree_async_frontier_tracker_query_epoch(tracker, axis, 1));
@@ -1425,7 +1473,7 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
       before = SnapshotHostAllocations(allocation_counters);
       native_allocations_before = harness.native.memory_create_count;
     }
-    harness.native.hold_retirement = true;
+    harness.native.HoldRetirement();
     const size_t submission_count = harness.native.submission_count;
     uint64_t preceding_value = switching_value;
     uint64_t first_value = ++switching_value;
@@ -1444,7 +1492,7 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
         switching_function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
         {1, &binding}, /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
     ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(submission_count + 2));
-    harness.native.hold_retirement = false;
+    harness.native.retirement_limit = UINT64_MAX;
     harness.native.Wake();
     harness.PollUntilValue(switching_completion, second_value);
   }
@@ -1487,7 +1535,7 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
       before = SnapshotHostAllocations(allocation_counters);
       native_allocations_before = harness.native.memory_create_count;
     }
-    harness.native.hold_retirement = true;
+    harness.native.HoldRetirement();
     const size_t submission_count = harness.native.submission_count;
     for (iree_hal_semaphore_t* completion : capacity_completions) {
       IREE_ASSERT_OK(iree_hal_queue_dispatch(
@@ -1496,7 +1544,7 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
           /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
     }
     ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(submission_count + 2));
-    harness.native.hold_retirement = false;
+    harness.native.retirement_limit = UINT64_MAX;
     harness.native.Wake();
     for (iree_hal_semaphore_t* completion : capacity_completions) {
       harness.PollUntilValue(completion, iteration);
@@ -1506,7 +1554,7 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
 
   before = SnapshotHostAllocations(allocation_counters);
   native_allocations_before = harness.native.memory_create_count;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   uint64_t retry_value = kTotalIterations + 1;
   const uint64_t submission_count = harness.native.submission_count;
   const size_t notification_count = harness.native.notification_count;
@@ -1532,7 +1580,6 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
   ASSERT_NO_FATAL_FAILURE(
       harness.PollUntilNotificationCount(notification_count + 2));
   harness.native.retirement_limit = UINT64_MAX;
-  harness.native.hold_retirement = false;
   harness.native.Wake();
   harness.PollUntilValue(capacity_completions[0], retry_value);
   harness.PollUntilValue(capacity_completions[1], retry_value);
@@ -1600,7 +1647,7 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
 
 TEST(XdnaQueueTest, FailedDependencyDoesNotWaitForNativeCapacity) {
   QueueHarness harness;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   ASSERT_NO_FATAL_FAILURE(harness.Submit());
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(1));
@@ -1629,7 +1676,7 @@ TEST(XdnaQueueTest, FailedDependencyDoesNotWaitForNativeCapacity) {
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_ABORTED, failed));
   EXPECT_EQ(harness.native.submission_count, 1u);
   EXPECT_EQ(harness.native.live_memories, 3u);
-  harness.native.hold_retirement = false;
+  harness.native.retirement_limit = UINT64_MAX;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
   iree_hal_semaphore_release(failed);
@@ -1811,7 +1858,7 @@ static void RunObserverFailurePreservesAcceptedOwnershipChild(Outcome outcome) {
 static void RunObserverFailurePreservesEveryPendingInvocationChild() {
   QueueHarness harness;
   harness.native.pending_capacity = 2;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   iree_hal_semaphore_t* second = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(

@@ -155,7 +155,7 @@ struct ProfileSink {
 TEST(XdnaProfileTest, DeferredReadinessAndHostPublicationExcludeNativeWait) {
   ProfileSink sink;
   QueueHarness harness;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
   const iree_hal_device_profiling_options_t options = {
@@ -197,7 +197,7 @@ TEST(XdnaProfileTest, DeferredReadinessAndHostPublicationExcludeNativeWait) {
   uint64_t done = 0;
   IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &done));
   EXPECT_EQ(done, 0u);
-  harness.native.hold_retirement = false;
+  harness.native.retirement_limit = UINT64_MAX;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
   IREE_ASSERT_OK(iree_hal_device_profiling_end(harness.device));
@@ -431,7 +431,7 @@ TEST(XdnaProfileTest,
     QueueHarness harness;
     harness.native.pending_capacity = 24;
     harness.native.maximum_command_count = 8;
-    harness.native.hold_retirement = true;
+    harness.native.HoldRetirement();
     // The second array crosses the capacity boundary before its BUSY retry.
     harness.native.result.capacity = 10 * 24;
     if (reject) {
@@ -457,7 +457,7 @@ TEST(XdnaProfileTest,
                                           {1, &harness.done, &value},
                                           command_buffer, {1, &binding}, 0));
     const size_t flushes = harness.native.FlushCount();
-    harness.native.hold_retirement = false;
+    harness.native.retirement_limit = UINT64_MAX;
     harness.native.Wake();
     if (reject) {
       uint64_t observed = 0;
@@ -635,7 +635,7 @@ TEST(XdnaProfileTest,
     if (iteration > 1) {
       warm = SnapshotHostAllocations(allocations);
     }
-    harness.native.hold_retirement = true;
+    harness.native.HoldRetirement();
     const auto binding =
         iree_hal_make_buffer_ref(buffers[iteration % 2], 0, 64);
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
@@ -654,7 +654,7 @@ TEST(XdnaProfileTest,
         EXPECT_EQ(bytes, first_command);
       }
     }
-    harness.native.hold_retirement = false;
+    harness.native.retirement_limit = UINT64_MAX;
     harness.native.Wake();
     ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(harness.done, iteration));
     if (iteration > 1) {

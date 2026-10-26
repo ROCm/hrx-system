@@ -36,7 +36,7 @@ struct ScopedMemoryGate {
 
 TEST(XdnaQueueTest, CachedQueueAllocationPublishesContractBeforeDispatch) {
   QueueHarness harness;
-  harness.native.hold_retirement = true;
+  harness.native.HoldRetirement();
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   ASSERT_NO_FATAL_FAILURE(harness.SealDeviceGroup());
   ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
@@ -117,7 +117,7 @@ TEST(XdnaQueueTest, CachedQueueAllocationPublishesContractBeforeDispatch) {
               UINT32_C(0xA5A50000) | (uint32_t)(patched_address >> 32));
   }
 
-  harness.native.hold_retirement = false;
+  harness.native.retirement_limit = UINT64_MAX;
   harness.native.Wake();
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(dispatch_done, value));
   IREE_ASSERT_OK(iree_hal_queue_dealloca(
