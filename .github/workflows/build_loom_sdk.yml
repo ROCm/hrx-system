@@ -77,8 +77,9 @@ jobs:
             "clang-22=$LLVM_APT_VERSION" "lld-22=$LLVM_APT_VERSION" \
             "llvm-22=$LLVM_APT_VERSION" "libclang-rt-22-dev=$LLVM_APT_VERSION" \
             g++-13 patchelf p7zip-full
-          python3 dev.py bazel setup --venv
-          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          mkdir -p build/loom-sdk/host-tools
+          python3 build_tools/devtools/install.py bazelisk --bin-dir build/loom-sdk/host-tools
+          echo "$PWD/build/loom-sdk/host-tools" >> "$GITHUB_PATH"
           echo "$LLVM_ROOT/bin" >> "$GITHUB_PATH"
       - name: Restore Windows SDK inputs
         id: toolchain
