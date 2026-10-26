@@ -8,6 +8,43 @@
 
 #include "iree/hal/drivers/amd/gpu/target/identity.h"
 
+static iree_status_t iree_hal_amd_gpu_device_spec_add_target(
+    iree_hal_device_spec_builder_t* builder,
+    const iree_hal_amd_gpu_target_identity_t* identity,
+    iree_hal_executable_target_kind_t kind, uint32_t priority,
+    iree_hal_physical_device_affinity_t affinity) {
+  char key[128];
+  iree_host_size_t length = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_target_identity_format_artifact_key(
+      identity, sizeof(key), key, &length));
+  const iree_hal_executable_target_t target = {
+      .family = IREE_SV("amdgpu"),
+      .target_key = iree_make_string_view(key, length),
+      .kind = kind,
+      .priority = priority,
+      .physical_device_affinity = affinity,
+  };
+  return iree_hal_device_spec_builder_add_executable_target(builder, &target);
+}
+
+iree_status_t iree_hal_amd_gpu_device_spec_builder_add_executable_targets(
+    iree_hal_device_spec_builder_t* builder,
+    const iree_hal_amd_gpu_target_identity_t* identity,
+    iree_hal_physical_device_affinity_t physical_device_affinity) {
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_device_spec_add_target(
+      builder, identity, IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT, 100,
+      physical_device_affinity));
+  iree_hal_amd_gpu_target_identity_t projected;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_target_identity_project_code_object(
+      identity, &projected));
+  if (iree_hal_amd_gpu_target_identity_equal(identity, &projected)) {
+    return iree_ok_status();
+  }
+  return iree_hal_amd_gpu_device_spec_add_target(
+      builder, &projected, IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC, 50,
+      physical_device_affinity);
+}
+
 iree_status_t iree_hal_amd_gpu_device_spec_select_executable_target(
     const iree_hal_device_spec_t* device_spec,
     iree_string_view_t artifact_target_key,

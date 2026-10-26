@@ -68,7 +68,8 @@ TEST_F(SelectionTest, CanonicalTargetsAcceptExactAndProjectedArtifacts) {
     if (identity.kind != IREE_HAL_AMD_GPU_TARGET_KIND_EXACT) {
       continue;
     }
-    Add(iree_make_cstring_view(target));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_device_spec_builder_add_executable_targets(
+        &builder_, &identity, 1));
   }
   Finalize();
   for (const char* target : targets) {
@@ -91,6 +92,13 @@ TEST_F(SelectionTest, CanonicalTargetsAcceptExactAndProjectedArtifacts) {
     // A generic family may match several exact devices at equal priority.
     EXPECT_NE(result.outcome,
               IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_NO_MATCH);
+    const iree_hal_executable_target_selection_t selection = {
+        .family = IREE_SV("amdgpu"),
+        .target_key = iree_make_cstring_view(key),
+    };
+    EXPECT_EQ(iree_hal_device_spec_select_executable_target(spec_, &selection)
+                  .outcome,
+              IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED);
   }
 }
 

@@ -102,6 +102,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:scratch",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/sdma:queue",
         "//runtime/src/iree/hal/drivers/amd/gpu/target:identity",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:selection",
         "//runtime/src/iree/hal/utils:device_spec_builder",
         "//runtime/src/iree/hal/utils:files",
     ],

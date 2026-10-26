@@ -35,6 +35,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/sdma/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
+#include "iree/hal/drivers/amd/gpu/target/selection.h"
 #include "iree/hal/drivers/amd/status.h"
 #include "iree/hal/utils/device_spec_builder.h"
 #include "iree/hal/utils/file_registry.h"
@@ -414,21 +415,41 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       .family_count = 1,
       .families = &family,
   };
+  const amdf_gpu_endpoint_info_t* native = &device->context->target_info;
+  iree_hal_amd_gpu_wavefront_size_support_t wavefront = {0};
+  iree_hal_amd_gpu_target_identity_lookup_wavefront_size_support(
+      &device->target, &wavefront);
+  const bool wave32 = iree_any_bit_set(wavefront.explicit_supported_sizes,
+                                       IREE_HAL_AMD_GPU_WAVEFRONT_SIZE_FLAG_32);
+  const bool wave64 = iree_any_bit_set(wavefront.explicit_supported_sizes,
+                                       IREE_HAL_AMD_GPU_WAVEFRONT_SIZE_FLAG_64);
   const iree_hal_device_dispatch_spec_t dispatch = {
       .launch = {.maximum_workgroup_invocations = 1024,
                  .maximum_workgroup_size = {1024, 1024, 1024},
                  .maximum_workgroup_count = {UINT32_MAX, UINT32_MAX,
                                              UINT32_MAX}},
-  };
-  char target_key[128];
-  iree_host_size_t target_key_length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_target_identity_format_artifact_key(
-      &device->target, sizeof(target_key), target_key, &target_key_length));
-  const iree_hal_executable_target_t target = {
-      .family = IREE_SV("amdgpu"),
-      .target_key = iree_make_string_view(target_key, target_key_length),
-      .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
-      .physical_device_affinity = 1,
+      .subgroup =
+          {
+              .default_size = native->compute.wavefront_size,
+              .minimum_size = wave32 ? 32 : native->compute.wavefront_size,
+              .maximum_size = wave64 ? 64 : native->compute.wavefront_size,
+              .supported_size_mask = wave32 ? UINT64_C(1) << 32 : 0,
+          },
+      .execution =
+          {
+              .unit_count = native->compute.compute_unit_count,
+              .group_count = native->topology.xcc_count *
+                             native->topology.shader_engine_count_per_xcc,
+              .maximum_resident_invocation_count =
+                  native->compute.maximum_wave_count_per_compute_unit *
+                  native->compute.wavefront_size,
+              .maximum_resident_subgroup_count =
+                  native->compute.maximum_wave_count_per_compute_unit,
+              .maximum_local_memory_size =
+                  native->compute.local_data_share_byte_length,
+              .maximum_workgroup_local_memory_size =
+                  native->compute.local_data_share_byte_length,
+          },
   };
   iree_hal_device_spec_builder_t builder;
   iree_hal_device_spec_builder_initialize(device->host_allocator, &builder);
@@ -446,8 +467,8 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
     status = iree_hal_device_spec_builder_set_dispatch(&builder, &dispatch);
   }
   if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_device_spec_builder_add_executable_target(&builder, &target);
+    status = iree_hal_amd_gpu_device_spec_builder_add_executable_targets(
+        &builder, &device->target, 1);
   }
   if (iree_status_is_ok(status) && asan_options) {
     const iree_hal_device_sanitizer_spec_t sanitizer = {
