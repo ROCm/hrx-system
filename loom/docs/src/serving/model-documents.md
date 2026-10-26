@@ -62,9 +62,14 @@ A text deployment can select a local card and override its execution defaults:
     "preset": "interactive",
     "programs": "mixed"
   },
-  "definition": {"kind": "text", "rows": 2}
+  "definition": {"kind": "text", "max_sessions": 4}
 }
 ```
+
+`max_sessions` bounds concurrent session ownership for this deployment.
+Additional requests wait in its bounded pending queue. The initial allocation
+is automatically capped by this maximum, so ordinary deployments need not set
+`rows` as well. Separate deployments of the same card can use different limits.
 
 The referenced `model.json` can contain:
 
@@ -297,7 +302,8 @@ Native capacity fields are:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `rows` | `4` | Initial resident state records, not a session limit. The directory grows as requests arrive, independently of epoch token/span capacity; request admission reserves actual memory credit. |
+| `max_sessions` | omitted | Positive ceiling on resident session owners. Preparation and outstanding output retain their owners; extra requests wait in `pending_requests`. Omission leaves concurrency memory-limited. |
+| `rows` | `4` | Initial resident capacity hint, capped by `max_sessions` when set. The directory grows as requests arrive, independently of epoch token/span capacity and up to the configured maximum. |
 | `context_capacity` | `16384` | Per-row logical context limit in token positions, at most 262144. |
 | `pool_capacity` | `65536` | Shared logical cache token positions, in whole source-defined pages. |
 | `prefill_capacity` | `512` | Largest automatically specialized packed token shape; not a prompt-length limit. |
@@ -327,6 +333,20 @@ Logical capacity is not eagerly committed physical storage under elastic
 backing. Sessions grow by blocks; admission reserves their requested completion
 high-water. Shared prefixes can reference the same resident blocks. Changing
 deployment capacities requires a new registration; they are not process flags.
+
+The session maximum controls live ownership, not the number of sessions that
+can visit the deployment over its lifetime. Finished or cancelled requests
+release their owners for reuse. Slow output readers still count while they
+retain a request, and a full pending queue rejects additional requests with
+HTTP 503. Growth stops exactly at the maximum, including non-power-of-two
+limits such as six. Dispatch shapes remain independent: a single session can
+still use a large prefill shape.
+
+Idle session caches, shared prefix endpoints, and explicit checkpoints have
+their own capacities; the session maximum is not a byte budget for those
+caches, model weights, or workspace. The shared physical memory budget still
+governs backing. `text_activity` telemetry reports `session_capacity` and
+`max_sessions`; zero in that telemetry field means no configured count limit.
 
 ### Image input
 
@@ -358,8 +378,8 @@ tokenizer, chat template, vocabulary head, or token sampler. This supports a
 stateful stage inside a larger inference pipeline without making it imitate a
 chat model.
 
-Sequence definitions share text's `rows`, `context_capacity`, `pool_capacity`,
-`prefill_capacity`, `checkpoint_capacity`, `session_cache_capacity`, and
+Sequence definitions share text's `rows`, `max_sessions`, `context_capacity`,
+`pool_capacity`, `prefill_capacity`, `checkpoint_capacity`, `session_cache_capacity`, and
 `admission_overtakes` fields and defaults. Admission reserves only the supplied
 known positions, rounded to cache blocks; it does not reserve generated tokens.
 Execution uses packed epochs and the same row/cache/checkpoint ownership.

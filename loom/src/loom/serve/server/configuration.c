@@ -230,6 +230,7 @@ typedef enum loom_serve_model_definition_field_e {
   DEFINITION_WEIGHTS,
   DEFINITION_TOKENIZER,
   DEFINITION_ROWS,
+  DEFINITION_MAX_SESSIONS,
   DEFINITION_CONTEXT_CAPACITY,
   DEFINITION_POOL_CAPACITY,
   DEFINITION_PREFILL_CAPACITY,
@@ -277,6 +278,11 @@ static iree_status_t loom_serve_model_configuration_text(
   }
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
       &fields[DEFINITION_ROWS], 1, INT32_MAX, &text->rows));
+  IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
+      &fields[DEFINITION_MAX_SESSIONS], 1, INT32_MAX, &text->max_sessions));
+  if (text->max_sessions) {
+    text->rows = iree_min(text->rows, text->max_sessions);
+  }
   text->admission_overtakes = text->rows;
   IREE_RETURN_IF_ERROR(loom_serve_model_configuration_size(
       &fields[DEFINITION_ADMISSION_OVERTAKES], 0, INT32_MAX,
@@ -382,6 +388,8 @@ static iree_status_t loom_serve_model_configuration_definition_parse(
                                 .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       [DEFINITION_ROWS] = {"rows", IREE_JSON_VALUE_TYPE_NUMBER,
                            .kinds = retained_kinds},
+      [DEFINITION_MAX_SESSIONS] = {"max_sessions", IREE_JSON_VALUE_TYPE_NUMBER,
+                                   .kinds = retained_kinds},
       [DEFINITION_CONTEXT_CAPACITY] = {"context_capacity",
                                        IREE_JSON_VALUE_TYPE_NUMBER,
                                        .kinds = retained_kinds},

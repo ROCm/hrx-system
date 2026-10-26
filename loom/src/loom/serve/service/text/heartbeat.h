@@ -26,6 +26,10 @@ typedef struct loom_serve_text_heartbeat_snapshot_t {
   iree_time_t last_completion;
   // Requests currently holding retained rows.
   iree_host_size_t active_rows;
+  // Allocated resident owners, including idle reusable records.
+  iree_host_size_t session_capacity;
+  // Configured resident ceiling; zero leaves concurrency memory-limited.
+  iree_host_size_t max_sessions;
   // Claimed requests waiting without a device row or completion reservation.
   iree_host_size_t queued_requests;
   // Monotonic receipt time of the oldest admitted request, if active_rows > 0.

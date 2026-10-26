@@ -62,6 +62,8 @@ struct loom_serve_text_service_t {
   loom_serve_packing_shape_t isolated_shape;
   // Number of allocated device/session rows.
   iree_host_size_t row_count;
+  // Resident owner ceiling, independent of epoch shapes; zero is unbounded.
+  iree_host_size_t max_sessions;
   // Cold replacement directory, private to its CPU task until readiness joins.
   loom_serve_text_service_capacity_t growth;
   // Output bound when the client omits one.

@@ -9,7 +9,9 @@
 namespace {
 
 using loom_serve::testing::text::Oracle;
+using loom_serve::testing::text::RegisteredSourceTextServiceTest;
 using loom_serve::testing::text::SourceTextServiceTest;
+using loom_serve::testing::text::StalledClient;
 
 class TextServiceCapacityTest : public SourceTextServiceTest {
  protected:
@@ -144,6 +146,102 @@ TEST_F(TextServiceCapacityTest, StoppingJoinsAcceptedCapacityGrowth) {
   for (int client : clients) {
     Read(client, true);
   }
+}
+
+TEST_F(TextServiceCapacityTest, RejectsMaximumBelowPreparedResidentCapacity) {
+  auto options = ServiceOptions();
+  options.max_sessions = options.row_count - 1;
+  loom_serve_text_service_t* limited = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_text_service_allocate(model_, &options, nullptr,
+                                       host_allocator_, &limited));
+  EXPECT_EQ(limited, nullptr);
+}
+
+class LimitedTextServiceCapacityTest
+    : public TextServiceCapacityTest,
+      public ::testing::WithParamInterface<iree_host_size_t> {
+ protected:
+  loom_serve_text_options_t ModelOptions() const override {
+    auto options = TextServiceCapacityTest::ModelOptions();
+    options.row_count = std::min(options.row_count, GetParam());
+    return options;
+  }
+
+  loom_serve_text_service_options_t ServiceOptions() const override {
+    auto options = TextServiceCapacityTest::ServiceOptions();
+    options.row_count = std::min(options.row_count, GetParam());
+    options.max_sessions = GetParam();
+    return options;
+  }
+};
+
+TEST_P(LimitedTextServiceCapacityTest,
+       BurstReusesOwnersWithoutExceedingMaximum) {
+  std::vector<int> clients;
+  ASSERT_NO_FATAL_FAILURE(Submit(13, &clients));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    return interface_.snapshot(interface_.self).active_requests == GetParam() ||
+           interface_.telemetry.counters->completed;
+  }));
+  EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, GetParam());
+  EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests,
+            clients.size() - GetParam());
+  EXPECT_EQ(interface_.telemetry.counters->completed, 0u);
+  EXPECT_EQ(loom_serve_text_model_row_count(model_), GetParam());
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
+    EXPECT_LE(interface_.snapshot(interface_.self).active_requests, GetParam());
+    EXPECT_EQ(loom_serve_text_model_row_count(model_), GetParam());
+    return Idle();
+  }));
+  for (size_t i = 0; i < clients.size(); ++i) {
+    EXPECT_EQ(Content(Read(clients[i])),
+              Oracle::Complete(std::string(1, "abx"[i % 3]), 8))
+        << i;
+  }
+  EXPECT_EQ(interface_.telemetry.counters->completed, clients.size());
+  EXPECT_EQ(interface_.telemetry.counters->failed, 0u);
+  EXPECT_EQ(loom_serve_text_model_weight_activity(model_).activations, 1u);
+}
+
+INSTANTIATE_TEST_SUITE_P(DeploymentLimits, LimitedTextServiceCapacityTest,
+                         ::testing::Values(1, 4, 6));
+
+TEST_F(RegisteredSourceTextServiceTest,
+       SessionMaximumRetainsSlowOutputUntilCancellation) {
+  StartManaged();
+  EXPECT_EQ(Read(Send(Declaration("fixture-text", directory_, "open",
+                                  R"(,"max_sessions":1,"pending_requests":1)"),
+                      "", "/v1/models/register"))
+                .find("HTTP/1.1 202"),
+            0u);
+  StalledClient stalled;
+  ASSERT_NO_FATAL_FAILURE(
+      stalled.Send(server_, Request(Message("user", "abxa"), 4)));
+  WaitModel("fixture-text",
+            R"("phase":"idle","queued_requests":0,"active_requests":1)");
+  const int pending = Send(Request(Message("user", "b"), 2));
+  WaitModel("fixture-text",
+            R"("phase":"idle","queued_requests":1,"active_requests":1)");
+  // A full waiting queue rejects excess work, rather than growing another
+  // resident to bypass the slow consumer's ownership.
+  EXPECT_EQ(Read(Send(Request(Message("user", "x"), 2))).find("HTTP/1.1 503"),
+            0u);
+  // The ceiling belongs to this deployment, not the model's source identity
+  // or shared device. A peer with the same programs can still serve work.
+  EXPECT_EQ(
+      Read(Send(Declaration("peer", directory_, "open", R"(,"max_sessions":1)"),
+                "", "/v1/models/register"))
+          .find("HTTP/1.1 202"),
+      0u);
+  const auto peer = Read(Send(
+      R"({"model":"peer","stream":true,"max_tokens":2,"messages":[{"role":"user","content":"x"}]})"));
+  EXPECT_EQ(Content(peer), Oracle::Complete("x", 2));
+  ASSERT_NO_FATAL_FAILURE(stalled.Close());
+  EXPECT_EQ(Content(Read(pending)), Oracle::Complete("b", 2));
+  WaitModel("fixture-text",
+            R"("phase":"idle","queued_requests":0,"active_requests":0)");
 }
 
 }  // namespace

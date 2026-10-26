@@ -52,8 +52,11 @@ static iree_status_t loom_serve_text_service_capacity_run(void* user_data) {
 
 bool loom_serve_text_service_capacity_begin(
     loom_serve_text_service_t* service) {
+  const iree_host_size_t maximum =
+      service->max_sessions ? iree_min(service->max_sessions, INT32_MAX)
+                            : INT32_MAX;
   if (loom_serve_text_has_work(service) || service->pending.prepared.session ||
-      service->row_count == INT32_MAX) {
+      service->row_count == maximum) {
     return false;
   }
   for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
@@ -63,7 +66,7 @@ bool loom_serve_text_service_capacity_begin(
       return false;
     }
   }
-  service->growth.requested = iree_min(2 * service->row_count, INT32_MAX);
+  service->growth.requested = iree_min(2 * service->row_count, maximum);
   loom_serve_text_observe(service, "grow");
   loom_serve_text_schedule_cpu(service, TEXT_CPU_WORK_GROW,
                                loom_serve_text_service_capacity_run);

@@ -32,6 +32,10 @@ typedef struct loom_serve_text_activity_record_t {
   uint64_t epoch_spans;
   // Token count of the last issued epoch.
   uint64_t epoch_tokens;
+  // Allocated resident owners, independent of the latest epoch's span count.
+  uint64_t session_capacity;
+  // Configured resident ceiling; zero leaves concurrency memory-limited.
+  uint64_t max_sessions;
 } loom_serve_text_activity_record_t;
 
 typedef struct loom_serve_text_work_record_t {
@@ -130,10 +134,12 @@ static iree_status_t loom_serve_text_activity_format(
       ",\"oldest_queued_arrival_ns\":%" PRIu64
       ",\"oldest_active_arrival_ns\":%" PRIu64 ",\"prefill_rows\":%" PRIu64
       ",\"decode_rows\":%" PRIu64 ",\"backpressured_rows\":%" PRIu64
-      ",\"epoch_spans\":%" PRIu64 ",\"epoch_tokens\":%" PRIu64,
+      ",\"epoch_spans\":%" PRIu64 ",\"epoch_tokens\":%" PRIu64
+      ",\"session_capacity\":%" PRIu64 ",\"max_sessions\":%" PRIu64,
       value.phase_start, value.last_completion, value.oldest_queued_arrival,
       value.oldest_active_arrival, value.prefill_rows, value.decode_rows,
-      value.backpressured_rows, value.epoch_spans, value.epoch_tokens);
+      value.backpressured_rows, value.epoch_spans, value.epoch_tokens,
+      value.session_capacity, value.max_sessions);
 }
 
 static iree_status_t loom_serve_text_work_format(
@@ -238,7 +244,9 @@ static void loom_serve_text_heartbeat_report(
       .decode_rows = state.decode_rows,
       .backpressured_rows = state.backpressured_rows,
       .epoch_spans = state.epoch_spans,
-      .epoch_tokens = state.epoch_tokens};
+      .epoch_tokens = state.epoch_tokens,
+      .session_capacity = state.session_capacity,
+      .max_sessions = state.max_sessions};
   memset(&record.data, 0, sizeof(record.data));
   record.event = &text_activity_event;
   memcpy(record.data.words, &activity, sizeof(activity));

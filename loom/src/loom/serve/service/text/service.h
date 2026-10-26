@@ -29,6 +29,9 @@ typedef struct loom_serve_text_service_options_t {
   // Initial resident capacity, matching the model at service creation. The
   // directory grows as requests arrive; memory credit gates active requests.
   iree_host_size_t row_count;
+  // Maximum resident owners, including preparation and output borrowers.
+  // Zero imposes no count limit. A nonzero limit must cover initial row_count.
+  iree_host_size_t max_sessions;
   // Maximum known input tokens admitted from one row in an epoch.
   iree_host_size_t chunk_size;
   // Output bound when a request omits max_tokens.

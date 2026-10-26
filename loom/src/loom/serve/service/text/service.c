@@ -847,6 +847,10 @@ iree_status_t loom_serve_text_service_allocate(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "initial service capacity must match its model");
   }
+  if (options->max_sessions && options->row_count > options->max_sessions) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "initial service capacity exceeds max_sessions");
+  }
   const iree_host_size_t draft_depth = loom_serve_text_model_draft_depth(model);
   const loom_serve_text_mode_t model_mode = loom_serve_text_model_mode(model);
   if (model_mode == LOOM_SERVE_TEXT_MODE_ENCODE &&
@@ -895,6 +899,7 @@ iree_status_t loom_serve_text_service_allocate(
       .model = model,
       .image = options->image,
       .name = options->name,
+      .max_sessions = options->max_sessions,
       .isolated_shape = {loom_serve_text_model_prefill_capacity(model),
                          options->row_count},
       .default_max_tokens = options->default_max_tokens,

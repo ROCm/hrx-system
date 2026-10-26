@@ -846,6 +846,7 @@ static iree_status_t loom_serve_text_registration_prepare(
         .name = configuration->name,
         .image = registration->image,
         .row_count = text->rows,
+        .max_sessions = text->max_sessions,
         .variant_capacity = configuration->variant_capacity,
         .chunk_size = text->prefill_capacity,
         .default_max_tokens = text->max_tokens,

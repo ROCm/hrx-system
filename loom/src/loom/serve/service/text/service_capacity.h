@@ -32,7 +32,8 @@ typedef struct loom_serve_text_service_capacity_t {
 } loom_serve_text_service_capacity_t;
 
 // Called after selection found no idle resident. A successful retired owner
-// starts amortized growth; accepted epochs and prepared continuations defer it.
+// starts amortized growth up to max_sessions; a reached ceiling, accepted
+// epochs, and prepared continuations leave demand pending without growth.
 bool loom_serve_text_service_capacity_begin(loom_serve_text_service_t* service);
 
 // After CPU readiness, submits native growth on the shared pool's owner and

@@ -6,6 +6,7 @@
 
 #include "loom/serve/server/configuration.h"
 
+#include <algorithm>
 #include <string>
 
 #include "iree/io/file_contents.h"
@@ -233,6 +234,7 @@ TEST_F(ConfigurationTest, SequenceRequiresWeightsButNoTokenizerOrSampler) {
   EXPECT_EQ(model_.text.tokenizer.size, 0u);
   EXPECT_EQ(model_.text.max_tokens, 0u);
   EXPECT_EQ(model_.text.rows, 4u);
+  EXPECT_EQ(model_.text.max_sessions, 0u);
   EXPECT_EQ(model_.text.session_cache_capacity, 1u);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Parse(Document("sequence")));
@@ -579,6 +581,7 @@ TEST_F(ConfigurationTest,
   IREE_ASSERT_OK(Parse(Text()));
   EXPECT_EQ(model_.kind, LOOM_SERVE_MODEL_KIND_TEXT);
   EXPECT_EQ(model_.text.rows, 4u);
+  EXPECT_EQ(model_.text.max_sessions, 0u);
   EXPECT_EQ(model_.variant_capacity, 16u);
   EXPECT_EQ(model_.text.admission_overtakes, 4u);
   EXPECT_EQ(model_.text.context_capacity, 16384u);
@@ -603,6 +606,41 @@ TEST_F(ConfigurationTest,
   EXPECT_EQ(model_.pending_requests, 17u);
   EXPECT_EQ(model_.text.max_tokens, 128u);
   EXPECT_EQ(String(model_.options), R"({"draft_weights":"draft.gguf"})");
+}
+
+TEST_F(ConfigurationTest, SessionMaximumBoundsInitialCapacityNotEpochShape) {
+  for (const char* kind : {"text", "sequence"}) {
+    const std::string inputs =
+        std::string(R"(,"weights":"model.irpa")") +
+        (std::string(kind) == "text" ? R"(,"tokenizer":"tokenizer.json")" : "");
+    for (const unsigned maximum : {1u, 4u, 6u, 100u}) {
+      SCOPED_TRACE(kind);
+      SCOPED_TRACE(maximum);
+      const std::string field = ",\"max_sessions\":" + std::to_string(maximum);
+      IREE_ASSERT_OK(Parse(Document(kind, inputs + field)));
+      EXPECT_EQ(model_.text.max_sessions, maximum);
+      EXPECT_EQ(model_.text.rows, std::min(4u, maximum));
+      EXPECT_EQ(model_.text.admission_overtakes, model_.text.rows);
+      EXPECT_EQ(model_.text.prefill_capacity, 512u);
+      IREE_ASSERT_OK(Parse(Document(kind, inputs + field + R"(,"rows":128)")));
+      EXPECT_EQ(model_.text.rows, maximum);
+    }
+    for (const char* value : {"0", "-1", "2147483648", "1.5", "\"4\""}) {
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_INVALID_ARGUMENT,
+          Parse(Document(kind, inputs + ",\"max_sessions\":" + value)));
+    }
+  }
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Parse(Image(R"(,"max_sessions":4)")));
+}
+
+TEST_F(ConfigurationTest, CardPresetMayBoundSessionsWithoutInitialRows) {
+  auto json = Card("text");
+  json.insert(json.find("\"pending_requests\""), R"("max_sessions":1,)");
+  IREE_ASSERT_OK(Load(json));
+  EXPECT_EQ(model_.text.max_sessions, 1u);
+  EXPECT_EQ(model_.text.rows, 1u);
 }
 
 TEST_F(ConfigurationTest, ImageDefaultsAndSpecializations) {

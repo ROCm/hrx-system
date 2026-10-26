@@ -82,7 +82,12 @@ headers. Slow output readers backpressure their own row without preventing
 credited peers from advancing.
 
 Resident identities are independent of epoch shape. The initial `rows` value
-sizes a directory, not an admission ceiling. When all residents have borrowers,
+sizes a directory, capped by the optional per-deployment `max_sessions`.
+That ceiling bounds resident owners, including preparation and output loans,
+not the number of participants selected for one epoch. No separate active
+counter mirrors the ownership already represented by those records. Finished
+owners become reusable; idle history caches retain their separate limits.
+When all residents have borrowers and the directory is below its ceiling,
 [capacity growth](service_capacity.h) evaluates source `resize_state` and
 allocates host session records on the shared task pool at a retired model
 boundary. This worker does not touch shared memory-pool accounting. After CPU

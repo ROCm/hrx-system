@@ -126,6 +126,27 @@ TEST_F(ModelResolutionTest, ResolvesDefaultsOnWorkerAndOwnsResult) {
   loom_serve_model_configuration_deinitialize(&resolved);
 }
 
+TEST_F(ModelResolutionTest, DeploymentMaximumCapsCardInitialRows) {
+  const std::string deployment = R"json({
+    "name": "fixture-text", "model": {"path": "cards/model.json"},
+    "definition": {"kind": "text", "max_sessions": 1}
+  })json";
+  Initialize(kCard, deployment);
+  loom_serve_model_resolution_t* resolution = nullptr;
+  IREE_ASSERT_OK(loom_serve_model_resolution_start(
+      Sink(), &configuration_, Observer(), allocator_, &resolution));
+  Execute();
+  loom_serve_model_configuration_t resolved = {};
+  iree_status_t status = iree_ok_status();
+  ASSERT_TRUE(
+      loom_serve_model_resolution_take(&resolution, &status, &resolved));
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(resolved.text.max_sessions, 1u);
+  EXPECT_EQ(resolved.text.rows, 1u);
+  EXPECT_EQ(resolved.text.prefill_capacity, 32u);
+  loom_serve_model_configuration_deinitialize(&resolved);
+}
+
 class ServiceCardResolutionTest
     : public ModelResolutionTest,
       public ::testing::WithParamInterface<const char*> {

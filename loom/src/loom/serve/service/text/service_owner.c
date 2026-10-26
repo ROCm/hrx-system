@@ -63,6 +63,8 @@ void loom_serve_text_observe(loom_serve_text_service_t* service,
     state->phase_start = iree_time_now();
   }
   state->active_rows = active;
+  state->session_capacity = service->row_count;
+  state->max_sessions = service->max_sessions;
   state->oldest_active_arrival = oldest_active_arrival;
   state->pool.capacity = pool.capacity;
   state->pool.reserved = pool.pending;
