@@ -31,7 +31,7 @@ enum amdf_media_encode_rate_control_mode_e {
 };
 
 /// Quantization controls for CQP. The codec configuration defines the numeric
-/// range: [0,51] for H264/HEVC and [0,255] for AV1.
+/// range: [0,51] for H264/HEVC and [1,255] for AV1.
 typedef struct amdf_media_encode_cqp_t {
   /// Quantization parameter used for intra-coded pictures.
   uint32_t intra_quantization_parameter;
@@ -41,9 +41,11 @@ typedef struct amdf_media_encode_cqp_t {
 
 /// Bit-rate controls shared by CBR and VBR.
 typedef struct amdf_media_encode_bit_rate_t {
-  /// Minimum quantization parameter the native controller may select.
+  /// Minimum quantization parameter the native controller may select. This is
+  /// in [0,51] for H264/HEVC and [1,255] for AV1.
   uint32_t minimum_quantization_parameter;
-  /// Maximum quantization parameter the native controller may select.
+  /// Maximum quantization parameter the native controller may select, in the
+  /// same codec-specific interval as minimum_quantization_parameter.
   uint32_t maximum_quantization_parameter;
   /// Optional maximum encoded bits for one picture, or zero for no limit.
   uint64_t maximum_frame_bit_count;

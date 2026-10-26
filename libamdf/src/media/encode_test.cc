@@ -86,6 +86,41 @@ TEST_F(EncodeValidationTest, RateControlAndCompressedOutputAreExactContracts) {
             amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
 }
 
+TEST_F(EncodeValidationTest, Av1RateControlExcludesZeroQuantization) {
+  requirements_.configuration.codec = AMDF_MEDIA_CODEC_AV1;
+  encode_.rate_control.control.cqp = {1, 255};
+  EXPECT_EQ(amdf_media_encode_validate_configuration(
+                &requirements_.configuration, &encode_),
+            AMDF_STATUS_OK);
+
+  encode_.rate_control.control.cqp.intra_quantization_parameter = 0;
+  EXPECT_EQ(amdf_media_encode_validate_configuration(
+                &requirements_.configuration, &encode_),
+            amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
+  encode_.rate_control.control.cqp = {1, 0};
+  EXPECT_EQ(amdf_media_encode_validate_configuration(
+                &requirements_.configuration, &encode_),
+            amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
+
+  encode_.rate_control.mode = AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CBR;
+  encode_.rate_control.control.bit_rate = {1,       255,     0,      4000000,
+                                           4000000, 8000000, 4000000};
+  EXPECT_EQ(amdf_media_encode_validate_configuration(
+                &requirements_.configuration, &encode_),
+            AMDF_STATUS_OK);
+  encode_.rate_control.control.bit_rate.minimum_quantization_parameter = 0;
+  EXPECT_EQ(amdf_media_encode_validate_configuration(
+                &requirements_.configuration, &encode_),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+
+  requirements_.configuration.codec = AMDF_MEDIA_CODEC_H264;
+  encode_.rate_control.mode = AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP;
+  encode_.rate_control.control.cqp = {0, 0};
+  EXPECT_EQ(amdf_media_encode_validate_configuration(
+                &requirements_.configuration, &encode_),
+            AMDF_STATUS_OK);
+}
+
 TEST_F(EncodeValidationTest, H264IPicturesUseStableReconstructionSlots) {
   amdf_media_h264_encode_configuration_t h264_encode = {};
   Initialize(&h264_encode, AMDF_STRUCTURE_TYPE_MEDIA_H264_ENCODE_CONFIGURATION);

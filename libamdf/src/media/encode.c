@@ -28,11 +28,15 @@ amdf_status_t amdf_media_encode_validate_configuration(
       encode->rate_control.frame_rate_denominator == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  const uint32_t maximum_quantization_parameter =
-      configuration->codec == AMDF_MEDIA_CODEC_AV1 ? 255 : 51;
+  const bool av1 = configuration->codec == AMDF_MEDIA_CODEC_AV1;
+  const uint32_t minimum_quantization_parameter = av1 ? 1 : 0;
+  const uint32_t maximum_quantization_parameter = av1 ? 255 : 51;
   if (encode->rate_control.mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP) {
     const amdf_media_encode_cqp_t* cqp = &encode->rate_control.control.cqp;
-    if (cqp->intra_quantization_parameter > maximum_quantization_parameter ||
+    if (cqp->intra_quantization_parameter < minimum_quantization_parameter ||
+        cqp->intra_quantization_parameter > maximum_quantization_parameter ||
+        cqp->predicted_quantization_parameter <
+            minimum_quantization_parameter ||
         cqp->predicted_quantization_parameter >
             maximum_quantization_parameter) {
       return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
@@ -45,7 +49,9 @@ amdf_status_t amdf_media_encode_validate_configuration(
   }
   const amdf_media_encode_bit_rate_t* bit_rate =
       &encode->rate_control.control.bit_rate;
-  if (bit_rate->minimum_quantization_parameter >
+  if (bit_rate->minimum_quantization_parameter <
+          minimum_quantization_parameter ||
+      bit_rate->minimum_quantization_parameter >
           bit_rate->maximum_quantization_parameter ||
       bit_rate->maximum_quantization_parameter >
           maximum_quantization_parameter ||
