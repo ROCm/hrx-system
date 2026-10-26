@@ -148,6 +148,11 @@ static iree_status_t hrx_mem_pool_backing_create_source(
       if (mapping_source) {
         family->interfaces = UINT64_C(1)
                              << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
+      } else {
+        family->interfaces =
+            UINT64_C(1) << (device->type == HRX_ACCELERATOR_CPU
+                                ? IREE_HAL_BUFFER_INTERFACE_HOST
+                                : IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS);
       }
       if (kind == HRX_MEM_POOL_SOURCE_UNCACHED_DEVICE) {
         family->requirements = IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED;

@@ -30,6 +30,7 @@ _LINUX_COMPATIBILITY = ["@platforms//os:linux"]
 # HIP GPU tests require a compiled AMDGPU backend before runtime device
 # discovery.
 _HIP_GPU_COMPATIBILITY = _LINUX_COMPATIBILITY + select({
+    "//runtime/config/hal:driver_amd_gpu": [],
     "//runtime/config/hal:driver_amdgpu": [],
     "//conditions:default": ["@platforms//:incompatible"],
 })

@@ -7,7 +7,6 @@
 load("//libhrx/build_tools/bazel:cts.bzl", "hrx_cts_test")
 load(
     "//libhrx/cts:defs.bzl",
-    "AMDGPU_CTS_COMPATIBILITY_CONDITIONS",
     "AMD_GPU_CTS_RESOURCE_GROUP",
     "AMD_GPU_CTS_TAGS",
 )
@@ -17,8 +16,6 @@ package(
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
 )
-
-_AMDGPU_CTS_COMPATIBILITY = select(AMDGPU_CTS_COMPATIBILITY_CONDITIONS)
 
 hrx_cts_test(
     name = "legacy_virtual_memory",
@@ -30,9 +27,13 @@ hrx_cts_test(
     name = "legacy_virtual_memory_gpu",
     srcs = ["legacy_virtual_memory_test.cpp"],
     args = ["--hrx-device=gpu:0"],
+    env = {"HRX_GPU_DRIVER": "legacy-amdgpu"},
     resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
     tags = AMD_GPU_CTS_TAGS,
-    target_compatible_with = _AMDGPU_CTS_COMPATIBILITY,
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amdgpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
 )
 
 hrx_cts_test(

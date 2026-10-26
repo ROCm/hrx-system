@@ -128,6 +128,18 @@ hrx_status_t hrx_allocator_import_buffer(hrx_allocator_t allocator,
 // Virtual memory
 //===----------------------------------------------------------------------===//
 
+static iree_status_t hrx_allocator_require_legacy_virtual_memory(
+    hrx_allocator_t allocator) {
+  if (!allocator->hal_allocator ||
+      !iree_hal_allocator_supports_virtual_memory(allocator->hal_allocator)) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "legacy virtual memory requires a legacy device allocator; use "
+        "virtual buffers and queue_map for ordinary memory backends");
+  }
+  return iree_ok_status();
+}
+
 hrx_status_t hrx_allocator_query_virtual_memory(hrx_allocator_t allocator,
                                                 hrx_memory_type_t mem_type,
                                                 bool* supported,
@@ -138,7 +150,8 @@ hrx_status_t hrx_allocator_query_virtual_memory(hrx_allocator_t allocator,
                            "allocator or supported is NULL");
   }
 
-  if (!iree_hal_allocator_supports_virtual_memory(allocator->hal_allocator)) {
+  if (!allocator->hal_allocator ||
+      !iree_hal_allocator_supports_virtual_memory(allocator->hal_allocator)) {
     *supported = false;
     if (min_page_size) {
       *min_page_size = 0;
@@ -181,6 +194,8 @@ hrx_status_t hrx_allocator_virtual_memory_reserve(
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument"));
   }
+  HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
+      z0, hrx_allocator_require_legacy_virtual_memory(allocator));
 
   iree_hal_queue_family_affinity_t queue_family_affinity = 0;
   iree_status_t status = hrx_hal_queue_affinity_to_family_affinity(
@@ -227,6 +242,8 @@ hrx_status_t hrx_allocator_virtual_memory_release(hrx_allocator_t allocator,
     HRX_RETURN_AND_END_ZONE(
         z0, hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument"));
   }
+  HRX_RETURN_AND_END_ZONE_IF_IREE_ERROR(
+      z0, hrx_allocator_require_legacy_virtual_memory(allocator));
   iree_status_t status = iree_hal_allocator_virtual_memory_release(
       allocator->hal_allocator, virtual_buffer->hal_buffer);
   if (iree_status_is_ok(status)) {
@@ -245,6 +262,8 @@ hrx_status_t hrx_allocator_physical_memory_allocate(
   if (!allocator || !physical) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
+  HRX_RETURN_IF_IREE_ERROR(
+      hrx_allocator_require_legacy_virtual_memory(allocator));
   iree_hal_physical_memory_params_t hal_params = {
       .type = (iree_hal_memory_type_t)mem_type,
       .usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
@@ -259,6 +278,8 @@ hrx_status_t hrx_allocator_physical_memory_free(
   if (!allocator || !physical) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
+  HRX_RETURN_IF_IREE_ERROR(
+      hrx_allocator_require_legacy_virtual_memory(allocator));
   return hrx_status_from_iree(iree_hal_allocator_physical_memory_free(
       allocator->hal_allocator, (iree_hal_physical_memory_t*)physical));
 }
@@ -272,6 +293,8 @@ hrx_status_t hrx_allocator_virtual_memory_map(hrx_allocator_t allocator,
   if (!allocator || !virtual_buffer || !physical) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
+  HRX_RETURN_IF_IREE_ERROR(
+      hrx_allocator_require_legacy_virtual_memory(allocator));
   return hrx_status_from_iree(iree_hal_allocator_virtual_memory_map(
       allocator->hal_allocator, virtual_buffer->hal_buffer,
       (iree_device_size_t)virtual_offset, (iree_hal_physical_memory_t*)physical,
@@ -285,6 +308,8 @@ hrx_status_t hrx_allocator_virtual_memory_unmap(hrx_allocator_t allocator,
   if (!allocator || !virtual_buffer) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
+  HRX_RETURN_IF_IREE_ERROR(
+      hrx_allocator_require_legacy_virtual_memory(allocator));
   return hrx_status_from_iree(iree_hal_allocator_virtual_memory_unmap(
       allocator->hal_allocator, virtual_buffer->hal_buffer,
       (iree_device_size_t)virtual_offset, (iree_device_size_t)size));
@@ -325,6 +350,8 @@ hrx_status_t hrx_allocator_virtual_memory_protect_scoped(
   if (!allocator || !virtual_buffer) {
     return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT, "NULL argument");
   }
+  HRX_RETURN_IF_IREE_ERROR(
+      hrx_allocator_require_legacy_virtual_memory(allocator));
   iree_hal_virtual_memory_access_scope_t hal_access_scope;
   iree_status_t status =
       hrx_virtual_memory_access_scope_to_hal(access_scope, &hal_access_scope);

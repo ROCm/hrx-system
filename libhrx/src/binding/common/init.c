@@ -489,8 +489,7 @@ iree_status_t iree_hal_streaming_init_global(
     return iree_ok_status();
   }
 
-  // Initialize pyre GPU subsystem (idempotent — handles HSA init,
-  // driver registration, device enumeration).
+  // Initialize HRX driver registration and device enumeration.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, HRX_CALL(hrx_gpu_initialize_with_device_extensions(
               /*flags=*/0, device_extensions)));
@@ -513,7 +512,8 @@ iree_status_t iree_hal_streaming_init_global(
   device_registry->context_list.head = NULL;
   device_registry->context_list.tail = NULL;
 
-  // Enumerate GPU devices from pyre.
+  // Enumerate the sealed HRX device inventory. Initialization is transactional:
+  // a device failure preserves its cause and releases the initialized prefix.
   int gpu_count = 0;
   iree_status_t status = HRX_CALL(hrx_gpu_device_count(&gpu_count));
 
@@ -521,32 +521,27 @@ iree_status_t iree_hal_streaming_init_global(
     memset(device_registry->devices, 0, sizeof(device_registry->devices));
     device_registry->device_count = 0;
 
-    for (int i = 0; i < gpu_count && i < IREE_HAL_STREAMING_MAX_DEVICES; ++i) {
+    for (int i = 0; i < gpu_count && i < IREE_HAL_STREAMING_MAX_DEVICES &&
+                    iree_status_is_ok(status);
+         ++i) {
       hrx_device_t hrx_dev = NULL;
-      iree_status_t dev_status = HRX_CALL(hrx_gpu_device_get(i, &hrx_dev));
-      if (!iree_status_is_ok(dev_status)) {
-        iree_status_ignore(dev_status);
-        continue;
+      status = HRX_CALL(hrx_gpu_device_get(i, &hrx_dev));
+      if (iree_status_is_ok(status)) {
+        iree_hal_streaming_device_t* device =
+            &device_registry->devices[device_registry->device_count];
+        status = iree_hal_streaming_initialize_device(
+            device_registry, hrx_dev, device_registry->device_count, device);
+        if (iree_status_is_ok(status)) {
+          ++device_registry->device_count;
+        }
       }
-
-      iree_hal_streaming_device_t* device =
-          &device_registry->devices[device_registry->device_count];
-
-      dev_status = iree_hal_streaming_initialize_device(
-          device_registry, hrx_dev, device_registry->device_count, device);
-      if (!iree_status_is_ok(dev_status)) {
-        iree_status_ignore(dev_status);
-        continue;
-      }
-
-      device_registry->device_count++;
     }
   }
 
   // Must have at least one device.
   if (iree_status_is_ok(status) && device_registry->device_count == 0) {
-    status = iree_make_status(IREE_STATUS_NOT_FOUND,
-                              "no GPU devices found via pyre");
+    status =
+        iree_make_status(IREE_STATUS_NOT_FOUND, "no GPU devices found via HRX");
   }
 
   if (iree_status_is_ok(status)) {

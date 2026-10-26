@@ -349,32 +349,14 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
   wrapper->last_prefetch_location = -2;  // Never prefetched.
   wrapper->coherency_mode = 0;           // Fine-grain by default.
 
-  iree_hal_external_storage_t external_ptr = {0};
-  iree_hal_buffer_range_t logical_range = {0};
-  iree_status_t status = iree_ok_status();
-  bool have_device_ptr = false;
-
-  // Try to export as device allocation (works for device-local memory
-  // and mapped host memory).
-  if (wrapper->buffer) {
-    status = iree_hal_buffer_export(
-        wrapper->buffer, iree_hal_make_buffer_range(0, IREE_HAL_WHOLE_BUFFER),
-        iree_hal_make_external_storage_class(
-            IREE_HAL_EXTERNAL_STORAGE_TYPE_DEVICE_ADDRESS),
-        &external_ptr, &logical_range);
-    if (iree_status_is_ok(status)) {
-      wrapper->device_ptr =
-          (iree_hal_streaming_deviceptr_t)(external_ptr.payload.device_address +
-                                           logical_range.byte_offset);
-      have_device_ptr = true;
-    } else if (iree_status_is_unavailable(status) && !imported_host_ptr) {
-      // The HAL reports unsupported native export as UNAVAILABLE. Such buffers
-      // use a synthetic table key below; actual export failures propagate.
-      iree_status_free(status);
-      status = iree_ok_status();
-    }
-    iree_hal_external_storage_release(&external_ptr);
-  }
+  // HIP pointers can occur inside by-value kernel arguments and must be real
+  // device addresses. The HRX query uses this device's prepared program
+  // binding; external-storage transport support is independent of address
+  // access.
+  void* device_pointer = NULL;
+  iree_status_t status =
+      HRX_CALL(hrx_buffer_get_device_ptr(hrx_buf, &device_pointer));
+  wrapper->device_ptr = (iree_hal_streaming_deviceptr_t)device_pointer;
 
   if (imported_host_ptr) {
     wrapper->host_ptr = imported_host_ptr;
@@ -393,31 +375,6 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
     if (iree_status_is_ok(status)) {
       wrapper->host_ptr = wrapper->host_mapping.contents.data;
       wrapper->has_host_mapping = true;
-    }
-  }
-
-  // We need at least a device pointer for the buffer table.
-  // Remote HAL buffers may not support exporting a device pointer;
-  // generate a synthetic device pointer so the buffer table can still map
-  // this wrapper.
-  if (iree_status_is_ok(status) && !have_device_ptr && imported_host_ptr) {
-    status = iree_make_status(
-        IREE_STATUS_UNAVAILABLE,
-        "registered host allocation did not export a device-visible pointer");
-  } else if (iree_status_is_ok(status) && !have_device_ptr) {
-    static iree_atomic_uint64_t g_next_synthetic =
-        IREE_ATOMIC_VAR_INIT(0xDEAD000000000000ULL);
-    iree_device_size_t aligned_size = 0;
-    if (IREE_UNLIKELY(!iree_device_size_checked_mul_add(wrapper->size, 1, 255,
-                                                        &aligned_size))) {
-      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "buffer size overflows synthetic alignment");
-    } else {
-      aligned_size &= ~(iree_device_size_t)255;
-      uint64_t synthetic = iree_atomic_fetch_add(
-          &g_next_synthetic, aligned_size, iree_memory_order_relaxed);
-      wrapper->device_ptr = (iree_hal_streaming_deviceptr_t)synthetic;
-      have_device_ptr = true;
     }
   }
 
@@ -3154,7 +3111,7 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
     iree_status_ignore(source_status);
     if (source_is_registered &&
         (!first_source_ref.buffer || !first_source_ref.buffer->buffer ||
-         !iree_any_bit_set(
+         !iree_all_bits_set(
              (iree_hal_memory_type_t)first_source_ref.buffer->memory_type,
              IREE_HAL_MEMORY_TYPE_HOST_LOCAL))) {
       status =
@@ -3185,7 +3142,7 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
                                                       width, &source_refs[row]);
       if (iree_status_is_ok(status) &&
           (!source_refs[row].buffer || !source_refs[row].buffer->buffer ||
-           !iree_any_bit_set(
+           !iree_all_bits_set(
                (iree_hal_memory_type_t)source_refs[row].buffer->memory_type,
                IREE_HAL_MEMORY_TYPE_HOST_LOCAL))) {
         status = iree_make_status(
@@ -3318,8 +3275,9 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
   }
 
   if (dst_ref.buffer->host_ptr &&
-      iree_any_bit_set((iree_hal_memory_type_t)dst_ref.buffer->memory_type,
-                       IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
+      iree_all_bits_set((iree_hal_memory_type_t)dst_ref.buffer->memory_type,
+                        IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                            IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
     iree_status_t status =
         iree_hal_streaming_buffer_ref_validate_range(&dst_ref, size);
     if (iree_status_is_ok(status)) {
@@ -3339,7 +3297,9 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
     iree_status_t src_status = iree_hal_streaming_memory_lookup(
         context, (iree_hal_streaming_deviceptr_t)src, &src_ref);
     if (iree_status_is_ok(src_status)) {
-      if (!(src_ref.buffer->memory_type & IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
+      if (!iree_all_bits_set(
+              (iree_hal_memory_type_t)src_ref.buffer->memory_type,
+              IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
         IREE_TRACE_ZONE_END(z0);
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "host-to-device source is not host memory");
@@ -3446,8 +3406,9 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
   }
 
   if (src_ref.buffer->host_ptr &&
-      iree_any_bit_set((iree_hal_memory_type_t)src_ref.buffer->memory_type,
-                       IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
+      iree_all_bits_set((iree_hal_memory_type_t)src_ref.buffer->memory_type,
+                        IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                            IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
     iree_status_t status =
         iree_hal_streaming_buffer_ref_validate_range(&src_ref, size);
     if (iree_status_is_ok(status)) {
@@ -3467,7 +3428,9 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
     iree_status_t dst_status = iree_hal_streaming_memory_lookup(
         context, (iree_hal_streaming_deviceptr_t)dst, &dst_ref);
     if (iree_status_is_ok(dst_status)) {
-      if (!(dst_ref.buffer->memory_type & IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
+      if (!iree_all_bits_set(
+              (iree_hal_memory_type_t)dst_ref.buffer->memory_type,
+              IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
         IREE_TRACE_ZONE_END(z0);
         return iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
@@ -3595,7 +3558,7 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host_2d(
                                                     &source_refs[row]);
     if (iree_status_is_ok(status) &&
         (!source_refs[row].buffer || !source_refs[row].buffer->buffer ||
-         iree_any_bit_set(
+         iree_all_bits_set(
              (iree_hal_memory_type_t)source_refs[row].buffer->memory_type,
              IREE_HAL_MEMORY_TYPE_HOST_LOCAL))) {
       iree_status_ignore(status);

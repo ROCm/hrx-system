@@ -53,7 +53,7 @@ iree_amdgpu_binary_variants_embed_data(
     tags = ["manual"],
     target = "amdgcn-amd-amdhsa",
     target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
-    target_selectors_flag = "//runtime/src/iree/hal/drivers/amdgpu:targets",
+    target_selectors_flag = "//runtime/src/iree/hal/drivers/amd/gpu:targets",
 )
 
 iree_amdgpu_binary_variants_embed_data(
@@ -68,7 +68,7 @@ iree_amdgpu_binary_variants_embed_data(
     tags = ["manual"],
     target = "amdgcn-amd-amdhsa",
     target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
-    target_selectors_flag = "//runtime/src/iree/hal/drivers/amdgpu:targets",
+    target_selectors_flag = "//runtime/src/iree/hal/drivers/amd/gpu:targets",
 )
 
 iree_amdgpu_binary_variants_embed_data(
@@ -83,7 +83,7 @@ iree_amdgpu_binary_variants_embed_data(
     tags = ["manual"],
     target = "amdgcn-amd-amdhsa",
     target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
-    target_selectors_flag = "//runtime/src/iree/hal/drivers/amdgpu:targets",
+    target_selectors_flag = "//runtime/src/iree/hal/drivers/amd/gpu:targets",
 )
 
 hrx_cc_test(

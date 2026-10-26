@@ -81,6 +81,12 @@ HRX_DEPS = [
     "//runtime/src/iree/io:file_handle",
     "//runtime/src/iree/task:api",
 ] + iree_select({
+    "//runtime/config/hal:driver_amd_gpu": [
+        "//runtime/src/iree/hal/drivers/amd/registration",
+        "//runtime/src/iree/hal/drivers/amd/gpu/target:selection",
+    ],
+    "//conditions:default": [],
+}) + iree_select({
     "//runtime/config/hal:driver_amdgpu": [
         "//runtime/src/iree/hal/drivers/amdgpu/registration",
         "//runtime/src/iree/hal/drivers/amdgpu/target:selection",
@@ -89,6 +95,11 @@ HRX_DEPS = [
 })
 
 HRX_AMDGPU_COPTS = iree_select({
+    "//runtime/config/hal:driver_amd_gpu": [
+        "-DHRX_HAS_IREE_AMD_GPU_DRIVER",
+    ],
+    "//conditions:default": [],
+}) + iree_select({
     "//runtime/config/hal:driver_amdgpu": [
         "-DHRX_HAS_IREE_AMDGPU_DRIVER",
     ],
@@ -145,6 +156,7 @@ hrx_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

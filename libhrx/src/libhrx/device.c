@@ -22,20 +22,38 @@ hrx_status_t hrx_device_query_total_memory_from_spec(
   *out_known = false;
   *out_total = 0;
 
-  iree_hal_device_observation_t observation;
-  iree_hal_device_observation_initialize(
-      IREE_HAL_DEVICE_OBSERVATION_FLAG_MEMORY, &observation);
-  iree_status_t status =
-      iree_hal_device_observation_populate_memory_total_from_spec(
-          iree_hal_device_spec(device->hal_device), &observation);
-  if (!iree_status_is_ok(status)) {
-    return hrx_status_from_iree(status);
+  const iree_hal_device_memory_spec_t* memory =
+      iree_hal_device_spec_memory(iree_hal_device_spec(device->hal_device));
+  const iree_hal_memory_type_t locality =
+      device->type == HRX_ACCELERATOR_GPU ? IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL
+                                          : IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+  iree_device_size_t total = 0;
+  bool known = false;
+  for (iree_host_size_t h = 0; h < memory->heap_count; ++h) {
+    const iree_hal_memory_heap_spec_t* heap = &memory->heaps[h];
+    if (iree_any_bit_set(heap->flags,
+                         IREE_HAL_MEMORY_HEAP_SPEC_FLAG_CAPACITY_UNKNOWN)) {
+      continue;
+    }
+    // Allocation profiles can expose several types backed by the same heap.
+    // HRX reports local physical capacity once, excluding staging-only heaps.
+    bool local = false;
+    for (iree_host_size_t t = 0; t < memory->memory_type_count && !local; ++t) {
+      local = memory->memory_types[t].heap_index == h &&
+              iree_all_bits_set(memory->memory_types[t].memory_type, locality);
+    }
+    if (!local) {
+      continue;
+    }
+    if (heap->capacity_bytes > IREE_DEVICE_SIZE_MAX ||
+        !iree_device_size_checked_add(total, heap->capacity_bytes, &total)) {
+      return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
+                             "local memory capacity exceeds device size");
+    }
+    known = true;
   }
-  if (iree_all_bits_set(observation.memory.flags,
-                        IREE_HAL_DEVICE_MEMORY_OBSERVATION_FLAG_TOTAL_BYTES)) {
-    *out_known = true;
-    *out_total = observation.memory.total_bytes;
-  }
+  *out_known = known;
+  *out_total = total;
   return hrx_ok_status();
 }
 
@@ -127,7 +145,12 @@ hrx_status_t hrx_device_get_property(hrx_device_t device,
         return hrx_make_status(HRX_STATUS_OUT_OF_RANGE,
                                "buffer too small for uint32_t");
       }
-      *(uint32_t*)value = 0;  // Not available from the task driver.
+      const iree_hal_device_dispatch_spec_t* dispatch =
+          iree_hal_device_spec_dispatch(
+              iree_hal_device_spec(device->hal_device));
+      *(uint32_t*)value = prop == HRX_DEVICE_PROPERTY_COMPUTE_UNITS
+                              ? dispatch->execution.unit_count
+                              : dispatch->launch.maximum_workgroup_invocations;
       return hrx_ok_status();
     }
     default:
