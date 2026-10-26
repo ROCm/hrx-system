@@ -137,6 +137,24 @@ void iree_hip_handle_registry_deinitialize(
   }
 }
 
+void iree_hip_handle_registry_trim(iree_hip_handle_registry_t* registry) {
+  for (iree_host_size_t i = 0; i < IREE_HIP_HANDLE_REGISTRY_SHARD_COUNT; ++i) {
+    iree_hip_handle_registry_shard_t* shard = &registry->shards[i];
+    iree_slim_mutex_lock(&shard->mutex);
+    if (!shard->count) {
+      iree_allocator_free(iree_allocator_system(), shard->states);
+      iree_allocator_free(iree_allocator_system(), shard->values);
+      iree_allocator_free(iree_allocator_system(), shard->handles);
+      shard->states = NULL;
+      shard->values = NULL;
+      shard->handles = NULL;
+      shard->capacity = 0;
+      shard->tombstone_count = 0;
+    }
+    iree_slim_mutex_unlock(&shard->mutex);
+  }
+}
+
 iree_status_t iree_hip_handle_registry_insert(
     iree_hip_handle_registry_t* registry, uintptr_t handle) {
   return iree_hip_handle_registry_insert_value(registry, handle, handle);

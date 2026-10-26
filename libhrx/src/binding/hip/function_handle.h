@@ -30,6 +30,10 @@ bool iree_hip_function_handle_lookup(const void* handle,
 void iree_hip_function_handle_retire_module(
     iree_hal_streaming_module_t* module);
 
+// Reclaims empty lookup tables after runtime teardown. Handle identity remains
+// monotonic across runtime incarnations.
+void iree_hip_function_handle_trim(void);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

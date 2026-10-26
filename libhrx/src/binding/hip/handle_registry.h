@@ -52,6 +52,10 @@ void iree_hip_handle_registry_initialize(iree_hip_handle_registry_t* registry);
 void iree_hip_handle_registry_deinitialize(
     iree_hip_handle_registry_t* registry);
 
+// Reclaims empty shard storage while preserving live entries and initialized
+// shard locks. Later insertions reacquire storage on demand.
+void iree_hip_handle_registry_trim(iree_hip_handle_registry_t* registry);
+
 iree_status_t iree_hip_handle_registry_insert(
     iree_hip_handle_registry_t* registry, uintptr_t handle);
 

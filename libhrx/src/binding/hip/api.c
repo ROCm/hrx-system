@@ -1967,6 +1967,12 @@ HIPAPI hipError_t hipHALDeinit(void) {
   iree_slim_mutex_lock(&iree_hip_global_init_mutex);
   const hipError_t result = iree_hip_execution_context_reset_all();
   iree_hal_streaming_cleanup_global();
+  iree_hip_stream_trim();
+  iree_hip_function_handle_trim();
+  iree_hip_execution_resource_descriptor_trim();
+  iree_call_once(&iree_hip_event_registry_once,
+                 iree_hip_event_registry_initialize);
+  iree_hip_handle_registry_trim(&iree_hip_event_registry);
   iree_atomic_store(&iree_hip_runtime_initialized, 0,
                     iree_memory_order_release);
   iree_hip_error_state_reset();

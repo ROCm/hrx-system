@@ -104,6 +104,9 @@ void iree_hip_stream_retain(hipStream_t handle);
 // Releases a retained or transferred HIP stream handle.
 void iree_hip_stream_release(hipStream_t handle);
 
+// Reclaims empty public-handle tables after runtime teardown.
+void iree_hip_stream_trim(void);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
