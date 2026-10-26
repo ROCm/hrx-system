@@ -22,7 +22,9 @@ jobs:
       matrix:
         profile: ${{ fromJSON(inputs.profiles) }}
     runs-on: azure-linux-scale-rocm
-    timeout-minutes: 10
+    # Two complete SDK builds normally take 5-9 minutes on this pool. Retain a
+    # finite hang bound without treating ordinary fleet variance as a failure.
+    timeout-minutes: 15
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
     defaults:
