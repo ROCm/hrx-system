@@ -231,7 +231,7 @@ TEST_F(KernargTest, NativePrefixPreservesExplicitHolesAndPopulatesRuntime) {
       0xaa, 0xbb, 0xcc, 0xdd, 1, 2, 3, 4, 0,  0, 0, 0,
       7,    0,    0,    0,    0, 0, 0, 0, 32, 0, 0, 0};
   EXPECT_EQ(bytes, expected);
-  std::array<uint8_t, 24> full;
+  std::array<uint8_t, 40> full;
   full.fill(0x5a);
   iree_hal_amd_gpu_kernarg_layout_emplace_native(
       layout_, iree_make_const_byte_span(full.data(), full.size()), &inputs,

@@ -176,11 +176,12 @@ void iree_hal_amd_gpu_kernarg_layout_emplace(
     const iree_hal_amd_gpu_kernarg_inputs_t* inputs, void* target);
 
 // Writes prepacked native explicit arguments and runtime-owned hidden fields.
-// The caller has admitted constants.data_length in [native_byte_length,
-// byte_length]. Native explicit offsets and padding are preserved; omitted
-// trailing bytes are zeroed before hidden fields are written. No pointer in
-// the supplied bytes gains lifetime management. Indirect native arguments
-// bypass host emplacement entirely and remain the caller's native ABI object.
+// The caller has admitted at least native_byte_length bytes. Explicit offsets
+// and padding within byte_length are preserved; additional caller padding is
+// ignored. Omitted trailing bytes are zeroed before hidden fields are written.
+// No pointer in the supplied bytes gains lifetime management. Indirect
+// arguments bypass host emplacement entirely and remain the caller's native ABI
+// object.
 void iree_hal_amd_gpu_kernarg_layout_emplace_native(
     const iree_hal_amd_gpu_kernarg_layout_t* layout,
     iree_const_byte_span_t constants,

@@ -314,12 +314,14 @@ void iree_hal_amd_gpu_kernarg_layout_emplace_native(
     const iree_hal_amd_gpu_kernarg_layout_t* layout,
     iree_const_byte_span_t constants,
     const iree_hal_amd_gpu_kernarg_inputs_t* inputs, void* target) {
-  if (constants.data_length) {
-    memcpy(target, constants.data, constants.data_length);
+  const iree_host_size_t copy_length =
+      iree_min(constants.data_length, layout->byte_length);
+  if (copy_length) {
+    memcpy(target, constants.data, copy_length);
   }
-  if (constants.data_length < layout->byte_length) {
-    memset((uint8_t*)target + constants.data_length, 0,
-           layout->byte_length - constants.data_length);
+  if (copy_length < layout->byte_length) {
+    memset((uint8_t*)target + copy_length, 0,
+           layout->byte_length - copy_length);
   }
   iree_hal_amd_gpu_kernarg_copy(
       layout->runtime_copy_count,

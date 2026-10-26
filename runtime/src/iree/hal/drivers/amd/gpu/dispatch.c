@@ -237,8 +237,7 @@ iree_status_t iree_hal_amd_gpu_dispatch_prepare(
     }
   } else if (native_arguments) {
     if (binding_count ||
-        constants.data_length < function->kernarg->native_byte_length ||
-        constants.data_length > function->kernarg->byte_length) {
+        constants.data_length < function->kernarg->native_byte_length) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "native argument extent does not match the "
                               "function ABI");

@@ -101,7 +101,7 @@ TEST_F(DispatchTest, GeometryAndLdsRespectExecutableLimits) {
 
 TEST_F(DispatchTest, DirectArgumentsRespectDenseAndNativeExtents) {
   const auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
-  std::array<uint8_t, 24> constants = {};
+  std::array<uint8_t, 40> constants = {};
   layout_.byte_length = 24;
   layout_.native_byte_length = 12;
   layout_.constant_byte_length = 8;
@@ -111,6 +111,7 @@ TEST_F(DispatchTest, DirectArgumentsRespectDenseAndNativeExtents) {
   const auto native = IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS;
   IREE_ASSERT_OK(Prepare(config, native, {constants.data(), 12}));
   IREE_ASSERT_OK(Prepare(config, native, {constants.data(), 24}));
+  IREE_ASSERT_OK(Prepare(config, native, {constants.data(), 40}));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Prepare(config, native, {constants.data(), 11}));
 }
