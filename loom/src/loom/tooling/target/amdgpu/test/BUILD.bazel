@@ -46,6 +46,11 @@ _AMDGPU_ARTIFACTS_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/target:amdgpu_artifacts",
 ])
 
+_LEGACY_AMDGPU_EXECUTION_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/execute:amdgpu_hal",
+    "//runtime/config/hal:driver_amdgpu",
+])
+
 _GFX11_GENERIC_REPRESENTATION = LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY["amdgpu.gfx11.generic.core"]
 
 _GFX11_EXECUTION_COMPATIBLE_WITH = (
@@ -65,8 +70,7 @@ iree_execution_test_suite(
         "iree-run-requirement=runtime.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/execute:amdgpu_hal",
+    target_compatible_with = _LEGACY_AMDGPU_EXECUTION_COMPATIBLE_WITH + loom_config_compatible_with([
         "//loom/config/target/arch:vm",
     ]),
     tools = {"benchmark": "//loom/src/loom/tools/loom-benchmark"},
@@ -81,10 +85,8 @@ iree_execution_test_suite(
         "iree-run-requirement=runtime.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/execute:amdgpu_hal",
+    target_compatible_with = _LEGACY_AMDGPU_EXECUTION_COMPATIBLE_WITH + loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
     ]),
     tools = {"loom-benchmark": "//loom/src/loom/tools/loom-benchmark"},
 )
@@ -485,7 +487,7 @@ iree_execution_test_suite(
         "iree-run-requirement=runtime.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:amdgpu_hal"]),
+    target_compatible_with = _LEGACY_AMDGPU_EXECUTION_COMPATIBLE_WITH,
     tools = {
         "loom-benchmark": "//loom/src/loom/tools/loom-benchmark",
         "loom-test": "//loom/src/loom/tools/loom-test",
