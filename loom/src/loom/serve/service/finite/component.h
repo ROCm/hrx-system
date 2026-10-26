@@ -41,6 +41,12 @@ iree_status_t loom_serve_finite_component_allocate(
 loom_serve_finite_component_phase_t loom_serve_finite_component_phase(
     const loom_serve_finite_component_t* component);
 
+// Cumulative preparation elapsed time, including the open attempt. Declared
+// gaps, weight activation, invocation, and retirement add none. Fixed-backing
+// re-preparation adds another interval; observation never starts preparation.
+uint64_t loom_serve_finite_component_preparation_duration_ns(
+    const loom_serve_finite_component_t* component);
+
 // Starts the first preparation on demand, or observes that same attempt.
 // Success with *out_model == NULL means pending; the observer schedules further
 // owner turns. Success with a model lends it until quiescent trim or

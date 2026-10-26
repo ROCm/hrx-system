@@ -34,7 +34,7 @@ TEST(CompilationTest, CleanDiagnosticSnapshotAllocatesNothing) {
       .commands = 1,
       .kernels = 2,
       .entries = 3,
-      .duration_ns = 4,
+      .stage_duration_sum_ns = 4,
   };
   loom_serve_compilation_diagnostics_t* diagnostics = nullptr;
   IREE_ASSERT_OK(loom_serve_compilation_diagnostics_clone(
@@ -67,7 +67,7 @@ TEST(CompilationTest, DiagnosticSnapshotOwnsOnlyEmittedRecords) {
     }
     // Job counters are not cached evidence and must not be replayed on hits.
     source.kernels = 5;
-    source.duration_ns = 123;
+    source.stage_duration_sum_ns = 123;
     loom_serve_compilation_diagnostics_t* diagnostics = nullptr;
     IREE_ASSERT_OK(loom_serve_compilation_diagnostics_clone(
         &source, iree_allocator_system(), &diagnostics));
@@ -85,7 +85,7 @@ TEST(CompilationTest, DiagnosticSnapshotOwnsOnlyEmittedRecords) {
               2 * emitted_count);
     EXPECT_EQ(report.diagnostic_count, std::min(2 * count, size_t{8}));
     EXPECT_EQ(report.kernels, 0u);
-    EXPECT_EQ(report.duration_ns, 0u);
+    EXPECT_EQ(report.stage_duration_sum_ns, 0u);
     for (size_t i = 0; i < report.diagnostic_count; ++i) {
       EXPECT_EQ(report.diagnostics[i].line, i % count + 1);
       EXPECT_STREQ(report.diagnostics[i].source, "input.loom");
@@ -108,17 +108,18 @@ TEST(CompilationTest, DiagnosticSnapshotPropagatesAllocationFailure) {
 }
 
 TEST(CompilationTest, DirectStageWorkHasNoCommandProduct) {
-  EXPECT_EQ(Format({
-                .kernels = 1,
-                .reused_kernels = 2,
-                .entries = 3,
-                .workers = 1,
-                .duration_ns = 456,
-            }),
-            "{\"event\":\"compilation\",\"commands\":0,\"kernels\":1,"
-            "\"reused_kernels\":2,\"entries\":3,\"workers\":1,"
-            "\"duration_ns\":456,\"notes\":0,\"warnings\":0,\"errors\":0,"
-            "\"omitted_diagnostics\":0,\"diagnostics\":[]}\n");
+  EXPECT_EQ(
+      Format({
+          .kernels = 1,
+          .reused_kernels = 2,
+          .entries = 3,
+          .workers = 1,
+          .stage_duration_sum_ns = 456,
+      }),
+      "{\"event\":\"compilation\",\"commands\":0,\"kernels\":1,"
+      "\"reused_kernels\":2,\"entries\":3,\"workers\":1,"
+      "\"stage_duration_sum_ns\":456,\"notes\":0,\"warnings\":0,\"errors\":0,"
+      "\"omitted_diagnostics\":0,\"diagnostics\":[]}\n");
 }
 
 TEST(CompilationTest, OwnedDiagnosticAndWorkHaveExactJson) {
@@ -143,12 +144,12 @@ TEST(CompilationTest, OwnedDiagnosticAndWorkHaveExactJson) {
       .reused_kernels = 4,
       .entries = 16,
       .workers = 4,
-      .duration_ns = 123,
+      .stage_duration_sum_ns = 123,
   };
   EXPECT_EQ(Format(report),
             "{\"event\":\"compilation\",\"commands\":2,\"kernels\":8,"
             "\"reused_kernels\":4,\"entries\":16,\"workers\":4,"
-            "\"duration_ns\":123,\"notes\":0,"
+            "\"stage_duration_sum_ns\":123,\"notes\":0,"
             "\"warnings\":1,\"errors\":0,\"omitted_diagnostics\":0,"
             "\"diagnostics\":[{\"severity\":1,\"line\":9,\"column\":2,"
             "\"omitted_locations\":3,\"omitted_parameters\":1,"
@@ -170,7 +171,7 @@ TEST(CompilationTest, MergeRetainsBoundedEvidenceAndAllCounters) {
     source.reused_kernels = 4;
     source.entries = 3;
     source.workers = 1 + i % 4;
-    source.duration_ns = 100;
+    source.stage_duration_sum_ns = 100;
     loom_serve_compilation_merge(&report, &source);
   }
   EXPECT_EQ(report.diagnostic_count, IREE_ARRAYSIZE(report.diagnostics));
@@ -185,7 +186,7 @@ TEST(CompilationTest, MergeRetainsBoundedEvidenceAndAllCounters) {
   EXPECT_EQ(report.reused_kernels, 48u);
   EXPECT_EQ(report.entries, 36u);
   EXPECT_EQ(report.workers, 4u);
-  EXPECT_EQ(report.duration_ns, 1200u);
+  EXPECT_EQ(report.stage_duration_sum_ns, 1200u);
   EXPECT_NE(Format(report).find("\"omitted_diagnostics\":4"),
             std::string::npos);
 }

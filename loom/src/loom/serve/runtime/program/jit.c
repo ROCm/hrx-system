@@ -1012,7 +1012,7 @@ static void loom_serve_jit_job_release(loom_serve_jit_job_t* job) {
   job->report.entries +=
       job->stage ? (job->stage->dispatch ? 1 : job->stage->entry_count) : 0;
   job->report.workers = jit->compilation.workspace_count;
-  job->report.duration_ns += iree_time_now() - job->start;
+  job->report.stage_duration_sum_ns += iree_time_now() - job->start;
   job->status = status;
   loom_serve_jit_job_publish(job);
 }

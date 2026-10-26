@@ -45,6 +45,8 @@ require fixed backing.
 preparation. `/v1/status` reports each registration's state and diagnostics;
 `/v1/models` lists prepared deployments and their client capabilities. Empty
 startup leaves these administration and observation endpoints available.
+The [preparation timing guide](../../../../docs/src/serving/workflows/observe-model-server.md#read-preparation-timing)
+distinguishes elapsed preparation from overlapping compilation-stage durations.
 
 ## Supply model documents
 

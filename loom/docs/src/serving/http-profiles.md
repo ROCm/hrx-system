@@ -107,7 +107,9 @@ Both responses contain `selected` and `variant`. A variant record contains
 `object:"variant"`, `id`, `base`, `phase` (`compiling`, `ready` or `failed`) and
 `users` (explicit consumer references). Terminal failures retain an `error`
 with code/message. Detailed records also include available `compilation`
-evidence. Staging never changes the preferred choice, including when JIT fails.
+evidence. Its `stage_duration_sum_ns` sums overlapping stage intervals, as
+defined in [preparation timing](workflows/observe-model-server.md#read-preparation-timing).
+Staging never changes the preferred choice, including when JIT fails.
 
 Selection accepts `{"model":"scout","variant":13,"expected":12}`. The request
 completes at the service's safe execution boundary and returns

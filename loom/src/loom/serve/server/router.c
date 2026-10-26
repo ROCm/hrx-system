@@ -515,20 +515,29 @@ static iree_status_t loom_serve_router_describe_parameters(
     }
     loom_serve_registration_parameters_t state = {
         .phase = loom_serve_registry_phase(model)};
+    bool preparation_available = false;
     if (model->phase == LOOM_SERVE_REGISTRATION_READY &&
         model->registration.parameters) {
       state =
           model->registration.parameters(model->registration.self, component);
+      preparation_available = true;
     } else if (component == LOOM_SERVE_MODEL_COMPONENT_IMAGE &&
                (model->phase == LOOM_SERVE_REGISTRATION_DECLARED ||
                 model->phase == LOOM_SERVE_REGISTRATION_PREPARING)) {
       state.phase = "declared";
+      preparation_available = true;
     }
     status = iree_string_builder_append_format(
         output, "%s\"%s\":{\"phase\":\"%s\",\"pinned\":%s",
         component ? "," : "", loom_serve_model_component_name(component),
         state.phase,
         (model->pinned_components & (1u << component)) ? "true" : "false");
+    if (iree_status_is_ok(status) && preparation_available &&
+        component != LOOM_SERVE_MODEL_COMPONENT_PRIMARY) {
+      status = iree_string_builder_append_format(
+          output, ",\"preparation_duration_ns\":%" PRIu64,
+          state.preparation_duration_ns);
+    }
     if (iree_status_is_ok(status) && state.prepared) {
       status = loom_serve_router_describe_residency(state.parameters, output);
     }
@@ -653,6 +662,11 @@ static iree_status_t loom_serve_router_describe_service(
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "}"));
     }
     const loom_serve_compilation_report_t* report = &admission->compilation;
+    if (include_status) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          output, ",\"preparation_duration_ns\":%" PRIu64,
+          loom_serve_registry_preparation_duration_ns(admission)));
+    }
     if (include_status && (report->commands || report->severities[0] ||
                            report->severities[1] || report->severities[2])) {
       IREE_RETURN_IF_ERROR(

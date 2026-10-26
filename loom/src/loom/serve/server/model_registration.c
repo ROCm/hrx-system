@@ -917,7 +917,10 @@ loom_serve_text_registration_parameters(
         .phase = phases[loom_serve_finite_component_phase(registration->image)],
         .deactivatable = true,
         .status = loom_serve_finite_component_status(registration->image),
-        .compilation = loom_serve_finite_component_report(registration->image)};
+        .compilation = loom_serve_finite_component_report(registration->image),
+        .preparation_duration_ns =
+            loom_serve_finite_component_preparation_duration_ns(
+                registration->image)};
     state.prepared = loom_serve_finite_component_parameters(registration->image,
                                                             &state.parameters);
     return state;

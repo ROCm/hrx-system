@@ -69,6 +69,8 @@ struct loom_serve_test_registration_dependency_t {
     // Most recent preparation policy supplied by the production registry.
     loom_serve_registration_prepare_flags_t flags = 0;
   } preparation;
+  // Terminal compiler evidence supplied independently of lifecycle timing.
+  loom_serve_compilation_report_t compilation = {};
   // Parameter state belongs to the model dependency and changes on owner turns.
   loom_serve_residency_snapshot_t parameters = {
       .active = true,
@@ -127,6 +129,7 @@ struct loom_serve_test_registration_dependency_t {
       *complete = false;
       return iree_ok_status();
     }
+    *out_report = dependency->compilation;
     if (dependency->preparation_failure !=
         loom_serve_test_registration_preparation_failure_t::kNone) {
       return iree_make_status(IREE_STATUS_UNAVAILABLE, "model prepare failed");
@@ -329,6 +332,7 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
     factory_ = {
         .self = &managed_,
         .kinds = (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
+                 (1u << LOOM_SERVE_MODEL_KIND_TEXT) |
                  (1u << LOOM_SERVE_MODEL_KIND_ACTIVITY),
         .device_names = {1, kDeviceNames},
         .create = loom_serve_test_registration_dependency_t::Create,
@@ -372,6 +376,14 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
         return state;
       }
     }
+  }
+  static uint64_t PreparationDuration(const std::string& status) {
+    const std::string key = "\"preparation_duration_ns\":";
+    const auto position = status.find(key);
+    EXPECT_NE(position, std::string::npos);
+    return position == std::string::npos
+               ? 0
+               : std::stoull(status.substr(position + key.size()));
   }
   // The model alone is a dependency; every control/transport path is
   // production.
@@ -637,6 +649,87 @@ TEST_P(HttpRouterRegistrationTest, ExplicitWarmupSuppliesPreparationDemand) {
   Remove();
 }
 
+TEST_P(HttpRouterRegistrationTest,
+       PreparationElapsedExcludesDormancyAndLaterActivation) {
+  {
+    std::lock_guard<std::mutex> lock(managed_.mutex);
+    managed_.preparation.ready = false;
+    managed_.compilation.commands = 3;
+    managed_.compilation.stage_duration_sum_ns = 123;
+  }
+  Declare();
+  EXPECT_EQ(PreparationDuration(Read(Send("GET", "/v1/status"))), 0u);
+  EXPECT_EQ(managed_.created.load(), 0u);
+  EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
+  managed_.ObservePreparation();
+  const auto preparing = PreparationDuration(Read(Send("GET", "/v1/status")));
+  EXPECT_GT(preparing, 0u);
+  EXPECT_GE(PreparationDuration(Read(Send("GET", "/v1/status"))), preparing);
+
+  managed_.ReleasePreparation();
+  std::string ready;
+  do {
+    ready = Read(Send("GET", "/v1/status"));
+  } while (ready.find(R"("registration":"ready")") == std::string::npos);
+  const auto completed = PreparationDuration(ready);
+  EXPECT_GE(completed, preparing);
+  EXPECT_NE(ready.find(R"("stage_duration_sum_ns":123)"), std::string::npos);
+  EXPECT_EQ(ready.find(R"("duration_ns":)"), std::string::npos);
+  EXPECT_EQ(PreparationDuration(Read(Send("GET", "/v1/status"))), completed);
+
+  EXPECT_EQ(Control("drain", "dynamic").find("HTTP/1.1 200"), 0u);
+  EXPECT_EQ(Control("activate", "dynamic").find("HTTP/1.1 202"), 0u);
+  managed_.WaitActivating();
+  EXPECT_EQ(PreparationDuration(Read(Send("GET", "/v1/status"))), completed);
+  managed_.ReleaseActivation();
+  EXPECT_EQ(PreparationDuration(WaitParameterOperation("idle")), completed);
+  Remove();
+}
+
+TEST_P(HttpRouterRegistrationTest, RetiringComponentTimingIsUnavailable) {
+  const auto response = Read(Send(
+      "POST", "/v1/models/register",
+      R"({"name":"dynamic","definition":{"kind":"text",)"
+      R"("prepare":"/model/prepare.loom","control":"/model/control.loom",)"
+      R"("weights":"/model/weights.safetensors","tokenizer":"/model/tokenizer.json",)"
+      R"("sources":["/model/kernel.loom"],"image":{)"
+      R"("prepare":"/image/prepare.loom","control":"/image/control.loom",)"
+      R"("assets":"/image"}}})"));
+  ASSERT_EQ(response.find("HTTP/1.1 202"), 0u) << response;
+  while (Read(Send("GET", "/v1/status")).find(R"("registration":"ready")") ==
+         std::string::npos) {
+  }
+  EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
+  managed_.WaitRetiring();
+  const auto state = Read(Send("GET", "/v1/status"));
+  EXPECT_NE(state.find(R"("image":{"phase":"retiring","pinned":false})"),
+            std::string::npos)
+      << state;
+  EXPECT_GT(PreparationDuration(state), 0u);
+  managed_.ReleaseRetirement();
+}
+
+TEST_P(HttpRouterRegistrationTest, CancelledPreparationStopsBeforeRetirement) {
+  {
+    std::lock_guard<std::mutex> lock(managed_.mutex);
+    managed_.preparation.ready = false;
+  }
+  Declare();
+  EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
+  managed_.ObservePreparation();
+  const auto preparing = PreparationDuration(Read(Send("GET", "/v1/status")));
+  EXPECT_GT(preparing, 0u);
+  EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
+  managed_.WaitRetiring();
+  const auto cancelled = PreparationDuration(Read(Send("GET", "/v1/status")));
+  EXPECT_GE(cancelled, preparing);
+  EXPECT_EQ(PreparationDuration(Read(Send("GET", "/v1/status"))), cancelled);
+  managed_.ReleaseRetirement();
+  while (Read(Send("GET", "/v1/status")).find(R"("id":"dynamic")") !=
+         std::string::npos) {
+  }
+}
+
 TEST_P(HttpRouterRegistrationTest, UnregisterJoinsAcceptedActivationFirst) {
   Declare();
   EXPECT_EQ(Control("pin", "dynamic").find("HTTP/1.1 200"), 0u);
@@ -869,8 +962,11 @@ TEST_P(HttpRouterRegistrationTest, LocalPreparationFailureKeepsPeersServing) {
   Declare();
   EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
   managed_.WaitRetiring();
-  EXPECT_NE(Read(Send("GET", "/v1/status")).find("model prepare failed"),
-            std::string::npos);
+  const auto failed = Read(Send("GET", "/v1/status"));
+  EXPECT_NE(failed.find("model prepare failed"), std::string::npos);
+  const auto duration = PreparationDuration(failed);
+  EXPECT_GT(duration, 0u);
+  EXPECT_EQ(PreparationDuration(Read(Send("GET", "/v1/status"))), duration);
   EXPECT_EQ(
       Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
       0u);

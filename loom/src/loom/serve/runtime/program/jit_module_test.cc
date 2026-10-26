@@ -59,7 +59,7 @@ TEST_P(JitModuleTest, SourceDefaultsAndOverridesShareVmAndGpuState) {
   EXPECT_EQ(compilation_.commands, 5u);
   EXPECT_EQ(compilation_.entries, 16u);
   EXPECT_EQ(compilation_.workers, GetParam());
-  EXPECT_GT(compilation_.duration_ns, 0u);
+  EXPECT_GT(compilation_.stage_duration_sum_ns, 0u);
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       loom_serve_device_storage_pool(device_owner_),
       iree_hal_make_pool_reservation_request(sizeof(input_), 0),

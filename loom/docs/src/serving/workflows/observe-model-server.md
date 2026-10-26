@@ -49,6 +49,51 @@ tokenization, health/observation calls and unknown-route rejections. Unavailable
 counters are reported as unavailable, not zero. Disabling periodic heartbeats
 with `--heartbeat_ms=0` does not disable counting.
 
+## Read preparation timing
+
+To see how long a model has spent preparing, query its elapsed time alongside
+the compilation report:
+
+```sh
+curl --fail --silent --show-error http://127.0.0.1:8080/v1/status |
+  jq '.data[] | select(.loom.incarnation) | {
+    model: .id,
+    phase: .loom.registration,
+    preparation_seconds: (.loom.preparation_duration_ns / 1e9),
+    compilation_stage_seconds:
+      (if .loom.compilation then
+         .loom.compilation.stage_duration_sum_ns / 1e9
+       else null end)
+  }'
+```
+
+`loom.preparation_duration_ns` counts elapsed time in preparation, including
+model-card resolution and synchronous setup. It advances while preparation is
+pending and freezes on completion, failure, or completed cancellation. A drained
+registration can resolve its card and then return to `declared`; that idle gap
+adds no time. Later preparation adds another interval. The field is zero before
+any preparation starts. Parameter activation after preparation, inference, and
+retirement have their own lifetimes and add no preparation time.
+
+`compilation.stage_duration_sum_ns` sums each compiled stage's interval from
+submission through completion. Those intervals include queueing and waits for
+shared native kernels, and overlap when stages compile concurrently. For
+example, two stages each pending for one second can contribute two seconds to
+the sum during one second of elapsed preparation. The sum is neither CPU work
+nor model startup latency; dividing it by elapsed time does not measure worker
+utilization. Reports are cumulative and contain completed stages, so a pending
+stage does not yet contribute its interval.
+
+A lazy image component reports its independent elapsed time at
+`loom.parameters.image.preparation_duration_ns`, next to its own `compilation`
+report. Reading either field leaves a declared component cold. Retiring a
+fixed-backing component and preparing it again adds a new interval; reactivating
+an already prepared component's weights does not. During registration retirement,
+the component's observations are unavailable and its timing field is omitted;
+the registration retains its own elapsed time until removal. Native executable
+variants use the same summed-stage field in their compilation reports; staging a
+variant does not add to the model's preparation time.
+
 ## Distinguish parameter pressure from queued work
 
 Each prepared component in `loom.parameters` reports accepted-consumer `pins` and an

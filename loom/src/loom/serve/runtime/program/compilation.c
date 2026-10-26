@@ -151,7 +151,7 @@ void loom_serve_compilation_merge(
   report->reused_kernels += source->reused_kernels;
   report->entries += source->entries;
   report->workers = iree_max(report->workers, source->workers);
-  report->duration_ns += source->duration_ns;
+  report->stage_duration_sum_ns += source->stage_duration_sum_ns;
 }
 
 static iree_status_t loom_serve_compilation_write_text(
@@ -176,11 +176,11 @@ iree_status_t loom_serve_compilation_write(
       output,
       "{\"event\":\"compilation\",\"commands\":%" PRIu64 ",\"kernels\":%" PRIu64
       ",\"reused_kernels\":%" PRIu64 ",\"entries\":%" PRIu64
-      ",\"workers\":%" PRIu64 ",\"duration_ns\":%" PRIu64 ",\"notes\":%" PRIu64
-      ",\"warnings\":%" PRIu64 ",\"errors\":%" PRIu64
+      ",\"workers\":%" PRIu64 ",\"stage_duration_sum_ns\":%" PRIu64
+      ",\"notes\":%" PRIu64 ",\"warnings\":%" PRIu64 ",\"errors\":%" PRIu64
       ",\"omitted_diagnostics\":%" PRIu64 ",\"diagnostics\":[",
       report->commands, report->kernels, report->reused_kernels,
-      report->entries, report->workers, report->duration_ns,
+      report->entries, report->workers, report->stage_duration_sum_ns,
       report->severities[0], report->severities[1], report->severities[2],
       count - report->diagnostic_count));
   iree_status_t status = iree_ok_status();

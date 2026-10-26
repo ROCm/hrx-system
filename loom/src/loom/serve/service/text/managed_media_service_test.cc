@@ -277,9 +277,18 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest,
 
 TEST_P(ManagedMediaServiceTest, ExplicitWarmupAndPinPolicyAreComponentScoped) {
   ASSERT_NO_FATAL_FAILURE(Register());
+  const auto declared_duration = Field(State(), "preparation_duration_ns");
+  if (GetParam()) {
+    // Resolving a card consumes preparation time, then stops while declared.
+    EXPECT_GT(std::stoull(declared_duration), 0u);
+  } else {
+    EXPECT_EQ(declared_duration, "0");
+  }
   ASSERT_NO_FATAL_FAILURE(Control("pin", "image"));
+  EXPECT_EQ(Field(State(), "preparation_duration_ns"), declared_duration);
   EXPECT_EQ(Field(Parameters("image"), "pinned"), "true");
   EXPECT_EQ(Field(Parameters("image"), "phase"), "declared");
+  EXPECT_EQ(Field(Parameters("image"), "preparation_duration_ns"), "0");
   EXPECT_FALSE(HasField(Parameters("image"), "active"));
 
   // Unqualified management still selects only the language model.
@@ -299,6 +308,9 @@ TEST_P(ManagedMediaServiceTest, ExplicitWarmupAndPinPolicyAreComponentScoped) {
   ASSERT_NO_FATAL_FAILURE(Activate("\\u0069mage"));
   const auto image = Parameters("image");
   EXPECT_EQ(Field(image, "phase"), "ready") << image;
+  EXPECT_GT(std::stoull(Field(image, "preparation_duration_ns")), 0u);
+  EXPECT_EQ(Field(Parameters("image"), "preparation_duration_ns"),
+            Field(image, "preparation_duration_ns"));
   EXPECT_EQ(Field(image, "active"), "true") << image;
   EXPECT_EQ(Field(image, "pinned"), "true") << image;
   EXPECT_EQ(Parameters("primary"), primary);
@@ -396,6 +408,7 @@ TEST_P(ManagedMediaServiceTest, FailedImageWarmupLeavesTextAvailable) {
   EXPECT_FALSE(HasField(State(), "error"));
   const auto image = Parameters("image");
   EXPECT_EQ(Field(image, "phase"), "failed") << image;
+  EXPECT_GT(std::stoull(Field(image, "preparation_duration_ns")), 0u);
   EXPECT_TRUE(HasField(image, "error")) << image;
   EXPECT_FALSE(HasField(image, "active")) << image;
   const auto metrics = Read(Send("", "", "/metrics", "GET"));

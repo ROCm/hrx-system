@@ -66,8 +66,10 @@ typedef struct loom_serve_compilation_report_t {
   uint64_t entries;
   // Largest shared compiler worker pool used by a stage attempt.
   uint64_t workers;
-  // Sum of stage-attempt wall durations, not CPU or device execution time.
-  uint64_t duration_ns;
+  // Sum of stage submission-to-completion intervals, including queue and
+  // native-dependency waits. Intervals overlap; this is neither preparation
+  // elapsed time nor CPU/device work time.
+  uint64_t stage_duration_sum_ns;
 } loom_serve_compilation_report_t;
 
 // Independently owned evidence retained with a cached compilation result.

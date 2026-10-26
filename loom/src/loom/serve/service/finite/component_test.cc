@@ -422,6 +422,8 @@ TEST_F(FiniteComponentTest,
   EXPECT_FALSE(loom_serve_finite_component_advance(component_, false));
   EXPECT_FALSE(loom_serve_finite_component_is_pending(component_));
   EXPECT_EQ(loom_serve_finite_component_report(component_)->commands, 0u);
+  EXPECT_EQ(loom_serve_finite_component_preparation_duration_ns(component_),
+            0u);
   IREE_ASSERT_OK(Trim());
   EXPECT_EQ(loom_serve_finite_component_phase(component_),
             LOOM_SERVE_FINITE_COMPONENT_DECLARED);
@@ -439,6 +441,9 @@ TEST_F(FiniteComponentTest, RepeatedDemandSharesOneUnactivatedPreparation) {
     return status;
   }));
   ASSERT_NE(model, nullptr);
+  const auto prepared =
+      loom_serve_finite_component_preparation_duration_ns(component_);
+  EXPECT_GT(prepared, 0u);
   const auto report = *loom_serve_finite_component_report(component_);
   EXPECT_EQ(report.commands, 2u);
   EXPECT_EQ(report.workers, 1u);
@@ -455,6 +460,8 @@ TEST_F(FiniteComponentTest, RepeatedDemandSharesOneUnactivatedPreparation) {
   EXPECT_EQ(loom_serve_finite_component_report(component_)->commands,
             report.commands);
   ASSERT_NO_FATAL_FAILURE(Invoke(model));
+  EXPECT_EQ(loom_serve_finite_component_preparation_duration_ns(component_),
+            prepared);
 }
 
 TEST_F(FiniteComponentTest, PreparationFailureIsRetainedWithoutRetrying) {
@@ -465,11 +472,16 @@ TEST_F(FiniteComponentTest, PreparationFailureIsRetainedWithoutRetrying) {
   EXPECT_FALSE(loom_serve_finite_component_is_pending(component_));
   EXPECT_EQ(loom_serve_finite_component_phase(component_),
             LOOM_SERVE_FINITE_COMPONENT_FAILED);
+  const auto failed =
+      loom_serve_finite_component_preparation_duration_ns(component_);
+  EXPECT_GT(failed, 0u);
   const auto report = *loom_serve_finite_component_report(component_);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND, Prepare(component_, &model));
   EXPECT_EQ(loom_serve_finite_component_report(component_)->commands,
             report.commands);
   EXPECT_FALSE(loom_serve_finite_component_advance(component_, false));
+  EXPECT_EQ(loom_serve_finite_component_preparation_duration_ns(component_),
+            failed);
 }
 
 TEST_F(FiniteComponentTest, RemovalJoinsAcceptedPreparation) {
@@ -487,6 +499,8 @@ TEST_F(FiniteComponentTest, RemovalJoinsAcceptedPreparation) {
   }));
   EXPECT_EQ(loom_serve_finite_component_phase(component_),
             LOOM_SERVE_FINITE_COMPONENT_RETIRED);
+  EXPECT_GT(loom_serve_finite_component_preparation_duration_ns(component_),
+            0u);
   EXPECT_FALSE(loom_serve_finite_component_is_pending(component_));
   EXPECT_EQ(loom_serve_finite_component_report(component_)->commands, 0u);
 }
@@ -494,12 +508,16 @@ TEST_F(FiniteComponentTest, RemovalJoinsAcceptedPreparation) {
 TEST_F(FiniteComponentTest, TrimReleasesBackingAndNextDemandExecutesAgain) {
   loom_serve_finite_model_t* model = nullptr;
   IREE_ASSERT_OK(Prepare(component_, &model));
+  const auto prepared =
+      loom_serve_finite_component_preparation_duration_ns(component_);
   ASSERT_NO_FATAL_FAILURE(Invoke(model));
   const auto report = *loom_serve_finite_component_report(component_);
   auto* residency = loom_serve_finite_model_residency(model);
   EXPECT_EQ(loom_serve_residency_activity(residency).activations, 1u);
   EXPECT_EQ(loom_serve_residency_activity(residency).read_bytes, 4u);
   IREE_ASSERT_OK(Trim());
+  EXPECT_EQ(loom_serve_finite_component_preparation_duration_ns(component_),
+            prepared);
   if ((loom_serve_test_device()->service_backing ==
        LOOM_SERVE_DEVICE_BACKING_ELASTIC)) {
     EXPECT_EQ(loom_serve_finite_component_phase(component_),
@@ -511,7 +529,17 @@ TEST_F(FiniteComponentTest, TrimReleasesBackingAndNextDemandExecutesAgain) {
               LOOM_SERVE_FINITE_COMPONENT_DECLARED);
   }
   IREE_ASSERT_OK(Prepare(component_, &model));
+  const auto prepared_again =
+      loom_serve_finite_component_preparation_duration_ns(component_);
+  if (loom_serve_test_device()->service_backing ==
+      LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
+    EXPECT_EQ(prepared_again, prepared);
+  } else {
+    EXPECT_GT(prepared_again, prepared);
+  }
   ASSERT_NO_FATAL_FAILURE(Invoke(model));
+  EXPECT_EQ(loom_serve_finite_component_preparation_duration_ns(component_),
+            prepared_again);
   residency = loom_serve_finite_model_residency(model);
   EXPECT_EQ(loom_serve_finite_component_report(component_)->commands,
             report.commands * ((loom_serve_test_device()->service_backing ==

@@ -37,6 +37,16 @@ struct loom_serve_registry_t {
 static void loom_serve_registry_set_phase(
     loom_serve_registered_model_t* model,
     loom_serve_registration_phase_t phase) {
+  if (model->phase != phase &&
+      (model->phase == LOOM_SERVE_REGISTRATION_PREPARING ||
+       phase == LOOM_SERVE_REGISTRATION_PREPARING)) {
+    const iree_time_t now = iree_time_now();
+    if (model->phase == LOOM_SERVE_REGISTRATION_PREPARING) {
+      model->preparation_duration_ns += now - model->preparation_start;
+    } else {
+      model->preparation_start = now;
+    }
+  }
   IREE_TRACE({
     if (model->phase != phase) {
       IREE_TRACE_SECTION_LEAVE(model->trace.lifecycle);
@@ -631,6 +641,7 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
   if (model->phase == LOOM_SERVE_REGISTRATION_DECLARED && !model->removal &&
       (model->configuration.sources.reference.path.size || !model->closed ||
        model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_WAITING)) {
+    loom_serve_registry_set_phase(model, LOOM_SERVE_REGISTRATION_PREPARING);
     if (model->configuration.sources.reference.path.size) {
       model->status = loom_serve_model_resolution_start(
           registry->factory.resolution_sink, &model->configuration, observer,
@@ -640,10 +651,8 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
           registry->factory.self, &model->configuration, observer,
           model->stream, registry->host_allocator, &model->registration);
     }
-    loom_serve_registry_set_phase(model, iree_status_is_ok(model->status)
-                                             ? LOOM_SERVE_REGISTRATION_PREPARING
-                                             : LOOM_SERVE_REGISTRATION_FAILED);
     if (!iree_status_is_ok(model->status)) {
+      loom_serve_registry_set_phase(model, LOOM_SERVE_REGISTRATION_FAILED);
       loom_serve_registry_set_parameter_operation(
           model, LOOM_SERVE_PARAMETER_OPERATION_NONE);
       loom_serve_registry_record_error(model, model->status);
@@ -875,6 +884,14 @@ const char* loom_serve_registry_phase(
                                        "ready",      "retiring",
                                        "failed",     "release_failed"};
   return phases[model->phase];
+}
+
+uint64_t loom_serve_registry_preparation_duration_ns(
+    const loom_serve_registered_model_t* model) {
+  return model->preparation_duration_ns +
+         (model->phase == LOOM_SERVE_REGISTRATION_PREPARING
+              ? iree_time_now() - model->preparation_start
+              : 0);
 }
 
 bool loom_serve_registry_counters(
