@@ -59,7 +59,7 @@ TEST_F(PrefixServiceTest, SharesActiveSourceWithIndependentDivergentRequests) {
       source.Send(server_, Request(Message("user", "abxabbxa"), 25)));
   const std::string held =
       R"("phase":"idle","queued_requests":0,"active_requests":1)";
-  WaitModel("fixture-text", held);
+  WaitModelState("fixture-text", held);
 
   // A real carrier-held source remains active with an outstanding completion
   // reservation. The cached first page is already usable by unrelated peers.
@@ -68,14 +68,14 @@ TEST_F(PrefixServiceTest, SharesActiveSourceWithIndependentDivergentRequests) {
            {"abxaxbb", 4}, {"abxa", 0}, {"abxax", 4}, {"axb", 0}}) {
     ExpectResponse(Read(Send(Request(Message("user", prompt), 3))), prompt, 3,
                    cached);
-    WaitModel("fixture-text", held);
+    WaitModelState("fixture-text", held);
   }
 
   // Cancelling the original row does not cancel an independently retained
   // immutable endpoint or change the tokens selected from another branch.
   ASSERT_NO_FATAL_FAILURE(source.Close());
-  WaitModel("fixture-text",
-            R"("phase":"idle","queued_requests":0,"active_requests":0)");
+  WaitModelState("fixture-text",
+                 R"("phase":"idle","queued_requests":0,"active_requests":0)");
   ExpectResponse(Read(Send(Request(Message("user", "abxabx"), 3))), "abxabx", 3,
                  4);
   const auto log =

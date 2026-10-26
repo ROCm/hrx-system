@@ -61,6 +61,7 @@ loom_cc_library(
     loom::serve::telemetry::record
     loom::serve::testing::http_harness
     loom::serve::testing::model
+    loom::serve::testing::model_wait
     loom::serve::testing::package
     loom::serve::testing::service_application
     loom::serve::testing::stalled_stderr

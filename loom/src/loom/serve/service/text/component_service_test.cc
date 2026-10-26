@@ -22,7 +22,8 @@ TEST_F(RegisteredSourceTextServiceTest,
   ASSERT_EQ(
       Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
       0u);
-  const auto prepared = WaitModel("fixture-text", R"("registration":"ready")");
+  const auto prepared =
+      WaitModelState("fixture-text", R"("registration":"ready")");
   EXPECT_NE(prepared.find(
                 R"("primary":{"phase":"ready","pinned":false,"active":false)"),
             std::string::npos)
@@ -34,7 +35,7 @@ TEST_F(RegisteredSourceTextServiceTest,
       Read(Send(R"({"model":"fixture-text"})", "", "/v1/models/activate"));
   ASSERT_EQ(activation.find("HTTP/1.1 202"), 0u) << activation;
   const auto active =
-      WaitModel("fixture-text", R"("parameter_operation":"idle")");
+      WaitModelState("fixture-text", R"("parameter_operation":"idle")");
   EXPECT_NE(
       active.find(R"("primary":{"phase":"ready","pinned":false,"active":true)"),
       std::string::npos)
@@ -48,7 +49,7 @@ TEST_F(RegisteredSourceTextServiceTest,
       Read(Send(R"({"model":"fixture-text"})", "", "/v1/models/unregister"))
           .find("HTTP/1.1 202"),
       0u);
-  WaitModel("fixture-text", {});
+  WaitModelAbsent("fixture-text");
   // No image root/checkpoint was available at any point, including removal.
   EXPECT_FALSE(http_.failed());
 }
@@ -63,13 +64,14 @@ TEST_F(RegisteredSourceTextServiceTest,
   broken.replace(broken.find(weights_), weights_.size(), weights_ + ".missing");
   ASSERT_EQ(Read(Send(broken, "", "/v1/models/register")).find("HTTP/1.1 202"),
             0u);
-  const auto failed = WaitModel("fixture-text", R"("registration":"failed")");
+  const auto failed =
+      WaitModelState("fixture-text", R"("registration":"failed")");
   EXPECT_NE(failed.find(".missing"), std::string::npos) << failed;
   ASSERT_EQ(
       Read(Send(R"({"model":"fixture-text"})", "", "/v1/models/unregister"))
           .find("HTTP/1.1 202"),
       0u);
-  WaitModel("fixture-text", {});
+  WaitModelAbsent("fixture-text");
   ASSERT_EQ(
       Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
       0u);

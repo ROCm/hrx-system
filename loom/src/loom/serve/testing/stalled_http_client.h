@@ -78,9 +78,19 @@ class StalledHttpClient {
             iree_make_const_byte_span(request.data(), request.size())),
         .completion_callback = {
             [](void* user_data, iree_status_t status,
-               iree_host_size_t bytes_sent) { IREE_EXPECT_OK(status); },
-            nullptr}};
+               iree_host_size_t bytes_sent) {
+              IREE_EXPECT_OK(status);
+              static_cast<StalledHttpClient*>(user_data)->request_sent_ = true;
+            },
+            this}};
     IREE_ASSERT_OK(iree_net_carrier_send(carrier_, &params));
+  }
+
+  // Waits until the complete request has reached the server-side carrier.
+  void WaitUntilRequestSent() {
+    while (!request_sent_) {
+      Poll();
+    }
   }
 
   std::string Read() {
@@ -129,6 +139,8 @@ class StalledHttpClient {
   iree_net_carrier_t* peer_ = nullptr;
   // Bytes delivered while this client is explicitly polled.
   std::string response_;
+  // The complete request has crossed the real loopback carrier.
+  bool request_sent_ = false;
   // Published only by this client's poll owner after server deactivation.
   bool departed_ = false;
 };

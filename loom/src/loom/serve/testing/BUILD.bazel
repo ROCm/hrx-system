@@ -162,6 +162,17 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "model_wait",
+    testonly = True,
+    hdrs = ["model_wait.h"],
+    visibility = ["//loom/src/loom/serve:implementation"],
+    deps = [
+        ":http_harness",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+loom_cc_library(
     name = "stalled_http_client",
     testonly = True,
     hdrs = ["stalled_http_client.h"],

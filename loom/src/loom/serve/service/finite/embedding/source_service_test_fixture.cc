@@ -472,16 +472,15 @@ std::string SourceEmbeddingServiceTest::ModelStatus(const std::string& name) {
   return listing.substr(begin, end == std::string::npos ? end : end - begin);
 }
 
-std::string SourceEmbeddingServiceTest::WaitModel(const std::string& name,
-                                                  const std::string& marker) {
-  while (!http_.failed() && !HasFatalFailure()) {
-    std::string state = ModelStatus(name);
-    if (marker.empty() ? state.empty()
-                       : state.find(marker) != std::string::npos) {
-      return state;
-    }
-  }
-  return {};
+std::string SourceEmbeddingServiceTest::WaitModelState(
+    const std::string& name, const std::string& marker) {
+  return loom_serve::testing::WaitModelState(
+      http_, name, marker, [this, &name] { return ModelStatus(name); });
+}
+
+void SourceEmbeddingServiceTest::WaitModelAbsent(const std::string& name) {
+  loom_serve::testing::WaitModelAbsent(
+      http_, [this, &name] { return ModelStatus(name); });
 }
 
 void SourceEmbeddingServiceTest::CheckInvalidSubmissionRetirement(
@@ -497,10 +496,10 @@ void SourceEmbeddingServiceTest::CheckInvalidSubmissionRetirement(
             0u);
   HttpClient cold(Send(R"({"model":"cold","input":"a"})"));
   ASSERT_FALSE(HasFatalFailure());
-  ASSERT_NO_FATAL_FAILURE(WaitModel("cold", R"("held_requests":1)"));
+  ASSERT_NO_FATAL_FAILURE(WaitModelState("cold", R"("held_requests":1)"));
   HttpClient broken(Send(R"({"model":"broken","input":"a"})"));
   ASSERT_FALSE(HasFatalFailure());
-  ASSERT_NO_FATAL_FAILURE(WaitModel("broken", R"("held_requests":1)"));
+  ASSERT_NO_FATAL_FAILURE(WaitModelState("broken", R"("held_requests":1)"));
   ASSERT_EQ(Read(Send(R"({"model":"broken"})", "/v1/models/undrain"))
                 .find("HTTP/1.1 200"),
             0u);

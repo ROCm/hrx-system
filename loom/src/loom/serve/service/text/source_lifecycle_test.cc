@@ -8,6 +8,7 @@
 
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/telemetry/latency.h"
+#include "loom/serve/testing/worker_gate.h"
 
 namespace {
 
@@ -299,20 +300,43 @@ TEST_F(RegisteredSourceTextServiceTest,
             0u);
   const int held =
       Send(R"({"model":"broken","content":"ab"})", "", "/tokenize");
-  WaitModel("broken", R"("held_requests":1)");
+  WaitModelState("broken", R"("held_requests":1)");
   EXPECT_EQ(Read(Send(R"({"model":"broken"})", "", "/v1/models/undrain"))
                 .find("HTTP/1.1 200"),
             0u);
   EXPECT_EQ(Read(held).find("HTTP/1.1 503"), 0u);
-  const auto failed = WaitModel("broken", R"("registration":"failed")");
+  const auto failed = WaitModelState("broken", R"("registration":"failed")");
   EXPECT_NE(failed.find("advance.loom"), std::string::npos);
   EXPECT_NE(failed.find(R"("diagnostics":[{)"), std::string::npos);
+  ::testing::TestPartResultArray wait_failures;
+  {
+    ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::
+            INTERCEPT_ONLY_CURRENT_THREAD,
+        &wait_failures);
+    EXPECT_TRUE(WaitModelState("broken", R"("registration":"ready")").empty());
+  }
+  ASSERT_EQ(wait_failures.size(), 1);
+  EXPECT_TRUE(wait_failures.GetTestPartResult(0).fatally_failed());
   EXPECT_EQ(Content(Read(Send(Request(Message("user", "ab"), 2)))),
             Oracle::Complete("ab", 2));
-  EXPECT_EQ(Read(Send(R"({"model":"broken"})", "", "/v1/models/unregister"))
-                .find("HTTP/1.1 202"),
-            0u);
-  WaitModel("broken", {});
+  StalledClient unregister;
+  StalledClient status;
+  {
+    loom_serve::testing::WorkerGate gate(loom_serve_host_executor(host_));
+    unregister.Send(server_, R"({"model":"broken"})", "/v1/models/unregister");
+    unregister.WaitUntilRequestSent();
+    status.Send(server_, "", "/v1/status", "GET");
+    status.WaitUntilRequestSent();
+  }
+  EXPECT_EQ(unregister.Read().find("HTTP/1.1 202"), 0u);
+  const std::string removing = status.Read();
+  EXPECT_NE(removing.find(R"("id":"broken")"), std::string::npos) << removing;
+  EXPECT_NE(removing.find(R"("registration":"failed")"), std::string::npos)
+      << removing;
+  EXPECT_NE(removing.find(R"("admission":"removing")"), std::string::npos)
+      << removing;
+  WaitModelAbsent("broken");
 }
 
 TEST_F(SourceTextServiceTest, PreparationOverlapsAcceptedEpoch) {
@@ -591,7 +615,7 @@ TEST_F(SourceTextServiceTest, TelemetryWrapDoesNotBlockTextOrChangeCounters) {
   // through the owner status before asserting that no further events arrive.
   const std::string idle =
       R"("status":{"phase":"idle","queued_requests":0,"active_requests":0,)";
-  const std::string status = WaitModel("fixture-text", idle);
+  const std::string status = WaitModelState("fixture-text", idle);
   ASSERT_NE(status.find(idle), std::string::npos) << status;
   const std::string latest = drain();
   const std::string totals =

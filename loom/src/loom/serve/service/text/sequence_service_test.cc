@@ -409,7 +409,7 @@ TEST_F(RegisteredSequenceServiceTest,
   response =
       Read(Send(R"({"model":"fixture-text"})", "", "/v1/models/unregister"));
   ASSERT_EQ(response.find("HTTP/1.1 202"), 0u) << response;
-  WaitModel("fixture-text", {});
+  WaitModelAbsent("fixture-text");
   response = Read(Send(declaration, "", "/v1/models/register"));
   ASSERT_EQ(response.find("HTTP/1.1 202"), 0u) << response;
   EXPECT_NE(Encode("[1]", 3, handle).find("404 Not Found"), std::string::npos);

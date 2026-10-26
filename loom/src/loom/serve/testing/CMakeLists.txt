@@ -189,6 +189,20 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    model_wait
+  HDRS
+    "model_wait.h"
+  DEPS
+    ::http_harness
+    iree::testing::gtest
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     stalled_http_client
   HDRS
     "stalled_http_client.h"

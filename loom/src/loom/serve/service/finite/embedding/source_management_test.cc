@@ -137,7 +137,7 @@ TEST_F(SourceEmbeddingServiceTest,
   ASSERT_EQ(Read(Send(R"({"model":"checkpoint"})", "/v1/models/unregister"))
                 .find("HTTP/1.1 202"),
             0u);
-  WaitModel("checkpoint", {});
+  WaitModelAbsent("checkpoint");
 }
 
 TEST_F(SourceEmbeddingServiceTest,
@@ -202,16 +202,16 @@ TEST_F(SourceEmbeddingServiceTest,
   EXPECT_EQ(Read(Send(R"({"model":"cold"})", "/v1/models/unregister"))
                 .find("HTTP/1.1 202"),
             0u);
-  WaitModel("cold", {});
+  WaitModelAbsent("cold");
 
   const int held = Send(R"({"model":"checkpoint","input":"a"})");
-  WaitModel("checkpoint", R"("held_requests":1)");
+  WaitModelState("checkpoint", R"("held_requests":1)");
   const int tokenizer =
       Send(R"({"model":"checkpoint","content":"ab"})", "/tokenize");
-  WaitModel("checkpoint", R"("held_requests":2)");
+  WaitModelState("checkpoint", R"("held_requests":2)");
   // The accepted operation belongs to the registry, not this unread response.
   const int admin = Send(R"({"model":"checkpoint"})", "/v1/models/undrain");
-  WaitModel("checkpoint", R"("admission":"open")");
+  WaitModelState("checkpoint", R"("admission":"open")");
   const linger reset = {1, 0};
   ASSERT_EQ(setsockopt(admin, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)), 0);
   ASSERT_EQ(close(admin), 0);
@@ -225,7 +225,7 @@ TEST_F(SourceEmbeddingServiceTest,
       << embedding_response << ModelStatus("checkpoint");
   ASSERT_NE(tokenizer_response.find(R"({"tokens":[0,1]})"), std::string::npos)
       << tokenizer_response;
-  const auto ready = WaitModel("checkpoint", R"("registration":"ready")");
+  const auto ready = WaitModelState("checkpoint", R"("registration":"ready")");
   EXPECT_NE(ready.find("\"workers\":1"), std::string::npos);
   const uint64_t completed = CompletedRequests();
   EXPECT_EQ(completed, 2u);
@@ -245,7 +245,7 @@ TEST_F(SourceEmbeddingServiceTest,
                       "/v1/models/unregister"))
                 .find("HTTP/1.1 202"),
             0u);
-  WaitModel("checkpoint", {});
+  WaitModelAbsent("checkpoint");
   EXPECT_EQ(CompletedRequests(), completed);
   EXPECT_EQ(
       Read(Send(Declaration("checkpoint", package), "/v1/models/register"))
@@ -270,7 +270,7 @@ TEST_F(SourceEmbeddingServiceTest,
                       "/v1/models/unregister"))
                 .find("HTTP/1.1 202"),
             0u);
-  WaitModel("checkpoint", {});
+  WaitModelAbsent("checkpoint");
 }
 
 TEST_F(SourceEmbeddingServiceTest,
@@ -351,12 +351,12 @@ TEST_F(SourceEmbeddingServiceTest,
                 .find("HTTP/1.1 202"),
             0u);
   const int held = Send(R"({"model":"broken","input":"a"})");
-  WaitModel("broken", R"("held_requests":1)");
+  WaitModelState("broken", R"("held_requests":1)");
   EXPECT_EQ(Read(Send(R"({"model":"broken"})", "/v1/models/undrain"))
                 .find("HTTP/1.1 200"),
             0u);
   EXPECT_EQ(Read(held).find("HTTP/1.1 503"), 0u);
-  const auto failed = WaitModel("broken", R"("registration":"failed")");
+  const auto failed = WaitModelState("broken", R"("registration":"failed")");
   EXPECT_NE(failed.find("embed.loom"), std::string::npos);
   EXPECT_NE(failed.find(R"("diagnostics":[{)"), std::string::npos);
   EXPECT_EQ(Read(Send(R"({"model":"broken"})", "/v1/models/undrain"))
@@ -368,7 +368,7 @@ TEST_F(SourceEmbeddingServiceTest,
   EXPECT_EQ(Read(Send(R"({"model":"broken"})", "/v1/models/unregister"))
                 .find("HTTP/1.1 202"),
             0u);
-  WaitModel("broken", {});
+  WaitModelAbsent("broken");
 }
 
 TEST_F(SourceEmbeddingServiceTest,

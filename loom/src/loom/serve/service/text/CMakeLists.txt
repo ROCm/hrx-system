@@ -162,6 +162,7 @@ loom_cc_library(
     loom::serve::telemetry::stream
     loom::serve::testing::http_harness
     loom::serve::testing::model
+    loom::serve::testing::model_wait
     loom::serve::testing::package
     loom::serve::testing::service_application
     loom::serve::testing::stalled_http_client
@@ -190,6 +191,7 @@ loom_cc_library(
     iree::base::internal::base64
     loom::serve::service::finite::component
     loom::serve::telemetry::latency
+    loom::serve::testing::worker_gate
   TESTONLY
   ALWAYSLINK
   PUBLIC

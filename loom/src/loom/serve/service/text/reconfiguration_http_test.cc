@@ -197,7 +197,7 @@ TEST_F(RegisteredReconfigurationHttpTextTest,
       Read(Send(R"({"model":"fixture-text"})", "", "/v1/models/unregister"))
           .find("HTTP/1.1 202"),
       0u);
-  WaitModel("fixture-text", {});
+  WaitModelAbsent("fixture-text");
 }
 
 TEST_F(ReconfigurationHttpTextTest,

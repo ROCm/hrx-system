@@ -129,7 +129,8 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
           Read(Send(Declaration(name, directory_), "", "/v1/models/register"))
               .find("HTTP/1.1 202"),
           0u);
-      ASSERT_NO_FATAL_FAILURE(WaitModel(name, R"("registration":"ready")"));
+      ASSERT_NO_FATAL_FAILURE(
+          WaitModelState(name, R"("registration":"ready")"));
     }
     // Explicit parameter activation leaves the cold model's KV untouched.
     ASSERT_EQ(Read(Send(R"({"model":"cold"})", "", "/v1/models/drain"))
@@ -138,7 +139,8 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
     ASSERT_EQ(Read(Send(R"({"model":"cold"})", "", "/v1/models/activate"))
                   .find("HTTP/1.1 202"),
               0u);
-    const auto activated = WaitModel("cold", R"("parameter_operation":"idle")");
+    const auto activated =
+        WaitModelState("cold", R"("parameter_operation":"idle")");
     ASSERT_NE(activated.find(
                   R"("primary":{"phase":"ready","pinned":false,"active":true)"),
               std::string::npos)
@@ -152,7 +154,8 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
     cold_request.replace(cold_request.find("fixture-text"), 12, "cold");
     ASSERT_EQ(Content(Read(Send(warm, "X-Loom-Session: warm\r\n"))),
               Oracle::Complete(prompt, 4));
-    ASSERT_NO_FATAL_FAILURE(WaitModel("fixture-text", R"("phase":"idle")"));
+    ASSERT_NO_FATAL_FAILURE(
+        WaitModelState("fixture-text", R"("phase":"idle")"));
     ASSERT_FALSE(HasPendingBacking(Read(Send("", "", "/v1/status", "GET"))));
     int cold = -1;
     {
@@ -173,7 +176,8 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
                             "/v1/models/unregister"))
                       .find("HTTP/1.1 202"),
                   0u);
-        ASSERT_NO_FATAL_FAILURE(WaitModel("cold", R"("admission":"removing")"));
+        ASSERT_NO_FATAL_FAILURE(
+            WaitModelState("cold", R"("admission":"removing")"));
         EXPECT_TRUE(HasPendingBacking(Read(Send("", "", "/v1/status", "GET"))));
       }
       EXPECT_EQ(Content(Read(Send(warm, "X-Loom-Session: warm\r\n"))),
@@ -181,10 +185,10 @@ class ElasticTextServiceTest : public SourceTextServiceTest {
       EXPECT_EQ(Read(Send("", "", "/healthz", "GET")).find("HTTP/1.1 200"), 0u);
     }
     if (cancel) {
-      ASSERT_NO_FATAL_FAILURE(WaitModel("cold", {}));
+      ASSERT_NO_FATAL_FAILURE(WaitModelAbsent("cold"));
     } else {
       EXPECT_EQ(Content(Read(cold)), Oracle::Complete(prompt, 4));
-      ASSERT_NO_FATAL_FAILURE(WaitModel("cold", R"("phase":"idle")"));
+      ASSERT_NO_FATAL_FAILURE(WaitModelState("cold", R"("phase":"idle")"));
     }
     EXPECT_FALSE(HasPendingBacking(Read(Send("", "", "/v1/status", "GET"))));
   }
@@ -222,7 +226,7 @@ TEST_F(RegisteredElasticTextServiceTest,
         Read(Send(Declaration(name, directory_), "", "/v1/models/register"))
             .find("HTTP/1.1 202"),
         0u);
-    ASSERT_NO_FATAL_FAILURE(WaitModel(name, R"("registration":"ready")"));
+    ASSERT_NO_FATAL_FAILURE(WaitModelState(name, R"("registration":"ready")"));
     ASSERT_EQ(Read(Send("{\"model\":\"" + std::string(name) + "\"}", "",
                         "/v1/models/pin"))
                   .find("HTTP/1.1 200"),
@@ -242,22 +246,22 @@ TEST_F(RegisteredElasticTextServiceTest,
   std::string warm = request;
   warm.replace(warm.find("fixture-text"), 12, "warm");
   ASSERT_EQ(Content(Read(Send(warm, "X-Loom-Session: warm\r\n"))), first);
-  ASSERT_NO_FATAL_FAILURE(WaitModel("fixture-text", R"("phase":"idle")"));
-  ASSERT_NO_FATAL_FAILURE(WaitModel("warm", R"("phase":"idle")"));
+  ASSERT_NO_FATAL_FAILURE(WaitModelState("fixture-text", R"("phase":"idle")"));
+  ASSERT_NO_FATAL_FAILURE(WaitModelState("warm", R"("phase":"idle")"));
   {
     ASSERT_EQ(Read(Send(R"({"model":"fixture-text"})", "", "/v1/models/unpin"))
                   .find("HTTP/1.1 200"),
               0u);
     // This poll does not keep parameters hot. Expiry returns backing to the
     // shared cache without closing admission or losing retained history.
-    const auto expired = WaitModel(
+    const auto expired = WaitModelState(
         "fixture-text",
         R"("primary":{"phase":"ready","pinned":false,"active":false)");
     ASSERT_NE(expired.find(R"("deactivations":1)"), std::string::npos)
         << expired;
     EXPECT_EQ(Content(Read(Send(warm, "X-Loom-Session: warm\r\n"))), first);
     EXPECT_EQ(Read(Send("", "", "/healthz", "GET")).find("HTTP/1.1 200"), 0u);
-    const auto peer = WaitModel("warm", R"("phase":"idle")");
+    const auto peer = WaitModelState("warm", R"("phase":"idle")");
     EXPECT_NE(
         peer.find(R"("primary":{"phase":"ready","pinned":true,"active":true)"),
         std::string::npos);

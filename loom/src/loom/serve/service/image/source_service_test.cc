@@ -36,6 +36,7 @@
 #include "loom/serve/service/image/service.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model.h"
+#include "loom/serve/testing/model_wait.h"
 #include "loom/serve/testing/package.h"
 #include "loom/serve/testing/service_application.h"
 #include "loom/serve/testing/stalled_stderr.h"
@@ -230,15 +231,15 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     return listing.substr(begin, end == std::string::npos ? end : end - begin);
   }
 
-  std::string WaitModel(const std::string& name, const std::string& marker) {
-    while (!http_.failed() && !HasFatalFailure()) {
-      const auto state = ModelStatus(name);
-      if (marker.empty() ? state.empty()
-                         : state.find(marker) != std::string::npos) {
-        return state;
-      }
-    }
-    return {};
+  std::string WaitModelState(const std::string& name,
+                             const std::string& marker) {
+    return loom_serve::testing::WaitModelState(
+        http_, name, marker, [this, &name] { return ModelStatus(name); });
+  }
+
+  void WaitModelAbsent(const std::string& name) {
+    loom_serve::testing::WaitModelAbsent(
+        http_, [this, &name] { return ModelStatus(name); });
   }
 
   int Send(const std::string& method, const std::string& target,
@@ -1136,7 +1137,7 @@ TEST_P(SourceImageServiceTest, ClosedTransportTerminatesModelPolling) {
         ::testing::ScopedFakeTestPartResultReporter::
             INTERCEPT_ONLY_CURRENT_THREAD,
         &failures);
-    EXPECT_TRUE(WaitModel("absent", "ready").empty());
+    EXPECT_TRUE(WaitModelState("absent", "ready").empty());
   }
   ASSERT_EQ(failures.size(), 1);
   EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
@@ -1311,7 +1312,7 @@ TEST_P(SourceImageServiceTest, DynamicImageAdmissionRetirementAndReuse) {
                         R"({"model":"pixels","prompt":"aba","seed":1})");
   const int tokens =
       Send("POST", "/tokenize", R"({"model":"pixels","content":"aba"})");
-  WaitModel("pixels", R"("held_requests":2)");
+  WaitModelState("pixels", R"("held_requests":2)");
   EXPECT_EQ(Read(Send("POST", "/v1/models/undrain", R"({"model":"pixels"})"))
                 .find("HTTP/1.1 200"),
             0u);
@@ -1343,13 +1344,13 @@ TEST_P(SourceImageServiceTest, DynamicImageAdmissionRetirementAndReuse) {
             0u);
   const int removed = Send("POST", "/v1/images/generations",
                            R"({"model":"pixels","prompt":"a"})");
-  WaitModel("pixels", R"("held_requests":1)");
+  WaitModelState("pixels", R"("held_requests":1)");
   EXPECT_EQ(Read(Send("POST", "/v1/models/unregister",
                       R"({"model":"pixels","mode":"drain"})"))
                 .find("HTTP/1.1 202"),
             0u);
   EXPECT_EQ(Read(removed).find("HTTP/1.1 410"), 0u);
-  WaitModel("pixels", {});
+  WaitModelAbsent("pixels");
   EXPECT_NE(Read(peer).find("\"b64_json\":\"" + EncodedPixels(2, 0) + "\""),
             std::string::npos);
 
@@ -1372,7 +1373,7 @@ TEST_P(SourceImageServiceTest, DynamicImageAdmissionRetirementAndReuse) {
                       R"({"model":"pixels","mode":"abort"})"))
                 .find("HTTP/1.1 202"),
             0u);
-  WaitModel("pixels", {});
+  WaitModelAbsent("pixels");
 }
 
 TEST_P(SourceImageServiceTest, UploadedImageRegistrationProducesExactPixels) {
@@ -1433,7 +1434,7 @@ TEST_P(SourceImageServiceTest, UploadedImageRegistrationProducesExactPixels) {
   ASSERT_EQ(Read(Send("POST", "/v1/models/unregister", R"({"model":"pixels"})"))
                 .find("HTTP/1.1 202"),
             0u);
-  WaitModel("pixels", {});
+  WaitModelAbsent("pixels");
 }
 
 TEST_P(SourceImageServiceTest, TokenizerFailureRetiresCompiledModel) {
@@ -1496,12 +1497,12 @@ TEST_P(SourceImageServiceTest, FailedImageSourceLeavesPeerUsable) {
             0u);
   const int held = Send("POST", "/v1/images/generations",
                         R"({"model":"broken","prompt":"a"})");
-  WaitModel("broken", R"("held_requests":1)");
+  WaitModelState("broken", R"("held_requests":1)");
   EXPECT_EQ(Read(Send("POST", "/v1/models/undrain", R"({"model":"broken"})"))
                 .find("HTTP/1.1 200"),
             0u);
   EXPECT_EQ(Read(held).find("HTTP/1.1 503"), 0u);
-  const auto failed = WaitModel("broken", R"("registration":"failed")");
+  const auto failed = WaitModelState("broken", R"("registration":"failed")");
   EXPECT_NE(failed.find("generate.loom"), std::string::npos);
   EXPECT_NE(failed.find(R"("diagnostics":[{)"), std::string::npos);
   EXPECT_NE(Read(Send("POST", "/v1/images/generations",
@@ -1511,7 +1512,7 @@ TEST_P(SourceImageServiceTest, FailedImageSourceLeavesPeerUsable) {
   EXPECT_EQ(Read(Send("POST", "/v1/models/unregister", R"({"model":"broken"})"))
                 .find("HTTP/1.1 202"),
             0u);
-  WaitModel("broken", {});
+  WaitModelAbsent("broken");
 }
 
 TEST_P(SourceImageServiceTest, CancelledDeviceImageSkipsEncoding) {

@@ -22,6 +22,7 @@
 #include "loom/serve/service/finite/service.h"
 #include "loom/serve/telemetry/record.h"
 #include "loom/serve/testing/http_harness.h"
+#include "loom/serve/testing/model_wait.h"
 #include "loom/serve/transport/http/listener.h"
 
 namespace loom_serve::testing::embedding {
@@ -127,7 +128,10 @@ class SourceEmbeddingServiceTest : public ::testing::Test {
 
   std::string ModelStatus(const std::string& name);
 
-  std::string WaitModel(const std::string& name, const std::string& marker);
+  std::string WaitModelState(const std::string& name,
+                             const std::string& marker);
+
+  void WaitModelAbsent(const std::string& name);
 
   void CheckInvalidSubmissionRetirement(const std::string& package);
 

@@ -219,11 +219,11 @@ TEST_F(RegisteredSourceTextServiceTest,
   StalledClient stalled;
   ASSERT_NO_FATAL_FAILURE(
       stalled.Send(server_, Request(Message("user", "abxa"), 4)));
-  WaitModel("fixture-text",
-            R"("phase":"idle","queued_requests":0,"active_requests":1)");
+  WaitModelState("fixture-text",
+                 R"("phase":"idle","queued_requests":0,"active_requests":1)");
   const int pending = Send(Request(Message("user", "b"), 2));
-  WaitModel("fixture-text",
-            R"("phase":"idle","queued_requests":1,"active_requests":1)");
+  WaitModelState("fixture-text",
+                 R"("phase":"idle","queued_requests":1,"active_requests":1)");
   // A full waiting queue rejects excess work, rather than growing another
   // resident to bypass the slow consumer's ownership.
   EXPECT_EQ(Read(Send(Request(Message("user", "x"), 2))).find("HTTP/1.1 503"),
@@ -240,8 +240,8 @@ TEST_F(RegisteredSourceTextServiceTest,
   EXPECT_EQ(Content(peer), Oracle::Complete("x", 2));
   ASSERT_NO_FATAL_FAILURE(stalled.Close());
   EXPECT_EQ(Content(Read(pending)), Oracle::Complete("b", 2));
-  WaitModel("fixture-text",
-            R"("phase":"idle","queued_requests":0,"active_requests":0)");
+  WaitModelState("fixture-text",
+                 R"("phase":"idle","queued_requests":0,"active_requests":0)");
 }
 
 }  // namespace

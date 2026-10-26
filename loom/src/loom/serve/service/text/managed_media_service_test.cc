@@ -108,7 +108,7 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest,
     const auto response = Read(Send(declaration, "", "/v1/models/register"));
     ASSERT_EQ(response.find("HTTP/1.1 202"), 0u) << response;
     if (GetParam()) {
-      ASSERT_FALSE(WaitModel("fixture-text", "\"image\":").empty());
+      ASSERT_FALSE(WaitModelState("fixture-text", "\"image\":").empty());
     }
   }
 
@@ -148,7 +148,7 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest,
 
   void FinishOperation() {
     const auto state =
-        WaitModel("fixture-text", R"("parameter_operation":"idle")");
+        WaitModelState("fixture-text", R"("parameter_operation":"idle")");
     ASSERT_FALSE(state.empty());
     const auto observed = State();
     ASSERT_FALSE(HasField(observed, "error")) << observed;
@@ -407,7 +407,7 @@ TEST_P(ManagedMediaServiceTest, FailedImageWarmupLeavesTextAvailable) {
   EXPECT_EQ(Content(Read(Send(Request(Message("user", "abxa"), 4)))),
             Oracle::Complete("abxa", 4));
   ASSERT_NO_FATAL_FAILURE(Control("unregister", "", 202));
-  WaitModel("fixture-text", {});
+  WaitModelAbsent("fixture-text");
   EXPECT_FALSE(http_.failed());
 }
 
@@ -422,7 +422,7 @@ TEST_P(ManagedMediaServiceTest, ComponentSelectorsValidateTheDeclaredBoundary) {
   ASSERT_NO_FATAL_FAILURE(Control("drain", "image", 400));
   ASSERT_NO_FATAL_FAILURE(Control("unregister", "image", 400));
   ASSERT_NO_FATAL_FAILURE(Control("unregister", "", 202));
-  WaitModel("fixture-text", {});
+  WaitModelAbsent("fixture-text");
   const auto declaration = Declaration("fixture-text", directory_, "drained");
   ASSERT_EQ(
       Read(Send(declaration, "", "/v1/models/register")).find("HTTP/1.1 202"),
