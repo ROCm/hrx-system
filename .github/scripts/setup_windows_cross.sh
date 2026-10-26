@@ -8,7 +8,8 @@ set -euo pipefail
 
 : "${WINDOWS_CROSS_ROOT:?}"
 mkdir -p "$WINDOWS_CROSS_ROOT"
-scratch="$(mktemp -d)"
+# xwin installs unpacked members with rename, requiring the same filesystem.
+scratch="$(mktemp -d "$WINDOWS_CROSS_ROOT/.setup.XXXXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
 
 fetch() {
