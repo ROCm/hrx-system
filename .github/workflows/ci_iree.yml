@@ -15,6 +15,7 @@ on:
       - ".github/scripts/**"
       - ".github/workflows/ci_iree*.yml"
       - ".github/workflows/build_loom_sdk.yml"
+      - ".github/workflows/build_loom_sdk_artifacts.yml"
       - ".github/workflows/release_loom_sdk.yml"
       - "BUILD.bazel"
       - "BUILDING.md"
@@ -39,6 +40,7 @@ on:
       - ".github/scripts/**"
       - ".github/workflows/ci_iree*.yml"
       - ".github/workflows/build_loom_sdk.yml"
+      - ".github/workflows/build_loom_sdk_artifacts.yml"
       - ".github/workflows/release_loom_sdk.yml"
       - "BUILD.bazel"
       - "BUILDING.md"
@@ -409,12 +411,13 @@ jobs:
 
   sdk:
     name: SDK
-    uses: ./.github/workflows/build_loom_sdk.yml
+    uses: ./.github/workflows/build_loom_sdk_artifacts.yml
     with:
       profiles: '["Release"]'
-      qualify-windows: false
 
   bazel_windows:
+    # SDK production does not gate independent Windows source coverage.
+    if: ${{ !cancelled() }}
     needs: sdk
     name: Bazel / Windows x86-64 / ${{ matrix.name }}
     strategy:
@@ -705,21 +708,21 @@ jobs:
           exit $LASTEXITCODE
 
       - name: Download the cross-built SDK
-        if: matrix.platform_coverage
+        if: matrix.platform_coverage && needs.sdk.result == 'success'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: loom-sdk-inputs-windows-Release
           path: wheel-inputs
 
       - name: Qualify the installed SDK
-        if: matrix.platform_coverage
+        if: matrix.platform_coverage && needs.sdk.result == 'success'
         shell: powershell
         run: |
-          python -m build_tools.ci.loom_wheel test --inputs=wheel-inputs --output=wheel-artifact
+          python -m build_tools.ci.loom_wheel test --inputs=wheel-inputs/Release --output=wheel-artifact
           exit $LASTEXITCODE
 
       - name: Upload qualified Windows wheel
-        if: matrix.platform_coverage
+        if: matrix.platform_coverage && needs.sdk.result == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: loom-sdk-wheel-windows-Release

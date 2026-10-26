@@ -1,0 +1,162 @@
+# Copyright 2026 The IREE Authors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+name: Loom / SDK / Build
+
+on:
+  workflow_call:
+    inputs:
+      profiles:
+        type: string
+        default: '["Release"]'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build:
+    name: Linux + Windows x86-64 / Clang / ${{ matrix.profile }}
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: ${{ fromJSON(inputs.profiles) }}
+    runs-on: azure-linux-scale-rocm
+    timeout-minutes: 10
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+    defaults:
+      run:
+        shell: bash
+    env:
+      LLVM_APT_VERSION: "1:22.1.8~++20260714014902+ca7933e47d3a-1~exp1~20260714135019.80"
+      CC: /usr/bin/clang-22
+      CXX: /usr/bin/clang++-22
+      AR: /usr/bin/llvm-ar-22
+      LLVM_ROOT: /usr/lib/llvm-22
+      PROFILE: ${{ matrix.profile }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Configure workspace
+        run: |
+          git config --global --add safe.directory "$PWD"
+          {
+            echo "WINDOWS_CROSS_ROOT=$PWD/build/loom-sdk/toolchain"
+            echo "WINSDK_ROOT=$PWD/build/loom-sdk/toolchain/sdk"
+            echo "WINDOWS_COMPILER_RT_ROOT=$PWD/build/loom-sdk/toolchain/compiler-rt"
+          } >> "$GITHUB_ENV"
+      - name: Install compiler and host tools
+        run: |
+          case "$PROFILE" in Release|Tracy|Debug|ASAN) ;; *) exit 2 ;; esac
+          curl --fail --location --silent --show-error \
+            https://apt.llvm.org/llvm-snapshot.gpg.key --output "$RUNNER_TEMP/llvm.asc"
+          echo "8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d  $RUNNER_TEMP/llvm.asc" | sha256sum --check
+          sudo install -m 644 "$RUNNER_TEMP/llvm.asc" /usr/share/keyrings/llvm.asc
+          echo 'deb [signed-by=/usr/share/keyrings/llvm.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main' | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            "clang-22=$LLVM_APT_VERSION" "lld-22=$LLVM_APT_VERSION" \
+            "llvm-22=$LLVM_APT_VERSION" "libclang-rt-22-dev=$LLVM_APT_VERSION" \
+            g++-13 patchelf p7zip-full python3-venv
+          mkdir -p build/loom-sdk/host-tools
+          /usr/bin/python3 build_tools/devtools/install.py bazelisk --bin-dir build/loom-sdk/host-tools
+          echo "$PWD/build/loom-sdk/host-tools" >> "$GITHUB_PATH"
+          echo "$LLVM_ROOT/bin" >> "$GITHUB_PATH"
+      - name: Restore Windows SDK inputs
+        id: toolchain
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.WINDOWS_CROSS_ROOT }}
+          key: windows-cross-${{ hashFiles('.github/scripts/setup_windows_cross.sh', '.github/scripts/windows-sdk-channel.json', 'build_tools/ci/windows_stl_asan.py') }}
+      - name: Prepare Windows SDK inputs
+        if: steps.toolchain.outputs.cache-hit != 'true'
+        run: bash .github/scripts/setup_windows_cross.sh
+      - name: Cache Windows SDK inputs
+        if: steps.toolchain.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.WINDOWS_CROSS_ROOT }}
+          key: ${{ steps.toolchain.outputs.cache-primary-key }}
+      - name: Select matching Windows compiler runtime
+        run: |
+          test "$("$LLVM_ROOT/bin/clang" -dumpversion)" = 22.1.8
+          resource_dir="$("$LLVM_ROOT/bin/clang" -print-resource-dir)"
+          sudo install -D "$WINDOWS_COMPILER_RT_ROOT/clang_rt.builtins-x86_64.lib" \
+            "$resource_dir/lib/windows/clang_rt.builtins-x86_64.lib"
+      - name: Build and qualify Linux SDK
+        run: |
+          /usr/bin/python3 -m build_tools.ci.loom_wheel build \
+            --profile="${PROFILE,,}" --output=build/loom-sdk/linux --bazel=bazel -- \
+            --cxxopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 \
+            --linkopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13
+          # Distribution Python works without loader overrides, which the
+          # installed-product test clears to verify the wheel's own linkage.
+          /usr/bin/python3 -m build_tools.ci.loom_wheel test \
+            --inputs=build/loom-sdk/linux --output=wheel-artifact
+      - name: Cross-build Windows SDK
+        run: |
+          /usr/bin/python3 -m build_tools.ci.loom_wheel build \
+            --profile="${PROFILE,,}" --output="build/loom-sdk/windows/$PROFILE" --bazel=bazel -- \
+            --config=windows-x86_64
+      - name: Measure release artifacts
+        if: matrix.profile == 'Release'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          history_args=()
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            history_args+=(--exclude-commit "$GITHUB_SHA")
+          fi
+          /usr/bin/python3 -m build_tools.ci.loom_binary_size fetch-history \
+            --repository "$GITHUB_REPOSITORY" --anchor "$BASE_SHA" \
+            --output build/loom-sdk/size/baseline.json "${history_args[@]}"
+          wheels=()
+          for wheel in wheel-artifact/*.whl build/loom-sdk/windows/"$PROFILE"/*.whl; do
+            wheels+=(--wheel "$wheel")
+          done
+          /usr/bin/python3 -m build_tools.ci.loom_binary_size collect \
+            "${wheels[@]}" --output-dir build/loom-sdk/size \
+            --llvm-bin "$LLVM_ROOT/bin" \
+            --environment-id ubuntu24-clang22-gcc13-winsdk26100-crt14.44.17.14 \
+            --commit "$GITHUB_SHA" --repository "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF_NAME" --run-id "$GITHUB_RUN_ID"
+          report_args=()
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            report_args+=(--update-main)
+          fi
+          /usr/bin/python3 -m build_tools.ci.loom_binary_size report \
+            --current build/loom-sdk/size/current.json \
+            --baseline build/loom-sdk/size/baseline.json \
+            --output-dir build/loom-sdk/size/record "${report_args[@]}"
+          cat build/loom-sdk/size/record/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload qualified Linux wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: loom-sdk-wheel-linux-${{ matrix.profile }}
+          path: wheel-artifact/*.whl
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+          overwrite: true
+      - name: Hand Windows artifacts to native qualification
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: loom-sdk-inputs-windows-${{ matrix.profile }}
+          path: build/loom-sdk/windows/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+          overwrite: true
+      - name: Upload release-size history
+        if: matrix.profile == 'Release'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ github.ref == 'refs/heads/main' && 'loom-binary-size-history-main-v2' || format('loom-binary-size-candidate-{0}', github.run_id) }}
+          path: build/loom-sdk/size/record/
+          if-no-files-found: error
+          retention-days: 45
+          overwrite: true
