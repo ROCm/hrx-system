@@ -267,6 +267,8 @@ enum amdf_structure_type_e {
   AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY = 25,
   /// An `amdf_memory_scope_observation_t` output structure.
   AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_OBSERVATION = 26,
+  /// PCI attachment address captured while opening an endpoint.
+  AMDF_STRUCTURE_TYPE_ENDPOINT_PCI_ADDRESS = 27,
 };
 
 /// Identifier of an optional API table compiled into the providing library.
@@ -587,7 +589,8 @@ typedef struct amdf_endpoint_info_t {
   amdf_structure_type_t type;
   /// Must be at least `sizeof(amdf_endpoint_info_t)`.
   uint32_t structure_size;
-  /// Optional `amdf_endpoint_host_locality_t` output extension.
+  /// Optional `amdf_endpoint_host_locality_t` or
+  /// `amdf_endpoint_pci_address_t` output extension.
   void* next;
   /// Opaque identity used to open this endpoint.
   amdf_endpoint_id_t id;
@@ -616,7 +619,7 @@ typedef struct amdf_endpoint_host_locality_t {
   amdf_structure_type_t type;
   /// Must be at least `sizeof(amdf_endpoint_host_locality_t)`.
   uint32_t structure_size;
-  /// Must be NULL; no further endpoint output extensions are defined.
+  /// Must be NULL; additional endpoint outputs require another query.
   void* next;
   /// OS NUMA node with online host CPUs at the endpoint's attachment, or
   /// UINT32_MAX when unavailable or when that node has no online CPUs.
@@ -624,6 +627,31 @@ typedef struct amdf_endpoint_host_locality_t {
   /// processor group, and does not imply permission to run on those CPUs.
   uint32_t numa_node;
 } amdf_endpoint_host_locality_t;
+
+/// PCI attachment address cached by `endpoint_open` without device activation.
+///
+/// Append to `amdf_endpoint_info_t::next`. This identifies the endpoint's
+/// physical PCI function, independently of its logical/native adapter index.
+/// It conveys no native handle, access guarantee, or ownership.
+typedef struct amdf_endpoint_pci_address_t {
+  /// Must be `AMDF_STRUCTURE_TYPE_ENDPOINT_PCI_ADDRESS`.
+  amdf_structure_type_t type;
+  /// Must be at least `sizeof(amdf_endpoint_pci_address_t)`.
+  uint32_t structure_size;
+  /// Must be NULL; additional endpoint output extensions require another query.
+  void* next;
+  /// One when all address components are known; zero clears every component.
+  /// Zero is a valid domain, bus, device, or function when available is one.
+  uint32_t available;
+  /// PCI domain or segment number, in the range 0..65535.
+  uint32_t domain;
+  /// PCI bus number, in the range 0..255.
+  uint32_t bus;
+  /// PCI device number on the bus, in the range 0..31.
+  uint32_t device;
+  /// PCI function number, in the range 0..7.
+  uint32_t function;
+} amdf_endpoint_pci_address_t;
 
 #ifdef __cplusplus
 }  // extern "C"

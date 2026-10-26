@@ -18,6 +18,12 @@ extern "C" {
 // Returns true when `pci` identifies an AMD-owned endpoint vendor.
 bool amdf_pci_is_amd(const amdf_pci_info_t* pci);
 
+// Parses a canonical hexadecimal domain:bus:device.function address.
+// Success sets availability and components, preserving the output header.
+// An invalid address leaves the output unchanged.
+bool amdf_pci_parse_address(const char* text,
+                            amdf_endpoint_pci_address_t* out_address);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

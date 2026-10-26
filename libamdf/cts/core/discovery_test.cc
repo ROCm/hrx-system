@@ -334,6 +334,90 @@ TEST_F(DiscoveryTest, QueriesCachedHostCpuLocalityWithoutActivation) {
   }
 }
 
+TEST_F(DiscoveryTest, QueriesCachedPciAddressWithoutActivation) {
+  std::vector<amdf_endpoint_summary_t> summaries;
+  ASSERT_TRUE(amdf_status_is_ok(Enumerate(&summaries)));
+  if (summaries.empty()) {
+    GTEST_SKIP() << "no AMD endpoints present";
+  }
+  for (size_t index = 0; index < summaries.size(); ++index) {
+    const auto& summary = summaries[index];
+    SCOPED_TRACE(summary.name);
+    ASSERT_EQ(api_->endpoint_open(instance_, &summary.id, &endpoint_),
+              AMDF_STATUS_OK);
+    struct {
+      // Caller-owned output prefix with extra trailing storage.
+      amdf_endpoint_pci_address_t address;
+      // Storage outside the supported output extent remains untouched.
+      uint64_t canary;
+    } extended = {
+        .address =
+            {
+                .type = AMDF_STRUCTURE_TYPE_ENDPOINT_PCI_ADDRESS,
+                .structure_size = sizeof(extended),
+            },
+        .canary = UINT64_C(0x472febc536a00819),
+    };
+    auto info = MakeEndpointInfo();
+    info.next = &extended.address;
+    ASSERT_EQ(api_->endpoint_query_info(endpoint_, &info), AMDF_STATUS_OK);
+    const auto& address = extended.address;
+    EXPECT_EQ(address.type, AMDF_STRUCTURE_TYPE_ENDPOINT_PCI_ADDRESS);
+    EXPECT_EQ(address.structure_size, sizeof(extended));
+    EXPECT_EQ(address.next, nullptr);
+    EXPECT_LE(address.available, 1u);
+    EXPECT_LE(address.domain, 65535u);
+    EXPECT_LE(address.bus, 255u);
+    EXPECT_LE(address.device, 31u);
+    EXPECT_LE(address.function, 7u);
+    if (!address.available) {
+      EXPECT_EQ(
+          address.domain | address.bus | address.device | address.function, 0u);
+    }
+    const auto expected_info = info;
+    const auto expected_address = address;
+    ASSERT_EQ(api_->endpoint_query_info(endpoint_, &info), AMDF_STATUS_OK);
+    EXPECT_EQ(std::memcmp(&info, &expected_info, sizeof(info)), 0);
+    EXPECT_EQ(std::memcmp(&address, &expected_address, sizeof(address)), 0);
+    EXPECT_EQ(extended.canary, UINT64_C(0x472febc536a00819));
+    RecordProperty("pci_available_" + std::to_string(index),
+                   std::to_string(address.available));
+    ASSERT_EQ(api_->endpoint_close(endpoint_), AMDF_STATUS_OK);
+    endpoint_ = nullptr;
+  }
+}
+
+TEST_F(DiscoveryTest, RejectsPciExtensionBeforeMutatingEitherOutput) {
+  std::vector<amdf_endpoint_summary_t> summaries;
+  ASSERT_TRUE(amdf_status_is_ok(Enumerate(&summaries)));
+  if (summaries.empty()) {
+    GTEST_SKIP() << "no AMD endpoints present";
+  }
+  ASSERT_EQ(api_->endpoint_open(instance_, &summaries[0].id, &endpoint_),
+            AMDF_STATUS_OK);
+  amdf_endpoint_pci_address_t address = {
+      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_PCI_ADDRESS,
+      .structure_size = sizeof(address) - 1,
+      .available = 123,
+      .domain = 456,
+  };
+  auto info = MakeEndpointInfo();
+  info.next = &address;
+  const auto original_info = info;
+  const auto original_address = address;
+  EXPECT_EQ(amdf_status_code(api_->endpoint_query_info(endpoint_, &info)),
+            AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  EXPECT_EQ(std::memcmp(&info, &original_info, sizeof(info)), 0);
+  EXPECT_EQ(std::memcmp(&address, &original_address, sizeof(address)), 0);
+  address.structure_size = sizeof(address);
+  address.next = &address;
+  EXPECT_EQ(amdf_status_code(api_->endpoint_query_info(endpoint_, &info)),
+            AMDF_STATUS_CODE_UNSUPPORTED);
+  EXPECT_EQ(std::memcmp(&info, &original_info, sizeof(info)), 0);
+  EXPECT_EQ(address.available, original_address.available);
+  EXPECT_EQ(address.domain, original_address.domain);
+}
+
 TEST_F(DiscoveryTest, RejectsLocalityExtensionBeforeMutatingEitherOutput) {
   std::vector<amdf_endpoint_summary_t> summaries;
   ASSERT_TRUE(amdf_status_is_ok(Enumerate(&summaries)));

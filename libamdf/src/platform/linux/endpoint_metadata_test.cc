@@ -115,6 +115,13 @@ TEST_P(LinuxEndpointMetadataTest, DiscoversWithoutAnExecutionNode) {
   EXPECT_EQ(info.native_identity.value.linux_device.major, 511u);
   EXPECT_EQ(info.native_identity.value.linux_device.minor, 63u);
   EXPECT_EQ(amdf_platform_endpoint_host_numa_node(endpoint_), UINT32_MAX);
+  const auto* address = amdf_platform_endpoint_pci_address(endpoint_);
+  ASSERT_NE(address, nullptr);
+  EXPECT_EQ(address->available, 1u);
+  EXPECT_EQ(address->domain, 0u);
+  EXPECT_EQ(address->bus, 0u);
+  EXPECT_EQ(address->device, 0u);
+  EXPECT_EQ(address->function, 0u);
   EXPECT_EQ(amdf_platform_endpoint_query_queue_publication_modes(
                 endpoint_, AMDF_QUEUE_COMMAND_TYPE_XDNA),
             GetParam() == AMDF_ENGINE_KIND_XDNA

@@ -75,8 +75,9 @@ static uint64_t amdf_linux_identity_hash(uint64_t hash, const void* bytes,
 
 // Returns NOT_FOUND for a class member outside the native AMD PCI providers.
 // IO and malformed-attribute errors remain visible to the caller.
-static amdf_status_t amdf_linux_query_endpoint(int directory,
-                                               amdf_endpoint_info_t* info) {
+static amdf_status_t amdf_linux_query_endpoint(
+    int directory, amdf_endpoint_info_t* info,
+    amdf_endpoint_pci_address_t* address) {
   *info = (amdf_endpoint_info_t){
       .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
       .structure_size = sizeof(*info),
@@ -149,6 +150,9 @@ static amdf_status_t amdf_linux_query_endpoint(int directory,
   device_path[path_length] = 0;
   const char* pci_address = strrchr(device_path, '/');
   pci_address = pci_address ? pci_address + 1 : device_path;
+  if (address != NULL && !amdf_pci_parse_address(pci_address, address)) {
+    return amdf_linux_error(EPROTO);
+  }
   uint64_t hash = amdf_linux_identity_hash(UINT64_C(14695981039346656037),
                                            &info->pci, sizeof(info->pci));
   info->id.words[1] =
@@ -230,7 +234,7 @@ amdf_status_t amdf_platform_endpoint_enumerate(
         break;
       }
       amdf_endpoint_info_t info;
-      status = amdf_linux_query_endpoint(node, &info);
+      status = amdf_linux_query_endpoint(node, &info, NULL);
       const amdf_status_t close_status = amdf_linux_file_close(&node);
       if (!amdf_status_is_ok(close_status)) {
         status = close_status;
@@ -336,6 +340,7 @@ static amdf_status_t amdf_linux_endpoint_query_host_numa_node(
 static amdf_status_t amdf_linux_resolve_endpoint(
     amdf_platform_instance_t* instance, const amdf_endpoint_id_t* id,
     amdf_endpoint_info_t* info, uint32_t* out_host_numa_node,
+    amdf_endpoint_pci_address_t* out_pci_address,
     char device_path[AMDF_LINUX_DEVICE_PATH_CAPACITY]) {
   char path[64];
   snprintf(path, sizeof(path), "dev/char/%u:%u", (uint32_t)(id->words[0] >> 32),
@@ -346,7 +351,7 @@ static amdf_status_t amdf_linux_resolve_endpoint(
     return errno == ENOENT ? amdf_make_api_status(AMDF_STATUS_CODE_NOT_FOUND)
                            : amdf_linux_error(errno);
   }
-  amdf_status_t status = amdf_linux_query_endpoint(node, info);
+  amdf_status_t status = amdf_linux_query_endpoint(node, info, out_pci_address);
   if (amdf_status_is_ok(status) && !amdf_endpoint_id_is_equal(id, &info->id)) {
     status = amdf_make_api_status(AMDF_STATUS_CODE_NOT_FOUND);
   }
@@ -452,7 +457,8 @@ amdf_status_t amdf_platform_endpoint_open(
   endpoint->instance = instance;
   char device_path[AMDF_LINUX_DEVICE_PATH_CAPACITY];
   status = amdf_linux_resolve_endpoint(instance, id, &endpoint->info,
-                                       &endpoint->host_numa_node, device_path);
+                                       &endpoint->host_numa_node,
+                                       &endpoint->pci_address, device_path);
   if (amdf_status_is_ok(status)) {
     *out_info = endpoint->info;
     *out_endpoint = endpoint;
@@ -467,12 +473,17 @@ uint32_t amdf_platform_endpoint_host_numa_node(
   return endpoint->host_numa_node;
 }
 
+const amdf_endpoint_pci_address_t* amdf_platform_endpoint_pci_address(
+    const amdf_platform_endpoint_t* endpoint) {
+  return &endpoint->pci_address;
+}
+
 amdf_status_t amdf_linux_endpoint_open_file(
     const amdf_platform_endpoint_t* endpoint, int* out_descriptor) {
   amdf_endpoint_info_t info;
   char device_path[AMDF_LINUX_DEVICE_PATH_CAPACITY];
   const amdf_status_t status = amdf_linux_resolve_endpoint(
-      endpoint->instance, &endpoint->info.id, &info, NULL, device_path);
+      endpoint->instance, &endpoint->info.id, &info, NULL, NULL, device_path);
   if (!amdf_status_is_ok(status)) {
     return status;
   }

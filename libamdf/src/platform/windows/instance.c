@@ -24,8 +24,8 @@ amdf_status_t amdf_platform_instance_create(
   InitializeSRWLock(&instance->native_lock);
   status = amdf_kmt_api_initialize(&instance->kmt);
   if (amdf_status_is_ok(status)) {
-    status =
-        amdf_windows_host_locality_api_initialize(&instance->host_locality);
+    status = amdf_windows_endpoint_metadata_api_initialize(
+        &instance->endpoint_metadata);
   }
   if (amdf_status_is_ok(status)) {
     *out_instance = instance;
@@ -64,8 +64,8 @@ void amdf_platform_instance_unlock_native(amdf_platform_instance_t* instance) {
 
 amdf_status_t amdf_platform_instance_destroy(
     amdf_platform_instance_t* instance) {
-  amdf_status_t status =
-      amdf_windows_host_locality_api_deinitialize(&instance->host_locality);
+  amdf_status_t status = amdf_windows_endpoint_metadata_api_deinitialize(
+      &instance->endpoint_metadata);
   if (amdf_status_is_ok(status)) {
     status = amdf_kmt_api_deinitialize(&instance->kmt);
   }

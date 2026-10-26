@@ -7,6 +7,7 @@
 #include "libamdf/src/endpoint.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/child_tracker.h"
@@ -167,19 +168,40 @@ amdf_status_t AMDF_CALL amdf_endpoint_query_info(
     return status;
   }
 
-  amdf_endpoint_host_locality_t* locality = out_info->next;
-  if (locality != NULL) {
-    if (locality->type != AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY) {
-      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  if (out_info->next != NULL) {
+    amdf_structure_type_t type;
+    memcpy(&type, out_info->next, sizeof(type));
+    switch (type) {
+      case AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY: {
+        amdf_endpoint_host_locality_t* locality = out_info->next;
+        status =
+            amdf_structure_validate_output(locality, type, sizeof(*locality));
+        if (!amdf_status_is_ok(status)) {
+          return status;
+        }
+        locality->numa_node =
+            amdf_platform_endpoint_host_numa_node(endpoint->platform);
+        break;
+      }
+      case AMDF_STRUCTURE_TYPE_ENDPOINT_PCI_ADDRESS: {
+        amdf_endpoint_pci_address_t* address = out_info->next;
+        status =
+            amdf_structure_validate_output(address, type, sizeof(*address));
+        if (!amdf_status_is_ok(status)) {
+          return status;
+        }
+        const amdf_endpoint_pci_address_t* cached =
+            amdf_platform_endpoint_pci_address(endpoint->platform);
+        address->available = cached->available;
+        address->domain = cached->domain;
+        address->bus = cached->bus;
+        address->device = cached->device;
+        address->function = cached->function;
+        break;
+      }
+      default:
+        return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
     }
-    status = amdf_structure_validate_output(
-        locality, AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY,
-        sizeof(*locality));
-    if (!amdf_status_is_ok(status)) {
-      return status;
-    }
-    locality->numa_node =
-        amdf_platform_endpoint_host_numa_node(endpoint->platform);
   }
 
   const uint32_t structure_size = out_info->structure_size;

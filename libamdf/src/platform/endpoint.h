@@ -25,6 +25,11 @@ amdf_status_t amdf_platform_endpoint_open(
 uint32_t amdf_platform_endpoint_host_numa_node(
     const amdf_platform_endpoint_t* endpoint);
 
+// Borrows the physical PCI attachment address cached while opening the
+// endpoint.
+const amdf_endpoint_pci_address_t* amdf_platform_endpoint_pci_address(
+    const amdf_platform_endpoint_t* endpoint);
+
 // Queries publication paths implemented for one native command type.
 amdf_queue_publication_modes_t
 amdf_platform_endpoint_query_queue_publication_modes(

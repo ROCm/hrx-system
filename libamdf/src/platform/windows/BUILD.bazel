@@ -138,9 +138,9 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
-    name = "host_locality",
-    srcs = ["host_locality.c"],
-    hdrs = ["host_locality.h"],
+    name = "endpoint_metadata",
+    srcs = ["endpoint_metadata.c"],
+    hdrs = ["endpoint_metadata.h"],
     target_compatible_with = WINDOWS_COMPATIBILITY,
     deps = [
         ":kmt_api",
@@ -155,8 +155,8 @@ amdf_cc_library(
     target_compatible_with = WINDOWS_COMPATIBILITY,
     visibility = ["//libamdf/src/platform:__pkg__"],
     deps = [
+        ":endpoint_metadata",
         ":endpoint_snapshot",
-        ":host_locality",
         ":kmt_api",
         "//libamdf/src:allocator",
         "//libamdf/src/platform",
@@ -170,8 +170,8 @@ amdf_cc_library(
     target_compatible_with = WINDOWS_COMPATIBILITY,
     visibility = ["//libamdf/src:__subpackages__"],
     deps = [
+        ":endpoint_metadata",
         ":endpoint_properties",
-        ":host_locality",
         ":instance",
         "//libamdf/src:allocator",
         "//libamdf/src/platform",
@@ -200,11 +200,11 @@ amdf_cc_test(
 )
 
 amdf_cc_test(
-    name = "host_locality_test",
-    srcs = ["host_locality_test.cc"],
+    name = "endpoint_metadata_test",
+    srcs = ["endpoint_metadata_test.cc"],
     target_compatible_with = WINDOWS_COMPATIBILITY,
     deps = [
-        ":host_locality",
+        ":endpoint_metadata",
         ":kmt_api",
         "//libamdf/src:allocator",
         "//third_party:google_test",

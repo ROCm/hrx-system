@@ -82,8 +82,8 @@ typedef struct amdf_api_t {
   ///
   /// The operation is thread-safe and performs no allocation, locking or lazy
   /// initialization. It reads the snapshot established by endpoint_open, not
-  /// live driver state. The caller initializes `out_info` and its
-  /// complete extension chain before the call. No output is modified when
+  /// live driver state. The caller initializes `out_info` and its optional
+  /// output extension before the call. No output is modified when
   /// validation fails.
   amdf_status_t(AMDF_CALL* endpoint_query_info)(amdf_endpoint_t* endpoint,
                                                 amdf_endpoint_info_t* out_info);
