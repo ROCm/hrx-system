@@ -7,14 +7,14 @@ CPU observation of the decoded samples. Media/compute interoperability lives in
 
 The JPEG corpus covers complete eight-bit baseline 4:2:0 streams decoded into
 NV12 on the Linux JPEG engine. Both native image identities and direct plane
-operands run at 128×96 and 80×72. Sixteen pictures reuse four recordings across
-array layers; two separately activated media domains alternate original and
-inverse images into shared backing through native timeline dependencies. The
-application joins each eight-picture group, checks both queues' original
-execution outcomes, and reuses its fixed slots. Eventfd delivery, old-point
-notification, independent duplicate imports, subrange re-export, invalid plane
-extents, exact configuration rejection, and checked destruction exercise the
-same public lifetime as a pipelined consumer.
+operands run at 80×72, 128×96, and 320×240. Sixteen pictures reuse four
+recordings across array layers; two separately activated media domains alternate
+original and inverse images into shared backing through native timeline
+dependencies. The application joins each eight-picture group, checks both
+queues' original execution outcomes, and reuses its fixed slots. Eventfd
+delivery, old-point notification, independent duplicate imports, subrange
+re-export, invalid plane extents, exact configuration rejection, and checked
+destruction exercise the same public lifetime as a pipelined consumer.
 
 Every visible Y/U/V sample must differ from the independent CPU decode by at
 most one. The complete returned plane extent belongs to native decoding,
@@ -24,10 +24,11 @@ hardware-reset claim.
 
 ## Fixture provenance
 
-The eight files are four original synthetic inputs and their decoded samples,
+The twelve files are six compressed synthetic inputs and their decoded samples,
 created offline with FFmpeg 8.1.2. They introduce no codec dependency into the
-library or CTS executable. For each width/height, the source is planar full-range
-YUV420. Plane `p` (Y=0, U=1, V=2) uses coordinates local to that plane:
+library or CTS executable. For each width/height, the source is planar
+full-range YUV420. Plane `p` (Y=0, U=1, V=2) uses coordinates local to that
+plane:
 
 ```python
 sample = 32 + ((x * 7 + y * 11 + p * 43 + ((x // 8) ^ (y // 8)) * 17) % 192)
@@ -45,6 +46,23 @@ ffmpeg -i input.jpg -frames:v 1 -pix_fmt yuvj420p -f rawvideo decoded.yuv
 The `.nv12` fixture preserves decoded Y verbatim, then interleaves decoded U,V
 without scaling or color conversion. Fixture lookup uses embedded filenames,
 independent of build-system input ordering.
+
+The 320×240 pair exercises the native 256-row storage boundary while retaining
+240 visible rows. Each compressed input carries an APP1 segment with payload
+`AMDFCTS\0jpeg-padding-boundary` and a COM segment with payload
+`libamdf CTS: benign JPEG comment metadata` immediately after SOI, before the
+encoder's own COM segment. Inserting these segments leaves the independently
+decoded samples unchanged and proves that ordinary marker metadata survives the
+complete device-local input path.
+
+Artifact | SHA-256
+--- | ---
+320×240 planar source | `c3e26f914ab4e4aca16c5bf8c011b39dea8167577c0b18b23f8e10afb3350a3e`
+320×240 inverse planar source | `02552c499e974564bdf3ad8eb2abead6509f5acc366ea688820c96e7dd981a47`
+`jpeg_320x240.jpg` | `4d4a521761438cf6919e37d8d1d3712f1496700ea9fd6d4c739e27fda65b9db3`
+`jpeg_320x240.nv12` | `66412834da9c64c08f845710b90d888a50d7918f615e44ff53922b0b4694cd58`
+`jpeg_320x240_inverse.jpg` | `318a4356b38c4844315afc2f7cc1276b4089d9dcfd6c8c7db1f3a0e4dfb1ff43`
+`jpeg_320x240_inverse.nv12` | `72e012b8efa4250b94ee4de19a6fa24a6d253e501a75441a11b1d4e6aa827944`
 
 ## Video conformance
 

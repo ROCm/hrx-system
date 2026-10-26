@@ -851,7 +851,8 @@ TEST_P(MediaJpegTest, RejectsUnsupportedEnvelopesAndInvalidPlaneExtents) {
 INSTANTIATE_TEST_SUITE_P(
     NativeAndLinear, MediaJpegTest,
     ::testing::Values(Shape{128, 96, false}, Shape{80, 72, false},
-                      Shape{128, 96, true}, Shape{80, 72, true}),
+                      Shape{320, 240, false}, Shape{128, 96, true},
+                      Shape{80, 72, true}, Shape{320, 240, true}),
     [](const ::testing::TestParamInfo<Shape>& info) {
       return std::string(info.param.linear ? "Planes" : "Image") +
              std::to_string(info.param.width) + "x" +
