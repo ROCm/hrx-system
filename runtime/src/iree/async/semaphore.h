@@ -649,28 +649,13 @@ iree_async_semaphore_query_untainted_value(iree_async_semaphore_t* semaphore);
 // can use when implementing their vtables. This avoids duplicating timeline
 // tracking, frontier merging, and timepoint management across backends.
 //
-// Typical HAL signal implementation:
-//
-//   static iree_status_t my_semaphore_signal(
-//       iree_async_semaphore_t* base, uint64_t value,
-//       const iree_async_frontier_t* frontier) {
-//     my_semaphore_t* semaphore = (my_semaphore_t*)base;
-//
-//     // Advance timeline value and merge frontier.
-//     IREE_RETURN_IF_ERROR(
-//         iree_async_semaphore_advance_timeline(base, value, frontier));
-//
-//     // Signal the native device primitive.
-//     my_semaphore_signal_device(semaphore, value);
-//
-//     // Dispatch satisfied timepoints.
-//     iree_async_semaphore_dispatch_timepoints(base, value);
-//
-//     return iree_ok_status();
-//   }
+// Native backends must order native completion before host timeline publication
+// and serialize normal native signals with terminal failure signaling. These
+// helpers do not provide a transaction spanning a native signal operation.
 
 // Advances the timeline value (CAS) and merges the frontier.
-// Does NOT dispatch timepoints (caller does that after native signaling).
+// Newly acquired timepoints can complete as soon as the value is published.
+// Pending timepoints require a separate call to dispatch_timepoints.
 // A failed semaphore returns its original failure without changing either.
 //
 // Returns INVALID_ARGUMENT if the timeline is already at or past |value| —

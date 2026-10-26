@@ -144,6 +144,28 @@ endif()
 if(IREE_HAL_DRIVER_VULKAN)
 iree_cc_test(
   NAME
+    semaphore_test
+  SRCS
+    "semaphore.h"
+    "semaphore_test.cc"
+  DEPS
+    ::vulkan
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::hal::drivers::vulkan::util::libvulkan
+    iree::hal::utils::submitted_signal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=runtime.hal.vulkan"
+)
+endif()
+
+if(IREE_HAL_DRIVER_VULKAN)
+iree_cc_test(
+  NAME
     command_buffer_test
   SRCS
     "barrier.h"

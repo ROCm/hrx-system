@@ -671,9 +671,9 @@ iree_async_semaphore_query_untainted_value(iree_async_semaphore_t* semaphore) {
 IREE_API_EXPORT iree_status_t iree_async_semaphore_advance_timeline(
     iree_async_semaphore_t* semaphore, uint64_t value,
     const iree_async_frontier_t* frontier) {
-  // Advances the timeline value and merges the frontier, but does NOT dispatch
-  // timepoints. HAL implementations call this first, then signal their native
-  // primitive, then call dispatch_timepoints.
+  // Publishes the timeline value and merges the frontier without dispatching
+  // pending timepoints. Newly acquired timepoints can complete immediately
+  // after publication; this helper does not defer visibility to dispatch.
   //
   // Returns INVALID_ARGUMENT if the timeline is already at or past |value| —
   // each timeline value must be signaled exactly once and concurrent races are

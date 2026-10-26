@@ -205,33 +205,29 @@ bool iree_hal_vulkan_semaphore_publish_signal(
 
 static uint64_t iree_hal_vulkan_semaphore_observe_native_value(
     iree_async_semaphore_t* base_semaphore, uint64_t value) {
-  int64_t current_raw = 0;
-  do {
-    current_raw = iree_atomic_load(&base_semaphore->timeline_value,
-                                   iree_memory_order_acquire);
-    if (value <= (uint64_t)current_raw) {
-      return (uint64_t)current_raw;
-    }
-  } while (!iree_atomic_compare_exchange_weak(
-      &base_semaphore->timeline_value, &current_raw, (int64_t)value,
-      iree_memory_order_release, iree_memory_order_relaxed));
-
-  iree_async_semaphore_dispatch_timepoints(base_semaphore, value);
-  return value;
-}
-
-iree_status_t iree_hal_vulkan_semaphore_retire_signal(
-    iree_hal_semaphore_t* base_semaphore, uint64_t value,
-    const iree_async_frontier_t* frontier) {
-  iree_hal_vulkan_semaphore_t* semaphore =
-      iree_hal_vulkan_semaphore_cast(base_semaphore);
-  iree_status_t status =
-      iree_async_semaphore_signal_untainted(&semaphore->async, value, frontier);
-  if (!iree_status_is_ok(status)) {
-    iree_async_semaphore_fail(&semaphore->async, iree_status_clone(status));
-    return status;
+  uint64_t current_value = (uint64_t)iree_atomic_load(
+      &base_semaphore->timeline_value, iree_memory_order_acquire);
+  if (value <= current_value) {
+    return current_value;
   }
-  return iree_ok_status();
+
+  // A native query may observe a host signal before that signal publishes its
+  // frontier and host value. Serialize publication with the signaling thread.
+  iree_slim_mutex_lock(&base_semaphore->mutex);
+  current_value = (uint64_t)iree_atomic_load(&base_semaphore->timeline_value,
+                                             iree_memory_order_acquire);
+  const bool advanced = value > current_value;
+  if (advanced) {
+    iree_atomic_store(&base_semaphore->timeline_value, (int64_t)value,
+                      iree_memory_order_release);
+    current_value = value;
+  }
+  iree_slim_mutex_unlock(&base_semaphore->mutex);
+
+  if (advanced) {
+    iree_async_semaphore_dispatch_timepoints(base_semaphore, value);
+  }
+  return current_value;
 }
 
 static uint64_t iree_hal_vulkan_semaphore_query(
@@ -277,26 +273,56 @@ static iree_status_t iree_hal_vulkan_semaphore_signal(
 
   iree_hal_vulkan_semaphore_t* semaphore =
       iree_hal_vulkan_semaphore_cast(iree_hal_semaphore_cast(base_semaphore));
-  iree_status_t status = iree_async_semaphore_advance_timeline(
-      base_semaphore, new_value, frontier);
-  if (!iree_status_is_ok(status)) {
-    return status;
-  }
-
   VkSemaphoreSignalInfo signal_info = {
       .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO,
       .semaphore = semaphore->handle,
       .value = new_value,
   };
-  status = iree_vkSignalSemaphore(IREE_VULKAN_DEVICE(&semaphore->syms),
-                                  semaphore->logical_device, &signal_info);
-  if (!iree_status_is_ok(status)) {
-    iree_async_semaphore_fail(base_semaphore, iree_status_clone(status));
-    return status;
-  }
 
-  iree_async_semaphore_dispatch_timepoints(base_semaphore, new_value);
-  return iree_ok_status();
+  // Native signals must be ordered with the terminal failure signal. Publish
+  // the host value only after native success: newly acquired timepoints observe
+  // it directly, without waiting for dispatch_timepoints.
+  iree_slim_mutex_lock(&base_semaphore->mutex);
+  iree_status_t status = iree_status_clone((iree_status_t)iree_atomic_load(
+      &base_semaphore->failure_status, iree_memory_order_acquire));
+  VkResult result = VK_SUCCESS;
+  if (iree_status_is_ok(status)) {
+    uint64_t current_value = (uint64_t)iree_atomic_load(
+        &base_semaphore->timeline_value, iree_memory_order_acquire);
+    if (new_value <= current_value) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "semaphore already signaled past %" PRIu64,
+                                new_value);
+    } else {
+      result = iree_vkSignalSemaphore_raw(
+          &semaphore->syms, semaphore->logical_device, &signal_info);
+      // Failure publication is independent of the mutex. A failure arriving
+      // during the native call takes precedence over this signal's completion.
+      status = iree_status_clone((iree_status_t)iree_atomic_load(
+          &base_semaphore->failure_status, iree_memory_order_acquire));
+      if (result == VK_SUCCESS && iree_status_is_ok(status)) {
+        if (frontier != NULL && frontier->entry_count > 0) {
+          iree_async_frontier_merge(base_semaphore->frontier,
+                                    base_semaphore->frontier_capacity,
+                                    frontier);
+        }
+        iree_atomic_store(&base_semaphore->timeline_value, (int64_t)new_value,
+                          iree_memory_order_release);
+      }
+    }
+  }
+  iree_slim_mutex_unlock(&base_semaphore->mutex);
+
+  // Failure propagation and callbacks may reenter this semaphore.
+  if (result != VK_SUCCESS && iree_status_is_ok(status)) {
+    status = iree_status_from_vk_result(__FILE__, __LINE__, result,
+                                        "vkSignalSemaphore");
+    iree_async_semaphore_fail(base_semaphore, iree_status_clone(status));
+  }
+  if (iree_status_is_ok(status)) {
+    iree_async_semaphore_dispatch_timepoints(base_semaphore, new_value);
+  }
+  return status;
 }
 
 static void iree_hal_vulkan_semaphore_on_fail(
@@ -310,8 +336,10 @@ static void iree_hal_vulkan_semaphore_on_fail(
       .semaphore = semaphore->handle,
       .value = IREE_HAL_SEMAPHORE_FAILURE_VALUE,
   };
+  iree_slim_mutex_lock(&base_semaphore->mutex);
   VkResult result = iree_vkSignalSemaphore_raw(
       &semaphore->syms, semaphore->logical_device, &signal_info);
+  iree_slim_mutex_unlock(&base_semaphore->mutex);
   IREE_ASSERT(result == VK_SUCCESS || result == VK_ERROR_DEVICE_LOST);
   (void)result;
 }
@@ -336,6 +364,16 @@ static iree_status_t iree_hal_vulkan_semaphore_wait(
       iree_hal_vulkan_semaphore_cast(base_semaphore);
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  // Failure callbacks run before on_fail wakes native waiters. A callback may
+  // wait on this semaphore, so the recorded failure must bypass the native
+  // wait.
+  iree_status_t failure_status = (iree_status_t)iree_atomic_load(
+      &semaphore->async.failure_status, iree_memory_order_acquire);
+  if (!iree_status_is_ok(failure_status)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_status_clone(failure_status);
+  }
+
   VkSemaphore vk_semaphore = semaphore->handle;
   VkSemaphoreWaitInfo wait_info = {
       .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
@@ -348,25 +386,22 @@ static iree_status_t iree_hal_vulkan_semaphore_wait(
       iree_hal_vulkan_timeout_to_nanoseconds(timeout));
 
   iree_status_t status = iree_ok_status();
-  if (result == VK_SUCCESS) {
-    iree_status_t failure_status = (iree_status_t)iree_atomic_load(
-        &((iree_async_semaphore_t*)base_semaphore)->failure_status,
-        iree_memory_order_acquire);
-    if (!iree_status_is_ok(failure_status)) {
-      status = iree_status_clone(failure_status);
-    } else {
-      uint64_t current_value = 0;
-      result = iree_vkGetSemaphoreCounterValue_raw(
-          &semaphore->syms, semaphore->logical_device, semaphore->handle,
-          &current_value);
-      if (result == VK_SUCCESS &&
-          current_value < IREE_HAL_SEMAPHORE_FAILURE_VALUE) {
-        iree_hal_vulkan_semaphore_observe_native_value(
-            (iree_async_semaphore_t*)base_semaphore, current_value);
-      } else if (result != VK_SUCCESS) {
-        status = iree_status_from_vk_result(__FILE__, __LINE__, result,
-                                            "vkGetSemaphoreCounterValue");
-      }
+  failure_status = (iree_status_t)iree_atomic_load(
+      &semaphore->async.failure_status, iree_memory_order_acquire);
+  if (!iree_status_is_ok(failure_status)) {
+    status = iree_status_clone(failure_status);
+  } else if (result == VK_SUCCESS) {
+    uint64_t current_value = 0;
+    result = iree_vkGetSemaphoreCounterValue_raw(
+        &semaphore->syms, semaphore->logical_device, semaphore->handle,
+        &current_value);
+    if (result == VK_SUCCESS &&
+        current_value < IREE_HAL_SEMAPHORE_FAILURE_VALUE) {
+      iree_hal_vulkan_semaphore_observe_native_value(
+          (iree_async_semaphore_t*)base_semaphore, current_value);
+    } else if (result != VK_SUCCESS) {
+      status = iree_status_from_vk_result(__FILE__, __LINE__, result,
+                                          "vkGetSemaphoreCounterValue");
     }
   } else {
     status = iree_status_from_vk_result(__FILE__, __LINE__, result,

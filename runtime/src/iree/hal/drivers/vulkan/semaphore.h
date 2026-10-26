@@ -56,11 +56,6 @@ bool iree_hal_vulkan_semaphore_publish_signal(
     const iree_async_frontier_t* producer_frontier, uint64_t producer_epoch,
     uint64_t producer_value);
 
-// Advances the HAL/async timeline after a native queue signal has retired.
-iree_status_t iree_hal_vulkan_semaphore_retire_signal(
-    iree_hal_semaphore_t* semaphore, uint64_t value,
-    const iree_async_frontier_t* frontier);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
