@@ -27,7 +27,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 66u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 67u
 
 // Sentinel for absent target-family or descriptor-set stable IDs.
 #define LOOM_LOW_STABLE_ID_NONE UINT64_C(0)
@@ -538,6 +538,11 @@ typedef uint16_t loom_low_descriptor_flags_t;
 #define LOOM_LOW_DESCRIPTOR_FLAG_LATE_READ ((uint16_t)1u << 12)
 // At least one result must occupy the same physical storage as an input.
 #define LOOM_LOW_DESCRIPTOR_FLAG_TIED_RESULTS ((uint16_t)1u << 13)
+// Every architectural state write is an implicit, whole-register,
+// commutative, idempotent update coupled to live SSA results. Repeating an
+// identical packet under the same implicit-state read epochs adds no state.
+// The packet remains dead-removable when all SSA results are unused.
+#define LOOM_LOW_DESCRIPTOR_FLAG_IDEMPOTENT_STATE_UPDATE ((uint16_t)1u << 14)
 
 // Target-neutral semantic classes attached to generated low descriptors.
 // Multiple classes may be present when a packet contributes to several
@@ -1554,6 +1559,10 @@ typedef enum loom_low_descriptor_set_flag_bits_e {
   // Source legality establishes this before lowering; authored Low is checked
   // at its input boundary. Emitters consume the established representation.
   LOOM_LOW_DESCRIPTOR_SET_FLAG_REQUIRES_STRUCTURED_CONTROL_FLOW = 1u << 1,
+  // At least one descriptor has a result-coupled idempotent state update.
+  // Low CSE uses this generated summary to avoid content-identity tracking for
+  // targets that cannot benefit from it.
+  LOOM_LOW_DESCRIPTOR_SET_FLAG_IDEMPOTENT_STATE_UPDATES = 1u << 2,
 } loom_low_descriptor_set_flag_bits_t;
 typedef uint8_t loom_low_descriptor_set_flags_t;
 

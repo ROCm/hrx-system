@@ -35,6 +35,22 @@ COMPILE-REPORT: source_low[11] function=nonlinear_selection source_op=scalar.cos
 
 // ====
 
+// The independently selected radians recipes share their complete phase
+// reduction during Low CSE. The pass statistic covers the large lowering
+// without checking in its generated machine IR.
+// RUN: with-checks pass-report target=amd.xdna.aie2p:core source-to-low,low-cse,low-dce
+
+func.def @shared_phase(%angle: f32) -> (f32, f32) {
+  %sine = scalar.sinf<afn> %angle : f32
+  %cosine = scalar.cosf<afn> %angle : f32
+  func.return %sine, %cosine : f32, f32
+}
+
+// ----
+CHECK: *"pass":"low-cse","kind":"func",*"symbol":"shared_phase",*"statistics":{"expressions-eliminated":67}*
+
+// ====
+
 // RUN: compile-report target=amd.xdna.aie2p:core legalize-math,dce,canonicalize,source-to-low,low-dce
 
 func.def @scalar_f32_silu(%input: f32) -> (f32) {

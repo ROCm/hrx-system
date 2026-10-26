@@ -1775,6 +1775,10 @@ TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR = Descriptor(
     ),
     asm_forms=_asm(results=("dst",), operands=("value",)),
     schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(
+        DescriptorFlag.DEAD_REMOVABLE,
+        DescriptorFlag.IDEMPOTENT_STATE_UPDATE,
+    ),
 )
 
 TEST_LOW_SCHEDULE_STATE_UPDATE_I32_DESCRIPTOR = replace(
@@ -1793,6 +1797,18 @@ TEST_LOW_SCHEDULE_STATE_UPDATE_I32_DESCRIPTOR = replace(
                 OperandFlag.COMMUTATIVE_STATE_UPDATE,
             ),
         ),
+    ),
+    flags=(),
+)
+
+TEST_LOW_STATE_UPDATE_READ_SCHEDULE_I32_DESCRIPTOR = replace(
+    TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR,
+    key="test.state.update.read_schedule.i32",
+    mnemonic="test.state.update.read_schedule.i32",
+    semantic_tag="test.state.update.read_schedule.i32",
+    operands=(
+        *TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR.operands,
+        _schedule_state_read(),
     ),
 )
 
@@ -2804,6 +2820,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_STATE_ASSIGN_I32_IMMEDIATE_DESCRIPTOR,
         TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR,
         TEST_LOW_SCHEDULE_STATE_UPDATE_I32_DESCRIPTOR,
+        TEST_LOW_STATE_UPDATE_READ_SCHEDULE_I32_DESCRIPTOR,
         TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
         TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
         TEST_LOW_STATE_READ_I32_DESCRIPTOR,

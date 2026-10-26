@@ -12,6 +12,8 @@ import pytest
 
 from loom.gen.target.low import validation
 from loom.target.low_descriptors import (
+    Constraint,
+    ConstraintKind,
     DescriptorFlag,
     Effect,
     EffectKind,
@@ -26,6 +28,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_CORE_DESCRIPTOR_SET,
     TEST_LOW_STATE_ASSIGN_I32_DESCRIPTOR,
     TEST_LOW_STATE_ASSIGN_I32_IMMEDIATE_DESCRIPTOR,
+    TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR,
 )
 
 _TOTAL_ADD = replace(
@@ -190,3 +193,75 @@ def test_replacement_is_not_a_commutative_update() -> None:
     descriptor = replace(_COMMUTATIVE_ADD, flags=(DescriptorFlag.STATE_ASSIGNMENT,))
     with pytest.raises(ValueError, match="state assignment cannot promise commutative updates"):
         validation.validate_descriptor_operands(descriptor)
+
+
+def test_idempotent_update_accepts_result_coupled_commutative_state() -> None:
+    validation.validate_descriptor_idempotent_state_update(TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR, _STATE_CLASSES)
+    validation.validate_descriptor_idempotent_state_update(TEST_LOW_ADD_I32_DESCRIPTOR, _STATE_CLASSES)
+
+
+@pytest.mark.parametrize(
+    ("descriptor", "message"),
+    [
+        (
+            replace(TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR, flags=(DescriptorFlag.IDEMPOTENT_STATE_UPDATE,)),
+            "couple its updates",
+        ),
+        (
+            replace(TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR, operands=TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR.operands[1:]),
+            "produce an SSA result",
+        ),
+        (
+            replace(
+                TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR,
+                operands=TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR.operands[:2],
+            ),
+            "must update architectural state",
+        ),
+        (
+            replace(
+                TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR,
+                operands=(
+                    *TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR.operands[:2],
+                    replace(
+                        TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR.operands[2],
+                        flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_WRITE),
+                    ),
+                ),
+            ),
+            "implicit commutative updates",
+        ),
+        (
+            replace(
+                TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR,
+                constraints=(Constraint(ConstraintKind.TIED, 0, 1),),
+            ),
+            "cannot transfer input storage ownership",
+        ),
+    ],
+)
+def test_idempotent_update_rejects_incomplete_contracts(descriptor, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        validation.validate_descriptor_idempotent_state_update(descriptor, _STATE_CLASSES)
+
+
+def test_idempotent_update_rejects_independent_effects_and_state_feedback() -> None:
+    descriptor = replace(
+        TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR,
+        effects=(Effect(EffectKind.READ, MemorySpace.GLOBAL),),
+    )
+    with pytest.raises(ValueError, match="no independent effects"):
+        validation.validate_descriptor_idempotent_state_update(descriptor, _STATE_CLASSES)
+
+    write = TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR.operands[2]
+    same_state_read = replace(
+        write,
+        field_name="state_in",
+        flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_READ),
+    )
+    descriptor = replace(
+        TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR,
+        operands=(*TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR.operands, same_state_read),
+    )
+    with pytest.raises(ValueError, match="cannot read a state register it updates"):
+        validation.validate_descriptor_idempotent_state_update(descriptor, _STATE_CLASSES)

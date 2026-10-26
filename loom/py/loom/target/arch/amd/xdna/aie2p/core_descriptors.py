@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from itertools import combinations, product
 from math import gcd
 from pathlib import Path
@@ -1314,6 +1315,52 @@ def _descriptor_flags(
     return tuple(result)
 
 
+def _descriptor_has_idempotent_sticky_updates(descriptor: Descriptor) -> bool:
+    """Returns whether only result-coupled sticky updates affect state."""
+    forbidden = {
+        DescriptorFlag.SIDE_EFFECTING,
+        DescriptorFlag.TERMINATOR,
+        DescriptorFlag.BARRIER,
+        DescriptorFlag.PSEUDO,
+        DescriptorFlag.UNIQUE_IDENTITY,
+        DescriptorFlag.VARIADIC_OPERANDS,
+        DescriptorFlag.ALLOCATION_MOVE,
+        DescriptorFlag.SAFE_TO_SPECULATE,
+        DescriptorFlag.STATE_ASSIGNMENT,
+    }
+    if (
+        DescriptorFlag.DEAD_REMOVABLE not in descriptor.flags
+        or forbidden.intersection(descriptor.flags)
+        or descriptor.effects
+        or descriptor.storage_leases
+        or not any(
+            operand.role is OperandRole.RESULT for operand in descriptor.operands
+        )
+        or any(
+            constraint.kind in (ConstraintKind.TIED, ConstraintKind.DESTRUCTIVE)
+            for constraint in descriptor.constraints
+        )
+    ):
+        return False
+    writes = tuple(
+        operand
+        for operand in descriptor.operands
+        if OperandFlag.STATE_WRITE in operand.flags
+    )
+    if not writes or any(
+        operand.role is not OperandRole.IMPLICIT
+        or OperandFlag.COMMUTATIVE_STATE_UPDATE not in operand.flags
+        for operand in writes
+    ):
+        return False
+    write_classes = {operand.reg_alts[0].reg_class for operand in writes}
+    return not any(
+        OperandFlag.STATE_READ in operand.flags
+        and operand.reg_alts[0].reg_class in write_classes
+        for operand in descriptor.operands
+    )
+
+
 def _instruction_classes(
     spec: descriptor_specs._DescriptorSpec,
     form: MachineForm,
@@ -1517,6 +1564,14 @@ def _descriptor(spec: descriptor_specs._DescriptorSpec) -> Descriptor:
         ),
         instruction_classes=_instruction_classes(spec, form),
     )
+    if _descriptor_has_idempotent_sticky_updates(descriptor):
+        descriptor = replace(
+            descriptor,
+            flags=(
+                *descriptor.flags,
+                DescriptorFlag.IDEMPOTENT_STATE_UPDATE,
+            ),
+        )
     expected_fields = {
         field.name for field in _INSTRUCTION_ENCODINGS[spec.form_name].fields
     }

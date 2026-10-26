@@ -26,6 +26,12 @@ extern "C" {
 typedef struct loom_expression_walk_t loom_expression_walk_t;
 typedef struct loom_expression_scope_t loom_expression_scope_t;
 
+// Returns the caller-owned semantic identity for one SSA value. The returned
+// key need not name a live value, but equal keys must mean equal value content
+// for the lifetime of the expression walk.
+typedef loom_value_id_t (*loom_expression_value_identity_fn_t)(
+    void* user_data, loom_value_id_t value_id);
+
 // Compares the semantic identity of two operations for one availability walk.
 // The caller's hash must describe the same identity relation.
 typedef bool (*loom_expression_identity_equal_fn_t)(void* user_data,
@@ -108,10 +114,23 @@ const loom_dominance_info_t* loom_expression_walk_dominance_info(
 // Hashes regionless operations by their exact SSA structural identity.
 uint32_t loom_expression_hash(const loom_module_t* module, const loom_op_t* op);
 
+// Hashes regionless operations after replacing each operand with the
+// caller-indexed semantic value identity. All non-operand structure remains
+// exact. |value_identity| must be paired with the matching equality helper.
+uint32_t loom_expression_hash_with_value_identity(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_expression_value_identity_fn_t value_identity, void* user_data);
+
 // Compares regionless operations by kind, exact SSA operands, result types,
 // attribute contents, operand segments, and instance flags.
 bool loom_expression_equal(const loom_module_t* module, const loom_op_t* a,
                            const loom_op_t* b);
+
+// Compares operations after replacing each operand with the caller-indexed
+// semantic value identity. All non-operand structure remains exact.
+bool loom_expression_equal_with_value_identity(
+    const loom_module_t* module, const loom_op_t* a, const loom_op_t* b,
+    loom_expression_value_identity_fn_t value_identity, void* user_data);
 
 // Finds the nearest equivalent producer visible from |cursor| in the shared
 // index, without walking enclosing scopes. The caller-supplied hash must match

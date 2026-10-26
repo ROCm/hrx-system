@@ -2444,7 +2444,9 @@ static iree_status_t loom_low_verify_descriptor(
           LOOM_LOW_DESCRIPTOR_FLAG_ENUM_IMMEDIATES |
           LOOM_LOW_DESCRIPTOR_FLAG_SAFE_TO_SPECULATE |
           LOOM_LOW_DESCRIPTOR_FLAG_STATE_ASSIGNMENT |
-          LOOM_LOW_DESCRIPTOR_FLAG_LATE_READ,
+          LOOM_LOW_DESCRIPTOR_FLAG_LATE_READ |
+          LOOM_LOW_DESCRIPTOR_FLAG_TIED_RESULTS |
+          LOOM_LOW_DESCRIPTOR_FLAG_IDEMPOTENT_STATE_UPDATE,
       "descriptor", descriptor_index));
   iree_string_view_t descriptor_key = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(

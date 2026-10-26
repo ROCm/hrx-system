@@ -42,9 +42,8 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i64x8_uniform_shi
   %47 = add.shift %46, -32
   %50 = vups.2x.x-to-c.signed %29, %20
   %51 = vsrs.2x.c-to-x.signed %50, %47
-  %52 = vups.2x.x-to-c.signed %29, %20
   %53 = mov.shift 31
-  %54 = vsrs.2x.c-to-x.signed %52, %53
+  %54 = vsrs.2x.c-to-x.signed %50, %53
   %signed = vshuffle %51, %54, %24
   return %left, %logical, %signed
 }

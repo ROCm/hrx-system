@@ -22,8 +22,8 @@ low.func.def target<amd.xdna.aie2p.core> @consumed_accumulator(%left: reg<aie2p.
 
 // ====
 
-// Native floating operations write architectural exception state. CSE retains
-// repeated operations as well as different controls and operation kinds.
+// Native floating operations update idempotent sticky exception state. Equal
+// packets may share; different controls and operation kinds remain distinct.
 // RUN: with-low-asm pass low-cse,low-dce
 
 low.func.def target<amd.xdna.aie2p.core> @native_controls(%left: reg<aie2p.vec256 x4>, %right: reg<aie2p.vec256 x4>, %accumulator: reg<aie2p.mbms x4>, %mode0: reg<aie2p.er>, %mode1: reg<aie2p.er>) -> (reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>) asm {
@@ -38,11 +38,32 @@ low.func.def target<amd.xdna.aie2p.core> @native_controls(%left: reg<aie2p.vec25
 // ----
 low.func.def target<amd.xdna.aie2p.core> @native_controls(%left: reg<aie2p.vec256 x4>, %right: reg<aie2p.vec256 x4>, %accumulator: reg<aie2p.mbms x4>, %mode0: reg<aie2p.er>, %mode1: reg<aie2p.er>) -> (reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>) asm {
   %product = mnegmul.bf16.y-y %left, %right, %mode0
-  %repeated = mnegmul.bf16.y-y %left, %right, %mode0
   %other_mode = mnegmul.bf16.y-y %left, %right, %mode1
   %difference = mms.bf16.y-y %accumulator, %left, %right, %mode0
   %negative = vneg.f32x64 %accumulator, %mode0
-  return %product, %repeated, %other_mode, %difference, %negative
+  return %product, %product, %other_mode, %difference, %negative
+}
+
+// ====
+
+// Independently allocated accumulator views carry the same bits. Conversion
+// results and their sticky updates share without merging the copies.
+// RUN: with-low-asm pass low-cse
+
+low.func.def target<amd.xdna.aie2p.core> @sticky_conversion_through_copies(%source: reg<aie2p.mbms>) -> (reg<aie2p.vec256>, reg<aie2p.vec256>) asm {
+  %first_input = copy %source : reg<aie2p.mbms> -> reg<aie2p.ebmll>
+  %first = vconv.bf16.fp32x16.low %first_input
+  %second_input = copy %source : reg<aie2p.mbms> -> reg<aie2p.ebmll>
+  %second = vconv.bf16.fp32x16.low %second_input
+  return %first, %second
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> @sticky_conversion_through_copies(%source: reg<aie2p.mbms>) -> (reg<aie2p.vec256>, reg<aie2p.vec256>) asm {
+  %first_input = copy %source : reg<aie2p.mbms> -> reg<aie2p.ebmll>
+  %first = vconv.bf16.fp32x16.low %first_input
+  %second_input = copy %source : reg<aie2p.mbms> -> reg<aie2p.ebmll>
+  return %first, %first
 }
 
 // ====

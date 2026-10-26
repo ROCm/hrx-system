@@ -1962,6 +1962,7 @@ def test_native_sticky_updates_are_distinct_from_replacement_writes() -> None:
         for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
     }
     seen_registers = set()
+    idempotent_descriptors = set()
     for spec in _DESCRIPTOR_SPECS:
         native_updates = (
             set(_MACHINE_FORMS[spec.form_name].implicit_defs) & sticky_registers
@@ -1981,7 +1982,58 @@ def test_native_sticky_updates_are_distinct_from_replacement_writes() -> None:
             assert ".operand.sticky_update." in operand.write_event
         assert actual_fields == expected_fields
         seen_registers.update(native_updates)
+        descriptor = descriptors[spec.key]
+        state_writes = tuple(
+            operand
+            for operand in descriptor.operands
+            if OperandFlag.STATE_WRITE in operand.flags
+        )
+        written_classes = {operand.reg_alts[0].reg_class for operand in state_writes}
+        forbidden_flags = {
+            DescriptorFlag.SIDE_EFFECTING,
+            DescriptorFlag.TERMINATOR,
+            DescriptorFlag.BARRIER,
+            DescriptorFlag.PSEUDO,
+            DescriptorFlag.UNIQUE_IDENTITY,
+            DescriptorFlag.VARIADIC_OPERANDS,
+            DescriptorFlag.ALLOCATION_MOVE,
+            DescriptorFlag.SAFE_TO_SPECULATE,
+            DescriptorFlag.STATE_ASSIGNMENT,
+        }
+        eligible = (
+            DescriptorFlag.DEAD_REMOVABLE in descriptor.flags
+            and not forbidden_flags.intersection(descriptor.flags)
+            and not descriptor.effects
+            and not descriptor.storage_leases
+            and any(
+                operand.role is OperandRole.RESULT for operand in descriptor.operands
+            )
+            and bool(state_writes)
+            and all(
+                operand.role is OperandRole.IMPLICIT
+                and OperandFlag.COMMUTATIVE_STATE_UPDATE in operand.flags
+                for operand in state_writes
+            )
+            and not any(
+                constraint.kind in (ConstraintKind.TIED, ConstraintKind.DESTRUCTIVE)
+                for constraint in descriptor.constraints
+            )
+            and not any(
+                OperandFlag.STATE_READ in operand.flags
+                and operand.reg_alts[0].reg_class in written_classes
+                for operand in descriptor.operands
+            )
+        )
+        assert (DescriptorFlag.IDEMPOTENT_STATE_UPDATE in descriptor.flags) == eligible
+        if eligible:
+            idempotent_descriptors.add(descriptor.key)
     assert {"srF2BFlags", "srFPFlags"} <= seen_registers
+    assert {
+        "amd.xdna.aie2p.convert.f32x16.to.bf16x16.low",
+        "amd.xdna.aie2p.multiply.bf16x32.configured",
+        "amd.xdna.aie2p.accumulate.bf16x16.configured",
+        "amd.xdna.aie2p.sub.f32x16.configured",
+    } <= idempotent_descriptors
 
 
 def test_implicit_registers_and_machine_ties_reach_low() -> None:

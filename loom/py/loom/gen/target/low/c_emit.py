@@ -30,6 +30,7 @@ from loom.gen.target.low.compiled import (
 from loom.target.low_descriptors import (
     LOW_DESCRIPTOR_SET_ORDINAL_NONE,
     Descriptor,
+    DescriptorFlag,
     DescriptorSet,
     Hazard,
     HazardReferenceKind,
@@ -1388,6 +1389,8 @@ def emit_source_for_views(
             view_flags.append("LOOM_LOW_DESCRIPTOR_SET_FLAG_NATIVE_SCHEDULING")
         if view_spec.requires_structured_control_flow:
             view_flags.append("LOOM_LOW_DESCRIPTOR_SET_FLAG_REQUIRES_STRUCTURED_CONTROL_FLOW")
+        if any(DescriptorFlag.IDEMPOTENT_STATE_UPDATE in descriptor.flags for descriptor in view.descriptors):
+            view_flags.append("LOOM_LOW_DESCRIPTOR_SET_FLAG_IDEMPOTENT_STATE_UPDATES")
         descriptor_table_symbol = descriptor_table_symbols[view_spec.key]
         descriptor_view_table_symbol = descriptor_view_table_symbols[view_spec.key]
         descriptor_ref_table_symbol = descriptor_ref_table_symbols[view_spec.key]

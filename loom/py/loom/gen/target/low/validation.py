@@ -1539,6 +1539,58 @@ def validate_descriptor_state_assignment(descriptor: Descriptor, register_classe
             raise ValueError(f"{description} may only have explicit inputs and the assigned state result")
 
 
+def validate_descriptor_idempotent_state_update(descriptor: Descriptor, register_classes: Mapping[str, RegClass]) -> None:
+    """Checks a result-coupled idempotent architectural-state update."""
+    if DescriptorFlag.IDEMPOTENT_STATE_UPDATE not in descriptor.flags:
+        return
+    description = f"descriptor '{descriptor.key}' idempotent state update"
+    forbidden = {
+        DescriptorFlag.SIDE_EFFECTING,
+        DescriptorFlag.TERMINATOR,
+        DescriptorFlag.BARRIER,
+        DescriptorFlag.PSEUDO,
+        DescriptorFlag.UNIQUE_IDENTITY,
+        DescriptorFlag.VARIADIC_OPERANDS,
+        DescriptorFlag.ALLOCATION_MOVE,
+        DescriptorFlag.SAFE_TO_SPECULATE,
+        DescriptorFlag.STATE_ASSIGNMENT,
+    }
+    if forbidden.intersection(descriptor.flags) or descriptor.effects or descriptor.storage_leases:
+        raise ValueError(f"{description} must have no independent effects")
+    if DescriptorFlag.DEAD_REMOVABLE not in descriptor.flags:
+        raise ValueError(f"{description} must couple its updates to live SSA results")
+    if not any(operand.role is OperandRole.RESULT for operand in descriptor.operands):
+        raise ValueError(f"{description} must produce an SSA result")
+    if any(constraint.kind in (ConstraintKind.TIED, ConstraintKind.DESTRUCTIVE) for constraint in descriptor.constraints):
+        raise ValueError(f"{description} cannot transfer input storage ownership")
+
+    writes = [operand for operand in descriptor.operands if OperandFlag.STATE_WRITE in operand.flags]
+    if not writes:
+        raise ValueError(f"{description} must update architectural state")
+    write_classes = set()
+    for write in writes:
+        required = {
+            OperandFlag.IMPLICIT,
+            OperandFlag.STATE_WRITE,
+            OperandFlag.COMMUTATIVE_STATE_UPDATE,
+        }
+        if write.role is not OperandRole.IMPLICIT or not required.issubset(write.flags):
+            raise ValueError(f"{description} writes must be implicit commutative updates")
+        if write.unit_count != 1 or any(alternative.register_part is not None for alternative in write.reg_alts):
+            raise ValueError(f"{description} must update whole state registers")
+        register_class_name = write.reg_alts[0].reg_class
+        register_class = register_classes[register_class_name]
+        if _register_class_allocatable_count(register_class) != 1:
+            raise ValueError(f"{description} must name singleton architectural state")
+        write_classes.add(register_class_name)
+
+    for read in descriptor.operands:
+        if OperandFlag.STATE_READ not in read.flags:
+            continue
+        if read.reg_alts[0].reg_class in write_classes:
+            raise ValueError(f"{description} cannot read a state register it updates")
+
+
 def validate_register_part(part: RegisterPart) -> None:
     if part.mask == 0:
         raise ValueError(f"register part '{part.name}' has an empty mask")

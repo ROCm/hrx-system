@@ -413,6 +413,33 @@ low.func.def target<test.low.core>(@test_target) @low_structural_identities_do_n
 
 // ====
 
+// Ordinary descriptor expressions continue to compare exact SSA operands.
+// Equal content in independent copies does not license sharing their results.
+// RUN: with-low-asm pass low-cse
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @ordinary_descriptors_keep_exact_operand_identity(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %copy0 = copy %lhs : reg<test.i32> -> reg<test.i32>
+  %sum0 = test.add.i32 %copy0, %rhs
+  %copy1 = copy %lhs : reg<test.i32> -> reg<test.i32>
+  %sum1 = test.add.i32 %copy1, %rhs
+  return %sum0, %sum1
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @ordinary_descriptors_keep_exact_operand_identity(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %copy0 = copy %lhs : reg<test.i32> -> reg<test.i32>
+  %sum0 = test.add.i32 %copy0, %rhs
+  %copy1 = copy %lhs : reg<test.i32> -> reg<test.i32>
+  %sum1 = test.add.i32 %copy1, %rhs
+  return %sum0, %sum1
+}
+
+// ====
+
 // Implicit reads share only within the same architectural state epoch.
 // RUN: with-low-asm pass low-cse
 test.target<low_core> @target

@@ -25,14 +25,17 @@
 // Result types are included because they are not always derivable from
 // (kind, operands, attributes) — cast and conversion ops can produce
 // different result types from the same operands.
-uint32_t loom_expression_hash(const loom_module_t* module,
-                              const loom_op_t* op) {
+uint32_t loom_expression_hash_with_value_identity(
+    const loom_module_t* module, const loom_op_t* op,
+    loom_expression_value_identity_fn_t value_identity, void* user_data) {
   uint32_t hash = loom_structural_hash_initialize();
   hash = loom_structural_hash_mix_u16(hash, op->kind);
   hash = loom_structural_hash_mix_u16(hash, op->operand_count);
-  const loom_value_id_t* operands = loom_op_operands((loom_op_t*)op);
+  const loom_value_id_t* operands = loom_op_const_operands(op);
   for (uint16_t i = 0; i < op->operand_count; ++i) {
-    hash = loom_structural_hash_mix_u32(hash, operands[i]);
+    const loom_value_id_t identity =
+        value_identity ? value_identity(user_data, operands[i]) : operands[i];
+    hash = loom_structural_hash_mix_u32(hash, identity);
   }
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
   uint8_t operand_segment_count = loom_op_vtable_operand_segment_count(vtable);
@@ -63,12 +66,19 @@ uint32_t loom_expression_hash(const loom_module_t* module,
   return loom_structural_hash_finalize(hash);
 }
 
+uint32_t loom_expression_hash(const loom_module_t* module,
+                              const loom_op_t* op) {
+  return loom_expression_hash_with_value_identity(
+      module, op, /*value_identity=*/NULL, /*user_data=*/NULL);
+}
+
 // Structural equality: two ops are CSE-equivalent if they have the
 // same kind, operands (same value IDs in same order), result types
 // (checked via the module's value table), attributes (structurally
 // equal via loom_attribute_equal), instance flags, and no regions.
-bool loom_expression_equal(const loom_module_t* module, const loom_op_t* a,
-                           const loom_op_t* b) {
+bool loom_expression_equal_with_value_identity(
+    const loom_module_t* module, const loom_op_t* a, const loom_op_t* b,
+    loom_expression_value_identity_fn_t value_identity, void* user_data) {
   if (a->kind != b->kind) {
     return false;
   }
@@ -87,12 +97,18 @@ bool loom_expression_equal(const loom_module_t* module, const loom_op_t* a,
   if (a->region_count > 0) {
     return false;
   }
-  const loom_value_id_t* a_operands = loom_op_operands((loom_op_t*)a);
-  const loom_value_id_t* b_operands = loom_op_operands((loom_op_t*)b);
-  if (memcmp(a_operands, b_operands,
-             (iree_host_size_t)a->operand_count * sizeof(loom_value_id_t)) !=
-      0) {
-    return false;
+  const loom_value_id_t* a_operands = loom_op_const_operands(a);
+  const loom_value_id_t* b_operands = loom_op_const_operands(b);
+  for (uint16_t i = 0; i < a->operand_count; ++i) {
+    const loom_value_id_t a_identity =
+        value_identity ? value_identity(user_data, a_operands[i])
+                       : a_operands[i];
+    const loom_value_id_t b_identity =
+        value_identity ? value_identity(user_data, b_operands[i])
+                       : b_operands[i];
+    if (a_identity != b_identity) {
+      return false;
+    }
   }
   const loom_op_vtable_t* vtable = loom_op_vtable(module, a);
   uint8_t operand_segment_count = loom_op_vtable_operand_segment_count(vtable);
@@ -124,6 +140,12 @@ bool loom_expression_equal(const loom_module_t* module, const loom_op_t* a,
     }
   }
   return true;
+}
+
+bool loom_expression_equal(const loom_module_t* module, const loom_op_t* a,
+                           const loom_op_t* b) {
+  return loom_expression_equal_with_value_identity(
+      module, a, b, /*value_identity=*/NULL, /*user_data=*/NULL);
 }
 
 //===----------------------------------------------------------------------===//

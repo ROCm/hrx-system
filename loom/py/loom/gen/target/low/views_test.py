@@ -27,6 +27,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_LOAD_V4I32_DESCRIPTOR,
     TEST_LOW_STATE_ADD_I32_DESCRIPTOR,
     TEST_LOW_STATE_ADD_I32_RHS_ZERO_DESCRIPTOR,
+    TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR,
 )
 
 
@@ -282,6 +283,26 @@ def test_effect_timing_summary_uses_selected_effect_endpoints(descriptor_keys: t
         )
         assert f".flags = {expected_descriptor_flags}," in descriptor_set
         assert f".flags = {expected_model_flags}," in schedule_model
+
+
+@pytest.mark.parametrize(
+    ("descriptor_key", "expected"),
+    [
+        ("test.add.i32", False),
+        (TEST_LOW_STATE_UPDATE_I32_DESCRIPTOR.key, True),
+    ],
+)
+def test_descriptor_set_summarizes_idempotent_state_updates(descriptor_key: str, expected: bool) -> None:
+    source = generate_descriptor_set(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        DescriptorAllowlist(keys=(descriptor_key,)),
+    ).source
+    descriptor_set = _emitted_initializer(
+        source,
+        "static const loom_low_descriptor_set_t kTestLowCoreSet = {",
+    )
+    flags = next(line for line in descriptor_set.splitlines() if ".flags = " in line)
+    assert ("LOOM_LOW_DESCRIPTOR_SET_FLAG_IDEMPOTENT_STATE_UPDATES" in flags) == expected
 
 
 @pytest.mark.parametrize("separation_cycles", [-2, 0, 3])

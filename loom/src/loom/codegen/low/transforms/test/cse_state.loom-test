@@ -1,3 +1,142 @@
+// Repeating one result-coupled sticky update adds no state after any number of
+// commutative updates to the same class. The distinct peer result remains.
+// RUN: pass low-cse
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @idempotent_update_reuses_through_commutative_peers(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %first = test.state.update.i32 %lhs
+  %peer = test.state.update.i32 %rhs
+  %same = test.state.update.i32 %lhs
+  return %first, %peer, %same
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @idempotent_update_reuses_through_commutative_peers(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %first = test.state.update.i32 %lhs
+  %peer = test.state.update.i32 %rhs
+  return %first, %peer, %first
+}
+
+// ====
+
+// An ordinary read/write of the same state class invalidates sticky-update
+// reuse even when the later packet has the same explicit operands.
+// RUN: pass low-cse
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @idempotent_update_stops_at_noncommutative_write(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %before = test.state.update.i32 %lhs
+  %clobber = test.state.add.i32 %rhs, %rhs
+  %after = test.state.update.i32 %lhs
+  return %before, %clobber, %after
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @idempotent_update_stops_at_noncommutative_write(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %before = test.state.update.i32 %lhs
+  %clobber = test.state.add.i32 %rhs, %rhs
+  %after = test.state.update.i32 %lhs
+  return %before, %clobber, %after
+}
+
+// ====
+
+// State read by the result computation retains its ordinary epoch. A write to
+// that disjoint class changes the result and prevents reuse.
+// RUN: pass low-cse
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @idempotent_update_preserves_hidden_read_epochs(%value: reg<test.i32>, %schedule: reg<test.schedule_state>) -> (reg<test.i32>, reg<test.schedule_state>, reg<test.i32>) asm {
+  %before = test.state.update.read_schedule.i32 %value
+  %schedule_update = test.state.add.schedule_state %schedule, %schedule
+  %after = test.state.update.read_schedule.i32 %value
+  return %before, %schedule_update, %after
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @idempotent_update_preserves_hidden_read_epochs(%value: reg<test.i32>, %schedule: reg<test.schedule_state>) -> (reg<test.i32>, reg<test.schedule_state>, reg<test.i32>) asm {
+  %before = test.state.update.read_schedule.i32 %value
+  %schedule_update = test.state.add.schedule_state %schedule, %schedule
+  %after = test.state.update.read_schedule.i32 %value
+  return %before, %schedule_update, %after
+}
+
+// ====
+
+// Storage constructors retain distinct virtual-register identities. The
+// idempotent descriptor alone compares their carried content, including
+// direct aliases and independently reconstructed concat/slice values.
+// RUN: pass low-cse
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @idempotent_update_uses_structural_content(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %copy0 = copy %lhs : reg<test.i32> -> reg<test.i32>
+  %moved0 = move %copy0 : reg<test.i32> -> reg<test.i32>
+  %assumed0 = low.assume %moved0 [range(%moved0, -2147483648, 2147483647)] : reg<test.i32>
+  %pair0 = concat(%assumed0, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %lane0 = slice %pair0[0] : reg<test.i32 x2> -> reg<test.i32>
+  %first = test.state.update.i32 %lane0
+  %copy1 = copy %lhs : reg<test.i32> -> reg<test.i32>
+  %moved1 = move %copy1 : reg<test.i32> -> reg<test.i32>
+  %assumed1 = low.assume %moved1 [range(%moved1, -2147483648, 2147483647)] : reg<test.i32>
+  %pair1 = concat(%assumed1, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %lane1 = slice %pair1[0] : reg<test.i32 x2> -> reg<test.i32>
+  %same = test.state.update.i32 %lane1
+  return %first, %same
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @idempotent_update_uses_structural_content(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %copy0 = copy %lhs : reg<test.i32> -> reg<test.i32>
+  %moved0 = move %copy0 : reg<test.i32> -> reg<test.i32>
+  %assumed0 = low.assume %moved0 [range(%moved0, -2147483648, 2147483647)] : reg<test.i32>
+  %pair0 = concat(%assumed0, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %lane0 = slice %pair0[0] : reg<test.i32 x2> -> reg<test.i32>
+  %first = test.state.update.i32 %lane0
+  %copy1 = copy %lhs : reg<test.i32> -> reg<test.i32>
+  %moved1 = move %copy1 : reg<test.i32> -> reg<test.i32>
+  %assumed1 = low.assume %moved1 [range(%moved1, -2147483648, 2147483647)] : reg<test.i32>
+  %pair1 = concat(%assumed1, %rhs) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %lane1 = slice %pair1[0] : reg<test.i32 x2> -> reg<test.i32>
+  return %first, %first
+}
+
+// ====
+
+// A consumer that transfers each result's storage ownership keeps both
+// otherwise identical updates and their independent result identities.
+// RUN: pass low-cse
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @idempotent_update_preserves_result_ownership(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = test.state.update.i32 %value
+  %second = test.state.update.i32 %value
+  %first_tied = test.tied.any %first
+  %second_tied = test.tied.any %second
+  return %first_tied, %second_tied
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @idempotent_update_preserves_result_ownership(%value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %first = test.state.update.i32 %value
+  %second = test.state.update.i32 %value
+  %first_tied = test.tied.any %first
+  %second_tied = test.tied.any %second
+  return %first_tied, %second_tied
+}
+
+// ====
+
 // Hidden state reads are reusable until their class is written. A write to
 // another class must preserve the single-class read and expire the pair.
 // RUN: pass low-cse
