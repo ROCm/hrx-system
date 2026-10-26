@@ -61,9 +61,6 @@ jobs:
             echo "WINSDK_ROOT=$PWD/build/loom-sdk/toolchain/sdk"
             echo "WINDOWS_COMPILER_RT_ROOT=$PWD/build/loom-sdk/toolchain/compiler-rt"
           } >> "$GITHUB_ENV"
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: "3.12"
       - name: Install compiler and host tools
         run: |
           case "$PROFILE" in Release|Tracy|Debug|ASAN) ;; *) exit 2 ;; esac
@@ -76,9 +73,9 @@ jobs:
           sudo apt-get install --yes --no-install-recommends \
             "clang-22=$LLVM_APT_VERSION" "lld-22=$LLVM_APT_VERSION" \
             "llvm-22=$LLVM_APT_VERSION" "libclang-rt-22-dev=$LLVM_APT_VERSION" \
-            g++-13 patchelf p7zip-full
+            g++-13 patchelf p7zip-full python3-venv
           mkdir -p build/loom-sdk/host-tools
-          python3 build_tools/devtools/install.py bazelisk --bin-dir build/loom-sdk/host-tools
+          /usr/bin/python3 build_tools/devtools/install.py bazelisk --bin-dir build/loom-sdk/host-tools
           echo "$PWD/build/loom-sdk/host-tools" >> "$GITHUB_PATH"
           echo "$LLVM_ROOT/bin" >> "$GITHUB_PATH"
       - name: Restore Windows SDK inputs
@@ -104,15 +101,17 @@ jobs:
             "$resource_dir/lib/windows/clang_rt.builtins-x86_64.lib"
       - name: Build and qualify Linux SDK
         run: |
-          python -m build_tools.ci.loom_wheel build \
+          /usr/bin/python3 -m build_tools.ci.loom_wheel build \
             --profile="${PROFILE,,}" --output=build/loom-sdk/linux --bazel=bazel -- \
             --cxxopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 \
             --linkopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13
-          python -m build_tools.ci.loom_wheel test \
+          # Distribution Python works without loader overrides, which the
+          # installed-product test clears to verify the wheel's own linkage.
+          /usr/bin/python3 -m build_tools.ci.loom_wheel test \
             --inputs=build/loom-sdk/linux --output=wheel-artifact
       - name: Cross-build Windows SDK
         run: |
-          python -m build_tools.ci.loom_wheel build \
+          /usr/bin/python3 -m build_tools.ci.loom_wheel build \
             --profile="${PROFILE,,}" --output=build/loom-sdk/windows --bazel=bazel -- \
             --config=windows-x86_64
       - name: Measure release artifacts
@@ -125,14 +124,14 @@ jobs:
           if [[ "$GITHUB_REF" == refs/heads/main ]]; then
             history_args+=(--exclude-commit "$GITHUB_SHA")
           fi
-          python -m build_tools.ci.loom_binary_size fetch-history \
+          /usr/bin/python3 -m build_tools.ci.loom_binary_size fetch-history \
             --repository "$GITHUB_REPOSITORY" --anchor "$BASE_SHA" \
             --output build/loom-sdk/size/baseline.json "${history_args[@]}"
           wheels=()
           for wheel in wheel-artifact/*.whl build/loom-sdk/windows/*.whl; do
             wheels+=(--wheel "$wheel")
           done
-          python -m build_tools.ci.loom_binary_size collect \
+          /usr/bin/python3 -m build_tools.ci.loom_binary_size collect \
             "${wheels[@]}" --output-dir build/loom-sdk/size \
             --llvm-bin "$LLVM_ROOT/bin" \
             --environment-id ubuntu24-clang22-gcc13-winsdk26100-crt14.44.17.14 \
@@ -142,7 +141,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/heads/main ]]; then
             report_args+=(--update-main)
           fi
-          python -m build_tools.ci.loom_binary_size report \
+          /usr/bin/python3 -m build_tools.ci.loom_binary_size report \
             --current build/loom-sdk/size/current.json \
             --baseline build/loom-sdk/size/baseline.json \
             --output-dir build/loom-sdk/size/record "${report_args[@]}"
