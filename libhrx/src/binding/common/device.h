@@ -9,6 +9,7 @@
 
 #include "common/context.h"
 #include "common/execution_resource.h"
+#include "common/host_callback.h"
 #include "common/tls.h"
 #include "hrx_runtime.h"
 #include "iree/base/internal/arena.h"
@@ -49,6 +50,9 @@ typedef struct iree_hal_streaming_device_t {
   // shares internal representations. Accessed via hrx_device_hal().
   iree_hal_device_t* hal_device;
   iree_hal_device_info_t info;
+
+  // Borrowed callout owner shared by every device in this frontend registry.
+  iree_hal_streaming_host_callback_queue_t* host_callbacks;
 
   // Immutable execution-resource sets interned for copied compatibility API
   // values. Entries live until this device incarnation is deinitialized.
@@ -139,6 +143,9 @@ typedef struct iree_hal_streaming_device_registry_t {
 
   // Thread-exit cleanup for current and stacked context references.
   iree_hal_streaming_tls_key_t context_key;
+
+  // Ready compatibility callouts, with one lazily created frontend worker.
+  iree_hal_streaming_host_callback_queue_t host_callbacks;
 
   iree_slim_mutex_t mutex;
 

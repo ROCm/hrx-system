@@ -76,6 +76,19 @@ hrx_cc_library(
 )
 
 hrx_cc_library(
+    name = "host_callback",
+    srcs = ["host_callback.c"],
+    hdrs = ["host_callback.h"],
+    includes = [".."],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_library(
     name = "common",
     srcs = [
         "context.c",
@@ -135,6 +148,7 @@ hrx_cc_library(
         ":capture_admission",
         ":execution_resource",
         ":function_attributes",
+        ":host_callback",
         "//build_tools/bazel:pthreads",
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/async",
@@ -147,6 +161,22 @@ hrx_cc_library(
         "//runtime/src/iree/hal/utils:resource_set",
         "//runtime/src/iree/io:file_handle",
         "//third_party:zstd",
+    ],
+)
+
+hrx_cc_test(
+    name = "host_callback_test",
+    srcs = ["host_callback_test.cc"],
+    deps = [
+        ":host_callback",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:host_semaphore",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -306,6 +336,7 @@ hrx_cc_test(
     srcs = ["graph_exec_test.cc"],
     deps = [
         ":common",
+        ":host_callback",
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",

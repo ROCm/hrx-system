@@ -16,6 +16,7 @@
 #include "common/device.h"
 #include "common/event.h"
 #include "common/graph.h"
+#include "common/host_callback.h"
 #include "common/hrx_bridge.h"
 #include "common/module.h"
 #include "common/stream.h"
@@ -383,6 +384,8 @@ iree_hal_queue_t* ReplaceGraphExecTestQueue(iree_hal_streaming_stream_t* stream,
 class GraphExecTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    iree_hal_streaming_host_callback_queue_initialize(iree_allocator_system(),
+                                                      &host_callbacks_);
     IREE_ASSERT_OK(HRX_CALL(hrx_cpu_initialize(/*flags=*/0)));
     hrx_device_t hrx_device = nullptr;
     IREE_ASSERT_OK(HRX_CALL(hrx_cpu_device_get(/*index=*/0, &hrx_device)));
@@ -393,6 +396,7 @@ class GraphExecTest : public ::testing::Test {
     memset(&device_entry_, 0, sizeof(device_entry_));
     device_entry_.hrx_device = hrx_device;
     device_entry_.hal_device = hrx_device_hal(hrx_device);
+    device_entry_.host_callbacks = &host_callbacks_;
     iree_slim_mutex_initialize(&device_entry_.primary_context_mutex);
     iree_slim_mutex_initialize(&device_entry_.graph_memory_mutex);
     iree_arena_block_pool_initialize(/*block_size=*/64 * 1024,
@@ -410,12 +414,17 @@ class GraphExecTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    if (context_) {
+      IREE_EXPECT_OK(iree_hal_streaming_context_synchronize(context_));
+    }
+    iree_hal_streaming_host_callback_queue_stop(&host_callbacks_);
     iree_hal_streaming_stream_release(stream_);
     iree_hal_streaming_context_release(context_);
     iree_arena_block_pool_deinitialize(&device_entry_.block_pool);
     iree_slim_mutex_deinitialize(&device_entry_.graph_memory_mutex);
     iree_slim_mutex_deinitialize(&device_entry_.primary_context_mutex);
     IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
+    iree_hal_streaming_host_callback_queue_deinitialize(&host_callbacks_);
   }
 
   // Adds |count| event record nodes recording |events| to |graph|, each
@@ -436,6 +445,8 @@ class GraphExecTest : public ::testing::Test {
     }
   }
 
+  // Explicit frontend-owned callout service borrowed by the test device entry.
+  iree_hal_streaming_host_callback_queue_t host_callbacks_ = {};
   // Registry entry backing |context_|; outlives every context created from it.
   iree_hal_streaming_device_t device_entry_ = {};
   // Context owning the graphs, events, and streams each test builds.

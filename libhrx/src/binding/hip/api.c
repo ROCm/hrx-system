@@ -16956,16 +16956,13 @@ HIPAPI hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config,
 // Callback behavior:
 // - Called on a runtime thread when stream reaches this point.
 // - Blocks stream execution until callback completes.
-// - Can make HIP API calls except stream synchronization.
+// - Must not invoke HIP APIs.
 // - Should complete quickly to avoid blocking the stream.
 // - Runs after all prior operations in stream complete.
 // - Subsequent operations wait for callback to finish.
 //
 // Restrictions in callback:
-// - Cannot call hipStreamSynchronize() on any stream.
-// - Cannot call hipDeviceSynchronize().
-// - Cannot wait on events from the same stream.
-// - Can launch new work to different streams.
+// - Cannot call HIP APIs or wait on HIP operations.
 //
 // Use cases:
 // - CPU-GPU task pipelining.
@@ -16978,10 +16975,10 @@ HIPAPI hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config,
 // - Long-running callbacks block stream progress.
 // - Consider using events for simple synchronization.
 //
-// Multi-GPU: Callback executes in context of the stream's device.
+// Multi-GPU: Callback ordering belongs to its originating stream.
 //
 // Warning: Avoid heavy computation in callbacks. Use callbacks for
-// quick signaling or launching work on other streams.
+// quick signaling and dependent host work.
 //
 // Graph capture: Supported. Creates host function node when capturing.
 //

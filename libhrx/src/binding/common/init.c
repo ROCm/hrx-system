@@ -212,6 +212,7 @@ static iree_status_t iree_hal_streaming_initialize_device(
   // Per-device pools, peer lookups, and context->device_ordinal all key off
   // it; if it stays 0 every device aliases device 0.
   out_device->ordinal = ordinal;
+  out_device->host_callbacks = &registry->host_callbacks;
 
   // Store pyre device and extract HAL device for direct HAL usage.
   out_device->hrx_device = hrx_dev;
@@ -511,6 +512,8 @@ iree_status_t iree_hal_streaming_init_global(
   device_registry->device_extensions = device_extensions;
   device_registry->context_key = IREE_HAL_STREAMING_TLS_KEY_INVALID;
   iree_slim_mutex_initialize(&device_registry->mutex);
+  iree_hal_streaming_host_callback_queue_initialize(
+      host_allocator, &device_registry->host_callbacks);
 
   // Initialize context list.
   iree_slim_mutex_initialize(&device_registry->context_list.mutex);
@@ -583,12 +586,19 @@ void iree_hal_streaming_cleanup_global(void) {
   device_registry->context_list.head = NULL;
   device_registry->context_list.tail = NULL;
   iree_slim_mutex_unlock(&device_registry->context_list.mutex);
+  for (iree_hal_streaming_context_t* context = context_head; context;
+       context = context->context_list_entry.next) {
+    iree_status_ignore(iree_hal_streaming_context_synchronize(context));
+  }
+  // Timeline completion may precede the callback worker's final CPU access.
+  // Join that tail while registry/context owners remain live. Closed callback
+  // state stays valid through native teardown to reject late error callbacks.
+  iree_hal_streaming_host_callback_queue_stop(&device_registry->host_callbacks);
   while (context_head) {
     iree_hal_streaming_context_t* context = context_head;
     context_head = context->context_list_entry.next;
     context->context_list_entry.next = NULL;
     context->context_list_entry.prev = NULL;
-    iree_status_ignore(iree_hal_streaming_context_synchronize(context));
     iree_hal_streaming_context_release(context);
   }
 
@@ -602,6 +612,8 @@ void iree_hal_streaming_cleanup_global(void) {
 
   // Shutdown pyre GPU subsystem.
   hrx_status_ignore(hrx_gpu_shutdown());
+  iree_hal_streaming_host_callback_queue_deinitialize(
+      &device_registry->host_callbacks);
 
   iree_hal_streaming_tls_key_delete(device_registry->context_key);
 

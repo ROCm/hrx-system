@@ -125,6 +125,8 @@ struct HipRuntimeApi {
   HipHrxSetArrayLeaseObserverForTestingFn set_array_lease_observer = nullptr;
   // Initializes the exact runtime under test.
   HipInitFn init = nullptr;
+  // Synchronously destroys runtime services before the fixture unloads its DSO.
+  hipError_t (*hal_deinit)() = nullptr;
   // Queries devices available to the exact runtime under test.
   HipGetDeviceCountFn get_device_count = nullptr;
   // Selects the current device for the calling thread.
@@ -209,6 +211,7 @@ class HipArrayCopySptApiTest : public testing::Test {
   api_.field = dso_.Resolve<decltype(api_.field)>(symbol); \
   ASSERT_NE(nullptr, api_.field) << dso_.error()
     HRX_RESOLVE_HIP_FIELD(init, "hipInit");
+    HRX_RESOLVE_HIP_FIELD(hal_deinit, "hipHALDeinit");
     HRX_RESOLVE_HIP_FIELD(set_array_lease_observer,
                           "hipHRXSetArrayLeaseObserverForTesting");
     HRX_RESOLVE_HIP_FIELD(get_device_count, "hipGetDeviceCount");
@@ -253,6 +256,16 @@ class HipArrayCopySptApiTest : public testing::Test {
     HRX_RESOLVE_HIP_FIELD(graph_destroy, "hipGraphDestroy");
 #undef HRX_RESOLVE_HIP_FIELD
     ASSERT_EQ(hipSuccess, api_.init(/*flags=*/0));
+  }
+
+  static void TearDownTestSuite() {
+    if (!dso_.is_open()) {
+      return;
+    }
+    ASSERT_NE(nullptr, api_.hal_deinit);
+    EXPECT_EQ(hipSuccess, api_.hal_deinit());
+    api_ = {};
+    EXPECT_TRUE(dso_.Close()) << dso_.error();
   }
 
   void TearDown() override {
