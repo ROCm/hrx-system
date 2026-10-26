@@ -1063,7 +1063,12 @@ TEST_P(TaskSlabPoolTest, CapturedViewsKeepAddressesAliveThroughRemoval) {
   VirtualBufferLifetime lifetime;
   const iree_allocator_t allocator = {&lifetime, ObserveVirtualBufferLifetime};
   Ref<iree_hal_buffer_t> arena;
-  const iree_hal_virtual_buffer_options_t options = {2 * kUnit, kUnit, kUnit};
+  const iree_hal_virtual_buffer_options_t options = {
+      .byte_length = 2 * kUnit,
+      .min_alignment = kUnit,
+      .mapping_granularity = kUnit,
+      .flags = IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
+  };
   IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
       group_, Scope(), {1, &source_pool}, &options, allocator, arena.out()));
   lifetime.buffer_allocation = arena.get();

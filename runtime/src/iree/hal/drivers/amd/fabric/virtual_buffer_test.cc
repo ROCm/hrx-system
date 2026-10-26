@@ -336,6 +336,7 @@ TEST_F(MemoryBackendTest, QueriesReservationGeometryBeforeAcquiringAddresses) {
   EXPECT_EQ(capabilities.mapping_granularity, 65536u);
   EXPECT_EQ(capabilities.max_byte_length, UINT64_C(1) << 40);
   EXPECT_EQ(capabilities.max_alignment, UINT64_C(1) << 30);
+  EXPECT_EQ(capabilities.supported_flags, 0u);
   EXPECT_EQ(native_.reservation_count, 0);
   EXPECT_EQ(native_.create_count, 0);
 
@@ -349,12 +350,38 @@ TEST_F(MemoryBackendTest, QueriesReservationGeometryBeforeAcquiringAddresses) {
   EXPECT_EQ(native_.reservation_count, 0);
   options.byte_length = capabilities.reservation_granularity;
   options.mapping_granularity = 4 * capabilities.mapping_granularity;
+  options.flags = UINT32_C(0x80000000);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_virtual_buffer_create(group_, scope, {1, &source_pool}, &options,
+                                     allocator_, &reservation));
+  EXPECT_EQ(native_.reservation_count, 0);
+  options.flags = IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS;
+  native_.reservation_flags[0] =
+      AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      group_, scope, {1, &source_pool}, allocator_, &capabilities));
+  EXPECT_EQ(capabilities.supported_flags, 0u);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      iree_hal_virtual_buffer_create(group_, scope, {1, &source_pool}, &options,
+                                     allocator_, &reservation));
+  EXPECT_EQ(reservation, nullptr);
+  EXPECT_EQ(native_.reservation_count, 0);
+  native_.reservation_flags[1] =
+      AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      group_, scope, {1, &source_pool}, allocator_, &capabilities));
+  EXPECT_EQ(capabilities.supported_flags,
+            IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS);
   IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
       group_, scope, {1, &source_pool}, &options, allocator_, &reservation));
   iree_hal_virtual_buffer_info_t info;
   IREE_ASSERT_OK(iree_hal_virtual_buffer_query_info(reservation, &info));
   EXPECT_EQ(info.mapping_granularity, options.mapping_granularity);
   EXPECT_EQ(native_.reservation_count, 1);
+  EXPECT_EQ(native_.last_reservation_flags,
+            AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS);
   EXPECT_EQ(native_.create_count, 0);
   iree_hal_buffer_release(reservation);
 

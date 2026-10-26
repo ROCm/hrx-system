@@ -609,6 +609,7 @@ struct FakeNative {
     output->supported_access =
         AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
     output->required_access = AMDF_MEMORY_ACCESS_READ;
+    output->supported_flags = native->owner->reservation_flags[native->ordinal];
     output->maximum_byte_length = UINT64_C(1) << 40;
     output->reservation_granularity =
         native->owner->reservation_granularities[native->ordinal];
@@ -654,6 +655,7 @@ struct FakeNative {
     reservation->host_view.owner = self;
     reservation->host_view.data = reinterpret_cast<void*>(UINT64_C(0x40000000));
     reservation->host_view.byte_length = info->byte_length;
+    self->last_reservation_flags = info->flags;
     *output = reinterpret_cast<amdf_memory_reservation_t*>(reservation);
     return AMDF_STATUS_OK;
   }
@@ -745,6 +747,10 @@ struct FakeNative {
       AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK;
   // Native address geometry per live consumer, before addresses are reserved.
   std::array<uint64_t, 2> reservation_granularities = {4096, 4096};
+  // Explicit address constraints supported by each dependency device.
+  std::array<amdf_memory_reservation_flags_t, 2> reservation_flags = {0, 0};
+  // Construction flags observed by the native reservation dependency.
+  amdf_memory_reservation_flags_t last_reservation_flags = 0;
   // Whole-backing preparation required by each native address domain.
   std::array<amdf_memory_flags_t, 2> reservation_source_flags = {};
   // Distinct logical consumers may share a single native mapping projection.

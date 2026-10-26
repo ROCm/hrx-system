@@ -368,6 +368,7 @@ static iree_status_t iree_hal_host_virtual_buffer_qualify(
       .mapping_granularity = page_size,
       .max_alignment = (IREE_HOST_SIZE_MAX >> 1) + 1,
       .operations = IREE_HAL_MEMORY_MAPPING_OPERATIONS_ALL,
+      .supported_flags = IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
   };
   return iree_hal_virtual_buffer_initialize_contract(
       scope, sources, IREE_HAL_MEMORY_BACKEND_HOST, 0, plan->contract,

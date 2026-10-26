@@ -138,6 +138,9 @@ TEST_P(FabricVirtualBufferTest, CpuAndGpuShareStableViewsAcrossReplacement) {
   IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
       group_, scope, {1, &source_pool}, allocator_, &capabilities));
   ASSERT_NE(capabilities.max_byte_length, 0u);
+  ASSERT_NE(capabilities.supported_flags &
+                IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
+            0u);
   const auto unit = std::max(capabilities.reservation_granularity,
                              capabilities.mapping_granularity);
   const size_t stride = unit / sizeof(uint32_t);
@@ -157,6 +160,7 @@ TEST_P(FabricVirtualBufferTest, CpuAndGpuShareStableViewsAcrossReplacement) {
   const iree_hal_virtual_buffer_options_t options = {
       .byte_length = 2 * unit,
       .mapping_granularity = unit,
+      .flags = IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
   };
   Ref<iree_hal_buffer_t> root;
   IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
@@ -177,6 +181,8 @@ TEST_P(FabricVirtualBufferTest, CpuAndGpuShareStableViewsAcrossReplacement) {
         iree_hal_buffer_native_host_span(views[i], 256, 256, &host_views[i]));
     addresses[i] =
         iree_hal_buffer_native_binding(views[i], gpu_slot).device_address;
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(host_views[i].data),
+              addresses[i] + 256);
   }
   iree_hal_memory_scope_t cpu_scope;
   IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(

@@ -272,6 +272,7 @@ static iree_status_t iree_hal_amdgpu_virtual_buffer_prepare(
       .operations = (1u << IREE_HAL_MEMORY_MAPPING_OPERATION_BIND) |
                     (1u << IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND) |
                     (1u << IREE_HAL_MEMORY_MAPPING_OPERATION_PROTECT),
+      .supported_flags = IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
   };
   iree_hal_memory_contract_t* contract = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_memory_contract_create(
@@ -331,6 +332,11 @@ iree_status_t iree_hal_amdgpu_virtual_buffer_create(
       &contract));
   if (!capabilities.max_byte_length) {
     return iree_ok_status();
+  }
+  if (options->flags & ~capabilities.supported_flags) {
+    iree_hal_memory_contract_release(contract);
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "unsupported ROCr reservation address constraint");
   }
   if (options->min_alignment > capabilities.max_alignment) {
     iree_hal_memory_contract_release(contract);

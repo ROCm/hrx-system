@@ -493,6 +493,7 @@ TEST(ReplayDumpTest, EmitsReservationAndMappingBatchPayloads) {
       .min_alignment = 8192,
       .mapping_granularity = 4096,
       .family_count = 1,
+      .flags = IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
       .source_pool_count = 2,
   };
   const iree_hal_replay_pool_family_access_payload_t family = {
@@ -574,7 +575,7 @@ TEST(ReplayDumpTest, EmitsReservationAndMappingBatchPayloads) {
     IREE_ASSERT_OK(DumpReplayToString(input, &options, &output));
     EXPECT_THAT(output, HasSubstr("buffer_id=17 byte_length=16384 "
                                   "min_alignment=8192 mapping_granularity=4096 "
-                                  "family_count=1"));
+                                  "flags=0x00000001 family_count=1"));
     EXPECT_THAT(output, HasSubstr("source_pool_ids=[11,13]"));
     EXPECT_THAT(output,
                 HasSubstr("wait_semaphores=[{semaphore_id=20 value=3}]"));
@@ -591,10 +592,12 @@ TEST(ReplayDumpTest, EmitsReservationAndMappingBatchPayloads) {
     options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
     output.clear();
     IREE_ASSERT_OK(DumpReplayToString(input, &options, &output));
-    EXPECT_THAT(output,
-                HasSubstr("\"buffer_id\":17,\"byte_length\":16384,"
-                          "\"min_alignment\":8192,"
-                          "\"mapping_granularity\":4096,\"family_count\":1"));
+    EXPECT_THAT(
+        output,
+        HasSubstr(
+            "\"buffer_id\":17,\"byte_length\":16384,"
+            "\"min_alignment\":8192,"
+            "\"mapping_granularity\":4096,\"flags\":1,\"family_count\":1"));
     EXPECT_THAT(output, HasSubstr("\"source_pool_ids\":[11,13]"));
     EXPECT_THAT(
         output,
@@ -644,6 +647,50 @@ TEST(ReplayDumpTest, RejectsTruncatedReservationAndMappingArrays) {
       IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
                             DumpReplayToString(MakeReplayFileContents(storage),
                                                &options, &output));
+    }
+  }
+}
+
+TEST(ReplayDumpTest, ValidatesAddressConstraintsAgainstTheFileVersion) {
+  for (const uint16_t minor : {uint16_t{8}, uint16_t{9}, uint16_t{10}}) {
+    for (const uint32_t flags :
+         {uint32_t{0}, uint32_t{1}, UINT32_C(0x80000000)}) {
+      ReplayFileBuilder builder(/*capacity=*/4096);
+      const iree_hal_replay_virtual_buffer_create_payload_t reservation = {
+          .byte_length = 4096,
+          .flags = flags,
+          .source_pool_count = 1,
+      };
+      const iree_hal_replay_object_id_t source_pool_id = 11;
+      const iree_const_byte_span_t payloads[] = {
+          iree_make_const_byte_span(&reservation, sizeof(reservation)),
+          iree_make_const_byte_span(&source_pool_id, sizeof(source_pool_id)),
+      };
+      const iree_hal_replay_file_record_metadata_t metadata = {
+          .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+          .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_VIRTUAL_BUFFER_CREATE,
+          .operation_code =
+              IREE_HAL_REPLAY_OPERATION_CODE_VIRTUAL_BUFFER_CREATE,
+      };
+      builder.Append(metadata, IREE_ARRAYSIZE(payloads), payloads);
+      auto storage = builder.Finish();
+      auto* header =
+          reinterpret_cast<iree_hal_replay_file_header_t*>(storage.data());
+      header->version_minor = minor;
+      for (auto format : {IREE_HAL_REPLAY_DUMP_FORMAT_TEXT,
+                          IREE_HAL_REPLAY_DUMP_FORMAT_JSONL}) {
+        const iree_hal_replay_dump_options_t options = {.format = format};
+        std::string output;
+        auto status = DumpReplayToString(MakeReplayFileContents(storage),
+                                         &options, &output);
+        if (flags == 0 ||
+            (flags == 1 &&
+             minor >= IREE_HAL_REPLAY_VIRTUAL_BUFFER_FLAGS_VERSION_MINOR)) {
+          IREE_EXPECT_OK(std::move(status));
+        } else {
+          IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS, std::move(status));
+        }
+      }
     }
   }
 }

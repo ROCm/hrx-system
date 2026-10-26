@@ -9,6 +9,8 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "iree/hal/virtual_buffer.h"
+
 iree_status_t iree_hal_replay_dump_payload_length_check(
     const iree_hal_replay_file_record_t* record,
     iree_host_size_t expected_payload_length) {
@@ -501,13 +503,18 @@ iree_status_t iree_hal_replay_dump_queue_payload_layout(
 }
 
 iree_status_t iree_hal_replay_dump_virtual_buffer_layout(
-    const iree_hal_replay_file_record_t* record,
+    uint16_t file_version_minor, const iree_hal_replay_file_record_t* record,
     const iree_hal_replay_virtual_buffer_create_payload_t* payload,
     iree_host_size_t* out_families_size) {
   iree_host_size_t total_size = 0;
   iree_host_size_t sources_size = 0;
   if (IREE_UNLIKELY(
-          payload->reserved0 || !payload->source_pool_count ||
+          (payload->flags &
+           ~IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS) ||
+          (payload->flags &&
+           file_version_minor <
+               IREE_HAL_REPLAY_VIRTUAL_BUFFER_FLAGS_VERSION_MINOR) ||
+          !payload->source_pool_count ||
           payload->source_pool_count > IREE_HOST_SIZE_MAX ||
           !iree_host_size_checked_mul(
               (iree_host_size_t)payload->source_pool_count,

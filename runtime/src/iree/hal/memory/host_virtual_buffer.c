@@ -123,6 +123,10 @@ iree_status_t iree_hal_host_virtual_buffer_create(
     iree_hal_memory_contract_t* contract,
     const iree_hal_virtual_buffer_options_t* options,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer) {
+  if (options->flags & ~IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "unsupported host reservation address constraint");
+  }
   if (options->byte_length > IREE_HOST_SIZE_MAX ||
       options->min_alignment > IREE_HOST_SIZE_MAX ||
       options->mapping_granularity > IREE_HOST_SIZE_MAX) {

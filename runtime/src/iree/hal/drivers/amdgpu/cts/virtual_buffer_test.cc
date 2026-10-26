@@ -65,6 +65,7 @@ class AmdgpuVirtualBufferTest : public CtsTestBase<> {
     const iree_hal_virtual_buffer_options_t options = {
         .byte_length = count * granularity_,
         .mapping_granularity = granularity_,
+        .flags = IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
     };
     iree_hal_pool_t* source_pool = pool_.get();
     return iree_hal_virtual_buffer_create(device_group_, scope_,

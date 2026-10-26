@@ -167,7 +167,7 @@ iree_status_t iree_hal_replay_dump_queue_payload_layout(
 
 // Validates the complete reservation payload and returns its family row bytes.
 iree_status_t iree_hal_replay_dump_virtual_buffer_layout(
-    const iree_hal_replay_file_record_t* record,
+    uint16_t file_version_minor, const iree_hal_replay_file_record_t* record,
     const iree_hal_replay_virtual_buffer_create_payload_t* payload,
     iree_host_size_t* out_families_size);
 

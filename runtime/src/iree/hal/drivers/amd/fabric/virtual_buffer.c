@@ -392,6 +392,7 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_prepare(
       .mapping_granularity = 1,
       .max_alignment = IREE_DEVICE_SIZE_MAX,
       .operations = IREE_HAL_MEMORY_MAPPING_OPERATIONS_ALL,
+      .supported_flags = IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
   };
   iree_hal_buffer_usage_t usage = 0;
   iree_hal_memory_access_t host_permissions = scope.host.access;
@@ -518,6 +519,11 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_prepare(
                    access->capabilities.maximum_byte_length);
       capabilities.max_alignment = iree_min(
           capabilities.max_alignment, access->capabilities.maximum_alignment);
+      if (!(access->capabilities.supported_flags &
+            AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS)) {
+        capabilities.supported_flags &=
+            ~IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS;
+      }
     }
     access->native.access |=
         minimum_access | access->capabilities.required_access;
@@ -661,9 +667,13 @@ iree_status_t iree_hal_amd_fabric_virtual_buffer_create(
   const iree_device_size_t alignment = iree_max(
       options->min_alignment, plan.capabilities.reservation_granularity);
   iree_status_t status = iree_ok_status();
-  if (options->byte_length > plan.capabilities.max_byte_length ||
-      options->byte_length % plan.capabilities.reservation_granularity ||
-      alignment > plan.capabilities.max_alignment) {
+  if (options->flags & ~plan.capabilities.supported_flags) {
+    status =
+        iree_make_status(IREE_STATUS_UNAVAILABLE,
+                         "unsupported native reservation address constraint");
+  } else if (options->byte_length > plan.capabilities.max_byte_length ||
+             options->byte_length % plan.capabilities.reservation_granularity ||
+             alignment > plan.capabilities.max_alignment) {
     status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "reservation exceeds native address geometry");
   }
@@ -677,6 +687,11 @@ iree_status_t iree_hal_amd_fabric_virtual_buffer_create(
         .byte_length = options->byte_length,
         .minimum_alignment = alignment,
         .access_count = reservation->access_count,
+        .flags = iree_any_bit_set(
+                     options->flags,
+                     IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS)
+                     ? AMDF_MEMORY_RESERVATION_FLAG_REQUIRE_COMMON_ADDRESS
+                     : 0,
         .accesses = plan.native_accesses,
     };
     status = IREE_HAL_AMD_STATUS_FROM_AMDF(

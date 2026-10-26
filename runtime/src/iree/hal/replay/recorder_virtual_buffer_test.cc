@@ -239,12 +239,16 @@ TEST_F(ReplayRecorderVirtualBufferTest,
   IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
       group_, scope, {1, &pool}, iree_allocator_system(), &capabilities));
   ASSERT_GT(capabilities.mapping_granularity, 0u);
+  EXPECT_NE(capabilities.supported_flags &
+                IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
+            0u);
   const iree_device_size_t unit =
       iree_max(64 * 1024, capabilities.reservation_granularity);
   const iree_hal_virtual_buffer_options_t reservation_options = {
       .byte_length = unit,
       .min_alignment = unit,
       .mapping_granularity = unit,
+      .flags = IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
   };
   std::array<iree_hal_buffer_t*, 2> reservations = {};
   for (auto& reservation : reservations) {
@@ -397,6 +401,8 @@ TEST_F(ReplayRecorderVirtualBufferTest,
                IREE_HAL_REPLAY_PAYLOAD_TYPE_VIRTUAL_BUFFER_CREATE) {
       iree_hal_replay_virtual_buffer_create_payload_t payload;
       memcpy(&payload, record.payload.data, sizeof(payload));
+      EXPECT_EQ(payload.flags,
+                IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS);
       EXPECT_EQ(payload.host_atomic_system_scope_32,
                 IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT);
       family_offset = sizeof(payload);

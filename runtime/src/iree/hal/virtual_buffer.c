@@ -93,10 +93,11 @@ IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_create(
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer) {
   *out_buffer = NULL;
   if (!group || !options || !options->byte_length ||
+      (options->flags & ~IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS) ||
       !iree_device_size_is_valid_alignment(options->min_alignment) ||
       !iree_device_size_is_valid_alignment(options->mapping_granularity)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "invalid reservation group or geometry");
+                            "invalid reservation group, geometry, or flags");
   }
   IREE_RETURN_IF_ERROR(iree_hal_pool_scope_validate(group, scope));
   IREE_RETURN_IF_ERROR(

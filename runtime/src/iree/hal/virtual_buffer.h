@@ -35,6 +35,16 @@ typedef enum iree_hal_memory_mapping_operation_e {
 typedef uint32_t iree_hal_memory_mapping_operations_t;
 #define IREE_HAL_MEMORY_MAPPING_OPERATIONS_ALL UINT32_C(0xF)
 
+// Explicit address constraints; zero preserves independent native addresses.
+typedef uint32_t iree_hal_virtual_buffer_flags_t;
+enum iree_hal_virtual_buffer_flag_bits_e {
+  IREE_HAL_VIRTUAL_BUFFER_FLAG_NONE = 0u,
+  // Every admitted host and program binding uses the same numeric base address.
+  // This does not grant host access unless the reservation scope requests it.
+  // Unsupported combinations fail instead of returning different addresses.
+  IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS = 1u << 0,
+};
+
 // Source pools describing backing admitted for the reservation's entire life.
 // Query and construction borrow this array and its pools; neither retains them.
 // Each source covers the complete consumer scope. Order conveys no preference.
@@ -62,6 +72,8 @@ typedef struct iree_hal_virtual_buffer_capabilities_t {
   iree_device_size_t max_alignment;
   // Operations supported by every projection of the requested scope.
   iree_hal_memory_mapping_operations_t operations;
+  // Address constraints supported across the complete requested scope.
+  iree_hal_virtual_buffer_flags_t supported_flags;
 } iree_hal_virtual_buffer_capabilities_t;
 
 // Queries geometry before acquiring addresses or physical backing. The same
@@ -89,6 +101,8 @@ typedef struct iree_hal_virtual_buffer_options_t {
   iree_device_size_t min_alignment;
   // Minimum power-of-two independently replaceable mapping unit, in bytes.
   iree_device_size_t mapping_granularity;
+  // Required address constraints; zero preserves independent native addresses.
+  iree_hal_virtual_buffer_flags_t flags;
 } iree_hal_virtual_buffer_options_t;
 
 // Reserves addresses without allocating physical payload and returns one owned

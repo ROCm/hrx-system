@@ -189,6 +189,10 @@ static iree_status_t iree_hal_vulkan_virtual_buffer_prepare(
                     << (63 - iree_math_count_leading_zeros_u64(max_length))
               : granularity,
       .operations = IREE_HAL_MEMORY_MAPPING_OPERATIONS_ALL,
+      .supported_flags =
+          has_device_address
+              ? IREE_HAL_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS
+              : 0,
   };
   iree_hal_memory_contract_t* contract = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_memory_contract_create(
@@ -260,6 +264,12 @@ iree_status_t iree_hal_vulkan_virtual_buffer_create(
       backend, group, scope, sources, host_allocator, &plan));
   if (!plan.capabilities.max_byte_length) {
     return iree_ok_status();
+  }
+  if (options->flags & ~plan.capabilities.supported_flags) {
+    iree_hal_memory_contract_release(plan.contract);
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "unsupported Vulkan reservation address constraint");
   }
   const iree_device_size_t alignment = iree_max(
       options->min_alignment, plan.capabilities.reservation_granularity);
