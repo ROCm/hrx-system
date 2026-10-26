@@ -609,12 +609,19 @@ jobs:
           # their native processor count.
           "build --jobs=$env:IREE_CI_BAZEL_JOBS" |
             Out-File -FilePath .bazelrc.local -Encoding ascii -Append
-          if ("${{ matrix.kind }}" -eq "repository" -and
-              "${{ matrix.host_toolchain }}" -eq "msvc") {
-            # MSVC repository tests need process-launch headroom; bound test
-            # actions independently while builds retain the full pool.
-            "test --local_test_jobs=35" |
-              Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+          if ("${{ matrix.kind }}" -eq "repository") {
+            if ("${{ matrix.host_toolchain }}" -eq "clang-cl") {
+              # The platform lane's Python and shell tests materialize large
+              # runfiles trees. Limit their concurrent filesystem work while
+              # preserving the full build-action pool.
+              "test --local_test_jobs=20" |
+                Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+            } elseif ("${{ matrix.host_toolchain }}" -eq "msvc") {
+              # MSVC repository tests need process-launch headroom; bound test
+              # actions independently while builds retain the full pool.
+              "test --local_test_jobs=35" |
+                Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+            }
           }
           if ("${{ matrix.host_toolchain }}" -eq "msvc") {
             "build --config=windows-msvc" |
