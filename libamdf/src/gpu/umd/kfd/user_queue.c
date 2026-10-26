@@ -63,6 +63,8 @@ struct amdf_gpu_umd_user_queue_t {
   } device_doorbell;
   // KFD queue identifier, valid after native creation succeeds.
   uint32_t queue_identifier;
+  // Admitted KFD scheduling priority, preserved when scratch reconnects CP.
+  uint32_t native_priority;
   // Whether construction acquired a native queue, including identifier zero.
   bool queue_created;
   // Whether terminal native removal was attempted, excluding ordinary destroy.
@@ -319,7 +321,7 @@ static bool amdf_gpu_kfd_user_queue_select_plan(
     const amdf_gpu_queue_family_properties_t* family = &plan->family;
     if (create_info->command_type == family->command_type &&
         create_info->format_version == family->format_version &&
-        create_info->priority == AMDF_QUEUE_PRIORITY_NORMAL &&
+        (family->priority_capabilities & (1u << create_info->priority)) != 0 &&
         (family->producer_modes & (1u << create_info->producer_mode)) != 0 &&
         (create_info->required_capabilities &
          ~family->user_queue_capabilities) == 0 &&
@@ -407,6 +409,10 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
   queue->device = device;
   queue->native_api = device->user_queue_native_api;
   queue->plan = plan;
+  queue->native_priority = create_info->priority == AMDF_QUEUE_PRIORITY_LOW ? 0
+                           : create_info->priority == AMDF_QUEUE_PRIORITY_HIGH
+                               ? KFD_MAX_QUEUE_PRIORITY
+                               : 7;
   queue->scratch_service = create_info->scratch_service;
   amdf_atomic_uint64_initialize(&queue->terminal_status, AMDF_STATUS_OK);
 
@@ -500,7 +506,7 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
         .gpu_id = device->topology.gpu_id,
         .queue_type = queue->plan.native_queue_type,
         .queue_percentage = KFD_MAX_QUEUE_PERCENTAGE,
-        .queue_priority = 7,
+        .queue_priority = queue->native_priority,
         .eop_buffer_address = queue->end_of_pipe.device_address,
         .eop_buffer_size = queue->plan.compute.end_of_pipe_storage.byte_length,
         .ctx_save_restore_address = queue->context.device_address,
@@ -767,7 +773,7 @@ static amdf_status_t amdf_gpu_kfd_user_queue_set_active(
       .queue_id = queue->queue_identifier,
       .ring_size = (uint32_t)queue->plan.ring.primary_byte_length,
       .queue_percentage = active ? KFD_MAX_QUEUE_PERCENTAGE : 0,
-      .queue_priority = 7,
+      .queue_priority = queue->native_priority,
   };
   const amdf_status_t status = queue->native_api->queue_update(
       queue->native_api->user_data, queue->device, &update);

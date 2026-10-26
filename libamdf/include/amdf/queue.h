@@ -223,7 +223,8 @@ typedef struct amdf_queue_family_info_t {
   amdf_kernel_queue_capabilities_t kernel_queue_capabilities;
   /// Supported direct-publication producer modes.
   amdf_queue_producer_modes_t producer_modes;
-  /// Supported scheduling priorities.
+  /// Supported user-queue scheduling priorities, or zero without user
+  /// publication. Kernel queue creation has no priority selector.
   amdf_queue_priority_capabilities_t priority_capabilities;
   /// Supported explicit primary-ring placements for user publication.
   amdf_queue_placement_capabilities_t placement_capabilities;

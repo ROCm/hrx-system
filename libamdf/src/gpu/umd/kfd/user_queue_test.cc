@@ -450,11 +450,6 @@ TEST_F(KfdUserQueueTest, RejectsUnsupportedQueueWithoutPublishingOutputs) {
                 &device_, &create_info, &queue, &result)),
             AMDF_STATUS_CODE_UNSUPPORTED);
   device_.topology.properties.topology.xcc_count = 1;
-  create_info.priority = AMDF_QUEUE_PRIORITY_HIGH;
-  EXPECT_EQ(amdf_status_code(amdf_gpu_umd_user_queue_create(
-                &device_, &create_info, &queue, &result)),
-            AMDF_STATUS_CODE_UNSUPPORTED);
-  create_info = MakeCreateInfo();
   create_info.ring_byte_length = UINT64_C(1) << 32;
   EXPECT_EQ(amdf_status_code(amdf_gpu_umd_user_queue_create(
                 &device_, &create_info, &queue, &result)),
@@ -500,6 +495,31 @@ TEST_F(KfdUserQueueTest, SamplesProgressAndLatchesTerminalFailures) {
   EXPECT_EQ(status.terminal_status,
             amdf_make_status(AMDF_STATUS_DOMAIN_FIRMWARE,
                              static_cast<uint32_t>(queue_error)));
+}
+
+TEST_F(KfdUserQueueTest, HonorsSchedulingPrioritiesForEveryProtocol) {
+  for (auto command_type :
+       {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+        AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA}) {
+    SCOPED_TRACE(command_type);
+    for (auto priority : {AMDF_QUEUE_PRIORITY_LOW, AMDF_QUEUE_PRIORITY_NORMAL,
+                          AMDF_QUEUE_PRIORITY_HIGH}) {
+      SCOPED_TRACE(priority);
+      native_state_.Reset();
+      auto create_info = MakeCreateInfo(command_type);
+      create_info.priority = priority;
+      ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
+                                               &queue_result_),
+                AMDF_STATUS_OK);
+      EXPECT_EQ(native_state_.observed_create.queue_priority,
+                priority == AMDF_QUEUE_PRIORITY_LOW    ? 0u
+                : priority == AMDF_QUEUE_PRIORITY_HIGH ? 15u
+                                                       : 7u);
+      ASSERT_EQ(amdf_gpu_umd_user_queue_destroy(queue_), AMDF_STATUS_OK);
+      queue_ = nullptr;
+      EXPECT_EQ(native_state_.LiveBufferCount(), 0u);
+    }
+  }
 }
 
 class KfdSizedUserQueueTest : public KfdUserQueueTest,
@@ -1519,6 +1539,7 @@ TEST_F(KfdUserQueueTest, ScratchServiceDoesNotHideOtherFirmwareErrors) {
 TEST_F(KfdUserQueueTest, IdleScratchTrimRebindsOnlyTheScratchDescriptor) {
   SelectAqlTopology();
   auto create_info = MakeCreateInfo(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+  create_info.priority = AMDF_QUEUE_PRIORITY_HIGH;
   create_info.scratch_service = true;
   ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create_info, &queue_,
                                            &queue_result_),

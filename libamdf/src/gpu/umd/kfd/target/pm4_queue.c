@@ -70,7 +70,9 @@ amdf_gpu_kfd_pm4_queue_family_properties(
       .atomic_capabilities = amdf_gpu_pm4_atomic_capabilities(),
       .user_queue_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
       .producer_modes = AMDF_QUEUE_PRODUCER_MODE_BIT_SINGLE,
-      .priority_capabilities = AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL,
+      .priority_capabilities = AMDF_QUEUE_PRIORITY_CAPABILITY_LOW |
+                               AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL |
+                               AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH,
       .minimum_ring_byte_length = AMDF_GPU_KFD_PM4_RING_BYTE_LENGTH,
       .maximum_ring_byte_length = UINT64_C(1) << 31,
       .ring_byte_length_alignment = AMDF_GPU_KFD_PM4_RING_BYTE_LENGTH,

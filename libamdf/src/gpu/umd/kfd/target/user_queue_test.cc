@@ -45,6 +45,10 @@ TEST(KfdTargetUserQueueTest, DiscoversPlacementWithoutAnAddressDomain) {
                                                     &plans);
     ASSERT_EQ(plans.count, 3u);
     for (uint32_t i = 0; i < plans.count; ++i) {
+      EXPECT_EQ(plans.values[i].family.priority_capabilities,
+                AMDF_QUEUE_PRIORITY_CAPABILITY_LOW |
+                    AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL |
+                    AMDF_QUEUE_PRIORITY_CAPABILITY_HIGH);
       EXPECT_EQ(plans.values[i].family.placement_capabilities,
                 AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
                     (mode ? AMDF_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL : 0));

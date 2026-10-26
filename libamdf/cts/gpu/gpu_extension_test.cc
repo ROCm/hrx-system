@@ -107,6 +107,67 @@ TEST_F(GpuDeviceFixture, InactivatesAdvertisedQueuesBeforeReleasingOwners) {
 
 class GpuMemoryObservationTest : public GpuDeviceFixture {};
 
+class GpuQueuePriorityTest : public GpuDeviceFixture {};
+
+TEST_F(GpuQueuePriorityTest, ConstructsEveryAdvertisedPriority) {
+  amdf_endpoint_info_t endpoint_info = {
+      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+      .structure_size = sizeof(endpoint_info),
+  };
+  ASSERT_EQ(api_->endpoint_query_info(endpoint_, &endpoint_info),
+            AMDF_STATUS_OK);
+  bool tested = false;
+  for (uint32_t ordinal = 0; ordinal < endpoint_info.queue_family_count;
+       ++ordinal) {
+    SCOPED_TRACE(ordinal);
+    amdf_queue_family_info_t family = {
+        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+        .structure_size = sizeof(family),
+    };
+    ASSERT_EQ(
+        api_->endpoint_query_queue_family_info(endpoint_, ordinal, &family),
+        AMDF_STATUS_OK);
+    if (!(family.user_queue_capabilities &
+          AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER)) {
+      continue;
+    }
+    for (amdf_queue_priority_t priority :
+         {AMDF_QUEUE_PRIORITY_LOW, AMDF_QUEUE_PRIORITY_NORMAL,
+          AMDF_QUEUE_PRIORITY_HIGH}) {
+      SCOPED_TRACE(priority);
+      if (!(family.priority_capabilities & (1u << priority))) {
+        continue;
+      }
+      const amdf_gpu_user_queue_create_info_t create = {
+          .type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,
+          .structure_size = sizeof(create),
+          .queue_family_ordinal = ordinal,
+          .priority = priority,
+          .producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE,
+          .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
+      };
+      amdf_user_queue_t* queue = nullptr;
+      ASSERT_EQ(gpu_api_->user_queue_create(device_, &create, &queue),
+                AMDF_STATUS_OK);
+      const auto release = [this](amdf_user_queue_t* value) {
+        EXPECT_EQ(api_->user_queue_destroy(value), AMDF_STATUS_OK);
+      };
+      const std::unique_ptr<amdf_user_queue_t, decltype(release)> owner(
+          queue, release);
+      amdf_user_queue_info_t info = {
+          .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_INFO,
+          .structure_size = sizeof(info),
+      };
+      ASSERT_EQ(api_->user_queue_query_info(queue, &info), AMDF_STATUS_OK);
+      EXPECT_EQ(info.priority, priority);
+      tested = true;
+    }
+  }
+  if (!tested) {
+    GTEST_SKIP() << "endpoint has no host-published user queues";
+  }
+}
+
 TEST_F(GpuMemoryObservationTest, PhysicalStorageReportsCapacityAndHeadroom) {
   amdf_memory_scope_info_t system_info = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
