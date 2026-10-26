@@ -15,6 +15,8 @@ extern "C" {
 #endif  // __cplusplus
 
 typedef struct iree_hal_streaming_context_t iree_hal_streaming_context_t;
+typedef struct iree_hal_streaming_stream_t iree_hal_streaming_stream_t;
+typedef struct iree_hal_streaming_buffer_ref_t iree_hal_streaming_buffer_ref_t;
 
 // Performs a blocking host-to-device transfer on |context|'s provisioned
 // transfer queue.
@@ -28,6 +30,16 @@ iree_status_t iree_hal_streaming_direct_transfer_h2d(
 iree_status_t iree_hal_streaming_direct_transfer_d2h(
     iree_hal_streaming_context_t* context, iree_hal_buffer_t* source_buffer,
     iree_device_size_t source_offset, void* target, iree_device_size_t length);
+
+// Downloads validated source rows to unregistered host memory in one native
+// transfer batch. The caller reserves and completes one point on |stream|'s
+// timeline without routing CPU work to a callback worker. Prepared |sources|
+// and the host destination remain borrowed until this blocking call returns.
+iree_status_t iree_hal_streaming_direct_transfer_d2h_rows(
+    iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream,
+    void* destination, iree_device_size_t destination_pitch,
+    iree_device_size_t width, iree_host_size_t row_count,
+    const iree_hal_streaming_buffer_ref_t* sources);
 
 // Performs a blocking device-to-device transfer on |context|'s provisioned
 // transfer queue.

@@ -37,6 +37,9 @@ typedef struct iree_hal_streaming_host_callback_queue_t {
   iree_hal_streaming_host_callback_job_t* head;
   // Last ready callback, or NULL when the FIFO is empty.
   iree_hal_streaming_host_callback_job_t* tail;
+  // Live prepared captures, including native callbacks not yet ready/cancelled.
+  // Shutdown joins these references before releasing frontend device owners.
+  iree_host_size_t capture_count;
   // Stops ready admission and exits the worker after draining its FIFO.
   bool stopping;
 } iree_hal_streaming_host_callback_queue_t;
@@ -47,7 +50,7 @@ void iree_hal_streaming_host_callback_queue_initialize(
     iree_allocator_t host_allocator,
     iree_hal_streaming_host_callback_queue_t* out_queue);
 
-// Closes ready admission, drains accepted callouts, and joins their CPU tails.
+// Closes ready admission, joins native captures, and drains worker CPU tails.
 // The application has stopped submitting frontend operations and synchronized
 // its streams. Late native callbacks on failed queues are rejected. The queue
 // object remains live until native device teardown has joined those producers.

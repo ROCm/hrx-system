@@ -12,6 +12,7 @@
 #include "common/device.h"
 #include "common/direct_transfer.h"
 #include "common/graph.h"
+#include "common/host_callback.h"
 #include "common/hrx_bridge.h"
 #include "common/peer.h"
 #include "common/stream.h"
@@ -2918,17 +2919,12 @@ static void iree_hal_streaming_host_d2h_staging_scatter_rows(
   }
 }
 
-static iree_status_t iree_hal_streaming_host_d2h_staging_call(
-    void* user_data, const uint64_t args[4],
-    iree_hal_host_call_context_t* call_context) {
-  (void)args;
-  (void)call_context;
+static void iree_hal_streaming_host_d2h_staging_call(void* user_data) {
   iree_hal_streaming_host_d2h_staging_t* copy =
       (iree_hal_streaming_host_d2h_staging_t*)user_data;
   iree_hal_streaming_host_d2h_staging_scatter_rows(copy->dst, copy->dst_pitch,
                                                    copy->staging->host_ptr,
                                                    copy->width, copy->height);
-  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_streaming_enqueue_host_d2h_staging_copy(
@@ -2964,11 +2960,16 @@ static iree_status_t iree_hal_streaming_enqueue_host_d2h_staging_copy(
   copy->width = width;
   copy->height = height;
 
-  uint64_t args[4] = {0, 0, 0, 0};
-  iree_hal_host_call_t call = iree_hal_make_host_call_with_resource(
-      iree_hal_streaming_host_d2h_staging_call, copy, &copy->resource);
-  status = iree_hal_streaming_queue_host_call(stream, call, args,
-                                              IREE_HAL_HOST_CALL_FLAG_NONE);
+  iree_hal_host_call_t call;
+  status = iree_hal_streaming_host_callback_prepare(
+      stream->context->device_entry->host_callbacks,
+      iree_hal_streaming_host_d2h_staging_call, copy, &copy->resource, &call);
+  if (iree_status_is_ok(status)) {
+    const uint64_t args[4] = {0};
+    status = iree_hal_streaming_queue_host_call(stream, call, args,
+                                                IREE_HAL_HOST_CALL_FLAG_NONE);
+    iree_hal_resource_release(call.resource);
+  }
   if (!iree_status_is_ok(status)) {
     iree_status_t sync_status = iree_hal_streaming_stream_synchronize(stream);
     if (iree_status_is_ok(sync_status)) {
@@ -3399,21 +3400,19 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
   iree_hal_streaming_buffer_ref_t src_ref;
   iree_status_t src_status =
       iree_hal_streaming_memory_lookup(context, src, &src_ref);
-
+  if (iree_status_is_ok(src_status)) {
+    src_status = iree_hal_streaming_buffer_ref_validate_range(&src_ref, size);
+  }
   if (!iree_status_is_ok(src_status)) {
     IREE_TRACE_ZONE_END(z0);
     return src_status;
   }
 
-  if (src_ref.buffer->host_ptr &&
+  if (!stream && src_ref.buffer->host_ptr &&
       iree_all_bits_set((iree_hal_memory_type_t)src_ref.buffer->memory_type,
                         IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
                             IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
-    iree_status_t status =
-        iree_hal_streaming_buffer_ref_validate_range(&src_ref, size);
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_streaming_context_synchronize_all();
-    }
+    iree_status_t status = iree_hal_streaming_context_synchronize_all();
     if (iree_status_is_ok(status)) {
       memcpy(dst, (const uint8_t*)src_ref.buffer->host_ptr + src_ref.offset,
              size);
@@ -3428,6 +3427,8 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
     iree_status_t dst_status = iree_hal_streaming_memory_lookup(
         context, (iree_hal_streaming_deviceptr_t)dst, &dst_ref);
     if (iree_status_is_ok(dst_status)) {
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_hal_streaming_buffer_ref_validate_range(&dst_ref, size));
       if (!iree_all_bits_set(
               (iree_hal_memory_type_t)dst_ref.buffer->memory_type,
               IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
@@ -3436,8 +3437,15 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
             IREE_STATUS_INVALID_ARGUMENT,
             "device-to-host destination is not host memory");
       }
-    } else {
+    } else if (iree_status_is_not_found(dst_status)) {
       iree_status_ignore(dst_status);
+      iree_status_t status = iree_hal_streaming_direct_transfer_d2h_rows(
+          context, stream, dst, size, size, 1, &src_ref);
+      IREE_TRACE_ZONE_END(z0);
+      return status;
+    } else {
+      IREE_TRACE_ZONE_END(z0);
+      return dst_status;
     }
 
     // Host allocations do not necessarily provide the system-scope visibility
@@ -3569,6 +3577,32 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host_2d(
   }
 
   iree_hal_streaming_buffer_t* staging = NULL;
+  if (iree_status_is_ok(status)) {
+    iree_hal_streaming_buffer_ref_t destination_ref;
+    iree_status_t destination_status = iree_hal_streaming_memory_lookup(
+        context, (iree_hal_streaming_deviceptr_t)dst, &destination_ref);
+    if (iree_status_is_not_found(destination_status)) {
+      iree_status_ignore(destination_status);
+      status = iree_hal_streaming_direct_transfer_d2h_rows(
+          context, stream, dst, dst_pitch, width, height, source_refs);
+      iree_allocator_free(context->host_allocator, source_refs);
+      IREE_TRACE_ZONE_END(z0);
+      return status;
+    }
+    status = destination_status;
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_buffer_ref_validate_range(&destination_ref,
+                                                            destination_span);
+    }
+    if (iree_status_is_ok(status) &&
+        !iree_all_bits_set(
+            (iree_hal_memory_type_t)destination_ref.buffer->memory_type,
+            IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
+      status =
+          iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                           "device-to-host destination is not host memory");
+    }
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_memory_allocate_host_with_context_mode(
         context, packed_size, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,

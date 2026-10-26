@@ -13,6 +13,7 @@
 
 #include "common/context.h"
 #include "common/device.h"
+#include "common/host_callback.h"
 #include "common/hrx_bridge.h"
 #include "common/stream.h"
 #include "iree/testing/gtest.h"
@@ -192,12 +193,15 @@ struct FailingSnapshotAllocator {
 class CpuStreamingMemoryTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    iree_hal_streaming_host_callback_queue_initialize(iree_allocator_system(),
+                                                      &host_callbacks_);
     IREE_ASSERT_OK(HRX_CALL(hrx_cpu_initialize(/*flags=*/0)));
     hrx_device_t hrx_device = nullptr;
     IREE_ASSERT_OK(HRX_CALL(hrx_cpu_device_get(/*index=*/0, &hrx_device)));
 
     device_entry_.hrx_device = hrx_device;
     device_entry_.hal_device = hrx_device_hal(hrx_device);
+    device_entry_.host_callbacks = &host_callbacks_;
     iree_slim_mutex_initialize(&device_entry_.primary_context_mutex);
     iree_slim_mutex_initialize(&device_entry_.graph_memory_mutex);
     iree_arena_block_pool_initialize(/*block_size=*/64 * 1024,
@@ -215,6 +219,11 @@ class CpuStreamingMemoryTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    if (context_) {
+      IREE_EXPECT_OK(iree_hal_streaming_context_synchronize(context_));
+    }
+    iree_hal_streaming_host_callback_queue_stop(&host_callbacks_);
+    iree_hal_streaming_memory_release_wrapped_buffer(host_buffer_);
     iree_hal_streaming_memory_release_wrapped_buffer(buffer_);
     buffer_ = nullptr;
     device_pointer_ = 0;
@@ -224,14 +233,42 @@ class CpuStreamingMemoryTest : public ::testing::Test {
     iree_slim_mutex_deinitialize(&device_entry_.graph_memory_mutex);
     iree_slim_mutex_deinitialize(&device_entry_.primary_context_mutex);
     IREE_EXPECT_OK(HRX_CALL(hrx_cpu_shutdown()));
+    iree_hal_streaming_host_callback_queue_deinitialize(&host_callbacks_);
   }
 
+  // Explicit frontend callout owner shared by this fixture's device contexts.
+  iree_hal_streaming_host_callback_queue_t host_callbacks_ = {};
   iree_hal_streaming_device_t device_entry_ = {};
   iree_hal_streaming_context_t* context_ = nullptr;
   iree_hal_streaming_stream_t* stream_ = nullptr;
   iree_hal_streaming_buffer_t* buffer_ = nullptr;
+  // Registered host destination held through asynchronous copy completion.
+  iree_hal_streaming_buffer_t* host_buffer_ = nullptr;
   iree_hal_streaming_deviceptr_t device_pointer_ = 0;
 };
+
+TEST_F(CpuStreamingMemoryTest,
+       DownloadsValidateAllocationExtentsBeforeSubmitting) {
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, 16, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
+      context_, 8, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
+      &host_buffer_));
+  const uint64_t pending_value = stream_->pending_value;
+  std::array<uint8_t, 16> pageable_destination = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_hal_streaming_memcpy_device_to_host(
+                            context_, pageable_destination.data(),
+                            device_pointer_ + 8, 9, stream_));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      iree_hal_streaming_memcpy_device_to_host(
+          context_, static_cast<uint8_t*>(host_buffer_->host_ptr) + 4,
+          device_pointer_, 8, stream_));
+  EXPECT_EQ(stream_->pending_value, pending_value);
+  EXPECT_EQ(host_callbacks_.thread, nullptr);
+}
 
 TEST_F(CpuStreamingMemoryTest,
        PitchedCopyDrainsAcceptedRowsBeforeReturningRecordingError) {
@@ -472,7 +509,10 @@ TEST_F(CpuStreamingMemoryTest,
   buffer_->memory_type =
       (iree_hal_memory_type_t)(buffer_->memory_type &
                                ~IREE_HAL_MEMORY_TYPE_HOST_LOCAL);
-  std::array<uint8_t, kAllocationSize> destination = {};
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
+      context_, kAllocationSize, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
+      &host_buffer_));
+  void* destination = host_buffer_->host_ptr;
 
   InjectedFlushQueue fault_queue = {};
   iree_hal_queue_t* original_queue = stream_->queue;
@@ -494,8 +534,7 @@ TEST_F(CpuStreamingMemoryTest,
   std::atomic<iree_status_code_t> copy_status_code = IREE_STATUS_UNKNOWN;
   std::thread copy_thread([&] {
     iree_status_t status = iree_hal_streaming_memcpy_device_to_host(
-        context_, destination.data(), device_pointer_, kAllocationSize,
-        stream_);
+        context_, destination, device_pointer_, kAllocationSize, stream_);
     copy_status_code.store(iree_status_code(status), std::memory_order_release);
     iree_status_ignore(status);
     copy_returned.store(true, std::memory_order_release);
@@ -522,8 +561,7 @@ TEST_F(CpuStreamingMemoryTest,
   EXPECT_TRUE(copy_returned.load(std::memory_order_acquire));
   EXPECT_EQ(IREE_STATUS_INTERNAL,
             copy_status_code.load(std::memory_order_acquire));
-  EXPECT_EQ(0,
-            std::memcmp(destination.data(), expected.data(), expected.size()));
+  EXPECT_EQ(0, std::memcmp(destination, expected.data(), expected.size()));
 
   iree_hal_queue_retain(original_queue);
   iree_hal_queue_t* installed_queue =
@@ -544,7 +582,10 @@ TEST_F(CpuStreamingMemoryTest,
   buffer_->memory_type =
       (iree_hal_memory_type_t)(buffer_->memory_type &
                                ~IREE_HAL_MEMORY_TYPE_HOST_LOCAL);
-  std::array<uint8_t, kAllocationSize> destination = {};
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
+      context_, kAllocationSize, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
+      &host_buffer_));
+  void* destination = host_buffer_->host_ptr;
 
   InjectedFlushQueue fault_queue = {};
   iree_hal_queue_t* original_queue = stream_->queue;
@@ -565,8 +606,7 @@ TEST_F(CpuStreamingMemoryTest,
   std::atomic<iree_status_code_t> copy_status_code = IREE_STATUS_UNKNOWN;
   std::thread copy_thread([&] {
     iree_status_t status = iree_hal_streaming_memcpy_device_to_host(
-        context_, destination.data(), device_pointer_, kAllocationSize,
-        stream_);
+        context_, destination, device_pointer_, kAllocationSize, stream_);
     copy_status_code.store(iree_status_code(status), std::memory_order_release);
     iree_status_ignore(status);
     copy_returned.store(true, std::memory_order_release);

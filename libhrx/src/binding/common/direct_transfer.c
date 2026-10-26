@@ -8,6 +8,8 @@
 
 #include "common/context.h"
 #include "common/device.h"
+#include "common/memory.h"
+#include "common/stream.h"
 #include "transfer.h"
 
 iree_status_t iree_hal_streaming_direct_transfer_h2d(
@@ -91,4 +93,59 @@ iree_status_t iree_hal_streaming_direct_transfer_d2d(
   };
   return hrx_hal_queue_transfer_and_wait(context->device_entry->hrx_device,
                                          /*operation_count=*/1, &operation);
+}
+
+typedef struct iree_hal_streaming_host_download_t {
+  // Borrowed device whose native transfer path performs host visibility work.
+  hrx_device_t device;
+  // Number of row downloads in this transaction.
+  iree_host_size_t operation_count;
+  // Borrowed capture, live on the caller until the transaction completes.
+  const iree_hal_transfer_operation_t* operations;
+} iree_hal_streaming_host_download_t;
+
+static iree_status_t iree_hal_streaming_host_download_execute(void* user_data) {
+  const iree_hal_streaming_host_download_t* download = user_data;
+  return hrx_hal_queue_transfer_and_wait(
+      download->device, download->operation_count, download->operations);
+}
+
+// Unregistered host memory is a blocking compatibility destination. Keep its
+// completion on the caller, ordered only after this stream, instead of making
+// it depend on unrelated application callbacks or allocating CPU-copy staging.
+iree_status_t iree_hal_streaming_direct_transfer_d2h_rows(
+    iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream,
+    void* destination, iree_device_size_t destination_pitch,
+    iree_device_size_t width, iree_host_size_t row_count,
+    const iree_hal_streaming_buffer_ref_t* sources) {
+  iree_hal_transfer_operation_t single_operation;
+  iree_hal_transfer_operation_t* operations = &single_operation;
+  if (row_count > 1) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array_uninitialized(
+        context->host_allocator, row_count, sizeof(*operations),
+        (void**)&operations));
+  }
+  for (iree_host_size_t row = 0; row < row_count; ++row) {
+    operations[row] = (iree_hal_transfer_operation_t){
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download =
+            {
+                .source_buffer = sources[row].buffer->buffer,
+                .source_offset = sources[row].offset,
+                .target = (uint8_t*)destination + row * destination_pitch,
+                .length = width,
+            },
+    };
+  }
+  iree_hal_streaming_host_download_t download = {
+      .device = context->device_entry->hrx_device,
+      .operation_count = row_count,
+      .operations = operations,
+  };
+  iree_status_t status = iree_hal_streaming_execute_host_operation(
+      stream, iree_hal_streaming_host_download_execute, &download);
+  if (operations != &single_operation) {
+    iree_allocator_free(context->host_allocator, operations);
+  }
+  return status;
 }

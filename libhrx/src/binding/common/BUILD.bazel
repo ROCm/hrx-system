@@ -323,6 +323,7 @@ hrx_cc_test(
     }),
     deps = [
         ":common",
+        ":host_callback",
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",

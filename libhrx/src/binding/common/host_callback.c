@@ -34,6 +34,14 @@ static void iree_hal_streaming_host_callback_destroy(
   iree_hal_streaming_host_callback_job_t* callback = (void*)base_resource;
   iree_hal_resource_release(callback->captured_resource);
   iree_hal_semaphore_list_free(callback->signals, callback->host_allocator);
+  // Native cancellation may release callback payloads after a failed stream's
+  // semaphore becomes observable. Keep frontend device owners until every
+  // native capture has actually released its payload and completion list.
+  iree_hal_streaming_host_callback_queue_t* queue = callback->queue;
+  iree_slim_mutex_lock(&queue->mutex);
+  --queue->capture_count;
+  iree_notification_post(&queue->notification, IREE_ALL_WAITERS);
+  iree_slim_mutex_unlock(&queue->mutex);
   iree_allocator_free(callback->host_allocator, callback);
 }
 
@@ -98,6 +106,14 @@ void iree_hal_streaming_host_callback_queue_initialize(
   iree_notification_initialize(&out_queue->notification);
 }
 
+static bool iree_hal_streaming_host_callback_queue_is_idle(void* user_data) {
+  iree_hal_streaming_host_callback_queue_t* queue = user_data;
+  iree_slim_mutex_lock(&queue->mutex);
+  const bool idle = queue->capture_count == 0;
+  iree_slim_mutex_unlock(&queue->mutex);
+  return idle;
+}
+
 void iree_hal_streaming_host_callback_queue_stop(
     iree_hal_streaming_host_callback_queue_t* queue) {
   iree_slim_mutex_lock(&queue->mutex);
@@ -106,6 +122,9 @@ void iree_hal_streaming_host_callback_queue_stop(
   queue->thread = NULL;
   iree_notification_post(&queue->notification, IREE_ALL_WAITERS);
   iree_slim_mutex_unlock(&queue->mutex);
+  iree_notification_await(&queue->notification,
+                          iree_hal_streaming_host_callback_queue_is_idle, queue,
+                          iree_infinite_timeout());
   iree_thread_release(thread);
 }
 
@@ -157,6 +176,7 @@ iree_status_t iree_hal_streaming_host_callback_prepare(
   callback->captured_resource = resource;
   iree_hal_resource_retain(resource);
   iree_slim_mutex_lock(&queue->mutex);
+  ++queue->capture_count;
   iree_status_t status = iree_ok_status();
   if (!queue->thread) {
     const iree_thread_create_params_t params = {

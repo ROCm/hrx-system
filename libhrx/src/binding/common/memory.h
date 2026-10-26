@@ -429,7 +429,9 @@ iree_status_t iree_hal_streaming_memcpy_value_to_device(
     const void* src, iree_device_size_t size,
     iree_hal_streaming_stream_t* stream);
 
-// Synchronization: stream or blocking (async if stream, sync if NULL stream).
+// Outside capture, registered host destinations remain asynchronous when a
+// stream is supplied. Unregistered host destinations and NULL-stream copies
+// complete on the caller.
 iree_status_t iree_hal_streaming_memcpy_device_to_host(
     iree_hal_streaming_context_t* context, void* dst,
     iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
@@ -490,10 +492,10 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
     iree_device_size_t width, iree_host_size_t height,
     iree_hal_streaming_stream_t* stream);
 
-// Enqueues a pitched D2H copy through queue-visible staging. A stream-ordered
-// host call scatters the packed staging rows into |dst| after the device copies
-// complete.
-// Synchronization: stream-ordered.
+// Copies a pitched D2H region. Registered host destinations use asynchronous
+// queue-visible staging and a stream-ordered CPU scatter. Unregistered host
+// destinations complete on the caller through one stream-ordered transfer
+// batch.
 iree_status_t iree_hal_streaming_memcpy_device_to_host_2d(
     iree_hal_streaming_context_t* context, void* dst,
     iree_device_size_t dst_pitch, iree_hal_streaming_deviceptr_t src,

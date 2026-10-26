@@ -924,18 +924,21 @@ TEST_F(HipArrayCopySptApiTest, ContiguousCopyWaitsForLegacyProducer) {
 
 TEST_F(HipArrayCopySptApiTest, PageableCopiesWaitOnlyForTheirSelectedStream) {
   constexpr size_t kWidth = 8;
-  AllocateArray(kWidth, 1);
-  AllocateHost(kWidth);
+  constexpr size_t kHeight = 3;
+  constexpr size_t kPitchedWidth = kWidth + 3;
+  constexpr size_t kSize = kWidth * kHeight;
+  AllocateArray(kWidth, kHeight);
+  AllocateHost(kSize);
   auto* source = static_cast<uint8_t*>(host_pointer_);
-  for (size_t i = 0; i < kWidth; ++i) {
+  for (size_t i = 0; i < kSize; ++i) {
     source[i] = static_cast<uint8_t>(i + 1);
   }
-  ASSERT_EQ(hipSuccess, api_.malloc(&device_pointer_, kWidth));
-  ASSERT_EQ(hipSuccess, api_.memcpy(device_pointer_, source, kWidth,
-                                    hipMemcpyHostToDevice));
+  ASSERT_EQ(hipSuccess, api_.malloc(&device_pointer_, kSize));
   ASSERT_EQ(hipSuccess,
-            api_.memcpy_2d_to_array_spt(array_, 0, 0, source, kWidth, kWidth, 1,
-                                        hipMemcpyHostToDevice));
+            api_.memcpy(device_pointer_, source, kSize, hipMemcpyHostToDevice));
+  ASSERT_EQ(hipSuccess,
+            api_.memcpy_2d_to_array_spt(array_, 0, 0, source, kWidth, kWidth,
+                                        kHeight, hipMemcpyHostToDevice));
 
   // A non-default priority selects a distinct hardware queue. This keeps the
   // blocked callback from physically obstructing the default queue while
@@ -948,29 +951,37 @@ TEST_F(HipArrayCopySptApiTest, PageableCopiesWaitOnlyForTheirSelectedStream) {
             api_.launch_host_function(stream_, WaitForRelease, &gate));
   gate.entered.Wait();
 
-  std::array<uint8_t, kWidth> generic_destination = {};
+  std::array<uint8_t, kSize> generic_destination = {};
   hipMemcpy3DParms parameters = {};
   parameters.srcPtr.ptr = device_pointer_;
   parameters.srcPtr.pitch = kWidth;
   parameters.srcPtr.xsize = kWidth;
-  parameters.srcPtr.ysize = 1;
+  parameters.srcPtr.ysize = kHeight;
   parameters.dstPtr.ptr = generic_destination.data();
   parameters.dstPtr.pitch = kWidth;
   parameters.dstPtr.xsize = kWidth;
-  parameters.dstPtr.ysize = 1;
-  parameters.extent = {.width = kWidth, .height = 1, .depth = 1};
+  parameters.dstPtr.ysize = kHeight;
+  parameters.extent = {.width = kWidth, .height = kHeight, .depth = 1};
   parameters.kind = hipMemcpyDeviceToHost;
   EXPECT_EQ(hipSuccess, api_.memcpy_3d_async(&parameters, nullptr));
 
-  std::array<uint8_t, kWidth> array_destination = {};
-  EXPECT_EQ(hipSuccess, api_.memcpy_2d_from_array_async_spt(
-                            array_destination.data(), kWidth, array_, 0, 0,
-                            kWidth, 1, hipMemcpyDeviceToHost, hipStreamLegacy));
+  std::array<uint8_t, kPitchedWidth * kHeight> array_destination;
+  array_destination.fill(0xcd);
+  EXPECT_EQ(hipSuccess,
+            api_.memcpy_2d_from_array_async_spt(
+                array_destination.data(), kPitchedWidth, array_, 0, 0, kWidth,
+                kHeight, hipMemcpyDeviceToHost, hipStreamLegacy));
 
   gate.release.Post();
   ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
-  EXPECT_EQ(0, std::memcmp(source, generic_destination.data(), kWidth));
-  EXPECT_EQ(0, std::memcmp(source, array_destination.data(), kWidth));
+  EXPECT_EQ(0, std::memcmp(source, generic_destination.data(), kSize));
+  for (size_t row = 0; row < kHeight; ++row) {
+    const auto* destination = array_destination.data() + row * kPitchedWidth;
+    EXPECT_EQ(0, std::memcmp(source + row * kWidth, destination, kWidth));
+    for (size_t column = kWidth; column < kPitchedWidth; ++column) {
+      EXPECT_EQ(destination[column], 0xcd);
+    }
+  }
 }
 
 TEST_F(HipArrayCopySptApiTest, NoOpAndDeviceCopyDoNotDrainPerThreadStream) {

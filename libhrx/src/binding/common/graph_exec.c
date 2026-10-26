@@ -8,6 +8,7 @@
 #include "common/device.h"
 #include "common/event.h"
 #include "common/graph.h"
+#include "common/host_callback.h"
 #include "common/module.h"
 #include "common/occupancy.h"
 #include "common/stream.h"
@@ -73,8 +74,6 @@ typedef struct iree_hal_streaming_graph_host_call_block_attrs_t {
   iree_hal_streaming_host_callback_t fn;
   // User data passed to the host callback.
   void* user_data;
-  // Persistent queue-host-call argument storage referenced by the device queue.
-  uint64_t args[4];
   // Host-call submission flags.
   iree_hal_host_call_flags_t flags;
 } iree_hal_streaming_graph_host_call_block_attrs_t;
@@ -2302,20 +2301,6 @@ iree_hal_streaming_graph_exec_preflight_cooperative_dispatches_locked(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_streaming_graph_host_callback(
-    void* user_data, const uint64_t args[4],
-    iree_hal_host_call_context_t* context) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_streaming_host_callback_t call_fn =
-      (iree_hal_streaming_host_callback_t)args[0];
-  void* call_user_data = (void*)args[1];
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, args[0]);
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, args[1]);
-  call_fn(call_user_data);
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
-}
-
 // Submits |block| on |stream| behind |wait_semaphores|, signaling
 // |signal_semaphores| when it completes. |launch_stream_tail_value| and
 // |dropped_graphs| are meaningful only to a child graph block, which carries
@@ -2414,17 +2399,21 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
                                       iree_hal_buffer_binding_table_empty(),
                                       IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
       break;
-    case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL:
-      ptrs->attrs->host_call.args[0] = (uint64_t)ptrs->attrs->host_call.fn;
-      ptrs->attrs->host_call.args[1] =
-          (uint64_t)ptrs->attrs->host_call.user_data;
-      ptrs->attrs->host_call.args[2] = 0;
-      ptrs->attrs->host_call.args[3] = 0;
-      status = iree_hal_queue_host_call(
-          stream->queue, wait_semaphores, signal_semaphores,
-          iree_hal_make_host_call(iree_hal_streaming_graph_host_callback, NULL),
-          ptrs->attrs->host_call.args, ptrs->attrs->host_call.flags);
+    case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL: {
+      iree_hal_host_call_t call;
+      status = iree_hal_streaming_host_callback_prepare(
+          stream->context->device_entry->host_callbacks,
+          ptrs->attrs->host_call.fn, ptrs->attrs->host_call.user_data,
+          /*resource=*/NULL, &call);
+      if (iree_status_is_ok(status)) {
+        const uint64_t args[4] = {0};
+        status = iree_hal_queue_host_call(stream->queue, wait_semaphores,
+                                          signal_semaphores, call, args,
+                                          ptrs->attrs->host_call.flags);
+        iree_hal_resource_release(call.resource);
+      }
       break;
+    }
     default:
       status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                                 "unsupported block type %u", block->type);

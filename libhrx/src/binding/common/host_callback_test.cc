@@ -166,14 +166,38 @@ TEST_F(HostCallbackTest,
   iree_hal_semaphore_release(semaphore);
 }
 
-TEST_F(HostCallbackTest, LateNativeReadyCallbackIsCancelledAfterWorkerStop) {
+TEST_F(HostCallbackTest, ShutdownJoinsNativeCaptureBeforeReleasingItsOwners) {
   int calls = 0;
+  CapturedState captured;
   iree_hal_host_call_t call;
   IREE_ASSERT_OK(iree_hal_streaming_host_callback_prepare(
-      &queue_, Increment, &calls, nullptr, &call));
-  iree_hal_streaming_host_callback_queue_stop(&queue_);
+      &queue_, Increment, &calls, &captured.resource, &call));
+  iree_hal_resource_release(&captured.resource);
+  std::atomic<bool> stopped = false;
+  std::thread shutdown([&] {
+    iree_hal_streaming_host_callback_queue_stop(&queue_);
+    stopped.store(true, std::memory_order_release);
+  });
+  iree_notification_await(
+      &queue_.notification,
+      +[](void* user_data) {
+        auto* queue =
+            static_cast<iree_hal_streaming_host_callback_queue_t*>(user_data);
+        iree_slim_mutex_lock(&queue->mutex);
+        const bool stopping = queue->stopping;
+        iree_slim_mutex_unlock(&queue->mutex);
+        return stopping;
+      },
+      &queue_, iree_infinite_timeout());
+  EXPECT_FALSE(stopped.load(std::memory_order_acquire));
+  EXPECT_EQ(captured.destroyed, 0);
+  // The native dependency retains the prepared call until invocation or
+  // cancellation, even when stream failure is already visible to its caller.
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, Ready(call));
   iree_hal_resource_release(call.resource);
+  shutdown.join();
+  EXPECT_TRUE(stopped.load(std::memory_order_acquire));
+  EXPECT_EQ(captured.destroyed, 1);
   EXPECT_EQ(calls, 0);
 }
 
