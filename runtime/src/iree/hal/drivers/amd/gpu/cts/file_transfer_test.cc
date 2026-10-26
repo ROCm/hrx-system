@@ -1248,7 +1248,7 @@ class FileDetachGate {
     EXPECT_FALSE(armed_);
     EXPECT_FALSE(closed_);
     EXPECT_EQ(callback_.fn, nullptr);
-    EXPECT_TRUE(iree_status_is_ok(status_));
+    IREE_EXPECT_OK(status_);
     iree_status_ignore(status_);
     armed_ = false;
     closed_ = false;
