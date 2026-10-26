@@ -964,10 +964,8 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
         dispatch_request->launch.geometry.workgroup_size,
         dispatch_request->launch.geometry.partial_size,
         dispatch_request->launch.geometry.group_segment_byte_length, &inputs);
-    const uint32_t initiator =
-        function->launch.dispatch_initiator |
-        (dispatch_request->launch.geometry.partial_size[0] ? UINT32_C(1) << 6
-                                                           : 0);
+    const uint32_t initiator = iree_hal_amd_gpu_pm4_launch_dispatch_initiator(
+        &function->launch, dispatch_request->launch.geometry.partial_size);
     const uint64_t sample_address =
         arguments->address + argument_offset + sample_offset;
     if (sample_length) {

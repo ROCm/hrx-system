@@ -718,9 +718,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
       cursor, &function->launch, dispatch.geometry.workgroup_size,
       dispatch.geometry.partial_size,
       dispatch.geometry.group_segment_byte_length, &inputs);
-  const uint32_t initiator =
-      function->launch.dispatch_initiator |
-      (dispatch.geometry.partial_size[0] ? UINT32_C(1) << 6 : 0);
+  const uint32_t initiator = iree_hal_amd_gpu_pm4_launch_dispatch_initiator(
+      &function->launch, dispatch.geometry.partial_size);
   const uint32_t profile_begin_offset =
       command_offset + (uint32_t)(cursor - words) * 4;
   if (buffer->program->profile) {
