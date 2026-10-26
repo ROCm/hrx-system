@@ -37,8 +37,8 @@ struct EncodeCase {
 class EncodeConfigurationTest : public ::testing::Test {
  protected:
   struct ConfigurationChain {
-    // Independent rate-control state for the one-layer baseline session.
-    amdf_media_encode_rate_control_layer_t rate_control_layer = {};
+    // Independent rate-control state for the requested temporal topology.
+    std::vector<amdf_media_encode_rate_control_layer_t> rate_control_layers;
     // Direction-common rate-control and GOP configuration.
     amdf_media_encode_configuration_t encode = {};
     // H.264 profile configuration at the head of an H.264 chain.
@@ -55,23 +55,25 @@ class EncodeConfigurationTest : public ::testing::Test {
     amdf_media_av1_encode_configuration_t av1_encode = {};
 
     const void* InitializeFor(const EncodeCase& test_case,
-                              amdf_media_encode_rate_control_mode_t mode) {
+                              amdf_media_encode_rate_control_mode_t mode,
+                              uint32_t temporal_layer_count = 1) {
       Initialize(&encode, AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION);
       encode.intra_picture_period = 12;
       encode.inter_picture_period = 1;
       encode.rate_control.mode = mode;
-      encode.rate_control.temporal_layer_count = 1;
-      encode.rate_control.temporal_layers = &rate_control_layer;
-      rate_control_layer.frame_rate_numerator = 30;
-      rate_control_layer.frame_rate_denominator = 1;
+      rate_control_layers.assign(temporal_layer_count, {});
+      encode.rate_control.temporal_layer_count = temporal_layer_count;
+      encode.rate_control.temporal_layers = rate_control_layers.data();
+      rate_control_layers[0].frame_rate_numerator = 30;
+      rate_control_layers[0].frame_rate_denominator = 1;
       if (mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP) {
-        rate_control_layer.control.cqp = {20, 20};
+        rate_control_layers[0].control.cqp = {20, 20};
       } else {
         const uint32_t minimum_qp =
             test_case.codec == AMDF_MEDIA_CODEC_AV1 ? 8u : 1u;
         const uint32_t maximum_qp =
             test_case.codec == AMDF_MEDIA_CODEC_AV1 ? 255u : 51u;
-        rate_control_layer.control.bit_rate = {
+        rate_control_layers[0].control.bit_rate = {
             minimum_qp,
             maximum_qp,
             0,
@@ -81,6 +83,9 @@ class EncodeConfigurationTest : public ::testing::Test {
             1200000,
             600000,
         };
+      }
+      for (uint32_t index = 1; index < temporal_layer_count; ++index) {
+        rate_control_layers[index] = rate_control_layers[0];
       }
       if (test_case.codec == AMDF_MEDIA_CODEC_H264) {
         Initialize(&h264, AMDF_STRUCTURE_TYPE_MEDIA_H264_CONFIGURATION);
@@ -235,11 +240,12 @@ class EncodeConfigurationTest : public ::testing::Test {
       const EncodeCase& test_case, amdf_media_encode_rate_control_mode_t mode,
       ConfigurationChain* chain, uint32_t coded_width = 320,
       uint32_t coded_height = 192,
-      amdf_media_encode_configuration_info_t* encode_info = nullptr) {
+      amdf_media_encode_configuration_info_t* encode_info = nullptr,
+      uint32_t temporal_layer_count = 1) {
     const amdf_media_configuration_query_t query = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_CONFIGURATION_QUERY,
         .structure_size = sizeof(query),
-        .next = chain->InitializeFor(test_case, mode),
+        .next = chain->InitializeFor(test_case, mode, temporal_layer_count),
         .queue_family_ordinal = encode_family_,
         .configuration =
             {
@@ -370,6 +376,46 @@ TEST_F(EncodeConfigurationTest, ExactAdvertisedMatrixAndStorageContracts) {
   EXPECT_GT(tested_case_count, 0u);
 }
 
+TEST_F(EncodeConfigurationTest, ReportedTemporalLayerLimitIsAdmitted) {
+  static constexpr std::array<EncodeCase, 5> kCases = {{
+      {AMDF_MEDIA_CODEC_H264, AMDF_MEDIA_PIXEL_FORMAT_NV12, 8},
+      {AMDF_MEDIA_CODEC_HEVC, AMDF_MEDIA_PIXEL_FORMAT_NV12, 8},
+      {AMDF_MEDIA_CODEC_HEVC, AMDF_MEDIA_PIXEL_FORMAT_P010, 10},
+      {AMDF_MEDIA_CODEC_AV1, AMDF_MEDIA_PIXEL_FORMAT_NV12, 8},
+      {AMDF_MEDIA_CODEC_AV1, AMDF_MEDIA_PIXEL_FORMAT_P010, 10},
+  }};
+  uint32_t tested_case_count = 0;
+  for (const auto& test_case : kCases) {
+    if (!Supports(test_case.codec)) {
+      continue;
+    }
+    ++tested_case_count;
+    ConfigurationChain baseline_chain;
+    amdf_media_encode_configuration_info_t baseline_info = {
+        .type = AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION_INFO,
+        .structure_size = sizeof(baseline_info),
+    };
+    const auto baseline =
+        Query(test_case, AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP,
+              &baseline_chain, 320, 192, &baseline_info);
+    ASSERT_EQ(baseline.support, AMDF_MEDIA_CONFIGURATION_SUPPORT_SUPPORTED);
+    ASSERT_GE(baseline_info.maximum_temporal_layer_count, 1u);
+    ConfigurationChain maximum_chain;
+    amdf_media_encode_configuration_info_t maximum_info = {
+        .type = AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION_INFO,
+        .structure_size = sizeof(maximum_info),
+    };
+    const auto maximum = Query(
+        test_case, AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP, &maximum_chain, 320,
+        192, &maximum_info, baseline_info.maximum_temporal_layer_count);
+    EXPECT_EQ(maximum.support, AMDF_MEDIA_CONFIGURATION_SUPPORT_SUPPORTED);
+    EXPECT_EQ(maximum.reason, AMDF_MEDIA_CONFIGURATION_REASON_NONE);
+    EXPECT_EQ(maximum_info.maximum_temporal_layer_count,
+              baseline_info.maximum_temporal_layer_count);
+  }
+  EXPECT_GT(tested_case_count, 0u);
+}
+
 TEST_F(EncodeConfigurationTest, RejectsUnrepresentableAv1CodedGeometry) {
   if (!Supports(AMDF_MEDIA_CODEC_AV1)) {
     GTEST_SKIP() << "AV1 encode is not advertised";
@@ -448,7 +494,7 @@ TEST_F(EncodeConfigurationTest, UnsupportedTuplesHaveSpecificReasons) {
   codec_configuration =
       chain.InitializeFor(h264_case, AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CBR);
   query.next = codec_configuration;
-  chain.rate_control_layer.frame_rate_numerator = 0;
+  chain.rate_control_layers[0].frame_rate_numerator = 0;
   ASSERT_EQ(media_->device_query_configuration(device_, &query, &result),
             AMDF_STATUS_OK);
   EXPECT_EQ(result.reason, AMDF_MEDIA_CONFIGURATION_REASON_CODEC);

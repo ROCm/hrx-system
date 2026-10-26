@@ -16,9 +16,11 @@ namespace {
 
 constexpr UINT kAv1InvalidDpbResourceIndex = 0xffu;
 
-void PrepareSequence(const Session& session, EncodePicture* picture) {
+void PrepareSequence(const Session& session, uint32_t temporal_layer_index,
+                     EncodePicture* picture) {
   const auto& native = session.native_encode;
-  picture->arguments.SequenceControlDesc.RateControl = native.rate_control;
+  picture->arguments.SequenceControlDesc.RateControl =
+      native.temporal_layer_rate_controls[temporal_layer_index].descriptor;
   picture->arguments.SequenceControlDesc.PictureTargetResolution =
       native.resolution;
   picture->arguments.SequenceControlDesc.SelectedLayoutMode =
@@ -49,6 +51,7 @@ amdf_status_t PrepareH264(const Session& session,
           : D3D12_VIDEO_ENCODER_FRAME_TYPE_H264_P_FRAME;
   picture->h264.PictureOrderCountNumber = source->picture_order_count;
   picture->h264.FrameDecodingOrderNumber = source->frame_decoding_order_number;
+  picture->h264.TemporalLayerIndex = encode.temporal_layer_index;
   picture->h264.List0ReferenceFramesCount = source->reference_count;
   picture->h264.pList0ReferenceFrames =
       source->reference_count != 0 ? picture->list0 : nullptr;
@@ -65,6 +68,7 @@ amdf_status_t PrepareH264(const Session& session,
         .PictureOrderCountNumber =
             static_cast<UINT>(reference.picture_order_count),
         .FrameDecodingOrderNumber = reference.frame_decoding_order_number,
+        .TemporalLayerIndex = reference.temporal_layer_index,
     };
   }
   picture->reference_count = source->reference_count;
@@ -91,6 +95,7 @@ amdf_status_t PrepareHevc(const Session& session,
           ? D3D12_VIDEO_ENCODER_FRAME_TYPE_HEVC_IDR_FRAME
           : D3D12_VIDEO_ENCODER_FRAME_TYPE_HEVC_P_FRAME;
   picture->hevc.PictureOrderCountNumber = source->picture_order_count;
+  picture->hevc.TemporalLayerIndex = encode.temporal_layer_index;
   picture->hevc.List0ReferenceFramesCount = source->reference_count;
   picture->hevc.pList0ReferenceFrames =
       source->reference_count != 0 ? picture->list0 : nullptr;
@@ -108,6 +113,7 @@ amdf_status_t PrepareHevc(const Session& session,
         .IsLongTermReference = FALSE,
         .PictureOrderCountNumber =
             static_cast<UINT>(reference.picture_order_count),
+        .TemporalLayerIndex = reference.temporal_layer_index,
     };
   }
   picture->reference_count = source->reference_count;
@@ -193,6 +199,9 @@ amdf_status_t PrepareAv1(const Session& session,
   picture->av1.SuperResDenominator = 8;
   picture->av1.OrderHint = source->order_hint;
   picture->av1.PictureIndex = source->picture_index;
+  const bool scalable = session.encode.rate_control.temporal_layer_count > 1;
+  picture->av1.TemporalLayerIndexPlus1 =
+      scalable ? encode.temporal_layer_index + 1 : 0;
   picture->av1.PrimaryRefFrame = source->primary_reference;
   picture->av1.RefreshFrameFlags = source->refresh_frame_flags;
   CopyLoopFilter(source->loop_filter, &picture->av1.LoopFilter,
@@ -212,6 +221,8 @@ amdf_status_t PrepareAv1(const Session& session,
         static_cast<D3D12_VIDEO_ENCODER_AV1_FRAME_TYPE>(reference.frame_type);
     native.OrderHint = reference.order_hint;
     native.PictureIndex = reference.picture_index;
+    native.TemporalLayerIndexPlus1 =
+        scalable ? reference.temporal_layer_index + 1 : 0;
   }
   for (uint32_t index = 0; index < 7; ++index) {
     picture->av1.ReferenceIndices[index] =
@@ -472,7 +483,6 @@ amdf_status_t PrepareEncode(const Session& session,
                             uint32_t maximum_reference_count,
                             EncodePicture* out_picture) {
   EncodePicture picture = {};
-  PrepareSequence(session, &picture);
   amdf_status_t status = AMDF_STATUS_OK;
   switch (session.info.configuration.codec) {
     case AMDF_MEDIA_CODEC_H264:
@@ -491,6 +501,7 @@ amdf_status_t PrepareEncode(const Session& session,
   if (!amdf_status_is_ok(status)) {
     return status;
   }
+  PrepareSequence(session, encode.temporal_layer_index, &picture);
   if (picture.reference_count > maximum_reference_count) {
     return amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
@@ -501,7 +512,9 @@ amdf_status_t PrepareEncode(const Session& session,
   *out_picture = picture;
   // Repair self-references after the value copy.
   out_picture->arguments.SequenceControlDesc.RateControl =
-      session.native_encode.rate_control;
+      session.native_encode
+          .temporal_layer_rate_controls[encode.temporal_layer_index]
+          .descriptor;
   out_picture->arguments.SequenceControlDesc.CodecGopSequence =
       session.native_encode.gop;
   if (session.native_encode.codec == D3D12_VIDEO_ENCODER_CODEC_AV1) {

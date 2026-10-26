@@ -36,6 +36,17 @@ amdf_cc_test(
 )
 
 amdf_cc_test(
+    name = "encode_test",
+    srcs = ["encode_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":execution",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
     name = "queue_test",
     srcs = [
         "queue_test.cc",
@@ -162,6 +173,7 @@ amdf_cc_library(
         "//libamdf/src:instance",
         "//libamdf/src:structure",
         "//libamdf/src/media:av1",
+        "//libamdf/src/media:encode",
         "//libamdf/src/media:h264",
         "//libamdf/src/media:hevc",
     ],

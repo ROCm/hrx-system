@@ -434,6 +434,68 @@ void AnswerUnsupported(amdf_media_configuration_info_t* info,
   *out_info = *info;
 }
 
+uint32_t RestrictTemporalLayerLimit(Device* device, amdf_media_codec_t codec,
+                                    uint32_t native_limit) {
+  const uint32_t bounded_limit =
+      native_limit < AMDF_MEDIA_ENCODE_TEMPORAL_LAYER_STORAGE_CAPACITY
+          ? native_limit
+          : AMDF_MEDIA_ENCODE_TEMPORAL_LAYER_STORAGE_CAPACITY;
+  return amdf_media_encode_restrict_temporal_layer_limit(
+      amdf_endpoint_get_cached_info(device->base.base.endpoint), codec,
+      bounded_limit);
+}
+
+void PrepareRateControl(const amdf_media_encode_configuration_t& encode,
+                        uint32_t temporal_layer_index,
+                        EncodeRateControl* native) {
+  const auto& layer = encode.rate_control.temporal_layers[temporal_layer_index];
+  native->descriptor.TargetFrameRate = {layer.frame_rate_numerator,
+                                        layer.frame_rate_denominator};
+  if (encode.rate_control.mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP) {
+    const auto& source = layer.control.cqp;
+    native->cqp = {source.intra_quantization_parameter,
+                   source.predicted_quantization_parameter,
+                   source.predicted_quantization_parameter};
+    native->descriptor.Mode = D3D12_VIDEO_ENCODER_RATE_CONTROL_MODE_CQP;
+    native->descriptor.ConfigParams = {sizeof(native->cqp)};
+    native->descriptor.ConfigParams.pConfiguration_CQP = &native->cqp;
+    return;
+  }
+
+  const auto& source = layer.control.bit_rate;
+  native->descriptor.Flags =
+      D3D12_VIDEO_ENCODER_RATE_CONTROL_FLAG_ENABLE_QP_RANGE |
+      D3D12_VIDEO_ENCODER_RATE_CONTROL_FLAG_ENABLE_VBV_SIZES;
+  if (source.maximum_frame_bit_count != 0) {
+    native->descriptor.Flags |=
+        D3D12_VIDEO_ENCODER_RATE_CONTROL_FLAG_ENABLE_MAX_FRAME_SIZE;
+  }
+  if (encode.rate_control.mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CBR) {
+    native->cbr = {0,
+                   source.minimum_quantization_parameter,
+                   source.maximum_quantization_parameter,
+                   source.maximum_frame_bit_count,
+                   source.target_bit_rate,
+                   source.virtual_buffer_capacity,
+                   source.initial_virtual_buffer_fullness};
+    native->descriptor.Mode = D3D12_VIDEO_ENCODER_RATE_CONTROL_MODE_CBR;
+    native->descriptor.ConfigParams = {sizeof(native->cbr)};
+    native->descriptor.ConfigParams.pConfiguration_CBR = &native->cbr;
+  } else {
+    native->vbr = {0,
+                   source.minimum_quantization_parameter,
+                   source.maximum_quantization_parameter,
+                   source.maximum_frame_bit_count,
+                   source.target_bit_rate,
+                   source.peak_bit_rate,
+                   source.virtual_buffer_capacity,
+                   source.initial_virtual_buffer_fullness};
+    native->descriptor.Mode = D3D12_VIDEO_ENCODER_RATE_CONTROL_MODE_VBR;
+    native->descriptor.ConfigParams = {sizeof(native->vbr)};
+    native->descriptor.ConfigParams.pConfiguration_VBR = &native->vbr;
+  }
+}
+
 amdf_status_t QueryEncodeConfiguration(
     Device* device, const amdf_media_configuration_t& configuration,
     const void* codec_configuration, amdf_media_configuration_info_t* out_info,
@@ -572,12 +634,6 @@ amdf_status_t QueryEncodeConfiguration(
     AnswerUnsupported(&info, AMDF_MEDIA_CONFIGURATION_REASON_CODEC, out_info);
     return AMDF_STATUS_OK;
   }
-  if (encode->rate_control.temporal_layer_count != 1) {
-    AnswerUnsupported(
-        &info, AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION, out_info);
-    return AMDF_STATUS_OK;
-  }
-
   EncodeConfiguration local_native = {};
   EncodeConfiguration* native =
       out_native_encode != nullptr ? out_native_encode : &local_native;
@@ -606,6 +662,8 @@ amdf_status_t QueryEncodeConfiguration(
                         out_info);
       return AMDF_STATUS_OK;
     }
+    native->maximum_temporal_layer_count =
+        RestrictTemporalLayerLimit(device, configuration.codec, 3);
     native->h264_level = H264Level(h264->level_idc);
     native->codec_configuration = {sizeof(native->h264)};
     native->codec_configuration.pH264Config = &native->h264;
@@ -676,6 +734,8 @@ amdf_status_t QueryEncodeConfiguration(
                         out_info);
       return AMDF_STATUS_OK;
     }
+    native->maximum_temporal_layer_count =
+        RestrictTemporalLayerLimit(device, configuration.codec, 3);
     native->hevc_level.Level = HevcLevel(hevc_encode->level_idc);
     native->hevc_level.Tier = hevc_encode->tier == AMDF_MEDIA_HEVC_TIER_HIGH
                                   ? D3D12_VIDEO_ENCODER_TIER_HEVC_HIGH
@@ -725,7 +785,7 @@ amdf_status_t QueryEncodeConfiguration(
     if ((av1_encode->feature_flags & AMDF_MEDIA_AV1_ENCODE_FEATURE_CDEF) != 0) {
       requested_features |= D3D12_VIDEO_ENCODER_AV1_FEATURE_FLAG_CDEF_FILTERING;
     }
-    if (!codec_support.IsSupported ||
+    if (!codec_support.IsSupported || limits.MaxTemporalLayers == 0 ||
         (static_cast<uint32_t>(limits.RequiredFeatureFlags) &
          ~requested_features) != 0 ||
         (requested_features &
@@ -735,6 +795,8 @@ amdf_status_t QueryEncodeConfiguration(
                         out_info);
       return AMDF_STATUS_OK;
     }
+    native->maximum_temporal_layer_count = RestrictTemporalLayerLimit(
+        device, configuration.codec, limits.MaxTemporalLayers);
     native->av1.FeatureFlags =
         static_cast<D3D12_VIDEO_ENCODER_AV1_FEATURE_FLAGS>(requested_features);
     native->av1.OrderHintBitsMinus1 =
@@ -756,55 +818,21 @@ amdf_status_t QueryEncodeConfiguration(
     native->level.pAV1LevelSetting = &native->av1_level;
   }
 
-  const auto& rate_layer = encode->rate_control.temporal_layers[0];
-  native->rate_control.TargetFrameRate = {rate_layer.frame_rate_numerator,
-                                          rate_layer.frame_rate_denominator};
-  if (encode->rate_control.mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP) {
-    const auto& source = rate_layer.control.cqp;
-    native->cqp = {source.intra_quantization_parameter,
-                   source.predicted_quantization_parameter,
-                   source.predicted_quantization_parameter};
-    native->rate_control.Mode = D3D12_VIDEO_ENCODER_RATE_CONTROL_MODE_CQP;
-    native->rate_control.ConfigParams = {sizeof(native->cqp)};
-    native->rate_control.ConfigParams.pConfiguration_CQP = &native->cqp;
-  } else {
-    const auto& source = rate_layer.control.bit_rate;
-    native->rate_control.Flags =
-        D3D12_VIDEO_ENCODER_RATE_CONTROL_FLAG_ENABLE_QP_RANGE |
-        D3D12_VIDEO_ENCODER_RATE_CONTROL_FLAG_ENABLE_VBV_SIZES;
-    if (source.maximum_frame_bit_count != 0) {
-      native->rate_control.Flags |=
-          D3D12_VIDEO_ENCODER_RATE_CONTROL_FLAG_ENABLE_MAX_FRAME_SIZE;
-    }
-    if (encode->rate_control.mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CBR) {
-      native->cbr = {0,
-                     source.minimum_quantization_parameter,
-                     source.maximum_quantization_parameter,
-                     source.maximum_frame_bit_count,
-                     source.target_bit_rate,
-                     source.virtual_buffer_capacity,
-                     source.initial_virtual_buffer_fullness};
-      native->rate_control.Mode = D3D12_VIDEO_ENCODER_RATE_CONTROL_MODE_CBR;
-      native->rate_control.ConfigParams = {sizeof(native->cbr)};
-      native->rate_control.ConfigParams.pConfiguration_CBR = &native->cbr;
-    } else {
-      native->vbr = {0,
-                     source.minimum_quantization_parameter,
-                     source.maximum_quantization_parameter,
-                     source.maximum_frame_bit_count,
-                     source.target_bit_rate,
-                     source.peak_bit_rate,
-                     source.virtual_buffer_capacity,
-                     source.initial_virtual_buffer_fullness};
-      native->rate_control.Mode = D3D12_VIDEO_ENCODER_RATE_CONTROL_MODE_VBR;
-      native->rate_control.ConfigParams = {sizeof(native->vbr)};
-      native->rate_control.ConfigParams.pConfiguration_VBR = &native->vbr;
-    }
+  if (encode->rate_control.temporal_layer_count >
+      native->maximum_temporal_layer_count) {
+    AnswerUnsupported(
+        &info, AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION, out_info);
+    return AMDF_STATUS_OK;
+  }
+  for (uint32_t index = 0; index < encode->rate_control.temporal_layer_count;
+       ++index) {
+    PrepareRateControl(*encode, index,
+                       &native->temporal_layer_rate_controls[index]);
   }
   native->resolution = {configuration.coded_width, configuration.coded_height};
   native->subregion_mode =
       D3D12_VIDEO_ENCODER_FRAME_SUBREGION_LAYOUT_MODE_FULL_FRAME;
-  D3D12_FEATURE_DATA_VIDEO_ENCODER_RESOLUTION_SUPPORT_LIMITS limits = {};
+  D3D12_FEATURE_DATA_VIDEO_ENCODER_RESOLUTION_SUPPORT_LIMITS first_limits = {};
   D3D12_FEATURE_DATA_VIDEO_ENCODER_SUPPORT1 support = {
       .Codec = native->codec,
       .InputFormat = configuration.format == AMDF_MEDIA_PIXEL_FORMAT_NV12
@@ -812,7 +840,7 @@ amdf_status_t QueryEncodeConfiguration(
                          : DXGI_FORMAT_P010,
       .CodecConfiguration = native->codec_configuration,
       .CodecGopSequence = native->gop,
-      .RateControl = native->rate_control,
+      .RateControl = native->temporal_layer_rate_controls[0].descriptor,
       .IntraRefresh = D3D12_VIDEO_ENCODER_INTRA_REFRESH_MODE_NONE,
       .SubregionFrameEncoding =
           D3D12_VIDEO_ENCODER_FRAME_SUBREGION_LAYOUT_MODE_FULL_FRAME,
@@ -821,7 +849,7 @@ amdf_status_t QueryEncodeConfiguration(
       .MaxReferenceFramesInDPB = 1,
       .SuggestedProfile = native->profile,
       .SuggestedLevel = native->level,
-      .pResolutionDependentSupport = &limits,
+      .pResolutionDependentSupport = &first_limits,
   };
   if (native->codec == D3D12_VIDEO_ENCODER_CODEC_AV1) {
     native->tiles.RowCount = 1;
@@ -834,26 +862,38 @@ amdf_status_t QueryEncodeConfiguration(
     support.SubregionFrameEncodingData = {sizeof(native->tiles)};
     support.SubregionFrameEncodingData.pTilesPartition_AV1 = &native->tiles;
   }
-  status = Hresult(device->encoder->CheckFeatureSupport(
-      D3D12_FEATURE_VIDEO_ENCODER_SUPPORT1, &support, sizeof(support)));
-  if (!amdf_status_is_ok(status)) {
-    return status;
-  }
-  if (support.ValidationFlags != D3D12_VIDEO_ENCODER_VALIDATION_FLAG_NONE ||
-      (support.SupportFlags &
-       D3D12_VIDEO_ENCODER_SUPPORT_FLAG_GENERAL_SUPPORT_OK) == 0) {
-    const auto reason =
-        support.ValidationFlags ==
-                D3D12_VIDEO_ENCODER_VALIDATION_FLAG_RESOLUTION_NOT_SUPPORTED_IN_LIST
-            ? AMDF_MEDIA_CONFIGURATION_REASON_DIMENSIONS
-            : AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION;
-    AnswerUnsupported(&info, reason, out_info);
-    return AMDF_STATUS_OK;
+  const D3D12_FEATURE_DATA_VIDEO_ENCODER_SUPPORT1 support_query = support;
+  for (uint32_t index = 0; index < encode->rate_control.temporal_layer_count;
+       ++index) {
+    D3D12_FEATURE_DATA_VIDEO_ENCODER_RESOLUTION_SUPPORT_LIMITS layer_limits =
+        {};
+    auto layer_support = support_query;
+    layer_support.RateControl =
+        native->temporal_layer_rate_controls[index].descriptor;
+    layer_support.pResolutionDependentSupport = &layer_limits;
+    status = Hresult(device->encoder->CheckFeatureSupport(
+        D3D12_FEATURE_VIDEO_ENCODER_SUPPORT1, &layer_support,
+        sizeof(layer_support)));
+    if (!amdf_status_is_ok(status)) {
+      return status;
+    }
+    if (layer_support.ValidationFlags !=
+            D3D12_VIDEO_ENCODER_VALIDATION_FLAG_NONE ||
+        (layer_support.SupportFlags &
+         D3D12_VIDEO_ENCODER_SUPPORT_FLAG_GENERAL_SUPPORT_OK) == 0) {
+      const auto reason =
+          layer_support.ValidationFlags ==
+                  D3D12_VIDEO_ENCODER_VALIDATION_FLAG_RESOLUTION_NOT_SUPPORTED_IN_LIST
+              ? AMDF_MEDIA_CONFIGURATION_REASON_DIMENSIONS
+              : AMDF_MEDIA_CONFIGURATION_REASON_NATIVE_CONFIGURATION;
+      AnswerUnsupported(&info, reason, out_info);
+      return AMDF_STATUS_OK;
+    }
   }
   D3D12_FEATURE_DATA_VIDEO_ENCODER_RESOURCE_REQUIREMENTS resources = {
       .Codec = native->codec,
       .Profile = native->profile,
-      .InputFormat = support.InputFormat,
+      .InputFormat = support_query.InputFormat,
       .PictureTargetResolution = native->resolution,
   };
   status = Hresult(device->encoder->CheckFeatureSupport(

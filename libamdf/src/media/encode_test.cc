@@ -411,6 +411,28 @@ TEST_F(EncodeValidationTest, HevcMain10AndGeometryRemainOneAdmittedEnvelope) {
   EXPECT_EQ(amdf_media_hevc_validate_encode_configuration(
                 &requirements_.configuration, &hevc, &encode_, &hevc_encode),
             amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+
+  hevc.profile = AMDF_MEDIA_HEVC_PROFILE_MAIN10;
+  const amdf_media_hevc_encode_reference_t reference = {
+      {&reference_frame_, 0}, 0, 0, 0};
+  amdf_media_hevc_encode_picture_info_t hevc_picture = {};
+  Initialize(&hevc_picture, AMDF_STRUCTURE_TYPE_MEDIA_HEVC_ENCODE_PICTURE_INFO);
+  hevc_picture.frame_type = AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_P;
+  hevc_picture.picture_order_count = 1;
+  hevc_picture.used_as_reference = 1;
+  hevc_picture.reference_count = 1;
+  hevc_picture.references = &reference;
+  picture_.next = &hevc_picture;
+  EXPECT_EQ(amdf_media_hevc_validate_encode_picture(&requirements_, &encode_,
+                                                    &picture_, &hevc_picture),
+            AMDF_STATUS_OK);
+
+  auto invalid_layer_reference = reference;
+  invalid_layer_reference.temporal_layer_index = 1;
+  hevc_picture.references = &invalid_layer_reference;
+  EXPECT_EQ(amdf_media_hevc_validate_encode_picture(&requirements_, &encode_,
+                                                    &picture_, &hevc_picture),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
 }
 
 TEST_F(EncodeValidationTest, Av1ReferencesPreserveLogicalAndPhysicalIdentity) {
@@ -460,6 +482,14 @@ TEST_F(EncodeValidationTest, Av1ReferencesPreserveLogicalAndPhysicalIdentity) {
   EXPECT_EQ(amdf_media_av1_validate_encode_picture(
                 &requirements_, &encode_, &picture_, &av1_encode, &av1_picture),
             AMDF_STATUS_OK);
+
+  auto invalid_layer_reference = reference;
+  invalid_layer_reference.temporal_layer_index = 1;
+  av1_picture.references = &invalid_layer_reference;
+  EXPECT_EQ(amdf_media_av1_validate_encode_picture(
+                &requirements_, &encode_, &picture_, &av1_encode, &av1_picture),
+            amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
+  av1_picture.references = &reference;
 
   av1_picture.reference_indices[3] = 1;
   EXPECT_EQ(amdf_media_av1_validate_encode_picture(

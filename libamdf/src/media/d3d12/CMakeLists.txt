@@ -44,6 +44,22 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD)
 iree_cc_test(
   NAME
+    encode_test
+  SRCS
+    "encode_test.cc"
+  DEPS
+    ::execution
+    amdf::headers
+    iree::third_party::google_test
+    iree::third_party::google_test_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD)
+iree_cc_test(
+  NAME
     queue_test
   SRCS
     "queue_test.cc"
@@ -186,6 +202,7 @@ iree_cc_library(
     libamdf::src::endpoint
     libamdf::src::instance
     libamdf::src::media::av1
+    libamdf::src::media::encode
     libamdf::src::media::h264
     libamdf::src::media::hevc
     libamdf::src::structure

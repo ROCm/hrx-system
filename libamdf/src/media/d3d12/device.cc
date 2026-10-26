@@ -115,9 +115,13 @@ amdf_status_t AMDF_CALL QueryDeviceConfiguration(
       .type = AMDF_STRUCTURE_TYPE_MEDIA_CONFIGURATION_INFO,
       .structure_size = out_info->structure_size,
   };
+  EncodeConfiguration native_encode = {};
   amdf_status_t status = QueryConfiguration(
       reinterpret_cast<Device*>(base), query->queue_family_ordinal,
-      query->configuration, query->next, &info, nullptr, nullptr);
+      query->configuration, query->next, &info, nullptr,
+      query->configuration.direction == AMDF_MEDIA_DIRECTION_ENCODE
+          ? &native_encode
+          : nullptr);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -126,7 +130,7 @@ amdf_status_t AMDF_CALL QueryDeviceConfiguration(
     encode_value.type = AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION_INFO;
     encode_value.structure_size = encode_info->structure_size;
     encode_value.maximum_temporal_layer_count =
-        info.reason == AMDF_MEDIA_CONFIGURATION_REASON_CODEC ? 0 : 1;
+        native_encode.maximum_temporal_layer_count;
   }
   info.next = encode_info;
   *out_info = info;

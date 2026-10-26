@@ -10,10 +10,24 @@
 #include <d3d12video.h>
 
 #include "amdf/media/device.h"
+#include "libamdf/src/media/encode.h"
 
 namespace amdf::media::d3d12 {
 
 struct Device;
+
+// Self-contained native rate-control state for one temporal layer. The
+// descriptor points to exactly one sibling payload selected by its mode.
+struct EncodeRateControl {
+  // Constant-QP payload used when descriptor selects CQP.
+  D3D12_VIDEO_ENCODER_RATE_CONTROL_CQP cqp;
+  // Constant-bit-rate payload used when descriptor selects CBR.
+  D3D12_VIDEO_ENCODER_RATE_CONTROL_CBR cbr;
+  // Variable-bit-rate payload used when descriptor selects VBR.
+  D3D12_VIDEO_ENCODER_RATE_CONTROL_VBR vbr;
+  // Type-erased descriptor referencing one payload above.
+  D3D12_VIDEO_ENCODER_RATE_CONTROL descriptor;
+};
 
 // Self-contained native encode descriptors. Pointer-bearing descriptors refer
 // to sibling fields and remain valid only while this owner stays in place.
@@ -52,14 +66,11 @@ struct EncodeConfiguration {
   D3D12_VIDEO_ENCODER_AV1_LEVEL_TIER_CONSTRAINTS av1_level;
   // Type-erased level descriptor referencing one level field above.
   D3D12_VIDEO_ENCODER_LEVEL_SETTING level;
-  // Constant-QP parameters referenced by rate_control in CQP mode.
-  D3D12_VIDEO_ENCODER_RATE_CONTROL_CQP cqp;
-  // Constant-bit-rate parameters referenced by rate_control in CBR mode.
-  D3D12_VIDEO_ENCODER_RATE_CONTROL_CBR cbr;
-  // Variable-bit-rate parameters referenced by rate_control in VBR mode.
-  D3D12_VIDEO_ENCODER_RATE_CONTROL_VBR vbr;
-  // Type-erased rate descriptor referencing one rate field above.
-  D3D12_VIDEO_ENCODER_RATE_CONTROL rate_control;
+  // Independent native rate-control state indexed by temporal layer.
+  EncodeRateControl temporal_layer_rate_controls
+      [AMDF_MEDIA_ENCODE_TEMPORAL_LAYER_STORAGE_CAPACITY];
+  // Maximum temporal-layer count admitted for this codec and device.
+  uint32_t maximum_temporal_layer_count;
   // Exact coded resolution used by support queries and construction.
   D3D12_VIDEO_ENCODER_PICTURE_RESOLUTION_DESC resolution;
   // Single-tile AV1 partition referenced by extended support queries.
