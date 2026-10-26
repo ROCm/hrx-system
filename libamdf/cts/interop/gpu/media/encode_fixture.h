@@ -35,7 +35,20 @@ struct EncodeExecutionCase {
   uint32_t sample_bit_depth;
 };
 
+enum class TemporalLayerSelection {
+  // Decode every encoded temporal layer.
+  kAll,
+  // Discard enhancement-layer access units before decode.
+  kBaseOnly,
+};
+
 struct EncodedPictureRegion {
+  // Source-frame generation encoded in this access unit.
+  uint32_t generation;
+  // Temporal layer selected for this access unit.
+  uint32_t temporal_layer_index;
+  // Generation referenced by this unit, or UINT32_MAX for a key picture.
+  uint32_t reference_generation;
   // Region start relative to the direct compressed-memory owner.
   uint64_t byte_offset;
   // Exact codec payload bytes reported by the encoder.
@@ -68,10 +81,12 @@ class MediaEncodeInteropTest : public GpuCommandTest {
   MediaEncodeInteropTest();
   void SetUp() override;
   void TearDown() override;
-  void RunPictures(const EncodeExecutionCase& test_case,
-                   amdf_media_encode_rate_control_mode_t rate_control_mode,
-                   uint32_t width, uint32_t height, uint32_t frame_count,
-                   uint32_t recording_count);
+  void RunPictures(
+      const EncodeExecutionCase& test_case,
+      amdf_media_encode_rate_control_mode_t rate_control_mode, uint32_t width,
+      uint32_t height, uint32_t frame_count, uint32_t recording_count,
+      uint32_t temporal_layer_count = 1,
+      TemporalLayerSelection layer_selection = TemporalLayerSelection::kAll);
 
  private:
   void CreateSharedMemory(amdf_memory_scope_t* scope, uint32_t profile_ordinal,
@@ -86,7 +101,7 @@ class MediaEncodeInteropTest : public GpuCommandTest {
   void DecodePictures(const EncodeExecutionCase& test_case, uint32_t width,
                       uint32_t height, amdf_memory_t* compressed_memory,
                       std::span<const EncodedPictureRegion> pictures,
-                      uint64_t encode_point);
+                      uint64_t encode_point, uint32_t temporal_layer_count);
   void QueryKernelImageLayout(amdf_media_image_t* image, uint32_t array_layer,
                               MediaKernelImageLayout* out_layout);
 

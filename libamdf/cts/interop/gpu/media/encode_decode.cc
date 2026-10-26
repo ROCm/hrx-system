@@ -122,14 +122,29 @@ class Av1BitReader {
 // single-tile KEY/INTER envelope produced by this CTS configuration. INTER
 // frames inherit their retained loop-filter deltas from the prior picture.
 ::testing::AssertionResult ParseAv1FrameObu(
-    const uint8_t* bytes, uint64_t byte_length,
+    const uint8_t* bytes, uint64_t byte_length, uint32_t temporal_layer_count,
+    uint32_t expected_temporal_layer_index,
     const amdf_media_av1_loop_filter_t* primary_filter,
     amdf_media_av1_decode_picture_info_t* picture,
     amdf_media_av1_tile_t* tile) {
-  if (bytes == nullptr || byte_length < 3 || bytes[0] != 0x32) {
+  const bool scalable = temporal_layer_count > 1;
+  const uint8_t expected_header = scalable ? 0x36 : 0x32;
+  if (bytes == nullptr || byte_length < (scalable ? 4u : 3u) ||
+      bytes[0] != expected_header) {
     return ::testing::AssertionFailure() << "expected one sized AV1 frame OBU";
   }
   uint64_t position = 1;
+  if (scalable) {
+    const uint8_t extension = bytes[position++];
+    const uint32_t temporal_layer_index = extension >> 5;
+    const uint32_t spatial_layer_index = (extension >> 3) & 3u;
+    if (temporal_layer_index != expected_temporal_layer_index ||
+        spatial_layer_index != 0 || (extension & 7u) != 0) {
+      return ::testing::AssertionFailure()
+             << "AV1 OBU extension has temporal_id=" << temporal_layer_index
+             << " spatial_id=" << spatial_layer_index;
+    }
+  }
   uint64_t obu_byte_length = 0;
   uint32_t shift = 0;
   for (;;) {
@@ -187,12 +202,14 @@ class Av1BitReader {
       !inter || std::all_of(std::begin(picture->active_reference_indices),
                             std::end(picture->active_reference_indices),
                             [](uint8_t index) { return index == 0; });
+  const uint32_t expected_refresh_frame_flags =
+      expected_temporal_layer_index == 0 ? 255u : 0u;
   if (error_resilient != (inter ? 0u : 1u) ||
       picture->disable_cdf_update != 0 || frame_size_override != 0 ||
       picture->primary_reference != (inter ? 0u : 7u) ||
-      refresh_frame_flags != 255 || short_reference_signaling != 0 ||
-      !active_references_valid || render_size_differs != 0 ||
-      picture->high_precision_motion_vectors != 0 ||
+      refresh_frame_flags != expected_refresh_frame_flags ||
+      short_reference_signaling != 0 || !active_references_valid ||
+      render_size_differs != 0 || picture->high_precision_motion_vectors != 0 ||
       picture->interpolation_filter != 4 ||
       picture->switchable_motion_mode != 0 ||
       picture->disable_frame_end_cdf_update != 0) {
@@ -328,6 +345,24 @@ class Av1BitReader {
   return ::testing::AssertionSuccess();
 }
 
+uint32_t UnsignedExpGolombBitCount(uint32_t value) {
+  uint32_t magnitude = 0;
+  for (uint32_t code_number = value + 1; code_number > 1; code_number >>= 1) {
+    ++magnitude;
+  }
+  return magnitude * 2 + 1;
+}
+
+uint32_t H264FrameNumber(uint32_t generation, uint32_t temporal_layer_count) {
+  return temporal_layer_count == 1 ? generation : (generation + 1) / 2;
+}
+
+int32_t H264PictureOrderCount(uint32_t generation,
+                              uint32_t temporal_layer_count) {
+  return static_cast<int32_t>(temporal_layer_count == 1 ? generation * 2
+                                                        : generation);
+}
+
 void CheckRoundTripPixels(const uint32_t* pixels, uint32_t width,
                           uint32_t height, bool p010,
                           uint32_t expected_generation, double* out_psnr) {
@@ -386,7 +421,8 @@ void CheckRoundTripPixels(const uint32_t* pixels, uint32_t width,
 void MediaEncodeInteropTest::DecodePictures(
     const EncodeExecutionCase& test_case, uint32_t width, uint32_t height,
     amdf_memory_t* compressed_memory,
-    std::span<const EncodedPictureRegion> pictures, uint64_t encode_point) {
+    std::span<const EncodedPictureRegion> pictures, uint64_t encode_point,
+    uint32_t temporal_layer_count) {
   ASSERT_EQ(decode_session_, nullptr);
   ASSERT_TRUE(decode_commands_.empty());
   ASSERT_FALSE(pictures.empty());
@@ -612,10 +648,31 @@ void MediaEncodeInteropTest::DecodePictures(
 
   amdf_media_h264_scaling_matrices_t h264_matrices;
   std::memset(&h264_matrices, 16, sizeof(h264_matrices));
-  amdf_media_av1_loop_filter_t av1_primary_filter = {};
+  std::vector<uint32_t> reference_generations(reference_count, UINT32_MAX);
+  std::vector<amdf_media_av1_loop_filter_t> av1_reference_filters(
+      reference_count);
+  std::vector<bool> reference_active(reference_count, false);
   for (uint32_t index = 0; index < pictures.size(); ++index) {
     const auto& encoded = pictures[index];
-    const uint32_t reference_slot = index % references.size();
+    ASSERT_LT(encoded.temporal_layer_index, temporal_layer_count);
+    const bool key = encoded.reference_generation == UINT32_MAX;
+    ASSERT_EQ(key, encoded.generation == 0);
+    const bool retained =
+        temporal_layer_count == 1 || encoded.temporal_layer_index == 0;
+    uint32_t reference_slot = UINT32_MAX;
+    if (!key) {
+      const auto reference_position =
+          std::find(reference_generations.begin(), reference_generations.end(),
+                    encoded.reference_generation);
+      ASSERT_NE(reference_position, reference_generations.end())
+          << "missing generation " << encoded.reference_generation;
+      reference_slot = static_cast<uint32_t>(reference_position -
+                                             reference_generations.begin());
+      ASSERT_LT(reference_slot, 2u);
+    }
+    const uint32_t reconstruction_slot =
+        key ? 0u : (reference_slot == 0 ? 1u : 0u);
+    ASSERT_LT(reconstruction_slot, references.size());
     const amdf_media_h264_slice_t h264_slice = {
         0, static_cast<uint32_t>(encoded.byte_length)};
     amdf_media_h264_reference_t h264_reference = {};
@@ -630,20 +687,23 @@ void MediaEncodeInteropTest::DecodePictures(
             },
         .picture = {.deblocking_filter_control_present = 1},
         .scaling_matrices = &h264_matrices,
-        .frame_number = index,
-        .is_reference = 1,
-        .is_intra = index == 0,
-        .top_field_order_count = static_cast<int32_t>(index * 2),
-        .bottom_field_order_count = static_cast<int32_t>(index * 2),
+        .frame_number =
+            H264FrameNumber(encoded.generation, temporal_layer_count),
+        .is_reference = retained ? 1u : 0u,
+        .is_intra = key ? 1u : 0u,
+        .top_field_order_count =
+            H264PictureOrderCount(encoded.generation, temporal_layer_count),
+        .bottom_field_order_count =
+            H264PictureOrderCount(encoded.generation, temporal_layer_count),
         .slice_count = 1,
         .slices = &h264_slice,
     };
-    if (index != 0) {
-      const uint32_t prior_slot = (index - 1) % references.size();
-      h264_reference.binding = {&references[prior_slot], prior_slot};
-      h264_reference.frame_number = index - 1;
-      h264_reference.top_field_order_count =
-          static_cast<int32_t>((index - 1) * 2);
+    if (!key) {
+      h264_reference.binding = {&references[reference_slot], reference_slot};
+      h264_reference.frame_number =
+          H264FrameNumber(encoded.reference_generation, temporal_layer_count);
+      h264_reference.top_field_order_count = H264PictureOrderCount(
+          encoded.reference_generation, temporal_layer_count);
       h264_reference.bottom_field_order_count =
           h264_reference.top_field_order_count;
       h264_picture.reference_count = 1;
@@ -653,9 +713,12 @@ void MediaEncodeInteropTest::DecodePictures(
     const amdf_media_hevc_slice_t hevc_slice = {
         0, static_cast<uint32_t>(encoded.byte_length)};
     amdf_media_hevc_reference_t hevc_reference = {};
-    // P slices carry one inline negative reference as ue(1), ue(0), ue(0),
-    // and a used flag: six bits after short_term_ref_pic_set_sps_flag.
-    const uint32_t hevc_reference_set_bit_count = index == 0 ? 0u : 6u;
+    const uint32_t reference_delta =
+        key ? 0u : encoded.generation - encoded.reference_generation;
+    // One negative reference uses ue(1), ue(0), ue(delta_poc_minus1), and a
+    // used flag after short_term_ref_pic_set_sps_flag.
+    const uint32_t hevc_reference_set_bit_count =
+        key ? 0u : 5u + UnsignedExpGolombBitCount(reference_delta - 1);
     amdf_media_hevc_decode_picture_info_t hevc_picture = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_HEVC_DECODE_PICTURE_INFO,
         .structure_size = sizeof(hevc_picture),
@@ -674,18 +737,18 @@ void MediaEncodeInteropTest::DecodePictures(
                 .slice_chroma_qp_offsets_present = 1,
                 .loop_filter_across_slices_enabled = 1,
             },
-        .picture_order_count = static_cast<int32_t>(index),
-        .is_random_access = index == 0,
-        .is_idr = index == 0,
-        .is_intra = index == 0,
+        .picture_order_count = static_cast<int32_t>(encoded.generation),
+        .is_random_access = key ? 1u : 0u,
+        .is_idr = key ? 1u : 0u,
+        .is_intra = key ? 1u : 0u,
         .short_term_reference_set_bit_count = hevc_reference_set_bit_count,
         .slice_count = 1,
         .slices = &hevc_slice,
     };
-    if (index != 0) {
-      const uint32_t prior_slot = (index - 1) % references.size();
-      hevc_reference.binding = {&references[prior_slot], prior_slot};
-      hevc_reference.picture_order_count = static_cast<int32_t>(index - 1);
+    if (!key) {
+      hevc_reference.binding = {&references[reference_slot], reference_slot};
+      hevc_reference.picture_order_count =
+          static_cast<int32_t>(encoded.reference_generation);
       hevc_picture.reference_count = 1;
       hevc_picture.references = &hevc_reference;
       hevc_picture.short_term_before.count = 1;
@@ -698,12 +761,12 @@ void MediaEncodeInteropTest::DecodePictures(
         .type = AMDF_STRUCTURE_TYPE_MEDIA_AV1_DECODE_PICTURE_INFO,
         .structure_size = sizeof(av1_picture),
         .sequence = {.cdef = 1, .order_hint_bit_count = 4},
-        .frame_type = index == 0 ? 0u : 1u,
+        .frame_type = key ? 0u : 1u,
         .show_frame = 1,
-        .primary_reference = index == 0 ? 7u : 0u,
-        .order_hint = index,
+        .primary_reference = key ? 7u : 0u,
+        .order_hint = encoded.generation,
         .interpolation_filter = 4,
-        .transform_mode = index == 0 ? 1u : 2u,
+        .transform_mode = key ? 1u : 2u,
         .superres_denominator = 8,
         .tile_column_count = 1,
         .tile_row_count = 1,
@@ -721,9 +784,12 @@ void MediaEncodeInteropTest::DecodePictures(
     av1_picture.tile_row_starts[1] = (height + 63) / 64;
     if (test_case.codec == AMDF_MEDIA_CODEC_AV1) {
       if (encoded.kind == AMDF_MEDIA_ENCODED_REGION_AV1_FRAME_OBU) {
+        const amdf_media_av1_loop_filter_t* primary_filter =
+            key ? nullptr : &av1_reference_filters[reference_slot];
         ASSERT_TRUE(ParseAv1FrameObu(encoded.bytes, encoded.byte_length,
-                                     index == 0 ? nullptr : &av1_primary_filter,
-                                     &av1_picture, &av1_tile));
+                                     temporal_layer_count,
+                                     encoded.temporal_layer_index,
+                                     primary_filter, &av1_picture, &av1_tile));
       } else {
         ASSERT_EQ(encoded.kind,
                   AMDF_MEDIA_ENCODED_REGION_AV1_TILE_GROUP_PAYLOAD);
@@ -731,25 +797,24 @@ void MediaEncodeInteropTest::DecodePictures(
         av1_picture.quantization = encoded.av1_result.quantization;
         av1_picture.cdef = encoded.av1_result.cdef;
         av1_picture.segmentation = encoded.av1_result.segmentation;
-        if (index != 0) {
+        if (!key) {
           av1_picture.primary_reference = encoded.av1_result.primary_reference;
           std::copy(std::begin(encoded.av1_result.reference_indices),
                     std::end(encoded.av1_result.reference_indices),
                     av1_picture.active_reference_indices);
         }
       }
-      ASSERT_EQ(av1_picture.frame_type, index == 0 ? 0u : 1u);
-      ASSERT_EQ(av1_picture.order_hint, index);
-      ASSERT_EQ(av1_picture.primary_reference, index == 0 ? 7u : 0u);
+      ASSERT_EQ(av1_picture.frame_type, key ? 0u : 1u);
+      ASSERT_EQ(av1_picture.order_hint, encoded.generation);
+      ASSERT_EQ(av1_picture.primary_reference, key ? 7u : 0u);
       ASSERT_EQ(av1_picture.interpolation_filter, 4u);
-      ASSERT_EQ(av1_picture.transform_mode, index == 0 ? 1u : 2u);
-      if (index != 0) {
+      ASSERT_EQ(av1_picture.transform_mode, key ? 1u : 2u);
+      if (!key) {
         ASSERT_TRUE(std::all_of(
             std::begin(av1_picture.active_reference_indices),
             std::end(av1_picture.active_reference_indices),
             [](uint8_t reference_index) { return reference_index == 0; }));
-        const uint32_t prior_slot = (index - 1) % references.size();
-        av1_reference = {&references[prior_slot], prior_slot};
+        av1_reference = {&references[reference_slot], reference_slot};
         av1_picture.reference_count = 1;
         av1_picture.references = &av1_reference;
         std::fill(std::begin(av1_picture.reference_map),
@@ -759,7 +824,6 @@ void MediaEncodeInteropTest::DecodePictures(
            av1_picture.loop_filter.log2_restoration_unit_sizes) {
         unit_size = 5;
       }
-      av1_primary_filter = av1_picture.loop_filter;
     }
     const void* codec_picture = test_case.codec == AMDF_MEDIA_CODEC_H264
                                     ? static_cast<const void*>(&h264_picture)
@@ -771,8 +835,10 @@ void MediaEncodeInteropTest::DecodePictures(
     if (index == 0) {
       activations[activation_count++].after = output_image;
     }
-    if (index < reference_count) {
-      activations[activation_count++].after = reference_images[reference_slot];
+    if (!reference_active[reconstruction_slot]) {
+      activations[activation_count++].after =
+          reference_images[reconstruction_slot];
+      reference_active[reconstruction_slot] = true;
     }
     const amdf_media_decode_picture_info_t decode = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_DECODE_PICTURE_INFO,
@@ -781,8 +847,8 @@ void MediaEncodeInteropTest::DecodePictures(
         .compressed = {compressed_memory, 0, encoded.byte_offset,
                        decode_compressed_byte_lengths[index]},
         .output = &output,
-        .reference_output = &references[reference_slot],
-        .reference_slot_index = reference_slot,
+        .reference_output = &references[reconstruction_slot],
+        .reference_slot_index = reconstruction_slot,
     };
     const amdf_media_command_prepare_info_t prepare = {
         .type = AMDF_STRUCTURE_TYPE_MEDIA_COMMAND_PREPARE_INFO,
@@ -798,6 +864,10 @@ void MediaEncodeInteropTest::DecodePictures(
         << "picture=" << index
         << " domain=" << amdf_status_domain(prepare_status)
         << " code=" << amdf_status_code(prepare_status);
+    reference_generations[reconstruction_slot] = encoded.generation;
+    if (test_case.codec == AMDF_MEDIA_CODEC_AV1 && retained) {
+      av1_reference_filters[reconstruction_slot] = av1_picture.loop_filter;
+    }
   }
 
   const uint64_t pixel_count = uint64_t(width) * height;
@@ -838,7 +908,7 @@ void MediaEncodeInteropTest::DecodePictures(
       output_address + layout.byte_offsets[0],
       results->device_address + 64,
   };
-  const uint32_t final_generation = static_cast<uint32_t>(pictures.size() - 1);
+  const uint32_t final_generation = pictures.back().generation;
   const uint32_t constants[] = {
       0,
       0,

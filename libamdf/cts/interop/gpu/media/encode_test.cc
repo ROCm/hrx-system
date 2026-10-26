@@ -18,9 +18,26 @@ struct EncodeMatrixCase {
   uint32_t height;
 };
 
+struct TemporalEncodeCase {
+  // Stable parameter name.
+  const char* name;
+  // Codec and sample representation under test.
+  EncodeExecutionCase execution;
+  // Coded width admitted by every provider.
+  uint32_t width;
+  // Coded height admitted by every provider.
+  uint32_t height;
+  // Access units retained for the independent decode.
+  TemporalLayerSelection layer_selection;
+};
+
 class MediaEncodeMatrixTest
     : public MediaEncodeInteropTest,
       public testing::WithParamInterface<EncodeMatrixCase> {};
+
+class MediaTemporalEncodeTest
+    : public MediaEncodeInteropTest,
+      public testing::WithParamInterface<TemporalEncodeCase> {};
 
 TEST_F(MediaEncodeInteropTest, H264DependentPicture) {
   ASSERT_NO_FATAL_FAILURE(
@@ -40,12 +57,61 @@ TEST_F(MediaEncodeInteropTest, Av1DependentPicture) {
                   AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP, 320, 208, 2, 2));
 }
 
+TEST_P(MediaTemporalEncodeTest, TwoLayersDecodeAtFullAndBaseFrameRates) {
+  const auto& test_case = GetParam();
+  ASSERT_NO_FATAL_FAILURE(RunPictures(
+      test_case.execution, AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP,
+      test_case.width, test_case.height, 6, 6, 2, test_case.layer_selection));
+}
+
 TEST_P(MediaEncodeMatrixTest, PipelinesGpuInputsAndReusesRecordings) {
   const auto& test_case = GetParam();
   ASSERT_NO_FATAL_FAILURE(
       RunPictures(test_case.execution, test_case.rate_control_mode,
                   test_case.width, test_case.height, 12, 4));
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    EncodeFamilies, MediaTemporalEncodeTest,
+    testing::Values(TemporalEncodeCase{"H264Full",
+                                       {AMDF_MEDIA_CODEC_H264,
+                                        AMDF_MEDIA_PIXEL_FORMAT_NV12, 8},
+                                       320,
+                                       192,
+                                       TemporalLayerSelection::kAll},
+                    TemporalEncodeCase{"H264BaseOnly",
+                                       {AMDF_MEDIA_CODEC_H264,
+                                        AMDF_MEDIA_PIXEL_FORMAT_NV12, 8},
+                                       320,
+                                       192,
+                                       TemporalLayerSelection::kBaseOnly},
+                    TemporalEncodeCase{"HevcFull",
+                                       {AMDF_MEDIA_CODEC_HEVC,
+                                        AMDF_MEDIA_PIXEL_FORMAT_NV12, 8},
+                                       320,
+                                       192,
+                                       TemporalLayerSelection::kAll},
+                    TemporalEncodeCase{"HevcBaseOnly",
+                                       {AMDF_MEDIA_CODEC_HEVC,
+                                        AMDF_MEDIA_PIXEL_FORMAT_NV12, 8},
+                                       320,
+                                       192,
+                                       TemporalLayerSelection::kBaseOnly},
+                    TemporalEncodeCase{
+                        "Av1Full",
+                        {AMDF_MEDIA_CODEC_AV1, AMDF_MEDIA_PIXEL_FORMAT_NV12, 8},
+                        320,
+                        208,
+                        TemporalLayerSelection::kAll},
+                    TemporalEncodeCase{
+                        "Av1BaseOnly",
+                        {AMDF_MEDIA_CODEC_AV1, AMDF_MEDIA_PIXEL_FORMAT_NV12, 8},
+                        320,
+                        208,
+                        TemporalLayerSelection::kBaseOnly}),
+    [](const testing::TestParamInfo<TemporalEncodeCase>& info) {
+      return std::string(info.param.name);
+    });
 
 INSTANTIATE_TEST_SUITE_P(
     EncodeFamilies, MediaEncodeMatrixTest,

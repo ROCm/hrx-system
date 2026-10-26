@@ -57,8 +57,9 @@ amdf_media_frame_t Frame(amdf_memory_t* memory, amdf_media_image_t* image,
 }
 
 struct ConfigurationChain {
-  // Independent rate-control state for the one-layer baseline session.
-  amdf_media_encode_rate_control_layer_t rate_control_layer = {};
+  // Independent rate-control state for the admitted temporal topology.
+  std::array<amdf_media_encode_rate_control_layer_t, 2> rate_control_layers =
+      {};
   // Direction-common GOP and rate-control configuration.
   amdf_media_encode_configuration_t encode = {};
   // H264 profile and level at the head of an H264 chain.
@@ -76,31 +77,38 @@ struct ConfigurationChain {
 
   const void* InitializeFor(
       const EncodeExecutionCase& test_case,
-      amdf_media_encode_rate_control_mode_t rate_control_mode) {
+      amdf_media_encode_rate_control_mode_t rate_control_mode,
+      uint32_t temporal_layer_count) {
     Initialize(&encode, AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION);
     encode.intra_picture_period = 12;
     encode.inter_picture_period = 1;
     encode.rate_control.mode = rate_control_mode;
-    encode.rate_control.temporal_layer_count = 1;
-    encode.rate_control.temporal_layers = &rate_control_layer;
-    rate_control_layer.frame_rate_numerator = 30;
-    rate_control_layer.frame_rate_denominator = 1;
-    if (rate_control_mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP) {
-      rate_control_layer.control.cqp = {20, 20};
-    } else {
-      rate_control_layer.control.bit_rate = {
-          .minimum_quantization_parameter =
-              test_case.codec == AMDF_MEDIA_CODEC_AV1 ? 8u : 1u,
-          .maximum_quantization_parameter =
-              test_case.codec == AMDF_MEDIA_CODEC_AV1 ? 255u : 51u,
-          .target_bit_rate = 1200000,
-          .peak_bit_rate =
-              rate_control_mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CBR
-                  ? 1200000u
-                  : 2400000u,
-          .virtual_buffer_capacity = 1200000,
-          .initial_virtual_buffer_fullness = 600000,
-      };
+    encode.rate_control.temporal_layer_count = temporal_layer_count;
+    encode.rate_control.temporal_layers = rate_control_layers.data();
+    const uint64_t target_bit_rate =
+        temporal_layer_count == 1 ? 1200000 : 600000;
+    for (uint32_t index = 0; index < temporal_layer_count; ++index) {
+      auto& layer = rate_control_layers[index];
+      layer.frame_rate_numerator = temporal_layer_count == 1 ? 30 : 15;
+      layer.frame_rate_denominator = 1;
+      if (rate_control_mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CQP) {
+        const uint32_t quantization_parameter = 20 + index * 4;
+        layer.control.cqp = {quantization_parameter, quantization_parameter};
+      } else {
+        layer.control.bit_rate = {
+            .minimum_quantization_parameter =
+                test_case.codec == AMDF_MEDIA_CODEC_AV1 ? 8u : 1u,
+            .maximum_quantization_parameter =
+                test_case.codec == AMDF_MEDIA_CODEC_AV1 ? 255u : 51u,
+            .target_bit_rate = target_bit_rate,
+            .peak_bit_rate =
+                rate_control_mode == AMDF_MEDIA_ENCODE_RATE_CONTROL_MODE_CBR
+                    ? target_bit_rate
+                    : target_bit_rate * 2,
+            .virtual_buffer_capacity = target_bit_rate,
+            .initial_virtual_buffer_fullness = target_bit_rate / 2,
+        };
+      }
     }
     if (test_case.codec == AMDF_MEDIA_CODEC_H264) {
       Initialize(&h264, AMDF_STRUCTURE_TYPE_MEDIA_H264_CONFIGURATION);
@@ -148,6 +156,59 @@ struct ConfigurationChain {
   }
 };
 
+constexpr uint32_t kNoReferenceGeneration = UINT32_MAX;
+
+struct PictureSchedule {
+  // Layer targeted by the current picture.
+  uint32_t temporal_layer_index;
+  // Reconstruction slot overwritten by the current picture.
+  uint32_t reconstruction_slot;
+  // Stable slot containing reference_generation.
+  uint32_t reference_slot;
+  // Referenced source generation, or kNoReferenceGeneration for a key.
+  uint32_t reference_generation;
+  // Nonzero when the current picture remains available to later pictures.
+  uint32_t used_as_reference;
+};
+
+PictureSchedule SchedulePicture(uint32_t generation,
+                                uint32_t temporal_layer_count) {
+  if (temporal_layer_count == 1) {
+    const uint32_t reconstruction_slot = generation % 2;
+    return {
+        .temporal_layer_index = 0,
+        .reconstruction_slot = reconstruction_slot,
+        .reference_slot = 1 - reconstruction_slot,
+        .reference_generation =
+            generation == 0 ? kNoReferenceGeneration : generation - 1,
+        .used_as_reference = 1,
+    };
+  }
+  const uint32_t temporal_layer_index = generation % 2;
+  const uint32_t base_slot = (generation / 2) % 2;
+  const uint32_t reconstruction_slot =
+      temporal_layer_index == 0 ? base_slot : 1 - base_slot;
+  return {
+      .temporal_layer_index = temporal_layer_index,
+      .reconstruction_slot = reconstruction_slot,
+      .reference_slot = 1 - reconstruction_slot,
+      .reference_generation =
+          generation == 0 ? kNoReferenceGeneration
+                          : generation - (temporal_layer_index == 0 ? 2 : 1),
+      .used_as_reference = temporal_layer_index == 0 ? 1u : 0u,
+  };
+}
+
+uint32_t H264FrameNumber(uint32_t generation, uint32_t temporal_layer_count) {
+  return temporal_layer_count == 1 ? generation : (generation + 1) / 2;
+}
+
+int32_t H264PictureOrderCount(uint32_t generation,
+                              uint32_t temporal_layer_count) {
+  return static_cast<int32_t>(temporal_layer_count == 1 ? generation * 2
+                                                        : generation);
+}
+
 struct PictureControls {
   // H264 reference storage used by h264 when encoding a P picture.
   amdf_media_h264_encode_reference_t h264_reference = {};
@@ -163,27 +224,31 @@ struct PictureControls {
   amdf_media_av1_encode_picture_info_t av1 = {};
 
   const void* InitializeFor(const EncodeExecutionCase& test_case,
-                            uint32_t generation,
-                            const amdf_media_frame_t* reference,
-                            uint32_t reference_slot) {
-    const bool key = generation == 0;
+                            uint32_t generation, uint32_t temporal_layer_count,
+                            const PictureSchedule& schedule,
+                            const amdf_media_frame_t* reference) {
+    const bool key = schedule.reference_generation == kNoReferenceGeneration;
     if (test_case.codec == AMDF_MEDIA_CODEC_H264) {
       Initialize(&h264, AMDF_STRUCTURE_TYPE_MEDIA_H264_ENCODE_PICTURE_INFO);
       h264.frame_type = key ? AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR
                             : AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_P;
-      h264.frame_number = generation;
-      h264.picture_order_count = static_cast<int32_t>(generation * 2);
+      h264.frame_number = H264FrameNumber(generation, temporal_layer_count);
+      h264.picture_order_count =
+          H264PictureOrderCount(generation, temporal_layer_count);
       h264.frame_decoding_order_number = generation;
-      h264.used_as_reference = 1;
+      h264.used_as_reference = schedule.used_as_reference;
       if (!key) {
-        h264_reference.binding = {reference, reference_slot};
-        h264_reference.frame_type = generation == 1
+        h264_reference.binding = {reference, schedule.reference_slot};
+        h264_reference.temporal_layer_index = 0;
+        h264_reference.frame_type = schedule.reference_generation == 0
                                         ? AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_IDR
                                         : AMDF_MEDIA_H264_ENCODE_FRAME_TYPE_P;
-        h264_reference.frame_number = generation - 1;
-        h264_reference.picture_order_count =
-            static_cast<int32_t>((generation - 1) * 2);
-        h264_reference.frame_decoding_order_number = generation - 1;
+        h264_reference.frame_number = H264FrameNumber(
+            schedule.reference_generation, temporal_layer_count);
+        h264_reference.picture_order_count = H264PictureOrderCount(
+            schedule.reference_generation, temporal_layer_count);
+        h264_reference.frame_decoding_order_number =
+            schedule.reference_generation;
         h264.reference_count = 1;
         h264.references = &h264_reference;
       }
@@ -194,11 +259,12 @@ struct PictureControls {
       hevc.frame_type = key ? AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_IDR
                             : AMDF_MEDIA_HEVC_ENCODE_FRAME_TYPE_P;
       hevc.picture_order_count = static_cast<int32_t>(generation);
-      hevc.used_as_reference = 1;
+      hevc.used_as_reference = schedule.used_as_reference;
       if (!key) {
-        hevc_reference.binding = {reference, reference_slot};
+        hevc_reference.binding = {reference, schedule.reference_slot};
+        hevc_reference.temporal_layer_index = 0;
         hevc_reference.picture_order_count =
-            static_cast<int32_t>(generation - 1);
+            static_cast<int32_t>(schedule.reference_generation);
         hevc.reference_count = 1;
         hevc.references = &hevc_reference;
       }
@@ -209,19 +275,22 @@ struct PictureControls {
     av1.order_hint = generation;
     av1.picture_index = generation;
     av1.primary_reference = key ? 7u : 0u;
-    av1.refresh_frame_flags = 255;
+    av1.refresh_frame_flags = schedule.used_as_reference != 0 ? 255u : 0u;
     av1.interpolation_filter = 4;
     av1.transform_mode = key ? 1u : 2u;
     av1.quantization.base_index = 20;
     std::fill(std::begin(av1.quantization.matrix_levels),
               std::end(av1.quantization.matrix_levels), UINT8_MAX);
+    std::fill(std::begin(av1.reference_map), std::end(av1.reference_map),
+              key ? UINT8_MAX : uint8_t{0});
     std::fill(std::begin(av1.reference_indices),
               std::end(av1.reference_indices), key ? UINT8_MAX : uint8_t{0});
     if (!key) {
-      av1_reference.binding = {reference, reference_slot};
-      av1_reference.frame_type = generation == 1 ? 0u : 1u;
-      av1_reference.order_hint = generation - 1;
-      av1_reference.picture_index = generation - 1;
+      av1_reference.binding = {reference, schedule.reference_slot};
+      av1_reference.temporal_layer_index = 0;
+      av1_reference.frame_type = schedule.reference_generation == 0 ? 0u : 1u;
+      av1_reference.order_hint = schedule.reference_generation;
+      av1_reference.picture_index = schedule.reference_generation;
       av1.reference_count = 1;
       av1.references = &av1_reference;
     }
@@ -358,7 +427,7 @@ void MediaEncodeInteropTest::SetUp() {
       .queue_family_ordinal = decode_family_,
       .required_capabilities =
           AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION,
-      .maximum_pending_submission_count = 4,
+      .maximum_pending_submission_count = 32,
   };
   ASSERT_EQ(media_->kernel_queue_create(media_device_, &decode_queue_create,
                                         &decode_queue_),
@@ -600,7 +669,8 @@ void MediaEncodeInteropTest::QueryKernelImageLayout(
 void MediaEncodeInteropTest::RunPictures(
     const EncodeExecutionCase& test_case,
     amdf_media_encode_rate_control_mode_t rate_control_mode, uint32_t width,
-    uint32_t height, uint32_t frame_count, uint32_t recording_count) {
+    uint32_t height, uint32_t frame_count, uint32_t recording_count,
+    uint32_t temporal_layer_count, TemporalLayerSelection layer_selection) {
   if (std::find(encode_codecs_.begin(), encode_codecs_.end(),
                 test_case.codec) == encode_codecs_.end()) {
     GTEST_SKIP() << "encode codec is not advertised";
@@ -609,6 +679,10 @@ void MediaEncodeInteropTest::RunPictures(
   ASSERT_GT(recording_count, 0u);
   ASSERT_LE(recording_count, frame_count);
   ASSERT_LE(frame_count, 12u);
+  ASSERT_GE(temporal_layer_count, 1u);
+  ASSERT_LE(temporal_layer_count, 2u);
+  ASSERT_TRUE(temporal_layer_count == 2 ||
+              layer_selection == TemporalLayerSelection::kAll);
   const auto* kernel =
       kernels::media_produce::kKernels.Find(gpu_endpoint_info_);
   if (kernel == nullptr) {
@@ -620,8 +694,8 @@ void MediaEncodeInteropTest::RunPictures(
   ASSERT_EQ(kernel->workgroup_size(), 64u);
 
   ConfigurationChain configuration_chain;
-  const void* codec_configuration =
-      configuration_chain.InitializeFor(test_case, rate_control_mode);
+  const void* codec_configuration = configuration_chain.InitializeFor(
+      test_case, rate_control_mode, temporal_layer_count);
   const amdf_media_configuration_query_t configuration_query = {
       .type = AMDF_STRUCTURE_TYPE_MEDIA_CONFIGURATION_QUERY,
       .structure_size = sizeof(configuration_query),
@@ -641,9 +715,21 @@ void MediaEncodeInteropTest::RunPictures(
       .type = AMDF_STRUCTURE_TYPE_MEDIA_CONFIGURATION_INFO,
       .structure_size = sizeof(configuration),
   };
+  amdf_media_encode_configuration_info_t encode_configuration = {
+      .type = AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_CONFIGURATION_INFO,
+      .structure_size = sizeof(encode_configuration),
+  };
+  configuration.next = &encode_configuration;
   ASSERT_EQ(media_->device_query_configuration(
                 media_device_, &configuration_query, &configuration),
             AMDF_STATUS_OK);
+  ASSERT_GE(encode_configuration.maximum_temporal_layer_count, 1u);
+  if (temporal_layer_count >
+      encode_configuration.maximum_temporal_layer_count) {
+    GTEST_SKIP() << "requested " << temporal_layer_count
+                 << " temporal layers; device admits "
+                 << encode_configuration.maximum_temporal_layer_count;
+  }
   ASSERT_EQ(configuration.support, AMDF_MEDIA_CONFIGURATION_SUPPORT_SUPPORTED);
   const amdf_media_session_create_info_t session_create = {
       .type = AMDF_STRUCTURE_TYPE_MEDIA_SESSION_CREATE_INFO,
@@ -898,9 +984,9 @@ void MediaEncodeInteropTest::RunPictures(
     std::vector<PictureControls> picture_controls(count);
     for (uint32_t index = 0; index < count; ++index) {
       const uint32_t generation = batch + index;
+      const PictureSchedule schedule =
+          SchedulePicture(generation, temporal_layer_count);
       const uint32_t input_slot = generation % 2;
-      const uint32_t reconstruction_slot = generation % 2;
-      const uint32_t reference_slot = 1 - reconstruction_slot;
       const auto& layout = input_layouts[input_slot];
       const uint64_t pointer = input_address + layout.byte_offsets[0];
       const uint32_t arguments[] = {
@@ -931,16 +1017,18 @@ void MediaEncodeInteropTest::RunPictures(
       }
       const void* codec_picture_controls =
           picture_controls[index].InitializeFor(
-              test_case, generation,
-              generation == 0 ? nullptr : &reconstructions[reference_slot],
-              reference_slot);
+              test_case, generation, temporal_layer_count, schedule,
+              schedule.reference_generation == kNoReferenceGeneration
+                  ? nullptr
+                  : &reconstructions[schedule.reference_slot]);
       const amdf_media_encode_picture_info_t encode = {
           .type = AMDF_STRUCTURE_TYPE_MEDIA_ENCODE_PICTURE_INFO,
           .structure_size = sizeof(encode),
           .next = codec_picture_controls,
           .input = &input_frames[input_slot],
-          .reconstruction = &reconstructions[reconstruction_slot],
-          .reconstruction_slot_index = reconstruction_slot,
+          .reconstruction = &reconstructions[schedule.reconstruction_slot],
+          .reconstruction_slot_index = schedule.reconstruction_slot,
+          .temporal_layer_index = schedule.temporal_layer_index,
           .compressed = {compressed_memory, 0,
                          compressed_start + index * compressed_stride,
                          compressed_stride},
@@ -1022,6 +1110,9 @@ void MediaEncodeInteropTest::RunPictures(
         static_cast<const uint8_t*>(captured->host.pointer);
     std::vector<EncodedPictureRegion> decoded_pictures;
     for (uint32_t index = 0; index < count; ++index) {
+      const uint32_t generation = batch + index;
+      const PictureSchedule schedule =
+          SchedulePicture(generation, temporal_layer_count);
       amdf_media_encoded_region_t region = {};
       amdf_media_av1_encode_result_info_t av1_result = {
           .type = AMDF_STRUCTURE_TYPE_MEDIA_AV1_ENCODE_RESULT_INFO,
@@ -1093,8 +1184,18 @@ void MediaEncodeInteropTest::RunPictures(
         EXPECT_EQ(output[2], 0u);
         EXPECT_EQ(output[3], 1u);
       }
-      if (batch == 0) {
+      if (test_case.codec == AMDF_MEDIA_CODEC_HEVC) {
+        ASSERT_GE(region.byte_length, 6u);
+        EXPECT_EQ(output[5] & 7u, schedule.temporal_layer_index + 1);
+      }
+      const bool decode_picture =
+          layer_selection == TemporalLayerSelection::kAll ||
+          schedule.temporal_layer_index == 0;
+      if (batch == 0 && decode_picture) {
         decoded_pictures.push_back({
+            .generation = generation,
+            .temporal_layer_index = schedule.temporal_layer_index,
+            .reference_generation = schedule.reference_generation,
             .byte_offset = output_offset,
             .byte_length = region.byte_length,
             .byte_capacity = compressed_stride - region.byte_offset,
@@ -1105,9 +1206,9 @@ void MediaEncodeInteropTest::RunPictures(
       }
     }
     if (batch == 0) {
-      ASSERT_NO_FATAL_FAILURE(DecodePictures(test_case, width, height,
-                                             compressed_memory,
-                                             decoded_pictures, last_encode));
+      ASSERT_NO_FATAL_FAILURE(
+          DecodePictures(test_case, width, height, compressed_memory,
+                         decoded_pictures, last_encode, temporal_layer_count));
     }
     for (uint64_t index = 0; index < compressed_start; ++index) {
       ASSERT_EQ(captured_bytes[index], 0xa5u);
@@ -1146,6 +1247,9 @@ void MediaEncodeInteropTest::RunPictures(
   RecordProperty("rate_control_mode", rate_control_mode);
   RecordProperty("pictures", frame_count);
   RecordProperty("recordings", recording_count);
+  RecordProperty("temporal_layers", temporal_layer_count);
+  RecordProperty("decoded_base_layer_only",
+                 layer_selection == TemporalLayerSelection::kBaseOnly ? 1 : 0);
   RecordProperty("media_kernel_sha256", kernel->executable.sha256);
 }
 
