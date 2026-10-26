@@ -92,6 +92,13 @@ consumes a complete marker/header stream; the caller's admitted dimensions,
 sampling, and precision must describe that stream. Video schemas carry explicit
 parsed syntax. Preparation performs no compressed-payload readback or pixel copy.
 
+Compressed input is an application trust boundary. An application accepting an
+untrusted bitstream validates its framing and syntax before preparing a command,
+including agreement with the configuration and parsed picture metadata it
+supplies. libamdf validates the metadata structures, memory range, and native
+provider constraints; it does not inspect payload bytes, and native completion
+does not certify the payload as safe or well formed.
+
 `kernel_queue_submit` publishes the prepared recording and already-created
 native dependency bindings. It performs no libamdf allocation, parsing, import,
 completion polling, or host completion wait. A nonzero accepted point owns the

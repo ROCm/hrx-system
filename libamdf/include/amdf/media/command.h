@@ -58,7 +58,9 @@ typedef struct amdf_media_decode_picture_info_t {
   /// Codec-specific parsed picture description, or NULL for complete JPEG
   /// input.
   const void* next;
-  /// Borrowed compressed bytes; preparation performs no readback or copy.
+  /// Borrowed compressed bytes whose codec framing and syntax are trusted by
+  /// the application. libamdf validates the range but does not read, parse,
+  /// copy, or validate the payload.
   amdf_media_buffer_range_t compressed;
   /// Borrowed independently consumable decoded output.
   const amdf_media_frame_t* output;
