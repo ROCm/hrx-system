@@ -52,6 +52,16 @@ typedef enum iree_hal_streaming_host_register_flag_bits_e {
   IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_NON_COHERENT = 1ull << 31,
 } iree_hal_streaming_host_register_flags_t;
 
+// API allocation identity, independent of physical placement or CPU mapping.
+typedef enum iree_hal_streaming_memory_kind_e {
+  // Device allocations, pools, executable globals, and virtual reservations.
+  IREE_HAL_STREAMING_MEMORY_KIND_DEVICE = 0,
+  // Owned or registered host allocations, including internal host staging.
+  IREE_HAL_STREAMING_MEMORY_KIND_HOST = 1,
+  // Managed allocations and imported managed variables.
+  IREE_HAL_STREAMING_MEMORY_KIND_MANAGED = 2,
+} iree_hal_streaming_memory_kind_t;
+
 // Describes how a streaming buffer wrapper keeps its context alive.
 typedef enum iree_hal_streaming_buffer_context_ownership_e {
   // The containing context owns the wrapper and must outlive it.
@@ -111,7 +121,8 @@ typedef struct iree_hal_streaming_buffer_t {
   // True while this pool-backed buffer contributes to logical pool usage.
   bool is_pool_allocation_live;
 
-  // Platform-specific memory type.
+  // Actual HAL memory capabilities; unified memory may be host and device
+  // local.
   int memory_type;
 
   // Host registration flags (if registered host memory).
@@ -120,8 +131,8 @@ typedef struct iree_hal_streaming_buffer_t {
   // True when host memory was imported by registration rather than allocated.
   bool imported_host_allocation;
 
-  // True when the allocation was created by hipMallocManaged.
-  bool is_managed;
+  // Immutable allocation identity established before buffer-table publication.
+  iree_hal_streaming_memory_kind_t memory_kind;
 
   // Coordinates operation preparation leases with allocation teardown.
   iree_hal_streaming_allocation_preparation_t preparation;

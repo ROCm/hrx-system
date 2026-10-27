@@ -244,8 +244,85 @@ class CpuStreamingMemoryTest : public ::testing::Test {
   iree_hal_streaming_buffer_t* buffer_ = nullptr;
   // Registered host destination held through asynchronous copy completion.
   iree_hal_streaming_buffer_t* host_buffer_ = nullptr;
+  // Caller-owned registered pages, live until TearDown releases their import.
+  std::array<uint8_t, 16> registered_storage_ = {};
   iree_hal_streaming_deviceptr_t device_pointer_ = 0;
 };
+
+TEST_F(CpuStreamingMemoryTest,
+       AllocationIdentityDoesNotFollowUnifiedMemoryPlacement) {
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, 16, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
+      context_, 16, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
+      &host_buffer_));
+  const iree_hal_memory_type_t shared_memory =
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  EXPECT_TRUE(iree_all_bits_set(buffer_->memory_type, shared_memory));
+  EXPECT_TRUE(iree_all_bits_set(host_buffer_->memory_type, shared_memory));
+  EXPECT_EQ(buffer_->memory_kind, IREE_HAL_STREAMING_MEMORY_KIND_DEVICE);
+  EXPECT_EQ(host_buffer_->memory_kind, IREE_HAL_STREAMING_MEMORY_KIND_HOST);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_streaming_memory_free_host(context_, buffer_->host_ptr));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_streaming_memory_unregister_host(context_, buffer_->host_ptr));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_streaming_memory_free_device(
+                            context_, host_buffer_->device_ptr));
+  iree_hal_streaming_host_register_flags_t flags;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_streaming_memory_host_flags(
+                            context_, buffer_->host_ptr, &flags));
+  IREE_EXPECT_OK(iree_hal_streaming_memory_host_flags(
+      context_, host_buffer_->host_ptr, &flags));
+  EXPECT_EQ(flags, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT);
+}
+
+TEST_F(CpuStreamingMemoryTest,
+       ManagedAndRegisteredHostAllocationsRejectWrongReleaseOwnership) {
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_managed(
+      context_, 16, /*allocation_flags=*/0, &buffer_));
+  EXPECT_EQ(buffer_->memory_kind, IREE_HAL_STREAMING_MEMORY_KIND_MANAGED);
+  IREE_ASSERT_OK(iree_hal_streaming_memory_register_host(
+      context_, registered_storage_.data(), registered_storage_.size(),
+      IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT, &host_buffer_));
+  EXPECT_EQ(host_buffer_->memory_kind, IREE_HAL_STREAMING_MEMORY_KIND_HOST);
+  EXPECT_TRUE(host_buffer_->imported_host_allocation);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_streaming_memory_free_host(
+                            context_, registered_storage_.data()));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_streaming_memory_free_host(context_, buffer_->host_ptr));
+}
+
+TEST_F(CpuStreamingMemoryTest,
+       PitchedTransfersUseAllocationIdentityOnSharedMemory) {
+  constexpr size_t kSize = 16;
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, kSize, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
+      context_, kSize, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
+      &host_buffer_));
+  const std::array<uint8_t, kSize> source = {1, 2,  3,  4,  5,  6,  7,  8,
+                                             9, 10, 11, 12, 13, 14, 15, 16};
+  std::memset(host_buffer_->host_ptr, 0xcd, kSize);
+  IREE_ASSERT_OK(iree_hal_streaming_memcpy_host_to_device_2d(
+      context_, device_pointer_, /*dst_pitch=*/8, source.data(),
+      /*src_pitch=*/8, /*width=*/4, /*height=*/2, stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_memcpy_device_to_host_2d(
+      context_, host_buffer_->host_ptr, /*dst_pitch=*/8, device_pointer_,
+      /*src_pitch=*/8, /*width=*/4, /*height=*/2, stream_));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  const auto* destination = static_cast<const uint8_t*>(host_buffer_->host_ptr);
+  for (size_t i = 0; i < kSize; ++i) {
+    EXPECT_EQ(destination[i], i % 8 < 4 ? source[i] : 0xcd);
+  }
+}
 
 TEST_F(CpuStreamingMemoryTest,
        DownloadsValidateAllocationExtentsBeforeSubmitting) {
@@ -504,11 +581,6 @@ TEST_F(CpuStreamingMemoryTest,
   const std::array<uint8_t, kAllocationSize> expected = {
       7, 14, 21, 28, 35, 42, 49, 56, 63, 70, 77, 84, 91, 98, 105, 112};
   std::memcpy(buffer_->host_ptr, expected.data(), expected.size());
-  // The task allocator is host-visible; clear only the wrapper classification
-  // so this test exercises the production staging/callback route.
-  buffer_->memory_type =
-      (iree_hal_memory_type_t)(buffer_->memory_type &
-                               ~IREE_HAL_MEMORY_TYPE_HOST_LOCAL);
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
       context_, kAllocationSize, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
       &host_buffer_));
@@ -579,9 +651,6 @@ TEST_F(CpuStreamingMemoryTest,
       &buffer_));
   device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
   ASSERT_NE(nullptr, buffer_->host_ptr);
-  buffer_->memory_type =
-      (iree_hal_memory_type_t)(buffer_->memory_type &
-                               ~IREE_HAL_MEMORY_TYPE_HOST_LOCAL);
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
       context_, kAllocationSize, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
       &host_buffer_));

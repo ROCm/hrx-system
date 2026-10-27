@@ -5601,7 +5601,8 @@ static hipError_t iree_hip_lookup_managed_range(
   if (result != hipSuccess) {
     return result;
   }
-  if (!buffer_ref.buffer->is_managed) {
+  if (buffer_ref.buffer->memory_kind !=
+      IREE_HAL_STREAMING_MEMORY_KIND_MANAGED) {
     iree_hal_streaming_context_release(owner_context);
     return hipErrorInvalidValue;
   }
@@ -5621,7 +5622,8 @@ static hipError_t iree_hip_lookup_advisable_range(
   if (result != hipSuccess) {
     return result;
   }
-  if ((!buffer_ref.buffer->is_managed &&
+  if ((buffer_ref.buffer->memory_kind !=
+           IREE_HAL_STREAMING_MEMORY_KIND_MANAGED &&
        !buffer_ref.buffer->imported_host_allocation) ||
       !buffer_ref.buffer->managed_page_count) {
     iree_hal_streaming_context_release(owner_context);
@@ -7007,10 +7009,7 @@ HIPAPI hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
 
 static bool iree_hip_buffer_ref_is_device_memory(
     iree_hal_streaming_buffer_ref_t buffer_ref) {
-  return buffer_ref.buffer->is_managed ||
-         !iree_all_bits_set(
-             (iree_hal_memory_type_t)buffer_ref.buffer->memory_type,
-             IREE_HAL_MEMORY_TYPE_HOST_LOCAL);
+  return buffer_ref.buffer->memory_kind != IREE_HAL_STREAMING_MEMORY_KIND_HOST;
 }
 
 static hipError_t iree_hip_resolve_memcpy_kind(
@@ -7249,7 +7248,7 @@ static hipError_t iree_hip_try_cross_context_h2d(
     iree_hal_streaming_context_release(owner_context);
     return iree_status_to_hip_result(sync_status);
   }
-  if (dst_ref.buffer->is_managed) {
+  if (dst_ref.buffer->memory_kind == IREE_HAL_STREAMING_MEMORY_KIND_MANAGED) {
     if (!dst_ref.buffer->host_ptr) {
       iree_hal_streaming_context_release(owner_context);
       return hipErrorInvalidValue;
@@ -7310,7 +7309,7 @@ static hipError_t iree_hip_try_cross_context_d2h(
     iree_hal_streaming_context_release(owner_context);
     return iree_status_to_hip_result(sync_status);
   }
-  if (src_ref.buffer->is_managed) {
+  if (src_ref.buffer->memory_kind == IREE_HAL_STREAMING_MEMORY_KIND_MANAGED) {
     if (!src_ref.buffer->host_ptr) {
       iree_hal_streaming_context_release(owner_context);
       return hipErrorInvalidValue;
@@ -7382,8 +7381,10 @@ static hipError_t iree_hip_try_managed_d2d(
     return hipSuccess;
   }
 
-  const bool dst_is_managed = dst_ref.buffer->is_managed;
-  const bool src_is_managed = src_ref.buffer->is_managed;
+  const bool dst_is_managed =
+      (dst_ref.buffer->memory_kind == IREE_HAL_STREAMING_MEMORY_KIND_MANAGED);
+  const bool src_is_managed =
+      (src_ref.buffer->memory_kind == IREE_HAL_STREAMING_MEMORY_KIND_MANAGED);
   if (!dst_is_managed && !src_is_managed) {
     iree_hal_streaming_context_release(src_context);
     iree_hal_streaming_context_release(dst_context);
@@ -11073,7 +11074,7 @@ static hipError_t iree_hip_validate_peer_copy_range(
   iree_status_t status = iree_hal_streaming_memory_lookup_range(
       context, (iree_hal_streaming_deviceptr_t)ptr, size, &ref);
   if (iree_status_is_ok(status)) {
-    if (!(ref.buffer->memory_type & IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL)) {
+    if (!iree_hip_buffer_ref_is_device_memory(ref)) {
       return hipErrorInvalidValue;
     }
     if (out_ref) {
@@ -17703,10 +17704,12 @@ typedef struct iree_hip_pointer_metadata_t {
 
 static hipMemoryType iree_hip_memory_type_for_buffer(
     const iree_hal_streaming_buffer_t* buffer) {
-  if (buffer->is_managed) {
+  if (buffer->memory_kind == IREE_HAL_STREAMING_MEMORY_KIND_MANAGED) {
     return hipMemoryTypeManaged;
   }
-  return buffer->host_ptr ? hipMemoryTypeHost : hipMemoryTypeDevice;
+  return buffer->memory_kind == IREE_HAL_STREAMING_MEMORY_KIND_HOST
+             ? hipMemoryTypeHost
+             : hipMemoryTypeDevice;
 }
 
 static bool iree_hip_pointer_is_cpu_mapped(const void* ptr) {
@@ -17948,14 +17951,15 @@ HIPAPI hipError_t hipPointerGetAttribute(void* data,
       break;
     }
     case HIP_POINTER_ATTRIBUTE_IS_MANAGED: {
-      *(unsigned int*)data = buffer_ref.buffer->is_managed ? 1 : 0;
+      *(unsigned int*)data = buffer_ref.buffer->memory_kind ==
+                             IREE_HAL_STREAMING_MEMORY_KIND_MANAGED;
       break;
     }
     case HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR: {
       // Return the base address of the allocation.
-      if (buffer_ref.buffer->is_managed && buffer_ref.buffer->host_ptr) {
-        *(hipDeviceptr_t*)data = (hipDeviceptr_t)buffer_ref.buffer->host_ptr;
-      } else if (buffer_ref.buffer->host_ptr) {
+      if (buffer_ref.buffer->memory_kind !=
+              IREE_HAL_STREAMING_MEMORY_KIND_DEVICE &&
+          buffer_ref.buffer->host_ptr) {
         *(hipDeviceptr_t*)data = (hipDeviceptr_t)buffer_ref.buffer->host_ptr;
       } else {
         *(hipDeviceptr_t*)data = (hipDeviceptr_t)buffer_ref.buffer->device_ptr;
@@ -18260,7 +18264,8 @@ HIPAPI hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes,
           (void*)((iree_device_size_t)buffer_ref.buffer->device_ptr +
                   buffer_ref.offset);
       attributes->device = (int)buffer_ref.buffer->context->device_ordinal;
-      attributes->isManaged = buffer_ref.buffer->is_managed ? 1 : 0;
+      attributes->isManaged = buffer_ref.buffer->memory_kind ==
+                              IREE_HAL_STREAMING_MEMORY_KIND_MANAGED;
       attributes->allocationFlags =
           (unsigned int)buffer_ref.buffer->host_register_flags;
       break;
@@ -23203,12 +23208,10 @@ static hipError_t iree_hip_graph_validate_memcpy3d_params(
         iree_hal_streaming_memory_lookup_range_across_contexts(
             (iree_hal_streaming_deviceptr_t)src, src_span, &src_context,
             &src_ref);
-    const bool dst_is_device =
-        iree_status_is_ok(dst_status) &&
-        (dst_ref.buffer->memory_type & IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
-    const bool src_is_device =
-        iree_status_is_ok(src_status) &&
-        (src_ref.buffer->memory_type & IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
+    const bool dst_is_device = iree_status_is_ok(dst_status) &&
+                               iree_hip_buffer_ref_is_device_memory(dst_ref);
+    const bool src_is_device = iree_status_is_ok(src_status) &&
+                               iree_hip_buffer_ref_is_device_memory(src_ref);
     if (iree_status_is_ok(dst_status)) {
       iree_hal_streaming_context_release(dst_context);
     } else {
@@ -23260,10 +23263,10 @@ static hipError_t iree_hip_graph_validate_memcpy3d_params(
             iree_hal_streaming_memory_lookup_range_across_contexts(
                 (iree_hal_streaming_deviceptr_t)src, src_span, &src_context,
                 &src_ref);
-        const bool valid =
-            iree_status_is_ok(dst_status) && iree_status_is_ok(src_status) &&
-            (dst_ref.buffer->memory_type & IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL) &&
-            (src_ref.buffer->memory_type & IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
+        const bool valid = iree_status_is_ok(dst_status) &&
+                           iree_status_is_ok(src_status) &&
+                           iree_hip_buffer_ref_is_device_memory(dst_ref) &&
+                           iree_hip_buffer_ref_is_device_memory(src_ref);
         if (iree_status_is_ok(dst_status)) {
           iree_hal_streaming_context_release(dst_context);
         } else {
@@ -23781,10 +23784,9 @@ static hipError_t iree_hip_graph_set_memcpy_node_params(
             &src_ref);
     const bool have_dst = iree_status_is_ok(dst_status);
     const bool have_src = iree_status_is_ok(src_status);
-    const bool valid =
-        have_dst && have_src &&
-        (dst_ref.buffer->memory_type & IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL) &&
-        (src_ref.buffer->memory_type & IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
+    const bool valid = have_dst && have_src &&
+                       iree_hip_buffer_ref_is_device_memory(dst_ref) &&
+                       iree_hip_buffer_ref_is_device_memory(src_ref);
     iree_host_size_t dst_rows_per_slice = 0;
     iree_host_size_t src_rows_per_slice = 0;
     if (!valid) {
@@ -25665,10 +25667,10 @@ static hipError_t iree_hip_graph_set_host_memcpy_callback_params(
       iree_hal_streaming_memory_lookup_range_across_contexts(
           (iree_hal_streaming_deviceptr_t)src, src_span, &src_context,
           &src_ref);
-  const bool valid =
-      iree_status_is_ok(dst_status) && iree_status_is_ok(src_status) &&
-      (dst_ref.buffer->memory_type & IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL) &&
-      (src_ref.buffer->memory_type & IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
+  const bool valid = iree_status_is_ok(dst_status) &&
+                     iree_status_is_ok(src_status) &&
+                     iree_hip_buffer_ref_is_device_memory(dst_ref) &&
+                     iree_hip_buffer_ref_is_device_memory(src_ref);
   if (!valid) {
     result = hipErrorInvalidValue;
   }
