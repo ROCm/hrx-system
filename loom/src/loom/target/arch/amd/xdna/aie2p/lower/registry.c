@@ -12,6 +12,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/contracts/core_lower_rules.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/target/arch/amd/xdna/aie2p/gather.h"
+#include "loom/target/arch/amd/xdna/aie2p/lower/configuration.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/f32_representation.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/fifo_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/gather.h"
@@ -549,6 +550,10 @@ void loom_aie2p_low_lower_policy_registry_initialize(
       {
           .contract_set_stable_id = UINT64_C(0x25ed3c7d25a1452a),
           .policy = &kAie2pCoreLowLowerPolicy,
+      },
+      {
+          .contract_set_stable_id = UINT64_C(0x562c9d43fef5386d),
+          .policy = &loom_aie2p_configuration_low_lower_policy,
       },
   };
   loom_low_lower_policy_registry_initialize_from_entries(

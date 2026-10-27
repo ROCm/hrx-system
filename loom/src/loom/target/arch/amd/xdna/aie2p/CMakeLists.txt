@@ -510,6 +510,7 @@ loom_cc_library(
   NAME
     lower
   HDRS
+    "lower/configuration.h"
     "lower/f32_representation.h"
     "lower/fifo_state.h"
     "lower/gather.h"
@@ -523,8 +524,10 @@ loom_cc_library(
     "lower/vector_load.h"
     "lower/vector_packet.h"
   TEXTUAL_HDRS
+    "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/contracts/configuration_index.inl"
     "${IREE_BINARY_DIR}/loom/src/loom/target/arch/amd/xdna/aie2p/contracts/core_index.inl"
   SRCS
+    "lower/configuration.c"
     "lower/f32_representation.c"
     "lower/fifo_state.c"
     "lower/gather.c"
@@ -538,6 +541,7 @@ loom_cc_library(
     "lower/vector_load.c"
     "lower/vector_packet.c"
   DEPS
+    ::configuration_descriptors
     ::core_descriptors
     ::gather
     ::vector_carrier
@@ -556,6 +560,8 @@ loom_cc_library(
     loom::ops::low
     loom::ops::op_defs
     loom::ops::vector
+    loom::target::arch::amd::xdna::aie2p::contracts::configuration
+    loom::target::arch::amd::xdna::aie2p::contracts::configuration_lower_rules
     loom::target::arch::amd::xdna::aie2p::contracts::core
     loom::target::arch::amd::xdna::aie2p::contracts::core_lower_rules
     loom::target::arch::amd::xdna::aie2p::ops
@@ -1080,6 +1086,7 @@ loom_check_test_suite(
     "test/configuration_limits.loom-test"
     "test/configuration_measurement.loom-test"
     "test/configuration_report.loom-test"
+    "test/configuration_source.loom-test"
     "test/descriptors/bf16_comparison.loom-test"
     "test/descriptors/bfp_move.loom-test"
     "test/descriptors/cascade.loom-test"

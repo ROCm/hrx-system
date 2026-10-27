@@ -1,0 +1,277 @@
+// RUN: emit source-low output=low
+
+// One composition fact supplies both lifecycle phases. Ordinary helpers fold
+// its byte calculation before physical command operands are materialized.
+aie2p.target<configuration> @configuration {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+config.def @cohort.panels = 4 : i64
+
+kernel.def target(@configuration) @cohort() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%metadata: buffer) {
+  func.call @configure() : ()
+  kernel.return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) abi(array_program) @configure() asm {
+  %columns = constant 8 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+func.def pure inline @metadata_extent() -> (i64) {
+  %panels = config.get @cohort.panels : i64
+  %panel_bytes = scalar.constant 8192 : i64
+  %extent = scalar.muli %panels, %panel_bytes : i64
+  func.return %extent : i64
+}
+
+func.def target(@configuration) @initialize() {
+  %extent = func.call @metadata_extent() : () -> (i64)
+  low.invoke @reserve(%extent) : (i64)
+  func.return
+}
+
+func.def target(@configuration) @invoke() {
+  %extent = func.call @metadata_extent() : () -> (i64)
+  low.invoke @bind(%extent) : (i64)
+  func.return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @reserve(%extent: reg<aie2p.config.scalar : i64>) asm {
+  %column = constant 0 : reg<aie2p.config.scalar : i64>
+  %row = constant 2 : reg<aie2p.config.scalar : i64>
+  data.reserve %column, %row, %column, %extent
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @bind(%extent: reg<aie2p.config.scalar : i64>) asm {
+  %ordinal = constant 0 : reg<aie2p.config.scalar : i64>
+  %read = constant 1 : reg<aie2p.config.scalar : i64>
+  %alignment = constant 64 : reg<aie2p.config.scalar : i64>
+  %metadata = binding %ordinal, %read, %extent, %alignment
+  return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) abi(array_program) abi_layout({binding_count = 1}) @cohort() asm {
+  %columns = constant 8 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) abi(object_function) @initialize() asm {
+  %extent = constant 32768 : reg<aie2p.config.scalar : i64>
+  %column = constant 0 : reg<aie2p.config.scalar : i64>
+  %row = constant 2 : reg<aie2p.config.scalar : i64>
+  data.reserve %column, %row, %column, %extent
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) abi(object_function) @invoke() asm {
+  %extent = constant 32768 : reg<aie2p.config.scalar : i64>
+  %ordinal = constant 0 : reg<aie2p.config.scalar : i64>
+  %read = constant 1 : reg<aie2p.config.scalar : i64>
+  %alignment = constant 64 : reg<aie2p.config.scalar : i64>
+  %metadata = binding %ordinal, %read, %extent, %alignment
+  return
+}
+
+// ====
+// RUN: emit source-low output=low
+
+// Every integer carrier crosses the same physical scalar boundary. Values
+// exercise logical predicates, narrow maxima, and quantities above 32 bits.
+aie2p.target<configuration> @configuration {device_profile = "amd.xdna.krackan.17f0_20"}
+
+func.def target(@configuration) @declare_bindings() {
+  %ordinal0 = scalar.constant false : i1
+  %extent0 = scalar.constant true : i1
+  low.invoke @bind(%ordinal0, %extent0) : (i1, i1)
+  %ordinal1 = scalar.constant 1 : i64
+  %extent1 = scalar.constant 127 : i8
+  low.invoke @bind(%ordinal1, %extent1) : (i64, i8)
+  %ordinal2 = scalar.constant 2 : i64
+  %extent2 = scalar.constant 32767 : i16
+  low.invoke @bind(%ordinal2, %extent2) : (i64, i16)
+  %ordinal3 = scalar.constant 3 : i64
+  %extent3 = scalar.constant 2147483647 : i32
+  low.invoke @bind(%ordinal3, %extent3) : (i64, i32)
+  %ordinal4 = scalar.constant 4 : i64
+  %extent4 = scalar.constant 9223372036854775807 : i64
+  low.invoke @bind(%ordinal4, %extent4) : (i64, i64)
+  %ordinal5 = scalar.constant 5 : i64
+  %extent5 = index.constant 1048576 : index
+  low.invoke @bind(%ordinal5, %extent5) : (i64, index)
+  %ordinal6 = scalar.constant 6 : i64
+  %extent6 = index.constant 4294967295 : offset
+  low.invoke @bind(%ordinal6, %extent6) : (i64, offset)
+  func.return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @bind(%ordinal: reg<aie2p.config.scalar : i64>, %extent: reg<aie2p.config.scalar : i64>) asm {
+  %read = constant 1 : reg<aie2p.config.scalar : i64>
+  %alignment = constant 64 : reg<aie2p.config.scalar : i64>
+  %input = binding %ordinal, %read, %extent, %alignment
+  return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) abi(object_function) @declare_bindings() asm {
+  %ordinal0 = constant 0 : reg<aie2p.config.scalar : i64>
+  %extent0 = constant 1 : reg<aie2p.config.scalar : i64>
+  %alignment = constant 64 : reg<aie2p.config.scalar : i64>
+  %input$50 = binding %ordinal0, %extent0, %extent0, %alignment
+  %extent1 = constant 127 : reg<aie2p.config.scalar : i64>
+  %input$47 = binding %extent0, %extent0, %extent1, %alignment
+  %ordinal2 = constant 2 : reg<aie2p.config.scalar : i64>
+  %extent2 = constant 32767 : reg<aie2p.config.scalar : i64>
+  %input$44 = binding %ordinal2, %extent0, %extent2, %alignment
+  %ordinal3 = constant 3 : reg<aie2p.config.scalar : i64>
+  %extent3 = constant 2147483647 : reg<aie2p.config.scalar : i64>
+  %input$41 = binding %ordinal3, %extent0, %extent3, %alignment
+  %ordinal4 = constant 4 : reg<aie2p.config.scalar : i64>
+  %extent4 = constant 9223372036854775807 : reg<aie2p.config.scalar : i64>
+  %input$38 = binding %ordinal4, %extent0, %extent4, %alignment
+  %ordinal5 = constant 5 : reg<aie2p.config.scalar : i64>
+  %extent5 = constant 1048576 : reg<aie2p.config.scalar : i64>
+  %input$35 = binding %ordinal5, %extent0, %extent5, %alignment
+  %ordinal6 = constant 6 : reg<aie2p.config.scalar : i64>
+  %extent6 = constant 4294967295 : reg<aie2p.config.scalar : i64>
+  %input$18 = binding %ordinal6, %extent0, %extent6, %alignment
+  return
+}
+
+// ====
+// RUN: emit source-low output=none
+
+// A configuration quantity cannot be negative after specialization.
+aie2p.target<configuration> @configuration {device_profile = "amd.xdna.strix.17f0_10"}
+
+func.def target(@configuration) @negative_extent() {
+  // ERROR@+1: TARGET/005 {op_name="scalar.constant", subject_name="result", constraint_key="i64_range", minimum="0", maximum="9223372036854775807"}
+  %extent = scalar.constant -1 : i64
+  low.invoke @bind(%extent) : (i64)
+  func.return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @bind(%extent: reg<aie2p.config.scalar : i64>) asm {
+  %ordinal = constant 0 : reg<aie2p.config.scalar : i64>
+  %read = constant 1 : reg<aie2p.config.scalar : i64>
+  %alignment = constant 64 : reg<aie2p.config.scalar : i64>
+  %input = binding %ordinal, %read, %extent, %alignment
+  return
+}
+
+// ----
+
+// ====
+// RUN: emit source-low output=none
+
+// Physical configuration has integer quantities, not floating-point operands.
+aie2p.target<configuration> @configuration {device_profile = "amd.xdna.strix.17f0_10"}
+
+func.def target(@configuration) @floating_extent() {
+  // ERROR@+1: TARGET/002 {op_name="scalar.constant", field_name="result", actual_type="f32", expected_type="{i1, i8, i16, i32, i64}"}
+  %extent = scalar.constant 32.0 : f32
+  low.invoke @bind(%extent) : (f32)
+  func.return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @bind(%extent: reg<aie2p.config.scalar : i64>) asm {
+  %ordinal = constant 0 : reg<aie2p.config.scalar : i64>
+  %read = constant 1 : reg<aie2p.config.scalar : i64>
+  %alignment = constant 64 : reg<aie2p.config.scalar : i64>
+  %input = binding %ordinal, %read, %extent, %alignment
+  return
+}
+
+// ----
+
+// ====
+// RUN: emit source-low output=none
+
+// Source initialization still cannot depend on invocation bindings.
+aie2p.target<configuration> @configuration {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration) abi(array_program) @entry() asm {
+  %columns = constant 8 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+func.def target(@configuration) @initialize() {
+  %extent = scalar.constant 64 : i64
+  low.invoke @bind(%extent) : (i64)
+  func.return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @invoke() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @bind(%extent: reg<aie2p.config.scalar : i64>) asm {
+  %ordinal = constant 0 : reg<aie2p.config.scalar : i64>
+  %read = constant 1 : reg<aie2p.config.scalar : i64>
+  // ERROR@+1: XDNA/038 {function_name="initialize", phase="initialization", command="amd.xdna.aie2p.configuration.binding"}
+  %input = binding %ordinal, %read, %extent, %extent
+  return
+}
+
+// ----
+
+// ====
+// RUN: emit source-low output=none
+
+// Invocation cannot acquire storage whose lifetime belongs to initialization.
+aie2p.target<configuration> @configuration {device_profile = "amd.xdna.krackan.17f0_20"}
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration) abi(array_program) @entry() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @initialize() asm {
+  return
+}
+
+func.def target(@configuration) @invoke() {
+  %extent = scalar.constant 64 : i64
+  low.invoke @reserve(%extent) : (i64)
+  func.return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @reserve(%extent: reg<aie2p.config.scalar : i64>) asm {
+  %column = constant 0 : reg<aie2p.config.scalar : i64>
+  %row = constant 2 : reg<aie2p.config.scalar : i64>
+  // ERROR@+1: XDNA/038 {function_name="invoke", phase="invocation", command="amd.xdna.aie2p.configuration.data.reserve"}
+  data.reserve %column, %row, %column, %extent
+  return
+}
+
+// ----
+
+// ====
+// RUN: verify
+
+// Source phases have the same empty runtime signature as physical phases.
+aie2p.target<configuration> @configuration
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration) abi(array_program) @entry() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  // ERROR@+1: XDNA/037 {field_name="initialize", symbol_name="initialize", argument_count="1", result_count="0"}
+  entry %columns, @initialize, @invoke
+  return
+}
+
+func.def target(@configuration) @initialize(%runtime_extent: i64) {
+  func.return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @invoke() asm {
+  return
+}
+
+// ----

@@ -350,12 +350,10 @@ low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) @initia
 // ====
 // RUN: verify
 
-// Configuration phases execute configuration commands, not source functions.
+// Configuration phases require definitions before physical materialization.
 aie2p.target<configuration> @configuration_target
 
-func.def target(@configuration_target) @initialize() {
-  func.return
-}
+func.decl target(@configuration_target) @initialize()
 
 low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) @invoke() asm {
   return
@@ -363,7 +361,7 @@ low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) @invoke
 
 low.func.def target<amd.xdna.aie2p.configuration>(@configuration_target) abi(array_program) @stream() asm {
   %one = constant 1 : reg<aie2p.config.scalar : i64>
-  // ERROR@+1: XDNA/036 {field_name="initialize", symbol_name="initialize", definition_kind="Low function"}
+  // ERROR@+1: XDNA/036 {field_name="initialize", symbol_name="initialize", definition_kind="source or Low function"}
   entry %one, @initialize, @invoke
   return
 }

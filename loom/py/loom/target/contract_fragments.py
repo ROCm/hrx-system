@@ -39,6 +39,12 @@ class ContractFragmentRegistration:
 
 CONTRACT_FRAGMENT_REGISTRATIONS = (
     ContractFragmentRegistration(
+        key="amd.xdna.aie2p.configuration",
+        module_name="loom.target.arch.amd.xdna.aie2p.contracts.configuration",
+        symbol_name="AIE2P_CONFIGURATION_CONTRACT_FRAGMENT",
+        dialect_ops_symbol_name="AIE2P_CONFIGURATION_CONTRACT_DIALECT_OPS",
+    ),
+    ContractFragmentRegistration(
         key="amd.xdna.aie2p.core",
         module_name="loom.target.arch.amd.xdna.aie2p.contracts.core_contract",
         symbol_name="AIE2P_CORE_CONTRACT_FRAGMENT",

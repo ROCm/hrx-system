@@ -114,10 +114,18 @@ static const loom_target_config_t kAie2pConfigurationConfig = {
         },
 };
 
+// Configuration functions supply initialization/invocation bodies. The kernel
+// realization owns the array-program ABI and its physical entry declaration.
+static const loom_target_export_plan_t kAie2pConfigurationExportPlan = {
+    .name = IREE_SVL("aie2p-configuration-function"),
+    .abi_kind = LOOM_TARGET_ABI_OBJECT_FUNCTION,
+    .linkage = LOOM_TARGET_LINKAGE_DSO_LOCAL,
+};
+
 const loom_target_bundle_t loom_aie2p_configuration_target_bundle = {
     .name = IREE_SVL("aie2p-configuration"),
     .snapshot = &kAie2pArraySnapshot,
-    .export_plan = &kAie2pArrayExportPlan,
+    .export_plan = &kAie2pConfigurationExportPlan,
     .config = &kAie2pConfigurationConfig,
 };
 

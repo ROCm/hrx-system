@@ -370,11 +370,12 @@ static iree_string_view_t loom_aie2p_low_function_contract_name(
     return loom_string_table_get(&module->strings, contract_id);
   }
 
-  // A resident worker may name a source function in the same mixed-level
-  // module. Before source-to-low conversion the function has no representation
-  // contract, but its target record already promises the contract that lowering
-  // must produce. Resolve that promise so pre-lowering verification and the
-  // concrete post-lowering check enforce the same worker-entry requirement.
+  // A configuration reference may name a source function in the same
+  // mixed-level module. Before source-to-low conversion the function has no
+  // representation contract, but its target record already promises the
+  // contract that lowering must produce. Resolve that promise so pre-lowering
+  // verification and the concrete post-lowering check enforce the same entry
+  // requirement.
   const loom_symbol_ref_t target_ref = loom_func_like_target(function);
   if (!loom_symbol_ref_is_valid(target_ref) || target_ref.module_id != 0 ||
       target_ref.symbol_id >= module->symbols.count) {
@@ -448,17 +449,13 @@ static iree_status_t loom_aie2p_low_verify_function_reference(
         AIE2P_CONFIGURATION_DESCRIPTOR_SET_ID) {
       return iree_ok_status();
     }
-    const bool is_program =
-        iree_string_view_equal(field_name, IREE_SV("program"));
-    const bool is_source_worker =
-        is_program && loom_func_def_isa(entry_function.op);
-    if (!loom_low_func_def_isa(entry_function.op) && !is_source_worker) {
+    const bool is_source_function = loom_func_def_isa(entry_function.op);
+    if (!loom_low_func_def_isa(entry_function.op) && !is_source_function) {
       const loom_diagnostic_param_t params[] = {
           loom_param_string(field_name),
           loom_param_string(
               loom_low_diagnostic_symbol_name(state->module, entry_ref)),
-          loom_param_string(is_program ? IREE_SV("source or Low function")
-                                       : IREE_SV("Low function")),
+          loom_param_string(IREE_SV("source or Low function")),
       };
       return loom_low_verify_context_emit(context, packet->op,
                                           LOOM_ERR_XDNA_036, params,
@@ -478,11 +475,11 @@ static iree_status_t loom_aie2p_low_verify_function_reference(
                                           LOOM_ERR_XDNA_037, params,
                                           IREE_ARRAYSIZE(params));
     }
-    // Source workers carry their target contract through ordinary source
+    // Source entries carry their target contract through ordinary source
     // lowering. Their resulting Low bodies participate in the same complete
-    // image checks as authored Low workers; there is no Low body to inspect
+    // image checks as authored Low entries; there is no Low body to inspect
     // during this verification of the mixed-level source module.
-    if (is_source_worker) {
+    if (is_source_function) {
       return iree_ok_status();
     }
     loom_aie2p_low_verify_module_state_t* module_state = state->module_state;

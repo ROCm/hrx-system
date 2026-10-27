@@ -12,6 +12,26 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_XDNA)
 loom_target_contract_table_cc_libraries(
   NAME
+    configuration
+  GENERATOR
+    loom::py::loom::gen::target::contracts::aie2p_contract_table_family
+  INDEX_OUTPUT
+    "configuration_index.inl"
+  ARGS
+    "--contract-fragment=amd.xdna.aie2p.configuration"
+    "--contract-index=LOOM_AIE2P_CONFIGURATION_CONTRACT:amd.xdna.aie2p.configuration"
+  CONTRACT_DEPS
+    loom::target::contract
+  LOWER_RULE_DEPS
+    loom::codegen::low::lower
+    loom::ops::index
+    loom::ops::scalar
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_target_contract_table_cc_libraries(
+  NAME
     core
   GENERATOR
     loom::py::loom::gen::target::contracts::aie2p_contract_table_family
