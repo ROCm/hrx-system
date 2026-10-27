@@ -356,7 +356,7 @@ static bool loom_low_allocation_storage_lease_overlap_preserves_identity(
           continue;
         }
         overlaps = true;
-        if (!loom_low_allocation_storage_assignment_subranges_equal(
+        if (!loom_low_allocation_storage_assignment_subranges_correspond(
                 descriptor_set, candidate, candidate_unit, lease_assignment,
                 source_unit, 1) ||
             state->identity_origins[candidate_identity_start +

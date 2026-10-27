@@ -1071,7 +1071,7 @@ bool loom_low_allocation_target_constraints_fixed_storage_conflicts(
       loom_low_allocation_target_constraints_fixed_value_for_value(
           constraints, candidate->value_id);
   if (fixed_value != NULL &&
-      !loom_low_allocation_storage_assignment_ranges_equal(
+      !loom_low_allocation_storage_assignment_locations_correspond(
           constraints->target->descriptor_set, &fixed_value->assignment,
           candidate)) {
     return true;

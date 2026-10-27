@@ -1003,7 +1003,7 @@ static bool loom_low_allocation_checker_lease_units_conflict(
         continue;
       }
       // Partial physical-register aliases do not prove atomic unit identity.
-      if (!loom_low_allocation_storage_assignment_subranges_equal(
+      if (!loom_low_allocation_storage_assignment_subranges_correspond(
               checker->descriptor_set, owner, owner_unit, candidate,
               candidate_unit, 1) ||
           !loom_low_allocation_checker_unit_alias_is_authorized(

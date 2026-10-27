@@ -141,9 +141,10 @@ static bool loom_low_allocation_concat_reservation_has_assigned_source(
   return false;
 }
 
-// Derives the complete source assignment whose related subrange aliases
-// |result|. This is a whole-value assignment because ignoring a fixed source
-// excludes its entire tied storage component from conflict queries.
+// Derives the complete source assignment whose related subrange corresponds
+// unit-for-unit with |result|. This is a whole-value assignment because
+// ignoring a fixed source excludes its entire tied storage component from
+// conflict queries.
 static iree_status_t
 loom_low_allocation_concat_reservation_source_assignment_for_result(
     loom_low_allocation_search_context_t* context,
@@ -168,7 +169,7 @@ loom_low_allocation_concat_reservation_source_assignment_for_result(
           ? loom_low_allocation_storage_assignment_unit_physical_register(
                 context->descriptor_set, result, relation->result_unit_offset,
                 &source_location_base)
-          : loom_low_allocation_storage_find_subrange_alias_location(
+          : loom_low_allocation_storage_find_corresponding_subrange_location(
                 context->descriptor_set, out_capacity->descriptor_reg_class_id,
                 out_capacity->location_kind, source_interval->unit_count,
                 relation->source_unit_offset, result,
@@ -224,7 +225,7 @@ static iree_status_t loom_low_allocation_concat_reservation_sources_fit(
       // its original lifetime would ask the monotone active-set sweep about
       // program points it has already consumed.
       if (!found_location ||
-          !loom_low_allocation_storage_assignment_ranges_equal(
+          !loom_low_allocation_storage_assignment_locations_correspond(
               context->descriptor_set, assigned_sibling, &sibling_assignment)) {
         return iree_ok_status();
       }
@@ -239,9 +240,10 @@ static iree_status_t loom_low_allocation_concat_reservation_sources_fit(
         loom_low_allocation_target_constraints_fixed_value_for_value_ordinal(
             context->target_constraints, sibling_relation->source_ordinal);
     if (!found_location ||
-        (fixed != NULL && !loom_low_allocation_storage_assignment_ranges_equal(
-                              context->descriptor_set, &fixed->assignment,
-                              &sibling_assignment)) ||
+        (fixed != NULL &&
+         !loom_low_allocation_storage_assignment_locations_correspond(
+             context->descriptor_set, &fixed->assignment,
+             &sibling_assignment)) ||
         !loom_low_allocation_target_constraints_location_range_fits_capacity(
             context->descriptor_set, &sibling_capacity,
             sibling_assignment.location_kind, sibling_assignment.location_base,
@@ -583,7 +585,7 @@ loom_low_allocation_concat_reservation_find_location_for_source(
           loom_low_allocation_assignment_map_assignment_for_value_ordinal(
               context->assignment_map, edge->source_ordinal, NULL);
       if (predecessor == NULL ||
-          !loom_low_allocation_storage_find_subrange_alias_location(
+          !loom_low_allocation_storage_find_corresponding_subrange_location(
               descriptor_set, capacity.descriptor_reg_class_id,
               capacity.location_kind, result_interval->unit_count,
               edge->result_unit_offset, predecessor, edge->source_unit_offset,
@@ -631,7 +633,7 @@ loom_low_allocation_concat_reservation_find_location_for_source(
                 &source_location_base);
       } else {
         source_location_ok =
-            loom_low_allocation_storage_find_subrange_alias_location(
+            loom_low_allocation_storage_find_corresponding_subrange_location(
                 descriptor_set, capacity.descriptor_reg_class_id,
                 capacity.location_kind, source_interval->unit_count,
                 relation->source_unit_offset, &reservation,

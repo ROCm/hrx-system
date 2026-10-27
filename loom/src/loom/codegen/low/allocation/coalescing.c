@@ -620,7 +620,7 @@ static iree_status_t loom_low_allocation_coalescing_append_relation_interval(
       context->target_constraints, interval->value_class,
       &interval_reg_class_id, NULL));
   uint32_t result_location_base = 0;
-  if (!loom_low_allocation_storage_find_subrange_alias_location(
+  if (!loom_low_allocation_storage_find_corresponding_subrange_location(
           context->search_context->descriptor_set, interval_reg_class_id,
           source_assignment->location_kind, interval->unit_count,
           relation->result_unit_offset, source_assignment,
@@ -711,7 +711,7 @@ loom_low_allocation_coalescing_append_relation_interval_if_source_assigned(
       context->target_constraints, interval->value_class,
       &interval_reg_class_id, NULL));
   uint32_t result_location_base = 0;
-  if (!loom_low_allocation_storage_find_subrange_alias_location(
+  if (!loom_low_allocation_storage_find_corresponding_subrange_location(
           context->search_context->descriptor_set, interval_reg_class_id,
           source_assignment->location_kind, interval->unit_count,
           relation->result_unit_offset, source_assignment,
@@ -910,7 +910,7 @@ static iree_status_t loom_low_allocation_coalescing_assign_concat_interval(
     }
     if (!first_assignment) {
       result_assignment.location_kind = source_assignment->location_kind;
-      if (!loom_low_allocation_storage_find_subrange_alias_location(
+      if (!loom_low_allocation_storage_find_corresponding_subrange_location(
               context->search_context->descriptor_set, interval_reg_class_id,
               result_assignment.location_kind, interval->unit_count,
               relation->result_unit_offset, source_assignment,
@@ -923,7 +923,7 @@ static iree_status_t loom_low_allocation_coalescing_assign_concat_interval(
     // Concat relations cover complete source operands. A matching source can
     // remain live in its result subrange while packet moves fill the other
     // units. Nonmatching sources retain ordinary interference protection.
-    if (loom_low_allocation_storage_assignment_subranges_equal(
+    if (loom_low_allocation_storage_assignment_subranges_correspond(
             context->search_context->descriptor_set, &result_assignment,
             relation->result_unit_offset, source_assignment,
             relation->source_unit_offset, relation->unit_count)) {
@@ -963,7 +963,7 @@ static iree_status_t loom_low_allocation_coalescing_assign_concat_interval(
             edge_relation->unit_count)) {
       continue;
     }
-    if (!loom_low_allocation_storage_assignment_subranges_equal(
+    if (!loom_low_allocation_storage_assignment_subranges_correspond(
             context->search_context->descriptor_set, &result_assignment,
             edge_relation->source_unit_offset, destination_assignment,
             edge_relation->result_unit_offset, edge_relation->unit_count)) {
@@ -1017,7 +1017,7 @@ loom_low_allocation_coalescing_candidate_location_for_concat_source(
       context->target_constraints, result_interval->value_class,
       &result_reg_class_id, NULL));
   uint32_t result_location_base = 0;
-  if (!loom_low_allocation_storage_find_subrange_alias_location(
+  if (!loom_low_allocation_storage_find_corresponding_subrange_location(
           context->search_context->descriptor_set, result_reg_class_id,
           sibling_assignment->location_kind, result_interval->unit_count,
           sibling_relation->result_unit_offset, sibling_assignment,
@@ -1035,7 +1035,7 @@ loom_low_allocation_coalescing_candidate_location_for_concat_source(
   IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_resolve_reg_class(
       context->target_constraints, interval->value_class, &source_reg_class_id,
       NULL));
-  *out_found = loom_low_allocation_storage_find_subrange_alias_location(
+  *out_found = loom_low_allocation_storage_find_corresponding_subrange_location(
       context->search_context->descriptor_set, source_reg_class_id,
       result_assignment.location_kind, interval->unit_count,
       relation->source_unit_offset, &result_assignment,
@@ -1057,7 +1057,7 @@ loom_low_allocation_coalescing_source_location_for_concat_result(
           relation->unit_count)) {
     return iree_ok_status();
   }
-  *out_found = loom_low_allocation_storage_find_subrange_alias_location(
+  *out_found = loom_low_allocation_storage_find_corresponding_subrange_location(
       context->search_context->descriptor_set, source_reg_class_id,
       result_assignment->location_kind, interval->unit_count,
       relation->source_unit_offset, result_assignment,
@@ -1176,7 +1176,7 @@ loom_low_allocation_coalescing_prepare_concat_reservation_sources(
       continue;
     }
     uint32_t result_location_base = 0;
-    if (!loom_low_allocation_storage_find_subrange_alias_location(
+    if (!loom_low_allocation_storage_find_corresponding_subrange_location(
             descriptor_set, result_reg_class_id, result_location_kind,
             result_interval->unit_count, relation->result_unit_offset,
             source_assignment, relation->source_unit_offset,
@@ -1303,7 +1303,7 @@ loom_low_allocation_coalescing_assign_concat_source_from_edge_destination(
             context->target_constraints, interval->value_class,
             &interval_reg_class_id, NULL));
     uint32_t source_location_base = 0;
-    if (!loom_low_allocation_storage_find_subrange_alias_location(
+    if (!loom_low_allocation_storage_find_corresponding_subrange_location(
             context->search_context->descriptor_set, interval_reg_class_id,
             destination_assignment->location_kind, interval->unit_count,
             concat_relation->source_unit_offset, destination_assignment,
@@ -1914,7 +1914,7 @@ static iree_status_t loom_low_allocation_coalescing_assign_edge_source_interval(
             context->target_constraints, interval->value_class,
             &interval_reg_class_id, NULL));
     uint32_t source_location_base = 0;
-    if (!loom_low_allocation_storage_find_subrange_alias_location(
+    if (!loom_low_allocation_storage_find_corresponding_subrange_location(
             context->search_context->descriptor_set, interval_reg_class_id,
             destination_assignment->location_kind, interval->unit_count,
             relation->source_unit_offset, destination_assignment,

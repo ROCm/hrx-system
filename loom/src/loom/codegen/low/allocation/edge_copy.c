@@ -104,7 +104,7 @@ static void loom_low_allocation_edge_copy_record_segment(
           &destination_assignment_index);
 
   const loom_low_allocation_copy_kind_t kind =
-      loom_low_allocation_storage_assignment_subranges_equal(
+      loom_low_allocation_storage_assignment_subranges_correspond(
           context->move_plan->context.descriptor_set, source_assignment,
           source_unit_offset, destination_assignment, destination_unit_offset,
           unit_count)

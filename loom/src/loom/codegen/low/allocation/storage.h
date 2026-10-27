@@ -77,10 +77,11 @@ bool loom_low_allocation_storage_assignment_unit_physical_register(
     uint32_t* out_physical_register_id);
 
 // Finds a location for a |candidate_location_count|-unit assignment whose
-// |candidate_unit_start| subrange aliases the selected |reference| subrange.
-// Explicit physical-register classes search their candidate ranges or declared
-// register views instead of assuming physical register IDs are linear.
-bool loom_low_allocation_storage_find_subrange_alias_location(
+// |candidate_unit_start| subrange corresponds unit-for-unit with the selected
+// |reference| subrange. Explicit physical-register classes search their
+// candidate ranges or declared register views instead of assuming physical
+// register IDs are linear.
+bool loom_low_allocation_storage_find_corresponding_subrange_location(
     const loom_low_descriptor_set_t* descriptor_set,
     uint16_t candidate_reg_class_id,
     loom_low_allocation_location_kind_t candidate_location_kind,
@@ -126,18 +127,18 @@ bool loom_low_allocation_storage_assignment_classes_share(
     const loom_low_allocation_assignment_t* lhs,
     const loom_low_allocation_assignment_t* rhs);
 
-// Returns true when two assignments name the same non-empty target storage
-// range under |descriptor_set|'s alias contracts.
+// Returns true when two assignments cover the same non-empty, unordered set of
+// target storage units under |descriptor_set|'s alias contracts. Logical unit
+// order is deliberately ignored; value transport uses ordered correspondence.
 bool loom_low_allocation_storage_assignment_ranges_equal(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_assignment_t* lhs,
     const loom_low_allocation_assignment_t* rhs);
 
-// Returns true when two assignments cover the same target-visible storage
-// location under |descriptor_set|'s alias contracts. Unlike range equality,
-// this mirrors allocation coalescing semantics and does not require a non-empty
-// location range.
-bool loom_low_allocation_storage_assignment_locations_share(
+// Returns true when equal-length assignments correspond unit-for-unit under
+// |descriptor_set|'s alias contracts. Empty assignments correspond when their
+// storage classes and empty locations match.
+bool loom_low_allocation_storage_assignment_locations_correspond(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_assignment_t* lhs,
     const loom_low_allocation_assignment_t* rhs);
@@ -149,9 +150,10 @@ bool loom_low_allocation_storage_assignment_ranges_overlap(
     const loom_low_allocation_assignment_t* lhs,
     const loom_low_allocation_assignment_t* rhs);
 
-// Returns true when two same-length assignment subranges name the same target
-// storage units under |descriptor_set|'s alias contracts.
-bool loom_low_allocation_storage_assignment_subranges_equal(
+// Returns true when two same-length assignment subranges correspond in logical
+// unit order under |descriptor_set|'s alias contracts. Unit N on the left must
+// name the same target storage as unit N on the right.
+bool loom_low_allocation_storage_assignment_subranges_correspond(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_assignment_t* lhs, uint32_t lhs_start,
     const loom_low_allocation_assignment_t* rhs, uint32_t rhs_start,

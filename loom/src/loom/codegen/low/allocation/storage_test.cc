@@ -101,11 +101,11 @@ TEST(LowAllocationStorageTest, MatchesConcreteAndAliasRanges) {
       loom_low_allocation_assignment_location_range_equal(&lhs, &alias_same));
   EXPECT_TRUE(loom_low_allocation_storage_assignment_ranges_equal(
       &descriptor_set, &lhs, &alias_same));
-  EXPECT_TRUE(loom_low_allocation_storage_assignment_locations_share(
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_locations_correspond(
       &descriptor_set, &lhs, &alias_same));
   EXPECT_TRUE(loom_low_allocation_storage_assignment_ranges_overlap(
       &descriptor_set, &lhs, &alias_overlap));
-  EXPECT_FALSE(loom_low_allocation_storage_assignment_locations_share(
+  EXPECT_FALSE(loom_low_allocation_storage_assignment_locations_correspond(
       &descriptor_set, &lhs, &alias_overlap));
   EXPECT_FALSE(loom_low_allocation_storage_assignment_ranges_equal(
       &descriptor_set, &lhs, &different_class));
@@ -122,7 +122,7 @@ TEST(LowAllocationStorageTest, MatchesConcreteAndAliasRanges) {
       /*location_count=*/0);
   EXPECT_FALSE(loom_low_allocation_storage_assignment_ranges_equal(
       &descriptor_set, &empty_lhs, &empty_alias_same));
-  EXPECT_TRUE(loom_low_allocation_storage_assignment_locations_share(
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_locations_correspond(
       &descriptor_set, &empty_lhs, &empty_alias_same));
 }
 
@@ -142,7 +142,7 @@ TEST(LowAllocationStorageTest, MatchesAndOverlapsAliasSubranges) {
       LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, /*location_base=*/12,
       /*location_count=*/8);
 
-  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_equal(
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_correspond(
       &descriptor_set, &lhs, 2, &rhs, 0, /*unit_count=*/2));
   EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_overlap(
       &descriptor_set, &lhs, 1, &rhs, 0, /*unit_count=*/2));
@@ -367,15 +367,15 @@ TEST(LowAllocationStorageTest, ResolvesExplicitAggregateRegisterViews) {
       descriptor_set, &pair, 1, &unit_register_id));
   EXPECT_EQ(unit_register_id, second_pair_register_id);
   uint32_t alias_location_base = UINT32_MAX;
-  EXPECT_TRUE(loom_low_allocation_storage_find_subrange_alias_location(
+  EXPECT_TRUE(loom_low_allocation_storage_find_corresponding_subrange_location(
       descriptor_set, reg_class_id,
       LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
       /*candidate_location_count=*/1, /*candidate_unit_start=*/0, &pair,
       /*reference_unit_start=*/1, /*unit_count=*/1, &alias_location_base));
   EXPECT_EQ(alias_location_base, second_pair_register_id);
-  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_equal(
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_correspond(
       descriptor_set, &pair, 0, &first, 0, /*unit_count=*/1));
-  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_equal(
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_correspond(
       descriptor_set, &pair, 1, &second, 0, /*unit_count=*/1));
   EXPECT_FALSE(loom_low_allocation_storage_assignment_subranges_overlap(
       descriptor_set, &pair, 0, &second, 0, /*unit_count=*/1));
@@ -390,6 +390,97 @@ TEST(LowAllocationStorageTest, ResolvesExplicitAggregateRegisterViews) {
       &first_candidate_ordinal, &pressure_extent));
   EXPECT_EQ(first_candidate_ordinal, 0u);
   EXPECT_EQ(pressure_extent, 4u);
+}
+
+TEST(LowAllocationStorageTest,
+     PreservesLogicalUnitOrderAcrossExplicitAggregateViews) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_test_low_core_descriptor_set();
+  uint16_t explicit_class = LOOM_LOW_REG_CLASS_NONE;
+  ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+      descriptor_set, IREE_SV("test.explicit32"), &explicit_class, nullptr));
+  uint16_t packed_class = LOOM_LOW_REG_CLASS_NONE;
+  ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+      descriptor_set, IREE_SV("test.packed.wide"), &packed_class, nullptr));
+
+  uint32_t explicit_quad_register = UINT32_MAX;
+  ASSERT_TRUE(FindExplicitPhysicalRegisterView(
+      descriptor_set, explicit_class, /*unit_count=*/4,
+      /*first_candidate_ordinal=*/0, /*maximum_pressure_extent=*/4,
+      &explicit_quad_register));
+  uint32_t packed_quad_register = UINT32_MAX;
+  ASSERT_TRUE(FindExplicitPhysicalRegisterView(
+      descriptor_set, packed_class, /*unit_count=*/4,
+      /*first_candidate_ordinal=*/0, /*maximum_pressure_extent=*/4,
+      &packed_quad_register));
+  ASSERT_EQ(explicit_quad_register, packed_quad_register);
+
+  const auto explicit_quad =
+      Assignment(explicit_class, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                 explicit_quad_register, /*location_count=*/4);
+  const auto packed_quad =
+      Assignment(packed_class, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                 packed_quad_register, /*location_count=*/4);
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_ranges_equal(
+      descriptor_set, &explicit_quad, &packed_quad));
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_ranges_overlap(
+      descriptor_set, &explicit_quad, &packed_quad));
+  EXPECT_FALSE(loom_low_allocation_storage_assignment_locations_correspond(
+      descriptor_set, &explicit_quad, &packed_quad));
+  EXPECT_FALSE(loom_low_allocation_storage_assignment_subranges_correspond(
+      descriptor_set, &explicit_quad, 0, &packed_quad, 0,
+      /*unit_count=*/4));
+
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_correspond(
+      descriptor_set, &explicit_quad, 0, &packed_quad, 0,
+      /*unit_count=*/1));
+  EXPECT_FALSE(loom_low_allocation_storage_assignment_subranges_correspond(
+      descriptor_set, &explicit_quad, 1, &packed_quad, 1,
+      /*unit_count=*/1));
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_correspond(
+      descriptor_set, &explicit_quad, 1, &packed_quad, 2,
+      /*unit_count=*/1));
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_correspond(
+      descriptor_set, &explicit_quad, 2, &packed_quad, 1,
+      /*unit_count=*/1));
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_correspond(
+      descriptor_set, &explicit_quad, 3, &packed_quad, 3,
+      /*unit_count=*/1));
+
+  uint32_t corresponding_location = UINT32_MAX;
+  EXPECT_FALSE(loom_low_allocation_storage_find_corresponding_subrange_location(
+      descriptor_set, packed_class,
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      /*candidate_location_count=*/4, /*candidate_unit_start=*/0,
+      &explicit_quad, /*reference_unit_start=*/0, /*unit_count=*/4,
+      &corresponding_location));
+
+  uint32_t explicit_pair_register = UINT32_MAX;
+  ASSERT_TRUE(FindExplicitPhysicalRegisterView(
+      descriptor_set, explicit_class, /*unit_count=*/2,
+      /*first_candidate_ordinal=*/0, /*maximum_pressure_extent=*/4,
+      &explicit_pair_register));
+  uint32_t packed_pair_register = UINT32_MAX;
+  ASSERT_TRUE(FindExplicitPhysicalRegisterView(
+      descriptor_set, packed_class, /*unit_count=*/2,
+      /*first_candidate_ordinal=*/0, /*maximum_pressure_extent=*/4,
+      &packed_pair_register));
+  ASSERT_EQ(explicit_pair_register, packed_pair_register);
+  const auto explicit_pair =
+      Assignment(explicit_class, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                 explicit_pair_register, /*location_count=*/2);
+  const auto packed_pair =
+      Assignment(packed_class, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                 packed_pair_register, /*location_count=*/2);
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_locations_correspond(
+      descriptor_set, &explicit_pair, &packed_pair));
+  EXPECT_TRUE(loom_low_allocation_storage_find_corresponding_subrange_location(
+      descriptor_set, packed_class,
+      LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      /*candidate_location_count=*/2, /*candidate_unit_start=*/0,
+      &explicit_pair, /*reference_unit_start=*/0, /*unit_count=*/2,
+      &corresponding_location));
+  EXPECT_EQ(corresponding_location, packed_pair_register);
 }
 
 TEST(LowAllocationStorageTest, ResolvesContiguousPhysicalCandidateRanges) {
@@ -464,9 +555,9 @@ TEST(LowAllocationStorageTest, ResolvesContiguousPhysicalCandidateRanges) {
   EXPECT_TRUE(loom_low_allocation_storage_assignment_unit_physical_register(
       descriptor_set, &pair, 1, &physical_register));
   EXPECT_EQ(physical_register, second_register);
-  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_equal(
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_correspond(
       descriptor_set, &pair, 1, &second, 0, /*unit_count=*/1));
-  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_equal(
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_correspond(
       descriptor_set, &pair, 1, &aliased_second, 0, /*unit_count=*/1));
   EXPECT_TRUE(loom_low_allocation_storage_assignment_ranges_overlap(
       descriptor_set, &pair, &shifted));
@@ -614,7 +705,7 @@ TEST(LowAllocationStorageTest, FindsDirectPhysicalAliasesAcrossClasses) {
     for (uint16_t candidate_class : {broad_class, narrow_class}) {
       uint32_t alias = UINT32_MAX;
       const bool found =
-          loom_low_allocation_storage_find_subrange_alias_location(
+          loom_low_allocation_storage_find_corresponding_subrange_location(
               descriptor_set, candidate_class,
               LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
               /*candidate_location_count=*/1, /*candidate_unit_start=*/0,

@@ -249,7 +249,7 @@ static bool loom_low_allocation_preference_hard_ordinal_copy_prediction(
   }
   const uint16_t destination_class = destination->value_class.register_class_id;
   uint32_t destination_location = 0;
-  if (!loom_low_allocation_storage_find_subrange_alias_location(
+  if (!loom_low_allocation_storage_find_corresponding_subrange_location(
           query->structural.constraints->target->descriptor_set,
           destination_class, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
           /*candidate_location_count=*/1, /*candidate_unit_start=*/0, source,

@@ -156,7 +156,7 @@ loom_low_allocation_packet_move_classify_unit(
                         LOOM_LOW_PLACEMENT_RELATION_FLAG_MATERIALIZE_PART)) {
     return LOOM_LOW_ALLOCATION_PACKET_TRANSFER_FORWARDED;
   }
-  return loom_low_allocation_storage_assignment_subranges_equal(
+  return loom_low_allocation_storage_assignment_subranges_correspond(
              context->move_plan->context.descriptor_set, source_assignment,
              relation->source_unit_offset + relation_unit_offset,
              destination_assignment, destination_unit, 1)

@@ -30,7 +30,7 @@ static iree_status_t loom_low_allocation_copy_decision_plan_record(
   const bool coalesced =
       loom_low_allocation_assignment_is_register_like(source_assignment) &&
       loom_low_allocation_assignment_is_register_like(result_assignment) &&
-      loom_low_allocation_storage_assignment_locations_share(
+      loom_low_allocation_storage_assignment_locations_correspond(
           context->descriptor_set, source_assignment, result_assignment);
   plan->decisions[plan->decision_count++] =
       (loom_low_allocation_copy_decision_t){

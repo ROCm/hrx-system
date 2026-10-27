@@ -97,7 +97,7 @@ static iree_string_view_t loom_low_allocation_coalescing_constraint(
   if (!loom_low_allocation_assignment_is_register_like(result_assignment)) {
     return IREE_SV("result-not-register-like");
   }
-  if (loom_low_allocation_storage_assignment_locations_share(
+  if (loom_low_allocation_storage_assignment_locations_correspond(
           table->target.descriptor_set, source_assignment, result_assignment)) {
     return IREE_SV("assigned-locations-match");
   }
@@ -259,7 +259,7 @@ static iree_string_view_t loom_low_allocation_placement_decision_reason_key(
     return *out_accepted ? IREE_SV("assigned-locations-disjoint")
                          : IREE_SV("assigned-locations-overlap");
   }
-  if (loom_low_allocation_storage_assignment_subranges_equal(
+  if (loom_low_allocation_storage_assignment_subranges_correspond(
           table->target.descriptor_set, result_assignment,
           relation->result_unit_offset, source_assignment,
           relation->source_unit_offset, relation->unit_count)) {

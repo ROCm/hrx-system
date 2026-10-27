@@ -480,7 +480,7 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_collect_candidate(
           source_assignment)) {
     return iree_ok_status();
   }
-  if (loom_low_allocation_storage_assignment_ranges_equal(
+  if (loom_low_allocation_storage_assignment_locations_correspond(
           state->context->descriptor_set, destination_assignment,
           source_assignment)) {
     return iree_ok_status();
