@@ -70,5 +70,52 @@ TEST_F(CandidatePolicyTest, PackingRecoverySchedulesReadyPeerWithoutHandoff) {
       &ready_peer, &stalled_peer));
 }
 
+TEST_F(CandidatePolicyTest, ReadyPackingCompletionPrecedesOtherBankStall) {
+  loom_low_schedule_candidate_score_t ready_completion =
+      MakeConstrainedCandidate(
+          0,
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXACT_PACKING_COMPLETION |
+              LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION);
+  loom_low_schedule_candidate_score_t stalled_handoff =
+      MakeConstrainedCandidate(
+          1,
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE |
+              LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION);
+  stalled_handoff.active_unspillable_completion_domain_id = 2;
+
+  EXPECT_TRUE(loom_low_schedule_candidate_policy_uses_ready_progress_order(
+      &state_, LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION,
+      &ready_completion, &stalled_handoff));
+  EXPECT_TRUE(loom_low_schedule_candidate_policy_uses_ready_progress_order(
+      &state_, LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION,
+      &stalled_handoff, &ready_completion));
+
+  // A handoff in the same bank still owns its packing constraint.
+  stalled_handoff.active_unspillable_completion_domain_id =
+      ready_completion.active_unspillable_completion_domain_id;
+  EXPECT_FALSE(loom_low_schedule_candidate_policy_uses_ready_progress_order(
+      &state_, LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION,
+      &ready_completion, &stalled_handoff));
+}
+
+TEST_F(CandidatePolicyTest, StalledPackingIdentityDoesNotOverrideOtherBank) {
+  loom_low_schedule_candidate_score_t stalled_completion =
+      MakeConstrainedCandidate(
+          3,
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXACT_PACKING_COMPLETION |
+              LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION);
+  loom_low_schedule_candidate_score_t ready_handoff = MakeConstrainedCandidate(
+      0, LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE |
+             LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION);
+  ready_handoff.active_unspillable_completion_domain_id = 2;
+
+  EXPECT_FALSE(loom_low_schedule_candidate_policy_uses_ready_progress_order(
+      &state_, LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION,
+      &stalled_completion, &ready_handoff));
+  EXPECT_FALSE(loom_low_schedule_candidate_policy_uses_ready_progress_order(
+      &state_, LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION,
+      &ready_handoff, &stalled_completion));
+}
+
 }  // namespace
 }  // namespace loom

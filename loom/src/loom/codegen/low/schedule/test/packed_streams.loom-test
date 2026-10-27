@@ -1,0 +1,118 @@
+// Four independent accumulators reuse each packed weight across four MACs.
+// Fresh activation FIFO groups release their state every sixteen records;
+// those releases compete with matrix operand storage in its native bank.
+// The weight pop must precede the final activation pop: freeing its FIFO
+// first would fill the matrix bank before the remaining MACs can start.
+// RUN: emit low-schedule-query @fresh_groups strategy=resource-stall order=26,51 scheduled-pressure=aie2p.mexa
+
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @fresh_groups(%weights: reg<aie2p.ep>, %weight_offset: reg<aie2p.er>, %activations: reg<aie2p.ep>, %activation_offset: reg<aie2p.er>, %initial0: reg<aie2p.mbms x4>, %initial1: reg<aie2p.mbms x4>, %initial2: reg<aie2p.mbms x4>, %initial3: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>) asm {
+  %control = mova.i32 780
+  %w_modifier = mov.modifier %weight_offset
+  %w_base = padda.modifier %weights, %w_modifier
+  %a_modifier = mov.modifier %activation_offset
+  %a_base = padda.modifier %activations, %a_modifier
+  %zero = mov.short 0
+  %one = mov.short 1
+  %halves = mov.short 2
+  low.br ^loop(%zero: reg<aie2p.er>, %w_base: reg<aie2p.ep>, %a_base: reg<aie2p.ep>, %initial0: reg<aie2p.mbms x4>, %initial1: reg<aie2p.mbms x4>, %initial2: reg<aie2p.mbms x4>, %initial3: reg<aie2p.mbms x4>)
+^loop(%group: reg<aie2p.er>, %weight_base: reg<aie2p.ep>, %activation_base: reg<aie2p.ep>, %c0: reg<aie2p.mbms x4>, %c1: reg<aie2p.mbms x4>, %c2: reg<aie2p.mbms x4>, %c3: reg<aie2p.mbms x4>):
+  %w = copy %weight_base : reg<aie2p.ep> -> reg<aie2p.eps>
+  %a = copy %activation_base : reg<aie2p.ep> -> reg<aie2p.eps>
+  %w_low0 = vlda.load-fifo.low512 %weight_base, 0
+  %w_full0 = vlda.load-fifo.high512 %weight_base, %w_low0, 64
+  %w_count0 = mova.fifo.position 64
+  %w_value0, %w_p0, %w_f0, %w_pos0 = vlda.pop.bfp16ebs8 %w, %w_full0, %w_count0
+  %a_low0 = vlda.load-fifo.low512 %activation_base, 0
+  %a_full0 = vlda.load-fifo.high512 %activation_base, %a_low0, 64
+  %a_count0 = mova.fifo.position 128
+  %a_value0, %a_p0, %a_f0, %a_pos0 = vlda.pop.bfp16ebs8 %a, %a_full0, %a_count0
+  %c0_0 = mma.bfp16ebs8.m8n8k8 %c0, %w_value0, %a_value0, %control
+  %a_value1, %a_p1, %a_f1, %a_pos1 = vlda.pop.bfp16ebs8 %a_p0, %a_f0, %a_pos0
+  %c1_0 = mma.bfp16ebs8.m8n8k8 %c1, %w_value0, %a_value1, %control
+  %a_value2, %a_p2, %a_f2, %a_pos2 = vlda.pop.bfp16ebs8 %a_p1, %a_f1, %a_pos1
+  %c2_0 = mma.bfp16ebs8.m8n8k8 %c2, %w_value0, %a_value2, %control
+  %a_value3, %a_p3, %a_f3, %a_pos3 = vlda.pop.bfp16ebs8 %a_p2, %a_f2, %a_pos2
+  %c3_0 = mma.bfp16ebs8.m8n8k8 %c3, %w_value0, %a_value3, %control
+  %w_value1, %w_p1, %w_f1, %w_pos1 = vlda.pop.bfp16ebs8 %w_p0, %w_f0, %w_pos0
+  %a_value4, %a_p4, %a_f4, %a_pos4 = vlda.pop.bfp16ebs8 %a_p3, %a_f3, %a_pos3
+  %c0_1 = mma.bfp16ebs8.m8n8k8 %c0_0, %w_value1, %a_value4, %control
+  %a_value5, %a_p5, %a_f5, %a_pos5 = vlda.pop.bfp16ebs8 %a_p4, %a_f4, %a_pos4
+  %c1_1 = mma.bfp16ebs8.m8n8k8 %c1_0, %w_value1, %a_value5, %control
+  %a_value6, %a_p6, %a_f6, %a_pos6 = vlda.pop.bfp16ebs8 %a_p5, %a_f5, %a_pos5
+  %c2_1 = mma.bfp16ebs8.m8n8k8 %c2_0, %w_value1, %a_value6, %control
+  %a_value7, %a_p7, %a_f7, %a_pos7 = vlda.pop.bfp16ebs8 %a_p6, %a_f6, %a_pos6
+  %c3_1 = mma.bfp16ebs8.m8n8k8 %c3_0, %w_value1, %a_value7, %control
+  %w_value2, %w_p2, %w_f2, %w_pos2 = vlda.pop.bfp16ebs8 %w_p1, %w_f1, %w_pos1
+  %a_value8, %a_p8, %a_f8, %a_pos8 = vlda.pop.bfp16ebs8 %a_p7, %a_f7, %a_pos7
+  %c0_2 = mma.bfp16ebs8.m8n8k8 %c0_1, %w_value2, %a_value8, %control
+  %a_value9, %a_p9, %a_f9, %a_pos9 = vlda.pop.bfp16ebs8 %a_p8, %a_f8, %a_pos8
+  %c1_2 = mma.bfp16ebs8.m8n8k8 %c1_1, %w_value2, %a_value9, %control
+  %a_value10, %a_p10, %a_f10, %a_pos10 = vlda.pop.bfp16ebs8 %a_p9, %a_f9, %a_pos9
+  %c2_2 = mma.bfp16ebs8.m8n8k8 %c2_1, %w_value2, %a_value10, %control
+  %a_value11, %a_p11, %a_f11, %a_pos11 = vlda.pop.bfp16ebs8 %a_p10, %a_f10, %a_pos10
+  %c3_2 = mma.bfp16ebs8.m8n8k8 %c3_1, %w_value2, %a_value11, %control
+  %w_value3, %w_p3, %w_f3, %w_pos3 = vlda.pop.bfp16ebs8 %w_p2, %w_f2, %w_pos2
+  %a_value12, %a_p12, %a_f12, %a_pos12 = vlda.pop.bfp16ebs8 %a_p11, %a_f11, %a_pos11
+  %c0_3 = mma.bfp16ebs8.m8n8k8 %c0_2, %w_value3, %a_value12, %control
+  %a_value13, %a_p13, %a_f13, %a_pos13 = vlda.pop.bfp16ebs8 %a_p12, %a_f12, %a_pos12
+  %c1_3 = mma.bfp16ebs8.m8n8k8 %c1_2, %w_value3, %a_value13, %control
+  %a_value14, %a_p14, %a_f14, %a_pos14 = vlda.pop.bfp16ebs8 %a_p13, %a_f13, %a_pos13
+  %c2_3 = mma.bfp16ebs8.m8n8k8 %c2_2, %w_value3, %a_value14, %control
+  %a_value15, %a_p15, %a_f15, %a_pos15 = vlda.pop.bfp16ebs8 %a_p14, %a_f14, %a_pos14
+  %c3_3 = mma.bfp16ebs8.m8n8k8 %c3_2, %w_value3, %a_value15, %control
+  %w_value4, %w_p4, %w_f4, %w_pos4 = vlda.pop.bfp16ebs8 %w_p3, %w_f3, %w_pos3
+  %a_base16 = copy %a_p15 : reg<aie2p.eps> -> reg<aie2p.ep>
+  %a_low16 = vlda.load-fifo.low512 %a_base16, 0
+  %a_full16 = vlda.load-fifo.high512 %a_base16, %a_low16, 64
+  %a_count16 = mova.fifo.position 128
+  %a_value16, %a_p16, %a_f16, %a_pos16 = vlda.pop.bfp16ebs8 %a_p15, %a_full16, %a_count16
+  %c0_4 = mma.bfp16ebs8.m8n8k8 %c0_3, %w_value4, %a_value16, %control
+  %a_value17, %a_p17, %a_f17, %a_pos17 = vlda.pop.bfp16ebs8 %a_p16, %a_f16, %a_pos16
+  %c1_4 = mma.bfp16ebs8.m8n8k8 %c1_3, %w_value4, %a_value17, %control
+  %a_value18, %a_p18, %a_f18, %a_pos18 = vlda.pop.bfp16ebs8 %a_p17, %a_f17, %a_pos17
+  %c2_4 = mma.bfp16ebs8.m8n8k8 %c2_3, %w_value4, %a_value18, %control
+  %a_value19, %a_p19, %a_f19, %a_pos19 = vlda.pop.bfp16ebs8 %a_p18, %a_f18, %a_pos18
+  %c3_4 = mma.bfp16ebs8.m8n8k8 %c3_3, %w_value4, %a_value19, %control
+  %w_value5, %w_p5, %w_f5, %w_pos5 = vlda.pop.bfp16ebs8 %w_p4, %w_f4, %w_pos4
+  %a_value20, %a_p20, %a_f20, %a_pos20 = vlda.pop.bfp16ebs8 %a_p19, %a_f19, %a_pos19
+  %c0_5 = mma.bfp16ebs8.m8n8k8 %c0_4, %w_value5, %a_value20, %control
+  %a_value21, %a_p21, %a_f21, %a_pos21 = vlda.pop.bfp16ebs8 %a_p20, %a_f20, %a_pos20
+  %c1_5 = mma.bfp16ebs8.m8n8k8 %c1_4, %w_value5, %a_value21, %control
+  %a_value22, %a_p22, %a_f22, %a_pos22 = vlda.pop.bfp16ebs8 %a_p21, %a_f21, %a_pos21
+  %c2_5 = mma.bfp16ebs8.m8n8k8 %c2_4, %w_value5, %a_value22, %control
+  %a_value23, %a_p23, %a_f23, %a_pos23 = vlda.pop.bfp16ebs8 %a_p22, %a_f22, %a_pos22
+  %c3_5 = mma.bfp16ebs8.m8n8k8 %c3_4, %w_value5, %a_value23, %control
+  %w_value6, %w_p6, %w_f6, %w_pos6 = vlda.pop.bfp16ebs8 %w_p5, %w_f5, %w_pos5
+  %a_value24, %a_p24, %a_f24, %a_pos24 = vlda.pop.bfp16ebs8 %a_p23, %a_f23, %a_pos23
+  %c0_6 = mma.bfp16ebs8.m8n8k8 %c0_5, %w_value6, %a_value24, %control
+  %a_value25, %a_p25, %a_f25, %a_pos25 = vlda.pop.bfp16ebs8 %a_p24, %a_f24, %a_pos24
+  %c1_6 = mma.bfp16ebs8.m8n8k8 %c1_5, %w_value6, %a_value25, %control
+  %a_value26, %a_p26, %a_f26, %a_pos26 = vlda.pop.bfp16ebs8 %a_p25, %a_f25, %a_pos25
+  %c2_6 = mma.bfp16ebs8.m8n8k8 %c2_5, %w_value6, %a_value26, %control
+  %a_value27, %a_p27, %a_f27, %a_pos27 = vlda.pop.bfp16ebs8 %a_p26, %a_f26, %a_pos26
+  %c3_6 = mma.bfp16ebs8.m8n8k8 %c3_5, %w_value6, %a_value27, %control
+  %w_value7, %w_p7, %w_f7, %w_pos7 = vlda.pop.bfp16ebs8 %w_p6, %w_f6, %w_pos6
+  %a_value28, %a_p28, %a_f28, %a_pos28 = vlda.pop.bfp16ebs8 %a_p27, %a_f27, %a_pos27
+  %c0_7 = mma.bfp16ebs8.m8n8k8 %c0_6, %w_value7, %a_value28, %control
+  %a_value29, %a_p29, %a_f29, %a_pos29 = vlda.pop.bfp16ebs8 %a_p28, %a_f28, %a_pos28
+  %c1_7 = mma.bfp16ebs8.m8n8k8 %c1_6, %w_value7, %a_value29, %control
+  %a_value30, %a_p30, %a_f30, %a_pos30 = vlda.pop.bfp16ebs8 %a_p29, %a_f29, %a_pos29
+  %c2_7 = mma.bfp16ebs8.m8n8k8 %c2_6, %w_value7, %a_value30, %control
+  %a_value31, %a_p31, %a_f31, %a_pos31 = vlda.pop.bfp16ebs8 %a_p30, %a_f30, %a_pos30
+  %c3_7 = mma.bfp16ebs8.m8n8k8 %c3_6, %w_value7, %a_value31, %control
+  %next_group = add.rr %group, %one
+  %condition = lt %next_group, %halves
+  low.cond_br %condition, ^repeat, ^finish : reg<aie2p.er>
+^repeat:
+  %next_weight = copy %w_p7 : reg<aie2p.eps> -> reg<aie2p.ep>
+  %next_activation = copy %a_p31 : reg<aie2p.eps> -> reg<aie2p.ep>
+  low.br ^loop(%next_group: reg<aie2p.er>, %next_weight: reg<aie2p.ep>, %next_activation: reg<aie2p.ep>, %c0_7: reg<aie2p.mbms x4>, %c1_7: reg<aie2p.mbms x4>, %c2_7: reg<aie2p.mbms x4>, %c3_7: reg<aie2p.mbms x4>)
+^finish:
+  return %c0_7, %c1_7, %c2_7, %c3_7
+}
+
+// ----
+block 1 order: 26, 51
+scheduled pressure aie2p.mexa: peak-live-units=12 peak-live-values=12

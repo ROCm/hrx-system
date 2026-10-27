@@ -37,6 +37,14 @@ loom_check_test_suite(
 )
 
 loom_check_test(
+    name = "packed_streams",
+    src = "packed_streams.loom-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/arch:aie2p",
+    ]),
+)
+
+loom_check_test(
     name = "spill_traffic",
     src = "spill_traffic.loom-test",
     target_compatible_with = loom_config_compatible_with([

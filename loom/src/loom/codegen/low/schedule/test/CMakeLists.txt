@@ -32,6 +32,20 @@ loom_check_test_suite(
     "storage_lifetime.loom-test"
 )
 
+if(LOOM_ARCH_AIE2P)
+iree_native_test(
+  NAME
+    "packed_streams"
+  WORKING_DIRECTORY "${IREE_ROOT_DIR}"
+  ARGS
+    "{{${CMAKE_CURRENT_SOURCE_DIR}/packed_streams.loom-test}}"
+  SRC
+    loom::tools::loom-check::loom-check-test
+  LABELS
+    "loom-check"
+)
+endif()
+
 if(LOOM_ARCH_AMDGPU)
 iree_native_test(
   NAME
