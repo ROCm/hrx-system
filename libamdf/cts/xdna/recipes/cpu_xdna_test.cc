@@ -18,6 +18,9 @@
 #include <vector>
 
 #include "libamdf/cts/xdna/programs/mul_i32.h"
+#if defined(AMDF_CTS_XDNA_CXX_WORKER)
+#include "libamdf/cts/xdna/programs/mul_i32_cxx.h"
+#endif  // AMDF_CTS_XDNA_CXX_WORKER
 #include "libamdf/cts/xdna/programs/recurrence_i32.h"
 #include "libamdf/cts/xdna/util/executable.h"
 #include "libamdf/cts/xdna/util/execution.h"
@@ -960,6 +963,15 @@ class CpuXdnaRecipeTest : public XdnaDeviceFixture {
   std::array<amdf_memory_pair_info_t, 3> egress_ = {};
 };
 
+#if defined(AMDF_CTS_XDNA_CXX_WORKER)
+class CxxWorkerCpuXdnaRecipeTest : public CpuXdnaRecipeTest {
+ protected:
+  const iree_file_toc_t* ProgramImages() const override {
+    return amdf_cts_xdna_mul_i32_cxx_create();
+  }
+};
+#endif  // AMDF_CTS_XDNA_CXX_WORKER
+
 // Finite capture controls share the workload context but borrow no storage on
 // its behalf. Cleanup deliberately stops if native retirement becomes unknown.
 class FirmwareResultRecipeTest : public CpuXdnaRecipeTest {
@@ -1622,6 +1634,13 @@ TEST_F(CpuXdnaRecipeTest, AllocatedRoundTrip) {
   ASSERT_NO_FATAL_FAILURE(CreateBindings(AMDF_MEMORY_PROFILE_ROLE_CREATE));
   RunRoundTrips();
 }
+
+#if defined(AMDF_CTS_XDNA_CXX_WORKER)
+TEST_F(CxxWorkerCpuXdnaRecipeTest, AllocatedRoundTrip) {
+  ASSERT_NO_FATAL_FAILURE(CreateBindings(AMDF_MEMORY_PROFILE_ROLE_CREATE));
+  RunRoundTrips();
+}
+#endif  // AMDF_CTS_XDNA_CXX_WORKER
 
 TEST_F(CpuXdnaRecipeTest, AllocatedRoundTripWithFirmwareTrace) {
   amdf_xdna_firmware_trace_info_t info = {

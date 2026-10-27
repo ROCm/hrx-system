@@ -10,6 +10,14 @@
 iree_add_all_subdirs()
 
 if(AMDF_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND AMDF_FAMILY_XDNA AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
+set(_execution_cases_platform_defines "")
+if(LOOM_IMPORT_CXX)
+  list(APPEND _execution_cases_platform_defines "AMDF_CTS_XDNA_CXX_WORKER=1")
+endif()
+set(_execution_cases_platform_deps "")
+if(LOOM_IMPORT_CXX)
+  list(APPEND _execution_cases_platform_deps libamdf::cts::xdna::programs::mul_i32_cxx)
+endif()
 iree_cc_library(
   NAME
     execution_cases
@@ -28,6 +36,9 @@ iree_cc_library(
     libamdf::cts::xdna::util::executable
     libamdf::cts::xdna::util::execution
     libamdf::cts::xdna::xdna_device_fixture
+    ${_execution_cases_platform_deps}
+  DEFINES
+    ${_execution_cases_platform_defines}
   TESTONLY
   ALWAYSLINK
   PUBLIC
