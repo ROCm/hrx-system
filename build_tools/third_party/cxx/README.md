@@ -5,7 +5,7 @@ changes live in the maintained fork rather than as patches in this directory:
 
 - Upstream: <https://github.com/robertoraggi/cplusplus>
 - Maintained fork: <https://github.com/benvanik/cplusplus>
-- Current stack: [`hrx-upstream/83-object-representation`](https://github.com/benvanik/cplusplus/commits/hrx-upstream/83-object-representation/)
+- Current stack: [`hrx-upstream/85-resource-closure`](https://github.com/benvanik/cplusplus/commits/hrx-upstream/85-resource-closure/)
 
 `../deps.MODULE.bazel` owns the archive commit and checksum. The generated root
 `MODULE.cmake.lock` carries the same identity for CMake. `cxx.BUILD.bazel` and
