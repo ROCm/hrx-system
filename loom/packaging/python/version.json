@@ -1,4 +1,4 @@
 {
-  "package-version": "0.0.0.dev0",
-  "model-catalog": null
+  "package-version": "0.1.0",
+  "model-catalog": "github:ROCm/hrx-loom-library@dd23d2f510054918bc92cf356b70913155a001f5"
 }
