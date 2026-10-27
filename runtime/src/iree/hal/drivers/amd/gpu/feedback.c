@@ -157,6 +157,27 @@ iree_status_t iree_hal_amd_gpu_feedback_initialize(
   iree_status_t status = iree_hal_amd_fabric_memory_allocate(
       context->api, memory, 128, 64, context->event_sink,
       &out_feedback->control_memory, NULL);
+  if (iree_status_is_ok(status)) {
+    amdf_memory_access_info_t access = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
+        .structure_size = sizeof(access),
+    };
+    status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+        context->api->memory_query_access_info(
+            out_feedback->control_memory.handle, 0, &access),
+        "feedback control memory access");
+    // Both dropped-packet accounting and shader notification use 64-bit ADD.
+    // Coherent ordinary loads/stores do not establish this backing capability.
+    if (iree_status_is_ok(status) &&
+        !iree_any_bit_set(access.atomic_operations_64,
+                          AMDF_ATOMIC_OPERATION_ADD)) {
+      status = iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "GPU feedback requires control memory supporting 64-bit atomic "
+          "addition; native backing supports operation mask 0x%016" PRIX64,
+          access.atomic_operations_64);
+    }
+  }
   uint64_t control_address = 0;
   if (iree_status_is_ok(status)) {
     if (out_feedback->control_memory.host_cacheability !=

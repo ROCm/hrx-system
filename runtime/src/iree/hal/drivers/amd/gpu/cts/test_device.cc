@@ -162,6 +162,7 @@ iree_status_t NativeMemoryGate::CreateFabric(iree_hal_amd_fabric_t** out_fabric,
   forwarding_api_ = *native_api;
   forwarding_api_.memory_scope_query_device_profile = QueryDeviceProfile;
   forwarding_api_.memory_scope_query_pair_info = QueryProfilePair;
+  forwarding_api_.memory_query_access_info = QueryAccessInfo;
   forwarding_api_.memory_create = CreateMemory;
   forwarding_api_.memory_destroy = DestroyMemory;
   Activate(maximum_byte_length);
@@ -203,6 +204,7 @@ iree_status_t NativeMemoryGate::AcquireProcessFabric(
         api = *native_api;
         api.memory_scope_query_device_profile = QueryDeviceProfile;
         api.memory_scope_query_pair_info = QueryProfilePair;
+        api.memory_query_access_info = QueryAccessInfo;
         api.memory_create = CreateMemory;
         api.memory_destroy = DestroyMemory;
         status = iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_PROCESS,
@@ -241,6 +243,23 @@ amdf_status_t AMDF_CALL NativeMemoryGate::QueryDeviceProfile(
     out_profile->allocation.maximum_byte_length =
         iree_min(out_profile->allocation.maximum_byte_length,
                  self->maximum_byte_length_.load());
+    for (uint32_t i = 0; i < access_count; ++i) {
+      out_access_capabilities[i].atomic_operations_64 &=
+          ~self->removed_atomic_operations_64_.load();
+    }
+  }
+  return status;
+}
+
+amdf_status_t AMDF_CALL NativeMemoryGate::QueryAccessInfo(
+    amdf_memory_t* memory, uint32_t access_ordinal,
+    amdf_memory_access_info_t* out_info) {
+  const amdf_status_t status =
+      native_api_->memory_query_access_info(memory, access_ordinal, out_info);
+  auto* self = active_.load();
+  if (self && amdf_status_is_ok(status)) {
+    out_info->atomic_operations_64 &=
+        ~self->removed_atomic_operations_64_.load();
   }
   return status;
 }

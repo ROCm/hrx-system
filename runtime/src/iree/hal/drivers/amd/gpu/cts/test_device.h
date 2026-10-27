@@ -83,6 +83,12 @@ class NativeMemoryGate {
   // Removes host publication for local code without changing native backing.
   void RequireCodeUpload() { require_code_upload_.store(true); }
 
+  // Narrows both prospective and achieved backing facts before construction.
+  // Queue instruction support and ordinary memory access remain unchanged.
+  void RemoveAtomicOperations64(amdf_atomic_operations_t operations) {
+    removed_atomic_operations_64_.store(operations);
+  }
+
   MemoryUsage ResetPeak();
   MemoryUsage QueryUsage();
   MemoryUsage WaitForBytes(uint64_t byte_count);
@@ -114,6 +120,10 @@ class NativeMemoryGate {
       amdf_memory_scope_t* scope, const amdf_memory_profile_pair_query_t* query,
       amdf_memory_pair_info_t* out_info);
 
+  static amdf_status_t AMDF_CALL
+  QueryAccessInfo(amdf_memory_t* memory, uint32_t access_ordinal,
+                  amdf_memory_access_info_t* out_info);
+
   static amdf_status_t AMDF_CALL CreateMemory(
       amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
       amdf_memory_t** out_memory, amdf_memory_release_info_t* out_release_info);
@@ -136,6 +146,8 @@ class NativeMemoryGate {
   std::atomic<uint64_t> maximum_byte_length_{UINT64_MAX};
   // Exercise staged loading even on a device with a usable CPU aperture.
   std::atomic<bool> require_code_upload_{false};
+  // Unsupported 64-bit operations at the native memory dependency boundary.
+  std::atomic<amdf_atomic_operations_t> removed_atomic_operations_64_{0};
   // Serial fixture identity required by the native ABI's context-free table.
   inline static std::atomic<NativeMemoryGate*> active_{nullptr};
   // One-shot hold consumed by the next native backing acquisition.
