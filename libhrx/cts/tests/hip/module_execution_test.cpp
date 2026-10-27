@@ -1353,7 +1353,7 @@ TEST_F(HipModuleExecutionTest, DISABLED_BlockingPrintfDirectAndGraphReplay) {
 
 TEST_F(HipModuleExecutionTest,
        CooperativeLaunchPreservesStreamAndGraphOrdering) {
-  if (hrx_cts_amdgpu_hip_cooperative_test_kernels_size() == 0) {
+  if (iree_hal_amd_gpu_cooperative_images_size() == 0) {
     GTEST_SKIP() << "ROCm device libraries are unavailable";
   }
 

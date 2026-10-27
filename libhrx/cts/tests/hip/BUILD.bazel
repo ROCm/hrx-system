@@ -57,21 +57,6 @@ iree_amdgpu_binary_variants_embed_data(
 )
 
 iree_amdgpu_binary_variants_embed_data(
-    name = "amdgpu_hip_cooperative_test_kernels",
-    testonly = True,
-    srcs = ["cooperative_kernel.hip"],
-    binary_name_prefix = "hrx_cts_hip_cooperative_kernel",
-    c_file_output = "amdgpu_hip_cooperative_test_kernels.c",
-    h_file_output = "amdgpu_hip_cooperative_test_kernels.h",
-    identifier = "hrx_cts_amdgpu_hip_cooperative_test_kernels",
-    source_format = "hip",
-    tags = ["manual"],
-    target = "amdgcn-amd-amdhsa",
-    target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
-    target_selectors_flag = "//runtime/src/iree/hal/drivers/amd/gpu:targets",
-)
-
-iree_amdgpu_binary_variants_embed_data(
     name = "amdgpu_hip_module_library_test_kernels",
     testonly = True,
     srcs = ["module_library_kernel.hip"],
@@ -173,7 +158,7 @@ hrx_cc_test(
     tags = AMD_GPU_CTS_TAGS,
     target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
     deps = [
-        ":amdgpu_hip_cooperative_test_kernels",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:cooperative_images",
         ":amdgpu_hip_printf_test_kernels",
         "//build_tools/amdgpu:target_map_h",
         "//libhrx/cts/tests/executable:amdgpu_executable_test_kernels",
