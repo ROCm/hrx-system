@@ -30,8 +30,7 @@ def main() -> None:
             sys.executable,
             "-I",
             "-c",
-            "import hashlib, sqlite3, ssl, sys, tkinter; "
-            "assert sys.dont_write_bytecode; "
+            "import hashlib, sqlite3, ssl, tkinter; "
             "print(hashlib.sha256(b'child').hexdigest())",
         ],
         text=True,

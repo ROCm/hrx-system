@@ -4,16 +4,11 @@
 # Interpreter registrations have no CMake target surface.
 # bazel-to-cmake: skip
 
-load("@bazel_skylib//lib:selects.bzl", "selects")
-load("@rules_python//python:py_runtime.bzl", "py_runtime")
-load("@rules_python//python:py_runtime_pair.bzl", "py_runtime_pair")
-
 # Keep runtime, C-extension, and exec-tools registration semantics together at
 # the same upstream boundary used to create the runtime repositories.
 # buildifier: disable=bzl-visibility
 load("@rules_python//python/private:py_toolchain_suite.bzl", "py_toolchain_suite")
 load("//build_tools/bazel:python.bzl", "iree_py_test")
-load(":compact_runtime.bzl", "compact_python_runtime")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -39,75 +34,6 @@ config_setting(
         "@rules_python//python/config_settings:py_freethreaded": "no",
         "@rules_python//python/config_settings:py_linux_libc": "glibc",
     },
-)
-
-selects.config_setting_group(
-    name = "version_3_12",
-    match_any = [
-        ":version_default",
-        ":version_minor",
-        ":version_exact",
-    ],
-)
-
-config_setting(
-    name = "compact_runtime",
-    flag_values = {
-        "//build_tools/bazel:python_runtime_debug": "false",
-        "@rules_python//python/config_settings:py_freethreaded": "no",
-    },
-)
-
-compact_python_runtime(
-    name = "windows_runtime",
-    srcs = ["@python_3_12//:files"],
-    interpreter = "@python_3_12//:python3",
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:windows",
-    ],
-)
-
-filegroup(
-    name = "windows_runtime_venv_bin_files",
-    srcs = [":windows_runtime"],
-    output_group = "venv_bin_files",
-)
-
-py_runtime(
-    name = "windows_py3_runtime",
-    implementation_name = "cpython",
-    interpreter = ":windows_runtime",
-    interpreter_version_info = {
-        "major": "3",
-        "micro": "13",
-        "minor": "12",
-        "releaselevel": "final",
-        "serial": "0",
-    },
-    pyc_tag = "cpython-312",
-    python_version = "PY3",
-    venv_bin_files = [":windows_runtime_venv_bin_files"],
-)
-
-py_runtime_pair(
-    name = "windows_python_runtimes",
-    py2_runtime = None,
-    py3_runtime = ":windows_py3_runtime",
-)
-
-toolchain(
-    name = "windows_compact_toolchain",
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:windows",
-    ],
-    target_settings = [
-        ":compact_runtime",
-        ":version_3_12",
-    ],
-    toolchain = ":windows_python_runtimes",
-    toolchain_type = "@rules_python//python:toolchain_type",
 )
 
 iree_py_test(

@@ -6,6 +6,7 @@
 
 """Analysis tests for shared Python Bazel macros."""
 
+load("@rules_python//python:py_runtime_info.bzl", "PyRuntimeInfo")
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
 load("@rules_testing//lib:util.bzl", "TestingAspectInfo", "util")
 load("//build_tools/bazel:python.bzl", "iree_py_binary", "iree_py_test")
@@ -157,11 +158,18 @@ def _test_other_python_version_uses_upstream_runtime_impl(env, target):
     ]:
         env.expect.that_collection(owners.keys()).not_contains(repository)
 
-def _test_windows_runtime_is_tree_compacted(name):
+def _selected_python_runtime_impl(ctx):
+    return [ctx.toolchains["@rules_python//python:toolchain_type"].py3_runtime]
+
+_selected_python_runtime = rule(
+    implementation = _selected_python_runtime_impl,
+    toolchains = ["@rules_python//python:toolchain_type"],
+)
+
+def _test_windows_runtime_owns_source_files(name):
     util.helper_target(
-        iree_py_binary,
+        _selected_python_runtime,
         name = name + "_subject",
-        srcs = [name + "_subject.py"],
     )
     analysis_test(
         name = name,
@@ -174,49 +182,18 @@ def _test_windows_runtime_is_tree_compacted(name):
             "//command_line_option:platforms": [Label("//build_tools/windows:windows_x86_64")],
             str(Label("//build_tools/bazel:python_runtime_debug")): False,
         },
-        impl = _test_windows_runtime_is_tree_compacted_impl,
+        impl = _test_windows_runtime_owns_source_files_impl,
         target = name + "_subject",
     )
 
-def _test_windows_runtime_is_tree_compacted_impl(env, target):
-    runfiles = target[DefaultInfo].default_runfiles.files.to_list()
-    runtime_owner = Label("//build_tools/bazel/python_runtime:windows_runtime")
-    runtime_files = [file for file in runfiles if file.owner == runtime_owner]
-    if len(runtime_files) > 16:
-        env.fail("compact Windows runtime expanded into {} runfiles".format(len(runtime_files)))
-    runtime_basenames = [file.basename for file in runtime_files]
-    for expected_basename in ["DLLs", "Lib", "python.exe", "python312.dll"]:
-        if expected_basename not in runtime_basenames:
-            env.fail("compact Windows runtime is missing {} from {}".format(expected_basename, runtime_basenames))
+def _test_windows_runtime_owns_source_files_impl(env, target):
+    runtime = target[PyRuntimeInfo]
 
-def _test_windows_debug_runtime_retains_symbols(name):
-    util.helper_target(
-        iree_py_binary,
-        name = name + "_subject",
-        srcs = [name + "_subject.py"],
-    )
-    analysis_test(
-        name = name,
-        attr_values = {
-            "target_compatible_with": ["@platforms//os:windows", "@platforms//cpu:x86_64"],
-        },
-        config_settings = {
-            str(Label("//build_tools/bazel:python_runtime_debug")): True,
-            str(Label("//build_tools/bazel:sanitizer")): False,
-            "//command_line_option:cc_output_directory_tag": "",
-            "//command_line_option:platforms": [Label("//build_tools/windows:windows_x86_64")],
-        },
-        impl = _test_windows_debug_runtime_retains_symbols_impl,
-        target = name + "_subject",
-    )
-
-def _test_windows_debug_runtime_retains_symbols_impl(env, target):
-    runfiles = target[DefaultInfo].default_runfiles.files.to_list()
-    runtime_owner = Label("//build_tools/bazel/python_runtime:windows_runtime")
-    compact_runtime_files = [file for file in runfiles if file.owner == runtime_owner]
-    env.expect.that_collection(compact_runtime_files).contains_exactly([])
-    if not any([file.basename.endswith(".pdb") for file in runfiles]):
-        env.fail("debug Windows runtime contains no interpreter symbols")
+    # Configured outputs can be rematerialized between invocations while a
+    # persistent worker still has the interpreter or its DLLs mapped.
+    for file in [runtime.interpreter] + runtime.files.to_list():
+        if not file.is_source:
+            env.fail("Windows Python runtime contains a generated artifact: {}".format(file.path))
 
 def python_rules_test_suite(name):
     test_suite(
@@ -230,7 +207,6 @@ def python_rules_test_suite(name):
             _test_default_runtime_is_compact,
             _test_debug_runtime_retains_symbols,
             _test_other_python_version_uses_upstream_runtime,
-            _test_windows_runtime_is_tree_compacted,
-            _test_windows_debug_runtime_retains_symbols,
+            _test_windows_runtime_owns_source_files,
         ],
     )
