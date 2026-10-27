@@ -25,15 +25,15 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   s_waitcnt_vscnt {vscnt = 0}
   %10 = v_mov_b32 1
   %11 = v_mov_b32 0
-  global_store_b32_saddr<volatile> %11, %10, %words
+  global_store_b32_saddr<atomic> %11, %10, %words
   s_waitcnt {lgkmcnt = 0}
   s_waitcnt {vmcnt = 0}
   s_waitcnt_vscnt {vscnt = 0}
-  %first = global_load_b32_saddr<volatile> %11, %words {offset = 4, glc = 1}
+  %first = global_load_b32_saddr<atomic> %11, %words {offset = 4, glc = 1}
   s_waitcnt {vmcnt = 0}
   buffer_gl1_inv
   buffer_gl0_inv
-  %second = global_load_b32_saddr<volatile> %11, %words {offset = 4, glc = 1}
+  %second = global_load_b32_saddr<atomic> %11, %words {offset = 4, glc = 1}
   s_waitcnt {vmcnt = 0}
   buffer_gl1_inv
   buffer_gl0_inv

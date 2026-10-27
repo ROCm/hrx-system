@@ -1529,14 +1529,14 @@ ERR_TARGET_090 = ErrorDef(
     severity=Severity.ERROR,
     summary="Memory access modifier applied to a non-memory packet.",
     message=(
-        "Low instruction '{descriptor}' in '@{function_name}' carries volatile "
+        "Low instruction '{descriptor}' in '@{function_name}' carries memory "
         "access semantics but its descriptor declares no memory read or write"
     ),
     params=(
         ErrorParam("descriptor", ParamKind.STRING),
         ErrorParam("function_name", ParamKind.STRING),
     ),
-    fix_hint="Apply volatile only to a descriptor-backed memory access.",
+    fix_hint="Apply memory access modifiers only to a descriptor-backed memory access.",
 )
 
 # ERR_TARGET_091: Returning paths have no common native result carrier.

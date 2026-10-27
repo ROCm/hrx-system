@@ -1459,6 +1459,12 @@ enum loom_memory_access_flag_bits_e {
   // results. Without this flag the target may flush subnormals. Selection
   // consumes this numerical requirement; it is not a physical Low access flag.
   LOOM_MEMORY_ACCESS_FLAG_NOFTZ = 1u << 1,
+  // A physical Low load/store is one indivisible atomic observation. Every
+  // dynamic access remains observable and same-location issue order is
+  // preserved. The selected instruction and alignment supply atomicity;
+  // explicit fences/cache controls supply synchronization and visibility.
+  // Unlike volatile, independent addresses do not require ordered completion.
+  LOOM_MEMORY_ACCESS_FLAG_ATOMIC = 1u << 2,
 };
 typedef uint8_t loom_memory_access_flags_t;
 

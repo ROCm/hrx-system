@@ -19,9 +19,9 @@ low.func.def target<amdgpu.cdna2.core> abi(hal_kernel) @workgroup_publication() 
   s_waitcnt {lgkmcnt = 0}
   %11 = v_mov_b32 1
   %12 = v_mov_b32 0
-  global_store_dword_saddr<volatile> %12, %11, %words
+  global_store_dword_saddr<atomic> %12, %11, %words
   s_waitcnt {lgkmcnt = 0}
-  %observed = global_load_dword_saddr<volatile> %12, %words {offset = 4} : reg<amdgpu.vgpr>
+  %observed = global_load_dword_saddr<atomic> %12, %words {offset = 4} : reg<amdgpu.vgpr>
   s_waitcnt {vmcnt = 0}
   s_waitcnt {lgkmcnt = 0}
   %old = global_atomic_add_rtn_saddr %12, %observed, %words : reg<amdgpu.vgpr>
@@ -54,11 +54,11 @@ low.func.def target<amdgpu.cdna2.core> abi(hal_kernel) @device_publication() -> 
   s_waitcnt {vmcnt = 0}
   %11 = v_mov_b32 1
   %12 = v_mov_b32 0
-  global_store_dword_saddr<volatile> %12, %11, %words
+  global_store_dword_saddr<atomic> %12, %11, %words
   s_waitcnt {lgkmcnt = 0}
   s_waitcnt {vmcnt = 0}
   s_waitcnt {vmcnt = 0}
-  %observed = global_load_dword_saddr<volatile> %12, %words {offset = 4, glc = 1} : reg<amdgpu.vgpr>
+  %observed = global_load_dword_saddr<atomic> %12, %words {offset = 4, glc = 1} : reg<amdgpu.vgpr>
   s_waitcnt {vmcnt = 0}
   buffer_wbinvl1_vol
   s_waitcnt {lgkmcnt = 0}
@@ -96,11 +96,11 @@ low.func.def target<amdgpu.cdna2.core> abi(hal_kernel) @system_publication() -> 
   s_waitcnt {vmcnt = 0}
   %11 = v_mov_b32 1
   %12 = v_mov_b32 0
-  global_store_dword_saddr<volatile> %12, %11, %words
+  global_store_dword_saddr<atomic> %12, %11, %words
   s_waitcnt {lgkmcnt = 0}
   buffer_wbl2
   s_waitcnt {vmcnt = 0}
-  %observed = global_load_dword_saddr<volatile> %12, %words {offset = 4, glc = 1} : reg<amdgpu.vgpr>
+  %observed = global_load_dword_saddr<atomic> %12, %words {offset = 4, glc = 1} : reg<amdgpu.vgpr>
   s_waitcnt {vmcnt = 0}
   buffer_invl2
   buffer_wbinvl1_vol

@@ -915,8 +915,9 @@ bool loom_amdgpu_memory_access_plan_select(
                ? LOOM_MEMORY_ACCESS_OPERATION_LOAD
                : LOOM_MEMORY_ACCESS_OPERATION_STORE;
     // The selected naturally aligned packet supplies atomicity. Observable
-    // execution prevents Low cleanup from merging or deleting observations.
-    selected_source->access_flags |= LOOM_MEMORY_ACCESS_FLAG_VOLATILE;
+    // execution prevents Low cleanup from merging or deleting observations,
+    // while independent accesses can remain concurrently in flight.
+    selected_source->access_flags |= LOOM_MEMORY_ACCESS_FLAG_ATOMIC;
   }
   bool uses_dynamic_root_address = false;
   if (!loom_amdgpu_memory_access_include_alloca_root_byte_offset(

@@ -1751,8 +1751,10 @@ loom_trait_flags_t loom_low_op_effective_traits(const loom_module_t* module,
                                                 const loom_op_t* op) {
   (void)module;
   // Descriptor traits remain intrinsic even when an access has no modifiers.
-  // Volatility strengthens this instance without changing the instruction.
-  if (iree_any_bit_set(op->instance_flags, LOOM_MEMORY_ACCESS_FLAG_VOLATILE)) {
+  // Physical observations remain visible independently of their result uses.
+  if (iree_any_bit_set(
+          op->instance_flags,
+          LOOM_MEMORY_ACCESS_FLAG_VOLATILE | LOOM_MEMORY_ACCESS_FLAG_ATOMIC)) {
     return (op->traits & ~LOOM_TRAIT_PURE) | LOOM_TRAIT_OBSERVABLE_EFFECT;
   }
   return op->traits;
