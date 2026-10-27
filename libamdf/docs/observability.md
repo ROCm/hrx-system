@@ -99,7 +99,7 @@ saved captures copy the descriptor strings and device identity.
 A caller can select a measured GPU clock with no platform code:
 
 ```c
-// device is already live. The caller owns catalog and chooses its capacity.
+// device is already live. The caller owns catalog with nonzero capacity.
 const void* extension = NULL;
 amdf_status_t status = api->query_extension(
     AMDF_EXTENSION_TELEMETRY, 1, AMDF_TELEMETRY_EXTENSION_VERSION_LATEST,
