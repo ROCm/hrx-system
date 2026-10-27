@@ -1461,8 +1461,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
       ++matched_family_count;
       const iree_hal_memory_backend_t* base =
           iree_hal_device_memory_backend(device);
-      if (!base || iree_any_bit_set(requested->requirements,
-                                    IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED)) {
+      if (!base) {
         supported = false;
         break;
       }
@@ -1472,7 +1471,9 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
         bindings->bindings[type] = IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE;
       }
       if (base->type == IREE_HAL_MEMORY_BACKEND_HOST) {
-        if (!iree_all_bits_set(
+        if (iree_any_bit_set(requested->requirements,
+                             IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED) ||
+            !iree_all_bits_set(
                 iree_hal_queue_family_spec(requested->family)->flags,
                 IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_HOST_MEMORY_BARRIERS) ||
             (requested->interfaces &
@@ -1579,6 +1580,10 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
       if (iree_any_bit_set(requested->requirements,
                            IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST)) {
         requirements->flags |= AMDF_MEMORY_FLAG_HOST_COHERENT;
+      }
+      if (iree_any_bit_set(requested->requirements,
+                           IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED)) {
+        requirements->flags |= AMDF_MEMORY_FLAG_DEVICE_UNCACHED;
       }
       if (!iree_hal_atomic_operation_capabilities_is_empty(
               requested->atomics.queue)) {

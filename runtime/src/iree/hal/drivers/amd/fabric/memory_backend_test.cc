@@ -85,6 +85,41 @@ TEST_F(MemoryBackendTest, HostGuaranteesIntersectOwnedAndImportedRoutes) {
   iree_hal_pool_release(pool);
 }
 
+TEST_F(MemoryBackendTest, UncachedAccessRemainsAnExplicitDeviceRequirement) {
+  native_.required_flags = 0;
+  native_.access_flags[0] = AMDF_MEMORY_FLAG_DEVICE_UNCACHED;
+  iree_hal_pool_family_access_t families[2] = {};
+  for (uint32_t i = 0; i < 2; ++i) {
+    families[i].family = families_[i];
+    families[i].usage = IREE_HAL_BUFFER_USAGE_STORAGE;
+    families[i].interfaces = UINT64_C(1)
+                             << IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA;
+  }
+  families[0].requirements = IREE_HAL_POOL_ACCESS_REQUIRE_UNCACHED;
+  const iree_hal_pool_scope_t scope = {
+      .family_count = 2,
+      .families = families,
+  };
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &pool_options_,
+                                           allocator_, &pool));
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(64, 64),
+      iree_infinite_timeout(), &buffer));
+  ASSERT_EQ(native_.created_accesses.size(), 2u);
+  EXPECT_EQ(native_.created_accesses[0].requirements.flags,
+            AMDF_MEMORY_FLAG_DEVICE_ADDRESS | AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
+  EXPECT_EQ(native_.created_accesses[1].requirements.flags,
+            AMDF_MEMORY_FLAG_DEVICE_ADDRESS);
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+      iree_hal_buffer_query_atomic_operations(
+          buffer, ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]))));
+  iree_hal_buffer_release(buffer);
+  iree_hal_pool_release(pool);
+  native_.AwaitEmpty();
+}
+
 TEST_F(MemoryBackendTest, RegisteredIoRequiresBothFileOwnerAndNativeAdmission) {
   const uint64_t interfaces = UINT64_C(1)
                               << IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO;
