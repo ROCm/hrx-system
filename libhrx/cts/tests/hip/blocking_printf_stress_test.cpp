@@ -1,33 +1,23 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include <dlfcn.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <string>
 #include <vector>
 
 #include "binding/hip/api.h"
+#include "binding/hip/hip_dso_test_util.h"
 #include "iree/testing/gtest.h"
 #include "libhrx/cts/core/amdgpu_hip_printf_test_data.hpp"
 
 namespace {
 
-const char* CandidateLibPath() {
-  if (const char* environment_path = std::getenv("HRX_TEST_LIBAMDHIP64");
-      environment_path && *environment_path != '\0') {
-    return environment_path;
-  }
-  return "libamdhip64.so";
-}
-
 template <typename T>
-T ResolveHipSymbol(void* library, const char* name) {
-  return reinterpret_cast<T>(dlsym(library, name));
+T ResolveHipSymbol(hrx::hip::testing::HipDso& library, const char* name) {
+  return library.Resolve<T>(name);
 }
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
@@ -53,18 +43,32 @@ using HipMemcpyFn = hipError_t (*)(void* target, const void* source,
 
 class HipBlockingPrintfStressTest : public ::testing::Test {
  protected:
+  static void SetUpTestSuite() {
+    if (hrx_cts_amdgpu_hip_printf_test_kernels_size() == 0) {
+      return;
+    }
+    ASSERT_TRUE(library_.Open()) << library_.error();
+    const auto initialize = library_.Resolve<HipInitFn>("hipInit");
+    ASSERT_NE(nullptr, initialize) << library_.error();
+    ASSERT_EQ(hipSuccess, initialize(/*flags=*/0));
+  }
+
+  static void TearDownTestSuite() {
+    if (!library_.is_open()) {
+      return;
+    }
+    const auto deinitialize =
+        library_.Resolve<hipError_t (*)()>("hipHALDeinit");
+    ASSERT_NE(nullptr, deinitialize) << library_.error();
+    EXPECT_EQ(hipSuccess, deinitialize());
+    EXPECT_TRUE(library_.Close()) << library_.error();
+  }
+
   void SetUp() override {
     if (hrx_cts_amdgpu_hip_printf_test_kernels_size() == 0) {
       GTEST_SKIP() << "ROCm device libraries are unavailable";
     }
 
-    library_ = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
-    if (!library_) {
-      GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": "
-                   << dlerror();
-    }
-
-    const auto init = ResolveHipSymbol<HipInitFn>(library_, "hipInit");
     const auto get_device =
         ResolveHipSymbol<HipGetDeviceFn>(library_, "hipGetDevice");
     const auto get_device_properties =
@@ -84,7 +88,6 @@ class HipBlockingPrintfStressTest : public ::testing::Test {
     hip_free_ = ResolveHipSymbol<HipFreeFn>(library_, "hipFree");
     hip_memcpy_ = ResolveHipSymbol<HipMemcpyFn>(library_, "hipMemcpy");
 
-    ASSERT_NE(nullptr, init);
     ASSERT_NE(nullptr, get_device);
     ASSERT_NE(nullptr, get_device_properties);
     ASSERT_NE(nullptr, module_load_data_);
@@ -96,10 +99,11 @@ class HipBlockingPrintfStressTest : public ::testing::Test {
     ASSERT_NE(nullptr, hip_free_);
     ASSERT_NE(nullptr, hip_memcpy_);
 
-    const hipError_t init_result = init(/*flags=*/0);
-    if (init_result != hipSuccess) {
-      GTEST_SKIP() << "hipInit failed: " << init_result;
-    }
+    const auto get_last_error =
+        library_.Resolve<decltype(&hipGetLastError)>("hipGetLastError");
+    ASSERT_NE(nullptr, get_last_error) << library_.error();
+    // Expected errors from another case do not become this case's TLS state.
+    (void)get_last_error();
     int device = 0;
     ASSERT_EQ(hipSuccess, get_device(&device));
     hipDeviceProp_t properties = {};
@@ -126,8 +130,8 @@ class HipBlockingPrintfStressTest : public ::testing::Test {
     }
   }
 
-  // Dynamically loaded HIP compatibility library.
-  void* library_ = nullptr;
+  // One exact HIP artifact and runtime shared through synchronous teardown.
+  static inline hrx::hip::testing::HipDso library_;
   // Module loader entry point.
   HipModuleLoadDataFn module_load_data_ = nullptr;
   // Module release entry point.

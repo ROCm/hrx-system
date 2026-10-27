@@ -95,7 +95,9 @@ hrx_cc_test(
     sanitizer_suppressions = hsa_suppressions,
     tags = AMD_GPU_CTS_TAGS,
     target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
-    deps = _HIP_TEST_DEPS,
+    deps = [
+        "//libhrx/src/binding/hip:hip_dso_test_util",
+    ] + _HIP_TEST_DEPS,
 )
 
 hrx_cc_test(
@@ -265,6 +267,7 @@ hrx_cc_test(
     ],
     target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
     deps = [
+        "//libhrx/src/binding/hip:hip_dso_test_util",
         ":amdgpu_hip_printf_test_kernels",
         "//build_tools/amdgpu:target_map_h",
     ] + _HIP_TEST_DEPS,
