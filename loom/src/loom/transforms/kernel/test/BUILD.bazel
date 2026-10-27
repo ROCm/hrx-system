@@ -20,6 +20,7 @@ loom_check_test_suite(
         "kernel_barrier_control.loom-test",
         "kernel_resources.loom-test",
         "kernel_synchronization_legality.loom-test",
+        "private_storage_write_scopes.loom-test",
         "promote_private_fragments.loom-test",
         "promote_private_fragments_after_unroll.loom-test",
         "promote_private_fragments_footprint.loom-test",

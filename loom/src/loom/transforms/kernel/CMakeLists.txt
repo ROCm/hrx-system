@@ -415,6 +415,28 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    private_storage_test
+  SRCS
+    "private_storage_test.cc"
+  DEPS
+    ::promote_private_fragments
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::buffer
+    loom::ops::func
+    loom::ops::index
+    loom::ops::op_registry
+    loom::ops::scf
+    loom::ops::test
+    loom::ops::view
+    loom::pass::value_facts
+    loom::verify
+)
+
 loom_cc_library(
   NAME
     stage_loop_carried_fragments

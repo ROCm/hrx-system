@@ -1,0 +1,162 @@
+// RUN: pass promote-private-fragments,dce
+
+// A read-only cell retains the value merged before the loop. A nested store
+// changes only its sibling, including the implicit fallthrough alternative.
+func.def @nested_writes(%initial: i32, %alternate: i32, %choose: i1, %enabled: i1, %limit: index) -> (i32, i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 8 : offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<2xi32>
+  scf.if %choose {
+    view.store %initial, %slots[0] : i32, view<2xi32>
+  } else {
+    view.store %alternate, %slots[0] : i32, view<2xi32>
+  }
+  view.store %initial, %slots[1] : i32, view<2xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%begin to %limit step %step] {
+    %invariant = view.load %slots[0] : view<2xi32> -> i32
+    scf.if %enabled {
+      %prior = view.load %slots[1] : view<2xi32> -> i32
+      %next = scalar.addi %prior, %invariant : i32
+      view.store %next, %slots[1] : i32, view<2xi32>
+    }
+  }
+  %fixed = view.load %slots[0] : view<2xi32> -> i32
+  %changed = view.load %slots[1] : view<2xi32> -> i32
+  func.return %fixed, %changed : i32, i32
+}
+
+// ----
+func.def @nested_writes(%initial: i32, %alternate: i32, %choose: i1, %enabled: i1, %limit: index) -> (i32, i32) {
+  %19 = scf.if %choose -> (i32) {
+    scf.yield %initial : i32
+  } else {
+    scf.yield %alternate : i32
+  }
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %22 = scf.for %i = [%begin to %limit step %step](%21 = %initial : i32) -> (i32) {
+    %20 = scf.if %enabled -> (i32) {
+      %next = scalar.addi %21, %19 : i32
+      scf.yield %next : i32
+    } else {
+      scf.yield %21 : i32
+    }
+    scf.yield %20 : i32
+  }
+  func.return %19, %22 : i32, i32
+}
+
+// ====
+
+// Condition and body have disjoint writes. The final condition write remains
+// visible after exit, while a third cell never acquires loop-carried state.
+func.def @condition_and_body(%initial: i32, %limit: i32) -> (i32, i32, i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 12 : offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<3xi32>
+  view.store %initial, %slots[0] : i32, view<3xi32>
+  view.store %initial, %slots[1] : i32, view<3xi32>
+  view.store %initial, %slots[2] : i32, view<3xi32>
+  %increment = scalar.constant 1 : i32
+  scf.while {
+    %prior_condition = view.load %slots[0] : view<3xi32> -> i32
+    %next_condition = scalar.addi %prior_condition, %increment : i32
+    view.store %next_condition, %slots[0] : i32, view<3xi32>
+    %condition = scalar.cmpi slt, %next_condition, %limit : i32
+    scf.condition %condition : i1
+  } do {
+    %prior_body = view.load %slots[1] : view<3xi32> -> i32
+    %invariant = view.load %slots[2] : view<3xi32> -> i32
+    %next_body = scalar.addi %prior_body, %invariant : i32
+    view.store %next_body, %slots[1] : i32, view<3xi32>
+    scf.yield
+  }
+  %condition_result = view.load %slots[0] : view<3xi32> -> i32
+  %body_result = view.load %slots[1] : view<3xi32> -> i32
+  %fixed = view.load %slots[2] : view<3xi32> -> i32
+  func.return %condition_result, %body_result, %fixed : i32, i32, i32
+}
+
+// ----
+func.def @condition_and_body(%initial: i32, %limit: i32) -> (i32, i32, i32) {
+  %increment = scalar.constant 1 : i32
+  %21, %24 = scf.while(%19 = %initial : i32, %22 = %initial : i32) -> (i32, i32) {
+    %next_condition = scalar.addi %19, %increment : i32
+    %condition = scalar.cmpi slt, %next_condition, %limit : i32
+    scf.condition %condition, %next_condition, %22 : i1, i32, i32
+  } do(%20: i32, %23: i32) {
+    %next_body = scalar.addi %23, %initial : i32
+    scf.yield %20, %next_body : i32, i32
+  }
+  func.return %21, %24, %initial : i32, i32, i32
+}
+
+// ====
+
+// Reexecuting the allocation resets both cells. Partial initialization in a
+// later iteration cannot inherit an earlier iteration's value.
+func.def @allocation_reset(%initial: i32, %enabled: i1, %limit: index) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 8 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%begin to %limit step %step] {
+    %storage = buffer.alloca<private> align(4) %bytes : buffer
+    %slots = buffer.view %storage[%origin] : buffer -> view<2xi32>
+    view.store %initial, %slots[0] : i32, view<2xi32>
+    scf.if %enabled {
+      view.store %initial, %slots[1] : i32, view<2xi32>
+    }
+    %first = view.load %slots[0] : view<2xi32> -> i32
+    %second = view.load %slots[1] : view<2xi32> -> i32
+    test.use %first, %second : i32, i32
+  }
+  func.return
+}
+
+// ====
+
+// A loop nested in a CFG join reads a reaching value from either predecessor.
+// Its read-only cell must keep the planned join, not the region's initial state.
+func.def @cfg_join(%initial: i32, %alternate: i32, %choose: i1, %limit: index) -> (i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %slot = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.cond_br %choose, ^first, ^second
+^first:
+  view.store %initial, %slot[0] : i32, view<1xi32>
+  cfg.br ^join
+^second:
+  view.store %alternate, %slot[0] : i32, view<1xi32>
+  cfg.br ^join
+^join:
+  scf.for %i = [%begin to %limit step %step] {
+    %value = view.load %slot[0] : view<1xi32> -> i32
+    test.use %value : i32
+  }
+  %result = view.load %slot[0] : view<1xi32> -> i32
+  func.return %result : i32
+}
+
+// ----
+func.def @cfg_join(%initial: i32, %alternate: i32, %choose: i1, %limit: index) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.cond_br %choose, ^first, ^second
+^first:
+  cfg.br ^join(%initial: i32)
+^second:
+  cfg.br ^join(%alternate: i32)
+^join(%14: i32):
+  scf.for %i = [%begin to %limit step %step] {
+    test.use %14 : i32
+  }
+  func.return %14 : i32
+}

@@ -383,6 +383,27 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "private_storage_test",
+    srcs = ["private_storage_test.cc"],
+    deps = [
+        ":promote_private_fragments",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/ops/view",
+        "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "stage_loop_carried_fragments",
     srcs = ["stage_loop_carried_fragments.c"],

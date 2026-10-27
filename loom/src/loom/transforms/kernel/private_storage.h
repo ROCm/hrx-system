@@ -37,6 +37,10 @@ struct loom_private_storage_allocation_t {
   loom_private_storage_allocation_t* next;
   // Exact allocation size, or zero when no static size is known.
   int64_t byte_count;
+  // First cell in the allocation's contiguous partition.
+  iree_host_size_t cell_begin;
+  // Number of cells reset when this allocation executes.
+  iree_host_size_t cell_count;
   // Whether every observer and live reaching value supports promotion.
   bool selected;
 };

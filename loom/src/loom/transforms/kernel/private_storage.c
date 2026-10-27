@@ -26,6 +26,13 @@
 // Neither the solver nor the rewrite rediscovers IR aliases or store order.
 typedef struct loom_private_storage_region_t loom_private_storage_region_t;
 
+typedef struct loom_private_storage_cell_span_t {
+  // Distinct potentially written cells, in plan cell order.
+  iree_host_size_t* indices;
+  // Number of cells in indices.
+  iree_host_size_t count;
+} loom_private_storage_cell_span_t;
+
 typedef struct loom_private_storage_event_t {
   // Operation whose memory or control semantics this event represents.
   loom_op_t* op;
@@ -37,6 +44,8 @@ typedef struct loom_private_storage_event_t {
   loom_private_storage_region_t** regions;
   // Explicit alternatives, including omitted optional fallthrough regions.
   uint8_t region_count;
+  // Writes and allocation resets in this event and its nested regions.
+  loom_private_storage_cell_span_t writes;
   // Next event in the same block.
   struct loom_private_storage_event_t* next;
 } loom_private_storage_event_t;
@@ -48,6 +57,8 @@ struct loom_private_storage_region_t {
   const loom_cfg_graph_t* graph;
   // First event for each block.
   loom_private_storage_event_t** events;
+  // Writes and allocation resets across this region's blocks.
+  loom_private_storage_cell_span_t writes;
 };
 
 typedef struct loom_private_storage_interval_t {
@@ -66,6 +77,8 @@ typedef struct loom_private_storage_interval_t {
 typedef struct loom_private_storage_builder_t {
   // Result representation owned by the pass arena.
   loom_private_storage_plan_t* plan;
+  // Construction-only state copies, retired at control-scope boundaries.
+  iree_arena_allocator_t* scratch_arena;
   // Shared function facts, borrowed until planning ends.
   const loom_value_fact_table_t* facts;
   // Shared byte-region analysis used during access classification.
@@ -319,6 +332,10 @@ static iree_status_t loom_private_storage_partition(
       }
     } else {
       cell = &plan->cells[plan->cell_count];
+      if (!interval->allocation->cell_count) {
+        interval->allocation->cell_begin = plan->cell_count;
+      }
+      ++interval->allocation->cell_count;
       *cell = (loom_private_storage_cell_t){.allocation = interval->allocation,
                                             .begin = interval->begin,
                                             .end = interval->end,
@@ -329,6 +346,125 @@ static iree_status_t loom_private_storage_partition(
     interval->access->cell = cell;
   }
   return iree_ok_status();
+}
+
+typedef struct loom_private_storage_write_index_t {
+  // Retained cell partition and destination arena.
+  loom_private_storage_plan_t* plan;
+  // Last union that included each cell.
+  iree_host_size_t* marks;
+  // Reusable union buffer, bounded by the cell count.
+  iree_host_size_t* indices;
+  // Identity of the union currently being collected.
+  iree_host_size_t epoch;
+  // Number of members in the current union.
+  iree_host_size_t count;
+} loom_private_storage_write_index_t;
+
+static void loom_private_storage_write_index_insert(
+    loom_private_storage_write_index_t* index, iree_host_size_t cell) {
+  if (index->plan->cells[cell].allocation->selected &&
+      index->marks[cell] != index->epoch) {
+    index->marks[cell] = index->epoch;
+    index->indices[index->count++] = cell;
+  }
+}
+
+static void loom_private_storage_write_index_include(
+    loom_private_storage_write_index_t* index,
+    loom_private_storage_cell_span_t cells) {
+  for (iree_host_size_t i = 0; i < cells.count; ++i) {
+    loom_private_storage_write_index_insert(index, cells.indices[i]);
+  }
+}
+
+static int loom_private_storage_compare_cell_indices(const void* lhs,
+                                                     const void* rhs) {
+  const iree_host_size_t a = *(const iree_host_size_t*)lhs;
+  const iree_host_size_t b = *(const iree_host_size_t*)rhs;
+  return (a > b) - (a < b);
+}
+
+static iree_status_t loom_private_storage_write_index_publish(
+    loom_private_storage_write_index_t* index,
+    loom_private_storage_cell_span_t* out_span) {
+  if (!index->count) {
+    return iree_ok_status();
+  }
+  qsort(index->indices, index->count, sizeof(*index->indices),
+        loom_private_storage_compare_cell_indices);
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      index->plan->arena, index->count, sizeof(*out_span->indices),
+      (void**)&out_span->indices));
+  memcpy(out_span->indices, index->indices,
+         index->count * sizeof(*out_span->indices));
+  out_span->count = index->count;
+  return iree_ok_status();
+}
+
+// Cell identities are available only after access partitioning. Compose their
+// write effects once over the retained control tree, before value flow starts.
+// Loads alone do not change a cell; allocation execution resets its cells even
+// when no store follows. Optional branch fallthrough contributes no writes.
+static iree_status_t loom_private_storage_index_region_writes(
+    loom_private_storage_write_index_t* index,
+    loom_private_storage_region_t* region) {
+  for (uint16_t b = 0; b < region->region->block_count; ++b) {
+    for (loom_private_storage_event_t* event = region->events[b]; event;
+         event = event->next) {
+      for (uint8_t r = 0; r < event->region_count; ++r) {
+        if (event->regions[r]) {
+          IREE_RETURN_IF_ERROR(loom_private_storage_index_region_writes(
+              index, event->regions[r]));
+        }
+      }
+      ++index->epoch;
+      index->count = 0;
+      if (event->allocation) {
+        const loom_private_storage_allocation_t* allocation = event->allocation;
+        for (iree_host_size_t i = 0; i < allocation->cell_count; ++i) {
+          loom_private_storage_write_index_insert(index,
+                                                  allocation->cell_begin + i);
+        }
+      }
+      if (event->access && event->access->cell &&
+          loom_view_store_isa(event->op)) {
+        loom_private_storage_write_index_insert(index,
+                                                event->access->cell->index);
+      }
+      for (uint8_t r = 0; r < event->region_count; ++r) {
+        if (event->regions[r]) {
+          loom_private_storage_write_index_include(index,
+                                                   event->regions[r]->writes);
+        }
+      }
+      IREE_RETURN_IF_ERROR(
+          loom_private_storage_write_index_publish(index, &event->writes));
+    }
+  }
+  ++index->epoch;
+  index->count = 0;
+  for (uint16_t b = 0; b < region->region->block_count; ++b) {
+    for (const loom_private_storage_event_t* event = region->events[b]; event;
+         event = event->next) {
+      loom_private_storage_write_index_include(index, event->writes);
+    }
+  }
+  return loom_private_storage_write_index_publish(index, &region->writes);
+}
+
+static iree_status_t loom_private_storage_index_writes(
+    loom_private_storage_builder_t* builder,
+    loom_private_storage_region_t* region) {
+  loom_private_storage_write_index_t index = {.plan = builder->plan};
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      builder->scratch_arena, builder->plan->cell_count, sizeof(*index.marks),
+      (void**)&index.marks));
+  memset(index.marks, 0, builder->plan->cell_count * sizeof(*index.marks));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      builder->scratch_arena, builder->plan->cell_count, sizeof(*index.indices),
+      (void**)&index.indices));
+  return loom_private_storage_index_region_writes(&index, region);
 }
 
 static iree_status_t loom_private_storage_new_value(
@@ -378,9 +514,9 @@ static iree_status_t loom_private_storage_copy_state(
     loom_private_storage_builder_t* builder,
     loom_private_storage_value_t** state,
     loom_private_storage_value_t*** out_state) {
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(builder->plan->arena, builder->plan->cell_count,
-                                sizeof(**out_state), (void**)out_state));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      builder->scratch_arena, builder->plan->cell_count, sizeof(**out_state),
+      (void**)out_state));
   memcpy(*out_state, state, builder->plan->cell_count * sizeof(**out_state));
   return iree_ok_status();
 }
@@ -438,7 +574,7 @@ static iree_status_t loom_private_storage_flow_branch(
   const uint8_t region_count = event->region_count;
   loom_private_storage_value_t*** alternatives = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(builder->plan->arena, region_count,
+      iree_arena_allocate_array(builder->scratch_arena, region_count,
                                 sizeof(*alternatives), (void**)&alternatives));
   for (uint8_t r = 0; r < region_count; ++r) {
     IREE_RETURN_IF_ERROR(
@@ -453,10 +589,8 @@ static iree_status_t loom_private_storage_flow_branch(
       loom_private_storage_new_signature(builder, op, NULL, &signature));
   signature->region_count = region_count;
   loom_private_storage_transport_t** tail = &signature->transports;
-  for (iree_host_size_t c = 0; c < builder->plan->cell_count; ++c) {
-    if (!builder->plan->cells[c].allocation->selected) {
-      continue;
-    }
+  for (iree_host_size_t i = 0; i < event->writes.count; ++i) {
+    const iree_host_size_t c = event->writes.indices[i];
     bool identical = true;
     for (uint8_t r = 1; r < region_count; ++r) {
       identical &= alternatives[r][c] == alternatives[0][c];
@@ -496,10 +630,8 @@ static iree_status_t loom_private_storage_flow_loop(
       loom_private_storage_copy_state(builder, state, &recurring));
   const bool conditional = loom_loop_like_condition_region(loop) != NULL;
   loom_private_storage_transport_t** tail = &signature->transports;
-  for (iree_host_size_t c = 0; c < builder->plan->cell_count; ++c) {
-    if (!builder->plan->cells[c].allocation->selected) {
-      continue;
-    }
+  for (iree_host_size_t i = 0; i < event->writes.count; ++i) {
+    const iree_host_size_t c = event->writes.indices[i];
     loom_private_storage_transport_t* transport = NULL;
     IREE_RETURN_IF_ERROR(loom_private_storage_new_transport(
         builder, &builder->plan->cells[c], event->op->region_count,
@@ -549,12 +681,11 @@ static iree_status_t loom_private_storage_flow_loop(
 static iree_status_t loom_private_storage_flow_events(
     loom_private_storage_builder_t* builder,
     loom_private_storage_event_t* event, loom_private_storage_value_t** state) {
-  for (; event; event = event->next) {
+  iree_status_t status = iree_ok_status();
+  for (; event && iree_status_is_ok(status); event = event->next) {
     if (event->allocation) {
-      for (iree_host_size_t c = 0; c < builder->plan->cell_count; ++c) {
-        if (builder->plan->cells[c].allocation == event->allocation) {
-          state[c] = NULL;
-        }
+      for (iree_host_size_t i = 0; i < event->allocation->cell_count; ++i) {
+        state[event->allocation->cell_begin + i] = NULL;
       }
     }
     loom_private_storage_access_t* access = event->access;
@@ -566,29 +697,30 @@ static iree_status_t loom_private_storage_flow_events(
             &builder->plan->domain, loom_view_load_result(access->op));
         builder->plan->loads[ordinal] = access;
       } else {
-        IREE_RETURN_IF_ERROR(loom_private_storage_source_value(
-            builder, loom_view_store_value(access->op), &access->value));
+        status = loom_private_storage_source_value(
+            builder, loom_view_store_value(access->op), &access->value);
         state[cell] = access->value;
       }
     }
-    if (!event->regions) {
+    if (!iree_status_is_ok(status) || !event->regions) {
       continue;
     }
     loom_loop_like_t loop =
         loom_loop_like_cast(builder->plan->module, event->op);
+    const iree_arena_checkpoint_t checkpoint =
+        iree_arena_checkpoint_save(builder->scratch_arena);
     if (loom_loop_like_isa(loop)) {
-      IREE_RETURN_IF_ERROR(
-          loom_private_storage_flow_loop(builder, event, loop, state));
+      status = loom_private_storage_flow_loop(builder, event, loop, state);
     } else if (loom_region_branch_isa(
                    loom_region_branch_cast(builder->plan->module, event->op))) {
-      IREE_RETURN_IF_ERROR(
-          loom_private_storage_flow_branch(builder, event, state));
+      status = loom_private_storage_flow_branch(builder, event, state);
     }
+    iree_arena_checkpoint_restore(&checkpoint);
   }
-  return iree_ok_status();
+  return status;
 }
 
-static iree_status_t loom_private_storage_flow_region(
+static iree_status_t loom_private_storage_flow_region_impl(
     loom_private_storage_builder_t* builder,
     const loom_private_storage_region_t* region,
     loom_private_storage_value_t** state) {
@@ -613,10 +745,10 @@ static iree_status_t loom_private_storage_flow_region(
   loom_private_storage_value_t*** exits = NULL;
   loom_private_storage_signature_t** signatures = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(builder->plan->arena, graph->block_count,
+      iree_arena_allocate_array(builder->scratch_arena, graph->block_count,
                                 sizeof(*exits), (void**)&exits));
   IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(builder->plan->arena, graph->block_count,
+      iree_arena_allocate_array(builder->scratch_arena, graph->block_count,
                                 sizeof(*signatures), (void**)&signatures));
   memset(signatures, 0, graph->block_count * sizeof(*signatures));
   for (uint16_t b = 0; b < graph->block_count; ++b) {
@@ -643,10 +775,8 @@ static iree_status_t loom_private_storage_flow_region(
           .successor_index = edge->successor_index};
     }
     loom_private_storage_transport_t** tail = &signature->transports;
-    for (iree_host_size_t c = 0; c < builder->plan->cell_count; ++c) {
-      if (!builder->plan->cells[c].allocation->selected) {
-        continue;
-      }
+    for (iree_host_size_t i = 0; i < region->writes.count; ++i) {
+      const iree_host_size_t c = region->writes.indices[i];
       loom_private_storage_transport_t* transport = NULL;
       IREE_RETURN_IF_ERROR(loom_private_storage_new_transport(
           builder, &builder->plan->cells[c], predecessors.count, &transport));
@@ -680,6 +810,18 @@ static iree_status_t loom_private_storage_flow_region(
     loom_private_storage_append_signature(builder, signature);
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_private_storage_flow_region(
+    loom_private_storage_builder_t* builder,
+    const loom_private_storage_region_t* region,
+    loom_private_storage_value_t** state) {
+  const iree_arena_checkpoint_t checkpoint =
+      iree_arena_checkpoint_save(builder->scratch_arena);
+  iree_status_t status =
+      loom_private_storage_flow_region_impl(builder, region, state);
+  iree_arena_checkpoint_restore(&checkpoint);
+  return status;
 }
 
 loom_private_storage_value_t* loom_private_storage_value_resolve(
@@ -874,7 +1016,7 @@ static iree_status_t loom_private_storage_add_cfg_graph(
 
 static iree_status_t loom_private_storage_analyze(
     loom_pass_t* pass, loom_func_like_t function,
-    loom_private_storage_plan_t* plan) {
+    loom_private_storage_plan_t* plan, iree_arena_allocator_t* scratch_arena) {
   IREE_RETURN_IF_ERROR(loom_local_value_domain_acquire_for_region_tree(
       plan->module, loom_func_like_body(function), plan->arena, &plan->domain));
   loom_value_fact_table_t* facts = NULL;
@@ -883,6 +1025,7 @@ static iree_status_t loom_private_storage_analyze(
       &facts));
   loom_private_storage_builder_t builder = {
       .plan = plan,
+      .scratch_arena = scratch_arena,
       .facts = facts,
       .dominance = {.module = plan->module, .arena = plan->arena}};
   IREE_RETURN_IF_ERROR(loom_value_fact_table_enumerate_cfg_graphs(
@@ -935,6 +1078,8 @@ static iree_status_t loom_private_storage_analyze(
   if (!plan->cell_count) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(loom_private_storage_index_writes(&builder, region));
+  iree_arena_reset(scratch_arena);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       plan->arena, value_count, sizeof(*plan->values), (void**)&plan->values));
   memset(plan->values, 0, value_count * sizeof(*plan->values));
@@ -943,7 +1088,7 @@ static iree_status_t loom_private_storage_analyze(
   memset(plan->loads, 0, value_count * sizeof(*plan->loads));
   loom_private_storage_value_t** state = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      plan->arena, plan->cell_count, sizeof(*state), (void**)&state));
+      scratch_arena, plan->cell_count, sizeof(*state), (void**)&state));
   memset(state, 0, plan->cell_count * sizeof(*state));
   IREE_RETURN_IF_ERROR(
       loom_private_storage_flow_region(&builder, region, state));
@@ -964,7 +1109,12 @@ iree_status_t loom_private_storage_plan_build(
   if (!out_plan->allocations) {
     return iree_ok_status();
   }
-  return loom_private_storage_analyze(pass, function, out_plan);
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(pass->arena->block_pool, &scratch_arena);
+  iree_status_t status =
+      loom_private_storage_analyze(pass, function, out_plan, &scratch_arena);
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
 }
 
 void loom_private_storage_plan_release(loom_private_storage_plan_t* plan) {
