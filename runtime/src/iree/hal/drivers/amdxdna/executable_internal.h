@@ -31,6 +31,18 @@ typedef struct iree_hal_amdxdna_u32_list_t {
   iree_host_size_t count;
 } iree_hal_amdxdna_u32_list_t;
 
+enum { kAmdxdnaTransactionVariantCacheByteBudget = 8 * 1024 * 1024 };
+
+typedef struct iree_hal_amdxdna_transaction_variant_t {
+  iree_hal_amdxdna_u32_list_t transaction;
+  iree_hal_amdxdna_u32_list_t patches;
+  iree_hal_amdxdna_write32_constant_patch_list_t constant_patches;
+  uint64_t identity;
+  uint64_t content_hash;
+  uint64_t last_use;
+  iree_host_size_t storage_size;
+} iree_hal_amdxdna_transaction_variant_t;
+
 typedef struct iree_hal_amdxdna_kernel_params_t {
   // Raw PDI context image from amdxdna-pdi-fb or extracted from an XADX
   // xclbin's AIE_PARTITION section for native drivers that consume PDI.
@@ -66,6 +78,16 @@ typedef struct iree_hal_amdxdna_kernel_params_t {
   iree_string_view_t kernel_name;
   uint32_t n_reconfigure_runs;
   uint32_t n_pdi_loads;
+  // Opaque token assigned when the entry point's original transaction is
+  // registered as a variant. Stable for identical transaction bytes so device
+  // command caches can retain hot variants while sharing the context image.
+  uint64_t transaction_variant_identity;
+  uint64_t transaction_variant_content_hash;
+  iree_hal_amdxdna_transaction_variant_t* transaction_variants;
+  iree_host_size_t transaction_variant_count;
+  iree_host_size_t transaction_variant_capacity;
+  iree_host_size_t transaction_variant_storage_size;
+  uint64_t transaction_variant_use_clock;
   // Legacy Windows MCDM requires stable per-entry-point native context/CU
   // bindings for self-contained dispatches. The lease pins the cache entry
   // against LRU eviction while keeping ownership accounted by the device cache.
@@ -102,6 +124,9 @@ typedef struct iree_hal_amdxdna_executable {
   uint64_t cache_identity;
   iree_host_size_t entry_point_count;
   iree_hal_amdxdna_kernel_params_t* entry_points;
+  // Monotonic executable-wide namespace prevents tokens registered for one
+  // export from aliasing a variant owned by another export.
+  uint32_t transaction_variant_next_token;
   // Standalone PDI pool used by in-transaction load_pdi relocations.
   iree_hal_amdxdna_u8_list_t* pdis;
   // Device buffers parallel to `pdis`; allocated on first load_pdi dispatch so
@@ -120,7 +145,24 @@ typedef struct iree_hal_amdxdna_executable {
   bool context_cu_index_valid;
 } iree_hal_amdxdna_executable;
 
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
 iree_status_t iree_hal_amdxdna_executable_ensure_pdi_buffer(
     iree_hal_amdxdna_executable* executable, uint32_t pdi_ordinal);
+
+iree_status_t iree_hal_amdxdna_executable_clone_transaction_variant(
+    iree_hal_amdxdna_executable* executable, uint32_t entry_point,
+    uint64_t variant, iree_allocator_t host_allocator,
+    iree_hal_amdxdna_transaction_variant_t* out_variant);
+
+void iree_hal_amdxdna_transaction_variant_deinitialize(
+    iree_allocator_t host_allocator,
+    iree_hal_amdxdna_transaction_variant_t* variant);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
 
 #endif  // IREE_HAL_DRIVERS_AMDXDNA_EXECUTABLE_INTERNAL_H_

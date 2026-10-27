@@ -61,6 +61,17 @@ struct TestRunDef {
   std::vector<TestControlParameterRelocationDef> control_parameter_relocations;
 };
 
+static std::vector<uint32_t> MakeWrite32Txn(uint32_t value) {
+  std::vector<uint32_t> transaction(10, 0);
+  transaction[2] = 1;
+  uint8_t* bytes = reinterpret_cast<uint8_t*>(transaction.data());
+  bytes[16] = 0;  // WRITE32
+  std::memcpy(bytes + 32, &value, sizeof(value));
+  const uint32_t op_size = 24;
+  std::memcpy(bytes + 36, &op_size, sizeof(op_size));
+  return transaction;
+}
+
 static flatbuffers_uint32_vec_ref_t CreateUInt32Vec(
     flatbuffers_builder_t* builder, const std::vector<uint32_t>& values) {
   return flatbuffers_uint32_vec_create(
@@ -405,6 +416,7 @@ TEST(ExecutableXclbinTest, ParsesStandalonePdisAndRelocations) {
   std::vector<uint8_t> xclbin = BuildXclbin({context_pdi});
   std::vector<uint8_t> load_pdi0(12, 0xD0);
   std::vector<uint8_t> load_pdi1(16, 0xD1);
+  const auto base_transaction = MakeWrite32Txn(0x11111111);
 
   std::vector<uint8_t> executable_data;
   IREE_ASSERT_OK(MakeXadxExecutable(
@@ -413,7 +425,7 @@ TEST(ExecutableXclbinTest, ParsesStandalonePdisAndRelocations) {
       {{"fused",
         /*pdi_index=*/0,
         /*xclbin_index=*/0,
-        {{{0, 0, 0, 0, 0, 0, 0, 0},
+        {{base_transaction,
           {},
           {},
           {{/*offset=*/4, /*pdi_index=*/1, /*addend=*/-16}},
@@ -455,6 +467,31 @@ TEST(ExecutableXclbinTest, ParsesStandalonePdisAndRelocations) {
   EXPECT_EQ(ToString(entry.parameters[0].name), "input_offset");
   EXPECT_EQ(entry.parameters[0].offset, 0u);
   EXPECT_EQ(entry.parameters[0].native_abi_offset, 12u);
+
+  const auto dynamic_transaction = MakeWrite32Txn(0x22222222);
+  uint64_t variant_token = 0;
+  IREE_ASSERT_OK(iree_hal_amdxdna_executable_cache_transaction(
+      base_executable, 0,
+      iree_make_const_byte_span(
+          dynamic_transaction.data(),
+          dynamic_transaction.size() * sizeof(dynamic_transaction[0])),
+      &variant_token));
+  EXPECT_NE(variant_token, 0u);
+  iree_hal_amdxdna_transaction_variant_t snapshot = {};
+  IREE_ASSERT_OK(iree_hal_amdxdna_executable_clone_transaction_variant(
+      executable, 0, variant_token, iree_allocator_system(), &snapshot));
+  EXPECT_EQ(ToVector(snapshot.transaction), dynamic_transaction);
+  iree_hal_amdxdna_transaction_variant_deinitialize(iree_allocator_system(),
+                                                    &snapshot);
+  const std::vector<uint32_t> short_transaction(4, 0);
+  EXPECT_THAT(
+      iree_hal_amdxdna_executable_cache_transaction(
+          base_executable, 0,
+          iree_make_const_byte_span(
+              short_transaction.data(),
+              short_transaction.size() * sizeof(short_transaction[0])),
+          &variant_token),
+      iree::testing::status::StatusIs(iree::StatusCode::kInvalidArgument));
 
   iree_hal_amdxdna_native_c_device_caps_t full_elf_caps = {};
   full_elf_caps.dispatch_models =

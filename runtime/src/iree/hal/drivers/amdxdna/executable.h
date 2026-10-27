@@ -43,6 +43,11 @@ iree_status_t iree_hal_amdxdna_executable_preload_contexts(
     struct iree_hal_amdxdna_device* device,
     iree_hal_executable_t* base_executable);
 
+// Caches |transaction| and returns its non-zero variant token.
+iree_status_t iree_hal_amdxdna_executable_cache_transaction(
+    iree_hal_executable_t* base_executable, uint32_t entry_point,
+    iree_const_byte_span_t transaction, uint64_t* out_variant);
+
 iree_status_t iree_hal_amdxdna_native_executable_infer_format(
     iree_const_byte_span_t executable_data,
     iree_host_size_t executable_format_capacity, char* executable_format,

@@ -363,6 +363,59 @@ TEST(ChainCommandCacheTest,
       &entry, &fresh_group, /*max_slots=*/24));
 }
 
+TEST(ChainCommandCacheTest,
+     MutableTransactionVariantsDoNotRewriteEachOtherByTemplateOrShape) {
+  uint32_t cached_control_data[] = {0xA, 0x1000, 0x0, 0xD};
+  uint32_t fresh_control_data[] = {0xA, 0x2000, 0x0, 0xD};
+  iree_hal_amdxdna_u32_list_t cached_control = {
+      cached_control_data,
+      IREE_ARRAYSIZE(cached_control_data),
+  };
+  iree_hal_amdxdna_u32_list_t fresh_control = {
+      fresh_control_data,
+      IREE_ARRAYSIZE(fresh_control_data),
+  };
+  auto cached_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  auto fresh_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  cached_cmd.src_executable_identity = 7;
+  fresh_cmd.src_executable_identity = 7;
+  cached_cmd.src_transaction_variant_identity = 11;
+  fresh_cmd.src_transaction_variant_identity = 22;
+  cached_cmd.src_entry_point = fresh_cmd.src_entry_point = 2;
+  cached_cmd.src_run_ordinal = fresh_cmd.src_run_ordinal = 3;
+  cached_cmd.src_asm_inst = &cached_control;
+  fresh_cmd.src_asm_inst = &fresh_control;
+  auto cached_group = MakeGroup1(&cached_cmd);
+  auto fresh_group = MakeGroup1(&fresh_cmd);
+  auto entry = MakeCacheEntry(&cached_group);
+
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_descriptor_matches(
+      &entry, &fresh_group, /*max_slots=*/24));
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_descriptor_template_matches(
+      &entry, &fresh_group, /*max_slots=*/24));
+  EXPECT_FALSE(iree_hal_amdxdna_chain_command_cache_shape_matches(
+      &entry, &fresh_group, /*max_slots=*/24));
+}
+
+TEST(ChainCommandCacheTest, MutableTransactionVariantReusesIdenticalContent) {
+  auto cached_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  auto fresh_cmd = MakeCmd(FakeBuffer(0x10), /*device_addr=*/0x80000000);
+  cached_cmd.src_executable_identity = 7;
+  fresh_cmd.src_executable_identity = 7;
+  cached_cmd.src_transaction_variant_identity = 11;
+  fresh_cmd.src_transaction_variant_identity = 11;
+  cached_cmd.src_entry_point = fresh_cmd.src_entry_point = 2;
+  cached_cmd.src_run_ordinal = fresh_cmd.src_run_ordinal = 3;
+  auto cached_group = MakeGroup1(&cached_cmd);
+  auto fresh_group = MakeGroup1(&fresh_cmd);
+  auto entry = MakeCacheEntry(&cached_group);
+
+  EXPECT_TRUE(iree_hal_amdxdna_chain_command_cache_descriptor_matches(
+      &entry, &fresh_group, /*max_slots=*/24));
+  EXPECT_TRUE(iree_hal_amdxdna_chain_command_cache_descriptor_template_matches(
+      &entry, &fresh_group, /*max_slots=*/24));
+}
+
 TEST(ChainCommandCacheTest, DeferredDescriptorReplacementOwnsFreshTxn) {
   uint32_t cached_control_data[] = {0xA, 0x1000, 0x0, 0xD};
   uint32_t fresh_control_data[] = {0xA, 0x2000, 0x0, 0xD};

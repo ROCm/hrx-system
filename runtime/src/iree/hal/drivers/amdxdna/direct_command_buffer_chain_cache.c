@@ -464,6 +464,8 @@ iree_status_t iree_hal_amdxdna_chain_cmd_replace_deferred_lists_owned(
                                   ? &cmd->owned_src_constant_patches
                                   : NULL;
   cmd->src_executable_identity = fresh->src_executable_identity;
+  cmd->src_transaction_variant_identity =
+      fresh->src_transaction_variant_identity;
   cmd->src_entry_point = fresh->src_entry_point;
   cmd->src_run_ordinal = fresh->src_run_ordinal;
   cmd->src_cu_idx = fresh->src_cu_idx;
@@ -813,11 +815,15 @@ static bool iree_hal_amdxdna_chain_cmd_same_control_program(
     const iree_hal_amdxdna_chain_cmd_t* rhs) {
   if (lhs->src_executable_identity != 0 || rhs->src_executable_identity != 0) {
     if (lhs->src_executable_identity != rhs->src_executable_identity ||
+        lhs->src_transaction_variant_identity !=
+            rhs->src_transaction_variant_identity ||
         lhs->src_entry_point != rhs->src_entry_point ||
         lhs->src_run_ordinal != rhs->src_run_ordinal) {
       return false;
     }
-    if (lhs->src_use_native_partial_elf || rhs->src_use_native_partial_elf) {
+    if (lhs->src_transaction_variant_identity != 0 ||
+        rhs->src_transaction_variant_identity != 0 ||
+        lhs->src_use_native_partial_elf || rhs->src_use_native_partial_elf) {
       return iree_hal_amdxdna_u32_list_equal(lhs->src_asm_inst,
                                              rhs->src_asm_inst) &&
              iree_hal_amdxdna_u32_list_equal(lhs->src_patches,
@@ -833,7 +839,9 @@ static bool iree_hal_amdxdna_chain_cmd_same_control_program(
 static bool iree_hal_amdxdna_chain_cmd_shape_matches(
     const iree_hal_amdxdna_chain_cmd_t* lhs,
     const iree_hal_amdxdna_chain_cmd_t* rhs) {
-  return lhs->ctrl_word_count == rhs->ctrl_word_count &&
+  return lhs->src_transaction_variant_identity == 0 &&
+         rhs->src_transaction_variant_identity == 0 &&
+         lhs->ctrl_word_count == rhs->ctrl_word_count &&
          lhs->binding_count == rhs->binding_count &&
          iree_hal_amdxdna_device_size_span_equal(
              lhs->binding_offsets, rhs->binding_offsets, lhs->binding_count) &&
@@ -893,13 +901,17 @@ bool iree_hal_amdxdna_chain_cmd_descriptor_matches(
   const bool same_immutable_source =
       lhs->src_executable_identity != 0 &&
       lhs->src_executable_identity == rhs->src_executable_identity &&
+      lhs->src_transaction_variant_identity ==
+          rhs->src_transaction_variant_identity &&
       lhs->src_entry_point == rhs->src_entry_point &&
       lhs->src_run_ordinal == rhs->src_run_ordinal;
   const bool has_immutable_source =
       lhs->src_executable_identity != 0 || rhs->src_executable_identity != 0;
   const bool same_program =
       (has_immutable_source && same_immutable_source &&
-       (!(lhs->src_use_native_partial_elf || rhs->src_use_native_partial_elf) ||
+       (!((lhs->src_transaction_variant_identity != 0 ||
+           rhs->src_transaction_variant_identity != 0) ||
+          lhs->src_use_native_partial_elf || rhs->src_use_native_partial_elf) ||
         (iree_hal_amdxdna_u32_list_equal(lhs->src_asm_inst,
                                          rhs->src_asm_inst) &&
          iree_hal_amdxdna_u32_list_equal(lhs->src_patches,
@@ -957,15 +969,27 @@ bool iree_hal_amdxdna_chain_cmd_descriptor_template_matches(
   const bool same_immutable_source =
       lhs->src_executable_identity != 0 &&
       lhs->src_executable_identity == rhs->src_executable_identity &&
+      lhs->src_transaction_variant_identity ==
+          rhs->src_transaction_variant_identity &&
       lhs->src_entry_point == rhs->src_entry_point &&
       lhs->src_run_ordinal == rhs->src_run_ordinal;
   const bool has_immutable_source =
       lhs->src_executable_identity != 0 || rhs->src_executable_identity != 0;
+  const bool mutable_variant = lhs->src_transaction_variant_identity != 0 ||
+                               rhs->src_transaction_variant_identity != 0;
+  const bool partial_elf =
+      lhs->src_use_native_partial_elf || rhs->src_use_native_partial_elf;
+  const bool same_mutable_template =
+      lhs->src_asm_inst && rhs->src_asm_inst &&
+      iree_hal_amdxdna_u32_list_equal(lhs->src_asm_inst, rhs->src_asm_inst) &&
+      iree_hal_amdxdna_u32_list_equal(lhs->src_patches, rhs->src_patches);
+  const bool same_partial_elf_shape =
+      lhs->src_asm_inst && rhs->src_asm_inst &&
+      lhs->src_asm_inst->count == rhs->src_asm_inst->count;
   const bool same_template =
       (has_immutable_source && same_immutable_source &&
-       (!(lhs->src_use_native_partial_elf || rhs->src_use_native_partial_elf) ||
-        (lhs->src_asm_inst && rhs->src_asm_inst &&
-         lhs->src_asm_inst->count == rhs->src_asm_inst->count))) ||
+       (mutable_variant ? same_mutable_template
+                        : (!partial_elf || same_partial_elf_shape))) ||
       (!has_immutable_source && lhs->src_asm_inst && rhs->src_asm_inst &&
        lhs->src_asm_inst->count == rhs->src_asm_inst->count);
   return same_template &&

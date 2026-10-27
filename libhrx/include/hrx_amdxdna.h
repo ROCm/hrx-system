@@ -194,6 +194,32 @@ HRX_API hrx_status_t hrx_amdxdna_executable_create(
     hrx_device_t device, const hrx_amdxdna_executable_create_params_t* params,
     hrx_executable_t* executable);
 
+// Registers a one-run |transaction| and returns an opaque non-zero token. This
+// cold-path call hashes, validates, and derives patch metadata. If the entry
+// point declares PDI or control-parameter relocations, every variant must
+// preserve that relocation schema and its transaction offsets; HRX applies the
+// executable's relocations to each variant.
+//
+// Registration is thread-safe, does not require stream synchronization, and
+// does not change what another stream dispatches. The executable must remain
+// live for this call and every dispatch. Tokens are owned by the executable and
+// must not be used with another executable or export. The bounded LRU cache may
+// evict cold variants; a later dispatch then returns NOT_FOUND and the caller
+// must register the transaction again.
+HRX_API hrx_status_t hrx_amdxdna_executable_cache_transaction(
+    hrx_executable_t executable, uint32_t export_ordinal,
+    hrx_const_byte_span_t transaction, uint64_t* out_variant);
+
+// Atomically records a dispatch against one cached transaction variant.
+// Concurrent streams may dispatch different variants of the same executable.
+// A successful call snapshots the variant into stream-owned recording storage,
+// so later cache eviction does not affect the recorded dispatch.
+HRX_API hrx_status_t hrx_amdxdna_stream_dispatch_variant(
+    hrx_stream_t stream, hrx_executable_t executable, uint32_t export_ordinal,
+    uint64_t variant, const hrx_dispatch_config_t* config,
+    const void* constants, size_t constants_size,
+    const hrx_buffer_ref_t* bindings, size_t binding_count, uint32_t flags);
+
 #ifdef __cplusplus
 }
 #endif

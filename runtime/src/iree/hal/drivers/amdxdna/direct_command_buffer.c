@@ -224,9 +224,10 @@ static void iree_hal_amdxdna_chain_cache_apply_shared_code_memory_budget(
   if (max_shared_code_memory_bytes != 0 && budget != 0) {
     const iree_host_size_t non_chain =
         live_context_image_bytes + single_cache_code_bytes;
-    const iree_host_size_t chain_real = real_dev_heap_used_bytes > non_chain
-                                            ? real_dev_heap_used_bytes - non_chain
-                                            : 0;
+    const iree_host_size_t chain_real =
+        real_dev_heap_used_bytes > non_chain
+            ? real_dev_heap_used_bytes - non_chain
+            : 0;
     if (chain_real > budget) {
       const iree_host_size_t overshoot = chain_real - budget;
       const iree_host_size_t accounted_chain =
@@ -968,8 +969,9 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_emit_chain_cmd(
     const iree_device_size_t* arg_lengths, size_t arg_count,
     iree_hal_amdxdna_native_c_cu_index_t cu_idx,
     iree_const_byte_span_t constants, bool use_native_partial_elf,
-    bool defer_build, uint64_t executable_identity, uint32_t entry_point,
-    uint32_t run_ordinal,
+    bool defer_build, bool control_descriptors_ephemeral,
+    uint64_t executable_identity, uint64_t transaction_variant_identity,
+    uint32_t entry_point, uint32_t run_ordinal,
     const iree_hal_amdxdna_ctrlcode_dpu_slice_t* dpu_slices,
     iree_host_size_t dpu_slice_count) {
   iree_hal_amdxdna_chain_cmd_t cmd;
@@ -979,11 +981,16 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_emit_chain_cmd(
       constant_patches, cu_idx, constants, use_native_partial_elf, arg_buffers,
       args, arg_offsets, arg_lengths, arg_count);
   cmd.src_executable_identity = executable_identity;
+  cmd.src_transaction_variant_identity = transaction_variant_identity;
   cmd.src_entry_point = entry_point;
   cmd.src_run_ordinal = run_ordinal;
   if (iree_status_is_ok(status)) {
     cmd.dpu_slices = dpu_slices;
     cmd.dpu_slice_count = dpu_slice_count;
+  }
+  if (iree_status_is_ok(status) && control_descriptors_ephemeral) {
+    status = iree_hal_amdxdna_chain_cmd_make_deferred_lists_owned(
+        command_buffer->host_allocator, &cmd);
   }
   if (iree_status_is_ok(status) && !defer_build) {
     status = iree_hal_amdxdna_make_npu_cmd(
@@ -1021,9 +1028,8 @@ static bool iree_hal_amdxdna_ctrl_inputs_changed(
   const bool constants_changed =
       owned_constant_count != fresh->src_constant_count ||
       (fresh->src_constant_count != 0 &&
-       (owned_constants == NULL ||
-        memcmp(owned_constants, fresh->src_constants,
-               fresh->src_constant_count) != 0));
+       (owned_constants == NULL || memcmp(owned_constants, fresh->src_constants,
+                                          fresh->src_constant_count) != 0));
   const bool addrs_changed =
       fresh->binding_count != 0 &&
       (cached_binding_count != fresh->binding_count ||
@@ -1120,8 +1126,7 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_start_npu_cmd(
   bool txn_changed = false;
   const bool control_changed = iree_hal_amdxdna_ctrl_inputs_changed(
       cached->src_asm_inst, cached->src_constants, cached->src_constant_count,
-      cached->binding_device_addrs, cached->binding_count, fresh,
-      &txn_changed);
+      cached->binding_device_addrs, cached->binding_count, fresh, &txn_changed);
   const bool bindings_changed = iree_hal_amdxdna_ctrl_bindings_changed(
       cached->binding_buffers, cached->binding_offsets, cached->binding_lengths,
       cached->binding_count, fresh);
@@ -1436,8 +1441,7 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_chain_partial_elf_cmd(
   bool txn_changed = false;
   const bool code_changed = iree_hal_amdxdna_ctrl_inputs_changed(
       cached->src_asm_inst, cached->src_constants, cached->src_constant_count,
-      cached->binding_device_addrs, cached->binding_count, fresh,
-      &txn_changed);
+      cached->binding_device_addrs, cached->binding_count, fresh, &txn_changed);
   const bool bindings_changed = iree_hal_amdxdna_ctrl_bindings_changed(
       cached->binding_buffers, cached->binding_offsets, cached->binding_lengths,
       cached->binding_count, fresh);
@@ -1599,7 +1603,8 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_accumulate_chained(
                                              : NULL,
         binding_buffers, binding_offsets, binding_lengths, bindings.count,
         cu_idx, constants, use_native_partial_elf, defer_build,
-        plan->executable->cache_identity, plan->entry_point,
+        plan->control_descriptors_ephemeral, plan->executable->cache_identity,
+        plan->transaction_variant_identity, plan->entry_point,
         /*run_ordinal=*/0, plan->kernel_params->dpu_slices,
         plan->kernel_params->dpu_slice_count);
   } else if (iree_status_is_ok(status)) {
@@ -1644,7 +1649,9 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_accumulate_chained(
                 : NULL,
             &reconf_buffer, &reconf_offset, &reconf_length,
             /*arg_count=*/1, cu_idx, constants, use_native_partial_elf,
-            defer_build, plan->executable->cache_identity, plan->entry_point,
+            defer_build, plan->control_descriptors_ephemeral,
+            plan->executable->cache_identity,
+            plan->transaction_variant_identity, plan->entry_point,
             /*run_ordinal=*/2 * i, /*dpu_slices=*/NULL,
             /*dpu_slice_count=*/0);
       }
@@ -1657,7 +1664,9 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_accumulate_chained(
                 : NULL,
             binding_buffers, binding_offsets, binding_lengths, bindings.count,
             cu_idx, constants, use_native_partial_elf, defer_build,
-            plan->executable->cache_identity, plan->entry_point,
+            plan->control_descriptors_ephemeral,
+            plan->executable->cache_identity,
+            plan->transaction_variant_identity, plan->entry_point,
             /*run_ordinal=*/2 * i + 1, /*dpu_slices=*/NULL,
             /*dpu_slice_count=*/0);
       }
@@ -1891,8 +1900,9 @@ static void iree_hal_amdxdna_bind_prepared_single_command_identity(
   iree_hal_amdxdna_single_command_cache_entry_set_executable_key(
       entry, cmd->src_executable_identity, cmd->src_entry_point,
       cmd->src_run_ordinal);
-  iree_status_ignore(iree_hal_amdxdna_single_command_cache_entry_store_constants(
-      cache, entry, cmd->src_constants, cmd->src_constant_count));
+  iree_status_ignore(
+      iree_hal_amdxdna_single_command_cache_entry_store_constants(
+          cache, entry, cmd->src_constants, cmd->src_constant_count));
 }
 
 static iree_status_t
@@ -1936,8 +1946,7 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
       }
     }
     if (iree_status_is_ok(status) &&
-        command_buffer->device->native_caps.max_shared_code_memory_bytes !=
-            0) {
+        command_buffer->device->native_caps.max_shared_code_memory_bytes != 0) {
       const iree_host_size_t max_bytes =
           command_buffer->device->native_caps.max_shared_code_memory_bytes;
       const iree_host_size_t reserve_bytes =
@@ -3455,6 +3464,8 @@ iree_status_t iree_hal_amdxdna_dispatch_plan_initialize(
   out_plan->executable = executable;
   out_plan->kernel_params = kernel_params;
   out_plan->entry_point = entry_point;
+  out_plan->transaction_variant_identity =
+      kernel_params->transaction_variant_identity;
   out_plan->control_code_count = kernel_params->asm_inst_runlist_count;
   out_plan->control_codes = kernel_params->asm_inst_runlist;
   out_plan->patch_table_count = kernel_params->patch_runlist_count;
@@ -3749,6 +3760,13 @@ iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch_plan(
   return status;
 }
 
+static iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch_variant(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_executable_t* base_executable,
+    iree_hal_executable_function_t function, uint64_t variant,
+    const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
+    iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags);
+
 static iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_executable_t* base_executable,
@@ -3758,6 +3776,13 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch(
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_validate_dispatch(&config, flags));
   if (iree_hal_amdxdna_dispatch_is_zero_workgroups(&config, flags)) {
     return iree_ok_status();
+  }
+  const uint32_t variant = (uint32_t)(function.value >> 32);
+  if (variant != 0) {
+    return iree_hal_amdxdna_direct_command_buffer_dispatch_variant(
+        base_command_buffer, base_executable,
+        iree_hal_executable_function_from_index((uint32_t)function.value),
+        variant, config, constants, bindings, flags);
   }
   iree_hal_amdxdna_direct_command_buffer* command_buffer =
       IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
@@ -3770,6 +3795,59 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch(
     status = iree_hal_amdxdna_direct_command_buffer_dispatch_plan(
         base_command_buffer, &plan, constants, bindings, flags);
   }
+  return status;
+}
+
+static iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch_variant(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_executable_t* base_executable,
+    iree_hal_executable_function_t function, uint64_t variant,
+    const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
+    iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags) {
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_validate_dispatch(&config, flags));
+  if (variant == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "transaction variant must be non-zero");
+  }
+  if (iree_hal_amdxdna_dispatch_is_zero_workgroups(&config, flags)) {
+    return iree_ok_status();
+  }
+  iree_hal_amdxdna_direct_command_buffer* command_buffer =
+      IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
+          base_command_buffer, iree_hal_amdxdna_direct_command_buffer_vtable,
+          iree_hal_amdxdna_direct_command_buffer);
+  iree_hal_amdxdna_executable* executable =
+      iree_hal_amdxdna_executable_cast(base_executable);
+  if (!iree_hal_executable_function_is_index_in_range(
+          function, executable->entry_point_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "transaction variant entry point is out of range");
+  }
+  const uint32_t entry_point = iree_hal_executable_function_index(function);
+  iree_hal_amdxdna_transaction_variant_t snapshot;
+  memset(&snapshot, 0, sizeof(snapshot));
+  iree_status_t status = iree_hal_amdxdna_executable_clone_transaction_variant(
+      executable, entry_point, variant, command_buffer->host_allocator,
+      &snapshot);
+  if (!iree_status_is_ok(status)) return status;
+
+  iree_hal_amdxdna_dispatch_plan_t plan;
+  status = iree_hal_amdxdna_dispatch_plan_initialize(
+      &command_buffer->device->native_caps, base_executable, function, &plan);
+  if (iree_status_is_ok(status)) {
+    plan.control_code_count = 1;
+    plan.control_codes = &snapshot.transaction;
+    plan.patch_table_count = 1;
+    plan.patch_tables = &snapshot.patches;
+    plan.constant_patch_table_count = 1;
+    plan.constant_patch_tables = &snapshot.constant_patches;
+    plan.transaction_variant_identity = variant;
+    plan.control_descriptors_ephemeral = true;
+    status = iree_hal_amdxdna_direct_command_buffer_dispatch_plan(
+        base_command_buffer, &plan, constants, bindings, flags);
+  }
+  iree_hal_amdxdna_transaction_variant_deinitialize(
+      command_buffer->host_allocator, &snapshot);
   return status;
 }
 

@@ -7,6 +7,7 @@
 
 #include <stdlib.h>
 
+#include "hrx_amdxdna.h"
 #include "hrx_internal.h"
 
 // Create a fresh one-shot command buffer for recording.
@@ -383,13 +384,11 @@ hrx_status_t hrx_stream_update_buffer(hrx_stream_t stream,
   HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
 }
 
-hrx_status_t hrx_stream_dispatch(hrx_stream_t stream,
-                                 hrx_executable_t executable,
-                                 uint32_t export_ordinal,
-                                 const hrx_dispatch_config_t* config,
-                                 const void* constants, size_t constants_size,
-                                 const hrx_buffer_ref_t* bindings,
-                                 size_t binding_count, uint32_t flags) {
+static hrx_status_t hrx_stream_dispatch_impl(
+    hrx_stream_t stream, hrx_executable_t executable, uint32_t export_ordinal,
+    uint64_t amdxdna_variant, const hrx_dispatch_config_t* config,
+    const void* constants, size_t constants_size,
+    const hrx_buffer_ref_t* bindings, size_t binding_count, uint32_t flags) {
   HRX_TRACE_ZONE_BEGIN(z0, "hrx_stream_dispatch");
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, export_ordinal);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, binding_count);
@@ -452,9 +451,12 @@ hrx_status_t hrx_stream_dispatch(hrx_stream_t stream,
       .values = hal_bindings,
   };
 
+  const uint64_t function_value = amdxdna_variant != 0
+                                      ? (amdxdna_variant << 32) | export_ordinal
+                                      : export_ordinal;
   iree_status_t iree_status = iree_hal_command_buffer_dispatch(
       stream->pending_cb, executable->hal_executable,
-      iree_hal_executable_function_from_index(export_ordinal), hal_config,
+      iree_hal_executable_function_from_value(function_value), hal_config,
       hal_constants, hal_binding_list, hal_flags);
   free(hal_bindings);
   if (!iree_status_is_ok(iree_status)) {
@@ -468,6 +470,46 @@ hrx_status_t hrx_stream_dispatch(hrx_stream_t stream,
 
   stream->has_pending_work = true;
   HRX_RETURN_AND_END_ZONE(z0, hrx_ok_status());
+}
+
+hrx_status_t hrx_stream_dispatch(hrx_stream_t stream,
+                                 hrx_executable_t executable,
+                                 uint32_t export_ordinal,
+                                 const hrx_dispatch_config_t* config,
+                                 const void* constants, size_t constants_size,
+                                 const hrx_buffer_ref_t* bindings,
+                                 size_t binding_count, uint32_t flags) {
+  return hrx_stream_dispatch_impl(
+      stream, executable, export_ordinal, /*amdxdna_variant=*/0, config,
+      constants, constants_size, bindings, binding_count, flags);
+}
+
+hrx_status_t hrx_amdxdna_stream_dispatch_variant(
+    hrx_stream_t stream, hrx_executable_t executable, uint32_t export_ordinal,
+    uint64_t variant, const hrx_dispatch_config_t* config,
+    const void* constants, size_t constants_size,
+    const hrx_buffer_ref_t* bindings, size_t binding_count, uint32_t flags) {
+  if (variant == 0 || variant > UINT32_MAX) {
+    return hrx_make_status(HRX_STATUS_INVALID_ARGUMENT,
+                           "transaction variant is invalid");
+  }
+#if !defined(HRX_HAS_IREE_AMDXDNA_DRIVER)
+  (void)stream;
+  (void)executable;
+  (void)export_ordinal;
+  (void)config;
+  (void)constants;
+  (void)constants_size;
+  (void)bindings;
+  (void)binding_count;
+  (void)flags;
+  return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
+                         "amdxdna driver not enabled");
+#else
+  return hrx_stream_dispatch_impl(stream, executable, export_ordinal, variant,
+                                  config, constants, constants_size, bindings,
+                                  binding_count, flags);
+#endif
 }
 
 hrx_status_t hrx_stream_execution_barrier(hrx_stream_t stream) {

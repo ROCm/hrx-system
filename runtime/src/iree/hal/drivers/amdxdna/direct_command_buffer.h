@@ -38,6 +38,10 @@ typedef struct iree_hal_amdxdna_dispatch_plan_t {
   iree_hal_amdxdna_executable* executable;
   iree_hal_amdxdna_kernel_params_t* kernel_params;
   uint32_t entry_point;
+  uint64_t transaction_variant_identity;
+  // True when control-code metadata is a call-local snapshot. Deferred chain
+  // descriptors clone it into command-buffer ownership while recording.
+  bool control_descriptors_ephemeral;
   iree_host_size_t control_code_count;
   const iree_hal_amdxdna_u32_list_t* control_codes;
   iree_host_size_t patch_table_count;

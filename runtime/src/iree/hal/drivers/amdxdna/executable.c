@@ -33,8 +33,8 @@ static const iree_string_view_t kAmdxdnaXclbinExecutableFormat = {
     "amdxdna-xclbin-fb", 17};
 static const iree_string_view_t kAmdxdnaXclbinExecutableCompatFormat = {
     "amdaie-amdxdna-xclbin-fb", 24};
-static const iree_string_view_t kAmdxdnaElfExecutableFormat = {
-    "amdxdna-elf-fb", 14};
+static const iree_string_view_t kAmdxdnaElfExecutableFormat = {"amdxdna-elf-fb",
+                                                               14};
 
 iree_string_view_t iree_hal_amdxdna_executable_format(void) {
   return kAmdxdnaPdiExecutableFormat;
@@ -64,6 +64,336 @@ void iree_hal_amdxdna_executable_bind_device(
       iree_hal_amdxdna_executable_cast(base_executable);
   if (!executable) return;
   executable->hal_device = device;
+}
+
+static void iree_hal_amdxdna_u32_list_deinitialize(
+    iree_allocator_t host_allocator, iree_hal_amdxdna_u32_list_t* list);
+
+static uint64_t iree_hal_amdxdna_transaction_identity(
+    iree_const_byte_span_t transaction) {
+  uint64_t identity = UINT64_C(14695981039346656037);
+  for (iree_host_size_t i = 0; i < transaction.data_length; ++i) {
+    identity ^= transaction.data[i];
+    identity *= UINT64_C(1099511628211);
+  }
+  return identity ? identity : 1;
+}
+
+static bool iree_hal_amdxdna_transaction_list_equal(
+    const iree_hal_amdxdna_u32_list_t* lhs,
+    iree_const_byte_span_t transaction) {
+  return lhs->count * sizeof(*lhs->data) == transaction.data_length &&
+         memcmp(lhs->data, transaction.data, transaction.data_length) == 0;
+}
+
+void iree_hal_amdxdna_transaction_variant_deinitialize(
+    iree_allocator_t host_allocator,
+    iree_hal_amdxdna_transaction_variant_t* variant) {
+  iree_hal_amdxdna_u32_list_deinitialize(host_allocator, &variant->transaction);
+  iree_hal_amdxdna_u32_list_deinitialize(host_allocator, &variant->patches);
+  iree_hal_amdxdna_write32_constant_patch_list_deinitialize(
+      host_allocator, &variant->constant_patches);
+  memset(variant, 0, sizeof(*variant));
+}
+
+static iree_status_t iree_hal_amdxdna_transaction_variant_build(
+    iree_allocator_t host_allocator, iree_const_byte_span_t transaction,
+    uint64_t content_hash,
+    iree_hal_amdxdna_transaction_variant_t* out_variant) {
+  memset(out_variant, 0, sizeof(*out_variant));
+  out_variant->content_hash = content_hash;
+  IREE_RETURN_IF_ERROR(iree_allocator_clone(
+      host_allocator, transaction, (void**)&out_variant->transaction.data));
+  out_variant->transaction.count = transaction.data_length / sizeof(uint32_t);
+  iree_hal_amdxdna_host_patch_table_t patch_table = {0};
+  iree_status_t status = iree_hal_amdxdna_build_host_patch_table(
+      host_allocator, transaction, &patch_table);
+  if (iree_status_is_ok(status)) {
+    out_variant->patches.data = patch_table.data;
+    out_variant->patches.count = patch_table.count;
+    status = iree_hal_amdxdna_build_write32_constant_patch_list(
+        host_allocator, out_variant->transaction.data,
+        out_variant->transaction.count, &out_variant->constant_patches);
+  }
+  if (iree_status_is_ok(status)) {
+    out_variant->storage_size =
+        sizeof(*out_variant) +
+        out_variant->transaction.count *
+            sizeof(*out_variant->transaction.data) +
+        out_variant->patches.count * sizeof(*out_variant->patches.data) +
+        out_variant->constant_patches.count *
+            sizeof(*out_variant->constant_patches.data);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amdxdna_transaction_variant_deinitialize(host_allocator,
+                                                      out_variant);
+  }
+  return status;
+}
+
+iree_status_t iree_hal_amdxdna_executable_clone_transaction_variant(
+    iree_hal_amdxdna_executable* executable, uint32_t entry_point,
+    uint64_t variant, iree_allocator_t host_allocator,
+    iree_hal_amdxdna_transaction_variant_t* out_variant) {
+  memset(out_variant, 0, sizeof(*out_variant));
+  if (!executable || variant == 0 ||
+      entry_point >= executable->entry_point_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "executable transaction variant is invalid");
+  }
+  iree_hal_amdxdna_kernel_params_t* params =
+      &executable->entry_points[entry_point];
+  iree_slim_mutex_lock(&executable->context_mutex);
+  const iree_hal_amdxdna_u32_list_t* transaction = NULL;
+  const iree_hal_amdxdna_u32_list_t* patches = NULL;
+  const iree_hal_amdxdna_write32_constant_patch_list_t* constant_patches = NULL;
+  uint64_t content_hash = 0;
+  if (params->transaction_variant_identity == variant) {
+    transaction = &params->asm_inst_runlist[0];
+    patches = &params->patch_runlist[0];
+    constant_patches = &params->constant_patch_runlist[0];
+    content_hash = params->transaction_variant_content_hash;
+  } else {
+    for (iree_host_size_t i = 0; i < params->transaction_variant_count; ++i) {
+      iree_hal_amdxdna_transaction_variant_t* candidate =
+          &params->transaction_variants[i];
+      if (candidate->identity != variant) continue;
+      candidate->last_use = ++params->transaction_variant_use_clock;
+      transaction = &candidate->transaction;
+      patches = &candidate->patches;
+      constant_patches = &candidate->constant_patches;
+      content_hash = candidate->content_hash;
+      break;
+    }
+  }
+  iree_status_t status =
+      transaction ? iree_allocator_clone(
+                        host_allocator,
+                        iree_make_const_byte_span(
+                            transaction->data,
+                            transaction->count * sizeof(*transaction->data)),
+                        (void**)&out_variant->transaction.data)
+                  : iree_make_status(IREE_STATUS_NOT_FOUND,
+                                     "transaction variant is not cached");
+  if (iree_status_is_ok(status)) {
+    out_variant->transaction.count = transaction->count;
+    if (patches->count != 0) {
+      status = iree_allocator_clone(
+          host_allocator,
+          iree_make_const_byte_span(patches->data,
+                                    patches->count * sizeof(*patches->data)),
+          (void**)&out_variant->patches.data);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    out_variant->patches.count = patches->count;
+    if (constant_patches->count != 0) {
+      status = iree_allocator_clone(
+          host_allocator,
+          iree_make_const_byte_span(
+              constant_patches->data,
+              constant_patches->count * sizeof(*constant_patches->data)),
+          (void**)&out_variant->constant_patches.data);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    out_variant->constant_patches.count = constant_patches->count;
+    out_variant->identity = variant;
+    out_variant->content_hash = content_hash;
+    out_variant->storage_size =
+        sizeof(*out_variant) +
+        out_variant->transaction.count *
+            sizeof(*out_variant->transaction.data) +
+        out_variant->patches.count * sizeof(*out_variant->patches.data) +
+        out_variant->constant_patches.count *
+            sizeof(*out_variant->constant_patches.data);
+  }
+  iree_slim_mutex_unlock(&executable->context_mutex);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amdxdna_transaction_variant_deinitialize(host_allocator,
+                                                      out_variant);
+  }
+  return status;
+}
+
+iree_status_t iree_hal_amdxdna_executable_cache_transaction(
+    iree_hal_executable_t* base_executable, uint32_t entry_point,
+    iree_const_byte_span_t transaction, uint64_t* out_variant) {
+  if (!base_executable || !out_variant || !transaction.data ||
+      transaction.data_length == 0 ||
+      transaction.data_length % sizeof(uint32_t) != 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "executable, transaction, or out_variant is invalid");
+  }
+  *out_variant = 0;
+  iree_hal_amdxdna_executable* executable =
+      iree_hal_amdxdna_executable_cast(base_executable);
+  if (entry_point >= executable->entry_point_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "entry point %u is out of range [0, %" PRIhsz ")",
+                            entry_point, executable->entry_point_count);
+  }
+  iree_hal_amdxdna_kernel_params_t* params =
+      &executable->entry_points[entry_point];
+  if (params->asm_inst_runlist_count != 1 || params->patch_runlist_count != 1 ||
+      params->constant_patch_runlist_count != 1 ||
+      params->pdi_relocation_runlist_count != 1 ||
+      params->control_parameter_relocation_runlist_count != 1 ||
+      params->reconf_data_runlist_count != 0 || params->dpu_slice_count != 0) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "transaction variants require one run with no reconfiguration or "
+        "paged-ELF slices");
+  }
+  const iree_host_size_t transaction_size = transaction.data_length;
+  for (iree_host_size_t i = 0; i < params->pdi_relocation_runlist[0].count;
+       ++i) {
+    const uint32_t offset =
+        params->pdi_relocation_runlist[0].data[i].transaction_offset;
+    if (transaction_size < sizeof(uint64_t) ||
+        offset > transaction_size - sizeof(uint64_t)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "transaction variant PDI relocation offset %u is out of range for "
+          "%" PRIhsz " bytes",
+          offset, transaction_size);
+    }
+  }
+  for (iree_host_size_t i = 0;
+       i < params->control_parameter_relocation_runlist[0].count; ++i) {
+    const uint32_t offset = params->control_parameter_relocation_runlist[0]
+                                .data[i]
+                                .transaction_offset;
+    if (transaction_size < sizeof(uint64_t) ||
+        offset > transaction_size - sizeof(uint64_t)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "transaction variant control-parameter relocation offset %u is out "
+          "of range for %" PRIhsz " bytes",
+          offset, transaction_size);
+    }
+  }
+
+  const uint64_t content_hash =
+      iree_hal_amdxdna_transaction_identity(transaction);
+  iree_slim_mutex_lock(&executable->context_mutex);
+  if (iree_hal_amdxdna_transaction_list_equal(&params->asm_inst_runlist[0],
+                                              transaction)) {
+    if (params->transaction_variant_identity == 0) {
+      if (executable->transaction_variant_next_token == UINT32_MAX) {
+        iree_slim_mutex_unlock(&executable->context_mutex);
+        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "transaction variant tokens exhausted");
+      }
+      params->transaction_variant_identity =
+          ++executable->transaction_variant_next_token;
+      params->transaction_variant_content_hash = content_hash;
+    }
+    *out_variant = params->transaction_variant_identity;
+    iree_slim_mutex_unlock(&executable->context_mutex);
+    return iree_ok_status();
+  }
+  for (iree_host_size_t i = 0; i < params->transaction_variant_count; ++i) {
+    iree_hal_amdxdna_transaction_variant_t* variant =
+        &params->transaction_variants[i];
+    if (variant->content_hash != content_hash) continue;
+    if (!iree_hal_amdxdna_transaction_list_equal(&variant->transaction,
+                                                 transaction)) {
+      continue;
+    }
+    variant->last_use = ++params->transaction_variant_use_clock;
+    *out_variant = variant->identity;
+    iree_slim_mutex_unlock(&executable->context_mutex);
+    return iree_ok_status();
+  }
+  iree_slim_mutex_unlock(&executable->context_mutex);
+
+  iree_hal_amdxdna_transaction_variant_t new_variant;
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_transaction_variant_build(
+      executable->host_allocator, transaction, content_hash, &new_variant));
+
+  iree_slim_mutex_lock(&executable->context_mutex);
+  // Registration may race registration of the same bytes; retain one copy.
+  for (iree_host_size_t i = 0; i < params->transaction_variant_count; ++i) {
+    iree_hal_amdxdna_transaction_variant_t* variant =
+        &params->transaction_variants[i];
+    if (variant->content_hash != content_hash) continue;
+    if (iree_hal_amdxdna_transaction_list_equal(&variant->transaction,
+                                                transaction)) {
+      variant->last_use = ++params->transaction_variant_use_clock;
+      *out_variant = variant->identity;
+      iree_slim_mutex_unlock(&executable->context_mutex);
+      iree_hal_amdxdna_transaction_variant_deinitialize(
+          executable->host_allocator, &new_variant);
+      return iree_ok_status();
+    }
+  }
+  if (executable->transaction_variant_next_token == UINT32_MAX) {
+    iree_slim_mutex_unlock(&executable->context_mutex);
+    iree_hal_amdxdna_transaction_variant_deinitialize(
+        executable->host_allocator, &new_variant);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "transaction variant tokens exhausted");
+  }
+  if (new_variant.storage_size > kAmdxdnaTransactionVariantCacheByteBudget) {
+    iree_slim_mutex_unlock(&executable->context_mutex);
+    iree_hal_amdxdna_transaction_variant_deinitialize(
+        executable->host_allocator, &new_variant);
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "transaction variant requires %" PRIhsz
+        " bytes and exceeds the per-entry-point budget of %u bytes",
+        new_variant.storage_size,
+        (unsigned)kAmdxdnaTransactionVariantCacheByteBudget);
+  }
+  new_variant.identity = ++executable->transaction_variant_next_token;
+  while (params->transaction_variant_storage_size >
+         kAmdxdnaTransactionVariantCacheByteBudget - new_variant.storage_size) {
+    iree_host_size_t slot_index = 0;
+    for (iree_host_size_t i = 1; i < params->transaction_variant_count; ++i) {
+      if (params->transaction_variants[i].last_use <
+          params->transaction_variants[slot_index].last_use) {
+        slot_index = i;
+      }
+    }
+    params->transaction_variant_storage_size -=
+        params->transaction_variants[slot_index].storage_size;
+    iree_hal_amdxdna_transaction_variant_deinitialize(
+        executable->host_allocator, &params->transaction_variants[slot_index]);
+    --params->transaction_variant_count;
+    if (slot_index != params->transaction_variant_count) {
+      params->transaction_variants[slot_index] =
+          params->transaction_variants[params->transaction_variant_count];
+      memset(&params->transaction_variants[params->transaction_variant_count],
+             0, sizeof(params->transaction_variants[0]));
+    }
+  }
+  if (params->transaction_variant_count ==
+      params->transaction_variant_capacity) {
+    iree_host_size_t new_capacity =
+        params->transaction_variant_capacity
+            ? params->transaction_variant_capacity * 2
+            : 8;
+    iree_status_t status =
+        iree_allocator_realloc_array(executable->host_allocator, new_capacity,
+                                     sizeof(*params->transaction_variants),
+                                     (void**)&params->transaction_variants);
+    if (!iree_status_is_ok(status)) {
+      iree_slim_mutex_unlock(&executable->context_mutex);
+      iree_hal_amdxdna_transaction_variant_deinitialize(
+          executable->host_allocator, &new_variant);
+      return status;
+    }
+    params->transaction_variant_capacity = new_capacity;
+  }
+  const iree_host_size_t slot_index = params->transaction_variant_count++;
+  new_variant.last_use = ++params->transaction_variant_use_clock;
+  params->transaction_variants[slot_index] = new_variant;
+  params->transaction_variant_storage_size += new_variant.storage_size;
+  *out_variant = new_variant.identity;
+  iree_slim_mutex_unlock(&executable->context_mutex);
+  return iree_ok_status();
 }
 
 iree_hal_amdxdna_native_context_t*
@@ -240,6 +570,20 @@ static void iree_hal_amdxdna_kernel_params_deinitialize(
   iree_allocator_free(host_allocator, params->constant_patch_runlist);
   params->constant_patch_runlist = NULL;
   params->constant_patch_runlist_count = 0;
+  for (iree_host_size_t i = 0; i < params->transaction_variant_count; ++i) {
+    iree_hal_amdxdna_transaction_variant_t* variant =
+        &params->transaction_variants[i];
+    iree_hal_amdxdna_u32_list_deinitialize(host_allocator,
+                                           &variant->transaction);
+    iree_hal_amdxdna_u32_list_deinitialize(host_allocator, &variant->patches);
+    iree_hal_amdxdna_write32_constant_patch_list_deinitialize(
+        host_allocator, &variant->constant_patches);
+  }
+  iree_allocator_free(host_allocator, params->transaction_variants);
+  params->transaction_variants = NULL;
+  params->transaction_variant_count = 0;
+  params->transaction_variant_capacity = 0;
+  params->transaction_variant_storage_size = 0;
   iree_allocator_free(host_allocator, params->dpu_slices);
   params->dpu_slices = NULL;
   params->dpu_slice_count = 0;
@@ -876,7 +1220,8 @@ static iree_status_t iree_hal_amdxdna_elf_flatbuffer_verify(
   size_t module_count = iree_hal_amdxdna_elf_ModuleDef_vec_len(modules);
   if (module_count == 0) {
     IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "no ELF module present");
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "no ELF module present");
   }
   for (size_t i = 0; i < module_count; ++i) {
     iree_hal_amdxdna_elf_ModuleDef_table_t module =

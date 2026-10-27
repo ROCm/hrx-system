@@ -12,6 +12,7 @@
 #if defined(HRX_HAS_IREE_AMDXDNA_DRIVER)
 #include "iree/base/internal/flatcc/building.h"
 #include "iree/hal/drivers/amdxdna/direct_command_buffer_planning.h"
+#include "iree/hal/drivers/amdxdna/executable.h"
 #include "iree/schemas/amdxdna_xclbin_executable_def_builder.h"
 
 static bool hrx_amdxdna_span_is_valid(hrx_const_byte_span_t span) {
@@ -856,4 +857,27 @@ hrx_status_t hrx_amdxdna_executable_create(
   }
   hrx_host_allocator_free(host_allocator, executable_data);
   return status;
+}
+
+hrx_status_t hrx_amdxdna_executable_cache_transaction(
+    hrx_executable_t executable, uint32_t export_ordinal,
+    hrx_const_byte_span_t transaction, uint64_t* out_variant) {
+  if (!executable || !out_variant ||
+      (transaction.data_length != 0 && !transaction.data)) {
+    return hrx_make_status(
+        HRX_STATUS_INVALID_ARGUMENT,
+        "executable, transaction, or out_variant is invalid");
+  }
+  *out_variant = 0;
+#if !defined(HRX_HAS_IREE_AMDXDNA_DRIVER)
+  (void)export_ordinal;
+  (void)transaction;
+  return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
+                         "amdxdna driver not enabled");
+#else
+  return hrx_status_from_iree(iree_hal_amdxdna_executable_cache_transaction(
+      executable->hal_executable, export_ordinal,
+      iree_make_const_byte_span(transaction.data, transaction.data_length),
+      out_variant));
+#endif  // HRX_HAS_IREE_AMDXDNA_DRIVER
 }

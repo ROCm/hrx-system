@@ -66,6 +66,9 @@ typedef struct iree_hal_amdxdna_chain_cmd_t {
   const iree_hal_amdxdna_u32_list_t* src_patches;
   const iree_hal_amdxdna_write32_constant_patch_list_t* src_constant_patches;
   uint64_t src_executable_identity;
+  // Non-zero for dynamically registered transaction variants. Re-registering
+  // identical bytes produces the same identity while the variant is cached.
+  uint64_t src_transaction_variant_identity;
   uint32_t src_entry_point;
   uint32_t src_run_ordinal;
   // Device-cache entries clone executable-owned template lists here before

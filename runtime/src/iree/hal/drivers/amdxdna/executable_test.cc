@@ -7,6 +7,7 @@
 #include "iree/hal/drivers/amdxdna/executable.h"
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -43,6 +44,30 @@ struct TestEntryPointDef {
   int32_t pdi_index = -1;
   std::vector<TestRunDef> runs;
 };
+
+static std::vector<uint32_t> MakeWrite32Txn(uint32_t value,
+                                            size_t total_bytes = 40) {
+  const uint32_t op_count = static_cast<uint32_t>((total_bytes - 16) / 24);
+  total_bytes = 16 + op_count * 24;
+  std::vector<uint32_t> txn(total_bytes / sizeof(uint32_t), 0);
+  txn[2] = op_count;
+  uint8_t* bytes = reinterpret_cast<uint8_t*>(txn.data());
+  const uint32_t op_size = 24;
+  for (uint32_t i = 0; i < op_count; ++i) {
+    const size_t offset = 16 + i * op_size;
+    bytes[offset] = 0;  // WRITE32
+    const uint32_t op_value = value + i;
+    std::memcpy(bytes + offset + 16, &op_value, sizeof(op_value));
+    std::memcpy(bytes + offset + 20, &op_size, sizeof(op_size));
+  }
+  return txn;
+}
+
+static iree_const_byte_span_t TransactionSpan(
+    const std::vector<uint32_t>& transaction) {
+  return iree_make_const_byte_span(transaction.data(),
+                                   transaction.size() * sizeof(transaction[0]));
+}
 
 static flatbuffers_uint32_vec_ref_t CreateUInt32Vec(
     flatbuffers_builder_t* builder, const std::vector<uint32_t>& values) {
@@ -312,6 +337,86 @@ TEST(ExecutableTest, ParsesSharedPdiAndRunDefinitions) {
   EXPECT_EQ(iree_status_code(missing_status), IREE_STATUS_NOT_FOUND);
   iree_status_free(missing_status);
   EXPECT_FALSE(iree_hal_executable_function_is_valid(missing_function));
+
+  iree_hal_executable_release(base_executable);
+}
+
+TEST(ExecutableTest, TransactionVariantIdentityBudgetAndEviction) {
+  const auto base0 = MakeWrite32Txn(0);
+  const auto base1 = MakeWrite32Txn(1);
+  std::vector<uint8_t> executable_data;
+  IREE_ASSERT_OK(MakeExecutable(
+      /*pdis=*/{{0x50, 0x44, 0x49, 0x00}},
+      /*entry_points=*/
+      {
+          {"entry0", 0, {{base0, {}, {}}}},
+          {"entry1", 0, {{base1, {}, {}}}},
+      },
+      &executable_data));
+
+  iree_hal_executable_load_params_t executable_params;
+  iree_hal_executable_load_params_initialize(&executable_params);
+  executable_params.executable_data =
+      iree_make_const_byte_span(executable_data.data(), executable_data.size());
+  iree_hal_executable_t* base_executable = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdxdna_native_executable_create(
+      /*native_device=*/nullptr, &executable_params, iree_allocator_system(),
+      &base_executable));
+  iree_hal_amdxdna_executable* executable =
+      iree_hal_amdxdna_executable_cast(base_executable);
+
+  uint64_t base_token = 0;
+  IREE_ASSERT_OK(iree_hal_amdxdna_executable_cache_transaction(
+      base_executable, 0, TransactionSpan(base0), &base_token));
+  uint64_t duplicate_token = 0;
+  IREE_ASSERT_OK(iree_hal_amdxdna_executable_cache_transaction(
+      base_executable, 0, TransactionSpan(base0), &duplicate_token));
+  EXPECT_NE(base_token, 0u);
+  EXPECT_EQ(duplicate_token, base_token);
+
+  const auto variant = MakeWrite32Txn(2);
+  uint64_t variant_token = 0;
+  IREE_ASSERT_OK(iree_hal_amdxdna_executable_cache_transaction(
+      base_executable, 0, TransactionSpan(variant), &variant_token));
+  EXPECT_NE(variant_token, base_token);
+
+  iree_hal_amdxdna_transaction_variant_t snapshot = {};
+  IREE_ASSERT_OK(iree_hal_amdxdna_executable_clone_transaction_variant(
+      executable, 0, variant_token, iree_allocator_system(), &snapshot));
+  EXPECT_EQ(ToVector(snapshot.transaction), variant);
+  iree_hal_amdxdna_transaction_variant_deinitialize(iree_allocator_system(),
+                                                    &snapshot);
+
+  iree_status_t wrong_export_status =
+      iree_hal_amdxdna_executable_clone_transaction_variant(
+          executable, 1, variant_token, iree_allocator_system(), &snapshot);
+  EXPECT_EQ(iree_status_code(wrong_export_status), IREE_STATUS_NOT_FOUND);
+  iree_status_free(wrong_export_status);
+
+  for (uint32_t i = 3; i < 24; ++i) {
+    const auto transaction = MakeWrite32Txn(i);
+    uint64_t token = 0;
+    IREE_ASSERT_OK(iree_hal_amdxdna_executable_cache_transaction(
+        base_executable, 0, TransactionSpan(transaction), &token));
+  }
+  EXPECT_GT(executable->entry_points[0].transaction_variant_count, 16u);
+
+  uint64_t first_large_token = 0;
+  for (uint32_t i = 0; i < 10; ++i) {
+    const auto transaction = MakeWrite32Txn(100 + i, 1024 * 1024);
+    uint64_t token = 0;
+    IREE_ASSERT_OK(iree_hal_amdxdna_executable_cache_transaction(
+        base_executable, 0, TransactionSpan(transaction), &token));
+    if (i == 0) first_large_token = token;
+  }
+  EXPECT_LE(
+      executable->entry_points[0].transaction_variant_storage_size,
+      static_cast<iree_host_size_t>(kAmdxdnaTransactionVariantCacheByteBudget));
+  iree_status_t evicted_status =
+      iree_hal_amdxdna_executable_clone_transaction_variant(
+          executable, 0, first_large_token, iree_allocator_system(), &snapshot);
+  EXPECT_EQ(iree_status_code(evicted_status), IREE_STATUS_NOT_FOUND);
+  iree_status_free(evicted_status);
 
   iree_hal_executable_release(base_executable);
 }

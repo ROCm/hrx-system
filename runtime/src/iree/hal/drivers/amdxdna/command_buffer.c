@@ -322,8 +322,9 @@ static iree_status_t iree_hal_amdxdna_command_buffer_atomic_wait(
   (void)target_stage_mask;
   (void)target_ref;
   (void)params;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "amdxdna command buffers do not support atomic waits");
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "amdxdna command buffers do not support atomic waits");
 }
 
 static iree_status_t iree_hal_amdxdna_command_buffer_atomic_store(
@@ -491,6 +492,9 @@ static iree_status_t iree_hal_amdxdna_apply_collective(
 typedef struct iree_hal_amdxdna_cmd_dispatch_t {
   iree_hal_amdxdna_cmd_header_t header;
   iree_hal_amdxdna_dispatch_plan_t plan;
+  iree_hal_amdxdna_u32_list_t variant_transaction;
+  iree_hal_amdxdna_u32_list_t variant_patches;
+  iree_hal_amdxdna_write32_constant_patch_list_t variant_constant_patches;
   iree_hal_dispatch_config_t config;
   iree_const_byte_span_t constants;
   iree_hal_buffer_ref_list_t bindings;
@@ -509,9 +513,12 @@ static iree_status_t iree_hal_amdxdna_command_buffer_dispatch(
   }
   iree_hal_amdxdna_command_buffer_t* command_buffer =
       iree_hal_amdxdna_command_buffer_cast(base_command_buffer);
+  const uint32_t transaction_variant = (uint32_t)(export_ordinal.value >> 32);
+  const iree_hal_executable_function_t entry_point =
+      iree_hal_executable_function_from_index((uint32_t)export_ordinal.value);
   iree_hal_amdxdna_dispatch_plan_t plan;
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_dispatch_plan_initialize(
-      &command_buffer->native_caps, executable, export_ordinal, &plan));
+      &command_buffer->native_caps, executable, entry_point, &plan));
   iree_host_size_t resource_count = 0;
   const void* resources[2] = {NULL, NULL};
   resources[resource_count++] = executable;
@@ -525,20 +532,55 @@ static iree_status_t iree_hal_amdxdna_command_buffer_dispatch(
       command_buffer, bindings.count, bindings.values,
       offsetof(iree_hal_buffer_ref_t, buffer), sizeof(iree_hal_buffer_ref_t)));
 
+  iree_hal_amdxdna_transaction_variant_t variant_snapshot;
+  memset(&variant_snapshot, 0, sizeof(variant_snapshot));
+  if (transaction_variant != 0) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_executable_clone_transaction_variant(
+        plan.executable, plan.entry_point, transaction_variant,
+        command_buffer->host_allocator, &variant_snapshot));
+    plan.control_code_count = 1;
+    plan.control_codes = &variant_snapshot.transaction;
+    plan.patch_table_count = 1;
+    plan.patch_tables = &variant_snapshot.patches;
+    plan.constant_patch_table_count = 1;
+    plan.constant_patch_tables = &variant_snapshot.constant_patches;
+    plan.transaction_variant_identity = transaction_variant;
+  }
+
   iree_host_size_t total_size = 0;
   iree_host_size_t constants_offset = 0;
   iree_host_size_t bindings_offset = 0;
-  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+  iree_host_size_t variant_transaction_offset = 0;
+  iree_host_size_t variant_patches_offset = 0;
+  iree_host_size_t variant_constant_patches_offset = 0;
+  iree_status_t status = IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amdxdna_cmd_dispatch_t), &total_size,
       IREE_STRUCT_FIELD_ALIGNED(constants.data_length, uint8_t,
                                 iree_max_align_t, &constants_offset),
       IREE_STRUCT_FIELD_ALIGNED(bindings.count, iree_hal_buffer_ref_t, 1,
-                                &bindings_offset)));
+                                &bindings_offset),
+      IREE_STRUCT_FIELD_ALIGNED(variant_snapshot.transaction.count, uint32_t, 1,
+                                &variant_transaction_offset),
+      IREE_STRUCT_FIELD_ALIGNED(variant_snapshot.patches.count, uint32_t, 1,
+                                &variant_patches_offset),
+      IREE_STRUCT_FIELD_ALIGNED(variant_snapshot.constant_patches.count,
+                                iree_hal_amdxdna_write32_constant_patch_site_t,
+                                1, &variant_constant_patches_offset));
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amdxdna_transaction_variant_deinitialize(
+        command_buffer->host_allocator, &variant_snapshot);
+    return status;
+  }
 
   iree_hal_amdxdna_cmd_dispatch_t* cmd = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_cmd_list_append(
-      &command_buffer->cmd_list, IREE_HAL_AMDXDNA_CMD_DISPATCH, total_size,
-      (void**)&cmd));
+  status = iree_hal_amdxdna_cmd_list_append(&command_buffer->cmd_list,
+                                            IREE_HAL_AMDXDNA_CMD_DISPATCH,
+                                            total_size, (void**)&cmd);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amdxdna_transaction_variant_deinitialize(
+        command_buffer->host_allocator, &variant_snapshot);
+    return status;
+  }
   cmd->plan = plan;
   cmd->config = config;
   cmd->flags = flags;
@@ -551,6 +593,39 @@ static iree_status_t iree_hal_amdxdna_command_buffer_dispatch(
   memcpy(cmd_base + bindings_offset, bindings.values,
          bindings.count * sizeof(bindings.values[0]));
   cmd->bindings.values = (iree_hal_buffer_ref_t*)(cmd_base + bindings_offset);
+  if (transaction_variant != 0) {
+    cmd->variant_transaction.count = variant_snapshot.transaction.count;
+    cmd->variant_transaction.data =
+        (uint32_t*)(cmd_base + variant_transaction_offset);
+    if (variant_snapshot.transaction.count != 0) {
+      memcpy(cmd->variant_transaction.data, variant_snapshot.transaction.data,
+             variant_snapshot.transaction.count *
+                 sizeof(*variant_snapshot.transaction.data));
+    }
+    cmd->variant_patches.count = variant_snapshot.patches.count;
+    cmd->variant_patches.data = (uint32_t*)(cmd_base + variant_patches_offset);
+    if (variant_snapshot.patches.count != 0) {
+      memcpy(cmd->variant_patches.data, variant_snapshot.patches.data,
+             variant_snapshot.patches.count *
+                 sizeof(*variant_snapshot.patches.data));
+    }
+    cmd->variant_constant_patches.count =
+        variant_snapshot.constant_patches.count;
+    cmd->variant_constant_patches.data =
+        (iree_hal_amdxdna_write32_constant_patch_site_t*)(cmd_base +
+                                                          variant_constant_patches_offset);
+    if (variant_snapshot.constant_patches.count != 0) {
+      memcpy(cmd->variant_constant_patches.data,
+             variant_snapshot.constant_patches.data,
+             variant_snapshot.constant_patches.count *
+                 sizeof(*variant_snapshot.constant_patches.data));
+    }
+    cmd->plan.control_codes = &cmd->variant_transaction;
+    cmd->plan.patch_tables = &cmd->variant_patches;
+    cmd->plan.constant_patch_tables = &cmd->variant_constant_patches;
+  }
+  iree_hal_amdxdna_transaction_variant_deinitialize(
+      command_buffer->host_allocator, &variant_snapshot);
   return iree_ok_status();
 }
 
