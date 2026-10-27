@@ -96,7 +96,9 @@ iree_status_t loom_ir_clone_region_blocks(loom_builder_t* builder,
 // through |rewriter| so use lists, type-use lists, effect summaries, and
 // worklist state remain coherent. Result values and nested block arguments keep
 // their existing IDs; this helper is for same-module move/consume transforms,
-// not cross-module cloning.
+// not cross-module cloning. When |remap| allows unmapped values, these
+// preserved IDs require no correspondence storage; strict remaps install
+// identity entries.
 iree_status_t loom_ir_remap_op_references(loom_rewriter_t* rewriter,
                                           loom_op_t* op,
                                           loom_ir_remap_t* remap);

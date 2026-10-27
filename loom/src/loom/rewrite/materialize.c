@@ -705,7 +705,11 @@ static iree_status_t loom_ir_remap_map_value_to_self(loom_ir_remap_t* remap,
         "cannot move value %%%u through remap to distinct value %%%u",
         (unsigned)value_id, (unsigned)mapped_value);
   }
-  return loom_ir_remap_map_value(remap, value_id, value_id);
+  // Same-module moves preserve value IDs. A remap that already preserves
+  // unmapped values needs correspondence only for the captures being changed.
+  return remap->allow_unmapped_values
+             ? iree_ok_status()
+             : loom_ir_remap_map_value(remap, value_id, value_id);
 }
 
 static iree_status_t loom_ir_remap_block_arg_values_to_self(

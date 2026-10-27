@@ -842,7 +842,10 @@ TEST_F(MaterializeTest, ClonesBlockOpsCanOmitTerminators) {
   ASSERT_TRUE(loom_test_constant_isa(loom_block_op(target_block, 0)));
 }
 
-TEST_F(MaterializeTest, MovesBlockOpsAndRemapsCapturedBlockArgs) {
+class MaterializeMoveTest : public MaterializeTest,
+                            public ::testing::WithParamInterface<bool> {};
+
+TEST_P(MaterializeMoveTest, MovesBlockOpsAndRemapsCapturedBlockArgs) {
   loom_type_t f32_type = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
   loom_type_t tile_type = loom_type_shaped_1d(
       LOOM_TYPE_TILE, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(4), 0);
@@ -882,8 +885,7 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsCapturedBlockArgs) {
 
   loom_rewriter_t rewriter = {};
   loom_rewriter_initialize(&rewriter, source_, &remap_arena_);
-  loom_ir_remap_t remap =
-      InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
+  loom_ir_remap_t remap = InitializeSameModuleRemap(GetParam());
   IREE_ASSERT_OK(loom_ir_remap_map_value(&remap, element, replacement));
   loom_ir_move_block_options_t options = {
       .omit_terminators = true,
@@ -896,6 +898,10 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsCapturedBlockArgs) {
   EXPECT_EQ(neg_op->parent_block, loom_module_block(source_));
   EXPECT_EQ(neg_op->parent_op, nullptr);
   EXPECT_EQ(loom_test_neg_input(neg_op), replacement);
+  // The moved definition retains its ID. Permissive remaps store only the
+  // changed capture; strict remaps also retain the identity correspondence.
+  EXPECT_EQ(loom_test_neg_result(neg_op), negated);
+  EXPECT_EQ(remap.mapped_value_count, GetParam() ? 1u : 2u);
   EXPECT_EQ(neg_op->next_op, sentinel_op);
   ASSERT_EQ(loom_region_entry_block(body)->op_count, 1u);
   EXPECT_EQ(loom_region_entry_block(body)->first_op, yield_op);
@@ -906,6 +912,9 @@ TEST_F(MaterializeTest, MovesBlockOpsAndRemapsCapturedBlockArgs) {
   EXPECT_FALSE(iree_any_bit_set(neg_op->flags, LOOM_OP_FLAG_DEAD));
   loom_rewriter_deinitialize(&rewriter);
 }
+
+INSTANTIATE_TEST_SUITE_P(ValueCorrespondence, MaterializeMoveTest,
+                         ::testing::Values(false, true));
 
 TEST_F(MaterializeTest, MovesBlockOpsAndRemapsDynamicResultTypes) {
   loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
