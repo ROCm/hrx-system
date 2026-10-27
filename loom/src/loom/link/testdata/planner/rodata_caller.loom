@@ -1,0 +1,9 @@
+global.rodata.decl @table
+
+global.rodata.decl @artifact_data
+
+func.def public @entry() -> (buffer, buffer) {
+  %table = global.load @table : buffer
+  %artifact = global.load @artifact_data : buffer
+  func.return %table, %artifact : buffer, buffer
+}

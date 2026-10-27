@@ -440,16 +440,17 @@ static bool loom_link_plan_symbol_is_declaration_like(
                                              LOOM_LINK_SYMBOL_FLAG_IMPORT);
 }
 
-// Returns true when |declaration| is an ordinary compile-time symbol contract.
-// Other declaration families have dedicated owners: runtime imports remain
-// external, templates use provider selection, and config/target/artifact
-// requirements are supplied by later compilation and emission stages.
+// Returns true when |declaration| has an exact callable or read-only data
+// provider. Runtime imports remain external, templates use provider selection,
+// and config/target requirements have their own binding rules. Read-only data
+// may remain unbound when its payload is supplied during artifact emission.
 static bool loom_link_plan_symbol_is_exact_declaration(
     const loom_link_module_index_symbol_t* declaration) {
   return loom_link_plan_symbol_is_declaration_like(declaration) &&
          !iree_any_bit_set(declaration->flags, LOOM_LINK_SYMBOL_FLAG_IMPORT) &&
-         iree_any_bit_set(declaration->facets.schema.interfaces,
-                          LOOM_SYMBOL_INTERFACE_FUNC_LIKE) &&
+         iree_any_bit_set(
+             declaration->facets.schema.interfaces,
+             LOOM_SYMBOL_INTERFACE_FUNC_LIKE | LOOM_SYMBOL_INTERFACE_RODATA) &&
          declaration->template_family_ordinal ==
              LOOM_LINK_TEMPLATE_FAMILY_ORDINAL_INVALID;
 }
@@ -504,6 +505,10 @@ static bool loom_link_plan_symbols_share_merge_ownership(
 static bool loom_link_plan_facet_request_requires_definition(
     const loom_link_module_index_symbol_t* declaration,
     loom_link_plan_facet_request_t request) {
+  if (iree_any_bit_set(declaration->facets.schema.interfaces,
+                       LOOM_SYMBOL_INTERFACE_RODATA)) {
+    return false;
+  }
   if (request.mode == LOOM_LINK_PLAN_FACET_REQUEST_COMPLETE) {
     return true;
   }

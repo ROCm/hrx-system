@@ -24,6 +24,7 @@
 #include "loom/ops/command/ops.h"
 #include "loom/ops/config/ops.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/global/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/target/ops.h"
 #include "loom/ops/template/ops.h"
@@ -63,6 +64,8 @@ class LinkPlannerTest : public ::testing::Test {
                     loom_config_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables,
                     loom_func_dialect_op_semantics);
+    RegisterDialect(LOOM_DIALECT_GLOBAL, loom_global_dialect_vtables,
+                    loom_global_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_KERNEL, loom_kernel_dialect_vtables,
                     loom_kernel_dialect_op_semantics);
     RegisterDialect(LOOM_DIALECT_TARGET, loom_target_dialect_vtables,
@@ -1105,6 +1108,90 @@ TEST_F(LinkPlannerTest, LinkImportFreeDeclarationPullsConcreteDefinition) {
   AddBytecode(bytecode_index.get(), library_bytecode, IREE_SV("library"),
               LOOM_LINK_PROVIDER_ROLE_LIBRARY);
   verify_index(bytecode_index.get());
+}
+
+TEST_F(LinkPlannerTest,
+       RodataSelectsAvailableDefinitionsAcrossRepresentations) {
+  const iree_string_view_t caller_source =
+      Fixture(IREE_SV("rodata_caller.loom"));
+  loom_module_t* caller = Parse(caller_source);
+  const std::vector<uint8_t> caller_bytecode = WriteModule(caller);
+  const iree_string_view_t provider_files[] = {
+      IREE_SV("rodata_public.loom"),
+      IREE_SV("rodata_private.loom"),
+  };
+  for (iree_host_size_t file_index = 0;
+       file_index < IREE_ARRAYSIZE(provider_files); ++file_index) {
+    const iree_string_view_t provider_source =
+        Fixture(provider_files[file_index]);
+    loom_module_t* provider = Parse(provider_source);
+    const std::vector<uint8_t> provider_bytecode = WriteModule(provider);
+    for (const auto role :
+         {LOOM_LINK_PROVIDER_ROLE_INPUT, LOOM_LINK_PROVIDER_ROLE_LIBRARY}) {
+      for (int caller_format = 0; caller_format < 3; ++caller_format) {
+        for (int provider_format = 0; provider_format < 3; ++provider_format) {
+          SCOPED_TRACE(::testing::Message()
+                       << StringViewToString(provider_files[file_index])
+                       << " role=" << role << " caller=" << caller_format
+                       << " provider=" << provider_format);
+          IndexPtr index = CreateIndex();
+          auto add =
+              [&](int format, loom_module_t* module, iree_string_view_t source,
+                  const std::vector<uint8_t>& bytecode, iree_string_view_t name,
+                  loom_link_provider_role_t provider_role) {
+                switch (format) {
+                  case 0:
+                    AddMaterialized(index.get(), module, name, provider_role);
+                    break;
+                  case 1:
+                    AddText(index.get(), source, name, provider_role);
+                    break;
+                  case 2:
+                    AddBytecode(index.get(), bytecode, name, provider_role);
+                    break;
+                }
+              };
+          add(caller_format, caller, caller_source, caller_bytecode,
+              IREE_SV("caller"), LOOM_LINK_PROVIDER_ROLE_INPUT);
+          add(provider_format, provider, provider_source, provider_bytecode,
+              IREE_SV("provider"), role);
+          const iree_string_view_t roots[] = {IREE_SV("@entry")};
+          const loom_link_plan_options_t options = {
+              .mode = LOOM_LINK_PLAN_LINK,
+              .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
+          };
+          PlanPtr plan = BuildPlan(index.get(), &options);
+          const loom_link_module_index_symbol_t* declaration =
+              loom_link_module_index_lookup_global(index.get(),
+                                                   IREE_SV("table"));
+          ASSERT_NE(declaration, nullptr);
+          const loom_link_module_index_symbol_t* definition =
+              loom_link_module_index_next_same_name(index.get(), declaration);
+          ASSERT_NE(definition, nullptr);
+          const bool available =
+              role == LOOM_LINK_PROVIDER_ROLE_INPUT || file_index == 0;
+          EXPECT_EQ(ContainsSymbol(plan.get(), definition), available);
+          const loom_link_plan_symbol_t* planned =
+              FindPlannedSymbol(plan.get(), declaration);
+          ASSERT_NE(planned, nullptr);
+          EXPECT_EQ(loom_link_plan_symbol_identity_ordinal(plan.get(),
+                                                           planned->ordinal),
+                    available ? definition->ordinal : declaration->ordinal);
+          EXPECT_FALSE(planned->has_unresolved_definition_dependency);
+          const loom_link_module_index_symbol_t* artifact =
+              loom_link_module_index_lookup_global(index.get(),
+                                                   IREE_SV("artifact_data"));
+          const loom_link_plan_symbol_t* planned_artifact =
+              FindPlannedSymbol(plan.get(), artifact);
+          ASSERT_NE(planned_artifact, nullptr);
+          EXPECT_FALSE(planned_artifact->has_unresolved_definition_dependency);
+          EXPECT_FALSE(
+              ContainsSymbol(plan.get(), loom_link_module_index_lookup_name(
+                                             index.get(), IREE_SV("unused"))));
+        }
+      }
+    }
+  }
 }
 
 TEST_F(LinkPlannerTest, OverlayPlansInputAgainstImmutableLibrary) {

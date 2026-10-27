@@ -1,0 +1,3 @@
+global.rodata.def @table = align(4) bytes("01000000")
+
+global.rodata.def @unused = bytes("00")
