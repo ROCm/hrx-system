@@ -417,6 +417,25 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "representation_projection_test",
+    srcs = ["representation_projection_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:facts_builder",
+        "//loom/src/loom/target:low_descriptor_registry",
+        "//loom/src/loom/target/test:low_registry",
+        "//loom/src/loom/target/test:target_record_table",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "representation_observer_test",
     srcs = ["representation_observer_test.cc"],
     deps = [

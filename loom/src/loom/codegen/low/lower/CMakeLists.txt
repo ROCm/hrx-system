@@ -412,6 +412,26 @@ loom_cc_test(
 
 loom_cc_test(
   NAME
+    representation_projection_test
+  SRCS
+    "representation_projection_test.cc"
+  DEPS
+    ::lower
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::builder
+    loom::ir
+    loom::ops::low
+    loom::ops::op_defs
+    loom::target::facts_builder
+    loom::target::low_descriptor_registry
+    loom::target::test::low_registry
+    loom::target::test::target_record_table
+)
+
+loom_cc_test(
+  NAME
     representation_observer_test
   SRCS
     "representation_observer_test.cc"

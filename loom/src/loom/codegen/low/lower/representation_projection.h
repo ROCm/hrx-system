@@ -75,6 +75,8 @@ loom_type_t loom_low_representation_projection_result_type(
 // belongs to |arena|; construction scratch is released before returning. User
 // contract failures emit diagnostics and return a NULL plan. Status reports
 // infrastructure failures. The function must remain unchanged until execution.
+// An already exact representation retains only its signature and target facts;
+// its body needs no traversal, descriptor lookup, or per-value update storage.
 iree_status_t loom_low_plan_function_representation(
     loom_module_t* module, loom_func_like_t function,
     const loom_target_facts_t* target_facts,

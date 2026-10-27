@@ -396,6 +396,37 @@ static iree_status_t loom_low_representation_allocate_plan(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_representation_plan_identity(
+    const loom_module_t* module, loom_func_like_t function,
+    iree_arena_allocator_t* arena,
+    loom_low_representation_projection_plan_t* plan) {
+  uint16_t argument_count = 0;
+  const loom_value_id_t* arguments =
+      loom_func_like_arg_ids(function, &argument_count);
+  const loom_value_id_t* results = loom_op_const_results(function.op);
+  *plan = (loom_low_representation_projection_plan_t){
+      .result_offset = argument_count,
+      .value_capacity =
+          (iree_host_size_t)argument_count + function.op->result_count,
+  };
+  if (plan->value_capacity == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, plan->value_capacity,
+                                                 sizeof(*plan->value_updates),
+                                                 (void**)&plan->value_updates));
+  for (iree_host_size_t i = 0; i < plan->value_capacity; ++i) {
+    const loom_value_id_t value =
+        i < argument_count ? arguments[i] : results[i - argument_count];
+    plan->value_updates[plan->value_count++] =
+        (loom_low_representation_value_update_t){
+            .value = value,
+            .type = loom_module_value_type(module, value),
+        };
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_low_apply_function_representation(
     loom_module_t* module,
     const loom_low_representation_projection_plan_t* plan, bool* out_changed) {
@@ -513,18 +544,26 @@ iree_status_t loom_low_plan_function_representation(
   loom_low_representation_projection_plan_t* plan = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(arena, sizeof(*plan), (void**)&plan));
-  IREE_RETURN_IF_ERROR(
-      loom_low_representation_allocate_plan(function.op, arena, plan));
+  if (projection.source_descriptor_set == projection.target_descriptor_set) {
+    // Call planning still needs the signature and selected target facts. The
+    // verified body already has exactly these register and descriptor meanings;
+    // retaining identity updates for every packet would only duplicate them.
+    IREE_RETURN_IF_ERROR(
+        loom_low_representation_plan_identity(module, function, arena, plan));
+  } else {
+    IREE_RETURN_IF_ERROR(
+        loom_low_representation_allocate_plan(function.op, arena, plan));
+    if (loom_low_func_decl_isa(function.op)) {
+      plan->result_offset = function.op->operand_count;
+    } else {
+      plan->argument_offset = function.op->result_count;
+    }
+    IREE_RETURN_IF_ERROR(loom_low_representation_plan_op(module, function.op,
+                                                         &projection, plan));
+  }
   plan->function = function;
   plan->descriptor_set = target_descriptor_set;
   plan->target_facts = target_facts;
-  if (loom_low_func_decl_isa(function.op)) {
-    plan->result_offset = function.op->operand_count;
-  } else {
-    plan->argument_offset = function.op->result_count;
-  }
-  IREE_RETURN_IF_ERROR(
-      loom_low_representation_plan_op(module, function.op, &projection, plan));
   IREE_RETURN_IF_ERROR(
       loom_module_intern_string(module, bundle->config->contract_set.spelling,
                                 &plan->target_descriptor_set_key));
