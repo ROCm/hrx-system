@@ -1423,6 +1423,35 @@ TEST_F(MemoryBackendTest,
   iree_hal_pool_release(pool);
 }
 
+TEST_F(MemoryBackendTest,
+       AutomaticPlacementBreaksDeviceLocalTiesWithLocalStorage) {
+  // Both storage domains are device-local, as on an integrated GPU. The
+  // selected physical domain must not depend on the system domain being
+  // enumerated first. An unavailable local domain must still permit fallback.
+  for (auto& backend : backends_) {
+    backend.native.storage_count = 2;
+  }
+  for (bool local_available : {true, false}) {
+    SCOPED_TRACE(local_available);
+    for (auto& local_scope : native_.local_scopes) {
+      local_scope.profile_status =
+          local_available ? AMDF_STATUS_OK
+                          : amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
+    iree_hal_pool_t* pool = nullptr;
+    IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool));
+    iree_hal_buffer_t* buffer = nullptr;
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        pool, iree_hal_make_pool_reservation_request(64, 64),
+        iree_infinite_timeout(), &buffer));
+    EXPECT_EQ(native_.created_scope,
+              local_available ? storage_[0][1].scope : native_.scope());
+    iree_hal_buffer_release(buffer);
+    iree_hal_pool_release(pool);
+    native_.AwaitEmpty();
+  }
+}
+
 TEST_F(MemoryBackendTest, SystemScopeCannotPromisePhysicalPlacement) {
   pool_options_.placement = {IREE_HAL_POOL_PLACEMENT_REQUIRED, PhysicalNode(0)};
   iree_hal_pool_t* pool = nullptr;

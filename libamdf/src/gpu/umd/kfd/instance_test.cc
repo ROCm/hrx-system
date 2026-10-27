@@ -289,6 +289,38 @@ TEST_F(KfdInstanceTest, NativeMemoryQueryPrecedesBootstrapAndPublication) {
   EXPECT_EQ(native_.Count(Operation::kOpenRender), 1u);
 }
 
+TEST(KfdMemoryFeaturesTest, IntegratedPlacementUsesReservedHeapAndGttBudget) {
+  amdf_gpu_kfd_topology_t topology = {};
+  topology.vram.total_byte_length = UINT64_C(8) << 30;
+  topology.vram.visible_byte_length = topology.vram.total_byte_length;
+  const auto visible_local = AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY |
+                             AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY;
+  const struct {
+    uint64_t byte_length;
+    amdf_gpu_device_features_t integrated_features;
+  } gtt_cases[] = {
+      {0, 0},
+      {UINT64_C(4) << 30, visible_local},
+      {UINT64_C(8) << 30, visible_local},
+      {UINT64_C(16) << 30, 0},
+  };
+  for (const auto& gtt_case : gtt_cases) {
+    SCOPED_TRACE(gtt_case.byte_length);
+    topology.gtt_total_byte_length = gtt_case.byte_length;
+    EXPECT_EQ(amdf_gpu_kfd_topology_memory_features(&topology, true),
+              gtt_case.integrated_features);
+    EXPECT_EQ(amdf_gpu_kfd_topology_memory_features(&topology, false),
+              visible_local);
+  }
+  topology.gtt_total_byte_length = UINT64_C(4) << 30;
+  topology.vram.visible_byte_length = UINT64_C(256) << 20;
+  EXPECT_EQ(amdf_gpu_kfd_topology_memory_features(&topology, true),
+            AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY);
+  topology.vram.total_byte_length = 0;
+  EXPECT_EQ(amdf_gpu_kfd_topology_memory_features(&topology, true), 0u);
+  EXPECT_EQ(amdf_gpu_kfd_topology_memory_features(&topology, false), 0u);
+}
+
 TEST_F(KfdInstanceTest, FailedMemoryQueryDoesNotAcquireOrPublishFacts) {
   ASSERT_EQ(Prepare(), AMDF_STATUS_OK);
   native_.failure = Operation::kDeviceInfo;

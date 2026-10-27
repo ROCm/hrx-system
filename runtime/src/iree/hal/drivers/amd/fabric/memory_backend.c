@@ -754,12 +754,22 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
       iree_allocator_malloc(query->host_allocator, plan_size, (void**)&plan));
   memset(plan, 0, plan_size);
   plan->base.vtable = &iree_hal_amd_fabric_slab_pool_plan_vtable;
+  // Integrated devices can report both SYSTEM and LOCAL storage as
+  // device-local. Break that tie in favor of qualified LOCAL storage for
+  // automatic placement with device consumers. The smaller bonus preserves
+  // host-access preferences.
+  const bool prefer_local_storage =
+      query->options->placement.mode == IREE_HAL_POOL_PLACEMENT_AUTOMATIC &&
+      query->scope.family_count && profile &&
+      profile->memory_class == AMDF_MEMORY_CLASS_LOCAL &&
+      iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
   plan->base.info = (iree_hal_slab_pool_plan_info_t){
       .preference =
           (preferred_host_added ? 1024 : 0) +
           (iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL)
                ? 512
-               : 0),
+               : 0) +
+          (prefer_local_storage ? 1 : 0),
       .placement = placement,
       .host = host,
   };

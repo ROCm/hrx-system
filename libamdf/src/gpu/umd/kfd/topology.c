@@ -351,11 +351,19 @@ static amdf_status_t amdf_gpu_kfd_read_memory(
   }
   uint64_t total_vram = 0;
   uint64_t visible_vram = 0;
+  uint64_t total_gtt = 0;
   amdf_status_t status =
       amdf_gpu_kfd_read_number64(directory, "mem_info_vram_total", &total_vram);
   if (amdf_status_is_ok(status)) {
     status = amdf_gpu_kfd_read_number64(directory, "mem_info_vis_vram_total",
                                         &visible_vram);
+  }
+  if (amdf_status_is_ok(status)) {
+    status =
+        amdf_gpu_kfd_read_number64(directory, "mem_info_gtt_total", &total_gtt);
+    if (status == amdf_linux_error(ENOENT)) {
+      status = AMDF_STATUS_OK;
+    }
   }
   uint64_t hive_id = 0;
   if (amdf_status_is_ok(status)) {
@@ -380,6 +388,7 @@ static amdf_status_t amdf_gpu_kfd_read_memory(
   }
   topology->vram.total_byte_length = total_vram;
   topology->vram.visible_byte_length = visible_vram;
+  topology->gtt_total_byte_length = total_gtt;
   topology->memory_peers.hive_id = hive_id;
   topology->memory_peers.hive_sharing_enabled = hive_sharing_enabled != 0;
   return AMDF_STATUS_OK;
@@ -523,9 +532,13 @@ void amdf_gpu_kfd_topology_deinitialize(amdf_gpu_kfd_topology_t* topology,
 
 amdf_gpu_device_features_t amdf_gpu_kfd_topology_memory_features(
     const amdf_gpu_kfd_topology_t* topology, bool integrated) {
-  // APU VRAM requests may be redirected to GTT by KFD. System memory remains
-  // available there without promising a physical placement the kernel changes.
-  if (integrated || topology->vram.total_byte_length == 0) {
+  // Linux 6.17 sets apu_prefer_gtt when an APU's reserved VRAM heap is smaller
+  // than GTT. KFD redirects VRAM requests to GTT in that case. Keep integrated
+  // device admission conservative when the GTT capacity is unknown.
+  if (topology->vram.total_byte_length == 0 ||
+      (integrated &&
+       (topology->gtt_total_byte_length == 0 ||
+        topology->vram.total_byte_length < topology->gtt_total_byte_length))) {
     return 0;
   }
   amdf_gpu_device_features_t features = AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY;
