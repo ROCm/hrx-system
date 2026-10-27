@@ -48,6 +48,7 @@ iree_py_test(
     name = "contracts_test",
     srcs = [
         "compile_test.py",
+        "lower_rule_diagnostics_test.py",
         "lower_rules_test.py",
         "schema_test.py",
         "selection_test.py",
@@ -57,6 +58,7 @@ iree_py_test(
     ],
     args = [
         "loom.target.contracts.compile_test",
+        "loom.target.contracts.lower_rule_diagnostics_test",
         "loom.target.contracts.lower_rules_test",
         "loom.target.contracts.schema_test",
         "loom.target.contracts.selection_test",

@@ -48,6 +48,7 @@ iree_py_test(
     "../../tools/pytest_style_runner.py"
   SRCS
     "compile_test.py"
+    "lower_rule_diagnostics_test.py"
     "lower_rules_test.py"
     "schema_test.py"
     "selection_test.py"
@@ -56,6 +57,7 @@ iree_py_test(
     "../../tools/pytest_style_runner.py"
   ARGS
     "loom.target.contracts.compile_test"
+    "loom.target.contracts.lower_rule_diagnostics_test"
     "loom.target.contracts.lower_rules_test"
     "loom.target.contracts.schema_test"
     "loom.target.contracts.selection_test"

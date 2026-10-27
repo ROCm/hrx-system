@@ -370,6 +370,26 @@ def _instance_flags_diagnostic(
     return _named_constraint_diagnostic("flags", field, f"{predicate}.{enum_keyword}")
 
 
+def _named_constraint_diagnostic(
+    subject_role: str,
+    subject_name: str,
+    constraint_key: str,
+) -> DiagnosticRef:
+    return target_diagnostic(
+        ERR_TARGET_003,
+        string_param("subject_role", subject_role),
+        string_param("subject_name", subject_name),
+        string_param("constraint_key", constraint_key),
+    )
+
+
+# The default projections depend only on the rejection reason, not the access.
+_DEFAULT_SOURCE_MEMORY_DIAGNOSTICS = {
+    reason: _named_constraint_diagnostic("source-memory", "access", reason.value)
+    for reason in SourceMemoryRejectionReason
+}
+
+
 def _source_memory_diagnostic(
     constraint: SourceMemoryConstraint,
     reason: SourceMemoryRejectionReason,
@@ -393,11 +413,7 @@ def _source_memory_diagnostic(
                 f"source-memory {reason.value} diagnostic is missing an error ref"
             )
         return ref
-    return _named_constraint_diagnostic(
-        "source-memory",
-        "access",
-        reason.value,
-    )
+    return _DEFAULT_SOURCE_MEMORY_DIAGNOSTICS[reason]
 
 
 def _source_memory_diagnostics(
@@ -412,19 +428,6 @@ def _source_memory_diagnostics(
 
 def _attr_diagnostic(field: str, attr_type: str) -> DiagnosticRef:
     return _named_constraint_diagnostic("field", field, f"attr_kind.{attr_type}")
-
-
-def _named_constraint_diagnostic(
-    subject_role: str,
-    subject_name: str,
-    constraint_key: str,
-) -> DiagnosticRef:
-    return target_diagnostic(
-        ERR_TARGET_003,
-        string_param("subject_role", subject_role),
-        string_param("subject_name", subject_name),
-        string_param("constraint_key", constraint_key),
-    )
 
 
 def _count_constraint_diagnostic(

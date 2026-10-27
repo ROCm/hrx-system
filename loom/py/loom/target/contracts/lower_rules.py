@@ -325,6 +325,8 @@ class _LowerRuleSetCompiler:
         self._authored_case_indices: list[int] = []
         self._type_pattern_ordinals: dict[TypePattern, int] = {}
         self._diagnostic_ordinals: dict[LowerDiagnostic, int] = {}
+        # Literal and runtime-context projections have the same lowering in every rule.
+        self._source_independent_diagnostic_ordinals: dict[DiagnosticRef, int] = {}
         self._value_ref_sequence_starts: dict[tuple[LowerValueRef, ...], int] = {(): 0}
         self._attr_copy_sequence_starts: dict[tuple[LowerAttrCopy, ...], int] = {(): 0}
         self._tied_result_sequence_starts: dict[tuple[LowerTiedResult, ...], int] = {
@@ -2925,7 +2927,15 @@ class _LowerRuleSetCompiler:
         return ordinal
 
     def _append_diagnostic_ref(self, source_op: Op, ref: DiagnosticRef) -> int:
-        return self._append_diagnostic(self._lower_diagnostic_ref(source_op, ref))
+        ordinal = self._source_independent_diagnostic_ordinals.get(ref)
+        if ordinal is not None:
+            return ordinal
+        ordinal = self._append_diagnostic(self._lower_diagnostic_ref(source_op, ref))
+        # Value-type projections must resolve the current source op's fields and
+        # validate variadic references against the current rule's arity guards.
+        if all(param.kind != DiagnosticParamKind.VALUE_TYPE for param in ref.params):
+            self._source_independent_diagnostic_ordinals[ref] = ordinal
+        return ordinal
 
     def _lower_diagnostic_ref(
         self, source_op: Op, ref: DiagnosticRef
