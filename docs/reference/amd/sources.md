@@ -27,6 +27,8 @@ specific definition, builder, caller, or resource owner that supports a claim.
 | [ROCm compiler and device libraries][rocm-device-libs] | `8cd9ac8c8f12ab07e92229ea9d690b49e866b8ec` | OCKL hidden grid state, GWS versus atomic barrier selection, split arrival/wait, workgroup/agent/system fence composition, stream-memory polling and masked predicates, OpenCL child handles and device scheduler, and target-selected shader-cycle versus steady-time reads. |
 | [Linux][linux] | `50d05c7c76c96b90462f24debacca971d2e86713` | Native UAPI, queue descriptors, memory mappings, engine emitters, and driver resource lifetimes; JPEG user-IB validation, VCN session/instance routing, media power ownership, and kernel-scheduled versus user-queue dependencies. |
 | [Linux profiling resume correction][linux-profile-resume] | `f931c54b241ce2f36bfc34955aec43a188276b8d` | Restoring native stable-pstate controls after runtime power transitions while the software profile level remains selected. |
+| [Linux telemetry producers][linux-telemetry] | `f307e9d20cc7bd6dd54a3fd8c2af767dd7ef2931` | SMU-selected hwmon semantics, fixed and tagged metric serialization, firmware capability predicates, power regions, accumulator-based averages, native timestamps, and sensor validity. |
+| [AMD Display Library sensors][adl-sensors] | `84c881cb2136f04287eb3af12de00a9e2867aa9e` | PMLog sensor IDs, physical units, and signed per-sensor values with independent support flags. |
 | [Linux memory transports][linux-memory-transports] | `fe2ec83746e501645709761605c2464a44fd2929` | Exporter runtime PM references and their relation to P2P eligibility and memory placement; KFD's noncached HDP remap, native availability and host flush sequence; SVM prefetch placement, partial migration and native completion; VM ioctl and cache-topology counterparts to runtime size requests. |
 | [ROCm AMDGPU native driver][rocm-amdgpu] | `820212794d184710298efcecce42c0215bfc9c6a` | Render-node VM ioctl, cache-topology publication, GC12.1 PTE coherence and bus-atomic policy, MES V12.1 partition-level scheduler coordination, native SPM buffer rotation, PC-sampling source control, and firmware dispatch-log streams. Compared with [the `releases/therock-7.14` revision][rocm-amdgpu-therock] `5081d704e60e807e9541c355c53df57d88ea8cde` for persisting-cache admission and GC12.1 remote MTYPE overrides. |
 | [Vulkan specification][vulkan] | `01aaacd99480487bf63830959513c5ca8ceb996d` | External memory and semaphore capabilities, handle ownership, host-pointer imports, buffer and address-range bounds, host-update capture, resource ownership transfers, host visibility, and performance-query lifetimes. |
@@ -134,6 +136,8 @@ executes. The corresponding chapter identifies those boundaries.
 [rocm-device-libs]: https://github.com/ROCm/llvm-project/tree/8cd9ac8c8f12ab07e92229ea9d690b49e866b8ec
 [linux]: https://github.com/torvalds/linux/tree/50d05c7c76c96b90462f24debacca971d2e86713
 [linux-profile-resume]: https://github.com/torvalds/linux/commit/f931c54b241ce2f36bfc34955aec43a188276b8d
+[linux-telemetry]: https://github.com/torvalds/linux/tree/f307e9d20cc7bd6dd54a3fd8c2af767dd7ef2931
+[adl-sensors]: https://github.com/GPUOpen-LibrariesAndSDKs/display-library/tree/84c881cb2136f04287eb3af12de00a9e2867aa9e
 [linux-memory-transports]: https://github.com/torvalds/linux/tree/fe2ec83746e501645709761605c2464a44fd2929
 [rocm-amdgpu]: https://github.com/ROCm/amdgpu/tree/820212794d184710298efcecce42c0215bfc9c6a
 [rocm-amdgpu-therock]: https://github.com/ROCm/amdgpu/tree/5081d704e60e807e9541c355c53df57d88ea8cde

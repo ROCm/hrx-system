@@ -65,3 +65,4 @@ provide exact search terms within the tree.
 | Exchange resident GPU/NPU payloads and return credits | [GPU/NPU ready and completion edges](gpu/recipes/gpu-npu.md#resident-programs-and-per-generation-ownership), [slot generations and drain](interop/pipelines.md). |
 | Share Vulkan or D3D12 resources with a native consumer | [External memory, handle ownership and dependency objects](interop/external-memory.md). |
 | Measure dispatch, transfer or tile execution | [GPU clocks and counter ownership](gpu/observability.md), [PM4 timing bracket](gpu/pm4/timing.md#timestamp-visibility-and-storage-lifetime), [SDMA timestamps](gpu/sdma/timing.md), [XDNA timers, counters and trace](xdna/observability.md). |
+| Read clocks, power, temperatures, and activity | [Device telemetry, SMU producer semantics, versioned snapshots, and sensor freshness](gpu/profiling/telemetry.md). |
