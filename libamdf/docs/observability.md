@@ -96,7 +96,9 @@ native fields without making the application carry an architecture-specific
 name or register table. IDs are opaque within the live device and source;
 saved captures copy the descriptor strings and device identity.
 
-Instance scope makes native compaction explicit. `DEVICE` ordinals retain
+`instance_scope` is fixed metadata on each metric descriptor, returned during
+enumeration. A caller classifies metrics once when selecting them and reuses
+the same query IDs across reads. `DEVICE` ordinals retain
 their identity across reads of the same source on a live device. `SNAPSHOT`
 ordinals identify an instance only within one `device_read` result: core slot
 zero can represent a different active core on the next read. Reading that

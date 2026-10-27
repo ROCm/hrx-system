@@ -156,6 +156,7 @@ typedef struct amdf_telemetry_metric_info_t {
   /// Scalar domains use zero. CPU indices are not OS logical-CPU numbers.
   uint32_t domain_instance;
   /// Identity lifetime of domain_instance within this source and domain.
+  /// Fixed per-metric metadata established during enumeration.
   amdf_telemetry_instance_scope_t instance_scope;
   /// Portable meaning, distinct from the device-local read ID.
   amdf_telemetry_metric_kind_t kind;
@@ -295,11 +296,13 @@ typedef struct amdf_telemetry_api_t {
   /// fields are selected. Separate sysfs files are separate sources; multiple
   /// native queries never become one fabricated coherent snapshot.
   ///
-  /// Input validation precedes native access. Unknown IDs return NOT_FOUND;
-  /// a changed native schema returns VERSION_MISMATCH. No automatic fallback
-  /// changes source, semantics, units, or read cost. All call-level failures
-  /// leave values and out_sample unchanged. On success every value has a
-  /// status; unavailable native fields are NOT_FOUND, never a successful zero.
+  /// Structural input validation precedes native access; dynamic native field
+  /// presence and array extents are checked against the returned snapshot.
+  /// Unknown IDs return NOT_FOUND; a changed native schema returns
+  /// VERSION_MISMATCH. No automatic fallback changes source, semantics, units,
+  /// or read cost. All call-level failures leave values and out_sample
+  /// unchanged. On success every value has a status; unavailable native fields
+  /// are NOT_FOUND, never a successful zero.
   /// A native route that can substitute configured/default data for failed
   /// measurements without reporting that distinction cannot supply a metric
   /// through this API. An uncertainty flag would not make it a measurement.

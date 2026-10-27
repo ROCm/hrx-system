@@ -412,8 +412,9 @@ static const amdf_gpu_kfd_metrics_layout_t amdf_gpu_kfd_metrics_layouts[] = {
 };
 
 // The native producer, not the binary layout alone, determines physical
-// meaning. The same v3.0 member contains targets on SMU14 and effective clocks
-// on SMU15; Aldebaran writes synthetic zero power on its secondary die.
+// meaning. SMU15 reuses v3.0 clock members for targets and effective clocks
+// across driver implementations; Aldebaran writes synthetic zero power on its
+// secondary die.
 enum amdf_gpu_kfd_metrics_profile_e {
   AMDF_METRICS_PROFILE_NONE,
   AMDF_METRICS_PROFILE_DISCRETE,
