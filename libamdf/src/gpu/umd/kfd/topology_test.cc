@@ -214,40 +214,16 @@ class KfdTopologyTest : public ::testing::Test {
   amdf_platform_endpoint_t endpoint_ = {};
 };
 
-TEST_F(KfdTopologyTest, DiscoversGttBudgetFromCachedHeapMetadata) {
+TEST_F(KfdTopologyTest, UnreadableGttMetadataDoesNotAffectDiscovery) {
   WriteProperties("");
-  WriteAttribute(directory_ / "dev/char/226:160/device/mem_info_gtt_total",
-                 "17179869184\n");
+  std::filesystem::create_directory(
+      directory_ / "dev/char/226:160/device/mem_info_gtt_total");
   amdf_gpu_kfd_topology_t topology = {};
   ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
                 &endpoint_, amdf_allocator_system(), &topology),
             AMDF_STATUS_OK);
-  EXPECT_EQ(topology.gtt_total_byte_length, UINT64_C(16) << 30);
+  EXPECT_EQ(topology.memory_features, 0u);
   amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
-}
-
-TEST_F(KfdTopologyTest, MissingGttBudgetKeepsIntegratedPlacementConservative) {
-  WriteProperties("");
-  amdf_gpu_kfd_topology_t topology = {};
-  ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
-                &endpoint_, amdf_allocator_system(), &topology),
-            AMDF_STATUS_OK);
-  EXPECT_EQ(topology.gtt_total_byte_length, 0u);
-  EXPECT_EQ(amdf_gpu_kfd_topology_memory_features(&topology, true), 0u);
-  amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
-}
-
-TEST_F(KfdTopologyTest, MalformedGttBudgetDoesNotPublishTopology) {
-  WriteProperties("");
-  WriteAttribute(directory_ / "dev/char/226:160/device/mem_info_gtt_total",
-                 "invalid\n");
-  amdf_gpu_kfd_topology_t topology;
-  std::memset(&topology, 0xA5, sizeof(topology));
-  const auto original = topology;
-  EXPECT_EQ(amdf_gpu_kfd_topology_initialize(
-                &endpoint_, amdf_allocator_system(), &topology),
-            amdf_linux_error(EPROTO));
-  EXPECT_EQ(std::memcmp(&topology, &original, sizeof(topology)), 0);
 }
 
 TEST_F(KfdTopologyTest, DiscoversMemoryAndSdmaWithoutComputeStorageMetadata) {

@@ -12,6 +12,7 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/kfd/hdp.h"
 #include "libamdf/src/gpu/umd/kfd/instance.h"
+#include "libamdf/src/gpu/umd/kfd/memory.h"
 #include "libamdf/src/gpu/umd/kfd/user_queue_native.h"
 #include "libamdf/src/platform/linux/endpoint.h"
 #include "libamdf/src/platform/linux/host_cache.h"
@@ -69,6 +70,9 @@ amdf_status_t amdf_gpu_umd_device_create(
         instance, endpoint, &device->topology, device->page_size,
         &device->render_descriptor);
     amdf_gpu_kfd_device_unlock_memory(device);
+  }
+  if (amdf_status_is_ok(status)) {
+    status = amdf_gpu_kfd_memory_qualify_local(device);
   }
   if (amdf_status_is_ok(status)) {
     status = amdf_gpu_kfd_hdp_create(device, &device->hdp);

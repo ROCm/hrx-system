@@ -24,6 +24,85 @@
 #include "libamdf/src/platform/linux/file.h"
 #include "libamdf/src/platform/linux/host_cache.h"
 
+amdf_status_t amdf_gpu_kfd_memory_qualify_local(amdf_gpu_umd_device_t* device) {
+  if (!device->topology.integrated ||
+      device->topology.vram.total_byte_length == 0) {
+    return AMDF_STATUS_OK;
+  }
+  amdf_gpu_device_features_t features =
+      amdf_gpu_kfd_topology_memory_features(&device->topology);
+  amdf_gpu_kfd_buffer_create_info_t create_info = {
+      .native_flags =
+          KFD_IOC_ALLOC_MEM_FLAGS_VRAM | AMDF_GPU_KFD_ALLOC_MEM_FLAGS_WRITABLE,
+      .byte_length = device->page_size,
+      .alignment = device->page_size,
+  };
+  if ((features & AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY) != 0) {
+    create_info.native_flags |= KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  }
+  amdf_gpu_kfd_buffer_t* buffer = NULL;
+  amdf_gpu_kfd_buffer_result_t result;
+  amdf_status_t status =
+      amdf_gpu_kfd_buffer_prepare(device, &create_info, &buffer, &result);
+  int descriptor = -1;
+  if (amdf_status_is_ok(status)) {
+    struct kfd_ioctl_export_dmabuf_args export_args = {
+        .handle = amdf_gpu_kfd_buffer_handle(buffer),
+        .flags = O_CLOEXEC,
+    };
+    if (ioctl(device->descriptor, AMDKFD_IOC_EXPORT_DMABUF, &export_args) !=
+        0) {
+      status = amdf_linux_error(errno);
+    } else {
+      amdf_assert(
+          export_args.dmabuf_fd <= INT_MAX &&
+          "successful DMA-BUF export must return a native int descriptor");
+      descriptor = (int)export_args.dmabuf_fd;
+    }
+  }
+  struct kfd_ioctl_get_dmabuf_info_args info = {
+      .dmabuf_fd = (uint32_t)descriptor,
+  };
+  if (amdf_status_is_ok(status)) {
+    if (ioctl(device->descriptor, AMDKFD_IOC_GET_DMABUF_INFO, &info) != 0) {
+      status = amdf_linux_error(errno);
+    } else if (info.size != device->page_size) {
+      status = amdf_linux_error(EPROTO);
+    }
+  }
+  const amdf_status_t close_status = amdf_linux_file_close(&descriptor);
+  const amdf_status_t release_status =
+      buffer != NULL ? amdf_gpu_kfd_buffer_discard(buffer) : AMDF_STATUS_OK;
+  if (!amdf_status_is_ok(release_status)) {
+    return release_status;
+  }
+  if (!amdf_status_is_ok(close_status)) {
+    return close_status;
+  }
+  if (status == amdf_linux_error(ENOMEM) ||
+      status == amdf_linux_error(ENOSPC) ||
+      status == amdf_linux_error(ENOTTY) ||
+      status == amdf_linux_error(EOPNOTSUPP) ||
+      status == amdf_linux_error(EINVAL)) {
+    return AMDF_STATUS_OK;
+  }
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  // KFD reports the BO's selected domain, not the original request flags.
+  // This detects APU redirection without copying a kernel-version policy.
+  // It does not promise free capacity or permanent physical residency.
+  const uint32_t domain =
+      info.flags & (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_GTT);
+  if (domain != KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
+    features = 0;
+  } else if ((info.flags & KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC) == 0) {
+    features &= ~AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY;
+  }
+  device->topology.memory_features = features;
+  return AMDF_STATUS_OK;
+}
+
 // One backing handle and GPU attachment, including incomplete teardown state.
 struct amdf_gpu_umd_memory_t {
   // Device borrowed while memory metadata is live.

@@ -113,6 +113,14 @@ Each materialized device retains the fabric independently. Releasing the
 registry and driver leaves those devices operational. The fabric owns the native
 instance and its discovery snapshot; engine contexts own their native children.
 
+## Automatic memory placement
+
+For automatic placement with device consumers, equally preferred device-local
+plans favor qualified LOCAL storage over SYSTEM storage. Explicit placement
+and host-access preferences retain their precedence. Each slab pool selects
+one plan when it is created. An unavailable LOCAL plan can fall back to SYSTEM
+at selection time; a pool does not spill into SYSTEM when its LOCAL heap fills.
+
 ## Native GPU execution
 
 PM4 and AQL own their packet encodings and publication rules under `gpu/queue/`.

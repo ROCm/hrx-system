@@ -16,11 +16,13 @@
 #include <cstdarg>
 #include <cstring>
 #include <functional>
+#include <iterator>
 #include <thread>
 #include <vector>
 
 #include "gtest/gtest.h"
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/kfd/memory.h"
 #include "libamdf/src/gpu/umd/memory.h"
 
 namespace {
@@ -73,8 +75,18 @@ struct NativeBufferState {
   uint32_t export_count = 0;
   // Temporary exported descriptor owned until its consuming close.
   int export_descriptor = -1;
-  // Error after consuming the temporary export once its GEM source is acquired.
+  // Error consuming the export after acquiring a GEM source or querying its
+  // allocation domain. Earlier identity-only exports remain unaffected.
   int export_close_error = 0;
+  // Domain reported after KFD has applied its native allocation policy.
+  uint32_t domain_flags =
+      KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  // Exact domain-query failure, or zero when the query succeeds.
+  int domain_query_error = 0;
+  // Number of allocation-domain queries.
+  uint32_t domain_query_count = 0;
+  // Reported allocation size, independently controllable for malformed replies.
+  uint64_t domain_byte_length = 4096;
   // Error retaining the real host reservation during terminal destruction.
   int munmap_error = 0;
   // Native allocation address within the real host reservation.
@@ -119,7 +131,8 @@ extern "C" int __wrap_close(int descriptor) {
   if (native_state != nullptr &&
       descriptor == native_state->export_descriptor) {
     native_state->export_descriptor = -1;
-    if (result == 0 && native_state->gem_live &&
+    if (result == 0 &&
+        (native_state->gem_live || native_state->domain_query_count != 0) &&
         native_state->export_close_error != 0) {
       errno = native_state->export_close_error;
       return -1;
@@ -180,7 +193,8 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
     return 0;
   }
   EXPECT_EQ(descriptor, 17);
-  if (request != AMDKFD_IOC_EXPORT_DMABUF) {
+  if (request != AMDKFD_IOC_EXPORT_DMABUF &&
+      request != AMDKFD_IOC_GET_DMABUF_INFO) {
     // Native completion includes the flush after KFD drops its own mutex.
     // Every retry and failure path must still exclude another caller here.
     EXPECT_EQ(pthread_mutex_lock(&native_state->memory_lock.mutex), 0);
@@ -314,6 +328,21 @@ extern "C" int __wrap_ioctl(int descriptor, unsigned long request, ...) {
           native_state->export_descriptor;
       return 0;
     }
+    case AMDKFD_IOC_GET_DMABUF_INFO: {
+      auto* info = static_cast<kfd_ioctl_get_dmabuf_info_args*>(argument);
+      EXPECT_EQ(info->dmabuf_fd,
+                static_cast<uint32_t>(native_state->export_descriptor));
+      EXPECT_TRUE(native_state->allocation_live);
+      ++native_state->domain_query_count;
+      if (native_state->domain_query_error != 0) {
+        errno = native_state->domain_query_error;
+        return -1;
+      }
+      info->flags = native_state->domain_flags;
+      info->size = native_state->domain_byte_length;
+      info->gpu_id = 19;
+      return 0;
+    }
     default:
       ADD_FAILURE() << "unexpected KFD buffer ioctl: " << request;
       errno = ENOTTY;
@@ -368,6 +397,14 @@ class KfdBufferNativeTest : public ::testing::Test {
   amdf_status_t Create() {
     return amdf_gpu_kfd_buffer_create(&device_, &create_info_, &buffer_,
                                       &result_);
+  }
+
+  void UseIntegratedLocalMemory() {
+    native_.import_descriptor = device_.render_descriptor;
+    device_.topology.integrated = true;
+    device_.topology.vram.total_byte_length = UINT64_C(8) << 30;
+    device_.topology.vram.visible_byte_length =
+        device_.topology.vram.total_byte_length;
   }
 
   void UseRegisteredPages(void* pages) {
@@ -437,6 +474,131 @@ class KfdBufferNativeTest : public ::testing::Test {
   // One buffer header, plus a memory header when exercising its native owner.
   uint32_t expected_metadata_free_count_ = 1;
 };
+
+TEST_F(KfdBufferNativeTest, QualifiesLocalMemoryFromNativeAllocationDomain) {
+  UseIntegratedLocalMemory();
+  const uint32_t vram = KFD_IOC_ALLOC_MEM_FLAGS_VRAM;
+  const uint32_t gtt = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+  const uint32_t host_visible = KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  const auto local = AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY;
+  const auto visible_local =
+      local | AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY;
+  const struct {
+    uint32_t domain_flags;
+    uint64_t visible_bytes;
+    amdf_gpu_device_features_t expected_features;
+  } cases[] = {
+      {vram | host_visible, UINT64_C(8) << 30, visible_local},
+      {gtt | host_visible, UINT64_C(8) << 30, 0},
+      {vram, UINT64_C(8) << 30, local},
+      {vram | host_visible, UINT64_C(256) << 20, local},
+      {0, UINT64_C(8) << 30, 0},
+      {vram | gtt, UINT64_C(8) << 30, 0},
+  };
+  expected_metadata_free_count_ = 0;
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.domain_flags);
+    ++expected_metadata_free_count_;
+    native_.domain_flags = test.domain_flags;
+    device_.topology.vram.visible_byte_length = test.visible_bytes;
+    device_.topology.memory_features = 0;
+    ASSERT_EQ(amdf_gpu_kfd_memory_qualify_local(&device_), AMDF_STATUS_OK);
+    EXPECT_EQ(device_.topology.memory_features, test.expected_features);
+    EXPECT_EQ(native_.allocation.flags & (vram | gtt), vram);
+    EXPECT_EQ((native_.allocation.flags & host_visible) != 0,
+              test.visible_bytes == device_.topology.vram.total_byte_length);
+    EXPECT_EQ(native_.allocation.size, device_.page_size);
+    EXPECT_EQ(native_.export_descriptor, -1);
+    EXPECT_FALSE(native_.allocation_live);
+    EXPECT_FALSE(native_.access_live);
+  }
+  EXPECT_EQ(native_.domain_query_count, std::size(cases));
+  EXPECT_EQ(native_.free_count, std::size(cases));
+}
+
+TEST_F(KfdBufferNativeTest, SkipsLocalMemoryProbeForDiscreteAndEmptyHeaps) {
+  UseIntegratedLocalMemory();
+  expected_metadata_free_count_ = 0;
+  device_.topology.integrated = false;
+  device_.topology.memory_features = AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY;
+  EXPECT_EQ(amdf_gpu_kfd_memory_qualify_local(&device_), AMDF_STATUS_OK);
+  EXPECT_EQ(device_.topology.memory_features,
+            AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY);
+  device_.topology.integrated = true;
+  device_.topology.vram.total_byte_length = 0;
+  device_.topology.memory_features = 0;
+  EXPECT_EQ(amdf_gpu_kfd_memory_qualify_local(&device_), AMDF_STATUS_OK);
+  EXPECT_EQ(device_.topology.memory_features, 0u);
+  EXPECT_TRUE(native_.allocation_attempts.empty());
+  EXPECT_EQ(native_.export_count, 0u);
+}
+
+TEST_F(KfdBufferNativeTest, FailedLocalMemoryProbeReleasesResources) {
+  UseIntegratedLocalMemory();
+  const struct {
+    int allocation_error;
+    int export_error;
+    int query_error;
+    uint64_t query_size;
+    int expected_error;
+  } cases[] = {
+      {ENOMEM, 0, 0, 4096, 0}, {ENOSPC, 0, 0, 4096, 0},
+      {0, ENOTTY, 0, 4096, 0}, {0, 0, EOPNOTSUPP, 4096, 0},
+      {0, 0, EINVAL, 4096, 0}, {ENODEV, 0, 0, 4096, ENODEV},
+      {0, 0, EIO, 4096, EIO},  {0, 0, 0, 8192, EPROTO},
+  };
+  expected_metadata_free_count_ = 0;
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.allocation_error);
+    SCOPED_TRACE(test.export_error);
+    SCOPED_TRACE(test.query_error);
+    SCOPED_TRACE(test.query_size);
+    ++expected_metadata_free_count_;
+    native_.allocation_attempts.clear();
+    native_.allocation_errors = {test.allocation_error};
+    native_.export_error = test.export_error;
+    native_.domain_query_error = test.query_error;
+    native_.domain_byte_length = test.query_size;
+    const amdf_status_t expected =
+        test.expected_error == 0
+            ? AMDF_STATUS_OK
+            : amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, test.expected_error);
+    EXPECT_EQ(amdf_gpu_kfd_memory_qualify_local(&device_), expected);
+    EXPECT_EQ(device_.topology.memory_features, 0u);
+    EXPECT_EQ(native_.export_descriptor, -1);
+    EXPECT_FALSE(native_.allocation_live);
+    EXPECT_FALSE(native_.access_live);
+  }
+}
+
+TEST_F(KfdBufferNativeTest, LocalMemoryProbeCloseFailureDoesNotPublish) {
+  UseIntegratedLocalMemory();
+  native_.export_close_error = EIO;
+  EXPECT_EQ(amdf_gpu_kfd_memory_qualify_local(&device_),
+            amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO));
+  EXPECT_EQ(device_.topology.memory_features, 0u);
+  EXPECT_EQ(native_.export_descriptor, -1);
+  EXPECT_EQ(native_.free_count, 1u);
+}
+
+TEST_F(KfdBufferNativeTest, LocalMemoryProbeReleaseFailureDoesNotPublish) {
+  UseIntegratedLocalMemory();
+  expected_metadata_free_count_ = 0;
+  for (int query_error : {0, EOPNOTSUPP}) {
+    SCOPED_TRACE(query_error);
+    ++expected_metadata_free_count_;
+    native_.domain_query_error = query_error;
+    native_.free_error = EIO;
+    EXPECT_EQ(amdf_gpu_kfd_memory_qualify_local(&device_),
+              amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO));
+    EXPECT_EQ(device_.topology.memory_features, 0u);
+    EXPECT_EQ(native_.export_descriptor, -1);
+    EXPECT_TRUE(native_.allocation_live);
+    native_.free_error = 0;
+    ReleaseLeakedReservation();
+  }
+  EXPECT_EQ(native_.free_count, 2u);
+}
 
 TEST_F(KfdBufferNativeTest, ImportsResidencyWithoutAnImplicitDeviceMapping) {
   native_.import_descriptor = device_.render_descriptor;

@@ -347,6 +347,7 @@ amdf_cc_library(
         ":device_state",
         ":hdp",
         ":instance",
+        ":memory",
         ":topology",
         ":user_queue_native",
         "//libamdf/src:allocator",

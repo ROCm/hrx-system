@@ -442,6 +442,7 @@ iree_cc_library(
     ::device_state
     ::hdp
     ::instance
+    ::memory
     ::topology
     ::user_queue_native
     amdf::headers

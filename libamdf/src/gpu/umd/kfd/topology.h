@@ -65,9 +65,6 @@ typedef struct amdf_gpu_kfd_topology_t {
     // CPU-visible VRAM capacity in bytes.
     uint64_t visible_byte_length;
   } vram;
-  // Cached GTT heap capacity. Zero means the sysfs value is absent or zero.
-  // This is a placement-policy input, not additional physical RAM.
-  uint64_t gtt_total_byte_length;
   // Number of native compute queues exposed by this KFD node.
   uint32_t compute_queue_count;
   // Qualified AQL scalar trap-reservation feature, or zero when unknown.
@@ -126,9 +123,10 @@ amdf_status_t amdf_gpu_kfd_topology_query_memory(
     int render_descriptor, uint32_t pci_device_id,
     amdf_gpu_kfd_topology_t* topology);
 
-// Physical placement supported for this package and its cached heap totals.
+// Features of the cached physical VRAM heap. Integrated devices must qualify
+// the native allocation domain before publishing these features.
 amdf_gpu_device_features_t amdf_gpu_kfd_topology_memory_features(
-    const amdf_gpu_kfd_topology_t* topology, bool integrated);
+    const amdf_gpu_kfd_topology_t* topology);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -111,6 +111,16 @@ qualifies the native interface and obtains actual memory limits before VM
 initialization. GPU address ranges and integrated-versus-discrete placement come
 from the native device query, without PCI or GFX memory tables.
 
+After VM acquisition, KFD device creation qualifies reserved VRAM on integrated
+GPUs with a one-page VRAM allocation and a DMA-BUF domain query. The query
+reports the buffer's selected domain after any kernel redirection to GTT.
+Only a VRAM result enables LOCAL storage. An unavailable allocation or query
+keeps the conservative SYSTEM path; other native failures remain errors.
+The temporary buffer and export are released before device publication, and
+cleanup errors fail creation. Endpoint discovery and memory-profile queries
+still allocate no device memory. This check establishes the allocation policy,
+not current free capacity or permanent residency.
+
 Windows opens KMT adapters for metadata queries. Those handles and the graphics
 kernel's process bookkeeping are distinct from the driver process context and
 GPU address domain acquired by device creation. GPU qualification uses a private

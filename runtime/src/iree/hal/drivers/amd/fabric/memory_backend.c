@@ -763,13 +763,14 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
       query->scope.family_count && profile &&
       profile->memory_class == AMDF_MEMORY_CLASS_LOCAL &&
       iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL);
+  const uint32_t local_storage_tie_break = 1;
   plan->base.info = (iree_hal_slab_pool_plan_info_t){
       .preference =
           (preferred_host_added ? 1024 : 0) +
           (iree_all_bits_set(memory_type, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL)
                ? 512
                : 0) +
-          (prefer_local_storage ? 1 : 0),
+          (prefer_local_storage ? local_storage_tie_break : 0),
       .placement = placement,
       .host = host,
   };
