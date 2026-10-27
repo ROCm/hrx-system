@@ -54,6 +54,8 @@ typedef struct iree_hal_amd_gpu_pm4_command_program_t {
   uint32_t scratch_wave_byte_length;
   // Encoded payload operation count used only by optional queue profiling.
   uint32_t operation_count;
+  // Union of dispatch queue requirements, admitted once at execution.
+  iree_hal_queue_feature_flags_t required_features;
   // Optional host-only dispatch attribution, independently retainable by a
   // sink.
   iree_hal_amd_gpu_profile_commands_t* profile;

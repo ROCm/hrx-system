@@ -802,6 +802,13 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
     after.cache_control |= queue->options.barriers.release;
   }
   if (dispatch) {
+    if (dispatch_request->flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
+      // Exclusive queue admission prevents competition from other queues;
+      // these joins also prevent two resident grids on this queue competing
+      // for the resources each was independently admitted to occupy.
+      before.execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
+      after.execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
+    }
     // Instruction upload and host argument publication remain mandatory even
     // when the caller supplies an empty optional payload boundary.
     before.cache_control |= 1u | queue->options.barriers.acquire;
@@ -919,7 +926,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
   if (argument_storage.length) {
     iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
         function, &dispatch_request->launch, dispatch_request->constants,
-        addresses, dispatch_request->flags,
+        addresses, dispatch_request->flags, argument_address,
         arguments->memory.contents.data + argument_offset);
   }
   uint64_t packet_address = 0;
@@ -2227,6 +2234,11 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_dispatch(
           queue->context->target_info.compute.local_data_share_byte_length,
       queue->options.scratch_profile.maximum_wave_byte_length, config,
       constants, bindings.count, flags, &dispatch));
+  if (flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amd_gpu_executable_validate_cooperative_dispatch(
+            executable, token, &dispatch.geometry, flags));
+  }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_dispatch_validate_direct_bindings(
       function->base.kernarg, config.workgroup_count_ref, bindings, flags));
   iree_hal_amd_gpu_profile_operation_t profile_storage;
@@ -2287,7 +2299,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_prepare_native(
             iree_hal_amd_gpu_user_queue_native_priority(queue->base.priority),
         .placement = (amdf_queue_placement_t)queue->base.placement,
         .producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE,
-        .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
+        .required_capabilities =
+            AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+            ((queue->base.features &
+              IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH)
+                 ? AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH
+                 : 0),
         .ring_byte_length = queue->options.command_byte_capacity,
     };
     amdf_user_queue_mapping_info_t mapping;
@@ -2574,6 +2591,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_execute(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create_execute(
       &queue->captures, queue->profile != NULL, waits, signals, command_buffer,
       bindings, &queue->options.barriers, flags, &submission));
+  if (submission->execute.program->required_features & ~base->features) {
+    iree_hal_amd_gpu_pm4_submission_release(submission);
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "recorded cooperative dispatch requires a cooperative queue");
+  }
   const bool capture =
       queue->profile && iree_hal_amd_gpu_profile_captures_commands(
                             queue->profile, queue->options.queue_ordinal,
@@ -2637,14 +2660,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_query_dispatch_concurrency(
     iree_hal_queue_dispatch_concurrency_params_t params,
     iree_hal_queue_dispatch_concurrency_flags_t flags,
     iree_hal_queue_dispatch_concurrency_t* out_concurrency) {
-  const iree_hal_amd_gpu_pm4_queue_t* pm4_queue = (void*)queue;
-  const amdf_queue_format_features_t features =
-      pm4_queue->context->families[pm4_queue->options.family_ordinal]
-          .format_features;
-  const uint32_t scalar_reservation =
-      features & AMDF_GPU_PM4_FORMAT_FEATURE_COMPUTE_TRAP_PRESENT ? 16 : 0;
   return iree_hal_amd_gpu_executable_query_dispatch_concurrency(
-      executable, function, scalar_reservation, params, out_concurrency);
+      executable, function, params, out_concurrency);
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_queue_control(

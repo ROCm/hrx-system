@@ -6,6 +6,32 @@
 
 #include "iree/hal/drivers/amd/gpu/dispatch.h"
 
+void iree_hal_amd_gpu_dispatch_emplace_grid_sync(
+    const iree_hal_amd_gpu_kernarg_layout_t* layout,
+    const iree_hal_amd_gpu_dispatch_geometry_t* dispatch,
+    uint64_t grid_sync_address, void* arguments,
+    iree_hal_amd_gpu_grid_sync_t* grid_sync) {
+  uint64_t workgroup_count = 1;
+  uint64_t workitem_count = 1;
+  for (uint32_t i = 0; i < 3; ++i) {
+    workgroup_count *= dispatch->workgroup_count[i];
+    const uint64_t count = dispatch->workgroup_count[i];
+    const uint64_t size = dispatch->workgroup_size[i];
+    workitem_count *= count * size - (count && dispatch->partial_size[i]
+                                          ? size - dispatch->partial_size[i]
+                                          : 0);
+  }
+  *grid_sync = (iree_hal_amd_gpu_grid_sync_t){
+      .grid_count = workgroup_count ? 1u : 0u,
+      .total_workitem_count = workitem_count,
+      .workgroup_count = (uint32_t)workgroup_count,
+  };
+  if (layout->requirements & IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC) {
+    memcpy((uint8_t*)arguments + layout->grid_sync_offset, &grid_sync_address,
+           sizeof(grid_sync_address));
+  }
+}
+
 // Resource accounting uses the kernel descriptor's encoded allocation, not
 // optional compiler register-use annotations. GFX9's unified VGPR/AGPR count
 // and RDNA's distinct encoding/allocation granules are therefore preserved.

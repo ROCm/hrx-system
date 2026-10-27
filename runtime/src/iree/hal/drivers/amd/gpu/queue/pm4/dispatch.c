@@ -96,6 +96,12 @@ iree_hal_amd_gpu_pm4_dispatch_storage_t iree_hal_amd_gpu_pm4_dispatch_storage(
       storage.length += 16u;
     }
   }
+  if (flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
+    storage.alignment = iree_max(storage.alignment, 8u);
+    storage.grid_sync_offset = (storage.length + 7u) & ~7u;
+    storage.length =
+        storage.grid_sync_offset + sizeof(iree_hal_amd_gpu_grid_sync_t);
+  }
   return storage;
 }
 
@@ -129,14 +135,20 @@ iree_status_t iree_hal_amd_gpu_pm4_dispatch_prepare(
     scratch_wave_byte_length = (uint32_t)required;
     launch_requirements &= ~IREE_HAL_AMD_GPU_PM4_LAUNCH_REQUIREMENT_SCRATCH;
   }
-  if (launch_requirements || function->base.kernarg->requirements) {
+  const uint32_t argument_requirements =
+      function->base.kernarg->requirements &
+      ~((flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) &&
+                !iree_hal_dispatch_uses_indirect_arguments(flags)
+            ? IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC
+            : 0u);
+  if (launch_requirements || argument_requirements) {
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "kernel '%.*s' requires native launch services 0x%x and argument "
         "services 0x%x that this queue has not provisioned "
         "(fixed private segment: %u bytes per workitem)",
         (int)metadata->reflection_name.size, metadata->reflection_name.data,
-        launch_requirements, function->base.kernarg->requirements,
+        launch_requirements, argument_requirements,
         metadata->private_segment_fixed_size);
   }
   if (metadata->has_workgroup_cluster_size) {
@@ -176,7 +188,7 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
     const iree_hal_amd_gpu_pm4_function_t* function,
     const iree_hal_amd_gpu_pm4_dispatch_t* dispatch,
     iree_const_byte_span_t constants, const uint64_t* binding_addresses,
-    iree_hal_dispatch_flags_t flags, void* target) {
+    iree_hal_dispatch_flags_t flags, uint64_t argument_address, void* target) {
   iree_hal_amd_gpu_dispatch_emplace_arguments(&function->base,
                                               &dispatch->geometry, constants,
                                               binding_addresses, flags, target);
@@ -196,6 +208,15 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
         function, dispatch, flags,
         (iree_hal_amd_gpu_pm4_dispatch_packet_t*)((uint8_t*)target +
                                                   storage.packet_offset));
+  }
+  if (flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
+    const iree_hal_amd_gpu_pm4_dispatch_storage_t storage =
+        iree_hal_amd_gpu_pm4_dispatch_storage(function, flags);
+    iree_hal_amd_gpu_dispatch_emplace_grid_sync(
+        function->base.kernarg, &dispatch->geometry,
+        argument_address + storage.grid_sync_offset, target,
+        (iree_hal_amd_gpu_grid_sync_t*)((uint8_t*)target +
+                                        storage.grid_sync_offset));
   }
 }
 

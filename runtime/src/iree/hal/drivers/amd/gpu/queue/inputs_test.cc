@@ -61,6 +61,25 @@ class InputsTest : public ::testing::Test {
   iree_hal_amd_gpu_command_inputs_t inputs_ = {};
 };
 
+TEST_F(InputsTest, ImmediateReplayStateUsesOneDeduplicatedValue) {
+  uint32_t first = 0, second = 0, other = 0;
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_command_inputs_add_constant(&inputs_, 0, &first));
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_command_inputs_add_constant(&inputs_, 0, &second));
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_command_inputs_add_constant(&inputs_, 23, &other));
+  EXPECT_EQ(first, second);
+  EXPECT_NE(first, other);
+  EXPECT_EQ(inputs_.count, 2u);
+  iree_hal_amd_gpu_command_inputs_seal(&inputs_);
+  uint64_t values[2] = {42, 42};
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, nullptr, 0, values));
+  EXPECT_EQ(values[first - inputs_.value_base], 0u);
+  EXPECT_EQ(values[other - inputs_.value_base], 23u);
+}
+
 TEST_F(InputsTest, IndirectAtomicUsesShareOneQualifiedInput) {
   const auto add = iree_hal_amd_gpu_control_rmw({
       .operand = 1,

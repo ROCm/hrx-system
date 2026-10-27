@@ -11,6 +11,7 @@ enum {
   IREE_HAL_AMD_GPU_INPUT_BINDING = 1,
   IREE_HAL_AMD_GPU_INPUT_IMAGE = 2,
   IREE_HAL_AMD_GPU_INPUT_LENGTH = 3,
+  IREE_HAL_AMD_GPU_INPUT_CONSTANT = 4,
   IREE_HAL_AMD_GPU_BINDING_LENGTH = 1u << 2,
 };
 
@@ -18,19 +19,19 @@ enum {
 // requirements; publication reads each source exactly once. Byte offsets belong
 // to immutable GPU fixups, not to a per-command host relocation list.
 typedef struct iree_hal_amd_gpu_command_input_t {
-  // Buffer/image pointer, or binding ordinal, selected by kind.
+  // Buffer/image pointer, binding ordinal, or immediate, selected by kind.
   uintptr_t key;
   // Largest displacement used by any fixup consuming this address.
   uint64_t maximum_offset;
   // Smallest whole-range displacement, or UINT64_MAX for a required address.
   uint64_t minimum_offset;
-  // Direct, binding, image-base, or binding-length input.
+  // Direct, binding, image-base, binding-length, or constant input.
   uint8_t kind;
   // Scalar control base alignment masks: default mode low nibble, INCOMPATIBLE
   // high. Public control offsets are naturally aligned, so both require residue
   // zero.
   uint8_t control_alignment;
-  // Queue/program native site, ignored for image and length inputs.
+  // Queue/program native site, ignored for image, length, and constant inputs.
   uint16_t site;
   // Prepared direct-buffer native slot, unused for other kinds.
   iree_hal_buffer_native_binding_slot_t slot;
@@ -320,6 +321,17 @@ iree_status_t iree_hal_amd_gpu_command_inputs_add_image(
   return iree_hal_amd_gpu_command_input(inputs, input, out_value);
 }
 
+iree_status_t iree_hal_amd_gpu_command_inputs_add_constant(
+    iree_hal_amd_gpu_command_inputs_t* inputs, uint32_t value,
+    uint32_t* out_value) {
+  const iree_hal_amd_gpu_command_input_t input = {
+      .key = value,
+      .kind = IREE_HAL_AMD_GPU_INPUT_CONSTANT,
+      .alignment = 1,
+      .minimum_offset = UINT64_MAX};
+  return iree_hal_amd_gpu_command_input(inputs, input, out_value);
+}
+
 void iree_hal_amd_gpu_command_inputs_seal(
     iree_hal_amd_gpu_command_inputs_t* buffer) {
   for (uint32_t i = 1; i <= buffer->command_buffer->binding_count; ++i) {
@@ -418,6 +430,8 @@ iree_status_t iree_hal_amd_gpu_command_inputs_write(
       value = ((const uint64_t*)input->key)[queue_ordinal];
     } else if (input->kind == IREE_HAL_AMD_GPU_INPUT_LENGTH) {
       value = bindings[input->key].length;
+    } else if (input->kind == IREE_HAL_AMD_GPU_INPUT_CONSTANT) {
+      value = input->key;
     } else {
       iree_hal_buffer_t* source = (void*)input->key;
       iree_hal_buffer_native_binding_slot_t slot = input->slot;

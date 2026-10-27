@@ -648,6 +648,15 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
       function, buffer->maximum_group_segment_byte_length,
       buffer->maximum_scratch_wave_byte_length, config, constants,
       bindings.count, flags, &dispatch));
+  if (flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amd_gpu_executable_validate_cooperative_dispatch(
+            executable, token, &dispatch.geometry, flags));
+    buffer->program->required_features |=
+        IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH;
+    buffer->pending_barrier.execution |=
+        IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
+  }
   const bool indirect_parameters =
       iree_hal_dispatch_uses_indirect_parameters(flags);
   const bool indirect = iree_hal_dispatch_uses_indirect_arguments(flags);
@@ -684,7 +693,27 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
         &buffer->recording.storage, storage.length, storage.alignment,
         &argument_offset, &arguments));
     iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
-        function, &dispatch, constants, NULL, flags, arguments);
+        function, &dispatch, constants, NULL, flags, 0, arguments);
+    if (flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
+      const uint32_t grid_offset = argument_offset + storage.grid_sync_offset;
+      if (function->base.kernarg->requirements &
+          IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC) {
+        IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
+            buffer, true,
+            argument_offset + function->base.kernarg->grid_sync_offset,
+            IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, grid_offset, true));
+      }
+      uint32_t zero = 0;
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_constant(
+          &buffer->inputs, 0, &zero));
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_fixup(
+          &buffer->recording.storage,
+          grid_offset +
+              offsetof(iree_hal_amd_gpu_grid_sync_t, single_grid_sync),
+          zero, 0, 0,
+          IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA |
+              IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE));
+    }
   }
   const uint32_t prepare_words =
       prepare_packet ? IREE_HAL_AMD_GPU_PM4_DISPATCH_PREPARE_WORDS : 0;
@@ -889,6 +918,10 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
   buffer->program->scratch_wave_byte_length =
       iree_max(buffer->program->scratch_wave_byte_length,
                dispatch.scratch_wave_byte_length);
+  if (flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
+    buffer->pending_barrier.execution |=
+        IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
+  }
   ++buffer->program->dispatch_count;
   ++buffer->program->operation_count;
   return iree_ok_status();

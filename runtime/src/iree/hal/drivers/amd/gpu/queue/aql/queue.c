@@ -428,11 +428,15 @@ static uint64_t iree_hal_amd_gpu_aql_argument_length(
       iree_hal_dispatch_uses_indirect_arguments(request->flags)
           ? 0
           : request->function->base.kernarg->byte_length;
-  const uint64_t arguments =
+  uint64_t arguments =
       iree_hal_dispatch_uses_indirect_parameters(request->flags)
           ? iree_align_uint64(length, 8) +
                 sizeof(iree_hal_amd_gpu_aql_indirect_arguments_t)
           : length;
+  if (request->flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
+    arguments =
+        iree_align_uint64(arguments, 8) + sizeof(iree_hal_amd_gpu_grid_sync_t);
+  }
   return sampled ? iree_align_uint64(arguments, 64) +
                        sizeof(iree_hal_amd_gpu_aql_signal_t)
                  : arguments;
@@ -602,10 +606,14 @@ static iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   const uint64_t argument_length =
       dispatch ? iree_hal_amd_gpu_aql_argument_length(request, sampled) : 0;
   const uint64_t argument_alignment =
-      dispatch ? iree_max(layout->alignment, sampled    ? 64u
-                                             : indirect ? 8u
-                                                        : 1u)
-               : 1;
+      dispatch
+          ? iree_max(layout->alignment,
+                     sampled ? 64u
+                     : (indirect ||
+                        (request->flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE))
+                         ? 8u
+                         : 1u)
+          : 1;
   iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
   uint64_t argument_offset = 0, argument_end = 0;
   const iree_hal_amd_gpu_aql_publish_result_t argument_result =
@@ -683,6 +691,19 @@ static iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
         &request->function->base, &request->geometry, request->constants,
         addresses, request->flags,
         arguments->memory.contents.data + argument_offset);
+  }
+  if (dispatch && (request->flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE)) {
+    const uint64_t grid_offset = iree_align_uint64(
+        indirect ? iree_align_uint64(kernarg_length, 8) +
+                       sizeof(iree_hal_amd_gpu_aql_indirect_arguments_t)
+                 : kernarg_length,
+        8);
+    iree_hal_amd_gpu_dispatch_emplace_grid_sync(
+        layout, &request->geometry,
+        arguments->address + argument_offset + grid_offset,
+        arguments->memory.contents.data + argument_offset,
+        (void*)(arguments->memory.contents.data + argument_offset +
+                grid_offset));
   }
   if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER) {
     action->download = (iree_hal_amd_gpu_download_t){0};
@@ -2022,6 +2043,11 @@ static iree_status_t iree_hal_amd_gpu_aql_queue_dispatch(
       (uint32_t)
           queue->context->target_info.compute.local_data_share_byte_length,
       config, constants, bindings.count, flags, &geometry));
+  if (flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amd_gpu_executable_validate_cooperative_dispatch(
+            executable, token, &geometry, flags));
+  }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_dispatch_validate_direct_bindings(
       function->base.kernarg, config.workgroup_count_ref, bindings, flags));
   const iree_hal_amd_gpu_aql_dispatch_request_t request = {
@@ -2117,16 +2143,8 @@ static iree_status_t iree_hal_amd_gpu_aql_queue_query_dispatch_concurrency(
     iree_hal_queue_dispatch_concurrency_params_t params,
     iree_hal_queue_dispatch_concurrency_flags_t flags,
     iree_hal_queue_dispatch_concurrency_t* out_concurrency) {
-  const iree_hal_amd_gpu_aql_queue_t* aql_queue = (void*)queue;
-  const amdf_queue_format_features_t features =
-      aql_queue->context->families[aql_queue->options.family_ordinal]
-          .format_features;
-  const uint32_t scalar_reservation =
-      features & AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_16  ? 16
-      : features & AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_0 ? 0
-                                                                   : UINT32_MAX;
   return iree_hal_amd_gpu_executable_query_dispatch_concurrency(
-      executable, function, scalar_reservation, params, out_concurrency);
+      executable, function, params, out_concurrency);
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_queue_control(
@@ -2322,6 +2340,11 @@ static iree_status_t iree_hal_amd_gpu_aql_queue_execute(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_check_acceptance(queue));
   const iree_hal_amd_gpu_aql_command_program_t* program =
       iree_hal_amd_gpu_aql_command_buffer_program(command_buffer);
+  if (program->required_features & ~base->features) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "recorded cooperative dispatch requires a cooperative queue");
+  }
   const bool capture =
       queue->profile && iree_hal_amd_gpu_profile_captures_commands(
                             queue->profile, queue->options.queue_ordinal,
@@ -2645,8 +2668,12 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
       .priority = iree_hal_amd_gpu_user_queue_native_priority(params->priority),
       .placement = (amdf_queue_placement_t)params->placement,
       .producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE,
-      .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-                               AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
+      .required_capabilities =
+          AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+          AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER |
+          ((params->features & IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH)
+               ? AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH
+               : 0),
       .ring_byte_length = options->command_byte_capacity};
   amdf_user_queue_mapping_info_t host_mapping;
   amdf_user_queue_mapping_info_t device_mapping;

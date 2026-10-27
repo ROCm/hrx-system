@@ -111,6 +111,10 @@ static iree_status_t iree_hal_amd_gpu_kernarg_analyze(
           iree_hal_amd_gpu_kernarg_runtime_fields[kind];
       expected_size = field.size;
       layout->requirements |= field.requirements;
+      if (kind ==
+          IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_MULTIGRID_SYNC_ARG) {
+        layout->grid_sync_offset = (uint16_t)argument->offset;
+      }
       ++layout->runtime_copy_count;
       if (kind >=
               IREE_HAL_AMD_GPU_METADATA_ARGUMENT_KIND_HIDDEN_BLOCK_COUNT_X &&

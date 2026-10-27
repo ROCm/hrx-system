@@ -111,6 +111,8 @@ typedef struct iree_hal_amd_gpu_kernarg_layout_t {
   uint16_t indirect_copy_count;
   // Number of HAL-visible parameters; hidden arguments are excluded.
   uint16_t parameter_count;
+  // Hidden grid-state pointer offset, present only with GRID_SYNC requirements.
+  uint16_t grid_sync_offset;
   // Byte offset from this header to aligned cold parameter reflection.
   uint32_t parameters_offset;
   // Allocator owning the header and all inline records.

@@ -110,6 +110,12 @@ iree_status_t iree_hal_amd_gpu_command_inputs_add_image(
     iree_hal_amd_gpu_command_inputs_t* inputs, const uint64_t* addresses,
     uint32_t* out_value);
 
+// Registers an immediate value shared by all fixups that consume it. A zero
+// value resets shader-owned invocation state on each replay.
+iree_status_t iree_hal_amd_gpu_command_inputs_add_constant(
+    iree_hal_amd_gpu_command_inputs_t* inputs, uint32_t value,
+    uint32_t* out_value);
+
 // Flattens whole-range constraints and releases the recording-only hash index.
 void iree_hal_amd_gpu_command_inputs_seal(
     iree_hal_amd_gpu_command_inputs_t* inputs);

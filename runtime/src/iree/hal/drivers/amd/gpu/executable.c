@@ -97,6 +97,8 @@ typedef struct iree_hal_amd_gpu_executable_t {
   amdf_queue_command_type_t command_type;
   // Size of one protocol-specific function, used by cold shared reflection.
   uint32_t function_size;
+  // Native per-wave trap reserve used to admit cooperative residency.
+  uint32_t scalar_register_reservation;
   // Dense variant-major functions; dispatch selection needs no placement walk.
   void* functions;
   // Inline placements sharing one parsed image and argument layout.
@@ -998,6 +1000,21 @@ iree_status_t iree_hal_amd_gpu_executable_create(
     executable->variant_count = variant_count;
     executable->command_type = command_type;
     executable->function_size = function_size;
+    const amdf_queue_format_features_t format_features =
+        context->families[options->native_family_ordinal].format_features;
+    executable->scalar_register_reservation =
+        command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
+            ? (format_features &
+                       AMDF_GPU_PM4_FORMAT_FEATURE_COMPUTE_TRAP_PRESENT
+                   ? 16u
+                   : 0u)
+            : (format_features &
+                       AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_16
+                   ? 16u
+               : format_features &
+                       AMDF_GPU_AQL_FORMAT_FEATURE_SGPR_TRAP_RESERVE_0
+                   ? 0u
+                   : UINT32_MAX);
     executable->functions = (void*)((uint8_t*)executable + functions_offset);
     executable->variants = (void*)((uint8_t*)executable + variants_offset);
     executable->memories = (void*)((uint8_t*)executable + memories_offset);
@@ -1144,7 +1161,7 @@ const uint64_t* iree_hal_amd_gpu_executable_queue_image_addresses(
 
 iree_status_t iree_hal_amd_gpu_executable_query_dispatch_concurrency(
     iree_hal_executable_t* base_executable,
-    iree_hal_executable_function_t token, uint32_t scalar_register_reservation,
+    iree_hal_executable_function_t token,
     iree_hal_queue_dispatch_concurrency_params_t params,
     iree_hal_queue_dispatch_concurrency_t* out_concurrency) {
   iree_hal_amd_gpu_executable_t* executable = (void*)base_executable;
@@ -1154,7 +1171,49 @@ iree_status_t iree_hal_amd_gpu_executable_query_dispatch_concurrency(
       &executable->context->target_info,
       &executable->image.kernels[token.value],
       &executable->image.metadata.kernels[token.value],
-      scalar_register_reservation, params, out_concurrency);
+      executable->scalar_register_reservation, params, out_concurrency);
+}
+
+iree_status_t iree_hal_amd_gpu_executable_validate_cooperative_dispatch(
+    iree_hal_executable_t* base, iree_hal_executable_function_t token,
+    const iree_hal_amd_gpu_dispatch_geometry_t* geometry,
+    iree_hal_dispatch_flags_t flags) {
+  if (iree_hal_dispatch_uses_indirect_parameters(flags)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "cooperative indirect grids require device-time residency admission");
+  }
+  uint64_t count = 1;
+  for (uint32_t i = 0; i < 3; ++i) {
+    if (!iree_checked_mul_u64(count, geometry->workgroup_count[i], &count) ||
+        count > UINT16_MAX) {
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "cooperative grid exceeds the device-library barrier counter");
+    }
+  }
+  const iree_hal_amd_gpu_executable_t* executable = (void*)base;
+  const iree_hal_queue_dispatch_concurrency_params_t params = {
+      .workgroup_size = {geometry->workgroup_size[0],
+                         geometry->workgroup_size[1],
+                         geometry->workgroup_size[2]},
+      .dynamic_workgroup_local_memory =
+          geometry->group_segment_byte_length -
+          executable->image.metadata.kernels[token.value]
+              .group_segment_fixed_size};
+  iree_hal_queue_dispatch_concurrency_t concurrency;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_dispatch_query_concurrency(
+      &executable->context->target_info,
+      &executable->image.kernels[token.value],
+      &executable->image.metadata.kernels[token.value],
+      executable->scalar_register_reservation, params, &concurrency));
+  if (count >
+      iree_hal_queue_dispatch_concurrency_total_workgroup_count(concurrency)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "cooperative grid cannot be simultaneously resident");
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_amd_gpu_executable_profile_metadata(

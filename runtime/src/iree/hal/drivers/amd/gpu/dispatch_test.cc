@@ -37,6 +37,45 @@ class DispatchTest : public ::testing::Test {
   iree_hal_amd_gpu_dispatch_geometry_t dispatch_ = {};
 };
 
+TEST_F(DispatchTest, CooperativeGridStateIsPrivateAndCompletelyReinitialized) {
+  layout_.requirements = IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC;
+  layout_.grid_sync_offset = 13;
+  layout_.byte_length = 32;
+  dispatch_ = {
+      .workgroup_size = {32, 4, 1},
+      .workgroup_count = {3, 2, 1},
+      .partial_size = {1, 4, 1},
+  };
+  uint8_t arguments[32];
+  memset(arguments, 0xa5, sizeof(arguments));
+  iree_hal_amd_gpu_grid_sync_t state;
+  memset(&state, 0xa5, sizeof(state));
+  const uint64_t address = UINT64_C(0x123456780000);
+  for (int replay = 0; replay < 2; ++replay) {
+    iree_hal_amd_gpu_dispatch_emplace_grid_sync(&layout_, &dispatch_, address,
+                                                arguments, &state);
+    EXPECT_EQ(state.multi_grid_sync, 0u);
+    EXPECT_EQ(state.grid_ordinal, 0u);
+    EXPECT_EQ(state.grid_count, 1u);
+    EXPECT_EQ(state.preceding_workitem_count, 0u);
+    EXPECT_EQ(state.total_workitem_count, 65u * 8u);
+    EXPECT_EQ(state.single_grid_sync[0], 0u);
+    EXPECT_EQ(state.single_grid_sync[1], 0u);
+    EXPECT_EQ(state.workgroup_count, 6u);
+    EXPECT_EQ(state.reserved, 0u);
+    uint64_t pointer = 0;
+    memcpy(&pointer, arguments + 13, sizeof(pointer));
+    EXPECT_EQ(pointer, address);
+    for (size_t i = 0; i < sizeof(arguments); ++i) {
+      if (i < 13 || i >= 21) {
+        EXPECT_EQ(arguments[i], 0xa5);
+      }
+    }
+    state.single_grid_sync[0] = 0x01230004;
+    state.single_grid_sync[1] = 7;
+  }
+}
+
 TEST_F(DispatchTest, DefaultGeometryUsesRequiredMetadata) {
   auto config = iree_hal_make_static_dispatch_config(7, 3, 2);
   IREE_ASSERT_OK(Prepare(config));

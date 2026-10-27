@@ -89,6 +89,18 @@ iree_amdgpu_binary_variants_embed_data(
 )
 
 iree_amdgpu_binary_variants_embed_data(
+    name = "cooperative_images",
+    testonly = True,
+    srcs = ["testdata/cooperative.hip"],
+    binary_name_prefix = "amd_gpu_cooperative",
+    identifier = "iree_hal_amd_gpu_cooperative_images",
+    source_format = "hip",
+    tags = ["manual"],
+    target = "amdgcn-amd-amdhsa",
+    target_selectors_flag = "//runtime/src/iree/hal/drivers/amd/gpu:targets",
+)
+
+iree_amdgpu_binary_variants_embed_data(
     name = "asan_images",
     testonly = True,
     srcs = ["testdata/asan.hip"],

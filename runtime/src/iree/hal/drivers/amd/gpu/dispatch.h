@@ -37,6 +37,38 @@ typedef struct iree_hal_amd_gpu_dispatch_geometry_t {
   uint32_t group_segment_byte_length;
 } iree_hal_amd_gpu_dispatch_geometry_t;
 
+// AMD device-library ABI referenced by hidden_multigrid_sync_arg. Each live
+// invocation owns its words through native execution completion.
+typedef struct iree_hal_amd_gpu_grid_sync_t {
+  // Device address of cross-grid state, zero for a single-device grid.
+  uint64_t multi_grid_sync;
+  // Zero-based grid index, zero for a single-device grid.
+  uint32_t grid_ordinal;
+  // Number of grids, one for a single-device cooperative dispatch.
+  uint32_t grid_count;
+  // Workitems in preceding grids, zero for a single-device grid.
+  uint64_t preceding_workitem_count;
+  // Workitems participating in this launch.
+  uint64_t total_workitem_count;
+  // Device-library-owned arrival and barrier epoch words.
+  uint32_t single_grid_sync[2];
+  // Workgroups participating in this grid.
+  uint32_t workgroup_count;
+  // Reserved ABI padding, always zero.
+  uint32_t reserved;
+} iree_hal_amd_gpu_grid_sync_t;
+static_assert(sizeof(iree_hal_amd_gpu_grid_sync_t) == 48,
+              "cooperative grid state must match the AMD device-library ABI");
+
+// Initializes a private invocation's grid state and its prepared hidden-pointer
+// destination. Geometry and residency were admitted by the queue. This neither
+// allocates nor scans argument metadata; no caller-owned arguments are changed.
+void iree_hal_amd_gpu_dispatch_emplace_grid_sync(
+    const iree_hal_amd_gpu_kernarg_layout_t* layout,
+    const iree_hal_amd_gpu_dispatch_geometry_t* dispatch,
+    uint64_t grid_sync_address, void* arguments,
+    iree_hal_amd_gpu_grid_sync_t* grid_sync);
+
 // Computes architectural residency for a full-endpoint queue using the loaded
 // descriptor and native device limits. Public HAL admission has established
 // nonzero dimensions; function-specific geometry is checked here. Metadata and

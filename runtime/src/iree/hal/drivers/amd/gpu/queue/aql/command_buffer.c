@@ -479,6 +479,14 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_dispatch_prepare(
       function, buffer->maximum_group_segment_byte_length, config, constants,
       bindings.count, flags, &geometry));
+  const bool cooperative = (flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) != 0;
+  if (cooperative) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amd_gpu_executable_validate_cooperative_dispatch(
+            executable, token, &geometry, flags));
+    buffer->program->required_features |=
+        IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH;
+  }
   const bool indirect = iree_hal_dispatch_uses_indirect_parameters(flags);
   const bool external_arguments =
       iree_hal_dispatch_uses_indirect_arguments(flags);
@@ -493,19 +501,50 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
   }
   uint32_t header = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_header(buffer, &header));
+  if (cooperative) {
+    header |= IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED;
+  }
   if (indirect) {
     header = iree_hal_amd_gpu_aql_barrier_join(
         header, IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM);
   }
   const iree_hal_amd_gpu_kernarg_layout_t* layout = function->base.kernarg;
   uint32_t argument_offset = 0;
-  if (!external_arguments && layout->byte_length) {
+  const uint32_t grid_offset = (layout->byte_length + 7u) & ~7u;
+  const uint32_t argument_length =
+      cooperative ? grid_offset + sizeof(iree_hal_amd_gpu_grid_sync_t)
+                  : layout->byte_length;
+  if (!external_arguments && argument_length) {
     void* arguments = NULL;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
-        &buffer->recording, layout->byte_length, layout->alignment,
+        &buffer->recording, argument_length,
+        cooperative ? iree_max(layout->alignment, 8u) : layout->alignment,
         &argument_offset, &arguments));
     iree_hal_amd_gpu_dispatch_emplace_arguments(
         &function->base, &geometry, constants, NULL, flags, arguments);
+    if (cooperative) {
+      iree_hal_amd_gpu_dispatch_emplace_grid_sync(
+          layout, &geometry, 0, arguments,
+          (void*)((uint8_t*)arguments + grid_offset));
+      if (layout->requirements &
+          IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC) {
+        IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
+            buffer, argument_offset + layout->grid_sync_offset, 0,
+            argument_offset + grid_offset,
+            IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA |
+                IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
+      }
+      uint32_t zero = 0;
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_constant(
+          &buffer->inputs, 0, &zero));
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_fixup(
+          &buffer->recording,
+          argument_offset + grid_offset +
+              offsetof(iree_hal_amd_gpu_grid_sync_t, single_grid_sync),
+          zero, 0, 0,
+          IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA |
+              IREE_HAL_AMD_GPU_RECORDING_FIXUP_WIDE));
+    }
   }
   uint32_t argument_value = 0;
   uint64_t argument_addend = argument_offset;
@@ -607,6 +646,9 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
     target->words[14] = block->dispatches.count + 1;
   }
   ++block->dispatches.count;
+  if (cooperative) {
+    buffer->pending_barrier |= IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED;
+  }
   ++buffer->program->dispatch_count;
   ++buffer->program->operation_count;
   return iree_ok_status();

@@ -100,6 +100,14 @@ typedef struct iree_hal_amd_gpu_device_t {
   iree_hal_queue_t** queues;
   // Cold dynamic ownership and device-lifetime causal coordinates.
   iree_hal_amd_gpu_queue_membership_t membership;
+  // KFD admits one cooperative native queue per process/device. Logical
+  // cooperative streams share this device-owned realization.
+  struct {
+    // Cold acquisition lock; ordinary submission never touches it.
+    iree_slim_mutex_t mutex;
+    // Owned dynamic queue, borrowing this device like all other queues.
+    iree_hal_queue_t* queue;
+  } cooperative;
   // Immutable common construction policies captured after placement resolves.
   iree_hal_amd_gpu_pm4_queue_options_t queue_options;
   // Native signal capacity outlives individual producer queues and their
@@ -386,6 +394,16 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       placements |= IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_DEVICE_LOCAL;
     }
   }
+  // Native endpoint queues currently select the complete compute resource.
+  // One indivisible resource describes that contract without inventing native
+  // per-CU mask positions from a logical compute-unit count.
+  const iree_hal_queue_execution_resource_group_spec_t resource_group = {
+      .minimum_selected_resource_count = 1};
+  const iree_hal_queue_execution_resource_spec_t execution_resource = {
+      .group_ordinal = 0,
+      .first_execution_unit_ordinal = 0,
+      .execution_unit_count =
+          device->context->target_info.compute.compute_unit_count};
   iree_hal_queue_family_spec_t family = {
       .name = device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
                   ? IREE_SV("aql")
@@ -396,7 +414,24 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
                ? IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS |
                      IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS
                : 0),
+      .supported_queue_features =
+          user_publication &&
+                  (native_family->user_queue_capabilities &
+                   AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH) &&
+                  (device->target.version.major == 11 ||
+                   (device->target.version.major == 9 &&
+                    ((device->target.version.minor == 4 &&
+                      device->target.version.stepping == 2) ||
+                     (device->target.version.minor == 5 &&
+                      device->target.version.stepping == 0))))
+              ? IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH
+              : 0,
       .provisioned_queue_count = queue_count,
+      .execution_unit_count = execution_resource.execution_unit_count,
+      .execution_resource_group_count = 1,
+      .execution_resource_groups = &resource_group,
+      .execution_resource_count = 1,
+      .execution_resources = &execution_resource,
       .placement_capabilities = placements,
       // COPY_DATA captures the 64-bit CP clock; the native query supplies its
       // platform-specific rate. Zero rate leaves timestamp capture unavailable.
@@ -771,6 +806,7 @@ static bool iree_hal_amd_gpu_device_release_children(
   iree_async_proactor_pool_entry_release(device->proactor_entry);
   iree_hal_device_spec_release(device->spec);
   iree_hal_amd_gpu_device_failure_deinitialize(&device->failure);
+  iree_slim_mutex_deinitialize(&device->cooperative.mutex);
   return true;
 }
 
@@ -798,6 +834,19 @@ static bool iree_hal_amd_gpu_device_poll_shutdown(
 
 static void iree_hal_amd_gpu_device_destroy(iree_hal_device_t* base) {
   iree_hal_amd_gpu_device_t* device = (void*)base;
+  if (device->cooperative.queue) {
+    if (iree_atomic_ref_count_load(
+            &device->cooperative.queue->resource.ref_count) != 1) {
+      iree_hal_amd_gpu_context_report(
+          device->context, amdf_make_api_status(AMDF_STATUS_CODE_BUSY),
+          "GPU device released with cooperative queue users; preserving "
+          "ownership");
+      return;
+    }
+    iree_hal_queue_t* queue = device->cooperative.queue;
+    device->cooperative.queue = NULL;
+    iree_hal_queue_release(queue);
+  }
   if (!iree_hal_amd_gpu_queue_membership_is_empty(&device->membership)) {
     iree_hal_amd_gpu_context_report(
         device->context, amdf_make_api_status(AMDF_STATUS_CODE_BUSY),
@@ -1123,6 +1172,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
                                &device->resource);
   device->host_allocator = host_allocator;
   device->context = context;
+  iree_slim_mutex_initialize(&device->cooperative.mutex);
   device->command_type = context->families[family_ordinal].command_type;
   device->queue_lifecycle = aql ? &iree_hal_amd_gpu_aql_queue_lifecycle
                                 : &iree_hal_amd_gpu_pm4_queue_lifecycle;
@@ -1559,6 +1609,33 @@ static iree_status_t iree_hal_amd_gpu_device_acquire_queue(
     iree_hal_device_t* base, const iree_hal_queue_family_t* family,
     const iree_hal_queue_params_t* params, iree_hal_queue_t** out_queue) {
   iree_hal_amd_gpu_device_t* device = (void*)base;
+  if (params->features & IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH) {
+    if (params->priority != IREE_HAL_QUEUE_PRIORITY_NORMAL ||
+        params->execution_resources.count) {
+      return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "cooperative queues require normal priority and "
+                              "all execution resources");
+    }
+    iree_slim_mutex_lock(&device->cooperative.mutex);
+    iree_hal_queue_t* queue = device->cooperative.queue;
+    iree_status_t status = iree_ok_status();
+    if (queue && params->placement != IREE_HAL_QUEUE_PLACEMENT_DEFAULT &&
+        params->placement != iree_hal_queue_placement(queue)) {
+      status = iree_make_status(
+          IREE_STATUS_UNAVAILABLE,
+          "the shared cooperative queue has a different placement");
+    } else if (!queue) {
+      status = iree_hal_amd_gpu_queue_membership_acquire(
+          &device->membership, params, &device->cooperative.queue);
+      queue = device->cooperative.queue;
+    }
+    if (iree_status_is_ok(status)) {
+      iree_hal_queue_retain(queue);
+      *out_queue = queue;
+    }
+    iree_slim_mutex_unlock(&device->cooperative.mutex);
+    return status;
+  }
   return iree_hal_amd_gpu_queue_membership_acquire(&device->membership, params,
                                                    out_queue);
 }

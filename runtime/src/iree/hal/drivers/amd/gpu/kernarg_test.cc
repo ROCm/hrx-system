@@ -204,6 +204,8 @@ TEST_F(KernargTest, EveryHiddenFieldUsesItsDeclaredDestinationAndWidth) {
   }
   IREE_ASSERT_OK(Build(std::move(arguments), expected.size()));
   EXPECT_EQ(layout_->requirements, 0x1ffu);
+  EXPECT_EQ(layout_->grid_sync_offset, 128u);
+  EXPECT_LE(sizeof(*layout_), 56u);
   EXPECT_EQ(layout_->parameter_count, 0u);
   EXPECT_EQ(layout_->runtime_copy_count, IREE_ARRAYSIZE(values));
   std::vector<uint8_t> actual(expected.size(), 0xa5);
