@@ -1,13 +1,10 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include <dlfcn.h>
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -15,26 +12,18 @@
 #include <vector>
 
 #include "binding/hip/api.h"
+#include "binding/hip/hip_dso_test_util.h"
 #include "iree/testing/gtest.h"
 #include "libhrx/cts/core/amdgpu_hip_printf_test_data.hpp"
 
 namespace {
 
-const char* CandidateLibPath() {
-  if (const char* environment_path = std::getenv("HRX_TEST_LIBAMDHIP64");
-      environment_path && *environment_path != '\0') {
-    return environment_path;
-  }
-  return "libamdhip64.so";
-}
-
 template <typename T>
-T ResolveHipSymbol(void* library, const char* name) {
-  return reinterpret_cast<T>(dlsym(library, name));
+T ResolveHipSymbol(hrx::hip::testing::HipDso& library, const char* name) {
+  return library.Resolve<T>(name);
 }
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
-using HipHALDeinitFn = hipError_t (*)(void);
 using HipHRXSetDeviceEventSinkFn = hipError_t (*)(hrx_device_event_sink_t sink);
 using HipGetDeviceFn = hipError_t (*)(int* device);
 using HipGetDevicePropertiesR0600Fn =
@@ -124,22 +113,79 @@ void CaptureDeviceEvent(void* user_data, const hrx_device_event_t* event) {
   capture->events.push_back(std::move(captured));
 }
 
+class HipDeviceEventSinkTest : public ::testing::Test {
+ protected:
+  static void SetUpTestSuite() {
+    if (hrx_cts_amdgpu_hip_printf_test_kernels_size() == 0) {
+      return;
+    }
+    ASSERT_TRUE(library_.Open()) << library_.error();
+    const auto set_sink = library_.Resolve<HipHRXSetDeviceEventSinkFn>(
+        "hipHRXSetDeviceEventSink");
+    ASSERT_NE(nullptr, set_sink) << library_.error();
+    const hrx_device_event_sink_t sink = {
+        .fn = CaptureDeviceEvent,
+        .user_data = &capture_,
+    };
+    ASSERT_EQ(hipSuccess, set_sink(sink));
+    const auto init = library_.Resolve<HipInitFn>("hipInit");
+    ASSERT_NE(nullptr, init) << library_.error();
+    ASSERT_EQ(hipSuccess, init(/*flags=*/0));
+  }
+
+  static void TearDownTestSuite() {
+    if (!library_.is_open()) {
+      return;
+    }
+    const auto deinit =
+        library_.Resolve<decltype(&hipHALDeinit)>("hipHALDeinit");
+    ASSERT_NE(nullptr, deinit) << library_.error();
+    EXPECT_EQ(hipSuccess, deinit());
+    EXPECT_TRUE(library_.Close()) << library_.error();
+  }
+
+  void SetUp() override {
+    if (hrx_cts_amdgpu_hip_printf_test_kernels_size() == 0) {
+      GTEST_SKIP() << "ROCm device libraries are unavailable";
+    }
+  }
+
+  void TearDown() override {
+    if (output_ || module_) {
+      const auto synchronize =
+          library_.Resolve<HipDeviceSynchronizeFn>("hipDeviceSynchronize");
+      ASSERT_NE(nullptr, synchronize) << library_.error();
+      EXPECT_EQ(hipSuccess, synchronize());
+    }
+    if (output_) {
+      const auto free = library_.Resolve<HipFreeFn>("hipFree");
+      ASSERT_NE(nullptr, free) << library_.error();
+      EXPECT_EQ(hipSuccess, free(output_));
+    }
+    if (module_) {
+      const auto unload =
+          library_.Resolve<HipModuleUnloadFn>("hipModuleUnload");
+      ASSERT_NE(nullptr, unload) << library_.error();
+      EXPECT_EQ(hipSuccess, unload(module_));
+    }
+  }
+
+  // Exact HIP artifact retained through synchronous runtime shutdown.
+  static inline hrx::hip::testing::HipDso library_;
+  // Sink storage outlives every callback and the terminal runtime shutdown.
+  static inline EventCapture capture_;
+  // Workload module released even after an assertion exits the test body.
+  hipModule_t module_ = nullptr;
+  // Workload output released only after its device work has completed.
+  hipDeviceptr_t output_ = nullptr;
+};
+
 // Requires device libraries using the stack/tag hostcall ABI; phase/occupancy
 // device libraries are incompatible with this provider. With a matching device
 // library, opt in using --gtest_also_run_disabled_tests.
-TEST(HipDeviceEventSinkTest,
-     DISABLED_RedirectsBlockingPrintfAcrossRuntimeLifetimes) {
-  if (hrx_cts_amdgpu_hip_printf_test_kernels_size() == 0) {
-    GTEST_SKIP() << "ROCm device libraries are unavailable";
-  }
-
-  void* library = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
-  if (!library) {
-    GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": " << dlerror();
-  }
-
-  const auto init = ResolveHipSymbol<HipInitFn>(library, "hipInit");
-  const auto deinit = ResolveHipSymbol<HipHALDeinitFn>(library, "hipHALDeinit");
+TEST_F(HipDeviceEventSinkTest,
+       DISABLED_RedirectsBlockingPrintfThroughDeviceEventSink) {
+  auto& library = library_;
   const auto set_device_event_sink =
       ResolveHipSymbol<HipHRXSetDeviceEventSinkFn>(library,
                                                    "hipHRXSetDeviceEventSink");
@@ -150,8 +196,6 @@ TEST(HipDeviceEventSinkTest,
           library, "hipGetDevicePropertiesR0600");
   const auto module_load_data =
       ResolveHipSymbol<HipModuleLoadDataFn>(library, "hipModuleLoadData");
-  const auto module_unload =
-      ResolveHipSymbol<HipModuleUnloadFn>(library, "hipModuleUnload");
   const auto module_get_function =
       ResolveHipSymbol<HipModuleGetFunctionFn>(library, "hipModuleGetFunction");
   const auto module_launch_kernel = ResolveHipSymbol<HipModuleLaunchKernelFn>(
@@ -159,38 +203,23 @@ TEST(HipDeviceEventSinkTest,
   const auto device_synchronize =
       ResolveHipSymbol<HipDeviceSynchronizeFn>(library, "hipDeviceSynchronize");
   const auto hip_malloc = ResolveHipSymbol<HipMallocFn>(library, "hipMalloc");
-  const auto hip_free = ResolveHipSymbol<HipFreeFn>(library, "hipFree");
   const auto hip_memcpy = ResolveHipSymbol<HipMemcpyFn>(library, "hipMemcpy");
 
-  ASSERT_NE(nullptr, init);
-  ASSERT_NE(nullptr, deinit);
   ASSERT_NE(nullptr, set_device_event_sink);
   ASSERT_NE(nullptr, get_device);
   ASSERT_NE(nullptr, get_device_properties);
   ASSERT_NE(nullptr, module_load_data);
-  ASSERT_NE(nullptr, module_unload);
   ASSERT_NE(nullptr, module_get_function);
   ASSERT_NE(nullptr, module_launch_kernel);
   ASSERT_NE(nullptr, device_synchronize);
   ASSERT_NE(nullptr, hip_malloc);
-  ASSERT_NE(nullptr, hip_free);
   ASSERT_NE(nullptr, hip_memcpy);
 
-  const hipError_t first_init_result = init(/*flags=*/0);
-  if (first_init_result != hipSuccess) {
-    dlclose(library);
-    GTEST_SKIP() << "hipInit failed: " << first_init_result;
-  }
-
-  EventCapture capture;
   const hrx_device_event_sink_t sink = {
       .fn = CaptureDeviceEvent,
-      .user_data = &capture,
+      .user_data = &capture_,
   };
   EXPECT_EQ(hipErrorSetOnActiveProcess, set_device_event_sink(sink));
-  ASSERT_EQ(hipSuccess, deinit());
-  ASSERT_EQ(hipSuccess, set_device_event_sink(sink));
-  ASSERT_EQ(hipSuccess, init(/*flags=*/0));
 
   int device = 0;
   ASSERT_EQ(hipSuccess, get_device(&device));
@@ -202,21 +231,19 @@ TEST(HipDeviceEventSinkTest,
   ASSERT_NE(nullptr, test_image.file)
       << "no embedded HIP printf HSACO for " << properties.gcnArchName;
 
-  hipModule_t module = nullptr;
-  ASSERT_EQ(hipSuccess, module_load_data(&module, test_image.file->data));
+  ASSERT_EQ(hipSuccess, module_load_data(&module_, test_image.file->data));
   hipFunction_t function = nullptr;
   ASSERT_EQ(hipSuccess,
-            module_get_function(&function, module, "hrx_blocking_printf"));
+            module_get_function(&function, module_, "hrx_blocking_printf"));
 
-  hipDeviceptr_t output = nullptr;
-  ASSERT_EQ(hipSuccess, hip_malloc(&output, 2 * sizeof(int)));
+  ASSERT_EQ(hipSuccess, hip_malloc(&output_, 2 * sizeof(int)));
   const std::array<int, 2> initial_result = {-1, -1};
   ASSERT_EQ(hipSuccess,
-            hip_memcpy(output, initial_result.data(), sizeof(initial_result),
+            hip_memcpy(output_, initial_result.data(), sizeof(initial_result),
                        hipMemcpyHostToDevice));
 
   uint32_t value = 42;
-  hipDeviceptr_t result = output;
+  hipDeviceptr_t result = output_;
   void* arguments[] = {&value, &result};
   ::testing::internal::CaptureStdout();
   const hipError_t launch_result =
@@ -235,15 +262,15 @@ TEST(HipDeviceEventSinkTest,
   constexpr int kPostPrintfMarker = 0xC0FFEE;
   std::array<int, 2> actual_result = {};
   ASSERT_EQ(hipSuccess,
-            hip_memcpy(actual_result.data(), output, sizeof(actual_result),
+            hip_memcpy(actual_result.data(), output_, sizeof(actual_result),
                        hipMemcpyDeviceToHost));
   EXPECT_EQ(kExpectedPrintfLength, actual_result[0]);
   EXPECT_EQ(kPostPrintfMarker, actual_result[1]);
 
   std::vector<CapturedPrintfEvent> events;
   {
-    std::lock_guard<std::mutex> lock(capture.mutex);
-    events = capture.events;
+    std::lock_guard<std::mutex> lock(capture_.mutex);
+    events = capture_.events;
   }
   ASSERT_EQ(1u, events.size());
   const CapturedPrintfEvent& event = events.front();
@@ -271,9 +298,6 @@ TEST(HipDeviceEventSinkTest,
   EXPECT_EQ(0u, event.printf_payload.format_id);
   EXPECT_EQ("hrx cts printf value=42\n", event.text);
   EXPECT_TRUE(event.arguments.empty());
-
-  EXPECT_EQ(hipSuccess, hip_free(output));
-  EXPECT_EQ(hipSuccess, module_unload(module));
 }
 
 }  // namespace

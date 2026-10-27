@@ -744,7 +744,7 @@ hrx_cc_test(
     target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
         ":execution_resource",
-        "//build_tools/bazel:dl",
+        ":hip_dso_test_util",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -789,8 +789,8 @@ hrx_cc_test(
     ],
     target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
+        ":hip_dso_test_util",
         ":launch_params",
-        "//build_tools/bazel:dl",
         "//build_tools/bazel:pthreads",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -862,8 +862,8 @@ hrx_cc_test(
     ],
     target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
+        ":hip_dso_test_util",
         ":launch_params",
-        "//build_tools/bazel:dl",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

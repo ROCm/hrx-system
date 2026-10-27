@@ -127,6 +127,7 @@ hrx_cc_test(
     tags = AMD_GPU_CTS_TAGS,
     target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
     deps = [
+        "//libhrx/src/binding/hip:hip_dso_test_util",
         "//build_tools/amdgpu:target_map_h",
         "//libhrx/cts/tests/executable:amdgpu_executable_test_kernels",
     ] + _HIP_TEST_DEPS,
@@ -224,6 +225,7 @@ hrx_cc_test(
     tags = AMD_GPU_CTS_TAGS,
     target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
     deps = [
+        "//libhrx/src/binding/hip:hip_dso_test_util",
         "//build_tools/amdgpu:target_map_h",
         "//libhrx/cts/tests/executable:amdgpu_executable_test_kernels",
     ] + _HIP_TEST_DEPS,
@@ -244,6 +246,7 @@ hrx_cc_test(
     tags = AMD_GPU_CTS_TAGS,
     target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
     deps = [
+        "//libhrx/src/binding/hip:hip_dso_test_util",
         ":amdgpu_hip_printf_test_kernels",
         "//build_tools/amdgpu:target_map_h",
     ] + _HIP_TEST_DEPS,

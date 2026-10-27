@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <dlfcn.h>
-
 #include <algorithm>
 #include <array>
 #include <condition_variable>
@@ -18,6 +16,7 @@
 #include <vector>
 
 #include "binding/hip/api.h"
+#include "binding/hip/hip_dso_test_util.h"
 #include "iree/testing/gtest.h"
 
 namespace {
@@ -35,18 +34,6 @@ class ScopeExit {
 };
 template <typename Cleanup>
 ScopeExit(Cleanup) -> ScopeExit<Cleanup>;
-
-const char* CandidateLibPath() {
-  if (const char* env = std::getenv("HRX_TEST_LIBAMDHIP64");
-      env && *env != '\0') {
-    return env;
-  }
-#ifdef HRX_TEST_LIBAMDHIP64_PATH
-  return HRX_TEST_LIBAMDHIP64_PATH;
-#else
-  return "libamdhip64.so";
-#endif
-}
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
 using HipDeviceGetAttributeFn = hipError_t (*)(int* value,
@@ -124,8 +111,6 @@ using HipGraphExecBatchMemOpNodeSetParamsFn = hipError_t (*)(
     hipGraphExec_t executable, hipGraphNode_t node, const void* params);
 
 struct HipRuntimeApi {
-  // Handle returned by dlopen for the HIP runtime instance.
-  void* library = nullptr;
   // Initializes the runtime.
   HipInitFn init = nullptr;
   // Queries one device capability.
@@ -208,8 +193,8 @@ struct HipRuntimeApi {
 };
 
 template <typename T>
-T ResolveHipSymbol(void* library, const char* name) {
-  return reinterpret_cast<T>(dlsym(library, name));
+T ResolveHipSymbol(hrx::hip::testing::HipDso& library, const char* name) {
+  return library.Resolve<T>(name);
 }
 
 class StartBarrier {
@@ -243,92 +228,83 @@ class StartBarrier {
 
 class HipStreamValueApiTest : public testing::Test {
  protected:
-  void SetUp() override {
-    if (!api_.library) {
-      const char* library_path = CandidateLibPath();
-      ASSERT_NE(nullptr, library_path)
-          << "the build must provide the libamdhip64 artifact under test";
-      api_.library = dlopen(library_path, RTLD_LAZY | RTLD_LOCAL);
-      ASSERT_NE(nullptr, api_.library)
-          << "cannot dlopen " << library_path << ": " << dlerror();
+  static void SetUpTestSuite() {
+    ASSERT_TRUE(library_.Open()) << library_.error();
 
-      api_.init = ResolveHipSymbol<HipInitFn>(api_.library, "hipInit");
-      api_.device_get_attribute = ResolveHipSymbol<HipDeviceGetAttributeFn>(
-          api_.library, "hipDeviceGetAttribute");
-      api_.malloc = ResolveHipSymbol<HipMallocFn>(api_.library, "hipMalloc");
-      api_.ext_malloc_with_flags = ResolveHipSymbol<HipExtMallocWithFlagsFn>(
-          api_.library, "hipExtMallocWithFlags");
-      api_.free = ResolveHipSymbol<HipFreeFn>(api_.library, "hipFree");
-      api_.malloc_host =
-          ResolveHipSymbol<HipMallocHostFn>(api_.library, "hipMallocHost");
-      api_.free_host =
-          ResolveHipSymbol<HipFreeHostFn>(api_.library, "hipFreeHost");
-      api_.host_get_device_pointer =
-          ResolveHipSymbol<HipHostGetDevicePointerFn>(
-              api_.library, "hipHostGetDevicePointer");
-      api_.memset = ResolveHipSymbol<HipMemsetFn>(api_.library, "hipMemset");
-      api_.memcpy = ResolveHipSymbol<HipMemcpyFn>(api_.library, "hipMemcpy");
-      api_.stream_create =
-          ResolveHipSymbol<HipStreamCreateFn>(api_.library, "hipStreamCreate");
-      api_.stream_destroy = ResolveHipSymbol<HipStreamDestroyFn>(
-          api_.library, "hipStreamDestroy");
-      api_.stream_query =
-          ResolveHipSymbol<HipStreamQueryFn>(api_.library, "hipStreamQuery");
-      api_.stream_synchronize = ResolveHipSymbol<HipStreamSynchronizeFn>(
-          api_.library, "hipStreamSynchronize");
-      api_.write_value_32 = ResolveHipSymbol<HipStreamWriteValue32Fn>(
-          api_.library, "hipStreamWriteValue32");
-      api_.write_value_64 = ResolveHipSymbol<HipStreamWriteValue64Fn>(
-          api_.library, "hipStreamWriteValue64");
-      api_.wait_value_32 = ResolveHipSymbol<HipStreamWaitValue32Fn>(
-          api_.library, "hipStreamWaitValue32");
-      api_.wait_value_64 = ResolveHipSymbol<HipStreamWaitValue64Fn>(
-          api_.library, "hipStreamWaitValue64");
-      api_.batch_mem_op = ResolveHipSymbol<HipStreamBatchMemOpFn>(
-          api_.library, "hipStreamBatchMemOp");
-      api_.stream_begin_capture = ResolveHipSymbol<HipStreamBeginCaptureFn>(
-          api_.library, "hipStreamBeginCapture");
-      api_.stream_end_capture = ResolveHipSymbol<HipStreamEndCaptureFn>(
-          api_.library, "hipStreamEndCapture");
-      api_.stream_is_capturing = ResolveHipSymbol<HipStreamIsCapturingFn>(
-          api_.library, "hipStreamIsCapturing");
-      api_.graph_instantiate = ResolveHipSymbol<HipGraphInstantiateFn>(
-          api_.library, "hipGraphInstantiate");
-      api_.graph_launch =
-          ResolveHipSymbol<HipGraphLaunchFn>(api_.library, "hipGraphLaunch");
-      api_.graph_exec_destroy = ResolveHipSymbol<HipGraphExecDestroyFn>(
-          api_.library, "hipGraphExecDestroy");
-      api_.graph_destroy =
-          ResolveHipSymbol<HipGraphDestroyFn>(api_.library, "hipGraphDestroy");
-      api_.ctx_create =
-          ResolveHipSymbol<HipCtxCreateFn>(api_.library, "hipCtxCreate");
-      api_.ctx_destroy =
-          ResolveHipSymbol<HipCtxDestroyFn>(api_.library, "hipCtxDestroy");
-      api_.ctx_get_current = ResolveHipSymbol<HipCtxGetCurrentFn>(
-          api_.library, "hipCtxGetCurrent");
-      api_.ctx_set_current = ResolveHipSymbol<HipCtxSetCurrentFn>(
-          api_.library, "hipCtxSetCurrent");
-      api_.ctx_enable_peer_access = ResolveHipSymbol<HipCtxEnablePeerAccessFn>(
-          api_.library, "hipCtxEnablePeerAccess");
-      api_.graph_create =
-          ResolveHipSymbol<HipGraphCreateFn>(api_.library, "hipGraphCreate");
-      api_.graph_get_nodes = ResolveHipSymbol<HipGraphGetNodesFn>(
-          api_.library, "hipGraphGetNodes");
-      api_.graph_node_get_type = ResolveHipSymbol<HipGraphNodeGetTypeFn>(
-          api_.library, "hipGraphNodeGetType");
-      api_.graph_add_batch_mem_op_node =
-          ResolveHipSymbol<HipGraphAddBatchMemOpNodeFn>(
-              api_.library, "hipGraphAddBatchMemOpNode");
-      api_.graph_batch_mem_op_node_get_params =
-          ResolveHipSymbol<HipGraphBatchMemOpNodeGetParamsFn>(
-              api_.library, "hipGraphBatchMemOpNodeGetParams");
-      api_.graph_batch_mem_op_node_set_params =
-          ResolveHipSymbol<HipGraphBatchMemOpNodeSetParamsFn>(
-              api_.library, "hipGraphBatchMemOpNodeSetParams");
-      api_.graph_exec_batch_mem_op_node_set_params =
-          ResolveHipSymbol<HipGraphExecBatchMemOpNodeSetParamsFn>(
-              api_.library, "hipGraphExecBatchMemOpNodeSetParams");
-    }
+    api_.init = ResolveHipSymbol<HipInitFn>(library_, "hipInit");
+    api_.device_get_attribute = ResolveHipSymbol<HipDeviceGetAttributeFn>(
+        library_, "hipDeviceGetAttribute");
+    api_.malloc = ResolveHipSymbol<HipMallocFn>(library_, "hipMalloc");
+    api_.ext_malloc_with_flags = ResolveHipSymbol<HipExtMallocWithFlagsFn>(
+        library_, "hipExtMallocWithFlags");
+    api_.free = ResolveHipSymbol<HipFreeFn>(library_, "hipFree");
+    api_.malloc_host =
+        ResolveHipSymbol<HipMallocHostFn>(library_, "hipMallocHost");
+    api_.free_host = ResolveHipSymbol<HipFreeHostFn>(library_, "hipFreeHost");
+    api_.host_get_device_pointer = ResolveHipSymbol<HipHostGetDevicePointerFn>(
+        library_, "hipHostGetDevicePointer");
+    api_.memset = ResolveHipSymbol<HipMemsetFn>(library_, "hipMemset");
+    api_.memcpy = ResolveHipSymbol<HipMemcpyFn>(library_, "hipMemcpy");
+    api_.stream_create =
+        ResolveHipSymbol<HipStreamCreateFn>(library_, "hipStreamCreate");
+    api_.stream_destroy =
+        ResolveHipSymbol<HipStreamDestroyFn>(library_, "hipStreamDestroy");
+    api_.stream_query =
+        ResolveHipSymbol<HipStreamQueryFn>(library_, "hipStreamQuery");
+    api_.stream_synchronize = ResolveHipSymbol<HipStreamSynchronizeFn>(
+        library_, "hipStreamSynchronize");
+    api_.write_value_32 = ResolveHipSymbol<HipStreamWriteValue32Fn>(
+        library_, "hipStreamWriteValue32");
+    api_.write_value_64 = ResolveHipSymbol<HipStreamWriteValue64Fn>(
+        library_, "hipStreamWriteValue64");
+    api_.wait_value_32 = ResolveHipSymbol<HipStreamWaitValue32Fn>(
+        library_, "hipStreamWaitValue32");
+    api_.wait_value_64 = ResolveHipSymbol<HipStreamWaitValue64Fn>(
+        library_, "hipStreamWaitValue64");
+    api_.batch_mem_op = ResolveHipSymbol<HipStreamBatchMemOpFn>(
+        library_, "hipStreamBatchMemOp");
+    api_.stream_begin_capture = ResolveHipSymbol<HipStreamBeginCaptureFn>(
+        library_, "hipStreamBeginCapture");
+    api_.stream_end_capture = ResolveHipSymbol<HipStreamEndCaptureFn>(
+        library_, "hipStreamEndCapture");
+    api_.stream_is_capturing = ResolveHipSymbol<HipStreamIsCapturingFn>(
+        library_, "hipStreamIsCapturing");
+    api_.graph_instantiate = ResolveHipSymbol<HipGraphInstantiateFn>(
+        library_, "hipGraphInstantiate");
+    api_.graph_launch =
+        ResolveHipSymbol<HipGraphLaunchFn>(library_, "hipGraphLaunch");
+    api_.graph_exec_destroy = ResolveHipSymbol<HipGraphExecDestroyFn>(
+        library_, "hipGraphExecDestroy");
+    api_.graph_destroy =
+        ResolveHipSymbol<HipGraphDestroyFn>(library_, "hipGraphDestroy");
+    api_.ctx_create =
+        ResolveHipSymbol<HipCtxCreateFn>(library_, "hipCtxCreate");
+    api_.ctx_destroy =
+        ResolveHipSymbol<HipCtxDestroyFn>(library_, "hipCtxDestroy");
+    api_.ctx_get_current =
+        ResolveHipSymbol<HipCtxGetCurrentFn>(library_, "hipCtxGetCurrent");
+    api_.ctx_set_current =
+        ResolveHipSymbol<HipCtxSetCurrentFn>(library_, "hipCtxSetCurrent");
+    api_.ctx_enable_peer_access = ResolveHipSymbol<HipCtxEnablePeerAccessFn>(
+        library_, "hipCtxEnablePeerAccess");
+    api_.graph_create =
+        ResolveHipSymbol<HipGraphCreateFn>(library_, "hipGraphCreate");
+    api_.graph_get_nodes =
+        ResolveHipSymbol<HipGraphGetNodesFn>(library_, "hipGraphGetNodes");
+    api_.graph_node_get_type = ResolveHipSymbol<HipGraphNodeGetTypeFn>(
+        library_, "hipGraphNodeGetType");
+    api_.graph_add_batch_mem_op_node =
+        ResolveHipSymbol<HipGraphAddBatchMemOpNodeFn>(
+            library_, "hipGraphAddBatchMemOpNode");
+    api_.graph_batch_mem_op_node_get_params =
+        ResolveHipSymbol<HipGraphBatchMemOpNodeGetParamsFn>(
+            library_, "hipGraphBatchMemOpNodeGetParams");
+    api_.graph_batch_mem_op_node_set_params =
+        ResolveHipSymbol<HipGraphBatchMemOpNodeSetParamsFn>(
+            library_, "hipGraphBatchMemOpNodeSetParams");
+    api_.graph_exec_batch_mem_op_node_set_params =
+        ResolveHipSymbol<HipGraphExecBatchMemOpNodeSetParamsFn>(
+            library_, "hipGraphExecBatchMemOpNodeSetParams");
 
     ASSERT_NE(nullptr, api_.init);
     ASSERT_NE(nullptr, api_.device_get_attribute);
@@ -370,6 +346,24 @@ class HipStreamValueApiTest : public testing::Test {
     ASSERT_NE(nullptr, api_.graph_exec_batch_mem_op_node_set_params);
 
     ASSERT_EQ(hipSuccess, api_.init(/*flags=*/0));
+  }
+
+  static void TearDownTestSuite() {
+    if (!library_.is_open()) {
+      return;
+    }
+    const auto deinit =
+        library_.Resolve<decltype(&hipHALDeinit)>("hipHALDeinit");
+    ASSERT_NE(nullptr, deinit) << library_.error();
+    EXPECT_EQ(hipSuccess, deinit());
+    EXPECT_TRUE(library_.Close()) << library_.error();
+  }
+
+  void SetUp() override {
+    const auto get_last_error =
+        library_.Resolve<decltype(&hipGetLastError)>("hipGetLastError");
+    ASSERT_NE(nullptr, get_last_error) << library_.error();
+    (void)get_last_error();
     int can_use_stream_wait_value = 0;
     ASSERT_EQ(hipSuccess,
               api_.device_get_attribute(&can_use_stream_wait_value,
@@ -465,6 +459,9 @@ class HipStreamValueApiTest : public testing::Test {
     streams_.erase(it);
   }
 
+  // Exact HIP artifact retained through synchronous suite shutdown.
+  static inline hrx::hip::testing::HipDso library_;
+  // Borrowed entry points resolved once before the suite initializes.
   static HipRuntimeApi api_;
   std::vector<hipStream_t> streams_;
   std::vector<void*> allocations_;

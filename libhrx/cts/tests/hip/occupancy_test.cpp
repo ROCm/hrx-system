@@ -1,30 +1,20 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include <dlfcn.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 
 #include "binding/hip/api.h"
+#include "binding/hip/hip_dso_test_util.h"
 #include "iree/testing/gtest.h"
 #include "libhrx/cts/core/amdgpu_executable_test_data.hpp"
 
 namespace {
 
-const char* CandidateLibPath() {
-  if (const char* environment_path = std::getenv("HRX_TEST_LIBAMDHIP64");
-      environment_path && *environment_path != '\0') {
-    return environment_path;
-  }
-  return "libamdhip64.so";
-}
-
 template <typename T>
-T ResolveHipSymbol(void* library, const char* name) {
-  return reinterpret_cast<T>(dlsym(library, name));
+T ResolveHipSymbol(hrx::hip::testing::HipDso& library, const char* name) {
+  return library.Resolve<T>(name);
 }
 
 using HipInitFn = hipError_t (*)(unsigned int flags);
@@ -102,13 +92,32 @@ struct ScopedRegistration {
 
 void OccupancyHostStub() {}
 
-TEST(HipOccupancyTest, LoadedAndRegisteredFunctionsUseExactQueueOccupancy) {
-  void* library = dlopen(CandidateLibPath(), RTLD_NOW | RTLD_LOCAL);
-  if (!library) {
-    GTEST_SKIP() << "cannot dlopen " << CandidateLibPath() << ": " << dlerror();
+class HipOccupancyTest : public ::testing::Test {
+ protected:
+  static void SetUpTestSuite() {
+    ASSERT_TRUE(library_.Open()) << library_.error();
+    const auto init = library_.Resolve<HipInitFn>("hipInit");
+    ASSERT_NE(nullptr, init) << library_.error();
+    ASSERT_EQ(hipSuccess, init(/*flags=*/0));
   }
 
-  const auto init = ResolveHipSymbol<HipInitFn>(library, "hipInit");
+  static void TearDownTestSuite() {
+    if (!library_.is_open()) {
+      return;
+    }
+    const auto deinit =
+        library_.Resolve<decltype(&hipHALDeinit)>("hipHALDeinit");
+    ASSERT_NE(nullptr, deinit) << library_.error();
+    EXPECT_EQ(hipSuccess, deinit());
+    EXPECT_TRUE(library_.Close()) << library_.error();
+  }
+
+  // Exact HIP artifact retained through synchronous runtime shutdown.
+  static inline hrx::hip::testing::HipDso library_;
+};
+
+TEST_F(HipOccupancyTest, LoadedAndRegisteredFunctionsUseExactQueueOccupancy) {
+  auto& library = library_;
   const auto get_device =
       ResolveHipSymbol<HipGetDeviceFn>(library, "hipGetDevice");
   const auto get_device_properties =
@@ -151,7 +160,6 @@ TEST(HipOccupancyTest, LoadedAndRegisteredFunctionsUseExactQueueOccupancy) {
   const auto get_func_by_symbol =
       ResolveHipSymbol<HipGetFuncBySymbolFn>(library, "hipGetFuncBySymbol");
 
-  ASSERT_NE(nullptr, init);
   ASSERT_NE(nullptr, get_device);
   ASSERT_NE(nullptr, get_device_properties);
   ASSERT_NE(nullptr, module_load_data);
@@ -169,10 +177,6 @@ TEST(HipOccupancyTest, LoadedAndRegisteredFunctionsUseExactQueueOccupancy) {
   ASSERT_NE(nullptr, register_function);
   ASSERT_NE(nullptr, get_func_by_symbol);
 
-  const hipError_t init_result = init(/*flags=*/0);
-  if (init_result != hipSuccess) {
-    GTEST_SKIP() << "hipInit failed: " << init_result;
-  }
   int device = 0;
   ASSERT_EQ(hipSuccess, get_device(&device));
   hipDeviceProp_t properties = {};
