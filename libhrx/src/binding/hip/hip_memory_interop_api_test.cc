@@ -9,10 +9,14 @@
 #include <cstdint>
 #include <cstring>
 #include <semaphore>
+#include <utility>
 
 #include "api.h"
+#include "common/context.h"
+#include "common/stream.h"
 #include "hip_dso_test_util.h"
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
 
 namespace {
 
@@ -205,6 +209,99 @@ class HipMemoryInteropApiTest : public testing::Test {
   // Releases a compiled native-copy capture.
   decltype(&hipGraphExecDestroy) graph_exec_destroy_ = nullptr;
 };
+
+// Replaces a quiescent stream's synchronization dependency and restores its
+// original owner on every exit, before fixture cleanup can submit more work.
+class ScopedStreamTimeline {
+ public:
+  ScopedStreamTimeline(iree_hal_streaming_stream_t* stream,
+                       iree_hal_semaphore_t* replacement,
+                       decltype(&iree_hal_resource_release) release)
+      : stream_(stream),
+        original_(std::exchange(stream->timeline_semaphore, replacement)),
+        release_(release) {}
+
+  ScopedStreamTimeline(const ScopedStreamTimeline&) = delete;
+  ScopedStreamTimeline& operator=(const ScopedStreamTimeline&) = delete;
+
+  ~ScopedStreamTimeline() {
+    release_(std::exchange(stream_->timeline_semaphore, original_));
+  }
+
+ private:
+  // Borrowed stream, quiescent for the entire replacement scope.
+  iree_hal_streaming_stream_t* stream_;
+  // Owned timeline reference transferred back to |stream_| on exit.
+  iree_hal_semaphore_t* original_;
+  // Resource release from the same DSO that created the replacement timeline.
+  decltype(&iree_hal_resource_release) release_;
+};
+
+TEST_F(HipMemoryInteropApiTest,
+       SynchronousCopiesPreserveProducerFailureAndDestinationBytes) {
+  const auto current_context =
+      dso_.ResolveLocalForTest<decltype(&iree_hal_streaming_context_current)>(
+          "iree_hal_streaming_context_current");
+  const auto create_semaphore =
+      dso_.ResolveLocalForTest<decltype(&iree_hal_semaphore_create)>(
+          "iree_hal_semaphore_create");
+  const auto fail_semaphore =
+      dso_.ResolveLocalForTest<decltype(&iree_hal_semaphore_fail)>(
+          "iree_hal_semaphore_fail");
+  const auto release_resource =
+      dso_.ResolveLocalForTest<decltype(&iree_hal_resource_release)>(
+          "iree_hal_resource_release");
+  const auto get_last_error =
+      dso_.Resolve<decltype(&hipGetLastError)>("hipGetLastError");
+  ASSERT_NE(nullptr, current_context) << dso_.error();
+  ASSERT_NE(nullptr, create_semaphore) << dso_.error();
+  ASSERT_NE(nullptr, fail_semaphore) << dso_.error();
+  ASSERT_NE(nullptr, release_resource) << dso_.error();
+  ASSERT_NE(nullptr, get_last_error) << dso_.error();
+
+  constexpr size_t kLength = 16;
+  ASSERT_EQ(hipSuccess, allocate_(&device_memory_, 2 * kLength));
+  auto* source = static_cast<uint8_t*>(device_memory_);
+  auto* target = source + kLength;
+  std::array<uint8_t, kLength> input;
+  input.fill(0x37);
+  std::array<uint8_t, kLength> initial_target;
+  initial_target.fill(0xC7);
+  std::array<uint8_t, kLength> output;
+  output.fill(0xA3);
+  ASSERT_EQ(hipSuccess,
+            copy_(source, input.data(), kLength, hipMemcpyHostToDevice));
+  ASSERT_EQ(hipSuccess, copy_(target, initial_target.data(), kLength,
+                              hipMemcpyHostToDevice));
+  ASSERT_EQ(hipSuccess, synchronize_());
+
+  auto* context = current_context();
+  ASSERT_NE(nullptr, context);
+  auto* stream = context->default_stream;
+  ASSERT_NE(nullptr, stream);
+  iree_hal_semaphore_t* failed_timeline = nullptr;
+  IREE_ASSERT_OK(create_semaphore(
+      context->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      stream->pending_value, IREE_HAL_SEMAPHORE_FLAG_NONE, &failed_timeline));
+  fail_semaphore(failed_timeline,
+                 iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED));
+  {
+    ScopedStreamTimeline timeline(stream, failed_timeline, release_resource);
+    EXPECT_EQ(hipErrorOutOfMemory,
+              copy_(target, input.data(), kLength, hipMemcpyHostToDevice));
+    EXPECT_EQ(hipErrorOutOfMemory,
+              copy_(output.data(), source, kLength, hipMemcpyDeviceToHost));
+    EXPECT_EQ(hipErrorOutOfMemory,
+              copy_(target, source, kLength, hipMemcpyDeviceToDevice));
+  }
+  std::array<uint8_t, kLength> untouched_output;
+  untouched_output.fill(0xA3);
+  EXPECT_EQ(untouched_output, output);
+  ASSERT_EQ(hipSuccess,
+            copy_(output.data(), target, kLength, hipMemcpyDeviceToHost));
+  EXPECT_EQ(initial_target, output);
+  EXPECT_EQ(hipErrorOutOfMemory, get_last_error());
+}
 
 TEST_F(HipMemoryInteropApiTest, RegisteredHostRangePreservesBytesAndOwnership) {
   ASSERT_EQ(hipSuccess, register_host_(storage_.data(), storage_.size(),
