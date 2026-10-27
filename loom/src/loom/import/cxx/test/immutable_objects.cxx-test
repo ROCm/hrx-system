@@ -145,7 +145,7 @@ using Word = unsigned char __attribute__((vector_size(4)));
 static constexpr bool flags[2] = {false, true};
 static constexpr Code codes[2] = {Code::first, Code::second};
 static constexpr Word words[2] = {{1, 2, 3, 4}, {5, 6, 7, 8}};
-static constexpr char text[] = "Loom";
+static constexpr char text[] = (("Loom"));
 
 bool flag_lookup(unsigned index) { return flags[index & 1u]; }
 Code code_lookup(unsigned index) { return codes[index & 1u]; }
