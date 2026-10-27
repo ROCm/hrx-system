@@ -654,11 +654,13 @@ typedef struct amdf_gpu_user_queue_create_info_t {
   amdf_queue_producer_mode_t producer_mode;
   /// Initial queue options. Unknown bits are invalid.
   amdf_gpu_user_queue_flags_t flags;
-  /// Direct producer capabilities that creation must achieve.
+  /// Native publication and scheduling capabilities that creation must achieve.
   /// Optional device publication must be requested here; mapping does not
   /// upgrade a queue's achieved capabilities. A family capability describes
   /// what creation supports, while user_queue_query_info reports what this
   /// queue established. SDMA device publication supports the exact owning GPU.
+  /// Cooperative dispatch may consume a limited native scheduling resource;
+  /// unsuccessful admission fails construction before publishing the queue.
   amdf_user_queue_capabilities_t required_capabilities;
   /// Requested power-of-two primary ring capacity, or zero for the default.
   uint64_t ring_byte_length;

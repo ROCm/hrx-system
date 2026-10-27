@@ -72,6 +72,8 @@ typedef struct amdf_gpu_kfd_topology_t {
   uint64_t gtt_byte_length;
   // Number of native compute queues exposed by this KFD node.
   uint32_t compute_queue_count;
+  // Cooperative scheduling resources exposed by this KFD node, or zero.
+  uint32_t global_wave_sync_count;
   // Qualified AQL scalar trap-reservation feature, or zero when unknown.
   amdf_queue_format_features_t aql_scalar_register_features;
   // Native SDMA engines and exact packet-ABI identity.

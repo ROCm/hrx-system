@@ -165,6 +165,7 @@ static amdf_status_t amdf_gpu_kfd_read_node(
     SDMA_XGMI_ENGINE_COUNT,
     SDMA_QUEUE_COUNT_PER_ENGINE,
     IO_LINK_COUNT,
+    GLOBAL_WAVE_SYNC_COUNT,
     PROPERTY_COUNT,
   };
   const char* names[PROPERTY_COUNT] = {
@@ -190,6 +191,7 @@ static amdf_status_t amdf_gpu_kfd_read_node(
       "num_sdma_xgmi_engines",
       "num_sdma_queues_per_engine",
       "io_links_count",
+      "num_gws",
   };
   uint32_t values[PROPERTY_COUNT] = {0};
   uint32_t present = 0;
@@ -283,6 +285,7 @@ static amdf_status_t amdf_gpu_kfd_read_node(
           },
   };
   topology->compute_queue_count = values[COMPUTE_QUEUE_COUNT];
+  topology->global_wave_sync_count = values[GLOBAL_WAVE_SYNC_COUNT];
   topology->memory_peers.count = values[P2P_LINK_COUNT];
   topology->sdma.engine_count = values[SDMA_ENGINE_COUNT];
   topology->sdma.xgmi_engine_count = values[SDMA_XGMI_ENGINE_COUNT];

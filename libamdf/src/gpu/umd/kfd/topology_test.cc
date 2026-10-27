@@ -235,7 +235,8 @@ TEST_F(KfdTopologyTest, DiscoversMemoryAndSdmaWithoutComputeStorageMetadata) {
   WriteProperties(
       "num_sdma_engines 2\n"
       "num_sdma_xgmi_engines 14\n"
-      "num_sdma_queues_per_engine 8\n");
+      "num_sdma_queues_per_engine 8\n"
+      "num_gws 64\n");
   amdf_gpu_kfd_topology_t topology = {};
   ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
                 &endpoint_, amdf_allocator_system(), &topology),
@@ -255,6 +256,7 @@ TEST_F(KfdTopologyTest, DiscoversMemoryAndSdmaWithoutComputeStorageMetadata) {
   EXPECT_EQ(topology.sdma.engine_count, 2u);
   EXPECT_EQ(topology.sdma.xgmi_engine_count, 14u);
   EXPECT_EQ(topology.sdma.queue_count_per_engine, 8u);
+  EXPECT_EQ(topology.global_wave_sync_count, 64u);
   EXPECT_TRUE(topology.sdma.ip.exact);
   EXPECT_EQ(topology.sdma.ip.major, 4u);
   EXPECT_EQ(topology.sdma.ip.minor, 4u);

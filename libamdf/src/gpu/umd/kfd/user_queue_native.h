@@ -41,6 +41,12 @@ typedef struct amdf_gpu_kfd_user_queue_native_api_t {
   amdf_status_t (*queue_create)(
       void* user_data, amdf_gpu_umd_device_t* device,
       struct kfd_ioctl_create_queue_args* inout_arguments);
+  // Establishes cooperative scheduling on an unpublished live queue. Failure
+  // may retain native admission progress; the queue must still be destroyed.
+  // Successful queue destruction consumes any established admission.
+  amdf_status_t (*queue_enable_cooperative)(void* user_data,
+                                            amdf_gpu_umd_device_t* device,
+                                            uint32_t queue_identifier);
   // Disconnects or reconnects an existing queue. Failure does not prove its
   // native mapping state; the owner preserves all backing until destruction.
   amdf_status_t (*queue_update)(

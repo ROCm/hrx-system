@@ -14,6 +14,40 @@
 
 namespace {
 
+class GpuCooperativeQueueTest
+    : public GpuCommandTest,
+      public ::testing::WithParamInterface<amdf_queue_command_type_t> {
+ protected:
+  GpuCooperativeQueueTest()
+      : GpuCommandTest({
+            .command_type = GetParam(),
+            .roles = AMDF_QUEUE_ROLE_COMPUTE,
+            .user_queue_capabilities =
+                AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH,
+        }) {}
+};
+
+TEST_P(GpuCooperativeQueueTest, EstablishesNativeAdmissionBeforePublication) {
+  const auto required = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                        AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH;
+  GpuUserQueue* queue = nullptr;
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(
+      family_, &queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {}, required));
+  EXPECT_EQ(queue->info.capabilities & required, required);
+  // No packet is published. Fixture teardown releases native admission with
+  // the empty queue before the next protocol borrows the same cached device.
+}
+
+INSTANTIATE_TEST_SUITE_P(Protocols, GpuCooperativeQueueTest,
+                         ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                           AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                         [](const auto& info) {
+                           return info.param == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4
+                                      ? "Pm4"
+                                      : "Aql";
+                         });
+
 struct RingCapacityCase {
   // Native packet representation and progress units.
   amdf_queue_command_type_t command_type;

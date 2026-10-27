@@ -244,7 +244,9 @@ TEST(GpuEndpointProfileTest, RejectsIncompleteOrInconsistentProperties) {
       .format_version = AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1,
       .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_USER,
       .roles = AMDF_QUEUE_ROLE_COMPUTE,
-      .user_queue_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
+      .user_queue_capabilities =
+          AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+          AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH,
       .producer_modes = AMDF_QUEUE_PRODUCER_MODE_BIT_SINGLE,
       .priority_capabilities = AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL,
       .placement_capabilities = AMDF_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL |
@@ -262,6 +264,11 @@ TEST(GpuEndpointProfileTest, RejectsIncompleteOrInconsistentProperties) {
       .ring_byte_length_alignment = 4096,
   };
   EXPECT_TRUE(amdf_gpu_endpoint_profile_initialize(&properties, &profile));
+  EXPECT_EQ(profile.queue_families[0].user_queue_capabilities,
+            properties.queue_families[0].user_queue_capabilities);
+  properties.queue_families[0].roles = AMDF_QUEUE_ROLE_TRANSFER;
+  EXPECT_FALSE(amdf_gpu_endpoint_profile_initialize(&properties, &profile));
+  properties.queue_families[0].roles = AMDF_QUEUE_ROLE_COMPUTE;
   for (uint32_t placement = 0; placement < AMDF_QUEUE_PLACEMENT_COUNT;
        ++placement) {
     EXPECT_EQ(profile.queue_families[0].host_publication[placement],
@@ -279,7 +286,9 @@ TEST(GpuEndpointProfileTest, RejectsIncompleteOrInconsistentProperties) {
       .format_version = 1,
       .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_USER,
       .roles = AMDF_QUEUE_ROLE_COMPUTE,
-      .user_queue_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
+      .user_queue_capabilities =
+          AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+          AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH,
       .producer_modes = AMDF_QUEUE_PRODUCER_MODE_BIT_SINGLE,
       .priority_capabilities = AMDF_QUEUE_PRIORITY_CAPABILITY_NORMAL,
       .metadata =

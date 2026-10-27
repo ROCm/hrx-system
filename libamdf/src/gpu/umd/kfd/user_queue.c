@@ -380,6 +380,12 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
       !amdf_gpu_kfd_user_queue_select_plan(device, create_info, &plan)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
+  const bool cooperative =
+      (create_info->required_capabilities &
+       AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH) != 0;
+  if (cooperative && create_info->priority != AMDF_QUEUE_PRIORITY_NORMAL) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
 
   amdf_gpu_kfd_aql_descriptor_t aql_descriptor = {0};
   if (plan.aql.xcc_count != 0) {
@@ -524,6 +530,10 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
   }
 
   size_t doorbell_byte_offset = 0;
+  if (amdf_status_is_ok(status) && cooperative) {
+    status = queue->native_api->queue_enable_cooperative(
+        queue->native_api->user_data, device, queue->queue_identifier);
+  }
   if (amdf_status_is_ok(status)) {
     const size_t mapping_byte_length = queue->plan.doorbell.mapping_byte_length;
     const uint64_t mapping_mask = mapping_byte_length - 1;
@@ -565,10 +575,13 @@ amdf_status_t amdf_gpu_umd_user_queue_create(
             {
                 .words = {device->topology.gpu_id, (uintptr_t)queue},
             },
-        .capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-                        (queue->device_doorbell.native != NULL
-                             ? AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER
-                             : 0),
+        .capabilities =
+            AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+            (cooperative ? AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH
+                         : 0) |
+            (queue->device_doorbell.native != NULL
+                 ? AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER
+                 : 0),
         .placement = queue->plan.ring.placement,
         .ring_byte_length = queue->plan.ring.primary_byte_length,
         .metadata_ring_byte_length = queue->plan.ring.metadata_byte_length,

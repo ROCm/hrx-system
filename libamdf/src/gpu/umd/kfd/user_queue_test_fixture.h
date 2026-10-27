@@ -146,7 +146,25 @@ struct FakeNativeState {
     auto* self = static_cast<FakeNativeState*>(user_data);
     ++self->queue_destroy_count;
     self->destroyed_queue_identifiers.push_back(queue_identifier);
+    if (amdf_status_is_ok(self->queue_destroy_status)) {
+      self->cooperative.live = false;
+    }
     return self->queue_destroy_status;
+  }
+
+  static amdf_status_t QueueEnableCooperative(void* user_data,
+                                              amdf_gpu_umd_device_t*,
+                                              uint32_t queue_identifier) {
+    auto* self = static_cast<FakeNativeState*>(user_data);
+    EXPECT_EQ(self->queue_create_count, 1);
+    EXPECT_EQ(self->queue_destroy_count, 0);
+    EXPECT_EQ(self->doorbell_map_count, 0);
+    EXPECT_EQ(queue_identifier, self->created_queue_identifier);
+    ++self->cooperative.call_count;
+    // KFD may change admission before its fallible queue update completes.
+    self->cooperative.live = true;
+    return self->FailCreationOperation() ? self->creation_failure
+                                         : AMDF_STATUS_OK;
   }
 
   static amdf_status_t QueueUpdate(
@@ -254,6 +272,7 @@ struct FakeNativeState {
     queue_create_count = 0;
     queue_destroy_count = 0;
     queue_destroy_status = AMDF_STATUS_OK;
+    cooperative = {};
     queue_update = {};
     host_publication = {};
     destroyed_queue_identifiers.clear();
@@ -294,6 +313,13 @@ struct FakeNativeState {
   int queue_create_count = 0;
   int queue_destroy_count = 0;
   amdf_status_t queue_destroy_status = AMDF_STATUS_OK;
+  // Cooperative admission belongs to the native queue through destruction.
+  struct {
+    // Number of unpublished-queue admission attempts.
+    uint32_t call_count = 0;
+    // Native registration can remain live even after a failed admission call.
+    bool live = false;
+  } cooperative;
   // Native host publication below the queue ownership boundary.
   struct {
     // Completed native release attempts.
@@ -492,6 +518,7 @@ class KfdUserQueueTest : public ::testing::Test {
       .buffer_destroy = FakeNativeState::BufferDestroy,
       .buffer_abandon = FakeNativeState::BufferAbandon,
       .queue_create = FakeNativeState::QueueCreate,
+      .queue_enable_cooperative = FakeNativeState::QueueEnableCooperative,
       .queue_update = FakeNativeState::QueueUpdate,
       .queue_destroy = FakeNativeState::QueueDestroy,
       .doorbell_map = FakeNativeState::DoorbellMap,

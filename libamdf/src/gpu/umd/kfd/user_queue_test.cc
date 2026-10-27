@@ -8,6 +8,71 @@
 
 namespace {
 
+TEST_F(KfdUserQueueTest, CooperativeAdmissionBelongsToThePublishedQueue) {
+  device_.topology.global_wave_sync_count = 64;
+  for (const auto command_type :
+       {AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL}) {
+    SCOPED_TRACE(command_type);
+    native_state_.Reset();
+    auto info = MakeCreateInfo(command_type);
+    info.required_capabilities |=
+        AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH;
+    ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &info, &queue_,
+                                             &queue_result_),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(queue_result_.capabilities & info.required_capabilities,
+              info.required_capabilities);
+    EXPECT_EQ(native_state_.cooperative.call_count, 1u);
+    EXPECT_TRUE(native_state_.cooperative.live);
+    if (command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+      EXPECT_EQ(native_state_.observed_aql_descriptor.queue_type, 2u);
+    }
+    ASSERT_EQ(amdf_gpu_umd_user_queue_destroy(queue_), AMDF_STATUS_OK);
+    queue_ = nullptr;
+    EXPECT_FALSE(native_state_.cooperative.live);
+    EXPECT_EQ(native_state_.queue_destroy_count, 1);
+    EXPECT_EQ(native_state_.LiveBufferCount(), 0u);
+  }
+}
+
+TEST_F(KfdUserQueueTest, CooperativeFailureDestroysPartialNativeAdmission) {
+  device_.topology.global_wave_sync_count = 64;
+  auto info = MakeCreateInfo();
+  info.required_capabilities |= AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH;
+  for (int failed_operation = 1; failed_operation <= 8; ++failed_operation) {
+    SCOPED_TRACE(failed_operation);
+    native_state_.Reset();
+    native_state_.failed_creation_operation = failed_operation;
+    auto* const sentinel =
+        reinterpret_cast<amdf_gpu_umd_user_queue_t*>(uintptr_t{1});
+    amdf_gpu_umd_user_queue_t* queue = sentinel;
+    amdf_gpu_umd_user_queue_result_t result = {.ring_byte_length = 17};
+    EXPECT_EQ(amdf_gpu_umd_user_queue_create(&device_, &info, &queue, &result),
+              native_state_.creation_failure);
+    EXPECT_EQ(queue, sentinel);
+    EXPECT_EQ(result.ring_byte_length, 17u);
+    EXPECT_FALSE(native_state_.cooperative.live);
+    EXPECT_EQ(native_state_.LiveBufferCount(), 0u);
+    EXPECT_EQ(native_state_.queue_destroy_count, failed_operation >= 7 ? 1 : 0);
+  }
+}
+
+TEST_F(KfdUserQueueTest, CooperativeAdmissionRequiresNormalPriority) {
+  device_.topology.global_wave_sync_count = 64;
+  for (auto priority : {AMDF_QUEUE_PRIORITY_LOW, AMDF_QUEUE_PRIORITY_HIGH}) {
+    auto info = MakeCreateInfo();
+    info.required_capabilities |=
+        AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH;
+    info.priority = priority;
+    amdf_gpu_umd_user_queue_t* queue = nullptr;
+    amdf_gpu_umd_user_queue_result_t result = {};
+    EXPECT_EQ(amdf_gpu_umd_user_queue_create(&device_, &info, &queue, &result),
+              amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
+    EXPECT_EQ(queue, nullptr);
+    EXPECT_EQ(native_state_.creation_operation_count, 0);
+  }
+}
+
 TEST_F(KfdUserQueueTest, ConstructionDependenciesPublishOnlyOnSuccess) {
   const amdf_gpu_umd_user_queue_create_info_t create_info = MakeCreateInfo();
   for (int failed_operation = 1; failed_operation <= 7; ++failed_operation) {
@@ -32,6 +97,7 @@ TEST_F(KfdUserQueueTest, ConstructionDependenciesPublishOnlyOnSuccess) {
 
 TEST_F(KfdUserQueueTest, PublishesExactNativeQueueAndHostMapping) {
   ASSERT_NO_FATAL_FAILURE(CreateQueue());
+  EXPECT_EQ(native_state_.cooperative.call_count, 0u);
   EXPECT_TRUE(amdf_queue_id_is_valid(&queue_result_.queue_id));
   EXPECT_EQ(queue_result_.capabilities,
             AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER);
