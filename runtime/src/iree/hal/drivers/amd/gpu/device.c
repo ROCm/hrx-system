@@ -437,6 +437,13 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       .family_count = 1,
       .families = &family,
   };
+  const iree_hal_device_timing_spec_t timing = {
+      .timestamp_valid_bits = family.timestamp_valid_bits,
+      .timestamp_frequency_hz = family.timestamp_frequency_hz,
+      .flags = clock.frequency_hz
+                   ? IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS
+                   : IREE_HAL_DEVICE_TIMING_SPEC_FLAG_NONE,
+  };
   const amdf_gpu_endpoint_info_t* native = &device->context->target_info;
   iree_hal_amd_gpu_wavefront_size_support_t wavefront = {0};
   iree_hal_amd_gpu_target_identity_lookup_wavefront_size_support(
@@ -484,6 +491,9 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_spec_builder_set_queues(&builder, &queues);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_device_spec_builder_set_timing(&builder, &timing);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_device_spec_builder_set_dispatch(&builder, &dispatch);
