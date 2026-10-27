@@ -1570,7 +1570,7 @@ static bool iree_hal_streaming_graph_node_has_recorded_dependency_hazard(
 }
 
 static iree_status_t iree_hal_streaming_graph_record_dependency_barrier(
-    iree_hal_command_buffer_t* command_buffer) {
+    iree_hal_command_buffer_t* command_buffer, iree_hal_barrier_flags_t flags) {
   // A dependency orders both command execution and memory visibility. Graph
   // nodes can alternate between dispatches, transfers, and atomics, so make
   // writes from any operation class available to reads by any class.
@@ -1595,6 +1595,7 @@ static iree_status_t iree_hal_streaming_graph_record_dependency_barrier(
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH |
                            IREE_HAL_EXECUTION_STAGE_TRANSFER |
                            IREE_HAL_EXECUTION_STAGE_ATOMIC,
+      .flags = flags,
       .memory_barrier_count = 1,
       .memory_barriers = &memory_barrier,
   };
@@ -1637,6 +1638,7 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
   // do that mapping.
   iree_status_t status = iree_ok_status();
   uint32_t in_stream_count = 0;
+  bool release_to_host = false;
   iree_hal_streaming_node_index_set_t barrier_index_set;
   iree_hal_streaming_node_index_set_reset(&barrier_index_set);
   for (uint32_t i = 0; iree_status_is_ok(status) && i < node_count; ++i) {
@@ -1653,8 +1655,8 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
               node, additional_edges, node_index_map, &barrier_index_set);
       if (preserve_sorted_order || has_dependency_hazard) {
         IREE_RETURN_AND_END_ZONE_IF_ERROR(
-            z0,
-            iree_hal_streaming_graph_record_dependency_barrier(command_buffer));
+            z0, iree_hal_streaming_graph_record_dependency_barrier(
+                    command_buffer, IREE_HAL_BARRIER_FLAG_NONE));
         iree_hal_streaming_node_index_set_reset(&barrier_index_set);
       }
     }
@@ -1705,6 +1707,8 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
             &node->attrs.memcpy;
         status =
             iree_hal_streaming_graph_record_memcpy_node(command_buffer, attrs);
+        release_to_host |= attrs->dst_ref.buffer->memory_kind !=
+                           IREE_HAL_STREAMING_MEMORY_KIND_DEVICE;
         break;
       }
       case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMSET: {
@@ -1748,6 +1752,12 @@ static iree_status_t iree_hal_streaming_graph_record_partition(
                                              node_index_map[node->node_index]);
   }
 
+  if (iree_status_is_ok(status) && release_to_host) {
+    // Publish all registered-host destinations before this partition signals
+    // completion or releases a dependent CPU graph node.
+    status = iree_hal_streaming_graph_record_dependency_barrier(
+        command_buffer, IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_end_debug_group(command_buffer);
   }

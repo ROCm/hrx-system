@@ -15,6 +15,7 @@
 
 #include "common/context.h"
 #include "common/device.h"
+#include "common/graph.h"
 #include "common/host_callback.h"
 #include "common/hrx_bridge.h"
 #include "common/stream.h"
@@ -457,6 +458,75 @@ TEST_F(CpuStreamingMemoryTest,
     EXPECT_EQ(0, std::memcmp(bytes, source.data(), source.size()));
     for (size_t i = 0; i < kSourceSize; ++i) {
       EXPECT_EQ(bytes[kSourceSize + i], i % 8 < 4 ? source[i] : 0xcd);
+    }
+  }
+}
+
+TEST_F(CpuStreamingMemoryTest,
+       CapturedRegisteredCopiesProgressPastBlockedCallbacks) {
+  constexpr size_t kSize = 16;
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, kSize, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
+  IREE_ASSERT_OK(iree_hal_streaming_memory_register_host(
+      context_, registered_storage_.data(), registered_storage_.size(),
+      IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT, &host_buffer_));
+  iree_hal_streaming_buffer_t* input_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
+      context_, kSize, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
+      &input_buffer));
+  const auto release_input = [&](iree_hal_streaming_buffer_t* buffer) {
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    iree_hal_streaming_memory_release_wrapped_buffer(buffer);
+  };
+  std::unique_ptr<iree_hal_streaming_buffer_t, decltype(release_input)>
+      input_owner(input_buffer, release_input);
+
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture(
+      stream_, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  iree_status_t status = iree_hal_streaming_memcpy_host_to_device(
+      context_, device_pointer_, input_buffer->host_ptr, kSize, stream_);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_memcpy_device_to_host(
+        context_, registered_storage_.data(), device_pointer_, kSize, stream_);
+  }
+  iree_hal_streaming_graph_t* graph = nullptr;
+  status =
+      iree_status_join(status, iree_hal_streaming_end_capture(stream_, &graph));
+  std::unique_ptr<iree_hal_streaming_graph_t,
+                  decltype(&iree_hal_streaming_graph_release)>
+      graph_owner(graph, iree_hal_streaming_graph_release);
+  IREE_ASSERT_OK(status);
+  ASSERT_NE(nullptr, graph);
+  // Registered copies are native graph nodes, with no hidden CPU copy jobs or
+  // transfer-sized staging allocations.
+  EXPECT_EQ(graph->node_count, 2u);
+  iree_hal_streaming_graph_exec_t* executable = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+  std::unique_ptr<iree_hal_streaming_graph_exec_t,
+                  decltype(&iree_hal_streaming_graph_exec_release)>
+      executable_owner(executable, iree_hal_streaming_graph_exec_release);
+
+  iree_hal_streaming_stream_t* callback_stream = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_create(
+      context_, context_->queue, IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING, 0,
+      iree_allocator_system(), &callback_stream));
+  ScopedHeldCallback callback(callback_stream);
+  IREE_ASSERT_OK(callback.Start());
+  callback.WaitUntilEntered();
+
+  for (uint8_t value : {0x12, 0x34}) {
+    std::memset(input_buffer->host_ptr, value, kSize);
+    registered_storage_.fill(0xcd);
+    iree_hal_streaming_graph_exec_launch_result_t launch_result;
+    IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(executable, stream_,
+                                                        &launch_result));
+    EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS, launch_result);
+    IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    EXPECT_FALSE(callback.returned());
+    for (uint8_t byte : registered_storage_) {
+      EXPECT_EQ(byte, value);
     }
   }
 }

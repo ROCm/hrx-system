@@ -138,6 +138,27 @@ static iree_status_t iree_hal_streaming_capture_record_host_to_device(
     iree_hal_streaming_graph_node_t** out_terminal_node) {
   iree_hal_streaming_capture_host_to_device_t* capture =
       (iree_hal_streaming_capture_host_to_device_t*)user_data;
+  if (!capture->copy_source_into_graph) {
+    iree_hal_streaming_buffer_ref_t source_ref;
+    iree_status_t status = iree_hal_streaming_memory_lookup_range(
+        graph->context, (iree_hal_streaming_deviceptr_t)capture->src,
+        capture->size, &source_ref);
+    if (iree_status_is_ok(status)) {
+      if (source_ref.buffer->memory_kind ==
+          IREE_HAL_STREAMING_MEMORY_KIND_DEVICE) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "host-to-device source is not host memory");
+      }
+      return iree_hal_streaming_graph_add_copy_ptr_node(
+          graph, dependencies, dependency_count, capture->dst,
+          (iree_hal_streaming_deviceptr_t)capture->src, capture->size,
+          out_terminal_node);
+    }
+    if (!iree_status_is_not_found(status)) {
+      return status;
+    }
+    iree_status_ignore(status);
+  }
   const void* source = capture->src;
   if (capture->copy_source_into_graph) {
     void* graph_source = NULL;
@@ -182,6 +203,25 @@ static iree_status_t iree_hal_streaming_capture_record_device_to_host(
     iree_hal_streaming_graph_node_t** out_terminal_node) {
   iree_hal_streaming_capture_device_to_host_t* capture =
       (iree_hal_streaming_capture_device_to_host_t*)user_data;
+  iree_hal_streaming_buffer_ref_t destination_ref;
+  iree_status_t status = iree_hal_streaming_memory_lookup_range(
+      graph->context, (iree_hal_streaming_deviceptr_t)capture->dst,
+      capture->size, &destination_ref);
+  if (iree_status_is_ok(status)) {
+    if (destination_ref.buffer->memory_kind ==
+        IREE_HAL_STREAMING_MEMORY_KIND_DEVICE) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "device-to-host destination is not host memory");
+    }
+    return iree_hal_streaming_graph_add_copy_ptr_node(
+        graph, dependencies, dependency_count,
+        (iree_hal_streaming_deviceptr_t)capture->dst, capture->src,
+        capture->size, out_terminal_node);
+  }
+  if (!iree_status_is_not_found(status)) {
+    return status;
+  }
+  iree_status_ignore(status);
   iree_hal_streaming_buffer_t* staging = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_allocate_host_staging(
       graph, capture->size, &staging));
