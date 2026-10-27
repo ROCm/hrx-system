@@ -621,15 +621,15 @@ class LoomPresubmitTest(unittest.TestCase):
                 "cmake_cache_value",
                 side_effect=lambda _build_dir, key: {
                     "LOOM_RESOLVED_ARCHITECTURES": ";".join(
-                        self.presubmit.capability_presets.ARCHITECTURES
+                        self.presubmit.target_presets.ARCHITECTURES
                     ),
                     "LOOM_RESOLVED_ARTIFACT_FORMATS": ";".join(
                         value
-                        for value in self.presubmit.capability_presets.ARTIFACT_FORMATS
+                        for value in self.presubmit.target_presets.ARTIFACT_FORMATS
                         if value != "wasm"
                     ),
                     "LOOM_RESOLVED_EXECUTION_SUBSTRATES": ";".join(
-                        self.presubmit.capability_presets.EXECUTION_SUBSTRATES
+                        self.presubmit.target_presets.EXECUTION_SUBSTRATES
                     ),
                 }[key],
             ),
@@ -661,13 +661,13 @@ class LoomPresubmitTest(unittest.TestCase):
                 "cmake_cache_value",
                 side_effect=lambda _build_dir, key: {
                     "LOOM_RESOLVED_ARCHITECTURES": ";".join(
-                        self.presubmit.capability_presets.ARCHITECTURES
+                        self.presubmit.target_presets.ARCHITECTURES
                     ),
                     "LOOM_RESOLVED_ARTIFACT_FORMATS": ";".join(
-                        self.presubmit.capability_presets.ARTIFACT_FORMATS
+                        self.presubmit.target_presets.ARTIFACT_FORMATS
                     ),
                     "LOOM_RESOLVED_EXECUTION_SUBSTRATES": ";".join(
-                        self.presubmit.capability_presets.EXECUTION_SUBSTRATES
+                        self.presubmit.target_presets.EXECUTION_SUBSTRATES
                     ),
                 }[key],
             ),

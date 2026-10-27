@@ -62,8 +62,8 @@ def checked_in_artifact_families(*, repository_root: Path | None = None) -> tupl
             regenerate_command=capability_presets.REGENERATE_COMMAND,
             file_set=capability_presets.checked_in_file_set(),
             input_roots=(
+                "loom/py/loom/build_tools/target_presets.py",
                 "loom/py/loom/gen/target/capability_presets.py",
-                "loom/py/loom/target/capability_presets.py",
             ),
         ),
         GeneratedFileFamily(

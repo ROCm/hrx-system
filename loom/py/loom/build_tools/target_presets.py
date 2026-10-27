@@ -4,17 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Loom target capability presets and Bazel-configure expansion."""
+"""Loom target capability presets used by repository build configuration."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Protocol, cast
-
-ARCHITECTURES = ("aie2p", "amdgpu", "spirv", "vm", "wasm", "x86")
-ARTIFACT_FORMATS = ("elf", "spirv", "vm", "wasm")
-EXECUTION_SUBSTRATES = ("iree_hal", "iree_vm", "wasm_host")
 
 ARCH_DEFINES = {
     "LOOM_ARCH_AIE2P": "aie2p",
@@ -35,42 +29,30 @@ EXECUTE_DEFINES = {
     "LOOM_EXECUTE_IREE_VM": "iree_vm",
     "LOOM_EXECUTE_WASM_HOST": "wasm_host",
 }
+ARCHITECTURES = tuple(ARCH_DEFINES.values())
+ARTIFACT_FORMATS = tuple(EMIT_DEFINES.values())
+EXECUTION_SUBSTRATES = tuple(EXECUTE_DEFINES.values())
 
 
 @dataclass(frozen=True)
 class TargetCapabilities:
-    architectures: tuple[str, ...] = ()
-    artifacts: tuple[str, ...] = ()
-    execution: tuple[str, ...] = ()
+    architectures: tuple[str, ...] = ()  # Compiler architecture providers.
+    artifacts: tuple[str, ...] = ()  # Emitted artifact formats.
+    execution: tuple[str, ...] = ()  # In-process execution substrates.
 
 
 @dataclass(frozen=True)
 class TargetPreset:
-    key: str
-    option: str
-    description: str
-    includes: tuple[str, ...] = ()
+    key: str  # Stable internal and CMake key.
+    option: str  # Portable -D option name.
+    description: str  # User-facing generated documentation.
+    includes: tuple[str, ...] = ()  # Transitively included preset keys.
+    # Capabilities contributed directly by this preset.
     capabilities: TargetCapabilities = field(default_factory=TargetCapabilities)
 
     @property
     def bazel_config(self) -> str:
         return "loom-target-" + self.key.replace("_", "-")
-
-
-class ConfigurationRequest(Protocol):
-    project_state: dict[str, object]
-    enabled_loom_architectures: set[str]
-    enabled_loom_artifact_formats: set[str]
-    enabled_loom_execute: set[str]
-    loom_arch_source: str | None
-    loom_emit_source: str | None
-    loom_execute_source: str | None
-
-    def set_loom_arch(self, architecture: str, enabled: bool) -> None: ...
-
-    def set_loom_emit(self, artifact_format: str, enabled: bool) -> None: ...
-
-    def set_loom_execute(self, execute: str, enabled: bool) -> None: ...
 
 
 TARGET_PRESETS = (
@@ -135,18 +117,9 @@ TARGET_PRESETS = (
     ),
 )
 
-_PRESETS_BY_KEY = {preset.key: preset for preset in TARGET_PRESETS}
-_PRESETS_BY_OPTION = {preset.option: preset for preset in TARGET_PRESETS}
-_PRESETS_BY_BAZEL_CONFIG = {preset.bazel_config: preset for preset in TARGET_PRESETS}
-_STATE_KEY = "loom_capability_presets"
-
-
-@dataclass
-class TargetPresetState:
-    enabled: set[str] = field(default_factory=lambda: {"default"})
-    explicit: set[str] = field(default_factory=set)
-    provenance: tuple[str, ...] = ()
-    exact: bool = False
+PRESETS_BY_KEY = {preset.key: preset for preset in TARGET_PRESETS}
+PRESETS_BY_OPTION = {preset.option: preset for preset in TARGET_PRESETS}
+PRESETS_BY_BAZEL_CONFIG = {preset.bazel_config: preset for preset in TARGET_PRESETS}
 
 
 def _ordered(values: set[str], order: tuple[str, ...]) -> tuple[str, ...]:
@@ -165,7 +138,7 @@ def resolve_presets(keys: set[str] | tuple[str, ...]) -> TargetCapabilities:
             return
         if key in active:
             raise ValueError(f"Loom target preset cycle at {key}")
-        preset = _PRESETS_BY_KEY.get(key)
+        preset = PRESETS_BY_KEY.get(key)
         if preset is None:
             raise ValueError(f"unknown Loom target preset: {key}")
         active.add(key)
@@ -187,14 +160,14 @@ def resolve_presets(keys: set[str] | tuple[str, ...]) -> TargetCapabilities:
 
 
 def _validate_presets() -> None:
-    if len(_PRESETS_BY_KEY) != len(TARGET_PRESETS):
+    if len(PRESETS_BY_KEY) != len(TARGET_PRESETS):
         raise ValueError("duplicate Loom target preset key")
-    if len(_PRESETS_BY_OPTION) != len(TARGET_PRESETS):
+    if len(PRESETS_BY_OPTION) != len(TARGET_PRESETS):
         raise ValueError("duplicate Loom target preset option")
-    if len(_PRESETS_BY_BAZEL_CONFIG) != len(TARGET_PRESETS):
+    if len(PRESETS_BY_BAZEL_CONFIG) != len(TARGET_PRESETS):
         raise ValueError("duplicate Loom target preset Bazel config")
     for preset in TARGET_PRESETS:
-        unknown_includes = set(preset.includes).difference(_PRESETS_BY_KEY)
+        unknown_includes = set(preset.includes).difference(PRESETS_BY_KEY)
         unknown_architectures = set(preset.capabilities.architectures).difference(
             ARCHITECTURES
         )
@@ -214,106 +187,6 @@ def _validate_presets() -> None:
                 f"Loom target preset {preset.key} has unknown capabilities"
             )
         resolve_presets((preset.key,))
-
-
-def _state(request: ConfigurationRequest) -> TargetPresetState:
-    return cast(TargetPresetState, request.project_state[_STATE_KEY])
-
-
-def initialize_request(request: ConfigurationRequest) -> None:
-    request.project_state[_STATE_KEY] = TargetPresetState()
-
-
-def apply_define(
-    request: ConfigurationRequest,
-    name: str,
-    value: str,
-    parse_bool: Callable[[str, str], bool],
-) -> bool:
-    preset = _PRESETS_BY_OPTION.get(name)
-    if preset is not None:
-        state = _state(request)
-        state.explicit.add(preset.key)
-        if parse_bool(name, value):
-            state.enabled.add(preset.key)
-        else:
-            state.enabled.discard(preset.key)
-        return True
-    if name in ARCH_DEFINES:
-        request.set_loom_arch(ARCH_DEFINES[name], parse_bool(name, value))
-        return True
-    if name in EMIT_DEFINES:
-        request.set_loom_emit(EMIT_DEFINES[name], parse_bool(name, value))
-        return True
-    if name in EXECUTE_DEFINES:
-        request.set_loom_execute(EXECUTE_DEFINES[name], parse_bool(name, value))
-        return True
-    return False
-
-
-def apply_native_bazel_arg(request: ConfigurationRequest, arg: str) -> bool:
-    prefix = "--config="
-    if not arg.startswith(prefix):
-        return False
-    preset = _PRESETS_BY_BAZEL_CONFIG.get(arg[len(prefix) :])
-    if preset is None:
-        return False
-    state = _state(request)
-    state.explicit.add(preset.key)
-    state.enabled.add(preset.key)
-    return True
-
-
-def finalize_request(request: ConfigurationRequest) -> None:
-    state = _state(request)
-    sources = (
-        request.loom_arch_source,
-        request.loom_emit_source,
-        request.loom_execute_source,
-    )
-    native_count = sum(source == "native" for source in sources)
-    if native_count not in (0, len(sources)):
-        raise SystemExit(
-            "Native Loom capability selection must name complete architecture, "
-            "artifact, and execution lists together."
-        )
-    exact = native_count == len(sources)
-    if exact and state.explicit:
-        raise SystemExit(
-            "Do not mix Loom target presets with native complete capability lists."
-        )
-    enabled = set() if exact else set(state.enabled)
-    family_presets = enabled.difference(("default",))
-    if family_presets:
-        enabled = family_presets
-    resolved = resolve_presets(enabled)
-    request.enabled_loom_architectures.update(resolved.architectures)
-    request.enabled_loom_artifact_formats.update(resolved.artifacts)
-    request.enabled_loom_execute.update(resolved.execution)
-    state.provenance = tuple(
-        preset.key for preset in TARGET_PRESETS if preset.key in enabled
-    )
-    state.exact = exact
-
-
-def request_summary(request: ConfigurationRequest) -> tuple[str, ...]:
-    state = _state(request)
-    provenance = state.provenance
-    if provenance:
-        selection = ",".join(provenance)
-    elif state.exact:
-        selection = "exact native lists"
-    else:
-        selection = "explicit leaves"
-    return (
-        "Loom target selection: " + selection,
-        "Loom architectures: "
-        + ",".join(_ordered(request.enabled_loom_architectures, ARCHITECTURES)),
-        "Loom artifact formats: "
-        + ",".join(_ordered(request.enabled_loom_artifact_formats, ARTIFACT_FORMATS)),
-        "Loom execution substrates: "
-        + ",".join(_ordered(request.enabled_loom_execute, EXECUTION_SUBSTRATES)),
-    )
 
 
 _validate_presets()

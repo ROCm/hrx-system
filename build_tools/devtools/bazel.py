@@ -23,7 +23,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from build_tools.bazel import compile_commands_merge
-from build_tools.bazel import configure as bazel_configure
 from build_tools.devtools import bazel_launcher, fuzz
 from build_tools.devtools.command_plan import quote_command
 from build_tools.devtools.environment import (
@@ -31,6 +30,14 @@ from build_tools.devtools.environment import (
     LOCAL_TMP_ROOT,
     REPO_ROOT,
 )
+
+_LOOM_PY_ROOT = str(REPO_ROOT / "loom" / "py")
+if _LOOM_PY_ROOT not in sys.path:
+    sys.path.insert(0, _LOOM_PY_ROOT)
+
+from libamdf.build_tools.bazel import configure as libamdf_configure
+from loom.build_tools.bazel import configure as loom_configure
+from runtime.build_tools.bazel import configure as runtime_configure
 
 LOCAL_STATE_ROOT = REPO_ROOT / ".iree"
 BAZEL_TRY_ROOT = LOCAL_STATE_ROOT / "bazel-try"
@@ -405,30 +412,30 @@ def clang_tidy_configuration_args(targets: list[str]) -> list[str]:
     selects_runtime = target_patterns_select_project(targets, "runtime")
     if selects_runtime:
         args.append(
-            f"{bazel_configure.NATIVE_DRIVER_FLAG}="
-            + ",".join(bazel_configure.ALL_DRIVERS)
+            f"{runtime_configure.NATIVE_DRIVER_FLAG}="
+            + ",".join(runtime_configure.ALL_DRIVERS)
         )
     selects_libamdf = target_patterns_select_project(targets, "libamdf")
     if selects_runtime or selects_libamdf:
-        args.append(f"{bazel_configure.NATIVE_AMDF_ENABLED_FLAG}=true")
+        args.append(f"{libamdf_configure.NATIVE_ENABLED_FLAG}=true")
         args.append(
-            f"{bazel_configure.NATIVE_AMDF_FAMILIES_FLAG}="
-            + ",".join(bazel_configure.AMDF_FAMILIES)
+            f"{libamdf_configure.NATIVE_FAMILIES_FLAG}="
+            + ",".join(libamdf_configure.FAMILIES)
         )
     if target_patterns_select_project(targets, "loom"):
         args.append(
-            f"{bazel_configure.NATIVE_LOOM_ARCH_FLAG}="
-            + ",".join(bazel_configure.LOOM_ARCHITECTURES)
+            f"{loom_configure.NATIVE_ARCH_FLAG}="
+            + ",".join(loom_configure.ARCHITECTURES)
         )
         args.append(
-            f"{bazel_configure.NATIVE_LOOM_EMIT_FLAG}="
-            + ",".join(bazel_configure.LOOM_ARTIFACT_FORMATS)
+            f"{loom_configure.NATIVE_EMIT_FLAG}="
+            + ",".join(loom_configure.ARTIFACT_FORMATS)
         )
         args.append(
-            f"{bazel_configure.NATIVE_LOOM_EXECUTE_FLAG}="
-            + ",".join(bazel_configure.LOOM_EXECUTE_SUBSTRATES)
+            f"{loom_configure.NATIVE_EXECUTE_FLAG}="
+            + ",".join(loom_configure.EXECUTION_SUBSTRATES)
         )
-        args.append(f"{bazel_configure.NATIVE_LOOM_IMPORT_FLAG}=cxx")
+        args.append(f"{loom_configure.NATIVE_IMPORT_FLAG}=cxx")
     return args
 
 

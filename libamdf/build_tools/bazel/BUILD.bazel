@@ -5,7 +5,24 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 # bazel-to-cmake: skip
 
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+
 package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "configure",
+    srcs = ["configure.py"],
+    deps = ["//build_tools/bazel:configure_api"],
+)
+
+py_test(
+    name = "configure_test",
+    srcs = ["configure_test.py"],
+    deps = [
+        ":configure",
+        "//build_tools/bazel:configure",
+    ],
+)
 
 exports_files([
     "cc.bzl",

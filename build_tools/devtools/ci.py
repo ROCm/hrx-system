@@ -23,6 +23,17 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_PY_ROOT = str(REPO_ROOT)
+if _REPO_PY_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_PY_ROOT)
+_LOOM_PY_ROOT = str(REPO_ROOT / "loom" / "py")
+if _LOOM_PY_ROOT not in sys.path:
+    sys.path.insert(0, _LOOM_PY_ROOT)
+
+from loom.build_tools import target_presets
+from loom.build_tools.bazel import configure as loom_configure
+from runtime.build_tools.bazel import configure as runtime_configure
+
 CMAKE_CI_BUILD_ROOT = Path("build/ci")
 TSAN_SUPPRESSIONS_FILE = REPO_ROOT / "build_tools/devtools/tsan.supp"
 CMAKE_SANITIZER_OPTIONS = {
@@ -31,63 +42,40 @@ CMAKE_SANITIZER_OPTIONS = {
     "tsan": ("-DIREE_ENABLE_TSAN=ON",),
     "ubsan": ("-DIREE_ENABLE_UBSAN=ON",),
 }
-CMAKE_HAL_DRIVER_DEFINES = (
-    ("amdgpu", "IREE_HAL_DRIVER_AMDGPU"),
-    ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
-    ("webgpu", "IREE_HAL_DRIVER_WEBGPU"),
-    ("amd", "IREE_HAL_DRIVER_AMD"),
-    ("amd-gpu", "IREE_HAL_DRIVER_AMD_GPU"),
-    ("amd-xdna", "IREE_HAL_DRIVER_AMD_XDNA"),
+CMAKE_HAL_DRIVER_DEFINES = tuple(
+    (driver, option)
+    for option, driver in runtime_configure.DRIVER_DEFINES.items()
+    if driver != "task"
 )
-CMAKE_LOOM_ARCH_DEFINES = (
-    ("aie2p", "LOOM_ARCH_AIE2P"),
-    ("amdgpu", "LOOM_ARCH_AMDGPU"),
-    ("spirv", "LOOM_ARCH_SPIRV"),
-    ("vm", "LOOM_ARCH_VM"),
-    ("wasm", "LOOM_ARCH_WASM"),
-    ("x86", "LOOM_ARCH_X86"),
+CMAKE_LOOM_ARCH_DEFINES = tuple(
+    (architecture, option)
+    for option, architecture in target_presets.ARCH_DEFINES.items()
 )
-CMAKE_LOOM_EMIT_DEFINES = (
-    ("elf", "LOOM_EMIT_ELF"),
-    ("spirv", "LOOM_EMIT_SPIRV"),
-    ("vm", "LOOM_EMIT_VM"),
-    ("wasm", "LOOM_EMIT_WASM"),
+CMAKE_LOOM_EMIT_DEFINES = tuple(
+    (artifact_format, option)
+    for option, artifact_format in target_presets.EMIT_DEFINES.items()
 )
-CMAKE_LOOM_EXECUTE_DEFINES = (
-    ("iree_hal", "LOOM_EXECUTE_IREE_HAL"),
-    ("iree_vm", "LOOM_EXECUTE_IREE_VM"),
-    ("wasm_host", "LOOM_EXECUTE_WASM_HOST"),
+CMAKE_LOOM_EXECUTE_DEFINES = tuple(
+    (substrate, option) for option, substrate in target_presets.EXECUTE_DEFINES.items()
 )
-CMAKE_LOOM_IMPORTER_DEFINES = (
-    ("cxx", "LOOM_IMPORT_CXX"),
-    ("mlir", "LOOM_IMPORT_MLIR"),
-    ("tilelang", "LOOM_IMPORT_TILELANG"),
+CMAKE_LOOM_IMPORTER_DEFINES = tuple(
+    (importer, option) for option, importer in loom_configure.IMPORT_DEFINES.items()
 )
 CI_SUPPORTED_HAL_DRIVERS = frozenset(
     ("task", *(driver for driver, _ in CMAKE_HAL_DRIVER_DEFINES))
 )
 REPOSITORY_BUILD_HAL_DRIVERS = (
     "amd",
-    "amdgpu",
-    "task",
-    "vulkan",
-    "webgpu",
+    *(
+        driver
+        for driver in runtime_configure.ALL_DRIVERS
+        if driver != "amd" and driver not in runtime_configure.AMD_ENGINES
+    ),
 )
-REPOSITORY_BUILD_LOOM_ARCHITECTURES = (
-    "aie2p",
-    "amdgpu",
-    "spirv",
-    "vm",
-    "wasm",
-    "x86",
-)
-REPOSITORY_BUILD_LOOM_ARTIFACT_FORMATS = ("elf", "spirv", "vm", "wasm")
-REPOSITORY_BUILD_LOOM_EXECUTION_SUBSTRATES = (
-    "iree_hal",
-    "iree_vm",
-    "wasm_host",
-)
-REPOSITORY_BUILD_LOOM_IMPORTERS = ("cxx", "mlir", "tilelang")
+REPOSITORY_BUILD_LOOM_ARCHITECTURES = loom_configure.ARCHITECTURES
+REPOSITORY_BUILD_LOOM_ARTIFACT_FORMATS = loom_configure.ARTIFACT_FORMATS
+REPOSITORY_BUILD_LOOM_EXECUTION_SUBSTRATES = loom_configure.EXECUTION_SUBSTRATES
+REPOSITORY_BUILD_LOOM_IMPORTERS = loom_configure.IMPORTERS
 ROCM_PINNED_DEPENDENCY_MODE_OPTION = "-DIREE_ROCM_DEPENDENCY_MODE=pinned"
 AMDGPU_DEVICE_BINARY_SOURCE_OPTIONS = (
     "-DIREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source",
@@ -150,7 +138,6 @@ IMPORTER_COMMANDS = {
 if __package__:
     from . import ci_config
 else:
-    sys.path.insert(0, str(REPO_ROOT))
     from build_tools.devtools import ci_config
 
 from build_tools.ci import windows_diagnostics
@@ -359,8 +346,8 @@ def validate_enabled_drivers(enabled_drivers: tuple[str, ...]) -> frozenset[str]
 
 def amdgpu_bazel_options(target_selector: str) -> tuple[str, ...]:
     return (
-        "--//runtime/src/iree/hal/drivers/amdgpu:targets=" + target_selector,
-        "--//loom/config/arch/amdgpu:targets=iree_hal",
+        runtime_configure.NATIVE_AMDGPU_TARGETS_FLAG + "=" + target_selector,
+        loom_configure.NATIVE_AMDGPU_TARGETS_FLAG + "=iree_hal",
     )
 
 
@@ -404,7 +391,7 @@ def bazel_configure_step(
     command = [
         "bazel",
         "configure",
-        "--//runtime/config/hal:drivers=" + ",".join(drivers),
+        runtime_configure.NATIVE_DRIVER_FLAG + "=" + ",".join(drivers),
     ]
     if "amdgpu" in enabled_driver_set:
         command.append(ROCM_PINNED_DEPENDENCY_MODE_OPTION)
@@ -413,20 +400,23 @@ def bazel_configure_step(
             command.append(f"-DIREE_ROCM_PATH={rocm_root}")
     if enabled_loom_architectures is not None:
         command.append(
-            "--//loom/config/arch:enable=" + ",".join(enabled_loom_architectures)
+            loom_configure.NATIVE_ARCH_FLAG + "=" + ",".join(enabled_loom_architectures)
         )
     if enabled_loom_artifact_formats is not None:
         command.append(
-            "--//loom/config/emit:enable=" + ",".join(enabled_loom_artifact_formats)
+            loom_configure.NATIVE_EMIT_FLAG
+            + "="
+            + ",".join(enabled_loom_artifact_formats)
         )
     if enabled_loom_execution_substrates is not None:
         command.append(
-            "--//loom/config/execute:enable="
+            loom_configure.NATIVE_EXECUTE_FLAG
+            + "="
             + ",".join(enabled_loom_execution_substrates)
         )
     if enabled_loom_importers is not None:
         command.append(
-            "--//loom/config/import:enable=" + ",".join(enabled_loom_importers)
+            loom_configure.NATIVE_IMPORT_FLAG + "=" + ",".join(enabled_loom_importers)
         )
     return CiStep(
         "Configure Bazel",

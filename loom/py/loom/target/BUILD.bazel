@@ -26,23 +26,6 @@ iree_py_library(
 )
 
 iree_py_library(
-    name = "capability_presets",
-    srcs = ["capability_presets.py"],
-    deps = [":package_init"],
-)
-
-iree_py_test(
-    name = "capability_presets_test",
-    srcs = [
-        "capability_presets_test.py",
-        "//loom/py/loom/tools:pytest_style_runner.py",
-    ],
-    args = ["loom.target.capability_presets_test"],
-    main = "pytest_style_runner.py",
-    deps = [":capability_presets"],
-)
-
-iree_py_library(
     name = "low_descriptors",
     srcs = ["low_descriptors.py"],
     deps = [

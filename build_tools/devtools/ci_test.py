@@ -45,6 +45,7 @@ from unittest import mock
 
 from build_tools.bazel import configure as bazel_configure
 from build_tools.devtools import ci, ci_config, run_requirements
+from runtime.build_tools.bazel import configure as runtime_configure
 
 
 class CiTest(unittest.TestCase):
@@ -323,7 +324,9 @@ class CiTest(unittest.TestCase):
                 for engine, enabled in (("GPU", gpu), ("XDNA", xdna)):
                     option = f"-DIREE_HAL_DRIVER_AMD_{engine}="
                     self.assertEqual(
-                        "amd-" + engine.lower() in request.enabled_drivers, enabled
+                        "amd-" + engine.lower()
+                        in runtime_configure.configuration(request).drivers,
+                        enabled,
                     )
                     self.assertIn(option + ("ON" if enabled else "OFF"), cmake)
 
@@ -350,7 +353,9 @@ class CiTest(unittest.TestCase):
                 request = bazel_configure.request_from_args(
                     bazel_configure.parse_arguments(step.argv[4:])
                 )
-                self.assertEqual(request.enabled_drivers, expected)
+                self.assertEqual(
+                    runtime_configure.configuration(request).drivers, expected
+                )
 
     def test_codec_policy_precedes_explicit_job_overrides(self):
         with mock.patch.object(ci, "codec_options", return_value=("--choice=default",)):
@@ -887,7 +892,7 @@ class CiTest(unittest.TestCase):
             [step.name for step in steps], ["Configure Bazel", "Build repository"]
         )
         self.assertEqual(
-            request.enabled_drivers,
+            runtime_configure.configuration(request).drivers,
             {"task", "amdgpu", "vulkan", "webgpu", "amd-gpu", "amd-xdna"},
         )
         self.assertIn(

@@ -16,7 +16,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from build_tools.bazel import configure as bazel_configure
 from build_tools.devtools import aliases, cli, importers
 from build_tools.devtools import bazel as bazel_dev
 from build_tools.devtools.command_plan import (
@@ -24,6 +23,9 @@ from build_tools.devtools.command_plan import (
     ExecCommandStep,
     WriteFileStep,
 )
+from libamdf.build_tools.bazel import configure as libamdf_configure
+from loom.build_tools.bazel import configure as loom_configure
+from runtime.build_tools.bazel import configure as runtime_configure
 
 
 def normalized_plan_description(plan) -> str:
@@ -782,14 +784,14 @@ class CliTest(unittest.TestCase):
         self.assertNotIn("build_tools/lefthook/presubmit.py", description)
         self.assertNotIn("--keep_going", description)
         self.assertIn(
-            f"{bazel_configure.NATIVE_DRIVER_FLAG}="
-            + ",".join(bazel_configure.ALL_DRIVERS),
+            f"{runtime_configure.NATIVE_DRIVER_FLAG}="
+            + ",".join(runtime_configure.ALL_DRIVERS),
             description,
         )
-        self.assertIn(f"{bazel_configure.NATIVE_AMDF_ENABLED_FLAG}=true", description)
+        self.assertIn(f"{libamdf_configure.NATIVE_ENABLED_FLAG}=true", description)
         self.assertIn(
-            f"{bazel_configure.NATIVE_AMDF_FAMILIES_FLAG}="
-            + ",".join(bazel_configure.AMDF_FAMILIES),
+            f"{libamdf_configure.NATIVE_FAMILIES_FLAG}="
+            + ",".join(libamdf_configure.FAMILIES),
             description,
         )
 
@@ -849,13 +851,13 @@ class CliTest(unittest.TestCase):
                 self.assertEqual("--//libamdf/config:enabled=true" in command, enabled)
                 self.assertNotIn("--//libamdf/config:enabled=false", command)
                 family_flags = [
-                    arg.removeprefix(bazel_configure.NATIVE_AMDF_FAMILIES_FLAG + "=")
+                    arg.removeprefix(libamdf_configure.NATIVE_FAMILIES_FLAG + "=")
                     for arg in command
-                    if arg.startswith(bazel_configure.NATIVE_AMDF_FAMILIES_FLAG + "=")
+                    if arg.startswith(libamdf_configure.NATIVE_FAMILIES_FLAG + "=")
                 ]
                 self.assertEqual(
                     family_flags,
-                    [",".join(bazel_configure.AMDF_FAMILIES)] if enabled else [],
+                    [",".join(libamdf_configure.FAMILIES)] if enabled else [],
                 )
 
     def test_bazel_clang_tidy_scopes_complete_runtime_driver_configuration(self):
@@ -871,16 +873,16 @@ class CliTest(unittest.TestCase):
             with self.subTest(targets=targets):
                 command = self.planned_argv(["bazel", "clang-tidy", "--", *targets])
                 driver_flags = [
-                    arg.removeprefix(bazel_configure.NATIVE_DRIVER_FLAG + "=")
+                    arg.removeprefix(runtime_configure.NATIVE_DRIVER_FLAG + "=")
                     for arg in command
-                    if arg.startswith(bazel_configure.NATIVE_DRIVER_FLAG + "=")
+                    if arg.startswith(runtime_configure.NATIVE_DRIVER_FLAG + "=")
                 ]
                 self.assertEqual(
                     driver_flags,
-                    [",".join(bazel_configure.ALL_DRIVERS)] if enabled else [],
+                    [",".join(runtime_configure.ALL_DRIVERS)] if enabled else [],
                 )
                 self.assertEqual(
-                    f"{bazel_configure.NATIVE_AMDF_ENABLED_FLAG}=true" in command,
+                    f"{libamdf_configure.NATIVE_ENABLED_FLAG}=true" in command,
                     enabled or targets == ["//libamdf/..."],
                 )
                 self.assertEqual(command[command.index("--") + 1 :], targets)
@@ -910,40 +912,36 @@ class CliTest(unittest.TestCase):
             with self.subTest(targets=targets):
                 command = self.planned_argv(["bazel", "clang-tidy", "--", *targets])
                 architecture_flags = [
-                    arg.removeprefix(bazel_configure.NATIVE_LOOM_ARCH_FLAG + "=")
+                    arg.removeprefix(loom_configure.NATIVE_ARCH_FLAG + "=")
                     for arg in command
-                    if arg.startswith(bazel_configure.NATIVE_LOOM_ARCH_FLAG + "=")
+                    if arg.startswith(loom_configure.NATIVE_ARCH_FLAG + "=")
                 ]
                 self.assertEqual(
                     architecture_flags,
-                    [",".join(bazel_configure.LOOM_ARCHITECTURES)] if enabled else [],
+                    [",".join(loom_configure.ARCHITECTURES)] if enabled else [],
                 )
                 artifact_format_flags = [
-                    arg.removeprefix(bazel_configure.NATIVE_LOOM_EMIT_FLAG + "=")
+                    arg.removeprefix(loom_configure.NATIVE_EMIT_FLAG + "=")
                     for arg in command
-                    if arg.startswith(bazel_configure.NATIVE_LOOM_EMIT_FLAG + "=")
+                    if arg.startswith(loom_configure.NATIVE_EMIT_FLAG + "=")
                 ]
                 self.assertEqual(
                     artifact_format_flags,
-                    [",".join(bazel_configure.LOOM_ARTIFACT_FORMATS)]
-                    if enabled
-                    else [],
+                    [",".join(loom_configure.ARTIFACT_FORMATS)] if enabled else [],
                 )
                 execution_flags = [
-                    arg.removeprefix(bazel_configure.NATIVE_LOOM_EXECUTE_FLAG + "=")
+                    arg.removeprefix(loom_configure.NATIVE_EXECUTE_FLAG + "=")
                     for arg in command
-                    if arg.startswith(bazel_configure.NATIVE_LOOM_EXECUTE_FLAG + "=")
+                    if arg.startswith(loom_configure.NATIVE_EXECUTE_FLAG + "=")
                 ]
                 self.assertEqual(
                     execution_flags,
-                    [",".join(bazel_configure.LOOM_EXECUTE_SUBSTRATES)]
-                    if enabled
-                    else [],
+                    [",".join(loom_configure.EXECUTION_SUBSTRATES)] if enabled else [],
                 )
                 importer_flags = [
-                    arg.removeprefix(bazel_configure.NATIVE_LOOM_IMPORT_FLAG + "=")
+                    arg.removeprefix(loom_configure.NATIVE_IMPORT_FLAG + "=")
                     for arg in command
-                    if arg.startswith(bazel_configure.NATIVE_LOOM_IMPORT_FLAG + "=")
+                    if arg.startswith(loom_configure.NATIVE_IMPORT_FLAG + "=")
                 ]
                 self.assertEqual(importer_flags, ["cxx"] if enabled else [])
                 self.assertEqual(command[command.index("--") + 1 :], targets)

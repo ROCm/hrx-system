@@ -108,8 +108,11 @@ py_library(
         ":command_line",
         ":run_requirements",
         "//build_tools/bazel:compile_commands_merge_lib",
-        "//build_tools/bazel:configure",
         "//build_tools/ci:windows_diagnostics",
+        "//libamdf/build_tools/bazel:configure",
+        "//loom/py/loom/build_tools:target_presets",
+        "//loom/py/loom/build_tools/bazel:configure",
+        "//runtime/build_tools/bazel:configure",
     ],
 )
 
@@ -126,6 +129,9 @@ py_binary(
         ":bazel_test_results",
         ":run_requirements",
         "//build_tools/ci:windows_diagnostics",
+        "//loom/py/loom/build_tools:target_presets",
+        "//loom/py/loom/build_tools/bazel:configure",
+        "//runtime/build_tools/bazel:configure",
     ],
 )
 
@@ -182,7 +188,9 @@ py_test(
     tags = _PRESUBMIT_TEST_TAGS,
     deps = [
         "//build_tools/bazel:compile_commands_merge_lib",
-        "//build_tools/bazel:configure",
+        "//libamdf/build_tools/bazel:configure",
+        "//loom/py/loom/build_tools/bazel:configure",
+        "//runtime/build_tools/bazel:configure",
     ],
 )
 
@@ -222,6 +230,9 @@ py_test(
         ":run_requirements",
         "//build_tools/bazel:configure",
         "//build_tools/ci:windows_diagnostics",
+        "//loom/py/loom/build_tools:target_presets",
+        "//loom/py/loom/build_tools/bazel:configure",
+        "//runtime/build_tools/bazel:configure",
     ],
 )
 
@@ -262,7 +273,9 @@ py_test(
     tags = _PRESUBMIT_TEST_TAGS,
     deps = [
         "//build_tools/bazel:compile_commands_merge_lib",
-        "//build_tools/bazel:configure",
+        "//libamdf/build_tools/bazel:configure",
+        "//loom/py/loom/build_tools/bazel:configure",
+        "//runtime/build_tools/bazel:configure",
     ],
 )
 

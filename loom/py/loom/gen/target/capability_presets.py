@@ -12,13 +12,13 @@ import argparse
 import sys
 from collections.abc import Sequence
 
+from loom.build_tools import target_presets
 from loom.gen import bootstrap
 from loom.gen.support.generated_file import (
     GeneratedFileSet,
     line_comment_header,
     maintain_generated_file_set,
 )
-from loom.target import capability_presets
 
 DESCRIPTION = "Loom target capability presets"
 REGENERATE_COMMAND = "python3 loom/py/loom/gen/run.py capability_presets --in-place"
@@ -34,7 +34,7 @@ def _cmake_list(name: str, values: Sequence[str]) -> list[str]:
 
 
 def render_capabilities_bzl() -> str:
-    default = capability_presets.resolve_presets(("default",))
+    default = target_presets.resolve_presets(("default",))
     lines = [
         "# Copyright 2026 The IREE Authors",
         "#",
@@ -46,11 +46,11 @@ def render_capabilities_bzl() -> str:
         "",
         '"""Canonical Loom compiler capability values and ordinary defaults."""',
         "",
-        *_starlark_list("LOOM_ARCHITECTURES", capability_presets.ARCHITECTURES),
+        *_starlark_list("LOOM_ARCHITECTURES", target_presets.ARCHITECTURES),
         "",
-        *_starlark_list("LOOM_ARTIFACT_FORMATS", capability_presets.ARTIFACT_FORMATS),
+        *_starlark_list("LOOM_ARTIFACT_FORMATS", target_presets.ARTIFACT_FORMATS),
         "",
-        *_starlark_list("LOOM_EXECUTION_SUBSTRATES", capability_presets.EXECUTION_SUBSTRATES),
+        *_starlark_list("LOOM_EXECUTION_SUBSTRATES", target_presets.EXECUTION_SUBSTRATES),
         "",
         "# The ordinary build contains every production target except WebAssembly.",
         *_starlark_list("LOOM_DEFAULT_ARCHITECTURES", default.architectures),
@@ -68,8 +68,8 @@ def render_bazelrc() -> str:
         *line_comment_header("#", generator=_GENERATOR, regenerate=REGENERATE_COMMAND),
         "# Each named config writes complete canonical capability lists.",
     ]
-    for preset in capability_presets.TARGET_PRESETS:
-        capabilities = capability_presets.resolve_presets((preset.key,))
+    for preset in target_presets.TARGET_PRESETS:
+        capabilities = target_presets.resolve_presets((preset.key,))
         lines.extend(
             [
                 "",
@@ -84,27 +84,27 @@ def render_bazelrc() -> str:
 
 
 def render_cmake() -> str:
-    preset_keys = tuple(preset.key.upper() for preset in capability_presets.TARGET_PRESETS)
+    preset_keys = tuple(preset.key.upper() for preset in target_presets.TARGET_PRESETS)
     family_keys = tuple(key for key in preset_keys if key != "DEFAULT")
     lines = [
         *line_comment_header("#", generator=_GENERATOR, regenerate=REGENERATE_COMMAND),
         "# Data only: loom/project.cmake owns preset resolution.",
         "",
-        *_cmake_list("_LOOM_CAPABILITY_ARCHITECTURES", capability_presets.ARCHITECTURES),
+        *_cmake_list("_LOOM_CAPABILITY_ARCHITECTURES", target_presets.ARCHITECTURES),
         *_cmake_list(
             "_LOOM_CAPABILITY_ARTIFACT_FORMATS",
-            capability_presets.ARTIFACT_FORMATS,
+            target_presets.ARTIFACT_FORMATS,
         ),
         *_cmake_list(
             "_LOOM_CAPABILITY_EXECUTION_SUBSTRATES",
-            capability_presets.EXECUTION_SUBSTRATES,
+            target_presets.EXECUTION_SUBSTRATES,
         ),
         *_cmake_list("_LOOM_TARGET_PRESET_KEYS", preset_keys),
         *_cmake_list("_LOOM_TARGET_FAMILY_PRESET_KEYS", family_keys),
     ]
-    for preset in capability_presets.TARGET_PRESETS:
+    for preset in target_presets.TARGET_PRESETS:
         key = preset.key.upper()
-        resolved = capability_presets.resolve_presets((preset.key,))
+        resolved = target_presets.resolve_presets((preset.key,))
         prefix = f"_LOOM_TARGET_PRESET_{key}"
         lines.extend(
             [

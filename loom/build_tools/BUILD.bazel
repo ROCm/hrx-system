@@ -58,8 +58,8 @@ py_test(
     tags = ["manual"],
     deps = [
         "//build_tools/devtools",
+        "//loom/py/loom/build_tools:target_presets",
         "//loom/py/loom/gen:checked_in_artifacts",
-        "//loom/py/loom/target:capability_presets",
         "//loom/py/loom/tools:source_inventory",
     ],
 )

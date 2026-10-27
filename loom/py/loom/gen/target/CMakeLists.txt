@@ -25,9 +25,9 @@ iree_py_library(
     "capability_presets.py"
   DEPS
     loom::py::loom::gen::target::package
+    loom::py::loom::build_tools::target_presets
     loom::py::loom::gen::bootstrap
     loom::py::loom::gen::support::support
-    loom::py::loom::target::capability_presets
 )
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

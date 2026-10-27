@@ -63,19 +63,54 @@ exports_files([
 ])
 
 py_library(
+    name = "configure_api",
+    srcs = ["configure_api.py"],
+)
+
+py_library(
+    name = "configure_dependencies",
+    srcs = ["configure_dependencies.py"],
+    deps = [
+        ":configure_api",
+        "//runtime/build_tools/bazel:configure",
+    ],
+)
+
+py_library(
     name = "configure",
     srcs = [
         "configure.py",
         "configure_project.py",
     ],
-    deps = ["//loom/py/loom/target:capability_presets"],
+    deps = [
+        ":configure_api",
+        ":configure_dependencies",
+        "//build_tools/d3d12/config:configure",
+        "//build_tools/vulkan/config:configure",
+        "//libamdf/build_tools/bazel:configure",
+        "//loom/py/loom/build_tools/bazel:configure",
+        "//runtime/build_tools/bazel:configure",
+    ],
 )
 
 py_test(
     name = "configure_test",
     srcs = ["configure_test.py"],
     main = "configure_test.py",
-    deps = [":configure"],
+    deps = [
+        ":configure",
+        ":configure_api",
+    ],
+)
+
+py_test(
+    name = "configure_dependencies_test",
+    srcs = ["configure_dependencies_test.py"],
+    deps = [
+        ":configure",
+        ":configure_api",
+        ":configure_dependencies",
+    ],
 )
 
 py_binary(

@@ -22,8 +22,8 @@ iree_py_library(
     srcs = ["capability_presets.py"],
     deps = [
         ":package",
+        "//loom/py/loom/build_tools:target_presets",
         "//loom/py/loom/gen:bootstrap",
         "//loom/py/loom/gen/support",
-        "//loom/py/loom/target:capability_presets",
     ],
 )

@@ -21,7 +21,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from build_tools.bazel import configure as bazel_configure
+from libamdf.build_tools.bazel import configure as libamdf_configure
+from runtime.build_tools.bazel import configure as runtime_configure
 
 PRESUBMIT_PATH = Path(__file__).with_name("presubmit.py")
 PRESUBMIT_SPEC = importlib.util.spec_from_file_location("presubmit", PRESUBMIT_PATH)
@@ -1509,14 +1510,14 @@ class PresubmitTest(unittest.TestCase):
 
         command = run_command.call_args.args[0]
         self.assertIn(
-            f"{bazel_configure.NATIVE_DRIVER_FLAG}="
-            + ",".join(bazel_configure.ALL_DRIVERS),
+            f"{runtime_configure.NATIVE_DRIVER_FLAG}="
+            + ",".join(runtime_configure.ALL_DRIVERS),
             command,
         )
-        self.assertIn(f"{bazel_configure.NATIVE_AMDF_ENABLED_FLAG}=true", command)
+        self.assertIn(f"{libamdf_configure.NATIVE_ENABLED_FLAG}=true", command)
         self.assertIn(
-            f"{bazel_configure.NATIVE_AMDF_FAMILIES_FLAG}="
-            + ",".join(bazel_configure.AMDF_FAMILIES),
+            f"{libamdf_configure.NATIVE_FAMILIES_FLAG}="
+            + ",".join(libamdf_configure.FAMILIES),
             command,
         )
         self.assertEqual(
@@ -1579,14 +1580,14 @@ class PresubmitTest(unittest.TestCase):
         )
 
         self.assertIn(
-            f"{bazel_configure.NATIVE_DRIVER_FLAG}="
-            + ",".join(bazel_configure.ALL_DRIVERS),
+            f"{runtime_configure.NATIVE_DRIVER_FLAG}="
+            + ",".join(runtime_configure.ALL_DRIVERS),
             command,
         )
         self.assertIn("--//libamdf/config:enabled=true", command)
         self.assertIn(
-            f"{bazel_configure.NATIVE_AMDF_FAMILIES_FLAG}="
-            + ",".join(bazel_configure.AMDF_FAMILIES),
+            f"{libamdf_configure.NATIVE_FAMILIES_FLAG}="
+            + ",".join(libamdf_configure.FAMILIES),
             command,
         )
         self.assertNotIn("--//libamdf/config:enabled=false", command)

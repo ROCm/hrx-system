@@ -8,8 +8,15 @@
 # bazel-to-cmake: skip
 
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@rules_python//python:defs.bzl", "py_library")
 
 package(default_visibility = ["//visibility:public"])
+
+py_library(
+    name = "configure",
+    srcs = ["configure.py"],
+    deps = ["//build_tools/bazel:configure_api"],
+)
 
 bool_flag(
     name = "enabled",

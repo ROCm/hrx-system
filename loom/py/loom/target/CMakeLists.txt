@@ -28,33 +28,6 @@ iree_py_library(
 
 iree_py_library(
   NAME
-    capability_presets
-  SRCS
-    "capability_presets.py"
-  DEPS
-    loom::py::loom::target::package_init
-)
-
-iree_py_test(
-  NAME
-    capability_presets_test
-  MAIN
-    "../tools/pytest_style_runner.py"
-  SRCS
-    "capability_presets_test.py"
-    "../tools/pytest_style_runner.py"
-  ARGS
-    "loom.target.capability_presets_test"
-  DEPS
-    loom::py::loom::target::capability_presets
-  PACKAGE_DIRS
-    "${PROJECT_SOURCE_DIR}/loom/py"
-    "${PROJECT_BINARY_DIR}/loom/py"
-    "${PROJECT_SOURCE_DIR}"
-)
-
-iree_py_library(
-  NAME
     low_descriptors
   SRCS
     "low_descriptors.py"

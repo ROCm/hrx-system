@@ -26,7 +26,7 @@ from loom.tools.source_inventory import is_format_source_path, is_lint_source_pa
 from build_tools.devtools import project_presubmit
 from build_tools.devtools.command_line import batch_path_commands
 from build_tools.devtools.source_lock import NonEmptyTrackedFileSnapshot
-from loom.target import capability_presets
+from loom.build_tools import target_presets
 
 PROJECT_NAME = "loom"
 PROJECT_ROOT = "loom/"
@@ -43,17 +43,17 @@ CMAKE_SOURCE_FORMAT_CAPABILITY_SETS = (
     (
         "architecture",
         "LOOM_RESOLVED_ARCHITECTURES",
-        capability_presets.ARCHITECTURES,
+        target_presets.ARCHITECTURES,
     ),
     (
         "artifact",
         "LOOM_RESOLVED_ARTIFACT_FORMATS",
-        capability_presets.ARTIFACT_FORMATS,
+        target_presets.ARTIFACT_FORMATS,
     ),
     (
         "execution",
         "LOOM_RESOLVED_EXECUTION_SUBSTRATES",
-        capability_presets.EXECUTION_SUBSTRATES,
+        target_presets.EXECUTION_SUBSTRATES,
     ),
 )
 # Formatting, hygiene, dependency selection, and tests share one build

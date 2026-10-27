@@ -38,7 +38,11 @@ py_test(
     data = ["//build_tools/bazel_to_cmake:deps.py"],
     main = "presubmit_test.py",
     tags = _PRESUBMIT_TEST_TAGS,
-    deps = ["//build_tools/devtools"],
+    deps = [
+        "//build_tools/devtools",
+        "//libamdf/build_tools/bazel:configure",
+        "//runtime/build_tools/bazel:configure",
+    ],
 )
 
 test_suite(
