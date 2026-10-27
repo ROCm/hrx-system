@@ -9,6 +9,8 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <memory>
+#include <semaphore>
 #include <thread>
 
 #include "common/context.h"
@@ -190,6 +192,40 @@ struct FailingSnapshotAllocator {
   }
 };
 
+class ScopedHeldCallback {
+ public:
+  explicit ScopedHeldCallback(iree_hal_streaming_stream_t* stream)
+      : stream_(stream) {}
+  ~ScopedHeldCallback() {
+    released_.release();
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    iree_hal_streaming_stream_release(stream_);
+  }
+
+  iree_status_t Start() {
+    return iree_hal_streaming_launch_host_function(stream_, Run, this);
+  }
+  void WaitUntilEntered() { entered_.acquire(); }
+  bool returned() const { return returned_.load(std::memory_order_acquire); }
+
+ private:
+  static void Run(void* user_data) {
+    auto* callback = static_cast<ScopedHeldCallback*>(user_data);
+    callback->entered_.release();
+    callback->released_.acquire();
+    callback->returned_.store(true, std::memory_order_release);
+  }
+
+  // Owned stream, synchronized and released after releasing the callback.
+  iree_hal_streaming_stream_t* stream_;
+  // Publishes that the frontend worker has entered the application callback.
+  std::binary_semaphore entered_{0};
+  // Releases the application callback on every exit from the enclosing test.
+  std::binary_semaphore released_{0};
+  // Set before the application callback returns to its execution owner.
+  std::atomic<bool> returned_{false};
+};
+
 class CpuStreamingMemoryTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -345,6 +381,84 @@ TEST_F(CpuStreamingMemoryTest,
           device_pointer_, 8, stream_));
   EXPECT_EQ(stream_->pending_value, pending_value);
   EXPECT_EQ(host_callbacks_.thread, nullptr);
+}
+
+TEST_F(CpuStreamingMemoryTest,
+       RegisteredDownloadsRemainAsyncAndProgressPastBlockedCallbacks) {
+  constexpr size_t kSourceSize = 16;
+  constexpr size_t kDestinationSize = 32;
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, kSourceSize, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
+  const std::array<uint8_t, kSourceSize> source = {
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+  std::memcpy(buffer_->host_ptr, source.data(), source.size());
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host(
+      context_, kDestinationSize, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT,
+      &host_buffer_));
+  std::array<uint8_t, kDestinationSize> registered_storage;
+  iree_hal_streaming_buffer_t* registered_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_memory_register_host(
+      context_, registered_storage.data(), registered_storage.size(),
+      IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT, &registered_buffer));
+  const auto release_buffer = [&](iree_hal_streaming_buffer_t* buffer) {
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    iree_hal_streaming_memory_release_wrapped_buffer(buffer);
+  };
+  std::unique_ptr<iree_hal_streaming_buffer_t, decltype(release_buffer)>
+      registered_owner(registered_buffer, release_buffer);
+  const std::array<void*, 2> destinations = {host_buffer_->host_ptr,
+                                             registered_storage.data()};
+  for (void* destination : destinations) {
+    std::memset(destination, 0xcd, kDestinationSize);
+  }
+
+  iree_hal_streaming_stream_t* callback_stream = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_create(
+      context_, context_->queue, IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING, 0,
+      iree_allocator_system(), &callback_stream));
+  ScopedHeldCallback callback(callback_stream);
+
+  iree_hal_semaphore_t* semaphore = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      context_->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &semaphore));
+  const auto release_gate = [](iree_hal_semaphore_t* semaphore) {
+    IREE_EXPECT_OK(iree_hal_semaphore_signal(semaphore, 1, nullptr));
+    iree_hal_semaphore_release(semaphore);
+  };
+  std::unique_ptr<iree_hal_semaphore_t, decltype(release_gate)> copy_gate(
+      semaphore, release_gate);
+  uint64_t gate_value = 1;
+  const iree_hal_semaphore_list_t gate_wait = {1, &semaphore, &gate_value};
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_semaphores(stream_, gate_wait));
+
+  IREE_ASSERT_OK(callback.Start());
+  callback.WaitUntilEntered();
+
+  for (void* destination : destinations) {
+    IREE_ASSERT_OK(iree_hal_streaming_memcpy_device_to_host(
+        context_, destination, device_pointer_, kSourceSize, stream_));
+    IREE_ASSERT_OK(iree_hal_streaming_memcpy_device_to_host_2d(
+        context_, static_cast<uint8_t*>(destination) + kSourceSize,
+        /*dst_pitch=*/8, device_pointer_, /*src_pitch=*/8, /*width=*/4,
+        /*height=*/2, stream_));
+    // The stream's unsatisfied wait proves these APIs did not wait for their
+    // copies or modify the destination on their calling thread.
+    for (size_t i = 0; i < kDestinationSize; ++i) {
+      EXPECT_EQ(static_cast<const uint8_t*>(destination)[i], 0xcd);
+    }
+  }
+  copy_gate.reset();
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_FALSE(callback.returned());
+  for (const void* destination : destinations) {
+    const auto* bytes = static_cast<const uint8_t*>(destination);
+    EXPECT_EQ(0, std::memcmp(bytes, source.data(), source.size()));
+    for (size_t i = 0; i < kSourceSize; ++i) {
+      EXPECT_EQ(bytes[kSourceSize + i], i % 8 < 4 ? source[i] : 0xcd);
+    }
+  }
 }
 
 TEST_F(CpuStreamingMemoryTest,
@@ -570,8 +684,7 @@ TEST_F(CpuStreamingMemoryTest,
   iree_hal_streaming_stream_release(second_stream);
 }
 
-TEST_F(CpuStreamingMemoryTest,
-       PostAcceptFlushFailureKeepsD2HStagingUntilTailCompletes) {
+TEST_F(CpuStreamingMemoryTest, PostAcceptFlushFailureDrainsD2HBeforeReturning) {
   constexpr iree_device_size_t kAllocationSize = 16;
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
       context_, kAllocationSize, IREE_HAL_STREAMING_MEMORY_FLAG_NONE,
@@ -644,7 +757,7 @@ TEST_F(CpuStreamingMemoryTest,
 
 #if defined(IREE_PLATFORM_LINUX)
 TEST_F(CpuStreamingMemoryTest,
-       ScalarD2HBarrierFailureDrainsRecordedCopyBeforeFreeingStaging) {
+       ScalarD2HBarrierFailureDrainsRecordedCopyBeforeReturning) {
   constexpr iree_device_size_t kAllocationSize = 16;
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
       context_, kAllocationSize, IREE_HAL_STREAMING_MEMORY_FLAG_NONE,
