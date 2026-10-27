@@ -418,13 +418,13 @@ command.program.def public @exact_composition() launch(%storage: view<4xi32>) {
 
 // ----
 low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @exact_composition() asm {
-  %25 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
-  %26 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
-  %27 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
-  %28 = cmd.constant.u64 0
-  %29 = cmd.constant.u64 -1
-  %30 = cmd.constant.u32 1
-  cmd.dispatch.direct<%26, %27>[%30, %30, %30](%25, %28, %29)
+  %26 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %27 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %28 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %29 = cmd.constant.u64 0
+  %30 = cmd.constant.u64 -1
+  %31 = cmd.constant.u32 1
+  cmd.dispatch.direct<%27, %28>[%31, %31, %31](%26, %29, %30)
   return
 }
 
@@ -512,66 +512,66 @@ command.program.def public @q6_q6() launch(%storage: buffer) {
 
 // ----
 low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 2, executable_count = 2, fixed_buffer_count = 0, rebindable_binding_count = 1}) @q4_q4() asm {
-  %87 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
-  %88 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
-  %89 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
-  %90 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
-  %91 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
-  %92 = cmd.constant.u64 0
-  %93 = cmd.constant.u64 -1
-  %94 = cmd.constant.u32 4
-  %95 = cmd.constant.u32 1
-  cmd.dispatch.direct<%88, %90>[%94, %95, %95](%87, %92, %93)
-  %96 = cmd.constant.u32 40
-  cmd.dispatch.direct.barrier<%89, %91>[%96, %95, %95](%87, %92, %93)
+  %95 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %96 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %97 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %98 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %99 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %100 = cmd.constant.u64 0
+  %101 = cmd.constant.u64 -1
+  %102 = cmd.constant.u32 4
+  %103 = cmd.constant.u32 1
+  cmd.dispatch.direct<%96, %98>[%102, %103, %103](%95, %100, %101)
+  %104 = cmd.constant.u32 40
+  cmd.dispatch.direct.barrier<%97, %99>[%104, %103, %103](%95, %100, %101)
   return
 }
 
 low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 2, executable_count = 2, fixed_buffer_count = 0, rebindable_binding_count = 1}) @q4_q6() asm {
-  %97 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
-  %98 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
-  %99 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
-  %100 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
-  %101 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
-  %102 = cmd.constant.u64 0
-  %103 = cmd.constant.u64 -1
-  %104 = cmd.constant.u32 4
-  %105 = cmd.constant.u32 1
-  cmd.dispatch.direct<%98, %100>[%104, %105, %105](%97, %102, %103)
-  %106 = cmd.constant.u32 60
-  cmd.dispatch.direct.barrier<%99, %101>[%106, %105, %105](%97, %102, %103)
+  %105 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %106 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %107 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %108 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %109 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %110 = cmd.constant.u64 0
+  %111 = cmd.constant.u64 -1
+  %112 = cmd.constant.u32 4
+  %113 = cmd.constant.u32 1
+  cmd.dispatch.direct<%106, %108>[%112, %113, %113](%105, %110, %111)
+  %114 = cmd.constant.u32 60
+  cmd.dispatch.direct.barrier<%107, %109>[%114, %113, %113](%105, %110, %111)
   return
 }
 
 low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 2, executable_count = 2, fixed_buffer_count = 0, rebindable_binding_count = 1}) @q6_q4() asm {
-  %107 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
-  %108 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
-  %109 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
-  %110 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
-  %111 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
-  %112 = cmd.constant.u64 0
-  %113 = cmd.constant.u64 -1
-  %114 = cmd.constant.u32 6
-  %115 = cmd.constant.u32 1
-  cmd.dispatch.direct<%108, %110>[%114, %115, %115](%107, %112, %113)
-  %116 = cmd.constant.u32 40
-  cmd.dispatch.direct.barrier<%109, %111>[%116, %115, %115](%107, %112, %113)
+  %115 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %116 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %117 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %118 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %119 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %120 = cmd.constant.u64 0
+  %121 = cmd.constant.u64 -1
+  %122 = cmd.constant.u32 6
+  %123 = cmd.constant.u32 1
+  cmd.dispatch.direct<%116, %118>[%122, %123, %123](%115, %120, %121)
+  %124 = cmd.constant.u32 40
+  cmd.dispatch.direct.barrier<%117, %119>[%124, %123, %123](%115, %120, %121)
   return
 }
 
 low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 2, executable_count = 2, fixed_buffer_count = 0, rebindable_binding_count = 1}) @q6_q6() asm {
-  %117 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
-  %118 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
-  %119 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
-  %120 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
-  %121 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
-  %122 = cmd.constant.u64 0
-  %123 = cmd.constant.u64 -1
-  %124 = cmd.constant.u32 6
-  %125 = cmd.constant.u32 1
-  cmd.dispatch.direct<%118, %120>[%124, %125, %125](%117, %122, %123)
-  %126 = cmd.constant.u32 60
-  cmd.dispatch.direct.barrier<%119, %121>[%126, %125, %125](%117, %122, %123)
+  %125 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %126 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %127 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %128 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %129 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %130 = cmd.constant.u64 0
+  %131 = cmd.constant.u64 -1
+  %132 = cmd.constant.u32 6
+  %133 = cmd.constant.u32 1
+  cmd.dispatch.direct<%126, %128>[%132, %133, %133](%125, %130, %131)
+  %134 = cmd.constant.u32 60
+  cmd.dispatch.direct.barrier<%127, %129>[%134, %133, %133](%125, %130, %131)
   return
 }
 

@@ -223,3 +223,25 @@ func.def @loop_fact_carrier() -> (i32) {
 ^exit:
   func.return %offset : i32
 }
+
+// ====
+
+// A batch can erase dependent tuple carriers while retaining the original
+// premise. The reordered result tuple and predicate references follow live SSA.
+func.def @dependent_tuple_carriers(%left: i32, %right: i32) -> (i32, i32, i32) {
+  cfg.br ^body
+^body:
+  %known_left, %known_right = scalar.assume %left, %right [lt(%left, %right)] : i32, i32
+  %first_left, %first_right = scalar.assume %known_left, %known_right [lt(%known_left, %known_right)] : i32, i32
+  %second_right, %second_left = scalar.assume %first_right, %first_left [gt(%first_right, %first_left)] : i32, i32
+  %third_left = scalar.assume %second_left [lt(%second_left, %second_right)] : i32
+  func.return %second_right, %third_left, %first_left : i32, i32, i32
+}
+
+// ----
+func.def @dependent_tuple_carriers(%left: i32, %right: i32) -> (i32, i32, i32) {
+  cfg.br ^body
+^body:
+  %known_left, %known_right = scalar.assume %left, %right [lt(%left, %right)] : i32, i32
+  func.return %known_right, %known_left, %known_left : i32, i32, i32
+}

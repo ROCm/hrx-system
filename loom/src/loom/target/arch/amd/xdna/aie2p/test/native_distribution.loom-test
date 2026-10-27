@@ -64,30 +64,30 @@ pipeline.def<kernel> public retain target(@device) @finite_stream() run(%output_
 
 // ----
 low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_0() asm {
-  %326 = mov.short 257
-  %327 = mov.short 1
-  %328 = mov.short 0
+  %327 = mov.short 257
+  %328 = mov.short 1
+  %329 = mov.short 0
   %140 = mov.short -1
   %135 = mov.local-address 458752
-  low.br ^_bb1(%328: reg<aie2p.er>, %328: reg<aie2p.er>)
+  low.br ^_bb1(%329: reg<aie2p.er>, %329: reg<aie2p.er>)
 ^_bb1(%value: reg<aie2p.er>, %write: reg<aie2p.er>):
-  %333 = lt %value, %326
-  low.cond_br %333, ^_bb2, ^_bb3 : reg<aie2p.er>
+  %334 = lt %value, %327
+  low.cond_br %334, ^_bb2, ^_bb3 : reg<aie2p.er>
 ^_bb2:
   acq %140, 48
-  %334 = mov.short 4
-  %335 = mov.short 12
-  %336 = add.nc %write, %334
-  %337 = eq %336, %335
-  %338 = copy %337 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %339 = sel.nez %328, %336, %338
-  %340 = mov.address-index %write
-  st.i32.index %value, %135, %340
-  rel %327, 49
-  %341 = add.nc %value, %327
-  low.br ^_bb1(%341: reg<aie2p.er>, %339: reg<aie2p.er>)
+  %335 = mov.short 4
+  %336 = mov.short 12
+  %337 = add.nc %write, %335
+  %338 = eq %337, %336
+  %339 = copy %338 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %340 = sel.nez %329, %337, %339
+  %341 = mov.address-index %write
+  st.i32.index %value, %135, %341
+  rel %328, 49
+  %342 = add.nc %value, %328
+  low.br ^_bb1(%342: reg<aie2p.er>, %340: reg<aie2p.er>)
 ^_bb3:
-  rel %327, 50
+  rel %328, 50
   low.br ^_bb4
 ^_bb4:
   %137 = mov.ss
@@ -95,56 +95,56 @@ low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_0() asm {
 }
 
 low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_3() asm {
-  %344 = mov.short 257
-  %345 = mov.short 0
-  %346 = mov.short 1
+  %345 = mov.short 257
+  %346 = mov.short 0
+  %347 = mov.short 1
   %205 = mov.short -1
-  low.br ^_bb1(%345: reg<aie2p.er>, %345: reg<aie2p.er>)
+  low.br ^_bb1(%346: reg<aie2p.er>, %346: reg<aie2p.er>)
 ^_bb1(%record: reg<aie2p.er>, %read: reg<aie2p.er>):
-  %350 = lt %record, %344
-  low.cond_br %350, ^_bb2, ^_bb3 : reg<aie2p.er>
+  %351 = lt %record, %345
+  low.cond_br %351, ^_bb2, ^_bb3 : reg<aie2p.er>
 ^_bb2:
   acq %205, 49
-  %351 = mov.short 4
-  %352 = mov.short 12
-  %353 = add.nc %read, %351
-  %354 = eq %353, %352
-  %355 = copy %354 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %356 = sel.nez %345, %353, %355
-  %361 = mov.short 2
-  %362 = lshl %record, %361
-  %364 = lshl %read, %352
-  %365 = or %364, %346
+  %352 = mov.short 4
+  %353 = mov.short 12
+  %354 = add.nc %read, %352
+  %355 = eq %354, %353
+  %356 = copy %355 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %357 = sel.nez %346, %354, %356
+  %362 = mov.short 2
+  %363 = lshl %record, %362
+  %365 = lshl %read, %353
+  %366 = or %365, %347
   %170 = mov.local-address 458768
   %171 = lda %170, 0
   %172 = lda %170, 4
-  %173 = add.rr %171, %362
+  %173 = add.rr %171, %363
   %174 = ltu %173, %171
   %175 = add.rr %172, %174
   %176 = mov.i32 -2147483648
   %177 = mov.i32 118816
   mov.ms %176
   mov.ms %177
-  mov.ms.last %365
+  mov.ms.last %366
   %179 = mov.i32 -2146316284
-  mov.ms %346
+  mov.ms %347
   mov.ms %179
   mov.ms %173
   mov.ms.last %175
   %183 = mov.i32 -2147364348
-  mov.ms %346
+  mov.ms %347
   mov.ms %183
   mov.ms.last %176
   %185 = mov.i32 122388
   mov.ms %176
   mov.ms %185
-  mov.ms.last %346
+  mov.ms.last %347
   %186 = mov.ss
-  rel %346, 48
-  %366 = add.nc %record, %346
-  low.br ^_bb1(%366: reg<aie2p.er>, %356: reg<aie2p.er>)
+  rel %347, 48
+  %367 = add.nc %record, %347
+  low.br ^_bb1(%367: reg<aie2p.er>, %357: reg<aie2p.er>)
 ^_bb3:
-  rel %346, 50
+  rel %347, 50
   low.br ^_bb4
 ^_bb4:
   %167 = mov.ss
@@ -401,30 +401,30 @@ pipeline.def<kernel> public retain target(@device) @finite_stream() run(%output_
 
 // ----
 low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_0() asm {
-  %326 = mov.i32 1024
-  %327 = mov.short 1
-  %328 = mov.short 0
+  %327 = mov.i32 1024
+  %328 = mov.short 1
+  %329 = mov.short 0
   %140 = mov.short -1
   %135 = mov.local-address 458752
-  low.br ^_bb1(%328: reg<aie2p.er>, %328: reg<aie2p.er>)
+  low.br ^_bb1(%329: reg<aie2p.er>, %329: reg<aie2p.er>)
 ^_bb1(%value: reg<aie2p.er>, %write: reg<aie2p.er>):
-  %333 = lt %value, %326
-  low.cond_br %333, ^_bb2, ^_bb3 : reg<aie2p.er>
+  %334 = lt %value, %327
+  low.cond_br %334, ^_bb2, ^_bb3 : reg<aie2p.er>
 ^_bb2:
   acq %140, 48
-  %334 = mov.short 4
-  %335 = mov.short 12
-  %336 = add.nc %write, %334
-  %337 = eq %336, %335
-  %338 = copy %337 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %339 = sel.nez %328, %336, %338
-  %340 = mov.address-index %write
-  st.i32.index %value, %135, %340
-  rel %327, 49
-  %341 = add.nc %value, %327
-  low.br ^_bb1(%341: reg<aie2p.er>, %339: reg<aie2p.er>)
+  %335 = mov.short 4
+  %336 = mov.short 12
+  %337 = add.nc %write, %335
+  %338 = eq %337, %336
+  %339 = copy %338 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %340 = sel.nez %329, %337, %339
+  %341 = mov.address-index %write
+  st.i32.index %value, %135, %341
+  rel %328, 49
+  %342 = add.nc %value, %328
+  low.br ^_bb1(%342: reg<aie2p.er>, %340: reg<aie2p.er>)
 ^_bb3:
-  rel %327, 50
+  rel %328, 50
   low.br ^_bb4
 ^_bb4:
   %137 = mov.ss
@@ -432,56 +432,56 @@ low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_0() asm {
 }
 
 low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_3() asm {
-  %344 = mov.i32 1024
-  %345 = mov.short 0
-  %346 = mov.short 1
+  %345 = mov.i32 1024
+  %346 = mov.short 0
+  %347 = mov.short 1
   %205 = mov.short -1
-  low.br ^_bb1(%345: reg<aie2p.er>, %345: reg<aie2p.er>)
+  low.br ^_bb1(%346: reg<aie2p.er>, %346: reg<aie2p.er>)
 ^_bb1(%record: reg<aie2p.er>, %read: reg<aie2p.er>):
-  %350 = lt %record, %344
-  low.cond_br %350, ^_bb2, ^_bb3 : reg<aie2p.er>
+  %351 = lt %record, %345
+  low.cond_br %351, ^_bb2, ^_bb3 : reg<aie2p.er>
 ^_bb2:
   acq %205, 49
-  %351 = mov.short 4
-  %352 = mov.short 12
-  %353 = add.nc %read, %351
-  %354 = eq %353, %352
-  %355 = copy %354 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %356 = sel.nez %345, %353, %355
-  %361 = mov.short 2
-  %362 = lshl %record, %361
-  %364 = lshl %read, %352
-  %365 = or %364, %346
+  %352 = mov.short 4
+  %353 = mov.short 12
+  %354 = add.nc %read, %352
+  %355 = eq %354, %353
+  %356 = copy %355 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %357 = sel.nez %346, %354, %356
+  %362 = mov.short 2
+  %363 = lshl %record, %362
+  %365 = lshl %read, %353
+  %366 = or %365, %347
   %170 = mov.local-address 458768
   %171 = lda %170, 0
   %172 = lda %170, 4
-  %173 = add.rr %171, %362
+  %173 = add.rr %171, %363
   %174 = ltu %173, %171
   %175 = add.rr %172, %174
   %176 = mov.i32 -2147483648
   %177 = mov.i32 118816
   mov.ms %176
   mov.ms %177
-  mov.ms.last %365
+  mov.ms.last %366
   %179 = mov.i32 -2146316284
-  mov.ms %346
+  mov.ms %347
   mov.ms %179
   mov.ms %173
   mov.ms.last %175
   %183 = mov.i32 -2147364348
-  mov.ms %346
+  mov.ms %347
   mov.ms %183
   mov.ms.last %176
   %185 = mov.i32 122388
   mov.ms %176
   mov.ms %185
-  mov.ms.last %346
+  mov.ms.last %347
   %186 = mov.ss
-  rel %346, 48
-  %366 = add.nc %record, %346
-  low.br ^_bb1(%366: reg<aie2p.er>, %356: reg<aie2p.er>)
+  rel %347, 48
+  %367 = add.nc %record, %347
+  low.br ^_bb1(%367: reg<aie2p.er>, %357: reg<aie2p.er>)
 ^_bb3:
-  rel %346, 50
+  rel %347, 50
   low.br ^_bb4
 ^_bb4:
   %167 = mov.ss
@@ -1068,30 +1068,30 @@ pipeline.def<kernel> public retain target(@device) @finite_stream() run(%output_
 
 // ----
 low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_0() asm {
-  %343 = mov.i32 1123
-  %344 = mov.short 1
-  %345 = mov.short 0
+  %344 = mov.i32 1123
+  %345 = mov.short 1
+  %346 = mov.short 0
   %140 = mov.short -1
   %135 = mov.local-address 458752
-  low.br ^_bb1(%345: reg<aie2p.er>, %345: reg<aie2p.er>)
+  low.br ^_bb1(%346: reg<aie2p.er>, %346: reg<aie2p.er>)
 ^_bb1(%value: reg<aie2p.er>, %write: reg<aie2p.er>):
-  %350 = lt %value, %343
-  low.cond_br %350, ^_bb2, ^_bb3 : reg<aie2p.er>
+  %351 = lt %value, %344
+  low.cond_br %351, ^_bb2, ^_bb3 : reg<aie2p.er>
 ^_bb2:
   acq %140, 48
-  %351 = mov.short 4
-  %352 = mov.short 12
-  %353 = add.nc %write, %351
-  %354 = eq %353, %352
-  %355 = copy %354 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %356 = sel.nez %345, %353, %355
-  %357 = mov.address-index %write
-  st.i32.index %value, %135, %357
-  rel %344, 49
-  %358 = add.nc %value, %344
-  low.br ^_bb1(%358: reg<aie2p.er>, %356: reg<aie2p.er>)
+  %352 = mov.short 4
+  %353 = mov.short 12
+  %354 = add.nc %write, %352
+  %355 = eq %354, %353
+  %356 = copy %355 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %357 = sel.nez %346, %354, %356
+  %358 = mov.address-index %write
+  st.i32.index %value, %135, %358
+  rel %345, 49
+  %359 = add.nc %value, %345
+  low.br ^_bb1(%359: reg<aie2p.er>, %357: reg<aie2p.er>)
 ^_bb3:
-  rel %344, 50
+  rel %345, 50
   low.br ^_bb4
 ^_bb4:
   %137 = mov.ss
@@ -1099,56 +1099,56 @@ low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_0() asm {
 }
 
 low.func.def inline target<amd.xdna.aie2p.core> @__pipeline_worker_3() asm {
-  %361 = mov.i32 1123
-  %362 = mov.short 0
-  %363 = mov.short 1
+  %362 = mov.i32 1123
+  %363 = mov.short 0
+  %364 = mov.short 1
   %205 = mov.short -1
-  low.br ^_bb1(%362: reg<aie2p.er>, %362: reg<aie2p.er>)
+  low.br ^_bb1(%363: reg<aie2p.er>, %363: reg<aie2p.er>)
 ^_bb1(%record: reg<aie2p.er>, %read: reg<aie2p.er>):
-  %367 = lt %record, %361
-  low.cond_br %367, ^_bb2, ^_bb3 : reg<aie2p.er>
+  %368 = lt %record, %362
+  low.cond_br %368, ^_bb2, ^_bb3 : reg<aie2p.er>
 ^_bb2:
   acq %205, 49
-  %368 = mov.short 4
-  %369 = mov.short 12
-  %370 = add.nc %read, %368
-  %371 = eq %370, %369
-  %372 = copy %371 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %373 = sel.nez %362, %370, %372
-  %378 = mov.short 2
-  %379 = lshl %record, %378
-  %381 = lshl %read, %369
-  %382 = or %381, %363
+  %369 = mov.short 4
+  %370 = mov.short 12
+  %371 = add.nc %read, %369
+  %372 = eq %371, %370
+  %373 = copy %372 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %374 = sel.nez %363, %371, %373
+  %379 = mov.short 2
+  %380 = lshl %record, %379
+  %382 = lshl %read, %370
+  %383 = or %382, %364
   %170 = mov.local-address 458768
   %171 = lda %170, 0
   %172 = lda %170, 4
-  %173 = add.rr %171, %379
+  %173 = add.rr %171, %380
   %174 = ltu %173, %171
   %175 = add.rr %172, %174
   %176 = mov.i32 -2147483648
   %177 = mov.i32 118912
   mov.ms %176
   mov.ms %177
-  mov.ms.last %382
+  mov.ms.last %383
   %179 = mov.i32 -2146316284
-  mov.ms %363
+  mov.ms %364
   mov.ms %179
   mov.ms %173
   mov.ms.last %175
   %183 = mov.i32 -2147364348
-  mov.ms %363
+  mov.ms %364
   mov.ms %183
   mov.ms.last %176
   %185 = mov.i32 122388
   mov.ms %176
   mov.ms %185
-  mov.ms.last %368
+  mov.ms.last %369
   %186 = mov.ss
-  rel %363, 48
-  %383 = add.nc %record, %363
-  low.br ^_bb1(%383: reg<aie2p.er>, %373: reg<aie2p.er>)
+  rel %364, 48
+  %384 = add.nc %record, %364
+  low.br ^_bb1(%384: reg<aie2p.er>, %374: reg<aie2p.er>)
 ^_bb3:
-  rel %363, 50
+  rel %364, 50
   low.br ^_bb4
 ^_bb4:
   %167 = mov.ss

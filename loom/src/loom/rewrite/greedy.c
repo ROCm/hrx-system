@@ -8,6 +8,9 @@
 
 #include <string.h>
 
+#include "loom/util/fact_observation.h"
+#include "loom/util/walk.h"
+
 void loom_greedy_rewrite_driver_initialize(
     loom_module_t* module, iree_arena_allocator_t* scratch_arena,
     loom_value_fact_table_t* fact_table,
@@ -78,19 +81,60 @@ void loom_greedy_rewrite_result_record_change(
   }
 }
 
-static iree_status_t loom_greedy_rewrite_apply_prepared(
+typedef struct loom_rewrite_preparation_t {
+  // Policy selected for this batch.
+  loom_rewrite_prepare_callback_t prepare;
+  // Coherent read-only IR and facts throughout preparation.
+  const loom_rewriter_t* rewriter;
+  // Short-lived storage for successful matches.
+  iree_arena_allocator_t* arena;
+  // Collected actions, each owning a distinct root.
+  loom_rewrite_action_t* actions;
+} loom_rewrite_preparation_t;
+
+static iree_status_t loom_greedy_rewrite_prepare_op(
+    void* user_data, loom_op_t* op, const loom_walk_context_t* context,
+    loom_walk_result_t* out_result) {
+  (void)context;
+  *out_result = LOOM_WALK_CONTINUE;
+  loom_rewrite_preparation_t* preparation = user_data;
+  loom_rewrite_action_t* action = NULL;
+  IREE_RETURN_IF_ERROR(preparation->prepare.fn(preparation->prepare.user_data,
+                                               preparation->rewriter, op,
+                                               preparation->arena, &action));
+  if (action) {
+    action->root = op;
+    action->next = preparation->actions;
+    preparation->actions = action;
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_greedy_rewrite_apply_prepared(
     loom_greedy_rewrite_driver_t* driver, loom_region_t* region,
-    const loom_rewrite_pattern_registry_t* patterns,
+    loom_rewrite_prepare_callback_t prepare,
     const loom_greedy_rewrite_callbacks_t* callbacks,
     loom_greedy_rewrite_result_t* result) {
   IREE_RETURN_IF_ERROR(loom_rewriter_propagate_value_facts(&driver->rewriter));
   loom_greedy_rewrite_result_record_rewriter_flags(result, &driver->rewriter);
   iree_arena_allocator_t arena;
   iree_arena_initialize(driver->scratch_arena->block_pool, &arena);
-  loom_rewrite_action_t* actions = NULL;
-  iree_status_t status = loom_rewrite_pattern_registry_prepare_region(
-      patterns, driver->module, driver->fact_table, region, &arena, &actions);
-  for (loom_rewrite_action_t* action = actions;
+  loom_rewrite_preparation_t preparation = {
+      .prepare = prepare, .rewriter = &driver->rewriter, .arena = &arena};
+  loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
+#ifndef NDEBUG
+  const loom_value_fact_observation_t observation =
+      loom_value_fact_observation_capture(driver->fact_table);
+  loom_value_fact_observation_assert_valid(observation);
+#endif
+  iree_status_t status = loom_walk_region(
+      driver->module, region, LOOM_WALK_PRE_ORDER,
+      (loom_walk_callback_t){loom_greedy_rewrite_prepare_op, &preparation},
+      &walk_result);
+#ifndef NDEBUG
+  loom_value_fact_observation_assert_valid(observation);
+#endif
+  for (loom_rewrite_action_t* action = preparation.actions;
        iree_status_is_ok(status) && action; action = action->next) {
     driver->rewriter.flags = 0;
     status = action->apply(action, &driver->rewriter);
@@ -103,6 +147,13 @@ static iree_status_t loom_greedy_rewrite_apply_prepared(
   }
   iree_arena_deinitialize(&arena);
   return status;
+}
+
+static iree_status_t loom_greedy_rewrite_prepare_pattern(
+    void* user_data, const loom_rewriter_t* rewriter, const loom_op_t* op,
+    iree_arena_allocator_t* arena, loom_rewrite_action_t** out_action) {
+  return loom_rewrite_pattern_registry_prepare_op(
+      user_data, rewriter->module, rewriter->fact_table, op, arena, out_action);
 }
 
 iree_status_t loom_greedy_rewrite_run_region(
@@ -144,7 +195,11 @@ iree_status_t loom_greedy_rewrite_run_region(
   if (iree_status_is_ok(status) && options && options->prepared_patterns &&
       options->prepared_patterns->pattern_count) {
     status = loom_greedy_rewrite_apply_prepared(
-        driver, region, options->prepared_patterns, callbacks, &result);
+        driver, region,
+        (loom_rewrite_prepare_callback_t){
+            .user_data = (void*)options->prepared_patterns,
+            .fn = loom_greedy_rewrite_prepare_pattern},
+        callbacks, &result);
   }
 
   for (uint32_t iteration = 0;

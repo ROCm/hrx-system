@@ -824,8 +824,8 @@ func.def @bounded_header_remaining_rows(%requested_count: index) -> (i64, i64) {
   %body_high = scalar.constant 8 : i64
   test.use %body_low, %body_high : i64, i64
   %next_iteration = index.add %iteration, %iteration_step : index
-  %21 = scalar.constant -1 : i32
-  %next_rows = scalar.addi %rows, %21 : i32
+  %25 = scalar.constant -1 : i32
+  %next_rows = scalar.addi %rows, %25 : i32
   cfg.br ^header(%next_iteration: index, %next_rows: i32)
 ^exit:
   %result_low = scalar.constant 5 : i64
@@ -883,8 +883,8 @@ func.def @unsigned_countdown_rows(%requested_count: index) -> (i64, i64) {
   %body_high = scalar.constant 8 : i64
   test.use %body_low, %body_high : i64, i64
   %next_remaining = index.sub %remaining, %iteration_step : index
-  %21 = scalar.constant -1 : i32
-  %next_rows = scalar.addi %rows, %21 : i32
+  %25 = scalar.constant -1 : i32
+  %next_rows = scalar.addi %rows, %25 : i32
   cfg.br ^header(%next_remaining: index, %next_rows: i32)
 ^exit:
   %result_low = scalar.constant 5 : i64
@@ -942,8 +942,8 @@ func.def @reversed_signed_countdown_rows(%requested_count: index) -> (i64, i64) 
   %body_high = scalar.constant 8 : i64
   test.use %body_low, %body_high : i64, i64
   %next_remaining = index.add %remaining, %counter_delta : index
-  %21 = scalar.constant -1 : i32
-  %next_rows = scalar.addi %rows, %21 : i32
+  %25 = scalar.constant -1 : i32
+  %next_rows = scalar.addi %rows, %25 : i32
   cfg.br ^header(%next_remaining: index, %next_rows: i32)
 ^exit:
   %result_low = scalar.constant 5 : i64
@@ -1007,8 +1007,8 @@ func.def @signed_ascending_data_exit(%input: view<3xi32>) -> (i32, i64, i64) {
   cfg.cond_br %keep_going, ^latch, ^stopped
 ^latch:
   %next_position = index.add %position, %position_step : index
-  %24 = scalar.constant -1 : i32
-  %next_rows = scalar.addi %rows, %24 : i32
+  %26 = scalar.constant -1 : i32
+  %next_rows = scalar.addi %rows, %26 : i32
   cfg.br ^header(%next_position: index, %next_rows: i32)
 ^stopped:
   cfg.br ^exit(%rows: i32)

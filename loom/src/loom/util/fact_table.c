@@ -279,6 +279,7 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->regions.bucket_count = 0;
   table->regions.count = 0;
   table->regions.cfg_count = 0;
+  table->regions.has_structured_summaries = false;
   table->regions.has_independent_targets = false;
   table->layout_origins = NULL;
   table->vector_partitions = NULL;

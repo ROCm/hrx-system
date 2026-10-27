@@ -146,15 +146,15 @@ func.def public @stored_synthesized_array() -> (i32) {
     view.store<volatile> %91, %65[0] : i32, view<1xi32>
     scf.yield %91 : i32
   }
-  %369 = index.constant 4 : offset
-  %93 = buffer.view %values_storage[%369] : buffer -> view<1xi32>
+  %367 = index.constant 4 : offset
+  %93 = buffer.view %values_storage[%367] : buffer -> view<1xi32>
   view.store<volatile> %77, %93[0] : i32, view<1xi32>
   %count$100 = view.load<volatile> %65[0] : view<1xi32> -> i32
-  %367 = index.constant 8 : offset
-  %102 = buffer.view %values_storage[%367] : buffer -> view<1xi32>
+  %365 = index.constant 8 : offset
+  %102 = buffer.view %values_storage[%365] : buffer -> view<1xi32>
   view.store<volatile> %count$100, %102[0] : i32, view<1xi32>
-  %366 = index.constant 12 : offset
-  %109 = buffer.view %values_storage[%366] : buffer -> view<1xi32>
+  %364 = index.constant 12 : offset
+  %109 = buffer.view %values_storage[%364] : buffer -> view<1xi32>
   view.store<volatile> %63, %109[0] : i32, view<1xi32>
   %count$116 = view.load<volatile> %109[0] : view<1xi32> -> i32
   %118 = scalar.andi %count$116, %73 : i32
@@ -171,12 +171,12 @@ func.def public @stored_synthesized_array() -> (i32) {
     view.store<volatile> %135, %109[0] : i32, view<1xi32>
     scf.yield %135 : i32
   }
-  %364 = index.constant 16 : offset
-  %137 = buffer.view %values_storage[%364] : buffer -> view<1xi32>
+  %360 = index.constant 16 : offset
+  %137 = buffer.view %values_storage[%360] : buffer -> view<1xi32>
   view.store<volatile> %121, %137[0] : i32, view<1xi32>
   %count$144 = view.load<volatile> %109[0] : view<1xi32> -> i32
-  %362 = index.constant 20 : offset
-  %146 = buffer.view %values_storage[%362] : buffer -> view<1xi32>
+  %358 = index.constant 20 : offset
+  %146 = buffer.view %values_storage[%358] : buffer -> view<1xi32>
   view.store<volatile> %count$144, %146[0] : i32, view<1xi32>
   %final$159 = view.load<volatile> %102[0] : view<1xi32> -> i32
   %final$172 = view.load<volatile> %146[0] : view<1xi32> -> i32

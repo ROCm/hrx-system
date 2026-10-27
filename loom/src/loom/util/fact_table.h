@@ -251,6 +251,9 @@ struct loom_value_fact_table_t {
     iree_host_size_t count;
     // Number of published CFG snapshots, used to skip CFG-only rewrite work.
     iree_host_size_t cfg_count;
+    // This scope has computed structured loop or branch summaries. Retained
+    // until scope reset, including after rewrites remove the original owners.
+    bool has_structured_summaries;
     // True after encountering an independent execution target. Ordinary
     // function inference bypasses per-operation region target lookup.
     bool has_independent_targets;

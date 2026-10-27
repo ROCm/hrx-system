@@ -200,8 +200,8 @@ func.def @bounded_while_remaining_rows(%requested_count: index) -> (i64, i64) {
     %body_high = scalar.constant 8 : i64
     test.use %body_low, %body_high : i64, i64
     %next_iteration = index.add %iteration, %iteration_step : index
-    %25 = scalar.constant -1 : i32
-    %next_rows = scalar.addi %rows, %25 : i32
+    %29 = scalar.constant -1 : i32
+    %next_rows = scalar.addi %rows, %29 : i32
     scf.yield %next_iteration, %next_rows : index, i32
   }
   %result_low = scalar.constant 5 : i64
@@ -314,8 +314,8 @@ func.def @reversed_unsigned_countdown_rows(%requested_count: index) -> (i64, i64
     %body_high = scalar.constant 8 : i64
     test.use %body_low, %body_high : i64, i64
     %next_remaining = index.add %remaining, %counter_delta : index
-    %25 = scalar.constant -1 : i32
-    %next_rows = scalar.addi %rows, %25 : i32
+    %29 = scalar.constant -1 : i32
+    %next_rows = scalar.addi %rows, %29 : i32
     scf.yield %next_remaining, %next_rows : index, i32
   }
   %result_low = scalar.constant 5 : i64

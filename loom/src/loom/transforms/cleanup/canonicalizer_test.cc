@@ -261,6 +261,38 @@ TEST_F(CanonicalizerTest, InitializesRegionOnceAndMaintainsNewRoots) {
   loom_rewrite_pattern_registry_storage_deinitialize(&initialization_storage);
 }
 
+TEST_F(CanonicalizerTest, PreFoldPatternsKeepPriority) {
+  body_->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
+  const loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* constant = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(7), i32,
+                                          LOOM_LOCATION_UNKNOWN, &constant));
+  const loom_value_id_t value = loom_test_constant_result(constant);
+  loom_op_t* add = nullptr;
+  IREE_ASSERT_OK(loom_test_addi_build(&builder_, value, value, i32,
+                                      LOOM_LOCATION_UNKNOWN, &add));
+  const loom_value_id_t result = loom_test_addi_result(add);
+  loom_op_t* use = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_use_build(&builder_, &result, 1, LOOM_LOCATION_UNKNOWN, &use));
+  loom_op_t* terminator = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &terminator));
+  CanonicalizerPhasePatternState state = {};
+  const CanonicalizerPhasePatternData data = {&state};
+  const loom_rewrite_pattern_t pattern = {
+      LOOM_OP_TEST_ADDI, CountRegionInitializationPattern, &data};
+  loom_rewrite_pattern_registry_storage_t storage = {};
+  InitializeSinglePatternRegistry(&pattern, &storage);
+  const loom_canonicalizer_options_t options = {
+      .patterns = {.pre_fold = &storage.registry},
+  };
+  IREE_ASSERT_OK(run_canonicalize(func_like_, &options));
+  EXPECT_EQ(state.initialization_visit_count, 1u);
+  EXPECT_EQ(constant_value(loom_op_const_operands(use)[0]), 14);
+  loom_rewrite_pattern_registry_storage_deinitialize(&storage);
+}
+
 TEST_F(CanonicalizerTest, AddiZeroRight) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
 
@@ -351,16 +383,11 @@ TEST_F(CanonicalizerTest, ConstantFoldAddi) {
 }
 
 TEST_F(CanonicalizerTest, ChainedFolds) {
+  body_->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
 
-  // %x = constant 42
-  // %zero = constant 0
-  // %a = addi %x, %zero     → folds to %x
-  // %b = addi %a, %zero     → folds to %x (after %a is replaced)
-  // %c = neg %b              → uses %x after both folds
-  //
-  // This tests that the worklist propagates: when %a folds, %b's
-  // operand changes, putting %b back on the worklist for another fold.
+  // Both sums are exact. Folding the consumer makes its producer dead, so
+  // only the consumer's constant needs storage.
   loom_op_t* const_x = NULL;
   IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(42), i32,
                                           LOOM_LOCATION_UNKNOWN, &const_x));
@@ -384,11 +411,15 @@ TEST_F(CanonicalizerTest, ChainedFolds) {
   loom_op_t* use = NULL;
   IREE_ASSERT_OK(
       loom_test_use_build(&builder_, &b, 1, LOOM_LOCATION_UNKNOWN, &use));
+  loom_op_t* terminator = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &terminator));
 
+  const iree_host_size_t value_count = module_->values.count;
   IREE_ASSERT_OK(run_canonicalize(func_like_));
 
-  // Both addi ops fold to constant 42. neg uses the folded result.
   EXPECT_EQ(constant_value(loom_op_operands(use)[0]), 42);
+  EXPECT_EQ(module_->values.count - value_count, 1u);
 }
 
 TEST_F(CanonicalizerTest, MultipleUsersRevisited) {
@@ -460,6 +491,129 @@ TEST_F(CanonicalizerTest, NewOpsAddedToWorklist) {
   // constant — nothing to fold to. Both survive.
   EXPECT_EQ(constant_value(loom_op_operands(use)[0]), 7);
 }
+
+class CanonicalizerBatchTest : public CanonicalizerTest,
+                               public ::testing::WithParamInterface<bool> {};
+
+TEST_P(CanonicalizerBatchTest, DependentFoldsAndIdentitiesSharePublication) {
+  constexpr uint16_t kRewriteCount = 32;
+  const loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t input = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_builder_define_block_arg(
+      &builder_, loom_region_entry_block(body_), i32, &input));
+  loom_block_t* loop = nullptr;
+  loom_op_t* terminator = nullptr;
+  if (GetParam()) {
+    const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+    loom_op_t* lower = nullptr;
+    loom_op_t* upper = nullptr;
+    loom_op_t* step = nullptr;
+    IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(0),
+                                            index_type, LOOM_LOCATION_UNKNOWN,
+                                            &lower));
+    IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(4),
+                                            index_type, LOOM_LOCATION_UNKNOWN,
+                                            &upper));
+    IREE_ASSERT_OK(loom_test_constant_build(
+        &builder_, loom_attr_i64(1), index_type, LOOM_LOCATION_UNKNOWN, &step));
+    loom_op_t* loop_op = nullptr;
+    IREE_ASSERT_OK(loom_test_loop_build(
+        &builder_, loom_test_constant_result(lower),
+        loom_test_constant_result(upper), loom_test_constant_result(step),
+        nullptr, 0, nullptr, nullptr, 0, LOOM_LOCATION_UNKNOWN, &loop_op));
+    IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                         LOOM_LOCATION_UNKNOWN, &terminator));
+    loom_builder_enter_region(&builder_, loop_op, loom_test_loop_body(loop_op));
+  } else {
+    body_->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
+    IREE_ASSERT_OK(loom_region_append_block(module_, body_, &loop));
+    IREE_ASSERT_OK(loom_test_br_build(&builder_, loop, LOOM_LOCATION_UNKNOWN,
+                                      &terminator));
+    loom_builder_set_block(&builder_, loop);
+  }
+  loom_predicate_t predicate = {
+      .kind = LOOM_PREDICATE_RANGE,
+      .arg_count = 3,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
+                   LOOM_PRED_ARG_CONST},
+      .reserved = {},
+      .args = {input, 0, 64},
+  };
+  loom_op_t* carrier = nullptr;
+  IREE_ASSERT_OK(loom_scalar_assume_build(&builder_, &input, 1, &predicate, 1,
+                                          &i32, 1, LOOM_LOCATION_UNKNOWN,
+                                          &carrier));
+  loom_value_id_t alias = loom_op_const_results(carrier)[0];
+  const loom_value_id_t original_alias = alias;
+  loom_op_t* one = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(1), i32,
+                                          LOOM_LOCATION_UNKNOWN, &one));
+  loom_value_id_t sum = loom_test_constant_result(one);
+  loom_value_id_t values[2 * kRewriteCount];
+  for (uint16_t i = 0; i < kRewriteCount; ++i) {
+    loom_op_t* add = nullptr;
+    IREE_ASSERT_OK(loom_test_addi_build(&builder_, sum,
+                                        loom_test_constant_result(one), i32,
+                                        LOOM_LOCATION_UNKNOWN, &add));
+    sum = loom_test_addi_result(add);
+    values[2 * i] = sum;
+    predicate.args[0] = alias;
+    loom_op_t* redundant = nullptr;
+    IREE_ASSERT_OK(loom_scalar_assume_build(&builder_, &alias, 1, &predicate, 1,
+                                            &i32, 1, LOOM_LOCATION_UNKNOWN,
+                                            &redundant));
+    alias = loom_op_const_results(redundant)[0];
+    values[2 * i + 1] = alias;
+  }
+  loom_op_t* use = nullptr;
+  IREE_ASSERT_OK(loom_test_use_build(&builder_, values, IREE_ARRAYSIZE(values),
+                                     LOOM_LOCATION_UNKNOWN, &use));
+  if (GetParam()) {
+    IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                         LOOM_LOCATION_UNKNOWN, &terminator));
+  } else {
+    IREE_ASSERT_OK(loom_test_br_build(&builder_, loop, LOOM_LOCATION_UNKNOWN,
+                                      &terminator));
+  }
+
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_pass_value_fact_owner_t owner;
+  loom_pass_value_fact_owner_initialize(&block_pool_, &owner);
+  loom_value_fact_table_t* facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &owner, module_, loom_pass_value_fact_scope_function(func_like_),
+      &facts));
+  EXPECT_EQ(facts->regions.has_structured_summaries, GetParam());
+  EXPECT_EQ(facts->regions.cfg_count, GetParam() ? 0u : 1u);
+#ifndef NDEBUG
+  const uint64_t generation = facts->observation.generation;
+#endif
+  loom_canonicalizer_t canonicalizer;
+  IREE_ASSERT_OK(loom_canonicalizer_initialize(
+      module_, &arena, &owner, &kSpecialValuePolicy, nullptr, &canonicalizer));
+  IREE_ASSERT_OK(loom_canonicalizer_run_function(&canonicalizer, func_like_,
+                                                 nullptr, nullptr));
+  for (uint16_t i = 0; i < kRewriteCount; ++i) {
+    const loom_value_id_t result = loom_op_const_operands(use)[2 * i];
+    EXPECT_EQ(constant_value(result), i + 2);
+    EXPECT_EQ(loom_value_fact_table_lookup(facts, result).range_lo, i + 2);
+    EXPECT_EQ(loom_op_const_operands(use)[2 * i + 1], original_alias);
+  }
+#ifndef NDEBUG
+  // Publication is bounded by rewrite phases, not the number of matched roots.
+  EXPECT_LE(facts->observation.generation - generation, 4u);
+  EXPECT_FALSE(facts->observation.pending);
+#endif
+  loom_canonicalizer_deinitialize(&canonicalizer);
+  loom_value_fact_table_clear_scope(facts);
+  EXPECT_FALSE(facts->regions.has_structured_summaries);
+  loom_pass_value_fact_owner_deinitialize(&owner);
+  iree_arena_deinitialize(&arena);
+}
+
+INSTANTIATE_TEST_SUITE_P(CfgAndStructuredLoops, CanonicalizerBatchTest,
+                         ::testing::Bool());
 
 TEST_F(CanonicalizerTest, FactRefinementChainUsesBoundedNames) {
   constexpr uint16_t kRelationCount = 256;

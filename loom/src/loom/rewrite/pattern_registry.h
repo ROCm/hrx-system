@@ -17,6 +17,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
+#include "loom/rewrite/action.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,25 +25,6 @@ extern "C" {
 
 typedef struct loom_rewrite_pattern_t loom_rewrite_pattern_t;
 typedef struct loom_value_fact_table_t loom_value_fact_table_t;
-typedef struct loom_rewrite_action_t loom_rewrite_action_t;
-
-// One prepared, meaning-preserving rewrite. Providers embed this header before
-// their payload. Apply may replace only its own regionless root and must
-// preserve result counts and types. It reads surviving operands from the live
-// root, never from captured value IDs, and does not query facts. Other planned
-// roots remain live until their own actions execute. Failure is limited to
-// allocation or another infrastructure failure; matching has already made every
-// decision.
-struct loom_rewrite_action_t {
-  // Next action in the temporary batch; assigned by the shared collector.
-  loom_rewrite_action_t* next;
-  // Live root to rewrite; assigned by the shared collector.
-  loom_op_t* root;
-  // Provider callback consuming this action and its trailing payload.
-  iree_status_t (*apply)(const loom_rewrite_action_t* action,
-                         loom_rewriter_t* rewriter);
-};
-
 // Matches against coherent read-only IR and facts. A match allocates its action
 // and payload in |arena| and initializes the apply callback. A nonmatch returns
 // NULL without allocating. No IR mutation occurs until all roots are prepared.
@@ -224,15 +206,14 @@ iree_status_t loom_rewrite_pattern_registry_apply(
     const loom_rewrite_pattern_registry_t* registry, void* context,
     loom_op_t* op, loom_rewriter_t* rewriter, bool* out_changed);
 
-// Prepares at most one action per root in |region|, taking the first matching
-// preparation callback in registry order. The arena and returned linked list
-// belong to the caller and must die after the complete batch is applied. No IR
-// changes occur here, including on failure. Actions are returned in reverse
-// preorder; their root-local contract makes application order independent.
-iree_status_t loom_rewrite_pattern_registry_prepare_region(
-    const loom_rewrite_pattern_registry_t* registry, loom_module_t* module,
-    const loom_value_fact_table_t* facts, loom_region_t* region,
-    iree_arena_allocator_t* arena, loom_rewrite_action_t** out_actions);
+// Prepares the first matching action for |op| in registry order. The caller
+// owns collection and application; a match initializes only its apply callback
+// and payload. No mutation occurs, including on failure.
+iree_status_t loom_rewrite_pattern_registry_prepare_op(
+    const loom_rewrite_pattern_registry_t* registry,
+    const loom_module_t* module, const loom_value_fact_table_t* facts,
+    const loom_op_t* op, iree_arena_allocator_t* arena,
+    loom_rewrite_action_t** out_action);
 
 #ifdef __cplusplus
 }

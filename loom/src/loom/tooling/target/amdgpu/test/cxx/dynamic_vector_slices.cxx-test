@@ -25,36 +25,36 @@ using Packet = unsigned __attribute__((ext_vector_type(4)));
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @sum_packets() asm {
   %input = resource<hal_binding> {extent = 64, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %332 = v_mov_b32 0
-  %333 = global_load_b32_saddr %332, %input
-  %335 = global_load_b32_saddr %332, %input {offset = 4}
-  %337 = global_load_b32_saddr %332, %input {offset = 8}
-  %339 = global_load_b32_saddr %332, %input {offset = 12}
-  %341 = global_load_b32_saddr %332, %input {offset = 16}
-  %343 = global_load_b32_saddr %332, %input {offset = 20}
-  %345 = global_load_b32_saddr %332, %input {offset = 24}
-  %347 = global_load_b32_saddr %332, %input {offset = 28}
-  %349 = global_load_b32_saddr %332, %input {offset = 32}
-  %351 = global_load_b32_saddr %332, %input {offset = 36}
-  %353 = global_load_b32_saddr %332, %input {offset = 40}
-  %355 = global_load_b32_saddr %332, %input {offset = 44}
-  %357 = global_load_b32_saddr %332, %input {offset = 48}
-  %359 = global_load_b32_saddr %332, %input {offset = 52}
-  %361 = global_load_b32_saddr %332, %input {offset = 56}
-  %363 = global_load_b32_saddr %332, %input {offset = 60}
-  %368 = v_add_u32 %333, %341
-  %371 = v_add_u32 %335, %343
-  %374 = v_add_u32 %337, %345
-  %377 = v_add_u32 %339, %347
-  %382 = v_add_u32 %368, %349
-  %385 = v_add_u32 %371, %351
-  %388 = v_add_u32 %374, %353
-  %391 = v_add_u32 %377, %355
-  %396 = v_add_u32 %382, %357
-  %399 = v_add_u32 %385, %359
-  %402 = v_add_u32 %388, %361
-  %405 = v_add_u32 %391, %363
-  %sum_3 = concat(%396, %399, %402, %405) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %332, %sum_3, %output
+  %315 = v_mov_b32 0
+  %316 = global_load_b32_saddr %315, %input
+  %318 = global_load_b32_saddr %315, %input {offset = 4}
+  %320 = global_load_b32_saddr %315, %input {offset = 8}
+  %322 = global_load_b32_saddr %315, %input {offset = 12}
+  %324 = global_load_b32_saddr %315, %input {offset = 16}
+  %326 = global_load_b32_saddr %315, %input {offset = 20}
+  %328 = global_load_b32_saddr %315, %input {offset = 24}
+  %330 = global_load_b32_saddr %315, %input {offset = 28}
+  %332 = global_load_b32_saddr %315, %input {offset = 32}
+  %334 = global_load_b32_saddr %315, %input {offset = 36}
+  %336 = global_load_b32_saddr %315, %input {offset = 40}
+  %338 = global_load_b32_saddr %315, %input {offset = 44}
+  %340 = global_load_b32_saddr %315, %input {offset = 48}
+  %342 = global_load_b32_saddr %315, %input {offset = 52}
+  %344 = global_load_b32_saddr %315, %input {offset = 56}
+  %346 = global_load_b32_saddr %315, %input {offset = 60}
+  %351 = v_add_u32 %316, %324
+  %354 = v_add_u32 %318, %326
+  %357 = v_add_u32 %320, %328
+  %360 = v_add_u32 %322, %330
+  %365 = v_add_u32 %351, %332
+  %368 = v_add_u32 %354, %334
+  %371 = v_add_u32 %357, %336
+  %374 = v_add_u32 %360, %338
+  %379 = v_add_u32 %365, %340
+  %382 = v_add_u32 %368, %342
+  %385 = v_add_u32 %371, %344
+  %388 = v_add_u32 %374, %346
+  %sum_3 = concat(%379, %382, %385, %388) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %315, %sum_3, %output
   return
 }

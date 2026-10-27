@@ -32,21 +32,21 @@ func.def @policies_forwarded_by_sibling(%input: view<16xf32>, %initial: f32, %co
   %sum = scf.if %26 -> (f32) {
     %74 = index.assume %count [gt(%count, 1)] : index
     %value = view.load %input[%begin] : view<16xf32> -> f32
-    %79, %80 = scf.for %76 = [%c1 to %74 step %c1](%77 = %initial : f32, %78 = %value : f32) -> (f32, f32) {
-      %value = view.load %input[%76] : view<16xf32> -> f32
-      %next = scalar.addf %77, %78 : f32
+    %80, %81 = scf.for %77 = [%c1 to %74 step %c1](%78 = %initial : f32, %79 = %value : f32) -> (f32, f32) {
+      %value = view.load %input[%77] : view<16xf32> -> f32
+      %next = scalar.addf %78, %79 : f32
       scf.yield %next, %value : f32, f32
     }
-    %next = scalar.addf %79, %80 : f32
+    %next = scalar.addf %80, %81 : f32
     scf.yield %next : f32
   } else {
     %75 = index.assume %count [le(%count, 1)] : index
-    %83 = scf.for %81 = [%begin to %75 step %c1](%82 = %initial : f32) -> (f32) {
-      %value = view.load %input[%81] : view<16xf32> -> f32
-      %next = scalar.addf %82, %value : f32
+    %84 = scf.for %82 = [%begin to %75 step %c1](%83 = %initial : f32) -> (f32) {
+      %value = view.load %input[%82] : view<16xf32> -> f32
+      %next = scalar.addf %83, %value : f32
       scf.yield %next : f32
     }
-    scf.yield %83 : f32
+    scf.yield %84 : f32
   }
   %57 = index.constant 5 : index
   %value = view.load %input[%c3] : view<16xf32> -> f32
@@ -92,21 +92,21 @@ func.def @range_forwarded_by_sibling(%input: view<16xf32>, %initial: f32, %count
   %sum = scf.if %23 -> (f32) {
     %62 = index.assume %count [gt(%count, 1)] : index
     %value = view.load %input[%begin] : view<16xf32> -> f32
-    %67, %68 = scf.for %64 = [%step to %62 step %step](%65 = %initial : f32, %66 = %value : f32) -> (f32, f32) {
-      %value = view.load %input[%64] : view<16xf32> -> f32
-      %next = scalar.addf %65, %66 : f32
+    %68, %69 = scf.for %65 = [%step to %62 step %step](%66 = %initial : f32, %67 = %value : f32) -> (f32, f32) {
+      %value = view.load %input[%65] : view<16xf32> -> f32
+      %next = scalar.addf %66, %67 : f32
       scf.yield %next, %value : f32, f32
     }
-    %next = scalar.addf %67, %68 : f32
+    %next = scalar.addf %68, %69 : f32
     scf.yield %next : f32
   } else {
     %63 = index.assume %count [le(%count, 1)] : index
-    %71 = scf.for %69 = [%begin to %63 step %step](%70 = %initial : f32) -> (f32) {
-      %value = view.load %input[%69] : view<16xf32> -> f32
-      %next = scalar.addf %70, %value : f32
+    %72 = scf.for %70 = [%begin to %63 step %step](%71 = %initial : f32) -> (f32) {
+      %value = view.load %input[%70] : view<16xf32> -> f32
+      %next = scalar.addf %71, %value : f32
       scf.yield %next : f32
     }
-    scf.yield %71 : f32
+    scf.yield %72 : f32
   }
   %45 = index.add %bounded, %step : index
   %value = view.load %input[%bounded] : view<16xf32> -> f32
@@ -156,20 +156,20 @@ func.def @nested_carried_policy(%input: view<8xf32>, %initial: f32) -> (f32) {
     scf.yield %added, %loaded : f32, f32
   }
   %added = scalar.addf %50, %51 : f32
-  %120, %121, %122 = scf.for %116 = [%step to %end step %step](%117 = %initial : f32, %118 = %value$42 : f32, %119 = %added : f32) -> (f32, f32, f32) {
-    %value = view.load %input[%116] : view<8xf32> -> f32
+  %124, %125, %126 = scf.for %120 = [%step to %end step %step](%121 = %initial : f32, %122 = %value$42 : f32, %123 = %added : f32) -> (f32, f32, f32) {
+    %value = view.load %input[%120] : view<8xf32> -> f32
     %77, %78 = scf.for %74 = [%step to %end step %step](%75 = %identity : f32, %76 = %value$42 : f32) -> (f32, f32) {
       %loaded = view.load %input[%74] : view<8xf32> -> f32
       %added = scalar.addf %75, %76 : f32
       scf.yield %added, %loaded : f32, f32
     }
     %added = scalar.addf %77, %78 : f32
-    %combined = scalar.addf %117, %119 : f32
-    %next = scalar.addf %combined, %118 : f32
+    %combined = scalar.addf %121, %123 : f32
+    %next = scalar.addf %combined, %122 : f32
     scf.yield %next, %value, %added : f32, f32, f32
   }
-  %combined = scalar.addf %120, %122 : f32
-  %next = scalar.addf %combined, %121 : f32
+  %combined = scalar.addf %124, %126 : f32
+  %next = scalar.addf %combined, %125 : f32
   func.return %next : f32
 }
 

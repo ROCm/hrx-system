@@ -13,6 +13,16 @@ package(
 )
 
 loom_cc_library(
+    name = "action",
+    hdrs = ["action.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "rewriter",
     srcs = [
         "fact_propagation.c",
@@ -23,6 +33,7 @@ loom_cc_library(
         "rewriter.h",
     ],
     deps = [
+        ":action",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:op_defs",
@@ -39,8 +50,8 @@ loom_cc_library(
     srcs = ["pattern_registry.c"],
     hdrs = ["pattern_registry.h"],
     deps = [
+        ":action",
         "//loom/src/loom/ir",
-        "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -106,10 +117,12 @@ loom_cc_library(
     srcs = ["greedy.c"],
     hdrs = ["greedy.h"],
     deps = [
+        ":action",
         ":pattern_registry",
         ":rewriter",
         "//loom/src/loom/ir",
         "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

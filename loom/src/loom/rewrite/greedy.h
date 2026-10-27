@@ -18,6 +18,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
+#include "loom/rewrite/action.h"
 #include "loom/rewrite/pattern_registry.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/util/fact_table.h"
@@ -184,6 +185,17 @@ void loom_greedy_rewrite_result_record_rewriter_flags(
 void loom_greedy_rewrite_result_record_change(
     loom_greedy_rewrite_result_t* result, const loom_rewriter_t* rewriter,
     loom_greedy_rewrite_change_flags_t flags);
+
+// Publishes pending facts, prepares one action per matching root, then applies
+// the complete batch in reverse preorder without intervening fact publication.
+// All decisions are made before the first mutation; preparation failure leaves
+// IR unchanged. Action storage is released before returning. The active
+// driver's next fact observer must publish the resulting mutations as usual.
+iree_status_t loom_greedy_rewrite_apply_prepared(
+    loom_greedy_rewrite_driver_t* driver, loom_region_t* region,
+    loom_rewrite_prepare_callback_t prepare,
+    const loom_greedy_rewrite_callbacks_t* callbacks,
+    loom_greedy_rewrite_result_t* result);
 
 // Runs greedy rewriting on an explicit region tree. |function| and |parent_op|
 // describe the region to policy callbacks; the driver does not rediscover or

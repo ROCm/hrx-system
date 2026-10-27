@@ -1430,6 +1430,7 @@ static iree_status_t loom_value_fact_table_compute_scoped_op(
         table, module, op, vtable, out_changed));
   }
   if (vtable && (vtable->loop_like || vtable->region_branch)) {
+    table->regions.has_structured_summaries = true;
     iree_status_t status =
         vtable->loop_like ? loom_value_fact_table_compute_loop_like_summary(
                                 table, module, (loom_op_t*)op, out_changed)

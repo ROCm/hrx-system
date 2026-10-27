@@ -32,6 +32,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/op_defs.h"
+#include "loom/rewrite/action.h"
 #include "loom/rewrite/fact_propagation.h"
 #include "loom/util/fact_table.h"
 
@@ -311,6 +312,16 @@ iree_status_t loom_rewriter_build_constant(loom_rewriter_t* rewriter,
 // or region summary interface.
 iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
                                      bool* out_folded);
+
+// Prepares the same exact fold for a regionless root from already-published
+// facts. Retains only exact result facts in the batch arena; apply consumes
+// live result types and never re-queries facts. Predicate-bearing identities
+// with pending exact relations remain on the ordinary fold path so their
+// relation-preservation callback runs before they disappear.
+iree_status_t loom_rewriter_prepare_fold(const loom_rewriter_t* rewriter,
+                                         const loom_op_t* op,
+                                         iree_arena_allocator_t* arena,
+                                         loom_rewrite_action_t** out_action);
 
 // Captures the current high-water mark of the module value table.
 //

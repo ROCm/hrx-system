@@ -463,9 +463,9 @@ func.def @branch_initialized_relation_chain(%first: i32, %second: i32, %upper: i
   %guard = scalar.andi %equal_pair, %below : i1
   scf.if %guard {
     %11 = scalar.assume %upper [gt(%upper, 5)] : i32
-    %12 = scalar.constant 5 : i32
     %13 = scalar.constant 5 : i32
-    test.use %13, %12, %11 : i32, i32, i32
+    %12 = scalar.constant 5 : i32
+    test.use %12, %13, %11 : i32, i32, i32
   }
   func.return
 }
@@ -793,4 +793,38 @@ func.def @scalar_float_relation(%upper: f32) -> (f32, f32) {
   %upper_refined = scalar.assume %upper [finite(%upper)] : f32
   %after = scalar.addf %upper_refined, %c1 : f32
   func.return %bounded, %after : f32, f32
+}
+
+// ====
+
+// Exact-result folds share a batch with dependent folds, but the symbolic
+// bound is first preserved on its dynamic participant and dynamic type uses.
+func.def @batched_exact_relations(%upper: index, %storage: view<[%upper]xi32>) -> (index, index) {
+  cfg.br ^body
+^body:
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %sum = index.add %c3, %c4 : index
+  %bounded = index.assume %sum [lt(%sum, %upper)] : index
+  %next = index.add %bounded, %c4 : index
+  %bounded_again = index.assume %next [lt(%next, %upper)] : index
+  %c0 = index.constant 0 : index
+  %loaded = view.load %storage[%c0] : view<[%upper]xi32> -> i32
+  test.use %loaded : i32
+  func.return %bounded, %bounded_again : index, index
+}
+
+// ----
+func.def @batched_exact_relations(%upper: index, %storage: view<[%upper]xi32>) -> (index, index) {
+  cfg.br ^body
+^body:
+  %bounded = index.constant 7 : index
+  %upper_refined$12 = index.assume %upper [gt(%upper, 7)] : index
+  %bounded_again = index.constant 11 : index
+  %upper_refined$13 = index.assume %upper_refined$12 [gt(%upper_refined$12, 11)] : index
+  %storage_refined = view.refine %storage : view<[%upper]xi32> -> view<[%upper_refined$13]xi32>
+  %c0 = index.constant 0 : index
+  %loaded = view.load %storage_refined[%c0] : view<[%upper_refined$13]xi32> -> i32
+  test.use %loaded : i32
+  func.return %bounded, %bounded_again : index, index
 }

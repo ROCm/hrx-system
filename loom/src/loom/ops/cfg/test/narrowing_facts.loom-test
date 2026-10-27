@@ -44,8 +44,8 @@ func.def @held_slot_offset(%repeat: i1, %replace: i1) -> (i64) {
   cfg.cond_br %replace, ^replace, ^retain
 ^replace:
   %slot = scalar.remui %position, %capacity : i32
-  %16 = scalar.constant 9 : i32
-  %byte_index = scalar.shli %slot, %16 : i32
+  %18 = scalar.constant 9 : i32
+  %byte_index = scalar.shli %slot, %18 : i32
   %byte_offset = index.cast %byte_index : i32 to offset
   cfg.br ^header(%next: i32, %byte_offset: offset)
 ^retain:
@@ -113,8 +113,8 @@ func.def @held_slot_view(%repeat: i1, %replace: i1) -> (i64) {
   cfg.cond_br %replace, ^replace, ^retain
 ^replace:
   %slot = scalar.remui %position, %capacity : i32
-  %22 = scalar.constant 9 : i32
-  %byte_index = scalar.shli %slot, %22 : i32
+  %26 = scalar.constant 9 : i32
+  %byte_index = scalar.shli %slot, %26 : i32
   %byte_offset = index.cast %byte_index : i32 to offset
   %selected = buffer.view %storage[%byte_offset] : buffer -> view<128xf32>
   cfg.br ^header(%next: i32, %selected: view<128xf32>)
@@ -154,8 +154,8 @@ func.def @unknown_initial_offset(%repeat: i1, %initial: offset, %position: i32) 
   cfg.cond_br %repeat, ^replace, ^exit
 ^replace:
   %slot = scalar.remui %position, %capacity : i32
-  %11 = scalar.constant 9 : i32
-  %byte_index = scalar.shli %slot, %11 : i32
+  %12 = scalar.constant 9 : i32
+  %byte_index = scalar.shli %slot, %12 : i32
   %byte_offset = index.cast %byte_index : i32 to offset
   cfg.br ^header(%byte_offset: offset)
 ^exit:

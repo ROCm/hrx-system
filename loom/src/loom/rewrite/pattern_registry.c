@@ -8,8 +8,6 @@
 
 #include <stdint.h>
 
-#include "loom/util/walk.h"
-
 static loom_rewrite_pattern_op_entry_t loom_rewrite_pattern_op_entry_empty(
     void) {
   return (loom_rewrite_pattern_op_entry_t){
@@ -283,58 +281,24 @@ iree_status_t loom_rewrite_pattern_registry_apply(
   return iree_ok_status();
 }
 
-typedef struct loom_rewrite_preparation_t {
-  // Kind-indexed callbacks selected for the batch.
-  const loom_rewrite_pattern_registry_t* registry;
-  // Read-only module during preparation.
-  const loom_module_t* module;
-  // Coherent facts borrowed for the read phase only.
-  const loom_value_fact_table_t* facts;
-  // Short-lived storage for successful matches.
-  iree_arena_allocator_t* arena;
-  // Collected actions, each owning a distinct root.
-  loom_rewrite_action_t* actions;
-} loom_rewrite_preparation_t;
-
-static iree_status_t loom_rewrite_prepare_op(void* user_data, loom_op_t* op,
-                                             const loom_walk_context_t* context,
-                                             loom_walk_result_t* out_result) {
-  (void)context;
-  *out_result = LOOM_WALK_CONTINUE;
-  loom_rewrite_preparation_t* preparation = user_data;
+iree_status_t loom_rewrite_pattern_registry_prepare_op(
+    const loom_rewrite_pattern_registry_t* registry,
+    const loom_module_t* module, const loom_value_fact_table_t* facts,
+    const loom_op_t* op, iree_arena_allocator_t* arena,
+    loom_rewrite_action_t** out_action) {
+  *out_action = NULL;
   const loom_rewrite_pattern_span_t span =
-      loom_rewrite_pattern_registry_lookup_kind(preparation->registry,
-                                                op->kind);
+      loom_rewrite_pattern_registry_lookup_kind(registry, op->kind);
   for (uint16_t i = 0; i < span.count; ++i) {
     const loom_rewrite_pattern_t* pattern = span.patterns[i];
     if (!pattern->prepare) {
       continue;
     }
-    loom_rewrite_action_t* action = NULL;
-    IREE_RETURN_IF_ERROR(pattern->prepare(pattern, preparation->module,
-                                          preparation->facts, op,
-                                          preparation->arena, &action));
-    if (action) {
-      action->root = op;
-      action->next = preparation->actions;
-      preparation->actions = action;
+    IREE_RETURN_IF_ERROR(
+        pattern->prepare(pattern, module, facts, op, arena, out_action));
+    if (*out_action) {
       break;
     }
   }
-  return iree_ok_status();
-}
-
-iree_status_t loom_rewrite_pattern_registry_prepare_region(
-    const loom_rewrite_pattern_registry_t* registry, loom_module_t* module,
-    const loom_value_fact_table_t* facts, loom_region_t* region,
-    iree_arena_allocator_t* arena, loom_rewrite_action_t** out_actions) {
-  *out_actions = NULL;
-  loom_rewrite_preparation_t preparation = {
-      .registry = registry, .module = module, .facts = facts, .arena = arena};
-  loom_walk_result_t result = LOOM_WALK_CONTINUE;
-  IREE_RETURN_IF_ERROR(loom_walk_region(
-      module, region, LOOM_WALK_PRE_ORDER,
-      (loom_walk_callback_t){loom_rewrite_prepare_op, &preparation}, &result));
-  *out_actions = preparation.actions;
   return iree_ok_status();
 }

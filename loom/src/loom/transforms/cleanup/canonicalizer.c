@@ -358,16 +358,15 @@ static bool loom_canonicalize_predicate_lists_implied_by_carrier(
   return true;
 }
 
-static iree_status_t loom_canonicalize_try_elide_redundant_fact_identity(
-    loom_rewriter_t* rewriter, loom_op_t* op, const loom_op_vtable_t* vtable,
-    bool* out_elided) {
-  *out_elided = false;
+static bool loom_canonicalize_can_elide_fact_identity(
+    const loom_rewriter_t* rewriter, const loom_op_t* op) {
+  const loom_op_vtable_t* vtable = loom_op_vtable(rewriter->module, op);
   if (!vtable ||
       !iree_all_bits_set(op->traits,
                          LOOM_TRAIT_PURE | LOOM_TRAIT_FACT_IDENTITY) ||
       !iree_any_bit_set(vtable->vtable_flags,
                         LOOM_OP_VTABLE_HAS_PREDICATE_LIST)) {
-    return iree_ok_status();
+    return false;
   }
 
   // An empty fact identity is the ordinary identity operation. Nonempty
@@ -382,24 +381,52 @@ static iree_status_t loom_canonicalize_try_elide_redundant_fact_identity(
       const loom_value_t* operand =
           loom_module_value(rewriter->module, operands[i]);
       if (loom_value_is_block_arg(operand)) {
-        return iree_ok_status();
+        return false;
       }
       loom_op_t* definition = loom_value_def_op(operand);
       if (!definition || (carrier_op && carrier_op != definition)) {
-        return iree_ok_status();
+        return false;
       }
       carrier_op = definition;
     }
     if (!carrier_op ||
         !loom_canonicalize_predicate_lists_implied_by_carrier(
             rewriter->fact_table, rewriter->module, op, vtable, carrier_op)) {
-      return iree_ok_status();
+      return false;
     }
   }
 
-  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
-      rewriter, op, loom_op_const_operands(op), op->operand_count));
-  *out_elided = true;
+  return true;
+}
+
+static iree_status_t loom_canonicalize_apply_fact_identity(
+    const loom_rewrite_action_t* action, loom_rewriter_t* rewriter) {
+  loom_op_t* op = action->root;
+  return loom_rewriter_replace_all_uses_and_erase(
+      rewriter, op, loom_op_const_operands(op), op->operand_count);
+}
+
+static iree_status_t loom_canonicalize_prepare_op(
+    void* user_data, const loom_rewriter_t* rewriter, const loom_op_t* op,
+    iree_arena_allocator_t* arena, loom_rewrite_action_t** out_action) {
+  // A composition's pre-fold rules retain priority over universal folding.
+  // Their roots stay on the ordinary worklist, where each rule observes fresh
+  // facts before the fallback fold or identity elimination.
+  const loom_rewrite_pattern_registry_t* pre_fold = user_data;
+  *out_action = NULL;
+  if (pre_fold &&
+      loom_rewrite_pattern_registry_lookup_kind(pre_fold, op->kind).count) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_prepare_fold(rewriter, op, arena, out_action));
+  if (*out_action || op->region_count || !op->result_count ||
+      !loom_canonicalize_can_elide_fact_identity(rewriter, op)) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, sizeof(**out_action), (void**)out_action));
+  (*out_action)->apply = loom_canonicalize_apply_fact_identity;
   return iree_ok_status();
 }
 
@@ -650,6 +677,22 @@ static iree_status_t loom_canonicalize_begin_iteration(
       *out_changed = true;
     }
   }
+  // Region summaries can revisit a whole loop or branch after each local
+  // rewrite. Flat scopes retain incremental one-op folding without paying
+  // for a separate preparation walk.
+  if (!driver->rewriter.fact_table ||
+      (!driver->rewriter.fact_table->regions.cfg_count &&
+       !driver->rewriter.fact_table->regions.has_structured_summaries)) {
+    return iree_ok_status();
+  }
+  const int64_t previous_modified = result->ops_modified;
+  IREE_RETURN_IF_ERROR(loom_greedy_rewrite_apply_prepared(
+      driver, region,
+      (loom_rewrite_prepare_callback_t){
+          .user_data = (void*)state->patterns.pre_fold,
+          .fn = loom_canonicalize_prepare_op},
+      /*callbacks=*/NULL, result));
+  *out_changed |= result->ops_modified != previous_modified;
   return iree_ok_status();
 }
 
@@ -784,11 +827,10 @@ static iree_status_t loom_canonicalize_rewrite_op(
   // Collapse duplicate explicit fact carriers one SSA edge at a time. Retained
   // canonical identities compare renamed predicate arguments without walking
   // producer chains; greedy rewriting naturally converges long carrier chains.
-  bool fact_identity_elided = false;
   rewriter->flags = 0;
-  IREE_RETURN_IF_ERROR(loom_canonicalize_try_elide_redundant_fact_identity(
-      rewriter, op, vtable, &fact_identity_elided));
-  if (fact_identity_elided) {
+  if (loom_canonicalize_can_elide_fact_identity(rewriter, op)) {
+    IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+        rewriter, op, loom_op_const_operands(op), op->operand_count));
     loom_greedy_rewrite_result_record_change(
         result, rewriter, LOOM_GREEDY_REWRITE_CHANGE_FLAG_COUNT_MODIFIED_OP);
     *out_changed = true;

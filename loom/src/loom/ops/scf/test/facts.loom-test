@@ -1200,8 +1200,8 @@ func.def @for_ranged_additive_state(%seed: i32, %stride: offset) {
     %cursor_hi = scalar.constant 60 : i64
     test.use %ascending_lo, %ascending_hi, %descending_lo, %descending_hi, %descending_divisor, %stationary_hi, %cursor_hi : i64, i64, i64, i64, i64, i64, i64
     %ascending_next = scalar.addi %ascending, %scalar_step : i32
-    %37 = scalar.constant -8 : i32
-    %descending_next = scalar.addi %descending, %37 : i32
+    %51 = scalar.constant -8 : i32
+    %descending_next = scalar.addi %descending, %51 : i32
     %stationary_next = index.constant 12 : offset
     %cursor_next = index.add %cursor, %captured_step : offset
     scf.yield %ascending_next, %descending_next, %stationary_next, %cursor_next : i32, i32, offset, offset
@@ -1357,8 +1357,8 @@ func.def @while_reordered_additive_companions() {
     %cursor_middle = index.add %cursor, %half_tile_bytes : offset
     %cursor_next = index.add %cursor_middle, %half_tile_bytes : offset
     %iteration_next = index.add %iteration, %step : index
-    %32 = scalar.constant -8 : i32
-    %descending_next = scalar.addi %descending, %32 : i32
+    %39 = scalar.constant -8 : i32
+    %descending_next = scalar.addi %descending, %39 : i32
     scf.yield %cursor_next, %iteration_next, %descending_next : offset, index, i32
   }
   %cursor_end_lo = scalar.constant 512 : i64

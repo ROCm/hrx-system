@@ -371,34 +371,33 @@ iree_status_t loom_rewriter_build_constant(loom_rewriter_t* rewriter,
       &rewriter->builder, facts, result_type, location, out_value_id);
 }
 
-iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
-                                     bool* out_folded) {
-  *out_folded = false;
+static bool loom_rewriter_can_fold(const loom_rewriter_t* rewriter,
+                                   const loom_op_t* op) {
   if (!rewriter->fact_table) {
-    return iree_ok_status();
+    return false;
   }
-  IREE_RETURN_IF_ERROR(loom_rewriter_propagate_value_facts(rewriter));
 #ifndef NDEBUG
   const loom_value_fact_observation_t observation =
       loom_value_fact_observation_capture(rewriter->fact_table);
+  loom_value_fact_observation_assert_valid(observation);
 #endif
   const loom_op_vtable_t* vtable = loom_op_vtable(rewriter->module, op);
   if (!vtable || iree_any_bit_set(op->traits, LOOM_TRAIT_CONSTANT_LIKE)) {
-    return iree_ok_status();
+    return false;
   }
 
   // Cannot materialize without a complete policy, and don't replace
   // constant-like ops with themselves.
   if (!loom_rewriter_has_constant_materializer(rewriter)) {
-    return iree_ok_status();
+    return false;
   }
   if (!vtable->infer_facts) {
-    return iree_ok_status();
+    return false;
   }
   const loom_trait_flags_t traits =
       loom_op_effective_traits(rewriter->module, op);
   if (loom_traits_has_side_effects(traits)) {
-    return iree_ok_status();
+    return false;
   }
 
   // Preflight the complete replacement family. Exact facts do not imply that
@@ -406,31 +405,34 @@ iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     if (results[i] == LOOM_VALUE_ID_INVALID) {
-      return iree_ok_status();
+      return false;
     }
-#ifndef NDEBUG
-    loom_value_fact_observation_assert_valid(observation);
-#endif
     loom_value_facts_t facts =
         loom_value_fact_table_lookup(rewriter->fact_table, results[i]);
     loom_type_t result_type =
         loom_module_value_type(rewriter->module, results[i]);
     if (!loom_value_facts_is_exact(facts) ||
         !loom_rewriter_can_materialize_constant(rewriter, facts, result_type)) {
-      return iree_ok_status();
+      return false;
     }
   }
   if (op->result_count == 0) {
-    return iree_ok_status();
+    return false;
   }
 
-  if (loom_traits_are_fact_identity(traits) &&
-      rewriter->pending_exact_relations_callback.fn &&
-      loom_value_fact_table_has_pending_exact_relations(rewriter->fact_table)) {
-    IREE_RETURN_IF_ERROR(rewriter->pending_exact_relations_callback.fn(
-        rewriter->pending_exact_relations_callback.user_data, rewriter));
-  }
+  return true;
+}
 
+// A prepared batch supplies retained exact facts. The immediate fold reads
+// its coherent results directly, avoiding batch storage for a single rewrite.
+static iree_status_t loom_rewriter_fold_results(
+    loom_rewriter_t* rewriter, loom_op_t* op,
+    const loom_value_facts_t* exact_facts) {
+#ifndef NDEBUG
+  const loom_value_fact_observation_t observation =
+      loom_value_fact_observation_capture(rewriter->fact_table);
+#endif
+  const loom_value_id_t* results = loom_op_const_results(op);
   // All results are exact. Materialize constants in the same block
   // as the op being folded, then RAUW+erase. Dead operands are
   // handled by cascading DCE (erase adds providers to worklist,
@@ -444,10 +446,14 @@ iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
 
   for (uint16_t i = 0; i < op->result_count; ++i) {
 #ifndef NDEBUG
-    loom_value_fact_observation_assert_valid(observation);
+    if (!exact_facts) {
+      loom_value_fact_observation_assert_valid(observation);
+    }
 #endif
     loom_value_facts_t facts =
-        loom_value_fact_table_lookup(rewriter->fact_table, results[i]);
+        exact_facts
+            ? exact_facts[i]
+            : loom_value_fact_table_lookup(rewriter->fact_table, results[i]);
     loom_type_t result_type =
         loom_module_value_type(rewriter->module, results[i]);
     IREE_RETURN_IF_ERROR(loom_rewriter_build_constant(
@@ -459,7 +465,76 @@ iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
   IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
       rewriter, op, replacement_ids, op->result_count));
 
+  return iree_ok_status();
+}
+
+iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
+                                     bool* out_folded) {
+  *out_folded = false;
+  IREE_RETURN_IF_ERROR(loom_rewriter_propagate_value_facts(rewriter));
+  if (!loom_rewriter_can_fold(rewriter, op)) {
+    return iree_ok_status();
+  }
+#ifndef NDEBUG
+  const loom_value_fact_observation_t observation =
+      loom_value_fact_observation_capture(rewriter->fact_table);
+#endif
+  if (loom_traits_are_fact_identity(op->traits) &&
+      rewriter->pending_exact_relations_callback.fn &&
+      loom_value_fact_table_has_pending_exact_relations(rewriter->fact_table)) {
+    IREE_RETURN_IF_ERROR(rewriter->pending_exact_relations_callback.fn(
+        rewriter->pending_exact_relations_callback.user_data, rewriter));
+  }
+#ifndef NDEBUG
+  loom_value_fact_observation_assert_valid(observation);
+#endif
+  IREE_RETURN_IF_ERROR(loom_rewriter_fold_results(rewriter, op, NULL));
   *out_folded = true;
+  return iree_ok_status();
+}
+
+typedef struct loom_rewrite_fold_action_t {
+  // Root-local application owned by the shared batch.
+  loom_rewrite_action_t action;
+  // Exact constant payload for every result; no captured SSA references.
+  loom_value_facts_t facts[];
+} loom_rewrite_fold_action_t;
+
+static iree_status_t loom_rewriter_apply_fold(
+    const loom_rewrite_action_t* action, loom_rewriter_t* rewriter) {
+  // Folding a consumer can make another planned root dead. Erase that root
+  // directly instead of allocating constants that the worklist would discard.
+  if (loom_rewriter_is_trivially_dead(rewriter, action->root)) {
+    return loom_rewriter_erase(rewriter, action->root);
+  }
+  const loom_rewrite_fold_action_t* fold =
+      (const loom_rewrite_fold_action_t*)action;
+  return loom_rewriter_fold_results(rewriter, action->root, fold->facts);
+}
+
+iree_status_t loom_rewriter_prepare_fold(const loom_rewriter_t* rewriter,
+                                         const loom_op_t* op,
+                                         iree_arena_allocator_t* arena,
+                                         loom_rewrite_action_t** out_action) {
+  *out_action = NULL;
+  if (op->region_count || !loom_rewriter_can_fold(rewriter, op)) {
+    return iree_ok_status();
+  }
+  if (loom_traits_are_fact_identity(op->traits) &&
+      loom_value_fact_table_has_pending_exact_relations(rewriter->fact_table)) {
+    return iree_ok_status();
+  }
+  loom_rewrite_fold_action_t* fold = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      arena, sizeof(*fold) + op->result_count * sizeof(fold->facts[0]),
+      (void**)&fold));
+  fold->action.apply = loom_rewriter_apply_fold;
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    fold->facts[i] =
+        loom_value_fact_table_lookup(rewriter->fact_table, results[i]);
+  }
+  *out_action = &fold->action;
   return iree_ok_status();
 }
 

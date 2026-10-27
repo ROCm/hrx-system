@@ -11,6 +11,18 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    action
+  HDRS
+    "action.h"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     rewriter
   HDRS
     "fact_propagation.h"
@@ -19,6 +31,7 @@ loom_cc_library(
     "fact_propagation.c"
     "rewriter.c"
   DEPS
+    ::action
     iree::base
     iree::base::internal::arena
     loom::ir
@@ -38,10 +51,10 @@ loom_cc_library(
   SRCS
     "pattern_registry.c"
   DEPS
+    ::action
     iree::base
     iree::base::internal::arena
     loom::ir
-    loom::util::walk
   PUBLIC
 )
 
@@ -112,12 +125,14 @@ loom_cc_library(
   SRCS
     "greedy.c"
   DEPS
+    ::action
     ::pattern_registry
     ::rewriter
     iree::base
     iree::base::internal::arena
     loom::ir
     loom::util::fact_table
+    loom::util::walk
   PUBLIC
 )
 

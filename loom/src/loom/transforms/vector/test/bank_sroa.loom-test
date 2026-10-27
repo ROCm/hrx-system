@@ -547,13 +547,13 @@ func.def @pipelined_aggregate_bank(%input: view<64xf32>, %initial: vector<8x8xf3
   %offset = index.constant 0 : index
   %loaded = vector.load %input[%offset] : view<64xf32> -> vector<8xf32>
   %initial_slot_3 = vector.extract %initial[3] : vector<8x8xf32> -> vector<8xf32>
-  %row, %75 = scf.for %71 = [%step to %end step %step](%row = %initial_slot_3 : vector<8xf32>, %73 = %loaded : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) {
-    %offset = index.mul %71, %end : index
+  %row, %76 = scf.for %72 = [%step to %end step %step](%row = %initial_slot_3 : vector<8xf32>, %74 = %loaded : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) {
+    %offset = index.mul %72, %end : index
     %loaded = vector.load %input[%offset] : view<64xf32> -> vector<8xf32>
-    %next = vector.addf %row, %73 : vector<8xf32>
+    %next = vector.addf %row, %74 : vector<8xf32>
     scf.yield %next, %loaded : vector<8xf32>, vector<8xf32>
   }
-  %next = vector.addf %row, %75 : vector<8xf32>
+  %next = vector.addf %row, %76 : vector<8xf32>
   func.return %next : vector<8xf32>
 }
 
