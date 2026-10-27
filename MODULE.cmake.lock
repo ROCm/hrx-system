@@ -264,10 +264,10 @@ set(IREE_DEP_CXX_VERSION "")
 set(IREE_DEP_CXX_DEV_DEPENDENCY "FALSE")
 set(IREE_DEP_CXX_SOURCE_URL "")
 set(IREE_DEP_CXX_URLS
-  "https://github.com/benvanik/cplusplus/archive/4e631b30a97913beca5115f9573ec9ca889297d2.tar.gz"
+  "https://github.com/benvanik/cplusplus/archive/dd738cca0a3f8e12dd38c9df08ae2c953f1b8a86.tar.gz"
 )
-set(IREE_DEP_CXX_SHA256 "c1167df3e11e6e81552fec8dea58f7e877fb5a402a573c9a7731599cafcf8649")
-set(IREE_DEP_CXX_STRIP_PREFIX "cplusplus-4e631b30a97913beca5115f9573ec9ca889297d2")
+set(IREE_DEP_CXX_SHA256 "c75b58ba0a07c77302d35537eceeda52ce367b0afd523c2ac37099f1f8ed9069")
+set(IREE_DEP_CXX_STRIP_PREFIX "cplusplus-dd738cca0a3f8e12dd38c9df08ae2c953f1b8a86")
 set(IREE_DEP_CXX_BUILD_FILE "//build_tools/third_party/cxx:cxx.BUILD.bazel")
 set(IREE_DEP_CXX_PATCHES "")
 set(IREE_DEP_CXX_PATCH_ARGS "")

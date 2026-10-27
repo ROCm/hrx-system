@@ -202,6 +202,46 @@ TEST(ConstantArchiveTest, PreservesTypedBitsAfterSourceDestruction) {
   }
 }
 
+TEST(ConstantArchiveTest, EvaluatesNanPayloadAfterDecoderDestruction) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  std::vector<std::uint8_t> bytes;
+  {
+    Source source(
+        IREE_SV("constexpr unsigned evaluate() {"
+                "  const char payload[] = \"x1\";"
+                "  return __builtin_bit_cast(unsigned,"
+                "                            __builtin_nanf(payload + 1));"
+                "}"),
+        IREE_SV("nan_payload.cxx"), options);
+    cxx::ArchiveWriter writer;
+    cxx::SemanticArchiveRoots roots;
+    roots.ast = source.unit().ast();
+    roots.globalScope = source.unit().globalScope();
+    cxx::SemanticEncoder encoder(&source.unit());
+    ASSERT_TRUE(encoder(roots, writer));
+    bytes = writer();
+  }
+
+  Source destination(IREE_SV(""), IREE_SV("restored.cxx"), options);
+  cxx::SemanticArchiveRoots restored;
+  {
+    cxx::ArchiveReader reader;
+    ASSERT_TRUE(reader(bytes)) << reader.error();
+    cxx::SemanticDecoder decoder(&destination.unit());
+    ASSERT_TRUE(decoder(reader, restored)) << decoder.error();
+  }
+  auto symbols = restored.globalScope->find("evaluate");
+  ASSERT_FALSE(symbols.begin() == symbols.end());
+  auto functions = cxx::views::each_function(*symbols.begin());
+  ASSERT_EQ(std::ranges::distance(functions), 1);
+
+  cxx::ASTInterpreter interpreter(&destination.unit());
+  auto value = interpreter.evaluateCall(*functions.begin(), {});
+  ASSERT_TRUE(value);
+  EXPECT_EQ(interpreter.toInt(*value), 0x7fc00001u);
+}
+
 TEST(ConstantArchiveTest, EvaluatesAggregateDefaultsAfterSourceDestruction) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);

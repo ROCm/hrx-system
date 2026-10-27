@@ -1,0 +1,27 @@
+// RUN: roundtrip
+constexpr char kFloatPayload[] = "x1";
+constexpr unsigned kFloatPayloadBits = __builtin_bit_cast(unsigned, __builtin_nanf(kFloatPayload + 1));
+static_assert(kFloatPayloadBits == 0x7fc00001u);
+
+static constexpr unsigned long long local_double_payload_bits() {
+  const char payload[] = "x0x123";
+  return __builtin_bit_cast(unsigned long long, __builtin_nan(payload + 1));
+}
+constexpr unsigned long long kDoublePayloadBits = local_double_payload_bits();
+static_assert(kDoublePayloadBits == 0x7ff8000000000123ULL);
+
+constexpr char kLongDoublePayload[] = "x1";
+static_assert(__builtin_nanl(kLongDoublePayload + 1) != __builtin_nanl(kLongDoublePayload + 1));
+
+unsigned float_payload_bits() { return kFloatPayloadBits; }
+unsigned long long double_payload_bits() { return kDoublePayloadBits; }
+// ----
+func.def public @float_payload_bits() -> (i32) {
+  %kFloatPayloadBits = scalar.constant 2143289345 : i32
+  func.return %kFloatPayloadBits : i32
+}
+
+func.def public @double_payload_bits() -> (i64) {
+  %kDoublePayloadBits = scalar.constant 9221120237041090851 : i64
+  func.return %kDoublePayloadBits : i64
+}
