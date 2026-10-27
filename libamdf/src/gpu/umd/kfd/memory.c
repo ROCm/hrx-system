@@ -66,8 +66,6 @@ amdf_status_t amdf_gpu_kfd_memory_qualify_local(amdf_gpu_umd_device_t* device) {
   if (amdf_status_is_ok(status)) {
     if (ioctl(device->descriptor, AMDKFD_IOC_GET_DMABUF_INFO, &info) != 0) {
       status = amdf_linux_error(errno);
-    } else if (info.size != device->page_size) {
-      status = amdf_linux_error(EPROTO);
     }
   }
   const amdf_status_t close_status = amdf_linux_file_close(&descriptor);
@@ -89,12 +87,14 @@ amdf_status_t amdf_gpu_kfd_memory_qualify_local(amdf_gpu_umd_device_t* device) {
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  // KFD reports the BO's selected domain, not the original request flags.
+  // KFD reports the BO's preferred domain after allocation redirection.
   // This detects APU redirection without copying a kernel-version policy.
   // It does not promise free capacity or permanent physical residency.
   const uint32_t domain =
       info.flags & (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_GTT);
-  if (domain != KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
+  // Unexpected probe metadata leaves LOCAL unqualified and SYSTEM available.
+  if (info.size != device->page_size ||
+      domain != KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
     features = 0;
   } else if ((info.flags & KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC) == 0) {
     features &= ~AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY;

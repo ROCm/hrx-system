@@ -15,8 +15,8 @@ extern "C" {
 
 // Qualifies reserved VRAM on an integrated GPU with an acquired KFD VM.
 // Allocates and releases one page before publishing memory features. An
-// unavailable allocation or domain query keeps LOCAL disabled. Other native
-// errors leave the features unchanged, including terminal cleanup failures.
+// unavailable allocation or query, or an unexpected size, keeps LOCAL disabled.
+// Other native errors leave the features unchanged, including cleanup failures.
 // Call only during device creation, before clients can query memory profiles.
 amdf_status_t amdf_gpu_kfd_memory_qualify_local(amdf_gpu_umd_device_t* device);
 

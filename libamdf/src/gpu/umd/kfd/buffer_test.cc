@@ -545,7 +545,9 @@ TEST_F(KfdBufferNativeTest, FailedLocalMemoryProbeReleasesResources) {
       {ENOMEM, 0, 0, 4096, 0}, {ENOSPC, 0, 0, 4096, 0},
       {0, ENOTTY, 0, 4096, 0}, {0, 0, EOPNOTSUPP, 4096, 0},
       {0, 0, EINVAL, 4096, 0}, {ENODEV, 0, 0, 4096, ENODEV},
-      {0, 0, EIO, 4096, EIO},  {0, 0, 0, 8192, EPROTO},
+      {0, 0, EIO, 4096, EIO},  {0, 0, EPROTO, 4096, EPROTO},
+      {0, 0, 0, 0, 0},         {0, 0, 0, 2048, 0},
+      {0, 0, 0, 8192, 0},
   };
   expected_metadata_free_count_ = 0;
   for (const auto& test : cases) {
@@ -574,20 +576,32 @@ TEST_F(KfdBufferNativeTest, FailedLocalMemoryProbeReleasesResources) {
 TEST_F(KfdBufferNativeTest, LocalMemoryProbeCloseFailureDoesNotPublish) {
   UseIntegratedLocalMemory();
   native_.export_close_error = EIO;
-  EXPECT_EQ(amdf_gpu_kfd_memory_qualify_local(&device_),
-            amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO));
-  EXPECT_EQ(device_.topology.memory_features, 0u);
-  EXPECT_EQ(native_.export_descriptor, -1);
-  EXPECT_EQ(native_.free_count, 1u);
+  expected_metadata_free_count_ = 0;
+  for (uint64_t query_size : {4096, 8192}) {
+    SCOPED_TRACE(query_size);
+    ++expected_metadata_free_count_;
+    native_.domain_byte_length = query_size;
+    EXPECT_EQ(amdf_gpu_kfd_memory_qualify_local(&device_),
+              amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO));
+    EXPECT_EQ(device_.topology.memory_features, 0u);
+    EXPECT_EQ(native_.export_descriptor, -1);
+  }
+  EXPECT_EQ(native_.free_count, 2u);
 }
 
 TEST_F(KfdBufferNativeTest, LocalMemoryProbeReleaseFailureDoesNotPublish) {
   UseIntegratedLocalMemory();
   expected_metadata_free_count_ = 0;
-  for (int query_error : {0, EOPNOTSUPP}) {
-    SCOPED_TRACE(query_error);
+  const struct {
+    int query_error;
+    uint64_t query_size;
+  } cases[] = {{0, 4096}, {EOPNOTSUPP, 4096}, {0, 8192}};
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.query_error);
+    SCOPED_TRACE(test.query_size);
     ++expected_metadata_free_count_;
-    native_.domain_query_error = query_error;
+    native_.domain_query_error = test.query_error;
+    native_.domain_byte_length = test.query_size;
     native_.free_error = EIO;
     EXPECT_EQ(amdf_gpu_kfd_memory_qualify_local(&device_),
               amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, EIO));
@@ -597,7 +611,7 @@ TEST_F(KfdBufferNativeTest, LocalMemoryProbeReleaseFailureDoesNotPublish) {
     native_.free_error = 0;
     ReleaseLeakedReservation();
   }
-  EXPECT_EQ(native_.free_count, 2u);
+  EXPECT_EQ(native_.free_count, std::size(cases));
 }
 
 TEST_F(KfdBufferNativeTest, ImportsResidencyWithoutAnImplicitDeviceMapping) {

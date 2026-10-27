@@ -113,9 +113,10 @@ from the native device query, without PCI or GFX memory tables.
 
 After VM acquisition, KFD device creation qualifies reserved VRAM on integrated
 GPUs with a one-page VRAM allocation and a DMA-BUF domain query. The query
-reports the buffer's selected domain after any kernel redirection to GTT.
-Only a VRAM result enables LOCAL storage. An unavailable allocation or query
-keeps the conservative SYSTEM path; other native failures remain errors.
+reports the buffer's preferred domain after any kernel redirection to GTT.
+Only a VRAM result with the expected size enables LOCAL storage. An unavailable
+allocation or query, or an unexpected reported size, keeps the conservative
+SYSTEM path; other native failures remain errors.
 The temporary buffer and export are released before device publication, and
 cleanup errors fail creation. Endpoint discovery and memory-profile queries
 still allocate no device memory. This check establishes the allocation policy,
