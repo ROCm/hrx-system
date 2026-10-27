@@ -20,6 +20,7 @@
 #include "iree/base/threading/notification.h"
 #include "libhrx/src/libhrx/buffer.h"
 #include "libhrx/src/libhrx/mem_pool_backing.h"
+#include "libhrx/src/libhrx/transfer.h"
 
 //===----------------------------------------------------------------------===//
 // Memory management
@@ -3171,6 +3172,17 @@ iree_status_t iree_hal_streaming_memcpy_value_to_device(
                                                   stream);
 }
 
+// Host coherence removes explicit host cache management, not device cache
+// publication. Join producers before asking the native queue to make their
+// writes visible and invalidate cached data before the CPU takes ownership.
+// The empty transfer is a barrier and allocates no copy staging.
+static iree_status_t iree_hal_streaming_synchronize_host_access(
+    iree_hal_streaming_context_t* context) {
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_context_synchronize_all());
+  return hrx_hal_queue_transfer_and_wait(context->device_entry->hrx_device,
+                                         /*operation_count=*/0, NULL);
+}
+
 iree_status_t iree_hal_streaming_memcpy_host_to_device(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
     const void* src, iree_device_size_t size,
@@ -3214,7 +3226,7 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
     iree_status_t status =
         iree_hal_streaming_buffer_ref_validate_range(&dst_ref, size);
     if (iree_status_is_ok(status)) {
-      status = iree_hal_streaming_context_synchronize_all();
+      status = iree_hal_streaming_synchronize_host_access(context);
     }
     if (iree_status_is_ok(status)) {
       memcpy((uint8_t*)dst_ref.buffer->host_ptr + dst_ref.offset, src, size);
@@ -3343,7 +3355,7 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
       iree_all_bits_set((iree_hal_memory_type_t)src_ref.buffer->memory_type,
                         IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
                             IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
-    iree_status_t status = iree_hal_streaming_context_synchronize_all();
+    iree_status_t status = iree_hal_streaming_synchronize_host_access(context);
     if (iree_status_is_ok(status)) {
       memcpy(dst, (const uint8_t*)src_ref.buffer->host_ptr + src_ref.offset,
              size);

@@ -620,6 +620,25 @@ TEST_F(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
                                    hipMemcpyDeviceToHost));
   EXPECT_EQ((std::array<uint32_t, 4>{5, 9, 13, 17}), actual);
 
+  // Reuse GPU-cached input after a synchronous CPU upload. Unified memory
+  // takes the mapped copy path, which must transfer cache ownership as well
+  // as wait for the preceding dispatch to finish.
+  const std::array<uint32_t, 4> updated_input_values = {2, 4, 6, 8};
+  ASSERT_EQ(hipSuccess,
+            hip_memcpy(input, updated_input_values.data(),
+                       sizeof(updated_input_values), hipMemcpyHostToDevice));
+  ASSERT_EQ(hipSuccess, module_launch_kernel(function, 1, 1, 1, 1, 1, 1,
+                                             /*shared_memory_bytes=*/0,
+                                             /*stream=*/nullptr, arguments,
+                                             /*extra=*/nullptr));
+  ASSERT_EQ(hipSuccess, device_synchronize());
+  ASSERT_EQ(hipSuccess, hip_memcpy(actual.data(), output, sizeof(actual),
+                                   hipMemcpyDeviceToHost));
+  EXPECT_EQ((std::array<uint32_t, 4>{9, 17, 25, 33}), actual);
+  ASSERT_EQ(hipSuccess,
+            hip_memcpy(input, input_values.data(), sizeof(input_values),
+                       hipMemcpyHostToDevice));
+
   ASSERT_EQ(hipSuccess, module_unload(module));
   module = nullptr;
   function = nullptr;
