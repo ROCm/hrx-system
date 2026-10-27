@@ -208,7 +208,7 @@ uint64_t DeviceProfile(const amdf_xdna_endpoint_info_t& endpoint_info) {
 
   XdnaExecutable candidate;
   candidate.elf_ = elf;
-  candidate.binding_count_ = binding_accesses.size();
+  candidate.binding_alignments_.reserve(binding_accesses.size());
   const uint8_t* allocation = metadata + kAllocationOffset;
   candidate.allocation_byte_length_ = Read64(allocation + 8);
   candidate.allocation_alignment_ = Read64(allocation + 16);
@@ -242,15 +242,18 @@ uint64_t DeviceProfile(const amdf_xdna_endpoint_info_t& endpoint_info) {
   // admits that offset for every unsigned maximum, including an unbounded one.
   for (size_t i = 0; i < binding_accesses.size(); ++i) {
     const uint8_t* binding = metadata + kBindingOffset + i * kBindingSize;
+    const uint64_t alignment = Read64(binding + 16);
     // Recipes bind complete logical buffers at offset zero. A zero minimum
     // admits that use regardless of the unsigned maximum logical offset.
     if (Read16(binding) != 1 || Read16(binding + 2) != 1 ||
         Read16(binding + 4) != binding_accesses[i] ||
         Read16(binding + 6) != 5 || Read64(binding + 8) != kBindingByteLength ||
-        Read64(binding + 16) != 4 || Read64(binding + 24) != 0) {
+        alignment < 4 || !IsPowerOfTwo(alignment) ||
+        Read64(binding + 24) != 0) {
       return ::testing::AssertionFailure()
              << "binding " << i << " does not match the fixed buffer contract";
     }
+    candidate.binding_alignments_.push_back(alignment);
   }
 
   std::vector<FileRange> source_ranges;
@@ -382,12 +385,12 @@ void XdnaExecutable::Load(std::span<uint8_t> storage) const {
 
 ::testing::AssertionResult XdnaExecutable::Bind(
     std::span<uint8_t> storage, std::span<const uint64_t> addresses) const {
-  if (addresses.size() != binding_count_) {
+  if (addresses.size() != binding_alignments_.size()) {
     return ::testing::AssertionFailure()
            << "binding address count does not match image";
   }
   for (size_t i = 0; i < addresses.size(); ++i) {
-    if (addresses[i] % 4 != 0 ||
+    if (addresses[i] % binding_alignments_[i] != 0 ||
         addresses[i] > kMaximumShimAddress - (kBindingByteLength - 1)) {
       return ::testing::AssertionFailure()
              << "binding " << i << " violates the aligned 48-bit buffer range";
