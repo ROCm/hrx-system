@@ -225,10 +225,9 @@ amdf_status_t amdf_gpu_kfd_query_memory_profile(
           AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
   };
   // Owned GTT uses CPU-cached TTM pages with snooped GPU PTEs. Host coherence
-  // is independent of GPU MTYPE: payloads retain GPU caches while control
-  // backing requests KFD UNCACHED.
-  const bool control_system =
-      memory_profile_ordinal == AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CONTROL;
+  // is independent of GPU MTYPE: only the uncached profile requests GPU UC.
+  const bool uncached_system =
+      memory_profile_ordinal == AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_UNCACHED;
   uint32_t ordinal = AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_COUNT;
   if (memory_profile_ordinal < ordinal) {
     profile.memory_class = AMDF_MEMORY_CLASS_SYSTEM;
@@ -238,16 +237,18 @@ amdf_status_t amdf_gpu_kfd_query_memory_profile(
     profile.guaranteed_flags =
         AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_SHAREABLE |
         AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
+    if (uncached_system) {
+      profile.guaranteed_flags |= AMDF_MEMORY_FLAG_DEVICE_UNCACHED;
+    }
     profile.supported_flags = profile.guaranteed_flags |
                               AMDF_MEMORY_FLAG_MAPPING_SOURCE |
                               AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE;
-    // Unified backing can be local to both CPU and GPU. Keep its SYSTEM
-    // acquisition and write-back host mapping; GPU-cached payload storage
-    // satisfies device-local requests without inventing a separate heap.
-    if (topology->integrated && !control_system) {
+    // Unified backing is local to both CPU and GPU regardless of GPU cache
+    // policy. Keep its SYSTEM acquisition and write-back host mapping.
+    if (topology->integrated) {
       profile.supported_flags |= AMDF_MEMORY_FLAG_DEVICE_LOCAL;
     }
-    if (control_system) {
+    if (uncached_system) {
       profile.supported_flags |= AMDF_MEMORY_FLAG_QUEUE_STORAGE;
     }
     profile.guaranteed_device_access = AMDF_MEMORY_ACCESS_READ;
@@ -285,7 +286,7 @@ amdf_status_t amdf_gpu_kfd_query_memory_profile(
     // integer ADD, unlike raw SUB/AND/OR/XOR. Wait comparisons remain an
     // independent queue capability.
     const amdf_gpu_kfd_ip_version_t* gc = &topology->gc_ip;
-    if (control_system && gc->exact &&
+    if (uncached_system && gc->exact &&
         (gc->major == 9 || gc->major == 11 ||
          (gc->major == 12 && gc->minor == 0 && gc->revision <= 1))) {
       profile.atomic_operations_32 =
@@ -307,9 +308,9 @@ amdf_status_t amdf_gpu_kfd_query_memory_profile(
     profile.roles = AMDF_MEMORY_PROFILE_ROLE_CREATE;
     profile.guaranteed_flags =
         AMDF_MEMORY_FLAG_DEVICE_LOCAL | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
-    profile.supported_flags = profile.guaranteed_flags |
-                              AMDF_MEMORY_FLAG_QUEUE_STORAGE |
-                              AMDF_MEMORY_FLAG_MAPPING_SOURCE;
+    profile.supported_flags =
+        profile.guaranteed_flags | AMDF_MEMORY_FLAG_QUEUE_STORAGE |
+        AMDF_MEMORY_FLAG_MAPPING_SOURCE | AMDF_MEMORY_FLAG_DEVICE_UNCACHED;
     if ((topology->memory_features &
          AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY) != 0) {
       profile.roles |= AMDF_MEMORY_PROFILE_ROLE_HOST_MAP;
@@ -342,8 +343,9 @@ amdf_status_t amdf_gpu_kfd_query_memory_profile(
     profile.guaranteed_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE |
                                AMDF_MEMORY_FLAG_HOST_COHERENT |
                                AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
-    profile.supported_flags =
-        profile.guaranteed_flags | AMDF_MEMORY_FLAG_QUEUE_STORAGE;
+    profile.supported_flags = profile.guaranteed_flags |
+                              AMDF_MEMORY_FLAG_QUEUE_STORAGE |
+                              AMDF_MEMORY_FLAG_DEVICE_UNCACHED;
     profile.guaranteed_device_access = AMDF_MEMORY_ACCESS_READ;
     profile.supported_device_access = AMDF_MEMORY_ACCESS_READ |
                                       AMDF_MEMORY_ACCESS_WRITE |

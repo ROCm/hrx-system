@@ -124,7 +124,8 @@ class GpuLinuxMemoryTest : public GpuDeviceFixture {
 
   void ExerciseOwnedAccessMatrix(amdf_memory_scope_t* scope,
                                  amdf_memory_class_t memory_class,
-                                 amdf_memory_flags_t required_flags) {
+                                 amdf_memory_flags_t required_flags,
+                                 amdf_memory_flags_t access_flags = 0) {
     const bool map_memory =
         (required_flags & AMDF_MEMORY_FLAG_HOST_VISIBLE) != 0;
     for (size_t case_ordinal = 0; case_ordinal < kDeviceAccessCases.size();
@@ -138,7 +139,7 @@ class GpuLinuxMemoryTest : public GpuDeviceFixture {
                        (memory_class == AMDF_MEMORY_CLASS_SYSTEM
                             ? AMDF_MEMORY_FLAG_HOST_COHERENT
                             : 0) |
-                       access_case.additional_flags,
+                       access_case.additional_flags | access_flags,
           },
       };
       amdf_memory_create_info_t create_info = {
@@ -496,6 +497,40 @@ TEST_F(GpuLinuxMemoryTest, BufferedFileIoUsesOwnedSystemMemory) {
 
 TEST_F(GpuLinuxMemoryTest, HonorsExactSystemDeviceAccess) {
   ASSERT_NO_FATAL_FAILURE(ExerciseExactSystemDeviceAccess());
+}
+
+TEST_F(GpuLinuxMemoryTest, UncachedSystemAccessRetainsCachedHostViews) {
+  ASSERT_NO_FATAL_FAILURE(ExerciseOwnedAccessMatrix(
+      system_scope_, AMDF_MEMORY_CLASS_SYSTEM, AMDF_MEMORY_FLAG_HOST_VISIBLE,
+      AMDF_MEMORY_FLAG_DEVICE_UNCACHED));
+}
+
+TEST_F(GpuLinuxMemoryTest, UncachedLocalAccessRetainsPhysicalPlacement) {
+  if ((features_ & AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY) == 0) {
+    GTEST_SKIP() << "device does not expose local memory";
+  }
+  ASSERT_NO_FATAL_FAILURE(ExerciseOwnedAccessMatrix(
+      local_scope_, AMDF_MEMORY_CLASS_LOCAL, AMDF_MEMORY_FLAG_DEVICE_LOCAL,
+      AMDF_MEMORY_FLAG_DEVICE_UNCACHED));
+}
+
+TEST_F(GpuLinuxMemoryTest, UncachedUnifiedStorageCanAlsoBeDeviceLocal) {
+  const amdf_memory_access_requirements_t requirements = {
+      .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+      .flags =
+          AMDF_MEMORY_FLAG_DEVICE_ADDRESS | AMDF_MEMORY_FLAG_DEVICE_UNCACHED,
+  };
+  const amdf_memory_flags_t flags =
+      AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_LOCAL;
+  if (FindMemoryProfileOrdinal(
+          system_scope_,
+          AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
+          flags, requirements) == AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN) {
+    GTEST_SKIP() << "device does not expose device-local SYSTEM backing";
+  }
+  ASSERT_NO_FATAL_FAILURE(
+      ExerciseOwnedAccessMatrix(system_scope_, AMDF_MEMORY_CLASS_SYSTEM, flags,
+                                AMDF_MEMORY_FLAG_DEVICE_UNCACHED));
 }
 
 TEST_F(GpuLinuxMemoryTest, UnifiedExecutableStorageRetainsCachedHostAccess) {

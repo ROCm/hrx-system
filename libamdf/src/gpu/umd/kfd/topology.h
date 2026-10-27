@@ -53,7 +53,7 @@ typedef struct amdf_gpu_kfd_topology_t {
   } memory_peers;
   // Physical placement features supported by the native device.
   amdf_gpu_device_features_t memory_features;
-  // Native integrated-package identity; owned cached SYSTEM storage is also
+  // Native integrated-package identity; owned SYSTEM storage is also
   // local to this GPU without requiring a distinct VRAM heap.
   bool integrated;
   // Native SR-IOV function identity; KFD cannot expose the HDP remap to VFs.

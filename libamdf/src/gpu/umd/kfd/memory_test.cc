@@ -43,7 +43,8 @@ TEST(LinuxGpuMemoryProfileTest, InstanceLifetimeExposesOwnedSystemMemory) {
   EXPECT_EQ(profile.guaranteed_flags, AMDF_MEMORY_FLAG_HOST_VISIBLE |
                                           AMDF_MEMORY_FLAG_SHAREABLE |
                                           AMDF_MEMORY_FLAG_HOST_COHERENT |
-                                          AMDF_MEMORY_FLAG_DEVICE_ADDRESS);
+                                          AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
+                                          AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
   EXPECT_EQ(profile.guaranteed_device_access, AMDF_MEMORY_ACCESS_READ);
   EXPECT_EQ(profile.supported_device_access, AMDF_MEMORY_ACCESS_READ |
                                                  AMDF_MEMORY_ACCESS_WRITE |
@@ -104,15 +105,16 @@ TEST(LinuxGpuMemoryProfileTest, UnifiedCachedSystemStorageCanBeDeviceLocal) {
             AMDF_HOST_CACHE_INSTRUCTION_X86_CLFLUSH);
   EXPECT_EQ(host.invalidate.host_instruction,
             AMDF_HOST_CACHE_INSTRUCTION_X86_CLFLUSH);
-  // Control and arbitrary registered pages do not inherit the owned cached
-  // allocation's device-local contract.
-  for (uint32_t ordinal :
-       {uint32_t{AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CONTROL},
-        uint32_t{AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_COUNT}}) {
-    EXPECT_EQ(QueryProfile(&device, ordinal).supported_flags &
-                  AMDF_MEMORY_FLAG_DEVICE_LOCAL,
-              0u);
-  }
+  // GPU cache policy does not change the locality of owned unified pages.
+  EXPECT_NE(QueryProfile(&device, AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_UNCACHED)
+                    .supported_flags &
+                AMDF_MEMORY_FLAG_DEVICE_LOCAL,
+            0u);
+  // Arbitrary registered pages do not establish physical placement.
+  EXPECT_EQ(QueryProfile(&device, AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_COUNT)
+                    .supported_flags &
+                AMDF_MEMORY_FLAG_DEVICE_LOCAL,
+            0u);
   device.topology.integrated = false;
   EXPECT_EQ(QueryProfile(&device, AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CACHED)
                     .supported_flags &
@@ -231,13 +233,16 @@ TEST(LinuxGpuMemoryProfileTest, CachedPayloadAndControlBothSnoopHostCaches) {
   const auto cached =
       QueryProfile(&device, AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CACHED);
   const auto control =
-      QueryProfile(&device, AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_CONTROL);
+      QueryProfile(&device, AMDF_GPU_KFD_MEMORY_PROFILE_SYSTEM_UNCACHED);
   EXPECT_EQ(cached.memory_class, AMDF_MEMORY_CLASS_SYSTEM);
   EXPECT_EQ(cached.roles, control.roles);
   EXPECT_NE(cached.guaranteed_flags & AMDF_MEMORY_FLAG_HOST_COHERENT, 0u);
-  EXPECT_EQ(cached.guaranteed_flags, control.guaranteed_flags);
+  EXPECT_EQ(cached.guaranteed_flags,
+            control.guaranteed_flags & ~AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
+  EXPECT_NE(control.guaranteed_flags & AMDF_MEMORY_FLAG_DEVICE_UNCACHED, 0u);
   EXPECT_EQ(cached.supported_flags,
-            control.supported_flags & ~AMDF_MEMORY_FLAG_QUEUE_STORAGE);
+            control.supported_flags & ~(AMDF_MEMORY_FLAG_QUEUE_STORAGE |
+                                        AMDF_MEMORY_FLAG_DEVICE_UNCACHED));
   EXPECT_EQ(cached.atomic_operations_32, 0u);
   EXPECT_EQ(cached.atomic_operations_64, 0u);
   EXPECT_NE(control.atomic_operations_32, 0u);
@@ -327,9 +332,10 @@ TEST(LinuxGpuMemoryProfileTest, ProcessLifetimeUsesDenseOptionalProfiles) {
   EXPECT_EQ(registered_profile.guaranteed_flags,
             AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_HOST_COHERENT |
                 AMDF_MEMORY_FLAG_DEVICE_ADDRESS);
-  EXPECT_EQ(
-      registered_profile.supported_flags,
-      registered_profile.guaranteed_flags | AMDF_MEMORY_FLAG_QUEUE_STORAGE);
+  EXPECT_EQ(registered_profile.supported_flags,
+            registered_profile.guaranteed_flags |
+                AMDF_MEMORY_FLAG_QUEUE_STORAGE |
+                AMDF_MEMORY_FLAG_DEVICE_UNCACHED);
   EXPECT_EQ(registered_profile.guaranteed_device_access,
             AMDF_MEMORY_ACCESS_READ);
   EXPECT_EQ(registered_profile.supported_device_access,
