@@ -1,0 +1,322 @@
+// RUN: pass amdgpu-materialize-hal-kernel-abi
+
+// Common uses share a load before the split. Branch-local and joined uses
+// begin their lifetimes in those blocks even when their ABI slots are adjacent.
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @staged_resources(%selector: reg<amdgpu.sgpr>) asm {
+  %shared = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %left = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %right = resource<hal_binding> {extent = 16, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %joined = resource<hal_binding> {extent = 16, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %offset = v_mov_b32 0
+  %value = v_mov_b32 42
+  low.br ^split
+^split:
+  %limit = s_mov_b32 16
+  %condition = s_cmp_lt_u32 %selector, %limit
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
+^left:
+  global_store_dword_saddr %offset, %value, %shared
+  global_store_dword_saddr %offset, %value, %left
+  low.br ^join
+^right:
+  global_store_dword_saddr %offset, %value, %shared
+  global_store_dword_saddr %offset, %value, %right
+  low.br ^join
+^join:
+  global_store_dword_saddr %offset, %value, %joined
+  return
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "selector"}, direct_arg_offsets = [32], direct_arg_parameter_indices = [4], direct_arg_sizes = [4], parameter_count = 5, resource_count = 4, resource_offsets = [0, 8, 16, 24], resource_parameter_indices = [0, 1, 2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @staged_resources() asm {
+  %kernarg = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %offset = v_mov_b32 0
+  %value = v_mov_b32 42
+  low.br ^split
+^split:
+  %limit = s_mov_b32 16
+  %selector = s_load_dword_offset_only %kernarg {offset = 32}
+  %condition = s_cmp_lt_u32 %selector, %limit
+  %shared = s_load_dwordx2_offset_only %kernarg
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
+^left:
+  global_store_dword_saddr %offset, %value, %shared
+  %left = s_load_dwordx2_offset_only %kernarg {offset = 8}
+  global_store_dword_saddr %offset, %value, %left
+  low.br ^join
+^right:
+  global_store_dword_saddr %offset, %value, %shared
+  %right = s_load_dwordx2_offset_only %kernarg {offset = 16}
+  global_store_dword_saddr %offset, %value, %right
+  low.br ^join
+^join:
+  %joined = s_load_dwordx2_offset_only %kernarg {offset = 24}
+  global_store_dword_saddr %offset, %value, %joined
+  return
+}
+
+// ====
+
+// Neither the resource pointer nor a direct argument may be reloaded on the
+// backedge. Both materialize after unrelated entry work, before the loop.
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @loop_arguments(%count: reg<amdgpu.sgpr>, %stride: reg<amdgpu.sgpr x2>) asm {
+  %output = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %offset = v_mov_b32 0
+  low.br ^preheader
+^preheader:
+  %value = v_mov_b32 7
+  low.br ^loop
+^loop:
+  %step = slice %stride[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %condition = s_cmp_lt_u32 %count, %step
+  global_store_dword_saddr %offset, %value, %output
+  low.cond_br %condition, ^loop, ^exit : reg<amdgpu.scc>
+^exit:
+  return
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "count", arg1 = "stride"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_sizes = [4, 8], parameter_count = 3, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @loop_arguments() asm {
+  %kernarg = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %offset = v_mov_b32 0
+  low.br ^preheader
+^preheader:
+  %value = v_mov_b32 7
+  %count = s_load_dword_offset_only %kernarg {offset = 8}
+  %stride = s_load_dwordx2_offset_only %kernarg {offset = 12}
+  %output = s_load_dwordx2_offset_only %kernarg
+  low.br ^loop
+^loop:
+  %step = slice %stride[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %condition = s_cmp_lt_u32 %count, %step
+  global_store_dword_saddr %offset, %value, %output
+  low.cond_br %condition, ^loop, ^exit : reg<amdgpu.scc>
+^exit:
+  return
+}
+
+// ====
+
+// The two-entry cycle has no natural-loop header. Its arguments still load
+// once in the acyclic common dominator rather than either repeating block.
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @irreducible_cycle(%selector: reg<amdgpu.sgpr>, %payload: reg<amdgpu.sgpr>) asm {
+  %output = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %offset = v_mov_b32 0
+  low.br ^split
+^split:
+  %limit = s_mov_b32 16
+  %condition = s_cmp_lt_u32 %selector, %limit
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
+^left:
+  %value = v_mov_b32_copy %payload
+  global_store_dword_saddr %offset, %value, %output
+  low.cond_br %condition, ^right, ^exit : reg<amdgpu.scc>
+^right:
+  low.br ^left
+^exit:
+  return
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "selector", arg1 = "payload"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @irreducible_cycle() asm {
+  %kernarg = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %offset = v_mov_b32 0
+  low.br ^split
+^split:
+  %limit = s_mov_b32 16
+  %selector = s_load_dword_offset_only %kernarg {offset = 8}
+  %condition = s_cmp_lt_u32 %selector, %limit
+  %payload = s_load_dword_offset_only %kernarg {offset = 12}
+  %output = s_load_dwordx2_offset_only %kernarg
+  low.cond_br %condition, ^left, ^right : reg<amdgpu.scc>
+^left:
+  %value = v_mov_b32_copy %payload
+  global_store_dword_saddr %offset, %value, %output
+  low.cond_br %condition, ^right, ^exit : reg<amdgpu.scc>
+^right:
+  low.br ^left
+^exit:
+  return
+}
+
+// ====
+
+// A predicate-bearing argument stays before its transferred entry assumption.
+// Another argument used beside it in a later block keeps its late lifetime.
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @late_predicate(%count: reg<amdgpu.sgpr>, %offset: reg<amdgpu.sgpr>) where [range(%count, 1, 4096)] asm {
+  low.br ^consume
+^consume:
+  %sum = s_add_u32 %count, %offset
+  return
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "count", arg1 = "offset"}, direct_arg_offsets = [0, 4], direct_arg_parameter_indices = [0, 1], direct_arg_sizes = [4, 4], parameter_count = 2, resource_count = 0, resource_offsets = [], resource_parameter_indices = [], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @late_predicate() asm {
+  %kernarg = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %4 = s_load_dword_offset_only %kernarg
+  %count = low.assume %4 [range(%4, 1, 4096)] : reg<amdgpu.sgpr>
+  low.br ^consume
+^consume:
+  %offset = s_load_dword_offset_only %kernarg {offset = 4}
+  %sum = s_add_u32 %count, %offset
+  return
+}
+
+// ====
+
+// Full-width and ragged payloads retain the same placement as scalar loads.
+// Unused arguments keep their ABI slots without introducing memory reads.
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @late_wide(%unused: reg<amdgpu.sgpr>, %full: reg<amdgpu.sgpr x32>, %ragged: reg<amdgpu.sgpr x31>) asm {
+  low.br ^consume
+^consume:
+  %first = slice %full[0] : reg<amdgpu.sgpr x32> -> reg<amdgpu.sgpr>
+  %last = slice %ragged[30] : reg<amdgpu.sgpr x31> -> reg<amdgpu.sgpr>
+  %sum = s_add_u32 %first, %last
+  return
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 64, direct_arg_count = 3, direct_arg_names = {arg0 = "unused", arg1 = "full", arg2 = "ragged"}, direct_arg_offsets = [0, 4, 132], direct_arg_parameter_indices = [0, 1, 2], direct_arg_sizes = [4, 128, 124], parameter_count = 3, resource_count = 0, resource_offsets = [], resource_parameter_indices = [], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @late_wide() asm {
+  %kernarg = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  low.br ^consume
+^consume:
+  %7 = s_load_dwordx16_offset_only %kernarg {offset = 4}
+  %8 = s_load_dwordx16_offset_only %kernarg {offset = 68}
+  %full = concat(%7, %8) : (reg<amdgpu.sgpr x16>, reg<amdgpu.sgpr x16>) -> reg<amdgpu.sgpr x32>
+  %first = slice %full[0] : reg<amdgpu.sgpr x32> -> reg<amdgpu.sgpr>
+  %10 = s_load_dwordx16_offset_only %kernarg {offset = 132}
+  %11 = s_load_dwordx8_offset_only %kernarg {offset = 196}
+  %12 = s_load_dwordx4_offset_only %kernarg {offset = 228}
+  %13 = s_load_dwordx2_offset_only %kernarg {offset = 244}
+  %14 = s_load_dword_offset_only %kernarg {offset = 252}
+  %ragged = concat(%10, %11, %12, %13, %14) : (reg<amdgpu.sgpr x16>, reg<amdgpu.sgpr x8>, reg<amdgpu.sgpr x4>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x31>
+  %last = slice %ragged[30] : reg<amdgpu.sgpr x31> -> reg<amdgpu.sgpr>
+  %sum = s_add_u32 %first, %last
+  return
+}
+
+// ====
+
+// A nested loop's captures project to the enclosing operation; the argument
+// table is not read on each iteration of the structured body.
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @nested_capture(%count: reg<amdgpu.sgpr>, %payload: reg<amdgpu.sgpr>) asm {
+  %output = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  low.br ^consume
+^consume:
+  %zero = s_mov_b32 0
+  %step = s_mov_b32 1
+  %offset = v_mov_b32 0
+  low.scf.for unsigned [%zero to %count step %step] do(%iteration: reg<amdgpu.sgpr>) {
+    %value = v_mov_b32_copy %payload
+    global_store_dword_saddr %offset, %value, %output
+  }
+  return
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "count", arg1 = "payload"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_sizes = [4, 4], parameter_count = 3, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @nested_capture() asm {
+  %kernarg = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  low.br ^consume
+^consume:
+  %zero = s_mov_b32 0
+  %step = s_mov_b32 1
+  %offset = v_mov_b32 0
+  %9 = s_load_dwordx2_offset_only %kernarg {offset = 8}
+  %count = slice %9[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %payload = slice %9[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %output = s_load_dwordx2_offset_only %kernarg
+  low.scf.for unsigned [%zero to %count step %step] do(%iteration: reg<amdgpu.sgpr>) {
+    %value = v_mov_b32_copy %payload
+    global_store_dword_saddr %offset, %value, %output
+  }
+  return
+}
+
+// ====
+
+// Grouped loads preserve width when all arguments have the same planned
+// consumer, independently for direct scalars and imported pointers.
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @grouped_arguments(%a: reg<amdgpu.sgpr>, %b: reg<amdgpu.sgpr>, %c: reg<amdgpu.sgpr>, %d: reg<amdgpu.sgpr>) asm {
+  %p0 = resource<hal_binding> {extent = 16, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %p1 = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %p2 = resource<hal_binding> {extent = 16, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %p3 = resource<hal_binding> {extent = 16, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  low.br ^consume
+^consume:
+  %scalars = concat(%a, %b, %c, %d) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %pointers = concat(%p0, %p1, %p2, %p3) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x8>
+  return
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 4, direct_arg_count = 4, direct_arg_names = {arg0 = "a", arg1 = "b", arg2 = "c", arg3 = "d"}, direct_arg_offsets = [32, 36, 40, 44], direct_arg_parameter_indices = [4, 5, 6, 7], direct_arg_sizes = [4, 4, 4, 4], parameter_count = 8, resource_count = 4, resource_offsets = [0, 8, 16, 24], resource_parameter_indices = [0, 1, 2, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @grouped_arguments() asm {
+  %kernarg = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  low.br ^consume
+^consume:
+  %11 = s_load_dwordx4_offset_only %kernarg {offset = 32}
+  %a = slice %11[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %b = slice %11[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %c = slice %11[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %d = slice %11[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %scalars = concat(%a, %b, %c, %d) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %16 = s_load_dwordx8_offset_only %kernarg
+  %p0 = slice %16[0] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr x2>
+  %p1 = slice %16[2] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr x2>
+  %p2 = slice %16[4] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr x2>
+  %p3 = slice %16[6] : reg<amdgpu.sgpr x8> -> reg<amdgpu.sgpr x2>
+  %pointers = concat(%p0, %p1, %p2, %p3) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x8>
+  return
+}
+
+// ====
+
+// Unreachable uses preserve entry availability without querying an absent
+// dominator tree path or placing a load inside an unreachable cycle.
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) workgroup_size(64, 1, 1) @unreachable_capture(%payload: reg<amdgpu.sgpr>) asm {
+  return
+^unreachable:
+  %value = s_add_u32 %payload, %payload
+  low.br ^unreachable
+}
+
+// ----
+amdgpu.target<gfx942> @target
+
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "payload"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [4], parameter_count = 1, resource_count = 0, resource_offsets = [], resource_parameter_indices = [], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @unreachable_capture() asm {
+  %kernarg = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %payload = s_load_dword_offset_only %kernarg
+  return
+^unreachable:
+  %value = s_add_u32 %payload, %payload
+  low.br ^unreachable
+}

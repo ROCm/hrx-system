@@ -93,6 +93,21 @@ loom_cc_library(
     deps = [":descriptors"],
 )
 
+loom_cc_library(
+    name = "entry_materialization",
+    srcs = ["entry_materialization.c"],
+    hdrs = ["entry_materialization.h"],
+    deps = [
+        ":function",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/util:cfg_dominance",
+        "//loom/src/loom/util:cfg_graph",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
 loom_cc_instance_library(
     name = "descriptor_traits",
     srcs = ["descriptor_traits.c"],
