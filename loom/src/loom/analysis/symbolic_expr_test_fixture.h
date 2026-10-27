@@ -12,6 +12,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/condition_facts.h"
 #include "loom/analysis/symbolic_expr.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -22,6 +23,90 @@
 #include "loom/util/fact_table.h"
 
 namespace loom {
+
+// Keeps borrowed facts and cached expressions within their active test scope,
+// including when a fatal assertion returns from the test early.
+class ScopedConditionFacts {
+ public:
+  ScopedConditionFacts(loom_symbolic_expr_context_t* context,
+                       const loom_condition_fact_set_t* facts)
+      : context_(*context), previous_scope_(context->condition_scope) {
+    derivation_.integer_facts = *facts;
+    loom_condition_fact_scope_initialize_local(previous_scope_, &derivation_,
+                                               &scope_);
+    context_.condition_scope = &scope_;
+    loom_symbolic_expr_context_reset(&context_);
+  }
+
+  ~ScopedConditionFacts() {
+    context_.condition_scope = previous_scope_;
+    loom_symbolic_expr_context_reset(&context_);
+  }
+
+  ScopedConditionFacts(const ScopedConditionFacts&) = delete;
+  ScopedConditionFacts& operator=(const ScopedConditionFacts&) = delete;
+
+ private:
+  // Fixture context borrowing the active facts.
+  loom_symbolic_expr_context_t& context_;
+  // Local derivation adapting the test's flat fact storage.
+  loom_condition_derivation_t derivation_ = {};
+  // Local scope installed while the test facts are active.
+  loom_condition_fact_scope_t scope_ = {};
+  // Enclosing scope restored before the local facts leave their lifetime.
+  const loom_condition_fact_scope_t* previous_scope_;
+};
+
+inline loom_condition_integer_relation_t ValueRelation(
+    loom_symbolic_integer_relation_t relation, loom_value_id_t left,
+    loom_value_id_t right) {
+  loom_condition_integer_relation_t result = {.relation = relation};
+  result.left.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE;
+  result.left.value_id = left;
+  result.right.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE;
+  result.right.value_id = right;
+  return result;
+}
+
+inline bool EvaluateIntegerRelation(loom_symbolic_integer_relation_t relation,
+                                    int64_t left, int64_t right) {
+  switch (relation) {
+    case LOOM_SYMBOLIC_INTEGER_RELATION_EQ:
+      return left == right;
+    case LOOM_SYMBOLIC_INTEGER_RELATION_NE:
+      return left != right;
+    case LOOM_SYMBOLIC_INTEGER_RELATION_LT:
+      return left < right;
+    case LOOM_SYMBOLIC_INTEGER_RELATION_LE:
+      return left <= right;
+    case LOOM_SYMBOLIC_INTEGER_RELATION_GT:
+      return left > right;
+    case LOOM_SYMBOLIC_INTEGER_RELATION_GE:
+      return left >= right;
+  }
+  return false;
+}
+
+inline loom_condition_fact_set_t SingleRelationFacts(
+    loom_condition_integer_relation_t* relation) {
+  loom_condition_fact_set_t facts = {
+      .integer_relations = relation,
+      .integer_relation_count = 1,
+      .integer_relation_capacity = 1,
+  };
+  return facts;
+}
+
+inline loom_predicate_t ValuePredicate(loom_predicate_kind_t kind,
+                                       loom_value_id_t left,
+                                       loom_value_id_t right) {
+  loom_predicate_t predicate = {.kind = kind, .arg_count = 2};
+  predicate.arg_tags[0] = LOOM_PRED_ARG_VALUE;
+  predicate.arg_tags[1] = LOOM_PRED_ARG_VALUE;
+  predicate.args[0] = left;
+  predicate.args[1] = right;
+  return predicate;
+}
 
 class SymbolicExprTest : public ::testing::Test {
  protected:

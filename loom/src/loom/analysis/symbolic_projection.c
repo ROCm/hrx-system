@@ -41,3 +41,14 @@ bool loom_symbolic_projection_equal(const loom_symbolic_projection_t* left,
          left->offset == right->offset && left->divisor == right->divisor &&
          left->modulus == right->modulus;
 }
+
+void loom_symbolic_projection_refine(int64_t known_divisor,
+                                     loom_symbolic_projection_t* projection) {
+  // Factor before multiplying: the product divides the positive denominator,
+  // even when scale * known_divisor would overflow the proof carrier.
+  int64_t common_divisor =
+      iree_math_gcd_i64(projection->scale, projection->divisor);
+  common_divisor *=
+      iree_math_gcd_i64(known_divisor, projection->divisor / common_divisor);
+  projection->offset -= projection->offset % common_divisor;
+}

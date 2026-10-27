@@ -707,3 +707,77 @@ check.scenario @scalar_integer_address_values {
   }
   check.return
 }
+
+// The same packet coordinate is bounded against complete and partial extents.
+// Only the complete extent makes its per-element tail tests redundant.
+func.def @packet_bound_observations(%full_input: index, %partial_input: index, %group_input: index, %lane_input: index, %output: buffer) {
+  %full = index.assume %full_input [range(%full_input, 8, 128), multiple_of(%full_input, 8)] : index
+  %partial = index.assume %partial_input [range(%partial_input, 1, 128)] : index
+  %group = index.assume %group_input [range(%group_input, 0, 15)] : index
+  %lane = index.assume %lane_input [range(%lane_input, 0, 7)] : index
+  %width = index.constant 8 : index
+  %padding = index.constant 7 : index
+  %full_padded = index.add %full, %padding : index
+  %full_count = index.div %full_padded, %width : index
+  %full_group = index.assume %group [lt(%group, %full_count)] : index
+  %full_position = index.madd %full_group, %width, %lane : index
+  %full_inside = index.cmp ult, %full_position, %full : index
+  %full_outside = index.cmp uge, %full_position, %full : index
+  %partial_padded = index.add %partial, %padding : index
+  %partial_count = index.div %partial_padded, %width : index
+  %partial_group = index.assume %group [lt(%group, %partial_count)] : index
+  %partial_position = index.madd %partial_group, %width, %lane : index
+  %partial_inside = index.cmp ult, %partial_position, %partial : index
+  %partial_outside = index.cmp uge, %partial_position, %partial : index
+  %a = scalar.extui %full_inside : i1 to i32
+  %b = scalar.extui %full_outside : i1 to i32
+  %c = scalar.extui %partial_inside : i1 to i32
+  %d = scalar.extui %partial_outside : i1 to i32
+  %origin = index.constant 0 : offset
+  %results = buffer.view %output[%origin] : buffer -> view<4xi32>
+  view.store %a, %results[0] : i32, view<4xi32>
+  view.store %b, %results[1] : i32, view<4xi32>
+  view.store %c, %results[2] : i32, view<4xi32>
+  view.store %d, %results[3] : i32, view<4xi32>
+  func.return
+}
+
+// Compute remaining elements using scalar arithmetic, without quotient
+// projection, divisibility, or relational assumptions.
+func.def @packet_bound_oracle(%full: index, %partial: index, %group: index, %lane: index, %output: buffer) {
+  %full_integer = index.cast %full : index to i64
+  %partial_integer = index.cast %partial : index to i64
+  %group_integer = index.cast %group : index to i64
+  %lane_integer = index.cast %lane : index to i64
+  %shift = scalar.constant 3 : i64
+  %origin_integer = scalar.shli %group_integer, %shift : i64
+  %full_remaining = scalar.subi %full_integer, %origin_integer : i64
+  %partial_remaining = scalar.subi %partial_integer, %origin_integer : i64
+  %full_inside = scalar.cmpi sgt, %full_remaining, %lane_integer : i64
+  %partial_inside = scalar.cmpi sgt, %partial_remaining, %lane_integer : i64
+  %c1 = scalar.constant 1 : i32
+  %a = scalar.extui %full_inside : i1 to i32
+  %c = scalar.extui %partial_inside : i1 to i32
+  %b = scalar.xori %a, %c1 : i32
+  %d = scalar.xori %c, %c1 : i32
+  %origin = index.constant 0 : offset
+  %results = buffer.view %output[%origin] : buffer -> view<4xi32>
+  view.store %a, %results[0] : i32, view<4xi32>
+  view.store %b, %results[1] : i32, view<4xi32>
+  view.store %c, %results[2] : i32, view<4xi32>
+  view.store %d, %results[3] : i32, view<4xi32>
+  func.return
+}
+
+check.scenario @packet_bound_values configure[8](%lane: index, %configuration_entropy: check.entropy) {
+  check.trial[5](%group: index, %entropy: check.entropy) {
+    %full = check.literal value(40) : index
+    %partial = check.literal value(35) : index
+    %storage = check.generate.fill value(-123) : tensor<12xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<12xi32> -> tensor<4xi32>
+    check.compare<@packet_bound_observations, @packet_bound_oracle>(%full, %partial, %group, %lane, %output) : (index, index, index, index, tensor<4xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<12xi32>
+    }
+  }
+  check.return
+}

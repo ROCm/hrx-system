@@ -1638,6 +1638,7 @@ loom_cc_library(
     testonly = True,
     hdrs = ["symbolic_expr_test_fixture.h"],
     deps = [
+        ":condition_facts",
         ":symbolic_expr",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/index",
@@ -1758,6 +1759,21 @@ loom_cc_test(
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "symbolic_quotient_test",
+    srcs = ["symbolic_quotient_test.cc"],
+    deps = [
+        ":condition_facts",
+        ":symbolic_expr",
+        ":symbolic_expr_test_fixture",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

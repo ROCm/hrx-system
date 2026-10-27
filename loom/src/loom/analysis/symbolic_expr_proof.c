@@ -16,9 +16,14 @@
 #include "loom/ir/attribute.h"
 #include "loom/util/adaptive_sort.h"
 #include "loom/util/fact_loop.h"
+#include "loom/util/fact_relation.h"
 
 #define LOOM_SYMBOLIC_EXPR_SELECT_CURSOR_INLINE_CAPACITY 4
 #define LOOM_SYMBOLIC_EXPR_SELECT_ASSUMPTION_INLINE_CAPACITY 8
+
+// Affine expansion is a bounded supplement to indexed pair and range queries.
+// Dense alias constraints must not make every comparison expand the full set.
+#define LOOM_SYMBOLIC_EXPR_RETAINED_RELATION_LIMIT 16
 
 typedef enum loom_symbolic_expr_proof_scope_e {
   LOOM_SYMBOLIC_EXPR_PROOF_SCOPE_ACTIVE_FACTS = 0,
@@ -478,8 +483,7 @@ static bool loom_symbolic_expr_terms_are_exact_multiple(
     const loom_symbolic_term_t* expression_terms,
     iree_host_size_t expression_term_count,
     const loom_symbolic_term_t* relation_terms,
-    iree_host_size_t relation_term_count, bool positive_multiplier,
-    int64_t* out_multiplier) {
+    iree_host_size_t relation_term_count, int64_t* out_multiplier) {
   *out_multiplier = 0;
   if (expression_term_count == 0 ||
       expression_term_count != relation_term_count ||
@@ -490,7 +494,7 @@ static bool loom_symbolic_expr_terms_are_exact_multiple(
   }
   const int64_t multiplier =
       expression_terms[0].coefficient / relation_terms[0].coefficient;
-  if (multiplier == 0 || (multiplier > 0) != positive_multiplier ||
+  if (multiplier == 0 ||
       expression_terms[0].coefficient % relation_terms[0].coefficient != 0) {
     return false;
   }
@@ -512,13 +516,13 @@ static iree_status_t loom_symbolic_expr_terms_are_multiple(
     const loom_symbolic_term_t* expression_terms,
     iree_host_size_t expression_term_count,
     const loom_symbolic_term_t* relation_terms,
-    iree_host_size_t relation_term_count, bool positive_multiplier,
-    bool* out_match, int64_t* out_multiplier) {
+    iree_host_size_t relation_term_count, bool* out_match,
+    int64_t* out_multiplier) {
   *out_match = false;
   *out_multiplier = 0;
   if (loom_symbolic_expr_terms_are_exact_multiple(
           expression_terms, expression_term_count, relation_terms,
-          relation_term_count, positive_multiplier, out_multiplier)) {
+          relation_term_count, out_multiplier)) {
     *out_match = true;
     return iree_ok_status();
   }
@@ -560,7 +564,6 @@ static iree_status_t loom_symbolic_expr_terms_are_multiple(
         }
         candidate_multiplier = expression_coefficient / relation_coefficient;
         if (candidate_multiplier == 0 ||
-            (candidate_multiplier > 0) != positive_multiplier ||
             expression_coefficient % relation_coefficient != 0) {
           continue;
         }
@@ -601,13 +604,14 @@ static iree_status_t loom_symbolic_expr_terms_are_multiple(
 }
 
 //===----------------------------------------------------------------------===//
-// Active edge relations
+// Retained integer relations
 //===----------------------------------------------------------------------===//
 
-// Matches an expanded query against an active edge relation. For integral
+// Matches an expanded query against a retained relation. For integral
 // values, scale * lower + residual <= scale * upper follows from lower < upper
 // when scale > 0 and residual <= scale, or from lower <= upper when scale > 0
-// and residual <= 0. Equality permits either sign when residual <= 0.
+// and residual <= 0. A negative scale supplies a lower bound and can disprove
+// the query. Equality permits either sign when residual <= 0.
 typedef struct loom_symbolic_expr_condition_relation_proof_t {
   // Symbolic context used to expand relation operands.
   loom_symbolic_expr_context_t* context;
@@ -628,17 +632,20 @@ typedef struct loom_symbolic_expr_condition_relation_proof_t {
   iree_status_t status;
 } loom_symbolic_expr_condition_relation_proof_t;
 
-// Removes query terms absent from the relation using their interval maximum.
-// Both lists are normalized by value ID, so the merge is linear in their size.
+// Matches the shared terms first, then bounds the residual in the direction
+// established by their multiplier. Unmatched relations need no fact queries.
 static iree_status_t loom_symbolic_expr_condition_relation_residual(
     loom_symbolic_expr_condition_relation_proof_t* proof,
     const loom_symbolic_term_t* relation_terms,
-    iree_host_size_t relation_term_count, loom_symbolic_term_t* matching_terms,
-    iree_host_size_t* out_matching_count, int64_t* out_constant,
-    bool* out_known) {
-  *out_matching_count = 0;
+    iree_host_size_t relation_term_count,
+    loom_symbolic_integer_relation_t relation, int64_t* out_multiplier,
+    int64_t* out_constant, bool* out_known) {
   *out_constant = proof->expression_constant;
   *out_known = false;
+  loom_symbolic_term_t matching_terms[LOOM_SYMBOLIC_EXPR_DEFAULT_TERM_LIMIT];
+  loom_symbolic_term_t residual_terms[LOOM_SYMBOLIC_EXPR_DEFAULT_TERM_LIMIT];
+  iree_host_size_t matching_count = 0;
+  iree_host_size_t residual_count = 0;
   iree_host_size_t relation_index = 0;
   for (iree_host_size_t i = 0; i < proof->expression_term_count; ++i) {
     const loom_symbolic_term_t term = proof->expression_terms[i];
@@ -648,15 +655,28 @@ static iree_status_t loom_symbolic_expr_condition_relation_residual(
     }
     if (relation_index < relation_term_count &&
         relation_terms[relation_index].value_id == term.value_id) {
-      matching_terms[(*out_matching_count)++] = term;
-      continue;
+      matching_terms[matching_count++] = term;
+    } else {
+      residual_terms[residual_count++] = term;
     }
+  }
+  if (!loom_symbolic_expr_terms_are_exact_multiple(
+          matching_terms, matching_count, relation_terms, relation_term_count,
+          out_multiplier)) {
+    return iree_ok_status();
+  }
+  const bool maximum =
+      *out_multiplier > 0 || relation == LOOM_SYMBOLIC_INTEGER_RELATION_EQ;
+  const uint32_t required = maximum ? LOOM_SYMBOLIC_EXPR_INTERVAL_MAXIMUM_KNOWN
+                                    : LOOM_SYMBOLIC_EXPR_INTERVAL_MINIMUM_KNOWN;
+  for (iree_host_size_t i = 0; i < residual_count; ++i) {
     loom_symbolic_expr_term_interval_t interval;
-    IREE_RETURN_IF_ERROR(
-        loom_symbolic_expr_term_interval(proof->context, term, &interval));
-    if (!iree_any_bit_set(interval.flags,
-                          LOOM_SYMBOLIC_EXPR_INTERVAL_MAXIMUM_KNOWN) ||
-        !iree_checked_add_i64(*out_constant, interval.maximum, out_constant)) {
+    IREE_RETURN_IF_ERROR(loom_symbolic_expr_term_interval(
+        proof->context, residual_terms[i], &interval));
+    if (!iree_any_bit_set(interval.flags, required) ||
+        !iree_checked_add_i64(*out_constant,
+                              maximum ? interval.maximum : interval.minimum,
+                              out_constant)) {
       return iree_ok_status();
     }
   }
@@ -693,39 +713,16 @@ static bool loom_symbolic_expr_match_condition_relation(
   int64_t expression_constant = proof->expression_constant;
   proof->status = loom_symbolic_expr_terms_are_multiple(
       proof->context, proof->expression_terms, proof->expression_term_count,
-      relation_terms, relation_term_count, /*positive_multiplier=*/true,
-      &terms_match, &multiplier);
+      relation_terms, relation_term_count, &terms_match, &multiplier);
   if (!iree_status_is_ok(proof->status)) {
     return false;
   }
-  if (!terms_match && relation == LOOM_SYMBOLIC_INTEGER_RELATION_EQ) {
-    proof->status = loom_symbolic_expr_terms_are_multiple(
-        proof->context, proof->expression_terms, proof->expression_term_count,
-        relation_terms, relation_term_count,
-        /*positive_multiplier=*/false, &terms_match, &multiplier);
-    if (!iree_status_is_ok(proof->status)) {
-      return false;
-    }
-  }
   if (!terms_match && proof->expression_term_count > relation_term_count) {
-    loom_symbolic_term_t matching_terms[LOOM_SYMBOLIC_EXPR_DEFAULT_TERM_LIMIT];
-    iree_host_size_t matching_count = 0;
-    bool residual_known = false;
     proof->status = loom_symbolic_expr_condition_relation_residual(
-        proof, relation_terms, relation_term_count, matching_terms,
-        &matching_count, &expression_constant, &residual_known);
+        proof, relation_terms, relation_term_count, relation, &multiplier,
+        &expression_constant, &terms_match);
     if (!iree_status_is_ok(proof->status)) {
       return false;
-    }
-    if (residual_known) {
-      terms_match = loom_symbolic_expr_terms_are_exact_multiple(
-          matching_terms, matching_count, relation_terms, relation_term_count,
-          /*positive_multiplier=*/true, &multiplier);
-      if (!terms_match && relation == LOOM_SYMBOLIC_INTEGER_RELATION_EQ) {
-        terms_match = loom_symbolic_expr_terms_are_exact_multiple(
-            matching_terms, matching_count, relation_terms, relation_term_count,
-            /*positive_multiplier=*/false, &multiplier);
-      }
     }
   }
   if (!terms_match) {
@@ -739,9 +736,13 @@ static bool loom_symbolic_expr_match_condition_relation(
                             &residual_constant)) {
     return true;
   }
-  if (residual_constant <=
-      (relation == LOOM_SYMBOLIC_INTEGER_RELATION_LT ? multiplier : 0)) {
-    proof->result = LOOM_SYMBOLIC_PROOF_TRUE;
+  const bool upper_bound =
+      multiplier > 0 || relation == LOOM_SYMBOLIC_INTEGER_RELATION_EQ;
+  const int64_t limit =
+      relation == LOOM_SYMBOLIC_INTEGER_RELATION_LT ? multiplier : 0;
+  if (upper_bound ? residual_constant <= limit : residual_constant > limit) {
+    proof->result =
+        upper_bound ? LOOM_SYMBOLIC_PROOF_TRUE : LOOM_SYMBOLIC_PROOF_FALSE;
     return false;
   }
   return true;
@@ -934,6 +935,34 @@ static bool loom_symbolic_expr_visit_counted_domain(
          loom_symbolic_expr_visit_condition_relation(proof, &upper);
 }
 
+typedef struct loom_symbolic_expr_retained_relation_proof_t {
+  // Shared affine matcher receiving this alias's retained relations.
+  loom_symbolic_expr_condition_relation_proof_t* proof;
+  // Scoped alias anchoring the sparse relation enumeration.
+  loom_value_id_t value;
+  // Remaining affine expansions across all anchors in this query.
+  uint8_t remaining;
+} loom_symbolic_expr_retained_relation_proof_t;
+
+static bool loom_symbolic_expr_visit_retained_relation(
+    void* user_data, loom_value_id_t counterpart,
+    loom_integer_order_outcome_bits_t outcomes) {
+  loom_symbolic_expr_retained_relation_proof_t* retained =
+      (loom_symbolic_expr_retained_relation_proof_t*)user_data;
+  --retained->remaining;
+  loom_condition_integer_relation_t relation = {
+      .left = {.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+               .value_id = retained->value},
+      .right = {.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,
+                .value_id = counterpart},
+  };
+  (void)loom_symbolic_integer_relation_from_outcomes(outcomes,
+                                                     &relation.relation);
+  return loom_symbolic_expr_visit_condition_relation(retained->proof,
+                                                     &relation) &&
+         retained->remaining != 0;
+}
+
 static iree_status_t loom_symbolic_expr_prove_le_by_condition_relations(
     loom_symbolic_expr_context_t* context,
     const loom_symbolic_expr_t* left_expression,
@@ -942,8 +971,11 @@ static iree_status_t loom_symbolic_expr_prove_le_by_condition_relations(
   *out_result = LOOM_SYMBOLIC_PROOF_UNKNOWN;
   const bool has_counted_domains =
       context->fact_table && context->fact_table->has_counted_loop_domains;
-  if (!has_counted_domains && !loom_condition_fact_scope_has_integer_relations(
-                                  context->condition_scope)) {
+  const bool has_retained_relations =
+      context->fact_table && context->fact_table->integer_relations;
+  if (!has_counted_domains && !has_retained_relations &&
+      !loom_condition_fact_scope_has_integer_relations(
+          context->condition_scope)) {
     return iree_ok_status();
   }
 
@@ -1016,6 +1048,24 @@ static iree_status_t loom_symbolic_expr_prove_le_by_condition_relations(
   (void)loom_condition_fact_scope_for_each_anchored_while(
       context->condition_scope, context->fact_table, anchors, anchor_count,
       loom_symbolic_expr_visit_condition_relation, &proof);
+  if (has_retained_relations) {
+    loom_symbolic_expr_retained_relation_proof_t retained = {
+        .proof = &proof,
+        .remaining = LOOM_SYMBOLIC_EXPR_RETAINED_RELATION_LIMIT,
+    };
+    for (iree_host_size_t i = 0; i < anchor_count && retained.remaining &&
+                                 iree_status_is_ok(proof.status) &&
+                                 proof.result == LOOM_SYMBOLIC_PROOF_UNKNOWN;
+         ++i) {
+      if (anchors[i].kind != LOOM_CONDITION_INTEGER_OPERAND_VALUE) {
+        continue;
+      }
+      retained.value = anchors[i].value_id;
+      (void)loom_value_fact_table_for_each_signed_integer_relation_while(
+          context->fact_table, retained.value,
+          loom_symbolic_expr_visit_retained_relation, &retained);
+    }
+  }
   if (has_counted_domains) {
     for (iree_host_size_t i = 0;
          i < anchor_count && iree_status_is_ok(proof.status) &&

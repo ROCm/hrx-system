@@ -1496,11 +1496,16 @@ static iree_status_t loom_symbolic_expr_retain_projection(
       .offset = input->constant,
       .divisor = 1,
   };
+  loom_value_id_t source_value = input->terms[0].relation_value_id;
+  if (source_value == LOOM_VALUE_ID_INVALID) {
+    source_value = projection.value_id;
+  }
   if (projection.scale == 1 && projection.offset == 0) {
     const loom_symbolic_projection_t* source =
         loom_symbolic_expr_lookup_projection(context, input);
     if (source) {
       projection = *source;
+      source_value = projection.value_id;
     }
   }
   bool represented = false;
@@ -1513,6 +1518,12 @@ static iree_status_t loom_symbolic_expr_retain_projection(
         loom_symbolic_projection_remainder(&projection, divisor, &projection);
   }
   if (represented) {
+    if (projection.offset != 0 && projection.divisor != 1) {
+      loom_value_facts_t source_facts;
+      IREE_RETURN_IF_ERROR(loom_symbolic_expr_context_lookup_facts(
+          context, source_value, &source_facts));
+      loom_symbolic_projection_refine(source_facts.known_divisor, &projection);
+    }
     if (context->projections.count == context->projections.capacity) {
       IREE_RETURN_IF_ERROR(iree_arena_grow_array(
           context->arena, context->projections.count,

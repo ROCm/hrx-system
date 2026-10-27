@@ -1825,6 +1825,7 @@ loom_cc_library(
   HDRS
     "symbolic_expr_test_fixture.h"
   DEPS
+    ::condition_facts
     ::symbolic_expr
     iree::base::internal::arena
     iree::testing::gtest
@@ -1959,6 +1960,22 @@ loom_cc_test(
     loom::ops::scalar
     loom::ops::scf
     loom::util::fact_table
+)
+
+loom_cc_test(
+  NAME
+    symbolic_quotient_test
+  SRCS
+    "symbolic_quotient_test.cc"
+  DEPS
+    ::condition_facts
+    ::symbolic_expr
+    ::symbolic_expr_test_fixture
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::ir
+    loom::ops::index
+    loom::ops::scalar
 )
 
 loom_cc_test(

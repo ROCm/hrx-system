@@ -46,6 +46,11 @@ bool loom_symbolic_projection_remainder(const loom_symbolic_projection_t* input,
                                         int64_t modulus,
                                         loom_symbolic_projection_t* output);
 
+// Removes numerator slack that cannot affect the quotient when value_id is a
+// multiple of known_divisor. Preserves both quotient and remainder values.
+void loom_symbolic_projection_refine(int64_t known_divisor,
+                                     loom_symbolic_projection_t* projection);
+
 // Compares retained numeric functions without source traversal or allocation.
 bool loom_symbolic_projection_equal(const loom_symbolic_projection_t* left,
                                     const loom_symbolic_projection_t* right);

@@ -1,0 +1,90 @@
+// RUN: pass canonicalize
+
+// A complete packet is inside the extent. Both spellings of the tail test
+// simplify, while the original argument keeps its broader scope.
+func.def @complete_packet(%extent_input: index, %group_input: index, %lane_input: index) -> (i1, i1, i1) {
+  %extent = index.assume %extent_input [range(%extent_input, 8, 128), multiple_of(%extent_input, 8)] : index
+  %group = index.assume %group_input [range(%group_input, 0, 15)] : index
+  %lane = index.assume %lane_input [range(%lane_input, 0, 7)] : index
+  %width = index.constant 8 : index
+  %padding = index.constant 7 : index
+  %padded = index.add %extent, %padding : index
+  %count = index.div %padded, %width : index
+  %bounded = index.assume %group [lt(%group, %count)] : index
+  %position = index.madd %bounded, %width, %lane : index
+  %inside = index.cmp ult, %position, %extent : index
+  %outside = index.cmp uge, %position, %extent : index
+  %unbounded_position = index.madd %group, %width, %lane : index
+  %unbounded = index.cmp ult, %unbounded_position, %extent : index
+  func.return %inside, %outside, %unbounded : i1, i1, i1
+}
+
+// ----
+func.def @complete_packet(%extent_input: index, %group_input: index, %lane_input: index) -> (i1, i1, i1) {
+  %extent = index.assume %extent_input [range(%extent_input, 8, 128), multiple_of(%extent_input, 8)] : index
+  %group = index.assume %group_input [range(%group_input, 0, 15)] : index
+  %lane = index.assume %lane_input [range(%lane_input, 0, 7)] : index
+  %width = index.constant 8 : index
+  %inside = scalar.constant true : i1
+  %outside = scalar.constant false : i1
+  %unbounded_position = index.madd %group, %width, %lane : index
+  %unbounded = index.cmp ult, %unbounded_position, %extent : index
+  func.return %inside, %outside, %unbounded : i1, i1, i1
+}
+
+// ====
+
+// Rounding down admits only complete packets, even for a partial extent.
+func.def @floor_packet(%extent_input: index, %group_input: index, %lane_input: index) -> (i1, i1) {
+  %extent = index.assume %extent_input [range(%extent_input, 8, 128)] : index
+  %group = index.assume %group_input [range(%group_input, 0, 15)] : index
+  %lane = index.assume %lane_input [range(%lane_input, 0, 7)] : index
+  %width = index.constant 8 : index
+  %count = index.div %extent, %width : index
+  %bounded = index.assume %group [lt(%group, %count)] : index
+  %position = index.madd %bounded, %width, %lane : index
+  %inside = index.cmp slt, %position, %extent : index
+  %outside = index.cmp sge, %position, %extent : index
+  func.return %inside, %outside : i1, i1
+}
+
+// ----
+func.def @floor_packet(%extent_input: index, %group_input: index, %lane_input: index) -> (i1, i1) {
+  %inside = scalar.constant true : i1
+  %outside = scalar.constant false : i1
+  func.return %inside, %outside : i1, i1
+}
+
+// ====
+
+// Rounding up without divisibility admits a partial last packet. Its guard
+// remains dynamic: extent=35, group=4, lane=3 is outside the logical extent.
+func.def @partial_packet(%extent_input: index, %group_input: index, %lane_input: index) -> (i1) {
+  %extent = index.assume %extent_input [range(%extent_input, 1, 128)] : index
+  %group = index.assume %group_input [range(%group_input, 0, 15)] : index
+  %lane = index.assume %lane_input [range(%lane_input, 0, 7)] : index
+  %width = index.constant 8 : index
+  %padding = index.constant 7 : index
+  %padded = index.add %extent, %padding : index
+  %count = index.div %padded, %width : index
+  %bounded = index.assume %group [lt(%group, %count)] : index
+  %position = index.madd %bounded, %width, %lane : index
+  %inside = index.cmp ult, %position, %extent : index
+  func.return %inside : i1
+}
+
+// ----
+func.def @partial_packet(%extent_input: index, %group_input: index, %lane_input: index) -> (i1) {
+  %extent = index.assume %extent_input [range(%extent_input, 1, 128)] : index
+  %group = index.assume %group_input [range(%group_input, 0, 15)] : index
+  %lane = index.assume %lane_input [range(%lane_input, 0, 7)] : index
+  %width = index.constant 8 : index
+  %padding = index.constant 7 : index
+  %padded = index.add %extent, %padding : index
+  %14 = index.constant 3 : index
+  %count = index.shrui %padded, %14 : index
+  %bounded = index.assume %group [lt(%group, %count)] : index
+  %position = index.madd %bounded, %width, %lane : index
+  %inside = index.cmp ult, %position, %extent : index
+  func.return %inside : i1
+}
