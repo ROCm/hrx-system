@@ -213,6 +213,7 @@ loom_cc_test(
   SRCS
     "low_test.cc"
   DEPS
+    ::format
     ::low
     iree::base::internal::arena
     iree::testing::gtest

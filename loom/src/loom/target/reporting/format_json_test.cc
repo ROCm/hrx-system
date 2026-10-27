@@ -227,20 +227,8 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
   const iree_string_view_t schedule_band_summary_rows =
       LookupObject(root, IREE_SV("schedule_band_summary_rows"));
   ExpectObjectUint64Equals(schedule_band_summary_rows, IREE_SV("count"), 1);
-  const iree_string_view_t schedule_band_rows =
-      LookupObject(schedule_band_summary_rows, IREE_SV("rows"));
-  ExpectArrayLength(schedule_band_rows, 1);
-  const iree_string_view_t schedule_band =
-      LookupArrayElement(schedule_band_rows, 0);
-  ExpectObjectValueEquals(schedule_band, IREE_SV("semantic_tag"),
-                          IREE_SV("matrix.wmma.f32"));
-  const iree_string_view_t static_mix =
-      LookupObject(schedule_band, IREE_SV("static_instruction_mix"));
-  ExpectObjectUint64Equals(static_mix, IREE_SV("wmma_count"), 2);
-  const iree_string_view_t dynamic_mix =
-      LookupObject(schedule_band, IREE_SV("dynamic_instruction_mix"));
-  ExpectObjectUint64Equals(dynamic_mix, IREE_SV("descriptor_count"), 4);
-  ExpectObjectUint64Equals(dynamic_mix, IREE_SV("wmma_count"), 4);
+  EXPECT_TRUE(iree_string_view_is_empty(
+      TryLookupObject(schedule_band_summary_rows, IREE_SV("rows"))));
 
   const iree_string_view_t wait_reason_summary_rows =
       LookupObject(root, IREE_SV("wait_reason_summary_rows"));
@@ -272,6 +260,31 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
   EXPECT_TRUE(iree_string_view_is_empty(
       TryLookupObject(wait_action_rows, IREE_SV("rows"))));
 
+  iree_string_builder_deinitialize(&builder);
+  iree_string_builder_initialize(iree_allocator_system(), &builder);
+  loom_output_stream_for_builder(&builder, &stream);
+  const loom_target_compile_report_format_options_t detail_options = {
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS,
+  };
+  IREE_ASSERT_OK(loom_target_compile_report_format_json(
+      &report, &detail_options, &stream));
+  const iree_string_view_t detail_root =
+      ParseJsonDocument(iree_string_builder_view(&builder));
+  const iree_string_view_t schedule_band_rows = LookupObject(
+      LookupObject(detail_root, IREE_SV("schedule_band_summary_rows")),
+      IREE_SV("rows"));
+  ExpectArrayLength(schedule_band_rows, 1);
+  const iree_string_view_t schedule_band =
+      LookupArrayElement(schedule_band_rows, 0);
+  ExpectObjectValueEquals(schedule_band, IREE_SV("semantic_tag"),
+                          IREE_SV("matrix.wmma.f32"));
+  const iree_string_view_t static_mix =
+      LookupObject(schedule_band, IREE_SV("static_instruction_mix"));
+  ExpectObjectUint64Equals(static_mix, IREE_SV("wmma_count"), 2);
+  const iree_string_view_t dynamic_mix =
+      LookupObject(schedule_band, IREE_SV("dynamic_instruction_mix"));
+  ExpectObjectUint64Equals(dynamic_mix, IREE_SV("descriptor_count"), 4);
+  ExpectObjectUint64Equals(dynamic_mix, IREE_SV("wmma_count"), 4);
   iree_string_builder_deinitialize(&builder);
   loom_target_compile_report_deinitialize(&report);
 }
@@ -911,12 +924,12 @@ TEST(CompileReportFormatTest, SelectsRequestedDetailsForMode) {
   const loom_target_compile_report_detail_flags_t summary_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_RESIDENCY_CONSTRAINTS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_CONFIG_BINDING_ROWS |
-      LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS;
   const loom_target_compile_report_detail_flags_t detail_flags =
       summary_flags | LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ORIGIN_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_ROWS |
+      LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION_FAILURE_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_ALLOCATION_HIGH_WATER_ROWS |

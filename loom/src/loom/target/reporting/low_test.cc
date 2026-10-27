@@ -14,6 +14,7 @@
 #include "loom/ops/test/ops.h"
 #include "loom/target/facts_builder.h"
 #include "loom/target/registers.h"
+#include "loom/target/reporting/format.h"
 #include "loom/target/reporting/low_mix.h"
 #include "loom/target/test/target_records.h"
 
@@ -1276,6 +1277,25 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   EXPECT_EQ(
       allocation_high_water_rows[0].active_fallback_storage_lease_blocker_units,
       0u);
+
+  loom_target_compile_report_t bounded_report = {};
+  loom_target_compile_report_initialize(&bounded_report,
+                                        iree_allocator_system());
+  bounded_report.requested_detail_flags =
+      loom_target_compile_report_requested_detail_flags(
+          LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY);
+  IREE_ASSERT_OK(loom_target_compile_report_record_low_emission_frame(
+      &bounded_report, &frame));
+  EXPECT_EQ(bounded_report.schedule_node_count, report.schedule_node_count);
+  EXPECT_EQ(bounded_report.static_instruction_mix.descriptor_count,
+            report.static_instruction_mix.descriptor_count);
+  EXPECT_EQ(bounded_report.static_instruction_mix.matrix_count,
+            report.static_instruction_mix.matrix_count);
+  EXPECT_EQ(bounded_report.schedule_band_rows.count, 0u);
+  EXPECT_EQ(bounded_report.schedule_band_rows.head, nullptr);
+  EXPECT_EQ(bounded_report.schedule_band_summary_rows.count, 0u);
+  EXPECT_EQ(bounded_report.schedule_band_summary_rows.head, nullptr);
+  loom_target_compile_report_deinitialize(&bounded_report);
 
   loom_target_compile_report_t summary_report = {};
   loom_target_compile_report_initialize(&summary_report,

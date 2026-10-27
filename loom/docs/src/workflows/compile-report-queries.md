@@ -365,10 +365,11 @@ allowing more overlap may increase the live register set.
 
 ## Inspect schedule bands
 
-Schedule-band summaries retain semantic tags, band width, node counts,
-instruction-family counts, and result pressure. When exact fixed-trip
-multiplicity is proven, `dynamic_instruction_mix` also reports repeated packet
-counts. Its absence means dynamic multiplicity was not proven.
+Capture with `--compile-report=details` to inspect schedule bands. Their grouped
+rows retain semantic tags, band width, node counts, instruction-family counts,
+and result pressure. When exact fixed-trip multiplicity is proven,
+`dynamic_instruction_mix` also reports repeated packet counts. Its absence
+means dynamic multiplicity was not proven.
 
 Read matrix-family bands:
 

@@ -313,12 +313,11 @@ loom_target_compile_report_format_schedule_band_summary_rows_json(
     const loom_target_compile_report_t* report,
     loom_target_compile_report_format_mode_t mode,
     loom_output_stream_t* stream) {
-  (void)mode;
   loom_json_object_writer_t object;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
       &object, IREE_SV("count"), report->schedule_band_summary_rows.count));
-  if (report->schedule_band_summary_rows.count != 0) {
+  if (mode == LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS) {
     IREE_RETURN_IF_ERROR(
         loom_json_object_begin_field(&object, IREE_SV("rows")));
     loom_json_array_writer_t array;
