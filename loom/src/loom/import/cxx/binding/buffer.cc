@@ -94,18 +94,31 @@ std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
         static_cast<loom_value_fact_memory_space_t>(space->toUIntMax()));
   }
   if (name == "buffer.assume.noalias" || name == "buffer.assume.alignment") {
-    auto* source =
-        parameters.size() == 1
-            ? cxx::type_cast<cxx::PointerType>(types.unqualified(parameters[0]))
-            : nullptr;
-    if (signature->isVariadic() || !source || !result ||
-        source->elementType() != result->elementType()) {
-      diagnostics.reject(unit, owner,
-                         "buffer assumption requires one pointer and the same "
-                         "result type");
+    if (signature->isVariadic() || parameters.size() != 1 ||
+        !unit.typeTraits().is_same(
+            types.unqualified(parameters[0]),
+            types.unqualified(signature->returnType()))) {
+      diagnostics.reject(
+          unit, owner,
+          "buffer assumption requires one pointer or typed buffer and the "
+          "same result type");
+    }
+    const cxx::Type* source_element_type = nullptr;
+    if (auto* source = cxx::type_cast<cxx::PointerType>(
+            types.unqualified(parameters[0]))) {
+      source_element_type = source->elementType();
+    } else {
+      const auto& partition = types.partition(parameters[0], owner);
+      if (partition.kind != ValueKind::Buffer) {
+        diagnostics.reject(
+            unit, owner,
+            "buffer assumption requires a pointer or typed buffer");
+      }
+      source_element_type =
+          static_cast<const BufferPartition&>(partition).element_type;
     }
     if (name == "buffer.assume.noalias") {
-      return BufferIntrinsic(source->elementType());
+      return BufferIntrinsic(source_element_type);
     }
     auto arguments = function->templateArguments();
     auto alignment_value = arguments.size() == 2
@@ -114,15 +127,17 @@ std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
     auto* alignment = alignment_value
                           ? std::get_if<cxx::ConstInt>(&*alignment_value)
                           : nullptr;
-    auto* element_type = arguments.size() == 2
-                             ? cxx::template_argument_as_type(arguments[1])
-                             : nullptr;
+    auto* template_element_type =
+        arguments.size() == 2 ? cxx::template_argument_as_type(arguments[1])
+                              : nullptr;
     if (!alignment || alignment->isNegative() ||
-        alignment->toUWide() > INT64_MAX || !element_type ||
-        !unit.typeTraits().is_same(element_type, source->elementType())) {
+        alignment->toUWide() > INT64_MAX || !template_element_type ||
+        !unit.typeTraits().is_same(template_element_type,
+                                   source_element_type)) {
       diagnostics.reject(
           unit, owner,
-          "buffer.assume.alignment requires an alignment and pointer type");
+          "buffer.assume.alignment requires an alignment and source element "
+          "type");
     }
     auto alignment_bytes = static_cast<uint64_t>(alignment->toUIntMax());
     if (alignment_bytes == 0 ||
@@ -131,7 +146,7 @@ std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
           unit, owner,
           "buffer alignment must be a positive power-of-two byte count");
     }
-    return BufferIntrinsic(source->elementType(),
+    return BufferIntrinsic(source_element_type,
                            static_cast<int64_t>(alignment_bytes));
   }
   if (signature->isVariadic() || parameters.size() != 1 || !result) {
@@ -234,11 +249,21 @@ Value BufferIntrinsic::call(std::span<const Value> arguments, ValueArena& arena,
     return arena.capture(source.partition(), {&root, 1});
   }
   if (operation_ == Operation::AssumeNoalias) {
-    return Value(storage.assume_noalias(arguments[0].pointer(), owner));
+    auto source = arguments[0];
+    if (source.is_pointer()) {
+      return Value(storage.assume_noalias(source.pointer(), owner));
+    }
+    auto root = storage.assume_noalias(source.ssa(), owner);
+    return arena.capture(source.partition(), {&root, 1});
   }
   if (operation_ == Operation::AssumeAlignment) {
-    return Value(
-        storage.assume_alignment(arguments[0].pointer(), alignment_, owner));
+    auto source = arguments[0];
+    if (source.is_pointer()) {
+      return Value(
+          storage.assume_alignment(source.pointer(), alignment_, owner));
+    }
+    auto root = storage.assume_alignment(source.ssa(), alignment_, owner);
+    return arena.capture(source.partition(), {&root, 1});
   }
   if (operation_ == Operation::AllocaBytes) {
     return Value(storage.allocate_bytes(arguments[0].ssa(), memory_space_,

@@ -32,6 +32,7 @@ exports_files([
     "include/loomcxx/scalar.h",
     "include/loomcxx/shape.h",
     "include/loomcxx/target.h",
+    "include/loomcxx/target/aie2p.h",
     "include/loomcxx/target/amdgpu.h",
     "include/loomcxx/vector.h",
     "include/loomcxx/view.h",

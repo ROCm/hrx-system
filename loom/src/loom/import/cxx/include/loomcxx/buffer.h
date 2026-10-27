@@ -105,10 +105,21 @@ namespace assume {
 template <class T>
 [[loom::op("buffer.assume.noalias")]] T* noalias(T* source);
 
+// Refines a borrowed zero-origin buffer with the same independent-root
+// promise.
+template <class T>
+[[loom::op("buffer.assume.noalias")]] loom::type::buffer<T> noalias(
+    loom::type::buffer<T> source);
+
 // Promises that source names the zero-origin buffer root with at least
 // Alignment-byte alignment in the current scope.
 template <__SIZE_TYPE__ Alignment, class T>
 [[loom::op("buffer.assume.alignment")]] T* alignment(T* source);
+
+// Refines a borrowed zero-origin buffer with the same alignment promise.
+template <__SIZE_TYPE__ Alignment, class T>
+[[loom::op("buffer.assume.alignment")]] loom::type::buffer<T> alignment(
+    loom::type::buffer<T> source);
 
 // Promises that source's existing storage belongs to Space in the current
 // scope. Preserves the element type, pointer origin, and storage identity;

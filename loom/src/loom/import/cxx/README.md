@@ -712,6 +712,34 @@ definition. Non-overloaded external names derive from their qualified C++ names.
 Overloads, operators and template specializations need `loom::symbol` because a
 stable cross-module identity cannot depend on reachability or declaration order.
 
+An ordinary function can own an explicit execution target just like a kernel or
+template provider. The target object uses the registered dialect schema, and the
+function attribute projects directly to `func.def target(...)`:
+
+```cpp
+#include <loomcxx/buffer.h>
+#include <loomcxx/target/aie2p.h>
+
+constexpr loom::aie2p::target core{.kind = "core"};
+
+[[loom::target(core)]] void multiply_record(loom::type::buffer<const int> lhs, loom::type::buffer<const int> rhs, loom::type::buffer<int> output) {
+  // Core program body.
+}
+```
+
+A separately imported caller repeats `[[loom::target(core)]]` on its bodyless
+declaration when that target is part of the callable contract. The resulting
+`func.decl target(@core)` links against the definition with the ordinary Loom
+function-contract checks; conflicting source redeclarations diagnose during
+import. Targetless reached helpers inherit the caller's selected target through
+the normal callable graph.
+
+This is the explicit partitioning boundary for mixed host and device libraries.
+One C++ translation unit still has one preprocessed language and data model.
+Sources requiring different host and device data models import separately, then
+link as ordinary `.loombc` modules. The importer does not infer a partition or
+introduce an offload driver.
+
 Namespace-scope immutable object storage uses the same module boundary. A
 header can declare externally supplied data and define an inline table:
 
@@ -1097,6 +1125,12 @@ lowering keep immutable input reads separate from synchronized mutable
 publication buffers. Conflicting known storage domains are rejected. The
 promise preserves the original extent, alignment, and nullability facts; it
 does not establish any of them independently.
+
+`noalias(source)` and `alignment<Bytes>(source)` also accept pointers or typed
+buffers and return the same source type. A typed buffer is already a zero-origin
+root. A pointer alignment promise therefore requires the pointer to retain its
+root origin; applying it after pointer arithmetic is rejected instead of
+overstating the root's alignment.
 
 ## Typed views and layouts
 

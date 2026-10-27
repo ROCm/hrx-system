@@ -148,10 +148,15 @@ class Storage {
   // Refines one pointer root with a scoped no-alias identity while preserving
   // its byte origin and compiler-owned allocation facts.
   Pointer assume_noalias(Pointer pointer, cxx::AST* owner);
+  // Refines a borrowed buffer root with an independent-root promise.
+  loom_value_id_t assume_noalias(loom_value_id_t root, cxx::AST* owner);
   // Refines a zero-origin pointer root with a scoped minimum byte alignment.
   // Interior pointers cannot represent buffer-root alignment and are rejected.
   Pointer assume_alignment(Pointer pointer, int64_t minimum_alignment,
                            cxx::AST* owner);
+  // Refines a borrowed zero-origin buffer root with a minimum byte alignment.
+  loom_value_id_t assume_alignment(loom_value_id_t root,
+                                   int64_t minimum_alignment, cxx::AST* owner);
   // Refines a borrowed buffer root's storage domain, preserving its identity
   // and compiler-owned allocation facts. This does not move or copy storage.
   loom_value_id_t assume_memory_space(

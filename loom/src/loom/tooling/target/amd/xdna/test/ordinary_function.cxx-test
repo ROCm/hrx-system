@@ -1,0 +1,21 @@
+// RUN: emit source-low @multiply_record target=amd.xdna.aie2p:core output=none
+
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+#include <loomcxx/target/aie2p.h>
+#include <loomcxx/view.h>
+
+constexpr loom::aie2p::target core_target{.kind = "core"};
+
+[[loom::target(core_target)]] void multiply_record(loom::type::buffer<const int> lhs, loom::type::buffer<const int> rhs, loom::type::buffer<int> output) {
+  const auto lhs_aligned = loom::buffer::assume::alignment<64>(lhs);
+  const auto rhs_aligned = loom::buffer::assume::alignment<64>(rhs);
+  const auto output_aligned = loom::buffer::assume::alignment<64>(output);
+  const auto lhs_values = loom::buffer::view<16>(lhs_aligned, {}, loom::encoding::layout::dense<1>());
+  const auto rhs_values = loom::buffer::view<16>(rhs_aligned, {}, loom::encoding::layout::dense<1>());
+  const auto output_values = loom::buffer::view<16>(output_aligned, {}, loom::encoding::layout::dense<1>());
+  for (unsigned i = 0; i < 16; ++i) {
+    const auto index = loom::index::cast(i);
+    loom::view::store(loom::view::load(lhs_values, index) * loom::view::load(rhs_values, index), output_values, index);
+  }
+}

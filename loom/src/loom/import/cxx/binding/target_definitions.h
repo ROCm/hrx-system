@@ -43,14 +43,20 @@ class TargetDefinitions {
                    cxx::List<cxx::AttributeSpecifierAST*>* attributes,
                    cxx::AST* owner);
 
-  // Emits every admitted target definition in source order and resolves kernel
-  // bindings. Called once after declaration collection and before functions.
+  // Emits every admitted target definition in source order and resolves
+  // function bindings. Called once after declaration collection and before
+  // functions.
   void build(loom_builder_t* builder);
 
-  // Returns the retained target symbol for a kernel or template provider, or
-  // null when the source has no target binding. All bindings have been
-  // validated by build().
+  // Returns the retained target symbol for a function-like definition or
+  // declaration, or null when the source has no target binding. All bindings
+  // have been validated by build().
   loom_symbol_ref_t reference(cxx::FunctionSymbol* function) const;
+
+  // Rejects a target binding on a function consumed as kernel launch
+  // configuration instead of emitted as a callable definition.
+  void reject_launch_configuration_function(
+      cxx::FunctionSymbol* function) const;
 
  private:
   struct Definition {
@@ -69,7 +75,7 @@ class TargetDefinitions {
   };
 
   struct FunctionBinding {
-    // Canonical target object named by the kernel attribute.
+    // Canonical target object named by the function attribute.
     cxx::VariableSymbol* variable;
     // Attribute owning conflict or invalid-target diagnostics.
     cxx::AST* owner;

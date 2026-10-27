@@ -230,6 +230,13 @@ loom_check_test(
 )
 
 loom_check_test(
+    name = "ordinary_function_lowering",
+    src = "test/ordinary_function.cxx-test",
+    runner = "//loom/src/loom/tools/loom-check",
+    target_compatible_with = _XDNA_COMPILE_COMPATIBLE_WITH + loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_check_test(
     name = "vector_lookup_lowering",
     src = "test/vector_lookup.cxx-test",
     data = ["//loom/src/loom/import/cxx/test:vector_lookup.cxx"],

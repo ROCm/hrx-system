@@ -431,6 +431,20 @@ endif()
 if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_IMPORT_CXX)
 iree_native_test(
   NAME
+    "ordinary_function_lowering"
+  WORKING_DIRECTORY "${IREE_ROOT_DIR}"
+  ARGS
+    "{{${CMAKE_CURRENT_SOURCE_DIR}/test/ordinary_function.cxx-test}}"
+  SRC
+    loom::tools::loom-check
+  LABELS
+    "loom-check"
+)
+endif()
+
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_IMPORT_CXX)
+iree_native_test(
+  NAME
     "vector_lookup_lowering"
   WORKING_DIRECTORY "${IREE_ROOT_DIR}"
   ARGS

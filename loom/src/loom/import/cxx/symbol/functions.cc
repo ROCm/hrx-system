@@ -1293,6 +1293,7 @@ void Functions::build_declarations(Types& types, Locations& locations,
         arguments, results, tied_results, predicates);
     const loom_attribute_t source_signature = build_c_source_signature(
         unit_, diagnostics_, module_, symbol, source, types);
+    const auto target = target_definitions_.reference(symbol);
 
     loom_func_decl_build_flags_t flags = 0;
     loom_string_id_t import_module = LOOM_STRING_ID_INVALID;
@@ -1316,13 +1317,16 @@ void Functions::build_declarations(Types& types, Locations& locations,
     if (!predicates.empty()) {
       flags |= LOOM_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES;
     }
+    if (loom_symbol_ref_is_valid(target)) {
+      flags |= LOOM_FUNC_DECL_BUILD_FLAG_HAS_TARGET;
+    }
     loom_op_t* op;
     check(loom_func_decl_build(
         builder, flags, /*visibility=*/0, /*retain=*/0, import_module,
         import_symbol, annotated(symbol, "device") ? LOOM_FUNC_CC_DEVICE : 0,
         /*effect_contract=*/0, /*temperature=*/0,
-        annotated(symbol, "force_inline") ? LOOM_INLINE_POLICY_INLINE : 0, {},
-        source_signature, /*abi=*/0, {}, LOOM_STRING_ID_INVALID, {},
+        annotated(symbol, "force_inline") ? LOOM_INLINE_POLICY_INLINE : 0,
+        target, source_signature, /*abi=*/0, {}, LOOM_STRING_ID_INVALID, {},
         callees_.at({symbol->canonical(), ImplicitObjectABI::None}),
         arguments.data(), arguments.size(), results.data(), results.size(),
         tied_results.data(), tied_results.size(), predicates.data(),
@@ -1383,6 +1387,8 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
             unit_, definition,
             "kernel configuration function requires a definition");
       }
+      target_definitions_.reject_launch_configuration_function(
+          configuration_symbol);
       launch_configuration =
           launches_.bind_configuration(configuration_symbol, types);
     }
@@ -1541,6 +1547,7 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
         predicates.size(), locations.get(definition), &op));
   } else {
     launches_.reject_ordinary_function(symbol);
+    const auto target = target_definitions_.reference(symbol);
     const bool link_once =
         exported_.contains(symbol) && symbol->canonical()->isInline();
     const loom_attribute_t source_signature = build_c_source_signature(
@@ -1555,13 +1562,16 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
                  ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY
                  : 0) |
             (link_once ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_LINKAGE : 0) |
+            (loom_symbol_ref_is_valid(target)
+                 ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_TARGET
+                 : 0) |
             (predicates.empty() ? 0 : LOOM_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES),
         exported_.contains(symbol) ? LOOM_FUNC_VISIBILITY_PUBLIC : 0,
         link_once ? LOOM_SYMBOL_LINKAGE_LINK_ONCE : 0, /*retain=*/0,
         annotated(symbol, "device") ? LOOM_FUNC_CC_DEVICE : 0,
         /*effect_contract=*/0, /*temperature=*/0,
-        annotated(symbol, "force_inline") ? LOOM_INLINE_POLICY_INLINE : 0, {},
-        source_signature, 0, {}, 0, {},
+        annotated(symbol, "force_inline") ? LOOM_INLINE_POLICY_INLINE : 0,
+        target, source_signature, 0, {}, 0, {},
         callees_.at({symbol->canonical(), instance.receiver_abi}),
         arguments.data(), arguments.size(), results.data(), results.size(),
         tied_results.data(), tied_results.size(), predicates.data(),

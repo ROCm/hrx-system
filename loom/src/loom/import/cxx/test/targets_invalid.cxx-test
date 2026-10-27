@@ -76,11 +76,35 @@ struct [[loom::target("target.generic")]] generic_target {
   const char* kind;
 };
 constexpr generic_target target{.kind = "reference"};
-// ERROR@+1: LOWERING/059 "namespace-scope kernels or template definitions"
-[[loom::target(target)]] void ordinary() {}
+struct owner {
+  // ERROR@+1: LOWERING/059 "ordinary functions, kernels, or template definitions"
+  [[loom::target(target)]] void member() {}
+};
 
 // ====
-// ERROR@+1: LOWERING/059 "namespace-scope kernels or template definitions"
+#include <loomcxx/check.h>
+struct [[loom::target("target.generic")]] generic_target {
+  const char* kind;
+};
+constexpr generic_target target{.kind = "reference"};
+// ERROR@+1: LOWERING/059 "ordinary functions, kernels, or template definitions"
+[[loom::target(target), loom::check_case]] void check() {}
+
+// ====
+#include <loomcxx/kernel.h>
+#include <loomcxx/target.h>
+struct [[loom::target("target.generic")]] generic_target {
+  const char* kind;
+};
+constexpr generic_target target{.kind = "reference"};
+// ERROR@+1: LOWERING/059 "kernel launch configuration functions cannot carry target bindings"
+[[loom::target(target)]] static loom::kernel::configuration configure() {
+  return {{1, 1, 1}, {1, 1, 1}};
+}
+[[loom::kernel(configure)]] void configured() {}
+
+// ====
+// ERROR@+1: LOWERING/059 "concrete namespace-scope functions"
 [[loom::target(0)]] constexpr unsigned value = 0;
 
 // ====

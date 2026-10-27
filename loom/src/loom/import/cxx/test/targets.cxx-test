@@ -25,21 +25,38 @@ constexpr generic_target reference{
 };
 }  // namespace library
 
-[[loom::kernel, loom::target(library::reference),
-  loom::workgroup_size(32, 1, 1)]] void dispatch() {}
+[[loom::target(library::reference)]] unsigned linked(unsigned value);
+
+[[loom::target(library::reference)]] unsigned increment(unsigned value);
+[[loom::target(library::reference)]] unsigned increment(unsigned value) {
+  return linked(value) + 1u;
+}
+
+[[loom::kernel, loom::target(library::reference), loom::workgroup_size(32, 1, 1)]] void dispatch() {
+  (void)increment(0u);
+}
 
 // ----
 target.generic<reference> @library.reference {codegen_format = low_native, default_pointer_bitwidth = 64, export_symbol = "dispatch", subgroup_size = 32}
+
+func.def public target(@library.reference) @increment(%value: i32) -> (i32) {
+  %2 = func.call @linked(%value) : (i32) -> (i32)
+  %3 = scalar.constant 1 : i32
+  %4 = scalar.addi %2, %3 : i32
+  func.return %4 : i32
+}
 
 kernel.def target(@library.reference) @dispatch() {
   %workgroup_count_x = config.get @dispatch.workgroup_count.x : index
   %workgroup_count_y = config.get @dispatch.workgroup_count.y : index
   %workgroup_count_z = config.get @dispatch.workgroup_count.z : index
-  %6 = index.constant 32 : index
-  %7 = index.constant 1 : index
-  %8 = index.constant 1 : index
-  kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%6, %7, %8) : index
+  %11 = index.constant 32 : index
+  %12 = index.constant 1 : index
+  %13 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%11, %12, %13) : index
 } launch() {
+  %14 = scalar.constant 0 : i32
+  %15 = func.call @increment(%14) : (i32) -> (i32)
   kernel.return
 }
 
@@ -48,3 +65,5 @@ config.decl @dispatch.workgroup_count.x : index
 config.decl @dispatch.workgroup_count.y : index
 
 config.decl @dispatch.workgroup_count.z : index
+
+func.decl target(@library.reference) @linked(%16: i32) -> (i32)

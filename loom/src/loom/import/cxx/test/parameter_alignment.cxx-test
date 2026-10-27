@@ -154,3 +154,19 @@ kernel.def @instantiated_64() {
   view.store %12, %21[0] : i32, view<1xi32>
   kernel.return
 }
+
+// ====
+// Borrowed buffer roots use scoped root contracts without manufacturing a
+// source pointer and byte offset.
+#include <loomcxx/buffer.h>
+loom::type::buffer<const int> aligned_buffer(loom::type::buffer<const int> source) {
+  const auto independent = loom::buffer::assume::noalias(source);
+  return loom::buffer::assume::alignment<64>(independent);
+}
+
+// ----
+func.def public @aligned_buffer(%source: buffer) -> (buffer) {
+  %independent = buffer.assume.noalias %source : buffer
+  %3 = buffer.assume.alignment %independent {minimum_alignment = 64} : buffer
+  func.return %3 : buffer
+}

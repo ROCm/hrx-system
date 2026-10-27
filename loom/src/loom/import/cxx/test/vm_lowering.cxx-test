@@ -14,3 +14,29 @@ low.func.def target<vm.core> @helper(%value: reg<vm.value : i32>) -> (reg<vm.val
   %13 = integer.add.i32 %value, %12
   return %13
 }
+
+// ====
+// A source-owned target on an ordinary function becomes its specialization
+// context. Reached targetless helpers inherit that context through the normal
+// callable graph.
+#include <loomcxx/target.h>
+struct [[loom::target("vm.target")]] vm_target {
+  const char* kind;
+};
+constexpr vm_target authored{.kind = "core"};
+static unsigned helper(unsigned value) { return value + 1u; }
+[[loom::target(authored)]] unsigned entry(unsigned value) {
+  return helper(value);
+}
+
+// ----
+low.func.def public target<vm.core>(@authored) abi(vm_function) @entry(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %9 = low.func.call pure @helper(%value) : (reg<vm.value : i32>) -> (reg<vm.value : i32>)
+  return %9
+}
+
+low.func.def target<vm.core> @helper(%value: reg<vm.value : i32>) -> (reg<vm.value : i32>) asm {
+  %12 = constant.i32 1
+  %13 = integer.add.i32 %value, %12
+  return %13
+}

@@ -222,8 +222,7 @@ bool TargetDefinitions::declaration(
         if (name == "target") {
           diagnostics_.reject(
               unit_, attribute,
-              "target bindings require concrete namespace-scope kernels or "
-              "template definitions");
+              "target bindings require concrete namespace-scope functions");
         }
       });
   auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(symbol);
@@ -249,13 +248,18 @@ void TargetDefinitions::admit_function(
   if (!selected) {
     return;
   }
+  const bool emits_non_callable_op = annotated(function, "op") ||
+                                     annotated(function, "assume") ||
+                                     annotated(function, "check_case") ||
+                                     annotated(function, "check_scenario") ||
+                                     annotated(function, "check_benchmark");
   if (function->isTemplatePattern() ||
       !cxx::symbol_cast<cxx::NamespaceSymbol>(function->parent()) ||
-      (!annotated(function, "kernel") &&
+      (emits_non_callable_op && !annotated(function, "kernel") &&
        !annotated(function, "template_def"))) {
     diagnostics_.reject(
         unit_, selected,
-        "target bindings require concrete namespace-scope kernels or template "
+        "target bindings require ordinary functions, kernels, or template "
         "definitions");
   }
   auto* clause = selected->attributeArgumentClause;
@@ -367,7 +371,7 @@ void TargetDefinitions::build(loom_builder_t* builder) {
   for (const auto& [function, binding] : functions_) {
     if (!variables_.contains(binding.variable)) {
       diagnostics_.reject(unit_, binding.owner,
-                          "kernel target must name a constexpr target object");
+                          "target binding must name a constexpr target object");
     }
   }
 }
@@ -454,6 +458,16 @@ loom_symbol_ref_t TargetDefinitions::reference(
   auto definition = variables_.find(binding->second.variable);
   IREE_ASSERT(definition != variables_.end());
   return definitions_[definition->second].reference;
+}
+
+void TargetDefinitions::reject_launch_configuration_function(
+    cxx::FunctionSymbol* function) const {
+  auto binding = functions_.find(function->canonical());
+  if (binding != functions_.end()) {
+    diagnostics_.reject(
+        unit_, binding->second.owner,
+        "kernel launch configuration functions cannot carry target bindings");
+  }
 }
 
 }  // namespace loom::cxx_import

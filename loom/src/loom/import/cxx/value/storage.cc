@@ -436,13 +436,18 @@ Pointer Storage::allocate_bytes(loom_value_id_t byte_length,
 }
 
 Pointer Storage::assume_noalias(Pointer pointer, cxx::AST* owner) {
+  return {assume_noalias(pointer.root, owner), pointer.byte_offset};
+}
+
+loom_value_id_t Storage::assume_noalias(loom_value_id_t source,
+                                        cxx::AST* owner) {
   auto type = loom_type_buffer();
   loom_op_t* op;
-  check(loom_buffer_assume_noalias_build(&builder_, &pointer.root, 1, &type, 1,
+  check(loom_buffer_assume_noalias_build(&builder_, &source, 1, &type, 1,
                                          locations_.get(owner), &op));
   auto root = loom_op_results(op)[0];
-  inherit_root_facts(pointer.root, root);
-  return {root, pointer.byte_offset};
+  inherit_root_facts(source, root);
+  return root;
 }
 
 Pointer Storage::assume_alignment(Pointer pointer, int64_t minimum_alignment,
@@ -452,14 +457,21 @@ Pointer Storage::assume_alignment(Pointer pointer, int64_t minimum_alignment,
         unit_, owner,
         "buffer alignment assumption requires a zero-origin pointer");
   }
+  return {assume_alignment(pointer.root, minimum_alignment, owner),
+          pointer.byte_offset};
+}
+
+loom_value_id_t Storage::assume_alignment(loom_value_id_t source,
+                                          int64_t minimum_alignment,
+                                          cxx::AST* owner) {
   auto type = loom_type_buffer();
   loom_op_t* op;
-  check(loom_buffer_assume_alignment_build(&builder_, &pointer.root, 1,
+  check(loom_buffer_assume_alignment_build(&builder_, &source, 1,
                                            minimum_alignment, &type, 1,
                                            locations_.get(owner), &op));
   auto root = loom_op_results(op)[0];
-  inherit_root_facts(pointer.root, root);
-  return {root, pointer.byte_offset};
+  inherit_root_facts(source, root);
+  return root;
 }
 
 loom_value_id_t Storage::assume_memory_space(

@@ -50,6 +50,7 @@ iree_c_embed_data(
         "//loom/src/loom/import/cxx:include/loomcxx/scalar.h",
         "//loom/src/loom/import/cxx:include/loomcxx/shape.h",
         "//loom/src/loom/import/cxx:include/loomcxx/target.h",
+        "//loom/src/loom/import/cxx:include/loomcxx/target/aie2p.h",
         "//loom/src/loom/import/cxx:include/loomcxx/target/amdgpu.h",
         "//loom/src/loom/import/cxx:include/loomcxx/vector.h",
         "//loom/src/loom/import/cxx:include/loomcxx/view.h",
