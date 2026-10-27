@@ -10,6 +10,7 @@
 
 #include "libamdf/src/endpoint.h"
 #include "libamdf/src/observation.h"
+#include "libamdf/src/telemetry.h"
 
 #if defined(AMDF_HAVE_GPU)
 #include "libamdf/src/gpu/extension.h"
@@ -52,6 +53,9 @@ amdf_status_t AMDF_CALL amdf_extension_query(amdf_extension_id_t extension_id,
   }
 
   switch (extension_id) {
+    case AMDF_EXTENSION_TELEMETRY:
+      return amdf_telemetry_extension_query(minimum_version, maximum_version,
+                                            out_extension_api);
     case AMDF_EXTENSION_OBSERVATION:
       return amdf_observation_extension_query(minimum_version, maximum_version,
                                               out_extension_api);

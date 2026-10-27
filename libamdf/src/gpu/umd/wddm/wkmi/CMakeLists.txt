@@ -54,6 +54,8 @@ amdf_windows_sidecar_library(
     "kernel_queue.h"
     "shared_buffer.cc"
     "shared_buffer.h"
+    "telemetry.cc"
+    "telemetry.h"
   LINKOPTS
     "gdi32.lib"
   DEPS

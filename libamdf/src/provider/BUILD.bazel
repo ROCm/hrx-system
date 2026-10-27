@@ -48,6 +48,7 @@ amdf_cc_library(
         "//libamdf/src:memory_scope_state",
         "//libamdf/src:observation",
         "//libamdf/src:structure",
+        "//libamdf/src:telemetry",
         "//libamdf/src:user_queue",
         "//libamdf/src/platform",
     ] + select({

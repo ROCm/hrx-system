@@ -158,6 +158,32 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "telemetry",
+    srcs = ["telemetry.c"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        "//libamdf/src/gpu/umd:telemetry",
+        "//libamdf/src/platform:native_observation",
+        "//libamdf/src/platform:observation",
+        "//libamdf/src/platform/linux:endpoint",
+        "//libamdf/src/platform/linux:file",
+    ],
+)
+
+amdf_cc_test(
+    name = "telemetry_test",
+    srcs = ["telemetry_test.cc"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":telemetry",
+        "//libamdf/src/gpu/umd:telemetry",
+        "//libamdf/src/platform/linux:endpoint",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
     name = "clock",
     srcs = ["clock.c"],
     target_compatible_with = KFD_COMPATIBILITY,
@@ -577,6 +603,7 @@ amdf_cc_library(
         ":instance",
         ":kernel_queue",
         ":memory",
+        ":telemetry",
         ":user_queue",
     ],
 )

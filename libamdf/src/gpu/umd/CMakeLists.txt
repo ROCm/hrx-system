@@ -54,6 +54,19 @@ endif()
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_library(
   NAME
+    telemetry
+  HDRS
+    "telemetry.h"
+  DEPS
+    ::device
+    amdf::headers
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_library(
+  NAME
     clock
   HDRS
     "clock.h"

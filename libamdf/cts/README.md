@@ -8,6 +8,14 @@ runtime-loaded shared-library executable. The API-negotiation corpus also
 covers static and link-time shared binding. Source membership, successful
 compilation and an observed native result establish different facts.
 
+The [GPU telemetry corpus](gpu/telemetry/telemetry_test.cc) reads supported
+physical sensors through the runtime-loaded public API on Linux and Windows.
+Cases share the cached device, group selections by source, preserve duplicate
+readings, and check enclosing host-clock brackets and transactional failures.
+They submit no GPU program and change no profiling or power policy. Descriptor
+and reading records establish native access and interpretation; they do not
+calibrate sensor accuracy or attribute device-wide power to a dispatch.
+
 ## Corpora and owners
 
 [GPU command conformance](gpu/README.md) describes PM4, SDMA, AQL, memory recipes,

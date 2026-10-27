@@ -14,7 +14,7 @@ package(
 
 [amdf_cts_test_suite(
     name = name,
-    srcs = [name + "_test.cc"],
+    srcs = [name + "_test.cc"] + (["telemetry_test.cc"] if name == "observation" else []),
     # API negotiation covers each binding; native behavior uses one provider.
     linkage_modes = [
         "static",

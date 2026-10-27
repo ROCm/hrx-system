@@ -15,6 +15,7 @@
 #include "libamdf/src/gpu/memory_reservation.h"
 #include "libamdf/src/gpu/umd/device.h"
 #include "libamdf/src/gpu/umd/instance.h"
+#include "libamdf/src/gpu/umd/telemetry.h"
 #include "libamdf/src/instance.h"
 #include "libamdf/src/platform/instance.h"
 #include "libamdf/src/structure.h"
@@ -41,7 +42,28 @@ static amdf_status_t amdf_gpu_device_destroy_native(
   return status;
 }
 
+static amdf_status_t amdf_gpu_device_enumerate_telemetry_metrics(
+    amdf_device_t* base_device, uint32_t capacity,
+    amdf_telemetry_metric_info_t* metrics, uint32_t* out_count) {
+  amdf_gpu_device_t* device = (amdf_gpu_device_t*)base_device;
+  return amdf_gpu_umd_enumerate_telemetry_metrics(
+      device->umd, amdf_endpoint_get_platform(base_device->endpoint), capacity,
+      metrics, out_count);
+}
+
+static amdf_status_t amdf_gpu_device_read_telemetry(
+    amdf_device_t* base_device, amdf_telemetry_source_id_t source_id,
+    uint32_t metric_count, const amdf_telemetry_metric_id_t* metric_ids,
+    amdf_telemetry_value_t* values, amdf_telemetry_sample_t* out_sample) {
+  amdf_gpu_device_t* device = (amdf_gpu_device_t*)base_device;
+  return amdf_gpu_umd_read_telemetry(
+      device->umd, amdf_endpoint_get_platform(base_device->endpoint), source_id,
+      metric_count, metric_ids, values, out_sample);
+}
+
 static const amdf_device_vtable_t amdf_gpu_device_vtable = {
+    .enumerate_telemetry_metrics = amdf_gpu_device_enumerate_telemetry_metrics,
+    .read_telemetry = amdf_gpu_device_read_telemetry,
     .query_memory_reservation_profile =
         amdf_gpu_device_query_memory_reservation_profile,
     .query_memory_profile = amdf_gpu_device_query_memory_profile,

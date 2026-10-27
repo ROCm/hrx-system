@@ -137,8 +137,8 @@ Focused design documents describe the contracts:
   and caller-owned lifetimes.
 - [Performance contracts](docs/performance.md): method-level preparation,
   allocation, locking, native-call and steady-state cost guarantees.
-- [Timing and observation](docs/observability.md): source selection, clock units,
-  bounded correlation, sustained collection, and caller-owned result storage.
+- [Timing, observation, and telemetry](docs/observability.md): source selection,
+  clock units, bounded correlation, caller-scheduled sensors, and result storage.
 - [GPU execution](docs/gpu.md): mapped publication, kernel-mediated submission,
   AQL fixed scratch, native signals and execution lifetimes.
 - [GPU command reference](../docs/reference/amd/gpu/README.md): PM4, SDMA and AQL commands,

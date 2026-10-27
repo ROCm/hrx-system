@@ -25,6 +25,14 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "telemetry",
+    srcs = ["telemetry.c"],
+    hdrs = ["telemetry.h"],
+    visibility = ["//libamdf/src/provider:__pkg__"],
+    deps = [":device"],
+)
+
+amdf_cc_library(
     name = "atomics",
     hdrs = ["atomics.h"],
     visibility = ["//libamdf/src:__subpackages__"],

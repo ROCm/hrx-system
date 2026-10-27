@@ -117,6 +117,7 @@ test_suite(
         "//libamdf/cts/gpu/recipes",
         "//libamdf/cts/gpu/sdma",
         "//libamdf/cts/gpu/sdma/encoding:commands_test",
+        "//libamdf/cts/gpu/telemetry",
         "//libamdf/cts/gpu/windows:memory",
     ],
     visibility = ["//visibility:public"],

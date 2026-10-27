@@ -196,6 +196,42 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_library(
   NAME
+    telemetry
+  SRCS
+    "telemetry.c"
+  DEPS
+    amdf::headers
+    libamdf::src::gpu::umd::telemetry
+    libamdf::src::platform::linux::endpoint
+    libamdf::src::platform::linux::file
+    libamdf::src::platform::native_observation
+    libamdf::src::platform::observation
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_test(
+  NAME
+    telemetry_test
+  SRCS
+    "telemetry_test.cc"
+  DEPS
+    ::telemetry
+    amdf::headers
+    iree::third_party::google_test
+    iree::third_party::google_test_main
+    libamdf::src::gpu::umd::telemetry
+    libamdf::src::platform::linux::endpoint
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_library(
+  NAME
     clock
   SRCS
     "clock.c"
@@ -728,6 +764,7 @@ iree_cc_library(
     ::instance
     ::kernel_queue
     ::memory
+    ::telemetry
     ::user_queue
     amdf::headers
   PUBLIC

@@ -28,6 +28,21 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    telemetry
+  HDRS
+    "telemetry.h"
+  SRCS
+    "telemetry.c"
+  DEPS
+    ::device
+    amdf::headers
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     atomics
   HDRS
     "atomics.h"

@@ -12,6 +12,43 @@ iree_add_all_subdirs()
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
 iree_cc_library(
   NAME
+    telemetry
+  SRCS
+    "telemetry.c"
+  DEPS
+    ::device_state
+    amdf::headers
+    libamdf::src::gpu::umd::telemetry
+    libamdf::src::gpu::umd::wddm::wkmi::bridge_api
+    libamdf::src::platform::native_observation
+    libamdf::src::platform::observation
+  PUBLIC
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_test(
+  NAME
+    telemetry_test
+  SRCS
+    "telemetry_test.cc"
+  DEPS
+    ::device_state
+    ::telemetry
+    amdf::headers
+    iree::third_party::google_test
+    iree::third_party::google_test_main
+    libamdf::src::gpu::umd::telemetry
+    libamdf::src::gpu::umd::wddm::wkmi::bridge_api
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.gpu"
+)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_cc_library(
+  NAME
     clock
   SRCS
     "clock.c"
@@ -212,6 +249,7 @@ iree_cc_library(
     ::kernel_queue
     ::memory
     ::memory_reservation
+    ::telemetry
     ::user_queue
     amdf::headers
   PUBLIC
