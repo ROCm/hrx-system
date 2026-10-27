@@ -840,6 +840,7 @@ hrx_cc_test(
     target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
         ":hip_dso_test_util",
+        "//build_tools/bazel:pthreads",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
