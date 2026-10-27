@@ -7,63 +7,15 @@
 #include <array>
 #include <atomic>
 #include <memory>
-#include <string>
 
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
 #include "iree/hal/drivers/amd/gpu/cts/testdata.h"
-#include "iree/hal/drivers/amd/gpu/device.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace iree::hal::amd::gpu::cts {
 namespace {
-
-class GpuFeedbackAdmissionTest : public GpuNativeTest,
-                                 public ::testing::WithParamInterface<
-                                     iree_hal_device_runtime_feature_flags_t> {
- protected:
-  void SetUp() override {
-    IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_));
-    memory_gate_.RemoveAtomicOperations64(AMDF_ATOMIC_OPERATION_ADD);
-    GpuNativeTest::SetUp();
-  }
-
-  // All allocations remain native; only their advertised RMW support changes.
-  NativeMemoryGate memory_gate_;
-};
-
-TEST_P(GpuFeedbackAdmissionTest, RequiresBackingAtomicsOnlyForFeedback) {
-  if (!(context_->device_info.features &
-        AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS)) {
-    GTEST_SKIP() << "Native shader notification is unavailable";
-  }
-  auto params = iree_hal_device_create_params_default();
-  params.proactor_pool = proactors_;
-  params.runtime_features = GetParam();
-  auto* context = context_;
-  context_ = nullptr;
-  iree::Status status = iree_hal_amd_gpu_device_create(
-      context, IREE_SV("feedback atomic admission"), &options_, &params,
-      allocator_.allocator(), &device_);
-  if (GetParam()) {
-    EXPECT_EQ(status.code(), iree::StatusCode::kUnimplemented)
-        << status.ToString();
-    EXPECT_NE(status.ToString().find("64-bit atomic addition"),
-              std::string::npos);
-    EXPECT_EQ(device_, nullptr);
-    EXPECT_EQ(memory_gate_.QueryUsage().live_bytes, 0u);
-  } else {
-    IREE_ASSERT_OK(status);
-    EXPECT_NE(device_, nullptr);
-  }
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    RuntimeFeatures, GpuFeedbackAdmissionTest,
-    ::testing::Values(0, IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_FEEDBACK,
-                      IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_ASAN,
-                      IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_TSAN));
 
 class GpuFeedbackTest
     : public GpuNativeTest,

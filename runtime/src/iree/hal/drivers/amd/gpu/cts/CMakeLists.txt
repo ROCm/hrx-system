@@ -170,7 +170,6 @@ iree_cc_test(
     ::testdata
     iree::base
     iree::hal
-    iree::hal::drivers::amd::gpu::device
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

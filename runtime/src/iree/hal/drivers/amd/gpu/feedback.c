@@ -172,7 +172,7 @@ iree_status_t iree_hal_amd_gpu_feedback_initialize(
         !iree_any_bit_set(access.atomic_operations_64,
                           AMDF_ATOMIC_OPERATION_ADD)) {
       status = iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
+          IREE_STATUS_FAILED_PRECONDITION,
           "GPU feedback requires control memory supporting 64-bit atomic "
           "addition; native backing supports operation mask 0x%016" PRIX64,
           access.atomic_operations_64);
@@ -183,7 +183,7 @@ iree_status_t iree_hal_amd_gpu_feedback_initialize(
     if (out_feedback->control_memory.host_cacheability !=
         IREE_HAL_HOST_CACHEABILITY_WRITE_BACK) {
       status =
-          iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                            "GPU feedback requires coherent write-back control");
     } else {
       status = IREE_HAL_AMD_STATUS_FROM_AMDF(
