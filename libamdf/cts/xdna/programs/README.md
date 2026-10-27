@@ -1,11 +1,36 @@
 # Loom XDNA arithmetic fixtures
 
-[mul_i32.loom](mul_i32.loom) multiplies two arrays of sixteen `i32` values,
-retaining the low 32 bits of each product. The ordinary build compiles this
-source with Loom for NPU4 and NPU5 and embeds both native images in the CTS.
-The images and generated C source stay in the build tree. Source and compiler
-changes therefore regenerate the fixtures, including changes to the native
-file format.
+[mul_i32.loom](mul_i32.loom) is a High `pipeline.def<kernel>` program whose
+strands own placement, channel storage, and asynchronous transport. Its
+signature-only `multiply_record` declaration leaves the record computation to
+a separately linked module. [mul_i32_worker.loom](mul_i32_worker.loom)
+supplies the ordinary authored-Loom implementation. When C++ import is enabled,
+[mul_i32_worker.cxx](mul_i32_worker.cxx) supplies an interchangeable helper:
+
+```c++
+namespace loomt = loom::type;
+using input_record = loomt::view<loomt::shape<16>, const int>;
+using output_record = loomt::view<loomt::shape<16>, int>;
+
+[[loom::symbol("multiply_record"), loom::force_inline]] void multiply_record(input_record lhs, input_record rhs, output_record output) {
+  for (unsigned i = 0; i < 16; ++i) {
+    const auto index = loom::index::cast(i);
+    loom::view::store(loom::view::load(lhs, index) * loom::view::load(rhs, index), output, index);
+  }
+}
+```
+
+Each helper compiles into an independent relocatable Loom module. The ordinary
+Loom dependency closure links one provider into the High pipeline before AIE2P
+realization. The target pipeline assigns the targetless helper to its compute
+strand and inlines it; neither provider authors a physical worker ABI. There is
+no C++-specific linker or source-combining path. Both helpers multiply two
+records of sixteen `i32` values and retain the low 32 bits of each product.
+Their native images and generated C sources stay in the build tree, so source
+and compiler changes regenerate the fixtures, including changes to the native
+file format. The CTS executes the C++-provided image through the same
+allocations, bindings, native submission, and complete CPU oracle as the
+authored-Loom image.
 
 [recurrence_i32.loom](recurrence_i32.loom) uses the same bindings and completion
 protocol. For each word it starts with `lhs[i]` and applies
@@ -23,13 +48,14 @@ compiler, SDK, transaction generator or linker is needed.
 
 ## Program and completion
 
-The pipeline has one worker lane, two input records and one output record.
-Each record contains sixteen words. The image declares three complete 64-byte
-bindings in `lhs`, `rhs`, `output` order. The caller supplies DMA addresses,
-external guards, directional cache transitions and native completion waits.
-NPU4 uses `amd.xdna.strix.17f0_10` for Strix/Krackan; NPU5 uses
-`amd.xdna.strix_halo.17f0_11`. The reader checks the selected image's execution
-profile against the native endpoint before allocating a placement.
+The pipeline has one compute strand, an ingress/egress strand, two input
+records, and one output record. Each record contains sixteen words. The image
+declares three complete 64-byte bindings in `lhs`, `rhs`, `output` order. The
+caller supplies DMA addresses, external guards, directional cache transitions,
+and native completion waits. NPU4 uses `amd.xdna.strix.17f0_10` for
+Strix/Krackan; NPU5 uses `amd.xdna.strix_halo.17f0_11`. The reader checks the
+selected image's execution profile against the native endpoint before
+allocating a placement.
 
 Each generation submits the establishing invocation. It loads the worker and
 configures the local rings before issuing finite shim transfers. Both complete
@@ -129,9 +155,19 @@ iree-bazel-build \
   //libamdf/cts/xdna/programs:mul_i32_npu5
 ```
 
+With C++ import enabled, the corresponding linked C++ worker images are built
+with:
+
+```sh
+iree-bazel-build \
+  //libamdf/cts/xdna/programs:mul_i32_cxx_npu4 \
+  //libamdf/cts/xdna/programs:mul_i32_cxx_npu5
+```
+
 Their outputs are `bazel-bin/libamdf/cts/xdna/programs/mul_i32_npu4.xdna` and
-`mul_i32_npu5.xdna`. CMake generates the same named images in its corresponding
-package build directory. Cross builds run the compilation and embedding tools
-on the build host; the generated data is then compiled into the destination
-platform's test executable. For CMake cross builds, `IREE_HOST_BIN_DIR` supplies
-the host `loom-link`, `loom-compile` and `iree-c-embed-data` executables.
+`mul_i32_npu5.xdna`; the C++ variants use the corresponding `mul_i32_cxx_*`
+names. CMake generates the same named images in its corresponding package build
+directory. Cross builds run the compilation and embedding tools on the build
+host; the generated data is then compiled into the destination platform's test
+executable. For CMake cross builds, `IREE_HOST_BIN_DIR` supplies the host
+`loom-link`, `loom-compile` and `iree-c-embed-data` executables.

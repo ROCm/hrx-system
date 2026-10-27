@@ -1,0 +1,18 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.def public inline @multiply_record(%lhs_layout: encoding<layout>, %lhs: view<16xi32, %lhs_layout>, %rhs_layout: encoding<layout>, %rhs: view<16xi32, %rhs_layout>, %output_layout: encoding<layout>, %output: view<16xi32, %output_layout>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %count = index.constant 16 : index
+  scf.for %i = [%c0 to %count step %c1] {
+    %lhs_value = view.load %lhs[%i] : view<16xi32, %lhs_layout> -> i32
+    %rhs_value = view.load %rhs[%i] : view<16xi32, %rhs_layout> -> i32
+    %product = scalar.muli %lhs_value, %rhs_value : i32
+    view.store %product, %output[%i] : i32, view<16xi32, %output_layout>
+  }
+  func.return
+}

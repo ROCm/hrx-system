@@ -6,7 +6,8 @@
 
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//libamdf/requirements:package_policy.bzl", "apply_amdf_target_policy")
-load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_target_profile")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_library", "loom_target_profile")
 
 package(
     default_visibility = [
@@ -28,6 +29,10 @@ exports_files([
 
 _PROGRAM_POLICY = apply_amdf_target_policy({})
 
+_CXX_COMPATIBILITY = loom_config_compatible_with([
+    "//loom/config/import:cxx",
+])
+
 loom_target_profile(
     name = "npu4",
     family = "amd.xdna.aie2p",
@@ -39,6 +44,22 @@ loom_target_profile(
     name = "npu5",
     family = "amd.xdna.aie2p",
     selector = "amd.xdna.strix_halo.17f0_11",
+    visibility = ["//visibility:private"],
+)
+
+loom_library(
+    name = "mul_i32_worker",
+    srcs = ["mul_i32_worker.loom"],
+    tags = _PROGRAM_POLICY["tags"],
+    target_compatible_with = _PROGRAM_POLICY["target_compatible_with"],
+    visibility = ["//visibility:private"],
+)
+
+loom_library(
+    name = "mul_i32_cxx_worker",
+    srcs = ["mul_i32_worker.cxx"],
+    tags = _PROGRAM_POLICY["tags"],
+    target_compatible_with = _PROGRAM_POLICY["target_compatible_with"] + _CXX_COMPATIBILITY,
     visibility = ["//visibility:private"],
 )
 
@@ -88,6 +109,7 @@ loom_kernel_binary(
     tags = _PROGRAM_POLICY["tags"],
     target = ":npu4",
     target_compatible_with = _PROGRAM_POLICY["target_compatible_with"],
+    deps = [":mul_i32_worker"],
 )
 
 loom_kernel_binary(
@@ -99,6 +121,7 @@ loom_kernel_binary(
     tags = _PROGRAM_POLICY["tags"],
     target = ":npu5",
     target_compatible_with = _PROGRAM_POLICY["target_compatible_with"],
+    deps = [":mul_i32_worker"],
 )
 
 iree_c_embed_data(
@@ -114,6 +137,45 @@ iree_c_embed_data(
     identifier = "amdf_cts_xdna_mul_i32",
     tags = _PROGRAM_POLICY["tags"],
     target_compatible_with = _PROGRAM_POLICY["target_compatible_with"],
+)
+
+loom_kernel_binary(
+    name = "mul_i32_cxx_npu4",
+    testonly = True,
+    srcs = ["mul_i32.loom"],
+    out = "mul_i32_cxx_npu4.xdna",
+    roots = ["@mul_i32"],
+    tags = _PROGRAM_POLICY["tags"],
+    target = ":npu4",
+    target_compatible_with = _PROGRAM_POLICY["target_compatible_with"] + _CXX_COMPATIBILITY,
+    deps = [":mul_i32_cxx_worker"],
+)
+
+loom_kernel_binary(
+    name = "mul_i32_cxx_npu5",
+    testonly = True,
+    srcs = ["mul_i32.loom"],
+    out = "mul_i32_cxx_npu5.xdna",
+    roots = ["@mul_i32"],
+    tags = _PROGRAM_POLICY["tags"],
+    target = ":npu5",
+    target_compatible_with = _PROGRAM_POLICY["target_compatible_with"] + _CXX_COMPATIBILITY,
+    deps = [":mul_i32_cxx_worker"],
+)
+
+iree_c_embed_data(
+    name = "mul_i32_cxx",
+    testonly = True,
+    srcs = [
+        ":mul_i32_cxx_npu4",
+        ":mul_i32_cxx_npu5",
+    ],
+    c_file_output = "mul_i32_cxx.c",
+    flatten = True,
+    h_file_output = "mul_i32_cxx.h",
+    identifier = "amdf_cts_xdna_mul_i32_cxx",
+    tags = _PROGRAM_POLICY["tags"],
+    target_compatible_with = _PROGRAM_POLICY["target_compatible_with"] + _CXX_COMPATIBILITY,
 )
 
 loom_kernel_binary(

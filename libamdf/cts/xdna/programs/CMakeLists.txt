@@ -28,6 +28,30 @@ loom_target_profile(
 )
 
 if(AMDF_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND AMDF_FAMILY_XDNA)
+loom_module(
+  NAME
+    mul_i32_worker
+  SRCS
+    "mul_i32_worker.loom"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+endif()
+
+if(AMDF_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND AMDF_FAMILY_XDNA AND LOOM_IMPORT_CXX)
+loom_module(
+  NAME
+    mul_i32_cxx_worker
+  SRCS
+    "mul_i32_worker.cxx"
+  MODE merge
+  OUTPUT_FORMAT bc
+  STRICT_DEPS
+)
+endif()
+
+if(AMDF_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND AMDF_FAMILY_XDNA)
 loom_kernel_binary(
   NAME
     "resident_file_channel_npu4"
@@ -94,6 +118,8 @@ loom_kernel_binary(
     "mul_i32_npu4.xdna"
   SRCS
     "mul_i32.loom"
+  LIBRARIES
+    ::mul_i32_worker
   ROOTS
     "@mul_i32"
   TESTONLY
@@ -112,6 +138,8 @@ loom_kernel_binary(
     "mul_i32_npu5.xdna"
   SRCS
     "mul_i32.loom"
+  LIBRARIES
+    ::mul_i32_worker
   ROOTS
     "@mul_i32"
   TESTONLY
@@ -131,6 +159,65 @@ iree_c_embed_data(
     "mul_i32.h"
   IDENTIFIER
     "amdf_cts_xdna_mul_i32"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND AMDF_FAMILY_XDNA AND LOOM_IMPORT_CXX)
+loom_kernel_binary(
+  NAME
+    "mul_i32_cxx_npu4"
+  COMPONENT
+    "//libamdf/cts/xdna/programs:mul_i32_cxx_npu4"
+  TARGET
+    "::npu4"
+  OUTPUT
+    "mul_i32_cxx_npu4.xdna"
+  SRCS
+    "mul_i32.loom"
+  LIBRARIES
+    ::mul_i32_cxx_worker
+  ROOTS
+    "@mul_i32"
+  TESTONLY
+)
+endif()
+
+if(AMDF_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND AMDF_FAMILY_XDNA AND LOOM_IMPORT_CXX)
+loom_kernel_binary(
+  NAME
+    "mul_i32_cxx_npu5"
+  COMPONENT
+    "//libamdf/cts/xdna/programs:mul_i32_cxx_npu5"
+  TARGET
+    "::npu5"
+  OUTPUT
+    "mul_i32_cxx_npu5.xdna"
+  SRCS
+    "mul_i32.loom"
+  LIBRARIES
+    ::mul_i32_cxx_worker
+  ROOTS
+    "@mul_i32"
+  TESTONLY
+)
+endif()
+
+if(AMDF_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_BUILD AND LOOM_EMIT_XDNA AND AMDF_FAMILY_XDNA AND LOOM_IMPORT_CXX)
+iree_c_embed_data(
+  NAME
+    mul_i32_cxx
+  SRCS
+    "${CMAKE_CURRENT_BINARY_DIR}/mul_i32_cxx_npu4.xdna"
+    "${CMAKE_CURRENT_BINARY_DIR}/mul_i32_cxx_npu5.xdna"
+  C_FILE_OUTPUT
+    "mul_i32_cxx.c"
+  H_FILE_OUTPUT
+    "mul_i32_cxx.h"
+  IDENTIFIER
+    "amdf_cts_xdna_mul_i32_cxx"
   TESTONLY
   FLATTEN
   PUBLIC

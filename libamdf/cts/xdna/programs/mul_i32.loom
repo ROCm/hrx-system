@@ -1,50 +1,56 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
 aie2p.target<array> @array_target
 
-aie2p.target<core> @core_target
+func.decl @multiply_record(%lhs_layout: encoding<layout>, %lhs: view<16xi32, %lhs_layout>, %rhs_layout: encoding<layout>, %rhs: view<16xi32, %rhs_layout>, %output_layout: encoding<layout>, %output: view<16xi32, %output_layout>)
 
-low.func.def public retain target<amd.xdna.aie2p.array>(@array_target) abi(array_program) abi_layout({binding_count = 3}) @mul_i32() asm {
-  %worker_count = constant.u32 1 : reg<aie2p.array.scalar : index>
-  %workers = group %worker_count
-  %worker_rank = constant.u32 0 : reg<aie2p.array.scalar : index>
-  %worker = worker %workers, %worker_rank, @multiply_record
-  %lhs = binding 0, "read"
-  %rhs = binding 1, "read"
-  %output = binding 2, "write"
-  %lhs_sender = sender %lhs, 0 : reg<aie2p.array.sender : tile<16xi32>>
-  %worker_receiver_0 = receiver %worker, 0 : reg<aie2p.array.receiver : tile<16xi32>>
-  %lhs_channel_capacity = constant.u32 2 : reg<aie2p.array.scalar : index>
-  %lhs_channel_records = constant.u32 1 : reg<aie2p.array.scalar : index>
-  %lhs_channel = channel %lhs_sender, %worker_receiver_0, %lhs_channel_capacity, %lhs_channel_records : reg<aie2p.array.channel : tile<16xi32>>
-  %rhs_sender = sender %rhs, 0 : reg<aie2p.array.sender : tile<16xi32>>
-  %worker_receiver_1 = receiver %worker, 1 : reg<aie2p.array.receiver : tile<16xi32>>
-  %rhs_channel_capacity = constant.u32 2 : reg<aie2p.array.scalar : index>
-  %rhs_channel_records = constant.u32 1 : reg<aie2p.array.scalar : index>
-  %rhs_channel = channel %rhs_sender, %worker_receiver_1, %rhs_channel_capacity, %rhs_channel_records : reg<aie2p.array.channel : tile<16xi32>>
-  %worker_sender_2 = sender %worker, 2 : reg<aie2p.array.sender : tile<16xi32>>
-  %output_receiver = receiver %output, 0 : reg<aie2p.array.receiver : tile<16xi32>>
-  %worker_2_channel_capacity = constant.u32 2 : reg<aie2p.array.scalar : index>
-  %worker_2_channel_records = constant.u32 1 : reg<aie2p.array.scalar : index>
-  %worker_2_channel = channel %worker_sender_2, %output_receiver, %worker_2_channel_capacity, %worker_2_channel_records : reg<aie2p.array.channel : tile<16xi32>>
-  %worker_column = constant.u32 0 : reg<aie2p.array.scalar : index>
-  %worker_row = constant.u32 2 : reg<aie2p.array.scalar : index>
-  constrain.location %worker, %worker_column, %worker_row
-  return
-}
-
-func.def target(@core_target) @multiply_record(%lhs: buffer, %rhs: buffer, %output: buffer) {
+pipeline.def<kernel> public retain target(@array_target) @mul_i32() run(%lhs: buffer, %rhs: buffer, %output: buffer) {
   %lhs_aligned, %rhs_aligned, %output_aligned = buffer.assume.alignment %lhs, %rhs, %output {minimum_alignment = 64} : buffer, buffer, buffer
-  %base = index.constant 0 : offset
-  %lhs_view = buffer.view %lhs_aligned[%base] : buffer -> view<16xi32>
-  %rhs_view = buffer.view %rhs_aligned[%base] : buffer -> view<16xi32>
-  %output_view = buffer.view %output_aligned[%base] : buffer -> view<16xi32>
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
-  %count = index.constant 16 : index
-  scf.for %i = [%zero to %count step %one] {
-    %lhs_value = view.load %lhs_view[%i] : view<16xi32> -> i32
-    %rhs_value = view.load %rhs_view[%i] : view<16xi32> -> i32
-    %product = scalar.muli %lhs_value, %rhs_value : i32
-    view.store %product, %output_view[%i] : i32, view<16xi32>
+  %memory = pipeline.memory<workgroup>[0, 3] : pool
+  %origin = index.constant 0 : offset
+  %storage_bytes = index.constant 64 : offset
+  %capacity = index.constant 1 : index
+  %record_layout = encoding.layout.dense : encoding<layout>
+  %lhs_storage = buffer.alloca<workgroup> pool(%memory) align(64) %storage_bytes : buffer
+  %lhs_slots = buffer.view %lhs_storage[%origin] : buffer -> view<1x16xi32>
+  %lhs_records = channel.bind<fifo> %lhs_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32, %record_layout>>
+  %rhs_storage = buffer.alloca<workgroup> pool(%memory) align(64) %storage_bytes : buffer
+  %rhs_slots = buffer.view %rhs_storage[%origin] : buffer -> view<1x16xi32>
+  %rhs_records = channel.bind<fifo> %rhs_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32, %record_layout>>
+  %output_storage = buffer.alloca<workgroup> pool(%memory) align(64) %storage_bytes : buffer
+  %output_slots = buffer.view %output_storage[%origin] : buffer -> view<1x16xi32>
+  %output_records = channel.bind<fifo> %output_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32, %record_layout>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %lhs_external = buffer.view %lhs_aligned[%origin] : buffer -> view<16xi32>
+    %lhs_write, %lhs_destination = channel.reserve %lhs_records : channel<tile<16xi32, %record_layout>> -> (write<tile<16xi32, %record_layout>>, view<16xi32, %record_layout>)
+    %lhs_ingress = kernel.async.copy %lhs_external to %lhs_destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32, %record_layout> -> kernel.async.token
+    %lhs_incoming = kernel.async.group %lhs_ingress : kernel.async.token -> kernel.async.group
+    kernel.async.wait %lhs_incoming {newer_groups = 0} : kernel.async.group
+    channel.publish %lhs_write : write<tile<16xi32, %record_layout>>
+    %rhs_external = buffer.view %rhs_aligned[%origin] : buffer -> view<16xi32>
+    %rhs_write, %rhs_destination = channel.reserve %rhs_records : channel<tile<16xi32, %record_layout>> -> (write<tile<16xi32, %record_layout>>, view<16xi32, %record_layout>)
+    %rhs_ingress = kernel.async.copy %rhs_external to %rhs_destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32, %record_layout> -> kernel.async.token
+    %rhs_incoming = kernel.async.group %rhs_ingress : kernel.async.token -> kernel.async.group
+    kernel.async.wait %rhs_incoming {newer_groups = 0} : kernel.async.group
+    channel.publish %rhs_write : write<tile<16xi32, %record_layout>>
+    %output_read, %output_source = channel.acquire %output_records : channel<tile<16xi32, %record_layout>> -> (read<tile<16xi32, %record_layout>>, view<16xi32, %record_layout>)
+    %output_external = buffer.view %output_aligned[%origin] : buffer -> view<16xi32>
+    %egress = kernel.async.copy %output_source to %output_external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32, %record_layout> to view<16xi32> -> kernel.async.token
+    %outgoing = kernel.async.group %egress : kernel.async.token -> kernel.async.group
+    kernel.async.wait %outgoing {newer_groups = 0} : kernel.async.group
+    channel.release %output_read : read<tile<16xi32, %record_layout>>
   }
-  func.return
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %lhs_read, %lhs_source = channel.acquire %lhs_records : channel<tile<16xi32, %record_layout>> -> (read<tile<16xi32, %record_layout>>, view<16xi32, %record_layout>)
+    %rhs_read, %rhs_source = channel.acquire %rhs_records : channel<tile<16xi32, %record_layout>> -> (read<tile<16xi32, %record_layout>>, view<16xi32, %record_layout>)
+    %output_write, %output_destination = channel.reserve %output_records : channel<tile<16xi32, %record_layout>> -> (write<tile<16xi32, %record_layout>>, view<16xi32, %record_layout>)
+    func.call @multiply_record(%record_layout, %lhs_source, %record_layout, %rhs_source, %record_layout, %output_destination) : (encoding<layout>, view<16xi32, %record_layout>, encoding<layout>, view<16xi32, %record_layout>, encoding<layout>, view<16xi32, %record_layout>)
+    channel.publish %output_write : write<tile<16xi32, %record_layout>>
+    channel.release %rhs_read : read<tile<16xi32, %record_layout>>
+    channel.release %lhs_read : read<tile<16xi32, %record_layout>>
+  }
 }
