@@ -107,6 +107,18 @@ enum amdf_telemetry_domain_kind_e {
 /// Aggregate across a domain's instances instead of one native instance.
 #define AMDF_TELEMETRY_ALL_INSTANCES UINT32_MAX
 
+/// Lifetime of a native domain-instance identity within one query source.
+/// Neither scope establishes identity across sources or separate devices.
+typedef uint32_t amdf_telemetry_instance_scope_t;
+enum amdf_telemetry_instance_scope_e {
+  /// The ordinal names the same native instance across reads on this device.
+  AMDF_TELEMETRY_INSTANCE_SCOPE_DEVICE = 0,
+  /// The ordinal pairs measurements only within one device_read result.
+  /// Native compaction can assign it to a different instance on the next read.
+  /// Matching source timestamps do not establish identity across calls.
+  AMDF_TELEMETRY_INSTANCE_SCOPE_SNAPSHOT = 1,
+};
+
 /// Cost and consistency facts for one source read.
 typedef uint32_t amdf_telemetry_source_flags_t;
 enum amdf_telemetry_source_flag_bits_e {
@@ -139,6 +151,8 @@ typedef struct amdf_telemetry_metric_info_t {
   /// Native instance ordinal, or ALL_INSTANCES for an established aggregate.
   /// Scalar domains use zero. CPU indices are not OS logical-CPU numbers.
   uint32_t domain_instance;
+  /// Identity lifetime of domain_instance within this source and domain.
+  amdf_telemetry_instance_scope_t instance_scope;
   /// Portable meaning, distinct from the device-local read ID.
   amdf_telemetry_metric_kind_t kind;
   /// Native representation, physical units, scaling, and aggregation.
@@ -260,7 +274,9 @@ typedef struct amdf_telemetry_api_t {
   /// physical measurements. Enumeration may query/wake native firmware and
   /// block; it is not endpoint discovery or an inert capability accessor.
   ///
-  /// IDs retain their meanings across calls on the same live device. New
+  /// IDs retain their meanings across calls on the same live device. A
+  /// SNAPSHOT-scoped metric names a native slot, not a persistent instance.
+  /// Fields sharing its domain and ordinal pair only within one read. New
   /// meanings/schema require new IDs; stale IDs fail instead of selecting a
   /// different route. No catalog cache, history, or registry is retained.
   amdf_status_t(AMDF_CALL* device_enumerate_metrics)(

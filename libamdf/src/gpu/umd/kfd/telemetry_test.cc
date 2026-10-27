@@ -104,6 +104,7 @@ TEST_F(TelemetryTest, PreservesUnitsScopeSignedValuesAndSeparateSources) {
                                                    32942000};
   for (size_t i = 0; i < metrics.size(); ++i) {
     SCOPED_TRACE(metrics[i].name);
+    EXPECT_EQ(metrics[i].instance_scope, AMDF_TELEMETRY_INSTANCE_SCOPE_DEVICE);
     EXPECT_EQ(
         metrics[i].source_flags & AMDF_TELEMETRY_SOURCE_FLAG_NATIVE_SNAPSHOT,
         0u);

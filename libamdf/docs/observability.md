@@ -96,6 +96,15 @@ native fields without making the application carry an architecture-specific
 name or register table. IDs are opaque within the live device and source;
 saved captures copy the descriptor strings and device identity.
 
+Instance scope makes native compaction explicit. `DEVICE` ordinals retain
+their identity across reads of the same source on a live device. `SNAPSHOT`
+ordinals identify an instance only within one `device_read` result: core slot
+zero can represent a different active core on the next read. Reading that
+slot's clock, power, and temperature together preserves their pairing. Reading
+them in separate calls cannot establish that they describe the same core,
+even when the source timestamps match. These ordinals are native identities,
+not OS logical-CPU numbers or identities shared by separate sources.
+
 A caller can select a measured GPU clock with no platform code:
 
 ```c

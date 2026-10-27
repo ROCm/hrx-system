@@ -72,6 +72,7 @@ TEST_F(TelemetryTest, DescribesPhysicalMeasurementsWithoutSensorControls) {
   EXPECT_EQ(native.read_count, 1u);
   for (const auto& metric : metrics) {
     EXPECT_EQ(metric.source_id, metrics[0].source_id);
+    EXPECT_EQ(metric.instance_scope, AMDF_TELEMETRY_INSTANCE_SCOPE_DEVICE);
     EXPECT_NE(metric.source_flags & AMDF_TELEMETRY_SOURCE_FLAG_NATIVE_SNAPSHOT,
               0u);
     EXPECT_EQ(metric.format.semantic,

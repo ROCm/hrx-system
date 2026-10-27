@@ -401,6 +401,7 @@ static amdf_telemetry_metric_info_t amdf_gpu_kfd_hwmon_describe(
                       AMDF_TELEMETRY_SOURCE_FLAG_MAY_WAKE_DEVICE,
       .domain = field->domain,
       .metric_id = id,
+      .instance_scope = AMDF_TELEMETRY_INSTANCE_SCOPE_DEVICE,
       .kind = field->kind,
       .format = {.kind = field->value_kind,
                  .unit = field->unit,

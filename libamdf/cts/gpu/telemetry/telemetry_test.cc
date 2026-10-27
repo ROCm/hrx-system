@@ -65,6 +65,9 @@ TEST_F(GpuTelemetryTest, SamplesPhysicalQuantitiesThroughOnePortableCaller) {
     ASSERT_NE(metric.origin.schema, nullptr);
     ASSERT_NE(metric.origin.field, nullptr);
     EXPECT_EQ(metric.origin.reserved, 0u);
+    EXPECT_TRUE(metric.instance_scope == AMDF_TELEMETRY_INSTANCE_SCOPE_DEVICE ||
+                metric.instance_scope ==
+                    AMDF_TELEMETRY_INSTANCE_SCOPE_SNAPSHOT);
     EXPECT_GT(metric.format.scale_numerator, 0u);
     EXPECT_GT(metric.format.scale_denominator, 0u);
     EXPECT_NE(metric.format.unit, AMDF_OBSERVATION_UNIT_NATIVE);
@@ -121,10 +124,12 @@ TEST_F(GpuTelemetryTest, SamplesPhysicalQuantitiesThroughOnePortableCaller) {
       const double physical = native_value * metric.format.scale_numerator /
                               metric.format.scale_denominator;
       EXPECT_TRUE(std::isfinite(physical));
-      std::printf("telemetry %s/%s %s: %.9g unit=%u domain=%u instance=%u\n",
-                  metric.origin.interface_name, metric.origin.schema,
-                  metric.name, physical, metric.format.unit, metric.domain,
-                  metric.domain_instance);
+      std::printf(
+          "telemetry %s/%s %s: %.9g unit=%u domain=%u instance=%u "
+          "instance_scope=%u\n",
+          metric.origin.interface_name, metric.origin.schema, metric.name,
+          physical, metric.format.unit, metric.domain, metric.domain_instance,
+          metric.instance_scope);
       RecordProperty("telemetry_" + std::to_string(indices[i]) + "_value",
                      std::to_string(physical));
     }

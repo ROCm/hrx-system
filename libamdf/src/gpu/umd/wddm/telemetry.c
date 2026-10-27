@@ -71,6 +71,7 @@ static amdf_telemetry_metric_info_t amdf_gpu_wddm_sensor_describe(
                       AMDF_TELEMETRY_SOURCE_FLAG_NATIVE_SNAPSHOT,
       .domain = sensor->domain,
       .metric_id = sensor->id,
+      .instance_scope = AMDF_TELEMETRY_INSTANCE_SCOPE_DEVICE,
       .kind = sensor->kind,
       .format = {.kind = AMDF_OBSERVATION_VALUE_KIND_I64,
                  .unit = sensor->unit,
