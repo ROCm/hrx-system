@@ -158,10 +158,29 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "metrics",
+    srcs = ["metrics.c"],
+    hdrs = ["metrics.h"],
+    target_compatible_with = KFD_COMPATIBILITY,
+)
+
+amdf_cc_test(
+    name = "metrics_test",
+    srcs = ["metrics_test.cc"],
+    target_compatible_with = KFD_COMPATIBILITY,
+    deps = [
+        ":metrics",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
     name = "telemetry",
     srcs = ["telemetry.c"],
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [
+        ":metrics",
         "//libamdf/src/gpu/umd:telemetry",
         "//libamdf/src/platform:native_observation",
         "//libamdf/src/platform:observation",

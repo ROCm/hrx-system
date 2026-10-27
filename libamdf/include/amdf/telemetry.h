@@ -50,7 +50,8 @@ enum amdf_telemetry_metric_kind_e {
   AMDF_TELEMETRY_METRIC_TEMPERATURE_MEMORY = 8,
   /// Temperature without an established edge/hotspot/memory interpretation.
   AMDF_TELEMETRY_METRIC_TEMPERATURE = 9,
-  /// Measured power of the specified domain, never a configured power cap.
+  /// Observed native power of the specified domain, never a configured cap.
+  /// Firmware can estimate consumption from activity instead of a power meter.
   AMDF_TELEMETRY_METRIC_POWER = 10,
   /// Measured energy of the specified domain; format gives time aggregation.
   AMDF_TELEMETRY_METRIC_ENERGY = 11,
@@ -62,6 +63,9 @@ enum amdf_telemetry_metric_kind_e {
   AMDF_TELEMETRY_METRIC_TRAFFIC_READ = 14,
   /// Measured traffic leaving the specified domain.
   AMDF_TELEMETRY_METRIC_TRAFFIC_WRITE = 15,
+  /// Residency in a native active power state, such as CPU C0. This does not
+  /// establish useful instruction throughput or execution-unit utilization.
+  AMDF_TELEMETRY_METRIC_ACTIVITY_ACTIVE = 16,
 };
 
 /// Diagnostic provenance, separate from the portable metric meaning.

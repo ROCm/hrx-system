@@ -79,12 +79,39 @@ class TelemetryTest : public ::testing::Test {
   }
 
   std::vector<amdf_telemetry_metric_info_t> Enumerate() {
-    std::array<amdf_telemetry_metric_info_t, 16> metrics = {};
     uint32_t count = 0;
+    EXPECT_EQ(amdf_gpu_umd_enumerate_telemetry_metrics(nullptr, &endpoint_, 0,
+                                                       nullptr, &count),
+              AMDF_STATUS_OK);
+    std::vector<amdf_telemetry_metric_info_t> metrics(count);
     EXPECT_EQ(amdf_gpu_umd_enumerate_telemetry_metrics(
                   nullptr, &endpoint_, metrics.size(), metrics.data(), &count),
               AMDF_STATUS_OK);
-    return {metrics.begin(), metrics.begin() + count};
+    return metrics;
+  }
+
+  void WriteSnapshot(const std::vector<uint8_t>& bytes) {
+    std::ofstream file(root_ / "dev/char/226:128/device/gpu_metrics",
+                       std::ios::binary);
+    file.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    ASSERT_TRUE(file.good());
+  }
+
+  std::vector<uint8_t> ApuSnapshot() {
+    std::vector<uint8_t> bytes(264, 0xff);
+    // Native v3.0: 264 bytes, GPU temperature 51 C, APU package power 23 W,
+    // driver CLOCK_BOOTTIME timestamp 123 ns. The other fields are unavailable.
+    bytes[0] = 8;
+    bytes[1] = 1;
+    bytes[2] = 3;
+    bytes[3] = 0;
+    const uint16_t temperature = 5100;
+    const uint32_t power = 23000;
+    const uint64_t timestamp = 123;
+    std::memcpy(bytes.data() + 4, &temperature, sizeof(temperature));
+    std::memcpy(bytes.data() + 120, &power, sizeof(power));
+    std::memcpy(bytes.data() + 104, &timestamp, sizeof(timestamp));
+    return bytes;
   }
 
   // Private sysfs fixture containing actual attribute files.
@@ -375,6 +402,118 @@ TEST_F(TelemetryTest, ChangedMeaningRejectsOldSourceIdentity) {
             amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH));
   EXPECT_EQ(value.value.u64, 123u);
   EXPECT_EQ(sample.host_before, 456u);
+}
+
+TEST_F(TelemetryTest, CombinedSnapshotUsesTheSameSelectedSourceContract) {
+  SetSmuVersion(14, 0, 0);
+  WriteSnapshot(ApuSnapshot());
+  const auto catalog = Enumerate();
+  std::vector<amdf_telemetry_metric_id_t> selected;
+  amdf_telemetry_source_id_t source = 0;
+  for (const auto& metric : catalog) {
+    if (std::strcmp(metric.source_name, "gpu_metrics") != 0) {
+      continue;
+    }
+    if (std::strcmp(metric.origin.field, "temperature_gfx") == 0 ||
+        std::strcmp(metric.origin.field, "average_apu_power") == 0) {
+      if (source != 0) {
+        EXPECT_EQ(source, metric.source_id);
+      }
+      source = metric.source_id;
+      selected.push_back(metric.metric_id);
+      EXPECT_NE(
+          metric.source_flags & AMDF_TELEMETRY_SOURCE_FLAG_NATIVE_SNAPSHOT, 0u);
+    }
+  }
+  ASSERT_EQ(selected.size(), 2u);
+  selected.push_back(selected.front());
+  amdf_telemetry_value_t values[3] = {};
+  amdf_telemetry_sample_t sample = {};
+  ASSERT_EQ(amdf_gpu_umd_read_telemetry(nullptr, &endpoint_, source, 3,
+                                        selected.data(), values, &sample),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(values[0].value.u64, 5100u);
+  EXPECT_EQ(values[1].value.u64, 23000u);
+  EXPECT_EQ(values[2].value.u64, values[0].value.u64);
+  EXPECT_EQ(sample.driver_time.domain, AMDF_TELEMETRY_CLOCK_SYSTEM);
+  EXPECT_EQ(sample.driver_time.value, 123u);
+  EXPECT_LE(sample.host_before, sample.host_after);
+  amdf_telemetry_metric_info_t prefix;
+  uint32_t count = 0;
+  EXPECT_EQ(amdf_gpu_umd_enumerate_telemetry_metrics(nullptr, &endpoint_, 1,
+                                                     &prefix, &count),
+            amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL));
+  EXPECT_EQ(count, catalog.size());
+  EXPECT_EQ(prefix.source_id, catalog.front().source_id);
+  EXPECT_EQ(prefix.metric_id, catalog.front().metric_id);
+}
+
+TEST_F(TelemetryTest, SnapshotWorksWithoutAScalarSensorRoute) {
+  SetSmuVersion(15, 0, 0);
+  std::filesystem::remove_all(sensor_.parent_path());
+  WriteSnapshot(ApuSnapshot());
+  const auto catalog = Enumerate();
+  ASSERT_FALSE(catalog.empty());
+  for (const auto& metric : catalog) {
+    EXPECT_STREQ(metric.source_name, "gpu_metrics");
+  }
+}
+
+TEST_F(TelemetryTest, MalformedSnapshotPublishesNeitherScalarPrefixNorValues) {
+  SetSmuVersion(14, 0, 0);
+  WriteSnapshot(ApuSnapshot());
+  const auto catalog = Enumerate();
+  ASSERT_FALSE(catalog.empty());
+  const auto metric = catalog.back();
+  ASSERT_STREQ(metric.source_name, "gpu_metrics");
+  auto bytes = ApuSnapshot();
+  bytes.pop_back();
+  WriteSnapshot(bytes);
+  std::array<amdf_telemetry_metric_info_t, 4> output;
+  std::memset(output.data(), 0xa5, sizeof(output));
+  const auto original = output;
+  uint32_t count = 123;
+  EXPECT_EQ(amdf_gpu_umd_enumerate_telemetry_metrics(
+                nullptr, &endpoint_, output.size(), output.data(), &count),
+            amdf_linux_error(EPROTO));
+  EXPECT_EQ(count, 123u);
+  EXPECT_EQ(std::memcmp(output.data(), original.data(), sizeof(output)), 0);
+  amdf_telemetry_value_t value = {.value = {.u64 = 456}};
+  amdf_telemetry_sample_t sample = {.host_before = 789};
+  EXPECT_EQ(amdf_gpu_umd_read_telemetry(nullptr, &endpoint_, metric.source_id,
+                                        1, &metric.metric_id, &value, &sample),
+            amdf_linux_error(EPROTO));
+  EXPECT_EQ(value.value.u64, 456u);
+  EXPECT_EQ(sample.host_before, 789u);
+}
+
+TEST_F(TelemetryTest, InvalidSnapshotSelectionPrecedesNativeRead) {
+  SetSmuVersion(14, 0, 0);
+  WriteSnapshot(ApuSnapshot());
+  const auto catalog = Enumerate();
+  ASSERT_FALSE(catalog.empty());
+  const auto metric = catalog.back();
+  ASSERT_STREQ(metric.source_name, "gpu_metrics");
+  WriteSnapshot(
+      {});  // A valid selection now encounters an absent native table.
+  const amdf_telemetry_metric_id_t ids[] = {metric.metric_id, UINT64_MAX};
+  amdf_telemetry_value_t values[2] = {};
+  amdf_telemetry_sample_t sample = {};
+  EXPECT_EQ(amdf_gpu_umd_read_telemetry(nullptr, &endpoint_, metric.source_id,
+                                        2, ids, values, &sample),
+            amdf_make_api_status(AMDF_STATUS_CODE_NOT_FOUND));
+  auto bytes = ApuSnapshot();
+  bytes[3] = 1;
+  WriteSnapshot(bytes);
+  EXPECT_EQ(amdf_gpu_umd_read_telemetry(nullptr, &endpoint_, metric.source_id,
+                                        1, ids, values, &sample),
+            amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH));
+  // Changing the producer with the same wire layout changes interpretation.
+  WriteSnapshot(ApuSnapshot());
+  SetSmuVersion(15, 0, 0);
+  EXPECT_EQ(amdf_gpu_umd_read_telemetry(nullptr, &endpoint_, metric.source_id,
+                                        1, ids, values, &sample),
+            amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH));
 }
 
 }  // namespace

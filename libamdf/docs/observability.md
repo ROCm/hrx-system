@@ -142,7 +142,14 @@ status: `NOT_FOUND` means the native field is unavailable, while a successful
 zero remains a real reading. Duplicate selections share the same observation.
 
 Fields from one native table share a source ID and can be read together through
-one query. Linux hwmon attributes are separate sources because their reads are
+one query. Linux `gpu_metrics` supplies a bounded combined snapshot. Its
+producer-specific catalog can include CPU-core power and C0 residency, NPU
+column activity and traffic, GPU measurements, and shared package power.
+CPU C0 residency uses `ACTIVITY_ACTIVE`; it measures time in an active power
+state, independently of useful compute throughput. Native power estimates
+remain power observations with their actual domain and aggregation.
+
+Linux hwmon attributes are separate sources because their reads are
 sequential native operations. Windows PMLog supplies a native table through the
 existing WKMI dependency, without starting its shared-memory sampler. That
 query has no physical-adapter selector; linked adapters therefore contribute
@@ -158,6 +165,22 @@ hotspot sensors. The descriptors preserve those distinctions. Clock routes
 that synthesize zero on older firmware require the native firmware capability
 before enumeration. An unavailable producer identity leaves those sources
 absent; malformed identity metadata remains an error.
+
+The combined reader validates the complete fixed or tagged native record
+before publishing descriptors or values. Unknown representations contribute
+no source; a malformed supported representation fails the query. Native
+all-ones unavailable markers become per-value `NOT_FOUND`. Version 3.0 also
+uses zero for unmeasured core and skin temperatures, following AMD SMI's
+field-specific convention; this does not suppress zero power or activity.
+No caller-side field-name or sentinel handling is needed.
+
+The same native table revision can span different driver implementations.
+SMU15 APU version 3.0 includes both older target clocks and newer effective
+clock averages, without a discriminator in the exported record. Those clocks
+are absent from the measured catalog. Its shared power, temperature, activity,
+and traffic meanings remain available with unspecified aggregation and
+snapshot-scoped CPU slots. Enumerating these fields never guesses the producer
+from its readings or the operating system's release string.
 
 Physical values are `native_value * scale_numerator / scale_denominator` in
 the descriptor's unit. Integer storage preserves native precision until the

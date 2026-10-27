@@ -14,6 +14,7 @@
 #include <string.h>
 #include <sys/syscall.h>
 
+#include "libamdf/src/gpu/umd/kfd/metrics.h"
 #include "libamdf/src/platform/linux/endpoint.h"
 #include "libamdf/src/platform/linux/file.h"
 #include "libamdf/src/platform/observation.h"
@@ -222,8 +223,8 @@ static amdf_status_t amdf_gpu_kfd_hwmon_read_integer(
   return AMDF_STATUS_OK;
 }
 
-static amdf_status_t amdf_gpu_kfd_hwmon_query_profile(
-    int device_directory, amdf_gpu_kfd_hwmon_profile_t* out_profile) {
+static amdf_status_t amdf_gpu_kfd_telemetry_query_mp1(int device_directory,
+                                                      uint32_t* out_version) {
   // MP1_HWID is 1. Numeric paths also work before named IP symlinks existed.
   // This explicit telemetry query neither extends discovery nor retains state.
   int directory = openat(device_directory, "ip_discovery/die/0/1/0",
@@ -232,7 +233,7 @@ static amdf_status_t amdf_gpu_kfd_hwmon_query_profile(
     if (errno != ENOENT) {
       return amdf_linux_error(errno);
     }
-    *out_profile = AMDF_GPU_KFD_HWMON_PROFILE_NONE;
+    *out_version = 0;
     return AMDF_STATUS_OK;
   }
   const char* names[] = {"major", "minor", "revision"};
@@ -254,6 +255,17 @@ static amdf_status_t amdf_gpu_kfd_hwmon_query_profile(
   if (amdf_status_is_ok(status)) {
     status = close_status;
   }
+  if (amdf_status_is_ok(status)) {
+    *out_version = version;
+  }
+  return status;
+}
+
+static amdf_status_t amdf_gpu_kfd_hwmon_query_profile(
+    int device_directory, amdf_gpu_kfd_hwmon_profile_t* out_profile) {
+  uint32_t version = 0;
+  amdf_status_t status =
+      amdf_gpu_kfd_telemetry_query_mp1(device_directory, &version);
   if (amdf_status_is_ok(status)) {
     amdf_gpu_kfd_hwmon_profile_t profile = amdf_gpu_kfd_hwmon_profile(version);
     if (version == 0x0d0006 || version == 0x0d000c) {
@@ -287,9 +299,8 @@ static amdf_status_t amdf_gpu_kfd_hwmon_query_profile(
   return status;
 }
 
-static amdf_status_t amdf_gpu_kfd_hwmon_open(
-    const amdf_platform_endpoint_t* endpoint, int* out_directory,
-    amdf_gpu_kfd_hwmon_profile_t* out_profile) {
+static amdf_status_t amdf_gpu_kfd_telemetry_open_device(
+    const amdf_platform_endpoint_t* endpoint, int* out_directory) {
   // The live device's render file pins this DRM minor allocation. Unregister
   // removes its sysfs path; the minor cannot name a replacement while borrowed.
   char path[80];
@@ -301,9 +312,21 @@ static amdf_status_t amdf_gpu_kfd_hwmon_open(
   if (device_directory < 0) {
     return amdf_linux_error(errno);
   }
-  amdf_gpu_kfd_hwmon_profile_t profile = AMDF_GPU_KFD_HWMON_PROFILE_NONE;
+  *out_directory = device_directory;
+  return AMDF_STATUS_OK;
+}
+
+static amdf_status_t amdf_gpu_kfd_hwmon_open(
+    const amdf_platform_endpoint_t* endpoint, int* out_directory,
+    amdf_gpu_kfd_hwmon_profile_t* out_profile) {
+  int device_directory = -1;
   amdf_status_t status =
-      amdf_gpu_kfd_hwmon_query_profile(device_directory, &profile);
+      amdf_gpu_kfd_telemetry_open_device(endpoint, &device_directory);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  amdf_gpu_kfd_hwmon_profile_t profile = AMDF_GPU_KFD_HWMON_PROFILE_NONE;
+  status = amdf_gpu_kfd_hwmon_query_profile(device_directory, &profile);
   int parent = -1;
   if (amdf_status_is_ok(status) && profile != AMDF_GPU_KFD_HWMON_PROFILE_NONE) {
     parent =
@@ -452,7 +475,7 @@ static amdf_telemetry_metric_info_t amdf_gpu_kfd_hwmon_describe(
   return info;
 }
 
-amdf_status_t amdf_gpu_umd_enumerate_telemetry_metrics(
+static amdf_status_t amdf_gpu_kfd_hwmon_enumerate(
     amdf_gpu_umd_device_t* device, amdf_platform_endpoint_t* endpoint,
     uint32_t capacity, amdf_telemetry_metric_info_t* metrics,
     uint32_t* out_count) {
@@ -509,7 +532,7 @@ amdf_status_t amdf_gpu_umd_enumerate_telemetry_metrics(
              : AMDF_STATUS_OK;
 }
 
-amdf_status_t amdf_gpu_umd_read_telemetry(
+static amdf_status_t amdf_gpu_kfd_hwmon_read(
     amdf_gpu_umd_device_t* device, amdf_platform_endpoint_t* endpoint,
     amdf_telemetry_source_id_t source_id, uint32_t metric_count,
     const amdf_telemetry_metric_id_t* metric_ids,
@@ -569,6 +592,144 @@ amdf_status_t amdf_gpu_umd_read_telemetry(
     for (uint32_t i = 0; i < metric_count; ++i) {
       values[i] = value;
     }
+    *out_sample = sample;
+  }
+  return status;
+}
+
+static amdf_status_t amdf_gpu_kfd_metrics_query(
+    const amdf_platform_endpoint_t* endpoint, uint8_t* storage,
+    amdf_telemetry_source_id_t requested_source,
+    amdf_gpu_kfd_metrics_t* out_metrics, amdf_telemetry_sample_t* out_sample) {
+  int directory = -1;
+  amdf_status_t status =
+      amdf_gpu_kfd_telemetry_open_device(endpoint, &directory);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  uint32_t mp1 = 0;
+  status = amdf_gpu_kfd_telemetry_query_mp1(directory, &mp1);
+  if (amdf_status_is_ok(status) &&
+      !amdf_gpu_kfd_metrics_supports_producer(mp1)) {
+    status = amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  int descriptor = -1;
+  if (amdf_status_is_ok(status)) {
+    descriptor = openat(directory, "gpu_metrics", O_RDONLY | O_CLOEXEC);
+    if (descriptor < 0) {
+      status = errno == ENOENT || errno == EOPNOTSUPP
+                   ? amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)
+                   : amdf_linux_error(errno);
+    }
+  }
+  const amdf_status_t directory_close = amdf_linux_file_close(&directory);
+  if (amdf_status_is_ok(status)) {
+    status = directory_close;
+  }
+  amdf_telemetry_sample_t sample = {0};
+  if (amdf_status_is_ok(status)) {
+    status = amdf_platform_observation_query_host_clock(&sample.host_before);
+  }
+  ssize_t length = 0;
+  if (amdf_status_is_ok(status)) {
+    length = read(descriptor, storage, AMDF_GPU_KFD_METRICS_CAPACITY);
+    if (length < 0) {
+      status = errno == EOPNOTSUPP
+                   ? amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)
+                   : amdf_linux_error(errno);
+    }
+  }
+  if (amdf_status_is_ok(status)) {
+    status = amdf_platform_observation_query_host_clock(&sample.host_after);
+  }
+  const amdf_status_t close_status = amdf_linux_file_close(&descriptor);
+  if (amdf_status_is_ok(status)) {
+    status = close_status;
+  }
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  amdf_gpu_kfd_metrics_t metrics;
+  status =
+      amdf_gpu_kfd_metrics_decode(mp1, (uint32_t)length, storage, &metrics);
+  if (requested_source != 0 &&
+      (status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED) ||
+       (amdf_status_is_ok(status) && metrics.source_id != requested_source))) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH);
+  }
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  *out_metrics = metrics;
+  *out_sample = sample;
+  return AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_gpu_umd_enumerate_telemetry_metrics(
+    amdf_gpu_umd_device_t* device, amdf_platform_endpoint_t* endpoint,
+    uint32_t capacity, amdf_telemetry_metric_info_t* metrics,
+    uint32_t* out_count) {
+  // Keep the small scalar prefix private until both native routes have
+  // completed. A late snapshot/close error publishes neither prefix nor count.
+  amdf_telemetry_metric_info_t scalar[AMDF_GPU_KFD_HWMON_FIELD_COUNT];
+  uint32_t scalar_count = 0;
+  amdf_status_t status = amdf_gpu_kfd_hwmon_enumerate(
+      device, endpoint, AMDF_GPU_KFD_HWMON_FIELD_COUNT, scalar, &scalar_count);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  uint8_t storage[AMDF_GPU_KFD_METRICS_CAPACITY];
+  amdf_gpu_kfd_metrics_t snapshot;
+  amdf_telemetry_sample_t sample;
+  status = amdf_gpu_kfd_metrics_query(endpoint, storage, 0, &snapshot, &sample);
+  const bool has_snapshot = amdf_status_is_ok(status);
+  if (!has_snapshot &&
+      status != amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+    return status;
+  }
+  const uint32_t scalar_written =
+      scalar_count < capacity ? scalar_count : capacity;
+  if (scalar_written != 0) {
+    memcpy(metrics, scalar, scalar_written * sizeof(metrics[0]));
+  }
+  uint32_t count = scalar_count;
+  if (has_snapshot) {
+    count += amdf_gpu_kfd_metrics_describe(
+        &snapshot, capacity - scalar_written,
+        metrics != NULL ? metrics + scalar_written : NULL);
+  }
+  *out_count = count;
+  return capacity != 0 && capacity < count
+             ? amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL)
+             : AMDF_STATUS_OK;
+}
+
+amdf_status_t amdf_gpu_umd_read_telemetry(
+    amdf_gpu_umd_device_t* device, amdf_platform_endpoint_t* endpoint,
+    amdf_telemetry_source_id_t source_id, uint32_t metric_count,
+    const amdf_telemetry_metric_id_t* metric_ids,
+    amdf_telemetry_value_t* values, amdf_telemetry_sample_t* out_sample) {
+  if ((source_id & UINT64_C(0xff00000000000000)) !=
+      AMDF_GPU_KFD_METRICS_SOURCE_BASE) {
+    return amdf_gpu_kfd_hwmon_read(device, endpoint, source_id, metric_count,
+                                   metric_ids, values, out_sample);
+  }
+  amdf_status_t status = amdf_gpu_kfd_metrics_validate_selection(
+      source_id, metric_count, metric_ids);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  uint8_t storage[AMDF_GPU_KFD_METRICS_CAPACITY];
+  amdf_gpu_kfd_metrics_t snapshot;
+  amdf_telemetry_sample_t sample;
+  status = amdf_gpu_kfd_metrics_query(endpoint, storage, source_id, &snapshot,
+                                      &sample);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  status = amdf_gpu_kfd_metrics_read(&snapshot, metric_count, metric_ids,
+                                     values, &sample);
+  if (amdf_status_is_ok(status)) {
     *out_sample = sample;
   }
   return status;
