@@ -59,6 +59,27 @@ _GFX11_EXECUTION_COMPATIBLE_WITH = (
 )
 
 iree_execution_test_suite(
+    name = "device_failure_test",
+    data = ["device_failure.loom"],
+    manifests = ["device_failure.test.json"],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=libamdf.resource.amd_gpu",
+        "requires-amd-gpu-feedback",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+        "//runtime/config/hal:driver_amd_gpu",
+        "//libamdf/config:enabled_setting",
+        "//libamdf/config/family:gpu",
+    ]),
+    tools = {
+        "loom-benchmark": "//loom/src/loom/tools/loom-benchmark",
+        "loom-test": "//loom/src/loom/tools/loom-test",
+    },
+)
+
+iree_execution_test_suite(
     name = "benchmark_scenario_correctness_test",
     data = [
         "//loom/src/loom/tooling/testbench:testdata/benchmark_device_events.loom",

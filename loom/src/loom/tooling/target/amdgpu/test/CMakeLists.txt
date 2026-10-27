@@ -9,6 +9,25 @@
 
 iree_add_all_subdirs()
 
+if(LOOM_ROUTE_AMDGPU_HAL AND IREE_HAL_DRIVER_AMD_GPU AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
+iree_execution_test_suite(
+  NAME
+    device_failure_test
+  MANIFESTS
+    "device_failure.test.json"
+  TOOLS
+    "loom-benchmark=loom::tools::loom-benchmark"
+    "loom-test=loom::tools::loom-test"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amdgpu/test/device_failure.loom"
+  LABELS
+    "iree-run-requirement=libamdf.resource.amd_gpu"
+    "requires-amd-gpu-feedback"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 if(LOOM_ROUTE_AMDGPU_HAL AND IREE_HAL_DRIVER_AMDGPU AND LOOM_ROUTE_VM_IREE_VM)
 iree_execution_test_suite(
   NAME

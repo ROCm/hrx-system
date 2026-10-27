@@ -6,6 +6,8 @@
 
 #include "loom/tooling/testbench/device_event.h"
 
+#include <inttypes.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "loom/util/json.h"
@@ -61,6 +63,34 @@ static bool loom_testbench_device_event_record_copy(
           source->payload, target->payload_storage,
           sizeof(target->payload_storage), &target->event.payload)) {
     return false;
+  }
+  // Standard payloads can themselves reference callback-scoped storage.
+  // Preserve any extension bytes while replacing their borrowed spans.
+  if (source->type == IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE &&
+      source->payload.data_length >=
+          sizeof(iree_hal_device_driver_failure_event_t)) {
+    iree_hal_device_driver_failure_event_t failure;
+    memcpy(&failure, target->payload_storage, sizeof(failure));
+    if (!loom_testbench_device_event_copy_string(
+            failure.message, target->payload_string_storage,
+            sizeof(target->payload_string_storage), &failure.message)) {
+      return false;
+    }
+    memcpy(target->payload_storage, &failure, sizeof(failure));
+  } else if (source->type == IREE_HAL_DEVICE_EVENT_TYPE_PRINTF &&
+             source->payload.data_length >=
+                 sizeof(iree_hal_device_printf_event_t)) {
+    iree_hal_device_printf_event_t printf_event;
+    memcpy(&printf_event, target->payload_storage, sizeof(printf_event));
+    if (!loom_testbench_device_event_copy_string(
+            printf_event.text, target->payload_string_storage,
+            sizeof(target->payload_string_storage), &printf_event.text) ||
+        !loom_testbench_device_event_copy_bytes(
+            printf_event.arguments, target->payload_data_storage,
+            sizeof(target->payload_data_storage), &printf_event.arguments)) {
+      return false;
+    }
+    memcpy(target->payload_storage, &printf_event, sizeof(printf_event));
   }
   if (!loom_testbench_device_event_copy_bytes(
           source->implementation_payload,
@@ -128,6 +158,25 @@ static void loom_testbench_device_event_record_clone(
       source->event.source.driver_id, target->source_driver_id_storage);
   target->event.payload = loom_testbench_device_event_rebind_bytes(
       source->event.payload, target->payload_storage);
+  if (source->event.type == IREE_HAL_DEVICE_EVENT_TYPE_DRIVER_FAILURE &&
+      source->event.payload.data_length >=
+          sizeof(iree_hal_device_driver_failure_event_t)) {
+    iree_hal_device_driver_failure_event_t failure;
+    memcpy(&failure, target->payload_storage, sizeof(failure));
+    failure.message = loom_testbench_device_event_rebind_string(
+        failure.message, target->payload_string_storage);
+    memcpy(target->payload_storage, &failure, sizeof(failure));
+  } else if (source->event.type == IREE_HAL_DEVICE_EVENT_TYPE_PRINTF &&
+             source->event.payload.data_length >=
+                 sizeof(iree_hal_device_printf_event_t)) {
+    iree_hal_device_printf_event_t printf_event;
+    memcpy(&printf_event, target->payload_storage, sizeof(printf_event));
+    printf_event.text = loom_testbench_device_event_rebind_string(
+        printf_event.text, target->payload_string_storage);
+    printf_event.arguments = loom_testbench_device_event_rebind_bytes(
+        printf_event.arguments, target->payload_data_storage);
+    memcpy(target->payload_storage, &printf_event, sizeof(printf_event));
+  }
   target->event.implementation_payload =
       loom_testbench_device_event_rebind_bytes(
           source->event.implementation_payload,
@@ -223,6 +272,22 @@ void loom_testbench_device_event_capture_events(
       .count = capture->record_count,
       .dropped_count = capture->dropped_count,
   };
+  iree_slim_mutex_unlock(&capture->mutex);
+}
+
+void loom_testbench_device_event_capture_dump(
+    loom_testbench_device_event_capture_t* capture) {
+  iree_slim_mutex_lock(&capture->mutex);
+  const iree_hal_device_event_sink_t sink = iree_hal_device_event_sink_stderr();
+  for (iree_host_size_t i = 0; i < capture->record_count; ++i) {
+    iree_hal_device_event_sink_publish(sink, &capture->records[i].event);
+  }
+  if (capture->dropped_count != 0) {
+    fprintf(stderr,
+            "device event capture: dropped %" PRIhsz
+            " events exceeding capture capacity\n",
+            capture->dropped_count);
+  }
   iree_slim_mutex_unlock(&capture->mutex);
 }
 

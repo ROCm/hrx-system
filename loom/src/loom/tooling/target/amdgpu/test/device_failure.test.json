@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "terminal scenario failure retains the device report",
+      "run": {
+        "tool": "loom-test",
+        "args": ["{srcdir}/device_failure.loom", "--device=amdgpu://?tsan_report_policy=fail-device", "--sanitizer=tsan", "--sanitizer-reporting=report-only"]
+      },
+      "exit": 1,
+      "stderr": {
+        "contains": {"unordered": ["DATA_LOSS", "type=tsan_report", "device_failure.loom:17:3", "operation=sanitizer.race.access", "check=data_race", "memory=workgroup"]}
+      }
+    },
+    {
+      "name": "terminal benchmark failure retains the device report",
+      "run": {
+        "tool": "loom-benchmark",
+        "args": ["{srcdir}/device_failure.loom", "--device=amdgpu://?tsan_report_policy=fail-device", "--sanitizer=tsan", "--sanitizer-reporting=report-only", "--iterations=1", "--warmup-iterations=0", "--batch-size=1", "--min-time-ms=0", "--max-batches=1"]
+      },
+      "exit": 1,
+      "stderr": {
+        "contains": {"unordered": ["DATA_LOSS", "type=tsan_report", "device_failure.loom:17:3", "operation=sanitizer.race.access", "check=data_race", "memory=workgroup"]}
+      },
+      "stdout": {"not_contains": ["\"operation_timing_ns\""]}
+    }
+  ]
+}

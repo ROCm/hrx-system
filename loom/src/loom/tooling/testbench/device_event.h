@@ -8,7 +8,7 @@
 //
 // HAL device events are side effects of kernel launches rather than SSA
 // values. This recorder provides a reusable sink that copies event envelopes
-// and fixed-layout payload bytes so check expectations can match structured
+// and their borrowed payload storage so check expectations can match structured
 // reports without scraping stderr.
 
 #ifndef LOOM_TOOLING_TESTBENCH_DEVICE_EVENT_H_
@@ -54,6 +54,10 @@ typedef struct loom_testbench_device_event_record_t {
   // typed HAL event payloads retained past the sink callback.
   iree_alignas(iree_max_align_t) uint8_t
       payload_storage[LOOM_TESTBENCH_DEVICE_EVENT_PAYLOAD_CAPACITY];
+  // Inline storage for a driver failure message or device printf text.
+  char payload_string_storage[LOOM_TESTBENCH_DEVICE_EVENT_STRING_CAPACITY];
+  // Inline storage for encoded device printf arguments.
+  uint8_t payload_data_storage[LOOM_TESTBENCH_DEVICE_EVENT_PAYLOAD_CAPACITY];
   // Inline storage for |event.implementation_payload|. Preserves alignment for
   // backend-native typed payloads retained past the sink callback.
   iree_alignas(iree_max_align_t) uint8_t implementation_payload_storage
@@ -123,6 +127,11 @@ iree_hal_device_event_sink_t loom_testbench_device_event_capture_sink(
 void loom_testbench_device_event_capture_events(
     loom_testbench_device_event_capture_t* capture,
     loom_testbench_device_event_list_t* out_events);
+
+// Prints captured events and any dropped-event count to stderr. Used when a
+// terminal execution failure prevents the normal structured result report.
+void loom_testbench_device_event_capture_dump(
+    loom_testbench_device_event_capture_t* capture);
 
 // Copies the current capture interval into an owned immutable snapshot.
 // |out_snapshot| must be empty and remains empty on failure.

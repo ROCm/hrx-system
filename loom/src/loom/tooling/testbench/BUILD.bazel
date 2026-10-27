@@ -225,6 +225,18 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "device_event_test",
+    srcs = ["device_event_test.cc"],
+    deps = [
+        ":device_event",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "testbench_test",
     srcs = ["testbench_test.cc"],
     deps = [

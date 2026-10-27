@@ -1664,6 +1664,9 @@ int loom_test_main(int argc, char** argv,
   if (had_error) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);
+    if (device_event_capture_initialized) {
+      loom_testbench_device_event_capture_dump(&device_event_capture);
+    }
     exit_code = 1;
   }
 

@@ -848,6 +848,9 @@ iree_status_t loom_benchmark_run_file(
     exit_code = 1;
   }
   if (!iree_status_is_ok(status)) {
+    if (device_event_capture_initialized) {
+      loom_testbench_device_event_capture_dump(&device_event_capture);
+    }
     exit_code = 1;
   }
 

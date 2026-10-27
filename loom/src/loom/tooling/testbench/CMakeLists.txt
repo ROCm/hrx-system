@@ -251,6 +251,19 @@ loom_cc_library(
 
 loom_cc_test(
   NAME
+    device_event_test
+  SRCS
+    "device_event_test.cc"
+  DEPS
+    ::device_event
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_test(
+  NAME
     testbench_test
   SRCS
     "testbench_test.cc"
