@@ -18,23 +18,50 @@ struct loom_serve_tokenizer_load_t {
   loomc_task_t task;
   // Allocator owning this operation and the transferred tokenizer.
   iree_allocator_t host_allocator;
+  // Borrowed shared cache owned beyond every accepted load.
+  loom_serve_tokenizer_cache_t* cache;
   // Immutable source/package views borrowed through final take.
   loom_serve_sources_t sources;
   // Copied locator stored immediately after this record.
   iree_string_view_t locator;
   // Serializes final publication and wake with the owner's take/destruction.
   iree_slim_mutex_t mutex;
-  // The task has relinquished all input and output borrows.
+  // Intrusive cache subscription retained until terminal publication.
+  loom_serve_tokenizer_subscription_t subscription;
+  // The scheduled task has relinquished all input and output borrows.
+  bool task_retired;
+  // The cache acquisition has delivered its terminal result.
+  bool cache_completed;
+  // Both asynchronous owners retired and the result may be taken.
   bool ready;
   // Worker outcome transferred to the load owner on take.
   iree_status_t status;
-  // Constructed tokenizer transferred even when another load branch failed.
-  iree_tokenizer_t* tokenizer;
+  // Shared tokenizer reference transferred even when another branch failed.
+  loom_serve_tokenizer_t* tokenizer;
   // Nonblocking notification scheduling the serialized load owner.
   void (*wake)(void* user_data);
   // Notification payload borrowed through terminal take.
   void* user_data;
 };
+
+static void loom_serve_tokenizer_load_publish(
+    loom_serve_tokenizer_load_t* load) {
+  if (!load->ready && load->task_retired && load->cache_completed) {
+    load->ready = true;
+    load->wake(load->user_data);
+  }
+}
+
+static void loom_serve_tokenizer_load_cache_complete(
+    void* user_data, iree_status_t status, loom_serve_tokenizer_t* tokenizer) {
+  loom_serve_tokenizer_load_t* load = user_data;
+  iree_slim_mutex_lock(&load->mutex);
+  load->status = status;
+  load->tokenizer = tokenizer;
+  load->cache_completed = true;
+  loom_serve_tokenizer_load_publish(load);
+  iree_slim_mutex_unlock(&load->mutex);
+}
 
 static void loom_serve_tokenizer_load_execute(
     loomc_task_t* task, loomc_host_size_t worker_ordinal) {
@@ -46,20 +73,39 @@ static void loom_serve_tokenizer_load_execute(
       &load->sources, load->locator, load->host_allocator, &contents);
   if (iree_status_is_ok(status)) {
     const loomc_byte_span_t bytes = loomc_source_contents(contents);
-    status = iree_tokenizer_from_huggingface_json(
-        iree_make_string_view((const char*)bytes.data, bytes.data_length),
-        load->host_allocator, &load->tokenizer);
+    loom_serve_tokenizer_acquisition_t acquisition;
+    status = loom_serve_tokenizer_cache_acquire(load->cache, contents,
+                                                &load->subscription,
+                                                &acquisition, &load->tokenizer);
+    if (iree_status_is_ok(status) &&
+        acquisition == LOOM_SERVE_TOKENIZER_ACQUISITION_PRODUCER) {
+      iree_tokenizer_t* value = NULL;
+      status = iree_tokenizer_from_huggingface_json(
+          iree_make_string_view((const char*)bytes.data, bytes.data_length),
+          load->host_allocator, &value);
+      const iree_status_t publication_status =
+          loom_serve_tokenizer_cache_complete(load->cache, contents, status,
+                                              value, &load->tokenizer);
+      status = iree_status_join(status, publication_status);
+    }
+    if (iree_status_is_ok(status) &&
+        acquisition == LOOM_SERVE_TOKENIZER_ACQUISITION_PENDING) {
+      loomc_source_release(contents);
+      IREE_TRACE_ZONE_END(z0);
+      return;
+    }
   }
   loomc_source_release(contents);
   load->status = status;
+  load->cache_completed = true;
   IREE_TRACE_ZONE_END(z0);
 }
 
 static void loom_serve_tokenizer_load_release(loomc_task_t* task) {
   loom_serve_tokenizer_load_t* load = (loom_serve_tokenizer_load_t*)task;
   iree_slim_mutex_lock(&load->mutex);
-  load->ready = true;
-  load->wake(load->user_data);
+  load->task_retired = true;
+  loom_serve_tokenizer_load_publish(load);
   iree_slim_mutex_unlock(&load->mutex);
 }
 
@@ -69,8 +115,9 @@ static const loomc_task_vtable_t tokenizer_load_vtable = {
 };
 
 static iree_status_t loom_serve_tokenizer_load_schedule(
-    loomc_task_sink_t sink, const loom_serve_sources_t* sources,
-    iree_string_view_t locator, void (*wake)(void* user_data), void* user_data,
+    loom_serve_tokenizer_cache_t* cache, loomc_task_sink_t sink,
+    const loom_serve_sources_t* sources, iree_string_view_t locator,
+    void (*wake)(void* user_data), void* user_data,
     iree_allocator_t host_allocator, loom_serve_tokenizer_load_t** out_load) {
   *out_load = NULL;
   loom_serve_tokenizer_load_t* load = NULL;
@@ -78,6 +125,7 @@ static iree_status_t loom_serve_tokenizer_load_schedule(
       host_allocator, sizeof(*load) + locator.size, (void**)&load));
   loomc_task_initialize(&tokenizer_load_vtable, &load->task);
   load->host_allocator = host_allocator;
+  load->cache = cache;
   load->sources = *sources;
   char* path = (char*)(load + 1);
   if (locator.size) {
@@ -86,6 +134,8 @@ static iree_status_t loom_serve_tokenizer_load_schedule(
   load->locator = iree_make_string_view(path, locator.size);
   load->wake = wake;
   load->user_data = user_data;
+  load->subscription.completion = loom_serve_tokenizer_load_cache_complete;
+  load->subscription.user_data = load;
   iree_slim_mutex_initialize(&load->mutex);
   iree_status_t status =
       iree_status_from_loomc(loomc_task_sink_submit(sink, &load->task));
@@ -99,9 +149,9 @@ static iree_status_t loom_serve_tokenizer_load_schedule(
 }
 
 iree_status_t loom_serve_tokenizer_load_start(
-    loomc_task_sink_t sink, const loom_serve_sources_t* sources,
-    iree_string_view_t directory, iree_string_view_t name,
-    void (*wake)(void* user_data), void* user_data,
+    loom_serve_tokenizer_cache_t* cache, loomc_task_sink_t sink,
+    const loom_serve_sources_t* sources, iree_string_view_t directory,
+    iree_string_view_t name, void (*wake)(void* user_data), void* user_data,
     iree_allocator_t host_allocator, loom_serve_tokenizer_load_t** out_load) {
   *out_load = NULL;
   if (sources->card) {
@@ -123,18 +173,19 @@ iree_status_t loom_serve_tokenizer_load_start(
           "for a renamed file",
           (int)name.size, name.data);
     }
-    return loom_serve_tokenizer_load_schedule(
-        sink, sources, file->path, wake, user_data, host_allocator, out_load);
+    return loom_serve_tokenizer_load_schedule(cache, sink, sources, file->path,
+                                              wake, user_data, host_allocator,
+                                              out_load);
   }
   if (iree_string_view_is_empty(directory)) {
     return loom_serve_tokenizer_load_schedule(
-        sink, sources, name, wake, user_data, host_allocator, out_load);
+        cache, sink, sources, name, wake, user_data, host_allocator, out_load);
   }
   char* path = NULL;
   IREE_RETURN_IF_ERROR(
       loom_serve_path_resolve(directory, name, host_allocator, &path));
   iree_status_t status = loom_serve_tokenizer_load_schedule(
-      sink, sources, iree_make_cstring_view(path), wake, user_data,
+      cache, sink, sources, iree_make_cstring_view(path), wake, user_data,
       host_allocator, out_load);
   iree_allocator_free(host_allocator, path);
   return status;
@@ -142,7 +193,7 @@ iree_status_t loom_serve_tokenizer_load_start(
 
 bool loom_serve_tokenizer_load_take(loom_serve_tokenizer_load_t** load_ptr,
                                     iree_status_t* status,
-                                    iree_tokenizer_t** out_tokenizer) {
+                                    loom_serve_tokenizer_t** out_tokenizer) {
   loom_serve_tokenizer_load_t* load = *load_ptr;
   if (!load) {
     return true;

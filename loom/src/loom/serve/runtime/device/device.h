@@ -27,6 +27,7 @@ typedef struct loom_serve_device_group_t loom_serve_device_group_t;
 // One task owner serializes model calls and physical residency transitions;
 // models sharing this record share its allocation budget, not their timelines.
 typedef struct loom_serve_device_t loom_serve_device_t;
+typedef struct loom_serve_tokenizer_cache_t loom_serve_tokenizer_cache_t;
 
 typedef enum loom_serve_device_backing_e {
   // Ordinary fixed allocations, including device address sanitizer use.
@@ -165,6 +166,9 @@ loom_serve_workspace_t* loom_serve_device_workspace(
     const loom_serve_device_t* device);
 // Borrowed application host, which outlives this device and its models.
 loom_serve_host_t* loom_serve_device_host(const loom_serve_device_t* device);
+// Exact immutable tokenizers shared by every model in the application group.
+loom_serve_tokenizer_cache_t* loom_serve_device_tokenizer_cache(
+    const loom_serve_device_t* device);
 iree_hal_device_group_t* loom_serve_device_group(
     const loom_serve_device_t* device);
 iree_hal_queue_t* loom_serve_device_dispatch_queue(

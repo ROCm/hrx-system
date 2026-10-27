@@ -22,7 +22,7 @@ iree_status_t loom_serve_text_source_resolve_tokenizer(
       source->terminal_marker, 0,
       iree_vm_buffer_length(source->terminal_marker), &bytes));
   source->eos_token = iree_tokenizer_vocab_lookup(
-      iree_tokenizer_vocab(source->tokenizer),
+      iree_tokenizer_vocab(loom_serve_tokenizer_value(source->tokenizer)),
       iree_make_string_view((const char*)bytes.data, bytes.data_length));
   if (source->eos_token < 0) {
     return iree_make_status(IREE_STATUS_NOT_FOUND,
@@ -297,7 +297,7 @@ void loom_serve_text_source_deinitialize(loom_serve_text_source_t* source) {
   iree_vm_module_release(source->module);
   iree_vm_buffer_release(source->control_state);
   iree_vm_buffer_release(source->options);
-  iree_tokenizer_free(source->tokenizer);
+  loom_serve_tokenizer_release(source->tokenizer);
   iree_vm_buffer_release(source->terminal_marker);
   iree_vm_environment_free(source->environment);
 }

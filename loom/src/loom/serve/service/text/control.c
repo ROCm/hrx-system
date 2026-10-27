@@ -105,7 +105,8 @@ iree_status_t loom_serve_text_control_initialize(
   iree_vm_module_t* libraries[] = {control->native_module, NULL, NULL, NULL,
                                    NULL};
   status = loom_serve_input_module_create(
-      source->environment, source->tokenizer, host_allocator, &libraries[1]);
+      source->environment, loom_serve_tokenizer_value(source->tokenizer),
+      host_allocator, &libraries[1]);
   if (iree_status_is_ok(status)) {
     status = loom_serve_json_module_create(source->environment, host_allocator,
                                            &libraries[2]);

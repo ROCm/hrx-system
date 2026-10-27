@@ -13,6 +13,7 @@
 #include "iree/vm/module.h"
 #include "loom/serve/runtime/parameter/sources.h"
 #include "loom/serve/runtime/program/preparation.h"
+#include "loom/serve/runtime/program/tokenizer_cache.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/storage.h"
 #include "loomc/target.h"
@@ -48,7 +49,7 @@ typedef struct loom_serve_text_source_t {
   // Owned deployment JSON shared with bootstrap and cold request policy.
   iree_vm_buffer_t* options;
   // Owned parsed vocabulary reused across requests and tokenizer borrowers.
-  iree_tokenizer_t* tokenizer;
+  loom_serve_tokenizer_t* tokenizer;
   // Source terminal marker retained until independent tokenizer construction.
   iree_vm_buffer_t* terminal_marker;
   // Source terminal marker resolved once against the tokenizer.

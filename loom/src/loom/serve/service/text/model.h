@@ -497,7 +497,7 @@ loom_serve_weight_activity_t loom_serve_text_model_weight_activity(
 // configured row count. The tokenizer can be shared by independent encoders.
 loom_serve_text_row_t* loom_serve_text_model_row(loom_serve_text_model_t* model,
                                                  iree_host_size_t index);
-iree_tokenizer_t* loom_serve_text_model_tokenizer(
+const iree_tokenizer_t* loom_serve_text_model_tokenizer(
     loom_serve_text_model_t* model);
 // Borrowed source policy; uses the same serialized invocation as model work.
 const loom_serve_text_chat_policy_t* loom_serve_text_model_chat_policy(

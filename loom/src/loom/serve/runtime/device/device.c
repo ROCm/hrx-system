@@ -10,6 +10,7 @@
 #include "iree/tooling/device_profiling.h"
 #include "loom/serve/runtime/execution/queues.h"
 #include "loom/serve/runtime/program/jit_cache.h"
+#include "loom/serve/runtime/program/tokenizer_cache.h"
 #include "loom/serve/runtime/storage/virtual_pool.h"
 
 struct loom_serve_device_t {
@@ -48,6 +49,8 @@ struct loom_serve_device_group_t {
   iree_allocator_t host_allocator;
   // Retained workers and I/O services outliving every HAL device.
   loom_serve_host_t* host;
+  // Exact immutable tokenizers shared across model modalities and devices.
+  loom_serve_tokenizer_cache_t* tokenizer_cache;
   // Completion registry outliving the shared HAL group.
   iree_async_frontier_tracker_t* frontier_tracker;
   // Owned immutable topology and semaphore/memory namespace.
@@ -299,7 +302,11 @@ iree_status_t loom_serve_device_group_allocate(
     group->devices[i].name = group->names[i];
     name_storage += names[i].size;
   }
-  iree_status_t status = loom_serve_device_group_initialize(group, options);
+  iree_status_t status = loom_serve_tokenizer_cache_allocate(
+      host_allocator, &group->tokenizer_cache);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_device_group_initialize(group, options);
+  }
   for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
        ++i) {
     status = loom_serve_device_initialize(&group->devices[i], &options[i]);
@@ -342,6 +349,8 @@ iree_status_t loom_serve_device_group_free(loom_serve_device_group_t* group) {
   }
   iree_status_t status = iree_hal_end_profiling_from_flags(group->profiling);
   group->profiling = NULL;
+  loom_serve_tokenizer_cache_free(group->tokenizer_cache);
+  group->tokenizer_cache = NULL;
   iree_status_t cleanup_status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < group->device_count && iree_status_is_ok(cleanup_status); ++i) {
@@ -409,6 +418,7 @@ loom_serve_device_memory_statistics_t loom_serve_device_memory_statistics(
 
 iree_status_t loom_serve_device_trim(loom_serve_device_t* device,
                                      uint64_t target_bytes) {
+  loom_serve_tokenizer_cache_trim(device->owner->tokenizer_cache);
   loom_serve_jit_cache_trim(device->jit_cache);
   const loom_serve_device_memory_statistics_t memory =
       loom_serve_device_memory_statistics(device);
@@ -457,6 +467,11 @@ iree_hal_pool_t* loom_serve_device_storage_pool(
 
 loom_serve_host_t* loom_serve_device_host(const loom_serve_device_t* device) {
   return device->owner->host;
+}
+
+loom_serve_tokenizer_cache_t* loom_serve_device_tokenizer_cache(
+    const loom_serve_device_t* device) {
+  return device->owner->tokenizer_cache;
 }
 
 loom_serve_workspace_t* loom_serve_device_workspace(

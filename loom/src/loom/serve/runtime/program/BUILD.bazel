@@ -338,11 +338,24 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "tokenizer_cache",
+    srcs = ["tokenizer_cache.c"],
+    hdrs = ["tokenizer_cache.h"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_library(
     name = "tokenizer_load",
     srcs = ["tokenizer_load.c"],
     hdrs = ["tokenizer_load.h"],
     deps = [
         ":sources",
+        ":tokenizer_cache",
         "//loom/binding/c:loomc",
         "//loom/src/loom/model:card",
         "//runtime/src/iree/base",
@@ -353,10 +366,25 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "tokenizer_cache_test",
+    srcs = ["tokenizer_cache_test.cc"],
+    deps = [
+        ":tokenizer_cache",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+    ],
+)
+
+loom_cc_test(
     name = "tokenizer_load_test",
     srcs = ["tokenizer_load_test.cc"],
     deps = [
         ":package",
+        ":tokenizer_cache",
         ":tokenizer_load",
         "//loom/binding/c:loomc",
         "//loom/src/loom/model:card",

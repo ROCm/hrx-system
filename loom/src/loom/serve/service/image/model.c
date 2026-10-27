@@ -38,7 +38,7 @@ struct loom_serve_image_model_t {
   // Soft per-submission command target, rounded to full barrier waves.
   uint32_t command_quantum;
   // Immutable tokenizer reused by each independent request encoder.
-  iree_tokenizer_t* tokenizer;
+  loom_serve_tokenizer_t* tokenizer;
   // Borrowed shared device/backing owner, outliving the model.
   loom_serve_device_t* owner;
   // Owned model work and feedback timelines, independent of other models.
@@ -202,7 +202,7 @@ static iree_status_t loom_serve_image_model_destroy_resources(
     loom_serve_execution_release(model->execution);
     iree_allocator_free(model->host_allocator, (void*)model->name.data);
     loom_serve_jit_release(model->jit);
-    iree_tokenizer_free(model->tokenizer);
+    loom_serve_tokenizer_release(model->tokenizer);
     iree_allocator_free(model->host_allocator, model->output.data);
     iree_allocator_free(model->host_allocator, model);
   }
@@ -336,6 +336,7 @@ static iree_status_t loom_serve_image_prepare(
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_tokenizer_load_start(
+        loom_serve_device_tokenizer_cache(model->owner),
         loom_serve_host_compiler_sink(loom_serve_device_host(model->owner)),
         &options->sources, options->checkpoint_directory,
         iree_make_string_view((const char*)bytes[0].data, bytes[0].data_length),
@@ -417,9 +418,10 @@ static iree_status_t loom_serve_image_create_control(
     iree_vm_module_retain(model->control.runner);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_input_module_create(model->control.environment,
-                                            model->tokenizer, host_allocator,
-                                            &native_modules[1]);
+    status = loom_serve_input_module_create(
+        model->control.environment,
+        loom_serve_tokenizer_value(model->tokenizer), host_allocator,
+        &native_modules[1]);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_json_module_create(model->control.environment,
@@ -1465,6 +1467,6 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
       .query_status = loom_serve_image_generator_query_status,
       .is_pending = loom_serve_image_generator_is_pending,
       .execution_update = loom_serve_executables_update(model->executables),
-      .tokenizer = model->tokenizer,
+      .tokenizer = loom_serve_tokenizer_value(model->tokenizer),
       .capacity_domain = loom_serve_residency_cache(model->residency)};
 }

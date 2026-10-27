@@ -25,6 +25,8 @@ class TokenizerLoadTest : public ::testing::Test {
   void SetUp() override {
     const auto json = IREE_SV(
         R"({"model":{"type":"BPE","vocab":{"a":0,"b":1},"merges":[]}})");
+    const auto other = IREE_SV(
+        R"({"model":{"type":"BPE","vocab":{"a":0,"b":1,"c":2},"merges":[]}})");
     const loom_serve_package_file_t files[] = {
         {IREE_SV("tokenizer.json"),
          iree_make_const_byte_span(json.data, json.size)},
@@ -32,10 +34,14 @@ class TokenizerLoadTest : public ::testing::Test {
          iree_make_const_byte_span(json.data, json.size)},
         {IREE_SV("asset/tokenizer.json"),
          iree_make_const_byte_span(json.data, json.size)},
+        {IREE_SV("other.json"),
+         iree_make_const_byte_span(other.data, other.size)},
     };
-    IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("model.json"), 3, files,
+    IREE_ASSERT_OK(loom_serve_package_create(IREE_SV("model.json"), 4, files,
                                              iree_allocator_system(),
                                              &sources_.package));
+    IREE_ASSERT_OK(
+        loom_serve_tokenizer_cache_allocate(iree_allocator_system(), &cache_));
   }
 
   void TearDown() override {
@@ -43,7 +49,8 @@ class TokenizerLoadTest : public ::testing::Test {
     RunQueued();
     EXPECT_TRUE(loom_serve_tokenizer_load_take(&load_, &status_, &tokenizer_));
     IREE_EXPECT_OK(status_);
-    iree_tokenizer_free(tokenizer_);
+    loom_serve_tokenizer_release(tokenizer_);
+    loom_serve_tokenizer_cache_free(cache_);
     loom_serve_package_release(sources_.package);
     loom_model_card_release(sources_.card);
   }
@@ -64,7 +71,7 @@ class TokenizerLoadTest : public ::testing::Test {
   iree_status_t Start(iree_string_view_t locator = IREE_SV("tokenizer.json"),
                       iree_string_view_t directory = iree_string_view_empty()) {
     return loom_serve_tokenizer_load_start(
-        {Submit, this}, &sources_, directory, locator,
+        cache_, {Submit, this}, &sources_, directory, locator,
         [](void* self) { ++static_cast<TokenizerLoadTest*>(self)->wakes_; },
         this, iree_allocator_system(), &load_);
   }
@@ -83,7 +90,7 @@ class TokenizerLoadTest : public ::testing::Test {
 
   iree_status_t StartNamed(iree_string_view_t name = IREE_SV("vocabulary")) {
     return loom_serve_tokenizer_load_start(
-        {Submit, this}, &sources_, IREE_SV("ignored-for-card"), name,
+        cache_, {Submit, this}, &sources_, IREE_SV("ignored-for-card"), name,
         [](void* self) { ++static_cast<TokenizerLoadTest*>(self)->wakes_; },
         this, iree_allocator_system(), &load_);
   }
@@ -101,8 +108,9 @@ class TokenizerLoadTest : public ::testing::Test {
     IREE_ASSERT_OK(status_);
     ASSERT_EQ(load_, nullptr);
     ASSERT_NE(tokenizer_, nullptr);
-    EXPECT_EQ(iree_tokenizer_vocab_lookup(iree_tokenizer_vocab(tokenizer_),
-                                          IREE_SV("b")),
+    EXPECT_EQ(iree_tokenizer_vocab_lookup(
+                  iree_tokenizer_vocab(loom_serve_tokenizer_value(tokenizer_)),
+                  IREE_SV("b")),
               1);
     EXPECT_EQ(wakes_, 1);
   }
@@ -111,10 +119,12 @@ class TokenizerLoadTest : public ::testing::Test {
 
   // Immutable source bytes borrowed through terminal take.
   loom_serve_sources_t sources_ = {};
+  // Shared exact-content cache under test.
+  loom_serve_tokenizer_cache_t* cache_ = nullptr;
   // Operation owned until its nonblocking take succeeds.
   loom_serve_tokenizer_load_t* load_ = nullptr;
   // Tokenizer transferred from completed work.
-  iree_tokenizer_t* tokenizer_ = nullptr;
+  loom_serve_tokenizer_t* tokenizer_ = nullptr;
   // Owned load outcome consumed by each test or teardown.
   iree_status_t status_ = iree_ok_status();
   // Task accepted by the deterministic sink, not the tokenizer implementation.
@@ -193,6 +203,34 @@ TEST_F(TokenizerLoadTest, InlineCompletionPublishesOneOwnedResult) {
   CheckResult();
 }
 
+TEST_F(TokenizerLoadTest, EqualBytesAcrossLocatorsShareOneTokenizer) {
+  IREE_ASSERT_OK(Start());
+  RunQueued();
+  CheckResult();
+  loom_serve_tokenizer_t* first = tokenizer_;
+  tokenizer_ = nullptr;
+  wakes_ = 0;
+  IREE_ASSERT_OK(Start(IREE_SV("vocabulary.data")));
+  RunQueued();
+  CheckResult();
+  EXPECT_EQ(tokenizer_, first);
+  loom_serve_tokenizer_release(first);
+}
+
+TEST_F(TokenizerLoadTest, ChangedBytesCreateAnotherTokenizer) {
+  IREE_ASSERT_OK(Start());
+  RunQueued();
+  CheckResult();
+  loom_serve_tokenizer_t* first = tokenizer_;
+  tokenizer_ = nullptr;
+  wakes_ = 0;
+  IREE_ASSERT_OK(Start(IREE_SV("other.json")));
+  RunQueued();
+  CheckResult();
+  EXPECT_NE(tokenizer_, first);
+  loom_serve_tokenizer_release(first);
+}
+
 TEST_F(TokenizerLoadTest, RejectedSubmissionHasNoWakeOrOperation) {
   reject_ = true;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Start());
@@ -231,6 +269,8 @@ void TokenizerLoadTest::CheckSingleWorker() {
     loomc_task_t task;
     // Shared sink also used by the child.
     loomc_task_sink_t sink;
+    // Fixture-owned cache shared with the child.
+    loom_serve_tokenizer_cache_t* cache;
     // Immutable test source owner.
     TokenizerLoadTest* test;
     // Outer test notification, never waited on by the worker.
@@ -239,6 +279,7 @@ void TokenizerLoadTest::CheckSingleWorker() {
     std::atomic<bool> retired{false};
   } parent;
   parent.sink = loom_serve_host_compiler_sink(host);
+  parent.cache = cache_;
   parent.test = this;
   iree_notification_initialize(&parent.notification);
   const loomc_task_vtable_t vtable = {
@@ -247,8 +288,8 @@ void TokenizerLoadTest::CheckSingleWorker() {
             reinterpret_cast<loom_serve_test_tokenizer_load_parent_t*>(task);
         auto* test = parent->test;
         test->status_ = loom_serve_tokenizer_load_start(
-            parent->sink, &test->sources_, iree_string_view_empty(),
-            IREE_SV("tokenizer.json"),
+            parent->cache, parent->sink, &test->sources_,
+            iree_string_view_empty(), IREE_SV("tokenizer.json"),
             [](void* data) {
               iree_notification_post(static_cast<iree_notification_t*>(data),
                                      IREE_ALL_WAITERS);

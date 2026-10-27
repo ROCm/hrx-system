@@ -202,6 +202,7 @@ loom_cc_library(
     loom::serve::runtime::program::sources
     loom::serve::runtime::program::stage_set
     loom::serve::runtime::program::stage_table
+    loom::serve::runtime::program::tokenizer_cache
     loom::serve::runtime::program::tokenizer_load
     loom::serve::runtime::program::variant_pool
     loom::serve::service::executables

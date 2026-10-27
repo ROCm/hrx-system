@@ -96,7 +96,7 @@ struct loom_serve_recognition_model_t {
   // Maximum compact work packet and source-produced batch upload bytes.
   iree_host_size_t batch_input_capacity;
   // Immutable tokenizer; input.encode uses independent encode states.
-  iree_tokenizer_t* tokenizer;
+  loom_serve_tokenizer_t* tokenizer;
   // Borrowed shared device, outliving this model.
   loom_serve_device_t* owner;
   // Independent model work and feedback timelines on shared queues.
@@ -287,7 +287,7 @@ static iree_status_t loom_serve_recognition_model_destroy_resources(
     iree_allocator_free(model->host_allocator, model->weights.plans);
     iree_allocator_free(model->host_allocator, (void*)model->name.data);
     loom_serve_jit_release(model->jit);
-    iree_tokenizer_free(model->tokenizer);
+    loom_serve_tokenizer_release(model->tokenizer);
     iree_allocator_free(model->host_allocator, model->output.data);
     iree_allocator_free(model->host_allocator, model);
   }
@@ -468,6 +468,7 @@ static iree_status_t loom_serve_recognition_prepare(
   }
   if (iree_status_is_ok(status) && metadata[0].data_length) {
     status = loom_serve_tokenizer_load_start(
+        loom_serve_device_tokenizer_cache(model->owner),
         loom_serve_host_compiler_sink(loom_serve_device_host(model->owner)),
         &options->sources, options->asset_directory,
         iree_make_string_view((const char*)metadata[0].data,
@@ -608,9 +609,10 @@ static iree_status_t loom_serve_recognition_create_control(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_input_module_create(model->control.environment,
-                                            model->tokenizer, host_allocator,
-                                            &native_modules[1]);
+    status = loom_serve_input_module_create(
+        model->control.environment,
+        loom_serve_tokenizer_value(model->tokenizer), host_allocator,
+        &native_modules[1]);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_json_module_create(model->control.environment,
@@ -1696,7 +1698,7 @@ loom_serve_recognition_generator_t loom_serve_recognition_model_generator(
       .collect = loom_serve_recognition_generator_collect,
       .release_batch = loom_serve_recognition_generator_release_batch,
       .release = loom_serve_recognition_generator_release,
-      .tokenizer = model->tokenizer,
+      .tokenizer = loom_serve_tokenizer_value(model->tokenizer),
       .capacity_domain = loom_serve_residency_cache(model->residency),
       .weight_activity = loom_serve_recognition_generator_weight_activity};
 }

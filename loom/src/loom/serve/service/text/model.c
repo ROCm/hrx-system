@@ -112,6 +112,7 @@ static iree_status_t loom_serve_text_load_prepare(
   const loom_serve_text_options_t* options = &load->options;
   if (options->mode == LOOM_SERVE_TEXT_MODE_GENERATE) {
     IREE_RETURN_IF_ERROR(loom_serve_tokenizer_load_start(
+        loom_serve_device_tokenizer_cache(model->device_owner),
         loom_serve_host_compiler_sink(
             loom_serve_device_host(model->device_owner)),
         &options->sources, iree_string_view_empty(),
@@ -798,9 +799,9 @@ iree_status_t loom_serve_text_model_deactivate(loom_serve_text_model_t* model,
   return loom_serve_residency_deactivate(model->residency, out_complete);
 }
 
-iree_tokenizer_t* loom_serve_text_model_tokenizer(
+const iree_tokenizer_t* loom_serve_text_model_tokenizer(
     loom_serve_text_model_t* model) {
-  return model->source.tokenizer;
+  return loom_serve_tokenizer_value(model->source.tokenizer);
 }
 
 loom_serve_text_mode_t loom_serve_text_model_mode(

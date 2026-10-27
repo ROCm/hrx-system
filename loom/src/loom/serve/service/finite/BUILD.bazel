@@ -138,6 +138,7 @@ loom_cc_library(
         "//loom/src/loom/serve/runtime/program:sources",
         "//loom/src/loom/serve/runtime/program:stage_set",
         "//loom/src/loom/serve/runtime/program:stage_table",
+        "//loom/src/loom/serve/runtime/program:tokenizer_cache",
         "//loom/src/loom/serve/runtime/program:tokenizer_load",
         "//loom/src/loom/serve/runtime/program:variant_pool",
         "//loom/src/loom/serve/service:executables",

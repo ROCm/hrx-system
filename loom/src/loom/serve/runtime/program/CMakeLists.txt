@@ -415,6 +415,23 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_library(
   NAME
+    tokenizer_cache
+  HDRS
+    "tokenizer_cache.h"
+  SRCS
+    "tokenizer_cache.c"
+  DEPS
+    iree::base
+    iree::base::threading
+    iree::tokenizer
+    loom::binding::c::loomc
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_library(
+  NAME
     tokenizer_load
   HDRS
     "tokenizer_load.h"
@@ -422,6 +439,7 @@ loom_cc_library(
     "tokenizer_load.c"
   DEPS
     ::sources
+    ::tokenizer_cache
     iree::base
     iree::base::threading
     iree::tokenizer
@@ -435,11 +453,31 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_test(
   NAME
+    tokenizer_cache_test
+  SRCS
+    "tokenizer_cache_test.cc"
+  DEPS
+    ::tokenizer_cache
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
+    loom::binding::c::loomc
+  LABELS
+    "iree-build-requirement=loom.target.arch.vm"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
     tokenizer_load_test
   SRCS
     "tokenizer_load_test.cc"
   DEPS
     ::package
+    ::tokenizer_cache
     ::tokenizer_load
     iree::base
     iree::base::threading

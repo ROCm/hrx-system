@@ -9,6 +9,7 @@
 
 #include "iree/tokenizer/tokenizer.h"
 #include "loom/serve/runtime/program/sources.h"
+#include "loom/serve/runtime/program/tokenizer_cache.h"
 #include "loomc/task.h"
 
 #ifdef __cplusplus
@@ -32,9 +33,9 @@ typedef struct loom_serve_tokenizer_load_t loom_serve_tokenizer_load_t;
 // submission and take; wake only schedules the owner and must not reenter this
 // operation.
 iree_status_t loom_serve_tokenizer_load_start(
-    loomc_task_sink_t sink, const loom_serve_sources_t* sources,
-    iree_string_view_t directory, iree_string_view_t name,
-    void (*wake)(void* user_data), void* user_data,
+    loom_serve_tokenizer_cache_t* cache, loomc_task_sink_t sink,
+    const loom_serve_sources_t* sources, iree_string_view_t directory,
+    iree_string_view_t name, void (*wake)(void* user_data), void* user_data,
     iree_allocator_t host_allocator, loom_serve_tokenizer_load_t** out_load);
 
 // Returns false without modifying arguments while construction is pending.
@@ -44,7 +45,7 @@ iree_status_t loom_serve_tokenizer_load_start(
 // must take accepted work before releasing borrowed inputs or the wake payload.
 bool loom_serve_tokenizer_load_take(loom_serve_tokenizer_load_t** load,
                                     iree_status_t* status,
-                                    iree_tokenizer_t** out_tokenizer);
+                                    loom_serve_tokenizer_t** out_tokenizer);
 
 #ifdef __cplusplus
 }  // extern "C"
