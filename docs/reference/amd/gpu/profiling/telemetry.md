@@ -93,6 +93,21 @@ secondary die, where those measurements are unavailable. Its separate sensor
 path returns an unsupported error for that power reading.
 [Aldebaran snapshot][aldebaran] [Aldebaran power sensor][aldebaran-power]
 
+Version 3.0 has an additional field-specific convention: AMD SMI treats zero
+core and skin temperatures as unmeasured, converting them to its unavailable
+marker. GFX/SoC temperatures, other fields, and version 2 temperatures retain
+their own conventions. A generic rule that rejects every zero would discard
+valid idle activity and power observations. [APU temperature interpretation][apu-zero]
+
+The field width also limits what the transport can represent. Version 3.0's
+16-bit DRAM/NPU bandwidth fields in MB/s cannot encode 65.535 GB/s or higher
+as an ordinary value when all-ones denotes unavailable. Its 16-bit system-power
+field has the same representational boundary at 65.535 W, whereas APU and GPU
+power use 32 bits. These are wire-format bounds, not limits on the machine's
+bandwidth or power. The cited producer does not publish overflow or sensor
+calibration metadata from which a wider measurement could be reconstructed.
+[APU fields][apu-layouts] [Firmware widths and units][smu14-fields]
+
 ### Tagged format 1.9
 
 The header's `gpu_metrics_attr` contains a pointer, but it is not the sysfs wire
@@ -142,7 +157,7 @@ extent remain part of record validation. [SMU13 fields][smu13-tags]
 
 Format 3.0 illustrates why representation and meaning are separate:
 
-| Field family | SMU14 APU producer | SMU15 APU producer |
+| Field family | SMU14 APU producer | SMU15 APU accumulator producer |
 | --- | --- | --- |
 | Clock rates | Copies firmware target-frequency fields. | Computes effective clock rates from accumulator differences and a sample-count difference. |
 | Power | Supplies filtered domain powers; `SocketPower` and `ApuPower` have different physical scopes. | Computes interval averages; some output fields use different accumulator domains. |
@@ -152,6 +167,16 @@ Format 3.0 illustrates why representation and meaning are separate:
 
 [SMU14 snapshot][smu14-snapshot] [SMU14 firmware definitions][smu14-fields]
 [SMU15 accumulation and packing][smu15-snapshot]
+
+The older SMU15 path copied filtered target clocks and fixed core arrays from
+`SmuMetrics_t`, using the same version 3.0 output layout. The accumulator
+replacement changed clock, integration, and core-identity semantics without
+changing that header. MP1 identity and the format/content bytes therefore do
+not distinguish these two driver implementations. Values shared by both paths
+can retain their physical units, but the table alone cannot establish that a
+clock is an effective rate or that core slots are stable between reads. A
+firmware version identifies firmware, not which kernel transformation copied
+the data. [Producer replacement and predecessor definitions][smu15-replacement]
 
 The SMU15 path requires a nonzero accumulation-count difference before its
 average calculation produces data. Its scalar hwmon cache has a different
@@ -243,6 +268,8 @@ timestamp rates, host correlation, and execution-point semantics.
 [smu15-tags]: https://github.com/torvalds/linux/blob/f307e9d20cc7bd6dd54a3fd8c2af767dd7ef2931/drivers/gpu/drm/amd/pm/swsmu/smu15/smu_v15_0_8_ppt.h
 [smu14-snapshot]: https://github.com/torvalds/linux/blob/f307e9d20cc7bd6dd54a3fd8c2af767dd7ef2931/drivers/gpu/drm/amd/pm/swsmu/smu14/smu_v14_0_0_ppt.c#L598-L674
 [smu15-snapshot]: https://github.com/torvalds/linux/blob/f307e9d20cc7bd6dd54a3fd8c2af767dd7ef2931/drivers/gpu/drm/amd/pm/swsmu/smu15/smu_v15_0_0_ppt.c#L427-L793
+[smu15-replacement]: https://mail-archive.com/amd-gfx@lists.freedesktop.org/msg148414.html
+[apu-zero]: https://github.com/ROCm/rocm-systems/commit/906f061fe55d4714ada216df2a264a2ce383434b
 [cache]: https://github.com/torvalds/linux/blob/f307e9d20cc7bd6dd54a3fd8c2af767dd7ef2931/drivers/gpu/drm/amd/pm/swsmu/smu_cmn.c#L1223-L1257
 [wkmi]: https://github.com/ROCm/rocm-systems/blob/6b7847ef03b76c004f57b8cf40cdef9621ee6f53/shared/amdgpu-windows-interop/wkmi/wkmi.h
 [adl-sensors]: https://github.com/GPUOpen-LibrariesAndSDKs/display-library/blob/84c881cb2136f04287eb3af12de00a9e2867aa9e/include/adl_defines.h
