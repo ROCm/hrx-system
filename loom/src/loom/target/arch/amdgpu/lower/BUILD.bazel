@@ -453,6 +453,21 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "source_type_mapping_test",
+    srcs = ["source_type_mapping_test.cc"],
+    deps = [
+        ":lower",
+        "//loom/src/loom/codegen/low/lower",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "feedback_test",
     srcs = ["feedback_test.cc"],
     deps = [

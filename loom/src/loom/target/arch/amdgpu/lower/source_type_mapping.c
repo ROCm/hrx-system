@@ -371,7 +371,15 @@ static bool loom_amdgpu_source_buffer_value_register_shape(
 }
 
 static bool loom_amdgpu_source_value_register_shape_needs_analysis(
-    loom_type_t source_type) {
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t source_value_id, loom_type_t source_type) {
+  // Varying non-predicate facts settle the use-sensitive bank preference
+  // without source or memory analysis. Width, storage, and representation
+  // belong to the mapping below; uniform or unknown facts do not prove a bank.
+  if (loom_amdgpu_source_value_facts_prefer_vgpr(module, fact_table,
+                                                 source_value_id)) {
+    return false;
+  }
   if (loom_type_is_buffer(source_type)) {
     return true;
   }
@@ -510,7 +518,10 @@ iree_status_t loom_amdgpu_map_value(void* user_data,
   (void)user_data;
   const loom_view_region_table_t* view_regions = NULL;
   loom_amdgpu_source_value_analysis_t* analysis = NULL;
-  if (loom_amdgpu_source_value_register_shape_needs_analysis(source_type)) {
+  if (loom_amdgpu_source_value_register_shape_needs_analysis(
+          loom_low_lower_context_module(context),
+          loom_low_lower_context_fact_table(context), source_value_id,
+          source_type)) {
     IREE_RETURN_IF_ERROR(
         loom_low_lower_context_view_regions(context, &view_regions));
     IREE_RETURN_IF_ERROR(
@@ -579,7 +590,9 @@ iree_status_t loom_amdgpu_map_contract_value(
       source_value_id);
   loom_target_contract_query_environment_t analyzed_environment = *environment;
   loom_amdgpu_source_value_analysis_t* analysis = NULL;
-  if (loom_amdgpu_source_value_register_shape_needs_analysis(source_type)) {
+  if (loom_amdgpu_source_value_register_shape_needs_analysis(
+          environment->module, environment->fact_table, source_value_id,
+          source_type)) {
     IREE_RETURN_IF_ERROR(loom_target_contract_query_resolve_function_analysis(
         &analyzed_environment));
     environment = &analyzed_environment;

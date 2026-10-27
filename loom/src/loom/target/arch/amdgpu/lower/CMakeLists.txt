@@ -452,6 +452,26 @@ endif()
 if(LOOM_ARCH_AMDGPU)
 loom_cc_test(
   NAME
+    source_type_mapping_test
+  SRCS
+    "source_type_mapping_test.cc"
+  DEPS
+    ::lower
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::lower
+    loom::ir
+    loom::ops::test
+    loom::target::arch::amdgpu::descriptors::low_registry
+    loom::util::fact_table
+  LABELS
+    "iree-build-requirement=loom.arch.amdgpu"
+)
+endif()
+
+if(LOOM_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
     feedback_test
   SRCS
     "feedback_test.cc"

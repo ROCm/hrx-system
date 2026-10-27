@@ -18,15 +18,9 @@
 extern "C" {
 #endif
 
-// Returns the AMDGPU scalar/VGPR lowering policy.
-//
-// The initial policy is intentionally narrow: it maps i32 scalar values to
-// SGPRs, maps 32-bit vector lane values to VGPRs, and lowers
-// scalar.constant/scalar.addi/vector.constant/vector.addi/vector.muli to
-// descriptor-backed low packets. HAL buffer arguments lower to explicit
-// entry low.resource imports.
-// Memory operations and wider vector packing require explicit view/resource
-// layout contracts and are not guessed here.
+// Returns the AMDGPU source-to-Low policy. Source types, value facts, and
+// selected representations determine register banks and widths; generated
+// contracts select descriptor-backed packets for the active target.
 const loom_low_lower_policy_t* loom_amdgpu_low_lower_policy(void);
 
 // Returns the AMDGPU source legality provider for target-low lowering.
