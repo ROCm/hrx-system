@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -19,6 +20,7 @@
 
 #include "gtest/gtest.h"
 #include "libamdf/src/platform/linux/endpoint.h"
+#include "libamdf/src/platform/linux/file.h"
 
 namespace {
 
@@ -37,6 +39,7 @@ class TelemetryTest : public ::testing::Test {
     Write("freq2_input", "1000000000\n");
     Write("power1_average", "32942000\n");
     Write("temp1_input", "-2500\n");
+    SetSmuVersion(13, 0, 0);
     instance_.sysfs_descriptor = open(root_.c_str(), O_RDONLY | O_DIRECTORY);
     ASSERT_GE(instance_.sysfs_descriptor, 0);
     endpoint_.instance = &instance_;
@@ -60,6 +63,19 @@ class TelemetryTest : public ::testing::Test {
     std::ofstream file(sensor_ / name);
     file << value;
     ASSERT_TRUE(file.good());
+  }
+
+  void SetSmuVersion(uint32_t major, uint32_t minor, uint32_t revision) {
+    const auto directory =
+        root_ / "dev/char/226:128/device/ip_discovery/die/0/1/0";
+    std::filesystem::create_directories(directory);
+    const char* names[] = {"major", "minor", "revision"};
+    const uint32_t values[] = {major, minor, revision};
+    for (size_t i = 0; i < 3; ++i) {
+      std::ofstream file(directory / names[i]);
+      file << values[i] << '\n';
+      ASSERT_TRUE(file.good());
+    }
   }
 
   std::vector<amdf_telemetry_metric_info_t> Enumerate() {
@@ -215,6 +231,149 @@ TEST_F(TelemetryTest, MissingServiceIsNotMissingDevice) {
                                                      nullptr, &count),
             AMDF_STATUS_OK);
   EXPECT_EQ(count, 99u);
+}
+
+TEST_F(TelemetryTest, Smu14ApuTargetsAreNotMeasuredClocks) {
+  Write("power1_input", "32942000\n");
+  Write("temp2_input", "41000\n");
+  // The SMU14 APU producer writes these frequency targets, SocketPower's
+  // APU+dGPU power budget, and separate GPU/SoC TSEN temperature values.
+  // Deliberately malformed target attributes prove enumeration never reads
+  // them as if they were actual operating clocks.
+  Write("freq1_input", "a configured target is not a measured clock\n");
+  Write("freq2_input", "a configured target is not a measured clock\n");
+  for (uint32_t revision : {0, 1, 4, 5}) {
+    SCOPED_TRACE(revision);
+    SetSmuVersion(14, 0, revision);
+    const auto metrics = Enumerate();
+    ASSERT_EQ(metrics.size(), 4u);
+    for (const auto& metric : metrics) {
+      EXPECT_STREQ(metric.origin.schema, "hwmon-abi:smu14-apu");
+      const std::string field = metric.origin.field;
+      if (field == "power1_average" || field == "power1_input") {
+        EXPECT_EQ(metric.kind, AMDF_TELEMETRY_METRIC_POWER);
+        EXPECT_EQ(metric.domain, AMDF_TELEMETRY_DOMAIN_POWER_BUDGET);
+        EXPECT_EQ(metric.format.semantic,
+                  AMDF_OBSERVATION_VALUE_SEMANTIC_FILTERED);
+      } else {
+        EXPECT_EQ(metric.kind, AMDF_TELEMETRY_METRIC_TEMPERATURE);
+        EXPECT_EQ(metric.domain, field == "temp1_input"
+                                     ? AMDF_TELEMETRY_DOMAIN_GPU
+                                     : AMDF_TELEMETRY_DOMAIN_SOC);
+      }
+    }
+  }
+}
+
+TEST_F(TelemetryTest, RenoirMemorySensorNamesItsActualFabricClock) {
+  for (uint32_t revision : {0, 1}) {
+    SCOPED_TRACE(revision);
+    SetSmuVersion(12, 0, revision);
+    const auto metrics = Enumerate();
+    ASSERT_EQ(metrics.size(), 4u);
+    ASSERT_STREQ(metrics[1].origin.field, "freq2_input");
+    EXPECT_EQ(metrics[1].kind, AMDF_TELEMETRY_METRIC_CLOCK_FABRIC);
+    EXPECT_EQ(metrics[1].domain, AMDF_TELEMETRY_DOMAIN_SOC);
+  }
+}
+
+TEST_F(TelemetryTest, ApuTemperatureAndPowerRetainTheirNativeRegions) {
+  Write("temp2_input", "41000\n");
+  const std::array<std::array<uint32_t, 3>, 9> versions = {{
+      {11, 0, 8},
+      {11, 5, 0},
+      {11, 5, 2},
+      {13, 0, 1},
+      {13, 0, 3},
+      {13, 0, 4},
+      {13, 0, 5},
+      {13, 0, 8},
+      {13, 0, 11},
+  }};
+  for (const auto& version : versions) {
+    SCOPED_TRACE(::testing::PrintToString(version));
+    SetSmuVersion(version[0], version[1], version[2]);
+    const auto metrics = Enumerate();
+    ASSERT_EQ(metrics.size(), 5u);
+    EXPECT_EQ(metrics[2].domain, AMDF_TELEMETRY_DOMAIN_POWER_BUDGET);
+    EXPECT_EQ(metrics[3].kind, AMDF_TELEMETRY_METRIC_TEMPERATURE);
+    EXPECT_EQ(metrics[3].domain, AMDF_TELEMETRY_DOMAIN_GPU);
+    EXPECT_EQ(metrics[4].kind, AMDF_TELEMETRY_METRIC_TEMPERATURE);
+    EXPECT_EQ(metrics[4].domain, AMDF_TELEMETRY_DOMAIN_SOC);
+  }
+}
+
+TEST_F(TelemetryTest, MultiDieClockRequiresNativeFirmwareCapability) {
+  Write("temp2_input", "41000\n");
+  const auto directory = root_ / "dev/char/226:128/device/fw_version";
+  ASSERT_TRUE(std::filesystem::create_directories(directory));
+  for (uint32_t revision : {6, 12}) {
+    SCOPED_TRACE(revision);
+    SetSmuVersion(13, 0, revision);
+    const uint32_t minimum = revision == 6 ? 0x00552f00 : 0x00561900;
+    for (const uint32_t firmware : {minimum - 1, minimum}) {
+      SCOPED_TRACE(firmware);
+      char text[16];
+      std::snprintf(text, sizeof(text), "0x%08x\n", firmware);
+      {
+        std::ofstream file(directory / "smc_fw_version");
+        file << text;
+        ASSERT_TRUE(file.good());
+      }
+      const auto metrics = Enumerate();
+      const bool has_clock = firmware == minimum;
+      ASSERT_EQ(metrics.size(), has_clock ? 3u : 2u);
+      EXPECT_EQ(metrics.front().kind, has_clock
+                                          ? AMDF_TELEMETRY_METRIC_CLOCK_COMPUTE
+                                          : AMDF_TELEMETRY_METRIC_CLOCK_MEMORY);
+      EXPECT_EQ(metrics.back().kind, AMDF_TELEMETRY_METRIC_TEMPERATURE_HOTSPOT);
+      EXPECT_EQ(metrics.back().domain, AMDF_TELEMETRY_DOMAIN_PACKAGE);
+    }
+    ASSERT_TRUE(std::filesystem::remove(directory / "smc_fw_version"));
+    EXPECT_EQ(Enumerate().size(), 2u);
+  }
+}
+
+TEST_F(TelemetryTest, UnestablishedProducerNeverInheritsAnotherMeaning) {
+  SetSmuVersion(99, 0, 0);
+  EXPECT_TRUE(Enumerate().empty());
+  std::filesystem::remove_all(root_ / "dev/char/226:128/device/ip_discovery");
+  EXPECT_TRUE(Enumerate().empty());
+}
+
+TEST_F(TelemetryTest, MalformedProducerIdentityPreservesCatalog) {
+  const auto directory =
+      root_ / "dev/char/226:128/device/ip_discovery/die/0/1/0";
+  for (const char* text : {"256\n", "0x0d\n", "-1\n", "13\n0\n"}) {
+    SCOPED_TRACE(text);
+    {
+      std::ofstream file(directory / "major");
+      file << text;
+      ASSERT_TRUE(file.good());
+    }
+    amdf_telemetry_metric_info_t metric = {.metric_id = 42};
+    uint32_t count = 123;
+    EXPECT_EQ(amdf_gpu_umd_enumerate_telemetry_metrics(nullptr, &endpoint_, 1,
+                                                       &metric, &count),
+              amdf_linux_error(EPROTO));
+    EXPECT_EQ(metric.metric_id, 42u);
+    EXPECT_EQ(count, 123u);
+  }
+}
+
+TEST_F(TelemetryTest, ChangedMeaningRejectsOldSourceIdentity) {
+  const auto metrics = Enumerate();
+  ASSERT_EQ(metrics.size(), 4u);
+  const auto& power = metrics[2];
+  ASSERT_EQ(power.kind, AMDF_TELEMETRY_METRIC_POWER);
+  SetSmuVersion(14, 0, 0);
+  amdf_telemetry_value_t value = {.value = {.u64 = 123}};
+  amdf_telemetry_sample_t sample = {.host_before = 456};
+  EXPECT_EQ(amdf_gpu_umd_read_telemetry(nullptr, &endpoint_, power.source_id, 1,
+                                        &power.metric_id, &value, &sample),
+            amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH));
+  EXPECT_EQ(value.value.u64, 123u);
+  EXPECT_EQ(sample.host_before, 456u);
 }
 
 }  // namespace

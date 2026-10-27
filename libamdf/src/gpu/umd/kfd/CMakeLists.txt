@@ -223,6 +223,7 @@ iree_cc_test(
     iree::third_party::google_test_main
     libamdf::src::gpu::umd::telemetry
     libamdf::src::platform::linux::endpoint
+    libamdf::src::platform::linux::file
   LABELS
     "iree-build-requirement=libamdf"
     "iree-build-requirement=libamdf.gpu"

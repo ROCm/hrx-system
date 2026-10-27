@@ -22,6 +22,90 @@
 // interpretation, independent of the kernel's ephemeral hwmon directory number.
 #define AMDF_GPU_KFD_HWMON_SOURCE_BASE UINT64_C(0x0100000000000000)
 
+// A hwmon attribute names a native sensor route, not a portable meaning. These
+// profiles follow amdgpu_smu.c's MP1 producer selection and each producer's
+// read_sensor/get_smu_metrics_data mapping and firmware interface declarations.
+typedef uint32_t amdf_gpu_kfd_hwmon_profile_t;
+enum amdf_gpu_kfd_hwmon_profile_e {
+  AMDF_GPU_KFD_HWMON_PROFILE_NONE = 0,
+  AMDF_GPU_KFD_HWMON_PROFILE_DISCRETE = 1,
+  AMDF_GPU_KFD_HWMON_PROFILE_APU = 2,
+  AMDF_GPU_KFD_HWMON_PROFILE_RENOIR = 3,
+  AMDF_GPU_KFD_HWMON_PROFILE_SMU14_APU = 4,
+  AMDF_GPU_KFD_HWMON_PROFILE_MULTI_DIE = 5,
+  AMDF_GPU_KFD_HWMON_PROFILE_MULTI_DIE_NO_GFXCLK = 6,
+};
+
+static amdf_gpu_kfd_hwmon_profile_t amdf_gpu_kfd_hwmon_profile(
+    uint32_t version) {
+  switch (version) {
+    // Navi, Sienna Cichlid, Arcturus, Aldebaran, and discrete SMU13/14.
+    case 0x0b0000:
+    case 0x0b0002:
+    case 0x0b0005:
+    case 0x0b0007:
+    case 0x0b0009:
+    case 0x0b000b:
+    case 0x0b000c:
+    case 0x0b000d:
+    case 0x0d0000:
+    case 0x0d0002:
+    case 0x0d0007:
+    case 0x0d000a:
+    case 0x0e0002:
+    case 0x0e0003:
+      return AMDF_GPU_KFD_HWMON_PROFILE_DISCRETE;
+    case 0x0d0006:
+    case 0x0d000c:
+    case 0x0d000e:
+    case 0x0f0008:
+      return AMDF_GPU_KFD_HWMON_PROFILE_MULTI_DIE;
+    // Cyan Skillfish, Vangogh, Yellow Carp, and the SMU13 APU producers.
+    case 0x0b0008:
+    case 0x0b0500:
+    case 0x0b0502:
+    case 0x0d0001:
+    case 0x0d0003:
+    case 0x0d0004:
+    case 0x0d0005:
+    case 0x0d0008:
+    case 0x0d000b:
+      return AMDF_GPU_KFD_HWMON_PROFILE_APU;
+    case 0x0c0000:
+    case 0x0c0001:
+      return AMDF_GPU_KFD_HWMON_PROFILE_RENOIR;
+    case 0x0e0000:
+    case 0x0e0001:
+    case 0x0e0004:
+    case 0x0e0005:
+      return AMDF_GPU_KFD_HWMON_PROFILE_SMU14_APU;
+    default:
+      return AMDF_GPU_KFD_HWMON_PROFILE_NONE;
+  }
+}
+
+static uint32_t amdf_gpu_kfd_hwmon_fields_for_profile(
+    amdf_gpu_kfd_hwmon_profile_t profile) {
+  switch (profile) {
+    case AMDF_GPU_KFD_HWMON_PROFILE_DISCRETE:
+      return 0x7f;
+    case AMDF_GPU_KFD_HWMON_PROFILE_APU:
+    case AMDF_GPU_KFD_HWMON_PROFILE_RENOIR:
+      return 0x3f;
+    case AMDF_GPU_KFD_HWMON_PROFILE_SMU14_APU:
+      // GfxclkFrequency and MemclkFrequency are filtered target frequencies.
+      // The measured-clock API cannot advertise either as an actual rate.
+      return 0x3c;
+    case AMDF_GPU_KFD_HWMON_PROFILE_MULTI_DIE:
+      return 0x6b;
+    case AMDF_GPU_KFD_HWMON_PROFILE_MULTI_DIE_NO_GFXCLK:
+      // Older SMU13 firmware makes the driver return a synthetic zero clock.
+      return 0x6a;
+    default:
+      return 0;
+  }
+}
+
 typedef struct amdf_gpu_kfd_hwmon_field_t {
   // Stable native attribute name, also used as diagnostic provenance.
   const char* name;
@@ -37,9 +121,10 @@ typedef struct amdf_gpu_kfd_hwmon_field_t {
   uint32_t denominator;
 } amdf_gpu_kfd_hwmon_field_t;
 
-// amdgpu_pm.c defines these fixed channels and their units. Power includes CPU
-// consumption on APUs. The named average/input routes can reach the same native
-// SMU quantity; neither their spelling nor read time establishes its filter.
+// amdgpu_pm.c defines these fixed channels and their units. This is the
+// discrete-GPU interpretation; APU profiles refine the physical meanings below.
+// The average/input routes can reach the same native quantity, so their
+// spelling alone does not establish an aggregation or filter window.
 static const amdf_gpu_kfd_hwmon_field_t amdf_gpu_kfd_hwmon_fields[] = {
     {"freq1_input", AMDF_TELEMETRY_METRIC_CLOCK_COMPUTE,
      AMDF_TELEMETRY_DOMAIN_GPU, AMDF_OBSERVATION_VALUE_KIND_U64,
@@ -105,8 +190,106 @@ static amdf_status_t amdf_gpu_kfd_hwmon_read_text(int directory,
   return amdf_status_is_ok(status) ? close_status : status;
 }
 
+static amdf_status_t amdf_gpu_kfd_hwmon_read_integer(
+    int directory, const char* name, amdf_observation_value_kind_t kind,
+    amdf_observation_value_t* out_value) {
+  char text[64];
+  const amdf_status_t status =
+      amdf_gpu_kfd_hwmon_read_text(directory, name, sizeof(text), text);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  char* end = NULL;
+  const char* digits = text;
+  if (kind == AMDF_OBSERVATION_VALUE_KIND_I64 && *digits == '-') {
+    ++digits;
+  }
+  if (*digits < '0' || *digits > '9') {
+    return amdf_linux_error(EPROTO);
+  }
+  errno = 0;
+  amdf_observation_value_t value = {0};
+  if (kind == AMDF_OBSERVATION_VALUE_KIND_I64) {
+    value.i64 = strtoll(text, &end, 10);
+  } else {
+    value.u64 = strtoull(text, &end, 10);
+  }
+  if (errno != 0 || end == text || (*end != 0 && *end != '\n') ||
+      (*end == '\n' && end[1] != 0)) {
+    return amdf_linux_error(EPROTO);
+  }
+  *out_value = value;
+  return AMDF_STATUS_OK;
+}
+
+static amdf_status_t amdf_gpu_kfd_hwmon_query_profile(
+    int device_directory, amdf_gpu_kfd_hwmon_profile_t* out_profile) {
+  // MP1_HWID is 1. Numeric paths also work before named IP symlinks existed.
+  // This explicit telemetry query neither extends discovery nor retains state.
+  int directory = openat(device_directory, "ip_discovery/die/0/1/0",
+                         O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (directory < 0) {
+    if (errno != ENOENT) {
+      return amdf_linux_error(errno);
+    }
+    *out_profile = AMDF_GPU_KFD_HWMON_PROFILE_NONE;
+    return AMDF_STATUS_OK;
+  }
+  const char* names[] = {"major", "minor", "revision"};
+  uint32_t version = 0;
+  amdf_status_t status = AMDF_STATUS_OK;
+  for (uint32_t i = 0; amdf_status_is_ok(status) && i < 3; ++i) {
+    amdf_observation_value_t value;
+    status = amdf_gpu_kfd_hwmon_read_integer(
+        directory, names[i], AMDF_OBSERVATION_VALUE_KIND_U64, &value);
+    if (amdf_status_is_ok(status)) {
+      if (value.u64 > UINT8_MAX) {
+        status = amdf_linux_error(EPROTO);
+      } else {
+        version = (version << 8) | (uint32_t)value.u64;
+      }
+    }
+  }
+  const amdf_status_t close_status = amdf_linux_file_close(&directory);
+  if (amdf_status_is_ok(status)) {
+    status = close_status;
+  }
+  if (amdf_status_is_ok(status)) {
+    amdf_gpu_kfd_hwmon_profile_t profile = amdf_gpu_kfd_hwmon_profile(version);
+    if (version == 0x0d0006 || version == 0x0d000c) {
+      // smu_v13_0_6_init_caps/smu_v13_0_12_init_caps suppress DPM below these
+      // firmware revisions. Their GFXCLK sensor returns zero instead of an
+      // unsupported error. The native firmware attribute disambiguates it.
+      char text[32];
+      status = amdf_gpu_kfd_hwmon_read_text(
+          device_directory, "fw_version/smc_fw_version", sizeof(text), text);
+      if (status == amdf_linux_error(ENOENT)) {
+        profile = AMDF_GPU_KFD_HWMON_PROFILE_MULTI_DIE_NO_GFXCLK;
+        status = AMDF_STATUS_OK;
+      } else if (amdf_status_is_ok(status)) {
+        char* end = NULL;
+        errno = 0;
+        const unsigned long long firmware = strtoull(text, &end, 16);
+        if (strlen(text) != 11 || text[0] != '0' || text[1] != 'x' ||
+            end != text + 10 || *end != '\n' || errno != 0 ||
+            firmware > UINT32_MAX) {
+          status = amdf_linux_error(EPROTO);
+        } else if (firmware <
+                   (version == 0x0d0006 ? 0x00552f00u : 0x00561900u)) {
+          profile = AMDF_GPU_KFD_HWMON_PROFILE_MULTI_DIE_NO_GFXCLK;
+        }
+      }
+    }
+    if (amdf_status_is_ok(status)) {
+      *out_profile = profile;
+    }
+  }
+  return status;
+}
+
 static amdf_status_t amdf_gpu_kfd_hwmon_open(
-    const amdf_platform_endpoint_t* endpoint, int* out_directory) {
+    const amdf_platform_endpoint_t* endpoint, int* out_directory,
+    amdf_gpu_kfd_hwmon_profile_t* out_profile) {
   // The live device's render file pins this DRM minor allocation. Unregister
   // removes its sysfs path; the minor cannot name a replacement while borrowed.
   char path[80];
@@ -118,15 +301,23 @@ static amdf_status_t amdf_gpu_kfd_hwmon_open(
   if (device_directory < 0) {
     return amdf_linux_error(errno);
   }
-  int parent =
-      openat(device_directory, "hwmon", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-  amdf_status_t status = parent < 0 ? amdf_linux_error(errno) : AMDF_STATUS_OK;
-  if (status == amdf_linux_error(ENOENT)) {
-    status = amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  amdf_gpu_kfd_hwmon_profile_t profile = AMDF_GPU_KFD_HWMON_PROFILE_NONE;
+  amdf_status_t status =
+      amdf_gpu_kfd_hwmon_query_profile(device_directory, &profile);
+  int parent = -1;
+  if (amdf_status_is_ok(status) && profile != AMDF_GPU_KFD_HWMON_PROFILE_NONE) {
+    parent =
+        openat(device_directory, "hwmon", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (parent < 0 && errno != ENOENT) {
+      status = amdf_linux_error(errno);
+    }
   }
   const amdf_status_t device_close = amdf_linux_file_close(&device_directory);
   if (amdf_status_is_ok(status)) {
     status = device_close;
+  }
+  if (amdf_status_is_ok(status) && parent < 0) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   int sensor_directory = -1;
   bool complete = false;
@@ -189,6 +380,7 @@ static amdf_status_t amdf_gpu_kfd_hwmon_open(
   }
   if (amdf_status_is_ok(status)) {
     *out_directory = sensor_directory;
+    *out_profile = profile;
   } else {
     // Preserve the originating error; close consumes this unexposed descriptor.
     const amdf_status_t close_status = amdf_linux_file_close(&sensor_directory);
@@ -197,44 +389,12 @@ static amdf_status_t amdf_gpu_kfd_hwmon_open(
   return status;
 }
 
-static amdf_status_t amdf_gpu_kfd_hwmon_read_value(
-    int directory, const amdf_gpu_kfd_hwmon_field_t* field,
-    amdf_observation_value_t* out_value) {
-  char text[64];
-  const amdf_status_t status =
-      amdf_gpu_kfd_hwmon_read_text(directory, field->name, sizeof(text), text);
-  if (!amdf_status_is_ok(status)) {
-    return status;
-  }
-  char* end = NULL;
-  const char* digits = text;
-  if (field->value_kind == AMDF_OBSERVATION_VALUE_KIND_I64 && *digits == '-') {
-    ++digits;
-  }
-  if (*digits < '0' || *digits > '9') {
-    return amdf_linux_error(EPROTO);
-  }
-  errno = 0;
-  amdf_observation_value_t value = {0};
-  if (field->value_kind == AMDF_OBSERVATION_VALUE_KIND_I64) {
-    value.i64 = strtoll(text, &end, 10);
-  } else {
-    value.u64 = strtoull(text, &end, 10);
-  }
-  if (errno != 0 || end == text || (*end != 0 && *end != '\n') ||
-      (*end == '\n' && end[1] != 0)) {
-    return amdf_linux_error(EPROTO);
-  }
-  *out_value = value;
-  return AMDF_STATUS_OK;
-}
-
 static amdf_telemetry_metric_info_t amdf_gpu_kfd_hwmon_describe(
-    uint32_t ordinal) {
+    amdf_gpu_kfd_hwmon_profile_t profile, uint32_t ordinal) {
   const amdf_gpu_kfd_hwmon_field_t* field = &amdf_gpu_kfd_hwmon_fields[ordinal];
   const amdf_telemetry_source_id_t id =
-      AMDF_GPU_KFD_HWMON_SOURCE_BASE + ordinal + 1;
-  return (amdf_telemetry_metric_info_t){
+      AMDF_GPU_KFD_HWMON_SOURCE_BASE + (profile << 8) + ordinal + 1;
+  amdf_telemetry_metric_info_t info = {
       .source_id = id,
       .source_name = field->name,
       .source_flags = AMDF_TELEMETRY_SOURCE_FLAG_NATIVE_MAY_BLOCK |
@@ -249,10 +409,46 @@ static amdf_telemetry_metric_info_t amdf_gpu_kfd_hwmon_describe(
                  .semantic = AMDF_OBSERVATION_VALUE_SEMANTIC_UNSPECIFIED},
       .name = field->name,
       .origin = {.interface_name = "linux.amdgpu.hwmon",
-                 .schema = "hwmon-abi",
+                 .schema = "hwmon-abi:discrete",
                  .field = field->name,
                  .field_index = UINT32_MAX},
   };
+  if (profile == AMDF_GPU_KFD_HWMON_PROFILE_APU ||
+      profile == AMDF_GPU_KFD_HWMON_PROFILE_RENOIR ||
+      profile == AMDF_GPU_KFD_HWMON_PROFILE_SMU14_APU) {
+    info.origin.schema = "hwmon-abi:apu";
+    if (ordinal == 2 || ordinal == 3) {
+      // APU producers report CurrentSocketPower/SocketPower, the firmware's
+      // PPT/STAPM power group that can include a participating discrete GPU.
+      info.domain = AMDF_TELEMETRY_DOMAIN_POWER_BUDGET;
+    } else if (ordinal == 4 || ordinal == 5) {
+      // The native EDGE/HOTSPOT routes return GfxTemperature/SocTemperature.
+      info.kind = AMDF_TELEMETRY_METRIC_TEMPERATURE;
+      info.domain =
+          ordinal == 4 ? AMDF_TELEMETRY_DOMAIN_GPU : AMDF_TELEMETRY_DOMAIN_SOC;
+    }
+  }
+  if (profile == AMDF_GPU_KFD_HWMON_PROFILE_RENOIR) {
+    info.origin.schema = "hwmon-abi:renoir";
+    if (ordinal == 1) {
+      // This producer's GFX_MCLK route reads ClockFrequency[CLOCK_FCLK].
+      info.kind = AMDF_TELEMETRY_METRIC_CLOCK_FABRIC;
+      info.domain = AMDF_TELEMETRY_DOMAIN_SOC;
+    }
+  } else if (profile == AMDF_GPU_KFD_HWMON_PROFILE_SMU14_APU) {
+    info.origin.schema = "hwmon-abi:smu14-apu";
+    if (ordinal == 2 || ordinal == 3) {
+      info.format.semantic = AMDF_OBSERVATION_VALUE_SEMANTIC_FILTERED;
+    }
+  } else if (profile == AMDF_GPU_KFD_HWMON_PROFILE_MULTI_DIE ||
+             profile == AMDF_GPU_KFD_HWMON_PROFILE_MULTI_DIE_NO_GFXCLK) {
+    info.origin.schema = "hwmon-abi:multi-die";
+    if (ordinal == 5) {
+      // MaxSocketTemperature is socket-scoped, not one graphics die.
+      info.domain = AMDF_TELEMETRY_DOMAIN_PACKAGE;
+    }
+  }
+  return info;
 }
 
 amdf_status_t amdf_gpu_umd_enumerate_telemetry_metrics(
@@ -261,7 +457,9 @@ amdf_status_t amdf_gpu_umd_enumerate_telemetry_metrics(
     uint32_t* out_count) {
   (void)device;
   int directory = -1;
-  amdf_status_t status = amdf_gpu_kfd_hwmon_open(endpoint, &directory);
+  amdf_gpu_kfd_hwmon_profile_t profile;
+  amdf_status_t status =
+      amdf_gpu_kfd_hwmon_open(endpoint, &directory, &profile);
   if (status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
     *out_count = 0;
     return AMDF_STATUS_OK;
@@ -270,11 +468,16 @@ amdf_status_t amdf_gpu_umd_enumerate_telemetry_metrics(
     return status;
   }
   uint32_t supported = 0;
+  const uint32_t admitted = amdf_gpu_kfd_hwmon_fields_for_profile(profile);
   for (uint32_t i = 0;
        amdf_status_is_ok(status) && i < AMDF_GPU_KFD_HWMON_FIELD_COUNT; ++i) {
+    if ((admitted & (1u << i)) == 0) {
+      continue;
+    }
+    const amdf_gpu_kfd_hwmon_field_t* field = &amdf_gpu_kfd_hwmon_fields[i];
     amdf_observation_value_t value;
-    status = amdf_gpu_kfd_hwmon_read_value(
-        directory, &amdf_gpu_kfd_hwmon_fields[i], &value);
+    status = amdf_gpu_kfd_hwmon_read_integer(directory, field->name,
+                                             field->value_kind, &value);
     if (amdf_status_is_ok(status) || status == amdf_linux_error(ENODATA)) {
       supported |= 1u << i;
       status = AMDF_STATUS_OK;
@@ -294,7 +497,7 @@ amdf_status_t amdf_gpu_umd_enumerate_telemetry_metrics(
   for (uint32_t i = 0; i < AMDF_GPU_KFD_HWMON_FIELD_COUNT; ++i) {
     if ((supported & (1u << i)) != 0) {
       if (count < capacity) {
-        metrics[count] = amdf_gpu_kfd_hwmon_describe(i);
+        metrics[count] = amdf_gpu_kfd_hwmon_describe(profile, i);
       }
       ++count;
     }
@@ -311,9 +514,14 @@ amdf_status_t amdf_gpu_umd_read_telemetry(
     const amdf_telemetry_metric_id_t* metric_ids,
     amdf_telemetry_value_t* values, amdf_telemetry_sample_t* out_sample) {
   (void)device;
-  if (source_id <= AMDF_GPU_KFD_HWMON_SOURCE_BASE ||
-      source_id - AMDF_GPU_KFD_HWMON_SOURCE_BASE >
-          AMDF_GPU_KFD_HWMON_FIELD_COUNT) {
+  const uint64_t source_index = source_id - AMDF_GPU_KFD_HWMON_SOURCE_BASE;
+  const amdf_gpu_kfd_hwmon_profile_t requested_profile =
+      (amdf_gpu_kfd_hwmon_profile_t)(source_index >> 8);
+  const uint32_t field_index = (uint32_t)(source_index & 0xff);
+  if (source_index >> 32 != 0 || field_index == 0 ||
+      field_index > AMDF_GPU_KFD_HWMON_FIELD_COUNT ||
+      (amdf_gpu_kfd_hwmon_fields_for_profile(requested_profile) &
+       (1u << (field_index - 1))) == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_NOT_FOUND);
   }
   for (uint32_t i = 0; i < metric_count; ++i) {
@@ -321,19 +529,27 @@ amdf_status_t amdf_gpu_umd_read_telemetry(
       return amdf_make_api_status(AMDF_STATUS_CODE_NOT_FOUND);
     }
   }
-  const uint32_t ordinal =
-      (uint32_t)(source_id - AMDF_GPU_KFD_HWMON_SOURCE_BASE - 1);
+  const uint32_t ordinal = field_index - 1;
   int directory = -1;
-  amdf_status_t status = amdf_gpu_kfd_hwmon_open(endpoint, &directory);
+  amdf_gpu_kfd_hwmon_profile_t profile;
+  amdf_status_t status =
+      amdf_gpu_kfd_hwmon_open(endpoint, &directory, &profile);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
   amdf_telemetry_sample_t sample = {0};
   amdf_telemetry_value_t value = {0};
-  status = amdf_platform_observation_query_host_clock(&sample.host_before);
+  if (profile != requested_profile) {
+    status = amdf_make_api_status(AMDF_STATUS_CODE_VERSION_MISMATCH);
+  }
   if (amdf_status_is_ok(status)) {
-    status = amdf_gpu_kfd_hwmon_read_value(
-        directory, &amdf_gpu_kfd_hwmon_fields[ordinal], &value.value);
+    status = amdf_platform_observation_query_host_clock(&sample.host_before);
+  }
+  if (amdf_status_is_ok(status)) {
+    const amdf_gpu_kfd_hwmon_field_t* field =
+        &amdf_gpu_kfd_hwmon_fields[ordinal];
+    status = amdf_gpu_kfd_hwmon_read_integer(directory, field->name,
+                                             field->value_kind, &value.value);
     if (status == amdf_linux_error(ENODATA) ||
         status == amdf_linux_error(EOPNOTSUPP) ||
         status == amdf_linux_error(ENOENT)) {

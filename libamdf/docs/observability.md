@@ -141,10 +141,21 @@ no PMLog source rather than assigning an ambiguous observation to one GPU.
 Only sensors with established measurement semantics and units are enumerated.
 Configured clock targets, power caps, and maximum rates are not measurements.
 
+Linux identifies the native SMU producer during the explicit telemetry query.
+The same hwmon name can describe different quantities: SMU14 APU clock fields
+are filtered targets, the Renoir memory-clock route reads its fabric clock,
+and APU temperature routes identify GPU and SoC regions rather than edge and
+hotspot sensors. The descriptors preserve those distinctions. Clock routes
+that synthesize zero on older firmware require the native firmware capability
+before enumeration. An unavailable producer identity leaves those sources
+absent; malformed identity metadata remains an error.
+
 Physical values are `native_value * scale_numerator / scale_denominator` in
 the descriptor's unit. Integer storage preserves native precision until the
 caller chooses a display representation. Package power can include CPU power
 on an APU; it does not become GPU-only consumption because the GPU exposes it.
+An APU's firmware power budget can also include a participating discrete GPU;
+`POWER_BUDGET` preserves that scope separately from package power.
 Related domains and multiple sources can overlap and are not additive. Native
 sensor names such as "average" or "current" do not establish a filter window;
 `UNSPECIFIED` aggregation preserves that absence of information.

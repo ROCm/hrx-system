@@ -178,6 +178,7 @@ amdf_cc_test(
         ":telemetry",
         "//libamdf/src/gpu/umd:telemetry",
         "//libamdf/src/platform/linux:endpoint",
+        "//libamdf/src/platform/linux:file",
         "//third_party:google_test",
         "//third_party:google_test_main",
     ],
