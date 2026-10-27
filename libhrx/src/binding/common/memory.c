@@ -49,6 +49,32 @@ static iree_status_t iree_hal_streaming_command_buffer_barrier(
   return iree_hal_command_buffer_barrier(command_buffer, &execution_barrier);
 }
 
+static bool iree_hal_streaming_memory_try_lookup(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_deviceptr_t device_ptr,
+    iree_hal_streaming_buffer_ref_t* out_ref) {
+  size_t offset = 0;
+  const bool found =
+      hrx_buffer_table_try_find(&context->buffer_table, device_ptr, NULL,
+                                &offset, (void**)&out_ref->buffer);
+  out_ref->offset = (iree_device_size_t)offset;
+  return found;
+}
+
+static iree_status_t iree_hal_streaming_buffer_ref_validate_range(
+    const iree_hal_streaming_buffer_ref_t* ref, iree_device_size_t size) {
+  if (!ref->buffer) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "buffer reference is empty");
+  }
+  if (ref->offset > ref->buffer->size ||
+      size > ref->buffer->size - ref->offset) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "buffer reference range exceeds allocation");
+  }
+  return iree_ok_status();
+}
+
 typedef struct iree_hal_streaming_host_memcpy_callback_data_t {
   void* dst;
   const void* src;
@@ -138,26 +164,23 @@ static iree_status_t iree_hal_streaming_capture_record_host_to_device(
     iree_hal_streaming_graph_node_t** out_terminal_node) {
   iree_hal_streaming_capture_host_to_device_t* capture =
       (iree_hal_streaming_capture_host_to_device_t*)user_data;
-  if (!capture->copy_source_into_graph) {
-    iree_hal_streaming_buffer_ref_t source_ref;
-    iree_status_t status = iree_hal_streaming_memory_lookup_range(
-        graph->context, (iree_hal_streaming_deviceptr_t)capture->src,
-        capture->size, &source_ref);
-    if (iree_status_is_ok(status)) {
-      if (source_ref.buffer->memory_kind ==
-          IREE_HAL_STREAMING_MEMORY_KIND_DEVICE) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "host-to-device source is not host memory");
-      }
+  iree_hal_streaming_buffer_ref_t source_ref;
+  if (iree_hal_streaming_memory_try_lookup(
+          graph->context, (iree_hal_streaming_deviceptr_t)capture->src,
+          &source_ref)) {
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_buffer_ref_validate_range(
+        &source_ref, capture->size));
+    if (source_ref.buffer->memory_kind ==
+        IREE_HAL_STREAMING_MEMORY_KIND_DEVICE) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "host-to-device source is not host memory");
+    }
+    if (!capture->copy_source_into_graph) {
       return iree_hal_streaming_graph_add_copy_ptr_node(
           graph, dependencies, dependency_count, capture->dst,
           (iree_hal_streaming_deviceptr_t)capture->src, capture->size,
           out_terminal_node);
     }
-    if (!iree_status_is_not_found(status)) {
-      return status;
-    }
-    iree_status_ignore(status);
   }
   const void* source = capture->src;
   if (capture->copy_source_into_graph) {
@@ -204,10 +227,11 @@ static iree_status_t iree_hal_streaming_capture_record_device_to_host(
   iree_hal_streaming_capture_device_to_host_t* capture =
       (iree_hal_streaming_capture_device_to_host_t*)user_data;
   iree_hal_streaming_buffer_ref_t destination_ref;
-  iree_status_t status = iree_hal_streaming_memory_lookup_range(
-      graph->context, (iree_hal_streaming_deviceptr_t)capture->dst,
-      capture->size, &destination_ref);
-  if (iree_status_is_ok(status)) {
+  if (iree_hal_streaming_memory_try_lookup(
+          graph->context, (iree_hal_streaming_deviceptr_t)capture->dst,
+          &destination_ref)) {
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_buffer_ref_validate_range(
+        &destination_ref, capture->size));
     if (destination_ref.buffer->memory_kind ==
         IREE_HAL_STREAMING_MEMORY_KIND_DEVICE) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -218,10 +242,6 @@ static iree_status_t iree_hal_streaming_capture_record_device_to_host(
         (iree_hal_streaming_deviceptr_t)capture->dst, capture->src,
         capture->size, out_terminal_node);
   }
-  if (!iree_status_is_not_found(status)) {
-    return status;
-  }
-  iree_status_ignore(status);
   iree_hal_streaming_buffer_t* staging = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_allocate_host_staging(
       graph, capture->size, &staging));
@@ -605,20 +625,6 @@ void iree_hal_streaming_memory_release_pageable_staging(
   }
 }
 
-static iree_status_t iree_hal_streaming_buffer_ref_validate_range(
-    const iree_hal_streaming_buffer_ref_t* ref, iree_device_size_t size) {
-  if (!ref->buffer) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "buffer reference is empty");
-  }
-  if (ref->offset > ref->buffer->size ||
-      size > ref->buffer->size - ref->offset) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "buffer reference range exceeds allocation");
-  }
-  return iree_ok_status();
-}
-
 iree_hal_streaming_deviceptr_t iree_hal_streaming_buffer_device_pointer(
     iree_hal_streaming_buffer_t* buffer) {
   return buffer ? buffer->device_ptr : 0;
@@ -630,21 +636,9 @@ iree_status_t iree_hal_streaming_memory_lookup(
     iree_hal_streaming_buffer_ref_t* out_ref) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(out_ref);
-  memset(out_ref, 0, sizeof(*out_ref));
-  size_t offset = 0;
-  // Hot path: explicit kernel parameter resolution and memory operations use
-  // this for pointer-table lookups. Most lookups miss, so handle the miss
-  // directly without allocating an error message.
-  hrx_status_t hs =
-      hrx_buffer_table_find(&context->buffer_table, device_ptr, NULL, &offset,
-                            (void**)&out_ref->buffer);
-  if (!hrx_status_is_ok(hs)) {
-    iree_status_code_t code = (iree_status_code_t)hrx_status_code(hs);
-    hrx_status_ignore(hs);
-    return iree_status_from_code(code);
-  }
-  out_ref->offset = (iree_device_size_t)offset;
-  return iree_ok_status();
+  return iree_hal_streaming_memory_try_lookup(context, device_ptr, out_ref)
+             ? iree_ok_status()
+             : iree_status_from_code(IREE_STATUS_NOT_FOUND);
 }
 
 iree_status_t iree_hal_streaming_memory_lookup_range(

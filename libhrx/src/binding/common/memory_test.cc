@@ -532,6 +532,49 @@ TEST_F(CpuStreamingMemoryTest,
 }
 
 TEST_F(CpuStreamingMemoryTest,
+       CapturedHostCopiesRejectRegisteredRangeOverruns) {
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, 16, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
+  IREE_ASSERT_OK(iree_hal_streaming_memory_register_host(
+      context_, registered_storage_.data(), registered_storage_.size(),
+      IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT, &host_buffer_));
+  registered_storage_.fill(0xcd);
+
+  for (int operation : {0, 1, 2}) {
+    IREE_ASSERT_OK(iree_hal_streaming_begin_capture(
+        stream_, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+    iree_status_t status;
+    switch (operation) {
+      case 0:
+        status = iree_hal_streaming_memcpy_host_to_device(
+            context_, device_pointer_, registered_storage_.data() + 8, 9,
+            stream_);
+        break;
+      case 1:
+        status = iree_hal_streaming_memcpy_value_to_device(
+            context_, device_pointer_, registered_storage_.data() + 8, 9,
+            stream_);
+        break;
+      default:
+        status = iree_hal_streaming_memcpy_device_to_host(
+            context_, registered_storage_.data() + 8, device_pointer_, 9,
+            stream_);
+        break;
+    }
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, status);
+    iree_hal_streaming_graph_t* graph = nullptr;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                          iree_hal_streaming_end_capture(stream_, &graph));
+    EXPECT_EQ(nullptr, graph);
+    iree_hal_streaming_graph_release(graph);
+    for (uint8_t byte : registered_storage_) {
+      EXPECT_EQ(0xcd, byte);
+    }
+  }
+}
+
+TEST_F(CpuStreamingMemoryTest,
        PitchedCopyDrainsAcceptedRowsBeforeReturningRecordingError) {
   constexpr iree_device_size_t kAllocationSize = 16;
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
