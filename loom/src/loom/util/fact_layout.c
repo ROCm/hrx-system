@@ -34,6 +34,7 @@ static iree_status_t loom_value_fact_layout_origins_ensure_capacity(
 
 loom_value_fact_layout_strides_t loom_value_fact_table_query_layout_strides(
     const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  loom_value_fact_table_record_read(table, value_id);
   const loom_value_fact_layout_origins_t* origins = table->layout_origins;
   if (!origins || !loom_value_fact_range_contains(origins->range, value_id) ||
       !origins

@@ -1,0 +1,41 @@
+// RUN: pass canonicalize
+
+// A loop body consumes an outer carried value without mentioning it in the
+// inner loop's operand list. Its equation can already have a reusable numeric
+// result when the enclosing solve starts observing dependencies.
+func.def @nested_capture(%count: index, %seed: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %result = scf.for %outer_iteration = [%c0 to %c2 step %c1](%carried = %c1 : index) -> (index) {
+    %inner_result = scf.for %inner_iteration = [%c0 to %count step %c1](%accumulator = %seed : index) -> (index) {
+      %sum = index.add %accumulator, %carried : index
+      %high = test.fact_range_hi %carried : index -> i64
+      test.use %high : i64
+      scf.yield %sum : index
+    }
+    test.use %inner_result : index
+    %next = index.add %carried, %c1 : index
+    scf.yield %next : index
+  }
+  func.return
+}
+
+// ----
+func.def @nested_capture(%count: index, %seed: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %result = scf.for %outer_iteration = [%c0 to %c2 step %c1](%carried = %c1 : index) -> (index) {
+    %inner_result = scf.for %inner_iteration = [%c0 to %count step %c1](%accumulator = %seed : index) -> (index) {
+      %sum = index.add %accumulator, %carried : index
+      %high = scalar.constant 2 : i64
+      test.use %high : i64
+      scf.yield %sum : index
+    }
+    test.use %inner_result : index
+    %next = index.add %carried, %c1 : index
+    scf.yield %next : index
+  }
+  func.return
+}

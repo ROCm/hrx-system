@@ -30,6 +30,7 @@ loom_check_test_suite(
         "forwarding_equivalence.loom-test",
         "forwarding_facts.loom-test",
         "loop_distribution_facts.loom-test",
+        "loop_replay_facts.loom-test",
         "rotation_facts.loom-test",
         "roundtrip.loom-test",
         "selection_bounds.loom-test",

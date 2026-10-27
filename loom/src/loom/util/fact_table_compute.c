@@ -13,6 +13,7 @@
 #include "loom/target/facts.h"
 #include "loom/util/fact_cfg.h"
 #include "loom/util/fact_loop.h"
+#include "loom/util/fact_loop_replay.h"
 #include "loom/util/fact_snapshot.h"
 #include "loom/util/fact_table.h"
 
@@ -902,6 +903,7 @@ static iree_status_t loom_value_fact_table_save_cfg_block(
 static iree_status_t loom_value_fact_table_reset_cfg_values(
     loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_value_fact_cfg_saved_values_t* saved) {
+  loom_value_fact_loop_replay_invalidate(table);
   for (const loom_value_fact_cfg_saved_chunk_t* chunk = saved->first; chunk;
        chunk = chunk->next) {
     const uint32_t value_count = chunk->next
@@ -1379,6 +1381,9 @@ static bool loom_value_fact_table_operands_unchanged(
   for (uint16_t i = 0; i < op->operand_count; ++i) {
     const iree_host_size_t index =
         (iree_host_size_t)operands[i] - table->first_value_id;
+    // A reused equation still depends on every operand. The enclosing loop
+    // must retain those reads even when inference itself is skipped.
+    loom_value_fact_table_record_read(table, operands[i]);
     if (index < table->capacity &&
         (table->replay.generations[index] & ~UINT32_C(1)) > evaluated) {
       return false;

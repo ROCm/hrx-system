@@ -14,6 +14,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/util/fact_induction.h"
+#include "loom/util/fact_loop_replay.h"
 
 #define LOOM_VALUE_FACT_LOOP_MAX_ITERATIONS 8
 
@@ -1077,12 +1078,24 @@ iree_status_t loom_value_fact_table_compute_loop_like_summary(
     // An enclosing solve can already be replaying this entire subtree. Restore
     // that state on failure as well as success so later edits refresh roots.
     const bool was_replaying = table->replaying;
-    iree_status_t status =
-        loom_loop_like_condition_region(loop)
-            ? loom_value_fact_table_compute_condition_loop_summary(
-                  table, module, loop, &scratch_arena, out_changed)
-            : loom_value_fact_table_compute_counted_loop_summary(
-                  table, module, loop, &scratch_arena, out_changed);
+    loom_value_fact_loop_replay_t replay;
+    bool reused = false;
+    iree_status_t status = loom_value_fact_loop_replay_begin(
+        table, module, op, &scratch_arena, &replay, &reused);
+    if (iree_status_is_ok(status)) {
+      if (!reused) {
+        status = loom_loop_like_condition_region(loop)
+                     ? loom_value_fact_table_compute_condition_loop_summary(
+                           table, module, loop, &scratch_arena, out_changed)
+                     : loom_value_fact_table_compute_counted_loop_summary(
+                           table, module, loop, &scratch_arena, out_changed);
+      } else if (out_changed) {
+        *out_changed = false;
+      }
+      iree_status_t end_status = loom_value_fact_loop_replay_end(
+          table, &replay, iree_status_is_ok(status));
+      status = iree_status_join(status, end_status);
+    }
     table->replaying = was_replaying;
     iree_arena_deinitialize(&scratch_arena);
     return status;

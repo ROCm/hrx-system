@@ -389,6 +389,7 @@ loom_cc_library(
     "fact_induction.h"
     "fact_layout.h"
     "fact_loop.h"
+    "fact_loop_replay.h"
     "fact_observation.h"
     "fact_origin.h"
     "fact_range.h"
@@ -405,6 +406,7 @@ loom_cc_library(
     "fact_induction.c"
     "fact_layout.c"
     "fact_loop.c"
+    "fact_loop_replay.c"
     "fact_origin.c"
     "fact_range.c"
     "fact_recurrence.c"
@@ -426,6 +428,7 @@ loom_cc_library(
     ::fact_table_api
     ::numeric_format
     ::reference_facts
+    ::walk
     iree::base
     iree::base::internal
     iree::base::internal::arena
@@ -582,6 +585,26 @@ loom_cc_test(
     loom::ir
     loom::ops::index
     loom::ops::scf
+)
+
+loom_cc_test(
+  NAME
+    fact_loop_replay_test
+  SRCS
+    "fact_loop_replay_test.cc"
+  DEPS
+    ::fact_table
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::analysis::condition_edge_projection
+    loom::analysis::condition_facts
+    loom::ir
+    loom::ops::func::builders
+    loom::ops::index::builders
+    loom::ops::op_registry
+    loom::ops::scalar::builders
+    loom::ops::scf::builders
 )
 
 loom_cc_test(

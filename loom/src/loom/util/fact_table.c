@@ -15,6 +15,7 @@
 #include "loom/target/facts_builder.h"
 #include "loom/util/fact_cfg.h"
 #include "loom/util/fact_loop.h"
+#include "loom/util/fact_loop_replay.h"
 #include "loom/util/fact_relation.h"
 #include "loom/util/fact_vector_partition.h"
 
@@ -52,11 +53,13 @@ struct loom_value_fact_region_entry_t {
   loom_value_fact_counted_loop_domain_t* counted_domain;
   // Condition facts projected onto this region's entry arguments, when any.
   loom_condition_edge_projection_t* condition_projection;
+  // Complete loop solve borrowed only while its outer solve is active.
+  loom_value_fact_loop_replay_record_t* loop_replay;
   // Next entry in the region-address hash collision chain.
   loom_value_fact_region_entry_t* next_bucket;
 };
 
-static_assert(sizeof(loom_value_fact_region_entry_t) <= 72,
+static_assert(sizeof(loom_value_fact_region_entry_t) <= 80,
               "region execution facts must retain a compact cache footprint");
 
 static iree_status_t loom_value_fact_table_ensure_range(
@@ -262,6 +265,8 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->touched_count = 0;
   table->replay.generation = 0;
   table->replay.generations = NULL;
+  table->replay.loop = NULL;
+  table->replay.reads = NULL;
   table->count = 0;
   if (!table->has_persistent_extension_entries) {
     table->extensions.entries = NULL;
@@ -425,6 +430,32 @@ static iree_status_t loom_value_fact_table_ensure_region_entry(
   }
   *out_entry = entry;
   return iree_ok_status();
+}
+
+iree_status_t loom_value_fact_table_set_loop_replay(
+    loom_value_fact_table_t* table, const loom_region_t* body,
+    loom_value_fact_loop_replay_record_t* record) {
+  loom_value_fact_region_entry_t* entry = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_value_fact_table_ensure_region_entry(table, body, &entry));
+  entry->loop_replay = record;
+  return iree_ok_status();
+}
+
+loom_value_fact_loop_replay_record_t* loom_value_fact_table_lookup_loop_replay(
+    const loom_value_fact_table_t* table, const loom_region_t* body) {
+  const loom_value_fact_region_entry_t* entry =
+      loom_value_fact_table_lookup_region_entry(table, body);
+  return entry ? entry->loop_replay : NULL;
+}
+
+void loom_value_fact_table_clear_loop_replay(loom_value_fact_table_t* table,
+                                             const loom_region_t* body) {
+  loom_value_fact_region_entry_t* entry =
+      loom_value_fact_table_lookup_region_entry(table, body);
+  if (entry) {
+    entry->loop_replay = NULL;
+  }
 }
 
 iree_status_t loom_value_fact_table_set_region_temporal_scope(
@@ -794,6 +825,7 @@ iree_status_t loom_value_fact_table_define(loom_value_fact_table_t* table,
 
 void loom_value_fact_table_undefine(loom_value_fact_table_t* table,
                                     loom_value_id_t value_id) {
+  loom_value_fact_loop_replay_invalidate(table);
   loom_value_fact_integer_relations_undefine(table, value_id);
   loom_value_fact_table_clear_origins(table, value_id);
   if (table->vector_partitions) {

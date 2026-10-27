@@ -143,6 +143,7 @@ static iree_host_size_t loom_value_fact_relation_entry_lower_bound(
 
 loom_value_fact_relation_roots_t loom_value_fact_integer_relations_snapshot(
     const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  loom_value_fact_table_record_read(table, value_id);
   if (!table || !table->integer_relations) {
     return (loom_value_fact_relation_roots_t){0};
   }
@@ -730,6 +731,7 @@ static void loom_value_fact_relation_root_cursor_advance(
 bool loom_value_fact_table_for_each_signed_integer_relation_while(
     const loom_value_fact_table_t* table, loom_value_id_t value,
     loom_value_fact_signed_integer_relation_visit_fn_t visit, void* user_data) {
+  loom_value_fact_table_record_read(table, value);
   if (!table || !table->integer_relations) {
     return true;
   }

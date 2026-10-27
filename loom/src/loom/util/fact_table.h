@@ -72,6 +72,8 @@ typedef struct loom_condition_edge_projection_t
     loom_condition_edge_projection_t;
 typedef struct loom_cfg_graph_t loom_cfg_graph_t;
 typedef struct loom_target_facts_t loom_target_facts_t;
+typedef struct loom_value_fact_loop_replay_t loom_value_fact_loop_replay_t;
+typedef struct loom_value_fact_loop_reads_t loom_value_fact_loop_reads_t;
 
 // Per-analysis context passed to op fact inference callbacks.
 struct loom_fact_context_t {
@@ -428,6 +430,10 @@ struct loom_value_fact_table_t {
   } scratch;
   // Numeric dependency tracking, activated lazily by iterative solvers.
   struct {
+    // Stack-owned outer/nested solve boundary; NULL outside loop inference.
+    loom_value_fact_loop_replay_t* loop;
+    // Active dependency collector; NULL for flat loops and snapshot comparison.
+    loom_value_fact_loop_reads_t* reads;
     // One transient-arena generation per dense row. Zero is unevaluated; the
     // low bit marks a publication not yet established by its defining op.
     // Completed equations record the scope generation at evaluation, allowing
@@ -492,9 +498,23 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table);
 iree_status_t loom_value_fact_table_touch(loom_value_fact_table_t* table,
                                           loom_value_id_t value_id);
 
+// Retains a dependency in a preallocated active collector. Reads allocate
+// nothing; their owning solve publishes complete snapshots at completion.
+// Keep this bookkeeping out of the many inlined numeric query callsites.
+IREE_ATTRIBUTE_NOINLINE void loom_value_fact_loop_record_read(
+    loom_value_fact_loop_reads_t* reads, loom_value_id_t value_id);
+
+static inline void loom_value_fact_table_record_read(
+    const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  if (table && table->replay.reads) {
+    loom_value_fact_loop_record_read(table->replay.reads, value_id);
+  }
+}
+
 // Returns true when |value_id| has explicitly defined facts in |table|.
 static inline bool loom_value_fact_table_has_entry(
     const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  loom_value_fact_table_record_read(table, value_id);
   const iree_host_size_t index =
       (iree_host_size_t)value_id - table->first_value_id;
   return index < table->capacity && table->entries[index].known_divisor != 0;
@@ -675,6 +695,7 @@ static inline bool loom_value_fact_table_has_result_type_kind(
 // Replacement preserves live representatives before deferred numeric inference.
 static inline loom_value_id_t loom_value_fact_table_query_identity(
     const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  loom_value_fact_table_record_read(table, value_id);
   if (!table ||
       !loom_value_fact_range_contains(table->identities.range, value_id)) {
     return value_id;

@@ -129,6 +129,7 @@ static iree_status_t loom_value_fact_vector_partitions_ensure_entry(
 
 loom_value_fact_vector_partition_t loom_value_fact_table_query_vector_partition(
     const loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  loom_value_fact_table_record_read(table, value_id);
   const loom_value_fact_vector_partitions_t* partitions =
       table ? table->vector_partitions : NULL;
   const loom_value_fact_vector_partition_entry_t* entry =
