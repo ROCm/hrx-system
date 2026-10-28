@@ -206,12 +206,22 @@ no execution checks; at least one execution or compiler profile is required.
 Adding profiles creates separate results without importing or linking the
 source closure again. Device availability never gates a sibling compiler check.
 
-The build configuration selects instrumentation for the same test targets.
-`--config=asan`, `--config=tsan`, and `--config=ubsan` pass the corresponding
-sanitizer mode to the built-in Loom correctness and benchmark runners. This
-also instruments JIT products when the runners come from an installed SDK;
-the wheel itself retains its native build configuration. Explicit sanitizer
-options on a profile or a runtime `--test_arg` override the build default.
+Loom program instrumentation is independent of the native compiler/runtime
+build. Select `--@hrx//loom/config/sanitizer:address=true`, `:thread=true`, or
+`:undefined=true` for the built-in correctness and benchmark runners. The flags
+combine, work with installed SDKs, and keep the same test targets. An external
+repository can give them the same aliases used by HRX:
+
+```text title=".bazelrc"
+build:loom-asan --@hrx//loom/config/sanitizer:address=true
+build:loom-tsan --@hrx//loom/config/sanitizer:thread=true
+build:loom-ubsan --@hrx//loom/config/sanitizer:undefined=true
+```
+
+`--config=loom-asan` checks JIT products. Native `--config=asan` checks the
+compiler/runtime built from source; selecting both checks both. An installed
+wheel retains its own native build configuration. Explicit sanitizer options
+on a profile or a runtime `--test_arg` override the configured Loom checks.
 Custom runners retain their own argument contract.
 
 ### Share a corpus across test packages

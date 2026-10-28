@@ -210,6 +210,11 @@ build:ubsan --cxxopt=-fno-sanitize=function
 build:ubsan --cxxopt=-fno-sanitize=vptr
 build:ubsan --cc_output_directory_tag=ubsan
 
+# Loom program checks are independent of native C/C++ instrumentation.
+build:loom-asan --//loom/config/sanitizer:address=true
+build:loom-tsan --//loom/config/sanitizer:thread=true
+build:loom-ubsan --//loom/config/sanitizer:undefined=true
+
 # LibFuzzer builds include ASAN by default; fuzzing without memory
 # instrumentation is not a useful local or CI default. This spells out the
 # ASAN flags instead of inheriting --config=asan so the output directory tag is

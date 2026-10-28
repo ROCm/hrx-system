@@ -6,6 +6,7 @@
 
 """Public rules for Loom libraries, kernels, and tests."""
 
+load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//build_tools/bazel:cc_attrs.bzl", "cc_attrs")
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
@@ -31,13 +32,6 @@ _LOOM_BENCHMARK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:benchmark_toolc
 _LOOM_FORMAT_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:format_toolchain_type")
 _LOOM_LINK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:link_toolchain_type")
 _LOOM_TEST_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:test_toolchain_type")
-
-_BUILD_SANITIZER_ARGS = select({
-    Label("//build_tools/bazel:address_sanitizer_target"): ["--sanitizer=asan"],
-    Label("//build_tools/bazel:thread_sanitizer_target"): ["--sanitizer=tsan"],
-    Label("//build_tools/bazel:undefined_behavior_sanitizer_target"): ["--sanitizer=ubsan"],
-    "//conditions:default": [],
-})
 
 _LOOM_BENCHMARK_SMOKE_ARGS = [
     "--iterations=1",
@@ -400,7 +394,17 @@ def _write_execution_test_launcher(
 
 def _execution_test_launcher_providers(ctx, test_tool, benchmark_tool):
     module = ctx.attr.module[_LoomTestModuleInfo].module
-    runner_args = ctx.attr.profile_args + ctx.attr.workload_args
+    sanitizers = [
+        mode
+        for mode, setting in [
+            ("asan", ctx.attr._address_sanitizer),
+            ("tsan", ctx.attr._thread_sanitizer),
+            ("ubsan", ctx.attr._undefined_sanitizer),
+        ]
+        if setting[BuildSettingInfo].value
+    ]
+    sanitizer_args = ["--sanitizer=" + "|".join(sanitizers)] if sanitizers else []
+    runner_args = sanitizer_args + ctx.attr.profile_args + ctx.attr.workload_args
     test_runner_args = runner_args + ctx.attr.test_args
     benchmark_runner_args = (
         _LOOM_BENCHMARK_SMOKE_ARGS + runner_args if benchmark_tool != None else []
@@ -465,6 +469,18 @@ _EXECUTION_TEST_LAUNCHER_ATTRS = {
     ),
     "workload_args": attr.string_list(
         doc = "Configuration bindings and case selection shared by each runner.",
+    ),
+    "_address_sanitizer": attr.label(
+        default = Label("//loom/config/sanitizer:address"),
+        providers = [BuildSettingInfo],
+    ),
+    "_thread_sanitizer": attr.label(
+        default = Label("//loom/config/sanitizer:thread"),
+        providers = [BuildSettingInfo],
+    ),
+    "_undefined_sanitizer": attr.label(
+        default = Label("//loom/config/sanitizer:undefined"),
+        providers = [BuildSettingInfo],
     ),
 }
 
@@ -672,7 +688,7 @@ def _declare_execution_test(
         return
     launcher_attrs = {
         "module": module,
-        "profile_args": _BUILD_SANITIZER_ARGS + profile.runner_args,
+        "profile_args": profile.runner_args,
         "profile_name": profile.name,
         "test_args": test_runner_args,
         "workload_args": workload_args,
@@ -1051,10 +1067,11 @@ def loom_test(
     contains shared options. Other single-tool launchers forward arguments
     directly, while artifact-presence checks accept none.
 
-    Built-in runners inherit address, thread, or undefined-behavior checks from the Bazel
-    build configuration, without adding test targets. Explicit profile and
-    runtime sanitizer options override that default. Custom runners own their
-    argument contract and do not receive implicit Loom options.
+    Built-in runners select program instrumentation through the address, thread,
+    and undefined flags in //loom/config/sanitizer. These combine independently
+    of native C/C++ sanitizers and do not add test targets. Explicit profile and
+    runtime sanitizer options override the configured checks. Custom runners
+    own their argument contract and do not receive implicit Loom options.
 
     Args:
       name: Name of the suite containing source, compilation, and execution checks.

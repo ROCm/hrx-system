@@ -1,0 +1,27 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# bazel-to-cmake: skip
+
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+
+package(default_visibility = ["//visibility:public"])
+
+# Instrument Loom programs independently of the native compiler/runtime build.
+bool_flag(
+    name = "address",
+    build_setting_default = False,
+)
+
+bool_flag(
+    name = "thread",
+    build_setting_default = False,
+)
+
+bool_flag(
+    name = "undefined",
+    build_setting_default = False,
+)
