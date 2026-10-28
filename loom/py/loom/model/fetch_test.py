@@ -9,7 +9,7 @@ import http.server
 import json
 import os
 import threading
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -689,6 +689,55 @@ def test_parallel_verified_install_and_offline_reuse(tmp_path):
     legacy.pop("scope")
     (output / "model.json.lock").write_text(json.dumps(legacy))
     install(offline, cache, output)
+
+
+@pytest.mark.parametrize("remote", [False, True])
+def test_sibling_programs_follow_snapshot_and_survive_relocation(tmp_path, remote):
+    card = _card()
+    source = "../../../program/shared.loom"
+    card["programs"]["p"]["inputs"] = [
+        {"path": "library/shared.loom", "origin": source}
+    ]
+    directory = "snapshot/model/publisher/example/"
+    files = {
+        directory + "model.json": json.dumps(card).encode(),
+        directory + "model.json.lock": json.dumps(
+            _lock({source: b"shared code", "weights.data": b"weights"})
+        ).encode(),
+        directory + "weights.data": b"weights",
+        "snapshot/program/shared.loom": b"shared code",
+    }
+    cache = ContentCache(tmp_path / "cache")
+    with ExitStack() as stack:
+        if remote:
+            base, requests, resources = stack.enter_context(_server({}, {}))
+            resources.update({"/" + name: content for name, content in files.items()})
+            location = base + "/" + directory + "model.json"
+        else:
+            for name, content in files.items():
+                path = tmp_path / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+            location = str(tmp_path / directory / "model.json")
+        document = cache.read_document(location, offline=not remote)
+        plan = plan_fetch(document, ModelCard.parse(document.text).select(), cache)
+        output = tmp_path / "installed"
+        result = install(plan, cache, output)
+        assert (output / "library/shared.loom").read_bytes() == b"shared code"
+        assert (output / "weights.data").read_bytes() == b"weights"
+        if remote:
+            assert sorted(requests) == sorted("/" + name for name in files)
+
+    installed = cache.read_document(str(result), offline=True)
+    selected = ModelCard.parse(installed.text).select()
+    locked = ModelLock.parse((output / "model.json.lock").read_text())
+    assert len(locked.cover(selected)) == 2
+    assert selected.files["library/shared.loom"].origin == "@document/" + source
+    offline = plan_fetch(installed, selected, cache, offline=True)
+    second = tmp_path / "refetched"
+    install(offline, cache, second)
+    assert (second / "library/shared.loom").read_bytes() == b"shared code"
+    assert (second / "weights.data").read_bytes() == b"weights"
 
 
 def test_tampered_code_does_not_publish_partial_installation(tmp_path):

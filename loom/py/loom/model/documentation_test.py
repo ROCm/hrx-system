@@ -251,6 +251,7 @@ def test_inline_local_relative_and_http_sources_are_literal_without_payload_read
         {"path": "empty.data", "origin": {"kind": "inline", "base64": "Y29kZQ=="}},
         {"path": "local.data", "origin": "@local/sub/file.data"},
         {"path": "relative.data", "origin": "file with % and #.data"},
+        {"path": "sibling.loom", "origin": "../program/shared.loom"},
         {"path": "http.data", "origin": "HTTPS://example.invalid/a(b)?x=1&copy;=2|3"},
     ]
     rendered = render_markdown(
@@ -259,6 +260,7 @@ def test_inline_local_relative_and_http_sources_are_literal_without_payload_read
     assert "Inline data (4 bytes)" in rendered and "Y29kZQ==" not in rendered
     assert "C:&#92;missing/sub/file.data</code> (local source)" in rendered
     assert "https://example.invalid/card/file%20with%20%25%20and%20%23.data" in rendered
+    assert "https://example.invalid/program/shared.loom" in rendered
     assert "(<HTTPS://example.invalid/a(b)?x=1&amp;copy;=2%7C3>)" in rendered
 
 

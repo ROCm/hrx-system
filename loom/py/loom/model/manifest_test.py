@@ -385,6 +385,64 @@ def test_rejects_unsafe_destinations(path):
         ModelCard(document)
 
 
+@pytest.mark.parametrize("origin", ["../shared.loom", "../../../program/shared.loom"])
+@pytest.mark.parametrize("root", [None, "local", "url"])
+def test_sibling_sources_preserve_contained_destination(origin, root):
+    document = _document()
+    provider = document["programs"]["source"]["inputs"][0]
+    destination = provider["path"]
+    if root:
+        document.setdefault("origins", {})["document"] = (
+            {"kind": "local", "path": "/checkout/model/publisher/example"}
+            if root == "local"
+            else {
+                "kind": "url",
+                "url": "https://example.org/snapshot/model/publisher/example/",
+            }
+        )
+        origin = "@document/" + origin
+    provider["origin"] = origin
+    selected = ModelCard(document).select("check")
+    assert selected.files[destination].origin == origin
+    assert selected.files[destination].path == destination
+
+
+def test_sibling_group_origin_appends_destination_once():
+    document = _document()
+    document["programs"]["source"]["origin"] = "../../../"
+    selected = ModelCard(document).select("check")
+    for provider in selected.program["inputs"]:
+        destination = provider["path"] if isinstance(provider, dict) else provider
+        assert selected.files[destination].origin == "../../../" + destination
+
+
+@pytest.mark.parametrize(
+    "origin",
+    ["../", "..", ".././code.loom", "../a/../b", "../a//b", "../C:/a", "../a\\b"],
+)
+def test_sibling_sources_still_require_normalized_file_names(origin):
+    document = _document()
+    document["programs"]["source"]["inputs"][0]["origin"] = origin
+    with pytest.raises(ManifestError):
+        ModelCard(document)
+
+
+def test_hugging_face_member_cannot_ascend_out_of_repository():
+    document = _document()
+    document.setdefault("origins", {})["checkpoint"] = {
+        "kind": "hf",
+        "repository": "publisher/model",
+    }
+    provider = document["programs"]["source"]["inputs"][0]
+    for origin in (
+        "@checkpoint/../other/code.loom",
+        {"kind": "hf", "repository": "publisher/model", "path": "../other/code.loom"},
+    ):
+        provider["origin"] = origin
+        with pytest.raises(ManifestError):
+            ModelCard(document)
+
+
 def test_rejects_file_directory_collision():
     document = _document()
     _service(document)["parameters"]["model"]["files"].append("bias.data/nested")

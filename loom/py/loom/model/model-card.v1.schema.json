@@ -164,7 +164,7 @@
         {
           "type": "string",
           "minLength": 1,
-          "description": "Complete logical source locator, such as @checkpoint/tokenizer/tokenizer.json, independent of local placement."
+          "description": "Complete logical source locator, such as @checkpoint/tokenizer/tokenizer.json or ../../../program/shared.loom, independent of local placement. Leading parent segments select sibling local or HTTP sources; Hugging Face member paths stay within their repository."
         },
         {
           "type": "object",

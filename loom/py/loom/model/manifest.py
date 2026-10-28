@@ -192,6 +192,17 @@ def _origin_object(value: Any, path: str, *, root: bool) -> dict:
     return value
 
 
+def _source_path(value: str, path: str, *, directory: bool = False) -> None:
+    """Allows sibling sources without relaxing materialized destinations."""
+    prefix_length = 0
+    while value.startswith("../", prefix_length):
+        prefix_length += 3
+    remainder = value[prefix_length:]
+    if directory and remainder == "..":
+        return
+    _path(remainder, path, directory=directory)
+
+
 def _origin(value: Any, roots: dict, path: str, *, group: bool = False) -> None:
     if isinstance(value, dict):
         if group:
@@ -205,13 +216,17 @@ def _origin(value: Any, roots: dict, path: str, *, group: bool = False) -> None:
         if not separator or (not suffix and not group):
             _fail(path, "origin aliases require @name/path")
         if suffix:
-            _path(suffix.removesuffix("/") if group else suffix, path)
+            source_path = suffix.removesuffix("/") if group else suffix
+            if roots[name]["kind"] == "hf":
+                _path(source_path, path)
+            else:
+                _source_path(source_path, path, directory=group)
     elif "://" in value:
         _url(value, path)
         if group and urlsplit(value).query:
             _fail(path, "directory origins cannot contain a query")
     else:
-        _path(value.removesuffix("/") if group else value, path, directory=group)
+        _source_path(value.removesuffix("/") if group else value, path, directory=group)
     if group and not value.endswith("/"):
         _fail(path, "group origin must end with '/'")
 

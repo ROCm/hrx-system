@@ -147,10 +147,12 @@ class ModelLock:
         if "$schema" in doc:
             _string(doc["$schema"], "lock.$schema")
         self.origins = _mapping(doc["origins"], "lock.origins", empty=True)
+        requested_origins = {}
         for name, record in self.origins.items():
             path = "lock.origins." + name
             _object(record, path, ("requested",), ("resolved",))
             _origin_object(record["requested"], path + ".requested", root=True)
+            requested_origins[name] = record["requested"]
             if "resolved" in record:
                 _resolved(record["resolved"], path + ".resolved")
                 if record["requested"]["kind"] != "hf":
@@ -174,7 +176,7 @@ class ModelLock:
                 if "transform" in record
                 else None
             )
-            _origin(record["origin"], self.origins, path + ".origin")
+            _origin(record["origin"], requested_origins, path + ".origin")
             if type(record["size"]) is not int or not 0 <= record["size"] < 2**64:
                 raise ManifestError(
                     f"{path}.size: expected an unsigned 64-bit byte count"

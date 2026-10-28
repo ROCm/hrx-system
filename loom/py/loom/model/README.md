@@ -48,6 +48,14 @@ exactly once. Without either declaration, a file's origin is its card-relative
 path. Model provenance is never an implicit acquisition default. Hashes and
 resolved source identities belong to acquisition locks, outside the model card.
 
+Card-relative origins can name sibling sources, such as
+`../../../program/text/chat.loom`. A local card reads the same checkout; a
+remote card resolves against its own URL, retaining a catalog's selected
+publication revision. Leading parent segments also work in local/HTTP origin
+aliases and group origins. They never appear in materialized destination paths,
+and Hugging Face member paths cannot ascend out of their repository. Shared
+programs within one publication need no independently pinned origin.
+
 `parameters.<scope>.files` is an ordered shard list populating one parameter
 index. `tokenizers.<identity>` declares a tokenizer, independently of its
 filename. Both accept strings or explicit file descriptors. Variant `config`
