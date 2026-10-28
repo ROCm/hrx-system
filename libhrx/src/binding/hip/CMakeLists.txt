@@ -673,6 +673,26 @@ iree_cc_test(
 )
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+iree_cc_test(
+  NAME
+    hip_array_validation_api_test
+  SRCS
+    "api.h"
+    "hip_array_validation_api_test.cc"
+  DATA
+    "libhrx::src::binding::hip::amdhip64"
+  DEPS
+    ${CMAKE_DL_LIBS}
+    ::hip_dso_test_util
+    iree::testing::gtest
+    iree::testing::gtest_main
+    libhrx_defs
+  ENV
+    "HRX_TEST_LIBAMDHIP64={{$<TARGET_FILE:libhrx::src::binding::hip::amdhip64>}}"
+)
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_HAL_DRIVER_AMDGPU)
 iree_cc_test(
   NAME
