@@ -264,11 +264,7 @@ static iree_status_t loom_low_lower_match_contract_case(
   }
   const loom_target_contract_binding_t* binding =
       &index->bindings[contract_case->binding_index];
-  *out_match = (loom_low_lower_contract_case_match_t){
-      .kind = LOOM_LOW_LOWER_CONTRACT_CASE_MATCH_SKIP,
-      .selection = {.rule_index = UINT16_MAX},
-      .result = loom_target_contract_query_result_empty(),
-  };
+  out_match->kind = LOOM_LOW_LOWER_CONTRACT_CASE_MATCH_SKIP;
   if (contract_case->system == LOOM_TARGET_CONTRACT_SYSTEM_UNSUPPORTED) {
     out_match->kind = LOOM_LOW_LOWER_CONTRACT_CASE_MATCH_UNSUPPORTED;
     return iree_ok_status();
@@ -560,9 +556,7 @@ static iree_status_t loom_low_lower_query_target_contract_index(
     unsupported_case_index = UINT16_MAX;
     loom_target_contract_query_result_t unavailable_result =
         loom_target_contract_query_result_empty();
-    loom_low_lower_rule_selection_t unavailable_selection = {
-        .rule_index = UINT16_MAX,
-    };
+    loom_low_lower_rule_selection_t unavailable_selection;
     uint16_t declined_rule_count = 0;
     loom_low_lower_contract_case_iterator_t iterator;
     const bool used_candidates =
@@ -646,7 +640,8 @@ static iree_status_t loom_low_lower_query_target_contract_index(
         if (unavailable_result.outcome ==
             LOOM_TARGET_CONTRACT_QUERY_UNHANDLED) {
           unavailable_result = match.result;
-          unavailable_selection = match.selection;
+          loom_low_lower_rule_selection_copy(&match.selection,
+                                             &unavailable_selection);
         }
         continue;
       }
@@ -658,14 +653,15 @@ static iree_status_t loom_low_lower_query_target_contract_index(
       }
       *out_result = match.result;
       if (out_selection != NULL) {
-        *out_selection = match.selection;
+        loom_low_lower_rule_selection_copy(&match.selection, out_selection);
       }
       return iree_ok_status();
     }
     if (unavailable_result.outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL) {
       *out_result = unavailable_result;
       if (out_selection != NULL) {
-        *out_selection = unavailable_selection;
+        loom_low_lower_rule_selection_copy(&unavailable_selection,
+                                           out_selection);
       }
       return iree_ok_status();
     }
@@ -742,9 +738,8 @@ static iree_status_t loom_low_lower_visit_target_contract_match_case(
   if (case_match->kind ==
       LOOM_LOW_LOWER_CONTRACT_CASE_MATCH_DESCRIPTOR_MATRIX) {
     if (case_match->result.outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL) {
-      const loom_low_lower_rule_selection_t selection = {
-          .rule_index = UINT16_MAX,
-      };
+      loom_low_lower_rule_selection_t selection;
+      loom_low_lower_rule_selection_initialize(&selection);
       return state->callback.fn(
           state->callback.user_data, &case_match->result,
           /*rule_set=*/NULL, &selection,
@@ -770,7 +765,10 @@ static iree_status_t loom_low_lower_visit_target_contract_match_case(
   const loom_target_contract_case_t* contract_case = &index->cases[case_index];
   const loom_target_contract_binding_t* binding =
       &index->bindings[contract_case->binding_index];
-  loom_low_lower_contract_case_match_t match = *case_match;
+  loom_low_lower_contract_case_match_t match;
+  match.kind = case_match->kind;
+  match.rule_set = case_match->rule_set;
+  loom_low_lower_rule_selection_copy(&case_match->selection, &match.selection);
   IREE_RETURN_IF_ERROR(loom_low_lower_materialize_target_contract_case(
       state->options, contract_case, case_index, binding, state->match_context,
       /*apply_accept_rule=*/false, &match, /*out_accepted=*/NULL));
@@ -869,9 +867,7 @@ iree_status_t loom_low_lower_query_target_contract_with_selection(
     loom_low_lower_rule_selection_t* out_selection) {
   *out_result = loom_target_contract_query_result_empty();
   if (out_selection != NULL) {
-    *out_selection = (loom_low_lower_rule_selection_t){
-        .rule_index = UINT16_MAX,
-    };
+    loom_low_lower_rule_selection_initialize(out_selection);
   }
 
   if (options->contract_index == NULL ||

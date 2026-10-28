@@ -28,7 +28,7 @@ iree_status_t loom_amdgpu_select_arithmetic_contract(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     bool* out_selected) {
   *out_selected = false;
-  loom_low_lower_rule_selection_t selection = {0};
+  loom_low_lower_rule_selection_t selection;
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_set_select_contract(
       context, &loom_amdgpu_arithmetic_lower_rule_set, source_op, &selection));
   *out_selected = selection.rule != NULL;
@@ -491,7 +491,7 @@ iree_status_t loom_amdgpu_emit_fmaf_literal_operand_form_diagnostic(
     return iree_ok_status();
   }
 
-  loom_low_lower_rule_selection_t selection = {0};
+  loom_low_lower_rule_selection_t selection;
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_set_select(
       context, &loom_amdgpu_arithmetic_lower_rule_set, source_op, &selection));
   if (selection.rule == NULL) {

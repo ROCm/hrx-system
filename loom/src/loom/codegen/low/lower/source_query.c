@@ -172,9 +172,7 @@ static iree_status_t loom_low_lower_source_query_one(
     loom_low_lower_rule_selection_t* out_selection) {
   *out_result = loom_target_contract_query_result_empty();
   if (out_selection != NULL) {
-    *out_selection = (loom_low_lower_rule_selection_t){
-        .rule_index = UINT16_MAX,
-    };
+    loom_low_lower_rule_selection_initialize(out_selection);
   }
   IREE_RETURN_IF_ERROR(loom_low_lower_source_query_target_contract(
       context, environment, source_op, out_result));

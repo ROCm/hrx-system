@@ -63,13 +63,13 @@ typedef enum loom_low_lower_contract_case_match_kind_e {
 typedef struct loom_low_lower_contract_case_match_t {
   // Kind of generated contract case represented by this match.
   loom_low_lower_contract_case_match_kind_t kind;
-  // Rule set owning a lower-rule match, or NULL for other systems.
+  // Rule set owning a lower-rule match. Valid only for LOWER_RULE.
   const loom_low_lower_rule_set_t* rule_set;
-  // Selected lower rule and its best failure when no rule matched.
+  // Selected lower rule and its best failure. Valid only for LOWER_RULE.
   loom_low_lower_rule_selection_t selection;
-  // Adapted semantic request for a descriptor-matrix case.
+  // Adapted semantic request. Valid only for DESCRIPTOR_MATRIX.
   loom_contract_request_t contract_request;
-  // Descriptor-matrix result before lower-rule result materialization.
+  // Valid for DESCRIPTOR_MATRIX or after lower-rule result materialization.
   loom_target_contract_query_result_t result;
 } loom_low_lower_contract_case_match_t;
 

@@ -171,9 +171,6 @@ typedef struct loom_low_lower_rule_selection_t {
   const loom_low_lower_rule_t* rule;
   // Best rejection to report when no rule accepted the source op.
   loom_low_lower_rule_failure_t failure;
-  // Resolved source graph for the selected rule. Entry zero is the rule root;
-  // only the first source_node_count entries are initialized.
-  const loom_op_t* source_nodes[LOOM_LOW_LOWER_MAX_SOURCE_NODES];
   // Selected rule row ordinal, or UINT16_MAX when no rule accepted the source
   // op.
   uint16_t rule_index;
@@ -184,7 +181,20 @@ typedef struct loom_low_lower_rule_selection_t {
   // Source-node ordinal where the rule can emit after every source-backed
   // operand is available. Zero preserves root emission.
   uint8_t emission_source_node_index;
+  // Resolved source graph for the selected rule. Entry zero is the rule root;
+  // only the first source_node_count entries are initialized. Keep this
+  // capacity-only storage last so copying a selection touches its live prefix.
+  const loom_op_t* source_nodes[LOOM_LOW_LOWER_MAX_SOURCE_NODES];
 } loom_low_lower_rule_selection_t;
+
+// Initializes an empty selection without touching unused source-node storage.
+void loom_low_lower_rule_selection_initialize(
+    loom_low_lower_rule_selection_t* out_selection);
+
+// Copies the selection header and its populated source graph.
+void loom_low_lower_rule_selection_copy(
+    const loom_low_lower_rule_selection_t* source,
+    loom_low_lower_rule_selection_t* target);
 
 // Returns true when |candidate| carries a more useful selection failure than
 // |incumbent|. Actionable diagnostics win over structural non-matches, then

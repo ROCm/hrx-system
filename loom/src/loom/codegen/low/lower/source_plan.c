@@ -1242,8 +1242,8 @@ typedef struct loom_low_lower_source_stream_contract_state_t {
   loom_low_lower_rule_match_context_t* match_context;
   // Best generated rejection seen when no candidate matched.
   loom_low_lower_source_candidate_rejection_t rejection;
-  // First feature-unavailable rule retained as a same-graph fallback.
-  loom_low_lower_rule_selection_t fallback_selection;
+  // Caller-owned scratch populated only when fallback_rule_set is non-NULL.
+  loom_low_lower_rule_selection_t* fallback_selection;
   // Rule set owning |fallback_selection|.
   const loom_low_lower_rule_set_t* fallback_rule_set;
   // Policy rule-set ordinal owning |fallback_selection|.
@@ -1297,7 +1297,7 @@ static iree_status_t loom_low_lower_source_stream_visit_contract_case(
   }
   if (state->fallback_rule_set != NULL &&
       !loom_low_lower_rule_selections_have_same_source_graph(
-          &state->fallback_selection, &match->selection)) {
+          state->fallback_selection, &match->selection)) {
     return iree_ok_status();
   }
 
@@ -1310,7 +1310,8 @@ static iree_status_t loom_low_lower_source_stream_visit_contract_case(
         loom_low_lower_rule_selection_can_record_plan(
             state->context, state->source_op, match->rule_set,
             &match->selection)) {
-      state->fallback_selection = match->selection;
+      loom_low_lower_rule_selection_copy(&match->selection,
+                                         state->fallback_selection);
       state->fallback_rule_set = match->rule_set;
       state->fallback_rule_set_index = binding->rule_set_index;
     }
@@ -1365,6 +1366,7 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
       *inout_failed_rule_set;
   const loom_low_lower_rule_failure_t initial_rule_failure =
       *inout_rule_failure;
+  loom_low_lower_rule_selection_t fallback_selection;
   loom_low_lower_source_stream_contract_state_t state = {
       .context = context,
       .source_op = source_op,
@@ -1375,7 +1377,7 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
               .failed_rule_set = initial_failed_rule_set,
               .rule_failure = initial_rule_failure,
           },
-      .fallback_selection = {.rule_index = UINT16_MAX},
+      .fallback_selection = &fallback_selection,
       .fallback_rule_set_index = UINT16_MAX,
       .iteration_mode = LOOM_LOW_LOWER_CONTRACT_CASE_ITERATION_CANDIDATES,
   };
@@ -1392,7 +1394,7 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
     bool recorded = false;
     IREE_RETURN_IF_ERROR(loom_low_lower_record_selected_rule_plan(
         context, source_op, state.fallback_rule_set_index,
-        state.fallback_rule_set, &state.fallback_selection, source_memory_state,
+        state.fallback_rule_set, state.fallback_selection, source_memory_state,
         &recorded));
     IREE_ASSERT(recorded);
     state.selected = true;

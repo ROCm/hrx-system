@@ -1058,6 +1058,8 @@ TEST(LowContractQueryTest,
     EXPECT_EQ(result.case_index, 1);
     EXPECT_EQ(result.selected_descriptor, &descriptors[1]);
     EXPECT_EQ(selection.rule, &rules[1]);
+    ASSERT_EQ(selection.source_node_count, 1u);
+    EXPECT_EQ(selection.source_nodes[0], &op);
 
     layouts[1].feature_mask_word_count = 1;
     IREE_ASSERT_OK(loom_low_lower_query_target_contract_with_selection(
@@ -1066,6 +1068,16 @@ TEST(LowContractQueryTest,
     EXPECT_EQ(result.case_index, 0);
     EXPECT_EQ(result.selected_descriptor, &descriptors[0]);
     EXPECT_EQ(selection.rule, &rules[0]);
+    ASSERT_EQ(selection.source_node_count, 1u);
+    EXPECT_EQ(selection.source_nodes[0], &op);
+
+    const loom_low_lower_contract_query_options_t empty_options = {};
+    IREE_ASSERT_OK(loom_low_lower_query_target_contract_with_selection(
+        &environment, &empty_options, &op, &result, &selection));
+    EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_UNHANDLED);
+    EXPECT_EQ(selection.rule, nullptr);
+    EXPECT_EQ(selection.rule_index, UINT16_MAX);
+    EXPECT_EQ(selection.source_node_count, 0u);
   }
 }
 

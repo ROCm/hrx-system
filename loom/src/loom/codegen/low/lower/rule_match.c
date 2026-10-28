@@ -1585,7 +1585,7 @@ bool loom_low_lower_rule_resolve_first_source_node(
   }
   const loom_low_lower_source_node_t* source_node =
       &rule_set->source_nodes[loom_low_lower_rule_source_node_start(rule)];
-  const loom_op_t* source_nodes[LOOM_LOW_LOWER_MAX_SOURCE_NODES] = {source_op};
+  const loom_op_t* source_nodes[2] = {source_op};
   if (!loom_low_lower_rule_resolve_source_node(
           match_context, rule_set, source_node, /*source_node_index=*/1,
           source_nodes)) {
@@ -1845,23 +1845,33 @@ bool loom_low_lower_rule_selections_have_same_source_graph(
   return true;
 }
 
-iree_status_t loom_low_lower_rule_set_select_rule_range_with_match_context(
-    const loom_low_lower_rule_match_context_t* match_context,
-    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    uint16_t rule_start, uint16_t rule_count,
+void loom_low_lower_rule_selection_initialize(
     loom_low_lower_rule_selection_t* out_selection) {
   out_selection->rule = NULL;
   out_selection->failure = (loom_low_lower_rule_failure_t){
-      .diagnostic_source_op = source_op,
-      .has_source_op_span = false,
       .diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE,
-      .matched_guard_count = 0,
-      .source_memory_compatible = false,
   };
   out_selection->rule_index = UINT16_MAX;
   out_selection->uses_source_memory_access = false;
   out_selection->source_node_count = 0;
   out_selection->emission_source_node_index = 0;
+}
+
+void loom_low_lower_rule_selection_copy(
+    const loom_low_lower_rule_selection_t* source,
+    loom_low_lower_rule_selection_t* target) {
+  memcpy(target, source,
+         offsetof(loom_low_lower_rule_selection_t, source_nodes) +
+             source->source_node_count * sizeof(*source->source_nodes));
+}
+
+iree_status_t loom_low_lower_rule_set_select_rule_range_with_match_context(
+    const loom_low_lower_rule_match_context_t* match_context,
+    const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
+    uint16_t rule_start, uint16_t rule_count,
+    loom_low_lower_rule_selection_t* out_selection) {
+  loom_low_lower_rule_selection_initialize(out_selection);
+  out_selection->failure.diagnostic_source_op = source_op;
 
   if (rule_count == 0) {
     return iree_ok_status();
