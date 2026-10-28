@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 include("${CMAKE_CURRENT_LIST_DIR}/../sanitizer/iree_sanitizer_suppressions.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/iree_compile_usage.cmake")
 
 # iree_cc_library()
 #
@@ -554,6 +555,11 @@ function(iree_cc_unified_library)
   iree_package_ns(_PACKAGE_NS)
   list(TRANSFORM _RULE_ROOT REPLACE "^::" "${_PACKAGE_NS}::")
 
+  # This adapter inspects the root's direct link interface to separate object
+  # ownership from usage requirements. Preserve that interface at finalization;
+  # ordinary dependencies beneath it can still resolve their compile usage.
+  set_property(GLOBAL APPEND PROPERTY IREE_NATIVE_COMPILE_INTERFACES "${_RULE_ROOT}")
+
   # Prefix the library with the package name, so we get: iree_package_name.
   iree_package_name(_PACKAGE_NAME)
   set(_NAME "${_PACKAGE_NAME}_${_RULE_NAME}")
@@ -595,7 +601,7 @@ function(iree_cc_unified_library)
   )
   target_link_libraries(${_NAME}
     PUBLIC
-      $<TARGET_GENEX_EVAL:${_RULE_ROOT},$<TARGET_PROPERTY:${_RULE_ROOT},INTERFACE_LINK_LIBRARIES>>
+      $<TARGET_GENEX_EVAL:$<TARGET_NAME:${_RULE_ROOT}>,$<TARGET_PROPERTY:${_RULE_ROOT},INTERFACE_LINK_LIBRARIES>>
   )
   iree_target_sanitizer_suppressions("${_NAME}" DEPS "${_RULE_ROOT}")
 

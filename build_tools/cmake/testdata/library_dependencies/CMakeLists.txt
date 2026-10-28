@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-cmake_minimum_required(VERSION 3.26)
+cmake_minimum_required(VERSION 3.26...4.2)
 project(iree_cmake_library_dependencies_test C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -138,6 +138,7 @@ target_compile_definitions(${_LIBRARY_OBJECT_TARGET} PRIVATE LATE_VALUE=11)
 # interface header's consumer and the library's generated source.
 add_subdirectory(producer)
 iree_finalize_target_dependencies()
+cmake_language(DEFER CALL iree_finalize_compile_usage)
 
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/paths-$<CONFIG>.txt"
   CONTENT "${_LIBRARY_OBJECT_TARGET}\n$<TARGET_FILE:iree_fixture_leaf>\n$<TARGET_FILE:iree_fixture_probe>\n$<TARGET_FILE:iree_fixture_unified_probe>\n$<TARGET_FILE:iree_fixture_collected_probe>\n$<TARGET_FILE:iree_fixture_runtime_tool_probe>\n$<TARGET_FILE:iree_fixture_tool_probe>\n$<TARGET_FILE:iree_fixture_source_less_test_with_a_long_target_name_matching_real_cts_binaries>\n")

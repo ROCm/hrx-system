@@ -80,6 +80,13 @@ endfunction()
 
 _iree_cmake_integration_test(
   NAME
+    cmake_compile_usage_test
+  SRCS
+    cmake_compile_usage_test.py
+)
+
+_iree_cmake_integration_test(
+  NAME
     cmake_data_dependencies_test
   SRCS
     cmake_data_dependencies_test.py
