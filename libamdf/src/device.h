@@ -8,6 +8,7 @@
 #define AMDF_SRC_DEVICE_H_
 
 #include "amdf/amdf.h"
+#include "amdf/telemetry.h"
 #include "libamdf/src/child_tracker.h"
 #include "libamdf/src/memory_profile.h"
 
@@ -18,6 +19,18 @@ extern "C" {
 struct amdf_memory_reservation_profile_t;
 
 typedef struct amdf_device_vtable_t {
+  // Explicit cold sensor queries. A NULL pair means no telemetry sources;
+  // providers publish caller outputs only after all fallible work completes.
+  amdf_status_t (*enumerate_telemetry_metrics)(
+      amdf_device_t* device, uint32_t capacity,
+      amdf_telemetry_metric_info_t* metrics, uint32_t* out_count);
+  // Reads one selected source without retaining sensor or output ownership.
+  amdf_status_t (*read_telemetry)(amdf_device_t* device,
+                                  amdf_telemetry_source_id_t source_id,
+                                  uint32_t metric_count,
+                                  const amdf_telemetry_metric_id_t* metric_ids,
+                                  amdf_telemetry_value_t* values,
+                                  amdf_telemetry_sample_t* out_sample);
   // Reads live-domain reservation limits without native work or allocation.
   amdf_status_t (*query_memory_reservation_profile)(
       amdf_device_t* device, uint32_t address_domain_ordinal,

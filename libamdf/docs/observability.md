@@ -1,4 +1,4 @@
-# Timing and observation
+# Timing, observation, and telemetry
 
 libamdf exposes native observation sources, their storage contracts, and their
 clock metadata. The caller owns workload identity, queues, result storage,
@@ -11,6 +11,12 @@ and the progress of a native read. Source-specific operations live in the
 Extension negotiation establishes that an API table is present. The selected
 queue family, live device, context, or native service establishes which
 operations are available.
+
+The [telemetry extension](../include/amdf/telemetry.h) supplies measured clock
+rates, power, temperature, and activity with physical units and source identity.
+Its two operations enumerate complete metric descriptions and read selected
+fields from one source. The caller schedules reads and owns the resulting
+history; libamdf creates no sampler, thread, GPU allocation, or sensor session.
 
 The device-independent `AMDF_EXTENSION_OBSERVATION` table supplies the profiling
 host clock. `query_host_clock_info` returns its frequency and counter width;
@@ -72,6 +78,132 @@ Enabling the recorder establishes configuration ownership, not exclusive
 workload execution. A device-wide diagnostic trace is therefore available
 independently of an attributed application timeline; an arbitrary concurrent
 dispatch cannot be identified from an opcode or its position in that trace.
+
+## Device telemetry
+
+`AMDF_EXTENSION_TELEMETRY` operates on an already-live device. Enumeration and
+reads are explicit cold native queries that may block and wake a suspended
+device. Discovery and ordinary submission perform no sensor work. A device
+with no supported source enumerates zero metrics; permission, removal, and
+native query errors remain failures. Obtaining the extension table itself is
+inert and does not imply that a particular device has a sensor service.
+
+Each descriptor carries a portable measurement kind, physical domain, instance,
+exact rational unit conversion, temporal aggregation, and native provenance.
+Selection uses those typed facts: a GPU compute clock differs from a memory
+clock, and an edge temperature differs from a hotspot. Diagnostic names identify
+native fields without making the application carry an architecture-specific
+name or register table. IDs are opaque within the live device and source;
+saved captures copy the descriptor strings and device identity.
+
+`instance_scope` is fixed metadata on each metric descriptor, returned during
+enumeration. A caller classifies metrics once when selecting them and reuses
+the same query IDs across reads. `DEVICE` ordinals retain
+their identity across reads of the same source on a live device. `SNAPSHOT`
+ordinals identify an instance only within one `device_read` result: core slot
+zero can represent a different active core on the next read. Reading that
+slot's clock, power, and temperature together preserves their pairing. Reading
+them in separate calls cannot establish that they describe the same core,
+even when the source timestamps match. These ordinals are native identities,
+not OS logical-CPU numbers or identities shared by separate sources.
+
+A caller can select a measured GPU clock with no platform code:
+
+```c
+// device is already live. The caller owns catalog with nonzero capacity.
+const void* extension = NULL;
+amdf_status_t status = api->query_extension(
+    AMDF_EXTENSION_TELEMETRY, 1, AMDF_TELEMETRY_EXTENSION_VERSION_LATEST,
+    &extension);
+if (!amdf_status_is_ok(status)) return status;
+const amdf_telemetry_api_t* telemetry = extension;
+uint32_t count = 0;
+status = telemetry->device_enumerate_metrics(
+    device, catalog_capacity, catalog, &count);
+if (!amdf_status_is_ok(status)) return status;
+for (uint32_t i = 0; i < count; ++i) {
+  const amdf_telemetry_metric_info_t* metric = &catalog[i];
+  if (metric->kind != AMDF_TELEMETRY_METRIC_CLOCK_COMPUTE ||
+      metric->domain != AMDF_TELEMETRY_DOMAIN_GPU) continue;
+  amdf_telemetry_value_t value = {0};
+  amdf_telemetry_sample_t sample = {0};
+  status = telemetry->device_read(device, metric->source_id, 1,
+                                 &metric->metric_id, &value, &sample);
+  if (!amdf_status_is_ok(status)) return status;
+  // Consume value.status before interpreting its selected numeric member.
+  // Retain metric and sample alongside the value in caller-owned history.
+}
+```
+
+Zero-capacity enumeration returns the required count without writing a catalog.
+Insufficient nonzero capacity returns `BUFFER_TOO_SMALL`, a valid prefix, and
+the total count so the caller can resize its storage. Other errors preserve
+both outputs. Reads preserve all values and the sample descriptor on a
+call-level failure. A successful read gives every selected value its own
+status: `NOT_FOUND` means the native field is unavailable, while a successful
+zero remains a real reading. Duplicate selections share the same observation.
+
+Fields from one native table share a source ID and can be read together through
+one query. Linux `gpu_metrics` supplies a bounded combined snapshot. Its
+producer-specific catalog can include CPU-core power and C0 residency, NPU
+column activity and traffic, GPU measurements, and shared package power.
+CPU C0 residency uses `ACTIVITY_ACTIVE`; it measures time in an active power
+state, independently of useful compute throughput. Native power estimates
+remain power observations with their actual domain and aggregation.
+
+Linux hwmon attributes are separate sources because their reads are
+sequential native operations. Windows PMLog supplies a native table through the
+existing WKMI dependency, without starting its shared-memory sampler. That
+query has no physical-adapter selector; linked adapters therefore contribute
+no PMLog source rather than assigning an ambiguous observation to one GPU.
+Only sensors with established measurement semantics and units are enumerated.
+Configured clock targets, power caps, and maximum rates are not measurements.
+
+Linux identifies the native SMU producer during the explicit telemetry query.
+The same hwmon name can describe different quantities: SMU14 APU clock fields
+are filtered targets, the Renoir memory-clock route reads its fabric clock,
+and APU temperature routes identify GPU and SoC regions rather than edge and
+hotspot sensors. The descriptors preserve those distinctions. Clock routes
+that synthesize zero on older firmware require the native firmware capability
+before enumeration. An unavailable producer identity leaves those sources
+absent; malformed identity metadata remains an error.
+
+The combined reader validates the complete fixed or tagged native record
+before publishing descriptors or values. Unknown representations contribute
+no source; a malformed supported representation fails the query. Native
+all-ones unavailable markers become per-value `NOT_FOUND`. Version 3.0 also
+uses zero for unmeasured core and skin temperatures, following AMD SMI's
+field-specific convention; this does not suppress zero power or activity.
+No caller-side field-name or sentinel handling is needed.
+
+The same native table revision can span different driver implementations.
+SMU15 APU version 3.0 includes both older target clocks and newer effective
+clock averages, without a discriminator in the exported record. Those clocks
+are absent from the measured catalog. Its shared power, temperature, activity,
+and traffic meanings remain available with unspecified aggregation and
+snapshot-scoped CPU slots. Enumerating these fields never guesses the producer
+from its readings or the operating system's release string.
+
+Physical values are `native_value * scale_numerator / scale_denominator` in
+the descriptor's unit. Integer storage preserves native precision until the
+caller chooses a display representation. Package power can include CPU power
+on an APU; it does not become GPU-only consumption because the GPU exposes it.
+An APU's firmware power budget can also include a participating discrete GPU;
+`POWER_BUDGET` preserves that scope separately from package power.
+Related domains and multiple sources can overlap and are not additive. Native
+sensor names such as "average" or "current" do not establish a filter window;
+`UNSPECIFIED` aggregation preserves that absence of information.
+
+The host timestamps bracket the explicit native read in the observation
+extension's clock. They measure query timing, not when the sensor acquired or
+filtered its value. Optional driver and source timestamps retain their separate
+clock domains; absent timestamps stay absent. Repeated reads can return the
+same cached observation. Actual filter constants or averaging windows belong
+to individual values when provided. This information supports a device-level
+timeline without claiming per-dispatch power attribution or sensor freshness.
+
+Measured operating clocks describe device behavior. Queue timestamp frequency
+comes from the queue-clock APIs below, independently of these clock sensors.
 
 ## Clock units and correlation
 

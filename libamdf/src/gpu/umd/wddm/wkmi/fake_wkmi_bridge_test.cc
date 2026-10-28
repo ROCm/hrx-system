@@ -123,9 +123,14 @@ GpuClockSample(amdf_wkmi_bridge_gpu_adapter_t*, uint32_t, uint32_t,
   return AMDF_WKMI_BRIDGE_RESULT_UNSUPPORTED;
 }
 
+amdf_status_t AMDF_WKMI_BRIDGE_CALL GpuTelemetryRead(
+    uint32_t, uint32_t, uint32_t, amdf_wkmi_bridge_gpu_telemetry_t*) {
+  return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+}
+
 amdf_wkmi_bridge_api_t api = {
     sizeof(amdf_wkmi_bridge_api_t),
-    AMDF_WKMI_BRIDGE_ABI_VERSION_10,
+    AMDF_WKMI_BRIDGE_ABI_VERSION_11,
     GpuAdapterOpen,
     GpuAdapterClose,
     GpuAllocationQueryLayout,
@@ -135,6 +140,7 @@ amdf_wkmi_bridge_api_t api = {
     GpuKernelQueueDestroy,
     GpuBufferPrepareImport,
     GpuClockSample,
+    GpuTelemetryRead,
 };
 
 }  // namespace

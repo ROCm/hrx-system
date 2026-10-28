@@ -48,6 +48,13 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "telemetry",
+    hdrs = ["telemetry.h"],
+    visibility = ["//libamdf/src/gpu:__subpackages__"],
+    deps = [":device"],
+)
+
+amdf_cc_library(
     name = "clock",
     hdrs = ["clock.h"],
     visibility = ["//libamdf/src/gpu:__subpackages__"],

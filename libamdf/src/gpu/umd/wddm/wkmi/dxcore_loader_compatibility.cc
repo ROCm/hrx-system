@@ -21,9 +21,10 @@
 
 // The pinned WKMI archive retains ROCr's inline DxcoreLoader singleton but not
 // its constructor. Its private object contains 38 procedure pointers followed
-// by a module handle and initialization flag, totaling 0x140 bytes. Only
-// D3DKMTQueryAdapterInfo at slot 8 is used by the archive; the shim binds it
-// directly and leaves the dynamic loader state unused.
+// by a module handle and initialization flag, totaling 0x140 bytes. Adapter
+// queries use D3DKMTQueryAdapterInfo at slot 8; one-shot telemetry uses
+// D3DKMTEscape at slot 15. Both bind directly to the imported KMT entry points,
+// leaving the dynamic loader state unused.
 namespace wsl::thunk::dxcore {
 
 using Procedure = NTSTATUS(WINAPI*)(void* arguments);
@@ -53,6 +54,7 @@ static DxcoreLoader* active_loader = nullptr;
 
 DxcoreLoader::DxcoreLoader() : procedures{} {
   procedures[8] = reinterpret_cast<Procedure>(&D3DKMTQueryAdapterInfo);
+  procedures[15] = reinterpret_cast<Procedure>(&D3DKMTEscape);
   active_loader = this;
 }
 

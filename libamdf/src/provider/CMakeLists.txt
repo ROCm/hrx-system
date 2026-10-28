@@ -54,6 +54,7 @@ iree_cc_library(
     libamdf::src::observation
     libamdf::src::platform
     libamdf::src::structure
+    libamdf::src::telemetry
     libamdf::src::user_queue
     ${_provider_platform_deps}
   DEFINES

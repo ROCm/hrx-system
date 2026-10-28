@@ -207,6 +207,7 @@ iree_cc_library(
     observation_cases
   SRCS
     "observation_test.cc"
+    "telemetry_test.cc"
   DEPS
     amdf::headers
     iree::third_party::google_test

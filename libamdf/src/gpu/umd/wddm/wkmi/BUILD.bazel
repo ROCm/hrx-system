@@ -50,6 +50,8 @@ amdf_windows_sidecar_library(
         "kernel_queue.h",
         "shared_buffer.cc",
         "shared_buffer.h",
+        "telemetry.cc",
+        "telemetry.h",
     ],
     linkopts = ["gdi32.lib"],
     deps = [
@@ -81,6 +83,21 @@ amdf_windows_sidecar_test(
     srcs = [
         "adapter_info_system_test.cc",
         "dxcore_loader_compatibility.cc",
+    ],
+    linkopts = ["gdi32.lib"],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=libamdf.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    deps = ["//third_party:amdf_wkmi"],
+)
+
+amdf_windows_sidecar_test(
+    name = "telemetry_system_test",
+    srcs = [
+        "dxcore_loader_compatibility.cc",
+        "telemetry_system_test.cc",
     ],
     linkopts = ["gdi32.lib"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,

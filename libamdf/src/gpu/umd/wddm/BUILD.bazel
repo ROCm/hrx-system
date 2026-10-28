@@ -16,6 +16,33 @@ package(
 )
 
 amdf_cc_library(
+    name = "telemetry",
+    srcs = ["telemetry.c"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":device_state",
+        "//libamdf/src/gpu/umd:telemetry",
+        "//libamdf/src/gpu/umd/wddm/wkmi:bridge_api",
+        "//libamdf/src/platform:native_observation",
+        "//libamdf/src/platform:observation",
+    ],
+)
+
+amdf_cc_test(
+    name = "telemetry_test",
+    srcs = ["telemetry_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":device_state",
+        ":telemetry",
+        "//libamdf/src/gpu/umd:telemetry",
+        "//libamdf/src/gpu/umd/wddm/wkmi:bridge_api",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_library(
     name = "clock",
     srcs = ["clock.c"],
     target_compatible_with = ["@platforms//os:windows"],
@@ -166,6 +193,7 @@ amdf_cc_library(
         ":kernel_queue",
         ":memory",
         ":memory_reservation",
+        ":telemetry",
         ":user_queue",
     ],
 )

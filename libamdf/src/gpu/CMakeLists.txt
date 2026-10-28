@@ -45,6 +45,7 @@ iree_cc_library(
     libamdf::src::gpu::umd::kernel_queue
     libamdf::src::gpu::umd::memory
     libamdf::src::gpu::umd::memory_reservation
+    libamdf::src::gpu::umd::telemetry
     libamdf::src::host_mapping
     libamdf::src::instance
     libamdf::src::memory

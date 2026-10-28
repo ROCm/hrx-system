@@ -21,7 +21,7 @@
 extern "C" {
 #endif  // __cplusplus
 
-// First supported private bridge ABI version.
+// Original private bridge ABI version.
 #define AMDF_WKMI_BRIDGE_ABI_VERSION_1 1u
 
 // First version carrying the instance allocator across the DLL boundary.
@@ -52,8 +52,11 @@ extern "C" {
 // GPU property layout containing target identity and queue services.
 #define AMDF_WKMI_BRIDGE_ABI_VERSION_10 10u
 
+// First version exposing explicit one-shot native sensor snapshots.
+#define AMDF_WKMI_BRIDGE_ABI_VERSION_11 11u
+
 // Most recent private bridge ABI version described by this header.
-#define AMDF_WKMI_BRIDGE_ABI_VERSION_LATEST AMDF_WKMI_BRIDGE_ABI_VERSION_10
+#define AMDF_WKMI_BRIDGE_ABI_VERSION_LATEST AMDF_WKMI_BRIDGE_ABI_VERSION_11
 
 // Result of one bridge operation.
 typedef uint32_t amdf_wkmi_bridge_result_t;
@@ -92,6 +95,15 @@ typedef struct amdf_wkmi_bridge_gpu_clock_sample_t {
   // Paired CPU counter in QueryPerformanceCounter units.
   uint64_t host_timestamp;
 } amdf_wkmi_bridge_gpu_clock_sample_t;
+
+// Fixed-width transport for the native PMLog sensor namespace. No pointers,
+// library-owned buffers, sampler session, or inferred timestamp cross this ABI.
+typedef struct amdf_wkmi_bridge_gpu_telemetry_t {
+  // Native values indexed by sensor ID; meaningful only when supported is set.
+  uint32_t values[256];
+  // Native support indication normalized to zero or one for each sensor ID.
+  uint8_t supported[256];
+} amdf_wkmi_bridge_gpu_telemetry_t;
 
 // Opaque native GPU kernel queue retained entirely inside the bridge.
 typedef struct amdf_wkmi_bridge_gpu_kernel_queue_t
@@ -360,13 +372,21 @@ typedef struct amdf_wkmi_bridge_api_t {
       amdf_wkmi_bridge_gpu_clock_sample_t* out_sample,
       uint32_t* out_native_status);
 
+  // Queries one PMLog table for a live single-physical-adapter device. Linked
+  // adapters are unsupported because the sensor call has no physical selector.
+  // Failure preserves out_snapshot. Native errors retain their NTSTATUS domain.
+  amdf_status_t(AMDF_WKMI_BRIDGE_CALL* gpu_telemetry_read)(
+      uint32_t adapter_handle, uint32_t device_handle,
+      uint32_t physical_adapter_index,
+      amdf_wkmi_bridge_gpu_telemetry_t* out_snapshot);
+
 } amdf_wkmi_bridge_api_t;
 
 #ifdef __cplusplus
-static_assert(sizeof(amdf_wkmi_bridge_api_t) == 80,
+static_assert(sizeof(amdf_wkmi_bridge_api_t) == 88,
               "WKMI entry-point table ABI must remain stable");
 #else
-_Static_assert(sizeof(amdf_wkmi_bridge_api_t) == 80,
+_Static_assert(sizeof(amdf_wkmi_bridge_api_t) == 88,
                "WKMI entry-point table ABI must remain stable");
 #endif
 

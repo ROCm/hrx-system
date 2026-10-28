@@ -267,6 +267,8 @@ enum amdf_extension_id_e {
   AMDF_EXTENSION_GPU = 2,
   /// Portable timing and observation services, independent of device families.
   AMDF_EXTENSION_OBSERVATION = 3,
+  /// Caller-scheduled sensor readings with explicit physical and time metadata.
+  AMDF_EXTENSION_TELEMETRY = 4,
 };
 
 /// Common prefix of every extensible input structure.
