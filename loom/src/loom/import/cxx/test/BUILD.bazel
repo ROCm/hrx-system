@@ -308,6 +308,7 @@ loom_check_test(
     data = ["//loom/py/loom/tools:loom-export-cxx"],
     env = {
         "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+        "PYTHONIOENCODING": "cp1252",
     },
     tags = ["skip-bazel_to_cmake"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),

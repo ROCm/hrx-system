@@ -26,10 +26,10 @@ def run(
     *,
     roots: Sequence[str] = (),
     stdin: BinaryIO,
-    stdout: TextIO,
+    stdout: BinaryIO,
     stderr: TextIO,
 ) -> int:
-    """Runs one export and returns its public process exit code."""
+    """Writes UTF-8 C++ source and returns its public process exit code."""
 
     try:
         if input_path == "-":
@@ -39,11 +39,13 @@ def run(
             path = Path(input_path)
             data = path.read_bytes()
             filename = str(path)
-        result = render_module(load_module(data, filename=filename), roots=roots)
+        result = render_module(
+            load_module(data, filename=filename), roots=roots
+        ).encode("utf-8")
         if output_path == "-":
             stdout.write(result)
         else:
-            Path(output_path).write_text(result, encoding="utf-8")
+            Path(output_path).write_bytes(result)
     except (
         BytecodeError,
         CxxRenderError,
@@ -91,7 +93,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.output,
         roots=args.root,
         stdin=sys.stdin.buffer,
-        stdout=sys.stdout,
+        stdout=sys.stdout.buffer,
         stderr=sys.stderr,
     )
 
