@@ -206,6 +206,14 @@ no execution checks; at least one execution or compiler profile is required.
 Adding profiles creates separate results without importing or linking the
 source closure again. Device availability never gates a sibling compiler check.
 
+The build configuration selects instrumentation for the same test targets.
+`--config=asan`, `--config=tsan`, and `--config=ubsan` pass the corresponding
+sanitizer mode to the built-in Loom correctness and benchmark runners. This
+also instruments JIT products when the runners come from an installed SDK;
+the wheel itself retains its native build configuration. Explicit sanitizer
+options on a profile or a runtime `--test_arg` override the build default.
+Custom runners retain their own argument contract.
+
 ### Share a corpus across test packages
 
 `loom_test_module` gives a corpus its own source and fixture ownership. A target

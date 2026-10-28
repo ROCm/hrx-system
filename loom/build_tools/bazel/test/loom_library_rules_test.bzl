@@ -286,6 +286,7 @@ def _test_generated_kernel_binary_is_testonly_impl(env, target):
 def _test_execution_profile_contract(name, **kwargs):
     analysis_test(
         name = name,
+        config_settings = {"//command_line_option:cc_output_directory_tag": ""},
         attr_values = {
             "timeout": "short",
         },
@@ -344,6 +345,7 @@ def _test_execution_profile_contract_impl(env, target):
 def _test_correctness_only_profile_omits_benchmark_runner(name, **kwargs):
     analysis_test(
         name = name,
+        config_settings = {"//command_line_option:cc_output_directory_tag": ""},
         impl = _test_correctness_only_profile_omits_benchmark_runner_impl,
         target = ":correctness_only_test_execute_reference_test_launcher",
         **kwargs
@@ -365,6 +367,49 @@ def _test_correctness_only_profile_omits_benchmark_runner_impl(env, target):
     for file in runfiles:
         if file.basename.startswith("loom-benchmark"):
             env.fail("correctness-only execution retained benchmark runfile %r" % file)
+
+def _test_address_build_selects_instrumentation(name, **kwargs):
+    analysis_test(
+        name = name,
+        config_settings = {"//command_line_option:cc_output_directory_tag": "asan"},
+        impl = _test_address_build_selects_instrumentation_impl,
+        target = ":profiled_test_selected_execute_reference_test_launcher",
+        **kwargs
+    )
+
+def _test_address_build_selects_instrumentation_impl(env, target):
+    info = target[LoomExecutionTestInfo]
+    env.expect.that_str(info.test_runner_args[0]).equals("--sanitizer=asan")
+    env.expect.that_collection(info.benchmark_runner_args).contains("--sanitizer=asan")
+    env.expect.that_str(info.profile_name).equals("reference")
+
+def _test_thread_build_selects_instrumentation(name, **kwargs):
+    analysis_test(
+        name = name,
+        config_settings = {"//command_line_option:cc_output_directory_tag": "tsan"},
+        impl = _test_thread_build_selects_instrumentation_impl,
+        target = ":correctness_only_test_execute_reference_test_launcher",
+        **kwargs
+    )
+
+def _test_thread_build_selects_instrumentation_impl(env, target):
+    info = target[LoomExecutionTestInfo]
+    env.expect.that_str(info.test_runner_args[0]).equals("--sanitizer=tsan")
+    env.expect.that_str(info.profile_name).equals("reference")
+
+def _test_undefined_build_selects_instrumentation(name, **kwargs):
+    analysis_test(
+        name = name,
+        config_settings = {"//command_line_option:cc_output_directory_tag": "ubsan"},
+        impl = _test_undefined_build_selects_instrumentation_impl,
+        target = ":profiled_test_selected_execute_reference_test_launcher",
+        **kwargs
+    )
+
+def _test_undefined_build_selects_instrumentation_impl(env, target):
+    info = target[LoomExecutionTestInfo]
+    env.expect.that_str(info.test_runner_args[0]).equals("--sanitizer=ubsan")
+    env.expect.that_collection(info.benchmark_runner_args).contains("--sanitizer=ubsan")
 
 def _test_resource_profile_preserves_direct_execution(name, **kwargs):
     analysis_test(
@@ -629,6 +674,7 @@ def loom_library_rules_test_suite(name):
     test_suite(
         name = name,
         tests = [
+            _test_address_build_selects_instrumentation,
             _test_correctness_only_profile_omits_benchmark_runner,
             _test_custom_runner_owns_benchmark_policy,
             _test_deps_only_library_propagates_dependencies,
@@ -645,5 +691,7 @@ def loom_library_rules_test_suite(name):
             _test_resource_profile_preserves_direct_execution,
             _test_reusable_module_owns_source_checks,
             _test_transitive_audit_universe_is_separate,
+            _test_thread_build_selects_instrumentation,
+            _test_undefined_build_selects_instrumentation,
         ],
     )

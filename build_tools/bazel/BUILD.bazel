@@ -181,6 +181,16 @@ selects.config_setting_group(
     ],
 )
 
+config_setting(
+    name = "thread_sanitizer_target",
+    values = {"cc_output_directory_tag": "tsan"},
+)
+
+config_setting(
+    name = "undefined_behavior_sanitizer_target",
+    values = {"cc_output_directory_tag": "ubsan"},
+)
+
 py_library(
     name = "python_test_environment",
     srcs = ["python_test_environment/sitecustomize.py"],

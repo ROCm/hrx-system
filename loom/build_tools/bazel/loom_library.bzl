@@ -32,6 +32,13 @@ _LOOM_FORMAT_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:format_toolchain_t
 _LOOM_LINK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:link_toolchain_type")
 _LOOM_TEST_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:test_toolchain_type")
 
+_BUILD_SANITIZER_ARGS = select({
+    Label("//build_tools/bazel:address_sanitizer_target"): ["--sanitizer=asan"],
+    Label("//build_tools/bazel:thread_sanitizer_target"): ["--sanitizer=tsan"],
+    Label("//build_tools/bazel:undefined_behavior_sanitizer_target"): ["--sanitizer=ubsan"],
+    "//conditions:default": [],
+})
+
 _LOOM_BENCHMARK_SMOKE_ARGS = [
     "--iterations=1",
     "--warmup-iterations=0",
@@ -665,7 +672,7 @@ def _declare_execution_test(
         return
     launcher_attrs = {
         "module": module,
-        "profile_args": profile.runner_args,
+        "profile_args": _BUILD_SANITIZER_ARGS + profile.runner_args,
         "profile_name": profile.name,
         "test_args": test_runner_args,
         "workload_args": workload_args,
@@ -1043,6 +1050,11 @@ def loom_test(
     only to correctness. A ``--flagfile`` is read by both tools and therefore
     contains shared options. Other single-tool launchers forward arguments
     directly, while artifact-presence checks accept none.
+
+    Built-in runners inherit address, thread, or undefined-behavior checks from the Bazel
+    build configuration, without adding test targets. Explicit profile and
+    runtime sanitizer options override that default. Custom runners own their
+    argument contract and do not receive implicit Loom options.
 
     Args:
       name: Name of the suite containing source, compilation, and execution checks.
