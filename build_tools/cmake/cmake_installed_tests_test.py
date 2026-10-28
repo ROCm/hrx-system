@@ -33,6 +33,7 @@ class CMakeInstalledTestsTest(unittest.TestCase):
             shutil.copytree(
                 FIXTURE.parent / "data_dependencies", root / "data_dependencies"
             )
+            shutil.copytree(FIXTURE / "python", root / "python")
             configure_project(source, build)
             build_project(build)
             install_project(build, prefix)
@@ -44,6 +45,7 @@ class CMakeInstalledTestsTest(unittest.TestCase):
             prefix.rename(relocated)
             source.rename(root / "retired source")
             build.rename(root / "retired build")
+            (root / "python").rename(root / "retired python")
             test_project(relocated / "share/tests")
 
     def test_deferred_artifact_must_exist_at_its_recorded_path(self):

@@ -67,4 +67,31 @@ if(IREE_TEST_DECLARE_TOOL)
   )
 endif()
 
+# External Python dependencies can appear in several package namespaces and
+# through overlapping import roots. Only identical mappings may be shared.
+function(register_python_sources)
+  iree_package_path(_PACKAGE)
+  set(_ROOT "${PROJECT_SOURCE_DIR}/../python")
+  set(_LIBRARY "${_ROOT}/library")
+  foreach(_ORDER forward reverse)
+    set(_PACKAGE_DIRS "${_ROOT}" "${_LIBRARY}")
+    if(_ORDER STREQUAL reverse)
+      list(REVERSE _PACKAGE_DIRS)
+    endif()
+    foreach(_INDEX RANGE 0 1)
+      hrx_register_installed_python_test(
+        NAME "${_PACKAGE}/${_ORDER}/${_INDEX}"
+        SRC "${_LIBRARY}/probe.py"
+        SOURCES "${_LIBRARY}/probe.py" "${_LIBRARY}/payload.py"
+        PACKAGE_DIRS ${_PACKAGE_DIRS})
+    endforeach()
+  endforeach()
+endfunction()
+
+foreach(_PREFIX first second)
+  set(IREE_PACKAGE_ROOT_PREFIX "${_PREFIX}")
+  register_python_sources()
+endforeach()
+add_subdirectory(python)
+
 hrx_create_installed_tests()

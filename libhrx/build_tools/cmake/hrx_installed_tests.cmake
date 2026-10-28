@@ -330,15 +330,36 @@ function(hrx_installed_tests_install_python_sources)
     ${ARGN}
   )
 
+  # Shared dependency files occur in many test closures. Reuse registration
+  # only within the same mapping context: ordered import roots and the caller's
+  # package namespace can place an external source at different destinations.
+  if(DEFINED IREE_PACKAGE_ROOT_DIR)
+    set(_PACKAGE_ROOT_DEFINED ON)
+  else()
+    set(_PACKAGE_ROOT_DEFINED OFF)
+  endif()
+  string(JOIN "|" _CONTEXT
+    "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_LIST_DIR}"
+    "${PROJECT_SOURCE_DIR}" "${CMAKE_BINARY_DIR}" "${IREE_ROOT_DIR}"
+    "${_PACKAGE_ROOT_DEFINED}" "${IREE_PACKAGE_ROOT_DIR}"
+    "${IREE_PACKAGE_ROOT_PREFIX}" "${_RULE_PACKAGE_DIRS}")
+  string(SHA256 _CONTEXT "${_CONTEXT}")
   foreach(_SOURCE IN LISTS _RULE_SOURCES)
     if(NOT IS_ABSOLUTE "${_SOURCE}")
       message(FATAL_ERROR
         "Installed Python test source must be absolute: ${_SOURCE}")
     endif()
+    string(SHA256 _SOURCE_KEY "${_CONTEXT}|${_SOURCE}")
+    get_property(_REGISTERED GLOBAL
+      PROPERTY "HRX_INSTALLED_PYTHON_SOURCE_${_SOURCE_KEY}")
+    if(_REGISTERED)
+      continue()
+    endif()
     hrx_installed_tests_python_source_relative_path(
       "${_SOURCE}" "${_RULE_PACKAGE_DIRS}" _SOURCE_REL_PATH)
     hrx_installed_tests_install_source_file(
       "${_SOURCE}" "${_SOURCE_REL_PATH}" _INSTALLED_SOURCE)
+    set_property(GLOBAL PROPERTY "HRX_INSTALLED_PYTHON_SOURCE_${_SOURCE_KEY}" ON)
   endforeach()
 endfunction()
 
