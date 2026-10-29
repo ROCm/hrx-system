@@ -10,9 +10,9 @@ kernel.def @i32_bitwise() {
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
   %loaded = vector.load %input_view[%lane] : view<64xi32> -> vector<1xi32>
-  %mask = vector.constant 15 : vector<1xi32>
+  %mask = vector.splati 15 : vector<1xi32>
   %masked = vector.andi %loaded, %mask : vector<1xi32>
-  %tag = vector.constant 240 : vector<1xi32>
+  %tag = vector.splati 240 : vector<1xi32>
   %with_tag = vector.ori %masked, %tag : vector<1xi32>
   %result = vector.xori %with_tag, %loaded : vector<1xi32>
   vector.store %result, %output_view[%lane] : vector<1xi32>, view<64xi32>
@@ -45,7 +45,7 @@ kernel.def @i32_shift() {
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
   %loaded = vector.load %input_view[%lane] : view<64xi32> -> vector<1xi32>
-  %shift = vector.constant 3 : vector<1xi32>
+  %shift = vector.splati 3 : vector<1xi32>
   %left = vector.shli %loaded, %shift : vector<1xi32>
   %logical = vector.shrui %loaded, %shift : vector<1xi32>
   %arithmetic = vector.shrsi %loaded, %shift : vector<1xi32>
@@ -83,7 +83,7 @@ kernel.def @i32_negative_literal() {
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
   %loaded = vector.load %input_view[%lane] : view<64xi32> -> vector<1xi32>
-  %mask = vector.constant -1 : vector<1xi32>
+  %mask = vector.splati -1 : vector<1xi32>
   %result = vector.xori %loaded, %mask : vector<1xi32>
   vector.store %result, %output_view[%lane] : vector<1xi32>, view<64xi32>
   kernel.return

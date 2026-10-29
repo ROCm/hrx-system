@@ -3,10 +3,10 @@
 // Partial floating literals use ordinary native constants. Only authored
 // lanes contribute when the final SIMD value is assembled with a runtime tail.
 func.def @partial_float_constants(%input: vector<4xf32>, %wide_input: vector<2xf64>) -> (vector<4xf32>, vector<2xf64>) {
-  %head = vector.constant -0.0 : vector<3xf32>
+  %head = vector.splatf -0.0 : vector<3xf32>
   %last = vector.slice %input[3] : vector<4xf32> -> vector<1xf32>
   %joined = vector.concat<0> %head, %last : vector<3xf32>, vector<1xf32> -> vector<4xf32>
-  %wide_head = vector.constant -inf : vector<1xf64>
+  %wide_head = vector.splatf -inf : vector<1xf64>
   %wide_last = vector.slice %wide_input[1] : vector<2xf64> -> vector<1xf64>
   %wide_joined = vector.concat<0> %wide_head, %wide_last : vector<1xf64>, vector<1xf64> -> vector<2xf64>
   func.return %joined, %wide_joined : vector<4xf32>, vector<2xf64>
@@ -28,7 +28,7 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @partial_float_constan
 
 // Runtime and literal i32 splats use the scalar-to-vector instruction path.
 func.def @i32_splat_forms(%dynamic: i32) -> (vector<4xi32>) {
-  %literal = vector.constant -19088743 : vector<4xi32>
+  %literal = vector.splati -19088743 : vector<4xi32>
   %splat = vector.splat %dynamic : vector<4xi32>
   %result = vector.addi %literal, %splat : vector<4xi32>
   func.return %result : vector<4xi32>
@@ -47,7 +47,7 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @i32_splat_forms(%dyna
 
 // Full-width i64 literals use the native vector constant form.
 func.def @i64_vector_constant() -> (vector<2xi64>) {
-  %result = vector.constant -9223372036854775807 : vector<2xi64>
+  %result = vector.splati -9223372036854775807 : vector<2xi64>
   func.return %result : vector<2xi64>
 }
 
@@ -61,7 +61,7 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @i64_vector_constant()
 
 // Runtime and literal f32 splats use the scalar-to-vector instruction path.
 func.def @f32_splat_forms(%dynamic: f32) -> (vector<4xf32>) {
-  %literal = vector.constant -1.1000000000000001 : vector<4xf32>
+  %literal = vector.splatf -1.1000000000000001 : vector<4xf32>
   %splat = vector.splat %dynamic : vector<4xf32>
   %result = vector.addf %literal, %splat : vector<4xf32>
   func.return %result : vector<4xf32>
@@ -80,7 +80,7 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @f32_splat_forms(%dyna
 
 // Full-width f64 literals use the native vector constant form.
 func.def @f64_vector_constant() -> (vector<2xf64>) {
-  %result = vector.constant -0.0 : vector<2xf64>
+  %result = vector.splatf -0.0 : vector<2xf64>
   func.return %result : vector<2xf64>
 }
 
@@ -94,7 +94,7 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @f64_vector_constant()
 
 // Predicate constants remain full-lane masks through vector selection.
 func.def @predicate_constant_masks(%condition: i1, %true_value: vector<4xi32>, %false_value: vector<4xi32>) -> (vector<4xi32>) {
-  %off = vector.constant false : vector<4xi1>
+  %off = vector.splati 0 : vector<4xi1>
   %scalar = scalar.constant true : i1
   %on = vector.splat %scalar : vector<4xi1>
   %mask = scf.select %condition, %on, %off : vector<4xi1>

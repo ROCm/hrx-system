@@ -2,7 +2,7 @@
 
 func.def @supported_f64_positive_zero() -> (f64, vector<2xf64>) {
   %scalar = scalar.constant 0.0 : f64
-  %vector = vector.constant 0.0 : vector<2xf64>
+  %vector = vector.splatf 0.0 : vector<2xf64>
   func.return %scalar, %vector : f64, vector<2xf64>
 }
 
@@ -15,13 +15,13 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
 // ====
 
 func.def @f64x2_constant_payloads() -> (vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>) {
-  %signed_payload = vector.constant -0.0 : vector<2xf64>
-  %fraction = vector.constant -1.1000000000000001 : vector<2xf64>
-  %subnormal = vector.constant 4.9406564584124654e-324 : vector<2xf64>
-  %normal = vector.constant 2.2250738585072014e-308 : vector<2xf64>
-  %positive_infinity = vector.constant inf : vector<2xf64>
-  %negative_infinity = vector.constant -inf : vector<2xf64>
-  %nan = vector.constant nan : vector<2xf64>
+  %signed_payload = vector.splatf -0.0 : vector<2xf64>
+  %fraction = vector.splatf -1.1000000000000001 : vector<2xf64>
+  %subnormal = vector.splatf 4.9406564584124654e-324 : vector<2xf64>
+  %normal = vector.splatf 2.2250738585072014e-308 : vector<2xf64>
+  %positive_infinity = vector.splatf inf : vector<2xf64>
+  %negative_infinity = vector.splatf -inf : vector<2xf64>
+  %nan = vector.splatf nan : vector<2xf64>
   func.return %signed_payload, %fraction, %subnormal, %normal, %positive_infinity, %negative_infinity, %nan : vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>
 }
 

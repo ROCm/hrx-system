@@ -93,7 +93,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x4_cfg_arg_add
 // ====
 
 func.def @i8x4_shrui_4(%values: vector<4xi8>) -> (vector<4xi8>) {
-  %amount = vector.constant 4 : vector<4xi8>
+  %amount = vector.splati 4 : vector<4xi8>
   %result = vector.shrui %values, %amount : vector<4xi8>
   func.return %result : vector<4xi8>
 }
@@ -108,7 +108,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x4_shrui_4(%va
 // ====
 
 func.def @i8x5_shli_7(%values: vector<5xi8>) -> (vector<5xi8>) {
-  %amount = vector.constant 7 : vector<5xi8>
+  %amount = vector.splati 7 : vector<5xi8>
   %result = vector.shli %values, %amount : vector<5xi8>
   func.return %result : vector<5xi8>
 }
@@ -128,7 +128,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x5_shli_7(%val
 // ====
 
 func.def @i8x4_shrui_0(%values: vector<4xi8>) -> (vector<4xi8>) {
-  %amount = vector.constant 0 : vector<4xi8>
+  %amount = vector.splati 0 : vector<4xi8>
   %result = vector.shrui %values, %amount : vector<4xi8>
   func.return %result : vector<4xi8>
 }
@@ -141,7 +141,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x4_shrui_0(%va
 // ====
 
 func.def @i8x4_bounded_varying_shifts(%values: vector<4xi8>, %amounts: vector<4xi8>) -> (vector<4xi8>) {
-  %mask = vector.constant 7 : vector<4xi8>
+  %mask = vector.splati 7 : vector<4xi8>
   %bounded = vector.andi %amounts, %mask : vector<4xi8>
   %result = vector.shrui %values, %bounded : vector<4xi8>
   func.return %result : vector<4xi8>

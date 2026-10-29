@@ -16,7 +16,7 @@ template.def<@model.nvfp4.matrix_tile> device requires [#target.subgroup.size<32
   %tile_extent = index.constant 16 : index
   %lhs = vector.fragment<lhs> %lhs_data shape [%tile_extent, %tile_extent] : vector<16xf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [%tile_extent, %tile_extent] : vector<16xf16>
-  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %initial_values = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %initial_values shape [%tile_extent, %tile_extent] : vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
   %output_view = buffer.view %output[%output_byte_offset] : buffer -> view<16x16xf32>
@@ -49,7 +49,7 @@ template.def<@model.nvfp4.matrix_tile> device requires [#target.subgroup.size<64
   %rhs_data = vector.slice %rhs_decoded[%c0] : vector<8xf16> -> vector<4xf16>
   %lhs = vector.fragment<lhs> %lhs_data shape [%tile_extent, %tile_extent] : vector<4xf16>
   %rhs = vector.fragment<rhs> %rhs_data shape [%tile_extent, %tile_extent] : vector<4xf16>
-  %initial_values = vector.constant 0.0 : vector<4xf32>
+  %initial_values = vector.splatf 0.0 : vector<4xf32>
   %initial = vector.fragment<init> %initial_values shape [%tile_extent, %tile_extent] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %initial : vector<4xf16>, vector<4xf16>, vector<4xf32>
   %output_view = buffer.view %output[%output_byte_offset] : buffer -> view<16x16xf32>

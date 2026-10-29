@@ -300,12 +300,13 @@ static iree_status_t loom_kernel_specialize_literal(
   if (loom_op_is_empty(source) &&
       !loom_type_has_static_zero_extent(body_type)) {
     const loom_scalar_type_t element_type = loom_type_element_type(body_type);
-    const loom_attribute_t zero =
-        loom_scalar_type_is_float(element_type) ? loom_attr_f64(0.0)
-        : element_type == LOOM_SCALAR_TYPE_I1   ? loom_attr_bool(false)
-                                                : loom_attr_i64(0);
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(builder, zero, body_type,
+    if (loom_scalar_type_is_float(element_type)) {
+      IREE_RETURN_IF_ERROR(loom_vector_splatf_build(builder, 0.0, body_type,
                                                     location, &literal));
+    } else {
+      IREE_RETURN_IF_ERROR(
+          loom_vector_splati_build(builder, 0, body_type, location, &literal));
+    }
   } else {
     IREE_RETURN_IF_ERROR(loom_builder_allocate_op(builder, source->kind, 0, 1,
                                                   0, 0, source->attribute_count,

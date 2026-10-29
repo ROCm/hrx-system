@@ -177,7 +177,7 @@ func.def @uniform_initialization_and_repeated_updates(%increment: vector<4xf32>)
   %loop_begin = index.constant 0 : index
   %loop_step = index.constant 1 : index
   %loop_end = index.constant 4 : index
-  %initial_slot_0 = vector.constant 0.0 : vector<4xf32>
+  %initial_slot_0 = vector.splatf 0.0 : vector<4xf32>
   %result_slot_0, %result_slot_1 = scf.for %i = [%loop_begin to %loop_end step %loop_step](%bank_slot_0 = %initial_slot_0 : vector<4xf32>, %bank_slot_1 = %initial_slot_0 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
     %first = vector.addf %bank_slot_0, %increment : vector<4xf32>
     %second = vector.addf %first, %increment : vector<4xf32>
@@ -423,7 +423,7 @@ func.def @rank1_reconstructed_state(%a: i32, %b: i32, %end: index) -> (i32, i32)
 func.def @rank2_row_reconstructed_state(%initial: vector<2x2xf32>, %increment: f32, %end: index) -> (f32, f32, f32, f32) {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
-  %empty = vector.constant 0.0 : vector<2x2xf32>
+  %empty = vector.splatf 0.0 : vector<2x2xf32>
   %result = scf.for %i = [%begin to %end step %step](%state = %initial : vector<2x2xf32>) -> (vector<2x2xf32>) {
     %x00 = vector.extract %state[0, 0] : vector<2x2xf32> -> f32
     %x01 = vector.extract %state[0, 1] : vector<2x2xf32> -> f32

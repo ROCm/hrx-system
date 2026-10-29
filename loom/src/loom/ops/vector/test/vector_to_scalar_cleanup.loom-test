@@ -6,7 +6,7 @@
 func.def @gather_zero_offsets(%buffer: buffer, %byte_offset: offset) -> (vector<2xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32, %layout>
-  %offsets = vector.constant 0 : vector<2xindex>
+  %offsets = vector.splati 0 : vector<2xindex>
   %loaded = vector.gather %view[3][%offsets] : view<8xf32, %layout>, vector<2xindex> -> vector<2xf32>
   func.return %loaded : vector<2xf32>
 }
@@ -38,7 +38,7 @@ func.def @gather_iota_offsets(%n: index, %buffer: buffer, %byte_offset: offset, 
 // ----
 func.def @gather_iota_offsets(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index) -> (vector<[%n]xf32>) {
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xf32>
-  %11 = vector.constant 0.0 : vector<[%n]xf32>
+  %11 = vector.splatf 0.0 : vector<[%n]xf32>
   %12 = index.constant 0 : index
   %13 = index.constant 1 : index
   %loaded = scf.for %14 = [%12 to %n step %13](%15 = %11 : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
@@ -57,7 +57,7 @@ func.def @gather_iota_offsets(%n: index, %buffer: buffer, %byte_offset: offset, 
 func.def @load_full_range_mask(%buffer: buffer, %byte_offset: offset) -> (vector<2xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32, %layout>
-  %old = vector.constant 0.0 : vector<2xf32>
+  %old = vector.splatf 0.0 : vector<2xf32>
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index

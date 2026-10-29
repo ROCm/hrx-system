@@ -55,12 +55,12 @@ static iree_status_t loom_vector_table_quantize_constant(
     const loom_vector_table_quantize_builder_t* quantize, loom_type_t type,
     uint64_t value, loom_value_id_t* out_value) {
   loom_op_t* constant_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      quantize->builder,
-      loom_attr_i64(loom_vector_table_quantize_integer_bits(
-          loom_type_element_type(type), value)),
-      type, quantize->location, &constant_op));
-  *out_value = loom_vector_constant_result(constant_op);
+  IREE_RETURN_IF_ERROR(
+      loom_vector_splati_build(quantize->builder,
+                               loom_vector_table_quantize_integer_bits(
+                                   loom_type_element_type(type), value),
+                               type, quantize->location, &constant_op));
+  *out_value = loom_vector_splati_result(constant_op);
   return iree_ok_status();
 }
 

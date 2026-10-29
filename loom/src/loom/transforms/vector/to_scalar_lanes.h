@@ -180,7 +180,7 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
     loom_type_t vector_type, loom_vector_to_scalar_index_list_t indices,
     bool* out_materialized, loom_value_id_t* out_lane);
 
-iree_status_t loom_vector_to_scalar_build_constant_lane(
+iree_status_t loom_vector_to_scalar_build_literal_splat_lane(
     loom_vector_to_scalar_state_t* state, loom_value_id_t* out_lane);
 
 iree_status_t loom_vector_to_scalar_build_poison_lane(

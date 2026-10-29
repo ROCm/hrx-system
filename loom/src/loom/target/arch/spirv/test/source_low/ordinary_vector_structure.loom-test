@@ -16,14 +16,14 @@ kernel.def @ordinary_vector_structure_i32() {
   %condition = scalar.cmpi sgt, %a, %b : i32
   %singleton_from = vector.from_elements %b : vector<1xi32>
   %singleton_splat = vector.splat %a : vector<1xi32>
-  %singleton_constant = vector.constant 10 : vector<1xi32>
+  %singleton_constant = vector.splati 10 : vector<1xi32>
   %singleton_selected = scf.select %condition, %singleton_splat, %singleton_from : vector<1xi32>
   %singleton_inserted = vector.insert %a into %singleton_selected[0] : i32, vector<1xi32>
   %singleton_value = vector.extract %singleton_inserted[0] : vector<1xi32> -> i32
   %singleton_constant_value = vector.extract %singleton_constant[0] : vector<1xi32> -> i32
   %from = vector.from_elements %a, %b, %c, %d : vector<4xi32>
   %shuffled = vector.shuffle<[3, 1, 1, 0]> %from : vector<4xi32>
-  %constant = vector.constant 10 : vector<4xi32>
+  %constant = vector.splati 10 : vector<4xi32>
   %splat = vector.splat %singleton_value : vector<4xi32>
   %candidate = scf.select %condition, %shuffled, %constant : vector<4xi32>
   %selected = scf.if %condition -> (vector<4xi32>) {

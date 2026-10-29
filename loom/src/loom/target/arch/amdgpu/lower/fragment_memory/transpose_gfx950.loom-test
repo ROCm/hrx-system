@@ -18,7 +18,7 @@ kernel.def target(@target) @lds_row_major_rhs_transpose_load() {
   %output_view = buffer.view %output[%base] : buffer -> view<4xf32>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x32xbf16> -> vector<8xbf16>
   %rhs = vector.fragment.load<rhs> %input_view[0, 0] shape [%k, %n] : view<32x16xbf16> -> vector<8xbf16>
-  %c0 = vector.constant 0.0 : vector<4xf32>
+  %c0 = vector.splatf 0.0 : vector<4xf32>
   %init = vector.fragment<init> %c0 shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
   vector.store %result, %output_view[0] : vector<4xf32>, view<4xf32>

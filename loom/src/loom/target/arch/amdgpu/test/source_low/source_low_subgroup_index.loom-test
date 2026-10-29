@@ -10,7 +10,7 @@ kernel.def target(@target) @subgroup_id_x_wave32() {
   %subgroup_id = kernel.subgroup.id : index
   %output_base = index.constant 0 : offset
   %output_view = buffer.view %output[%output_base] : buffer -> view<2xi32>
-  %marker_value = vector.constant 1 : vector<1xi32>
+  %marker_value = vector.splati 1 : vector<1xi32>
   vector.store %marker_value, %output_view[%subgroup_id] : vector<1xi32>, view<2xi32>
   kernel.return
 }
@@ -38,7 +38,7 @@ kernel.def target(@target) @subgroup_id_single_wave_gfx11() {
   %subgroup_id = kernel.subgroup.id : index
   %output_base = index.constant 0 : offset
   %output_view = buffer.view %output[%output_base] : buffer -> view<1xi32>
-  %marker_value = vector.constant 1 : vector<1xi32>
+  %marker_value = vector.splati 1 : vector<1xi32>
   vector.store %marker_value, %output_view[%subgroup_id] : vector<1xi32>, view<1xi32>
   kernel.return
 }
@@ -66,7 +66,7 @@ kernel.def target(@target) @subgroup_lane_id_xyz_wave32() {
   %lane_id = kernel.subgroup.lane.id : index
   %output_base = index.constant 0 : offset
   %output_view = buffer.view %output[%output_base] : buffer -> view<32xi32>
-  %marker_value = vector.constant 1 : vector<1xi32>
+  %marker_value = vector.splati 1 : vector<1xi32>
   vector.store %marker_value, %output_view[%lane_id] : vector<1xi32>, view<32xi32>
   kernel.return
 }
@@ -106,7 +106,7 @@ kernel.def target(@target) @subgroup_id_xyz_non_power_of_two() {
   %subgroup_id = kernel.subgroup.id : index
   %output_base = index.constant 0 : offset
   %output_view = buffer.view %output[%output_base] : buffer -> view<4xi32>
-  %marker_value = vector.constant 1 : vector<1xi32>
+  %marker_value = vector.splati 1 : vector<1xi32>
   vector.store %marker_value, %output_view[%subgroup_id] : vector<1xi32>, view<4xi32>
   kernel.return
 }
@@ -147,7 +147,7 @@ kernel.def target(@target) @subgroup_lane_id_xyz_wave32_gfx12() {
   %lane_id = kernel.subgroup.lane.id : index
   %output_base = index.constant 0 : offset
   %output_view = buffer.view %output[%output_base] : buffer -> view<32xi32>
-  %marker_value = vector.constant 1 : vector<1xi32>
+  %marker_value = vector.splati 1 : vector<1xi32>
   vector.store %marker_value, %output_view[%lane_id] : vector<1xi32>, view<32xi32>
   kernel.return
 }
@@ -184,7 +184,7 @@ kernel.def target(@target) @subgroup_id_x_wave64() {
   %subgroup_id = kernel.subgroup.id : index
   %output_base = index.constant 0 : offset
   %output_view = buffer.view %output[%output_base] : buffer -> view<2xi32>
-  %marker_value = vector.constant 1 : vector<1xi32>
+  %marker_value = vector.splati 1 : vector<1xi32>
   vector.store %marker_value, %output_view[%subgroup_id] : vector<1xi32>, view<2xi32>
   kernel.return
 }
@@ -212,7 +212,7 @@ kernel.def target(@target) @subgroup_lane_id_x_wave64() {
   %lane_id = kernel.subgroup.lane.id : index
   %output_base = index.constant 0 : offset
   %output_view = buffer.view %output[%output_base] : buffer -> view<64xi32>
-  %marker_value = vector.constant 1 : vector<1xi32>
+  %marker_value = vector.splati 1 : vector<1xi32>
   vector.store %marker_value, %output_view[%lane_id] : vector<1xi32>, view<64xi32>
   kernel.return
 }
@@ -238,7 +238,7 @@ kernel.def target(@target) @dynamic_subgroup_lane_id(%size: index) {
   %lane_id = kernel.subgroup.lane.id : index
   %output_base = index.constant 0 : offset
   %output_view = buffer.view %output[%output_base] : buffer -> view<32xi32>
-  %marker_value = vector.constant 1 : vector<1xi32>
+  %marker_value = vector.splati 1 : vector<1xi32>
   vector.store %marker_value, %output_view[%lane_id] : vector<1xi32>, view<32xi32>
   kernel.return
 }
@@ -264,7 +264,7 @@ kernel.def target(@target) @dynamic_subgroup_lane_id_wave64(%size: index) {
   %lane_id = kernel.subgroup.lane.id : index
   %output_base = index.constant 0 : offset
   %output_view = buffer.view %output[%output_base] : buffer -> view<64xi32>
-  %marker_value = vector.constant 1 : vector<1xi32>
+  %marker_value = vector.splati 1 : vector<1xi32>
   vector.store %marker_value, %output_view[%lane_id] : vector<1xi32>, view<64xi32>
   kernel.return
 }

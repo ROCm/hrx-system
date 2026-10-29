@@ -161,7 +161,7 @@ func.def @partial_i32_tail(%input: buffer, %output: buffer) {
   %input_view = buffer.view %input[%base] : buffer -> view<3xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<3xi32>
   %values = vector.load %input_view[0] : view<3xi32> -> vector<3xi32>
-  %counts = vector.constant 5 : vector<3xi32>
+  %counts = vector.splati 5 : vector<3xi32>
   %result = vector.shli %values, %counts : vector<3xi32>
   vector.store %result, %output_view[0] : vector<3xi32>, view<3xi32>
   func.return

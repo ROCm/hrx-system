@@ -265,7 +265,7 @@ pipeline.def @fixed_records() run(%storage: buffer) {
 
 func.def inline @__pipeline_strand_0(%width: index, %channel: channel<tile<[%width]xi32>>) {
   %write, %destination = channel.reserve %channel : channel<tile<[%width]xi32>> -> (write<tile<[%width]xi32>>, view<[%width]xi32>)
-  %values = vector.constant 0 : vector<8xi32>
+  %values = vector.splati 0 : vector<8xi32>
   vector.store %values, %destination[0] : vector<8xi32>, view<[%width]xi32>
   channel.publish %write : write<tile<[%width]xi32>>
   %read, %payload = channel.acquire %channel : channel<tile<[%width]xi32>> -> (read<tile<[%width]xi32>>, view<[%width]xi32>)

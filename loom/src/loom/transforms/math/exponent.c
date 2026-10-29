@@ -46,20 +46,20 @@ static loom_type_t loom_math_exponent_element_type(loom_type_t type,
 // Both recipes use the same small set of elementwise operations. The table
 // carries scalar/vector selection and arity; construction consumes these
 // trusted contracts without per-operation dispatch or builder wrappers.
-#define LOOM_MATH_EXPONENT_OPS(_)       \
-  _(CONSTANT, CONSTANT, CONSTANT, 0, 1) \
-  _(BITCAST, BITCAST, BITCAST, 1, 0)    \
-  _(EXTSI, EXTSI, EXTSI, 1, 0)          \
-  _(TRUNCI, TRUNCI, TRUNCI, 1, 0)       \
-  _(CTLZI, CTLZI, CTLZI, 1, 0)          \
-  _(ADDI, ADDI, ADDI, 2, 0)             \
-  _(SUBI, SUBI, SUBI, 2, 0)             \
-  _(ANDI, ANDI, ANDI, 2, 0)             \
-  _(ORI, ORI, ORI, 2, 0)                \
-  _(SHLI, SHLI, SHLI, 2, 0)             \
-  _(SHRUI, SHRUI, SHRUI, 2, 0)          \
-  _(MINSI, MINSI, MINSI, 2, 0)          \
-  _(MAXSI, MAXSI, MAXSI, 2, 0)          \
+#define LOOM_MATH_EXPONENT_OPS(_)     \
+  _(CONSTANT, CONSTANT, SPLATI, 0, 1) \
+  _(BITCAST, BITCAST, BITCAST, 1, 0)  \
+  _(EXTSI, EXTSI, EXTSI, 1, 0)        \
+  _(TRUNCI, TRUNCI, TRUNCI, 1, 0)     \
+  _(CTLZI, CTLZI, CTLZI, 1, 0)        \
+  _(ADDI, ADDI, ADDI, 2, 0)           \
+  _(SUBI, SUBI, SUBI, 2, 0)           \
+  _(ANDI, ANDI, ANDI, 2, 0)           \
+  _(ORI, ORI, ORI, 2, 0)              \
+  _(SHLI, SHLI, SHLI, 2, 0)           \
+  _(SHRUI, SHRUI, SHRUI, 2, 0)        \
+  _(MINSI, MINSI, MINSI, 2, 0)        \
+  _(MAXSI, MAXSI, MAXSI, 2, 0)        \
   _(CMPI, CMPI, CMPI, 2, 1)
 
 typedef enum loom_math_exponent_opcode_e {

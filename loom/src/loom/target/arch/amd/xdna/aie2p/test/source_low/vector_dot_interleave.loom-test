@@ -28,7 +28,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot_inte
 aie2p.target<core> @target
 
 func.def target(@target) @dot_interleaved_zero(%lhs: vector<32xbf16>, %even: vector<16xbf16>, %odd: vector<16xbf16>) -> (vector<16xf32>) {
-  %initial = vector.constant 0.0 : vector<16xf32>
+  %initial = vector.splatf 0.0 : vector<16xf32>
   %rhs = vector.interleave<0> %even, %odd : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
   %result = vector.dot2f %lhs, %rhs, %initial : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
   func.return %result : vector<16xf32>

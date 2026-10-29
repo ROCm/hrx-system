@@ -95,7 +95,7 @@ func.def @per_lane_gather_preserves_vector_dot(%latent: vector<8xbf16>, %weights
   %base = index.constant 0 : offset
   %start = index.constant 0 : index
   %stride = index.constant 7 : index
-  %zero_acc = vector.constant 0.0 : vector<4xf32>
+  %zero_acc = vector.splatf 0.0 : vector<4xf32>
   %weights_view = buffer.view %weights[%base] : buffer -> view<4096xbf16>
   %offsets = vector.iota %start step %stride : vector<8xindex>
   %weight = vector.gather %weights_view[%origin][%offsets] : view<4096xbf16>, vector<8xindex> -> vector<8xbf16>
@@ -106,7 +106,7 @@ func.def @per_lane_gather_preserves_vector_dot(%latent: vector<8xbf16>, %weights
 // ----
 func.def @per_lane_gather_preserves_vector_dot(%latent: vector<8xbf16>, %weights: buffer, %origin: index) -> (vector<4xf32>) {
   %base = index.constant 0 : offset
-  %zero_acc = vector.constant 0.0 : vector<4xf32>
+  %zero_acc = vector.splatf 0.0 : vector<4xf32>
   %weights_view = buffer.view %weights[%base] : buffer -> view<4096xbf16>
   %15 = view.load %weights_view[%origin] : view<4096xbf16> -> bf16
   %19 = index.constant 7 : index

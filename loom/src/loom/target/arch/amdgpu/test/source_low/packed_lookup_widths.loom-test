@@ -4,7 +4,7 @@
 // recursive table selection, and composed nibble decode.
 
 func.def @byte_table_4_lanes_1(%table: vector<4xi8>, %input: vector<1xi8>) -> (vector<1xi8>) {
-  %mask = vector.constant 3 : vector<1xi8>
+  %mask = vector.splati 3 : vector<1xi8>
   %indices = vector.andi %input, %mask : vector<1xi8>
   %values = vector.table.lookup %table[%indices] : vector<4xi8>, vector<1xi8> -> vector<1xi8>
   func.return %values : vector<1xi8>
@@ -21,7 +21,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_4_lan
 // ====
 
 func.def @byte_table_8_lanes_5(%table: vector<8xi8>, %input: vector<5xi8>) -> (vector<5xi8>) {
-  %mask = vector.constant 7 : vector<5xi8>
+  %mask = vector.splati 7 : vector<5xi8>
   %indices = vector.andi %input, %mask : vector<5xi8>
   %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<5xi8> -> vector<5xi8>
   func.return %values : vector<5xi8>
@@ -45,7 +45,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_8_lan
 // ====
 
 func.def @byte_table_16_lanes_5(%table: vector<16xi8>, %input: vector<5xi8>) -> (vector<5xi8>) {
-  %mask = vector.constant 15 : vector<5xi8>
+  %mask = vector.splati 15 : vector<5xi8>
   %indices = vector.andi %input, %mask : vector<5xi8>
   %values = vector.table.lookup %table[%indices] : vector<16xi8>, vector<5xi8> -> vector<5xi8>
   func.return %values : vector<5xi8>
@@ -83,7 +83,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_16_la
 // ====
 
 func.def @byte_table_33_lanes_1(%table: vector<33xi8>, %input: vector<1xi8>) -> (vector<1xi8>) {
-  %mask = vector.constant 32 : vector<1xi8>
+  %mask = vector.splati 32 : vector<1xi8>
   %indices = vector.andi %input, %mask : vector<1xi8>
   %values = vector.table.lookup %table[%indices] : vector<33xi8>, vector<1xi8> -> vector<1xi8>
   func.return %values : vector<1xi8>

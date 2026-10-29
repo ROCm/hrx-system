@@ -11,9 +11,9 @@ func.def target(@target) @extract_unsigned_same_width(%count: index, %source: ve
 test.target<low_core> @target
 
 func.def target(@target) @extract_unsigned_same_width(%count: index, %source: vector<[%count]xi32>) -> (vector<[%count]xi32>) {
-  %6 = vector.constant 31 : vector<[%count]xi32>
+  %6 = vector.splati 31 : vector<[%count]xi32>
   %7 = vector.shli %source, %6 : vector<[%count]xi32>
-  %8 = vector.constant 31 : vector<[%count]xi32>
+  %8 = vector.splati 31 : vector<[%count]xi32>
   %result = vector.shrui %7, %8 : vector<[%count]xi32>
   func.return %result : vector<[%count]xi32>
 }
@@ -50,9 +50,9 @@ test.target<low_core> @target
 
 func.def target(@target) @extract_unsigned_wider_result(%source: vector<4xi16>) -> (vector<4xi64>) {
   %5 = vector.extui %source : vector<4xi16> to vector<4xi64>
-  %6 = vector.constant 63 : vector<4xi64>
+  %6 = vector.splati 63 : vector<4xi64>
   %7 = vector.shli %5, %6 : vector<4xi64>
-  %8 = vector.constant 63 : vector<4xi64>
+  %8 = vector.splati 63 : vector<4xi64>
   %result = vector.shrui %7, %8 : vector<4xi64>
   func.return %result : vector<4xi64>
 }
@@ -73,9 +73,9 @@ test.target<low_core> @target
 func.def target(@target) @retained_truncation(%count: index, %source: vector<2x[%count]xi32>) -> (vector<2x[%count]xi1>, vector<2x[%count]xi64>) {
   %intermediate = vector.trunci %source : vector<2x[%count]xi32> to vector<2x[%count]xi1>
   %7 = vector.extui %source : vector<2x[%count]xi32> to vector<2x[%count]xi64>
-  %8 = vector.constant 63 : vector<2x[%count]xi64>
+  %8 = vector.splati 63 : vector<2x[%count]xi64>
   %9 = vector.shli %7, %8 : vector<2x[%count]xi64>
-  %10 = vector.constant 63 : vector<2x[%count]xi64>
+  %10 = vector.splati 63 : vector<2x[%count]xi64>
   %result = vector.shrsi %9, %10 : vector<2x[%count]xi64>
   func.return %intermediate, %result : vector<2x[%count]xi1>, vector<2x[%count]xi64>
 }

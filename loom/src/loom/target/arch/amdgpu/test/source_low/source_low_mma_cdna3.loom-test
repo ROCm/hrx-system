@@ -690,7 +690,7 @@ kernel.def target(@target) @fp8_mfma_fragment_memory() {
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x32xf8E4M3> -> vector<8xf8E4M3>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<32x16xf8E4M3, %rhs_layout> -> vector<8xf8E4M3>
-  %zero_acc = vector.constant 0.0 : vector<4xf32>
+  %zero_acc = vector.splatf 0.0 : vector<4xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<8xf8E4M3>, vector<8xf8E4M3>, vector<4xf32>
   vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
@@ -745,7 +745,7 @@ kernel.def target(@target) @bf8_fp8_mfma_fragment_memory() {
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x32xf8E5M2> -> vector<8xf8E5M2>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<32x16xf8E4M3, %rhs_layout> -> vector<8xf8E4M3>
-  %zero_acc = vector.constant 0.0 : vector<4xf32>
+  %zero_acc = vector.splatf 0.0 : vector<4xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<8xf8E5M2>, vector<8xf8E4M3>, vector<4xf32>
   vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
@@ -846,7 +846,7 @@ kernel.def target(@target) @f32_mfma_32x32x2_fragment_memory() {
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x32xf32>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<32x2xf32> -> vector<1xf32>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<2x32xf32, %rhs_layout> -> vector<1xf32>
-  %zero_acc = vector.constant 0.0 : vector<16xf32>
+  %zero_acc = vector.splatf 0.0 : vector<16xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<16xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<1xf32>, vector<1xf32>, vector<16xf32>
   vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<32x32xf32>
@@ -925,7 +925,7 @@ kernel.def target(@target) @f16_mfma_32x32x8_fragment_memory() {
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x32xf32>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<32x8xf16> -> vector<4xf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<8x32xf16, %rhs_layout> -> vector<4xf16>
-  %zero_acc = vector.constant 0.0 : vector<16xf32>
+  %zero_acc = vector.splatf 0.0 : vector<16xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<16xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<16xf32>
   vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<32x32xf32>
@@ -1004,7 +1004,7 @@ kernel.def target(@target) @bf16_mfma_32x32x8_fragment_memory() {
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x32xf32>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<32x8xbf16> -> vector<4xbf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<8x32xbf16, %rhs_layout> -> vector<4xbf16>
-  %zero_acc = vector.constant 0.0 : vector<16xf32>
+  %zero_acc = vector.splatf 0.0 : vector<16xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<16xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<4xbf16>, vector<4xbf16>, vector<16xf32>
   vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<32x32xf32>
@@ -1087,7 +1087,7 @@ kernel.def target(@target) @tf32_mfma_16x16x8_fragment_memory() {
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x8xf32, %lhs_storage> -> vector<2xi32>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<8x16xf32, %rhs_storage> -> vector<2xi32>
-  %zero_acc = vector.constant 0.0 : vector<4xf32>
+  %zero_acc = vector.splatf 0.0 : vector<4xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<2xi32>, vector<4xf32>
   vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<4xf32>, view<16x16xf32>
@@ -1146,7 +1146,7 @@ kernel.def target(@target) @tf32_mfma_32x32x4_fragment_memory() {
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<32x32xf32>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<32x4xf32, %lhs_storage> -> vector<2xi32>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<4x32xf32, %rhs_storage> -> vector<2xi32>
-  %zero_acc = vector.constant 0.0 : vector<16xf32>
+  %zero_acc = vector.splatf 0.0 : vector<16xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<16xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<2xi32>, vector<2xi32>, vector<16xf32>
   vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<32x32xf32>

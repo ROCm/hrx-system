@@ -12,7 +12,7 @@ kernel.def @uniform_table() {
   %lane = kernel.workitem.id<x> : index
   %source_view = buffer.view %source[%c0] : buffer -> view<32x4xi8>
   %input_values = vector.load %source_view[%lane, 0] : view<32x4xi8> -> vector<4xi8>
-  %mask = vector.constant 15 : vector<4xi8>
+  %mask = vector.splati 15 : vector<4xi8>
   %indices = vector.andi %input_values, %mask : vector<4xi8>
   %table_view = buffer.view %table_source[%c0] : buffer -> view<16xi8>
   %table = vector.load %table_view[0] : view<16xi8> -> vector<16xi8>

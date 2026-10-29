@@ -97,9 +97,9 @@ func.def @vector_i64_bitwise(%trial: index, %output: buffer) {
   %and_result = vector.andi %lhs, %rhs : vector<2xi64>
   %or_result = vector.ori %lhs, %rhs : vector<2xi64>
   %xor_result = vector.xori %lhs, %rhs : vector<2xi64>
-  %low_mask = vector.constant 4294967295 : vector<2xi64>
-  %sign_tag = vector.constant -9223372036854775807 : vector<2xi64>
-  %upper_toggle = vector.constant -4294967296 : vector<2xi64>
+  %low_mask = vector.splati 4294967295 : vector<2xi64>
+  %sign_tag = vector.splati -9223372036854775807 : vector<2xi64>
+  %upper_toggle = vector.splati -4294967296 : vector<2xi64>
   %masked = vector.andi %lhs, %low_mask : vector<2xi64>
   %tagged = vector.ori %sign_tag, %rhs : vector<2xi64>
   %toggled = vector.xori %lhs, %upper_toggle : vector<2xi64>
@@ -146,7 +146,7 @@ func.def @uniform_byte_shifts(%trial: index, %input: buffer, %count_storage: buf
   %mask = scalar.constant 7 : i8
   %count = scalar.andi %loaded_count, %mask : i8
   %counts = vector.splat %count : vector<16xi8>
-  %fixed_counts = vector.constant 4 : vector<16xi8>
+  %fixed_counts = vector.splati 4 : vector<16xi8>
   %replacement = scalar.xori %count, %mask : i8
   view.store %replacement, %count_source[%ordinal] : i8, view<8xi8>
   %source = buffer.view %input[%base] : buffer -> view<16xi8>
@@ -176,7 +176,7 @@ func.def @uniform_word_shifts(%trial: index, %input: buffer, %count_storage: buf
   %narrow_count = scalar.trunci %loaded_count : i32 to i16
   %count = scalar.assume %narrow_count [range(%narrow_count, 0, 15)] : i16
   %counts = vector.splat %count : vector<8xi16>
-  %fixed_counts = vector.constant 4 : vector<8xi16>
+  %fixed_counts = vector.splati 4 : vector<8xi16>
   %mask = scalar.constant 15 : i32
   %replacement = scalar.xori %loaded_count, %mask : i32
   view.store %replacement, %count_source[%ordinal] : i32, view<16xi32>
@@ -206,7 +206,7 @@ func.def @uniform_dword_shifts(%trial: index, %input: buffer, %count_storage: bu
   %mask = scalar.constant 31 : i32
   %count = scalar.andi %loaded_count, %mask : i32
   %counts = vector.splat %count : vector<4xi32>
-  %fixed_counts = vector.constant 4 : vector<4xi32>
+  %fixed_counts = vector.splati 4 : vector<4xi32>
   %replacement = scalar.xori %count, %mask : i32
   view.store %replacement, %count_source[%ordinal] : i32, view<32xi32>
   %source = buffer.view %input[%base] : buffer -> view<4xi32>
@@ -235,7 +235,7 @@ func.def @uniform_qword_shifts(%trial: index, %input: buffer, %count_storage: bu
   %mask = scalar.constant 63 : i64
   %count = scalar.andi %loaded_count, %mask : i64
   %counts = vector.splat %count : vector<2xi64>
-  %fixed_counts = vector.constant 4 : vector<2xi64>
+  %fixed_counts = vector.splati 4 : vector<2xi64>
   %replacement = scalar.xori %count, %mask : i64
   view.store %replacement, %count_source[%ordinal] : i64, view<64xi64>
   %source = buffer.view %input[%base] : buffer -> view<2xi64>

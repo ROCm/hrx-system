@@ -24,9 +24,9 @@ iree_status_t loom_vector_legalize_signed_unary(
   loom_value_id_t replacement = input;
   if (loom_type_element_type(type) != LOOM_SCALAR_TYPE_I1) {
     loom_op_t* zero_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64(0), type, op->location, &zero_op));
-    const loom_value_id_t zero = loom_vector_constant_result(zero_op);
+    IREE_RETURN_IF_ERROR(
+        loom_vector_splati_build(builder, 0, type, op->location, &zero_op));
+    const loom_value_id_t zero = loom_vector_splati_result(zero_op);
 
     if (!loom_vector_signi_isa(op)) {
       loom_op_t* negation_op = NULL;
@@ -49,11 +49,11 @@ iree_status_t loom_vector_legalize_signed_unary(
       loom_value_id_t nonnegative = input;
       if (loom_vector_signi_isa(op)) {
         loom_op_t* one_op = NULL;
-        IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-            builder, loom_attr_i64(1), type, op->location, &one_op));
+        IREE_RETURN_IF_ERROR(
+            loom_vector_splati_build(builder, 1, type, op->location, &one_op));
         loom_op_t* minus_one_op = NULL;
-        IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-            builder, loom_attr_i64(-1), type, op->location, &minus_one_op));
+        IREE_RETURN_IF_ERROR(loom_vector_splati_build(
+            builder, -1, type, op->location, &minus_one_op));
         loom_op_t* nonzero_op = NULL;
         IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
             builder, LOOM_VECTOR_CMPI_PREDICATE_NE, input, zero, type,
@@ -61,10 +61,10 @@ iree_status_t loom_vector_legalize_signed_unary(
         loom_op_t* positive_op = NULL;
         IREE_RETURN_IF_ERROR(loom_vector_select_build(
             builder, loom_vector_cmpi_result(nonzero_op),
-            loom_vector_constant_result(one_op), zero, type, op->location,
+            loom_vector_splati_result(one_op), zero, type, op->location,
             &positive_op));
         nonnegative = loom_vector_select_result(positive_op);
-        replacement = loom_vector_constant_result(minus_one_op);
+        replacement = loom_vector_splati_result(minus_one_op);
       }
 
       // Comparisons and selection preserve byte lanes and qword lanes even on

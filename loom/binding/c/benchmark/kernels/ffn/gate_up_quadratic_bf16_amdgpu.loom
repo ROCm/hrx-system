@@ -5,8 +5,8 @@
 config.decl @ffn_gate_up.input_size : %value: index where [range(%value, 512, 4096), multiple_of(%value, 32)]
 
 func.def inline @bf16_product(%lhs: vector<16xbf16>, %rhs: vector<16xbf16>) -> (vector<16xbf16>) {
-  %c0 = vector.constant 0.0 : vector<16xbf16>
-  %initial = vector.constant 0.0 : vector<16xf32>
+  %c0 = vector.splatf 0.0 : vector<16xbf16>
+  %initial = vector.splatf 0.0 : vector<16xf32>
   %left = vector.interleave<0> %lhs, %c0 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
   %right = vector.interleave<0> %rhs, %c0 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
   %product = vector.dot2f %left, %right, %initial : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
@@ -20,7 +20,7 @@ func.def inline @gate_up_tile(%input_arg: buffer, %weights_arg: buffer, %output_
   %base = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %step = index.constant 32 : index
-  %initial = vector.constant 0.0 : vector<16xf32>
+  %initial = vector.splatf 0.0 : vector<16xf32>
   // Retain one 16-lane partial sum in local storage for the scalar reduction.
   %scratch_bytes = index.constant 64 : offset
   %scratch = buffer.alloca<private> align(64) %scratch_bytes : buffer
@@ -54,8 +54,8 @@ func.def inline @gate_up_tile(%input_arg: buffer, %weights_arg: buffer, %output_
   %up_vector = vector.splat %up_sum : vector<16xf32>
   %gate = vector.fptrunc %gate_vector : vector<16xf32> to vector<16xbf16>
   %up = vector.fptrunc %up_vector : vector<16xf32> to vector<16xbf16>
-  %quarters = vector.constant 0.25 : vector<16xbf16>
-  %halves = vector.constant 0.5 : vector<16xf32>
+  %quarters = vector.splatf 0.25 : vector<16xbf16>
+  %halves = vector.splatf 0.5 : vector<16xf32>
   %linear = func.call @bf16_product(%gate, %quarters) : (vector<16xbf16>, vector<16xbf16>) -> (vector<16xbf16>)
   %linear_f32 = vector.extf %linear : vector<16xbf16> to vector<16xf32>
   %scale_f32 = vector.addf %halves, %linear_f32 : vector<16xf32>

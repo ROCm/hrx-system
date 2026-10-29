@@ -101,7 +101,7 @@ func.def target(@target) @sum_i32x7_load(%input: buffer) -> (i32) {
   %initial = scalar.constant 3 : i32
   %14 = scalar.addi %9, %10 : i32
   %15 = scalar.addi %14, %11 : i32
-  %16 = vector.constant 0 : vector<4xi32>
+  %16 = vector.splati 0 : vector<4xi32>
   %17 = vector.insert %15 into %16[0] : i32, vector<4xi32>
   %18 = vector.addi %8, %17 : vector<4xi32>
   %result = vector.reduce<addi> %18, %initial : vector<4xi32>, i32
@@ -318,13 +318,13 @@ func.def target(@target) @sum_f32x31_load(%input: buffer) -> (f32) {
   %12 = view.load %view[29] : view<31xf32> -> f32
   %13 = view.load %view[30] : view<31xf32> -> f32
   %initial = scalar.constant -0.0 : f32
-  %16 = vector.constant -0.0 : vector<8xf32>
+  %16 = vector.splatf -0.0 : vector<8xf32>
   %17 = vector.concat<0> %9, %16 : vector<8xf32>, vector<8xf32> -> vector<16xf32>
-  %18 = vector.constant -0.0 : vector<12xf32>
+  %18 = vector.splatf -0.0 : vector<12xf32>
   %19 = vector.concat<0> %10, %18 : vector<4xf32>, vector<12xf32> -> vector<16xf32>
   %20 = scalar.addf<reassoc> %11, %12 : f32
   %21 = scalar.addf<reassoc> %20, %13 : f32
-  %22 = vector.constant -0.0 : vector<16xf32>
+  %22 = vector.splatf -0.0 : vector<16xf32>
   %23 = vector.insert %21 into %22[0] : f32, vector<16xf32>
   %24 = vector.addf<reassoc> %8, %17 : vector<16xf32>
   %25 = vector.addf<reassoc> %19, %23 : vector<16xf32>

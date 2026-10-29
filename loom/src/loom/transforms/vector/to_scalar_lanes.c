@@ -15,6 +15,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/transforms/vector/to_scalar_encoding.h"
 #include "loom/transforms/vector/to_scalar_memory.h"
@@ -66,17 +67,6 @@ loom_type_t loom_vector_to_scalar_lane_type(loom_type_t vector_type) {
   return loom_type_scalar(loom_type_element_type(vector_type));
 }
 
-static loom_attribute_t loom_vector_to_scalar_zero_attr(
-    loom_scalar_type_t scalar_type) {
-  if (scalar_type == LOOM_SCALAR_TYPE_I1) {
-    return loom_attr_bool(false);
-  }
-  if (loom_scalar_type_is_float(scalar_type)) {
-    return loom_attr_f64(0.0);
-  }
-  return loom_attr_i64(0);
-}
-
 iree_status_t loom_vector_to_scalar_build_scalar_constant(
     loom_builder_t* builder, loom_type_t result_type,
     loom_location_id_t location, int64_t integer_value,
@@ -123,10 +113,17 @@ iree_status_t loom_vector_to_scalar_build_vector_zero(
     loom_value_id_t* out_value_id) {
   loom_scalar_type_t scalar_type = loom_type_element_type(result_type);
   loom_op_t* constant_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      &state->rewriter->builder, loom_vector_to_scalar_zero_attr(scalar_type),
-      result_type, state->location, &constant_op));
-  *out_value_id = loom_vector_constant_result(constant_op);
+  if (loom_scalar_type_is_float(scalar_type)) {
+    IREE_RETURN_IF_ERROR(
+        loom_vector_splatf_build(&state->rewriter->builder, 0.0, result_type,
+                                 state->location, &constant_op));
+    *out_value_id = loom_vector_splatf_result(constant_op);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_vector_splati_build(&state->rewriter->builder, 0,
+                                                  result_type, state->location,
+                                                  &constant_op));
+    *out_value_id = loom_vector_splati_result(constant_op);
+  }
   return iree_ok_status();
 }
 
@@ -654,11 +651,15 @@ static iree_status_t loom_vector_to_scalar_build_mask_range_lane(
       loom_type_scalar(LOOM_SCALAR_TYPE_I1), out_lane);
 }
 
-iree_status_t loom_vector_to_scalar_build_constant_lane(
+iree_status_t loom_vector_to_scalar_build_literal_splat_lane(
     loom_vector_to_scalar_state_t* state, loom_value_id_t* out_lane) {
+  const loom_attribute_t value =
+      loom_vector_splati_isa(state->op)
+          ? loom_attr_i64(loom_vector_splati_value(state->op))
+          : loom_attr_f64(loom_vector_splatf_value(state->op));
   return loom_vector_to_scalar_build_scalar_attr_constant(
       &state->rewriter->builder, state->result_scalar_type, state->location,
-      loom_vector_constant_value(state->op), out_lane);
+      value, out_lane);
 }
 
 iree_status_t loom_vector_to_scalar_build_poison_lane(
@@ -865,7 +866,8 @@ bool loom_vector_to_scalar_can_materialize_def_lane(
       return true;
     }
 
-    if (loom_vector_splat_isa(def_op) || loom_vector_constant_isa(def_op) ||
+    if (loom_vector_splat_isa(def_op) ||
+        loom_vector_literal_splat_isa(def_op) ||
         loom_vector_poison_isa(def_op)) {
       return true;
     }
@@ -1139,7 +1141,7 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
     *out_materialized = true;
     return iree_ok_status();
   }
-  if (loom_vector_constant_isa(def_op)) {
+  if (loom_vector_literal_splat_isa(def_op)) {
     loom_vector_to_scalar_state_t def_state = {
         .pass = state->pass,
         .statistics = state->statistics,
@@ -1153,7 +1155,7 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
         .location = def_op->location,
     };
     IREE_RETURN_IF_ERROR(
-        loom_vector_to_scalar_build_constant_lane(&def_state, out_lane));
+        loom_vector_to_scalar_build_literal_splat_lane(&def_state, out_lane));
     *out_materialized = true;
     return iree_ok_status();
   }

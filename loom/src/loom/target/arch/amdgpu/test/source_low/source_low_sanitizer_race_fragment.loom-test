@@ -13,8 +13,8 @@ kernel.def target(@target) @race_fragment_shared_store() {
   %stage_bytes = index.constant 512 : offset
   %stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
   %stage_view = buffer.view %stage[%base] : buffer -> view<16x16xbf16>
-  %operand = vector.constant 1.0 : vector<16xbf16>
-  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %operand = vector.splatf 1.0 : vector<16xbf16>
+  %initial_values = vector.splatf 0.0 : vector<8xf32>
   %lhs = vector.fragment<lhs> %operand shape [%c16, %c16] : vector<16xbf16>
   %rhs = vector.fragment<rhs> %operand shape [%c16, %c16] : vector<16xbf16>
   %initial = vector.fragment<init> %initial_values shape [%c16, %c16] : vector<8xf32>

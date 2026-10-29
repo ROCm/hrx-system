@@ -470,9 +470,15 @@ static const loom_amdgpu_lower_dispatch_row_t
 
 static const loom_amdgpu_lower_dispatch_row_t
     kAmdgpuVectorDispatchRows[LOOM_OP_VECTOR_COUNT_] = {
-        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_CONSTANT)] =
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_SPLATI)] =
             LOOM_AMDGPU_VALUE_DATA_STORAGE_ROW(
-                LOOM_OP_VECTOR_CONSTANT, loom_amdgpu_constant_plan_t,
+                LOOM_OP_VECTOR_SPLATI, loom_amdgpu_constant_plan_t,
+                loom_amdgpu_select_constant_dispatch,
+                loom_amdgpu_emit_constant_dispatch, NULL,
+                LOOM_AMDGPU_STORAGE_NONE),
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_VECTOR_SPLATF)] =
+            LOOM_AMDGPU_VALUE_DATA_STORAGE_ROW(
+                LOOM_OP_VECTOR_SPLATF, loom_amdgpu_constant_plan_t,
                 loom_amdgpu_select_constant_dispatch,
                 loom_amdgpu_emit_constant_dispatch, NULL,
                 LOOM_AMDGPU_STORAGE_NONE),

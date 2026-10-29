@@ -106,7 +106,7 @@ func.def @q3_word_boundary(%storage: buffer) -> (i8, i8, i8) {
   %packed = vector.concat<0> %71, %76 : vector<4xi8>, vector<2xi8> -> vector<6xi8>
   %180 = vector.bitcast %71 : vector<4xi8> to vector<1xi32>
   %181 = vector.extract %180[0] : vector<1xi32> -> i32
-  %182 = vector.constant 0 : vector<4xi8>
+  %182 = vector.splati 0 : vector<4xi8>
   %183 = vector.extract %76[0] : vector<2xi8> -> i8
   %184 = vector.insert %183 into %182[0] : i8, vector<4xi8>
   %185 = vector.extract %76[1] : vector<2xi8> -> i8
@@ -168,7 +168,7 @@ func.def @q3_word_boundary(%storage: buffer) -> (i8, i8, i8) {
   %unsigned = vector.concat<0> %204, %215, %229, %240 : vector<4xi8>, vector<4xi8>, vector<4xi8>, vector<4xi8> -> vector<16xi8>
   %78 = vector.bitcast %71 : vector<4xi8> to vector<1xi32>
   %79 = vector.extract %78[0] : vector<1xi32> -> i32
-  %80 = vector.constant 0 : vector<4xi8>
+  %80 = vector.splati 0 : vector<4xi8>
   %81 = vector.extract %76[0] : vector<2xi8> -> i8
   %82 = vector.insert %81 into %80[0] : i8, vector<4xi8>
   %83 = vector.extract %76[1] : vector<2xi8> -> i8

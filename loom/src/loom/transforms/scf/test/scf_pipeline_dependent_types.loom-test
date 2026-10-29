@@ -117,7 +117,7 @@ func.def @guarded_dynamic_vector(%input: view<64xf32>, %width: index, %end: inde
       %loaded = vector.load %input[%begin] : view<64xf32> -> vector<[%width]xf32>
       scf.yield %loaded : vector<[%width]xf32>
     } else {
-      %20 = vector.constant 0.0 : vector<[%width]xf32>
+      %20 = vector.splatf 0.0 : vector<[%width]xf32>
       scf.yield %20 : vector<[%width]xf32>
     }
     %24, %25 = scf.for %21 = [%15 to %end step %step](%22 = %initial : vector<[%width]xf32>, %23 = %loaded : vector<[%width]xf32>) -> (vector<[%width]xf32>, vector<[%width]xf32>) {
@@ -125,7 +125,7 @@ func.def @guarded_dynamic_vector(%input: view<64xf32>, %width: index, %end: inde
         %loaded = vector.load %input[%21] : view<64xf32> -> vector<[%width]xf32>
         scf.yield %loaded : vector<[%width]xf32>
       } else {
-        %28 = vector.constant 0.0 : vector<[%width]xf32>
+        %28 = vector.splatf 0.0 : vector<[%width]xf32>
         scf.yield %28 : vector<[%width]xf32>
       }
       %next = scf.if %condition -> (vector<[%width]xf32>) {

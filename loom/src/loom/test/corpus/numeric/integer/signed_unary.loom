@@ -211,7 +211,7 @@ func.def @signed_unary_predicates(%input: buffer, %output: buffer) {
   %inputs = buffer.view %input[%base] : buffer -> view<19xi8>
   %outputs = buffer.view %output[%base] : buffer -> view<6x20xi8>
   %values = vector.load %inputs[0] : view<19xi8> -> vector<19xi8>
-  %inactive = vector.constant 0 : vector<19xi8>
+  %inactive = vector.splati 0 : vector<19xi8>
   %predicates = vector.cmpi ne, %values, %inactive : vector<19xi8> -> vector<19xi1>
   %negative = vector.negi %predicates : vector<19xi1>
   %absolute = vector.absi %predicates : vector<19xi1>

@@ -3,11 +3,11 @@
 // Uniform rotate counts retain their direction while normalizing modulo the
 // lane width. Every count is an identity for one-bit lanes.
 func.def @rotate_counts_normalize(%words: vector<4xi32>, %wide: vector<2xi64>, %bits: vector<8xi1>) -> (vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>, vector<8xi1>) {
-  %negative_word = vector.constant -1 : vector<4xi32>
-  %large_word = vector.constant 257 : vector<4xi32>
-  %large_wide = vector.constant 300 : vector<2xi64>
-  %negative_wide = vector.constant -1 : vector<2xi64>
-  %bit_counts = vector.constant true : vector<8xi1>
+  %negative_word = vector.splati -1 : vector<4xi32>
+  %large_word = vector.splati 257 : vector<4xi32>
+  %large_wide = vector.splati 300 : vector<2xi64>
+  %negative_wide = vector.splati -1 : vector<2xi64>
+  %bit_counts = vector.splati 1 : vector<8xi1>
   %word_left = vector.rotli %words, %negative_word : vector<4xi32>
   %word_right = vector.rotri %words, %large_word : vector<4xi32>
   %wide_left = vector.rotli %wide, %large_wide : vector<2xi64>
@@ -18,13 +18,13 @@ func.def @rotate_counts_normalize(%words: vector<4xi32>, %wide: vector<2xi64>, %
 
 // ----
 func.def @rotate_counts_normalize(%words: vector<4xi32>, %wide: vector<2xi64>, %bits: vector<8xi1>) -> (vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>, vector<8xi1>) {
-  %21 = vector.constant 31 : vector<4xi32>
+  %21 = vector.splati 31 : vector<4xi32>
   %word_left = vector.rotli %words, %21 : vector<4xi32>
-  %20 = vector.constant 1 : vector<4xi32>
+  %20 = vector.splati 1 : vector<4xi32>
   %word_right = vector.rotri %words, %20 : vector<4xi32>
-  %19 = vector.constant 44 : vector<2xi64>
+  %19 = vector.splati 44 : vector<2xi64>
   %wide_left = vector.rotli %wide, %19 : vector<2xi64>
-  %18 = vector.constant 63 : vector<2xi64>
+  %18 = vector.splati 63 : vector<2xi64>
   %wide_right = vector.rotri %wide, %18 : vector<2xi64>
   func.return %word_left, %word_right, %wide_left, %wide_right, %bits : vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>, vector<8xi1>
 }
@@ -51,7 +51,7 @@ func.def @refine_propagates_static_shape(%width: index, %value: i32) -> (vector<
 // Every widened lane is below the divisor, including large and ranked shapes.
 func.def @widened_unsigned_remainder(%input: vector<4x32xi8>) -> (vector<4x32xi32>) {
   %wide = vector.extui %input : vector<4x32xi8> to vector<4x32xi32>
-  %divisor = vector.constant 257 : vector<4x32xi32>
+  %divisor = vector.splati 257 : vector<4x32xi32>
   %result = vector.remui %wide, %divisor : vector<4x32xi32>
   func.return %result : vector<4x32xi32>
 }
@@ -113,7 +113,7 @@ func.def @partially_bounded_unsigned_remainder(%first: i32, %second: i32) -> (ve
 
 func.def @empty_unsigned_remainder() -> (vector<0xi32>) {
   %empty = vector.from_elements : vector<0xi32>
-  %divisor = vector.constant 7 : vector<0xi32>
+  %divisor = vector.splati 7 : vector<0xi32>
   %result = vector.remui %empty, %divisor : vector<0xi32>
   func.return %result : vector<0xi32>
 }
@@ -660,16 +660,16 @@ func.def @from_elements_of_ordered_extracts_to_source(%values: vector<4xi32>) ->
 // ====
 
 func.def @divf_arcp_constant_rhs_to_reciprocal_mulf(%values: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
-  %scale = vector.constant 127.0 : vector<4xf32>
+  %scale = vector.splatf 127.0 : vector<4xf32>
   %strict = vector.divf %values, %scale : vector<4xf32>
   %fast = vector.divf<nnan|ninf|nsz|arcp> %values, %scale : vector<4xf32>
   func.return %strict, %fast : vector<4xf32>, vector<4xf32>
 }
 // ----
 func.def @divf_arcp_constant_rhs_to_reciprocal_mulf(%values: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
-  %scale = vector.constant 127.0 : vector<4xf32>
+  %scale = vector.splatf 127.0 : vector<4xf32>
   %strict = vector.divf %values, %scale : vector<4xf32>
-  %6 = vector.constant 0.0078740157186985016 : vector<4xf32>
+  %6 = vector.splatf 0.0078740157186985016 : vector<4xf32>
   %fast = vector.mulf<nnan|ninf|nsz|arcp> %values, %6 : vector<4xf32>
   func.return %strict, %fast : vector<4xf32>, vector<4xf32>
 }
@@ -705,7 +705,7 @@ kernel.def @extract_single_use_workgroup_load_keeps_wide_load() {
   %bytes = index.constant 64 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<4xi32>
-  %seed = vector.constant 1 : vector<4xi32>
+  %seed = vector.splati 1 : vector<4xi32>
   vector.store %seed, %view[0] : vector<4xi32>, view<4xi32>
   %wide = vector.load %view[0] : view<4xi32> -> vector<4xi32>
   %lane2 = vector.extract %wide[2] : vector<4xi32> -> i32
@@ -762,7 +762,7 @@ func.def @mask_range_static_all_true() -> (vector<4xi1>) {
 }
 // ----
 func.def @mask_range_static_all_true() -> (vector<4xi1>) {
-  %r = vector.constant true : vector<4xi1>
+  %r = vector.splati 1 : vector<4xi1>
   func.return %r : vector<4xi1>
 }
 
@@ -777,7 +777,7 @@ func.def @mask_range_static_all_false() -> (vector<4xi1>) {
 }
 // ----
 func.def @mask_range_static_all_false() -> (vector<4xi1>) {
-  %r = vector.constant false : vector<4xi1>
+  %r = vector.splati 0 : vector<4xi1>
   func.return %r : vector<4xi1>
 }
 
@@ -794,7 +794,7 @@ func.def @mask_range_bounded_all_true(%lo0: index, %hi0: index, %step0: index) -
 }
 // ----
 func.def @mask_range_bounded_all_true(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
-  %r = vector.constant true : vector<16xi1>
+  %r = vector.splati 1 : vector<16xi1>
   func.return %r : vector<16xi1>
 }
 
@@ -810,7 +810,7 @@ func.def @mask_range_bounded_all_true_negative_step(%lo0: index, %hi0: index, %s
 }
 // ----
 func.def @mask_range_bounded_all_true_negative_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
-  %r = vector.constant true : vector<16xi1>
+  %r = vector.splati 1 : vector<16xi1>
   func.return %r : vector<16xi1>
 }
 
@@ -827,7 +827,7 @@ func.def @mask_range_bounded_all_false_positive_step(%lo0: index, %hi0: index, %
 }
 // ----
 func.def @mask_range_bounded_all_false_positive_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
-  %r = vector.constant false : vector<16xi1>
+  %r = vector.splati 0 : vector<16xi1>
   func.return %r : vector<16xi1>
 }
 
@@ -844,7 +844,7 @@ func.def @mask_range_bounded_all_false_negative_step(%lo0: index, %hi0: index, %
 }
 // ----
 func.def @mask_range_bounded_all_false_negative_step(%lo0: index, %hi0: index, %step0: index) -> (vector<16xi1>) {
-  %r = vector.constant false : vector<16xi1>
+  %r = vector.splati 0 : vector<16xi1>
   func.return %r : vector<16xi1>
 }
 
@@ -1142,7 +1142,7 @@ func.def @splat_constant_to_vector_constant() -> (vector<4xi32>) {
 }
 // ----
 func.def @splat_constant_to_vector_constant() -> (vector<4xi32>) {
-  %v = vector.constant 7 : vector<4xi32>
+  %v = vector.splati 7 : vector<4xi32>
   func.return %v : vector<4xi32>
 }
 
@@ -1158,7 +1158,7 @@ func.def @equal_exact_elements_to_vector_constant() -> (vector<17xi32>) {
 }
 // ----
 func.def @equal_exact_elements_to_vector_constant() -> (vector<17xi32>) {
-  %v = vector.constant 7 : vector<17xi32>
+  %v = vector.splati 7 : vector<17xi32>
   func.return %v : vector<17xi32>
 }
 
@@ -1166,14 +1166,14 @@ func.def @equal_exact_elements_to_vector_constant() -> (vector<17xi32>) {
 
 // Uniform vector facts let lanewise ops materialize vector constants.
 func.def @addi_uniform_constants_to_vector_constant() -> (vector<4xi32>) {
-  %a = vector.constant 2 : vector<4xi32>
-  %b = vector.constant 3 : vector<4xi32>
+  %a = vector.splati 2 : vector<4xi32>
+  %b = vector.splati 3 : vector<4xi32>
   %r = vector.addi %a, %b : vector<4xi32>
   func.return %r : vector<4xi32>
 }
 // ----
 func.def @addi_uniform_constants_to_vector_constant() -> (vector<4xi32>) {
-  %r = vector.constant 5 : vector<4xi32>
+  %r = vector.splati 5 : vector<4xi32>
   func.return %r : vector<4xi32>
 }
 
@@ -1195,7 +1195,7 @@ func.def @addi_dynamic_zero_identity(%n: index, %x: vector<[%n]xi32>) -> (vector
 
 // Zero shift counts preserve every bit in either direction.
 func.def @shift_zero_identities(%values: vector<4xi8>) -> (vector<4xi8>, vector<4xi8>, vector<4xi8>) {
-  %c0 = vector.constant 0 : vector<4xi8>
+  %c0 = vector.splati 0 : vector<4xi8>
   %left = vector.shli %values, %c0 : vector<4xi8>
   %arithmetic = vector.shrsi %values, %c0 : vector<4xi8>
   %logical = vector.shrui %values, %c0 : vector<4xi8>
@@ -1240,7 +1240,7 @@ func.def @shift_mixed_counts(%values: vector<4xi8>) -> (vector<4xi8>, vector<4xi
 // Floating-point subtraction identities require signed-zero freedom and keep
 // negation explicit instead of relying on target-specific subtract literals.
 func.def @subf_zero_identities(%n: index, %x: vector<[%n]xf32>) -> (vector<[%n]xf32>, vector<[%n]xf32>) {
-  %c0 = vector.constant 0.0 : vector<[%n]xf32>
+  %c0 = vector.splatf 0.0 : vector<[%n]xf32>
   %sub_rhs = vector.subf<nsz> %x, %c0 : vector<[%n]xf32>
   %sub_lhs = vector.subf<nnan|nsz> %c0, %x : vector<[%n]xf32>
   func.return %sub_rhs, %sub_lhs : vector<[%n]xf32>, vector<[%n]xf32>
@@ -1256,15 +1256,15 @@ func.def @subf_zero_identities(%n: index, %x: vector<[%n]xf32>) -> (vector<[%n]x
 // A negated input multiplied by an exact constant keeps the sign on the
 // constant so target lowering does not need a separate negation instruction.
 func.def @mulf_absorbs_negated_input_constant(%x: vector<4xf32>) -> (vector<4xf32>) {
-  %c0 = vector.constant 0.0 : vector<4xf32>
+  %c0 = vector.splatf 0.0 : vector<4xf32>
   %neg = vector.subf<nnan|nsz> %c0, %x : vector<4xf32>
-  %scale = vector.constant 1.4426950408889634 : vector<4xf32>
+  %scale = vector.splatf 1.4426950408889634 : vector<4xf32>
   %scaled = vector.mulf<nnan|ninf|nsz> %neg, %scale : vector<4xf32>
   func.return %scaled : vector<4xf32>
 }
 // ----
 func.def @mulf_absorbs_negated_input_constant(%x: vector<4xf32>) -> (vector<4xf32>) {
-  %7 = vector.constant -1.4426950216293335 : vector<4xf32>
+  %7 = vector.splatf -1.4426950216293335 : vector<4xf32>
   %scaled = vector.mulf<nnan|ninf|nsz> %x, %7 : vector<4xf32>
   func.return %scaled : vector<4xf32>
 }
@@ -1273,7 +1273,7 @@ func.def @mulf_absorbs_negated_input_constant(%x: vector<4xf32>) -> (vector<4xf3
 
 // A uniform all-true mask selects the true vector as a whole.
 func.def @select_uniform_true(%a: vector<4xi32>, %b: vector<4xi32>) -> (vector<4xi32>) {
-  %mask = vector.constant true : vector<4xi1>
+  %mask = vector.splati 1 : vector<4xi1>
   %r = vector.select %mask, %a, %b : vector<4xi32>
   func.return %r : vector<4xi32>
 }
@@ -1428,7 +1428,7 @@ func.def @reduce_axes_dynamic_zero_to_init(%n: index, %init: vector<2xi32>) -> (
 
 // Integer identities fold without requiring the vector shape to become static.
 func.def @integer_identities(%n: index, %x: vector<[%n]xi32>) -> (vector<[%n]xi32>, vector<[%n]xi32>, vector<[%n]xi32>) {
-  %c0 = vector.constant 0 : vector<[%n]xi32>
+  %c0 = vector.splati 0 : vector<[%n]xi32>
   %sub = vector.subi %x, %c0 : vector<[%n]xi32>
   %xor = vector.xori %x, %x : vector<[%n]xi32>
   %and = vector.andi %x, %x : vector<[%n]xi32>
@@ -1436,7 +1436,7 @@ func.def @integer_identities(%n: index, %x: vector<[%n]xi32>) -> (vector<[%n]xi3
 }
 // ----
 func.def @integer_identities(%n: index, %x: vector<[%n]xi32>) -> (vector<[%n]xi32>, vector<[%n]xi32>, vector<[%n]xi32>) {
-  %xor = vector.constant 0 : vector<[%n]xi32>
+  %xor = vector.splati 0 : vector<[%n]xi32>
   func.return %x, %xor, %x : vector<[%n]xi32>, vector<[%n]xi32>, vector<[%n]xi32>
 }
 
@@ -1450,8 +1450,8 @@ func.def @cmpi_same_operand(%x: vector<4xi32>) -> (vector<4xi1>, vector<4xi1>) {
 }
 // ----
 func.def @cmpi_same_operand(%x: vector<4xi32>) -> (vector<4xi1>, vector<4xi1>) {
-  %le = vector.constant true : vector<4xi1>
-  %gt = vector.constant false : vector<4xi1>
+  %le = vector.splati 1 : vector<4xi1>
+  %gt = vector.splati 0 : vector<4xi1>
   func.return %le, %gt : vector<4xi1>, vector<4xi1>
 }
 
@@ -1465,8 +1465,8 @@ func.def @cmpf_same_operand(%x: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>) {
 }
 // ----
 func.def @cmpf_same_operand(%x: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>) {
-  %ueq = vector.constant true : vector<4xi1>
-  %ordered_not_equal = vector.constant false : vector<4xi1>
+  %ueq = vector.splati 1 : vector<4xi1>
+  %ordered_not_equal = vector.splati 0 : vector<4xi1>
   func.return %ueq, %ordered_not_equal : vector<4xi1>, vector<4xi1>
 }
 
@@ -1476,7 +1476,7 @@ func.def @cmpf_same_operand(%x: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>) {
 func.def @load_mask_all_false_to_passthrough(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %mask = vector.constant false : vector<4xi1>
+  %mask = vector.splati 0 : vector<4xi1>
   %r = vector.load.mask %view[0], %mask, %old : view<16xf32, %layout>, vector<4xi1>, vector<4xf32>
   func.return %r : vector<4xf32>
 }
@@ -1491,7 +1491,7 @@ func.def @load_mask_all_false_to_passthrough(%buffer: buffer, %offset: offset, %
 func.def @store_mask_all_false_erases(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %mask = vector.constant false : vector<4xi1>
+  %mask = vector.splati 0 : vector<4xi1>
   vector.store.mask %value, %view[0], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xi1>
   func.return
 }
@@ -1506,7 +1506,7 @@ func.def @store_mask_all_false_erases(%buffer: buffer, %offset: offset, %value: 
 func.def @load_expand_all_false_to_passthrough(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %mask = vector.constant false : vector<4xi1>
+  %mask = vector.splati 0 : vector<4xi1>
   %r = vector.load.expand %view[0], %mask, %old : view<16xf32, %layout>, vector<4xi1>, vector<4xf32>
   func.return %r : vector<4xf32>
 }
@@ -1521,7 +1521,7 @@ func.def @load_expand_all_false_to_passthrough(%buffer: buffer, %offset: offset,
 func.def @store_compress_all_false_erases(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %mask = vector.constant false : vector<4xi1>
+  %mask = vector.splati 0 : vector<4xi1>
   vector.store.compress %value, %view[0], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xi1>
   func.return
 }
@@ -1536,7 +1536,7 @@ func.def @store_compress_all_false_erases(%buffer: buffer, %offset: offset, %val
 func.def @gather_mask_all_false_to_passthrough(%buffer: buffer, %offset: offset, %offsets: vector<4xi32>, %old: vector<4xf32>) -> (vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %mask = vector.constant false : vector<4xi1>
+  %mask = vector.splati 0 : vector<4xi1>
   %r = vector.gather.mask %view[0][%offsets], %mask, %old : view<16xf32, %layout>, vector<4xi32>, vector<4xi1>, vector<4xf32>
   func.return %r : vector<4xf32>
 }
@@ -1552,7 +1552,7 @@ func.def @gather_mask_all_false_to_passthrough(%buffer: buffer, %offset: offset,
 func.def @scatter_mask_all_false_erases(%buffer: buffer, %offset: offset, %offsets: vector<4xi32>, %value: vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %mask = vector.constant false : vector<4xi1>
+  %mask = vector.splati 0 : vector<4xi1>
   vector.scatter.mask %value, %view[0][%offsets], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xi32>, vector<4xi1>
   func.return
 }
@@ -1647,7 +1647,7 @@ func.def @scatter_mask_iota_to_store_mask(%buffer: buffer, %offset: offset, %ori
 func.def @atomic_rmw_mask_all_false_to_passthrough(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %value: vector<4xi32>, %old: vector<4xi32>) -> (vector<4xi32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
-  %mask = vector.constant false : vector<4xi1>
+  %mask = vector.splati 0 : vector<4xi1>
   %r = vector.atomic.rmw.mask<addi> %value, %view[0][%offsets], %mask, %old {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<16xi32, %layout>, vector<4xindex>, vector<4xi1>, vector<4xi32>
   func.return %r : vector<4xi32>
 }
@@ -1662,7 +1662,7 @@ func.def @atomic_rmw_mask_all_false_to_passthrough(%buffer: buffer, %offset: off
 func.def @atomic_reduce_mask_all_false_erases(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %value: vector<4xi32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xi32, %layout>
-  %mask = vector.constant false : vector<4xi1>
+  %mask = vector.splati 0 : vector<4xi1>
   vector.atomic.reduce.mask<addi> %value, %view[0][%offsets], %mask {ordering = relaxed, scope = workgroup} : vector<4xi32>, view<16xi32, %layout>, vector<4xindex>, vector<4xi1>
   func.return
 }
@@ -1677,7 +1677,7 @@ func.def @atomic_reduce_mask_all_false_erases(%buffer: buffer, %offset: offset, 
 func.def @load_mask_all_true_to_load(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %mask = vector.constant true : vector<4xi1>
+  %mask = vector.splati 1 : vector<4xi1>
   %r = vector.load.mask %view[0], %mask, %old {cache_scope = device, cache_temporal = non_temporal} : view<16xf32, %layout>, vector<4xi1>, vector<4xf32>
   func.return %r : vector<4xf32>
 }
@@ -1736,7 +1736,7 @@ func.def @store_mask_bounded_full_range_to_store(%buffer: buffer, %offset: offse
 func.def @store_mask_all_true_to_store(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %mask = vector.constant true : vector<4xi1>
+  %mask = vector.splati 1 : vector<4xi1>
   vector.store.mask %value, %view[0], %mask {cache_scope = system, cache_temporal = writeback} : vector<4xf32>, view<16xf32, %layout>, vector<4xi1>
   func.return
 }
@@ -1753,7 +1753,7 @@ func.def @store_mask_all_true_to_store(%buffer: buffer, %offset: offset, %value:
 func.def @load_expand_all_true_to_load(%buffer: buffer, %offset: offset, %old: vector<4xf32>) -> (vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %mask = vector.constant true : vector<4xi1>
+  %mask = vector.splati 1 : vector<4xi1>
   %r = vector.load.expand %view[0], %mask, %old : view<16xf32, %layout>, vector<4xi1>, vector<4xf32>
   func.return %r : vector<4xf32>
 }
@@ -1770,7 +1770,7 @@ func.def @load_expand_all_true_to_load(%buffer: buffer, %offset: offset, %old: v
 func.def @store_compress_all_true_to_store(%buffer: buffer, %offset: offset, %value: vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %mask = vector.constant true : vector<4xi1>
+  %mask = vector.splati 1 : vector<4xi1>
   vector.store.compress %value, %view[0], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xi1>
   func.return
 }
@@ -1787,7 +1787,7 @@ func.def @store_compress_all_true_to_store(%buffer: buffer, %offset: offset, %va
 func.def @gather_mask_all_true_to_gather(%buffer: buffer, %offset: offset, %offsets: vector<4xi32>, %old: vector<4xf32>) -> (vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %mask = vector.constant true : vector<4xi1>
+  %mask = vector.splati 1 : vector<4xi1>
   %r = vector.gather.mask %view[0][%offsets], %mask, %old : view<16xf32, %layout>, vector<4xi32>, vector<4xi1>, vector<4xf32>
   func.return %r : vector<4xf32>
 }
@@ -1804,7 +1804,7 @@ func.def @gather_mask_all_true_to_gather(%buffer: buffer, %offset: offset, %offs
 func.def @scatter_mask_all_true_to_scatter(%buffer: buffer, %offset: offset, %offsets: vector<4xi32>, %value: vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %mask = vector.constant true : vector<4xi1>
+  %mask = vector.splati 1 : vector<4xi1>
   vector.scatter.mask %value, %view[0][%offsets], %mask : vector<4xf32>, view<16xf32, %layout>, vector<4xi32>, vector<4xi1>
   func.return
 }
@@ -1821,7 +1821,7 @@ func.def @scatter_mask_all_true_to_scatter(%buffer: buffer, %offset: offset, %of
 func.def @atomic_rmw_mask_all_true_to_atomic_rmw(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %value: vector<4xf32>, %old: vector<4xf32>) -> (vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %mask = vector.constant true : vector<4xi1>
+  %mask = vector.splati 1 : vector<4xi1>
   %r = vector.atomic.rmw.mask<addf, noftz> %value, %view[0][%offsets], %mask, %old {ordering = relaxed, scope = workgroup} : vector<4xf32>, view<16xf32, %layout>, vector<4xindex>, vector<4xi1>, vector<4xf32>
   func.return %r : vector<4xf32>
 }
@@ -1838,7 +1838,7 @@ func.def @atomic_rmw_mask_all_true_to_atomic_rmw(%buffer: buffer, %offset: offse
 func.def @atomic_reduce_mask_all_true_to_atomic_reduce(%buffer: buffer, %offset: offset, %offsets: vector<4xindex>, %value: vector<4xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<16xf32, %layout>
-  %mask = vector.constant true : vector<4xi1>
+  %mask = vector.splati 1 : vector<4xi1>
   vector.atomic.reduce.mask<addf, noftz> %value, %view[0][%offsets], %mask {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : vector<4xf32>, view<16xf32, %layout>, vector<4xindex>, vector<4xi1>
   func.return
 }

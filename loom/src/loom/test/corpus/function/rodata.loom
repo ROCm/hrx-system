@@ -22,7 +22,7 @@ func.def @rodata_byte(%table: buffer, %position: i64) -> (i32) {
 func.def @rodata_word_gather(%packed_indices: i32) -> (i32, i32, i32, i32) {
   %packed = vector.splat %packed_indices : vector<4xi32>
   %bytes = vector.bitcast %packed : vector<4xi32> to vector<16xi8>
-  %index_mask = vector.constant 15 : vector<16xi8>
+  %index_mask = vector.splati 15 : vector<16xi8>
   %bounded = vector.andi %bytes, %index_mask : vector<16xi8>
   %indices = vector.extui %bounded : vector<16xi8> to vector<16xi32>
   %table = global.load @gather_words : buffer
@@ -177,7 +177,7 @@ func.def @immutable_gather(%input: buffer, %output: buffer) {
   %destination_f32 = buffer.view %destination[%origin] : buffer -> view<48xf32>
   %destination_f64 = buffer.view %destination[%origin] : buffer -> view<24xf64>
   %raw_indices = vector.load %source_i32[0] : view<64xi32> -> vector<16xi32>
-  %index_mask = vector.constant 15 : vector<16xi32>
+  %index_mask = vector.splati 15 : vector<16xi32>
   %indices = vector.andi %raw_indices, %index_mask : vector<16xi32>
   %packed_values = vector.gather %table_i32[0][%indices] : view<16xi32>, vector<16xi32> -> vector<16xi32>
   vector.store %packed_values, %destination_words[48] : vector<16xi32>, view<64xi32>
@@ -188,14 +188,14 @@ func.def @immutable_gather(%input: buffer, %output: buffer) {
   vector.store %result, %destination_f32[0] : vector<16xf32>, view<48xf32>
 
   %raw_bf16_indices = vector.load %source_i8[64] : view<256xi8> -> vector<32xi8>
-  %bf16_index_mask = vector.constant 31 : vector<32xi8>
+  %bf16_index_mask = vector.splati 31 : vector<32xi8>
   %bounded_bf16_indices = vector.andi %raw_bf16_indices, %bf16_index_mask : vector<32xi8>
   %bf16_indices = vector.extui %bounded_bf16_indices : vector<32xi8> to vector<32xi32>
   %bf16_values = vector.gather %table_bf16[0][%bf16_indices] : view<32xbf16>, vector<32xi32> -> vector<32xbf16>
   vector.store %bf16_values, %destination_bf16[32] : vector<32xbf16>, view<96xbf16>
 
   %raw_f64_indices = vector.load %source_i32[24] : view<64xi32> -> vector<8xi32>
-  %f64_index_mask = vector.constant 7 : vector<8xi32>
+  %f64_index_mask = vector.splati 7 : vector<8xi32>
   %f64_indices = vector.andi %raw_f64_indices, %f64_index_mask : vector<8xi32>
   %f64_values = vector.gather %table_f64[0][%f64_indices] : view<8xf64>, vector<8xi32> -> vector<8xf64>
   vector.store %f64_values, %destination_f64[16] : vector<8xf64>, view<24xf64>

@@ -54,7 +54,7 @@ kernel.def @aligned_store() {
   %aligned = buffer.assume.alignment %buffer {minimum_alignment = 64} : buffer
   %unique = buffer.assume.noalias %aligned : buffer
   %view = buffer.view %unique[%c0] : buffer -> view<15xi32>
-  %value = vector.constant 42 : vector<15xi32>
+  %value = vector.splati 42 : vector<15xi32>
   vector.store %value, %view[0] : vector<15xi32>, view<15xi32>
   kernel.return
 }
@@ -79,7 +79,7 @@ kernel.def @write_read() {
   %second_global = buffer.assume.memory_space<global> %second : buffer
   %first_view = buffer.view %first_global[%c0] : buffer -> view<4xi32>
   %second_view = buffer.view %second_global[%c0] : buffer -> view<4xi32>
-  %c1 = vector.constant 1 : vector<4xi32>
+  %c1 = vector.splati 1 : vector<4xi32>
   vector.store %c1, %first_view[0] : vector<4xi32>, view<4xi32>
   %observed = vector.load %second_view[0] : view<4xi32> -> vector<4xi32>
   vector.store %observed, %first_view[0] : vector<4xi32>, view<4xi32>
@@ -109,7 +109,7 @@ pipeline.def<kernel> public retain @write_read() run(%10: buffer, %11: buffer) {
     %second_global = buffer.assume.memory_space<workgroup> %22 : buffer
     %first_view = buffer.view %first_global[%c0] : buffer -> view<4xi32>
     %second_view = buffer.view %second_global[%c0] : buffer -> view<4xi32>
-    %c1 = vector.constant 1 : vector<4xi32>
+    %c1 = vector.splati 1 : vector<4xi32>
     %27, %28 = channel.reserve %19 : channel<tile<16xi8>> -> (write<tile<16xi8>>, view<16xi8>)
     %29 = kernel.async.copy %25 to %28 {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
     %30 = kernel.async.group %29 : kernel.async.token -> kernel.async.group
@@ -157,7 +157,7 @@ kernel.def @write_read_noalias() {
   %c0 = index.constant 0 : offset
   %first_view = buffer.view %first_unique[%c0] : buffer -> view<4xi32>
   %second_view = buffer.view %second_unique[%c0] : buffer -> view<4xi32>
-  %c1 = vector.constant 1 : vector<4xi32>
+  %c1 = vector.splati 1 : vector<4xi32>
   vector.store %c1, %first_view[0] : vector<4xi32>, view<4xi32>
   %observed = vector.load %second_view[0] : view<4xi32> -> vector<4xi32>
   vector.store %observed, %first_view[0] : vector<4xi32>, view<4xi32>
@@ -212,7 +212,7 @@ pipeline.def<kernel> public retain @write_read_noalias() run(%10: buffer, %11: b
     %c0 = index.constant 0 : offset
     %first_view = buffer.view %first_unique[%c0] : buffer -> view<4xi32>
     %second_view = buffer.view %second_unique[%c0] : buffer -> view<4xi32>
-    %c1 = vector.constant 1 : vector<4xi32>
+    %c1 = vector.splati 1 : vector<4xi32>
     vector.store %c1, %first_view[0] : vector<4xi32>, view<4xi32>
     %observed = vector.load %second_view[0] : view<4xi32> -> vector<4xi32>
     vector.store %observed, %first_view[0] : vector<4xi32>, view<4xi32>

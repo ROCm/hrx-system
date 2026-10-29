@@ -171,7 +171,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i1x2x8_any_all(%v
 // ====
 
 func.def @any_negative_i32x16(%values: vector<16xi32>) -> (i1) {
-  %sign_boundary = vector.constant 0 : vector<16xi32>
+  %sign_boundary = vector.splati 0 : vector<16xi32>
   %negative = vector.cmpi slt, %values, %sign_boundary : vector<16xi32> -> vector<16xi1>
   %false = scalar.constant false : i1
   %any = vector.reduce<ori> %negative, %false : vector<16xi1>, i1

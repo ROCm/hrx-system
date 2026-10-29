@@ -437,31 +437,30 @@ static iree_status_t loom_vector_legalize_shift(
         loom_type_kind(result_type), LOOM_SCALAR_TYPE_I1,
         loom_type_rank(result_type), loom_type_flags(result_type));
     loom_op_t* zero_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64(0), result_type, op->location, &zero_op));
+    IREE_RETURN_IF_ERROR(loom_vector_splati_build(builder, 0, result_type,
+                                                  op->location, &zero_op));
     loom_value_id_t current = loom_op_operands(op)[0];
     for (int64_t amount = 1; amount < bit_width; amount <<= 1) {
       loom_op_t* amount_op = NULL;
-      IREE_RETURN_IF_ERROR(
-          loom_vector_constant_build(builder, loom_attr_i64(amount),
-                                     result_type, op->location, &amount_op));
+      IREE_RETURN_IF_ERROR(loom_vector_splati_build(
+          builder, amount, result_type, op->location, &amount_op));
       loom_op_t* selected_bit_op = NULL;
       IREE_RETURN_IF_ERROR(
           loom_vector_andi_build(builder, loom_op_operands(op)[1],
-                                 loom_vector_constant_result(amount_op),
+                                 loom_vector_splati_result(amount_op),
                                  result_type, op->location, &selected_bit_op));
       loom_op_t* selected_op = NULL;
       IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
           builder, LOOM_VECTOR_CMPI_PREDICATE_NE,
           loom_vector_andi_result(selected_bit_op),
-          loom_vector_constant_result(zero_op), result_type, predicate_type,
+          loom_vector_splati_result(zero_op), result_type, predicate_type,
           op->location, &selected_op));
 
       loom_op_t* shifted_op = NULL;
       IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
           builder, op->kind, 2, 1, 0, 0, 0, op->location, &shifted_op));
       loom_op_operands(shifted_op)[0] = current;
-      loom_op_operands(shifted_op)[1] = loom_vector_constant_result(amount_op);
+      loom_op_operands(shifted_op)[1] = loom_vector_splati_result(amount_op);
       IREE_RETURN_IF_ERROR(loom_builder_define_result(
           builder, result_type, &loom_op_results(shifted_op)[0]));
       IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, shifted_op));
@@ -1042,18 +1041,16 @@ static iree_status_t loom_vector_legalize_predicate_extension(
   loom_type_t result_type =
       loom_module_value_type(context->module, loom_op_results(op)[0]);
   loom_op_t* true_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      &rewriter->builder,
-      loom_attr_i64(op->kind == LOOM_OP_VECTOR_EXTSI ? -1 : 1), result_type,
-      op->location, &true_op));
+  IREE_RETURN_IF_ERROR(loom_vector_splati_build(
+      &rewriter->builder, op->kind == LOOM_OP_VECTOR_EXTSI ? -1 : 1,
+      result_type, op->location, &true_op));
   loom_op_t* false_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(&rewriter->builder,
-                                                  loom_attr_i64(0), result_type,
-                                                  op->location, &false_op));
+  IREE_RETURN_IF_ERROR(loom_vector_splati_build(
+      &rewriter->builder, 0, result_type, op->location, &false_op));
   loom_op_t* select_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_select_build(
-      &rewriter->builder, input, loom_vector_constant_result(true_op),
-      loom_vector_constant_result(false_op), result_type, op->location,
+      &rewriter->builder, input, loom_vector_splati_result(true_op),
+      loom_vector_splati_result(false_op), result_type, op->location,
       &select_op));
   loom_value_id_t replacement = loom_vector_select_result(select_op);
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
@@ -1161,12 +1158,12 @@ static iree_status_t loom_vector_legalize_build_number_extremum(
       builder, fastmath, LOOM_VECTOR_CMPF_PREDICATE_UNE, rhs, rhs, type,
       predicate_type, location, &rhs_nan_op));
   loom_op_t* quiet_nan_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      builder, loom_attr_f64(NAN), type, location, &quiet_nan_op));
+  IREE_RETURN_IF_ERROR(
+      loom_vector_splatf_build(builder, NAN, type, location, &quiet_nan_op));
   loom_value_id_t lhs_nan_result = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_legalize_build_select(
       builder, location, type, loom_vector_cmpf_result(rhs_nan_op),
-      loom_vector_constant_result(quiet_nan_op), rhs, &lhs_nan_result));
+      loom_vector_splatf_result(quiet_nan_op), rhs, &lhs_nan_result));
   loom_value_id_t rhs_checked = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_legalize_build_select(
       builder, location, type, loom_vector_cmpf_result(rhs_nan_op), lhs,
@@ -1261,12 +1258,12 @@ static iree_status_t loom_vector_legalize_build_ieee_extremum(
       builder, op->instance_flags, LOOM_VECTOR_CMPF_PREDICATE_UNO, lhs, rhs,
       type, predicate_type, op->location, &unordered));
   loom_op_t* nan = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(builder, loom_attr_f64(NAN),
-                                                  type, op->location, &nan));
+  IREE_RETURN_IF_ERROR(
+      loom_vector_splatf_build(builder, NAN, type, op->location, &nan));
   loom_op_t* select = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_select_build(
       builder, loom_vector_cmpf_result(unordered),
-      loom_vector_constant_result(nan), loom_op_results(number)[0], type,
+      loom_vector_splatf_result(nan), loom_op_results(number)[0], type,
       op->location, &select));
   *out_result = loom_vector_select_result(select);
   return iree_ok_status();
@@ -1362,9 +1359,9 @@ static iree_status_t loom_vector_legalize_float_classification(
   if (op->kind == LOOM_OP_VECTOR_ISINFF &&
       encoding.special_layout == LOOM_NUMERIC_FLOAT_SPECIAL_LAYOUT_FINITE_NAN) {
     loom_op_t* false_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64(0), result_type, op->location, &false_op));
-    replacement = loom_vector_constant_result(false_op);
+    IREE_RETURN_IF_ERROR(loom_vector_splati_build(builder, 0, result_type,
+                                                  op->location, &false_op));
+    replacement = loom_vector_splati_result(false_op);
   } else {
     loom_type_t integer_type = float_type;
     integer_type.header = loom_type_make_header(
@@ -1374,18 +1371,18 @@ static iree_status_t loom_vector_legalize_float_classification(
     IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
         builder, input, float_type, integer_type, op->location, &bitcast_op));
     loom_op_t* magnitude_mask_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64((int64_t)encoding.magnitude_mask), integer_type,
-        op->location, &magnitude_mask_op));
+    IREE_RETURN_IF_ERROR(loom_vector_splati_build(
+        builder, (int64_t)encoding.magnitude_mask, integer_type, op->location,
+        &magnitude_mask_op));
     loom_op_t* magnitude_op = NULL;
     IREE_RETURN_IF_ERROR(
         loom_vector_andi_build(builder, loom_vector_bitcast_result(bitcast_op),
-                               loom_vector_constant_result(magnitude_mask_op),
+                               loom_vector_splati_result(magnitude_mask_op),
                                integer_type, op->location, &magnitude_op));
     loom_op_t* special_magnitude_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64((int64_t)encoding.special_magnitude),
-        integer_type, op->location, &special_magnitude_op));
+    IREE_RETURN_IF_ERROR(loom_vector_splati_build(
+        builder, (int64_t)encoding.special_magnitude, integer_type,
+        op->location, &special_magnitude_op));
 
     loom_vector_cmpi_predicate_t predicate = LOOM_VECTOR_CMPI_PREDICATE_EQ;
     if (op->kind == LOOM_OP_VECTOR_ISNANF) {
@@ -1402,7 +1399,7 @@ static iree_status_t loom_vector_legalize_float_classification(
     loom_op_t* comparison_op = NULL;
     IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
         builder, predicate, loom_vector_andi_result(magnitude_op),
-        loom_vector_constant_result(special_magnitude_op), integer_type,
+        loom_vector_splati_result(special_magnitude_op), integer_type,
         result_type, op->location, &comparison_op));
     replacement = loom_vector_cmpi_result(comparison_op);
   }

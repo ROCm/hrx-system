@@ -303,7 +303,7 @@ After ordinary cleanup, the computation is:
 
 ```loom
 func.def public @weighted_sum(%weights: vector<16xbf16>, %activations: vector<16xbf16>, %seed: f32) -> (f32) {
-  %zero = vector.constant 0.0 : vector<8xf32>
+  %zero = vector.splatf 0.0 : vector<8xf32>
   %partial = vector.dot2f %weights, %activations, %zero : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %sum = vector.reduce<addf> %partial, %seed : vector<8xf32>, f32
   func.return %sum : f32
@@ -403,7 +403,7 @@ the computation has the same operations as authored Loom:
 ```loom
 %schema = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=32, payload_packing=little_endian_nibbles, payload_registers=4, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
 %weights = vector.decode %payload using %schema {scale = %scale : vector<1xi32>} : vector<4xi32>, encoding<schema> -> vector<32xbf16>
-%zero = vector.constant 0.0 : vector<16xf32>
+%zero = vector.splatf 0.0 : vector<16xf32>
 %partial = vector.dot2f %weights, %activations, %zero : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
 %seed = scalar.constant 0.0 : f32
 %sum = vector.reduce<addf> %partial, %seed : vector<16xf32>, f32

@@ -388,11 +388,11 @@ def _const_float_rule(
 
 
 def _const_v128_rule(
-    result_type: TypePattern, value: ValueProject, guard: Guard
+    source_op: Op, result_type: TypePattern, value: ValueProject, guard: Guard
 ) -> DescriptorRule:
     descriptor = _descriptor("wasm.v128.const")
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=source_op,
         descriptor=descriptor,
         guards=(_value_type("result", result_type), guard),
         emit=(
@@ -407,6 +407,7 @@ def _const_v128_rule(
 
 
 def _const_vector_splat_rule(
+    source_op: Op,
     result_type: TypePattern,
     element_type: str,
     shape_name: str,
@@ -419,7 +420,7 @@ def _const_vector_splat_rule(
     constant = _descriptor(f"wasm.{element_type}.const")
     splat = _descriptor(f"wasm.{shape_name}.splat")
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=source_op,
         descriptor=splat,
         guards=(_value_type("result", result_type), guard),
         emit=(
@@ -1925,23 +1926,32 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         _const_float_rule(_F64, "wasm.f64.const"),
         *predicate_rules(_descriptor, _value_type),
         _const_v128_rule(
-            _V2I64, ValueProject.exact_i64("result"), Guard.value_exact_i64("result")
+            vector.vector_splati,
+            _V2I64,
+            ValueProject.exact_i64("result"),
+            Guard.value_exact_i64("result"),
         ),
         _const_v128_rule(
+            vector.vector_splati,
             _PARTIAL_I64,
             ValueProject.exact_i64("result"),
             Guard.value_exact_i64("result"),
         ),
         _const_v128_rule(
-            _V2F64, ValueProject.float_bits("result"), Guard.value_exact_float("result")
+            vector.vector_splatf,
+            _V2F64,
+            ValueProject.float_bits("result"),
+            Guard.value_exact_float("result"),
         ),
         _const_v128_rule(
+            vector.vector_splatf,
             Vector("f64", minimum_lanes=1, maximum_lanes=1),
             ValueProject.float_bits("result"),
             Guard.value_exact_float("result"),
         ),
         *(
             _const_vector_splat_rule(
+                vector.vector_splati,
                 result_type,
                 "i32",
                 shape_name,
@@ -1957,6 +1967,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         ),
         *(
             _const_vector_splat_rule(
+                vector.vector_splati,
                 vector_type,
                 "i32",
                 shape_name,
@@ -1968,6 +1979,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         ),
         *(
             _const_vector_splat_rule(
+                vector.vector_splatf,
                 result_type,
                 element_type,
                 shape_name,
@@ -1989,6 +2001,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         ),
         *(
             _const_vector_splat_rule(
+                vector.vector_splatf,
                 vector_type,
                 "i32",
                 shape_name,

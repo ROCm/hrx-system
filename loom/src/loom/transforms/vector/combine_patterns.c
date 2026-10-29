@@ -409,11 +409,10 @@ static iree_status_t loom_vector_mask_range_relations_pattern(
   loom_builder_set_before(&rewriter->builder, op);
   const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
   loom_op_t* replacement_op = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_vector_constant_build(&rewriter->builder, loom_attr_bool(all_true),
-                                 result_type, op->location, &replacement_op));
-  const loom_value_id_t replacement =
-      loom_vector_constant_result(replacement_op);
+  IREE_RETURN_IF_ERROR(loom_vector_splati_build(&rewriter->builder,
+                                                all_true ? 1 : 0, result_type,
+                                                op->location, &replacement_op));
+  const loom_value_id_t replacement = loom_vector_splati_result(replacement_op);
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, checkpoint));
   IREE_RETURN_IF_ERROR(

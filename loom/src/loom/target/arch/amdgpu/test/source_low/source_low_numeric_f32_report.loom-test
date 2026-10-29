@@ -53,7 +53,7 @@ CHECK: COMPILE-REPORT: source_low[*] * source_op=scalar.divf selection=rule plan
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_vector_arcp_reciprocal_div(%rhs: vector<2xf32>) -> (vector<2xf32>) {
-  %reciprocal_numerator = vector.constant 1.0 : vector<2xf32>
+  %reciprocal_numerator = vector.splatf 1.0 : vector<2xf32>
   %quotient = vector.divf<nnan|ninf|nsz|arcp> %reciprocal_numerator, %rhs : vector<2xf32>
   func.return %quotient : vector<2xf32>
 }

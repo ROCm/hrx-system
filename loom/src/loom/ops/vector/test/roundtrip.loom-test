@@ -40,7 +40,7 @@ func.def @construction(%x: f32, %i: i32, %n: index) {
   %dyn_lanes = vector.iota %c0 step %c1 : vector<[%n]xindex>
   %tail = vector.mask.range [%c0 to %n step %c1] : index -> vector<16xi1>
   %int_tail = vector.mask.range [%ci0 to %ci4 step %ci1] : i32 -> vector<4xi1>
-  %c = vector.constant 0.0 : vector<4xf32>
+  %c = vector.splatf 0.0 : vector<4xf32>
   %wide = vector.broadcast %c : vector<4xf32> -> vector<4x4xf32>
   %lane0 = vector.extract %c[0] : vector<4xf32> -> f32
   %updated = vector.insert %lane0 into %c[%n] : f32, vector<4xf32>

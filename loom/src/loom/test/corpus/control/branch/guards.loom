@@ -281,7 +281,7 @@ kernel.def @mixed_carriers() {
     scf.yield %fragment, %lanes : vector<[%fragment_lanes]xf32>, vector<8xf32>
   } else {
     %fragment = vector.fragment.load<init> %input_matrix[0, 0] shape [%tile, %tile] : view<16x16xf32> -> vector<[%fragment_lanes]xf32>
-    %fallback = vector.constant 3.0 : vector<8xf32>
+    %fallback = vector.splatf 3.0 : vector<8xf32>
     scf.yield %fragment, %fallback : vector<[%fragment_lanes]xf32>, vector<8xf32>
   }
   vector.fragment.store<result> %matrix, %output_matrix[0, 0] shape [%tile, %tile] : vector<[%fragment_lanes]xf32>, view<16x16xf32>

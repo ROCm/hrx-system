@@ -25,8 +25,12 @@ static_assert(LOOM_TARGET_MATH_FLOAT_CONVERSION_FLAG_FTZ ==
                   LOOM_VECTOR_FLOATCONVERSIONFLAGS_FTZ,
               "math and vector conversion result flags must match");
 
-typedef iree_status_t (*loom_math_evaluation_constant_build_fn_t)(
-    loom_builder_t* builder, loom_attribute_t value, loom_type_t result_type,
+typedef iree_status_t (*loom_math_evaluation_constantf_build_fn_t)(
+    loom_builder_t* builder, double value, loom_type_t result_type,
+    loom_location_id_t location, loom_op_t** out_op);
+
+typedef iree_status_t (*loom_math_evaluation_constanti_build_fn_t)(
+    loom_builder_t* builder, int64_t value, loom_type_t result_type,
     loom_location_id_t location, loom_op_t** out_op);
 
 typedef iree_status_t (*loom_math_evaluation_unary_build_fn_t)(
@@ -64,8 +68,10 @@ typedef iree_status_t (*loom_math_evaluation_cast_build_fn_t)(
     loom_location_id_t location, loom_op_t** out_op);
 
 struct loom_math_evaluation_lane_ops_t {
-  // Builds a uniform scalar or vector constant.
-  loom_math_evaluation_constant_build_fn_t constant;
+  // Builds a uniform scalar or vector floating-point constant.
+  loom_math_evaluation_constantf_build_fn_t constantf;
+  // Builds a uniform scalar or vector integer constant.
+  loom_math_evaluation_constanti_build_fn_t constanti;
   // Builds lane-wise floating-point addition.
   loom_math_evaluation_binary_build_fn_t addf;
   // Builds lane-wise floating-point subtraction.
@@ -161,8 +167,23 @@ static iree_status_t loom_math_evaluation_vector_cmpf_build(
                                 operand_type, result_type, location, out_op);
 }
 
+static iree_status_t loom_math_evaluation_scalar_constantf_build(
+    loom_builder_t* builder, double value, loom_type_t result_type,
+    loom_location_id_t location, loom_op_t** out_op) {
+  return loom_scalar_constant_build(builder, loom_attr_f64(value), result_type,
+                                    location, out_op);
+}
+
+static iree_status_t loom_math_evaluation_scalar_constanti_build(
+    loom_builder_t* builder, int64_t value, loom_type_t result_type,
+    loom_location_id_t location, loom_op_t** out_op) {
+  return loom_scalar_constant_build(builder, loom_attr_i64(value), result_type,
+                                    location, out_op);
+}
+
 static const loom_math_evaluation_lane_ops_t kScalarLaneOps = {
-    .constant = loom_scalar_constant_build,
+    .constantf = loom_math_evaluation_scalar_constantf_build,
+    .constanti = loom_math_evaluation_scalar_constanti_build,
     .addf = loom_scalar_addf_build,
     .subf = loom_scalar_subf_build,
     .mulf = loom_scalar_mulf_build,
@@ -190,7 +211,8 @@ static const loom_math_evaluation_lane_ops_t kScalarLaneOps = {
 };
 
 static const loom_math_evaluation_lane_ops_t kVectorLaneOps = {
-    .constant = loom_vector_constant_build,
+    .constantf = loom_vector_splatf_build,
+    .constanti = loom_vector_splati_build,
     .addf = loom_vector_addf_build,
     .subf = loom_vector_subf_build,
     .mulf = loom_vector_mulf_build,
@@ -332,12 +354,11 @@ static iree_status_t loom_math_evaluation_import_grouped_product(
       evaluation->descriptor.packet_lane_count -
           evaluation->source_element_count);
   loom_op_t* padding_op = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_vector_constant_build(builder, loom_attr_f64(0.0), padding_type,
-                                 evaluation->location, &padding_op));
+  IREE_RETURN_IF_ERROR(loom_vector_splatf_build(
+      builder, 0.0, padding_type, evaluation->location, &padding_op));
   const loom_value_id_t inputs[] = {
       flat_accumulator,
-      loom_vector_constant_result(padding_op),
+      loom_vector_splatf_result(padding_op),
   };
   loom_op_t* concat_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_concat_build(
@@ -461,10 +482,9 @@ static iree_status_t loom_math_evaluation_build_zero(
     return iree_ok_status();
   }
   loom_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      &evaluation->rewriter->builder, loom_attr_f64(0.0), type,
-      evaluation->location, &op));
-  *inout_value = loom_vector_constant_result(op);
+  IREE_RETURN_IF_ERROR(loom_vector_splatf_build(
+      &evaluation->rewriter->builder, 0.0, type, evaluation->location, &op));
+  *inout_value = loom_vector_splatf_result(op);
   return iree_ok_status();
 }
 
@@ -565,9 +585,9 @@ iree_status_t loom_math_evaluation_build_constant(
     loom_math_evaluation_t* evaluation, double value,
     loom_math_evaluation_value_t* out_value) {
   loom_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(evaluation->lane_ops->constant(
-      &evaluation->rewriter->builder, loom_attr_f64(value),
-      evaluation->value_type, evaluation->location, &op));
+  IREE_RETURN_IF_ERROR(evaluation->lane_ops->constantf(
+      &evaluation->rewriter->builder, value, evaluation->value_type,
+      evaluation->location, &op));
   *out_value = loom_math_evaluation_value_from_id(loom_op_results(op)[0]);
   return iree_ok_status();
 }
@@ -795,13 +815,13 @@ iree_status_t loom_math_evaluation_build_positive_normal_finite_condition(
   const loom_type_t mask_type = loom_math_evaluation_type_with_element(
       evaluation->value_type, LOOM_SCALAR_TYPE_I1);
   loom_op_t* minimum_op = NULL;
-  IREE_RETURN_IF_ERROR(evaluation->lane_ops->constant(
-      builder, loom_attr_i64((int64_t)minimum_normal_bits), integer_type,
-      evaluation->location, &minimum_op));
+  IREE_RETURN_IF_ERROR(evaluation->lane_ops->constanti(
+      builder, (int64_t)minimum_normal_bits, integer_type, evaluation->location,
+      &minimum_op));
   loom_op_t* span_op = NULL;
-  IREE_RETURN_IF_ERROR(evaluation->lane_ops->constant(
-      builder, loom_attr_i64((int64_t)finite_normal_span), integer_type,
-      evaluation->location, &span_op));
+  IREE_RETURN_IF_ERROR(evaluation->lane_ops->constanti(
+      builder, (int64_t)finite_normal_span, integer_type, evaluation->location,
+      &span_op));
 
   loom_op_t* bits_op = NULL;
   loom_op_t* offset_op = NULL;

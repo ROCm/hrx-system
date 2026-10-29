@@ -160,11 +160,11 @@ TEST_F(ErasureTest, VectorMaterializationsFollowReplacementAndDeadProducers) {
 
   loom_builder_set_before(&rewriter_.builder, pair);
   loom_op_t* replacement_pair = nullptr;
-  IREE_ASSERT_OK(loom_vector_constant_build(
-      &rewriter_.builder, loom_attr_i64(7), pair_type, LOOM_LOCATION_UNKNOWN,
-      &replacement_pair));
+  IREE_ASSERT_OK(loom_vector_splati_build(&rewriter_.builder, 7, pair_type,
+                                          LOOM_LOCATION_UNKNOWN,
+                                          &replacement_pair));
   const loom_value_id_t replacement_pair_value =
-      loom_vector_constant_result(replacement_pair);
+      loom_vector_splati_result(replacement_pair);
   IREE_ASSERT_OK(loom_rewriter_replace_all_uses_and_erase(
       &rewriter_, pair, &replacement_pair_value, 1));
   bool erased = false;

@@ -143,15 +143,15 @@ test.target<low_core> @reference
 
 func.def target(@reference) @decompose_vector_f64(%input: vector<2xf64>) -> (vector<2xf64>, vector<2xi32>) {
   %5 = vector.bitcast %input : vector<2xf64> to vector<2xi64>
-  %6 = vector.constant -9223372036854775808 : vector<2xi64>
-  %7 = vector.constant 9223372036854775807 : vector<2xi64>
+  %6 = vector.splati -9223372036854775808 : vector<2xi64>
+  %7 = vector.splati 9223372036854775807 : vector<2xi64>
   %8 = vector.andi %5, %6 : vector<2xi64>
   %9 = vector.andi %5, %7 : vector<2xi64>
-  %10 = vector.constant 4503599627370495 : vector<2xi64>
-  %11 = vector.constant 0 : vector<2xi64>
-  %12 = vector.constant 1 : vector<2xi64>
-  %13 = vector.constant 52 : vector<2xi64>
-  %14 = vector.constant 11 : vector<2xi64>
+  %10 = vector.splati 4503599627370495 : vector<2xi64>
+  %11 = vector.splati 0 : vector<2xi64>
+  %12 = vector.splati 1 : vector<2xi64>
+  %13 = vector.splati 52 : vector<2xi64>
+  %14 = vector.splati 11 : vector<2xi64>
   %15 = vector.ctlzi %9 : vector<2xi64>
   %16 = vector.subi %15, %14 : vector<2xi64>
   %17 = vector.maxsi %16, %11 : vector<2xi64>
@@ -160,18 +160,18 @@ func.def target(@reference) @decompose_vector_f64(%input: vector<2xf64>) -> (vec
   %20 = vector.shrui %9, %13 : vector<2xi64>
   %21 = vector.maxsi %20, %12 : vector<2xi64>
   %22 = vector.subi %21, %17 : vector<2xi64>
-  %23 = vector.constant 9218868437227405312 : vector<2xi64>
+  %23 = vector.splati 9218868437227405312 : vector<2xi64>
   %24 = vector.cmpi eq, %9, %11 : vector<2xi64> -> vector<2xi1>
   %25 = vector.cmpi uge, %9, %23 : vector<2xi64> -> vector<2xi1>
   %26 = vector.ori %24, %25 : vector<2xi1>
-  %27 = vector.constant 4602678819172646912 : vector<2xi64>
+  %27 = vector.splati 4602678819172646912 : vector<2xi64>
   %28 = vector.ori %19, %27 : vector<2xi64>
   %29 = vector.ori %28, %8 : vector<2xi64>
   %30 = vector.select %26, %5, %29 : vector<2xi64>
   %fraction = vector.bitcast %30 : vector<2xi64> to vector<2xf64>
-  %32 = vector.constant 1022 : vector<2xi64>
+  %32 = vector.splati 1022 : vector<2xi64>
   %33 = vector.subi %22, %32 : vector<2xi64>
-  %34 = vector.constant 0 : vector<2xi64>
+  %34 = vector.splati 0 : vector<2xi64>
   %35 = vector.select %26, %34, %33 : vector<2xi64>
   %exponent = vector.trunci %35 : vector<2xi64> to vector<2xi32>
   func.return %fraction, %exponent : vector<2xf64>, vector<2xi32>

@@ -7,7 +7,7 @@ test.target<low_core> @target
 func.def public target(@target) @ranked_predicates(%limit: i32, %seed: vector<2x3xi1>) -> (vector<2x3xi1>) {
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
-  %true_words = vector.constant 1 : vector<2x3xi1>
+  %true_words = vector.splati 1 : vector<2x3xi1>
   cfg.br ^loop(%c0: i32, %seed: vector<2x3xi1>)
 ^loop(%iteration: i32, %predicates: vector<2x3xi1>):
   %again = scalar.cmpi slt, %iteration, %limit : i32
@@ -26,11 +26,11 @@ test.target<low_core> @target
 func.def public target(@target) @ranked_predicates(%limit: i32, %seed: vector<2x3xi1>) -> (vector<2x3xi1>) {
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
-  %true_words = vector.constant 1 : vector<2x3xi1>
+  %true_words = vector.splati 1 : vector<2x3xi1>
   cfg.br ^loop(%c0: i32, %seed: vector<2x3xi1>)
 ^loop(%iteration: i32, %predicates: vector<2x3xi1>):
-  %11 = vector.constant 1 : vector<2x3xi32>
-  %12 = vector.constant 0 : vector<2x3xi32>
+  %11 = vector.splati 1 : vector<2x3xi32>
+  %12 = vector.splati 0 : vector<2x3xi32>
   %13 = vector.select %predicates, %11, %12 : vector<2x3xi32>
   %again = scalar.cmpi slt, %iteration, %limit : i32
   cfg.cond_br %again, ^body, ^exit
@@ -39,7 +39,7 @@ func.def public target(@target) @ranked_predicates(%limit: i32, %seed: vector<2x
   %inverted = vector.xori %predicates, %true_words : vector<2x3xi1>
   cfg.br ^loop(%next: i32, %inverted: vector<2x3xi1>)
 ^exit:
-  %14 = vector.constant 0 : vector<2x3xi32>
+  %14 = vector.splati 0 : vector<2x3xi32>
   %15 = vector.cmpi ne, %13, %14 : vector<2x3xi32> -> vector<2x3xi1>
   func.return %15 : vector<2x3xi1>
 }
@@ -54,7 +54,7 @@ x86.target<avx2> @target
 func.def public target(@target) @direct_predicates(%limit: i32, %seed: vector<2x3xi1>) -> (vector<2x3xi1>) {
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
-  %true_words = vector.constant 1 : vector<2x3xi1>
+  %true_words = vector.splati 1 : vector<2x3xi1>
   cfg.br ^loop(%c0: i32, %seed: vector<2x3xi1>)
 ^loop(%iteration: i32, %predicates: vector<2x3xi1>):
   %again = scalar.cmpi slt, %iteration, %limit : i32
@@ -73,7 +73,7 @@ x86.target<avx2> @target
 func.def public target(@target) @direct_predicates(%limit: i32, %seed: vector<2x3xi1>) -> (vector<2x3xi1>) {
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
-  %true_words = vector.constant 1 : vector<2x3xi1>
+  %true_words = vector.splati 1 : vector<2x3xi1>
   cfg.br ^loop(%c0: i32, %seed: vector<2x3xi1>)
 ^loop(%iteration: i32, %predicates: vector<2x3xi1>):
   %again = scalar.cmpi slt, %iteration, %limit : i32

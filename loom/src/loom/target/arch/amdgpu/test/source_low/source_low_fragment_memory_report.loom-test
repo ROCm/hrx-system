@@ -95,7 +95,7 @@ kernel.def target(@target) @report_rdna4_bf16_result_fragment_packets() {
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xbf16>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16> -> vector<8xbf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<8xbf16>
-  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %zero_acc = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<8xbf16>, vector<8xbf16>, vector<8xf32>
   vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xbf16>
@@ -186,7 +186,7 @@ kernel.def target(@target) @report_gfx1250_bf16_result_fragment_packets() {
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xbf16>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x32xbf16> -> vector<16xbf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<32x16xbf16, %rhs_layout> -> vector<16xbf16>
-  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %zero_acc = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xbf16>

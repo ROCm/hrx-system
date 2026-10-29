@@ -65,7 +65,7 @@ func.def public @signed_integer(%lhs: vector<8xi32>, %rhs: vector<8xi32>) -> (ve
   %36 = vector.remsi %35, %lhs : vector<8xi32>
   %arithmetic = vector.negi %36 : vector<8xi32>
   %38 = vector.andi %lhs, %rhs : vector<8xi32>
-  %39 = vector.constant -1 : vector<8xi32>
+  %39 = vector.splati -1 : vector<8xi32>
   %40 = vector.xori %38, %39 : vector<8xi32>
   %41 = vector.xori %lhs, %rhs : vector<8xi32>
   %bits = vector.ori %40, %41 : vector<8xi32>

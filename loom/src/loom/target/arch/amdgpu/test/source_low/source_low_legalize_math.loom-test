@@ -1172,7 +1172,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @vector_sin_project_turns(%input: vector<4xf32>) -> (vector<4xf32>) {
-  %two_pi = vector.constant 6.2831853071795862 : vector<4xf32>
+  %two_pi = vector.splatf 6.2831853071795862 : vector<4xf32>
   %radians = vector.mulf<afn> %input, %two_pi : vector<4xf32>
   %result = vector.sinf<afn> %radians : vector<4xf32>
   func.return %result : vector<4xf32>

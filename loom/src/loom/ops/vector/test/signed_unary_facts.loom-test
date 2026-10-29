@@ -22,7 +22,7 @@ func.def @predicate_range(%input: i1) -> (i64, i64) {
 
 // Uniform summaries preserve signed minimum under negation and absolute value.
 func.def @uniform_minimum() -> (i8, i8, i8) {
-  %values = vector.constant -128 : vector<4xi8>
+  %values = vector.splati -128 : vector<4xi8>
   %negative = vector.negi %values : vector<4xi8>
   %absolute = vector.absi %values : vector<4xi8>
   %sign = vector.signi %values : vector<4xi8>

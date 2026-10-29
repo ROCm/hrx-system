@@ -57,13 +57,13 @@ kernel.def retain target(@attention_prefill_gfx11_wave64) export("attention_pref
   %c1_f32 = scalar.constant 1.0 : f32
   %attention_scale = scalar.constant 0.0625 : f32
   %negative_large = scalar.constant -1e+30 : f32
-  %output_zero0 = vector.constant 0.0 : vector<4xf16>
-  %output_zero1 = vector.constant 0.0 : vector<4xf16>
-  %output_zero2 = vector.constant 0.0 : vector<4xf16>
-  %output_zero3 = vector.constant 0.0 : vector<4xf16>
-  %c0_f16x8 = vector.constant 0.0 : vector<8xf16>
-  %c0_f32x4 = vector.constant 0.0 : vector<4xf32>
-  %negative_f32x4 = vector.constant -1e+30 : vector<4xf32>
+  %output_zero0 = vector.splatf 0.0 : vector<4xf16>
+  %output_zero1 = vector.splatf 0.0 : vector<4xf16>
+  %output_zero2 = vector.splatf 0.0 : vector<4xf16>
+  %output_zero3 = vector.splatf 0.0 : vector<4xf16>
+  %c0_f16x8 = vector.splatf 0.0 : vector<8xf16>
+  %c0_f32x4 = vector.splatf 0.0 : vector<4xf32>
+  %negative_f32x4 = vector.splatf -1e+30 : vector<4xf32>
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 16 : index
@@ -158,7 +158,7 @@ kernel.def retain target(@attention_prefill_gfx11_wave64) export("attention_pref
     %score_key_origin0 = index.add %key_origin, %subgroup_score_column : index
     %last_full_key_tile_start = index.sub %context_count, %c15 : index
     %score_key_origin = index.assume %score_key_origin0 [lt(%score_key_origin0, %last_full_key_tile_start)] : index
-    %score_init_values = vector.constant 0.0 : vector<4xf32>
+    %score_init_values = vector.splatf 0.0 : vector<4xf32>
     %score_init = vector.fragment<init> %score_init_values shape [%m, %n] : vector<4xf32>
     %score_fragment = scf.for %head_tile = [%c0 to %c256 step %c16](%score_accumulator = %score_init : vector<4xf32>) -> (vector<4xf32>) unroll schedule(recurrence) {
       %key_channel = index.add %key_value_head_base, %head_tile : index
@@ -276,7 +276,7 @@ kernel.def retain target(@attention_prefill_gfx11_wave64) export("attention_pref
     }
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
     scf.if %tail_score_wave {
-      %tail_score_init_values = vector.constant 0.0 : vector<4xf32>
+      %tail_score_init_values = vector.splatf 0.0 : vector<4xf32>
       %tail_score_init = vector.fragment<init> %tail_score_init_values shape [%m, %n] : vector<4xf32>
       %tail_score_fragment = scf.for %head_tile = [%c0 to %c256 step %c16](%score_accumulator = %tail_score_init : vector<4xf32>) -> (vector<4xf32>) unroll schedule(recurrence) {
         %key_fragment = vector.fragment.load<lhs> %tail_key_value_stage_view[%c0, %head_tile] shape [%m, %k] : view<16x264xf16> -> vector<16xf16>

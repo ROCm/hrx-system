@@ -17,7 +17,7 @@ func.def @packed_q2_offset_binary_chunk() -> (i32, i32, i32, i32) {
   %packed_byte = scalar.constant -28 : i8
   %packed = vector.from_elements %packed_byte : vector<1xi8>
   %codes = vector.bitunpacku<2> %packed : vector<1xi8> -> vector<4xi32>
-  %bias = vector.constant 2 : vector<4xi32>
+  %bias = vector.splati 2 : vector<4xi32>
   %signed = vector.subi %codes, %bias : vector<4xi32>
   %r0 = vector.extract %signed[0] : vector<4xi32> -> i32
   %r1 = vector.extract %signed[1] : vector<4xi32> -> i32
@@ -57,11 +57,11 @@ func.def @packed_q4_repack_to_dot8i4() -> (i32, i32) {
   %row0_storage = scalar.constant 1985229328 : i32
   %row1_storage = scalar.constant -19088744 : i32
   %rows = vector.from_elements %row0_storage, %row1_storage : vector<2xi32>
-  %offset_to_signed_mask = vector.constant -2004318072 : vector<2xi32>
+  %offset_to_signed_mask = vector.splati -2004318072 : vector<2xi32>
   %signed_rows = vector.xori %rows, %offset_to_signed_mask : vector<2xi32>
   %rhs_storage = scalar.constant 124076833 : i32
   %rhs = vector.splat %rhs_storage : vector<2xi32>
-  %acc = vector.constant 0 : vector<2xi32>
+  %acc = vector.splati 0 : vector<2xi32>
   %dot = vector.dot8i4<s4u4> %signed_rows, %rhs, %acc : vector<2xi32>
   %r0 = vector.extract %dot[0] : vector<2xi32> -> i32
   %r1 = vector.extract %dot[1] : vector<2xi32> -> i32
@@ -84,7 +84,7 @@ func.def @packed_q5_split_high_bit_chunk() -> (i32, i32, i32, i32) {
   %high8 = vector.bitunpacku<1> %high_packed : vector<1xi8> -> vector<8xi8>
   %high4 = vector.slice %high8[0] : vector<8xi8> -> vector<4xi8>
   %codes = vector.bitfield.insert %high4 into %low_codes {offset = 4, width = 1} : vector<4xi8>, vector<4xi8>
-  %bias = vector.constant -16 : vector<4xi8>
+  %bias = vector.splati -16 : vector<4xi8>
   %signed = vector.addi %codes, %bias : vector<4xi8>
   %s0 = vector.extract %signed[0] : vector<4xi8> -> i8
   %s1 = vector.extract %signed[1] : vector<4xi8> -> i8
@@ -118,7 +118,7 @@ func.def @packed_q6_split_high_bits_chunk() -> (i32, i32, i32, i32) {
   %lo6 = vector.bitfield.insert %lo2 into %lo4 {offset = 4, width = 2} : vector<4xi8>, vector<4xi8>
   %hi6 = vector.bitfield.insert %hi2 into %hi4 {offset = 4, width = 2} : vector<4xi8>, vector<4xi8>
   %codes = vector.interleave<0> %lo6, %hi6 : vector<4xi8>, vector<4xi8> -> vector<8xi8>
-  %bias = vector.constant -32 : vector<8xi8>
+  %bias = vector.splati -32 : vector<8xi8>
   %signed = vector.addi %codes, %bias : vector<8xi8>
   %s0 = vector.extract %signed[0] : vector<8xi8> -> i8
   %s1 = vector.extract %signed[1] : vector<8xi8> -> i8

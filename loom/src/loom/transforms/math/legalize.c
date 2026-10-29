@@ -644,15 +644,15 @@ typedef iree_status_t (*loom_math_conversion_builder_fn_t)(
 typedef iree_status_t (*loom_math_binary_builder_fn_t)(
     loom_builder_t* builder, loom_value_id_t lhs, loom_value_id_t rhs,
     loom_type_t result_type, loom_location_id_t location, loom_op_t** out_op);
-typedef iree_status_t (*loom_math_constant_builder_fn_t)(
-    loom_builder_t* builder, loom_attribute_t value, loom_type_t result_type,
+typedef iree_status_t (*loom_math_integer_constant_builder_fn_t)(
+    loom_builder_t* builder, int64_t value, loom_type_t result_type,
     loom_location_id_t location, loom_op_t** out_op);
 
 typedef struct loom_math_sign_builders_t {
   // Builds an equal-width integer/floating-point representation change.
   loom_math_conversion_builder_fn_t bitcast;
   // Builds the sign or magnitude mask.
-  loom_math_constant_builder_fn_t constant;
+  loom_math_integer_constant_builder_fn_t constanti;
   // Clears all bits outside the selected mask.
   loom_math_binary_builder_fn_t bitwise_and;
   // Joins the magnitude and sign fields.
@@ -683,14 +683,20 @@ static iree_status_t loom_math_build_binary(
 }
 
 static iree_status_t loom_math_build_integer_constant(
-    loom_math_constant_builder_fn_t build, loom_builder_t* builder,
+    loom_math_integer_constant_builder_fn_t build, loom_builder_t* builder,
     loom_location_id_t location, loom_type_t result_type, int64_t value,
     loom_value_id_t* out_result) {
   loom_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(
-      build(builder, loom_attr_i64(value), result_type, location, &op));
+  IREE_RETURN_IF_ERROR(build(builder, value, result_type, location, &op));
   *out_result = loom_op_results(op)[0];
   return iree_ok_status();
+}
+
+static iree_status_t loom_math_build_scalar_integer_constant(
+    loom_builder_t* builder, int64_t value, loom_type_t result_type,
+    loom_location_id_t location, loom_op_t** out_op) {
+  return loom_scalar_constant_build(builder, loom_attr_i64(value), result_type,
+                                    location, out_op);
 }
 
 // Builds exact signum from the encoded sign and magnitude fields. The unsigned
@@ -713,7 +719,7 @@ static iree_status_t loom_math_build_float_signum(
 
   loom_value_id_t magnitude_mask = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_math_build_integer_constant(
-      builders->constant, builder, location, integer_type,
+      builders->constanti, builder, location, integer_type,
       (int64_t)encoding->magnitude_mask, &magnitude_mask));
   loom_value_id_t magnitude = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_math_build_binary(
@@ -722,14 +728,14 @@ static iree_status_t loom_math_build_float_signum(
 
   loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_math_build_integer_constant(
-      builders->constant, builder, location, integer_type, 0, &zero));
+      builders->constanti, builder, location, integer_type, 0, &zero));
   const uint64_t maximum_numeric_magnitude =
       encoding->special_layout == LOOM_NUMERIC_FLOAT_SPECIAL_LAYOUT_FINITE_NAN
           ? encoding->special_magnitude - 1
           : encoding->special_magnitude;
   loom_value_id_t numeric_bound = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_math_build_integer_constant(
-      builders->constant, builder, location, integer_type,
+      builders->constanti, builder, location, integer_type,
       (int64_t)maximum_numeric_magnitude, &numeric_bound));
   loom_op_t* nonzero_op = NULL;
   loom_op_t* numeric_op = NULL;
@@ -754,7 +760,7 @@ static iree_status_t loom_math_build_float_signum(
       bit_width == 64 ? INT64_MIN : -(INT64_C(1) << (bit_width - 1));
   loom_value_id_t sign_mask_value = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_math_build_integer_constant(
-      builders->constant, builder, location, integer_type, sign_mask,
+      builders->constanti, builder, location, integer_type, sign_mask,
       &sign_mask_value));
   loom_value_id_t sign = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
@@ -762,7 +768,7 @@ static iree_status_t loom_math_build_float_signum(
                              input_bits, sign_mask_value, integer_type, &sign));
   loom_value_id_t one_magnitude = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_math_build_integer_constant(
-      builders->constant, builder, location, integer_type,
+      builders->constanti, builder, location, integer_type,
       (int64_t)encoding->one_magnitude, &one_magnitude));
   loom_value_id_t signed_one = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_math_build_binary(builders->bitwise_or, builder,
@@ -823,14 +829,14 @@ static iree_status_t loom_math_target_legalize_float_sign(
   const loom_math_sign_builders_t builders = is_vector
       ? (loom_math_sign_builders_t){
             .bitcast = loom_vector_bitcast_build,
-            .constant = loom_vector_constant_build,
+            .constanti = loom_vector_splati_build,
             .bitwise_and = loom_vector_andi_build,
             .bitwise_or = loom_vector_ori_build,
             .bitwise_xor = loom_vector_xori_build,
         }
       : (loom_math_sign_builders_t){
             .bitcast = loom_scalar_bitcast_build,
-            .constant = loom_scalar_constant_build,
+            .constanti = loom_math_build_scalar_integer_constant,
             .bitwise_and = loom_scalar_andi_build,
             .bitwise_or = loom_scalar_ori_build,
             .bitwise_xor = loom_scalar_xori_build,
@@ -865,7 +871,7 @@ static iree_status_t loom_math_target_legalize_float_sign(
   } else if (is_absolute || is_negate) {
     loom_value_id_t mask = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_math_build_integer_constant(
-        builders.constant, builder, op->location, integer_type,
+        builders.constanti, builder, op->location, integer_type,
         is_absolute ? magnitude_mask : sign_mask, &mask));
     IREE_RETURN_IF_ERROR(loom_math_build_binary(
         is_absolute ? builders.bitwise_and : builders.bitwise_xor, builder,
@@ -877,14 +883,14 @@ static iree_status_t loom_math_target_legalize_float_sign(
         float_type, integer_type, &sign_bits));
     loom_value_id_t mask = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_math_build_integer_constant(
-        builders.constant, builder, op->location, integer_type, magnitude_mask,
+        builders.constanti, builder, op->location, integer_type, magnitude_mask,
         &mask));
     loom_value_id_t magnitude_bits = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_math_build_binary(builders.bitwise_and, builder,
                                                 op->location, input_bits, mask,
                                                 integer_type, &magnitude_bits));
     IREE_RETURN_IF_ERROR(loom_math_build_integer_constant(
-        builders.constant, builder, op->location, integer_type, sign_mask,
+        builders.constanti, builder, op->location, integer_type, sign_mask,
         &mask));
     IREE_RETURN_IF_ERROR(loom_math_build_binary(builders.bitwise_and, builder,
                                                 op->location, sign_bits, mask,

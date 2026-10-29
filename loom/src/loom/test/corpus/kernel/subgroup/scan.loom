@@ -65,7 +65,7 @@ func.def @subgroup_scan_i32_oracle(%input: buffer, %output: buffer) {
   %begin = index.constant 0 : index
   %end = index.constant 128 : index
   %step = index.constant 1 : index
-  %no_difference = vector.constant 0 : vector<4xi32>
+  %no_difference = vector.splati 0 : vector<4xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<128x4xi32>
   scf.for %item = [%begin to %end step %step] {
     vector.store %no_difference, %output_view[%item, 0] : vector<4xi32>, view<128x4xi32>
@@ -91,21 +91,21 @@ check.scenario @subgroup_scan_i32_values {
 func.def device inline @scan_extrema_matches(%actual: vector<4xf32>, %expected: vector<4xf32>, %combined: i1) -> (i32) {
   %actual_bits = vector.bitcast %actual : vector<4xf32> to vector<4xi32>
   %expected_bits = vector.bitcast %expected : vector<4xf32> to vector<4xi32>
-  %magnitude_mask = vector.constant 2147483647 : vector<4xi32>
-  %infinity_bits = vector.constant 2139095040 : vector<4xi32>
+  %magnitude_mask = vector.splati 2147483647 : vector<4xi32>
+  %infinity_bits = vector.splati 2139095040 : vector<4xi32>
   %actual_magnitude = vector.andi %actual_bits, %magnitude_mask : vector<4xi32>
   %expected_magnitude = vector.andi %expected_bits, %magnitude_mask : vector<4xi32>
   %actual_nan = vector.cmpi sgt, %actual_magnitude, %infinity_bits : vector<4xi32> -> vector<4xi1>
   %expected_nan = vector.cmpi sgt, %expected_magnitude, %infinity_bits : vector<4xi32> -> vector<4xi1>
   %both_nan = vector.andi %actual_nan, %expected_nan : vector<4xi1>
-  %quiet_mask = vector.constant 4194304 : vector<4xi32>
+  %quiet_mask = vector.splati 4194304 : vector<4xi32>
   %actual_quiet_bits = vector.andi %actual_bits, %quiet_mask : vector<4xi32>
   %actual_quiet = vector.cmpi eq, %actual_quiet_bits, %quiet_mask : vector<4xi32> -> vector<4xi1>
   %requires_quiet = vector.splat %combined : vector<4xi1>
   %allowed_nan = vector.select %requires_quiet, %actual_quiet, %both_nan : vector<4xi1>
   %quiet_nan = vector.andi %both_nan, %allowed_nan : vector<4xi1>
   %same_bits = vector.cmpi eq, %actual_bits, %expected_bits : vector<4xi32> -> vector<4xi1>
-  %true_mask = vector.constant true : vector<4xi1>
+  %true_mask = vector.splati 1 : vector<4xi1>
   %expected_number = vector.xori %expected_nan, %true_mask : vector<4xi1>
   %same_number = vector.andi %same_bits, %expected_number : vector<4xi1>
   %matches = vector.ori %same_number, %quiet_nan : vector<4xi1>
@@ -139,8 +139,8 @@ kernel.def @subgroup_scan_float_extrema() {
     %has_prefix = scalar.cmpi ne, %prefix, %absent : i32
     %prefix_combines = scalar.cmpi ugt, %prefix, %present : i32
     %prefix_mask = vector.splat %has_prefix : vector<4xi1>
-    %minimum_bound = vector.constant inf : vector<4xf32>
-    %maximum_bound = vector.constant -inf : vector<4xf32>
+    %minimum_bound = vector.splatf inf : vector<4xf32>
+    %maximum_bound = vector.splatf -inf : vector<4xf32>
     %expected_minimum = vector.select %prefix_mask, %value, %minimum_bound : vector<4xf32>
     %expected_maximum = vector.select %prefix_mask, %value, %maximum_bound : vector<4xf32>
     %exclusive_minimum = kernel.subgroup.scan<minnumf> %value {direction = forward, mode = exclusive} : vector<4xf32>
@@ -176,7 +176,7 @@ func.def @subgroup_scan_extrema_oracle(%input: buffer, %output: buffer) {
   %begin = index.constant 1 : index
   %end = index.constant 67 : index
   %step = index.constant 2 : index
-  %passed = vector.constant 1 : vector<8xi32>
+  %passed = vector.splati 1 : vector<8xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<67x8xi32>
   scf.for %item = [%begin to %end step %step] {
     vector.store %passed, %output_view[%item, 0] : vector<8xi32>, view<67x8xi32>
@@ -340,8 +340,8 @@ kernel.def @subgroup_scan_bfloat_extrema() {
     %has_prefix = scalar.cmpi ne, %prefix, %absent : i32
     %prefix_combines = scalar.cmpi ugt, %prefix, %present : i32
     %prefix_mask = vector.splat %has_prefix : vector<4xi1>
-    %minimum_bound = vector.constant inf : vector<4xf32>
-    %maximum_bound = vector.constant -inf : vector<4xf32>
+    %minimum_bound = vector.splatf inf : vector<4xf32>
+    %maximum_bound = vector.splatf -inf : vector<4xf32>
     %expected_minimum = vector.select %prefix_mask, %value, %minimum_bound : vector<4xf32>
     %expected_maximum = vector.select %prefix_mask, %value, %maximum_bound : vector<4xf32>
     %exclusive_minimum = kernel.subgroup.scan<minnumf> %narrow {direction = forward, mode = exclusive} : vector<4xbf16>
@@ -411,9 +411,9 @@ check.scenario @subgroup_scan_bfloat_extrema_values {
 func.def device inline @wide_scan_matches(%actual: vector<3xf64>, %expected: vector<3xf64>, %combined: i1) -> (i32) {
   %actual_bits = vector.bitcast %actual : vector<3xf64> to vector<3xi64>
   %expected_bits = vector.bitcast %expected : vector<3xf64> to vector<3xi64>
-  %mask = vector.constant 9223372036854775807 : vector<3xi64>
-  %infinity = vector.constant 9218868437227405312 : vector<3xi64>
-  %quiet_mask = vector.constant 2251799813685248 : vector<3xi64>
+  %mask = vector.splati 9223372036854775807 : vector<3xi64>
+  %infinity = vector.splati 9218868437227405312 : vector<3xi64>
+  %quiet_mask = vector.splati 2251799813685248 : vector<3xi64>
   %actual_magnitude = vector.andi %actual_bits, %mask : vector<3xi64>
   %expected_magnitude = vector.andi %expected_bits, %mask : vector<3xi64>
   %actual_nan = vector.cmpi sgt, %actual_magnitude, %infinity : vector<3xi64> -> vector<3xi1>
@@ -425,7 +425,7 @@ func.def device inline @wide_scan_matches(%actual: vector<3xf64>, %expected: vec
   %allowed_nan = vector.select %requires_quiet, %actual_quiet, %both_nan : vector<3xi1>
   %quiet_nan = vector.andi %both_nan, %allowed_nan : vector<3xi1>
   %same_bits = vector.cmpi eq, %actual_bits, %expected_bits : vector<3xi64> -> vector<3xi1>
-  %true_mask = vector.constant true : vector<3xi1>
+  %true_mask = vector.splati 1 : vector<3xi1>
   %expected_number = vector.xori %expected_nan, %true_mask : vector<3xi1>
   %same_number = vector.andi %same_bits, %expected_number : vector<3xi1>
   %matches = vector.ori %same_number, %quiet_nan : vector<3xi1>
@@ -455,8 +455,8 @@ kernel.def @subgroup_scan_wide_extrema() {
     %has_prefix = scalar.cmpi ne, %prefix, %absent : i32
     %combined = scalar.cmpi ugt, %prefix, %present : i32
     %prefix_mask = vector.splat %has_prefix : vector<3xi1>
-    %minimum_bound = vector.constant inf : vector<3xf64>
-    %maximum_bound = vector.constant -inf : vector<3xf64>
+    %minimum_bound = vector.splatf inf : vector<3xf64>
+    %maximum_bound = vector.splatf -inf : vector<3xf64>
     %expected_minimum = vector.select %prefix_mask, %value, %minimum_bound : vector<3xf64>
     %expected_maximum = vector.select %prefix_mask, %value, %maximum_bound : vector<3xf64>
     %minimum = kernel.subgroup.scan<minnumf> %value {direction = forward, mode = exclusive} : vector<3xf64>
@@ -480,7 +480,7 @@ func.def @subgroup_scan_wide_extrema_oracle(%input: buffer, %output: buffer) {
   %begin = index.constant 1 : index
   %end = index.constant 67 : index
   %step = index.constant 2 : index
-  %passed = vector.constant 1 : vector<4xi32>
+  %passed = vector.splati 1 : vector<4xi32>
   %destination = buffer.view %output[%base] : buffer -> view<67x4xi32>
   scf.for %item = [%begin to %end step %step] {
     vector.store %passed, %destination[%item, 0] : vector<4xi32>, view<67x4xi32>
@@ -543,8 +543,8 @@ kernel.def @subgroup_scan_exact_narrowing() {
     %prefix = kernel.subgroup.scan<addi> %present {direction = forward, mode = exclusive} : i32
     %has_prefix = scalar.cmpi ne, %prefix, %absent : i32
     %prefix_mask = vector.splat %has_prefix : vector<4xi1>
-    %minimum_bound = vector.constant inf : vector<4xf32>
-    %maximum_bound = vector.constant -inf : vector<4xf32>
+    %minimum_bound = vector.splatf inf : vector<4xf32>
+    %maximum_bound = vector.splatf -inf : vector<4xf32>
     %expected_minimum = vector.select %prefix_mask, %values, %minimum_bound : vector<4xf32>
     %expected_maximum = vector.select %prefix_mask, %values, %maximum_bound : vector<4xf32>
     %minimum = kernel.subgroup.scan<minnumf> %values {direction = forward, mode = exclusive} : vector<4xf32>

@@ -52,7 +52,7 @@ kernel.def target(@target) @f16_lhs_packed_e2m1_rhs_grouped_scale_wmma() {
   %column_mask = vector.splat %is_odd_column : vector<8xi1>
   %rhs_values = vector.select %column_mask, %odd_columns, %even_columns : vector<8xf16>
   %rhs = vector.fragment<rhs> %rhs_values shape [%tile_extent, %tile_extent] : vector<8xf16>
-  %zero_accumulator = vector.constant 0.0 : vector<8xf32>
+  %zero_accumulator = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
   %local_result = vector.mma %lhs, %rhs, %init : vector<8xf16>, vector<8xf16>, vector<8xf32>
 

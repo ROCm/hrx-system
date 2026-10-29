@@ -226,7 +226,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scale_f16_down_ne
 aie2p.target<core> @target
 
 func.def target(@target) @report_scale_selection(%value: vector<32xf32>, %lhs: f32, %rhs: f32) -> (vector<32xf32>, f32) {
-  %factor = vector.constant 0.00390625 : vector<32xf32>
+  %factor = vector.splatf 0.00390625 : vector<32xf32>
   %scaled = vector.mulf %value, %factor : vector<32xf32>
   %general = scalar.mulf %lhs, %rhs : f32
   func.return %scaled, %general : vector<32xf32>, f32
@@ -236,7 +236,7 @@ func.def target(@target) @report_scale_selection(%value: vector<32xf32>, %lhs: f
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=9 emitted_ops=462 rows=9 unkeyed_maximum_emitted_ops=0
 COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=0 target_rewritten=1 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1 maximum_created_ops=7
-COMPILE-REPORT: source_low[0] function=report_scale_selection source_op=vector.constant selection=rule descriptor_key=amd.xdna.aie2p.splat.i32x16 descriptor_semantic_tag=integer.splat.i32x16 emitted_ops=0
+COMPILE-REPORT: source_low[0] function=report_scale_selection source_op=vector.splatf selection=rule descriptor_key=amd.xdna.aie2p.splat.i32x16 descriptor_semantic_tag=integer.splat.i32x16 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_scale_selection source_op=vector.slice selection=rule descriptor_key=amd.xdna.aie2p.move.accumulator512.to.vector512 descriptor_semantic_tag=register.move.accumulator512.to.vector512 emitted_ops=2
 COMPILE-REPORT: source_low[2] function=report_scale_selection source_op=vector.slice selection=rule descriptor_key=amd.xdna.aie2p.move.accumulator512.to.vector512 descriptor_semantic_tag=register.move.accumulator512.to.vector512 emitted_ops=0
 COMPILE-REPORT: source_low[3] function=report_scale_selection source_op=vector.mulf selection=rule plan_key=exact_power_of_two_float_scale descriptor_key=amd.xdna.aie2p.select.i32x16.mask64 descriptor_semantic_tag=integer.select.i32x16.mask64 emitted_ops=146

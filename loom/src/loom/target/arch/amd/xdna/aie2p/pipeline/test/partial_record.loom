@@ -37,7 +37,7 @@ pipeline.def<kernel> @partial_record(%row: index, %compute: i1) run(%input_argum
       kernel.async.wait %group {newer_groups = 0} : kernel.async.group
     }
     scf.if %compute {
-      %bias = vector.constant 17 : vector<16xi32>
+      %bias = vector.splati 17 : vector<16xi32>
       scf.for %part = [%c0 to %parts step %c1] {
         %word = index.mul %part, %c16 : index
         %value = vector.load %payload[%word] : view<512xi32> -> vector<16xi32>

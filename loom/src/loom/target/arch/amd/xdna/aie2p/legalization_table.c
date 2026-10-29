@@ -84,11 +84,10 @@ static iree_status_t loom_aie2p_table_lookup_build_leaf(
     loom_value_id_t* out_value) {
   loom_op_t* op = NULL;
   if (loom_type_element_type(tree->table_type) != LOOM_SCALAR_TYPE_I1) {
-    IREE_RETURN_IF_ERROR(
-        loom_vector_constant_build(tree->builder, loom_attr_i64(table_index),
-                                   tree->index_type, tree->location, &op));
+    IREE_RETURN_IF_ERROR(loom_vector_splati_build(
+        tree->builder, table_index, tree->index_type, tree->location, &op));
     IREE_RETURN_IF_ERROR(loom_vector_table_lookup_build(
-        tree->builder, tree->table, loom_vector_constant_result(op),
+        tree->builder, tree->table, loom_vector_splati_result(op),
         tree->result_type, tree->location, &op));
     *out_value = loom_vector_table_lookup_result(op);
     return iree_ok_status();
@@ -97,12 +96,12 @@ static iree_status_t loom_aie2p_table_lookup_build_leaf(
   const uint32_t packet_lane_count =
       LOOM_AIE2P_TABLE_LOOKUP_PREDICATE_PACKET_LANE_COUNT;
   const uint32_t packet_index = table_index / packet_lane_count;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      tree->builder, loom_attr_i64(table_index % packet_lane_count),
-      tree->index_type, tree->location, &op));
+  IREE_RETURN_IF_ERROR(
+      loom_vector_splati_build(tree->builder, table_index % packet_lane_count,
+                               tree->index_type, tree->location, &op));
   IREE_RETURN_IF_ERROR(loom_vector_table_lookup_build(
       tree->builder, tree->predicate_byte_tables[packet_index],
-      loom_vector_constant_result(op), tree->result_type, tree->location, &op));
+      loom_vector_splati_result(op), tree->result_type, tree->location, &op));
   *out_value = loom_vector_table_lookup_result(op);
   return iree_ok_status();
 }
@@ -139,11 +138,11 @@ static iree_status_t loom_aie2p_table_lookup_build_selector(
     loom_type_t predicate_type, loom_value_id_t zero, uint32_t level,
     loom_value_id_t* out_selector) {
   loom_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      tree->builder, loom_attr_i64(UINT64_C(1) << level), tree->index_type,
-      tree->location, &op));
+  IREE_RETURN_IF_ERROR(
+      loom_vector_splati_build(tree->builder, (int64_t)(UINT64_C(1) << level),
+                               tree->index_type, tree->location, &op));
   IREE_RETURN_IF_ERROR(loom_vector_andi_build(
-      tree->builder, indices, loom_vector_constant_result(op), tree->index_type,
+      tree->builder, indices, loom_vector_splati_result(op), tree->index_type,
       tree->location, &op));
   IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
       tree->builder, LOOM_VECTOR_CMPI_PREDICATE_ULT, zero,
@@ -293,10 +292,9 @@ iree_status_t loom_aie2p_table_lookup_rewrite(
                               loom_type_rank(selection_index_type),
                               loom_type_flags(selection_index_type));
     loom_op_t* value_op = NULL;
-    IREE_RETURN_IF_ERROR(
-        loom_vector_constant_build(tree.builder, loom_attr_i64(0),
-                                   tree.index_type, op->location, &value_op));
-    const loom_value_id_t zero = loom_vector_constant_result(value_op);
+    IREE_RETURN_IF_ERROR(loom_vector_splati_build(
+        tree.builder, 0, tree.index_type, op->location, &value_op));
+    const loom_value_id_t zero = loom_vector_splati_result(value_op);
     for (uint32_t level = 0; level < levels; ++level) {
       IREE_RETURN_IF_ERROR(loom_aie2p_table_lookup_build_selector(
           &tree, selection_indices, predicate_type, zero, level,
@@ -307,10 +305,9 @@ iree_status_t loom_aie2p_table_lookup_rewrite(
   }
   if (loom_type_element_type(table_type) == LOOM_SCALAR_TYPE_I1) {
     loom_op_t* value_op = NULL;
-    IREE_RETURN_IF_ERROR(
-        loom_vector_constant_build(tree.builder, loom_attr_i64(0),
-                                   tree.result_type, op->location, &value_op));
-    const loom_value_id_t zero = loom_vector_constant_result(value_op);
+    IREE_RETURN_IF_ERROR(loom_vector_splati_build(
+        tree.builder, 0, tree.result_type, op->location, &value_op));
+    const loom_value_id_t zero = loom_vector_splati_result(value_op);
     IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
         tree.builder, LOOM_VECTOR_CMPI_PREDICATE_ULT, zero, replacement,
         tree.result_type, result_type, op->location, &value_op));

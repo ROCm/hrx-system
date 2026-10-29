@@ -6,7 +6,7 @@ func.def @bf16_origin_scale(%input: buffer) -> (vector<16xf32>) {
   %input_view = buffer.view %input_aligned[%origin] : buffer -> view<16xbf16>
   %narrow = vector.load %input_view[0] : view<16xbf16> -> vector<16xbf16>
   %wide = vector.extf %narrow : vector<16xbf16> to vector<16xf32>
-  %scale = vector.constant 1.4453125 : vector<16xf32>
+  %scale = vector.splatf 1.4453125 : vector<16xf32>
   %product = vector.mulf<nnan> %wide, %scale : vector<16xf32>
   func.return %product : vector<16xf32>
 }
@@ -63,7 +63,7 @@ func.def @bf16_bitcast_origin_scale(%input: buffer) -> (vector<16xf32>) {
   %input_bits = vector.load %input_view[0] : view<16xi16> -> vector<16xi16>
   %narrow = vector.bitcast %input_bits : vector<16xi16> to vector<16xbf16>
   %wide = vector.extf %narrow : vector<16xbf16> to vector<16xf32>
-  %scale = vector.constant 1.4453125 : vector<16xf32>
+  %scale = vector.splatf 1.4453125 : vector<16xf32>
   %product = vector.mulf<nnan> %wide, %scale : vector<16xf32>
   func.return %product : vector<16xf32>
 }
@@ -120,7 +120,7 @@ func.def @bf16_dynamic_origin_scale(%input: buffer, %element0: index) -> (vector
   %input_view = buffer.view %input_aligned[%origin] : buffer -> view<64xbf16>
   %narrow = vector.load %input_view[%element] : view<64xbf16> -> vector<16xbf16>
   %wide = vector.extf %narrow : vector<16xbf16> to vector<16xf32>
-  %scale = vector.constant 1.4453125 : vector<16xf32>
+  %scale = vector.splatf 1.4453125 : vector<16xf32>
   %product = vector.mulf<nnan> %wide, %scale : vector<16xf32>
   func.return %product : vector<16xf32>
 }

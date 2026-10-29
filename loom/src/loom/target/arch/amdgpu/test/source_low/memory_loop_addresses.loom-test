@@ -17,7 +17,7 @@ kernel.def @alternating_banks() {
   %end = index.constant 10 : index
   %step = index.constant 3 : index
   %bank_count = index.constant 2 : index
-  %initial = vector.constant 7 : vector<4xi32>
+  %initial = vector.splati 7 : vector<4xi32>
   %final = scf.for %iteration = [%begin to %end step %step](%carried = %initial : vector<4xi32>) -> (vector<4xi32>) {
     %bank = index.rem %iteration, %bank_count : index
     vector.store<volatile> %carried, %banks[%bank, %lane, 0] : vector<4xi32>, view<2x32x4xi32>
@@ -58,7 +58,7 @@ kernel.def @overlapping_bank_footprints() {
   %end = index.constant 4 : index
   %step = index.constant 1 : index
   %bank_count = index.constant 2 : index
-  %initial = vector.constant 7 : vector<4xi32>
+  %initial = vector.splati 7 : vector<4xi32>
   %final = scf.for %iteration = [%begin to %end step %step](%carried = %initial : vector<4xi32>) -> (vector<4xi32>) {
     %bank = index.rem %iteration, %bank_count : index
     vector.store<volatile> %carried, %banks[%bank, %lane, 0] : vector<4xi32>, view<2x32x4xi32, %layout>
@@ -409,7 +409,7 @@ kernel.def @masked_loop_banks() {
   %bank_count = index.constant 2 : index
   %half = index.constant 16 : index
   %selected = index.cmp ult, %lane, %half : index
-  %initial = vector.constant 7 : vector<4xi32>
+  %initial = vector.splati 7 : vector<4xi32>
   %final = scf.if %selected -> (vector<4xi32>) {
     %loop_result = scf.for %iteration = [%begin to %end step %step](%carried = %initial : vector<4xi32>) -> (vector<4xi32>) {
       %bank = index.rem %iteration, %bank_count : index

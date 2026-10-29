@@ -20,7 +20,7 @@ pipeline.def<kernel> public retain target(@device) @local_capture() run() {
     %south_view = buffer.view %south_storage[%origin] : buffer -> view<16xi32>
     %west_view = buffer.view %west_storage[%origin] : buffer -> view<16xi32>
     %north_view = buffer.view %north_storage[%origin] : buffer -> view<16xi32>
-    %value = vector.constant 42 : vector<16xi32>
+    %value = vector.splati 42 : vector<16xi32>
     vector.store %value, %self_view[0] : vector<16xi32>, view<16xi32>
     vector.store %value, %south_view[0] : vector<16xi32>, view<16xi32>
     vector.store %value, %west_view[0] : vector<16xi32>, view<16xi32>

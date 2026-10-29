@@ -24,7 +24,7 @@ kernel.def target(@target) @masked_tiles() {
   %selected = buffer.view %selected_tiles[%base] : buffer -> view<4x64x2xi32, %layout>
   %remaining = buffer.view %remaining_tiles[%base] : buffer -> view<4x64x2xi32, %layout>
   %uneven = buffer.view %uneven_tiles[%base] : buffer -> view<4x64x2xi32, %layout>
-  %initial = vector.constant 1 : vector<2xi32>
+  %initial = vector.splati 1 : vector<2xi32>
   vector.store %initial, %input[%wave, %lane, 0] : vector<2xi32>, view<4x64x2xi32, %layout>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %row_width = index.constant 16 : index

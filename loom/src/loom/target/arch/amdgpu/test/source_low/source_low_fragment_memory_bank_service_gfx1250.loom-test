@@ -29,7 +29,7 @@ kernel.def target(@target) @gfx1250_fragment_bank_service() {
   %rhs_view = buffer.view %scratch[%buffer_base] : buffer -> view<32x64xbf16, %rhs_layout>
   %lhs = vector.fragment.load<lhs> %lhs_view[%tile_origin, %fragment_origin] shape [%m, %k] : view<64x32xbf16> -> vector<16xbf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %tile_origin] shape [%k, %n] : view<32x64xbf16, %rhs_layout> -> vector<16xbf16>
-  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %zero_acc = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   vector.fragment.store<result> %result, %output_view[%tile_origin, %tile_origin] shape [%m, %n] : vector<8xf32>, view<64x64xf32>

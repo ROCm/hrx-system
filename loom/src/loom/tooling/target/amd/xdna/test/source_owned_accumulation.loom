@@ -50,7 +50,7 @@ pipeline.def<kernel> public retain target(@array_target) @source_owned_accumulat
   }
 
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
-    %initial = vector.constant 0.0 : vector<16xf32>
+    %initial = vector.splatf 0.0 : vector<16xf32>
     scf.for %frame = [%begin to %frame_count step %step] {
       %write, %accumulator = channel.reserve %output_records : channel<tile<16xf32>> -> (write<tile<16xf32>>, view<16xf32>)
       vector.store %initial, %accumulator[0] : vector<16xf32>, view<16xf32>
@@ -76,7 +76,7 @@ func.def @source_owned_accumulation_reference(%input: buffer, %output: buffer) {
   %panel_count = index.constant 3 : index
   %step = index.constant 1 : index
   %width = index.constant 16 : index
-  %initial = vector.constant 0.0 : vector<16xf32>
+  %initial = vector.splatf 0.0 : vector<16xf32>
   scf.for %frame = [%begin to %frame_count step %step] {
     %frame_base = index.mul %frame, %panel_count : index
     %sum = scf.for %panel = [%begin to %panel_count step %step](%accumulator = %initial : vector<16xf32>) -> (vector<16xf32>) {

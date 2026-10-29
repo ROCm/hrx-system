@@ -215,11 +215,11 @@ func.def @saturating_nibble_pack64(%input: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %input_view = buffer.view %source[%origin] : buffer -> view<256xi8>
   %output_view = buffer.view %destination[%origin] : buffer -> view<384xi8>
-  %guard = vector.constant -91 : vector<64xi8>
+  %guard = vector.splati -91 : vector<64xi8>
   vector.store %guard, %output_view[0] : vector<64xi8>, view<384xi8>
   vector.store %guard, %output_view[320] : vector<64xi8>, view<384xi8>
-  %lower = vector.constant -8 : vector<64xi8>
-  %upper = vector.constant 7 : vector<64xi8>
+  %lower = vector.splati -8 : vector<64xi8>
+  %upper = vector.splati 7 : vector<64xi8>
   %values_0 = vector.load %input_view[0] : view<256xi8> -> vector<64xi8>
   %lower_clamped_0 = vector.maxsi %values_0, %lower : vector<64xi8>
   %clamped_0 = vector.minsi %lower_clamped_0, %upper : vector<64xi8>
@@ -256,11 +256,11 @@ func.def @saturating_nibble_pack128(%input: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %input_view = buffer.view %source[%origin] : buffer -> view<256xi8>
   %output_view = buffer.view %destination[%origin] : buffer -> view<384xi8>
-  %guard = vector.constant -91 : vector<64xi8>
+  %guard = vector.splati -91 : vector<64xi8>
   vector.store %guard, %output_view[0] : vector<64xi8>, view<384xi8>
   vector.store %guard, %output_view[320] : vector<64xi8>, view<384xi8>
-  %lower = vector.constant -8 : vector<128xi8>
-  %upper = vector.constant 7 : vector<128xi8>
+  %lower = vector.splati -8 : vector<128xi8>
+  %upper = vector.splati 7 : vector<128xi8>
   %values_0 = vector.load %input_view[0] : view<256xi8> -> vector<128xi8>
   %upper_clamped_0 = vector.minsi %values_0, %upper : vector<128xi8>
   %clamped_0 = vector.maxsi %upper_clamped_0, %lower : vector<128xi8>

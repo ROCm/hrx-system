@@ -549,7 +549,10 @@ class CxxExpressionRenderer(CxxRenderContext):
 
     def _loop_initializer(self, value_id: int) -> str:
         definition = self.definitions.get(value_id)
-        if definition is not None and definition.name == "vector.constant":
+        if definition is not None and definition.name in {
+            "vector.splati",
+            "vector.splatf",
+        }:
             value = definition.attributes.get("value")
             value_type = self.module.values[value_id].type
             if (
@@ -1312,7 +1315,7 @@ class CxxExpressionRenderer(CxxRenderContext):
         """Projects vector construction, reshaping, and lane selection."""
 
         name = operation.name
-        if name == "vector.constant":
+        if name in {"vector.splati", "vector.splatf"}:
             result = operation.results[0]
             value = operation.attributes["value"]
             type_name = self.cpp_type(result)

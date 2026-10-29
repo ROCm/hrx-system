@@ -80,18 +80,18 @@ test.target<low_core> @target
 
 func.def target(@target) @byte_fields(%source: vector<2xi8>) -> (vector<2xi8>, vector<2xi16>, vector<2xi16>) {
   %19 = vector.extsi %source : vector<2xi8> to vector<2xi16>
-  %23 = vector.constant 4 : vector<2xi16>
+  %23 = vector.splati 4 : vector<2xi16>
   %21 = vector.shrsi %19, %23 : vector<2xi16>
   %top = vector.trunci %21 : vector<2xi16> to vector<2xi8>
   %12 = vector.extui %source : vector<2xi8> to vector<2xi16>
-  %13 = vector.constant 11 : vector<2xi16>
+  %13 = vector.splati 11 : vector<2xi16>
   %14 = vector.shli %12, %13 : vector<2xi16>
-  %15 = vector.constant 13 : vector<2xi16>
+  %15 = vector.splati 13 : vector<2xi16>
   %signed = vector.shrsi %14, %15 : vector<2xi16>
   %7 = vector.extui %source : vector<2xi8> to vector<2xi16>
-  %8 = vector.constant 11 : vector<2xi16>
+  %8 = vector.splati 11 : vector<2xi16>
   %9 = vector.shli %7, %8 : vector<2xi16>
-  %10 = vector.constant 13 : vector<2xi16>
+  %10 = vector.splati 13 : vector<2xi16>
   %unsigned = vector.shrui %9, %10 : vector<2xi16>
   func.return %top, %signed, %unsigned : vector<2xi8>, vector<2xi16>, vector<2xi16>
 }
@@ -111,9 +111,9 @@ func.def target(@target) @halfword_fields(%source: vector<2xi16>) -> (vector<2xi
 test.target<low_core> @target
 
 func.def target(@target) @halfword_fields(%source: vector<2xi16>) -> (vector<2xi16>, vector<2xi16>, vector<2xi32>, vector<2xi32>) {
-  %13 = vector.constant 7 : vector<2xi16>
+  %13 = vector.splati 7 : vector<2xi16>
   %signed = vector.shrsi %source, %13 : vector<2xi16>
-  %11 = vector.constant 7 : vector<2xi16>
+  %11 = vector.splati 7 : vector<2xi16>
   %unsigned = vector.shrui %source, %11 : vector<2xi16>
   %signed_full = vector.extsi %source : vector<2xi16> to vector<2xi32>
   %unsigned_full = vector.extui %source : vector<2xi16> to vector<2xi32>
@@ -135,21 +135,21 @@ func.def target(@target) @word_fields(%source: vector<2xi32>) -> (vector<2xi8>, 
 test.target<low_core> @target
 
 func.def target(@target) @word_fields(%source: vector<2xi32>) -> (vector<2xi8>, vector<2xi1>, vector<2xi32>, vector<2xi32>) {
-  %20 = vector.constant 8 : vector<2xi32>
+  %20 = vector.splati 8 : vector<2xi32>
   %21 = vector.shli %source, %20 : vector<2xi32>
-  %22 = vector.constant 24 : vector<2xi32>
+  %22 = vector.splati 24 : vector<2xi32>
   %23 = vector.shrui %21, %22 : vector<2xi32>
   %byte = vector.trunci %23 : vector<2xi32> to vector<2xi8>
-  %17 = vector.constant 31 : vector<2xi32>
+  %17 = vector.splati 31 : vector<2xi32>
   %18 = vector.shrsi %source, %17 : vector<2xi32>
   %predicate = vector.trunci %18 : vector<2xi32> to vector<2xi1>
-  %13 = vector.constant 12 : vector<2xi32>
+  %13 = vector.splati 12 : vector<2xi32>
   %14 = vector.shli %source, %13 : vector<2xi32>
-  %15 = vector.constant 19 : vector<2xi32>
+  %15 = vector.splati 19 : vector<2xi32>
   %signed = vector.shrsi %14, %15 : vector<2xi32>
-  %9 = vector.constant 12 : vector<2xi32>
+  %9 = vector.splati 12 : vector<2xi32>
   %10 = vector.shli %source, %9 : vector<2xi32>
-  %11 = vector.constant 19 : vector<2xi32>
+  %11 = vector.splati 19 : vector<2xi32>
   %unsigned = vector.shrui %10, %11 : vector<2xi32>
   func.return %byte, %predicate, %signed, %unsigned : vector<2xi8>, vector<2xi1>, vector<2xi32>, vector<2xi32>
 }
@@ -169,15 +169,15 @@ func.def target(@target) @wide_fields(%source: vector<2xi64>) -> (vector<2xi64>,
 test.target<low_core> @target
 
 func.def target(@target) @wide_fields(%source: vector<2xi64>) -> (vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi32>) {
-  %16 = vector.constant 1 : vector<2xi64>
+  %16 = vector.splati 1 : vector<2xi64>
   %17 = vector.shli %source, %16 : vector<2xi64>
-  %18 = vector.constant 1 : vector<2xi64>
+  %18 = vector.splati 1 : vector<2xi64>
   %signed = vector.shrsi %17, %18 : vector<2xi64>
-  %12 = vector.constant 1 : vector<2xi64>
+  %12 = vector.splati 1 : vector<2xi64>
   %13 = vector.shli %source, %12 : vector<2xi64>
-  %14 = vector.constant 1 : vector<2xi64>
+  %14 = vector.splati 1 : vector<2xi64>
   %unsigned = vector.shrui %13, %14 : vector<2xi64>
-  %9 = vector.constant 32 : vector<2xi64>
+  %9 = vector.splati 32 : vector<2xi64>
   %10 = vector.shrui %source, %9 : vector<2xi64>
   %upper = vector.trunci %10 : vector<2xi64> to vector<2xi32>
   func.return %source, %signed, %unsigned, %upper : vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi32>
@@ -196,13 +196,13 @@ func.def target(@target) @dynamic_fields(%count: index, %source: vector<[%count]
 test.target<low_core> @target
 
 func.def target(@target) @dynamic_fields(%count: index, %source: vector<[%count]xi32>) -> (vector<[%count]xi32>, vector<[%count]xi8>) {
-  %11 = vector.constant 22 : vector<[%count]xi32>
+  %11 = vector.splati 22 : vector<[%count]xi32>
   %12 = vector.shli %source, %11 : vector<[%count]xi32>
-  %13 = vector.constant 25 : vector<[%count]xi32>
+  %13 = vector.splati 25 : vector<[%count]xi32>
   %signed = vector.shrsi %12, %13 : vector<[%count]xi32>
-  %6 = vector.constant 22 : vector<[%count]xi32>
+  %6 = vector.splati 22 : vector<[%count]xi32>
   %7 = vector.shli %source, %6 : vector<[%count]xi32>
-  %8 = vector.constant 25 : vector<[%count]xi32>
+  %8 = vector.splati 25 : vector<[%count]xi32>
   %9 = vector.shrui %7, %8 : vector<[%count]xi32>
   %unsigned = vector.trunci %9 : vector<[%count]xi32> to vector<[%count]xi8>
   func.return %signed, %unsigned : vector<[%count]xi32>, vector<[%count]xi8>
@@ -221,13 +221,13 @@ func.def target(@target) @matrix_fields(%source: vector<2x2xi32>) -> (vector<2x2
 test.target<low_core> @target
 
 func.def target(@target) @matrix_fields(%source: vector<2x2xi32>) -> (vector<2x2xi32>, vector<2x2xi32>) {
-  %9 = vector.constant 23 : vector<2x2xi32>
+  %9 = vector.splati 23 : vector<2x2xi32>
   %10 = vector.shli %source, %9 : vector<2x2xi32>
-  %11 = vector.constant 27 : vector<2x2xi32>
+  %11 = vector.splati 27 : vector<2x2xi32>
   %signed = vector.shrsi %10, %11 : vector<2x2xi32>
-  %5 = vector.constant 23 : vector<2x2xi32>
+  %5 = vector.splati 23 : vector<2x2xi32>
   %6 = vector.shli %source, %5 : vector<2x2xi32>
-  %7 = vector.constant 27 : vector<2x2xi32>
+  %7 = vector.splati 27 : vector<2x2xi32>
   %unsigned = vector.shrui %6, %7 : vector<2x2xi32>
   func.return %signed, %unsigned : vector<2x2xi32>, vector<2x2xi32>
 }

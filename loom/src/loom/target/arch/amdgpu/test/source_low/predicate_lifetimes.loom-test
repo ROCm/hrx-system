@@ -36,8 +36,8 @@ kernel.def target(@target) @predicate_lifetime() {
   %head_word = scf.select %head, %c1, %c0 : i32
   %tail_word = scf.select %tail, %c1, %c0 : i32
   %begin_word = scf.select %at_begin, %c1, %c0 : i32
-  %true_words = vector.constant 1 : vector<2xi32>
-  %false_words = vector.constant 0 : vector<2xi32>
+  %true_words = vector.splati 1 : vector<2xi32>
+  %false_words = vector.splati 0 : vector<2xi32>
   %predicate_words = vector.select %predicates, %true_words, %false_words : vector<2xi32>
   view.store %iteration, %outputs[%lane, 0] : i32, view<64x6xi32>
   view.store %head_word, %outputs[%lane, 1] : i32, view<64x6xi32>
@@ -140,8 +140,8 @@ kernel.def target(@target) @predicate_lifetime() {
   %head_word = scf.select %head, %c1, %c0 : i32
   %tail_word = scf.select %tail, %c1, %c0 : i32
   %begin_word = scf.select %at_begin, %c1, %c0 : i32
-  %true_words = vector.constant 1 : vector<2xi32>
-  %false_words = vector.constant 0 : vector<2xi32>
+  %true_words = vector.splati 1 : vector<2xi32>
+  %false_words = vector.splati 0 : vector<2xi32>
   %predicate_words = vector.select %predicates, %true_words, %false_words : vector<2xi32>
   view.store %iteration, %outputs[%lane, 0] : i32, view<64x6xi32>
   view.store %head_word, %outputs[%lane, 1] : i32, view<64x6xi32>

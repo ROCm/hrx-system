@@ -279,7 +279,7 @@ func.def public @zeroed() -> (i32, i32, i32) {
 
 func.def public @zeroed_vector() -> (vector<4xi32>, i32) {
   %17 = scalar.constant 0 : i32
-  %24 = vector.constant 0 : vector<4xi32>
+  %24 = vector.splati 0 : vector<4xi32>
   func.return %24, %17 : vector<4xi32>, i32
 }
 

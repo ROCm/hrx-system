@@ -2,7 +2,7 @@
 
 func.def @f32x32_bf16_origin_scale(%input: vector<32xbf16>) -> (vector<32xbf16>) {
   %widened = vector.extf %input : vector<32xbf16> to vector<32xf32>
-  %scale = vector.constant 1.4453125 : vector<32xf32>
+  %scale = vector.splatf 1.4453125 : vector<32xf32>
   %scaled = vector.mulf<nnan|ninf|nsz|contract> %widened, %scale : vector<32xf32>
   %rounded = vector.fptrunc %scaled : vector<32xf32> to vector<32xbf16>
   func.return %rounded : vector<32xbf16>

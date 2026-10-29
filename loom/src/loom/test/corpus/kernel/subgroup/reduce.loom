@@ -13,7 +13,7 @@ kernel.def @subgroup_integer_reductions() {
   %raw = vector.load %source[%lane, 0] : view<64x4xi32> -> vector<4xi32>
   // Odd factors keep modular multiplication informative instead of collapsing
   // to zero after a few even inputs.
-  %odd_bit = vector.constant 1 : vector<4xi32>
+  %odd_bit = vector.splati 1 : vector<4xi32>
   %values = vector.ori %raw, %odd_bit : vector<4xi32>
   %sum = kernel.subgroup.reduce<addi> %values {cluster_size = 32} : vector<4xi32>
   %product = kernel.subgroup.reduce<muli> %values {cluster_size = 32} : vector<4xi32>
@@ -674,10 +674,10 @@ kernel.def @subgroup_packet_reductions() {
   %single = vector.sitofp %values : vector<9xi32> to vector<9xf32>
   %double = vector.sitofp %values : vector<9xi32> to vector<9xf64>
   %bfloat = vector.fptrunc %single : vector<9xf32> to vector<9xbf16>
-  %additive_identity = vector.constant 0 : vector<9xi32>
+  %additive_identity = vector.splati 0 : vector<9xi32>
   %predicates = vector.cmpi ne, %values, %additive_identity : vector<9xi32> -> vector<9xi1>
-  %positive = vector.constant 1.0 : vector<9xbf16>
-  %negative = vector.constant -1.0 : vector<9xbf16>
+  %positive = vector.splatf 1.0 : vector<9xbf16>
+  %negative = vector.splatf -1.0 : vector<9xbf16>
   %factors = vector.select %predicates, %negative, %positive : vector<9xbf16>
   %byte_sum = kernel.subgroup.reduce<addi> %bytes {cluster_size = 8} : vector<9xi8>
   %short_sum = kernel.subgroup.reduce<addi> %shorts {cluster_size = 8} : vector<9xi16>

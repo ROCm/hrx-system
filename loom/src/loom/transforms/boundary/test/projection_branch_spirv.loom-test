@@ -19,7 +19,7 @@ func.def public target(@target) @mixed_carriers(%input: buffer, %output: buffer,
     scf.yield %fragment, %lanes : vector<8xf32>, vector<8xf32>
   } else {
     %fragment = vector.fragment.load<init> %input_matrix[0, 0] shape [%tile, %tile] : view<16x16xf32> -> vector<8xf32>
-    %fallback = vector.constant 3.0 : vector<8xf32>
+    %fallback = vector.splatf 3.0 : vector<8xf32>
     scf.yield %fragment, %fallback : vector<8xf32>, vector<8xf32>
   }
   vector.fragment.store<result> %matrix, %output_matrix[0, 0] shape [%tile, %tile] : vector<8xf32>, view<16x16xf32>
@@ -46,7 +46,7 @@ func.def public target(@target) @mixed_carriers(%input: buffer, %output: buffer,
     scf.yield %fragment, %19, %20 : vector<8xf32>, vector<4xf32>, vector<4xf32>
   } else {
     %fragment = vector.fragment.load<init> %input_matrix[0, 0] shape [%tile, %tile] : view<16x16xf32> -> vector<8xf32>
-    %fallback = vector.constant 3.0 : vector<8xf32>
+    %fallback = vector.splatf 3.0 : vector<8xf32>
     %21 = vector.slice %fallback[0] : vector<8xf32> -> vector<4xf32>
     %22 = vector.slice %fallback[4] : vector<8xf32> -> vector<4xf32>
     scf.yield %fragment, %21, %22 : vector<8xf32>, vector<4xf32>, vector<4xf32>

@@ -41,7 +41,7 @@ aie2p.target<core> @target
 // split back into group-local reductions without scalar lane traffic.
 func.def target(@target) @i8x32_pair_dot_split_reduce(%lhs_low: vector<32xi8>, %lhs_high: vector<32xi8>, %rhs_low: vector<32xi8>, %rhs_high: vector<32xi8>) -> (i32, i32) {
   %reduction_identity = scalar.constant 0 : i32
-  %zero_partial = vector.constant 0 : vector<16xi32>
+  %zero_partial = vector.splati 0 : vector<16xi32>
   %lhs = vector.concat<0> %lhs_low, %lhs_high : vector<32xi8>, vector<32xi8> -> vector<64xi8>
   %rhs = vector.concat<0> %rhs_low, %rhs_high : vector<32xi8>, vector<32xi8> -> vector<64xi8>
   %partials = vector.dot4i<u8s8> %lhs, %rhs, %zero_partial : vector<64xi8>, vector<64xi8>, vector<16xi32>

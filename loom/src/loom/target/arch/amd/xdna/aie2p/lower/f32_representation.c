@@ -105,12 +105,12 @@ static void loom_aie2p_f32_constrain_vectors(
 static void loom_aie2p_f32_observe_constant(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_representation_recorder_t* recorder) {
-  const loom_value_id_t result = loom_vector_constant_result(source_op);
+  const loom_value_id_t result = loom_vector_splatf_result(source_op);
   const loom_module_t* module = loom_low_lower_context_module(context);
   if (!loom_aie2p_f32_packet_type(loom_module_value_type(module, result))) {
     return;
   }
-  const double value = loom_attr_as_f64(loom_vector_constant_value(source_op));
+  const double value = loom_vector_splatf_value(source_op);
   if (value != 0.0 || signbit(value)) {
     loom_aie2p_f32_constrain_vector(module, result, recorder);
     return;
@@ -368,8 +368,6 @@ static void loom_aie2p_f32_observe_unclaimed_operand(
 
 static const loom_low_lower_representation_boundary_t
     kAie2pF32RepresentationBoundaries[] = {
-        {LOOM_OP_VECTOR_CONSTANT, LOOM_AIE2P_F32_REPRESENTATION_ACTION_CONSTANT,
-         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
         {LOOM_OP_VECTOR_SELECT, LOOM_AIE2P_F32_REPRESENTATION_ACTION_SELECT,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_ALL},
         {LOOM_OP_VECTOR_ADDF, LOOM_AIE2P_F32_REPRESENTATION_ACTION_BINARY,
@@ -390,12 +388,33 @@ static const loom_low_lower_representation_boundary_t
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_ALL},
         {LOOM_OP_VECTOR_REDUCE, LOOM_AIE2P_F32_REPRESENTATION_ACTION_REDUCE_ADD,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_OPERANDS},
+        {LOOM_OP_VECTOR_SPLATF, LOOM_AIE2P_F32_REPRESENTATION_ACTION_CONSTANT,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
 };
 
 static const loom_low_lower_representation_boundary_span_t
     kAie2pF32RepresentationBoundarySpans[] = {
         {0, IREE_ARRAYSIZE(kAie2pF32RepresentationBoundaries)},
 };
+static_assert((loom_op_kind_t)LOOM_OP_VECTOR_SELECT <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_ADDF &&
+                  (loom_op_kind_t)LOOM_OP_VECTOR_ADDF <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_SUBF &&
+                  (loom_op_kind_t)LOOM_OP_VECTOR_SUBF <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_EXP2F &&
+                  (loom_op_kind_t)LOOM_OP_VECTOR_EXP2F <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_TANHF &&
+                  (loom_op_kind_t)LOOM_OP_VECTOR_TANHF <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_EXTF &&
+                  (loom_op_kind_t)LOOM_OP_VECTOR_EXTF <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_FPTRUNC &&
+                  (loom_op_kind_t)LOOM_OP_VECTOR_FPTRUNC <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_DOT2F &&
+                  (loom_op_kind_t)LOOM_OP_VECTOR_DOT2F <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_REDUCE &&
+                  (loom_op_kind_t)LOOM_OP_VECTOR_REDUCE <
+                      (loom_op_kind_t)LOOM_OP_VECTOR_SPLATF,
+              "AIE2P f32 representation boundaries must remain ordered");
 
 static const loom_low_lower_representation_provider_t
     kAie2pF32RepresentationProvider = {

@@ -409,11 +409,11 @@ func.def @transpose_byte_predicates(%input: buffer, %output: buffer) {
   %values = vector.load %input_view[0, 0] : view<8x16xi8> -> vector<8x16xi8>
   %ordinary = vector.transpose<[1, 0]> %values : vector<8x16xi8> -> vector<16x8xi8>
   vector.store %ordinary, %ordinary_output[0, 0] : vector<16x8xi8>, view<16x8xi8>
-  %c0 = vector.constant 0 : vector<8x16xi8>
+  %c0 = vector.splati 0 : vector<8x16xi8>
   %predicates = vector.cmpi ne, %values, %c0 : vector<8x16xi8> -> vector<8x16xi1>
   %transposed = vector.transpose<[1, 0]> %predicates : vector<8x16xi1> -> vector<16x8xi1>
-  %false_bytes = vector.constant 0 : vector<16x8xi8>
-  %true_bytes = vector.constant 1 : vector<16x8xi8>
+  %false_bytes = vector.splati 0 : vector<16x8xi8>
+  %true_bytes = vector.splati 1 : vector<16x8xi8>
   %bytes = vector.select %transposed, %true_bytes, %false_bytes : vector<16x8xi8>
   vector.store %bytes, %predicate_output[0, 0] : vector<16x8xi8>, view<16x8xi8>
   func.return

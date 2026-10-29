@@ -342,7 +342,7 @@ kernel.def retain @readonly_nested_global() {
   %base = index.constant 0 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<8xf32>
   %output_view = buffer.view %output[%base] : buffer -> view<4xf32>
-  %identity = vector.constant 0.0 : vector<4xf32>
+  %identity = vector.splatf 0.0 : vector<4xf32>
   %result = scf.for %i = [%c0 to %c4 step %c1](%sum = %identity : vector<4xf32>) -> (vector<4xf32>) pipeline(%c2) {
     %partial = scf.for %j = [%c0 to %c2 step %c1](%inner_sum = %identity : vector<4xf32>) -> (vector<4xf32>) unroll {
       %address = index.mul %j, %c4 : index

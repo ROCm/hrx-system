@@ -8,7 +8,7 @@ func.def target(@target) @streamed_predicate_window(%source: buffer, %offset: in
   %base = index.constant 0 : offset
   %source_view = buffer.view %source[%base] : buffer -> view<16xi32>
   %values = vector.load %source_view[0] : view<16xi32> -> vector<16xi32>
-  %c0 = vector.constant 0 : vector<16xi32>
+  %c0 = vector.splati 0 : vector<16xi32>
   %predicates = vector.cmpi slt, %values, %c0 : vector<16xi32> -> vector<16xi1>
   %window = vector.slice %predicates[%offset] : vector<16xi1> -> vector<8xi1>
   %result = vector.extui %window : vector<8xi1> to vector<8xi8>
@@ -22,18 +22,18 @@ func.def target(@target) @streamed_predicate_window(%source: buffer, %offset: in
   %base = index.constant 0 : offset
   %source_view = buffer.view %source[%base] : buffer -> view<16xi32>
   %10 = vector.load %source_view[%offset] : view<16xi32> -> vector<4xi32>
-  %11 = vector.constant 0 : vector<4xi32>
+  %11 = vector.splati 0 : vector<4xi32>
   %12 = vector.cmpi slt, %10, %11 : vector<4xi32> -> vector<4xi1>
-  %13 = vector.constant 1 : vector<4xi8>
-  %14 = vector.constant 0 : vector<4xi8>
+  %13 = vector.splati 1 : vector<4xi8>
+  %14 = vector.splati 0 : vector<4xi8>
   %15 = vector.select %12, %13, %14 : vector<4xi8>
   %16 = index.constant 4 : index
   %17 = index.add %offset, %16 : index
   %18 = vector.load %source_view[%17] : view<16xi32> -> vector<4xi32>
-  %19 = vector.constant 0 : vector<4xi32>
+  %19 = vector.splati 0 : vector<4xi32>
   %20 = vector.cmpi slt, %18, %19 : vector<4xi32> -> vector<4xi1>
-  %21 = vector.constant 1 : vector<4xi8>
-  %22 = vector.constant 0 : vector<4xi8>
+  %21 = vector.splati 1 : vector<4xi8>
+  %22 = vector.splati 0 : vector<4xi8>
   %23 = vector.select %20, %21, %22 : vector<4xi8>
   %result = vector.concat<0> %15, %23 : vector<4xi8>, vector<4xi8> -> vector<8xi8>
   func.return %result : vector<8xi8>
@@ -118,20 +118,20 @@ func.def target(@target) @snapshot_predicate_branches(%packet0: vector<4xi1>, %p
   %base = index.constant 0 : offset
   %unsigned_view = buffer.view %unsigned_output[%base] : buffer -> view<4xi64>
   %signed_view = buffer.view %signed_output[%base] : buffer -> view<4xi64>
-  %20 = vector.constant 1 : vector<4xi64>
-  %21 = vector.constant 0 : vector<4xi64>
+  %20 = vector.splati 1 : vector<4xi64>
+  %21 = vector.splati 0 : vector<4xi64>
   %22 = vector.select %packet0, %20, %21 : vector<4xi64>
   vector.store %22, %15[0] : vector<4xi64>, view<8xi64>
-  %23 = vector.constant -1 : vector<4xi64>
-  %24 = vector.constant 0 : vector<4xi64>
+  %23 = vector.splati -1 : vector<4xi64>
+  %24 = vector.splati 0 : vector<4xi64>
   %25 = vector.select %packet0, %23, %24 : vector<4xi64>
   vector.store %25, %19[0] : vector<4xi64>, view<8xi64>
-  %26 = vector.constant 1 : vector<4xi64>
-  %27 = vector.constant 0 : vector<4xi64>
+  %26 = vector.splati 1 : vector<4xi64>
+  %27 = vector.splati 0 : vector<4xi64>
   %28 = vector.select %packet1, %26, %27 : vector<4xi64>
   vector.store %28, %15[4] : vector<4xi64>, view<8xi64>
-  %29 = vector.constant -1 : vector<4xi64>
-  %30 = vector.constant 0 : vector<4xi64>
+  %29 = vector.splati -1 : vector<4xi64>
+  %30 = vector.splati 0 : vector<4xi64>
   %31 = vector.select %packet1, %29, %30 : vector<4xi64>
   vector.store %31, %19[4] : vector<4xi64>, view<8xi64>
   %unsigned = vector.load %15[%offset] : view<8xi64> -> vector<4xi64>
@@ -155,7 +155,7 @@ func.def target(@target) @store_streamed_wide_predicate_window(%source: buffer, 
   %source_view = buffer.view %source[%base] : buffer -> view<80xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<65xi8>
   %values = vector.load %source_view[0] : view<80xi32> -> vector<80xi32>
-  %c0 = vector.constant 0 : vector<80xi32>
+  %c0 = vector.splati 0 : vector<80xi32>
   %predicates = vector.cmpi slt, %values, %c0 : vector<80xi32> -> vector<80xi1>
   %window = vector.slice %predicates[%offset] : vector<80xi1> -> vector<65xi1>
   %result = vector.extui %window : vector<65xi1> to vector<65xi8>
@@ -171,10 +171,10 @@ func.def target(@target) @store_streamed_wide_predicate_window(%source: buffer, 
   %source_view = buffer.view %source[%base] : buffer -> view<80xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<65xi8>
   %11 = vector.load %source_view[%offset] : view<80xi32> -> vector<4xi32>
-  %12 = vector.constant 0 : vector<4xi32>
+  %12 = vector.splati 0 : vector<4xi32>
   %13 = vector.cmpi slt, %11, %12 : vector<4xi32> -> vector<4xi1>
-  %14 = vector.constant 1 : vector<4xi8>
-  %15 = vector.constant 0 : vector<4xi8>
+  %14 = vector.splati 1 : vector<4xi8>
+  %15 = vector.splati 0 : vector<4xi8>
   %16 = vector.select %13, %14, %15 : vector<4xi8>
   %17 = index.constant 4 : index
   %18 = index.add %offset, %17 : index
@@ -255,10 +255,10 @@ func.def target(@target) @store_streamed_wide_predicate_window(%source: buffer, 
   %138 = index.add %offset, %137 : index
   %139 = view.load %source_view[%138] : view<80xi32> -> i32
   %140 = vector.splat %139 : vector<1xi32>
-  %141 = vector.constant 0 : vector<1xi32>
+  %141 = vector.splati 0 : vector<1xi32>
   %142 = vector.cmpi slt, %140, %141 : vector<1xi32> -> vector<1xi1>
-  %143 = vector.constant 1 : vector<1xi8>
-  %144 = vector.constant 0 : vector<1xi8>
+  %143 = vector.splati 1 : vector<1xi8>
+  %144 = vector.splati 0 : vector<1xi8>
   %145 = vector.select %142, %143, %144 : vector<1xi8>
   %147 = vector.concat<0> %16, %24 : vector<4xi8>, vector<4xi8> -> vector<8xi8>
   %148 = vector.concat<0> %32, %40 : vector<4xi8>, vector<4xi8> -> vector<8xi8>

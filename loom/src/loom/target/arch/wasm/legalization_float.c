@@ -220,23 +220,23 @@ static iree_status_t loom_wasm_build_vector_relaxed_extremum(
         loom_type_make_header(loom_type_kind(type), encoding.integer_type,
                               loom_type_rank(type), loom_type_flags(type));
     loom_op_t* magnitude_mask_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64((int64_t)encoding.magnitude_mask), integer_type,
-        location, &magnitude_mask_op));
+    IREE_RETURN_IF_ERROR(
+        loom_vector_splati_build(builder, (int64_t)encoding.magnitude_mask,
+                                 integer_type, location, &magnitude_mask_op));
     loom_op_t* sign_shift_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64(loom_scalar_type_bitwidth(element_type) - 1),
-        integer_type, location, &sign_shift_op));
+    IREE_RETURN_IF_ERROR(loom_vector_splati_build(
+        builder, loom_scalar_type_bitwidth(element_type) - 1, integer_type,
+        location, &sign_shift_op));
     loom_value_id_t lhs_key = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_wasm_build_vector_float_order_key(
         builder, location, lhs, type, integer_type,
-        loom_vector_constant_result(magnitude_mask_op),
-        loom_vector_constant_result(sign_shift_op), &lhs_key));
+        loom_vector_splati_result(magnitude_mask_op),
+        loom_vector_splati_result(sign_shift_op), &lhs_key));
     loom_value_id_t rhs_key = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_wasm_build_vector_float_order_key(
         builder, location, rhs, type, integer_type,
-        loom_vector_constant_result(magnitude_mask_op),
-        loom_vector_constant_result(sign_shift_op), &rhs_key));
+        loom_vector_splati_result(magnitude_mask_op),
+        loom_vector_splati_result(sign_shift_op), &rhs_key));
     loom_op_t* comparison_op = NULL;
     IREE_RETURN_IF_ERROR(
         loom_vector_cmpi_build(builder,

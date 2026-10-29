@@ -24,8 +24,8 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @signed_minmax_i8x
 // ====
 
 func.def @constant_i8x128() -> (vector<128xi8>, vector<128xi8>) {
-  %minimum = vector.constant -128 : vector<128xi8>
-  %maximum = vector.constant 127 : vector<128xi8>
+  %minimum = vector.splati -128 : vector<128xi8>
+  %maximum = vector.splati 127 : vector<128xi8>
   func.return %minimum, %maximum : vector<128xi8>, vector<128xi8>
 }
 

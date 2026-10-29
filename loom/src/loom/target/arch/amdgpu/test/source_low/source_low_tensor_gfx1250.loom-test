@@ -9,8 +9,8 @@ kernel.def target(@target) @tensor_load_to_lds_d4() {
 } launch(%input: buffer) {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 16384 : offset
-  %d0 = vector.constant 0 : vector<4xi32>
-  %d1 = vector.constant 0 : vector<8xi32>
+  %d0 = vector.splati 0 : vector<4xi32>
+  %d1 = vector.splati 0 : vector<8xi32>
   %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1, %d0, %d0) : vector<4xi32>, vector<8xi32>, vector<4xi32>, vector<4xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32>
@@ -66,8 +66,8 @@ kernel.def target(@target) @tensor_load_to_lds_d2() {
 } launch(%input: buffer) {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 16384 : offset
-  %d0 = vector.constant 0 : vector<4xi32>
-  %d1 = vector.constant 0 : vector<8xi32>
+  %d0 = vector.splati 0 : vector<4xi32>
+  %d1 = vector.splati 0 : vector<8xi32>
   %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32>
@@ -113,8 +113,8 @@ kernel.def target(@target) @tensor_load_two_stage_wait_depth() {
 } launch(%input: buffer) {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 16384 : offset
-  %d0 = vector.constant 0 : vector<4xi32>
-  %d1 = vector.constant 0 : vector<8xi32>
+  %d0 = vector.splati 0 : vector<4xi32>
+  %d1 = vector.splati 0 : vector<8xi32>
   %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32>

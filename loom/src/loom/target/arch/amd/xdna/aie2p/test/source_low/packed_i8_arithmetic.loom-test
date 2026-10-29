@@ -156,7 +156,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_cfg_arg_addi
 // ====
 
 func.def @i8x4_shrui_4(%values: vector<4xi8>) -> (vector<4xi8>) {
-  %amount = vector.constant 4 : vector<4xi8>
+  %amount = vector.splati 4 : vector<4xi8>
   %result = vector.shrui %values, %amount : vector<4xi8>
   func.return %result : vector<4xi8>
 }
@@ -177,7 +177,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_shrui_4(%val
 // ====
 
 func.def @i8x4_shli_3(%values: vector<4xi8>) -> (vector<4xi8>) {
-  %amount = vector.constant 3 : vector<4xi8>
+  %amount = vector.splati 3 : vector<4xi8>
   %result = vector.shli %values, %amount : vector<4xi8>
   func.return %result : vector<4xi8>
 }
@@ -198,7 +198,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_shli_3(%valu
 // ====
 
 func.def @i8x8_shrui_1(%values: vector<8xi8>) -> (vector<8xi8>) {
-  %amount = vector.constant 1 : vector<8xi8>
+  %amount = vector.splati 1 : vector<8xi8>
   %result = vector.shrui %values, %amount : vector<8xi8>
   func.return %result : vector<8xi8>
 }
@@ -219,7 +219,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x8_shrui_1(%val
 // ====
 
 func.def @i8x5_shli_7(%values: vector<5xi8>) -> (vector<5xi8>) {
-  %amount = vector.constant 7 : vector<5xi8>
+  %amount = vector.splati 7 : vector<5xi8>
   %result = vector.shli %values, %amount : vector<5xi8>
   func.return %result : vector<5xi8>
 }
@@ -240,7 +240,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x5_shli_7(%valu
 // ====
 
 func.def @i8x3_shrui_7(%values: vector<3xi8>) -> (vector<3xi8>) {
-  %amount = vector.constant 7 : vector<3xi8>
+  %amount = vector.splati 7 : vector<3xi8>
   %result = vector.shrui %values, %amount : vector<3xi8>
   func.return %result : vector<3xi8>
 }
@@ -261,7 +261,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x3_shrui_7(%val
 // ====
 
 func.def @i8x1_shli_1(%values: vector<1xi8>) -> (vector<1xi8>) {
-  %amount = vector.constant 1 : vector<1xi8>
+  %amount = vector.splati 1 : vector<1xi8>
   %result = vector.shli %values, %amount : vector<1xi8>
   func.return %result : vector<1xi8>
 }
@@ -282,7 +282,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x1_shli_1(%valu
 // ====
 
 func.def @i8x4_shrui_0(%values: vector<4xi8>) -> (vector<4xi8>) {
-  %amount = vector.constant 0 : vector<4xi8>
+  %amount = vector.splati 0 : vector<4xi8>
   %result = vector.shrui %values, %amount : vector<4xi8>
   func.return %result : vector<4xi8>
 }
@@ -295,7 +295,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_shrui_0(%val
 // ====
 
 func.def @i8x4_bounded_varying_shifts(%values: vector<4xi8>, %amounts: vector<4xi8>) -> (vector<4xi8>) {
-  %mask = vector.constant 7 : vector<4xi8>
+  %mask = vector.splati 7 : vector<4xi8>
   %bounded = vector.andi %amounts, %mask : vector<4xi8>
   %result = vector.shrui %values, %bounded : vector<4xi8>
   func.return %result : vector<4xi8>

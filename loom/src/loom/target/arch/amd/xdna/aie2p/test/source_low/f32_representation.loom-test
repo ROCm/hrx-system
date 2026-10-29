@@ -4,7 +4,7 @@ func.def @f32_accumulator_pipeline(%lhs: vector<16xbf16>, %rhs: vector<16xbf16>)
   %lhs_wide = vector.extf<daz> %lhs : vector<16xbf16> to vector<16xf32>
   %rhs_wide = vector.extf<daz> %rhs : vector<16xbf16> to vector<16xf32>
   %sum = vector.addf %lhs_wide, %rhs_wide : vector<16xf32>
-  %baseline = vector.constant 0.0 : vector<16xf32>
+  %baseline = vector.splatf 0.0 : vector<16xf32>
   %centered = vector.subf %sum, %baseline : vector<16xf32>
   %activated = vector.tanhf<afn> %centered : vector<16xf32>
   %result = vector.fptrunc<daz> %activated : vector<16xf32> to vector<16xbf16>

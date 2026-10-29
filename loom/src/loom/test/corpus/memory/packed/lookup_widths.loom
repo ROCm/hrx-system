@@ -288,8 +288,8 @@ kernel.def @lookup_computed_1() {
   %table_view = buffer.view %table[%base] : buffer -> view<16xi8>
   %short_output_view = buffer.view %short_output[%base] : buffer -> view<17xi8>
   %output_view = buffer.view %output[%base] : buffer -> view<17xi8>
-  %short_mask = vector.constant 3 : vector<1xi8>
-  %mask = vector.constant 15 : vector<1xi8>
+  %short_mask = vector.splati 3 : vector<1xi8>
+  %mask = vector.splati 15 : vector<1xi8>
   %short_indices = vector.andi %raw, %short_mask : vector<1xi8>
   %indices = vector.andi %raw, %mask : vector<1xi8>
   %short_entries = vector.load %short_table_view[0] : view<4xi8> -> vector<4xi8>
@@ -334,8 +334,8 @@ kernel.def @lookup_computed_2() {
   %table_view = buffer.view %table[%base] : buffer -> view<16xi8>
   %short_output_view = buffer.view %short_output[%base] : buffer -> view<34xi8>
   %output_view = buffer.view %output[%base] : buffer -> view<34xi8>
-  %short_mask = vector.constant 3 : vector<2xi8>
-  %mask = vector.constant 15 : vector<2xi8>
+  %short_mask = vector.splati 3 : vector<2xi8>
+  %mask = vector.splati 15 : vector<2xi8>
   %short_indices = vector.andi %raw, %short_mask : vector<2xi8>
   %indices = vector.andi %raw, %mask : vector<2xi8>
   %short_entries = vector.load %short_table_view[0] : view<4xi8> -> vector<4xi8>
@@ -380,8 +380,8 @@ kernel.def @lookup_computed_3() {
   %table_view = buffer.view %table[%base] : buffer -> view<16xi8>
   %short_output_view = buffer.view %short_output[%base] : buffer -> view<51xi8>
   %output_view = buffer.view %output[%base] : buffer -> view<51xi8>
-  %short_mask = vector.constant 3 : vector<3xi8>
-  %mask = vector.constant 15 : vector<3xi8>
+  %short_mask = vector.splati 3 : vector<3xi8>
+  %mask = vector.splati 15 : vector<3xi8>
   %short_indices = vector.andi %raw, %short_mask : vector<3xi8>
   %indices = vector.andi %raw, %mask : vector<3xi8>
   %short_entries = vector.load %short_table_view[0] : view<4xi8> -> vector<4xi8>
@@ -426,8 +426,8 @@ kernel.def @lookup_computed_5() {
   %table_view = buffer.view %table[%base] : buffer -> view<16xi8>
   %short_output_view = buffer.view %short_output[%base] : buffer -> view<85xi8>
   %output_view = buffer.view %output[%base] : buffer -> view<85xi8>
-  %short_mask = vector.constant 3 : vector<5xi8>
-  %mask = vector.constant 15 : vector<5xi8>
+  %short_mask = vector.splati 3 : vector<5xi8>
+  %mask = vector.splati 15 : vector<5xi8>
   %short_indices = vector.andi %raw, %short_mask : vector<5xi8>
   %indices = vector.andi %raw, %mask : vector<5xi8>
   %short_entries = vector.load %short_table_view[0] : view<4xi8> -> vector<4xi8>
@@ -470,7 +470,7 @@ kernel.def @lookup_computed_63() {
   %raw = vector.iota %start step %step : vector<63xi8>
   %table_view = buffer.view %table[%base] : buffer -> view<16xi8>
   %output_view = buffer.view %output[%base] : buffer -> view<1071xi8>
-  %mask = vector.constant 15 : vector<63xi8>
+  %mask = vector.splati 15 : vector<63xi8>
   %indices = vector.andi %raw, %mask : vector<63xi8>
   %entries = vector.load %table_view[0] : view<16xi8> -> vector<16xi8>
   %values = vector.table.lookup %entries[%indices] : vector<16xi8>, vector<63xi8> -> vector<63xi8>
@@ -505,7 +505,7 @@ kernel.def @lookup_computed_64() {
   %raw = vector.iota %start step %step : vector<64xi8>
   %table_view = buffer.view %table[%base] : buffer -> view<16xi8>
   %output_view = buffer.view %output[%base] : buffer -> view<1088xi8>
-  %mask = vector.constant 15 : vector<64xi8>
+  %mask = vector.splati 15 : vector<64xi8>
   %indices = vector.andi %raw, %mask : vector<64xi8>
   %entries = vector.load %table_view[0] : view<16xi8> -> vector<16xi8>
   %values = vector.table.lookup %entries[%indices] : vector<16xi8>, vector<64xi8> -> vector<64xi8>
@@ -540,7 +540,7 @@ kernel.def @lookup_short_computed_63() {
   %raw = vector.iota %start step %step : vector<63xi8>
   %table_view = buffer.view %table[%base] : buffer -> view<4xi8>
   %output_view = buffer.view %output[%base] : buffer -> view<1071xi8>
-  %mask = vector.constant 3 : vector<63xi8>
+  %mask = vector.splati 3 : vector<63xi8>
   %indices = vector.andi %raw, %mask : vector<63xi8>
   %entries = vector.load %table_view[0] : view<4xi8> -> vector<4xi8>
   %values = vector.table.lookup %entries[%indices] : vector<4xi8>, vector<63xi8> -> vector<63xi8>
@@ -575,7 +575,7 @@ kernel.def @lookup_short_computed_64() {
   %raw = vector.iota %start step %step : vector<64xi8>
   %table_view = buffer.view %table[%base] : buffer -> view<4xi8>
   %output_view = buffer.view %output[%base] : buffer -> view<1088xi8>
-  %mask = vector.constant 3 : vector<64xi8>
+  %mask = vector.splati 3 : vector<64xi8>
   %indices = vector.andi %raw, %mask : vector<64xi8>
   %entries = vector.load %table_view[0] : view<4xi8> -> vector<4xi8>
   %values = vector.table.lookup %entries[%indices] : vector<4xi8>, vector<64xi8> -> vector<64xi8>
@@ -611,9 +611,9 @@ kernel.def @lookup_byte_table_index_carriers() {
   %input_view = buffer.view %input[%base] : buffer -> view<4xi8>
   %output_view = buffer.view %output[%base] : buffer -> view<28xi8>
   %raw = vector.load %input_view[0] : view<4xi8> -> vector<4xi8>
-  %short_mask = vector.constant 32 : vector<4xi8>
+  %short_mask = vector.splati 32 : vector<4xi8>
   %short_indices = vector.andi %raw, %short_mask : vector<4xi8>
-  %mask = vector.constant 63 : vector<4xi8>
+  %mask = vector.splati 63 : vector<4xi8>
   %byte_indices = vector.andi %raw, %mask : vector<4xi8>
   %half_indices = vector.extui %byte_indices : vector<4xi8> to vector<4xi16>
   %word_indices = vector.extui %byte_indices : vector<4xi8> to vector<4xi32>
@@ -704,7 +704,7 @@ func.def device inline @compute_lookup_predicates(%table_input: buffer, %index_i
   %index_view = buffer.view %index_input[%base] : buffer -> view<8xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<8xi32>
   %table_words = vector.load %table_view[0] : view<2xi32> -> vector<2xi32>
-  %c0 = vector.constant 0 : vector<2xi32>
+  %c0 = vector.splati 0 : vector<2xi32>
   %table = vector.cmpi slt, %table_words, %c0 : vector<2xi32> -> vector<2xi1>
   %indices = vector.load %index_view[0] : view<8xi32> -> vector<8xi32>
   %selected = vector.table.lookup %table[%indices] : vector<2xi1>, vector<8xi32> -> vector<8xi1>

@@ -482,8 +482,8 @@ template.def<@initializer_loop> @initializer_loop_impl(%count: index, %value: f3
   %ordinary_aligned = buffer.assume.alignment %ordinary {minimum_alignment = 16} : buffer
   %ordinary_view = buffer.view %ordinary_aligned[%base] : buffer -> view<8xf32>
   %ordinary_size = index.constant 8 : index
-  %a = vector.constant -2.0 : vector<[%lanes]xf16>
-  %b = vector.constant 3.0 : vector<[%lanes]xf16>
+  %a = vector.splatf -2.0 : vector<[%lanes]xf16>
+  %b = vector.splatf 3.0 : vector<[%lanes]xf16>
   %initial_values = vector.splat %value : vector<[%lanes]xf32>
   %lhs = vector.fragment<lhs> %a shape [%size, %size] : vector<[%lanes]xf16>
   %rhs = vector.fragment<rhs> %b shape [%size, %size] : vector<[%lanes]xf16>

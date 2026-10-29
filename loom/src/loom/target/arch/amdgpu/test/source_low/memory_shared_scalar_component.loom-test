@@ -54,7 +54,7 @@ kernel.def @single_dynamic_view_base() {
   %thread = kernel.workitem.id<x> : index
   %tile_offset = index.scale %group, %tile_bytes : index, offset -> offset
   %output_view = buffer.view %output[%tile_offset] : buffer -> view<3x256x2xi32>
-  %value = vector.constant 1 : vector<2xi32>
+  %value = vector.splati 1 : vector<2xi32>
   vector.store %value, %output_view[0, %thread, 0] : vector<2xi32>, view<3x256x2xi32>
   kernel.return
 }
@@ -94,7 +94,7 @@ kernel.def @shared_dynamic_view_base() {
   %thread = kernel.workitem.id<x> : index
   %tile_offset = index.scale %group, %tile_bytes : index, offset -> offset
   %output_view = buffer.view %output[%tile_offset] : buffer -> view<3x256x2xi32>
-  %value = vector.constant 1 : vector<2xi32>
+  %value = vector.splati 1 : vector<2xi32>
   vector.store %value, %output_view[0, %thread, 0] : vector<2xi32>, view<3x256x2xi32>
   vector.store %value, %output_view[2, %thread, 0] : vector<2xi32>, view<3x256x2xi32>
   kernel.return
@@ -200,7 +200,7 @@ func.def @multipacket_dynamic_view_base_store(%output: buffer, %row: index) {
   %row_offset = index.scale %bounded_row, %row_bytes : index, offset -> offset
   %aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
   %destination = buffer.view %aligned[%row_offset] : buffer -> view<16xi32>
-  %value = vector.constant 1 : vector<16xi32>
+  %value = vector.splati 1 : vector<16xi32>
   vector.store<volatile> %value, %destination[0] : vector<16xi32>, view<16xi32>
   func.return
 }

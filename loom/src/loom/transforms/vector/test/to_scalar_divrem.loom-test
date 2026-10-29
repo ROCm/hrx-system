@@ -27,8 +27,8 @@ func.def @dynamic_signed_divrem(%length: index, %lhs: vector<[%length]xi64>, %rh
 
 // ----
 func.def @dynamic_signed_divrem(%length: index, %lhs: vector<[%length]xi64>, %rhs: vector<[%length]xi64>) -> (vector<[%length]xi64>, vector<[%length]xi64>) {
-  %7 = vector.constant 0 : vector<[%length]xi64>
-  %8 = vector.constant 0 : vector<[%length]xi64>
+  %7 = vector.splati 0 : vector<[%length]xi64>
+  %8 = vector.splati 0 : vector<[%length]xi64>
   %9 = index.constant 0 : index
   %10 = index.constant 1 : index
   %quotient, %remainder = scf.for %11 = [%9 to %length step %10](%12 = %7 : vector<[%length]xi64>, %13 = %8 : vector<[%length]xi64>) -> (vector<[%length]xi64>, vector<[%length]xi64>) {

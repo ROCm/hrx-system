@@ -29,7 +29,7 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
 func.def @dword_counts(%values: vector<8xi32>, %raw_count: i32, %varying_counts: vector<8xi32>) -> (vector<8xi32>, vector<8xi32>, vector<8xi32>) {
   %count = scalar.assume %raw_count [range(%raw_count, 0, 31)] : i32
   %counts = vector.splat %count : vector<8xi32>
-  %fixed_counts = vector.constant 4 : vector<8xi32>
+  %fixed_counts = vector.splati 4 : vector<8xi32>
   %left = vector.shli %values, %counts : vector<8xi32>
   %signed = vector.shrsi %values, %fixed_counts : vector<8xi32>
   %unsigned = vector.shrui %values, %varying_counts : vector<8xi32>
@@ -52,7 +52,7 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
 func.def @qword_counts(%values: vector<2xi64>, %raw_count: i64) -> (vector<2xi64>, vector<2xi64>) {
   %count = scalar.assume %raw_count [range(%raw_count, 0, 63)] : i64
   %counts = vector.splat %count : vector<2xi64>
-  %fixed_counts = vector.constant 63 : vector<2xi64>
+  %fixed_counts = vector.splati 63 : vector<2xi64>
   %left = vector.shli %values, %counts : vector<2xi64>
   %unsigned = vector.shrui %values, %fixed_counts : vector<2xi64>
   func.return %left, %unsigned : vector<2xi64>, vector<2xi64>
@@ -74,7 +74,7 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
 func.def @wide_counts(%values: vector<8xi64>, %raw_count: i64) -> (vector<8xi64>, vector<8xi64>, vector<8xi64>, vector<8xi64>) {
   %count = scalar.assume %raw_count [range(%raw_count, 0, 63)] : i64
   %counts = vector.splat %count : vector<8xi64>
-  %fixed_counts = vector.constant 63 : vector<8xi64>
+  %fixed_counts = vector.splati 63 : vector<8xi64>
   %runtime = vector.shrui %values, %counts : vector<8xi64>
   %left = vector.shli %values, %fixed_counts : vector<8xi64>
   %signed = vector.shrsi %values, %fixed_counts : vector<8xi64>
@@ -99,7 +99,7 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
 func.def @small_words(%values: vector<8xi16>, %raw_count: i16) -> (vector<8xi16>, vector<8xi16>) {
   %count = scalar.assume %raw_count [range(%raw_count, 0, 15)] : i16
   %counts = vector.splat %count : vector<8xi16>
-  %fixed_counts = vector.constant 4 : vector<8xi16>
+  %fixed_counts = vector.splati 4 : vector<8xi16>
   %runtime = vector.shrui %values, %counts : vector<8xi16>
   %fixed = vector.shrui %values, %fixed_counts : vector<8xi16>
   func.return %runtime, %fixed : vector<8xi16>, vector<8xi16>
@@ -118,7 +118,7 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
 // AVX512VL supplies the qword arithmetic shift absent from AVX2.
 // RUN: emit source-low target=x86:avx512 output=low
 func.def @small_signed_qwords(%values: vector<4xi64>) -> (vector<4xi64>) {
-  %fixed_counts = vector.constant 63 : vector<4xi64>
+  %fixed_counts = vector.splati 63 : vector<4xi64>
   %result = vector.shrsi %values, %fixed_counts : vector<4xi64>
   func.return %result : vector<4xi64>
 }
@@ -157,7 +157,7 @@ x86.target<avx2> @target {features = []}
 func.def target(@target) @host_avx2_counts(%values: vector<8xi32>, %raw_count: i32) -> (vector<8xi32>, vector<8xi32>) {
   %count = scalar.assume %raw_count [range(%raw_count, 0, 31)] : i32
   %counts = vector.splat %count : vector<8xi32>
-  %fixed_counts = vector.constant 4 : vector<8xi32>
+  %fixed_counts = vector.splati 4 : vector<8xi32>
   %runtime = vector.shli %values, %counts : vector<8xi32>
   %fixed = vector.shrsi %values, %fixed_counts : vector<8xi32>
   func.return %runtime, %fixed : vector<8xi32>, vector<8xi32>
@@ -181,7 +181,7 @@ x86.target<avx512> @target {features = [-avx512vl]}
 func.def target(@target) @host_avx512_counts(%values: vector<8xi32>, %raw_count: i32) -> (vector<8xi32>, vector<8xi32>) {
   %count = scalar.assume %raw_count [range(%raw_count, 0, 31)] : i32
   %counts = vector.splat %count : vector<8xi32>
-  %fixed_counts = vector.constant 4 : vector<8xi32>
+  %fixed_counts = vector.splati 4 : vector<8xi32>
   %runtime = vector.shli %values, %counts : vector<8xi32>
   %fixed = vector.shrsi %values, %fixed_counts : vector<8xi32>
   func.return %runtime, %fixed : vector<8xi32>, vector<8xi32>

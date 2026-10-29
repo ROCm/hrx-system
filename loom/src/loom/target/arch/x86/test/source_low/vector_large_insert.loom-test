@@ -223,7 +223,7 @@ func.def public target(@target) @i1x40_insert_dynamic(%input: buffer, %output: b
   %input_view = buffer.view %input[%c0] : buffer -> view<40xi8>
   %output_view = buffer.view %output[%c0] : buffer -> view<40xi8>
   %values = vector.load %input_view[0] : view<40xi8> -> vector<40xi8>
-  %clear_values = vector.constant 0 : vector<40xi8>
+  %clear_values = vector.splati 0 : vector<40xi8>
   %predicates = vector.cmpi eq, %values, %clear_values : vector<40xi8> -> vector<40xi1>
   %updated = vector.insert %value into %predicates[%position] : i1, vector<40xi1>
   %result = vector.select %updated, %values, %clear_values : vector<40xi8>
@@ -418,7 +418,7 @@ x86.target<avx2> @target
 func.def public target(@target) @short_dynamic_insert(%output: buffer, %value: f8E4M3, %position: index) {
   %c0 = index.constant 0 : offset
   %output_view = buffer.view %output[%c0] : buffer -> view<4xf8E4M3>
-  %values = vector.constant 0.0 : vector<4xf8E4M3>
+  %values = vector.splatf 0.0 : vector<4xf8E4M3>
   %result = vector.insert %value into %values[%position] : f8E4M3, vector<4xf8E4M3>
   vector.store %result, %output_view[0] : vector<4xf8E4M3>, view<4xf8E4M3>
   func.return

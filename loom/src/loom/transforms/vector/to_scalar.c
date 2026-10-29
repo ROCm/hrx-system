@@ -411,7 +411,7 @@ static iree_status_t loom_vector_to_scalar_lower_static_constant(
     bool* out_handled) {
   *out_handled = true;
   loom_type_t result_type =
-      loom_module_value_type(rewriter->module, loom_vector_constant_result(op));
+      loom_module_value_type(rewriter->module, loom_op_const_results(op)[0]);
   if (!loom_type_is_all_static(result_type)) {
     return iree_ok_status();
   }
@@ -440,7 +440,7 @@ static iree_status_t loom_vector_to_scalar_lower_static_constant(
   }
   for (uint16_t i = 0; i < element_count; ++i) {
     IREE_RETURN_IF_ERROR(
-        loom_vector_to_scalar_build_constant_lane(&state, &elements[i]));
+        loom_vector_to_scalar_build_literal_splat_lane(&state, &elements[i]));
   }
 
   loom_op_t* from_elements_op = NULL;
@@ -717,7 +717,9 @@ static const loom_vector_to_scalar_op_lowerer_t
         LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
             ATOMIC_CMPXCHG, loom_vector_to_scalar_lower_atomic_cmpxchg_op),
         LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
-            CONSTANT, loom_vector_to_scalar_lower_static_constant),
+            SPLATI, loom_vector_to_scalar_lower_static_constant),
+        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
+            SPLATF, loom_vector_to_scalar_lower_static_constant),
         LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
             POISON, loom_vector_to_scalar_lower_static_poison),
         LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(EMPTY,

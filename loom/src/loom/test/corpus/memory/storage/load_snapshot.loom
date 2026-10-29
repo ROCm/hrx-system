@@ -204,7 +204,7 @@ kernel.def @capture_partial_byte_vectors() {
   %count_i32 = view.load %count_view[0] : view<64xi32> -> i32
   %count = index.cast %count_i32 : i32 to index
   %snapshot = vector.load %source_view[0] : view<128xi8> -> vector<128xi8>
-  %sentinel = vector.constant -91 : vector<64xi8>
+  %sentinel = vector.splati -91 : vector<64xi8>
   vector.store<volatile> %sentinel, %source_view[0] : vector<64xi8>, view<128xi8>
   vector.store<volatile> %sentinel, %source_view[64] : vector<64xi8>, view<128xi8>
   vector.store %sentinel, %destination_view[0] : vector<64xi8>, view<512xi8>

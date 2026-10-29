@@ -41,7 +41,7 @@ pipeline.def<kernel> @finite_ingress(%record_count: index, %capacity: index, %re
     }
   }
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
-    %bias = vector.constant 17 : vector<16xi32>
+    %bias = vector.splati 17 : vector<16xi32>
     scf.for %record = [%begin to %record_count step %step] {
       %read, %payload = channel.acquire<mutable> %destination : channel<tile<16xi32>> -> (read<tile<16xi32>, mutable>, view<16xi32>)
       %values = vector.load %payload[0] : view<16xi32> -> vector<16xi32>

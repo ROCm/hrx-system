@@ -4,7 +4,7 @@
 // and a fragment boundary. Finite does not imply exact BF16 representability.
 func.def @probability_narrowing(%input: vector<8xf32>, %valid: vector<8xi1>) -> (i1, vector<8xbf16>) {
   %exponential = vector.exp2f<nnan|ninf|afn> %input : vector<8xf32>
-  %masked_value = vector.constant 0.0 : vector<8xf32>
+  %masked_value = vector.splatf 0.0 : vector<8xf32>
   %probability = vector.select %valid, %exponential, %masked_value : vector<8xf32>
   %extent = index.constant 16 : index
   %fragment = vector.fragment<result> %probability shape [%extent, %extent] : vector<8xf32>
@@ -17,7 +17,7 @@ func.def @probability_narrowing(%input: vector<8xf32>, %valid: vector<8xi1>) -> 
 // ----
 func.def @probability_narrowing(%input: vector<8xf32>, %valid: vector<8xi1>) -> (i1, vector<8xbf16>) {
   %exponential = vector.exp2f<nnan|ninf|afn> %input : vector<8xf32>
-  %masked_value = vector.constant 0.0 : vector<8xf32>
+  %masked_value = vector.splatf 0.0 : vector<8xf32>
   %probability = vector.select %valid, %exponential, %masked_value : vector<8xf32>
   %extent = index.constant 16 : index
   %fragment = vector.fragment<result> %probability shape [%extent, %extent] : vector<8xf32>
@@ -126,7 +126,7 @@ func.def @independent_classes(%input: vector<32xf32>, %mask: vector<32xi1>) -> (
 // A known mask can choose a finite alternative even if the other is unknown.
 func.def @known_choice(%input: vector<32xf32>, %other: vector<32xf32>) -> (vector<32xi1>) {
   %left = vector.exp2f<nnan|ninf> %input : vector<32xf32>
-  %mask = vector.constant true : vector<32xi1>
+  %mask = vector.splati 1 : vector<32xi1>
   %selected = vector.select %mask, %left, %other : vector<32xf32>
   %finite = vector.isfinitef %selected : vector<32xf32> -> vector<32xi1>
   func.return %finite : vector<32xi1>
@@ -134,6 +134,6 @@ func.def @known_choice(%input: vector<32xf32>, %other: vector<32xf32>) -> (vecto
 
 // ----
 func.def @known_choice(%input: vector<32xf32>, %other: vector<32xf32>) -> (vector<32xi1>) {
-  %finite = vector.constant true : vector<32xi1>
+  %finite = vector.splati 1 : vector<32xi1>
   func.return %finite : vector<32xi1>
 }

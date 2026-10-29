@@ -308,14 +308,13 @@ static iree_status_t loom_x86_materialize_dynamic_insert_component(
                              loom_scalar_constant_result(one_op), ordinal_type,
                              location, &ordinals_op));
   loom_op_t* zeros_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      builder, loom_attr_i64(0), ordinal_type, location, &zeros_op));
+  IREE_RETURN_IF_ERROR(
+      loom_vector_splati_build(builder, 0, ordinal_type, location, &zeros_op));
   loom_op_t* condition_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
       builder, LOOM_VECTOR_CMPI_PREDICATE_EQ,
-      loom_vector_iota_result(ordinals_op),
-      loom_vector_constant_result(zeros_op), ordinal_type, condition_type,
-      location, &condition_op));
+      loom_vector_iota_result(ordinals_op), loom_vector_splati_result(zeros_op),
+      ordinal_type, condition_type, location, &condition_op));
   loom_value_id_t condition = loom_vector_cmpi_result(condition_op);
   if (loom_x86_dynamic_insert_position_requires_guard(context, ordinal_type)) {
     IREE_RETURN_IF_ERROR(loom_x86_materialize_dynamic_insert_range_guard(

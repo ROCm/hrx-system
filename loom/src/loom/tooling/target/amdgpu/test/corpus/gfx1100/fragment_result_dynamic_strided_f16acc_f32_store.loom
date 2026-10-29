@@ -25,12 +25,12 @@ kernel.def target(@fragment_result_dynamic_gfx1100_wave64) @fragment_result_dyna
   %out_aligned = buffer.assume.alignment %out_global {minimum_alignment = 16} : buffer
   %out_view = buffer.view %out_aligned[%base] : buffer -> view<64x64xf32, %layout>
 
-  %lhs_values = vector.constant 0.0 : vector<16xf16>
-  %rhs_values = vector.constant 0.0 : vector<16xf16>
-  %init_values0 = vector.constant 1.0 : vector<8xf16>
-  %init_values1 = vector.constant 2.0 : vector<8xf16>
-  %init_values2 = vector.constant 3.0 : vector<8xf16>
-  %init_values3 = vector.constant 4.0 : vector<8xf16>
+  %lhs_values = vector.splatf 0.0 : vector<16xf16>
+  %rhs_values = vector.splatf 0.0 : vector<16xf16>
+  %init_values0 = vector.splatf 1.0 : vector<8xf16>
+  %init_values1 = vector.splatf 2.0 : vector<8xf16>
+  %init_values2 = vector.splatf 3.0 : vector<8xf16>
+  %init_values3 = vector.splatf 4.0 : vector<8xf16>
 
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xf16>
   %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xf16>

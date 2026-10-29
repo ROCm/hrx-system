@@ -18,6 +18,7 @@
 #include "loom/ops/scalar/combining.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/combining.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
@@ -441,17 +442,24 @@ static iree_status_t loom_vector_packet_materialize_simple_op(
   return iree_ok_status();
 }
 
-static iree_status_t loom_vector_packet_materialize_constant(
+static iree_status_t loom_vector_packet_materialize_literal_splat(
     loom_vector_packetization_t* packetization, loom_op_t* op,
     const loom_vector_packet_slice_t* slice,
     loom_vector_packetized_value_t* packetized_value) {
   const loom_type_t packet_type =
       loom_vector_packet_type(packetized_value->source_type, slice->lane_count);
   loom_op_t* packet_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      &packetization->context->rewriter->builder,
-      loom_vector_constant_value(op), packet_type, op->location, &packet_op));
-  packetized_value->packet.vector = loom_vector_constant_result(packet_op);
+  if (loom_vector_splati_isa(op)) {
+    IREE_RETURN_IF_ERROR(loom_vector_splati_build(
+        &packetization->context->rewriter->builder,
+        loom_vector_splati_value(op), packet_type, op->location, &packet_op));
+    packetized_value->packet.vector = loom_vector_splati_result(packet_op);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_vector_splatf_build(
+        &packetization->context->rewriter->builder,
+        loom_vector_splatf_value(op), packet_type, op->location, &packet_op));
+    packetized_value->packet.vector = loom_vector_splatf_result(packet_op);
+  }
   return iree_ok_status();
 }
 
@@ -657,9 +665,9 @@ static iree_status_t loom_vector_packet_materialize_value(
   if (loom_vector_load_isa(op)) {
     return loom_vector_packet_materialize_memory_load(packetization, op, slice,
                                                       packetized_value);
-  } else if (loom_vector_constant_isa(op)) {
-    return loom_vector_packet_materialize_constant(packetization, op, slice,
-                                                   packetized_value);
+  } else if (loom_vector_literal_splat_isa(op)) {
+    return loom_vector_packet_materialize_literal_splat(
+        packetization, op, slice, packetized_value);
   } else if (loom_vector_poison_isa(op)) {
     return loom_vector_packet_materialize_poison(packetization, op, slice,
                                                  packetized_value);
@@ -1404,29 +1412,28 @@ static iree_status_t loom_vector_packet_build_identity(
     loom_target_legalization_context_t* context, loom_op_t* reduce_op,
     loom_type_t vector_type, loom_value_id_t* out_value) {
   const loom_scalar_type_t element_type = loom_type_element_type(vector_type);
-  loom_attribute_t identity_attr = loom_attr_absent();
   int64_t identity = 0;
   double float_identity = 0.0;
   bool has_identity = loom_combining_kind_integer_identity(
       loom_vector_reduce_kind(reduce_op), element_type, &identity);
-  if (has_identity) {
-    identity_attr = element_type == LOOM_SCALAR_TYPE_I1
-                        ? loom_attr_bool(identity != 0)
-                        : loom_attr_i64(identity);
-  } else {
+  if (!has_identity) {
     has_identity = loom_combining_kind_float_identity(
         loom_vector_reduce_kind(reduce_op), &float_identity);
-    if (has_identity) {
-      identity_attr = loom_attr_f64(float_identity);
-    }
   }
   IREE_ASSERT_TRUE(has_identity);
   (void)has_identity;
   loom_op_t* identity_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      &context->rewriter->builder, identity_attr, vector_type,
-      reduce_op->location, &identity_op));
-  *out_value = loom_vector_constant_result(identity_op);
+  if (loom_scalar_type_is_float(element_type)) {
+    IREE_RETURN_IF_ERROR(loom_vector_splatf_build(
+        &context->rewriter->builder, float_identity, vector_type,
+        reduce_op->location, &identity_op));
+    *out_value = loom_vector_splatf_result(identity_op);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_vector_splati_build(
+        &context->rewriter->builder, identity, vector_type, reduce_op->location,
+        &identity_op));
+    *out_value = loom_vector_splati_result(identity_op);
+  }
   return iree_ok_status();
 }
 

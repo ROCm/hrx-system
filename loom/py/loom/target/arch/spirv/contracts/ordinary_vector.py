@@ -681,14 +681,8 @@ def _constant_guards(
             raise ValueError("boolean constant requires an exact value")
         guards.append(Guard.value_i64_range("result", boolean_value, boolean_value))
     elif component_type.kind == OrdinaryVectorComponentKind.FLOAT:
-        guards.extend(
-            (
-                Guard.attr_kind("value", "f64"),
-                Guard.value_exact_float("result"),
-            )
-        )
+        guards.append(Guard.value_exact_float("result"))
     else:
-        guards.append(Guard.attr_kind("value", "i64"))
         if component_type.kind == OrdinaryVectorComponentKind.SIGNED_INTEGER:
             guards.append(
                 Guard.i64_range(
@@ -735,7 +729,11 @@ def _constant_rule(
     )
     if lane_count is None or lane_count == 1:
         return DescriptorRule(
-            source_op=vector.vector_constant,
+            source_op=(
+                vector.vector_splatf
+                if component_type.kind == OrdinaryVectorComponentKind.FLOAT
+                else vector.vector_splati
+            ),
             descriptor=scalar_descriptor,
             guards=_constant_guards(
                 component_type,
@@ -758,7 +756,11 @@ def _constant_rule(
     construct_descriptor = _construct_descriptor(vector_type)
     temporary = ValueRef.temporary("component")
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=(
+            vector.vector_splatf
+            if component_type.kind == OrdinaryVectorComponentKind.FLOAT
+            else vector.vector_splati
+        ),
         descriptor=construct_descriptor,
         guards=(
             *_constant_guards(

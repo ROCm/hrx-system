@@ -1246,9 +1246,9 @@ kernel.def @i32_b128() {
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
   %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
-  %raise = vector.constant 9 : vector<4xi32>
+  %raise = vector.splati 9 : vector<4xi32>
   %raised = vector.addi %loaded, %raise : vector<4xi32>
-  %drop = vector.constant 4 : vector<4xi32>
+  %drop = vector.splati 4 : vector<4xi32>
   %result = vector.subi %raised, %drop : vector<4xi32>
   vector.store %result, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
   kernel.return
@@ -1291,7 +1291,7 @@ kernel.def @f32x8_split_b128() {
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x8xf32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x8xf32>
   %loaded = vector.load %input_view[%lane, 0] : view<64x8xf32> -> vector<8xf32>
-  %raise = vector.constant 2.0 : vector<8xf32>
+  %raise = vector.splatf 2.0 : vector<8xf32>
   %result = vector.addf %loaded, %raise : vector<8xf32>
   vector.store %result, %output_view[%lane, 0] : vector<8xf32>, view<64x8xf32>
   kernel.return

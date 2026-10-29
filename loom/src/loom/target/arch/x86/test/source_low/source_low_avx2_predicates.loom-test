@@ -128,11 +128,11 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({sig
 x86.target<avx2> @target
 
 func.def target(@target) @construct_predicates(%condition_value: i1, %true_value: vector<16xi16>, %false_value: vector<16xi16>) -> (vector<2xi1>, vector<4xi1>, vector<16xi16>, vector<32xi1>) {
-  %false2 = vector.constant 0 : vector<2xi1>
-  %true4 = vector.constant 1 : vector<4xi1>
+  %false2 = vector.splati 0 : vector<2xi1>
+  %true4 = vector.splati 1 : vector<4xi1>
   %condition16 = vector.splat %condition_value : vector<16xi1>
   %selected = vector.select %condition16, %true_value, %false_value : vector<16xi16>
-  %true32 = vector.constant 1 : vector<32xi1>
+  %true32 = vector.splati 1 : vector<32xi1>
   func.return %false2, %true4, %selected, %true32 : vector<2xi1>, vector<4xi1>, vector<16xi16>, vector<32xi1>
 }
 

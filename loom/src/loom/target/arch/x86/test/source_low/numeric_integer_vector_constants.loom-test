@@ -1,8 +1,8 @@
 // RUN: emit source-low target=x86:avx2 output=low
 
 func.def @integer_vector_zeros() -> (vector<4xi32>, vector<2xi64>) {
-  %i32 = vector.constant 0 : vector<4xi32>
-  %i64 = vector.constant 0 : vector<2xi64>
+  %i32 = vector.splati 0 : vector<4xi32>
+  %i64 = vector.splati 0 : vector<2xi64>
   func.return %i32, %i64 : vector<4xi32>, vector<2xi64>
 }
 
@@ -15,11 +15,11 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
 // ====
 
 func.def @i32x4_constant_payloads() -> (vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>) {
-  %unit_value = vector.constant 1 : vector<4xi32>
-  %negative = vector.constant -19088743 : vector<4xi32>
-  %minimum = vector.constant -2147483648 : vector<4xi32>
-  %all_bits = vector.constant -1 : vector<4xi32>
-  %maximum = vector.constant 2147483647 : vector<4xi32>
+  %unit_value = vector.splati 1 : vector<4xi32>
+  %negative = vector.splati -19088743 : vector<4xi32>
+  %minimum = vector.splati -2147483648 : vector<4xi32>
+  %all_bits = vector.splati -1 : vector<4xi32>
+  %maximum = vector.splati 2147483647 : vector<4xi32>
   func.return %unit_value, %negative, %minimum, %all_bits, %maximum : vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>
 }
 
@@ -46,12 +46,12 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
 // ====
 
 func.def @i64x2_constant_payloads() -> (vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>) {
-  %unit_value = vector.constant 1 : vector<2xi64>
-  %low_word = vector.constant 4294967295 : vector<2xi64>
-  %high_word = vector.constant -4294967296 : vector<2xi64>
-  %near_minimum = vector.constant -9223372036854775807 : vector<2xi64>
-  %minimum = vector.constant -9223372036854775808 : vector<2xi64>
-  %maximum = vector.constant 9223372036854775807 : vector<2xi64>
+  %unit_value = vector.splati 1 : vector<2xi64>
+  %low_word = vector.splati 4294967295 : vector<2xi64>
+  %high_word = vector.splati -4294967296 : vector<2xi64>
+  %near_minimum = vector.splati -9223372036854775807 : vector<2xi64>
+  %minimum = vector.splati -9223372036854775808 : vector<2xi64>
+  %maximum = vector.splati 9223372036854775807 : vector<2xi64>
   func.return %unit_value, %low_word, %high_word, %near_minimum, %minimum, %maximum : vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>
 }
 
@@ -102,8 +102,8 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
 // ====
 
 func.def @i32x8_uniform_values(%value: i32) -> (vector<8xi32>, vector<8xi32>, vector<8xi32>) {
-  %cleared = vector.constant 0 : vector<8xi32>
-  %constant = vector.constant -19088743 : vector<8xi32>
+  %cleared = vector.splati 0 : vector<8xi32>
+  %constant = vector.splati -19088743 : vector<8xi32>
   %splat = vector.splat %value : vector<8xi32>
   func.return %cleared, %constant, %splat : vector<8xi32>, vector<8xi32>, vector<8xi32>
 }
@@ -124,9 +124,9 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
 // RUN: emit source-low target=x86:avx512 output=low
 
 func.def @avx512_integer_constants() -> (vector<4xi32>, vector<16xi32>, vector<2xi64>) {
-  %i32x4 = vector.constant -19088743 : vector<4xi32>
-  %i32x16 = vector.constant 2147483647 : vector<16xi32>
-  %i64x2 = vector.constant -9223372036854775808 : vector<2xi64>
+  %i32x4 = vector.splati -19088743 : vector<4xi32>
+  %i32x16 = vector.splati 2147483647 : vector<16xi32>
+  %i64x2 = vector.splati -9223372036854775808 : vector<2xi64>
   func.return %i32x4, %i32x16, %i64x2 : vector<4xi32>, vector<16xi32>, vector<2xi64>
 }
 
@@ -165,7 +165,7 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
 // RUN: emit source-low target=x86:avx512 output=low
 
 func.def @avx512_i32x16_zero() -> (vector<16xi32>) {
-  %cleared = vector.constant 0 : vector<16xi32>
+  %cleared = vector.splati 0 : vector<16xi32>
   func.return %cleared : vector<16xi32>
 }
 

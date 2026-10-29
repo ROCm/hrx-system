@@ -14,11 +14,11 @@ kernel.def target(@target) @narrow_packets() {
   %bytes = index.constant 4096 : offset
   %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
   %halves = buffer.view %scratch[%base] : buffer -> view<32xi16>
-  %half = vector.constant 1 : vector<1xi16>
+  %half = vector.splati 1 : vector<1xi16>
   vector.store %half, %halves[%lane] : vector<1xi16>, view<32xi16>
   %layout = encoding.layout.strided [32] : encoding<layout>
   %words = buffer.view %scratch[%base] : buffer -> view<32xi32, %layout>
-  %word = vector.constant 1 : vector<1xi32>
+  %word = vector.splati 1 : vector<1xi32>
   vector.store %word, %words[%lane] : vector<1xi32>, view<32xi32, %layout>
   kernel.return
 }
@@ -48,7 +48,7 @@ kernel.def target(@target) @fragment_base_residues() {
   %view0 = buffer.view %aligned[%base0] : buffer -> view<16x48xbf16>
   %view2 = buffer.view %aligned[%base2] : buffer -> view<16x48xbf16>
   %view_unknown = buffer.view %aligned[%offset] : buffer -> view<16x48xbf16>
-  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %initial_values = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %initial_values shape [%size, %size] : vector<8xf32>
   %halves = vector.fptrunc %init : vector<8xf32> to vector<8xbf16>
   vector.fragment.store<result> %halves, %view0[%origin, %origin] shape [%size, %size] : vector<8xbf16>, view<16x48xbf16>

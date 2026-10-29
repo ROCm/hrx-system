@@ -2,7 +2,7 @@
 
 // A uniform exact index maps every result directly to one table register.
 func.def @table_lookup_uniform_index(%table: vector<3xf32>) -> (vector<8xf32>) {
-  %indices = vector.constant 2 : vector<8xi8>
+  %indices = vector.splati 2 : vector<8xi8>
   %result = vector.table.lookup %table[%indices] : vector<3xf32>, vector<8xi8> -> vector<8xf32>
   func.return %result : vector<8xf32>
 }

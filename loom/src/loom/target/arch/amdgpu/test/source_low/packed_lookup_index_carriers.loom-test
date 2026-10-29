@@ -4,7 +4,7 @@
 // packed-i16 sources, and all tails of full-width selector packing.
 
 func.def @byte_table_i16_one_index(%table: vector<8xi8>, %input: vector<1xi16>) -> (vector<1xi8>) {
-  %mask = vector.constant 7 : vector<1xi16>
+  %mask = vector.splati 7 : vector<1xi16>
   %indices = vector.andi %input, %mask : vector<1xi16>
   %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<1xi16> -> vector<1xi8>
   func.return %values : vector<1xi8>
@@ -24,7 +24,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_i16_o
 // ====
 
 func.def @byte_table_i16_indices(%table: vector<8xi8>, %input: vector<4xi16>) -> (vector<4xi8>) {
-  %mask = vector.constant 7 : vector<4xi16>
+  %mask = vector.splati 7 : vector<4xi16>
   %indices = vector.andi %input, %mask : vector<4xi16>
   %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<4xi16> -> vector<4xi8>
   func.return %values : vector<4xi8>
@@ -47,7 +47,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_i16_i
 // ====
 
 func.def @byte_table_i32_one_index(%table: vector<8xi8>, %input: vector<1xi32>) -> (vector<1xi8>) {
-  %mask = vector.constant 7 : vector<1xi32>
+  %mask = vector.splati 7 : vector<1xi32>
   %indices = vector.andi %input, %mask : vector<1xi32>
   %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<1xi32> -> vector<1xi8>
   func.return %values : vector<1xi8>
@@ -65,7 +65,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_i32_o
 // ====
 
 func.def @byte_table_i64_two_indices(%table: vector<8xi8>, %input: vector<2xi64>) -> (vector<2xi8>) {
-  %mask = vector.constant 7 : vector<2xi64>
+  %mask = vector.splati 7 : vector<2xi64>
   %indices = vector.andi %input, %mask : vector<2xi64>
   %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<2xi64> -> vector<2xi8>
   func.return %values : vector<2xi8>
@@ -88,7 +88,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_i64_t
 // ====
 
 func.def @byte_table_i32_three_indices(%table: vector<8xi8>, %input: vector<3xi32>) -> (vector<3xi8>) {
-  %mask = vector.constant 7 : vector<3xi32>
+  %mask = vector.splati 7 : vector<3xi32>
   %indices = vector.andi %input, %mask : vector<3xi32>
   %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<3xi32> -> vector<3xi8>
   func.return %values : vector<3xi8>
@@ -113,7 +113,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_i32_t
 // ====
 
 func.def @byte_table_i32_four_indices(%table: vector<8xi8>, %input: vector<4xi32>) -> (vector<4xi8>) {
-  %mask = vector.constant 7 : vector<4xi32>
+  %mask = vector.splati 7 : vector<4xi32>
   %indices = vector.andi %input, %mask : vector<4xi32>
   %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<4xi32> -> vector<4xi8>
   func.return %values : vector<4xi8>

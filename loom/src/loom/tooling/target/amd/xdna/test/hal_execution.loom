@@ -7,13 +7,13 @@ func.def inline @kernel_alias_ordering_body(%first: buffer, %second: buffer, %ob
   %first_view = buffer.view %first_global[%origin] : buffer -> view<4xi32>
   %second_view = buffer.view %second_global[%origin] : buffer -> view<4xi32>
   %observed_view = buffer.view %observed[%origin] : buffer -> view<4xi32>
-  %first_value = vector.constant 17 : vector<4xi32>
+  %first_value = vector.splati 17 : vector<4xi32>
   vector.store %first_value, %first_view[0] : vector<4xi32>, view<4xi32>
   %after_first_write = vector.load %second_view[0] : view<4xi32> -> vector<4xi32>
   vector.store %after_first_write, %observed_view[0] : vector<4xi32>, view<4xi32>
-  %second_value = vector.constant 23 : vector<4xi32>
+  %second_value = vector.splati 23 : vector<4xi32>
   vector.store %second_value, %second_view[0] : vector<4xi32>, view<4xi32>
-  %final_value = vector.constant 42 : vector<4xi32>
+  %final_value = vector.splati 42 : vector<4xi32>
   vector.store %final_value, %first_view[0] : vector<4xi32>, view<4xi32>
   func.return
 }

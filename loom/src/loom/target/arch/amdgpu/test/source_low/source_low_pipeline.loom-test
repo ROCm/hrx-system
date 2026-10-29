@@ -292,10 +292,10 @@ kernel.def target(@target) @target_legalization_precedes_cfg_finalization() {
   %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%output: buffer) {
-  %payload0 = vector.constant 1.0 : vector<8xf32>
-  %payload1 = vector.constant 2.0 : vector<8xf32>
-  %payload2 = vector.constant 3.0 : vector<8xf32>
-  %payload3 = vector.constant 4.0 : vector<8xf32>
+  %payload0 = vector.splatf 1.0 : vector<8xf32>
+  %payload1 = vector.splatf 2.0 : vector<8xf32>
+  %payload2 = vector.splatf 3.0 : vector<8xf32>
+  %payload3 = vector.splatf 4.0 : vector<8xf32>
   %column_count = index.constant 64 : index
   template.apply<@pipeline.late_fragment_epilogue>(%payload0, %payload1, %payload2, %payload3, %output, %column_count) : (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, buffer, index)
   kernel.return

@@ -236,7 +236,7 @@ kernel.def target(@target) @bf16_result_fragment_epilogue_after_barrier() {
   %output_view = buffer.view %output_aligned[%base] : buffer -> view<16x16xbf16>
   %gate_bf16 = vector.fragment.load<result> %gate_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16> -> vector<8xbf16>
   %gate_f32 = vector.extf %gate_bf16 : vector<8xbf16> to vector<8xf32>
-  %scale = vector.constant 2.0 : vector<8xf32>
+  %scale = vector.splatf 2.0 : vector<8xf32>
   %product = vector.mulf<reassoc|nnan|ninf|nsz|contract> %gate_f32, %scale : vector<8xf32>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   vector.fragment.store<result> %product, %output_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xbf16>
@@ -1414,7 +1414,7 @@ kernel.def target(@target) @bf16_wmmar3_dual_result_product_bf16_epilogue() {
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x16xbf16> -> vector<16xbf16>
   %gate_rhs = vector.fragment.load<rhs> %gate_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
   %up_rhs = vector.fragment.load<rhs> %up_view[0, 0] shape [%k, %n] : view<16x16xbf16, %rhs_layout> -> vector<16xbf16>
-  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %initial_values = vector.splatf 0.0 : vector<8xf32>
   %zero_acc = vector.fragment<init> %initial_values shape [%m, %n] : vector<8xf32>
   %gate = vector.mma %lhs, %gate_rhs, %zero_acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %up = vector.mma %lhs, %up_rhs, %zero_acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>

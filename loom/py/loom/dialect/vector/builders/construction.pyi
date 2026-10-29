@@ -5,16 +5,25 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
 
 from loom.builder import TiedResultSpec, ValueRef
 from loom.ir import Type
 
 class VectorConstructionMixin:
-    def constant(
+    def splati(
         self,
         *,
-        value: Any,
+        value: int,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
+    def splatf(
+        self,
+        *,
+        value: float,
         results: list[Type | TiedResultSpec],
         name: str | None = ...,
         names: Sequence[str] | None = ...,

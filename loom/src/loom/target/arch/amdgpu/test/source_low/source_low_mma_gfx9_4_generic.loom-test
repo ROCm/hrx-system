@@ -28,8 +28,8 @@ func.def target(@target) @f64_mfma_constants() -> (vector<4xf64>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 4 : index
-  %operand_elements = vector.constant 1.0 : vector<1xf64>
-  %accumulator_elements = vector.constant 0.0 : vector<4xf64>
+  %operand_elements = vector.splatf 1.0 : vector<1xf64>
+  %accumulator_elements = vector.splatf 0.0 : vector<4xf64>
   %lhs = vector.fragment<lhs> %operand_elements shape [%m, %k] : vector<1xf64>
   %rhs = vector.fragment<rhs> %operand_elements shape [%k, %n] : vector<1xf64>
   %init = vector.fragment<init> %accumulator_elements shape [%m, %n] : vector<4xf64>

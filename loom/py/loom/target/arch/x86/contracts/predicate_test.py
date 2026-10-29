@@ -147,7 +147,7 @@ _PAYLOAD_NAMES_BY_BIT_WIDTH = {
 
 
 def test_predicate_construction_covers_every_callable_lane_count() -> None:
-    constant_rules = _rules_for(vector.vector_constant)
+    constant_rules = _rules_for(vector.vector_splati)
     assert {
         (
             _type_guard(rule, "result"),
@@ -549,15 +549,15 @@ def test_avx512_predicate_construction_is_only_the_missing_delta() -> None:
             _representation_guard(rule, "result"),
         )
         for rule in (
-            *_avx512_rules_for(vector.vector_constant),
+            *_avx512_rules_for(vector.vector_splati),
             *_avx512_rules_for(vector.vector_splat),
         )
     } == {
         (source_op, Vector("i1", minimum_lanes=2, maximum_lanes=64), "x86.k", 1)
-        for source_op in (vector.vector_constant, vector.vector_splat)
+        for source_op in (vector.vector_splati, vector.vector_splat)
     } | {
         (source_op, Vector("i1", lanes=64), "x86.zmm", 8)
-        for source_op in (vector.vector_constant, vector.vector_splat)
+        for source_op in (vector.vector_splati, vector.vector_splat)
     }
 
 

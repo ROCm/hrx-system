@@ -1,7 +1,7 @@
 // RUN: with-checks compile-report target=wasm:simd128 source-to-low,low-dce
 
 func.def @integer_shift_strategies(%bytes: vector<16xi8>, %byte_counts: vector<16xi8>, %wide: vector<2xi64>, %wide_count: i64) -> (vector<16xi8>, vector<16xi8>, vector<2xi64>) {
-  %byte_count = vector.constant 7 : vector<16xi8>
+  %byte_count = vector.splati 7 : vector<16xi8>
   %wide_mask = scalar.constant 63 : i64
   %bounded_wide_count = scalar.andi %wide_count, %wide_mask : i64
   %wide_counts = vector.splat %bounded_wide_count : vector<2xi64>

@@ -39,8 +39,8 @@ func.def @f8e5m2_vector_rounding(%input: vector<3xf8E5M2>) -> (vector<3xf8E5M2>,
   %17 = vector.floorf %16 : vector<3xf32>
   %floor = vector.fptrunc %17 : vector<3xf32> to vector<3xf8E5M2>
   %5 = vector.extf %input : vector<3xf8E5M2> to vector<3xf32>
-  %6 = vector.constant 0.5 : vector<3xf32>
-  %7 = vector.constant 1.0 : vector<3xf32>
+  %6 = vector.splatf 0.5 : vector<3xf32>
+  %7 = vector.splatf 1.0 : vector<3xf32>
   %8 = vector.truncf %5 : vector<3xf32>
   %9 = vector.subf %5, %8 : vector<3xf32>
   %10 = vector.absf %9 : vector<3xf32>
@@ -112,8 +112,8 @@ func.def @f64_vector_round(%input: vector<2xf64>) -> (vector<2xf64>) {
 
 // ----
 func.def @f64_vector_round(%input: vector<2xf64>) -> (vector<2xf64>) {
-  %3 = vector.constant 0.5 : vector<2xf64>
-  %4 = vector.constant 1.0 : vector<2xf64>
+  %3 = vector.splatf 0.5 : vector<2xf64>
+  %4 = vector.splatf 1.0 : vector<2xf64>
   %5 = vector.truncf %input : vector<2xf64>
   %6 = vector.subf %input, %5 : vector<2xf64>
   %7 = vector.absf %6 : vector<2xf64>

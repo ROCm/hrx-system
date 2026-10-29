@@ -4,15 +4,15 @@
 
 // ----
 func.def public @packed_group_dot(%table: vector<16xi8>, %packed: vector<16xi8>, %activations_low: vector<16xbf16>, %activations_high: vector<16xbf16>, %scale: f32, %seed: f32) -> (f32) {
-  %265 = vector.constant 15 : vector<16xi8>
+  %265 = vector.splati 15 : vector<16xi8>
   %10 = vector.andi %packed, %265 : vector<16xi8>
   %low_codes = vector.table.lookup %table[%10] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
-  %260 = vector.constant 4 : vector<16xi8>
+  %260 = vector.splati 4 : vector<16xi8>
   %15 = vector.shrui %packed, %260 : vector<16xi8>
   %high_codes = vector.table.lookup %table[%15] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
   %low_weights = vector.sitofp %low_codes : vector<16xi8> to vector<16xbf16>
   %high_weights = vector.sitofp %high_codes : vector<16xi8> to vector<16xbf16>
-  %partial$255 = vector.constant 0.0 : vector<8xf32>
+  %partial$255 = vector.splatf 0.0 : vector<8xf32>
   %partial$21 = vector.dot2f %low_weights, %activations_low, %partial$255 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %partial$22 = vector.dot2f %high_weights, %activations_high, %partial$21 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %23 = scalar.constant 0.0 : f32

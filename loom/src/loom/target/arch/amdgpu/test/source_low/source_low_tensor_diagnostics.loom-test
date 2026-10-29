@@ -9,8 +9,8 @@ kernel.def target(@target) @tensor_memory_requires_gfx125x() {
 } launch(%input: buffer) {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 16384 : offset
-  %d0 = vector.constant 0 : vector<4xi32>
-  %d1 = vector.constant 0 : vector<8xi32>
+  %d0 = vector.splati 0 : vector<4xi32>
+  %d1 = vector.splati 0 : vector<8xi32>
   // ERROR@+1: AMDGPU/023 {constraint_key="tensor_memory.provider_required"}
   %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %input : buffer
@@ -39,7 +39,7 @@ kernel.def target(@target) @tensor_dgroups_must_be_subgroup_uniform() {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 16384 : offset
   %d0 = vector.splat %lane_i32 : vector<4xi32>
-  %d1 = vector.constant 0 : vector<8xi32>
+  %d1 = vector.splati 0 : vector<8xi32>
   %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32>

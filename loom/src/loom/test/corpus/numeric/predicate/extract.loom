@@ -16,8 +16,8 @@ kernel.def @predicate_extract() {
   %dynamic_view = buffer.view %dynamic_output[%base] : buffer -> view<64xi32>
   %vote_view = buffer.view %vote_output[%base] : buffer -> view<64xi32>
   %values = vector.load %source[%lane, 0] : view<64x4xi32> -> vector<4xi32>
-  %bits = vector.constant 129 : vector<4xi32>
-  %c0 = vector.constant 0 : vector<4xi32>
+  %bits = vector.splati 129 : vector<4xi32>
+  %c0 = vector.splati 0 : vector<4xi32>
   %masked = vector.andi %values, %bits : vector<4xi32>
   %predicates = vector.cmpi ne, %masked, %c0 : vector<4xi32> -> vector<4xi1>
   %first = vector.extract %predicates[0] : vector<4xi1> -> i1
@@ -55,8 +55,8 @@ func.def @predicate_extract_oracle(%input: buffer, %first_output: buffer, %last_
   %step = index.constant 1 : index
   %group_size = index.constant 16 : index
   %limit = index.constant 56 : index
-  %bits = vector.constant 129 : vector<4xi32>
-  %c0 = vector.constant 0 : vector<4xi32>
+  %bits = vector.splati 129 : vector<4xi32>
+  %c0 = vector.splati 0 : vector<4xi32>
   %vote_value = scalar.constant 1 : i32
   scf.for %lane = [%begin to %end step %step] {
     %position = index.div %lane, %group_size : index

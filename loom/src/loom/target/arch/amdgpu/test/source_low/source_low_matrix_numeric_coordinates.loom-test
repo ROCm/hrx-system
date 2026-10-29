@@ -13,11 +13,11 @@ kernel.def target(@target) @element_mask_mma_coordinates() {
   %tile = index.constant 16 : index
   %layout = encoding.layout.strided [1, 16] : encoding<layout>
   %output_view = buffer.view %output[%buffer_origin] : buffer -> view<16x16xbf16, %layout>
-  %lhs_values = vector.constant 1.0 : vector<16xbf16>
-  %rhs_values = vector.constant 2.0 : vector<16xbf16>
+  %lhs_values = vector.splatf 1.0 : vector<16xbf16>
+  %rhs_values = vector.splatf 2.0 : vector<16xbf16>
   %lhs = vector.fragment<lhs> %lhs_values shape [%tile, %tile] : vector<16xbf16>
   %rhs = vector.fragment<rhs> %rhs_values shape [%tile, %tile] : vector<16xbf16>
-  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %initial_values = vector.splatf 0.0 : vector<8xf32>
   %initial = vector.fragment<init> %initial_values shape [%tile, %tile] : vector<8xf32>
   %product = vector.mma %lhs, %rhs, %initial : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %active = scalar.constant true : i1
@@ -537,7 +537,7 @@ kernel.def target(@target) @uniform_scaled_mma_coordinates() {
   %output_view = buffer.view %output[%buffer_origin] : buffer -> view<16x16xbf16, %layout>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%tile, %tile] : view<16x16xbf16> -> vector<16xbf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%tile, %tile] : view<16x16xbf16, %layout> -> vector<16xbf16>
-  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %initial_values = vector.splatf 0.0 : vector<8xf32>
   %initial = vector.fragment<init> %initial_values shape [%tile, %tile] : vector<8xf32>
   %product = vector.mma %lhs, %rhs, %initial : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %scales = vector.splat %scale : vector<8xf32>
@@ -670,7 +670,7 @@ kernel.def target(@target) @varying_bias_mma_coordinates() {
   %output_view = buffer.view %output[%buffer_origin] : buffer -> view<16x16xbf16, %layout>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%tile, %tile] : view<16x16xbf16> -> vector<16xbf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%tile, %tile] : view<16x16xbf16, %layout> -> vector<16xbf16>
-  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %initial_values = vector.splatf 0.0 : vector<8xf32>
   %initial = vector.fragment<init> %initial_values shape [%tile, %tile] : vector<8xf32>
   %product = vector.mma %lhs, %rhs, %initial : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %lane = kernel.workitem.id<x> : index
@@ -810,7 +810,7 @@ kernel.def target(@target) @varying_mask_mma_coordinates() {
   %output_view = buffer.view %output[%buffer_origin] : buffer -> view<16x16xbf16, %layout>
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%tile, %tile] : view<16x16xbf16> -> vector<16xbf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%tile, %tile] : view<16x16xbf16, %layout> -> vector<16xbf16>
-  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %initial_values = vector.splatf 0.0 : vector<8xf32>
   %initial = vector.fragment<init> %initial_values shape [%tile, %tile] : vector<8xf32>
   %product = vector.mma %lhs, %rhs, %initial : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %lane = kernel.workitem.id<x> : index

@@ -1558,7 +1558,7 @@ def test_avx512_construction_covers_every_zmm_payload_type() -> None:
     constant_rules = tuple(
         rule
         for rule in descriptor_rules
-        if rule.source_op is vector.vector_constant
+        if rule.source_op in (vector.vector_splati, vector.vector_splatf)
         and rule.descriptor.key.startswith("x86.avx512.vpbroadcast")
     )
     assert {_value_type_guard(rule, "result") for rule in constant_rules} == (

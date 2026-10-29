@@ -8,7 +8,7 @@ func.def @unrolled_vector_build(%input: buffer, %output: buffer) {
   %last = index.constant 4 : index
   %source = buffer.view %input[%origin] : buffer -> view<5xf32>
   %destination = buffer.view %output[%origin] : buffer -> view<5xf32>
-  %initial = vector.constant 0.0 : vector<5xf32>
+  %initial = vector.splatf 0.0 : vector<5xf32>
   %values = scf.for %position = [%begin to %end step %step](%current = %initial : vector<5xf32>) -> (vector<5xf32>) unroll {
     %value = view.load %source[%position] : view<5xf32> -> f32
     %next = vector.insert %value into %current[%position] : f32, vector<5xf32>
@@ -353,7 +353,7 @@ func.def @dynamic_tail_values(%input: buffer, %positions: buffer, %output: buffe
   %matrix_output = buffer.view %output[%matrix_base] : buffer -> view<5x5xi64>
   %integers = vector.load %source[0] : view<10xi64> -> vector<5xi64>
   %floats = vector.bitcast %integers : vector<5xi64> to vector<5xf64>
-  %address_mask = vector.constant 4294967295 : vector<5xi64>
+  %address_mask = vector.splati 4294967295 : vector<5xi64>
   %address_bits = vector.andi %integers, %address_mask : vector<5xi64>
   %offsets = vector.index_cast %address_bits : vector<5xi64> to vector<5xoffset>
   %words = vector.trunci %integers : vector<5xi64> to vector<5xi32>

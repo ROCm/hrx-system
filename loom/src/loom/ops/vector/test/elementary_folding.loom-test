@@ -1,28 +1,28 @@
 // RUN: pass canonicalize
 
 func.def @ordinary_vector_math() -> (vector<2xf64>, vector<2xf32>, vector<2xbf16>) {
-  %inputs = vector.constant 4.9406564584124654e-324 : vector<2xf64>
+  %inputs = vector.splatf 4.9406564584124654e-324 : vector<2xf64>
   %roots = vector.sqrtf %inputs : vector<2xf64>
-  %exponents = vector.constant -149.0 : vector<2xf32>
+  %exponents = vector.splatf -149.0 : vector<2xf32>
   %powers = vector.exp2f %exponents : vector<2xf32>
-  %narrow = vector.constant 1.0 : vector<2xbf16>
+  %narrow = vector.splatf 1.0 : vector<2xbf16>
   %natural = vector.expf %narrow : vector<2xbf16>
   func.return %roots, %powers, %natural : vector<2xf64>, vector<2xf32>, vector<2xbf16>
 }
 
 // ----
 func.def @ordinary_vector_math() -> (vector<2xf64>, vector<2xf32>, vector<2xbf16>) {
-  %roots = vector.constant 2.2227587494850775e-162 : vector<2xf64>
-  %powers = vector.constant 1.4012984643248171e-45 : vector<2xf32>
-  %natural = vector.constant 2.71875 : vector<2xbf16>
+  %roots = vector.splatf 2.2227587494850775e-162 : vector<2xf64>
+  %powers = vector.splatf 1.4012984643248171e-45 : vector<2xf32>
+  %natural = vector.splatf 2.71875 : vector<2xbf16>
   func.return %roots, %powers, %natural : vector<2xf64>, vector<2xf32>, vector<2xbf16>
 }
 
 // ====
 
 func.def @vector_cube_roots() -> (vector<2xf16>, vector<2xf64>) {
-  %narrow = vector.constant -8.0 : vector<2xf16>
-  %wide = vector.constant 4.9406564584124654e-324 : vector<2xf64>
+  %narrow = vector.splatf -8.0 : vector<2xf16>
+  %wide = vector.splatf 4.9406564584124654e-324 : vector<2xf64>
   %narrow_roots = vector.cbrtf %narrow : vector<2xf16>
   %wide_roots = vector.cbrtf %wide : vector<2xf64>
   func.return %narrow_roots, %wide_roots : vector<2xf16>, vector<2xf64>
@@ -30,17 +30,17 @@ func.def @vector_cube_roots() -> (vector<2xf16>, vector<2xf64>) {
 
 // ----
 func.def @vector_cube_roots() -> (vector<2xf16>, vector<2xf64>) {
-  %narrow_roots = vector.constant -2.0 : vector<2xf16>
-  %wide_roots = vector.constant 1.7031839360032603e-108 : vector<2xf64>
+  %narrow_roots = vector.splatf -2.0 : vector<2xf16>
+  %wide_roots = vector.splatf 1.7031839360032603e-108 : vector<2xf64>
   func.return %narrow_roots, %wide_roots : vector<2xf16>, vector<2xf64>
 }
 
 // ====
 func.def @vector_logarithms() -> (vector<2xf32>, vector<2xf64>, vector<2xf16>, vector<2xbf16>) {
-  %a = vector.constant 2.0 : vector<2xf32>
-  %b = vector.constant 4.9406564584124654e-324 : vector<2xf64>
-  %c = vector.constant 10.0 : vector<2xf16>
-  %d = vector.constant -0.00390625 : vector<2xbf16>
+  %a = vector.splatf 2.0 : vector<2xf32>
+  %b = vector.splatf 4.9406564584124654e-324 : vector<2xf64>
+  %c = vector.splatf 10.0 : vector<2xf16>
+  %d = vector.splatf -0.00390625 : vector<2xbf16>
   %natural = vector.logf %a : vector<2xf32>
   %base_two = vector.log2f %b : vector<2xf64>
   %base_ten = vector.log10f %c : vector<2xf16>
@@ -50,17 +50,17 @@ func.def @vector_logarithms() -> (vector<2xf32>, vector<2xf64>, vector<2xf16>, v
 
 // ----
 func.def @vector_logarithms() -> (vector<2xf32>, vector<2xf64>, vector<2xf16>, vector<2xbf16>) {
-  %natural = vector.constant 0.69314718246459961 : vector<2xf32>
-  %base_two = vector.constant -1074.0 : vector<2xf64>
-  %base_ten = vector.constant 1.0 : vector<2xf16>
-  %increment = vector.constant -0.00390625 : vector<2xbf16>
+  %natural = vector.splatf 0.69314718246459961 : vector<2xf32>
+  %base_two = vector.splatf -1074.0 : vector<2xf64>
+  %base_ten = vector.splatf 1.0 : vector<2xf16>
+  %increment = vector.splatf -0.00390625 : vector<2xbf16>
   func.return %natural, %base_two, %base_ten, %increment : vector<2xf32>, vector<2xf64>, vector<2xf16>, vector<2xbf16>
 }
 
 // ====
 func.def @vector_exponential_difference() -> (vector<2xf16>, vector<2xf64>) {
-  %small = vector.constant 0.00390625 : vector<2xf16>
-  %tiny = vector.constant 4.9406564584124654e-324 : vector<2xf64>
+  %small = vector.splatf 0.00390625 : vector<2xf16>
+  %tiny = vector.splatf 4.9406564584124654e-324 : vector<2xf64>
   %narrow = vector.expm1f %small : vector<2xf16>
   %wide = vector.expm1f %tiny : vector<2xf64>
   func.return %narrow, %wide : vector<2xf16>, vector<2xf64>
@@ -68,18 +68,18 @@ func.def @vector_exponential_difference() -> (vector<2xf16>, vector<2xf64>) {
 
 // ----
 func.def @vector_exponential_difference() -> (vector<2xf16>, vector<2xf64>) {
-  %narrow = vector.constant 0.00391387939453125 : vector<2xf16>
-  %wide = vector.constant 4.9406564584124654e-324 : vector<2xf64>
+  %narrow = vector.splatf 0.00391387939453125 : vector<2xf16>
+  %wide = vector.splatf 4.9406564584124654e-324 : vector<2xf64>
   func.return %narrow, %wide : vector<2xf16>, vector<2xf64>
 }
 
 // ====
 
 func.def @vector_real_powers() -> (vector<2xbf16>, vector<2xf64>) {
-  %narrow_base = vector.constant -2.0 : vector<2xbf16>
-  %narrow_exponent = vector.constant -3.0 : vector<2xbf16>
-  %wide_base = vector.constant 2.2250738585072009e-308 : vector<2xf64>
-  %wide_exponent = vector.constant -0.5 : vector<2xf64>
+  %narrow_base = vector.splatf -2.0 : vector<2xbf16>
+  %narrow_exponent = vector.splatf -3.0 : vector<2xbf16>
+  %wide_base = vector.splatf 2.2250738585072009e-308 : vector<2xf64>
+  %wide_exponent = vector.splatf -0.5 : vector<2xf64>
   %narrow = vector.powf %narrow_base, %narrow_exponent : vector<2xbf16>
   %wide = vector.powf %wide_base, %wide_exponent : vector<2xf64>
   func.return %narrow, %wide : vector<2xbf16>, vector<2xf64>
@@ -87,103 +87,103 @@ func.def @vector_real_powers() -> (vector<2xbf16>, vector<2xf64>) {
 
 // ----
 func.def @vector_real_powers() -> (vector<2xbf16>, vector<2xf64>) {
-  %narrow = vector.constant -0.125 : vector<2xbf16>
-  %wide = vector.constant 6.7039039649712985e+153 : vector<2xf64>
+  %narrow = vector.splatf -0.125 : vector<2xbf16>
+  %wide = vector.splatf 6.7039039649712985e+153 : vector<2xf64>
   func.return %narrow, %wide : vector<2xbf16>, vector<2xf64>
 }
 
 // ====
 
 func.def @vector_hyperbolic_boundaries() -> (vector<2xf32>, vector<2xf64>, vector<2xf64>, vector<2xf16>, vector<2xbf16>, vector<2xf64>) {
-  %tanh_input = vector.constant 0.40029323101043701 : vector<2xf32>
+  %tanh_input = vector.splatf 0.40029323101043701 : vector<2xf32>
   %tanh_result = vector.tanhf %tanh_input : vector<2xf32>
-  %sinh_input = vector.constant 710.0 : vector<2xf64>
+  %sinh_input = vector.splatf 710.0 : vector<2xf64>
   %sinh_result = vector.sinhf %sinh_input : vector<2xf64>
-  %cosh_input = vector.constant 710.0 : vector<2xf64>
+  %cosh_input = vector.splatf 710.0 : vector<2xf64>
   %cosh_result = vector.coshf %cosh_input : vector<2xf64>
-  %asinh_input = vector.constant 6.103515625e-05 : vector<2xf16>
+  %asinh_input = vector.splatf 6.103515625e-05 : vector<2xf16>
   %asinh_result = vector.asinhf %asinh_input : vector<2xf16>
-  %acosh_input = vector.constant 1.0078125 : vector<2xbf16>
+  %acosh_input = vector.splatf 1.0078125 : vector<2xbf16>
   %acosh_result = vector.acoshf %acosh_input : vector<2xbf16>
-  %atanh_input = vector.constant 4.9406564584124654e-324 : vector<2xf64>
+  %atanh_input = vector.splatf 4.9406564584124654e-324 : vector<2xf64>
   %atanh_result = vector.atanhf %atanh_input : vector<2xf64>
   func.return %tanh_result, %sinh_result, %cosh_result, %asinh_result, %acosh_result, %atanh_result : vector<2xf32>, vector<2xf64>, vector<2xf64>, vector<2xf16>, vector<2xbf16>, vector<2xf64>
 }
 
 // ----
 func.def @vector_hyperbolic_boundaries() -> (vector<2xf32>, vector<2xf64>, vector<2xf64>, vector<2xf16>, vector<2xbf16>, vector<2xf64>) {
-  %tanh_result = vector.constant 0.38019981980323792 : vector<2xf32>
-  %sinh_result = vector.constant 1.1169973830808557e+308 : vector<2xf64>
-  %cosh_result = vector.constant 1.1169973830808557e+308 : vector<2xf64>
-  %asinh_result = vector.constant 6.103515625e-05 : vector<2xf16>
-  %acosh_result = vector.constant 0.125 : vector<2xbf16>
-  %atanh_result = vector.constant 4.9406564584124654e-324 : vector<2xf64>
+  %tanh_result = vector.splatf 0.38019981980323792 : vector<2xf32>
+  %sinh_result = vector.splatf 1.1169973830808557e+308 : vector<2xf64>
+  %cosh_result = vector.splatf 1.1169973830808557e+308 : vector<2xf64>
+  %asinh_result = vector.splatf 6.103515625e-05 : vector<2xf16>
+  %acosh_result = vector.splatf 0.125 : vector<2xbf16>
+  %atanh_result = vector.splatf 4.9406564584124654e-324 : vector<2xf64>
   func.return %tanh_result, %sinh_result, %cosh_result, %asinh_result, %acosh_result, %atanh_result : vector<2xf32>, vector<2xf64>, vector<2xf64>, vector<2xf16>, vector<2xbf16>, vector<2xf64>
 }
 
 // ====
 
 func.def @vector_inverse_trigonometry() -> (vector<2xf32>, vector<2xf64>, vector<2xbf16>, vector<2xf8E5M2>) {
-  %asin_input = vector.constant 0.99999994039535522 : vector<2xf32>
+  %asin_input = vector.splatf 0.99999994039535522 : vector<2xf32>
   %asin_result = vector.asinf %asin_input : vector<2xf32>
-  %acos_input = vector.constant 0.99999999999999989 : vector<2xf64>
+  %acos_input = vector.splatf 0.99999999999999989 : vector<2xf64>
   %acos_result = vector.acosf %acos_input : vector<2xf64>
-  %atan_input = vector.constant -1.0 : vector<2xbf16>
+  %atan_input = vector.splatf -1.0 : vector<2xbf16>
   %atan_result = vector.atanf %atan_input : vector<2xbf16>
-  %atan2_input = vector.constant 0.5 : vector<2xf8E5M2>
-  %negative_x = vector.constant -0.5 : vector<2xf8E5M2>
+  %atan2_input = vector.splatf 0.5 : vector<2xf8E5M2>
+  %negative_x = vector.splatf -0.5 : vector<2xf8E5M2>
   %atan2_result = vector.atan2f %atan2_input, %negative_x : vector<2xf8E5M2>
   func.return %asin_result, %acos_result, %atan_result, %atan2_result : vector<2xf32>, vector<2xf64>, vector<2xbf16>, vector<2xf8E5M2>
 }
 
 // ----
 func.def @vector_inverse_trigonometry() -> (vector<2xf32>, vector<2xf64>, vector<2xbf16>, vector<2xf8E5M2>) {
-  %asin_result = vector.constant 1.570451021194458 : vector<2xf32>
-  %acos_result = vector.constant 1.4901161193847656e-08 : vector<2xf64>
-  %atan_result = vector.constant -0.78515625 : vector<2xbf16>
-  %atan2_result = vector.constant 2.5 : vector<2xf8E5M2>
+  %asin_result = vector.splatf 1.570451021194458 : vector<2xf32>
+  %acos_result = vector.splatf 1.4901161193847656e-08 : vector<2xf64>
+  %atan_result = vector.splatf -0.78515625 : vector<2xbf16>
+  %atan2_result = vector.splatf 2.5 : vector<2xf8E5M2>
   func.return %asin_result, %acos_result, %atan_result, %atan2_result : vector<2xf32>, vector<2xf64>, vector<2xbf16>, vector<2xf8E5M2>
 }
 
 // ====
 
 func.def @vector_trigonometry() -> (vector<2xf64>, vector<2xf32>, vector<2xf64>, vector<2xf8E4M3>, vector<2xf64>, vector<2xf64>) {
-  %large_input = vector.constant 1.0715086071862673e+301 : vector<2xf64>
+  %large_input = vector.splatf 1.0715086071862673e+301 : vector<2xf64>
   %large = vector.sinf %large_input : vector<2xf64>
-  %small_input = vector.constant 0.5 : vector<2xf32>
+  %small_input = vector.splatf 0.5 : vector<2xf32>
   %small = vector.cosf %small_input : vector<2xf32>
-  %pole_input = vector.constant 1.5707963267948966 : vector<2xf64>
+  %pole_input = vector.splatf 1.5707963267948966 : vector<2xf64>
   %pole = vector.tanf %pole_input : vector<2xf64>
-  %narrow_input = vector.constant 0.5 : vector<2xf8E4M3>
+  %narrow_input = vector.splatf 0.5 : vector<2xf8E4M3>
   %narrow = vector.sinf %narrow_input : vector<2xf8E4M3>
-  %turns_input = vector.constant 4.9406564584124654e-324 : vector<2xf64>
+  %turns_input = vector.splatf 4.9406564584124654e-324 : vector<2xf64>
   %turns = vector.sinturnsf %turns_input : vector<2xf64>
-  %cardinal_input = vector.constant 4503599627370496.0 : vector<2xf64>
+  %cardinal_input = vector.splatf 4503599627370496.0 : vector<2xf64>
   %cardinal = vector.costurnsf %cardinal_input : vector<2xf64>
   func.return %large, %small, %pole, %narrow, %turns, %cardinal : vector<2xf64>, vector<2xf32>, vector<2xf64>, vector<2xf8E4M3>, vector<2xf64>, vector<2xf64>
 }
 
 // ----
 func.def @vector_trigonometry() -> (vector<2xf64>, vector<2xf32>, vector<2xf64>, vector<2xf8E4M3>, vector<2xf64>, vector<2xf64>) {
-  %large = vector.constant -0.15920170308624243 : vector<2xf64>
-  %small = vector.constant 0.87758255004882812 : vector<2xf32>
-  %pole = vector.constant 16331239353195370.0 : vector<2xf64>
-  %narrow = vector.constant 0.46875 : vector<2xf8E4M3>
-  %turns = vector.constant 2.9643938750474793e-323 : vector<2xf64>
-  %cardinal = vector.constant 1.0 : vector<2xf64>
+  %large = vector.splatf -0.15920170308624243 : vector<2xf64>
+  %small = vector.splatf 0.87758255004882812 : vector<2xf32>
+  %pole = vector.splatf 16331239353195370.0 : vector<2xf64>
+  %narrow = vector.splatf 0.46875 : vector<2xf8E4M3>
+  %turns = vector.splatf 2.9643938750474793e-323 : vector<2xf64>
+  %cardinal = vector.splatf 1.0 : vector<2xf64>
   func.return %large, %small, %pole, %narrow, %turns, %cardinal : vector<2xf64>, vector<2xf32>, vector<2xf64>, vector<2xf8E4M3>, vector<2xf64>, vector<2xf64>
 }
 
 // ====
 
 func.def @error_functions() -> (vector<2xf32>, vector<2xf32>, vector<2xf64>, vector<2xf64>, vector<2xf8E5M2>, vector<2xf8E5M2>) {
-  %input0 = vector.constant 9.5 : vector<2xf32>
+  %input0 = vector.splatf 9.5 : vector<2xf32>
   %erf0 = vector.erff %input0 : vector<2xf32>
   %erfc0 = vector.erfcf %input0 : vector<2xf32>
-  %input1 = vector.constant 9.5 : vector<2xf64>
+  %input1 = vector.splatf 9.5 : vector<2xf64>
   %erf1 = vector.erff %input1 : vector<2xf64>
   %erfc1 = vector.erfcf %input1 : vector<2xf64>
-  %input2 = vector.constant 0.75 : vector<2xf8E5M2>
+  %input2 = vector.splatf 0.75 : vector<2xf8E5M2>
   %erf2 = vector.erff %input2 : vector<2xf8E5M2>
   %erfc2 = vector.erfcf %input2 : vector<2xf8E5M2>
   func.return %erf0, %erfc0, %erf1, %erfc1, %erf2, %erfc2 : vector<2xf32>, vector<2xf32>, vector<2xf64>, vector<2xf64>, vector<2xf8E5M2>, vector<2xf8E5M2>
@@ -191,48 +191,48 @@ func.def @error_functions() -> (vector<2xf32>, vector<2xf32>, vector<2xf64>, vec
 
 // ----
 func.def @error_functions() -> (vector<2xf32>, vector<2xf32>, vector<2xf64>, vector<2xf64>, vector<2xf8E5M2>, vector<2xf8E5M2>) {
-  %erf0 = vector.constant 1.0 : vector<2xf32>
-  %erfc0 = vector.constant 3.769212609340893e-41 : vector<2xf32>
-  %erf1 = vector.constant 1.0 : vector<2xf64>
-  %erfc1 = vector.constant 3.7692144856548802e-41 : vector<2xf64>
-  %erf2 = vector.constant 0.75 : vector<2xf8E5M2>
-  %erfc2 = vector.constant 0.3125 : vector<2xf8E5M2>
+  %erf0 = vector.splatf 1.0 : vector<2xf32>
+  %erfc0 = vector.splatf 3.769212609340893e-41 : vector<2xf32>
+  %erf1 = vector.splatf 1.0 : vector<2xf64>
+  %erfc1 = vector.splatf 3.7692144856548802e-41 : vector<2xf64>
+  %erf2 = vector.splatf 0.75 : vector<2xf8E5M2>
+  %erfc2 = vector.splatf 0.3125 : vector<2xf8E5M2>
   func.return %erf0, %erfc0, %erf1, %erfc1, %erf2, %erfc2 : vector<2xf32>, vector<2xf32>, vector<2xf64>, vector<2xf64>, vector<2xf8E5M2>, vector<2xf8E5M2>
 }
 
 // ====
 
 func.def @vector_activation_tails_and_scale() -> (vector<2xf32>, vector<2xf32>, vector<2xf64>, vector<2xf64>, vector<2xf32>, vector<2xf16>) {
-  %logistic_input = vector.constant -100.0 : vector<2xf32>
+  %logistic_input = vector.splatf -100.0 : vector<2xf32>
   %logistic = vector.logisticf %logistic_input : vector<2xf32>
-  %silu_input = vector.constant -104.0 : vector<2xf32>
+  %silu_input = vector.splatf -104.0 : vector<2xf32>
   %silu = vector.siluf %silu_input : vector<2xf32>
-  %softplus_input = vector.constant -744.0 : vector<2xf64>
+  %softplus_input = vector.splatf -744.0 : vector<2xf64>
   %softplus = vector.softplusf %softplus_input : vector<2xf64>
-  %gelu_erf_input = vector.constant -38.0 : vector<2xf64>
+  %gelu_erf_input = vector.splatf -38.0 : vector<2xf64>
   %gelu_erf = vector.geluf<erf> %gelu_erf_input : vector<2xf64>
-  %gelu_tanh_input = vector.constant -8.0 : vector<2xf32>
+  %gelu_tanh_input = vector.splatf -8.0 : vector<2xf32>
   %gelu_tanh = vector.geluf<tanh> %gelu_tanh_input : vector<2xf32>
-  %gelu_logistic_input = vector.constant -5.0 : vector<2xf16>
+  %gelu_logistic_input = vector.splatf -5.0 : vector<2xf16>
   %gelu_logistic = vector.geluf<logistic> %gelu_logistic_input {scale = 1.702} : vector<2xf16>
   func.return %logistic, %silu, %softplus, %gelu_erf, %gelu_tanh, %gelu_logistic : vector<2xf32>, vector<2xf32>, vector<2xf64>, vector<2xf64>, vector<2xf32>, vector<2xf16>
 }
 
 // ----
 func.def @vector_activation_tails_and_scale() -> (vector<2xf32>, vector<2xf32>, vector<2xf64>, vector<2xf64>, vector<2xf32>, vector<2xf16>) {
-  %logistic = vector.constant 3.7835058536770061e-44 : vector<2xf32>
-  %silu = vector.constant -7.1466221680565671e-44 : vector<2xf32>
-  %softplus = vector.constant 9.8813129168249309e-324 : vector<2xf64>
-  %gelu_erf = vector.constant -1.096462776839966e-314 : vector<2xf64>
-  %gelu_tanh = vector.constant -3.1077797614663798e-21 : vector<2xf32>
-  %gelu_logistic = vector.constant -0.001007080078125 : vector<2xf16>
+  %logistic = vector.splatf 3.7835058536770061e-44 : vector<2xf32>
+  %silu = vector.splatf -7.1466221680565671e-44 : vector<2xf32>
+  %softplus = vector.splatf 9.8813129168249309e-324 : vector<2xf64>
+  %gelu_erf = vector.splatf -1.096462776839966e-314 : vector<2xf64>
+  %gelu_tanh = vector.splatf -3.1077797614663798e-21 : vector<2xf32>
+  %gelu_logistic = vector.splatf -0.001007080078125 : vector<2xf16>
   func.return %logistic, %silu, %softplus, %gelu_erf, %gelu_tanh, %gelu_logistic : vector<2xf32>, vector<2xf32>, vector<2xf64>, vector<2xf64>, vector<2xf32>, vector<2xf16>
 }
 
 // ====
 
 func.def @rounding_vector_4xf16() -> (vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) {
-  %input = vector.constant -0.5 : vector<4xf16>
+  %input = vector.splatf -0.5 : vector<4xf16>
   %ceil = vector.ceilf %input : vector<4xf16>
   %floor = vector.floorf %input : vector<4xf16>
   %trunc = vector.truncf %input : vector<4xf16>
@@ -243,18 +243,18 @@ func.def @rounding_vector_4xf16() -> (vector<4xf16>, vector<4xf16>, vector<4xf16
 
 // ----
 func.def @rounding_vector_4xf16() -> (vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) {
-  %ceil = vector.constant -0.0 : vector<4xf16>
-  %floor = vector.constant -1.0 : vector<4xf16>
-  %trunc = vector.constant -0.0 : vector<4xf16>
-  %roundeven = vector.constant -0.0 : vector<4xf16>
-  %round = vector.constant -1.0 : vector<4xf16>
+  %ceil = vector.splatf -0.0 : vector<4xf16>
+  %floor = vector.splatf -1.0 : vector<4xf16>
+  %trunc = vector.splatf -0.0 : vector<4xf16>
+  %roundeven = vector.splatf -0.0 : vector<4xf16>
+  %round = vector.splatf -1.0 : vector<4xf16>
   func.return %ceil, %floor, %trunc, %roundeven, %round : vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>
 }
 
 // ====
 
 func.def @rounding_vector_2xf64() -> (vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>) {
-  %input = vector.constant -0.5 : vector<2xf64>
+  %input = vector.splatf -0.5 : vector<2xf64>
   %ceil = vector.ceilf %input : vector<2xf64>
   %floor = vector.floorf %input : vector<2xf64>
   %trunc = vector.truncf %input : vector<2xf64>
@@ -265,10 +265,10 @@ func.def @rounding_vector_2xf64() -> (vector<2xf64>, vector<2xf64>, vector<2xf64
 
 // ----
 func.def @rounding_vector_2xf64() -> (vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>) {
-  %ceil = vector.constant -0.0 : vector<2xf64>
-  %floor = vector.constant -1.0 : vector<2xf64>
-  %trunc = vector.constant -0.0 : vector<2xf64>
-  %roundeven = vector.constant -0.0 : vector<2xf64>
-  %round = vector.constant -1.0 : vector<2xf64>
+  %ceil = vector.splatf -0.0 : vector<2xf64>
+  %floor = vector.splatf -1.0 : vector<2xf64>
+  %trunc = vector.splatf -0.0 : vector<2xf64>
+  %roundeven = vector.splatf -0.0 : vector<2xf64>
+  %round = vector.splatf -1.0 : vector<2xf64>
   func.return %ceil, %floor, %trunc, %roundeven, %round : vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>
 }

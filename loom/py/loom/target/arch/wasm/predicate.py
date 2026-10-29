@@ -245,7 +245,7 @@ def _predicate_constant_rule(
     descriptor = descriptor_lookup("wasm.v128.const")
     value = ValueProject.exact_i64_negate("result")
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=vector.vector_splati,
         descriptor=descriptor,
         guards=(
             value_type_guard("result", PREDICATE_TYPE),

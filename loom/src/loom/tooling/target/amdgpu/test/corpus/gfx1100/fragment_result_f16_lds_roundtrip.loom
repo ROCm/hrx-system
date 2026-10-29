@@ -51,8 +51,8 @@ kernel.def target(@fragment_result_lds_gfx1100_wave64) @fragment_result_f16_lds_
   %lane_plus7_f16 = scalar.fptrunc %lane_plus7_f32 : f32 to f16
 
   %init_values = vector.from_elements %lane_f16, %lane_plus1_f16, %lane_plus2_f16, %lane_plus3_f16, %lane_plus4_f16, %lane_plus5_f16, %lane_plus6_f16, %lane_plus7_f16 : vector<8xf16>
-  %lhs_values = vector.constant 0.0 : vector<16xf16>
-  %rhs_values = vector.constant 0.0 : vector<16xf16>
+  %lhs_values = vector.splatf 0.0 : vector<16xf16>
+  %rhs_values = vector.splatf 0.0 : vector<16xf16>
 
   %lhs = vector.fragment<lhs> %lhs_values shape [%m, %k] : vector<16xf16>
   %rhs = vector.fragment<rhs> %rhs_values shape [%k, %n] : vector<16xf16>

@@ -109,7 +109,7 @@ kernel.def target(@fragment_numeric_coordinates_gfx11) @fragment_affine_stride_s
   %row = index.add %row_prefix, %fragment_extent : index
   %global = buffer.assume.memory_space<global> %output : buffer
   %view = buffer.view %global[%base] : buffer -> view<8336x[%width]xbf16>
-  %values = vector.constant 0.0 : vector<8xf32>
+  %values = vector.splatf 0.0 : vector<8xf32>
   %fragment = vector.fragment<result> %values shape [%fragment_extent, %fragment_extent] : vector<8xf32>
   vector.fragment.store<result> %fragment, %view[%row, 0] shape [%fragment_extent, %fragment_extent] : vector<8xf32>, view<8336x[%width]xbf16>
   kernel.return

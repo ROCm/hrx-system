@@ -43,8 +43,8 @@ func.def target(@core_target) @private_atomic_worker(%input_arg: buffer, %output
   %enabled = scalar.constant true : i1
   %disabled = scalar.constant false : i1
   %mask = vector.from_elements %enabled, %disabled : vector<2xi1>
-  %increment_i32 = vector.constant 1 : vector<2xi32>
-  %passthrough_i32 = vector.constant -101 : vector<2xi32>
+  %increment_i32 = vector.splati 1 : vector<2xi32>
+  %passthrough_i32 = vector.splati -101 : vector<2xi32>
   vector.atomic.reduce<addi> %increment_i32, %cells_i32[0][%offsets] {ordering = release, scope = system} : vector<2xi32>, view<2xi32>, vector<2xindex>
   vector.atomic.reduce.mask<xori> %increment_i32, %cells_i32[0][%offsets], %mask {ordering = relaxed, scope = thread} : vector<2xi32>, view<2xi32>, vector<2xindex>, vector<2xi1>
   %old_i32 = vector.atomic.rmw<subi> %increment_i32, %cells_i32[0][%offsets] {ordering = acquire, scope = device} : vector<2xi32>, view<2xi32>, vector<2xindex>

@@ -143,12 +143,12 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @word_lanes(%input: re
 
 // Integer immediates retain float payload bits, including signed zero.
 func.def @narrow_constants() -> (vector<16xi8>, vector<16xf8E4M3>, vector<16xf8E5M2>, vector<8xi16>, vector<8xf16>, vector<8xbf16>) {
-  %bytes = vector.constant -91 : vector<16xi8>
-  %e4m3 = vector.constant -2.0 : vector<16xf8E4M3>
-  %e5m2 = vector.constant -0.0 : vector<16xf8E5M2>
-  %words = vector.constant -21846 : vector<8xi16>
-  %half = vector.constant -0.0 : vector<8xf16>
-  %bfloat = vector.constant -2.0 : vector<8xbf16>
+  %bytes = vector.splati -91 : vector<16xi8>
+  %e4m3 = vector.splatf -2.0 : vector<16xf8E4M3>
+  %e5m2 = vector.splatf -0.0 : vector<16xf8E5M2>
+  %words = vector.splati -21846 : vector<8xi16>
+  %half = vector.splatf -0.0 : vector<8xf16>
+  %bfloat = vector.splatf -2.0 : vector<8xbf16>
   func.return %bytes, %e4m3, %e5m2, %words, %half, %bfloat : vector<16xi8>, vector<16xf8E4M3>, vector<16xf8E5M2>, vector<8xi16>, vector<8xf16>, vector<8xbf16>
 }
 

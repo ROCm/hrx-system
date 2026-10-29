@@ -62,7 +62,7 @@ def test_check_expect_close_rewrites_to_typed_approximate() -> None:
 def test_check_expect_close_rewrite_tolerates_zero_length_compact_types() -> None:
     text = (
         "func.def @empty() -> (vector<0xi32>) {\n"
-        "  %empty = vector.constant [] : vector<0xi32>\n"
+        "  %empty = vector.empty : vector<0xi32>\n"
         "  func.return %empty : vector<0xi32>\n"
         "}\n"
         "check.case @case {\n"

@@ -13,7 +13,7 @@ func.def @shift_cfg(%input: i64, %condition: i1) -> (i64) {
   test.use %head_high : i64
   %local_scalar = scalar.constant 7 : i64
   %scalar_high = test.fact_range_hi %local_scalar : i64 -> i64
-  %local_vector = vector.constant 11 : vector<2xi32>
+  %local_vector = vector.splati 11 : vector<2xi32>
   %element_high = test.fact_all_equal_range_hi %local_vector : vector<2xi32> -> i64
   test.use %scalar_high, %element_high : i64, i64
   %next0 = test.addi %slot1, %seed : i64

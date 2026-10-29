@@ -72,8 +72,8 @@ func.def @vector_f32_comparisons_no_nan(%lhs_buffer: buffer, %rhs_buffer: buffer
   %output_view = buffer.view %output_buffer[%base] : buffer -> view<24xi32>
   %lhs = vector.load %lhs_view[0] : view<4xf32> -> vector<4xf32>
   %rhs = vector.load %rhs_view[0] : view<4xf32> -> vector<4xf32>
-  %true = vector.constant -1 : vector<4xi32>
-  %false = vector.constant 0 : vector<4xi32>
+  %true = vector.splati -1 : vector<4xi32>
+  %false = vector.splati 0 : vector<4xi32>
   %not_equal = vector.cmpf<nnan> one, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
   %not_equal_words = vector.select %not_equal, %true, %false : vector<4xi32>
   vector.store %not_equal_words, %output_view[0] : vector<4xi32>, view<24xi32>
@@ -104,7 +104,7 @@ func.def @vector_bf16_origin_scale(%input_buffer: buffer, %output_buffer: buffer
   %output_view = buffer.view %output_buffer[%base] : buffer -> view<16xf32>
   %input = vector.load %input_view[0] : view<16xbf16> -> vector<16xbf16>
   %wide = vector.extf %input : vector<16xbf16> to vector<16xf32>
-  %scale = vector.constant 1.4453125 : vector<16xf32>
+  %scale = vector.splatf 1.4453125 : vector<16xf32>
   %product = vector.mulf<nnan> %wide, %scale : vector<16xf32>
   vector.store %product, %output_view[0] : vector<16xf32>, view<16xf32>
   func.return
@@ -123,7 +123,7 @@ func.def @f32_power_of_two_scale(%input_buffer: buffer, %output_buffer: buffer) 
   %up_result = scalar.mulf %up_factor, %up_value : f32
   view.store %up_result, %output[1] : f32, view<20xf32>
   %vector_value = vector.load %input[4] : view<20xf32> -> vector<16xf32>
-  %vector_factor = vector.constant 0.001953125 : vector<16xf32>
+  %vector_factor = vector.splatf 0.001953125 : vector<16xf32>
   %vector_result = vector.mulf %vector_value, %vector_factor : vector<16xf32>
   vector.store %vector_result, %output[4] : vector<16xf32>, view<20xf32>
   func.return

@@ -629,16 +629,15 @@ TEST_P(FactTableLoopScratchTest,
       loom_region_entry_block(loom_loop_like_body(inner))->last_op;
   loom_builder_set_before(&builder_, yield);
   loom_op_t* constant = nullptr;
-  IREE_ASSERT_OK(loom_vector_constant_build(&builder_, loom_attr_i64(7),
-                                            vector_type_, LOOM_LOCATION_UNKNOWN,
-                                            &constant));
-  const auto result = loom_vector_constant_result(constant);
+  IREE_ASSERT_OK(loom_vector_splati_build(&builder_, 7, vector_type_,
+                                          LOOM_LOCATION_UNKNOWN, &constant));
+  const auto result = loom_vector_splati_result(constant);
   IREE_ASSERT_OK(loom_op_set_operand(module_, yield, 0, result));
 
   for (unsigned scope = 0; scope < 2; ++scope) {
     for (int64_t value : {7, 11}) {
-      IREE_ASSERT_OK(loom_vector_constant_set_value(module_, constant,
-                                                    loom_attr_i64(value)));
+      IREE_ASSERT_OK(
+          loom_op_set_attr(module_, constant, 0, loom_attr_i64(value)));
       IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, loop));
       EXPECT_FALSE(table_.replaying);
       const auto facts = loom_value_fact_table_lookup(&table_, result);

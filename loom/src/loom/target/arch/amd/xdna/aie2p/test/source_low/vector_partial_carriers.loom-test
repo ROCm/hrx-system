@@ -59,7 +59,7 @@ func.def target(@target) @store_snapshot_after_write(%input: buffer, %output: bu
   %input_view = buffer.view %input_aligned[%origin] : buffer -> view<128xi8>
   %output_view = buffer.view %output_aligned[%origin] : buffer -> view<128xi8>
   %snapshot = vector.load %input_view[0] : view<128xi8> -> vector<128xi8>
-  %sentinel = vector.constant -91 : vector<64xi8>
+  %sentinel = vector.splati -91 : vector<64xi8>
   vector.store<volatile> %sentinel, %input_view[0] : vector<64xi8>, view<128xi8>
   vector.store<volatile> %sentinel, %input_view[64] : vector<64xi8>, view<128xi8>
   vector.store %snapshot, %output_view[0] : vector<128xi8>, view<128xi8>

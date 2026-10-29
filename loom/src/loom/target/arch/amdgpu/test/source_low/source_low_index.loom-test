@@ -477,7 +477,7 @@ kernel.def @workitem_y_lds_uses_explicit_vaddr() {
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32>
   %output_view = buffer.view %output[%output_base] : buffer -> view<64xi32>
-  %value = vector.constant 7 : vector<1xi32>
+  %value = vector.splati 7 : vector<1xi32>
   vector.store %value, %scratch_view[%row] : vector<1xi32>, view<64xi32>
   %loaded = vector.load %scratch_view[%row] : view<64xi32> -> vector<1xi32>
   vector.store %loaded, %output_view[%row] : vector<1xi32>, view<64xi32>
@@ -515,7 +515,7 @@ kernel.def @dispatch_id_xy_global_b32() {
   %linear = index.madd %dispatch_row, %row_stride, %dispatch_column : index
   %output_base = index.constant 0 : offset
   %output_view = buffer.view %output[%output_base] : buffer -> view<512xi32>
-  %stored_value = vector.constant 1 : vector<1xi32>
+  %stored_value = vector.splati 1 : vector<1xi32>
   vector.store %stored_value, %output_view[%linear] : vector<1xi32>, view<512xi32>
   kernel.return
 }

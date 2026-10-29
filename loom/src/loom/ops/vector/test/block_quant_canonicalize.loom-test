@@ -13,12 +13,12 @@ func.def @q4_0_repack_to_dot8i4_micro_gemv() -> (i32, i32) {
   %row1_storage = scalar.constant -19088744 : i32
   %rows = vector.from_elements %row0_storage, %row1_storage : vector<2xi32>
 
-  %q4_offset_to_signed_mask = vector.constant -2004318072 : vector<2xi32>
+  %q4_offset_to_signed_mask = vector.splati -2004318072 : vector<2xi32>
   %signed_rows = vector.xori %rows, %q4_offset_to_signed_mask : vector<2xi32>
 
   %rhs_storage = scalar.constant 124076833 : i32
   %rhs = vector.splat %rhs_storage : vector<2xi32>
-  %acc = vector.constant 0 : vector<2xi32>
+  %acc = vector.splati 0 : vector<2xi32>
   %dot = vector.dot8i4<s4u4> %signed_rows, %rhs, %acc : vector<2xi32>
   %r0 = vector.extract %dot[0] : vector<2xi32> -> i32
   %r1 = vector.extract %dot[1] : vector<2xi32> -> i32
@@ -51,7 +51,7 @@ func.def @q4_0_reference_chunk_folds() -> (i1) {
   %lo = vector.bitfield.extractu %qs {offset = 0, width = 4} : vector<4xi8> -> vector<4xi8>
   %hi = vector.bitfield.extractu %qs {offset = 4, width = 4} : vector<4xi8> -> vector<4xi8>
   %codes = vector.concat<0> %lo, %hi : vector<4xi8>, vector<4xi8> -> vector<8xi8>
-  %bias = vector.constant -8 : vector<8xi8>
+  %bias = vector.splati -8 : vector<8xi8>
   %signed = vector.addi %codes, %bias : vector<8xi8>
 
   %e0 = scalar.constant -8 : i8
@@ -229,8 +229,8 @@ func.def @q8_0_decoded_pair_dot_reference_folds() -> (f32) {
   %rhs3 = scalar.constant 1 : i8
   %rhs_payload = vector.from_elements %rhs0, %rhs1, %rhs2, %rhs3 : vector<4xi8>
 
-  %lhs_scale = vector.constant 0.5 : vector<1xf16>
-  %rhs_scale = vector.constant -0.25 : vector<1xf16>
+  %lhs_scale = vector.splatf 0.5 : vector<1xf16>
+  %rhs_scale = vector.splatf -0.25 : vector<1xf16>
   %lhs = vector.decode %lhs_payload using %schema {scale = %lhs_scale : vector<1xf16>} : vector<4xi8>, encoding<schema> -> vector<4xf32>
   %rhs = vector.decode %rhs_payload using %schema {scale = %rhs_scale : vector<1xf16>} : vector<4xi8>, encoding<schema> -> vector<4xf32>
   %dot_init = scalar.constant 0.0 : f32
@@ -265,11 +265,11 @@ func.def @q8_0_explicit_scaled_dot4i_contract_folds() -> (f32) {
   %rhs3 = scalar.constant 1 : i8
   %rhs = vector.from_elements %rhs0, %rhs1, %rhs2, %rhs3 : vector<4xi8>
 
-  %acc = vector.constant 0 : vector<1xi32>
+  %acc = vector.splati 0 : vector<1xi32>
   %dot = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   %dotf = vector.sitofp %dot : vector<1xi32> to vector<1xf32>
-  %lhs_scale = vector.constant 0.5 : vector<1xf32>
-  %rhs_scale = vector.constant -0.25 : vector<1xf32>
+  %lhs_scale = vector.splatf 0.5 : vector<1xf32>
+  %rhs_scale = vector.splatf -0.25 : vector<1xf32>
   %combined_scale = vector.mulf %lhs_scale, %rhs_scale : vector<1xf32>
   %scaled = vector.mulf %dotf, %combined_scale : vector<1xf32>
   %result = vector.extract %scaled[0] : vector<1xf32> -> f32
@@ -344,10 +344,10 @@ func.def @q8_0_decoded_dotf_keeps_strict_float_contract(%lhs_payload: vector<32x
 // reference path.
 func.def @q8_0_vector_decode_folds() -> (i1) {
   %schema = encoding.define #ggml.q8_0 : encoding<schema>
-  %payload = vector.constant -3 : vector<32xi8>
-  %scale = vector.constant 0.5 : vector<1xf16>
+  %payload = vector.splati -3 : vector<32xi8>
+  %scale = vector.splatf 0.5 : vector<1xf16>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf16>} : vector<32xi8>, encoding<schema> -> vector<32xf32>
-  %expected = vector.constant -1.5 : vector<32xf32>
+  %expected = vector.splatf -1.5 : vector<32xf32>
   %matches = vector.cmpf oeq, %decoded, %expected : vector<32xf32> -> vector<32xi1>
   %true = scalar.constant true : i1
   %ok = vector.reduce<andi> %matches, %true : vector<32xi1>, i1
@@ -386,7 +386,7 @@ func.def @q6_k_reference_chunk_folds() -> (i1) {
   %lo6 = vector.bitfield.insert %lo2 into %lo4 {offset = 4, width = 2} : vector<4xi8>, vector<4xi8>
   %hi6 = vector.bitfield.insert %hi2 into %hi4 {offset = 4, width = 2} : vector<4xi8>, vector<4xi8>
   %codes = vector.interleave<0> %lo6, %hi6 : vector<4xi8>, vector<4xi8> -> vector<8xi8>
-  %bias = vector.constant -32 : vector<8xi8>
+  %bias = vector.splati -32 : vector<8xi8>
   %signed = vector.addi %codes, %bias : vector<8xi8>
 
   %e0 = scalar.constant -32 : i8

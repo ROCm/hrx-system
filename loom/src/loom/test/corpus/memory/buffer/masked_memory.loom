@@ -41,7 +41,7 @@ func.def @masked_empty_view(%value: i32) -> (i32, i32) {
   %length = index.constant 0 : offset
   %storage = buffer.alloca<private> align(4) %length : buffer
   %view = buffer.view %storage[%length] : buffer -> view<0xi32>
-  %mask = vector.constant false : vector<2xi1>
+  %mask = vector.splati 0 : vector<2xi1>
   %values = vector.splat %value : vector<2xi32>
   vector.store.mask %values, %view[7], %mask : vector<2xi32>, view<0xi32>, vector<2xi1>
   %loaded = vector.load.mask %view[7], %mask, %values : view<0xi32>, vector<2xi1>, vector<2xi32>
@@ -123,7 +123,7 @@ func.def @counted_masked_packets(%ordinal: index, %input: buffer, %output: buffe
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
   %target = buffer.view %output[%base] : buffer -> view<80xi32>
-  %fallback = vector.constant -1 : vector<4xi32>
+  %fallback = vector.splati -1 : vector<4xi32>
   scf.for %packet = [%c0 to %count step %c1] {
     %origin = index.mul %packet, %packet_width : index
     %mask = vector.mask.range [%origin to %extent step %c1] : index -> vector<4xi1>

@@ -34,9 +34,9 @@ func.def @integer_to_float_classes(%input: vector<4xi32>) -> (vector<4xi1>, vect
 // ----
 func.def @integer_to_float_classes(%input: vector<4xi32>) -> (vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>) {
   %unsigned = vector.uitofp %input : vector<4xi32> to vector<4xf16>
-  %signed_nan = vector.constant false : vector<4xi1>
-  %signed_finite = vector.constant true : vector<4xi1>
-  %unsigned_nan = vector.constant false : vector<4xi1>
+  %signed_nan = vector.splati 0 : vector<4xi1>
+  %signed_finite = vector.splati 1 : vector<4xi1>
+  %unsigned_nan = vector.splati 0 : vector<4xi1>
   %unsigned_inf = vector.isinff %unsigned : vector<4xf16> -> vector<4xi1>
   func.return %signed_nan, %signed_finite, %unsigned_nan, %unsigned_inf : vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>
 }
@@ -45,7 +45,7 @@ func.def @integer_to_float_classes(%input: vector<4xi32>) -> (vector<4xi1>, vect
 
 // Uniform narrowing rounds before subsequent widening and arithmetic.
 func.def @bf16_residual_constant() -> (vector<16xbf16>) {
-  %input = vector.constant 0.5 : vector<16xf32>
+  %input = vector.splatf 0.5 : vector<16xf32>
   %high = vector.fptrunc %input : vector<16xf32> to vector<16xbf16>
   %back = vector.extf %high : vector<16xbf16> to vector<16xf32>
   %residual = vector.subf %input, %back : vector<16xf32>
@@ -55,7 +55,7 @@ func.def @bf16_residual_constant() -> (vector<16xbf16>) {
 
 // ----
 func.def @bf16_residual_constant() -> (vector<16xbf16>) {
-  %low = vector.constant 0.0 : vector<16xbf16>
+  %low = vector.splatf 0.0 : vector<16xbf16>
   func.return %low : vector<16xbf16>
 }
 
@@ -88,11 +88,11 @@ func.def @bf16_rounding_lanes() -> (f32, f32, i16) {
 
 // Destination formats distinguish overflow to infinity from saturation.
 func.def @narrow_overflow() -> (i1, f32) {
-  %large_half = vector.constant 65520.0 : vector<4xf32>
+  %large_half = vector.splatf 65520.0 : vector<4xf32>
   %half = vector.fptrunc %large_half : vector<4xf32> to vector<4xf16>
   %half_inf = vector.isinff %half : vector<4xf16> -> vector<4xi1>
   %is_inf = vector.extract %half_inf[0] : vector<4xi1> -> i1
-  %large_fp8 = vector.constant 500.0 : vector<4xf32>
+  %large_fp8 = vector.splatf 500.0 : vector<4xf32>
   %fp8 = vector.fptrunc %large_fp8 : vector<4xf32> to vector<4xf8E4M3>
   %back = vector.extf %fp8 : vector<4xf8E4M3> to vector<4xf32>
   %saturated = vector.extract %back[0] : vector<4xf32> -> f32
@@ -110,7 +110,7 @@ func.def @narrow_overflow() -> (i1, f32) {
 
 // A NaN discovered by bitcast retains classification without inventing payload.
 func.def @narrow_nan() -> (vector<4xbf16>, i1) {
-  %bits = vector.constant 2139095041 : vector<4xi32>
+  %bits = vector.splati 2139095041 : vector<4xi32>
   %input = vector.bitcast %bits : vector<4xi32> to vector<4xf32>
   %narrow = vector.fptrunc %input : vector<4xf32> to vector<4xbf16>
   %classes = vector.isnanf %narrow : vector<4xbf16> -> vector<4xi1>
@@ -120,7 +120,7 @@ func.def @narrow_nan() -> (vector<4xbf16>, i1) {
 
 // ----
 func.def @narrow_nan() -> (vector<4xbf16>, i1) {
-  %bits = vector.constant 2139095041 : vector<4xi32>
+  %bits = vector.splati 2139095041 : vector<4xi32>
   %input = vector.bitcast %bits : vector<4xi32> to vector<4xf32>
   %narrow = vector.fptrunc %input : vector<4xf32> to vector<4xbf16>
   %is_nan = scalar.constant true : i1
@@ -131,14 +131,14 @@ func.def @narrow_nan() -> (vector<4xbf16>, i1) {
 
 // F64 narrowing preserves which side of a BF16 midpoint the source occupies.
 func.def @f64_above_bf16_midpoint() -> (vector<4xbf16>) {
-  %input = vector.constant 1.0039062500000002 : vector<4xf64>
+  %input = vector.splatf 1.0039062500000002 : vector<4xf64>
   %narrow = vector.fptrunc %input : vector<4xf64> to vector<4xbf16>
   func.return %narrow : vector<4xbf16>
 }
 
 // ----
 func.def @f64_above_bf16_midpoint() -> (vector<4xbf16>) {
-  %narrow = vector.constant 1.0078125 : vector<4xbf16>
+  %narrow = vector.splatf 1.0078125 : vector<4xbf16>
   func.return %narrow : vector<4xbf16>
 }
 
@@ -445,7 +445,7 @@ func.def @f64_to_f8e5m2_boundary_values() -> (vector<16xf8E5M2>) {
 
 // An explicit F32 intermediate still rounds before the BF16 conversion.
 func.def @f64_staged_narrowing() -> (bf16, bf16) {
-  %input = vector.constant 1.0039062500000002 : vector<4xf64>
+  %input = vector.splatf 1.0039062500000002 : vector<4xf64>
   %direct = vector.fptrunc %input : vector<4xf64> to vector<4xbf16>
   %intermediate = vector.fptrunc %input : vector<4xf64> to vector<4xf32>
   %staged = vector.fptrunc %intermediate : vector<4xf32> to vector<4xbf16>
@@ -511,8 +511,8 @@ func.def @fragment_numeric_envelope(%input: vector<4xi32>, %value: f32, %unknown
 func.def @fragment_numeric_envelope(%input: vector<4xi32>, %value: f32, %unknown: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>, vector<4xi1>) {
   %extent = index.constant 16 : index
   %unknown_fragment = vector.fragment<result> %unknown shape [%extent, %extent] : vector<4xf32>
-  %is_finite = vector.constant true : vector<4xi1>
-  %is_nan = vector.constant false : vector<4xi1>
+  %is_finite = vector.splati 1 : vector<4xi1>
+  %is_nan = vector.splati 0 : vector<4xi1>
   %unknown_nan = vector.isnanf %unknown_fragment : vector<4xf32> -> vector<4xi1>
   func.return %is_finite, %is_nan, %unknown_nan : vector<4xi1>, vector<4xi1>, vector<4xi1>
 }
@@ -522,8 +522,8 @@ func.def @fragment_numeric_envelope(%input: vector<4xi32>, %value: f32, %unknown
 // Exact element envelopes do not route aggregate results to scalar constant
 // materialization. Signed and unsigned conversions still fold as vectors.
 func.def @constant_conversions() -> (vector<4xf32>, vector<4xf32>, vector<4xbf16>) {
-  %integer = vector.constant 17 : vector<4xi32>
-  %byte = vector.constant -1 : vector<4xi8>
+  %integer = vector.splati 17 : vector<4xi32>
+  %byte = vector.splati -1 : vector<4xi8>
   %wide = vector.sitofp %integer : vector<4xi32> to vector<4xf32>
   %unsigned = vector.uitofp %byte : vector<4xi8> to vector<4xf32>
   %narrow = vector.fptrunc %wide : vector<4xf32> to vector<4xbf16>
@@ -532,8 +532,8 @@ func.def @constant_conversions() -> (vector<4xf32>, vector<4xf32>, vector<4xbf16
 
 // ----
 func.def @constant_conversions() -> (vector<4xf32>, vector<4xf32>, vector<4xbf16>) {
-  %wide = vector.constant 17.0 : vector<4xf32>
-  %unsigned = vector.constant 255.0 : vector<4xf32>
-  %narrow = vector.constant 17.0 : vector<4xbf16>
+  %wide = vector.splatf 17.0 : vector<4xf32>
+  %unsigned = vector.splatf 255.0 : vector<4xf32>
+  %narrow = vector.splatf 17.0 : vector<4xbf16>
   func.return %wide, %unsigned, %narrow : vector<4xf32>, vector<4xf32>, vector<4xbf16>
 }

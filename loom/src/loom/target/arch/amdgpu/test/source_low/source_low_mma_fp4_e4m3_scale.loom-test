@@ -25,7 +25,7 @@ kernel.def target(@target) @fp4_e4m3_scale16_wmma_global_scale_epilogue() {
   %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=64, payload_registers=8, scale_format=f8e4m3, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {scale = %lhs_block_scale : vector<2xi32>, schema = %schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {scale = %rhs_block_scale : vector<2xi32>, schema = %schema : encoding<schema>} : vector<8xi32>
-  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %zero_acc = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %local_result = vector.mma %lhs, %rhs, %init : vector<8xi32>, vector<8xi32>, vector<8xf32>
   %lhs_global_scale = view.load %lhs_global_scale_view[0] : view<1xf32> -> f32
@@ -107,7 +107,7 @@ func.def target(@target) @fp4_e4m3_scale16_wmma_k_loop_final_domain_accumulator(
   %schema = encoding.define #encoding.operand<element_format=f4e2m1, payload_elements=64, payload_registers=8, scale_format=f8e4m3, scale_group_elements=16, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   %lhs = vector.fragment<lhs> %lhs_data shape [%m, %k] using {scale = %lhs_block_scale : vector<2xi32>, schema = %schema : encoding<schema>} : vector<8xi32>
   %rhs = vector.fragment<rhs> %rhs_data shape [%k, %n] using {scale = %rhs_block_scale : vector<2xi32>, schema = %schema : encoding<schema>} : vector<8xi32>
-  %zero_acc = vector.constant 0.0 : vector<8xf32>
+  %zero_acc = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<8xf32>
   %local_result = scf.for %k_tile = [%k_tile_begin to %k_tile_end step %k_tile_step](%local_accumulator = %init : vector<8xf32>) -> (vector<8xf32>) {
     %next = vector.mma %lhs, %rhs, %local_accumulator : vector<8xi32>, vector<8xi32>, vector<8xf32>

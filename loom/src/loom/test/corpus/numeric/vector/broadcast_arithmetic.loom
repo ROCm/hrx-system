@@ -767,7 +767,7 @@ func.def inline @arithmetic_i16_masks(%a: vector<8xi16>, %b: vector<8xi16>, %c: 
   %xs = vector.splat %x : vector<8xi16>
   %ys = vector.splat %y : vector<8xi16>
   %zs = vector.splat %z : vector<8xi16>
-  %shift_mask = vector.constant 15 : vector<8xi16>
+  %shift_mask = vector.splati 15 : vector<8xi16>
   %shifts = vector.andi %b, %shift_mask : vector<8xi16>
   %scalar_shift_mask = scalar.constant 15 : i16
   %scalar_shift = scalar.andi %y, %scalar_shift_mask : i16

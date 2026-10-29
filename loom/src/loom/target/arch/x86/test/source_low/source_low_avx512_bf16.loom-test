@@ -66,7 +66,7 @@ x86.target<avx512> @target {features = [avx512bf16]}
 func.def target(@target) @zero_masked_narrow(%lhs: vector<8xf32>, %rhs: vector<8xf32>, %input: vector<8xf32>) -> (vector<8xbf16>) {
   %condition = vector.cmpf olt, %lhs, %rhs : vector<8xf32> -> vector<8xi1>
   %narrow = vector.fptrunc<daz> %input : vector<8xf32> to vector<8xbf16>
-  %c0 = vector.constant 0.0 : vector<8xbf16>
+  %c0 = vector.splatf 0.0 : vector<8xbf16>
   %result = vector.select %condition, %narrow, %c0 : vector<8xbf16>
   func.return %result : vector<8xbf16>
 }

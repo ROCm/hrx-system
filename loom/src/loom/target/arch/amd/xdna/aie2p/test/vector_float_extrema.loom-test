@@ -9,11 +9,11 @@ func.def @finite_nan_minimum_f8e4m3(%lhs: vector<4xf8E4M3>, %rhs: vector<4xf8E4M
 
 // ----
 func.def @finite_nan_minimum_f8e4m3(%lhs: vector<4xf8E4M3>, %rhs: vector<4xf8E4M3>) -> (vector<4xf8E4M3>) {
-  %4 = vector.constant 0 : vector<4xi8>
-  %5 = vector.constant 127 : vector<4xi8>
-  %6 = vector.constant 127 : vector<4xi8>
-  %7 = vector.constant -128 : vector<4xi8>
-  %8 = vector.constant -1 : vector<4xi8>
+  %4 = vector.splati 0 : vector<4xi8>
+  %5 = vector.splati 127 : vector<4xi8>
+  %6 = vector.splati 127 : vector<4xi8>
+  %7 = vector.splati -128 : vector<4xi8>
+  %8 = vector.splati -1 : vector<4xi8>
   %9 = vector.bitcast %lhs : vector<4xf8E4M3> to vector<4xi8>
   %10 = vector.andi %9, %5 : vector<4xi8>
   %11 = vector.cmpi eq, %10, %6 : vector<4xi8> -> vector<4xi1>
@@ -47,12 +47,12 @@ func.def @ieee_minnum_f8e5m2(%lhs: vector<4xf8E5M2>, %rhs: vector<4xf8E5M2>) -> 
 
 // ----
 func.def @ieee_minnum_f8e5m2(%lhs: vector<4xf8E5M2>, %rhs: vector<4xf8E5M2>) -> (vector<4xf8E5M2>) {
-  %4 = vector.constant 0 : vector<4xi8>
-  %5 = vector.constant 127 : vector<4xi8>
-  %6 = vector.constant 124 : vector<4xi8>
-  %7 = vector.constant 2 : vector<4xi8>
-  %8 = vector.constant -128 : vector<4xi8>
-  %9 = vector.constant -1 : vector<4xi8>
+  %4 = vector.splati 0 : vector<4xi8>
+  %5 = vector.splati 127 : vector<4xi8>
+  %6 = vector.splati 124 : vector<4xi8>
+  %7 = vector.splati 2 : vector<4xi8>
+  %8 = vector.splati -128 : vector<4xi8>
+  %9 = vector.splati -1 : vector<4xi8>
   %10 = vector.bitcast %lhs : vector<4xf8E5M2> to vector<4xi8>
   %11 = vector.andi %10, %5 : vector<4xi8>
   %12 = vector.cmpi ugt, %11, %6 : vector<4xi8> -> vector<4xi1>
@@ -89,11 +89,11 @@ func.def @ordered_clamp_bf16(%value: vector<4xbf16>, %lower: vector<4xbf16>, %up
 
 // ----
 func.def @ordered_clamp_bf16(%value: vector<4xbf16>, %lower: vector<4xbf16>, %upper: vector<4xbf16>) -> (vector<4xbf16>) {
-  %5 = vector.constant 0 : vector<4xi16>
-  %6 = vector.constant 32767 : vector<4xi16>
-  %7 = vector.constant 32640 : vector<4xi16>
-  %8 = vector.constant -32768 : vector<4xi16>
-  %9 = vector.constant -1 : vector<4xi16>
+  %5 = vector.splati 0 : vector<4xi16>
+  %6 = vector.splati 32767 : vector<4xi16>
+  %7 = vector.splati 32640 : vector<4xi16>
+  %8 = vector.splati -32768 : vector<4xi16>
+  %9 = vector.splati -1 : vector<4xi16>
   %10 = vector.bitcast %value : vector<4xbf16> to vector<4xi16>
   %11 = vector.andi %10, %6 : vector<4xi16>
   %12 = vector.cmpi ugt, %11, %7 : vector<4xi16> -> vector<4xi1>
@@ -146,12 +146,12 @@ func.def @number_clamp_f16(%value: vector<4xf16>, %lower: vector<4xf16>, %upper:
 
 // ----
 func.def @number_clamp_f16(%value: vector<4xf16>, %lower: vector<4xf16>, %upper: vector<4xf16>) -> (vector<4xf16>) {
-  %5 = vector.constant 0 : vector<4xi16>
-  %6 = vector.constant 32767 : vector<4xi16>
-  %7 = vector.constant 31744 : vector<4xi16>
-  %8 = vector.constant 512 : vector<4xi16>
-  %9 = vector.constant -32768 : vector<4xi16>
-  %10 = vector.constant -1 : vector<4xi16>
+  %5 = vector.splati 0 : vector<4xi16>
+  %6 = vector.splati 32767 : vector<4xi16>
+  %7 = vector.splati 31744 : vector<4xi16>
+  %8 = vector.splati 512 : vector<4xi16>
+  %9 = vector.splati -32768 : vector<4xi16>
+  %10 = vector.splati -1 : vector<4xi16>
   %11 = vector.bitcast %value : vector<4xf16> to vector<4xi16>
   %12 = vector.andi %11, %6 : vector<4xi16>
   %13 = vector.cmpi ugt, %12, %7 : vector<4xi16> -> vector<4xi1>
@@ -202,12 +202,12 @@ func.def @ieee_clamp_f32(%value: vector<4xf32>, %lower: vector<4xf32>, %upper: v
 
 // ----
 func.def @ieee_clamp_f32(%value: vector<4xf32>, %lower: vector<4xf32>, %upper: vector<4xf32>) -> (vector<4xf32>) {
-  %5 = vector.constant 0 : vector<4xi32>
-  %6 = vector.constant 2147483647 : vector<4xi32>
-  %7 = vector.constant 2139095040 : vector<4xi32>
-  %8 = vector.constant 4194304 : vector<4xi32>
-  %9 = vector.constant -2147483648 : vector<4xi32>
-  %10 = vector.constant -1 : vector<4xi32>
+  %5 = vector.splati 0 : vector<4xi32>
+  %6 = vector.splati 2147483647 : vector<4xi32>
+  %7 = vector.splati 2139095040 : vector<4xi32>
+  %8 = vector.splati 4194304 : vector<4xi32>
+  %9 = vector.splati -2147483648 : vector<4xi32>
+  %10 = vector.splati -1 : vector<4xi32>
   %11 = vector.bitcast %value : vector<4xf32> to vector<4xi32>
   %12 = vector.andi %11, %6 : vector<4xi32>
   %13 = vector.cmpi ugt, %12, %7 : vector<4xi32> -> vector<4xi1>
@@ -260,9 +260,9 @@ func.def @relaxed_clamp_f64(%value: vector<8xf64>, %lower: vector<8xf64>, %upper
 
 // ----
 func.def @relaxed_clamp_f64(%value: vector<8xf64>, %lower: vector<8xf64>, %upper: vector<8xf64>) -> (vector<8xf64>) {
-  %5 = vector.constant 0 : vector<8xi64>
-  %6 = vector.constant -9223372036854775808 : vector<8xi64>
-  %7 = vector.constant -1 : vector<8xi64>
+  %5 = vector.splati 0 : vector<8xi64>
+  %6 = vector.splati -9223372036854775808 : vector<8xi64>
+  %7 = vector.splati -1 : vector<8xi64>
   %8 = vector.bitcast %value : vector<8xf64> to vector<8xi64>
   %9 = vector.cmpi slt, %8, %5 : vector<8xi64> -> vector<8xi1>
   %10 = vector.select %9, %7, %6 : vector<8xi64>
@@ -298,12 +298,12 @@ func.def @wide_shaped_maximum_f64(%lhs: vector<3x3xf64>, %rhs: vector<3x3xf64>) 
   %5 = vector.bitcast %rhs : vector<3x3xf64> to vector<9xf64>
   %6 = vector.slice %4[0] : vector<9xf64> -> vector<8xf64>
   %7 = vector.slice %5[0] : vector<9xf64> -> vector<8xf64>
-  %8 = vector.constant 0 : vector<8xi64>
-  %9 = vector.constant 9223372036854775807 : vector<8xi64>
-  %10 = vector.constant 9218868437227405312 : vector<8xi64>
-  %11 = vector.constant 2251799813685248 : vector<8xi64>
-  %12 = vector.constant -9223372036854775808 : vector<8xi64>
-  %13 = vector.constant -1 : vector<8xi64>
+  %8 = vector.splati 0 : vector<8xi64>
+  %9 = vector.splati 9223372036854775807 : vector<8xi64>
+  %10 = vector.splati 9218868437227405312 : vector<8xi64>
+  %11 = vector.splati 2251799813685248 : vector<8xi64>
+  %12 = vector.splati -9223372036854775808 : vector<8xi64>
+  %13 = vector.splati -1 : vector<8xi64>
   %14 = vector.bitcast %6 : vector<8xf64> to vector<8xi64>
   %15 = vector.andi %14, %9 : vector<8xi64>
   %16 = vector.cmpi ugt, %15, %10 : vector<8xi64> -> vector<8xi1>
@@ -326,12 +326,12 @@ func.def @wide_shaped_maximum_f64(%lhs: vector<3x3xf64>, %rhs: vector<3x3xf64>) 
   %33 = vector.bitcast %32 : vector<8xi64> to vector<8xf64>
   %34 = vector.slice %4[8] : vector<9xf64> -> vector<1xf64>
   %35 = vector.slice %5[8] : vector<9xf64> -> vector<1xf64>
-  %36 = vector.constant 0 : vector<1xi64>
-  %37 = vector.constant 9223372036854775807 : vector<1xi64>
-  %38 = vector.constant 9218868437227405312 : vector<1xi64>
-  %39 = vector.constant 2251799813685248 : vector<1xi64>
-  %40 = vector.constant -9223372036854775808 : vector<1xi64>
-  %41 = vector.constant -1 : vector<1xi64>
+  %36 = vector.splati 0 : vector<1xi64>
+  %37 = vector.splati 9223372036854775807 : vector<1xi64>
+  %38 = vector.splati 9218868437227405312 : vector<1xi64>
+  %39 = vector.splati 2251799813685248 : vector<1xi64>
+  %40 = vector.splati -9223372036854775808 : vector<1xi64>
+  %41 = vector.splati -1 : vector<1xi64>
   %42 = vector.bitcast %34 : vector<1xf64> to vector<1xi64>
   %43 = vector.andi %42, %37 : vector<1xi64>
   %44 = vector.cmpi ugt, %43, %38 : vector<1xi64> -> vector<1xi1>

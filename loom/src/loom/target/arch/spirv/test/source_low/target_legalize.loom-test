@@ -383,7 +383,7 @@ func.def @decomposes_rank_two_divrem(%a: i32, %b: i32, %c: i32, %d: i32, %diviso
 func.def @decomposes_shaped_reduction(%a: i32, %b: i32, %c: i32, %d: i32, %e: i32, %f: i32) -> (i32) {
   %matrix = vector.from_elements %a, %b, %c, %d, %e, %f : vector<2x3xi32>
   %transpose = vector.transpose<[1, 0]> %matrix : vector<2x3xi32> -> vector<3x2xi32>
-  %initial = vector.constant 0 : vector<2xi32>
+  %initial = vector.splati 0 : vector<2xi32>
   %rows = vector.reduce.axes<addi> %transpose, %initial axes [0] : vector<3x2xi32>, vector<2xi32>
   %left = vector.extract %rows[0] : vector<2xi32> -> i32
   %right = vector.extract %rows[1] : vector<2xi32> -> i32

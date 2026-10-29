@@ -60,7 +60,7 @@ def test_float_constants_and_selection_cover_native_and_payload_types() -> None:
 
 
 def test_singleton_constants_and_selection_preserve_native_feature_priority() -> None:
-    for source_op in (vector.vector_constant, scf.scf_select):
+    for source_op in (vector.vector_splatf, scf.scf_select):
         rules = _payload_rules(source_op, "result", kind="vector", lanes=1)
         for native_bfloat in (False, True):
             features = feature_bits_value(
@@ -88,7 +88,7 @@ def test_singleton_constants_and_selection_preserve_native_feature_priority() ->
                 selected = applicable[0]
                 selected.validate(SPIRV_LOGICAL_CORE_DESCRIPTOR_SET)
                 assert selected.emit[-1].descriptor.key.endswith(f".{carrier}")
-                if source_op is vector.vector_constant:
+                if source_op is vector.vector_splatf:
                     immediate = next(iter(selected.emit[0].immediates.values()))
                     assert immediate.kind is ValueProjectKind.FLOAT_BITS
 

@@ -18,7 +18,7 @@ pipeline.def<kernel> public retain target(@device) @grouped_projection() run(%ou
   %records = channel.bind<fifo> %slots, %capacity : view<1x4xi32>, index -> channel<tile<4xi32>>
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
     %write, %destination = channel.reserve %records : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
-    %values = vector.constant 11 : vector<4xi32>
+    %values = vector.splati 11 : vector<4xi32>
     vector.store %values, %destination[0] : vector<4xi32>, view<4xi32>
     channel.publish %write : write<tile<4xi32>>
     %read, %source = channel.acquire %records : channel<tile<4xi32>> -> (read<tile<4xi32>>, view<4xi32>)

@@ -70,7 +70,7 @@ kernel.def export("constant_carriers") @constant_carriers() {
   %xmm_output = buffer.view %output[%xmm_offset] : buffer -> view<2xf64>
   %ymm_output = buffer.view %output[%ymm_offset] : buffer -> view<8xf32>
   %selected_output = buffer.view %output[%selected_offset] : buffer -> view<8xf32>
-  %inactive = vector.constant 0.0 : vector<8xf32>
+  %inactive = vector.splatf 0.0 : vector<8xf32>
   %selected = vector.select %predicate, %ymm, %inactive : vector<8xf32>
   view.store %single, %single_output[0] : f32, view<1xf32>
   view.store %double, %double_output[0] : f64, view<1xf64>

@@ -89,7 +89,7 @@ func.def public @entry(%input: buffer, %input_byte_offset: offset, %output: buff
   %69 = index.cast %68 : i64 to offset
   %70 = buffer.view %masks[%69] : buffer -> view<16xi32>
   vector.store %61, %70[0] : vector<16xi32>, view<16xi32>
-  %71 = vector.constant 0 : vector<16xi32>
+  %71 = vector.splati 0 : vector<16xi32>
   %72 = vector.cmpi eq, %value$37, %71 : vector<16xi32> -> vector<16xi1>
   %73 = vector.extsi %72 : vector<16xi1> to vector<16xi32>
   %74 = scalar.constant 1 : i32

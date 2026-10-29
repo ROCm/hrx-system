@@ -32,8 +32,8 @@ func.def @whole_vector_if(%condition: i1, %a: i64, %b: i64) -> (i64, i64) {
 func.def @lane_select_i64x16(%condition_word: i32, %true_value: i64, %false_value: i64) -> (i64, i64, i64, i64) {
   %start = scalar.constant 0 : i32
   %step = scalar.constant 1 : i32
-  %c1 = vector.constant 1 : vector<16xi32>
-  %c0 = vector.constant 0 : vector<16xi32>
+  %c1 = vector.splati 1 : vector<16xi32>
+  %c0 = vector.splati 0 : vector<16xi32>
   %condition_words = vector.splat %condition_word : vector<16xi32>
   %positions = vector.iota %start step %step : vector<16xi32>
   %shifted = vector.shrui %condition_words, %positions : vector<16xi32>

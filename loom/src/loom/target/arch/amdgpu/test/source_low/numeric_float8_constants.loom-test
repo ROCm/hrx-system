@@ -102,8 +102,8 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @float8_midpoint_neighb
 // ====
 
 func.def @float8_vector_midpoints() -> (vector<4xf8E4M3>, vector<8xf8E5M2>) {
-  %e4_above_even = vector.constant 1.0625000000000002 : vector<4xf8E4M3>
-  %e5_below_odd = vector.constant 1.3749999999999998 : vector<8xf8E5M2>
+  %e4_above_even = vector.splatf 1.0625000000000002 : vector<4xf8E4M3>
+  %e5_below_odd = vector.splatf 1.3749999999999998 : vector<8xf8E5M2>
   func.return %e4_above_even, %e5_below_odd : vector<4xf8E4M3>, vector<8xf8E5M2>
 }
 
@@ -118,10 +118,10 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @float8_vector_midpoint
 // ====
 
 func.def @float8_vector_specials() -> (vector<1xf8E4M3>, vector<5xf8E4M3>, vector<4xf8E5M2>, vector<8xf8E5M2>) {
-  %e4_negative_zero = vector.constant -0.0 : vector<1xf8E4M3>
-  %e4_saturated = vector.constant inf : vector<5xf8E4M3>
-  %e5_negative_infinity = vector.constant -inf : vector<4xf8E5M2>
-  %e5_nan = vector.constant nan : vector<8xf8E5M2>
+  %e4_negative_zero = vector.splatf -0.0 : vector<1xf8E4M3>
+  %e4_saturated = vector.splatf inf : vector<5xf8E4M3>
+  %e5_negative_infinity = vector.splatf -inf : vector<4xf8E5M2>
+  %e5_nan = vector.splatf nan : vector<8xf8E5M2>
   func.return %e4_negative_zero, %e4_saturated, %e5_negative_infinity, %e5_nan : vector<1xf8E4M3>, vector<5xf8E4M3>, vector<4xf8E5M2>, vector<8xf8E5M2>
 }
 

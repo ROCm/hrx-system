@@ -278,9 +278,9 @@ kernel.def @floating_integer_shapes() {
   %values4 = vector.load %source[0] : view<8xf32> -> vector<4xf32>
   %values3 = vector.load %source[0] : view<8xf32> -> vector<3xf32>
   %values2 = vector.load %source[0] : view<8xf32> -> vector<2xf32>
-  %bias8 = vector.constant 128.0 : vector<8xf32>
-  %bias4 = vector.constant 128.0 : vector<4xf32>
-  %bias2 = vector.constant 128.0 : vector<2xf32>
+  %bias8 = vector.splatf 128.0 : vector<8xf32>
+  %bias4 = vector.splatf 128.0 : vector<4xf32>
+  %bias2 = vector.splatf 128.0 : vector<2xf32>
   %signed8 = vector.subf %values8, %bias8 : vector<8xf32>
   %signed4 = vector.subf %values4, %bias4 : vector<4xf32>
   %signed2 = vector.subf %values2, %bias2 : vector<2xf32>
@@ -299,7 +299,7 @@ kernel.def @floating_integer_shapes() {
   vector.store %s2, %halves[0] : vector<2xi16>, view<4xi16>
   vector.store %u2, %halves[2] : vector<2xi16>, view<4xi16>
   %wide_values = vector.load %wide_source[0] : view<4xf32> -> vector<4xf32>
-  %wide_bias = vector.constant 2147483648.0 : vector<4xf32>
+  %wide_bias = vector.splatf 2147483648.0 : vector<4xf32>
   %wide_signed = vector.subf %wide_values, %wide_bias : vector<4xf32>
   %signed_words = vector.fptosi %wide_signed : vector<4xf32> to vector<4xi32>
   %unsigned_words = vector.fptoui %wide_values : vector<4xf32> to vector<4xi32>

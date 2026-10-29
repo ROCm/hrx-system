@@ -11,7 +11,7 @@ func.def public inline @q8s32_scaled_weights(%weights: vector<16xi8>, %scale: bf
 }
 
 func.def public inline @q8s32_lane_dot_combined(%weights_low: vector<16xi8>, %weights_high: vector<16xi8>, %activations_low: vector<16xbf16>, %activations_high: vector<16xbf16>, %scale: bf16) -> (f32) {
-  %initial_accumulator = vector.constant 0.0 : vector<8xf32>
+  %initial_accumulator = vector.splatf 0.0 : vector<8xf32>
   %scaled_low = func.call pure @q8s32_scaled_weights(%weights_low, %scale) : (vector<16xi8>, bf16) -> (vector<16xbf16>)
   %low = vector.dot2f %scaled_low, %activations_low, %initial_accumulator : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %scaled_high = func.call pure @q8s32_scaled_weights(%weights_high, %scale) : (vector<16xi8>, bf16) -> (vector<16xbf16>)
@@ -22,7 +22,7 @@ func.def public inline @q8s32_lane_dot_combined(%weights_low: vector<16xi8>, %we
 }
 
 func.def public inline @q8s32_lane_dot_split(%weights_low: vector<16xi8>, %weights_high: vector<16xi8>, %activations_low: vector<16xbf16>, %activations_high: vector<16xbf16>, %scale: bf16) -> (f32) {
-  %initial_accumulator = vector.constant 0.0 : vector<8xf32>
+  %initial_accumulator = vector.splatf 0.0 : vector<8xf32>
   %scaled_low = func.call pure @q8s32_scaled_weights(%weights_low, %scale) : (vector<16xi8>, bf16) -> (vector<16xbf16>)
   %low = vector.dot2f %scaled_low, %activations_low, %initial_accumulator : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   %scaled_high = func.call pure @q8s32_scaled_weights(%weights_high, %scale) : (vector<16xi8>, bf16) -> (vector<16xbf16>)

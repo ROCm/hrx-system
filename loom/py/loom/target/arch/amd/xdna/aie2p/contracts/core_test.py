@@ -1758,11 +1758,12 @@ def test_f32_extremum_reductions_use_packed_trees() -> None:
         ] == [0, *_F32X16_REDUCTION_CONTROLS]
 
 
-def test_vector_constant_rules_materialize_each_register_carrier() -> None:
+def test_vector_literal_splat_rules_materialize_each_register_carrier() -> None:
     rules = [
         case
         for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
-        if isinstance(case, DescriptorRule) and case.source_op is vector.vector_constant
+        if isinstance(case, DescriptorRule)
+        and case.source_op in (vector.vector_splati, vector.vector_splatf)
     ]
 
     def result_shape(rule: DescriptorRule):

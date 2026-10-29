@@ -3,8 +3,8 @@
 // All eight accepted clamp orders and operand positions lower in one function.
 // Distinct inputs keep the matcher permutations independent through lowering.
 func.def @saturating_pack_permutations(%a: vector<64xi8>, %b: vector<64xi8>, %c: vector<64xi8>, %d: vector<64xi8>, %e: vector<64xi8>, %f: vector<64xi8>, %g: vector<64xi8>, %h: vector<64xi8>) -> (vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<32xi8>) {
-  %lower = vector.constant -8 : vector<64xi8>
-  %upper = vector.constant 7 : vector<64xi8>
+  %lower = vector.splati -8 : vector<64xi8>
+  %upper = vector.splati 7 : vector<64xi8>
   %a_inner = vector.maxsi %a, %lower : vector<64xi8>
   %a_outer = vector.minsi %a_inner, %upper : vector<64xi8>
   %a_packed = vector.bitpack<4> %a_outer : vector<64xi8> -> vector<32xi8>
@@ -68,9 +68,9 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @saturating_pack_p
 // The wider physical carrier selects a different AIE2P pack instruction while
 // retaining a clamp whose lower bound does not span the signed i4 domain.
 func.def @saturating_pack_wide(%values: vector<128xi8>, %noncanonical_values: vector<128xi8>) -> (vector<64xi8>, vector<64xi8>) {
-  %lower = vector.constant -8 : vector<128xi8>
-  %wrong_lower = vector.constant -7 : vector<128xi8>
-  %upper = vector.constant 7 : vector<128xi8>
+  %lower = vector.splati -8 : vector<128xi8>
+  %wrong_lower = vector.splati -7 : vector<128xi8>
+  %upper = vector.splati 7 : vector<128xi8>
   %above_lower = vector.maxsi %values, %lower : vector<128xi8>
   %clamped = vector.minsi %above_lower, %upper : vector<128xi8>
   %packed = vector.bitpack<4> %clamped : vector<128xi8> -> vector<64xi8>
@@ -106,10 +106,10 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @saturating_pack_w
 // Noncanonical bounds, dynamic bounds, shared clamp results, and an
 // intervening operation must retain the authored clamp and truncating pack.
 func.def @retain_noncanonical_packs(%wrong_lower_values: vector<64xi8>, %wrong_upper_values: vector<64xi8>, %dynamic_values: vector<64xi8>, %dynamic_upper: vector<64xi8>, %shared_inner_values: vector<64xi8>, %shared_outer_values: vector<64xi8>, %intervening_values: vector<64xi8>) -> (vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<64xi8>, vector<32xi8>, vector<64xi8>, vector<32xi8>, vector<64xi8>) {
-  %wrong_lower = vector.constant -7 : vector<64xi8>
-  %lower = vector.constant -8 : vector<64xi8>
-  %wrong_upper = vector.constant 6 : vector<64xi8>
-  %upper = vector.constant 7 : vector<64xi8>
+  %wrong_lower = vector.splati -7 : vector<64xi8>
+  %lower = vector.splati -8 : vector<64xi8>
+  %wrong_upper = vector.splati 6 : vector<64xi8>
+  %upper = vector.splati 7 : vector<64xi8>
   %wrong_lower_inner = vector.maxsi %wrong_lower_values, %wrong_lower : vector<64xi8>
   %wrong_lower_outer = vector.minsi %wrong_lower_inner, %upper : vector<64xi8>
   %wrong_lower_packed = vector.bitpack<4> %wrong_lower_outer : vector<64xi8> -> vector<32xi8>

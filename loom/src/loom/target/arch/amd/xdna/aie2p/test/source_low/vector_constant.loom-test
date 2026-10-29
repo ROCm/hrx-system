@@ -1,7 +1,7 @@
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 func.def @shaped_wide_fp8_constant() -> (vector<2x64xf8E4M3>) {
-  %result = vector.constant 1.0625000000000002 : vector<2x64xf8E4M3>
+  %result = vector.splatf 1.0625000000000002 : vector<2x64xf8E4M3>
   func.return %result : vector<2x64xf8E4M3>
 }
 
@@ -16,7 +16,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @shaped_wide_fp8_c
 // ====
 
 func.def @partial_f32_constant() -> (vector<31xf32>) {
-  %result = vector.constant -1.5 : vector<31xf32>
+  %result = vector.splatf -1.5 : vector<31xf32>
   func.return %result : vector<31xf32>
 }
 
@@ -31,7 +31,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @partial_f32_const
 // ====
 
 func.def @flat_f32_accumulator_constant() -> (vector<32xf32>) {
-  %result = vector.constant 2.0 : vector<32xf32>
+  %result = vector.splatf 2.0 : vector<32xf32>
   func.return %result : vector<32xf32>
 }
 
@@ -47,7 +47,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @flat_f32_accumula
 // ====
 
 func.def @wide_i64_constant() -> (vector<32xi64>) {
-  %result = vector.constant -81985529216486896 : vector<32xi64>
+  %result = vector.splati -81985529216486896 : vector<32xi64>
   func.return %result : vector<32xi64>
 }
 
@@ -65,7 +65,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_i64_constant
 // ====
 
 func.def @wide_f64_negative_zero_constant() -> (vector<16xf64>) {
-  %result = vector.constant -0.0 : vector<16xf64>
+  %result = vector.splatf -0.0 : vector<16xf64>
   func.return %result : vector<16xf64>
 }
 
@@ -82,7 +82,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_f64_negative
 // ====
 
 func.def @f64_negative_zero_constant() -> (vector<8xf64>) {
-  %result = vector.constant -0.0 : vector<8xf64>
+  %result = vector.splatf -0.0 : vector<8xf64>
   func.return %result : vector<8xf64>
 }
 

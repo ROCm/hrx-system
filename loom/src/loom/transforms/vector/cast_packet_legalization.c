@@ -260,16 +260,16 @@ static iree_status_t loom_vector_predicate_extension_packet_materialize(
       lane_count);
   loom_builder_t* builder = &context->rewriter->builder;
   loom_op_t* true_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      builder, loom_attr_i64(op->kind == LOOM_OP_VECTOR_EXTSI ? -1 : 1),
-      result_type, op->location, &true_op));
+  IREE_RETURN_IF_ERROR(loom_vector_splati_build(
+      builder, op->kind == LOOM_OP_VECTOR_EXTSI ? -1 : 1, result_type,
+      op->location, &true_op));
   loom_op_t* false_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      builder, loom_attr_i64(0), result_type, op->location, &false_op));
+  IREE_RETURN_IF_ERROR(loom_vector_splati_build(builder, 0, result_type,
+                                                op->location, &false_op));
   loom_op_t* select_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_select_build(
-      builder, source, loom_vector_constant_result(true_op),
-      loom_vector_constant_result(false_op), result_type, op->location,
+      builder, source, loom_vector_splati_result(true_op),
+      loom_vector_splati_result(false_op), result_type, op->location,
       &select_op));
   *out_result = loom_vector_select_result(select_op);
   return iree_ok_status();

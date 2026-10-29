@@ -195,7 +195,7 @@ func.def @atomic_rmw_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %
 func.def @atomic_rmw_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %value: vector<[%n]xi32>, %offsets: vector<[%n]xindex>) -> (vector<[%n]xi32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xi32, %layout>
-  %10 = vector.constant 0 : vector<[%n]xi32>
+  %10 = vector.splati 0 : vector<[%n]xi32>
   %11 = index.constant 0 : index
   %12 = index.constant 1 : index
   %old = scf.for %13 = [%11 to %n step %12](%14 = %10 : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
@@ -284,7 +284,7 @@ func.def @atomic_cmpxchg_dynamic(%n: index, %buffer: buffer, %byte_offset: offse
 func.def @atomic_cmpxchg_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %expected: vector<[%n]xi32>, %replacement: vector<[%n]xi32>, %offsets: vector<[%n]xindex>) -> (vector<[%n]xi32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xi32, %layout>
-  %11 = vector.constant 0 : vector<[%n]xi32>
+  %11 = vector.splati 0 : vector<[%n]xi32>
   %12 = index.constant 0 : index
   %13 = index.constant 1 : index
   %old = scf.for %14 = [%12 to %n step %13](%15 = %11 : vector<[%n]xi32>) -> (vector<[%n]xi32>) {

@@ -52,7 +52,6 @@ from loom.dialect.scalar import (
 from loom.dialect.scalar.comparison import CmpFPredicate, CmpIPredicate
 from loom.dsl import (
     ANY,
-    ATTR_TYPE_ANY,
     ATTR_TYPE_DICT,
     ATTR_TYPE_ENUM,
     ATTR_TYPE_F64,
@@ -504,22 +503,33 @@ def _element_constraint_for(
 # Construction
 # ============================================================================
 
-vector_constant = Op(
-    "vector.constant",
+vector_splati = Op(
+    "vector.splati",
     group=vector_ops,
     phase=OpPhase.EXECUTABLE,
-    doc=(
-        "Materialize a compile-time vector value whose every lane has the "
-        "same scalar attribute payload. The result type supplies both the "
-        "vector shape and the element type used to interpret the payload."
-    ),
+    doc=("Materialize an integer, predicate, or address vector whose every lane has the same integer literal. The result element type supplies the value domain; i1 literals use 0 or 1."),
     results=[Result("result", VECTOR)],
-    attrs=[AttrDef("value", ATTR_TYPE_ANY, doc="The constant payload.")],
+    attrs=[AttrDef("value", ATTR_TYPE_I64, doc="The integer splat value.")],
     constraints=[AttrMatchesElementType("value", "result")],
-    facts="loom_vector_constant_facts",
+    facts="loom_vector_splati_facts",
     traits=[PURE, CONSTANT_LIKE, REFINABLE_RESULT_TYPE_REFS],
     format=[Attr("value"), COLON, ResultType("result")],
-    examples=["%v = vector.constant 0.0 : vector<4xf32>"],
+    examples=["%v = vector.splati 0 : vector<4xi32>"],
+    eager_execution_cost=1,
+)
+
+vector_splatf = Op(
+    "vector.splatf",
+    group=vector_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Materialize a floating-point vector whose every lane has the same floating-point literal. The result element type determines the target floating-point format."),
+    results=[Result("result", VECTOR)],
+    attrs=[AttrDef("value", ATTR_TYPE_F64, doc="The floating-point splat value.")],
+    constraints=[HasFloatElement("result")],
+    facts="loom_vector_splatf_facts",
+    traits=[PURE, CONSTANT_LIKE, REFINABLE_RESULT_TYPE_REFS],
+    format=[Attr("value"), COLON, ResultType("result")],
+    examples=["%v = vector.splatf 0.0 : vector<4xf32>"],
     eager_execution_cost=1,
 )
 
@@ -4757,7 +4767,8 @@ vector_reduce_axes = Op(
 # ============================================================================
 
 VECTOR_CONSTRUCTION_OPS: tuple[Op, ...] = (
-    vector_constant,
+    vector_splati,
+    vector_splatf,
     vector_poison,
     vector_empty,
     vector_splat,
@@ -4971,4 +4982,11 @@ VECTOR_OP_CATEGORY_GROUPS: tuple[tuple[OpCategory, tuple[Op, ...]], ...] = (
     (VECTOR_REFINEMENT_CATEGORY, VECTOR_REFINEMENT_OPS),
 )
 
-ALL_VECTOR_OPS: tuple[Op, ...] = tuple(op for _, category_ops in VECTOR_OP_CATEGORY_GROUPS for op in category_ops)
+# Documentation and builder generation use semantic category order. Operation
+# kinds use an independent ABI order so category refactoring cannot renumber
+# the registry.
+ALL_VECTOR_OPS: tuple[Op, ...] = (
+    vector_splati,
+    *(op for _, category_ops in VECTOR_OP_CATEGORY_GROUPS for op in category_ops if op is not vector_splati and op is not vector_splatf),
+    vector_splatf,
+)

@@ -1065,10 +1065,9 @@ def _vector_extremum_f32x16_rule(
 def _float_matrix_accumulator_zero_rule() -> DescriptorRule:
     descriptor = _descriptor("amd.xdna.aie2p.accumulator.clear.f32x64")
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=vector.vector_splatf,
         descriptor=descriptor,
         guards=(
-            Guard.attr_kind("value", "f64"),
             Guard.value_type("result", _F32X64_ACCUMULATOR),
             Guard.value_float_equals("result", 0.0),
         ),
@@ -1086,10 +1085,9 @@ def _float_packet_accumulator_zero_rule() -> DescriptorRule:
     cleared = ValueRef.temporary("cleared")
     cleared_unit = ValueRef.temporary("cleared_unit")
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=vector.vector_splatf,
         descriptor=descriptor,
         guards=(
-            Guard.attr_kind("value", "f64"),
             Guard.value_type("result", _F32X16_VECTOR),
             Guard.value_float_equals("result", 0.0),
             Guard.low_value_register_class("result", "aie2p.ebmll"),

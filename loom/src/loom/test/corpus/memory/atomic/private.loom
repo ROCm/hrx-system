@@ -416,19 +416,19 @@ kernel.def @private_vector_updates() {
   %even = scalar.cmpi eq, %parity, %c0 : i32
   %odd = scalar.cmpi ne, %parity, %c0 : i32
   %mask = vector.from_elements %even, %odd : vector<2xi1>
-  %passthrough_bits = vector.constant 11 : vector<2xi16>
+  %passthrough_bits = vector.splati 11 : vector<2xi16>
   %passthrough = vector.bitcast %passthrough_bits : vector<2xi16> to vector<2xf16>
   vector.atomic.reduce<addf, noftz> %initial, %cells[0][%offsets] {ordering = release, scope = system} : vector<2xf16>, view<2xf16>, vector<2xindex>
   vector.atomic.reduce.mask<addf, noftz> %initial, %cells[0][%offsets], %mask {ordering = relaxed, scope = thread} : vector<2xf16>, view<2xf16>, vector<2xindex>, vector<2xi1>
   %old = vector.atomic.rmw<addf, noftz> %initial, %cells[0][%offsets] {ordering = acq_rel, scope = system} : vector<2xf16>, view<2xf16>, vector<2xindex>
   %masked = vector.atomic.rmw.mask<addf, noftz> %initial, %cells[0][%offsets], %mask, %passthrough {ordering = relaxed, scope = thread} : vector<2xf16>, view<2xf16>, vector<2xindex>, vector<2xi1>, vector<2xf16>
-  %expected_bits = vector.constant 3 : vector<2xi16>
+  %expected_bits = vector.splati 3 : vector<2xi16>
   %expected = vector.bitcast %expected_bits : vector<2xi16> to vector<2xf16>
-  %replacement_bits = vector.constant 7 : vector<2xi16>
+  %replacement_bits = vector.splati 7 : vector<2xi16>
   %replacement = vector.bitcast %replacement_bits : vector<2xi16> to vector<2xf16>
   %observed = vector.atomic.cmpxchg %expected, %replacement, %cells[0][%offsets] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : vector<2xf16>, view<2xf16>, vector<2xindex> -> vector<2xf16>
   %final = vector.load %cells[0] : view<2xf16> -> vector<2xf16>
-  %duplicates = vector.constant 0 : vector<2xindex>
+  %duplicates = vector.splati 0 : vector<2xindex>
   vector.atomic.reduce<addf, noftz> %initial, %cells[0][%duplicates] {ordering = seq_cst, scope = system} : vector<2xf16>, view<2xf16>, vector<2xindex>
   %accumulated = vector.load %cells[0] : view<2xf16> -> vector<2xf16>
   %old_bits = vector.bitcast %old : vector<2xf16> to vector<2xi16>

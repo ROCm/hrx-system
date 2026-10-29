@@ -3,7 +3,7 @@
 // Packed byte lookup is bit-preserving across every byte-sized value type.
 
 func.def @byte_table_f8e4m3(%table: vector<8xf8E4M3>, %input: vector<4xi8>) -> (vector<4xf8E4M3>) {
-  %mask = vector.constant 7 : vector<4xi8>
+  %mask = vector.splati 7 : vector<4xi8>
   %indices = vector.andi %input, %mask : vector<4xi8>
   %values = vector.table.lookup %table[%indices] : vector<8xf8E4M3>, vector<4xi8> -> vector<4xf8E4M3>
   func.return %values : vector<4xf8E4M3>
@@ -22,7 +22,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @byte_table_f8e4m
 // ====
 
 func.def @byte_table_f8e5m2(%table: vector<8xf8E5M2>, %input: vector<4xi8>) -> (vector<4xf8E5M2>) {
-  %mask = vector.constant 7 : vector<4xi8>
+  %mask = vector.splati 7 : vector<4xi8>
   %indices = vector.andi %input, %mask : vector<4xi8>
   %values = vector.table.lookup %table[%indices] : vector<8xf8E5M2>, vector<4xi8> -> vector<4xf8E5M2>
   func.return %values : vector<4xf8E5M2>

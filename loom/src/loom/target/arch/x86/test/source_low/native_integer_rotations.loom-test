@@ -76,8 +76,8 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
 // Each encoded width is covered because narrow forms additionally require VL.
 // RUN: emit source-low target=x86:avx512 output=low
 func.def @packed_rotations_128(%value32: vector<4xi32>, %count32: vector<4xi32>, %value64: vector<2xi64>, %count64: vector<2xi64>) -> (vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>) {
-  %fixed32 = vector.constant -1 : vector<4xi32>
-  %fixed64 = vector.constant 300 : vector<2xi64>
+  %fixed32 = vector.splati -1 : vector<4xi32>
+  %fixed64 = vector.splati 300 : vector<2xi64>
   %left32 = vector.rotli %value32, %count32 : vector<4xi32>
   %right32 = vector.rotri %value32, %count32 : vector<4xi32>
   %left32_fixed = vector.rotli %value32, %fixed32 : vector<4xi32>
@@ -106,8 +106,8 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
 
 // RUN: emit source-low target=x86:avx512 output=low
 func.def @packed_rotations_512(%value32: vector<16xi32>, %count32: vector<16xi32>, %value64: vector<8xi64>, %count64: vector<8xi64>) -> (vector<16xi32>, vector<16xi32>, vector<16xi32>, vector<16xi32>, vector<8xi64>, vector<8xi64>, vector<8xi64>, vector<8xi64>) {
-  %fixed32 = vector.constant 7 : vector<16xi32>
-  %fixed64 = vector.constant 11 : vector<8xi64>
+  %fixed32 = vector.splati 7 : vector<16xi32>
+  %fixed64 = vector.splati 11 : vector<8xi64>
   %left32 = vector.rotli %value32, %count32 : vector<16xi32>
   %right32 = vector.rotri %value32, %count32 : vector<16xi32>
   %left32_fixed = vector.rotli %value32, %fixed32 : vector<16xi32>
@@ -140,7 +140,7 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
 x86.target<avx512> @target {features = [-avx512vl]}
 
 func.def target(@target) @rotation_without_vl(%narrow: vector<4xi32>, %wide: vector<16xi32>, %wide_count: vector<16xi32>) -> (vector<4xi32>, vector<16xi32>) {
-  %fixed_count = vector.constant 7 : vector<4xi32>
+  %fixed_count = vector.splati 7 : vector<4xi32>
   %narrow_result = vector.rotli %narrow, %fixed_count : vector<4xi32>
   %wide_result = vector.rotli %wide, %wide_count : vector<16xi32>
   func.return %narrow_result, %wide_result : vector<4xi32>, vector<16xi32>

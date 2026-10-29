@@ -1,8 +1,8 @@
 // RUN: pass canonicalize
 
 func.def @uniform_scaling() -> (vector<2xbf16>, vector<2xi32>, vector<2xbf16>) {
-  %input = vector.constant -1.5 : vector<2xbf16>
-  %power = vector.constant -2 : vector<2xi32>
+  %input = vector.splatf -1.5 : vector<2xbf16>
+  %power = vector.splati -2 : vector<2xi32>
   %fraction, %exponent = vector.frexpf %input : vector<2xbf16>, vector<2xi32>
   %scaled = vector.ldexpf %input, %power : vector<2xbf16>, vector<2xi32>
   func.return %fraction, %exponent, %scaled : vector<2xbf16>, vector<2xi32>, vector<2xbf16>
@@ -10,9 +10,9 @@ func.def @uniform_scaling() -> (vector<2xbf16>, vector<2xi32>, vector<2xbf16>) {
 
 // ----
 func.def @uniform_scaling() -> (vector<2xbf16>, vector<2xi32>, vector<2xbf16>) {
-  %fraction = vector.constant -0.75 : vector<2xbf16>
-  %exponent = vector.constant 1 : vector<2xi32>
-  %scaled = vector.constant -0.375 : vector<2xbf16>
+  %fraction = vector.splatf -0.75 : vector<2xbf16>
+  %exponent = vector.splati 1 : vector<2xi32>
+  %scaled = vector.splatf -0.375 : vector<2xbf16>
   func.return %fraction, %exponent, %scaled : vector<2xbf16>, vector<2xi32>, vector<2xbf16>
 }
 
@@ -52,7 +52,7 @@ func.def @nonuniform_scaling() -> (f64, i32, f64, f64, i32, f64) {
 // The NaN payload cannot be materialized as a compact float fact. Its exponent
 // can still fold without replacing the fraction's observable computation.
 func.def @partial_uniform_decomposition() -> (vector<2xbf16>, vector<2xi32>) {
-  %payload = vector.constant 32641 : vector<2xi16>
+  %payload = vector.splati 32641 : vector<2xi16>
   %input = vector.bitcast %payload : vector<2xi16> to vector<2xbf16>
   %fraction, %exponent = vector.frexpf %input : vector<2xbf16>, vector<2xi32>
   func.return %fraction, %exponent : vector<2xbf16>, vector<2xi32>
@@ -60,9 +60,9 @@ func.def @partial_uniform_decomposition() -> (vector<2xbf16>, vector<2xi32>) {
 
 // ----
 func.def @partial_uniform_decomposition() -> (vector<2xbf16>, vector<2xi32>) {
-  %payload = vector.constant 32641 : vector<2xi16>
+  %payload = vector.splati 32641 : vector<2xi16>
   %input = vector.bitcast %payload : vector<2xi16> to vector<2xbf16>
-  %exponent$6 = vector.constant 0 : vector<2xi32>
+  %exponent$6 = vector.splati 0 : vector<2xi32>
   %fraction, %exponent$5 = vector.frexpf %input : vector<2xbf16>, vector<2xi32>
   func.return %fraction, %exponent$6 : vector<2xbf16>, vector<2xi32>
 }

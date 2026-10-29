@@ -6,11 +6,11 @@
 x86.target<avx2> @target
 
 func.def target(@target) @zero_insert_avx2(%i8_value: i8, %bf16_value: bf16, %i64_value: i64, %f32_value: f32, %f64_value: f64) -> (vector<32xi8>, vector<16xbf16>, vector<4xi64>, vector<8xf32>, vector<8xf32>, vector<4xf64>) {
-  %c0_i8 = vector.constant 0 : vector<32xi8>
-  %c0_bf16 = vector.constant 0.0 : vector<16xbf16>
-  %c0_i64 = vector.constant 0 : vector<4xi64>
-  %c0_f32 = vector.constant 0.0 : vector<8xf32>
-  %c0_f64 = vector.constant 0.0 : vector<4xf64>
+  %c0_i8 = vector.splati 0 : vector<32xi8>
+  %c0_bf16 = vector.splatf 0.0 : vector<16xbf16>
+  %c0_i64 = vector.splati 0 : vector<4xi64>
+  %c0_f32 = vector.splatf 0.0 : vector<8xf32>
+  %c0_f64 = vector.splatf 0.0 : vector<4xf64>
   %i8_high = vector.insert %i8_value into %c0_i8[29] : i8, vector<32xi8>
   %bf16_high = vector.insert %bf16_value into %c0_bf16[9] : bf16, vector<16xbf16>
   %i64_high = vector.insert %i64_value into %c0_i64[3] : i64, vector<4xi64>
@@ -50,7 +50,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({sig
 x86.target<avx2> @target
 
 func.def target(@target) @negative_zero_insert_avx2(%value: f32) -> (vector<8xf32>) {
-  %cn0 = vector.constant -0.0 : vector<8xf32>
+  %cn0 = vector.splatf -0.0 : vector<8xf32>
   %result = vector.insert %value into %cn0[0] : f32, vector<8xf32>
   func.return %result : vector<8xf32>
 }
@@ -73,10 +73,10 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({sig
 x86.target<avx512> @target {features = [avx512fp16]}
 
 func.def target(@target) @zero_insert_avx512(%i32_value: i32, %f32_value: f32, %f64_value: f64, %f16_value: f16) -> (vector<16xi32>, vector<16xf32>, vector<16xf32>, vector<8xf64>, vector<32xf16>) {
-  %c0_i32 = vector.constant 0 : vector<16xi32>
-  %c0_f32 = vector.constant 0.0 : vector<16xf32>
-  %c0_f64 = vector.constant 0.0 : vector<8xf64>
-  %c0_f16 = vector.constant 0.0 : vector<32xf16>
+  %c0_i32 = vector.splati 0 : vector<16xi32>
+  %c0_f32 = vector.splatf 0.0 : vector<16xf32>
+  %c0_f64 = vector.splatf 0.0 : vector<8xf64>
+  %c0_f16 = vector.splatf 0.0 : vector<32xf16>
   %i32_high = vector.insert %i32_value into %c0_i32[14] : i32, vector<16xi32>
   %f32_low = vector.insert %f32_value into %c0_f32[0] : f32, vector<16xf32>
   %f32_high = vector.insert %f32_value into %c0_f32[14] : f32, vector<16xf32>

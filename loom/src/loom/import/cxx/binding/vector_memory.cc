@@ -274,8 +274,7 @@ loom_value_id_t VectorMemoryIntrinsic::build_mask(
     loom_value_id_t source, loom_builder_t* builder,
     loom_location_id_t location) const {
   loom_op_t* op;
-  check(loom_vector_constant_build(builder, loom_attr_i64(0), mask_type_,
-                                   location, &op));
+  check(loom_vector_splati_build(builder, 0, mask_type_, location, &op));
   check(loom_vector_cmpi_build(builder, LOOM_VECTOR_CMPI_PREDICATE_NE, source,
                                loom_op_results(op)[0], mask_type_,
                                predicate_type_, location, &op));

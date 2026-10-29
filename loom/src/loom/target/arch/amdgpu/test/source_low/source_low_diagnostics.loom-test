@@ -17,7 +17,7 @@ kernel.def target(@target) @lds_b32_diagnostics() {
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
-  %stored_value = vector.constant 1 : vector<1xi32>
+  %stored_value = vector.splati 1 : vector<1xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="4"}
   vector.store %stored_value, %scratch_view[%tid] : vector<1xi32>, view<64xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="4"}
@@ -57,7 +57,7 @@ kernel.def target(@target) @lds_padded_diagnostics() {
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, %layout>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
-  %stored_value = vector.constant 1 : vector<4xi32>
+  %stored_value = vector.splati 1 : vector<4xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="20"}
   vector.store %stored_value, %scratch_view[%tid, 0] : vector<4xi32>, view<64x4xi32, %layout>
   // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="20"}
@@ -100,7 +100,7 @@ kernel.def target(@target) @lds_read2_write2_diagnostics() {
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, %layout>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x2xi32>
-  %stored_value = vector.constant 1 : vector<2xi32>
+  %stored_value = vector.splati 1 : vector<2xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write2_b32", address_form="ds_2addr", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="32"}
   vector.store %stored_value, %scratch_view[%tid, 0] : vector<2xi32>, view<64x4xi32, %layout>
   // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read2_b32", address_form="ds_2addr", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="32"}
@@ -140,7 +140,7 @@ kernel.def target(@target) @lds_dense_b128_diagnostics() {
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
-  %stored_value = vector.constant 1 : vector<4xi32>
+  %stored_value = vector.splati 1 : vector<4xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="16"}
   vector.store %stored_value, %scratch_view[%tid, 0] : vector<4xi32>, view<64x4xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="16"}
@@ -297,7 +297,7 @@ kernel.def target(@target) @fragment_store_launch_subgroup_footprint() {
   %row = index.add %workgroup_base, %subgroup_base : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_view = buffer.view %output_global[%output_base] : buffer -> view<4096x16xf32>
-  %value = vector.constant 0.0 : vector<8xf32>
+  %value = vector.splatf 0.0 : vector<8xf32>
   vector.fragment.store<result> %value, %output_view[%row, %column] shape [%m, %n] : vector<8xf32>, view<4096x16xf32>
   kernel.return
 }
@@ -351,7 +351,7 @@ kernel.def target(@target) @workgroup_dependent_lds_index_rejected() {
   %bytes = index.constant 256 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32>
-  %stored_value = vector.constant 1 : vector<1xi32>
+  %stored_value = vector.splati 1 : vector<1xi32>
   // ERROR@+1: AMDGPU/023 {constraint_key="memory_access.workgroup_dynamic_index_source"}
   vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<64xi32>
   kernel.return
@@ -390,7 +390,7 @@ kernel.def target(@target) @cache_policy_workgroup_dropped() {
   %bytes = index.constant 1024 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64x4xi32>
-  %stored_value = vector.constant 1 : vector<4xi32>
+  %stored_value = vector.splati 1 : vector<4xi32>
   // REMARK@+2: BACKEND/040 "dropped cache policy 'device/non_temporal'" "decision 'memory_cache_policy.unsupported'" "store in workgroup"
   // REMARK@+1: BACKEND/017 "selected store memory packet 'amdgpu.ds_write_b128'"
   vector.store %stored_value, %scratch_view[%tid, 0] {cache_scope = device, cache_temporal = non_temporal} : vector<4xi32>, view<64x4xi32>
@@ -545,7 +545,7 @@ kernel.def target(@target) @fragment_wave64_result_wide_f32_payload_rejected() {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
-  %values = vector.constant 0.0 : vector<8xf32>
+  %values = vector.splatf 0.0 : vector<8xf32>
   %fragment = vector.fragment<result> %values shape [%m, %n] : vector<8xf32>
   // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.payload_layout"}
   vector.fragment.store<result> %fragment, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
@@ -565,7 +565,7 @@ kernel.def target(@target) @fragment_wave64_result_ordinary_f16_storage_rejected
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
-  %wide = vector.constant 0.0 : vector<8xf32>
+  %wide = vector.splatf 0.0 : vector<8xf32>
   %narrow = vector.fptrunc %wide : vector<8xf32> to vector<8xf16>
   %fragment = vector.fragment<result> %narrow shape [%m, %n] : vector<8xf16>
   // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.payload_storage"}
@@ -657,7 +657,7 @@ kernel.def target(@target) @cdna_legacy_mfma_fragment_layout_rejected() {
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x4xf16> -> vector<4xf16>
   // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.payload_layout"}
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<4x16xf16, %rhs_layout> -> vector<4xf16>
-  %zero_acc = vector.constant 0.0 : vector<16xf32>
+  %zero_acc = vector.splatf 0.0 : vector<16xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<16xf32>
   // ERROR@+1: AMDGPU/021 {matrix_constraint="payload_shape"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<16xf32>

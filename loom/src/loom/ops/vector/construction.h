@@ -7,12 +7,20 @@
 #ifndef LOOM_OPS_VECTOR_CONSTRUCTION_H_
 #define LOOM_OPS_VECTOR_CONSTRUCTION_H_
 
+#include "loom/ops/vector/ops.h"
 #include "loom/rewrite/pattern_registry.h"
 #include "loom/rewrite/rewriter.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Returns true for a literal integer or floating-point vector splat. Operand
+// vector.splat is deliberately excluded: it has an SSA source, not an
+// immediate payload.
+static inline bool loom_vector_literal_splat_isa(const loom_op_t* op) {
+  return loom_vector_splati_isa(op) || loom_vector_splatf_isa(op);
+}
 
 // Plans in-bounds constant coordinate conversion for extract, insert, or slice.
 // Only exact coordinates are retained; dynamic operand IDs are read when

@@ -18,7 +18,7 @@ template.def<@hip.recipe.vector_loop> device @vector_loop_provider(%publish_opti
   %stripe_step = index.constant 1024 : index
   %element_count = index.constant 2048 : index
   %buffer_base = index.constant 0 : offset
-  %masked_zero = vector.constant 0.0 : vector<4xf32>
+  %masked_zero = vector.splatf 0.0 : vector<4xf32>
   %workitem = kernel.workitem.id<x> : index
   %word_element_add = index.mul %workitem, %vector_width : index
   %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer

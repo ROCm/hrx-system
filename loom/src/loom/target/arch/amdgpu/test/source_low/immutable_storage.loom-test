@@ -55,7 +55,7 @@ kernel.def @read_words() {
   %indices_view = buffer.view %indices[%origin] : buffer -> view<4x4xi32>
   %output_view = buffer.view %output[%origin] : buffer -> view<4x4xi32>
   %loaded = vector.load %indices_view[%thread, 0] : view<4x4xi32> -> vector<4xi32>
-  %mask = vector.constant 15 : vector<4xi32>
+  %mask = vector.splati 15 : vector<4xi32>
   %bounded = vector.andi %loaded, %mask : vector<4xi32>
   %table = global.load @words : buffer
   %view = buffer.view %table[%origin] : buffer -> view<16xi32>

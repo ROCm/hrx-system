@@ -17,6 +17,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/combining.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/transforms/vector/packet_legalization.h"
@@ -1541,7 +1542,7 @@ iree_status_t loom_vector_packet_select_value_shape(
   } else if (loom_vector_concat_isa(op)) {
     // Irregular concatenations are not replayable packet snapshots.
   } else if (loom_vector_from_elements_isa(op) ||
-             loom_vector_constant_isa(op) || loom_vector_poison_isa(op) ||
+             loom_vector_literal_splat_isa(op) || loom_vector_poison_isa(op) ||
              loom_vector_splat_isa(op)) {
     *out_selected = true;
   } else {

@@ -20,7 +20,7 @@ kernel.def @paged_online_softmax_loop_f32() {
   %28 = buffer.assume.alignment %6 {minimum_alignment = 4} : buffer
   %output_storage = buffer.assume.noalias %28 : buffer
   %token_count$31 = index.assume %token_count$0 [range(%token_count$0, 0, 32)] : index
-  %initial_accumulator = vector.constant 0.0 : vector<4xf32>
+  %initial_accumulator = vector.splatf 0.0 : vector<4xf32>
   %query_view = buffer.view %query_storage[%query_storage_byte_offset] : buffer -> view<4xf32>
   %table = buffer.view %table_storage[%query_storage_byte_offset] : buffer -> view<8xi32>
   %state = buffer.view %state_storage[%query_storage_byte_offset] : buffer -> view<2xf32>

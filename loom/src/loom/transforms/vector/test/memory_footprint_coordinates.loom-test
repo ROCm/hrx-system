@@ -39,7 +39,7 @@ func.def @wrapping_mask_is_not_a_tail(%input: buffer) -> (vector<4xi32>) {
   %origin = index.cast %lower : i8 to index
   %base = index.constant 0 : offset
   %view = buffer.view %input[%base] : buffer -> view<128xi32>
-  %fallback = vector.constant 0 : vector<4xi32>
+  %fallback = vector.splati 0 : vector<4xi32>
   // ERROR@+1: SUBRANGE/010 {op_name="vector.load.mask", vector_extent="4", view_bound="128", required_origin_upper_bound="124"}
   %result = vector.load.mask %view[%origin], %mask, %fallback : view<128xi32>, vector<4xi1>, vector<4xi32>
   func.return %result : vector<4xi32>
@@ -56,7 +56,7 @@ func.def @nonwrapping_mask_proves_tail(%input: buffer) -> (vector<4xi32>) {
   %origin = index.cast %lower : i8 to index
   %base = index.constant 0 : offset
   %view = buffer.view %input[%base] : buffer -> view<126xi32>
-  %fallback = vector.constant 0 : vector<4xi32>
+  %fallback = vector.splati 0 : vector<4xi32>
   %result = vector.load.mask %view[%origin], %mask, %fallback : view<126xi32>, vector<4xi1>, vector<4xi32>
   func.return %result : vector<4xi32>
 }
@@ -73,7 +73,7 @@ func.def @bounded_dynamic_mask_proves_tail(%input: buffer, %count_input: index) 
   %origin = index.cast %lower : i8 to index
   %base = index.constant 0 : offset
   %view = buffer.view %input[%base] : buffer -> view<126xi32>
-  %fallback = vector.constant 0 : vector<[%count]xi32>
+  %fallback = vector.splati 0 : vector<[%count]xi32>
   %result = vector.load.mask %view[%origin], %mask, %fallback : view<126xi32>, vector<[%count]xi1>, vector<[%count]xi32>
   test.use %result : vector<[%count]xi32>
   func.return

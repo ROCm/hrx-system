@@ -136,7 +136,7 @@ func.def @preserves_bf16_epilogue_snapshot_before_store(%source_buffer: buffer, 
   %source = buffer.view %source_buffer[%source_base] : buffer -> view<[%m]x[%n]xbf16>
   %gate = buffer.view %gate_buffer[%gate_base] : buffer -> view<[%m]x[%n]xf32>
   %target = buffer.view %target_buffer[%target_base] : buffer -> view<[%m]x[%n]xbf16>
-  %20 = vector.constant 0.0 : vector<[%m]x[%n]xbf16>
+  %20 = vector.splatf 0.0 : vector<[%m]x[%n]xbf16>
   %21 = index.constant 0 : index
   %22 = index.constant 1 : index
   %narrow = scf.for %23 = [%21 to %m step %22](%24 = %20 : vector<[%m]x[%n]xbf16>) -> (vector<[%m]x[%n]xbf16>) {
@@ -1008,7 +1008,7 @@ func.def @scalarizes_dynamic_flat_product_f32_mma(%m: index, %n: index, %k: inde
 // ----
 func.def @scalarizes_dynamic_flat_product_f32_mma(%m: index, %n: index, %k: index, %lhs0: f32, %rhs0: f32, %init0: f32) {
   %mn = index.mul %m, %n : index
-  %42 = vector.constant 0.0 : vector<[%mn]xf32>
+  %42 = vector.splatf 0.0 : vector<[%mn]xf32>
   %43 = index.constant 0 : index
   %44 = index.constant 1 : index
   %init_data = scf.for %45 = [%43 to %mn step %44](%46 = %42 : vector<[%mn]xf32>) -> (vector<[%mn]xf32>) {
@@ -1042,16 +1042,16 @@ func.def @scalarizes_dynamic_flat_product_f32_mma(%m: index, %n: index, %k: inde
 // ====
 
 func.def @rejects_unrepresentable_static_lane_count() -> (vector<4294967296x4294967296xi32>) {
-  // ERROR@+1: SHAPE/007 "vector.constant" "vector-to-scalar" "vector<4294967296x4294967296xi32>"
-  %value = vector.constant 0 : vector<4294967296x4294967296xi32>
+  // ERROR@+1: SHAPE/007 "vector.splati" "vector-to-scalar" "vector<4294967296x4294967296xi32>"
+  %value = vector.splati 0 : vector<4294967296x4294967296xi32>
   func.return %value : vector<4294967296x4294967296xi32>
 }
 
 // ====
 
 func.def @rejects_static_lane_count_beyond_value_slice() -> (vector<65536xi32>) {
-  // ERROR@+1: SHAPE/007 "vector.constant" "vector-to-scalar" "vector<65536xi32>"
-  %value = vector.constant 0 : vector<65536xi32>
+  // ERROR@+1: SHAPE/007 "vector.splati" "vector-to-scalar" "vector<65536xi32>"
+  %value = vector.splati 0 : vector<65536xi32>
   func.return %value : vector<65536xi32>
 }
 
@@ -1518,7 +1518,7 @@ func.def @preserves_dynamic_rank2_mma_store_snapshots(%m: index, %n: index, %k: 
   %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<[%k]x[%n]xf32>
   %init_view = buffer.view %init_buffer[%base] : buffer -> view<[%m]x[%n]xf32>
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<[%m]x[%n]xf32>
-  %62 = vector.constant 0.0 : vector<[%m]x[%k]xf32>
+  %62 = vector.splatf 0.0 : vector<[%m]x[%k]xf32>
   %63 = index.constant 0 : index
   %64 = index.constant 1 : index
   %lhs_data = scf.for %65 = [%63 to %m step %64](%66 = %62 : vector<[%m]x[%k]xf32>) -> (vector<[%m]x[%k]xf32>) {
@@ -1531,7 +1531,7 @@ func.def @preserves_dynamic_rank2_mma_store_snapshots(%m: index, %n: index, %k: 
     }
     scf.yield %72 : vector<[%m]x[%k]xf32>
   }
-  %49 = vector.constant 0.0 : vector<[%k]x[%n]xf32>
+  %49 = vector.splatf 0.0 : vector<[%k]x[%n]xf32>
   %50 = index.constant 0 : index
   %51 = index.constant 1 : index
   %rhs_data = scf.for %52 = [%50 to %k step %51](%53 = %49 : vector<[%k]x[%n]xf32>) -> (vector<[%k]x[%n]xf32>) {
@@ -1544,7 +1544,7 @@ func.def @preserves_dynamic_rank2_mma_store_snapshots(%m: index, %n: index, %k: 
     }
     scf.yield %59 : vector<[%k]x[%n]xf32>
   }
-  %36 = vector.constant 0.0 : vector<[%m]x[%n]xf32>
+  %36 = vector.splatf 0.0 : vector<[%m]x[%n]xf32>
   %37 = index.constant 0 : index
   %38 = index.constant 1 : index
   %init_data = scf.for %39 = [%37 to %m step %38](%40 = %36 : vector<[%m]x[%n]xf32>) -> (vector<[%m]x[%n]xf32>) {

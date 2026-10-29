@@ -5,12 +5,12 @@
 x86.target<avx2> @target
 
 func.def target(@target) @construct_full_vectors(%i16_value: i16, %bf16_value: bf16) -> (vector<32xi8>, vector<8xi16>, vector<4xi64>, vector<16xf8E4M3>, vector<16xbf16>, vector<4xf64>) {
-  %i8_constant = vector.constant -7 : vector<32xi8>
+  %i8_constant = vector.splati -7 : vector<32xi8>
   %i16_splat = vector.splat %i16_value : vector<8xi16>
-  %i64_constant = vector.constant 81985529216486895 : vector<4xi64>
-  %f8_constant = vector.constant 1.5 : vector<16xf8E4M3>
+  %i64_constant = vector.splati 81985529216486895 : vector<4xi64>
+  %f8_constant = vector.splatf 1.5 : vector<16xf8E4M3>
   %bf16_splat = vector.splat %bf16_value : vector<16xbf16>
-  %f64_constant = vector.constant -2.5 : vector<4xf64>
+  %f64_constant = vector.splatf -2.5 : vector<4xf64>
   func.return %i8_constant, %i16_splat, %i64_constant, %f8_constant, %bf16_splat, %f64_constant : vector<32xi8>, vector<8xi16>, vector<4xi64>, vector<16xf8E4M3>, vector<16xbf16>, vector<4xf64>
 }
 

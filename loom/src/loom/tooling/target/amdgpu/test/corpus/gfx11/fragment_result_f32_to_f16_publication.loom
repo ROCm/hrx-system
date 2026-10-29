@@ -23,7 +23,7 @@ kernel.def target(@fragment_result_f32_to_f16_gfx11) @publish_transposed_f16() {
   %output_view = buffer.view %output_global[%base] : buffer -> view<16x16xf16, %transposed_layout>
   %lhs = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %fragment_origin] shape [%m, %k] : view<16x16xf16> -> vector<16xf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%k, %n] : view<16x16xf16, %transposed_layout> -> vector<16xf16>
-  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %initial_values = vector.splatf 0.0 : vector<8xf32>
   %initial = vector.fragment<init> %initial_values shape [%m, %n] : vector<8xf32>
   %result = vector.mma %lhs, %rhs, %initial : vector<16xf16>, vector<16xf16>, vector<8xf32>
   vector.fragment.store<result> %result, %output_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<8xf32>, view<16x16xf16, %transposed_layout>
@@ -49,7 +49,7 @@ kernel.def target(@fragment_result_f32_to_f16_gfx11) @publish_transposed_f32_ref
   %output_view = buffer.view %output_global[%base] : buffer -> view<16x16xf32, %transposed_layout>
   %lhs = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %fragment_origin] shape [%m, %k] : view<16x16xf16> -> vector<16xf16>
   %rhs = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%k, %n] : view<16x16xf16, %transposed_layout> -> vector<16xf16>
-  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %initial_values = vector.splatf 0.0 : vector<8xf32>
   %initial = vector.fragment<init> %initial_values shape [%m, %n] : vector<8xf32>
   %result = vector.mma %lhs, %rhs, %initial : vector<16xf16>, vector<16xf16>, vector<8xf32>
   vector.fragment.store<result> %result, %output_view[%fragment_origin, %fragment_origin] shape [%m, %n] : vector<8xf32>, view<16x16xf32, %transposed_layout>

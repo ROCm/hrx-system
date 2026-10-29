@@ -16,7 +16,7 @@ func.def @biased_tail_zero_fill(%row0: index, %rows0: index, %base_i32: i32, %in
   %header_value = view.load %header[0] : view<1xi32> -> i32
   %inside = index.cmp slt, %row, %rows : index
   %mask = vector.splat %inside : vector<4xi1>
-  %passthrough = vector.constant 0 : vector<4xi32>
+  %passthrough = vector.splati 0 : vector<4xi32>
   %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32>, vector<4xi1>, vector<4xi32>
   func.return %header_value, %value : i32, vector<4xi32>
 }
@@ -321,7 +321,7 @@ func.def @dynamic_base_zero_fill(%row0: index, %rows0: index, %base_i32: i32, %i
   %source = buffer.view %descriptor[%base] : buffer -> view<[%rows]x4xi32>
   %inside = index.cmp slt, %row, %rows : index
   %mask = vector.splat %inside : vector<4xi1>
-  %passthrough = vector.constant 0 : vector<4xi32>
+  %passthrough = vector.splati 0 : vector<4xi32>
   %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32>, vector<4xi1>, vector<4xi32>
   func.return %value : vector<4xi32>
 }
@@ -357,7 +357,7 @@ func.def @negative_zero_passthrough_preserved(%row0: index, %rows0: index, %inpu
   %source = buffer.view %descriptor[%base] : buffer -> view<[%rows]x4xf32>
   %inside = index.cmp slt, %row, %rows : index
   %mask = vector.splat %inside : vector<4xi1>
-  %passthrough = vector.constant -0.0 : vector<4xf32>
+  %passthrough = vector.splatf -0.0 : vector<4xf32>
   %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xf32>, vector<4xi1>, vector<4xf32>
   func.return %value : vector<4xf32>
 }
@@ -401,7 +401,7 @@ func.def @conjunctive_passthrough_preserved(%row0: index, %rows0: index, %column
   %column_inside = index.cmp slt, %column, %columns : index
   %inside = scalar.andi %row_inside, %column_inside : i1
   %mask = vector.splat %inside : vector<4xi1>
-  %passthrough = vector.constant 0 : vector<4xi32>
+  %passthrough = vector.splati 0 : vector<4xi32>
   %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32>, vector<4xi1>, vector<4xi32>
   func.return %value : vector<4xi32>
 }
@@ -454,7 +454,7 @@ func.def @strided_passthrough_preserved(%row0: index, %rows0: index, %input: buf
   %source = buffer.view %descriptor[%base] : buffer -> view<[%rows]x4xi32, %layout>
   %inside = index.cmp slt, %row, %rows : index
   %mask = vector.splat %inside : vector<4xi1>
-  %passthrough = vector.constant 0 : vector<4xi32>
+  %passthrough = vector.splati 0 : vector<4xi32>
   %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32, %layout>, vector<4xi1>, vector<4xi32>
   func.return %value : vector<4xi32>
 }

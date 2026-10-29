@@ -1000,11 +1000,11 @@ spirv.target<vulkan1_3> @vector_atomic_target {contract_feature_bits = 214751642
 func.def target(@vector_atomic_target) @vector_atomic_forms(%value: i32, %expected: i32, %replacement: i32, %buffer: buffer) {
   %base = index.constant 0 : offset
   %layout = encoding.layout.dense : encoding<layout>
-  %offsets = vector.constant 0 : vector<2xindex>
+  %offsets = vector.splati 0 : vector<2xindex>
   %values = vector.splat %value : vector<2xi32>
   %expected_values = vector.splat %expected : vector<2xi32>
   %replacement_values = vector.splat %replacement : vector<2xi32>
-  %mask = vector.constant true : vector<2xi1>
+  %mask = vector.splati 1 : vector<2xi1>
   %global = buffer.assume.memory_space<global> %buffer : buffer
   %aligned = buffer.assume.alignment %global {minimum_alignment = 4} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<8xi32, %layout>

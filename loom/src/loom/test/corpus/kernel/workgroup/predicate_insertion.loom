@@ -5,8 +5,8 @@
 func.def device inline @store_predicate_mask(%mask: vector<4xi1>, %position: index, %output: buffer) {
   %base = index.constant 0 : offset
   %destination = buffer.view %output[%base] : buffer -> view<2112xi32>
-  %true_words = vector.constant -1431655766 : vector<4xi32>
-  %false_words = vector.constant 1431655765 : vector<4xi32>
+  %true_words = vector.splati -1431655766 : vector<4xi32>
+  %false_words = vector.splati 1431655765 : vector<4xi32>
   %words = vector.select %mask, %true_words, %false_words : vector<4xi32>
   vector.store %words, %destination[%position] : vector<4xi32>, view<2112xi32>
   func.return
@@ -147,14 +147,14 @@ kernel.def @wide_predicate_insertion() {
   %source_view = buffer.view %input[%base] : buffer -> view<1024xi32>
   %destination = buffer.view %output[%base] : buffer -> view<1024xi32>
   %words = vector.load %source_view[%position] : view<1024xi32> -> vector<32xi32>
-  %sign_boundary = vector.constant 0 : vector<32xi32>
+  %sign_boundary = vector.splati 0 : vector<32xi32>
   %source = vector.cmpi slt, %words, %sign_boundary : vector<32xi32> -> vector<32xi1>
   %c1 = index.constant 1 : index
   %parity = index.andi %item, %c1 : index
   %replacement = index.cmp eq, %parity, %replacement_parity : index
   %inserted = vector.insert %replacement into %source[%item] : i1, vector<32xi1>
-  %true_words = vector.constant -1431655766 : vector<32xi32>
-  %false_words = vector.constant 1431655765 : vector<32xi32>
+  %true_words = vector.splati -1431655766 : vector<32xi32>
+  %false_words = vector.splati 1431655765 : vector<32xi32>
   %result = vector.select %inserted, %true_words, %false_words : vector<32xi32>
   vector.store %result, %destination[%position] : vector<32xi32>, view<1024xi32>
   kernel.return

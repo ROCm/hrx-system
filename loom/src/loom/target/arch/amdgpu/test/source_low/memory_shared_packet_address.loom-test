@@ -69,7 +69,7 @@ func.def @descriptor_dynamic_store(%output: buffer, %row: index) {
   %aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
   %descriptor_output = buffer.assume.memory_space<descriptor> %aligned : buffer
   %destination = buffer.view %descriptor_output[%row_offset] : buffer -> view<16xi32>
-  %value = vector.constant 1 : vector<16xi32>
+  %value = vector.splati 1 : vector<16xi32>
   vector.store<volatile> %value, %destination[0] : vector<16xi32>, view<16xi32>
   func.return
 }

@@ -25,8 +25,8 @@ func.def @dynamic_decomposition(%length: index, %input: vector<[%length]xf32>) -
 
 // ----
 func.def @dynamic_decomposition(%length: index, %input: vector<[%length]xf32>) -> (vector<[%length]xf32>, vector<[%length]xi32>) {
-  %6 = vector.constant 0.0 : vector<[%length]xf32>
-  %7 = vector.constant 0 : vector<[%length]xi32>
+  %6 = vector.splatf 0.0 : vector<[%length]xf32>
+  %7 = vector.splati 0 : vector<[%length]xi32>
   %8 = index.constant 0 : index
   %9 = index.constant 1 : index
   %fraction, %exponent = scf.for %10 = [%8 to %length step %9](%11 = %6 : vector<[%length]xf32>, %12 = %7 : vector<[%length]xi32>) -> (vector<[%length]xf32>, vector<[%length]xi32>) {

@@ -11,9 +11,9 @@ kernel.def @f16_constant_1_plain() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<1xf16>
-  %b_values = vector.constant 3.0 : vector<1xf16>
-  %c_values = vector.constant 7.0 : vector<1xf32>
+  %a_values = vector.splatf -2.0 : vector<1xf16>
+  %b_values = vector.splatf 3.0 : vector<1xf16>
+  %c_values = vector.splatf 7.0 : vector<1xf32>
   %lhs = vector.fragment<lhs> %a_values shape [blocks(%unit), %m, %k] : vector<1xf16>
   %rhs = vector.fragment<rhs> %b_values shape [blocks(%unit), %k, %m] : vector<1xf16>
   %init = vector.fragment<init> %c_values shape [blocks(%unit), %m, %m] : vector<1xf32>
@@ -100,9 +100,9 @@ kernel.def @s8_constant_1_plain() {
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %output_storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=i32, payload_elements=8, payload_registers=8>> : encoding<storage>
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xi32, %output_storage>
-  %a_values = vector.constant -2 : vector<1xi8>
-  %b_values = vector.constant 3 : vector<1xi8>
-  %c_values = vector.constant 7 : vector<1xi32>
+  %a_values = vector.splati -2 : vector<1xi8>
+  %b_values = vector.splati 3 : vector<1xi8>
+  %c_values = vector.splati 7 : vector<1xi32>
   %lhs = vector.fragment<lhs> %a_values shape [blocks(%unit), %m, %k] : vector<1xi8>
   %rhs = vector.fragment<rhs> %b_values shape [blocks(%unit), %k, %m] : vector<1xi8>
   %init = vector.fragment<init> %c_values shape [blocks(%unit), %m, %m] : vector<1xi32>
@@ -191,9 +191,9 @@ kernel.def @f16_constant_bits() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -0.0 : vector<1xf16>
-  %b_values = vector.constant 5.9604644775390625e-08 : vector<1xf16>
-  %c_values = vector.constant -0.0 : vector<1xf32>
+  %a_values = vector.splatf -0.0 : vector<1xf16>
+  %b_values = vector.splatf 5.9604644775390625e-08 : vector<1xf16>
+  %c_values = vector.splatf -0.0 : vector<1xf32>
   %lhs = vector.fragment<lhs> %a_values shape [blocks(%unit), %m, %k] : vector<1xf16>
   %rhs = vector.fragment<rhs> %b_values shape [blocks(%unit), %k, %m] : vector<1xf16>
   %init = vector.fragment<init> %c_values shape [blocks(%unit), %m, %m] : vector<1xf32>
@@ -234,8 +234,8 @@ kernel.def @varying_initializer() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
+  %a_values = vector.splatf -2.0 : vector<4xf16>
+  %b_values = vector.splatf 3.0 : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %lane = kernel.workitem.id<x> : index
@@ -263,18 +263,18 @@ kernel.def @divergent_initializer() {
   %first_lane = index.constant 0 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%offset] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
+  %a_values = vector.splatf -2.0 : vector<4xf16>
+  %b_values = vector.splatf 3.0 : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %thread = kernel.workitem.id<x> : index
   %writer = index.cmp eq, %thread, %first_lane : index
   %value = scf.if %writer -> (vector<4xf32>) {
-    %then_values = vector.constant 1.0 : vector<4xf32>
+    %then_values = vector.splatf 1.0 : vector<4xf32>
     %fragment = vector.fragment<init> %then_values shape [%size, %size] : vector<4xf32>
     scf.yield %fragment : vector<4xf32>
   } else {
-    %else_values = vector.constant 2.0 : vector<4xf32>
+    %else_values = vector.splatf 2.0 : vector<4xf32>
     %fragment = vector.fragment<init> %else_values shape [%size, %size] : vector<4xf32>
     scf.yield %fragment : vector<4xf32>
   }
@@ -298,12 +298,12 @@ kernel.def @multiple_blocks() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
+  %a_values = vector.splatf -2.0 : vector<4xf16>
+  %b_values = vector.splatf 3.0 : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %blocks = index.constant 2 : index
-  %values = vector.constant 7.0 : vector<4xf32>
+  %values = vector.splatf 7.0 : vector<4xf32>
   %init = vector.fragment<init> %values shape [blocks(%blocks), %size, %size] : vector<4xf32>
   // ERROR@+1: TARGET/039 {matrix_constraint="fragment_shape"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
@@ -325,12 +325,12 @@ kernel.def @packed_initializer() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
+  %a_values = vector.splatf -2.0 : vector<4xf16>
+  %b_values = vector.splatf 3.0 : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %schema = encoding.define #encoding.f32<payload_elements=4, payload_registers=4> : encoding<schema>
-  %values = vector.constant 7.0 : vector<4xf32>
+  %values = vector.splatf 7.0 : vector<4xf32>
   %init = vector.fragment<init> %values shape [%size, %size] using {schema = %schema : encoding<schema>} : vector<4xf32>
   // ERROR@+1: TARGET/039 {matrix_constraint="fragment_schema"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
@@ -352,12 +352,12 @@ kernel.def @scaled_initializer() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
+  %a_values = vector.splatf -2.0 : vector<4xf16>
+  %b_values = vector.splatf 3.0 : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f32, payload_elements=4, payload_registers=4, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %values = vector.constant 7.0 : vector<4xf32>
+  %values = vector.splatf 7.0 : vector<4xf32>
   %init = vector.fragment<init> %values shape [%size, %size] using {scale = %values : vector<4xf32>, schema = %schema : encoding<schema>} : vector<4xf32>
   // ERROR@+1: SPIRV/013 {function_name="scaled_initializer", descriptor_key="spirv.op_cooperative_matrix_mul_add_khr.f16.m16n16k16.f32.subgroup", field_kind="operand", field_index="2", value_name="init", expected_value_type="cooperative_matrix", actual_value_type="v4f32"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
@@ -379,13 +379,13 @@ kernel.def @sparse_initializer() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
+  %a_values = vector.splatf -2.0 : vector<4xf16>
+  %b_values = vector.splatf 3.0 : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %schema = encoding.define #encoding.operand<element_format=f32, payload_elements=4, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
-  %metadata = vector.constant 0 : vector<4xi32>
-  %values = vector.constant 7.0 : vector<4xf32>
+  %metadata = vector.splati 0 : vector<4xi32>
+  %values = vector.splatf 7.0 : vector<4xf32>
   %init = vector.fragment<init> %values shape [%size, %size] using {schema = %schema : encoding<schema>, sparsity = %metadata : vector<4xi32>} : vector<4xf32>
   // ERROR@+1: SPIRV/013 {function_name="sparse_initializer", descriptor_key="spirv.op_cooperative_matrix_mul_add_khr.f16.m16n16k16.f32.subgroup", field_kind="operand", field_index="2", value_name="init", expected_value_type="cooperative_matrix", actual_value_type="v4f32"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
@@ -407,11 +407,11 @@ kernel.def @unavailable_cooperative_matrix() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
+  %a_values = vector.splatf -2.0 : vector<4xf16>
+  %b_values = vector.splatf 3.0 : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
-  %values = vector.constant 7.0 : vector<4xf32>
+  %values = vector.splatf 7.0 : vector<4xf32>
   %init = vector.fragment<init> %values shape [%size, %size] : vector<4xf32>
   // ERROR@+1: TARGET/039 {matrix_constraint="spirv.cooperative_matrix.khr"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
@@ -434,9 +434,9 @@ kernel.def @f16_accumulator_initializers() {
   %size = index.constant 16 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<32x16xf16>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
-  %constant_values = vector.constant 7.0 : vector<4xf16>
+  %a_values = vector.splatf -2.0 : vector<4xf16>
+  %b_values = vector.splatf 3.0 : vector<4xf16>
+  %constant_values = vector.splatf 7.0 : vector<4xf16>
   %uniform_values = vector.splat %initial : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>

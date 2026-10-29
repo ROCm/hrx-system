@@ -279,10 +279,9 @@ def _predicate_constant_rules(
             )
             rules.append(
                 DescriptorRule(
-                    source_op=vector.vector_constant,
+                    source_op=vector.vector_splati,
                     descriptor=zero,
                     guards=(
-                        Guard.attr_kind("value", "i64"),
                         Guard.i64_range("value", 0, 0),
                         *common_guards,
                     ),
@@ -297,10 +296,9 @@ def _predicate_constant_rules(
             )
             rules.append(
                 DescriptorRule(
-                    source_op=vector.vector_constant,
+                    source_op=vector.vector_splati,
                     descriptor=equal,
                     guards=(
-                        Guard.attr_kind("value", "i64"),
                         Guard.i64_range("value", 1, 1),
                         *common_guards,
                         Guard.descriptor_available(zero),

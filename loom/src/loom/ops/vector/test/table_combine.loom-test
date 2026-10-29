@@ -32,7 +32,7 @@ func.def @fixed_lookup_different_shape(%table: vector<16xi8>) -> (vector<4xi8>) 
 
 // ----
 func.def @fixed_lookup_different_shape(%table: vector<16xi8>) -> (vector<4xi8>) {
-  %source = vector.constant 66051 : vector<1xi32>
+  %source = vector.splati 66051 : vector<1xi32>
   %indices = vector.bitcast %source : vector<1xi32> to vector<4xi8>
   %result = vector.table.lookup %table[%indices] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
   func.return %result : vector<4xi8>
@@ -81,7 +81,7 @@ func.def @exact_address_indices(%table: vector<4xf32>) -> (vector<2xf32>) {
 
 // Masked byte indices survive the promotions introduced by C++ subscripts.
 func.def @promoted_bytes(%table: vector<16xi8>, %raw: vector<4xi8>) -> (vector<4xi8>) {
-  %mask = vector.constant 15 : vector<4xi8>
+  %mask = vector.splati 15 : vector<4xi8>
   %indices = vector.andi %raw, %mask : vector<4xi8>
   %a = vector.extract %indices[0] : vector<4xi8> -> i8
   %b = vector.extract %indices[1] : vector<4xi8> -> i8
@@ -105,7 +105,7 @@ func.def @promoted_bytes(%table: vector<16xi8>, %raw: vector<4xi8>) -> (vector<4
 
 // ----
 func.def @promoted_bytes(%table: vector<16xi8>, %raw: vector<4xi8>) -> (vector<4xi8>) {
-  %mask = vector.constant 15 : vector<4xi8>
+  %mask = vector.splati 15 : vector<4xi8>
   %indices = vector.andi %raw, %mask : vector<4xi8>
   %result = vector.table.lookup %table[%indices] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
   func.return %result : vector<4xi8>

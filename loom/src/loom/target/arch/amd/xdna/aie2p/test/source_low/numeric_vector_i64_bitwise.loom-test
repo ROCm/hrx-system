@@ -65,9 +65,9 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @sixteen_wide_elem
 // ====
 
 func.def @wide_element_constants(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>, vector<2xi64>, vector<2xi64>) {
-  %mask = vector.constant 4294967295 : vector<2xi64>
-  %tag = vector.constant -9223372036854775807 : vector<2xi64>
-  %toggle = vector.constant -4294967296 : vector<2xi64>
+  %mask = vector.splati 4294967295 : vector<2xi64>
+  %tag = vector.splati -9223372036854775807 : vector<2xi64>
+  %toggle = vector.splati -4294967296 : vector<2xi64>
   %masked = vector.andi %lhs, %mask : vector<2xi64>
   %tagged = vector.ori %tag, %rhs : vector<2xi64>
   %toggled = vector.xori %lhs, %toggle : vector<2xi64>

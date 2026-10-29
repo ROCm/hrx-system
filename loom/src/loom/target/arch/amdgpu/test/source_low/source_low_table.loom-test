@@ -194,7 +194,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8_table_lookup_
 // ====
 
 func.def @i8_table_lookup_masked_codes(%grid: vector<16xi8>, %packed: vector<4xi8>) -> (vector<4xi8>) {
-  %mask = vector.constant 15 : vector<4xi8>
+  %mask = vector.splati 15 : vector<4xi8>
   %codes = vector.andi %packed, %mask : vector<4xi8>
   %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
   func.return %decoded : vector<4xi8>
@@ -221,7 +221,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8_table_lookup_
 // ====
 
 func.def @i8_table_lookup_shifted_codes(%grid: vector<16xi8>, %packed: vector<4xi8>) -> (vector<4xi8>) {
-  %shift = vector.constant 4 : vector<4xi8>
+  %shift = vector.splati 4 : vector<4xi8>
   %codes = vector.shrui %packed, %shift : vector<4xi8>
   %decoded = vector.table.lookup %grid[%codes] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
   func.return %decoded : vector<4xi8>
@@ -297,7 +297,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8_table_lookup_
 
 // Masked byte indices survive the promotions introduced by C++ subscripts.
 func.def @i8_table_indexed_bytes(%table: vector<16xi8>, %raw: vector<4xi8>) -> (vector<4xi8>) {
-  %mask = vector.constant 15 : vector<4xi8>
+  %mask = vector.splati 15 : vector<4xi8>
   %indices = vector.andi %raw, %mask : vector<4xi8>
   %a = vector.extract %indices[0] : vector<4xi8> -> i8
   %b = vector.extract %indices[1] : vector<4xi8> -> i8

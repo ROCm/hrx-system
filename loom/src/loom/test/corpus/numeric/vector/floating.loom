@@ -322,7 +322,7 @@ func.def @bfloat_lookup_arithmetic(%input: buffer, %output: buffer) {
   %table = vector.load %table_view[0] : view<8xbf16> -> vector<8xbf16>
   %rhs = vector.load %rhs_view[0] : view<8xbf16> -> vector<8xbf16>
   %raw_codes = vector.load %codes_view[0] : view<8xi16> -> vector<8xi16>
-  %code_mask = vector.constant 7 : vector<8xi16>
+  %code_mask = vector.splati 7 : vector<8xi16>
   %codes = vector.andi %raw_codes, %code_mask : vector<8xi16>
   %bits = vector.load %bits_view[0] : view<8xbf16> -> vector<8xbf16>
   %initial = vector.load %acc_view[0] : view<4xf32> -> vector<4xf32>
@@ -333,13 +333,13 @@ func.def @bfloat_lookup_arithmetic(%input: buffer, %output: buffer) {
   %last = vector.extract %table[7] : vector<8xbf16> -> bf16
   %updated = vector.insert %last into %decoded[5] : bf16, vector<8xbf16>
   %splat = vector.splat %last : vector<8xbf16>
-  %initial_zero = vector.constant 0.0 : vector<4xf32>
+  %initial_zero = vector.splatf 0.0 : vector<4xf32>
   %dot_zero = vector.dot2f %decoded, %rhs, %initial_zero : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
   %dot_initial = vector.dot2f %decoded, %rhs, %initial : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
   // Volatile initialization keeps the guard writes before the partial stores.
   // Each 16-byte result leaves 48 bytes of the same register-sized slot intact.
   %guard_view = buffer.view %destination[%origin] : buffer -> view<128xi32>
-  %guard = vector.constant -1515870811 : vector<16xi32>
+  %guard = vector.splati -1515870811 : vector<16xi32>
   vector.store<volatile> %guard, %guard_view[0] : vector<16xi32>, view<128xi32>
   vector.store<volatile> %guard, %guard_view[16] : vector<16xi32>, view<128xi32>
   vector.store<volatile> %guard, %guard_view[32] : vector<16xi32>, view<128xi32>
@@ -363,7 +363,7 @@ func.def @bfloat_lookup_arithmetic(%input: buffer, %output: buffer) {
   %k = index.constant 1 : index
   %lhs_fragment = vector.fragment<lhs> %decoded shape [%m, %k] : vector<8xbf16>
   %rhs_fragment = vector.fragment<rhs> %rhs shape [%k, %n] : vector<8xbf16>
-  %accumulator = vector.constant 0.0 : vector<64xf32>
+  %accumulator = vector.splatf 0.0 : vector<64xf32>
   %acc_fragment = vector.fragment<init> %accumulator shape [%m, %n] : vector<64xf32>
   %product = vector.mma %lhs_fragment, %rhs_fragment, %acc_fragment : vector<8xbf16>, vector<8xbf16>, vector<64xf32>
   %product_offset = index.constant 512 : offset

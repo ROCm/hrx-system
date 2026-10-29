@@ -649,9 +649,9 @@ def _expected_partial_numeric_vector_ranges():
 def test_numeric_constants_cover_every_native_and_partial_carrier() -> None:
     actual = set()
     for rule in WASM_CORE_SIMD128_CONTRACT_FRAGMENT.cases:
-        if (
-            not isinstance(rule, DescriptorRule)
-            or rule.source_op is not vector.vector_constant
+        if not isinstance(rule, DescriptorRule) or rule.source_op not in (
+            vector.vector_splati,
+            vector.vector_splatf,
         ):
             continue
         actual.update(_numeric_vector_shapes(rule, "result"))
@@ -666,37 +666,39 @@ def test_numeric_constants_cover_every_native_and_partial_carrier() -> None:
 
 def test_full_numeric_carriers_have_complete_structural_rules() -> None:
     expected = _expected_numeric_vector_shapes()
-    for source_op, field in (
-        (vector.vector_constant, "result"),
-        (vector.vector_splat, "result"),
-        (vector.vector_extract, "source"),
-        (vector.vector_insert, "dest"),
-        (vector.vector_shuffle, "result"),
+    for source_ops, field in (
+        ((vector.vector_splati, vector.vector_splatf), "result"),
+        ((vector.vector_splat,), "result"),
+        ((vector.vector_extract,), "source"),
+        ((vector.vector_insert,), "dest"),
+        ((vector.vector_shuffle,), "result"),
     ):
         actual = {
             shape
             for rule in WASM_CORE_SIMD128_CONTRACT_FRAGMENT.cases
-            if isinstance(rule, DescriptorRule) and rule.source_op is source_op
+            if isinstance(rule, DescriptorRule) and rule.source_op in source_ops
             for shape in _numeric_vector_shapes(rule, field)
         }
-        assert actual == expected, source_op.name
+        assert actual == expected, tuple(source_op.name for source_op in source_ops)
 
 
 def test_partial_numeric_carriers_have_complete_direct_structural_rules() -> None:
     expected = _expected_partial_numeric_vector_ranges()
-    for source_op, field, rules_per_shape in (
-        (vector.vector_constant, "result", 1),
-        (vector.vector_splat, "result", 1),
-        (vector.vector_extract, "source", 1),
-        (vector.vector_insert, "dest", 2),
+    for source_ops, field, rules_per_shape in (
+        ((vector.vector_splati, vector.vector_splatf), "result", 1),
+        ((vector.vector_splat,), "result", 1),
+        ((vector.vector_extract,), "source", 1),
+        ((vector.vector_insert,), "dest", 2),
     ):
         counts = {}
         for rule in WASM_CORE_SIMD128_CONTRACT_FRAGMENT.cases:
-            if not isinstance(rule, DescriptorRule) or rule.source_op is not source_op:
+            if not isinstance(rule, DescriptorRule) or rule.source_op not in source_ops:
                 continue
             for shape in _numeric_vector_ranges(rule, field):
                 counts[shape] = counts.get(shape, 0) + 1
-        assert counts == {shape: rules_per_shape for shape in expected}, source_op.name
+        assert counts == {shape: rules_per_shape for shape in expected}, tuple(
+            source_op.name for source_op in source_ops
+        )
 
 
 def test_partial_integer_carriers_have_complete_bitwise_rules() -> None:

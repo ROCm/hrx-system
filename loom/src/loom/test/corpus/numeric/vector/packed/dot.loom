@@ -26,9 +26,9 @@ func.def @packed_byte_dots(%storage_buffer: buffer) {
   vector.store %u8s8, %outputs[32] : vector<16xi32>, view<80xi32>
   %s8u8 = vector.dot4i<s8u8> %lhs, %rhs, %accumulators : vector<64xi8>, vector<64xi8>, vector<16xi32>
   vector.store %s8u8, %outputs[48] : vector<16xi32>, view<80xi32>
-  %q6_mask = vector.constant 63 : vector<64xi8>
+  %q6_mask = vector.splati 63 : vector<64xi8>
   %q6_codes = vector.andi %q6_raw, %q6_mask : vector<64xi8>
-  %q6_bias = vector.constant -32 : vector<64xi8>
+  %q6_bias = vector.splati -32 : vector<64xi8>
   %q6_signed = vector.addi %q6_codes, %q6_bias : vector<64xi8>
   %q6 = vector.dot4i<s8s8> %q6_signed, %rhs, %accumulators : vector<64xi8>, vector<64xi8>, vector<16xi32>
   vector.store %q6, %outputs[64] : vector<16xi32>, view<80xi32>
@@ -76,7 +76,7 @@ func.def @packed_mixed_nibble_dots(%storage_buffer: buffer) {
   vector.store %u4s4, %outputs[0] : vector<1xi32>, view<3xi32>
   %s4u4 = vector.dot8i4<s4u4> %lhs, %rhs, %accumulator : vector<1xi32>
   vector.store %s4u4, %outputs[1] : vector<1xi32>, view<3xi32>
-  %offset_to_signed_mask = vector.constant -2004318072 : vector<1xi32>
+  %offset_to_signed_mask = vector.splati -2004318072 : vector<1xi32>
   %signed_lhs = vector.xori %lhs, %offset_to_signed_mask : vector<1xi32>
   %q4 = vector.dot8i4<s4u4> %signed_lhs, %rhs, %accumulator : vector<1xi32>
   vector.store %q4, %outputs[2] : vector<1xi32>, view<3xi32>

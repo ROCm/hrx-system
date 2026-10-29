@@ -6,7 +6,7 @@ func.def inline @cohort_width(%width: index, %unused_offset: offset) -> (index) 
 
 func.def inline @write_cohort(%width: index, %offset: offset, %output: buffer) {
   %extent = func.call @cohort_width(%width, %offset) : (index, offset) -> (index)
-  %values = vector.constant 7 : vector<[%extent]xi32>
+  %values = vector.splati 7 : vector<[%extent]xi32>
   %destination = buffer.view %output[%offset] : buffer -> view<[%extent]xi32>
   vector.store %values, %destination[0] : vector<[%extent]xi32>, view<[%extent]xi32>
   func.return

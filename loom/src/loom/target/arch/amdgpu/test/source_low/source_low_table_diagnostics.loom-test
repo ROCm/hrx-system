@@ -28,7 +28,7 @@ func.def target(@target) @i8_table_lookup_unknown_codes_rejected(%grid: vector<4
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @f16_table_lookup_rejected(%grid: vector<4xf16>, %input: vector<4xi8>) -> (vector<4xf16>) {
-  %mask = vector.constant 3 : vector<4xi8>
+  %mask = vector.splati 3 : vector<4xi8>
   %codes = vector.andi %input, %mask : vector<4xi8>
   // ERROR@+1: AMDGPU/023 {constraint_key="table_lookup.shape"}
   %decoded = vector.table.lookup %grid[%codes] : vector<4xf16>, vector<4xi8> -> vector<4xf16>

@@ -297,7 +297,7 @@ def _pair_constant_rule(
 def _pair_vector_constant_rule(
     scalar_type: TypePattern,
     result_type: TypePattern,
-    attr_kind: str,
+    source_op: Op,
     low_bits: ValueProject,
     high_bits: ValueProject,
     exact_guard: Guard,
@@ -347,10 +347,9 @@ def _pair_vector_constant_rule(
             )
         )
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=source_op,
         descriptor=descriptor,
         guards=(
-            Guard.attr_kind("value", attr_kind),
             Guard.value_type("result", result_type),
             exact_guard,
         ),
@@ -364,9 +363,23 @@ def _pair_vector_constant_rules() -> tuple[DescriptorRule, ...]:
     integer_exact = Guard.value_exact_i64
     float_exact = Guard.value_exact_float
     rules = []
-    for scalar_type, native_type, element_type, project, exact_guard in (
-        (_I64, _I64_VECTOR, "i64", integer_words, integer_exact),
-        (_F64, _F64_VECTOR, "f64", float_words, float_exact),
+    for scalar_type, native_type, element_type, source_op, project, exact_guard in (
+        (
+            _I64,
+            _I64_VECTOR,
+            "i64",
+            vector.vector_splati,
+            integer_words,
+            integer_exact,
+        ),
+        (
+            _F64,
+            _F64_VECTOR,
+            "f64",
+            vector.vector_splatf,
+            float_words,
+            float_exact,
+        ),
     ):
         for result_type, carrier in (
             (native_type, _PairVectorConstantCarrier.NATIVE),
@@ -383,7 +396,7 @@ def _pair_vector_constant_rules() -> tuple[DescriptorRule, ...]:
                 _pair_vector_constant_rule(
                     scalar_type,
                     result_type,
-                    element_type,
+                    source_op,
                     project("result", word_index=0),
                     project("result", word_index=1),
                     exact_guard("result"),
@@ -394,7 +407,7 @@ def _pair_vector_constant_rules() -> tuple[DescriptorRule, ...]:
         _pair_vector_constant_rule(
             _I64,
             Vector("i64", lanes=32),
-            "i64",
+            vector.vector_splati,
             integer_words("result", word_index=0),
             integer_words("result", word_index=1),
             integer_exact("result"),

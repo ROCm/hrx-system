@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from loom.dialect.scalar import conversion as scalar_conversion
 from loom.dialect.vector import defs as vector
+from loom.dsl import Op
 from loom.target.contracts import (
     AttrProject,
     DescriptorEmitForm,
@@ -37,10 +38,9 @@ def integer_vector_zero_rule(
 ) -> DescriptorRule:
     """Constructs an integer zero vector with a dependency-breaking op."""
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=vector.vector_splati,
         descriptor=descriptor,
         guards=(
-            Guard.attr_kind("value", "i64"),
             Guard.value_type("result", result_type),
             Guard.i64_range("value", 0, 0),
             *(
@@ -61,6 +61,7 @@ def integer_vector_zero_rule(
 
 
 def _uniform_vector_constant_rule(
+    source_op: Op,
     result_type: TypePattern,
     immediate_type: TypePattern,
     broadcast_type: TypePattern,
@@ -108,7 +109,7 @@ def _uniform_vector_constant_rule(
         )
     )
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=source_op,
         descriptor=broadcast_descriptor,
         guards=(
             Guard.value_type("result", result_type),
@@ -137,6 +138,7 @@ def i32_vector_constant_rule(
 ) -> DescriptorRule:
     """Constructs a uniform i32 vector from its exact element value."""
     return _uniform_vector_constant_rule(
+        vector.vector_splati,
         result_type,
         _I32,
         result_type if lane_type is None else lane_type,
@@ -147,10 +149,7 @@ def i32_vector_constant_rule(
         broadcast_operand,
         broadcast_immediates,
         lane_move_descriptor,
-        (
-            Guard.attr_kind("value", "i64"),
-            Guard.i64_range("value", -(2**31), (2**31) - 1),
-        ),
+        (Guard.i64_range("value", -(2**31), (2**31) - 1),),
         priority,
     )
 
@@ -171,6 +170,7 @@ def integer_vector_constant_rule(
         raise ValueError(f"unsupported x86 integer element width {element_bit_width}")
     immediate_type = _I64 if element_bit_width == 64 else _I32
     return _uniform_vector_constant_rule(
+        vector.vector_splati,
         result_type,
         immediate_type,
         lane_type,
@@ -182,7 +182,6 @@ def integer_vector_constant_rule(
         None,
         lane_move_descriptor,
         (
-            Guard.attr_kind("value", "i64"),
             Guard.i64_range(
                 "value",
                 -(2 ** (element_bit_width - 1)),
@@ -206,6 +205,7 @@ def i64_vector_constant_rule(
 ) -> DescriptorRule:
     """Constructs a uniform i64 vector from its exact element value."""
     return _uniform_vector_constant_rule(
+        vector.vector_splati,
         result_type,
         _I64,
         result_type,
@@ -216,10 +216,7 @@ def i64_vector_constant_rule(
         broadcast_operand,
         broadcast_immediates,
         lane_move_descriptor,
-        (
-            Guard.attr_kind("value", "i64"),
-            Guard.i64_range("value", -(2**63), (2**63) - 1),
-        ),
+        (Guard.i64_range("value", -(2**63), (2**63) - 1),),
         priority,
     )
 
@@ -410,10 +407,9 @@ def floating_vector_zero_rule(
 ) -> DescriptorRule:
     """Constructs an exact positive-zero vector with a dependency-breaking op."""
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=vector.vector_splatf,
         descriptor=descriptor,
         guards=(
-            Guard.attr_kind("value", "f64"),
             Guard.value_type("result", result_type),
             Guard.value_float_equals("result", 0.0),
             *(
@@ -447,6 +443,7 @@ def _floating_vector_constant_rule(
 ) -> DescriptorRule:
     """Constructs a uniform float vector from its exact element bit pattern."""
     return _uniform_vector_constant_rule(
+        vector.vector_splatf,
         result_type,
         integer_type,
         scalar_type,
@@ -457,10 +454,7 @@ def _floating_vector_constant_rule(
         broadcast_operand,
         broadcast_immediates,
         bitcast_descriptor,
-        (
-            Guard.attr_kind("value", "f64"),
-            Guard.value_exact_float("result"),
-        ),
+        (Guard.value_exact_float("result"),),
         0,
     )
 
@@ -533,6 +527,7 @@ def floating_vector_constant_bits_rule(
     else:
         raise ValueError(f"unsupported x86 floating element type {element_type}")
     return _uniform_vector_constant_rule(
+        vector.vector_splatf,
         result_type,
         immediate_type,
         lane_type,
@@ -543,10 +538,7 @@ def floating_vector_constant_bits_rule(
         "value",
         None,
         lane_move_descriptor,
-        (
-            Guard.attr_kind("value", "f64"),
-            Guard.value_exact_float("result"),
-        ),
+        (Guard.value_exact_float("result"),),
         priority,
         result_register_class,
     )

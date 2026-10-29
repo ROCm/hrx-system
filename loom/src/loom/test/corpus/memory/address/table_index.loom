@@ -59,8 +59,8 @@ kernel.def @lookup_vector() {
   %high_bytes = vector.load %high_view[%position] : view<256xi8> -> vector<4xi8>
   %low_words = vector.extui %low_bytes : vector<4xi8> to vector<4xi32>
   %high_words = vector.extui %high_bytes : vector<4xi8> to vector<4xi32>
-  %high_mask = vector.constant 1 : vector<4xi32>
-  %high_shift = vector.constant 8 : vector<4xi32>
+  %high_mask = vector.splati 1 : vector<4xi32>
+  %high_shift = vector.splati 8 : vector<4xi32>
   %high_bits = vector.andi %high_words, %high_mask : vector<4xi32>
   %high_codes = vector.shli %high_bits, %high_shift : vector<4xi32>
   %codes = vector.ori %low_words, %high_codes : vector<4xi32>

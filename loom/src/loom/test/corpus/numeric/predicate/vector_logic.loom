@@ -148,8 +148,8 @@ func.def @predicate_insert(%trial: index, %output: buffer) {
   %source0, %source1, %source2, %source3 = func.call @predicate_bits4(%source_bits) : (i32) -> (i1, i1, i1, i1)
   %source = vector.from_elements %source0, %source1, %source2, %source3 : vector<4xi1>
   %updated = vector.insert %replacement into %source[%lane] : i1, vector<4xi1>
-  %true_words = vector.constant -1431655766 : vector<4xi32>
-  %false_words = vector.constant 1431655765 : vector<4xi32>
+  %true_words = vector.splati -1431655766 : vector<4xi32>
+  %false_words = vector.splati 1431655765 : vector<4xi32>
   %selected = vector.select %updated, %true_words, %false_words : vector<4xi32>
   %base = index.constant 0 : offset
   %result = buffer.view %output[%base] : buffer -> view<4xi32>
@@ -207,8 +207,8 @@ func.def @predicate_bitstream_roundtrip(%trial: index, %output: buffer) {
   %packed = vector.from_elements %byte : vector<1xi8>
   %unsigned = vector.bitunpacku<1> %packed : vector<1xi8> -> vector<8xi1>
   %signed = vector.bitunpacks<1> %packed : vector<1xi8> -> vector<8xi1>
-  %true_values = vector.constant -1 : vector<8xi32>
-  %false_values = vector.constant 0 : vector<8xi32>
+  %true_values = vector.splati -1 : vector<8xi32>
+  %false_values = vector.splati 0 : vector<8xi32>
   %unsigned_values = vector.select %unsigned, %true_values, %false_values : vector<8xi32>
   %signed_values = vector.select %signed, %true_values, %false_values : vector<8xi32>
   %repacked = vector.bitpack<1> %signed : vector<8xi1> -> vector<1xi8>

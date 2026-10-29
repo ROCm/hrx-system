@@ -655,7 +655,7 @@ kernel.def @bank_read_ahead() {
   %origin = index.constant 0 : offset
   %source = buffer.view %input[%origin] : buffer -> view<8x8xi32>
   %destination = buffer.view %output[%origin] : buffer -> view<8x8xi32>
-  %initial = vector.constant 0 : vector<8x8xi32>
+  %initial = vector.splati 0 : vector<8x8xi32>
   %result = scf.for %i = [%begin to %count step %step](%bank = %initial : vector<8x8xi32>) -> (vector<8x8xi32>) pipeline(%depth) {
     %value = vector.load %source[%i, 0] : view<8x8xi32> -> vector<8xi32>
     %next = scf.for %slot = [%begin to %extent step %step](%partial = %bank : vector<8x8xi32>) -> (vector<8x8xi32>) unroll schedule(linear) {

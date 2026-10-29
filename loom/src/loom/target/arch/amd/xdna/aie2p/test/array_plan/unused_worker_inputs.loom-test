@@ -10,7 +10,7 @@ func.def target(@core_target) @replace(%input: buffer, %output_arg: buffer) {
   %output = buffer.assume.alignment %output_arg {minimum_alignment = 64} : buffer
   %base = index.constant 0 : offset
   %output_view = buffer.view %output[%base] : buffer -> view<16xi32>
-  %value = vector.constant 1 : vector<16xi32>
+  %value = vector.splati 1 : vector<16xi32>
   vector.store %value, %output_view[0] : vector<16xi32>, view<16xi32>
   func.return
 }
@@ -21,7 +21,7 @@ func.def target(@core_target) @following(%input_arg: buffer, %output_arg: buffer
   %input_view = buffer.view %input[%base] : buffer -> view<16xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<16xi32>
   %value = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
-  %increment = vector.constant 1 : vector<16xi32>
+  %increment = vector.splati 1 : vector<16xi32>
   %next = vector.addi %value, %increment : vector<16xi32>
   vector.store %next, %output_view[0] : vector<16xi32>, view<16xi32>
   func.return

@@ -3,7 +3,7 @@
 // CDNA materializes and reuses register selectors for fixed index packing.
 
 func.def @byte_table_i32_indices_cdna(%table: vector<8xi8>, %input: vector<4xi32>) -> (vector<4xi8>) {
-  %mask = vector.constant 7 : vector<4xi32>
+  %mask = vector.splati 7 : vector<4xi32>
   %indices = vector.andi %input, %mask : vector<4xi32>
   %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<4xi32> -> vector<4xi8>
   func.return %values : vector<4xi8>

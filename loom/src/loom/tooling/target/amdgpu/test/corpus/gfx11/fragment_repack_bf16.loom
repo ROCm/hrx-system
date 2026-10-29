@@ -19,7 +19,7 @@ kernel.def target(@fragment_repack_gfx11_wave32) @fragment_repack_roundtrip_bf16
   %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32>
   %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<16x16xbf16>
-  %zero_accumulator = vector.constant 0.0 : vector<8xf32>
+  %zero_accumulator = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
   %result = vector.fragment.load<result> %input_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf32> -> vector<8xf32>
   vector.fragment.store<result> %result, %scratch_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : vector<8xf32>, view<16x16xbf16>
@@ -43,7 +43,7 @@ kernel.def target(@fragment_repack_gfx11_wave32) @fragment_repack_direct_bf16() 
   %input_view = buffer.view %input[%base] : buffer -> view<16x16xf32>
   %rhs_view = buffer.view %rhs[%base] : buffer -> view<16x16xbf16, %rhs_layout>
   %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32>
-  %zero_accumulator = vector.constant 0.0 : vector<8xf32>
+  %zero_accumulator = vector.splatf 0.0 : vector<8xf32>
   %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
   %result = vector.fragment.load<result> %input_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf32> -> vector<8xf32>
   %lhs = vector.fragment.repack<lhs> %result shape [%tile_extent, %tile_extent] : vector<8xf32> -> vector<16xbf16>

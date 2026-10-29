@@ -75,7 +75,7 @@ func.def @load_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin
 func.def @load_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index) -> (vector<[%n]xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xf32, %layout>
-  %8 = vector.constant 0.0 : vector<[%n]xf32>
+  %8 = vector.splatf 0.0 : vector<[%n]xf32>
   %9 = index.constant 0 : index
   %10 = index.constant 1 : index
   %loaded = scf.for %11 = [%9 to %n step %10](%12 = %8 : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
@@ -288,7 +288,7 @@ func.def @gather_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %orig
 func.def @gather_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %offsets: vector<[%n]xindex>) -> (vector<[%n]xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xf32, %layout>
-  %9 = vector.constant 0.0 : vector<[%n]xf32>
+  %9 = vector.splatf 0.0 : vector<[%n]xf32>
   %10 = index.constant 0 : index
   %11 = index.constant 1 : index
   %loaded = scf.for %12 = [%10 to %n step %11](%13 = %9 : vector<[%n]xf32>) -> (vector<[%n]xf32>) {

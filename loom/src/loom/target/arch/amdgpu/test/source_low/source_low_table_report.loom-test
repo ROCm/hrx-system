@@ -72,7 +72,7 @@ COMPILE-REPORT: target_legalization[0] function=report_i8_table_lookup_u4_permut
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @wide_u4_recipe(%table: vector<16xi8>, %input: vector<16xi8>) -> (vector<16xi8>) {
-  %mask = vector.constant 15 : vector<16xi8>
+  %mask = vector.splati 15 : vector<16xi8>
   %indices = vector.andi %input, %mask : vector<16xi8>
   %values = vector.table.lookup %table[%indices] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
   func.return %values : vector<16xi8>
@@ -91,28 +91,28 @@ amdgpu.target<gfx11-generic> @target
 // Boundary cases keep every selector carrier and the maximum table extent on
 // the packed permutation path.
 func.def target(@target) @table64_byte(%table: vector<64xi8>, %input: vector<4xi8>) -> (vector<4xi8>) {
-  %mask = vector.constant 63 : vector<4xi8>
+  %mask = vector.splati 63 : vector<4xi8>
   %indices = vector.andi %input, %mask : vector<4xi8>
   %values = vector.table.lookup %table[%indices] : vector<64xi8>, vector<4xi8> -> vector<4xi8>
   func.return %values : vector<4xi8>
 }
 
 func.def target(@target) @table64_half_max(%table: vector<64xi8>, %input: vector<32xi16>) -> (vector<32xi8>) {
-  %mask = vector.constant 63 : vector<32xi16>
+  %mask = vector.splati 63 : vector<32xi16>
   %indices = vector.andi %input, %mask : vector<32xi16>
   %values = vector.table.lookup %table[%indices] : vector<64xi8>, vector<32xi16> -> vector<32xi8>
   func.return %values : vector<32xi8>
 }
 
 func.def target(@target) @table64_word_max(%table: vector<64xi8>, %input: vector<32xi32>) -> (vector<32xi8>) {
-  %mask = vector.constant 63 : vector<32xi32>
+  %mask = vector.splati 63 : vector<32xi32>
   %indices = vector.andi %input, %mask : vector<32xi32>
   %values = vector.table.lookup %table[%indices] : vector<64xi8>, vector<32xi32> -> vector<32xi8>
   func.return %values : vector<32xi8>
 }
 
 func.def target(@target) @table64_wide_max(%table: vector<64xi8>, %input: vector<16xi64>) -> (vector<16xi8>) {
-  %mask = vector.constant 63 : vector<16xi64>
+  %mask = vector.splati 63 : vector<16xi64>
   %indices = vector.andi %input, %mask : vector<16xi64>
   %values = vector.table.lookup %table[%indices] : vector<64xi8>, vector<16xi64> -> vector<16xi8>
   func.return %values : vector<16xi8>
@@ -135,7 +135,7 @@ CHECK-NOT: *strategy=reference*
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @partial_u4_recipe(%table: vector<16xi8>, %input: vector<5xi8>) -> (vector<5xi8>) {
-  %mask = vector.constant 15 : vector<5xi8>
+  %mask = vector.splati 15 : vector<5xi8>
   %indices = vector.andi %input, %mask : vector<5xi8>
   %values = vector.table.lookup %table[%indices] : vector<16xi8>, vector<5xi8> -> vector<5xi8>
   func.return %values : vector<5xi8>
@@ -152,7 +152,7 @@ CHECK-NOT: *strategy=reference*
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @maximum_u4_recipe(%table: vector<16xi8>, %input: vector<64xi8>) -> (vector<64xi8>) {
-  %mask = vector.constant 15 : vector<64xi8>
+  %mask = vector.splati 15 : vector<64xi8>
   %indices = vector.andi %input, %mask : vector<64xi8>
   %values = vector.table.lookup %table[%indices] : vector<16xi8>, vector<64xi8> -> vector<64xi8>
   func.return %values : vector<64xi8>
@@ -169,7 +169,7 @@ CHECK-NOT: *strategy=reference*
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @partial_u2_recipe(%table: vector<4xi8>, %input: vector<7xi8>) -> (vector<7xi8>) {
-  %mask = vector.constant 3 : vector<7xi8>
+  %mask = vector.splati 3 : vector<7xi8>
   %indices = vector.andi %input, %mask : vector<7xi8>
   %values = vector.table.lookup %table[%indices] : vector<4xi8>, vector<7xi8> -> vector<7xi8>
   func.return %values : vector<7xi8>
@@ -201,7 +201,7 @@ CHECK-NOT: *plan_key=amdgpu.table_lookup.strategy.packed_byte*
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @report_f32_table_lookup_static(%table: vector<3xf32>) -> (vector<4xf32>) {
-  %indices = vector.constant 2 : vector<4xi8>
+  %indices = vector.splati 2 : vector<4xi8>
   %result = vector.table.lookup %table[%indices] : vector<3xf32>, vector<4xi8> -> vector<4xf32>
   func.return %result : vector<4xf32>
 }
@@ -217,7 +217,7 @@ amdgpu.target<gfx11-generic> @target
 
 // A U4 bound is insufficient for a four-entry table, including partial words.
 func.def target(@target) @insufficient_partial_index_bound(%table: vector<4xi8>, %input: vector<5xi8>) -> (vector<5xi8>) {
-  %mask = vector.constant 15 : vector<5xi8>
+  %mask = vector.splati 15 : vector<5xi8>
   %indices = vector.andi %input, %mask : vector<5xi8>
   %values = vector.table.lookup %table[%indices] : vector<4xi8>, vector<5xi8> -> vector<5xi8>
   func.return %values : vector<5xi8>

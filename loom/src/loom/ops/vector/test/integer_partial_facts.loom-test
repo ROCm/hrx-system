@@ -3,7 +3,7 @@
 // Vector integer facts use the element width when interpreting unsigned
 // operands. Each unknown i8 lane modulo nine is in [0, 8].
 func.def @remui_unknown_lanes_use_element_width(%values: vector<4xi8>) -> (i64, i64) {
-  %divisors = vector.constant 9 : vector<4xi8>
+  %divisors = vector.splati 9 : vector<4xi8>
   %remainders = vector.remui %values, %divisors : vector<4xi8>
   %lane = vector.extract %remainders[0] : vector<4xi8> -> i8
   %minimum = test.fact_range_lo %lane : i8 -> i64
@@ -23,7 +23,7 @@ func.def @remui_unknown_lanes_use_element_width(%values: vector<4xi8>) -> (i64, 
 // One mask bounds every unknown lane without enumerating a large vector or
 // claiming that the runtime lane values are equal.
 func.def @uniform_mask(%input: vector<32xi8>) -> (i64, i64, i1) {
-  %mask = vector.constant 15 : vector<32xi8>
+  %mask = vector.splati 15 : vector<32xi8>
   %masked = vector.andi %input, %mask : vector<32xi8>
   %lo = test.fact_all_equal_range_lo %masked : vector<32xi8> -> i64
   %hi = test.fact_all_equal_range_hi %masked : vector<32xi8> -> i64
@@ -41,7 +41,7 @@ func.def @uniform_mask(%input: vector<32xi8>) -> (i64, i64, i1) {
 // ====
 
 func.def @commuted_uniform_mask(%input: vector<32xi8>) -> (i64, i64) {
-  %mask = vector.constant 15 : vector<32xi8>
+  %mask = vector.splati 15 : vector<32xi8>
   %masked = vector.andi %mask, %input : vector<32xi8>
   %lo = test.fact_all_equal_range_lo %masked : vector<32xi8> -> i64
   %hi = test.fact_all_equal_range_hi %masked : vector<32xi8> -> i64
@@ -108,8 +108,8 @@ func.def @lane_masks(%input: vector<4xi8>) -> (i64, i64, i64, i64) {
 // Large vectors carry the shared OR bound without enumerating their lanes or
 // claiming that the runtime values are equal across invocations.
 func.def @uniform_bitwise_bounds(%low: vector<32xi32>, %high: vector<32xi32>) -> (i64, i64, i1) {
-  %low_mask = vector.constant 255 : vector<32xi32>
-  %high_mask = vector.constant 256 : vector<32xi32>
+  %low_mask = vector.splati 255 : vector<32xi32>
+  %high_mask = vector.splati 256 : vector<32xi32>
   %low_bits = vector.andi %low, %low_mask : vector<32xi32>
   %high_bits = vector.andi %high, %high_mask : vector<32xi32>
   %codes = vector.ori %low_bits, %high_bits : vector<32xi32>
@@ -130,7 +130,7 @@ func.def @uniform_bitwise_bounds(%low: vector<32xi32>, %high: vector<32xi32>) ->
 
 // Per-lane OR facts survive extraction and reduction with different high bits.
 func.def @independent_bitwise_bounds(%low: vector<4xi32>, %high: vector<4xi32>) -> (i64, i64, i64, i64, i64) {
-  %low_mask = vector.constant 7 : vector<4xi32>
+  %low_mask = vector.splati 7 : vector<4xi32>
   %low_bits = vector.andi %low, %low_mask : vector<4xi32>
   %c8 = scalar.constant 8 : i32
   %c128 = scalar.constant 128 : i32
@@ -166,7 +166,7 @@ func.def @independent_bitwise_bounds(%low: vector<4xi32>, %high: vector<4xi32>) 
 // Unknown inputs and transfers that cannot derive a bound remain unknown.
 func.def @unknown_results(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (i64, i64, i64, i64) {
   %masked = vector.andi %lhs, %rhs : vector<4xi8>
-  %increment = vector.constant 15 : vector<4xi8>
+  %increment = vector.splati 15 : vector<4xi8>
   %added = vector.addi %lhs, %increment : vector<4xi8>
   %masked_lo = test.fact_all_equal_range_lo %masked : vector<4xi8> -> i64
   %masked_hi = test.fact_all_equal_range_hi %masked : vector<4xi8> -> i64
@@ -187,7 +187,7 @@ func.def @unknown_results(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (i64, i64, 
 
 // Logical shifts clear the element sign bit even without source lane facts.
 func.def @uniform_logical_shift(%input: vector<32xi8>) -> (i64, i64, i1) {
-  %amount = vector.constant 4 : vector<32xi8>
+  %amount = vector.splati 4 : vector<32xi8>
   %shifted = vector.shrui %input, %amount : vector<32xi8>
   %lo = test.fact_all_equal_range_lo %shifted : vector<32xi8> -> i64
   %hi = test.fact_all_equal_range_hi %shifted : vector<32xi8> -> i64
@@ -235,9 +235,9 @@ func.def @independent_logical_shifts(%input: vector<4xi8>) -> (i64, i64, i64, i6
 
 // Wrapping left shifts can set the sign bit in each narrow element.
 func.def @left_shift_sign(%input: vector<4xi8>) -> (i1) {
-  %mask = vector.constant 1 : vector<4xi8>
+  %mask = vector.splati 1 : vector<4xi8>
   %bits = vector.andi %input, %mask : vector<4xi8>
-  %amount = vector.constant 7 : vector<4xi8>
+  %amount = vector.splati 7 : vector<4xi8>
   %shifted = vector.shli %bits, %amount : vector<4xi8>
   %element = vector.extract %shifted[0] : vector<4xi8> -> i8
   %nonnegative = test.fact_non_negative %element : i8 -> i1
@@ -253,9 +253,9 @@ func.def @left_shift_sign(%input: vector<4xi8>) -> (i1) {
 
 // Explicit signed-overflow semantics retain the mathematical result facts.
 func.def @left_shift_nsw_sign(%input: vector<4xi8>) -> (i1) {
-  %mask = vector.constant 1 : vector<4xi8>
+  %mask = vector.splati 1 : vector<4xi8>
   %bits = vector.andi %input, %mask : vector<4xi8>
-  %amount = vector.constant 7 : vector<4xi8>
+  %amount = vector.splati 7 : vector<4xi8>
   %shifted = vector.shli<nsw> %bits, %amount : vector<4xi8>
   %element = vector.extract %shifted[0] : vector<4xi8> -> i8
   %nonnegative = test.fact_non_negative %element : i8 -> i1
@@ -271,8 +271,8 @@ func.def @left_shift_nsw_sign(%input: vector<4xi8>) -> (i1) {
 
 // Lanewise OR/XOR retain the common alignment of independent runtime operands.
 func.def @bitwise_common_divisor(%lhs: vector<32xi16>, %rhs: vector<32xi16>) -> (i64, i64) {
-  %left_mask = vector.constant -8 : vector<32xi16>
-  %right_mask = vector.constant -4 : vector<32xi16>
+  %left_mask = vector.splati -8 : vector<32xi16>
+  %right_mask = vector.splati -4 : vector<32xi16>
   %left = vector.andi %lhs, %left_mask : vector<32xi16>
   %right = vector.andi %rhs, %right_mask : vector<32xi16>
   %or = vector.ori %left, %right : vector<32xi16>

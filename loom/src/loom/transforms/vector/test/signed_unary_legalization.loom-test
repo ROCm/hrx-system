@@ -31,16 +31,16 @@ func.def target(@target) @signed_lanes(%input: vector<2x3xi64>) -> (vector<2x3xi
 test.target<low_core> @target
 
 func.def target(@target) @signed_lanes(%input: vector<2x3xi64>) -> (vector<2x3xi64>, vector<2x3xi64>, vector<2x3xi64>) {
-  %18 = vector.constant 0 : vector<2x3xi64>
+  %18 = vector.splati 0 : vector<2x3xi64>
   %negative = vector.subi %18, %input : vector<2x3xi64>
-  %14 = vector.constant 0 : vector<2x3xi64>
+  %14 = vector.splati 0 : vector<2x3xi64>
   %15 = vector.subi %14, %input : vector<2x3xi64>
   %16 = vector.cmpi slt, %input, %14 : vector<2x3xi64> -> vector<2x3xi1>
   %absolute = vector.select %16, %15, %input : vector<2x3xi64>
-  %7 = vector.constant 0 : vector<2x3xi64>
+  %7 = vector.splati 0 : vector<2x3xi64>
   %8 = vector.cmpi slt, %input, %7 : vector<2x3xi64> -> vector<2x3xi1>
-  %9 = vector.constant 1 : vector<2x3xi64>
-  %10 = vector.constant -1 : vector<2x3xi64>
+  %9 = vector.splati 1 : vector<2x3xi64>
+  %10 = vector.splati -1 : vector<2x3xi64>
   %11 = vector.cmpi ne, %input, %7 : vector<2x3xi64> -> vector<2x3xi1>
   %12 = vector.select %11, %9, %7 : vector<2x3xi64>
   %sign = vector.select %8, %10, %12 : vector<2x3xi64>

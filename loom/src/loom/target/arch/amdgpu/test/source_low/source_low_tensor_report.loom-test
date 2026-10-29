@@ -9,8 +9,8 @@ kernel.def target(@target) @report_tensor_load_to_lds() {
 } launch(%input: buffer) {
   %buffer_base = index.constant 0 : offset
   %bytes = index.constant 16384 : offset
-  %d0 = vector.constant 0 : vector<4xi32>
-  %d1 = vector.constant 0 : vector<8xi32>
+  %d0 = vector.splati 0 : vector<4xi32>
+  %d1 = vector.splati 0 : vector<8xi32>
   %descriptor = kernel.tensor.lds.descriptor dgroups(%d0, %d1) : vector<4xi32>, vector<8xi32> -> kernel.tensor.lds.descriptor
   %global = buffer.assume.memory_space<global> %input : buffer
   %source = buffer.view %global[%buffer_base] : buffer -> view<64x64xf32>
@@ -28,8 +28,8 @@ COMPILE-REPORT: workload workgroup_size=64x1x1 flat_workgroup_size=64 workgroup_
 COMPILE-REPORT: source_low selected_ops=11 emitted_ops=42 rows=11 unkeyed_maximum_emitted_ops=9
 COMPILE-REPORT: source_low[0] function=report_tensor_load_to_lds source_op=index.constant selection=plan emitted_ops=0
 COMPILE-REPORT: source_low[1] function=report_tensor_load_to_lds source_op=index.constant selection=plan emitted_ops=0
-COMPILE-REPORT: source_low[2] function=report_tensor_load_to_lds source_op=vector.constant selection=plan emitted_ops=5
-COMPILE-REPORT: source_low[3] function=report_tensor_load_to_lds source_op=vector.constant selection=plan emitted_ops=9
+COMPILE-REPORT: source_low[2] function=report_tensor_load_to_lds source_op=vector.splati selection=plan emitted_ops=5
+COMPILE-REPORT: source_low[3] function=report_tensor_load_to_lds source_op=vector.splati selection=plan emitted_ops=9
 COMPILE-REPORT: source_low[4] function=report_tensor_load_to_lds source_op=kernel.tensor.lds.descriptor selection=rule emitted_ops=0
 COMPILE-REPORT: source_low[5] function=report_tensor_load_to_lds source_op=buffer.view selection=rule emitted_ops=0
 COMPILE-REPORT: source_low[6] function=report_tensor_load_to_lds source_op=buffer.alloca selection=plan emitted_ops=0

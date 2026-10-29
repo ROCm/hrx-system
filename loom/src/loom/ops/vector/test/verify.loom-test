@@ -270,10 +270,10 @@ func.def @reduce_axes_integer_with_float_kind(%v: vector<2x3xi32>, %init: vector
 
 // ====
 
-// Vector constants use a scalar literal payload matching the vector element type.
-func.def @constant_payload_mismatch() {
+// Integer literal splats require an integer, predicate, or address result.
+func.def @splati_result_mismatch() {
   // ERROR@+1: TYPE/005 "value"
-  %r = vector.constant 0 : vector<4xf32>
+  %r = vector.splati 0 : vector<4xf32>
   func.return
 }
 
@@ -281,7 +281,7 @@ func.def @constant_payload_mismatch() {
 
 func.def @constant_i1_payload_mismatch() {
   // ERROR@+1: TYPE/005 "value"
-  %r = vector.constant 2 : vector<4xi1>
+  %r = vector.splati 2 : vector<4xi1>
   func.return
 }
 
@@ -975,8 +975,8 @@ func.def @table_lookup_element_mismatch(%table: vector<4xf32>, %indices: vector<
 
 // Splat constant indices are rejected when statically outside the table range.
 func.def @table_lookup_static_index_out_of_bounds() {
-  %table = vector.constant 0.0 : vector<4xf32>
-  %indices = vector.constant 4 : vector<8xi8>
+  %table = vector.splatf 0.0 : vector<4xf32>
+  %indices = vector.splati 4 : vector<8xi8>
   // ERROR@+1: SUBRANGE/004
   %r = vector.table.lookup %table[%indices] : vector<4xf32>, vector<8xi8> -> vector<8xf32>
   func.return
@@ -986,8 +986,8 @@ func.def @table_lookup_static_index_out_of_bounds() {
 
 // Negative splat constant indices are also statically invalid.
 func.def @table_lookup_static_negative_index() {
-  %table = vector.constant 0.0 : vector<4xf32>
-  %indices = vector.constant -1 : vector<8xi8>
+  %table = vector.splatf 0.0 : vector<4xf32>
+  %indices = vector.splati -1 : vector<8xi8>
   // ERROR@+1: SUBRANGE/004
   %r = vector.table.lookup %table[%indices] : vector<4xf32>, vector<8xi8> -> vector<8xf32>
   func.return

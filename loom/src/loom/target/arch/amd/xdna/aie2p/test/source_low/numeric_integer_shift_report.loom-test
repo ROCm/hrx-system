@@ -1,8 +1,8 @@
 // RUN: with-checks compile-report target=amd.xdna.aie2p:core source-to-low,low-dce
 
 func.def @integer_shift_strategies(%words: vector<16xi32>, %word_counts: vector<16xi32>, %wide: vector<8xi64>) -> (vector<16xi32>, vector<16xi32>, vector<8xi64>) {
-  %word_count = vector.constant 7 : vector<16xi32>
-  %wide_count = vector.constant 63 : vector<8xi64>
+  %word_count = vector.splati 7 : vector<16xi32>
+  %wide_count = vector.splati 63 : vector<8xi64>
   %uniform_words = vector.shli %words, %word_count : vector<16xi32>
   %varying_words = vector.shrui %words, %word_counts : vector<16xi32>
   %uniform_wide = vector.shrsi %wide, %wide_count : vector<8xi64>

@@ -180,7 +180,7 @@ func.def @vector_f32_reference_extrema(%value: vector<4xf32>, %lhs: vector<4xf32
   %68 = vector.select %65, %lhs, %67 : vector<4xf32>
   %69 = vector.cmpf une, %lhs, %lhs : vector<4xf32> -> vector<4xi1>
   %70 = vector.cmpf une, %rhs, %rhs : vector<4xf32> -> vector<4xi1>
-  %71 = vector.constant nan : vector<4xf32>
+  %71 = vector.splatf nan : vector<4xf32>
   %72 = vector.select %70, %71, %rhs : vector<4xf32>
   %73 = vector.select %70, %lhs, %68 : vector<4xf32>
   %minnum = vector.select %69, %72, %73 : vector<4xf32>
@@ -194,7 +194,7 @@ func.def @vector_f32_reference_extrema(%value: vector<4xf32>, %lhs: vector<4xf32
   %54 = vector.select %51, %lhs, %53 : vector<4xf32>
   %55 = vector.cmpf une, %lhs, %lhs : vector<4xf32> -> vector<4xi1>
   %56 = vector.cmpf une, %rhs, %rhs : vector<4xf32> -> vector<4xi1>
-  %57 = vector.constant nan : vector<4xf32>
+  %57 = vector.splatf nan : vector<4xf32>
   %58 = vector.select %56, %57, %rhs : vector<4xf32>
   %59 = vector.select %56, %lhs, %54 : vector<4xf32>
   %maxnum = vector.select %55, %58, %59 : vector<4xf32>
@@ -212,7 +212,7 @@ func.def @vector_f32_reference_extrema(%value: vector<4xf32>, %lhs: vector<4xf32
   %22 = vector.select %19, %value, %21 : vector<4xf32>
   %23 = vector.cmpf une, %value, %value : vector<4xf32> -> vector<4xi1>
   %24 = vector.cmpf une, %lhs, %lhs : vector<4xf32> -> vector<4xi1>
-  %25 = vector.constant nan : vector<4xf32>
+  %25 = vector.splatf nan : vector<4xf32>
   %26 = vector.select %24, %25, %lhs : vector<4xf32>
   %27 = vector.select %24, %value, %22 : vector<4xf32>
   %28 = vector.select %23, %26, %27 : vector<4xf32>
@@ -226,7 +226,7 @@ func.def @vector_f32_reference_extrema(%value: vector<4xf32>, %lhs: vector<4xf32
   %36 = vector.select %33, %28, %35 : vector<4xf32>
   %37 = vector.cmpf une, %28, %28 : vector<4xf32> -> vector<4xi1>
   %38 = vector.cmpf une, %rhs, %rhs : vector<4xf32> -> vector<4xi1>
-  %39 = vector.constant nan : vector<4xf32>
+  %39 = vector.splatf nan : vector<4xf32>
   %40 = vector.select %38, %39, %rhs : vector<4xf32>
   %41 = vector.select %38, %28, %36 : vector<4xf32>
   %number = vector.select %37, %40, %41 : vector<4xf32>
@@ -261,7 +261,7 @@ func.def @vector_f64_reference_extrema(%value: vector<2xf64>, %lhs: vector<2xf64
   %68 = vector.select %65, %lhs, %67 : vector<2xf64>
   %69 = vector.cmpf une, %lhs, %lhs : vector<2xf64> -> vector<2xi1>
   %70 = vector.cmpf une, %rhs, %rhs : vector<2xf64> -> vector<2xi1>
-  %71 = vector.constant nan : vector<2xf64>
+  %71 = vector.splatf nan : vector<2xf64>
   %72 = vector.select %70, %71, %rhs : vector<2xf64>
   %73 = vector.select %70, %lhs, %68 : vector<2xf64>
   %minnum = vector.select %69, %72, %73 : vector<2xf64>
@@ -275,7 +275,7 @@ func.def @vector_f64_reference_extrema(%value: vector<2xf64>, %lhs: vector<2xf64
   %54 = vector.select %51, %lhs, %53 : vector<2xf64>
   %55 = vector.cmpf une, %lhs, %lhs : vector<2xf64> -> vector<2xi1>
   %56 = vector.cmpf une, %rhs, %rhs : vector<2xf64> -> vector<2xi1>
-  %57 = vector.constant nan : vector<2xf64>
+  %57 = vector.splatf nan : vector<2xf64>
   %58 = vector.select %56, %57, %rhs : vector<2xf64>
   %59 = vector.select %56, %lhs, %54 : vector<2xf64>
   %maxnum = vector.select %55, %58, %59 : vector<2xf64>
@@ -293,7 +293,7 @@ func.def @vector_f64_reference_extrema(%value: vector<2xf64>, %lhs: vector<2xf64
   %22 = vector.select %19, %value, %21 : vector<2xf64>
   %23 = vector.cmpf une, %value, %value : vector<2xf64> -> vector<2xi1>
   %24 = vector.cmpf une, %lhs, %lhs : vector<2xf64> -> vector<2xi1>
-  %25 = vector.constant nan : vector<2xf64>
+  %25 = vector.splatf nan : vector<2xf64>
   %26 = vector.select %24, %25, %lhs : vector<2xf64>
   %27 = vector.select %24, %value, %22 : vector<2xf64>
   %28 = vector.select %23, %26, %27 : vector<2xf64>
@@ -307,7 +307,7 @@ func.def @vector_f64_reference_extrema(%value: vector<2xf64>, %lhs: vector<2xf64
   %36 = vector.select %33, %28, %35 : vector<2xf64>
   %37 = vector.cmpf une, %28, %28 : vector<2xf64> -> vector<2xi1>
   %38 = vector.cmpf une, %rhs, %rhs : vector<2xf64> -> vector<2xi1>
-  %39 = vector.constant nan : vector<2xf64>
+  %39 = vector.splatf nan : vector<2xf64>
   %40 = vector.select %38, %39, %rhs : vector<2xf64>
   %41 = vector.select %38, %28, %36 : vector<2xf64>
   %number = vector.select %37, %40, %41 : vector<2xf64>
@@ -407,7 +407,7 @@ func.def @vector_f16_reference_extrema(%value_packet: vector<8xf16>, %lhs_packet
   %111 = vector.cmpf une, %110, %110 : vector<4xf32> -> vector<4xi1>
   %108 = vector.extf %rhs : vector<4xf16> to vector<4xf32>
   %109 = vector.cmpf une, %108, %108 : vector<4xf32> -> vector<4xi1>
-  %104 = vector.constant nan : vector<4xf16>
+  %104 = vector.splatf nan : vector<4xf16>
   %105 = vector.select %109, %104, %rhs : vector<4xf16>
   %106 = vector.select %109, %lhs, %101 : vector<4xf16>
   %minnum = vector.select %111, %105, %106 : vector<4xf16>
@@ -427,14 +427,14 @@ func.def @vector_f16_reference_extrema(%value_packet: vector<8xf16>, %lhs_packet
   %87 = vector.cmpf une, %86, %86 : vector<4xf32> -> vector<4xi1>
   %84 = vector.extf %rhs : vector<4xf16> to vector<4xf32>
   %85 = vector.cmpf une, %84, %84 : vector<4xf32> -> vector<4xi1>
-  %80 = vector.constant nan : vector<4xf16>
+  %80 = vector.splatf nan : vector<4xf16>
   %81 = vector.select %85, %80, %rhs : vector<4xf16>
   %82 = vector.select %85, %lhs, %77 : vector<4xf16>
   %83 = vector.select %87, %81, %82 : vector<4xf16>
   %67 = vector.extf %lhs : vector<4xf16> to vector<4xf32>
   %68 = vector.extf %rhs : vector<4xf16> to vector<4xf32>
   %69 = vector.cmpf uno, %67, %68 : vector<4xf32> -> vector<4xi1>
-  %65 = vector.constant nan : vector<4xf16>
+  %65 = vector.splatf nan : vector<4xf16>
   %minimum = vector.select %69, %65, %83 : vector<4xf16>
   %15 = vector.bitcast %value : vector<4xf16> to vector<4xi16>
   %16 = vector.bitcast %lhs : vector<4xf16> to vector<4xi16>
@@ -452,7 +452,7 @@ func.def @vector_f16_reference_extrema(%value_packet: vector<8xf16>, %lhs_packet
   %56 = vector.cmpf une, %55, %55 : vector<4xf32> -> vector<4xi1>
   %53 = vector.extf %lhs : vector<4xf16> to vector<4xf32>
   %54 = vector.cmpf une, %53, %53 : vector<4xf32> -> vector<4xi1>
-  %25 = vector.constant nan : vector<4xf16>
+  %25 = vector.splatf nan : vector<4xf16>
   %26 = vector.select %54, %25, %lhs : vector<4xf16>
   %27 = vector.select %54, %value, %22 : vector<4xf16>
   %28 = vector.select %56, %26, %27 : vector<4xf16>
@@ -472,7 +472,7 @@ func.def @vector_f16_reference_extrema(%value_packet: vector<8xf16>, %lhs_packet
   %46 = vector.cmpf une, %45, %45 : vector<4xf32> -> vector<4xi1>
   %43 = vector.extf %rhs : vector<4xf16> to vector<4xf32>
   %44 = vector.cmpf une, %43, %43 : vector<4xf32> -> vector<4xi1>
-  %39 = vector.constant nan : vector<4xf16>
+  %39 = vector.splatf nan : vector<4xf16>
   %40 = vector.select %44, %39, %rhs : vector<4xf16>
   %41 = vector.select %44, %28, %36 : vector<4xf16>
   %number = vector.select %46, %40, %41 : vector<4xf16>
@@ -491,7 +491,7 @@ func.def @vector_f16_tail_ordering(%lhs_packet: vector<8xf16>, %rhs_packet: vect
   %rhs = vector.slice %rhs_packet[4] : vector<8xf16> -> vector<3xf16>
   %unordered = vector.cmpf uno, %lhs, %rhs : vector<3xf16> -> vector<3xi1>
   %minnum = vector.minnumf %lhs, %rhs : vector<3xf16>
-  %false = vector.constant 0 : vector<1xi1>
+  %false = vector.splati 0 : vector<1xi1>
   %unordered_packet = vector.concat<0> %unordered, %false : vector<3xi1>, vector<1xi1> -> vector<4xi1>
   %preserved = vector.slice %lhs_packet[7] : vector<8xf16> -> vector<1xf16>
   %minnum_half = vector.concat<0> %minnum, %preserved : vector<3xf16>, vector<1xf16> -> vector<4xf16>
@@ -522,11 +522,11 @@ func.def @vector_f16_tail_ordering(%lhs_packet: vector<8xf16>, %rhs_packet: vect
   %30 = vector.cmpf une, %29, %29 : vector<3xf32> -> vector<3xi1>
   %27 = vector.extf %rhs : vector<3xf16> to vector<3xf32>
   %28 = vector.cmpf une, %27, %27 : vector<3xf32> -> vector<3xi1>
-  %23 = vector.constant nan : vector<3xf16>
+  %23 = vector.splatf nan : vector<3xf16>
   %24 = vector.select %28, %23, %rhs : vector<3xf16>
   %25 = vector.select %28, %lhs, %20 : vector<3xf16>
   %minnum = vector.select %30, %24, %25 : vector<3xf16>
-  %false = vector.constant 0 : vector<1xi1>
+  %false = vector.splati 0 : vector<1xi1>
   %unordered_packet = vector.concat<0> %unordered, %false : vector<3xi1>, vector<1xi1> -> vector<4xi1>
   %preserved = vector.slice %lhs_packet[7] : vector<8xf16> -> vector<1xf16>
   %minnum_half = vector.concat<0> %minnum, %preserved : vector<3xf16>, vector<1xf16> -> vector<4xf16>
@@ -594,8 +594,8 @@ func.def @relaxed_extrema_carriers(%bf16_lhs: bf16, %bf16_rhs: bf16, %bf16_value
   %59 = scalar.xori %65, %58 : i32
   %60 = scalar.cmpi sgt, %54, %59 : i32
   %bf16_maximum = scf.select %60, %bf16_lhs, %bf16_rhs : bf16
-  %24 = vector.constant 32767 : vector<8xi16>
-  %25 = vector.constant 15 : vector<8xi16>
+  %24 = vector.splati 32767 : vector<8xi16>
+  %25 = vector.splati 15 : vector<8xi16>
   %26 = vector.bitcast %bf16_value : vector<8xbf16> to vector<8xi16>
   %27 = vector.shrsi %26, %25 : vector<8xi16>
   %28 = vector.andi %27, %24 : vector<8xi16>
@@ -606,8 +606,8 @@ func.def @relaxed_extrema_carriers(%bf16_lhs: bf16, %bf16_rhs: bf16, %bf16_value
   %33 = vector.xori %30, %32 : vector<8xi16>
   %34 = vector.cmpi sgt, %29, %33 : vector<8xi16> -> vector<8xi1>
   %35 = vector.select %34, %bf16_value, %bf16_lower : vector<8xbf16>
-  %36 = vector.constant 32767 : vector<8xi16>
-  %37 = vector.constant 15 : vector<8xi16>
+  %36 = vector.splati 32767 : vector<8xi16>
+  %37 = vector.splati 15 : vector<8xi16>
   %38 = vector.bitcast %35 : vector<8xbf16> to vector<8xi16>
   %39 = vector.shrsi %38, %37 : vector<8xi16>
   %40 = vector.andi %39, %36 : vector<8xi16>

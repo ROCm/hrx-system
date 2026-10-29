@@ -32,7 +32,7 @@ kernel.def target(@target) @subgroup_tiles() {
   %columns_per_row = index.constant 5 : index
   %row = index.div %lane, %columns_per_row : index
   %slot = index.rem %lane, %columns_per_row : index
-  %value = vector.constant 1 : vector<4xi32>
+  %value = vector.splati 1 : vector<4xi32>
   vector.store %value, %linear[%subgroup, %lane, 0] : vector<4xi32>, view<4x64x4xi32, %linear_layout>
   vector.store %value, %digits[%subgroup, %row, %slot, 0] : vector<4xi32>, view<4x13x5x4xi32, %digit_layout>
   vector.store %value, %mixed[%subgroup, %column, %lane, 0] : vector<4xi32>, view<4x4x64x4xi32, %mixed_layout>

@@ -122,8 +122,8 @@ func.def target(@target) @vector_fp16_family(%xmm_lhs: vector<4xf16>, %xmm_rhs: 
   %absolute = vector.absf %selected : vector<4xf16>
   %negated = vector.negf %absolute : vector<4xf16>
   %copied = vector.copysignf %negated, %xmm_rhs : vector<4xf16>
-  %c0 = vector.constant 0.0 : vector<4xf16>
-  %constant = vector.constant 1.5 : vector<4xf16>
+  %c0 = vector.splatf 0.0 : vector<4xf16>
+  %constant = vector.splatf 1.5 : vector<4xf16>
   %extended = vector.extf %copied : vector<4xf16> to vector<4xf32>
   %truncated = vector.fptrunc %wide : vector<4xf32> to vector<4xf16>
   %bits = vector.bitcast %copied : vector<4xf16> to vector<4xi16>

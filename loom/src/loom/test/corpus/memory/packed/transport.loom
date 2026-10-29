@@ -153,7 +153,7 @@ func.def @transport_64bit_vectors(%input: buffer, %output: buffer) {
   %destination_i64 = buffer.view %destination[%origin] : buffer -> view<192xi64>
   %destination_f64 = buffer.view %destination[%origin] : buffer -> view<192xf64>
   %guards = buffer.view %destination[%origin] : buffer -> view<384xi32>
-  %sentinel = vector.constant -1515870811 : vector<16xi32>
+  %sentinel = vector.splati -1515870811 : vector<16xi32>
   %begin = index.constant 0 : index
   %end = index.constant 384 : index
   %step = index.constant 16 : index

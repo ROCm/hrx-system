@@ -88,7 +88,7 @@ pipeline.def<kernel> public retain target(@device) @unowned_local_core_buffer(%b
   // ERROR@+1: XDNA/051 {requirement="an invocation-owned finite local allocation for each core buffer capture"}
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
     %view = buffer.view %local[%origin] : buffer -> view<16xi32>
-    %value = vector.constant 42 : vector<16xi32>
+    %value = vector.splati 42 : vector<16xi32>
     vector.store %value, %view[0] : vector<16xi32>, view<16xi32>
   }
 }
@@ -237,7 +237,7 @@ pipeline.def<kernel> public retain target(@device) @shared_distribution_reader()
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
     %begin = index.constant 0 : index
     %step = index.constant 1 : index
-    %values = vector.constant 42 : vector<16xi32>
+    %values = vector.splati 42 : vector<16xi32>
     scf.for %record = [%begin to %capacity step %step] {
       %write, %payload = channel.reserve %source : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
       vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
@@ -275,7 +275,7 @@ pipeline.def<kernel> public retain target(@device) @shared_distribution_writer()
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
     %begin = index.constant 0 : index
     %step = index.constant 1 : index
-    %values = vector.constant 42 : vector<16xi32>
+    %values = vector.splati 42 : vector<16xi32>
     scf.for %record = [%begin to %capacity step %step] {
       %write, %payload = channel.reserve %source : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
       vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
@@ -313,7 +313,7 @@ pipeline.def<kernel> public retain target(@device) @interleaved_distribution() r
   %destination = channel.bind<fifo> %destination_slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
     %write, %payload = channel.reserve %source : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32, #encoding.layout.strided<strides=[2]>>)
-    %values = vector.constant 42 : vector<16xi32>
+    %values = vector.splati 42 : vector<16xi32>
     vector.store %values, %payload[0] : vector<16xi32>, view<16xi32, #encoding.layout.strided<strides=[2]>>
     channel.publish %write : write<tile<16xi32>>
   }
@@ -406,7 +406,7 @@ pipeline.def<kernel> public retain target(@device) @captured_sram_buffer() run()
   // ERROR@+1: XDNA/051 {requirement="DMA-owned SRAM storage with compute-memory handoffs"}
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
     %payload = buffer.view %storage[%origin] : buffer -> view<16xi32>
-    %values = vector.constant 42 : vector<16xi32>
+    %values = vector.splati 42 : vector<16xi32>
     vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
   }
 }
@@ -424,7 +424,7 @@ pipeline.def<kernel> public retain target(@device) @captured_east_buffer() run()
   // ERROR@+1: XDNA/051 {requirement="captured storage directly visible from its consuming core"}
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
     %payload = buffer.view %storage[%origin] : buffer -> view<16xi32>
-    %values = vector.constant 42 : vector<16xi32>
+    %values = vector.splati 42 : vector<16xi32>
     vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
   }
 }
@@ -442,7 +442,7 @@ pipeline.def<kernel> public retain target(@device) @captured_distant_buffer() ru
   // ERROR@+1: XDNA/051 {requirement="captured storage directly visible from its consuming core"}
   pipeline.strand workers([2, 2], [1, 1], [1, 1]) {
     %payload = buffer.view %storage[%origin] : buffer -> view<16xi32>
-    %values = vector.constant 42 : vector<16xi32>
+    %values = vector.splati 42 : vector<16xi32>
     vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
   }
 }
@@ -462,7 +462,7 @@ pipeline.def<kernel> public retain target(@device) @east_channel_storage() run()
   // ERROR@+1: XDNA/051 {requirement="channel storage directly visible from its consuming core"}
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
     %write, %payload = channel.reserve %channel : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
-    %values = vector.constant 42 : vector<16xi32>
+    %values = vector.splati 42 : vector<16xi32>
     vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
     channel.publish %write : write<tile<16xi32>>
   }

@@ -69,38 +69,38 @@ amdgpu.target<gfx11-generic> @target
 
 func.def public target(@target) @f32_i64_partial_packet(%values: vector<17xf32>, %thresholds: vector<3xf32>) -> (vector<16xi64>, vector<1xi64>) {
   %10 = vector.slice %values[0] : vector<17xf32> -> vector<16xf32>
-  %11 = vector.constant 0 : vector<16xi32>
-  %12 = vector.constant 1 : vector<16xi32>
-  %13 = vector.constant 0 : vector<16xi8>
+  %11 = vector.splati 0 : vector<16xi32>
+  %12 = vector.splati 1 : vector<16xi32>
+  %13 = vector.splati 0 : vector<16xi8>
   %14 = vector.table.lookup %thresholds[%13] : vector<3xf32>, vector<16xi8> -> vector<16xf32>
   %15 = vector.cmpf olt, %14, %10 : vector<16xf32> -> vector<16xi1>
-  %50 = vector.constant 1 : vector<16xi32>
+  %50 = vector.splati 1 : vector<16xi32>
   %17 = vector.select %15, %50, %11 : vector<16xi32>
-  %18 = vector.constant 1 : vector<16xi8>
+  %18 = vector.splati 1 : vector<16xi8>
   %19 = vector.table.lookup %thresholds[%18] : vector<3xf32>, vector<16xi8> -> vector<16xf32>
   %20 = vector.cmpf olt, %19, %10 : vector<16xf32> -> vector<16xi1>
   %21 = vector.addi %17, %12 : vector<16xi32>
   %22 = vector.select %20, %21, %17 : vector<16xi32>
-  %23 = vector.constant 2 : vector<16xi8>
+  %23 = vector.splati 2 : vector<16xi8>
   %24 = vector.table.lookup %thresholds[%23] : vector<3xf32>, vector<16xi8> -> vector<16xf32>
   %25 = vector.cmpf olt, %24, %10 : vector<16xf32> -> vector<16xi1>
   %26 = vector.addi %22, %12 : vector<16xi32>
   %27 = vector.select %25, %26, %22 : vector<16xi32>
   %28 = vector.extui %27 : vector<16xi32> to vector<16xi64>
   %29 = vector.slice %values[16] : vector<17xf32> -> vector<1xf32>
-  %30 = vector.constant 0 : vector<1xi32>
-  %31 = vector.constant 1 : vector<1xi32>
-  %32 = vector.constant 0 : vector<1xi8>
+  %30 = vector.splati 0 : vector<1xi32>
+  %31 = vector.splati 1 : vector<1xi32>
+  %32 = vector.splati 0 : vector<1xi8>
   %33 = vector.table.lookup %thresholds[%32] : vector<3xf32>, vector<1xi8> -> vector<1xf32>
   %34 = vector.cmpf olt, %33, %29 : vector<1xf32> -> vector<1xi1>
-  %49 = vector.constant 1 : vector<1xi32>
+  %49 = vector.splati 1 : vector<1xi32>
   %36 = vector.select %34, %49, %30 : vector<1xi32>
-  %37 = vector.constant 1 : vector<1xi8>
+  %37 = vector.splati 1 : vector<1xi8>
   %38 = vector.table.lookup %thresholds[%37] : vector<3xf32>, vector<1xi8> -> vector<1xf32>
   %39 = vector.cmpf olt, %38, %29 : vector<1xf32> -> vector<1xi1>
   %40 = vector.addi %36, %31 : vector<1xi32>
   %41 = vector.select %39, %40, %36 : vector<1xi32>
-  %42 = vector.constant 2 : vector<1xi8>
+  %42 = vector.splati 2 : vector<1xi8>
   %43 = vector.table.lookup %thresholds[%42] : vector<3xf32>, vector<1xi8> -> vector<1xf32>
   %44 = vector.cmpf olt, %43, %29 : vector<1xf32> -> vector<1xi1>
   %45 = vector.addi %41, %31 : vector<1xi32>
@@ -139,7 +139,7 @@ CHECK-NOT: * = v_cmp_eq_i32 *
 // ====
 
 func.def @empty_thresholds(%values: vector<4xf32>) -> (vector<4xi8>) {
-  %thresholds = vector.constant 0.0 : vector<0xf32>
+  %thresholds = vector.splatf 0.0 : vector<0xf32>
   %codes = vector.table.quantize %values, %thresholds {nan = zero, tie = lower} : vector<4xf32>, vector<0xf32> -> vector<4xi8>
   func.return %codes : vector<4xi8>
 }

@@ -308,7 +308,11 @@ def _float_payload_constant_rule(
         source_op=source_op,
         descriptor=emits[-1].descriptor,
         guards=(
-            Guard.attr_kind("value", "f64"),
+            *(
+                (Guard.attr_kind("value", "f64"),)
+                if source_op is scalar_conversion.scalar_constant
+                else ()
+            ),
             Guard.value_type("result", result_pattern),
             Guard.value_exact_float("result"),
             *_feature_guards(*(step.descriptor for step in emits)),
@@ -1401,10 +1405,10 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         # Singleton vectors use the scalar physical carrier. Native BF16 rows
         # precede these software alternatives just as for scalar constants.
         _float_payload_constant_rule(
-            vector.vector_constant, Vector(("f8E4M3", "f8E5M2"), lanes=1), "i8"
+            vector.vector_splatf, Vector(("f8E4M3", "f8E5M2"), lanes=1), "i8"
         ),
         _float_payload_constant_rule(
-            vector.vector_constant, Vector("bf16", lanes=1), "i32"
+            vector.vector_splatf, Vector("bf16", lanes=1), "i32"
         ),
         _select_rule(Vector("bf16", lanes=1), "spirv.op_select.i32"),
         *SPIRV_ORDINARY_VECTOR_ALU_CONTRACT_CASES,

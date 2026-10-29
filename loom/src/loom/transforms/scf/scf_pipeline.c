@@ -695,9 +695,15 @@ static iree_status_t loom_scf_pipeline_build_guard_placeholder(
         loom_vector_empty_build(builder, type, location, &vector));
     *out_value = loom_vector_empty_result(vector);
   } else {
-    IREE_RETURN_IF_ERROR(
-        loom_vector_constant_build(builder, zero, type, location, &vector));
-    *out_value = loom_vector_constant_result(vector);
+    if (loom_scalar_type_is_float(loom_type_element_type(type))) {
+      IREE_RETURN_IF_ERROR(
+          loom_vector_splatf_build(builder, 0.0, type, location, &vector));
+      *out_value = loom_vector_splatf_result(vector);
+    } else {
+      IREE_RETURN_IF_ERROR(
+          loom_vector_splati_build(builder, 0, type, location, &vector));
+      *out_value = loom_vector_splati_result(vector);
+    }
   }
   return iree_ok_status();
 }

@@ -91,12 +91,13 @@ def test_constant_operation_and_assignment_may_span_lines() -> None:
 
 def test_all_constant_operation_spellings_share_the_rule() -> None:
     source = """%one = scalar.constant 1 : i32
-%two = vector.constant 2 : vector<4xi32>
-%three = test.clause_constant value(3) : i32
-%four = test.effectful_constant 4 : i32
+%two = vector.splati 2 : vector<4xi32>
+%three = vector.splatf 3.0 : vector<4xf32>
+%four = test.clause_constant value(4) : i32
+%five = test.effectful_constant 5 : i32
 """
 
-    assert _finding_names(source) == ["one", "two", "three", "four"]
+    assert _finding_names(source) == ["one", "two", "three", "four", "five"]
 
 
 def test_comments_and_string_literals_are_not_authored_operations() -> None:

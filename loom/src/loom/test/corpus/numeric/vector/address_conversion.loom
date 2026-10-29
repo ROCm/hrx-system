@@ -9,7 +9,7 @@ func.def @vector_address_conversions(%input: buffer, %address_output: buffer, %b
   %word_results = buffer.view %word_output[%origin] : buffer -> view<8xi32>
 
   %words = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
-  %c0_i32x4 = vector.constant 0 : vector<4xi32>
+  %c0_i32x4 = vector.splati 0 : vector<4xi32>
   %predicates = vector.cmpi ne, %words, %c0_i32x4 : vector<4xi32> -> vector<4xi1>
   %bytes = vector.trunci %words : vector<4xi32> to vector<4xi8>
   %halves = vector.trunci %words : vector<4xi32> to vector<4xi16>
@@ -56,8 +56,8 @@ func.def @vector_address_conversions(%input: buffer, %address_output: buffer, %b
   %offset_bytes = vector.index_cast %word_offset : vector<4xoffset> to vector<4xi8>
   %offset_halves = vector.index_cast %word_offset : vector<4xoffset> to vector<4xi16>
   %offset_words = vector.index_cast %word_offset : vector<4xoffset> to vector<4xi32>
-  %c0_i8x4 = vector.constant 0 : vector<4xi8>
-  %c1_i8x4 = vector.constant 1 : vector<4xi8>
+  %c0_i8x4 = vector.splati 0 : vector<4xi8>
+  %c1_i8x4 = vector.splati 1 : vector<4xi8>
   %index_predicate_bytes = vector.select %index_predicates, %c1_i8x4, %c0_i8x4 : vector<4xi8>
   %offset_predicate_bytes = vector.select %offset_predicates, %c1_i8x4, %c0_i8x4 : vector<4xi8>
   vector.store %index_predicate_bytes, %byte_results[0] : vector<4xi8>, view<16xi8>

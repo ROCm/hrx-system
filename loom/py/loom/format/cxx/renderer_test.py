@@ -1392,7 +1392,7 @@ def test_projects_nonfinite_float_constants_as_exact_bit_patterns() -> None:
 func.def public @math.nonfinite() -> (f32, f64, vector<2x2xf32>) {
   %positive_infinity = scalar.constant inf : f32
   %not_a_number = scalar.constant nan : f64
-  %negative_infinity = vector.constant -inf : vector<2x2xf32>
+  %negative_infinity = vector.splatf -inf : vector<2x2xf32>
   func.return %positive_infinity, %not_a_number, %negative_infinity : f32, f64, vector<2x2xf32>
 }
 """

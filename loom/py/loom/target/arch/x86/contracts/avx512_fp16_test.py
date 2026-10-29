@@ -284,7 +284,10 @@ def test_scalar_carrier_rules_preserve_the_existing_fp16_surface() -> None:
         Vector("f16", lanes=32),
     }
     assert {rule.priority for rule in _rules_for(vector.vector_splat)} == {2}
-    constant_rules = _rules_for(vector.vector_constant)
+    constant_rules = (
+        *_rules_for(vector.vector_splati),
+        *_rules_for(vector.vector_splatf),
+    )
     assert {_value_type(rule, "result") for rule in constant_rules} == {
         Vector("i16", lanes=4),
         Vector("f16", lanes=4),

@@ -225,10 +225,10 @@ static iree_status_t loom_aie2p_float_ordering_build_constant(
     loom_aie2p_float_ordering_context_t* ordering, int64_t value,
     loom_value_id_t* out_value) {
   loom_op_t* constant_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      ordering->builder, loom_attr_i64(value), ordering->integer_type,
-      ordering->location, &constant_op));
-  *out_value = loom_vector_constant_result(constant_op);
+  IREE_RETURN_IF_ERROR(
+      loom_vector_splati_build(ordering->builder, value, ordering->integer_type,
+                               ordering->location, &constant_op));
+  *out_value = loom_vector_splati_result(constant_op);
   return iree_ok_status();
 }
 

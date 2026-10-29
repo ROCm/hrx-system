@@ -1,8 +1,8 @@
 // RUN: pass canonicalize
 
 func.def @remainder_lanes() -> (vector<2xbf16>, f64, f64) {
-  %a = vector.constant -1.75 : vector<2xbf16>
-  %b = vector.constant 0.75 : vector<2xbf16>
+  %a = vector.splatf -1.75 : vector<2xbf16>
+  %b = vector.splatf 0.75 : vector<2xbf16>
   %uniform = vector.remf %a, %b : vector<2xbf16>
   %normal = scalar.constant 2.2250738585072014e-308 : f64
   %neighbor = scalar.constant 2.2250738585072019e-308 : f64
@@ -18,7 +18,7 @@ func.def @remainder_lanes() -> (vector<2xbf16>, f64, f64) {
 
 // ----
 func.def @remainder_lanes() -> (vector<2xbf16>, f64, f64) {
-  %uniform = vector.constant -0.25 : vector<2xbf16>
+  %uniform = vector.splatf -0.25 : vector<2xbf16>
   %tiny = scalar.constant 4.9406564584124654e-324 : f64
   %signed = scalar.constant -0.25 : f64
   func.return %uniform, %tiny, %signed : vector<2xbf16>, f64, f64

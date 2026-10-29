@@ -89,7 +89,7 @@ kernel.def @constant_loop_f8e4m3_1() {
   %step = index.constant 1 : index
   %source = buffer.view %input[%base] : buffer -> view<1xf8E4M3>
   %destination = buffer.view %output[%base] : buffer -> view<1xf8E4M3>
-  %initial = vector.constant -0.0 : vector<1xf8E4M3>
+  %initial = vector.splatf -0.0 : vector<1xf8E4M3>
   %loaded = vector.load %source[0] : view<1xf8E4M3> -> vector<1xf8E4M3>
   %result = scf.for %iteration = [%begin to %iterations step %step](%state = %initial : vector<1xf8E4M3>) -> (vector<1xf8E4M3>) {
     %chosen = index.cmp eq, %iteration, %selected : index
@@ -134,7 +134,7 @@ kernel.def @constant_loop_f8e5m2_3() {
   %step = index.constant 1 : index
   %source = buffer.view %input[%base] : buffer -> view<3xf8E5M2>
   %destination = buffer.view %output[%base] : buffer -> view<3xf8E5M2>
-  %initial = vector.constant -0.0 : vector<3xf8E5M2>
+  %initial = vector.splatf -0.0 : vector<3xf8E5M2>
   %loaded = vector.load %source[0] : view<3xf8E5M2> -> vector<3xf8E5M2>
   %result = scf.for %iteration = [%begin to %iterations step %step](%state = %initial : vector<3xf8E5M2>) -> (vector<3xf8E5M2>) {
     %chosen = index.cmp eq, %iteration, %selected : index
@@ -191,7 +191,7 @@ kernel.def @constant_loop_bf16_7() {
   %step = index.constant 1 : index
   %source = buffer.view %input[%base] : buffer -> view<7xbf16>
   %destination = buffer.view %output[%base] : buffer -> view<7xbf16>
-  %initial = vector.constant -0.0 : vector<7xbf16>
+  %initial = vector.splatf -0.0 : vector<7xbf16>
   %loaded = vector.load %source[0] : view<7xbf16> -> vector<7xbf16>
   %result = scf.for %iteration = [%begin to %iterations step %step](%state = %initial : vector<7xbf16>) -> (vector<7xbf16>) {
     %chosen = index.cmp eq, %iteration, %selected : index
@@ -299,7 +299,7 @@ kernel.def @constant_loop_bf16_7_native() {
   %step = index.constant 1 : index
   %source = buffer.view %input[%base] : buffer -> view<7xbf16>
   %destination = buffer.view %output[%base] : buffer -> view<7xbf16>
-  %initial = vector.constant -0.0 : vector<7xbf16>
+  %initial = vector.splatf -0.0 : vector<7xbf16>
   %loaded = vector.load %source[0] : view<7xbf16> -> vector<7xbf16>
   %result = scf.for %iteration = [%begin to %iterations step %step](%state = %initial : vector<7xbf16>) -> (vector<7xbf16>) {
     %chosen = index.cmp eq, %iteration, %selected : index

@@ -120,7 +120,7 @@ func.def @finite_1_operand_results(%input: vector<8xf32>) -> (vector<8xi1>) {
 
 // ----
 func.def @finite_1_operand_results(%input: vector<8xf32>) -> (vector<8xi1>) {
-  %all_truncf = vector.constant true : vector<8xi1>
+  %all_truncf = vector.splati 1 : vector<8xi1>
   func.return %all_truncf : vector<8xi1>
 }
 
@@ -167,7 +167,7 @@ func.def @finite_2_operand_results(%input: vector<8xf32>, %other: vector<8xf32>)
 
 // ----
 func.def @finite_2_operand_results(%input: vector<8xf32>, %other: vector<8xf32>) -> (vector<8xi1>) {
-  %all_atan2f = vector.constant true : vector<8xi1>
+  %all_atan2f = vector.splati 1 : vector<8xi1>
   func.return %all_atan2f : vector<8xi1>
 }
 
@@ -184,7 +184,7 @@ func.def @finite_3_operand_results(%input: vector<8xf32>, %other: vector<8xf32>,
 
 // ----
 func.def @finite_3_operand_results(%input: vector<8xf32>, %other: vector<8xf32>, %third: vector<8xf32>) -> (vector<8xi1>) {
-  %all_fmaf = vector.constant true : vector<8xi1>
+  %all_fmaf = vector.splati 1 : vector<8xi1>
   func.return %all_fmaf : vector<8xi1>
 }
 
@@ -212,11 +212,11 @@ func.def @independent_promises(%input: vector<4xf32>) -> (vector<4xi1>, vector<4
   %not_nan = vector.exp2f<nnan> %input : vector<4xf32>
   %not_inf = vector.exp2f<ninf> %input : vector<4xf32>
   %fast = vector.exp2f<reassoc|nnan|ninf|nsz|arcp|contract|afn> %input : vector<4xf32>
-  %nan = vector.constant false : vector<4xi1>
-  %inf = vector.constant false : vector<4xi1>
+  %nan = vector.splati 0 : vector<4xi1>
+  %inf = vector.splati 0 : vector<4xi1>
   %possibly_inf = vector.isinff %not_nan : vector<4xf32> -> vector<4xi1>
   %possibly_nan = vector.isnanf %not_inf : vector<4xf32> -> vector<4xi1>
-  %finite = vector.constant true : vector<4xi1>
+  %finite = vector.splati 1 : vector<4xi1>
   %flush = vector.fptrunc<ftz> %input : vector<4xf32> to vector<4xbf16>
   %flush_nan = vector.isnanf %flush : vector<4xbf16> -> vector<4xi1>
   %rounded = vector.fptrunc %fast : vector<4xf32> to vector<4xbf16>
@@ -313,11 +313,11 @@ func.def @partial_axes(%input: vector<2x4xf32>, %initial: vector<4xf32>, %scalar
   %result = vector.reduce.axes<addf, nnan|ninf> %input, %initial axes [0] : vector<2x4xf32>, vector<4xf32>
   %finite = vector.isfinitef %result : vector<4xf32> -> vector<4xi1>
   %broadcast = vector.splat %scalar : vector<2x4xf32>
-  %initial_sums = vector.constant 0.0 : vector<4xf32>
+  %initial_sums = vector.splatf 0.0 : vector<4xf32>
   %uniform = vector.reduce.axes<addf, nnan|ninf> %broadcast, %initial_sums axes [0] : vector<2x4xf32>, vector<4xf32>
   %element = vector.extract %uniform[1] : vector<4xf32> -> f32
   %uniform_finite = scalar.isfinitef %element : f32
-  %empty = vector.constant 0.0 : vector<0xf32>
+  %empty = vector.splatf 0.0 : vector<0xf32>
   %empty_sum = vector.reduce<addf, nnan|ninf> %empty, %scalar : vector<0xf32>, f32
   %empty_finite = scalar.isfinitef %empty_sum : f32
   func.return %finite, %uniform_finite, %empty_finite : vector<4xi1>, i1, i1
@@ -325,7 +325,7 @@ func.def @partial_axes(%input: vector<2x4xf32>, %initial: vector<4xf32>, %scalar
 
 // ----
 func.def @partial_axes(%input: vector<2x4xf32>, %initial: vector<4xf32>, %scalar: f32) -> (vector<4xi1>, i1, i1) {
-  %finite = vector.constant true : vector<4xi1>
+  %finite = vector.splati 1 : vector<4xi1>
   %uniform_finite = scalar.constant true : i1
   %empty_finite = scalar.constant true : i1
   func.return %finite, %uniform_finite, %empty_finite : vector<4xi1>, i1, i1
@@ -352,7 +352,7 @@ func.def @empty_uniform(%scalar: f32) -> (vector<4xi1>, i1, i1) {
 func.def @empty_uniform(%scalar: f32) -> (vector<4xi1>, i1, i1) {
   %initial = vector.splat %scalar : vector<4xf32>
   %empty = vector.empty : vector<0x4xf32>
-  %finite = vector.constant true : vector<4xi1>
+  %finite = vector.splati 1 : vector<4xi1>
   %element_finite = scalar.constant true : i1
   %unflagged = vector.reduce.axes<addf> %empty, %initial axes [0] : vector<0x4xf32>, vector<4xf32>
   %unflagged_element = vector.extract %unflagged[1] : vector<4xf32> -> f32
@@ -377,7 +377,7 @@ func.def @empty_components(%initial_value: f32) -> (vector<2xi1>, i1, f32) {
 
 // ----
 func.def @empty_components(%initial_value: f32) -> (vector<2xi1>, i1, f32) {
-  %finite = vector.constant true : vector<2xi1>
+  %finite = vector.splati 1 : vector<2xi1>
   %second = scalar.constant 1.0 : f32
   %first_finite = scalar.constant true : i1
   func.return %finite, %first_finite, %second : vector<2xi1>, i1, f32

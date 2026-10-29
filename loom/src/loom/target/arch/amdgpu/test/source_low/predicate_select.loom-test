@@ -141,8 +141,8 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @predicate_scf_select_u
 // ====
 
 func.def @predicate_scf_select_constants_max(%condition: i1) -> (vector<32xi1>) {
-  %on = vector.constant true : vector<32xi1>
-  %off = vector.constant false : vector<32xi1>
+  %on = vector.splati 1 : vector<32xi1>
+  %off = vector.splati 0 : vector<32xi1>
   %selected = scf.select %condition, %on, %off : vector<32xi1>
   func.return %selected : vector<32xi1>
 }

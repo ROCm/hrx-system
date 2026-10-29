@@ -183,7 +183,7 @@ worker 0: transport=borrowed-movement execution_counts=exact batches=0 streams=1
 func.def @worker(%source: channel<tile<16xi32>>, %output: buffer) {
   %origin = index.constant 0 : offset
   %read, %payload = channel.acquire<mutable> %source : channel<tile<16xi32>> -> (read<tile<16xi32>, mutable>, view<16xi32>)
-  %bias = vector.constant 17 : vector<16xi32>
+  %bias = vector.splati 17 : vector<16xi32>
   %value = vector.load %payload[0] : view<16xi32> -> vector<16xi32>
   %next = vector.addi %value, %bias : vector<16xi32>
   vector.store %next, %payload[0] : vector<16xi32>, view<16xi32>

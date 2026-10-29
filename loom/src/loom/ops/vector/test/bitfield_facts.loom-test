@@ -90,7 +90,7 @@ func.def @boolean_unpack_256(%source: vector<32xi8>) -> (i64, i64, i64, i64) {
 
 // Distinct packed bits retain their exact values through signed unpacking.
 func.def @boolean_unpack_lanes() -> (i8, i8, i8) {
-  %source = vector.constant -127 : vector<1xi8>
+  %source = vector.splati -127 : vector<1xi8>
   %fields = vector.bitunpacks<1> %source : vector<1xi8> -> vector<8xi1>
   %bytes = vector.extui %fields : vector<8xi1> to vector<8xi8>
   %first = vector.extract %bytes[0] : vector<8xi8> -> i8
@@ -110,14 +110,14 @@ func.def @boolean_unpack_lanes() -> (i8, i8, i8) {
 
 // Exact i1 facts retain true; signed extension then produces integer -1.
 func.def @boolean_unpack_uniform() -> (vector<32xi8>) {
-  %source = vector.constant true : vector<32xi1>
+  %source = vector.splati 1 : vector<32xi1>
   %fields = vector.bitunpacks<1> %source : vector<32xi1> -> vector<32xi1>
   %bytes = vector.extsi %fields : vector<32xi1> to vector<32xi8>
   func.return %bytes : vector<32xi8>
 }
 // ----
 func.def @boolean_unpack_uniform() -> (vector<32xi8>) {
-  %bytes = vector.constant -1 : vector<32xi8>
+  %bytes = vector.splati -1 : vector<32xi8>
   func.return %bytes : vector<32xi8>
 }
 

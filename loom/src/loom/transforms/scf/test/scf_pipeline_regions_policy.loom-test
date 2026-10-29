@@ -335,7 +335,7 @@ func.def @guarded_vector_update(%input: view<32xf32>, %initial: vector<4xf32>, %
       %loaded = vector.load %input[%begin] : view<32xf32> -> vector<4xf32>
       scf.yield %loaded : vector<4xf32>
     } else {
-      %19 = vector.constant 0.0 : vector<4xf32>
+      %19 = vector.splatf 0.0 : vector<4xf32>
       scf.yield %19 : vector<4xf32>
     }
     %23, %24 = scf.for %20 = [%14 to %end step %step](%21 = %initial : vector<4xf32>, %22 = %loaded : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
@@ -343,7 +343,7 @@ func.def @guarded_vector_update(%input: view<32xf32>, %initial: vector<4xf32>, %
         %loaded = vector.load %input[%20] : view<32xf32> -> vector<4xf32>
         scf.yield %loaded : vector<4xf32>
       } else {
-        %27 = vector.constant 0.0 : vector<4xf32>
+        %27 = vector.splatf 0.0 : vector<4xf32>
         scf.yield %27 : vector<4xf32>
       }
       %next = scf.if %condition -> (vector<4xf32>) {

@@ -518,11 +518,11 @@ func.def target(@test_target) @predicate_masks(%predicate: vector<4xi1>) -> (vec
 test.target<low_core> @test_target
 
 func.def target(@test_target) @predicate_masks(%predicate: vector<4xi1>) -> (vector<4xi32>, vector<4xi32>) {
-  %8 = vector.constant -1 : vector<4xi32>
-  %9 = vector.constant 0 : vector<4xi32>
+  %8 = vector.splati -1 : vector<4xi32>
+  %9 = vector.splati 0 : vector<4xi32>
   %signed_mask = vector.select %predicate, %8, %9 : vector<4xi32>
-  %5 = vector.constant 1 : vector<4xi32>
-  %6 = vector.constant 0 : vector<4xi32>
+  %5 = vector.splati 1 : vector<4xi32>
+  %6 = vector.splati 0 : vector<4xi32>
   %unsigned_mask = vector.select %predicate, %5, %6 : vector<4xi32>
   func.return %signed_mask, %unsigned_mask : vector<4xi32>, vector<4xi32>
 }

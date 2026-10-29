@@ -107,7 +107,7 @@ CHECK-NOT: * = vinsert.*
 // ====
 
 func.def @empty_thresholds(%values: vector<4xf32>) -> (vector<4xi8>) {
-  %thresholds = vector.constant 0.0 : vector<0xf32>
+  %thresholds = vector.splatf 0.0 : vector<0xf32>
   %codes = vector.table.quantize %values, %thresholds {nan = zero, tie = lower} : vector<4xf32>, vector<0xf32> -> vector<4xi8>
   func.return %codes : vector<4xi8>
 }

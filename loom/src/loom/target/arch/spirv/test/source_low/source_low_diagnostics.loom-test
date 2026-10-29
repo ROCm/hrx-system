@@ -523,7 +523,7 @@ spirv.target<vulkan1_3> @target
 
 // ERROR@+1: TARGET/031 {actual_type="vector<5xi32>", type_constraint="vector.target_carrier"}
 func.def target(@target) @ordinary_vector_rejects_wide_return() -> (vector<5xi32>) {
-  %value = vector.constant 0 : vector<5xi32>
+  %value = vector.splati 0 : vector<5xi32>
   // ERROR@+1: TARGET/031 {actual_type="vector<5xi32>", type_constraint="vector.target_carrier"}
   func.return %value : vector<5xi32>
 }

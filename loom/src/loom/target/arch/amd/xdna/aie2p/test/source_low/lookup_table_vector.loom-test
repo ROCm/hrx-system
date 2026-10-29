@@ -51,7 +51,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @predicate_table(%
 // The first bit in the second predicate packet remains a single native
 // broadcast after the packet widens to bytes.
 func.def @predicate_table_high_uniform(%table: vector<65xi1>) -> (vector<64xi1>) {
-  %indices = vector.constant 64 : vector<64xi8>
+  %indices = vector.splati 64 : vector<64xi8>
   %result = vector.table.lookup %table[%indices] : vector<65xi1>, vector<64xi8> -> vector<64xi1>
   func.return %result : vector<64xi1>
 }
@@ -121,7 +121,7 @@ CHECK-NOT: * = vinsert.*
 
 // A uniform double-word lookup is one native indexed broadcast.
 func.def @i64_uniform_table(%table: vector<8xi64>) -> (vector<8xi64>) {
-  %indices = vector.constant 7 : vector<8xi8>
+  %indices = vector.splati 7 : vector<8xi8>
   %result = vector.table.lookup %table[%indices] : vector<8xi64>, vector<8xi8> -> vector<8xi64>
   func.return %result : vector<8xi64>
 }
@@ -470,7 +470,7 @@ CHECK-NOT: * = vinsert.*
 // Uniform specialization survives packetization and shares one native table
 // broadcast across both result carriers.
 func.def @uniform_wide(%table: vector<4xi8>) -> (vector<128xi8>) {
-  %indices = vector.constant 3 : vector<128xi8>
+  %indices = vector.splati 3 : vector<128xi8>
   %result = vector.table.lookup %table[%indices] : vector<4xi8>, vector<128xi8> -> vector<128xi8>
   func.return %result : vector<128xi8>
 }

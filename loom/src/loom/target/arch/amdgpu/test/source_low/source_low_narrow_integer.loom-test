@@ -33,7 +33,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @scalar_
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @i8x4_vector_constant() -> (vector<4xi8>) {
-  %value = vector.constant -1 : vector<4xi8>
+  %value = vector.splati -1 : vector<4xi8>
   func.return %value : vector<4xi8>
 }
 
@@ -48,7 +48,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_ve
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @i16x4_vector_constant() -> (vector<4xi16>) {
-  %value = vector.constant 4660 : vector<4xi16>
+  %value = vector.splati 4660 : vector<4xi16>
   func.return %value : vector<4xi16>
 }
 
@@ -64,7 +64,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x4_v
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @i16x2_vector_constant() -> (vector<2xi16>) {
-  %value = vector.constant -2 : vector<2xi16>
+  %value = vector.splati -2 : vector<2xi16>
   func.return %value : vector<2xi16>
 }
 
@@ -79,7 +79,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16x2_v
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @i1x1_vector_constant_false() -> (vector<1xi1>) {
-  %value = vector.constant false : vector<1xi1>
+  %value = vector.splati 0 : vector<1xi1>
   func.return %value : vector<1xi1>
 }
 
@@ -95,7 +95,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i1x1_ve
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @i1x4_vector_constant_true() -> (vector<4xi1>) {
-  %value = vector.constant true : vector<4xi1>
+  %value = vector.splati 1 : vector<4xi1>
   func.return %value : vector<4xi1>
 }
 
@@ -111,7 +111,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i1x4_ve
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @i1x2x2_vector_constant_false() -> (vector<2x2xi1>) {
-  %value = vector.constant false : vector<2x2xi1>
+  %value = vector.splati 0 : vector<2x2xi1>
   func.return %value : vector<2x2xi1>
 }
 
@@ -128,7 +128,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i1x2x2_
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @i1x32_vector_constant_true() -> (vector<32xi1>) {
-  %value = vector.constant true : vector<32xi1>
+  %value = vector.splati 1 : vector<32xi1>
   func.return %value : vector<32xi1>
 }
 
@@ -144,7 +144,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i1x32_v
 amdgpu.target<gfx11-generic> @target
 
 func.def public target(@target) @i1x33_vector_constant_false() -> (vector<33xi1>) {
-  %value = vector.constant false : vector<33xi1>
+  %value = vector.splati 0 : vector<33xi1>
   func.return %value : vector<33xi1>
 }
 

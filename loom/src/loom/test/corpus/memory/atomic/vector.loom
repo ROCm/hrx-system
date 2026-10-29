@@ -17,8 +17,8 @@ kernel.def @masked_duplicate_atomic() {
   %index2 = index.constant 2 : index
   %index3 = index.constant 3 : index
   %offsets = vector.from_elements %index0, %index2, %index0, %index3 : vector<4xindex>
-  %increment = vector.constant 1 : vector<4xi32>
-  %passthrough = vector.constant -101 : vector<4xi32>
+  %increment = vector.splati 1 : vector<4xi32>
+  %passthrough = vector.splati -101 : vector<4xi32>
   %old = vector.atomic.rmw.mask<addi> %increment, %view[0][%offsets], %mask, %passthrough {ordering = relaxed, scope = device} : vector<4xi32>, view<4xi32>, vector<4xindex>, vector<4xi1>, vector<4xi32>
   %first = vector.extract %old[0] : vector<4xi32> -> i32
   %second = vector.extract %old[2] : vector<4xi32> -> i32
@@ -97,8 +97,8 @@ kernel.def @masked_outside_view() {
   %enabled = scalar.constant true : i1
   %disabled = scalar.constant false : i1
   %mask = vector.from_elements %enabled, %disabled : vector<2xi1>
-  %increment = vector.constant 1 : vector<2xi32>
-  %passthrough = vector.constant -101 : vector<2xi32>
+  %increment = vector.splati 1 : vector<2xi32>
+  %passthrough = vector.splati -101 : vector<2xi32>
   %old = vector.atomic.rmw.mask<addi> %increment, %view[0][%offsets], %mask, %passthrough {ordering = relaxed, scope = device} : vector<2xi32>, view<1xi32>, vector<2xindex>, vector<2xi1>, vector<2xi32>
   vector.store %old, %results[0] : vector<2xi32>, view<2xi32>
   kernel.return
@@ -149,8 +149,8 @@ kernel.def @masked_float_old_bits() {
   %index0 = index.constant 0 : index
   %index1 = index.constant 1 : index
   %offsets = vector.iota %index0 step %index1 : vector<2xindex>
-  %value = vector.constant 1.0 : vector<2xf32>
-  %passthrough_bits = vector.constant 2143311480 : vector<2xi32>
+  %value = vector.splatf 1.0 : vector<2xf32>
+  %passthrough_bits = vector.splati 2143311480 : vector<2xi32>
   %passthrough = vector.bitcast %passthrough_bits : vector<2xi32> to vector<2xf32>
   %old = vector.atomic.rmw.mask<minnumf> %value, %view[0][%offsets], %mask, %passthrough {ordering = relaxed, scope = device} : vector<2xf32>, view<2xf32>, vector<2xindex>, vector<2xi1>, vector<2xf32>
   %old_bits = vector.bitcast %old : vector<2xf32> to vector<2xi32>
@@ -262,7 +262,7 @@ kernel.def @vector_atomic_i64() {
   %origin = index.constant 0 : index
   %stride = index.constant 1 : index
   %offsets = vector.iota %origin step %stride : vector<2xindex>
-  %increment = vector.constant 4294967297 : vector<2xi64>
+  %increment = vector.splati 4294967297 : vector<2xi64>
   vector.atomic.reduce<addi> %increment, %view[0][%offsets] {ordering = relaxed, scope = device} : vector<2xi64>, view<2xi64>, vector<2xindex>
   %old = vector.atomic.rmw<xchgi> %increment, %view[0][%offsets] {ordering = relaxed, scope = device} : vector<2xi64>, view<2xi64>, vector<2xindex>
   %observed = vector.atomic.cmpxchg %increment, %old, %view[0][%offsets] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : vector<2xi64>, view<2xi64>, vector<2xindex> -> vector<2xi64>
@@ -327,9 +327,9 @@ kernel.def @vector_atomic_float_cmpxchg() {
   %match_bits = scalar.constant 0 : i32
   %expected_bits = vector.from_elements %mismatch_bits, %match_bits : vector<2xi32>
   %expected = vector.bitcast %expected_bits : vector<2xi32> to vector<2xf32>
-  %nan_bits = vector.constant 2143294004 : vector<2xi32>
+  %nan_bits = vector.splati 2143294004 : vector<2xi32>
   %nan = vector.bitcast %nan_bits : vector<2xi32> to vector<2xf32>
-  %replacement = vector.constant 1.0 : vector<2xf32>
+  %replacement = vector.splatf 1.0 : vector<2xf32>
   %old = vector.atomic.cmpxchg %expected, %nan, %view[0][%offsets] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : vector<2xf32>, view<2xf32>, vector<2xindex> -> vector<2xf32>
   %observed = vector.atomic.cmpxchg %nan, %replacement, %view[0][%offsets] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : vector<2xf32>, view<2xf32>, vector<2xindex> -> vector<2xf32>
   %old_bits = vector.bitcast %old : vector<2xf32> to vector<2xi32>
@@ -408,8 +408,8 @@ kernel.def @contended_vector_atomic() {
   %view = buffer.view %global[%base] : buffer -> view<1xi32>
   %sum_global = buffer.assume.memory_space<global> %old_sum : buffer
   %sum_view = buffer.view %sum_global[%base] : buffer -> view<1xi32>
-  %offsets = vector.constant 0 : vector<2xi32>
-  %increment = vector.constant 1 : vector<2xi32>
+  %offsets = vector.splati 0 : vector<2xi32>
+  %increment = vector.splati 1 : vector<2xi32>
   %old = vector.atomic.rmw<addi> %increment, %view[0][%offsets] {ordering = relaxed, scope = device} : vector<2xi32>, view<1xi32>, vector<2xi32>
   %first = vector.extract %old[0] : vector<2xi32> -> i32
   %second = vector.extract %old[1] : vector<2xi32> -> i32

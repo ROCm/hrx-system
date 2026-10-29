@@ -110,7 +110,7 @@ func.def device inline @compute_packed_halfword_lookup(%input: buffer, %table: b
   %output_view = buffer.view %output[%base] : buffer -> view<8xi32>
   %packed = vector.load %input_view[0] : view<8xi16> -> vector<8xi16>
   %wide = vector.extui %packed : vector<8xi16> to vector<8xi32>
-  %mask = vector.constant 255 : vector<8xi32>
+  %mask = vector.splati 255 : vector<8xi32>
   %indices = vector.andi %wide, %mask : vector<8xi32>
   %values = vector.gather %table_view[0][%indices] : view<256xi32>, vector<8xi32> -> vector<8xi32>
   vector.store %values, %output_view[0] : vector<8xi32>, view<8xi32>
@@ -151,7 +151,7 @@ func.def device inline @compute_packed_signed_byte_lookup(%input: buffer, %table
   %output_view = buffer.view %output[%base] : buffer -> view<16xi32>
   %packed = vector.load %input_view[0] : view<16xi8> -> vector<16xi8>
   %signed = vector.extsi %packed : vector<16xi8> to vector<16xi32>
-  %bias = vector.constant 128 : vector<16xi32>
+  %bias = vector.splati 128 : vector<16xi32>
   %indices = vector.addi %signed, %bias : vector<16xi32>
   %values = vector.gather %table_view[0][%indices] : view<256xi32>, vector<16xi32> -> vector<16xi32>
   vector.store %values, %output_view[0] : vector<16xi32>, view<16xi32>
@@ -234,10 +234,10 @@ func.def device inline @compute_packed_snapshot_consumers(%input: buffer, %table
   %packed = vector.load %input_view[0] : view<16xi8> -> vector<16xi8>
   %unsigned = vector.extui %packed : vector<16xi8> to vector<16xi32>
   %unsigned_values = vector.gather %table_view[0][%unsigned] : view<256xi32>, vector<16xi32> -> vector<16xi32>
-  %replacement = vector.constant 0 : vector<16xi8>
+  %replacement = vector.splati 0 : vector<16xi8>
   vector.store %replacement, %input_view[0] : vector<16xi8>, view<16xi8>
   %signed = vector.extsi %packed : vector<16xi8> to vector<16xi32>
-  %bias = vector.constant 128 : vector<16xi32>
+  %bias = vector.splati 128 : vector<16xi32>
   %signed_indices = vector.addi %signed, %bias : vector<16xi32>
   %signed_values = vector.gather %table_view[0][%signed_indices] : view<256xi32>, vector<16xi32> -> vector<16xi32>
   vector.store %unsigned_values, %unsigned_view[0] : vector<16xi32>, view<16xi32>
@@ -284,7 +284,7 @@ func.def device inline @compute_packed_masked_consumer(%input: buffer, %table: b
   %start = index.constant 0 : index
   %step = index.constant 1 : index
   %mask = vector.mask.range [%start to %count step %step] : index -> vector<16xi1>
-  %passthrough = vector.constant -17 : vector<16xi32>
+  %passthrough = vector.splati -17 : vector<16xi32>
   %values = vector.gather.mask %table_view[0][%indices], %mask, %passthrough : view<256xi32>, vector<16xi32>, vector<16xi1>, vector<16xi32>
   vector.store.mask %values, %output_view[0], %mask : vector<16xi32>, view<16xi32>, vector<16xi1>
   func.return
@@ -359,7 +359,7 @@ func.def device inline @compute_masked_byte_tail(%input: buffer, %output: buffer
   %output_view = buffer.view %output[%base] : buffer -> view<4xi8>
   %inactive = scalar.constant false : i1
   %mask = vector.from_elements %active, %active, %active, %inactive : vector<4xi1>
-  %passthrough = vector.constant 99 : vector<4xi8>
+  %passthrough = vector.splati 99 : vector<4xi8>
   %loaded = vector.load.mask %input_view[0], %mask, %passthrough : view<3xi8>, vector<4xi1>, vector<4xi8>
   vector.store %loaded, %output_view[0] : vector<4xi8>, view<4xi8>
   func.return

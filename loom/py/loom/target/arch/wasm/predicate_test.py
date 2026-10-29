@@ -292,7 +292,7 @@ def test_lane_access_has_one_rule_for_each_physical_representation():
 
 def test_representation_invariant_rules_are_single_shared_rows():
     for source_op in (
-        vector.vector_constant,
+        vector.vector_splati,
         vector.vector_splat,
         vector.vector_andi,
         vector.vector_ori,

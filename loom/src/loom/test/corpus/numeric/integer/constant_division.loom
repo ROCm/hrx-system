@@ -3,9 +3,9 @@ func.def @bounded_remainder_identities(%input: buffer, %output: buffer) {
   %values = buffer.view %input[%base] : buffer -> view<4xi32>
   %results = buffer.view %output[%base] : buffer -> view<8xi32>
   %loaded = vector.load %values[0] : view<4xi32> -> vector<4xi32>
-  %mask = vector.constant 255 : vector<4xi32>
+  %mask = vector.splati 255 : vector<4xi32>
   %bounded = vector.andi %loaded, %mask : vector<4xi32>
-  %divisors = vector.constant 257 : vector<4xi32>
+  %divisors = vector.splati 257 : vector<4xi32>
   %identities = vector.remui %bounded, %divisors : vector<4xi32>
   vector.store %identities, %results[0] : vector<4xi32>, view<8xi32>
   %begin = index.constant 0 : index

@@ -50,14 +50,13 @@ iree_status_t loom_predicate_word_materialize(loom_builder_t* builder,
         &select_op));
     *out_word = loom_scf_select_result(select_op);
   } else {
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64(1), word_type, location, &true_op));
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64(0), word_type, location, &false_op));
+    IREE_RETURN_IF_ERROR(
+        loom_vector_splati_build(builder, 1, word_type, location, &true_op));
+    IREE_RETURN_IF_ERROR(
+        loom_vector_splati_build(builder, 0, word_type, location, &false_op));
     IREE_RETURN_IF_ERROR(loom_vector_select_build(
-        builder, predicate, loom_vector_constant_result(true_op),
-        loom_vector_constant_result(false_op), word_type, location,
-        &select_op));
+        builder, predicate, loom_vector_splati_result(true_op),
+        loom_vector_splati_result(false_op), word_type, location, &select_op));
     *out_word = loom_vector_select_result(select_op);
   }
   return iree_ok_status();
@@ -79,11 +78,11 @@ iree_status_t loom_predicate_word_reconstruct(loom_builder_t* builder,
         loom_scalar_constant_result(zero_op), location, &compare_op));
     *out_predicate = loom_scalar_cmpi_result(compare_op);
   } else {
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64(0), word_type, location, &zero_op));
+    IREE_RETURN_IF_ERROR(
+        loom_vector_splati_build(builder, 0, word_type, location, &zero_op));
     IREE_RETURN_IF_ERROR(
         loom_vector_cmpi_build(builder, LOOM_VECTOR_CMPI_PREDICATE_NE, word,
-                               loom_vector_constant_result(zero_op), word_type,
+                               loom_vector_splati_result(zero_op), word_type,
                                predicate_type, location, &compare_op));
     *out_predicate = loom_vector_cmpi_result(compare_op);
   }

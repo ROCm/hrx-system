@@ -21,7 +21,7 @@ func.def @q4_0_reference_chunk() -> (i1) {
   %lo = vector.bitfield.extractu %qs {offset = 0, width = 4} : vector<4xi8> -> vector<4xi8>
   %hi = vector.bitfield.extractu %qs {offset = 4, width = 4} : vector<4xi8> -> vector<4xi8>
   %codes = vector.concat<0> %lo, %hi : vector<4xi8>, vector<4xi8> -> vector<8xi8>
-  %bias = vector.constant -8 : vector<8xi8>
+  %bias = vector.splati -8 : vector<8xi8>
   %signed = vector.addi %codes, %bias : vector<8xi8>
 
   %e0 = scalar.constant -8 : i8
@@ -98,7 +98,7 @@ func.def @q8_0_dot4_reference_chunk() -> (vector<1xi32>) {
   %b3 = scalar.constant 1 : i8
   %rhs = vector.from_elements %b0, %b1, %b2, %b3 : vector<4xi8>
 
-  %acc = vector.constant 10 : vector<1xi32>
+  %acc = vector.splati 10 : vector<1xi32>
   %dot = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   func.return %dot : vector<1xi32>
 }
@@ -139,7 +139,7 @@ func.def @q6_k_reference_chunk() -> (i1) {
   %lo6 = vector.bitfield.insert %lo2 into %lo4 {offset = 4, width = 2} : vector<4xi8>, vector<4xi8>
   %hi6 = vector.bitfield.insert %hi2 into %hi4 {offset = 4, width = 2} : vector<4xi8>, vector<4xi8>
   %codes = vector.interleave<0> %lo6, %hi6 : vector<4xi8>, vector<4xi8> -> vector<8xi8>
-  %bias = vector.constant -32 : vector<8xi8>
+  %bias = vector.splati -32 : vector<8xi8>
   %signed = vector.addi %codes, %bias : vector<8xi8>
 
   %e0 = scalar.constant -32 : i8

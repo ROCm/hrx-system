@@ -326,8 +326,7 @@ Value VectorArithmeticIntrinsic::call(std::span<const Value> arguments,
                                    &op));
       break;
     case Kind::ComplementI:
-      check(loom_vector_constant_build(builder, loom_attr_i64(-1), result_type,
-                                       location, &op));
+      check(loom_vector_splati_build(builder, -1, result_type, location, &op));
       check(loom_vector_xori_build(builder, left, loom_op_results(op)[0],
                                    result_type, location, &op));
       break;

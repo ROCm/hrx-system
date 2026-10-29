@@ -155,7 +155,7 @@ x86.target<avx2> @target
 
 func.def target(@target) @subnative_integer_arithmetic(%condition: i1, %lhs: vector<2xi32>, %rhs: vector<2xi32>) -> (vector<2xi32>) {
   %product = vector.muli %lhs, %rhs : vector<2xi32>
-  %bias = vector.constant 8388608 : vector<2xi32>
+  %bias = vector.splati 8388608 : vector<2xi32>
   %adjusted = vector.subi %product, %bias : vector<2xi32>
   %result = scf.select %condition, %adjusted, %product : vector<2xi32>
   func.return %result : vector<2xi32>
@@ -183,7 +183,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({sig
 x86.target<avx2> @target
 
 func.def target(@target) @subnative_float_arithmetic(%f32_lhs: vector<2xf32>, %f32_rhs: vector<2xf32>, %f64_lhs: vector<1xf64>, %f64_rhs: vector<1xf64>) -> (vector<2xf32>, vector<1xf64>) {
-  %f32_acc = vector.constant 1.0 : vector<2xf32>
+  %f32_acc = vector.splatf 1.0 : vector<2xf32>
   %f32_add = vector.addf %f32_lhs, %f32_rhs : vector<2xf32>
   %f32_sub = vector.subf %f32_add, %f32_rhs : vector<2xf32>
   %f32_mul = vector.mulf %f32_sub, %f32_rhs : vector<2xf32>
@@ -191,7 +191,7 @@ func.def target(@target) @subnative_float_arithmetic(%f32_lhs: vector<2xf32>, %f
   %f32_result = vector.fmaf %f32_div, %f32_rhs, %f32_acc : vector<2xf32>
   %f32_bits = vector.bitcast %f32_result : vector<2xf32> to vector<2xi32>
   %f32_restored = vector.bitcast %f32_bits : vector<2xi32> to vector<2xf32>
-  %f64_acc = vector.constant 1.0 : vector<1xf64>
+  %f64_acc = vector.splatf 1.0 : vector<1xf64>
   %f64_add = vector.addf %f64_lhs, %f64_rhs : vector<1xf64>
   %f64_sub = vector.subf %f64_add, %f64_rhs : vector<1xf64>
   %f64_mul = vector.mulf %f64_sub, %f64_rhs : vector<1xf64>

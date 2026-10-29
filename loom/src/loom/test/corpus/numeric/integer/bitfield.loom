@@ -78,7 +78,7 @@ func.def @bitfield_observations(%bits: i64, %output: buffer) {
   %field_low = vector.bitfield.extractu %values {offset = 0, width = 4} : vector<4xi32> -> vector<4xi32>
   %field_high = vector.bitfield.extractu %values {offset = 4, width = 2} : vector<4xi32> -> vector<4xi32>
   %merged = vector.bitfield.insert %field_high into %field_low {offset = 4, width = 2} : vector<4xi32>, vector<4xi32>
-  %bias = vector.constant 32 : vector<4xi32>
+  %bias = vector.splati 32 : vector<4xi32>
   %field_result = vector.subi %merged, %bias : vector<4xi32>
   %length = index.constant 16 : offset
   %storage = buffer.alloca<private> align(4) %length : buffer

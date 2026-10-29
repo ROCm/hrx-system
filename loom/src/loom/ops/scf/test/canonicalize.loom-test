@@ -579,7 +579,7 @@ func.def @if_edge_rewrites_refinable_result_type_refs(%buffer: buffer, %offset: 
   %c1 = index.constant 1 : index
   %cond = index.cmp slt, %n, %limit : index
   scf.if %cond {
-    %constant = vector.constant 7 : vector<[%n]xi32>
+    %constant = vector.splati 7 : vector<[%n]xi32>
     %iota = vector.iota %c0 step %c1 : vector<[%n]xindex>
     %mask = vector.mask.range [%c0 to %n step %c1] : index -> vector<[%n]xi1>
     %sub = view.subview %source[0] : view<[%n]xi32, %layout> -> view<[%n]xi32, %layout>
@@ -599,7 +599,7 @@ func.def @if_edge_rewrites_refinable_result_type_refs(%buffer: buffer, %offset: 
   %cond = index.cmp slt, %n, %limit : index
   scf.if %cond {
     %16 = index.assume %n [lt(%n, %limit)] : index
-    %constant = vector.constant 7 : vector<[%16]xi32>
+    %constant = vector.splati 7 : vector<[%16]xi32>
     %iota = vector.iota %c0 step %c1 : vector<[%16]xindex>
     %mask = vector.mask.range [%c0 to %16 step %c1] : index -> vector<[%16]xi1>
     %sub = view.subview %source[0] : view<[%n]xi32> -> view<[%16]xi32>

@@ -322,7 +322,7 @@ kernel.def @partial_widening() {
   %source_f32 = buffer.view %source[%origin] : buffer -> view<64xf32>
   %destination_i32 = buffer.view %destination[%origin] : buffer -> view<144xi32>
   %destination_i64 = buffer.view %destination[%origin] : buffer -> view<72xi64>
-  %sentinel = vector.constant -1515870811 : vector<16xi32>
+  %sentinel = vector.splati -1515870811 : vector<16xi32>
   vector.store<volatile> %sentinel, %destination_i32[0] : vector<16xi32>, view<144xi32>
   vector.store<volatile> %sentinel, %destination_i32[16] : vector<16xi32>, view<144xi32>
   vector.store<volatile> %sentinel, %destination_i32[32] : vector<16xi32>, view<144xi32>

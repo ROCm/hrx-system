@@ -13,7 +13,7 @@ kernel.def target(@target_gfx1100_32) @strided_gfx1100_wave32() {
   %layout = encoding.layout.strided [24, 1] : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<64x4xi32, %layout>
-  %value = vector.constant 1 : vector<4xi32>
+  %value = vector.splati 1 : vector<4xi32>
   vector.store %value, %view[%lane, 0] : vector<4xi32>, view<64x4xi32, %layout>
   kernel.return
 }
@@ -31,7 +31,7 @@ kernel.def target(@target_gfx1151_64) @strided_gfx1151_wave64() {
   %layout = encoding.layout.strided [24, 1] : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<64x4xi32, %layout>
-  %value = vector.constant 1 : vector<4xi32>
+  %value = vector.splati 1 : vector<4xi32>
   vector.store %value, %view[%lane, 0] : vector<4xi32>, view<64x4xi32, %layout>
   kernel.return
 }
@@ -49,7 +49,7 @@ kernel.def target(@target_gfx942_64) @strided_gfx942_wave64() {
   %layout = encoding.layout.strided [24, 1] : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<64x4xi32, %layout>
-  %value = vector.constant 1 : vector<4xi32>
+  %value = vector.splati 1 : vector<4xi32>
   vector.store %value, %view[%lane, 0] : vector<4xi32>, view<64x4xi32, %layout>
   kernel.return
 }
@@ -67,7 +67,7 @@ kernel.def target(@unmodeled_gfx1200) @coverage_gfx1200() {
   %layout = encoding.layout.strided [16, 1] : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<32x4xi32, %layout>
-  %value = vector.constant 1 : vector<4xi32>
+  %value = vector.splati 1 : vector<4xi32>
   vector.store %value, %view[%lane, 0] : vector<4xi32>, view<32x4xi32, %layout>
   kernel.return
 }
@@ -85,7 +85,7 @@ kernel.def target(@unmodeled_gfx1151) @coverage_gfx1151() {
   %layout = encoding.layout.strided [64, 1] : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<32x4xi8, %layout>
-  %value = vector.constant 1 : vector<1xi8>
+  %value = vector.splati 1 : vector<1xi8>
   vector.store %value, %view[%lane, 0] : vector<1xi8>, view<32x4xi8, %layout>
   kernel.return
 }
@@ -106,7 +106,7 @@ kernel.def target(@target_gfx1100_32) @staged_rows() {
   %layout = encoding.layout.strided [4, 128, 1] : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<32x2x4xi32, %layout>
-  %value = vector.constant 1 : vector<4xi32>
+  %value = vector.splati 1 : vector<4xi32>
   vector.store %value, %view[%column, %row, 0] : vector<4xi32>, view<32x2x4xi32, %layout>
   kernel.return
 }
@@ -125,7 +125,7 @@ kernel.def target(@target_gfx1100_32) @rows_inside_wave() {
   %layout = encoding.layout.strided [4, 128, 1] : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<4x8x4xi32, %layout>
-  %value = vector.constant 1 : vector<4xi32>
+  %value = vector.splati 1 : vector<4xi32>
   vector.store %value, %view[%column, %row, 0] : vector<4xi32>, view<4x8x4xi32, %layout>
   kernel.return
 }
@@ -147,7 +147,7 @@ kernel.def target(@target_gfx1100_32) @digit_rows() {
   %layout = encoding.layout.strided [36, 4, 1] : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<17x8x4xi32, %layout>
-  %value = vector.constant 1 : vector<4xi32>
+  %value = vector.splati 1 : vector<4xi32>
   vector.store %value, %view[%row, %column, 0] : vector<4xi32>, view<17x8x4xi32, %layout>
   kernel.return
 }
@@ -170,7 +170,7 @@ kernel.def target(@target_gfx1100_32) @shifted_digit_rows() {
   %layout = encoding.layout.strided [36, 4, 1] : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<17x8x4xi32, %layout>
-  %value = vector.constant 1 : vector<4xi32>
+  %value = vector.splati 1 : vector<4xi32>
   vector.store %value, %view[%row, %column, 0] : vector<4xi32>, view<17x8x4xi32, %layout>
   kernel.return
 }
@@ -194,7 +194,7 @@ kernel.def target(@target_gfx1100_32) @forwarded_digit_rows() {
   %layout = encoding.layout.strided [36, 4, 1] : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<144x2x4xi32, %layout>
-  %value = vector.constant 1 : vector<4xi32>
+  %value = vector.splati 1 : vector<4xi32>
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
   %last = scf.for %iteration = [%begin to %iterations step %step](%carried_row = %initial : index) -> (index) {

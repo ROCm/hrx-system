@@ -1541,14 +1541,10 @@ static bool loom_vector_try_get_splat_i64_constant(const loom_module_t* module,
     return false;
   }
   const loom_op_t* def_op = loom_value_def_op(value);
-  if (!def_op || !loom_vector_constant_isa(def_op)) {
+  if (!def_op || !loom_vector_splati_isa(def_op)) {
     return false;
   }
-  loom_attribute_t attr = loom_vector_constant_value(def_op);
-  if (attr.kind != LOOM_ATTR_I64) {
-    return false;
-  }
-  *out_value = loom_attr_as_i64(attr);
+  *out_value = loom_vector_splati_value(def_op);
   return true;
 }
 
@@ -1643,9 +1639,8 @@ static iree_status_t loom_vector_verify_static_threshold_order(
     return iree_ok_status();
   }
 
-  if (loom_vector_constant_isa(def_op)) {
-    loom_attribute_t attr = loom_vector_constant_value(def_op);
-    if (attr.kind != LOOM_ATTR_F64 || !isnan(loom_attr_as_f64(attr))) {
+  if (loom_vector_splatf_isa(def_op)) {
+    if (!isnan(loom_vector_splatf_value(def_op))) {
       return iree_ok_status();
     }
     return loom_vector_emit_static_threshold_order(

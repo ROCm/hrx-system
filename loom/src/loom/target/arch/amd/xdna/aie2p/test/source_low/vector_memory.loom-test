@@ -466,7 +466,7 @@ func.def target(@target) @outer_product_bf16bf16_m8n8k1(%lhs: buffer, %rhs: buff
   %rhs_value = vector.load %rhs_view[0] : view<8xbf16> -> vector<8xbf16>
   %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] : vector<8xbf16>
   %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<8xbf16>
-  %accumulator_init = vector.constant 0.0 : vector<64xf32>
+  %accumulator_init = vector.splatf 0.0 : vector<64xf32>
   %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xf32>
   %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<8xbf16>, vector<8xbf16>, vector<64xf32>
   func.return %product : vector<64xf32>
@@ -1087,7 +1087,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @cached_l
 aie2p.target<core> @target
 
 func.def target(@target) @dot2_bf16x8_positive_zero(%lhs: vector<8xbf16>, %rhs: vector<8xbf16>) -> (vector<4xf32>) {
-  %initial_accumulator = vector.constant 0.0 : vector<4xf32>
+  %initial_accumulator = vector.splatf 0.0 : vector<4xf32>
   %result = vector.dot2f %lhs, %rhs, %initial_accumulator : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
   func.return %result : vector<4xf32>
 }
@@ -1104,7 +1104,7 @@ CHECK-NOT: * = vmov.vector512.to.accumulator512 *
 aie2p.target<core> @target
 
 func.def target(@target) @dot2_bf16x32_positive_zero(%lhs: vector<32xbf16>, %rhs: vector<32xbf16>) -> (vector<16xf32>) {
-  %initial_accumulator = vector.constant 0.0 : vector<16xf32>
+  %initial_accumulator = vector.splatf 0.0 : vector<16xf32>
   %result = vector.dot2f %lhs, %rhs, %initial_accumulator : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
   func.return %result : vector<16xf32>
 }
@@ -1131,7 +1131,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot2_bf1
 aie2p.target<core> @target
 
 func.def target(@target) @dot2_bf16x32_negative_zero(%lhs: vector<32xbf16>, %rhs: vector<32xbf16>) -> (vector<16xf32>) {
-  %initial_accumulator = vector.constant -0.0 : vector<16xf32>
+  %initial_accumulator = vector.splatf -0.0 : vector<16xf32>
   %result = vector.dot2f %lhs, %rhs, %initial_accumulator : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
   func.return %result : vector<16xf32>
 }

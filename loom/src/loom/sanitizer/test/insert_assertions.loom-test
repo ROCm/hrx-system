@@ -320,8 +320,8 @@ func.def @access_strided_vector_carriers(%input: buffer, %output: buffer) {
   %doubles = buffer.view %output[%origin] : buffer -> view<4xf64, %layout>
   %byte_values = vector.load %bytes[0] : view<4xi8, %layout> -> vector<3xi8>
   %half_values = vector.load %halves[0] : view<4xbf16, %layout> -> vector<3xbf16>
-  %word_values = vector.constant 7 : vector<3xi32>
-  %double_value = vector.constant 3.0 : vector<1xf64>
+  %word_values = vector.splati 7 : vector<3xi32>
+  %double_value = vector.splatf 3.0 : vector<1xf64>
   vector.store %word_values, %words[0] : vector<3xi32>, view<4xi32, %layout>
   vector.store %double_value, %doubles[0] : vector<1xf64>, view<4xf64, %layout>
   func.return
@@ -339,8 +339,8 @@ func.def @access_strided_vector_carriers(%input: buffer, %output: buffer) {
   %byte_values = vector.load %bytes[0] : view<4xi8, %layout> -> vector<3xi8>
   sanitizer.assert.accesses<read> %halves[0] {static_count = 3, static_extents = [1], static_strides = [1]} : view<4xbf16, %layout>
   %half_values = vector.load %halves[0] : view<4xbf16, %layout> -> vector<3xbf16>
-  %word_values = vector.constant 7 : vector<3xi32>
-  %double_value = vector.constant 3.0 : vector<1xf64>
+  %word_values = vector.splati 7 : vector<3xi32>
+  %double_value = vector.splatf 3.0 : vector<1xf64>
   sanitizer.assert.accesses<write> %words[0] {static_count = 3, static_extents = [1], static_strides = [1]} : view<4xi32, %layout>
   vector.store %word_values, %words[0] : vector<3xi32>, view<4xi32, %layout>
   sanitizer.assert.accesses<write> %doubles[0] {static_count = 1, static_extents = [1], static_strides = [1]} : view<4xf64, %layout>

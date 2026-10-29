@@ -53,8 +53,8 @@ template.def<@benchmark.attention_bf16.m16n16> target(@gfx1250) priority(20) @pl
   %key_tile_count = index.div %valid_token_count_rounded, %tile_extent : index
   %additive_identity = scalar.constant 0.0 : f32
   %negative_large = scalar.constant -1000000000.0 : f32
-  %zero_acc = vector.constant 0.0 : vector<8xf32>
-  %zero_operand = vector.constant 0.0 : vector<16xbf16>
+  %zero_acc = vector.splatf 0.0 : vector<8xf32>
+  %zero_operand = vector.splatf 0.0 : vector<16xbf16>
   %zero_vector = vector.splat %additive_identity : vector<8xf32>
   %negative_vector = vector.splat %negative_large : vector<8xf32>
   %head_size_i32 = index.cast %head_size : index to i32

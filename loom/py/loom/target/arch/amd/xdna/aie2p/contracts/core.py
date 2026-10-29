@@ -719,7 +719,7 @@ def _vector_predicate_splat_rule() -> DescriptorRule:
 
 def _vector_predicate_constant_rule() -> DescriptorRule:
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=vector.vector_splati,
         descriptor=_descriptor("amd.xdna.aie2p.cmp.lt.unsigned.i8x64"),
         guards=(
             Guard.value_type("result", _I1_VECTOR),
@@ -1097,10 +1097,9 @@ def _vector_constant_rule(
 ) -> DescriptorRule:
     broadcast = _descriptor(broadcast_descriptor_key)
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=vector.vector_splati,
         descriptor=broadcast,
         guards=(
-            Guard.attr_kind("value", "i64"),
             Guard.value_type("result", result_type),
             Guard.i64_range("value", minimum, maximum),
         ),
@@ -1132,10 +1131,9 @@ def _address_vector_constant_rule(
     )
     broadcast_descriptor_key = "amd.xdna.aie2p.splat.i32x16"
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=vector.vector_splati,
         descriptor=_descriptor(broadcast_descriptor_key),
         guards=(
-            Guard.attr_kind("value", "i64"),
             Guard.value_type("result", result_type),
             Guard.i64_range("value", minimum, maximum),
         ),
@@ -1160,10 +1158,9 @@ def _float_vector_constant_rule(
 ) -> DescriptorRule:
     broadcast = _descriptor(broadcast_descriptor_key)
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=vector.vector_splatf,
         descriptor=broadcast,
         guards=(
-            Guard.attr_kind("value", "f64"),
             Guard.value_type("result", result_type),
             Guard.value_exact_float("result"),
             *extra_guards,
@@ -1181,10 +1178,9 @@ def _float_vector_constant_rule(
 def _matrix_accumulator_zero_rule() -> DescriptorRule:
     descriptor = _descriptor("amd.xdna.aie2p.accumulator.clear.i32x64")
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=vector.vector_splati,
         descriptor=descriptor,
         guards=(
-            Guard.attr_kind("value", "i64"),
             Guard.value_type("result", _I32_MATRIX_ACCUMULATOR),
             Guard.i64_range("value", 0, 0),
         ),

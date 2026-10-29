@@ -644,7 +644,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_target) abi(hal_kernel) @v
 amdgpu.target<gfx11-generic> @gfx11_target
 
 func.def target(@gfx11_target) @vector_f32_mulf_uniform_constant_keeps_mul(%q: vector<2xf32>) -> (vector<2xf32>) {
-  %scale_vector = vector.constant 2.0 : vector<2xf32>
+  %scale_vector = vector.splatf 2.0 : vector<2xf32>
   %result = vector.mulf<nnan|nsz|contract> %q, %scale_vector : vector<2xf32>
   func.return %result : vector<2xf32>
 }

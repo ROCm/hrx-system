@@ -35,7 +35,7 @@ func.def @shared_dynamic_predicate_windows(%trial0: index, %input: buffer, %outp
   %source_view = buffer.view %input[%base] : buffer -> view<12xi32>
   %result_view = buffer.view %output[%base] : buffer -> view<8xi8>
   %source = vector.load %source_view[0] : view<12xi32> -> vector<12xi32>
-  %c0 = vector.constant 0 : vector<12xi32>
+  %c0 = vector.splati 0 : vector<12xi32>
   %predicates = vector.cmpi ne, %source, %c0 : vector<12xi32> -> vector<12xi1>
   %first = vector.slice %predicates[%trial] : vector<12xi1> -> vector<4xi1>
   %second = vector.slice %predicates[%second_offset] : vector<12xi1> -> vector<4xi1>

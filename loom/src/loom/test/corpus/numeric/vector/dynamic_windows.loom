@@ -139,7 +139,7 @@ func.def @dynamic_predicate_windows(%trial: index, %input: buffer, %narrow_outpu
   %narrow_results = buffer.view %narrow_output[%base] : buffer -> view<40xi8>
   %wide_results = buffer.view %wide_output[%base] : buffer -> view<96xi8>
   %source = vector.load %values[0] : view<128xi32> -> vector<128xi32>
-  %c0 = vector.constant 0 : vector<128xi32>
+  %c0 = vector.splati 0 : vector<128xi32>
   %predicates = vector.cmpi ne, %source, %c0 : vector<128xi32> -> vector<128xi1>
   %narrow_window = vector.slice %predicates[%narrow_offset] : vector<128xi1> -> vector<40xi1>
   %wide_window = vector.slice %predicates[%wide_offset] : vector<128xi1> -> vector<96xi1>
@@ -220,7 +220,7 @@ func.def @dynamic_materialized_windows(%trial: index, %word_input: buffer, %pred
   %bytes1 = vector.load %predicate_values[16] : view<64xi8> -> vector<16xi8>
   %bytes2 = vector.load %predicate_values[32] : view<64xi8> -> vector<16xi8>
   %bytes3 = vector.load %predicate_values[48] : view<64xi8> -> vector<16xi8>
-  %c0_i8 = vector.constant 0 : vector<16xi8>
+  %c0_i8 = vector.splati 0 : vector<16xi8>
   %predicates0 = vector.cmpi ne, %bytes0, %c0_i8 : vector<16xi8> -> vector<16xi1>
   %predicates1 = vector.cmpi ne, %bytes1, %c0_i8 : vector<16xi8> -> vector<16xi1>
   %predicates2 = vector.cmpi ne, %bytes2, %c0_i8 : vector<16xi8> -> vector<16xi1>
@@ -740,7 +740,7 @@ func.def @shared_snapshot_windows(%trial: index, %input: buffer, %output: buffer
   %half_source = vector.load %halves[0] : view<64xi16> -> vector<32xi16>
   %word_source = vector.load %words[0] : view<32xi32> -> vector<16xi32>
   %wide_source = vector.load %wide[0] : view<16xi64> -> vector<16xi64>
-  %cleared = vector.constant 0 : vector<128xi8>
+  %cleared = vector.splati 0 : vector<128xi8>
   vector.store %cleared, %bytes[0] : vector<128xi8>, view<128xi8>
   %byte_head = vector.slice %byte_source[%byte_position] : vector<64xi8> -> vector<16xi8>
   %byte_last = vector.slice %byte_source[%byte_tail] : vector<64xi8> -> vector<16xi8>

@@ -119,8 +119,8 @@ func.def @vector_f32_comparisons(%lhs_buffer: buffer, %rhs_buffer: buffer, %outp
   %output_view = buffer.view %output_buffer[%base] : buffer -> view<24xi32>
   %lhs = vector.load %lhs_view[0] : view<4xf32> -> vector<4xf32>
   %rhs = vector.load %rhs_view[0] : view<4xf32> -> vector<4xf32>
-  %true = vector.constant -1 : vector<4xi32>
-  %false = vector.constant 0 : vector<4xi32>
+  %true = vector.splati -1 : vector<4xi32>
+  %false = vector.splati 0 : vector<4xi32>
   %equal = vector.cmpf oeq, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
   %equal_words = vector.select %equal, %true, %false : vector<4xi32>
   vector.store %equal_words, %output_view[0] : vector<4xi32>, view<24xi32>
@@ -181,8 +181,8 @@ func.def @vector_f32_comparisons_no_nan(%lhs_buffer: buffer, %rhs_buffer: buffer
   %output_view = buffer.view %output_buffer[%base] : buffer -> view<24xi32>
   %lhs = vector.load %lhs_view[0] : view<4xf32> -> vector<4xf32>
   %rhs = vector.load %rhs_view[0] : view<4xf32> -> vector<4xf32>
-  %true = vector.constant -1 : vector<4xi32>
-  %false = vector.constant 0 : vector<4xi32>
+  %true = vector.splati -1 : vector<4xi32>
+  %false = vector.splati 0 : vector<4xi32>
   %not_equal = vector.cmpf<nnan> one, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
   %not_equal_words = vector.select %not_equal, %true, %false : vector<4xi32>
   vector.store %not_equal_words, %output_view[0] : vector<4xi32>, view<24xi32>

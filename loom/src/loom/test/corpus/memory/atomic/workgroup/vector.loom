@@ -9,12 +9,12 @@ kernel.def @workgroup_vector_atomics() {
   %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<2xi32>
   %results = buffer.view %output[%base] : buffer -> view<6xi32>
-  %initial = vector.constant 7 : vector<2xi32>
+  %initial = vector.splati 7 : vector<2xi32>
   vector.store %initial, %view[0] : vector<2xi32>, view<2xi32>
   %origin = index.constant 0 : index
   %stride = index.constant 1 : index
   %offsets = vector.iota %origin step %stride : vector<2xindex>
-  %increment = vector.constant 1 : vector<2xi32>
+  %increment = vector.splati 1 : vector<2xi32>
   %enabled = index.cmp ne, %flag, %origin : index
   %disabled = scalar.constant false : i1
   %mask = vector.from_elements %enabled, %disabled : vector<2xi1>

@@ -226,7 +226,7 @@ kernel.def @workgroup_cached_dot4i_u8s8_tile() {
   vector.store %lhs, %scratch_view[%lane, 0] : vector<16xi8>, view<64x16xi8>
   %lhs_cached = vector.load %scratch_view[%lane, 0] : view<64x16xi8> -> vector<16xi8>
   %rhs = vector.load %rhs_view[%lane, 0] : view<64x16xi8> -> vector<16xi8>
-  %acc = vector.constant 0 : vector<4xi32>
+  %acc = vector.splati 0 : vector<4xi32>
   %dot = vector.dot4i<u8s8> %lhs_cached, %rhs, %acc : vector<16xi8>, vector<16xi8>, vector<4xi32>
   vector.store %dot, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
   kernel.return

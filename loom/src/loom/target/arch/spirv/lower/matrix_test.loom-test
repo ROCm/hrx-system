@@ -10,9 +10,9 @@ kernel.def @signed_wrapping_k16() {
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=i32, payload_elements=8, payload_registers=8>> : encoding<storage>
   %destination = buffer.view %aligned[%origin] : buffer -> view<16x16xi32, %storage>
-  %a_values = vector.constant -2 : vector<1xi8>
-  %b_values = vector.constant 3 : vector<1xi8>
-  %c_values = vector.constant 7 : vector<1xi32>
+  %a_values = vector.splati -2 : vector<1xi8>
+  %b_values = vector.splati 3 : vector<1xi8>
+  %c_values = vector.splati 7 : vector<1xi32>
   %lhs = vector.fragment<lhs> %a_values shape [%tile, %tile] : vector<1xi8>
   %rhs = vector.fragment<rhs> %b_values shape [%tile, %tile] : vector<1xi8>
   %initial = vector.fragment<init> %c_values shape [%tile, %tile] : vector<1xi32>
@@ -57,9 +57,9 @@ kernel.def @mixed_signed_saturating_k16() {
   %lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
   %rhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
   %acc_schema = encoding.define #encoding.operand<element_format=i32, payload_elements=8, payload_registers=8> : encoding<schema>
-  %a_values = vector.constant -2 : vector<1xi8>
-  %b_values = vector.constant 3 : vector<1xi8>
-  %c_values = vector.constant 7 : vector<1xi32>
+  %a_values = vector.splati -2 : vector<1xi8>
+  %b_values = vector.splati 3 : vector<1xi8>
+  %c_values = vector.splati 7 : vector<1xi32>
   %lhs = vector.fragment<lhs> %a_values shape [%tile, %reduction] using {schema = %lhs_schema : encoding<schema>} : vector<1xi8>
   %rhs = vector.fragment<rhs> %b_values shape [%reduction, %tile] using {schema = %rhs_schema : encoding<schema>} : vector<1xi8>
   %initial = vector.fragment<init> %c_values shape [%tile, %tile] using {schema = %acc_schema : encoding<schema>} : vector<1xi32>
@@ -105,9 +105,9 @@ kernel.def @mixed_unsigned_saturating_k32() {
   %lhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=32, payload_registers=8> : encoding<schema>
   %rhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_registers=8> : encoding<schema>
   %acc_schema = encoding.define #encoding.operand<element_format=u32, payload_elements=8, payload_registers=8> : encoding<schema>
-  %a_values = vector.constant -2 : vector<1xi8>
-  %b_values = vector.constant 3 : vector<1xi8>
-  %c_values = vector.constant 7 : vector<1xi32>
+  %a_values = vector.splati -2 : vector<1xi8>
+  %b_values = vector.splati 3 : vector<1xi8>
+  %c_values = vector.splati 7 : vector<1xi32>
   %lhs = vector.fragment<lhs> %a_values shape [%tile, %reduction] using {schema = %lhs_schema : encoding<schema>} : vector<1xi8>
   %rhs = vector.fragment<rhs> %b_values shape [%reduction, %tile] using {schema = %rhs_schema : encoding<schema>} : vector<1xi8>
   %initial = vector.fragment<init> %c_values shape [%tile, %tile] using {schema = %acc_schema : encoding<schema>} : vector<1xi32>

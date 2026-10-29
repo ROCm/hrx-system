@@ -146,7 +146,7 @@ func.def @dynamic_2d_splat(%m: index, %n: index, %x: f32) -> (vector<[%m]x[%n]xf
 
 // ----
 func.def @dynamic_2d_splat(%m: index, %n: index, %x: f32) -> (vector<[%m]x[%n]xf32>) {
-  %5 = vector.constant 0.0 : vector<[%m]x[%n]xf32>
+  %5 = vector.splatf 0.0 : vector<[%m]x[%n]xf32>
   %6 = index.constant 0 : index
   %7 = index.constant 1 : index
   %r = scf.for %8 = [%6 to %m step %7](%9 = %5 : vector<[%m]x[%n]xf32>) -> (vector<[%m]x[%n]xf32>) {
@@ -169,8 +169,8 @@ func.def @static_float_math(%a: vector<2xf32>, %b: vector<2xf32>) -> (vector<2xf
   %diff = vector.subf %a, %b : vector<2xf32>
   %exp = vector.expf %diff : vector<2xf32>
   %max = vector.maxnumf %exp, %a : vector<2xf32>
-  %lower = vector.constant -1.0 : vector<2xf32>
-  %upper = vector.constant 1.0 : vector<2xf32>
+  %lower = vector.splatf -1.0 : vector<2xf32>
+  %upper = vector.splatf 1.0 : vector<2xf32>
   %r = vector.clampf<number, nnan|nsz> %max, %lower, %upper : vector<2xf32>
   func.return %r : vector<2xf32>
 }
@@ -256,7 +256,7 @@ func.def @dynamic_float_math(%n: index, %a: vector<[%n]xf32>, %b: vector<[%n]xf3
 
 // ----
 func.def @dynamic_float_math(%n: index, %a: vector<[%n]xf32>, %b: vector<[%n]xf32>) -> (vector<[%n]xf32>) {
-  %6 = vector.constant 0.0 : vector<[%n]xf32>
+  %6 = vector.splatf 0.0 : vector<[%n]xf32>
   %7 = index.constant 0 : index
   %8 = index.constant 1 : index
   %r = scf.for %9 = [%7 to %n step %8](%10 = %6 : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
@@ -627,7 +627,7 @@ func.def @dynamic_float_predicate(%n: index, %a: vector<[%n]xf32>) -> (vector<[%
 
 // ----
 func.def @dynamic_float_predicate(%n: index, %a: vector<[%n]xf32>) -> (vector<[%n]xi1>) {
-  %4 = vector.constant false : vector<[%n]xi1>
+  %4 = vector.splati 0 : vector<[%n]xi1>
   %5 = index.constant 0 : index
   %6 = index.constant 1 : index
   %r = scf.for %7 = [%5 to %n step %6](%8 = %4 : vector<[%n]xi1>) -> (vector<[%n]xi1>) {
@@ -955,7 +955,7 @@ func.def @coordinates(%n: index) -> (vector<4xindex>, vector<[%n]xi1>) {
   %27 = index.mul %26, %c1 : index
   %28 = index.add %c0, %27 : index
   %lanes = vector.from_elements %19, %22, %25, %28 : vector<4xindex>
-  %7 = vector.constant false : vector<[%n]xi1>
+  %7 = vector.splati 0 : vector<[%n]xi1>
   %8 = index.constant 0 : index
   %9 = index.constant 1 : index
   %mask = scf.for %10 = [%8 to %n step %9](%11 = %7 : vector<[%n]xi1>) -> (vector<[%n]xi1>) {
@@ -1020,7 +1020,7 @@ func.def @integer_coordinates(%limit: i32) -> (vector<4xi32>, vector<4xi1>) {
 // Static aggregate constructors expose lanes but keep vector.from_elements as
 // the explicit vector ABI boundary.
 func.def @static_constant_poison(%x: f32, %y: f32) -> (vector<2xi32>, vector<2xf32>) {
-  %c = vector.constant 7 : vector<2xi32>
+  %c = vector.splati 7 : vector<2xi32>
   %p = vector.poison : vector<2xf32>
   %first = vector.insert %x into %p[0] : f32, vector<2xf32>
   %filled = vector.insert %y into %first[1] : f32, vector<2xf32>
@@ -1287,7 +1287,7 @@ func.def @dynamic_shape_changing_bitcast(%n: index, %bytes: vector<[%n]x2xi8>, %
 
 // ----
 func.def @dynamic_shape_changing_bitcast(%n: index, %bytes: vector<[%n]x2xi8>, %halves: vector<[%n]xf16>) -> (vector<[%n]xf16>, vector<[%n]x2xi8>) {
-  %47 = vector.constant 0.0 : vector<[%n]xf16>
+  %47 = vector.splatf 0.0 : vector<[%n]xf16>
   %48 = index.constant 0 : index
   %49 = index.constant 1 : index
   %to_half = scf.for %50 = [%48 to %n step %49](%51 = %47 : vector<[%n]xf16>) -> (vector<[%n]xf16>) {
@@ -1322,7 +1322,7 @@ func.def @dynamic_shape_changing_bitcast(%n: index, %bytes: vector<[%n]x2xi8>, %
     %81 = vector.insert %80 into %51[%50] : f16, vector<[%n]xf16>
     scf.yield %81 : vector<[%n]xf16>
   }
-  %7 = vector.constant 0 : vector<[%n]x2xi8>
+  %7 = vector.splati 0 : vector<[%n]x2xi8>
   %8 = index.constant 0 : index
   %9 = index.constant 1 : index
   %to_bytes = scf.for %10 = [%8 to %n step %9](%11 = %7 : vector<[%n]x2xi8>) -> (vector<[%n]x2xi8>) {
@@ -1426,7 +1426,7 @@ func.def @dynamic_transpose(%m: index, %n: index, %v: vector<[%m]x[%n]xi32>) -> 
 
 // ----
 func.def @dynamic_transpose(%m: index, %n: index, %v: vector<[%m]x[%n]xi32>) -> (vector<[%n]x[%m]xi32>) {
-  %5 = vector.constant 0 : vector<[%n]x[%m]xi32>
+  %5 = vector.splati 0 : vector<[%n]x[%m]xi32>
   %6 = index.constant 0 : index
   %7 = index.constant 1 : index
   %r = scf.for %8 = [%6 to %n step %7](%9 = %5 : vector<[%n]x[%m]xi32>) -> (vector<[%n]x[%m]xi32>) {
@@ -1453,7 +1453,7 @@ func.def @dynamic_deinterleave(%full: index, %half: index, %v: vector<[%full]xi3
 
 // ----
 func.def @dynamic_deinterleave(%full: index, %half: index, %v: vector<[%full]xi32>) -> (vector<[%half]xi32>, vector<[%half]xi32>) {
-  %7 = vector.constant 0 : vector<[%half]xi32>
+  %7 = vector.splati 0 : vector<[%half]xi32>
   %8 = index.constant 0 : index
   %9 = index.constant 1 : index
   %even = scf.for %10 = [%8 to %half step %9](%11 = %7 : vector<[%half]xi32>) -> (vector<[%half]xi32>) {
@@ -1463,7 +1463,7 @@ func.def @dynamic_deinterleave(%full: index, %half: index, %v: vector<[%full]xi3
     %16 = vector.insert %15 into %11[%10] : i32, vector<[%half]xi32>
     scf.yield %16 : vector<[%half]xi32>
   }
-  %17 = vector.constant 0 : vector<[%half]xi32>
+  %17 = vector.splati 0 : vector<[%half]xi32>
   %18 = index.constant 0 : index
   %19 = index.constant 1 : index
   %odd = scf.for %20 = [%18 to %half step %19](%21 = %17 : vector<[%half]xi32>) -> (vector<[%half]xi32>) {
@@ -1489,7 +1489,7 @@ func.def @dynamic_interleave(%full: index, %half: index, %even: vector<[%half]xi
 
 // ----
 func.def @dynamic_interleave(%full: index, %half: index, %even: vector<[%half]xi32>, %odd: vector<[%half]xi32>) -> (vector<[%full]xi32>) {
-  %6 = vector.constant 0 : vector<[%full]xi32>
+  %6 = vector.splati 0 : vector<[%full]xi32>
   %7 = index.constant 0 : index
   %8 = index.constant 1 : index
   %r = scf.for %9 = [%7 to %full step %8](%10 = %6 : vector<[%full]xi32>) -> (vector<[%full]xi32>) {
@@ -1520,7 +1520,7 @@ func.def @dynamic_insert_consumed(%n: index, %lane: index, %dest: vector<[%n]xi3
 
 // ----
 func.def @dynamic_insert_consumed(%n: index, %lane: index, %dest: vector<[%n]xi32>, %value: i32) -> (vector<[%n]xi32>) {
-  %7 = vector.constant 0 : vector<[%n]xi32>
+  %7 = vector.splati 0 : vector<[%n]xi32>
   %8 = index.constant 0 : index
   %9 = index.constant 1 : index
   %r = scf.for %10 = [%8 to %n step %9](%11 = %7 : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
@@ -1545,7 +1545,7 @@ func.def @dynamic_concat(%full: index, %left_n: index, %right_n: index, %left: v
 
 // ----
 func.def @dynamic_concat(%full: index, %left_n: index, %right_n: index, %left: vector<[%left_n]xi32>, %right: vector<[%right_n]xi32>) -> (vector<[%full]xi32>) {
-  %7 = vector.constant 0 : vector<[%full]xi32>
+  %7 = vector.splati 0 : vector<[%full]xi32>
   %8 = index.constant 0 : index
   %9 = index.constant 1 : index
   %r = scf.for %10 = [%8 to %full step %9](%11 = %7 : vector<[%full]xi32>) -> (vector<[%full]xi32>) {
@@ -2351,7 +2351,7 @@ func.def @dynamic_bitpack_q4(%n: index, %m: index, %codes: vector<[%n]xi8>, %pac
 
 // ----
 func.def @dynamic_bitpack_q4(%n: index, %m: index, %codes: vector<[%n]xi8>, %packed: vector<[%m]xi8>) -> (vector<[%m]xi8>, vector<[%n]xi8>) {
-  %28 = vector.constant 0 : vector<[%m]xi8>
+  %28 = vector.splati 0 : vector<[%m]xi8>
   %29 = index.constant 0 : index
   %30 = index.constant 1 : index
   %stream = scf.for %31 = [%29 to %m step %30](%32 = %28 : vector<[%m]xi8>) -> (vector<[%m]xi8>) {
@@ -2376,7 +2376,7 @@ func.def @dynamic_bitpack_q4(%n: index, %m: index, %codes: vector<[%n]xi8>, %pac
     %52 = vector.insert %51 into %32[%31] : i8, vector<[%m]xi8>
     scf.yield %52 : vector<[%m]xi8>
   }
-  %8 = vector.constant 0 : vector<[%n]xi8>
+  %8 = vector.splati 0 : vector<[%n]xi8>
   %9 = index.constant 0 : index
   %10 = index.constant 1 : index
   %unpacked = scf.for %11 = [%9 to %n step %10](%12 = %8 : vector<[%n]xi8>) -> (vector<[%n]xi8>) {
@@ -2412,7 +2412,7 @@ func.def @dynamic_bitpack_q3(%n: index, %m: index, %codes: vector<[%n]xi8>, %pac
 
 // ----
 func.def @dynamic_bitpack_q3(%n: index, %m: index, %codes: vector<[%n]xi8>, %packed: vector<[%m]xi8>) -> (vector<[%m]xi8>, vector<[%n]xi8>, vector<[%n]xi8>) {
-  %76 = vector.constant 0 : vector<[%m]xi8>
+  %76 = vector.splati 0 : vector<[%m]xi8>
   %77 = index.constant 0 : index
   %78 = index.constant 1 : index
   %stream = scf.for %79 = [%77 to %m step %78](%80 = %76 : vector<[%m]xi8>) -> (vector<[%m]xi8>) {
@@ -2443,7 +2443,7 @@ func.def @dynamic_bitpack_q3(%n: index, %m: index, %codes: vector<[%n]xi8>, %pac
     %106 = vector.insert %105 into %80[%79] : i8, vector<[%m]xi8>
     scf.yield %106 : vector<[%m]xi8>
   }
-  %45 = vector.constant 0 : vector<[%n]xi8>
+  %45 = vector.splati 0 : vector<[%n]xi8>
   %46 = index.constant 0 : index
   %47 = index.constant 1 : index
   %unpacked_u = scf.for %48 = [%46 to %n step %47](%49 = %45 : vector<[%n]xi8>) -> (vector<[%n]xi8>) {
@@ -2474,7 +2474,7 @@ func.def @dynamic_bitpack_q3(%n: index, %m: index, %codes: vector<[%n]xi8>, %pac
     %75 = vector.insert %74 into %49[%48] : i8, vector<[%n]xi8>
     scf.yield %75 : vector<[%n]xi8>
   }
-  %10 = vector.constant 0 : vector<[%n]xi8>
+  %10 = vector.splati 0 : vector<[%n]xi8>
   %11 = index.constant 0 : index
   %12 = index.constant 1 : index
   %unpacked_s = scf.for %13 = [%11 to %n step %12](%14 = %10 : vector<[%n]xi8>) -> (vector<[%n]xi8>) {
@@ -2547,7 +2547,7 @@ func.def @dynamic_table_lookup(%n: index, %table: vector<4xf32>, %codes: vector<
 
 // ----
 func.def @dynamic_table_lookup(%n: index, %table: vector<4xf32>, %codes: vector<[%n]xi8>) -> (vector<[%n]xf32>) {
-  %5 = vector.constant 0.0 : vector<[%n]xf32>
+  %5 = vector.splatf 0.0 : vector<[%n]xf32>
   %6 = index.constant 0 : index
   %7 = index.constant 1 : index
   %r = scf.for %8 = [%6 to %n step %7](%9 = %5 : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
@@ -2628,7 +2628,7 @@ func.def @dynamic_table_quantize(%n: index, %k: index, %values: vector<[%n]xf32>
 
 // ----
 func.def @dynamic_table_quantize(%n: index, %k: index, %values: vector<[%n]xf32>, %thresholds: vector<[%k]xf32>) -> (vector<[%n]xi8>) {
-  %6 = vector.constant 0 : vector<[%n]xi8>
+  %6 = vector.splati 0 : vector<[%n]xi8>
   %7 = index.constant 0 : index
   %8 = index.constant 1 : index
   %r = scf.for %9 = [%7 to %n step %8](%10 = %6 : vector<[%n]xi8>) -> (vector<[%n]xi8>) {

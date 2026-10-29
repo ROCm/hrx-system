@@ -52,7 +52,7 @@ func.def device inline @compute_inactive_empty_view(%input: buffer, %output: buf
   %mask_start = index.constant 0 : index
   %mask_step = index.constant 1 : index
   %mask = vector.mask.range [%mask_start to %extent step %mask_step] : index -> vector<2xi1>
-  %values = vector.constant -17 : vector<2xi32>
+  %values = vector.splati -17 : vector<2xi32>
   %loaded = vector.load.mask %empty[0], %mask, %values : view<[%extent]xi32>, vector<2xi1>, vector<2xi32>
   vector.store.mask %values, %empty[0], %mask : vector<2xi32>, view<[%extent]xi32>, vector<2xi1>
   %destination = buffer.view %output[%base] : buffer -> view<2xi32>

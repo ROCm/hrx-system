@@ -204,10 +204,10 @@ func.def @generated_constant_store_packets(%i8_output: buffer, %bf16_output: buf
   %bf16_view = buffer.view %bf16_aligned[%origin] : buffer -> view<3x2x64xbf16>
   %i32_view = buffer.view %i32_aligned[%origin] : buffer -> view<3x2x32xi32>
   %i64_view = buffer.view %i64_aligned[%origin] : buffer -> view<3x2x16xi64>
-  %i8_value = vector.constant 0 : vector<128xi8>
-  %bf16_value = vector.constant 0.0 : vector<64xbf16>
-  %i32_value = vector.constant 0 : vector<32xi32>
-  %i64_value = vector.constant 0 : vector<16xi64>
+  %i8_value = vector.splati 0 : vector<128xi8>
+  %bf16_value = vector.splatf 0.0 : vector<64xbf16>
+  %i32_value = vector.splati 0 : vector<32xi32>
+  %i64_value = vector.splati 0 : vector<16xi64>
   vector.store %i8_value, %i8_view[%row, %column, 0] : vector<128xi8>, view<3x2x128xi8>
   vector.store %bf16_value, %bf16_view[%row, %column, 0] : vector<64xbf16>, view<3x2x64xbf16>
   vector.store %i32_value, %i32_view[%row, %column, 0] : vector<32xi32>, view<3x2x32xi32>
@@ -230,28 +230,28 @@ func.def @generated_constant_store_packets(%i8_output: buffer, %bf16_output: buf
   %35 = index.constant 128 : index
   %36 = index.constant 16 : index
   scf.for %37 = [%34 to %35 step %36] {
-    %38 = vector.constant 0 : vector<16xi8>
+    %38 = vector.splati 0 : vector<16xi8>
     vector.store %38, %i8_view[%row, %column, %37] : vector<16xi8>, view<3x2x128xi8>
   }
   %29 = index.constant 0 : index
   %30 = index.constant 64 : index
   %31 = index.constant 16 : index
   scf.for %32 = [%29 to %30 step %31] {
-    %33 = vector.constant 0.0 : vector<16xbf16>
+    %33 = vector.splatf 0.0 : vector<16xbf16>
     vector.store %33, %bf16_view[%row, %column, %32] : vector<16xbf16>, view<3x2x64xbf16>
   }
   %24 = index.constant 0 : index
   %25 = index.constant 32 : index
   %26 = index.constant 16 : index
   scf.for %27 = [%24 to %25 step %26] {
-    %28 = vector.constant 0 : vector<16xi32>
+    %28 = vector.splati 0 : vector<16xi32>
     vector.store %28, %i32_view[%row, %column, %27] : vector<16xi32>, view<3x2x32xi32>
   }
   %19 = index.constant 0 : index
   %20 = index.constant 16 : index
   %21 = index.constant 8 : index
   scf.for %22 = [%19 to %20 step %21] {
-    %23 = vector.constant 0 : vector<8xi64>
+    %23 = vector.splati 0 : vector<8xi64>
     vector.store %23, %i64_view[%row, %column, %22] : vector<8xi64>, view<3x2x16xi64>
   }
   func.return

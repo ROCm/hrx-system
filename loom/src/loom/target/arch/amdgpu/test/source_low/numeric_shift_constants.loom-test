@@ -20,8 +20,8 @@ CHECK: %signed = v_ashrrev_i32_src0_inline %value, 31
 // ====
 
 func.def @vector_shift_constants(%value: vector<2xi32>) -> (vector<2xi32>, vector<2xi32>, vector<2xi32>) {
-  %left_count = vector.constant 31 : vector<2xi32>
-  %right_count = vector.constant 1 : vector<2xi32>
+  %left_count = vector.splati 31 : vector<2xi32>
+  %right_count = vector.splati 1 : vector<2xi32>
   %left = vector.shli %value, %left_count : vector<2xi32>
   %logical = vector.shrui %value, %right_count : vector<2xi32>
   %signed = vector.shrsi %value, %right_count : vector<2xi32>

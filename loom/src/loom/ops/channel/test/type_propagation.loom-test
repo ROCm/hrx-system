@@ -28,7 +28,7 @@ func.def @records(%storage: buffer) {
   %channel = channel.bind<fifo> %slots, %capacity : view<2x[%width]xi32>, index -> channel<tile<[%width]xi32>>
   %write, %destination = channel.reserve %channel : channel<tile<[%width]xi32>> -> (write<tile<[%width]xi32>>, view<[%width]xi32>)
   %value = scalar.constant 7 : i32
-  %values = vector.constant 7 : vector<8xi32>
+  %values = vector.splati 7 : vector<8xi32>
   vector.store %values, %destination[0] : vector<8xi32>, view<[%width]xi32>
   channel.publish %write : write<tile<[%width]xi32>>
   %read, %payload = channel.acquire<mutable> %channel : channel<tile<[%width]xi32>> -> (read<tile<[%width]xi32>, mutable>, view<[%width]xi32>)
@@ -70,7 +70,7 @@ func.def @deferred(%storage: buffer) {
   %slots = buffer.view %storage[%origin] : buffer -> view<2x2x[%width]xbf16>
   %channel = channel.bind<fifo> %slots, %capacity : view<2x2x[%width]xbf16>, index -> channel<tile<2x[%width]xbf16>>
   %write, %destination = channel.reserve %channel : channel<tile<2x[%width]xbf16>> -> (write<tile<2x[%width]xbf16>>, view<2x[%width]xbf16>)
-  %values = vector.constant 0.0 : vector<2x8xbf16>
+  %values = vector.splatf 0.0 : vector<2x8xbf16>
   vector.store %values, %destination[0, 0] : vector<2x8xbf16>, view<2x[%width]xbf16>
   channel.publish %write : write<tile<2x[%width]xbf16>>
   %read = channel.accept %channel : channel<tile<2x[%width]xbf16>> -> read<tile<2x[%width]xbf16>>

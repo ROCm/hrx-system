@@ -7,8 +7,8 @@ func.def @partial_predicate_packets(%input: buffer, %output: buffer) {
   %mask_view = buffer.view %input[%base] : buffer -> view<3x3xi8>
   %result_view = buffer.view %output[%base] : buffer -> view<3x3xi8>
   %mask_bytes = vector.load %mask_view[0, 0] : view<3x3xi8> -> vector<3x3xi8>
-  %c0 = vector.constant 0 : vector<3x3xi8>
-  %c1 = vector.constant 1 : vector<3x3xi8>
+  %c0 = vector.splati 0 : vector<3x3xi8>
+  %c1 = vector.splati 1 : vector<3x3xi8>
   %mask = vector.cmpi ne, %mask_bytes, %c0 : vector<3x3xi8> -> vector<3x3xi1>
   %bytes = vector.select %mask, %c1, %c0 : vector<3x3xi8>
   vector.store %bytes, %result_view[0, 0] : vector<3x3xi8>, view<3x3xi8>
@@ -105,8 +105,8 @@ func.def @wide_predicate_packets(%input: buffer, %output: buffer) {
   %mask_bytes = vector.load %mask_view[0] : view<64xi8> -> vector<64xi8>
   %true_bytes = vector.load %true_view[0] : view<64xi8> -> vector<64xi8>
   %false_bytes = vector.load %false_view[0] : view<64xi8> -> vector<64xi8>
-  %c0 = vector.constant 0 : vector<64xi8>
-  %c1 = vector.constant 1 : vector<64xi8>
+  %c0 = vector.splati 0 : vector<64xi8>
+  %c1 = vector.splati 1 : vector<64xi8>
   %mask = vector.cmpi ne, %mask_bytes, %c0 : vector<64xi8> -> vector<64xi1>
   %true_value = vector.cmpi ne, %true_bytes, %c0 : vector<64xi8> -> vector<64xi1>
   %false_value = vector.cmpi ne, %false_bytes, %c0 : vector<64xi8> -> vector<64xi1>

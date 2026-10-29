@@ -1,9 +1,9 @@
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 func.def @address_constant_carriers() -> (vector<16xindex>, vector<32xoffset>, vector<64xindex>) {
-  %native = vector.constant -7 : vector<16xindex>
-  %wide = vector.constant 4294967295 : vector<32xoffset>
-  %accumulator = vector.constant 7 : vector<64xindex>
+  %native = vector.splati -7 : vector<16xindex>
+  %wide = vector.splati 4294967295 : vector<32xoffset>
+  %accumulator = vector.splati 7 : vector<64xindex>
   func.return %native, %wide, %accumulator : vector<16xindex>, vector<32xoffset>, vector<64xindex>
 }
 

@@ -26,9 +26,9 @@ func.def @bfloat_rounding(%upper_bits: buffer, %discarded: i32, %output: buffer,
   }
   %packed_step = index.constant 4 : index
   %discarded_lanes = vector.splat %discarded : vector<4xi32>
-  %magnitude_masks = vector.constant 32767 : vector<4xi16>
-  %exponents = vector.constant 32640 : vector<4xi16>
-  %quiet_bits = vector.constant 64 : vector<4xi16>
+  %magnitude_masks = vector.splati 32767 : vector<4xi16>
+  %exponents = vector.splati 32640 : vector<4xi16>
+  %quiet_bits = vector.splati 64 : vector<4xi16>
   %packed_result = buffer.view %packed_output[%base] : buffer -> view<65536xi16>
   scf.for %i = [%begin to %end step %packed_step] {
     %upper = vector.load %input[%i] : view<65536xi32> -> vector<4xi32>
@@ -118,7 +118,7 @@ func.def @finite_bfloat_products(%even_tie: f32, %odd_tie: f32, %signed_zero: f3
   %scalar_narrow = scalar.fptrunc %scalar_product : f32 to bf16
   %scalar_bits = scalar.bitcast %scalar_narrow : bf16 to i16
   %inputs = vector.from_elements %even_tie, %odd_tie, %signed_zero : vector<3xf32>
-  %halves = vector.constant 0.5 : vector<3xf32>
+  %halves = vector.splatf 0.5 : vector<3xf32>
   %products = vector.mulf<nnan|ninf> %inputs, %halves : vector<3xf32>
   %narrow = vector.fptrunc %products : vector<3xf32> to vector<3xbf16>
   %bits = vector.bitcast %narrow : vector<3xbf16> to vector<3xi16>
@@ -134,10 +134,10 @@ func.def @finite_bfloat_products(%even_tie: f32, %odd_tie: f32, %signed_zero: f3
 func.def @finite_bfloat_products_oracle(%even_tie: f32, %odd_tie: f32, %signed_zero: f32) -> (i16, i16, i16, i16) {
   %inputs = vector.from_elements %even_tie, %odd_tie, %signed_zero : vector<3xf32>
   %bits = vector.bitcast %inputs : vector<3xf32> to vector<3xi32>
-  %shift = vector.constant 16 : vector<3xi32>
+  %shift = vector.splati 16 : vector<3xi32>
   %high = vector.shrui %bits, %shift : vector<3xi32>
   %words = vector.trunci %high : vector<3xi32> to vector<3xi16>
-  %sign_mask = vector.constant -32768 : vector<3xi16>
+  %sign_mask = vector.splati -32768 : vector<3xi16>
   %signs = vector.andi %words, %sign_mask : vector<3xi16>
   %even_bits = scalar.constant 16256 : i16
   %odd_bits = scalar.constant 16258 : i16

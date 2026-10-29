@@ -23,7 +23,7 @@ kernel.def target(@target) @gfx1250_b128_bank_service() {
   %view64 = buffer.view %scratch64[%buffer_base] : buffer -> view<32x4xi32, %stride64>
   %view80 = buffer.view %scratch80[%buffer_base] : buffer -> view<32x4xi32, %stride80>
   %view96 = buffer.view %scratch96[%buffer_base] : buffer -> view<32x4xi32, %stride96>
-  %value = vector.constant 1 : vector<4xi32>
+  %value = vector.splati 1 : vector<4xi32>
   vector.store %value, %view16[%lane, 0] : vector<4xi32>, view<32x4xi32, %stride16>
   vector.store %value, %view64[%lane, 0] : vector<4xi32>, view<32x4xi32, %stride64>
   vector.store %value, %view80[%lane, 0] : vector<4xi32>, view<32x4xi32, %stride80>
@@ -68,7 +68,7 @@ kernel.def target(@target) @half_wave_bank_service() {
   %layout = encoding.layout.strided [16, 1] : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %view = buffer.view %scratch[%scratch_base] : buffer -> view<32x4xi32, %layout>
-  %value = vector.constant 1 : vector<4xi32>
+  %value = vector.splati 1 : vector<4xi32>
   scf.if %active {
     vector.store %value, %view[%lane, 0] : vector<4xi32>, view<32x4xi32, %layout>
   }
@@ -95,7 +95,7 @@ kernel.def target(@target) @unknown_address_alignment() {
   %layout = encoding.layout.strided [16, 1] : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
   %view = buffer.view %scratch[%scratch_base] : buffer -> view<32x4xi32, %layout>
-  %value = vector.constant 1 : vector<4xi32>
+  %value = vector.splati 1 : vector<4xi32>
   vector.store %value, %view[%lane, 0] : vector<4xi32>, view<32x4xi32, %layout>
   kernel.return
 }

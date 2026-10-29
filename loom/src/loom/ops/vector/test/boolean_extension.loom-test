@@ -2,7 +2,7 @@
 
 func.def @byte_truth(%count: index, %input: vector<[%count]xi1>) -> (vector<[%count]xi1>) {
   %byte = vector.extui %input : vector<[%count]xi1> to vector<[%count]xi8>
-  %c0 = vector.constant 0 : vector<[%count]xi8>
+  %c0 = vector.splati 0 : vector<[%count]xi8>
   %result = vector.cmpi ne, %byte, %c0 : vector<[%count]xi8> -> vector<[%count]xi1>
   func.return %result : vector<[%count]xi1>
 }
@@ -15,13 +15,13 @@ func.def @byte_truth(%count: index, %input: vector<[%count]xi1>) -> (vector<[%co
 
 func.def @halfword_false(%input: vector<4xi1>) -> (vector<4xi1>) {
   %halfword = vector.extui %input : vector<4xi1> to vector<4xi16>
-  %c0 = vector.constant 0 : vector<4xi16>
+  %c0 = vector.splati 0 : vector<4xi16>
   %result = vector.cmpi eq, %halfword, %c0 : vector<4xi16> -> vector<4xi1>
   func.return %result : vector<4xi1>
 }
 // ----
 func.def @halfword_false(%input: vector<4xi1>) -> (vector<4xi1>) {
-  %5 = vector.constant true : vector<4xi1>
+  %5 = vector.splati 1 : vector<4xi1>
   %result = vector.xori %input, %5 : vector<4xi1>
   func.return %result : vector<4xi1>
 }
@@ -31,7 +31,7 @@ func.def @halfword_false(%input: vector<4xi1>) -> (vector<4xi1>) {
 // Sign extension represents true as all bits set; its zero test is unchanged.
 func.def @swapped_signed_truth(%input: vector<2x3xi1>) -> (vector<2x3xi1>) {
   %word = vector.extsi %input : vector<2x3xi1> to vector<2x3xi32>
-  %c0 = vector.constant 0 : vector<2x3xi32>
+  %c0 = vector.splati 0 : vector<2x3xi32>
   %result = vector.cmpi ne, %c0, %word : vector<2x3xi32> -> vector<2x3xi1>
   func.return %result : vector<2x3xi1>
 }
@@ -44,13 +44,13 @@ func.def @swapped_signed_truth(%input: vector<2x3xi1>) -> (vector<2x3xi1>) {
 
 func.def @swapped_signed_false(%input: vector<8xi1>) -> (vector<8xi1>) {
   %word = vector.extsi %input : vector<8xi1> to vector<8xi64>
-  %c0 = vector.constant 0 : vector<8xi64>
+  %c0 = vector.splati 0 : vector<8xi64>
   %result = vector.cmpi eq, %c0, %word : vector<8xi64> -> vector<8xi1>
   func.return %result : vector<8xi1>
 }
 // ----
 func.def @swapped_signed_false(%input: vector<8xi1>) -> (vector<8xi1>) {
-  %5 = vector.constant true : vector<8xi1>
+  %5 = vector.splati 1 : vector<8xi1>
   %result = vector.xori %input, %5 : vector<8xi1>
   func.return %result : vector<8xi1>
 }
@@ -60,7 +60,7 @@ func.def @swapped_signed_false(%input: vector<8xi1>) -> (vector<8xi1>) {
 // Replacing the comparison preserves other users of the extended value.
 func.def @retained_extension(%input: vector<4xi1>) -> (vector<4xi8>, vector<4xi1>) {
   %byte = vector.extsi %input : vector<4xi1> to vector<4xi8>
-  %c0 = vector.constant 0 : vector<4xi8>
+  %c0 = vector.splati 0 : vector<4xi8>
   %result = vector.cmpi ne, %byte, %c0 : vector<4xi8> -> vector<4xi1>
   func.return %byte, %result : vector<4xi8>, vector<4xi1>
 }
@@ -75,14 +75,14 @@ func.def @retained_extension(%input: vector<4xi1>) -> (vector<4xi8>, vector<4xi1
 // An extended byte still needs a comparison, including for even nonzero bytes.
 func.def @integer_truth(%input: vector<4xi8>) -> (vector<4xi1>) {
   %word = vector.extui %input : vector<4xi8> to vector<4xi32>
-  %c0 = vector.constant 0 : vector<4xi32>
+  %c0 = vector.splati 0 : vector<4xi32>
   %result = vector.cmpi ne, %word, %c0 : vector<4xi32> -> vector<4xi1>
   func.return %result : vector<4xi1>
 }
 // ----
 func.def @integer_truth(%input: vector<4xi8>) -> (vector<4xi1>) {
   %word = vector.extui %input : vector<4xi8> to vector<4xi32>
-  %c0 = vector.constant 0 : vector<4xi32>
+  %c0 = vector.splati 0 : vector<4xi32>
   %result = vector.cmpi ne, %word, %c0 : vector<4xi32> -> vector<4xi1>
   func.return %result : vector<4xi1>
 }
@@ -107,10 +107,10 @@ func.def @dynamic_comparison(%input: vector<4xi1>, %other: vector<4xi8>) -> (vec
 // Uniform zero extension uses the input width, including when its sign bit
 // is set. Dynamic extents retain the same per-element constant.
 func.def @unsigned_constants(%count: index) -> (vector<[%count]xi8>, vector<4xi16>, vector<2x3xi32>, vector<8xi64>) {
-  %flag = vector.constant true : vector<[%count]xi1>
-  %byte = vector.constant -1 : vector<4xi8>
-  %halfword = vector.constant -1 : vector<2x3xi16>
-  %word = vector.constant -1 : vector<8xi32>
+  %flag = vector.splati 1 : vector<[%count]xi1>
+  %byte = vector.splati -1 : vector<4xi8>
+  %halfword = vector.splati -1 : vector<2x3xi16>
+  %word = vector.splati -1 : vector<8xi32>
   %from_flag = vector.extui %flag : vector<[%count]xi1> to vector<[%count]xi8>
   %from_byte = vector.extui %byte : vector<4xi8> to vector<4xi16>
   %from_halfword = vector.extui %halfword : vector<2x3xi16> to vector<2x3xi32>
@@ -120,9 +120,9 @@ func.def @unsigned_constants(%count: index) -> (vector<[%count]xi8>, vector<4xi1
 
 // ----
 func.def @unsigned_constants(%count: index) -> (vector<[%count]xi8>, vector<4xi16>, vector<2x3xi32>, vector<8xi64>) {
-  %from_flag = vector.constant 1 : vector<[%count]xi8>
-  %from_byte = vector.constant 255 : vector<4xi16>
-  %from_halfword = vector.constant 65535 : vector<2x3xi32>
-  %from_word = vector.constant 4294967295 : vector<8xi64>
+  %from_flag = vector.splati 1 : vector<[%count]xi8>
+  %from_byte = vector.splati 255 : vector<4xi16>
+  %from_halfword = vector.splati 65535 : vector<2x3xi32>
+  %from_word = vector.splati 4294967295 : vector<8xi64>
   func.return %from_flag, %from_byte, %from_halfword, %from_word : vector<[%count]xi8>, vector<4xi16>, vector<2x3xi32>, vector<8xi64>
 }

@@ -114,7 +114,7 @@ func.def @rounding_f16_inputs(%input: buffer) {
   %infinity_or_max = scalar.constant 31744 : i16
   %nan = scalar.constant 32256 : i16
   %positive = vector.from_elements %signed_zero, %min_subnormal, %max_subnormal, %min_normal, %before_half, %half, %after_half, %before_one, %unity_bits, %after_one, %odd_half, %even_half, %last_fractional, %first_integral, %infinity_or_max, %nan : vector<16xi16>
-  %sign = vector.constant -32768 : vector<16xi16>
+  %sign = vector.splati -32768 : vector<16xi16>
   %negative = vector.xori %positive, %sign : vector<16xi16>
   vector.store %positive, %source[0] : vector<16xi16>, view<32xi16>
   vector.store %negative, %source[16] : vector<16xi16>, view<32xi16>
@@ -186,7 +186,7 @@ func.def @rounding_bf16_inputs(%input: buffer) {
   %infinity_or_max = scalar.constant 32640 : i16
   %nan = scalar.constant 32704 : i16
   %positive = vector.from_elements %signed_zero, %min_subnormal, %max_subnormal, %min_normal, %before_half, %half, %after_half, %before_one, %unity_bits, %after_one, %odd_half, %even_half, %last_fractional, %first_integral, %infinity_or_max, %nan : vector<16xi16>
-  %sign = vector.constant -32768 : vector<16xi16>
+  %sign = vector.splati -32768 : vector<16xi16>
   %negative = vector.xori %positive, %sign : vector<16xi16>
   vector.store %positive, %source[0] : vector<16xi16>, view<32xi16>
   vector.store %negative, %source[16] : vector<16xi16>, view<32xi16>
@@ -258,7 +258,7 @@ func.def @rounding_f8e4m3_inputs(%input: buffer) {
   %infinity_or_max = scalar.constant 126 : i8
   %nan = scalar.constant 127 : i8
   %positive = vector.from_elements %signed_zero, %min_subnormal, %max_subnormal, %min_normal, %before_half, %half, %after_half, %before_one, %unity_bits, %after_one, %odd_half, %even_half, %last_fractional, %first_integral, %infinity_or_max, %nan : vector<16xi8>
-  %sign = vector.constant -128 : vector<16xi8>
+  %sign = vector.splati -128 : vector<16xi8>
   %negative = vector.xori %positive, %sign : vector<16xi8>
   vector.store %positive, %source[0] : vector<16xi8>, view<32xi8>
   vector.store %negative, %source[16] : vector<16xi8>, view<32xi8>
@@ -330,7 +330,7 @@ func.def @rounding_f8e5m2_inputs(%input: buffer) {
   %infinity_or_max = scalar.constant 124 : i8
   %nan = scalar.constant 126 : i8
   %positive = vector.from_elements %signed_zero, %min_subnormal, %max_subnormal, %min_normal, %before_half, %half, %after_half, %before_one, %unity_bits, %after_one, %odd_half, %even_half, %last_fractional, %first_integral, %infinity_or_max, %nan : vector<16xi8>
-  %sign = vector.constant -128 : vector<16xi8>
+  %sign = vector.splati -128 : vector<16xi8>
   %negative = vector.xori %positive, %sign : vector<16xi8>
   vector.store %positive, %source[0] : vector<16xi8>, view<32xi8>
   vector.store %negative, %source[16] : vector<16xi8>, view<32xi8>
@@ -512,7 +512,7 @@ func.def @rounding_f32_inputs(%input: buffer) {
   %infinity_or_max = scalar.constant 2139095040 : i32
   %nan = scalar.constant 2143289344 : i32
   %positive = vector.from_elements %signed_zero, %min_subnormal, %max_subnormal, %min_normal, %before_half, %half, %after_half, %before_one, %unity_bits, %after_one, %odd_half, %even_half, %last_fractional, %first_integral, %infinity_or_max, %nan : vector<16xi32>
-  %sign = vector.constant -2147483648 : vector<16xi32>
+  %sign = vector.splati -2147483648 : vector<16xi32>
   %negative = vector.xori %positive, %sign : vector<16xi32>
   vector.store %positive, %source[0] : vector<16xi32>, view<32xi32>
   vector.store %negative, %source[16] : vector<16xi32>, view<32xi32>
@@ -598,7 +598,7 @@ func.def @rounding_f64_inputs(%input: buffer) {
   %infinity_or_max = scalar.constant 9218868437227405312 : i64
   %nan = scalar.constant 9221120237041090560 : i64
   %positive = vector.from_elements %signed_zero, %min_subnormal, %max_subnormal, %min_normal, %before_half, %half, %after_half, %before_one, %unity_bits, %after_one, %odd_half, %even_half, %last_fractional, %first_integral, %infinity_or_max, %nan : vector<16xi64>
-  %sign = vector.constant -9223372036854775808 : vector<16xi64>
+  %sign = vector.splati -9223372036854775808 : vector<16xi64>
   %negative = vector.xori %positive, %sign : vector<16xi64>
   vector.store %positive, %source[0] : vector<16xi64>, view<32xi64>
   vector.store %negative, %source[16] : vector<16xi64>, view<32xi64>

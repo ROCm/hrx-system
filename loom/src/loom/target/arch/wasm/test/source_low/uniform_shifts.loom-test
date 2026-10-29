@@ -27,7 +27,7 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @byte_shifts(%values: 
 
 // A constant vector count materializes one I32 scalar, not a vector constant.
 func.def @nibble_extraction(%values: vector<8xi16>) -> (vector<8xi16>) {
-  %counts = vector.constant 4 : vector<8xi16>
+  %counts = vector.splati 4 : vector<8xi16>
   %result = vector.shrui %values, %counts : vector<8xi16>
   func.return %result : vector<8xi16>
 }
@@ -43,7 +43,7 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @nibble_extraction(%va
 
 // Equal element types alone do not establish a shared count.
 func.def @varying_counts(%values: vector<2xi64>, %counts: vector<2xi64>) -> (vector<2xi64>) {
-  %mask = vector.constant 63 : vector<2xi64>
+  %mask = vector.splati 63 : vector<2xi64>
   %bounded_counts = vector.andi %counts, %mask : vector<2xi64>
   %result = vector.shrui %values, %bounded_counts : vector<2xi64>
   func.return %result : vector<2xi64>

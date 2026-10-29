@@ -320,11 +320,11 @@ def test_validate_dispatch_rows_rejects_policy_in_non_policy_slot() -> None:
 def test_validate_dispatch_rows_rejects_removed_direct_default_macros() -> None:
     rows = (
         DispatchRow(
-            op_kind="LOOM_OP_VECTOR_CONSTANT",
+            op_kind="LOOM_OP_VECTOR_SPLATI",
             role=DispatchRowRole.VALUE,
             macro_name="VALUE_DIRECT_ROW",
             arguments=(
-                "LOOM_OP_VECTOR_CONSTANT",
+                "LOOM_OP_VECTOR_SPLATI",
                 "select",
                 "emit",
                 "verify",

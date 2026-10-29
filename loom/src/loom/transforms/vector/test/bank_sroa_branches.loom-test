@@ -6,7 +6,7 @@ func.def @runtime_read_ahead(%input: view<8x4xf32>, %end: index) -> (vector<4xf3
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
   %depth = index.constant 2 : index
-  %initial = vector.constant 0.0 : vector<2x4xf32>
+  %initial = vector.splatf 0.0 : vector<2x4xf32>
   %result = scf.for %i = [%begin to %end step %step](%bank = %initial : vector<2x4xf32>) -> (vector<2x4xf32>) pipeline(%depth) {
     %value = vector.load %input[%i, 0] : view<8x4xf32> -> vector<4xf32>
     %extent = index.constant 2 : index
@@ -31,7 +31,7 @@ func.def @runtime_read_ahead(%input: view<8x4xf32>, %end: index) -> (vector<4xf3
   %first, %second = scf.if %22 -> (vector<4xf32>, vector<4xf32>) {
     %95 = index.assume %end [gt(%end, 1)] : index
     %value = vector.load %input[%begin, 0] : view<8x4xf32> -> vector<4xf32>
-    %initial_slot_0 = vector.constant 0.0 : vector<4xf32>
+    %initial_slot_0 = vector.splatf 0.0 : vector<4xf32>
     %old, %old_1, %103 = scf.for %104 = [%step to %95 step %step](%old = %initial_slot_0 : vector<4xf32>, %old_1 = %initial_slot_0 : vector<4xf32>, %107 = %value : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>) {
       %value = vector.load %input[%104, 0] : view<8x4xf32> -> vector<4xf32>
       %updated = vector.addf %old, %107 : vector<4xf32>
@@ -43,7 +43,7 @@ func.def @runtime_read_ahead(%input: view<8x4xf32>, %end: index) -> (vector<4xf3
     scf.yield %updated, %updated_1 : vector<4xf32>, vector<4xf32>
   } else {
     %96 = index.assume %end [le(%end, 1)] : index
-    %initial_slot_0 = vector.constant 0.0 : vector<4xf32>
+    %initial_slot_0 = vector.splatf 0.0 : vector<4xf32>
     %110, %111 = scf.for %112 = [%begin to %96 step %step](%old = %initial_slot_0 : vector<4xf32>, %old_1 = %initial_slot_0 : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
       %value = vector.load %input[%112, 0] : view<8x4xf32> -> vector<4xf32>
       %updated = vector.addf %old, %value : vector<4xf32>

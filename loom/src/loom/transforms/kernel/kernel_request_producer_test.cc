@@ -292,19 +292,20 @@ TEST_P(KernelRequestProducerTest, BindsScalarAndVectorLiteralFamilies) {
           vector ? std::string("vector<") + shape + scalar_type + ">"
                  : scalar_type;
       SCOPED_TRACE(type);
-      const std::string operation = empty    ? "vector.empty"
-                                    : vector ? "vector.constant"
-                                    : (std::strcmp(scalar_type, "index") == 0 ||
-                                       std::strcmp(scalar_type, "offset") == 0)
-                                        ? "index.constant"
-                                        : "scalar.constant";
       const bool floating = scalar_type[0] == 'f' || scalar_type[0] == 'b';
+      const std::string operation =
+          empty    ? "vector.empty"
+          : vector ? (floating ? "vector.splatf" : "vector.splati")
+          : (std::strcmp(scalar_type, "index") == 0 ||
+             std::strcmp(scalar_type, "offset") == 0)
+              ? "index.constant"
+              : "scalar.constant";
       const std::string first = empty      ? ""
-                                : boolean  ? " true"
+                                : boolean  ? (vector ? " 1" : " true")
                                 : floating ? " 0.0"
                                            : " 1";
       const std::string second = empty      ? ""
-                                 : boolean  ? " false"
+                                 : boolean  ? (vector ? " 0" : " false")
                                  : floating ? " -0.0"
                                             : " 2";
       const std::string source =
@@ -561,7 +562,7 @@ template.def<@write> @write_impl(%rows: index, %offset: offset, %output: buffer)
 }
 func.def inline @compute(%rows: index, %offset: offset, %output: buffer) {
   %extent = func.call @extent(%rows, %offset) : (index, offset) -> (index)
-  %values = vector.constant 1.0 : vector<[%extent]xf32>
+  %values = vector.splatf 1.0 : vector<[%extent]xf32>
   %view = buffer.view %output[%offset] : buffer -> view<[%extent]xf32>
   vector.store %values, %view[0] : vector<[%extent]xf32>, view<[%extent]xf32>
   func.return

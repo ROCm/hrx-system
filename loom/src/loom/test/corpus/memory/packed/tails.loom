@@ -329,7 +329,7 @@ kernel.def @capture_tail() {
   %target = buffer.view %output[%guard_offset] : buffer -> view<3xi8>
   %after = buffer.view %observed[%base] : buffer -> view<3xi8>
   %captured = vector.load<volatile> %source[0] : view<3xi8> -> vector<3xi8>
-  %replacement = vector.constant 0 : vector<3xi8>
+  %replacement = vector.splati 0 : vector<3xi8>
   vector.store<volatile> %replacement, %source[0] : vector<3xi8>, view<3xi8>
   %reloaded = vector.load<volatile> %source[0] : view<3xi8> -> vector<3xi8>
   vector.store %captured, %target[0] : vector<3xi8>, view<3xi8>

@@ -1,9 +1,9 @@
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 func.def @i64x8_uniform_shift_boundaries(%input: vector<8xi64>) -> (vector<8xi64>, vector<8xi64>, vector<8xi64>) {
-  %left_count = vector.constant 32 : vector<8xi64>
-  %logical_count = vector.constant 31 : vector<8xi64>
-  %signed_count = vector.constant 63 : vector<8xi64>
+  %left_count = vector.splati 32 : vector<8xi64>
+  %logical_count = vector.splati 31 : vector<8xi64>
+  %signed_count = vector.splati 63 : vector<8xi64>
   %left = vector.shli %input, %left_count : vector<8xi64>
   %logical = vector.shrui %input, %logical_count : vector<8xi64>
   %signed = vector.shrsi %input, %signed_count : vector<8xi64>
@@ -51,7 +51,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i64x8_uniform_shi
 // ====
 
 func.def @i64x2x3_varying_signed_shift(%input: vector<2x3xi64>, %raw_counts: vector<2x3xi64>) -> (vector<2x3xi64>) {
-  %mask = vector.constant 63 : vector<2x3xi64>
+  %mask = vector.splati 63 : vector<2x3xi64>
   %counts = vector.andi %raw_counts, %mask : vector<2x3xi64>
   %result = vector.shrsi %input, %counts : vector<2x3xi64>
   func.return %result : vector<2x3xi64>

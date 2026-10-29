@@ -2,8 +2,8 @@
 
 // Lanewise facts are produced for both results by one vector operation.
 func.def @facts() -> (i32, i32) {
-  %lhs = vector.constant 63 : vector<2xi32>
-  %rhs = vector.constant 8 : vector<2xi32>
+  %lhs = vector.splati 63 : vector<2xi32>
+  %rhs = vector.splati 8 : vector<2xi32>
   %quotients, %remainders = vector.divremui %lhs, %rhs : vector<2xi32>
   %quotient = vector.extract %quotients[0] : vector<2xi32> -> i32
   %remainder = vector.extract %remainders[1] : vector<2xi32> -> i32
@@ -22,14 +22,14 @@ func.def @facts() -> (i32, i32) {
 // Uniform exact divisors expose the ordinary vector operations so target
 // vector recipes and strength reductions remain available independently.
 func.def @exact_divisor(%values: vector<2xi32>) -> (vector<2xi32>, vector<2xi32>) {
-  %divisors = vector.constant 8 : vector<2xi32>
+  %divisors = vector.splati 8 : vector<2xi32>
   %quotients, %remainders = vector.divremui %values, %divisors : vector<2xi32>
   func.return %quotients, %remainders : vector<2xi32>, vector<2xi32>
 }
 
 // ----
 func.def @exact_divisor(%values: vector<2xi32>) -> (vector<2xi32>, vector<2xi32>) {
-  %divisors = vector.constant 8 : vector<2xi32>
+  %divisors = vector.splati 8 : vector<2xi32>
   %quotients = vector.divui %values, %divisors : vector<2xi32>
   %remainders = vector.remui %values, %divisors : vector<2xi32>
   func.return %quotients, %remainders : vector<2xi32>, vector<2xi32>

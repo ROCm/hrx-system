@@ -58,7 +58,7 @@ kernel.def @pack_v4_rope_rows() {
   %row = kernel.workgroup.id<x> : index
   %base = index.constant 0 : offset
   %rope_view = buffer.view %rope[%base] : buffer -> view<64x64xbf16>
-  %cleared_row = vector.constant 0.0 : vector<64xbf16>
+  %cleared_row = vector.splatf 0.0 : vector<64xbf16>
   vector.store %cleared_row, %rope_view[%row, 0] : vector<64xbf16>, view<64x64xbf16>
   %tile_extent = index.constant 16 : index
   %token_tile = index.div %row, %tile_extent : index
@@ -139,7 +139,7 @@ kernel.def target(@v4_gfx950) @v4_lds_shared_qk() {
   %channel_count = index.constant 512 : index
   %query_row_raw = index.mul %subgroup, %tile_extent : index
   %query_row = index.assume %query_row_raw [range(%query_row_raw, 0, 112), multiple_of(%query_row_raw, 16)] : index
-  %score_seed = vector.constant 0.0 : vector<4xf32>
+  %score_seed = vector.splatf 0.0 : vector<4xf32>
   %score0, %score1, %score2, %score3 = scf.for %channel = [%begin to %channel_count step %tile_extent](%carried0 = %score_seed : vector<4xf32>, %carried1 = %score_seed : vector<4xf32>, %carried2 = %score_seed : vector<4xf32>, %carried3 = %score_seed : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
     %lhs = vector.fragment.load<lhs> %query_view[%query_row, %channel] shape [%tile_extent, %tile_extent] : view<128x512xbf16> -> vector<4xbf16>
     %rhs0 = vector.fragment.load<rhs> %lds_rhs[%channel, %begin] shape [%tile_extent, %tile_extent] : view<512x64xbf16, %rhs_layout> -> vector<4xbf16>

@@ -27,7 +27,7 @@ _NAME_PATTERN = re.compile(r"[%@^#]?[A-Za-z0-9_$][A-Za-z0-9_$.-]*")
 
 _CONSTANT_RESULT_PATTERN = re.compile(
     r"(?P<result>%(?P<name>[A-Za-z_][A-Za-z0-9_]*))\s*=\s*"
-    r"(?P<operation>[A-Za-z_][A-Za-z0-9_.]*constant)\b"
+    r"(?P<operation>(?:[A-Za-z_][A-Za-z0-9_.]*constant|vector\.splat[fi]))\b"
 )
 
 # Type, domain, unit, and duplicate markers can decorate either side of a

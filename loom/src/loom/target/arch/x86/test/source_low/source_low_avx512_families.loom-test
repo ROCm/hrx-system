@@ -3,12 +3,12 @@
 x86.target<avx512> @target
 
 func.def target(@target) @construct_zmm_vectors(%i16_value: i16, %bf16_value: bf16) -> (vector<64xi8>, vector<32xi16>, vector<8xi64>, vector<64xf8E4M3>, vector<32xbf16>, vector<8xf64>) {
-  %i8_constant = vector.constant -7 : vector<64xi8>
+  %i8_constant = vector.splati -7 : vector<64xi8>
   %i16_splat = vector.splat %i16_value : vector<32xi16>
-  %i64_constant = vector.constant 81985529216486895 : vector<8xi64>
-  %f8_constant = vector.constant 1.5 : vector<64xf8E4M3>
+  %i64_constant = vector.splati 81985529216486895 : vector<8xi64>
+  %f8_constant = vector.splatf 1.5 : vector<64xf8E4M3>
   %bf16_splat = vector.splat %bf16_value : vector<32xbf16>
-  %f64_constant = vector.constant -2.5 : vector<8xf64>
+  %f64_constant = vector.splatf -2.5 : vector<8xf64>
   func.return %i8_constant, %i16_splat, %i64_constant, %f8_constant, %bf16_splat, %f64_constant : vector<64xi8>, vector<32xi16>, vector<8xi64>, vector<64xf8E4M3>, vector<32xbf16>, vector<8xf64>
 }
 

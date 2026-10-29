@@ -218,8 +218,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @predicat
 aie2p.target<core> @target
 
 func.def target(@target) @predicate_constants() -> (vector<64xi1>, vector<17xi1>) {
-  %true_mask = vector.constant true : vector<64xi1>
-  %false_mask = vector.constant false : vector<17xi1>
+  %true_mask = vector.splati 1 : vector<64xi1>
+  %false_mask = vector.splati 0 : vector<17xi1>
   func.return %true_mask, %false_mask : vector<64xi1>, vector<17xi1>
 }
 

@@ -49,7 +49,8 @@ def test_every_owned_source_operation_has_a_closed_shape_matrix() -> None:
         for contract_case in SPIRV_ORDINARY_VECTOR_CONTRACT_CASES
     )
     assert case_counts == {
-        vector.vector_constant.name: 55,
+        vector.vector_splati.name: 35,
+        vector.vector_splatf.name: 20,
         vector.vector_bitcast.name: 140,
         vector.vector_splat.name: 32,
         vector.vector_from_elements.name: 31,
@@ -205,7 +206,15 @@ def test_each_native_type_drives_all_descriptor_backed_structural_rules() -> Non
             == 1
         )
         assert (
-            descriptor_rule_counts[(vector.vector_constant.name, construct_key)]
+            descriptor_rule_counts[
+                (
+                    vector.vector_splatf.name
+                    if vector_type.component_type.kind
+                    == OrdinaryVectorComponentKind.FLOAT
+                    else vector.vector_splati.name
+                ),
+                construct_key,
+            ]
             == constant_count
         )
         assert descriptor_rule_counts[(vector.vector_extract.name, extract_key)] == 1

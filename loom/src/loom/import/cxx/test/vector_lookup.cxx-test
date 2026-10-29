@@ -13,7 +13,7 @@ Codes4 lookup(Codebook16 table, Bytes4 indices) {
 
 // ----
 func.def public @lookup(%table: vector<16xi8>, %indices$1: vector<4xi8>) -> (vector<4xi8>) {
-  %40 = vector.constant 15 : vector<4xi8>
+  %40 = vector.splati 15 : vector<4xi8>
   %indices$6 = vector.andi %indices$1, %40 : vector<4xi8>
   %39 = vector.table.lookup %table[%indices$6] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
   func.return %39 : vector<4xi8>
@@ -53,7 +53,7 @@ func.def public @lookup(%packed: vector<4xi8>) -> (vector<4xi8>) {
   %16 = scalar.constant 89 : i8
   %17 = scalar.constant 113 : i8
   %table = vector.from_elements %2, %3, %4, %5, %6, %7, %8, %9, %10, %11, %12, %13, %14, %15, %16, %17 : vector<16xi8>
-  %56 = vector.constant 15 : vector<4xi8>
+  %56 = vector.splati 15 : vector<4xi8>
   %indices = vector.andi %packed, %56 : vector<4xi8>
   %55 = vector.table.lookup %table[%indices] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
   func.return %55 : vector<4xi8>

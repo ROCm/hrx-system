@@ -1,7 +1,7 @@
 // RUN: emit source-low target=x86:avx512_packed_dot output=low
 
 func.def @bf16_dot2_zero_256(%lhs: vector<16xbf16>, %rhs: vector<16xbf16>) -> (vector<8xf32>) {
-  %c0 = vector.constant 0.0 : vector<8xf32>
+  %c0 = vector.splatf 0.0 : vector<8xf32>
   %dot = vector.dot2f %lhs, %rhs, %c0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   func.return %dot : vector<8xf32>
 }
@@ -18,9 +18,9 @@ low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({s
 
 func.def @supported_f32_zero_widths() -> (f32, vector<4xf32>, vector<8xf32>, vector<16xf32>) {
   %scalar = scalar.constant 0.0 : f32
-  %c0x4 = vector.constant 0.0 : vector<4xf32>
-  %c0x8 = vector.constant 0.0 : vector<8xf32>
-  %c0x16 = vector.constant 0.0 : vector<16xf32>
+  %c0x4 = vector.splatf 0.0 : vector<4xf32>
+  %c0x8 = vector.splatf 0.0 : vector<8xf32>
+  %c0x16 = vector.splatf 0.0 : vector<16xf32>
   func.return %scalar, %c0x4, %c0x8, %c0x16 : f32, vector<4xf32>, vector<8xf32>, vector<16xf32>
 }
 
@@ -35,13 +35,13 @@ low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({s
 // ====
 
 func.def @f32x4_constant_payloads() -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
-  %signed_payload = vector.constant -0.0 : vector<4xf32>
-  %fraction = vector.constant -1.1000000000000001 : vector<4xf32>
-  %subnormal = vector.constant 1.4012984643248171e-45 : vector<4xf32>
-  %normal = vector.constant 1.1754943508222875e-38 : vector<4xf32>
-  %positive_infinity = vector.constant inf : vector<4xf32>
-  %negative_infinity = vector.constant -inf : vector<4xf32>
-  %nan = vector.constant nan : vector<4xf32>
+  %signed_payload = vector.splatf -0.0 : vector<4xf32>
+  %fraction = vector.splatf -1.1000000000000001 : vector<4xf32>
+  %subnormal = vector.splatf 1.4012984643248171e-45 : vector<4xf32>
+  %normal = vector.splatf 1.1754943508222875e-38 : vector<4xf32>
+  %positive_infinity = vector.splatf inf : vector<4xf32>
+  %negative_infinity = vector.splatf -inf : vector<4xf32>
+  %nan = vector.splatf nan : vector<4xf32>
   func.return %signed_payload, %fraction, %subnormal, %normal, %positive_infinity, %negative_infinity, %nan : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
 }
 
@@ -86,7 +86,7 @@ low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({s
 // ====
 
 func.def @bf16_dot2_negative_zero_256(%lhs: vector<16xbf16>, %rhs: vector<16xbf16>) -> (vector<8xf32>) {
-  %cn0 = vector.constant -0.0 : vector<8xf32>
+  %cn0 = vector.splatf -0.0 : vector<8xf32>
   %dot = vector.dot2f %lhs, %rhs, %cn0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   func.return %dot : vector<8xf32>
 }
@@ -103,7 +103,7 @@ low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({s
 // ====
 
 func.def @f32x16_negative_zero() -> (vector<16xf32>) {
-  %cn0 = vector.constant -0.0 : vector<16xf32>
+  %cn0 = vector.splatf -0.0 : vector<16xf32>
   func.return %cn0 : vector<16xf32>
 }
 

@@ -270,15 +270,16 @@ loom_value_id_t Vectors::unary(cxx::TokenKind token, loom_value_id_t value,
       }
       break;
     case cxx::TokenKind::T_TILDE:
-      check(loom_vector_constant_build(&builder_, loom_attr_i64(-1), input,
-                                       source, &op));
+      check(loom_vector_splati_build(&builder_, -1, input, source, &op));
       check(loom_vector_xori_build(&builder_, value, loom_op_results(op)[0],
                                    output, source, &op));
       break;
     case cxx::TokenKind::T_EXCLAIM:
-      check(loom_vector_constant_build(
-          &builder_, floating ? loom_attr_f64(0.0) : loom_attr_i64(0), input,
-          source, &op));
+      if (floating) {
+        check(loom_vector_splatf_build(&builder_, 0.0, input, source, &op));
+      } else {
+        check(loom_vector_splati_build(&builder_, 0, input, source, &op));
+      }
       return binary(cxx::TokenKind::T_EQUAL_EQUAL, value,
                     loom_op_results(op)[0], input_type, output_type, owner,
                     fastmath);

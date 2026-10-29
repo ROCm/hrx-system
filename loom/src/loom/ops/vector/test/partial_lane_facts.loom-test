@@ -4,7 +4,7 @@
 func.def @insert_preserves_known_lane(%values: vector<4xi32>) -> (i32, i32) {
   %replacement = scalar.constant 9 : i32
   %combined = vector.insert %replacement into %values[2] : i32, vector<4xi32>
-  %increment = vector.constant 1 : vector<4xi32>
+  %increment = vector.splati 1 : vector<4xi32>
   %shifted = vector.addi %combined, %increment : vector<4xi32>
   %known_lane = vector.extract %shifted[2] : vector<4xi32> -> i32
   %dynamic_lane = vector.extract %shifted[0] : vector<4xi32> -> i32
@@ -20,9 +20,9 @@ CHECK-NOT: %known_lane = vector.extract *
 
 // Concatenation retains the facts of one input when another input is unknown.
 func.def @concat_preserves_known_lanes(%values: vector<2xi32>) -> (i32, i32) {
-  %known = vector.constant 9 : vector<2xi32>
+  %known = vector.splati 9 : vector<2xi32>
   %combined = vector.concat<0> %values, %known : vector<2xi32>, vector<2xi32> -> vector<4xi32>
-  %increment = vector.constant 1 : vector<4xi32>
+  %increment = vector.splati 1 : vector<4xi32>
   %shifted = vector.addi %combined, %increment : vector<4xi32>
   %known_lane = vector.extract %shifted[2] : vector<4xi32> -> i32
   %dynamic_lane = vector.extract %shifted[0] : vector<4xi32> -> i32
@@ -38,9 +38,9 @@ CHECK-NOT: %known_lane = vector.extract *
 
 // Interleaving retains the known operand's lanes independently of its peer.
 func.def @interleave_preserves_known_lanes(%values: vector<2x2xi32>) -> (i32, i32) {
-  %known = vector.constant 9 : vector<2x2xi32>
+  %known = vector.splati 9 : vector<2x2xi32>
   %combined = vector.interleave<1> %values, %known : vector<2x2xi32>, vector<2x2xi32> -> vector<2x4xi32>
-  %increment = vector.constant 1 : vector<2x4xi32>
+  %increment = vector.splati 1 : vector<2x4xi32>
   %shifted = vector.addi %combined, %increment : vector<2x4xi32>
   %known_lane = vector.extract %shifted[1, 3] : vector<2x4xi32> -> i32
   %dynamic_lane = vector.extract %shifted[0, 2] : vector<2x4xi32> -> i32
