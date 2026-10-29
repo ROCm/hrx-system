@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "iree/base/internal/arena.h"
+#include "iree/base/threading/numa.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loomc/iree/task_pool.h"
@@ -55,6 +56,27 @@ TEST(HostTest, InvalidCapacityAndAllocationFailureReturnNoHost) {
       IREE_STATUS_INVALID_ARGUMENT,
       loom_serve_host_create(1, nullptr, iree_allocator_null(), &host));
   EXPECT_EQ(host, nullptr);
+}
+
+TEST(HostTest, DeviceIoPlacementResolvesEveryOnlineNode) {
+  loom_serve_host_t* host = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_host_create(1, nullptr, iree_allocator_system(), &host));
+  auto* pool = loom_serve_host_proactor_pool(host);
+  EXPECT_EQ(iree_async_proactor_pool_count(pool), iree_numa_node_count());
+  iree_bitmap_t online_nodes = iree_numa_online_nodes();
+  for (uint32_t node_id = 0; node_id < online_nodes.bit_count; ++node_id) {
+    if (!iree_bitmap_test(online_nodes, node_id)) {
+      continue;
+    }
+    iree_async_proactor_pool_entry_t* entry = nullptr;
+    IREE_ASSERT_OK(
+        iree_async_proactor_pool_acquire_for_node(pool, node_id, &entry));
+    EXPECT_EQ(iree_async_proactor_pool_entry_node_id(entry), node_id);
+    EXPECT_NE(iree_async_proactor_pool_entry_proactor(entry), nullptr);
+    iree_async_proactor_pool_entry_release(entry);
+  }
+  loom_serve_host_release(host);
 }
 
 TEST(HostTest, BatchArenasShareAndReturnScratchBlocks) {
