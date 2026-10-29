@@ -372,6 +372,59 @@ loomc_status_t loomc_target_environment_create(
   return result;
 }
 
+loomc_host_size_t loomc_target_environment_artifact_format_count(
+    const loomc_target_environment_t* target_environment) {
+  return target_environment ? target_environment->environment.emitter_count : 0;
+}
+
+loomc_string_view_t loomc_target_environment_artifact_format_at(
+    const loomc_target_environment_t* target_environment,
+    loomc_host_size_t ordinal) {
+  if (target_environment == NULL ||
+      ordinal >= target_environment->environment.emitter_count) {
+    return loomc_string_view_empty();
+  }
+  return loomc_string_view_from_iree(
+      target_environment->environment.emitters[ordinal]
+          ->public_artifact_format);
+}
+
+loomc_host_size_t loomc_target_environment_target_family_count(
+    const loomc_target_environment_t* target_environment) {
+  if (target_environment == NULL) {
+    return 0;
+  }
+  loomc_host_size_t count = 0;
+  const loom_target_provider_set_t* provider_set =
+      target_environment->environment.provider_set;
+  for (iree_host_size_t i = 0; i < provider_set->provider_count; ++i) {
+    count += provider_set->providers[i]->profile_type != NULL;
+  }
+  return count;
+}
+
+loomc_string_view_t loomc_target_environment_target_family_at(
+    const loomc_target_environment_t* target_environment,
+    loomc_host_size_t ordinal) {
+  if (target_environment == NULL) {
+    return loomc_string_view_empty();
+  }
+  const loom_target_provider_set_t* provider_set =
+      target_environment->environment.provider_set;
+  for (iree_host_size_t i = 0; i < provider_set->provider_count; ++i) {
+    const loom_target_profile_type_t* profile_type =
+        provider_set->providers[i]->profile_type;
+    if (profile_type == NULL) {
+      continue;
+    }
+    if (ordinal == 0) {
+      return loomc_string_view_from_iree(profile_type->name);
+    }
+    --ordinal;
+  }
+  return loomc_string_view_empty();
+}
+
 const loom_target_environment_t*
 loomc_target_environment_loom_target_environment(
     const loomc_target_environment_t* target_environment) {

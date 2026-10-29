@@ -705,6 +705,43 @@ TEST(TargetTest, ComposedEnvironmentRetainsAndDeduplicatesPackages) {
   }
 }
 
+TEST(TargetTest, EnumeratesEnvironmentCapabilities) {
+  const loom_target_provider_t* providers[] = {
+      &kTestTargetProvider,
+      &kFakeElfProvider,
+      &kFakeWasmProvider,
+  };
+  const auto provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  auto environment = CreateTargetEnvironmentFromProviderSet(&provider_set);
+
+  ASSERT_EQ(loomc_target_environment_artifact_format_count(environment.get()),
+            2u);
+  EXPECT_EQ(ToString(loomc_target_environment_artifact_format_at(
+                environment.get(), 0)),
+            "fake-elf");
+  EXPECT_EQ(ToString(loomc_target_environment_artifact_format_at(
+                environment.get(), 1)),
+            "fake-wasm");
+  EXPECT_TRUE(loomc_string_view_is_empty(
+      loomc_target_environment_artifact_format_at(environment.get(), 2)));
+
+  ASSERT_EQ(loomc_target_environment_target_family_count(environment.get()),
+            1u);
+  EXPECT_EQ(
+      ToString(loomc_target_environment_target_family_at(environment.get(), 0)),
+      "loomc-target-test");
+  EXPECT_TRUE(loomc_string_view_is_empty(
+      loomc_target_environment_target_family_at(environment.get(), 1)));
+
+  EXPECT_EQ(loomc_target_environment_artifact_format_count(nullptr), 0u);
+  EXPECT_TRUE(loomc_string_view_is_empty(
+      loomc_target_environment_artifact_format_at(nullptr, 0)));
+  EXPECT_EQ(loomc_target_environment_target_family_count(nullptr), 0u);
+  EXPECT_TRUE(loomc_string_view_is_empty(
+      loomc_target_environment_target_family_at(nullptr, 0)));
+}
+
 TEST(TargetTest, ComposedEnvironmentRejectsDistinctFamilyOwners) {
   const auto first_set = loom_target_provider_set_make(kTestTargetProviders, 1);
   const auto duplicate_provider = kTestTargetProvider;

@@ -26,15 +26,16 @@
 #include "loomc/target/configured.h"
 
 IREE_FLAG(string, format, "",
-          "Optional exact artifact format, such as 'amdgpu-hsaco', "
-          "'spirv', or 'wasm-binary'. Omit this to "
+          "Optional exact artifact format. Available formats are listed at "
+          "the end of --help. Omit this to "
           "select the canonical format for the selected entries and target.");
 IREE_FLAG(string, target, "",
-          "Optional compilation target in family:selector form, such as "
-          "'amdgpu:gfx11-generic' or 'spirv:vulkan1.3+bda'. Selects the exact "
-          "profile for kernel entries or the public/retained functions of a "
-          "module and their callees. Authored targets remain compatibility "
-          "requirements; target-free source needs no target attributes.");
+          "Optional compilation target in family:selector form. Available "
+          "target families are listed at the end of --help. "
+          "Selects the exact profile for kernel entries or the "
+          "public/retained functions of a module and their callees. "
+          "Authored targets remain compatibility requirements; target-free "
+          "source needs no target attributes.");
 IREE_FLAG_LIST(
     string, root,
     "Root symbol to materialize before compilation. Repeat for "
@@ -97,6 +98,70 @@ IREE_FLAG_LIST_NAMED(
 
 static iree_string_view_t loom_compile_input_path(int argc, char** argv) {
   return argc < 2 ? iree_string_view_empty() : iree_make_cstring_view(argv[1]);
+}
+
+static iree_status_t loom_compile_print_capability(FILE* stream,
+                                                   loomc_string_view_t value) {
+  if (fprintf(stream, "#   %.*s\n", (int)value.size, value.data) < 0) {
+    return iree_make_status(IREE_STATUS_UNKNOWN,
+                            "failed to write compiler capabilities");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_compile_print_capabilities(
+    FILE* stream, loomc_allocator_t allocator) {
+  loomc_target_environment_t* target_environment = NULL;
+  iree_status_t status =
+      iree_status_from_loomc(loomc_target_environment_create_configured(
+          allocator, &target_environment));
+  if (iree_status_is_ok(status) &&
+      fprintf(stream, "# Available artifact formats:\n") < 0) {
+    status = iree_make_status(IREE_STATUS_UNKNOWN,
+                              "failed to write compiler capabilities");
+  }
+  if (iree_status_is_ok(status)) {
+    const loomc_host_size_t format_count =
+        loomc_target_environment_artifact_format_count(target_environment);
+    for (loomc_host_size_t i = 0; i < format_count && iree_status_is_ok(status);
+         ++i) {
+      status = loom_compile_print_capability(
+          stream,
+          loomc_target_environment_artifact_format_at(target_environment, i));
+    }
+  }
+  if (iree_status_is_ok(status) &&
+      fprintf(stream, "#\n# Available target families:\n") < 0) {
+    status = iree_make_status(IREE_STATUS_UNKNOWN,
+                              "failed to write compiler capabilities");
+  }
+  if (iree_status_is_ok(status)) {
+    const loomc_host_size_t family_count =
+        loomc_target_environment_target_family_count(target_environment);
+    for (loomc_host_size_t i = 0; i < family_count && iree_status_is_ok(status);
+         ++i) {
+      status = loom_compile_print_capability(
+          stream,
+          loomc_target_environment_target_family_at(target_environment, i));
+    }
+  }
+  if (iree_status_is_ok(status) && fflush(stream) != 0) {
+    status = iree_make_status(IREE_STATUS_UNKNOWN,
+                              "failed to flush compiler capabilities");
+  }
+  loomc_target_environment_release(target_environment);
+  return status;
+}
+
+static bool loom_compile_help_requested(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    const iree_string_view_t arg = iree_make_cstring_view(argv[i]);
+    if (iree_string_view_equal(arg, IREE_SV("--help")) ||
+        iree_string_view_starts_with(arg, IREE_SV("--help="))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 static iree_string_view_t loom_compile_input_identifier(
@@ -380,26 +445,17 @@ static void loom_compile_print_agents_markdown(FILE* stream) {
       "### Common commands",
       "",
       "```shell",
-      "# Compile a targetless kernel for a portable GFX11 profile.",
-      "loom-compile kernel.loom \\",
-      "  --target=amdgpu:gfx11-generic --output=kernel.hsaco",
+      "# Inspect the formats and target families provided by this compiler.",
+      "loom-compile --help",
       "",
-      "# Select one catalog root, exact target, and compile-time value.",
-      "loom-compile catalog.loombc --root=@entry \\",
-      "  --target=amdgpu:gfx1151 --config=model.hidden_size=4096 \\",
-      "  --output=entry.hsaco",
-      "",
-      "# Emit SPIR-V or WebAssembly from source that declares its target.",
-      "loom-compile kernel.loom --format=spirv --output=kernel.spv",
-      "loom-compile functions.loom --format=wasm-binary "
-      "--output=functions.wasm",
+      "# Compile source that declares its target with the canonical format.",
+      "loom-compile program.loom --output=program.bin",
       "```",
       "",
       "### Inspect a compilation",
       "",
       "```shell",
-      "loom-compile kernel.loom \\",
-      "  --target=amdgpu:gfx11-generic --output=kernel.hsaco \\",
+      "loom-compile program.loom --output=program.bin \\",
       "  --artifact-manifest=summary \\",
       "  --emit-artifact-manifest=manifest.json \\",
       "  --compile-report=summary --compile-report-output=report.json",
@@ -434,8 +490,9 @@ int main(int argc, char** argv) {
       "Compiles a Loom module to a runtime artifact.\n"
       "\n"
       "Usage:\n"
-      "  loom-compile [file.loom] --format=amdgpu-hsaco "
-      "--target=amdgpu:gfx11-generic --output=kernel.hsaco\n"
+      "  loom-compile [file.loom] [--target=family:selector] "
+      "[--format=name] --output=artifact\n"
+      "  loom-compile --help\n"
       "  loom-compile --agents_md\n"
       "\n"
       "Repeat --config=key=value to materialize compile-time config symbols "
@@ -455,7 +512,8 @@ int main(int argc, char** argv) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   loom_tooling_cli_set_default_help_filter();
-  iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
+  iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_CONTINUE_AFTER_HELP, &argc,
+                           &argv);
 
   const iree_allocator_t allocator = iree_allocator_system();
   const loomc_allocator_t loom_allocator = loomc_allocator_from_iree(allocator);
@@ -464,6 +522,18 @@ int main(int argc, char** argv) {
   };
   iree_status_t status = iree_ok_status();
   int exit_code = 0;
+
+  if (loom_compile_help_requested(argc, argv)) {
+    status = loom_compile_print_capabilities(stdout, loom_allocator);
+    if (!iree_status_is_ok(status)) {
+      iree_status_fprint(stderr, status);
+      iree_status_free(status);
+      exit_code = 1;
+    }
+    IREE_TRACE_ZONE_END(z0);
+    IREE_TRACE_APP_EXIT(exit_code);
+    return exit_code;
+  }
 
   loom_config_text_binding_set_t config_set;
   loom_config_text_binding_set_initialize(allocator, &config_set);

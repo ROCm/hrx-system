@@ -24,8 +24,41 @@
         "args": ["--agents_md"]
       },
       "stdout": {
-        "non_empty": true
+        "contains": ["loom-compile --help"],
+        "not_contains": [
+          "amdgpu:gfx11-generic",
+          "--format=spirv",
+          "wasm-binary"
+        ]
       }
+    },
+    {
+      "name": "reports provider capabilities in help",
+      "run": {
+        "tool": "loom-compile",
+        "args": ["--help"]
+      },
+      "stdout": {
+        "contains": [
+          "Available artifact formats:",
+          "amdgpu-hsaco",
+          "spirv",
+          "vm",
+          "xdna",
+          "x86-elf",
+          "x86-elf-shared",
+          "x86-hal",
+          "Available target families:",
+          "amdgpu",
+          "amd.xdna.aie2p",
+          "x86"
+        ],
+        "not_contains": [
+          "--list-formats",
+          "--list-targets"
+        ]
+      },
+      "stderr": {"empty": true}
     },
     {
       "name": "rejects artifact and report output sharing stdout",

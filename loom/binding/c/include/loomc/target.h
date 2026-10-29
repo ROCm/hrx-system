@@ -390,6 +390,55 @@ LOOMC_API_EXPORT loomc_status_t loomc_target_environment_create(
     loomc_allocator_t allocator,
     loomc_target_environment_t** out_target_environment);
 
+/// Returns the number of public artifact formats in a target environment.
+///
+/// Each format names one linked emitter and may be passed to artifact-emission
+/// APIs. Formats preserve target provider composition order.
+///
+/// @param target_environment Environment to inspect, or `NULL`.
+/// @return Artifact format count, or zero for a `NULL` environment.
+LOOMC_API_EXPORT loomc_host_size_t
+loomc_target_environment_artifact_format_count(
+    const loomc_target_environment_t* target_environment);
+
+/// Returns a public artifact format by ordinal.
+///
+/// @param target_environment Environment to inspect.
+/// @param ordinal Zero-based artifact format ordinal.
+/// @return Borrowed artifact format name, or an empty view when `ordinal` is
+/// out of range.
+///
+/// @lifetime
+/// The returned view remains valid while `target_environment` is retained.
+LOOMC_API_EXPORT loomc_string_view_t
+loomc_target_environment_artifact_format_at(
+    const loomc_target_environment_t* target_environment,
+    loomc_host_size_t ordinal);
+
+/// Returns the number of target families in a target environment.
+///
+/// Each family names one linked target profile provider. Families preserve
+/// target provider composition order. Family-owned profile selectors are not
+/// enumerated by this target-neutral query.
+///
+/// @param target_environment Environment to inspect, or `NULL`.
+/// @return Target family count, or zero for a `NULL` environment.
+LOOMC_API_EXPORT loomc_host_size_t loomc_target_environment_target_family_count(
+    const loomc_target_environment_t* target_environment);
+
+/// Returns a target family name by ordinal.
+///
+/// @param target_environment Environment to inspect.
+/// @param ordinal Zero-based target family ordinal.
+/// @return Borrowed target family name, or an empty view when `ordinal` is out
+/// of range.
+///
+/// @lifetime
+/// The returned view remains valid while `target_environment` is retained.
+LOOMC_API_EXPORT loomc_string_view_t loomc_target_environment_target_family_at(
+    const loomc_target_environment_t* target_environment,
+    loomc_host_size_t ordinal);
+
 /// Retains a target environment for another owner.
 ///
 /// @param target_environment Target environment to retain.
