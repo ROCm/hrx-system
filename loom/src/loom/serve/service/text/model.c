@@ -41,6 +41,7 @@ typedef enum loom_serve_text_load_phase_e {
   TEXT_LOAD_STAGES,
   TEXT_LOAD_BIND,
   TEXT_LOAD_WEIGHTS,
+  TEXT_LOAD_RESIDENCY,
   TEXT_LOAD_ACTIVATE,
   TEXT_LOAD_LINK,
   TEXT_LOAD_READY,
@@ -58,8 +59,6 @@ struct loom_serve_text_load_t {
   loom_serve_text_options_t options;
   // Serialized owner-only phase; callbacks publish results, never transition.
   loom_serve_text_load_phase_t phase;
-  // Next parameter domain during checkpoint preparation.
-  iree_host_size_t index;
   // Once cancelled, subsequent advance calls cannot restart preparation.
   bool cancelled;
   // Private task result transferred only by the task's final release.
@@ -72,8 +71,8 @@ struct loom_serve_text_load_t {
   struct {
     // Protects completion publication and its final notification access.
     iree_slim_mutex_t mutex;
-    // Accepted foreground phase retains this load until its final callback.
-    bool pending;
+    // Accepted foreground callbacks plus any active submission hold.
+    iree_host_size_t pending;
     // Native stage compilation may overlap parameter preparation/activation.
     bool compiling;
     // Immutable command layouts published by the accepted stage set.
@@ -101,9 +100,35 @@ static void loom_serve_text_load_complete(void* user_data,
   loom_serve_text_load_t* load = user_data;
   iree_slim_mutex_lock(&load->event.mutex);
   load->event.status = iree_status_join(load->event.status, status);
-  load->event.pending = false;
-  load->event.wake(load->event.user_data);
+  if (--load->event.pending == 0) {
+    load->event.wake(load->event.user_data);
+  }
   iree_slim_mutex_unlock(&load->event.mutex);
+}
+
+// Parameter plans have disjoint preparation state and share immutable source
+// catalogs. Preclaim their callbacks and a submission hold so inline completion
+// and partial rejection cannot publish readiness before the fanout retires.
+static void loom_serve_text_load_prepare_weights(loom_serve_text_load_t* load) {
+  loom_serve_text_model_t* model = load->model;
+  loom_serve_host_t* host = loom_serve_device_host(model->device_owner);
+  const iree_host_size_t count = model->parameters.count;
+  iree_slim_mutex_lock(&load->event.mutex);
+  load->event.pending = count + 1;
+  iree_slim_mutex_unlock(&load->event.mutex);
+  iree_status_t status = iree_ok_status();
+  iree_host_size_t accepted = 0;
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    status = loom_serve_weights_prepare_async(
+        model->parameters.plans[i], host, model->jit, model->command_mode,
+        &load->options.sources, model->parameters.sources[i],
+        model->source.parameter_sources, loom_serve_text_load_complete, load);
+    accepted += iree_status_is_ok(status) ? 1 : 0;
+  }
+  iree_slim_mutex_lock(&load->event.mutex);
+  load->event.pending -= count - accepted;
+  iree_slim_mutex_unlock(&load->event.mutex);
+  loom_serve_text_load_complete(load, status);
 }
 
 static iree_status_t loom_serve_text_load_prepare(
@@ -442,7 +467,7 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
       case TEXT_LOAD_PREPARE:
         load->phase = TEXT_LOAD_STAGES;
         iree_slim_mutex_lock(&load->event.mutex);
-        load->event.pending = true;
+        load->event.pending = 1;
         iree_slim_mutex_unlock(&load->event.mutex);
         status = iree_status_from_loomc(loomc_task_sink_submit(
             loom_serve_host_compiler_sink(host), &load->task));
@@ -471,29 +496,18 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
         load->phase = TEXT_LOAD_WEIGHTS;
         break;
       case TEXT_LOAD_WEIGHTS:
-        if (load->index < model->parameters.count) {
-          const iree_host_size_t index = load->index++;
-          const loom_serve_preparation_parameter_t* checkpoint =
-              model->parameters.sources[index];
-          iree_slim_mutex_lock(&load->event.mutex);
-          load->event.pending = true;
-          iree_slim_mutex_unlock(&load->event.mutex);
-          status = loom_serve_weights_prepare_async(
-              model->parameters.plans[index], host, model->jit,
-              model->command_mode, &load->options.sources, checkpoint,
-              model->source.parameter_sources, loom_serve_text_load_complete,
-              load);
-          submitted = iree_status_is_ok(status);
-        } else {
-          // Source preparation defines captured-input lane storage. Register
-          // the complete cold working set before optional activation, while
-          // device compilation and tokenization can still be running.
-          status = loom_serve_residency_allocate(
-              loom_serve_pool_residency_cache(model->pool), model->execution, 1,
-              &model->parameter_group, model->host_allocator,
-              &model->residency);
-          load->phase = TEXT_LOAD_ACTIVATE;
-        }
+        load->phase = TEXT_LOAD_RESIDENCY;
+        loom_serve_text_load_prepare_weights(load);
+        submitted = true;
+        break;
+      case TEXT_LOAD_RESIDENCY:
+        // Source preparation defines captured-input lane storage. Register
+        // the complete cold working set before optional activation, while
+        // device compilation and tokenization can still be running.
+        status = loom_serve_residency_allocate(
+            loom_serve_pool_residency_cache(model->pool), model->execution, 1,
+            &model->parameter_group, model->host_allocator, &model->residency);
+        load->phase = TEXT_LOAD_ACTIVATE;
         break;
       case TEXT_LOAD_ACTIVATE:
         if (iree_any_bit_set(flags, LOOM_SERVE_TEXT_LOAD_FLAG_DEMAND)) {
@@ -515,7 +529,7 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
         }
         if (iree_status_is_ok(status)) {
           iree_slim_mutex_lock(&load->event.mutex);
-          load->event.pending = true;
+          load->event.pending = 1;
           iree_slim_mutex_unlock(&load->event.mutex);
           status = loom_serve_text_load_link(load);
           submitted = iree_status_is_ok(status);
@@ -534,7 +548,7 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
     // Rejected foreground work owes no callback. Independent stage work still
     // owns layout bytes and model borrows until its terminal publication.
     iree_slim_mutex_lock(&load->event.mutex);
-    load->event.pending = false;
+    load->event.pending = 0;
     const bool stages_pending = load->event.compiling;
     iree_slim_mutex_unlock(&load->event.mutex);
     load->phase = TEXT_LOAD_COMPLETE;

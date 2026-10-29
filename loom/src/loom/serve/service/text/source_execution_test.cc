@@ -76,6 +76,72 @@ TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
   }
 }
 
+TEST_F(SourceTextServiceTest, IndependentParameterPreparationJoinsAllDomains) {
+  for (const bool fail_policy : {false, true}) {
+    SCOPED_TRACE(fail_policy);
+    const auto package =
+        iree::testing::MakeTempFilePath("text_parameter_domains");
+    ASSERT_TRUE(std::filesystem::create_directory(package));
+    for (const char* file : {"advance.loom", "storage.loom", "control.loom",
+                             "model.json", "tokenizer.json"}) {
+      ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/" + file,
+                                             package + "/" + file));
+    }
+    // The media stage has an independent preparation policy and parameter
+    // domain while the ordinary text stage retains the fixture's oracle.
+    EditNativeProvider(directory_ + "/prepare.loom", package + "/prepare.loom",
+                       "func.call @parameter(%media_stage, %c0_i32, "
+                       "%c0_source, %checkpoint, %policy)",
+                       "%media_policy = buffer.constant "
+                       "utf8(\"media-weights.loom\") : buffer\n"
+                       "  func.call @parameter(%media_stage, %c0_i32, "
+                       "%c0_source, %checkpoint, %media_policy)");
+    EditNativeProvider(package + "/prepare.loom", package + "/prepare.loom",
+                       "func.return %effective, %c2_i32, %state",
+                       "func.return %effective, %c1_i32, %state");
+    ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/weights.loom",
+                                           package + "/media-weights.loom"));
+    if (fail_policy) {
+      std::ofstream output(package + "/weights.loom");
+      output << "invalid preparation policy\n";
+      ASSERT_TRUE(output.good());
+    } else {
+      ASSERT_TRUE(std::filesystem::copy_file(directory_ + "/weights.loom",
+                                             package + "/weights.loom"));
+    }
+    auto* pool = loom_serve_pool_memory(storage_owner_);
+    if (pool) {
+      IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+    }
+    const auto before = loom_serve_pool_statistics(storage_owner_);
+    auto options = ModelOptions();
+    options.sources.base_directory = iree_make_cstring_view(package.c_str());
+    loom_serve_text_model_t* model = nullptr;
+    auto status = loom_serve_text_model_allocate(
+        device_, storage_owner_, &options, host_allocator_, &model);
+    if (fail_policy) {
+      IREE_EXPECT_NOT_OK(status);
+      EXPECT_EQ(model, nullptr);
+    } else {
+      IREE_ASSERT_OK(status);
+      const int32_t token = Oracle::Id('a');
+      auto* row = loom_serve_text_model_row(model, 0);
+      IREE_ASSERT_OK(loom_serve_text_row_prefill(row, 1, &token));
+      Oracle reference;
+      reference.Consume("a");
+      EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
+      EXPECT_EQ(loom_serve_text_model_weight_activity(model).activations, 2u);
+    }
+    IREE_ASSERT_OK(loom_serve_text_model_free(model));
+    if (pool) {
+      IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+    }
+    const auto after = loom_serve_pool_statistics(storage_owner_);
+    EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
+    EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
+  }
+}
+
 TEST_F(SourceTextServiceTest, FailedLinkRetiresAcceptedInitialization) {
   const auto package = iree::testing::MakeTempFilePath("failed_text_link");
   ASSERT_TRUE(std::filesystem::create_directory(package));
