@@ -27,6 +27,8 @@ extern "C" {
 #endif
 
 typedef struct loom_kernel_synchronization_legality_options_t {
+  // Shared immutable-source scope owning transitive callable storage effects.
+  struct loom_storage_access_scope_t* storage_access;
   // Active local value domain extended by analyses as values are discovered.
   loom_local_value_domain_t* value_domain;
   // Borrowed function-local value facts. The analysis only reads this table.

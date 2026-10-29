@@ -1349,6 +1349,7 @@ static iree_status_t loom_low_lower_function_plan_build(
   loom_kernel_synchronization_legality_result_t synchronization_result = {0};
   if (iree_status_is_ok(status)) {
     loom_kernel_synchronization_legality_options_t synchronization_options = {
+        .storage_access = context->storage_access,
         .fact_table = context->fact_table,
         .value_domain = &context->lowering->value_domain,
         .emitter = options->emitter,

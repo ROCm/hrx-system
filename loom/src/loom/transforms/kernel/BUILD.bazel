@@ -238,6 +238,7 @@ loom_cc_library(
     hdrs = ["kernel_synchronization_legality.h"],
     deps = [
         "//loom/src/loom/analysis:kernel_synchronization_legality",
+        "//loom/src/loom/analysis:storage_access",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/pass:types",

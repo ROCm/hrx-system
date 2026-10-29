@@ -335,3 +335,38 @@ func.def @copy_padded_destination_requires_wait(%input: buffer) {
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   func.return
 }
+
+// ====
+
+// A raw buffer access observes the same storage as its pending view transfer.
+func.def @raw_destination_read_requires_wait(%input: buffer) -> (i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%origin] : buffer -> view<16xi8>
+  %storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %destination = buffer.view %storage[%origin] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %source to %destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/028 {op_name="buffer.load.i8.u", phase_name="kernel-synchronization-legality"}
+  %value = buffer.load.i8.u %storage[%origin]
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return %value : i32
+}
+
+// ====
+
+func.def @raw_source_write_requires_wait(%input: buffer, %value: i32) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%origin] : buffer -> view<16xi8>
+  %storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %destination = buffer.view %storage[%origin] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %source to %destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/037 {op_name="buffer.store.i8", phase_name="kernel-synchronization-legality"}
+  buffer.store.i8 %value, %global[%origin]
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}

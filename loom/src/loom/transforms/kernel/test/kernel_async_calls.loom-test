@@ -1,0 +1,273 @@
+// RUN: pass kernel-synchronization-legality
+
+func.def noinline @read(%values: view<16xi8>) -> (i8) {
+  %value = view.load %values[0] : view<16xi8> -> i8
+  func.return %value : i8
+}
+
+func.def @rejects_destination_read(%input: buffer) -> (i8) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%base] : buffer -> view<16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %source to %dest {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/028 {op_name="func.call", phase_name="kernel-synchronization-legality"}
+  %loaded = func.call @read(%dest) : (view<16xi8>) -> (i8)
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return %loaded : i8
+}
+
+// ====
+
+func.def noinline @write(%value: i8, %values: view<16xi8>) {
+  view.store %value, %values[0] : i8, view<16xi8>
+  func.return
+}
+
+func.def @rejects_destination_write(%input: buffer, %value: i8) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%base] : buffer -> view<16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %source to %dest {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/027 {op_name="func.call", phase_name="kernel-synchronization-legality"}
+  func.call @write(%value, %dest) : (i8, view<16xi8>)
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.def noinline @write(%values: view<16xi8>, %value: i8) {
+  view.store %value, %values[0] : i8, view<16xi8>
+  func.return
+}
+
+func.def noinline @forward(%value: i8, %values: view<16xi8>) {
+  func.call @write(%values, %value) : (view<16xi8>, i8)
+  func.return
+}
+
+// A source remains borrowed from issue, even before the transfer is grouped.
+func.def @rejects_transitive_source_write(%input: buffer, %value: i8) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%base] : buffer -> view<16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %source to %dest {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  // ERROR@+1: LOWERING/037 {op_name="func.call", phase_name="kernel-synchronization-legality"}
+  func.call @forward(%value, %source) : (i8, view<16xi8>)
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.def noinline @read_root(%root: buffer) -> (i8) {
+  %base = index.constant 0 : offset
+  %values = buffer.view %root[%base] : buffer -> view<16xi8>
+  %value = view.load %values[0] : view<16xi8> -> i8
+  func.return %value : i8
+}
+
+func.def @rejects_buffer_alias_read(%input: buffer) -> (i8) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%base] : buffer -> view<16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %alias = buffer.assume.memory_space<workgroup> %scratch : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %source to %dest {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/028 {op_name="func.call", phase_name="kernel-synchronization-legality"}
+  %loaded = func.call @read_root(%alias) : (buffer) -> (i8)
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return %loaded : i8
+}
+
+// ====
+
+func.def noinline @recursive_read(%values: view<16xi8>, %count: i32) -> (i8) {
+  %stop_count = scalar.constant 0 : i32
+  %decrement = scalar.constant 1 : i32
+  %done = scalar.cmpi eq, %count, %stop_count : i32
+  %value = scf.if %done -> (i8) {
+    %loaded = view.load %values[0] : view<16xi8> -> i8
+    scf.yield %loaded : i8
+  } else {
+    %next = scalar.subi %count, %decrement : i32
+    %nested = func.call @recursive_read(%values, %next) : (view<16xi8>, i32) -> (i8)
+    scf.yield %nested : i8
+  }
+  func.return %value : i8
+}
+
+func.def @rejects_recursive_destination_read(%input: buffer) -> (i8) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %depth = scalar.constant 1 : i32
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%base] : buffer -> view<16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %source to %dest {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/028 {op_name="func.call", phase_name="kernel-synchronization-legality"}
+  %loaded = func.call @recursive_read(%dest, %depth) : (view<16xi8>, i32) -> (i8)
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return %loaded : i8
+}
+
+// ====
+
+func.decl @external()
+
+func.def noinline @middle(%recurse: i1) {
+  func.call @forward(%recurse) : (i1)
+  func.call @external() : ()
+  func.return
+}
+
+func.def noinline @forward(%recurse: i1) {
+  scf.if %recurse {
+    %stop = scalar.constant 0 : i1
+    func.call @middle(%stop) : (i1)
+  }
+  func.return
+}
+
+func.def @rejects_transitive_unbounded_access(%input: buffer) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %recurse = scalar.constant 1 : i1
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%base] : buffer -> view<16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %source to %dest {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/070 {op_name="func.call", phase_name="kernel-synchronization-legality"}
+  func.call @forward(%recurse) : (i1)
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.decl readonly @external_read()
+
+func.def @rejects_unbounded_read(%input: buffer) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%base] : buffer -> view<16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %source to %dest {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/070 {op_name="func.call", phase_name="kernel-synchronization-legality"}
+  func.call readonly @external_read() : ()
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+func.decl pure @observe_address(%values: view<16xi8>) -> (i8)
+
+func.decl @external()
+
+func.def noinline @read(%values: view<16xi8>) -> (i8) {
+  %value = view.load %values[0] : view<16xi8> -> i8
+  func.return %value : i8
+}
+
+func.def noinline @write(%values: view<16xi8>, %value: i8) {
+  view.store %value, %values[0] : i8, view<16xi8>
+  func.return
+}
+
+func.def noinline @write_root(%root: buffer, %value: i8) {
+  %base = index.constant 0 : offset
+  %values = buffer.view %root[%base] : buffer -> view<16xi8>
+  view.store %value, %values[0] : i8, view<16xi8>
+  func.return
+}
+
+// Read/read overlap, disjoint intervals of one root, and distinct allocations
+// remain legal. Waiting retires the restriction on opaque and overlapping calls.
+func.def @allows_independent_calls(%input: buffer) -> (i8) {
+  %base = index.constant 0 : offset
+  %adjacent = index.constant 16 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%base] : buffer -> view<16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %independent = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<16xi8>
+  %other = buffer.view %scratch[%adjacent] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %source to %dest {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  %address = func.call pure @observe_address(%dest) : (view<16xi8>) -> (i8)
+  %source_value = func.call @read(%source) : (view<16xi8>) -> (i8)
+  func.call @write(%other, %source_value) : (view<16xi8>, i8)
+  func.call @write_root(%independent, %address) : (buffer, i8)
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.call @external() : ()
+  %result = func.call @read(%dest) : (view<16xi8>) -> (i8)
+  func.return %result : i8
+}
+
+// ====
+
+test.target<low_core> @target
+
+low.func.decl target<test.low.core>(@target) @native_access()
+
+func.def @rejects_opaque_native_access(%input: buffer) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%base] : buffer -> view<16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %source to %dest {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/070 {op_name="low.invoke", phase_name="kernel-synchronization-legality"}
+  low.invoke @native_access() : ()
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}
+
+// ====
+
+// RUN: pass source-to-low
+
+test.target<low_core> @target
+
+func.decl @external()
+
+func.def target(@target) @rejects_call_during_source_lowering(%input: buffer) {
+  %base = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source = buffer.view %global[%base] : buffer -> view<16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<16xi8>
+  %copy = kernel.async.copy %source to %dest {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi8> to view<16xi8> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  // ERROR@+1: LOWERING/070 {op_name="func.call", phase_name="source-low"}
+  func.call @external() : ()
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  func.return
+}

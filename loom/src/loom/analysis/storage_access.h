@@ -107,6 +107,16 @@ typedef struct loom_storage_access_scope_t {
   struct loom_storage_access_state_t* state;
 } loom_storage_access_scope_t;
 
+// Memory effects projected through one call boundary. Reference arguments
+// retain their own effects; unbounded accesses are not confined to arguments.
+typedef struct loom_storage_access_call_t {
+  // Completed formal references in call argument order, with NULL entries for
+  // scalar arguments. NULL when no bounded argument summary is needed or known.
+  const loom_storage_reference_t* const* arguments;
+  // The callee or a reached call may access storage without a bounded operand.
+  bool has_unbounded_memory_access;
+} loom_storage_access_call_t;
+
 // Initializes a demand scope without traversing source or allocating storage.
 // The scope ends before any represented source mutation. All borrowed graphs
 // and use records expire with |arena|; no graph is needed by plan execution.
@@ -126,6 +136,15 @@ iree_status_t loom_storage_access_require_function(
     loom_storage_access_scope_t* scope, loom_func_like_t function,
     loom_local_value_domain_t* value_domain,
     const loom_storage_access_function_t** out_function);
+
+// Projects the canonical reached-body summaries through |call|. Pure calls
+// need no graph; opaque memory effects remain unbounded. Visible semantic
+// callees share the same demand scope and fixed point as function queries.
+// The caller's active value domain is restored before returning.
+iree_status_t loom_storage_access_require_call(
+    loom_storage_access_scope_t* scope, loom_call_like_t call,
+    loom_local_value_domain_t* value_domain,
+    loom_storage_access_call_t* out_call);
 
 // Returns the classified effects of a direct use after graph construction.
 static inline loom_storage_access_effects_t loom_storage_access_use_effects(

@@ -9,6 +9,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/control_uniformity.h"
 #include "loom/analysis/movement.h"
+#include "loom/analysis/storage_access.h"
 #include "loom/error/error_catalog.h"
 #include "loom/error/parameter.h"
 #include "loom/ir/context.h"
@@ -665,44 +666,115 @@ loom_kernel_synchronization_legality_check_pending_source_hazard(
 }
 
 static iree_status_t
-loom_kernel_synchronization_legality_check_op_memory_accesses(
+loom_kernel_synchronization_legality_check_reference_access(
     loom_kernel_synchronization_legality_state_t* state,
     const loom_kernel_synchronization_legality_stream_t* stream,
-    const loom_op_t* op) {
-  if (stream->completed_endpoint_count == stream->endpoint_count) {
+    const loom_op_t* op, loom_value_id_t value_id, loom_operand_flags_t flags) {
+  const loom_view_region_t* access_region = NULL;
+  IREE_RETURN_IF_ERROR(loom_view_region_table_get(
+      &state->result->movement.view_regions, value_id, &access_region));
+  loom_view_region_t buffer_region = {0};
+  if (!access_region &&
+      loom_type_is_buffer(loom_module_value_type(state->module, value_id))) {
+    loom_value_fact_buffer_reference_t reference = {
+        .root_value_id = value_id,
+        .maximum_byte_extent = loom_value_facts_make(0, INT64_MAX, 1),
+    };
+    (void)loom_value_facts_query_buffer_reference(
+        &state->fact_table->context,
+        loom_value_fact_table_lookup(state->fact_table, value_id), &reference);
+    buffer_region.root_value_id =
+        loom_value_fact_buffer_reference_resolve_root_value(reference,
+                                                            value_id);
+    buffer_region.alias_scope_id = reference.alias_scope_id;
+    buffer_region.memory_space = reference.memory_space;
+    buffer_region.nullability = reference.nullability;
+    buffer_region.origin = reference.origin;
+    loom_symbolic_expr_constant(0, &buffer_region.begin_byte_offset);
+    loom_symbolic_expr_unknown(reference.maximum_byte_extent,
+                               &buffer_region.byte_length);
+    buffer_region.end_byte_offset = buffer_region.byte_length;
+    access_region = &buffer_region;
+  }
+  if (!access_region) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(
+      loom_kernel_synchronization_legality_check_pending_dest_hazard(
+          state, stream, op, access_region, flags));
+  if (state->failed) {
+    return iree_ok_status();
+  }
+  return loom_kernel_synchronization_legality_check_pending_source_hazard(
+      state, stream, op, access_region, flags);
+}
 
-  const loom_op_vtable_t* vtable = loom_op_vtable(state->module, op);
-  if (!vtable || !vtable->operand_descriptors) {
+static iree_status_t loom_kernel_synchronization_legality_check_call(
+    loom_kernel_synchronization_legality_state_t* state,
+    const loom_kernel_synchronization_legality_stream_t* stream,
+    loom_call_like_t call) {
+  loom_storage_access_call_t access = {0};
+  IREE_RETURN_IF_ERROR(
+      loom_storage_access_require_call(state->options->storage_access, call,
+                                       state->options->value_domain, &access));
+  if (access.has_unbounded_memory_access) {
+    return loom_kernel_synchronization_legality_fail(state, call.op,
+                                                     LOOM_ERR_LOWERING_070);
+  }
+  if (!access.arguments) {
     return iree_ok_status();
   }
-  const uint16_t descriptor_count =
-      op->operand_count < vtable->fixed_operand_count
-          ? op->operand_count
-          : vtable->fixed_operand_count;
-  const loom_value_id_t* operands = loom_op_const_operands(op);
-  for (uint16_t i = 0; i < descriptor_count; ++i) {
-    const loom_operand_flags_t flags = vtable->operand_descriptors[i].flags;
-    if (!iree_any_bit_set(flags, LOOM_OPERAND_READS | LOOM_OPERAND_WRITES)) {
+  const loom_value_slice_t arguments = loom_call_like_operands(call);
+  for (uint16_t i = 0; i < arguments.count; ++i) {
+    const loom_storage_reference_t* reference = access.arguments[i];
+    if (!reference || !reference->effects) {
       continue;
     }
-
-    const loom_view_region_t* access_region = NULL;
-    IREE_RETURN_IF_ERROR(loom_view_region_table_get(
-        &state->result->movement.view_regions, operands[i], &access_region));
-    if (!access_region) {
-      continue;
+    loom_operand_flags_t flags = 0;
+    if (iree_any_bit_set(reference->effects, LOOM_STORAGE_ACCESS_READ |
+                                                 LOOM_STORAGE_ACCESS_ESCAPE)) {
+      flags |= LOOM_OPERAND_READS;
+    }
+    if (iree_any_bit_set(reference->effects, LOOM_STORAGE_ACCESS_WRITE |
+                                                 LOOM_STORAGE_ACCESS_ESCAPE)) {
+      flags |= LOOM_OPERAND_WRITES;
     }
     IREE_RETURN_IF_ERROR(
-        loom_kernel_synchronization_legality_check_pending_dest_hazard(
-            state, stream, op, access_region, flags));
+        loom_kernel_synchronization_legality_check_reference_access(
+            state, stream, call.op, loom_value_slice_get(arguments, i), flags));
     if (state->failed) {
       return iree_ok_status();
     }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+loom_kernel_synchronization_legality_check_op_memory_accesses(
+    loom_kernel_synchronization_legality_state_t* state,
+    const loom_kernel_synchronization_legality_stream_t* stream,
+    loom_op_t* op) {
+  if (stream->completed_endpoint_count == stream->endpoint_count) {
+    return iree_ok_status();
+  }
+  const loom_call_like_t call = loom_call_like_cast(state->module, op);
+  if (loom_call_like_isa(call)) {
+    return loom_kernel_synchronization_legality_check_call(state, stream, call);
+  }
+
+  const loom_op_vtable_t* vtable = loom_op_vtable(state->module, op);
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    const loom_operand_descriptor_t* descriptor = NULL;
+    if (!loom_op_operand_descriptor_at(vtable, op, i, &descriptor, NULL,
+                                       NULL) ||
+        !iree_any_bit_set(descriptor->flags,
+                          LOOM_OPERAND_READS | LOOM_OPERAND_WRITES)) {
+      continue;
+    }
     IREE_RETURN_IF_ERROR(
-        loom_kernel_synchronization_legality_check_pending_source_hazard(
-            state, stream, op, access_region, flags));
+        loom_kernel_synchronization_legality_check_reference_access(
+            state, stream, op, operands[i], descriptor->flags));
     if (state->failed) {
       return iree_ok_status();
     }

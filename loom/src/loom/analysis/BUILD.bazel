@@ -705,6 +705,7 @@ loom_cc_library(
     deps = [
         ":control_uniformity",
         ":movement",
+        ":storage_access",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:parameter",

@@ -660,7 +660,8 @@ static iree_status_t loom_pipeline_worker_build(
     iree_host_size_t incoming_count,
     const loom_channel_plan_callable_t* const* callables,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
-    loom_pipeline_worker_t* worker, bool* out_valid) {
+    loom_storage_access_scope_t* storage_access, loom_pipeline_worker_t* worker,
+    bool* out_valid) {
   *out_valid = false;
   const loom_op_t* declaration = worker->source->declaration;
   const loom_attribute_t origins =
@@ -792,6 +793,7 @@ static iree_status_t loom_pipeline_worker_build(
   if (iree_status_is_ok(status) &&
       rejection.kind == LOOM_CHANNEL_PLAN_REJECTION_NONE) {
     const loom_kernel_synchronization_legality_options_t options = {
+        .storage_access = storage_access,
         .value_domain = &worker->value_domain,
         .fact_table = &worker->facts,
         .emitter = diagnostic_emitter,
@@ -900,6 +902,7 @@ static bool loom_pipeline_storage_references_may_alias(
 static iree_status_t loom_pipeline_workers_prove_transport_sources(
     loom_module_t* module, const loom_pipeline_resources_t* resources,
     iree_host_size_t incoming_count, iree_arena_allocator_t* arena,
+    loom_storage_access_scope_t* storage_access,
     loom_pipeline_worker_t* workers) {
   if (incoming_count || resources->composition_count) {
     return iree_ok_status();
@@ -914,8 +917,6 @@ static iree_status_t loom_pipeline_workers_prove_transport_sources(
   const loom_storage_access_function_t** accesses = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, resources->strand_count, sizeof(*accesses), (void**)&accesses));
-  loom_storage_access_scope_t access_scope;
-  loom_storage_access_scope_initialize(module, arena, &access_scope);
   iree_host_size_t modifying_capacity = 0;
   for (iree_host_size_t i = 0; i < resources->strand_count; ++i) {
     loom_pipeline_worker_t* worker = &workers[i];
@@ -932,7 +933,7 @@ static iree_status_t loom_pipeline_workers_prove_transport_sources(
     }
     loom_local_value_domain_restore(&worker->value_domain);
     iree_status_t status = loom_storage_access_require_function(
-        &access_scope, worker->function, &worker->value_domain, &accesses[i]);
+        storage_access, worker->function, &worker->value_domain, &accesses[i]);
     loom_local_value_domain_release(&worker->value_domain);
     IREE_RETURN_IF_ERROR(status);
     for (const loom_storage_access_use_t* use = accesses[i]->uses; use;
@@ -1029,18 +1030,21 @@ iree_status_t loom_pipeline_workers_build(
   loom_pipeline_worker_t* workers = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, resources->strand_count, sizeof(*workers), (void**)&workers));
+  loom_storage_access_scope_t storage_access;
+  loom_storage_access_scope_initialize(module, arena, &storage_access);
   for (iree_host_size_t i = 0; i < resources->strand_count; ++i) {
     workers[i] = (loom_pipeline_worker_t){.source = &resources->strands[i]};
     bool valid = false;
     IREE_RETURN_IF_ERROR(loom_pipeline_worker_build(
         module, resources, construction_facts, incoming, incoming_count,
-        callables, diagnostic_emitter, arena, &workers[i], &valid));
+        callables, diagnostic_emitter, arena, &storage_access, &workers[i],
+        &valid));
     if (!valid) {
       return iree_ok_status();
     }
   }
   IREE_RETURN_IF_ERROR(loom_pipeline_workers_prove_transport_sources(
-      module, resources, incoming_count, arena, workers));
+      module, resources, incoming_count, arena, &storage_access, workers));
   *out_workers = workers;
   *out_valid = true;
   return iree_ok_status();

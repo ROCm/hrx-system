@@ -7,6 +7,7 @@
 #include "loom/transforms/kernel/kernel_synchronization_legality.h"
 
 #include "loom/analysis/kernel_synchronization_legality.h"
+#include "loom/analysis/storage_access.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ops/op_defs.h"
 #include "loom/pass/value_facts.h"
@@ -61,7 +62,10 @@ iree_status_t loom_kernel_synchronization_legality_run(
             loom_target_function_version_target_facts(pass->function_version)),
         &fact_table);
   }
+  loom_storage_access_scope_t storage_access;
+  loom_storage_access_scope_initialize(module, pass->arena, &storage_access);
   loom_kernel_synchronization_legality_options_t options = {
+      .storage_access = &storage_access,
       .value_domain = &value_domain,
       .fact_table = fact_table,
       .emitter = pass->diagnostic_emitter,

@@ -709,6 +709,23 @@ ERR_LOWERING_069 = ErrorDef(
     params=(),
 )
 
+# ERR_LOWERING_070: A call's memory accesses cannot be bounded before async wait.
+ERR_LOWERING_070 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=70,
+    severity=Severity.ERROR,
+    summary="Unbounded callable memory access while an async transfer is pending.",
+    message=(
+        "{op_name} may access memory outside its described arguments before "
+        "pending async transfers complete during {phase_name}"
+    ),
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("phase_name", ParamKind.STRING),
+    ),
+    fix_hint="Wait for pending transfers before invoking an unbounded memory effect",
+)
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -747,4 +764,5 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_067,
     ERR_LOWERING_068,
     ERR_LOWERING_069,
+    ERR_LOWERING_070,
 )
