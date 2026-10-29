@@ -648,58 +648,56 @@ def _vector_splat_rule(
     scalar_type: TypePattern,
     result_type: TypePattern,
     descriptor_key: str,
+    *,
+    carrier: _VectorConstantCarrier = _VectorConstantCarrier.NATIVE,
+    unit_count: int = 1,
+    extra_guards: Sequence[Guard] = (),
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
+    packet = (
+        ValueRef.result("result")
+        if carrier is _VectorConstantCarrier.NATIVE
+        else ValueRef.temporary("packet")
+    )
+    emits: list[EmitDescriptorOp | EmitRegisterConcat] = [
+        _op_emit(
+            descriptor,
+            operands={"src": ValueRef.operand("scalar")},
+            results={"dst": packet},
+            result_types=(
+                None
+                if carrier is _VectorConstantCarrier.NATIVE
+                else {"dst": DescriptorResultType()}
+            ),
+        )
+    ]
+    if carrier is not _VectorConstantCarrier.NATIVE:
+        carrier_unit = packet
+        if carrier is _VectorConstantCarrier.ACCUMULATOR:
+            carrier_unit = ValueRef.temporary("accumulator_unit")
+            emits.append(
+                _op_emit(
+                    _descriptor("amd.xdna.aie2p.move.vector512.to.accumulator512"),
+                    operands={"src": packet},
+                    results={"dst": carrier_unit},
+                    result_types={"dst": DescriptorResultType()},
+                )
+            )
+        emits.append(
+            EmitRegisterConcat(
+                sources=(carrier_unit,) * unit_count,
+                result=ValueRef.result("result"),
+            )
+        )
     return DescriptorRule(
         source_op=vector.vector_splat,
         descriptor=descriptor,
         guards=(
             Guard.value_type("scalar", scalar_type),
             Guard.value_type("result", result_type),
+            *extra_guards,
         ),
-        emit=(
-            _op_emit(
-                descriptor,
-                operands={"src": ValueRef.operand("scalar")},
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
-def _vector_wide_f32_splat_rule() -> DescriptorRule:
-    """Replicates one F32 value across both native accumulator units."""
-
-    broadcast = _descriptor("amd.xdna.aie2p.splat.i32x16")
-    move_to_accumulator = _descriptor("amd.xdna.aie2p.move.vector512.to.accumulator512")
-    packet = ValueRef.temporary("packet")
-    accumulator_unit = ValueRef.temporary("accumulator_unit")
-    return DescriptorRule(
-        source_op=vector.vector_splat,
-        descriptor=broadcast,
-        guards=(
-            Guard.value_type("scalar", _F32),
-            Guard.value_type("result", _F32X32_VECTOR),
-        ),
-        emit=(
-            _op_emit(
-                broadcast,
-                operands={"src": ValueRef.operand("scalar")},
-                results={"dst": packet},
-                result_types={"dst": DescriptorResultType()},
-            ),
-            _op_emit(
-                move_to_accumulator,
-                operands={"src": packet},
-                results={"dst": accumulator_unit},
-                result_types={"dst": DescriptorResultType()},
-            ),
-            EmitRegisterConcat(
-                sources=(accumulator_unit, accumulator_unit),
-                result=ValueRef.result("result"),
-            ),
-        ),
-        report_key="f32x32_native_splat",
+        emit=tuple(emits),
     )
 
 

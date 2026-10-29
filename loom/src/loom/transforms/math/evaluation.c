@@ -165,10 +165,6 @@ static iree_status_t loom_math_evaluation_vector_cmpf_build(
 static iree_status_t loom_math_evaluation_vector_constant_build(
     loom_builder_t* builder, loom_attribute_t value, loom_type_t result_type,
     loom_location_id_t location, loom_op_t** out_op) {
-  if (!loom_scalar_type_is_float(loom_type_element_type(result_type))) {
-    return loom_vector_constant_build(builder, value, result_type, location,
-                                      out_op);
-  }
   const loom_type_t element_type =
       loom_type_scalar(loom_type_element_type(result_type));
   loom_op_t* scalar_op = NULL;

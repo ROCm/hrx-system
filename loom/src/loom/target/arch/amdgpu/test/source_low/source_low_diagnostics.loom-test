@@ -17,7 +17,8 @@ kernel.def target(@target) @lds_b32_diagnostics() {
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64xi32>
-  %stored_value = vector.constant 1 : vector<1xi32>
+  %stored_value_scalar = scalar.constant 1 : i32
+  %stored_value = vector.splat %stored_value_scalar : vector<1xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="4"}
   vector.store %stored_value, %scratch_view[%tid] : vector<1xi32>, view<64xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b32", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="4"}
@@ -32,12 +33,12 @@ amdgpu.target<gfx11-generic> @target
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_b32_diagnostics() asm {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %13 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
+  %14 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
   %stored_value = v_mov_b32 1
-  %16 = v_lshlrev_b32_src0_inline %tid, 2
-  ds_write_b32 %16, %stored_value
-  %loaded = ds_read_b32 %16
-  global_store_b32_saddr %16, %loaded, %output_view
+  %17 = v_lshlrev_b32_src0_inline %tid, 2
+  ds_write_b32 %17, %stored_value
+  %loaded = ds_read_b32 %17
+  global_store_b32_saddr %17, %loaded, %output_view
   return
 }
 
@@ -57,7 +58,8 @@ kernel.def target(@target) @lds_padded_diagnostics() {
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, %layout>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
-  %stored_value = vector.constant 1 : vector<4xi32>
+  %stored_value_scalar = scalar.constant 1 : i32
+  %stored_value = vector.splat %stored_value_scalar : vector<4xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="20"}
   vector.store %stored_value, %scratch_view[%tid, 0] : vector<4xi32>, view<64x4xi32, %layout>
   // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="20"}
@@ -72,15 +74,15 @@ amdgpu.target<gfx11-generic> @target
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_padded_diagnostics() asm {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %14 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
-  %16 = v_mov_b32 1
-  %stored_value = concat(%16, %16, %16, %16) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %21 = v_mov_b32 20
-  %22 = v_mul_lo_u32 %tid, %21
-  ds_write_b128 %22, %stored_value
-  %loaded = ds_read_b128 %22
-  %26 = v_lshlrev_b32_src0_inline %tid, 4
-  global_store_b128_saddr %26, %loaded, %output_view
+  %15 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
+  %17 = v_mov_b32 1
+  %stored_value = concat(%17, %17, %17, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %22 = v_mov_b32 20
+  %23 = v_mul_lo_u32 %tid, %22
+  ds_write_b128 %23, %stored_value
+  %loaded = ds_read_b128 %23
+  %27 = v_lshlrev_b32_src0_inline %tid, 4
+  global_store_b128_saddr %27, %loaded, %output_view
   return
 }
 
@@ -100,7 +102,8 @@ kernel.def target(@target) @lds_read2_write2_diagnostics() {
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32, %layout>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x2xi32>
-  %stored_value = vector.constant 1 : vector<2xi32>
+  %stored_value_scalar = scalar.constant 1 : i32
+  %stored_value = vector.splat %stored_value_scalar : vector<2xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write2_b32", address_form="ds_2addr", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="32"}
   vector.store %stored_value, %scratch_view[%tid, 0] : vector<2xi32>, view<64x4xi32, %layout>
   // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read2_b32", address_form="ds_2addr", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="32"}
@@ -115,13 +118,13 @@ amdgpu.target<gfx11-generic> @target
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_read2_write2_diagnostics() asm {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %14 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
-  %16 = v_mov_b32 1
-  %19 = v_lshlrev_b32_src0_inline %tid, 5
-  ds_write2_b32 %19, %16, %16 {offset1 = 2}
-  %loaded = ds_read2_b32 %19 {offset1 = 2}
-  %24 = v_lshlrev_b32_src0_inline %tid, 3
-  global_store_b64_saddr %24, %loaded, %output_view
+  %15 = storage {byte_alignment = 16, byte_length = 2048} : low.storage<workgroup>
+  %17 = v_mov_b32 1
+  %20 = v_lshlrev_b32_src0_inline %tid, 5
+  ds_write2_b32 %20, %17, %17 {offset1 = 2}
+  %loaded = ds_read2_b32 %20 {offset1 = 2}
+  %25 = v_lshlrev_b32_src0_inline %tid, 3
+  global_store_b64_saddr %25, %loaded, %output_view
   return
 }
 
@@ -140,7 +143,8 @@ kernel.def target(@target) @lds_dense_b128_diagnostics() {
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%buffer_base] : buffer -> view<64x4xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
-  %stored_value = vector.constant 1 : vector<4xi32>
+  %stored_value_scalar = scalar.constant 1 : i32
+  %stored_value = vector.splat %stored_value_scalar : vector<4xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="store", packet_key="amdgpu.ds_write_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="16"}
   vector.store %stored_value, %scratch_view[%tid, 0] : vector<4xi32>, view<64x4xi32>
   // REMARK@+1: BACKEND/017 {operation_kind="load", packet_key="amdgpu.ds_read_b128", address_form="default", dynamic_term_kind="vaddr", fallback_reason="cross_wave_workgroup", dynamic_stride_bytes="16"}
@@ -155,13 +159,13 @@ amdgpu.target<gfx11-generic> @target
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @lds_dense_b128_diagnostics() asm {
   %tid = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %13 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
-  %15 = v_mov_b32 1
-  %stored_value = concat(%15, %15, %15, %15) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %20 = v_lshlrev_b32_src0_inline %tid, 4
-  ds_write_b128 %20, %stored_value
-  %loaded = ds_read_b128 %20
-  global_store_b128_saddr %20, %loaded, %output_view
+  %14 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
+  %16 = v_mov_b32 1
+  %stored_value = concat(%16, %16, %16, %16) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %21 = v_lshlrev_b32_src0_inline %tid, 4
+  ds_write_b128 %21, %stored_value
+  %loaded = ds_read_b128 %21
+  global_store_b128_saddr %21, %loaded, %output_view
   return
 }
 
@@ -311,25 +315,25 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %20 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {extent = 262144, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %subgroup = v_lshrrev_b32_src0_inline %20, 5
-  %value_scalar = v_mov_b32 0
-  %25 = v_and_b32_src0_inline %20, 31
-  %26 = s_lshl_b32_rhs_inline %workgroup, 12
-  %27 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %28 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %29 = s_mov_b32 0
-  %30, %31 = s_add_co_u32 %27, %26
-  %32, %33 = s_addc_u32 %28, %29, %31
-  %34 = concat(%30, %32) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %35 = v_lshlrev_b32_src0_inline %subgroup, 10
-  %36 = v_lshl_add_u32_shift_imm %25, %35, 2
-  global_store_b32_saddr %36, %value_scalar, %34
-  global_store_b32_saddr %36, %value_scalar, %34 {offset = 128}
-  global_store_b32_saddr %36, %value_scalar, %34 {offset = 256}
-  global_store_b32_saddr %36, %value_scalar, %34 {offset = 384}
-  global_store_b32_saddr %36, %value_scalar, %34 {offset = 512}
-  global_store_b32_saddr %36, %value_scalar, %34 {offset = 640}
-  global_store_b32_saddr %36, %value_scalar, %34 {offset = 768}
-  global_store_b32_saddr %36, %value_scalar, %34 {offset = 896}
+  %23 = v_mov_b32 0
+  %32 = v_and_b32_src0_inline %20, 31
+  %33 = s_lshl_b32_rhs_inline %workgroup, 12
+  %34 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %36 = s_mov_b32 0
+  %37, %38 = s_add_co_u32 %34, %33
+  %39, %40 = s_addc_u32 %35, %36, %38
+  %41 = concat(%37, %39) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %42 = v_lshlrev_b32_src0_inline %subgroup, 10
+  %43 = v_lshl_add_u32_shift_imm %32, %42, 2
+  global_store_b32_saddr %43, %23, %41
+  global_store_b32_saddr %43, %23, %41 {offset = 128}
+  global_store_b32_saddr %43, %23, %41 {offset = 256}
+  global_store_b32_saddr %43, %23, %41 {offset = 384}
+  global_store_b32_saddr %43, %23, %41 {offset = 512}
+  global_store_b32_saddr %43, %23, %41 {offset = 640}
+  global_store_b32_saddr %43, %23, %41 {offset = 768}
+  global_store_b32_saddr %43, %23, %41 {offset = 896}
   return
 }
 
@@ -352,7 +356,8 @@ kernel.def target(@target) @workgroup_dependent_lds_index_rejected() {
   %bytes = index.constant 256 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32>
-  %stored_value = vector.constant 1 : vector<1xi32>
+  %stored_value_scalar = scalar.constant 1 : i32
+  %stored_value = vector.splat %stored_value_scalar : vector<1xi32>
   // ERROR@+1: AMDGPU/023 {constraint_key="memory_access.workgroup_dynamic_index_source"}
   vector.store %stored_value, %scratch_view[%element_index] : vector<1xi32>, view<64xi32>
   kernel.return
@@ -391,7 +396,8 @@ kernel.def target(@target) @cache_policy_workgroup_dropped() {
   %bytes = index.constant 1024 : offset
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64x4xi32>
-  %stored_value = vector.constant 1 : vector<4xi32>
+  %stored_value_scalar = scalar.constant 1 : i32
+  %stored_value = vector.splat %stored_value_scalar : vector<4xi32>
   // REMARK@+2: BACKEND/040 "dropped cache policy 'device/non_temporal'" "decision 'memory_cache_policy.unsupported'" "store in workgroup"
   // REMARK@+1: BACKEND/017 "selected store memory packet 'amdgpu.ds_write_b128'"
   vector.store %stored_value, %scratch_view[%tid, 0] {cache_scope = device, cache_temporal = non_temporal} : vector<4xi32>, view<64x4xi32>
@@ -405,15 +411,15 @@ kernel.def target(@target) @cache_policy_workgroup_dropped() {
 amdgpu.target<gfx11-generic> @target
 
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @cache_policy_workgroup_dropped() asm {
-  %9 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
-  %scratch_view = storage_address %9 : low.storage<workgroup> -> reg<amdgpu.vgpr>
-  %11 = v_mov_b32 1
-  %stored_value = concat(%11, %11, %11, %11) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %16 = v_mov_b32 0
-  ds_write_b128 %16, %stored_value
+  %10 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
+  %scratch_view = storage_address %10 : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %12 = v_mov_b32 1
+  %stored_value = concat(%12, %12, %12, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %17 = v_mov_b32 0
+  ds_write_b128 %17, %stored_value
   s_waitcnt {vmcnt = 0, lgkmcnt = 0}
   s_waitcnt_vscnt {vscnt = 0}
-  %old = ds_add_rtn_u32 %scratch_view, %11
+  %old = ds_add_rtn_u32 %scratch_view, %12
   s_waitcnt {lgkmcnt = 0}
   buffer_gl0_inv
   return

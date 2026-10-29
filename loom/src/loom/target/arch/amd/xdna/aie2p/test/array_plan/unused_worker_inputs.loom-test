@@ -10,7 +10,8 @@ func.def target(@core_target) @replace(%input: buffer, %output_arg: buffer) {
   %output = buffer.assume.alignment %output_arg {minimum_alignment = 64} : buffer
   %base = index.constant 0 : offset
   %output_view = buffer.view %output[%base] : buffer -> view<16xi32>
-  %value = vector.constant 1 : vector<16xi32>
+  %value_scalar = scalar.constant 1 : i32
+  %value = vector.splat %value_scalar : vector<16xi32>
   vector.store %value, %output_view[0] : vector<16xi32>, view<16xi32>
   func.return
 }
@@ -21,7 +22,8 @@ func.def target(@core_target) @following(%input_arg: buffer, %output_arg: buffer
   %input_view = buffer.view %input[%base] : buffer -> view<16xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<16xi32>
   %value = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
-  %increment = vector.constant 1 : vector<16xi32>
+  %increment_scalar = scalar.constant 1 : i32
+  %increment = vector.splat %increment_scalar : vector<16xi32>
   %next = vector.addi %value, %increment : vector<16xi32>
   vector.store %next, %output_view[0] : vector<16xi32>, view<16xi32>
   func.return
@@ -142,8 +144,8 @@ low.func.def retain target<amd.xdna.aie2p.core> @discard_then_increment$worker$0
   acq %acquire_delta, 49
   acq %acquire_delta, 50
   %output = copy %5 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %3 = mov.short 1
-  %value = vbcst.32 %3
+  %value_scalar = mov.short 1
+  %value = vbcst.32 %value_scalar
   vst.512.i32x16 %value, %output, 0
   rel %release_delta, 51
   rel %release_delta, 48
@@ -165,8 +167,8 @@ low.func.def retain target<amd.xdna.aie2p.core> @discard_then_increment$worker$1
   acq %acquire_delta, 48
   %input = copy %20 : reg<aie2p.ep> -> reg<aie2p.ep>
   %output = copy %22 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %16 = mov.short 1
-  %increment = vbcst.32 %16
+  %increment_scalar = mov.short 1
+  %increment = vbcst.32 %increment_scalar
   %value = vlda.512.i32x16 %input, 0
   %next = vadd.32 %value, %increment
   vst.512.i32x16 %next, %output, 0

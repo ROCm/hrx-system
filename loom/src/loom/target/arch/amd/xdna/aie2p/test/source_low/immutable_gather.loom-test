@@ -7,9 +7,12 @@ func.def @immutable_widths(%packed_bf16: vector<32xi8>, %packed_f32: vector<16xi
   %view_bf16 = buffer.view %table[%origin] : buffer -> view<32xbf16>
   %view_f32 = buffer.view %table[%origin] : buffer -> view<16xf32>
   %view_f64 = buffer.view %table[%origin] : buffer -> view<8xf64>
-  %mask_bf16 = vector.constant 31 : vector<32xi8>
-  %mask_f32 = vector.constant 15 : vector<16xi8>
-  %mask_f64 = vector.constant 7 : vector<8xi8>
+  %mask_bf16_scalar = scalar.constant 31 : i8
+  %mask_bf16 = vector.splat %mask_bf16_scalar : vector<32xi8>
+  %mask_f32_scalar = scalar.constant 15 : i8
+  %mask_f32 = vector.splat %mask_f32_scalar : vector<16xi8>
+  %mask_f64_scalar = scalar.constant 7 : i8
+  %mask_f64 = vector.splat %mask_f64_scalar : vector<8xi8>
   %bounded_bf16 = vector.andi %packed_bf16, %mask_bf16 : vector<32xi8>
   %bounded_f32 = vector.andi %packed_f32, %mask_f32 : vector<16xi8>
   %bounded_f64 = vector.andi %packed_f64, %mask_f64 : vector<8xi8>
@@ -24,12 +27,12 @@ func.def @immutable_widths(%packed_bf16: vector<32xi8>, %packed_f32: vector<16xi
 
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@__loom_target_context_0_0) abi(object_function) @immutable_widths(%packed_bf16: reg<aie2p.vec256 x2>, %packed_f32: reg<aie2p.vec256 x2>, %packed_f64: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
-  %6 = mov.short 31
-  %mask_bf16 = vbcst.8 %6
-  %8 = mov.short 15
-  %mask_f32 = vbcst.8 %8
-  %10 = mov.short 7
-  %mask_f64 = vbcst.8 %10
+  %mask_bf16_scalar = mov.short 31
+  %mask_bf16 = vbcst.8 %mask_bf16_scalar
+  %mask_f32_scalar = mov.short 15
+  %mask_f32 = vbcst.8 %mask_f32_scalar
+  %mask_f64_scalar = mov.short 7
+  %mask_f64 = vbcst.8 %mask_f64_scalar
   %bounded_bf16 = vband %packed_bf16, %mask_bf16
   %bounded_f32 = vband %packed_f32, %mask_f32
   %bounded_f64 = vband %packed_f64, %mask_f64
@@ -140,8 +143,10 @@ func.def target(@target) @immutable_type_aliases(%packed_i16: vector<32xi8>, %pa
   %view_i16 = buffer.view %table[%origin] : buffer -> view<32xi16>
   %view_f16 = buffer.view %table[%origin] : buffer -> view<32xf16>
   %view_i64 = buffer.view %table[%origin] : buffer -> view<8xi64>
-  %mask_16 = vector.constant 31 : vector<32xi8>
-  %mask_64 = vector.constant 7 : vector<8xi8>
+  %mask_16_scalar = scalar.constant 31 : i8
+  %mask_16 = vector.splat %mask_16_scalar : vector<32xi8>
+  %mask_64_scalar = scalar.constant 7 : i8
+  %mask_64 = vector.splat %mask_64_scalar : vector<8xi8>
   %bounded_i16 = vector.andi %packed_i16, %mask_16 : vector<32xi8>
   %bounded_f16 = vector.andi %packed_f16, %mask_16 : vector<32xi8>
   %bounded_i64 = vector.andi %packed_i64, %mask_64 : vector<8xi8>
@@ -172,7 +177,8 @@ func.def target(@target) @unsupported_i8() -> (vector<8xi8>) {
   %table = global.load @table : buffer
   %origin = index.constant 0 : offset
   %view = buffer.view %table[%origin] : buffer -> view<64xi8>
-  %indices = vector.constant 0 : vector<8xi32>
+  %indices_scalar = scalar.constant 0 : i32
+  %indices = vector.splat %indices_scalar : vector<8xi32>
   %result_i8 = vector.gather %view[0][%indices] : view<64xi8>, vector<8xi32> -> vector<8xi8>
   func.return %result_i8 : vector<8xi8>
 }
@@ -181,7 +187,8 @@ func.def target(@target) @index_typed_offsets() -> (vector<8xi64>) {
   %table = global.load @table : buffer
   %origin = index.constant 0 : offset
   %view = buffer.view %table[%origin] : buffer -> view<8xi64>
-  %indices = vector.constant 0 : vector<8xindex>
+  %indices_scalar = index.constant 0 : index
+  %indices = vector.splat %indices_scalar : vector<8xindex>
   %result_index = vector.gather %view[0][%indices] : view<8xi64>, vector<8xindex> -> vector<8xi64>
   func.return %result_index : vector<8xi64>
 }
@@ -190,7 +197,8 @@ func.def target(@target) @nonnative_lane_count() -> (vector<8xbf16>) {
   %table = global.load @table : buffer
   %origin = index.constant 0 : offset
   %view = buffer.view %table[%origin] : buffer -> view<32xbf16>
-  %indices = vector.constant 0 : vector<8xi32>
+  %indices_scalar = scalar.constant 0 : i32
+  %indices = vector.splat %indices_scalar : vector<8xi32>
   %result_bf16 = vector.gather %view[0][%indices] : view<32xbf16>, vector<8xi32> -> vector<8xbf16>
   func.return %result_bf16 : vector<8xbf16>
 }
@@ -236,7 +244,8 @@ func.def target(@target) @partial_block(%packed: vector<16xi8>) -> (vector<16xi3
   %table = global.load @table : buffer
   %origin = index.constant 0 : offset
   %view = buffer.view %table[%origin] : buffer -> view<9xi32>
-  %mask = vector.constant 7 : vector<16xi8>
+  %mask_scalar = scalar.constant 7 : i8
+  %mask = vector.splat %mask_scalar : vector<16xi8>
   %bounded = vector.andi %packed, %mask : vector<16xi8>
   %indices = vector.extui %bounded : vector<16xi8> to vector<16xi32>
   %result = vector.gather %view[0][%indices] : view<9xi32>, vector<16xi32> -> vector<16xi32>
@@ -258,7 +267,8 @@ aie2p.target<core> @target
 func.def target(@target) @dynamic_root(%table: buffer, %packed: vector<16xi8>) -> (vector<16xi32>) {
   %origin = index.constant 0 : offset
   %view = buffer.view %table[%origin] : buffer -> view<8xi32>
-  %mask = vector.constant 7 : vector<16xi8>
+  %mask_scalar = scalar.constant 7 : i8
+  %mask = vector.splat %mask_scalar : vector<16xi8>
   %bounded = vector.andi %packed, %mask : vector<16xi8>
   %indices = vector.extui %bounded : vector<16xi8> to vector<16xi32>
   %result = vector.gather %view[0][%indices] : view<8xi32>, vector<16xi32> -> vector<16xi32>

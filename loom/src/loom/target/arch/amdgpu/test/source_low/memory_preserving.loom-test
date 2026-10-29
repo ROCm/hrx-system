@@ -16,7 +16,8 @@ func.def @biased_tail_zero_fill(%row0: index, %rows0: index, %base_i32: i32, %in
   %header_value = view.load %header[0] : view<1xi32> -> i32
   %inside = index.cmp slt, %row, %rows : index
   %mask = vector.splat %inside : vector<4xi1>
-  %passthrough = vector.constant 0 : vector<4xi32>
+  %passthrough_scalar = scalar.constant 0 : i32
+  %passthrough = vector.splat %passthrough_scalar : vector<4xi32>
   %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32>, vector<4xi1>, vector<4xi32>
   func.return %header_value, %value : i32, vector<4xi32>
 }
@@ -24,26 +25,26 @@ func.def @biased_tail_zero_fill(%row0: index, %rows0: index, %base_i32: i32, %in
 // ----
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @biased_tail_zero_fill(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>) asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %26 = v_mov_b32 0
-  %27 = s_mov_b32 4
-  %28 = s_add_u32 %base, %27
-  %39 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %40 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %41 = s_mov_b32 65535
-  %42 = s_and_b32 %40, %41
-  %43 = concat(%39, %42) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %44 = s_mov_b32 822173696
-  %45 = concat(%43, %28, %44) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %header_value = buffer_load_dword %45, %26, %base
-  %32 = s_lshl_b32_rhs_inline %row, 4
-  %33 = s_add_u32 %base, %32
-  %34 = s_lshl_b32_rhs_inline %rows, 4
-  %35 = s_add_u32 %base, %34
-  %36 = s_add_u32_rhs_inline %35, 16
-  %49 = s_and_b32 %40, %41
-  %50 = concat(%39, %49) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %52 = concat(%50, %36, %44) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %value = buffer_load_b128 %52, %26, %33 {offset = 16}
+  %27 = v_mov_b32 0
+  %28 = s_mov_b32 4
+  %29 = s_add_u32 %base, %28
+  %40 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %41 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %42 = s_mov_b32 65535
+  %43 = s_and_b32 %41, %42
+  %44 = concat(%40, %43) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %45 = s_mov_b32 822173696
+  %46 = concat(%44, %29, %45) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %header_value = buffer_load_dword %46, %27, %base
+  %33 = s_lshl_b32_rhs_inline %row, 4
+  %34 = s_add_u32 %base, %33
+  %35 = s_lshl_b32_rhs_inline %rows, 4
+  %36 = s_add_u32 %base, %35
+  %37 = s_add_u32_rhs_inline %36, 16
+  %50 = s_and_b32 %41, %42
+  %51 = concat(%40, %50) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %53 = concat(%51, %37, %45) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %value = buffer_load_b128 %53, %27, %34 {offset = 16}
   return %header_value, %value
 }
 
@@ -321,7 +322,8 @@ func.def @dynamic_base_zero_fill(%row0: index, %rows0: index, %base_i32: i32, %i
   %source = buffer.view %descriptor[%base] : buffer -> view<[%rows]x4xi32>
   %inside = index.cmp slt, %row, %rows : index
   %mask = vector.splat %inside : vector<4xi1>
-  %passthrough = vector.constant 0 : vector<4xi32>
+  %passthrough_scalar = scalar.constant 0 : i32
+  %passthrough = vector.splat %passthrough_scalar : vector<4xi32>
   %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32>, vector<4xi1>, vector<4xi32>
   func.return %value : vector<4xi32>
 }
@@ -329,19 +331,19 @@ func.def @dynamic_base_zero_fill(%row0: index, %rows0: index, %base_i32: i32, %i
 // ----
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @dynamic_base_zero_fill(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>, %base: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x4>) asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %20 = v_mov_b32 0
-  %21 = s_lshl_b32_rhs_inline %row, 4
-  %22 = s_add_u32 %base, %21
-  %23 = s_lshl_b32_rhs_inline %rows, 4
-  %24 = s_add_u32 %base, %23
-  %27 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %28 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %29 = s_mov_b32 65535
-  %30 = s_and_b32 %28, %29
-  %31 = concat(%27, %30) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %32 = s_mov_b32 822173696
-  %33 = concat(%31, %24, %32) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %value = buffer_load_b128 %33, %20, %22
+  %21 = v_mov_b32 0
+  %22 = s_lshl_b32_rhs_inline %row, 4
+  %23 = s_add_u32 %base, %22
+  %24 = s_lshl_b32_rhs_inline %rows, 4
+  %25 = s_add_u32 %base, %24
+  %28 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = s_mov_b32 65535
+  %31 = s_and_b32 %29, %30
+  %32 = concat(%28, %31) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %33 = s_mov_b32 822173696
+  %34 = concat(%32, %25, %33) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %value = buffer_load_b128 %34, %21, %23
   return %value
 }
 
@@ -367,22 +369,22 @@ func.def @negative_zero_passthrough_preserved(%row0: index, %rows0: index, %inpu
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @negative_zero_passthrough_preserved(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x4>) asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %inside = v_cmp_lt_i32 %row, %rows
-  %passthrough_scalar = v_mov_b32 2147483648
-  %passthrough = concat(%passthrough_scalar, %passthrough_scalar, %passthrough_scalar, %passthrough_scalar) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %22 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %23 = v_mov_b32 0
-  %24 = s_lshl_b32_rhs_inline %row, 4
-  %25 = s_lshl_b32_rhs_inline %rows, 4
-  %30 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %31 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %32 = s_mov_b32 65535
-  %33 = s_and_b32 %31, %32
-  %34 = concat(%30, %33) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %35 = s_mov_b32 822173696
-  %36 = concat(%34, %25, %35) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %27, %28 = s_and_saveexec_b64 %inside
-  %value = buffer_load_b128_preserve %22, %36, %23, %24
-  s_mov_b64_exec %27
+  %19 = v_mov_b32 2147483648
+  %passthrough = concat(%19, %19, %19, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %25 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %26 = v_mov_b32 0
+  %27 = s_lshl_b32_rhs_inline %row, 4
+  %28 = s_lshl_b32_rhs_inline %rows, 4
+  %33 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35 = s_mov_b32 65535
+  %36 = s_and_b32 %34, %35
+  %37 = concat(%33, %36) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %38 = s_mov_b32 822173696
+  %39 = concat(%37, %28, %38) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %30, %31 = s_and_saveexec_b64 %inside
+  %value = buffer_load_b128_preserve %25, %39, %26, %27
+  s_mov_b64_exec %30
   return %value
 }
 
@@ -402,7 +404,8 @@ func.def @conjunctive_passthrough_preserved(%row0: index, %rows0: index, %column
   %column_inside = index.cmp slt, %column, %columns : index
   %inside = scalar.andi %row_inside, %column_inside : i1
   %mask = vector.splat %inside : vector<4xi1>
-  %passthrough = vector.constant 0 : vector<4xi32>
+  %passthrough_scalar = scalar.constant 0 : i32
+  %passthrough = vector.splat %passthrough_scalar : vector<4xi32>
   %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32>, vector<4xi1>, vector<4xi32>
   func.return %value : vector<4xi32>
 }
@@ -413,32 +416,32 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @conjunctive_passthroug
   %columns = s_mov_b32 4
   %row_inside = s_cmp_lt_i32 %row, %rows
   %column_inside = s_cmp_lt_i32 %column, %columns
-  %26 = s_mov_b64_exec_read
-  %27 = slice %26[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %28 = slice %26[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %29 = s_mov_b32 0
-  %30 = s_cselect_b32 %27, %29, %row_inside
-  %31 = s_cselect_b32 %28, %29, %row_inside
-  %32 = concat(%30, %31) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %37 = s_cselect_b32 %27, %29, %column_inside
-  %38 = s_cselect_b32 %28, %29, %column_inside
-  %39 = concat(%37, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %inside = s_and_b64 %32, %39
-  %41 = v_mov_b32 0
-  %passthrough = concat(%41, %41, %41, %41) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %47 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %49 = s_lshl_b32_rhs_inline %row, 4
-  %50 = s_lshl_b32_rhs_inline %rows, 4
-  %55 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %56 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %57 = s_mov_b32 65535
-  %58 = s_and_b32 %56, %57
-  %59 = concat(%55, %58) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %60 = s_mov_b32 822173696
-  %61 = concat(%59, %50, %60) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %52, %53 = s_and_saveexec_b64 %inside
-  %value = buffer_load_b128_preserve %47, %61, %41, %49
-  s_mov_b64_exec %52
+  %27 = s_mov_b64_exec_read
+  %28 = slice %27[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29 = slice %27[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %30 = s_mov_b32 0
+  %31 = s_cselect_b32 %28, %30, %row_inside
+  %32 = s_cselect_b32 %29, %30, %row_inside
+  %33 = concat(%31, %32) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %38 = s_cselect_b32 %28, %30, %column_inside
+  %39 = s_cselect_b32 %29, %30, %column_inside
+  %40 = concat(%38, %39) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %inside = s_and_b64 %33, %40
+  %42 = v_mov_b32 0
+  %passthrough = concat(%42, %42, %42, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %48 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %50 = s_lshl_b32_rhs_inline %row, 4
+  %51 = s_lshl_b32_rhs_inline %rows, 4
+  %56 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %57 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %58 = s_mov_b32 65535
+  %59 = s_and_b32 %57, %58
+  %60 = concat(%56, %59) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %61 = s_mov_b32 822173696
+  %62 = concat(%60, %51, %61) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %53, %54 = s_and_saveexec_b64 %inside
+  %value = buffer_load_b128_preserve %48, %62, %42, %50
+  s_mov_b64_exec %53
   return %value
 }
 
@@ -455,7 +458,8 @@ func.def @strided_passthrough_preserved(%row0: index, %rows0: index, %input: buf
   %source = buffer.view %descriptor[%base] : buffer -> view<[%rows]x4xi32, %layout>
   %inside = index.cmp slt, %row, %rows : index
   %mask = vector.splat %inside : vector<4xi1>
-  %passthrough = vector.constant 0 : vector<4xi32>
+  %passthrough_scalar = scalar.constant 0 : i32
+  %passthrough = vector.splat %passthrough_scalar : vector<4xi32>
   %value = vector.load.mask %source[%row, 0], %mask, %passthrough : view<[%rows]x4xi32, %layout>, vector<4xi1>, vector<4xi32>
   func.return %value : vector<4xi32>
 }
@@ -464,20 +468,20 @@ func.def @strided_passthrough_preserved(%row0: index, %rows0: index, %input: buf
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @strided_passthrough_preserved(%row: reg<amdgpu.sgpr>, %rows: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x4>) asm {
   %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %inside = v_cmp_lt_i32 %row, %rows
-  %19 = v_mov_b32 0
-  %passthrough = concat(%19, %19, %19, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %25 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
-  %27 = s_lshl_b32_rhs_inline %row, 5
-  %32 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %33 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %34 = s_mov_b32 65535
-  %35 = s_and_b32 %33, %34
-  %36 = concat(%32, %35) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %37 = s_mov_b32 4294967295
-  %38 = s_mov_b32 822173696
-  %39 = concat(%36, %37, %38) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  %29, %30 = s_and_saveexec_b64 %inside
-  %value = buffer_load_b128_preserve %25, %39, %19, %27
-  s_mov_b64_exec %29
+  %20 = v_mov_b32 0
+  %passthrough = concat(%20, %20, %20, %20) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %26 = copy %passthrough : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x4>
+  %28 = s_lshl_b32_rhs_inline %row, 5
+  %33 = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = slice %source[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35 = s_mov_b32 65535
+  %36 = s_and_b32 %34, %35
+  %37 = concat(%33, %36) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %38 = s_mov_b32 4294967295
+  %39 = s_mov_b32 822173696
+  %40 = concat(%37, %38, %39) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %30, %31 = s_and_saveexec_b64 %inside
+  %value = buffer_load_b128_preserve %26, %40, %20, %28
+  s_mov_b64_exec %30
   return %value
 }

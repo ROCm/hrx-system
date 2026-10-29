@@ -14,11 +14,13 @@ kernel.def target(@target) @narrow_packets() {
   %bytes = index.constant 4096 : offset
   %scratch = buffer.alloca<workgroup> align(2) %bytes : buffer
   %halves = buffer.view %scratch[%base] : buffer -> view<32xi16>
-  %half = vector.constant 1 : vector<1xi16>
+  %half_scalar = scalar.constant 1 : i16
+  %half = vector.splat %half_scalar : vector<1xi16>
   vector.store %half, %halves[%lane] : vector<1xi16>, view<32xi16>
   %layout = encoding.layout.strided [32] : encoding<layout>
   %words = buffer.view %scratch[%base] : buffer -> view<32xi32, %layout>
-  %word = vector.constant 1 : vector<1xi32>
+  %word_scalar = scalar.constant 1 : i32
+  %word = vector.splat %word_scalar : vector<1xi32>
   vector.store %word, %words[%lane] : vector<1xi32>, view<32xi32, %layout>
   kernel.return
 }

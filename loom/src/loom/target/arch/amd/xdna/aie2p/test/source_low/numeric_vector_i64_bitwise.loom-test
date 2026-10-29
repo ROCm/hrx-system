@@ -65,9 +65,12 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @sixteen_wide_elem
 // ====
 
 func.def @wide_element_constants(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (vector<2xi64>, vector<2xi64>, vector<2xi64>) {
-  %mask = vector.constant 4294967295 : vector<2xi64>
-  %tag = vector.constant -9223372036854775807 : vector<2xi64>
-  %toggle = vector.constant -4294967296 : vector<2xi64>
+  %mask_scalar = scalar.constant 4294967295 : i64
+  %mask = vector.splat %mask_scalar : vector<2xi64>
+  %tag_scalar = scalar.constant -9223372036854775807 : i64
+  %tag = vector.splat %tag_scalar : vector<2xi64>
+  %toggle_scalar = scalar.constant -4294967296 : i64
+  %toggle = vector.splat %toggle_scalar : vector<2xi64>
   %masked = vector.andi %lhs, %mask : vector<2xi64>
   %tagged = vector.ori %tag, %rhs : vector<2xi64>
   %toggled = vector.xori %lhs, %toggle : vector<2xi64>
@@ -76,20 +79,20 @@ func.def @wide_element_constants(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (v
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_element_constants(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
-  %16 = mov.i32 -1
-  %17 = mov.i32 0
-  %18 = concat(%16, %17) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %mask = vbcst.64 %18
-  %20 = mov.i32 1
-  %21 = mov.i32 -2147483648
-  %22 = concat(%20, %21) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %tag = vbcst.64 %22
-  %26 = concat(%17, %16) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %toggle = vbcst.64 %26
+  %19 = mov.i32 -1
+  %20 = mov.i32 0
+  %mask_scalar = concat(%19, %20) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %mask = vbcst.64 %mask_scalar
+  %23 = mov.i32 1
+  %24 = mov.i32 -2147483648
+  %tag_scalar = concat(%23, %24) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %tag = vbcst.64 %tag_scalar
+  %toggle_scalar = concat(%20, %19) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %toggle = vbcst.64 %toggle_scalar
   %masked = vband %lhs, %mask
   %tagged = vbor %tag, %rhs
-  %30 = vbor %lhs, %toggle
-  %31 = vband %lhs, %toggle
-  %toggled = vsub.32 %30, %31
+  %33 = vbor %lhs, %toggle
+  %34 = vband %lhs, %toggle
+  %toggled = vsub.32 %33, %34
   return %masked, %tagged, %toggled
 }

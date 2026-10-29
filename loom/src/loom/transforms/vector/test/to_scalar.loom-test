@@ -1044,16 +1044,18 @@ func.def @scalarizes_dynamic_flat_product_f32_mma(%m: index, %n: index, %k: inde
 // ====
 
 func.def @rejects_unrepresentable_static_lane_count() -> (vector<4294967296x4294967296xi32>) {
-  // ERROR@+1: SHAPE/007 "vector.constant" "vector-to-scalar" "vector<4294967296x4294967296xi32>"
-  %value = vector.constant 0 : vector<4294967296x4294967296xi32>
+  // ERROR@+2: SHAPE/007 "vector.splat" "vector-to-scalar" "vector<4294967296x4294967296xi32>"
+  %value_scalar = scalar.constant 0 : i32
+  %value = vector.splat %value_scalar : vector<4294967296x4294967296xi32>
   func.return %value : vector<4294967296x4294967296xi32>
 }
 
 // ====
 
 func.def @rejects_static_lane_count_beyond_value_slice() -> (vector<65536xi32>) {
-  // ERROR@+1: SHAPE/007 "vector.constant" "vector-to-scalar" "vector<65536xi32>"
-  %value = vector.constant 0 : vector<65536xi32>
+  // ERROR@+2: SHAPE/007 "vector.splat" "vector-to-scalar" "vector<65536xi32>"
+  %value_scalar = scalar.constant 0 : i32
+  %value = vector.splat %value_scalar : vector<65536xi32>
   func.return %value : vector<65536xi32>
 }
 

@@ -156,133 +156,140 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_cfg_arg_addi
 // ====
 
 func.def @i8x4_shrui_4(%values: vector<4xi8>) -> (vector<4xi8>) {
-  %amount = vector.constant 4 : vector<4xi8>
+  %amount_scalar = scalar.constant 4 : i8
+  %amount = vector.splat %amount_scalar : vector<4xi8>
   %result = vector.shrui %values, %amount : vector<4xi8>
   func.return %result : vector<4xi8>
 }
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_shrui_4(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %6 = mov.shift 0
-  %7 = mov.shift 4
+  %7 = mov.shift 0
+  %8 = mov.shift 4
   set.saturation 0
   set.ups-mode 0
   set.srs-mode 0
   set.rounding 0
-  %8 = vups.4x.x-to-d.unsigned %values, %6
-  %result = vsrs.4x.d-to-x.unsigned %8, %7
+  %9 = vups.4x.x-to-d.unsigned %values, %7
+  %result = vsrs.4x.d-to-x.unsigned %9, %8
   return %result
 }
 
 // ====
 
 func.def @i8x4_shli_3(%values: vector<4xi8>) -> (vector<4xi8>) {
-  %amount = vector.constant 3 : vector<4xi8>
+  %amount_scalar = scalar.constant 3 : i8
+  %amount = vector.splat %amount_scalar : vector<4xi8>
   %result = vector.shli %values, %amount : vector<4xi8>
   func.return %result : vector<4xi8>
 }
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_shli_3(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %6 = mov.shift 3
-  %7 = mov.shift 0
+  %7 = mov.shift 3
+  %8 = mov.shift 0
   set.saturation 0
   set.ups-mode 0
   set.srs-mode 0
   set.rounding 0
-  %8 = vups.4x.x-to-d.unsigned %values, %6
-  %result = vsrs.4x.d-to-x.unsigned %8, %7
+  %9 = vups.4x.x-to-d.unsigned %values, %7
+  %result = vsrs.4x.d-to-x.unsigned %9, %8
   return %result
 }
 
 // ====
 
 func.def @i8x8_shrui_1(%values: vector<8xi8>) -> (vector<8xi8>) {
-  %amount = vector.constant 1 : vector<8xi8>
+  %amount_scalar = scalar.constant 1 : i8
+  %amount = vector.splat %amount_scalar : vector<8xi8>
   %result = vector.shrui %values, %amount : vector<8xi8>
   func.return %result : vector<8xi8>
 }
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x8_shrui_1(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %6 = mov.shift 0
-  %7 = mov.shift 1
+  %7 = mov.shift 0
+  %8 = mov.shift 1
   set.saturation 0
   set.ups-mode 0
   set.srs-mode 0
   set.rounding 0
-  %8 = vups.4x.x-to-d.unsigned %values, %6
-  %result = vsrs.4x.d-to-x.unsigned %8, %7
+  %9 = vups.4x.x-to-d.unsigned %values, %7
+  %result = vsrs.4x.d-to-x.unsigned %9, %8
   return %result
 }
 
 // ====
 
 func.def @i8x5_shli_7(%values: vector<5xi8>) -> (vector<5xi8>) {
-  %amount = vector.constant 7 : vector<5xi8>
+  %amount_scalar = scalar.constant 7 : i8
+  %amount = vector.splat %amount_scalar : vector<5xi8>
   %result = vector.shli %values, %amount : vector<5xi8>
   func.return %result : vector<5xi8>
 }
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x5_shli_7(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %6 = mov.shift 7
-  %7 = mov.shift 0
+  %7 = mov.shift 7
+  %8 = mov.shift 0
   set.saturation 0
   set.ups-mode 0
   set.srs-mode 0
   set.rounding 0
-  %8 = vups.4x.x-to-d.unsigned %values, %6
-  %result = vsrs.4x.d-to-x.unsigned %8, %7
+  %9 = vups.4x.x-to-d.unsigned %values, %7
+  %result = vsrs.4x.d-to-x.unsigned %9, %8
   return %result
 }
 
 // ====
 
 func.def @i8x3_shrui_7(%values: vector<3xi8>) -> (vector<3xi8>) {
-  %amount = vector.constant 7 : vector<3xi8>
+  %amount_scalar = scalar.constant 7 : i8
+  %amount = vector.splat %amount_scalar : vector<3xi8>
   %result = vector.shrui %values, %amount : vector<3xi8>
   func.return %result : vector<3xi8>
 }
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x3_shrui_7(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %6 = mov.shift 0
-  %7 = mov.shift 7
+  %7 = mov.shift 0
+  %8 = mov.shift 7
   set.saturation 0
   set.ups-mode 0
   set.srs-mode 0
   set.rounding 0
-  %8 = vups.4x.x-to-d.unsigned %values, %6
-  %result = vsrs.4x.d-to-x.unsigned %8, %7
+  %9 = vups.4x.x-to-d.unsigned %values, %7
+  %result = vsrs.4x.d-to-x.unsigned %9, %8
   return %result
 }
 
 // ====
 
 func.def @i8x1_shli_1(%values: vector<1xi8>) -> (vector<1xi8>) {
-  %amount = vector.constant 1 : vector<1xi8>
+  %amount_scalar = scalar.constant 1 : i8
+  %amount = vector.splat %amount_scalar : vector<1xi8>
   %result = vector.shli %values, %amount : vector<1xi8>
   func.return %result : vector<1xi8>
 }
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x1_shli_1(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %6 = mov.shift 1
-  %7 = mov.shift 0
+  %7 = mov.shift 1
+  %8 = mov.shift 0
   set.saturation 0
   set.ups-mode 0
   set.srs-mode 0
   set.rounding 0
-  %8 = vups.4x.x-to-d.unsigned %values, %6
-  %result = vsrs.4x.d-to-x.unsigned %8, %7
+  %9 = vups.4x.x-to-d.unsigned %values, %7
+  %result = vsrs.4x.d-to-x.unsigned %9, %8
   return %result
 }
 
 // ====
 
 func.def @i8x4_shrui_0(%values: vector<4xi8>) -> (vector<4xi8>) {
-  %amount = vector.constant 0 : vector<4xi8>
+  %amount_scalar = scalar.constant 0 : i8
+  %amount = vector.splat %amount_scalar : vector<4xi8>
   %result = vector.shrui %values, %amount : vector<4xi8>
   func.return %result : vector<4xi8>
 }
@@ -295,7 +302,8 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_shrui_0(%val
 // ====
 
 func.def @i8x4_bounded_varying_shifts(%values: vector<4xi8>, %amounts: vector<4xi8>) -> (vector<4xi8>) {
-  %mask = vector.constant 7 : vector<4xi8>
+  %mask_scalar = scalar.constant 7 : i8
+  %mask = vector.splat %mask_scalar : vector<4xi8>
   %bounded = vector.andi %amounts, %mask : vector<4xi8>
   %result = vector.shrui %values, %bounded : vector<4xi8>
   func.return %result : vector<4xi8>
@@ -303,35 +311,35 @@ func.def @i8x4_bounded_varying_shifts(%values: vector<4xi8>, %amounts: vector<4x
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x4_bounded_varying_shifts(%values: reg<aie2p.vec256 x2>, %amounts: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %9 = mov.short 7
-  %mask = vbcst.8 %9
+  %mask_scalar = mov.short 7
+  %mask = vbcst.8 %mask_scalar
   %bounded = vband %amounts, %mask
-  %12 = mov.short 1
-  %13 = vbcst.8 %12
+  %13 = mov.short 1
+  %14 = vbcst.8 %13
   set.saturation 0
   set.ups-mode 0
   set.srs-mode 0
   set.rounding 0
-  %14 = mov.shift 0
-  %15 = vups.4x.x-to-d.unsigned %values, %14
-  %16 = mov.shift 1
-  %17 = vsrs.4x.d-to-x.unsigned %15, %16
-  %18 = vband %bounded, %13
-  %19 = veqz.8 %18
-  %20 = vsel.8 %17, %values, %19
-  %21 = vadd.8 %13, %13
-  %22 = vups.4x.x-to-d.unsigned %20, %14
-  %23 = mov.shift 2
-  %24 = vsrs.4x.d-to-x.unsigned %22, %23
-  %25 = vband %bounded, %21
-  %26 = veqz.8 %25
-  %27 = vsel.8 %24, %20, %26
-  %28 = vadd.8 %21, %21
-  %29 = vups.4x.x-to-d.unsigned %27, %14
-  %30 = mov.shift 4
-  %31 = vsrs.4x.d-to-x.unsigned %29, %30
-  %32 = vband %bounded, %28
-  %33 = veqz.8 %32
-  %result = vsel.8 %31, %27, %33
+  %15 = mov.shift 0
+  %16 = vups.4x.x-to-d.unsigned %values, %15
+  %17 = mov.shift 1
+  %18 = vsrs.4x.d-to-x.unsigned %16, %17
+  %19 = vband %bounded, %14
+  %20 = veqz.8 %19
+  %21 = vsel.8 %18, %values, %20
+  %22 = vadd.8 %14, %14
+  %23 = vups.4x.x-to-d.unsigned %21, %15
+  %24 = mov.shift 2
+  %25 = vsrs.4x.d-to-x.unsigned %23, %24
+  %26 = vband %bounded, %22
+  %27 = veqz.8 %26
+  %28 = vsel.8 %25, %21, %27
+  %29 = vadd.8 %22, %22
+  %30 = vups.4x.x-to-d.unsigned %28, %15
+  %31 = mov.shift 4
+  %32 = vsrs.4x.d-to-x.unsigned %30, %31
+  %33 = vband %bounded, %29
+  %34 = veqz.8 %33
+  %result = vsel.8 %32, %28, %34
   return %result
 }

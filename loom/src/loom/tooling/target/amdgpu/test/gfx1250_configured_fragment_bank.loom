@@ -37,7 +37,8 @@ kernel.def target(@target) export("configured_fragment_bank") @configured_fragme
   %output_view = buffer.view %output_global[%base] : buffer -> view<[%m_extent]x[%n_extent]xf32>
   %scratch = buffer.alloca<workgroup> align(16) %scratch_bytes : buffer
   %scratch_view = buffer.view %scratch[%base] : buffer -> view<[%scratch_elements]xi32>
-  %marker = vector.constant 0 : vector<1xi32>
+  %marker_scalar = scalar.constant 0 : i32
+  %marker = vector.splat %marker_scalar : vector<1xi32>
   vector.store %marker, %scratch_view[%lane] : vector<1xi32>, view<[%scratch_elements]xi32>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %lhs_payload_scalar = scalar.constant 1.0 : bf16

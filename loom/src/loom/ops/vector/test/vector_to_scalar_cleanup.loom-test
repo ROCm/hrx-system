@@ -6,7 +6,8 @@
 func.def @gather_zero_offsets(%buffer: buffer, %byte_offset: offset) -> (vector<2xf32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32, %layout>
-  %offsets = vector.constant 0 : vector<2xindex>
+  %offsets_scalar = index.constant 0 : index
+  %offsets = vector.splat %offsets_scalar : vector<2xindex>
   %loaded = vector.gather %view[3][%offsets] : view<8xf32, %layout>, vector<2xindex> -> vector<2xf32>
   func.return %loaded : vector<2xf32>
 }
@@ -15,8 +16,8 @@ func.def @gather_zero_offsets(%buffer: buffer, %byte_offset: offset) -> (vector<
 func.def @gather_zero_offsets(%buffer: buffer, %byte_offset: offset) -> (vector<2xf32>) {
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<8xf32>
   %8 = view.load %view[3] : view<8xf32> -> f32
-  %10 = view.load %view[3] : view<8xf32> -> f32
-  %loaded = vector.from_elements %8, %10 : vector<2xf32>
+  %9 = view.load %view[3] : view<8xf32> -> f32
+  %loaded = vector.from_elements %8, %9 : vector<2xf32>
   func.return %loaded : vector<2xf32>
 }
 

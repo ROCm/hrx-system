@@ -31,7 +31,8 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @partial_float_constan
 
 // Runtime and literal i32 splats use the scalar-to-vector instruction path.
 func.def @i32_splat_forms(%dynamic: i32) -> (vector<4xi32>) {
-  %literal = vector.constant -19088743 : vector<4xi32>
+  %literal_scalar = scalar.constant -19088743 : i32
+  %literal = vector.splat %literal_scalar : vector<4xi32>
   %splat = vector.splat %dynamic : vector<4xi32>
   %result = vector.addi %literal, %splat : vector<4xi32>
   func.return %result : vector<4xi32>
@@ -39,8 +40,8 @@ func.def @i32_splat_forms(%dynamic: i32) -> (vector<4xi32>) {
 
 // ----
 low.func.def target<wasm.core.simd128> abi(wasm_function) @i32_splat_forms(%dynamic: reg<wasm.i32>) -> (reg<wasm.v128>) asm {
-  %7 = i32.const -19088743
-  %literal = i32x4.splat %7
+  %literal_scalar = i32.const -19088743
+  %literal = i32x4.splat %literal_scalar
   %splat = i32x4.splat %dynamic
   %result = i32x4.add %literal, %splat
   return %result
@@ -50,7 +51,8 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @i32_splat_forms(%dyna
 
 // Full-width i64 literals use the native vector constant form.
 func.def @i64_vector_constant() -> (vector<2xi64>) {
-  %result = vector.constant -9223372036854775807 : vector<2xi64>
+  %result_scalar = scalar.constant -9223372036854775807 : i64
+  %result = vector.splat %result_scalar : vector<2xi64>
   func.return %result : vector<2xi64>
 }
 
@@ -100,7 +102,8 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @f64_vector_constant()
 
 // Predicate constants remain full-lane masks through vector selection.
 func.def @predicate_constant_masks(%condition: i1, %true_value: vector<4xi32>, %false_value: vector<4xi32>) -> (vector<4xi32>) {
-  %off = vector.constant false : vector<4xi1>
+  %off_scalar = scalar.constant false : i1
+  %off = vector.splat %off_scalar : vector<4xi1>
   %scalar = scalar.constant true : i1
   %on = vector.splat %scalar : vector<4xi1>
   %mask = scf.select %condition, %on, %off : vector<4xi1>

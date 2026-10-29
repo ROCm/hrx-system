@@ -427,7 +427,8 @@ kernel.def target(@carrier_target) @recurring_predicate_vector() {
   %limit = kernel.subgroup.lane.id : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %disabled = vector.constant false : vector<1x2xi1>
+  %disabled_scalar = scalar.constant false : i1
+  %disabled = vector.splat %disabled_scalar : vector<1x2xi1>
   %terminal, %last = scf.while(%i = %c0 : index, %flags = %disabled : vector<1x2xi1>) -> (index, vector<1x2xi1>) {
     %continue = index.cmp ult, %i, %limit : index
     scf.condition %continue, %i, %flags : i1, index, vector<1x2xi1>
@@ -453,29 +454,37 @@ kernel.def target(@carrier_target) @recurring_predicate_vector() {
   %limit = kernel.subgroup.lane.id : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %disabled = vector.constant false : vector<1x2xi1>
-  %17 = vector.constant 1 : vector<1x2xi32>
-  %18 = vector.constant 0 : vector<1x2xi32>
-  %19 = vector.select %disabled, %17, %18 : vector<1x2xi32>
-  %terminal, %last_word = scf.while(%i = %c0 : index, %flags_word = %19 : vector<1x2xi32>) -> (index, vector<1x2xi32>) {
-    %26 = vector.constant 0 : vector<1x2xi32>
-    %flags = vector.cmpi ne, %flags_word, %26 : vector<1x2xi32> -> vector<1x2xi1>
+  %disabled_scalar = scalar.constant false : i1
+  %disabled = vector.splat %disabled_scalar : vector<1x2xi1>
+  %18 = scalar.constant 1 : i32
+  %19 = vector.splat %18 : vector<1x2xi32>
+  %20 = scalar.constant 0 : i32
+  %21 = vector.splat %20 : vector<1x2xi32>
+  %22 = vector.select %disabled, %19, %21 : vector<1x2xi32>
+  %terminal, %last_word = scf.while(%i = %c0 : index, %flags_word = %22 : vector<1x2xi32>) -> (index, vector<1x2xi32>) {
+    %29 = scalar.constant 0 : i32
+    %30 = vector.splat %29 : vector<1x2xi32>
+    %flags = vector.cmpi ne, %flags_word, %30 : vector<1x2xi32> -> vector<1x2xi1>
     %continue = index.cmp ult, %i, %limit : index
     scf.condition %continue, %i, %flags_word : i1, index, vector<1x2xi32>
   } do(%body_i: index, %body_flags_word: vector<1x2xi32>) {
-    %28 = vector.constant 0 : vector<1x2xi32>
-    %body_flags = vector.cmpi ne, %body_flags_word, %28 : vector<1x2xi32> -> vector<1x2xi1>
+    %32 = scalar.constant 0 : i32
+    %33 = vector.splat %32 : vector<1x2xi32>
+    %body_flags = vector.cmpi ne, %body_flags_word, %33 : vector<1x2xi32> -> vector<1x2xi1>
     %next = index.add %body_i, %c1 : index
     %at_limit = index.cmp eq, %next, %limit : index
     %before_limit = index.cmp ult, %next, %limit : index
     %next_flags = vector.from_elements %at_limit, %before_limit : vector<1x2xi1>
-    %32 = vector.constant 1 : vector<1x2xi32>
-    %33 = vector.constant 0 : vector<1x2xi32>
-    %34 = vector.select %next_flags, %32, %33 : vector<1x2xi32>
-    scf.yield %next, %34 : index, vector<1x2xi32>
+    %38 = scalar.constant 1 : i32
+    %39 = vector.splat %38 : vector<1x2xi32>
+    %40 = scalar.constant 0 : i32
+    %41 = vector.splat %40 : vector<1x2xi32>
+    %42 = vector.select %next_flags, %39, %41 : vector<1x2xi32>
+    scf.yield %next, %42 : index, vector<1x2xi32>
   }
-  %30 = vector.constant 0 : vector<1x2xi32>
-  %last = vector.cmpi ne, %last_word, %30 : vector<1x2xi32> -> vector<1x2xi1>
+  %35 = scalar.constant 0 : i32
+  %36 = vector.splat %35 : vector<1x2xi32>
+  %last = vector.cmpi ne, %last_word, %36 : vector<1x2xi32> -> vector<1x2xi1>
   test.use %terminal, %last : index, vector<1x2xi1>
   kernel.return
 }
@@ -490,8 +499,10 @@ test.target<low_core> @carrier_target
 func.def public target(@carrier_target) @predicate_vector_carrier_bound() {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %within_bound = vector.constant false : vector<4x8xi1>
-  %above_bound = vector.constant false : vector<3x11xi1>
+  %within_bound_scalar = scalar.constant false : i1
+  %within_bound = vector.splat %within_bound_scalar : vector<4x8xi1>
+  %above_bound_scalar = scalar.constant false : i1
+  %above_bound = vector.splat %above_bound_scalar : vector<3x11xi1>
   %within_result, %above_result = scf.for %i = [%c0 to %c1 step %c1](%within = %within_bound : vector<4x8xi1>, %above = %above_bound : vector<3x11xi1>) -> (vector<4x8xi1>, vector<3x11xi1>) {
     scf.yield %within, %above : vector<4x8xi1>, vector<3x11xi1>
   }
@@ -505,18 +516,24 @@ test.target<low_core> @carrier_target
 func.def public target(@carrier_target) @predicate_vector_carrier_bound() {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %within_bound = vector.constant false : vector<4x8xi1>
-  %above_bound = vector.constant false : vector<3x11xi1>
-  %9 = vector.constant 1 : vector<4x8xi32>
-  %10 = vector.constant 0 : vector<4x8xi32>
-  %11 = vector.select %within_bound, %9, %10 : vector<4x8xi32>
-  %within_result_word, %above_result = scf.for %i = [%c0 to %c1 step %c1](%within_word = %11 : vector<4x8xi32>, %above = %above_bound : vector<3x11xi1>) -> (vector<4x8xi32>, vector<3x11xi1>) {
-    %17 = vector.constant 0 : vector<4x8xi32>
-    %within = vector.cmpi ne, %within_word, %17 : vector<4x8xi32> -> vector<4x8xi1>
+  %within_bound_scalar = scalar.constant false : i1
+  %within_bound = vector.splat %within_bound_scalar : vector<4x8xi1>
+  %above_bound_scalar = scalar.constant false : i1
+  %above_bound = vector.splat %above_bound_scalar : vector<3x11xi1>
+  %11 = scalar.constant 1 : i32
+  %12 = vector.splat %11 : vector<4x8xi32>
+  %13 = scalar.constant 0 : i32
+  %14 = vector.splat %13 : vector<4x8xi32>
+  %15 = vector.select %within_bound, %12, %14 : vector<4x8xi32>
+  %within_result_word, %above_result = scf.for %i = [%c0 to %c1 step %c1](%within_word = %15 : vector<4x8xi32>, %above = %above_bound : vector<3x11xi1>) -> (vector<4x8xi32>, vector<3x11xi1>) {
+    %21 = scalar.constant 0 : i32
+    %22 = vector.splat %21 : vector<4x8xi32>
+    %within = vector.cmpi ne, %within_word, %22 : vector<4x8xi32> -> vector<4x8xi1>
     scf.yield %within_word, %above : vector<4x8xi32>, vector<3x11xi1>
   }
-  %19 = vector.constant 0 : vector<4x8xi32>
-  %within_result = vector.cmpi ne, %within_result_word, %19 : vector<4x8xi32> -> vector<4x8xi1>
+  %24 = scalar.constant 0 : i32
+  %25 = vector.splat %24 : vector<4x8xi32>
+  %within_result = vector.cmpi ne, %within_result_word, %25 : vector<4x8xi32> -> vector<4x8xi1>
   test.use %within_result, %above_result : vector<4x8xi1>, vector<3x11xi1>
   func.return
 }

@@ -24,48 +24,48 @@ func.def @f32_cmpf_select(%lhs: vector<1xf32>, %rhs: vector<1xf32>, %true_value:
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_cmpf_select(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %39 = mov.i32 2147483647
-  %40 = vbcst.32 %39
-  %41 = vband %lhs, %40
-  %42 = vband %rhs, %40
-  %43 = mov.i32 2139095040
-  %44 = vbcst.32 %43
-  %45 = vlt.u32x16.el.low32 %44, %41
-  %46 = predicate.complete.zero.high32 %45, 0
-  %47 = vlt.u32x16.el.low32 %44, %42
-  %48 = predicate.complete.zero.high32 %47, 0
-  %49 = predicate.or.low32.rhs_tied %46, %48
-  %50 = predicate.or.high32.rhs_tied %46, %49
-  %51 = mov.short 0
-  %52 = vbcst.32 %51
-  %53 = mov.i32 -2147483648
-  %54 = vbcst.32 %53
-  %55 = mov.short -1
-  %56 = vbcst.32 %55
-  %57 = vsub.32 %41, %52
-  %58 = veqz.32.el.low32 %57
-  %59 = predicate.complete.zero.high32 %58, 0
-  %60 = vsel.32.mask64 %lhs, %52, %59
-  %61 = vlt.s32x16.el.low32 %60, %52
-  %62 = predicate.complete.zero.high32 %61, 0
-  %63 = vadd.32 %60, %54
-  %64 = vsub.32 %56, %60
-  %65 = vsel.32.mask64 %63, %64, %62
-  %66 = vsub.32 %42, %52
-  %67 = veqz.32.el.low32 %66
-  %68 = predicate.complete.zero.high32 %67, 0
-  %69 = vsel.32.mask64 %rhs, %52, %68
-  %70 = vlt.s32x16.el.low32 %69, %52
-  %71 = predicate.complete.zero.high32 %70, 0
-  %72 = vadd.32 %69, %54
-  %73 = vsub.32 %56, %69
-  %74 = vsel.32.mask64 %72, %73, %71
-  %75 = vlt.u32x16.el.low32 %65, %74
+  %44 = mov.i32 2147483647
+  %45 = vbcst.32 %44
+  %46 = vband %lhs, %45
+  %47 = vband %rhs, %45
+  %48 = mov.i32 2139095040
+  %49 = vbcst.32 %48
+  %50 = vlt.u32x16.el.low32 %49, %46
+  %51 = predicate.complete.zero.high32 %50, 0
+  %52 = vlt.u32x16.el.low32 %49, %47
+  %53 = predicate.complete.zero.high32 %52, 0
+  %54 = predicate.or.low32.rhs_tied %51, %53
+  %55 = predicate.or.high32.rhs_tied %51, %54
+  %56 = mov.short 0
+  %57 = vbcst.32 %56
+  %58 = mov.i32 -2147483648
+  %59 = vbcst.32 %58
+  %60 = mov.short -1
+  %61 = vbcst.32 %60
+  %62 = vsub.32 %46, %57
+  %63 = veqz.32.el.low32 %62
+  %64 = predicate.complete.zero.high32 %63, 0
+  %65 = vsel.32.mask64 %lhs, %57, %64
+  %66 = vlt.s32x16.el.low32 %65, %57
+  %67 = predicate.complete.zero.high32 %66, 0
+  %68 = vadd.32 %65, %59
+  %69 = vsub.32 %61, %65
+  %70 = vsel.32.mask64 %68, %69, %67
+  %71 = vsub.32 %47, %57
+  %72 = veqz.32.el.low32 %71
+  %73 = predicate.complete.zero.high32 %72, 0
+  %74 = vsel.32.mask64 %rhs, %57, %73
+  %75 = vlt.s32x16.el.low32 %74, %57
   %76 = predicate.complete.zero.high32 %75, 0
-  %77 = predicate.and.low32.rhs_tied %76, %50
-  %78 = predicate.and.high32.rhs_tied %76, %77
-  %79 = predicate.xor.low32.rhs_tied %76, %78
-  %mask = predicate.xor.high32.rhs_tied %76, %79
+  %77 = vadd.32 %74, %59
+  %78 = vsub.32 %61, %74
+  %79 = vsel.32.mask64 %77, %78, %76
+  %80 = vlt.u32x16.el.low32 %70, %79
+  %81 = predicate.complete.zero.high32 %80, 0
+  %82 = predicate.and.low32.rhs_tied %81, %55
+  %83 = predicate.and.high32.rhs_tied %81, %82
+  %84 = predicate.xor.low32.rhs_tied %81, %83
+  %mask = predicate.xor.high32.rhs_tied %81, %84
   %selected = vsel.32.mask64 %false_value, %true_value, %mask
   return %selected
 }
@@ -151,36 +151,36 @@ func.def @vector_cmpf_rhs_zero_inline(%value: vector<2xf32>) -> (vector<2xi1>) {
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_cmpf_rhs_zero_inline(%value: reg<aie2p.vec256 x2>) -> (reg<aie2p.elpredicate>) asm {
-  %35 = mov.i32 2147483647
-  %36 = vbcst.32 %35
-  %37 = vband %value, %36
-  %38 = mov.i32 2139095040
-  %39 = vbcst.32 %38
-  %40 = vlt.u32x16.el.low32 %39, %37
-  %41 = predicate.complete.zero.high32 %40, 0
-  %42 = mov.short 0
-  %43 = vbcst.32 %42
-  %44 = mov.i32 -2147483648
+  %41 = mov.i32 2147483647
+  %42 = vbcst.32 %41
+  %43 = vband %value, %42
+  %44 = mov.i32 2139095040
   %45 = vbcst.32 %44
-  %46 = mov.short -1
-  %47 = vbcst.32 %46
-  %48 = vsub.32 %37, %43
-  %49 = veqz.32.el.low32 %48
-  %50 = predicate.complete.zero.high32 %49, 0
-  %51 = vsel.32.mask64 %value, %43, %50
-  %52 = vlt.s32x16.el.low32 %51, %43
-  %53 = predicate.complete.zero.high32 %52, 0
-  %54 = vadd.32 %51, %45
-  %55 = vsub.32 %47, %51
-  %56 = vsel.32.mask64 %54, %55, %53
-  %57 = vlt.u32x16.el.low32 %56, %45
-  %58 = vlt.u32x16.el.low32 %45, %56
-  %59 = predicate.or.low32 %57, %58
-  %60 = predicate.complete.zero.high32 %59, 0
-  %61 = predicate.and.low32.rhs_tied %60, %41
-  %62 = predicate.and.high32.rhs_tied %60, %61
-  %63 = predicate.xor.low32.rhs_tied %60, %62
-  %mask = predicate.xor.high32.rhs_tied %60, %63
+  %46 = vlt.u32x16.el.low32 %45, %43
+  %47 = predicate.complete.zero.high32 %46, 0
+  %48 = mov.short 0
+  %49 = vbcst.32 %48
+  %50 = mov.i32 -2147483648
+  %51 = vbcst.32 %50
+  %52 = mov.short -1
+  %53 = vbcst.32 %52
+  %54 = vsub.32 %43, %49
+  %55 = veqz.32.el.low32 %54
+  %56 = predicate.complete.zero.high32 %55, 0
+  %57 = vsel.32.mask64 %value, %49, %56
+  %58 = vlt.s32x16.el.low32 %57, %49
+  %59 = predicate.complete.zero.high32 %58, 0
+  %60 = vadd.32 %57, %51
+  %61 = vsub.32 %53, %57
+  %62 = vsel.32.mask64 %60, %61, %59
+  %63 = vlt.u32x16.el.low32 %62, %51
+  %64 = vlt.u32x16.el.low32 %51, %62
+  %65 = predicate.or.low32 %63, %64
+  %66 = predicate.complete.zero.high32 %65, 0
+  %67 = predicate.and.low32.rhs_tied %66, %47
+  %68 = predicate.and.high32.rhs_tied %66, %67
+  %69 = predicate.xor.low32.rhs_tied %66, %68
+  %mask = predicate.xor.high32.rhs_tied %66, %69
   return %mask
 }
 
@@ -196,10 +196,10 @@ func.def @i32_cmpi_select_zero_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>, 
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_cmpi_select_zero_inline(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %13 = vlt.s32x16.el.low32 %lhs, %rhs
-  %mask = predicate.complete.zero.high32 %13, 0
-  %15 = mov.short 0
-  %true_value = vbcst.32 %15
+  %12 = vlt.s32x16.el.low32 %lhs, %rhs
+  %mask = predicate.complete.zero.high32 %12, 0
+  %true_element = mov.short 0
+  %true_value = vbcst.32 %true_element
   %selected = vsel.32.mask64 %false_value, %true_value, %mask
   return %selected
 }
@@ -216,10 +216,10 @@ func.def @i32_cmpi_select_small_inline(%lhs: vector<2xi32>, %rhs: vector<2xi32>,
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_cmpi_select_small_inline(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %small = mov.short 3
   %13 = vlt.s32x16.el.low32 %lhs, %rhs
   %mask = predicate.complete.zero.high32 %13, 0
-  %15 = mov.short 3
-  %true_value = vbcst.32 %15
+  %true_value = vbcst.32 %small
   %selected = vsel.32.mask64 %false_value, %true_value, %mask
   return %selected
 }
@@ -236,10 +236,10 @@ func.def @i32_cmpi_select_noninline_constant(%lhs: vector<2xi32>, %rhs: vector<2
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_cmpi_select_noninline_constant(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %constant = mov.short 65
   %13 = vlt.s32x16.el.low32 %lhs, %rhs
   %mask = predicate.complete.zero.high32 %13, 0
-  %15 = mov.short 65
-  %true_value = vbcst.32 %15
+  %true_value = vbcst.32 %constant
   %selected = vsel.32.mask64 %false_value, %true_value, %mask
   return %selected
 }

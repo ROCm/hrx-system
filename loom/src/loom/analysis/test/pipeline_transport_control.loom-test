@@ -326,7 +326,8 @@ func.def inline @egress(%source: channel<tile<16xi32>>, %output: buffer, %base: 
   %bytes = index.constant 64 : offset
   scf.for %record = [%c0 to %count step %c1] {
     %read, %payload = channel.acquire<mutable> %source : channel<tile<16xi32>> -> (read<tile<16xi32>, mutable>, view<16xi32>)
-    %bias = vector.constant 17 : vector<16xi32>
+    %bias_scalar = scalar.constant 17 : i32
+    %bias = vector.splat %bias_scalar : vector<16xi32>
     %value = vector.load %payload[0] : view<16xi32> -> vector<16xi32>
     %next = vector.addi %value, %bias : vector<16xi32>
     vector.store %next, %payload[0] : vector<16xi32>, view<16xi32>

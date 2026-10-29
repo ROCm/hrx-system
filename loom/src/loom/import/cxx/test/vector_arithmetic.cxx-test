@@ -65,24 +65,25 @@ func.def public @signed_integer(%lhs: vector<8xi32>, %rhs: vector<8xi32>) -> (ve
   %36 = vector.remsi %35, %lhs : vector<8xi32>
   %arithmetic = vector.negi %36 : vector<8xi32>
   %38 = vector.andi %lhs, %rhs : vector<8xi32>
-  %39 = vector.constant -1 : vector<8xi32>
-  %40 = vector.xori %38, %39 : vector<8xi32>
-  %41 = vector.xori %lhs, %rhs : vector<8xi32>
-  %bits = vector.ori %40, %41 : vector<8xi32>
-  %43 = vector.xori %arithmetic, %bits : vector<8xi32>
-  %44 = vector.shli %43, %rhs : vector<8xi32>
-  %45 = vector.shrsi %44, %rhs : vector<8xi32>
-  func.return %45 : vector<8xi32>
+  %39 = scalar.constant -1 : i32
+  %40 = vector.splat %39 : vector<8xi32>
+  %41 = vector.xori %38, %40 : vector<8xi32>
+  %42 = vector.xori %lhs, %rhs : vector<8xi32>
+  %bits = vector.ori %41, %42 : vector<8xi32>
+  %44 = vector.xori %arithmetic, %bits : vector<8xi32>
+  %45 = vector.shli %44, %rhs : vector<8xi32>
+  %46 = vector.shrsi %45, %rhs : vector<8xi32>
+  func.return %46 : vector<8xi32>
 }
 
 func.def public @unsigned_integer(%lhs: vector<8xi32>, %rhs: vector<8xi32>) -> (vector<8xi32>) {
-  %49 = vector.divui %lhs, %rhs : vector<8xi32>
-  %50 = vector.remui %49, %rhs : vector<8xi32>
-  %51 = vector.shrui %50, %rhs : vector<8xi32>
-  func.return %51 : vector<8xi32>
+  %50 = vector.divui %lhs, %rhs : vector<8xi32>
+  %51 = vector.remui %50, %rhs : vector<8xi32>
+  %52 = vector.shrui %51, %rhs : vector<8xi32>
+  func.return %52 : vector<8xi32>
 }
 
 func.def public @narrow_float(%lhs: vector<16xf8E4M3>, %rhs: vector<16xf8E4M3>) -> (vector<16xf8E4M3>) {
-  %55 = vector.addf %lhs, %rhs : vector<16xf8E4M3>
-  func.return %55 : vector<16xf8E4M3>
+  %56 = vector.addf %lhs, %rhs : vector<16xf8E4M3>
+  func.return %56 : vector<16xf8E4M3>
 }

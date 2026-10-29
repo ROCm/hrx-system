@@ -96,16 +96,16 @@ func.def @i64_to_addresses(%index: index, %offset: offset) -> (vector<9xindex>, 
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i64_to_addresses(%bounded_index: reg<aie2p.er>, %bounded_offset: reg<aie2p.er>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
-  %22 = mov.short -31
-  %23 = ashl %bounded_index, %22
-  %wide_index = concat(%bounded_index, %23) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %25 = mov.short 0
-  %wide_offset = concat(%bounded_offset, %25) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %27 = vbcst.64 %wide_index
-  %30 = vbcst.64 %wide_offset
-  %35 = mova.i32 4
-  %indices = vshuffle %27, %27, %35
-  %offsets = vshuffle %30, %30, %35
+  %16 = mov.short -31
+  %17 = ashl %bounded_index, %16
+  %wide_index = concat(%bounded_index, %17) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %19 = mov.short 0
+  %wide_offset = concat(%bounded_offset, %19) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %21 = vbcst.64 %wide_index
+  %23 = vbcst.64 %wide_offset
+  %27 = mova.i32 4
+  %indices = vshuffle %21, %21, %27
+  %offsets = vshuffle %23, %23, %27
   return %indices, %offsets
 }
 
@@ -255,49 +255,49 @@ func.def @index_table_selector(%table: vector<4xi16>, %input: vector<17xi8>) -> 
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_table_selector(%table: reg<aie2p.vec256 x2>, %input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %53 = slice %input[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %54 = mov.shift 0
+  %67 = slice %input[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %68 = mov.shift 0
   set.saturation 0
   set.ups-mode 0
-  %55 = vups.4x.w-to-c.signed %53, %54
-  %56 = slice %55[0] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
-  %57 = vmov.accumulator512.to.vector512 %56
-  %58 = mov.short 0
-  %59 = vbcst.32 %58
-  %60 = mov.short 1
-  %61 = vbcst.32 %60
-  %62 = vband %57, %61
-  %63 = vlt.u32x16.el.low32 %59, %62
-  %64 = predicate.complete.zero.high32 %63, 0
-  %65 = mov.short 2
-  %66 = vbcst.32 %65
-  %67 = vband %57, %66
-  %68 = vlt.u32x16.el.low32 %59, %67
-  %69 = predicate.complete.zero.high32 %68, 0
-  %70 = vextbcst.16 %table, 0
-  %71 = vextbcst.16 %table, 1
-  %72 = vsel.16.mask64 %70, %71, %64
-  %73 = vextbcst.16 %table, 2
-  %74 = vextbcst.16 %table, 3
-  %75 = vsel.16.mask64 %73, %74, %64
-  %76 = vsel.16.mask64 %72, %75, %69
-  %77 = mova.i32 16
-  %78 = vshift %input, %input, %77
-  %79 = slice %78[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %81 = vups.4x.w-to-c.signed %79, %54
-  %82 = slice %81[0] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
-  %83 = vmov.accumulator512.to.vector512 %82
-  %88 = vband %83, %61
-  %89 = vlt.u32x16.el.low32 %59, %88
-  %90 = predicate.complete.zero.high32 %89, 0
-  %93 = vband %83, %66
-  %94 = vlt.u32x16.el.low32 %59, %93
-  %95 = predicate.complete.zero.high32 %94, 0
-  %98 = vsel.16.mask64 %70, %71, %90
-  %101 = vsel.16.mask64 %73, %74, %90
-  %102 = vsel.16.mask64 %98, %101, %95
-  %103 = slice %76[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %104 = slice %102[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %result = concat(%103, %104) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %69 = vups.4x.w-to-c.signed %67, %68
+  %70 = slice %69[0] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %71 = vmov.accumulator512.to.vector512 %70
+  %72 = mov.short 0
+  %73 = vbcst.32 %72
+  %74 = mov.short 1
+  %75 = vbcst.32 %74
+  %76 = vband %71, %75
+  %77 = vlt.u32x16.el.low32 %73, %76
+  %78 = predicate.complete.zero.high32 %77, 0
+  %79 = mov.short 2
+  %80 = vbcst.32 %79
+  %81 = vband %71, %80
+  %82 = vlt.u32x16.el.low32 %73, %81
+  %83 = predicate.complete.zero.high32 %82, 0
+  %84 = vextbcst.16 %table, 0
+  %85 = vextbcst.16 %table, 1
+  %86 = vsel.16.mask64 %84, %85, %78
+  %87 = vextbcst.16 %table, 2
+  %88 = vextbcst.16 %table, 3
+  %89 = vsel.16.mask64 %87, %88, %78
+  %90 = vsel.16.mask64 %86, %89, %83
+  %91 = mova.i32 16
+  %92 = vshift %input, %input, %91
+  %93 = slice %92[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %95 = vups.4x.w-to-c.signed %93, %68
+  %96 = slice %95[0] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %97 = vmov.accumulator512.to.vector512 %96
+  %100 = vband %97, %75
+  %101 = vlt.u32x16.el.low32 %73, %100
+  %102 = predicate.complete.zero.high32 %101, 0
+  %104 = vband %97, %80
+  %105 = vlt.u32x16.el.low32 %73, %104
+  %106 = predicate.complete.zero.high32 %105, 0
+  %109 = vsel.16.mask64 %84, %85, %102
+  %112 = vsel.16.mask64 %87, %88, %102
+  %113 = vsel.16.mask64 %109, %112, %106
+  %114 = slice %90[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %115 = slice %113[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %result = concat(%114, %115) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   return %result
 }

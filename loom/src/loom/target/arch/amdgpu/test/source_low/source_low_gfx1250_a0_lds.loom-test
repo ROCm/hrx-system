@@ -19,8 +19,10 @@ kernel.def target(@target) @a0_legalizes_constrained_lds_packets() {
   %stride64_b32 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi32, %stride64_layout>
   %stride64_b64 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi64, %stride64_layout>
   %dense = buffer.view %scratch[%scratch_base] : buffer -> view<4096xi8>
-  %pair_b32 = vector.constant 1 : vector<2xi32>
-  %pair_b64 = vector.constant 1 : vector<2xi64>
+  %pair_b32_scalar = scalar.constant 1 : i32
+  %pair_b32 = vector.splat %pair_b32_scalar : vector<2xi32>
+  %pair_b64_scalar = scalar.constant 1 : i64
+  %pair_b64 = vector.splat %pair_b64_scalar : vector<2xi64>
   vector.store %pair_b32, %regular_b32[0, 0] : vector<2xi32>, view<1x2xi32, %regular_b32_layout>
   %loaded_regular_b32 = vector.load %regular_b32[0, 0] : view<1x2xi32, %regular_b32_layout> -> vector<2xi32>
   vector.store %loaded_regular_b32, %regular_b32[0, 0] : vector<2xi32>, view<1x2xi32, %regular_b32_layout>
@@ -33,7 +35,8 @@ kernel.def target(@target) @a0_legalizes_constrained_lds_packets() {
   vector.store %pair_b64, %stride64_b64[0, 0] : vector<2xi64>, view<1x2xi64, %stride64_layout>
   %loaded_stride64_b64 = vector.load %stride64_b64[0, 0] : view<1x2xi64, %stride64_layout> -> vector<2xi64>
   vector.store %loaded_stride64_b64, %stride64_b64[0, 0] : vector<2xi64>, view<1x2xi64, %stride64_layout>
-  %word = vector.constant 1 : vector<4xi8>
+  %word_scalar = scalar.constant 1 : i8
+  %word = vector.splat %word_scalar : vector<4xi8>
   vector.store %word, %dense[%lane] : vector<4xi8>, view<4096xi8>
   %loaded_word = vector.load %dense[%lane] : view<4096xi8> -> vector<4xi8>
   vector.store %loaded_word, %dense[%lane] : vector<4xi8>, view<4096xi8>
@@ -43,36 +46,36 @@ kernel.def target(@target) @a0_legalizes_constrained_lds_packets() {
 // ----
 low.kernel.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @a0_legalizes_constrained_lds_packets() asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %23 = storage {byte_alignment = 16, byte_length = 4096} : low.storage<workgroup>
-  %25 = v_mov_b32 1
-  %29 = v_mov_b32 0
-  %pair_b64 = concat(%25, %29, %25, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  ds_write_b32 %29, %25
-  ds_write_b32 %29, %25 {offset = 8}
-  %37 = ds_read_b32 %29
-  %38 = ds_read_b32 %29 {offset = 8}
-  ds_write_b32 %29, %37
-  ds_write_b32 %29, %38 {offset = 8}
-  %43 = slice %pair_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  ds_write_b64 %29, %43
-  %45 = slice %pair_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  ds_write_b64 %29, %45 {offset = 16}
-  %47 = ds_read_b64 %29
-  %48 = ds_read_b64 %29 {offset = 16}
-  ds_write_b64 %29, %47
-  ds_write_b64 %29, %48 {offset = 16}
-  ds_write_b32 %29, %25
-  ds_write_b32 %29, %25 {offset = 1024}
-  %57 = ds_read_b32 %29
-  %58 = ds_read_b32 %29 {offset = 1024}
-  ds_write_b32 %29, %57
-  ds_write_b32 %29, %58 {offset = 1024}
-  ds_write_b64 %29, %43
-  ds_write_b64 %29, %45 {offset = 2048}
-  %67 = ds_read_b64 %29
-  %68 = ds_read_b64 %29 {offset = 2048}
-  ds_write_b64 %29, %67
-  ds_write_b64 %29, %68 {offset = 2048}
+  %26 = storage {byte_alignment = 16, byte_length = 4096} : low.storage<workgroup>
+  %28 = v_mov_b32 1
+  %32 = v_mov_b32 0
+  %pair_b64 = concat(%28, %32, %28, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  ds_write_b32 %32, %28
+  ds_write_b32 %32, %28 {offset = 8}
+  %40 = ds_read_b32 %32
+  %41 = ds_read_b32 %32 {offset = 8}
+  ds_write_b32 %32, %40
+  ds_write_b32 %32, %41 {offset = 8}
+  %46 = slice %pair_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  ds_write_b64 %32, %46
+  %48 = slice %pair_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  ds_write_b64 %32, %48 {offset = 16}
+  %50 = ds_read_b64 %32
+  %51 = ds_read_b64 %32 {offset = 16}
+  ds_write_b64 %32, %50
+  ds_write_b64 %32, %51 {offset = 16}
+  ds_write_b32 %32, %28
+  ds_write_b32 %32, %28 {offset = 1024}
+  %60 = ds_read_b32 %32
+  %61 = ds_read_b32 %32 {offset = 1024}
+  ds_write_b32 %32, %60
+  ds_write_b32 %32, %61 {offset = 1024}
+  ds_write_b64 %32, %46
+  ds_write_b64 %32, %48 {offset = 2048}
+  %70 = ds_read_b64 %32
+  %71 = ds_read_b64 %32 {offset = 2048}
+  ds_write_b64 %32, %70
+  ds_write_b64 %32, %71 {offset = 2048}
   %word = v_mov_b32 16843009
   ds_write_b32 %lane, %word
   %loaded_word = ds_read_b32 %lane
@@ -103,8 +106,10 @@ kernel.def target(@target) @b0_retains_native_lds_packets() {
   %stride64_b32 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi32, %stride64_layout>
   %stride64_b64 = buffer.view %scratch[%scratch_base] : buffer -> view<1x2xi64, %stride64_layout>
   %dense = buffer.view %scratch[%scratch_base] : buffer -> view<4096xi8>
-  %pair_b32 = vector.constant 1 : vector<2xi32>
-  %pair_b64 = vector.constant 1 : vector<2xi64>
+  %pair_b32_scalar = scalar.constant 1 : i32
+  %pair_b32 = vector.splat %pair_b32_scalar : vector<2xi32>
+  %pair_b64_scalar = scalar.constant 1 : i64
+  %pair_b64 = vector.splat %pair_b64_scalar : vector<2xi64>
   vector.store %pair_b32, %regular_b32[0, 0] : vector<2xi32>, view<1x2xi32, %regular_b32_layout>
   %loaded_regular_b32 = vector.load %regular_b32[0, 0] : view<1x2xi32, %regular_b32_layout> -> vector<2xi32>
   vector.store %loaded_regular_b32, %regular_b32[0, 0] : vector<2xi32>, view<1x2xi32, %regular_b32_layout>
@@ -117,7 +122,8 @@ kernel.def target(@target) @b0_retains_native_lds_packets() {
   vector.store %pair_b64, %stride64_b64[0, 0] : vector<2xi64>, view<1x2xi64, %stride64_layout>
   %loaded_stride64_b64 = vector.load %stride64_b64[0, 0] : view<1x2xi64, %stride64_layout> -> vector<2xi64>
   vector.store %loaded_stride64_b64, %stride64_b64[0, 0] : vector<2xi64>, view<1x2xi64, %stride64_layout>
-  %word = vector.constant 1 : vector<4xi8>
+  %word_scalar = scalar.constant 1 : i8
+  %word = vector.splat %word_scalar : vector<4xi8>
   vector.store %word, %dense[%lane] : vector<4xi8>, view<4096xi8>
   %loaded_word = vector.load %dense[%lane] : view<4096xi8> -> vector<4xi8>
   vector.store %loaded_word, %dense[%lane] : vector<4xi8>, view<4096xi8>
@@ -126,36 +132,36 @@ kernel.def target(@target) @b0_retains_native_lds_packets() {
 
 // ----
 low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(32, 1, 1) workgroup_count(1, 1, 1) @b0_retains_native_lds_packets() asm {
-  %23 = storage {byte_alignment = 16, byte_length = 4096} : low.storage<workgroup>
-  %25 = v_mov_b32 1
-  %29 = v_mov_b32 0
-  %pair_b64 = concat(%25, %29, %25, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  ds_write2_b32 %29, %25, %25 {offset1 = 2}
-  %loaded_regular_b32 = ds_read2_b32 %29 {offset1 = 2}
-  %39 = slice %loaded_regular_b32[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %40 = slice %loaded_regular_b32[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  ds_write2_b32 %29, %39, %40 {offset1 = 2}
-  %42 = slice %pair_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  %43 = slice %pair_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  ds_write2_b64 %29, %42, %43 {offset1 = 2}
-  %loaded_regular_b64 = ds_read2_b64 %29 {offset1 = 2}
-  %47 = slice %loaded_regular_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  %48 = slice %loaded_regular_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  ds_write2_b64 %29, %47, %48 {offset1 = 2}
-  ds_write2st64_b32 %29, %25, %25 {offset1 = 4}
-  %loaded_stride64_b32 = ds_read2st64_b32 %29 {offset1 = 4}
-  %55 = slice %loaded_stride64_b32[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %56 = slice %loaded_stride64_b32[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  ds_write2st64_b32 %29, %55, %56 {offset1 = 4}
-  ds_write2st64_b64 %29, %42, %43 {offset1 = 4}
-  %loaded_stride64_b64 = ds_read2st64_b64 %29 {offset1 = 4}
-  %63 = slice %loaded_stride64_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  %64 = slice %loaded_stride64_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  ds_write2st64_b64 %29, %63, %64 {offset1 = 4}
+  %26 = storage {byte_alignment = 16, byte_length = 4096} : low.storage<workgroup>
+  %28 = v_mov_b32 1
+  %32 = v_mov_b32 0
+  %pair_b64 = concat(%28, %32, %28, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  ds_write2_b32 %32, %28, %28 {offset1 = 2}
+  %loaded_regular_b32 = ds_read2_b32 %32 {offset1 = 2}
+  %42 = slice %loaded_regular_b32[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %43 = slice %loaded_regular_b32[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  ds_write2_b32 %32, %42, %43 {offset1 = 2}
+  %45 = slice %pair_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %46 = slice %pair_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  ds_write2_b64 %32, %45, %46 {offset1 = 2}
+  %loaded_regular_b64 = ds_read2_b64 %32 {offset1 = 2}
+  %50 = slice %loaded_regular_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %51 = slice %loaded_regular_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  ds_write2_b64 %32, %50, %51 {offset1 = 2}
+  ds_write2st64_b32 %32, %28, %28 {offset1 = 4}
+  %loaded_stride64_b32 = ds_read2st64_b32 %32 {offset1 = 4}
+  %58 = slice %loaded_stride64_b32[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %59 = slice %loaded_stride64_b32[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  ds_write2st64_b32 %32, %58, %59 {offset1 = 4}
+  ds_write2st64_b64 %32, %45, %46 {offset1 = 4}
+  %loaded_stride64_b64 = ds_read2st64_b64 %32 {offset1 = 4}
+  %66 = slice %loaded_stride64_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %67 = slice %loaded_stride64_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  ds_write2st64_b64 %32, %66, %67 {offset1 = 4}
   %word = v_mov_b32 16843009
-  %66 = s_mov_b32_m0_imm 0
-  ds_write_addtid_b32 %word, %66
-  %loaded_word = ds_read_addtid_b32 %66
-  ds_write_addtid_b32 %loaded_word, %66
+  %69 = s_mov_b32_m0_imm 0
+  ds_write_addtid_b32 %word, %69
+  %loaded_word = ds_read_addtid_b32 %69
+  ds_write_addtid_b32 %loaded_word, %69
   return
 }

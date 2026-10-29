@@ -76,8 +76,10 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
 // Each encoded width is covered because narrow forms additionally require VL.
 // RUN: emit source-low target=x86:avx512 output=low
 func.def @packed_rotations_128(%value32: vector<4xi32>, %count32: vector<4xi32>, %value64: vector<2xi64>, %count64: vector<2xi64>) -> (vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>) {
-  %fixed32 = vector.constant -1 : vector<4xi32>
-  %fixed64 = vector.constant 300 : vector<2xi64>
+  %fixed32_scalar = scalar.constant -1 : i32
+  %fixed32 = vector.splat %fixed32_scalar : vector<4xi32>
+  %fixed64_scalar = scalar.constant 300 : i64
+  %fixed64 = vector.splat %fixed64_scalar : vector<2xi64>
   %left32 = vector.rotli %value32, %count32 : vector<4xi32>
   %right32 = vector.rotri %value32, %count32 : vector<4xi32>
   %left32_fixed = vector.rotli %value32, %fixed32 : vector<4xi32>
@@ -106,8 +108,10 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
 
 // RUN: emit source-low target=x86:avx512 output=low
 func.def @packed_rotations_512(%value32: vector<16xi32>, %count32: vector<16xi32>, %value64: vector<8xi64>, %count64: vector<8xi64>) -> (vector<16xi32>, vector<16xi32>, vector<16xi32>, vector<16xi32>, vector<8xi64>, vector<8xi64>, vector<8xi64>, vector<8xi64>) {
-  %fixed32 = vector.constant 7 : vector<16xi32>
-  %fixed64 = vector.constant 11 : vector<8xi64>
+  %fixed32_scalar = scalar.constant 7 : i32
+  %fixed32 = vector.splat %fixed32_scalar : vector<16xi32>
+  %fixed64_scalar = scalar.constant 11 : i64
+  %fixed64 = vector.splat %fixed64_scalar : vector<8xi64>
   %left32 = vector.rotli %value32, %count32 : vector<16xi32>
   %right32 = vector.rotri %value32, %count32 : vector<16xi32>
   %left32_fixed = vector.rotli %value32, %fixed32 : vector<16xi32>
@@ -140,7 +144,8 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
 x86.target<avx512> @target {features = [-avx512vl]}
 
 func.def target(@target) @rotation_without_vl(%narrow: vector<4xi32>, %wide: vector<16xi32>, %wide_count: vector<16xi32>) -> (vector<4xi32>, vector<16xi32>) {
-  %fixed_count = vector.constant 7 : vector<4xi32>
+  %fixed_count_scalar = scalar.constant 7 : i32
+  %fixed_count = vector.splat %fixed_count_scalar : vector<4xi32>
   %narrow_result = vector.rotli %narrow, %fixed_count : vector<4xi32>
   %wide_result = vector.rotli %wide, %wide_count : vector<16xi32>
   func.return %narrow_result, %wide_result : vector<4xi32>, vector<16xi32>
@@ -148,10 +153,10 @@ func.def target(@target) @rotation_without_vl(%narrow: vector<4xi32>, %wide: vec
 
 // ----
 low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<4xi32>, vector<16xi32>, vector<16xi32>) -> (vector<4xi32>, vector<16xi32>)}) @rotation_without_vl(%narrow: reg<x86.xmm>, %wide: reg<x86.zmm>, %wide_count: reg<x86.zmm>) -> (reg<x86.xmm>, reg<x86.zmm>) asm {
-  %23 = vpsrld.xmm %narrow, 24
-  %24 = vpslld.xmm %narrow, 7
-  %25 = vpsrld.xmm %23, 1
-  %narrow_result = vpor.xmm %24, %25
+  %28 = vpsrld.xmm %narrow, 24
+  %29 = vpslld.xmm %narrow, 7
+  %30 = vpsrld.xmm %28, 1
+  %narrow_result = vpor.xmm %29, %30
   %wide_result = avx512.vprolvd.zmm %wide, %wide_count
   return %narrow_result, %wide_result
 }

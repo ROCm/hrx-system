@@ -26,19 +26,6 @@ CHECK: COMPILE-REPORT: target_legalization[0] * source_op=vector.broadcast * act
 
 // RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
 
-func.def @packetized_splat(%value: i32) -> (vector<32xi32>) {
-  %result = vector.splat %value : vector<32xi32>
-  func.return %result : vector<32xi32>
-}
-
-// ----
-CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=0 target_rewritten=1 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1 *
-CHECK: COMPILE-REPORT: target_legalization[0] * source_op=vector.splat * action=rewritten * legalizer=vector-packet strategy=target * scalarized=false * created_ops=3 erased_ops=1
-
-// ====
-
-// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
-
 func.def @static_slice(%values: vector<3x4xf32>) -> (vector<1x4xf32>) {
   %result = vector.slice %values[1, 0] : vector<3x4xf32> -> vector<1x4xf32>
   func.return %result : vector<1x4xf32>

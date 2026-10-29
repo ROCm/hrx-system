@@ -725,6 +725,19 @@ static iree_status_t loom_math_build_integer_constant(
   return iree_ok_status();
 }
 
+static iree_status_t loom_math_vector_constant_splat_build(
+    loom_builder_t* builder, loom_attribute_t value, loom_type_t result_type,
+    loom_location_id_t location, loom_op_t** out_op) {
+  const loom_type_t element_type =
+      loom_type_scalar(loom_type_element_type(result_type));
+  loom_op_t* scalar_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_scalar_constant_build(builder, value, element_type,
+                                                  location, &scalar_op));
+  return loom_vector_splat_build(builder,
+                                 loom_scalar_constant_result(scalar_op),
+                                 result_type, location, out_op);
+}
+
 // Builds exact signum from the encoded sign and magnitude fields. The unsigned
 // range predicates accept every nonzero value through the format's numeric
 // upper bound, including infinity for IEEE formats. NaNs and both signed zeros
@@ -855,7 +868,7 @@ static iree_status_t loom_math_target_legalize_float_sign(
   const loom_math_sign_builders_t builders = is_vector
       ? (loom_math_sign_builders_t){
             .bitcast = loom_vector_bitcast_build,
-            .constant = loom_vector_constant_build,
+            .constant = loom_math_vector_constant_splat_build,
             .bitwise_and = loom_vector_andi_build,
             .bitwise_or = loom_vector_ori_build,
             .bitwise_xor = loom_vector_xori_build,

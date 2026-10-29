@@ -165,8 +165,8 @@ kernel.def target(@target) @exact_workgroup_count_uses_facts() {
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(3, 5, 1) workgroup_count(2, 3, 1) @exact_workgroup_count_uses_facts() asm {
   %output_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %result = v_mov_b32 6
-  %17 = v_mov_b32 0
-  global_store_b32_saddr %17, %result, %output_view
+  %18 = v_mov_b32 0
+  global_store_b32_saddr %18, %result, %output_view
   return
 }
 

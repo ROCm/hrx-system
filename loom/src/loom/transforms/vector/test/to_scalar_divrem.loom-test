@@ -27,17 +27,19 @@ func.def @dynamic_signed_divrem(%length: index, %lhs: vector<[%length]xi64>, %rh
 
 // ----
 func.def @dynamic_signed_divrem(%length: index, %lhs: vector<[%length]xi64>, %rhs: vector<[%length]xi64>) -> (vector<[%length]xi64>, vector<[%length]xi64>) {
-  %7 = vector.constant 0 : vector<[%length]xi64>
-  %8 = vector.constant 0 : vector<[%length]xi64>
-  %9 = index.constant 0 : index
-  %10 = index.constant 1 : index
-  %quotient, %remainder = scf.for %11 = [%9 to %length step %10](%12 = %7 : vector<[%length]xi64>, %13 = %8 : vector<[%length]xi64>) -> (vector<[%length]xi64>, vector<[%length]xi64>) {
-    %16 = vector.extract %lhs[%11] : vector<[%length]xi64> -> i64
-    %17 = vector.extract %rhs[%11] : vector<[%length]xi64> -> i64
-    %18, %19 = scalar.divremsi %16, %17 : i64
-    %20 = vector.insert %18 into %12[%11] : i64, vector<[%length]xi64>
-    %21 = vector.insert %19 into %13[%11] : i64, vector<[%length]xi64>
-    scf.yield %20, %21 : vector<[%length]xi64>, vector<[%length]xi64>
+  %7 = scalar.constant 0 : i64
+  %8 = vector.splat %7 : vector<[%length]xi64>
+  %9 = scalar.constant 0 : i64
+  %10 = vector.splat %9 : vector<[%length]xi64>
+  %11 = index.constant 0 : index
+  %12 = index.constant 1 : index
+  %quotient, %remainder = scf.for %13 = [%11 to %length step %12](%14 = %8 : vector<[%length]xi64>, %15 = %10 : vector<[%length]xi64>) -> (vector<[%length]xi64>, vector<[%length]xi64>) {
+    %18 = vector.extract %lhs[%13] : vector<[%length]xi64> -> i64
+    %19 = vector.extract %rhs[%13] : vector<[%length]xi64> -> i64
+    %20, %21 = scalar.divremsi %18, %19 : i64
+    %22 = vector.insert %20 into %14[%13] : i64, vector<[%length]xi64>
+    %23 = vector.insert %21 into %15[%13] : i64, vector<[%length]xi64>
+    scf.yield %22, %23 : vector<[%length]xi64>, vector<[%length]xi64>
   }
   func.return %quotient, %remainder : vector<[%length]xi64>, vector<[%length]xi64>
 }

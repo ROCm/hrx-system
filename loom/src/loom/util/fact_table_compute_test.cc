@@ -628,17 +628,21 @@ TEST_P(FactTableLoopScratchTest,
   loom_op_t* yield =
       loom_region_entry_block(loom_loop_like_body(inner))->last_op;
   loom_builder_set_before(&builder_, yield);
-  loom_op_t* constant = nullptr;
-  IREE_ASSERT_OK(loom_vector_constant_build(&builder_, loom_attr_i64(7),
-                                            vector_type_, LOOM_LOCATION_UNKNOWN,
-                                            &constant));
-  const auto result = loom_vector_constant_result(constant);
+  loom_op_t* scalar = nullptr;
+  IREE_ASSERT_OK(loom_scalar_constant_build(
+      &builder_, loom_attr_i64(7), loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      LOOM_LOCATION_UNKNOWN, &scalar));
+  loom_op_t* splat = nullptr;
+  IREE_ASSERT_OK(
+      loom_vector_splat_build(&builder_, loom_scalar_constant_result(scalar),
+                              vector_type_, LOOM_LOCATION_UNKNOWN, &splat));
+  const auto result = loom_vector_splat_result(splat);
   IREE_ASSERT_OK(loom_op_set_operand(module_, yield, 0, result));
 
   for (unsigned scope = 0; scope < 2; ++scope) {
     for (int64_t value : {7, 11}) {
-      IREE_ASSERT_OK(loom_vector_constant_set_value(module_, constant,
-                                                    loom_attr_i64(value)));
+      IREE_ASSERT_OK(
+          loom_op_set_attr(module_, scalar, 0, loom_attr_i64(value)));
       IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, loop));
       EXPECT_FALSE(table_.replaying);
       const auto facts = loom_value_fact_table_lookup(&table_, result);

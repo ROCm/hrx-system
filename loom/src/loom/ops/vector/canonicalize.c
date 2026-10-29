@@ -241,15 +241,8 @@ static iree_status_t loom_vector_replace_single_result_with_constant_attr(
   loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
 
   loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
-  if (loom_scalar_type_is_float(loom_type_element_type(result_type))) {
-    IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
-        &rewriter->builder, attr, result_type, op->location, &replacement));
-  } else {
-    loom_op_t* constant_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        &rewriter->builder, attr, result_type, op->location, &constant_op));
-    replacement = loom_vector_constant_result(constant_op);
-  }
+  IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+      &rewriter->builder, attr, result_type, op->location, &replacement));
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, value_checkpoint));
   return loom_vector_replace_single_result_with_value(op, rewriter,
@@ -435,8 +428,7 @@ static iree_status_t loom_vector_canonicalize_uniform_result(
       !loom_type_is_vector(result_type)) {
     return iree_ok_status();
   }
-  if (loom_vector_splat_isa(op) &&
-      loom_scalar_type_is_float(loom_type_element_type(result_type))) {
+  if (loom_vector_splat_isa(op)) {
     return iree_ok_status();
   }
 
@@ -1006,6 +998,26 @@ static iree_status_t loom_vector_canonicalize_extract(loom_op_t* op,
     return iree_ok_status();
   }
 
+  // A statically selected component of a repeated scalar is the same scalar
+  // or a smaller repetition, even when packet reconstruction has interposed
+  // concat and shape-only bitcast operations between the splat and extract.
+  if (loom_vector_extract_indices(op).count == 0 &&
+      loom_vector_extract_static_indices(op).count != 0) {
+    loom_value_id_t scalar = LOOM_VALUE_ID_INVALID;
+    if (loom_value_fact_table_query_uniform_element_origin(
+            rewriter->fact_table, rewriter->module, source, &scalar)) {
+      if (loom_type_is_scalar(result_type)) {
+        IREE_RETURN_IF_ERROR(
+            loom_vector_replace_single_result_with_value(op, rewriter, scalar));
+      } else {
+        IREE_RETURN_IF_ERROR(loom_vector_replace_single_result_with_splat(
+            op, rewriter, scalar, result_type));
+      }
+      *out_changed = true;
+      return iree_ok_status();
+    }
+  }
+
   loom_op_t* source_def_op = loom_rewriter_value_defining_op(rewriter, source);
   if (!source_def_op) {
     return iree_ok_status();
@@ -1156,14 +1168,13 @@ static iree_status_t loom_vector_canonicalize_extended_boolean_comparison(
       loom_module_value_type(rewriter->module, loom_op_const_results(op)[0]);
   loom_builder_set_before(&rewriter->builder, op);
   const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
-  loom_op_t* one = NULL;
+  loom_value_id_t one = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
-      loom_vector_constant_build(&rewriter->builder, loom_attr_bool(true),
-                                 result_type, op->location, &one));
+      loom_vector_build_constant_splat(&rewriter->builder, loom_attr_bool(true),
+                                       result_type, op->location, &one));
   loom_op_t* inverted = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_xori_build(
-      &rewriter->builder, input, loom_vector_constant_result(one), result_type,
-      op->location, &inverted));
+      &rewriter->builder, input, one, result_type, op->location, &inverted));
   IREE_RETURN_IF_ERROR(loom_vector_replace_single_result_with_new_op(
       op, rewriter, inverted, checkpoint));
   *out_changed = true;
@@ -1642,13 +1653,12 @@ static iree_status_t loom_vector_canonicalize_rotation(
   }
 
   loom_builder_set_before(&rewriter->builder, op);
-  loom_op_t* count_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
+  loom_value_id_t count = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
       &rewriter->builder, loom_attr_i64(normalized_amount), result_type,
-      op->location, &count_op));
+      op->location, &count));
   IREE_RETURN_IF_ERROR(
-      loom_rewriter_set_operand(rewriter, op, /*operand_index=*/1,
-                                loom_vector_constant_result(count_op)));
+      loom_rewriter_set_operand(rewriter, op, /*operand_index=*/1, count));
   *out_changed = true;
   return iree_ok_status();
 }

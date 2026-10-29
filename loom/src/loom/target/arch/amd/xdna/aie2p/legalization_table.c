@@ -7,6 +7,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/legalization_table.h"
 
 #include "loom/ir/module.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/vector_carrier.h"
 #include "loom/util/fact_table.h"
@@ -83,13 +84,14 @@ static iree_status_t loom_aie2p_table_lookup_build_leaf(
     const loom_aie2p_table_lookup_tree_t* tree, uint32_t table_index,
     loom_value_id_t* out_value) {
   loom_op_t* op = NULL;
+  loom_value_id_t index = LOOM_VALUE_ID_INVALID;
   if (loom_type_element_type(tree->table_type) != LOOM_SCALAR_TYPE_I1) {
+    IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+        tree->builder, loom_attr_i64(table_index), tree->index_type,
+        tree->location, &index));
     IREE_RETURN_IF_ERROR(
-        loom_vector_constant_build(tree->builder, loom_attr_i64(table_index),
-                                   tree->index_type, tree->location, &op));
-    IREE_RETURN_IF_ERROR(loom_vector_table_lookup_build(
-        tree->builder, tree->table, loom_vector_constant_result(op),
-        tree->result_type, tree->location, &op));
+        loom_vector_table_lookup_build(tree->builder, tree->table, index,
+                                       tree->result_type, tree->location, &op));
     *out_value = loom_vector_table_lookup_result(op);
     return iree_ok_status();
   }
@@ -97,12 +99,12 @@ static iree_status_t loom_aie2p_table_lookup_build_leaf(
   const uint32_t packet_lane_count =
       LOOM_AIE2P_TABLE_LOOKUP_PREDICATE_PACKET_LANE_COUNT;
   const uint32_t packet_index = table_index / packet_lane_count;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
+  IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
       tree->builder, loom_attr_i64(table_index % packet_lane_count),
-      tree->index_type, tree->location, &op));
+      tree->index_type, tree->location, &index));
   IREE_RETURN_IF_ERROR(loom_vector_table_lookup_build(
-      tree->builder, tree->predicate_byte_tables[packet_index],
-      loom_vector_constant_result(op), tree->result_type, tree->location, &op));
+      tree->builder, tree->predicate_byte_tables[packet_index], index,
+      tree->result_type, tree->location, &op));
   *out_value = loom_vector_table_lookup_result(op);
   return iree_ok_status();
 }
@@ -138,13 +140,13 @@ static iree_status_t loom_aie2p_table_lookup_build_selector(
     const loom_aie2p_table_lookup_tree_t* tree, loom_value_id_t indices,
     loom_type_t predicate_type, loom_value_id_t zero, uint32_t level,
     loom_value_id_t* out_selector) {
-  loom_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
+  loom_value_id_t mask = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
       tree->builder, loom_attr_i64(UINT64_C(1) << level), tree->index_type,
-      tree->location, &op));
+      tree->location, &mask));
+  loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_andi_build(
-      tree->builder, indices, loom_vector_constant_result(op), tree->index_type,
-      tree->location, &op));
+      tree->builder, indices, mask, tree->index_type, tree->location, &op));
   IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
       tree->builder, LOOM_VECTOR_CMPI_PREDICATE_ULT, zero,
       loom_vector_andi_result(op), tree->index_type, predicate_type,
@@ -292,11 +294,9 @@ iree_status_t loom_aie2p_table_lookup_rewrite(
         loom_type_make_header(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I1,
                               loom_type_rank(selection_index_type),
                               loom_type_flags(selection_index_type));
-    loom_op_t* value_op = NULL;
-    IREE_RETURN_IF_ERROR(
-        loom_vector_constant_build(tree.builder, loom_attr_i64(0),
-                                   tree.index_type, op->location, &value_op));
-    const loom_value_id_t zero = loom_vector_constant_result(value_op);
+    loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+        tree.builder, loom_attr_i64(0), tree.index_type, op->location, &zero));
     for (uint32_t level = 0; level < levels; ++level) {
       IREE_RETURN_IF_ERROR(loom_aie2p_table_lookup_build_selector(
           &tree, selection_indices, predicate_type, zero, level,
@@ -306,11 +306,10 @@ iree_status_t loom_aie2p_table_lookup_rewrite(
         &tree, 0, span, levels, &replacement));
   }
   if (loom_type_element_type(table_type) == LOOM_SCALAR_TYPE_I1) {
+    loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+        tree.builder, loom_attr_i64(0), tree.result_type, op->location, &zero));
     loom_op_t* value_op = NULL;
-    IREE_RETURN_IF_ERROR(
-        loom_vector_constant_build(tree.builder, loom_attr_i64(0),
-                                   tree.result_type, op->location, &value_op));
-    const loom_value_id_t zero = loom_vector_constant_result(value_op);
     IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
         tree.builder, LOOM_VECTOR_CMPI_PREDICATE_ULT, zero, replacement,
         tree.result_type, result_type, op->location, &value_op));

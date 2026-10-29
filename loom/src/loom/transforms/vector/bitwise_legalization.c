@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "loom/ir/module.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/transforms/vector/to_scalar.h"
 
@@ -16,10 +17,9 @@ static iree_status_t loom_vector_build_fixed_shift(
     loom_builder_t* builder, loom_op_kind_t kind, loom_value_id_t value,
     loom_type_t type, int64_t amount, loom_location_id_t location,
     loom_value_id_t* out_result) {
-  loom_op_t* amount_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      builder, loom_attr_i64(amount), type, location, &amount_op));
-  const loom_value_id_t amount_value = loom_vector_constant_result(amount_op);
+  loom_value_id_t amount_value = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+      builder, loom_attr_i64(amount), type, location, &amount_value));
 
   loom_op_t* shift_op = NULL;
   switch (kind) {
@@ -178,26 +178,23 @@ iree_status_t loom_vector_legalize_rotation(
 
   loom_value_id_t replacement = value;
   if (bit_width != 1) {
-    loom_op_t* mask_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64(bit_width - 1), type, op->location, &mask_op));
+    loom_value_id_t mask = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+        builder, loom_attr_i64(bit_width - 1), type, op->location, &mask));
     loom_op_t* amount_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_andi_build(
-        builder, count, loom_vector_constant_result(mask_op), type,
-        op->location, &amount_op));
+    IREE_RETURN_IF_ERROR(loom_vector_andi_build(builder, count, mask, type,
+                                                op->location, &amount_op));
 
     loom_op_t* complement_op = NULL;
     IREE_RETURN_IF_ERROR(
         loom_vector_xori_build(builder, loom_vector_andi_result(amount_op),
-                               loom_vector_constant_result(mask_op), type,
-                               op->location, &complement_op));
-    loom_op_t* one_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64(1), type, op->location, &one_op));
+                               mask, type, op->location, &complement_op));
+    loom_value_id_t one = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+        builder, loom_attr_i64(1), type, op->location, &one));
 
     const loom_value_id_t amount = loom_vector_andi_result(amount_op);
     const loom_value_id_t complement = loom_vector_xori_result(complement_op);
-    const loom_value_id_t one = loom_vector_constant_result(one_op);
     const bool rotate_left = loom_vector_rotli_isa(op);
     loom_op_t* complementary_op = NULL;
     if (rotate_left) {

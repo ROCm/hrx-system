@@ -11,10 +11,10 @@ func.def target(@target) @same_width_bitfields(%values: vector<8xi32>) -> (vecto
 
 // ----
 low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<8xi32>) -> (vector<8xi32>, vector<8xi32>, vector<8xi32>)}) @same_width_bitfields(%values: reg<x86.ymm>) -> (reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>) asm {
-  %21 = vpslld.ymm %values, 16
-  %unsigned_middle = vpsrld.ymm %21, 24
-  %23 = vpslld.ymm %values, 8
-  %signed_middle = vpsrad.ymm %23, 24
+  %26 = vpslld.ymm %values, 16
+  %unsigned_middle = vpsrld.ymm %26, 24
+  %28 = vpslld.ymm %values, 8
+  %signed_middle = vpsrad.ymm %28, 24
   %signed_top = vpsrad.ymm %values, 24
   return %unsigned_middle, %signed_middle, %signed_top
 }
@@ -38,22 +38,22 @@ func.def public target(@target) @widened_byte_packets(%input: buffer, %output_un
 
 // ----
 low.func.def public target<x86.avx2.core>(@target) abi(object_function) @widened_byte_packets(%input: reg<x86.gpr64>, %output_unsigned: reg<x86.gpr64>, %output_signed: reg<x86.gpr64>) asm {
-  %36 = vmovdqu32.load.xmm %input {disp32 = 0}
-  %37 = vmovdqu32.load.xmm %input {disp32 = 16}
-  %38 = vpmovzxbw.ymm %36
-  %39 = vpsllw.ymm %38, 9
-  %40 = vpsrlw.ymm %39, 10
-  vmovdqu32.store.ymm %40, %output_unsigned {disp32 = 0}
-  %41 = vpmovzxbw.ymm %37
-  %42 = vpsllw.ymm %41, 9
-  %43 = vpsrlw.ymm %42, 10
-  vmovdqu32.store.ymm %43, %output_unsigned {disp32 = 32}
-  %44 = vpmovsxbw.ymm %36
-  %45 = vpsraw.ymm %44, 4
-  vmovdqu32.store.ymm %45, %output_signed {disp32 = 0}
-  %46 = vpmovsxbw.ymm %37
-  %47 = vpsraw.ymm %46, 4
-  vmovdqu32.store.ymm %47, %output_signed {disp32 = 32}
+  %42 = vmovdqu32.load.xmm %input {disp32 = 0}
+  %43 = vmovdqu32.load.xmm %input {disp32 = 16}
+  %44 = vpmovzxbw.ymm %42
+  %45 = vpsllw.ymm %44, 9
+  %46 = vpsrlw.ymm %45, 10
+  vmovdqu32.store.ymm %46, %output_unsigned {disp32 = 0}
+  %47 = vpmovzxbw.ymm %43
+  %48 = vpsllw.ymm %47, 9
+  %49 = vpsrlw.ymm %48, 10
+  vmovdqu32.store.ymm %49, %output_unsigned {disp32 = 32}
+  %50 = vpmovsxbw.ymm %42
+  %51 = vpsraw.ymm %50, 4
+  vmovdqu32.store.ymm %51, %output_signed {disp32 = 0}
+  %52 = vpmovsxbw.ymm %43
+  %53 = vpsraw.ymm %52, 4
+  vmovdqu32.store.ymm %53, %output_signed {disp32 = 32}
   return
 }
 
@@ -69,18 +69,18 @@ func.def target(@target) @narrowed_word_bitfields(%values: vector<8xi32>) -> (ve
 
 // ----
 low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<8xi32>) -> (vector<8xi16>, vector<8xi16>)}) @narrowed_word_bitfields(%values: reg<x86.ymm>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
-  %16 = vpslld.ymm %values, 12
-  %17 = vpsrld.ymm %16, 20
-  %18 = avx2.vmovdqu.rodata.ymm @__low_rodata_6e7103bf
-  %19 = vpshufb.ymm %17, %18
-  %20 = vextractf128.xmm %19, 0
-  %21 = vextractf128.xmm %19, 1
-  %unsigned = vpunpcklqdq.xmm %20, %21
-  %23 = vpsrad.ymm %values, 20
-  %25 = vpshufb.ymm %23, %18
-  %26 = vextractf128.xmm %25, 0
-  %27 = vextractf128.xmm %25, 1
-  %signed_top = vpunpcklqdq.xmm %26, %27
+  %19 = vpslld.ymm %values, 12
+  %20 = vpsrld.ymm %19, 20
+  %21 = avx2.vmovdqu.rodata.ymm @__low_rodata_6e7103bf
+  %22 = vpshufb.ymm %20, %21
+  %23 = vextractf128.xmm %22, 0
+  %24 = vextractf128.xmm %22, 1
+  %unsigned = vpunpcklqdq.xmm %23, %24
+  %26 = vpsrad.ymm %values, 20
+  %28 = vpshufb.ymm %26, %21
+  %29 = vextractf128.xmm %28, 0
+  %30 = vextractf128.xmm %28, 1
+  %signed_top = vpunpcklqdq.xmm %29, %30
   return %unsigned, %signed_top
 }
 
@@ -97,10 +97,10 @@ func.def target(@target) @signed_wide_bitfields(%zmm_values: vector<8xi64>, %ymm
 
 // ----
 low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (vector<8xi64>, vector<4xi64>) -> (vector<8xi64>, vector<8xi64>, vector<4xi64>)}) @signed_wide_bitfields(%zmm_values: reg<x86.zmm>, %ymm_values: reg<x86.ymm>) -> (reg<x86.zmm>, reg<x86.zmm>, reg<x86.ymm>) asm {
-  %23 = avx512.vpsllq.zmm %zmm_values, 16
-  %middle = avx512.vpsraq.zmm %23, 32
+  %28 = avx512.vpsllq.zmm %zmm_values, 16
+  %middle = avx512.vpsraq.zmm %28, 32
   %top = avx512.vpsraq.zmm %zmm_values, 48
-  %26 = vpsllq.ymm %ymm_values, 8
-  %vl_middle = avx512.vpsraq.ymm %26, 16
+  %31 = vpsllq.ymm %ymm_values, 8
+  %vl_middle = avx512.vpsraq.ymm %31, 16
   return %middle, %top, %vl_middle
 }

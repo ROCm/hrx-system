@@ -11,6 +11,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/vector/packet_legalization.h"
@@ -259,18 +260,17 @@ static iree_status_t loom_vector_predicate_extension_packet_materialize(
       loom_module_value_type(context->module, loom_op_const_results(op)[0]),
       lane_count);
   loom_builder_t* builder = &context->rewriter->builder;
-  loom_op_t* true_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
+  loom_value_id_t true_value = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
       builder, loom_attr_i64(op->kind == LOOM_OP_VECTOR_EXTSI ? -1 : 1),
-      result_type, op->location, &true_op));
-  loom_op_t* false_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      builder, loom_attr_i64(0), result_type, op->location, &false_op));
+      result_type, op->location, &true_value));
+  loom_value_id_t false_value = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+      builder, loom_attr_i64(0), result_type, op->location, &false_value));
   loom_op_t* select_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_select_build(
-      builder, source, loom_vector_constant_result(true_op),
-      loom_vector_constant_result(false_op), result_type, op->location,
-      &select_op));
+  IREE_RETURN_IF_ERROR(loom_vector_select_build(builder, source, true_value,
+                                                false_value, result_type,
+                                                op->location, &select_op));
   *out_result = loom_vector_select_result(select_op);
   return iree_ok_status();
 }

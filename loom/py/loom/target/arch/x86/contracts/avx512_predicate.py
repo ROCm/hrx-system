@@ -915,6 +915,26 @@ def _predicate_constant_rules(
                     emit=tuple(emits),
                 )
             )
+            rules.append(
+                DescriptorRule(
+                    source_op=vector.vector_splat,
+                    descriptor=move_mask if register_class == "x86.k" else expand,
+                    guards=(
+                        Guard.value_type("scalar", _I1),
+                        Guard.value_i64_range("scalar", value, value),
+                        Guard.value_type("result", result_type),
+                        *_predicate_representation_guards("result", 64, register_class),
+                        Guard.descriptor_available(move_bits),
+                        *(
+                            (Guard.descriptor_available(move_mask),)
+                            if register_class != "x86.k"
+                            else ()
+                        ),
+                    ),
+                    emit=tuple(emits),
+                    priority=1,
+                )
+            )
     return tuple(rules)
 
 

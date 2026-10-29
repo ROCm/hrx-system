@@ -36,8 +36,10 @@ kernel.def target(@target) @predicate_lifetime() {
   %head_word = scf.select %head, %c1, %c0 : i32
   %tail_word = scf.select %tail, %c1, %c0 : i32
   %begin_word = scf.select %at_begin, %c1, %c0 : i32
-  %true_words = vector.constant 1 : vector<2xi32>
-  %false_words = vector.constant 0 : vector<2xi32>
+  %true_words_scalar = scalar.constant 1 : i32
+  %true_words = vector.splat %true_words_scalar : vector<2xi32>
+  %false_words_scalar = scalar.constant 0 : i32
+  %false_words = vector.splat %false_words_scalar : vector<2xi32>
   %predicate_words = vector.select %predicates, %true_words, %false_words : vector<2xi32>
   view.store %iteration, %outputs[%lane, 0] : i32, view<64x6xi32>
   view.store %head_word, %outputs[%lane, 1] : i32, view<64x6xi32>
@@ -52,51 +54,51 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count =
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %inputs = resource<hal_binding> {extent = 768, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %outputs = resource<hal_binding> {extent = 1536, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %80 = v_mov_b32 12
-  %81 = v_mul_lo_u32 %lane, %80
-  %limit = global_load_b32_saddr %81, %inputs
-  %first_word = global_load_b32_saddr %81, %inputs {offset = 4}
-  %second_word = global_load_b32_saddr %81, %inputs {offset = 8}
+  %85 = v_mov_b32 12
+  %86 = v_mul_lo_u32 %lane, %85
+  %limit = global_load_b32_saddr %86, %inputs
+  %first_word = global_load_b32_saddr %86, %inputs {offset = 4}
+  %second_word = global_load_b32_saddr %86, %inputs {offset = 8}
   %first = v_cmp_ne_i32_src1_inline %first_word {rhs = 0}
   %second = v_cmp_ne_i32_src1_inline %second_word {rhs = 0}
-  %93 = v_mov_b32 0
-  %125 = s_mov_b64_exec_read
-  low.br ^loop(%93: reg<amdgpu.vgpr>, %first: reg<amdgpu.sgpr x2>, %second: reg<amdgpu.sgpr x2>)
+  %98 = v_mov_b32 0
+  %130 = s_mov_b64_exec_read
+  low.br ^loop(%98: reg<amdgpu.vgpr>, %first: reg<amdgpu.sgpr x2>, %second: reg<amdgpu.sgpr x2>)
 ^loop(%iteration: reg<amdgpu.vgpr>, %head: reg<amdgpu.sgpr x2>, %tail: reg<amdgpu.sgpr x2>):
-  %96 = v_cndmask_b32_src0_lit_src1_inline %head {imm32 = 0, true_value = 1}
-  %99 = v_cndmask_b32_src0_lit_src1_inline %tail {imm32 = 0, true_value = 1}
+  %101 = v_cndmask_b32_src0_lit_src1_inline %head {imm32 = 0, true_value = 1}
+  %104 = v_cndmask_b32_src0_lit_src1_inline %tail {imm32 = 0, true_value = 1}
   %at_begin = v_cmp_eq_i32_src1_inline %iteration {rhs = 0}
-  %103 = v_cndmask_b32_src0_lit_src1_inline %at_begin {imm32 = 0, true_value = 1}
-  %109 = v_cmp_lt_i32 %iteration, %limit
-  %111 = v_cmp_lt_i32_src0_inline %limit {lhs = 0}
-  %120 = v_cndmask_b32_src0_lit_src1_inline %109 {imm32 = 0, true_value = 1}
-  %122 = v_cndmask_b32_src0_lit_src1_inline %111 {imm32 = 0, true_value = 1}
-  %126, %127 = s_and_saveexec_b64 %109
-  low.cond_br %127, ^body, ^_bb3 : reg<amdgpu.scc>
+  %108 = v_cndmask_b32_src0_lit_src1_inline %at_begin {imm32 = 0, true_value = 1}
+  %114 = v_cmp_lt_i32 %iteration, %limit
+  %116 = v_cmp_lt_i32_src0_inline %limit {lhs = 0}
+  %125 = v_cndmask_b32_src0_lit_src1_inline %114 {imm32 = 0, true_value = 1}
+  %127 = v_cndmask_b32_src0_lit_src1_inline %116 {imm32 = 0, true_value = 1}
+  %131, %132 = s_and_saveexec_b64 %114
+  low.cond_br %132, ^body, ^_bb3 : reg<amdgpu.scc>
 ^body:
-  %128 = v_mov_b32 1
-  %next = v_add_u32 %iteration, %128
+  %133 = v_mov_b32 1
+  %next = v_add_u32 %iteration, %133
   low.br ^loop(%next: reg<amdgpu.vgpr>, %tail: reg<amdgpu.sgpr x2>, %head: reg<amdgpu.sgpr x2>)
 ^_bb3:
-  s_mov_b64_exec %125
-  %130 = v_cmp_ne_i32_src1_inline %96 {rhs = 0}
-  %131 = v_cmp_ne_i32_src1_inline %99 {rhs = 0}
-  %132 = v_cmp_ne_i32_src1_inline %103 {rhs = 0}
-  %137 = v_cmp_ne_i32_src1_inline %120 {rhs = 0}
-  %139 = v_cmp_ne_i32_src1_inline %122 {rhs = 0}
-  %head_word = v_cndmask_b32_src0_lit_src1_inline %130 {imm32 = 0, true_value = 1}
-  %tail_word = v_cndmask_b32_src0_lit_src1_inline %131 {imm32 = 0, true_value = 1}
-  %begin_word = v_cndmask_b32_src0_lit_src1_inline %132 {imm32 = 0, true_value = 1}
-  %151 = v_cndmask_b32_src0_lit_src1_inline %137 {imm32 = 0, true_value = 1}
-  %153 = v_cndmask_b32_src0_lit_src1_inline %139 {imm32 = 0, true_value = 1}
-  %predicate_words = concat(%151, %153) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %155 = v_mov_b32 24
-  %156 = v_mul_lo_u32 %lane, %155
-  global_store_b32_saddr %156, %iteration, %outputs
-  global_store_b32_saddr %156, %head_word, %outputs {offset = 4}
-  global_store_b32_saddr %156, %tail_word, %outputs {offset = 8}
-  global_store_b32_saddr %156, %begin_word, %outputs {offset = 12}
-  global_store_b64_saddr %156, %predicate_words, %outputs {offset = 16}
+  s_mov_b64_exec %130
+  %135 = v_cmp_ne_i32_src1_inline %101 {rhs = 0}
+  %136 = v_cmp_ne_i32_src1_inline %104 {rhs = 0}
+  %137 = v_cmp_ne_i32_src1_inline %108 {rhs = 0}
+  %142 = v_cmp_ne_i32_src1_inline %125 {rhs = 0}
+  %144 = v_cmp_ne_i32_src1_inline %127 {rhs = 0}
+  %head_word = v_cndmask_b32_src0_lit_src1_inline %135 {imm32 = 0, true_value = 1}
+  %tail_word = v_cndmask_b32_src0_lit_src1_inline %136 {imm32 = 0, true_value = 1}
+  %begin_word = v_cndmask_b32_src0_lit_src1_inline %137 {imm32 = 0, true_value = 1}
+  %156 = v_cndmask_b32_src0_lit_src1_inline %142 {imm32 = 0, true_value = 1}
+  %158 = v_cndmask_b32_src0_lit_src1_inline %144 {imm32 = 0, true_value = 1}
+  %predicate_words = concat(%156, %158) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %160 = v_mov_b32 24
+  %161 = v_mul_lo_u32 %lane, %160
+  global_store_b32_saddr %161, %iteration, %outputs
+  global_store_b32_saddr %161, %head_word, %outputs {offset = 4}
+  global_store_b32_saddr %161, %tail_word, %outputs {offset = 8}
+  global_store_b32_saddr %161, %begin_word, %outputs {offset = 12}
+  global_store_b64_saddr %161, %predicate_words, %outputs {offset = 16}
   return
 }
 
@@ -140,8 +142,10 @@ kernel.def target(@target) @predicate_lifetime() {
   %head_word = scf.select %head, %c1, %c0 : i32
   %tail_word = scf.select %tail, %c1, %c0 : i32
   %begin_word = scf.select %at_begin, %c1, %c0 : i32
-  %true_words = vector.constant 1 : vector<2xi32>
-  %false_words = vector.constant 0 : vector<2xi32>
+  %true_words_scalar = scalar.constant 1 : i32
+  %true_words = vector.splat %true_words_scalar : vector<2xi32>
+  %false_words_scalar = scalar.constant 0 : i32
+  %false_words = vector.splat %false_words_scalar : vector<2xi32>
   %predicate_words = vector.select %predicates, %true_words, %false_words : vector<2xi32>
   view.store %iteration, %outputs[%lane, 0] : i32, view<64x6xi32>
   view.store %head_word, %outputs[%lane, 1] : i32, view<64x6xi32>
@@ -156,51 +160,51 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count =
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %inputs = resource<hal_binding> {extent = 768, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %outputs = resource<hal_binding> {extent = 1536, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %80 = v_mov_b32 12
-  %81 = v_mul_lo_u32 %lane, %80
-  %limit = global_load_b32_saddr %81, %inputs
-  %first_word = global_load_b32_saddr %81, %inputs {offset = 4}
-  %second_word = global_load_b32_saddr %81, %inputs {offset = 8}
+  %85 = v_mov_b32 12
+  %86 = v_mul_lo_u32 %lane, %85
+  %limit = global_load_b32_saddr %86, %inputs
+  %first_word = global_load_b32_saddr %86, %inputs {offset = 4}
+  %second_word = global_load_b32_saddr %86, %inputs {offset = 8}
   %first = v_cmp_ne_i32_src1_inline %first_word {rhs = 0}
   %second = v_cmp_ne_i32_src1_inline %second_word {rhs = 0}
-  %93 = v_mov_b32 0
-  %125 = s_mov_b64_exec_read
-  low.br ^loop(%93: reg<amdgpu.vgpr>, %first: reg<amdgpu.sgpr x2>, %second: reg<amdgpu.sgpr x2>)
+  %98 = v_mov_b32 0
+  %130 = s_mov_b64_exec_read
+  low.br ^loop(%98: reg<amdgpu.vgpr>, %first: reg<amdgpu.sgpr x2>, %second: reg<amdgpu.sgpr x2>)
 ^loop(%iteration: reg<amdgpu.vgpr>, %head: reg<amdgpu.sgpr x2>, %tail: reg<amdgpu.sgpr x2>):
-  %96 = v_cndmask_b32_src0_lit_src1_inline %head {imm32 = 0, true_value = 1}
-  %99 = v_cndmask_b32_src0_lit_src1_inline %tail {imm32 = 0, true_value = 1}
+  %101 = v_cndmask_b32_src0_lit_src1_inline %head {imm32 = 0, true_value = 1}
+  %104 = v_cndmask_b32_src0_lit_src1_inline %tail {imm32 = 0, true_value = 1}
   %at_begin = v_cmp_eq_i32_src1_inline %iteration {rhs = 0}
-  %103 = v_cndmask_b32_src0_lit_src1_inline %at_begin {imm32 = 0, true_value = 1}
-  %109 = v_cmp_lt_i32 %iteration, %limit
-  %111 = v_cmp_lt_i32_src0_inline %limit {lhs = 0}
-  %120 = v_cndmask_b32_src0_lit_src1_inline %109 {imm32 = 0, true_value = 1}
-  %122 = v_cndmask_b32_src0_lit_src1_inline %111 {imm32 = 0, true_value = 1}
-  %126, %127 = s_and_saveexec_b64 %109
-  low.cond_br %127, ^body, ^_bb3 : reg<amdgpu.scc>
+  %108 = v_cndmask_b32_src0_lit_src1_inline %at_begin {imm32 = 0, true_value = 1}
+  %114 = v_cmp_lt_i32 %iteration, %limit
+  %116 = v_cmp_lt_i32_src0_inline %limit {lhs = 0}
+  %125 = v_cndmask_b32_src0_lit_src1_inline %114 {imm32 = 0, true_value = 1}
+  %127 = v_cndmask_b32_src0_lit_src1_inline %116 {imm32 = 0, true_value = 1}
+  %131, %132 = s_and_saveexec_b64 %114
+  low.cond_br %132, ^body, ^_bb3 : reg<amdgpu.scc>
 ^body:
-  %128 = v_mov_b32 1
-  %next = v_add_u32 %iteration, %128
+  %133 = v_mov_b32 1
+  %next = v_add_u32 %iteration, %133
   low.br ^loop(%next: reg<amdgpu.vgpr>, %tail: reg<amdgpu.sgpr x2>, %head: reg<amdgpu.sgpr x2>)
 ^_bb3:
-  s_mov_b64_exec %125
-  %130 = v_cmp_ne_i32_src1_inline %96 {rhs = 0}
-  %131 = v_cmp_ne_i32_src1_inline %99 {rhs = 0}
-  %132 = v_cmp_ne_i32_src1_inline %103 {rhs = 0}
-  %137 = v_cmp_ne_i32_src1_inline %120 {rhs = 0}
-  %139 = v_cmp_ne_i32_src1_inline %122 {rhs = 0}
-  %head_word = v_cndmask_b32_src0_lit_src1_inline %130 {imm32 = 0, true_value = 1}
-  %tail_word = v_cndmask_b32_src0_lit_src1_inline %131 {imm32 = 0, true_value = 1}
-  %begin_word = v_cndmask_b32_src0_lit_src1_inline %132 {imm32 = 0, true_value = 1}
-  %151 = v_cndmask_b32_src0_lit_src1_inline %137 {imm32 = 0, true_value = 1}
-  %153 = v_cndmask_b32_src0_lit_src1_inline %139 {imm32 = 0, true_value = 1}
-  %predicate_words = concat(%151, %153) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %155 = v_mov_b32 24
-  %156 = v_mul_lo_u32 %lane, %155
-  global_store_b32_saddr %156, %iteration, %outputs
-  global_store_b32_saddr %156, %head_word, %outputs {offset = 4}
-  global_store_b32_saddr %156, %tail_word, %outputs {offset = 8}
-  global_store_b32_saddr %156, %begin_word, %outputs {offset = 12}
-  global_store_b64_saddr %156, %predicate_words, %outputs {offset = 16}
+  s_mov_b64_exec %130
+  %135 = v_cmp_ne_i32_src1_inline %101 {rhs = 0}
+  %136 = v_cmp_ne_i32_src1_inline %104 {rhs = 0}
+  %137 = v_cmp_ne_i32_src1_inline %108 {rhs = 0}
+  %142 = v_cmp_ne_i32_src1_inline %125 {rhs = 0}
+  %144 = v_cmp_ne_i32_src1_inline %127 {rhs = 0}
+  %head_word = v_cndmask_b32_src0_lit_src1_inline %135 {imm32 = 0, true_value = 1}
+  %tail_word = v_cndmask_b32_src0_lit_src1_inline %136 {imm32 = 0, true_value = 1}
+  %begin_word = v_cndmask_b32_src0_lit_src1_inline %137 {imm32 = 0, true_value = 1}
+  %156 = v_cndmask_b32_src0_lit_src1_inline %142 {imm32 = 0, true_value = 1}
+  %158 = v_cndmask_b32_src0_lit_src1_inline %144 {imm32 = 0, true_value = 1}
+  %predicate_words = concat(%156, %158) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %160 = v_mov_b32 24
+  %161 = v_mul_lo_u32 %lane, %160
+  global_store_b32_saddr %161, %iteration, %outputs
+  global_store_b32_saddr %161, %head_word, %outputs {offset = 4}
+  global_store_b32_saddr %161, %tail_word, %outputs {offset = 8}
+  global_store_b32_saddr %161, %begin_word, %outputs {offset = 12}
+  global_store_b64_saddr %161, %predicate_words, %outputs {offset = 16}
   return
 }
 

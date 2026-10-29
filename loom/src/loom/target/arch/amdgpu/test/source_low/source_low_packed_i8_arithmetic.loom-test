@@ -93,42 +93,45 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x4_cfg_arg_add
 // ====
 
 func.def @i8x4_shrui_4(%values: vector<4xi8>) -> (vector<4xi8>) {
-  %amount = vector.constant 4 : vector<4xi8>
+  %amount_scalar = scalar.constant 4 : i8
+  %amount = vector.splat %amount_scalar : vector<4xi8>
   %result = vector.shrui %values, %amount : vector<4xi8>
   func.return %result : vector<4xi8>
 }
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x4_shrui_4(%values: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %6 = v_lshrrev_b32_src0_inline %values, 4
-  %result = v_and_b32_lit %6, 252645135
+  %7 = v_lshrrev_b32_src0_inline %values, 4
+  %result = v_and_b32_lit %7, 252645135
   return %result
 }
 
 // ====
 
 func.def @i8x5_shli_7(%values: vector<5xi8>) -> (vector<5xi8>) {
-  %amount = vector.constant 7 : vector<5xi8>
+  %amount_scalar = scalar.constant 7 : i8
+  %amount = vector.splat %amount_scalar : vector<5xi8>
   %result = vector.shli %values, %amount : vector<5xi8>
   func.return %result : vector<5xi8>
 }
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x5_shli_7(%values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
-  %6 = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %7 = v_lshlrev_b32_src0_inline %6, 7
-  %8 = v_and_b32_lit %7, 2155905152
-  %9 = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %10 = v_lshlrev_b32_src0_inline %9, 7
-  %11 = v_and_b32_lit %10, 2155905152
-  %result = concat(%8, %11) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %7 = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %8 = v_lshlrev_b32_src0_inline %7, 7
+  %9 = v_and_b32_lit %8, 2155905152
+  %10 = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %11 = v_lshlrev_b32_src0_inline %10, 7
+  %12 = v_and_b32_lit %11, 2155905152
+  %result = concat(%9, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
 }
 
 // ====
 
 func.def @i8x4_shrui_0(%values: vector<4xi8>) -> (vector<4xi8>) {
-  %amount = vector.constant 0 : vector<4xi8>
+  %amount_scalar = scalar.constant 0 : i8
+  %amount = vector.splat %amount_scalar : vector<4xi8>
   %result = vector.shrui %values, %amount : vector<4xi8>
   func.return %result : vector<4xi8>
 }
@@ -141,7 +144,8 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x4_shrui_0(%va
 // ====
 
 func.def @i8x4_bounded_varying_shifts(%values: vector<4xi8>, %amounts: vector<4xi8>) -> (vector<4xi8>) {
-  %mask = vector.constant 7 : vector<4xi8>
+  %mask_scalar = scalar.constant 7 : i8
+  %mask = vector.splat %mask_scalar : vector<4xi8>
   %bounded = vector.andi %amounts, %mask : vector<4xi8>
   %result = vector.shrui %values, %bounded : vector<4xi8>
   func.return %result : vector<4xi8>
@@ -151,32 +155,32 @@ func.def @i8x4_bounded_varying_shifts(%values: vector<4xi8>, %amounts: vector<4x
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x4_bounded_varying_shifts(%values: reg<amdgpu.vgpr>, %amounts: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %mask = v_mov_b32 117901063
   %bounded = v_and_b32 %amounts, %mask
-  %15 = v_and_b32_lit %values, 255
-  %16 = v_and_b32_lit %15, 65535
-  %17 = v_bfe_u32_offset_width_inline %values {offset = 8, width = 8}
-  %18 = v_and_b32_lit %17, 65535
-  %19 = v_lshl_add_u32_shift_imm %18, %16, 16
-  %20 = v_bfe_u32_offset_width_inline %values {offset = 16, width = 8}
-  %21 = v_and_b32_lit %20, 65535
-  %22 = v_bfe_u32_offset_width_inline %values {offset = 24, width = 8}
-  %23 = v_and_b32_lit %22, 65535
-  %24 = v_lshl_add_u32_shift_imm %23, %21, 16
-  %26 = v_and_b32_lit %bounded, 255
-  %27 = v_and_b32_lit %26, 65535
-  %28 = v_bfe_u32_offset_width_inline %bounded {offset = 8, width = 8}
-  %29 = v_and_b32_lit %28, 65535
-  %30 = v_lshl_add_u32_shift_imm %29, %27, 16
-  %31 = v_bfe_u32_offset_width_inline %bounded {offset = 16, width = 8}
-  %32 = v_and_b32_lit %31, 65535
-  %33 = v_bfe_u32_offset_width_inline %bounded {offset = 24, width = 8}
-  %34 = v_and_b32_lit %33, 65535
-  %35 = v_lshl_add_u32_shift_imm %34, %32, 16
-  %39 = v_pk_lshrrev_b16 %30, %19
-  %42 = v_pk_lshrrev_b16 %35, %24
-  %46 = v_lshrrev_b32_src0_inline %39, 16
-  %49 = v_lshrrev_b32_src0_inline %42, 16
-  %50 = v_perm_b32_src2_lit %39, %46, 4
-  %51 = v_perm_b32_src2_lit %42, %49, 4
-  %result = v_perm_b32_src2_lit %50, %51, 16778500
+  %16 = v_and_b32_lit %values, 255
+  %17 = v_and_b32_lit %16, 65535
+  %18 = v_bfe_u32_offset_width_inline %values {offset = 8, width = 8}
+  %19 = v_and_b32_lit %18, 65535
+  %20 = v_lshl_add_u32_shift_imm %19, %17, 16
+  %21 = v_bfe_u32_offset_width_inline %values {offset = 16, width = 8}
+  %22 = v_and_b32_lit %21, 65535
+  %23 = v_bfe_u32_offset_width_inline %values {offset = 24, width = 8}
+  %24 = v_and_b32_lit %23, 65535
+  %25 = v_lshl_add_u32_shift_imm %24, %22, 16
+  %27 = v_and_b32_lit %bounded, 255
+  %28 = v_and_b32_lit %27, 65535
+  %29 = v_bfe_u32_offset_width_inline %bounded {offset = 8, width = 8}
+  %30 = v_and_b32_lit %29, 65535
+  %31 = v_lshl_add_u32_shift_imm %30, %28, 16
+  %32 = v_bfe_u32_offset_width_inline %bounded {offset = 16, width = 8}
+  %33 = v_and_b32_lit %32, 65535
+  %34 = v_bfe_u32_offset_width_inline %bounded {offset = 24, width = 8}
+  %35 = v_and_b32_lit %34, 65535
+  %36 = v_lshl_add_u32_shift_imm %35, %33, 16
+  %40 = v_pk_lshrrev_b16 %31, %20
+  %43 = v_pk_lshrrev_b16 %36, %25
+  %47 = v_lshrrev_b32_src0_inline %40, 16
+  %50 = v_lshrrev_b32_src0_inline %43, 16
+  %51 = v_perm_b32_src2_lit %40, %47, 4
+  %52 = v_perm_b32_src2_lit %43, %50, 4
+  %result = v_perm_b32_src2_lit %51, %52, 16778500
   return %result
 }

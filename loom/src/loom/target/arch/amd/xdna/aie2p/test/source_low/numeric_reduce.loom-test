@@ -220,29 +220,29 @@ func.def @i32_reduce_minui_select_sentinel(%values: vector<4xi32>) -> (i32) {
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_reduce_minui_select_sentinel(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.er>) asm {
-  %21 = mov.short 0
-  %zeros = vbcst.32 %21
-  %23 = vsub.32 %values, %zeros
-  %24 = veqz.32.el.low32 %23
-  %is_zero = predicate.complete.zero.high32 %24, 0
-  %27 = mov.short 1
-  %28 = mov.short 2
-  %29 = mov.short 3
-  %30 = vbcst.32 %29
-  %31 = vpush.lo.32 %28, %30
-  %32 = vpush.lo.32 %27, %31
-  %indices = vpush.lo.32 %21, %32
+  %empty_value = mov.short 0
+  %zeros = vbcst.32 %empty_value
+  %21 = vsub.32 %values, %zeros
+  %22 = veqz.32.el.low32 %21
+  %is_zero = predicate.complete.zero.high32 %22, 0
+  %24 = mov.short 1
+  %25 = mov.short 2
+  %26 = mov.short 3
+  %27 = vbcst.32 %26
+  %28 = vpush.lo.32 %25, %27
+  %29 = vpush.lo.32 %24, %28
+  %indices = vpush.lo.32 %empty_value, %29
   %sentinel = mov.i32 2147483647
   %sentinels = vbcst.32 %sentinel
   %selected = vsel.32.mask64 %sentinels, %indices, %is_zero
-  %39 = min.u32x16 %selected, %sentinels
-  %40 = mova.i32 8
-  %41 = vshift %39, %39, %40
-  %42 = min.u32x16 %39, %41
-  %43 = mova.i32 4
-  %44 = vshift %42, %42, %43
-  %45 = min.u32x16 %42, %44
-  %result = vextract.32.imm %45, 0
+  %35 = min.u32x16 %selected, %sentinels
+  %36 = mova.i32 8
+  %37 = vshift %35, %35, %36
+  %38 = min.u32x16 %35, %37
+  %39 = mova.i32 4
+  %40 = vshift %38, %38, %39
+  %41 = min.u32x16 %38, %40
+  %result = vextract.32.imm %41, 0
   return %result
 }
 

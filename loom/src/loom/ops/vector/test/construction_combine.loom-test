@@ -147,6 +147,18 @@ func.def @insert_chain_over_splat(%fill: f32, %left: f32, %right: f32) -> (vecto
 
 // ====
 
+// A positive-zero splat remains an explicit sparse-update seed. Targets can
+// materialize the seed directly instead of rebuilding every unwritten lane.
+func.def @insert_chain_over_zero_splat(%left: i32, %right: i32) -> (vector<4xi32>) {
+  %fill = scalar.constant 0 : i32
+  %base = vector.splat %fill : vector<4xi32>
+  %with_right = vector.insert %right into %base[3] : i32, vector<4xi32>
+  %result = vector.insert %left into %with_right[1] : i32, vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ====
+
 // Unwritten lanes retain their distinct values from a from-elements base.
 func.def @insert_chain_over_elements(%a: i16, %b: i16, %c: i16, %d: i16, %left: i16, %right: i16) -> (vector<4xi16>) {
   %base = vector.from_elements %a, %b, %c, %d : vector<4xi16>

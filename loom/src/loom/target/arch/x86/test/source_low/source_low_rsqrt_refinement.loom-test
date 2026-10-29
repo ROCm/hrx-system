@@ -11,28 +11,28 @@ func.def target(@target) @avx2_low_rsqrt_refinement(%value: vector<2xf32>) -> (v
 
 // ----
 low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<2xf32>) -> (vector<2xf32>)}) @avx2_low_rsqrt_refinement(%value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
-  %21 = mov.imm32 1056964608
-  %22 = vmovd.xmm.gpr32 %21
-  %23 = vbroadcastss.xmm %22
-  %24 = mov.imm32 1069547520
-  %25 = vmovd.xmm.gpr32 %24
-  %26 = vbroadcastss.xmm %25
-  %27 = vrsqrtps.xmm %value
-  %28 = vmulps.xmm %value, %27
-  %29 = vmulps.xmm %28, %27
-  %30 = vmulps.xmm %23, %29
-  %31 = vsubps.xmm %26, %30
-  %32 = vmulps.xmm %27, %31
-  %33 = mov.imm32 8388608
-  %34 = vmovd.xmm.gpr32 %33
-  %35 = avx2.vpbroadcastd.xmm %34
-  %36 = mov.imm32 2130706431
-  %37 = vmovd.xmm.gpr32 %36
-  %38 = avx2.vpbroadcastd.xmm %37
-  %39 = vpsubd.xmm %value, %35
-  %40 = vpminud.xmm %39, %38
-  %41 = vpcmpeqd.xmm %40, %39
-  %result = vpblendvb.xmm %27, %32, %41
+  %23 = mov.imm32 1056964608
+  %24 = vmovd.xmm.gpr32 %23
+  %25 = vbroadcastss.xmm %24
+  %26 = mov.imm32 1069547520
+  %27 = vmovd.xmm.gpr32 %26
+  %28 = vbroadcastss.xmm %27
+  %29 = vrsqrtps.xmm %value
+  %30 = vmulps.xmm %value, %29
+  %31 = vmulps.xmm %30, %29
+  %32 = vmulps.xmm %25, %31
+  %33 = vsubps.xmm %28, %32
+  %34 = vmulps.xmm %29, %33
+  %35 = mov.imm32 8388608
+  %36 = vmovd.xmm.gpr32 %35
+  %37 = avx2.vpbroadcastd.xmm %36
+  %38 = mov.imm32 2130706431
+  %39 = vmovd.xmm.gpr32 %38
+  %40 = avx2.vpbroadcastd.xmm %39
+  %41 = vpsubd.xmm %value, %37
+  %42 = vpminud.xmm %41, %40
+  %43 = vpcmpeqd.xmm %42, %41
+  %result = vpblendvb.xmm %29, %34, %43
   return %result
 }
 
@@ -67,13 +67,13 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({s
   %51 = vmulpd.xmm %39, %50
   %52 = vsubpd.xmm %42, %51
   %53 = vmulpd.xmm %48, %52
-  %54 = vpermilpd.xmm %value, 0
-  %55 = vmovq.gpr64.xmm %54
-  %56 = mov.imm64 -4503599627370496
-  %57 = copy %55 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %58 = add.gpr64 %57, %56
-  %59 = mov.imm64 9214364837600034815
-  %60 = cmp.gpr64 %58, %59, "ule"
+  %54 = mov.imm64 9214364837600034815
+  %55 = vpermilpd.xmm %value, 0
+  %56 = vmovq.gpr64.xmm %55
+  %57 = mov.imm64 -4503599627370496
+  %58 = copy %56 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %59 = add.gpr64 %58, %57
+  %60 = cmp.gpr64 %59, %54, "ule"
   %61 = mov.imm32 0
   %62 = sub.gpr32 %61, %60
   %63 = vmovd.xmm.gpr32 %62

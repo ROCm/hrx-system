@@ -16,6 +16,7 @@
 #include "iree/base/api.h"
 #include "loom/import/cxx/binding/scalar_bindings.h"
 #include "loom/import/cxx/source/error.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 
 namespace loom::cxx_import {
@@ -321,12 +322,14 @@ Value VectorArithmeticIntrinsic::call(std::span<const Value> arguments,
       check(loom_vector_xori_build(builder, left, right, result_type, location,
                                    &op));
       break;
-    case Kind::ComplementI:
-      check(loom_vector_constant_build(builder, loom_attr_i64(-1), result_type,
-                                       location, &op));
-      check(loom_vector_xori_build(builder, left, loom_op_results(op)[0],
-                                   result_type, location, &op));
+    case Kind::ComplementI: {
+      loom_value_id_t mask;
+      check(loom_vector_build_constant_splat(builder, loom_attr_i64(-1),
+                                             result_type, location, &mask));
+      check(loom_vector_xori_build(builder, left, mask, result_type, location,
+                                   &op));
       break;
+    }
     case Kind::ShlI:
       check(loom_vector_shli_build(builder, 0, left, right, result_type,
                                    location, &op));

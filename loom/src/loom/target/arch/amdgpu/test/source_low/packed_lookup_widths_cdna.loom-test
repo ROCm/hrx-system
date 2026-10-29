@@ -4,7 +4,8 @@
 // recursive table selection, and composed nibble decode.
 
 func.def @byte_table_4_lanes_1(%table: vector<4xi8>, %input: vector<1xi8>) -> (vector<1xi8>) {
-  %mask = vector.constant 3 : vector<1xi8>
+  %mask_scalar = scalar.constant 3 : i8
+  %mask = vector.splat %mask_scalar : vector<1xi8>
   %indices = vector.andi %input, %mask : vector<1xi8>
   %values = vector.table.lookup %table[%indices] : vector<4xi8>, vector<1xi8> -> vector<1xi8>
   func.return %values : vector<1xi8>
@@ -21,7 +22,8 @@ low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @byte_table_4_lanes_1(%ta
 // ====
 
 func.def @byte_table_8_lanes_5(%table: vector<8xi8>, %input: vector<5xi8>) -> (vector<5xi8>) {
-  %mask = vector.constant 7 : vector<5xi8>
+  %mask_scalar = scalar.constant 7 : i8
+  %mask = vector.splat %mask_scalar : vector<5xi8>
   %indices = vector.andi %input, %mask : vector<5xi8>
   %values = vector.table.lookup %table[%indices] : vector<8xi8>, vector<5xi8> -> vector<5xi8>
   func.return %values : vector<5xi8>
@@ -29,23 +31,24 @@ func.def @byte_table_8_lanes_5(%table: vector<8xi8>, %input: vector<5xi8>) -> (v
 
 // ----
 low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @byte_table_8_lanes_5(%table: reg<amdgpu.vgpr x2>, %input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
-  %9 = v_mov_b32 117901063
-  %12 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %14 = v_and_b32 %12, %9
-  %15 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %17 = v_and_b32 %15, %9
-  %19 = slice %table[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %20 = slice %table[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %23 = v_perm_b32 %20, %19, %14
-  %24 = v_perm_b32 %20, %19, %17
-  %values = concat(%23, %24) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %10 = v_mov_b32 117901063
+  %13 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %15 = v_and_b32 %13, %10
+  %16 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = v_and_b32 %16, %10
+  %20 = slice %table[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = slice %table[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %24 = v_perm_b32 %21, %20, %15
+  %25 = v_perm_b32 %21, %20, %18
+  %values = concat(%24, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %values
 }
 
 // ====
 
 func.def @byte_table_16_lanes_5(%table: vector<16xi8>, %input: vector<5xi8>) -> (vector<5xi8>) {
-  %mask = vector.constant 15 : vector<5xi8>
+  %mask_scalar = scalar.constant 15 : i8
+  %mask = vector.splat %mask_scalar : vector<5xi8>
   %indices = vector.andi %input, %mask : vector<5xi8>
   %values = vector.table.lookup %table[%indices] : vector<16xi8>, vector<5xi8> -> vector<5xi8>
   func.return %values : vector<5xi8>
@@ -53,30 +56,30 @@ func.def @byte_table_16_lanes_5(%table: vector<16xi8>, %input: vector<5xi8>) -> 
 
 // ----
 low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @byte_table_16_lanes_5(%table: reg<amdgpu.vgpr x4>, %input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
-  %9 = v_mov_b32 252645135
-  %12 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %14 = v_and_b32 %12, %9
-  %15 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %17 = v_and_b32 %15, %9
-  %19 = slice %table[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %20 = slice %table[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %21 = slice %table[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %22 = slice %table[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %25 = v_and_b32_lit %14, 117901063
-  %26 = v_perm_b32 %20, %19, %25
-  %27 = v_perm_b32 %22, %21, %25
-  %28 = v_and_b32_lit %14, 134744072
-  %29 = v_lshrrev_b32_src0_inline %28, 1
-  %30 = v_or_b32_lit %29, 50462976
-  %31 = v_perm_b32 %27, %26, %30
-  %32 = v_and_b32_lit %17, 117901063
-  %33 = v_perm_b32 %20, %19, %32
-  %34 = v_perm_b32 %22, %21, %32
-  %35 = v_and_b32_lit %17, 134744072
-  %36 = v_lshrrev_b32_src0_inline %35, 1
-  %37 = v_or_b32_lit %36, 50462976
-  %38 = v_perm_b32 %34, %33, %37
-  %values = concat(%31, %38) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %10 = v_mov_b32 252645135
+  %13 = slice %input[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %15 = v_and_b32 %13, %10
+  %16 = slice %input[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = v_and_b32 %16, %10
+  %20 = slice %table[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %21 = slice %table[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %22 = slice %table[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %23 = slice %table[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %26 = v_and_b32_lit %15, 117901063
+  %27 = v_perm_b32 %21, %20, %26
+  %28 = v_perm_b32 %23, %22, %26
+  %29 = v_and_b32_lit %15, 134744072
+  %30 = v_lshrrev_b32_src0_inline %29, 1
+  %31 = v_or_b32_lit %30, 50462976
+  %32 = v_perm_b32 %28, %27, %31
+  %33 = v_and_b32_lit %18, 117901063
+  %34 = v_perm_b32 %21, %20, %33
+  %35 = v_perm_b32 %23, %22, %33
+  %36 = v_and_b32_lit %18, 134744072
+  %37 = v_lshrrev_b32_src0_inline %36, 1
+  %38 = v_or_b32_lit %37, 50462976
+  %39 = v_perm_b32 %35, %34, %38
+  %values = concat(%32, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %values
 }
 

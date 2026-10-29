@@ -101,10 +101,11 @@ func.def target(@target) @sum_i32x7_load(%input: buffer) -> (i32) {
   %initial = scalar.constant 3 : i32
   %14 = scalar.addi %9, %10 : i32
   %15 = scalar.addi %14, %11 : i32
-  %16 = vector.constant 0 : vector<4xi32>
-  %17 = vector.insert %15 into %16[0] : i32, vector<4xi32>
-  %18 = vector.addi %8, %17 : vector<4xi32>
-  %result = vector.reduce<addi> %18, %initial : vector<4xi32>, i32
+  %16 = scalar.constant 0 : i32
+  %17 = vector.splat %16 : vector<4xi32>
+  %18 = vector.insert %15 into %17[0] : i32, vector<4xi32>
+  %19 = vector.addi %8, %18 : vector<4xi32>
+  %result = vector.reduce<addi> %19, %initial : vector<4xi32>, i32
   func.return %result : i32
 }
 

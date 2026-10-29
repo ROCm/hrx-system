@@ -1487,7 +1487,8 @@ func.def @static_masked_tail(%view: view<1xi32>, %old: vector<2xi32>) {
 // The active-lane analysis, not a maximum-footprint structural check, rejects
 // accesses whose actual active range exceeds the view.
 func.def @static_masked_tail_active_overflow(%view: view<1xi32>, %old: vector<2xi32>) {
-  %mask = vector.constant true : vector<2xi1>
+  %mask_scalar = scalar.constant true : i1
+  %mask = vector.splat %mask_scalar : vector<2xi1>
   // ERROR@+1: SUBRANGE/010
   %loaded = vector.load.mask %view[0], %mask, %old : view<1xi32>, vector<2xi1>, vector<2xi32>
   func.return
@@ -1496,7 +1497,8 @@ func.def @static_masked_tail_active_overflow(%view: view<1xi32>, %old: vector<2x
 // ====
 
 func.def @static_compact_tail_active_overflow(%view: view<1xi32>, %value: vector<2xi32>) {
-  %mask = vector.constant true : vector<2xi1>
+  %mask_scalar = scalar.constant true : i1
+  %mask = vector.splat %mask_scalar : vector<2xi1>
   // ERROR@+1: SUBRANGE/010
   vector.store.compress %value, %view[0], %mask : vector<2xi32>, view<1xi32>, vector<2xi1>
   func.return
@@ -1506,7 +1508,8 @@ func.def @static_compact_tail_active_overflow(%view: view<1xi32>, %value: vector
 
 // An empty mask does not access even an origin beyond an empty view.
 func.def @static_masked_empty_access(%view: view<0xi32>, %old: vector<2xi32>) {
-  %mask = vector.constant false : vector<2xi1>
+  %mask_scalar = scalar.constant false : i1
+  %mask = vector.splat %mask_scalar : vector<2xi1>
   %loaded = vector.load.mask %view[7], %mask, %old : view<0xi32>, vector<2xi1>, vector<2xi32>
   vector.store.mask %old, %view[7], %mask : vector<2xi32>, view<0xi32>, vector<2xi1>
   %expanded = vector.load.expand %view[7], %mask, %old : view<0xi32>, vector<2xi1>, vector<2xi32>
@@ -1804,8 +1807,10 @@ func.def @masked_offset_ops_uniform_false_skip(%buffer: buffer, %base: offset, %
   %layout = encoding.layout.dense : encoding<layout>
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %mask = vector.constant false : vector<4xi1>
-  %old = vector.constant 0 : vector<4xi32>
+  %mask_scalar = scalar.constant false : i1
+  %mask = vector.splat %mask_scalar : vector<4xi1>
+  %old_scalar = scalar.constant 0 : i32
+  %old = vector.splat %old_scalar : vector<4xi32>
   %view = buffer.view %buffer[%base] : buffer -> view<4xi32, %layout>
   %offsets = vector.iota %c1 step %c1 : vector<4xindex>
   %gathered = vector.gather.mask %view[%c0][%offsets], %mask, %old : view<4xi32, %layout>, vector<4xindex>, vector<4xi1>, vector<4xi32>

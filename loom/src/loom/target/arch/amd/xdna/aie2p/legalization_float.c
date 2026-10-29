@@ -7,6 +7,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/legalization_float.h"
 
 #include "loom/ir/module.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/util/numeric_format.h"
@@ -224,12 +225,9 @@ static void loom_aie2p_float_ordering_initialize(
 static iree_status_t loom_aie2p_float_ordering_build_constant(
     loom_aie2p_float_ordering_context_t* ordering, int64_t value,
     loom_value_id_t* out_value) {
-  loom_op_t* constant_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
+  return loom_vector_build_constant_splat(
       ordering->builder, loom_attr_i64(value), ordering->integer_type,
-      ordering->location, &constant_op));
-  *out_value = loom_vector_constant_result(constant_op);
-  return iree_ok_status();
+      ordering->location, out_value);
 }
 
 static iree_status_t loom_aie2p_float_ordering_build_compare(

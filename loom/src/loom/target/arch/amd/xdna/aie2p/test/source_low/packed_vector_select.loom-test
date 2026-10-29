@@ -129,12 +129,12 @@ func.def @select_byte_comparisons(%input: vector<4xi32>, %true_value: vector<4xi
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @select_byte_comparisons(%input: reg<aie2p.vec256 x2>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %14 = mov.short 1
-  %low_bits = vbcst.32 %14
+  %low_bit = mov.short 1
+  %low_bits = vbcst.32 %low_bit
   %bits = vband %input, %low_bits
-  %17 = vsub.32 %bits, %low_bits
-  %18 = veqz.32.el.low32 %17
-  %mask = predicate.complete.zero.high32 %18, 0
+  %16 = vsub.32 %bits, %low_bits
+  %17 = veqz.32.el.low32 %16
+  %mask = predicate.complete.zero.high32 %17, 0
   %selected = vsel.8 %false_value, %true_value, %mask
   return %selected
 }

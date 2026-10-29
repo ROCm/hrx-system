@@ -85,24 +85,24 @@ func.def @select_byte_comparisons(%input: vector<4xi32>, %true_value: vector<4xi
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @select_byte_comparisons(%input: reg<amdgpu.vgpr x4>, %true_value: reg<amdgpu.vgpr>, %false_value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %19 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %20 = v_and_b32_lit %19, 1
-  %21 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %22 = v_and_b32_lit %21, 1
-  %23 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %24 = v_and_b32_lit %23, 1
-  %25 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %26 = v_and_b32_lit %25, 1
-  %29 = v_cmp_eq_i32_src1_inline %20 {rhs = 1}
-  %31 = v_cmp_eq_i32_src1_inline %22 {rhs = 1}
-  %33 = v_cmp_eq_i32_src1_inline %24 {rhs = 1}
-  %35 = v_cmp_eq_i32_src1_inline %26 {rhs = 1}
-  %38 = v_cndmask_b32 %false_value, %true_value, %29
-  %40 = v_cndmask_b32 %false_value, %true_value, %31
-  %41 = v_bfi_b32_src0_lit %40, %38, 65280
-  %43 = v_cndmask_b32 %false_value, %true_value, %33
-  %44 = v_bfi_b32_src0_lit %43, %41, 16711680
-  %46 = v_cndmask_b32 %false_value, %true_value, %35
-  %selected = v_bfi_b32_src0_lit %46, %44, 4278190080
+  %18 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %19 = v_and_b32_lit %18, 1
+  %20 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %21 = v_and_b32_lit %20, 1
+  %22 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %23 = v_and_b32_lit %22, 1
+  %24 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %25 = v_and_b32_lit %24, 1
+  %28 = v_cmp_eq_i32_src1_inline %19 {rhs = 1}
+  %30 = v_cmp_eq_i32_src1_inline %21 {rhs = 1}
+  %32 = v_cmp_eq_i32_src1_inline %23 {rhs = 1}
+  %34 = v_cmp_eq_i32_src1_inline %25 {rhs = 1}
+  %37 = v_cndmask_b32 %false_value, %true_value, %28
+  %39 = v_cndmask_b32 %false_value, %true_value, %30
+  %40 = v_bfi_b32_src0_lit %39, %37, 65280
+  %42 = v_cndmask_b32 %false_value, %true_value, %32
+  %43 = v_bfi_b32_src0_lit %42, %40, 16711680
+  %45 = v_cndmask_b32 %false_value, %true_value, %34
+  %selected = v_bfi_b32_src0_lit %45, %43, 4278190080
   return %selected
 }

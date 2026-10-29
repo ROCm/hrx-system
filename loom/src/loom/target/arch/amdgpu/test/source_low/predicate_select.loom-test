@@ -141,23 +141,25 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @predicate_scf_select_u
 // ====
 
 func.def @predicate_scf_select_constants_max(%condition: i1) -> (vector<32xi1>) {
-  %on = vector.constant true : vector<32xi1>
-  %off = vector.constant false : vector<32xi1>
+  %on_scalar = scalar.constant true : i1
+  %on = vector.splat %on_scalar : vector<32xi1>
+  %off_scalar = scalar.constant false : i1
+  %off = vector.splat %off_scalar : vector<32xi1>
   %selected = scf.select %condition, %on, %off : vector<32xi1>
   func.return %selected : vector<32xi1>
 }
 
 // ----
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @predicate_scf_select_constants_max(%condition: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x64>) asm {
-  %13 = s_cmp_lg_i32_src1_inline %condition {rhs = 0}
-  %14 = s_mov_b64_exec_read
-  %15 = s_mov_b32 0
-  %18 = slice %14[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %20 = s_cselect_b32 %18, %15, %13
-  %21 = slice %14[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %23 = s_cselect_b32 %21, %15, %13
-  %24 = concat(%20, %23) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %selected = concat(%24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24, %24) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x64>
+  %15 = s_cmp_lg_i32_src1_inline %condition {rhs = 0}
+  %16 = s_mov_b64_exec_read
+  %17 = s_mov_b32 0
+  %20 = slice %16[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = s_cselect_b32 %20, %17, %15
+  %23 = slice %16[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = s_cselect_b32 %23, %17, %15
+  %26 = concat(%22, %25) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %selected = concat(%26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26, %26) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x64>
   return %selected
 }
 

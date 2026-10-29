@@ -1,11 +1,16 @@
 // q6_K stores low bits and sign/high-bit state separately. The q6/q8 dot path
 // calls this concrete sign-pack helper directly.
 func.def inline @q6_signed_pack_dot4i(%code: vector<1xi32>) -> (vector<4xi8>) {
-  %bit6_shift = vector.constant 1 : vector<1xi32>
-  %bit7_shift = vector.constant 2 : vector<1xi32>
-  %low5_mask = vector.constant 522133279 : vector<1xi32>
-  %bit5_mask = vector.constant 538976288 : vector<1xi32>
-  %sign_mask = vector.constant -522133280 : vector<1xi32>
+  %bit6_shift_scalar = scalar.constant 1 : i32
+  %bit6_shift = vector.splat %bit6_shift_scalar : vector<1xi32>
+  %bit7_shift_scalar = scalar.constant 2 : i32
+  %bit7_shift = vector.splat %bit7_shift_scalar : vector<1xi32>
+  %low5_mask_scalar = scalar.constant 522133279 : i32
+  %low5_mask = vector.splat %low5_mask_scalar : vector<1xi32>
+  %bit5_mask_scalar = scalar.constant 538976288 : i32
+  %bit5_mask = vector.splat %bit5_mask_scalar : vector<1xi32>
+  %sign_mask_scalar = scalar.constant -522133280 : i32
+  %sign_mask = vector.splat %sign_mask_scalar : vector<1xi32>
   %low5 = vector.andi %code, %low5_mask : vector<1xi32>
   %bit5 = vector.andi %code, %bit5_mask : vector<1xi32>
   %bit6 = vector.shli %bit5, %bit6_shift : vector<1xi32>
@@ -36,10 +41,14 @@ template.def<@model.q6q8.accumulate_part> device priority(10) @q6q8_accumulate_p
   %qh_add = index.constant 64 : index
   %d_add = index.constant 104 : index
   %scale_add = index.constant 192 : index
-  %dot_initial = vector.constant 0 : vector<1xi32>
-  %q6_high_shift = vector.constant 4 : vector<1xi32>
-  %nibble_mask = vector.constant 252645135 : vector<1xi32>
-  %q6_high_mask = vector.constant 808464432 : vector<1xi32>
+  %dot_initial_scalar = scalar.constant 0 : i32
+  %dot_initial = vector.splat %dot_initial_scalar : vector<1xi32>
+  %q6_high_shift_scalar = scalar.constant 4 : i32
+  %q6_high_shift = vector.splat %q6_high_shift_scalar : vector<1xi32>
+  %nibble_mask_scalar = scalar.constant 252645135 : i32
+  %nibble_mask = vector.splat %nibble_mask_scalar : vector<1xi32>
+  %q6_high_mask_scalar = scalar.constant 808464432 : i32
+  %q6_high_mask = vector.splat %q6_high_mask_scalar : vector<1xi32>
 
   %block_i16 = index.mul %block, %block_i16_stride : index
   %block_i8 = index.mul %block, %block_i8_stride : index

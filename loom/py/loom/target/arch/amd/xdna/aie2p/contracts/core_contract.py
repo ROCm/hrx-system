@@ -1008,7 +1008,66 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
                 ),
             )
         ),
-        core_rules._vector_wide_f32_splat_rule(),
+        *(
+            core_rules._vector_splat_rule(
+                scalar_type,
+                Vector(
+                    element_type,
+                    minimum_static_elements=native_lanes + 1,
+                    maximum_static_elements=native_lanes * 2,
+                ),
+                f"amd.xdna.aie2p.splat.i{width}x{native_lanes}",
+                carrier=core_rules._VectorConstantCarrier.WIDE,
+                unit_count=2,
+                extra_guards=(
+                    (vector_register_guard,) if element_type == "f32" else ()
+                ),
+            )
+            for scalar_type, element_type, width, native_lanes in (
+                (core_rules._I8, "i8", 8, 64),
+                (core_rules._F8E4M3, "f8E4M3", 8, 64),
+                (core_rules._F8E5M2, "f8E5M2", 8, 64),
+                (core_rules._I16, "i16", 16, 32),
+                (core_rules._F16, "f16", 16, 32),
+                (core_rules._BF16, "bf16", 16, 32),
+                (core_rules._I32, "i32", 32, 16),
+                (core_rules._F32, "f32", 32, 16),
+                (core_rules._INDEX, "index", 32, 16),
+                (core_rules._OFFSET, "offset", 32, 16),
+            )
+        ),
+        *(
+            core_rules._vector_splat_rule(
+                scalar_type,
+                result_type,
+                "amd.xdna.aie2p.splat.i32x16",
+                carrier=core_rules._VectorConstantCarrier.ACCUMULATOR,
+                unit_count=unit_count,
+            )
+            for scalar_type, result_type, unit_count in (
+                (core_rules._I32, core_rules._I32_MATRIX_ACCUMULATOR, 4),
+                (core_rules._F32, Vector("f32", lanes=32), 2),
+                (core_rules._F32, Vector("f32", lanes=64), 4),
+                (
+                    core_rules._INDEX,
+                    Vector(
+                        "index",
+                        minimum_static_elements=33,
+                        maximum_static_elements=64,
+                    ),
+                    4,
+                ),
+                (
+                    core_rules._OFFSET,
+                    Vector(
+                        "offset",
+                        minimum_static_elements=33,
+                        maximum_static_elements=64,
+                    ),
+                    4,
+                ),
+            )
+        ),
         core_rules._vector_predicate_splat_rule(),
         core_rules._vector_predicate_constant_rule(),
         *(

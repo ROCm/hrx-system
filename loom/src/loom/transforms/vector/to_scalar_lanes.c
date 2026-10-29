@@ -122,18 +122,10 @@ iree_status_t loom_vector_to_scalar_build_scalar_attr_constant(
 iree_status_t loom_vector_to_scalar_build_vector_zero(
     loom_vector_to_scalar_state_t* state, loom_type_t result_type,
     loom_value_id_t* out_value_id) {
-  loom_scalar_type_t scalar_type = loom_type_element_type(result_type);
-  if (loom_scalar_type_is_float(scalar_type)) {
-    return loom_vector_build_constant_splat(&state->rewriter->builder,
-                                            loom_attr_f64(0.0), result_type,
-                                            state->location, out_value_id);
-  }
-  loom_op_t* constant_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      &state->rewriter->builder, loom_vector_to_scalar_zero_attr(scalar_type),
-      result_type, state->location, &constant_op));
-  *out_value_id = loom_vector_constant_result(constant_op);
-  return iree_ok_status();
+  return loom_vector_build_constant_splat(
+      &state->rewriter->builder,
+      loom_vector_to_scalar_zero_attr(loom_type_element_type(result_type)),
+      result_type, state->location, out_value_id);
 }
 
 iree_status_t loom_vector_to_scalar_build_generic_lane_op(

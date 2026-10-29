@@ -27,15 +27,16 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @byte_shifts(%values: 
 
 // A constant vector count materializes one I32 scalar, not a vector constant.
 func.def @nibble_extraction(%values: vector<8xi16>) -> (vector<8xi16>) {
-  %counts = vector.constant 4 : vector<8xi16>
+  %counts_scalar = scalar.constant 4 : i16
+  %counts = vector.splat %counts_scalar : vector<8xi16>
   %result = vector.shrui %values, %counts : vector<8xi16>
   func.return %result : vector<8xi16>
 }
 
 // ----
 low.func.def target<wasm.core.simd128> abi(wasm_function) @nibble_extraction(%values: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
-  %6 = i32.const 4
-  %result = i16x8.shr_u %values, %6
+  %counts_scalar = i32.const 4
+  %result = i16x8.shr_u %values, %counts_scalar
   return %result
 }
 
@@ -43,7 +44,8 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @nibble_extraction(%va
 
 // Equal element types alone do not establish a shared count.
 func.def @varying_counts(%values: vector<2xi64>, %counts: vector<2xi64>) -> (vector<2xi64>) {
-  %mask = vector.constant 63 : vector<2xi64>
+  %mask_scalar = scalar.constant 63 : i64
+  %mask = vector.splat %mask_scalar : vector<2xi64>
   %bounded_counts = vector.andi %counts, %mask : vector<2xi64>
   %result = vector.shrui %values, %bounded_counts : vector<2xi64>
   func.return %result : vector<2xi64>
@@ -53,42 +55,42 @@ func.def @varying_counts(%values: vector<2xi64>, %counts: vector<2xi64>) -> (vec
 low.func.def target<wasm.core.simd128> abi(wasm_function) @varying_counts(%values: reg<wasm.v128>, %counts: reg<wasm.v128>) -> (reg<wasm.v128>) asm {
   %mask = v128.const 63, 63
   %bounded_counts = v128.and %counts, %mask
-  %11 = v128.const 1, 1
-  %12 = i32.const 1
-  %13 = v128.const 2, 2
-  %14 = i32.const 2
-  %15 = v128.const 4, 4
-  %16 = i32.const 4
-  %17 = v128.const 8, 8
-  %18 = i32.const 8
-  %19 = v128.const 16, 16
-  %20 = i32.const 16
-  %21 = v128.const 32, 32
-  %22 = i32.const 32
-  %23 = v128.and %bounded_counts, %11
-  %24 = i64x2.eq %23, %11
-  %25 = i64x2.shr_u %values, %12
-  %26 = v128.bitselect %25, %values, %24
-  %27 = v128.and %bounded_counts, %13
-  %28 = i64x2.eq %27, %13
-  %29 = i64x2.shr_u %26, %14
-  %30 = v128.bitselect %29, %26, %28
-  %31 = v128.and %bounded_counts, %15
-  %32 = i64x2.eq %31, %15
-  %33 = i64x2.shr_u %30, %16
-  %34 = v128.bitselect %33, %30, %32
-  %35 = v128.and %bounded_counts, %17
-  %36 = i64x2.eq %35, %17
-  %37 = i64x2.shr_u %34, %18
-  %38 = v128.bitselect %37, %34, %36
-  %39 = v128.and %bounded_counts, %19
-  %40 = i64x2.eq %39, %19
-  %41 = i64x2.shr_u %38, %20
-  %42 = v128.bitselect %41, %38, %40
-  %43 = v128.and %bounded_counts, %21
-  %44 = i64x2.eq %43, %21
-  %45 = i64x2.shr_u %42, %22
-  %result = v128.bitselect %45, %42, %44
+  %12 = v128.const 1, 1
+  %13 = i32.const 1
+  %14 = v128.const 2, 2
+  %15 = i32.const 2
+  %16 = v128.const 4, 4
+  %17 = i32.const 4
+  %18 = v128.const 8, 8
+  %19 = i32.const 8
+  %20 = v128.const 16, 16
+  %21 = i32.const 16
+  %22 = v128.const 32, 32
+  %23 = i32.const 32
+  %24 = v128.and %bounded_counts, %12
+  %25 = i64x2.eq %24, %12
+  %26 = i64x2.shr_u %values, %13
+  %27 = v128.bitselect %26, %values, %25
+  %28 = v128.and %bounded_counts, %14
+  %29 = i64x2.eq %28, %14
+  %30 = i64x2.shr_u %27, %15
+  %31 = v128.bitselect %30, %27, %29
+  %32 = v128.and %bounded_counts, %16
+  %33 = i64x2.eq %32, %16
+  %34 = i64x2.shr_u %31, %17
+  %35 = v128.bitselect %34, %31, %33
+  %36 = v128.and %bounded_counts, %18
+  %37 = i64x2.eq %36, %18
+  %38 = i64x2.shr_u %35, %19
+  %39 = v128.bitselect %38, %35, %37
+  %40 = v128.and %bounded_counts, %20
+  %41 = i64x2.eq %40, %20
+  %42 = i64x2.shr_u %39, %21
+  %43 = v128.bitselect %42, %39, %41
+  %44 = v128.and %bounded_counts, %22
+  %45 = i64x2.eq %44, %22
+  %46 = i64x2.shr_u %43, %23
+  %result = v128.bitselect %46, %43, %45
   return %result
 }
 

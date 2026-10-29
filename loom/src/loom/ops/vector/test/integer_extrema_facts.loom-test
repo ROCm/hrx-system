@@ -14,10 +14,14 @@ func.def @boolean_lane_extrema() -> (vector<2xi1>, vector<2xi1>, vector<2xi1>, v
 
 // ----
 func.def @boolean_lane_extrema() -> (vector<2xi1>, vector<2xi1>, vector<2xi1>, vector<2xi1>) {
-  %smin = vector.constant true : vector<2xi1>
-  %smax = vector.constant false : vector<2xi1>
-  %umin = vector.constant false : vector<2xi1>
-  %umax = vector.constant true : vector<2xi1>
+  %18 = scalar.constant true : i1
+  %smin = vector.splat %18 : vector<2xi1>
+  %16 = scalar.constant false : i1
+  %smax = vector.splat %16 : vector<2xi1>
+  %14 = scalar.constant false : i1
+  %umin = vector.splat %14 : vector<2xi1>
+  %12 = scalar.constant true : i1
+  %umax = vector.splat %12 : vector<2xi1>
   func.return %smin, %smax, %umin, %umax : vector<2xi1>, vector<2xi1>, vector<2xi1>, vector<2xi1>
 }
 
@@ -70,10 +74,14 @@ func.def @byte_reductions() -> (i8, i8, i8, i8) {
 
 // Extrema identities leave a dynamic accumulator unchanged.
 func.def @byte_reduction_identities(%init: i8) -> (i8, i8, i8, i8) {
-  %signed_maximum = vector.constant 127 : vector<4xi8>
-  %signed_minimum = vector.constant -128 : vector<4xi8>
-  %unsigned_maximum = vector.constant -1 : vector<4xi8>
-  %unsigned_minimum = vector.constant 0 : vector<4xi8>
+  %signed_maximum_scalar = scalar.constant 127 : i8
+  %signed_maximum = vector.splat %signed_maximum_scalar : vector<4xi8>
+  %signed_minimum_scalar = scalar.constant -128 : i8
+  %signed_minimum = vector.splat %signed_minimum_scalar : vector<4xi8>
+  %unsigned_maximum_scalar = scalar.constant -1 : i8
+  %unsigned_maximum = vector.splat %unsigned_maximum_scalar : vector<4xi8>
+  %unsigned_minimum_scalar = scalar.constant 0 : i8
+  %unsigned_minimum = vector.splat %unsigned_minimum_scalar : vector<4xi8>
   %smin = vector.reduce<minsi> %signed_maximum, %init : vector<4xi8>, i8
   %smax = vector.reduce<maxsi> %signed_minimum, %init : vector<4xi8>, i8
   %umin = vector.reduce<minui> %unsigned_maximum, %init : vector<4xi8>, i8
@@ -90,7 +98,8 @@ func.def @byte_reduction_identities(%init: i8) -> (i8, i8, i8, i8) {
 
 // Axis reductions consume the same shared identity classification.
 func.def @byte_axis_reduction_identity(%init: vector<3xi8>) -> (vector<3xi8>) {
-  %values = vector.constant 0 : vector<2x3xi8>
+  %values_scalar = scalar.constant 0 : i8
+  %values = vector.splat %values_scalar : vector<2x3xi8>
   %result = vector.reduce.axes<maxui> %values, %init axes [0] : vector<2x3xi8>, vector<3xi8>
   func.return %result : vector<3xi8>
 }

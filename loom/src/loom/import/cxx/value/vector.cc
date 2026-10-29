@@ -264,24 +264,26 @@ loom_value_id_t Vectors::unary(cxx::TokenKind token, loom_value_id_t value,
         check(loom_vector_negi_build(&builder_, value, output, source, &op));
       }
       break;
-    case cxx::TokenKind::T_TILDE:
-      check(loom_vector_constant_build(&builder_, loom_attr_i64(-1), input,
-                                       source, &op));
-      check(loom_vector_xori_build(&builder_, value, loom_op_results(op)[0],
-                                   output, source, &op));
+    case cxx::TokenKind::T_TILDE: {
+      loom_value_id_t mask;
+      check(loom_vector_build_constant_splat(&builder_, loom_attr_i64(-1),
+                                             input, source, &mask));
+      check(
+          loom_vector_xori_build(&builder_, value, mask, output, source, &op));
       break;
-    case cxx::TokenKind::T_EXCLAIM:
+    }
+    case cxx::TokenKind::T_EXCLAIM: {
       loom_value_id_t zero;
-      if (floating) {
-        check(loom_vector_build_constant_splat(&builder_, loom_attr_f64(0.0),
-                                               input, source, &zero));
-      } else {
-        check(loom_vector_constant_build(&builder_, loom_attr_i64(0), input,
-                                         source, &op));
-        zero = loom_vector_constant_result(op);
-      }
+      const loom_scalar_type_t element_type = loom_type_element_type(input);
+      const loom_attribute_t zero_attr = floating ? loom_attr_f64(0.0)
+                                         : element_type == LOOM_SCALAR_TYPE_I1
+                                             ? loom_attr_bool(false)
+                                             : loom_attr_i64(0);
+      check(loom_vector_build_constant_splat(&builder_, zero_attr, input,
+                                             source, &zero));
       return binary(cxx::TokenKind::T_EQUAL_EQUAL, value, zero, input_type,
                     output_type, owner, fastmath);
+    }
     default:
       diagnostics_.reject(unit_, owner, "unsupported vector unary operator");
   }

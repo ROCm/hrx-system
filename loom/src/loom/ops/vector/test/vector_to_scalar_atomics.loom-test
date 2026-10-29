@@ -195,16 +195,17 @@ func.def @atomic_rmw_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %
 func.def @atomic_rmw_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %value: vector<[%n]xi32>, %offsets: vector<[%n]xindex>) -> (vector<[%n]xi32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xi32, %layout>
-  %10 = vector.constant 0 : vector<[%n]xi32>
-  %11 = index.constant 0 : index
-  %12 = index.constant 1 : index
-  %old = scf.for %13 = [%11 to %n step %12](%14 = %10 : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
-    %16 = vector.extract %value[%13] : vector<[%n]xi32> -> i32
-    %17 = vector.extract %offsets[%13] : vector<[%n]xindex> -> index
-    %18 = index.add %origin, %17 : index
-    %19 = view.atomic.rmw<addi> %16, %view[%18] {ordering = acq_rel, scope = workgroup} : i32, view<[%n]xi32, %layout> -> i32
-    %20 = vector.insert %19 into %14[%13] : i32, vector<[%n]xi32>
-    scf.yield %20 : vector<[%n]xi32>
+  %10 = scalar.constant 0 : i32
+  %11 = vector.splat %10 : vector<[%n]xi32>
+  %12 = index.constant 0 : index
+  %13 = index.constant 1 : index
+  %old = scf.for %14 = [%12 to %n step %13](%15 = %11 : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
+    %17 = vector.extract %value[%14] : vector<[%n]xi32> -> i32
+    %18 = vector.extract %offsets[%14] : vector<[%n]xindex> -> index
+    %19 = index.add %origin, %18 : index
+    %20 = view.atomic.rmw<addi> %17, %view[%19] {ordering = acq_rel, scope = workgroup} : i32, view<[%n]xi32, %layout> -> i32
+    %21 = vector.insert %20 into %15[%14] : i32, vector<[%n]xi32>
+    scf.yield %21 : vector<[%n]xi32>
   }
   func.return %old : vector<[%n]xi32>
 }
@@ -284,17 +285,18 @@ func.def @atomic_cmpxchg_dynamic(%n: index, %buffer: buffer, %byte_offset: offse
 func.def @atomic_cmpxchg_dynamic(%n: index, %buffer: buffer, %byte_offset: offset, %origin: index, %expected: vector<[%n]xi32>, %replacement: vector<[%n]xi32>, %offsets: vector<[%n]xindex>) -> (vector<[%n]xi32>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%byte_offset] : buffer -> view<[%n]xi32, %layout>
-  %11 = vector.constant 0 : vector<[%n]xi32>
-  %12 = index.constant 0 : index
-  %13 = index.constant 1 : index
-  %old = scf.for %14 = [%12 to %n step %13](%15 = %11 : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
-    %17 = vector.extract %expected[%14] : vector<[%n]xi32> -> i32
-    %18 = vector.extract %replacement[%14] : vector<[%n]xi32> -> i32
-    %19 = vector.extract %offsets[%14] : vector<[%n]xindex> -> index
-    %20 = index.add %origin, %19 : index
-    %21 = view.atomic.cmpxchg %17, %18, %view[%20] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : i32, view<[%n]xi32, %layout> -> i32
-    %22 = vector.insert %21 into %15[%14] : i32, vector<[%n]xi32>
-    scf.yield %22 : vector<[%n]xi32>
+  %11 = scalar.constant 0 : i32
+  %12 = vector.splat %11 : vector<[%n]xi32>
+  %13 = index.constant 0 : index
+  %14 = index.constant 1 : index
+  %old = scf.for %15 = [%13 to %n step %14](%16 = %12 : vector<[%n]xi32>) -> (vector<[%n]xi32>) {
+    %18 = vector.extract %expected[%15] : vector<[%n]xi32> -> i32
+    %19 = vector.extract %replacement[%15] : vector<[%n]xi32> -> i32
+    %20 = vector.extract %offsets[%15] : vector<[%n]xindex> -> index
+    %21 = index.add %origin, %20 : index
+    %22 = view.atomic.cmpxchg %18, %19, %view[%21] {failure_ordering = seq_cst, scope = device, success_ordering = seq_cst} : i32, view<[%n]xi32, %layout> -> i32
+    %23 = vector.insert %22 into %16[%15] : i32, vector<[%n]xi32>
+    scf.yield %23 : vector<[%n]xi32>
   }
   func.return %old : vector<[%n]xi32>
 }

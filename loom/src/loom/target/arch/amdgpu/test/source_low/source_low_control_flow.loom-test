@@ -348,7 +348,8 @@ kernel.def target(@target) @cfg_exact_divergent_condition() {
   %cond = index.cmp eq, %lane, %lane : index
   cfg.cond_br %cond, ^then, ^else
 ^then:
-  %value = vector.constant 1 : vector<1xi32>
+  %value_scalar = scalar.constant 1 : i32
+  %value = vector.splat %value_scalar : vector<1xi32>
   vector.store %value, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 ^else:
@@ -367,7 +368,8 @@ kernel.def target(@target) @cfg_exact_false_divergent_condition() {
 ^then:
   kernel.return
 ^else:
-  %value = vector.constant 2 : vector<1xi32>
+  %value_scalar = scalar.constant 2 : i32
+  %value = vector.splat %value_scalar : vector<1xi32>
   vector.store %value, %output_view[0] : vector<1xi32>, view<1xi32>
   kernel.return
 }
@@ -376,16 +378,16 @@ kernel.def target(@target) @cfg_exact_false_divergent_condition() {
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @cfg_exact_divergent_condition() asm {
   %output_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %value = v_mov_b32 1
-  %18 = v_mov_b32 0
-  global_store_b32_saddr %18, %value, %output_view
+  %20 = v_mov_b32 0
+  global_store_b32_saddr %20, %value, %output_view
   return
 }
 
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @cfg_exact_false_divergent_condition() asm {
   %output_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %value = v_mov_b32 2
-  %21 = v_mov_b32 0
-  global_store_b32_saddr %21, %value, %output_view
+  %23 = v_mov_b32 0
+  global_store_b32_saddr %23, %value, %output_view
   return
 }
 
@@ -409,7 +411,8 @@ func.def target(@target) @divergent_if_else(%values: vector<2xi32>, %limit: i32,
   vector.store %else, %output_view[0] : vector<1xi32>, view<2xi32>
   cfg.br ^join
 ^join:
-  %joined = vector.constant 1 : vector<1xi32>
+  %joined_scalar = scalar.constant 1 : i32
+  %joined = vector.splat %joined_scalar : vector<1xi32>
   vector.store %joined, %output_view[1] : vector<1xi32>, view<2xi32>
   func.return
 }
@@ -419,26 +422,26 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @diverge
   %output_view = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %then = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %cond = v_cmp_lt_i32 %then, %limit
-  %18, %19 = s_and_saveexec_b64 %cond
-  low.cond_br %19, ^then, ^_bb3 : reg<amdgpu.scc>
+  %19, %20 = s_and_saveexec_b64 %cond
+  low.cond_br %20, ^then, ^_bb3 : reg<amdgpu.scc>
 ^then:
-  %21 = v_mov_b32 0
-  global_store_b32_saddr %21, %then, %output_view
+  %22 = v_mov_b32 0
+  global_store_b32_saddr %22, %then, %output_view
   low.br ^_bb3
 ^_bb3:
-  %20 = s_xor_b64_exec %18
-  low.cond_br %20, ^else, ^_bb4 : reg<amdgpu.scc>
+  %21 = s_xor_b64_exec %19
+  low.cond_br %21, ^else, ^_bb4 : reg<amdgpu.scc>
 ^else:
-  %22 = v_mov_b32_copy %limit
-  %else = v_sub_nc_u32 %22, %then
-  %24 = v_mov_b32 0
-  global_store_b32_saddr %24, %else, %output_view
+  %23 = v_mov_b32_copy %limit
+  %else = v_sub_nc_u32 %23, %then
+  %25 = v_mov_b32 0
+  global_store_b32_saddr %25, %else, %output_view
   low.br ^_bb4
 ^_bb4:
-  s_mov_b64_exec %18
+  s_mov_b64_exec %19
   %joined = v_mov_b32 1
-  %26 = v_mov_b32 0
-  global_store_b32_saddr %26, %joined, %output_view {offset = 4}
+  %27 = v_mov_b32 0
+  global_store_b32_saddr %27, %joined, %output_view {offset = 4}
   return
 }
 
@@ -984,7 +987,8 @@ func.def target(@target) @divergent_then_only(%values: vector<2xi32>, %limit: i3
   vector.store %stored, %output_view[0] : vector<1xi32>, view<2xi32>
   cfg.br ^join
 ^join:
-  %joined = vector.constant 1 : vector<1xi32>
+  %joined_scalar = scalar.constant 1 : i32
+  %joined = vector.splat %joined_scalar : vector<1xi32>
   vector.store %joined, %output_view[1] : vector<1xi32>, view<2xi32>
   func.return
 }
@@ -994,19 +998,19 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @diverge
   %output_view = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %lane = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %cond = v_cmp_lt_i32 %lane, %limit
-  %16, %17 = s_and_saveexec_b64 %cond
-  low.cond_br %17, ^then, ^_bb2 : reg<amdgpu.scc>
+  %17, %18 = s_and_saveexec_b64 %cond
+  low.cond_br %18, ^then, ^_bb2 : reg<amdgpu.scc>
 ^then:
-  %18 = v_mov_b32_copy %limit
-  %stored = v_add_u32 %lane, %18
-  %20 = v_mov_b32 0
-  global_store_b32_saddr %20, %stored, %output_view
+  %19 = v_mov_b32_copy %limit
+  %stored = v_add_u32 %lane, %19
+  %21 = v_mov_b32 0
+  global_store_b32_saddr %21, %stored, %output_view
   low.br ^_bb2
 ^_bb2:
-  s_mov_b64_exec %16
+  s_mov_b64_exec %17
   %joined = v_mov_b32 1
-  %22 = v_mov_b32 0
-  global_store_b32_saddr %22, %joined, %output_view {offset = 4}
+  %23 = v_mov_b32 0
+  global_store_b32_saddr %23, %joined, %output_view {offset = 4}
   return
 }
 

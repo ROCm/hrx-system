@@ -54,19 +54,24 @@ kernel.def target(@gfx11_wmma_families_wave32_target) @gfx11_wmma_families_wave3
 
   %i8_lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
   %i8_rhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
-  %i8_lhs_words = vector.constant -1 : vector<4xi32>
-  %i8_rhs_words = vector.constant 33686018 : vector<4xi32>
+  %i8_lhs_words_scalar = scalar.constant -1 : i32
+  %i8_lhs_words = vector.splat %i8_lhs_words_scalar : vector<4xi32>
+  %i8_rhs_words_scalar = scalar.constant 33686018 : i32
+  %i8_rhs_words = vector.splat %i8_rhs_words_scalar : vector<4xi32>
   %i8_lhs = vector.fragment<lhs> %i8_lhs_words shape [%m, %k] using {schema = %i8_lhs_schema : encoding<schema>} : vector<4xi32>
   %i8_rhs = vector.fragment<rhs> %i8_rhs_words shape [%k, %n] using {schema = %i8_rhs_schema : encoding<schema>} : vector<4xi32>
-  %i32_accumulator_elements = vector.constant 0 : vector<8xi32>
+  %i32_accumulator_elements_scalar = scalar.constant 0 : i32
+  %i32_accumulator_elements = vector.splat %i32_accumulator_elements_scalar : vector<8xi32>
   %i32_init = vector.fragment<init> %i32_accumulator_elements shape [%m, %n] : vector<8xi32>
   %i8_result = vector.mma %i8_lhs, %i8_rhs, %i32_init : vector<4xi32>, vector<4xi32>, vector<8xi32>
   vector.fragment.store<result> %i8_result, %i8_output_view[0, 0] shape [%m, %n] : vector<8xi32>, view<16x16xi32>
 
   %i4_lhs_schema = encoding.define #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
   %i4_rhs_schema = encoding.define #encoding.operand<element_format=u4, payload_elements=16, payload_registers=2> : encoding<schema>
-  %i4_lhs_words = vector.constant -1 : vector<2xi32>
-  %i4_rhs_words = vector.constant 572662306 : vector<2xi32>
+  %i4_lhs_words_scalar = scalar.constant -1 : i32
+  %i4_lhs_words = vector.splat %i4_lhs_words_scalar : vector<2xi32>
+  %i4_rhs_words_scalar = scalar.constant 572662306 : i32
+  %i4_rhs_words = vector.splat %i4_rhs_words_scalar : vector<2xi32>
   %i4_lhs = vector.fragment<lhs> %i4_lhs_words shape [%m, %k] using {schema = %i4_lhs_schema : encoding<schema>} : vector<2xi32>
   %i4_rhs = vector.fragment<rhs> %i4_rhs_words shape [%k, %n] using {schema = %i4_rhs_schema : encoding<schema>} : vector<2xi32>
   %i4_result = vector.mma %i4_lhs, %i4_rhs, %i32_init : vector<2xi32>, vector<2xi32>, vector<8xi32>
@@ -121,19 +126,24 @@ kernel.def target(@gfx11_wmma_families_wave64_target) @gfx11_wmma_families_wave6
 
   %i8_lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
   %i8_rhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
-  %i8_lhs_words = vector.constant -1 : vector<4xi32>
-  %i8_rhs_words = vector.constant 33686018 : vector<4xi32>
+  %i8_lhs_words_scalar = scalar.constant -1 : i32
+  %i8_lhs_words = vector.splat %i8_lhs_words_scalar : vector<4xi32>
+  %i8_rhs_words_scalar = scalar.constant 33686018 : i32
+  %i8_rhs_words = vector.splat %i8_rhs_words_scalar : vector<4xi32>
   %i8_lhs = vector.fragment<lhs> %i8_lhs_words shape [%m, %k] using {schema = %i8_lhs_schema : encoding<schema>} : vector<4xi32>
   %i8_rhs = vector.fragment<rhs> %i8_rhs_words shape [%k, %n] using {schema = %i8_rhs_schema : encoding<schema>} : vector<4xi32>
-  %i32_accumulator_elements = vector.constant 0 : vector<4xi32>
+  %i32_accumulator_elements_scalar = scalar.constant 0 : i32
+  %i32_accumulator_elements = vector.splat %i32_accumulator_elements_scalar : vector<4xi32>
   %i32_init = vector.fragment<init> %i32_accumulator_elements shape [%m, %n] : vector<4xi32>
   %i8_result = vector.mma %i8_lhs, %i8_rhs, %i32_init : vector<4xi32>, vector<4xi32>, vector<4xi32>
   vector.fragment.store<result> %i8_result, %i8_output_view[0, 0] shape [%m, %n] : vector<4xi32>, view<16x16xi32>
 
   %i4_lhs_schema = encoding.define #encoding.operand<element_format=i4, payload_elements=16, payload_registers=2> : encoding<schema>
   %i4_rhs_schema = encoding.define #encoding.operand<element_format=u4, payload_elements=16, payload_registers=2> : encoding<schema>
-  %i4_lhs_words = vector.constant -1 : vector<2xi32>
-  %i4_rhs_words = vector.constant 572662306 : vector<2xi32>
+  %i4_lhs_words_scalar = scalar.constant -1 : i32
+  %i4_lhs_words = vector.splat %i4_lhs_words_scalar : vector<2xi32>
+  %i4_rhs_words_scalar = scalar.constant 572662306 : i32
+  %i4_rhs_words = vector.splat %i4_rhs_words_scalar : vector<2xi32>
   %i4_lhs = vector.fragment<lhs> %i4_lhs_words shape [%m, %k] using {schema = %i4_lhs_schema : encoding<schema>} : vector<2xi32>
   %i4_rhs = vector.fragment<rhs> %i4_rhs_words shape [%k, %n] using {schema = %i4_rhs_schema : encoding<schema>} : vector<2xi32>
   %i4_result = vector.mma %i4_lhs, %i4_rhs, %i32_init : vector<2xi32>, vector<2xi32>, vector<4xi32>

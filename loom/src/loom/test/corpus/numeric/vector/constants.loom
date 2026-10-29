@@ -14,12 +14,14 @@ func.def @vector_constants_narrow(%output: buffer) {
   %word_view = buffer.view %output[%word_origin] : buffer -> view<8xi16>
   %half_view = buffer.view %output[%half_origin] : buffer -> view<8xf16>
   %bfloat_view = buffer.view %output[%bfloat_origin] : buffer -> view<8xbf16>
-  %bytes = vector.constant -91 : vector<16xi8>
+  %bytes_scalar = scalar.constant -91 : i8
+  %bytes = vector.splat %bytes_scalar : vector<16xi8>
   %e4_scalar = scalar.constant -2.0 : f8E4M3
   %e4 = vector.splat %e4_scalar : vector<16xf8E4M3>
   %e5_scalar = scalar.constant -0.0 : f8E5M2
   %e5 = vector.splat %e5_scalar : vector<16xf8E5M2>
-  %words = vector.constant -21846 : vector<8xi16>
+  %words_scalar = scalar.constant -21846 : i16
+  %words = vector.splat %words_scalar : vector<8xi16>
   %half_scalar = scalar.constant -0.0 : f16
   %half = vector.splat %half_scalar : vector<8xf16>
   %bfloat_scalar = scalar.constant -2.0 : bf16
@@ -46,15 +48,20 @@ check.scenario @narrow_vector_constant_bits {
 func.def @vector_constants_i32(%output: buffer) {
   %base = index.constant 0 : offset
   %view = buffer.view %output[%base] : buffer -> view<24xi32>
-  %c0 = vector.constant 0 : vector<4xi32>
+  %c0_scalar = scalar.constant 0 : i32
+  %c0 = vector.splat %c0_scalar : vector<4xi32>
   vector.store %c0, %view[0] : vector<4xi32>, view<24xi32>
-  %c1 = vector.constant 1 : vector<4xi32>
+  %c1_scalar = scalar.constant 1 : i32
+  %c1 = vector.splat %c1_scalar : vector<4xi32>
   vector.store %c1, %view[4] : vector<4xi32>, view<24xi32>
-  %negative = vector.constant -19088743 : vector<4xi32>
+  %negative_scalar = scalar.constant -19088743 : i32
+  %negative = vector.splat %negative_scalar : vector<4xi32>
   vector.store %negative, %view[8] : vector<4xi32>, view<24xi32>
-  %minimum = vector.constant -2147483648 : vector<4xi32>
+  %minimum_scalar = scalar.constant -2147483648 : i32
+  %minimum = vector.splat %minimum_scalar : vector<4xi32>
   vector.store %minimum, %view[12] : vector<4xi32>, view<24xi32>
-  %all_bits = vector.constant -1 : vector<4xi32>
+  %all_bits_scalar = scalar.constant -1 : i32
+  %all_bits = vector.splat %all_bits_scalar : vector<4xi32>
   vector.store %all_bits, %view[16] : vector<4xi32>, view<24xi32>
   %scalar = scalar.constant 2147483647 : i32
   %folded = vector.splat %scalar : vector<4xi32>
@@ -65,19 +72,26 @@ func.def @vector_constants_i32(%output: buffer) {
 func.def @vector_constants_i64(%output: buffer) {
   %base = index.constant 0 : offset
   %view = buffer.view %output[%base] : buffer -> view<16xi64>
-  %c0 = vector.constant 0 : vector<2xi64>
+  %c0_scalar = scalar.constant 0 : i64
+  %c0 = vector.splat %c0_scalar : vector<2xi64>
   vector.store %c0, %view[0] : vector<2xi64>, view<16xi64>
-  %c1 = vector.constant 1 : vector<2xi64>
+  %c1_scalar = scalar.constant 1 : i64
+  %c1 = vector.splat %c1_scalar : vector<2xi64>
   vector.store %c1, %view[2] : vector<2xi64>, view<16xi64>
-  %low_word = vector.constant 4294967295 : vector<2xi64>
+  %low_word_scalar = scalar.constant 4294967295 : i64
+  %low_word = vector.splat %low_word_scalar : vector<2xi64>
   vector.store %low_word, %view[4] : vector<2xi64>, view<16xi64>
-  %high_word = vector.constant -4294967296 : vector<2xi64>
+  %high_word_scalar = scalar.constant -4294967296 : i64
+  %high_word = vector.splat %high_word_scalar : vector<2xi64>
   vector.store %high_word, %view[6] : vector<2xi64>, view<16xi64>
-  %both_words = vector.constant -9223372036854775807 : vector<2xi64>
+  %both_words_scalar = scalar.constant -9223372036854775807 : i64
+  %both_words = vector.splat %both_words_scalar : vector<2xi64>
   vector.store %both_words, %view[8] : vector<2xi64>, view<16xi64>
-  %minimum = vector.constant -9223372036854775808 : vector<2xi64>
+  %minimum_scalar = scalar.constant -9223372036854775808 : i64
+  %minimum = vector.splat %minimum_scalar : vector<2xi64>
   vector.store %minimum, %view[10] : vector<2xi64>, view<16xi64>
-  %maximum = vector.constant 9223372036854775807 : vector<2xi64>
+  %maximum_scalar = scalar.constant 9223372036854775807 : i64
+  %maximum = vector.splat %maximum_scalar : vector<2xi64>
   vector.store %maximum, %view[12] : vector<2xi64>, view<16xi64>
   %scalar = scalar.constant -1 : i64
   %folded = vector.splat %scalar : vector<2xi64>
@@ -156,7 +170,8 @@ func.def @vector_constants_f64(%output: buffer) {
 func.def @vector_predicate_constant_observations(%ordinal: index, %true_payload: i32, %false_payload: i32, %output: buffer) {
   %c0 = index.constant 0 : index
   %condition = index.cmp ne, %ordinal, %c0 : index
-  %off = vector.constant false : vector<4xi1>
+  %off_scalar = scalar.constant false : i1
+  %off = vector.splat %off_scalar : vector<4xi1>
   %scalar = scalar.constant true : i1
   %on = vector.splat %scalar : vector<4xi1>
   %mask = scf.select %condition, %on, %off : vector<4xi1>

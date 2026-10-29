@@ -9,8 +9,8 @@ func.def @shaped_wide_fp8_constant() -> (vector<2x64xf8E4M3>) {
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @shaped_wide_fp8_constant() -> (reg<aie2p.vec256 x4>) asm {
   %result_scalar = mov.i32 57
-  %9 = vbcst.8 %result_scalar
-  %result = concat(%9, %9) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %5 = vbcst.8 %result_scalar
+  %result = concat(%5, %5) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   return %result
 }
 
@@ -25,8 +25,8 @@ func.def @partial_f32_constant() -> (vector<31xf32>) {
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @partial_f32_constant() -> (reg<aie2p.vec256 x4>) asm {
   %result_scalar = mov.i32 -1077936128
-  %8 = vbcst.32 %result_scalar
-  %result = concat(%8, %8) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %5 = vbcst.32 %result_scalar
+  %result = concat(%5, %5) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   return %result
 }
 
@@ -50,18 +50,19 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @flat_f32_accumula
 // ====
 
 func.def @wide_i64_constant() -> (vector<32xi64>) {
-  %result = vector.constant -81985529216486896 : vector<32xi64>
+  %result_scalar = scalar.constant -81985529216486896 : i64
+  %result = vector.splat %result_scalar : vector<32xi64>
   func.return %result : vector<32xi64>
 }
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_i64_constant() -> (reg<aie2p.mbms x4>) asm {
-  %3 = mov.i32 1985229328
-  %4 = mov.i32 -19088744
-  %5 = concat(%3, %4) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %6 = vbcst.64 %5
-  %7 = vmov.vector512.to.accumulator512 %6
-  %result = concat(%7, %7, %7, %7) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %4 = mov.i32 1985229328
+  %5 = mov.i32 -19088744
+  %result_scalar = concat(%4, %5) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %7 = vbcst.64 %result_scalar
+  %8 = vmov.vector512.to.accumulator512 %7
+  %result = concat(%8, %8, %8, %8) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
   return %result
 }
 

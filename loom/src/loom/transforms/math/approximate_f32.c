@@ -12,6 +12,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 
 static_assert((uint8_t)LOOM_SCALAR_CMPF_PREDICATE_OEQ ==
@@ -140,9 +141,9 @@ static const uint32_t
 
 // Scalar/vector operation pairs admitted by the checked-in recipe programs.
 #define LOOM_MATH_APPROXIMATE_F32_OPS(_)                                       \
-  _(CONSTANT_F32, LOOM_OP_SCALAR_CONSTANT, LOOM_OP_VECTOR_CONSTANT, 0,         \
+  _(CONSTANT_F32, LOOM_OP_SCALAR_CONSTANT, LOOM_OP_VECTOR_SPLAT, 0,            \
     LOOM_SCALAR_TYPE_F32, LOOM_MATH_APPROXIMATE_F32_ATTRIBUTE_CONSTANT_F32, 0) \
-  _(CONSTANT_I32, LOOM_OP_SCALAR_CONSTANT, LOOM_OP_VECTOR_CONSTANT, 0,         \
+  _(CONSTANT_I32, LOOM_OP_SCALAR_CONSTANT, LOOM_OP_VECTOR_SPLAT, 0,            \
     LOOM_SCALAR_TYPE_I32, LOOM_MATH_APPROXIMATE_F32_ATTRIBUTE_CONSTANT_I32, 0) \
   _(BITCAST_F32, LOOM_OP_SCALAR_BITCAST, LOOM_OP_VECTOR_BITCAST, 1,            \
     LOOM_SCALAR_TYPE_F32, LOOM_MATH_APPROXIMATE_F32_ATTRIBUTE_NONE, 0)         \
@@ -485,6 +486,19 @@ iree_status_t loom_math_approximate_f32_build(
                                      instruction_ordinal];
     const loom_math_approximate_f32_instruction_descriptor_t* descriptor =
         &kApproximateF32InstructionDescriptors[instruction->opcode];
+    const loom_type_t result_type = loom_math_approximate_f32_type_with_element(
+        evaluation->value_type, descriptor->result_element_type);
+    if (is_vector && (descriptor->attribute_mode ==
+                          LOOM_MATH_APPROXIMATE_F32_ATTRIBUTE_CONSTANT_F32 ||
+                      descriptor->attribute_mode ==
+                          LOOM_MATH_APPROXIMATE_F32_ATTRIBUTE_CONSTANT_I32)) {
+      IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+          builder,
+          loom_math_approximate_f32_instruction_attribute(descriptor,
+                                                          instruction),
+          result_type, evaluation->location, &values[instruction_ordinal + 1]));
+      continue;
+    }
     const loom_op_kind_t op_kind =
         is_vector ? descriptor->vector_op_kind : descriptor->scalar_op_kind;
     const uint8_t attribute_count =
@@ -507,8 +521,6 @@ iree_status_t loom_math_approximate_f32_build(
           loom_math_approximate_f32_instruction_attribute(descriptor,
                                                           instruction);
     }
-    const loom_type_t result_type = loom_math_approximate_f32_type_with_element(
-        evaluation->value_type, descriptor->result_element_type);
     IREE_RETURN_IF_ERROR(loom_builder_define_result(
         builder, result_type, &loom_op_results(emitted_op)[0]));
     IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, emitted_op));

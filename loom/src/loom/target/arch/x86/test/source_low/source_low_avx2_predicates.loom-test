@@ -128,11 +128,14 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({sig
 x86.target<avx2> @target
 
 func.def target(@target) @construct_predicates(%condition_value: i1, %true_value: vector<16xi16>, %false_value: vector<16xi16>) -> (vector<2xi1>, vector<4xi1>, vector<16xi16>, vector<32xi1>) {
-  %false2 = vector.constant 0 : vector<2xi1>
-  %true4 = vector.constant 1 : vector<4xi1>
+  %false2_scalar = scalar.constant 0 : i1
+  %false2 = vector.splat %false2_scalar : vector<2xi1>
+  %true4_scalar = scalar.constant 1 : i1
+  %true4 = vector.splat %true4_scalar : vector<4xi1>
   %condition16 = vector.splat %condition_value : vector<16xi1>
   %selected = vector.select %condition16, %true_value, %false_value : vector<16xi16>
-  %true32 = vector.constant 1 : vector<32xi1>
+  %true32_scalar = scalar.constant 1 : i1
+  %true32 = vector.splat %true32_scalar : vector<32xi1>
   func.return %false2, %true4, %selected, %true32 : vector<2xi1>, vector<4xi1>, vector<16xi16>, vector<32xi1>
 }
 
@@ -140,13 +143,13 @@ func.def target(@target) @construct_predicates(%condition_value: i1, %true_value
 low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (i1, vector<16xi16>, vector<16xi16>) -> (vector<2xi1>, vector<4xi1>, vector<16xi16>, vector<32xi1>)}) @construct_predicates(%condition_value: reg<x86.gpr32>, %true_value: reg<x86.ymm>, %false_value: reg<x86.ymm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.ymm>, reg<x86.ymm>) asm {
   %false2 = vxorps.zero.xmm
   %true4 = vpcmpeqd.xmm %false2, %false2
-  %23 = mov.imm32 0
-  %24 = sub.gpr32 %23, %condition_value
-  %25 = vmovd.xmm.gpr32 %24
-  %26 = vpbroadcastd.ymm %25
-  %selected = vpblendvb.ymm %false_value, %true_value, %26
-  %28 = vxorps.zero.ymm
-  %true32 = vpcmpeqb.ymm %28, %28
+  %26 = mov.imm32 0
+  %27 = sub.gpr32 %26, %condition_value
+  %28 = vmovd.xmm.gpr32 %27
+  %29 = vpbroadcastd.ymm %28
+  %selected = vpblendvb.ymm %false_value, %true_value, %29
+  %31 = vxorps.zero.ymm
+  %true32 = vpcmpeqb.ymm %31, %31
   return %false2, %true4, %selected, %true32
 }
 

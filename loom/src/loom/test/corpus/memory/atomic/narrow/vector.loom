@@ -79,7 +79,8 @@ kernel.def @masked_brain_payloads() {
   %scratch = buffer.alloca<workgroup> align(4) %bytes : buffer
   %cells = buffer.view %scratch[%origin] : buffer -> view<2xbf16>
   %results = buffer.view %output[%origin] : buffer -> view<9xi16>
-  %nan_bits = vector.constant 32641 : vector<2xi16>
+  %nan_bits_scalar = scalar.constant 32641 : i16
+  %nan_bits = vector.splat %nan_bits_scalar : vector<2xi16>
   %nan = vector.bitcast %nan_bits : vector<2xi16> to vector<2xbf16>
   vector.store %nan, %cells[0] : vector<2xbf16>, view<2xbf16>
   %flag_clear = scalar.constant 0 : i32
@@ -90,9 +91,11 @@ kernel.def @masked_brain_payloads() {
   %outside = index.constant -100 : index
   %last = index.constant 1 : index
   %offsets = vector.from_elements %first, %outside, %last : vector<3xindex>
-  %subnormal_bits = vector.constant 1 : vector<3xi16>
+  %subnormal_bits_scalar = scalar.constant 1 : i16
+  %subnormal_bits = vector.splat %subnormal_bits_scalar : vector<3xi16>
   %subnormal = vector.bitcast %subnormal_bits : vector<3xi16> to vector<3xbf16>
-  %passthrough_bits = vector.constant 32709 : vector<3xi16>
+  %passthrough_bits_scalar = scalar.constant 32709 : i16
+  %passthrough_bits = vector.splat %passthrough_bits_scalar : vector<3xi16>
   %passthrough = vector.bitcast %passthrough_bits : vector<3xi16> to vector<3xbf16>
   %old = vector.atomic.rmw.mask<xchgf> %subnormal, %cells[0][%offsets], %mask, %passthrough {cache_scope = workgroup, cache_temporal = non_temporal, ordering = acq_rel, scope = workgroup} : vector<3xbf16>, view<2xbf16>, vector<3xindex>, vector<3xi1>, vector<3xbf16>
   vector.atomic.reduce.mask<addf, noftz> %subnormal, %cells[0][%offsets], %mask {cache_scope = workgroup, cache_temporal = non_temporal, ordering = release, scope = workgroup} : vector<3xbf16>, view<2xbf16>, vector<3xindex>, vector<3xi1>
@@ -104,7 +107,8 @@ kernel.def @masked_brain_payloads() {
   %active_bits = scf.select %enabled, %added_bits, %original_bits : i16
   %expected_bits = vector.from_elements %active_bits, %original_bits : vector<2xi16>
   %expected = vector.bitcast %expected_bits : vector<2xi16> to vector<2xbf16>
-  %replacement_bits = vector.constant -32768 : vector<2xi16>
+  %replacement_bits_scalar = scalar.constant -32768 : i16
+  %replacement_bits = vector.splat %replacement_bits_scalar : vector<2xi16>
   %replacement = vector.bitcast %replacement_bits : vector<2xi16> to vector<2xbf16>
   %observed = vector.atomic.cmpxchg %expected, %replacement, %cells[0][%pair_offsets] {cache_scope = workgroup, cache_temporal = non_temporal, failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<2xbf16>, view<2xbf16>, vector<2xindex> -> vector<2xbf16>
   %failed = vector.atomic.cmpxchg %expected, %nan, %cells[0][%pair_offsets] {cache_scope = workgroup, cache_temporal = non_temporal, failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<2xbf16>, view<2xbf16>, vector<2xindex> -> vector<2xbf16>

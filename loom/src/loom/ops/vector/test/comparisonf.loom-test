@@ -14,11 +14,14 @@ func.def @same_value_0(%lhs: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>, vect
 // ----
 func.def @same_value_0(%lhs: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>) {
   %oeq = vector.cmpf oeq, %lhs, %lhs : vector<4xf32> -> vector<4xi1>
-  %ogt = vector.constant false : vector<4xi1>
+  %19 = scalar.constant false : i1
+  %ogt = vector.splat %19 : vector<4xi1>
   %oge = vector.cmpf oge, %lhs, %lhs : vector<4xf32> -> vector<4xi1>
-  %olt = vector.constant false : vector<4xi1>
+  %17 = scalar.constant false : i1
+  %olt = vector.splat %17 : vector<4xi1>
   %ole = vector.cmpf ole, %lhs, %lhs : vector<4xf32> -> vector<4xi1>
-  %one = vector.constant false : vector<4xi1>
+  %15 = scalar.constant false : i1
+  %one = vector.splat %15 : vector<4xi1>
   %ord = vector.cmpf ord, %lhs, %lhs : vector<4xf32> -> vector<4xi1>
   func.return %oeq, %ogt, %oge, %olt, %ole, %one, %ord : vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>
 }
@@ -38,11 +41,14 @@ func.def @same_value_1(%lhs: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>, vect
 
 // ----
 func.def @same_value_1(%lhs: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>) {
-  %ueq = vector.constant true : vector<4xi1>
+  %19 = scalar.constant true : i1
+  %ueq = vector.splat %19 : vector<4xi1>
   %ugt = vector.cmpf ugt, %lhs, %lhs : vector<4xf32> -> vector<4xi1>
-  %uge = vector.constant true : vector<4xi1>
+  %17 = scalar.constant true : i1
+  %uge = vector.splat %17 : vector<4xi1>
   %ult = vector.cmpf ult, %lhs, %lhs : vector<4xf32> -> vector<4xi1>
-  %ule = vector.constant true : vector<4xi1>
+  %15 = scalar.constant true : i1
+  %ule = vector.splat %15 : vector<4xi1>
   %une = vector.cmpf une, %lhs, %lhs : vector<4xf32> -> vector<4xi1>
   %uno = vector.cmpf uno, %lhs, %lhs : vector<4xf32> -> vector<4xi1>
   func.return %ueq, %ugt, %uge, %ult, %ule, %une, %uno : vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>
@@ -63,13 +69,20 @@ func.def @same_value_nnan_0(%lhs: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>,
 
 // ----
 func.def @same_value_nnan_0(%lhs: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>) {
-  %oeq = vector.constant true : vector<4xi1>
-  %ogt = vector.constant false : vector<4xi1>
-  %oge = vector.constant true : vector<4xi1>
-  %olt = vector.constant false : vector<4xi1>
-  %ole = vector.constant true : vector<4xi1>
-  %one = vector.constant false : vector<4xi1>
-  %ord = vector.constant true : vector<4xi1>
+  %27 = scalar.constant true : i1
+  %oeq = vector.splat %27 : vector<4xi1>
+  %25 = scalar.constant false : i1
+  %ogt = vector.splat %25 : vector<4xi1>
+  %23 = scalar.constant true : i1
+  %oge = vector.splat %23 : vector<4xi1>
+  %21 = scalar.constant false : i1
+  %olt = vector.splat %21 : vector<4xi1>
+  %19 = scalar.constant true : i1
+  %ole = vector.splat %19 : vector<4xi1>
+  %17 = scalar.constant false : i1
+  %one = vector.splat %17 : vector<4xi1>
+  %15 = scalar.constant true : i1
+  %ord = vector.splat %15 : vector<4xi1>
   func.return %oeq, %ogt, %oge, %olt, %ole, %one, %ord : vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>
 }
 
@@ -88,13 +101,20 @@ func.def @same_value_nnan_1(%lhs: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>,
 
 // ----
 func.def @same_value_nnan_1(%lhs: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>) {
-  %ueq = vector.constant true : vector<4xi1>
-  %ugt = vector.constant false : vector<4xi1>
-  %uge = vector.constant true : vector<4xi1>
-  %ult = vector.constant false : vector<4xi1>
-  %ule = vector.constant true : vector<4xi1>
-  %une = vector.constant false : vector<4xi1>
-  %uno = vector.constant false : vector<4xi1>
+  %27 = scalar.constant true : i1
+  %ueq = vector.splat %27 : vector<4xi1>
+  %25 = scalar.constant false : i1
+  %ugt = vector.splat %25 : vector<4xi1>
+  %23 = scalar.constant true : i1
+  %uge = vector.splat %23 : vector<4xi1>
+  %21 = scalar.constant false : i1
+  %ult = vector.splat %21 : vector<4xi1>
+  %19 = scalar.constant true : i1
+  %ule = vector.splat %19 : vector<4xi1>
+  %17 = scalar.constant false : i1
+  %une = vector.splat %17 : vector<4xi1>
+  %15 = scalar.constant false : i1
+  %uno = vector.splat %15 : vector<4xi1>
   func.return %ueq, %ugt, %uge, %ult, %ule, %une, %uno : vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>
 }
 
@@ -119,7 +139,8 @@ func.def @different_values_nnan_0(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (
   %olt = vector.cmpf<nnan> olt, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
   %ole = vector.cmpf<nnan> ole, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
   %one = vector.cmpf<nnan> one, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
-  %ord = vector.constant true : vector<4xi1>
+  %16 = scalar.constant true : i1
+  %ord = vector.splat %16 : vector<4xi1>
   func.return %oeq, %ogt, %oge, %olt, %ole, %one, %ord : vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>
 }
 
@@ -144,7 +165,8 @@ func.def @different_values_nnan_1(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (
   %ult = vector.cmpf<nnan> ult, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
   %ule = vector.cmpf<nnan> ule, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
   %une = vector.cmpf<nnan> une, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
-  %uno = vector.constant false : vector<4xi1>
+  %16 = scalar.constant false : i1
+  %uno = vector.splat %16 : vector<4xi1>
   func.return %ueq, %ugt, %uge, %ult, %ule, %une, %uno : vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>
 }
 
@@ -162,7 +184,8 @@ func.def @independent_permissions(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (
 // ----
 func.def @independent_permissions(%lhs: vector<4xf32>, %rhs: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>) {
   %plain = vector.cmpf ord, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
-  %nnan = vector.constant true : vector<4xi1>
+  %10 = scalar.constant true : i1
+  %nnan = vector.splat %10 : vector<4xi1>
   %other = vector.cmpf<reassoc|ninf|nsz|arcp|contract|afn> ord, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
   %same_other = vector.cmpf<reassoc|ninf|nsz|arcp|contract|afn> oeq, %lhs, %lhs : vector<4xf32> -> vector<4xi1>
   func.return %plain, %nnan, %other, %same_other : vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>

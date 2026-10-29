@@ -173,6 +173,37 @@ def test_predicate_construction_covers_every_callable_lane_count() -> None:
     }
 
     splat_rules = _rules_for(vector.vector_splat)
+    exact_splat_rules = tuple(
+        rule
+        for rule in splat_rules
+        if any(
+            guard.kind == GuardKind.VALUE_I64_RANGE and guard.field == "scalar"
+            for guard in rule.guards
+        )
+    )
+    assert {
+        (
+            _type_guard(rule, "result"),
+            _carrier_register_class(rule, "result"),
+            _representation_guard(rule, "result"),
+            next(
+                (guard.minimum, guard.maximum)
+                for guard in rule.guards
+                if guard.kind == GuardKind.VALUE_I64_RANGE and guard.field == "scalar"
+            ),
+        )
+        for rule in exact_splat_rules
+    } == {
+        (
+            Vector("i1", lanes=lane_count),
+            _register_class(representation_bit_width),
+            _representation(lane_count, representation_bit_width),
+            (value, value),
+        )
+        for lane_count in _PREDICATE_LANE_COUNTS
+        for representation_bit_width in _representation_bit_widths(lane_count)
+        for value in (0, 1)
+    }
     assert {
         (
             _type_guard(rule, "result"),
@@ -460,6 +491,10 @@ def test_predicate_rule_inventory_has_no_unclassified_rows() -> None:
         for lane_count in _PREDICATE_LANE_COUNTS
     )
     expected_count += len(AVX2_VECTOR_BIT_WIDTHS)
+    expected_count += sum(
+        len(_representation_bit_widths(lane_count)) * len((0, 1))
+        for lane_count in _PREDICATE_LANE_COUNTS
+    )
     assert len(_RULES) == expected_count
 
 
@@ -558,6 +593,34 @@ def test_avx512_predicate_construction_is_only_the_missing_delta() -> None:
     } | {
         (source_op, Vector("i1", lanes=64), "x86.zmm", 8)
         for source_op in (vector.vector_constant, vector.vector_splat)
+    }
+    exact_splat_rules = tuple(
+        rule
+        for rule in _avx512_rules_for(vector.vector_splat)
+        if any(
+            guard.kind == GuardKind.VALUE_I64_RANGE and guard.field == "scalar"
+            for guard in rule.guards
+        )
+    )
+    assert {
+        (
+            _type_guard(rule, "result"),
+            _carrier_register_class(rule, "result"),
+            _representation_guard(rule, "result"),
+            next(
+                (guard.minimum, guard.maximum)
+                for guard in rule.guards
+                if guard.kind == GuardKind.VALUE_I64_RANGE and guard.field == "scalar"
+            ),
+        )
+        for rule in exact_splat_rules
+    } == {
+        (result_type, register_class, representation, (value, value))
+        for result_type, register_class, representation in (
+            (Vector("i1", minimum_lanes=2, maximum_lanes=64), "x86.k", 1),
+            (Vector("i1", lanes=64), "x86.zmm", 8),
+        )
+        for value in (0, 1)
     }
 
 
@@ -818,4 +881,8 @@ def test_avx512_predicate_rule_inventory_has_no_unclassified_rows() -> None:
             *_avx512_simd_representation_bit_widths(lane_count),
         )
     )
-    assert len(_AVX512_RULES) == 80 + extension_count + truncation_count
+    exact_splat_count = len(("mask", "carrier")) * len((0, 1))
+    assert (
+        len(_AVX512_RULES)
+        == 80 + exact_splat_count + extension_count + truncation_count
+    )

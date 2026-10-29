@@ -297,6 +297,24 @@ def _predicate_constant_rules(
             )
             rules.append(
                 DescriptorRule(
+                    source_op=vector.vector_splat,
+                    descriptor=zero,
+                    guards=(
+                        Guard.value_type("scalar", _I1),
+                        Guard.value_i64_range("scalar", 0, 0),
+                        *common_guards,
+                    ),
+                    emit=(
+                        _op_emit(
+                            descriptor=zero,
+                            results={"dst": ValueRef.result("result")},
+                        ),
+                    ),
+                    priority=2,
+                )
+            )
+            rules.append(
+                DescriptorRule(
                     source_op=vector.vector_constant,
                     descriptor=equal,
                     guards=(
@@ -321,6 +339,34 @@ def _predicate_constant_rules(
                         ),
                     ),
                     priority=1,
+                )
+            )
+            rules.append(
+                DescriptorRule(
+                    source_op=vector.vector_splat,
+                    descriptor=equal,
+                    guards=(
+                        Guard.value_type("scalar", _I1),
+                        Guard.value_i64_range("scalar", 1, 1),
+                        *common_guards,
+                        Guard.descriptor_available(zero),
+                    ),
+                    emit=(
+                        _op_emit(
+                            descriptor=zero,
+                            results={"dst": ValueRef.temporary("zero")},
+                            result_types={"dst": carrier_type},
+                        ),
+                        _op_emit(
+                            descriptor=equal,
+                            operands={
+                                "lhs": ValueRef.temporary("zero"),
+                                "rhs": ValueRef.temporary("zero"),
+                            },
+                            results={"dst": ValueRef.result("result")},
+                        ),
+                    ),
+                    priority=2,
                 )
             )
     return tuple(rules)

@@ -7,6 +7,7 @@
 #include "loom/transforms/vector/signed_unary_legalization.h"
 
 #include "loom/ir/module.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 
 iree_status_t loom_vector_legalize_signed_unary(
@@ -23,10 +24,9 @@ iree_status_t loom_vector_legalize_signed_unary(
 
   loom_value_id_t replacement = input;
   if (loom_type_element_type(type) != LOOM_SCALAR_TYPE_I1) {
-    loom_op_t* zero_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-        builder, loom_attr_i64(0), type, op->location, &zero_op));
-    const loom_value_id_t zero = loom_vector_constant_result(zero_op);
+    loom_value_id_t zero = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+        builder, loom_attr_i64(0), type, op->location, &zero));
 
     if (!loom_vector_signi_isa(op)) {
       loom_op_t* negation_op = NULL;
@@ -48,23 +48,22 @@ iree_status_t loom_vector_legalize_signed_unary(
 
       loom_value_id_t nonnegative = input;
       if (loom_vector_signi_isa(op)) {
-        loom_op_t* one_op = NULL;
-        IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-            builder, loom_attr_i64(1), type, op->location, &one_op));
-        loom_op_t* minus_one_op = NULL;
-        IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-            builder, loom_attr_i64(-1), type, op->location, &minus_one_op));
+        loom_value_id_t one = LOOM_VALUE_ID_INVALID;
+        IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+            builder, loom_attr_i64(1), type, op->location, &one));
+        loom_value_id_t minus_one = LOOM_VALUE_ID_INVALID;
+        IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+            builder, loom_attr_i64(-1), type, op->location, &minus_one));
         loom_op_t* nonzero_op = NULL;
         IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
             builder, LOOM_VECTOR_CMPI_PREDICATE_NE, input, zero, type,
             predicate_type, op->location, &nonzero_op));
         loom_op_t* positive_op = NULL;
         IREE_RETURN_IF_ERROR(loom_vector_select_build(
-            builder, loom_vector_cmpi_result(nonzero_op),
-            loom_vector_constant_result(one_op), zero, type, op->location,
-            &positive_op));
+            builder, loom_vector_cmpi_result(nonzero_op), one, zero, type,
+            op->location, &positive_op));
         nonnegative = loom_vector_select_result(positive_op);
-        replacement = loom_vector_constant_result(minus_one_op);
+        replacement = minus_one;
       }
 
       // Comparisons and selection preserve byte lanes and qword lanes even on

@@ -12,7 +12,8 @@ func.def public target(@target) @guarded_vector(%input: buffer, %output: buffer,
     %loaded = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
     scf.yield %loaded, %tag : vector<16xi32>, i32
   } else {
-    %fallback = vector.constant 0 : vector<16xi32>
+    %fallback_scalar = scalar.constant 0 : i32
+    %fallback = vector.splat %fallback_scalar : vector<16xi32>
     %other_tag = scalar.constant 7 : i32
     scf.yield %fallback, %other_tag : vector<16xi32>, i32
   }
@@ -28,19 +29,20 @@ func.def public target(@target) @guarded_vector(%input: buffer, %output: buffer,
   %base = index.constant 0 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<16xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<16xi32>
-  %12, %13, %selected_tag = scf.if %condition -> (vector<8xi32>, vector<8xi32>, i32) {
+  %13, %14, %selected_tag = scf.if %condition -> (vector<8xi32>, vector<8xi32>, i32) {
     %loaded = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
-    %15 = vector.slice %loaded[0] : vector<16xi32> -> vector<8xi32>
-    %16 = vector.slice %loaded[8] : vector<16xi32> -> vector<8xi32>
-    scf.yield %15, %16, %tag : vector<8xi32>, vector<8xi32>, i32
+    %16 = vector.slice %loaded[0] : vector<16xi32> -> vector<8xi32>
+    %17 = vector.slice %loaded[8] : vector<16xi32> -> vector<8xi32>
+    scf.yield %16, %17, %tag : vector<8xi32>, vector<8xi32>, i32
   } else {
-    %fallback = vector.constant 0 : vector<16xi32>
+    %fallback_scalar = scalar.constant 0 : i32
+    %fallback = vector.splat %fallback_scalar : vector<16xi32>
     %other_tag = scalar.constant 7 : i32
-    %17 = vector.slice %fallback[0] : vector<16xi32> -> vector<8xi32>
-    %18 = vector.slice %fallback[8] : vector<16xi32> -> vector<8xi32>
-    scf.yield %17, %18, %other_tag : vector<8xi32>, vector<8xi32>, i32
+    %18 = vector.slice %fallback[0] : vector<16xi32> -> vector<8xi32>
+    %19 = vector.slice %fallback[8] : vector<16xi32> -> vector<8xi32>
+    scf.yield %18, %19, %other_tag : vector<8xi32>, vector<8xi32>, i32
   }
-  %values = vector.concat<0> %12, %13 : vector<8xi32>, vector<8xi32> -> vector<16xi32>
+  %values = vector.concat<0> %13, %14 : vector<8xi32>, vector<8xi32> -> vector<16xi32>
   vector.store %values, %output_view[0] : vector<16xi32>, view<16xi32>
   view.store %selected_tag, %output_view[0] : i32, view<16xi32>
   func.return
@@ -64,13 +66,15 @@ func.def public target(@target) @nested_switch(%input: buffer, %output: buffer, 
       %nested = scf.if %condition -> (vector<10xi32>) {
         scf.yield %seed : vector<10xi32>
       } else {
-        %fallback = vector.constant 0 : vector<10xi32>
+        %fallback_scalar = scalar.constant 0 : i32
+        %fallback = vector.splat %fallback_scalar : vector<10xi32>
         scf.yield %fallback : vector<10xi32>
       }
       scf.yield %nested : vector<10xi32>
     }
     case 9 {
-      %case_value = vector.constant 1 : vector<10xi32>
+      %case_value_scalar = scalar.constant 1 : i32
+      %case_value = vector.splat %case_value_scalar : vector<10xi32>
       scf.yield %case_value : vector<10xi32>
     }
     default {
@@ -89,34 +93,36 @@ func.def public target(@target) @nested_switch(%input: buffer, %output: buffer, 
   %input_view = buffer.view %input[%base] : buffer -> view<10xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<10xi32>
   %seed = vector.load %input_view[0] : view<10xi32> -> vector<10xi32>
-  %12, %13 = scf.switch %selector -> (vector<8xi32>, vector<2xi32>) {
+  %14, %15 = scf.switch %selector -> (vector<8xi32>, vector<2xi32>) {
     case 3 {
-      %14, %15 = scf.if %condition -> (vector<8xi32>, vector<2xi32>) {
-        %21 = vector.slice %seed[0] : vector<10xi32> -> vector<8xi32>
-        %22 = vector.slice %seed[8] : vector<10xi32> -> vector<2xi32>
-        scf.yield %21, %22 : vector<8xi32>, vector<2xi32>
-      } else {
-        %fallback = vector.constant 0 : vector<10xi32>
-        %23 = vector.slice %fallback[0] : vector<10xi32> -> vector<8xi32>
-        %24 = vector.slice %fallback[8] : vector<10xi32> -> vector<2xi32>
+      %16, %17 = scf.if %condition -> (vector<8xi32>, vector<2xi32>) {
+        %23 = vector.slice %seed[0] : vector<10xi32> -> vector<8xi32>
+        %24 = vector.slice %seed[8] : vector<10xi32> -> vector<2xi32>
         scf.yield %23, %24 : vector<8xi32>, vector<2xi32>
+      } else {
+        %fallback_scalar = scalar.constant 0 : i32
+        %fallback = vector.splat %fallback_scalar : vector<10xi32>
+        %25 = vector.slice %fallback[0] : vector<10xi32> -> vector<8xi32>
+        %26 = vector.slice %fallback[8] : vector<10xi32> -> vector<2xi32>
+        scf.yield %25, %26 : vector<8xi32>, vector<2xi32>
       }
-      %nested = vector.concat<0> %14, %15 : vector<8xi32>, vector<2xi32> -> vector<10xi32>
-      scf.yield %14, %15 : vector<8xi32>, vector<2xi32>
-    }
-    case 9 {
-      %case_value = vector.constant 1 : vector<10xi32>
-      %18 = vector.slice %case_value[0] : vector<10xi32> -> vector<8xi32>
-      %19 = vector.slice %case_value[8] : vector<10xi32> -> vector<2xi32>
-      scf.yield %18, %19 : vector<8xi32>, vector<2xi32>
-    }
-    default {
-      %16 = vector.slice %seed[0] : vector<10xi32> -> vector<8xi32>
-      %17 = vector.slice %seed[8] : vector<10xi32> -> vector<2xi32>
+      %nested = vector.concat<0> %16, %17 : vector<8xi32>, vector<2xi32> -> vector<10xi32>
       scf.yield %16, %17 : vector<8xi32>, vector<2xi32>
     }
+    case 9 {
+      %case_value_scalar = scalar.constant 1 : i32
+      %case_value = vector.splat %case_value_scalar : vector<10xi32>
+      %20 = vector.slice %case_value[0] : vector<10xi32> -> vector<8xi32>
+      %21 = vector.slice %case_value[8] : vector<10xi32> -> vector<2xi32>
+      scf.yield %20, %21 : vector<8xi32>, vector<2xi32>
+    }
+    default {
+      %18 = vector.slice %seed[0] : vector<10xi32> -> vector<8xi32>
+      %19 = vector.slice %seed[8] : vector<10xi32> -> vector<2xi32>
+      scf.yield %18, %19 : vector<8xi32>, vector<2xi32>
+    }
   }
-  %values = vector.concat<0> %12, %13 : vector<8xi32>, vector<2xi32> -> vector<10xi32>
+  %values = vector.concat<0> %14, %15 : vector<8xi32>, vector<2xi32> -> vector<10xi32>
   vector.store %values, %output_view[0] : vector<10xi32>, view<10xi32>
   func.return
 }
@@ -140,7 +146,8 @@ func.def public target(@target) @loop_branch_transport(%input: buffer, %output: 
     %loop_result = scf.for %iteration = [%c0 to %count step %c1](%carried = %seed : vector<16xi32>) -> (vector<16xi32>) {
       %first = index.cmp eq, %iteration, %c0 : index
       %next = scf.if %first -> (vector<16xi32>) {
-        %fallback = vector.constant 0 : vector<16xi32>
+        %fallback_scalar = scalar.constant 0 : i32
+        %fallback = vector.splat %fallback_scalar : vector<16xi32>
         scf.yield %fallback : vector<16xi32>
       } else {
         scf.yield %carried : vector<16xi32>
@@ -165,31 +172,32 @@ func.def public target(@target) @loop_branch_transport(%input: buffer, %output: 
   %seed = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %17, %18 = scf.if %condition -> (vector<8xi32>, vector<8xi32>) {
-    %21 = vector.slice %seed[0] : vector<16xi32> -> vector<8xi32>
-    %22 = vector.slice %seed[8] : vector<16xi32> -> vector<8xi32>
-    %23, %24 = scf.for %iteration = [%c0 to %count step %c1](%26 = %21 : vector<8xi32>, %27 = %22 : vector<8xi32>) -> (vector<8xi32>, vector<8xi32>) {
-      %carried = vector.concat<0> %26, %27 : vector<8xi32>, vector<8xi32> -> vector<16xi32>
+  %18, %19 = scf.if %condition -> (vector<8xi32>, vector<8xi32>) {
+    %22 = vector.slice %seed[0] : vector<16xi32> -> vector<8xi32>
+    %23 = vector.slice %seed[8] : vector<16xi32> -> vector<8xi32>
+    %24, %25 = scf.for %iteration = [%c0 to %count step %c1](%27 = %22 : vector<8xi32>, %28 = %23 : vector<8xi32>) -> (vector<8xi32>, vector<8xi32>) {
+      %carried = vector.concat<0> %27, %28 : vector<8xi32>, vector<8xi32> -> vector<16xi32>
       %first = index.cmp eq, %iteration, %c0 : index
-      %19, %20 = scf.if %first -> (vector<8xi32>, vector<8xi32>) {
-        %fallback = vector.constant 0 : vector<16xi32>
-        %33 = vector.slice %fallback[0] : vector<16xi32> -> vector<8xi32>
-        %34 = vector.slice %fallback[8] : vector<16xi32> -> vector<8xi32>
-        scf.yield %33, %34 : vector<8xi32>, vector<8xi32>
+      %20, %21 = scf.if %first -> (vector<8xi32>, vector<8xi32>) {
+        %fallback_scalar = scalar.constant 0 : i32
+        %fallback = vector.splat %fallback_scalar : vector<16xi32>
+        %34 = vector.slice %fallback[0] : vector<16xi32> -> vector<8xi32>
+        %35 = vector.slice %fallback[8] : vector<16xi32> -> vector<8xi32>
+        scf.yield %34, %35 : vector<8xi32>, vector<8xi32>
       } else {
-        scf.yield %26, %27 : vector<8xi32>, vector<8xi32>
+        scf.yield %27, %28 : vector<8xi32>, vector<8xi32>
       }
-      %next = vector.concat<0> %19, %20 : vector<8xi32>, vector<8xi32> -> vector<16xi32>
-      scf.yield %19, %20 : vector<8xi32>, vector<8xi32>
+      %next = vector.concat<0> %20, %21 : vector<8xi32>, vector<8xi32> -> vector<16xi32>
+      scf.yield %20, %21 : vector<8xi32>, vector<8xi32>
     }
-    %loop_result = vector.concat<0> %23, %24 : vector<8xi32>, vector<8xi32> -> vector<16xi32>
-    scf.yield %23, %24 : vector<8xi32>, vector<8xi32>
+    %loop_result = vector.concat<0> %24, %25 : vector<8xi32>, vector<8xi32> -> vector<16xi32>
+    scf.yield %24, %25 : vector<8xi32>, vector<8xi32>
   } else {
-    %30 = vector.slice %seed[0] : vector<16xi32> -> vector<8xi32>
-    %31 = vector.slice %seed[8] : vector<16xi32> -> vector<8xi32>
-    scf.yield %30, %31 : vector<8xi32>, vector<8xi32>
+    %31 = vector.slice %seed[0] : vector<16xi32> -> vector<8xi32>
+    %32 = vector.slice %seed[8] : vector<16xi32> -> vector<8xi32>
+    scf.yield %31, %32 : vector<8xi32>, vector<8xi32>
   }
-  %values = vector.concat<0> %17, %18 : vector<8xi32>, vector<8xi32> -> vector<16xi32>
+  %values = vector.concat<0> %18, %19 : vector<8xi32>, vector<8xi32> -> vector<16xi32>
   vector.store %values, %output_view[0] : vector<16xi32>, view<16xi32>
   func.return
 }
@@ -211,7 +219,8 @@ func.def public target(@target) @retained_result_types(%input: buffer, %output: 
     scf.yield %seed, %left, %left_size : vector<16xi32>, view<[%left_size]xi32>, index
   } else {
     %right = buffer.view %output[%base] : buffer -> view<[%right_size]xi32>
-    %fallback = vector.constant 0 : vector<16xi32>
+    %fallback_scalar = scalar.constant 0 : i32
+    %fallback = vector.splat %fallback_scalar : vector<16xi32>
     scf.yield %fallback, %right, %right_size : vector<16xi32>, view<[%right_size]xi32>, index
   }
   vector.store %values, %view[0] : vector<16xi32>, view<[%size]xi32>
@@ -225,19 +234,20 @@ func.def public target(@target) @retained_result_types(%input: buffer, %output: 
   %base = index.constant 0 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<16xi32>
   %seed = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
-  %14, %15, %view, %size = scf.if %condition -> (vector<8xi32>, vector<8xi32>, view<[%size]xi32>, index) {
+  %15, %16, %view, %size = scf.if %condition -> (vector<8xi32>, vector<8xi32>, view<[%size]xi32>, index) {
     %left = buffer.view %output[%base] : buffer -> view<[%left_size]xi32>
-    %18 = vector.slice %seed[0] : vector<16xi32> -> vector<8xi32>
-    %19 = vector.slice %seed[8] : vector<16xi32> -> vector<8xi32>
-    scf.yield %18, %19, %left, %left_size : vector<8xi32>, vector<8xi32>, view<[%left_size]xi32>, index
+    %19 = vector.slice %seed[0] : vector<16xi32> -> vector<8xi32>
+    %20 = vector.slice %seed[8] : vector<16xi32> -> vector<8xi32>
+    scf.yield %19, %20, %left, %left_size : vector<8xi32>, vector<8xi32>, view<[%left_size]xi32>, index
   } else {
     %right = buffer.view %output[%base] : buffer -> view<[%right_size]xi32>
-    %fallback = vector.constant 0 : vector<16xi32>
-    %20 = vector.slice %fallback[0] : vector<16xi32> -> vector<8xi32>
-    %21 = vector.slice %fallback[8] : vector<16xi32> -> vector<8xi32>
-    scf.yield %20, %21, %right, %right_size : vector<8xi32>, vector<8xi32>, view<[%right_size]xi32>, index
+    %fallback_scalar = scalar.constant 0 : i32
+    %fallback = vector.splat %fallback_scalar : vector<16xi32>
+    %21 = vector.slice %fallback[0] : vector<16xi32> -> vector<8xi32>
+    %22 = vector.slice %fallback[8] : vector<16xi32> -> vector<8xi32>
+    scf.yield %21, %22, %right, %right_size : vector<8xi32>, vector<8xi32>, view<[%right_size]xi32>, index
   }
-  %values = vector.concat<0> %14, %15 : vector<8xi32>, vector<8xi32> -> vector<16xi32>
+  %values = vector.concat<0> %15, %16 : vector<8xi32>, vector<8xi32> -> vector<16xi32>
   vector.store %values, %view[0] : vector<16xi32>, view<[%size]xi32>
   func.return
 }

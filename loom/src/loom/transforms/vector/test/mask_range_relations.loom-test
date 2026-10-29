@@ -11,7 +11,8 @@ func.def target(@carrier) @complete_packets(%input: buffer, %extent_input: index
   %base = index.constant 0 : offset
   %count = index.div %extent, %width : index
   %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
-  %fallback = vector.constant 0 : vector<4xi32>
+  %fallback_scalar = scalar.constant 0 : i32
+  %fallback = vector.splat %fallback_scalar : vector<4xi32>
   scf.for %block = [%c0 to %count step %c1] {
     %origin = index.madd %block, %width, %last_packet : index
     %mask = vector.mask.range [%origin to %extent step %c1] : index -> vector<4xi1>
@@ -31,20 +32,20 @@ func.def target(@carrier) @complete_packets(%input: buffer, %extent_input: index
   %width = index.constant 16 : index
   %last_packet = index.constant 12 : index
   %base = index.constant 0 : offset
-  %17 = index.constant 4 : index
-  %count = index.shrui %extent, %17 : index
+  %19 = index.constant 4 : index
+  %count = index.shrui %extent, %19 : index
   %view = buffer.view %input[%base] : buffer -> view<[%extent]xi32>
   cfg.br ^_bb1(%c0: index)
-^_bb1(%19: index):
-  %21 = index.cmp slt, %19, %count : index
-  cfg.cond_br %21, ^_bb2, ^_bb3
+^_bb1(%21: index):
+  %23 = index.cmp slt, %21, %count : index
+  cfg.cond_br %23, ^_bb2, ^_bb3
 ^_bb2:
-  %block = index.assume %19 [range(%19, 0, 62), lt(%19, %count)] : index
+  %block = index.assume %21 [range(%21, 0, 62), lt(%21, %count)] : index
   %origin = index.madd %block, %width, %last_packet : index
   %value = vector.load %view[%origin] : view<[%extent]xi32> -> vector<4xi32>
   test.use %value : vector<4xi32>
-  %22 = index.add %block, %c1 : index
-  cfg.br ^_bb1(%22: index)
+  %24 = index.add %block, %c1 : index
+  cfg.br ^_bb1(%24: index)
 ^_bb3:
   func.return
 }
@@ -116,10 +117,11 @@ func.def target(@carrier) @reverse_packet(%extent_input: index) {
   %extent = index.assume %extent_input [range(%extent_input, 16, 1023)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %12 = index.constant 4 : index
-  %count = index.shrui %extent, %12 : index
+  %13 = index.constant 4 : index
+  %count = index.shrui %extent, %13 : index
   scf.for %block = [%c0 to %count step %c1] {
-    %mask = vector.constant true : vector<4xi1>
+    %11 = scalar.constant true : i1
+    %mask = vector.splat %11 : vector<4xi1>
     test.use %mask : vector<4xi1>
   }
   func.return
@@ -151,10 +153,11 @@ func.def target(@carrier) @stationary_packet(%extent_input: index, %lanes: index
   %extent = index.assume %extent_input [range(%extent_input, 16, 1023)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %11 = index.constant 4 : index
-  %count = index.shrui %extent, %11 : index
+  %12 = index.constant 4 : index
+  %count = index.shrui %extent, %12 : index
   scf.for %block = [%c0 to %count step %c1] {
-    %mask = vector.constant true : vector<[%lanes]xi1>
+    %10 = scalar.constant true : i1
+    %mask = vector.splat %10 : vector<[%lanes]xi1>
     test.use %mask : vector<[%lanes]xi1>
   }
   func.return
@@ -233,13 +236,17 @@ func.def @fixed_width_coordinates(%extent_input: index) {
   %extent = index.assume %extent_input [range(%extent_input, 16, 127)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %29 = index.constant 4 : index
-  %count = index.shrui %extent, %29 : index
+  %33 = index.constant 4 : index
+  %count = index.shrui %extent, %33 : index
   scf.for %block = [%c0 to %count step %c1] {
-    %mask_i8 = vector.constant true : vector<4xi1>
-    %mask_i16 = vector.constant true : vector<4xi1>
-    %mask_i32 = vector.constant true : vector<4xi1>
-    %mask_i64 = vector.constant true : vector<4xi1>
+    %31 = scalar.constant true : i1
+    %mask_i8 = vector.splat %31 : vector<4xi1>
+    %29 = scalar.constant true : i1
+    %mask_i16 = vector.splat %29 : vector<4xi1>
+    %27 = scalar.constant true : i1
+    %mask_i32 = vector.splat %27 : vector<4xi1>
+    %25 = scalar.constant true : i1
+    %mask_i64 = vector.splat %25 : vector<4xi1>
     test.use %mask_i8, %mask_i16, %mask_i32, %mask_i64 : vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>
   }
   func.return
@@ -343,7 +350,8 @@ func.def target(@carrier) @counted_offset(%lower_input: offset, %upper_input: of
   %upper = index.assume %upper_input [range(%upper_input, 0, 100)] : offset
   %c1 = index.constant 1 : offset
   scf.for %coordinate = [%lower to %upper step %c1] {
-    %mask = vector.constant true : vector<4xi1>
+    %10 = scalar.constant true : i1
+    %mask = vector.splat %10 : vector<4xi1>
     test.use %mask : vector<4xi1>
   }
   func.return
@@ -373,7 +381,8 @@ func.def target(@carrier) @below_counted_lower(%lower_input: index) {
   %upper = index.constant 128 : index
   %c1 = index.constant 1 : index
   scf.for %coordinate = [%lower to %upper step %c1] {
-    %mask = vector.constant false : vector<4xi1>
+    %6 = scalar.constant false : i1
+    %mask = vector.splat %6 : vector<4xi1>
     test.use %mask : vector<4xi1>
   }
   func.return
@@ -409,10 +418,11 @@ func.def target(@carrier) @bounded_lanes_and_stride(%extent_input: index, %lanes
   %lanes = index.assume %lanes_input [range(%lanes_input, 1, 4)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
-  %15 = index.constant 4 : index
-  %count = index.shrui %extent, %15 : index
+  %16 = index.constant 4 : index
+  %count = index.shrui %extent, %16 : index
   scf.for %block = [%c0 to %count step %c1] {
-    %mask = vector.constant true : vector<[%lanes]xi1>
+    %14 = scalar.constant true : i1
+    %mask = vector.splat %14 : vector<[%lanes]xi1>
     test.use %mask : vector<[%lanes]xi1>
   }
   func.return

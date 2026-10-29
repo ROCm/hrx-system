@@ -354,7 +354,8 @@ func.def @dynamic_tail_values(%input: buffer, %positions: buffer, %output: buffe
   %matrix_output = buffer.view %output[%matrix_base] : buffer -> view<5x5xi64>
   %integers = vector.load %source[0] : view<10xi64> -> vector<5xi64>
   %floats = vector.bitcast %integers : vector<5xi64> to vector<5xf64>
-  %address_mask = vector.constant 4294967295 : vector<5xi64>
+  %address_mask_scalar = scalar.constant 4294967295 : i64
+  %address_mask = vector.splat %address_mask_scalar : vector<5xi64>
   %address_bits = vector.andi %integers, %address_mask : vector<5xi64>
   %offsets = vector.index_cast %address_bits : vector<5xi64> to vector<5xoffset>
   %words = vector.trunci %integers : vector<5xi64> to vector<5xi32>

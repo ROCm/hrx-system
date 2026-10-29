@@ -406,6 +406,33 @@ def _const_v128_rule(
     )
 
 
+def _const_v128_splat_rule(
+    scalar_type: TypePattern,
+    result_type: TypePattern,
+    value: ValueProject,
+    guard: Guard,
+) -> DescriptorRule:
+    descriptor = _descriptor("wasm.v128.const")
+    return DescriptorRule(
+        source_op=vector.vector_splat,
+        descriptor=descriptor,
+        guards=(
+            _value_type("scalar", scalar_type),
+            _value_type("result", result_type),
+            guard,
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                results={"dst": ValueRef.result("result")},
+                immediates={"lo64": value, "hi64": value},
+                form=DescriptorEmitForm.CONST,
+            ),
+        ),
+        priority=1,
+    )
+
+
 def _const_vector_splat_rule(
     result_type: TypePattern,
     element_type: str,
@@ -1931,6 +1958,18 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
             _PARTIAL_I64,
             ValueProject.exact_i64("result"),
             Guard.value_exact_i64("result"),
+        ),
+        _const_v128_splat_rule(
+            _I64,
+            _V2I64,
+            ValueProject.exact_i64("scalar"),
+            Guard.value_exact_i64("scalar"),
+        ),
+        _const_v128_splat_rule(
+            _I64,
+            _PARTIAL_I64,
+            ValueProject.exact_i64("scalar"),
+            Guard.value_exact_i64("scalar"),
         ),
         _const_v128_rule(
             _V2F64, ValueProject.float_bits("result"), Guard.value_exact_float("result")

@@ -3,9 +3,11 @@
 x86.target<avx512> @target
 
 func.def target(@target) @construct_zmm_vectors(%i16_value: i16, %bf16_value: bf16) -> (vector<64xi8>, vector<32xi16>, vector<8xi64>, vector<64xf8E4M3>, vector<32xbf16>, vector<8xf64>) {
-  %i8_constant = vector.constant -7 : vector<64xi8>
+  %i8_constant_scalar = scalar.constant -7 : i8
+  %i8_constant = vector.splat %i8_constant_scalar : vector<64xi8>
   %i16_splat = vector.splat %i16_value : vector<32xi16>
-  %i64_constant = vector.constant 81985529216486895 : vector<8xi64>
+  %i64_constant_scalar = scalar.constant 81985529216486895 : i64
+  %i64_constant = vector.splat %i64_constant_scalar : vector<8xi64>
   %f8_constant_scalar = scalar.constant 1.5 : f8E4M3
   %f8_constant = vector.splat %f8_constant_scalar : vector<64xf8E4M3>
   %bf16_splat = vector.splat %bf16_value : vector<32xbf16>
@@ -16,16 +18,16 @@ func.def target(@target) @construct_zmm_vectors(%i16_value: i16, %bf16_value: bf
 
 // ----
 low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (i16, bf16) -> (vector<64xi8>, vector<32xi16>, vector<8xi64>, vector<64xf8E4M3>, vector<32xbf16>, vector<8xf64>)}) @construct_zmm_vectors(%i16_value: reg<x86.gpr32>, %bf16_value: reg<x86.gpr32>) -> (reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>) asm {
-  %24 = mov.imm32 -7
-  %i8_constant = vpbroadcastb %24
+  %i8_constant_scalar = mov.imm32 -7
+  %i8_constant = vpbroadcastb %i8_constant_scalar
   %i16_splat = vpbroadcastw %i16_value
-  %27 = mov.imm64 81985529216486895
-  %i64_constant = vpbroadcastq %27
+  %i64_constant_scalar = mov.imm64 81985529216486895
+  %i64_constant = vpbroadcastq %i64_constant_scalar
   %f8_constant_scalar = mov.imm32 60
   %f8_constant = vpbroadcastb %f8_constant_scalar
   %bf16_splat = vpbroadcastw %bf16_value
-  %32 = mov.imm64 -4610560118520545280
-  %f64_constant_scalar = vmovq.xmm.gpr64 %32
+  %34 = mov.imm64 -4610560118520545280
+  %f64_constant_scalar = vmovq.xmm.gpr64 %34
   %f64_constant = vbroadcastsd %f64_constant_scalar
   return %i8_constant, %i16_splat, %i64_constant, %f8_constant, %bf16_splat, %f64_constant
 }

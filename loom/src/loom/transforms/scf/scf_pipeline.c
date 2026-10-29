@@ -690,18 +690,14 @@ static iree_status_t loom_scf_pipeline_build_guard_placeholder(
     }
     return iree_ok_status();
   }
-  loom_op_t* vector = NULL;
   if (loom_type_has_static_zero_extent(type)) {
+    loom_op_t* vector = NULL;
     IREE_RETURN_IF_ERROR(
         loom_vector_empty_build(builder, type, location, &vector));
     *out_value = loom_vector_empty_result(vector);
-  } else if (loom_scalar_type_is_float(loom_type_element_type(type))) {
+  } else {
     IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(builder, zero, type,
                                                           location, out_value));
-  } else {
-    IREE_RETURN_IF_ERROR(
-        loom_vector_constant_build(builder, zero, type, location, &vector));
-    *out_value = loom_vector_constant_result(vector);
   }
   return iree_ok_status();
 }

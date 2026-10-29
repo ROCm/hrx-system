@@ -1246,9 +1246,11 @@ kernel.def @i32_b128() {
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<64x4xi32>
   %output_view = buffer.view %output[%buffer_base] : buffer -> view<64x4xi32>
   %loaded = vector.load %input_view[%lane, 0] : view<64x4xi32> -> vector<4xi32>
-  %raise = vector.constant 9 : vector<4xi32>
+  %raise_scalar = scalar.constant 9 : i32
+  %raise = vector.splat %raise_scalar : vector<4xi32>
   %raised = vector.addi %loaded, %raise : vector<4xi32>
-  %drop = vector.constant 4 : vector<4xi32>
+  %drop_scalar = scalar.constant 4 : i32
+  %drop = vector.splat %drop_scalar : vector<4xi32>
   %result = vector.subi %raised, %drop : vector<4xi32>
   vector.store %result, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
   kernel.return
@@ -1259,23 +1261,23 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input_view = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %21 = v_lshlrev_b32_src0_inline %lane, 4
-  %loaded = global_load_b128_saddr %21, %input_view
-  %23 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %24 = v_add_u32_lit %23, 9
-  %25 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %23 = v_lshlrev_b32_src0_inline %lane, 4
+  %loaded = global_load_b128_saddr %23, %input_view
+  %25 = slice %loaded[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %26 = v_add_u32_lit %25, 9
-  %27 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %27 = slice %loaded[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %28 = v_add_u32_lit %27, 9
-  %29 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %29 = slice %loaded[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %30 = v_add_u32_lit %29, 9
-  %32 = v_mov_b32 4
-  %39 = v_sub_nc_u32 %24, %32
-  %42 = v_sub_nc_u32 %26, %32
-  %45 = v_sub_nc_u32 %28, %32
-  %48 = v_sub_nc_u32 %30, %32
-  %result = concat(%39, %42, %45, %48) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %21, %result, %output_view
+  %31 = slice %loaded[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %32 = v_add_u32_lit %31, 9
+  %34 = v_mov_b32 4
+  %41 = v_sub_nc_u32 %26, %34
+  %44 = v_sub_nc_u32 %28, %34
+  %47 = v_sub_nc_u32 %30, %34
+  %50 = v_sub_nc_u32 %32, %34
+  %result = concat(%41, %44, %47, %50) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %23, %result, %output_view
   return
 }
 

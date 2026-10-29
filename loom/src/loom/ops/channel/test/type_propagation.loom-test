@@ -28,8 +28,8 @@ func.def @records(%storage: buffer) {
   %channel = channel.bind<fifo> %slots, %capacity : view<2x[%width]xi32>, index -> channel<tile<[%width]xi32>>
   %write, %destination = channel.reserve %channel : channel<tile<[%width]xi32>> -> (write<tile<[%width]xi32>>, view<[%width]xi32>)
   %value = scalar.constant 7 : i32
-  %values = vector.constant 7 : vector<8xi32>
-  vector.store %values, %destination[0] : vector<8xi32>, view<[%width]xi32>
+  %values = vector.splat %value : vector<[%width]xi32>
+  vector.store %values, %destination[0] : vector<[%width]xi32>, view<[%width]xi32>
   channel.publish %write : write<tile<[%width]xi32>>
   %read, %payload = channel.acquire<mutable> %channel : channel<tile<[%width]xi32>> -> (read<tile<[%width]xi32>, mutable>, view<[%width]xi32>)
   view.store %value, %payload[0] : i32, view<[%width]xi32>

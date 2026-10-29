@@ -694,9 +694,41 @@ def test_partial_numeric_carriers_have_complete_direct_structural_rules() -> Non
         for rule in WASM_CORE_SIMD128_CONTRACT_FRAGMENT.cases:
             if not isinstance(rule, DescriptorRule) or rule.source_op is not source_op:
                 continue
+            if source_op is vector.vector_splat and rule.priority == 1:
+                continue
             for shape in _numeric_vector_ranges(rule, field):
                 counts[shape] = counts.get(shape, 0) + 1
         assert counts == {shape: rules_per_shape for shape in expected}, source_op.name
+
+
+def test_exact_i64_splats_use_v128_immediates() -> None:
+    rules = tuple(
+        rule
+        for rule in WASM_CORE_SIMD128_CONTRACT_FRAGMENT.cases
+        if isinstance(rule, DescriptorRule)
+        and rule.source_op is vector.vector_splat
+        and rule.priority == 1
+        and any(
+            guard.kind is GuardKind.VALUE_TYPE
+            and guard.field == "scalar"
+            and guard.type_pattern.elements == ("i64",)
+            for guard in rule.guards
+        )
+    )
+    assert {
+        shape for rule in rules for shape in _numeric_vector_ranges(rule, "result")
+    } == {("i64", 1, 1)}
+    assert {
+        shape for rule in rules for shape in _numeric_vector_shapes(rule, "result")
+    } == {("i64", 2)}
+    assert all(rule.descriptor.key == "wasm.v128.const" for rule in rules)
+    assert all(
+        any(
+            guard.kind is GuardKind.VALUE_EXACT_I64 and guard.field == "scalar"
+            for guard in rule.guards
+        )
+        for rule in rules
+    )
 
 
 def test_partial_integer_carriers_have_complete_bitwise_rules() -> None:

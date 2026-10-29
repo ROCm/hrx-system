@@ -13,7 +13,8 @@ func.def @matrix_multiply_s8s8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffe
   %rhs_value = vector.load %rhs_view[0] : view<64xi8> -> vector<64xi8>
   %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] : vector<64xi8>
   %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<64xi8>
-  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_init_scalar = scalar.constant 0 : i32
+  %accumulator_init = vector.splat %accumulator_init_scalar : vector<64xi32>
   %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
   %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
   vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
@@ -27,16 +28,16 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_multiply_s
   %output_aligned = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
   %lhs_fragment = vlda.512.i8x64 %lhs_aligned, 0
   %rhs_fragment = vlda.512.i8x64 %rhs_aligned, 0
-  %25 = mova.i32 776
-  %product = mmul.s8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %25
-  %27 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %27, %output_aligned, 0
-  %28 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %28, %output_aligned, 64
-  %29 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %29, %output_aligned, 128
-  %30 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %30, %output_aligned, 192
+  %26 = mova.i32 776
+  %product = mmul.s8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %26
+  %28 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %28, %output_aligned, 0
+  %29 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %29, %output_aligned, 64
+  %30 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %30, %output_aligned, 128
+  %31 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %31, %output_aligned, 192
   return
 }
 
@@ -56,7 +57,8 @@ func.def @matrix_multiply_u8s8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffe
   %lhs_schema = encoding.define #encoding.u8<payload_elements=64, payload_packing=target_fragment, payload_registers=16> : encoding<schema>
   %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<64xi8>
   %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<64xi8>
-  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_init_scalar = scalar.constant 0 : i32
+  %accumulator_init = vector.splat %accumulator_init_scalar : vector<64xi32>
   %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
   %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
   vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
@@ -70,16 +72,16 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_multiply_u
   %output_aligned = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
   %lhs_fragment = vlda.512.i8x64 %lhs_aligned, 0
   %rhs_fragment = vlda.512.i8x64 %rhs_aligned, 0
-  %26 = mova.i32 264
-  %product = mmul.u8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %26
-  %28 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %28, %output_aligned, 0
-  %29 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %29, %output_aligned, 64
-  %30 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %30, %output_aligned, 128
-  %31 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %31, %output_aligned, 192
+  %27 = mova.i32 264
+  %product = mmul.u8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %27
+  %29 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %29, %output_aligned, 0
+  %30 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %30, %output_aligned, 64
+  %31 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %31, %output_aligned, 128
+  %32 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %32, %output_aligned, 192
   return
 }
 
@@ -99,7 +101,8 @@ func.def @matrix_multiply_s8u8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffe
   %rhs_schema = encoding.define #encoding.u8<payload_elements=64, payload_packing=target_fragment, payload_registers=16> : encoding<schema>
   %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] : vector<64xi8>
   %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<64xi8>
-  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_init_scalar = scalar.constant 0 : i32
+  %accumulator_init = vector.splat %accumulator_init_scalar : vector<64xi32>
   %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
   %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
   vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
@@ -113,16 +116,16 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_multiply_s
   %output_aligned = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
   %lhs_fragment = vlda.512.i8x64 %lhs_aligned, 0
   %rhs_fragment = vlda.512.i8x64 %rhs_aligned, 0
-  %26 = mova.i32 520
-  %product = mmul.s8u8.m8n8k8 %lhs_fragment, %rhs_fragment, %26
-  %28 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %28, %output_aligned, 0
-  %29 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %29, %output_aligned, 64
-  %30 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %30, %output_aligned, 128
-  %31 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %31, %output_aligned, 192
+  %27 = mova.i32 520
+  %product = mmul.s8u8.m8n8k8 %lhs_fragment, %rhs_fragment, %27
+  %29 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %29, %output_aligned, 0
+  %30 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %30, %output_aligned, 64
+  %31 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %31, %output_aligned, 128
+  %32 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %32, %output_aligned, 192
   return
 }
 
@@ -143,7 +146,8 @@ func.def @matrix_multiply_u8u8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffe
   %rhs_schema = encoding.define #encoding.u8<payload_elements=64, payload_packing=target_fragment, payload_registers=16> : encoding<schema>
   %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<64xi8>
   %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] using {schema = %rhs_schema : encoding<schema>} : vector<64xi8>
-  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_init_scalar = scalar.constant 0 : i32
+  %accumulator_init = vector.splat %accumulator_init_scalar : vector<64xi32>
   %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
   %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
   vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
@@ -157,16 +161,16 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_multiply_u
   %output_aligned = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
   %lhs_fragment = vlda.512.i8x64 %lhs_aligned, 0
   %rhs_fragment = vlda.512.i8x64 %rhs_aligned, 0
-  %27 = mova.i32 8
-  %product = mmul.u8u8.m8n8k8 %lhs_fragment, %rhs_fragment, %27
-  %29 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %29, %output_aligned, 0
-  %30 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %30, %output_aligned, 64
-  %31 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %31, %output_aligned, 128
-  %32 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %32, %output_aligned, 192
+  %28 = mova.i32 8
+  %product = mmul.u8u8.m8n8k8 %lhs_fragment, %rhs_fragment, %28
+  %30 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %30, %output_aligned, 0
+  %31 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %31, %output_aligned, 64
+  %32 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %32, %output_aligned, 128
+  %33 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %33, %output_aligned, 192
   return
 }
 
@@ -229,7 +233,8 @@ func.def @matrix_multiply_packed_u4s8_m8n8k8(%packed_lhs: buffer, %rhs: buffer, 
   %lhs_schema = encoding.define #encoding.u8<payload_elements=64, payload_packing=target_fragment, payload_registers=16> : encoding<schema>
   %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<64xi8>
   %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<64xi8>
-  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_init_scalar = scalar.constant 0 : i32
+  %accumulator_init = vector.splat %accumulator_init_scalar : vector<64xi32>
   %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
   %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
   vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
@@ -244,16 +249,16 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_multiply_p
   set.unpack-size 0
   %lhs_fragment = vldb.unpack.u4.to.u8x64 %packed_lhs_aligned, 0
   %rhs_fragment = vlda.512.i8x64 %rhs_aligned, 0
-  %27 = mova.i32 264
-  %product = mmul.u8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %27
-  %29 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %29, %output_aligned, 0
-  %30 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %30, %output_aligned, 64
-  %31 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %31, %output_aligned, 128
-  %32 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %32, %output_aligned, 192
+  %28 = mova.i32 264
+  %product = mmul.u8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %28
+  %30 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %30, %output_aligned, 0
+  %31 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %31, %output_aligned, 64
+  %32 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %32, %output_aligned, 128
+  %33 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %33, %output_aligned, 192
   return
 }
 
@@ -274,14 +279,16 @@ func.def @matrix_multiply_packed_u5s8_m8n8k8(%packed_lhs: buffer, %high_lhs: buf
   %high_lhs_value = vector.load %high_lhs_view[0] : view<16xi8> -> vector<16xi8>
   %high_lhs_bits = vector.bitunpacku<1> %high_lhs_value : vector<16xi8> -> vector<2x64xi1>
   %high_lhs_mask = vector.extract %high_lhs_bits[0] : vector<2x64xi1> -> vector<64xi1>
-  %high_bit_value = vector.constant 16 : vector<64xi8>
+  %high_bit_value_scalar = scalar.constant 16 : i8
+  %high_bit_value = vector.splat %high_bit_value_scalar : vector<64xi8>
   %high_lhs_candidates = vector.addi %low_lhs_value, %high_bit_value : vector<64xi8>
   %lhs_value = vector.select %high_lhs_mask, %high_lhs_candidates, %low_lhs_value : vector<64xi8>
   %rhs_value = vector.load %rhs_view[0] : view<64xi8> -> vector<64xi8>
   %lhs_schema = encoding.define #encoding.u8<payload_elements=64, payload_packing=target_fragment, payload_registers=16> : encoding<schema>
   %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<64xi8>
   %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<64xi8>
-  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_init_scalar = scalar.constant 0 : i32
+  %accumulator_init = vector.splat %accumulator_init_scalar : vector<64xi32>
   %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
   %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
   vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
@@ -296,27 +303,27 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_multiply_p
   %output_aligned = resource<native_pointer> {index = 3, source_type = buffer} : reg<aie2p.ep>
   set.unpack-size 0
   %low_lhs_value = vldb.unpack.u4.to.u8x64 %packed_lhs_aligned, 0
-  %36 = mov.short 0
-  %37 = vbcst.8 %36
-  %38 = slice %37[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %39 = vlda.128.i8x16 %high_lhs_aligned, 0
-  %high_lhs_bits = concat(%39, %38) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %38 = mov.short 0
+  %39 = vbcst.8 %38
+  %40 = slice %39[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %41 = vlda.128.i8x16 %high_lhs_aligned, 0
+  %high_lhs_bits = concat(%41, %40) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   %high_lhs_mask = vextract.predicate64 %high_lhs_bits, 0
-  %42 = mov.short 16
-  %high_bit_value = vbcst.8 %42
+  %high_bit_value_scalar = mov.short 16
+  %high_bit_value = vbcst.8 %high_bit_value_scalar
   %high_lhs_candidates = vadd.8 %low_lhs_value, %high_bit_value
   %lhs_fragment = vsel.8 %low_lhs_value, %high_lhs_candidates, %high_lhs_mask
   %rhs_fragment = vlda.512.i8x64 %rhs_aligned, 0
-  %47 = mova.i32 264
-  %product = mmul.u8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %47
-  %49 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %49, %output_aligned, 0
-  %50 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %50, %output_aligned, 64
-  %51 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %51, %output_aligned, 128
-  %52 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %52, %output_aligned, 192
+  %49 = mova.i32 264
+  %product = mmul.u8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %49
+  %51 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %51, %output_aligned, 0
+  %52 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %52, %output_aligned, 64
+  %53 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %53, %output_aligned, 128
+  %54 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %54, %output_aligned, 192
   return
 }
 
@@ -336,7 +343,8 @@ func.def @matrix_multiply_packed_s4s8_m8n8k8(%packed_lhs: buffer, %rhs: buffer, 
   %rhs_value = vector.load %rhs_view[0] : view<64xi8> -> vector<64xi8>
   %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] : vector<64xi8>
   %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<64xi8>
-  %accumulator_init = vector.constant 0 : vector<64xi32>
+  %accumulator_init_scalar = scalar.constant 0 : i32
+  %accumulator_init = vector.splat %accumulator_init_scalar : vector<64xi32>
   %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xi32>
   %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<64xi8>, vector<64xi8>, vector<64xi32>
   vector.fragment.store<result> %product, %output_view[0, 0] shape [%m, %n] : vector<64xi32>, view<8x8xi32>
@@ -351,15 +359,15 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @matrix_multiply_p
   set.unpack-size 0
   %lhs_fragment = vldb.unpack.s4.to.s8x64 %packed_lhs_aligned, 0
   %rhs_fragment = vlda.512.i8x64 %rhs_aligned, 0
-  %26 = mova.i32 776
-  %product = mmul.s8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %26
-  %28 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %28, %output_aligned, 0
-  %29 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %29, %output_aligned, 64
-  %30 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %30, %output_aligned, 128
-  %31 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  vst.acc %31, %output_aligned, 192
+  %27 = mova.i32 776
+  %product = mmul.s8s8.m8n8k8 %lhs_fragment, %rhs_fragment, %27
+  %29 = slice %product[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %29, %output_aligned, 0
+  %30 = slice %product[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %30, %output_aligned, 64
+  %31 = slice %product[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %31, %output_aligned, 128
+  %32 = slice %product[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  vst.acc %32, %output_aligned, 192
   return
 }

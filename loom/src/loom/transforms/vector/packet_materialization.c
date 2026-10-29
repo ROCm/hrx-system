@@ -448,18 +448,10 @@ static iree_status_t loom_vector_packet_materialize_constant(
     loom_vector_packetized_value_t* packetized_value) {
   const loom_type_t packet_type =
       loom_vector_packet_type(packetized_value->source_type, slice->lane_count);
-  if (loom_scalar_type_is_float(loom_type_element_type(packet_type))) {
-    return loom_vector_build_constant_splat(
-        &packetization->context->rewriter->builder,
-        loom_vector_constant_value(op), packet_type, op->location,
-        &packetized_value->packet.vector);
-  }
-  loom_op_t* packet_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
+  return loom_vector_build_constant_splat(
       &packetization->context->rewriter->builder,
-      loom_vector_constant_value(op), packet_type, op->location, &packet_op));
-  packetized_value->packet.vector = loom_vector_constant_result(packet_op);
-  return iree_ok_status();
+      loom_vector_constant_value(op), packet_type, op->location,
+      &packetized_value->packet.vector);
 }
 
 static iree_status_t loom_vector_packet_materialize_poison(
@@ -1429,17 +1421,9 @@ static iree_status_t loom_vector_packet_build_identity(
   }
   IREE_ASSERT_TRUE(has_identity);
   (void)has_identity;
-  if (loom_scalar_type_is_float(element_type)) {
-    return loom_vector_build_constant_splat(&context->rewriter->builder,
-                                            identity_attr, vector_type,
-                                            reduce_op->location, out_value);
-  }
-  loom_op_t* identity_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      &context->rewriter->builder, identity_attr, vector_type,
-      reduce_op->location, &identity_op));
-  *out_value = loom_vector_constant_result(identity_op);
-  return iree_ok_status();
+  return loom_vector_build_constant_splat(&context->rewriter->builder,
+                                          identity_attr, vector_type,
+                                          reduce_op->location, out_value);
 }
 
 static iree_status_t loom_vector_packet_normalize_short_component(

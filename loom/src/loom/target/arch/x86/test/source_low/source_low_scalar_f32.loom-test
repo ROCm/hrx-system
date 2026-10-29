@@ -48,11 +48,11 @@ func.def @vector_f32_sign_bits(%input: vector<4xf32>) -> (vector<4xf32>, vector<
 
 // ----
 low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<4xf32>) -> (vector<4xf32>, vector<4xf32>)}) @vector_f32_sign_bits(%input: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
-  %16 = mov.imm32 -2147483648
-  %17 = vpbroadcastd.xmm %16
-  %negated = vpxor.xmm %input, %17
-  %19 = mov.imm32 2147483647
-  %20 = vpbroadcastd.xmm %19
-  %absolute = vpand.xmm %input, %20
+  %18 = mov.imm32 -2147483648
+  %19 = vpbroadcastd.xmm %18
+  %negated = vpxor.xmm %input, %19
+  %21 = mov.imm32 2147483647
+  %22 = vpbroadcastd.xmm %21
+  %absolute = vpand.xmm %input, %22
   return %negated, %absolute
 }

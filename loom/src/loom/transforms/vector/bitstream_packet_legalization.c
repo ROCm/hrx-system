@@ -14,6 +14,7 @@
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/vector/packet_legalization.h"
@@ -313,15 +314,14 @@ static iree_status_t loom_vector_bitstream_vector_convert_unsigned(
     return iree_ok_status();
   }
   if (result_bit_count == 1) {
-    loom_op_t* one_op = NULL;
+    loom_value_id_t one = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(
-        loom_vector_constant_build(builder->builder, loom_attr_i64(1),
-                                   source_type, builder->location, &one_op));
+        loom_vector_build_constant_splat(builder->builder, loom_attr_i64(1),
+                                         source_type, builder->location, &one));
     loom_op_t* compare_op = NULL;
     IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
-        builder->builder, LOOM_VECTOR_CMPI_PREDICATE_EQ, value,
-        loom_vector_constant_result(one_op), source_type, result_type,
-        builder->location, &compare_op));
+        builder->builder, LOOM_VECTOR_CMPI_PREDICATE_EQ, value, one,
+        source_type, result_type, builder->location, &compare_op));
     *out_value = loom_vector_cmpi_result(compare_op);
     return iree_ok_status();
   }
@@ -406,11 +406,10 @@ static iree_status_t loom_vector_bitstream_pad_packet(
   const loom_scalar_type_t element_type = loom_type_element_type(packet_type);
   *out_type =
       loom_vector_bitstream_vector_type(element_type, carrier_lane_count);
-  loom_op_t* zero_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(builder->builder,
-                                                  loom_attr_i64(0), *out_type,
-                                                  builder->location, &zero_op));
-  loom_value_id_t padded_packet = loom_vector_constant_result(zero_op);
+  loom_value_id_t padded_packet = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+      builder->builder, loom_attr_i64(0), *out_type, builder->location,
+      &padded_packet));
   for (uint32_t i = 0; i < packet_lane_count; ++i) {
     const int64_t static_index = i;
     loom_op_t* extract_op = NULL;

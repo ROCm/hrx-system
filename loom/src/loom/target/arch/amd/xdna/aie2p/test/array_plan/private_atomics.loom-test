@@ -43,8 +43,10 @@ func.def target(@core_target) @private_atomic_worker(%input_arg: buffer, %output
   %enabled = scalar.constant true : i1
   %disabled = scalar.constant false : i1
   %mask = vector.from_elements %enabled, %disabled : vector<2xi1>
-  %increment_i32 = vector.constant 1 : vector<2xi32>
-  %passthrough_i32 = vector.constant -101 : vector<2xi32>
+  %increment_i32_scalar = scalar.constant 1 : i32
+  %increment_i32 = vector.splat %increment_i32_scalar : vector<2xi32>
+  %passthrough_i32_scalar = scalar.constant -101 : i32
+  %passthrough_i32 = vector.splat %passthrough_i32_scalar : vector<2xi32>
   vector.atomic.reduce<addi> %increment_i32, %cells_i32[0][%offsets] {ordering = release, scope = system} : vector<2xi32>, view<2xi32>, vector<2xindex>
   vector.atomic.reduce.mask<xori> %increment_i32, %cells_i32[0][%offsets], %mask {ordering = relaxed, scope = thread} : vector<2xi32>, view<2xi32>, vector<2xindex>, vector<2xi1>
   %old_i32 = vector.atomic.rmw<subi> %increment_i32, %cells_i32[0][%offsets] {ordering = acquire, scope = device} : vector<2xi32>, view<2xi32>, vector<2xindex>
@@ -195,32 +197,32 @@ low.func.def retain target<amd.xdna.aie2p.core> @private_atomic_array$worker$0()
   st %7, %output, 28
   %23 = lda %input, 24
   %24 = lda %input, 28
-  %25 = mov.short 1
-  %26 = add.nc %23, %25
-  %27 = add.nc %24, %25
-  %28 = xor %26, %25
-  %29 = mov.short -1
-  %30 = add.nc %28, %29
-  %31 = mov.short -101
-  %32 = eq %24, %27
+  %increment_i32_scalar = mov.short 1
+  %passthrough_i32_scalar = mov.short -101
+  %27 = add.nc %23, %increment_i32_scalar
+  %28 = add.nc %24, %increment_i32_scalar
+  %29 = xor %27, %increment_i32_scalar
+  %30 = mov.short -1
+  %31 = add.nc %29, %30
+  %32 = eq %24, %28
   %33 = copy %32 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %34 = sel.nez %25, %24, %33
+  %34 = sel.nez %increment_i32_scalar, %24, %33
   %35 = mov.short 3
   %36 = mov.static-byte-offset 32
   %37 = mov.address-index %36
-  st.i32.index %28, %output, %37
+  st.i32.index %29, %output, %37
   %38 = mov.static-byte-offset 36
   %39 = mov.address-index %38
-  st.i32.index %27, %output, %39
+  st.i32.index %28, %output, %39
   %40 = mov.static-byte-offset 40
   %41 = mov.address-index %40
-  st.i32.index %30, %output, %41
+  st.i32.index %31, %output, %41
   %42 = mov.static-byte-offset 44
   %43 = mov.address-index %42
-  st.i32.index %31, %output, %43
+  st.i32.index %passthrough_i32_scalar, %output, %43
   %44 = mov.static-byte-offset 48
   %45 = mov.address-index %44
-  st.i32.index %28, %output, %45
+  st.i32.index %29, %output, %45
   %46 = mov.static-byte-offset 52
   %47 = mov.address-index %46
   st.i32.index %24, %output, %47

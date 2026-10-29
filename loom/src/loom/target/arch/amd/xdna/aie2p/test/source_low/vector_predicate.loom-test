@@ -218,20 +218,22 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @predicat
 aie2p.target<core> @target
 
 func.def target(@target) @predicate_constants() -> (vector<64xi1>, vector<17xi1>) {
-  %true_mask = vector.constant true : vector<64xi1>
-  %false_mask = vector.constant false : vector<17xi1>
+  %true_mask_scalar = scalar.constant true : i1
+  %true_mask = vector.splat %true_mask_scalar : vector<64xi1>
+  %false_mask_scalar = scalar.constant false : i1
+  %false_mask = vector.splat %false_mask_scalar : vector<17xi1>
   func.return %true_mask, %false_mask : vector<64xi1>, vector<17xi1>
 }
 
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @predicate_constants() -> (reg<aie2p.elpredicate>, reg<aie2p.elpredicate>) asm {
-  %6 = mov.short 1
-  %7 = vbcst.8 %6
-  %8 = vsub.8 %7, %7
-  %true_mask = vlt.u8x64 %8, %7
-  %10 = mov.short 0
-  %11 = vbcst.8 %10
-  %12 = vsub.8 %11, %11
-  %false_mask = vlt.u8x64 %12, %11
+  %true_mask_scalar = mov.short 1
+  %9 = vbcst.8 %true_mask_scalar
+  %10 = vsub.8 %9, %9
+  %true_mask = vlt.u8x64 %10, %9
+  %false_mask_scalar = mov.short 0
+  %13 = vbcst.8 %false_mask_scalar
+  %14 = vsub.8 %13, %13
+  %false_mask = vlt.u8x64 %14, %13
   return %true_mask, %false_mask
 }

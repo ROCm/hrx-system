@@ -140,11 +140,11 @@ func.def @maximum_bf16x33_splat(%input: vector<33xbf16>, %scalar: bf16) -> (vect
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @maximum_bf16x33_splat(%input: reg<aie2p.vec256 x4>, %scalar: reg<aie2p.er>) -> (reg<aie2p.vec256 x4>) asm {
-  %15 = vbcst.16 %scalar
-  %16 = slice %input[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %17, %18 = vmax_lt.bf16 %16, %15
-  %20 = slice %input[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %21, %22 = vmax_lt.bf16 %20, %15
-  %result = concat(%17, %21) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %17 = slice %input[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %18 = vbcst.16 %scalar
+  %19, %20 = vmax_lt.bf16 %17, %18
+  %21 = slice %input[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %23, %24 = vmax_lt.bf16 %21, %18
+  %result = concat(%19, %23) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   return %result
 }

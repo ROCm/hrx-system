@@ -1904,6 +1904,59 @@ static void loom_vector_fmai_transfer(const loom_value_facts_t* a,
 // Construction
 //===----------------------------------------------------------------------===//
 
+static iree_status_t loom_vector_forward_uniform_element_origin(
+    loom_fact_context_t* context, const loom_module_t* module,
+    loom_value_id_t source, loom_value_id_t result) {
+  if (context == NULL || context->table == NULL) {
+    return iree_ok_status();
+  }
+  loom_value_id_t scalar = LOOM_VALUE_ID_INVALID;
+  if (!loom_value_fact_table_query_uniform_element_origin(
+          context->table, module, source, &scalar)) {
+    return iree_ok_status();
+  }
+  loom_value_id_t exact_scalar = LOOM_VALUE_ID_INVALID;
+  (void)loom_value_fact_table_query_exact_uniform_element_origin(
+      context->table, module, source, &exact_scalar);
+  return loom_value_fact_table_define_uniform_element_origin(
+      context->table, result, scalar, exact_scalar);
+}
+
+static iree_status_t loom_vector_concat_define_uniform_element_origin(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op) {
+  if (context == NULL || context->table == NULL) {
+    return iree_ok_status();
+  }
+  const loom_value_slice_t inputs = loom_vector_concat_inputs(op);
+  IREE_ASSERT_GT(inputs.count, 0);
+
+  loom_value_id_t scalar = LOOM_VALUE_ID_INVALID;
+  if (!loom_value_fact_table_query_uniform_element_origin(
+          context->table, module, inputs.values[0], &scalar)) {
+    return iree_ok_status();
+  }
+  loom_value_id_t exact_scalar = LOOM_VALUE_ID_INVALID;
+  (void)loom_value_fact_table_query_exact_uniform_element_origin(
+      context->table, module, inputs.values[0], &exact_scalar);
+  for (iree_host_size_t i = 1; i < inputs.count; ++i) {
+    loom_value_id_t input_scalar = LOOM_VALUE_ID_INVALID;
+    if (!loom_value_fact_table_query_uniform_element_origin(
+            context->table, module, inputs.values[i], &input_scalar) ||
+        input_scalar != scalar) {
+      return iree_ok_status();
+    }
+    loom_value_id_t input_exact_scalar = LOOM_VALUE_ID_INVALID;
+    if (!loom_value_fact_table_query_exact_uniform_element_origin(
+            context->table, module, inputs.values[i], &input_exact_scalar) ||
+        input_exact_scalar != exact_scalar) {
+      exact_scalar = LOOM_VALUE_ID_INVALID;
+    }
+  }
+  return loom_value_fact_table_define_uniform_element_origin(
+      context->table, loom_vector_concat_result(op), scalar, exact_scalar);
+}
+
 iree_status_t loom_vector_refine_facts(loom_fact_context_t* context,
                                        const loom_module_t* module,
                                        const loom_op_t* op,
@@ -2802,6 +2855,8 @@ iree_status_t loom_vector_concat_facts(loom_fact_context_t* context,
                                        loom_value_facts_t* result_facts) {
   IREE_RETURN_IF_ERROR(
       loom_vector_concat_define_partition_fact(context, module, op));
+  IREE_RETURN_IF_ERROR(
+      loom_vector_concat_define_uniform_element_origin(context, module, op));
   loom_type_t result_type =
       loom_module_value_type(module, loom_vector_concat_result(op));
   int64_t axis = loom_vector_concat_axis(op);
@@ -4553,6 +4608,11 @@ iree_status_t loom_vector_bitcast_facts(loom_fact_context_t* context,
       loom_module_value_type(module, loom_vector_bitcast_result(op));
   loom_scalar_type_t source_element_type = loom_type_element_type(source_type);
   loom_scalar_type_t result_element_type = loom_type_element_type(result_type);
+  if (source_element_type == result_element_type) {
+    IREE_RETURN_IF_ERROR(loom_vector_forward_uniform_element_origin(
+        context, module, loom_vector_bitcast_input(op),
+        loom_vector_bitcast_result(op)));
+  }
   iree_host_size_t lane_count = 0;
   if (!loom_vector_same_static_lane_count(source_type, result_type,
                                           &lane_count)) {

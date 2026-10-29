@@ -1,8 +1,10 @@
 // RUN: emit source-low target=x86:avx2 output=low
 
 func.def @integer_vector_zeros() -> (vector<4xi32>, vector<2xi64>) {
-  %i32 = vector.constant 0 : vector<4xi32>
-  %i64 = vector.constant 0 : vector<2xi64>
+  %i32_scalar = scalar.constant 0 : i32
+  %i32 = vector.splat %i32_scalar : vector<4xi32>
+  %i64_scalar = scalar.constant 0 : i64
+  %i64 = vector.splat %i64_scalar : vector<2xi64>
   func.return %i32, %i64 : vector<4xi32>, vector<2xi64>
 }
 
@@ -15,66 +17,77 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
 // ====
 
 func.def @i32x4_constant_payloads() -> (vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>) {
-  %unit_value = vector.constant 1 : vector<4xi32>
-  %negative = vector.constant -19088743 : vector<4xi32>
-  %minimum = vector.constant -2147483648 : vector<4xi32>
-  %all_bits = vector.constant -1 : vector<4xi32>
-  %maximum = vector.constant 2147483647 : vector<4xi32>
+  %unit_value_scalar = scalar.constant 1 : i32
+  %unit_value = vector.splat %unit_value_scalar : vector<4xi32>
+  %negative_scalar = scalar.constant -19088743 : i32
+  %negative = vector.splat %negative_scalar : vector<4xi32>
+  %minimum_scalar = scalar.constant -2147483648 : i32
+  %minimum = vector.splat %minimum_scalar : vector<4xi32>
+  %all_bits_scalar = scalar.constant -1 : i32
+  %all_bits = vector.splat %all_bits_scalar : vector<4xi32>
+  %maximum_scalar = scalar.constant 2147483647 : i32
+  %maximum = vector.splat %maximum_scalar : vector<4xi32>
   func.return %unit_value, %negative, %minimum, %all_bits, %maximum : vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>
 }
 
 // ----
 low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = () -> (vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>)}) @i32x4_constant_payloads() -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
-  %15 = mov.imm32 1
-  %16 = vmovd.xmm.gpr32 %15
-  %unit_value = avx2.vpbroadcastd.xmm %16
-  %18 = mov.imm32 -19088743
-  %19 = vmovd.xmm.gpr32 %18
-  %negative = avx2.vpbroadcastd.xmm %19
-  %21 = mov.imm32 -2147483648
-  %22 = vmovd.xmm.gpr32 %21
-  %minimum = avx2.vpbroadcastd.xmm %22
-  %24 = mov.imm32 -1
-  %25 = vmovd.xmm.gpr32 %24
-  %all_bits = avx2.vpbroadcastd.xmm %25
-  %27 = mov.imm32 2147483647
-  %28 = vmovd.xmm.gpr32 %27
-  %maximum = avx2.vpbroadcastd.xmm %28
+  %unit_value_scalar = mov.imm32 1
+  %21 = vmovd.xmm.gpr32 %unit_value_scalar
+  %unit_value = avx2.vpbroadcastd.xmm %21
+  %negative_scalar = mov.imm32 -19088743
+  %24 = vmovd.xmm.gpr32 %negative_scalar
+  %negative = avx2.vpbroadcastd.xmm %24
+  %minimum_scalar = mov.imm32 -2147483648
+  %27 = vmovd.xmm.gpr32 %minimum_scalar
+  %minimum = avx2.vpbroadcastd.xmm %27
+  %all_bits_scalar = mov.imm32 -1
+  %30 = vmovd.xmm.gpr32 %all_bits_scalar
+  %all_bits = avx2.vpbroadcastd.xmm %30
+  %maximum_scalar = mov.imm32 2147483647
+  %33 = vmovd.xmm.gpr32 %maximum_scalar
+  %maximum = avx2.vpbroadcastd.xmm %33
   return %unit_value, %negative, %minimum, %all_bits, %maximum
 }
 
 // ====
 
 func.def @i64x2_constant_payloads() -> (vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>) {
-  %unit_value = vector.constant 1 : vector<2xi64>
-  %low_word = vector.constant 4294967295 : vector<2xi64>
-  %high_word = vector.constant -4294967296 : vector<2xi64>
-  %near_minimum = vector.constant -9223372036854775807 : vector<2xi64>
-  %minimum = vector.constant -9223372036854775808 : vector<2xi64>
-  %maximum = vector.constant 9223372036854775807 : vector<2xi64>
+  %unit_value_scalar = scalar.constant 1 : i64
+  %unit_value = vector.splat %unit_value_scalar : vector<2xi64>
+  %low_word_scalar = scalar.constant 4294967295 : i64
+  %low_word = vector.splat %low_word_scalar : vector<2xi64>
+  %high_word_scalar = scalar.constant -4294967296 : i64
+  %high_word = vector.splat %high_word_scalar : vector<2xi64>
+  %near_minimum_scalar = scalar.constant -9223372036854775807 : i64
+  %near_minimum = vector.splat %near_minimum_scalar : vector<2xi64>
+  %minimum_scalar = scalar.constant -9223372036854775808 : i64
+  %minimum = vector.splat %minimum_scalar : vector<2xi64>
+  %maximum_scalar = scalar.constant 9223372036854775807 : i64
+  %maximum = vector.splat %maximum_scalar : vector<2xi64>
   func.return %unit_value, %low_word, %high_word, %near_minimum, %minimum, %maximum : vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>
 }
 
 // ----
 low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = () -> (vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>, vector<2xi64>)}) @i64x2_constant_payloads() -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
-  %18 = mov.imm64 1
-  %19 = vmovq.xmm.gpr64 %18
-  %unit_value = avx2.vpbroadcastq.xmm %19
-  %21 = mov.imm64 4294967295
-  %22 = vmovq.xmm.gpr64 %21
-  %low_word = avx2.vpbroadcastq.xmm %22
-  %24 = mov.imm64 -4294967296
-  %25 = vmovq.xmm.gpr64 %24
-  %high_word = avx2.vpbroadcastq.xmm %25
-  %27 = mov.imm64 -9223372036854775807
-  %28 = vmovq.xmm.gpr64 %27
-  %near_minimum = avx2.vpbroadcastq.xmm %28
-  %30 = mov.imm64 -9223372036854775808
-  %31 = vmovq.xmm.gpr64 %30
-  %minimum = avx2.vpbroadcastq.xmm %31
-  %33 = mov.imm64 9223372036854775807
-  %34 = vmovq.xmm.gpr64 %33
-  %maximum = avx2.vpbroadcastq.xmm %34
+  %unit_value_scalar = mov.imm64 1
+  %25 = vmovq.xmm.gpr64 %unit_value_scalar
+  %unit_value = avx2.vpbroadcastq.xmm %25
+  %low_word_scalar = mov.imm64 4294967295
+  %28 = vmovq.xmm.gpr64 %low_word_scalar
+  %low_word = avx2.vpbroadcastq.xmm %28
+  %high_word_scalar = mov.imm64 -4294967296
+  %31 = vmovq.xmm.gpr64 %high_word_scalar
+  %high_word = avx2.vpbroadcastq.xmm %31
+  %near_minimum_scalar = mov.imm64 -9223372036854775807
+  %34 = vmovq.xmm.gpr64 %near_minimum_scalar
+  %near_minimum = avx2.vpbroadcastq.xmm %34
+  %minimum_scalar = mov.imm64 -9223372036854775808
+  %37 = vmovq.xmm.gpr64 %minimum_scalar
+  %minimum = avx2.vpbroadcastq.xmm %37
+  %maximum_scalar = mov.imm64 9223372036854775807
+  %40 = vmovq.xmm.gpr64 %maximum_scalar
+  %maximum = avx2.vpbroadcastq.xmm %40
   return %unit_value, %low_word, %high_word, %near_minimum, %minimum, %maximum
 }
 
@@ -90,20 +103,22 @@ func.def @folded_integer_splats() -> (vector<4xi32>, vector<2xi64>) {
 
 // ----
 low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = () -> (vector<4xi32>, vector<2xi64>)}) @folded_integer_splats() -> (reg<x86.xmm>, reg<x86.xmm>) asm {
-  %10 = mov.imm32 2147483647
-  %11 = vmovd.xmm.gpr32 %10
-  %i32 = avx2.vpbroadcastd.xmm %11
-  %13 = mov.imm64 -1
-  %14 = vmovq.xmm.gpr64 %13
-  %i64 = avx2.vpbroadcastq.xmm %14
+  %i32_scalar = mov.imm32 2147483647
+  %9 = vmovd.xmm.gpr32 %i32_scalar
+  %i32 = avx2.vpbroadcastd.xmm %9
+  %i64_scalar = mov.imm64 -1
+  %12 = vmovq.xmm.gpr64 %i64_scalar
+  %i64 = avx2.vpbroadcastq.xmm %12
   return %i32, %i64
 }
 
 // ====
 
 func.def @i32x8_uniform_values(%value: i32) -> (vector<8xi32>, vector<8xi32>, vector<8xi32>) {
-  %cleared = vector.constant 0 : vector<8xi32>
-  %constant = vector.constant -19088743 : vector<8xi32>
+  %cleared_scalar = scalar.constant 0 : i32
+  %cleared = vector.splat %cleared_scalar : vector<8xi32>
+  %constant_scalar = scalar.constant -19088743 : i32
+  %constant = vector.splat %constant_scalar : vector<8xi32>
   %splat = vector.splat %value : vector<8xi32>
   func.return %cleared, %constant, %splat : vector<8xi32>, vector<8xi32>, vector<8xi32>
 }
@@ -111,11 +126,11 @@ func.def @i32x8_uniform_values(%value: i32) -> (vector<8xi32>, vector<8xi32>, ve
 // ----
 low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i32) -> (vector<8xi32>, vector<8xi32>, vector<8xi32>)}) @i32x8_uniform_values(%value: reg<x86.gpr32>) -> (reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>) asm {
   %cleared = vxorps.zero.ymm
-  %12 = mov.imm32 -19088743
-  %13 = vmovd.xmm.gpr32 %12
-  %constant = vpbroadcastd.ymm %13
-  %15 = vmovd.xmm.gpr32 %value
-  %splat = vpbroadcastd.ymm %15
+  %constant_scalar = mov.imm32 -19088743
+  %15 = vmovd.xmm.gpr32 %constant_scalar
+  %constant = vpbroadcastd.ymm %15
+  %17 = vmovd.xmm.gpr32 %value
+  %splat = vpbroadcastd.ymm %17
   return %cleared, %constant, %splat
 }
 
@@ -124,20 +139,23 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
 // RUN: emit source-low target=x86:avx512 output=low
 
 func.def @avx512_integer_constants() -> (vector<4xi32>, vector<16xi32>, vector<2xi64>) {
-  %i32x4 = vector.constant -19088743 : vector<4xi32>
-  %i32x16 = vector.constant 2147483647 : vector<16xi32>
-  %i64x2 = vector.constant -9223372036854775808 : vector<2xi64>
+  %i32x4_scalar = scalar.constant -19088743 : i32
+  %i32x4 = vector.splat %i32x4_scalar : vector<4xi32>
+  %i32x16_scalar = scalar.constant 2147483647 : i32
+  %i32x16 = vector.splat %i32x16_scalar : vector<16xi32>
+  %i64x2_scalar = scalar.constant -9223372036854775808 : i64
+  %i64x2 = vector.splat %i64x2_scalar : vector<2xi64>
   func.return %i32x4, %i32x16, %i64x2 : vector<4xi32>, vector<16xi32>, vector<2xi64>
 }
 
 // ----
 low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = () -> (vector<4xi32>, vector<16xi32>, vector<2xi64>)}) @avx512_integer_constants() -> (reg<x86.xmm>, reg<x86.zmm>, reg<x86.xmm>) asm {
-  %9 = mov.imm32 -19088743
-  %i32x4 = vpbroadcastd.xmm %9
-  %11 = mov.imm32 2147483647
-  %i32x16 = vpbroadcastd %11
-  %13 = mov.imm64 -9223372036854775808
-  %i64x2 = vpbroadcastq.xmm %13
+  %i32x4_scalar = mov.imm32 -19088743
+  %i32x4 = vpbroadcastd.xmm %i32x4_scalar
+  %i32x16_scalar = mov.imm32 2147483647
+  %i32x16 = vpbroadcastd %i32x16_scalar
+  %i64x2_scalar = mov.imm64 -9223372036854775808
+  %i64x2 = vpbroadcastq.xmm %i64x2_scalar
   return %i32x4, %i32x16, %i64x2
 }
 
@@ -165,7 +183,8 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
 // RUN: emit source-low target=x86:avx512 output=low
 
 func.def @avx512_i32x16_zero() -> (vector<16xi32>) {
-  %cleared = vector.constant 0 : vector<16xi32>
+  %cleared_scalar = scalar.constant 0 : i32
+  %cleared = vector.splat %cleared_scalar : vector<16xi32>
   func.return %cleared : vector<16xi32>
 }
 

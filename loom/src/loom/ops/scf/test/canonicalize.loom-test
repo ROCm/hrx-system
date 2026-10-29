@@ -579,7 +579,8 @@ func.def @if_edge_rewrites_refinable_result_type_refs(%buffer: buffer, %offset: 
   %c1 = index.constant 1 : index
   %cond = index.cmp slt, %n, %limit : index
   scf.if %cond {
-    %constant = vector.constant 7 : vector<[%n]xi32>
+    %constant_scalar = scalar.constant 7 : i32
+    %constant = vector.splat %constant_scalar : vector<[%n]xi32>
     %iota = vector.iota %c0 step %c1 : vector<[%n]xindex>
     %mask = vector.mask.range [%c0 to %n step %c1] : index -> vector<[%n]xi1>
     %sub = view.subview %source[0] : view<[%n]xi32, %layout> -> view<[%n]xi32, %layout>
@@ -598,14 +599,15 @@ func.def @if_edge_rewrites_refinable_result_type_refs(%buffer: buffer, %offset: 
   %c1 = index.constant 1 : index
   %cond = index.cmp slt, %n, %limit : index
   scf.if %cond {
-    %16 = index.assume %n [lt(%n, %limit)] : index
-    %constant = vector.constant 7 : vector<[%16]xi32>
-    %iota = vector.iota %c0 step %c1 : vector<[%16]xindex>
-    %mask = vector.mask.range [%c0 to %16 step %c1] : index -> vector<[%16]xi1>
-    %sub = view.subview %source[0] : view<[%n]xi32> -> view<[%16]xi32>
-    %refined = view.refine %sub : view<[%16]xi32> -> view<[%16]xi32>
-    %loaded = vector.load %refined[0] : view<[%16]xi32> -> vector<[%16]xi32>
-    test.use %constant, %iota, %mask, %loaded : vector<[%16]xi32>, vector<[%16]xindex>, vector<[%16]xi1>, vector<[%16]xi32>
+    %17 = index.assume %n [lt(%n, %limit)] : index
+    %constant_scalar = scalar.constant 7 : i32
+    %constant = vector.splat %constant_scalar : vector<[%17]xi32>
+    %iota = vector.iota %c0 step %c1 : vector<[%17]xindex>
+    %mask = vector.mask.range [%c0 to %17 step %c1] : index -> vector<[%17]xi1>
+    %sub = view.subview %source[0] : view<[%n]xi32> -> view<[%17]xi32>
+    %refined = view.refine %sub : view<[%17]xi32> -> view<[%17]xi32>
+    %loaded = vector.load %refined[0] : view<[%17]xi32> -> vector<[%17]xi32>
+    test.use %constant, %iota, %mask, %loaded : vector<[%17]xi32>, vector<[%17]xindex>, vector<[%17]xi1>, vector<[%17]xi32>
   } else {
   }
   func.return

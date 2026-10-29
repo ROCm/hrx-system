@@ -241,21 +241,21 @@ func.def @i32_reduce_minui_select_sentinel(%values: vector<4xi32>) -> (i32) {
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_reduce_minui_select_sentinel(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
-  %26 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %27 = v_cmp_eq_i32_src1_inline %26 {rhs = 0}
-  %28 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %29 = v_cmp_eq_i32_src1_inline %28 {rhs = 0}
-  %30 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %31 = v_cmp_eq_i32_src1_inline %30 {rhs = 0}
-  %32 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %33 = v_cmp_eq_i32_src1_inline %32 {rhs = 0}
-  %50 = v_cndmask_b32_src0_lit_src1_inline %27 {imm32 = 2147483647, true_value = 0}
-  %52 = v_cndmask_b32_src0_lit_src1_inline %29 {imm32 = 2147483647, true_value = 1}
-  %54 = v_cndmask_b32_src0_lit_src1_inline %31 {imm32 = 2147483647, true_value = 2}
-  %56 = v_cndmask_b32_src0_lit_src1_inline %33 {imm32 = 2147483647, true_value = 3}
-  %60 = v_min_u32 %50, %52
-  %62 = v_min_u32 %60, %54
-  %result = v_min_u32 %62, %56
+  %25 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %26 = v_cmp_eq_i32_src1_inline %25 {rhs = 0}
+  %27 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %28 = v_cmp_eq_i32_src1_inline %27 {rhs = 0}
+  %29 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %30 = v_cmp_eq_i32_src1_inline %29 {rhs = 0}
+  %31 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %32 = v_cmp_eq_i32_src1_inline %31 {rhs = 0}
+  %48 = v_cndmask_b32_src0_lit_src1_inline %26 {imm32 = 2147483647, true_value = 0}
+  %50 = v_cndmask_b32_src0_lit_src1_inline %28 {imm32 = 2147483647, true_value = 1}
+  %52 = v_cndmask_b32_src0_lit_src1_inline %30 {imm32 = 2147483647, true_value = 2}
+  %54 = v_cndmask_b32_src0_lit_src1_inline %32 {imm32 = 2147483647, true_value = 3}
+  %58 = v_min_u32 %48, %50
+  %60 = v_min_u32 %58, %52
+  %result = v_min_u32 %60, %54
   return %result
 }
 

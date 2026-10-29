@@ -293,7 +293,6 @@ def test_lane_access_has_one_rule_for_each_physical_representation():
 def test_representation_invariant_rules_are_single_shared_rows():
     for source_op in (
         vector.vector_constant,
-        vector.vector_splat,
         vector.vector_andi,
         vector.vector_ori,
         vector.vector_xori,
@@ -305,6 +304,18 @@ def test_representation_invariant_rules_are_single_shared_rows():
             _type_guard(rule, "result").elements == PREDICATE_TYPE.elements
             for rule in rules
         )
+    splat_rules = _rules_for(vector.vector_splat)
+    assert {rule.priority for rule in splat_rules} == {0, 1}
+    assert all(
+        _type_guard(rule, "result").elements == PREDICATE_TYPE.elements
+        for rule in splat_rules
+    )
+    exact_splat = next(rule for rule in splat_rules if rule.priority == 1)
+    assert any(
+        guard.kind is GuardKind.VALUE_EXACT_I64 and guard.field == "scalar"
+        for guard in exact_splat.guards
+    )
+    assert exact_splat.descriptor.key == "wasm.v128.const"
     assert PREDICATE_TYPE.minimum_static_elements == 1
     assert PREDICATE_TYPE.maximum_static_elements == 16
     assert PREDICATE_TYPE.minimum_lanes is None

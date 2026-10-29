@@ -65,7 +65,8 @@ func.def @subgroup_scan_i32_oracle(%input: buffer, %output: buffer) {
   %begin = index.constant 0 : index
   %end = index.constant 128 : index
   %step = index.constant 1 : index
-  %no_difference = vector.constant 0 : vector<4xi32>
+  %no_difference_scalar = scalar.constant 0 : i32
+  %no_difference = vector.splat %no_difference_scalar : vector<4xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<128x4xi32>
   scf.for %item = [%begin to %end step %step] {
     vector.store %no_difference, %output_view[%item, 0] : vector<4xi32>, view<128x4xi32>
@@ -91,21 +92,25 @@ check.scenario @subgroup_scan_i32_values {
 func.def device inline @scan_extrema_matches(%actual: vector<4xf32>, %expected: vector<4xf32>, %combined: i1) -> (i32) {
   %actual_bits = vector.bitcast %actual : vector<4xf32> to vector<4xi32>
   %expected_bits = vector.bitcast %expected : vector<4xf32> to vector<4xi32>
-  %magnitude_mask = vector.constant 2147483647 : vector<4xi32>
-  %infinity_bits = vector.constant 2139095040 : vector<4xi32>
+  %magnitude_mask_scalar = scalar.constant 2147483647 : i32
+  %magnitude_mask = vector.splat %magnitude_mask_scalar : vector<4xi32>
+  %infinity_bits_scalar = scalar.constant 2139095040 : i32
+  %infinity_bits = vector.splat %infinity_bits_scalar : vector<4xi32>
   %actual_magnitude = vector.andi %actual_bits, %magnitude_mask : vector<4xi32>
   %expected_magnitude = vector.andi %expected_bits, %magnitude_mask : vector<4xi32>
   %actual_nan = vector.cmpi sgt, %actual_magnitude, %infinity_bits : vector<4xi32> -> vector<4xi1>
   %expected_nan = vector.cmpi sgt, %expected_magnitude, %infinity_bits : vector<4xi32> -> vector<4xi1>
   %both_nan = vector.andi %actual_nan, %expected_nan : vector<4xi1>
-  %quiet_mask = vector.constant 4194304 : vector<4xi32>
+  %quiet_mask_scalar = scalar.constant 4194304 : i32
+  %quiet_mask = vector.splat %quiet_mask_scalar : vector<4xi32>
   %actual_quiet_bits = vector.andi %actual_bits, %quiet_mask : vector<4xi32>
   %actual_quiet = vector.cmpi eq, %actual_quiet_bits, %quiet_mask : vector<4xi32> -> vector<4xi1>
   %requires_quiet = vector.splat %combined : vector<4xi1>
   %allowed_nan = vector.select %requires_quiet, %actual_quiet, %both_nan : vector<4xi1>
   %quiet_nan = vector.andi %both_nan, %allowed_nan : vector<4xi1>
   %same_bits = vector.cmpi eq, %actual_bits, %expected_bits : vector<4xi32> -> vector<4xi1>
-  %true_mask = vector.constant true : vector<4xi1>
+  %true_mask_scalar = scalar.constant true : i1
+  %true_mask = vector.splat %true_mask_scalar : vector<4xi1>
   %expected_number = vector.xori %expected_nan, %true_mask : vector<4xi1>
   %same_number = vector.andi %same_bits, %expected_number : vector<4xi1>
   %matches = vector.ori %same_number, %quiet_nan : vector<4xi1>
@@ -178,7 +183,8 @@ func.def @subgroup_scan_extrema_oracle(%input: buffer, %output: buffer) {
   %begin = index.constant 1 : index
   %end = index.constant 67 : index
   %step = index.constant 2 : index
-  %passed = vector.constant 1 : vector<8xi32>
+  %passed_scalar = scalar.constant 1 : i32
+  %passed = vector.splat %passed_scalar : vector<8xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<67x8xi32>
   scf.for %item = [%begin to %end step %step] {
     vector.store %passed, %output_view[%item, 0] : vector<8xi32>, view<67x8xi32>
@@ -415,9 +421,12 @@ check.scenario @subgroup_scan_bfloat_extrema_values {
 func.def device inline @wide_scan_matches(%actual: vector<3xf64>, %expected: vector<3xf64>, %combined: i1) -> (i32) {
   %actual_bits = vector.bitcast %actual : vector<3xf64> to vector<3xi64>
   %expected_bits = vector.bitcast %expected : vector<3xf64> to vector<3xi64>
-  %mask = vector.constant 9223372036854775807 : vector<3xi64>
-  %infinity = vector.constant 9218868437227405312 : vector<3xi64>
-  %quiet_mask = vector.constant 2251799813685248 : vector<3xi64>
+  %mask_scalar = scalar.constant 9223372036854775807 : i64
+  %mask = vector.splat %mask_scalar : vector<3xi64>
+  %infinity_scalar = scalar.constant 9218868437227405312 : i64
+  %infinity = vector.splat %infinity_scalar : vector<3xi64>
+  %quiet_mask_scalar = scalar.constant 2251799813685248 : i64
+  %quiet_mask = vector.splat %quiet_mask_scalar : vector<3xi64>
   %actual_magnitude = vector.andi %actual_bits, %mask : vector<3xi64>
   %expected_magnitude = vector.andi %expected_bits, %mask : vector<3xi64>
   %actual_nan = vector.cmpi sgt, %actual_magnitude, %infinity : vector<3xi64> -> vector<3xi1>
@@ -429,7 +438,8 @@ func.def device inline @wide_scan_matches(%actual: vector<3xf64>, %expected: vec
   %allowed_nan = vector.select %requires_quiet, %actual_quiet, %both_nan : vector<3xi1>
   %quiet_nan = vector.andi %both_nan, %allowed_nan : vector<3xi1>
   %same_bits = vector.cmpi eq, %actual_bits, %expected_bits : vector<3xi64> -> vector<3xi1>
-  %true_mask = vector.constant true : vector<3xi1>
+  %true_mask_scalar = scalar.constant true : i1
+  %true_mask = vector.splat %true_mask_scalar : vector<3xi1>
   %expected_number = vector.xori %expected_nan, %true_mask : vector<3xi1>
   %same_number = vector.andi %same_bits, %expected_number : vector<3xi1>
   %matches = vector.ori %same_number, %quiet_nan : vector<3xi1>
@@ -486,7 +496,8 @@ func.def @subgroup_scan_wide_extrema_oracle(%input: buffer, %output: buffer) {
   %begin = index.constant 1 : index
   %end = index.constant 67 : index
   %step = index.constant 2 : index
-  %passed = vector.constant 1 : vector<4xi32>
+  %passed_scalar = scalar.constant 1 : i32
+  %passed = vector.splat %passed_scalar : vector<4xi32>
   %destination = buffer.view %output[%base] : buffer -> view<67x4xi32>
   scf.for %item = [%begin to %end step %step] {
     vector.store %passed, %destination[%item, 0] : vector<4xi32>, view<67x4xi32>

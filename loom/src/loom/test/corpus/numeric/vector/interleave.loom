@@ -8,8 +8,10 @@ func.def @packed_byte_even_odd_mask(%input: buffer, %output: buffer) {
   %step = index.constant 16 : index
   %input_bytes = buffer.view %input[%base] : buffer -> view<64xi8>
   %output_bytes = buffer.view %output[%base] : buffer -> view<64xi8>
-  %even_mask = vector.constant 1 : vector<8xi8>
-  %odd_mask = vector.constant -3 : vector<8xi8>
+  %even_mask_scalar = scalar.constant 1 : i8
+  %even_mask = vector.splat %even_mask_scalar : vector<8xi8>
+  %odd_mask_scalar = scalar.constant -3 : i8
+  %odd_mask = vector.splat %odd_mask_scalar : vector<8xi8>
   scf.for %i = [%begin to %end step %step] {
     %packet = vector.load %input_bytes[%i] : view<64xi8> -> vector<16xi8>
     %even, %odd = vector.deinterleave<0> %packet : vector<16xi8> -> vector<8xi8>, vector<8xi8>
@@ -56,8 +58,10 @@ func.def @irregular_byte_row_mask(%input: buffer, %output: buffer) {
   %even, %odd = vector.deinterleave<0> %packet : vector<16x21xi8> -> vector<8x21xi8>, vector<8x21xi8>
   %even_flat = vector.bitcast %even : vector<8x21xi8> to vector<168xi8>
   %odd_flat = vector.bitcast %odd : vector<8x21xi8> to vector<168xi8>
-  %even_mask = vector.constant 17 : vector<168xi8>
-  %odd_mask = vector.constant -29 : vector<168xi8>
+  %even_mask_scalar = scalar.constant 17 : i8
+  %even_mask = vector.splat %even_mask_scalar : vector<168xi8>
+  %odd_mask_scalar = scalar.constant -29 : i8
+  %odd_mask = vector.splat %odd_mask_scalar : vector<168xi8>
   %masked_even_flat = vector.xori %even_flat, %even_mask : vector<168xi8>
   %masked_odd_flat = vector.xori %odd_flat, %odd_mask : vector<168xi8>
   %masked_even = vector.bitcast %masked_even_flat : vector<168xi8> to vector<8x21xi8>

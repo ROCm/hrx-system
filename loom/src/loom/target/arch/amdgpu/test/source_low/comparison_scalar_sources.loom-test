@@ -187,35 +187,35 @@ func.def @uniform_vector_sources(%input: buffer, %varying: vector<4xi32>) -> (ve
 // ----
 low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @uniform_vector_sources(%varying: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
   %view = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %22 = s_mov_b32 0
-  %uniform = s_load_dwordx4 %view, %22
-  %24 = slice %uniform[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %25 = slice %varying[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %26 = v_cmp_lt_i32 %24, %25
-  %27 = slice %uniform[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %28 = slice %varying[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %29 = v_cmp_lt_i32 %27, %28
-  %30 = slice %uniform[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %31 = slice %varying[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %32 = v_cmp_lt_i32 %30, %31
-  %33 = slice %uniform[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %34 = slice %varying[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %35 = v_cmp_lt_i32 %33, %34
-  %39 = v_cmp_ge_u32 %25, %24
-  %42 = v_cmp_ge_u32 %28, %27
-  %45 = v_cmp_ge_u32 %31, %30
-  %48 = v_cmp_ge_u32 %34, %33
-  %55 = v_mov_b32 0
-  %62 = v_cndmask_b32_src1_inline %55, %26 {true_value = 1}
-  %65 = v_cndmask_b32_src1_inline %55, %29 {true_value = 1}
-  %68 = v_cndmask_b32_src1_inline %55, %32 {true_value = 1}
-  %71 = v_cndmask_b32_src1_inline %55, %35 {true_value = 1}
-  %forward_words = concat(%62, %65, %68, %71) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %75 = v_cndmask_b32_src1_inline %55, %39 {true_value = 1}
-  %78 = v_cndmask_b32_src1_inline %55, %42 {true_value = 1}
-  %81 = v_cndmask_b32_src1_inline %55, %45 {true_value = 1}
-  %84 = v_cndmask_b32_src1_inline %55, %48 {true_value = 1}
-  %reverse_words = concat(%75, %78, %81, %84) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %26 = s_mov_b32 0
+  %uniform = s_load_dwordx4 %view, %26
+  %28 = slice %uniform[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %29 = slice %varying[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %30 = v_cmp_lt_i32 %28, %29
+  %31 = slice %uniform[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %32 = slice %varying[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %33 = v_cmp_lt_i32 %31, %32
+  %34 = slice %uniform[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %35 = slice %varying[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %36 = v_cmp_lt_i32 %34, %35
+  %37 = slice %uniform[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %38 = slice %varying[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %39 = v_cmp_lt_i32 %37, %38
+  %43 = v_cmp_ge_u32 %29, %28
+  %46 = v_cmp_ge_u32 %32, %31
+  %49 = v_cmp_ge_u32 %35, %34
+  %52 = v_cmp_ge_u32 %38, %37
+  %59 = v_mov_b32 0
+  %66 = v_cndmask_b32_src1_inline %59, %30 {true_value = 1}
+  %69 = v_cndmask_b32_src1_inline %59, %33 {true_value = 1}
+  %72 = v_cndmask_b32_src1_inline %59, %36 {true_value = 1}
+  %75 = v_cndmask_b32_src1_inline %59, %39 {true_value = 1}
+  %forward_words = concat(%66, %69, %72, %75) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %79 = v_cndmask_b32_src1_inline %59, %43 {true_value = 1}
+  %82 = v_cndmask_b32_src1_inline %59, %46 {true_value = 1}
+  %85 = v_cndmask_b32_src1_inline %59, %49 {true_value = 1}
+  %88 = v_cndmask_b32_src1_inline %59, %52 {true_value = 1}
+  %reverse_words = concat(%79, %82, %85, %88) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   return %forward_words, %reverse_words
 }
 
@@ -238,33 +238,33 @@ func.def @uniform_vector_sources(%input: buffer, %varying: vector<4xi32>) -> (ve
 // ----
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @uniform_vector_sources(%varying: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
   %view = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %22 = s_mov_b32 0
-  %uniform = s_load_dwordx4 %view, %22
-  %24 = slice %uniform[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %25 = slice %varying[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %26 = v_cmp_lt_i32 %24, %25
-  %27 = slice %uniform[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %28 = slice %varying[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %29 = v_cmp_lt_i32 %27, %28
-  %30 = slice %uniform[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %31 = slice %varying[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %32 = v_cmp_lt_i32 %30, %31
-  %33 = slice %uniform[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
-  %34 = slice %varying[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %35 = v_cmp_lt_i32 %33, %34
-  %39 = v_cmp_ge_u32 %25, %24
-  %42 = v_cmp_ge_u32 %28, %27
-  %45 = v_cmp_ge_u32 %31, %30
-  %48 = v_cmp_ge_u32 %34, %33
-  %61 = v_cndmask_b32_src0_lit_src1_inline %26 {imm32 = 0, true_value = 1}
-  %63 = v_cndmask_b32_src0_lit_src1_inline %29 {imm32 = 0, true_value = 1}
-  %65 = v_cndmask_b32_src0_lit_src1_inline %32 {imm32 = 0, true_value = 1}
-  %67 = v_cndmask_b32_src0_lit_src1_inline %35 {imm32 = 0, true_value = 1}
-  %forward_words = concat(%61, %63, %65, %67) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %70 = v_cndmask_b32_src0_lit_src1_inline %39 {imm32 = 0, true_value = 1}
-  %72 = v_cndmask_b32_src0_lit_src1_inline %42 {imm32 = 0, true_value = 1}
-  %74 = v_cndmask_b32_src0_lit_src1_inline %45 {imm32 = 0, true_value = 1}
-  %76 = v_cndmask_b32_src0_lit_src1_inline %48 {imm32 = 0, true_value = 1}
-  %reverse_words = concat(%70, %72, %74, %76) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %26 = s_mov_b32 0
+  %uniform = s_load_dwordx4 %view, %26
+  %28 = slice %uniform[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %29 = slice %varying[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %30 = v_cmp_lt_i32 %28, %29
+  %31 = slice %uniform[1] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %32 = slice %varying[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %33 = v_cmp_lt_i32 %31, %32
+  %34 = slice %uniform[2] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %35 = slice %varying[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %36 = v_cmp_lt_i32 %34, %35
+  %37 = slice %uniform[3] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr>
+  %38 = slice %varying[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %39 = v_cmp_lt_i32 %37, %38
+  %43 = v_cmp_ge_u32 %29, %28
+  %46 = v_cmp_ge_u32 %32, %31
+  %49 = v_cmp_ge_u32 %35, %34
+  %52 = v_cmp_ge_u32 %38, %37
+  %65 = v_cndmask_b32_src0_lit_src1_inline %30 {imm32 = 0, true_value = 1}
+  %67 = v_cndmask_b32_src0_lit_src1_inline %33 {imm32 = 0, true_value = 1}
+  %69 = v_cndmask_b32_src0_lit_src1_inline %36 {imm32 = 0, true_value = 1}
+  %71 = v_cndmask_b32_src0_lit_src1_inline %39 {imm32 = 0, true_value = 1}
+  %forward_words = concat(%65, %67, %69, %71) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %74 = v_cndmask_b32_src0_lit_src1_inline %43 {imm32 = 0, true_value = 1}
+  %76 = v_cndmask_b32_src0_lit_src1_inline %46 {imm32 = 0, true_value = 1}
+  %78 = v_cndmask_b32_src0_lit_src1_inline %49 {imm32 = 0, true_value = 1}
+  %80 = v_cndmask_b32_src0_lit_src1_inline %52 {imm32 = 0, true_value = 1}
+  %reverse_words = concat(%74, %76, %78, %80) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   return %forward_words, %reverse_words
 }

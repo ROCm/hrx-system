@@ -7,8 +7,10 @@ func.def @partial_predicate_packets(%input: buffer, %output: buffer) {
   %mask_view = buffer.view %input[%base] : buffer -> view<3x3xi8>
   %result_view = buffer.view %output[%base] : buffer -> view<3x3xi8>
   %mask_bytes = vector.load %mask_view[0, 0] : view<3x3xi8> -> vector<3x3xi8>
-  %c0 = vector.constant 0 : vector<3x3xi8>
-  %c1 = vector.constant 1 : vector<3x3xi8>
+  %c0_scalar = scalar.constant 0 : i8
+  %c0 = vector.splat %c0_scalar : vector<3x3xi8>
+  %c1_scalar = scalar.constant 1 : i8
+  %c1 = vector.splat %c1_scalar : vector<3x3xi8>
   %mask = vector.cmpi ne, %mask_bytes, %c0 : vector<3x3xi8> -> vector<3x3xi1>
   %bytes = vector.select %mask, %c1, %c0 : vector<3x3xi8>
   vector.store %bytes, %result_view[0, 0] : vector<3x3xi8>, view<3x3xi8>
@@ -17,73 +19,73 @@ func.def @partial_predicate_packets(%input: buffer, %output: buffer) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @partial_predicate_packets(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
-  %98 = OpConstant.offset64 0
-  %99 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %98
-  %100 = OpLoad.storage_buffer.i8 %99
-  %101 = OpConstant.offset64 1
-  %102 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %101
-  %103 = OpLoad.storage_buffer.i8 %102
-  %104 = OpConstant.offset64 2
-  %105 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %104
-  %106 = OpLoad.storage_buffer.i8 %105
-  %107 = OpConstant.offset64 3
-  %108 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %107
-  %109 = OpLoad.storage_buffer.i8 %108
-  %110 = OpConstant.offset64 4
-  %111 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %110
-  %112 = OpLoad.storage_buffer.i8 %111
-  %113 = OpConstant.offset64 5
-  %114 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %113
-  %115 = OpLoad.storage_buffer.i8 %114
-  %116 = OpConstant.offset64 6
-  %117 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %116
-  %118 = OpLoad.storage_buffer.i8 %117
-  %119 = OpConstant.offset64 7
-  %120 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %119
-  %121 = OpLoad.storage_buffer.i8 %120
-  %122 = OpConstant.offset64 8
-  %123 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %122
-  %124 = OpLoad.storage_buffer.i8 %123
-  %125 = OpCompositeConstruct.v3i8 %100, %103, %106
-  %126 = OpConstant.i8 0
-  %127 = OpCompositeConstruct.v3i8 %126, %126, %126
-  %128 = OpINotEqual.v3i8 %125, %127
-  %129 = OpConstant.i8 1
-  %130 = OpCompositeConstruct.v3i8 %129, %129, %129
-  %131 = OpSelect.v3i8 %128, %130, %127
-  %132 = OpCompositeConstruct.v3i8 %109, %112, %115
-  %133 = OpINotEqual.v3i8 %132, %127
-  %134 = OpSelect.v3i8 %133, %130, %127
-  %135 = OpCompositeConstruct.v3i8 %118, %121, %124
-  %136 = OpINotEqual.v3i8 %135, %127
-  %137 = OpSelect.v3i8 %136, %130, %127
-  %138 = OpCompositeExtract.v3i8.i8 %131, 0
-  %139 = OpCompositeExtract.v3i8.i8 %131, 1
-  %140 = OpCompositeExtract.v3i8.i8 %131, 2
-  %142 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %98
-  OpStore.storage_buffer.i8 %142, %138
-  %144 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %101
-  OpStore.storage_buffer.i8 %144, %139
-  %146 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %104
-  OpStore.storage_buffer.i8 %146, %140
-  %147 = OpCompositeExtract.v3i8.i8 %134, 0
-  %148 = OpCompositeExtract.v3i8.i8 %134, 1
-  %149 = OpCompositeExtract.v3i8.i8 %134, 2
-  %151 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %107
-  OpStore.storage_buffer.i8 %151, %147
-  %153 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %110
-  OpStore.storage_buffer.i8 %153, %148
-  %155 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %113
-  OpStore.storage_buffer.i8 %155, %149
-  %156 = OpCompositeExtract.v3i8.i8 %137, 0
-  %157 = OpCompositeExtract.v3i8.i8 %137, 1
-  %158 = OpCompositeExtract.v3i8.i8 %137, 2
-  %160 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %116
-  OpStore.storage_buffer.i8 %160, %156
-  %162 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %119
-  OpStore.storage_buffer.i8 %162, %157
-  %164 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %122
-  OpStore.storage_buffer.i8 %164, %158
+  %68 = OpConstant.offset64 0
+  %69 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %68
+  %70 = OpLoad.storage_buffer.i8 %69
+  %71 = OpConstant.offset64 1
+  %72 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %71
+  %73 = OpLoad.storage_buffer.i8 %72
+  %74 = OpConstant.offset64 2
+  %75 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %74
+  %76 = OpLoad.storage_buffer.i8 %75
+  %77 = OpConstant.offset64 3
+  %78 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %77
+  %79 = OpLoad.storage_buffer.i8 %78
+  %80 = OpConstant.offset64 4
+  %81 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %80
+  %82 = OpLoad.storage_buffer.i8 %81
+  %83 = OpConstant.offset64 5
+  %84 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %83
+  %85 = OpLoad.storage_buffer.i8 %84
+  %86 = OpConstant.offset64 6
+  %87 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %86
+  %88 = OpLoad.storage_buffer.i8 %87
+  %89 = OpConstant.offset64 7
+  %90 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %89
+  %91 = OpLoad.storage_buffer.i8 %90
+  %92 = OpConstant.offset64 8
+  %93 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %92
+  %94 = OpLoad.storage_buffer.i8 %93
+  %c0_scalar = OpConstant.i8 0
+  %c1_scalar = OpConstant.i8 1
+  %97 = OpCompositeConstruct.v3i8 %c0_scalar, %c0_scalar, %c0_scalar
+  %98 = OpCompositeConstruct.v3i8 %c1_scalar, %c1_scalar, %c1_scalar
+  %99 = OpCompositeConstruct.v3i8 %70, %73, %76
+  %100 = OpINotEqual.v3i8 %99, %97
+  %101 = OpSelect.v3i8 %100, %98, %97
+  %102 = OpCompositeConstruct.v3i8 %79, %82, %85
+  %103 = OpINotEqual.v3i8 %102, %97
+  %104 = OpSelect.v3i8 %103, %98, %97
+  %105 = OpCompositeConstruct.v3i8 %88, %91, %94
+  %106 = OpINotEqual.v3i8 %105, %97
+  %107 = OpSelect.v3i8 %106, %98, %97
+  %108 = OpCompositeExtract.v3i8.i8 %101, 0
+  %109 = OpCompositeExtract.v3i8.i8 %101, 1
+  %110 = OpCompositeExtract.v3i8.i8 %101, 2
+  %112 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %68
+  OpStore.storage_buffer.i8 %112, %108
+  %114 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %71
+  OpStore.storage_buffer.i8 %114, %109
+  %116 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %74
+  OpStore.storage_buffer.i8 %116, %110
+  %117 = OpCompositeExtract.v3i8.i8 %104, 0
+  %118 = OpCompositeExtract.v3i8.i8 %104, 1
+  %119 = OpCompositeExtract.v3i8.i8 %104, 2
+  %121 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %77
+  OpStore.storage_buffer.i8 %121, %117
+  %123 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %80
+  OpStore.storage_buffer.i8 %123, %118
+  %125 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %83
+  OpStore.storage_buffer.i8 %125, %119
+  %126 = OpCompositeExtract.v3i8.i8 %107, 0
+  %127 = OpCompositeExtract.v3i8.i8 %107, 1
+  %128 = OpCompositeExtract.v3i8.i8 %107, 2
+  %130 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %86
+  OpStore.storage_buffer.i8 %130, %126
+  %132 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %89
+  OpStore.storage_buffer.i8 %132, %127
+  %134 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %92
+  OpStore.storage_buffer.i8 %134, %128
   return
 }
 
@@ -105,8 +107,10 @@ func.def @wide_predicate_packets(%input: buffer, %output: buffer) {
   %mask_bytes = vector.load %mask_view[0] : view<64xi8> -> vector<64xi8>
   %true_bytes = vector.load %true_view[0] : view<64xi8> -> vector<64xi8>
   %false_bytes = vector.load %false_view[0] : view<64xi8> -> vector<64xi8>
-  %c0 = vector.constant 0 : vector<64xi8>
-  %c1 = vector.constant 1 : vector<64xi8>
+  %c0_scalar = scalar.constant 0 : i8
+  %c0 = vector.splat %c0_scalar : vector<64xi8>
+  %c1_scalar = scalar.constant 1 : i8
+  %c1 = vector.splat %c1_scalar : vector<64xi8>
   %mask = vector.cmpi ne, %mask_bytes, %c0 : vector<64xi8> -> vector<64xi1>
   %true_value = vector.cmpi ne, %true_bytes, %c0 : vector<64xi8> -> vector<64xi1>
   %false_value = vector.cmpi ne, %false_bytes, %c0 : vector<64xi8> -> vector<64xi1>

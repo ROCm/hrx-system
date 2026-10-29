@@ -18,6 +18,7 @@ from loom.target.arch.x86.contracts.constants import (
     floating_vector_zero_rule,
     integer_vector_constant_rule,
     integer_vector_splat_rule,
+    integer_vector_splat_zero_rule,
     integer_vector_zero_rule,
 )
 from loom.target.arch.x86.contracts.rule_builders import (
@@ -142,8 +143,10 @@ def _vector_zero_rules(
     vector_bit_widths: tuple[int, ...],
 ) -> tuple[DescriptorRule, ...]:
     maximum_lanes = max(vector_bit_widths) // 8
+    integer_element_names = tuple(element.name for element in INTEGER_ELEMENTS)
+    integer_scalar_types = Scalar(integer_element_names)
     integer_vector_types = Vector(
-        tuple(element.name for element in INTEGER_ELEMENTS),
+        integer_element_names,
         minimum_lanes=2,
         maximum_lanes=maximum_lanes,
     )
@@ -162,6 +165,12 @@ def _vector_zero_rules(
         rules.extend(
             (
                 integer_vector_zero_rule(
+                    integer_vector_types,
+                    descriptor,
+                    result_register_class=register_class,
+                ),
+                integer_vector_splat_zero_rule(
+                    integer_scalar_types,
                     integer_vector_types,
                     descriptor,
                     result_register_class=register_class,

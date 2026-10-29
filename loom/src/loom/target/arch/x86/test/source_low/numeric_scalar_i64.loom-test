@@ -331,19 +331,19 @@ func.def @scalar_i64_insert_dynamic(%values: vector<2xi64>, %replacement: i64, %
 
 // ----
 low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>, i64, index) -> (vector<2xi64>)}) @scalar_i64_insert_dynamic(%values: reg<x86.xmm>, %replacement: reg<x86.gpr64>, %lane: reg<x86.gpr64>) -> (reg<x86.xmm>) asm {
-  %17 = copy %lane : reg<x86.gpr64> -> reg<x86.gpr64>
-  %18 = neg.gpr64 %17
-  %19 = mov.imm32 256
-  %20 = vmovd.xmm.gpr32 %19
-  %21 = vpmovzxbq.xmm %20
-  %22 = vmovq.xmm.gpr64 %18
-  %23 = avx2.vpbroadcastq.xmm %22
-  %24 = vpaddq.xmm %23, %21
-  %25 = vxorps.zero.xmm
-  %26 = vpcmpeqq.xmm %24, %25
-  %27 = vmovq.xmm.gpr64 %replacement
-  %28 = avx2.vpbroadcastq.xmm %27
-  %updated = vpblendvb.xmm %values, %28, %26
+  %18 = copy %lane : reg<x86.gpr64> -> reg<x86.gpr64>
+  %19 = neg.gpr64 %18
+  %20 = mov.imm32 256
+  %21 = vmovd.xmm.gpr32 %20
+  %22 = vpmovzxbq.xmm %21
+  %23 = vmovq.xmm.gpr64 %19
+  %24 = avx2.vpbroadcastq.xmm %23
+  %25 = vpaddq.xmm %24, %22
+  %26 = vxorps.zero.xmm
+  %27 = vpcmpeqq.xmm %25, %26
+  %28 = vmovq.xmm.gpr64 %replacement
+  %29 = avx2.vpbroadcastq.xmm %28
+  %updated = vpblendvb.xmm %values, %29, %27
   return %updated
 }
 

@@ -1279,19 +1279,34 @@ def test_core_contract_closes_scalar_and_vector_families() -> None:
             rule.guards[1].type_pattern.element,
             rule.guards[1].type_pattern.minimum_static_elements,
             rule.guards[1].type_pattern.maximum_static_elements,
+            rule.guards[1].type_pattern.lanes,
             rule.descriptor.key,
         )
         for rule in pair_splat_rules
     ] == [
-        ("i64", "i64", 1, 8, "amd.xdna.aie2p.splat.i64x8"),
-        ("f64", "f64", 1, 8, "amd.xdna.aie2p.splat.i64x8"),
-        ("f64", "f64", 9, 16, "amd.xdna.aie2p.splat.i64x8"),
+        ("i64", "i64", 1, 8, None, "amd.xdna.aie2p.splat.i64x8"),
+        ("f64", "f64", 1, 8, None, "amd.xdna.aie2p.splat.i64x8"),
+        ("i64", "i64", 9, 16, None, "amd.xdna.aie2p.splat.i64x8"),
+        ("f64", "f64", 9, 16, None, "amd.xdna.aie2p.splat.i64x8"),
+        ("i64", "i64", None, None, 32, "amd.xdna.aie2p.splat.i64x8"),
     ]
     assert all(len(rule.emit) == 1 for rule in pair_splat_rules[:2])
-    assert isinstance(pair_splat_rules[2].emit[-1], EmitRegisterConcat)
+    for rule in pair_splat_rules[2:4]:
+        assert isinstance(rule.emit[-1], EmitRegisterConcat)
+        assert rule.emit[-1].sources == (rule.emit[0].results["dst"],) * 2
+    accumulator_splat_rule = pair_splat_rules[4]
+    assert [
+        emit.descriptor.key
+        for emit in accumulator_splat_rule.emit
+        if not isinstance(emit, EmitRegisterConcat)
+    ] == [
+        "amd.xdna.aie2p.splat.i64x8",
+        "amd.xdna.aie2p.move.vector512.to.accumulator512",
+    ]
+    assert isinstance(accumulator_splat_rule.emit[-1], EmitRegisterConcat)
     assert (
-        pair_splat_rules[2].emit[-1].sources
-        == (pair_splat_rules[2].emit[0].results["dst"],) * 2
+        accumulator_splat_rule.emit[-1].sources
+        == (accumulator_splat_rule.emit[1].results["dst"],) * 4
     )
     f32_zero_splat_rules = [
         rule
@@ -1313,6 +1328,7 @@ def test_core_contract_closes_scalar_and_vector_families() -> None:
         for rule in vector_splat_rules
         if rule.guards[0].type_pattern.element not in ("i64", "f64")
         and rule not in f32_zero_splat_rules
+        and not any(isinstance(emit, EmitRegisterConcat) for emit in rule.emit)
     ]
     assert [rule.descriptor.key for rule in native_splat_rules] == [
         "amd.xdna.aie2p.splat.i8x64",
@@ -1321,7 +1337,6 @@ def test_core_contract_closes_scalar_and_vector_families() -> None:
         "amd.xdna.aie2p.splat.i16x32",
         "amd.xdna.aie2p.splat.i16x32",
         "amd.xdna.aie2p.splat.i16x32",
-        "amd.xdna.aie2p.splat.i32x16",
         "amd.xdna.aie2p.splat.i32x16",
         "amd.xdna.aie2p.splat.i32x16",
         "amd.xdna.aie2p.splat.i32x16",
@@ -1342,7 +1357,6 @@ def test_core_contract_closes_scalar_and_vector_families() -> None:
         ("f32", "f32"),
         ("index", "index"),
         ("offset", "offset"),
-        ("f32", "f32"),
         ("i1", "i1"),
     ]
     predicate_splat = native_splat_rules[-1]
@@ -1907,6 +1921,84 @@ def test_vector_constant_rules_materialize_each_register_carrier() -> None:
             (("offset", 33, 64, None), 4),
             (("offset", 33, 64, None), 4),
         ]
+    )
+
+
+def test_vector_splat_rules_materialize_each_register_carrier() -> None:
+    rules = [
+        case
+        for case in AIE2P_CORE_CONTRACT_FRAGMENT.cases
+        if isinstance(case, DescriptorRule)
+        and case.source_op is vector.vector_splat
+        and case.descriptor.key.startswith("amd.xdna.aie2p.splat")
+        and case.guards[0].type_pattern.element not in ("i1", "i64", "f64")
+    ]
+
+    def result_shape(rule: DescriptorRule):
+        pattern = next(
+            guard.type_pattern
+            for guard in rule.guards
+            if guard.field == "result" and guard.type_pattern is not None
+        )
+        return (
+            pattern.element,
+            pattern.minimum_static_elements,
+            pattern.maximum_static_elements,
+            pattern.lanes,
+        )
+
+    packet_families = (
+        ("i8", 64),
+        ("f8E4M3", 64),
+        ("f8E5M2", 64),
+        ("i16", 32),
+        ("f16", 32),
+        ("bf16", 32),
+        ("i32", 16),
+        ("f32", 16),
+        ("index", 16),
+        ("offset", 16),
+    )
+    native = [rule for rule in rules if len(rule.emit) == 1]
+    assert sorted(result_shape(rule) for rule in native) == sorted(
+        (element, 1, lanes, None) for element, lanes in packet_families
+    )
+
+    wide = [
+        rule
+        for rule in rules
+        if len(rule.emit) == 2 and isinstance(rule.emit[-1], EmitRegisterConcat)
+    ]
+    assert sorted(result_shape(rule) for rule in wide) == sorted(
+        (element, lanes + 1, lanes * 2, None) for element, lanes in packet_families
+    )
+    assert all(
+        rule.emit[-1].sources == (rule.emit[0].results["dst"],) * 2 for rule in wide
+    )
+    f32_wide = next(rule for rule in wide if result_shape(rule)[0] == "f32")
+    assert Guard.low_value_register_class("result", "aie2p.vec256") in f32_wide.guards
+
+    accumulator = [
+        rule
+        for rule in rules
+        if len(rule.emit) == 3 and isinstance(rule.emit[-1], EmitRegisterConcat)
+    ]
+    assert sorted(
+        (result_shape(rule), len(rule.emit[-1].sources)) for rule in accumulator
+    ) == sorted(
+        [
+            (("i32", None, None, 64), 4),
+            (("f32", None, None, 32), 2),
+            (("f32", None, None, 64), 4),
+            (("index", 33, 64, None), 4),
+            (("offset", 33, 64, None), 4),
+        ]
+    )
+    assert all(
+        rule.emit[1].descriptor.key == "amd.xdna.aie2p.move.vector512.to.accumulator512"
+        and rule.emit[-1].sources
+        == (rule.emit[1].results["dst"],) * len(rule.emit[-1].sources)
+        for rule in accumulator
     )
 
 

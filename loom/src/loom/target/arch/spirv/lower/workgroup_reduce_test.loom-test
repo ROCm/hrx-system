@@ -129,92 +129,92 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffe
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %item = OpLoadBuiltin.local_invocation_id.x
-  %37 = OpSConvert.i32.offset64 %item
-  %38 = OpConstant.offset64 8
-  %39 = OpIMul.offset64 %37, %38
-  %40 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %39
-  %41 = OpLoad.storage_buffer.i32 %40
-  %45 = OpConstant.offset64 4
-  %46 = OpIAdd.offset64 %39, %45
-  %47 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %46
-  %48 = OpLoad.storage_buffer.i32 %47
-  %49 = OpConstant.i32 1
-  %50 = OpBitwiseAnd %41, %49
-  %51 = OpIEqual %50, %49
-  %53 = OpBitwiseAnd %48, %49
-  %54 = OpIEqual %53, %49
-  %predicates = OpCompositeConstruct.v2bool %51, %54
-  %56 = OpConstant.i32 0
-  %58 = OpLoadBuiltin.subgroup_id : reg<spirv.id : i32>
-  %59 = OpLoadBuiltin.num_subgroups : reg<spirv.id : i32>
-  %60 = OpGroupNonUniformIAdd.exclusive_scan.i32 %49
-  %61 = OpConstantFalse.bool
-  %62 = OpCompositeExtract.v2bool.bool %predicates, 0
-  %63 = OpGroupNonUniformLogicalXor.reduce.bool %62
-  %64 = OpSelect %63, %49, %56
-  %65 = storage {byte_alignment = 4, byte_length = 12} : low.storage<workgroup>
-  %66 = storage_address %65 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
-  %67 = OpCompositeExtract.v2bool.bool %predicates, 1
-  %68 = OpGroupNonUniformLogicalXor.reduce.bool %67
-  %69 = OpSelect %68, %49, %56
-  %70 = storage {byte_alignment = 4, byte_length = 12} : low.storage<workgroup>
-  %71 = storage_address %70 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
-  %72 = OpIEqual %60, %56
-  low.scf.if %72 {
-    %73 = OpAccessChain.workgroup.i32.element_index %66, %58
-    OpStore.workgroup.i32 %73, %64
-    %74 = OpAccessChain.workgroup.i32.element_index %71, %58
-    OpStore.workgroup.i32 %74, %69
+  %39 = OpSConvert.i32.offset64 %item
+  %40 = OpConstant.offset64 8
+  %41 = OpIMul.offset64 %39, %40
+  %42 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %41
+  %43 = OpLoad.storage_buffer.i32 %42
+  %47 = OpConstant.offset64 4
+  %48 = OpIAdd.offset64 %41, %47
+  %49 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %48
+  %50 = OpLoad.storage_buffer.i32 %49
+  %51 = OpConstant.i32 1
+  %52 = OpBitwiseAnd %43, %51
+  %53 = OpIEqual %52, %51
+  %55 = OpBitwiseAnd %50, %51
+  %56 = OpIEqual %55, %51
+  %predicates = OpCompositeConstruct.v2bool %53, %56
+  %58 = OpConstant.i32 0
+  %60 = OpLoadBuiltin.subgroup_id : reg<spirv.id : i32>
+  %61 = OpLoadBuiltin.num_subgroups : reg<spirv.id : i32>
+  %62 = OpGroupNonUniformIAdd.exclusive_scan.i32 %51
+  %63 = OpConstantFalse.bool
+  %64 = OpCompositeExtract.v2bool.bool %predicates, 0
+  %65 = OpGroupNonUniformLogicalXor.reduce.bool %64
+  %66 = OpSelect %65, %51, %58
+  %67 = storage {byte_alignment = 4, byte_length = 12} : low.storage<workgroup>
+  %68 = storage_address %67 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %69 = OpCompositeExtract.v2bool.bool %predicates, 1
+  %70 = OpGroupNonUniformLogicalXor.reduce.bool %69
+  %71 = OpSelect %70, %51, %58
+  %72 = storage {byte_alignment = 4, byte_length = 12} : low.storage<workgroup>
+  %73 = storage_address %72 : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %74 = OpIEqual %62, %58
+  low.scf.if %74 {
+    %75 = OpAccessChain.workgroup.i32.element_index %68, %60
+    OpStore.workgroup.i32 %75, %66
+    %76 = OpAccessChain.workgroup.i32.element_index %73, %60
+    OpStore.workgroup.i32 %76, %71
   }
   OpControlBarrier.workgroup.workgroup.acq_rel
-  %75 = OpConstant.i32 2
-  %76 = OpAccessChain.workgroup.i32.element_index %66, %75
-  %77 = OpAccessChain.workgroup.i32.element_index %71, %75
-  %78 = OpIEqual %58, %56
-  low.scf.if %78 {
-    %79 = OpGroupNonUniformIAdd.reduce.i32 %49
-    %83, %84 = low.scf.for unsigned [%60 to %59 step %79] iter_args(%61: reg<spirv.id : i1>, %61: reg<spirv.id : i1>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>) do(%80: reg<spirv.id : i32>, %81: reg<spirv.id : i1>, %82: reg<spirv.id : i1>) {
-      %85 = OpAccessChain.workgroup.i32.element_index %66, %80
-      %86 = OpLoad.workgroup.i32 %85
-      %87 = OpINotEqual %86, %56
-      %88 = OpLogicalNotEqual.bool %81, %87
-      %89 = OpAccessChain.workgroup.i32.element_index %71, %80
-      %90 = OpLoad.workgroup.i32 %89
-      %91 = OpINotEqual %90, %56
-      %92 = OpLogicalNotEqual.bool %82, %91
-      low.scf.yield %88, %92 : reg<spirv.id : i1>, reg<spirv.id : i1>
+  %77 = OpConstant.i32 2
+  %78 = OpAccessChain.workgroup.i32.element_index %68, %77
+  %79 = OpAccessChain.workgroup.i32.element_index %73, %77
+  %80 = OpIEqual %60, %58
+  low.scf.if %80 {
+    %81 = OpGroupNonUniformIAdd.reduce.i32 %51
+    %85, %86 = low.scf.for unsigned [%62 to %61 step %81] iter_args(%63: reg<spirv.id : i1>, %63: reg<spirv.id : i1>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>) do(%82: reg<spirv.id : i32>, %83: reg<spirv.id : i1>, %84: reg<spirv.id : i1>) {
+      %87 = OpAccessChain.workgroup.i32.element_index %68, %82
+      %88 = OpLoad.workgroup.i32 %87
+      %89 = OpINotEqual %88, %58
+      %90 = OpLogicalNotEqual.bool %83, %89
+      %91 = OpAccessChain.workgroup.i32.element_index %73, %82
+      %92 = OpLoad.workgroup.i32 %91
+      %93 = OpINotEqual %92, %58
+      %94 = OpLogicalNotEqual.bool %84, %93
+      low.scf.yield %90, %94 : reg<spirv.id : i1>, reg<spirv.id : i1>
     }
-    %93 = OpGroupNonUniformLogicalXor.reduce.bool %83
-    %94 = OpSelect %93, %49, %56
-    %95 = OpGroupNonUniformLogicalXor.reduce.bool %84
-    %96 = OpSelect %95, %49, %56
-    low.scf.if %72 {
-      OpStore.workgroup.i32 %76, %94
-      OpStore.workgroup.i32 %77, %96
+    %95 = OpGroupNonUniformLogicalXor.reduce.bool %85
+    %96 = OpSelect %95, %51, %58
+    %97 = OpGroupNonUniformLogicalXor.reduce.bool %86
+    %98 = OpSelect %97, %51, %58
+    low.scf.if %74 {
+      OpStore.workgroup.i32 %78, %96
+      OpStore.workgroup.i32 %79, %98
     }
   }
   OpControlBarrier.workgroup.workgroup.acq_rel
-  %97 = OpLoad.workgroup.i32 %76
-  %98 = OpINotEqual %97, %56
-  %99 = OpLoad.workgroup.i32 %77
-  %100 = OpINotEqual %99, %56
-  %parity = OpCompositeConstruct.v2bool %98, %100
-  %102 = OpConstant.i32 1
-  %103 = OpCompositeConstruct.v2i32 %102, %102
-  %104 = OpConstant.i32 0
+  %99 = OpLoad.workgroup.i32 %78
+  %100 = OpINotEqual %99, %58
+  %101 = OpLoad.workgroup.i32 %79
+  %102 = OpINotEqual %101, %58
+  %parity = OpCompositeConstruct.v2bool %100, %102
+  %104 = OpConstant.i32 1
   %105 = OpCompositeConstruct.v2i32 %104, %104
-  %bits = OpSelect.v2i32 %parity, %103, %105
-  %107 = OpCompositeExtract.v2i32.i32 %bits, 0
-  %108 = OpCompositeExtract.v2i32.i32 %bits, 1
-  %109 = OpSConvert.i32.offset64 %item
-  %110 = OpConstant.offset64 8
-  %111 = OpIMul.offset64 %109, %110
-  %112 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %111
-  OpStore.storage_buffer.i32 %112, %107
-  %116 = OpConstant.offset64 4
-  %117 = OpIAdd.offset64 %111, %116
-  %118 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %117
-  OpStore.storage_buffer.i32 %118, %108
+  %106 = OpConstant.i32 0
+  %107 = OpCompositeConstruct.v2i32 %106, %106
+  %bits = OpSelect.v2i32 %parity, %105, %107
+  %109 = OpCompositeExtract.v2i32.i32 %bits, 0
+  %110 = OpCompositeExtract.v2i32.i32 %bits, 1
+  %111 = OpSConvert.i32.offset64 %item
+  %112 = OpConstant.offset64 8
+  %113 = OpIMul.offset64 %111, %112
+  %114 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %113
+  OpStore.storage_buffer.i32 %114, %109
+  %118 = OpConstant.offset64 4
+  %119 = OpIAdd.offset64 %113, %118
+  %120 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %119
+  OpStore.storage_buffer.i32 %120, %110
   return
 }
 

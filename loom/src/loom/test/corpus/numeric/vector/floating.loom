@@ -322,7 +322,8 @@ func.def @bfloat_lookup_arithmetic(%input: buffer, %output: buffer) {
   %table = vector.load %table_view[0] : view<8xbf16> -> vector<8xbf16>
   %rhs = vector.load %rhs_view[0] : view<8xbf16> -> vector<8xbf16>
   %raw_codes = vector.load %codes_view[0] : view<8xi16> -> vector<8xi16>
-  %code_mask = vector.constant 7 : vector<8xi16>
+  %code_mask_scalar = scalar.constant 7 : i16
+  %code_mask = vector.splat %code_mask_scalar : vector<8xi16>
   %codes = vector.andi %raw_codes, %code_mask : vector<8xi16>
   %bits = vector.load %bits_view[0] : view<8xbf16> -> vector<8xbf16>
   %initial = vector.load %acc_view[0] : view<4xf32> -> vector<4xf32>
@@ -340,7 +341,8 @@ func.def @bfloat_lookup_arithmetic(%input: buffer, %output: buffer) {
   // Volatile initialization keeps the guard writes before the partial stores.
   // Each 16-byte result leaves 48 bytes of the same register-sized slot intact.
   %guard_view = buffer.view %destination[%origin] : buffer -> view<128xi32>
-  %guard = vector.constant -1515870811 : vector<16xi32>
+  %guard_scalar = scalar.constant -1515870811 : i32
+  %guard = vector.splat %guard_scalar : vector<16xi32>
   vector.store<volatile> %guard, %guard_view[0] : vector<16xi32>, view<128xi32>
   vector.store<volatile> %guard, %guard_view[16] : vector<16xi32>, view<128xi32>
   vector.store<volatile> %guard, %guard_view[32] : vector<16xi32>, view<128xi32>

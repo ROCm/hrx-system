@@ -194,6 +194,11 @@ func.def @vector_extract_identity(%input: f32) -> (f32) {
   func.return %result : f32
 }
 
+// ----
+func.def @vector_extract_identity(%input: f32) -> (f32) {
+  func.return %input : f32
+}
+
 // ====
 
 // All shift kinds preserve a shared consumed intermediate.

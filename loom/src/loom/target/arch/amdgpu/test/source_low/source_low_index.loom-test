@@ -477,7 +477,8 @@ kernel.def @workitem_y_lds_uses_explicit_vaddr() {
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64xi32>
   %output_view = buffer.view %output[%output_base] : buffer -> view<64xi32>
-  %value = vector.constant 7 : vector<1xi32>
+  %value_scalar = scalar.constant 7 : i32
+  %value = vector.splat %value_scalar : vector<1xi32>
   vector.store %value, %scratch_view[%row] : vector<1xi32>, view<64xi32>
   %loaded = vector.load %scratch_view[%row] : view<64xi32> -> vector<1xi32>
   vector.store %loaded, %output_view[%row] : vector<1xi32>, view<64xi32>
@@ -488,14 +489,14 @@ kernel.def @workitem_y_lds_uses_explicit_vaddr() {
 low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 64, 1) workgroup_count(1, 1, 1) @workitem_y_lds_uses_explicit_vaddr() asm {
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %14 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
-  %15 = v_lshrrev_b32_src0_inline %packed_tid, 10
-  %row = v_and_b32_lit %15, 1023
+  %15 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
+  %16 = v_lshrrev_b32_src0_inline %packed_tid, 10
+  %row = v_and_b32_lit %16, 1023
   %value = v_mov_b32 7
-  %19 = v_lshlrev_b32_src0_inline %row, 2
-  ds_write_b32 %19, %value
-  %loaded = ds_read_b32 %19
-  global_store_b32_saddr %19, %loaded, %output_view
+  %20 = v_lshlrev_b32_src0_inline %row, 2
+  ds_write_b32 %20, %value
+  %loaded = ds_read_b32 %20
+  global_store_b32_saddr %20, %loaded, %output_view
   return
 }
 
@@ -515,29 +516,30 @@ kernel.def @dispatch_id_xy_global_b32() {
   %linear = index.madd %dispatch_row, %row_stride, %dispatch_column : index
   %output_base = index.constant 0 : offset
   %output_view = buffer.view %output[%output_base] : buffer -> view<512xi32>
-  %stored_value = vector.constant 1 : vector<1xi32>
+  %stored_value_scalar = scalar.constant 1 : i32
+  %stored_value = vector.splat %stored_value_scalar : vector<1xi32>
   vector.store %stored_value, %output_view[%linear] : vector<1xi32>, view<512xi32>
   kernel.return
 }
 
 // ----
 low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(8, 4, 1) workgroup_count(4, 4, 1) @dispatch_id_xy_global_b32() asm {
-  %13 = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
-  %14 = live_in<amdgpu.workgroup_id.y> : reg<amdgpu.sgpr>
+  %14 = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %15 = live_in<amdgpu.workgroup_id.y> : reg<amdgpu.sgpr>
   %packed_tid = live_in<amdgpu.workitem_id.packed.xy> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {extent = 2048, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %17 = v_and_b32_lit %packed_tid, 1023
-  %18 = v_mov_b32_copy %13
-  %19 = v_lshlrev_b32_src0_inline %18, 3
-  %dispatch_column = v_add_u32 %19, %17
-  %21 = v_lshrrev_b32_src0_inline %packed_tid, 10
-  %22 = v_and_b32_lit %21, 1023
-  %23 = v_mov_b32_copy %14
-  %24 = v_lshlrev_b32_src0_inline %23, 2
-  %dispatch_row = v_add_u32 %24, %22
+  %18 = v_and_b32_lit %packed_tid, 1023
+  %19 = v_mov_b32_copy %14
+  %20 = v_lshlrev_b32_src0_inline %19, 3
+  %dispatch_column = v_add_u32 %20, %18
+  %22 = v_lshrrev_b32_src0_inline %packed_tid, 10
+  %23 = v_and_b32_lit %22, 1023
+  %24 = v_mov_b32_copy %15
+  %25 = v_lshlrev_b32_src0_inline %24, 2
+  %dispatch_row = v_add_u32 %25, %23
   %stored_value = v_mov_b32 1
-  %27 = v_lshl_add_u32_shift_imm %dispatch_row, %dispatch_column, 5
-  %28 = v_lshlrev_b32_src0_inline %27, 2
-  global_store_b32_saddr %28, %stored_value, %output_view
+  %28 = v_lshl_add_u32_shift_imm %dispatch_row, %dispatch_column, 5
+  %29 = v_lshlrev_b32_src0_inline %28, 2
+  global_store_b32_saddr %29, %stored_value, %output_view
   return
 }

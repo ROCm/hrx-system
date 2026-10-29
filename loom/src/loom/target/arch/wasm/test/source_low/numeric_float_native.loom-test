@@ -119,8 +119,10 @@ func.def @vector_f32_comparisons(%lhs_buffer: buffer, %rhs_buffer: buffer, %outp
   %output_view = buffer.view %output_buffer[%base] : buffer -> view<24xi32>
   %lhs = vector.load %lhs_view[0] : view<4xf32> -> vector<4xf32>
   %rhs = vector.load %rhs_view[0] : view<4xf32> -> vector<4xf32>
-  %true = vector.constant -1 : vector<4xi32>
-  %false = vector.constant 0 : vector<4xi32>
+  %true_scalar = scalar.constant -1 : i32
+  %true = vector.splat %true_scalar : vector<4xi32>
+  %false_scalar = scalar.constant 0 : i32
+  %false = vector.splat %false_scalar : vector<4xi32>
   %equal = vector.cmpf oeq, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
   %equal_words = vector.select %equal, %true, %false : vector<4xi32>
   vector.store %equal_words, %output_view[0] : vector<4xi32>, view<24xi32>
@@ -146,10 +148,10 @@ func.def @vector_f32_comparisons(%lhs_buffer: buffer, %rhs_buffer: buffer, %outp
 low.func.def target<wasm.core.simd128> abi(wasm_function) @vector_f32_comparisons(%lhs_buffer: reg<wasm.i32>, %rhs_buffer: reg<wasm.i32>, %output_buffer: reg<wasm.i32>) asm {
   %lhs = v128.load %lhs_buffer
   %rhs = v128.load %rhs_buffer
-  %28 = i32.const -1
-  %true = i32x4.splat %28
-  %30 = i32.const 0
-  %false = i32x4.splat %30
+  %true_scalar = i32.const -1
+  %true = i32x4.splat %true_scalar
+  %false_scalar = i32.const 0
+  %false = i32x4.splat %false_scalar
   %equal = f32x4.eq %lhs, %rhs
   %equal_words = v128.bitselect %true, %false, %equal
   v128.store %output_buffer, %equal_words
@@ -181,8 +183,10 @@ func.def @vector_f32_comparisons_no_nan(%lhs_buffer: buffer, %rhs_buffer: buffer
   %output_view = buffer.view %output_buffer[%base] : buffer -> view<24xi32>
   %lhs = vector.load %lhs_view[0] : view<4xf32> -> vector<4xf32>
   %rhs = vector.load %rhs_view[0] : view<4xf32> -> vector<4xf32>
-  %true = vector.constant -1 : vector<4xi32>
-  %false = vector.constant 0 : vector<4xi32>
+  %true_scalar = scalar.constant -1 : i32
+  %true = vector.splat %true_scalar : vector<4xi32>
+  %false_scalar = scalar.constant 0 : i32
+  %false = vector.splat %false_scalar : vector<4xi32>
   %not_equal = vector.cmpf<nnan> one, %lhs, %rhs : vector<4xf32> -> vector<4xi1>
   %not_equal_words = vector.select %not_equal, %true, %false : vector<4xi32>
   vector.store %not_equal_words, %output_view[0] : vector<4xi32>, view<24xi32>
@@ -208,10 +212,10 @@ func.def @vector_f32_comparisons_no_nan(%lhs_buffer: buffer, %rhs_buffer: buffer
 low.func.def target<wasm.core.simd128> abi(wasm_function) @vector_f32_comparisons_no_nan(%lhs_buffer: reg<wasm.i32>, %rhs_buffer: reg<wasm.i32>, %output_buffer: reg<wasm.i32>) asm {
   %lhs = v128.load %lhs_buffer
   %rhs = v128.load %rhs_buffer
-  %28 = i32.const -1
-  %true = i32x4.splat %28
-  %30 = i32.const 0
-  %false = i32x4.splat %30
+  %true_scalar = i32.const -1
+  %true = i32x4.splat %true_scalar
+  %false_scalar = i32.const 0
+  %false = i32x4.splat %false_scalar
   %not_equal = f32x4.ne %lhs, %rhs
   %not_equal_words = v128.bitselect %true, %false, %not_equal
   v128.store %output_buffer, %not_equal_words

@@ -16,6 +16,7 @@
 
 #include "loom/import/cxx/binding/index_values.h"
 #include "loom/import/cxx/source/error.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 
 namespace loom::cxx_import {
@@ -274,11 +275,16 @@ loom_value_id_t VectorMemoryIntrinsic::build_mask(
     loom_value_id_t source, loom_builder_t* builder,
     loom_location_id_t location) const {
   loom_op_t* op;
-  check(loom_vector_constant_build(builder, loom_attr_i64(0), mask_type_,
-                                   location, &op));
+  loom_value_id_t zero;
+  const loom_attribute_t zero_attr =
+      loom_type_element_type(mask_type_) == LOOM_SCALAR_TYPE_I1
+          ? loom_attr_bool(false)
+          : loom_attr_i64(0);
+  check(loom_vector_build_constant_splat(builder, zero_attr, mask_type_,
+                                         location, &zero));
   check(loom_vector_cmpi_build(builder, LOOM_VECTOR_CMPI_PREDICATE_NE, source,
-                               loom_op_results(op)[0], mask_type_,
-                               predicate_type_, location, &op));
+                               zero, mask_type_, predicate_type_, location,
+                               &op));
   return loom_op_results(op)[0];
 }
 

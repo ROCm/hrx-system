@@ -60,6 +60,38 @@ def integer_vector_zero_rule(
     )
 
 
+def integer_vector_splat_zero_rule(
+    scalar_type: TypePattern,
+    result_type: TypePattern,
+    descriptor: Descriptor,
+    *,
+    result_register_class: str | None = None,
+) -> DescriptorRule:
+    """Constructs an exact integer-zero splat with a dependency-breaking op."""
+    return DescriptorRule(
+        source_op=vector.vector_splat,
+        descriptor=descriptor,
+        guards=(
+            Guard.value_type("scalar", scalar_type),
+            Guard.value_i64_range("scalar", 0, 0),
+            Guard.value_type("result", result_type),
+            *(
+                (Guard.low_value_register_class("result", result_register_class),)
+                if result_register_class is not None
+                else ()
+            ),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                results={"dst": ValueRef.result("result")},
+                form=DescriptorEmitForm.OP,
+            ),
+        ),
+        priority=2,
+    )
+
+
 def _uniform_vector_constant_rule(
     result_type: TypePattern,
     immediate_type: TypePattern,

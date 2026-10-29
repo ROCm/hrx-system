@@ -58,39 +58,39 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) abi_layout({constant_c
   %lhs_block_scale = global_load_b64_saddr %44, %lhs_block_scale_view
   %rhs_block_scale = global_load_b64_saddr %44, %rhs_block_scale_view
   %init = concat(%44, %44, %44, %44, %44, %44, %44, %44) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
-  %58 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
-  %local_result = v_wmma_scale16_f32_16x16x128_f8f6f4_f4_f4 %lhs, %rhs, %58, %lhs_block_scale, %rhs_block_scale {matrix_a_fmt = "fp4", matrix_b_fmt = "fp4", matrix_a_scale_fmt = "fp8_e4m3", matrix_b_scale_fmt = "fp8_e4m3"}
+  %65 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %local_result = v_wmma_scale16_f32_16x16x128_f8f6f4_f4_f4 %lhs, %rhs, %65, %lhs_block_scale, %rhs_block_scale {matrix_a_fmt = "fp4", matrix_b_fmt = "fp4", matrix_a_scale_fmt = "fp8_e4m3", matrix_b_scale_fmt = "fp8_e4m3"}
   %lhs_global_scale = global_load_b32_saddr %44, %lhs_global_scale_view
   %rhs_global_scale = global_load_b32_saddr %44, %rhs_global_scale_view
   %global_scale = v_mul_f32 %lhs_global_scale, %rhs_global_scale
-  %66 = slice %local_result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %68 = v_mul_f32 %66, %global_scale
-  %69 = slice %local_result[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %71 = v_mul_f32 %69, %global_scale
-  %72 = slice %local_result[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %74 = v_mul_f32 %72, %global_scale
-  %75 = slice %local_result[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %77 = v_mul_f32 %75, %global_scale
-  %78 = slice %local_result[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %80 = v_mul_f32 %78, %global_scale
-  %81 = slice %local_result[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %83 = v_mul_f32 %81, %global_scale
-  %84 = slice %local_result[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %86 = v_mul_f32 %84, %global_scale
-  %87 = slice %local_result[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %89 = v_mul_f32 %87, %global_scale
-  %91 = v_and_b32_src0_inline %36, 15
-  %92 = v_lshlrev_b32_src0_inline %91, 2
-  %93 = v_lshrrev_b32_src0_inline %36, 4
-  %94 = v_lshl_add_u32_shift_imm %93, %92, 9
-  global_store_b32_saddr %94, %68, %out_view
-  global_store_b32_saddr %94, %71, %out_view {offset = 64}
-  global_store_b32_saddr %94, %74, %out_view {offset = 128}
-  global_store_b32_saddr %94, %77, %out_view {offset = 192}
-  global_store_b32_saddr %94, %80, %out_view {offset = 256}
-  global_store_b32_saddr %94, %83, %out_view {offset = 320}
-  global_store_b32_saddr %94, %86, %out_view {offset = 384}
-  global_store_b32_saddr %94, %89, %out_view {offset = 448}
+  %73 = slice %local_result[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %75 = v_mul_f32 %73, %global_scale
+  %76 = slice %local_result[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %78 = v_mul_f32 %76, %global_scale
+  %79 = slice %local_result[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %81 = v_mul_f32 %79, %global_scale
+  %82 = slice %local_result[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %84 = v_mul_f32 %82, %global_scale
+  %85 = slice %local_result[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %87 = v_mul_f32 %85, %global_scale
+  %88 = slice %local_result[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %90 = v_mul_f32 %88, %global_scale
+  %91 = slice %local_result[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %93 = v_mul_f32 %91, %global_scale
+  %94 = slice %local_result[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %96 = v_mul_f32 %94, %global_scale
+  %98 = v_and_b32_src0_inline %36, 15
+  %99 = v_lshlrev_b32_src0_inline %98, 2
+  %100 = v_lshrrev_b32_src0_inline %36, 4
+  %101 = v_lshl_add_u32_shift_imm %100, %99, 9
+  global_store_b32_saddr %101, %75, %out_view
+  global_store_b32_saddr %101, %78, %out_view {offset = 64}
+  global_store_b32_saddr %101, %81, %out_view {offset = 128}
+  global_store_b32_saddr %101, %84, %out_view {offset = 192}
+  global_store_b32_saddr %101, %87, %out_view {offset = 256}
+  global_store_b32_saddr %101, %90, %out_view {offset = 320}
+  global_store_b32_saddr %101, %93, %out_view {offset = 384}
+  global_store_b32_saddr %101, %96, %out_view {offset = 448}
   return
 }
 
@@ -127,51 +127,51 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) abi(hal_kernel) @fp4_e4m
   %k_tile_begin = s_mov_b32 0
   %k_tile_step = s_mov_b32 1
   %k_tile_end = s_mov_b32 2
-  %zero_acc_scalar = v_mov_b32 0
-  %init = concat(%zero_acc_scalar, %zero_acc_scalar, %zero_acc_scalar, %zero_acc_scalar, %zero_acc_scalar, %zero_acc_scalar, %zero_acc_scalar, %zero_acc_scalar) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %47 = v_mov_b32 0
+  %init = concat(%47, %47, %47, %47, %47, %47, %47, %47) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
   low.br ^_bb1(%k_tile_begin: reg<amdgpu.sgpr>, %init: reg<amdgpu.vgpr x8>)
 ^_bb1(%k_tile: reg<amdgpu.sgpr>, %local_accumulator: reg<amdgpu.vgpr x8>):
-  %49 = s_cmp_lt_i32 %k_tile, %k_tile_end
-  low.cond_br %49, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %56 = s_cmp_lt_i32 %k_tile, %k_tile_end
+  low.cond_br %56, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %50 = copy %local_accumulator : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
-  %next = v_wmma_scale16_f32_16x16x128_f8f6f4_f4_f4 %lhs, %rhs, %50, %lhs_block_scale, %rhs_block_scale {matrix_a_fmt = "fp4", matrix_b_fmt = "fp4", matrix_a_scale_fmt = "fp8_e4m3", matrix_b_scale_fmt = "fp8_e4m3"}
-  %52 = s_add_u32 %k_tile, %k_tile_step
-  low.br ^_bb1(%52: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr x8>)
+  %57 = copy %local_accumulator : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %next = v_wmma_scale16_f32_16x16x128_f8f6f4_f4_f4 %lhs, %rhs, %57, %lhs_block_scale, %rhs_block_scale {matrix_a_fmt = "fp4", matrix_b_fmt = "fp4", matrix_a_scale_fmt = "fp8_e4m3", matrix_b_scale_fmt = "fp8_e4m3"}
+  %59 = s_add_u32 %k_tile, %k_tile_step
+  low.br ^_bb1(%59: reg<amdgpu.sgpr>, %next: reg<amdgpu.vgpr x8>)
 ^_bb3:
   %global_scale = v_mul_f32 %lhs_global_scale, %rhs_global_scale
-  %55 = slice %local_accumulator[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %57 = v_mul_f32 %55, %global_scale
-  %58 = slice %local_accumulator[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %60 = v_mul_f32 %58, %global_scale
-  %61 = slice %local_accumulator[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %63 = v_mul_f32 %61, %global_scale
-  %64 = slice %local_accumulator[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %66 = v_mul_f32 %64, %global_scale
-  %67 = slice %local_accumulator[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %69 = v_mul_f32 %67, %global_scale
-  %70 = slice %local_accumulator[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %72 = v_mul_f32 %70, %global_scale
-  %73 = slice %local_accumulator[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %75 = v_mul_f32 %73, %global_scale
-  %76 = slice %local_accumulator[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %78 = v_mul_f32 %76, %global_scale
-  %80 = slice %final_domain_accumulator[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %82 = v_add_f32 %80, %57
-  %83 = slice %final_domain_accumulator[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %85 = v_add_f32 %83, %60
-  %86 = slice %final_domain_accumulator[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %88 = v_add_f32 %86, %63
-  %89 = slice %final_domain_accumulator[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %91 = v_add_f32 %89, %66
-  %92 = slice %final_domain_accumulator[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %94 = v_add_f32 %92, %69
-  %95 = slice %final_domain_accumulator[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %97 = v_add_f32 %95, %72
-  %98 = slice %final_domain_accumulator[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %100 = v_add_f32 %98, %75
-  %101 = slice %final_domain_accumulator[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %103 = v_add_f32 %101, %78
-  %result = concat(%82, %85, %88, %91, %94, %97, %100, %103) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
+  %62 = slice %local_accumulator[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %64 = v_mul_f32 %62, %global_scale
+  %65 = slice %local_accumulator[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %67 = v_mul_f32 %65, %global_scale
+  %68 = slice %local_accumulator[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %70 = v_mul_f32 %68, %global_scale
+  %71 = slice %local_accumulator[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %73 = v_mul_f32 %71, %global_scale
+  %74 = slice %local_accumulator[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %76 = v_mul_f32 %74, %global_scale
+  %77 = slice %local_accumulator[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %79 = v_mul_f32 %77, %global_scale
+  %80 = slice %local_accumulator[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %82 = v_mul_f32 %80, %global_scale
+  %83 = slice %local_accumulator[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %85 = v_mul_f32 %83, %global_scale
+  %87 = slice %final_domain_accumulator[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %89 = v_add_f32 %87, %64
+  %90 = slice %final_domain_accumulator[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %92 = v_add_f32 %90, %67
+  %93 = slice %final_domain_accumulator[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %95 = v_add_f32 %93, %70
+  %96 = slice %final_domain_accumulator[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %98 = v_add_f32 %96, %73
+  %99 = slice %final_domain_accumulator[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %101 = v_add_f32 %99, %76
+  %102 = slice %final_domain_accumulator[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %104 = v_add_f32 %102, %79
+  %105 = slice %final_domain_accumulator[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %107 = v_add_f32 %105, %82
+  %108 = slice %final_domain_accumulator[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %110 = v_add_f32 %108, %85
+  %result = concat(%89, %92, %95, %98, %101, %104, %107, %110) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
   return %result
 }

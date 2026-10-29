@@ -8,23 +8,23 @@ func.def @signed_byte_comparison(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (vec
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @signed_byte_comparison(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm {
-  %36 = v_bfe_i32_offset_width_inline %lhs {offset = 0, width = 8}
-  %37 = v_bfe_i32_offset_width_inline %rhs {offset = 0, width = 8}
-  %38 = v_cmp_lt_i32 %36, %37
-  %39 = v_bfe_i32_offset_width_inline %lhs {offset = 8, width = 8}
-  %40 = v_bfe_i32_offset_width_inline %rhs {offset = 8, width = 8}
-  %41 = v_cmp_lt_i32 %39, %40
-  %42 = v_bfe_i32_offset_width_inline %lhs {offset = 16, width = 8}
-  %43 = v_bfe_i32_offset_width_inline %rhs {offset = 16, width = 8}
-  %44 = v_cmp_lt_i32 %42, %43
-  %45 = v_ashrrev_i32_src0_inline %lhs, 24
-  %46 = v_ashrrev_i32_src0_inline %rhs, 24
-  %47 = v_cmp_lt_i32 %45, %46
-  %60 = v_cndmask_b32_src0_lit_src1_inline %38 {imm32 = 0, true_value = 1}
-  %62 = v_cndmask_b32_src0_lit_src1_inline %41 {imm32 = 0, true_value = 1}
-  %64 = v_cndmask_b32_src0_lit_src1_inline %44 {imm32 = 0, true_value = 1}
-  %66 = v_cndmask_b32_src0_lit_src1_inline %47 {imm32 = 0, true_value = 1}
-  %result = concat(%60, %62, %64, %66) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %38 = v_bfe_i32_offset_width_inline %lhs {offset = 0, width = 8}
+  %39 = v_bfe_i32_offset_width_inline %rhs {offset = 0, width = 8}
+  %40 = v_cmp_lt_i32 %38, %39
+  %41 = v_bfe_i32_offset_width_inline %lhs {offset = 8, width = 8}
+  %42 = v_bfe_i32_offset_width_inline %rhs {offset = 8, width = 8}
+  %43 = v_cmp_lt_i32 %41, %42
+  %44 = v_bfe_i32_offset_width_inline %lhs {offset = 16, width = 8}
+  %45 = v_bfe_i32_offset_width_inline %rhs {offset = 16, width = 8}
+  %46 = v_cmp_lt_i32 %44, %45
+  %47 = v_ashrrev_i32_src0_inline %lhs, 24
+  %48 = v_ashrrev_i32_src0_inline %rhs, 24
+  %49 = v_cmp_lt_i32 %47, %48
+  %62 = v_cndmask_b32_src0_lit_src1_inline %40 {imm32 = 0, true_value = 1}
+  %64 = v_cndmask_b32_src0_lit_src1_inline %43 {imm32 = 0, true_value = 1}
+  %66 = v_cndmask_b32_src0_lit_src1_inline %46 {imm32 = 0, true_value = 1}
+  %68 = v_cndmask_b32_src0_lit_src1_inline %49 {imm32 = 0, true_value = 1}
+  %result = concat(%62, %64, %66, %68) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   return %result
 }
 
@@ -38,23 +38,23 @@ func.def @unsigned_byte_comparison(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (v
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @unsigned_byte_comparison(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x4>) asm {
-  %36 = v_and_b32_lit %lhs, 255
-  %37 = v_and_b32_lit %rhs, 255
-  %38 = v_cmp_le_u32 %36, %37
-  %39 = v_bfe_u32_offset_width_inline %lhs {offset = 8, width = 8}
-  %40 = v_bfe_u32_offset_width_inline %rhs {offset = 8, width = 8}
-  %41 = v_cmp_le_u32 %39, %40
-  %42 = v_bfe_u32_offset_width_inline %lhs {offset = 16, width = 8}
-  %43 = v_bfe_u32_offset_width_inline %rhs {offset = 16, width = 8}
-  %44 = v_cmp_le_u32 %42, %43
-  %45 = v_bfe_u32_offset_width_inline %lhs {offset = 24, width = 8}
-  %46 = v_bfe_u32_offset_width_inline %rhs {offset = 24, width = 8}
-  %47 = v_cmp_le_u32 %45, %46
-  %60 = v_cndmask_b32_src0_lit_src1_inline %38 {imm32 = 0, true_value = 1}
-  %62 = v_cndmask_b32_src0_lit_src1_inline %41 {imm32 = 0, true_value = 1}
-  %64 = v_cndmask_b32_src0_lit_src1_inline %44 {imm32 = 0, true_value = 1}
-  %66 = v_cndmask_b32_src0_lit_src1_inline %47 {imm32 = 0, true_value = 1}
-  %result = concat(%60, %62, %64, %66) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %38 = v_and_b32_lit %lhs, 255
+  %39 = v_and_b32_lit %rhs, 255
+  %40 = v_cmp_le_u32 %38, %39
+  %41 = v_bfe_u32_offset_width_inline %lhs {offset = 8, width = 8}
+  %42 = v_bfe_u32_offset_width_inline %rhs {offset = 8, width = 8}
+  %43 = v_cmp_le_u32 %41, %42
+  %44 = v_bfe_u32_offset_width_inline %lhs {offset = 16, width = 8}
+  %45 = v_bfe_u32_offset_width_inline %rhs {offset = 16, width = 8}
+  %46 = v_cmp_le_u32 %44, %45
+  %47 = v_bfe_u32_offset_width_inline %lhs {offset = 24, width = 8}
+  %48 = v_bfe_u32_offset_width_inline %rhs {offset = 24, width = 8}
+  %49 = v_cmp_le_u32 %47, %48
+  %62 = v_cndmask_b32_src0_lit_src1_inline %40 {imm32 = 0, true_value = 1}
+  %64 = v_cndmask_b32_src0_lit_src1_inline %43 {imm32 = 0, true_value = 1}
+  %66 = v_cndmask_b32_src0_lit_src1_inline %46 {imm32 = 0, true_value = 1}
+  %68 = v_cndmask_b32_src0_lit_src1_inline %49 {imm32 = 0, true_value = 1}
+  %result = concat(%62, %64, %66, %68) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   return %result
 }
 
@@ -68,15 +68,15 @@ func.def @signed_halfword_comparison(%lhs: vector<2xi16>, %rhs: vector<2xi16>) -
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @signed_halfword_comparison(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
-  %24 = v_bfe_i32_offset_width_inline %lhs {offset = 0, width = 16}
-  %25 = v_bfe_i32_offset_width_inline %rhs {offset = 0, width = 16}
-  %26 = v_cmp_ge_i32 %24, %25
-  %27 = v_ashrrev_i32_src0_inline %lhs, 16
-  %28 = v_ashrrev_i32_src0_inline %rhs, 16
-  %29 = v_cmp_ge_i32 %27, %28
-  %38 = v_cndmask_b32_src0_lit_src1_inline %26 {imm32 = 0, true_value = 1}
-  %40 = v_cndmask_b32_src0_lit_src1_inline %29 {imm32 = 0, true_value = 1}
-  %result = concat(%38, %40) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %26 = v_bfe_i32_offset_width_inline %lhs {offset = 0, width = 16}
+  %27 = v_bfe_i32_offset_width_inline %rhs {offset = 0, width = 16}
+  %28 = v_cmp_ge_i32 %26, %27
+  %29 = v_ashrrev_i32_src0_inline %lhs, 16
+  %30 = v_ashrrev_i32_src0_inline %rhs, 16
+  %31 = v_cmp_ge_i32 %29, %30
+  %40 = v_cndmask_b32_src0_lit_src1_inline %28 {imm32 = 0, true_value = 1}
+  %42 = v_cndmask_b32_src0_lit_src1_inline %31 {imm32 = 0, true_value = 1}
+  %result = concat(%40, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
 }
 
@@ -90,15 +90,15 @@ func.def @halfword_equality(%lhs: vector<2xi16>, %rhs: vector<2xi16>) -> (vector
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @halfword_equality(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
-  %24 = v_and_b32_lit %lhs, 65535
-  %25 = v_and_b32_lit %rhs, 65535
-  %26 = v_cmp_eq_i32 %24, %25
-  %27 = v_bfe_u32_offset_width_inline %lhs {offset = 16, width = 16}
-  %28 = v_bfe_u32_offset_width_inline %rhs {offset = 16, width = 16}
-  %29 = v_cmp_eq_i32 %27, %28
-  %38 = v_cndmask_b32_src0_lit_src1_inline %26 {imm32 = 0, true_value = 1}
-  %40 = v_cndmask_b32_src0_lit_src1_inline %29 {imm32 = 0, true_value = 1}
-  %result = concat(%38, %40) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %26 = v_and_b32_lit %lhs, 65535
+  %27 = v_and_b32_lit %rhs, 65535
+  %28 = v_cmp_eq_i32 %26, %27
+  %29 = v_bfe_u32_offset_width_inline %lhs {offset = 16, width = 16}
+  %30 = v_bfe_u32_offset_width_inline %rhs {offset = 16, width = 16}
+  %31 = v_cmp_eq_i32 %29, %30
+  %40 = v_cndmask_b32_src0_lit_src1_inline %28 {imm32 = 0, true_value = 1}
+  %42 = v_cndmask_b32_src0_lit_src1_inline %31 {imm32 = 0, true_value = 1}
+  %result = concat(%40, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
 }
 
@@ -112,27 +112,27 @@ func.def @wide_integer_comparison(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @wide_integer_comparison(%lhs: reg<amdgpu.vgpr x4>, %rhs: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm {
-  %59 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %58 = slice %lhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %57 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %56 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %24 = v_cmp_gt_u32 %58, %56
-  %25 = v_cmp_gt_u32 %59, %57
-  %26 = v_cmp_eq_i32 %58, %56
-  %27 = s_and_b64 %26, %25
-  %28 = s_or_b64 %24, %27
-  %55 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %54 = slice %lhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %53 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %52 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %35 = v_cmp_gt_u32 %54, %52
-  %36 = v_cmp_gt_u32 %55, %53
-  %37 = v_cmp_eq_i32 %54, %52
-  %38 = s_and_b64 %37, %36
-  %39 = s_or_b64 %35, %38
-  %48 = v_cndmask_b32_src0_lit_src1_inline %28 {imm32 = 0, true_value = 1}
-  %50 = v_cndmask_b32_src0_lit_src1_inline %39 {imm32 = 0, true_value = 1}
-  %result = concat(%48, %50) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %61 = slice %lhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %60 = slice %lhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %59 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %58 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %26 = v_cmp_gt_u32 %60, %58
+  %27 = v_cmp_gt_u32 %61, %59
+  %28 = v_cmp_eq_i32 %60, %58
+  %29 = s_and_b64 %28, %27
+  %30 = s_or_b64 %26, %29
+  %57 = slice %lhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %56 = slice %lhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %55 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %54 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %37 = v_cmp_gt_u32 %56, %54
+  %38 = v_cmp_gt_u32 %57, %55
+  %39 = v_cmp_eq_i32 %56, %54
+  %40 = s_and_b64 %39, %38
+  %41 = s_or_b64 %37, %40
+  %50 = v_cndmask_b32_src0_lit_src1_inline %30 {imm32 = 0, true_value = 1}
+  %52 = v_cndmask_b32_src0_lit_src1_inline %41 {imm32 = 0, true_value = 1}
+  %result = concat(%50, %52) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
 }
 
@@ -146,14 +146,14 @@ func.def @floating_comparison_flags(%lhs: vector<2xf32>, %rhs: vector<2xf32>) ->
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @floating_comparison_flags(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
-  %11 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %12 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %13 = v_cmp_lt_f32 %11, %12
-  %14 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %15 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %16 = v_cmp_lt_f32 %14, %15
-  %25 = v_cndmask_b32_src0_lit_src1_inline %13 {imm32 = 0, true_value = 1}
-  %27 = v_cndmask_b32_src0_lit_src1_inline %16 {imm32 = 0, true_value = 1}
-  %result = concat(%25, %27) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %13 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %14 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %15 = v_cmp_lt_f32 %13, %14
+  %16 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %17 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %18 = v_cmp_lt_f32 %16, %17
+  %27 = v_cndmask_b32_src0_lit_src1_inline %15 {imm32 = 0, true_value = 1}
+  %29 = v_cndmask_b32_src0_lit_src1_inline %18 {imm32 = 0, true_value = 1}
+  %result = concat(%27, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %result
 }

@@ -34,9 +34,12 @@ func.def @integer_to_float_classes(%input: vector<4xi32>) -> (vector<4xi1>, vect
 // ----
 func.def @integer_to_float_classes(%input: vector<4xi32>) -> (vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>) {
   %unsigned = vector.uitofp %input : vector<4xi32> to vector<4xf16>
-  %signed_nan = vector.constant false : vector<4xi1>
-  %signed_finite = vector.constant true : vector<4xi1>
-  %unsigned_nan = vector.constant false : vector<4xi1>
+  %15 = scalar.constant false : i1
+  %signed_nan = vector.splat %15 : vector<4xi1>
+  %13 = scalar.constant true : i1
+  %signed_finite = vector.splat %13 : vector<4xi1>
+  %11 = scalar.constant false : i1
+  %unsigned_nan = vector.splat %11 : vector<4xi1>
   %unsigned_inf = vector.isinff %unsigned : vector<4xf16> -> vector<4xi1>
   func.return %signed_nan, %signed_finite, %unsigned_nan, %unsigned_inf : vector<4xi1>, vector<4xi1>, vector<4xi1>, vector<4xi1>
 }
@@ -114,7 +117,8 @@ func.def @narrow_overflow() -> (i1, f32) {
 
 // A NaN discovered by bitcast retains classification without inventing payload.
 func.def @narrow_nan() -> (vector<4xbf16>, i1) {
-  %bits = vector.constant 2139095041 : vector<4xi32>
+  %bits_scalar = scalar.constant 2139095041 : i32
+  %bits = vector.splat %bits_scalar : vector<4xi32>
   %input = vector.bitcast %bits : vector<4xi32> to vector<4xf32>
   %narrow = vector.fptrunc %input : vector<4xf32> to vector<4xbf16>
   %classes = vector.isnanf %narrow : vector<4xbf16> -> vector<4xi1>
@@ -124,7 +128,8 @@ func.def @narrow_nan() -> (vector<4xbf16>, i1) {
 
 // ----
 func.def @narrow_nan() -> (vector<4xbf16>, i1) {
-  %bits = vector.constant 2139095041 : vector<4xi32>
+  %bits_scalar = scalar.constant 2139095041 : i32
+  %bits = vector.splat %bits_scalar : vector<4xi32>
   %input = vector.bitcast %bits : vector<4xi32> to vector<4xf32>
   %narrow = vector.fptrunc %input : vector<4xf32> to vector<4xbf16>
   %is_nan = scalar.constant true : i1
@@ -518,8 +523,10 @@ func.def @fragment_numeric_envelope(%input: vector<4xi32>, %value: f32, %unknown
 func.def @fragment_numeric_envelope(%input: vector<4xi32>, %value: f32, %unknown: vector<4xf32>) -> (vector<4xi1>, vector<4xi1>, vector<4xi1>) {
   %extent = index.constant 16 : index
   %unknown_fragment = vector.fragment<result> %unknown shape [%extent, %extent] : vector<4xf32>
-  %is_finite = vector.constant true : vector<4xi1>
-  %is_nan = vector.constant false : vector<4xi1>
+  %18 = scalar.constant true : i1
+  %is_finite = vector.splat %18 : vector<4xi1>
+  %16 = scalar.constant false : i1
+  %is_nan = vector.splat %16 : vector<4xi1>
   %unknown_nan = vector.isnanf %unknown_fragment : vector<4xf32> -> vector<4xi1>
   func.return %is_finite, %is_nan, %unknown_nan : vector<4xi1>, vector<4xi1>, vector<4xi1>
 }
@@ -529,8 +536,10 @@ func.def @fragment_numeric_envelope(%input: vector<4xi32>, %value: f32, %unknown
 // Exact element envelopes do not route aggregate results to scalar constant
 // materialization. Signed and unsigned conversions still fold as vectors.
 func.def @constant_conversions() -> (vector<4xf32>, vector<4xf32>, vector<4xbf16>) {
-  %integer = vector.constant 17 : vector<4xi32>
-  %byte = vector.constant -1 : vector<4xi8>
+  %integer_scalar = scalar.constant 17 : i32
+  %integer = vector.splat %integer_scalar : vector<4xi32>
+  %byte_scalar = scalar.constant -1 : i8
+  %byte = vector.splat %byte_scalar : vector<4xi8>
   %wide = vector.sitofp %integer : vector<4xi32> to vector<4xf32>
   %unsigned = vector.uitofp %byte : vector<4xi8> to vector<4xf32>
   %narrow = vector.fptrunc %wide : vector<4xf32> to vector<4xbf16>
@@ -539,11 +548,11 @@ func.def @constant_conversions() -> (vector<4xf32>, vector<4xf32>, vector<4xbf16
 
 // ----
 func.def @constant_conversions() -> (vector<4xf32>, vector<4xf32>, vector<4xbf16>) {
-  %12 = scalar.constant 17.0 : f32
-  %wide = vector.splat %12 : vector<4xf32>
-  %10 = scalar.constant 255.0 : f32
-  %unsigned = vector.splat %10 : vector<4xf32>
-  %8 = scalar.constant 17.0 : bf16
-  %narrow = vector.splat %8 : vector<4xbf16>
+  %14 = scalar.constant 17.0 : f32
+  %wide = vector.splat %14 : vector<4xf32>
+  %12 = scalar.constant 255.0 : f32
+  %unsigned = vector.splat %12 : vector<4xf32>
+  %10 = scalar.constant 17.0 : bf16
+  %narrow = vector.splat %10 : vector<4xbf16>
   func.return %wide, %unsigned, %narrow : vector<4xf32>, vector<4xf32>, vector<4xbf16>
 }

@@ -69,7 +69,8 @@ func.def @descriptor_dynamic_store(%output: buffer, %row: index) {
   %aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
   %descriptor_output = buffer.assume.memory_space<descriptor> %aligned : buffer
   %destination = buffer.view %descriptor_output[%row_offset] : buffer -> view<16xi32>
-  %value = vector.constant 1 : vector<16xi32>
+  %value_scalar = scalar.constant 1 : i32
+  %value = vector.splat %value_scalar : vector<16xi32>
   vector.store<volatile> %value, %destination[0] : vector<16xi32>, view<16xi32>
   func.return
 }
@@ -79,26 +80,26 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @descriptor_dynamic_sto
   %destination = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %row_bytes = s_mov_b32 131072
   %row_offset = s_mul_i32 %bounded_row, %row_bytes
-  %13 = v_mov_b32 1
-  %value = concat(%13, %13, %13, %13, %13, %13, %13, %13, %13, %13, %13, %13, %13, %13, %13, %13) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x16>
-  %30 = slice %value[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
-  %31 = v_mov_b32 0
-  %32 = s_mov_b32 64
-  %33 = s_add_u32 %row_offset, %32
-  %38 = slice %destination[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %39 = slice %destination[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %40 = s_mov_b32 65535
-  %41 = s_and_b32 %39, %40
-  %42 = concat(%38, %41) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %43 = s_mov_b32 822173696
-  %44 = concat(%42, %33, %43) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
-  buffer_store_b128<volatile> %30, %44, %31, %row_offset
-  %35 = slice %value[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
-  buffer_store_b128<volatile> %35, %44, %31, %row_offset {offset = 16}
-  %36 = slice %value[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
-  buffer_store_b128<volatile> %36, %44, %31, %row_offset {offset = 32}
-  %37 = slice %value[12] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
-  buffer_store_b128<volatile> %37, %44, %31, %row_offset {offset = 48}
+  %14 = v_mov_b32 1
+  %value = concat(%14, %14, %14, %14, %14, %14, %14, %14, %14, %14, %14, %14, %14, %14, %14, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x16>
+  %31 = slice %value[0] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
+  %32 = v_mov_b32 0
+  %33 = s_mov_b32 64
+  %34 = s_add_u32 %row_offset, %33
+  %39 = slice %destination[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %40 = slice %destination[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %41 = s_mov_b32 65535
+  %42 = s_and_b32 %40, %41
+  %43 = concat(%39, %42) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %44 = s_mov_b32 822173696
+  %45 = concat(%43, %34, %44) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  buffer_store_b128<volatile> %31, %45, %32, %row_offset
+  %36 = slice %value[4] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
+  buffer_store_b128<volatile> %36, %45, %32, %row_offset {offset = 16}
+  %37 = slice %value[8] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
+  buffer_store_b128<volatile> %37, %45, %32, %row_offset {offset = 32}
+  %38 = slice %value[12] : reg<amdgpu.vgpr x16> -> reg<amdgpu.vgpr x4>
+  buffer_store_b128<volatile> %38, %45, %32, %row_offset {offset = 48}
   return
 }
 

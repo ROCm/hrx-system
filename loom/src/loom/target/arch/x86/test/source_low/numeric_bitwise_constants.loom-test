@@ -79,7 +79,8 @@ func.def @vector_i32x2_uniform_shift_left(%input_arg: buffer, %output_arg: buffe
   %input_view = buffer.view %input_buffer[%base] : buffer -> view<2xi32>
   %output_view = buffer.view %output_buffer[%base] : buffer -> view<2xi32>
   %input = vector.load %input_view[0] : view<2xi32> -> vector<2xi32>
-  %distance = vector.constant 23 : vector<2xi32>
+  %distance_scalar = scalar.constant 23 : i32
+  %distance = vector.splat %distance_scalar : vector<2xi32>
   %shifted = vector.shli %input, %distance : vector<2xi32>
   vector.store %shifted, %output_view[0] : vector<2xi32>, view<2xi32>
   func.return
@@ -87,14 +88,14 @@ func.def @vector_i32x2_uniform_shift_left(%input_arg: buffer, %output_arg: buffe
 
 // ----
 low.func.def target<x86.scalar.core> abi(object_function) @vector_i32x2_uniform_shift_left(%input_buffer: reg<x86.gpr64>, %output_buffer: reg<x86.gpr64>) asm {
-  %23 = mov.load.gpr32 %input_buffer {disp32 = 0}
-  %24 = mov.load.gpr32 %input_buffer {disp32 = 4}
-  %25 = copy %23 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %26 = shl.imm.gpr32 %25 {shift = 23}
-  %27 = copy %24 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %28 = shl.imm.gpr32 %27 {shift = 23}
-  mov.store.gpr32 %26, %output_buffer {disp32 = 0}
-  mov.store.gpr32 %28, %output_buffer {disp32 = 4}
+  %22 = mov.load.gpr32 %input_buffer {disp32 = 0}
+  %23 = mov.load.gpr32 %input_buffer {disp32 = 4}
+  %24 = copy %22 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %25 = shl.imm.gpr32 %24 {shift = 23}
+  %26 = copy %23 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %27 = shl.imm.gpr32 %26 {shift = 23}
+  mov.store.gpr32 %25, %output_buffer {disp32 = 0}
+  mov.store.gpr32 %27, %output_buffer {disp32 = 4}
   return
 }
 
@@ -107,7 +108,8 @@ func.def @vector_i32x2_uniform_shift_signed(%input_arg: buffer, %output_arg: buf
   %input_view = buffer.view %input_buffer[%base] : buffer -> view<2xi32>
   %output_view = buffer.view %output_buffer[%base] : buffer -> view<2xi32>
   %input = vector.load %input_view[0] : view<2xi32> -> vector<2xi32>
-  %distance = vector.constant 7 : vector<2xi32>
+  %distance_scalar = scalar.constant 7 : i32
+  %distance = vector.splat %distance_scalar : vector<2xi32>
   %shifted = vector.shrsi %input, %distance : vector<2xi32>
   vector.store %shifted, %output_view[0] : vector<2xi32>, view<2xi32>
   func.return
@@ -115,14 +117,14 @@ func.def @vector_i32x2_uniform_shift_signed(%input_arg: buffer, %output_arg: buf
 
 // ----
 low.func.def target<x86.scalar.core> abi(object_function) @vector_i32x2_uniform_shift_signed(%input_buffer: reg<x86.gpr64>, %output_buffer: reg<x86.gpr64>) asm {
-  %23 = mov.load.gpr32 %input_buffer {disp32 = 0}
-  %24 = mov.load.gpr32 %input_buffer {disp32 = 4}
-  %25 = copy %23 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %26 = sar.imm.gpr32 %25 {shift = 7}
-  %27 = copy %24 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %28 = sar.imm.gpr32 %27 {shift = 7}
-  mov.store.gpr32 %26, %output_buffer {disp32 = 0}
-  mov.store.gpr32 %28, %output_buffer {disp32 = 4}
+  %22 = mov.load.gpr32 %input_buffer {disp32 = 0}
+  %23 = mov.load.gpr32 %input_buffer {disp32 = 4}
+  %24 = copy %22 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %25 = sar.imm.gpr32 %24 {shift = 7}
+  %26 = copy %23 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %27 = sar.imm.gpr32 %26 {shift = 7}
+  mov.store.gpr32 %25, %output_buffer {disp32 = 0}
+  mov.store.gpr32 %27, %output_buffer {disp32 = 4}
   return
 }
 
@@ -135,7 +137,8 @@ func.def @vector_i32x2_uniform_shift_unsigned(%input_arg: buffer, %output_arg: b
   %input_view = buffer.view %input_buffer[%base] : buffer -> view<2xi32>
   %output_view = buffer.view %output_buffer[%base] : buffer -> view<2xi32>
   %input = vector.load %input_view[0] : view<2xi32> -> vector<2xi32>
-  %distance = vector.constant 31 : vector<2xi32>
+  %distance_scalar = scalar.constant 31 : i32
+  %distance = vector.splat %distance_scalar : vector<2xi32>
   %shifted = vector.shrui %input, %distance : vector<2xi32>
   vector.store %shifted, %output_view[0] : vector<2xi32>, view<2xi32>
   func.return
@@ -143,13 +146,13 @@ func.def @vector_i32x2_uniform_shift_unsigned(%input_arg: buffer, %output_arg: b
 
 // ----
 low.func.def target<x86.scalar.core> abi(object_function) @vector_i32x2_uniform_shift_unsigned(%input_buffer: reg<x86.gpr64>, %output_buffer: reg<x86.gpr64>) asm {
-  %23 = mov.load.gpr32 %input_buffer {disp32 = 0}
-  %24 = mov.load.gpr32 %input_buffer {disp32 = 4}
-  %25 = copy %23 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %26 = shr.imm.gpr32 %25 {shift = 31}
-  %27 = copy %24 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %28 = shr.imm.gpr32 %27 {shift = 31}
-  mov.store.gpr32 %26, %output_buffer {disp32 = 0}
-  mov.store.gpr32 %28, %output_buffer {disp32 = 4}
+  %22 = mov.load.gpr32 %input_buffer {disp32 = 0}
+  %23 = mov.load.gpr32 %input_buffer {disp32 = 4}
+  %24 = copy %22 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %25 = shr.imm.gpr32 %24 {shift = 31}
+  %26 = copy %23 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %27 = shr.imm.gpr32 %26 {shift = 31}
+  mov.store.gpr32 %25, %output_buffer {disp32 = 0}
+  mov.store.gpr32 %27, %output_buffer {disp32 = 4}
   return
 }

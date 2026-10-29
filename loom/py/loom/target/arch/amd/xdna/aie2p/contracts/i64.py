@@ -1341,14 +1341,16 @@ AIE2P_I64_RULES = (
             (_I64, _I64_VECTOR, _PairVectorCarrier.NATIVE),
             (_F64, _F64_VECTOR, _PairVectorCarrier.NATIVE),
             (
-                _F64,
-                Vector(
-                    "f64",
-                    minimum_static_elements=9,
-                    maximum_static_elements=16,
-                ),
+                _I64,
+                Vector("i64", minimum_static_elements=9, maximum_static_elements=16),
                 _PairVectorCarrier.WIDE,
             ),
+            (
+                _F64,
+                Vector("f64", minimum_static_elements=9, maximum_static_elements=16),
+                _PairVectorCarrier.WIDE,
+            ),
+            (_I64, Vector("i64", lanes=32), _PairVectorCarrier.ACCUMULATOR),
         )
     ),
 )

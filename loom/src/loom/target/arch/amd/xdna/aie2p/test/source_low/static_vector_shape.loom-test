@@ -139,10 +139,10 @@ func.def @broadcast_i64_wide_accumulator(%source: vector<1xi64>) -> (vector<32xi
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @broadcast_i64_wide_accumulator(%source: reg<aie2p.vec256 x2>) -> (reg<aie2p.mbms x4>) asm {
-  %15 = vextract.64.imm %source, 0
-  %16 = vbcst.64 %15
-  %19 = vmov.vector512.to.accumulator512 %16
-  %result = concat(%19, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %7 = vextract.64.imm %source, 0
+  %8 = vbcst.64 %7
+  %9 = vmov.vector512.to.accumulator512 %8
+  %result = concat(%9, %9, %9, %9) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
   return %result
 }
 

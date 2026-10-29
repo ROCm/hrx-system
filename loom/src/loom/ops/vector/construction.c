@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
@@ -1138,6 +1139,22 @@ static bool loom_vector_insert_chain_may_form_elements(
 
   const loom_op_t* base_op = loom_rewriter_value_defining_op(rewriter, base);
   if (base_op && loom_vector_splat_isa(base_op)) {
+    const loom_value_id_t scalar = loom_vector_splat_scalar(base_op);
+    const loom_type_t scalar_type =
+        loom_module_value_type(rewriter->module, scalar);
+    const loom_value_facts_t scalar_facts =
+        loom_value_fact_table_lookup(rewriter->fact_table, scalar);
+    if (loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_FLOAT,
+                                      loom_type_element_type(scalar_type))) {
+      uint64_t bits = 0;
+      if (loom_value_facts_as_exact_float_bits(
+              loom_type_element_type(scalar_type), scalar_facts, &bits) &&
+          bits == 0) {
+        return false;
+      }
+    } else if (loom_value_facts_is_zero(scalar_facts)) {
+      return false;
+    }
     return true;
   }
   return base_op && loom_vector_from_elements_isa(base_op) &&

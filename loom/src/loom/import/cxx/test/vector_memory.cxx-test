@@ -103,39 +103,43 @@ func.def public @load_masked(%input: buffer, %input_byte_offset: offset, %index:
   %source_layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<64xf32, %source_layout>
   %45 = index.cast %index : i64 to index
-  %46 = vector.constant 0 : vector<4xi8>
-  %47 = vector.cmpi ne, %mask, %46 : vector<4xi8> -> vector<4xi1>
-  %48 = vector.load.mask %source[%45], %47, %passthrough : view<64xf32, %source_layout>, vector<4xi1>, vector<4xf32>
-  func.return %48 : vector<4xf32>
+  %46 = scalar.constant 0 : i8
+  %47 = vector.splat %46 : vector<4xi8>
+  %48 = vector.cmpi ne, %mask, %47 : vector<4xi8> -> vector<4xi1>
+  %49 = vector.load.mask %source[%45], %48, %passthrough : view<64xf32, %source_layout>, vector<4xi1>, vector<4xf32>
+  func.return %49 : vector<4xf32>
 }
 
 func.def public @store_masked(%value: vector<4xf32>, %output: buffer, %output_byte_offset: offset, %index: i64, %mask: vector<4xi8>) {
   %destination_layout = encoding.layout.dense : encoding<layout>
   %destination = buffer.view %output[%output_byte_offset] : buffer -> view<64xf32, %destination_layout>
-  %56 = index.cast %index : i64 to index
-  %57 = vector.constant 0 : vector<4xi8>
-  %58 = vector.cmpi ne, %mask, %57 : vector<4xi8> -> vector<4xi1>
-  vector.store.mask %value, %destination[%56], %58 : vector<4xf32>, view<64xf32, %destination_layout>, vector<4xi1>
+  %57 = index.cast %index : i64 to index
+  %58 = scalar.constant 0 : i8
+  %59 = vector.splat %58 : vector<4xi8>
+  %60 = vector.cmpi ne, %mask, %59 : vector<4xi8> -> vector<4xi1>
+  vector.store.mask %value, %destination[%57], %60 : vector<4xf32>, view<64xf32, %destination_layout>, vector<4xi1>
   func.return
 }
 
 func.def public @load_expanded(%input: buffer, %input_byte_offset: offset, %index: i64, %mask: vector<4xi8>, %passthrough: vector<4xf32>) -> (vector<4xf32>) {
   %source_layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<64xf32, %source_layout>
-  %67 = index.cast %index : i64 to index
-  %68 = vector.constant 0 : vector<4xi8>
-  %69 = vector.cmpi ne, %mask, %68 : vector<4xi8> -> vector<4xi1>
-  %70 = vector.load.expand %source[%67], %69, %passthrough : view<64xf32, %source_layout>, vector<4xi1>, vector<4xf32>
-  func.return %70 : vector<4xf32>
+  %69 = index.cast %index : i64 to index
+  %70 = scalar.constant 0 : i8
+  %71 = vector.splat %70 : vector<4xi8>
+  %72 = vector.cmpi ne, %mask, %71 : vector<4xi8> -> vector<4xi1>
+  %73 = vector.load.expand %source[%69], %72, %passthrough : view<64xf32, %source_layout>, vector<4xi1>, vector<4xf32>
+  func.return %73 : vector<4xf32>
 }
 
 func.def public @store_compressed(%value: vector<4xf32>, %output: buffer, %output_byte_offset: offset, %index: i64, %mask: vector<4xi8>) {
   %destination_layout = encoding.layout.dense : encoding<layout>
   %destination = buffer.view %output[%output_byte_offset] : buffer -> view<64xf32, %destination_layout>
-  %78 = index.cast %index : i64 to index
-  %79 = vector.constant 0 : vector<4xi8>
-  %80 = vector.cmpi ne, %mask, %79 : vector<4xi8> -> vector<4xi1>
-  vector.store.compress %value, %destination[%78], %80 : vector<4xf32>, view<64xf32, %destination_layout>, vector<4xi1>
+  %81 = index.cast %index : i64 to index
+  %82 = scalar.constant 0 : i8
+  %83 = vector.splat %82 : vector<4xi8>
+  %84 = vector.cmpi ne, %mask, %83 : vector<4xi8> -> vector<4xi1>
+  vector.store.compress %value, %destination[%81], %84 : vector<4xf32>, view<64xf32, %destination_layout>, vector<4xi1>
   func.return
 }
 

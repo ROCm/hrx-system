@@ -162,7 +162,8 @@ func.def @zero_step(%count: index) -> (vector<[%count]xi1>) {
 
 // ----
 func.def @zero_step(%count: index) -> (vector<[%count]xi1>) {
-  %mask = vector.constant true : vector<[%count]xi1>
+  %6 = scalar.constant true : i1
+  %mask = vector.splat %6 : vector<[%count]xi1>
   func.return %mask : vector<[%count]xi1>
 }
 
@@ -182,7 +183,8 @@ func.def @bounded_shape(%rows_input: index, %lower_input: i8) {
 // ----
 func.def @bounded_shape(%rows_input: index, %lower_input: i8) {
   %rows = index.assume %rows_input [range(%rows_input, 1, 2)] : index
-  %mask = vector.constant true : vector<[%rows]x2xi1>
+  %7 = scalar.constant true : i1
+  %mask = vector.splat %7 : vector<[%rows]x2xi1>
   test.use %mask : vector<[%rows]x2xi1>
   func.return
 }

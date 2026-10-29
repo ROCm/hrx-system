@@ -259,14 +259,15 @@ pipeline.def @fixed_records() run(%storage: buffer) {
   %slots = buffer.view %storage[%origin] : buffer -> view<2x[%width]xi32>
   %channel = channel.bind<fifo> %slots, %capacity : view<2x[%width]xi32>, index -> channel<tile<[%width]xi32>>
   pipeline.strand workers([0], [1], [1]) {
-    func.call @__pipeline_strand_0(%width, %channel) : (index, channel<tile<[%width]xi32>>)
+    func.call @__pipeline_strand_0(%channel, %width) : (channel<tile<[%width]xi32>>, index)
   }
 }
 
-func.def inline @__pipeline_strand_0(%width: index, %channel: channel<tile<[%width]xi32>>) {
+func.def inline @__pipeline_strand_0(%channel: channel<tile<[%width]xi32>>, %width: index) {
   %write, %destination = channel.reserve %channel : channel<tile<[%width]xi32>> -> (write<tile<[%width]xi32>>, view<[%width]xi32>)
-  %values = vector.constant 0 : vector<8xi32>
-  vector.store %values, %destination[0] : vector<8xi32>, view<[%width]xi32>
+  %initial_value = scalar.constant 0 : i32
+  %values = vector.splat %initial_value : vector<[%width]xi32>
+  vector.store %values, %destination[0] : vector<[%width]xi32>, view<[%width]xi32>
   channel.publish %write : write<tile<[%width]xi32>>
   %read, %payload = channel.acquire %channel : channel<tile<[%width]xi32>> -> (read<tile<[%width]xi32>>, view<[%width]xi32>)
   channel.release %read : read<tile<[%width]xi32>>

@@ -383,7 +383,8 @@ func.def @decomposes_rank_two_divrem(%a: i32, %b: i32, %c: i32, %d: i32, %diviso
 func.def @decomposes_shaped_reduction(%a: i32, %b: i32, %c: i32, %d: i32, %e: i32, %f: i32) -> (i32) {
   %matrix = vector.from_elements %a, %b, %c, %d, %e, %f : vector<2x3xi32>
   %transpose = vector.transpose<[1, 0]> %matrix : vector<2x3xi32> -> vector<3x2xi32>
-  %initial = vector.constant 0 : vector<2xi32>
+  %initial_scalar = scalar.constant 0 : i32
+  %initial = vector.splat %initial_scalar : vector<2xi32>
   %rows = vector.reduce.axes<addi> %transpose, %initial axes [0] : vector<3x2xi32>, vector<2xi32>
   %left = vector.extract %rows[0] : vector<2xi32> -> i32
   %right = vector.extract %rows[1] : vector<2xi32> -> i32
@@ -393,13 +394,13 @@ func.def @decomposes_shaped_reduction(%a: i32, %b: i32, %c: i32, %d: i32, %e: i3
 
 // ----
 func.def @decomposes_shaped_reduction(%a: i32, %b: i32, %c: i32, %d: i32, %e: i32, %f: i32) -> (i32) {
-  %23 = vector.from_elements %a, %d : vector<2xi32>
-  %22 = vector.from_elements %b, %e : vector<2xi32>
-  %21 = vector.from_elements %c, %f : vector<2xi32>
-  %18 = vector.addi %22, %21 : vector<2xi32>
-  %19 = vector.addi %23, %18 : vector<2xi32>
-  %left = vector.extract %19[0] : vector<2xi32> -> i32
-  %right = vector.extract %19[1] : vector<2xi32> -> i32
+  %24 = vector.from_elements %a, %d : vector<2xi32>
+  %23 = vector.from_elements %b, %e : vector<2xi32>
+  %22 = vector.from_elements %c, %f : vector<2xi32>
+  %19 = vector.addi %23, %22 : vector<2xi32>
+  %20 = vector.addi %24, %19 : vector<2xi32>
+  %left = vector.extract %20[0] : vector<2xi32> -> i32
+  %right = vector.extract %20[1] : vector<2xi32> -> i32
   %result = scalar.subi %left, %right : i32
   func.return %result : i32
 }

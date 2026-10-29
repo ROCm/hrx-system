@@ -226,7 +226,8 @@ kernel.def @workgroup_cached_dot4i_u8s8_tile() {
   vector.store %lhs, %scratch_view[%lane, 0] : vector<16xi8>, view<64x16xi8>
   %lhs_cached = vector.load %scratch_view[%lane, 0] : view<64x16xi8> -> vector<16xi8>
   %rhs = vector.load %rhs_view[%lane, 0] : view<64x16xi8> -> vector<16xi8>
-  %acc = vector.constant 0 : vector<4xi32>
+  %acc_scalar = scalar.constant 0 : i32
+  %acc = vector.splat %acc_scalar : vector<4xi32>
   %dot = vector.dot4i<u8s8> %lhs_cached, %rhs, %acc : vector<16xi8>, vector<16xi8>, vector<4xi32>
   vector.store %dot, %output_view[%lane, 0] : vector<4xi32>, view<64x4xi32>
   kernel.return
@@ -238,27 +239,27 @@ low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 0, direct_
   %lhs_view = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %rhs_view = resource<hal_binding> {extent = 1024, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 1024, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %33 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
-  %35 = v_lshlrev_b32_src0_inline %lane, 4
-  %lhs = global_load_b128_saddr %35, %lhs_view
-  ds_write_b128 %35, %lhs
-  %lhs_cached = ds_read_b128 %35
-  %rhs = global_load_b128_saddr %35, %rhs_view
-  %42 = v_mov_b32 0
-  %47 = slice %lhs_cached[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %48 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %50 = v_dot4_i32_iu8_u8s8 %47, %48, %42
-  %51 = slice %lhs_cached[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %52 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %54 = v_dot4_i32_iu8_u8s8 %51, %52, %42
-  %55 = slice %lhs_cached[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %56 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %58 = v_dot4_i32_iu8_u8s8 %55, %56, %42
-  %59 = slice %lhs_cached[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %60 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %62 = v_dot4_i32_iu8_u8s8 %59, %60, %42
-  %dot = concat(%50, %54, %58, %62) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %35, %dot, %output_view
+  %34 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
+  %36 = v_lshlrev_b32_src0_inline %lane, 4
+  %lhs = global_load_b128_saddr %36, %lhs_view
+  ds_write_b128 %36, %lhs
+  %lhs_cached = ds_read_b128 %36
+  %rhs = global_load_b128_saddr %36, %rhs_view
+  %43 = v_mov_b32 0
+  %48 = slice %lhs_cached[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %49 = slice %rhs[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %51 = v_dot4_i32_iu8_u8s8 %48, %49, %43
+  %52 = slice %lhs_cached[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %53 = slice %rhs[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %55 = v_dot4_i32_iu8_u8s8 %52, %53, %43
+  %56 = slice %lhs_cached[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %57 = slice %rhs[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %59 = v_dot4_i32_iu8_u8s8 %56, %57, %43
+  %60 = slice %lhs_cached[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %61 = slice %rhs[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %63 = v_dot4_i32_iu8_u8s8 %60, %61, %43
+  %dot = concat(%51, %55, %59, %63) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %36, %dot, %output_view
   return
 }
 

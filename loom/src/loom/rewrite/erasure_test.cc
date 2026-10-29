@@ -159,12 +159,16 @@ TEST_F(ErasureTest, VectorMaterializationsFollowReplacementAndDeadProducers) {
   }
 
   loom_builder_set_before(&rewriter_.builder, pair);
+  loom_op_t* replacement_pair_scalar = nullptr;
+  IREE_ASSERT_OK(loom_scalar_constant_build(
+      &rewriter_.builder, loom_attr_i64(7), scalar_type, LOOM_LOCATION_UNKNOWN,
+      &replacement_pair_scalar));
   loom_op_t* replacement_pair = nullptr;
-  IREE_ASSERT_OK(loom_vector_constant_build(
-      &rewriter_.builder, loom_attr_i64(7), pair_type, LOOM_LOCATION_UNKNOWN,
-      &replacement_pair));
+  IREE_ASSERT_OK(loom_vector_splat_build(
+      &rewriter_.builder, loom_scalar_constant_result(replacement_pair_scalar),
+      pair_type, LOOM_LOCATION_UNKNOWN, &replacement_pair));
   const loom_value_id_t replacement_pair_value =
-      loom_vector_constant_result(replacement_pair);
+      loom_vector_splat_result(replacement_pair);
   IREE_ASSERT_OK(loom_rewriter_replace_all_uses_and_erase(
       &rewriter_, pair, &replacement_pair_value, 1));
   bool erased = false;
@@ -179,8 +183,8 @@ TEST_F(ErasureTest, VectorMaterializationsFollowReplacementAndDeadProducers) {
   EXPECT_EQ(snapshot.snapshot_components[0].value, replacement_pair_value);
   EXPECT_EQ(snapshot.snapshot_components[1].value, replacement_pair_value);
 
-  loom_op_t* consumed[] = {replacement_pair, full};
-  IREE_ASSERT_OK(loom_rewriter_erase_closed_set(&rewriter_, consumed, 2));
+  loom_op_t* consumed[] = {replacement_pair_scalar, replacement_pair, full};
+  IREE_ASSERT_OK(loom_rewriter_erase_closed_set(&rewriter_, consumed, 3));
   EXPECT_EQ(loom_value_fact_table_query_vector_partition(&facts, full_value)
                 .snapshot_count,
             0u);

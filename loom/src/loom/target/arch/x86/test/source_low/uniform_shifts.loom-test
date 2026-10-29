@@ -29,7 +29,8 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
 func.def @dword_counts(%values: vector<8xi32>, %raw_count: i32, %varying_counts: vector<8xi32>) -> (vector<8xi32>, vector<8xi32>, vector<8xi32>) {
   %count = scalar.assume %raw_count [range(%raw_count, 0, 31)] : i32
   %counts = vector.splat %count : vector<8xi32>
-  %fixed_counts = vector.constant 4 : vector<8xi32>
+  %fixed_counts_scalar = scalar.constant 4 : i32
+  %fixed_counts = vector.splat %fixed_counts_scalar : vector<8xi32>
   %left = vector.shli %values, %counts : vector<8xi32>
   %signed = vector.shrsi %values, %fixed_counts : vector<8xi32>
   %unsigned = vector.shrui %values, %varying_counts : vector<8xi32>
@@ -38,8 +39,8 @@ func.def @dword_counts(%values: vector<8xi32>, %raw_count: i32, %varying_counts:
 
 // ----
 low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<8xi32>, i32, vector<8xi32>) -> (vector<8xi32>, vector<8xi32>, vector<8xi32>)}) @dword_counts(%values: reg<x86.ymm>, %count: reg<x86.gpr32>, %varying_counts: reg<x86.ymm>) -> (reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>) asm {
-  %18 = vmovd.xmm.gpr32 %count
-  %left = vpslld.count.ymm %values, %18
+  %19 = vmovd.xmm.gpr32 %count
+  %left = vpslld.count.ymm %values, %19
   %signed = vpsrad.ymm %values, 4
   %unsigned = vpsrlvd.ymm %values, %varying_counts
   return %left, %signed, %unsigned
@@ -52,7 +53,8 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
 func.def @qword_counts(%values: vector<2xi64>, %raw_count: i64) -> (vector<2xi64>, vector<2xi64>) {
   %count = scalar.assume %raw_count [range(%raw_count, 0, 63)] : i64
   %counts = vector.splat %count : vector<2xi64>
-  %fixed_counts = vector.constant 63 : vector<2xi64>
+  %fixed_counts_scalar = scalar.constant 63 : i64
+  %fixed_counts = vector.splat %fixed_counts_scalar : vector<2xi64>
   %left = vector.shli %values, %counts : vector<2xi64>
   %unsigned = vector.shrui %values, %fixed_counts : vector<2xi64>
   func.return %left, %unsigned : vector<2xi64>, vector<2xi64>
@@ -60,8 +62,8 @@ func.def @qword_counts(%values: vector<2xi64>, %raw_count: i64) -> (vector<2xi64
 
 // ----
 low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>, i64) -> (vector<2xi64>, vector<2xi64>)}) @qword_counts(%values: reg<x86.xmm>, %count: reg<x86.gpr64>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
-  %13 = vmovq.xmm.gpr64 %count
-  %left = vpsllq.count.xmm %values, %13
+  %14 = vmovq.xmm.gpr64 %count
+  %left = vpsllq.count.xmm %values, %14
   %unsigned = vpsrlq.xmm %values, 63
   return %left, %unsigned
 }
@@ -74,7 +76,8 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
 func.def @wide_counts(%values: vector<8xi64>, %raw_count: i64) -> (vector<8xi64>, vector<8xi64>, vector<8xi64>, vector<8xi64>) {
   %count = scalar.assume %raw_count [range(%raw_count, 0, 63)] : i64
   %counts = vector.splat %count : vector<8xi64>
-  %fixed_counts = vector.constant 63 : vector<8xi64>
+  %fixed_counts_scalar = scalar.constant 63 : i64
+  %fixed_counts = vector.splat %fixed_counts_scalar : vector<8xi64>
   %runtime = vector.shrui %values, %counts : vector<8xi64>
   %left = vector.shli %values, %fixed_counts : vector<8xi64>
   %signed = vector.shrsi %values, %fixed_counts : vector<8xi64>
@@ -99,7 +102,8 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
 func.def @small_words(%values: vector<8xi16>, %raw_count: i16) -> (vector<8xi16>, vector<8xi16>) {
   %count = scalar.assume %raw_count [range(%raw_count, 0, 15)] : i16
   %counts = vector.splat %count : vector<8xi16>
-  %fixed_counts = vector.constant 4 : vector<8xi16>
+  %fixed_counts_scalar = scalar.constant 4 : i16
+  %fixed_counts = vector.splat %fixed_counts_scalar : vector<8xi16>
   %runtime = vector.shrui %values, %counts : vector<8xi16>
   %fixed = vector.shrui %values, %fixed_counts : vector<8xi16>
   func.return %runtime, %fixed : vector<8xi16>, vector<8xi16>
@@ -118,7 +122,8 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
 // AVX512VL supplies the qword arithmetic shift absent from AVX2.
 // RUN: emit source-low target=x86:avx512 output=low
 func.def @small_signed_qwords(%values: vector<4xi64>) -> (vector<4xi64>) {
-  %fixed_counts = vector.constant 63 : vector<4xi64>
+  %fixed_counts_scalar = scalar.constant 63 : i64
+  %fixed_counts = vector.splat %fixed_counts_scalar : vector<4xi64>
   %result = vector.shrsi %values, %fixed_counts : vector<4xi64>
   func.return %result : vector<4xi64>
 }
@@ -157,7 +162,8 @@ x86.target<avx2> @target {features = []}
 func.def target(@target) @host_avx2_counts(%values: vector<8xi32>, %raw_count: i32) -> (vector<8xi32>, vector<8xi32>) {
   %count = scalar.assume %raw_count [range(%raw_count, 0, 31)] : i32
   %counts = vector.splat %count : vector<8xi32>
-  %fixed_counts = vector.constant 4 : vector<8xi32>
+  %fixed_counts_scalar = scalar.constant 4 : i32
+  %fixed_counts = vector.splat %fixed_counts_scalar : vector<8xi32>
   %runtime = vector.shli %values, %counts : vector<8xi32>
   %fixed = vector.shrsi %values, %fixed_counts : vector<8xi32>
   func.return %runtime, %fixed : vector<8xi32>, vector<8xi32>
@@ -165,8 +171,8 @@ func.def target(@target) @host_avx2_counts(%values: vector<8xi32>, %raw_count: i
 
 // ----
 low.func.def target<x86.avx2_features.core>(@target) abi(object_function) abi_layout({signature = (vector<8xi32>, i32) -> (vector<8xi32>, vector<8xi32>)}) @host_avx2_counts(%values: reg<x86.ymm>, %count: reg<x86.gpr32>) -> (reg<x86.ymm>, reg<x86.ymm>) asm {
-  %13 = vmovd.xmm.gpr32 %count
-  %runtime = vpslld.count.ymm %values, %13
+  %14 = vmovd.xmm.gpr32 %count
+  %runtime = vpslld.count.ymm %values, %14
   %fixed = vpsrad.ymm %values, 4
   return %runtime, %fixed
 }
@@ -181,7 +187,8 @@ x86.target<avx512> @target {features = [-avx512vl]}
 func.def target(@target) @host_avx512_counts(%values: vector<8xi32>, %raw_count: i32) -> (vector<8xi32>, vector<8xi32>) {
   %count = scalar.assume %raw_count [range(%raw_count, 0, 31)] : i32
   %counts = vector.splat %count : vector<8xi32>
-  %fixed_counts = vector.constant 4 : vector<8xi32>
+  %fixed_counts_scalar = scalar.constant 4 : i32
+  %fixed_counts = vector.splat %fixed_counts_scalar : vector<8xi32>
   %runtime = vector.shli %values, %counts : vector<8xi32>
   %fixed = vector.shrsi %values, %fixed_counts : vector<8xi32>
   func.return %runtime, %fixed : vector<8xi32>, vector<8xi32>
@@ -189,8 +196,8 @@ func.def target(@target) @host_avx512_counts(%values: vector<8xi32>, %raw_count:
 
 // ----
 low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<8xi32>, i32) -> (vector<8xi32>, vector<8xi32>)}) @host_avx512_counts(%values: reg<x86.ymm>, %count: reg<x86.gpr32>) -> (reg<x86.ymm>, reg<x86.ymm>) asm {
-  %13 = vmovd.xmm.gpr32 %count
-  %runtime = vpslld.count.ymm %values, %13
+  %14 = vmovd.xmm.gpr32 %count
+  %runtime = vpslld.count.ymm %values, %14
   %fixed = vpsrad.ymm %values, 4
   return %runtime, %fixed
 }

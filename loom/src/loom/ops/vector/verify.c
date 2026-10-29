@@ -1571,6 +1571,10 @@ iree_status_t loom_vector_deinterleave_verify(
       IREE_SV("deinterleave axis extent half of source axis extent"));
 }
 
+static bool loom_vector_try_get_scalar_i64_constant(const loom_module_t* module,
+                                                    loom_value_id_t value_id,
+                                                    int64_t* out_value);
+
 static bool loom_vector_try_get_splat_i64_constant(const loom_module_t* module,
                                                    loom_value_id_t value_id,
                                                    int64_t* out_value) {
@@ -1579,7 +1583,14 @@ static bool loom_vector_try_get_splat_i64_constant(const loom_module_t* module,
     return false;
   }
   const loom_op_t* def_op = loom_value_def_op(value);
-  if (!def_op || !loom_vector_constant_isa(def_op)) {
+  if (!def_op) {
+    return false;
+  }
+  if (loom_vector_splat_isa(def_op)) {
+    return loom_vector_try_get_scalar_i64_constant(
+        module, loom_vector_splat_scalar(def_op), out_value);
+  }
+  if (!loom_vector_constant_isa(def_op)) {
     return false;
   }
   loom_attribute_t attr = loom_vector_constant_value(def_op);

@@ -16,6 +16,6 @@ func.def public @load_less(%input: buffer, %input_byte_offset: offset, %index: i
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<64xf32>
   %9 = vector.cmpf olt, %values, %limits : vector<4xf32> -> vector<4xi1>
   %11 = index.cast %index : i64 to index
-  %14 = vector.load.mask %source[%11], %9, %passthrough : view<64xf32>, vector<4xi1>, vector<4xf32>
-  func.return %14 : vector<4xf32>
+  %15 = vector.load.mask %source[%11], %9, %passthrough : view<64xf32>, vector<4xi1>, vector<4xf32>
+  func.return %15 : vector<4xf32>
 }

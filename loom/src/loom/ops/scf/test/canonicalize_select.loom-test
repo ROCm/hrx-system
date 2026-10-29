@@ -187,8 +187,10 @@ func.def @select_boolean_vectors(%condition: i1) -> (vector<4xi1>) {
 
 // ----
 func.def @select_boolean_vectors(%condition: i1) -> (vector<4xi1>) {
-  %zeros = vector.constant false : vector<4xi1>
-  %all_bits = vector.constant true : vector<4xi1>
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %zeros = vector.splat %false : vector<4xi1>
+  %all_bits = vector.splat %true : vector<4xi1>
   %result = scf.select %condition, %zeros, %all_bits : vector<4xi1>
   func.return %result : vector<4xi1>
 }

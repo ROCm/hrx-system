@@ -89,31 +89,32 @@ func.def public @entry(%input: buffer, %input_byte_offset: offset, %output: buff
   %69 = index.cast %68 : i64 to offset
   %70 = buffer.view %masks[%69] : buffer -> view<16xi32>
   vector.store %61, %70[0] : vector<16xi32>, view<16xi32>
-  %71 = vector.constant 0 : vector<16xi32>
-  %72 = vector.cmpi eq, %value$37, %71 : vector<16xi32> -> vector<16xi1>
-  %73 = vector.extsi %72 : vector<16xi1> to vector<16xi32>
-  %74 = scalar.constant 1 : i32
-  %75 = scalar.extsi %74 : i32 to i64
-  %76 = scalar.constant 64 : i64
-  %77 = scalar.muli %75, %76 : i64
-  %78 = index.cast %masks_byte_offset : offset to i64
-  %79 = scalar.addi %78, %77 : i64
-  %80 = scalar.assume %79 [range(%79, 0, 9223372036854775807)] : i64
-  %81 = index.cast %80 : i64 to offset
-  %82 = buffer.view %masks[%81] : buffer -> view<16xi32>
-  vector.store %73, %82[0] : vector<16xi32>, view<16xi32>
+  %71 = scalar.constant 0 : i32
+  %72 = vector.splat %71 : vector<16xi32>
+  %73 = vector.cmpi eq, %value$37, %72 : vector<16xi32> -> vector<16xi1>
+  %74 = vector.extsi %73 : vector<16xi1> to vector<16xi32>
+  %75 = scalar.constant 1 : i32
+  %76 = scalar.extsi %75 : i32 to i64
+  %77 = scalar.constant 64 : i64
+  %78 = scalar.muli %76, %77 : i64
+  %79 = index.cast %masks_byte_offset : offset to i64
+  %80 = scalar.addi %79, %78 : i64
+  %81 = scalar.assume %80 [range(%80, 0, 9223372036854775807)] : i64
+  %82 = index.cast %81 : i64 to offset
+  %83 = buffer.view %masks[%82] : buffer -> view<16xi32>
+  vector.store %74, %83[0] : vector<16xi32>, view<16xi32>
   func.return
 }
 
 func.def @update(%value: vector<16xi32>, %depth: vector<16xi32>) -> (vector<16xi32>) {
-  %86 = scalar.constant 65535 : i32
-  %87 = vector.splat %86 : vector<16xi32>
-  %88 = vector.andi %value, %87 : vector<16xi32>
-  %89 = scalar.constant -65536 : i32
-  %90 = vector.splat %89 : vector<16xi32>
-  %91 = vector.andi %depth, %90 : vector<16xi32>
-  %92 = vector.ori %88, %91 : vector<16xi32>
-  func.return %92 : vector<16xi32>
+  %87 = scalar.constant 65535 : i32
+  %88 = vector.splat %87 : vector<16xi32>
+  %89 = vector.andi %value, %88 : vector<16xi32>
+  %90 = scalar.constant -65536 : i32
+  %91 = vector.splat %90 : vector<16xi32>
+  %92 = vector.andi %depth, %91 : vector<16xi32>
+  %93 = vector.ori %89, %92 : vector<16xi32>
+  func.return %93 : vector<16xi32>
 }
 
 // ====

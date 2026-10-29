@@ -108,7 +108,8 @@ func.def @vector_i32x16_uniform_shift_left(%input_arg: buffer, %output_arg: buff
   %input_view = buffer.view %input_buffer[%base] : buffer -> view<16xi32>
   %output_view = buffer.view %output_buffer[%base] : buffer -> view<16xi32>
   %input = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
-  %distance = vector.constant 23 : vector<16xi32>
+  %distance_scalar = scalar.constant 23 : i32
+  %distance = vector.splat %distance_scalar : vector<16xi32>
   %shifted = vector.shli %input, %distance : vector<16xi32>
   vector.store %shifted, %output_view[0] : vector<16xi32>, view<16xi32>
   func.return
@@ -119,14 +120,14 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_i32x16_uni
   %input_buffer = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_buffer = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %input = vlda.512.i32x16 %input_buffer, 0
-  %13 = mov.shift 23
-  %14 = mov.shift 0
+  %14 = mov.shift 23
+  %15 = mov.shift 0
   set.saturation 0
   set.ups-mode 1
   set.srs-mode 1
   set.rounding 0
-  %15 = vups.2x.x-to-c.unsigned %input, %13
-  %shifted = vsrs.2x.c-to-x.unsigned %15, %14
+  %16 = vups.2x.x-to-c.unsigned %input, %14
+  %shifted = vsrs.2x.c-to-x.unsigned %16, %15
   vst.512.i32x16 %shifted, %output_buffer, 0
   return
 }
@@ -140,7 +141,8 @@ func.def @vector_i32x16_uniform_shift_signed(%input_arg: buffer, %output_arg: bu
   %input_view = buffer.view %input_buffer[%base] : buffer -> view<16xi32>
   %output_view = buffer.view %output_buffer[%base] : buffer -> view<16xi32>
   %input = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
-  %distance = vector.constant 7 : vector<16xi32>
+  %distance_scalar = scalar.constant 7 : i32
+  %distance = vector.splat %distance_scalar : vector<16xi32>
   %shifted = vector.shrsi %input, %distance : vector<16xi32>
   vector.store %shifted, %output_view[0] : vector<16xi32>, view<16xi32>
   func.return
@@ -151,14 +153,14 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_i32x16_uni
   %input_buffer = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_buffer = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %input = vlda.512.i32x16 %input_buffer, 0
-  %13 = mov.shift 0
-  %14 = mov.shift 7
+  %14 = mov.shift 0
+  %15 = mov.shift 7
   set.saturation 0
   set.ups-mode 1
   set.srs-mode 1
   set.rounding 0
-  %15 = vups.2x.x-to-c.signed %input, %13
-  %shifted = vsrs.2x.c-to-x.signed %15, %14
+  %16 = vups.2x.x-to-c.signed %input, %14
+  %shifted = vsrs.2x.c-to-x.signed %16, %15
   vst.512.i32x16 %shifted, %output_buffer, 0
   return
 }
@@ -172,7 +174,8 @@ func.def @vector_i32x16_uniform_shift_unsigned(%input_arg: buffer, %output_arg: 
   %input_view = buffer.view %input_buffer[%base] : buffer -> view<16xi32>
   %output_view = buffer.view %output_buffer[%base] : buffer -> view<16xi32>
   %input = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
-  %distance = vector.constant 31 : vector<16xi32>
+  %distance_scalar = scalar.constant 31 : i32
+  %distance = vector.splat %distance_scalar : vector<16xi32>
   %shifted = vector.shrui %input, %distance : vector<16xi32>
   vector.store %shifted, %output_view[0] : vector<16xi32>, view<16xi32>
   func.return
@@ -183,14 +186,14 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_i32x16_uni
   %input_buffer = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_buffer = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %input = vlda.512.i32x16 %input_buffer, 0
-  %13 = mov.shift 0
-  %14 = mov.shift 31
+  %14 = mov.shift 0
+  %15 = mov.shift 31
   set.saturation 0
   set.ups-mode 1
   set.srs-mode 1
   set.rounding 0
-  %15 = vups.2x.x-to-c.unsigned %input, %13
-  %shifted = vsrs.2x.c-to-x.unsigned %15, %14
+  %16 = vups.2x.x-to-c.unsigned %input, %14
+  %shifted = vsrs.2x.c-to-x.unsigned %16, %15
   vst.512.i32x16 %shifted, %output_buffer, 0
   return
 }

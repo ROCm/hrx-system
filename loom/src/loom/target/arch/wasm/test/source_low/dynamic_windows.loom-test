@@ -35,7 +35,8 @@ func.def @shared_dynamic_predicate_windows(%trial0: index, %input: buffer, %outp
   %source_view = buffer.view %input[%base] : buffer -> view<12xi32>
   %result_view = buffer.view %output[%base] : buffer -> view<8xi8>
   %source = vector.load %source_view[0] : view<12xi32> -> vector<12xi32>
-  %c0 = vector.constant 0 : vector<12xi32>
+  %c0_scalar = scalar.constant 0 : i32
+  %c0 = vector.splat %c0_scalar : vector<12xi32>
   %predicates = vector.cmpi ne, %source, %c0 : vector<12xi32> -> vector<12xi1>
   %first = vector.slice %predicates[%trial] : vector<12xi1> -> vector<4xi1>
   %second = vector.slice %predicates[%second_offset] : vector<12xi1> -> vector<4xi1>
@@ -48,24 +49,24 @@ func.def @shared_dynamic_predicate_windows(%trial0: index, %input: buffer, %outp
 
 // ----
 low.func.def target<wasm.core.simd128> abi(wasm_function) @shared_dynamic_predicate_windows(%trial: reg<wasm.i32>, %input: reg<wasm.i32>, %output: reg<wasm.i32>) asm {
-  %33 = i32.const 4
-  %34 = i32.mul %trial, %33
-  %35 = i32.add %input, %34
-  %36 = v128.load %35
-  %37 = i32.const 0
-  %38 = i32x4.splat %37
-  %39 = i32x4.ne %36, %38
-  %first = i8x16.shuffle %39, %39, 0, 4, 8, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-  %42 = v128.load %35 {offset = 16}
-  %43 = i32x4.ne %42, %38
-  %second = i8x16.shuffle %43, %43, 0, 4, 8, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-  %45 = v128.const 72340172838076673, 72340172838076673
-  %first_bytes = v128.and %first, %45
-  %second_bytes = v128.and %second, %45
-  %49 = i32x4.extract_lane %first_bytes, 0
-  i32.store %output, %49
-  %50 = i32x4.extract_lane %second_bytes, 0
-  i32.store %output, %50 {offset = 4}
+  %c0_scalar = i32.const 0
+  %35 = i32.const 4
+  %36 = i32.mul %trial, %35
+  %37 = i32.add %input, %36
+  %38 = v128.load %37
+  %39 = i32x4.splat %c0_scalar
+  %40 = i32x4.ne %38, %39
+  %first = i8x16.shuffle %40, %40, 0, 4, 8, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  %43 = v128.load %37 {offset = 16}
+  %44 = i32x4.ne %43, %39
+  %second = i8x16.shuffle %44, %44, 0, 4, 8, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  %46 = v128.const 72340172838076673, 72340172838076673
+  %first_bytes = v128.and %first, %46
+  %second_bytes = v128.and %second, %46
+  %50 = i32x4.extract_lane %first_bytes, 0
+  i32.store %output, %50
+  %51 = i32x4.extract_lane %second_bytes, 0
+  i32.store %output, %51 {offset = 4}
   return
 }
 

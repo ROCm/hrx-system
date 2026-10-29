@@ -10,9 +10,12 @@ kernel.def @signed_wrapping_k16() {
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=i32, payload_elements=8, payload_registers=8>> : encoding<storage>
   %destination = buffer.view %aligned[%origin] : buffer -> view<16x16xi32, %storage>
-  %a_values = vector.constant -2 : vector<1xi8>
-  %b_values = vector.constant 3 : vector<1xi8>
-  %c_values = vector.constant 7 : vector<1xi32>
+  %a_values_scalar = scalar.constant -2 : i8
+  %a_values = vector.splat %a_values_scalar : vector<1xi8>
+  %b_values_scalar = scalar.constant 3 : i8
+  %b_values = vector.splat %b_values_scalar : vector<1xi8>
+  %c_values_scalar = scalar.constant 7 : i32
+  %c_values = vector.splat %c_values_scalar : vector<1xi32>
   %lhs = vector.fragment<lhs> %a_values shape [%tile, %tile] : vector<1xi8>
   %rhs = vector.fragment<rhs> %b_values shape [%tile, %tile] : vector<1xi8>
   %initial = vector.fragment<init> %c_values shape [%tile, %tile] : vector<1xi32>
@@ -24,18 +27,18 @@ kernel.def @signed_wrapping_k16() {
 // ----
 low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer) -> ()}) workgroup_count(1, 1, 1) @signed_wrapping_k16() asm {
   %aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %16 = OpConstant.i8 -2 : reg<spirv.id>
-  %lhs = OpCompositeConstruct.cooperative.i8.16x16.lhs %16 : reg<spirv.id : spirv.cooperative_matrix<16x16xs8, subgroup, matrix_a>>
-  %18 = OpConstant.i8 3 : reg<spirv.id>
-  %rhs = OpCompositeConstruct.cooperative.i8.16x16.rhs %18 : reg<spirv.id : spirv.cooperative_matrix<16x16xs8, subgroup, matrix_b>>
-  %20 = OpConstant.i32 7 : reg<spirv.id>
-  %initial = OpCompositeConstruct.cooperative.i32.16x16.accumulator %20 : reg<spirv.id : spirv.cooperative_matrix<16x16xs32, subgroup, matrix_accumulator>>
+  %19 = OpConstant.i8 -2 : reg<spirv.id>
+  %lhs = OpCompositeConstruct.cooperative.i8.16x16.lhs %19 : reg<spirv.id : spirv.cooperative_matrix<16x16xs8, subgroup, matrix_a>>
+  %21 = OpConstant.i8 3 : reg<spirv.id>
+  %rhs = OpCompositeConstruct.cooperative.i8.16x16.rhs %21 : reg<spirv.id : spirv.cooperative_matrix<16x16xs8, subgroup, matrix_b>>
+  %23 = OpConstant.i32 7 : reg<spirv.id>
+  %initial = OpCompositeConstruct.cooperative.i32.16x16.accumulator %23 : reg<spirv.id : spirv.cooperative_matrix<16x16xs32, subgroup, matrix_accumulator>>
   %result = OpCooperativeMatrixMulAddKHR.s8.16x16x16.s32.subgroup %lhs, %rhs, %initial : reg<spirv.id : spirv.cooperative_matrix<16x16xs32, subgroup, matrix_accumulator>>
-  %23 = OpConstant.offset64 16
-  %24 = OpUConvert.offset64.u32 %23
-  %25 = OpConstant.offset64 0
-  %26 = OpPtrAccessChain.storage_buffer.i32.byte_offset %aligned, %25
-  OpCooperativeMatrixStoreKHR.result.i32.16x16.subgroup.storage_buffer %26, %result, %24, 0
+  %26 = OpConstant.offset64 16
+  %27 = OpUConvert.offset64.u32 %26
+  %28 = OpConstant.offset64 0
+  %29 = OpPtrAccessChain.storage_buffer.i32.byte_offset %aligned, %28
+  OpCooperativeMatrixStoreKHR.result.i32.16x16.subgroup.storage_buffer %29, %result, %27, 0
   return
 }
 
@@ -57,9 +60,12 @@ kernel.def @mixed_signed_saturating_k16() {
   %lhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=16, payload_registers=4> : encoding<schema>
   %rhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=16, payload_registers=4> : encoding<schema>
   %acc_schema = encoding.define #encoding.operand<element_format=i32, payload_elements=8, payload_registers=8> : encoding<schema>
-  %a_values = vector.constant -2 : vector<1xi8>
-  %b_values = vector.constant 3 : vector<1xi8>
-  %c_values = vector.constant 7 : vector<1xi32>
+  %a_values_scalar = scalar.constant -2 : i8
+  %a_values = vector.splat %a_values_scalar : vector<1xi8>
+  %b_values_scalar = scalar.constant 3 : i8
+  %b_values = vector.splat %b_values_scalar : vector<1xi8>
+  %c_values_scalar = scalar.constant 7 : i32
+  %c_values = vector.splat %c_values_scalar : vector<1xi32>
   %lhs = vector.fragment<lhs> %a_values shape [%tile, %reduction] using {schema = %lhs_schema : encoding<schema>} : vector<1xi8>
   %rhs = vector.fragment<rhs> %b_values shape [%reduction, %tile] using {schema = %rhs_schema : encoding<schema>} : vector<1xi8>
   %initial = vector.fragment<init> %c_values shape [%tile, %tile] using {schema = %acc_schema : encoding<schema>} : vector<1xi32>
@@ -71,19 +77,19 @@ kernel.def @mixed_signed_saturating_k16() {
 // ----
 low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer) -> ()}) workgroup_count(1, 1, 1) @mixed_signed_saturating_k16() asm {
   %aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %20 = OpConstant.i8 -2 : reg<spirv.id>
-  %lhs = OpCompositeConstruct.cooperative.i8.16x16.lhs %20 : reg<spirv.id : spirv.cooperative_matrix<16x16xs8, subgroup, matrix_a>>
-  %22 = OpConstant.i8 3 : reg<spirv.id>
-  %23 = OpBitcast.i8.u8 %22
-  %rhs = OpCompositeConstruct.cooperative.u8.16x16.rhs %23 : reg<spirv.id : spirv.cooperative_matrix<16x16xu8, subgroup, matrix_b>>
-  %25 = OpConstant.i32 7 : reg<spirv.id>
-  %initial = OpCompositeConstruct.cooperative.i32.16x16.accumulator %25 : reg<spirv.id : spirv.cooperative_matrix<16x16xs32, subgroup, matrix_accumulator>>
+  %23 = OpConstant.i8 -2 : reg<spirv.id>
+  %lhs = OpCompositeConstruct.cooperative.i8.16x16.lhs %23 : reg<spirv.id : spirv.cooperative_matrix<16x16xs8, subgroup, matrix_a>>
+  %25 = OpConstant.i8 3 : reg<spirv.id>
+  %26 = OpBitcast.i8.u8 %25
+  %rhs = OpCompositeConstruct.cooperative.u8.16x16.rhs %26 : reg<spirv.id : spirv.cooperative_matrix<16x16xu8, subgroup, matrix_b>>
+  %28 = OpConstant.i32 7 : reg<spirv.id>
+  %initial = OpCompositeConstruct.cooperative.i32.16x16.accumulator %28 : reg<spirv.id : spirv.cooperative_matrix<16x16xs32, subgroup, matrix_accumulator>>
   %result = OpCooperativeMatrixMulAddKHR.s8_u8.16x16x16.s32.subgroup.saturating %lhs, %rhs, %initial : reg<spirv.id : spirv.cooperative_matrix<16x16xs32, subgroup, matrix_accumulator>>
-  %28 = OpConstant.offset64 16
-  %29 = OpUConvert.offset64.u32 %28
-  %30 = OpConstant.offset64 0
-  %31 = OpPtrAccessChain.storage_buffer.i32.byte_offset %aligned, %30
-  OpCooperativeMatrixStoreKHR.result.i32.16x16.subgroup.storage_buffer %31, %result, %29, 0
+  %31 = OpConstant.offset64 16
+  %32 = OpUConvert.offset64.u32 %31
+  %33 = OpConstant.offset64 0
+  %34 = OpPtrAccessChain.storage_buffer.i32.byte_offset %aligned, %33
+  OpCooperativeMatrixStoreKHR.result.i32.16x16.subgroup.storage_buffer %34, %result, %32, 0
   return
 }
 
@@ -105,9 +111,12 @@ kernel.def @mixed_unsigned_saturating_k32() {
   %lhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=32, payload_registers=8> : encoding<schema>
   %rhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_registers=8> : encoding<schema>
   %acc_schema = encoding.define #encoding.operand<element_format=u32, payload_elements=8, payload_registers=8> : encoding<schema>
-  %a_values = vector.constant -2 : vector<1xi8>
-  %b_values = vector.constant 3 : vector<1xi8>
-  %c_values = vector.constant 7 : vector<1xi32>
+  %a_values_scalar = scalar.constant -2 : i8
+  %a_values = vector.splat %a_values_scalar : vector<1xi8>
+  %b_values_scalar = scalar.constant 3 : i8
+  %b_values = vector.splat %b_values_scalar : vector<1xi8>
+  %c_values_scalar = scalar.constant 7 : i32
+  %c_values = vector.splat %c_values_scalar : vector<1xi32>
   %lhs = vector.fragment<lhs> %a_values shape [%tile, %reduction] using {schema = %lhs_schema : encoding<schema>} : vector<1xi8>
   %rhs = vector.fragment<rhs> %b_values shape [%reduction, %tile] using {schema = %rhs_schema : encoding<schema>} : vector<1xi8>
   %initial = vector.fragment<init> %c_values shape [%tile, %tile] using {schema = %acc_schema : encoding<schema>} : vector<1xi32>
@@ -119,19 +128,19 @@ kernel.def @mixed_unsigned_saturating_k32() {
 // ----
 low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer) -> ()}) workgroup_count(1, 1, 1) @mixed_unsigned_saturating_k32() asm {
   %aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %20 = OpConstant.i8 -2 : reg<spirv.id>
-  %21 = OpBitcast.i8.u8 %20
-  %lhs = OpCompositeConstruct.cooperative.u8.16x32.lhs %21 : reg<spirv.id : spirv.cooperative_matrix<16x32xu8, subgroup, matrix_a>>
-  %23 = OpConstant.i8 3 : reg<spirv.id>
-  %rhs = OpCompositeConstruct.cooperative.i8.32x16.rhs %23 : reg<spirv.id : spirv.cooperative_matrix<32x16xs8, subgroup, matrix_b>>
-  %25 = OpConstant.i32 7 : reg<spirv.id>
-  %26 = OpBitcast.i32.u32 %25
-  %initial = OpCompositeConstruct.cooperative.u32.16x16.accumulator %26 : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %23 = OpConstant.i8 -2 : reg<spirv.id>
+  %24 = OpBitcast.i8.u8 %23
+  %lhs = OpCompositeConstruct.cooperative.u8.16x32.lhs %24 : reg<spirv.id : spirv.cooperative_matrix<16x32xu8, subgroup, matrix_a>>
+  %26 = OpConstant.i8 3 : reg<spirv.id>
+  %rhs = OpCompositeConstruct.cooperative.i8.32x16.rhs %26 : reg<spirv.id : spirv.cooperative_matrix<32x16xs8, subgroup, matrix_b>>
+  %28 = OpConstant.i32 7 : reg<spirv.id>
+  %29 = OpBitcast.i32.u32 %28
+  %initial = OpCompositeConstruct.cooperative.u32.16x16.accumulator %29 : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
   %result = OpCooperativeMatrixMulAddKHR.u8_s8.16x16x32.u32.subgroup.saturating %lhs, %rhs, %initial : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
-  %29 = OpConstant.offset64 16
-  %30 = OpUConvert.offset64.u32 %29
-  %31 = OpConstant.offset64 0
-  %32 = OpPtrAccessChain.storage_buffer.u32.byte_offset %aligned, %31
-  OpCooperativeMatrixStoreKHR.result.u32.16x16.subgroup.storage_buffer %32, %result, %30, 0
+  %32 = OpConstant.offset64 16
+  %33 = OpUConvert.offset64.u32 %32
+  %34 = OpConstant.offset64 0
+  %35 = OpPtrAccessChain.storage_buffer.u32.byte_offset %aligned, %34
+  OpCooperativeMatrixStoreKHR.result.u32.16x16.subgroup.storage_buffer %35, %result, %33, 0
   return
 }

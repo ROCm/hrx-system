@@ -161,11 +161,14 @@ func.def @vector_integer_identity(%value: vector<4xi32>, %take: vector<4xi1>) ->
 func.def @vector_integer_identity(%value: vector<4xi32>, %take: vector<4xi1>) -> (vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi1>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>, vector<4xi32>) {
   %extent = index.constant 2 : index
   %fragment = vector.fragment<lhs> %value shape [%extent, %extent] : vector<4xi32>
-  %difference = vector.constant 0 : vector<4xi32>
-  %exclusive = vector.constant 0 : vector<4xi32>
+  %28 = scalar.constant 0 : i32
+  %difference = vector.splat %28 : vector<4xi32>
+  %26 = scalar.constant 0 : i32
+  %exclusive = vector.splat %26 : vector<4xi32>
   %both = vector.andi %fragment, %value : vector<4xi32>
   %selected = vector.select %take, %value, %fragment : vector<4xi32>
-  %equal = vector.constant true : vector<4xi1>
+  %24 = scalar.constant true : i1
+  %equal = vector.splat %24 : vector<4xi1>
   %either = vector.ori %value, %fragment : vector<4xi32>
   %signed_low = vector.minsi %value, %fragment : vector<4xi32>
   %signed_high = vector.maxsi %fragment, %value : vector<4xi32>
@@ -190,8 +193,10 @@ func.def @vector_float_identity(%value: vector<4xf32>) -> (vector<4xi1>, vector<
   %extent = index.constant 2 : index
   %fragment = vector.fragment<lhs> %value shape [%extent, %extent] : vector<4xf32>
   %ordered_equal = vector.cmpf oeq, %fragment, %value : vector<4xf32> -> vector<4xi1>
-  %unordered_equal = vector.constant true : vector<4xi1>
-  %finite_equal = vector.constant true : vector<4xi1>
+  %11 = scalar.constant true : i1
+  %unordered_equal = vector.splat %11 : vector<4xi1>
+  %9 = scalar.constant true : i1
+  %finite_equal = vector.splat %9 : vector<4xi1>
   func.return %ordered_equal, %unordered_equal, %finite_equal : vector<4xi1>, vector<4xi1>, vector<4xi1>
 }
 

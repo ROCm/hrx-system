@@ -476,6 +476,11 @@ static bool loom_vector_component_root_is_selected(
   if (root_index == component_root_index) {
     return true;
   }
+  // An undemanded direct producer remains an authored boundary. Its own
+  // producers cannot move past it with a later demanded consumer.
+  if (!plan->records[root_index].demanded) {
+    return false;
+  }
   for (uint16_t i = 0; i < record->op->operand_count; ++i) {
     if (loom_vector_component_operand_root(plan, record, i) == root_index) {
       return true;

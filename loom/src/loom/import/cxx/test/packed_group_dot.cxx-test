@@ -4,11 +4,13 @@
 
 // ----
 func.def public @packed_group_dot(%table: vector<16xi8>, %packed: vector<16xi8>, %activations_low: vector<16xbf16>, %activations_high: vector<16xbf16>, %scale: f32, %seed: f32) -> (f32) {
-  %266 = vector.constant 15 : vector<16xi8>
-  %10 = vector.andi %packed, %266 : vector<16xi8>
+  %266 = scalar.constant 15 : i8
+  %9 = vector.splat %266 : vector<16xi8>
+  %10 = vector.andi %packed, %9 : vector<16xi8>
   %low_codes = vector.table.lookup %table[%10] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
-  %261 = vector.constant 4 : vector<16xi8>
-  %15 = vector.shrui %packed, %261 : vector<16xi8>
+  %261 = scalar.constant 4 : i8
+  %14 = vector.splat %261 : vector<16xi8>
+  %15 = vector.shrui %packed, %14 : vector<16xi8>
   %high_codes = vector.table.lookup %table[%15] : vector<16xi8>, vector<16xi8> -> vector<16xi8>
   %low_weights = vector.sitofp %low_codes : vector<16xi8> to vector<16xbf16>
   %high_weights = vector.sitofp %high_codes : vector<16xi8> to vector<16xbf16>

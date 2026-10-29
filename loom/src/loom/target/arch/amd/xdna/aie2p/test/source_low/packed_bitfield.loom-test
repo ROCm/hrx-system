@@ -129,52 +129,53 @@ func.def @i32_bitfield_b128_shape(%loaded: vector<4xi32>) -> (vector<4xi32>) {
   %low = vector.bitfield.extractu %loaded {offset = 0, width = 4} : vector<4xi32> -> vector<4xi32>
   %high = vector.bitfield.extractu %loaded {offset = 4, width = 2} : vector<4xi32> -> vector<4xi32>
   %merged = vector.bitfield.insert %high into %low {offset = 4, width = 2} : vector<4xi32>, vector<4xi32>
-  %bias = vector.constant 32 : vector<4xi32>
+  %bias_scalar = scalar.constant 32 : i32
+  %bias = vector.splat %bias_scalar : vector<4xi32>
   %result = vector.subi %merged, %bias : vector<4xi32>
   func.return %result : vector<4xi32>
 }
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_bitfield_b128_shape(%loaded: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %76 = vextract.32.imm %loaded, 0
-  %77 = mov.short 15
-  %78 = and %76, %77
-  %79 = vextract.32.imm %loaded, 1
-  %80 = and %79, %77
-  %81 = vextract.32.imm %loaded, 2
-  %82 = and %81, %77
-  %83 = vextract.32.imm %loaded, 3
-  %84 = and %83, %77
-  %85 = mov.short 26
-  %86 = lshl %76, %85
-  %87 = mov.short -30
-  %88 = lshl %86, %87
-  %90 = lshl %79, %85
-  %92 = lshl %90, %87
-  %94 = lshl %81, %85
-  %96 = lshl %94, %87
-  %98 = lshl %83, %85
-  %100 = lshl %98, %87
-  %101 = mov.short 4
-  %102 = lshl %88, %101
-  %103 = mov.short -49
-  %104 = and %78, %103
-  %105 = or %104, %102
-  %106 = lshl %92, %101
-  %107 = and %80, %103
-  %108 = or %107, %106
-  %109 = lshl %96, %101
-  %110 = and %82, %103
-  %111 = or %110, %109
-  %112 = lshl %100, %101
-  %113 = and %84, %103
-  %114 = or %113, %112
-  %115 = vbcst.32 %114
-  %116 = vpush.lo.32 %111, %115
-  %117 = vpush.lo.32 %108, %116
-  %merged = vpush.lo.32 %105, %117
-  %119 = mov.short 32
-  %bias = vbcst.32 %119
+  %77 = vextract.32.imm %loaded, 0
+  %78 = mov.short 15
+  %79 = and %77, %78
+  %80 = vextract.32.imm %loaded, 1
+  %81 = and %80, %78
+  %82 = vextract.32.imm %loaded, 2
+  %83 = and %82, %78
+  %84 = vextract.32.imm %loaded, 3
+  %85 = and %84, %78
+  %86 = mov.short 26
+  %87 = lshl %77, %86
+  %88 = mov.short -30
+  %89 = lshl %87, %88
+  %91 = lshl %80, %86
+  %93 = lshl %91, %88
+  %95 = lshl %82, %86
+  %97 = lshl %95, %88
+  %99 = lshl %84, %86
+  %101 = lshl %99, %88
+  %102 = mov.short 4
+  %103 = lshl %89, %102
+  %104 = mov.short -49
+  %105 = and %79, %104
+  %106 = or %105, %103
+  %107 = lshl %93, %102
+  %108 = and %81, %104
+  %109 = or %108, %107
+  %110 = lshl %97, %102
+  %111 = and %83, %104
+  %112 = or %111, %110
+  %113 = lshl %101, %102
+  %114 = and %85, %104
+  %115 = or %114, %113
+  %116 = vbcst.32 %115
+  %117 = vpush.lo.32 %112, %116
+  %118 = vpush.lo.32 %109, %117
+  %merged = vpush.lo.32 %106, %118
+  %bias_scalar = mov.short 32
+  %bias = vbcst.32 %bias_scalar
   %result = vsub.32 %merged, %bias
   return %result
 }

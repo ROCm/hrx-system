@@ -7,8 +7,8 @@ func.def @wide_i8_splat(%value: i8) -> (vector<128xi8>) {
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_i8_splat(%value: reg<aie2p.er>) -> (reg<aie2p.vec256 x4>) asm {
-  %8 = vbcst.8 %value
-  %result = concat(%8, %8) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %5 = vbcst.8 %value
+  %result = concat(%5, %5) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   return %result
 }
 
@@ -21,8 +21,8 @@ func.def @shaped_partial_f32_splat(%value: f32) -> (vector<2x15xf32>) {
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @shaped_partial_f32_splat(%value: reg<aie2p.er>) -> (reg<aie2p.vec256 x4>) asm {
-  %9 = vbcst.32 %value
-  %result = concat(%9, %9) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %5 = vbcst.32 %value
+  %result = concat(%5, %5) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   return %result
 }
 
@@ -35,7 +35,7 @@ func.def @wide_i64_splat(%value: i64) -> (vector<16xi64>) {
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_i64_splat(%value: reg<aie2p.er x2>) -> (reg<aie2p.vec256 x4>) asm {
-  %8 = vbcst.64 %value
-  %result = concat(%8, %8) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %5 = vbcst.64 %value
+  %result = concat(%5, %5) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   return %result
 }

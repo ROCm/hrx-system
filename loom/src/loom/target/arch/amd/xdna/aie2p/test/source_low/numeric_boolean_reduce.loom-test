@@ -171,7 +171,8 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i1x2x8_any_all(%v
 // ====
 
 func.def @any_negative_i32x16(%values: vector<16xi32>) -> (i1) {
-  %sign_boundary = vector.constant 0 : vector<16xi32>
+  %sign_boundary_scalar = scalar.constant 0 : i32
+  %sign_boundary = vector.splat %sign_boundary_scalar : vector<16xi32>
   %negative = vector.cmpi slt, %values, %sign_boundary : vector<16xi32> -> vector<16xi1>
   %false = scalar.constant false : i1
   %any = vector.reduce<ori> %negative, %false : vector<16xi1>, i1
@@ -180,13 +181,13 @@ func.def @any_negative_i32x16(%values: vector<16xi32>) -> (i1) {
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @any_negative_i32x16(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.er>) asm {
-  %8 = mov.short 0
-  %sign_boundary = vbcst.32 %8
-  %10 = vlt.s32x16.el.low32 %values, %sign_boundary
-  %negative = predicate.complete.zero.high32 %10, 0
-  %12 = mov.i32 65535
-  %13 = predicate.mask.low32 %negative, %12
-  %any = nez %13
+  %sign_boundary_scalar = mov.short 0
+  %sign_boundary = vbcst.32 %sign_boundary_scalar
+  %11 = vlt.s32x16.el.low32 %values, %sign_boundary
+  %negative = predicate.complete.zero.high32 %11, 0
+  %13 = mov.i32 65535
+  %14 = predicate.mask.low32 %negative, %13
+  %any = nez %14
   return %any
 }
 

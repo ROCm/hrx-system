@@ -3,8 +3,10 @@
 // All eight accepted clamp orders and operand positions lower in one function.
 // Distinct inputs keep the matcher permutations independent through lowering.
 func.def @saturating_pack_permutations(%a: vector<64xi8>, %b: vector<64xi8>, %c: vector<64xi8>, %d: vector<64xi8>, %e: vector<64xi8>, %f: vector<64xi8>, %g: vector<64xi8>, %h: vector<64xi8>) -> (vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<32xi8>) {
-  %lower = vector.constant -8 : vector<64xi8>
-  %upper = vector.constant 7 : vector<64xi8>
+  %lower_scalar = scalar.constant -8 : i8
+  %lower = vector.splat %lower_scalar : vector<64xi8>
+  %upper_scalar = scalar.constant 7 : i8
+  %upper = vector.splat %upper_scalar : vector<64xi8>
   %a_inner = vector.maxsi %a, %lower : vector<64xi8>
   %a_outer = vector.minsi %a_inner, %upper : vector<64xi8>
   %a_packed = vector.bitpack<4> %a_outer : vector<64xi8> -> vector<32xi8>
@@ -36,30 +38,30 @@ func.def @saturating_pack_permutations(%a: vector<64xi8>, %b: vector<64xi8>, %c:
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @saturating_pack_permutations(%a: reg<aie2p.vec256 x2>, %b: reg<aie2p.vec256 x2>, %c: reg<aie2p.vec256 x2>, %d: reg<aie2p.vec256 x2>, %e: reg<aie2p.vec256 x2>, %f: reg<aie2p.vec256 x2>, %g: reg<aie2p.vec256 x2>, %h: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
   set.saturation 1
   set.pack-size 0
-  %58 = vpack.w.signed %a
-  %59 = slice %a[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %a_packed = concat(%58, %59) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %61 = vpack.w.signed %b
-  %62 = slice %b[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %b_packed = concat(%61, %62) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %64 = vpack.w.signed %c
-  %65 = slice %c[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %c_packed = concat(%64, %65) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %67 = vpack.w.signed %d
-  %68 = slice %d[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %d_packed = concat(%67, %68) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %70 = vpack.w.signed %e
-  %71 = slice %e[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %e_packed = concat(%70, %71) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %73 = vpack.w.signed %f
-  %74 = slice %f[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %f_packed = concat(%73, %74) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %76 = vpack.w.signed %g
-  %77 = slice %g[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %g_packed = concat(%76, %77) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %79 = vpack.w.signed %h
-  %80 = slice %h[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %h_packed = concat(%79, %80) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %60 = vpack.w.signed %a
+  %61 = slice %a[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %a_packed = concat(%60, %61) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %63 = vpack.w.signed %b
+  %64 = slice %b[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %b_packed = concat(%63, %64) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %66 = vpack.w.signed %c
+  %67 = slice %c[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %c_packed = concat(%66, %67) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %69 = vpack.w.signed %d
+  %70 = slice %d[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %d_packed = concat(%69, %70) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %72 = vpack.w.signed %e
+  %73 = slice %e[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %e_packed = concat(%72, %73) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %75 = vpack.w.signed %f
+  %76 = slice %f[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %f_packed = concat(%75, %76) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %78 = vpack.w.signed %g
+  %79 = slice %g[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %g_packed = concat(%78, %79) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %81 = vpack.w.signed %h
+  %82 = slice %h[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %h_packed = concat(%81, %82) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   return %a_packed, %b_packed, %c_packed, %d_packed, %e_packed, %f_packed, %g_packed, %h_packed
 }
 
@@ -68,9 +70,12 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @saturating_pack_p
 // The wider physical carrier selects a different AIE2P pack instruction while
 // retaining a clamp whose lower bound does not span the signed i4 domain.
 func.def @saturating_pack_wide(%values: vector<128xi8>, %noncanonical_values: vector<128xi8>) -> (vector<64xi8>, vector<64xi8>) {
-  %lower = vector.constant -8 : vector<128xi8>
-  %wrong_lower = vector.constant -7 : vector<128xi8>
-  %upper = vector.constant 7 : vector<128xi8>
+  %lower_scalar = scalar.constant -8 : i8
+  %lower = vector.splat %lower_scalar : vector<128xi8>
+  %wrong_lower_scalar = scalar.constant -7 : i8
+  %wrong_lower = vector.splat %wrong_lower_scalar : vector<128xi8>
+  %upper_scalar = scalar.constant 7 : i8
+  %upper = vector.splat %upper_scalar : vector<128xi8>
   %above_lower = vector.maxsi %values, %lower : vector<128xi8>
   %clamped = vector.minsi %above_lower, %upper : vector<128xi8>
   %packed = vector.bitpack<4> %clamped : vector<128xi8> -> vector<64xi8>
@@ -82,20 +87,20 @@ func.def @saturating_pack_wide(%values: vector<128xi8>, %noncanonical_values: ve
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @saturating_pack_wide(%values: reg<aie2p.vec256 x4>, %noncanonical_values: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
-  %17 = mov.short -7
-  %18 = vbcst.8 %17
-  %20 = mov.short 7
-  %21 = vbcst.8 %20
+  %wrong_lower_scalar = mov.short -7
+  %21 = vbcst.8 %wrong_lower_scalar
+  %upper_scalar = mov.short 7
+  %24 = vbcst.8 %upper_scalar
   set.saturation 1
   set.pack-size 0
   %packed = vpack.x.signed %values
-  %24 = slice %noncanonical_values[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %26 = max.s8x64 %24, %18
-  %27 = slice %noncanonical_values[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %29 = max.s8x64 %27, %18
-  %33 = min.s8x64 %26, %21
-  %36 = min.s8x64 %29, %21
-  %noncanonical_outer = concat(%33, %36) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %27 = slice %noncanonical_values[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %29 = max.s8x64 %27, %21
+  %30 = slice %noncanonical_values[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %32 = max.s8x64 %30, %21
+  %36 = min.s8x64 %29, %24
+  %39 = min.s8x64 %32, %24
+  %noncanonical_outer = concat(%36, %39) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   set.saturation 0
   %noncanonical_packed = vpack.x.trunc %noncanonical_outer
   return %packed, %noncanonical_packed
@@ -106,10 +111,14 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @saturating_pack_w
 // Noncanonical bounds, dynamic bounds, shared clamp results, and an
 // intervening operation must retain the authored clamp and truncating pack.
 func.def @retain_noncanonical_packs(%wrong_lower_values: vector<64xi8>, %wrong_upper_values: vector<64xi8>, %dynamic_values: vector<64xi8>, %dynamic_upper: vector<64xi8>, %shared_inner_values: vector<64xi8>, %shared_outer_values: vector<64xi8>, %intervening_values: vector<64xi8>) -> (vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<32xi8>, vector<64xi8>, vector<32xi8>, vector<64xi8>, vector<32xi8>, vector<64xi8>) {
-  %wrong_lower = vector.constant -7 : vector<64xi8>
-  %lower = vector.constant -8 : vector<64xi8>
-  %wrong_upper = vector.constant 6 : vector<64xi8>
-  %upper = vector.constant 7 : vector<64xi8>
+  %wrong_lower_scalar = scalar.constant -7 : i8
+  %wrong_lower = vector.splat %wrong_lower_scalar : vector<64xi8>
+  %lower_scalar = scalar.constant -8 : i8
+  %lower = vector.splat %lower_scalar : vector<64xi8>
+  %wrong_upper_scalar = scalar.constant 6 : i8
+  %wrong_upper = vector.splat %wrong_upper_scalar : vector<64xi8>
+  %upper_scalar = scalar.constant 7 : i8
+  %upper = vector.splat %upper_scalar : vector<64xi8>
   %wrong_lower_inner = vector.maxsi %wrong_lower_values, %wrong_lower : vector<64xi8>
   %wrong_lower_outer = vector.minsi %wrong_lower_inner, %upper : vector<64xi8>
   %wrong_lower_packed = vector.bitpack<4> %wrong_lower_outer : vector<64xi8> -> vector<32xi8>
@@ -134,46 +143,46 @@ func.def @retain_noncanonical_packs(%wrong_lower_values: vector<64xi8>, %wrong_u
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @retain_noncanonical_packs(%wrong_lower_values: reg<aie2p.vec256 x2>, %wrong_upper_values: reg<aie2p.vec256 x2>, %dynamic_values: reg<aie2p.vec256 x2>, %dynamic_upper: reg<aie2p.vec256 x2>, %shared_inner_values: reg<aie2p.vec256 x2>, %shared_outer_values: reg<aie2p.vec256 x2>, %intervening_values: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
-  %55 = mov.short -7
-  %wrong_lower = vbcst.8 %55
-  %57 = mov.short -8
-  %lower = vbcst.8 %57
-  %59 = mov.short 6
-  %wrong_upper = vbcst.8 %59
-  %61 = mov.short 7
-  %upper = vbcst.8 %61
+  %wrong_lower_scalar = mov.short -7
+  %wrong_lower = vbcst.8 %wrong_lower_scalar
+  %lower_scalar = mov.short -8
+  %lower = vbcst.8 %lower_scalar
+  %wrong_upper_scalar = mov.short 6
+  %wrong_upper = vbcst.8 %wrong_upper_scalar
+  %upper_scalar = mov.short 7
+  %upper = vbcst.8 %upper_scalar
   %wrong_lower_inner = max.s8x64 %wrong_lower_values, %wrong_lower
   %wrong_lower_outer = min.s8x64 %wrong_lower_inner, %upper
   set.saturation 0
   set.pack-size 0
-  %65 = vpack.w.trunc %wrong_lower_outer
-  %66 = slice %wrong_lower_outer[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %wrong_lower_packed = concat(%65, %66) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %69 = vpack.w.trunc %wrong_lower_outer
+  %70 = slice %wrong_lower_outer[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %wrong_lower_packed = concat(%69, %70) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   %wrong_upper_inner = max.s8x64 %wrong_upper_values, %lower
   %wrong_upper_outer = min.s8x64 %wrong_upper_inner, %wrong_upper
-  %70 = vpack.w.trunc %wrong_upper_outer
-  %71 = slice %wrong_upper_outer[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %wrong_upper_packed = concat(%70, %71) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %74 = vpack.w.trunc %wrong_upper_outer
+  %75 = slice %wrong_upper_outer[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %wrong_upper_packed = concat(%74, %75) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   %dynamic_inner = max.s8x64 %dynamic_values, %lower
   %dynamic_outer = min.s8x64 %dynamic_inner, %dynamic_upper
-  %75 = vpack.w.trunc %dynamic_outer
-  %76 = slice %dynamic_outer[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %dynamic_packed = concat(%75, %76) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %79 = vpack.w.trunc %dynamic_outer
+  %80 = slice %dynamic_outer[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %dynamic_packed = concat(%79, %80) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   %shared_inner = max.s8x64 %shared_inner_values, %lower
   %shared_inner_outer = min.s8x64 %shared_inner, %upper
-  %80 = vpack.w.trunc %shared_inner_outer
-  %81 = slice %shared_inner_outer[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %shared_inner_packed = concat(%80, %81) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %84 = vpack.w.trunc %shared_inner_outer
+  %85 = slice %shared_inner_outer[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %shared_inner_packed = concat(%84, %85) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   %shared_outer_inner = max.s8x64 %shared_outer_values, %lower
   %shared_outer = min.s8x64 %shared_outer_inner, %upper
-  %85 = vpack.w.trunc %shared_outer
-  %86 = slice %shared_outer[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %shared_outer_packed = concat(%85, %86) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %89 = vpack.w.trunc %shared_outer
+  %90 = slice %shared_outer[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %shared_outer_packed = concat(%89, %90) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   %intervening_inner = max.s8x64 %intervening_values, %lower
   %intervening_other = min.s8x64 %intervening_values, %upper
   %intervening_outer = min.s8x64 %intervening_inner, %upper
-  %91 = vpack.w.trunc %intervening_outer
-  %92 = slice %intervening_outer[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %intervening_packed = concat(%91, %92) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %95 = vpack.w.trunc %intervening_outer
+  %96 = slice %intervening_outer[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %intervening_packed = concat(%95, %96) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   return %wrong_lower_packed, %wrong_upper_packed, %dynamic_packed, %shared_inner_packed, %shared_inner, %shared_outer_packed, %shared_outer, %intervening_packed, %intervening_other
 }

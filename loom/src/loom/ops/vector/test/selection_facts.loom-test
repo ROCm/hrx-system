@@ -128,7 +128,8 @@ func.def @independent_classes(%input: vector<32xf32>, %mask: vector<32xi1>) -> (
 // A known mask can choose a finite alternative even if the other is unknown.
 func.def @known_choice(%input: vector<32xf32>, %other: vector<32xf32>) -> (vector<32xi1>) {
   %left = vector.exp2f<nnan|ninf> %input : vector<32xf32>
-  %mask = vector.constant true : vector<32xi1>
+  %mask_scalar = scalar.constant true : i1
+  %mask = vector.splat %mask_scalar : vector<32xi1>
   %selected = vector.select %mask, %left, %other : vector<32xf32>
   %finite = vector.isfinitef %selected : vector<32xf32> -> vector<32xi1>
   func.return %finite : vector<32xi1>
@@ -136,6 +137,7 @@ func.def @known_choice(%input: vector<32xf32>, %other: vector<32xf32>) -> (vecto
 
 // ----
 func.def @known_choice(%input: vector<32xf32>, %other: vector<32xf32>) -> (vector<32xi1>) {
-  %finite = vector.constant true : vector<32xi1>
+  %8 = scalar.constant true : i1
+  %finite = vector.splat %8 : vector<32xi1>
   func.return %finite : vector<32xi1>
 }

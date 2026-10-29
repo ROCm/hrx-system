@@ -1,9 +1,12 @@
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 func.def @i64x8_uniform_shift_boundaries(%input: vector<8xi64>) -> (vector<8xi64>, vector<8xi64>, vector<8xi64>) {
-  %left_count = vector.constant 32 : vector<8xi64>
-  %logical_count = vector.constant 31 : vector<8xi64>
-  %signed_count = vector.constant 63 : vector<8xi64>
+  %left_count_scalar = scalar.constant 32 : i64
+  %left_count = vector.splat %left_count_scalar : vector<8xi64>
+  %logical_count_scalar = scalar.constant 31 : i64
+  %logical_count = vector.splat %logical_count_scalar : vector<8xi64>
+  %signed_count_scalar = scalar.constant 63 : i64
+  %signed_count = vector.splat %signed_count_scalar : vector<8xi64>
   %left = vector.shli %input, %left_count : vector<8xi64>
   %logical = vector.shrui %input, %logical_count : vector<8xi64>
   %signed = vector.shrsi %input, %signed_count : vector<8xi64>
@@ -12,46 +15,47 @@ func.def @i64x8_uniform_shift_boundaries(%input: vector<8xi64>) -> (vector<8xi64
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i64x8_uniform_shift_boundaries(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
-  %14 = mova.i32 4
-  %16 = vshuffle %input, %input, %14
-  %18 = mov.short 32
-  %19 = add.shift %18, -32
-  %20 = mov.shift 0
-  %21 = vsub.32 %16, %16
+  %17 = mova.i32 4
+  %19 = vshuffle %input, %input, %17
+  %21 = mov.short 32
+  %22 = add.shift %21, -32
+  %23 = mov.shift 0
+  %24 = vsub.32 %19, %19
   set.saturation 0
   set.ups-mode 1
   set.srs-mode 1
   set.rounding 0
-  %22 = vups.2x.x-to-c.unsigned %16, %19
-  %23 = vsrs.2x.c-to-x.unsigned %22, %20
-  %24 = mova.i32 16
-  %left = vshuffle %21, %23, %24
-  %27 = mova.i32 5
-  %29 = vshuffle %input, %input, %27
-  %30 = mov.short -31
-  %31 = add.shift %30, 32
-  %33 = mov.shift 32
-  %34 = vups.2x.x-to-c.unsigned %16, %31
-  %35 = vsrs.2x.c-to-x.unsigned %34, %33
-  %36 = vups.2x.x-to-c.unsigned %29, %31
-  %37 = vsrs.2x.c-to-x.unsigned %36, %20
-  %38 = vbor %35, %37
-  %39 = vsrs.2x.c-to-x.unsigned %36, %33
-  %logical = vshuffle %38, %39, %24
-  %46 = mov.short 63
-  %47 = add.shift %46, -32
-  %50 = vups.2x.x-to-c.signed %29, %20
-  %51 = vsrs.2x.c-to-x.signed %50, %47
-  %53 = mov.shift 31
-  %54 = vsrs.2x.c-to-x.signed %50, %53
-  %signed = vshuffle %51, %54, %24
+  %25 = vups.2x.x-to-c.unsigned %19, %22
+  %26 = vsrs.2x.c-to-x.unsigned %25, %23
+  %27 = mova.i32 16
+  %left = vshuffle %24, %26, %27
+  %30 = mova.i32 5
+  %32 = vshuffle %input, %input, %30
+  %33 = mov.short -31
+  %34 = add.shift %33, 32
+  %36 = mov.shift 32
+  %37 = vups.2x.x-to-c.unsigned %19, %34
+  %38 = vsrs.2x.c-to-x.unsigned %37, %36
+  %39 = vups.2x.x-to-c.unsigned %32, %34
+  %40 = vsrs.2x.c-to-x.unsigned %39, %23
+  %41 = vbor %38, %40
+  %42 = vsrs.2x.c-to-x.unsigned %39, %36
+  %logical = vshuffle %41, %42, %27
+  %49 = mov.short 63
+  %50 = add.shift %49, -32
+  %53 = vups.2x.x-to-c.signed %32, %23
+  %54 = vsrs.2x.c-to-x.signed %53, %50
+  %56 = mov.shift 31
+  %57 = vsrs.2x.c-to-x.signed %53, %56
+  %signed = vshuffle %54, %57, %27
   return %left, %logical, %signed
 }
 
 // ====
 
 func.def @i64x2x3_varying_signed_shift(%input: vector<2x3xi64>, %raw_counts: vector<2x3xi64>) -> (vector<2x3xi64>) {
-  %mask = vector.constant 63 : vector<2x3xi64>
+  %mask_scalar = scalar.constant 63 : i64
+  %mask = vector.splat %mask_scalar : vector<2x3xi64>
   %counts = vector.andi %raw_counts, %mask : vector<2x3xi64>
   %result = vector.shrsi %input, %counts : vector<2x3xi64>
   func.return %result : vector<2x3xi64>
@@ -59,97 +63,97 @@ func.def @i64x2x3_varying_signed_shift(%input: vector<2x3xi64>, %raw_counts: vec
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i64x2x3_varying_signed_shift(%input: reg<aie2p.vec256 x2>, %raw_counts: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %9 = mov.i32 63
-  %10 = mov.i32 0
-  %11 = concat(%9, %10) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %mask = vbcst.64 %11
+  %10 = mov.i32 63
+  %11 = mov.i32 0
+  %mask_scalar = concat(%10, %11) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %mask = vbcst.64 %mask_scalar
   %counts = vband %raw_counts, %mask
-  %14 = mova.i32 4
-  %15 = mova.i32 5
-  %16 = vshuffle %input, %input, %14
+  %15 = mova.i32 4
+  %16 = mova.i32 5
   %17 = vshuffle %input, %input, %15
-  %18 = vshuffle %counts, %counts, %14
-  %19 = mov.short 1
-  %20 = vbcst.32 %19
-  %21 = mov.shift 31
-  %22 = mov.shift 0
-  %23 = mov.shift 32
+  %18 = vshuffle %input, %input, %16
+  %19 = vshuffle %counts, %counts, %15
+  %20 = mov.short 1
+  %21 = vbcst.32 %20
+  %22 = mov.shift 31
+  %23 = mov.shift 0
+  %24 = mov.shift 32
   set.saturation 0
   set.ups-mode 1
-  %24 = vups.2x.x-to-c.unsigned %16, %21
+  %25 = vups.2x.x-to-c.unsigned %17, %22
   set.srs-mode 1
   set.rounding 0
-  %25 = vsrs.2x.c-to-x.unsigned %24, %23
-  %26 = vups.2x.x-to-c.signed %17, %21
-  %27 = vsrs.2x.c-to-x.signed %26, %22
-  %28 = vbor %25, %27
-  %29 = vsrs.2x.c-to-x.signed %26, %23
-  %30 = vband %18, %20
-  %31 = veqz.32.el.low32 %30
-  %32 = predicate.complete.zero.high32 %31, 0
-  %33 = vsel.32.mask64 %28, %16, %32
-  %34 = vsel.32.mask64 %29, %17, %32
-  %35 = vadd.32 %20, %20
-  %36 = mov.shift 30
-  %37 = vups.2x.x-to-c.unsigned %33, %36
-  %38 = vsrs.2x.c-to-x.unsigned %37, %23
-  %39 = vups.2x.x-to-c.signed %34, %36
-  %40 = vsrs.2x.c-to-x.signed %39, %22
-  %41 = vbor %38, %40
-  %42 = vsrs.2x.c-to-x.signed %39, %23
-  %43 = vband %18, %35
-  %44 = veqz.32.el.low32 %43
-  %45 = predicate.complete.zero.high32 %44, 0
-  %46 = vsel.32.mask64 %41, %33, %45
-  %47 = vsel.32.mask64 %42, %34, %45
-  %48 = vadd.32 %35, %35
-  %49 = mov.shift 28
-  %50 = vups.2x.x-to-c.unsigned %46, %49
-  %51 = vsrs.2x.c-to-x.unsigned %50, %23
-  %52 = vups.2x.x-to-c.signed %47, %49
-  %53 = vsrs.2x.c-to-x.signed %52, %22
-  %54 = vbor %51, %53
-  %55 = vsrs.2x.c-to-x.signed %52, %23
-  %56 = vband %18, %48
-  %57 = veqz.32.el.low32 %56
-  %58 = predicate.complete.zero.high32 %57, 0
-  %59 = vsel.32.mask64 %54, %46, %58
-  %60 = vsel.32.mask64 %55, %47, %58
-  %61 = vadd.32 %48, %48
-  %62 = mov.shift 24
-  %63 = vups.2x.x-to-c.unsigned %59, %62
-  %64 = vsrs.2x.c-to-x.unsigned %63, %23
-  %65 = vups.2x.x-to-c.signed %60, %62
-  %66 = vsrs.2x.c-to-x.signed %65, %22
-  %67 = vbor %64, %66
-  %68 = vsrs.2x.c-to-x.signed %65, %23
-  %69 = vband %18, %61
-  %70 = veqz.32.el.low32 %69
-  %71 = predicate.complete.zero.high32 %70, 0
-  %72 = vsel.32.mask64 %67, %59, %71
-  %73 = vsel.32.mask64 %68, %60, %71
-  %74 = vadd.32 %61, %61
-  %75 = mov.shift 16
-  %76 = vups.2x.x-to-c.unsigned %72, %75
-  %77 = vsrs.2x.c-to-x.unsigned %76, %23
-  %78 = vups.2x.x-to-c.signed %73, %75
-  %79 = vsrs.2x.c-to-x.signed %78, %22
-  %80 = vbor %77, %79
-  %81 = vsrs.2x.c-to-x.signed %78, %23
-  %82 = vband %18, %74
-  %83 = veqz.32.el.low32 %82
-  %84 = predicate.complete.zero.high32 %83, 0
-  %85 = vsel.32.mask64 %80, %72, %84
-  %86 = vsel.32.mask64 %81, %73, %84
-  %87 = vadd.32 %74, %74
-  %89 = vups.2x.x-to-c.signed %86, %22
-  %90 = vsrs.2x.c-to-x.signed %89, %21
-  %91 = vband %18, %87
-  %92 = veqz.32.el.low32 %91
-  %93 = predicate.complete.zero.high32 %92, 0
-  %94 = vsel.32.mask64 %86, %85, %93
-  %95 = vsel.32.mask64 %90, %86, %93
-  %96 = mova.i32 16
-  %result = vshuffle %94, %95, %96
+  %26 = vsrs.2x.c-to-x.unsigned %25, %24
+  %27 = vups.2x.x-to-c.signed %18, %22
+  %28 = vsrs.2x.c-to-x.signed %27, %23
+  %29 = vbor %26, %28
+  %30 = vsrs.2x.c-to-x.signed %27, %24
+  %31 = vband %19, %21
+  %32 = veqz.32.el.low32 %31
+  %33 = predicate.complete.zero.high32 %32, 0
+  %34 = vsel.32.mask64 %29, %17, %33
+  %35 = vsel.32.mask64 %30, %18, %33
+  %36 = vadd.32 %21, %21
+  %37 = mov.shift 30
+  %38 = vups.2x.x-to-c.unsigned %34, %37
+  %39 = vsrs.2x.c-to-x.unsigned %38, %24
+  %40 = vups.2x.x-to-c.signed %35, %37
+  %41 = vsrs.2x.c-to-x.signed %40, %23
+  %42 = vbor %39, %41
+  %43 = vsrs.2x.c-to-x.signed %40, %24
+  %44 = vband %19, %36
+  %45 = veqz.32.el.low32 %44
+  %46 = predicate.complete.zero.high32 %45, 0
+  %47 = vsel.32.mask64 %42, %34, %46
+  %48 = vsel.32.mask64 %43, %35, %46
+  %49 = vadd.32 %36, %36
+  %50 = mov.shift 28
+  %51 = vups.2x.x-to-c.unsigned %47, %50
+  %52 = vsrs.2x.c-to-x.unsigned %51, %24
+  %53 = vups.2x.x-to-c.signed %48, %50
+  %54 = vsrs.2x.c-to-x.signed %53, %23
+  %55 = vbor %52, %54
+  %56 = vsrs.2x.c-to-x.signed %53, %24
+  %57 = vband %19, %49
+  %58 = veqz.32.el.low32 %57
+  %59 = predicate.complete.zero.high32 %58, 0
+  %60 = vsel.32.mask64 %55, %47, %59
+  %61 = vsel.32.mask64 %56, %48, %59
+  %62 = vadd.32 %49, %49
+  %63 = mov.shift 24
+  %64 = vups.2x.x-to-c.unsigned %60, %63
+  %65 = vsrs.2x.c-to-x.unsigned %64, %24
+  %66 = vups.2x.x-to-c.signed %61, %63
+  %67 = vsrs.2x.c-to-x.signed %66, %23
+  %68 = vbor %65, %67
+  %69 = vsrs.2x.c-to-x.signed %66, %24
+  %70 = vband %19, %62
+  %71 = veqz.32.el.low32 %70
+  %72 = predicate.complete.zero.high32 %71, 0
+  %73 = vsel.32.mask64 %68, %60, %72
+  %74 = vsel.32.mask64 %69, %61, %72
+  %75 = vadd.32 %62, %62
+  %76 = mov.shift 16
+  %77 = vups.2x.x-to-c.unsigned %73, %76
+  %78 = vsrs.2x.c-to-x.unsigned %77, %24
+  %79 = vups.2x.x-to-c.signed %74, %76
+  %80 = vsrs.2x.c-to-x.signed %79, %23
+  %81 = vbor %78, %80
+  %82 = vsrs.2x.c-to-x.signed %79, %24
+  %83 = vband %19, %75
+  %84 = veqz.32.el.low32 %83
+  %85 = predicate.complete.zero.high32 %84, 0
+  %86 = vsel.32.mask64 %81, %73, %85
+  %87 = vsel.32.mask64 %82, %74, %85
+  %88 = vadd.32 %75, %75
+  %90 = vups.2x.x-to-c.signed %87, %23
+  %91 = vsrs.2x.c-to-x.signed %90, %22
+  %92 = vband %19, %88
+  %93 = veqz.32.el.low32 %92
+  %94 = predicate.complete.zero.high32 %93, 0
+  %95 = vsel.32.mask64 %87, %86, %94
+  %96 = vsel.32.mask64 %91, %87, %94
+  %97 = mova.i32 16
+  %result = vshuffle %95, %96, %97
   return %result
 }

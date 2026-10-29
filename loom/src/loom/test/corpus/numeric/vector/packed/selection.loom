@@ -5,8 +5,10 @@ func.def inline @packed_select_masks(%trial: index) -> (vector<1xi1>, vector<3xi
   %packet = index.cast %ordinal : index to i32
   %start = scalar.constant 0 : i32
   %step = scalar.constant 1 : i32
-  %c1 = vector.constant 1 : vector<8xi32>
-  %c0 = vector.constant 0 : vector<8xi32>
+  %c1_scalar = scalar.constant 1 : i32
+  %c1 = vector.splat %c1_scalar : vector<8xi32>
+  %c0_scalar = scalar.constant 0 : i32
+  %c0 = vector.splat %c0_scalar : vector<8xi32>
   %packets = vector.splat %packet : vector<8xi32>
   %shifts = vector.iota %start step %step : vector<8xi32>
   %shifted = vector.shrui %packets, %shifts : vector<8xi32>

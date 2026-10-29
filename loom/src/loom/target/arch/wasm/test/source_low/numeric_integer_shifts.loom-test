@@ -161,7 +161,8 @@ func.def @partial_i32_tail(%input: buffer, %output: buffer) {
   %input_view = buffer.view %input[%base] : buffer -> view<3xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<3xi32>
   %values = vector.load %input_view[0] : view<3xi32> -> vector<3xi32>
-  %counts = vector.constant 5 : vector<3xi32>
+  %counts_scalar = scalar.constant 5 : i32
+  %counts = vector.splat %counts_scalar : vector<3xi32>
   %result = vector.shli %values, %counts : vector<3xi32>
   vector.store %result, %output_view[0] : vector<3xi32>, view<3xi32>
   func.return
@@ -169,17 +170,17 @@ func.def @partial_i32_tail(%input: buffer, %output: buffer) {
 
 // ----
 low.func.def target<wasm.core.simd128> abi(wasm_function) @partial_i32_tail(%input: reg<wasm.i32>, %output: reg<wasm.i32>) asm {
-  %32 = i64.load %input
-  %33 = i64x2.splat %32
-  %34 = i32.load %input {offset = 8}
-  %35 = i32x4.splat %34
-  %values = i8x16.shuffle %33, %35, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 0, 0, 0, 0
-  %37 = i32.const 5
-  %result = i32x4.shl %values, %37
-  %39 = i64x2.extract_lane %result, 0
-  i64.store %output, %39
-  %40 = i32x4.extract_lane %result, 2
-  i32.store %output, %40 {offset = 8}
+  %33 = i64.load %input
+  %34 = i64x2.splat %33
+  %35 = i32.load %input {offset = 8}
+  %36 = i32x4.splat %35
+  %values = i8x16.shuffle %34, %36, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 0, 0, 0, 0
+  %counts_scalar = i32.const 5
+  %result = i32x4.shl %values, %counts_scalar
+  %40 = i64x2.extract_lane %result, 0
+  i64.store %output, %40
+  %41 = i32x4.extract_lane %result, 2
+  i32.store %output, %41 {offset = 8}
   return
 }
 

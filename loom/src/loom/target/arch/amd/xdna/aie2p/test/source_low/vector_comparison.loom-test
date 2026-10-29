@@ -9,11 +9,11 @@ func.def @signed_byte_comparison(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (vec
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @signed_byte_comparison(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %mask = vlt.s8x64 %lhs, %rhs
-  %12 = mov.short 1
-  %13 = vbcst.32 %12
-  %14 = mov.short 0
+  %14 = mov.short 1
   %15 = vbcst.32 %14
-  %result = vsel.32.mask64 %15, %13, %mask
+  %16 = mov.short 0
+  %17 = vbcst.32 %16
+  %result = vsel.32.mask64 %17, %15, %mask
   return %result
 }
 
@@ -28,11 +28,11 @@ func.def @unsigned_byte_comparison(%lhs: vector<4xi8>, %rhs: vector<4xi8>) -> (v
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @unsigned_byte_comparison(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
   %mask = vge.u8x64 %rhs, %lhs
-  %12 = mov.short 1
-  %13 = vbcst.32 %12
-  %14 = mov.short 0
+  %14 = mov.short 1
   %15 = vbcst.32 %14
-  %result = vsel.32.mask64 %15, %13, %mask
+  %16 = mov.short 0
+  %17 = vbcst.32 %16
+  %result = vsel.32.mask64 %17, %15, %mask
   return %result
 }
 
@@ -46,13 +46,13 @@ func.def @signed_halfword_comparison(%lhs: vector<2xi16>, %rhs: vector<2xi16>) -
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @signed_halfword_comparison(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %11 = vge.s16x32.el.low32 %lhs, %rhs
-  %mask = predicate.complete.zero.high32 %11, 0
-  %13 = mov.short 1
-  %14 = vbcst.32 %13
-  %15 = mov.short 0
+  %13 = vge.s16x32.el.low32 %lhs, %rhs
+  %mask = predicate.complete.zero.high32 %13, 0
+  %15 = mov.short 1
   %16 = vbcst.32 %15
-  %result = vsel.32.mask64 %16, %14, %mask
+  %17 = mov.short 0
+  %18 = vbcst.32 %17
+  %result = vsel.32.mask64 %18, %16, %mask
   return %result
 }
 
@@ -66,14 +66,14 @@ func.def @halfword_equality(%lhs: vector<2xi16>, %rhs: vector<2xi16>) -> (vector
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @halfword_equality(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %11 = vsub.16 %lhs, %rhs
-  %12 = veqz.16.el.low32 %11
-  %mask = predicate.complete.zero.high32 %12, 0
-  %14 = mov.short 1
-  %15 = vbcst.32 %14
-  %16 = mov.short 0
+  %13 = vsub.16 %lhs, %rhs
+  %14 = veqz.16.el.low32 %13
+  %mask = predicate.complete.zero.high32 %14, 0
+  %16 = mov.short 1
   %17 = vbcst.32 %16
-  %result = vsel.32.mask64 %17, %15, %mask
+  %18 = mov.short 0
+  %19 = vbcst.32 %18
+  %result = vsel.32.mask64 %19, %17, %mask
   return %result
 }
 
@@ -87,24 +87,24 @@ func.def @wide_integer_comparison(%lhs: vector<2xi64>, %rhs: vector<2xi64>) -> (
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @wide_integer_comparison(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %11 = mova.i32 4
-  %12 = mova.i32 5
-  %13 = vshuffle %lhs, %lhs, %11
-  %14 = vshuffle %lhs, %lhs, %12
-  %15 = vshuffle %rhs, %rhs, %11
-  %16 = vshuffle %rhs, %rhs, %12
-  %17 = vsub.32 %16, %14
-  %18 = veqz.32.el.low32 %17
-  %19 = vlt.u32x16.el.low32 %16, %14
-  %20 = vlt.u32x16.el.low32 %15, %13
-  %21 = predicate.and.low32 %18, %20
-  %22 = predicate.or.low32 %19, %21
-  %mask = predicate.complete.zero.high32 %22, 0
-  %24 = mov.short 1
-  %25 = vbcst.32 %24
-  %26 = mov.short 0
+  %13 = mova.i32 4
+  %14 = mova.i32 5
+  %15 = vshuffle %lhs, %lhs, %13
+  %16 = vshuffle %lhs, %lhs, %14
+  %17 = vshuffle %rhs, %rhs, %13
+  %18 = vshuffle %rhs, %rhs, %14
+  %19 = vsub.32 %18, %16
+  %20 = veqz.32.el.low32 %19
+  %21 = vlt.u32x16.el.low32 %18, %16
+  %22 = vlt.u32x16.el.low32 %17, %15
+  %23 = predicate.and.low32 %20, %22
+  %24 = predicate.or.low32 %21, %23
+  %mask = predicate.complete.zero.high32 %24, 0
+  %26 = mov.short 1
   %27 = vbcst.32 %26
-  %result = vsel.32.mask64 %27, %25, %mask
+  %28 = mov.short 0
+  %29 = vbcst.32 %28
+  %result = vsel.32.mask64 %29, %27, %mask
   return %result
 }
 
@@ -118,50 +118,50 @@ func.def @floating_comparison_flags(%lhs: vector<2xf32>, %rhs: vector<2xf32>) ->
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @floating_comparison_flags(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %38 = mov.i32 2147483647
-  %39 = vbcst.32 %38
-  %40 = vband %lhs, %39
-  %41 = vband %rhs, %39
-  %42 = mov.i32 2139095040
-  %43 = vbcst.32 %42
-  %44 = vlt.u32x16.el.low32 %43, %40
-  %45 = predicate.complete.zero.high32 %44, 0
-  %46 = vlt.u32x16.el.low32 %43, %41
-  %47 = predicate.complete.zero.high32 %46, 0
-  %48 = predicate.or.low32.rhs_tied %45, %47
-  %49 = predicate.or.high32.rhs_tied %45, %48
-  %50 = mov.short 0
-  %51 = vbcst.32 %50
-  %52 = mov.i32 -2147483648
-  %53 = vbcst.32 %52
-  %54 = mov.short -1
-  %55 = vbcst.32 %54
-  %56 = vsub.32 %40, %51
-  %57 = veqz.32.el.low32 %56
-  %58 = predicate.complete.zero.high32 %57, 0
-  %59 = vsel.32.mask64 %lhs, %51, %58
-  %60 = vlt.s32x16.el.low32 %59, %51
-  %61 = predicate.complete.zero.high32 %60, 0
-  %62 = vadd.32 %59, %53
-  %63 = vsub.32 %55, %59
-  %64 = vsel.32.mask64 %62, %63, %61
-  %65 = vsub.32 %41, %51
-  %66 = veqz.32.el.low32 %65
-  %67 = predicate.complete.zero.high32 %66, 0
-  %68 = vsel.32.mask64 %rhs, %51, %67
-  %69 = vlt.s32x16.el.low32 %68, %51
-  %70 = predicate.complete.zero.high32 %69, 0
-  %71 = vadd.32 %68, %53
-  %72 = vsub.32 %55, %68
-  %73 = vsel.32.mask64 %71, %72, %70
-  %74 = vlt.u32x16.el.low32 %64, %73
-  %75 = predicate.complete.zero.high32 %74, 0
-  %76 = predicate.and.low32.rhs_tied %75, %49
-  %77 = predicate.and.high32.rhs_tied %75, %76
-  %78 = predicate.xor.low32.rhs_tied %75, %77
-  %mask = predicate.xor.high32.rhs_tied %75, %78
-  %80 = mov.short 1
-  %81 = vbcst.32 %80
-  %result = vsel.32.mask64 %51, %81, %mask
+  %45 = mov.i32 2147483647
+  %46 = vbcst.32 %45
+  %47 = vband %lhs, %46
+  %48 = vband %rhs, %46
+  %49 = mov.i32 2139095040
+  %50 = vbcst.32 %49
+  %51 = vlt.u32x16.el.low32 %50, %47
+  %52 = predicate.complete.zero.high32 %51, 0
+  %53 = vlt.u32x16.el.low32 %50, %48
+  %54 = predicate.complete.zero.high32 %53, 0
+  %55 = predicate.or.low32.rhs_tied %52, %54
+  %56 = predicate.or.high32.rhs_tied %52, %55
+  %57 = mov.short 0
+  %58 = vbcst.32 %57
+  %59 = mov.i32 -2147483648
+  %60 = vbcst.32 %59
+  %61 = mov.short -1
+  %62 = vbcst.32 %61
+  %63 = vsub.32 %47, %58
+  %64 = veqz.32.el.low32 %63
+  %65 = predicate.complete.zero.high32 %64, 0
+  %66 = vsel.32.mask64 %lhs, %58, %65
+  %67 = vlt.s32x16.el.low32 %66, %58
+  %68 = predicate.complete.zero.high32 %67, 0
+  %69 = vadd.32 %66, %60
+  %70 = vsub.32 %62, %66
+  %71 = vsel.32.mask64 %69, %70, %68
+  %72 = vsub.32 %48, %58
+  %73 = veqz.32.el.low32 %72
+  %74 = predicate.complete.zero.high32 %73, 0
+  %75 = vsel.32.mask64 %rhs, %58, %74
+  %76 = vlt.s32x16.el.low32 %75, %58
+  %77 = predicate.complete.zero.high32 %76, 0
+  %78 = vadd.32 %75, %60
+  %79 = vsub.32 %62, %75
+  %80 = vsel.32.mask64 %78, %79, %77
+  %81 = vlt.u32x16.el.low32 %71, %80
+  %82 = predicate.complete.zero.high32 %81, 0
+  %83 = predicate.and.low32.rhs_tied %82, %56
+  %84 = predicate.and.high32.rhs_tied %82, %83
+  %85 = predicate.xor.low32.rhs_tied %82, %84
+  %mask = predicate.xor.high32.rhs_tied %82, %85
+  %87 = mov.short 1
+  %88 = vbcst.32 %87
+  %result = vsel.32.mask64 %58, %88, %mask
   return %result
 }
