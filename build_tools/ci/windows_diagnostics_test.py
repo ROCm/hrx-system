@@ -18,6 +18,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+from xml.sax.saxutils import escape
 
 from build_tools.ci import windows_diagnostics as diagnostics
 
@@ -88,7 +89,10 @@ class WindowsDiagnosticsTest(unittest.TestCase):
             (root / "sdk.lib").write_bytes(b"installed library")
 
             def native_tool(argv, **kwargs):
-                if argv[1:4] == ["-t", "inputs", "--no-shell-escape"]:
+                if argv[0] == "wevtutil.exe":
+                    self.assertEqual(argv[2], "Application")
+                    kwargs["stdout"].write(b"<Events/>")
+                elif argv[1:4] == ["-t", "inputs", "--no-shell-escape"]:
                     self.assertEqual(argv[4], "test with spaces.exe")
                     kwargs["stdout"].write(
                         ("\n".join(objects) + "\n../sdk.lib\n").encode()
@@ -263,7 +267,11 @@ class WindowsDiagnosticsTest(unittest.TestCase):
             phase = next((root / "artifacts").iterdir())
             command = json.loads((phase / "command.json").read_text())
             manifest = json.loads((phase / "manifest.json").read_text())
-            events, policy_list = manifest["tools"]
+            events, policy_list = [
+                tool
+                for tool in manifest["tools"]
+                if "application-crash-events" not in tool["output"]
+            ]
             self.assertEqual(events["returncode"], 5)
             self.assertEqual((phase / events["output"]).read_bytes(), denied)
             self.assertEqual(policy_list["returncode"], 0)
@@ -275,6 +283,162 @@ class WindowsDiagnosticsTest(unittest.TestCase):
             self.assertIn(
                 f"TimeCreated[@SystemTime >= '{timestamp}']", events["argv"][3]
             )
+
+    def test_silent_failure_retains_crash_images_before_rebuild(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "bazel-out/bin/tool & \N{GREEK SMALL LETTER LAMDA}.exe"
+            module = root / "bazel-out/bin/runtime/library.dll"
+            installed = root / "bazel-outside/system.dll"
+            original = {
+                executable: b"executable image",
+                module: b"runtime image",
+                executable.with_suffix(".pdb"): b"executable symbols",
+                module.with_suffix(".pdb"): b"runtime symbols",
+            }
+            for path, contents in {**original, installed: b"installed image"}.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(contents)
+            event = (
+                '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+                '<System><Provider Name="Application Error"/><EventID>1000</EventID>'
+                '</System><EventData><Data Name="ExceptionCode">c0000005</Data>'
+                '<Data Name="FaultingOffset">0000000000001234</Data>'
+                f'<Data Name="AppPath">{escape(str(executable))}</Data>'
+                f'<Data Name="ModulePath">{escape(str(module))}</Data>'
+                "</EventData></Event>"
+            )
+            # Repeated failures share images; installed modules must remain
+            # identified in the raw events without being copied into artifacts.
+            events = (
+                "<Events>"
+                + event
+                + event.replace(escape(str(module)), escape(str(installed)))
+                + "</Events>"
+            ).encode("utf-16")
+
+            def native_tool(argv, **kwargs):
+                self.assertEqual(argv[:3], ["wevtutil.exe", "qe", "Application"])
+                self.assertIn("Provider[@Name='Application Error']", argv[3])
+                self.assertIn("Provider[@Name='Windows Error Reporting']", argv[3])
+                self.assertIn("/c:64", argv)
+                kwargs["stdout"].write(events)
+                return subprocess.CompletedProcess(argv, 0)
+
+            # The child exits silently; only the native event reader is replaced.
+            # Run the real phase collector, XML parser, snapshots, and manifest.
+            with (
+                mock.patch.object(subprocess, "run", side_effect=native_tool),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                result = diagnostics.run(
+                    [sys.executable, "-c", "raise SystemExit(3)"],
+                    cwd=root,
+                    env=None,
+                    artifact_dir=root / "artifacts",
+                    label="silent test failure",
+                )
+            self.assertEqual(result, 3)
+            phase = next((root / "artifacts").iterdir())
+            self.assertEqual((phase / "output.log").read_bytes(), b"")
+            manifest = json.loads((phase / "manifest.json").read_text())
+            self.assertNotIn("capture_error", manifest)
+            query = manifest["tools"][0]
+            self.assertEqual(query["returncode"], 0)
+            self.assertEqual((phase / query["output"]).read_bytes(), events)
+            started_at = dt.datetime.fromisoformat(
+                json.loads((phase / "command.json").read_text())["started_at"]
+            )
+            timestamp = started_at.isoformat(timespec="milliseconds").replace(
+                "+00:00", "Z"
+            )
+            self.assertIn(
+                f"TimeCreated[@SystemTime >= '{timestamp}']", query["argv"][3]
+            )
+            records = {Path(record["path"]): record for record in manifest["files"]}
+            self.assertEqual(set(records), set(original))
+            for path, contents in original.items():
+                path.write_bytes(b"a later phase replaced these bytes")
+                record = records[path]
+                self.assertEqual((phase / record["copy"]).read_bytes(), contents)
+                self.assertEqual(record["sha256"], hashlib.sha256(contents).hexdigest())
+
+    def test_crash_images_precede_symbols_in_the_capture_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build = root / "cmake build"
+            build.mkdir()
+            executable = build / "tool.exe"
+            module = build / "runtime.dll"
+            executable.write_bytes(b"image")
+            module.write_bytes(b"library")
+            executable.with_suffix(".pdb").write_bytes(b"large symbols")
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            events = (
+                "<Events><Event><EventData>"
+                f'<Data Name="AppPath">{escape(str(executable))}</Data>'
+                f'<Data Name="ModulePath">{escape(str(module))}</Data>'
+                "</EventData></Event></Events>"
+            ).encode("utf-16")
+
+            def native_tool(argv, **kwargs):
+                kwargs["stdout"].write(events)
+                return subprocess.CompletedProcess(argv, 0)
+
+            capture = diagnostics.Capture(artifacts, {})
+            capture.remaining_bytes = len(b"imagelibrary")
+            with mock.patch.object(subprocess, "run", side_effect=native_tool):
+                diagnostics.capture_application_crashes(
+                    capture, root, build, dt.datetime.now(dt.UTC)
+                )
+            for path in (executable, module):
+                record = capture.files[str(path)]
+                self.assertEqual(
+                    (artifacts / record["copy"]).read_bytes(), path.read_bytes()
+                )
+            self.assertEqual(
+                capture.files[str(executable.with_suffix(".pdb"))]["error"],
+                "capture byte limit exceeded",
+            )
+
+    def test_bad_crash_events_preserve_other_failure_evidence(self):
+        for output, returncode in ((b"Access denied", 5), (b"invalid XML", 0)):
+            with (
+                self.subTest(returncode=returncode),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                executable = root / "bazel-out/bin/tool.exe"
+                executable.parent.mkdir(parents=True)
+                executable.write_bytes(b"failed launch image")
+                artifacts = root / "artifacts"
+                artifacts.mkdir()
+                (artifacts / "output.log").write_text(f'CreateProcessW("{executable}")')
+
+                def native_tool(argv, **kwargs):
+                    kwargs["stdout"].write(output)
+                    return subprocess.CompletedProcess(argv, returncode)
+
+                with mock.patch.object(subprocess, "run", side_effect=native_tool):
+                    diagnostics.capture_failure(
+                        artifacts,
+                        root,
+                        {"PATH": ""},
+                        None,
+                        started_at=dt.datetime.now(dt.UTC),
+                    )
+                manifest = json.loads((artifacts / "manifest.json").read_text())
+                self.assertNotIn("capture_error", manifest)
+                query = manifest["tools"][0]
+                self.assertEqual(query["returncode"], returncode)
+                self.assertEqual((artifacts / query["output"]).read_bytes(), output)
+                if returncode == 0:
+                    self.assertIn("capture_error", query)
+                self.assertEqual(
+                    (artifacts / manifest["files"][0]["copy"]).read_bytes(),
+                    b"failed launch image",
+                )
 
     def test_unreadable_files_and_limits_are_explicit(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -326,7 +490,11 @@ class WindowsDiagnosticsTest(unittest.TestCase):
                     self.assertEqual(result, 34)
                     phase = next(artifacts.iterdir())
                     manifest = json.loads((phase / "manifest.json").read_text())
-                    events, snapshot = manifest["tools"]
+                    events, snapshot = [
+                        tool
+                        for tool in manifest["tools"]
+                        if "application-crash-events" not in tool["output"]
+                    ]
                     self.assertEqual(events["returncode"], 5)
                     self.assertEqual(snapshot["returncode"], 0)
                     self.assertIn(
@@ -348,6 +516,26 @@ class WindowsDiagnosticsTest(unittest.TestCase):
                         f"TimeCreated[@SystemTime >= '{timestamp}']", events["argv"][3]
                     )
 
+    @unittest.skipUnless(os.name == "nt", "requires native Windows event queries")
+    def test_native_crash_query_preserves_silent_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = diagnostics.run(
+                    [sys.executable, "-c", "raise SystemExit(3)"],
+                    cwd=root,
+                    env=None,
+                    artifact_dir=root / "artifacts",
+                    label="silent failure",
+                )
+            self.assertEqual(result, 3)
+            phase = next((root / "artifacts").iterdir())
+            manifest = json.loads((phase / "manifest.json").read_text())
+            self.assertNotIn("capture_error", manifest)
+            query = manifest["tools"][0]
+            self.assertEqual(query["returncode"], 0, query)
+            self.assertNotIn("capture_error", query)
+
     @unittest.skipUnless(os.name == "nt", "requires native Windows resource queries")
     def test_native_resource_snapshot_preserves_process_launch_failure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -368,7 +556,11 @@ class WindowsDiagnosticsTest(unittest.TestCase):
             self.assertEqual(result, 34)
             phase = next((root / "artifacts").iterdir())
             manifest = json.loads((phase / "manifest.json").read_text())
-            events, snapshot = manifest["tools"]
+            events, snapshot = [
+                tool
+                for tool in manifest["tools"]
+                if "application-crash-events" not in tool["output"]
+            ]
             self.assertEqual(events["returncode"], 0, events)
             self.assertEqual(snapshot["returncode"], 0, snapshot)
             state = json.loads((phase / snapshot["output"]).read_text())

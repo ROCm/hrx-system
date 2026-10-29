@@ -10,6 +10,7 @@ The caller owns the build command and its exit status. Collection is read-only:
 Ninja's input query enumerates the failed link's objects and archives without
 running actions, and symbol tools inspect copies of those inputs. Application
 Control launch failures capture native block events and policy identities.
+Silent process failures capture native crash events and build-owned images.
 Missing files, access errors, and capture limits appear in the manifest.
 """
 
@@ -25,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 import traceback
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -377,6 +379,70 @@ def capture_resource_exhaustion(
     )
 
 
+def capture_application_crashes(
+    capture: Capture, cwd: Path, build_dir: Path | None, started_at: dt.datetime
+) -> None:
+    timestamp = (
+        started_at.astimezone(dt.UTC)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+    # A shell or test harness may translate the native exception status and
+    # retain no child output. Query every failed phase, without relying on a
+    # printed crash diagnostic. Raw events preserve fault offsets and report IDs.
+    query = (
+        "*[System[((Provider[@Name='Application Error'] and EventID=1000) or "
+        "(Provider[@Name='Windows Error Reporting'] and EventID=1001))"
+        f" and TimeCreated[@SystemTime >= '{timestamp}']]]"
+    )
+    events = capture.tool(
+        [
+            "wevtutil.exe",
+            "qe",
+            "Application",
+            "/q:" + query,
+            "/rd:true",
+            "/c:64",
+            "/f:xml",
+            "/e:Events",
+            "/uni:true",
+        ],
+        cwd,
+        "application-crash-events",
+    )
+    if events is None:
+        return
+    try:
+        # Parse the original bytes so the XML reader honors wevtutil's UTF-16
+        # output. Installed shell/system images remain identified in the events;
+        # only products of this build belong in the binary snapshot.
+        root = ET.parse(events).getroot()
+        output_roots = [(cwd / "bazel-out").resolve()]
+        if build_dir is not None:
+            output_roots.append(build_dir.resolve())
+        images = {}
+        for event in root.findall("{*}Event"):
+            for data in event.findall("{*}EventData/{*}Data"):
+                if data.get("Name") not in ("AppPath", "ModulePath") or not data.text:
+                    continue
+                path = Path(data.text)
+                if path.is_absolute() and any(
+                    path.resolve().is_relative_to(output_root)
+                    for output_root in output_roots
+                ):
+                    images[path] = None
+        # Preserve each reported image before PDBs consume the remaining budget.
+        for path in images:
+            capture.file(path, copy=True)
+        for path in images:
+            symbols = path.with_suffix(".pdb")
+            if symbols.is_file():
+                capture.file(symbols, copy=True)
+    except (OSError, ValueError, ET.ParseError) as error:
+        # Keep the raw event output and continue the other failure collectors.
+        capture.tools[-1]["capture_error"] = str(error)
+
+
 def capture_failure(
     directory: Path,
     cwd: Path,
@@ -396,6 +462,7 @@ def capture_failure(
     output = (directory / "output.log").read_text(encoding="utf-8", errors="replace")
     output = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", output)
     try:
+        capture_application_crashes(capture, cwd, build_dir, started_at)
         capture_application_control(capture, cwd, output, started_at)
         capture_resource_exhaustion(capture, cwd, output, started_at)
         capture_process_images(capture, cwd, output)
