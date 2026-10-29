@@ -164,6 +164,7 @@ hrx_cc_library(
     hdrs = ["stream_value.h"],
     includes = ["../.."],
     deps = [
+        "//libhrx/src/binding/common",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],

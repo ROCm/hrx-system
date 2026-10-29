@@ -11,6 +11,57 @@
 
 namespace {
 
+TEST(StreamValueTest, DeviceScopeDoesNotDependOnPrivateHostVisibility) {
+  iree_hal_streaming_buffer_t allocation = {
+      .memory_kind = IREE_HAL_STREAMING_MEMORY_KIND_DEVICE,
+  };
+  iree_hal_streaming_retained_buffer_ref_t target = {
+      .owner_wrapper = &allocation,
+      .memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+  };
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAG_NONE,
+            iree_hip_stream_value_target_scope(&target));
+
+  // The same device allocation can have a CPU view for internal transfers,
+  // including unified backing, without promising concurrent CPU atomics.
+  target.memory_type |= IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+                        IREE_HAL_MEMORY_TYPE_HOST_COHERENT |
+                        IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAG_NONE,
+            iree_hip_stream_value_target_scope(&target));
+}
+
+TEST(StreamValueTest, HostAndManagedAllocationsRequireSystemScope) {
+  iree_hal_streaming_buffer_t allocation = {
+      .memory_kind = IREE_HAL_STREAMING_MEMORY_KIND_HOST,
+  };
+  iree_hal_streaming_retained_buffer_ref_t target = {
+      .owner_wrapper = &allocation,
+      .memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
+                     IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                     IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+                     IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
+  };
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+            iree_hip_stream_value_target_scope(&target));
+  allocation.memory_kind = IREE_HAL_STREAMING_MEMORY_KIND_MANAGED;
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+            iree_hip_stream_value_target_scope(&target));
+}
+
+TEST(StreamValueTest, CrossContextDeviceAllocationsRequireSystemScope) {
+  iree_hal_streaming_buffer_t allocation = {
+      .memory_kind = IREE_HAL_STREAMING_MEMORY_KIND_DEVICE,
+  };
+  iree_hal_streaming_retained_buffer_ref_t target = {
+      .owner_wrapper = &allocation,
+      .memory_type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .is_cross_context = true,
+  };
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+            iree_hip_stream_value_target_scope(&target));
+}
+
 TEST(StreamValueTest, TranslatesGreaterEqualAndEqual) {
   iree_hal_atomic_wait_params_t params;
   IREE_ASSERT_OK(iree_hip_stream_wait_value_params_initialize(

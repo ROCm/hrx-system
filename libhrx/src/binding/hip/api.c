@@ -13216,19 +13216,6 @@ static hipError_t iree_hip_stream_value_target_initialize(
   return hipSuccess;
 }
 
-// Host-visible atomic cells participate in the system coherence domain so
-// host stores can release queue waits and queue writes are visible to the
-// host. Device-only cells use the default device coherence domain; requiring
-// system scope there would reject valid coarse-grained device allocations.
-static iree_hal_atomic_flags_t iree_hip_stream_value_target_scope(
-    const iree_hip_stream_value_target_t* target) {
-  return target->is_cross_context ||
-                 iree_all_bits_set(target->memory_type,
-                                   IREE_HAL_MEMORY_TYPE_HOST_VISIBLE)
-             ? IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE
-             : IREE_HAL_ATOMIC_FLAG_NONE;
-}
-
 static void iree_hip_stream_value_write_params_set_scope(
     const iree_hip_stream_value_target_t* target,
     iree_hip_stream_value_write_params_t* params) {
