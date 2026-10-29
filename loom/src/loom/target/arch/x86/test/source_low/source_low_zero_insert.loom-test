@@ -28,29 +28,23 @@ func.def target(@target) @zero_insert_avx2(%i8_value: i8, %bf16_value: bf16, %i6
 // ----
 low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (i8, bf16, i64, f32, f64) -> (vector<32xi8>, vector<16xbf16>, vector<4xi64>, vector<8xf32>, vector<8xf32>, vector<4xf64>)}) @zero_insert_avx2(%i8_value: reg<x86.gpr32>, %bf16_value: reg<x86.gpr32>, %i64_value: reg<x86.gpr64>, %f32_value: reg<x86.xmm>, %f64_value: reg<x86.xmm>) -> (reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>, reg<x86.ymm>) asm {
   %c0_i8 = vxorps.zero.ymm
-  %c0_bf16_scalar = mov.imm32 0
-  %40 = vmovd.xmm.gpr32 %c0_bf16_scalar
-  %c0_bf16 = vpbroadcastw.ymm %40
-  %c0_f32_scalar = vxorps.zero.xmm
-  %c0_f32 = vbroadcastss.ymm %c0_f32_scalar
-  %c0_f64 = vbroadcastsd.ymm %c0_f32_scalar
-  %47 = copy %c0_i8 : reg<x86.ymm> -> reg<x86.xmm>
-  %48 = vpinsrb.xmm %47, %i8_value, 13
-  %i8_high = vinsertf128.ymm.xmm %c0_i8, %48, 1
-  %50 = copy %c0_bf16 : reg<x86.ymm> -> reg<x86.xmm>
-  %51 = vpinsrw.xmm %50, %bf16_value, 1
-  %bf16_high = vinsertf128.ymm.xmm %c0_bf16, %51, 1
-  %53 = copy %c0_i8 : reg<x86.ymm> -> reg<x86.xmm>
-  %54 = vpinsrq.xmm %53, %i64_value, 1
-  %i64_high = vinsertf128.ymm.xmm %c0_i8, %54, 1
-  %56 = vinsertps.xmm %f32_value, %f32_value, 14
-  %f32_low = copy %56 : reg<x86.xmm> -> reg<x86.ymm>
-  %58 = copy %c0_f32 : reg<x86.ymm> -> reg<x86.xmm>
-  %59 = vinsertps.xmm %58, %f32_value, 32
-  %f32_high = vinsertf128.ymm.xmm %c0_f32, %59, 1
-  %61 = copy %c0_f64 : reg<x86.ymm> -> reg<x86.xmm>
-  %62 = vshufpd.xmm %61, %f64_value, 0
-  %f64_high = vinsertf128.ymm.xmm %c0_f64, %62, 1
+  %43 = copy %c0_i8 : reg<x86.ymm> -> reg<x86.xmm>
+  %44 = vpinsrb.xmm %43, %i8_value, 13
+  %i8_high = vinsertf128.ymm.xmm %c0_i8, %44, 1
+  %46 = copy %c0_i8 : reg<x86.ymm> -> reg<x86.xmm>
+  %47 = vpinsrw.xmm %46, %bf16_value, 1
+  %bf16_high = vinsertf128.ymm.xmm %c0_i8, %47, 1
+  %49 = copy %c0_i8 : reg<x86.ymm> -> reg<x86.xmm>
+  %50 = vpinsrq.xmm %49, %i64_value, 1
+  %i64_high = vinsertf128.ymm.xmm %c0_i8, %50, 1
+  %52 = vinsertps.xmm %f32_value, %f32_value, 14
+  %f32_low = copy %52 : reg<x86.xmm> -> reg<x86.ymm>
+  %54 = copy %c0_i8 : reg<x86.ymm> -> reg<x86.xmm>
+  %55 = vinsertps.xmm %54, %f32_value, 32
+  %f32_high = vinsertf128.ymm.xmm %c0_i8, %55, 1
+  %57 = copy %c0_i8 : reg<x86.ymm> -> reg<x86.xmm>
+  %58 = vshufpd.xmm %57, %f64_value, 0
+  %f64_high = vinsertf128.ymm.xmm %c0_i8, %58, 1
   return %i8_high, %bf16_high, %i64_high, %f32_low, %f32_high, %f64_high
 }
 
@@ -109,24 +103,20 @@ func.def target(@target) @zero_insert_avx512(%i32_value: i32, %f32_value: f32, %
 // ----
 low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (i32, f32, f64, f16) -> (vector<16xi32>, vector<16xf32>, vector<16xf32>, vector<8xf64>, vector<32xf16>)}) @zero_insert_avx512(%i32_value: reg<x86.gpr32>, %f32_value: reg<x86.xmm>, %f64_value: reg<x86.xmm>, %f16_value: reg<x86.xmm>) -> (reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>) asm {
   %c0_i32 = vxorps.zero
-  %c0_f32_scalar = vxorps.zero.xmm
-  %c0_f32 = vbroadcastss %c0_f32_scalar
-  %c0_f64 = vbroadcastsd %c0_f32_scalar
-  %c0_f16 = vpbroadcastw.zmm.xmm %c0_f32_scalar
-  %38 = copy %c0_i32 : reg<x86.zmm> -> reg<x86.xmm>
-  %39 = vpinsrd.xmm %38, %i32_value, 2
-  %i32_high = vinsertf32x4.zmm.xmm %c0_i32, %39, 3
-  %41 = vinsertps.xmm %f32_value, %f32_value, 14
-  %f32_low = copy %41 : reg<x86.xmm> -> reg<x86.zmm>
-  %43 = copy %c0_f32 : reg<x86.zmm> -> reg<x86.xmm>
-  %44 = vinsertps.xmm %43, %f32_value, 32
-  %f32_high = vinsertf32x4.zmm.xmm %c0_f32, %44, 3
-  %46 = copy %c0_f64 : reg<x86.zmm> -> reg<x86.xmm>
-  %47 = vshufpd.xmm %46, %f64_value, 0
-  %f64_high = vinsertf32x4.zmm.xmm %c0_f64, %47, 3
-  %49 = vmovd.gpr32.xmm %f16_value
-  %50 = copy %c0_f16 : reg<x86.zmm> -> reg<x86.xmm>
-  %51 = vpinsrw.xmm %50, %49, 1
-  %f16_high = vinsertf32x4.zmm.xmm %c0_f16, %51, 3
+  %35 = copy %c0_i32 : reg<x86.zmm> -> reg<x86.xmm>
+  %36 = vpinsrd.xmm %35, %i32_value, 2
+  %i32_high = vinsertf32x4.zmm.xmm %c0_i32, %36, 3
+  %38 = vinsertps.xmm %f32_value, %f32_value, 14
+  %f32_low = copy %38 : reg<x86.xmm> -> reg<x86.zmm>
+  %40 = copy %c0_i32 : reg<x86.zmm> -> reg<x86.xmm>
+  %41 = vinsertps.xmm %40, %f32_value, 32
+  %f32_high = vinsertf32x4.zmm.xmm %c0_i32, %41, 3
+  %43 = copy %c0_i32 : reg<x86.zmm> -> reg<x86.xmm>
+  %44 = vshufpd.xmm %43, %f64_value, 0
+  %f64_high = vinsertf32x4.zmm.xmm %c0_i32, %44, 3
+  %46 = vmovd.gpr32.xmm %f16_value
+  %47 = copy %c0_i32 : reg<x86.zmm> -> reg<x86.xmm>
+  %48 = vpinsrw.xmm %47, %46, 1
+  %f16_high = vinsertf32x4.zmm.xmm %c0_i32, %48, 3
   return %i32_high, %f32_low, %f32_high, %f64_high, %f16_high
 }

@@ -147,31 +147,6 @@ _PAYLOAD_NAMES_BY_BIT_WIDTH = {
 
 
 def test_predicate_construction_covers_every_callable_lane_count() -> None:
-    constant_rules = _rules_for(vector.vector_constant)
-    assert {
-        (
-            _type_guard(rule, "result"),
-            _carrier_register_class(rule, "result"),
-            _representation_guard(rule, "result"),
-            next(
-                (guard.minimum, guard.maximum)
-                for guard in rule.guards
-                if guard.kind == GuardKind.I64_RANGE and guard.field == "value"
-            ),
-        )
-        for rule in constant_rules
-    } == {
-        (
-            Vector("i1", lanes=lane_count),
-            _register_class(representation_bit_width),
-            _representation(lane_count, representation_bit_width),
-            (value, value),
-        )
-        for lane_count in _PREDICATE_LANE_COUNTS
-        for representation_bit_width in _representation_bit_widths(lane_count)
-        for value in (0, 1)
-    }
-
     splat_rules = _rules_for(vector.vector_splat)
     exact_splat_rules = tuple(
         rule
@@ -459,7 +434,7 @@ def test_predicate_logic_preserves_each_physical_representation() -> None:
 
 def test_predicate_rule_inventory_has_no_unclassified_rows() -> None:
     expected_count = sum(
-        len(_representation_bit_widths(lane_count)) * 8
+        len(_representation_bit_widths(lane_count)) * 6
         for lane_count in _PREDICATE_LANE_COUNTS
     )
     expected_count += sum(
@@ -578,21 +553,14 @@ def _avx512_register_class(vector_bit_width: int) -> str:
 def test_avx512_predicate_construction_is_only_the_missing_delta() -> None:
     assert {
         (
-            rule.source_op,
             _type_guard(rule, "result"),
             _carrier_register_class(rule, "result"),
             _representation_guard(rule, "result"),
         )
-        for rule in (
-            *_avx512_rules_for(vector.vector_constant),
-            *_avx512_rules_for(vector.vector_splat),
-        )
+        for rule in _avx512_rules_for(vector.vector_splat)
     } == {
-        (source_op, Vector("i1", minimum_lanes=2, maximum_lanes=64), "x86.k", 1)
-        for source_op in (vector.vector_constant, vector.vector_splat)
-    } | {
-        (source_op, Vector("i1", lanes=64), "x86.zmm", 8)
-        for source_op in (vector.vector_constant, vector.vector_splat)
+        (Vector("i1", minimum_lanes=2, maximum_lanes=64), "x86.k", 1),
+        (Vector("i1", lanes=64), "x86.zmm", 8),
     }
     exact_splat_rules = tuple(
         rule
@@ -884,5 +852,5 @@ def test_avx512_predicate_rule_inventory_has_no_unclassified_rows() -> None:
     exact_splat_count = len(("mask", "carrier")) * len((0, 1))
     assert (
         len(_AVX512_RULES)
-        == 80 + exact_splat_count + extension_count + truncation_count
+        == 76 + exact_splat_count + extension_count + truncation_count
     )

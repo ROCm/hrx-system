@@ -284,20 +284,6 @@ def test_scalar_carrier_rules_preserve_the_existing_fp16_surface() -> None:
         Vector("f16", lanes=32),
     }
     assert {rule.priority for rule in _rules_for(vector.vector_splat)} == {2}
-    constant_rules = _rules_for(vector.vector_constant)
-    assert {_value_type(rule, "result") for rule in constant_rules} == {
-        Vector("i16", lanes=4),
-        Vector("f16", lanes=4),
-    }
-    assert all(
-        _descriptor_keys(rule)
-        == (
-            "x86.scalar.movimm.gpr32",
-            "x86.avx2.vmovd.xmm.gpr32",
-            "x86.avx2.vpbroadcastw.xmm",
-        )
-        for rule in constant_rules
-    )
     assert {
         (_value_type(rule, "input"), _value_type(rule, "result"))
         for rule in X86_AVX512_FP16_CONTRACT_FRAGMENT.cases

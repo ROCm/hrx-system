@@ -717,9 +717,6 @@ static void loom_x86_predicate_observe_unclaimed_operand(
 
 static const loom_low_lower_representation_boundary_t
     kX86PredicateRepresentationBoundaries[] = {
-        {LOOM_OP_VECTOR_CONSTANT,
-         LOOM_X86_PREDICATE_REPRESENTATION_ACTION_FLEXIBLE_RESULT,
-         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
         {LOOM_OP_VECTOR_SPLAT,
          LOOM_X86_PREDICATE_REPRESENTATION_ACTION_FLEXIBLE_RESULT,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
@@ -755,9 +752,7 @@ static const loom_low_lower_representation_boundary_span_t
     kX86PredicateRepresentationBoundarySpans[] = {
         {0, IREE_ARRAYSIZE(kX86PredicateRepresentationBoundaries)},
 };
-static_assert((loom_op_kind_t)LOOM_OP_VECTOR_CONSTANT <
-                      (loom_op_kind_t)LOOM_OP_VECTOR_SPLAT &&
-                  (loom_op_kind_t)LOOM_OP_VECTOR_SPLAT <
+static_assert((loom_op_kind_t)LOOM_OP_VECTOR_SPLAT <
                       (loom_op_kind_t)LOOM_OP_VECTOR_FROM_ELEMENTS &&
                   (loom_op_kind_t)LOOM_OP_VECTOR_FROM_ELEMENTS <
                       (loom_op_kind_t)LOOM_OP_VECTOR_EXTRACT &&

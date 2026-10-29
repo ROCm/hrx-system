@@ -9,10 +9,9 @@ func.def @bf16_dot2_zero_256(%lhs: vector<16xbf16>, %rhs: vector<16xbf16>) -> (v
 
 // ----
 low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({signature = (vector<16xbf16>, vector<16xbf16>) -> (vector<8xf32>)}) @bf16_dot2_zero_256(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
-  %c0_scalar = vxorps.zero.xmm
-  %c0 = vbroadcastss.ymm %c0_scalar
-  %11 = copy %c0 : reg<x86.ymm> -> reg<x86.ymm>
-  %dot = avx512_bf16.vdpbf16ps.ymm %11, %lhs, %rhs
+  %c0 = vxorps.zero.ymm
+  %10 = copy %c0 : reg<x86.ymm> -> reg<x86.ymm>
+  %dot = avx512_bf16.vdpbf16ps.ymm %10, %lhs, %rhs
   return %dot
 }
 
@@ -32,10 +31,9 @@ func.def @supported_f32_zero_widths() -> (f32, vector<4xf32>, vector<8xf32>, vec
 // ----
 low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({signature = () -> (f32, vector<4xf32>, vector<8xf32>, vector<16xf32>)}) @supported_f32_zero_widths() -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.ymm>, reg<x86.zmm>) asm {
   %scalar = vxorps.zero.xmm
-  %c0x4 = vbroadcastss.xmm %scalar
-  %c0x8 = vbroadcastss.ymm %scalar
-  %c0x16 = vbroadcastss %scalar
-  return %scalar, %c0x4, %c0x8, %c0x16
+  %c0x8 = vxorps.zero.ymm
+  %c0x16 = vxorps.zero
+  return %scalar, %scalar, %c0x8, %c0x16
 }
 
 // ====

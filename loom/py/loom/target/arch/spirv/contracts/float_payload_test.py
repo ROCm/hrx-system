@@ -6,7 +6,6 @@
 
 from loom.dialect.scalar import conversion
 from loom.dialect.scf import defs as scf
-from loom.dialect.vector import defs as vector
 from loom.target.arch.spirv.contracts.bfloat import (
     bfloat_carrier_memory_rules,
     bfloat_to_f32_emits,
@@ -59,38 +58,34 @@ def test_float_constants_and_selection_cover_native_and_payload_types() -> None:
             assert immediate.kind is ValueProjectKind.FLOAT_BITS
 
 
-def test_singleton_constants_and_selection_preserve_native_feature_priority() -> None:
-    for source_op in (vector.vector_constant, scf.scf_select):
-        rules = _payload_rules(source_op, "result", kind="vector", lanes=1)
-        for native_bfloat in (False, True):
-            features = feature_bits_value(
-                ("vulkan_shader", "int8", "float16", "float64")
-                + (("bfloat16_type_khr",) if native_bfloat else ())
-            )
-            for element, carrier in (
-                ("f8E4M3", "i8"),
-                ("f8E5M2", "i8"),
-                ("bf16", "bf16" if native_bfloat else "i32"),
-                ("f16", "f16"),
-                ("f32", "f32"),
-                ("f64", "f64"),
-            ):
-                applicable = tuple(
-                    rule
-                    for rule in rules[element]
-                    if all(
-                        not mask & ~features
-                        for guard in rule.guards
-                        if guard.kind is GuardKind.DESCRIPTOR_AVAILABLE
-                        for mask in guard.descriptor.feature_mask_words
-                    )
+def test_singleton_selection_preserves_native_feature_priority() -> None:
+    rules = _payload_rules(scf.scf_select, "result", kind="vector", lanes=1)
+    for native_bfloat in (False, True):
+        features = feature_bits_value(
+            ("vulkan_shader", "int8", "float16", "float64")
+            + (("bfloat16_type_khr",) if native_bfloat else ())
+        )
+        for element, carrier in (
+            ("f8E4M3", "i8"),
+            ("f8E5M2", "i8"),
+            ("bf16", "bf16" if native_bfloat else "i32"),
+            ("f16", "f16"),
+            ("f32", "f32"),
+            ("f64", "f64"),
+        ):
+            applicable = tuple(
+                rule
+                for rule in rules[element]
+                if all(
+                    not mask & ~features
+                    for guard in rule.guards
+                    if guard.kind is GuardKind.DESCRIPTOR_AVAILABLE
+                    for mask in guard.descriptor.feature_mask_words
                 )
-                selected = applicable[0]
-                selected.validate(SPIRV_LOGICAL_CORE_DESCRIPTOR_SET)
-                assert selected.emit[-1].descriptor.key.endswith(f".{carrier}")
-                if source_op is vector.vector_constant:
-                    immediate = next(iter(selected.emit[0].immediates.values()))
-                    assert immediate.kind is ValueProjectKind.FLOAT_BITS
+            )
+            selected = applicable[0]
+            selected.validate(SPIRV_LOGICAL_CORE_DESCRIPTOR_SET)
+            assert selected.emit[-1].descriptor.key.endswith(f".{carrier}")
 
 
 def test_bfloat_memory_uses_existing_bit_preserving_storage_conversions() -> None:

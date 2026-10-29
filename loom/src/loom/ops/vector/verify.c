@@ -1583,22 +1583,11 @@ static bool loom_vector_try_get_splat_i64_constant(const loom_module_t* module,
     return false;
   }
   const loom_op_t* def_op = loom_value_def_op(value);
-  if (!def_op) {
+  if (!def_op || !loom_vector_splat_isa(def_op)) {
     return false;
   }
-  if (loom_vector_splat_isa(def_op)) {
-    return loom_vector_try_get_scalar_i64_constant(
-        module, loom_vector_splat_scalar(def_op), out_value);
-  }
-  if (!loom_vector_constant_isa(def_op)) {
-    return false;
-  }
-  loom_attribute_t attr = loom_vector_constant_value(def_op);
-  if (attr.kind != LOOM_ATTR_I64) {
-    return false;
-  }
-  *out_value = loom_attr_as_i64(attr);
-  return true;
+  return loom_vector_try_get_scalar_i64_constant(
+      module, loom_vector_splat_scalar(def_op), out_value);
 }
 
 static bool loom_vector_try_get_scalar_f64_constant(const loom_module_t* module,
@@ -1690,16 +1679,6 @@ static iree_status_t loom_vector_verify_static_threshold_order(
   const loom_op_t* def_op = loom_value_def_op(value);
   if (!def_op) {
     return iree_ok_status();
-  }
-
-  if (loom_vector_constant_isa(def_op)) {
-    loom_attribute_t attr = loom_vector_constant_value(def_op);
-    if (attr.kind != LOOM_ATTR_F64 || !isnan(loom_attr_as_f64(attr))) {
-      return iree_ok_status();
-    }
-    return loom_vector_emit_static_threshold_order(
-        emitter, op, IREE_SV("thresholds"), /*left_index=*/0,
-        /*right_index=*/0);
   }
 
   if (loom_vector_splat_isa(def_op)) {

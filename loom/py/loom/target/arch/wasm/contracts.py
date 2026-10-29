@@ -387,25 +387,6 @@ def _const_float_rule(
     )
 
 
-def _const_v128_rule(
-    result_type: TypePattern, value: ValueProject, guard: Guard
-) -> DescriptorRule:
-    descriptor = _descriptor("wasm.v128.const")
-    return DescriptorRule(
-        source_op=vector.vector_constant,
-        descriptor=descriptor,
-        guards=(_value_type("result", result_type), guard),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                results={"dst": ValueRef.result("result")},
-                immediates={"lo64": value, "hi64": value},
-                form=DescriptorEmitForm.CONST,
-            ),
-        ),
-    )
-
-
 def _const_v128_splat_rule(
     scalar_type: TypePattern,
     result_type: TypePattern,
@@ -430,40 +411,6 @@ def _const_v128_splat_rule(
             ),
         ),
         priority=1,
-    )
-
-
-def _const_vector_splat_rule(
-    result_type: TypePattern,
-    element_type: str,
-    shape_name: str,
-    immediate: str,
-    value: ValueProject,
-    guard: Guard,
-) -> DescriptorRule:
-    # A scalar splat represents repeated lanes without packing them into
-    # v128.const's two immediate words and fixed 16-byte payload.
-    constant = _descriptor(f"wasm.{element_type}.const")
-    splat = _descriptor(f"wasm.{shape_name}.splat")
-    return DescriptorRule(
-        source_op=vector.vector_constant,
-        descriptor=splat,
-        guards=(_value_type("result", result_type), guard),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=constant,
-                results={"dst": ValueRef.temporary("element")},
-                result_types={"dst": Scalar(element_type)},
-                immediates={immediate: value},
-                form=DescriptorEmitForm.CONST,
-            ),
-            EmitDescriptorOp(
-                descriptor=splat,
-                operands={"value": ValueRef.temporary("element")},
-                results={"dst": ValueRef.result("result")},
-                form=DescriptorEmitForm.OP,
-            ),
-        ),
     )
 
 
@@ -1951,14 +1898,6 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
         _const_float_rule(_F32, "wasm.f32.const"),
         _const_float_rule(_F64, "wasm.f64.const"),
         *predicate_rules(_descriptor, _value_type),
-        _const_v128_rule(
-            _V2I64, ValueProject.exact_i64("result"), Guard.value_exact_i64("result")
-        ),
-        _const_v128_rule(
-            _PARTIAL_I64,
-            ValueProject.exact_i64("result"),
-            Guard.value_exact_i64("result"),
-        ),
         _const_v128_splat_rule(
             _I64,
             _V2I64,
@@ -1970,72 +1909,6 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
             _PARTIAL_I64,
             ValueProject.exact_i64("scalar"),
             Guard.value_exact_i64("scalar"),
-        ),
-        _const_v128_rule(
-            _V2F64, ValueProject.float_bits("result"), Guard.value_exact_float("result")
-        ),
-        _const_v128_rule(
-            Vector("f64", minimum_lanes=1, maximum_lanes=1),
-            ValueProject.float_bits("result"),
-            Guard.value_exact_float("result"),
-        ),
-        *(
-            _const_vector_splat_rule(
-                result_type,
-                "i32",
-                shape_name,
-                "i32_value",
-                ValueProject.exact_i64("result"),
-                Guard.value_exact_i64("result"),
-            )
-            for result_type, shape_name in (
-                (Vector("i8", lanes=16), "i8x16"),
-                (Vector("i16", lanes=8), "i16x8"),
-                (_V4I32, "i32x4"),
-            )
-        ),
-        *(
-            _const_vector_splat_rule(
-                vector_type,
-                "i32",
-                shape_name,
-                "i32_value",
-                ValueProject.exact_i64("result"),
-                Guard.value_exact_i64("result"),
-            )
-            for _, vector_type, shape_name, _, _ in _PARTIAL_INTEGER_LANE_TYPES[:-1]
-        ),
-        *(
-            _const_vector_splat_rule(
-                result_type,
-                element_type,
-                shape_name,
-                immediate,
-                ValueProject.float_bits("result"),
-                Guard.value_exact_float("result"),
-            )
-            for result_type, element_type, shape_name, immediate in (
-                (Vector(("f8E4M3", "f8E5M2"), lanes=16), "i32", "i8x16", "i32_value"),
-                (Vector(("f16", "bf16"), lanes=8), "i32", "i16x8", "i32_value"),
-                (_V4F32, "f32", "f32x4", "bits"),
-                (
-                    Vector("f32", minimum_lanes=1, maximum_lanes=3),
-                    "f32",
-                    "f32x4",
-                    "bits",
-                ),
-            )
-        ),
-        *(
-            _const_vector_splat_rule(
-                vector_type,
-                "i32",
-                shape_name,
-                "i32_value",
-                ValueProject.float_bits("result"),
-                Guard.value_exact_float("result"),
-            )
-            for _, vector_type, shape_name, _, _ in _PARTIAL_NARROW_FLOAT_LANE_TYPES
         ),
         *(
             _whole_value_select_rule(value_type, f"wasm.{type_name}.select")

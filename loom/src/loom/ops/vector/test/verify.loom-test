@@ -270,23 +270,6 @@ func.def @reduce_axes_integer_with_float_kind(%v: vector<2x3xi32>, %init: vector
 
 // ====
 
-// Vector constants use a scalar literal payload matching the vector element type.
-func.def @constant_payload_mismatch() {
-  // ERROR@+1: TYPE/005 "value"
-  %r = vector.constant 0 : vector<4xf32>
-  func.return
-}
-
-// ====
-
-func.def @constant_i1_payload_mismatch() {
-  // ERROR@+1: TYPE/005 "value"
-  %r = vector.constant 2 : vector<4xi1>
-  func.return
-}
-
-// ====
-
 // Static zero-lane vectors are empty aggregates, not poison.
 func.def @poison_static_zero_lane() {
   // ERROR@+1: TYPE/004 "use vector.empty"

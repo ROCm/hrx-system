@@ -159,10 +159,9 @@ low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_
   %87 = vpand.xmm %86, %81
   %88 = vpand.xmm %xmm_rhs, %85
   %copied = vpor.xmm %87, %88
-  %c0_scalar = vxorps.zero.xmm
-  %c0 = vpbroadcastw.xmm %c0_scalar
-  %92 = mov.imm32 15872
-  %constant_scalar = vmovd.xmm.gpr32 %92
+  %c0 = vxorps.zero.xmm
+  %91 = mov.imm32 15872
+  %constant_scalar = vmovd.xmm.gpr32 %91
   %constant = vpbroadcastw.xmm %constant_scalar
   %extended = vcvtph2psx.xmm.xmm %copied
   %truncated = vcvtps2phx.xmm.xmm %wide

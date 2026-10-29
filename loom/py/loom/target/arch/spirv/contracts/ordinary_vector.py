@@ -19,7 +19,6 @@ from loom.target.arch.spirv.ordinary_vector import (
     ORDINARY_VECTOR_CONCAT_SHUFFLE_INSTRUCTIONS,
     ORDINARY_VECTOR_SOURCE_SHUFFLE_INSTRUCTIONS,
     ORDINARY_VECTOR_TYPES,
-    OrdinaryVectorComponentKind,
     OrdinaryVectorComponentType,
     OrdinaryVectorConcatShape,
     OrdinaryVectorShuffleInstruction,
@@ -35,7 +34,6 @@ from loom.target.contracts import (
     AttrProject,
     ContractCase,
     DescriptorEmitForm,
-    DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
     Guard,
@@ -653,162 +651,6 @@ def _select_rule(vector_type: OrdinaryVectorType) -> DescriptorRule:
     )
 
 
-def _constant_descriptor(
-    component_type: OrdinaryVectorComponentType,
-    *,
-    boolean_value: int | None = None,
-) -> Descriptor:
-    if component_type.kind == OrdinaryVectorComponentKind.BOOLEAN:
-        if boolean_value is None:
-            raise ValueError("boolean constant requires an exact value")
-        suffix = "false" if boolean_value == 0 else "true"
-        return _descriptor(f"spirv.op_constant_{suffix}.bool")
-    if component_type.kind == OrdinaryVectorComponentKind.OFFSET:
-        return _descriptor("spirv.op_constant.offset64")
-    return _descriptor(f"spirv.op_constant.{component_type.suffix}")
-
-
-def _constant_guards(
-    component_type: OrdinaryVectorComponentType,
-    result_pattern: TypePattern,
-    descriptor: Descriptor,
-    *,
-    boolean_value: int | None = None,
-) -> tuple[Guard, ...]:
-    guards = [Guard.value_type("result", result_pattern)]
-    if component_type.kind == OrdinaryVectorComponentKind.BOOLEAN:
-        if boolean_value is None:
-            raise ValueError("boolean constant requires an exact value")
-        guards.append(Guard.value_i64_range("result", boolean_value, boolean_value))
-    elif component_type.kind == OrdinaryVectorComponentKind.FLOAT:
-        guards.extend(
-            (
-                Guard.attr_kind("value", "f64"),
-                Guard.value_exact_float("result"),
-            )
-        )
-    else:
-        guards.append(Guard.attr_kind("value", "i64"))
-        if component_type.kind == OrdinaryVectorComponentKind.SIGNED_INTEGER:
-            guards.append(
-                Guard.i64_range(
-                    "value",
-                    component_type.signed_minimum,
-                    component_type.signed_maximum,
-                )
-            )
-    guards.extend(_feature_guards(descriptor))
-    return tuple(guards)
-
-
-def _constant_immediates(
-    component_type: OrdinaryVectorComponentType,
-) -> dict[str, AttrProject | ValueProject]:
-    if component_type.kind == OrdinaryVectorComponentKind.BOOLEAN:
-        return {}
-    if component_type.kind == OrdinaryVectorComponentKind.FLOAT:
-        return {
-            f"{component_type.source_types[0]}_bits": ValueProject.float_bits("result")
-        }
-    if component_type.kind == OrdinaryVectorComponentKind.OFFSET:
-        return {"offset64_value": AttrProject.direct("value")}
-    return {f"{component_type.suffix}_value": AttrProject.direct("value")}
-
-
-def _constant_rule(
-    component_type: OrdinaryVectorComponentType,
-    lane_count: int | None,
-    *,
-    boolean_value: int | None = None,
-) -> DescriptorRule:
-    scalar_descriptor = _constant_descriptor(
-        component_type, boolean_value=boolean_value
-    )
-    result_pattern = (
-        Vector(component_type.source_types, lanes=lane_count)
-        if lane_count is not None
-        else Vector(
-            component_type.source_types,
-            minimum_lanes=5,
-            maximum_lanes="LOOM_DIM_MAX_STATIC_SIZE",
-        )
-    )
-    if lane_count is None or lane_count == 1:
-        return DescriptorRule(
-            source_op=vector.vector_constant,
-            descriptor=scalar_descriptor,
-            guards=_constant_guards(
-                component_type,
-                result_pattern,
-                scalar_descriptor,
-                boolean_value=boolean_value,
-            ),
-            emit=(
-                _emit(
-                    scalar_descriptor,
-                    results={"dst": ValueRef.result("result")},
-                    result_types={"dst": DescriptorResultType()},
-                    immediates=_constant_immediates(component_type),
-                    form=DescriptorEmitForm.CONST,
-                ),
-            ),
-        )
-
-    vector_type = OrdinaryVectorType(component_type, lane_count)
-    construct_descriptor = _construct_descriptor(vector_type)
-    temporary = ValueRef.temporary("component")
-    return DescriptorRule(
-        source_op=vector.vector_constant,
-        descriptor=construct_descriptor,
-        guards=(
-            *_constant_guards(
-                component_type,
-                result_pattern,
-                scalar_descriptor,
-                boolean_value=boolean_value,
-            ),
-            *_feature_guards(construct_descriptor),
-        ),
-        emit=(
-            _emit(
-                scalar_descriptor,
-                results={"dst": temporary},
-                result_types={"dst": Scalar(component_type.source_types[0])},
-                immediates=_constant_immediates(component_type),
-                form=DescriptorEmitForm.CONST,
-            ),
-            _emit(
-                construct_descriptor,
-                operands={
-                    f"component{lane_index}": temporary
-                    for lane_index in range(lane_count)
-                },
-                results={"dst": ValueRef.result("result")},
-            ),
-        ),
-    )
-
-
-def _constant_rules() -> tuple[DescriptorRule, ...]:
-    rules: list[DescriptorRule] = []
-    for component_type in ORDINARY_VECTOR_COMPONENT_TYPES:
-        boolean_values = (
-            (0, 1)
-            if component_type.kind == OrdinaryVectorComponentKind.BOOLEAN
-            else (None,)
-        )
-        for lane_count in (1, *NATIVE_ORDINARY_VECTOR_LANE_COUNTS, None):
-            rules.extend(
-                _constant_rule(
-                    component_type,
-                    lane_count,
-                    boolean_value=boolean_value,
-                )
-                for boolean_value in boolean_values
-            )
-    return tuple(rules)
-
-
 def _native_rules() -> tuple[DescriptorRule, ...]:
     rules: list[DescriptorRule] = []
     for component_type in ORDINARY_VECTOR_COMPONENT_TYPES:
@@ -855,7 +697,6 @@ SPIRV_ORDINARY_VECTOR_CONTRACT_CASES: tuple[ContractCase, ...] = (
         _singleton_select_rule(component_type)
         for component_type in ORDINARY_VECTOR_COMPONENT_TYPES
     ),
-    *_constant_rules(),
     *_native_rules(),
     *_concat_rules(),
 )

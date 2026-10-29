@@ -147,8 +147,7 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({sig
   %active = vpcmpgtd.ymm %limits, %lanes
   %scales = vbroadcastss.ymm %scale
   %scaled = vmulps.ymm %values, %scales
-  %inactive_values_scalar = vxorps.zero.xmm
-  %inactive_values = vbroadcastss.ymm %inactive_values_scalar
+  %inactive_values = vxorps.zero.ymm
   %result = vpblendvb.ymm %inactive_values, %scaled, %active
   return %result
 }

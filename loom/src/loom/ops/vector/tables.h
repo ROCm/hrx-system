@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-extern const loom_op_vtable_t loom_vector_constant_vtable;
+extern const loom_op_vtable_t loom_vector_constanti_vtable;
 extern const loom_op_vtable_t loom_vector_poison_vtable;
 extern const loom_op_vtable_t loom_vector_empty_vtable;
 extern const loom_op_vtable_t loom_vector_splat_vtable;
@@ -177,7 +177,6 @@ extern const loom_op_vtable_t loom_vector_encode_vtable;
 extern const loom_op_vtable_t loom_vector_fragment_vtable;
 extern const loom_op_vtable_t loom_vector_fragment_repack_vtable;
 extern const loom_op_vtable_t loom_vector_refine_vtable;
-extern const loom_op_vtable_t loom_vector_constanti_vtable;
 extern const loom_op_vtable_t loom_vector_constantf_vtable;
 
 #ifdef __cplusplus

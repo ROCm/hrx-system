@@ -468,10 +468,6 @@ class CxxExpressionRenderer(CxxRenderContext):
 
     def _loop_initializer(self, value_id: int) -> str:
         definition = self.definitions.get(value_id)
-        if definition is not None and definition.name == "vector.constant":
-            value = definition.attributes.get("value")
-            if value == 0 or value == 0.0:
-                return f"{self.cpp_type(value_id)}{{}}"
         if definition is not None and definition.name in {
             "scalar.constant",
             "index.constant",
@@ -1288,17 +1284,6 @@ class CxxExpressionRenderer(CxxRenderContext):
         if projected is not None:
             return projected
 
-        if name == "vector.constant":
-            result = operation.results[0]
-            value = operation.attributes["value"]
-            type_name = self.cpp_type(result)
-            expression = (
-                f"{type_name}{{}}"
-                if value == 0 or value == 0.0
-                else self._literal(value, result)
-            )
-            self._declare(result, expression)
-            return ("value",)
         if name == "vector.from_elements":
             result = operation.results[0]
             elements = ", ".join(

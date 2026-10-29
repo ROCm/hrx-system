@@ -14,12 +14,9 @@ from enum import Enum
 
 from loom.dialect.vector import defs as vector
 from loom.target.arch.x86.contracts.constants import (
-    floating_vector_constant_bits_rule,
-    floating_vector_zero_rule,
-    integer_vector_constant_rule,
+    floating_vector_splat_zero_rule,
     integer_vector_splat_rule,
     integer_vector_splat_zero_rule,
-    integer_vector_zero_rule,
 )
 from loom.target.arch.x86.contracts.rule_builders import (
     DescriptorLookup as _DescriptorLookup,
@@ -164,95 +161,18 @@ def _vector_zero_rules(
         register_class = _REGISTER_CLASSES[vector_bit_width]
         rules.extend(
             (
-                integer_vector_zero_rule(
-                    integer_vector_types,
-                    descriptor,
-                    result_register_class=register_class,
-                ),
                 integer_vector_splat_zero_rule(
                     integer_scalar_types,
                     integer_vector_types,
                     descriptor,
                     result_register_class=register_class,
                 ),
-                floating_vector_zero_rule(
+                floating_vector_splat_zero_rule(
                     float_vector_types,
                     descriptor,
                     result_register_class=register_class,
                 ),
             )
-        )
-    return tuple(rules)
-
-
-def _uniform_vector_constant_rules(
-    descriptor_lookup: _DescriptorLookup,
-    *,
-    descriptor_key_prefix: str,
-    vector_bit_widths: tuple[int, ...],
-    broadcast_source: _IntegerBroadcastSource,
-    integer_elements: Sequence[VectorElement] = INTEGER_ELEMENTS,
-    floating_elements: Sequence[VectorElement] = (*STORAGE_ELEMENTS, *FLOAT_ELEMENTS),
-    priority: int = 0,
-) -> tuple[DescriptorRule, ...]:
-    rules: list[DescriptorRule] = []
-    for element in integer_elements:
-        lane_type = _full_vector_type(element, 128)
-        rules.extend(
-            (
-                integer_vector_constant_rule(
-                    carrier.value_type,
-                    lane_type,
-                    element.bit_width,
-                    descriptor_lookup(
-                        "x86.scalar.movimm.gpr64"
-                        if element.bit_width == 64
-                        else "x86.scalar.movimm.gpr32"
-                    ),
-                    _integer_lane_move_descriptor(
-                        element.bit_width,
-                        broadcast_source,
-                        descriptor_lookup,
-                    ),
-                    descriptor_lookup(
-                        f"{descriptor_key_prefix}."
-                        f"{_INTEGER_BROADCAST_MNEMONICS[element.bit_width]}."
-                        f"{carrier.descriptor_suffix}"
-                    ),
-                    priority=priority,
-                    result_register_class=carrier.register_class,
-                )
-            )
-            for carrier in vector_carriers(element, vector_bit_widths)
-        )
-    for element in floating_elements:
-        lane_type = _full_vector_type(element, 128)
-        rules.extend(
-            (
-                floating_vector_constant_bits_rule(
-                    carrier.value_type,
-                    lane_type,
-                    element.name,
-                    descriptor_lookup(
-                        "x86.scalar.movimm.gpr64"
-                        if element.bit_width == 64
-                        else "x86.scalar.movimm.gpr32"
-                    ),
-                    _integer_lane_move_descriptor(
-                        element.bit_width,
-                        broadcast_source,
-                        descriptor_lookup,
-                    ),
-                    descriptor_lookup(
-                        f"{descriptor_key_prefix}."
-                        f"{_INTEGER_BROADCAST_MNEMONICS[element.bit_width]}."
-                        f"{carrier.descriptor_suffix}"
-                    ),
-                    priority=priority,
-                    result_register_class=carrier.register_class,
-                )
-            )
-            for carrier in vector_carriers(element, vector_bit_widths)
         )
     return tuple(rules)
 
@@ -1261,12 +1181,6 @@ def avx2_vector_construction_rules(
             descriptor_key_prefix="x86.avx2",
             vector_bit_widths=AVX2_VECTOR_BIT_WIDTHS,
         ),
-        *_uniform_vector_constant_rules(
-            descriptor_lookup,
-            descriptor_key_prefix="x86.avx2",
-            vector_bit_widths=AVX2_CARRIER_VECTOR_BIT_WIDTHS,
-            broadcast_source=_IntegerBroadcastSource.XMM_LOW_LANE,
-        ),
         *_vector_splat_rules(
             descriptor_lookup,
             descriptor_key_prefix="x86.avx2",
@@ -1321,22 +1235,6 @@ def avx512_fp16_vector_construction_rules(
         for vector_bit_width in AVX512_FP16_VECTOR_BIT_WIDTHS
     )
     return (
-        integer_vector_constant_rule(
-            low_xmm_bits_type,
-            Vector("i16", lanes=8),
-            16,
-            descriptor_lookup("x86.scalar.movimm.gpr32"),
-            descriptor_lookup("x86.avx2.vmovd.xmm.gpr32"),
-            descriptor_lookup("x86.avx2.vpbroadcastw.xmm"),
-        ),
-        floating_vector_constant_bits_rule(
-            low_xmm_type,
-            _full_vector_type(FP16_ELEMENT, 128),
-            FP16_ELEMENT.name,
-            descriptor_lookup("x86.scalar.movimm.gpr32"),
-            descriptor_lookup("x86.avx2.vmovd.xmm.gpr32"),
-            descriptor_lookup("x86.avx2.vpbroadcastw.xmm"),
-        ),
         *splat_rules,
         ValueAliasRule(
             source_op=vector.vector_bitcast,
@@ -1368,13 +1266,6 @@ def avx512_vector_construction_rules(
             descriptor_lookup,
             descriptor_key_prefix="x86.avx512",
             vector_bit_widths=AVX512_VECTOR_BIT_WIDTHS,
-        ),
-        *_uniform_vector_constant_rules(
-            descriptor_lookup,
-            descriptor_key_prefix="x86.avx512",
-            vector_bit_widths=AVX512_DIRECT_BROADCAST_VECTOR_BIT_WIDTHS,
-            broadcast_source=_IntegerBroadcastSource.GPR,
-            priority=1,
         ),
         *_vector_splat_rules(
             descriptor_lookup,

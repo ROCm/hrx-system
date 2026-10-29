@@ -26,13 +26,29 @@ typedef struct loom_kernel_class_site_t {
   const loom_value_id_t* argument_values;
 } loom_kernel_class_site_t;
 
-typedef struct loom_kernel_specialization_value_t {
-  // Fact-specialized source type, including the exact scalar representation.
-  loom_type_t type;
-  // Closed ConstantLike producer for non-scalar literals, or NULL for facts.
+typedef enum loom_kernel_specialization_value_kind_e {
+  // An exact scalar reconstructed from its facts.
+  LOOM_KERNEL_SPECIALIZATION_VALUE_KIND_EXACT_SCALAR = 0,
+  // A closed operand-free ConstantLike operation cloned into the product.
+  LOOM_KERNEL_SPECIALIZATION_VALUE_KIND_CLOSED_LITERAL = 1,
+  // A vector reconstructed by splatting one exact scalar element.
+  LOOM_KERNEL_SPECIALIZATION_VALUE_KIND_UNIFORM_SPLAT = 2,
+} loom_kernel_specialization_value_kind_t;
+
+typedef union loom_kernel_specialization_value_payload_u {
+  // Source operation for CLOSED_LITERAL values.
   const loom_op_t* literal;
-  // Exact scalar facts when literal is NULL; unknown otherwise.
-  loom_value_facts_t facts;
+  // Exact scalar or splat-element facts for the other value kinds.
+  loom_value_facts_t scalar_facts;
+} loom_kernel_specialization_value_payload_t;
+
+typedef struct loom_kernel_specialization_value_t {
+  // Fact-specialized source type, including concrete dependent dimensions.
+  loom_type_t type;
+  // Reconstruction mechanism selected at the command-side source boundary.
+  loom_kernel_specialization_value_kind_t kind;
+  // Payload selected by |kind|.
+  loom_kernel_specialization_value_payload_t payload;
 } loom_kernel_specialization_value_t;
 
 // Interns mandatory argument tuples and seeds the initial partition. Unlike

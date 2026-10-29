@@ -239,29 +239,6 @@ def _predicate_conversion_emits(
     )
 
 
-def _predicate_constant_rule(
-    descriptor_lookup: DescriptorLookup, value_type_guard: ValueTypeGuard
-) -> DescriptorRule:
-    descriptor = descriptor_lookup("wasm.v128.const")
-    value = ValueProject.exact_i64_negate("result")
-    return DescriptorRule(
-        source_op=vector.vector_constant,
-        descriptor=descriptor,
-        guards=(
-            value_type_guard("result", PREDICATE_TYPE),
-            Guard.value_exact_i64("result"),
-        ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                results={"dst": ValueRef.result("result")},
-                immediates={"lo64": value, "hi64": value},
-                form=DescriptorEmitForm.CONST,
-            ),
-        ),
-    )
-
-
 def _predicate_splat_rule(
     descriptor_lookup: DescriptorLookup, value_type_guard: ValueTypeGuard
 ) -> DescriptorRule:
@@ -923,7 +900,6 @@ def predicate_rules(
 ) -> tuple[ContractCase, ...]:
     """Builds the complete Wasm SIMD predicate contract family."""
     return (
-        _predicate_constant_rule(descriptor_lookup, value_type_guard),
         _predicate_exact_splat_rule(descriptor_lookup, value_type_guard),
         _predicate_splat_rule(descriptor_lookup, value_type_guard),
         _whole_predicate_select_rule(descriptor_lookup, value_type_guard),

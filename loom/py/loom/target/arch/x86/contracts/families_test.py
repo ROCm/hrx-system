@@ -1549,23 +1549,6 @@ def test_avx512_construction_covers_every_zmm_payload_type() -> None:
         for case in X86_AVX512_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
     )
-    payload_elements = (*INTEGER_ELEMENTS, *STORAGE_ELEMENTS, *FLOAT_ELEMENTS)
-    expected_constant_types = {
-        Vector(element.name, lanes=vector_bit_width // element.bit_width)
-        for element in payload_elements
-        for vector_bit_width in AVX512_DIRECT_BROADCAST_VECTOR_BIT_WIDTHS
-    }
-    constant_rules = tuple(
-        rule
-        for rule in descriptor_rules
-        if rule.source_op is vector.vector_constant
-        and rule.descriptor.key.startswith("x86.avx512.vpbroadcast")
-    )
-    assert {_value_type_guard(rule, "result") for rule in constant_rules} == (
-        expected_constant_types
-    )
-    assert len(constant_rules) == len(expected_constant_types)
-
     splat_rules = tuple(
         rule
         for rule in descriptor_rules

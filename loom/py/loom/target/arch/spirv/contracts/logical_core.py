@@ -1398,14 +1398,6 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *bit_count_rules(),
         *rotation_rules(),
         *SPIRV_ORDINARY_VECTOR_CONTRACT_CASES,
-        # Singleton vectors use the scalar physical carrier. Native BF16 rows
-        # precede these software alternatives just as for scalar constants.
-        _float_payload_constant_rule(
-            vector.vector_constant, Vector(("f8E4M3", "f8E5M2"), lanes=1), "i8"
-        ),
-        _float_payload_constant_rule(
-            vector.vector_constant, Vector("bf16", lanes=1), "i32"
-        ),
         _select_rule(Vector("bf16", lanes=1), "spirv.op_select.i32"),
         *SPIRV_ORDINARY_VECTOR_ALU_CONTRACT_CASES,
         *_compare_rules(),

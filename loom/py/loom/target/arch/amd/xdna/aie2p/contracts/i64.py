@@ -294,116 +294,6 @@ def _pair_constant_rule(
     )
 
 
-def _pair_vector_constant_rule(
-    scalar_type: TypePattern,
-    result_type: TypePattern,
-    attr_kind: str,
-    low_bits: ValueProject,
-    high_bits: ValueProject,
-    exact_guard: Guard,
-    carrier: _PairVectorCarrier,
-) -> DescriptorRule:
-    descriptor = _descriptor("amd.xdna.aie2p.splat.i64x8")
-    packet = (
-        ValueRef.result("result")
-        if carrier is _PairVectorCarrier.NATIVE
-        else ValueRef.temporary("packet")
-    )
-    scalar = ValueRef.temporary("scalar")
-    emits = list(_pair_constant_emits(low_bits, high_bits, scalar, scalar_type))
-    emits.append(
-        EmitDescriptorOp(
-            descriptor=descriptor,
-            operands={"src": scalar},
-            results={"dst": packet},
-            result_types={"dst": DescriptorResultType()},
-            form=DescriptorEmitForm.OP,
-        )
-    )
-    if carrier is _PairVectorCarrier.WIDE:
-        emits.append(
-            EmitRegisterConcat(
-                sources=(packet, packet),
-                result=ValueRef.result("result"),
-            )
-        )
-    elif carrier is _PairVectorCarrier.ACCUMULATOR:
-        accumulator_unit = ValueRef.temporary("accumulator_unit")
-        emits.extend(
-            (
-                EmitDescriptorOp(
-                    descriptor=_descriptor(
-                        "amd.xdna.aie2p.move.vector512.to.accumulator512"
-                    ),
-                    operands={"src": packet},
-                    results={"dst": accumulator_unit},
-                    result_types={"dst": DescriptorResultType()},
-                    form=DescriptorEmitForm.OP,
-                ),
-                EmitRegisterConcat(
-                    sources=(accumulator_unit,) * 4,
-                    result=ValueRef.result("result"),
-                ),
-            )
-        )
-    return DescriptorRule(
-        source_op=vector.vector_constant,
-        descriptor=descriptor,
-        guards=(
-            Guard.attr_kind("value", attr_kind),
-            Guard.value_type("result", result_type),
-            exact_guard,
-        ),
-        emit=tuple(emits),
-    )
-
-
-def _pair_vector_constant_rules() -> tuple[DescriptorRule, ...]:
-    integer_words = ValueProject.exact_i64_i32_word
-    float_words = ValueProject.float_as_f64_i32_word
-    integer_exact = Guard.value_exact_i64
-    float_exact = Guard.value_exact_float
-    rules = []
-    for scalar_type, native_type, element_type, project, exact_guard in (
-        (_I64, _I64_VECTOR, "i64", integer_words, integer_exact),
-        (_F64, _F64_VECTOR, "f64", float_words, float_exact),
-    ):
-        for result_type, carrier in (
-            (native_type, _PairVectorCarrier.NATIVE),
-            (
-                Vector(
-                    element_type,
-                    minimum_static_elements=9,
-                    maximum_static_elements=16,
-                ),
-                _PairVectorCarrier.WIDE,
-            ),
-        ):
-            rules.append(
-                _pair_vector_constant_rule(
-                    scalar_type,
-                    result_type,
-                    element_type,
-                    project("result", word_index=0),
-                    project("result", word_index=1),
-                    exact_guard("result"),
-                    carrier,
-                )
-            )
-    rules.append(
-        _pair_vector_constant_rule(
-            _I64,
-            Vector("i64", lanes=32),
-            "i64",
-            integer_words("result", word_index=0),
-            integer_words("result", word_index=1),
-            integer_exact("result"),
-            _PairVectorCarrier.ACCUMULATOR,
-        )
-    )
-    return tuple(rules)
-
-
 def _pair_multiply_rule() -> DescriptorRule:
     lhs_emits, lhs_low, lhs_high = _split_pair(ValueRef.operand("lhs"), "lhs")
     rhs_emits, rhs_low, rhs_high = _split_pair(ValueRef.operand("rhs"), "rhs")
@@ -1250,7 +1140,6 @@ AIE2P_I64_RULES = (
         ValueProject.float_as_f64_i32_word("result", word_index=1),
         Guard.value_exact_float("result"),
     ),
-    *_pair_vector_constant_rules(),
     _pair_vector_binary_rule(vector.vector_andi, "amd.xdna.aie2p.and.bits512"),
     _pair_vector_binary_rule(vector.vector_ori, "amd.xdna.aie2p.or.bits512"),
     _pair_vector_xor_rule(),

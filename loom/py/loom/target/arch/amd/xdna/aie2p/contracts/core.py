@@ -715,29 +715,6 @@ def _vector_predicate_splat_rule() -> DescriptorRule:
     )
 
 
-def _vector_predicate_constant_rule() -> DescriptorRule:
-    return DescriptorRule(
-        source_op=vector.vector_constant,
-        descriptor=_descriptor("amd.xdna.aie2p.cmp.lt.unsigned.i8x64"),
-        guards=(
-            Guard.value_type("result", _I1_VECTOR),
-            Guard.value_exact_i64("result"),
-            Guard.value_i64_range("result", 0, 1),
-        ),
-        emit=(
-            _const_emit(
-                _descriptor("amd.xdna.aie2p.constant.i32.short"),
-                ValueRef.temporary("condition"),
-                ValueProject.exact_i64("result"),
-                result_type=DescriptorResultType(),
-            ),
-            *_vector_predicate_splat_emits(
-                ValueRef.temporary("condition"), ValueRef.result("result")
-            ),
-        ),
-    )
-
-
 def _vector_select_rule(
     value_type: TypePattern,
     descriptor_key: str,
@@ -1029,162 +1006,15 @@ def _whole_predicate_select_rules() -> tuple[DescriptorRule, ...]:
     )
 
 
-def _vector_constant_emits(
-    constant_descriptor_key: str,
-    broadcast_descriptor_key: str,
-    value: AttrProject | ValueProject,
-    carrier: _VectorConstantCarrier,
-    unit_count: int,
-) -> tuple[EmitDescriptorOp | EmitRegisterConcat, ...]:
-    broadcast = _descriptor(broadcast_descriptor_key)
-    scalar = ValueRef.temporary("scalar")
-    packet = (
-        ValueRef.result("result")
-        if carrier is _VectorConstantCarrier.NATIVE
-        else ValueRef.temporary("packet")
-    )
-    emits: list[EmitDescriptorOp | EmitRegisterConcat] = [
-        _const_emit(
-            _descriptor(constant_descriptor_key),
-            scalar,
-            value,
-            result_type=DescriptorResultType(),
-        ),
-        _op_emit(
-            broadcast,
-            operands={"src": scalar},
-            results={"dst": packet},
-            result_types=(
-                None
-                if carrier is _VectorConstantCarrier.NATIVE
-                else {"dst": DescriptorResultType()}
-            ),
-        ),
-    ]
-    if carrier is _VectorConstantCarrier.NATIVE:
-        return tuple(emits)
-    carrier_unit = packet
-    if carrier is _VectorConstantCarrier.ACCUMULATOR:
-        carrier_unit = ValueRef.temporary("accumulator_unit")
-        emits.append(
-            _op_emit(
-                _descriptor("amd.xdna.aie2p.move.vector512.to.accumulator512"),
-                operands={"src": packet},
-                results={"dst": carrier_unit},
-                result_types={"dst": DescriptorResultType()},
-            )
-        )
-    emits.append(
-        EmitRegisterConcat(
-            sources=(carrier_unit,) * unit_count,
-            result=ValueRef.result("result"),
-        )
-    )
-    return tuple(emits)
-
-
-def _vector_constant_rule(
-    result_type: TypePattern,
-    constant_descriptor_key: str,
-    broadcast_descriptor_key: str,
-    minimum: int,
-    maximum: int,
-    *,
-    carrier: _VectorConstantCarrier = _VectorConstantCarrier.NATIVE,
-    unit_count: int = 1,
-) -> DescriptorRule:
-    broadcast = _descriptor(broadcast_descriptor_key)
-    return DescriptorRule(
-        source_op=vector.vector_constant,
-        descriptor=broadcast,
-        guards=(
-            Guard.attr_kind("value", "i64"),
-            Guard.value_type("result", result_type),
-            Guard.i64_range("value", minimum, maximum),
-        ),
-        emit=_vector_constant_emits(
-            constant_descriptor_key,
-            broadcast_descriptor_key,
-            AttrProject.direct("value"),
-            carrier,
-            unit_count,
-        ),
-    )
-
-
-def _address_vector_constant_rule(
-    result_type: TypePattern,
-    constant_descriptor_key: str,
-    minimum: int,
-    maximum: int,
-    *,
-    carrier: _VectorConstantCarrier = _VectorConstantCarrier.NATIVE,
-    unit_count: int = 1,
-) -> DescriptorRule:
-    """Materializes target-width address lanes without changing their domain."""
-
-    immediate = (
-        ValueProject.exact_i64_i32_word("result", word_index=0)
-        if maximum > _I32_MAX
-        else AttrProject.direct("value")
-    )
-    broadcast_descriptor_key = "amd.xdna.aie2p.splat.i32x16"
-    return DescriptorRule(
-        source_op=vector.vector_constant,
-        descriptor=_descriptor(broadcast_descriptor_key),
-        guards=(
-            Guard.attr_kind("value", "i64"),
-            Guard.value_type("result", result_type),
-            Guard.i64_range("value", minimum, maximum),
-        ),
-        emit=_vector_constant_emits(
-            constant_descriptor_key,
-            broadcast_descriptor_key,
-            immediate,
-            carrier,
-            unit_count,
-        ),
-    )
-
-
-def _float_vector_constant_rule(
-    result_type: TypePattern,
-    broadcast_descriptor_key: str,
-    bits: ValueProject,
-    *,
-    carrier: _VectorConstantCarrier = _VectorConstantCarrier.NATIVE,
-    unit_count: int = 1,
-    extra_guards: Sequence[Guard] = (),
-) -> DescriptorRule:
-    broadcast = _descriptor(broadcast_descriptor_key)
-    return DescriptorRule(
-        source_op=vector.vector_constant,
-        descriptor=broadcast,
-        guards=(
-            Guard.attr_kind("value", "f64"),
-            Guard.value_type("result", result_type),
-            Guard.value_exact_float("result"),
-            *extra_guards,
-        ),
-        emit=_vector_constant_emits(
-            "amd.xdna.aie2p.constant.i32",
-            broadcast_descriptor_key,
-            bits,
-            carrier,
-            unit_count,
-        ),
-    )
-
-
 def _matrix_accumulator_zero_rule() -> DescriptorRule:
     descriptor = _descriptor("amd.xdna.aie2p.accumulator.clear.i32x64")
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=vector.vector_splat,
         descriptor=descriptor,
         guards=(
-            Guard.attr_kind("value", "i64"),
+            Guard.value_type("scalar", _I32),
+            Guard.value_i64_range("scalar", 0, 0),
             Guard.value_type("result", _I32_MATRIX_ACCUMULATOR),
-            Guard.i64_range("value", 0, 0),
         ),
         emit=(
             _op_emit(
@@ -1192,6 +1022,7 @@ def _matrix_accumulator_zero_rule() -> DescriptorRule:
                 results={"dst": ValueRef.result("result")},
             ),
         ),
+        priority=1,
     )
 
 

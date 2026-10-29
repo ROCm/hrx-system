@@ -1540,8 +1540,7 @@ iree_status_t loom_vector_packet_select_value_shape(
         packetization, op, inout_shape, out_selected));
   } else if (loom_vector_concat_isa(op)) {
     // Irregular concatenations are not replayable packet snapshots.
-  } else if (loom_vector_from_elements_isa(op) ||
-             loom_vector_constant_isa(op) || loom_vector_poison_isa(op) ||
+  } else if (loom_vector_from_elements_isa(op) || loom_vector_poison_isa(op) ||
              loom_vector_splat_isa(op)) {
     *out_selected = true;
   } else {

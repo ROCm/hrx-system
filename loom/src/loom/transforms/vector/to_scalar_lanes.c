@@ -652,13 +652,6 @@ static iree_status_t loom_vector_to_scalar_build_mask_range_lane(
       loom_type_scalar(LOOM_SCALAR_TYPE_I1), out_lane);
 }
 
-iree_status_t loom_vector_to_scalar_build_constant_lane(
-    loom_vector_to_scalar_state_t* state, loom_value_id_t* out_lane) {
-  return loom_vector_to_scalar_build_scalar_attr_constant(
-      &state->rewriter->builder, state->result_scalar_type, state->location,
-      loom_vector_constant_value(state->op), out_lane);
-}
-
 iree_status_t loom_vector_to_scalar_build_poison_lane(
     loom_vector_to_scalar_state_t* state, loom_value_id_t* out_lane) {
   loom_op_t* poison_op = NULL;
@@ -863,8 +856,7 @@ bool loom_vector_to_scalar_can_materialize_def_lane(
       return true;
     }
 
-    if (loom_vector_splat_isa(def_op) || loom_vector_constant_isa(def_op) ||
-        loom_vector_poison_isa(def_op)) {
+    if (loom_vector_splat_isa(def_op) || loom_vector_poison_isa(def_op)) {
       return true;
     }
 
@@ -1134,24 +1126,6 @@ iree_status_t loom_vector_to_scalar_try_materialize_def_lane(
   }
   if (loom_vector_splat_isa(def_op)) {
     *out_lane = loom_vector_splat_scalar(def_op);
-    *out_materialized = true;
-    return iree_ok_status();
-  }
-  if (loom_vector_constant_isa(def_op)) {
-    loom_vector_to_scalar_state_t def_state = {
-        .pass = state->pass,
-        .statistics = state->statistics,
-        .rewriter = state->rewriter,
-        .op = def_op,
-        .value_checkpoint = state->value_checkpoint,
-        .vector_type = vector_type,
-        .result_scalar_type = loom_vector_to_scalar_lane_type(vector_type),
-        .matrix_fragment_layout = state->matrix_fragment_layout,
-        .rematerialization = state->rematerialization,
-        .location = def_op->location,
-    };
-    IREE_RETURN_IF_ERROR(
-        loom_vector_to_scalar_build_constant_lane(&def_state, out_lane));
     *out_materialized = true;
     return iree_ok_status();
   }

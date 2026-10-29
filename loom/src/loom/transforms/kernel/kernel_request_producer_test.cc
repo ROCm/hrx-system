@@ -9,6 +9,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "iree/io/vec_stream.h"
@@ -21,6 +22,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/ops/vector/ops.h"
 #include "loom/testing/module_ptr.h"
 #include "loom/verify/verify.h"
 
@@ -292,12 +294,10 @@ TEST_P(KernelRequestProducerTest, BindsScalarAndVectorLiteralFamilies) {
           vector ? std::string("vector<") + shape + scalar_type + ">"
                  : scalar_type;
       SCOPED_TRACE(type);
-      const std::string operation = empty    ? "vector.empty"
-                                    : vector ? "vector.constant"
-                                    : (std::strcmp(scalar_type, "index") == 0 ||
-                                       std::strcmp(scalar_type, "offset") == 0)
-                                        ? "index.constant"
-                                        : "scalar.constant";
+      const bool index_like = std::strcmp(scalar_type, "index") == 0 ||
+                              std::strcmp(scalar_type, "offset") == 0;
+      const std::string scalar_operation =
+          index_like ? "index.constant" : "scalar.constant";
       const bool floating = scalar_type[0] == 'f' || scalar_type[0] == 'b';
       const std::string first = empty      ? ""
                                 : boolean  ? " true"
@@ -307,6 +307,21 @@ TEST_P(KernelRequestProducerTest, BindsScalarAndVectorLiteralFamilies) {
                                  : boolean  ? " false"
                                  : floating ? " -0.0"
                                             : " 2";
+      const auto literal_source = [&](std::string_view name,
+                                      const std::string& value) {
+        const std::string result_name = "%" + std::string(name);
+        if (empty) {
+          return result_name + " = vector.empty : " + type + "\n";
+        }
+        if (!vector) {
+          return result_name + " = " + scalar_operation + value + " : " + type +
+                 "\n";
+        }
+        const std::string scalar_name = result_name + "_scalar";
+        return scalar_name + " = " + scalar_operation + value + " : " +
+               scalar_type + "\n" + result_name + " = vector.splat " +
+               scalar_name + " : " + type + "\n";
+      };
       const std::string source =
           "func.decl @observe(%value: " + type + ")\n" +
           (GetParam()
@@ -317,10 +332,9 @@ TEST_P(KernelRequestProducerTest, BindsScalarAndVectorLiteralFamilies) {
           "func.call @observe(%value) : (" +
           type +
           ")\npipeline.finish\n}\n"
-          "func.def @sites(%output: buffer) {\n%first = " +
-          operation + first + " : " + type + "\n%second = " + operation +
-          second + " : " + type + "\n%equal = " + operation + first + " : " +
-          type + "\nfunc.return\n}\n";
+          "func.def @sites(%output: buffer) {\n" +
+          literal_source("first", first) + literal_source("second", second) +
+          literal_source("equal", first) + "func.return\n}\n";
       ModulePtr source_module = ParseText(source);
       ASSERT_NE(source_module, nullptr);
       std::vector<uint8_t> bytecode = WriteModule(source_module.get());
@@ -345,6 +359,9 @@ TEST_P(KernelRequestProducerTest, BindsScalarAndVectorLiteralFamilies) {
       const loom_op_t* literal =
           loom_region_entry_block(loom_func_like_body(site_function))->first_op;
       for (size_t i = 0; i < 3; ++i) {
+        if (vector && !empty) {
+          literal = literal->next_op;
+        }
         arguments[i][0] = loom_op_results((loom_op_t*)literal)[0];
         arguments[i][1] =
             loom_region_entry_block(loom_func_like_body(site_function))
@@ -394,6 +411,11 @@ TEST_P(KernelRequestProducerTest, BindsScalarAndVectorLiteralFamilies) {
         const loom_op_t* bound =
             loom_region_entry_block(loom_func_like_body(function))->first_op;
         EXPECT_TRUE(iree_all_bits_set(bound->traits, LOOM_TRAIT_CONSTANT_LIKE));
+        if (vector && !empty) {
+          bound = bound->next_op;
+          ASSERT_NE(bound, nullptr);
+          EXPECT_TRUE(loom_vector_splat_isa(bound));
+        }
         const loom_type_t bound_type = loom_module_value_type(
             request.product.module, loom_op_results((loom_op_t*)bound)[0]);
         EXPECT_EQ(loom_type_is_vector(bound_type), vector);
@@ -561,7 +583,8 @@ template.def<@write> @write_impl(%rows: index, %offset: offset, %output: buffer)
 }
 func.def inline @compute(%rows: index, %offset: offset, %output: buffer) {
   %extent = func.call @extent(%rows, %offset) : (index, offset) -> (index)
-  %values = vector.constant 1.0 : vector<[%extent]xf32>
+  %one = scalar.constant 1.0 : f32
+  %values = vector.splat %one : vector<[%extent]xf32>
   %view = buffer.view %output[%offset] : buffer -> view<[%extent]xf32>
   vector.store %values, %view[0] : vector<[%extent]xf32>, view<[%extent]xf32>
   func.return

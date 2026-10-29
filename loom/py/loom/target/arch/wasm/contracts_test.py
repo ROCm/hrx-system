@@ -646,28 +646,9 @@ def _expected_partial_numeric_vector_ranges():
     }
 
 
-def test_numeric_constants_cover_every_native_and_partial_carrier() -> None:
-    actual = set()
-    for rule in WASM_CORE_SIMD128_CONTRACT_FRAGMENT.cases:
-        if (
-            not isinstance(rule, DescriptorRule)
-            or rule.source_op is not vector.vector_constant
-        ):
-            continue
-        actual.update(_numeric_vector_shapes(rule, "result"))
-        for element, minimum, maximum in _numeric_vector_ranges(rule, "result"):
-            actual.update((element, count) for count in range(minimum, maximum + 1))
-    assert actual == {
-        (element, count)
-        for element, maximum in _expected_numeric_vector_shapes()
-        for count in range(1, maximum + 1)
-    }
-
-
 def test_full_numeric_carriers_have_complete_structural_rules() -> None:
     expected = _expected_numeric_vector_shapes()
     for source_op, field in (
-        (vector.vector_constant, "result"),
         (vector.vector_splat, "result"),
         (vector.vector_extract, "source"),
         (vector.vector_insert, "dest"),
@@ -685,7 +666,6 @@ def test_full_numeric_carriers_have_complete_structural_rules() -> None:
 def test_partial_numeric_carriers_have_complete_direct_structural_rules() -> None:
     expected = _expected_partial_numeric_vector_ranges()
     for source_op, field, rules_per_shape in (
-        (vector.vector_constant, "result", 1),
         (vector.vector_splat, "result", 1),
         (vector.vector_extract, "source", 1),
         (vector.vector_insert, "dest", 2),

@@ -103,14 +103,6 @@ from loom.target.contracts import (
 def aie2p_core_cases() -> Sequence[ContractCase]:
     # Priorities order specialized cases for the same source op; authored order
     # remains the stable tie break within each priority.
-    full_i32_constant = "amd.xdna.aie2p.constant.i32"
-    short_i32_constant = "amd.xdna.aie2p.constant.i32.short"
-    i8_range = (core_rules._I8_MIN, core_rules._I8_MAX)
-    i16_range = (core_rules._I16_MIN, core_rules._I16_MAX)
-    i32_range = (core_rules._I32_MIN, core_rules._I32_MAX)
-    short_range = (core_rules._SHORT_MIN, core_rules._SHORT_MAX)
-    float_bits = ValueProject.float_bits("result")
-    f32_bits = ValueProject.float_as_f32_i32("result")
     vector_register_guard = Guard.low_value_register_class("result", "aie2p.vec256")
     return (
         ValueAliasRule(
@@ -315,175 +307,6 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
         ),
         *AIE2P_INTEGER_SHIFT_RULES,
         *AIE2P_CONVERSION_RULES,
-        core_rules._vector_constant_rule(
-            core_rules._I8_VECTOR,
-            "amd.xdna.aie2p.constant.i32.short",
-            "amd.xdna.aie2p.splat.i8x64",
-            core_rules._I8_MIN,
-            core_rules._I8_MAX,
-        ),
-        core_rules._vector_constant_rule(
-            core_rules._I16_VECTOR,
-            "amd.xdna.aie2p.constant.i32.short",
-            "amd.xdna.aie2p.splat.i16x32",
-            core_rules._SHORT_MIN,
-            core_rules._SHORT_MAX,
-        ),
-        core_rules._vector_constant_rule(
-            core_rules._I16_VECTOR,
-            "amd.xdna.aie2p.constant.i32",
-            "amd.xdna.aie2p.splat.i16x32",
-            core_rules._I16_MIN,
-            core_rules._I16_MAX,
-        ),
-        core_rules._vector_constant_rule(
-            core_rules._I32_VECTOR,
-            "amd.xdna.aie2p.constant.i32.short",
-            "amd.xdna.aie2p.splat.i32x16",
-            core_rules._SHORT_MIN,
-            core_rules._SHORT_MAX,
-        ),
-        core_rules._vector_constant_rule(
-            core_rules._I32_VECTOR,
-            "amd.xdna.aie2p.constant.i32",
-            "amd.xdna.aie2p.splat.i32x16",
-            core_rules._I32_MIN,
-            core_rules._I32_MAX,
-        ),
-        core_rules._float_vector_constant_rule(
-            core_rules._F8E4M3_VECTOR,
-            "amd.xdna.aie2p.splat.i8x64",
-            ValueProject.float_bits("result"),
-        ),
-        core_rules._float_vector_constant_rule(
-            core_rules._F8E5M2_VECTOR,
-            "amd.xdna.aie2p.splat.i8x64",
-            ValueProject.float_bits("result"),
-        ),
-        core_rules._float_vector_constant_rule(
-            core_rules._F16_VECTOR,
-            "amd.xdna.aie2p.splat.i16x32",
-            ValueProject.float_bits("result"),
-        ),
-        core_rules._float_vector_constant_rule(
-            core_rules._BF16_VECTOR,
-            "amd.xdna.aie2p.splat.i16x32",
-            ValueProject.float_bits("result"),
-        ),
-        core_rules._float_vector_constant_rule(
-            core_rules._F32_VECTOR,
-            "amd.xdna.aie2p.splat.i32x16",
-            ValueProject.float_as_f32_i32("result"),
-            extra_guards=(vector_register_guard,),
-        ),
-        *(
-            core_rules._address_vector_constant_rule(
-                result_type,
-                descriptor_key,
-                minimum,
-                maximum,
-            )
-            for result_type, minimum, maximum in (
-                (
-                    core_rules._INDEX_VECTOR,
-                    core_rules._SHORT_MIN,
-                    core_rules._SHORT_MAX,
-                ),
-                (core_rules._OFFSET_VECTOR, 0, core_rules._SHORT_MAX),
-            )
-            for descriptor_key in (short_i32_constant,)
-        ),
-        *(
-            core_rules._address_vector_constant_rule(
-                result_type,
-                full_i32_constant,
-                minimum,
-                maximum,
-            )
-            for result_type, minimum, maximum in (
-                (core_rules._INDEX_VECTOR, core_rules._I32_MIN, core_rules._I32_MAX),
-                (core_rules._OFFSET_VECTOR, 0, core_rules._U32_MAX),
-            )
-        ),
-        *(
-            core_rules._vector_constant_rule(
-                Vector(
-                    element_type,
-                    minimum_static_elements=native_lanes + 1,
-                    maximum_static_elements=native_lanes * 2,
-                ),
-                descriptor_key,
-                f"amd.xdna.aie2p.splat.i{width}x{native_lanes}",
-                *value_range,
-                carrier=core_rules._VectorConstantCarrier.WIDE,
-                unit_count=2,
-            )
-            for element_type, width, native_lanes, descriptor_key, value_range in (
-                ("i8", 8, 64, short_i32_constant, i8_range),
-                ("i16", 16, 32, short_i32_constant, short_range),
-                ("i16", 16, 32, full_i32_constant, i16_range),
-                ("i32", 32, 16, short_i32_constant, short_range),
-                ("i32", 32, 16, full_i32_constant, i32_range),
-            )
-        ),
-        *(
-            core_rules._address_vector_constant_rule(
-                Vector(
-                    element_type,
-                    minimum_static_elements=17,
-                    maximum_static_elements=32,
-                ),
-                descriptor_key,
-                minimum,
-                maximum,
-                carrier=core_rules._VectorConstantCarrier.WIDE,
-                unit_count=2,
-            )
-            for element_type, minimum, maximum in (
-                ("index", core_rules._SHORT_MIN, core_rules._SHORT_MAX),
-                ("offset", 0, core_rules._SHORT_MAX),
-            )
-            for descriptor_key in (short_i32_constant,)
-        ),
-        *(
-            core_rules._address_vector_constant_rule(
-                Vector(
-                    element_type,
-                    minimum_static_elements=17,
-                    maximum_static_elements=32,
-                ),
-                full_i32_constant,
-                minimum,
-                maximum,
-                carrier=core_rules._VectorConstantCarrier.WIDE,
-                unit_count=2,
-            )
-            for element_type, minimum, maximum in (
-                ("index", core_rules._I32_MIN, core_rules._I32_MAX),
-                ("offset", 0, core_rules._U32_MAX),
-            )
-        ),
-        *(
-            core_rules._float_vector_constant_rule(
-                Vector(
-                    element_type,
-                    minimum_static_elements=native_lanes + 1,
-                    maximum_static_elements=native_lanes * 2,
-                ),
-                f"amd.xdna.aie2p.splat.i{width}x{native_lanes}",
-                bits,
-                carrier=core_rules._VectorConstantCarrier.WIDE,
-                unit_count=2,
-                extra_guards=extra_guards,
-            )
-            for element_type, width, native_lanes, bits, extra_guards in (
-                ("f8E4M3", 8, 64, float_bits, ()),
-                ("f8E5M2", 8, 64, float_bits, ()),
-                ("f16", 16, 32, float_bits, ()),
-                ("bf16", 16, 32, float_bits, ()),
-                ("f32", 32, 16, f32_bits, (vector_register_guard,)),
-            )
-        ),
         *core_rules._vector_broadcast_alias_rules(),
         *(
             core_rules._vector_broadcast_rule(
@@ -854,67 +677,6 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
         *AIE2P_FLOATING_RULES,
         *AIE2P_POWER_OF_TWO_SCALE_RULES,
         *(
-            core_rules._vector_constant_rule(
-                core_rules._I32_MATRIX_ACCUMULATOR,
-                descriptor_key,
-                "amd.xdna.aie2p.splat.i32x16",
-                *value_range,
-                carrier=core_rules._VectorConstantCarrier.ACCUMULATOR,
-                unit_count=4,
-            )
-            for descriptor_key, value_range in (
-                (short_i32_constant, short_range),
-                (full_i32_constant, i32_range),
-            )
-        ),
-        *(
-            core_rules._float_vector_constant_rule(
-                Vector("f32", lanes=lanes),
-                "amd.xdna.aie2p.splat.i32x16",
-                f32_bits,
-                carrier=core_rules._VectorConstantCarrier.ACCUMULATOR,
-                unit_count=unit_count,
-            )
-            for lanes, unit_count in ((32, 2), (64, 4))
-        ),
-        *(
-            core_rules._address_vector_constant_rule(
-                Vector(
-                    element_type,
-                    minimum_static_elements=33,
-                    maximum_static_elements=64,
-                ),
-                descriptor_key,
-                minimum,
-                maximum,
-                carrier=core_rules._VectorConstantCarrier.ACCUMULATOR,
-                unit_count=4,
-            )
-            for element_type, minimum, maximum in (
-                ("index", core_rules._SHORT_MIN, core_rules._SHORT_MAX),
-                ("offset", 0, core_rules._SHORT_MAX),
-            )
-            for descriptor_key in (short_i32_constant,)
-        ),
-        *(
-            core_rules._address_vector_constant_rule(
-                Vector(
-                    element_type,
-                    minimum_static_elements=33,
-                    maximum_static_elements=64,
-                ),
-                full_i32_constant,
-                minimum,
-                maximum,
-                carrier=core_rules._VectorConstantCarrier.ACCUMULATOR,
-                unit_count=4,
-            )
-            for element_type, minimum, maximum in (
-                ("index", core_rules._I32_MIN, core_rules._I32_MAX),
-                ("offset", 0, core_rules._U32_MAX),
-            )
-        ),
-        *(
             core_rules._vector_binary_rule(source_op, type_pattern, descriptor_key)
             for source_op, type_pattern, descriptor_key in (
                 (
@@ -1069,7 +831,6 @@ def aie2p_core_cases() -> Sequence[ContractCase]:
             )
         ),
         core_rules._vector_predicate_splat_rule(),
-        core_rules._vector_predicate_constant_rule(),
         *(
             core_rules._vector_select_rule(value_type, descriptor_key)
             for value_type, descriptor_key in (

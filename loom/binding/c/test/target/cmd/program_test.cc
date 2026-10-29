@@ -684,9 +684,12 @@ command.program.def public @embed() launch(%checkpoint: buffer, %output: buffer)
   %small = index.constant 64 : index
   %large = index.constant 128 : index
   %zero = index.constant 0 : index
-  %pattern_small = vector.constant 7 : vector<[%small]xi32>
-  %pattern_large = vector.constant 9 : vector<[%large]xi32>
-  %pattern_empty = vector.constant 0 : vector<[%zero]xi32>
+  %pattern_small_scalar = scalar.constant 7 : i32
+  %pattern_small = vector.splat %pattern_small_scalar : vector<[%small]xi32>
+  %pattern_large_scalar = scalar.constant 9 : i32
+  %pattern_large = vector.splat %pattern_large_scalar : vector<[%large]xi32>
+  %pattern_empty_scalar = scalar.constant 0 : i32
+  %pattern_empty = vector.splat %pattern_empty_scalar : vector<[%zero]xi32>
   %parameters_empty = command.parameter %checkpoint, "empty" : view<[%zero]xi8>
   %parameters_small = command.parameter %checkpoint, "small" : view<[%small]xi8>
   %parameters_large = command.parameter %checkpoint, "large" : view<[%large]xi8>

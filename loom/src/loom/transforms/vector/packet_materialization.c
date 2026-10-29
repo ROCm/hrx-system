@@ -442,18 +442,6 @@ static iree_status_t loom_vector_packet_materialize_simple_op(
   return iree_ok_status();
 }
 
-static iree_status_t loom_vector_packet_materialize_constant(
-    loom_vector_packetization_t* packetization, loom_op_t* op,
-    const loom_vector_packet_slice_t* slice,
-    loom_vector_packetized_value_t* packetized_value) {
-  const loom_type_t packet_type =
-      loom_vector_packet_type(packetized_value->source_type, slice->lane_count);
-  return loom_vector_build_constant_splat(
-      &packetization->context->rewriter->builder,
-      loom_vector_constant_value(op), packet_type, op->location,
-      &packetized_value->packet.vector);
-}
-
 static iree_status_t loom_vector_packet_materialize_poison(
     loom_vector_packetization_t* packetization, loom_op_t* op,
     const loom_vector_packet_slice_t* slice,
@@ -656,9 +644,6 @@ static iree_status_t loom_vector_packet_materialize_value(
   if (loom_vector_load_isa(op)) {
     return loom_vector_packet_materialize_memory_load(packetization, op, slice,
                                                       packetized_value);
-  } else if (loom_vector_constant_isa(op)) {
-    return loom_vector_packet_materialize_constant(packetization, op, slice,
-                                                   packetized_value);
   } else if (loom_vector_poison_isa(op)) {
     return loom_vector_packet_materialize_poison(packetization, op, slice,
                                                  packetized_value);

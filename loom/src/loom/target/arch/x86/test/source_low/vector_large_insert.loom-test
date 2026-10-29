@@ -428,32 +428,30 @@ func.def public target(@target) @short_dynamic_insert(%output: buffer, %value: f
 
 // ----
 low.func.def public target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (buffer, f8E4M3, index) -> ()}) @short_dynamic_insert(%output: reg<x86.gpr64>, %value: reg<x86.gpr32>, %position: reg<x86.gpr64>) asm {
-  %values_scalar = mov.imm32 0
-  %30 = vmovd.xmm.gpr32 %values_scalar
-  %values = vpbroadcastb.xmm %30
-  %32 = mov.trunc.gpr32.gpr64 %position
-  %33 = movsx.i16.gpr32 %32
-  %35 = copy %values_scalar : reg<x86.gpr32> -> reg<x86.gpr32>
-  %36 = sub.gpr32 %35, %33
-  %37 = mov.imm32 50462976
-  %38 = vmovd.xmm.gpr32 %37
-  %39 = vpmovzxbw.xmm %38
-  %40 = vmovd.xmm.gpr32 %36
-  %41 = vpbroadcastw.xmm %40
-  %42 = vpaddw.xmm %41, %39
-  %43 = vxorps.zero.xmm
-  %44 = vpcmpeqw.xmm %42, %43
-  %45 = cmp.imm.gpr64 %position, 4, "ult"
-  %46 = mov.imm32 0
-  %47 = sub.gpr32 %46, %45
-  %48 = vmovd.xmm.gpr32 %47
-  %49 = vpbroadcastw.xmm %48
-  %50 = vpand.xmm %44, %49
-  %51 = vmovd.xmm.gpr32 %value
-  %52 = vpbroadcastb.xmm %51
-  %53 = avx2.vmovdqu.rodata.xmm @__low_rodata_6497a0a7
-  %54 = vpshufb.xmm %50, %53
-  %result = vpblendvb.xmm %values, %52, %54
+  %values = vxorps.zero.xmm
+  %30 = mov.trunc.gpr32.gpr64 %position
+  %31 = movsx.i16.gpr32 %30
+  %32 = mov.imm32 0
+  %33 = copy %32 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %34 = sub.gpr32 %33, %31
+  %35 = mov.imm32 50462976
+  %36 = vmovd.xmm.gpr32 %35
+  %37 = vpmovzxbw.xmm %36
+  %38 = vmovd.xmm.gpr32 %34
+  %39 = vpbroadcastw.xmm %38
+  %40 = vpaddw.xmm %39, %37
+  %42 = vpcmpeqw.xmm %40, %values
+  %43 = cmp.imm.gpr64 %position, 4, "ult"
+  %44 = mov.imm32 0
+  %45 = sub.gpr32 %44, %43
+  %46 = vmovd.xmm.gpr32 %45
+  %47 = vpbroadcastw.xmm %46
+  %48 = vpand.xmm %42, %47
+  %49 = vmovd.xmm.gpr32 %value
+  %50 = vpbroadcastb.xmm %49
+  %51 = avx2.vmovdqu.rodata.xmm @__low_rodata_6497a0a7
+  %52 = vpshufb.xmm %48, %51
+  %result = vpblendvb.xmm %values, %50, %52
   vmovss.store.xmm %result, %output {disp32 = 0}
   return
 }

@@ -851,7 +851,7 @@ def _predicate_insert_rules(
     return tuple(rules)
 
 
-def _predicate_constant_rules(
+def _predicate_exact_splat_rules(
     descriptor_lookup: _DescriptorLookup,
 ) -> tuple[DescriptorRule, ...]:
     move_bits = descriptor_lookup("x86.scalar.movimm.gpr64")
@@ -896,25 +896,6 @@ def _predicate_constant_rules(
                         ValueRef.result("result"),
                     )
                 )
-            rules.append(
-                DescriptorRule(
-                    source_op=vector.vector_constant,
-                    descriptor=move_mask if register_class == "x86.k" else expand,
-                    guards=(
-                        Guard.attr_kind("value", "i64"),
-                        Guard.i64_range("value", value, value),
-                        Guard.value_type("result", result_type),
-                        *_predicate_representation_guards("result", 64, register_class),
-                        Guard.descriptor_available(move_bits),
-                        *(
-                            (Guard.descriptor_available(move_mask),)
-                            if register_class != "x86.k"
-                            else ()
-                        ),
-                    ),
-                    emit=tuple(emits),
-                )
-            )
             rules.append(
                 DescriptorRule(
                     source_op=vector.vector_splat,
@@ -1438,7 +1419,7 @@ def avx512_predicate_rules(
     descriptor_lookup: _DescriptorLookup,
 ) -> tuple[ContractCase, ...]:
     return (
-        *_predicate_constant_rules(descriptor_lookup),
+        *_predicate_exact_splat_rules(descriptor_lookup),
         *_predicate_splat_rules(descriptor_lookup),
         *_predicate_extension_rules(descriptor_lookup),
         *_predicate_truncation_rules(descriptor_lookup),

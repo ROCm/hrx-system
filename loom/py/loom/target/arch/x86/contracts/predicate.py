@@ -251,7 +251,7 @@ def _scalar_i1_mask_emits(
     return tuple(emits), tuple((*dependencies, broadcast))
 
 
-def _predicate_constant_rules(
+def _predicate_exact_splat_rules(
     descriptor_lookup: _DescriptorLookup,
 ) -> tuple[DescriptorRule, ...]:
     rules: list[DescriptorRule] = []
@@ -279,24 +279,6 @@ def _predicate_constant_rules(
             )
             rules.append(
                 DescriptorRule(
-                    source_op=vector.vector_constant,
-                    descriptor=zero,
-                    guards=(
-                        Guard.attr_kind("value", "i64"),
-                        Guard.i64_range("value", 0, 0),
-                        *common_guards,
-                    ),
-                    emit=(
-                        _op_emit(
-                            descriptor=zero,
-                            results={"dst": ValueRef.result("result")},
-                        ),
-                    ),
-                    priority=1,
-                )
-            )
-            rules.append(
-                DescriptorRule(
                     source_op=vector.vector_splat,
                     descriptor=zero,
                     guards=(
@@ -311,34 +293,6 @@ def _predicate_constant_rules(
                         ),
                     ),
                     priority=2,
-                )
-            )
-            rules.append(
-                DescriptorRule(
-                    source_op=vector.vector_constant,
-                    descriptor=equal,
-                    guards=(
-                        Guard.attr_kind("value", "i64"),
-                        Guard.i64_range("value", 1, 1),
-                        *common_guards,
-                        Guard.descriptor_available(zero),
-                    ),
-                    emit=(
-                        _op_emit(
-                            descriptor=zero,
-                            results={"dst": ValueRef.temporary("zero")},
-                            result_types={"dst": carrier_type},
-                        ),
-                        _op_emit(
-                            descriptor=equal,
-                            operands={
-                                "lhs": ValueRef.temporary("zero"),
-                                "rhs": ValueRef.temporary("zero"),
-                            },
-                            results={"dst": ValueRef.result("result")},
-                        ),
-                    ),
-                    priority=1,
                 )
             )
             rules.append(
@@ -1589,7 +1543,7 @@ def avx2_predicate_rules(
     descriptor_lookup: _DescriptorLookup,
 ) -> tuple[ContractCase, ...]:
     return (
-        *_predicate_constant_rules(descriptor_lookup),
+        *_predicate_exact_splat_rules(descriptor_lookup),
         *_predicate_splat_rules(descriptor_lookup),
         *_predicate_extension_rules(descriptor_lookup),
         *_predicate_truncation_rules(descriptor_lookup),

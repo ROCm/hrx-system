@@ -52,7 +52,6 @@ from loom.dialect.scalar import (
 from loom.dialect.scalar.comparison import CmpFPredicate, CmpIPredicate
 from loom.dsl import (
     ANY,
-    ATTR_TYPE_ANY,
     ATTR_TYPE_DICT,
     ATTR_TYPE_ENUM,
     ATTR_TYPE_F64,
@@ -84,7 +83,6 @@ from loom.dsl import (
     VECTOR,
     VIEW,
     AttrDef,
-    AttrMatchesElementType,
     BitRangeWithinElementWidth,
     CachePolicyInterface,
     Constraint,
@@ -504,25 +502,6 @@ def _element_constraint_for(
 # ============================================================================
 # Construction
 # ============================================================================
-
-vector_constant = Op(
-    "vector.constant",
-    group=vector_ops,
-    phase=OpPhase.EXECUTABLE,
-    doc=(
-        "Materialize a compile-time vector value whose every lane has the "
-        "same scalar attribute payload. The result type supplies both the "
-        "vector shape and the element type used to interpret the payload."
-    ),
-    results=[Result("result", VECTOR)],
-    attrs=[AttrDef("value", ATTR_TYPE_ANY, doc="The constant payload.")],
-    constraints=[AttrMatchesElementType("value", "result")],
-    facts="loom_vector_constant_facts",
-    traits=[PURE, CONSTANT_LIKE, REFINABLE_RESULT_TYPE_REFS],
-    format=[Attr("value"), COLON, ResultType("result")],
-    examples=["%v = vector.constant 0.0 : vector<4xf32>"],
-    eager_execution_cost=1,
-)
 
 vector_constanti = Op(
     "vector.constanti",
@@ -4804,7 +4783,6 @@ vector_reduce_axes = Op(
 # ============================================================================
 
 VECTOR_CONSTRUCTION_OPS: tuple[Op, ...] = (
-    vector_constant,
     vector_constanti,
     vector_constantf,
     vector_poison,
@@ -5021,12 +4999,11 @@ VECTOR_OP_CATEGORY_GROUPS: tuple[tuple[OpCategory, tuple[Op, ...]], ...] = (
 )
 
 # Category order groups related builders and documentation. Registry order also
-# assigns observable operation-kind ordinals, so new operations append without
-# renumbering the established dialect. The legacy vector.constant slot becomes
-# vector.constanti when the old attribute-splat operation is removed.
+# assigns observable operation-kind ordinals. vector.constanti occupies the
+# original constant slot so removing the legacy attribute splat does not
+# renumber the established dialect operations.
 ALL_VECTOR_OPS: tuple[Op, ...] = (
-    vector_constant,
-    *(op for _, category_ops in VECTOR_OP_CATEGORY_GROUPS for op in category_ops if op is not vector_constant and op is not vector_constanti and op is not vector_constantf),
     vector_constanti,
+    *(op for _, category_ops in VECTOR_OP_CATEGORY_GROUPS for op in category_ops if op is not vector_constanti and op is not vector_constantf),
     vector_constantf,
 )

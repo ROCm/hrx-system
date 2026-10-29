@@ -406,52 +406,6 @@ static iree_status_t loom_vector_to_scalar_lower_scalar_extract(
   return loom_vector_to_scalar_replace_one_result(&state, replacement);
 }
 
-static iree_status_t loom_vector_to_scalar_lower_static_constant(
-    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
-    bool* out_handled) {
-  *out_handled = true;
-  loom_type_t result_type =
-      loom_module_value_type(rewriter->module, loom_vector_constant_result(op));
-  if (!loom_type_is_all_static(result_type)) {
-    return iree_ok_status();
-  }
-  loom_vector_to_scalar_state_t state = {
-      .pass = pass,
-      .rewriter = rewriter,
-      .op = op,
-      .value_checkpoint = loom_rewriter_value_checkpoint(rewriter),
-      .vector_type = result_type,
-      .result_scalar_type = loom_vector_to_scalar_lane_type(result_type),
-      .location = op->location,
-  };
-  loom_vector_to_scalar_state_initialize(&state, pass);
-
-  uint16_t element_count = 0;
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_static_element_count(
-      &state, result_type, &element_count));
-  if (loom_pass_has_error_diagnostics(pass)) {
-    return iree_ok_status();
-  }
-  loom_value_id_t* elements = NULL;
-  if (element_count > 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(rewriter->arena, element_count,
-                                  sizeof(loom_value_id_t), (void**)&elements));
-  }
-  for (uint16_t i = 0; i < element_count; ++i) {
-    IREE_RETURN_IF_ERROR(
-        loom_vector_to_scalar_build_constant_lane(&state, &elements[i]));
-  }
-
-  loom_op_t* from_elements_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_from_elements_build(
-      &rewriter->builder, elements, element_count, result_type, op->location,
-      &from_elements_op));
-  loom_value_id_t replacement =
-      loom_vector_from_elements_result(from_elements_op);
-  return loom_vector_to_scalar_replace_one_result(&state, replacement);
-}
-
 static iree_status_t loom_vector_to_scalar_lower_static_poison(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_handled) {
@@ -729,8 +683,6 @@ static const loom_vector_to_scalar_op_lowerer_t
             ATOMIC_RMW_MASK, loom_vector_to_scalar_lower_atomic_rmw_op),
         LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
             ATOMIC_CMPXCHG, loom_vector_to_scalar_lower_atomic_cmpxchg_op),
-        LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
-            CONSTANT, loom_vector_to_scalar_lower_static_constant),
         LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(
             POISON, loom_vector_to_scalar_lower_static_poison),
         LOOM_VECTOR_TO_SCALAR_OP_LOWERER_ROW(EMPTY,

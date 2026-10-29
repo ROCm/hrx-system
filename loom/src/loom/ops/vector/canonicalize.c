@@ -411,8 +411,7 @@ static iree_status_t loom_vector_replace_single_result_with_integer_zero(
 static iree_status_t loom_vector_canonicalize_uniform_result(
     loom_op_t* op, loom_rewriter_t* rewriter, bool* out_changed) {
   *out_changed = false;
-  if (op->kind == LOOM_OP_VECTOR_CONSTANT || op->kind == LOOM_OP_VECTOR_EMPTY ||
-      op->kind == LOOM_OP_VECTOR_POISON) {
+  if (op->kind == LOOM_OP_VECTOR_EMPTY || op->kind == LOOM_OP_VECTOR_POISON) {
     return iree_ok_status();
   }
   loom_trait_flags_t traits = loom_op_effective_traits(rewriter->module, op);

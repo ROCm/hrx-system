@@ -10,8 +10,7 @@ func.def @supported_f64_positive_zero() -> (f64, vector<2xf64>) {
 // ----
 low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = () -> (f64, vector<2xf64>)}) @supported_f64_positive_zero() -> (reg<x86.xmm>, reg<x86.xmm>) asm {
   %scalar = vxorps.zero.xmm
-  %vector = vmovddup.xmm %scalar
-  return %scalar, %vector
+  return %scalar, %scalar
 }
 
 // ====

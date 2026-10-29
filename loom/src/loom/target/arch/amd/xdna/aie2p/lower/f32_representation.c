@@ -127,10 +127,7 @@ static bool loom_aie2p_f32_value_is_positive_zero(
 static void loom_aie2p_f32_observe_constant(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_representation_recorder_t* recorder) {
-  const bool is_splat = loom_vector_splat_isa(source_op);
-  const loom_value_id_t result = is_splat
-                                     ? loom_vector_splat_result(source_op)
-                                     : loom_vector_constant_result(source_op);
+  const loom_value_id_t result = loom_vector_splat_result(source_op);
   const loom_module_t* module = loom_low_lower_context_module(context);
   if (!loom_aie2p_f32_packet_type(loom_module_value_type(module, result))) {
     return;
@@ -392,8 +389,6 @@ static void loom_aie2p_f32_observe_unclaimed_operand(
 
 static const loom_low_lower_representation_boundary_t
     kAie2pF32RepresentationBoundaries[] = {
-        {LOOM_OP_VECTOR_CONSTANT, LOOM_AIE2P_F32_REPRESENTATION_ACTION_CONSTANT,
-         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
         {LOOM_OP_VECTOR_SPLAT, LOOM_AIE2P_F32_REPRESENTATION_ACTION_CONSTANT,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
         {LOOM_OP_VECTOR_SELECT, LOOM_AIE2P_F32_REPRESENTATION_ACTION_SELECT,

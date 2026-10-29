@@ -22,7 +22,7 @@ extern "C" {
 #endif
 
 enum {
-  LOOM_OP_VECTOR_CONSTANT = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 0),
+  LOOM_OP_VECTOR_CONSTANTI = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 0),
   LOOM_OP_VECTOR_POISON = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 1),
   LOOM_OP_VECTOR_EMPTY = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 2),
   LOOM_OP_VECTOR_SPLAT = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 3),
@@ -179,9 +179,8 @@ enum {
   LOOM_OP_VECTOR_FRAGMENT = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 154),
   LOOM_OP_VECTOR_FRAGMENT_REPACK = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 155),
   LOOM_OP_VECTOR_REFINE = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 156),
-  LOOM_OP_VECTOR_CONSTANTI = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 157),
-  LOOM_OP_VECTOR_CONSTANTF = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 158),
-  LOOM_OP_VECTOR_COUNT_ = 159,
+  LOOM_OP_VECTOR_CONSTANTF = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 157),
+  LOOM_OP_VECTOR_COUNT_ = 158,
 };
 
 // IEEE 754 fast-math relaxation flags for float operations. nnan and ninf are independent author promises, not runtime checks or requests to clamp results. Together they guarantee finite floating-point results, but do not imply exact representability in a narrower type or absence of subnormals. Behavior outside an authored promise is not constrained by the operation's ordinary special-value contract. Flags do not refine unrelated uses of an operand.
@@ -311,22 +310,22 @@ typedef enum loom_vector_dot4f8_kind_e {
   LOOM_VECTOR_DOT4F8_KIND_COUNT_ = 4,
 } loom_vector_dot4f8_kind_t;
 
-// LOOM_OP_VECTOR_CONSTANT: Materialize a compile-time vector value whose every lane has the same scalar attribute payload. The result type supplies both the vector shape and the element type used to interpret the payload.
-// %v = vector.constant 0.0 : vector<4xf32>
-LOOM_DEFINE_ISA(loom_vector_constant_isa, LOOM_OP_VECTOR_CONSTANT)
-LOOM_DEFINE_RESULT(loom_vector_constant_result, 0)
-LOOM_DEFINE_ATTR_ANY(loom_vector_constant_value, 0)
-iree_status_t loom_vector_constant_build(
+// LOOM_OP_VECTOR_CONSTANTI: Materialize a non-empty all-static integer vector from ordered literal lanes. Values use logical row-major lane order, and their count must match the result shape. Uniform literals canonicalize to a scalar constant and vector.splat; other literals canonicalize to scalar constants and vector.from_elements.
+// %v = vector.constanti [1, -2, 3, 4] : vector<2x2xi16>
+LOOM_DEFINE_ISA(loom_vector_constanti_isa, LOOM_OP_VECTOR_CONSTANTI)
+LOOM_DEFINE_RESULT(loom_vector_constanti_result, 0)
+LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_constanti_values, 0)
+iree_status_t loom_vector_constanti_build(
     loom_builder_t* builder,
-    loom_attribute_t value,
+    const int64_t* values,
+    iree_host_size_t values_count,
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
-iree_status_t loom_vector_constant_facts(
-    loom_fact_context_t* context,
+iree_status_t loom_vector_constant_elements_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
+iree_status_t loom_vector_constant_elements_verify(
     const loom_module_t* module, const loom_op_t* op,
-    const loom_value_facts_t* operand_facts,
-    loom_value_facts_t* result_facts);
+    iree_diagnostic_emitter_t emitter);
 
 // LOOM_OP_VECTOR_POISON: Materialize a typed Loom poison vector. Poison represents an invalid vector value and propagates through pure vector ops until dead-code elimination removes it or a boundary diagnoses it. A zero-lane vector such as vector<0xf32> is not poison: it is an empty aggregate whose pure lane-wise computation and zero-lane memory effects should canonicalize away. Poison is introduced when IR observes something that cannot exist, such as a lane extracted from a vector proven to have zero lanes.
 // %p = vector.poison : vector<4xf32>
@@ -3540,23 +3539,6 @@ iree_status_t loom_vector_refine_type_transfer(
     loom_type_transfer_context_t* context,
     const loom_module_t* module, loom_op_t* op);
 iree_status_t loom_vector_refine_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter);
-
-// LOOM_OP_VECTOR_CONSTANTI: Materialize a non-empty all-static integer vector from ordered literal lanes. Values use logical row-major lane order, and their count must match the result shape. Uniform literals canonicalize to a scalar constant and vector.splat; other literals canonicalize to scalar constants and vector.from_elements.
-// %v = vector.constanti [1, -2, 3, 4] : vector<2x2xi16>
-LOOM_DEFINE_ISA(loom_vector_constanti_isa, LOOM_OP_VECTOR_CONSTANTI)
-LOOM_DEFINE_RESULT(loom_vector_constanti_result, 0)
-LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_constanti_values, 0)
-iree_status_t loom_vector_constanti_build(
-    loom_builder_t* builder,
-    const int64_t* values,
-    iree_host_size_t values_count,
-    loom_type_t result_type,
-    loom_location_id_t location,
-    loom_op_t** out_op);
-iree_status_t loom_vector_constant_elements_canonicalize(loom_op_t* op, loom_rewriter_t* rewriter);
-iree_status_t loom_vector_constant_elements_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

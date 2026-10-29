@@ -38,17 +38,35 @@ static iree_status_t loom_kernel_specialization_capture(
   *out_value = (loom_kernel_specialization_value_t){.type = type};
   *inout_hash = loom_structural_hash_mix_u32(*inout_hash, loom_type_hash(type));
   if (loom_value_facts_can_materialize_constant(facts, type)) {
-    out_value->facts = facts;
+    out_value->kind = LOOM_KERNEL_SPECIALIZATION_VALUE_KIND_EXACT_SCALAR;
+    out_value->payload.scalar_facts = facts;
+    *inout_hash = loom_structural_hash_mix_u8(*inout_hash, out_value->kind);
     *inout_hash = loom_structural_hash_mix_u64(*inout_hash, facts.range_lo);
     return iree_ok_status();
   }
   const loom_value_t* value = loom_module_value(module, value_id);
   const loom_op_t* literal =
       loom_value_is_block_arg(value) ? NULL : loom_value_def_op(value);
+  if (literal && loom_vector_splat_isa(literal)) {
+    const loom_value_id_t scalar_value_id = loom_vector_splat_scalar(literal);
+    const loom_type_t scalar_type =
+        loom_module_value_type(module, scalar_value_id);
+    const loom_value_facts_t scalar_facts =
+        loom_value_fact_table_lookup(site->facts, scalar_value_id);
+    if (loom_value_facts_can_materialize_constant(scalar_facts, scalar_type)) {
+      out_value->kind = LOOM_KERNEL_SPECIALIZATION_VALUE_KIND_UNIFORM_SPLAT;
+      out_value->payload.scalar_facts = scalar_facts;
+      *inout_hash = loom_structural_hash_mix_u8(*inout_hash, out_value->kind);
+      *inout_hash =
+          loom_structural_hash_mix_u64(*inout_hash, scalar_facts.range_lo);
+      return iree_ok_status();
+    }
+  }
   if (literal && iree_all_bits_set(literal->traits, LOOM_TRAIT_CONSTANT_LIKE) &&
       !loom_type_may_reference_values(type)) {
-    out_value->literal = literal;
-    out_value->facts = loom_value_facts_unknown();
+    out_value->kind = LOOM_KERNEL_SPECIALIZATION_VALUE_KIND_CLOSED_LITERAL;
+    out_value->payload.literal = literal;
+    *inout_hash = loom_structural_hash_mix_u8(*inout_hash, out_value->kind);
     *inout_hash = loom_structural_hash_mix_u16(*inout_hash, literal->kind);
     *inout_hash =
         loom_structural_hash_mix_u8(*inout_hash, literal->instance_flags);
@@ -71,25 +89,33 @@ static bool loom_kernel_specializations_equal(
     const loom_kernel_specialization_value_t* rhs, uint16_t count) {
   for (uint16_t i = 0; i < count; ++i) {
     if (!loom_type_equal(lhs[i].type, rhs[i].type) ||
-        (lhs[i].literal == NULL) != (rhs[i].literal == NULL)) {
+        lhs[i].kind != rhs[i].kind) {
       return false;
     }
-    if (lhs[i].literal) {
-      const loom_op_t* a = lhs[i].literal;
-      const loom_op_t* b = rhs[i].literal;
-      if (a->kind != b->kind || a->instance_flags != b->instance_flags ||
-          a->attribute_count != b->attribute_count) {
-        return false;
-      }
-      const loom_attribute_t* a_attributes = loom_op_attrs((loom_op_t*)a);
-      const loom_attribute_t* b_attributes = loom_op_attrs((loom_op_t*)b);
-      for (uint8_t j = 0; j < a->attribute_count; ++j) {
-        if (!loom_attribute_equal(&a_attributes[j], &b_attributes[j])) {
+    switch (lhs[i].kind) {
+      case LOOM_KERNEL_SPECIALIZATION_VALUE_KIND_EXACT_SCALAR:
+      case LOOM_KERNEL_SPECIALIZATION_VALUE_KIND_UNIFORM_SPLAT:
+        if (lhs[i].payload.scalar_facts.range_lo !=
+            rhs[i].payload.scalar_facts.range_lo) {
           return false;
         }
+        break;
+      case LOOM_KERNEL_SPECIALIZATION_VALUE_KIND_CLOSED_LITERAL: {
+        const loom_op_t* a = lhs[i].payload.literal;
+        const loom_op_t* b = rhs[i].payload.literal;
+        if (a->kind != b->kind || a->instance_flags != b->instance_flags ||
+            a->attribute_count != b->attribute_count) {
+          return false;
+        }
+        const loom_attribute_t* a_attributes = loom_op_attrs((loom_op_t*)a);
+        const loom_attribute_t* b_attributes = loom_op_attrs((loom_op_t*)b);
+        for (uint8_t j = 0; j < a->attribute_count; ++j) {
+          if (!loom_attribute_equal(&a_attributes[j], &b_attributes[j])) {
+            return false;
+          }
+        }
+        break;
       }
-    } else if (lhs[i].facts.range_lo != rhs[i].facts.range_lo) {
-      return false;
     }
   }
   return true;
@@ -371,15 +397,38 @@ static iree_status_t loom_kernel_specialize_argument(
   loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
   const loom_type_t body_type =
       loom_module_value_type(rewriter->module, argument);
-  if (value->literal) {
-    IREE_RETURN_IF_ERROR(loom_kernel_specialize_literal(
-        value->literal, body_type, remap, &rewriter->builder, &replacement));
-  } else {
-    IREE_RETURN_IF_ERROR(loom_constant_build(
-        &rewriter->builder, value->facts, body_type, location, &replacement));
+  loom_value_facts_t replacement_facts = loom_value_facts_unknown();
+  switch (value->kind) {
+    case LOOM_KERNEL_SPECIALIZATION_VALUE_KIND_EXACT_SCALAR: {
+      IREE_RETURN_IF_ERROR(
+          loom_constant_build(&rewriter->builder, value->payload.scalar_facts,
+                              body_type, location, &replacement));
+      replacement_facts = value->payload.scalar_facts;
+      break;
+    }
+    case LOOM_KERNEL_SPECIALIZATION_VALUE_KIND_CLOSED_LITERAL: {
+      IREE_RETURN_IF_ERROR(loom_kernel_specialize_literal(
+          value->payload.literal, body_type, remap, &rewriter->builder,
+          &replacement));
+      break;
+    }
+    case LOOM_KERNEL_SPECIALIZATION_VALUE_KIND_UNIFORM_SPLAT: {
+      loom_value_id_t scalar = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_constant_build(
+          &rewriter->builder, value->payload.scalar_facts,
+          loom_type_scalar(loom_type_element_type(body_type)), location,
+          &scalar));
+      IREE_RETURN_IF_ERROR(loom_value_fact_table_define(
+          facts, scalar, value->payload.scalar_facts));
+      loom_op_t* splat = NULL;
+      IREE_RETURN_IF_ERROR(loom_vector_splat_build(
+          &rewriter->builder, scalar, body_type, location, &splat));
+      replacement = loom_vector_splat_result(splat);
+      break;
+    }
   }
   IREE_RETURN_IF_ERROR(
-      loom_value_fact_table_define(facts, replacement, value->facts));
+      loom_value_fact_table_define(facts, replacement, replacement_facts));
   return loom_rewriter_replace_all_uses_with(rewriter, argument, replacement);
 }
 
@@ -394,8 +443,13 @@ iree_status_t loom_kernel_specializations_apply(
   iree_status_t status = iree_ok_status();
   for (uint16_t i = 0; i < specialization_count && iree_status_is_ok(status);
        ++i) {
-    status = loom_value_fact_table_define(&facts, block->arg_ids[i],
-                                          specializations[i].facts);
+    const loom_value_facts_t argument_facts =
+        specializations[i].kind ==
+                LOOM_KERNEL_SPECIALIZATION_VALUE_KIND_EXACT_SCALAR
+            ? specializations[i].payload.scalar_facts
+            : loom_value_facts_unknown();
+    status =
+        loom_value_fact_table_define(&facts, block->arg_ids[i], argument_facts);
   }
   IREE_RETURN_IF_ERROR(status);
   loom_ir_remap_t remap;
@@ -418,7 +472,8 @@ iree_status_t loom_kernel_specializations_apply(
     for (uint16_t i = 0; i < specialization_count && iree_status_is_ok(status);
          ++i) {
       const loom_kernel_specialization_value_t* value = &specializations[i];
-      if ((value->literal != NULL) != (phase != 0)) {
+      if ((value->kind != LOOM_KERNEL_SPECIALIZATION_VALUE_KIND_EXACT_SCALAR) !=
+          (phase != 0)) {
         continue;
       }
       status = loom_kernel_specialize_argument(value, block->arg_ids[i], &remap,

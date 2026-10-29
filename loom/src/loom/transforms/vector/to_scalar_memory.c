@@ -792,8 +792,7 @@ static bool loom_vector_to_scalar_fragment_store_source_is_supported(
     return loom_vector_to_scalar_read_can_rematerialize_at(
         state->rewriter->module, def_op, state->op);
   }
-  if (loom_vector_splat_isa(def_op) || loom_vector_constant_isa(def_op) ||
-      loom_vector_poison_isa(def_op)) {
+  if (loom_vector_splat_isa(def_op) || loom_vector_poison_isa(def_op)) {
     return true;
   }
   if (loom_vector_mma_isa(def_op)) {
@@ -846,8 +845,7 @@ static uint32_t loom_vector_to_scalar_fragment_store_source_rejection_bits(
                ? LOOM_CONTRACT_REJECTION_NONE
                : LOOM_CONTRACT_REJECTION_POLICY;
   }
-  if (loom_vector_splat_isa(def_op) || loom_vector_constant_isa(def_op) ||
-      loom_vector_poison_isa(def_op)) {
+  if (loom_vector_splat_isa(def_op) || loom_vector_poison_isa(def_op)) {
     return LOOM_CONTRACT_REJECTION_NONE;
   }
   if (loom_vector_mma_isa(def_op)) {
