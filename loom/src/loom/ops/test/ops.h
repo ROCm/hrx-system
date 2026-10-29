@@ -316,8 +316,9 @@ enum {
   LOOM_OP_TEST_BLOCK_ARG_GROUPS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 119),
   LOOM_OP_TEST_SIGNATURE_SINK = LOOM_OP_KIND(LOOM_DIALECT_TEST, 120),
   LOOM_OP_TEST_FACT_EXACT_FLOAT_TYPES = LOOM_OP_KIND(LOOM_DIALECT_TEST, 121),
-  LOOM_OP_TEST_STRING_ARRAY_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 122),
-  LOOM_OP_TEST_COUNT_ = 123,
+  LOOM_OP_TEST_F64_ARRAY_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 122),
+  LOOM_OP_TEST_STRING_ARRAY_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 123),
+  LOOM_OP_TEST_COUNT_ = 124,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -2427,6 +2428,28 @@ iree_status_t loom_test_fact_exact_float_types_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
+
+// LOOM_OP_TEST_F64_ARRAY_ATTRS: Test op with required and optional ordered binary64 arrays.
+// test.f64_array_attrs [1.0, -0.0] using []
+LOOM_DEFINE_ISA(loom_test_f64_array_attrs_isa, LOOM_OP_TEST_F64_ARRAY_ATTRS)
+LOOM_DEFINE_ATTR_F64_ARRAY(loom_test_f64_array_attrs_required_values, 0)
+LOOM_DEFINE_ATTR_F64_ARRAY(loom_test_f64_array_attrs_optional_values, 1)
+LOOM_DEFINE_ATTR_DICT(loom_test_f64_array_attrs_dict, 2)
+enum loom_test_f64_array_attrs_build_flag_bits_e {
+  LOOM_TEST_F64_ARRAY_ATTRS_BUILD_FLAG_HAS_OPTIONAL_VALUES = 1u << 0,
+  LOOM_TEST_F64_ARRAY_ATTRS_BUILD_FLAG_HAS_DICT = 1u << 1,
+};
+typedef uint32_t loom_test_f64_array_attrs_build_flags_t;
+iree_status_t loom_test_f64_array_attrs_build(
+    loom_builder_t* builder,
+    loom_test_f64_array_attrs_build_flags_t build_flags,
+    const double* required_values,
+    iree_host_size_t required_values_count,
+    loom_optional const double* optional_values,
+    iree_host_size_t optional_values_count,
+    loom_optional loom_named_attr_slice_t dict,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 
 // LOOM_OP_TEST_STRING_ARRAY_ATTRS: Test op with required and optional ordered string arrays.
 // test.string_array_attrs ["first", "second"] using []

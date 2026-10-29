@@ -350,6 +350,7 @@ LOOM_FIELD_REF_MAX_INDEX = 63
 ATTR_KIND_MAP: dict[str, str] = {
     "i64": "LOOM_ATTR_I64",
     "f64": "LOOM_ATTR_F64",
+    "f64_array": "LOOM_ATTR_F64_ARRAY",
     "string": "LOOM_ATTR_STRING",
     "string_array": "LOOM_ATTR_STRING_ARRAY",
     "bool": "LOOM_ATTR_BOOL",

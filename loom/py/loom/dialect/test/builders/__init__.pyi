@@ -1186,6 +1186,14 @@ class TestBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
+    def f64_array_attrs(
+        self,
+        *,
+        required_values: Sequence[float],
+        optional_values: Sequence[float] | None = ...,
+        dict: Mapping[str, Any] | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...
     def string_array_attrs(
         self,
         *,

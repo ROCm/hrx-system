@@ -20,6 +20,7 @@ blocks, and CFG successor edges reference their target blocks directly.
 from __future__ import annotations
 
 import math
+import struct
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import IntEnum, unique
@@ -105,6 +106,7 @@ __all__ = [
     "CanonicalAttrDict",
     "ATTR_AGGREGATE_MAX_NESTING_DEPTH",
     "EnumArrayAttr",
+    "FloatArrayAttr",
     "StringArrayAttr",
     "Utf8Attr",
     "SignedEnumSetAttr",
@@ -1399,6 +1401,18 @@ def _canonicalize_parameterized_i64_array(
     return values
 
 
+def _canonicalize_parameterized_f64_array(
+    family_name: str, parameter_name: str, value: Any
+) -> FloatArrayAttr:
+    values = value.values if isinstance(value, FloatArrayAttr) else value
+    if isinstance(values, str | bytes | bytearray) or not isinstance(values, Iterable):
+        raise TypeError(
+            f"{family_name}: parameter '{parameter_name}' must be an iterable "
+            f"of binary64 values, got {value!r}"
+        )
+    return FloatArrayAttr(values)
+
+
 def _canonicalize_parameterized_value(
     family_name: str, parameter: Any, value: Any
 ) -> Any:
@@ -1410,6 +1424,7 @@ def _canonicalize_parameterized_value(
         ATTR_TYPE_ENUM,
         ATTR_TYPE_ENUM_ARRAY,
         ATTR_TYPE_F64,
+        ATTR_TYPE_F64_ARRAY,
         ATTR_TYPE_I64,
         ATTR_TYPE_I64_ARRAY,
         ATTR_TYPE_PARAMETERIZED,
@@ -1437,6 +1452,10 @@ def _canonicalize_parameterized_value(
             if isinstance(value, bool) or not isinstance(value, int | float):
                 raise type_error("a floating-point number")
             return float(value)
+        case kind if kind == ATTR_TYPE_F64_ARRAY:
+            return _canonicalize_parameterized_f64_array(
+                family_name, parameter.name, value
+            )
         case kind if kind == ATTR_TYPE_STRING:
             if type(value) is not str:
                 raise type_error("a string")
@@ -1563,6 +1582,45 @@ class Utf8Attr:
 
     def __bytes__(self) -> bytes:
         return self.value.encode("utf-8")
+
+
+@dataclass(frozen=True, slots=True, init=False, eq=False)
+class FloatArrayAttr:
+    """Ordered binary64 attribute payloads with bitwise identity."""
+
+    values: tuple[float, ...]
+    bit_patterns: tuple[int, ...] = field(repr=False)
+
+    def __init__(self, values: Iterable[float] = ()) -> None:
+        frozen_values = tuple(values)
+        if len(frozen_values) > 0xFFFF:
+            raise ValueError(
+                f"floating array length {len(frozen_values)} exceeds UINT16_MAX"
+            )
+        for index, value in enumerate(frozen_values):
+            if type(value) is not float:
+                raise TypeError(
+                    f"floating array element {index} must be a float, got {value!r}"
+                )
+        bit_patterns = tuple(
+            struct.unpack("<Q", struct.pack("<d", value))[0] for value in frozen_values
+        )
+        object.__setattr__(self, "values", frozen_values)
+        object.__setattr__(self, "bit_patterns", bit_patterns)
+
+    def __iter__(self) -> Iterator[float]:
+        return iter(self.values)
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, FloatArrayAttr):
+            return NotImplemented
+        return self.bit_patterns == other.bit_patterns
+
+    def __hash__(self) -> int:
+        return hash(self.bit_patterns)
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -1802,11 +1860,15 @@ def _canonicalize_attr_value(value: Any) -> Any:
         return canonicalize_attr_dict(value)
     if isinstance(value, list):
         canonical_values = [_canonicalize_attr_value(item) for item in value]
+        if canonical_values and all(type(item) is float for item in canonical_values):
+            return FloatArrayAttr(canonical_values)
         if canonical_values and all(type(item) is str for item in canonical_values):
             return StringArrayAttr(canonical_values)
         return canonical_values
     if isinstance(value, tuple):
         canonical_values = tuple(_canonicalize_attr_value(item) for item in value)
+        if canonical_values and all(type(item) is float for item in canonical_values):
+            return FloatArrayAttr(canonical_values)
         if canonical_values and all(type(item) is str for item in canonical_values):
             return StringArrayAttr(canonical_values)
         return canonical_values

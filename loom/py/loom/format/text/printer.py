@@ -100,6 +100,7 @@ from loom.ir import (
     EncodingInstance,
     EncodingType,
     EnumArrayAttr,
+    FloatArrayAttr,
     FunctionType,
     GroupType,
     Module,
@@ -789,6 +790,12 @@ def _format_attr_value(
                 f"string-array attribute value must be StringArrayAttr: {value!r}"
             )
         return "[" + ", ".join(_format_string_literal(v) for v in value) + "]"
+    if attr_def is not None and attr_def.attr_type == "f64_array":
+        if not isinstance(value, FloatArrayAttr):
+            raise TypeError(
+                f"f64-array attribute value must be FloatArrayAttr: {value!r}"
+            )
+        return "[" + ", ".join(_format_float(v) for v in value) + "]"
     if (attr_def is not None and attr_def.attr_type == "type") or isinstance(
         value, _IR_TYPE_CLASSES
     ):
@@ -828,6 +835,8 @@ def _format_attr_value(
         raise ValueError("signed enum sets require a descriptor-backed field")
     if isinstance(value, StringArrayAttr):
         return "[" + ", ".join(_format_string_literal(v) for v in value) + "]"
+    if isinstance(value, FloatArrayAttr):
+        return "[" + ", ".join(_format_float(v) for v in value) + "]"
     if isinstance(value, ParameterizedAttr):
         if attr_def is not None:
             if attr_def.attr_type != "parameterized":
@@ -1033,6 +1042,8 @@ def _is_pipeline_printable_attr_value(
         )
     if isinstance(value, StringArrayAttr):
         return attr_def is None or attr_def.attr_type == "string_array"
+    if isinstance(value, FloatArrayAttr):
+        return attr_def is None or attr_def.attr_type == "f64_array"
     if isinstance(value, ParameterizedAttr):
         return all(
             slot is None or _is_pipeline_printable_attr_value(slot, parameter)

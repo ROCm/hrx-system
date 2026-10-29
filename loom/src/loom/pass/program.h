@@ -56,6 +56,8 @@ typedef struct loom_pass_program_attr_value_t {
     int64_t i64_value;
     // Floating-point payload for LOOM_ATTR_F64.
     double f64_value;
+    // Program-owned array payload for LOOM_ATTR_F64_ARRAY.
+    const double* f64_array;
     // Program-owned string payload for LOOM_ATTR_STRING.
     iree_string_view_t string_value;
     // Program-owned string views for LOOM_ATTR_STRING_ARRAY. Both the view

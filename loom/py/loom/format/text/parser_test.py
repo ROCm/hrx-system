@@ -76,6 +76,7 @@ from loom.ir import (
     EncodingRole,
     EncodingType,
     EnumArrayAttr,
+    FloatArrayAttr,
     FunctionType,
     GroupType,
     Module,
@@ -1689,6 +1690,26 @@ class TestRoundTrip:
 
         absent = _parse_op('test.string_array_attrs ["gfx1250"]')
         assert "optional_values" not in absent.attributes
+
+    def test_f64_arrays_preserve_bits_order_duplicates_and_presence(self) -> None:
+        text = "test.f64_array_attrs [1.0, -0.0, 1.0] using [] {fallbacks = [2.0, 3.0]}"
+        op = _parse_op(text)
+
+        assert op.attributes["required_values"] == FloatArrayAttr([1.0, -0.0, 1.0])
+        assert op.attributes["optional_values"] == FloatArrayAttr()
+        assert op.attributes["dict"]["fallbacks"] == FloatArrayAttr([2.0, 3.0])
+        assert _op_printer().print_operation(op, Module()) == text
+
+        absent = _parse_op("test.f64_array_attrs [2.0]")
+        assert "optional_values" not in absent.attributes
+
+    def test_f64_arrays_accept_integer_literal_spelling(self) -> None:
+        op = _parse_op("test.f64_array_attrs [1.0, 2]")
+
+        assert op.attributes["required_values"] == FloatArrayAttr([1.0, 2.0])
+        assert _op_printer().print_operation(op, Module()) == (
+            "test.f64_array_attrs [1.0, 2.0]"
+        )
 
     def test_string_arrays_reject_mixed_elements(self) -> None:
         with pytest.raises(ParseError, match="expected STRING"):

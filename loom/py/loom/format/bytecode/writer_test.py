@@ -100,6 +100,7 @@ from loom.ir import (
     EncodingInstance,
     EnumArrayAttr,
     FileLocation,
+    FloatArrayAttr,
     FunctionType,
     GroupType,
     LocationTable,
@@ -1706,6 +1707,25 @@ class TestCrossFormatRoundTrip:
         assert first.attributes["dict"]["fallbacks"] == StringArrayAttr(
             ["gfx11-generic", "gfx12-generic"]
         )
+        assert "optional_values" not in second.attributes
+        assert _roundtrip_text_through_bytecode(text) == text
+
+    def test_f64_arrays_survive_bytecode_with_exact_bits_and_presence(self) -> None:
+        text = (
+            "test.func @f64_arrays() {\n"
+            "  test.f64_array_attrs [1.0, -0.0, 1.0] using [] "
+            "{fallbacks = [2.0, 3.0]}\n"
+            "  test.f64_array_attrs [2.0]\n"
+            "  test.yield\n"
+            "}\n"
+        )
+        loaded = _parse_write_read(text)
+        function = loaded.symbols[0].op
+        assert function is not None
+        first, second, _yield = function.regions[0].blocks[0].ops
+        assert first.attributes["required_values"] == FloatArrayAttr([1.0, -0.0, 1.0])
+        assert first.attributes["optional_values"] == FloatArrayAttr()
+        assert first.attributes["dict"]["fallbacks"] == FloatArrayAttr([2.0, 3.0])
         assert "optional_values" not in second.attributes
         assert _roundtrip_text_through_bytecode(text) == text
 

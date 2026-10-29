@@ -66,6 +66,21 @@ def _emit_builder_i64_array_storage(
     lines.append(f"{indent}        &{storage}));")
 
 
+def _emit_builder_f64_array_storage(
+    lines: list[str],
+    *,
+    source: str,
+    count: str,
+    storage: str,
+    indent: str = "",
+) -> None:
+    """Emits C code that copies an f64-array attr payload into the builder."""
+    lines.append(f"{indent}const double* {storage} = NULL;")
+    lines.append(f"{indent}IREE_RETURN_IF_ERROR(")
+    lines.append(f"{indent}    loom_builder_copy_f64_array_attr_storage(")
+    lines.append(f"{indent}        builder, {source}, {count}, &{storage}));")
+
+
 def _emit_builder_enum_array_storage(
     lines: list[str],
     *,
@@ -391,12 +406,16 @@ def _generate_builder_implementation(
                 max_value="UINT16_MAX",
                 label=f"{op.name} block argument",
             )
-        elif param["kind"] == "attr" and param["attr_type"] == "i64_array":
+        elif param["kind"] == "attr" and param["attr_type"] in (
+            "f64_array",
+            "i64_array",
+        ):
+            element_type = param["attr_type"].removesuffix("_array")
             _emit_builder_count_check(
                 lines,
                 count=f"{_c_parameter_name(param['name'])}_count",
                 max_value="UINT16_MAX",
-                label=f"{op.name} i64 array attribute",
+                label=f"{op.name} {element_type} array attribute",
             )
 
     block_arg_params_by_region: dict[str, list[dict[str, Any]]] = {}
@@ -928,7 +947,28 @@ def _generate_builder_implementation(
             }
             constructor = constructor_map.get(attr_type, name)
             optional_flag = c_builder_model.build_flag_bit_name(prefix, param) if c_builder_model.optional_param_uses_build_flag(param) else ""
-            if attr_type == "i64_array":
+            if attr_type == "f64_array":
+                storage = f"_{field_name}_storage"
+                if optional_flag:
+                    lines.append(f"  if (iree_any_bit_set(build_flags, {optional_flag})) {{")
+                    _emit_builder_f64_array_storage(
+                        lines,
+                        source=name,
+                        count=f"{name}_count",
+                        storage=storage,
+                        indent="    ",
+                    )
+                    lines.append(f"    loom_op_attrs(*out_op)[{idx}] = loom_attr_f64_array({storage}, (uint16_t){name}_count);")
+                    lines.append("  }")
+                else:
+                    _emit_builder_f64_array_storage(
+                        lines,
+                        source=name,
+                        count=f"{name}_count",
+                        storage=storage,
+                    )
+                    lines.append(f"  loom_op_attrs(*out_op)[{idx}] = loom_attr_f64_array({storage}, (uint16_t){name}_count);")
+            elif attr_type == "i64_array":
                 storage = f"_{field_name}_storage"
                 if optional_flag:
                     lines.append(f"  if (iree_any_bit_set(build_flags, {optional_flag})) {{")

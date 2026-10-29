@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <cmath>
 #include <cstdio>
 #include <vector>
 
@@ -441,6 +442,30 @@ TEST_F(BuilderStorageTest, StringArraysPreserveCallerOrderAndStorage) {
   EXPECT_TRUE(iree_string_view_equal(
       loom_string_table_get(&module_->strings, stored_optional.values[0]),
       IREE_SV("gfx11-generic")));
+}
+
+TEST_F(BuilderStorageTest, F64ArraysPreserveCallerBitsOrderAndStorage) {
+  double required[] = {1.0, -0.0, 1.0};
+  double optional[] = {2.0, 3.0};
+
+  loom_op_t* op = nullptr;
+  IREE_ASSERT_OK(loom_test_f64_array_attrs_build(
+      &builder_, LOOM_TEST_F64_ARRAY_ATTRS_BUILD_FLAG_HAS_OPTIONAL_VALUES,
+      required, IREE_ARRAYSIZE(required), optional, IREE_ARRAYSIZE(optional),
+      loom_named_attr_slice_empty(), LOOM_LOCATION_UNKNOWN, &op));
+
+  memset(required, 0, sizeof(required));
+  memset(optional, 0, sizeof(optional));
+  const loom_f64_array_t stored = loom_test_f64_array_attrs_required_values(op);
+  ASSERT_EQ(stored.count, 3u);
+  EXPECT_EQ(stored.values[0], 1.0);
+  EXPECT_TRUE(std::signbit(stored.values[1]));
+  EXPECT_EQ(stored.values[2], 1.0);
+  const loom_f64_array_t stored_optional =
+      loom_test_f64_array_attrs_optional_values(op);
+  ASSERT_EQ(stored_optional.count, 2u);
+  EXPECT_EQ(stored_optional.values[0], 2.0);
+  EXPECT_EQ(stored_optional.values[1], 3.0);
 }
 
 TEST_F(BuilderStorageTest, SignedEnumSetsCopyBothPolarities) {

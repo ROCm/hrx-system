@@ -45,6 +45,7 @@ from loom.ir import (
     INDEX,
     Block,
     EnumArrayAttr,
+    FloatArrayAttr,
     OpaqueLocation,
     ParameterizedAttrArray,
     ShapedType,
@@ -198,6 +199,28 @@ def test_dynamic_builder_normalizes_string_arrays_and_presence() -> None:
     )
     assert first["optional_values"] == StringArrayAttr()
     assert "optional_values" not in block.ops[1].attributes
+
+
+def test_dynamic_builder_normalizes_f64_arrays_and_presence() -> None:
+    block, builder = _builder()
+
+    builder.test.f64_array_attrs(
+        required_values=[1.0, -0.0, 1.0],
+        optional_values=[],
+    )
+    builder.test.f64_array_attrs(required_values=[2.0])
+
+    first = block.ops[0].attributes
+    assert first["required_values"] == FloatArrayAttr([1.0, -0.0, 1.0])
+    assert first["optional_values"] == FloatArrayAttr()
+    assert "optional_values" not in block.ops[1].attributes
+
+
+def test_dynamic_builder_rejects_non_f64_array_elements() -> None:
+    _block, builder = _builder()
+
+    with pytest.raises(TypeError, match="floating array element 1"):
+        builder.test.f64_array_attrs(required_values=[1.0, 2])
 
 
 def test_dynamic_builder_rejects_non_string_array_elements() -> None:

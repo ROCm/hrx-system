@@ -104,6 +104,7 @@ __all__ = [
     "AttrType",
     "ATTR_TYPE_I64",
     "ATTR_TYPE_F64",
+    "ATTR_TYPE_F64_ARRAY",
     "ATTR_TYPE_STRING",
     "ATTR_TYPE_STRING_ARRAY",
     "ATTR_TYPE_BOOL",
@@ -574,6 +575,7 @@ type AttrType = str  # One of the ATTR_TYPE_* constants below.
 
 ATTR_TYPE_I64 = "i64"
 ATTR_TYPE_F64 = "f64"
+ATTR_TYPE_F64_ARRAY = "f64_array"
 ATTR_TYPE_STRING = "string"
 ATTR_TYPE_STRING_ARRAY = "string_array"
 ATTR_TYPE_BOOL = "bool"
@@ -599,6 +601,7 @@ _VALID_ATTR_TYPES = frozenset(
     {
         ATTR_TYPE_I64,
         ATTR_TYPE_F64,
+        ATTR_TYPE_F64_ARRAY,
         ATTR_TYPE_STRING,
         ATTR_TYPE_STRING_ARRAY,
         ATTR_TYPE_BOOL,
@@ -3308,6 +3311,7 @@ _DESCRIPTOR_PARAMETER_TYPES = frozenset(
     {
         ATTR_TYPE_I64,
         ATTR_TYPE_F64,
+        ATTR_TYPE_F64_ARRAY,
         ATTR_TYPE_STRING,
         ATTR_TYPE_STRING_ARRAY,
         ATTR_TYPE_BOOL,

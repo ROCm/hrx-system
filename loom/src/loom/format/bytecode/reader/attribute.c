@@ -343,6 +343,24 @@ static iree_status_t loom_bytecode_attribute_validate_at_depth(
       return loom_bytecode_reader_read_u64_le(validator->decoder, cursor,
                                               &bits);
     }
+    case LOOM_BYTECODE_ATTR_F64_ARRAY: {
+      const uint64_t count_offset =
+          loom_bytecode_reader_cursor_absolute_position(cursor);
+      uint64_t count = 0;
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(validator->decoder,
+                                                             cursor, &count));
+      if (count > UINT16_MAX) {
+        return loom_bytecode_reader_emit_count_exceeds(
+            validator->decoder, IREE_SV("f64_array"), count, UINT16_MAX,
+            count_offset);
+      }
+      for (uint64_t i = 0; i < count; ++i) {
+        uint64_t bits = 0;
+        IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u64_le(
+            validator->decoder, cursor, &bits));
+      }
+      return iree_ok_status();
+    }
     case LOOM_BYTECODE_ATTR_STRING:
     case LOOM_BYTECODE_ATTR_SCOPED_ENUM: {
       const uint64_t offset =

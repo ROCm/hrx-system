@@ -21,6 +21,7 @@ def parameter_value_c_type(parameter: AttrDef, enum_type: Callable[[AttrDef], st
     return {
         "i64": "int64_t",
         "f64": "double",
+        "f64_array": "loom_f64_array_t",
         "string": "loom_string_id_t",
         "string_array": "loom_string_id_array_t",
         "bool": "bool",
@@ -45,6 +46,7 @@ def parameter_value_constructor_expr(parameter: AttrDef) -> str:
     return {
         "i64": f"loom_attr_i64({name})",
         "f64": f"loom_attr_f64({name})",
+        "f64_array": f"loom_attr_f64_array({name}.values, (uint16_t){name}.count)",
         "string": f"loom_attr_string({name})",
         "string_array": f"loom_attr_string_array({name}.values, (uint16_t){name}.count)",
         "bool": f"loom_attr_bool({name})",
@@ -69,6 +71,7 @@ def parameter_value_accessor_expr(parameter: AttrDef, slot_expr: str, c_type: st
     return {
         "i64": f"loom_attr_as_i64({slot_expr})",
         "f64": f"loom_attr_as_f64({slot_expr})",
+        "f64_array": f"loom_attr_as_f64_array({slot_expr})",
         "string": f"loom_attr_as_string_id({slot_expr})",
         "string_array": f"loom_attr_as_string_array({slot_expr})",
         "bool": f"loom_attr_as_bool({slot_expr})",
@@ -164,6 +167,7 @@ def append_parameter_slot_initializers(
             "enum_array",
             "symbol_array",
             "string_array",
+            "f64_array",
             "i64_array",
             "dict",
             "parameterized_array",

@@ -324,6 +324,31 @@ static inline loom_i64_array_t loom_make_i64_array(const int64_t* values,
   return array;
 }
 
+// A borrowed ordered array of IEEE 754 binary64 values.
+//
+// Values retain their exact carrier bits, including signed zero and NaN
+// payloads. Ordering and duplicates are preserved.
+typedef struct loom_f64_array_t {
+  // Borrowed binary64 values preserving their exact carrier bits.
+  const double* values;
+  // Number of entries in |values|.
+  iree_host_size_t count;
+} loom_f64_array_t;
+
+static inline loom_f64_array_t loom_f64_array_empty(void) {
+  loom_f64_array_t array = {0};
+  return array;
+}
+
+static inline loom_f64_array_t loom_make_f64_array(const double* values,
+                                                   iree_host_size_t count) {
+  loom_f64_array_t array = {
+      /*.values=*/count > 0 ? values : NULL,
+      /*.count=*/count,
+  };
+  return array;
+}
+
 // A borrowed ordered array of module-local symbol references.
 //
 // The descriptor of the operation field carrying the array owns the symbol
@@ -444,6 +469,9 @@ typedef enum loom_attr_kind_e {
   // Arena-allocated ordered module-local interned string IDs. Ordering and
   // duplicate strings are preserved.
   LOOM_ATTR_STRING_ARRAY = 21,
+  // Arena-allocated ordered IEEE 754 binary64 values. Exact carrier bits,
+  // ordering, and duplicates are preserved.
+  LOOM_ATTR_F64_ARRAY = 22,
   LOOM_ATTR_COUNT_,
 } loom_attr_kind_t;
 
@@ -463,7 +491,7 @@ enum loom_attr_bytes_flag_bits_e {
 // parameters, and anywhere a typed scalar/aggregate is needed.
 //
 // The kind tag (byte 0) determines which union member is active.
-// For I64_ARRAY, STRING_ARRAY, ENUM_ARRAY, SYMBOL_ARRAY, SYMBOL_SET,
+// For I64_ARRAY, F64_ARRAY, STRING_ARRAY, ENUM_ARRAY, SYMBOL_ARRAY, SYMBOL_SET,
 // PREDICATE_LIST, PARAMETERIZED, PARAMETERIZED_ARRAY, and SIGNED_ENUM_SET, the
 // count field holds the element, parameter, or per-polarity word count and the
 // payload holds a pointer to arena-allocated storage. PARAMETERIZED uses
@@ -488,6 +516,8 @@ typedef struct loom_attribute_t {
     // Arena-owned payload for LOOM_ATTR_SYMBOL_ARRAY and LOOM_ATTR_SYMBOL_SET.
     const loom_symbol_ref_t* symbol_refs;
     int64_t* i64_array;
+    // Arena-owned payload for LOOM_ATTR_F64_ARRAY.
+    const double* f64_array;
     const uint8_t* enum_array;
     const uint64_t* signed_enum_set_words;
     loom_type_id_t type_id;
@@ -684,6 +714,18 @@ static inline loom_attribute_t loom_attr_i64_array(int64_t* values,
   loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_I64_ARRAY);
   attr.count = count;
   attr.i64_array = values;
+  return attr;
+}
+
+// Constructs a floating-point array attribute. The values array must be
+// arena-allocated and outlive the attribute. A zero-length array is present and
+// canonicalized to a NULL payload, unlike the all-zero absent attribute
+// sentinel.
+static inline loom_attribute_t loom_attr_f64_array(const double* values,
+                                                   uint16_t count) {
+  loom_attribute_t attr = loom_attr_make_present(LOOM_ATTR_F64_ARRAY);
+  attr.count = count;
+  attr.f64_array = count > 0 ? values : NULL;
   return attr;
 }
 
@@ -986,6 +1028,18 @@ static inline loom_i64_array_t loom_attr_as_i64_array(loom_attribute_t attr) {
   }
   IREE_ASSERT(attr.kind == LOOM_ATTR_I64_ARRAY);
   return loom_make_i64_array(attr.i64_array, attr.count);
+}
+
+// Returns the ordered binary64 values of an F64_ARRAY attribute.
+//
+// An absent optional attribute reads as an empty array. Call
+// loom_attr_is_absent when presence matters.
+static inline loom_f64_array_t loom_attr_as_f64_array(loom_attribute_t attr) {
+  if (loom_attr_is_absent(attr)) {
+    return loom_f64_array_empty();
+  }
+  IREE_ASSERT(attr.kind == LOOM_ATTR_F64_ARRAY);
+  return loom_make_f64_array(attr.f64_array, attr.count);
 }
 
 // Returns the dictionary entries of a DICT attribute.

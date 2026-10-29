@@ -257,6 +257,21 @@ static iree_status_t loom_ir_remap_leaf_attribute(
       return iree_ok_status();
     }
 
+    case LOOM_ATTR_F64_ARRAY: {
+      if (source_attr.count == 0) {
+        out_target_attr->f64_array = NULL;
+        return iree_ok_status();
+      }
+      double* target_values = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          payload_arena, source_attr.count, sizeof(*target_values),
+          (void**)&target_values));
+      memcpy(target_values, source_attr.f64_array,
+             (iree_host_size_t)source_attr.count * sizeof(*target_values));
+      out_target_attr->f64_array = target_values;
+      return iree_ok_status();
+    }
+
     case LOOM_ATTR_ENUM_ARRAY: {
       if (source_attr.count == 0) {
         out_target_attr->enum_array = NULL;

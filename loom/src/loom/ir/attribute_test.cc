@@ -313,6 +313,31 @@ TEST(AttributeEqual, I64ArraySamePointer) {
   EXPECT_TRUE(loom_attribute_equal(&a, &b));
 }
 
+TEST(AttributeEqual, F64ArrayUsesExactCarrierBits) {
+  const uint64_t bit_patterns[] = {
+      UINT64_C(0x0000000000000000),
+      UINT64_C(0x8000000000000000),
+      UINT64_C(0x7FF8000000000042),
+  };
+  double values[IREE_ARRAYSIZE(bit_patterns)];
+  memcpy(values, bit_patterns, sizeof(values));
+  double same_values[IREE_ARRAYSIZE(bit_patterns)];
+  memcpy(same_values, bit_patterns, sizeof(same_values));
+  double different_values[IREE_ARRAYSIZE(bit_patterns)];
+  memcpy(different_values, bit_patterns, sizeof(different_values));
+  different_values[1] = 0.0;
+
+  loom_attribute_t a = loom_attr_f64_array(values, IREE_ARRAYSIZE(values));
+  loom_attribute_t b =
+      loom_attr_f64_array(same_values, IREE_ARRAYSIZE(same_values));
+  loom_attribute_t c =
+      loom_attr_f64_array(different_values, IREE_ARRAYSIZE(different_values));
+
+  EXPECT_TRUE(loom_attribute_equal(&a, &b));
+  EXPECT_EQ(loom_attribute_hash(&a), loom_attribute_hash(&b));
+  EXPECT_FALSE(loom_attribute_equal(&a, &c));
+}
+
 TEST(AttributeEqual, StringArrayPreservesOrderAndDuplicates) {
   const loom_string_id_t values_a[] = {4, 9, 4};
   const loom_string_id_t values_b[] = {4, 9, 4};

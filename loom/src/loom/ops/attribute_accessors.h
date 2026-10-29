@@ -29,6 +29,12 @@ extern "C" {
     return loom_attr_as_f64(loom_op_attrs(op)[(index)]); \
   }
 
+// Defines a function that reads an f64-array attribute by index.
+#define LOOM_DEFINE_ATTR_F64_ARRAY(func_name, index)              \
+  static inline loom_f64_array_t func_name(const loom_op_t* op) { \
+    return loom_attr_as_f64_array(loom_op_attrs(op)[(index)]);    \
+  }
+
 // Defines a function that reads an enum attribute by index.
 // Returns the enum case index as a uint8_t.
 #define LOOM_DEFINE_ATTR_ENUM(func_name, index)           \

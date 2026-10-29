@@ -238,6 +238,11 @@ iree_status_t loom_builder_copy_i64_array_attr_storage(loom_builder_t* builder,
                                                        iree_string_view_t label,
                                                        int64_t** out_storage);
 
+// Copies an f64-array attribute payload into the builder arena.
+iree_status_t loom_builder_copy_f64_array_attr_storage(
+    loom_builder_t* builder, const double* values, iree_host_size_t count,
+    const double** out_storage);
+
 // Copies a string-array attribute payload into the builder arena.
 iree_status_t loom_builder_copy_string_array_attr_storage(
     loom_builder_t* builder, loom_string_id_array_t values,

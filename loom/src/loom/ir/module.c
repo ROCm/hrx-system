@@ -2743,6 +2743,24 @@ static iree_status_t loom_module_canonicalize_attr_value(
     case LOOM_ATTR_F64:
       *out_value = loom_attr_f64(value.f64);
       return iree_ok_status();
+    case LOOM_ATTR_F64_ARRAY: {
+      if (value.count == 0) {
+        *out_value = loom_attr_f64_array(NULL, 0);
+        return iree_ok_status();
+      }
+      if (value.f64_array == NULL) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "non-empty f64 array attribute has a NULL payload");
+      }
+      double* values = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          &module->arena, value.count, sizeof(*values), (void**)&values));
+      memcpy(values, value.f64_array,
+             (iree_host_size_t)value.count * sizeof(*values));
+      *out_value = loom_attr_f64_array(values, value.count);
+      return iree_ok_status();
+    }
     case LOOM_ATTR_STRING:
       if (value.string_id == LOOM_STRING_ID_INVALID ||
           value.string_id >= module->strings.count) {
@@ -3265,6 +3283,16 @@ static iree_status_t loom_module_verify_canonical_attr_value(
     case LOOM_ATTR_SYMBOL:
       return loom_module_verify_canonical_attr_header(
           value, IREE_SV("attribute value"));
+    case LOOM_ATTR_F64_ARRAY: {
+      IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
+          value, IREE_SV("f64 array attribute")));
+      if ((value->count > 0) != (value->f64_array != NULL)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "f64 array attribute pointer does not match its element count");
+      }
+      return iree_ok_status();
+    }
     case LOOM_ATTR_BOOL: {
       IREE_RETURN_IF_ERROR(loom_module_verify_canonical_attr_header(
           value, IREE_SV("boolean attribute")));

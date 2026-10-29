@@ -52,6 +52,7 @@ static bool loom_benchmark_sample_attr_equal(loom_attribute_t lhs,
     case LOOM_ATTR_STRING:
       return loom_attr_as_string_id(lhs) == loom_attr_as_string_id(rhs);
     case LOOM_ATTR_STRING_ARRAY:
+    case LOOM_ATTR_F64_ARRAY:
       return loom_attribute_equal(&lhs, &rhs);
     default:
       return lhs.raw == rhs.raw;

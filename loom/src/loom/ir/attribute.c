@@ -236,6 +236,21 @@ static bool loom_attribute_equal_impl(const loom_attribute_t* a,
       }
       return memcmp(a->i64_array, b->i64_array,
                     (iree_host_size_t)a->count * sizeof(int64_t)) == 0;
+    case LOOM_ATTR_F64_ARRAY:
+      if (a->count != b->count) {
+        return false;
+      }
+      if (a->count == 0) {
+        return true;
+      }
+      if (a->f64_array == NULL || b->f64_array == NULL) {
+        return false;
+      }
+      if (a->f64_array == b->f64_array) {
+        return true;
+      }
+      return memcmp(a->f64_array, b->f64_array,
+                    (iree_host_size_t)a->count * sizeof(double)) == 0;
     case LOOM_ATTR_ENUM_ARRAY:
       if (a->count != b->count) {
         return false;
@@ -388,6 +403,14 @@ static uint32_t loom_attribute_hash_impl(const loom_attribute_t* attr,
       hash = loom_structural_hash_mix_bytes(
           hash, attr->i64_array,
           (iree_host_size_t)attr->count * sizeof(int64_t));
+      break;
+    case LOOM_ATTR_F64_ARRAY:
+      hash = loom_structural_hash_mix_u16(hash, attr->count);
+      if (attr->count != 0 && attr->f64_array != NULL) {
+        hash = loom_structural_hash_mix_bytes(
+            hash, attr->f64_array,
+            (iree_host_size_t)attr->count * sizeof(double));
+      }
       break;
     case LOOM_ATTR_ENUM_ARRAY:
       hash = loom_structural_hash_mix_u16(hash, attr->count);

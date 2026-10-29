@@ -62,6 +62,7 @@ from loom.dsl import (
     ANY_ENCODING,
     ATTR_TYPE_ENUM,
     ATTR_TYPE_ENUM_ARRAY,
+    ATTR_TYPE_F64_ARRAY,
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64_ARRAY,
     ATTR_TYPE_PARAMETERIZED,
@@ -2390,6 +2391,41 @@ test_string_array_attrs = Op(
 )
 
 # ============================================================================
+# test.f64_array_attrs — ordered binary64-array attributes
+# ============================================================================
+
+test_f64_array_attrs = Op(
+    "test.f64_array_attrs",
+    group=test_ops,
+    doc="Test op with required and optional ordered binary64 arrays.",
+    attrs=[
+        AttrDef(
+            "required_values",
+            ATTR_TYPE_F64_ARRAY,
+            doc="Required ordered binary64 values.",
+        ),
+        AttrDef(
+            "optional_values",
+            ATTR_TYPE_F64_ARRAY,
+            optional=True,
+            doc="Optional ordered binary64 values.",
+        ),
+        AttrDef("dict", "dict", optional=True),
+    ],
+    format=[
+        Attr("required_values"),
+        OptionalGroup(
+            [kw("using"), Attr("optional_values")],
+            anchor="optional_values",
+        ),
+        AttrDict("dict"),
+    ],
+    examples=[
+        "test.f64_array_attrs [1.0, -0.0] using []",
+    ],
+)
+
+# ============================================================================
 # test.enum_array_attrs — descriptor-backed enum-array attributes
 # ============================================================================
 
@@ -3332,5 +3368,6 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_block_arg_groups,
     test_signature_sink,
     test_fact_exact_float_types,
+    test_f64_array_attrs,
     test_string_array_attrs,
 )

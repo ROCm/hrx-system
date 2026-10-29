@@ -22,6 +22,7 @@ from loom.dialect.test.defs import (
     ALL_TEST_OPS,
     ALL_TEST_TYPES,
     test_enum_array_attrs,
+    test_f64_array_attrs,
     test_options_attr,
     test_parameterized_attr,
     test_parameterized_attr_array,
@@ -84,6 +85,7 @@ from loom.ir import (
     EncodingInstance,
     EnumArrayAttr,
     FileLocation,
+    FloatArrayAttr,
     FunctionType,
     Module,
     Operation,
@@ -2296,6 +2298,36 @@ class TestStringArrayAttributeWireFormat:
     def test_rejects_out_of_range_string(self) -> None:
         with pytest.raises(BytecodeError, match="string_id 3 out of range"):
             self._read_string_array(bytes([19, 1, 3]))
+
+
+class TestF64ArrayAttributeWireFormat:
+    def _read_f64_array(self, data: bytes) -> tuple[FloatArrayAttr, int]:
+        reader = BytecodeReader(b"", op_decls=[test_f64_array_attrs])
+        attr_def = reader._attr_def_for_op_attr(
+            "test.f64_array_attrs", "required_values"
+        )
+        value, offset = reader._read_attr_value(data, 0, attr_def=attr_def)
+        assert isinstance(value, FloatArrayAttr)
+        return value, offset
+
+    def test_reads_exact_ordered_binary64_bits(self) -> None:
+        bits = (0x3FF0000000000000, 0x8000000000000000, 0x7FF8000000000042)
+        data = bytes([21, 3]) + struct.pack("<3Q", *bits)
+
+        value, offset = self._read_f64_array(data)
+
+        assert value.bit_patterns == bits
+        assert offset == len(data)
+
+    def test_rejects_oversized_array(self) -> None:
+        data = bytes([21]) + encode_varint(0x10000)
+
+        with pytest.raises(BytecodeError, match="exceeds UINT16_MAX"):
+            self._read_f64_array(data)
+
+    def test_rejects_truncated_payload(self) -> None:
+        with pytest.raises(BytecodeError, match="exceeds payload size"):
+            self._read_f64_array(bytes([21, 1, 0]))
 
 
 class TestSignedEnumSetAttributeWireFormat:

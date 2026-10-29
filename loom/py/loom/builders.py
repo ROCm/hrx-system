@@ -26,6 +26,7 @@ from loom.builder_model import (
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dsl import (
     ATTR_TYPE_ENUM_ARRAY,
+    ATTR_TYPE_F64_ARRAY,
     ATTR_TYPE_PARAMETERIZED_ARRAY,
     ATTR_TYPE_SIGNED_ENUM_SET,
     ATTR_TYPE_STRING_ARRAY,
@@ -44,6 +45,7 @@ from loom.ir import (
     OFFSET,
     Block,
     EnumArrayAttr,
+    FloatArrayAttr,
     Module,
     ParameterizedAttrArray,
     Region,
@@ -227,6 +229,11 @@ class OpCallable:
                 case BuilderParamKind.ATTR:
                     if value is not None:
                         if (
+                            param.attr_def is not None
+                            and param.attr_def.attr_type == ATTR_TYPE_F64_ARRAY
+                        ):
+                            value = FloatArrayAttr(value)
+                        elif (
                             param.attr_def is not None
                             and param.attr_def.attr_type == ATTR_TYPE_ENUM_ARRAY
                         ):

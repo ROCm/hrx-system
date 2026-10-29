@@ -279,6 +279,32 @@ static iree_status_t loom_bytecode_attribute_impl_decode_at_depth(
       *out_attr = loom_attr_f64(value);
       return iree_ok_status();
     }
+    case LOOM_BYTECODE_ATTR_F64_ARRAY: {
+      const uint64_t count_offset =
+          loom_bytecode_reader_cursor_absolute_position(cursor);
+      uint64_t count = 0;
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
+          materializer->decoder, cursor, &count));
+      if (count > UINT16_MAX || count > IREE_HOST_SIZE_MAX) {
+        return loom_bytecode_reader_emit_count_exceeds(
+            materializer->decoder, IREE_SV("f64_array"), count, UINT16_MAX,
+            count_offset);
+      }
+      double* values = NULL;
+      if (count > 0) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            materializer->scratch_arena, (iree_host_size_t)count,
+            sizeof(*values), (void**)&values));
+      }
+      for (uint64_t i = 0; i < count; ++i) {
+        uint64_t bits = 0;
+        IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_u64_le(
+            materializer->decoder, cursor, &bits));
+        memcpy(&values[i], &bits, sizeof(bits));
+      }
+      *out_attr = loom_attr_f64_array(values, (uint16_t)count);
+      return iree_ok_status();
+    }
     case LOOM_BYTECODE_ATTR_STRING: {
       const uint64_t offset =
           loom_bytecode_reader_cursor_absolute_position(cursor);

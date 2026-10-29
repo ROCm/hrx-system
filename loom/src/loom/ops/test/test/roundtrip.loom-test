@@ -76,6 +76,16 @@ test.func @string_arrays() {
 
 // ====
 
+// Ordered binary64 arrays preserve exact carrier bits, duplicates, optional
+// empty presence, and generic dictionary nesting.
+test.func @f64_arrays() {
+  test.f64_array_attrs [1.0, -0.0, 1.0] using [] {fallbacks = [2.0, 3.0]}
+  test.f64_array_attrs [2.0]
+  test.yield
+}
+
+// ====
+
 // Owned-resource operations model generic lifetime effects without depending
 // on a target dialect.
 test.func @owned_resources(%size: index) {

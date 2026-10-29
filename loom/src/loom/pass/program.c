@@ -201,6 +201,19 @@ static iree_status_t loom_pass_program_copy_attr_value(
     case LOOM_ATTR_F64:
       out_value->f64_value = source_attr.f64;
       return iree_ok_status();
+    case LOOM_ATTR_F64_ARRAY: {
+      if (source_attr.count == 0) {
+        return iree_ok_status();
+      }
+      double* values = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          &compiler->program->arena, source_attr.count, sizeof(*values),
+          (void**)&values));
+      memcpy(values, source_attr.f64_array,
+             source_attr.count * sizeof(*values));
+      out_value->f64_array = values;
+      return iree_ok_status();
+    }
     case LOOM_ATTR_STRING: {
       iree_string_view_t source_string = iree_string_view_empty();
       IREE_RETURN_IF_ERROR(loom_pass_program_string_from_id(

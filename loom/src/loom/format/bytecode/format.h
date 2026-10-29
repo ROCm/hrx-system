@@ -938,6 +938,10 @@ typedef enum loom_bytecode_section_kind_e {
 //       [count: varint]
 //       [string_id: varint] repeated count times
 // Ordering and duplicate strings are preserved.
+// F64_ARRAY value_data:
+//       [count: varint]
+//       [value_bits: u64 little-endian] repeated count times
+// Exact IEEE 754 binary64 carrier bits, ordering, and duplicates are preserved.
 //       [region_count: varint]
 //       For each region:
 //         (recursive: source_flags, block_count, blocks...)
@@ -969,6 +973,7 @@ typedef enum loom_bytecode_attr_kind_e {
   LOOM_BYTECODE_ATTR_STRING_ARRAY = 19,
   // Same length + payload encoding as BYTES, with validated UTF-8 form.
   LOOM_BYTECODE_ATTR_UTF8 = 20,
+  LOOM_BYTECODE_ATTR_F64_ARRAY = 21,
   LOOM_BYTECODE_ATTR_COUNT,
 } loom_bytecode_attr_kind_t;
 

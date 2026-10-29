@@ -139,6 +139,19 @@ static iree_status_t loom_bytecode_write_attr_value_at_depth(
           loom_bytecode_page_writer_write_u64_le(writer, bits));
       break;
     }
+    case LOOM_ATTR_F64_ARRAY: {
+      IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
+          writer, LOOM_BYTECODE_ATTR_F64_ARRAY));
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_page_writer_write_uvarint(writer, attr.count));
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        uint64_t bits = 0;
+        memcpy(&bits, &attr.f64_array[i], sizeof(bits));
+        IREE_RETURN_IF_ERROR(
+            loom_bytecode_page_writer_write_u64_le(writer, bits));
+      }
+      break;
+    }
     case LOOM_ATTR_STRING: {
       uint32_t string_writer_id = 0;
       IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
@@ -519,6 +532,17 @@ static iree_status_t loom_bytecode_emit_attr_value_at_depth(
       uint64_t bits = 0;
       memcpy(&bits, &attr.f64, sizeof(bits));
       IREE_RETURN_IF_ERROR(loom_bytecode_emit_u64_le(builder, bits));
+      break;
+    }
+    case LOOM_ATTR_F64_ARRAY: {
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_emit_u8(builder, LOOM_BYTECODE_ATTR_F64_ARRAY));
+      IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(builder, attr.count));
+      for (uint16_t i = 0; i < attr.count; ++i) {
+        uint64_t bits = 0;
+        memcpy(&bits, &attr.f64_array[i], sizeof(bits));
+        IREE_RETURN_IF_ERROR(loom_bytecode_emit_u64_le(builder, bits));
+      }
       break;
     }
     case LOOM_ATTR_STRING: {

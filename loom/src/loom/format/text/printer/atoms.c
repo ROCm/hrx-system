@@ -189,6 +189,35 @@ static iree_status_t loom_print_scalar_type(loom_output_stream_t* stream,
 
 // Parameterized types, static encodings, and type-valued attributes are
 // mutually recursive.
+static iree_status_t loom_print_f64(loom_output_stream_t* stream,
+                                    double value) {
+  if (isnan(value)) {
+    return loom_output_stream_write_cstring(stream, "nan");
+  }
+  if (isinf(value)) {
+    return loom_output_stream_write_cstring(stream,
+                                            value < 0.0 ? "-inf" : "inf");
+  }
+  char buffer[32];
+  int length = iree_snprintf(buffer, sizeof(buffer), "%.17g", value);
+  bool has_dot = false;
+  bool has_exp = false;
+  for (int i = 0; i < length; ++i) {
+    if (buffer[i] == '.') {
+      has_dot = true;
+    }
+    if (buffer[i] == 'e' || buffer[i] == 'E') {
+      has_exp = true;
+    }
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_output_stream_write(stream, iree_make_string_view(buffer, length)));
+  if (!has_dot && !has_exp) {
+    IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ".0"));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_print_attr_impl(
     loom_output_stream_t* stream, const loom_attribute_t* attr,
     const loom_module_t* module, const loom_attr_descriptor_t* descriptor,
@@ -1035,32 +1064,17 @@ static iree_status_t loom_print_attr_impl(
   switch (attr->kind) {
     case LOOM_ATTR_I64:
       return loom_output_stream_write_format(stream, "%" PRId64, attr->i64);
-    case LOOM_ATTR_F64: {
-      if (isnan(attr->f64)) {
-        return loom_output_stream_write_cstring(stream, "nan");
-      }
-      if (isinf(attr->f64)) {
-        return loom_output_stream_write_cstring(
-            stream, attr->f64 < 0.0 ? "-inf" : "inf");
-      }
-      char buffer[32];
-      int length = iree_snprintf(buffer, sizeof(buffer), "%.17g", attr->f64);
-      bool has_dot = false;
-      bool has_exp = false;
-      for (int i = 0; i < length; ++i) {
-        if (buffer[i] == '.') {
-          has_dot = true;
+    case LOOM_ATTR_F64:
+      return loom_print_f64(stream, attr->f64);
+    case LOOM_ATTR_F64_ARRAY: {
+      IREE_RETURN_IF_ERROR(loom_output_stream_write_char(stream, '['));
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        if (i > 0) {
+          IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ", "));
         }
-        if (buffer[i] == 'e' || buffer[i] == 'E') {
-          has_exp = true;
-        }
+        IREE_RETURN_IF_ERROR(loom_print_f64(stream, attr->f64_array[i]));
       }
-      IREE_RETURN_IF_ERROR(loom_output_stream_write(
-          stream, iree_make_string_view(buffer, length)));
-      if (!has_dot && !has_exp) {
-        IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ".0"));
-      }
-      return iree_ok_status();
+      return loom_output_stream_write_char(stream, ']');
     }
     case LOOM_ATTR_STRING: {
       loom_string_id_t id = attr->string_id;

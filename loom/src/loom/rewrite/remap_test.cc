@@ -1085,6 +1085,29 @@ static iree_status_t RemapSymbolByName(void* user_data,
   return iree_ok_status();
 }
 
+TEST_F(RemapTest, CopiesOrderedF64ArraysAcrossModules) {
+  const uint64_t source_bits[] = {
+      UINT64_C(0x3FF0000000000000),
+      UINT64_C(0x8000000000000000),
+      UINT64_C(0x7FF8000000000042),
+      UINT64_C(0x3FF0000000000000),
+  };
+  double source_values[IREE_ARRAYSIZE(source_bits)];
+  memcpy(source_values, source_bits, sizeof(source_values));
+
+  loom_ir_remap_t remap = InitializeRemap();
+  loom_attribute_t target_attr = loom_attr_absent();
+  IREE_ASSERT_OK(loom_ir_remap_attribute(
+      &remap, loom_attr_f64_array(source_values, IREE_ARRAYSIZE(source_values)),
+      &target_attr));
+
+  const loom_f64_array_t target_values = loom_attr_as_f64_array(target_attr);
+  ASSERT_EQ(target_values.count, IREE_ARRAYSIZE(source_values));
+  ASSERT_NE(target_values.values, nullptr);
+  EXPECT_NE(target_values.values, source_values);
+  EXPECT_EQ(memcmp(target_values.values, source_bits, sizeof(source_bits)), 0);
+}
+
 TEST_F(RemapTest, RemapsOrderedStringArraysAcrossModules) {
   loom_string_id_t source_ids[] = {
       LOOM_STRING_ID_INVALID, LOOM_STRING_ID_INVALID, LOOM_STRING_ID_INVALID};

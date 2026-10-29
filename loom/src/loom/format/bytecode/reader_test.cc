@@ -613,6 +613,48 @@ class ReaderTest : public ::testing::Test {
     return module;
   }
 
+  loom_module_t* CreateF64ArrayModule() {
+    loom_module_t* module = CreateModule("reader_f64_array");
+    loom_region_t* body = AddVoidFunction(module, "f64_arrays");
+    loom_builder_t body_builder;
+    loom_builder_initialize(module, &module->arena,
+                            loom_region_entry_block(body), &body_builder);
+
+    const uint64_t required_bits[] = {
+        UINT64_C(0x3FF0000000000000),
+        UINT64_C(0x8000000000000000),
+        UINT64_C(0x7FF8000000000042),
+    };
+    double required_values[IREE_ARRAYSIZE(required_bits)];
+    memcpy(required_values, required_bits, sizeof(required_values));
+    const double optional_values[] = {2.0, 3.0};
+    loom_op_t* populated_op = nullptr;
+    IREE_CHECK_OK(loom_test_f64_array_attrs_build(
+        &body_builder, LOOM_TEST_F64_ARRAY_ATTRS_BUILD_FLAG_HAS_OPTIONAL_VALUES,
+        required_values, IREE_ARRAYSIZE(required_values), optional_values,
+        IREE_ARRAYSIZE(optional_values), loom_named_attr_slice_empty(),
+        LOOM_LOCATION_UNKNOWN, &populated_op));
+
+    loom_op_t* present_empty_op = nullptr;
+    IREE_CHECK_OK(loom_test_f64_array_attrs_build(
+        &body_builder, LOOM_TEST_F64_ARRAY_ATTRS_BUILD_FLAG_HAS_OPTIONAL_VALUES,
+        required_values, 1, /*optional_values=*/nullptr,
+        /*optional_values_count=*/0, loom_named_attr_slice_empty(),
+        LOOM_LOCATION_UNKNOWN, &present_empty_op));
+
+    loom_op_t* absent_op = nullptr;
+    IREE_CHECK_OK(loom_test_f64_array_attrs_build(
+        &body_builder, /*build_flags=*/0, required_values, 1,
+        /*optional_values=*/nullptr, /*optional_values_count=*/0,
+        loom_named_attr_slice_empty(), LOOM_LOCATION_UNKNOWN, &absent_op));
+
+    loom_op_t* yield_op = nullptr;
+    IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
+                                        /*value_count=*/0,
+                                        LOOM_LOCATION_UNKNOWN, &yield_op));
+    return module;
+  }
+
   loom_module_t* CreateSignedEnumSetModule() {
     loom_module_t* module = CreateModule("reader_signed_enum_set");
     loom_region_t* body = AddVoidFunction(module, "f");
@@ -4182,6 +4224,63 @@ TEST_F(ReaderTest, StringArraysPreserveValuesPresenceAndOrder) {
 
   loom_op_t* absent_op = loom_block_op(entry, 2);
   ASSERT_TRUE(loom_test_string_array_attrs_isa(absent_op));
+  EXPECT_TRUE(loom_attr_is_absent(loom_op_attrs(absent_op)[1]));
+
+  loom_module_free(read_module);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, F64ArraysPreserveBitsPresenceAndOrder) {
+  loom_module_t* module = CreateF64ArrayModule();
+  auto bytes = WriteModule(module);
+  AttributeValueOffsets value_offsets =
+      FirstBodyOpFirstAttributeValueOffsets(bytes);
+  ASSERT_EQ(bytes[value_offsets.kind], LOOM_BYTECODE_ATTR_F64_ARRAY);
+
+  loom_module_t* read_module = nullptr;
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result =
+      ReadModule(bytes, &read_module, &error_ids, /*verify_module=*/true);
+
+  EXPECT_EQ(result.error_count, 0u) << ::testing::PrintToString(error_ids);
+  EXPECT_TRUE(error_ids.empty()) << ::testing::PrintToString(error_ids);
+  ASSERT_NE(read_module, nullptr);
+  const loom_string_id_t function_name_id =
+      loom_module_lookup_string(read_module, IREE_SV("f64_arrays"));
+  const uint16_t function_symbol_id =
+      loom_module_find_symbol(read_module, function_name_id);
+  ASSERT_NE(function_symbol_id, LOOM_SYMBOL_ID_INVALID);
+  loom_op_t* func_op =
+      read_module->symbols.entries[function_symbol_id].defining_op;
+  ASSERT_NE(func_op, nullptr);
+  loom_block_t* entry = loom_region_entry_block(loom_test_func_body(func_op));
+  ASSERT_NE(entry, nullptr);
+  ASSERT_EQ(entry->op_count, 4u);
+
+  loom_op_t* populated_op = loom_block_op(entry, 0);
+  ASSERT_TRUE(loom_test_f64_array_attrs_isa(populated_op));
+  const loom_f64_array_t required =
+      loom_test_f64_array_attrs_required_values(populated_op);
+  ASSERT_EQ(required.count, 3u);
+  uint64_t required_bits[3] = {0};
+  memcpy(required_bits, required.values, sizeof(required_bits));
+  EXPECT_EQ(required_bits[0], UINT64_C(0x3FF0000000000000));
+  EXPECT_EQ(required_bits[1], UINT64_C(0x8000000000000000));
+  EXPECT_EQ(required_bits[2], UINT64_C(0x7FF8000000000042));
+  const loom_f64_array_t optional =
+      loom_test_f64_array_attrs_optional_values(populated_op);
+  ASSERT_EQ(optional.count, 2u);
+  EXPECT_EQ(optional.values[0], 2.0);
+  EXPECT_EQ(optional.values[1], 3.0);
+
+  loom_op_t* present_empty_op = loom_block_op(entry, 1);
+  ASSERT_TRUE(loom_test_f64_array_attrs_isa(present_empty_op));
+  EXPECT_FALSE(loom_attr_is_absent(loom_op_attrs(present_empty_op)[1]));
+  EXPECT_EQ(loom_test_f64_array_attrs_optional_values(present_empty_op).count,
+            0u);
+
+  loom_op_t* absent_op = loom_block_op(entry, 2);
+  ASSERT_TRUE(loom_test_f64_array_attrs_isa(absent_op));
   EXPECT_TRUE(loom_attr_is_absent(loom_op_attrs(absent_op)[1]));
 
   loom_module_free(read_module);

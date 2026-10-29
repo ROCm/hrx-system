@@ -477,6 +477,7 @@ def generate_ops_h(
             macro_map = {
                 "i64": "LOOM_DEFINE_ATTR_I64",
                 "f64": "LOOM_DEFINE_ATTR_F64",
+                "f64_array": "LOOM_DEFINE_ATTR_F64_ARRAY",
                 "string": "LOOM_DEFINE_ATTR_STRING",
                 "string_array": "LOOM_DEFINE_ATTR_STRING_ARRAY",
                 "bool": "LOOM_DEFINE_ATTR_BOOL",

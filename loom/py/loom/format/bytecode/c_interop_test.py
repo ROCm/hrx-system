@@ -44,6 +44,7 @@ from loom.ir import (
     DynamicDim,
     DynamicEncoding,
     EnumArrayAttr,
+    FloatArrayAttr,
     FunctionType,
     Module,
     ParameterizedAttr,
@@ -126,6 +127,8 @@ def _interop_module() -> tuple[Module, RegisterType]:
         '  test.string_array_attrs ["gfx12-generic", "gfx1250", '
         '"gfx12-generic"] using [] '
         '{fallbacks = ["gfx11-generic", "gfx12-generic"]}\n'
+        "  test.f64_array_attrs [1.0, -0.0, 1.0] using [] "
+        "{fallbacks = [2.0, 3.0]}\n"
         "  test.yield\n"
         "}\n"
         "test.record @parameterized_record "
@@ -389,6 +392,15 @@ def _assert_parameterized_arrays(entry_block: Block) -> None:
         ["gfx11-generic", "gfx12-generic"]
     ):
         raise AssertionError("generic dict string array changed")
+    f64_array_op = next(
+        op for op in entry_block.ops if op.name == "test.f64_array_attrs"
+    )
+    if f64_array_op.attributes["required_values"] != FloatArrayAttr([1.0, -0.0, 1.0]):
+        raise AssertionError("f64 array lost exact bits, order, or duplicates")
+    if f64_array_op.attributes["optional_values"] != FloatArrayAttr():
+        raise AssertionError("present empty f64 array changed")
+    if f64_array_op.attributes["dict"]["fallbacks"] != FloatArrayAttr([2.0, 3.0]):
+        raise AssertionError("generic dict f64 array changed")
 
 
 def _assert_symbol_payloads(module: Module) -> None:

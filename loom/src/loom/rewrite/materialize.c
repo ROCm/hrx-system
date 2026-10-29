@@ -1051,6 +1051,7 @@ static iree_status_t loom_ir_move_attr_is_available(
     case LOOM_ATTR_ABSENT:
     case LOOM_ATTR_I64:
     case LOOM_ATTR_F64:
+    case LOOM_ATTR_F64_ARRAY:
     case LOOM_ATTR_STRING:
     case LOOM_ATTR_STRING_ARRAY:
     case LOOM_ATTR_BOOL:

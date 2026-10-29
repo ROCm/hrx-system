@@ -111,6 +111,61 @@ static iree_status_t loom_parse_i64_array_attr(loom_parser_t* parser,
   return iree_ok_status();
 }
 
+static iree_status_t loom_parse_f64_array_attr(loom_parser_t* parser,
+                                               loom_attribute_t* out_attr) {
+  // [1.0, 2.0, 3.0]
+  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LBRACKET)) {
+    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+    return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'['"));
+  }
+
+  double inline_values[32];
+  double* values = inline_values;
+  iree_host_size_t capacity = IREE_ARRAYSIZE(inline_values);
+  iree_host_size_t count = 0;
+  while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RBRACKET) &&
+         !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
+    if (count > 0 &&
+        !loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_COMMA)) {
+      break;
+    }
+    loom_token_t token = loom_tokenizer_peek(&parser->tokenizer);
+    double special_value = 0.0;
+    if (token.kind != LOOM_TOKEN_FLOAT && token.kind != LOOM_TOKEN_INTEGER &&
+        !(token.kind == LOOM_TOKEN_BARE_IDENT &&
+          loom_parse_special_f64_spelling(token.text, &special_value))) {
+      return loom_parser_emit_unexpected_token(
+          parser, token, IREE_SV("a floating-point value"));
+    }
+    token = loom_tokenizer_next(&parser->tokenizer);
+    if (count == UINT16_MAX) {
+      return loom_parser_emit_token_text_error(parser, LOOM_ERR_PARSE_004,
+                                               token);
+    }
+    if (count >= capacity) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(&parser->parser_arena, count,
+                                                 count + 1, sizeof(*values),
+                                                 &capacity, (void**)&values));
+    }
+    IREE_RETURN_IF_ERROR(loom_parse_f64_token(parser, token, &values[count]));
+    ++count;
+  }
+  if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RBRACKET)) {
+    loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
+    return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("']'"));
+  }
+
+  double* arena_values = NULL;
+  if (count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(&parser->module->arena,
+                                                   count, sizeof(*arena_values),
+                                                   (void**)&arena_values));
+    memcpy(arena_values, values, count * sizeof(*arena_values));
+  }
+  *out_attr = loom_attr_f64_array(arena_values, (uint16_t)count);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_parse_string_array_attr(loom_parser_t* parser,
                                                   loom_attribute_t* out_attr) {
   // ["first", "second"]
@@ -849,6 +904,8 @@ static iree_status_t loom_parse_attr_value_at_depth(
     case LOOM_ATTR_I64_ARRAY: {
       return loom_parse_i64_array_attr(parser, out_attr);
     }
+    case LOOM_ATTR_F64_ARRAY:
+      return loom_parse_f64_array_attr(parser, out_attr);
     case LOOM_ATTR_STRING_ARRAY:
       return loom_parse_string_array_attr(parser, out_attr);
     case LOOM_ATTR_PREDICATE_LIST: {
@@ -1218,6 +1275,14 @@ static iree_status_t loom_parse_generic_attr_value_with_type_mode(
       (void)loom_tokenizer_next(&lookahead);
       if (loom_tokenizer_at(&lookahead, LOOM_TOKEN_STRING)) {
         return loom_parse_string_array_attr(parser, out_attr);
+      }
+      loom_token_t element_token = loom_tokenizer_peek(&lookahead);
+      double special_value = 0.0;
+      if (element_token.kind == LOOM_TOKEN_FLOAT ||
+          (element_token.kind == LOOM_TOKEN_BARE_IDENT &&
+           loom_parse_special_f64_spelling(element_token.text,
+                                           &special_value))) {
+        return loom_parse_f64_array_attr(parser, out_attr);
       }
       return loom_parse_i64_array_attr(parser, out_attr);
     }

@@ -108,6 +108,7 @@ from loom.ir import (
     EncodingType,
     EnumArrayAttr,
     FileLocation,
+    FloatArrayAttr,
     FunctionType,
     FusedLocation,
     GroupType,
@@ -193,6 +194,44 @@ def _parse_float_literal(text: str) -> float:
         except OverflowError:
             return float("-inf" if text.startswith("-") else "inf")
     return float(text)
+
+
+def _parse_f64_attr_value(tokenizer: Tokenizer, filename: str) -> float:
+    """Parses one binary64 attribute literal."""
+    if tokenizer.at(TokenKind.FLOAT):
+        return _parse_float_literal(tokenizer.next().text)
+    if tokenizer.at(TokenKind.INTEGER):
+        return float(tokenizer.next().text)
+    if tokenizer.at(TokenKind.BARE_IDENT):
+        special_float = _parse_special_float(tokenizer.peek().text)
+        if special_float is not None:
+            tokenizer.next()
+            return special_float
+    token = tokenizer.peek()
+    raise ParseError(
+        f"expected floating-point literal, got {token.text!r}",
+        token.location,
+        filename,
+    )
+
+
+def _parse_f64_array_attr(tokenizer: Tokenizer, filename: str) -> FloatArrayAttr:
+    """Parses a bracketed ordered binary64 attribute payload."""
+    tokenizer.expect(TokenKind.LBRACKET)
+    values: list[float] = []
+    if not tokenizer.at(TokenKind.RBRACKET):
+        while True:
+            if len(values) == 0xFFFF:
+                raise ParseError(
+                    "f64-array length exceeds UINT16_MAX",
+                    tokenizer.peek().location,
+                    filename,
+                )
+            values.append(_parse_f64_attr_value(tokenizer, filename))
+            if not tokenizer.try_consume(TokenKind.COMMA):
+                break
+    tokenizer.expect(TokenKind.RBRACKET)
+    return FloatArrayAttr(values)
 
 
 def _concrete_type_for_constraint(constraint: TypeConstraint) -> Type | None:
@@ -312,6 +351,11 @@ def _parse_generic_attr_value_from_tokens(
             ),
         )
     if tokenizer.at(TokenKind.LBRACKET):
+        if tokenizer.peek_n(1).kind == TokenKind.FLOAT or (
+            tokenizer.peek_n(1).kind == TokenKind.BARE_IDENT
+            and _parse_special_float(tokenizer.peek_n(1).text) is not None
+        ):
+            return _parse_f64_array_attr(tokenizer, filename)
         tokenizer.next()
         if tokenizer.at(TokenKind.STRING):
             values: list[str] = []
@@ -811,14 +855,9 @@ def _parse_descriptor_attr_value_from_tokens(
         case "i64":
             return int(tokenizer.expect(TokenKind.INTEGER).text)
         case "f64":
-            if tokenizer.at(TokenKind.FLOAT):
-                return _parse_float_literal(tokenizer.next().text)
-            if tokenizer.at(TokenKind.BARE_IDENT):
-                special_float = _parse_special_float(tokenizer.peek().text)
-                if special_float is not None:
-                    tokenizer.next()
-                    return special_float
-            return float(tokenizer.expect(TokenKind.INTEGER).text)
+            return _parse_f64_attr_value(tokenizer, filename)
+        case "f64_array":
+            return _parse_f64_array_attr(tokenizer, filename)
         case "string":
             return tokenizer.expect(TokenKind.STRING).text
         case "string_array":

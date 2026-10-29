@@ -82,6 +82,7 @@ from loom.ir import (
     EncodingType,
     EnumArrayAttr,
     FileLocation,
+    FloatArrayAttr,
     FunctionType,
     FusedLocation,
     GroupType,
@@ -2354,6 +2355,8 @@ class BytecodeReader:
                 )
             case 19:  # STRING_ARRAY
                 return self._read_string_array_attr(data, offset, attr_def)
+            case 21:  # F64_ARRAY
+                return self._read_f64_array_attr(data, offset, attr_def)
             case _:
                 raise BytecodeError(f"unknown attr value kind: {kind}")
 
@@ -2399,6 +2402,22 @@ class BytecodeReader:
                 )
             values.append(self._strings[string_id])
         return StringArrayAttr(values), offset
+
+    @staticmethod
+    def _read_f64_array_attr(
+        data: bytes, offset: int, attr_def: Any | None
+    ) -> tuple[FloatArrayAttr, int]:
+        if getattr(attr_def, "attr_type", None) not in (None, "any", "f64_array"):
+            raise BytecodeError("f64-array attribute does not match the field contract")
+        count, offset = decode_varint(data, offset)
+        if count > 0xFFFF:
+            raise BytecodeError(f"f64-array length {count} exceeds UINT16_MAX")
+        byte_length = count * 8
+        end_offset = offset + byte_length
+        if end_offset > len(data):
+            raise BytecodeError(f"f64-array length {count} exceeds payload size")
+        values = struct.unpack_from(f"<{count}d", data, offset) if count else ()
+        return FloatArrayAttr(values), end_offset
 
     def _read_signed_enum_set_attr(
         self, data: bytes, offset: int, attr_def: Any | None

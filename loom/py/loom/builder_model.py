@@ -159,6 +159,8 @@ def attr_type_hint(attr_def: AttrDef | None) -> str:
             return "int"
         case "f64":
             return "float"
+        case "f64_array":
+            return "Sequence[float]"
         case "string":
             return "str"
         case "bytes":

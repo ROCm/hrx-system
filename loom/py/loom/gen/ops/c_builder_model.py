@@ -130,6 +130,7 @@ def detect_builder_pattern(op: Op) -> str | None:
 _C_ATTR_TYPE_MAP: dict[str, str] = {
     "i64": "int64_t",
     "f64": "double",
+    "f64_array": "const double*",
     "string": "loom_string_id_t",
     "string_array": "loom_string_id_array_t",
     "bool": "bool",
@@ -171,6 +172,7 @@ _BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
     {
         "i64",
         "f64",
+        "f64_array",
         "string",
         "string_array",
         "bool",
@@ -191,6 +193,7 @@ _BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
 
 _TRAILING_BUILD_FLAG_OPTIONAL_ATTR_TYPES = frozenset(
     {
+        "f64_array",
         "i64_array",
         "string_array",
         "symbol_array",
@@ -832,7 +835,7 @@ def build_c_param_list(op: Op, params: list[dict[str, object]], layout: FieldLay
                 c_params.append(f"iree_host_size_t {name}_count")
             case "attr":
                 c_params.append(f"{opt}{param['c_type']} {name}")
-                if param["attr_type"] == "i64_array":
+                if param["attr_type"] in ("f64_array", "i64_array"):
                     c_params.append(f"iree_host_size_t {name}_count")
             case "stable_key_ref":
                 c_params.append(f"{param['c_type']} {name}")

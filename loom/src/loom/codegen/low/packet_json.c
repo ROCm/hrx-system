@@ -410,6 +410,16 @@ static iree_status_t loom_low_packet_json_write_attr(
       return loom_output_stream_write_format(stream, "%" PRId64, attr->i64);
     case LOOM_ATTR_F64:
       return loom_low_packet_json_write_f64(attr->f64, stream);
+    case LOOM_ATTR_F64_ARRAY: {
+      loom_json_array_writer_t array;
+      IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
+      for (uint16_t i = 0; i < attr->count; ++i) {
+        IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
+        IREE_RETURN_IF_ERROR(
+            loom_low_packet_json_write_f64(attr->f64_array[i], stream));
+      }
+      return loom_json_array_end(&array);
+    }
     case LOOM_ATTR_STRING:
       return loom_low_packet_json_write_string_id_or_null(
           module, attr->string_id, stream);

@@ -212,6 +212,8 @@ static bool loom_print_pipeline_attr_value_is_printable(
       return true;
     case LOOM_ATTR_I64_ARRAY:
       return attr->count == 0 || attr->i64_array != NULL;
+    case LOOM_ATTR_F64_ARRAY:
+      return attr->count == 0 || attr->f64_array != NULL;
     case LOOM_ATTR_BYTES:
       return attr->reserved_1 == 0 || attr->bytes != NULL;
     case LOOM_ATTR_SYMBOL: {

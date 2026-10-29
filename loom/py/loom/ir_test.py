@@ -7,6 +7,7 @@
 """Tests for loom.ir — in-memory IR representation."""
 
 import math
+import struct
 from itertools import repeat
 
 import pytest
@@ -58,6 +59,7 @@ from loom.ir import (
     EncodingType,
     EnumArrayAttr,
     FileLocation,
+    FloatArrayAttr,
     FunctionType,
     FusedLocation,
     GroupType,
@@ -1019,6 +1021,22 @@ class TestOperations:
     def test_string_array_attribute_rejects_non_string_elements(self) -> None:
         with pytest.raises(TypeError, match="string array element 1"):
             StringArrayAttr(["gfx1250", 12])  # type: ignore[list-item]
+
+    def test_f64_array_attribute_preserves_exact_carrier_bits(self) -> None:
+        nan_payload = struct.unpack("<d", struct.pack("<Q", 0x7FF8000000000042))[0]
+        values = FloatArrayAttr([0.0, -0.0, nan_payload])
+
+        assert values.bit_patterns == (
+            0x0000000000000000,
+            0x8000000000000000,
+            0x7FF8000000000042,
+        )
+        assert values != FloatArrayAttr([0.0, 0.0, nan_payload])
+        assert hash(values) == hash(FloatArrayAttr([0.0, -0.0, nan_payload]))
+
+    def test_f64_array_attribute_rejects_non_float_elements(self) -> None:
+        with pytest.raises(TypeError, match="floating array element 1"):
+            FloatArrayAttr([1.0, 2])  # type: ignore[list-item]
 
     def test_signed_enum_set_is_canonical_and_distinguishes_polarity(self) -> None:
         value = SignedEnumSetAttr([255, 1], [7])

@@ -243,6 +243,21 @@ iree_status_t loom_builder_copy_i64_array_attr_storage(loom_builder_t* builder,
   return iree_ok_status();
 }
 
+iree_status_t loom_builder_copy_f64_array_attr_storage(
+    loom_builder_t* builder, const double* values, iree_host_size_t count,
+    const double** out_storage) {
+  *out_storage = NULL;
+  if (count == 0) {
+    return iree_ok_status();
+  }
+  double* storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      builder->arena, count, sizeof(*storage), (void**)&storage));
+  memcpy(storage, values, count * sizeof(*storage));
+  *out_storage = storage;
+  return iree_ok_status();
+}
+
 iree_status_t loom_builder_copy_string_array_attr_storage(
     loom_builder_t* builder, loom_string_id_array_t values,
     iree_string_view_t label, const loom_string_id_t** out_storage) {

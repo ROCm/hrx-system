@@ -48,6 +48,7 @@ from loom.ir import (
     EncodingType,
     EnumArrayAttr,
     FileLocation,
+    FloatArrayAttr,
     FunctionType,
     FusedLocation,
     GroupType,
@@ -166,6 +167,7 @@ ATTR_KIND_SYMBOL_ARRAY = 17
 ATTR_KIND_SYMBOL_SET = 18
 ATTR_KIND_STRING_ARRAY = 19
 ATTR_KIND_UTF8 = 20
+ATTR_KIND_F64_ARRAY = 21
 
 # Type kind bytes. These must match loom_bytecode_type_kind_e, not just the
 # current Python enum spelling.
@@ -819,7 +821,7 @@ class BytecodeWriter:
         if isinstance(value, str):
             self._ctx.intern_string(value)
             return None
-        if isinstance(value, (int, float, bytes, bytearray, Utf8Attr)):
+        if isinstance(value, (int, float, bytes, bytearray, Utf8Attr, FloatArrayAttr)):
             return None
         return self._number_attr_children(value, attr_def, aggregate_nesting_depth)
 
@@ -1755,6 +1757,20 @@ class BytecodeWriter:
             buf.write_varint(len(value))
             for string in value:
                 buf.write_varint(self._ctx.strings[string])
+            return
+        if attr_type == "f64_array" or isinstance(value, FloatArrayAttr):
+            if not isinstance(value, FloatArrayAttr):
+                raise TypeError(
+                    f"f64-array attribute value must be FloatArrayAttr, got {value!r}"
+                )
+            if attr_type not in (None, "any", "f64_array"):
+                raise TypeError(
+                    f"f64-array attribute does not match field kind {attr_type!r}"
+                )
+            buf.write_u8(ATTR_KIND_F64_ARRAY)
+            buf.write_varint(len(value))
+            for bit_pattern in value.bit_patterns:
+                buf.write_bytes(struct.pack("<Q", bit_pattern))
             return
         if isinstance(value, SymbolName):
             buf.write_u8(ATTR_KIND_SYMBOL)
