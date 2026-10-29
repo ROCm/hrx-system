@@ -86,6 +86,17 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "parameter_index_test",
+    srcs = ["parameter_index_test.cc"],
+    deps = [
+        ":parameter_index",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_cmake_extra_content(
     content = """
 if(TARGET iree::hal::drivers::task::registration)

@@ -9,11 +9,20 @@
 #include "iree/base/internal/atomics.h"
 #include "iree/base/threading/mutex.h"
 
+typedef struct iree_io_parameter_index_slot_t {
+  // Cached key hash, retained across table growth.
+  uint64_t hash;
+  // First entry with this key, or NULL when the slot is empty.
+  const iree_io_parameter_index_entry_t* entry;
+} iree_io_parameter_index_slot_t;
+
 struct iree_io_parameter_index_t {
+  // Number of owners retaining this index and its immutable entries.
   iree_atomic_ref_count_t ref_count;
+  // Allocator owning the index, entries, and lookup table.
   iree_allocator_t host_allocator;
 
-  // Guards mutation of the entries list.
+  // Guards mutation of the entries list and lookup table.
   // NOTE: this does not guard the entries themselves as we assume they are
   // immutable (today).
   iree_slim_mutex_t mutex;
@@ -24,7 +33,36 @@ struct iree_io_parameter_index_t {
   iree_host_size_t entry_count;
   // Dense list of entries in the index. Grows as needed.
   iree_io_parameter_index_entry_t** entries;
+
+  // Power-of-two lookup capacity, with at least half the slots empty.
+  iree_host_size_t slot_capacity;
+  // Open-addressed lookup table borrowing immutable entries from the dense
+  // list.
+  iree_io_parameter_index_slot_t* slots;
 };
+
+// FNV-1a over length-delimited keys, including any embedded NUL bytes.
+static uint64_t iree_io_parameter_index_hash(iree_string_view_t key) {
+  uint64_t hash = UINT64_C(14695981039346656037);
+  for (iree_host_size_t i = 0; i < key.size; ++i) {
+    hash ^= (uint8_t)key.data[i];
+    hash *= UINT64_C(1099511628211);
+  }
+  return hash;
+}
+
+// Returns the matching slot or an empty slot in a non-full lookup table.
+static iree_io_parameter_index_slot_t* iree_io_parameter_index_find_slot(
+    iree_io_parameter_index_slot_t* slots, iree_host_size_t capacity,
+    uint64_t hash, iree_string_view_t key) {
+  iree_host_size_t position = (iree_host_size_t)hash & (capacity - 1);
+  while (slots[position].entry &&
+         (slots[position].hash != hash ||
+          !iree_string_view_equal(slots[position].entry->key, key))) {
+    position = (position + 1) & (capacity - 1);
+  }
+  return &slots[position];
+}
 
 IREE_API_EXPORT iree_status_t iree_io_parameter_index_create(
     iree_allocator_t host_allocator, iree_io_parameter_index_t** out_index) {
@@ -46,6 +84,8 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_index_create(
   index->entry_capacity = 0;
   index->entry_count = 0;
   index->entries = NULL;
+  index->slot_capacity = 0;
+  index->slots = NULL;
 
   *out_index = index;
   IREE_TRACE_ZONE_END(z0);
@@ -71,6 +111,7 @@ static void iree_io_parameter_index_destroy(iree_io_parameter_index_t* index) {
   if (index->entries) {
     iree_allocator_free(host_allocator, index->entries);
   }
+  iree_allocator_free(host_allocator, index->slots);
 
   iree_slim_mutex_deinitialize(&index->mutex);
 
@@ -105,15 +146,49 @@ iree_io_parameter_index_count(iree_io_parameter_index_t* index) {
 static iree_status_t iree_io_parameter_index_reserve_unsafe(
     iree_io_parameter_index_t* index, iree_host_size_t new_capacity) {
   IREE_ASSERT_ARGUMENT(index);
-  if (new_capacity <= index->entry_capacity) {
+  if (new_capacity <= index->entry_capacity &&
+      new_capacity <= index->slot_capacity / 2) {
     return iree_ok_status();
   }
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, new_capacity);
 
-  iree_status_t status = iree_allocator_grow_array(
-      index->host_allocator, new_capacity, sizeof(index->entries[0]),
-      &index->entry_capacity, (void**)&index->entries);
+  iree_host_size_t slot_capacity = iree_max(index->slot_capacity, 32);
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) && new_capacity > slot_capacity / 2) {
+    if (!iree_host_size_checked_mul(slot_capacity, 2, &slot_capacity)) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "parameter index capacity overflow");
+    }
+  }
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
+
+  // Each allocation can fail independently. Published entries and their lookup
+  // remain intact even if only the dense array has grown when an error occurs.
+  if (new_capacity > index->entry_capacity) {
+    status = iree_allocator_grow_array(
+        index->host_allocator, iree_max(new_capacity, 16),
+        sizeof(index->entries[0]), &index->entry_capacity,
+        (void**)&index->entries);
+  }
+  if (iree_status_is_ok(status) && slot_capacity > index->slot_capacity) {
+    iree_io_parameter_index_slot_t* slots = NULL;
+    status = iree_allocator_malloc_array(index->host_allocator, slot_capacity,
+                                         sizeof(*slots), (void**)&slots);
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < index->slot_capacity; ++i) {
+        const iree_io_parameter_index_slot_t* old_slot = &index->slots[i];
+        if (old_slot->entry) {
+          *iree_io_parameter_index_find_slot(
+              slots, slot_capacity, old_slot->hash, old_slot->entry->key) =
+              *old_slot;
+        }
+      }
+      iree_allocator_free(index->host_allocator, index->slots);
+      index->slots = slots;
+      index->slot_capacity = slot_capacity;
+    }
+  }
 
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -138,14 +213,8 @@ iree_io_parameter_index_add(iree_io_parameter_index_t* index,
   IREE_TRACE_ZONE_APPEND_TEXT(z0, entry->key.data, entry->key.size);
   iree_slim_mutex_lock(&index->mutex);
 
-  // Grow the index if needed (double each time after some initial minimum).
-  iree_status_t status = iree_ok_status();
-  if (index->entry_count == index->entry_capacity) {
-    status = iree_allocator_grow_array(
-        index->host_allocator,
-        /*min_capacity=*/16, sizeof(index->entries[0]), &index->entry_capacity,
-        (void**)&index->entries);
-  }
+  iree_status_t status =
+      iree_io_parameter_index_reserve_unsafe(index, index->entry_count + 1);
 
   // Clone the entry memory. We allocate it as a single slab and stash the
   // pointers for easier access by callers. Entries themselves are never
@@ -197,6 +266,15 @@ iree_io_parameter_index_add(iree_io_parameter_index_t* index,
 
     // Append the entry to the file index.
     index->entries[index->entry_count++] = cloned_entry;
+
+    // Enumeration retains duplicates, while lookup returns the first entry.
+    uint64_t hash = iree_io_parameter_index_hash(cloned_entry->key);
+    iree_io_parameter_index_slot_t* slot = iree_io_parameter_index_find_slot(
+        index->slots, index->slot_capacity, hash, cloned_entry->key);
+    if (!slot->entry) {
+      slot->hash = hash;
+      slot->entry = cloned_entry;
+    }
   }
 
   iree_slim_mutex_unlock(&index->mutex);
@@ -234,15 +312,14 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_index_lookup(
   *out_entry = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, key.data, key.size);
+  uint64_t hash = iree_io_parameter_index_hash(key);
   iree_slim_mutex_lock(&index->mutex);
 
   iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < index->entry_count; ++i) {
-    const iree_io_parameter_index_entry_t* entry = index->entries[i];
-    if (iree_string_view_equal(key, entry->key)) {
-      *out_entry = entry;
-      break;
-    }
+  if (index->slot_capacity) {
+    *out_entry = iree_io_parameter_index_find_slot(
+                     index->slots, index->slot_capacity, hash, key)
+                     ->entry;
   }
   if (*out_entry == NULL) {
     status = iree_make_status(IREE_STATUS_NOT_FOUND,
