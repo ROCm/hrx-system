@@ -21,7 +21,8 @@ enum loom_rewriter_fact_entry_flag_bits_e {
   LOOM_REWRITER_FACT_PENDING = 1u << 0,
   // The indexed direct-use closure has not yet published a semantic edit.
   LOOM_REWRITER_FACT_INVALIDATED = 1u << 1,
-  // A block's argument inputs must publish semantic invalidation.
+  // Direct inputs changed: blocks publish semantic invalidation, and structured
+  // operations refresh nested facts before joining their results.
   LOOM_REWRITER_FACT_INPUTS_CHANGED = 1u << 2,
 };
 
@@ -189,8 +190,9 @@ bool loom_rewriter_op_summarizes_nested_regions(
   return vtable && (vtable->loop_like || vtable->region_branch);
 }
 
-iree_status_t loom_rewriter_add_fact_user_to_worklist(loom_rewriter_t* rewriter,
-                                                      loom_op_t* op) {
+static iree_status_t loom_rewriter_add_fact_equation(loom_rewriter_t* rewriter,
+                                                     loom_op_t* op,
+                                                     bool inputs_changed) {
   IREE_RETURN_IF_ERROR(loom_rewriter_add_to_worklist(rewriter, op));
   if (!rewriter->fact_table || (op->flags & LOOM_OP_FLAG_DEAD)) {
     return iree_ok_status();
@@ -200,6 +202,9 @@ iree_status_t loom_rewriter_add_fact_user_to_worklist(loom_rewriter_t* rewriter,
 #endif
   loom_rewriter_fact_entry_t* entry = NULL;
   IREE_RETURN_IF_ERROR(loom_rewriter_get_fact_entry(rewriter, op, &entry));
+  if (op->region_count && inputs_changed) {
+    entry->flags |= LOOM_REWRITER_FACT_INPUTS_CHANGED;
+  }
   if (entry->flags & LOOM_REWRITER_FACT_PENDING) {
     return iree_ok_status();
   }
@@ -214,10 +219,16 @@ iree_status_t loom_rewriter_add_fact_user_to_worklist(loom_rewriter_t* rewriter,
   return iree_ok_status();
 }
 
-iree_status_t loom_rewriter_add_changed_fact_user(
+iree_status_t loom_rewriter_add_fact_user_to_worklist(loom_rewriter_t* rewriter,
+                                                      loom_op_t* op) {
+  return loom_rewriter_add_fact_equation(rewriter, op, true);
+}
+
+static iree_status_t loom_rewriter_add_changed_fact_equation(
     loom_rewriter_t* rewriter, loom_op_t* op,
-    loom_rewriter_user_change_flags_t flags) {
-  IREE_RETURN_IF_ERROR(loom_rewriter_add_fact_user_to_worklist(rewriter, op));
+    loom_rewriter_user_change_flags_t flags, bool inputs_changed) {
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_add_fact_equation(rewriter, op, inputs_changed));
   if (!rewriter->fact_table || (op->flags & LOOM_OP_FLAG_DEAD) ||
       !iree_any_bit_set(flags, LOOM_REWRITER_USER_CHANGE_FLAG_REPLACED |
                                    LOOM_REWRITER_USER_CHANGE_FLAG_SEMANTIC)) {
@@ -231,6 +242,12 @@ iree_status_t loom_rewriter_add_changed_fact_user(
     entry->flags |= LOOM_REWRITER_FACT_INVALIDATED;
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_rewriter_add_changed_fact_user(
+    loom_rewriter_t* rewriter, loom_op_t* op,
+    loom_rewriter_user_change_flags_t flags) {
+  return loom_rewriter_add_changed_fact_equation(rewriter, op, flags, true);
 }
 
 iree_status_t loom_rewriter_add_fact_block(loom_rewriter_t* rewriter,
@@ -350,11 +367,16 @@ iree_status_t loom_rewriter_seed_nested_execution_facts(
       loom_loop_like_isa(loom_loop_like_cast(rewriter->module, op)) ||
       loom_value_fact_table_block_may_repeat(rewriter->fact_table,
                                              op->parent_block);
+  const loom_region_branch_t branch =
+      loom_region_branch_cast(rewriter->module, op);
   loom_region_t** regions = loom_op_regions(op);
   for (uint8_t i = 0; i < op->region_count; ++i) {
     if (regions[i]) {
       IREE_RETURN_IF_ERROR(loom_value_fact_table_set_region_temporal_scope(
           rewriter->fact_table, regions[i], op, scope, may_repeat));
+      IREE_RETURN_IF_ERROR(loom_value_fact_table_set_region_branch_truth(
+          rewriter->fact_table, regions[i],
+          loom_region_branch_region_truth(branch, i)));
       if (regions[i]->block_count) {
         IREE_RETURN_IF_ERROR(loom_value_fact_table_seed_loop_iv_arg(
             rewriter->fact_table, rewriter->module,
@@ -450,7 +472,8 @@ static void loom_rewriter_on_summary_computed(void* user_data,
   loom_rewriter_fact_entry_t* entry =
       loom_rewriter_find_fact_entry(rewriter, op);
   if (entry) {
-    entry->flags &= ~LOOM_REWRITER_FACT_PENDING;
+    entry->flags &=
+        ~(LOOM_REWRITER_FACT_PENDING | LOOM_REWRITER_FACT_INPUTS_CHANGED);
   }
 }
 
@@ -890,10 +913,12 @@ iree_status_t loom_rewriter_add_parent_summary_ops_to_worklist(
         // edits still queue the owner and refresh its nested execution facts.
         if (changes_summary &&
             (!vtable->region_branch || parent->result_count)) {
-          // Close semantic dependencies before solving so a containing summary
-          // can cover its children, even when their numeric facts stay equal.
-          IREE_RETURN_IF_ERROR(loom_rewriter_add_changed_fact_user(
-              rewriter, parent, LOOM_REWRITER_USER_CHANGE_FLAG_SEMANTIC));
+          // Close semantic dependencies before solving, including feedback
+          // owners whose current numeric facts stay equal. A changed yield does
+          // not change its branch owner's inputs or nested execution context.
+          IREE_RETURN_IF_ERROR(loom_rewriter_add_changed_fact_equation(
+              rewriter, parent, LOOM_REWRITER_USER_CHANGE_FLAG_SEMANTIC,
+              /*inputs_changed=*/false));
         } else {
           IREE_RETURN_IF_ERROR(loom_rewriter_add_to_worklist(rewriter, parent));
         }
@@ -1006,7 +1031,8 @@ iree_status_t loom_rewriter_add_result_users_to_worklist(
 }
 
 static iree_status_t loom_rewriter_update_op_facts(loom_rewriter_t* rewriter,
-                                                   loom_op_t* op) {
+                                                   loom_op_t* op,
+                                                   bool inputs_changed) {
   IREE_RETURN_IF_ERROR(loom_rewriter_update_successor_facts(rewriter, op));
   // Constant-like ops are already the canonical representation of their
   // compile-time value. Their source contract forbids operands and regions,
@@ -1016,10 +1042,15 @@ static iree_status_t loom_rewriter_update_op_facts(loom_rewriter_t* rewriter,
   if (iree_any_bit_set(op->traits, LOOM_TRAIT_CONSTANT_LIKE)) {
     return iree_ok_status();
   }
-  // Compute facts for this op (updates the table, reuses table scratch).
+  // A changed yield only updates its owner's result join. Direct inputs can
+  // change nested execution facts; loops always retain their feedback solve.
   bool facts_changed = false;
-  IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_op_and_report(
-      rewriter->fact_table, rewriter->module, op, &facts_changed));
+  IREE_RETURN_IF_ERROR(
+      inputs_changed
+          ? loom_value_fact_table_compute_op_and_report(
+                rewriter->fact_table, rewriter->module, op, &facts_changed)
+          : loom_value_fact_table_compute_op_summary(
+                rewriter->fact_table, rewriter->module, op, &facts_changed));
   if (facts_changed) {
     rewriter->flags |= LOOM_REWRITER_FLAG_FACTS_CHANGED;
     // Ensure downstream ops are revisited with updated facts. Type-use edges
@@ -1125,10 +1156,13 @@ iree_status_t loom_rewriter_propagate_value_facts(loom_rewriter_t* rewriter) {
       entry = pending->summaries.values[--pending->summaries.count];
     }
     const bool queued = (entry->flags & LOOM_REWRITER_FACT_PENDING) != 0;
-    entry->flags &= ~LOOM_REWRITER_FACT_PENDING;
+    const bool inputs_changed =
+        (entry->flags & LOOM_REWRITER_FACT_INPUTS_CHANGED) != 0;
+    entry->flags &=
+        ~(LOOM_REWRITER_FACT_PENDING | LOOM_REWRITER_FACT_INPUTS_CHANGED);
     loom_op_t* op = entry->owner;
     if (!(op->flags & LOOM_OP_FLAG_DEAD) && queued) {
-      status = loom_rewriter_update_op_facts(rewriter, op);
+      status = loom_rewriter_update_op_facts(rewriter, op, inputs_changed);
     }
   }
   if (iree_status_is_ok(status)) {

@@ -1475,6 +1475,13 @@ static iree_status_t loom_value_fact_table_compute_op_in_target_scope(
   return status;
 }
 
+iree_status_t loom_value_fact_table_compute_op_summary(
+    loom_value_fact_table_t* table, const loom_module_t* module,
+    const loom_op_t* op, bool* out_changed) {
+  return loom_value_fact_table_compute_op_in_target_scope(table, module, op,
+                                                          out_changed);
+}
+
 static iree_status_t loom_value_fact_table_seed_branch_region(
     loom_value_fact_table_t* table, loom_region_branch_t branch,
     loom_region_t* region, uint8_t region_index) {

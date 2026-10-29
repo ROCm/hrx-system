@@ -83,14 +83,15 @@ class NestedSummaryTest : public FactSummaryTest,
                           public ::testing::WithParamInterface<bool> {};
 
 // Lexical containment alone creates no fact dependency. When the inner result
-// is yielded by the outer branch, semantic closure must queue both owners
-// before solving either, allowing one outer solve to cover the inner summary.
+// is yielded by the outer branch, semantic closure queues both result joins.
+// A parent joined before its child must receive the child's final publication,
+// while neither join reevaluates an unaffected sibling body.
 TEST_P(NestedSummaryTest, ResultDependencies) {
   const bool uses_inner_result = GetParam();
   const auto i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
-  loom_op_t* constants[3] = {};
-  const int64_t values[] = {1, 2, 9};
-  for (int i = 0; i < 3; ++i) {
+  loom_op_t* constants[4] = {};
+  const int64_t values[] = {1, 2, 9, 1};
+  for (int i = 0; i < 4; ++i) {
     IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(values[i]),
                                             i32, LOOM_LOCATION_UNKNOWN,
                                             &constants[i]));
@@ -99,9 +100,11 @@ TEST_P(NestedSummaryTest, ResultDependencies) {
   const auto two = loom_test_constant_result(constants[1]);
   const auto nine = loom_test_constant_result(constants[2]);
   loom_op_t* outer = nullptr;
-  IREE_ASSERT_OK(loom_test_branch_build(&builder_, one, &i32, 1, nullptr, 0,
-                                        LOOM_LOCATION_UNKNOWN, &outer));
+  IREE_ASSERT_OK(loom_test_branch_build(
+      &builder_, loom_test_constant_result(constants[3]), &i32, 1, nullptr, 0,
+      LOOM_LOCATION_UNKNOWN, &outer));
   loom_op_t* inner = nullptr;
+  loom_op_t* sibling = nullptr;
   loom_op_t* producer = nullptr;
   for (int branch_index = 0; branch_index < 2; ++branch_index) {
     auto* region = loom_op_regions(outer)[branch_index];
@@ -131,6 +134,19 @@ TEST_P(NestedSummaryTest, ResultDependencies) {
       loom_op_t* use = nullptr;
       IREE_ASSERT_OK(loom_test_use_build(&nested, loom_op_results(inner), 1,
                                          LOOM_LOCATION_UNKNOWN, &use));
+    } else {
+      IREE_ASSERT_OK(loom_test_branch_build(&nested, one, &i32, 1, nullptr, 0,
+                                            LOOM_LOCATION_UNKNOWN, &sibling));
+      for (int sibling_index = 0; sibling_index < 2; ++sibling_index) {
+        auto* sibling_region = loom_op_regions(sibling)[sibling_index];
+        auto sibling_builder = nested;
+        loom_builder_enter_region(&sibling_builder, sibling, sibling_region);
+        loom_builder_set_block(&sibling_builder,
+                               loom_region_entry_block(sibling_region));
+        loom_op_t* yield = nullptr;
+        IREE_ASSERT_OK(loom_test_yield_build(&sibling_builder, &two, 1,
+                                             LOOM_LOCATION_UNKNOWN, &yield));
+      }
     }
     const auto outer_value = branch_index == 0 && uses_inner_result
                                  ? loom_op_results(inner)[0]
@@ -161,11 +177,15 @@ TEST_P(NestedSummaryTest, ResultDependencies) {
     const loom_op_t* outer;
     // Direct owner of the mutated result equation.
     const loom_op_t* inner;
+    // Independent body whose facts stay current across result-only changes.
+    const loom_op_t* sibling;
     // Completed enclosing summaries during this publication.
     size_t outer_count = 0;
     // Completed direct summaries during this publication.
     size_t inner_count = 0;
-  } observer{facts->summary_computed, outer, inner};
+    // Completed independent summaries during this publication.
+    size_t sibling_count = 0;
+  } observer{facts->summary_computed, outer, inner, sibling};
   facts->summary_computed = {
       .user_data = &observer,
       .fn =
@@ -173,17 +193,21 @@ TEST_P(NestedSummaryTest, ResultDependencies) {
             auto* observer = static_cast<Observer*>(user_data);
             observer->outer_count += op == observer->outer;
             observer->inner_count += op == observer->inner;
+            observer->sibling_count += op == observer->sibling;
             observer->previous.fn(observer->previous.user_data, op);
           },
   };
   for (auto replacement : {nine, two, nine, two}) {
     observer.outer_count = 0;
     observer.inner_count = 0;
+    observer.sibling_count = 0;
     IREE_ASSERT_OK(
         loom_rewriter_set_operand(&rewriter, producer, 0, replacement));
     IREE_ASSERT_OK(loom_rewriter_propagate_value_facts(&rewriter));
-    EXPECT_EQ(observer.outer_count, uses_inner_result ? 1u : 0u);
+    EXPECT_EQ(observer.outer_count != 0, uses_inner_result);
+    EXPECT_LE(observer.outer_count, 2u);
     EXPECT_EQ(observer.inner_count, 1u);
+    EXPECT_EQ(observer.sibling_count, 0u);
     EXPECT_EQ(
         loom_value_fact_table_lookup(facts, loom_op_results(outer)[0]).range_lo,
         2);
@@ -200,11 +224,43 @@ TEST_P(NestedSummaryTest, ResultDependencies) {
     loom_value_fact_table_t* fresh = nullptr;
     IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(&fresh_owner, module_,
                                                       scope, &fresh));
-    for (auto* op : {producer, inner, outer}) {
+    for (auto* op : {producer, inner, outer, sibling}) {
       const auto value = loom_op_results(op)[0];
       EXPECT_TRUE(loom_value_fact_table_facts_equal_for_type(
           module_, i32, facts, loom_value_fact_table_lookup(facts, value),
           fresh, loom_value_fact_table_lookup(fresh, value)));
+    }
+    loom_pass_value_fact_owner_deinitialize(&fresh_owner);
+  }
+  // A direct selector edit still refreshes nested context. Coalesce it with
+  // the yielded-value edit in either order, then compare every live fact.
+  for (bool selector_first : {false, true}) {
+    auto change_selector = [&]() {
+      return loom_test_constant_rewrite_value(
+          &rewriter, constants[3], loom_attr_i64(selector_first ? 1 : 0));
+    };
+    if (selector_first) {
+      IREE_ASSERT_OK(change_selector());
+    }
+    IREE_ASSERT_OK(loom_rewriter_set_operand(&rewriter, producer, 0,
+                                             selector_first ? two : nine));
+    if (!selector_first) {
+      IREE_ASSERT_OK(change_selector());
+    }
+    observer.sibling_count = 0;
+    IREE_ASSERT_OK(loom_rewriter_propagate_value_facts(&rewriter));
+    EXPECT_EQ(observer.sibling_count, 1u);
+    loom_pass_value_fact_owner_t fresh_owner;
+    loom_pass_value_fact_owner_initialize(&block_pool_, &fresh_owner);
+    loom_value_fact_table_t* fresh = nullptr;
+    IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(&fresh_owner, module_,
+                                                      scope, &fresh));
+    for (iree_host_size_t i = 0; i < fresh->touched_count; ++i) {
+      const auto value = fresh->touched_values[i];
+      EXPECT_TRUE(loom_value_fact_table_facts_equal_for_type(
+          module_, loom_module_value_type(module_, value), facts,
+          loom_value_fact_table_lookup(facts, value), fresh,
+          loom_value_fact_table_lookup(fresh, value)));
     }
     loom_pass_value_fact_owner_deinitialize(&fresh_owner);
   }
@@ -214,6 +270,84 @@ TEST_P(NestedSummaryTest, ResultDependencies) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Dependencies, NestedSummaryTest, ::testing::Bool());
+
+class NewBranchContextTest : public FactSummaryTest,
+                             public ::testing::WithParamInterface<bool> {};
+
+TEST_P(NewBranchContextTest, PublishesContextBeforeBodyConstruction) {
+  const bool keyed = GetParam();
+  const auto type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_op_t* constant = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(1), type,
+                                          LOOM_LOCATION_UNKNOWN, &constant));
+  const auto one = loom_test_constant_result(constant);
+  loom_op_t* function_yield = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &function_yield));
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_pass_value_fact_owner_t owner;
+  loom_pass_value_fact_owner_initialize(&block_pool_, &owner);
+  loom_value_fact_table_t* facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &owner, module_, loom_pass_value_fact_scope_function(function_), &facts));
+  loom_rewriter_t rewriter;
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  loom_rewriter_attach_value_facts(&rewriter, facts);
+  loom_builder_set_before(&rewriter.builder, function_yield);
+  loom_op_t* branch = nullptr;
+  if (keyed) {
+    const int64_t key = 0;
+    IREE_ASSERT_OK(loom_scf_switch_build(&rewriter.builder, one, &type, 1,
+                                         nullptr, 0, &key, 1,
+                                         LOOM_LOCATION_UNKNOWN, &branch));
+  } else {
+    IREE_ASSERT_OK(loom_test_branch_build(&rewriter.builder, one, &type, 1,
+                                          nullptr, 0, LOOM_LOCATION_UNKNOWN,
+                                          &branch));
+  }
+  // Entry context belongs to the region producer, before any child inference.
+  EXPECT_EQ(
+      loom_value_fact_table_lookup_region_branch_truth(
+          facts, loom_op_regions(branch)[0]),
+      keyed ? LOOM_REGION_BRANCH_TRUTH_UNKNOWN : LOOM_REGION_BRANCH_TRUTH_TRUE);
+  EXPECT_EQ(loom_value_fact_table_lookup_region_branch_truth(
+                facts, loom_op_regions(branch)[1]),
+            keyed ? LOOM_REGION_BRANCH_TRUTH_UNKNOWN
+                  : LOOM_REGION_BRANCH_TRUTH_FALSE);
+  for (int region_index = 0; region_index < 2; ++region_index) {
+    auto* region = loom_op_regions(branch)[region_index];
+    auto nested = rewriter.builder;
+    loom_builder_enter_region(&nested, branch, region);
+    loom_builder_set_block(&nested, loom_region_entry_block(region));
+    loom_op_t* yield = nullptr;
+    if (keyed) {
+      IREE_ASSERT_OK(loom_scf_yield_build(&nested, &one, 1,
+                                          LOOM_LOCATION_UNKNOWN, &yield));
+    } else {
+      IREE_ASSERT_OK(loom_test_yield_build(&nested, &one, 1,
+                                           LOOM_LOCATION_UNKNOWN, &yield));
+    }
+  }
+  IREE_ASSERT_OK(loom_rewriter_propagate_value_facts(&rewriter));
+  EXPECT_EQ(
+      loom_value_fact_table_lookup_region_branch_truth(
+          facts, loom_op_regions(branch)[0]),
+      keyed ? LOOM_REGION_BRANCH_TRUTH_UNKNOWN : LOOM_REGION_BRANCH_TRUTH_TRUE);
+  EXPECT_EQ(loom_value_fact_table_lookup_region_branch_truth(
+                facts, loom_op_regions(branch)[1]),
+            keyed ? LOOM_REGION_BRANCH_TRUTH_UNKNOWN
+                  : LOOM_REGION_BRANCH_TRUTH_FALSE);
+  EXPECT_TRUE(loom_value_facts_equal(
+      loom_value_fact_table_lookup(facts, loom_op_results(branch)[0]),
+      loom_value_fact_table_lookup(facts, one)));
+  loom_rewriter_deinitialize(&rewriter);
+  loom_pass_value_fact_owner_deinitialize(&owner);
+  iree_arena_deinitialize(&arena);
+}
+
+INSTANTIATE_TEST_SUITE_P(BooleanAndKeyed, NewBranchContextTest,
+                         ::testing::Bool());
 
 class NestedFeedbackTest : public FactSummaryTest,
                            public ::testing::WithParamInterface<bool> {};

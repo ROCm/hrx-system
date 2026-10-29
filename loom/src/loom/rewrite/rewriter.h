@@ -302,8 +302,8 @@ iree_status_t loom_rewriter_build_constant(loom_rewriter_t* rewriter,
                                            loom_location_id_t location,
                                            loom_value_id_t* out_value_id);
 
-// Recomputes an op's inferred or structured-region result facts, then attempts
-// to fold a side-effect-free op with vtable fact inference to constants.
+// Publishes pending fact equations, then attempts to fold a side-effect-free op
+// with vtable fact inference to constants using the maintained result facts.
 // Materializes constants when every result is exact and supported by the
 // selected materializer, then replaces the original op via RAUW+erase. The
 // complete result family is checked before any relation preservation or IR

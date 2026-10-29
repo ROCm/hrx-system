@@ -794,6 +794,14 @@ iree_status_t loom_value_fact_table_compute_op_and_report(
     loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_op_t* op, bool* out_changed);
 
+// Publishes an op's results using maintained nested-region facts. RegionBranch
+// ops join current yields without reevaluating their bodies; LoopLike ops still
+// solve feedback. Callers establish direct inputs and nested execution context
+// before using this boundary. Ordinary ops compute their complete result facts.
+iree_status_t loom_value_fact_table_compute_op_summary(
+    loom_value_fact_table_t* table, const loom_module_t* module,
+    const loom_op_t* op, bool* out_changed);
+
 // Computes nested regions using the already established function context.
 // Acyclic lexical descent retains continuations in transient storage. LoopLike
 // and CFG summaries own the iterative solves for their regions.
