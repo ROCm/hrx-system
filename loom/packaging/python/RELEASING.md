@@ -129,6 +129,11 @@ to pass. The bundle job verifies the complete set and writes `SHA256SUMS`.
 Both publication jobs verify the bundle again and consume its bytes without
 recompiling. GitHub publication completes before PyPI publication starts.
 
+GitHub publication writes a compact SDK description naming the PyPI install,
+attached native profiles, and checksum document. The body comes from the
+committed SDK identity and artifact contract, so the first release cannot expand
+into the repository's complete pull-request history.
+
 The normal filenames have no local-version suffix; instrumented filenames use
 `+tracy`, `+debug`, or `+asan`. Linux release wheels carry the audited
 `manylinux_2_39_x86_64` tag; Windows wheels carry `win_amd64`. Prerelease versions

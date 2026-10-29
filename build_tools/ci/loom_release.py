@@ -26,6 +26,28 @@ from zipfile import BadZipFile
 from build_tools.ci import github_api
 from loom.packaging.python import release
 
+GITHUB_RELEASE_BODY_MAXIMUM = 125_000
+
+
+def github_release_body(identity: release.Identity) -> str:
+    """Builds the bounded product description used for GitHub releases."""
+    body = (
+        f"Loom SDK {identity.version} contains the compiler, runtime, command-line "
+        "tools, and Python APIs for Linux x86-64 and Windows x86-64.\n\n"
+        "After the release workflow completes, install the optimized profile "
+        "from PyPI:\n\n"
+        "```console\n"
+        f"python -m pip install hrx-loom=={identity.version}\n"
+        "```\n\n"
+        "The attached wheels include Release, Tracy, Debug, and ASAN profiles. "
+        "`SHA256SUMS` records the exact qualified artifacts."
+    )
+    if len(body) > GITHUB_RELEASE_BODY_MAXIMUM:
+        raise ValueError(
+            "GitHub release body exceeds the 125000-character service limit"
+        )
+    return body
+
 
 def verified_release(
     directory: Path, identity: release.Identity, description: str, tag: str
@@ -85,7 +107,8 @@ def publish_github(
             "--verify-tag",
             "--title",
             f"Loom {tag}",
-            "--generate-notes",
+            "--notes",
+            github_release_body(identity),
             *options,
         )
         return

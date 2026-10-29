@@ -117,9 +117,22 @@ class LoomReleaseTest(unittest.TestCase):
                 self.assertEqual(command[:4], ["gh", "release", "create", self.tag])
                 self.assertIn("--verify-tag", command)
                 self.assertNotIn("--clobber", command)
+                self.assertNotIn("--generate-notes", command)
                 self.assertEqual("--prerelease" in command, version.endswith("rc1"))
+                body = command[command.index("--notes") + 1]
+                self.assertIn(f"hrx-loom=={version}", body)
+                self.assertIn("Release, Tracy, Debug, and ASAN", body)
+                self.assertIn("SHA256SUMS", body)
+                self.assertLessEqual(
+                    len(body), loom_release.GITHUB_RELEASE_BODY_MAXIMUM
+                )
                 for path in self.assets.values():
                     self.assertIn(str(path), command)
+
+    def test_github_release_body_rejects_service_limit_overflow(self):
+        identity = release.Identity("1" * 125_000, self.identity.catalog)
+        with self.assertRaisesRegex(ValueError, "125000-character service limit"):
+            loom_release.github_release_body(identity)
 
     def test_partial_retry_checks_all_overlaps_before_upload(self):
         present = list(self.assets)[:2] + ["SHA256SUMS"]
