@@ -6,7 +6,9 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstring>
+#include <mutex>
 #include <thread>
 #include <utility>
 
@@ -57,14 +59,47 @@ class ScopeExit {
 // declaration can spell.
 template <typename Cleanup>
 ScopeExit(Cleanup) -> ScopeExit<Cleanup>;
+
+struct GraphLaunchObservation {
+  // Guards every phase field below.
+  std::mutex mutex;
+  // Notifies the test whenever one of the observed phases changes.
+  std::condition_variable notification;
+  // True after the queue wrapper injects the later submission rejection.
+  bool later_call_rejected = false;
+  // True after the accepted prefix host call runs.
+  bool prefix_call_ran = false;
+  // True after the graph launch returns to its calling thread.
+  bool launch_returned = false;
+  // Records whether the graph launch returned before its accepted prefix ran.
+  bool launch_returned_before_prefix = false;
+};
+
+void ObserveGraphLaunchPrefix(void* user_data) {
+  auto* observation = static_cast<GraphLaunchObservation*>(user_data);
+  {
+    std::lock_guard<std::mutex> lock(observation->mutex);
+    observation->launch_returned_before_prefix = observation->launch_returned;
+    observation->prefix_call_ran = true;
+  }
+  observation->notification.notify_all();
+}
+
 struct RejectSecondHostCallQueue {
+  // Base queue interface exposed to the graph executor.
   iree_hal_queue_t base;
+  // Retained queue receiving submissions accepted by this wrapper.
   iree_hal_queue_t* target = nullptr;
+  // Gate appended to the first accepted host call.
   iree_hal_semaphore_t* first_call_gate = nullptr;
+  // Required value of |first_call_gate|.
   uint64_t first_call_gate_value = 0;
+  // Shared test phase observation.
+  GraphLaunchObservation* observation = nullptr;
+  // Number of host calls presented to this wrapper.
   std::atomic<int> host_call_count = 0;
+  // Number of host calls accepted by the target queue.
   std::atomic<int> accepted_host_call_count = 0;
-  std::atomic<bool> second_call_rejected = false;
 };
 
 RejectSecondHostCallQueue* CastRejectSecondHostCallQueue(
@@ -99,7 +134,11 @@ iree_status_t RejectSecondHostCallQueueHostCall(
   const int call_index =
       queue->host_call_count.fetch_add(1, std::memory_order_acq_rel);
   if (call_index == 1) {
-    queue->second_call_rejected.store(true, std::memory_order_release);
+    {
+      std::lock_guard<std::mutex> lock(queue->observation->mutex);
+      queue->observation->later_call_rejected = true;
+    }
+    queue->observation->notification.notify_all();
     return iree_make_status(IREE_STATUS_ABORTED,
                             "injected later graph block rejection");
   }
@@ -158,8 +197,10 @@ const iree_hal_queue_vtable_t kRejectSecondHostCallQueueVtable = {
 };
 
 void InitializeRejectSecondHostCallQueue(iree_hal_queue_t* target,
+                                         GraphLaunchObservation* observation,
                                          RejectSecondHostCallQueue* out_queue) {
   out_queue->target = target;
+  out_queue->observation = observation;
   iree_hal_queue_retain(target);
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
@@ -983,6 +1024,7 @@ TEST_F(GraphExecTest,
   iree_hal_streaming_graph_t* parent_graph = nullptr;
   iree_hal_streaming_graph_exec_t* exec = nullptr;
   iree_hal_semaphore_t* gate = nullptr;
+  GraphLaunchObservation launch_observation;
   RejectSecondHostCallQueue fault_queue = {};
   iree_hal_queue_t* original_queue = nullptr;
   bool wrapper_installed = false;
@@ -1007,8 +1049,8 @@ TEST_F(GraphExecTest,
       &child_graph));
   iree_hal_streaming_graph_node_t* first_node = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
-      child_graph, /*dependencies=*/nullptr, /*dependency_count=*/0, &SetFlag,
-      &graph_host_node_ran_, &first_node));
+      child_graph, /*dependencies=*/nullptr, /*dependency_count=*/0,
+      &ObserveGraphLaunchPrefix, &launch_observation, &first_node));
   iree_hal_streaming_graph_node_t* second_node = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
       child_graph, &first_node, /*dependency_count=*/1, &SetFlag,
@@ -1025,7 +1067,8 @@ TEST_F(GraphExecTest,
       parent_graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
 
   original_queue = stream_->queue;
-  InitializeRejectSecondHostCallQueue(original_queue, &fault_queue);
+  InitializeRejectSecondHostCallQueue(original_queue, &launch_observation,
+                                      &fault_queue);
   EXPECT_EQ(original_queue,
             ReplaceGraphExecTestQueue(stream_, &fault_queue.base));
   // Transfer the stream's old queue reference to the wrapper target.
@@ -1038,7 +1081,6 @@ TEST_F(GraphExecTest,
   const uint64_t initial_pending_value = stream_->pending_value;
   iree_slim_mutex_unlock(&stream_->mutex);
 
-  std::atomic<bool> launch_returned = false;
   std::atomic<iree_status_code_t> launch_status_code = IREE_STATUS_UNKNOWN;
   std::thread launch_thread([&] {
     iree_hal_streaming_graph_exec_launch_result_t launch_result =
@@ -1049,48 +1091,48 @@ TEST_F(GraphExecTest,
     launch_status_code.store(iree_status_code(status),
                              std::memory_order_release);
     iree_status_ignore(status);
-    launch_returned.store(true, std::memory_order_release);
+    {
+      std::lock_guard<std::mutex> lock(launch_observation.mutex);
+      launch_observation.launch_returned = true;
+    }
+    launch_observation.notification.notify_all();
   });
 
   bool observed_later_rejection = false;
-  for (int i = 0; i < 1000000; ++i) {
-    if (fault_queue.second_call_rejected.load(std::memory_order_acquire)) {
-      observed_later_rejection = true;
-      break;
-    }
-    if (launch_returned.load(std::memory_order_acquire)) {
-      break;
-    }
-    std::this_thread::yield();
+  {
+    std::unique_lock<std::mutex> lock(launch_observation.mutex);
+    launch_observation.notification.wait(lock, [&] {
+      return launch_observation.later_call_rejected ||
+             launch_observation.launch_returned;
+    });
+    observed_later_rejection = launch_observation.later_call_rejected;
   }
   if (!observed_later_rejection) {
     IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, 1, /*frontier=*/nullptr));
     launch_thread.join();
+    if (fault_queue.accepted_host_call_count.load(std::memory_order_acquire) >
+        0) {
+      std::unique_lock<std::mutex> lock(launch_observation.mutex);
+      launch_observation.notification.wait(
+          lock, [&] { return launch_observation.prefix_call_ran; });
+    }
     FAIL() << "recursive launch did not reach the injected later rejection";
     return;
   }
   EXPECT_EQ(
       1, fault_queue.accepted_host_call_count.load(std::memory_order_acquire));
-  for (int i = 0;
-       i < 100000 && !launch_returned.load(std::memory_order_acquire); ++i) {
-    std::this_thread::yield();
-  }
-  EXPECT_FALSE(launch_returned.load(std::memory_order_acquire))
-      << "launch returned while its accepted prefix was still gated";
 
   IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, 1, /*frontier=*/nullptr));
   launch_thread.join();
   EXPECT_EQ(IREE_STATUS_ABORTED,
             launch_status_code.load(std::memory_order_acquire));
-  bool accepted_prefix_completed = false;
-  for (int i = 0; i < 1000000; ++i) {
-    if (graph_host_node_ran_.load(std::memory_order_acquire)) {
-      accepted_prefix_completed = true;
-      break;
-    }
-    std::this_thread::yield();
+  {
+    std::unique_lock<std::mutex> lock(launch_observation.mutex);
+    launch_observation.notification.wait(
+        lock, [&] { return launch_observation.prefix_call_ran; });
+    EXPECT_FALSE(launch_observation.launch_returned_before_prefix)
+        << "launch returned before its accepted prefix completed";
   }
-  EXPECT_TRUE(accepted_prefix_completed);
   EXPECT_FALSE(stream_marker_ran_.load(std::memory_order_acquire));
 
   iree_slim_mutex_lock(&stream_->mutex);
