@@ -310,18 +310,25 @@ static bool loom_aie2p_native_can_configure(
     const loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,
     const loom_pipeline_worker_t* worker) {
-  if (!worker->transport.steps) {
+  if (!worker->transport.steps || worker->transport.induction) {
     return false;
   }
-  // One admission at each private endpoint makes its initial free credit
-  // unconditional and its final reclamation unobservable. Publication and
-  // external-write completion remain explicit ordered effects.
+  // A singleton returns its entire credit on each turn. A retained reader
+  // likewise returns a complete batch after replay. Ordinary multi-slot rings
+  // can have concurrent partial publications and need atomic credit updates.
+  const uint32_t worker_index = (uint32_t)(worker - realization->workers);
   for (iree_host_size_t i = 0; i < worker->binding_count; ++i) {
     const loom_aie2p_native_channel_t* channel =
         &context->channels[worker->bindings[i].channel -
                            realization->resources.channels];
-    if (channel->cursor.reader.maximum_admissions > 1 ||
-        channel->cursor.writer.maximum_admissions > 1) {
+    if (channel->source->capacity > 1 &&
+        (channel->cursor.reader.maximum_admissions > 1 ||
+         channel->cursor.writer.maximum_admissions > 1) &&
+        !(channel->replay.record_count &&
+          channel->cursor.writer.worker == worker_index &&
+          channel->cursor.writer.maximum_admissions %
+                  channel->replay.record_count ==
+              0)) {
       return false;
     }
   }
@@ -359,6 +366,104 @@ static bool loom_aie2p_native_can_configure(
     }
   }
   return true;
+}
+
+typedef struct loom_aie2p_native_configuration_cursor_t {
+  // Next reserved physical slot.
+  uint32_t reservation;
+  // Published prefix within the current retained batch.
+  uint32_t publication;
+} loom_aie2p_native_configuration_cursor_t;
+
+static iree_status_t loom_aie2p_native_configure_channels(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    const loom_pipeline_worker_t* source, loom_aie2p_native_worker_t* worker) {
+  // These are physical cursor positions, assigned once from the retained
+  // straight-line effect order. Emission consumes the selected turns directly.
+  loom_aie2p_native_configuration_cursor_t* positions;
+  loom_aie2p_native_configuration_action_t* actions;
+  uint32_t* records;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, realization->resources.channel_count,
+      sizeof(*positions), (void**)&positions));
+  memset(positions, 0,
+         realization->resources.channel_count * sizeof(*positions));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, source->channels.action_count, sizeof(*actions),
+      (void**)&actions));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, source->channels.value_count, sizeof(*records),
+      (void**)&records));
+  for (iree_host_size_t i = 0; i < source->transport.count; ++i) {
+    const loom_pipeline_transport_step_t* step = &source->transport.steps[i];
+    if (step->kind != LOOM_PIPELINE_TRANSPORT_STEP_CHANNEL) {
+      continue;
+    }
+    const loom_channel_plan_action_t* source_action = step->source.channel;
+    const iree_host_size_t action_index =
+        source_action - source->channels.actions;
+    const loom_pipeline_resource_channel_t* binding =
+        loom_pipeline_resources_lookup_channel(
+            &realization->resources, source_action->channel->value_id);
+    const iree_host_size_t channel_index =
+        binding - realization->resources.channels;
+    const loom_aie2p_native_channel_t* channel =
+        &context->channels[channel_index];
+    loom_aie2p_native_configuration_cursor_t* position =
+        &positions[channel_index];
+    loom_aie2p_native_configuration_action_t* action = &actions[action_index];
+    *action = (loom_aie2p_native_configuration_action_t){
+        .channel = channel, .expected = -1, .value = -1};
+    const loom_op_t* op = step->op;
+    const bool reserve = loom_channel_reserve_isa(op);
+    const bool acquire = loom_channel_acquire_isa(op);
+    if (reserve || acquire) {
+      const loom_value_id_t record = loom_op_const_results(op)[0];
+      records[loom_local_value_domain_ordinal(&source->value_domain, record)] =
+          reserve ? position->reservation * channel->byte_stride : 0;
+    }
+    if (channel->replay.record_count) {
+      if (reserve) {
+        if (position->reservation == 0) {
+          action->lock = channel->free_lock;
+          action->expected = (int16_t)channel->replay.count;
+          action->value = 0;
+        }
+        position->reservation =
+            (position->reservation + 1) % channel->replay.record_count;
+      } else if (loom_channel_publish_isa(op)) {
+        position->publication +=
+            source->completion.actions[action_index].credits;
+        if (position->publication == channel->replay.record_count) {
+          action->lock = channel->ready_lock;
+          action->value = (int16_t)channel->replay.count;
+          position->publication = 0;
+        }
+      }
+    } else if (channel->source->capacity == 1 &&
+               source->completion.actions[action_index].maximum_admissions >
+                   1) {
+      action->lock = reserve || loom_channel_release_isa(op)
+                         ? channel->free_lock
+                         : channel->ready_lock;
+      if (reserve || acquire) {
+        action->expected = 1;
+        action->value = 0;
+      } else if (source->completion.actions[action_index].credits) {
+        action->value = 1;
+      }
+    } else if (acquire || loom_channel_publish_isa(op)) {
+      // A single admission from an ordinary ring retains the original
+      // initial-credit debit and unobservable final reclamation.
+      action->lock = channel->ready_lock;
+      action->expected = acquire ? 1 : -1;
+      action->value = acquire ? 0 : 1;
+    }
+  }
+  worker->configuration_actions = actions;
+  worker->configuration_records = records;
+  return iree_ok_status();
 }
 
 static bool loom_aie2p_native_can_repeat(
@@ -651,15 +756,20 @@ static iree_status_t loom_aie2p_native_select(
     bool repeat = false;
     if (source->transport.steps) {
       loom_local_value_domain_restore(&source->value_domain);
-      configure = !configuration_used &&
+      repeat =
+          loom_aie2p_native_can_repeat(context, realization, source, worker);
+      configure = !repeat && !configuration_used &&
                   loom_aie2p_native_can_configure(context, realization, source);
-      repeat = !configure && loom_aie2p_native_can_repeat(context, realization,
-                                                          source, worker);
       loom_local_value_domain_release(&source->value_domain);
     }
     if (configure) {
       worker->execution = LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION;
       configuration_used = true;
+      loom_local_value_domain_restore(&source->value_domain);
+      iree_status_t status = loom_aie2p_native_configure_channels(
+          context, realization, source, worker);
+      loom_local_value_domain_release(&source->value_domain);
+      IREE_RETURN_IF_ERROR(status);
       continue;
     }
     if (repeat) {
@@ -700,11 +810,13 @@ static iree_status_t loom_aie2p_native_select(
     const loom_aie2p_native_channel_t* channel = &context->channels[i];
     if (channel->replay.record_count &&
         (channel->cursor.writer.worker == UINT32_MAX ||
-         context->workers[channel->cursor.writer.worker].execution !=
-             LOOM_AIE2P_NATIVE_EXECUTION_DMA)) {
+         (context->workers[channel->cursor.writer.worker].execution !=
+              LOOM_AIE2P_NATIVE_EXECUTION_DMA &&
+          context->workers[channel->cursor.writer.worker].execution !=
+              LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION))) {
       return loom_aie2p_native_reject(
           context, realization->function.op,
-          IREE_SV("a coalescible immutable ingress for retained FIFO replay"));
+          IREE_SV("a DMA-owned ingress for retained FIFO replay"));
     }
   }
   IREE_RETURN_IF_ERROR(

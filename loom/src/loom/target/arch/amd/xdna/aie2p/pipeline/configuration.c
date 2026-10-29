@@ -26,6 +26,8 @@ typedef struct loom_aie2p_native_configuration_t {
   // Scalar constant results in the current straight-line function. Cleared at
   // each function boundary so every reused result dominates its consumers.
   loom_intern_table_t constants;
+  // Invocation binding values, shared by initialization and ordered issue.
+  loom_value_id_t* bindings;
   // Configuration scalar type, independent of the core's machine word width.
   loom_type_t scalar_type;
   // Native invocation buffer identity.
@@ -367,14 +369,101 @@ static iree_status_t loom_aie2p_native_config_transfers(
   return iree_ok_status();
 }
 
+static iree_status_t loom_aie2p_native_config_bind_transfer(
+    loom_aie2p_native_configuration_t* config,
+    const loom_aie2p_native_worker_t* worker,
+    const loom_aie2p_native_transfer_t* transfer) {
+  const loom_aie2p_native_context_t* context = config->context;
+  const uint64_t tile_address = (uint64_t)worker->tile->coordinate.column
+                                    << context->family->column_shift |
+                                (uint64_t)worker->tile->coordinate.row
+                                    << context->family->row_shift;
+  const loom_symbolic_expr_t* offset =
+      &transfer->external_view->begin_byte_offset;
+  const bool external_dynamic = transfer->shim_descriptor->address_dynamic;
+  if (!external_dynamic && transfer->shim_descriptor->last_transfer !=
+                               transfer->task->first_transfer) {
+    return iree_ok_status();
+  }
+  const bool relocated_storage =
+      external_dynamic && worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_CORE;
+  const uint64_t begin = worker->repetition.count
+                             ? worker->repetition.external_byte_offset
+                         : relocated_storage ? 0
+                                             : offset->constant;
+  loom_value_id_t range[] = {config->bindings[transfer->binding],
+                             LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID};
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_config_constant(config, begin, &range[1]));
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_config_constant(
+      config, context->bindings[transfer->binding].byte_length - begin,
+      &range[2]));
+  loom_op_t* op;
+  IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
+      &config->builder, config->descriptors,
+      &config->descriptors->descriptors
+           [AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_RANGE],
+      0, range, 3, loom_named_attr_slice_empty(), &config->span_type, 1, NULL,
+      0, LOOM_LOCATION_UNKNOWN, &op));
+  loom_value_id_t operands[] = {LOOM_VALUE_ID_INVALID, loom_op_results(op)[0]};
+  // Constant offsets bind directly into a descriptor shared only by copies
+  // with the same binding and offset.
+  // Dynamic offsets load a relocated base through the worker's aperture;
+  // configuration writes use the memory owner's allocation address space.
+  const bool autonomous = worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_DMA;
+  const uint16_t first_descriptor =
+      autonomous ? 0 : (uint16_t)transfer->descriptor_ordinal;
+  const uint16_t descriptor_count =
+      autonomous ? transfer->shim_descriptor->sequence.descriptor_count : 1;
+  for (uint16_t j = first_descriptor; j < first_descriptor + descriptor_count;
+       ++j) {
+    const uint16_t descriptor =
+        transfer->shim_descriptor->sequence.descriptor + j;
+    const uint64_t address =
+        relocated_storage
+            ? tile_address + worker->tile->facts->memory.local_base +
+                  transfer->base_storage_offset
+            : loom_xdna_register_field_address(
+                  context->family,
+                  LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD1_BASE_ADDRESS_LOW,
+                  transfer->shim_descriptor->path->shim->coordinate,
+                  &descriptor);
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_native_config_constant(config, address, &operands[0]));
+    IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
+        &config->builder, config->descriptors,
+        &config->descriptors->descriptors
+             [AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WRITE_ADDRESS],
+        0, operands, 2, loom_named_attr_slice_empty(), NULL, 0, NULL, 0,
+        LOOM_LOCATION_UNKNOWN, &op));
+  }
+  if (transfer->local_descriptor->sequence.rewind_iteration) {
+    // The descriptor advances its iteration when loaded. All publications
+    // were consumed before the previous invocation returned, so its final
+    // advancement is complete. Restore slot zero when the bounded repeat
+    // does not wrap naturally; the consumer also starts at slot zero.
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_config_write(
+        config,
+        loom_xdna_register_field_address(
+            context->family,
+            transfer->local_descriptor->path->local->memory_layout->iteration
+                .current,
+            transfer->local_descriptor->path->local->coordinate,
+            &transfer->local_descriptor->sequence.descriptor),
+        transfer->local_descriptor->sequence
+            .words[0][transfer->local_descriptor->path->local->memory_layout
+                          ->iteration_word]));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_aie2p_native_config_bindings(
     loom_aie2p_native_configuration_t* config,
     const loom_pipeline_realization_t* realization) {
   const loom_aie2p_native_context_t* context = config->context;
-  loom_value_id_t* bindings;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(context->pass->arena, context->binding_count,
-                                sizeof(*bindings), (void**)&bindings));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, context->binding_count, sizeof(*config->bindings),
+      (void**)&config->bindings));
   for (iree_host_size_t i = 0; i < context->binding_count; ++i) {
     const loom_aie2p_native_binding_t* binding = &context->bindings[i];
     if (!binding->access) {
@@ -399,92 +488,18 @@ static iree_status_t loom_aie2p_native_config_bindings(
              [AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_BINDING],
         0, operands, 4, loom_named_attr_slice_empty(), &config->binding_type, 1,
         NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
-    bindings[i] = loom_op_results(op)[0];
+    config->bindings[i] = loom_op_results(op)[0];
   }
   for (iree_host_size_t i = 0; i < realization->resources.strand_count; ++i) {
     const loom_aie2p_native_worker_t* worker = &context->workers[i];
-    const uint64_t tile_address = (uint64_t)worker->tile->coordinate.column
-                                      << context->family->column_shift |
-                                  (uint64_t)worker->tile->coordinate.row
-                                      << context->family->row_shift;
     for (const loom_aie2p_native_transfer_t* transfer = worker->transfers;
          transfer; transfer = transfer->next) {
-      const loom_symbolic_expr_t* offset =
-          &transfer->external_view->begin_byte_offset;
-      const bool external_dynamic = transfer->shim_descriptor->address_dynamic;
-      if (!external_dynamic && transfer->shim_descriptor->last_transfer !=
-                                   transfer->task->first_transfer) {
+      if (worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION &&
+          transfer->shim_descriptor->address_dynamic) {
         continue;
       }
-      const uint64_t begin = worker->repetition.count
-                                 ? worker->repetition.external_byte_offset
-                             : external_dynamic ? 0
-                                                : offset->constant;
-      loom_value_id_t range[] = {bindings[transfer->binding],
-                                 LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID};
       IREE_RETURN_IF_ERROR(
-          loom_aie2p_native_config_constant(config, begin, &range[1]));
-      IREE_RETURN_IF_ERROR(loom_aie2p_native_config_constant(
-          config, context->bindings[transfer->binding].byte_length - begin,
-          &range[2]));
-      loom_op_t* op;
-      IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
-          &config->builder, config->descriptors,
-          &config->descriptors->descriptors
-               [AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_RANGE],
-          0, range, 3, loom_named_attr_slice_empty(), &config->span_type, 1,
-          NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
-      loom_value_id_t operands[] = {LOOM_VALUE_ID_INVALID,
-                                    loom_op_results(op)[0]};
-      // Constant offsets bind directly into a descriptor shared only by copies
-      // with the same binding and offset.
-      // Dynamic offsets load a relocated base through the worker's aperture;
-      // configuration writes use the memory owner's allocation address space.
-      const bool autonomous =
-          worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_DMA;
-      const uint16_t first_descriptor =
-          autonomous ? 0 : (uint16_t)transfer->descriptor_ordinal;
-      const uint16_t descriptor_count =
-          autonomous ? transfer->shim_descriptor->sequence.descriptor_count : 1;
-      for (uint16_t j = first_descriptor;
-           j < first_descriptor + descriptor_count; ++j) {
-        const uint16_t descriptor =
-            transfer->shim_descriptor->sequence.descriptor + j;
-        const uint64_t address =
-            external_dynamic
-                ? tile_address + worker->tile->facts->memory.local_base +
-                      transfer->base_storage_offset
-                : loom_xdna_register_field_address(
-                      context->family,
-                      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD1_BASE_ADDRESS_LOW,
-                      transfer->shim_descriptor->path->shim->coordinate,
-                      &descriptor);
-        IREE_RETURN_IF_ERROR(
-            loom_aie2p_native_config_constant(config, address, &operands[0]));
-        IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
-            &config->builder, config->descriptors,
-            &config->descriptors->descriptors
-                 [AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WRITE_ADDRESS],
-            0, operands, 2, loom_named_attr_slice_empty(), NULL, 0, NULL, 0,
-            LOOM_LOCATION_UNKNOWN, &op));
-      }
-      if (transfer->local_descriptor->sequence.rewind_iteration) {
-        // The descriptor advances its iteration when loaded. All publications
-        // were consumed before the previous invocation returned, so its final
-        // advancement is complete. Restore slot zero when the bounded repeat
-        // does not wrap naturally; the consumer also starts at slot zero.
-        IREE_RETURN_IF_ERROR(loom_aie2p_native_config_write(
-            config,
-            loom_xdna_register_field_address(
-                context->family,
-                transfer->local_descriptor->path->local->memory_layout
-                    ->iteration.current,
-                transfer->local_descriptor->path->local->coordinate,
-                &transfer->local_descriptor->sequence.descriptor),
-            transfer->local_descriptor->sequence
-                .words[0][transfer->local_descriptor->path->local->memory_layout
-                              ->iteration_word]));
-      }
+          loom_aie2p_native_config_bind_transfer(config, worker, transfer));
     }
     for (const loom_aie2p_native_distribution_t* distribution =
              worker->distributions;
@@ -639,6 +654,14 @@ static iree_status_t loom_aie2p_native_config_communicate(
     switch (step->kind) {
       case LOOM_PIPELINE_TRANSPORT_STEP_TRANSFER: {
         if (issue == issue->task->last_transfer) {
+          for (const loom_aie2p_native_transfer_t* transfer =
+                   issue->task->first_transfer;
+               transfer; transfer = transfer->task_next) {
+            if (transfer->shim_descriptor->address_dynamic) {
+              IREE_RETURN_IF_ERROR(loom_aie2p_native_config_bind_transfer(
+                  config, worker, transfer));
+            }
+          }
           IREE_RETURN_IF_ERROR(
               loom_aie2p_native_config_submit(config, issue->task));
         }
@@ -654,6 +677,12 @@ static iree_status_t loom_aie2p_native_config_communicate(
                 path->local->memory_layout->lock_value,
                 &complete->local_descriptor->completion->lock, 1,
                 AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WAIT_MASK32));
+            const loom_aie2p_native_dma_completion_t* arrival =
+                complete->local_descriptor->completion;
+            if (arrival->last_transfer != complete->first_transfer) {
+              IREE_RETURN_IF_ERROR(loom_aie2p_native_config_set_lock(
+                  config, path->local->coordinate, arrival->lock, 0));
+            }
           } else {
             const uint64_t values[] = {path->shim->coordinate.column,
                                        path->shim->coordinate.row,
@@ -670,35 +699,27 @@ static iree_status_t loom_aie2p_native_config_communicate(
         }
         break;
       case LOOM_PIPELINE_TRANSPORT_STEP_CHANNEL: {
-        // Initial free credit cannot block and final reclamation has no later
-        // admission observing it. Readiness is still an explicit source edge.
-        if (!loom_channel_acquire_isa(step->op) &&
-            !loom_channel_publish_isa(step->op)) {
+        const loom_aie2p_native_configuration_action_t* action =
+            &worker->configuration_actions[step->source.channel -
+                                           source->channels.actions];
+        if (action->value < 0) {
           break;
         }
         if (issue && issue->admission == step->op) {
           break;
         }
-        const loom_pipeline_resource_channel_t* binding =
-            loom_pipeline_resources_lookup_channel(
-                &realization->resources,
-                step->source.channel->channel->value_id);
-        const loom_aie2p_native_channel_t* channel =
-            &context->channels[binding - realization->resources.channels];
+        const loom_aie2p_native_channel_t* channel = action->channel;
         const loom_xdna_tile_coordinate_t tile =
             context->pool_tiles[channel->pool_index]->coordinate;
         const loom_xdna_register_field_id_t lock_value =
             context->pool_tiles[channel->pool_index]->memory_layout->lock_value;
-        const bool acquire = loom_channel_acquire_isa(step->op);
-        if (acquire) {
+        if (action->expected >= 0) {
           IREE_RETURN_IF_ERROR(loom_aie2p_native_config_register(
-              config, tile, lock_value, &channel->ready_lock, 1,
+              config, tile, lock_value, &action->lock, action->expected,
               AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WAIT_MASK32));
         }
-        // Each endpoint acts once and has one cursor owner. No second producer
-        // can race this ready-credit update with another publication.
         IREE_RETURN_IF_ERROR(loom_aie2p_native_config_set_lock(
-            config, tile, channel->ready_lock, acquire ? 0 : 1));
+            config, tile, action->lock, action->value));
         break;
       }
     }
@@ -842,13 +863,15 @@ iree_status_t loom_aie2p_native_emit_configuration(
     const loom_aie2p_native_channel_t* channel = &context->channels[i];
     const loom_xdna_tile_coordinate_t tile =
         context->pool_tiles[channel->pool_index]->coordinate;
-    // A configuration writer reserves its sole record from the initial
-    // credit. Debit it here so a core reader's final release cannot overflow
-    // the semaphore even when the channel starts at its maximum capacity.
+    // A single admission to an ordinary ring debits its initial credit.
+    // Singleton and retained-batch writers instead consume complete turns in
+    // the ordered configuration program.
     const bool reserve_initial =
         channel->cursor.writer.worker != UINT32_MAX &&
         context->workers[channel->cursor.writer.worker].execution ==
-            LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION;
+            LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION &&
+        channel->cursor.writer.maximum_admissions == 1 &&
+        !channel->replay.record_count;
     IREE_RETURN_IF_ERROR(loom_aie2p_native_config_set_lock(
         &config, tile, channel->free_lock,
         (channel->replay.record_count ? channel->replay.count

@@ -1,0 +1,199 @@
+// One controller refills retained batches across two columns and three phases.
+// Each consumer reverses the records written to mutable state; the controller
+// joins both writers before the next fill. Guards and fresh trial inputs also
+// exercise descriptor reuse, invocation restart, and complete retirement.
+aie2p.target<array> @device
+
+func.def inline @fill(%input: buffer, %incoming: channel<tile<16xi32>>) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %first = buffer.view %input[%origin] : buffer -> view<16xi32>
+  %second = buffer.view %input[%bytes] : buffer -> view<16xi32>
+  %write0, %payload0 = channel.reserve %incoming : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  %copy0 = kernel.async.copy %first to %payload0 {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %group0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group0 {newer_groups = 0} : kernel.async.group
+  %write1, %payload1 = channel.reserve %incoming : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  %copy1 = kernel.async.copy %second to %payload1 {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %group1 = kernel.async.group %copy1 : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group1 {newer_groups = 0} : kernel.async.group
+  // Only completing the first reservation exposes the whole FIFO prefix.
+  channel.publish %write1 : write<tile<16xi32>>
+  channel.publish %write0 : write<tile<16xi32>>
+  func.return
+}
+
+func.def inline @forward(%read: read<tile<16xi32>>, %destination: channel<tile<16xi32>>) -> (read<tile<16xi32>>) {
+  %retained, %outgoing = channel.fanout %read : read<tile<16xi32>> -> (read<tile<16xi32>>, read<tile<16xi32>>)
+  %write, %payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  channel.copy %outgoing -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+  func.return %retained : read<tile<16xi32>>
+}
+
+func.def inline @consume(%records: channel<tile<16xi32>>, %ready: channel<tile<16xi32>>, %state: buffer, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %bytes = index.constant 64 : offset
+  %phase_bytes = index.constant 256 : offset
+  scf.for %phase = [%c0 to %c3 step %c1] unroll {
+    %base = index.scale %phase, %phase_bytes : index, offset -> offset
+    scf.for %record = [%c0 to %c4 step %c1] {
+      %read, %payload = channel.acquire %records : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %relative = index.scale %record, %bytes : index, offset -> offset
+      %offset = index.add %base, %relative : offset
+      %external = buffer.view %output[%offset] : buffer -> view<16xi32>
+      %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      %has_next_phase = index.cmp ult, %phase, %c2 : index
+      scf.if %has_next_phase {
+        %last = index.constant 192 : offset
+        %state_offset = index.sub %last, %relative : offset
+        %state_record = buffer.view %state[%state_offset] : buffer -> view<16xi32>
+        %state_copy = kernel.async.copy %payload to %state_record {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+        %state_group = kernel.async.group %state_copy : kernel.async.token -> kernel.async.group
+        kernel.async.wait %state_group {newer_groups = 0} : kernel.async.group
+      }
+      channel.release %read : read<tile<16xi32>>
+    }
+    %has_next_phase = index.cmp ult, %phase, %c2 : index
+    scf.if %has_next_phase {
+      %write, %unused = channel.reserve %ready : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      channel.publish %write : write<tile<16xi32>>
+    }
+  }
+  func.return
+}
+
+func.def inline @distribute(%batch: channel<tile<16xi32>>, %records: channel<tile<16xi32>>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  scf.for %phase = [%c0 to %c3 step %c1] {
+    %first, %first_payload = channel.acquire %batch : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %second, %second_payload = channel.acquire %batch : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %last_first, %last_second = scf.for %replay = [%c0 to %c2 step %c1](%a = %first : read<tile<16xi32>>, %b = %second : read<tile<16xi32>>) -> (read<tile<16xi32>>, read<tile<16xi32>>) {
+      %next_a = func.call @forward(%a, %records) : (read<tile<16xi32>>, channel<tile<16xi32>>) -> (read<tile<16xi32>>)
+      %next_b = func.call @forward(%b, %records) : (read<tile<16xi32>>, channel<tile<16xi32>>) -> (read<tile<16xi32>>)
+      scf.yield %next_a, %next_b : read<tile<16xi32>>, read<tile<16xi32>>
+    }
+    channel.release %last_first : read<tile<16xi32>>
+    channel.release %last_second : read<tile<16xi32>>
+  }
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@device) @retained_handoff() run(%input0_argument: buffer, %state0_argument: buffer, %output0_argument: buffer, %input1_argument: buffer, %state1_argument: buffer, %output1_argument: buffer) {
+  %input0_unique, %state0_unique, %output0_unique, %input1_unique, %state1_unique, %output1_unique = buffer.assume.noalias %input0_argument, %state0_argument, %output0_argument, %input1_argument, %state1_argument, %output1_argument : buffer, buffer, buffer, buffer, buffer, buffer
+  %input0, %state0, %output0, %input1, %state1, %output1 = buffer.assume.alignment %input0_unique, %state0_unique, %output0_unique, %input1_unique, %state1_unique, %output1_unique {minimum_alignment = 64} : buffer, buffer, buffer, buffer, buffer, buffer
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 64 : offset
+  %batch_bytes = index.constant 128 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %memory0 = pipeline.memory<workgroup>[0, 1] : pool
+  %core0 = pipeline.memory<workgroup>[0, 2] : pool
+  %batch_storage0 = buffer.alloca<workgroup> pool(%memory0) align(64) %batch_bytes : buffer
+  %batch_slots0 = buffer.view %batch_storage0[%origin] : buffer -> view<2x16xi32>
+  %batch0 = channel.bind<fifo> %batch_slots0, %c2 : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %record_storage0 = buffer.alloca<workgroup> pool(%core0) align(64) %bytes : buffer
+  %record_slots0 = buffer.view %record_storage0[%origin] : buffer -> view<1x16xi32>
+  %records0 = channel.bind<fifo> %record_slots0, %c1 : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %ready_storage0 = buffer.alloca<workgroup> pool(%core0) align(64) %bytes : buffer
+  %ready_slots0 = buffer.view %ready_storage0[%origin] : buffer -> view<1x16xi32>
+  %ready0 = channel.bind<fifo> %ready_slots0, %c1 : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %memory1 = pipeline.memory<workgroup>[1, 1] : pool
+  %core1 = pipeline.memory<workgroup>[1, 2] : pool
+  %batch_storage1 = buffer.alloca<workgroup> pool(%memory1) align(64) %batch_bytes : buffer
+  %batch_slots1 = buffer.view %batch_storage1[%origin] : buffer -> view<2x16xi32>
+  %batch1 = channel.bind<fifo> %batch_slots1, %c2 : view<2x16xi32>, index -> channel<tile<16xi32>>
+  %record_storage1 = buffer.alloca<workgroup> pool(%core1) align(64) %bytes : buffer
+  %record_slots1 = buffer.view %record_storage1[%origin] : buffer -> view<1x16xi32>
+  %records1 = channel.bind<fifo> %record_slots1, %c1 : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %ready_storage1 = buffer.alloca<workgroup> pool(%core1) align(64) %bytes : buffer
+  %ready_slots1 = buffer.view %ready_storage1[%origin] : buffer -> view<1x16xi32>
+  %ready1 = channel.bind<fifo> %ready_slots1, %c1 : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @fill(%input0, %batch0) : (buffer, channel<tile<16xi32>>)
+    func.call @fill(%input1, %batch1) : (buffer, channel<tile<16xi32>>)
+    scf.for %phase = [%c0 to %c2 step %c1] unroll {
+      %read0, %unused0 = channel.acquire %ready0 : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %read1, %unused1 = channel.acquire %ready1 : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      func.call @fill(%state0, %batch0) : (buffer, channel<tile<16xi32>>)
+      func.call @fill(%state1, %batch1) : (buffer, channel<tile<16xi32>>)
+      channel.release %read0 : read<tile<16xi32>>
+      channel.release %read1 : read<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @distribute(%batch0, %records0) : (channel<tile<16xi32>>, channel<tile<16xi32>>)
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @consume(%records0, %ready0, %state0, %output0) : (channel<tile<16xi32>>, channel<tile<16xi32>>, buffer, buffer)
+  }
+  pipeline.strand workers([1, 2], [1, 1], [1, 1]) {
+    func.call @distribute(%batch1, %records1) : (channel<tile<16xi32>>, channel<tile<16xi32>>)
+  }
+  pipeline.strand workers([1, 2], [1, 1], [1, 1]) {
+    func.call @consume(%records1, %ready1, %state1, %output1) : (channel<tile<16xi32>>, channel<tile<16xi32>>, buffer, buffer)
+  }
+}
+
+func.def inline @reference_column(%input: buffer, %state: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c4 = index.constant 4 : index
+  %words = index.constant 16 : index
+  %source = buffer.view %input[%origin] : buffer -> view<2x16xi32>
+  %intermediate = buffer.view %state[%origin] : buffer -> view<4x16xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<3x4x16xi32>
+  scf.for %record = [%c0 to %c4 step %c1] {
+    %index = index.rem %record, %c2 : index
+    scf.for %word = [%c0 to %words step %c1] {
+      %value = view.load %source[%index, %word] : view<2x16xi32> -> i32
+      view.store %value, %intermediate[%record, %word] : i32, view<4x16xi32>
+      scf.for %phase = [%c0 to %c3 step %c1] {
+        %sum = index.add %record, %phase : index
+        %source_index = index.rem %sum, %c2 : index
+        %phase_value = view.load %source[%source_index, %word] : view<2x16xi32> -> i32
+        view.store %phase_value, %destination[%phase, %record, %word] : i32, view<3x4x16xi32>
+      }
+    }
+  }
+  func.return
+}
+
+func.def @reference(%input0: buffer, %state0: buffer, %output0: buffer, %input1: buffer, %state1: buffer, %output1: buffer) {
+  func.call @reference_column(%input0, %state0, %output0) : (buffer, buffer, buffer)
+  func.call @reference_column(%input1, %state1, %output1) : (buffer, buffer, buffer)
+  func.return
+}
+
+check.scenario public @retained_mutable_handoff {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<96xi32>
+    %input0 = check.tensor.view %input_storage offset(64) : tensor<96xi32> -> tensor<32xi32>
+    %input1 = check.tensor.view %input_storage offset(192) : tensor<96xi32> -> tensor<32xi32>
+    %state_storage = check.generate.fill value(-7777) : tensor<160xi32>
+    %state0 = check.tensor.view %state_storage offset(64) : tensor<160xi32> -> tensor<64xi32>
+    %state1 = check.tensor.view %state_storage offset(320) : tensor<160xi32> -> tensor<64xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<416xi32>
+    %output0 = check.tensor.view %output_storage offset(64) : tensor<416xi32> -> tensor<192xi32>
+    %output1 = check.tensor.view %output_storage offset(832) : tensor<416xi32> -> tensor<192xi32>
+    check.compare<@retained_handoff, @reference>(%input0, %state0, %output0, %input1, %state1, %output1) : (tensor<32xi32>, tensor<64xi32>, tensor<192xi32>, tensor<32xi32>, tensor<64xi32>, tensor<192xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<96xi32>
+      check.expect.equal actual(%state_storage) expected(%state_storage) : tensor<160xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<416xi32>
+    }
+  }
+  check.return
+}

@@ -295,11 +295,29 @@ typedef enum loom_aie2p_native_execution_e {
   LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION,
 } loom_aie2p_native_execution_t;
 
+// One configuration-owned channel turn. Whole-record ownership makes a lock
+// value update safe: the opposite endpoint cannot publish another turn until
+// this endpoint returns its credit.
+typedef struct loom_aie2p_native_configuration_action_t {
+  // Channel whose selected protocol supplies this action's semaphore.
+  const loom_aie2p_native_channel_t* channel;
+  // Physical semaphore within the channel's memory owner.
+  uint16_t lock;
+  // Value to observe before the update; -1 means no wait.
+  int16_t expected;
+  // Value to publish; -1 means this source action has no physical update.
+  int16_t value;
+} loom_aie2p_native_configuration_action_t;
+
 typedef struct loom_aie2p_native_worker_t {
   // Authored location used for physical access and route selection.
   loom_aie2p_native_tile_t* tile;
   // Engine implementing the strand; only CORE occupies instruction memory.
   loom_aie2p_native_execution_t execution;
+  // Configuration channel turns indexed by the source channel action table.
+  const loom_aie2p_native_configuration_action_t* configuration_actions;
+  // Fixed record byte offsets indexed by the source's owned-value domain.
+  const uint32_t* configuration_records;
   // Autonomous descriptor iteration for a regular ingress worker.
   struct {
     // Local record count; zero for instruction/configuration engines.

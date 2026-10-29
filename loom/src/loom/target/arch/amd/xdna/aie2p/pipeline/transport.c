@@ -182,9 +182,9 @@ static loom_aie2p_native_dma_descriptor_t*
 loom_aie2p_native_reusable_descriptor(
     const loom_aie2p_native_worker_t* worker,
     const loom_aie2p_native_transfer_task_t* task, bool shim) {
-  if (worker->execution != LOOM_AIE2P_NATIVE_EXECUTION_CORE) {
-    // Autonomous descriptors retain iteration state. Configuration-only waits
-    // observe completion credits without consuming them for a subsequent use.
+  if (worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_DMA) {
+    // Autonomous descriptors retain iteration state until invocation
+    // retirement.
     return NULL;
   }
   const loom_op_t* issue = task->first_transfer->source->request.op;
@@ -211,14 +211,14 @@ loom_aie2p_native_reusable_descriptor(
   return NULL;
 }
 
-// Core waits consume arrival credits, so a retired credit can serve a different
-// descriptor geometry on the same tile. Configuration waits leave their credits
-// set and cannot share them. The search is bounded by the physical lock count.
+// Both core and configuration waits consume arrival credits, so a retired
+// credit can serve another descriptor geometry on the same tile. The search is
+// bounded by the physical lock count.
 static loom_aie2p_native_dma_completion_t*
 loom_aie2p_native_reusable_completion(const loom_aie2p_native_worker_t* worker,
                                       const loom_aie2p_native_tile_t* tile,
                                       const loom_op_t* issue) {
-  if (worker->execution != LOOM_AIE2P_NATIVE_EXECUTION_CORE) {
+  if (worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_DMA) {
     return NULL;
   }
   for (loom_aie2p_native_dma_completion_t* completion = worker->dma_completions;
@@ -509,8 +509,9 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
       const loom_aie2p_native_channel_t* local_channel =
           bound ? &context->channels[bound - realization->resources.channels]
                 : NULL;
-      const bool record_dynamic =
-          bound && bound->capacity > 1 && payload_record.maximum_admissions > 1;
+      const bool record_dynamic = !configuration && bound &&
+                                  bound->capacity > 1 &&
+                                  payload_record.maximum_admissions > 1;
       const loom_value_t* root =
           loom_module_value(module, external->root_value_id);
       if (!local_channel || !loom_value_is_block_arg(root) ||
@@ -528,10 +529,19 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
       }
       loom_aie2p_native_tile_t* local_tile =
           context->pool_tiles[local_channel->pool_index];
+      uint32_t record_offset = 0;
+      if (configuration) {
+        const loom_value_id_t admission = loom_channel_plan_admission(
+            &source->channels, payload_record.value_id);
+        record_offset =
+            worker->configuration_records[loom_local_value_domain_ordinal(
+                &source->value_domain, admission)];
+      }
       const loom_aie2p_native_memory_layout_t* layout =
           local_tile->memory_layout;
       loom_aie2p_native_tile_t* shim =
-          &context->tiles[worker->tile->coordinate.column *
+          &context->tiles[(configuration ? local_tile : worker->tile)
+                              ->coordinate.column *
                           context->family->row_count];
       if (loom_movement_endpoint_minimum_byte_alignment(external) <
               shim->facts->dma.address_alignment ||
@@ -723,7 +733,7 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
       if (!autonomous && !record_dynamic &&
           loom_symbolic_expr_is_constant(&local_view->projection_byte_offset)) {
         const uint32_t address =
-            local_channel->byte_offset +
+            local_channel->byte_offset + record_offset +
             (uint32_t)local_view->projection_byte_offset.constant;
         selected->local_words[layout->address_word] |=
             loom_xdna_register_field_encode(
@@ -805,7 +815,8 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
   // final.
   for (loom_aie2p_native_transfer_t* transfer = worker->transfers; transfer;
        transfer = transfer->next) {
-    if (!transfer->shim_descriptor->address_dynamic) {
+    if (worker->execution != LOOM_AIE2P_NATIVE_EXECUTION_CORE ||
+        !transfer->shim_descriptor->address_dynamic) {
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_source_storage_packing_reserve(
