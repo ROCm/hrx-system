@@ -8,7 +8,9 @@
 
 iree_add_all_subdirs()
 
-if(IREE_TARGET_HAS_THREADS AND IREE_BUILD_BENCHMARKS)
+# Correctness tests exercise benchmark setup and result reporting even when
+# standalone benchmark workloads are disabled.
+if(IREE_TARGET_HAS_THREADS AND (IREE_BUILD_TESTS OR IREE_BUILD_BENCHMARKS))
   iree_cc_library(
     NAME
       benchmark
@@ -50,7 +52,7 @@ iree_cc_library(
   PUBLIC
 )
 
-if(IREE_TARGET_HAS_THREADS AND IREE_BUILD_BENCHMARKS)
+if(IREE_TARGET_HAS_THREADS AND IREE_BUILD_TESTS)
   iree_cc_binary(
     NAME
       benchmark_result_fixture
