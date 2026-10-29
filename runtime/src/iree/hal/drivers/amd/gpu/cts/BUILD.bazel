@@ -373,6 +373,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/drivers/amd:status",
         "//runtime/src/iree/hal/drivers/amd/fabric",
+        "//runtime/src/iree/hal/drivers/amd/fabric:memory_backend",
         "//runtime/src/iree/hal/drivers/amd/gpu:device",
         "//runtime/src/iree/hal/drivers/amd/gpu/image:hip_images",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:semaphore",

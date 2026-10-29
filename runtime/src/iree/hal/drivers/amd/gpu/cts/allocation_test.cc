@@ -19,6 +19,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amd/fabric/fabric.h"
+#include "iree/hal/drivers/amd/fabric/memory_backend.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
 #include "iree/hal/drivers/amd/gpu/device.h"
 #include "iree/hal/drivers/amd/gpu/image/hip_images.h"
@@ -142,6 +143,110 @@ class GpuNativeAllocationTest : public GpuNativeTest {
     }
   }
 
+  // An aperture permits mapping but does not establish host/device visibility.
+  // Query native guarantees independently of HAL pool admission, without
+  // allocating backing or assuming a particular architecture or profile
+  // ordinal.
+  void QueryLocalHostSupport(bool* out_supported) {
+    *out_supported = false;
+    const auto* backend =
+        reinterpret_cast<const iree_hal_amd_fabric_memory_backend_t*>(
+            iree_hal_device_memory_backend(device_));
+    const auto& family = backend->native.families[iree_hal_queue_family_ordinal(
+        iree_hal_queue_family(queues_[0]))];
+    const amdf_memory_device_access_t access = {
+        .device = native_domain_->device,
+        .requirements =
+            {
+                .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
+                          family.minimum_access,
+                .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+                .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
+            },
+    };
+    const amdf_memory_map_flags_t host_access =
+        AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+    const amdf_memory_profile_site_t sites[] = {
+        {
+            .kind = AMDF_MEMORY_SITE_KIND_HOST,
+            .value = {.host_access = host_access},
+        },
+        {
+            .kind = AMDF_MEMORY_SITE_KIND_DEVICE,
+            .value = {.device = {0, family.queue_family_ordinal}},
+        },
+    };
+    const auto* api = native_domain_->api;
+    for (uint32_t i = 0; i < native_domain_->memory_scope_count; ++i) {
+      SCOPED_TRACE(i);
+      auto* scope = native_domain_->memory_scopes[i];
+      amdf_memory_scope_info_t info = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+          .structure_size = sizeof(info),
+      };
+      ASSERT_EQ(api->memory_scope_query_info(scope, &info), AMDF_STATUS_OK);
+      for (uint32_t ordinal = 0; ordinal < info.memory_profile_count;
+           ++ordinal) {
+        SCOPED_TRACE(ordinal);
+        amdf_memory_profile_t profile = {
+            .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+            .structure_size = sizeof(profile),
+        };
+        amdf_memory_access_capabilities_t capabilities = {
+            .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+            .structure_size = sizeof(capabilities),
+        };
+        const amdf_status_t status = api->memory_scope_query_device_profile(
+            scope, ordinal, 1, &access, &profile, &capabilities);
+        if (status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+          continue;
+        }
+        ASSERT_EQ(status, AMDF_STATUS_OK);
+        if (!iree_all_bits_set(profile.roles,
+                               AMDF_MEMORY_PROFILE_ROLE_CREATE |
+                                   AMDF_MEMORY_PROFILE_ROLE_HOST_MAP) ||
+            !iree_all_bits_set(profile.supported_flags,
+                               AMDF_MEMORY_FLAG_HOST_VISIBLE) ||
+            !iree_all_bits_set(profile.host_mapping.supported_access,
+                               host_access)) {
+          continue;
+        }
+        amdf_memory_profile_pair_query_t query = {
+            .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY,
+            .structure_size = sizeof(query),
+            .memory_profile_ordinal = ordinal,
+            .access_count = 1,
+            .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+            .accesses = &access,
+        };
+        bool complete = true;
+        for (const auto& producer : sites) {
+          SCOPED_TRACE(producer.kind);
+          for (const auto& consumer : sites) {
+            SCOPED_TRACE(consumer.kind);
+            query.producer = producer;
+            query.consumer = consumer;
+            amdf_memory_pair_info_t pair = {
+                .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+                .structure_size = sizeof(pair),
+            };
+            const amdf_status_t pair_status =
+                api->memory_scope_query_pair_info(scope, &query, &pair);
+            if (pair_status ==
+                amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+              complete = false;
+              continue;
+            }
+            ASSERT_EQ(pair_status, AMDF_STATUS_OK);
+            complete &= iree_all_bits_set(
+                pair.flags, AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE);
+          }
+        }
+        *out_supported |= complete;
+      }
+    }
+  }
+
   // Explicit native storage owner, kept alive through all borrowed roots.
   iree_hal_pool_t* pool_ = nullptr;
   // Borrowed native dependency domain owned by the constructed device.
@@ -204,11 +309,10 @@ TEST_F(GpuNativeAllocationTest, CachedHostPoolRetainsGuaranteesThroughCopy) {
 
 TEST_F(GpuNativeAllocationTest,
        RequiredLocalHostPoolCopiesThroughPublicMapping) {
-  if (!(native_domain_->device_info.features &
-        AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY)) {
-    GTEST_SKIP()
-        << "native endpoint has no host-visible LOCAL allocation domain";
-  }
+  bool supported = false;
+  ASSERT_NO_FATAL_FAILURE(QueryLocalHostSupport(&supported));
+  RecordProperty("local_host_contract",
+                 supported ? "qualified" : "unsupported");
   using iree::hal::cts::Ref;
   const iree_hal_pool_family_access_t family = {
       .family = iree_hal_queue_family(queues_[0]),
@@ -239,6 +343,14 @@ TEST_F(GpuNativeAllocationTest,
       .placement = {IREE_HAL_POOL_PLACEMENT_REQUIRED, physical_node},
   };
   Ref<iree_hal_pool_t> pool;
+  if (!supported) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_UNAVAILABLE,
+        iree_hal_slab_pool_create(group_, scope, &options,
+                                  iree_allocator_system(), pool.out()));
+    EXPECT_EQ(pool.get(), nullptr);
+    return;
+  }
   IREE_ASSERT_OK(iree_hal_slab_pool_create(
       group_, scope, &options, iree_allocator_system(), pool.out()));
   iree_hal_pool_capabilities_t capabilities;
