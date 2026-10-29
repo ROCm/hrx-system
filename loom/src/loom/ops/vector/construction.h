@@ -79,6 +79,13 @@ iree_status_t loom_vector_insert_combine_elements(loom_op_t* op,
 iree_status_t loom_vector_replace_single_result_with_value(
     loom_op_t* op, loom_rewriter_t* rewriter, loom_value_id_t replacement);
 
+// Builds a scalar or address constant and splats it to |result_type|.
+iree_status_t loom_vector_build_constant_splat(loom_builder_t* builder,
+                                               loom_attribute_t value,
+                                               loom_type_t result_type,
+                                               loom_location_id_t location,
+                                               loom_value_id_t* out_value);
+
 // Builds a splat, transfers the result name, and replaces the construction.
 iree_status_t loom_vector_replace_single_result_with_splat(
     loom_op_t* op, loom_rewriter_t* rewriter, loom_value_id_t scalar,

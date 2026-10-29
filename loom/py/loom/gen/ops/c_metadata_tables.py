@@ -1504,6 +1504,7 @@ def generate_tables_aggregator_c(
 def generate_sharded_tables_c(
     dialect_name: str,
     dialect_id: int,
+    ops: Sequence[Op],
     category_groups: Sequence[tuple[Any, Sequence[Op]]],
     parameterized_attrs: Sequence[ParameterizedAttrDef] = (),
     encoding_families: Sequence[EncodingFamilyDef] = (),
@@ -1512,7 +1513,6 @@ def generate_sharded_tables_c(
     referenced_ops: Sequence[Op] = (),
 ) -> dict[str, str]:
     """Generates an aggregator plus category shards for one dialect."""
-    all_ops = [op for _, category_ops in category_groups for op in category_ops]
     table_files: dict[str, str] = {}
     for category, category_ops in category_groups:
         shard_ops = list(category_ops)
@@ -1525,7 +1525,7 @@ def generate_sharded_tables_c(
             dialect_id,
             shard_ops,
             include_path=include_path,
-            referenced_ops=(*referenced_ops, *all_ops),
+            referenced_ops=(*referenced_ops, *ops),
             emit_registration=False,
             export_vtables=True,
             private_header=True,
@@ -1533,10 +1533,10 @@ def generate_sharded_tables_c(
     table_files["tables.c"] = generate_tables_aggregator_c(
         dialect_name,
         dialect_id,
-        all_ops,
+        ops,
         parameterized_attrs,
         encoding_families,
         include_path=include_path,
     )
-    table_files["tables.h"] = generate_tables_h(dialect_name, all_ops, include_path=include_path)
+    table_files["tables.h"] = generate_tables_h(dialect_name, ops, include_path=include_path)
     return table_files

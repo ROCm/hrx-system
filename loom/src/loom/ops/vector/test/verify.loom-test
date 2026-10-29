@@ -1875,3 +1875,75 @@ func.def @preservation_requires_floating_add(%view: view<1xf32>, %value: vector<
   %old = vector.atomic.rmw.mask<xchgf, noftz> %value, %view[0][%offsets], %mask, %value {ordering = relaxed, scope = workgroup} : vector<2xf32>, view<1xf32>, vector<2xindex>, vector<2xi1>, vector<2xf32>
   func.return
 }
+
+// ====
+
+func.def @constanti_count_mismatch() {
+  // ERROR@+1: STRUCTURE/013 "values"
+  %value = vector.constanti [1, 2, 3] : vector<4xi32>
+  func.return
+}
+
+// ====
+
+func.def @constantf_count_mismatch() {
+  // ERROR@+1: STRUCTURE/013 "values"
+  %value = vector.constantf [1.0, 2.0, 3.0] : vector<4xf32>
+  func.return
+}
+
+// ====
+
+func.def @constanti_dynamic_shape(%n: index) {
+  // ERROR@+1: TYPE/004 "all-static vector shape"
+  %value = vector.constanti [1, 2, 3, 4] : vector<[%n]xi32>
+  func.return
+}
+
+// ====
+
+func.def @constanti_address_element() {
+  // ERROR@+1: TYPE/004 "integer_element"
+  %value = vector.constanti [1, 2, 3, 4] : vector<4xindex>
+  func.return
+}
+
+// ====
+
+func.def @constantf_integer_element() {
+  // ERROR@+1: TYPE/004 "float_element"
+  %value = vector.constantf [1.0, 2.0, 3.0, 4.0] : vector<4xi32>
+  func.return
+}
+
+// ====
+
+func.def @constanti_empty() {
+  // ERROR@+1: TYPE/004 "use vector.empty"
+  %value = vector.constanti [] : vector<0xi32>
+  func.return
+}
+
+// ====
+
+func.def @constantf_empty() {
+  // ERROR@+1: TYPE/004 "use vector.empty"
+  %value = vector.constantf [] : vector<0xf32>
+  func.return
+}
+
+// ====
+
+func.def @constanti_lane_out_of_range() {
+  // ERROR@+1: STRUCTURE/014 "values[2]" "128" "result element type domain"
+  %value = vector.constanti [-128, 127, 128, 0] : vector<4xi8>
+  func.return
+}
+
+// ====
+
+func.def @constanti_i1_lane_out_of_range() {
+  // ERROR@+1: STRUCTURE/014 "values[1]" "-1" "result element type domain"
+  %value = vector.constanti [1, -1] : vector<2xi1>
+  func.return
+}

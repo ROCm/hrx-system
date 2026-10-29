@@ -22,6 +22,7 @@ loom_check_test_suite(
         "bytecode.loom-test",
         "canonicalize.loom-test",
         "comparisonf.loom-test",
+        "constant_literals.loom-test",
         "construction_combine.loom-test",
         "coordinate_facts.loom-test",
         "divrem.loom-test",

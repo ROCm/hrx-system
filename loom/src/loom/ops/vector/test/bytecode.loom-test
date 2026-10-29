@@ -8,6 +8,16 @@ func.def @float_conversion_policy(%half: vector<4xf16>, %single: vector<4xf32>) 
 
 // ====
 
+// Dense literal arrays preserve ordering and exact floating-point carrier bits
+// in bytecode before their canonical expansion.
+func.def @constant_literals() -> (vector<2x2xi16>, vector<2x2xf32>) {
+  %integers = vector.constanti [1, -2, 3, -4] : vector<2x2xi16>
+  %floats = vector.constantf [0.0, -0.0, 2.5, -3.0] : vector<2x2xf32>
+  func.return %integers, %floats : vector<2x2xi16>, vector<2x2xf32>
+}
+
+// ====
+
 // Fragment movement uses keyed attributes, dynamic shape operands, dynamic view
 // origins, cache attrs, and a trailing store without a result. Keep bytecode
 // coverage separate from the larger text roundtrip corpus so wire-format gaps

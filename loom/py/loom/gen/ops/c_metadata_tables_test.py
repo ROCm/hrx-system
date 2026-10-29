@@ -488,6 +488,28 @@ def test_dialect_generation_retains_placement_declarations(sharded: bool) -> Non
     assert "LOOM_OP_EXECUTION_CONTEXT" not in files["ops.h"]
 
 
+def test_sharded_tables_preserve_registry_order_independently_of_categories() -> None:
+    dialect = Dialect("test", dialect_id=0x7D)
+    first = Op("test.first", group=dialect)
+    second = Op("test.second", group=dialect)
+    generation = DialectGeneration(
+        dialect=dialect,
+        ops=[second, first],
+        table_shards=[
+            (OpCategory("first"), [first]),
+            (OpCategory("second"), [second]),
+        ],
+    )
+
+    files = generate_dialect_contents(generation)
+
+    assert "LOOM_OP_TEST_SECOND = LOOM_OP_KIND(LOOM_DIALECT_TEST, 0)" in files["ops.h"]
+    assert "LOOM_OP_TEST_FIRST = LOOM_OP_KIND(LOOM_DIALECT_TEST, 1)" in files["ops.h"]
+    assert files["tables.c"].index("&loom_test_second_vtable") < files["tables.c"].index("&loom_test_first_vtable")
+    assert "const loom_op_vtable_t loom_test_first_vtable" in files["tables/first.c"]
+    assert "const loom_op_vtable_t loom_test_second_vtable" in files["tables/second.c"]
+
+
 def test_constraint_count_fits_vtable_storage() -> None:
     for count in (255, 256):
         op = Op(

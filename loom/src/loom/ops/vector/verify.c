@@ -786,6 +786,44 @@ iree_status_t loom_vector_empty_verify(const loom_module_t* module,
       IREE_SV("static zero-lane vector type"));
 }
 
+iree_status_t loom_vector_constant_elements_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_type_t result_type =
+      loom_module_value_type(module, loom_op_const_results(op)[0]);
+  if (!loom_type_is_vector(result_type)) {
+    return iree_ok_status();
+  }
+  if (loom_type_has_static_zero_extent(result_type)) {
+    return loom_vector_emit_result_constraint(
+        emitter, op, IREE_SV("result"), result_type,
+        IREE_SV("non-empty vector type; use vector.empty for static zero-lane "
+                "values"));
+  }
+  if (!loom_vector_constanti_isa(op)) {
+    return iree_ok_status();
+  }
+
+  int64_t minimum_value = 0;
+  int64_t maximum_value = 0;
+  const bool has_integer_domain = loom_scalar_type_integer_domain(
+      loom_type_element_type(result_type), &minimum_value, &maximum_value);
+  IREE_ASSERT(has_integer_domain);
+  const loom_attribute_t values = loom_vector_constanti_values(op);
+  for (uint16_t i = 0; i < values.count; ++i) {
+    const int64_t value = values.i64_array[i];
+    if (value < minimum_value || value > maximum_value) {
+      char value_name_buffer[32];
+      iree_snprintf(value_name_buffer, sizeof(value_name_buffer), "values[%u]",
+                    i);
+      return loom_vector_emit_attribute_value_constraint(
+          emitter, op, iree_make_cstring_view(value_name_buffer), value,
+          IREE_SV("result element type domain"));
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_vector_broadcast_verify(const loom_module_t* module,
                                            const loom_op_t* op,
                                            iree_diagnostic_emitter_t emitter) {

@@ -2869,7 +2869,7 @@ def OffsetCountMatchesRank(shaped: str, offsets: str) -> Constraint:
 
 
 def ValueCountMatchesStaticElementCount(shaped: str, values: str) -> Constraint:
-    """Value count must equal a shaped field's static element count."""
+    """Value collection count must equal a shaped field's static element count."""
 
     def _validate(fields: dict[str, Any]) -> tuple[bool, str]:
         from loom.ir import DynamicDim, StaticDim

@@ -1,0 +1,59 @@
+// RUN: roundtrip
+
+// Dense literals cover every fixed-width integer and floating-point element
+// family. Index and offset are address types and remain scalar splats.
+func.def @literal_element_families() {
+  %i1 = vector.constanti [0, 1] : vector<2xi1>
+  %i8 = vector.constanti [-1, 2] : vector<2xi8>
+  %i16 = vector.constanti [-3, 4] : vector<2xi16>
+  %i32 = vector.constanti [-5, 6] : vector<2xi32>
+  %i64 = vector.constanti [-7, 8] : vector<2xi64>
+  %f8e4m3 = vector.constantf [-1.0, 2.0] : vector<2xf8E4M3>
+  %f8e5m2 = vector.constantf [-1.0, 2.0] : vector<2xf8E5M2>
+  %f16 = vector.constantf [-3.0, 4.0] : vector<2xf16>
+  %bf16 = vector.constantf [-5.0, 6.0] : vector<2xbf16>
+  %f32 = vector.constantf [-7.0, 8.0] : vector<2xf32>
+  %f64 = vector.constantf [-9.0, 10.0] : vector<2xf64>
+  %nonfinite = vector.constantf [nan, inf, -inf, -0.0] : vector<4xf64>
+  func.return
+}
+
+// ====
+// RUN: pass canonicalize
+
+// Nonuniform literals expand in logical row-major lane order.
+func.def @nonuniform_literals() -> (vector<2x2xi16>, vector<2x2xf32>) {
+  %integers = vector.constanti [1, -2, 3, -4] : vector<2x2xi16>
+  %floats = vector.constantf [0.0, -0.0, 2.5, -3.0] : vector<2x2xf32>
+  func.return %integers, %floats : vector<2x2xi16>, vector<2x2xf32>
+}
+// ----
+func.def @nonuniform_literals() -> (vector<2x2xi16>, vector<2x2xf32>) {
+  %9 = scalar.constant 1 : i16
+  %10 = scalar.constant -2 : i16
+  %11 = scalar.constant 3 : i16
+  %12 = scalar.constant -4 : i16
+  %integers = vector.from_elements %9, %10, %11, %12 : vector<2x2xi16>
+  %4 = scalar.constant 0.0 : f32
+  %5 = scalar.constant -0.0 : f32
+  %6 = scalar.constant 2.5 : f32
+  %7 = scalar.constant -3.0 : f32
+  %floats = vector.from_elements %4, %5, %6, %7 : vector<2x2xf32>
+  func.return %integers, %floats : vector<2x2xi16>, vector<2x2xf32>
+}
+
+// ====
+// RUN: pass canonicalize
+
+// Uniform literals canonicalize one way to scalar constants and splats.
+func.def @uniform_literals() -> (vector<4xi32>, vector<4xf32>) {
+  %integers = vector.constanti [7, 7, 7, 7] : vector<4xi32>
+  %floats = vector.constantf [-0.0, -0.0, -0.0, -0.0] : vector<4xf32>
+  func.return %integers, %floats : vector<4xi32>, vector<4xf32>
+}
+// ----
+func.def @uniform_literals() -> (vector<4xi32>, vector<4xf32>) {
+  %integers = vector.constant 7 : vector<4xi32>
+  %floats = vector.constant -0.0 : vector<4xf32>
+  func.return %integers, %floats : vector<4xi32>, vector<4xf32>
+}

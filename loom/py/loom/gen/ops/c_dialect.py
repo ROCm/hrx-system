@@ -41,6 +41,7 @@ def generate_dialect_contents(generation: DialectGeneration) -> dict[str, str]:
         generate_sharded_tables_c(
             dialect.name,
             dialect.dialect_id,
+            generation.ops,
             generation.table_shards,
             generation.parameterized_attrs,
             generation.encoding_families,

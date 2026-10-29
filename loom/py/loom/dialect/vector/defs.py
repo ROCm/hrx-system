@@ -56,6 +56,7 @@ from loom.dsl import (
     ATTR_TYPE_DICT,
     ATTR_TYPE_ENUM,
     ATTR_TYPE_F64,
+    ATTR_TYPE_F64_ARRAY,
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
@@ -520,6 +521,58 @@ vector_constant = Op(
     traits=[PURE, CONSTANT_LIKE, REFINABLE_RESULT_TYPE_REFS],
     format=[Attr("value"), COLON, ResultType("result")],
     examples=["%v = vector.constant 0.0 : vector<4xf32>"],
+    eager_execution_cost=1,
+)
+
+vector_constanti = Op(
+    "vector.constanti",
+    group=vector_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Materialize a non-empty all-static integer vector from ordered "
+        "literal lanes. Values use logical row-major lane order, and their "
+        "count must match the result shape. Uniform literals canonicalize to "
+        "a scalar constant and vector.splat; other literals canonicalize to "
+        "scalar constants and vector.from_elements."
+    ),
+    results=[Result("result", VECTOR)],
+    attrs=[AttrDef("values", ATTR_TYPE_I64_ARRAY, doc="Ordered integer lanes.")],
+    constraints=[
+        HasAllStaticVector("result"),
+        HasIntegerElement("result"),
+        ValueCountMatchesStaticElementCount("result", "values"),
+    ],
+    verify="loom_vector_constant_elements_verify",
+    canonicalize="loom_vector_constant_elements_canonicalize",
+    traits=[PURE, CONSTANT_LIKE],
+    format=[Attr("values"), COLON, ResultType("result")],
+    examples=["%v = vector.constanti [1, -2, 3, 4] : vector<2x2xi16>"],
+    eager_execution_cost=1,
+)
+
+vector_constantf = Op(
+    "vector.constantf",
+    group=vector_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Materialize a non-empty all-static floating-point vector from "
+        "ordered literal lanes. Values use logical row-major lane order, and "
+        "their count must match the result shape. Uniform literals "
+        "canonicalize to a scalar constant and vector.splat; other literals "
+        "canonicalize to scalar constants and vector.from_elements."
+    ),
+    results=[Result("result", VECTOR)],
+    attrs=[AttrDef("values", ATTR_TYPE_F64_ARRAY, doc="Ordered floating-point lanes.")],
+    constraints=[
+        HasAllStaticVector("result"),
+        HasFloatElement("result"),
+        ValueCountMatchesStaticElementCount("result", "values"),
+    ],
+    verify="loom_vector_constant_elements_verify",
+    canonicalize="loom_vector_constant_elements_canonicalize",
+    traits=[PURE, CONSTANT_LIKE],
+    format=[Attr("values"), COLON, ResultType("result")],
+    examples=["%v = vector.constantf [1.0, -0.0, 3.5, 4.0] : vector<2x2xf16>"],
     eager_execution_cost=1,
 )
 
@@ -4752,6 +4805,8 @@ vector_reduce_axes = Op(
 
 VECTOR_CONSTRUCTION_OPS: tuple[Op, ...] = (
     vector_constant,
+    vector_constanti,
+    vector_constantf,
     vector_poison,
     vector_empty,
     vector_splat,
@@ -4965,4 +5020,13 @@ VECTOR_OP_CATEGORY_GROUPS: tuple[tuple[OpCategory, tuple[Op, ...]], ...] = (
     (VECTOR_REFINEMENT_CATEGORY, VECTOR_REFINEMENT_OPS),
 )
 
-ALL_VECTOR_OPS: tuple[Op, ...] = tuple(op for _, category_ops in VECTOR_OP_CATEGORY_GROUPS for op in category_ops)
+# Category order groups related builders and documentation. Registry order also
+# assigns observable operation-kind ordinals, so new operations append without
+# renumbering the established dialect. The legacy vector.constant slot becomes
+# vector.constanti when the old attribute-splat operation is removed.
+ALL_VECTOR_OPS: tuple[Op, ...] = (
+    vector_constant,
+    *(op for _, category_ops in VECTOR_OP_CATEGORY_GROUPS for op in category_ops if op is not vector_constant and op is not vector_constanti and op is not vector_constantf),
+    vector_constanti,
+    vector_constantf,
+)

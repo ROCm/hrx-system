@@ -1423,9 +1423,9 @@ static void loom_verify_relation_count_matches_rank(
                               error->param_count < 3 ? error->param_count : 3);
 }
 
-// COUNT_MATCHES_STATIC_ELEMENT_COUNT: a variadic value field's element count
-// equals the static element count of a shaped value field. Args: (shaped value
-// field, variadic value field).
+// COUNT_MATCHES_STATIC_ELEMENT_COUNT: a variadic value field or ordered array
+// attribute's element count equals the static element count of a shaped value
+// field. Args: (shaped value field, counted field).
 static void loom_verify_relation_count_matches_static_element_count(
     loom_verify_state_t* state, const loom_op_t* op,
     const loom_op_vtable_t* vtable, const loom_constraint_t* constraint) {
@@ -1461,7 +1461,23 @@ static void loom_verify_relation_count_matches_static_element_count(
     return;
   }
 
-  uint16_t value_count = loom_verify_variadic_count(op, vtable, values_ref);
+  uint16_t value_count = 0;
+  if (LOOM_FIELD_REF_CATEGORY(values_ref) == LOOM_FIELD_ATTR) {
+    const uint8_t attr_index = LOOM_FIELD_REF_INDEX(values_ref);
+    if (attr_index >= op->attribute_count ||
+        attr_index >= vtable->attribute_count || !vtable->attr_descriptors) {
+      return;
+    }
+    const loom_attribute_t values = loom_op_attrs(op)[attr_index];
+    if (!loom_attr_descriptor_accepts_kind(
+            &vtable->attr_descriptors[attr_index],
+            (loom_attr_kind_t)values.kind)) {
+      return;
+    }
+    value_count = values.count;
+  } else {
+    value_count = loom_verify_variadic_count(op, vtable, values_ref);
+  }
   if (value_count == expected_count) {
     return;
   }

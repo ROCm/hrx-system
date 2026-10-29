@@ -180,9 +180,9 @@ enum loom_constraint_relation_e {
   // field). Used by OffsetCountMatchesRank.
   LOOM_RELATION_COUNT_MATCHES_RANK,
 
-  // The element count of a variadic value field equals the static element
-  // count of a shaped value field. Args: (shaped value field, variadic value
-  // field). Used by ValueCountMatchesStaticElementCount.
+  // The element count of a variadic value field or ordered array attribute
+  // equals the static element count of a shaped value field. Args: (shaped
+  // value field, counted field). Used by ValueCountMatchesStaticElementCount.
   LOOM_RELATION_COUNT_MATCHES_STATIC_ELEMENT_COUNT,
 
   // An i64 attribute's value falls within [0, rank) of a shaped value
