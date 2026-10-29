@@ -38,7 +38,6 @@ class CiCoreLinuxTest(unittest.TestCase):
                 args.rocm_root = rocm_root
                 args.build_dir = root / "build"
                 args.public_install_dir = root / "public"
-                args.tests_install_dir = root / "tests"
 
                 commands = []
                 with mock.patch.object(
@@ -151,14 +150,13 @@ class CiCoreLinuxTest(unittest.TestCase):
         commands = self.build_core_commands()
         configure_cmd = commands[0]
         self.assertIn("-DIREE_BUILD_TESTS=ON", configure_cmd)
-        self.assertIn("-DIREE_BUILD_BENCHMARKS=ON", configure_cmd)
+        self.assertIn("-DIREE_BUILD_BENCHMARKS=OFF", configure_cmd)
         self.assertIn("-DLOOM_BUILD=ON", configure_cmd)
         self.assertIn("-DIREE_HAL_DRIVER_AMD=ON", configure_cmd)
         self.assertIn("-DAMDF_BUILD=ON", configure_cmd)
         self.assertIn("-DLIBHRX_BUILD=ON", configure_cmd)
         self.assertIn("-DLIBHRX_BUILD_CTS=ON", configure_cmd)
         self.assertIn("-DLIBHRX_BUILD_HIP_BINDING=ON", configure_cmd)
-        self.assertIn("-DHRX_INSTALL_TESTS=ON", configure_cmd)
         self.assertIn("-DLIBHRX_BUILD_PASSTHROUGH=ON", configure_cmd)
         self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", configure_cmd)
         self.assertNotIn("-DCMAKE_C_COMPILER_LAUNCHER=ccache", configure_cmd)
@@ -167,7 +165,7 @@ class CiCoreLinuxTest(unittest.TestCase):
         self.assertIn("all", commands[1])
         self.assertEqual(
             [command[0:2] for command in commands[2:]],
-            [["cmake", "--install"], ["cmake", "--install"]],
+            [["cmake", "--install"]],
         )
 
     def test_sanitizer_build_only_configures_the_source_test_tree(self):
@@ -177,12 +175,24 @@ class CiCoreLinuxTest(unittest.TestCase):
         self.assertIn("-DIREE_ENABLE_ASAN=ON", commands[0])
         self.assertIn("-DIREE_BUILD_TESTS=ON", commands[0])
 
+    def test_gpu_build_without_packaging_only_configures(self):
+        commands = self.build_core_commands(
+            {
+                "HRX_PACKAGE": "false",
+                "HRX_PACKAGE_SMOKE": "false",
+                "HRX_TEST_GPU": "true",
+            }
+        )
+        self.assertEqual(len(commands), 1)
+        self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", commands[0])
+        self.assertIn("-DLIBHRX_BUILD_CTS=ON", commands[0])
+
     def test_build_core_can_exclude_loom_from_the_product(self):
         commands = self.build_core_commands({"HRX_BUILD_LOOM": "false"})
 
         self.assertIn("-DLOOM_BUILD=OFF", commands[0])
 
-    def test_sanitizer_tests_build_the_selected_source_ctest_closure(self):
+    def check_selected_source_ctest_closure(self, sanitizer):
         with tempfile.TemporaryDirectory() as temporary_dir:
             root = Path(temporary_dir)
             rocm_root = root / "rocm"
@@ -195,7 +205,9 @@ class CiCoreLinuxTest(unittest.TestCase):
             with mock.patch.dict(
                 os.environ,
                 {
-                    "HRX_SANITIZER": "asan",
+                    "HRX_SANITIZER": sanitizer,
+                    "HRX_PACKAGE_SMOKE": "false",
+                    "HRX_CTS_DEVICE": "gpu:0",
                     "HRX_CTEST_REGEX": "^iree/",
                     "HRX_CTEST_EXCLUDE_REGEX": "excluded",
                     "HRX_CTEST_LABEL_EXCLUDE_REGEX": "runtime-resource=|manual",
@@ -211,7 +223,7 @@ class CiCoreLinuxTest(unittest.TestCase):
                 selected_test_step = mock.Mock()
                 selected_test_step.run.return_value = 0
                 with mock.patch.object(
-                    ci_core_linux.ctest_dev,
+                    ci_core_linux.common.ctest_dev,
                     "CTestBuildAndRunStep",
                     return_value=selected_test_step,
                 ) as step_type:
@@ -228,14 +240,22 @@ class CiCoreLinuxTest(unittest.TestCase):
                 "-R",
                 "^iree/",
                 "-E",
-                "(excluded)",
+                "(^build_tools/cmake/)|(excluded)",
                 "-LE",
                 "runtime-resource=|manual",
                 "--no-tests=error",
             ],
         )
-        self.assertIn("ASAN_OPTIONS", step_args["env"])
+        if sanitizer == "asan":
+            self.assertIn("ASAN_OPTIONS", step_args["env"])
+        self.assertIn(str(rocm_root / "lib"), step_args["env"]["LD_LIBRARY_PATH"])
+        self.assertEqual(step_args["env"]["HRX_CTS_DEVICE"], "gpu:0")
         selected_test_step.run.assert_called_once_with(verbose=True)
+
+    def test_tests_build_the_selected_source_ctest_closure(self):
+        for sanitizer in ("none", "asan"):
+            with self.subTest(sanitizer=sanitizer):
+                self.check_selected_source_ctest_closure(sanitizer)
 
     def test_build_core_preserves_standard_compiler_launcher_options(self):
         commands = self.build_core_commands(

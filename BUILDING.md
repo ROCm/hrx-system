@@ -995,7 +995,6 @@ tree. Bazel project availability is currently expressed by target selection.
 | `LIBHRX_BUILD_PASSTHROUGH` | `ON` on Linux, `OFF` elsewhere | CMake | Builds HIP passthrough and interception developer tools. |
 | `LOOM_BUILD` | `ON` | CMake | Builds Loom libraries, tools, bindings, and tests. |
 | `IREE_BUILD_TESTS` | `ON` | CMake | Builds runtime tests and CTS targets. |
-| `HRX_INSTALL_TESTS` | `${IREE_BUILD_TESTS}` | CMake | Installs a relocatable CTest tree. |
 
 ## Installation and Embedding
 
@@ -1007,9 +1006,9 @@ python dev.py cmake build
 cmake --install build/cmake --prefix build/install
 ```
 
-Replace `build/cmake` with the configured build tree. HRX's `HrxPublicDist` and
-`HrxTestsDist` install components allow separate runtime and test packages;
-see the [HRX package instructions](README.md#building). Public HRX packaging
+Replace `build/cmake` with the configured build tree. HRX's `HrxPublicDist`
+component installs its public SDK; see the
+[HRX package instructions](README.md#building). Public HRX packaging
 uses `BUILD_SHARED_LIBS=OFF` so private runtime components are incorporated into
 `libhrx`. Shared Loom tool bundles have their own
 [linkage option](#shared-loom-tool-bundles).

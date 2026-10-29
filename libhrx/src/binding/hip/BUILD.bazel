@@ -531,9 +531,7 @@ hrx_cc_test(
     ],
 )
 
-# The installed-test registration runs while this file's generated CMake is
-# evaluated. Set the shared library's artifact name before the test records it
-# as data or expands its target-file environment value.
+# Export the HIP compatibility library with the ROCm ABI name and version.
 iree_cmake_extra_content(
     content = """
 if(TARGET libhrx_src_binding_hip_amdhip64)

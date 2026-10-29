@@ -18,7 +18,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/../sanitizer/iree_sanitizer_suppressions.cmak
 # COPTS: List of private compile options
 # DEFINES: List of public defines
 # LINKOPTS: List of link options
-# TESTONLY: for testing; won't compile when tests are disabled
+# TESTONLY: for testing; not installed and not compiled when tests are disabled
 # HOSTONLY: host only; compile using host toolchain when cross-compiling
 # COVERAGE: whether to enable code coverage during compilation/linking.
 # SETUP_INSTALL_RPATH: Sets an install RPATH which assumes the standard
@@ -172,25 +172,24 @@ function(iree_cc_binary)
   set_property(TARGET ${_NAME} PROPERTY CXX_STANDARD ${IREE_CXX_STANDARD})
   set_property(TARGET ${_NAME} PROPERTY CXX_STANDARD_REQUIRED ON)
 
-  set(_INSTALL_COMPONENT "${_RULE_INSTALL_COMPONENT}")
-  if(NOT _INSTALL_COMPONENT)
-    set(_INSTALL_COMPONENT "IREETool-${_RULE_NAME}")
-  endif()
-
   if(_RULE_EXCLUDE_FROM_ALL)
     set_property(TARGET ${_NAME} PROPERTY EXCLUDE_FROM_ALL ON)
-    install(TARGETS ${_NAME}
-            RENAME ${_RULE_NAME}
-            COMPONENT ${_INSTALL_COMPONENT}
-            RUNTIME DESTINATION bin
-            BUNDLE DESTINATION bin
-            EXCLUDE_FROM_ALL)
-  else()
+  endif()
+  if(NOT _RULE_TESTONLY)
+    set(_INSTALL_COMPONENT "${_RULE_INSTALL_COMPONENT}")
+    if(NOT _INSTALL_COMPONENT)
+      set(_INSTALL_COMPONENT "IREETool-${_RULE_NAME}")
+    endif()
+    set(_INSTALL_OPTIONS)
+    if(_RULE_EXCLUDE_FROM_ALL)
+      list(APPEND _INSTALL_OPTIONS EXCLUDE_FROM_ALL)
+    endif()
     install(TARGETS ${_NAME}
       RENAME ${_RULE_NAME}
       COMPONENT ${_INSTALL_COMPONENT}
       RUNTIME DESTINATION bin
-      BUNDLE DESTINATION bin)
+      BUNDLE DESTINATION bin
+      ${_INSTALL_OPTIONS})
   endif()
 
   # Setup RPATH if on a Unix-like system. We have two use cases that we are

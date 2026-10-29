@@ -4,19 +4,16 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 from build_tools.cmake.test_environment import (
     CONFIGURATION,
     CTEST_COMMAND,
     REPO_ROOT,
     configure_project,
-    install_project,
     run_command,
     test_project,
 )
@@ -63,26 +60,13 @@ class CMakeTestResultsTest(unittest.TestCase):
             for report, name in reports.items():
                 self.assertEqual(report.read_text(), name + "\n")
 
-    def test_results_follow_invocations_and_relocated_scratch(self):
+    def test_results_follow_invocations(self):
         with tempfile.TemporaryDirectory(prefix="cmake test results ") as temporary:
             root = Path(temporary)
-            source, build, prefix = (
-                root / name for name in ("source", "build", "install")
-            )
+            source, build = root / "source", root / "build"
             shutil.copytree(FIXTURE, source)
             configure_project(source, build)
             self.check_results(build, build / "test_tmpdir")
-            install_project(build, prefix)
-            relocated = root / "relocated install"
-            prefix.rename(relocated)
-            source.rename(root / "retired source")
-            build.rename(root / "retired build")
-            tests = relocated / "share/tests"
-            with mock.patch.dict(os.environ, {"HRX_TEST_TMPDIR": ""}):
-                self.check_results(tests, tests / "tmp")
-            scratch = root / "custom scratch"
-            with mock.patch.dict(os.environ, {"HRX_TEST_TMPDIR": str(scratch)}):
-                self.check_results(tests, scratch)
 
 
 if __name__ == "__main__":

@@ -66,8 +66,6 @@ python dev.py cmake configure \
 python dev.py cmake build
 cmake --install build/cmake --prefix build/hrx-install \
   --component HrxPublicDist
-cmake --install build/cmake --prefix build/hrx-tests \
-  --component HrxTestsDist
 ```
 
 The equivalent raw CMake command is still valid when embedding or debugging the
@@ -93,8 +91,6 @@ cmake -S . -B build/hrx-system -GNinja \
 cmake --build build/hrx-system
 cmake --install build/hrx-system --prefix build/hrx-install \
   --component HrxPublicDist
-cmake --install build/hrx-system --prefix build/hrx-tests \
-  --component HrxTestsDist
 ```
 
 Useful options:
@@ -107,7 +103,6 @@ Useful options:
 | `LIBHRX_BUILD_HIP_BINDING` | ON | Build the HIP runtime API compatibility DLL. |
 | `LIBHRX_BUILD_PASSTHROUGH` | `ON` on Linux, `OFF` elsewhere | Build HIP passthrough/interception tools. |
 | `IREE_BUILD_TESTS` | ON | Build IREE runtime tests and CTS targets. |
-| `HRX_INSTALL_TESTS` | `${IREE_BUILD_TESTS}` | Install a relocatable CTest tree. |
 | `IREE_HAL_DRIVER_AMDGPU` | OFF | Build the legacy ROCr HAL driver used by LibHRX GPU compatibility. |
 | `IREE_ROCM_DEPENDENCY_MODE` | empty | Overrides ROCm header dependency resolution: `pinned`, `package`, or `auto`; empty selects package mode when `IREE_ROCM_PATH` is set. |
 | `IREE_ROCM_PATH` | empty | ROCm or TheRock SDK root used for package-mode ROCm headers and device tooling. |
@@ -134,7 +129,7 @@ python dev.py bazel hook --profile paranoid
 python dev.py bazel precommit
 ```
 
-Use the CMake lane when you are working from the package/install-test side:
+Use the CMake lane when working on native builds or public SDK packaging:
 
 ```bash
 python dev.py cmake setup
@@ -169,36 +164,29 @@ for the hook architecture.
 
 ## Running Tests
 
-The installed test tree is relocatable and can run outside the build directory:
+Tests run from the configured build directory. The wrapper builds the targets
+required by the selected tests before invoking CTest:
 
 ```bash
-ctest --test-dir build/hrx-tests/share/hrx-system/tests \
-  --output-on-failure --parallel "$(nproc)"
-```
-
-Set `HRX_TEST_TMPDIR` to put per-test temporary directories somewhere writable:
-
-```bash
-HRX_TEST_TMPDIR=/tmp/hrx-system-tests \
-  ctest --test-dir build/hrx-tests/share/hrx-system/tests \
-  --output-on-failure --parallel "$(nproc)"
+python dev.py cmake test
 ```
 
 Tests that require runtime hardware resources are labeled with
-`runtime-resource=*`. CPU-only runners should exclude them:
+`runtime-resource=*`. CPU-only runs exclude them and opt-in manual tests:
 
 ```bash
-ctest --test-dir build/hrx-tests/share/hrx-system/tests \
-  --output-on-failure -LE runtime-resource=
+python dev.py cmake test -- -LE 'runtime-resource=|manual'
 ```
 
-GPU runners use the AMD GPU resource label to run all GPU-dependent installed
+GPU runners select the AMD GPU resource label to build and run GPU-dependent
 tests across HRX and runtime projects:
 
 ```bash
-ctest --test-dir build/hrx-tests/share/hrx-system/tests \
-  --output-on-failure -L runtime-resource=amd-gpu
+python dev.py cmake test -- -L runtime-resource=amd-gpu -LE manual
 ```
+
+For a raw CMake build, build the required targets and run
+`ctest --test-dir build/hrx-system --output-on-failure` with the same filters.
 
 ## Release Artifacts
 
@@ -209,11 +197,9 @@ helper scripts where useful:
 |----------|----------|
 | `hrx-public-linux-x86_64` | Public HRX install: `libhrx.so`, `libamdhip64.so`, headers, CMake package files, and tools. |
 | `hrx-public-deps-linux-x86_64` | Runtime ROCm dependency subset needed with the public install, including HSA and AQL profile libraries. |
-| `hrx-tests-linux-x86_64` | Installed CTest tree, unit tests, CTS binaries, test data, and benchmarks. |
 | `hrx-rocm-buildenv-linux-x86_64` | ROCm build environment used by CI, including ROCm LLVM. |
 | `hrx-public-windows-x86_64` | Public HRX Windows install: `hrx.dll`, import library, public HRX headers, CMake package files, and `hrx-info`. |
 | `hrx-public-deps-windows-x86_64` | Reserved public dependency overlay for the Windows package; the initial Windows package does not bundle ROCm runtime DLLs. |
-| `hrx-tests-windows-x86_64` | Windows installed CTest tree, runtime/libhrx unit tests, and test data. |
 | `hrx-rocm-buildenv-windows-x86_64` | ROCm Windows build environment used by CI, including ROCm LLVM. |
 
 To recreate the runtime overlay used by CI, extract the public package and the
@@ -229,8 +215,6 @@ tar --use-compress-program=unzstd -xf hrx-public-deps-linux-x86_64-<tag>.tar.zst
 source /tmp/hrx-root/hrx-public-linux-x86_64-env.sh
 ```
 
-Extract `hrx-tests-linux-x86_64-<tag>.tar.zst` into a separate tests root and
-run its installed CTest tree against the composed runtime environment.
 Windows release artifacts use `.zip` archives and include `.ps1` and `.cmd`
 environment helper scripts next to the package archive.
 
@@ -257,5 +241,4 @@ developer tools for comparing behavior against the real ROCm HIP runtime.
 - `BUILDING.md`: source-build, embedding, and build configuration options.
 - `CONTRIBUTING.md`: contributor workflow and `dev.py` modes.
 - `build_tools/lefthook/README.md`: Lefthook profiles and hook architecture.
-- `docs/testing/installed_tests.md`: installed test tree details.
 - `libhrx/src/passthrough/README.md`: HIP passthrough and tracing tools.

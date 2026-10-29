@@ -137,53 +137,6 @@ class CiCoreWindowsTest(unittest.TestCase):
             )
             self.assertEqual((copied_package / "module.py").read_text(), "value = 1\n")
 
-    def test_copy_tree_contents_materializes_installed_build_testdata_symlink(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            repo_root = root / "repo"
-            repo_file = repo_root / "loom" / "py" / "loom" / "assembly.py"
-            repo_file.parent.mkdir(parents=True)
-            repo_file.write_text("value = 1\n")
-
-            source = (
-                root
-                / "install"
-                / "tests"
-                / "share"
-                / "hrx-system"
-                / "tests"
-                / "testdata"
-                / "build"
-                / "loom"
-                / "py"
-                / "loom"
-            )
-            source.mkdir(parents=True)
-            link_file = source / "assembly.py"
-            self._symlink_or_skip(root / "missing-target.py", link_file)
-            target = root / "composed"
-
-            with mock.patch.object(ci_core_common, "REPO_ROOT", repo_root):
-                ci_core_common.copy_tree_contents(
-                    root / "install", target, preserve_symlinks=False
-                )
-
-            copied_file = (
-                target
-                / "tests"
-                / "share"
-                / "hrx-system"
-                / "tests"
-                / "testdata"
-                / "build"
-                / "loom"
-                / "py"
-                / "loom"
-                / "assembly.py"
-            )
-            self.assertFalse(copied_file.is_symlink())
-            self.assertEqual(copied_file.read_text(), "value = 1\n")
-
     def test_create_zip_materializes_file_symlinks(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -291,7 +244,6 @@ class CiCoreWindowsTest(unittest.TestCase):
             [
                 "hrx-public-windows-x86_64",
                 "hrx-public-deps-windows-x86_64",
-                "hrx-tests-windows-x86_64",
                 "hrx-rocm-buildenv-windows-x86_64",
             ],
         )
@@ -516,7 +468,6 @@ class CiCoreWindowsTest(unittest.TestCase):
                 rocm_root=rocm_root,
                 build_dir=root / "build",
                 public_install_dir=root / "public",
-                tests_install_dir=root / "tests",
                 build_type="RelWithDebInfo",
                 passthrough=False,
                 assertions=False,
@@ -525,7 +476,8 @@ class CiCoreWindowsTest(unittest.TestCase):
                 target="all",
                 windows_toolchain="msvc",
                 public_component="IREEPackage",
-                tests_component="IREEPackage-tests",
+                package=True,
+                package_smoke=True,
             )
             toolchain = ci_core_windows.WindowsToolchain(
                 name="msvc",
@@ -580,162 +532,92 @@ class CiCoreWindowsTest(unittest.TestCase):
         self.assertIn("-DLIBHRX_BUILD_PASSTHROUGH=OFF", configure_cmd)
         self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=OFF", configure_cmd)
 
-    def test_test_core_runs_hrx_info_without_package_smoke(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
+    def test_test_core_builds_the_selected_source_ctest_closure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
             rocm_root = root / "rocm"
-            public_deps_dir = root / "public-deps"
-            public_install_dir = root / "public"
-            tests_install_dir = root / "tests"
-            ctest_file = (
-                tests_install_dir
-                / "share"
-                / "hrx-system"
-                / "tests"
-                / "CTestTestfile.cmake"
-            )
             rocm_root.mkdir()
-            public_deps_dir.mkdir()
-            (public_install_dir / "bin").mkdir(parents=True)
-            (public_install_dir / "bin" / "hrx.dll").touch()
-            (public_install_dir / "bin" / "hrx-info.exe").touch()
-            ctest_file.parent.mkdir(parents=True)
-            ctest_file.write_text("# tests\n")
-            args = Namespace(
-                rocm_root=rocm_root,
-                public_deps_dir=public_deps_dir,
-                public_install_dir=public_install_dir,
-                tests_install_dir=tests_install_dir,
-                composed_install_dir=root / "composed",
-                package_smoke_build_dir=root / "smoke",
-                prepare_public_deps=False,
-                package_smoke=False,
-                cts_device="",
-                test_tmpdir=None,
-                ctest_parallelism=1,
-                ctest_regex="",
-                ctest_exclude_regex="",
-                ctest_label_regex="",
-                ctest_label_exclude_regex="",
-            )
-            commands = []
-
-            old_rocm_build_env = ci_core_windows.rocm_build_env
-            old_run = ci_core_windows.run
-            try:
-                ci_core_windows.rocm_build_env = lambda _rocm_root: {}
-                ci_core_windows.run = lambda cmd, **_kwargs: commands.append(
-                    [os.fspath(arg) for arg in cmd]
-                )
-
+            build_dir = root / "build"
+            build_dir.mkdir()
+            (build_dir / "CTestTestfile.cmake").touch()
+            parser = argparse.ArgumentParser()
+            with mock.patch.dict(os.environ, {}, clear=True):
+                ci_core_windows.add_shared_args(parser)
+                args = parser.parse_args(["--no-package-smoke"])
+            args.rocm_root = rocm_root
+            args.build_dir = build_dir
+            args.ctest_regex = "^hrx/"
+            args.ctest_parallelism = 2
+            args.ctest_label_exclude_regex = "manual"
+            selected_test_step = mock.Mock()
+            selected_test_step.run.return_value = 0
+            with (
+                mock.patch.object(
+                    ci_core_windows,
+                    "rocm_build_env",
+                    return_value={"PATH": "toolchain"},
+                ),
+                mock.patch.object(
+                    ci_core_common.ctest_dev,
+                    "CTestBuildAndRunStep",
+                    return_value=selected_test_step,
+                ) as step_type,
+            ):
                 ci_core_windows.test_core(args)
-            finally:
-                ci_core_windows.rocm_build_env = old_rocm_build_env
-                ci_core_windows.run = old_run
-
-        command_lines = [" ".join(command) for command in commands]
-        self.assertEqual(len(commands), 3)
-        self.assertIn("ctest", commands[0][0])
-        self.assertEqual(
-            command_lines.count(str(root / "composed" / "bin" / "hrx-info.exe")), 1
-        )
-        self.assertTrue(
-            any("hrx-info.exe --device=cpu:0" in line for line in command_lines)
-        )
-        self.assertFalse(any("package_smoke" in line for line in command_lines))
-
-    def test_generated_package_scan_rejects_configure_time_python(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            ctest_file = (
-                root
-                / "share"
-                / "hrx-system"
-                / "tests"
-                / "ctest"
-                / "CTestTestfile.cmake"
+            self.assertEqual(step_type.call_args.kwargs["build_dir"], build_dir)
+            self.assertEqual(step_type.call_args.kwargs["env"]["PATH"], "toolchain")
+            self.assertEqual(
+                step_type.call_args.kwargs["arguments"],
+                [
+                    "--parallel",
+                    "2",
+                    "-R",
+                    "^hrx/",
+                    "-E",
+                    "(^build_tools/cmake/)",
+                    "-LE",
+                    "manual",
+                    "--no-tests=error",
+                ],
             )
-            ctest_file.parent.mkdir(parents=True)
-            ctest_file.write_text(
-                'add_test("py" "C:/Python313/python.exe" "test.py")\n',
-                encoding="utf-8",
-            )
-
-            with self.assertRaisesRegex(RuntimeError, "captured interpreter"):
-                ci_core_windows.scan_generated_package_files(
-                    [root],
-                    forbidden_paths=[],
-                    forbidden_interpreters=[Path("C:/Python313/python.exe")],
-                )
+            selected_test_step.run.assert_called_once_with(verbose=True)
+            selected_test_step.run.return_value = 17
+            with (
+                mock.patch.object(ci_core_windows, "rocm_build_env", return_value={}),
+                mock.patch.object(
+                    ci_core_common.ctest_dev,
+                    "CTestBuildAndRunStep",
+                    return_value=selected_test_step,
+                ),
+                self.assertRaises(subprocess.CalledProcessError) as failure,
+            ):
+                ci_core_windows.test_core(args)
+            self.assertEqual(failure.exception.returncode, 17)
 
     def test_generated_package_scan_rejects_original_roots(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             build_root = root / "build"
-            ctest_root = root / "tests"
-            ctest_file = (
-                ctest_root
-                / "share"
-                / "hrx-system"
-                / "tests"
-                / "ctest"
-                / "CTestTestfile.cmake"
-            )
-            ctest_file.parent.mkdir(parents=True)
-            ctest_file.write_text(
-                f'set(TEST_PATH "{ci_core_windows.cmake_path(build_root)}")\n',
+            package_root = root / "public"
+            config_file = package_root / "lib/cmake/hrx/hrx-config.cmake"
+            config_file.parent.mkdir(parents=True)
+            config_file.write_text(
+                f'set(IMPORT_PATH "{ci_core_windows.cmake_path(build_root)}")\n',
                 encoding="utf-8",
             )
 
             with self.assertRaisesRegex(RuntimeError, "captured"):
                 ci_core_windows.scan_generated_package_files(
-                    [ctest_root],
+                    [package_root],
                     forbidden_paths=[build_root],
-                    forbidden_interpreters=[],
                 )
-
-    def test_generated_package_scan_accepts_runtime_python_lookup(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            ctest_file = (
-                root
-                / "share"
-                / "hrx-system"
-                / "tests"
-                / "ctest"
-                / "CTestTestfile.cmake"
-            )
-            ctest_file.parent.mkdir(parents=True)
-            ctest_file.write_text(
-                "if(DEFINED ENV{HRX_TEST_PYTHON})\n"
-                '  set(HRX_TEST_PYTHON "$ENV{HRX_TEST_PYTHON}")\n'
-                "else()\n"
-                "  find_program(HRX_TEST_PYTHON NAMES python3 python REQUIRED)\n"
-                "endif()\n"
-                'add_test("py" "${HRX_TEST_PYTHON}" "test.py")\n',
-                encoding="utf-8",
-            )
-
-            ci_core_windows.scan_generated_package_files(
-                [root],
-                forbidden_paths=[root / "build"],
-                forbidden_interpreters=[Path("C:/Python313/python.exe")],
-            )
 
     def test_package_core_accepts_libhrx_public_install_without_loomc(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             rocm_root = root / "rocm"
             public_install_dir = root / "public"
-            tests_install_dir = root / "tests"
             public_deps_dir = root / "public-deps"
-            ctest_file = (
-                tests_install_dir
-                / "share"
-                / "hrx-system"
-                / "tests"
-                / "CTestTestfile.cmake"
-            )
             (public_install_dir / "bin").mkdir(parents=True)
             (public_install_dir / "bin" / "hrx.dll").touch()
             (public_install_dir / "bin" / "hrx-info.exe").touch()
@@ -753,13 +635,10 @@ class CiCoreWindowsTest(unittest.TestCase):
                 public_install_dir / "lib" / "cmake" / "hrx" / "hrx-config.cmake"
             ).write_text("# config\n")
             rocm_root.mkdir()
-            ctest_file.parent.mkdir(parents=True)
-            ctest_file.write_text("# tests\n")
             args = Namespace(
                 rocm_root=rocm_root,
                 package_output_dir=root / "dist",
                 public_install_dir=public_install_dir,
-                tests_install_dir=tests_install_dir,
                 public_deps_dir=public_deps_dir,
                 package_suffix="test",
                 build_dir=root / "build",

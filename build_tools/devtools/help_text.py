@@ -184,7 +184,7 @@ Use .bazelrc.local for checkout-specific Bazel overrides.
 without adding frontend packages to the base module lock.""",
             )
         return CommandHelp(
-            description="Configure the CMake package/install-test build tree.",
+            description="Configure the CMake build tree.",
             arguments="CMake configure options.",
             epilog="""Examples:
   python dev.py cmake configure
@@ -655,7 +655,7 @@ Outputs: `bazel-bin/`, `bazel-testlogs/`, and `bazel-out/`."""
 def cmake_agent_markdown() -> str:
     return """### CMake
 
-Use `iree-cmake-*` for package and install-test workflows. `iree-cmake-configure`
+Use `iree-cmake-*` for native builds, tests, and SDK packaging. `iree-cmake-configure`
 records the selected build tree for later wrappers. `iree-cmake-build TARGET`
 maps to `cmake --build ... --target TARGET`.
 
@@ -945,7 +945,7 @@ or `IREE_CMAKE_BUILD_DIR`."""
     if command == "configure":
         return """## iree-cmake-configure
 
-Configure the CMake package/install-test build tree for this checkout.
+Configure the CMake build tree for this checkout.
 
 ```bash
 iree-cmake-configure

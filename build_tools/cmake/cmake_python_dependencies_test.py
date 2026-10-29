@@ -15,7 +15,6 @@ from build_tools.cmake.test_environment import (
     REPO_ROOT,
     build_project,
     configure_project,
-    install_project,
     test_project,
 )
 
@@ -46,13 +45,6 @@ class CMakePythonDependenciesTest(unittest.TestCase):
             check("left: changed\n")
             configure_project(source, build, "-DIREE_TEST_REVERSE_DEPS=ON")
             check("right: changed\n")
-
-            prefix = root / "installed"
-            install_project(build, prefix)
-            # Installed tests must not import from either original tree.
-            source.rename(root / "retired-source")
-            build.rename(root / "retired-build")
-            test_project(prefix / "share/tests")
 
     def test_shared_graph_work_scales_with_declarations(self):
         with tempfile.TemporaryDirectory() as temporary:

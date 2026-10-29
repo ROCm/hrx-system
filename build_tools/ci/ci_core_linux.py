@@ -32,12 +32,9 @@ if str(REPO_ROOT) not in sys.path:
 from build_tools.ci import ci_core_common as common
 from build_tools.ci.ci_core_common import (
     ARTIFACT_SETS,
-    CORE_CTEST_EXCLUDE_REGEXES,
     cmake_options_from_env,
-    combine_ctest_exclude_regex,
     copy_matching_rocm_paths,
     copy_relative_path,
-    default_ctest_parallelism,
     env_bool,
     extract_tar_package_archive,
     log,
@@ -49,12 +46,10 @@ from build_tools.ci.ci_core_common import (
     run,
     sanitizer_options,
 )
-from build_tools.devtools import ctest as ctest_dev
 
 PACKAGE_NAMES = [
     "hrx-public-linux-x86_64",
     "hrx-public-deps-linux-x86_64",
-    "hrx-tests-linux-x86_64",
     "hrx-rocm-buildenv-linux-x86_64",
 ]
 
@@ -86,7 +81,6 @@ def extract_packages(args: argparse.Namespace) -> None:
         package_roots={
             "hrx-public-linux-x86_64": args.public_install_dir.resolve(),
             "hrx-public-deps-linux-x86_64": args.public_deps_dir.resolve(),
-            "hrx-tests-linux-x86_64": args.tests_install_dir.resolve(),
         },
         extension=".tar.zst",
         extract_archive=extract_tar_package_archive,
@@ -223,7 +217,6 @@ def build_core(args: argparse.Namespace) -> None:
     rocm_root = args.rocm_root.resolve()
     build_dir = args.build_dir.resolve()
     public_install_dir = args.public_install_dir.resolve()
-    tests_install_dir = args.tests_install_dir.resolve()
     require_path(rocm_root, "ROCm build root")
 
     c_compiler = rocm_tool(rocm_root, "clang")
@@ -232,7 +225,6 @@ def build_core(args: argparse.Namespace) -> None:
     ranlib = rocm_tool(rocm_root, "llvm-ranlib")
 
     cmake_prefix_path = ";".join([str(rocm_root)])
-    ctest_enabled = True
     cmake_defines = [
         f"CMAKE_PREFIX_PATH={cmake_prefix_path}",
         f"CMAKE_INSTALL_PREFIX={public_install_dir}",
@@ -246,15 +238,14 @@ def build_core(args: argparse.Namespace) -> None:
         "CMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld",
         "CMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld",
         f"CMAKE_BUILD_TYPE={args.build_type}",
-        f"IREE_BUILD_TESTS={'ON' if ctest_enabled else 'OFF'}",
-        "IREE_BUILD_BENCHMARKS=ON",
+        "IREE_BUILD_TESTS=ON",
+        "IREE_BUILD_BENCHMARKS=OFF",
         f"LOOM_BUILD={'ON' if args.build_loom else 'OFF'}",
         "IREE_HAL_DRIVER_AMD=ON",
         "AMDF_BUILD=ON",
         "LIBHRX_BUILD=ON",
-        f"LIBHRX_BUILD_CTS={'ON' if ctest_enabled else 'OFF'}",
+        "LIBHRX_BUILD_CTS=ON",
         "LIBHRX_BUILD_HIP_BINDING=ON",
-        f"HRX_INSTALL_TESTS={'ON' if ctest_enabled else 'OFF'}",
         f"LIBHRX_BUILD_PASSTHROUGH={'ON' if args.passthrough else 'OFF'}",
         f"IREE_HAL_DRIVER_AMDGPU={'ON' if args.amdgpu else 'OFF'}",
         f"IREE_ROCM_PATH={rocm_root}",
@@ -287,128 +278,57 @@ def build_core(args: argparse.Namespace) -> None:
         env=env,
         pretty_command=True,
     )
-    if args.sanitizer != "none":
-        log(
-            "Sanitizer build tree configured; selected source tests own the "
-            "build closure."
-        )
+    if args.sanitizer != "none" or not (args.package or args.package_smoke):
+        log("Build tree configured; selected tests own the build closure.")
         return
 
     run(
         ["cmake", "--build", build_dir, "--target", args.target], cwd=REPO_ROOT, env=env
     )
 
-    for install_dir, component in [
-        (public_install_dir, args.public_component),
-        (tests_install_dir, args.tests_component),
-    ]:
-        if install_dir.exists():
-            remove_tree(install_dir)
-        run(
-            [
-                "cmake",
-                "--install",
-                build_dir,
-                "--prefix",
-                install_dir,
-                "--component",
-                component,
-            ],
-            cwd=REPO_ROOT,
-            env=env,
-        )
-
-
-def ctest_arguments(args: argparse.Namespace) -> list[str]:
-    ctest_parallelism = args.ctest_parallelism or default_ctest_parallelism()
-    arguments = ["--parallel", str(ctest_parallelism)]
-    if args.ctest_regex:
-        arguments.extend(["-R", args.ctest_regex])
-    ctest_exclude_regex = combine_ctest_exclude_regex(
-        *CORE_CTEST_EXCLUDE_REGEXES, args.ctest_exclude_regex
-    )
-    if ctest_exclude_regex:
-        arguments.extend(["-E", ctest_exclude_regex])
-    if args.ctest_label_regex:
-        arguments.extend(["-L", args.ctest_label_regex])
-    if args.ctest_label_exclude_regex:
-        arguments.extend(["-LE", args.ctest_label_exclude_regex])
-    return arguments
-
-
-def apply_test_environment(
-    args: argparse.Namespace,
-    env: dict[str, str],
-) -> dict[str, str]:
-    env = dict(env)
-    if args.cts_device:
-        env["HRX_CTS_DEVICE"] = args.cts_device
-    if args.test_tmpdir is not None:
-        env["HRX_TEST_TMPDIR"] = os.fspath(args.test_tmpdir.resolve())
-    return env
-
-
-def test_source_build(args: argparse.Namespace) -> None:
-    rocm_root = args.rocm_root.resolve()
-    build_dir = args.build_dir.resolve()
-    require_path(rocm_root, "ROCm build root")
-    require_path(build_dir / "CTestTestfile.cmake", "source CTest file")
-
-    env = add_sanitizer_runtime_env(
-        rocm_build_env(rocm_root),
-        sanitizer=args.sanitizer,
-        rocm_root=rocm_root,
-    )
-    env = apply_test_environment(args, env)
-    test_step = ctest_dev.CTestBuildAndRunStep(
-        cmake="cmake",
-        ctest="ctest",
-        build_dir=build_dir,
-        arguments=[*ctest_arguments(args), "--no-tests=error"],
+    if public_install_dir.exists():
+        remove_tree(public_install_dir)
+    run(
+        [
+            "cmake",
+            "--install",
+            build_dir,
+            "--prefix",
+            public_install_dir,
+            "--component",
+            args.public_component,
+        ],
         cwd=REPO_ROOT,
         env=env,
     )
-    result = test_step.run(verbose=True)
-    if result != 0:
-        raise subprocess.CalledProcessError(result, "selected CTest build and run")
 
 
 def test_core(args: argparse.Namespace) -> None:
-    if args.sanitizer != "none":
-        test_source_build(args)
-        return
+    rocm_root = args.rocm_root.resolve()
+    require_path(rocm_root, "ROCm build root")
+    env = add_sanitizer_runtime_env(
+        install_runtime_env(rocm_root, rocm_build_env(rocm_root)),
+        sanitizer=args.sanitizer,
+        rocm_root=rocm_root,
+    )
+    common.test_source_build(args, env=env)
+    if args.sanitizer == "none" and args.package_smoke:
+        test_package(args)
 
+
+def test_package(args: argparse.Namespace) -> None:
     rocm_root = args.rocm_root.resolve()
     smoke_build_dir = args.package_smoke_build_dir.resolve()
     if args.prepare_public_deps:
         prepare_public_deps_root(args)
     install_root = prepare_composed_install_root(args)
-    installed_tests_dir = install_root / "share" / "hrx-system" / "tests"
-
-    require_path(installed_tests_dir / "CTestTestfile.cmake", "installed CTest file")
     require_path(install_root / "lib" / "libhrx.so", "installed libhrx.so")
     if args.build_loom:
         require_path(install_root / "lib" / "libloomc.so", "installed libloomc.so")
     require_path(install_root / "bin" / "hrx-info", "installed hrx-info")
 
-    if rocm_root.exists():
-        base_env = rocm_build_env(rocm_root)
-    elif args.package_smoke:
-        require_path(rocm_root, "ROCm build root")
-        base_env = rocm_build_env(rocm_root)
-    else:
-        base_env = dict(os.environ)
-
-    env = apply_test_environment(args, install_runtime_env(install_root, base_env))
-    ctest_cmd = [
-        "ctest",
-        "--test-dir",
-        installed_tests_dir,
-        "--output-on-failure",
-        "--no-tests=error",
-        *ctest_arguments(args),
-    ]
-    run(ctest_cmd, cwd=REPO_ROOT, env=env, stderr_to_stdout=True)
+    require_path(rocm_root, "ROCm build root")
+    env = install_runtime_env(install_root, rocm_build_env(rocm_root))
     run([install_root / "bin" / "hrx-info"], cwd=REPO_ROOT, env=env)
     run([install_root / "bin" / "hrx-info", "--device=cpu:0"], cwd=REPO_ROOT, env=env)
     if args.gpu:
@@ -417,9 +337,6 @@ def test_core(args: argparse.Namespace) -> None:
             cwd=REPO_ROOT,
             env=env,
         )
-
-    if not args.package_smoke:
-        return
 
     sanitizer_link_flag = sanitizer_flag(args.sanitizer)
     smoke_link_flags = "-fuse-ld=lld"
@@ -481,7 +398,6 @@ ROCM_BUILDENV_EXCLUDE_PATHS = {
     "env.sh",
     "hrx-public-linux-x86_64-env.sh",
     "hrx-public-deps-linux-x86_64-env.sh",
-    "hrx-tests-linux-x86_64-env.sh",
     "hrx-rocm-buildenv-linux-x86_64-env.sh",
     "include/hrx",
     "include/loomc",
@@ -727,14 +643,6 @@ def package_core(args: argparse.Namespace) -> None:
             / "loomc-config.cmake",
             "public loomc CMake package",
         )
-    require_path(
-        args.tests_install_dir.resolve()
-        / "share"
-        / "hrx-system"
-        / "tests"
-        / "CTestTestfile.cmake",
-        "installed CTest file",
-    )
     prepare_public_deps_root(args)
 
     package_tree(
@@ -752,13 +660,6 @@ def package_core(args: argparse.Namespace) -> None:
         suffix=suffix,
         rocm_root=rocm_root,
         env_script_name="hrx-public-deps-linux-x86_64-env.sh",
-    )
-    package_tree(
-        package_name="hrx-tests-linux-x86_64",
-        source_root=args.tests_install_dir.resolve(),
-        output_dir=output_dir,
-        suffix=suffix,
-        rocm_root=rocm_root,
     )
     package_tree(
         package_name="hrx-rocm-buildenv-linux-x86_64",
@@ -808,6 +709,7 @@ def main(argv: list[str] | None = None) -> int:
         fetch_rocm_fn=fetch_rocm,
         build_core_fn=build_core,
         test_core_fn=test_core,
+        test_package_fn=test_package,
         extract_packages_fn=extract_packages,
         package_core_fn=package_core,
     )

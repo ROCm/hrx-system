@@ -15,7 +15,6 @@ from build_tools.cmake.test_environment import (
     REPO_ROOT,
     build_project,
     configure_project,
-    install_project,
     test_project,
 )
 
@@ -23,7 +22,7 @@ FIXTURES = REPO_ROOT / "build_tools/cmake/testdata"
 
 
 class CMakeDataDependenciesTest(unittest.TestCase):
-    def test_shared_staged_data_stays_fresh_and_relocates(self):
+    def test_shared_staged_data_stays_fresh(self):
         with tempfile.TemporaryDirectory(prefix="cmake staged data ") as temporary:
             root = Path(temporary)
             source, build = root / "source with spaces", root / "build with spaces"
@@ -57,20 +56,6 @@ class CMakeDataDependenciesTest(unittest.TestCase):
                     path.read_bytes(), (source / path.relative_to(build)).read_bytes()
                 )
             test_project(build)
-
-            prefix = root / "install"
-            install_project(build, prefix)
-            relocated = root / "relocated install"
-            prefix.rename(relocated)
-            source.rename(root / "retired source")
-            build.rename(root / "retired build")
-            output = test_project(relocated / "share/tests", "--verbose")
-            for payload in (
-                "updated shared payload",
-                "slash payload",
-                "underscore payload",
-            ):
-                self.assertIn(payload, output)
 
     def test_file_and_target_data_build_their_producers(self):
         with tempfile.TemporaryDirectory() as temporary:

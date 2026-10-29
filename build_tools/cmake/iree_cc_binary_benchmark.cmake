@@ -58,11 +58,6 @@ function(iree_cc_binary_benchmark)
     set(_MAYBE_HOSTONLY "HOSTONLY")
   endif()
 
-  set(_MAYBE_INSTALL_COMPONENT "")
-  if(IREE_BENCHMARK_INSTALL_COMPONENT)
-    set(_MAYBE_INSTALL_COMPONENT INSTALL_COMPONENT ${IREE_BENCHMARK_INSTALL_COMPONENT})
-  endif()
-
   iree_cc_binary(
     NAME
       ${_RULE_NAME}
@@ -76,13 +71,10 @@ function(iree_cc_binary_benchmark)
       ${_RULE_DEFINES}
     LINKOPTS
       ${_RULE_LINKOPTS}
-    ${_MAYBE_INSTALL_COMPONENT}
     ${_MAYBE_TESTONLY}
     ${_MAYBE_HOSTONLY}
   )
 
-  set(_IREE_SAVED_SKIP_TEST_REGISTRATION "${IREE_SKIP_TEST_REGISTRATION}")
-  set(IREE_SKIP_TEST_REGISTRATION ON)
   iree_native_test(
     NAME
       ${_RULE_NAME}_test
@@ -97,5 +89,4 @@ function(iree_cc_binary_benchmark)
     RESOURCE_GROUP
       ${_RULE_RESOURCE_GROUP}
   )
-  set(IREE_SKIP_TEST_REGISTRATION "${_IREE_SAVED_SKIP_TEST_REGISTRATION}")
 endfunction()

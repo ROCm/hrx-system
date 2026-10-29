@@ -160,7 +160,6 @@ function(iree_cc_test)
   string(REPLACE "::" "/" _PACKAGE_PATH ${_PACKAGE_NS})
   set(_NAME_PATH "${_PACKAGE_PATH}/${_RULE_NAME}")
   set(_TEST_BUILD_TARGET "${_NAME}")
-  set(_IREE_TEST_CAN_REGISTER OFF)
 
   set(_ENVIRONMENT_VARS)
   list(APPEND _ENVIRONMENT_VARS ${_RULE_ENV})
@@ -200,7 +199,6 @@ function(iree_cc_test)
       )
 
     iree_configure_test(${_NAME_PATH})
-    set(_IREE_TEST_CAN_REGISTER ON)
   endif()
   iree_register_test_build_targets(
     "${_NAME_PATH}"
@@ -245,36 +243,6 @@ function(iree_cc_test)
 
   if(_RULE_RESOURCE_GROUP)
     set_property(TEST ${_NAME_PATH} PROPERTY RESOURCE_LOCK "${_RULE_RESOURCE_GROUP}")
-  endif()
-
-  if(_IREE_TEST_CAN_REGISTER AND
-     IREE_TEST_REGISTRATION_FUNCTION AND
-     NOT IREE_SKIP_TEST_REGISTRATION)
-    set(_IREE_REGISTERED_RESOURCE_GROUP)
-    if(_RULE_RESOURCE_GROUP)
-      set(_IREE_REGISTERED_RESOURCE_GROUP RESOURCE_GROUP "${_RULE_RESOURCE_GROUP}")
-    endif()
-    if(COMMAND ${IREE_TEST_REGISTRATION_FUNCTION})
-      cmake_language(CALL ${IREE_TEST_REGISTRATION_FUNCTION}
-        NAME
-          "${_NAME_PATH}"
-        TARGET
-          "${_NAME}"
-        ARGS
-          ${_RULE_ARGS}
-        DATA
-          ${_RULE_DATA}
-        SANITIZER_TARGET
-          "${_NAME}"
-        ENVIRONMENT
-          ${_ENVIRONMENT_VARS}
-        LABELS
-          ${_RULE_LABELS}
-        TIMEOUT
-          ${_RULE_TIMEOUT}
-        ${_IREE_REGISTERED_RESOURCE_GROUP}
-      )
-    endif()
   endif()
 
   if(_RULE_GROUP)

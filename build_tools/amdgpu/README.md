@@ -206,8 +206,8 @@ code-object target and can return both the aggregate CMake targets and generated
 file names. `iree_amdgpu_binary_variants_embed_data(...)` builds the same
 selected variants and immediately feeds them through `iree_c_embed_data`, giving
 the consuming C/C++ code a generated table of contents. Test-owned HSACOs should
-use the embed-data form so installed tests, Bazel runfiles, and local CMake
-builds all consume the same in-process bytes.
+use the embed-data form so Bazel and CMake tests consume the same in-process
+bytes.
 
 These rules consume the resolved
 `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_*` capability configured by the containing

@@ -276,9 +276,6 @@ if(LOOM_BUILD)
     iree_add_subdirectory(loom/build_tools/corpus)
   endblock()
   iree_add_subdirectory(loom/binding/c)
-  hrx_installed_tests_install_source_tree(
-    "${PROJECT_SOURCE_DIR}/loom/src/loom" "loom/src/loom"
-    _HRX_INSTALLED_LOOM_SOURCE_TREE)
 endif()
 
 if(LIBHRX_BUILD)
@@ -304,7 +301,6 @@ if(IREE_BUILD_TESTS)
   iree_finalize_python_test_environments()
   iree_finalize_test_build_targets()
   iree_create_ctest_customization()
-  hrx_create_installed_tests()
 endif()
 
 # Register after callbacks that create targets, including Windows Python sources.

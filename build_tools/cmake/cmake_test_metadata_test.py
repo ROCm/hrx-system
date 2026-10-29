@@ -15,7 +15,6 @@ from build_tools.cmake.test_environment import (
     REPO_ROOT,
     build_project,
     configure_project,
-    install_project,
     test_project,
 )
 
@@ -70,14 +69,6 @@ iree_target_sanitizer_suppressions(tool_backed_root)
 iree_finalize_sanitizer_suppressions()
 set_property(TEST host PROPERTY ENVIRONMENT "$<TARGET_PROPERTY:host_root,IREE_SANITIZER_ENVIRONMENT>")
 set_property(TEST tool-backed PROPERTY ENVIRONMENT "$<TARGET_PROPERTY:tool_backed_root,IREE_SANITIZER_ENVIRONMENT>")
-set(HRX_INSTALL_TESTS ON)
-set(IREE_BUILD_TESTS ON)
-set(HRX_INSTALL_TESTS_DIR "tests")
-set(HRX_INSTALL_TESTS_COMPONENT "FixtureTests")
-include("${{IREE_REPO_ROOT}}/libhrx/build_tools/cmake/hrx_installed_tests.cmake")
-hrx_register_installed_test(NAME installed COMMAND "${{CMAKE_COMMAND}}"
-  ARGS -E true SANITIZER_TARGET host_root ENVIRONMENT "FIXTURE_ENV=preserved")
-hrx_create_installed_tests()
 """)
             build_dir = root / "build"
             configure_project(
@@ -118,28 +109,6 @@ hrx_create_installed_tests()
             second.write_text("leak:changed")
             build_project(build_dir, "host_root")
             self.assertEqual(merged.read_text().split(), ["leak:first", "leak:changed"])
-            install_dir = root / "relocated install"
-            install_project(build_dir, install_dir)
-            installed = json.loads(
-                test_project(install_dir / "tests", "--show-only=json-v1")
-            )["tests"][0]
-            environment = next(
-                prop["value"]
-                for prop in installed["properties"]
-                if prop["name"] == "ENVIRONMENT"
-            )
-            self.assertIn("FIXTURE_ENV=preserved", environment)
-            sanitizer_environment = [
-                value
-                for value in environment
-                if value.startswith(("LSAN_OPTIONS=", "TSAN_OPTIONS="))
-            ]
-            self.assertEqual(len(sanitizer_environment), 2)
-            for value in sanitizer_environment:
-                suppression = Path(value.split('"')[1])
-                self.assertTrue(suppression.is_relative_to(install_dir))
-                self.assertTrue(suppression.is_file())
-                self.assertNotIn(str(build_dir), value)
 
     def test_rejects_invalid_build_metadata(self):
         cases = (

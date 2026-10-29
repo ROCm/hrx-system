@@ -408,7 +408,6 @@ endfunction()
 # Parameters:
 # NAME: name of test
 # SRC: Test source file
-# SOURCES: All Python sources required by the test.
 # DEPS: Python library targets required by the test.
 # ARGS: Command line arguments to the Python source file.
 #     File paths use the same {{file}} locators as iree_native_test.
@@ -431,7 +430,7 @@ function(iree_local_py_test)
     _RULE
     "GENERATED_IN_BINARY_DIR"
     "NAME;RESOURCE_GROUP;SRC"
-    "ARGS;DATA;DEPS;LABELS;PACKAGE_DIRS;SOURCES;TIMEOUT"
+    "ARGS;DATA;DEPS;LABELS;PACKAGE_DIRS;TIMEOUT"
     ${ARGN}
   )
 
@@ -440,12 +439,6 @@ function(iree_local_py_test)
   if(_RULE_GENERATED_IN_BINARY_DIR)
     set(_SRC_DIR "${_IREE_PACKAGE_BINARY_DIR}")
   endif()
-
-  set(_SOURCE_FILES)
-  foreach(_SOURCE IN LISTS _RULE_SOURCES)
-    get_filename_component(_SOURCE "${_SOURCE}" ABSOLUTE BASE_DIR "${_SRC_DIR}")
-    list(APPEND _SOURCE_FILES "${_SOURCE}")
-  endforeach()
 
   iree_package_name(_PACKAGE_NAME)
   set(_NAME "${_PACKAGE_NAME}_${_RULE_NAME}")
@@ -476,8 +469,6 @@ function(iree_local_py_test)
   if(_RULE_RESOURCE_GROUP)
     set_property(TEST ${_NAME_PATH} PROPERTY RESOURCE_LOCK "${_RULE_RESOURCE_GROUP}")
   endif()
-
-  set(_IREE_INSTALL_PACKAGE_DIRS ${_RULE_PACKAGE_DIRS})
 
   if(NOT _RULE_DEPS)
     iree_python_test_add_package_dirs("${_NAME_PATH}" ${_RULE_PACKAGE_DIRS})
@@ -520,37 +511,6 @@ function(iree_local_py_test)
     "${_NAME_PATH}"
     TARGETS ${_TEST_BUILD_TARGETS}
   )
-
-  if(IREE_PYTHON_TEST_REGISTRATION_FUNCTION AND
-     NOT IREE_SKIP_TEST_REGISTRATION)
-    set(_IREE_REGISTERED_RESOURCE_GROUP)
-    if(_RULE_RESOURCE_GROUP)
-      set(_IREE_REGISTERED_RESOURCE_GROUP RESOURCE_GROUP "${_RULE_RESOURCE_GROUP}")
-    endif()
-    if(COMMAND ${IREE_PYTHON_TEST_REGISTRATION_FUNCTION})
-      cmake_language(CALL ${IREE_PYTHON_TEST_REGISTRATION_FUNCTION}
-        NAME
-          "${_NAME_PATH}"
-        SRC
-          "${_SOURCE_PATH}"
-        DATA
-          ${_RULE_DATA}
-        SOURCES
-          ${_SOURCE_FILES}
-        DEPS
-          ${_RULE_DEPS}
-        ARGS
-          ${_RULE_ARGS}
-        LABELS
-          ${_RULE_LABELS}
-        PACKAGE_DIRS
-          ${_IREE_INSTALL_PACKAGE_DIRS}
-        TIMEOUT
-          ${_RULE_TIMEOUT}
-        ${_IREE_REGISTERED_RESOURCE_GROUP}
-      )
-    endif()
-  endif()
 endfunction()
 
 # iree_py_test()
@@ -610,7 +570,6 @@ function(iree_py_test)
 
   iree_package_ns(_PACKAGE_NS)
   list(TRANSFORM _RULE_DEPS REPLACE "^::" "${_PACKAGE_NS}::")
-  set(_RULE_SOURCE_FILES ${_RULE_SRCS})
   if(_RULE_PACKAGE_DIRS)
     list(REMOVE_DUPLICATES _RULE_PACKAGE_DIRS)
   endif()
@@ -624,8 +583,6 @@ function(iree_py_test)
       "${_RULE_NAME}"
     SRC
       "${_RULE_MAIN_SOURCE}"
-    SOURCES
-      ${_RULE_SOURCE_FILES}
     DATA
       ${_RULE_DATA}
     DEPS

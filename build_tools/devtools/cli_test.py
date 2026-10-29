@@ -1677,7 +1677,6 @@ class CliTest(unittest.TestCase):
     def test_cmake_configure_help_explains_user_visible_build_tree(self):
         output = self.parse_help(["cmake", "configure", "--help"])
 
-        self.assertIn("Configure the CMake package/install-test build tree", output)
         self.assertIn("build/cmake", output)
         self.assertIn("IREE_CMAKE_BUILD_DIR", output)
         self.assertNotIn("../builds", output)

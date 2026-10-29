@@ -196,7 +196,10 @@ py_test(
         "ci_core_windows_test.py",
     ],
     main = "ci_core_windows_test.py",
-    deps = [":windows_diagnostics"],
+    deps = [
+        ":windows_diagnostics",
+        "//build_tools/devtools",
+    ],
 )
 
 py_test(

@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable, Iterable
 
+from build_tools.devtools import ctest as ctest_dev
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Minimal TheRock artifact closure used by HRX CI. Platform selection is handled
@@ -60,7 +62,8 @@ ARTIFACT_SETS = {
 
 ROCM_ARTIFACT_VARIANTS = ("release", "asan", "host-asan", "tsan")
 ROCM_ARTIFACT_VARIANT_LOG_KEY = "logs/compiler-runtime/amd-llvm_configure.log"
-CORE_CTEST_EXCLUDE_REGEXES = ()
+# Build-system lifecycle tests run in the repository CMake jobs.
+CORE_CTEST_EXCLUDE_REGEXES = (r"^build_tools/cmake/",)
 
 
 @dataclass(frozen=True)
@@ -135,20 +138,6 @@ def remove_tree(path: Path) -> None:
         shutil.rmtree(path)
 
 
-def _repo_source_for_installed_build_testdata(path: Path) -> Path | None:
-    # Installed tests copy CMake build-tree mirrors under testdata/build. Those
-    # mirrors use symlinks back to source files, so their repo-relative suffix
-    # is a valid source fallback when Windows cannot resolve the link directly.
-    parts = path.parts
-    lower_parts = [part.lower() for part in parts]
-    for i in range(len(parts) - 1):
-        if lower_parts[i] == "testdata" and lower_parts[i + 1] == "build":
-            rel_parts = parts[i + 2 :]
-            if rel_parts:
-                return REPO_ROOT.joinpath(*rel_parts)
-    return None
-
-
 def _existing_materialized_path(path: Path) -> Path | None:
     try:
         if path.is_symlink():
@@ -169,15 +158,11 @@ def materialized_source_path(path: Path) -> Path:
     except OSError as resolve_error:
         link_target = os.readlink(path)
         target_path = Path(link_target)
-        candidates = [
+        candidate = (
             target_path if target_path.is_absolute() else path.parent / target_path
-        ]
-        if repo_source := _repo_source_for_installed_build_testdata(path):
-            candidates.append(repo_source)
-
-        for candidate in candidates:
-            if materialized := _existing_materialized_path(candidate):
-                return materialized
+        )
+        if materialized := _existing_materialized_path(candidate):
+            return materialized
 
         raise OSError(
             f"Could not materialize symlink {path} -> {link_target}"
@@ -926,6 +911,42 @@ def copy_matching_rocm_paths(
     return copied
 
 
+def ctest_arguments(args: argparse.Namespace) -> list[str]:
+    ctest_parallelism = args.ctest_parallelism or default_ctest_parallelism()
+    arguments = ["--parallel", str(ctest_parallelism)]
+    if args.ctest_regex:
+        arguments.extend(["-R", args.ctest_regex])
+    ctest_exclude_regex = combine_ctest_exclude_regex(
+        *CORE_CTEST_EXCLUDE_REGEXES, args.ctest_exclude_regex
+    )
+    if ctest_exclude_regex:
+        arguments.extend(["-E", ctest_exclude_regex])
+    if args.ctest_label_regex:
+        arguments.extend(["-L", args.ctest_label_regex])
+    if args.ctest_label_exclude_regex:
+        arguments.extend(["-LE", args.ctest_label_exclude_regex])
+    return arguments
+
+
+def test_source_build(args: argparse.Namespace, *, env: dict[str, str]) -> None:
+    build_dir = args.build_dir.resolve()
+    require_path(build_dir / "CTestTestfile.cmake", "build-directory CTest file")
+    env = dict(env)
+    if args.cts_device:
+        env["HRX_CTS_DEVICE"] = args.cts_device
+    test_step = ctest_dev.CTestBuildAndRunStep(
+        cmake="cmake",
+        ctest="ctest",
+        build_dir=build_dir,
+        arguments=[*ctest_arguments(args), "--no-tests=error"],
+        cwd=REPO_ROOT,
+        env=env,
+    )
+    result = test_step.run(verbose=True)
+    if result != 0:
+        raise subprocess.CalledProcessError(result, "selected CTest build and run")
+
+
 def prepare_composed_install_root(
     args: argparse.Namespace, *, preserve_symlinks: bool = True
 ) -> Path:
@@ -936,7 +957,6 @@ def prepare_composed_install_root(
     for source_root in [
         args.public_deps_dir.resolve(),
         args.public_install_dir.resolve(),
-        args.tests_install_dir.resolve(),
     ]:
         require_path(source_root, "install overlay root")
         copy_tree_contents(
@@ -1004,7 +1024,6 @@ def add_shared_args(
     sanitizer_choices: list[str],
     passthrough_default: bool,
     public_component_default: str = "HrxPublicDist",
-    tests_component_default: str = "HrxTestsDist",
     include_gpu: bool = False,
     include_amdgpu: bool = False,
     add_toolchain_args: bool = False,
@@ -1054,11 +1073,6 @@ def add_shared_args(
         ),
     )
     parser.add_argument(
-        "--tests-install-dir",
-        type=Path,
-        default=env_path("HRX_TESTS_INSTALL_DIR", default_output / "install" / "tests"),
-    )
-    parser.add_argument(
         "--public-deps-dir",
         type=Path,
         default=env_path(
@@ -1096,10 +1110,6 @@ def add_shared_args(
         default=env_default("HRX_PUBLIC_COMPONENT", public_component_default),
     )
     parser.add_argument(
-        "--tests-component",
-        default=env_default("HRX_TESTS_COMPONENT", tests_component_default),
-    )
-    parser.add_argument(
         "--build-type", default=env_default("HRX_BUILD_TYPE", "RelWithDebInfo")
     )
     parser.add_argument("--target", default=env_default("HRX_BUILD_TARGET", "all"))
@@ -1128,13 +1138,6 @@ def add_shared_args(
         "--ctest-parallelism", type=int, default=env_int("HRX_CTEST_PARALLELISM", 0)
     )
     parser.add_argument("--cts-device", default=env_default("HRX_CTS_DEVICE", ""))
-    parser.add_argument(
-        "--test-tmpdir",
-        type=Path,
-        default=Path(os.environ["HRX_TEST_TMPDIR"])
-        if os.environ.get("HRX_TEST_TMPDIR")
-        else None,
-    )
     if include_gpu:
         parser.add_argument(
             "--gpu", action="store_true", default=env_bool("HRX_TEST_GPU", False)
@@ -1187,6 +1190,7 @@ def main(
     fetch_rocm_fn: Callable[[argparse.Namespace], None],
     build_core_fn: Callable[[argparse.Namespace], None],
     test_core_fn: Callable[[argparse.Namespace], None],
+    test_package_fn: Callable[[argparse.Namespace], None],
     extract_packages_fn: Callable[[argparse.Namespace], None],
     package_core_fn: Callable[[argparse.Namespace], None],
 ) -> int:
@@ -1202,8 +1206,14 @@ def main(
     add_shared_args_fn(fetch_parser)
     build_parser = subparsers.add_parser("build", help="Configure, build, and install")
     add_shared_args_fn(build_parser)
-    test_parser = subparsers.add_parser("test", help="Validate build and install trees")
+    test_parser = subparsers.add_parser(
+        "test", help="Build and run selected CTest tests"
+    )
     add_shared_args_fn(test_parser)
+    package_test_parser = subparsers.add_parser(
+        "test-package", help="Validate the installed public SDK"
+    )
+    add_shared_args_fn(package_test_parser)
     extract_parser = subparsers.add_parser(
         "extract-packages", help="Extract downloaded HRX package artifacts"
     )
@@ -1233,6 +1243,8 @@ def main(
         build_core_fn(args)
     elif args.command == "test":
         test_core_fn(args)
+    elif args.command == "test-package":
+        test_package_fn(args)
     elif args.command == "extract-packages":
         extract_packages_fn(args)
     elif args.command == "package":

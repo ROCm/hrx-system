@@ -13,8 +13,6 @@ set(IREE_PACKAGE_ROOT_PREFIX "build_tools/cmake")
 
 # These tests exercise the CMake/CTest integration itself. They belong to the
 # CTest graph and must use the exact tools selected by the outer configure.
-# Developer-only build-system tests are not part of the installed test suite.
-set(IREE_SKIP_TEST_REGISTRATION ON)
 
 function(_iree_cmake_integration_test)
   cmake_parse_arguments(
@@ -125,13 +123,6 @@ _iree_cmake_integration_test(
     cmake_hal_cts_test
   SRCS
     cmake_hal_cts_test.py
-)
-
-_iree_cmake_integration_test(
-  NAME
-    cmake_installed_tests_test
-  SRCS
-    cmake_installed_tests_test.py
 )
 
 _iree_cmake_integration_test(
