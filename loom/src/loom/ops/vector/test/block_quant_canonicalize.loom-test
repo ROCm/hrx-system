@@ -229,8 +229,10 @@ func.def @q8_0_decoded_pair_dot_reference_folds() -> (f32) {
   %rhs3 = scalar.constant 1 : i8
   %rhs_payload = vector.from_elements %rhs0, %rhs1, %rhs2, %rhs3 : vector<4xi8>
 
-  %lhs_scale = vector.constant 0.5 : vector<1xf16>
-  %rhs_scale = vector.constant -0.25 : vector<1xf16>
+  %lhs_scale_scalar = scalar.constant 0.5 : f16
+  %lhs_scale = vector.splat %lhs_scale_scalar : vector<1xf16>
+  %rhs_scale_scalar = scalar.constant -0.25 : f16
+  %rhs_scale = vector.splat %rhs_scale_scalar : vector<1xf16>
   %lhs = vector.decode %lhs_payload using %schema {scale = %lhs_scale : vector<1xf16>} : vector<4xi8>, encoding<schema> -> vector<4xf32>
   %rhs = vector.decode %rhs_payload using %schema {scale = %rhs_scale : vector<1xf16>} : vector<4xi8>, encoding<schema> -> vector<4xf32>
   %dot_init = scalar.constant 0.0 : f32
@@ -268,8 +270,10 @@ func.def @q8_0_explicit_scaled_dot4i_contract_folds() -> (f32) {
   %acc = vector.constant 0 : vector<1xi32>
   %dot = vector.dot4i<s8s8> %lhs, %rhs, %acc : vector<4xi8>, vector<4xi8>, vector<1xi32>
   %dotf = vector.sitofp %dot : vector<1xi32> to vector<1xf32>
-  %lhs_scale = vector.constant 0.5 : vector<1xf32>
-  %rhs_scale = vector.constant -0.25 : vector<1xf32>
+  %lhs_scale_scalar = scalar.constant 0.5 : f32
+  %lhs_scale = vector.splat %lhs_scale_scalar : vector<1xf32>
+  %rhs_scale_scalar = scalar.constant -0.25 : f32
+  %rhs_scale = vector.splat %rhs_scale_scalar : vector<1xf32>
   %combined_scale = vector.mulf %lhs_scale, %rhs_scale : vector<1xf32>
   %scaled = vector.mulf %dotf, %combined_scale : vector<1xf32>
   %result = vector.extract %scaled[0] : vector<1xf32> -> f32
@@ -345,9 +349,11 @@ func.def @q8_0_decoded_dotf_keeps_strict_float_contract(%lhs_payload: vector<32x
 func.def @q8_0_vector_decode_folds() -> (i1) {
   %schema = encoding.define #ggml.q8_0 : encoding<schema>
   %payload = vector.constant -3 : vector<32xi8>
-  %scale = vector.constant 0.5 : vector<1xf16>
+  %scale_scalar = scalar.constant 0.5 : f16
+  %scale = vector.splat %scale_scalar : vector<1xf16>
   %decoded = vector.decode %payload using %schema {scale = %scale : vector<1xf16>} : vector<32xi8>, encoding<schema> -> vector<32xf32>
-  %expected = vector.constant -1.5 : vector<32xf32>
+  %expected_scalar = scalar.constant -1.5 : f32
+  %expected = vector.splat %expected_scalar : vector<32xf32>
   %matches = vector.cmpf oeq, %decoded, %expected : vector<32xf32> -> vector<32xi1>
   %true = scalar.constant true : i1
   %ok = vector.reduce<andi> %matches, %true : vector<32xi1>, i1

@@ -313,11 +313,12 @@ func.def @partial_axes(%input: vector<2x4xf32>, %initial: vector<4xf32>, %scalar
   %result = vector.reduce.axes<addf, nnan|ninf> %input, %initial axes [0] : vector<2x4xf32>, vector<4xf32>
   %finite = vector.isfinitef %result : vector<4xf32> -> vector<4xi1>
   %broadcast = vector.splat %scalar : vector<2x4xf32>
-  %initial_sums = vector.constant 0.0 : vector<4xf32>
+  %initial_sums_scalar = scalar.constant 0.0 : f32
+  %initial_sums = vector.splat %initial_sums_scalar : vector<4xf32>
   %uniform = vector.reduce.axes<addf, nnan|ninf> %broadcast, %initial_sums axes [0] : vector<2x4xf32>, vector<4xf32>
   %element = vector.extract %uniform[1] : vector<4xf32> -> f32
   %uniform_finite = scalar.isfinitef %element : f32
-  %empty = vector.constant 0.0 : vector<0xf32>
+  %empty = vector.empty : vector<0xf32>
   %empty_sum = vector.reduce<addf, nnan|ninf> %empty, %scalar : vector<0xf32>, f32
   %empty_finite = scalar.isfinitef %empty_sum : f32
   func.return %finite, %uniform_finite, %empty_finite : vector<4xi1>, i1, i1

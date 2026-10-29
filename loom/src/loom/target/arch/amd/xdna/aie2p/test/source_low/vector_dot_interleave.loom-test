@@ -28,7 +28,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot_inte
 aie2p.target<core> @target
 
 func.def target(@target) @dot_interleaved_zero(%lhs: vector<32xbf16>, %even: vector<16xbf16>, %odd: vector<16xbf16>) -> (vector<16xf32>) {
-  %initial = vector.constant 0.0 : vector<16xf32>
+  %initial_scalar = scalar.constant 0.0 : f32
+  %initial = vector.splat %initial_scalar : vector<16xf32>
   %rhs = vector.interleave<0> %even, %odd : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
   %result = vector.dot2f %lhs, %rhs, %initial : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
   func.return %result : vector<16xf32>
@@ -36,16 +37,16 @@ func.def target(@target) @dot_interleaved_zero(%lhs: vector<32xbf16>, %even: vec
 
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot_interleaved_zero(%lhs: reg<aie2p.vec256 x2>, %even: reg<aie2p.vec256 x2>, %odd: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %11 = mova.i32 2
-  %12 = vshuffle %lhs, %lhs, %11
-  %13 = mova.i32 3
-  %14 = vshuffle %lhs, %lhs, %13
-  %15 = acc.clear.f32x64
-  %16 = mova.i32 60
-  %17 = vmac.bf16x32 %15, %12, %even, %16
-  %18 = vmac.bf16x32 %17, %14, %odd, %16
-  %19 = slice %18[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %result = vmov.accumulator512.to.vector512 %19
+  %12 = mova.i32 2
+  %13 = vshuffle %lhs, %lhs, %12
+  %14 = mova.i32 3
+  %15 = vshuffle %lhs, %lhs, %14
+  %16 = acc.clear.f32x64
+  %17 = mova.i32 60
+  %18 = vmac.bf16x32 %16, %13, %even, %17
+  %19 = vmac.bf16x32 %18, %15, %odd, %17
+  %20 = slice %19[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %result = vmov.accumulator512.to.vector512 %20
   return %result
 }
 

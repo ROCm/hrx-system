@@ -22,16 +22,16 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({sig
   %scalar_sqrt_f32 = vsqrtss.xmm %scalar_f32, %scalar_f32
   %scalar_sqrt_f64 = vsqrtsd.xmm %scalar_f64, %scalar_f64
   %scalar_fast_rsqrt_f32 = vrsqrtss.xmm %scalar_f32, %scalar_f32
-  %45 = mov.imm64 4607182418800017408
-  %46 = vmovq.xmm.gpr64 %45
-  %scalar_exact_rsqrt_f64 = vdivsd.xmm %46, %scalar_sqrt_f64
+  %46 = mov.imm64 4607182418800017408
+  %47 = vmovq.xmm.gpr64 %46
+  %scalar_exact_rsqrt_f64 = vdivsd.xmm %47, %scalar_sqrt_f64
   %low_sqrt_f32 = vsqrtps.xmm %low_f32
   %xmm_fast_rsqrt_f32 = vrsqrtps.xmm %xmm_f32
-  %50 = mov.imm32 1065353216
-  %51 = vmovd.xmm.gpr32 %50
-  %52 = vpbroadcastd.ymm %51
-  %53 = vsqrtps.ymm %ymm_f32
-  %ymm_exact_rsqrt_f32 = vdivps.ymm %52, %53
+  %51 = mov.imm32 1065353216
+  %52 = vmovd.xmm.gpr32 %51
+  %53 = vbroadcastss.ymm %52
+  %54 = vsqrtps.ymm %ymm_f32
+  %ymm_exact_rsqrt_f32 = vdivps.ymm %53, %54
   %ymm_sqrt_f64 = vsqrtpd.ymm %ymm_f64
   return %scalar_sqrt_f32, %scalar_sqrt_f64, %scalar_fast_rsqrt_f32, %scalar_exact_rsqrt_f64, %low_sqrt_f32, %xmm_fast_rsqrt_f32, %ymm_exact_rsqrt_f32, %ymm_sqrt_f64
 }
@@ -60,9 +60,10 @@ low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({s
   %ymm_fast_rsqrt_f32 = vrsqrt14ps.ymm %ymm_f32
   %zmm_sqrt_f32 = vsqrtps %zmm_f32
   %zmm_fast_rsqrt_f64 = vrsqrt14pd %zmm_f64
-  %36 = mov.imm32 1065353216
-  %37 = vpbroadcastd %36
-  %zmm_exact_rsqrt_f32 = vdivps %37, %zmm_sqrt_f32
+  %37 = mov.imm32 1065353216
+  %38 = vmovd.xmm.gpr32 %37
+  %39 = vbroadcastss %38
+  %zmm_exact_rsqrt_f32 = vdivps %39, %zmm_sqrt_f32
   return %low_fast_rsqrt_f32, %xmm_fast_rsqrt_f64, %ymm_fast_rsqrt_f32, %zmm_sqrt_f32, %zmm_fast_rsqrt_f64, %zmm_exact_rsqrt_f32
 }
 
@@ -108,12 +109,12 @@ func.def target(@target) @avx512_fp16_root_family(%scalar_value: f16, %low_value
 low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (f16, vector<2xf16>, vector<8xf16>, vector<16xf16>, vector<32xf16>) -> (f16, f16, f16, vector<2xf16>, vector<8xf16>, vector<16xf16>, vector<32xf16>)}) @avx512_fp16_root_family(%scalar_value: reg<x86.xmm>, %low_value: reg<x86.xmm>, %xmm_value: reg<x86.xmm>, %ymm_value: reg<x86.ymm>, %zmm_value: reg<x86.zmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.ymm>, reg<x86.zmm>) asm {
   %scalar_sqrt = vsqrtsh.xmm %scalar_value, %scalar_value
   %scalar_fast_rsqrt = vrsqrtsh.xmm %scalar_value, %scalar_value
-  %39 = mov.imm32 15360
-  %40 = vmovd.xmm.gpr32 %39
-  %scalar_exact_rsqrt = vdivsh.xmm %40, %scalar_sqrt
+  %40 = mov.imm32 15360
+  %41 = vmovd.xmm.gpr32 %40
+  %scalar_exact_rsqrt = vdivsh.xmm %41, %scalar_sqrt
   %low_sqrt = vsqrtph.xmm %low_value
   %xmm_fast_rsqrt = vrsqrtph.xmm %xmm_value
-  %45 = avx512.vpbroadcastw.ymm %39
+  %45 = vpbroadcastw.ymm %41
   %46 = vsqrtph.ymm %ymm_value
   %ymm_exact_rsqrt = vdivph.ymm %45, %46
   %zmm_fast_rsqrt = vrsqrtph %zmm_value

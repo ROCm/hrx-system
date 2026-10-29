@@ -15,11 +15,15 @@ func.def @vector_constants_narrow(%output: buffer) {
   %half_view = buffer.view %output[%half_origin] : buffer -> view<8xf16>
   %bfloat_view = buffer.view %output[%bfloat_origin] : buffer -> view<8xbf16>
   %bytes = vector.constant -91 : vector<16xi8>
-  %e4 = vector.constant -2.0 : vector<16xf8E4M3>
-  %e5 = vector.constant -0.0 : vector<16xf8E5M2>
+  %e4_scalar = scalar.constant -2.0 : f8E4M3
+  %e4 = vector.splat %e4_scalar : vector<16xf8E4M3>
+  %e5_scalar = scalar.constant -0.0 : f8E5M2
+  %e5 = vector.splat %e5_scalar : vector<16xf8E5M2>
   %words = vector.constant -21846 : vector<8xi16>
-  %half = vector.constant -0.0 : vector<8xf16>
-  %bfloat = vector.constant -2.0 : vector<8xbf16>
+  %half_scalar = scalar.constant -0.0 : f16
+  %half = vector.splat %half_scalar : vector<8xf16>
+  %bfloat_scalar = scalar.constant -2.0 : bf16
+  %bfloat = vector.splat %bfloat_scalar : vector<8xbf16>
   vector.store %bytes, %byte_view[0] : vector<16xi8>, view<16xi8>
   vector.store %e4, %e4_view[0] : vector<16xf8E4M3>, view<16xf8E4M3>
   vector.store %e5, %e5_view[0] : vector<16xf8E5M2>, view<16xf8E5M2>
@@ -84,21 +88,29 @@ func.def @vector_constants_i64(%output: buffer) {
 func.def @vector_constants_f32(%output: buffer) {
   %base = index.constant 0 : offset
   %view = buffer.view %output[%base] : buffer -> view<36xf32>
-  %c0 = vector.constant 0.0 : vector<4xf32>
+  %c0_scalar = scalar.constant 0.0 : f32
+  %c0 = vector.splat %c0_scalar : vector<4xf32>
   vector.store %c0, %view[0] : vector<4xf32>, view<36xf32>
-  %cn0 = vector.constant -0.0 : vector<4xf32>
+  %cn0_scalar = scalar.constant -0.0 : f32
+  %cn0 = vector.splat %cn0_scalar : vector<4xf32>
   vector.store %cn0, %view[4] : vector<4xf32>, view<36xf32>
-  %fraction = vector.constant -1.1000000000000001 : vector<4xf32>
+  %fraction_scalar = scalar.constant -1.1000000000000001 : f32
+  %fraction = vector.splat %fraction_scalar : vector<4xf32>
   vector.store %fraction, %view[8] : vector<4xf32>, view<36xf32>
-  %subnormal = vector.constant 1.4012984643248171e-45 : vector<4xf32>
+  %subnormal_scalar = scalar.constant 1.4012984643248171e-45 : f32
+  %subnormal = vector.splat %subnormal_scalar : vector<4xf32>
   vector.store %subnormal, %view[12] : vector<4xf32>, view<36xf32>
-  %normal = vector.constant 1.1754943508222875e-38 : vector<4xf32>
+  %normal_scalar = scalar.constant 1.1754943508222875e-38 : f32
+  %normal = vector.splat %normal_scalar : vector<4xf32>
   vector.store %normal, %view[16] : vector<4xf32>, view<36xf32>
-  %positive_infinity = vector.constant inf : vector<4xf32>
+  %positive_infinity_scalar = scalar.constant inf : f32
+  %positive_infinity = vector.splat %positive_infinity_scalar : vector<4xf32>
   vector.store %positive_infinity, %view[20] : vector<4xf32>, view<36xf32>
-  %negative_infinity = vector.constant -inf : vector<4xf32>
+  %negative_infinity_scalar = scalar.constant -inf : f32
+  %negative_infinity = vector.splat %negative_infinity_scalar : vector<4xf32>
   vector.store %negative_infinity, %view[24] : vector<4xf32>, view<36xf32>
-  %nan = vector.constant nan : vector<4xf32>
+  %nan_scalar = scalar.constant nan : f32
+  %nan = vector.splat %nan_scalar : vector<4xf32>
   vector.store %nan, %view[28] : vector<4xf32>, view<36xf32>
   %scalar = scalar.constant 1.0000000596046448 : f32
   %folded = vector.splat %scalar : vector<4xf32>
@@ -109,21 +121,29 @@ func.def @vector_constants_f32(%output: buffer) {
 func.def @vector_constants_f64(%output: buffer) {
   %base = index.constant 0 : offset
   %view = buffer.view %output[%base] : buffer -> view<18xf64>
-  %c0 = vector.constant 0.0 : vector<2xf64>
+  %c0_scalar = scalar.constant 0.0 : f64
+  %c0 = vector.splat %c0_scalar : vector<2xf64>
   vector.store %c0, %view[0] : vector<2xf64>, view<18xf64>
-  %cn0 = vector.constant -0.0 : vector<2xf64>
+  %cn0_scalar = scalar.constant -0.0 : f64
+  %cn0 = vector.splat %cn0_scalar : vector<2xf64>
   vector.store %cn0, %view[2] : vector<2xf64>, view<18xf64>
-  %fraction = vector.constant -1.1000000000000001 : vector<2xf64>
+  %fraction_scalar = scalar.constant -1.1000000000000001 : f64
+  %fraction = vector.splat %fraction_scalar : vector<2xf64>
   vector.store %fraction, %view[4] : vector<2xf64>, view<18xf64>
-  %subnormal = vector.constant 4.9406564584124654e-324 : vector<2xf64>
+  %subnormal_scalar = scalar.constant 4.9406564584124654e-324 : f64
+  %subnormal = vector.splat %subnormal_scalar : vector<2xf64>
   vector.store %subnormal, %view[6] : vector<2xf64>, view<18xf64>
-  %normal = vector.constant 2.2250738585072014e-308 : vector<2xf64>
+  %normal_scalar = scalar.constant 2.2250738585072014e-308 : f64
+  %normal = vector.splat %normal_scalar : vector<2xf64>
   vector.store %normal, %view[8] : vector<2xf64>, view<18xf64>
-  %positive_infinity = vector.constant inf : vector<2xf64>
+  %positive_infinity_scalar = scalar.constant inf : f64
+  %positive_infinity = vector.splat %positive_infinity_scalar : vector<2xf64>
   vector.store %positive_infinity, %view[10] : vector<2xf64>, view<18xf64>
-  %negative_infinity = vector.constant -inf : vector<2xf64>
+  %negative_infinity_scalar = scalar.constant -inf : f64
+  %negative_infinity = vector.splat %negative_infinity_scalar : vector<2xf64>
   vector.store %negative_infinity, %view[12] : vector<2xf64>, view<18xf64>
-  %nan = vector.constant nan : vector<2xf64>
+  %nan_scalar = scalar.constant nan : f64
+  %nan = vector.splat %nan_scalar : vector<2xf64>
   vector.store %nan, %view[14] : vector<2xf64>, view<18xf64>
   %scalar = scalar.constant 1.1000000000000001 : f64
   %folded = vector.splat %scalar : vector<2xf64>
@@ -164,7 +184,8 @@ func.def @vector_f64_constant_selection(%ordinal: index, %input: buffer, %output
   %input_view = buffer.view %input[%base] : buffer -> view<2xf64>
   %output_view = buffer.view %output[%base] : buffer -> view<2xf64>
   %input_values = vector.load %input_view[0] : view<2xf64> -> vector<2xf64>
-  %override = vector.constant -0.0 : vector<2xf64>
+  %override_scalar = scalar.constant -0.0 : f64
+  %override = vector.splat %override_scalar : vector<2xf64>
   %selected = scf.select %condition, %override, %input_values : vector<2xf64>
   vector.store %selected, %output_view[0] : vector<2xf64>, view<2xf64>
   func.return

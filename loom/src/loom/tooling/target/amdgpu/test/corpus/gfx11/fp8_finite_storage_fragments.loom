@@ -116,7 +116,8 @@ kernel.def target(@finite_storage_fragments_gfx11_wave32) @fp8_finite_storage_co
   %lhs_view = buffer.view %lhs[%base] : buffer -> view<16x16xbf16>
   %rhs_view = buffer.view %rhs[%base] : buffer -> view<16x16xf8E4M3, %rhs_storage>
   %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32>
-  %zero_accumulator = vector.constant 0.0 : vector<8xf32>
+  %zero_accumulator_scalar = scalar.constant 0.0 : f32
+  %zero_accumulator = vector.splat %zero_accumulator_scalar : vector<8xf32>
   %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
   %lhs_fragment = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16> -> vector<16xbf16>
   %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf8E4M3, %rhs_storage> -> vector<16xbf16>
@@ -140,7 +141,8 @@ kernel.def target(@finite_storage_fragments_gfx11_wave32) @bf8_finite_storage_co
   %lhs_view = buffer.view %lhs[%base] : buffer -> view<16x16xbf16>
   %rhs_view = buffer.view %rhs[%base] : buffer -> view<16x16xf8E5M2, %rhs_storage>
   %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32>
-  %zero_accumulator = vector.constant 0.0 : vector<8xf32>
+  %zero_accumulator_scalar = scalar.constant 0.0 : f32
+  %zero_accumulator = vector.splat %zero_accumulator_scalar : vector<8xf32>
   %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
   %lhs_fragment = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16> -> vector<16xbf16>
   %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf8E5M2, %rhs_storage> -> vector<16xbf16>
@@ -164,7 +166,8 @@ kernel.def target(@finite_storage_fragments_gfx11_wave32) @fp8_finite_flush_stor
   %lhs_view = buffer.view %lhs[%base] : buffer -> view<16x16xbf16>
   %rhs_view = buffer.view %rhs[%base] : buffer -> view<16x16xf8E4M3, %rhs_storage>
   %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32>
-  %zero_accumulator = vector.constant 0.0 : vector<8xf32>
+  %zero_accumulator_scalar = scalar.constant 0.0 : f32
+  %zero_accumulator = vector.splat %zero_accumulator_scalar : vector<8xf32>
   %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
   %lhs_fragment = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16> -> vector<16xbf16>
   %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf8E4M3, %rhs_storage> -> vector<16xbf16>
@@ -188,7 +191,8 @@ kernel.def target(@finite_storage_fragments_gfx11_wave32) @bf8_finite_flush_stor
   %lhs_view = buffer.view %lhs[%base] : buffer -> view<16x16xbf16>
   %rhs_view = buffer.view %rhs[%base] : buffer -> view<16x16xf8E5M2, %rhs_storage>
   %output_view = buffer.view %output[%base] : buffer -> view<16x16xf32>
-  %zero_accumulator = vector.constant 0.0 : vector<8xf32>
+  %zero_accumulator_scalar = scalar.constant 0.0 : f32
+  %zero_accumulator = vector.splat %zero_accumulator_scalar : vector<8xf32>
   %init = vector.fragment<init> %zero_accumulator shape [%tile_extent, %tile_extent] : vector<8xf32>
   %lhs_fragment = vector.fragment.load<lhs> %lhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xbf16> -> vector<16xbf16>
   %rhs_fragment = vector.fragment.load<rhs> %rhs_view[%fragment_origin, %fragment_origin] shape [%tile_extent, %tile_extent] : view<16x16xf8E5M2, %rhs_storage> -> vector<16xbf16>

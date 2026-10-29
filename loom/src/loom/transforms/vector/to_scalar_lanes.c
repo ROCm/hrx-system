@@ -15,6 +15,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/transforms/vector/to_scalar_encoding.h"
 #include "loom/transforms/vector/to_scalar_memory.h"
@@ -122,6 +123,11 @@ iree_status_t loom_vector_to_scalar_build_vector_zero(
     loom_vector_to_scalar_state_t* state, loom_type_t result_type,
     loom_value_id_t* out_value_id) {
   loom_scalar_type_t scalar_type = loom_type_element_type(result_type);
+  if (loom_scalar_type_is_float(scalar_type)) {
+    return loom_vector_build_constant_splat(&state->rewriter->builder,
+                                            loom_attr_f64(0.0), result_type,
+                                            state->location, out_value_id);
+  }
   loom_op_t* constant_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_constant_build(
       &state->rewriter->builder, loom_vector_to_scalar_zero_attr(scalar_type),

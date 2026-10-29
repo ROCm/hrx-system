@@ -56,7 +56,7 @@ _I64_PREDICATE_VECTOR = Vector(
 )
 
 
-class _PairVectorConstantCarrier(Enum):
+class _PairVectorCarrier(Enum):
     NATIVE = "native"
     WIDE = "wide"
     ACCUMULATOR = "accumulator"
@@ -301,12 +301,12 @@ def _pair_vector_constant_rule(
     low_bits: ValueProject,
     high_bits: ValueProject,
     exact_guard: Guard,
-    carrier: _PairVectorConstantCarrier,
+    carrier: _PairVectorCarrier,
 ) -> DescriptorRule:
     descriptor = _descriptor("amd.xdna.aie2p.splat.i64x8")
     packet = (
         ValueRef.result("result")
-        if carrier is _PairVectorConstantCarrier.NATIVE
+        if carrier is _PairVectorCarrier.NATIVE
         else ValueRef.temporary("packet")
     )
     scalar = ValueRef.temporary("scalar")
@@ -320,14 +320,14 @@ def _pair_vector_constant_rule(
             form=DescriptorEmitForm.OP,
         )
     )
-    if carrier is _PairVectorConstantCarrier.WIDE:
+    if carrier is _PairVectorCarrier.WIDE:
         emits.append(
             EmitRegisterConcat(
                 sources=(packet, packet),
                 result=ValueRef.result("result"),
             )
         )
-    elif carrier is _PairVectorConstantCarrier.ACCUMULATOR:
+    elif carrier is _PairVectorCarrier.ACCUMULATOR:
         accumulator_unit = ValueRef.temporary("accumulator_unit")
         emits.extend(
             (
@@ -369,14 +369,14 @@ def _pair_vector_constant_rules() -> tuple[DescriptorRule, ...]:
         (_F64, _F64_VECTOR, "f64", float_words, float_exact),
     ):
         for result_type, carrier in (
-            (native_type, _PairVectorConstantCarrier.NATIVE),
+            (native_type, _PairVectorCarrier.NATIVE),
             (
                 Vector(
                     element_type,
                     minimum_static_elements=9,
                     maximum_static_elements=16,
                 ),
-                _PairVectorConstantCarrier.WIDE,
+                _PairVectorCarrier.WIDE,
             ),
         ):
             rules.append(
@@ -398,7 +398,7 @@ def _pair_vector_constant_rules() -> tuple[DescriptorRule, ...]:
             integer_words("result", word_index=0),
             integer_words("result", word_index=1),
             integer_exact("result"),
-            _PairVectorConstantCarrier.ACCUMULATOR,
+            _PairVectorCarrier.ACCUMULATOR,
         )
     )
     return tuple(rules)
@@ -1177,8 +1177,53 @@ def _pair_insert_rule(
 def _pair_splat_rule(
     scalar_type: TypePattern,
     vector_type: TypePattern,
+    carrier: _PairVectorCarrier = _PairVectorCarrier.NATIVE,
 ) -> DescriptorRule:
     descriptor = _descriptor("amd.xdna.aie2p.splat.i64x8")
+    packet = (
+        ValueRef.result("result")
+        if carrier is _PairVectorCarrier.NATIVE
+        else ValueRef.temporary("packet")
+    )
+    emits: list[EmitDescriptorOp | EmitRegisterConcat] = [
+        EmitDescriptorOp(
+            descriptor=descriptor,
+            operands={"src": ValueRef.operand("scalar")},
+            results={"dst": packet},
+            result_types=(
+                None
+                if carrier is _PairVectorCarrier.NATIVE
+                else {"dst": DescriptorResultType()}
+            ),
+            form=DescriptorEmitForm.OP,
+        )
+    ]
+    if carrier is _PairVectorCarrier.WIDE:
+        emits.append(
+            EmitRegisterConcat(
+                sources=(packet, packet),
+                result=ValueRef.result("result"),
+            )
+        )
+    elif carrier is _PairVectorCarrier.ACCUMULATOR:
+        accumulator_unit = ValueRef.temporary("accumulator_unit")
+        emits.extend(
+            (
+                EmitDescriptorOp(
+                    descriptor=_descriptor(
+                        "amd.xdna.aie2p.move.vector512.to.accumulator512"
+                    ),
+                    operands={"src": packet},
+                    results={"dst": accumulator_unit},
+                    result_types={"dst": DescriptorResultType()},
+                    form=DescriptorEmitForm.OP,
+                ),
+                EmitRegisterConcat(
+                    sources=(accumulator_unit,) * 4,
+                    result=ValueRef.result("result"),
+                ),
+            )
+        )
     return DescriptorRule(
         source_op=vector.vector_splat,
         descriptor=descriptor,
@@ -1186,14 +1231,7 @@ def _pair_splat_rule(
             Guard.value_type("scalar", scalar_type),
             Guard.value_type("result", vector_type),
         ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                operands={"src": ValueRef.operand("scalar")},
-                results={"dst": ValueRef.result("result")},
-                form=DescriptorEmitForm.OP,
-            ),
-        ),
+        emit=tuple(emits),
     )
 
 
@@ -1298,10 +1336,19 @@ AIE2P_I64_RULES = (
         )
     ),
     *(
-        _pair_splat_rule(scalar_type, vector_type)
-        for scalar_type, vector_type in (
-            (_I64, _I64_VECTOR),
-            (_F64, _F64_VECTOR),
+        _pair_splat_rule(scalar_type, vector_type, carrier)
+        for scalar_type, vector_type, carrier in (
+            (_I64, _I64_VECTOR, _PairVectorCarrier.NATIVE),
+            (_F64, _F64_VECTOR, _PairVectorCarrier.NATIVE),
+            (
+                _F64,
+                Vector(
+                    "f64",
+                    minimum_static_elements=9,
+                    maximum_static_elements=16,
+                ),
+                _PairVectorCarrier.WIDE,
+            ),
         )
     ),
 )

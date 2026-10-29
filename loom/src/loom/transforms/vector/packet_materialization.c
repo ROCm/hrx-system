@@ -18,6 +18,7 @@
 #include "loom/ops/scalar/combining.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/combining.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
@@ -447,6 +448,12 @@ static iree_status_t loom_vector_packet_materialize_constant(
     loom_vector_packetized_value_t* packetized_value) {
   const loom_type_t packet_type =
       loom_vector_packet_type(packetized_value->source_type, slice->lane_count);
+  if (loom_scalar_type_is_float(loom_type_element_type(packet_type))) {
+    return loom_vector_build_constant_splat(
+        &packetization->context->rewriter->builder,
+        loom_vector_constant_value(op), packet_type, op->location,
+        &packetized_value->packet.vector);
+  }
   loom_op_t* packet_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_constant_build(
       &packetization->context->rewriter->builder,
@@ -1422,6 +1429,11 @@ static iree_status_t loom_vector_packet_build_identity(
   }
   IREE_ASSERT_TRUE(has_identity);
   (void)has_identity;
+  if (loom_scalar_type_is_float(element_type)) {
+    return loom_vector_build_constant_splat(&context->rewriter->builder,
+                                            identity_attr, vector_type,
+                                            reduce_op->location, out_value);
+  }
   loom_op_t* identity_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_constant_build(
       &context->rewriter->builder, identity_attr, vector_type,

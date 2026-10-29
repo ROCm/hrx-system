@@ -660,17 +660,20 @@ func.def @from_elements_of_ordered_extracts_to_source(%values: vector<4xi32>) ->
 // ====
 
 func.def @divf_arcp_constant_rhs_to_reciprocal_mulf(%values: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
-  %scale = vector.constant 127.0 : vector<4xf32>
+  %scale_scalar = scalar.constant 127.0 : f32
+  %scale = vector.splat %scale_scalar : vector<4xf32>
   %strict = vector.divf %values, %scale : vector<4xf32>
   %fast = vector.divf<nnan|ninf|nsz|arcp> %values, %scale : vector<4xf32>
   func.return %strict, %fast : vector<4xf32>, vector<4xf32>
 }
 // ----
 func.def @divf_arcp_constant_rhs_to_reciprocal_mulf(%values: vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
-  %scale = vector.constant 127.0 : vector<4xf32>
+  %scale_scalar = scalar.constant 127.0 : f32
+  %scale = vector.splat %scale_scalar : vector<4xf32>
   %strict = vector.divf %values, %scale : vector<4xf32>
-  %6 = vector.constant 0.0078740157186985016 : vector<4xf32>
-  %fast = vector.mulf<nnan|ninf|nsz|arcp> %values, %6 : vector<4xf32>
+  %7 = scalar.constant 0.0078740157186985016 : f32
+  %8 = vector.splat %7 : vector<4xf32>
+  %fast = vector.mulf<nnan|ninf|nsz|arcp> %values, %8 : vector<4xf32>
   func.return %strict, %fast : vector<4xf32>, vector<4xf32>
 }
 
@@ -1240,7 +1243,8 @@ func.def @shift_mixed_counts(%values: vector<4xi8>) -> (vector<4xi8>, vector<4xi
 // Floating-point subtraction identities require signed-zero freedom and keep
 // negation explicit instead of relying on target-specific subtract literals.
 func.def @subf_zero_identities(%n: index, %x: vector<[%n]xf32>) -> (vector<[%n]xf32>, vector<[%n]xf32>) {
-  %c0 = vector.constant 0.0 : vector<[%n]xf32>
+  %c0_scalar = scalar.constant 0.0 : f32
+  %c0 = vector.splat %c0_scalar : vector<[%n]xf32>
   %sub_rhs = vector.subf<nsz> %x, %c0 : vector<[%n]xf32>
   %sub_lhs = vector.subf<nnan|nsz> %c0, %x : vector<[%n]xf32>
   func.return %sub_rhs, %sub_lhs : vector<[%n]xf32>, vector<[%n]xf32>
@@ -1256,16 +1260,19 @@ func.def @subf_zero_identities(%n: index, %x: vector<[%n]xf32>) -> (vector<[%n]x
 // A negated input multiplied by an exact constant keeps the sign on the
 // constant so target lowering does not need a separate negation instruction.
 func.def @mulf_absorbs_negated_input_constant(%x: vector<4xf32>) -> (vector<4xf32>) {
-  %c0 = vector.constant 0.0 : vector<4xf32>
+  %c0_scalar = scalar.constant 0.0 : f32
+  %c0 = vector.splat %c0_scalar : vector<4xf32>
   %neg = vector.subf<nnan|nsz> %c0, %x : vector<4xf32>
-  %scale = vector.constant 1.4426950408889634 : vector<4xf32>
+  %scale_scalar = scalar.constant 1.4426950408889634 : f32
+  %scale = vector.splat %scale_scalar : vector<4xf32>
   %scaled = vector.mulf<nnan|ninf|nsz> %neg, %scale : vector<4xf32>
   func.return %scaled : vector<4xf32>
 }
 // ----
 func.def @mulf_absorbs_negated_input_constant(%x: vector<4xf32>) -> (vector<4xf32>) {
-  %7 = vector.constant -1.4426950216293335 : vector<4xf32>
-  %scaled = vector.mulf<nnan|ninf|nsz> %x, %7 : vector<4xf32>
+  %9 = scalar.constant -1.4426950216293335 : f32
+  %10 = vector.splat %9 : vector<4xf32>
+  %scaled = vector.mulf<nnan|ninf|nsz> %x, %10 : vector<4xf32>
   func.return %scaled : vector<4xf32>
 }
 

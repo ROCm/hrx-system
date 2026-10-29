@@ -183,7 +183,8 @@ low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({sig
 x86.target<avx2> @target
 
 func.def target(@target) @subnative_float_arithmetic(%f32_lhs: vector<2xf32>, %f32_rhs: vector<2xf32>, %f64_lhs: vector<1xf64>, %f64_rhs: vector<1xf64>) -> (vector<2xf32>, vector<1xf64>) {
-  %f32_acc = vector.constant 1.0 : vector<2xf32>
+  %f32_acc_scalar = scalar.constant 1.0 : f32
+  %f32_acc = vector.splat %f32_acc_scalar : vector<2xf32>
   %f32_add = vector.addf %f32_lhs, %f32_rhs : vector<2xf32>
   %f32_sub = vector.subf %f32_add, %f32_rhs : vector<2xf32>
   %f32_mul = vector.mulf %f32_sub, %f32_rhs : vector<2xf32>
@@ -191,7 +192,8 @@ func.def target(@target) @subnative_float_arithmetic(%f32_lhs: vector<2xf32>, %f
   %f32_result = vector.fmaf %f32_div, %f32_rhs, %f32_acc : vector<2xf32>
   %f32_bits = vector.bitcast %f32_result : vector<2xf32> to vector<2xi32>
   %f32_restored = vector.bitcast %f32_bits : vector<2xi32> to vector<2xf32>
-  %f64_acc = vector.constant 1.0 : vector<1xf64>
+  %f64_acc_scalar = scalar.constant 1.0 : f64
+  %f64_acc = vector.splat %f64_acc_scalar : vector<1xf64>
   %f64_add = vector.addf %f64_lhs, %f64_rhs : vector<1xf64>
   %f64_sub = vector.subf %f64_add, %f64_rhs : vector<1xf64>
   %f64_mul = vector.mulf %f64_sub, %f64_rhs : vector<1xf64>
@@ -202,24 +204,24 @@ func.def target(@target) @subnative_float_arithmetic(%f32_lhs: vector<2xf32>, %f
 
 // ----
 low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<2xf32>, vector<2xf32>, vector<1xf64>, vector<1xf64>) -> (vector<2xf32>, vector<1xf64>)}) @subnative_float_arithmetic(%f32_lhs: reg<x86.xmm>, %f32_rhs: reg<x86.xmm>, %f64_lhs: reg<x86.xmm>, %f64_rhs: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
-  %26 = mov.imm32 1065353216
-  %27 = vmovd.xmm.gpr32 %26
-  %f32_acc = avx2.vpbroadcastd.xmm %27
+  %28 = mov.imm32 1065353216
+  %f32_acc_scalar = vmovd.xmm.gpr32 %28
+  %f32_acc = vbroadcastss.xmm %f32_acc_scalar
   %f32_add = vaddps.xmm %f32_lhs, %f32_rhs
   %f32_sub = vsubps.xmm %f32_add, %f32_rhs
   %f32_mul = vmulps.xmm %f32_sub, %f32_rhs
   %f32_div = vdivps.xmm %f32_mul, %f32_rhs
-  %33 = copy %f32_acc : reg<x86.xmm> -> reg<x86.xmm>
-  %f32_result = vfmadd231ps.xmm %33, %f32_div, %f32_rhs
-  %35 = mov.imm64 4607182418800017408
-  %36 = vmovq.xmm.gpr64 %35
-  %f64_acc = avx2.vpbroadcastq.xmm %36
+  %35 = copy %f32_acc : reg<x86.xmm> -> reg<x86.xmm>
+  %f32_result = vfmadd231ps.xmm %35, %f32_div, %f32_rhs
+  %37 = mov.imm64 4607182418800017408
+  %f64_acc_scalar = vmovq.xmm.gpr64 %37
+  %f64_acc = vmovddup.xmm %f64_acc_scalar
   %f64_add = vaddpd.xmm %f64_lhs, %f64_rhs
   %f64_sub = vsubpd.xmm %f64_add, %f64_rhs
   %f64_mul = vmulpd.xmm %f64_sub, %f64_rhs
   %f64_div = vdivpd.xmm %f64_mul, %f64_rhs
-  %42 = copy %f64_acc : reg<x86.xmm> -> reg<x86.xmm>
-  %f64_result = vfmadd231pd.xmm %42, %f64_div, %f64_rhs
+  %44 = copy %f64_acc : reg<x86.xmm> -> reg<x86.xmm>
+  %f64_result = vfmadd231pd.xmm %44, %f64_div, %f64_rhs
   return %f32_result, %f64_result
 }
 

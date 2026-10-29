@@ -546,6 +546,19 @@ static iree_status_t loom_vector_to_scalar_lower_splat_op(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_handled) {
   *out_handled = true;
+  const loom_type_t result_type =
+      loom_module_value_type(rewriter->module, loom_vector_splat_result(op));
+  if (!loom_type_is_all_static(result_type)) {
+    loom_op_t* scalar_op = loom_vector_to_scalar_value_def_op(
+        rewriter->module, loom_vector_splat_scalar(op));
+    // A dynamic constant splat is the aggregate seed used by dynamic scalar
+    // lane loops. It is already a terminal constant boundary; expanding it
+    // would create another identical seed and keep the worklist live forever.
+    if (scalar_op && (loom_scalar_constant_isa(scalar_op) ||
+                      loom_index_constant_isa(scalar_op))) {
+      return iree_ok_status();
+    }
+  }
   loom_vector_to_scalar_state_t state = {0};
   IREE_RETURN_IF_ERROR(
       loom_vector_to_scalar_prepare_state(pass, rewriter, op, NULL, 0, &state));

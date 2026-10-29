@@ -6,24 +6,27 @@ func.def target(@target) @construct_zmm_vectors(%i16_value: i16, %bf16_value: bf
   %i8_constant = vector.constant -7 : vector<64xi8>
   %i16_splat = vector.splat %i16_value : vector<32xi16>
   %i64_constant = vector.constant 81985529216486895 : vector<8xi64>
-  %f8_constant = vector.constant 1.5 : vector<64xf8E4M3>
+  %f8_constant_scalar = scalar.constant 1.5 : f8E4M3
+  %f8_constant = vector.splat %f8_constant_scalar : vector<64xf8E4M3>
   %bf16_splat = vector.splat %bf16_value : vector<32xbf16>
-  %f64_constant = vector.constant -2.5 : vector<8xf64>
+  %f64_constant_scalar = scalar.constant -2.5 : f64
+  %f64_constant = vector.splat %f64_constant_scalar : vector<8xf64>
   func.return %i8_constant, %i16_splat, %i64_constant, %f8_constant, %bf16_splat, %f64_constant : vector<64xi8>, vector<32xi16>, vector<8xi64>, vector<64xf8E4M3>, vector<32xbf16>, vector<8xf64>
 }
 
 // ----
 low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (i16, bf16) -> (vector<64xi8>, vector<32xi16>, vector<8xi64>, vector<64xf8E4M3>, vector<32xbf16>, vector<8xf64>)}) @construct_zmm_vectors(%i16_value: reg<x86.gpr32>, %bf16_value: reg<x86.gpr32>) -> (reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>, reg<x86.zmm>) asm {
-  %22 = mov.imm32 -7
-  %i8_constant = vpbroadcastb %22
+  %24 = mov.imm32 -7
+  %i8_constant = vpbroadcastb %24
   %i16_splat = vpbroadcastw %i16_value
-  %25 = mov.imm64 81985529216486895
-  %i64_constant = vpbroadcastq %25
-  %27 = mov.imm32 60
-  %f8_constant = vpbroadcastb %27
+  %27 = mov.imm64 81985529216486895
+  %i64_constant = vpbroadcastq %27
+  %f8_constant_scalar = mov.imm32 60
+  %f8_constant = vpbroadcastb %f8_constant_scalar
   %bf16_splat = vpbroadcastw %bf16_value
-  %30 = mov.imm64 -4610560118520545280
-  %f64_constant = vpbroadcastq %30
+  %32 = mov.imm64 -4610560118520545280
+  %f64_constant_scalar = vmovq.xmm.gpr64 %32
+  %f64_constant = vbroadcastsd %f64_constant_scalar
   return %i8_constant, %i16_splat, %i64_constant, %f8_constant, %bf16_splat, %f64_constant
 }
 

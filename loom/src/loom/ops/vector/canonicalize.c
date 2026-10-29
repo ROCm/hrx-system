@@ -240,10 +240,16 @@ static iree_status_t loom_vector_replace_single_result_with_constant_attr(
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
 
-  loom_op_t* constant_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      &rewriter->builder, attr, result_type, op->location, &constant_op));
-  loom_value_id_t replacement = loom_vector_constant_result(constant_op);
+  loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
+  if (loom_scalar_type_is_float(loom_type_element_type(result_type))) {
+    IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+        &rewriter->builder, attr, result_type, op->location, &replacement));
+  } else {
+    loom_op_t* constant_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_constant_build(
+        &rewriter->builder, attr, result_type, op->location, &constant_op));
+    replacement = loom_vector_constant_result(constant_op);
+  }
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, value_checkpoint));
   return loom_vector_replace_single_result_with_value(op, rewriter,
@@ -427,6 +433,10 @@ static iree_status_t loom_vector_canonicalize_uniform_result(
   loom_type_t result_type = {0};
   if (!loom_vector_get_single_result_type(rewriter, op, &result_type) ||
       !loom_type_is_vector(result_type)) {
+    return iree_ok_status();
+  }
+  if (loom_vector_splat_isa(op) &&
+      loom_scalar_type_is_float(loom_type_element_type(result_type))) {
     return iree_ok_status();
   }
 
@@ -1257,11 +1267,10 @@ static iree_status_t loom_vector_replace_mulf_with_negated_constant(
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
 
-  loom_op_t* constant_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
+  loom_value_id_t negated_constant = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
       &rewriter->builder, loom_attr_f64(-constant_value), result_type,
-      op->location, &constant_op));
-  loom_value_id_t negated_constant = loom_vector_constant_result(constant_op);
+      op->location, &negated_constant));
 
   loom_op_t* replacement_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_mulf_build(
@@ -1352,11 +1361,10 @@ static iree_status_t loom_vector_replace_divf_with_reciprocal_mulf(
       scalar_type, reciprocal_facts, &reciprocal_value);
   IREE_ASSERT(has_reciprocal);
 
-  loom_op_t* constant_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
+  loom_value_id_t reciprocal = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
       &rewriter->builder, loom_attr_f64(reciprocal_value), result_type,
-      op->location, &constant_op));
-  loom_value_id_t reciprocal = loom_vector_constant_result(constant_op);
+      op->location, &reciprocal));
 
   loom_op_t* replacement_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_mulf_build(

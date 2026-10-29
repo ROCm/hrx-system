@@ -567,30 +567,30 @@ func.def @tail_masked_score_block(%scores: vector<4xf32>, %valid_count: i32) -> 
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @tail_masked_score_block(%scores: reg<amdgpu.vgpr x4>, %valid_count: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %37 = v_mov_b32_copy %valid_count
-  %40 = v_cmp_lt_i32_src0_inline %37 {lhs = 0}
-  %42 = v_cmp_lt_i32_src0_inline %37 {lhs = 1}
-  %44 = v_cmp_lt_i32_src0_inline %37 {lhs = 2}
-  %46 = v_cmp_lt_i32_src0_inline %37 {lhs = 3}
-  %54 = slice %scores[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %55 = v_cndmask_b32_src0_lit %54, %40, 3463342888
-  %57 = slice %scores[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %58 = v_cndmask_b32_src0_lit %57, %42, 3463342888
-  %60 = slice %scores[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %61 = v_cndmask_b32_src0_lit %60, %44, 3463342888
-  %63 = slice %scores[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %64 = v_cndmask_b32_src0_lit %63, %46, 3463342888
-  %67 = v_max_f32_lit %55, 3463342888
-  %71 = v_max_f32 %67, %58
-  %72 = v_max_f32 %61, %64
-  %block_max = v_max_f32 %71, %72
-  %81 = v_cndmask_b32_src0_inline %54, %40 {false_value = 0}
-  %84 = v_cndmask_b32_src0_inline %57, %42 {false_value = 0}
-  %87 = v_cndmask_b32_src0_inline %60, %44 {false_value = 0}
-  %90 = v_cndmask_b32_src0_inline %63, %46 {false_value = 0}
-  %96 = v_add_f32 %81, %84
-  %97 = v_add_f32 %87, %90
-  %block_sum = v_add_f32 %96, %97
+  %35 = v_mov_b32_copy %valid_count
+  %38 = v_cmp_lt_i32_src0_inline %35 {lhs = 0}
+  %40 = v_cmp_lt_i32_src0_inline %35 {lhs = 1}
+  %42 = v_cmp_lt_i32_src0_inline %35 {lhs = 2}
+  %44 = v_cmp_lt_i32_src0_inline %35 {lhs = 3}
+  %49 = slice %scores[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %50 = v_cndmask_b32_src0_lit %49, %38, 3463342888
+  %52 = slice %scores[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %53 = v_cndmask_b32_src0_lit %52, %40, 3463342888
+  %55 = slice %scores[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %56 = v_cndmask_b32_src0_lit %55, %42, 3463342888
+  %58 = slice %scores[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %59 = v_cndmask_b32_src0_lit %58, %44, 3463342888
+  %62 = v_max_f32_lit %50, 3463342888
+  %66 = v_max_f32 %62, %53
+  %67 = v_max_f32 %56, %59
+  %block_max = v_max_f32 %66, %67
+  %73 = v_cndmask_b32_src0_inline %49, %38 {false_value = 0}
+  %76 = v_cndmask_b32_src0_inline %52, %40 {false_value = 0}
+  %79 = v_cndmask_b32_src0_inline %55, %42 {false_value = 0}
+  %82 = v_cndmask_b32_src0_inline %58, %44 {false_value = 0}
+  %88 = v_add_f32 %73, %76
+  %89 = v_add_f32 %79, %82
+  %block_sum = v_add_f32 %88, %89
   return %block_max, %block_sum
 }
 

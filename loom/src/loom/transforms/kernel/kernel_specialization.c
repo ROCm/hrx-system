@@ -13,6 +13,7 @@
 #include "loom/ir/structural_hash.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/special_values.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/rewrite/remap.h"
@@ -304,6 +305,10 @@ static iree_status_t loom_kernel_specialize_literal(
         loom_scalar_type_is_float(element_type) ? loom_attr_f64(0.0)
         : element_type == LOOM_SCALAR_TYPE_I1   ? loom_attr_bool(false)
                                                 : loom_attr_i64(0);
+    if (loom_scalar_type_is_float(element_type)) {
+      return loom_vector_build_constant_splat(builder, zero, body_type,
+                                              location, out_value);
+    }
     IREE_RETURN_IF_ERROR(loom_vector_constant_build(builder, zero, body_type,
                                                     location, &literal));
   } else {

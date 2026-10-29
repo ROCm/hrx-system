@@ -676,8 +676,10 @@ kernel.def @subgroup_packet_reductions() {
   %bfloat = vector.fptrunc %single : vector<9xf32> to vector<9xbf16>
   %additive_identity = vector.constant 0 : vector<9xi32>
   %predicates = vector.cmpi ne, %values, %additive_identity : vector<9xi32> -> vector<9xi1>
-  %positive = vector.constant 1.0 : vector<9xbf16>
-  %negative = vector.constant -1.0 : vector<9xbf16>
+  %positive_scalar = scalar.constant 1.0 : bf16
+  %positive = vector.splat %positive_scalar : vector<9xbf16>
+  %negative_scalar = scalar.constant -1.0 : bf16
+  %negative = vector.splat %negative_scalar : vector<9xbf16>
   %factors = vector.select %predicates, %negative, %positive : vector<9xbf16>
   %byte_sum = kernel.subgroup.reduce<addi> %bytes {cluster_size = 8} : vector<9xi8>
   %short_sum = kernel.subgroup.reduce<addi> %shorts {cluster_size = 8} : vector<9xi16>

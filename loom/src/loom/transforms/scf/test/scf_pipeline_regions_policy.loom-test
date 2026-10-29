@@ -335,44 +335,46 @@ func.def @guarded_vector_update(%input: view<32xf32>, %initial: vector<4xf32>, %
       %loaded = vector.load %input[%begin] : view<32xf32> -> vector<4xf32>
       scf.yield %loaded : vector<4xf32>
     } else {
-      %19 = vector.constant 0.0 : vector<4xf32>
-      scf.yield %19 : vector<4xf32>
+      %19 = scalar.constant 0.0 : f32
+      %20 = vector.splat %19 : vector<4xf32>
+      scf.yield %20 : vector<4xf32>
     }
-    %23, %24 = scf.for %20 = [%14 to %end step %step](%21 = %initial : vector<4xf32>, %22 = %loaded : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+    %24, %25 = scf.for %21 = [%14 to %end step %step](%22 = %initial : vector<4xf32>, %23 = %loaded : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
       %loaded = scf.if %condition -> (vector<4xf32>) {
-        %loaded = vector.load %input[%20] : view<32xf32> -> vector<4xf32>
+        %loaded = vector.load %input[%21] : view<32xf32> -> vector<4xf32>
         scf.yield %loaded : vector<4xf32>
       } else {
-        %27 = vector.constant 0.0 : vector<4xf32>
-        scf.yield %27 : vector<4xf32>
+        %28 = scalar.constant 0.0 : f32
+        %29 = vector.splat %28 : vector<4xf32>
+        scf.yield %29 : vector<4xf32>
       }
       %next = scf.if %condition -> (vector<4xf32>) {
-        %updated = vector.addf %21, %22 : vector<4xf32>
+        %updated = vector.addf %22, %23 : vector<4xf32>
         scf.yield %updated : vector<4xf32>
       } else {
-        scf.yield %21 : vector<4xf32>
+        scf.yield %22 : vector<4xf32>
       }
       scf.yield %next, %loaded : vector<4xf32>, vector<4xf32>
     }
     %next = scf.if %condition -> (vector<4xf32>) {
-      %updated = vector.addf %23, %24 : vector<4xf32>
+      %updated = vector.addf %24, %25 : vector<4xf32>
       scf.yield %updated : vector<4xf32>
     } else {
-      scf.yield %23 : vector<4xf32>
+      scf.yield %24 : vector<4xf32>
     }
     scf.yield %next : vector<4xf32>
   } else {
-    %34 = scf.for %32 = [%begin to %end step %step](%33 = %initial : vector<4xf32>) -> (vector<4xf32>) {
+    %36 = scf.for %34 = [%begin to %end step %step](%35 = %initial : vector<4xf32>) -> (vector<4xf32>) {
       %next = scf.if %condition -> (vector<4xf32>) {
-        %loaded = vector.load %input[%32] : view<32xf32> -> vector<4xf32>
-        %updated = vector.addf %33, %loaded : vector<4xf32>
+        %loaded = vector.load %input[%34] : view<32xf32> -> vector<4xf32>
+        %updated = vector.addf %35, %loaded : vector<4xf32>
         scf.yield %updated : vector<4xf32>
       } else {
-        scf.yield %33 : vector<4xf32>
+        scf.yield %35 : vector<4xf32>
       }
       scf.yield %next : vector<4xf32>
     }
-    scf.yield %34 : vector<4xf32>
+    scf.yield %36 : vector<4xf32>
   }
   func.return %result : vector<4xf32>
 }

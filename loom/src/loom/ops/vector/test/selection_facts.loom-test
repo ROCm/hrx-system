@@ -4,7 +4,8 @@
 // and a fragment boundary. Finite does not imply exact BF16 representability.
 func.def @probability_narrowing(%input: vector<8xf32>, %valid: vector<8xi1>) -> (i1, vector<8xbf16>) {
   %exponential = vector.exp2f<nnan|ninf|afn> %input : vector<8xf32>
-  %masked_value = vector.constant 0.0 : vector<8xf32>
+  %masked_value_scalar = scalar.constant 0.0 : f32
+  %masked_value = vector.splat %masked_value_scalar : vector<8xf32>
   %probability = vector.select %valid, %exponential, %masked_value : vector<8xf32>
   %extent = index.constant 16 : index
   %fragment = vector.fragment<result> %probability shape [%extent, %extent] : vector<8xf32>
@@ -17,7 +18,8 @@ func.def @probability_narrowing(%input: vector<8xf32>, %valid: vector<8xi1>) -> 
 // ----
 func.def @probability_narrowing(%input: vector<8xf32>, %valid: vector<8xi1>) -> (i1, vector<8xbf16>) {
   %exponential = vector.exp2f<nnan|ninf|afn> %input : vector<8xf32>
-  %masked_value = vector.constant 0.0 : vector<8xf32>
+  %masked_value_scalar = scalar.constant 0.0 : f32
+  %masked_value = vector.splat %masked_value_scalar : vector<8xf32>
   %probability = vector.select %valid, %exponential, %masked_value : vector<8xf32>
   %extent = index.constant 16 : index
   %fragment = vector.fragment<result> %probability shape [%extent, %extent] : vector<8xf32>

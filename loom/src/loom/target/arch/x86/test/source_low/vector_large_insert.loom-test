@@ -418,7 +418,8 @@ x86.target<avx2> @target
 func.def public target(@target) @short_dynamic_insert(%output: buffer, %value: f8E4M3, %position: index) {
   %c0 = index.constant 0 : offset
   %output_view = buffer.view %output[%c0] : buffer -> view<4xf8E4M3>
-  %values = vector.constant 0.0 : vector<4xf8E4M3>
+  %values_scalar = scalar.constant 0.0 : f8E4M3
+  %values = vector.splat %values_scalar : vector<4xf8E4M3>
   %result = vector.insert %value into %values[%position] : f8E4M3, vector<4xf8E4M3>
   vector.store %result, %output_view[0] : vector<4xf8E4M3>, view<4xf8E4M3>
   func.return
@@ -426,30 +427,32 @@ func.def public target(@target) @short_dynamic_insert(%output: buffer, %value: f
 
 // ----
 low.func.def public target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (buffer, f8E4M3, index) -> ()}) @short_dynamic_insert(%output: reg<x86.gpr64>, %value: reg<x86.gpr32>, %position: reg<x86.gpr64>) asm {
-  %values = vxorps.zero.xmm
-  %28 = mov.trunc.gpr32.gpr64 %position
-  %29 = movsx.i16.gpr32 %28
-  %30 = mov.imm32 0
-  %31 = copy %30 : reg<x86.gpr32> -> reg<x86.gpr32>
-  %32 = sub.gpr32 %31, %29
-  %33 = mov.imm32 50462976
-  %34 = vmovd.xmm.gpr32 %33
-  %35 = vpmovzxbw.xmm %34
-  %36 = vmovd.xmm.gpr32 %32
-  %37 = vpbroadcastw.xmm %36
-  %38 = vpaddw.xmm %37, %35
-  %40 = vpcmpeqw.xmm %38, %values
-  %41 = cmp.imm.gpr64 %position, 4, "ult"
-  %42 = mov.imm32 0
-  %43 = sub.gpr32 %42, %41
-  %44 = vmovd.xmm.gpr32 %43
-  %45 = vpbroadcastw.xmm %44
-  %46 = vpand.xmm %40, %45
-  %47 = vmovd.xmm.gpr32 %value
-  %48 = vpbroadcastb.xmm %47
-  %49 = avx2.vmovdqu.rodata.xmm @__low_rodata_6497a0a7
-  %50 = vpshufb.xmm %46, %49
-  %result = vpblendvb.xmm %values, %48, %50
+  %values_scalar = mov.imm32 0
+  %29 = vmovd.xmm.gpr32 %values_scalar
+  %values = vpbroadcastb.xmm %29
+  %31 = mov.trunc.gpr32.gpr64 %position
+  %32 = movsx.i16.gpr32 %31
+  %34 = copy %values_scalar : reg<x86.gpr32> -> reg<x86.gpr32>
+  %35 = sub.gpr32 %34, %32
+  %36 = mov.imm32 50462976
+  %37 = vmovd.xmm.gpr32 %36
+  %38 = vpmovzxbw.xmm %37
+  %39 = vmovd.xmm.gpr32 %35
+  %40 = vpbroadcastw.xmm %39
+  %41 = vpaddw.xmm %40, %38
+  %42 = vxorps.zero.xmm
+  %43 = vpcmpeqw.xmm %41, %42
+  %44 = cmp.imm.gpr64 %position, 4, "ult"
+  %45 = mov.imm32 0
+  %46 = sub.gpr32 %45, %44
+  %47 = vmovd.xmm.gpr32 %46
+  %48 = vpbroadcastw.xmm %47
+  %49 = vpand.xmm %43, %48
+  %50 = vmovd.xmm.gpr32 %value
+  %51 = vpbroadcastb.xmm %50
+  %52 = avx2.vmovdqu.rodata.xmm @__low_rodata_6497a0a7
+  %53 = vpshufb.xmm %49, %52
+  %result = vpblendvb.xmm %values, %51, %53
   vmovss.store.xmm %result, %output {disp32 = 0}
   return
 }

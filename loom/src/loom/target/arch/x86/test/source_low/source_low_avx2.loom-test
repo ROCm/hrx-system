@@ -128,25 +128,27 @@ func.def target(@target) @masked_scale(%base: i32, %limit: i32, %values: vector<
   %active = vector.cmpi slt, %lanes, %limits : vector<8xi32> -> vector<8xi1>
   %scales = vector.splat %scale : vector<8xf32>
   %scaled = vector.mulf %values, %scales : vector<8xf32>
-  %inactive_values = vector.constant 0.0 : vector<8xf32>
+  %inactive_values_scalar = scalar.constant 0.0 : f32
+  %inactive_values = vector.splat %inactive_values_scalar : vector<8xf32>
   %result = vector.select %active, %scaled, %inactive_values : vector<8xf32>
   func.return %result : vector<8xf32>
 }
 
 // ----
 low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (i32, i32, vector<8xf32>, f32) -> (vector<8xf32>)}) @masked_scale(%base: reg<x86.gpr32>, %limit: reg<x86.gpr32>, %values: reg<x86.ymm>, %scale: reg<x86.xmm>) -> (reg<x86.ymm>) asm {
-  %18 = mov.imm64 506097522914230528
-  %19 = vmovq.xmm.gpr64 %18
-  %20 = vpmovzxbd.ymm %19
-  %21 = vmovd.xmm.gpr32 %base
-  %22 = vpbroadcastd.ymm %21
-  %lanes = vpaddd.ymm %22, %20
-  %24 = vmovd.xmm.gpr32 %limit
-  %limits = vpbroadcastd.ymm %24
+  %19 = mov.imm64 506097522914230528
+  %20 = vmovq.xmm.gpr64 %19
+  %21 = vpmovzxbd.ymm %20
+  %22 = vmovd.xmm.gpr32 %base
+  %23 = vpbroadcastd.ymm %22
+  %lanes = vpaddd.ymm %23, %21
+  %25 = vmovd.xmm.gpr32 %limit
+  %limits = vpbroadcastd.ymm %25
   %active = vpcmpgtd.ymm %limits, %lanes
   %scales = vbroadcastss.ymm %scale
   %scaled = vmulps.ymm %values, %scales
-  %inactive_values = vxorps.zero.ymm
+  %inactive_values_scalar = vxorps.zero.xmm
+  %inactive_values = vbroadcastss.ymm %inactive_values_scalar
   %result = vpblendvb.ymm %inactive_values, %scaled, %active
   return %result
 }

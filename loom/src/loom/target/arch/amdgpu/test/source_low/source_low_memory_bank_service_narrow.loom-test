@@ -48,7 +48,8 @@ kernel.def target(@target) @fragment_base_residues() {
   %view0 = buffer.view %aligned[%base0] : buffer -> view<16x48xbf16>
   %view2 = buffer.view %aligned[%base2] : buffer -> view<16x48xbf16>
   %view_unknown = buffer.view %aligned[%offset] : buffer -> view<16x48xbf16>
-  %initial_values = vector.constant 0.0 : vector<8xf32>
+  %initial_values_scalar = scalar.constant 0.0 : f32
+  %initial_values = vector.splat %initial_values_scalar : vector<8xf32>
   %init = vector.fragment<init> %initial_values shape [%size, %size] : vector<8xf32>
   %halves = vector.fptrunc %init : vector<8xf32> to vector<8xbf16>
   vector.fragment.store<result> %halves, %view0[%origin, %origin] shape [%size, %size] : vector<8xbf16>, view<16x48xbf16>

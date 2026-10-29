@@ -1252,13 +1252,18 @@ def _vector_extremum_f32x16_rule(
     )
 
 
-def _float_matrix_accumulator_zero_rule() -> DescriptorRule:
+def _float_matrix_accumulator_zero_rule(source_op: Op) -> DescriptorRule:
     descriptor = _descriptor("amd.xdna.aie2p.accumulator.clear.f32x64")
+    source_guards = (
+        (Guard.attr_kind("value", "f64"),)
+        if source_op is vector.vector_constant
+        else (Guard.value_type("scalar", _F32),)
+    )
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=source_op,
         descriptor=descriptor,
         guards=(
-            Guard.attr_kind("value", "f64"),
+            *source_guards,
             Guard.value_type("result", _F32X64_ACCUMULATOR),
             Guard.value_float_equals("result", 0.0),
         ),
@@ -1271,15 +1276,20 @@ def _float_matrix_accumulator_zero_rule() -> DescriptorRule:
     )
 
 
-def _float_packet_accumulator_zero_rule() -> DescriptorRule:
+def _float_packet_accumulator_zero_rule(source_op: Op) -> DescriptorRule:
     descriptor = _descriptor("amd.xdna.aie2p.accumulator.clear.f32x64")
     cleared = ValueRef.temporary("cleared")
     cleared_unit = ValueRef.temporary("cleared_unit")
+    source_guards = (
+        (Guard.attr_kind("value", "f64"),)
+        if source_op is vector.vector_constant
+        else (Guard.value_type("scalar", _F32),)
+    )
     return DescriptorRule(
-        source_op=vector.vector_constant,
+        source_op=source_op,
         descriptor=descriptor,
         guards=(
-            Guard.attr_kind("value", "f64"),
+            *source_guards,
             Guard.value_type("result", _F32X16_VECTOR),
             Guard.value_float_equals("result", 0.0),
             Guard.low_value_register_class("result", "aie2p.ebmll"),
@@ -1545,8 +1555,14 @@ AIE2P_FLOATING_RULES = (
             (scalar_arithmetic.scalar_maximumf, "maximum"),
         )
     ),
-    _float_packet_accumulator_zero_rule(),
-    _float_matrix_accumulator_zero_rule(),
+    *(
+        zero_rule(source_op)
+        for source_op in (vector.vector_constant, vector.vector_splat)
+        for zero_rule in (
+            _float_packet_accumulator_zero_rule,
+            _float_matrix_accumulator_zero_rule,
+        )
+    ),
     _float_matrix_accumulator_add_rule(),
     *(
         _float_vector_accumulator_binary_rule(

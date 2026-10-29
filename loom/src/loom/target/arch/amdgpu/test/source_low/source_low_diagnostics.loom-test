@@ -297,7 +297,8 @@ kernel.def target(@target) @fragment_store_launch_subgroup_footprint() {
   %row = index.add %workgroup_base, %subgroup_base : index
   %output_global = buffer.assume.memory_space<global> %output : buffer
   %output_view = buffer.view %output_global[%output_base] : buffer -> view<4096x16xf32>
-  %value = vector.constant 0.0 : vector<8xf32>
+  %value_scalar = scalar.constant 0.0 : f32
+  %value = vector.splat %value_scalar : vector<8xf32>
   vector.fragment.store<result> %value, %output_view[%row, %column] shape [%m, %n] : vector<8xf32>, view<4096x16xf32>
   kernel.return
 }
@@ -307,28 +308,28 @@ amdgpu.target<gfx11-generic> @target
 
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(64, 1, 1) @fragment_store_launch_subgroup_footprint() asm {
   %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
-  %19 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %20 = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output_view = resource<hal_binding> {extent = 262144, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %subgroup = v_lshrrev_b32_src0_inline %19, 5
-  %22 = v_mov_b32 0
-  %31 = v_and_b32_src0_inline %19, 31
-  %32 = s_lshl_b32_rhs_inline %workgroup, 12
-  %33 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %34 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %35 = s_mov_b32 0
-  %36, %37 = s_add_co_u32 %33, %32
-  %38, %39 = s_addc_u32 %34, %35, %37
-  %40 = concat(%36, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %41 = v_lshlrev_b32_src0_inline %subgroup, 10
-  %42 = v_lshl_add_u32_shift_imm %31, %41, 2
-  global_store_b32_saddr %42, %22, %40
-  global_store_b32_saddr %42, %22, %40 {offset = 128}
-  global_store_b32_saddr %42, %22, %40 {offset = 256}
-  global_store_b32_saddr %42, %22, %40 {offset = 384}
-  global_store_b32_saddr %42, %22, %40 {offset = 512}
-  global_store_b32_saddr %42, %22, %40 {offset = 640}
-  global_store_b32_saddr %42, %22, %40 {offset = 768}
-  global_store_b32_saddr %42, %22, %40 {offset = 896}
+  %subgroup = v_lshrrev_b32_src0_inline %20, 5
+  %value_scalar = v_mov_b32 0
+  %25 = v_and_b32_src0_inline %20, 31
+  %26 = s_lshl_b32_rhs_inline %workgroup, 12
+  %27 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29 = s_mov_b32 0
+  %30, %31 = s_add_co_u32 %27, %26
+  %32, %33 = s_addc_u32 %28, %29, %31
+  %34 = concat(%30, %32) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %35 = v_lshlrev_b32_src0_inline %subgroup, 10
+  %36 = v_lshl_add_u32_shift_imm %25, %35, 2
+  global_store_b32_saddr %36, %value_scalar, %34
+  global_store_b32_saddr %36, %value_scalar, %34 {offset = 128}
+  global_store_b32_saddr %36, %value_scalar, %34 {offset = 256}
+  global_store_b32_saddr %36, %value_scalar, %34 {offset = 384}
+  global_store_b32_saddr %36, %value_scalar, %34 {offset = 512}
+  global_store_b32_saddr %36, %value_scalar, %34 {offset = 640}
+  global_store_b32_saddr %36, %value_scalar, %34 {offset = 768}
+  global_store_b32_saddr %36, %value_scalar, %34 {offset = 896}
   return
 }
 
@@ -545,7 +546,8 @@ kernel.def target(@target) @fragment_wave64_result_wide_f32_payload_rejected() {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
-  %values = vector.constant 0.0 : vector<8xf32>
+  %values_scalar = scalar.constant 0.0 : f32
+  %values = vector.splat %values_scalar : vector<8xf32>
   %fragment = vector.fragment<result> %values shape [%m, %n] : vector<8xf32>
   // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.payload_layout"}
   vector.fragment.store<result> %fragment, %out_view[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
@@ -565,7 +567,8 @@ kernel.def target(@target) @fragment_wave64_result_ordinary_f16_storage_rejected
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %out_view = buffer.view %out_buffer[%base] : buffer -> view<16x16xf32>
-  %wide = vector.constant 0.0 : vector<8xf32>
+  %wide_scalar = scalar.constant 0.0 : f32
+  %wide = vector.splat %wide_scalar : vector<8xf32>
   %narrow = vector.fptrunc %wide : vector<8xf32> to vector<8xf16>
   %fragment = vector.fragment<result> %narrow shape [%m, %n] : vector<8xf16>
   // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.payload_storage"}
@@ -657,7 +660,8 @@ kernel.def target(@target) @cdna_legacy_mfma_fragment_layout_rejected() {
   %lhs = vector.fragment.load<lhs> %lhs_view[0, 0] shape [%m, %k] : view<16x4xf16> -> vector<4xf16>
   // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.payload_layout"}
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<4x16xf16, %rhs_layout> -> vector<4xf16>
-  %zero_acc = vector.constant 0.0 : vector<16xf32>
+  %zero_acc_scalar = scalar.constant 0.0 : f32
+  %zero_acc = vector.splat %zero_acc_scalar : vector<16xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<16xf32>
   // ERROR@+1: AMDGPU/021 {matrix_constraint="payload_shape"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<16xf32>

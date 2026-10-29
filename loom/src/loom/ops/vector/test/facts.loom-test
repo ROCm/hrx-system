@@ -65,7 +65,8 @@ func.def @fmaf_bf16_single_rounding() -> (bf16, bf16) {
   %c0 = scalar.constant -9.3132257461547852e-10 : bf16
   %c1 = scalar.constant 9.3132257461547852e-10 : bf16
   %a = vector.from_elements %a0, %a1 : vector<2xbf16>
-  %b = vector.constant 1.5 : vector<2xbf16>
+  %b_scalar = scalar.constant 1.5 : bf16
+  %b = vector.splat %b_scalar : vector<2xbf16>
   %c = vector.from_elements %c0, %c1 : vector<2xbf16>
   %r = vector.fmaf %a, %b, %c : vector<2xbf16>
   %positive = vector.extract %r[0] : vector<2xbf16> -> bf16
@@ -84,8 +85,10 @@ func.def @fmaf_bf16_single_rounding() -> (bf16, bf16) {
 // Dot accumulation uses the same single-rounding FMA facts as scalar and
 // lanewise operations, including a uniform input fact representation.
 func.def @dotf_bf16_single_rounding() -> (bf16) {
-  %a = vector.constant 1.0078125 : vector<1xbf16>
-  %b = vector.constant 1.5 : vector<1xbf16>
+  %a_scalar = scalar.constant 1.0078125 : bf16
+  %a = vector.splat %a_scalar : vector<1xbf16>
+  %b_scalar = scalar.constant 1.5 : bf16
+  %b = vector.splat %b_scalar : vector<1xbf16>
   %c = scalar.constant -9.3132257461547852e-10 : bf16
   %r = vector.dotf %a, %b, %c : vector<1xbf16>, vector<1xbf16>, bf16
   func.return %r : bf16
@@ -245,8 +248,10 @@ func.def @reduce_uniform_splat_addi() -> (i32) {
 // Representative lanewise float facts preserve uniform summaries through the
 // expanded math surface.
 func.def @reduce_uniform_float_math() -> (f32) {
-  %c9 = vector.constant 9.0 : vector<4xf32>
-  %c4 = vector.constant 4.0 : vector<4xf32>
+  %c9_scalar = scalar.constant 9.0 : f32
+  %c9 = vector.splat %c9_scalar : vector<4xf32>
+  %c4_scalar = scalar.constant 4.0 : f32
+  %c4 = vector.splat %c4_scalar : vector<4xf32>
   %rem = vector.remf %c9, %c4 : vector<4xf32>
   %root = vector.sqrtf %c9 : vector<4xf32>
   %sum = vector.addf %rem, %root : vector<4xf32>
@@ -301,9 +306,11 @@ func.def @small_static_float_math_extract() -> (f32) {
 
 // Vector minimumf mirrors scalar IEEE NaN propagation instead of minnumf.
 func.def @vector_minimumf_propagates_uniform_nan() -> (i1) {
-  %neg = vector.constant -1.0 : vector<4xf32>
+  %neg_scalar = scalar.constant -1.0 : f32
+  %neg = vector.splat %neg_scalar : vector<4xf32>
   %nan = vector.logf %neg : vector<4xf32>
-  %c3 = vector.constant 3.0 : vector<4xf32>
+  %c3_scalar = scalar.constant 3.0 : f32
+  %c3 = vector.splat %c3_scalar : vector<4xf32>
   %min = vector.minimumf %nan, %c3 : vector<4xf32>
   %lane = vector.extract %min[0] : vector<4xf32> -> f32
   %r = scalar.isnanf %lane : f32
@@ -319,9 +326,11 @@ func.def @vector_minimumf_propagates_uniform_nan() -> (i1) {
 
 // Vector minnumf keeps the explicit NaN-skipping behavior.
 func.def @vector_minnumf_skips_uniform_nan() -> (i1) {
-  %neg = vector.constant -1.0 : vector<4xf32>
+  %neg_scalar = scalar.constant -1.0 : f32
+  %neg = vector.splat %neg_scalar : vector<4xf32>
   %nan = vector.logf %neg : vector<4xf32>
-  %c3 = vector.constant 3.0 : vector<4xf32>
+  %c3_scalar = scalar.constant 3.0 : f32
+  %c3 = vector.splat %c3_scalar : vector<4xf32>
   %min = vector.minnumf %nan, %c3 : vector<4xf32>
   %lane = vector.extract %min[0] : vector<4xf32> -> f32
   %r = scalar.isnanf %lane : f32
@@ -338,10 +347,13 @@ func.def @vector_minnumf_skips_uniform_nan() -> (i1) {
 // Uniform vector clamp facts preserve the same explicit NaN semantics as the
 // scalar op and feed scalar consumers through extraction.
 func.def @vector_clampf_modes_uniform_nan() -> (i1, i1, i1) {
-  %neg = vector.constant -1.0 : vector<4xf32>
+  %neg_scalar = scalar.constant -1.0 : f32
+  %neg = vector.splat %neg_scalar : vector<4xf32>
   %nan = vector.logf %neg : vector<4xf32>
-  %c0 = vector.constant 0.0 : vector<4xf32>
-  %c1 = vector.constant 1.0 : vector<4xf32>
+  %c0_scalar = scalar.constant 0.0 : f32
+  %c0 = vector.splat %c0_scalar : vector<4xf32>
+  %c1_scalar = scalar.constant 1.0 : f32
+  %c1 = vector.splat %c1_scalar : vector<4xf32>
   %ordered = vector.clampf<ordered> %nan, %c0, %c1 : vector<4xf32>
   %number = vector.clampf<number> %nan, %c0, %c1 : vector<4xf32>
   %ieee = vector.clampf<ieee> %nan, %c0, %c1 : vector<4xf32>
@@ -382,8 +394,10 @@ func.def @reduce_dynamic_zero_splat_addi(%n: index) -> (i32) {
 
 // Uniform floating-point dot products fold through fused multiply-add facts.
 func.def @dotf_uniform_constants() -> (f32) {
-  %lhs = vector.constant 2.0 : vector<4xf32>
-  %rhs = vector.constant 3.0 : vector<4xf32>
+  %lhs_scalar = scalar.constant 2.0 : f32
+  %lhs = vector.splat %lhs_scalar : vector<4xf32>
+  %rhs_scalar = scalar.constant 3.0 : f32
+  %rhs = vector.splat %rhs_scalar : vector<4xf32>
   %init = scalar.constant 1.0 : f32
   %r = vector.dotf %lhs, %rhs, %init : vector<4xf32>, vector<4xf32>, f32
   func.return %r : f32
@@ -447,7 +461,8 @@ func.def @structural_uniform_facts() -> (i32, i32, i32, i32) {
   %uniform_elements = vector.constant 3 : vector<4xi32>
   %inserted = vector.insert %c3 into %uniform_elements[2] : i32, vector<4xi32>
   %r2 = vector.extract %inserted[0] : vector<4xi32> -> i32
-  %c1 = vector.constant 1.0 : vector<4xf32>
+  %c1_scalar = scalar.constant 1.0 : f32
+  %c1 = vector.splat %c1_scalar : vector<4xf32>
   %bits = vector.bitcast %c1 : vector<4xf32> to vector<4xi32>
   %r3 = vector.extract %bits[3] : vector<4xi32> -> i32
   func.return %r0, %r1, %r2, %r3 : i32, i32, i32, i32
@@ -782,7 +797,8 @@ func.def @bitfield_extract_small_lanes() -> (i32, i32) {
 // Semantic activation facts preserve uniform and exact-lane summaries so
 // canonicalization can fold through vector consumers.
 func.def @activation_uniform_exact_zero() -> (f32, f32, f32, f32) {
-  %c0 = vector.constant 0.0 : vector<4xf32>
+  %c0_scalar = scalar.constant 0.0 : f32
+  %c0 = vector.splat %c0_scalar : vector<4xf32>
   %logistic = vector.logisticf %c0 : vector<4xf32>
   %silu = vector.siluf %c0 : vector<4xf32>
   %softplus = vector.softplusf %c0 : vector<4xf32>
@@ -807,7 +823,8 @@ func.def @activation_uniform_exact_zero() -> (f32, f32, f32, f32) {
 // Uniform vector activation facts retain the selected-width negative tail for
 // every operation derived from logistic.
 func.def @activation_uniform_negative_tail() -> (i1, i1, i1, i1, i1, i1) {
-  %f32_input = vector.constant -100.0 : vector<4xf32>
+  %f32_input_scalar = scalar.constant -100.0 : f32
+  %f32_input = vector.splat %f32_input_scalar : vector<4xf32>
   %f32_logistic = vector.logisticf %f32_input : vector<4xf32>
   %f32_silu = vector.siluf %f32_input : vector<4xf32>
   %f32_gelu = vector.geluf<logistic> %f32_input {scale = 1.0} : vector<4xf32>
@@ -819,7 +836,8 @@ func.def @activation_uniform_negative_tail() -> (i1, i1, i1, i1, i1, i1) {
   %f32_silu_negative = scalar.cmpf olt, %f32_silu_lane, %f32_sign_threshold : f32
   %f32_gelu_negative = scalar.cmpf olt, %f32_gelu_lane, %f32_sign_threshold : f32
 
-  %f64_input = vector.constant -710.0 : vector<4xf64>
+  %f64_input_scalar = scalar.constant -710.0 : f64
+  %f64_input = vector.splat %f64_input_scalar : vector<4xf64>
   %f64_logistic = vector.logisticf %f64_input : vector<4xf64>
   %f64_silu = vector.siluf %f64_input : vector<4xf64>
   %f64_gelu = vector.geluf<logistic> %f64_input {scale = 1.0} : vector<4xf64>
@@ -847,8 +865,10 @@ func.def @activation_uniform_negative_tail() -> (i1, i1, i1, i1, i1, i1) {
 
 // Turn-domain trig facts preserve exact lane values and uniform summaries.
 func.def @turn_trig_uniform_exact_quadrants() -> (f32, f32, f32, f32) {
-  %c0 = vector.constant 0.0 : vector<4xf32>
-  %quarter = vector.constant 0.25 : vector<4xf32>
+  %c0_scalar = scalar.constant 0.0 : f32
+  %c0 = vector.splat %c0_scalar : vector<4xf32>
+  %quarter_scalar = scalar.constant 0.25 : f32
+  %quarter = vector.splat %quarter_scalar : vector<4xf32>
   %sin_zero = vector.sinturnsf %c0 : vector<4xf32>
   %cos_zero = vector.costurnsf %c0 : vector<4xf32>
   %sin_quarter = vector.sinturnsf %quarter : vector<4xf32>
@@ -1073,11 +1093,14 @@ func.def @transform_hadamard_rounds_each_step() -> (f32) {
 
 // Float predicate and sign facts can produce exact i1/float lane summaries.
 func.def @wave2_float_predicate_facts() -> (i1, i1, i1, f32) {
-  %neg = vector.constant -1.0 : vector<4xf32>
-  %c0 = vector.constant 0.0 : vector<4xf32>
+  %neg_scalar = scalar.constant -1.0 : f32
+  %neg = vector.splat %neg_scalar : vector<4xf32>
+  %c0_scalar = scalar.constant 0.0 : f32
+  %c0 = vector.splat %c0_scalar : vector<4xf32>
   %nan = vector.logf %neg : vector<4xf32>
   %inf = vector.divf %neg, %c0 : vector<4xf32>
-  %finite = vector.constant 2.0 : vector<4xf32>
+  %finite_scalar = scalar.constant 2.0 : f32
+  %finite = vector.splat %finite_scalar : vector<4xf32>
   %is_nan = vector.isnanf %nan : vector<4xf32> -> vector<4xi1>
   %is_inf = vector.isinff %inf : vector<4xf32> -> vector<4xi1>
   %is_finite = vector.isfinitef %finite : vector<4xf32> -> vector<4xi1>

@@ -8,7 +8,10 @@
 
 #include <math.h>
 
+#include "loom/ir/float_facts.h"
 #include "loom/ops/vector/ops.h"
+#include "loom/util/fact_extensions.h"
+#include "loom/util/fact_table.h"
 
 typedef enum loom_aie2p_f32_representation_action_e {
   LOOM_AIE2P_F32_REPRESENTATION_ACTION_CONSTANT = 0,
@@ -102,16 +105,37 @@ static void loom_aie2p_f32_constrain_vectors(
   }
 }
 
+static bool loom_aie2p_f32_value_is_positive_zero(
+    loom_low_lower_context_t* context, loom_value_id_t value_id) {
+  const loom_value_fact_table_t* fact_table =
+      loom_low_lower_context_fact_table(context);
+  if (fact_table == NULL) {
+    return false;
+  }
+  loom_value_facts_t element_facts = loom_value_facts_unknown();
+  if (!loom_value_facts_query_all_equal_element(
+          &fact_table->context,
+          loom_value_fact_table_lookup(fact_table, value_id), &element_facts)) {
+    return false;
+  }
+  double value = 0.0;
+  return loom_value_facts_as_exact_float(LOOM_SCALAR_TYPE_F32, element_facts,
+                                         &value) &&
+         value == 0.0 && !signbit(value);
+}
+
 static void loom_aie2p_f32_observe_constant(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_representation_recorder_t* recorder) {
-  const loom_value_id_t result = loom_vector_constant_result(source_op);
+  const bool is_splat = loom_vector_splat_isa(source_op);
+  const loom_value_id_t result = is_splat
+                                     ? loom_vector_splat_result(source_op)
+                                     : loom_vector_constant_result(source_op);
   const loom_module_t* module = loom_low_lower_context_module(context);
   if (!loom_aie2p_f32_packet_type(loom_module_value_type(module, result))) {
     return;
   }
-  const double value = loom_attr_as_f64(loom_vector_constant_value(source_op));
-  if (value != 0.0 || signbit(value)) {
+  if (!loom_aie2p_f32_value_is_positive_zero(context, result)) {
     loom_aie2p_f32_constrain_vector(module, result, recorder);
     return;
   }
@@ -369,6 +393,8 @@ static void loom_aie2p_f32_observe_unclaimed_operand(
 static const loom_low_lower_representation_boundary_t
     kAie2pF32RepresentationBoundaries[] = {
         {LOOM_OP_VECTOR_CONSTANT, LOOM_AIE2P_F32_REPRESENTATION_ACTION_CONSTANT,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
+        {LOOM_OP_VECTOR_SPLAT, LOOM_AIE2P_F32_REPRESENTATION_ACTION_CONSTANT,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
         {LOOM_OP_VECTOR_SELECT, LOOM_AIE2P_F32_REPRESENTATION_ACTION_SELECT,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_ALL},

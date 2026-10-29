@@ -333,7 +333,8 @@ func.def @bfloat_lookup_arithmetic(%input: buffer, %output: buffer) {
   %last = vector.extract %table[7] : vector<8xbf16> -> bf16
   %updated = vector.insert %last into %decoded[5] : bf16, vector<8xbf16>
   %splat = vector.splat %last : vector<8xbf16>
-  %initial_zero = vector.constant 0.0 : vector<4xf32>
+  %initial_zero_scalar = scalar.constant 0.0 : f32
+  %initial_zero = vector.splat %initial_zero_scalar : vector<4xf32>
   %dot_zero = vector.dot2f %decoded, %rhs, %initial_zero : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
   %dot_initial = vector.dot2f %decoded, %rhs, %initial : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
   // Volatile initialization keeps the guard writes before the partial stores.
@@ -363,7 +364,8 @@ func.def @bfloat_lookup_arithmetic(%input: buffer, %output: buffer) {
   %k = index.constant 1 : index
   %lhs_fragment = vector.fragment<lhs> %decoded shape [%m, %k] : vector<8xbf16>
   %rhs_fragment = vector.fragment<rhs> %rhs shape [%k, %n] : vector<8xbf16>
-  %accumulator = vector.constant 0.0 : vector<64xf32>
+  %accumulator_scalar = scalar.constant 0.0 : f32
+  %accumulator = vector.splat %accumulator_scalar : vector<64xf32>
   %acc_fragment = vector.fragment<init> %accumulator shape [%m, %n] : vector<64xf32>
   %product = vector.mma %lhs_fragment, %rhs_fragment, %acc_fragment : vector<8xbf16>, vector<8xbf16>, vector<64xf32>
   %product_offset = index.constant 512 : offset

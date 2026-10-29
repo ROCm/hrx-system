@@ -11,28 +11,28 @@ func.def target(@target) @avx2_low_rsqrt_refinement(%value: vector<2xf32>) -> (v
 
 // ----
 low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<2xf32>) -> (vector<2xf32>)}) @avx2_low_rsqrt_refinement(%value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
-  %19 = mov.imm32 1056964608
-  %20 = vmovd.xmm.gpr32 %19
-  %21 = avx2.vpbroadcastd.xmm %20
-  %22 = mov.imm32 1069547520
-  %23 = vmovd.xmm.gpr32 %22
-  %24 = avx2.vpbroadcastd.xmm %23
-  %25 = vrsqrtps.xmm %value
-  %26 = vmulps.xmm %value, %25
-  %27 = vmulps.xmm %26, %25
-  %28 = vmulps.xmm %21, %27
-  %29 = vsubps.xmm %24, %28
-  %30 = vmulps.xmm %25, %29
-  %31 = mov.imm32 8388608
-  %32 = vmovd.xmm.gpr32 %31
-  %33 = avx2.vpbroadcastd.xmm %32
-  %34 = mov.imm32 2130706431
-  %35 = vmovd.xmm.gpr32 %34
-  %36 = avx2.vpbroadcastd.xmm %35
-  %37 = vpsubd.xmm %value, %33
-  %38 = vpminud.xmm %37, %36
-  %39 = vpcmpeqd.xmm %38, %37
-  %result = vpblendvb.xmm %25, %30, %39
+  %21 = mov.imm32 1056964608
+  %22 = vmovd.xmm.gpr32 %21
+  %23 = vbroadcastss.xmm %22
+  %24 = mov.imm32 1069547520
+  %25 = vmovd.xmm.gpr32 %24
+  %26 = vbroadcastss.xmm %25
+  %27 = vrsqrtps.xmm %value
+  %28 = vmulps.xmm %value, %27
+  %29 = vmulps.xmm %28, %27
+  %30 = vmulps.xmm %23, %29
+  %31 = vsubps.xmm %26, %30
+  %32 = vmulps.xmm %27, %31
+  %33 = mov.imm32 8388608
+  %34 = vmovd.xmm.gpr32 %33
+  %35 = avx2.vpbroadcastd.xmm %34
+  %36 = mov.imm32 2130706431
+  %37 = vmovd.xmm.gpr32 %36
+  %38 = avx2.vpbroadcastd.xmm %37
+  %39 = vpsubd.xmm %value, %35
+  %40 = vpminud.xmm %39, %38
+  %41 = vpcmpeqd.xmm %40, %39
+  %result = vpblendvb.xmm %27, %32, %41
   return %result
 }
 
@@ -50,35 +50,35 @@ func.def target(@target) @avx512_single_rsqrt_refinement(%value: vector<1xf64>) 
 
 // ----
 low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (vector<1xf64>) -> (vector<1xf64>)}) @avx512_single_rsqrt_refinement(%value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
-  %35 = mov.imm64 4602678819172646912
-  %36 = vmovq.xmm.gpr64 %35
-  %37 = avx2.vpbroadcastq.xmm %36
-  %38 = mov.imm64 4609434218613702656
-  %39 = vmovq.xmm.gpr64 %38
-  %40 = avx2.vpbroadcastq.xmm %39
-  %41 = vrsqrt14pd.xmm %value
-  %42 = vmulpd.xmm %value, %41
-  %43 = vmulpd.xmm %42, %41
-  %44 = vmulpd.xmm %37, %43
-  %45 = vsubpd.xmm %40, %44
-  %46 = vmulpd.xmm %41, %45
-  %47 = vmulpd.xmm %value, %46
-  %48 = vmulpd.xmm %47, %46
-  %49 = vmulpd.xmm %37, %48
-  %50 = vsubpd.xmm %40, %49
-  %51 = vmulpd.xmm %46, %50
-  %52 = vpermilpd.xmm %value, 0
-  %53 = vmovq.gpr64.xmm %52
-  %54 = mov.imm64 -4503599627370496
-  %55 = copy %53 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %56 = add.gpr64 %55, %54
-  %57 = mov.imm64 9214364837600034815
-  %58 = cmp.gpr64 %56, %57, "ule"
-  %59 = mov.imm32 0
-  %60 = sub.gpr32 %59, %58
-  %61 = vmovd.xmm.gpr32 %60
-  %62 = avx2.vpbroadcastd.xmm %61
-  %result = vpblendvb.xmm %41, %51, %62
+  %37 = mov.imm64 4602678819172646912
+  %38 = vmovq.xmm.gpr64 %37
+  %39 = vmovddup.xmm %38
+  %40 = mov.imm64 4609434218613702656
+  %41 = vmovq.xmm.gpr64 %40
+  %42 = vmovddup.xmm %41
+  %43 = vrsqrt14pd.xmm %value
+  %44 = vmulpd.xmm %value, %43
+  %45 = vmulpd.xmm %44, %43
+  %46 = vmulpd.xmm %39, %45
+  %47 = vsubpd.xmm %42, %46
+  %48 = vmulpd.xmm %43, %47
+  %49 = vmulpd.xmm %value, %48
+  %50 = vmulpd.xmm %49, %48
+  %51 = vmulpd.xmm %39, %50
+  %52 = vsubpd.xmm %42, %51
+  %53 = vmulpd.xmm %48, %52
+  %54 = vpermilpd.xmm %value, 0
+  %55 = vmovq.gpr64.xmm %54
+  %56 = mov.imm64 -4503599627370496
+  %57 = copy %55 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %58 = add.gpr64 %57, %56
+  %59 = mov.imm64 9214364837600034815
+  %60 = cmp.gpr64 %58, %59, "ule"
+  %61 = mov.imm32 0
+  %62 = sub.gpr32 %61, %60
+  %63 = vmovd.xmm.gpr32 %62
+  %64 = avx2.vpbroadcastd.xmm %63
+  %result = vpblendvb.xmm %43, %53, %64
   return %result
 }
 
@@ -100,25 +100,25 @@ func.def target(@target) @rsqrt_refinement_proven_domain(%condition: i1) -> (vec
 
 // ----
 low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (i1) -> (vector<8xf32>)}) @rsqrt_refinement_proven_domain(%condition: reg<x86.gpr32>) -> (reg<x86.ymm>) asm {
-  %17 = mov.imm32 1065353216
-  %positive_lower = vmovd.xmm.gpr32 %17
-  %19 = mov.imm32 1082130432
-  %positive_upper = vmovd.xmm.gpr32 %19
-  %21 = vmovd.xmm.gpr32 %condition
-  %22 = vpsllq.xmm %21, 63
-  %scalar = vblendvpd.xmm %positive_upper, %positive_lower, %22
+  %19 = mov.imm32 1065353216
+  %positive_lower = vmovd.xmm.gpr32 %19
+  %21 = mov.imm32 1082130432
+  %positive_upper = vmovd.xmm.gpr32 %21
+  %23 = vmovd.xmm.gpr32 %condition
+  %24 = vpsllq.xmm %23, 63
+  %scalar = vblendvpd.xmm %positive_upper, %positive_lower, %24
   %value = vbroadcastss.ymm %scalar
-  %25 = mov.imm32 1056964608
-  %26 = vmovd.xmm.gpr32 %25
-  %27 = vpbroadcastd.ymm %26
-  %28 = mov.imm32 1069547520
-  %29 = vmovd.xmm.gpr32 %28
-  %30 = vpbroadcastd.ymm %29
-  %31 = vrsqrtps.ymm %value
-  %32 = vmulps.ymm %value, %31
-  %33 = vmulps.ymm %32, %31
-  %34 = vmulps.ymm %27, %33
-  %35 = vsubps.ymm %30, %34
-  %result = vmulps.ymm %31, %35
+  %27 = mov.imm32 1056964608
+  %28 = vmovd.xmm.gpr32 %27
+  %29 = vbroadcastss.ymm %28
+  %30 = mov.imm32 1069547520
+  %31 = vmovd.xmm.gpr32 %30
+  %32 = vbroadcastss.ymm %31
+  %33 = vrsqrtps.ymm %value
+  %34 = vmulps.ymm %value, %33
+  %35 = vmulps.ymm %34, %33
+  %36 = vmulps.ymm %29, %35
+  %37 = vsubps.ymm %32, %36
+  %result = vmulps.ymm %33, %37
   return %result
 }

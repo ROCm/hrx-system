@@ -10,6 +10,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 
 static_assert(LOOM_TARGET_MATH_FLOAT_CONVERSION_FLAG_DAZ ==
@@ -161,6 +162,23 @@ static iree_status_t loom_math_evaluation_vector_cmpf_build(
                                 operand_type, result_type, location, out_op);
 }
 
+static iree_status_t loom_math_evaluation_vector_constant_build(
+    loom_builder_t* builder, loom_attribute_t value, loom_type_t result_type,
+    loom_location_id_t location, loom_op_t** out_op) {
+  if (!loom_scalar_type_is_float(loom_type_element_type(result_type))) {
+    return loom_vector_constant_build(builder, value, result_type, location,
+                                      out_op);
+  }
+  const loom_type_t element_type =
+      loom_type_scalar(loom_type_element_type(result_type));
+  loom_op_t* scalar_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_scalar_constant_build(builder, value, element_type,
+                                                  location, &scalar_op));
+  return loom_vector_splat_build(builder,
+                                 loom_scalar_constant_result(scalar_op),
+                                 result_type, location, out_op);
+}
+
 static const loom_math_evaluation_lane_ops_t kScalarLaneOps = {
     .constant = loom_scalar_constant_build,
     .addf = loom_scalar_addf_build,
@@ -190,7 +208,7 @@ static const loom_math_evaluation_lane_ops_t kScalarLaneOps = {
 };
 
 static const loom_math_evaluation_lane_ops_t kVectorLaneOps = {
-    .constant = loom_vector_constant_build,
+    .constant = loom_math_evaluation_vector_constant_build,
     .addf = loom_vector_addf_build,
     .subf = loom_vector_subf_build,
     .mulf = loom_vector_mulf_build,
@@ -331,13 +349,13 @@ static iree_status_t loom_math_evaluation_import_grouped_product(
       evaluation->descriptor.accumulator_element_type,
       evaluation->descriptor.packet_lane_count -
           evaluation->source_element_count);
-  loom_op_t* padding_op = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_vector_constant_build(builder, loom_attr_f64(0.0), padding_type,
-                                 evaluation->location, &padding_op));
+  loom_value_id_t padding = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+      builder, loom_attr_f64(0.0), padding_type, evaluation->location,
+      &padding));
   const loom_value_id_t inputs[] = {
       flat_accumulator,
-      loom_vector_constant_result(padding_op),
+      padding,
   };
   loom_op_t* concat_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_concat_build(
@@ -460,11 +478,9 @@ static iree_status_t loom_math_evaluation_build_zero(
   if (*inout_value != LOOM_VALUE_ID_INVALID) {
     return iree_ok_status();
   }
-  loom_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
+  IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
       &evaluation->rewriter->builder, loom_attr_f64(0.0), type,
-      evaluation->location, &op));
-  *inout_value = loom_vector_constant_result(op);
+      evaluation->location, inout_value));
   return iree_ok_status();
 }
 

@@ -1559,7 +1559,8 @@ func.def @masked_tail_uses_active_storage_root_end() {
   %origin = index.constant 8 : index
   %limit = index.constant 10 : index
   %step = index.constant 1 : index
-  %old = vector.constant 0.0 : vector<4xf32>
+  %old_scalar = scalar.constant 0.0 : f32
+  %old = vector.splat %old_scalar : vector<4xf32>
   %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<16xf32>
   %mask = vector.mask.range [%origin to %limit step %step] : index -> vector<4xi1>
@@ -1576,7 +1577,8 @@ func.def @masked_tail_rejects_active_storage_root_overflow() {
   %origin = index.constant 8 : index
   %limit = index.constant 11 : index
   %step = index.constant 1 : index
-  %old = vector.constant 0.0 : vector<4xf32>
+  %old_scalar = scalar.constant 0.0 : f32
+  %old = vector.splat %old_scalar : vector<4xf32>
   %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<16xf32>
   %mask = vector.mask.range [%origin to %limit step %step] : index -> vector<4xi1>
@@ -1594,7 +1596,8 @@ func.def @saturated_tail_clamps_to_vector_extent() {
   %origin = index.constant 8 : index
   %limit = index.constant 100 : index
   %step = index.constant 1 : index
-  %old = vector.constant 0.0 : vector<4xf32>
+  %old_scalar = scalar.constant 0.0 : f32
+  %old = vector.splat %old_scalar : vector<4xf32>
   %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
   %view = buffer.view %scratch[%base] : buffer -> view<32xf32>
   %mask = vector.mask.range [%origin to %limit step %step] : index -> vector<4xi1>

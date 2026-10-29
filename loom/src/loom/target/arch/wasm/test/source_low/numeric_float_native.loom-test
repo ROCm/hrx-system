@@ -41,9 +41,9 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @vector_f32_unary(%inp
   v128.store %output_buffer, %trunc {offset = 80}
   %square_root = f32x4.sqrt %input
   v128.store %output_buffer, %square_root {offset = 96}
-  %27 = f32.const 1065353216
-  %28 = f32x4.splat %27
-  %reciprocal_root = f32x4.div %28, %square_root
+  %28 = f32.const 1065353216
+  %29 = f32x4.splat %28
+  %reciprocal_root = f32x4.div %29, %square_root
   v128.store %output_buffer, %reciprocal_root {offset = 112}
   return
 }

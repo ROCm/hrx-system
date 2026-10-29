@@ -17,6 +17,7 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/test/ops.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/fact_propagation.h"
@@ -270,13 +271,13 @@ TEST_F(FactPublicationTest, ExactFoldUsesSelectedNonScalarMaterializer) {
       LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(4), 0);
   const loom_type_t result_type = loom_type_shaped_1d(
       LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_BF16, loom_dim_pack_static(4), 0);
-  loom_op_t* input = nullptr;
-  IREE_ASSERT_OK(loom_vector_constant_build(
+  loom_value_id_t input = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(loom_vector_build_constant_splat(
       &builder, loom_attr_f64(0.5), input_type, LOOM_LOCATION_UNKNOWN, &input));
   loom_op_t* conversion = nullptr;
-  IREE_ASSERT_OK(loom_vector_fptrunc_build(
-      &builder, 0, loom_vector_constant_result(input), input_type, result_type,
-      LOOM_LOCATION_UNKNOWN, &conversion));
+  IREE_ASSERT_OK(loom_vector_fptrunc_build(&builder, 0, input, input_type,
+                                           result_type, LOOM_LOCATION_UNKNOWN,
+                                           &conversion));
   const loom_value_id_t original_result =
       loom_vector_fptrunc_result(conversion);
   loom_op_t* use = nullptr;

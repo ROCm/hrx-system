@@ -18,6 +18,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/pass/report.h"
 #include "loom/pass/value_facts.h"
@@ -694,6 +695,9 @@ static iree_status_t loom_scf_pipeline_build_guard_placeholder(
     IREE_RETURN_IF_ERROR(
         loom_vector_empty_build(builder, type, location, &vector));
     *out_value = loom_vector_empty_result(vector);
+  } else if (loom_scalar_type_is_float(loom_type_element_type(type))) {
+    IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(builder, zero, type,
+                                                          location, out_value));
   } else {
     IREE_RETURN_IF_ERROR(
         loom_vector_constant_build(builder, zero, type, location, &vector));

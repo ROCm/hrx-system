@@ -11,9 +11,12 @@ kernel.def @f16_constant_1_plain() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<1xf16>
-  %b_values = vector.constant 3.0 : vector<1xf16>
-  %c_values = vector.constant 7.0 : vector<1xf32>
+  %a_values_scalar = scalar.constant -2.0 : f16
+  %a_values = vector.splat %a_values_scalar : vector<1xf16>
+  %b_values_scalar = scalar.constant 3.0 : f16
+  %b_values = vector.splat %b_values_scalar : vector<1xf16>
+  %c_values_scalar = scalar.constant 7.0 : f32
+  %c_values = vector.splat %c_values_scalar : vector<1xf32>
   %lhs = vector.fragment<lhs> %a_values shape [blocks(%unit), %m, %k] : vector<1xf16>
   %rhs = vector.fragment<rhs> %b_values shape [blocks(%unit), %k, %m] : vector<1xf16>
   %init = vector.fragment<init> %c_values shape [blocks(%unit), %m, %m] : vector<1xf32>
@@ -25,18 +28,18 @@ kernel.def @f16_constant_1_plain() {
 // ----
 low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer) -> ()}) workgroup_count(1, 1, 1) @f16_constant_1_plain() asm {
   %aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %17 = OpConstant.f16 49152 : reg<spirv.id>
-  %lhs = OpCompositeConstruct.cooperative.f16.16x16.lhs %17 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_a>>
-  %19 = OpConstant.f16 16896 : reg<spirv.id>
-  %rhs = OpCompositeConstruct.cooperative.f16.16x16.rhs %19 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_b>>
-  %21 = OpConstant.f32 1088421888 : reg<spirv.id>
-  %init = OpCompositeConstruct.cooperative.f32.16x16.accumulator %21 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %20 = OpConstant.f16 49152 : reg<spirv.id>
+  %lhs = OpCompositeConstruct.cooperative.f16.16x16.lhs %20 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_a>>
+  %22 = OpConstant.f16 16896 : reg<spirv.id>
+  %rhs = OpCompositeConstruct.cooperative.f16.16x16.rhs %22 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_b>>
+  %24 = OpConstant.f32 1088421888 : reg<spirv.id>
+  %init = OpCompositeConstruct.cooperative.f32.16x16.accumulator %24 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
   %result = OpCooperativeMatrixMulAddKHR.f16.16x16x16.f32.subgroup %lhs, %rhs, %init : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
-  %24 = OpConstant.offset64 16
-  %25 = OpUConvert.offset64.u32 %24
-  %26 = OpConstant.offset64 0
-  %27 = OpPtrAccessChain.storage_buffer.f32.byte_offset %aligned, %26
-  OpCooperativeMatrixStoreKHR.result.f32.16x16.subgroup.storage_buffer %27, %result, %25, 0
+  %27 = OpConstant.offset64 16
+  %28 = OpUConvert.offset64.u32 %27
+  %29 = OpConstant.offset64 0
+  %30 = OpPtrAccessChain.storage_buffer.f32.byte_offset %aligned, %29
+  OpCooperativeMatrixStoreKHR.result.f32.16x16.subgroup.storage_buffer %30, %result, %28, 0
   return
 }
 
@@ -191,9 +194,12 @@ kernel.def @f16_constant_bits() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -0.0 : vector<1xf16>
-  %b_values = vector.constant 5.9604644775390625e-08 : vector<1xf16>
-  %c_values = vector.constant -0.0 : vector<1xf32>
+  %a_values_scalar = scalar.constant -0.0 : f16
+  %a_values = vector.splat %a_values_scalar : vector<1xf16>
+  %b_values_scalar = scalar.constant 5.9604644775390625e-08 : f16
+  %b_values = vector.splat %b_values_scalar : vector<1xf16>
+  %c_values_scalar = scalar.constant -0.0 : f32
+  %c_values = vector.splat %c_values_scalar : vector<1xf32>
   %lhs = vector.fragment<lhs> %a_values shape [blocks(%unit), %m, %k] : vector<1xf16>
   %rhs = vector.fragment<rhs> %b_values shape [blocks(%unit), %k, %m] : vector<1xf16>
   %init = vector.fragment<init> %c_values shape [blocks(%unit), %m, %m] : vector<1xf32>
@@ -205,18 +211,18 @@ kernel.def @f16_constant_bits() {
 // ----
 low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer) -> ()}) workgroup_count(1, 1, 1) @f16_constant_bits() asm {
   %aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %17 = OpConstant.f16 32768 : reg<spirv.id>
-  %lhs = OpCompositeConstruct.cooperative.f16.16x16.lhs %17 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_a>>
-  %19 = OpConstant.f16 1 : reg<spirv.id>
-  %rhs = OpCompositeConstruct.cooperative.f16.16x16.rhs %19 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_b>>
-  %21 = OpConstant.f32 2147483648 : reg<spirv.id>
-  %init = OpCompositeConstruct.cooperative.f32.16x16.accumulator %21 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %20 = OpConstant.f16 32768 : reg<spirv.id>
+  %lhs = OpCompositeConstruct.cooperative.f16.16x16.lhs %20 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_a>>
+  %22 = OpConstant.f16 1 : reg<spirv.id>
+  %rhs = OpCompositeConstruct.cooperative.f16.16x16.rhs %22 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_b>>
+  %24 = OpConstant.f32 2147483648 : reg<spirv.id>
+  %init = OpCompositeConstruct.cooperative.f32.16x16.accumulator %24 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
   %result = OpCooperativeMatrixMulAddKHR.f16.16x16x16.f32.subgroup %lhs, %rhs, %init : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
-  %24 = OpConstant.offset64 16
-  %25 = OpUConvert.offset64.u32 %24
-  %26 = OpConstant.offset64 0
-  %27 = OpPtrAccessChain.storage_buffer.f32.byte_offset %aligned, %26
-  OpCooperativeMatrixStoreKHR.result.f32.16x16.subgroup.storage_buffer %27, %result, %25, 0
+  %27 = OpConstant.offset64 16
+  %28 = OpUConvert.offset64.u32 %27
+  %29 = OpConstant.offset64 0
+  %30 = OpPtrAccessChain.storage_buffer.f32.byte_offset %aligned, %29
+  OpCooperativeMatrixStoreKHR.result.f32.16x16.subgroup.storage_buffer %30, %result, %28, 0
   return
 }
 
@@ -234,8 +240,10 @@ kernel.def @varying_initializer() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
+  %a_values_scalar = scalar.constant -2.0 : f16
+  %a_values = vector.splat %a_values_scalar : vector<4xf16>
+  %b_values_scalar = scalar.constant 3.0 : f16
+  %b_values = vector.splat %b_values_scalar : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %lane = kernel.workitem.id<x> : index
@@ -263,18 +271,22 @@ kernel.def @divergent_initializer() {
   %first_lane = index.constant 0 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%offset] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
+  %a_values_scalar = scalar.constant -2.0 : f16
+  %a_values = vector.splat %a_values_scalar : vector<4xf16>
+  %b_values_scalar = scalar.constant 3.0 : f16
+  %b_values = vector.splat %b_values_scalar : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %thread = kernel.workitem.id<x> : index
   %writer = index.cmp eq, %thread, %first_lane : index
   %value = scf.if %writer -> (vector<4xf32>) {
-    %then_values = vector.constant 1.0 : vector<4xf32>
+    %then_values_scalar = scalar.constant 1.0 : f32
+    %then_values = vector.splat %then_values_scalar : vector<4xf32>
     %fragment = vector.fragment<init> %then_values shape [%size, %size] : vector<4xf32>
     scf.yield %fragment : vector<4xf32>
   } else {
-    %else_values = vector.constant 2.0 : vector<4xf32>
+    %else_values_scalar = scalar.constant 2.0 : f32
+    %else_values = vector.splat %else_values_scalar : vector<4xf32>
     %fragment = vector.fragment<init> %else_values shape [%size, %size] : vector<4xf32>
     scf.yield %fragment : vector<4xf32>
   }
@@ -298,12 +310,15 @@ kernel.def @multiple_blocks() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
+  %a_values_scalar = scalar.constant -2.0 : f16
+  %a_values = vector.splat %a_values_scalar : vector<4xf16>
+  %b_values_scalar = scalar.constant 3.0 : f16
+  %b_values = vector.splat %b_values_scalar : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %blocks = index.constant 2 : index
-  %values = vector.constant 7.0 : vector<4xf32>
+  %values_scalar = scalar.constant 7.0 : f32
+  %values = vector.splat %values_scalar : vector<4xf32>
   %init = vector.fragment<init> %values shape [blocks(%blocks), %size, %size] : vector<4xf32>
   // ERROR@+1: TARGET/039 {matrix_constraint="fragment_shape"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
@@ -325,12 +340,15 @@ kernel.def @packed_initializer() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
+  %a_values_scalar = scalar.constant -2.0 : f16
+  %a_values = vector.splat %a_values_scalar : vector<4xf16>
+  %b_values_scalar = scalar.constant 3.0 : f16
+  %b_values = vector.splat %b_values_scalar : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %schema = encoding.define #encoding.f32<payload_elements=4, payload_registers=4> : encoding<schema>
-  %values = vector.constant 7.0 : vector<4xf32>
+  %values_scalar = scalar.constant 7.0 : f32
+  %values = vector.splat %values_scalar : vector<4xf32>
   %init = vector.fragment<init> %values shape [%size, %size] using {schema = %schema : encoding<schema>} : vector<4xf32>
   // ERROR@+1: TARGET/039 {matrix_constraint="fragment_schema"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
@@ -352,12 +370,15 @@ kernel.def @scaled_initializer() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
+  %a_values_scalar = scalar.constant -2.0 : f16
+  %a_values = vector.splat %a_values_scalar : vector<4xf16>
+  %b_values_scalar = scalar.constant 3.0 : f16
+  %b_values = vector.splat %b_values_scalar : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %schema = encoding.define #encoding.operand<affine=scale_only, element_format=f32, payload_elements=4, payload_registers=4, scale_format=f32, scale_group_elements=4, scale_operands=1, scale_topology=block_1d> : encoding<schema>
-  %values = vector.constant 7.0 : vector<4xf32>
+  %values_scalar = scalar.constant 7.0 : f32
+  %values = vector.splat %values_scalar : vector<4xf32>
   %init = vector.fragment<init> %values shape [%size, %size] using {scale = %values : vector<4xf32>, schema = %schema : encoding<schema>} : vector<4xf32>
   // ERROR@+1: SPIRV/013 {function_name="scaled_initializer", descriptor_key="spirv.op_cooperative_matrix_mul_add_khr.f16.m16n16k16.f32.subgroup", field_kind="operand", field_index="2", value_name="init", expected_value_type="cooperative_matrix", actual_value_type="v4f32"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
@@ -379,13 +400,16 @@ kernel.def @sparse_initializer() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
+  %a_values_scalar = scalar.constant -2.0 : f16
+  %a_values = vector.splat %a_values_scalar : vector<4xf16>
+  %b_values_scalar = scalar.constant 3.0 : f16
+  %b_values = vector.splat %b_values_scalar : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
   %schema = encoding.define #encoding.operand<element_format=f32, payload_elements=4, payload_registers=4, sparsity=n_m_structured, sparsity_group_elements=4, sparsity_group_nonzero_elements=2> : encoding<schema>
   %metadata = vector.constant 0 : vector<4xi32>
-  %values = vector.constant 7.0 : vector<4xf32>
+  %values_scalar = scalar.constant 7.0 : f32
+  %values = vector.splat %values_scalar : vector<4xf32>
   %init = vector.fragment<init> %values shape [%size, %size] using {schema = %schema : encoding<schema>, sparsity = %metadata : vector<4xi32>} : vector<4xf32>
   // ERROR@+1: SPIRV/013 {function_name="sparse_initializer", descriptor_key="spirv.op_cooperative_matrix_mul_add_khr.f16.m16n16k16.f32.subgroup", field_kind="operand", field_index="2", value_name="init", expected_value_type="cooperative_matrix", actual_value_type="v4f32"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
@@ -407,11 +431,14 @@ kernel.def @unavailable_cooperative_matrix() {
   %unit = index.constant 1 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<16x16xf32>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
+  %a_values_scalar = scalar.constant -2.0 : f16
+  %a_values = vector.splat %a_values_scalar : vector<4xf16>
+  %b_values_scalar = scalar.constant 3.0 : f16
+  %b_values = vector.splat %b_values_scalar : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
-  %values = vector.constant 7.0 : vector<4xf32>
+  %values_scalar = scalar.constant 7.0 : f32
+  %values = vector.splat %values_scalar : vector<4xf32>
   %init = vector.fragment<init> %values shape [%size, %size] : vector<4xf32>
   // ERROR@+1: TARGET/039 {matrix_constraint="spirv.cooperative_matrix.khr"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
@@ -434,9 +461,12 @@ kernel.def @f16_accumulator_initializers() {
   %size = index.constant 16 : index
   %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
   %view = buffer.view %aligned[%base] : buffer -> view<32x16xf16>
-  %a_values = vector.constant -2.0 : vector<4xf16>
-  %b_values = vector.constant 3.0 : vector<4xf16>
-  %constant_values = vector.constant 7.0 : vector<4xf16>
+  %a_values_scalar = scalar.constant -2.0 : f16
+  %a_values = vector.splat %a_values_scalar : vector<4xf16>
+  %b_values_scalar = scalar.constant 3.0 : f16
+  %b_values = vector.splat %b_values_scalar : vector<4xf16>
+  %constant_values_scalar = scalar.constant 7.0 : f16
+  %constant_values = vector.splat %constant_values_scalar : vector<4xf16>
   %uniform_values = vector.splat %initial : vector<4xf16>
   %lhs = vector.fragment<lhs> %a_values shape [%size, %size] : vector<4xf16>
   %rhs = vector.fragment<rhs> %b_values shape [%size, %size] : vector<4xf16>
@@ -452,24 +482,24 @@ kernel.def @f16_accumulator_initializers() {
 // ----
 low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, f16) -> ()}) workgroup_count(1, 1, 1) @f16_accumulator_initializers(%initial: reg<spirv.id : f16>) asm {
   %aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
-  %20 = OpConstant.f16 49152 : reg<spirv.id>
-  %lhs = OpCompositeConstruct.cooperative.f16.16x16.lhs %20 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_a>>
-  %22 = OpConstant.f16 16896 : reg<spirv.id>
-  %rhs = OpCompositeConstruct.cooperative.f16.16x16.rhs %22 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_b>>
-  %24 = OpConstant.f16 18176 : reg<spirv.id>
-  %constant_init = OpCompositeConstruct.cooperative.f16.16x16.accumulator %24 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_accumulator>>
+  %23 = OpConstant.f16 49152 : reg<spirv.id>
+  %lhs = OpCompositeConstruct.cooperative.f16.16x16.lhs %23 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_a>>
+  %25 = OpConstant.f16 16896 : reg<spirv.id>
+  %rhs = OpCompositeConstruct.cooperative.f16.16x16.rhs %25 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_b>>
+  %27 = OpConstant.f16 18176 : reg<spirv.id>
+  %constant_init = OpCompositeConstruct.cooperative.f16.16x16.accumulator %27 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_accumulator>>
   %uniform_init = OpCompositeConstruct.cooperative.f16.16x16.accumulator %initial : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_accumulator>>
   %constant_result = OpCooperativeMatrixMulAddKHR.f16.16x16x16.f16.subgroup %lhs, %rhs, %constant_init : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_accumulator>>
   %uniform_result = OpCooperativeMatrixMulAddKHR.f16.16x16x16.f16.subgroup %lhs, %rhs, %uniform_init : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_accumulator>>
-  %29 = OpConstant.offset64 16
-  %30 = OpUConvert.offset64.u32 %29
-  %31 = OpConstant.offset64 0
-  %32 = OpPtrAccessChain.storage_buffer.f16.byte_offset %aligned, %31
-  OpCooperativeMatrixStoreKHR.result.f16.16x16.subgroup.storage_buffer %32, %constant_result, %30, 0
-  %33 = OpConstant.offset64 16
-  %34 = OpUConvert.offset64.u32 %33
-  %35 = OpConstant.offset64 512
-  %36 = OpPtrAccessChain.storage_buffer.f16.byte_offset %aligned, %35
-  OpCooperativeMatrixStoreKHR.result.f16.16x16.subgroup.storage_buffer %36, %uniform_result, %34, 0
+  %32 = OpConstant.offset64 16
+  %33 = OpUConvert.offset64.u32 %32
+  %34 = OpConstant.offset64 0
+  %35 = OpPtrAccessChain.storage_buffer.f16.byte_offset %aligned, %34
+  OpCooperativeMatrixStoreKHR.result.f16.16x16.subgroup.storage_buffer %35, %constant_result, %33, 0
+  %36 = OpConstant.offset64 16
+  %37 = OpUConvert.offset64.u32 %36
+  %38 = OpConstant.offset64 512
+  %39 = OpPtrAccessChain.storage_buffer.f16.byte_offset %aligned, %38
+  OpCooperativeMatrixStoreKHR.result.f16.16x16.subgroup.storage_buffer %39, %uniform_result, %37, 0
   return
 }

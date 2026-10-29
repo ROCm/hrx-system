@@ -149,7 +149,8 @@ kernel.def @masked_float_old_bits() {
   %index0 = index.constant 0 : index
   %index1 = index.constant 1 : index
   %offsets = vector.iota %index0 step %index1 : vector<2xindex>
-  %value = vector.constant 1.0 : vector<2xf32>
+  %value_scalar = scalar.constant 1.0 : f32
+  %value = vector.splat %value_scalar : vector<2xf32>
   %passthrough_bits = vector.constant 2143311480 : vector<2xi32>
   %passthrough = vector.bitcast %passthrough_bits : vector<2xi32> to vector<2xf32>
   %old = vector.atomic.rmw.mask<minnumf> %value, %view[0][%offsets], %mask, %passthrough {ordering = relaxed, scope = device} : vector<2xf32>, view<2xf32>, vector<2xindex>, vector<2xi1>, vector<2xf32>
@@ -329,7 +330,8 @@ kernel.def @vector_atomic_float_cmpxchg() {
   %expected = vector.bitcast %expected_bits : vector<2xi32> to vector<2xf32>
   %nan_bits = vector.constant 2143294004 : vector<2xi32>
   %nan = vector.bitcast %nan_bits : vector<2xi32> to vector<2xf32>
-  %replacement = vector.constant 1.0 : vector<2xf32>
+  %replacement_scalar = scalar.constant 1.0 : f32
+  %replacement = vector.splat %replacement_scalar : vector<2xf32>
   %old = vector.atomic.cmpxchg %expected, %nan, %view[0][%offsets] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : vector<2xf32>, view<2xf32>, vector<2xindex> -> vector<2xf32>
   %observed = vector.atomic.cmpxchg %nan, %replacement, %view[0][%offsets] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : vector<2xf32>, view<2xf32>, vector<2xindex> -> vector<2xf32>
   %old_bits = vector.bitcast %old : vector<2xf32> to vector<2xi32>

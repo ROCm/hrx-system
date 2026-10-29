@@ -35,20 +35,22 @@ func.def @f8e5m2_vector_rounding(%input: vector<3xf8E5M2>) -> (vector<3xf8E5M2>,
 
 // ----
 func.def @f8e5m2_vector_rounding(%input: vector<3xf8E5M2>) -> (vector<3xf8E5M2>, vector<3xf8E5M2>) {
-  %16 = vector.extf %input : vector<3xf8E5M2> to vector<3xf32>
-  %17 = vector.floorf %16 : vector<3xf32>
-  %floor = vector.fptrunc %17 : vector<3xf32> to vector<3xf8E5M2>
+  %18 = vector.extf %input : vector<3xf8E5M2> to vector<3xf32>
+  %19 = vector.floorf %18 : vector<3xf32>
+  %floor = vector.fptrunc %19 : vector<3xf32> to vector<3xf8E5M2>
   %5 = vector.extf %input : vector<3xf8E5M2> to vector<3xf32>
-  %6 = vector.constant 0.5 : vector<3xf32>
-  %7 = vector.constant 1.0 : vector<3xf32>
-  %8 = vector.truncf %5 : vector<3xf32>
-  %9 = vector.subf %5, %8 : vector<3xf32>
-  %10 = vector.absf %9 : vector<3xf32>
-  %11 = vector.cmpf oge, %10, %6 : vector<3xf32> -> vector<3xi1>
-  %12 = vector.copysignf %7, %5 : vector<3xf32>
-  %13 = vector.addf %8, %12 : vector<3xf32>
-  %14 = vector.select %11, %13, %8 : vector<3xf32>
-  %round = vector.fptrunc %14 : vector<3xf32> to vector<3xf8E5M2>
+  %6 = scalar.constant 0.5 : f32
+  %7 = vector.splat %6 : vector<3xf32>
+  %8 = scalar.constant 1.0 : f32
+  %9 = vector.splat %8 : vector<3xf32>
+  %10 = vector.truncf %5 : vector<3xf32>
+  %11 = vector.subf %5, %10 : vector<3xf32>
+  %12 = vector.absf %11 : vector<3xf32>
+  %13 = vector.cmpf oge, %12, %7 : vector<3xf32> -> vector<3xi1>
+  %14 = vector.copysignf %9, %5 : vector<3xf32>
+  %15 = vector.addf %10, %14 : vector<3xf32>
+  %16 = vector.select %13, %15, %10 : vector<3xf32>
+  %round = vector.fptrunc %16 : vector<3xf32> to vector<3xf8E5M2>
   func.return %floor, %round : vector<3xf8E5M2>, vector<3xf8E5M2>
 }
 
@@ -112,14 +114,16 @@ func.def @f64_vector_round(%input: vector<2xf64>) -> (vector<2xf64>) {
 
 // ----
 func.def @f64_vector_round(%input: vector<2xf64>) -> (vector<2xf64>) {
-  %3 = vector.constant 0.5 : vector<2xf64>
-  %4 = vector.constant 1.0 : vector<2xf64>
-  %5 = vector.truncf %input : vector<2xf64>
-  %6 = vector.subf %input, %5 : vector<2xf64>
-  %7 = vector.absf %6 : vector<2xf64>
-  %8 = vector.cmpf oge, %7, %3 : vector<2xf64> -> vector<2xi1>
-  %9 = vector.copysignf %4, %input : vector<2xf64>
-  %10 = vector.addf %5, %9 : vector<2xf64>
-  %result = vector.select %8, %10, %5 : vector<2xf64>
+  %3 = scalar.constant 0.5 : f64
+  %4 = vector.splat %3 : vector<2xf64>
+  %5 = scalar.constant 1.0 : f64
+  %6 = vector.splat %5 : vector<2xf64>
+  %7 = vector.truncf %input : vector<2xf64>
+  %8 = vector.subf %input, %7 : vector<2xf64>
+  %9 = vector.absf %8 : vector<2xf64>
+  %10 = vector.cmpf oge, %9, %4 : vector<2xf64> -> vector<2xi1>
+  %11 = vector.copysignf %6, %input : vector<2xf64>
+  %12 = vector.addf %7, %11 : vector<2xf64>
+  %result = vector.select %10, %12, %7 : vector<2xf64>
   func.return %result : vector<2xf64>
 }

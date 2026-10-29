@@ -95,7 +95,8 @@ func.def @per_lane_gather_preserves_vector_dot(%latent: vector<8xbf16>, %weights
   %base = index.constant 0 : offset
   %start = index.constant 0 : index
   %stride = index.constant 7 : index
-  %zero_acc = vector.constant 0.0 : vector<4xf32>
+  %zero_acc_scalar = scalar.constant 0.0 : f32
+  %zero_acc = vector.splat %zero_acc_scalar : vector<4xf32>
   %weights_view = buffer.view %weights[%base] : buffer -> view<4096xbf16>
   %offsets = vector.iota %start step %stride : vector<8xindex>
   %weight = vector.gather %weights_view[%origin][%offsets] : view<4096xbf16>, vector<8xindex> -> vector<8xbf16>
@@ -106,31 +107,32 @@ func.def @per_lane_gather_preserves_vector_dot(%latent: vector<8xbf16>, %weights
 // ----
 func.def @per_lane_gather_preserves_vector_dot(%latent: vector<8xbf16>, %weights: buffer, %origin: index) -> (vector<4xf32>) {
   %base = index.constant 0 : offset
-  %zero_acc = vector.constant 0.0 : vector<4xf32>
+  %zero_acc_scalar = scalar.constant 0.0 : f32
+  %zero_acc = vector.splat %zero_acc_scalar : vector<4xf32>
   %weights_view = buffer.view %weights[%base] : buffer -> view<4096xbf16>
-  %15 = view.load %weights_view[%origin] : view<4096xbf16> -> bf16
-  %19 = index.constant 7 : index
-  %20 = index.add %origin, %19 : index
-  %21 = view.load %weights_view[%20] : view<4096xbf16> -> bf16
-  %25 = index.constant 14 : index
-  %26 = index.add %origin, %25 : index
-  %27 = view.load %weights_view[%26] : view<4096xbf16> -> bf16
-  %31 = index.constant 21 : index
-  %32 = index.add %origin, %31 : index
-  %33 = view.load %weights_view[%32] : view<4096xbf16> -> bf16
-  %37 = index.constant 28 : index
-  %38 = index.add %origin, %37 : index
-  %39 = view.load %weights_view[%38] : view<4096xbf16> -> bf16
-  %43 = index.constant 35 : index
-  %44 = index.add %origin, %43 : index
-  %45 = view.load %weights_view[%44] : view<4096xbf16> -> bf16
-  %49 = index.constant 42 : index
-  %50 = index.add %origin, %49 : index
-  %51 = view.load %weights_view[%50] : view<4096xbf16> -> bf16
-  %55 = index.constant 49 : index
-  %56 = index.add %origin, %55 : index
-  %57 = view.load %weights_view[%56] : view<4096xbf16> -> bf16
-  %weight = vector.from_elements %15, %21, %27, %33, %39, %45, %51, %57 : vector<8xbf16>
+  %16 = view.load %weights_view[%origin] : view<4096xbf16> -> bf16
+  %20 = index.constant 7 : index
+  %21 = index.add %origin, %20 : index
+  %22 = view.load %weights_view[%21] : view<4096xbf16> -> bf16
+  %26 = index.constant 14 : index
+  %27 = index.add %origin, %26 : index
+  %28 = view.load %weights_view[%27] : view<4096xbf16> -> bf16
+  %32 = index.constant 21 : index
+  %33 = index.add %origin, %32 : index
+  %34 = view.load %weights_view[%33] : view<4096xbf16> -> bf16
+  %38 = index.constant 28 : index
+  %39 = index.add %origin, %38 : index
+  %40 = view.load %weights_view[%39] : view<4096xbf16> -> bf16
+  %44 = index.constant 35 : index
+  %45 = index.add %origin, %44 : index
+  %46 = view.load %weights_view[%45] : view<4096xbf16> -> bf16
+  %50 = index.constant 42 : index
+  %51 = index.add %origin, %50 : index
+  %52 = view.load %weights_view[%51] : view<4096xbf16> -> bf16
+  %56 = index.constant 49 : index
+  %57 = index.add %origin, %56 : index
+  %58 = view.load %weights_view[%57] : view<4096xbf16> -> bf16
+  %weight = vector.from_elements %16, %22, %28, %34, %40, %46, %52, %58 : vector<8xbf16>
   %dot = vector.dot2f %latent, %weight, %zero_acc : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
   func.return %dot : vector<4xf32>
 }

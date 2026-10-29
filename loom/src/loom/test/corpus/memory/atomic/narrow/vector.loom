@@ -16,7 +16,8 @@ kernel.def @half_snapshot_and_duplicates() {
   %reverse = vector.from_elements %last, %first : vector<2xindex>
   vector.atomic.reduce<addf, noftz> %captured, %cells[0][%reverse] {cache_scope = workgroup, cache_temporal = non_temporal, ordering = release, scope = device} : vector<2xf16>, view<2xf16>, vector<2xindex>
   %duplicate = vector.from_elements %first, %first : vector<2xindex>
-  %increment = vector.constant 1.0 : vector<2xf16>
+  %increment_scalar = scalar.constant 1.0 : f16
+  %increment = vector.splat %increment_scalar : vector<2xf16>
   %old = vector.atomic.rmw<addf, noftz> %increment, %cells[0][%duplicate] {cache_scope = workgroup, cache_temporal = non_temporal, ordering = acq_rel, scope = device} : vector<2xf16>, view<2xf16>, vector<2xindex>
   %left = vector.extract %old[0] : vector<2xf16> -> f16
   %right = vector.extract %old[1] : vector<2xf16> -> f16

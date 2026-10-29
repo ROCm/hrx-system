@@ -54,6 +54,7 @@ func.def @uniform_literals() -> (vector<4xi32>, vector<4xf32>) {
 // ----
 func.def @uniform_literals() -> (vector<4xi32>, vector<4xf32>) {
   %integers = vector.constant 7 : vector<4xi32>
-  %floats = vector.constant -0.0 : vector<4xf32>
+  %4 = scalar.constant -0.0 : f32
+  %floats = vector.splat %4 : vector<4xf32>
   func.return %integers, %floats : vector<4xi32>, vector<4xf32>
 }

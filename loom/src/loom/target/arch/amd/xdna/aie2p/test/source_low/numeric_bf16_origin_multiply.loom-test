@@ -6,7 +6,8 @@ func.def @bf16_origin_scale(%input: buffer) -> (vector<16xf32>) {
   %input_view = buffer.view %input_aligned[%origin] : buffer -> view<16xbf16>
   %narrow = vector.load %input_view[0] : view<16xbf16> -> vector<16xbf16>
   %wide = vector.extf %narrow : vector<16xbf16> to vector<16xf32>
-  %scale = vector.constant 1.4453125 : vector<16xf32>
+  %scale_scalar = scalar.constant 1.4453125 : f32
+  %scale = vector.splat %scale_scalar : vector<16xf32>
   %product = vector.mulf<nnan> %wide, %scale : vector<16xf32>
   func.return %product : vector<16xf32>
 }
@@ -14,67 +15,10 @@ func.def @bf16_origin_scale(%input: buffer) -> (vector<16xf32>) {
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @bf16_origin_scale() -> (reg<aie2p.vec256 x2>) asm {
   %input_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %11 = mov.short 0
-  %12 = vbcst.16 %11
-  %13 = slice %12[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %14 = vlda.256.bf16x16 %input_aligned, 0
-  %narrow = concat(%14, %13) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %16 = mov.i32 16313
-  %17 = vbcst.16 %16
-  %18 = mova.i32 60
-  %19 = vmul.bf16x32 %narrow, %17, %18
-  %20 = slice %19[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %21 = vmov.accumulator512.to.vector512 %20
-  %22 = mov.i32 32767
-  %23 = vbcst.16 %22
-  %24 = vband %narrow, %23
-  %25 = mov.i32 47360
-  %26 = vbcst.16 %25
-  %27 = mova.i32 90
-  %28 = vmul.i16x32 %24, %26, %27
-  %29 = mov.shift 0
-  %30 = mov.shift 15
-  set.rounding 0
-  set.srs-mode 1
-  set.saturation 0
-  %31 = vsrs.trunc.s16x32 %28, %29
-  %32 = vsrs.trunc.s16x32 %28, %30
-  %33 = vadd.16 %31, %31
-  %34 = mov.i32 32768
-  %35 = vbcst.16 %34
-  %36 = vband %narrow, %35
-  %37 = vbor %32, %36
-  %38 = mova.i32 18
-  %39 = vshuffle %33, %37, %38
-  %40 = mov.short 89
-  %41 = vbcst.16 %40
-  %42 = vlt.u16x32.el.low32 %24, %41
-  %product = vsel.32.mask64 %21, %39, %42
-  return %product
-}
-
-// ====
-// RUN: emit source-low target=amd.xdna.aie2p:core output=low
-
-func.def @bf16_bitcast_origin_scale(%input: buffer) -> (vector<16xf32>) {
-  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 32} : buffer
-  %origin = index.constant 0 : offset
-  %input_view = buffer.view %input_aligned[%origin] : buffer -> view<16xi16>
-  %input_bits = vector.load %input_view[0] : view<16xi16> -> vector<16xi16>
-  %narrow = vector.bitcast %input_bits : vector<16xi16> to vector<16xbf16>
-  %wide = vector.extf %narrow : vector<16xbf16> to vector<16xf32>
-  %scale = vector.constant 1.4453125 : vector<16xf32>
-  %product = vector.mulf<nnan> %wide, %scale : vector<16xf32>
-  func.return %product : vector<16xf32>
-}
-
-// ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @bf16_bitcast_origin_scale() -> (reg<aie2p.vec256 x2>) asm {
-  %input_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %12 = mov.short 0
   %13 = vbcst.16 %12
   %14 = slice %13[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %15 = vlda.256.i16x16 %input_aligned, 0
+  %15 = vlda.256.bf16x16 %input_aligned, 0
   %narrow = concat(%15, %14) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   %17 = mov.i32 16313
   %18 = vbcst.16 %17
@@ -113,6 +57,64 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @bf16_bitcast_orig
 // ====
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
+func.def @bf16_bitcast_origin_scale(%input: buffer) -> (vector<16xf32>) {
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 32} : buffer
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%origin] : buffer -> view<16xi16>
+  %input_bits = vector.load %input_view[0] : view<16xi16> -> vector<16xi16>
+  %narrow = vector.bitcast %input_bits : vector<16xi16> to vector<16xbf16>
+  %wide = vector.extf %narrow : vector<16xbf16> to vector<16xf32>
+  %scale_scalar = scalar.constant 1.4453125 : f32
+  %scale = vector.splat %scale_scalar : vector<16xf32>
+  %product = vector.mulf<nnan> %wide, %scale : vector<16xf32>
+  func.return %product : vector<16xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @bf16_bitcast_origin_scale() -> (reg<aie2p.vec256 x2>) asm {
+  %input_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %13 = mov.short 0
+  %14 = vbcst.16 %13
+  %15 = slice %14[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %16 = vlda.256.i16x16 %input_aligned, 0
+  %narrow = concat(%16, %15) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %18 = mov.i32 16313
+  %19 = vbcst.16 %18
+  %20 = mova.i32 60
+  %21 = vmul.bf16x32 %narrow, %19, %20
+  %22 = slice %21[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %23 = vmov.accumulator512.to.vector512 %22
+  %24 = mov.i32 32767
+  %25 = vbcst.16 %24
+  %26 = vband %narrow, %25
+  %27 = mov.i32 47360
+  %28 = vbcst.16 %27
+  %29 = mova.i32 90
+  %30 = vmul.i16x32 %26, %28, %29
+  %31 = mov.shift 0
+  %32 = mov.shift 15
+  set.rounding 0
+  set.srs-mode 1
+  set.saturation 0
+  %33 = vsrs.trunc.s16x32 %30, %31
+  %34 = vsrs.trunc.s16x32 %30, %32
+  %35 = vadd.16 %33, %33
+  %36 = mov.i32 32768
+  %37 = vbcst.16 %36
+  %38 = vband %narrow, %37
+  %39 = vbor %34, %38
+  %40 = mova.i32 18
+  %41 = vshuffle %35, %39, %40
+  %42 = mov.short 89
+  %43 = vbcst.16 %42
+  %44 = vlt.u16x32.el.low32 %26, %43
+  %product = vsel.32.mask64 %23, %41, %44
+  return %product
+}
+
+// ====
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
 func.def @bf16_dynamic_origin_scale(%input: buffer, %element0: index) -> (vector<16xf32>) {
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 32} : buffer
   %element = index.assume %element0 [range(%element0, 0, 48), multiple_of(%element0, 16)] : index
@@ -120,7 +122,8 @@ func.def @bf16_dynamic_origin_scale(%input: buffer, %element0: index) -> (vector
   %input_view = buffer.view %input_aligned[%origin] : buffer -> view<64xbf16>
   %narrow = vector.load %input_view[%element] : view<64xbf16> -> vector<16xbf16>
   %wide = vector.extf %narrow : vector<16xbf16> to vector<16xf32>
-  %scale = vector.constant 1.4453125 : vector<16xf32>
+  %scale_scalar = scalar.constant 1.4453125 : f32
+  %scale = vector.splat %scale_scalar : vector<16xf32>
   %product = vector.mulf<nnan> %wide, %scale : vector<16xf32>
   func.return %product : vector<16xf32>
 }
@@ -128,45 +131,45 @@ func.def @bf16_dynamic_origin_scale(%input: buffer, %element0: index) -> (vector
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @bf16_dynamic_origin_scale(%element: reg<aie2p.er>) -> (reg<aie2p.vec256 x2>) asm {
   %input_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %14 = mov.short 0
-  %15 = vbcst.16 %14
-  %16 = slice %15[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %17 = mov.i32 1
-  %18 = lshl %element, %17
-  %19 = mov.address-index %18
-  %20 = vlda.256.bf16x16.index %input_aligned, %19
-  %narrow = concat(%20, %16) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %22 = mov.i32 16313
-  %23 = vbcst.16 %22
-  %24 = mova.i32 60
-  %25 = vmul.bf16x32 %narrow, %23, %24
-  %26 = slice %25[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %27 = vmov.accumulator512.to.vector512 %26
-  %28 = mov.i32 32767
-  %29 = vbcst.16 %28
-  %30 = vband %narrow, %29
-  %31 = mov.i32 47360
-  %32 = vbcst.16 %31
-  %33 = mova.i32 90
-  %34 = vmul.i16x32 %30, %32, %33
-  %35 = mov.shift 0
-  %36 = mov.shift 15
+  %15 = mov.short 0
+  %16 = vbcst.16 %15
+  %17 = slice %16[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %18 = mov.i32 1
+  %19 = lshl %element, %18
+  %20 = mov.address-index %19
+  %21 = vlda.256.bf16x16.index %input_aligned, %20
+  %narrow = concat(%21, %17) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %23 = mov.i32 16313
+  %24 = vbcst.16 %23
+  %25 = mova.i32 60
+  %26 = vmul.bf16x32 %narrow, %24, %25
+  %27 = slice %26[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %28 = vmov.accumulator512.to.vector512 %27
+  %29 = mov.i32 32767
+  %30 = vbcst.16 %29
+  %31 = vband %narrow, %30
+  %32 = mov.i32 47360
+  %33 = vbcst.16 %32
+  %34 = mova.i32 90
+  %35 = vmul.i16x32 %31, %33, %34
+  %36 = mov.shift 0
+  %37 = mov.shift 15
   set.rounding 0
   set.srs-mode 1
   set.saturation 0
-  %37 = vsrs.trunc.s16x32 %34, %35
-  %38 = vsrs.trunc.s16x32 %34, %36
-  %39 = vadd.16 %37, %37
-  %40 = mov.i32 32768
-  %41 = vbcst.16 %40
-  %42 = vband %narrow, %41
-  %43 = vbor %38, %42
-  %44 = mova.i32 18
-  %45 = vshuffle %39, %43, %44
-  %46 = mov.short 89
-  %47 = vbcst.16 %46
-  %48 = vlt.u16x32.el.low32 %30, %47
-  %product = vsel.32.mask64 %27, %45, %48
+  %38 = vsrs.trunc.s16x32 %35, %36
+  %39 = vsrs.trunc.s16x32 %35, %37
+  %40 = vadd.16 %38, %38
+  %41 = mov.i32 32768
+  %42 = vbcst.16 %41
+  %43 = vband %narrow, %42
+  %44 = vbor %39, %43
+  %45 = mova.i32 18
+  %46 = vshuffle %40, %44, %45
+  %47 = mov.short 89
+  %48 = vbcst.16 %47
+  %49 = vlt.u16x32.el.low32 %31, %48
+  %product = vsel.32.mask64 %28, %46, %49
   return %product
 }
 

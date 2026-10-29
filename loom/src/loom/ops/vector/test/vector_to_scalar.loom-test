@@ -146,17 +146,18 @@ func.def @dynamic_2d_splat(%m: index, %n: index, %x: f32) -> (vector<[%m]x[%n]xf
 
 // ----
 func.def @dynamic_2d_splat(%m: index, %n: index, %x: f32) -> (vector<[%m]x[%n]xf32>) {
-  %5 = vector.constant 0.0 : vector<[%m]x[%n]xf32>
-  %6 = index.constant 0 : index
-  %7 = index.constant 1 : index
-  %r = scf.for %8 = [%6 to %m step %7](%9 = %5 : vector<[%m]x[%n]xf32>) -> (vector<[%m]x[%n]xf32>) {
-    %11 = index.constant 0 : index
-    %12 = index.constant 1 : index
-    %15 = scf.for %13 = [%11 to %n step %12](%14 = %9 : vector<[%m]x[%n]xf32>) -> (vector<[%m]x[%n]xf32>) {
-      %16 = vector.insert %x into %14[%8, %13] : f32, vector<[%m]x[%n]xf32>
-      scf.yield %16 : vector<[%m]x[%n]xf32>
+  %5 = scalar.constant 0.0 : f32
+  %6 = vector.splat %5 : vector<[%m]x[%n]xf32>
+  %7 = index.constant 0 : index
+  %8 = index.constant 1 : index
+  %r = scf.for %9 = [%7 to %m step %8](%10 = %6 : vector<[%m]x[%n]xf32>) -> (vector<[%m]x[%n]xf32>) {
+    %12 = index.constant 0 : index
+    %13 = index.constant 1 : index
+    %16 = scf.for %14 = [%12 to %n step %13](%15 = %10 : vector<[%m]x[%n]xf32>) -> (vector<[%m]x[%n]xf32>) {
+      %17 = vector.insert %x into %15[%9, %14] : f32, vector<[%m]x[%n]xf32>
+      scf.yield %17 : vector<[%m]x[%n]xf32>
     }
-    scf.yield %15 : vector<[%m]x[%n]xf32>
+    scf.yield %16 : vector<[%m]x[%n]xf32>
   }
   func.return %r : vector<[%m]x[%n]xf32>
 }
@@ -169,33 +170,33 @@ func.def @static_float_math(%a: vector<2xf32>, %b: vector<2xf32>) -> (vector<2xf
   %diff = vector.subf %a, %b : vector<2xf32>
   %exp = vector.expf %diff : vector<2xf32>
   %max = vector.maxnumf %exp, %a : vector<2xf32>
-  %lower = vector.constant -1.0 : vector<2xf32>
-  %upper = vector.constant 1.0 : vector<2xf32>
+  %lower_scalar = scalar.constant -1.0 : f32
+  %lower = vector.splat %lower_scalar : vector<2xf32>
+  %upper_scalar = scalar.constant 1.0 : f32
+  %upper = vector.splat %upper_scalar : vector<2xf32>
   %r = vector.clampf<number, nnan|nsz> %max, %lower, %upper : vector<2xf32>
   func.return %r : vector<2xf32>
 }
 
 // ----
 func.def @static_float_math(%a: vector<2xf32>, %b: vector<2xf32>) -> (vector<2xf32>) {
-  %9 = vector.extract %a[0] : vector<2xf32> -> f32
-  %10 = vector.extract %b[0] : vector<2xf32> -> f32
-  %11 = scalar.subf %9, %10 : f32
-  %12 = scalar.expf %11 : f32
-  %13 = vector.extract %a[0] : vector<2xf32> -> f32
-  %14 = scalar.maxnumf %12, %13 : f32
-  %15 = scalar.constant -1.0 : f32
-  %16 = scalar.constant 1.0 : f32
-  %17 = scalar.clampf<number, nnan|nsz> %14, %15, %16 : f32
+  %lower_scalar = scalar.constant -1.0 : f32
+  %upper_scalar = scalar.constant 1.0 : f32
+  %11 = vector.extract %a[0] : vector<2xf32> -> f32
+  %12 = vector.extract %b[0] : vector<2xf32> -> f32
+  %13 = scalar.subf %11, %12 : f32
+  %14 = scalar.expf %13 : f32
+  %15 = vector.extract %a[0] : vector<2xf32> -> f32
+  %16 = scalar.maxnumf %14, %15 : f32
+  %17 = scalar.clampf<number, nnan|nsz> %16, %lower_scalar, %upper_scalar : f32
   %18 = vector.extract %a[1] : vector<2xf32> -> f32
   %19 = vector.extract %b[1] : vector<2xf32> -> f32
   %20 = scalar.subf %18, %19 : f32
   %21 = scalar.expf %20 : f32
   %22 = vector.extract %a[1] : vector<2xf32> -> f32
   %23 = scalar.maxnumf %21, %22 : f32
-  %24 = scalar.constant -1.0 : f32
-  %25 = scalar.constant 1.0 : f32
-  %26 = scalar.clampf<number, nnan|nsz> %23, %24, %25 : f32
-  %r = vector.from_elements %17, %26 : vector<2xf32>
+  %24 = scalar.clampf<number, nnan|nsz> %23, %lower_scalar, %upper_scalar : f32
+  %r = vector.from_elements %17, %24 : vector<2xf32>
   func.return %r : vector<2xf32>
 }
 
@@ -256,16 +257,17 @@ func.def @dynamic_float_math(%n: index, %a: vector<[%n]xf32>, %b: vector<[%n]xf3
 
 // ----
 func.def @dynamic_float_math(%n: index, %a: vector<[%n]xf32>, %b: vector<[%n]xf32>) -> (vector<[%n]xf32>) {
-  %6 = vector.constant 0.0 : vector<[%n]xf32>
-  %7 = index.constant 0 : index
-  %8 = index.constant 1 : index
-  %r = scf.for %9 = [%7 to %n step %8](%10 = %6 : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
-    %12 = vector.extract %a[%9] : vector<[%n]xf32> -> f32
-    %13 = vector.extract %b[%9] : vector<[%n]xf32> -> f32
-    %14 = scalar.divf %12, %13 : f32
-    %15 = scalar.sqrtf %14 : f32
-    %16 = vector.insert %15 into %10[%9] : f32, vector<[%n]xf32>
-    scf.yield %16 : vector<[%n]xf32>
+  %6 = scalar.constant 0.0 : f32
+  %7 = vector.splat %6 : vector<[%n]xf32>
+  %8 = index.constant 0 : index
+  %9 = index.constant 1 : index
+  %r = scf.for %10 = [%8 to %n step %9](%11 = %7 : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
+    %13 = vector.extract %a[%10] : vector<[%n]xf32> -> f32
+    %14 = vector.extract %b[%10] : vector<[%n]xf32> -> f32
+    %15 = scalar.divf %13, %14 : f32
+    %16 = scalar.sqrtf %15 : f32
+    %17 = vector.insert %16 into %11[%10] : f32, vector<[%n]xf32>
+    scf.yield %17 : vector<[%n]xf32>
   }
   func.return %r : vector<[%n]xf32>
 }
@@ -1287,40 +1289,41 @@ func.def @dynamic_shape_changing_bitcast(%n: index, %bytes: vector<[%n]x2xi8>, %
 
 // ----
 func.def @dynamic_shape_changing_bitcast(%n: index, %bytes: vector<[%n]x2xi8>, %halves: vector<[%n]xf16>) -> (vector<[%n]xf16>, vector<[%n]x2xi8>) {
-  %47 = vector.constant 0.0 : vector<[%n]xf16>
-  %48 = index.constant 0 : index
-  %49 = index.constant 1 : index
-  %to_half = scf.for %50 = [%48 to %n step %49](%51 = %47 : vector<[%n]xf16>) -> (vector<[%n]xf16>) {
-    %53 = index.constant 16 : index
-    %54 = index.mul %50, %53 : index
-    %55 = index.constant 0 : index
-    %56 = index.constant 16 : index
-    %57 = index.constant 1 : index
-    %58 = scalar.constant 1 : i8
-    %59 = scalar.constant 0 : i16
-    %62 = scf.for %60 = [%55 to %56 step %57](%61 = %59 : i16) -> (i16) {
-      %63 = index.add %54, %60 : index
-      %64 = index.constant 8 : index
-      %65 = index.div %63, %64 : index
-      %66 = index.constant 8 : index
-      %67 = index.rem %63, %66 : index
-      %68 = index.constant 2 : index
-      %69 = index.rem %65, %68 : index
-      %70 = index.constant 2 : index
-      %71 = index.div %65, %70 : index
-      %72 = vector.extract %bytes[%71, %69] : vector<[%n]x2xi8> -> i8
-      %73 = index.cast %67 : index to i8
-      %74 = scalar.shrui %72, %73 : i8
-      %75 = scalar.andi %74, %58 : i8
-      %76 = scalar.extui %75 : i8 to i16
-      %77 = index.cast %60 : index to i16
-      %78 = scalar.shli %76, %77 : i16
-      %79 = scalar.ori %61, %78 : i16
-      scf.yield %79 : i16
+  %47 = scalar.constant 0.0 : f16
+  %48 = vector.splat %47 : vector<[%n]xf16>
+  %49 = index.constant 0 : index
+  %50 = index.constant 1 : index
+  %to_half = scf.for %51 = [%49 to %n step %50](%52 = %48 : vector<[%n]xf16>) -> (vector<[%n]xf16>) {
+    %54 = index.constant 16 : index
+    %55 = index.mul %51, %54 : index
+    %56 = index.constant 0 : index
+    %57 = index.constant 16 : index
+    %58 = index.constant 1 : index
+    %59 = scalar.constant 1 : i8
+    %60 = scalar.constant 0 : i16
+    %63 = scf.for %61 = [%56 to %57 step %58](%62 = %60 : i16) -> (i16) {
+      %64 = index.add %55, %61 : index
+      %65 = index.constant 8 : index
+      %66 = index.div %64, %65 : index
+      %67 = index.constant 8 : index
+      %68 = index.rem %64, %67 : index
+      %69 = index.constant 2 : index
+      %70 = index.rem %66, %69 : index
+      %71 = index.constant 2 : index
+      %72 = index.div %66, %71 : index
+      %73 = vector.extract %bytes[%72, %70] : vector<[%n]x2xi8> -> i8
+      %74 = index.cast %68 : index to i8
+      %75 = scalar.shrui %73, %74 : i8
+      %76 = scalar.andi %75, %59 : i8
+      %77 = scalar.extui %76 : i8 to i16
+      %78 = index.cast %61 : index to i16
+      %79 = scalar.shli %77, %78 : i16
+      %80 = scalar.ori %62, %79 : i16
+      scf.yield %80 : i16
     }
-    %80 = scalar.bitcast %62 : i16 to f16
-    %81 = vector.insert %80 into %51[%50] : f16, vector<[%n]xf16>
-    scf.yield %81 : vector<[%n]xf16>
+    %81 = scalar.bitcast %63 : i16 to f16
+    %82 = vector.insert %81 into %52[%51] : f16, vector<[%n]xf16>
+    scf.yield %82 : vector<[%n]xf16>
   }
   %7 = vector.constant 0 : vector<[%n]x2xi8>
   %8 = index.constant 0 : index
@@ -2547,15 +2550,16 @@ func.def @dynamic_table_lookup(%n: index, %table: vector<4xf32>, %codes: vector<
 
 // ----
 func.def @dynamic_table_lookup(%n: index, %table: vector<4xf32>, %codes: vector<[%n]xi8>) -> (vector<[%n]xf32>) {
-  %5 = vector.constant 0.0 : vector<[%n]xf32>
-  %6 = index.constant 0 : index
-  %7 = index.constant 1 : index
-  %r = scf.for %8 = [%6 to %n step %7](%9 = %5 : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
-    %11 = vector.extract %codes[%8] : vector<[%n]xi8> -> i8
-    %12 = index.cast %11 : i8 to index
-    %13 = vector.extract %table[%12] : vector<4xf32> -> f32
-    %14 = vector.insert %13 into %9[%8] : f32, vector<[%n]xf32>
-    scf.yield %14 : vector<[%n]xf32>
+  %5 = scalar.constant 0.0 : f32
+  %6 = vector.splat %5 : vector<[%n]xf32>
+  %7 = index.constant 0 : index
+  %8 = index.constant 1 : index
+  %r = scf.for %9 = [%7 to %n step %8](%10 = %6 : vector<[%n]xf32>) -> (vector<[%n]xf32>) {
+    %12 = vector.extract %codes[%9] : vector<[%n]xi8> -> i8
+    %13 = index.cast %12 : i8 to index
+    %14 = vector.extract %table[%13] : vector<4xf32> -> f32
+    %15 = vector.insert %14 into %10[%9] : f32, vector<[%n]xf32>
+    scf.yield %15 : vector<[%n]xf32>
   }
   func.return %r : vector<[%n]xf32>
 }

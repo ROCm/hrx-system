@@ -118,7 +118,8 @@ func.def @finite_bfloat_products(%even_tie: f32, %odd_tie: f32, %signed_zero: f3
   %scalar_narrow = scalar.fptrunc %scalar_product : f32 to bf16
   %scalar_bits = scalar.bitcast %scalar_narrow : bf16 to i16
   %inputs = vector.from_elements %even_tie, %odd_tie, %signed_zero : vector<3xf32>
-  %halves = vector.constant 0.5 : vector<3xf32>
+  %halves_scalar = scalar.constant 0.5 : f32
+  %halves = vector.splat %halves_scalar : vector<3xf32>
   %products = vector.mulf<nnan|ninf> %inputs, %halves : vector<3xf32>
   %narrow = vector.fptrunc %products : vector<3xf32> to vector<3xbf16>
   %bits = vector.bitcast %narrow : vector<3xbf16> to vector<3xi16>

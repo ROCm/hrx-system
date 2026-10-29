@@ -139,8 +139,10 @@ kernel.def @subgroup_scan_float_extrema() {
     %has_prefix = scalar.cmpi ne, %prefix, %absent : i32
     %prefix_combines = scalar.cmpi ugt, %prefix, %present : i32
     %prefix_mask = vector.splat %has_prefix : vector<4xi1>
-    %minimum_bound = vector.constant inf : vector<4xf32>
-    %maximum_bound = vector.constant -inf : vector<4xf32>
+    %minimum_bound_scalar = scalar.constant inf : f32
+    %minimum_bound = vector.splat %minimum_bound_scalar : vector<4xf32>
+    %maximum_bound_scalar = scalar.constant -inf : f32
+    %maximum_bound = vector.splat %maximum_bound_scalar : vector<4xf32>
     %expected_minimum = vector.select %prefix_mask, %value, %minimum_bound : vector<4xf32>
     %expected_maximum = vector.select %prefix_mask, %value, %maximum_bound : vector<4xf32>
     %exclusive_minimum = kernel.subgroup.scan<minnumf> %value {direction = forward, mode = exclusive} : vector<4xf32>
@@ -340,8 +342,10 @@ kernel.def @subgroup_scan_bfloat_extrema() {
     %has_prefix = scalar.cmpi ne, %prefix, %absent : i32
     %prefix_combines = scalar.cmpi ugt, %prefix, %present : i32
     %prefix_mask = vector.splat %has_prefix : vector<4xi1>
-    %minimum_bound = vector.constant inf : vector<4xf32>
-    %maximum_bound = vector.constant -inf : vector<4xf32>
+    %minimum_bound_scalar = scalar.constant inf : f32
+    %minimum_bound = vector.splat %minimum_bound_scalar : vector<4xf32>
+    %maximum_bound_scalar = scalar.constant -inf : f32
+    %maximum_bound = vector.splat %maximum_bound_scalar : vector<4xf32>
     %expected_minimum = vector.select %prefix_mask, %value, %minimum_bound : vector<4xf32>
     %expected_maximum = vector.select %prefix_mask, %value, %maximum_bound : vector<4xf32>
     %exclusive_minimum = kernel.subgroup.scan<minnumf> %narrow {direction = forward, mode = exclusive} : vector<4xbf16>
@@ -455,8 +459,10 @@ kernel.def @subgroup_scan_wide_extrema() {
     %has_prefix = scalar.cmpi ne, %prefix, %absent : i32
     %combined = scalar.cmpi ugt, %prefix, %present : i32
     %prefix_mask = vector.splat %has_prefix : vector<3xi1>
-    %minimum_bound = vector.constant inf : vector<3xf64>
-    %maximum_bound = vector.constant -inf : vector<3xf64>
+    %minimum_bound_scalar = scalar.constant inf : f64
+    %minimum_bound = vector.splat %minimum_bound_scalar : vector<3xf64>
+    %maximum_bound_scalar = scalar.constant -inf : f64
+    %maximum_bound = vector.splat %maximum_bound_scalar : vector<3xf64>
     %expected_minimum = vector.select %prefix_mask, %value, %minimum_bound : vector<3xf64>
     %expected_maximum = vector.select %prefix_mask, %value, %maximum_bound : vector<3xf64>
     %minimum = kernel.subgroup.scan<minnumf> %value {direction = forward, mode = exclusive} : vector<3xf64>
@@ -543,8 +549,10 @@ kernel.def @subgroup_scan_exact_narrowing() {
     %prefix = kernel.subgroup.scan<addi> %present {direction = forward, mode = exclusive} : i32
     %has_prefix = scalar.cmpi ne, %prefix, %absent : i32
     %prefix_mask = vector.splat %has_prefix : vector<4xi1>
-    %minimum_bound = vector.constant inf : vector<4xf32>
-    %maximum_bound = vector.constant -inf : vector<4xf32>
+    %minimum_bound_scalar = scalar.constant inf : f32
+    %minimum_bound = vector.splat %minimum_bound_scalar : vector<4xf32>
+    %maximum_bound_scalar = scalar.constant -inf : f32
+    %maximum_bound = vector.splat %maximum_bound_scalar : vector<4xf32>
     %expected_minimum = vector.select %prefix_mask, %values, %minimum_bound : vector<4xf32>
     %expected_maximum = vector.select %prefix_mask, %values, %maximum_bound : vector<4xf32>
     %minimum = kernel.subgroup.scan<minnumf> %values {direction = forward, mode = exclusive} : vector<4xf32>

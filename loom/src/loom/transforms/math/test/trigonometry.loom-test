@@ -49,27 +49,33 @@ func.def @vector_zero_signs(%input: vector<3xf32>) -> (vector<3xf32>, vector<3xf
 
 // ----
 func.def @vector_zero_signs(%input: vector<3xf32>) -> (vector<3xf32>, vector<3xf32>, vector<3xf32>, vector<3xf32>) {
-  %30 = vector.constant 0.15915494309189535 : vector<3xf32>
-  %31 = vector.mulf<afn> %input, %30 : vector<3xf32>
-  %32 = vector.sinturnsf<afn> %31 : vector<3xf32>
-  %26 = vector.constant 0.0 : vector<3xf32>
-  %27 = vector.cmpf<afn> oeq, %32, %26 : vector<3xf32> -> vector<3xi1>
-  %28 = vector.copysignf<afn> %26, %input : vector<3xf32>
-  %sine = vector.select %27, %28, %32 : vector<3xf32>
-  %22 = vector.constant 0.15915494309189535 : vector<3xf32>
-  %23 = vector.mulf<afn> %input, %22 : vector<3xf32>
-  %24 = vector.costurnsf<afn> %23 : vector<3xf32>
-  %19 = vector.constant 0.0 : vector<3xf32>
-  %20 = vector.cmpf<afn> oeq, %24, %19 : vector<3xf32> -> vector<3xi1>
-  %cosine = vector.select %20, %19, %24 : vector<3xf32>
-  %13 = vector.sinturnsf<afn> %input : vector<3xf32>
-  %14 = vector.constant 0.0 : vector<3xf32>
-  %15 = vector.cmpf<afn> oeq, %13, %14 : vector<3xf32> -> vector<3xi1>
-  %16 = vector.copysignf<afn> %14, %input : vector<3xf32>
-  %turn_sine = vector.select %15, %16, %13 : vector<3xf32>
+  %35 = scalar.constant 0.15915494309189535 : f32
+  %36 = vector.splat %35 : vector<3xf32>
+  %37 = vector.mulf<afn> %input, %36 : vector<3xf32>
+  %38 = vector.sinturnsf<afn> %37 : vector<3xf32>
+  %30 = scalar.constant 0.0 : f32
+  %31 = vector.splat %30 : vector<3xf32>
+  %32 = vector.cmpf<afn> oeq, %38, %31 : vector<3xf32> -> vector<3xi1>
+  %33 = vector.copysignf<afn> %31, %input : vector<3xf32>
+  %sine = vector.select %32, %33, %38 : vector<3xf32>
+  %25 = scalar.constant 0.15915494309189535 : f32
+  %26 = vector.splat %25 : vector<3xf32>
+  %27 = vector.mulf<afn> %input, %26 : vector<3xf32>
+  %28 = vector.costurnsf<afn> %27 : vector<3xf32>
+  %21 = scalar.constant 0.0 : f32
+  %22 = vector.splat %21 : vector<3xf32>
+  %23 = vector.cmpf<afn> oeq, %28, %22 : vector<3xf32> -> vector<3xi1>
+  %cosine = vector.select %23, %22, %28 : vector<3xf32>
+  %14 = vector.sinturnsf<afn> %input : vector<3xf32>
+  %15 = scalar.constant 0.0 : f32
+  %16 = vector.splat %15 : vector<3xf32>
+  %17 = vector.cmpf<afn> oeq, %14, %16 : vector<3xf32> -> vector<3xi1>
+  %18 = vector.copysignf<afn> %16, %input : vector<3xf32>
+  %turn_sine = vector.select %17, %18, %14 : vector<3xf32>
   %9 = vector.costurnsf<afn> %input : vector<3xf32>
-  %10 = vector.constant 0.0 : vector<3xf32>
-  %11 = vector.cmpf<afn> oeq, %9, %10 : vector<3xf32> -> vector<3xi1>
-  %turn_cosine = vector.select %11, %10, %9 : vector<3xf32>
+  %10 = scalar.constant 0.0 : f32
+  %11 = vector.splat %10 : vector<3xf32>
+  %12 = vector.cmpf<afn> oeq, %9, %11 : vector<3xf32> -> vector<3xi1>
+  %turn_cosine = vector.select %12, %11, %9 : vector<3xf32>
   func.return %sine, %cosine, %turn_sine, %turn_cosine : vector<3xf32>, vector<3xf32>, vector<3xf32>, vector<3xf32>
 }

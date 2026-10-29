@@ -8,30 +8,32 @@ func.def target(@target) @construct_full_vectors(%i16_value: i16, %bf16_value: b
   %i8_constant = vector.constant -7 : vector<32xi8>
   %i16_splat = vector.splat %i16_value : vector<8xi16>
   %i64_constant = vector.constant 81985529216486895 : vector<4xi64>
-  %f8_constant = vector.constant 1.5 : vector<16xf8E4M3>
+  %f8_constant_scalar = scalar.constant 1.5 : f8E4M3
+  %f8_constant = vector.splat %f8_constant_scalar : vector<16xf8E4M3>
   %bf16_splat = vector.splat %bf16_value : vector<16xbf16>
-  %f64_constant = vector.constant -2.5 : vector<4xf64>
+  %f64_constant_scalar = scalar.constant -2.5 : f64
+  %f64_constant = vector.splat %f64_constant_scalar : vector<4xf64>
   func.return %i8_constant, %i16_splat, %i64_constant, %f8_constant, %bf16_splat, %f64_constant : vector<32xi8>, vector<8xi16>, vector<4xi64>, vector<16xf8E4M3>, vector<16xbf16>, vector<4xf64>
 }
 
 // ----
 low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (i16, bf16) -> (vector<32xi8>, vector<8xi16>, vector<4xi64>, vector<16xf8E4M3>, vector<16xbf16>, vector<4xf64>)}) @construct_full_vectors(%i16_value: reg<x86.gpr32>, %bf16_value: reg<x86.gpr32>) -> (reg<x86.ymm>, reg<x86.xmm>, reg<x86.ymm>, reg<x86.xmm>, reg<x86.ymm>, reg<x86.ymm>) asm {
-  %22 = mov.imm32 -7
-  %23 = vmovd.xmm.gpr32 %22
-  %i8_constant = vpbroadcastb.ymm %23
-  %25 = vmovd.xmm.gpr32 %i16_value
-  %i16_splat = vpbroadcastw.xmm %25
-  %27 = mov.imm64 81985529216486895
-  %28 = vmovq.xmm.gpr64 %27
-  %i64_constant = vpbroadcastq.ymm %28
-  %30 = mov.imm32 60
-  %31 = vmovd.xmm.gpr32 %30
-  %f8_constant = vpbroadcastb.xmm %31
-  %33 = vmovd.xmm.gpr32 %bf16_value
-  %bf16_splat = vpbroadcastw.ymm %33
-  %35 = mov.imm64 -4610560118520545280
-  %36 = vmovq.xmm.gpr64 %35
-  %f64_constant = vpbroadcastq.ymm %36
+  %24 = mov.imm32 -7
+  %25 = vmovd.xmm.gpr32 %24
+  %i8_constant = vpbroadcastb.ymm %25
+  %27 = vmovd.xmm.gpr32 %i16_value
+  %i16_splat = vpbroadcastw.xmm %27
+  %29 = mov.imm64 81985529216486895
+  %30 = vmovq.xmm.gpr64 %29
+  %i64_constant = vpbroadcastq.ymm %30
+  %f8_constant_scalar = mov.imm32 60
+  %33 = vmovd.xmm.gpr32 %f8_constant_scalar
+  %f8_constant = vpbroadcastb.xmm %33
+  %35 = vmovd.xmm.gpr32 %bf16_value
+  %bf16_splat = vpbroadcastw.ymm %35
+  %37 = mov.imm64 -4610560118520545280
+  %f64_constant_scalar = vmovq.xmm.gpr64 %37
+  %f64_constant = vbroadcastsd.ymm %f64_constant_scalar
   return %i8_constant, %i16_splat, %i64_constant, %f8_constant, %bf16_splat, %f64_constant
 }
 

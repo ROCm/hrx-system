@@ -8,7 +8,8 @@ func.def @unrolled_vector_build(%input: buffer, %output: buffer) {
   %last = index.constant 4 : index
   %source = buffer.view %input[%origin] : buffer -> view<5xf32>
   %destination = buffer.view %output[%origin] : buffer -> view<5xf32>
-  %initial = vector.constant 0.0 : vector<5xf32>
+  %initial_scalar = scalar.constant 0.0 : f32
+  %initial = vector.splat %initial_scalar : vector<5xf32>
   %values = scf.for %position = [%begin to %end step %step](%current = %initial : vector<5xf32>) -> (vector<5xf32>) unroll {
     %value = view.load %source[%position] : view<5xf32> -> f32
     %next = vector.insert %value into %current[%position] : f32, vector<5xf32>

@@ -28,8 +28,10 @@ func.def target(@target) @f64_mfma_constants() -> (vector<4xf64>) {
   %m = index.constant 16 : index
   %n = index.constant 16 : index
   %k = index.constant 4 : index
-  %operand_elements = vector.constant 1.0 : vector<1xf64>
-  %accumulator_elements = vector.constant 0.0 : vector<4xf64>
+  %operand_elements_scalar = scalar.constant 1.0 : f64
+  %operand_elements = vector.splat %operand_elements_scalar : vector<1xf64>
+  %accumulator_elements_scalar = scalar.constant 0.0 : f64
+  %accumulator_elements = vector.splat %accumulator_elements_scalar : vector<4xf64>
   %lhs = vector.fragment<lhs> %operand_elements shape [%m, %k] : vector<1xf64>
   %rhs = vector.fragment<rhs> %operand_elements shape [%k, %n] : vector<1xf64>
   %init = vector.fragment<init> %accumulator_elements shape [%m, %n] : vector<4xf64>
@@ -39,11 +41,12 @@ func.def target(@target) @f64_mfma_constants() -> (vector<4xf64>) {
 
 // ----
 low.func.def target<amdgpu.gfx9_4.generic.core>(@target) abi(hal_kernel) @f64_mfma_constants() -> (reg<amdgpu.vgpr x8>) asm {
-  %11 = v_mov_b32 0
-  %12 = v_mov_b32 1072693248
-  %rhs = concat(%11, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %init = concat(%11, %11, %11, %11, %11, %11, %11, %11) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x8>
-  %23 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
-  %result = v_mfma_f64_16x16x4_f64 %rhs, %rhs, %23
+  %13 = v_mov_b32 0
+  %14 = v_mov_b32 1072693248
+  %rhs = concat(%13, %14) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %accumulator_elements_scalar = concat(%13, %13) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %init = concat(%accumulator_elements_scalar, %accumulator_elements_scalar, %accumulator_elements_scalar, %accumulator_elements_scalar) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x8>
+  %20 = copy %init : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr x8>
+  %result = v_mfma_f64_16x16x4_f64 %rhs, %rhs, %20
   return %result
 }

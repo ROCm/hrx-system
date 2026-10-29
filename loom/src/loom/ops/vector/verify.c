@@ -1691,6 +1691,18 @@ static iree_status_t loom_vector_verify_static_threshold_order(
         /*right_index=*/0);
   }
 
+  if (loom_vector_splat_isa(def_op)) {
+    double splat_value = 0.0;
+    if (!loom_vector_try_get_scalar_f64_constant(
+            module, loom_vector_splat_scalar(def_op), &splat_value) ||
+        !isnan(splat_value)) {
+      return iree_ok_status();
+    }
+    return loom_vector_emit_static_threshold_order(
+        emitter, op, IREE_SV("thresholds"), /*left_index=*/0,
+        /*right_index=*/0);
+  }
+
   if (!loom_vector_from_elements_isa(def_op)) {
     return iree_ok_status();
   }

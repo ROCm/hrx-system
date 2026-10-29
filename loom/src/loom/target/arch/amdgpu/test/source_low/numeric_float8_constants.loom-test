@@ -102,36 +102,78 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @float8_midpoint_neighb
 // ====
 
 func.def @float8_vector_midpoints() -> (vector<4xf8E4M3>, vector<8xf8E5M2>) {
-  %e4_above_even = vector.constant 1.0625000000000002 : vector<4xf8E4M3>
-  %e5_below_odd = vector.constant 1.3749999999999998 : vector<8xf8E5M2>
+  %e4_above_even_scalar = scalar.constant 1.0625000000000002 : f8E4M3
+  %e4_above_even = vector.splat %e4_above_even_scalar : vector<4xf8E4M3>
+  %e5_below_odd_scalar = scalar.constant 1.3749999999999998 : f8E5M2
+  %e5_below_odd = vector.splat %e5_below_odd_scalar : vector<8xf8E5M2>
   func.return %e4_above_even, %e5_below_odd : vector<4xf8E4M3>, vector<8xf8E5M2>
 }
 
 // ----
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @float8_vector_midpoints() -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
-  %e4_above_even = v_mov_b32 960051513
-  %7 = v_mov_b32 1027423549
-  %e5_below_odd = concat(%7, %7) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %e4_above_even_scalar = v_mov_b32 57
+  %9 = v_and_b32_lit %e4_above_even_scalar, 255
+  %11 = v_lshlrev_b32_src0_inline %9, 8
+  %12 = v_or_b32 %9, %11
+  %14 = v_lshlrev_b32_src0_inline %9, 16
+  %15 = v_or_b32 %12, %14
+  %17 = v_lshlrev_b32_src0_inline %9, 24
+  %e4_above_even = v_or_b32 %15, %17
+  %e5_below_odd_scalar = v_mov_b32 61
+  %20 = v_and_b32_lit %e5_below_odd_scalar, 255
+  %22 = v_lshlrev_b32_src0_inline %20, 8
+  %23 = v_or_b32 %20, %22
+  %25 = v_lshlrev_b32_src0_inline %20, 16
+  %26 = v_or_b32 %23, %25
+  %28 = v_lshlrev_b32_src0_inline %20, 24
+  %29 = v_or_b32 %26, %28
+  %e5_below_odd = concat(%29, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %e4_above_even, %e5_below_odd
 }
 
 // ====
 
 func.def @float8_vector_specials() -> (vector<1xf8E4M3>, vector<5xf8E4M3>, vector<4xf8E5M2>, vector<8xf8E5M2>) {
-  %e4_negative_zero = vector.constant -0.0 : vector<1xf8E4M3>
-  %e4_saturated = vector.constant inf : vector<5xf8E4M3>
-  %e5_negative_infinity = vector.constant -inf : vector<4xf8E5M2>
-  %e5_nan = vector.constant nan : vector<8xf8E5M2>
+  %e4_negative_zero_scalar = scalar.constant -0.0 : f8E4M3
+  %e4_negative_zero = vector.splat %e4_negative_zero_scalar : vector<1xf8E4M3>
+  %e4_saturated_scalar = scalar.constant inf : f8E4M3
+  %e4_saturated = vector.splat %e4_saturated_scalar : vector<5xf8E4M3>
+  %e5_negative_infinity_scalar = scalar.constant -inf : f8E5M2
+  %e5_negative_infinity = vector.splat %e5_negative_infinity_scalar : vector<4xf8E5M2>
+  %e5_nan_scalar = scalar.constant nan : f8E5M2
+  %e5_nan = vector.splat %e5_nan_scalar : vector<8xf8E5M2>
   func.return %e4_negative_zero, %e4_saturated, %e5_negative_infinity, %e5_nan : vector<1xf8E4M3>, vector<5xf8E4M3>, vector<4xf8E5M2>, vector<8xf8E5M2>
 }
 
 // ----
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @float8_vector_specials() -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
-  %e4_negative_zero = v_mov_b32 2155905152
-  %13 = v_mov_b32 2122219134
-  %e4_saturated = concat(%13, %13) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %e5_negative_infinity = v_mov_b32 4244438268
-  %17 = v_mov_b32 2139062143
-  %e5_nan = concat(%17, %17) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %e4_negative_zero_scalar = v_mov_b32 128
+  %e4_negative_zero = v_and_b32_lit %e4_negative_zero_scalar, 255
+  %e4_saturated_scalar = v_mov_b32 126
+  %19 = v_and_b32_lit %e4_saturated_scalar, 255
+  %21 = v_lshlrev_b32_src0_inline %19, 8
+  %22 = v_or_b32 %19, %21
+  %24 = v_lshlrev_b32_src0_inline %19, 16
+  %25 = v_or_b32 %22, %24
+  %27 = v_lshlrev_b32_src0_inline %19, 24
+  %28 = v_or_b32 %25, %27
+  %e4_saturated = concat(%28, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %e5_negative_infinity_scalar = v_mov_b32 252
+  %32 = v_and_b32_lit %e5_negative_infinity_scalar, 255
+  %34 = v_lshlrev_b32_src0_inline %32, 8
+  %35 = v_or_b32 %32, %34
+  %37 = v_lshlrev_b32_src0_inline %32, 16
+  %38 = v_or_b32 %35, %37
+  %40 = v_lshlrev_b32_src0_inline %32, 24
+  %e5_negative_infinity = v_or_b32 %38, %40
+  %e5_nan_scalar = v_mov_b32 127
+  %43 = v_and_b32_lit %e5_nan_scalar, 255
+  %45 = v_lshlrev_b32_src0_inline %43, 8
+  %46 = v_or_b32 %43, %45
+  %48 = v_lshlrev_b32_src0_inline %43, 16
+  %49 = v_or_b32 %46, %48
+  %51 = v_lshlrev_b32_src0_inline %43, 24
+  %52 = v_or_b32 %49, %51
+  %e5_nan = concat(%52, %52) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %e4_negative_zero, %e4_saturated, %e5_negative_infinity, %e5_nan
 }

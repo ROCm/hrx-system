@@ -151,36 +151,36 @@ func.def @vector_cmpf_rhs_zero_inline(%value: vector<2xf32>) -> (vector<2xi1>) {
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_cmpf_rhs_zero_inline(%value: reg<aie2p.vec256 x2>) -> (reg<aie2p.elpredicate>) asm {
-  %36 = mov.i32 2147483647
-  %37 = vbcst.32 %36
-  %38 = vband %value, %37
-  %39 = mov.i32 2139095040
-  %40 = vbcst.32 %39
-  %41 = vlt.u32x16.el.low32 %40, %38
-  %42 = predicate.complete.zero.high32 %41, 0
-  %43 = mov.short 0
-  %44 = vbcst.32 %43
-  %45 = mov.i32 -2147483648
-  %46 = vbcst.32 %45
-  %47 = mov.short -1
-  %48 = vbcst.32 %47
-  %49 = vsub.32 %38, %44
-  %50 = veqz.32.el.low32 %49
-  %51 = predicate.complete.zero.high32 %50, 0
-  %52 = vsel.32.mask64 %value, %44, %51
-  %53 = vlt.s32x16.el.low32 %52, %44
-  %54 = predicate.complete.zero.high32 %53, 0
-  %55 = vadd.32 %52, %46
-  %56 = vsub.32 %48, %52
-  %57 = vsel.32.mask64 %55, %56, %54
-  %58 = vlt.u32x16.el.low32 %57, %46
-  %59 = vlt.u32x16.el.low32 %46, %57
-  %60 = predicate.or.low32 %58, %59
-  %61 = predicate.complete.zero.high32 %60, 0
-  %62 = predicate.and.low32.rhs_tied %61, %42
-  %63 = predicate.and.high32.rhs_tied %61, %62
-  %64 = predicate.xor.low32.rhs_tied %61, %63
-  %mask = predicate.xor.high32.rhs_tied %61, %64
+  %35 = mov.i32 2147483647
+  %36 = vbcst.32 %35
+  %37 = vband %value, %36
+  %38 = mov.i32 2139095040
+  %39 = vbcst.32 %38
+  %40 = vlt.u32x16.el.low32 %39, %37
+  %41 = predicate.complete.zero.high32 %40, 0
+  %42 = mov.short 0
+  %43 = vbcst.32 %42
+  %44 = mov.i32 -2147483648
+  %45 = vbcst.32 %44
+  %46 = mov.short -1
+  %47 = vbcst.32 %46
+  %48 = vsub.32 %37, %43
+  %49 = veqz.32.el.low32 %48
+  %50 = predicate.complete.zero.high32 %49, 0
+  %51 = vsel.32.mask64 %value, %43, %50
+  %52 = vlt.s32x16.el.low32 %51, %43
+  %53 = predicate.complete.zero.high32 %52, 0
+  %54 = vadd.32 %51, %45
+  %55 = vsub.32 %47, %51
+  %56 = vsel.32.mask64 %54, %55, %53
+  %57 = vlt.u32x16.el.low32 %56, %45
+  %58 = vlt.u32x16.el.low32 %45, %56
+  %59 = predicate.or.low32 %57, %58
+  %60 = predicate.complete.zero.high32 %59, 0
+  %61 = predicate.and.low32.rhs_tied %60, %41
+  %62 = predicate.and.high32.rhs_tied %60, %61
+  %63 = predicate.xor.low32.rhs_tied %60, %62
+  %mask = predicate.xor.high32.rhs_tied %60, %63
   return %mask
 }
 

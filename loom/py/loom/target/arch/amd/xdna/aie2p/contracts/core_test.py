@@ -1277,18 +1277,42 @@ def test_core_contract_closes_scalar_and_vector_families() -> None:
         (
             rule.guards[0].type_pattern.element,
             rule.guards[1].type_pattern.element,
+            rule.guards[1].type_pattern.minimum_static_elements,
+            rule.guards[1].type_pattern.maximum_static_elements,
             rule.descriptor.key,
         )
         for rule in pair_splat_rules
     ] == [
-        (element_type, element_type, "amd.xdna.aie2p.splat.i64x8")
-        for element_type in ("i64", "f64")
+        ("i64", "i64", 1, 8, "amd.xdna.aie2p.splat.i64x8"),
+        ("f64", "f64", 1, 8, "amd.xdna.aie2p.splat.i64x8"),
+        ("f64", "f64", 9, 16, "amd.xdna.aie2p.splat.i64x8"),
     ]
-    assert all(len(rule.emit) == 1 for rule in pair_splat_rules)
+    assert all(len(rule.emit) == 1 for rule in pair_splat_rules[:2])
+    assert isinstance(pair_splat_rules[2].emit[-1], EmitRegisterConcat)
+    assert (
+        pair_splat_rules[2].emit[-1].sources
+        == (pair_splat_rules[2].emit[0].results["dst"],) * 2
+    )
+    f32_zero_splat_rules = [
+        rule
+        for rule in vector_splat_rules
+        if rule.descriptor.key == "amd.xdna.aie2p.accumulator.clear.f32x64"
+    ]
+    assert [
+        next(
+            guard.type_pattern.lanes for guard in rule.guards if guard.field == "result"
+        )
+        for rule in f32_zero_splat_rules
+    ] == [16, 64]
+    assert all(
+        Guard.value_float_equals("result", 0.0) in rule.guards
+        for rule in f32_zero_splat_rules
+    )
     native_splat_rules = [
         rule
         for rule in vector_splat_rules
         if rule.guards[0].type_pattern.element not in ("i64", "f64")
+        and rule not in f32_zero_splat_rules
     ]
     assert [rule.descriptor.key for rule in native_splat_rules] == [
         "amd.xdna.aie2p.splat.i8x64",

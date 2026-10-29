@@ -144,28 +144,32 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @word_lanes(%input: re
 // Integer immediates retain float payload bits, including signed zero.
 func.def @narrow_constants() -> (vector<16xi8>, vector<16xf8E4M3>, vector<16xf8E5M2>, vector<8xi16>, vector<8xf16>, vector<8xbf16>) {
   %bytes = vector.constant -91 : vector<16xi8>
-  %e4m3 = vector.constant -2.0 : vector<16xf8E4M3>
-  %e5m2 = vector.constant -0.0 : vector<16xf8E5M2>
+  %e4m3_scalar = scalar.constant -2.0 : f8E4M3
+  %e4m3 = vector.splat %e4m3_scalar : vector<16xf8E4M3>
+  %e5m2_scalar = scalar.constant -0.0 : f8E5M2
+  %e5m2 = vector.splat %e5m2_scalar : vector<16xf8E5M2>
   %words = vector.constant -21846 : vector<8xi16>
-  %half = vector.constant -0.0 : vector<8xf16>
-  %bfloat = vector.constant -2.0 : vector<8xbf16>
+  %half_scalar = scalar.constant -0.0 : f16
+  %half = vector.splat %half_scalar : vector<8xf16>
+  %bfloat_scalar = scalar.constant -2.0 : bf16
+  %bfloat = vector.splat %bfloat_scalar : vector<8xbf16>
   func.return %bytes, %e4m3, %e5m2, %words, %half, %bfloat : vector<16xi8>, vector<16xf8E4M3>, vector<16xf8E5M2>, vector<8xi16>, vector<8xf16>, vector<8xbf16>
 }
 
 // ----
 low.func.def target<wasm.core.simd128> abi(wasm_function) @narrow_constants() -> (reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>, reg<wasm.v128>) asm {
-  %18 = i32.const -91
-  %bytes = i8x16.splat %18
-  %20 = i32.const 192
-  %e4m3 = i8x16.splat %20
-  %22 = i32.const 128
-  %e5m2 = i8x16.splat %22
-  %24 = i32.const -21846
-  %words = i16x8.splat %24
-  %26 = i32.const 32768
-  %half = i16x8.splat %26
-  %28 = i32.const 49152
-  %bfloat = i16x8.splat %28
+  %22 = i32.const -91
+  %bytes = i8x16.splat %22
+  %e4m3_scalar = i32.const 192
+  %e4m3 = i8x16.splat %e4m3_scalar
+  %e5m2_scalar = i32.const 128
+  %e5m2 = i8x16.splat %e5m2_scalar
+  %28 = i32.const -21846
+  %words = i16x8.splat %28
+  %half_scalar = i32.const 32768
+  %half = i16x8.splat %half_scalar
+  %bfloat_scalar = i32.const 49152
+  %bfloat = i16x8.splat %bfloat_scalar
   return %bytes, %e4m3, %e5m2, %words, %half, %bfloat
 }
 

@@ -2,52 +2,61 @@
 
 func.def @supported_f64_positive_zero() -> (f64, vector<2xf64>) {
   %scalar = scalar.constant 0.0 : f64
-  %vector = vector.constant 0.0 : vector<2xf64>
+  %vector_scalar = scalar.constant 0.0 : f64
+  %vector = vector.splat %vector_scalar : vector<2xf64>
   func.return %scalar, %vector : f64, vector<2xf64>
 }
 
 // ----
 low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = () -> (f64, vector<2xf64>)}) @supported_f64_positive_zero() -> (reg<x86.xmm>, reg<x86.xmm>) asm {
   %scalar = vxorps.zero.xmm
-  return %scalar, %scalar
+  %vector = vmovddup.xmm %scalar
+  return %scalar, %vector
 }
 
 // ====
 
 func.def @f64x2_constant_payloads() -> (vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>) {
-  %signed_payload = vector.constant -0.0 : vector<2xf64>
-  %fraction = vector.constant -1.1000000000000001 : vector<2xf64>
-  %subnormal = vector.constant 4.9406564584124654e-324 : vector<2xf64>
-  %normal = vector.constant 2.2250738585072014e-308 : vector<2xf64>
-  %positive_infinity = vector.constant inf : vector<2xf64>
-  %negative_infinity = vector.constant -inf : vector<2xf64>
-  %nan = vector.constant nan : vector<2xf64>
+  %signed_payload_scalar = scalar.constant -0.0 : f64
+  %signed_payload = vector.splat %signed_payload_scalar : vector<2xf64>
+  %fraction_scalar = scalar.constant -1.1000000000000001 : f64
+  %fraction = vector.splat %fraction_scalar : vector<2xf64>
+  %subnormal_scalar = scalar.constant 4.9406564584124654e-324 : f64
+  %subnormal = vector.splat %subnormal_scalar : vector<2xf64>
+  %normal_scalar = scalar.constant 2.2250738585072014e-308 : f64
+  %normal = vector.splat %normal_scalar : vector<2xf64>
+  %positive_infinity_scalar = scalar.constant inf : f64
+  %positive_infinity = vector.splat %positive_infinity_scalar : vector<2xf64>
+  %negative_infinity_scalar = scalar.constant -inf : f64
+  %negative_infinity = vector.splat %negative_infinity_scalar : vector<2xf64>
+  %nan_scalar = scalar.constant nan : f64
+  %nan = vector.splat %nan_scalar : vector<2xf64>
   func.return %signed_payload, %fraction, %subnormal, %normal, %positive_infinity, %negative_infinity, %nan : vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>
 }
 
 // ----
 low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = () -> (vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>)}) @f64x2_constant_payloads() -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
-  %21 = mov.imm64 -9223372036854775808
-  %22 = vmovq.xmm.gpr64 %21
-  %signed_payload = avx2.vpbroadcastq.xmm %22
-  %24 = mov.imm64 -4615739258092021350
-  %25 = vmovq.xmm.gpr64 %24
-  %fraction = avx2.vpbroadcastq.xmm %25
-  %27 = mov.imm64 1
-  %28 = vmovq.xmm.gpr64 %27
-  %subnormal = avx2.vpbroadcastq.xmm %28
-  %30 = mov.imm64 4503599627370496
-  %31 = vmovq.xmm.gpr64 %30
-  %normal = avx2.vpbroadcastq.xmm %31
-  %33 = mov.imm64 9218868437227405312
-  %34 = vmovq.xmm.gpr64 %33
-  %positive_infinity = avx2.vpbroadcastq.xmm %34
-  %36 = mov.imm64 -4503599627370496
-  %37 = vmovq.xmm.gpr64 %36
-  %negative_infinity = avx2.vpbroadcastq.xmm %37
-  %39 = mov.imm64 9221120237041090560
-  %40 = vmovq.xmm.gpr64 %39
-  %nan = avx2.vpbroadcastq.xmm %40
+  %28 = mov.imm64 -9223372036854775808
+  %signed_payload_scalar = vmovq.xmm.gpr64 %28
+  %signed_payload = vmovddup.xmm %signed_payload_scalar
+  %31 = mov.imm64 -4615739258092021350
+  %fraction_scalar = vmovq.xmm.gpr64 %31
+  %fraction = vmovddup.xmm %fraction_scalar
+  %34 = mov.imm64 1
+  %subnormal_scalar = vmovq.xmm.gpr64 %34
+  %subnormal = vmovddup.xmm %subnormal_scalar
+  %37 = mov.imm64 4503599627370496
+  %normal_scalar = vmovq.xmm.gpr64 %37
+  %normal = vmovddup.xmm %normal_scalar
+  %40 = mov.imm64 9218868437227405312
+  %positive_infinity_scalar = vmovq.xmm.gpr64 %40
+  %positive_infinity = vmovddup.xmm %positive_infinity_scalar
+  %43 = mov.imm64 -4503599627370496
+  %negative_infinity_scalar = vmovq.xmm.gpr64 %43
+  %negative_infinity = vmovddup.xmm %negative_infinity_scalar
+  %46 = mov.imm64 9221120237041090560
+  %nan_scalar = vmovq.xmm.gpr64 %46
+  %nan = vmovddup.xmm %nan_scalar
   return %signed_payload, %fraction, %subnormal, %normal, %positive_infinity, %negative_infinity, %nan
 }
 
@@ -61,8 +70,8 @@ func.def @folded_f64_splat() -> (vector<2xf64>) {
 
 // ----
 low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = () -> (vector<2xf64>)}) @folded_f64_splat() -> (reg<x86.xmm>) asm {
-  %5 = mov.imm64 4607632778762754458
-  %6 = vmovq.xmm.gpr64 %5
-  %vector = avx2.vpbroadcastq.xmm %6
+  %4 = mov.imm64 4607632778762754458
+  %scalar = vmovq.xmm.gpr64 %4
+  %vector = vmovddup.xmm %scalar
   return %vector
 }

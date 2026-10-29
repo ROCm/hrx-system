@@ -1,16 +1,18 @@
 // RUN: emit source-low target=x86:avx512_packed_dot output=low
 
 func.def @bf16_dot2_zero_256(%lhs: vector<16xbf16>, %rhs: vector<16xbf16>) -> (vector<8xf32>) {
-  %c0 = vector.constant 0.0 : vector<8xf32>
+  %c0_scalar = scalar.constant 0.0 : f32
+  %c0 = vector.splat %c0_scalar : vector<8xf32>
   %dot = vector.dot2f %lhs, %rhs, %c0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   func.return %dot : vector<8xf32>
 }
 
 // ----
 low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({signature = (vector<16xbf16>, vector<16xbf16>) -> (vector<8xf32>)}) @bf16_dot2_zero_256(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
-  %c0 = vxorps.zero.ymm
-  %9 = copy %c0 : reg<x86.ymm> -> reg<x86.ymm>
-  %dot = avx512_bf16.vdpbf16ps.ymm %9, %lhs, %rhs
+  %c0_scalar = vxorps.zero.xmm
+  %c0 = vbroadcastss.ymm %c0_scalar
+  %11 = copy %c0 : reg<x86.ymm> -> reg<x86.ymm>
+  %dot = avx512_bf16.vdpbf16ps.ymm %11, %lhs, %rhs
   return %dot
 }
 
@@ -18,49 +20,67 @@ low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({s
 
 func.def @supported_f32_zero_widths() -> (f32, vector<4xf32>, vector<8xf32>, vector<16xf32>) {
   %scalar = scalar.constant 0.0 : f32
-  %c0x4 = vector.constant 0.0 : vector<4xf32>
-  %c0x8 = vector.constant 0.0 : vector<8xf32>
-  %c0x16 = vector.constant 0.0 : vector<16xf32>
+  %c0x4_scalar = scalar.constant 0.0 : f32
+  %c0x4 = vector.splat %c0x4_scalar : vector<4xf32>
+  %c0x8_scalar = scalar.constant 0.0 : f32
+  %c0x8 = vector.splat %c0x8_scalar : vector<8xf32>
+  %c0x16_scalar = scalar.constant 0.0 : f32
+  %c0x16 = vector.splat %c0x16_scalar : vector<16xf32>
   func.return %scalar, %c0x4, %c0x8, %c0x16 : f32, vector<4xf32>, vector<8xf32>, vector<16xf32>
 }
 
 // ----
 low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({signature = () -> (f32, vector<4xf32>, vector<8xf32>, vector<16xf32>)}) @supported_f32_zero_widths() -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.ymm>, reg<x86.zmm>) asm {
   %scalar = vxorps.zero.xmm
-  %c0x8 = vxorps.zero.ymm
-  %c0x16 = vxorps.zero
-  return %scalar, %scalar, %c0x8, %c0x16
+  %c0x4 = vbroadcastss.xmm %scalar
+  %c0x8 = vbroadcastss.ymm %scalar
+  %c0x16 = vbroadcastss %scalar
+  return %scalar, %c0x4, %c0x8, %c0x16
 }
 
 // ====
 
 func.def @f32x4_constant_payloads() -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>) {
-  %signed_payload = vector.constant -0.0 : vector<4xf32>
-  %fraction = vector.constant -1.1000000000000001 : vector<4xf32>
-  %subnormal = vector.constant 1.4012984643248171e-45 : vector<4xf32>
-  %normal = vector.constant 1.1754943508222875e-38 : vector<4xf32>
-  %positive_infinity = vector.constant inf : vector<4xf32>
-  %negative_infinity = vector.constant -inf : vector<4xf32>
-  %nan = vector.constant nan : vector<4xf32>
+  %signed_payload_scalar = scalar.constant -0.0 : f32
+  %signed_payload = vector.splat %signed_payload_scalar : vector<4xf32>
+  %fraction_scalar = scalar.constant -1.1000000000000001 : f32
+  %fraction = vector.splat %fraction_scalar : vector<4xf32>
+  %subnormal_scalar = scalar.constant 1.4012984643248171e-45 : f32
+  %subnormal = vector.splat %subnormal_scalar : vector<4xf32>
+  %normal_scalar = scalar.constant 1.1754943508222875e-38 : f32
+  %normal = vector.splat %normal_scalar : vector<4xf32>
+  %positive_infinity_scalar = scalar.constant inf : f32
+  %positive_infinity = vector.splat %positive_infinity_scalar : vector<4xf32>
+  %negative_infinity_scalar = scalar.constant -inf : f32
+  %negative_infinity = vector.splat %negative_infinity_scalar : vector<4xf32>
+  %nan_scalar = scalar.constant nan : f32
+  %nan = vector.splat %nan_scalar : vector<4xf32>
   func.return %signed_payload, %fraction, %subnormal, %normal, %positive_infinity, %negative_infinity, %nan : vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>
 }
 
 // ----
 low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({signature = () -> (vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>, vector<4xf32>)}) @f32x4_constant_payloads() -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
-  %21 = mov.imm32 -2147483648
-  %signed_payload = vpbroadcastd.xmm %21
-  %23 = mov.imm32 -1081291571
-  %fraction = vpbroadcastd.xmm %23
-  %25 = mov.imm32 1
-  %subnormal = vpbroadcastd.xmm %25
-  %27 = mov.imm32 8388608
-  %normal = vpbroadcastd.xmm %27
-  %29 = mov.imm32 2139095040
-  %positive_infinity = vpbroadcastd.xmm %29
-  %31 = mov.imm32 -8388608
-  %negative_infinity = vpbroadcastd.xmm %31
-  %33 = mov.imm32 2143289344
-  %nan = vpbroadcastd.xmm %33
+  %28 = mov.imm32 -2147483648
+  %signed_payload_scalar = vmovd.xmm.gpr32 %28
+  %signed_payload = vbroadcastss.xmm %signed_payload_scalar
+  %31 = mov.imm32 -1081291571
+  %fraction_scalar = vmovd.xmm.gpr32 %31
+  %fraction = vbroadcastss.xmm %fraction_scalar
+  %34 = mov.imm32 1
+  %subnormal_scalar = vmovd.xmm.gpr32 %34
+  %subnormal = vbroadcastss.xmm %subnormal_scalar
+  %37 = mov.imm32 8388608
+  %normal_scalar = vmovd.xmm.gpr32 %37
+  %normal = vbroadcastss.xmm %normal_scalar
+  %40 = mov.imm32 2139095040
+  %positive_infinity_scalar = vmovd.xmm.gpr32 %40
+  %positive_infinity = vbroadcastss.xmm %positive_infinity_scalar
+  %43 = mov.imm32 -8388608
+  %negative_infinity_scalar = vmovd.xmm.gpr32 %43
+  %negative_infinity = vbroadcastss.xmm %negative_infinity_scalar
+  %46 = mov.imm32 2143289344
+  %nan_scalar = vmovd.xmm.gpr32 %46
+  %nan = vbroadcastss.xmm %nan_scalar
   return %signed_payload, %fraction, %subnormal, %normal, %positive_infinity, %negative_infinity, %nan
 }
 
@@ -76,40 +96,45 @@ func.def @folded_f32_splat_widths() -> (vector<4xf32>, vector<8xf32>, vector<16x
 
 // ----
 low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({signature = () -> (vector<4xf32>, vector<8xf32>, vector<16xf32>)}) @folded_f32_splat_widths() -> (reg<x86.xmm>, reg<x86.ymm>, reg<x86.zmm>) asm {
-  %13 = mov.imm32 1065353216
-  %x4 = vpbroadcastd.xmm %13
-  %x8 = avx512.vpbroadcastd.ymm %13
-  %x16 = vpbroadcastd %13
+  %10 = mov.imm32 1065353216
+  %scalar = vmovd.xmm.gpr32 %10
+  %x4 = vbroadcastss.xmm %scalar
+  %x8 = vbroadcastss.ymm %scalar
+  %x16 = vbroadcastss %scalar
   return %x4, %x8, %x16
 }
 
 // ====
 
 func.def @bf16_dot2_negative_zero_256(%lhs: vector<16xbf16>, %rhs: vector<16xbf16>) -> (vector<8xf32>) {
-  %cn0 = vector.constant -0.0 : vector<8xf32>
+  %cn0_scalar = scalar.constant -0.0 : f32
+  %cn0 = vector.splat %cn0_scalar : vector<8xf32>
   %dot = vector.dot2f %lhs, %rhs, %cn0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
   func.return %dot : vector<8xf32>
 }
 
 // ----
 low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({signature = (vector<16xbf16>, vector<16xbf16>) -> (vector<8xf32>)}) @bf16_dot2_negative_zero_256(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
-  %8 = mov.imm32 -2147483648
-  %cn0 = avx512.vpbroadcastd.ymm %8
-  %10 = copy %cn0 : reg<x86.ymm> -> reg<x86.ymm>
-  %dot = avx512_bf16.vdpbf16ps.ymm %10, %lhs, %rhs
+  %9 = mov.imm32 -2147483648
+  %cn0_scalar = vmovd.xmm.gpr32 %9
+  %cn0 = vbroadcastss.ymm %cn0_scalar
+  %12 = copy %cn0 : reg<x86.ymm> -> reg<x86.ymm>
+  %dot = avx512_bf16.vdpbf16ps.ymm %12, %lhs, %rhs
   return %dot
 }
 
 // ====
 
 func.def @f32x16_negative_zero() -> (vector<16xf32>) {
-  %cn0 = vector.constant -0.0 : vector<16xf32>
+  %cn0_scalar = scalar.constant -0.0 : f32
+  %cn0 = vector.splat %cn0_scalar : vector<16xf32>
   func.return %cn0 : vector<16xf32>
 }
 
 // ----
 low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({signature = () -> (vector<16xf32>)}) @f32x16_negative_zero() -> (reg<x86.zmm>) asm {
-  %3 = mov.imm32 -2147483648
-  %cn0 = vpbroadcastd %3
+  %4 = mov.imm32 -2147483648
+  %cn0_scalar = vmovd.xmm.gpr32 %4
+  %cn0 = vbroadcastss %cn0_scalar
   return %cn0
 }

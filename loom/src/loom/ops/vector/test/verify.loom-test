@@ -975,7 +975,8 @@ func.def @table_lookup_element_mismatch(%table: vector<4xf32>, %indices: vector<
 
 // Splat constant indices are rejected when statically outside the table range.
 func.def @table_lookup_static_index_out_of_bounds() {
-  %table = vector.constant 0.0 : vector<4xf32>
+  %table_scalar = scalar.constant 0.0 : f32
+  %table = vector.splat %table_scalar : vector<4xf32>
   %indices = vector.constant 4 : vector<8xi8>
   // ERROR@+1: SUBRANGE/004
   %r = vector.table.lookup %table[%indices] : vector<4xf32>, vector<8xi8> -> vector<8xf32>
@@ -986,7 +987,8 @@ func.def @table_lookup_static_index_out_of_bounds() {
 
 // Negative splat constant indices are also statically invalid.
 func.def @table_lookup_static_negative_index() {
-  %table = vector.constant 0.0 : vector<4xf32>
+  %table_scalar = scalar.constant 0.0 : f32
+  %table = vector.splat %table_scalar : vector<4xf32>
   %indices = vector.constant -1 : vector<8xi8>
   // ERROR@+1: SUBRANGE/004
   %r = vector.table.lookup %table[%indices] : vector<4xf32>, vector<8xi8> -> vector<8xf32>

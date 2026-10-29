@@ -77,7 +77,8 @@ kernel.def @asan_strided_store_redzone() {
   %base = index.constant 0 : offset
   %layout = encoding.layout.strided [4] : encoding<layout>
   %view = buffer.view %output[%base] : buffer -> view<3xbf16, %layout>
-  %values = vector.constant 7.0 : vector<3xbf16>
+  %values_scalar = scalar.constant 7.0 : bf16
+  %values = vector.splat %values_scalar : vector<3xbf16>
   vector.store %values, %view[0] : vector<3xbf16>, view<3xbf16, %layout>
   kernel.return
 }

@@ -4,7 +4,8 @@ func.def @f32_accumulator_pipeline(%lhs: vector<16xbf16>, %rhs: vector<16xbf16>)
   %lhs_wide = vector.extf<daz> %lhs : vector<16xbf16> to vector<16xf32>
   %rhs_wide = vector.extf<daz> %rhs : vector<16xbf16> to vector<16xf32>
   %sum = vector.addf %lhs_wide, %rhs_wide : vector<16xf32>
-  %baseline = vector.constant 0.0 : vector<16xf32>
+  %baseline_scalar = scalar.constant 0.0 : f32
+  %baseline = vector.splat %baseline_scalar : vector<16xf32>
   %centered = vector.subf %sum, %baseline : vector<16xf32>
   %activated = vector.tanhf<afn> %centered : vector<16xf32>
   %result = vector.fptrunc<daz> %activated : vector<16xf32> to vector<16xbf16>
@@ -13,26 +14,26 @@ func.def @f32_accumulator_pipeline(%lhs: vector<16xbf16>, %rhs: vector<16xbf16>)
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_accumulator_pipeline(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %13 = slice %lhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %14 = vconv.fp32.bf16x16 %13
-  %lhs_wide = copy %14 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
-  %16 = slice %rhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %17 = vconv.fp32.bf16x16 %16
-  %rhs_wide = copy %17 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
-  %19 = mova.i32 60
-  %20 = vadd.f32x16 %lhs_wide, %rhs_wide, %19
-  %21 = slice %20[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %sum = copy %21 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
-  %23 = acc.clear.f32x64
-  %24 = slice %23[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %baseline = copy %24 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
-  %26 = mova.i32 60
-  %27 = vsub.f32x16 %sum, %baseline, %26
-  %28 = slice %27[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %centered = copy %28 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
-  %30 = copy %centered : reg<aie2p.ebmll> -> reg<aie2p.mbms>
-  %31 = vtanh.bf16x16 %30
-  %result = concat(%31, %31) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %14 = slice %lhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %15 = vconv.fp32.bf16x16 %14
+  %lhs_wide = copy %15 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
+  %17 = slice %rhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %18 = vconv.fp32.bf16x16 %17
+  %rhs_wide = copy %18 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
+  %20 = mova.i32 60
+  %21 = vadd.f32x16 %lhs_wide, %rhs_wide, %20
+  %22 = slice %21[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %sum = copy %22 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
+  %24 = acc.clear.f32x64
+  %25 = slice %24[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %baseline = copy %25 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
+  %27 = mova.i32 60
+  %28 = vsub.f32x16 %sum, %baseline, %27
+  %29 = slice %28[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %centered = copy %29 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
+  %31 = copy %centered : reg<aie2p.ebmll> -> reg<aie2p.mbms>
+  %32 = vtanh.bf16x16 %31
+  %result = concat(%32, %32) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   return %result
 }
 

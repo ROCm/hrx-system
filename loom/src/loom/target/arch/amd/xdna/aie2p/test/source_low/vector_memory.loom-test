@@ -466,7 +466,8 @@ func.def target(@target) @outer_product_bf16bf16_m8n8k1(%lhs: buffer, %rhs: buff
   %rhs_value = vector.load %rhs_view[0] : view<8xbf16> -> vector<8xbf16>
   %lhs_fragment = vector.fragment<lhs> %lhs_value shape [%m, %k] : vector<8xbf16>
   %rhs_fragment = vector.fragment<rhs> %rhs_value shape [%k, %n] : vector<8xbf16>
-  %accumulator_init = vector.constant 0.0 : vector<64xf32>
+  %accumulator_init_scalar = scalar.constant 0.0 : f32
+  %accumulator_init = vector.splat %accumulator_init_scalar : vector<64xf32>
   %accumulator_fragment = vector.fragment<init> %accumulator_init shape [%m, %n] : vector<64xf32>
   %product = vector.mma %lhs_fragment, %rhs_fragment, %accumulator_fragment : vector<8xbf16>, vector<8xbf16>, vector<64xf32>
   func.return %product : vector<64xf32>
@@ -1087,7 +1088,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @cached_l
 aie2p.target<core> @target
 
 func.def target(@target) @dot2_bf16x8_positive_zero(%lhs: vector<8xbf16>, %rhs: vector<8xbf16>) -> (vector<4xf32>) {
-  %initial_accumulator = vector.constant 0.0 : vector<4xf32>
+  %initial_accumulator_scalar = scalar.constant 0.0 : f32
+  %initial_accumulator = vector.splat %initial_accumulator_scalar : vector<4xf32>
   %result = vector.dot2f %lhs, %rhs, %initial_accumulator : vector<8xbf16>, vector<8xbf16>, vector<4xf32>
   func.return %result : vector<4xf32>
 }
@@ -1104,25 +1106,26 @@ CHECK-NOT: * = vmov.vector512.to.accumulator512 *
 aie2p.target<core> @target
 
 func.def target(@target) @dot2_bf16x32_positive_zero(%lhs: vector<32xbf16>, %rhs: vector<32xbf16>) -> (vector<16xf32>) {
-  %initial_accumulator = vector.constant 0.0 : vector<16xf32>
+  %initial_accumulator_scalar = scalar.constant 0.0 : f32
+  %initial_accumulator = vector.splat %initial_accumulator_scalar : vector<16xf32>
   %result = vector.dot2f %lhs, %rhs, %initial_accumulator : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
   func.return %result : vector<16xf32>
 }
 
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot2_bf16x32_positive_zero(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %8 = mova.i32 2
-  %9 = vshuffle %lhs, %lhs, %8
-  %10 = vshuffle %rhs, %rhs, %8
-  %11 = mova.i32 3
-  %12 = vshuffle %lhs, %lhs, %11
-  %13 = vshuffle %rhs, %rhs, %11
-  %14 = acc.clear.f32x64
-  %15 = mova.i32 60
-  %16 = vmac.bf16x32 %14, %9, %10, %15
-  %17 = vmac.bf16x32 %16, %12, %13, %15
-  %18 = slice %17[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %result = vmov.accumulator512.to.vector512 %18
+  %9 = mova.i32 2
+  %10 = vshuffle %lhs, %lhs, %9
+  %11 = vshuffle %rhs, %rhs, %9
+  %12 = mova.i32 3
+  %13 = vshuffle %lhs, %lhs, %12
+  %14 = vshuffle %rhs, %rhs, %12
+  %15 = acc.clear.f32x64
+  %16 = mova.i32 60
+  %17 = vmac.bf16x32 %15, %10, %11, %16
+  %18 = vmac.bf16x32 %17, %13, %14, %16
+  %19 = slice %18[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %result = vmov.accumulator512.to.vector512 %19
   return %result
 }
 
@@ -1131,26 +1134,27 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot2_bf1
 aie2p.target<core> @target
 
 func.def target(@target) @dot2_bf16x32_negative_zero(%lhs: vector<32xbf16>, %rhs: vector<32xbf16>) -> (vector<16xf32>) {
-  %initial_accumulator = vector.constant -0.0 : vector<16xf32>
+  %initial_accumulator_scalar = scalar.constant -0.0 : f32
+  %initial_accumulator = vector.splat %initial_accumulator_scalar : vector<16xf32>
   %result = vector.dot2f %lhs, %rhs, %initial_accumulator : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
   func.return %result : vector<16xf32>
 }
 
 // ----
 low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @dot2_bf16x32_negative_zero(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %8 = mov.i32 -2147483648
-  %initial_accumulator = vbcst.32 %8
-  %10 = mova.i32 2
-  %11 = vshuffle %lhs, %lhs, %10
-  %12 = vshuffle %rhs, %rhs, %10
-  %13 = mova.i32 3
-  %14 = vshuffle %lhs, %lhs, %13
-  %15 = vshuffle %rhs, %rhs, %13
-  %16 = vmov.vector512.to.accumulator512.low %initial_accumulator
-  %17 = mova.i32 60
-  %18 = vmac.bf16x16 %16, %11, %12, %17
-  %19 = vmac.bf16x32 %18, %14, %15, %17
-  %20 = slice %19[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %result = vmov.accumulator512.to.vector512 %20
+  %initial_accumulator_scalar = mov.i32 -2147483648
+  %initial_accumulator = vbcst.32 %initial_accumulator_scalar
+  %11 = mova.i32 2
+  %12 = vshuffle %lhs, %lhs, %11
+  %13 = vshuffle %rhs, %rhs, %11
+  %14 = mova.i32 3
+  %15 = vshuffle %lhs, %lhs, %14
+  %16 = vshuffle %rhs, %rhs, %14
+  %17 = vmov.vector512.to.accumulator512.low %initial_accumulator
+  %18 = mova.i32 60
+  %19 = vmac.bf16x16 %17, %12, %13, %18
+  %20 = vmac.bf16x32 %19, %15, %16, %18
+  %21 = slice %20[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %result = vmov.accumulator512.to.vector512 %21
   return %result
 }

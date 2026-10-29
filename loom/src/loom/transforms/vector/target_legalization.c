@@ -1160,13 +1160,13 @@ static iree_status_t loom_vector_legalize_build_number_extremum(
   IREE_RETURN_IF_ERROR(loom_vector_cmpf_build(
       builder, fastmath, LOOM_VECTOR_CMPF_PREDICATE_UNE, rhs, rhs, type,
       predicate_type, location, &rhs_nan_op));
-  loom_op_t* quiet_nan_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
-      builder, loom_attr_f64(NAN), type, location, &quiet_nan_op));
+  loom_value_id_t quiet_nan = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+      builder, loom_attr_f64(NAN), type, location, &quiet_nan));
   loom_value_id_t lhs_nan_result = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_legalize_build_select(
-      builder, location, type, loom_vector_cmpf_result(rhs_nan_op),
-      loom_vector_constant_result(quiet_nan_op), rhs, &lhs_nan_result));
+      builder, location, type, loom_vector_cmpf_result(rhs_nan_op), quiet_nan,
+      rhs, &lhs_nan_result));
   loom_value_id_t rhs_checked = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_legalize_build_select(
       builder, location, type, loom_vector_cmpf_result(rhs_nan_op), lhs,
@@ -1260,14 +1260,13 @@ static iree_status_t loom_vector_legalize_build_ieee_extremum(
   IREE_RETURN_IF_ERROR(loom_vector_cmpf_build(
       builder, op->instance_flags, LOOM_VECTOR_CMPF_PREDICATE_UNO, lhs, rhs,
       type, predicate_type, op->location, &unordered));
-  loom_op_t* nan = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_constant_build(builder, loom_attr_f64(NAN),
-                                                  type, op->location, &nan));
+  loom_value_id_t nan = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_vector_build_constant_splat(
+      builder, loom_attr_f64(NAN), type, op->location, &nan));
   loom_op_t* select = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_select_build(
-      builder, loom_vector_cmpf_result(unordered),
-      loom_vector_constant_result(nan), loom_op_results(number)[0], type,
-      op->location, &select));
+      builder, loom_vector_cmpf_result(unordered), nan,
+      loom_op_results(number)[0], type, op->location, &select));
   *out_result = loom_vector_select_result(select);
   return iree_ok_status();
 }

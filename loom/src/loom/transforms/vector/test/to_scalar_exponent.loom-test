@@ -25,16 +25,17 @@ func.def @dynamic_decomposition(%length: index, %input: vector<[%length]xf32>) -
 
 // ----
 func.def @dynamic_decomposition(%length: index, %input: vector<[%length]xf32>) -> (vector<[%length]xf32>, vector<[%length]xi32>) {
-  %6 = vector.constant 0.0 : vector<[%length]xf32>
-  %7 = vector.constant 0 : vector<[%length]xi32>
-  %8 = index.constant 0 : index
-  %9 = index.constant 1 : index
-  %fraction, %exponent = scf.for %10 = [%8 to %length step %9](%11 = %6 : vector<[%length]xf32>, %12 = %7 : vector<[%length]xi32>) -> (vector<[%length]xf32>, vector<[%length]xi32>) {
-    %15 = vector.extract %input[%10] : vector<[%length]xf32> -> f32
-    %16, %17 = scalar.frexpf %15 : f32, i32
-    %18 = vector.insert %16 into %11[%10] : f32, vector<[%length]xf32>
-    %19 = vector.insert %17 into %12[%10] : i32, vector<[%length]xi32>
-    scf.yield %18, %19 : vector<[%length]xf32>, vector<[%length]xi32>
+  %6 = scalar.constant 0.0 : f32
+  %7 = vector.splat %6 : vector<[%length]xf32>
+  %8 = vector.constant 0 : vector<[%length]xi32>
+  %9 = index.constant 0 : index
+  %10 = index.constant 1 : index
+  %fraction, %exponent = scf.for %11 = [%9 to %length step %10](%12 = %7 : vector<[%length]xf32>, %13 = %8 : vector<[%length]xi32>) -> (vector<[%length]xf32>, vector<[%length]xi32>) {
+    %16 = vector.extract %input[%11] : vector<[%length]xf32> -> f32
+    %17, %18 = scalar.frexpf %16 : f32, i32
+    %19 = vector.insert %17 into %12[%11] : f32, vector<[%length]xf32>
+    %20 = vector.insert %18 into %13[%11] : i32, vector<[%length]xi32>
+    scf.yield %19, %20 : vector<[%length]xf32>, vector<[%length]xi32>
   }
   func.return %fraction, %exponent : vector<[%length]xf32>, vector<[%length]xi32>
 }

@@ -16,6 +16,7 @@
 
 #include "loom/import/cxx/source/error.h"
 #include "loom/ops/index/ops.h"
+#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/ops.h"
 
 namespace loom::cxx_import {
@@ -270,12 +271,17 @@ loom_value_id_t Vectors::unary(cxx::TokenKind token, loom_value_id_t value,
                                    output, source, &op));
       break;
     case cxx::TokenKind::T_EXCLAIM:
-      check(loom_vector_constant_build(
-          &builder_, floating ? loom_attr_f64(0.0) : loom_attr_i64(0), input,
-          source, &op));
-      return binary(cxx::TokenKind::T_EQUAL_EQUAL, value,
-                    loom_op_results(op)[0], input_type, output_type, owner,
-                    fastmath);
+      loom_value_id_t zero;
+      if (floating) {
+        check(loom_vector_build_constant_splat(&builder_, loom_attr_f64(0.0),
+                                               input, source, &zero));
+      } else {
+        check(loom_vector_constant_build(&builder_, loom_attr_i64(0), input,
+                                         source, &op));
+        zero = loom_vector_constant_result(op);
+      }
+      return binary(cxx::TokenKind::T_EQUAL_EQUAL, value, zero, input_type,
+                    output_type, owner, fastmath);
     default:
       diagnostics_.reject(unit_, owner, "unsupported vector unary operator");
   }
