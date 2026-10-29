@@ -35,18 +35,18 @@ typedef struct loom_serve_weight_root_t {
 typedef struct loom_serve_weights_t loom_serve_weights_t;
 
 // Cumulative owner-side submissions, independent of telemetry retention. These
-// are accepted queue operations, not measured storage traffic or device time.
+// are accepted producer operations, not measured storage traffic or device
+// time.
 typedef struct loom_serve_weight_activity_t {
   // Fully submitted loads, excluding readiness imports by later consumers.
   uint64_t activations;
   // Active-to-inactive releases of physical backing.
   uint64_t deactivations;
-  // Payload bytes in successful gather batches, excluding failed partial
-  // batches.
+  // Payload bytes accepted by cold read tasks, including later I/O failures.
   uint64_t read_bytes;
   // Final tensor bytes whose preparation dispatch was accepted.
   uint64_t prepared_bytes;
-  // Gather groups accepted across all activations.
+  // Gather groups accepted by cold read tasks across all activations.
   uint64_t groups;
 } loom_serve_weight_activity_t;
 
@@ -141,10 +141,10 @@ typedef void (*loom_serve_weights_completion_fn_t)(void* user_data,
 // Success accepts exclusive access to weights until completion, which may run
 // before return. Independent compilations may share jit; policy evidence is
 // accumulated privately and merged through its report lock. The caller keeps
-// both, declaration, host and user_data
-// alive through that callback. Rejection owes no callback. Preparation is
-// attempted once per plan; failure returns ownership for destruction, not
-// activation.
+// both, declaration, and user_data alive through that callback. The host also
+// supplies activation tasks and outlives the plan. Rejection owes no callback.
+// Preparation is attempted once per plan; failure returns ownership for
+// destruction, not activation.
 iree_status_t loom_serve_weights_prepare_async(
     loom_serve_weights_t* weights, loom_serve_host_t* host,
     loom_serve_jit_t* jit, iree_hal_command_buffer_mode_t command_mode,
@@ -183,8 +183,10 @@ iree_hal_pool_reservation_request_t loom_serve_weights_activation_workspace(
 // An already active plan does not reload or prepare again. Success means
 // producer submission, not completion or consumer ordering. Native backing
 // runs on the shared cold-memory executor and gates file loading with each
-// slab's readiness. Neither native preparation nor device
-// completion blocks the submitting owner. The caller pins backing until every
+// slab's readiness. Provider submission runs on the host preparation task pool;
+// its accepted ownership retires independently of readiness failure.
+// Neither native preparation nor device completion blocks the submitting
+// owner. The caller pins backing until every
 // consuming domain retires. A failed load is terminal: later consumers receive
 // its error without replaying accepted I/O, whose ownership remains protected
 // through plan destruction.

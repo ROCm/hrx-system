@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "loom/serve/runtime/parameter/weights_test_base.h"
+#include "loom/serve/testing/worker_gate.h"
 
 namespace loom_serve::testing {
 
@@ -137,6 +138,100 @@ TEST_P(WindowedWeightsTest, CapturedSourcesWaitForEveryDestinationSlab) {
   }
 }
 
+TEST_P(WindowedWeightsTest, CapturedInputSubmissionReturnsWithTheWorkerHeld) {
+  ASSERT_NO_FATAL_FAILURE(WriteWindowedCheckpoint(path_.path()));
+  ASSERT_NO_FATAL_FAILURE(
+      WriteWindowedCheckpoint(adapter_path_.path(), 100000));
+  IREE_ASSERT_OK(Compile(0, "windowed"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateSourceRoots(0, 1, &root,
+                                   {{path_.path()}, {adapter_path_.path()}},
+                                   "streaming_policy.loom"));
+  auto* host = loom_serve_device_host(device_owner_);
+  {
+    WorkerGate gate(loom_serve_host_executor(host));
+    IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0]));
+    IREE_ASSERT_OK(loom_serve_weights_import_readiness(plans_[0], execution_));
+    EXPECT_FALSE(loom_serve_weights_is_retired(plans_[0]));
+    EXPECT_EQ(loom_serve_weights_activity(plans_[0]).read_bytes, 2097248u);
+  }
+  IREE_ASSERT_OK(loom_serve_weights_await(plans_[0]));
+  ASSERT_NO_FATAL_FAILURE(VerifyWindowedStorage(true));
+}
+
+class RejectedReadWeightsTest : public WindowedWeightsTest {
+ protected:
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(WindowedWeightsTest::SetUp());
+    const iree_hal_queue_params_t params = {
+        .priority = transfer_->priority,
+        .features = transfer_->features,
+        .execution_resources = transfer_->execution_resources,
+    };
+    static const iree_hal_queue_vtable_t vtable = {
+        .destroy = [](iree_hal_queue_t*) {},
+        .read =
+            [](iree_hal_queue_t*, iree_hal_semaphore_list_t,
+               iree_hal_semaphore_list_t, iree_hal_file_t*, uint64_t,
+               iree_hal_buffer_t*, iree_device_size_t, iree_device_size_t,
+               const iree_hal_queue_barriers_t*, iree_hal_read_flags_t) {
+              return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+            },
+    };
+    iree_hal_queue_initialize(iree_hal_queue_family(transfer_), &params,
+                              &vtable, &rejected_transfer_);
+    initialized_ = true;
+  }
+
+  void TearDown() override {
+    WindowedWeightsTest::TearDown();
+    if (initialized_) {
+      iree_hal_queue_release(&rejected_transfer_);
+    }
+  }
+
+  // Native file submission rejects after the cold host task was accepted.
+  iree_hal_queue_t rejected_transfer_ = {};
+  // The queue is released only after successful fixture initialization.
+  bool initialized_ = false;
+};
+
+TEST_P(RejectedReadWeightsTest,
+       FailedReadRetiresTheAcceptedProducerWithoutReplay) {
+  ASSERT_NO_FATAL_FAILURE(WriteWindowedCheckpoint(path_.path()));
+  IREE_ASSERT_OK(Compile(0, "windowed"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(loom_serve_weights_allocate(
+      device_, &rejected_transfer_, dispatch_,
+      loom_serve_pool_storage(storage_owner_), pool_,
+      loom_serve_pool_weight_geometry(storage_owner_), nullptr,
+      loom_serve_pool_workspace(storage_owner_), 0, 1, &root, host_allocator_,
+      &plans_[0]));
+  IREE_ASSERT_OK(Prepare(plans_[0], {path_.path()}));
+  {
+    WorkerGate gate(
+        loom_serve_host_executor(loom_serve_device_host(device_owner_)));
+    IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0]));
+    iree_hal_buffer_release(buffers_[0][0]);
+    buffers_[0][0] = nullptr;
+    EXPECT_FALSE(loom_serve_weights_is_retired(plans_[0]));
+  }
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_weights_await(plans_[0]));
+  IREE_ASSERT_OK(loom_serve_weights_await_retirement(plans_[0]));
+  EXPECT_TRUE(loom_serve_weights_is_retired(plans_[0]));
+  const auto activity = loom_serve_weights_activity(plans_[0]);
+  EXPECT_EQ(activity.activations, 1u);
+  EXPECT_EQ(activity.read_bytes, 2097248u);
+  IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0]));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_weights_await(plans_[0]));
+  EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations,
+            activity.activations);
+  EXPECT_EQ(loom_serve_weights_activity(plans_[0]).read_bytes,
+            activity.read_bytes);
+}
+
 class CoarseWindowWeightsTest : public WindowedWeightsTest {
  protected:
   // Two populated 64 MiB read windows share one exact physical tail.
@@ -199,6 +294,8 @@ TEST_P(CoarseWindowWeightsTest, ReadWindowsShareOnePendingSlabAndReload) {
 INSTANTIATE_TEST_SUITE_P(Streaming, WindowedWeightsTest,
                          ::testing::Values(false, true));
 INSTANTIATE_TEST_SUITE_P(Streaming, CoarseWindowWeightsTest,
+                         ::testing::Values(true));
+INSTANTIATE_TEST_SUITE_P(Streaming, RejectedReadWeightsTest,
                          ::testing::Values(true));
 
 }  // namespace loom_serve::testing

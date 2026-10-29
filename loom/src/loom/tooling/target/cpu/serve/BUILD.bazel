@@ -1565,6 +1565,7 @@ loom_cc_test(
         "//loom/src/loom/serve/testing:compiler",
         "//loom/src/loom/serve/testing:device",
         "//loom/src/loom/serve/testing:native_allocator",
+        "//loom/src/loom/serve/testing:worker_gate",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",

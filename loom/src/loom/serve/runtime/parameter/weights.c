@@ -125,6 +125,8 @@ struct loom_serve_weights_t {
   iree_hal_device_t* device;
   // Borrowed native pool for fixed roots; outlives all resolved storage.
   iree_hal_pool_t* storage_pool;
+  // Borrowed host preparation queue, valid through final plan retirement.
+  loomc_task_sink_t sink;
   // Borrowed exact file transfer queue.
   iree_hal_queue_t* transfer;
   // Borrowed exact in-place preparation queue.
@@ -618,7 +620,8 @@ iree_status_t loom_serve_weights_prepare_async(
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(weights->host_allocator,
                                              sizeof(*job), (void**)&job));
   loomc_task_initialize(&weight_preparation_vtable, &job->task);
-  job->sink = loom_serve_host_preparation_sink(host);
+  weights->sink = loom_serve_host_preparation_sink(host);
+  job->sink = weights->sink;
   job->weights = weights;
   job->jit = jit;
   job->command_mode = command_mode;
@@ -895,50 +898,160 @@ static iree_status_t loom_serve_weight_allocate_staging(
   return status;
 }
 
-static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  const iree_allocator_t allocator = weights->host_allocator;
-  loom_serve_weight_stream_plan_t plan = {0};
-  iree_status_t status = loom_serve_weight_stream_plan(weights, &plan);
+// The owner constructs the exact GPU graph and submits one cold gather job.
+// Enumerators and semaphore-list storage remain live until every provider has
+// captured them; the retirement claim also protects the immutable weight plan.
+typedef struct loom_serve_weight_stream_t {
+  // Shared host task; no private thread or worker join.
+  loomc_task_t task;
+  // Borrowed plan protected through destruction by activation retirement.
+  loom_serve_weights_t* weights;
+  // Owned mapped read windows and their gather fragments.
+  loom_serve_weight_stream_plan_t plan;
+  // Owned source-ordered provider batches.
+  loom_serve_weight_source_batch_t* batches;
+  // Owned release-tracked final-storage views captured by reads and preparers.
+  iree_hal_buffer_t** views;
+  // Owned gather requests borrowing this task's descriptor storage.
+  iree_io_parameter_gather_t* gathers;
+  // Owned captured-input enumerators borrowing the retained input recipes.
+  loom_serve_weight_read_t* input_reads;
+  // Owned release-tracked staging view retained until read submission finishes.
+  iree_hal_buffer_t* staging;
+  // Owned staging allocation readiness captured by input reads.
+  iree_hal_semaphore_t* staging_ready;
+  // Owned read/preparation timelines, independent of owner-side deactivation.
+  iree_hal_semaphore_t* lanes[WEIGHT_COMPLETIONS];
+  // Initialized timelines, including partially constructed activations.
+  iree_host_size_t lane_count;
+  // Owned captured-input timelines, with stable slots for gather signals.
+  iree_hal_semaphore_t* input_lanes[WEIGHT_LANES];
+} loom_serve_weight_stream_t;
+
+static void loom_serve_weight_stream_fail(loom_serve_weight_stream_t* job,
+                                          iree_status_t status) {
+  // Readiness failure releases unsubmitted dependencies; accepted I/O and
+  // mapping ownership still retire independently before the plan can die.
+  for (iree_host_size_t i = 0; i < job->lane_count; ++i) {
+    iree_hal_semaphore_fail(job->lanes[i], iree_status_clone(status));
+  }
+  for (iree_host_size_t i = 0; i < WEIGHT_LANES; ++i) {
+    if (job->input_lanes[i]) {
+      iree_hal_semaphore_fail(job->input_lanes[i], iree_status_clone(status));
+    }
+  }
+}
+
+static void loom_serve_weight_stream_execute(loomc_task_t* task,
+                                             loomc_host_size_t worker_ordinal) {
+  loom_serve_weight_stream_t* job = (loom_serve_weight_stream_t*)task;
+  loom_serve_weights_t* weights = job->weights;
   const uint32_t source_count =
       loom_serve_weight_inputs_source_count(weights->inputs);
-  loom_serve_weight_source_batch_t* batches = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(allocator, source_count,
-                                         sizeof(*batches), (void**)&batches);
+  iree_status_t status = iree_ok_status();
+  for (uint32_t s = 0; s < source_count && iree_status_is_ok(status); ++s) {
+    const loom_serve_weight_source_batch_t batch = job->batches[s];
+    if (batch.count) {
+      status = iree_io_parameter_provider_gather_batch(
+          loom_serve_weight_inputs_provider(weights->inputs, s),
+          weights->device, weights->transfer, batch.count,
+          job->gathers + batch.first);
+    }
   }
-  iree_hal_buffer_t** views = NULL;
+  if (!iree_status_is_ok(status)) {
+    loom_serve_weight_stream_fail(job, status);
+    iree_status_free(status);
+  }
+}
+
+static void loom_serve_weight_stream_destroy(loomc_task_t* task) {
+  loom_serve_weight_stream_t* job = (loom_serve_weight_stream_t*)task;
+  loom_serve_weights_t* weights = job->weights;
+  const iree_allocator_t allocator = weights->host_allocator;
+  for (iree_host_size_t i = 0; i < WEIGHT_LANES; ++i) {
+    iree_hal_semaphore_release(job->input_lanes[i]);
+  }
+  for (iree_host_size_t i = 0; i < job->lane_count; ++i) {
+    iree_hal_semaphore_release(job->lanes[i]);
+  }
+  iree_hal_semaphore_release(job->staging_ready);
+  iree_hal_buffer_release(job->staging);
+  if (job->views) {
+    for (iree_host_size_t i = 0; i < weights->storage_count; ++i) {
+      iree_hal_buffer_release(job->views[i]);
+    }
+  }
+  if (job->plan.groups) {
+    for (iree_host_size_t i = 0; i < job->plan.group_count; ++i) {
+      iree_hal_semaphore_release(job->plan.groups[i].mapped);
+    }
+  }
+  iree_allocator_free(allocator, job->views);
+  iree_allocator_free(allocator, job->gathers);
+  iree_allocator_free(allocator, job->input_reads);
+  iree_allocator_free(allocator, job->batches);
+  iree_allocator_free(allocator, job->plan.fragments);
+  iree_allocator_free(allocator, job->plan.spans);
+  iree_allocator_free(allocator, job->plan.groups);
+  iree_allocator_free(allocator, job);
+  loom_serve_retirement_release(&weights->activation.retirement);
+}
+
+static const loomc_task_vtable_t weight_stream_vtable = {
+    .execute = loom_serve_weight_stream_execute,
+    .destroy = loom_serve_weight_stream_destroy,
+};
+
+static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
+  const iree_allocator_t allocator = weights->host_allocator;
+  loom_serve_weight_stream_t* job = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(allocator, sizeof(*job), (void**)&job));
+  loomc_task_initialize(&weight_stream_vtable, &job->task);
+  job->weights = weights;
+  loom_serve_retirement_acquire(&weights->activation.retirement);
+  IREE_TRACE_ZONE_BEGIN(z0);
+  loom_serve_weight_stream_plan_t* plan = &job->plan;
+  iree_status_t status = loom_serve_weight_stream_plan(weights, plan);
+  const uint32_t source_count =
+      loom_serve_weight_inputs_source_count(weights->inputs);
   if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(allocator, weights->storage_count,
-                                         sizeof(*views), (void**)&views);
+    status = iree_allocator_malloc_array(
+        allocator, source_count, sizeof(*job->batches), (void**)&job->batches);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_allocator_malloc_array(allocator, weights->storage_count,
+                                    sizeof(*job->views), (void**)&job->views);
   }
   for (iree_host_size_t i = 0;
        i < weights->storage_count && iree_status_is_ok(status); ++i) {
-    views[i] = weights->storages[i].buffer;
-    iree_hal_buffer_retain(views[i]);
+    job->views[i] = weights->storages[i].buffer;
+    iree_hal_buffer_retain(job->views[i]);
     status = loom_serve_retirement_track(&weights->activation.retirement,
-                                         &views[i], allocator);
+                                         &job->views[i], allocator);
   }
   const iree_device_size_t staging_stride =
       loom_serve_weight_inputs_staging_length(weights->inputs);
   loom_serve_workspace_scope_t* scope = NULL;
-  iree_hal_buffer_t* staging = NULL;
-  iree_hal_semaphore_t* staging_ready = NULL;
   if (staging_stride && iree_status_is_ok(status)) {
-    status = loom_serve_weight_allocate_staging(weights, &scope, &staging,
-                                                &staging_ready);
+    status = loom_serve_weight_allocate_staging(weights, &scope, &job->staging,
+                                                &job->staging_ready);
   }
   const iree_host_size_t lane_count =
-      plan.has_preparation ? WEIGHT_COMPLETIONS : WEIGHT_LANES;
-  iree_hal_semaphore_t** lanes = weights->activation.semaphores;
+      plan->has_preparation ? WEIGHT_COMPLETIONS : WEIGHT_LANES;
+  iree_hal_semaphore_t** lanes = job->lanes;
   uint64_t* frontiers = weights->activation.values;
-  iree_hal_semaphore_t* input_lanes[WEIGHT_LANES] = {0};
+  iree_hal_semaphore_t** input_lanes = job->input_lanes;
   for (iree_host_size_t i = 0; i < lane_count && iree_status_is_ok(status);
        ++i) {
     status = iree_hal_semaphore_create(
         weights->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
         IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &lanes[i]);
     if (iree_status_is_ok(status)) {
+      ++job->lane_count;
+      weights->activation.semaphores[i] = lanes[i];
+      iree_hal_semaphore_retain(lanes[i]);
       ++weights->activation.count;
     }
   }
@@ -952,46 +1065,45 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
   if (iree_status_is_ok(status)) {
     // Source prefix offsets preserve one provider batch without rescanning the
     // tensor plan for each checkpoint. Mapping-only windows issue barriers.
-    for (iree_host_size_t i = 0; i < plan.group_count; ++i) {
-      batches[0].count += plan.groups[i].count != 0;
+    for (iree_host_size_t i = 0; i < plan->group_count; ++i) {
+      job->batches[0].count += plan->groups[i].count != 0;
     }
     if (source_count) {
-      batches[0].byte_length = plan.read_bytes;
+      job->batches[0].byte_length = plan->read_bytes;
     }
     for (iree_host_size_t i = 0; i < weights->span_count; ++i) {
       const loom_serve_weight_input_recipe_t recipe = weights->spans[i].inputs;
       for (uint32_t p = 0; p < recipe.count; ++p) {
         const loom_serve_weight_input_t* input =
             loom_serve_weight_inputs_at(weights->inputs, recipe.first + p);
-        ++batches[input->source].count;
-        batches[input->source].byte_length += input->span.length;
+        ++job->batches[input->source].count;
+        job->batches[input->source].byte_length += input->span.length;
       }
     }
     for (uint32_t s = 0; s < source_count; ++s) {
-      batches[s].first = read_count;
-      read_count += batches[s].count;
-      batches[s].count = 0;
+      job->batches[s].first = read_count;
+      read_count += job->batches[s].count;
+      job->batches[s].count = 0;
     }
-  }
-  iree_io_parameter_gather_t* gathers = NULL;
-  loom_serve_weight_read_t* input_reads = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(allocator, read_count,
-                                         sizeof(*gathers), (void**)&gathers);
   }
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc_array(
-        allocator, read_count, sizeof(*input_reads), (void**)&input_reads);
+        allocator, read_count, sizeof(*job->gathers), (void**)&job->gathers);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(allocator, read_count,
+                                         sizeof(*job->input_reads),
+                                         (void**)&job->input_reads);
   }
   if (iree_status_is_ok(status) && weights->pool) {
-    status = iree_allocator_malloc_array(allocator, plan.backing_count,
+    status = iree_allocator_malloc_array(allocator, plan->backing_count,
                                          sizeof(*weights->activation.backing),
                                          (void**)&weights->activation.backing);
     for (iree_host_size_t i = 0;
-         i < plan.group_count && iree_status_is_ok(status); ++i) {
-      loom_serve_weight_group_t* group = &plan.groups[i];
+         i < plan->group_count && iree_status_is_ok(status); ++i) {
+      loom_serve_weight_group_t* group = &plan->groups[i];
       if (group->mapping_group != i) {
-        group->mapped = plan.groups[group->mapping_group].mapped;
+        group->mapped = plan->groups[group->mapping_group].mapped;
         iree_hal_semaphore_retain(group->mapped);
         continue;
       }
@@ -1014,8 +1126,8 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
     }
   }
   for (iree_host_size_t i = 0;
-       i < plan.group_count && iree_status_is_ok(status); ++i) {
-    loom_serve_weight_group_t* group = &plan.groups[i];
+       i < plan->group_count && iree_status_is_ok(status); ++i) {
+    loom_serve_weight_group_t* group = &plan->groups[i];
     const iree_host_size_t lane = i % WEIGHT_LANES;
     group->waits[0] = lanes[lane];
     group->wait_values[0] = frontiers[lane];
@@ -1028,14 +1140,15 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
     const iree_hal_semaphore_list_t signal = {1, &lanes[lane],
                                               &group->signal_value};
     if (group->count) {
-      loom_serve_weight_source_batch_t* batch = &batches[0];
-      gathers[batch->first + batch->count++] = (iree_io_parameter_gather_t){
-          .target_buffer = views[group->storage_index],
-          .count = group->count,
-          .enumerator = {loom_serve_weight_enumerate, group},
-          .wait_semaphore_list = wait,
-          .signal_semaphore_list = signal,
-      };
+      loom_serve_weight_source_batch_t* batch = &job->batches[0];
+      job->gathers[batch->first + batch->count++] =
+          (iree_io_parameter_gather_t){
+              .target_buffer = job->views[group->storage_index],
+              .count = group->count,
+              .enumerator = {loom_serve_weight_enumerate, group},
+              .wait_semaphore_list = wait,
+              .signal_semaphore_list = signal,
+          };
     } else {
       // Captured inputs do not touch the final root until preparation. Its
       // mapping still participates in the same ordered window frontiers.
@@ -1051,24 +1164,24 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
         continue;
       }
       const iree_host_size_t lane = i % WEIGHT_LANES;
-      loom_serve_weight_tensor_plan_t* tensor = &plan.spans[i];
+      loom_serve_weight_tensor_plan_t* tensor = &plan->spans[i];
       tensor->prepare_wait = frontiers[WEIGHT_LANES + lane];
       tensor->prepare_signal = ++frontiers[WEIGHT_LANES + lane];
       for (uint32_t p = 0; p < span->inputs.count; ++p) {
         const loom_serve_weight_input_t* input = loom_serve_weight_inputs_at(
             weights->inputs, span->inputs.first + p);
-        loom_serve_weight_source_batch_t* batch = &batches[input->source];
+        loom_serve_weight_source_batch_t* batch = &job->batches[input->source];
         const iree_host_size_t ordinal = batch->first + batch->count++;
-        loom_serve_weight_read_t* read = &input_reads[ordinal];
+        loom_serve_weight_read_t* read = &job->input_reads[ordinal];
         read->input = input;
         read->staging_offset = lane * staging_stride;
         read->waits[0] = p ? input_lanes[lane] : lanes[WEIGHT_LANES + lane];
         read->wait_values[0] = p ? input_values[lane] : tensor->prepare_wait;
-        read->waits[1] = staging_ready;
+        read->waits[1] = job->staging_ready;
         read->wait_values[1] = 1;
         read->signal_value = ++input_values[lane];
-        gathers[ordinal] = (iree_io_parameter_gather_t){
-            .target_buffer = staging,
+        job->gathers[ordinal] = (iree_io_parameter_gather_t){
+            .target_buffer = job->staging,
             .count = 1,
             .enumerator = {loom_serve_weight_input_enumerate, read},
             .wait_semaphore_list = {2, read->waits, read->wait_values},
@@ -1077,18 +1190,6 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
         };
       }
       tensor->input_signal = input_values[lane];
-    }
-    for (uint32_t s = 0; s < source_count && iree_status_is_ok(status); ++s) {
-      if (batches[s].count) {
-        status = iree_io_parameter_provider_gather_batch(
-            loom_serve_weight_inputs_provider(weights->inputs, s),
-            weights->device, weights->transfer, batches[s].count,
-            gathers + batches[s].first);
-        if (iree_status_is_ok(status)) {
-          weights->activity.read_bytes += batches[s].byte_length;
-          weights->activity.groups += batches[s].count;
-        }
-      }
     }
   }
   for (iree_host_size_t i = 0;
@@ -1099,7 +1200,7 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
     }
     // The last window on each ordered lane proves every earlier contributing
     // read and mapping on that lane. Staging input completion is independent.
-    loom_serve_weight_tensor_plan_t tensor = plan.spans[i];
+    loom_serve_weight_tensor_plan_t tensor = plan->spans[i];
     iree_hal_semaphore_t* waits[WEIGHT_LANES + 2];
     uint64_t values[WEIGHT_LANES + 2];
     iree_host_size_t wait_count = 0;
@@ -1112,7 +1213,7 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
           (last % WEIGHT_LANES + WEIGHT_LANES - lane) % WEIGHT_LANES;
       if (last - tensor.begin >= distance) {
         waits[wait_count] = lanes[lane];
-        values[wait_count++] = plan.groups[last - distance].signal_value;
+        values[wait_count++] = plan->groups[last - distance].signal_value;
       }
     }
     const iree_host_size_t lane = i % WEIGHT_LANES;
@@ -1123,9 +1224,9 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
     waits[wait_count] = lanes[WEIGHT_LANES + lane];
     values[wait_count++] = tensor.prepare_wait;
     const iree_hal_buffer_binding_t bindings[] = {
-        {views[span->storage_index], span->parameter.byte_offset,
+        {job->views[span->storage_index], span->parameter.byte_offset,
          span->parameter.byte_length},
-        {staging, lane * staging_stride, span->inputs.byte_length}};
+        {job->staging, lane * staging_stride, span->inputs.byte_length}};
     status = iree_hal_queue_execute(
         weights->dispatch,
         (iree_hal_semaphore_list_t){wait_count, waits, values},
@@ -1138,8 +1239,8 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
       weights->activity.prepared_bytes += span->parameter.byte_length;
     }
   }
-  if (staging && iree_status_is_ok(status)) {
-    iree_hal_buffer_t* root = iree_hal_buffer_allocated_buffer(staging);
+  if (job->staging && iree_status_is_ok(status)) {
+    iree_hal_buffer_t* root = iree_hal_buffer_allocated_buffer(job->staging);
     uint64_t value = frontiers[WEIGHT_LANES] + 1;
     status = iree_hal_queue_dealloca(
         weights->dispatch,
@@ -1150,41 +1251,25 @@ static iree_status_t loom_serve_weight_stream(loom_serve_weights_t* weights) {
       frontiers[WEIGHT_LANES] = value;
     }
   }
-  if (!iree_status_is_ok(status)) {
-    // Failed readiness releases unsubmitted dependencies, not captured I/O,
-    // staging, or native mapping ownership. Those retire independently.
-    for (iree_host_size_t i = 0; i < weights->activation.count; ++i) {
-      iree_hal_semaphore_fail(lanes[i], iree_status_clone(status));
-    }
-    for (iree_host_size_t i = 0; i < WEIGHT_LANES; ++i) {
-      if (input_lanes[i]) {
-        iree_hal_semaphore_fail(input_lanes[i], iree_status_clone(status));
-      }
-    }
-  }
-  for (iree_host_size_t i = 0; i < WEIGHT_LANES; ++i) {
-    iree_hal_semaphore_release(input_lanes[i]);
-  }
-  iree_hal_semaphore_release(staging_ready);
-  iree_hal_buffer_release(staging);
   loom_serve_workspace_scope_retire(scope);
-  if (views) {
-    for (iree_host_size_t i = 0; i < weights->storage_count; ++i) {
-      iree_hal_buffer_release(views[i]);
+  if (iree_status_is_ok(status)) {
+    uint64_t read_bytes = 0;
+    for (uint32_t s = 0; s < source_count; ++s) {
+      read_bytes += job->batches[s].byte_length;
+    }
+    // The owner publishes this activation's complete graph before its cold
+    // read task runs. Acceptance may execute and destroy job before returning.
+    status = iree_status_from_loomc(
+        loomc_task_sink_submit(weights->sink, &job->task));
+    if (iree_status_is_ok(status)) {
+      weights->activity.read_bytes += read_bytes;
+      weights->activity.groups += read_count;
     }
   }
-  if (plan.groups) {
-    for (iree_host_size_t i = 0; i < plan.group_count; ++i) {
-      iree_hal_semaphore_release(plan.groups[i].mapped);
-    }
+  if (!iree_status_is_ok(status)) {
+    loom_serve_weight_stream_fail(job, status);
+    loomc_task_destroy(&job->task);
   }
-  iree_allocator_free(allocator, views);
-  iree_allocator_free(allocator, gathers);
-  iree_allocator_free(allocator, input_reads);
-  iree_allocator_free(allocator, batches);
-  iree_allocator_free(allocator, plan.fragments);
-  iree_allocator_free(allocator, plan.spans);
-  iree_allocator_free(allocator, plan.groups);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

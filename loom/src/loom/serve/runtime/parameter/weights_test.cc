@@ -1831,7 +1831,7 @@ class RejectedPreparationWeightsTest : public ArenaWeightsTest {
     }
   }
 
-  // Rejects preparation dispatch after the real mapping and file submissions.
+  // Rejects preparation dispatch after real mapping submission, before reads.
   iree_hal_queue_t rejected_dispatch_ = {};
   // The queue is released only if device setup reached its initialization.
   bool initialized_ = false;
@@ -1856,7 +1856,7 @@ TEST_P(RejectedPreparationWeightsTest,
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         loom_serve_weights_await(plans_[0]));
   EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations, 0u);
-  EXPECT_GT(loom_serve_weights_activity(plans_[0]).read_bytes, 0u);
+  EXPECT_EQ(loom_serve_weights_activity(plans_[0]).read_bytes, 0u);
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
             geometry.minimum_size);
 
