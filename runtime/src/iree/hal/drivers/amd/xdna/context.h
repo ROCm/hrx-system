@@ -47,6 +47,8 @@ typedef struct iree_hal_amd_xdna_context_t {
   const amdf_xdna_api_t* xdna;
   // Opened endpoint, released after the native device.
   amdf_endpoint_t* endpoint;
+  // Physical identity retained from passive discovery for allocation routing.
+  amdf_endpoint_id_t endpoint_id;
   // Stable ordinal within the fabric's passive XDNA discovery family.
   uint32_t device_ordinal;
   // Ordinary device address domain, released after the execution context.

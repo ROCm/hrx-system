@@ -21,7 +21,7 @@ typedef struct iree_hal_amd_fabric_allocation_entry_t
 
 // Shared native identity and allocation domains for AMD execution engines.
 // The driver and every materialized device retain this owner independently.
-// Discovery is immutable; node-local native allocation queues are acquired on
+// Discovery is immutable; endpoint-local allocation queues are acquired on
 // demand. Engine resources and private scopes belong to the consuming device.
 // Sharing native identity does not grant access across sealed HAL groups.
 typedef struct iree_hal_amd_fabric_t {
@@ -41,7 +41,7 @@ typedef struct iree_hal_amd_fabric_t {
   amdf_endpoint_summary_t* endpoints;
   // Protects cold allocation-domain construction, never native batch execution.
   iree_slim_mutex_t allocation_mutex;
-  // Owned native allocation queues, one per requested NUMA node.
+  // Owned native queues, one per physical endpoint and requested NUMA node.
   iree_hal_amd_fabric_allocation_entry_t* allocations;
 } iree_hal_amd_fabric_t;
 
@@ -67,12 +67,14 @@ void iree_hal_amd_fabric_retain(iree_hal_amd_fabric_t* fabric);
 // ignored. This performs no implicit device wait.
 void iree_hal_amd_fabric_release(iree_hal_amd_fabric_t* fabric);
 
-// Acquires the shared native allocation queue for |node_id|, creating it on
-// first use. The selected progress entry supplies the node; UINT32_MAX leaves
+// Acquires native allocation progress for a physical endpoint and host node.
+// Logical contexts of the same endpoint share a queue at the same placement;
+// other endpoints progress independently. Native provider synchronization is
+// unchanged. The selected progress entry supplies |node_id|; UINT32_MAX leaves
 // placement unspecified. The caller releases the returned queue reference.
 iree_status_t iree_hal_amd_fabric_acquire_allocation_queue(
-    iree_hal_amd_fabric_t* fabric, uint32_t node_id,
-    iree_hal_amd_fabric_allocation_queue_t** out_queue);
+    iree_hal_amd_fabric_t* fabric, const amdf_endpoint_id_t* endpoint_id,
+    uint32_t node_id, iree_hal_amd_fabric_allocation_queue_t** out_queue);
 
 #ifdef __cplusplus
 }  // extern "C"

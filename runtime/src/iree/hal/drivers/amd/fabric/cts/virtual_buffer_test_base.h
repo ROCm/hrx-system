@@ -105,6 +105,7 @@ class FabricVirtualBufferTest
     RecordProperty("native_lifetime", GetParam() == AMDF_NATIVE_LIFETIME_PROCESS
                                           ? "process"
                                           : "instance");
+    amdf_endpoint_id_t endpoint_id = {};
     for (uint32_t i = 0; i < fabric_->endpoint_count && !endpoint_; ++i) {
       if (fabric_->endpoints[i].engine_kind != AMDF_ENGINE_KIND_GPU) {
         continue;
@@ -130,6 +131,7 @@ class FabricVirtualBufferTest
              AMDF_QUEUE_PUBLICATION_MODE_USER) &&
             (native_family_.user_queue_capabilities &
              AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER)) {
+          endpoint_id = info.id;
           selected = true;
           break;
         }
@@ -249,7 +251,7 @@ class FabricVirtualBufferTest
         .families = &family_,
     };
     IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
-        fabric_, UINT32_MAX, &allocation_queue_));
+        fabric_, &endpoint_id, UINT32_MAX, &allocation_queue_));
     iree_hal_amd_fabric_memory_backend_initialize(
         device_, &memory_options, host->notification, allocation_queue_,
         host->epoch_query, &backend_);

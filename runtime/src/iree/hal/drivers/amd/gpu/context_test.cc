@@ -628,7 +628,7 @@ class ContextMemoryTest : public ContextTest {
 TEST_F(ContextMemoryTest, AsyncBatchesUseSharedNativeDomain) {
   iree_hal_amd_fabric_allocation_queue_t* shared = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
-      fabric_, UINT32_MAX, &shared));
+      fabric_, &context_->endpoint_info.id, UINT32_MAX, &shared));
   EXPECT_EQ(context_->memory.queue, shared);
   iree_hal_amd_fabric_allocation_queue_release(shared);
 
@@ -753,6 +753,7 @@ TEST_F(ContextMemoryTest, NativeTeardownJoinsReleaseOnItsOwnThread) {
   entered.get_future().get();
   std::promise<void> teardown_started;
   const auto* allocation_queue = context_->memory.queue;
+  const auto endpoint_id = context_->endpoint_info.id;
   std::thread teardown([&, context = std::exchange(context_, nullptr)] {
     teardown_started.set_value();
     iree_hal_amd_gpu_context_free(context);
@@ -766,7 +767,7 @@ TEST_F(ContextMemoryTest, NativeTeardownJoinsReleaseOnItsOwnThread) {
   EXPECT_NE(native_.destruction_thread, native_backing_.threads.front());
   iree_hal_amd_fabric_allocation_queue_t* shared = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
-      fabric_, UINT32_MAX, &shared));
+      fabric_, &endpoint_id, UINT32_MAX, &shared));
   EXPECT_EQ(shared, allocation_queue);
   iree_hal_amd_fabric_allocation_queue_release(shared);
 }

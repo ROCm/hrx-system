@@ -82,7 +82,7 @@ typedef struct iree_hal_amd_gpu_context_t {
   } execution_failure;
   // Native backing ownership, initialized after selecting host NUMA placement.
   struct {
-    // Retained fabric allocation domain shared with other engines on this node.
+    // Retained allocation domain for this physical endpoint and host node.
     iree_hal_amd_fabric_allocation_queue_t* queue;
     // Protects the outstanding count and the final notification access.
     iree_slim_mutex_t mutex;

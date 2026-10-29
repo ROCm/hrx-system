@@ -11,19 +11,23 @@
 struct iree_hal_amd_fabric_allocation_entry_t {
   // Next cold allocation domain owned by the fabric.
   iree_hal_amd_fabric_allocation_entry_t* next;
+  // Physical endpoint whose native requests share this progress domain.
+  amdf_endpoint_id_t endpoint_id;
   // NUMA placement, or UINT32_MAX for unspecified placement.
   uint32_t node_id;
-  // Fabric-owned native allocation queue shared by all engines on this node.
+  // Fabric-owned queue shared by logical contexts of this endpoint and node.
   iree_hal_amd_fabric_allocation_queue_t* queue;
 };
 
 iree_status_t iree_hal_amd_fabric_acquire_allocation_queue(
-    iree_hal_amd_fabric_t* fabric, uint32_t node_id,
-    iree_hal_amd_fabric_allocation_queue_t** out_queue) {
+    iree_hal_amd_fabric_t* fabric, const amdf_endpoint_id_t* endpoint_id,
+    uint32_t node_id, iree_hal_amd_fabric_allocation_queue_t** out_queue) {
   *out_queue = NULL;
   iree_slim_mutex_lock(&fabric->allocation_mutex);
   iree_hal_amd_fabric_allocation_entry_t* entry = fabric->allocations;
-  while (entry && entry->node_id != node_id) {
+  while (entry &&
+         (entry->node_id != node_id ||
+          !amdf_endpoint_id_is_equal(&entry->endpoint_id, endpoint_id))) {
     entry = entry->next;
   }
   iree_status_t status = iree_ok_status();
@@ -34,6 +38,7 @@ iree_status_t iree_hal_amd_fabric_acquire_allocation_queue(
       status = iree_hal_amd_fabric_allocation_queue_create(
           node_id, fabric->host_allocator, &entry->queue);
       if (iree_status_is_ok(status)) {
+        entry->endpoint_id = *endpoint_id;
         entry->node_id = node_id;
         entry->next = fabric->allocations;
         fabric->allocations = entry;

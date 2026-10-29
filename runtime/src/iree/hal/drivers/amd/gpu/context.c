@@ -13,7 +13,7 @@ iree_status_t iree_hal_amd_gpu_context_prepare_memory(
     iree_hal_amd_gpu_context_t* context, uint32_t node_id) {
   iree_hal_amd_fabric_allocation_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_acquire_allocation_queue(
-      context->fabric, node_id, &queue));
+      context->fabric, &context->endpoint_info.id, node_id, &queue));
   iree_slim_mutex_initialize(&context->memory.mutex);
   iree_notification_initialize(&context->memory.notification);
   context->memory.queue = queue;

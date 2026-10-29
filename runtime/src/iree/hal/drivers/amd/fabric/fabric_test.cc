@@ -156,18 +156,28 @@ TEST(AmdFabricTest, EmptyDiscoveryRetainsTheNativeInstance) {
   iree_hal_amd_fabric_release(fabric);
 }
 
-TEST(AmdFabricTest, EnginesAcquireTheSameNodeAllocationQueue) {
+TEST(AmdFabricTest, LogicalContextsShareOnlyTheirEndpointAndNodeQueue) {
   auto api = NativeApi();
   iree_hal_amd_fabric_t* fabric = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_fabric_create(&api, AMDF_NATIVE_LIFETIME_PROCESS,
                                             iree_allocator_system(), &fabric));
   iree_hal_amd_fabric_allocation_queue_t* first = nullptr;
   iree_hal_amd_fabric_allocation_queue_t* second = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_fabric_acquire_allocation_queue(fabric, UINT32_MAX, &first));
   IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
-      fabric, UINT32_MAX, &second));
+      fabric, &fabric->endpoints[0].id, UINT32_MAX, &first));
+  IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
+      fabric, &fabric->endpoints[0].id, UINT32_MAX, &second));
   EXPECT_EQ(first, second);
+  iree_hal_amd_fabric_allocation_queue_t* peer = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
+      fabric, &fabric->endpoints[2].id, UINT32_MAX, &peer));
+  EXPECT_NE(first, peer);
+  iree_hal_amd_fabric_allocation_queue_t* local = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_acquire_allocation_queue(
+      fabric, &fabric->endpoints[0].id, 0, &local));
+  EXPECT_NE(first, local);
+  iree_hal_amd_fabric_allocation_queue_release(peer);
+  iree_hal_amd_fabric_allocation_queue_release(local);
   iree_hal_amd_fabric_allocation_queue_release(first);
   iree_hal_amd_fabric_release(fabric);
   iree_hal_amd_fabric_allocation_queue_release(second);

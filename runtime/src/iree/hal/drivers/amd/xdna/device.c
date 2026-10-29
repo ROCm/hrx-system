@@ -193,7 +193,7 @@ iree_status_t iree_hal_amd_xdna_device_create(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_fabric_acquire_allocation_queue(
-        context->fabric,
+        context->fabric, &context->endpoint_id,
         iree_async_proactor_pool_entry_node_id(device->proactor_entry),
         &device->memory.allocation_queue);
   }
