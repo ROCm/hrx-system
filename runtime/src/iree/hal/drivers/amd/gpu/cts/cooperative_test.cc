@@ -45,8 +45,29 @@ TEST_P(GpuCooperativeTest, PrivateGridStateSurvivesQueuedRecordedReplays) {
   IREE_ASSERT_OK(iree_hal_queue_acquire(family, &params, queue.out()));
   {
     Ref<iree_hal_queue_t> alias;
+    IREE_ASSERT_OK(iree_hal_device_trim(device_));
     IREE_ASSERT_OK(iree_hal_queue_acquire(family, &params, alias.out()));
     EXPECT_EQ(queue.get(), alias.get());
+  }
+  const auto alternate_placement =
+      iree_hal_queue_placement(queue) == IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL
+          ? IREE_HAL_QUEUE_PLACEMENT_DEVICE_LOCAL
+          : IREE_HAL_QUEUE_PLACEMENT_HOST_LOCAL;
+  if (iree_hal_queue_family_spec(family)->placement_capabilities &
+      (1u << alternate_placement)) {
+    params.placement = alternate_placement;
+    Ref<iree_hal_queue_t> conflicting;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_UNAVAILABLE,
+        iree_hal_queue_acquire(family, &params, conflicting.out()));
+  }
+  // No work has been submitted: trim must return the sole cached admission,
+  // including its immutable placement, without draining unrelated queues.
+  queue.reset();
+  IREE_ASSERT_OK(iree_hal_device_trim(device_));
+  IREE_ASSERT_OK(iree_hal_queue_acquire(family, &params, queue.out()));
+  if (params.placement != IREE_HAL_QUEUE_PLACEMENT_DEFAULT) {
+    EXPECT_EQ(iree_hal_queue_placement(queue), params.placement);
   }
   const auto* target =
       &iree_hal_device_spec_executables(iree_hal_device_spec(device_))
@@ -110,6 +131,24 @@ TEST_P(GpuCooperativeTest, PrivateGridStateSurvivesQueuedRecordedReplays) {
           iree_make_const_byte_span(constants.data(), sizeof(constants)),
           {IREE_ARRAYSIZE(direct_bindings), direct_bindings}, nullptr,
           IREE_HAL_DISPATCH_FLAG_COOPERATIVE));
+  std::array<uint32_t, kGroups> direct_values = {};
+  IREE_ASSERT_OK(iree_hal_buffer_map_write(output, 0, direct_values.data(),
+                                           sizeof(direct_values)));
+  uint64_t direct_done = 1;
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      queue, {}, {1, &semaphore, &direct_done}, executable, function, config,
+      iree_make_const_byte_span(constants.data(), sizeof(constants)),
+      {IREE_ARRAYSIZE(direct_bindings), direct_bindings}, nullptr,
+      IREE_HAL_DISPATCH_FLAG_COOPERATIVE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, direct_done,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(output, 0, direct_values.data(),
+                                          sizeof(direct_values)));
+  for (auto value : direct_values) {
+    EXPECT_EQ(value, sum);
+  }
+  completed = direct_done;
   const iree_hal_buffer_ref_t bindings[] = {
       iree_hal_make_indirect_buffer_ref(0, 0, kBytes),
       iree_hal_make_indirect_buffer_ref(1, 0, kBytes),

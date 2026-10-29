@@ -44,7 +44,10 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
       {.argument_length =
            sizeof(iree_hal_amd_gpu_aql_materialize_profile_arguments_t),
        .kernel_object = &out_pool->materialize_profile},
+      {.argument_length = sizeof(iree_hal_amd_gpu_grid_sync_t),
+       .kernel_object = &out_pool->grid_sync},
   };
+  uint32_t builtin_count = IREE_ARRAYSIZE(builtins) - 1;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_blit_program_query(
       gfxip, &builtins[0].code, &builtins[0].kernel));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_fixup_program_query(
@@ -55,11 +58,17 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
       gfxip, &builtins[3].code, &builtins[3].kernel));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_materialize_program_query(
       gfxip, true, &builtins[4].code, &builtins[4].kernel));
+  if (iree_hal_amd_gpu_grid_sync_select_strategy(gfxip) ==
+      IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS) {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_grid_sync_program_query(
+        gfxip, &builtins[builtin_count].code, &builtins[builtin_count].kernel));
+    ++builtin_count;
+  }
   const uint64_t descriptor_length = 64;
   const uint64_t code_begin =
-      iree_align_uint64(IREE_ARRAYSIZE(builtins) * descriptor_length, 256);
+      iree_align_uint64(builtin_count * descriptor_length, 256);
   uint64_t byte_length = code_begin;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(builtins); ++i) {
+  for (iree_host_size_t i = 0; i < builtin_count; ++i) {
     byte_length += iree_align_uint64(builtins[i].code.data_length, 256);
   }
   byte_length += 256;  // Instruction fetch padding after the final kernel.
@@ -75,7 +84,7 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
       "query AQL builtin address"));
   memset(contents.data, 0, byte_length);
   uint64_t code_offset = code_begin;
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(builtins); ++i) {
+  for (iree_host_size_t i = 0; i < builtin_count; ++i) {
     const iree_hal_amd_gpu_aql_builtin_t* builtin = &builtins[i];
     const uint64_t descriptor_offset = i * descriptor_length;
     uint8_t* descriptor = contents.data + descriptor_offset;

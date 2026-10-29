@@ -498,6 +498,20 @@ iree_runtime_cc_test(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "dispatch_program_test",
+    srcs = ["dispatch_program_test.cc"],
+    target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
+    deps = [
+        ":dispatch",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/drivers/amd/gpu/image:hsaco",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:grid_sync_programs",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_benchmark(
     name = "dispatch_benchmark",
     srcs = ["dispatch_benchmark.cc"],

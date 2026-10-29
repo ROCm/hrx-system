@@ -549,6 +549,7 @@ iree_runtime_cc_library(
         ":ring",
         "//runtime/src/iree/hal/drivers/amd:status",
         "//runtime/src/iree/hal/drivers/amd/gpu:code",
+        "//runtime/src/iree/hal/drivers/amd/gpu:dispatch",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:blit",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:program",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:user_queue",

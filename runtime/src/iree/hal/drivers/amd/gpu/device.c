@@ -418,12 +418,9 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
           user_publication &&
                   (native_family->user_queue_capabilities &
                    AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH) &&
-                  (device->target.version.major == 11 ||
-                   (device->target.version.major == 9 &&
-                    ((device->target.version.minor == 4 &&
-                      device->target.version.stepping == 2) ||
-                     (device->target.version.minor == 5 &&
-                      device->target.version.stepping == 0))))
+                  iree_hal_amd_gpu_grid_sync_select_strategy(
+                      device->target.version) !=
+                      IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_NONE
               ? IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH
               : 0,
       .provisioned_queue_count = queue_count,
@@ -1490,6 +1487,17 @@ static void iree_hal_amd_gpu_device_replace_channel_provider(
 
 static iree_status_t iree_hal_amd_gpu_device_trim(iree_hal_device_t* base) {
   iree_hal_amd_gpu_device_t* device = (void*)base;
+  iree_slim_mutex_lock(&device->cooperative.mutex);
+  iree_hal_queue_t* queue = device->cooperative.queue;
+  if (queue && iree_atomic_ref_count_load(&queue->resource.ref_count) == 1 &&
+      device->queue_lifecycle->is_idle(queue)) {
+    device->cooperative.queue = NULL;
+  } else {
+    queue = NULL;
+  }
+  iree_slim_mutex_unlock(&device->cooperative.mutex);
+  // Callback-table handoffs join worker borrowers outside the cache lock.
+  iree_hal_queue_release(queue);
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       iree_hal_amd_gpu_queue_membership_trim(&device->membership),
       "GPU queue scratch trim"));

@@ -490,6 +490,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
   const bool indirect = iree_hal_dispatch_uses_indirect_parameters(flags);
   const bool external_arguments =
       iree_hal_dispatch_uses_indirect_arguments(flags);
+  const bool initialize_grid = cooperative && buffer->pool->grid_sync;
   if (!indirect &&
       (!geometry.workgroup_count[0] || !geometry.workgroup_count[1] ||
        !geometry.workgroup_count[2])) {
@@ -574,9 +575,16 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
   uint32_t offset = 0;
   iree_hal_amd_gpu_aql_packet_t* packets = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_packets(
-      buffer, indirect ? 2 : 1, &offset, &packets));
-  const uint32_t target_offset = offset + (indirect ? 64 : 0);
-  iree_hal_amd_gpu_aql_packet_t* target = packets + indirect;
+      buffer, (indirect ? 2 : 1) + initialize_grid, &offset, &packets));
+  if (initialize_grid) {
+    packets[0] =
+        iree_hal_amd_gpu_aql_grid_sync_packet(buffer->pool->grid_sync, 0);
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
+        buffer, offset + 40, 0, argument_offset + grid_offset,
+        IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
+  }
+  const uint32_t target_offset = offset + (indirect + initialize_grid) * 64;
+  iree_hal_amd_gpu_aql_packet_t* target = packets + indirect + initialize_grid;
   *target = iree_hal_amd_gpu_aql_dispatch_packet(function, &geometry, header, 0,
                                                  0, flags);
   // An indirect producer is itself ordered before publishing its target.
@@ -622,10 +630,10 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
           buffer, patch_offset + 16, argument_value, argument_addend,
           IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA | argument_flags));
     }
-    packets[0] =
+    packets[initialize_grid] =
         iree_hal_amd_gpu_aql_indirect_packet(buffer->pool->indirect, 0);
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
-        buffer, offset + 40, 0, patch_offset,
+        buffer, offset + initialize_grid * 64 + 40, 0, patch_offset,
         IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
     target->words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
     buffer->requires_device_publication = true;

@@ -60,6 +60,28 @@ typedef struct iree_hal_amd_gpu_grid_sync_t {
 static_assert(sizeof(iree_hal_amd_gpu_grid_sync_t) == 48,
               "cooperative grid state must match the AMD device-library ABI");
 
+typedef enum iree_hal_amd_gpu_grid_sync_strategy_e {
+  // No compiler grid-barrier algorithm is known for this ISA.
+  IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_NONE = 0,
+  // Resident global-memory arrival counter with a 16-bit group count.
+  IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY,
+  // Hardware resource zero, initialized before the cooperative user grid.
+  IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS,
+} iree_hal_amd_gpu_grid_sync_strategy_t;
+
+// Selects the compiler device-library grid-barrier algorithm. Native exclusive
+// queue scheduling is required independently of this shader strategy.
+iree_hal_amd_gpu_grid_sync_strategy_t
+iree_hal_amd_gpu_grid_sync_select_strategy(
+    iree_hal_amd_gpu_gfxip_version_t gfxip);
+
+// Relocation-free one-workitem initializer consuming a grid record directly.
+// Only GWS-strategy queues place and execute this program; it reads the group
+// count at byte 40 and initializes hardware resource zero before the user grid.
+iree_status_t iree_hal_amd_gpu_grid_sync_program_query(
+    iree_hal_amd_gpu_gfxip_version_t gfxip, iree_const_byte_span_t* out_code,
+    iree_hal_amd_gpu_image_kernel_t* out_kernel);
+
 // Initializes a private invocation's grid state and its prepared hidden-pointer
 // destination. Geometry and residency were admitted by the queue. This neither
 // allocates nor scans argument metadata; no caller-owned arguments are changed.

@@ -99,6 +99,8 @@ typedef struct iree_hal_amd_gpu_executable_t {
   uint32_t function_size;
   // Native per-wave trap reserve used to admit cooperative residency.
   uint32_t scalar_register_reservation;
+  // Maximum grid extent represented by the compiler's barrier algorithm.
+  uint32_t maximum_cooperative_workgroup_count;
   // Dense variant-major functions; dispatch selection needs no placement walk.
   void* functions;
   // Inline placements sharing one parsed image and argument layout.
@@ -1000,6 +1002,14 @@ iree_status_t iree_hal_amd_gpu_executable_create(
     executable->variant_count = variant_count;
     executable->command_type = command_type;
     executable->function_size = function_size;
+    const iree_hal_amd_gpu_grid_sync_strategy_t grid_sync_strategy =
+        iree_hal_amd_gpu_grid_sync_select_strategy(options->target->version);
+    if (grid_sync_strategy != IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_NONE) {
+      executable->maximum_cooperative_workgroup_count =
+          grid_sync_strategy == IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_MEMORY
+              ? UINT16_MAX
+              : UINT32_MAX;
+    }
     const amdf_queue_format_features_t format_features =
         context->families[options->native_family_ordinal].format_features;
     executable->scalar_register_reservation =
@@ -1183,16 +1193,20 @@ iree_status_t iree_hal_amd_gpu_executable_validate_cooperative_dispatch(
         IREE_STATUS_UNIMPLEMENTED,
         "cooperative indirect grids require device-time residency admission");
   }
+  if (!geometry->workgroup_count[0] || !geometry->workgroup_count[1] ||
+      !geometry->workgroup_count[2]) {
+    return iree_ok_status();
+  }
+  const iree_hal_amd_gpu_executable_t* executable = (void*)base;
   uint64_t count = 1;
   for (uint32_t i = 0; i < 3; ++i) {
     if (!iree_checked_mul_u64(count, geometry->workgroup_count[i], &count) ||
-        count > UINT16_MAX) {
+        count > executable->maximum_cooperative_workgroup_count) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
           "cooperative grid exceeds the device-library barrier counter");
     }
   }
-  const iree_hal_amd_gpu_executable_t* executable = (void*)base;
   const iree_hal_queue_dispatch_concurrency_params_t params = {
       .workgroup_size = {geometry->workgroup_size[0],
                          geometry->workgroup_size[1],
