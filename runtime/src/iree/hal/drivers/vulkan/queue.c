@@ -1748,7 +1748,8 @@ static void iree_hal_vulkan_queue_command_buffer_block_free(
     for (uint32_t i = 0;
          i < IREE_HAL_VULKAN_QUEUE_COMMAND_BUFFER_BLOCK_CAPACITY; ++i) {
       iree_hal_vulkan_timestamp_state_deinitialize(
-          &queue->syms, queue->logical_device, &block->timestamps[i]);
+          &queue->syms, queue->logical_device, queue->host_allocator,
+          &block->timestamps[i]);
     }
     iree_allocator_free(queue->host_allocator, block->timestamps);
   }
@@ -1778,7 +1779,8 @@ static iree_status_t iree_hal_vulkan_queue_prepare_command_timestamps(
       &queue->syms, queue->logical_device, queue->device_allocator,
       iree_hal_make_queue_family_affinity(
           iree_hal_queue_family_ordinal(iree_hal_queue_family(&queue->base))),
-      query_count, resolve_count, &queue->timestamp_pipeline, state));
+      query_count, resolve_count, &queue->timestamp_pipeline,
+      queue->host_allocator, state));
   *out_state = state;
   return iree_ok_status();
 }

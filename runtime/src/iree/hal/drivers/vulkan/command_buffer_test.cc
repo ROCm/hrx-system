@@ -12,6 +12,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "iree/base/internal/arena.h"
 #include "iree/hal/drivers/vulkan/barrier.h"
@@ -30,10 +31,14 @@ static const iree_hal_queue_family_spec_t kQueueFamilySpec = [] {
       .name = IREE_SV("test"),
       .priority_count = 1,
       .priorities = &kQueuePriority,
+      .timestamp_valid_bits = 64,
+      .timestamp_frequency_hz = 1000000000,
       .physical_device_affinity = 1,
       .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
                     IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
                     IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC,
+      .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS |
+               IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS,
   };
   return spec;
 }();
@@ -127,6 +132,12 @@ struct NativeReplayCapture {
   // Count of fake vkCmdDispatch calls.
   int dispatch_count = 0;
 
+  // Native ordering of captures, result copies, barriers, and dispatches.
+  std::vector<std::pair<char, uint32_t>> events;
+
+  // Query range and destination offset of each delivery batch.
+  std::vector<std::array<uint64_t, 3>> query_copies;
+
   // VkCommandBuffer passed to vkBeginCommandBuffer.
   VkCommandBuffer begin_command_buffer = VK_NULL_HANDLE;
 
@@ -146,7 +157,7 @@ struct NativeReplayCapture {
   float color[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 
   // Memory barriers copied during fake pipeline-barrier entry-point calls.
-  std::array<VkMemoryBarrier2, 4> memory_barriers = {};
+  std::array<VkMemoryBarrier2, 16> memory_barriers = {};
 
   // Number of captured global memory barriers.
   uint32_t memory_barrier_count = 0;
@@ -205,6 +216,7 @@ static VKAPI_ATTR void VKAPI_CALL FakeCmdPipelineBarrier2(
     VkCommandBuffer command_buffer, const VkDependencyInfo* dependency_info) {
   (void)command_buffer;
   ++g_native_replay_capture->pipeline_barrier_count;
+  g_native_replay_capture->events.emplace_back('B', 0);
   ASSERT_EQ(dependency_info->memoryBarrierCount +
                 dependency_info->bufferMemoryBarrierCount,
             1u);
@@ -256,12 +268,36 @@ FakeCmdDispatch(VkCommandBuffer command_buffer, uint32_t group_count_x,
   EXPECT_EQ(group_count_y, 1u);
   EXPECT_EQ(group_count_z, 1u);
   ++g_native_replay_capture->dispatch_count;
+  g_native_replay_capture->events.emplace_back('D', 0);
 }
 
 static VKAPI_ATTR void VKAPI_CALL FakeCmdInsertDebugUtilsLabelEXT(
     VkCommandBuffer command_buffer, const VkDebugUtilsLabelEXT* label_info) {
   (void)command_buffer;
   (void)label_info;
+}
+
+static VKAPI_ATTR void VKAPI_CALL FakeCmdResetQueryPool(VkCommandBuffer,
+                                                        VkQueryPool,
+                                                        uint32_t first,
+                                                        uint32_t count) {
+  g_native_replay_capture->events.emplace_back('R', count);
+  EXPECT_EQ(first, 0u);
+}
+
+static VKAPI_ATTR void VKAPI_CALL FakeCmdWriteTimestamp2(
+    VkCommandBuffer, VkPipelineStageFlags2 stage, VkQueryPool, uint32_t query) {
+  g_native_replay_capture->events.emplace_back('T', query);
+  EXPECT_EQ(stage, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT);
+}
+
+static VKAPI_ATTR void VKAPI_CALL FakeCmdCopyQueryPoolResults(
+    VkCommandBuffer, VkQueryPool, uint32_t first, uint32_t count, VkBuffer,
+    VkDeviceSize offset, VkDeviceSize stride, VkQueryResultFlags flags) {
+  g_native_replay_capture->events.emplace_back('C', first);
+  g_native_replay_capture->query_copies.push_back({first, count, offset});
+  EXPECT_EQ(stride, 8u);
+  EXPECT_EQ(flags, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
 }
 
 static iree_hal_vulkan_device_syms_t MakeNativeReplaySyms() {
@@ -271,6 +307,9 @@ static iree_hal_vulkan_device_syms_t MakeNativeReplaySyms() {
       .vkCmdBeginDebugUtilsLabelEXT = FakeCmdBeginDebugUtilsLabelEXT,
       .vkCmdEndDebugUtilsLabelEXT = FakeCmdEndDebugUtilsLabelEXT,
       .vkCmdInsertDebugUtilsLabelEXT = FakeCmdInsertDebugUtilsLabelEXT,
+      .vkCmdResetQueryPool = FakeCmdResetQueryPool,
+      .vkCmdWriteTimestamp2 = FakeCmdWriteTimestamp2,
+      .vkCmdCopyQueryPoolResults = FakeCmdCopyQueryPoolResults,
       .vkCmdPipelineBarrier2 = FakeCmdPipelineBarrier2,
       .vkCmdBindPipeline = FakeCmdBindPipeline,
       .vkCmdPushConstants = FakeCmdPushConstants,
@@ -649,9 +688,123 @@ TEST_F(VulkanCommandBufferTest,
   g_native_replay_capture = nullptr;
 }
 
+TEST_F(VulkanCommandBufferTest, TimestampDeliveryFollowsDataDependencies) {
+  const auto syms = MakeNativeReplaySyms();
+  const auto handle = reinterpret_cast<VkBuffer>(uintptr_t{0x2468});
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_vulkan_buffer_create_borrowed(
+      &syms, reinterpret_cast<VkDevice>(uintptr_t{1}),
+      iree_hal_buffer_placement_undefined(),
+      IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE, IREE_HAL_MEMORY_ACCESS_ALL,
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE, 128, 0,
+      128, 0, 1, VK_NULL_HANDLE, nullptr, handle, 0x1000, nullptr,
+      iree_hal_buffer_release_callback_null(), iree_allocator_system(),
+      &buffer));
+  const std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
+      buffer_owner(buffer, iree_hal_buffer_release);
+  for (bool alias_slot : {false, true}) {
+    SCOPED_TRACE(alias_slot);
+    auto commands =
+        CreateCommandBuffer(2, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT);
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(commands.get()));
+    IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+        commands.get(), 0, 0, iree_hal_make_indirect_buffer_ref(0, 0, 8), 0));
+    // A wave join orders captures, but does not consume timestamp data.
+    const iree_hal_barrier_t execution = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+    };
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(commands.get(), &execution));
+    IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+        commands.get(), 0, 0, iree_hal_make_indirect_buffer_ref(0, 8, 8), 0));
+    const iree_hal_buffer_barrier_t unrelated = {
+        .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+        .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
+        .buffer_ref = iree_hal_make_indirect_buffer_ref(0, 32, 8),
+    };
+    iree_hal_barrier_t consume = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .buffer_barrier_count = 1,
+        .buffer_barriers = &unrelated,
+    };
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(commands.get(), &consume));
+    const iree_hal_buffer_barrier_t sample = {
+        .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+        .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
+        .buffer_ref =
+            iree_hal_make_indirect_buffer_ref(alias_slot ? 1 : 0, 0, 8),
+    };
+    consume.buffer_barriers = &sample;
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(commands.get(), &consume));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(commands.get()));
+    EXPECT_EQ(
+        iree_hal_vulkan_command_buffer_native_replay_compatible(commands.get()),
+        !alias_slot);
+
+    // Cross-slot aliases change between submissions. Native recording must
+    // resolve exactly the query covered by this invocation's range.
+    for (uint64_t alias_offset : {0u, 8u}) {
+      SCOPED_TRACE(alias_offset);
+      const iree_hal_buffer_binding_t bindings[] = {{buffer, 0, 64},
+                                                    {buffer, alias_offset, 64}};
+      std::array<uint64_t, 2> addresses = {};
+      const iree_hal_vulkan_command_buffer_bda_publication_t publication = {
+          .host_span = iree_make_byte_span(addresses.data(), sizeof(addresses)),
+          .device_address = 0x2000,
+      };
+      std::array<iree_hal_vulkan_timestamp_pending_t, 2> pending = {};
+      const iree_hal_vulkan_timestamp_pipeline_t pipeline = {};
+      const iree_hal_vulkan_timestamp_state_t timestamps = {
+          .resolve_address = 0x3000,
+          .pipeline = &pipeline,
+          .pending = pending.data(),
+      };
+      const iree_hal_vulkan_debug_utils_t debug_utils = {};
+      const iree_hal_vulkan_builtins_t builtins = {};
+      NativeReplayCapture capture;
+      g_native_replay_capture = &capture;
+      IREE_ASSERT_OK(iree_hal_vulkan_command_buffer_record_native(
+          commands.get(), &syms, reinterpret_cast<VkDevice>(uintptr_t{1}),
+          &debug_utils, &builtins,
+          reinterpret_cast<VkCommandBuffer>(uintptr_t{2}), 0, VK_NULL_HANDLE,
+          {2, bindings}, &publication, nullptr, &timestamps, nullptr,
+          iree_allocator_system()));
+      g_native_replay_capture = nullptr;
+      const uint32_t first = alias_slot ? alias_offset / 8 : 0;
+      EXPECT_EQ(capture.events,
+                (std::vector<std::pair<char, uint32_t>>{{'R', 2},
+                                                        {'B', 0},
+                                                        {'T', 0},
+                                                        {'B', 0},
+                                                        {'T', 1},
+                                                        {'B', 0},
+                                                        {'C', first},
+                                                        {'B', 0},
+                                                        {'D', 0},
+                                                        {'B', 0},
+                                                        {'C', 1 - first},
+                                                        {'B', 0},
+                                                        {'D', 0}}));
+      EXPECT_EQ(capture.query_copies,
+                (std::vector<std::array<uint64_t, 3>>{
+                    {first, 1, first * 8}, {1 - first, 1, (1 - first) * 8}}));
+      EXPECT_EQ(addresses, (std::array<uint64_t, 2>{0x1000, 0x1008}));
+      // An ordinary ranged access dependency retains visibility without a
+      // recipe.
+      EXPECT_NE(capture.memory_barriers[3].srcAccessMask, 0u);
+      EXPECT_NE(capture.memory_barriers[1].srcStageMask &
+                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                0u);
+      EXPECT_EQ(capture.memory_barriers[1].srcAccessMask, 0u);
+    }
+  }
+}
+
 TEST_F(VulkanCommandBufferTest,
        RangedActionCopiesRecipeAndResolvesIndirectBufferAtReplay) {
-  CommandBufferPtr command_buffer = CreateCommandBuffer(/*binding_capacity=*/1);
+  CommandBufferPtr command_buffer = CreateCommandBuffer(
+      /*binding_capacity=*/1, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT);
   ASSERT_NE(command_buffer, nullptr);
 
   iree_hal_memory_transition_recipe_info_t operation = {
@@ -687,6 +840,8 @@ TEST_F(VulkanCommandBufferTest,
       iree_hal_command_buffer_barrier(command_buffer.get(), &barrier));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer.get()));
 
+  EXPECT_FALSE(iree_hal_vulkan_command_buffer_native_replay_compatible(
+      command_buffer.get()));
   // The native command must use the operation copied while recording.
   operation.operation =
       IREE_HAL_MEMORY_TRANSITION_OPERATION_ACQUIRE_FROM_SYSTEM;
