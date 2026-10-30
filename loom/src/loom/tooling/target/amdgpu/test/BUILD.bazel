@@ -200,11 +200,8 @@ iree_execution_test_suite(
 )
 
 loom_test(
-    name = "hal_tests",
-    srcs = [
-        "amdgpu_hal_actual.loom",
-        "generated_tensor_cases.loom",
-    ],
+    name = "hal_actual_test",
+    srcs = ["amdgpu_hal_actual.loom"],
     execution_profiles = [
         AMD_GPU_HARDWARE_PROFILE,
         AMD_GPU_ACCESS_PROFILE,
