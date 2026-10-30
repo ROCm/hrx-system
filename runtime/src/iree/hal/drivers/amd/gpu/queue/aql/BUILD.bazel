@@ -347,7 +347,9 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:control",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:inputs",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:recording",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:timestamp",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:transfer",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:commands",
         "//runtime/src/iree/hal/utils:resource_set",
     ],
 )

@@ -52,6 +52,30 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "timestamp",
+    srcs = ["timestamp.c"],
+    hdrs = ["timestamp.h"],
+    deps = [
+        ":recording",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "timestamp_test",
+    srcs = ["timestamp_test.cc"],
+    deps = [
+        ":recording",
+        ":timestamp",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "transfer",
     srcs = ["transfer.c"],
     hdrs = ["transfer.h"],

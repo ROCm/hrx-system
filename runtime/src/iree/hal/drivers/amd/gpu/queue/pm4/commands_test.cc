@@ -228,9 +228,20 @@ TEST_F(CommandsTest, Copy32SelectsOnlyOneDestinationWord) {
 
 TEST_F(CommandsTest, ClockReadAfterComputeJoinConfirmsTheSampleWrite) {
   auto* end = iree_hal_amd_gpu_pm4_emit_compute_flush(words());
-  end = iree_hal_amd_gpu_pm4_emit_clock(end, UINT64_C(0x00001234fffffff8));
+  end =
+      iree_hal_amd_gpu_pm4_emit_clock(end, UINT64_C(0x00001234fffffff8), true);
   Expect(end, {0xc0004600, 0x00000407, 0xc0044000, 0x00110509, 0, 0, 0xfffffff8,
                0x1234});
+}
+
+TEST_F(CommandsTest, PostedClockWriteDrainsAtASeparateMecWrite) {
+  auto* end = iree_hal_amd_gpu_pm4_emit_clock(
+      words(), UINT64_C(0x00001234fffffff8), false);
+  const uint32_t value = 0;
+  end = iree_hal_amd_gpu_pm4_emit_write(end, UINT64_C(0x0000567800000004), 1,
+                                        &value);
+  Expect(end, {0xc0044000, 0x00010509, 0, 0, 0xfffffff8, 0x1234, 0xc0033700,
+               0x00100200, 4, 0x5678, 0});
 }
 
 TEST_F(CommandsTest, WriteCapturesOneOrSeveralWords) {
