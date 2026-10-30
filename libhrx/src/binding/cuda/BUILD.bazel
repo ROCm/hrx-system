@@ -24,6 +24,7 @@ hrx_cc_shared_library(
     tags = ["manual"],
     deps = [
         "//libhrx/src/binding/common",
+        "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
     ],

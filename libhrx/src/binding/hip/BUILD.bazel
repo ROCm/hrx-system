@@ -336,6 +336,29 @@ hrx_cc_library(
 )
 
 hrx_cc_library(
+    name = "device_selection",
+    srcs = ["device_selection.c"],
+    hdrs = ["device_selection.h"],
+    includes = ["../.."],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+hrx_cc_test(
+    name = "device_selection_test",
+    srcs = ["device_selection_test.cc"],
+    deps = [
+        ":device_selection",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_library(
     name = "staged_copy",
     srcs = ["staged_copy.c"],
     hdrs = ["staged_copy.h"],
@@ -399,6 +422,7 @@ hrx_cc_shared_library(
         ":array_lifetime",
         ":blocking_printf_provider",
         ":device_properties",
+        ":device_selection",
         ":error_state",
         ":execution_context",
         ":execution_resource",
@@ -462,6 +486,7 @@ hrx_cc_shared_library(
         ":array_lifetime",
         ":blocking_printf_provider",
         ":device_properties",
+        ":device_selection",
         ":error_state",
         ":execution_context",
         ":execution_resource",

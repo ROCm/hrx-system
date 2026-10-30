@@ -14,11 +14,12 @@ extern "C" {
 #endif
 
 typedef struct iree_hal_streaming_context_t iree_hal_streaming_context_t;
+typedef struct hrx_gpu_initialize_options_t hrx_gpu_initialize_options_t;
 
 // Initializes global state.
 // Synchronization: none (one-time initialization).
 iree_status_t iree_hal_streaming_init_global(
-    const iree_hal_device_create_params_extension_t* device_extensions,
+    const hrx_gpu_initialize_options_t* options,
     iree_allocator_t host_allocator);
 
 // Cleans up global state and releases all resources.

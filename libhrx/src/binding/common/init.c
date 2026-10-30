@@ -473,13 +473,13 @@ void iree_hal_streaming_unregister_context(
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_hal_streaming_init_global(
-    const iree_hal_device_create_params_extension_t* device_extensions,
+    const hrx_gpu_initialize_options_t* options,
     iree_allocator_t host_allocator) {
   IREE_TRACE_ZONE_BEGIN(z0);
   if (iree_hal_streaming_global_registry &&
       iree_hal_streaming_global_registry->initialized) {
     if (IREE_UNLIKELY(iree_hal_streaming_global_registry->device_extensions !=
-                      device_extensions)) {
+                      options->device_extensions)) {
       IREE_TRACE_ZONE_END(z0);
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
@@ -492,8 +492,7 @@ iree_status_t iree_hal_streaming_init_global(
 
   // Initialize HRX driver registration and device enumeration.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, HRX_CALL(hrx_gpu_initialize_with_device_extensions(
-              /*flags=*/0, device_extensions)));
+      z0, HRX_CALL(hrx_gpu_initialize_with_options(options)));
 
   // Create global registry.
   iree_status_t status = iree_allocator_malloc(
@@ -509,7 +508,7 @@ iree_status_t iree_hal_streaming_init_global(
       iree_hal_streaming_device_registry();
   memset(device_registry, 0, sizeof(*device_registry));
   device_registry->host_allocator = host_allocator;
-  device_registry->device_extensions = device_extensions;
+  device_registry->device_extensions = options->device_extensions;
   device_registry->context_key = IREE_HAL_STREAMING_TLS_KEY_INVALID;
   iree_slim_mutex_initialize(&device_registry->mutex);
   iree_hal_streaming_host_callback_queue_initialize(

@@ -20,6 +20,7 @@
 #include "common/occupancy.h"
 #include "common/peer.h"
 #include "common/stream.h"
+#include "libhrx/src/libhrx/runtime.h"
 
 //===----------------------------------------------------------------------===//
 // Flag translation functions
@@ -227,8 +228,9 @@ static CUresult iree_event_record_status_to_cu_result(iree_status_t status) {
 
 CUDAAPI CUresult cuInit(unsigned int Flags) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_status_t status = iree_hal_streaming_init_global(
-      /*device_extensions=*/NULL, iree_allocator_system());
+  const hrx_gpu_initialize_options_t options = {0};
+  iree_status_t status =
+      iree_hal_streaming_init_global(&options, iree_allocator_system());
   CUresult result = iree_status_to_cu_result(status);
   IREE_TRACE_ZONE_END(z0);
   return result;

@@ -94,6 +94,30 @@ iree_amdgpu_binary_variants_embed_data(
 )
 
 hrx_cc_test(
+    name = "hip_device_selection_test",
+    srcs = [
+        "device_selection_test.cpp",
+        "//libhrx/cts/core:amdgpu_executable_test_data.hpp",
+        "//libhrx/cts/core:amdgpu_test_data.hpp",
+    ],
+    data = [_HIP_RUNTIME],
+    env = {
+        "HIP_VISIBLE_DEVICES": "0",
+        "HRX_TEST_EXPECT_DEVICE_COUNT": "1",
+        "HRX_TEST_LIBAMDHIP64": "$(rootpath //libhrx/src/binding/hip:amdhip64)",
+    },
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    sanitizer_suppressions = hsa_suppressions,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = _HIP_GPU_CTS_COMPATIBILITY,
+    deps = [
+        "//build_tools/amdgpu:target_map_h",
+        "//libhrx/cts/tests/executable:amdgpu_executable_test_kernels",
+        "//libhrx/src/binding/hip:hip_dso_test_util",
+    ] + _HIP_TEST_DEPS,
+)
+
+hrx_cc_test(
     name = "hip_event_test",
     srcs = ["event_test.cpp"],
     data = [_HIP_RUNTIME],

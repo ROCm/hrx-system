@@ -29,6 +29,7 @@
 #include "binding/hip/array_lifetime.h"
 #include "binding/hip/binding_internal.h"
 #include "binding/hip/blocking_printf_provider.h"
+#include "binding/hip/device_selection.h"
 #include "binding/hip/error_state.h"
 #include "binding/hip/execution_context.h"
 #include "binding/hip/execution_resource.h"
@@ -979,8 +980,10 @@ static inline hrx_device_t iree_hip_hrx_device_from_context(
 
 static iree_slim_mutex_t iree_hip_global_init_mutex;
 static iree_once_flag iree_hip_global_init_mutex_once = IREE_ONCE_FLAG_INIT;
-static iree_atomic_int32_t iree_hip_runtime_initialized =
-    IREE_ATOMIC_VAR_INIT(0);
+// Both successful activation and an empty selected set are immutable until
+// explicit teardown. Repeated no-device queries never recreate native drivers.
+static iree_atomic_int32_t iree_hip_runtime_init_result =
+    IREE_ATOMIC_VAR_INIT(hipErrorNotInitialized);
 static iree_hip_blocking_printf_provider_t iree_hip_blocking_printf_provider;
 
 typedef struct iree_hip_per_thread_stream_state_t {
@@ -1587,15 +1590,6 @@ static void iree_hip_sync_thread_device_selection(uint32_t generation) {
 }
 
 // Ensures HIP runtime is initialized (calls hipInit if needed).
-static bool iree_hip_no_visible_devices_requested(void) {
-  const char* hip_visible_devices = getenv("HIP_VISIBLE_DEVICES");
-  if (hip_visible_devices && strcmp(hip_visible_devices, "-1") == 0) {
-    return true;
-  }
-  const char* rocr_visible_devices = getenv("ROCR_VISIBLE_DEVICES");
-  return rocr_visible_devices && strcmp(rocr_visible_devices, "-1") == 0;
-}
-
 static hipError_t iree_hip_ensure_initialized(void) {
   uint32_t runtime_generation = 0;
   const hipError_t fatal_result =
@@ -1604,21 +1598,27 @@ static hipError_t iree_hip_ensure_initialized(void) {
   if (IREE_UNLIKELY(fatal_result != hipSuccess)) {
     return fatal_result;
   }
-  if (iree_hip_no_visible_devices_requested()) {
-    return hipErrorNoDevice;
+  hipError_t initialized_result = (hipError_t)iree_atomic_load(
+      &iree_hip_runtime_init_result, iree_memory_order_acquire);
+  if (IREE_LIKELY(initialized_result != hipErrorNotInitialized)) {
+    return initialized_result;
   }
-  if (IREE_LIKELY(iree_atomic_load(&iree_hip_runtime_initialized,
-                                   iree_memory_order_acquire))) {
-    return hipSuccess;
-  }
-
   iree_call_once(&iree_hip_global_init_mutex_once,
                  iree_hip_initialize_global_init_mutex);
   iree_slim_mutex_lock(&iree_hip_global_init_mutex);
-  if (iree_atomic_load(&iree_hip_runtime_initialized,
-                       iree_memory_order_relaxed)) {
+  initialized_result = (hipError_t)iree_atomic_load(
+      &iree_hip_runtime_init_result, iree_memory_order_relaxed);
+  if (initialized_result != hipErrorNotInitialized) {
     iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
-    return hipSuccess;
+    return initialized_result;
+  }
+  iree_hip_device_selection_t selection =
+      iree_hip_device_selection_from_environment();
+  if (iree_hip_device_selection_selects_none(&selection)) {
+    iree_atomic_store(&iree_hip_runtime_init_result, hipErrorNoDevice,
+                      iree_memory_order_release);
+    iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
+    return hipErrorNoDevice;
   }
   if (!iree_hal_streaming_device_registry()) {
     iree_hal_device_event_sink_t event_sink = {0};
@@ -1628,31 +1628,31 @@ static hipError_t iree_hip_ensure_initialized(void) {
         &iree_hip_blocking_printf_provider);
   }
 
-  const iree_hal_device_create_params_extension_t* device_extension =
-      iree_hip_blocking_printf_provider_device_extension(
-          &iree_hip_blocking_printf_provider);
+  const hrx_gpu_initialize_options_t options = {
+      .device_extensions = iree_hip_blocking_printf_provider_device_extension(
+          &iree_hip_blocking_printf_provider),
+      .device_selector = {.self = &selection,
+                          .select = iree_hip_device_selection_apply},
+  };
   iree_status_t status = iree_hal_streaming_tls_key_create(
       &iree_hip_per_thread_stream_key,
       iree_hip_per_thread_stream_state_destroy);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_init_global(device_extension,
-                                            iree_allocator_system());
+    status = iree_hal_streaming_init_global(&options, iree_allocator_system());
   }
   if (!iree_status_is_ok(status)) {
     iree_hip_deinitialize_per_thread_stream_key();
     const iree_status_code_t status_code = iree_status_code(status);
     iree_status_free(status);
+    if (status_code == IREE_STATUS_NOT_FOUND) {
+      iree_atomic_store(&iree_hip_runtime_init_result, hipErrorNoDevice,
+                        iree_memory_order_release);
+    }
     iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
     return status_code == IREE_STATUS_NOT_FOUND ? hipErrorNoDevice
                                                 : hipErrorNotInitialized;
   }
-  iree_hal_streaming_device_registry_t* device_registry =
-      iree_hal_streaming_device_registry();
-  if (!device_registry || device_registry->device_count == 0) {
-    iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
-    return hipErrorNoDevice;
-  }
-  iree_atomic_store(&iree_hip_runtime_initialized, 1,
+  iree_atomic_store(&iree_hip_runtime_init_result, hipSuccess,
                     iree_memory_order_release);
   iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
   return hipSuccess;
@@ -1976,7 +1976,7 @@ HIPAPI hipError_t hipHALDeinit(void) {
   iree_call_once(&iree_hip_event_registry_once,
                  iree_hip_event_registry_initialize);
   iree_hip_handle_registry_trim(&iree_hip_event_registry);
-  iree_atomic_store(&iree_hip_runtime_initialized, 0,
+  iree_atomic_store(&iree_hip_runtime_init_result, hipErrorNotInitialized,
                     iree_memory_order_release);
   iree_hip_error_state_reset();
   iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
