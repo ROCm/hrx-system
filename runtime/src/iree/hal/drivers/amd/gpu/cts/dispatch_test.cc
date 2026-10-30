@@ -743,7 +743,8 @@ TEST_P(GpuNativeDispatchTest,
   // Small and multi-wrap recordings share exactly the same public lifecycle.
   // Repeated invocations contend for instances on two FIFOs, then idle trim
   // drops spare instances before the next epoch reuses the immutable program.
-  for (uint32_t count : {1u, 97u}) {
+  for (uint32_t count : {1u, 2u, 5u, 97u}) {
+    SCOPED_TRACE(count);
     iree_hal_command_buffer_t* recording = nullptr;
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
         family, 0, IREE_HAL_COMMAND_CATEGORY_DISPATCH, 3, &recording));
@@ -765,8 +766,8 @@ TEST_P(GpuNativeDispatchTest,
     if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
       const auto* program =
           iree_hal_amd_gpu_aql_command_buffer_program(recording);
-      EXPECT_EQ(program->host_template != nullptr, count == 1);
-      EXPECT_EQ(program->resident.pool == nullptr, count == 1);
+      EXPECT_EQ(program->host_template != nullptr, count <= 2);
+      EXPECT_EQ(program->resident.pool == nullptr, count <= 2);
       uint32_t dispatch_index = 0;
       for (uint32_t i = 0; i < program->block_count; ++i) {
         const auto& block = program->blocks[i];
@@ -858,7 +859,10 @@ TEST_P(GpuNativeDispatchTest,
     EXPECT_EQ(program->blocks[0].packet_count, 4u);
     const auto* packets =
         reinterpret_cast<const iree_hal_amd_gpu_aql_packet_t*>(
-            program->resident.contents.data + program->blocks[0].offset);
+            (program->host_template
+                 ? reinterpret_cast<const uint8_t*>(program->host_template + 1)
+                 : program->resident.contents.data) +
+            program->blocks[0].offset);
     const uint32_t expected[] = {
         IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH |
             IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |

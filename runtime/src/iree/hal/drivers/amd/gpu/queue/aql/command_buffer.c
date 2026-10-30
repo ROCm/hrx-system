@@ -40,6 +40,8 @@ typedef struct iree_hal_amd_gpu_aql_command_buffer_t {
   // The last payload begins after all earlier payloads have completed, so its
   // release fence can cover their writes without an additional native packet.
   bool last_ordered;
+  // Indirect dispatch headers are published by the GPU after reading counts.
+  bool requires_device_publication;
   // First failed mutation, preventing partial native programs from sealing.
   iree_status_t recording_status;
   // Blocks backing optional direct-resource retention.
@@ -245,12 +247,11 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
   if (length) {
     const uint32_t fixup_count =
         iree_hal_amd_gpu_recording_fixup_count(&buffer->recording);
-    // Bound host publication to one native dispatch, eight cache lines of
-    // packet/private data, and sixteen replacement stores. Larger recordings
-    // keep resident instances and native parallel fixup/materialization.
+    // Bound host publication to eight cache lines of packet/private data and
+    // sixteen replacement stores. Larger recordings and device-produced
+    // dispatch headers keep resident fixup/materialization.
     if (buffer->program->block_count == 1 &&
-        buffer->program->blocks[0].packet_count == 1 &&
-        buffer->program->dispatch_count == 1 && length <= 512 &&
+        !buffer->requires_device_publication && length <= 512 &&
         fixup_count <= 16) {
       const uint32_t fixup_offset = (uint32_t)iree_align_uint64(length, 16);
       IREE_RETURN_IF_ERROR(iree_allocator_malloc(
@@ -460,6 +461,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
         buffer, offset + 40, 0, patch_offset,
         IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
     target->words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
+    buffer->requires_device_publication = true;
   }
   iree_hal_amd_gpu_aql_program_block_t* block =
       &buffer->program->blocks[buffer->program->block_count - 1];
@@ -671,9 +673,13 @@ iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
   const iree_hal_amd_gpu_aql_command_buffer_t* buffer =
       (const void*)invocation->command_buffer;
   const iree_hal_amd_gpu_aql_command_program_t* program = invocation->program;
+  const uint64_t address =
+      program->host_template ? upload_address : invocation->instance->address;
+  const uint32_t byte_length = program->host_template
+                                   ? program->host_template->byte_length
+                                   : program->resident.byte_length;
   if (IREE_UNLIKELY(program->has_control) &&
-      invocation->instance->address >
-          (UINT64_C(1) << 48) - program->resident.byte_length) {
+      address > (UINT64_C(1) << 48) - byte_length) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AQL control program exceeds 48-bit addressing");
   }
@@ -687,8 +693,7 @@ iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
                            sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)
                      : 0);
   uint64_t* values = (void*)((uint8_t*)upload + values_offset);
-  values[0] =
-      program->host_template ? upload_address : invocation->instance->address;
+  values[0] = address;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_write(
       &buffer->inputs, invocation->bindings, queue_ordinal, values + 1));
   if (IREE_UNLIKELY(program->host_template)) {
