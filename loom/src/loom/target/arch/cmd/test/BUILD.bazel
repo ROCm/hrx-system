@@ -16,6 +16,7 @@ loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
         "bytecode.loom-test",
+        "dependencies.loom-test",
         "diagnostics.loom-test",
         "low.loom-test",
         "planning.loom-test",

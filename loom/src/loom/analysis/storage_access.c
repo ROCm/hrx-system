@@ -106,6 +106,23 @@ static loom_func_like_t loom_storage_access_call_function(
   return (loom_func_like_t){0};
 }
 
+static const loom_storage_access_binding_t* loom_storage_access_find_binding(
+    const loom_storage_access_scope_t* scope, const loom_op_t* operation) {
+  iree_host_size_t begin = 0, end = scope->binding_count;
+  while (begin < end) {
+    const iree_host_size_t middle = begin + (end - begin) / 2;
+    if ((uintptr_t)scope->bindings[middle].operation < (uintptr_t)operation) {
+      begin = middle + 1;
+    } else {
+      end = middle;
+    }
+  }
+  return begin < scope->binding_count &&
+                 scope->bindings[begin].operation == operation
+             ? &scope->bindings[begin]
+             : NULL;
+}
+
 // Tagged branches and leaves share stable function-record storage. Every branch
 // consumes a distinct bit of a 16-bit symbol, bounding lookup independently of
 // source order without allocating slots for unqueried module symbols.
@@ -410,8 +427,22 @@ static iree_status_t loom_storage_access_visit(
   }
   const loom_call_like_t call = loom_call_like_cast(module, op);
   loom_storage_access_function_record_t* callee_record = NULL;
-  const loom_func_like_t function =
-      loom_storage_access_call_function(module, call);
+  loom_func_like_t function = loom_storage_access_call_function(module, call);
+  loom_value_slice_t arguments = loom_call_like_operands(call);
+  uint16_t argument_offset = loom_call_like_operand_offset(call);
+  if (!loom_func_like_isa(function) && state->scope->binding_count &&
+      iree_any_bit_set(traits, LOOM_TRAIT_CALLABLE_BOUNDARY)) {
+    const loom_storage_access_binding_t* binding =
+        loom_storage_access_find_binding(state->scope, op);
+    if (binding) {
+      function = binding->function;
+      argument_offset = binding->argument_offset;
+      arguments = (loom_value_slice_t){
+          .values = loom_op_operands(op) + argument_offset,
+          .count = binding->argument_count,
+      };
+    }
+  }
   if (loom_func_like_isa(function)) {
     IREE_RETURN_IF_ERROR(
         loom_storage_access_enqueue_function(state, function, &callee_record));
@@ -429,8 +460,6 @@ static iree_status_t loom_storage_access_visit(
     if (callee_record->graph.has_unbounded_memory_access) {
       loom_storage_access_mark_unbounded(state, state->current);
     }
-    const loom_value_slice_t arguments = loom_call_like_operands(call);
-    const uint16_t argument_offset = loom_call_like_operand_offset(call);
     for (uint16_t i = 0; i < arguments.count; ++i) {
       loom_storage_reference_t* formal = callee_record->graph.arguments[i];
       if (!formal) {
@@ -670,5 +699,41 @@ iree_status_t loom_storage_access_require_call(
     return iree_ok_status();
   }
   out_call->has_unbounded_memory_access = true;
+  return iree_ok_status();
+}
+
+iree_status_t loom_storage_access_require_summary(
+    loom_storage_access_scope_t* scope, loom_func_like_t function,
+    loom_local_value_domain_t* value_domain,
+    iree_arena_allocator_t* result_arena,
+    const loom_storage_access_summary_t** out_summary) {
+  *out_summary = NULL;
+  const loom_storage_access_function_t* graph = NULL;
+  IREE_RETURN_IF_ERROR(loom_storage_access_require_function(
+      scope, function, value_domain, &graph));
+  uint16_t argument_count = 0;
+  loom_func_like_arg_ids(function, &argument_count);
+  loom_storage_access_summary_t* summary = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      result_arena,
+      sizeof(*summary) + argument_count * sizeof(*summary->arguments),
+      (void**)&summary));
+  loom_storage_access_argument_t* arguments =
+      (loom_storage_access_argument_t*)(summary + 1);
+  for (uint16_t i = 0; i < argument_count; ++i) {
+    const loom_storage_reference_t* reference = graph->arguments[i];
+    arguments[i] = reference
+                       ? (loom_storage_access_argument_t){
+                             .effects = reference->effects,
+                             .footprint = reference->footprint,
+                         }
+                       : (loom_storage_access_argument_t){0};
+  }
+  *summary = (loom_storage_access_summary_t){
+      .arguments = arguments,
+      .argument_count = argument_count,
+      .has_unbounded_memory_access = graph->has_unbounded_memory_access,
+  };
+  *out_summary = summary;
   return iree_ok_status();
 }

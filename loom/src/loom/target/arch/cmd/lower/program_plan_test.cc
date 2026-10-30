@@ -520,30 +520,35 @@ command.def public @root() launch(%count_storage: buffer, %first_output: buffer,
   loom_cmd_program_t program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(data.data, data.data_length), &program));
-  ASSERT_EQ(program.commands.count, 5u);
+  ASSERT_EQ(program.commands.count, 4u);
   const loom_cmd_program_command_t producer =
       loom_cmd_program_command_at(&program, 0);
   const loom_cmd_program_command_t first_consumer =
       loom_cmd_program_command_at(&program, 2);
   const loom_cmd_program_command_t second_consumer =
-      loom_cmd_program_command_at(&program, 4);
+      loom_cmd_program_command_at(&program, 3);
   EXPECT_EQ(producer.kind, LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT);
   EXPECT_EQ(first_consumer.kind,
             LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC);
   EXPECT_EQ(second_consumer.kind,
-            LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC);
+            LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC_BARRIER);
+  // Both count tuples are published once; the second read needs only order.
+  ASSERT_EQ(program.memory_dependencies.count, 1u);
   const auto dependency = loom_cmd_program_memory_dependency_at(&program, 0);
-  EXPECT_EQ(program.memory_dependencies.count, 1u);
-  EXPECT_EQ(dependency.buffer_ref, LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_GLOBAL);
-  EXPECT_NE(
-      dependency.target_scope & LOOM_CMD_PROGRAM_ACCESS_INDIRECT_COMMAND_READ,
-      0u);
-  for (uint32_t boundary : {1u, 3u}) {
-    const auto barrier = loom_cmd_program_command_at(&program, boundary);
-    EXPECT_EQ(barrier.kind, LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER);
-    EXPECT_EQ(barrier.payload.barrier.first_dependency, 0u);
-    EXPECT_EQ(barrier.payload.barrier.dependency_count, 1u);
-  }
+  EXPECT_EQ(dependency.source_scope, LOOM_CMD_PROGRAM_ACCESS_DISPATCH_WRITE);
+  EXPECT_EQ(dependency.target_scope,
+            LOOM_CMD_PROGRAM_ACCESS_INDIRECT_COMMAND_READ);
+  ASSERT_NE(dependency.buffer_ref, LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_GLOBAL);
+  const auto published =
+      loom_cmd_program_buffer_ref_at(&program, dependency.buffer_ref);
+  EXPECT_EQ(published.role, LOOM_CMD_PROGRAM_BUFFER_ROLE_REBINDABLE);
+  EXPECT_EQ(published.root_index, plan.roots[0].transient.binding_index);
+  EXPECT_EQ(published.byte_offset, 0u);
+  EXPECT_EQ(published.byte_length, 24u);
+  const auto barrier = loom_cmd_program_command_at(&program, 1);
+  EXPECT_EQ(barrier.kind, LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER);
+  EXPECT_EQ(barrier.payload.barrier.first_dependency, 0u);
+  EXPECT_EQ(barrier.payload.barrier.dependency_count, 1u);
   EXPECT_EQ(producer.payload.dispatch_direct.workgroup_count_x, 1u);
   EXPECT_EQ(producer.payload.dispatch_direct.workgroup_count_y, 1u);
   EXPECT_EQ(producer.payload.dispatch_direct.workgroup_count_z, 1u);

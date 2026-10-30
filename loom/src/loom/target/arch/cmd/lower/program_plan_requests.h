@@ -32,6 +32,14 @@ typedef struct loom_cmd_program_kernel_site_root_t {
   uint32_t* requirement_indices;
 } loom_cmd_program_kernel_site_root_t;
 
+// Compact source facts retained only until command dependency planning ends.
+typedef struct loom_cmd_program_kernel_accesses_t {
+  // Plan-wide requirement projection; NULL rows are opaque external entries.
+  const loom_storage_access_summary_t** by_requirement;
+  // Storage whose lifetime extends beyond each publication scratch rewind.
+  iree_arena_allocator_t* arena;
+} loom_cmd_program_kernel_accesses_t;
+
 // Publishes source-backed kernel classes and assigns their plan requirements.
 //
 // Schedule rows and the existing source fact table are the authoritative site
@@ -46,6 +54,7 @@ iree_status_t loom_cmd_program_plan_publish_kernel_requests(
     const loom_value_fact_table_t* source_facts,
     const loom_cmd_program_kernel_source_t* kernel_source,
     loom_cmd_program_kernel_site_root_t* roots, iree_host_size_t root_count,
+    loom_cmd_program_kernel_accesses_t* accesses,
     iree_arena_allocator_t* scratch_arena);
 
 // Publishes generated count-producer sources and assigns their requirements.
@@ -58,6 +67,7 @@ iree_status_t loom_cmd_program_plan_publish_generated_kernel_requests(
     const loom_cmd_launch_count_realization_t* realization,
     loom_cmd_program_kernel_request_sink_t sink,
     loom_cmd_program_kernel_site_root_t* roots, iree_host_size_t root_count,
+    loom_cmd_program_kernel_accesses_t* accesses,
     iree_arena_allocator_t* scratch_arena);
 
 #ifdef __cplusplus
