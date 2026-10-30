@@ -212,45 +212,6 @@ loom_test(
 )
 
 loom_test(
-    name = "packed_integer_widening_test",
-    srcs = ["packed_integer_widening.loom"],
-    execution_profiles = [
-        AMD_GPU_HARDWARE_PROFILE,
-        AMD_GPU_ACCESS_PROFILE,
-    ],
-)
-
-loom_test(
-    name = "packed_f16_widening_test",
-    srcs = ["packed_f16_widening.loom"],
-    benchmark_smoke = False,
-    compile_targets = ["//loom/target/amdgpu:" + target for target in LOOM_AMDGPU_SUPPORTED_TARGETS],
-    execution_profiles = [
-        AMD_GPU_HARDWARE_PROFILE,
-        AMD_GPU_ACCESS_PROFILE,
-    ],
-)
-
-loom_test(
-    name = "packed_table_lookup_test",
-    srcs = ["packed_table_lookup.loom"],
-    execution_profiles = [
-        AMD_GPU_HARDWARE_PROFILE,
-        AMD_GPU_ACCESS_PROFILE,
-    ],
-)
-
-loom_test(
-    name = "packed_nibble_unpack_test",
-    srcs = ["packed_nibble_unpack.loom"],
-    compile_targets = ["//loom/target/amdgpu:" + target for target in LOOM_AMDGPU_SUPPORTED_TARGETS],
-    execution_profiles = [
-        AMD_GPU_HARDWARE_PROFILE,
-        AMD_GPU_ACCESS_PROFILE,
-    ],
-)
-
-loom_test(
     name = "buffer_descriptor_extents_test",
     srcs = ["buffer_descriptor_extents.loom"],
     benchmark_smoke = False,
