@@ -13,7 +13,7 @@ Loom product already includes XDNA emission and the VM reference target:
 ```sh
 python dev.py bazel configure -DIREE_HAL_DRIVER_AMD_XDNA=ON
 python dev.py bazel run //loom/src/loom/tools/loom-test -- \
-  loom/src/loom/tooling/target/amd/xdna/test/hal_execution.loom --device=xdna
+  loom/target/amd/xdna/test/native/hal_execution.loom --device=xdna
 ```
 
 The scenario compiles a finite multiply pipeline for the selected device and
@@ -188,7 +188,7 @@ In another terminal, run the just-built executable:
 ```sh
 TRACY_PORT=18086 TRACY_NO_EXIT=1 \
   bazel-bin/loom/src/loom/tools/loom-benchmark/loom-benchmark \
-  loom/src/loom/tooling/target/amd/xdna/test/hal_execution.loom \
+  loom/target/amd/xdna/test/native/hal_execution.loom \
   --device=xdna --benchmark=@serial_array_latency --batch-size=6 \
   --iterations=8 --warmup-iterations=2 --profile-final-batch=false
 ```
@@ -231,7 +231,7 @@ The ordinary benchmark tool uses the same XDNA provider as correctness tests:
 ```sh
 python dev.py bazel run --config=opt \
   //loom/src/loom/tools/loom-benchmark -- \
-  loom/src/loom/tooling/target/amd/xdna/test/hal_execution.loom \
+  loom/target/amd/xdna/test/native/hal_execution.loom \
   --device=xdna --benchmark=@serial_array_latency --batch-size=64 \
   --profile-data=queue-events,host-execution,counters
 ```
@@ -307,7 +307,7 @@ iree-bazel-test --config=asan \
   //runtime/src/iree/hal/drivers/amd/xdna/cts:native_test \
   //runtime/src/iree/hal/drivers/amd/cts:cpu_xdna_test \
   //runtime/src/iree/hal/drivers/amd/cts:virtual_buffer_test \
-  //loom/src/loom/tooling/target/amd/xdna:hal_execution_test
+  //loom/target/amd/xdna/test/native:hal_execution_test
 ```
 
 The native suite exercises submission capture, rebinding, guarded buffer views,
