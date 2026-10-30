@@ -294,11 +294,24 @@ static void iree_hal_vulkan_timestamp_record_scatter(
 static bool iree_hal_vulkan_timestamp_matches_range(
     const iree_hal_vulkan_timestamp_pending_t* pending,
     iree_hal_buffer_ref_t range) {
-  return pending->buffer &&
-         (!range.buffer ||
-          iree_hal_buffer_test_overlap(
-              pending->buffer, pending->offset, 8, range.buffer, range.offset,
-              range.length) != IREE_HAL_BUFFER_OVERLAP_DISJOINT);
+  if (!pending->buffer) {
+    return false;
+  }
+  if (!range.buffer) {
+    return true;
+  }
+  if (!range.length) {
+    return false;
+  }
+  // Distinct imports may share storage without sharing logical byte
+  // coordinates. Only a shared allocation proves range disjointness.
+  if (iree_hal_buffer_allocated_buffer(pending->buffer) !=
+      iree_hal_buffer_allocated_buffer(range.buffer)) {
+    return true;
+  }
+  return iree_hal_buffer_test_overlap(
+             pending->buffer, pending->offset, 8, range.buffer, range.offset,
+             range.length) != IREE_HAL_BUFFER_OVERLAP_DISJOINT;
 }
 
 void iree_hal_vulkan_timestamp_record_delivery(

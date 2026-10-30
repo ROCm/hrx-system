@@ -702,32 +702,55 @@ TEST_F(VulkanCommandBufferTest, TimestampDeliveryFollowsDataDependencies) {
       &buffer));
   const std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
       buffer_owner(buffer, iree_hal_buffer_release);
-  const std::pair<bool, iree_hal_execution_stage_t> cases[] = {
-      {false, IREE_HAL_EXECUTION_STAGE_TRANSFER},
-      {true, IREE_HAL_EXECUTION_STAGE_TRANSFER},
-      {false, IREE_HAL_EXECUTION_STAGE_HOST},
-      {true, IREE_HAL_EXECUTION_STAGE_HOST},
+  enum class References {
+    kSameSlot,
+    kOtherSlot,
+    kDirectCapture,
+    kDirectConsumer,
+    kDirect
   };
-  for (auto [alias_slot, execution_target] : cases) {
-    SCOPED_TRACE(alias_slot);
+  const std::pair<References, iree_hal_execution_stage_t> cases[] = {
+      {References::kSameSlot, IREE_HAL_EXECUTION_STAGE_TRANSFER},
+      {References::kOtherSlot, IREE_HAL_EXECUTION_STAGE_TRANSFER},
+      {References::kDirectCapture, IREE_HAL_EXECUTION_STAGE_TRANSFER},
+      {References::kDirectConsumer, IREE_HAL_EXECUTION_STAGE_TRANSFER},
+      {References::kDirect, IREE_HAL_EXECUTION_STAGE_TRANSFER},
+      {References::kSameSlot, IREE_HAL_EXECUTION_STAGE_HOST},
+      {References::kOtherSlot, IREE_HAL_EXECUTION_STAGE_HOST},
+      {References::kDirectCapture, IREE_HAL_EXECUTION_STAGE_HOST},
+      {References::kDirectConsumer, IREE_HAL_EXECUTION_STAGE_HOST},
+      {References::kDirect, IREE_HAL_EXECUTION_STAGE_HOST},
+  };
+  for (auto [references, execution_target] : cases) {
+    SCOPED_TRACE(static_cast<int>(references));
     SCOPED_TRACE(execution_target);
+    const bool direct_capture = references == References::kDirectCapture ||
+                                references == References::kDirect;
+    const bool direct_consumer = references == References::kDirectConsumer ||
+                                 references == References::kDirect;
+    const bool alias_slot = references == References::kOtherSlot ||
+                            references == References::kDirectCapture;
+    const auto capture_ref = [&](uint64_t offset) {
+      return direct_capture ? iree_hal_make_buffer_ref(buffer, offset, 8)
+                            : iree_hal_make_indirect_buffer_ref(0, offset, 8);
+    };
     auto commands =
         CreateCommandBuffer(2, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT);
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(commands.get()));
-    IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
-        commands.get(), 0, 0, iree_hal_make_indirect_buffer_ref(0, 0, 8), 0));
+    IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(commands.get(), 0, 0,
+                                                     capture_ref(0), 0));
     // A wave join orders captures, but does not consume timestamp data.
     const iree_hal_barrier_t execution = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
         .target_stage_mask = execution_target,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(commands.get(), &execution));
-    IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
-        commands.get(), 0, 0, iree_hal_make_indirect_buffer_ref(0, 8, 8), 0));
+    IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(commands.get(), 0, 0,
+                                                     capture_ref(8), 0));
     const iree_hal_buffer_barrier_t unrelated = {
         .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
         .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
-        .buffer_ref = iree_hal_make_indirect_buffer_ref(0, 32, 8),
+        .buffer_ref = capture_ref(32),
     };
     iree_hal_barrier_t consume = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
@@ -740,21 +763,25 @@ TEST_F(VulkanCommandBufferTest, TimestampDeliveryFollowsDataDependencies) {
         .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
         .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
         .buffer_ref =
-            iree_hal_make_indirect_buffer_ref(alias_slot ? 1 : 0, 0, 8),
+            direct_consumer
+                ? iree_hal_make_buffer_ref(buffer, direct_capture ? 0 : 8, 8)
+                : iree_hal_make_indirect_buffer_ref(alias_slot ? 1 : 0, 0, 8),
     };
     consume.buffer_barriers = &sample;
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(commands.get(), &consume));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(commands.get()));
     EXPECT_EQ(
         iree_hal_vulkan_command_buffer_native_replay_compatible(commands.get()),
-        !alias_slot);
+        references == References::kSameSlot);
 
-    // Cross-slot aliases change between submissions. Native recording must
-    // resolve exactly the query covered by this invocation's range.
+    // Cross-slot and mixed direct/indirect aliases change between submissions.
+    // Resolve exactly the query covered by this invocation's range.
     for (uint64_t alias_offset : {0u, 8u}) {
       SCOPED_TRACE(alias_offset);
-      const iree_hal_buffer_binding_t bindings[] = {{buffer, 0, 64},
-                                                    {buffer, alias_offset, 64}};
+      const uint64_t capture_offset =
+          references == References::kDirectConsumer ? alias_offset : 0;
+      const iree_hal_buffer_binding_t bindings[] = {
+          {buffer, capture_offset, 64}, {buffer, alias_offset, 64}};
       std::array<uint64_t, 2> addresses = {};
       const iree_hal_vulkan_command_buffer_bda_publication_t publication = {
           .host_span = iree_make_byte_span(addresses.data(), sizeof(addresses)),
@@ -775,12 +802,24 @@ TEST_F(VulkanCommandBufferTest, TimestampDeliveryFollowsDataDependencies) {
           commands.get(), &syms, reinterpret_cast<VkDevice>(uintptr_t{1}),
           &debug_utils, &builtins,
           reinterpret_cast<VkCommandBuffer>(uintptr_t{2}), 0, VK_NULL_HANDLE,
-          {2, bindings}, &publication, nullptr, &timestamps, nullptr,
-          iree_allocator_system()));
+          {2, bindings}, direct_capture ? nullptr : &publication, nullptr,
+          &timestamps, nullptr, iree_allocator_system()));
       g_native_replay_capture = nullptr;
-      const uint32_t first = alias_slot ? alias_offset / 8 : 0;
-      EXPECT_EQ(capture.events,
-                (std::vector<std::pair<char, uint32_t>>{{'R', 2},
+      const uint32_t first = references == References::kDirectConsumer
+                                 ? 1 - alias_offset / 8
+                             : alias_slot ? alias_offset / 8
+                                          : 0;
+      const std::vector<std::pair<char, uint32_t>> expected_events =
+          direct_capture
+              ? std::vector<std::pair<char, uint32_t>>{{'R', 2},
+                                                       {'T', 0},
+                                                       {'B', 0},
+                                                       {'T', 1},
+                                                       {'B', 0},
+                                                       {'C', first},
+                                                       {'B', 0},
+                                                       {'C', 1 - first}}
+              : (std::vector<std::pair<char, uint32_t>>{{'R', 2},
                                                         {'B', 0},
                                                         {'T', 0},
                                                         {'B', 0},
@@ -792,18 +831,27 @@ TEST_F(VulkanCommandBufferTest, TimestampDeliveryFollowsDataDependencies) {
                                                         {'B', 0},
                                                         {'C', 1 - first},
                                                         {'B', 0},
-                                                        {'D', 0}}));
+                                                        {'D', 0}});
+      EXPECT_EQ(capture.events, expected_events);
       EXPECT_EQ(capture.query_copies,
                 (std::vector<std::array<uint64_t, 3>>{
                     {first, 1, first * 8}, {1 - first, 1, (1 - first) * 8}}));
-      EXPECT_EQ(addresses, (std::array<uint64_t, 2>{0x1000, 0x1008}));
+      const std::array<uint64_t, 2> expected_addresses =
+          direct_capture ? std::array<uint64_t, 2>{}
+                         : std::array<uint64_t, 2>{0x1000 + capture_offset,
+                                                   0x1008 + capture_offset};
+      EXPECT_EQ(addresses, expected_addresses);
       // An ordinary ranged access dependency retains visibility without a
       // recipe.
-      EXPECT_NE(capture.memory_barriers[3].srcAccessMask, 0u);
-      EXPECT_NE(capture.memory_barriers[1].srcStageMask &
+      ASSERT_EQ(capture.memory_barrier_count, direct_capture ? 3u : 4u);
+      EXPECT_NE(capture.memory_barriers[capture.memory_barrier_count - 1]
+                    .srcAccessMask,
+                0u);
+      const size_t execution_index = direct_capture ? 0 : 1;
+      EXPECT_NE(capture.memory_barriers[execution_index].srcStageMask &
                     VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                 0u);
-      EXPECT_EQ(capture.memory_barriers[1].srcAccessMask, 0u);
+      EXPECT_EQ(capture.memory_barriers[execution_index].srcAccessMask, 0u);
     }
   }
 }
