@@ -347,6 +347,23 @@ hrx_cc_library(
     ],
 )
 
+hrx_cc_test(
+    name = "staged_copy_test",
+    srcs = ["staged_copy_test.cc"],
+    deps = [
+        ":staged_copy",
+        "//libhrx/src/binding/common",
+        "//libhrx/src/binding/common:host_callback",
+        "//libhrx/src/libhrx:hrx_static",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 hrx_cc_shared_library(
     name = "amdhip64",
     srcs = [
@@ -643,6 +660,30 @@ hrx_cc_test(
         ":hip_dso_test_util",
         "//build_tools/bazel:dl",
         "//build_tools/bazel:pthreads",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_graph_memory_api_test",
+    srcs = [
+        "api.h",
+        "hip_graph_memory_api_test.cc",
+    ],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    sanitizer_suppressions = hsa_suppressions,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    deps = [
+        ":hip_dso_test_util",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

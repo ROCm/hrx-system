@@ -2357,6 +2357,8 @@ HIPAPI hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node,
                                                  hipGraph_t* pGraph);
 HIPAPI hipError_t hipGraphHostNodeSetParams(hipGraphNode_t node,
                                             const void* pNodeParams);
+HIPAPI hipError_t hipGraphHostNodeGetParams(hipGraphNode_t node,
+                                            hipHostNodeParams* pNodeParams);
 HIPAPI hipError_t hipGraphKernelNodeGetParams(hipGraphNode_t node,
                                               void* pNodeParams);
 HIPAPI hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node,
