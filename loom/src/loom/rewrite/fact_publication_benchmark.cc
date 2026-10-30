@@ -28,7 +28,7 @@ namespace {
 class LoopPublication {
  public:
   LoopPublication(int64_t independent_count, int64_t feedback_count,
-                  int64_t loop_count, bool track_rewrites) {
+                  int64_t loop_count, bool track_rewrites, int64_t depth = 1) {
     iree_arena_block_pool_initialize(64 * 1024, iree_allocator_system(),
                                      &pool_);
     iree_arena_initialize(&pool_, &rewrite_arena_);
@@ -61,40 +61,8 @@ class LoopPublication {
     one_ = Constant(&builder, 1);
     const auto upper = Constant(&builder, 4);
     for (int64_t i = 0; i < loop_count; ++i) {
-      loom_op_t* loop = nullptr;
-      IREE_CHECK_OK(loom_scf_for_build(
-          &builder, 0, zero_, upper, one_, &one_, 1, nullptr, nullptr, 0,
-          LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID, 0, 0,
-          LOOM_LOCATION_UNKNOWN, &loop));
-      auto nested = builder;
-      auto* loop_body = loom_loop_like_body(loom_loop_like_cast(module_, loop));
-      loom_builder_enter_region(&nested, loop, loop_body);
-      loom_value_id_t invariant = input;
-      for (int64_t j = 0; j < independent_count; ++j) {
-        loom_op_t* add = nullptr;
-        IREE_CHECK_OK(loom_index_add_build(&nested, invariant, one_, type,
-                                           LOOM_LOCATION_UNKNOWN, &add));
-        invariant = loom_index_add_result(add);
-      }
-      loom_op_t* use = nullptr;
-      IREE_CHECK_OK(loom_test_use_build(&nested, &invariant, 1,
-                                        LOOM_LOCATION_UNKNOWN, &use));
-      loom_op_t* increment = nullptr;
-      IREE_CHECK_OK(loom_index_constant_build(
-          &nested, loom_attr_i64(0), type, LOOM_LOCATION_UNKNOWN, &increment));
-      edits_.push_back(increment);
-      loom_value_id_t feedback = loom_region_entry_arg_id(loop_body, 1);
-      for (int64_t j = 0; j < feedback_count; ++j) {
-        loom_op_t* add = nullptr;
-        IREE_CHECK_OK(loom_index_add_build(
-            &nested, feedback,
-            j == 0 ? loom_index_constant_result(increment) : zero_, type,
-            LOOM_LOCATION_UNKNOWN, &add));
-        feedback = loom_index_add_result(add);
-      }
-      loom_op_t* yield = nullptr;
-      IREE_CHECK_OK(loom_scf_yield_build(&nested, &feedback, 1,
-                                         LOOM_LOCATION_UNKNOWN, &yield));
+      BuildLoop(&builder, one_, input, upper, independent_count, feedback_count,
+                depth);
     }
     loom_op_t* end = nullptr;
     IREE_CHECK_OK(loom_test_yield_build(&builder, nullptr, 0,
@@ -166,6 +134,52 @@ class LoopPublication {
            owner_.transient_arena.used_allocation_size;
   }
 
+  loom_value_id_t BuildLoop(loom_builder_t* builder, loom_value_id_t initial,
+                            loom_value_id_t input, loom_value_id_t upper,
+                            int64_t independent_count, int64_t feedback_count,
+                            int64_t depth) {
+    const auto type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+    loom_op_t* loop = nullptr;
+    IREE_CHECK_OK(loom_scf_for_build(
+        builder, 0, zero_, upper, one_, &initial, 1, nullptr, nullptr, 0,
+        LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID, 0, 0,
+        LOOM_LOCATION_UNKNOWN, &loop));
+    auto nested = *builder;
+    auto* loop_body = loom_loop_like_body(loom_loop_like_cast(module_, loop));
+    loom_builder_enter_region(&nested, loop, loop_body);
+    loom_value_id_t invariant = input;
+    for (int64_t j = 0; j < independent_count; ++j) {
+      loom_op_t* add = nullptr;
+      IREE_CHECK_OK(loom_index_add_build(&nested, invariant, one_, type,
+                                         LOOM_LOCATION_UNKNOWN, &add));
+      invariant = loom_index_add_result(add);
+    }
+    loom_op_t* use = nullptr;
+    IREE_CHECK_OK(loom_test_use_build(&nested, &invariant, 1,
+                                      LOOM_LOCATION_UNKNOWN, &use));
+    loom_op_t* increment = nullptr;
+    IREE_CHECK_OK(loom_index_constant_build(&nested, loom_attr_i64(0), type,
+                                            LOOM_LOCATION_UNKNOWN, &increment));
+    edits_.push_back(increment);
+    loom_value_id_t feedback = loom_region_entry_arg_id(loop_body, 1);
+    if (depth > 1) {
+      feedback = BuildLoop(&nested, feedback, input, upper, independent_count,
+                           feedback_count, depth - 1);
+    }
+    for (int64_t j = 0; j < feedback_count; ++j) {
+      loom_op_t* add = nullptr;
+      IREE_CHECK_OK(loom_index_add_build(
+          &nested, feedback,
+          j == 0 ? loom_index_constant_result(increment) : zero_, type,
+          LOOM_LOCATION_UNKNOWN, &add));
+      feedback = loom_index_add_result(add);
+    }
+    loom_op_t* yield = nullptr;
+    IREE_CHECK_OK(loom_scf_yield_build(&nested, &feedback, 1,
+                                       LOOM_LOCATION_UNKNOWN, &yield));
+    return loom_op_results(loop)[0];
+  }
+
   // Shared backing for independent module, fact, and rewrite lifetimes.
   iree_arena_block_pool_t pool_;
   // Retained queue storage reused by each mutation batch.
@@ -178,7 +192,7 @@ class LoopPublication {
   loom_pass_value_fact_owner_t owner_;
   // Production mutation and publication boundary under measurement.
   loom_rewriter_t rewriter_;
-  // Mutable feedback increment in each independent loop.
+  // Mutable feedback increments for the publication batch.
   std::vector<loom_op_t*> edits_;
   // Zero increment used on alternating publications.
   loom_value_id_t zero_;
@@ -217,5 +231,19 @@ BENCHMARK(BM_LoopPublication)
         }
       }
     });
+
+static void BM_NestedLoopPublication(benchmark::State& state) {
+  LoopPublication fixture(state.range(0), state.range(1), 1, state.range(2), 2);
+  for (auto _ : state) {
+    fixture.Publish();
+  }
+  fixture.Counters(state);
+}
+BENCHMARK(BM_NestedLoopPublication)
+    ->ArgNames({"independent", "feedback", "rewrites"})
+    ->Args({0, 32, 0})
+    ->Args({256, 1, 0})
+    ->Args({0, 32, 1})
+    ->Args({256, 1, 1});
 
 }  // namespace
