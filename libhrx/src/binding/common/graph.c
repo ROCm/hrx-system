@@ -139,21 +139,6 @@ static iree_status_t iree_hal_streaming_graph_validate_batch_mem_operations(
   return status;
 }
 
-static bool iree_hal_streaming_graph_contains_graph_memory_nodes(
-    const iree_hal_streaming_graph_t* graph) {
-  for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
-       block = block->next) {
-    for (iree_host_size_t i = 0; i < block->count; ++i) {
-      iree_hal_streaming_graph_node_t* node = block->nodes[i];
-      if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC ||
-          node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 static iree_atomic_uint64_t iree_hal_streaming_next_graph_debug_id =
     IREE_ATOMIC_VAR_INIT(1);
 static iree_atomic_uint64_t iree_hal_streaming_next_node_debug_id =
@@ -2288,11 +2273,16 @@ iree_status_t iree_hal_streaming_graph_destroy_node(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "node must belong to an active graph");
   }
+  // Memory-node storage belongs to the template and its executable snapshots.
+  // HIP/CUDA prohibit removing these nodes independently of their graph.
+  if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC ||
+      node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "memory allocation and free nodes cannot be removed from a graph");
+  }
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_hal_streaming_graph_t* graph = node->graph;
-  const bool removed_graph_memory_node =
-      node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC ||
-      node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE;
   if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY) {
     if (node->attrs.memcpy.pre_callback) {
       iree_hal_streaming_graph_erase_node(node->attrs.memcpy.pre_callback);
@@ -2302,10 +2292,6 @@ iree_status_t iree_hal_streaming_graph_destroy_node(
     }
   }
   iree_hal_streaming_graph_erase_node(node);
-  if (removed_graph_memory_node) {
-    graph->has_graph_memory_nodes =
-        iree_hal_streaming_graph_contains_graph_memory_nodes(graph);
-  }
   iree_hal_streaming_graph_renumber_nodes(graph);
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();

@@ -522,6 +522,8 @@ iree_status_t iree_hal_streaming_graph_set_batch_mem_op_node_params(
     const iree_hal_streaming_value_operation_t* operations,
     const hrx_buffer_t* owners, iree_host_size_t operation_count);
 
+// Removes an ordinary operation and its helpers. Allocation and free nodes
+// remain with the template until its final owner releases it.
 iree_status_t iree_hal_streaming_graph_destroy_node(
     iree_hal_streaming_graph_node_t* node);
 

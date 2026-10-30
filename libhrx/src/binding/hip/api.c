@@ -22101,8 +22101,7 @@ HIPAPI hipError_t hipGraphNodeGetType(hipGraphNode_t node,
 HIPAPI hipError_t hipGraphDestroyNode(hipGraphNode_t node) {
   HIP_API_BEGIN();
   HIP_RETURN_STATUS(iree_hal_streaming_graph_destroy_node(
-                        (iree_hal_streaming_graph_node_t*)node),
-                    hipErrorInvalidValue);
+      (iree_hal_streaming_graph_node_t*)node));
   HIP_RETURN_ERROR(hipSuccess);
 }
 

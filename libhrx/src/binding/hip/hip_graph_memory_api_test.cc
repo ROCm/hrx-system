@@ -55,6 +55,10 @@ struct HipGraphApi {
   decltype(&hipGraphLaunch) launch = nullptr;
   // Adds a contiguous graph copy.
   decltype(&hipGraphAddMemcpyNode1D) add_copy_1d = nullptr;
+  // Allocates graph-owned device storage with a stable graph address.
+  decltype(&hipGraphAddMemAllocNode) add_allocation = nullptr;
+  // Ends the graph-visible lifetime of a graph allocation.
+  decltype(&hipGraphAddMemFreeNode) add_free = nullptr;
   // Adds a pitched multidimensional graph copy.
   decltype(&hipGraphAddMemcpyNode) add_copy = nullptr;
   // Updates a template's contiguous copy parameters.
@@ -123,6 +127,8 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     RESOLVE(executable_destroy, "hipGraphExecDestroy");
     RESOLVE(launch, "hipGraphLaunch");
     RESOLVE(add_copy_1d, "hipGraphAddMemcpyNode1D");
+    RESOLVE(add_allocation, "hipGraphAddMemAllocNode");
+    RESOLVE(add_free, "hipGraphAddMemFreeNode");
     RESOLVE(add_copy, "hipGraphAddMemcpyNode");
     RESOLVE(set_copy, "hipGraphMemcpyNodeSetParams1D");
     RESOLVE(set_executable_copy, "hipGraphExecMemcpyNodeSetParams1D");
@@ -439,6 +445,54 @@ TEST_F(HipGraphMemoryApiTest, TemplateNodeRemovalPreservesExecutableHandles) {
   ASSERT_FALSE(HasFatalFailure());
   EXPECT_EQ(destination_, replacement_);
   EXPECT_EQ(callbacks_[0], 1);
+}
+
+TEST_F(HipGraphMemoryApiTest, AllocationNodesRemainUntilTheirGraphIsReleased) {
+  int device = -1;
+  ASSERT_EQ(hipSuccess, api_.get_device(&device));
+  hipMemAllocNodeParams allocation = {};
+  allocation.poolProps.allocType = hipMemAllocationTypePinned;
+  allocation.poolProps.location.type = hipMemLocationTypeDevice;
+  allocation.poolProps.location.id = device;
+  allocation.bytesize = source_.size();
+  hipGraphNode_t allocation_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_allocation(&allocation_node, graph_, nullptr,
+                                            0, &allocation));
+  ASSERT_NE(nullptr, allocation.dptr);
+  hipGraphNode_t upload = nullptr;
+  ASSERT_EQ(
+      hipSuccess,
+      api_.add_copy_1d(&upload, graph_, &allocation_node, 1, allocation.dptr,
+                       source_.data(), source_.size(), hipMemcpyHostToDevice));
+  hipGraphNode_t download = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.add_copy_1d(&download, graph_, &upload, 1, destination_.data(),
+                             allocation.dptr, destination_.size(),
+                             hipMemcpyDeviceToHost));
+  hipGraphNode_t free_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.add_free(&free_node, graph_, &download, 1, allocation.dptr));
+
+  EXPECT_EQ(hipErrorNotSupported, api_.destroy_node(allocation_node));
+  EXPECT_EQ(hipErrorNotSupported, api_.destroy_node(free_node));
+  size_t node_count = 0;
+  ASSERT_EQ(hipSuccess, api_.get_nodes(graph_, nullptr, &node_count));
+  EXPECT_EQ(4u, node_count);
+
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  Replay();
+  EXPECT_EQ(source_, destination_);
+  EXPECT_EQ(hipErrorNotSupported, api_.destroy_node(allocation_node));
+  EXPECT_EQ(hipErrorNotSupported, api_.destroy_node(free_node));
+  ASSERT_EQ(hipSuccess,
+            api_.set_executable_copy(executable_, upload, allocation.dptr,
+                                     replacement_.data(), replacement_.size(),
+                                     hipMemcpyHostToDevice));
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(graph_));
+  graph_ = nullptr;
+  destination_.fill(0);
+  Replay();
+  EXPECT_EQ(replacement_, destination_);
 }
 
 TEST_F(HipGraphMemoryApiTest, PitchedCopyCloneReplaysItsOwnStaging) {
