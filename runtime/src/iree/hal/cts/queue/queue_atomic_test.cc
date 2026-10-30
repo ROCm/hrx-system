@@ -424,6 +424,50 @@ TEST_P(QueueAtomicTest, SystemWaitConditions64) {
                                   IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
 }
 
+TEST_P(QueueAtomicTest, ZeroComputeStoreAndAddSubtract32) {
+  RunStoreAndRmwTest<uint32_t>(IREE_HAL_ATOMIC_WIDTH_32, false,
+                               IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
+}
+
+TEST_P(QueueAtomicTest, ZeroComputeWaitConditions32) {
+  RunWaitConditionsTest<uint32_t>(IREE_HAL_ATOMIC_WIDTH_32,
+                                  IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
+}
+
+TEST_P(QueueAtomicTest, ZeroComputeStoreAndAddSubtract64) {
+  RunStoreAndRmwTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64, false,
+                               IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
+}
+
+TEST_P(QueueAtomicTest, ZeroComputeWaitConditions64) {
+  RunWaitConditionsTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64,
+                                  IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
+}
+
+TEST_P(QueueAtomicTest, ZeroComputeSystemStoreAndAddSubtract32) {
+  RunStoreAndRmwTest<uint32_t>(
+      IREE_HAL_ATOMIC_WIDTH_32, false,
+      IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+}
+
+TEST_P(QueueAtomicTest, ZeroComputeSystemWaitConditions32) {
+  RunWaitConditionsTest<uint32_t>(
+      IREE_HAL_ATOMIC_WIDTH_32,
+      IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+}
+
+TEST_P(QueueAtomicTest, ZeroComputeSystemStoreAndAddSubtract64) {
+  RunStoreAndRmwTest<uint64_t>(
+      IREE_HAL_ATOMIC_WIDTH_64, false,
+      IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+}
+
+TEST_P(QueueAtomicTest, ZeroComputeSystemWaitConditions64) {
+  RunWaitConditionsTest<uint64_t>(
+      IREE_HAL_ATOMIC_WIDTH_64,
+      IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+}
+
 TEST_P(QueueAtomicTest, ResolvedMisalignmentFails64) {
   RunResolvedMisalignmentFailureTest(IREE_HAL_ATOMIC_WIDTH_64);
 }

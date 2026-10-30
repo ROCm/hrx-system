@@ -550,6 +550,52 @@ TEST_P(CommandBufferAtomicTest, SystemReusableWait64) {
                                 IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
 }
 
+TEST_P(CommandBufferAtomicTest, ZeroComputeReusableStoreAndAddSubtract32) {
+  RunReusableStoreAndRmwTest<uint32_t>(IREE_HAL_ATOMIC_WIDTH_32, false,
+                                       IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
+}
+
+TEST_P(CommandBufferAtomicTest, ZeroComputeReusableWait32) {
+  RunReusableWaitTest<uint32_t>(IREE_HAL_ATOMIC_WIDTH_32,
+                                IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
+}
+
+TEST_P(CommandBufferAtomicTest, ZeroComputeReusableStoreAndAddSubtract64) {
+  RunReusableStoreAndRmwTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64, false,
+                                       IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
+}
+
+TEST_P(CommandBufferAtomicTest, ZeroComputeReusableWait64) {
+  RunReusableWaitTest<uint64_t>(IREE_HAL_ATOMIC_WIDTH_64,
+                                IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
+}
+
+TEST_P(CommandBufferAtomicTest,
+       ZeroComputeSystemReusableStoreAndAddSubtract32) {
+  RunReusableStoreAndRmwTest<uint32_t>(
+      IREE_HAL_ATOMIC_WIDTH_32, false,
+      IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+}
+
+TEST_P(CommandBufferAtomicTest, ZeroComputeSystemReusableWait32) {
+  RunReusableWaitTest<uint32_t>(
+      IREE_HAL_ATOMIC_WIDTH_32,
+      IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+}
+
+TEST_P(CommandBufferAtomicTest,
+       ZeroComputeSystemReusableStoreAndAddSubtract64) {
+  RunReusableStoreAndRmwTest<uint64_t>(
+      IREE_HAL_ATOMIC_WIDTH_64, false,
+      IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+}
+
+TEST_P(CommandBufferAtomicTest, ZeroComputeSystemReusableWait64) {
+  RunReusableWaitTest<uint64_t>(
+      IREE_HAL_ATOMIC_WIDTH_64,
+      IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE);
+}
+
 TEST_P(CommandBufferAtomicTest, ResolvedMisalignmentFails64) {
   RunResolvedMisalignmentFailureTest(IREE_HAL_ATOMIC_WIDTH_64);
 }

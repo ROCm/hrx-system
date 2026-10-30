@@ -65,17 +65,22 @@ bool SelectAtomicTestConfiguration(iree_hal_device_t* device,
         queue_family.provisioned_queue_count == 0) {
       continue;
     }
+    const bool zero_compute = iree_any_bit_set(
+        requirements.atomic_flags, IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
+    const iree_hal_atomic_capabilities_t& capabilities =
+        zero_compute ? queue_family.zero_compute_atomic_capabilities
+                     : queue_family.atomic_capabilities;
     const iree_hal_atomic_operation_flags_t queue_operations =
-        AtomicOperationCapabilitiesForCell(
-            queue_family.atomic_capabilities.operations, requirements.width,
-            requirements.atomic_flags);
+        AtomicOperationCapabilitiesForCell(capabilities.operations,
+                                           requirements.width,
+                                           requirements.atomic_flags);
     if (!iree_all_bits_set(queue_operations, requirements.operation_flags)) {
       continue;
     }
     const iree_hal_atomic_wait_condition_flags_t queue_wait_conditions =
-        AtomicWaitConditionsForCell(
-            queue_family.atomic_capabilities.wait_conditions,
-            requirements.width, requirements.atomic_flags);
+        AtomicWaitConditionsForCell(capabilities.wait_conditions,
+                                    requirements.width,
+                                    requirements.atomic_flags);
     if (!iree_all_bits_set(queue_wait_conditions,
                            requirements.wait_condition_flags)) {
       continue;
@@ -109,6 +114,10 @@ bool SelectAtomicTestConfiguration(iree_hal_device_t* device,
         device, out_configuration->queue_family_ordinal);
     out_configuration->family_access.usage = requirements.buffer_usage;
     out_configuration->family_access.atomics.queue = required_atomics;
+    if (zero_compute) {
+      out_configuration->family_access.atomics.queue_zero_compute =
+          required_atomics;
+    }
     out_configuration->min_alignment =
         iree_hal_atomic_width_byte_count(requirements.width);
     return true;
