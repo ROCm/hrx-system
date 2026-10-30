@@ -483,6 +483,9 @@ enum iree_hal_profile_command_operation_type_e {
 
   // Atomic read-modify-write operation.
   IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_RMW = 12u,
+
+  // Application-authored timestamp write to a buffer reference.
+  IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_TIMESTAMP = 13u,
 };
 
 // Bitfield specifying properties of one command-buffer operation record.

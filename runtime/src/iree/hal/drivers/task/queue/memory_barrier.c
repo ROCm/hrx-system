@@ -262,6 +262,11 @@ static iree_status_t iree_hal_task_queue_barrier_default_operands(
           operation->atomic_wait.target_offset,
           iree_hal_atomic_width_byte_count(operation->atomic_wait.params.width),
           IREE_HAL_MEMORY_ACCESS_READ, access);
+    case IREE_HAL_TASK_QUEUE_OP_TIMESTAMP:
+      return iree_hal_task_queue_barrier_default_range(
+          operation->timestamp.target_buffer,
+          operation->timestamp.target_offset, sizeof(uint64_t),
+          IREE_HAL_MEMORY_ACCESS_WRITE, access);
     case IREE_HAL_TASK_QUEUE_OP_ATOMIC_STORE:
       return iree_hal_task_queue_barrier_default_range(
           operation->atomic_store.target_buffer,

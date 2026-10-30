@@ -347,7 +347,9 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:control",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:inputs",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:recording",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue:timestamp",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:transfer",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:commands",
         "//runtime/src/iree/hal/utils:resource_set",
     ],
 )
@@ -550,6 +552,22 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:blit",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:program",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:user_queue",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "program_test",
+    srcs = ["program_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":packet",
+        ":program",
+        ":ring",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

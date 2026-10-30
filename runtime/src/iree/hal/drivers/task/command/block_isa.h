@@ -53,6 +53,8 @@ typedef enum iree_hal_cmd_opcode_e {
   IREE_HAL_CMD_ATOMIC_RMW = 9,    // Atomically update a buffer location.
   IREE_HAL_CMD_FENCE = 10,        // Apply CPU memory ordering.
   IREE_HAL_CMD_CACHE = 11,        // Execute a prepared CPU cache recipe.
+  IREE_HAL_CMD_TIMESTAMP =
+      12,  // Write the family clock to one buffer location.
 } iree_hal_cmd_opcode_t;
 
 typedef uint8_t iree_hal_cmd_flags_t;
@@ -570,8 +572,21 @@ static_assert(sizeof(iree_hal_cmd_update_t) == 24,
               "update command is 3 qwords (plus trailing inline data)");
 
 //===----------------------------------------------------------------------===//
-// ATOMIC commands
+// Scalar commands
 //===----------------------------------------------------------------------===//
+
+// Writes one monotonic nanosecond timestamp to a resolved buffer location.
+typedef struct iree_hal_cmd_timestamp_t {
+  // Command header with opcode TIMESTAMP.
+  iree_hal_cmd_header_t header;
+  // .data binding_ptrs index for the eight-byte target location.
+  uint16_t target_binding;
+  // Reserved for future use and must be zero.
+  uint16_t reserved;
+} iree_hal_cmd_timestamp_t;
+
+static_assert(sizeof(iree_hal_cmd_timestamp_t) == 8,
+              "timestamp command is 1 qword");
 
 // Waits until one resolved buffer location satisfies an inline predicate.
 typedef struct iree_hal_cmd_atomic_wait_t {

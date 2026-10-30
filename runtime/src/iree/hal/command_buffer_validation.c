@@ -291,6 +291,28 @@ iree_status_t iree_hal_command_buffer_barrier_validation(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_command_buffer_timestamp_validation(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_command_buffer_validation_state_t* validation_state,
+    iree_hal_buffer_ref_t target_ref) {
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_validate_categories(
+      command_buffer, validation_state, IREE_HAL_COMMAND_CATEGORY_TRANSFER));
+  if (IREE_UNLIKELY(target_ref.length != sizeof(uint64_t) ||
+                    target_ref.offset % sizeof(uint64_t) != 0)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "timestamp target requires an eight-byte length and aligned offset");
+  }
+  const iree_hal_buffer_binding_requirements_t requirements = {
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+      .access = IREE_HAL_MEMORY_ACCESS_WRITE,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+      .min_byte_alignment = sizeof(uint64_t),
+  };
+  return iree_hal_command_buffer_validate_buffer_requirements(
+      command_buffer, validation_state, target_ref, requirements);
+}
+
 static iree_status_t iree_hal_command_buffer_atomic_target_validation(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_command_buffer_validation_state_t* validation_state,

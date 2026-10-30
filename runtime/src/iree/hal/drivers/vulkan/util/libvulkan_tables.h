@@ -288,6 +288,14 @@ IREE_HAL_VULKAN_DEVICE_PFN(void, vkCmdWriteTimestamp2,
                                 VkQueryPool queryPool, uint32_t query),
                            ARGS(commandBuffer, stage, queryPool, query))
 
+IREE_HAL_VULKAN_DEVICE_PFN(
+    void, vkCmdCopyQueryPoolResults,
+    DECL(VkCommandBuffer commandBuffer, VkQueryPool queryPool,
+         uint32_t firstQuery, uint32_t queryCount, VkBuffer dstBuffer,
+         VkDeviceSize dstOffset, VkDeviceSize stride, VkQueryResultFlags flags),
+    ARGS(commandBuffer, queryPool, firstQuery, queryCount, dstBuffer, dstOffset,
+         stride, flags))
+
 IREE_HAL_VULKAN_DEVICE_PFN(void, vkCmdFillBuffer,
                            DECL(VkCommandBuffer commandBuffer,
                                 VkBuffer dstBuffer, VkDeviceSize dstOffset,

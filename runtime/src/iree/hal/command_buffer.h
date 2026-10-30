@@ -599,6 +599,41 @@ IREE_API_EXPORT iree_status_t
 iree_hal_command_buffer_barrier(iree_hal_command_buffer_t* command_buffer,
                                 const iree_hal_barrier_t* barrier);
 
+// Writes one raw 64-bit timestamp to |target_ref| during execution.
+//
+// |source_stage_mask| names earlier stages that must complete before capture.
+// |target_stage_mask| names later stages that cannot begin until capture.
+// A zero mask adds no dependency on that side; stages outside the masks may
+// overlap. HOST is not an execution stage for this operation. Execution-only
+// barriers order captures without requiring delivery to the destination.
+//
+// Result delivery may be deferred and batched until a memory dependency on the
+// destination or normal completion. A subsequent consumer requires an ordinary
+// TRANSFER_WRITE memory dependency covering the target range. Execution
+// ordering alone does not make the result available or replace payload
+// visibility.
+//
+// The timestamp has the same clock domain, frequency, and valid-bit width as
+// iree_hal_queue_timestamp on this family. Differences are modulo that width;
+// timestamps from different families need not be comparable. Successful
+// completion and the required visibility transition make the sample available.
+// Zero is a valid tick. Results of failed execution are unspecified.
+//
+// This is a TRANSFER-stage, TRANSFER_WRITE access. The target requires WRITE
+// access and TRANSFER_TARGET usage. The reference length must be exactly eight
+// bytes, and its offset and resolved binding base must be eight-byte aligned.
+// Binding-table targets resolve independently for each invocation. The caller
+// owns the target range through execution and its subsequent consumption.
+//
+// Requires COMMAND_TIMESTAMPS in the queue family specification, and
+// INDIRECT_COMMAND_TIMESTAMPS for a binding-table reference. No profiling
+// session or metadata retention is required. |flags| must be NONE.
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_timestamp(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_timestamp_flags_t flags);
+
 // Waits until the atomic value at |target_ref| satisfies |params.condition|.
 //
 // |source_stage_mask| names earlier stages that must complete before the wait
@@ -775,6 +810,13 @@ typedef struct iree_hal_command_buffer_vtable_t {
   iree_status_t(IREE_API_PTR* barrier)(
       iree_hal_command_buffer_t* command_buffer,
       const iree_hal_barrier_t* barrier);
+
+  // Required when the family advertises COMMAND_TIMESTAMPS; otherwise NULL.
+  iree_status_t(IREE_API_PTR* timestamp)(
+      iree_hal_command_buffer_t* command_buffer,
+      iree_hal_execution_stage_t source_stage_mask,
+      iree_hal_execution_stage_t target_stage_mask,
+      iree_hal_buffer_ref_t target_ref, iree_hal_timestamp_flags_t flags);
 
   iree_status_t(IREE_API_PTR* atomic_wait)(
       iree_hal_command_buffer_t* command_buffer,

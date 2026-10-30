@@ -181,6 +181,8 @@ IREE_API_EXPORT const char* iree_hal_replay_operation_code_string(
       return "command_buffer.atomic_store";
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_RMW:
       return "command_buffer.atomic_rmw";
+    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_TIMESTAMP:
+      return "command_buffer.timestamp";
     case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_COUNT:
       return "executable.function_count";
     case IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_INFO:
@@ -259,6 +261,8 @@ IREE_API_EXPORT const char* iree_hal_replay_payload_type_string(
       return "command_buffer_atomic_store";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_RMW:
       return "command_buffer_atomic_rmw";
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_TIMESTAMP:
+      return "command_buffer_timestamp";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT:
       return "provisioned_queue_object";
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_DYNAMIC_QUEUE_OBJECT:

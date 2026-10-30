@@ -257,7 +257,7 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_control(
   submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_CONTROL;
   submission->control.target = reference;
   submission->control.command = command;
-  iree_hal_amd_gpu_pm4_barrier_atomic(
+  iree_hal_amd_gpu_pm4_barrier_control(
       profile, command.flags,
       (command.flags & IREE_HAL_ATOMIC_FLAG_RELEASE)
           ? IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE

@@ -76,7 +76,7 @@ uint32_t* iree_hal_amd_gpu_control_emit(uint32_t* words, uint64_t address,
                                         iree_hal_amd_gpu_control_t command) {
   switch (command.kind) {
     case IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP:
-      return iree_hal_amd_gpu_pm4_emit_clock(words, address);
+      return iree_hal_amd_gpu_pm4_emit_clock(words, address, true);
     case IREE_HAL_AMD_GPU_CONTROL_WAIT: {
       const iree_hal_amd_gpu_pm4_comparison_t comparison =
           (iree_hal_amd_gpu_pm4_comparison_t)(IREE_HAL_AMD_GPU_PM4_COMPARISON_EQUAL +

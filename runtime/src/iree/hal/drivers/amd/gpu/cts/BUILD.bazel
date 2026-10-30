@@ -250,6 +250,17 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "command_buffer_dispatch_test",
+    target_compatible_with = _EXECUTABLE_COMPATIBLE_WITH,
+    deps = [
+        ":backends",
+        ":dispatch_testdata",
+        "//runtime/src/iree/hal/cts/command_buffer:dispatch_multi_workgroup_test",
+        "//runtime/src/iree/hal/cts/util:test_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "file_test",
     deps = [
         ":backends",
@@ -329,6 +340,7 @@ iree_runtime_cc_benchmark(
         "//runtime/src/iree/hal/drivers/amd/gpu:context",
         "//runtime/src/iree/hal/drivers/amd/gpu:device",
         "//runtime/src/iree/hal/drivers/amd/gpu/image:hip_images",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:command_buffer",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:queue",
         "//runtime/src/iree/hal/utils:statistics_sink",
         "//runtime/src/iree/testing:benchmark_main",
@@ -378,6 +390,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/drivers/amd/gpu/image:hip_images",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:semaphore",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:signal",
+        "//runtime/src/iree/hal/drivers/amd/gpu/queue/aql:command_buffer",
         "//runtime/src/iree/hal/memory:fixed_block_pool",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

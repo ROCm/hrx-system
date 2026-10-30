@@ -8,6 +8,7 @@
 #include <cstring>
 #include <memory>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "iree/async/frontier_tracker.h"
@@ -743,7 +744,8 @@ TEST_P(GpuNativeDispatchTest,
   // Small and multi-wrap recordings share exactly the same public lifecycle.
   // Repeated invocations contend for instances on two FIFOs, then idle trim
   // drops spare instances before the next epoch reuses the immutable program.
-  for (uint32_t count : {1u, 97u}) {
+  for (uint32_t count : {1u, 6u, 7u, 97u}) {
+    SCOPED_TRACE(count);
     iree_hal_command_buffer_t* recording = nullptr;
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
         family, 0, IREE_HAL_COMMAND_CATEGORY_DISPATCH, 3, &recording));
@@ -765,8 +767,8 @@ TEST_P(GpuNativeDispatchTest,
     if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
       const auto* program =
           iree_hal_amd_gpu_aql_command_buffer_program(recording);
-      EXPECT_EQ(program->host_template != nullptr, count == 1);
-      EXPECT_EQ(program->resident.pool == nullptr, count == 1);
+      EXPECT_EQ(program->host_template != nullptr, count <= 6);
+      EXPECT_EQ(program->resident.pool == nullptr, count <= 6);
       uint32_t dispatch_index = 0;
       for (uint32_t i = 0; i < program->block_count; ++i) {
         const auto& block = program->blocks[i];
@@ -858,7 +860,10 @@ TEST_P(GpuNativeDispatchTest,
     EXPECT_EQ(program->blocks[0].packet_count, 4u);
     const auto* packets =
         reinterpret_cast<const iree_hal_amd_gpu_aql_packet_t*>(
-            program->resident.contents.data + program->blocks[0].offset);
+            (program->host_template
+                 ? reinterpret_cast<const uint8_t*>(program->host_template + 1)
+                 : program->resident.contents.data) +
+            program->blocks[0].offset);
     const uint32_t expected[] = {
         IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH |
             IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
@@ -894,6 +899,207 @@ TEST_P(GpuNativeDispatchTest,
   IREE_ASSERT_OK(iree_hal_buffer_map_read(output, 0, actual, sizeof(actual)));
   EXPECT_EQ(actual[0], 7u + 97u * 98u / 2 + 12u);
   EXPECT_EQ(actual[1], 7u + 97u * 98u / 2 + 2u);
+}
+
+TEST_P(GpuNativeDispatchTest, ControlOrderingPreservesIndependentShaderWrites) {
+  Create();
+  if (HasFatalFailure() || IsSkipped()) {
+    return;
+  }
+  const auto* family = iree_hal_queue_family(queues_[0]);
+  constexpr auto kOperations = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+                               IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |
+                               IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
+  const iree_hal_pool_family_access_t access = {
+      .family = family,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .atomics =
+          {
+              .queue =
+                  {
+                      .device_scope_32 = kOperations,
+                      .device_scope_64 = kOperations,
+                  },
+          },
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = 1,
+      .families = &access,
+      .host =
+          {
+              .access =
+                  IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+              .modes = IREE_HAL_MAPPING_MODE_SCOPED,
+          },
+  };
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  Ref<iree_hal_pool_t> pool;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(
+      group_, scope, &options, iree_allocator_system(), pool.out()));
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(32, 8),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_executable_t> executable;
+  IREE_ASSERT_OK(Load(executable.out()));
+  iree_hal_executable_function_t function;
+  IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+      executable, IREE_SV("image_accumulate"), &function));
+  Ref<iree_hal_semaphore_t> done;
+  CreateSemaphore(done.out());
+  auto* done_handle = done.get();
+  uint64_t completion = 0;
+  auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = 32;
+  config.workgroup_size[1] = config.workgroup_size[2] = 1;
+  const auto shader_target = iree_hal_make_indirect_buffer_ref(0, 0, 4);
+  constexpr uint64_t kGuard = UINT64_C(0xA5A5A5A5A5A5A5A5);
+  const std::array<uint64_t, 4> initial = {kGuard, kGuard, kGuard, kGuard};
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  // Each native control emitter shares the same source/target ordering path.
+  // Timestamp is always 64-bit; wait, store, and RMW cover both native widths.
+  enum class ControlKind { kTimestamp, kWait, kStore, kRmw };
+  const std::pair<ControlKind, iree_hal_atomic_width_t> cases[] = {
+      {ControlKind::kTimestamp, IREE_HAL_ATOMIC_WIDTH_64},
+      {ControlKind::kWait, IREE_HAL_ATOMIC_WIDTH_32},
+      {ControlKind::kWait, IREE_HAL_ATOMIC_WIDTH_64},
+      {ControlKind::kStore, IREE_HAL_ATOMIC_WIDTH_32},
+      {ControlKind::kStore, IREE_HAL_ATOMIC_WIDTH_64},
+      {ControlKind::kRmw, IREE_HAL_ATOMIC_WIDTH_32},
+      {ControlKind::kRmw, IREE_HAL_ATOMIC_WIDTH_64},
+  };
+  for (auto [kind, width] : cases) {
+    SCOPED_TRACE(static_cast<int>(kind));
+    SCOPED_TRACE(width);
+    const uint64_t mask =
+        width == IREE_HAL_ATOMIC_WIDTH_64 ? UINT64_MAX : UINT32_MAX;
+    const auto target = iree_hal_make_indirect_buffer_ref(0, 8, width / 8);
+    enum class Position { kFirst, kBeforeDispatch, kConcurrent, kOrdered };
+    for (auto position : {Position::kFirst, Position::kBeforeDispatch,
+                          Position::kConcurrent, Position::kOrdered}) {
+      SCOPED_TRACE(static_cast<int>(position));
+      const bool dispatch = position != Position::kFirst;
+      const bool before_dispatch = position == Position::kBeforeDispatch;
+      const bool ordered = position == Position::kOrdered;
+      IREE_ASSERT_OK(iree_hal_buffer_map_write(output, 0, initial.data(),
+                                               sizeof(initial)));
+      Ref<iree_hal_command_buffer_t> recording;
+      IREE_ASSERT_OK(iree_hal_command_buffer_create(
+          family, 0,
+          IREE_HAL_COMMAND_CATEGORY_ATOMIC |
+              IREE_HAL_COMMAND_CATEGORY_DISPATCH |
+              IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+          1, recording.out()));
+      IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+      const auto record_dispatch = [&]() {
+        const uint32_t increment = 1;
+        return iree_hal_command_buffer_dispatch(
+            recording, executable, function, config,
+            iree_make_const_byte_span(&increment, 4), {1, &shader_target}, 0);
+      };
+      if (dispatch && !before_dispatch) {
+        IREE_ASSERT_OK(record_dispatch());
+      }
+      const iree_hal_execution_stage_t source =
+          ordered ? IREE_HAL_EXECUTION_STAGE_DISPATCH : 0;
+      uint64_t expected = kGuard;
+      if (kind == ControlKind::kTimestamp) {
+        IREE_ASSERT_OK(
+            iree_hal_command_buffer_timestamp(recording, source, 0, target, 0));
+      } else if (kind == ControlKind::kWait) {
+        const iree_hal_atomic_wait_params_t params = {
+            .value = kGuard & mask,
+            .mask = mask,
+            .width = width,
+            .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+        };
+        IREE_ASSERT_OK(iree_hal_command_buffer_atomic_wait(recording, source, 0,
+                                                           target, params));
+      } else if (kind == ControlKind::kStore) {
+        const iree_hal_atomic_store_params_t params = {
+            .value = 7,
+            .width = width,
+        };
+        IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(recording, source,
+                                                            0, target, params));
+        expected = (kGuard & ~mask) | 7;
+      } else {
+        const iree_hal_atomic_rmw_params_t params = {
+            .operand = 1,
+            .width = width,
+            .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+        };
+        IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(recording, source, 0,
+                                                          target, params));
+        expected = kGuard + 1;
+      }
+      if (before_dispatch) {
+        IREE_ASSERT_OK(record_dispatch());
+      }
+      IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
+      IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+      if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+        const auto* program =
+            iree_hal_amd_gpu_aql_command_buffer_program(recording);
+        ASSERT_NE(program->host_template, nullptr);
+        ASSERT_EQ(program->block_count, 1u);
+        const bool timestamp = kind == ControlKind::kTimestamp;
+        const bool standalone_release = dispatch && !ordered;
+        EXPECT_EQ(program->blocks[0].packet_count,
+                  1u + dispatch + standalone_release);
+        const auto* packets =
+            reinterpret_cast<const iree_hal_amd_gpu_aql_packet_t*>(
+                program->host_template + 1);
+        if (dispatch) {
+          EXPECT_EQ(packets[before_dispatch].words[0] & 0xFFFFu,
+                    IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH);
+        }
+        EXPECT_EQ(packets[dispatch && !before_dispatch].words[0],
+                  (1u << 16) |
+                      (ordered ? IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED : 0) |
+                      (standalone_release
+                           ? 0
+                           : IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM));
+        if (timestamp && before_dispatch) {
+          // Work separates capture from delivery, so the write drain has its
+          // own carrier at the authored publication boundary.
+          EXPECT_EQ(packets[2].words[0],
+                    (1u << 16) | IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                        IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM);
+        } else if (standalone_release) {
+          EXPECT_EQ(packets[2].words[0],
+                    IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND |
+                        IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                        IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM);
+        }
+      }
+      const iree_hal_buffer_binding_t binding = {output, 0, 32};
+      ++completion;
+      IREE_ASSERT_OK(iree_hal_queue_execute(queues_[0], {},
+                                            {1, &done_handle, &completion},
+                                            recording, {1, &binding}, 0));
+      IREE_ASSERT_OK(iree_hal_semaphore_wait(done, completion,
+                                             iree_infinite_timeout(), 0));
+      std::array<uint64_t, 4> actual = {};
+      IREE_ASSERT_OK(
+          iree_hal_buffer_map_read(output, 0, actual.data(), sizeof(actual)));
+      // Shader and CP writes are disjoint within one cache line. No timestamp
+      // padding or payload dependency is required between concurrent siblings.
+      EXPECT_EQ(actual[0], kGuard + dispatch);
+      if (kind == ControlKind::kTimestamp) {
+        EXPECT_NE(actual[1], kGuard);
+      } else {
+        EXPECT_EQ(actual[1], expected);
+      }
+      EXPECT_EQ(actual[2], kGuard);
+      EXPECT_EQ(actual[3], kGuard);
+    }
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(

@@ -47,7 +47,7 @@ TEST(AqlBarrierTest, AtomicReleasePrecedesAndAcquireFollowsTheCarrier) {
   for (uint32_t flags = 0; flags < 8; ++flags) {
     SCOPED_TRACE(flags);
     uint32_t before = 0, after = 0;
-    iree_hal_amd_gpu_aql_barrier_atomic(
+    iree_hal_amd_gpu_aql_barrier_control(
         flags, IREE_HAL_EXECUTION_STAGE_DISPATCH,
         IREE_HAL_EXECUTION_STAGE_DISPATCH, &before, &after);
     const uint32_t scope = flags & IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE ? 2 : 1;

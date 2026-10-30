@@ -73,7 +73,7 @@ static uint32_t iree_hal_amd_gpu_pm4_barrier_execution(
              : 0;
 }
 
-void iree_hal_amd_gpu_pm4_barrier_atomic(
+void iree_hal_amd_gpu_pm4_barrier_control(
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     iree_hal_atomic_flags_t flags, iree_hal_execution_stage_t source_stage,
     iree_hal_amd_gpu_pm4_barrier_t* before,

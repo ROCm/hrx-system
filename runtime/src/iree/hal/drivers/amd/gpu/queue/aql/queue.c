@@ -978,6 +978,7 @@ iree_hal_amd_gpu_aql_publish_execute(
                                      position + 1);
   }
   uint64_t sample_address = 0;
+  iree_hal_amd_gpu_aql_signal_t* samples = NULL;
   if (operation) {
     iree_hal_amd_gpu_profile_completion_t* completion =
         &queue->issued[position & (queue->options.retirement_capacity - 1)]
@@ -996,11 +997,7 @@ iree_hal_amd_gpu_aql_publish_execute(
                         offsetof(iree_hal_amd_gpu_aql_signal_t,
                                  start_timestamp));
       sample_address = arguments->address + offset;
-      if (host_template) {
-        iree_hal_amd_gpu_aql_signal_t* sample =
-            (void*)(arguments->memory.contents.data + offset);
-        *sample = (iree_hal_amd_gpu_aql_signal_t){.kind = 1, .value = 1};
-      }
+      samples = (void*)(arguments->memory.contents.data + offset);
     }
   }
   const iree_hal_amd_gpu_aql_program_flags_t program_flags =
@@ -1019,17 +1016,9 @@ iree_hal_amd_gpu_aql_publish_execute(
   // consume the pre-publication facts captured above.
   if (amdf_status_is_ok(publication_status)) {
     if (IREE_UNLIKELY(host_template)) {
-      iree_hal_amd_gpu_aql_packet_t packet;
-      memcpy(&packet, upload, sizeof(packet));
-      // Invocation-private host arguments require a system acquire even when
-      // the caller's explicit payload barriers are narrower.
-      packet.words[0] = (packet.words[0] & ~(3u << 9)) |
-                        IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
-                        IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED;
-      packet.words[14] = (uint32_t)sample_address;
-      packet.words[15] = (uint32_t)(sample_address >> 32);
-      publication_status = iree_hal_amd_gpu_aql_write_packet(
-          ring, &queue->storage, packet_position, packet);
+      publication_status = iree_hal_amd_gpu_aql_program_emit_host(
+          block.packet_count, upload, ring, &queue->storage, packet_position,
+          sample_address, samples);
     } else {
       publication_status = iree_hal_amd_gpu_aql_program_emit(
           queue->options.programs, program, invocation->instance, block.offset,

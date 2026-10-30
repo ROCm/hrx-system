@@ -76,6 +76,10 @@ typedef enum iree_hal_vulkan_atomic_record_flag_bits_e {
 
   // target_address points to a uint64_t containing the final target address.
   IREE_HAL_VULKAN_ATOMIC_RECORD_FLAG_INDIRECT_TARGET = 1u << 0,
+
+  // The recording contains timestamp queries in the logical transfer domain.
+  // Execution dependencies include those queries without widening accesses.
+  IREE_HAL_VULKAN_ATOMIC_RECORD_FLAG_TRANSFER_TIMESTAMPS = 1u << 1,
 } iree_hal_vulkan_atomic_record_flag_bits_e;
 
 // Initializes optional atomic pipelines supported by |enabled_features|.

@@ -64,7 +64,8 @@ static bool vulkan_replay_cache_registered_ =
           /*executable_data=*/nullptr, RecordingMode::kIndirect,
           /*unsupported_tests=*/{},
           /*expected_failures=*/{}},
-         {"async_queue", "file_io", "vulkan", "vulkan_replay_cache"},
+         {"async_queue", "file_io", "indirect", "vulkan",
+          "vulkan_replay_cache"},
      }),
      true);
 

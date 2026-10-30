@@ -774,7 +774,8 @@ static bool iree_hal_vulkan_allocator_uses_buffer_device_address(
   return iree_all_bits_set(
              allocator->enabled_features.general,
              IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES) &&
-         iree_any_bit_set(hal_usage, IREE_HAL_BUFFER_USAGE_DISPATCH);
+         iree_any_bit_set(hal_usage, IREE_HAL_BUFFER_USAGE_DISPATCH |
+                                         IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET);
 }
 
 static VkMemoryAllocateFlags iree_hal_vulkan_allocator_memory_allocate_flags(

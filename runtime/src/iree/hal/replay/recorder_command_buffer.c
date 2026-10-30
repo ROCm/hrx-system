@@ -317,6 +317,49 @@ static iree_status_t iree_hal_replay_recorder_command_buffer_atomic_wait(
   return status;
 }
 
+static iree_status_t iree_hal_replay_recorder_command_buffer_timestamp(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_timestamp_flags_t flags) {
+  iree_hal_replay_recorder_command_buffer_t* command_buffer =
+      iree_hal_replay_recorder_command_buffer_cast(base_command_buffer);
+  iree_hal_replay_command_buffer_timestamp_payload_t payload;
+  memset(&payload, 0, sizeof(payload));
+  iree_hal_replay_recorder_buffer_ref_make_payload(target_ref,
+                                                   &payload.target_ref);
+  payload.source_stage_mask = source_stage_mask;
+  payload.target_stage_mask = target_stage_mask;
+  payload.flags = flags;
+  iree_const_byte_span_t payload_iovec =
+      iree_make_const_byte_span(&payload, sizeof(payload));
+
+  iree_hal_buffer_ref_t base_target_ref = target_ref;
+  iree_hal_buffer_t* temporary_target_buffer = NULL;
+  iree_status_t status = iree_ok_status();
+  if (target_ref.buffer) {
+    status = iree_hal_replay_recorder_buffer_unwrap_for_call(
+        target_ref.buffer, command_buffer->host_allocator,
+        &base_target_ref.buffer, &temporary_target_buffer);
+  }
+  iree_hal_replay_pending_record_t pending_record = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_recorder_command_buffer_begin_operation(
+        command_buffer, IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_TIMESTAMP,
+        IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_TIMESTAMP, &pending_record);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_replay_recorder_end_operation_with_payload(
+        &pending_record,
+        iree_hal_command_buffer_timestamp(command_buffer->base_command_buffer,
+                                          source_stage_mask, target_stage_mask,
+                                          base_target_ref, flags),
+        1, &payload_iovec);
+  }
+  iree_hal_replay_recorder_buffer_release_temporary(temporary_target_buffer);
+  return status;
+}
+
 static iree_status_t iree_hal_replay_recorder_command_buffer_atomic_store(
     iree_hal_command_buffer_t* base_command_buffer,
     iree_hal_execution_stage_t source_stage_mask,
@@ -718,6 +761,7 @@ static const iree_hal_command_buffer_vtable_t
         .end_debug_group =
             iree_hal_replay_recorder_command_buffer_end_debug_group,
         .barrier = iree_hal_replay_recorder_command_buffer_barrier,
+        .timestamp = iree_hal_replay_recorder_command_buffer_timestamp,
         .atomic_wait = iree_hal_replay_recorder_command_buffer_atomic_wait,
         .atomic_store = iree_hal_replay_recorder_command_buffer_atomic_store,
         .atomic_rmw = iree_hal_replay_recorder_command_buffer_atomic_rmw,

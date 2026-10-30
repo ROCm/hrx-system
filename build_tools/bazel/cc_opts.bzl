@@ -133,9 +133,9 @@ _CLANG_CL_CXXOPTS = _MSVC_CXXOPTS + [
 # shared across hosts, so select the spelling understood by the active compiler
 # instead of leaking a Unix driver flag through a global --copt.
 _SANITIZER_FRAME_POINTER_COPTS = select({
-    "//build_tools/bazel:sanitizer_cc_compiler_clang_cl": ["/Oy-"],
-    "//build_tools/bazel:sanitizer_cc_compiler_msvc": ["/Oy-"],
-    "//build_tools/bazel:sanitizer_enabled": ["-fno-omit-frame-pointer"],
+    Label("//build_tools/bazel:sanitizer_cc_compiler_clang_cl"): ["/Oy-"],
+    Label("//build_tools/bazel:sanitizer_cc_compiler_msvc"): ["/Oy-"],
+    Label("//build_tools/bazel:sanitizer_enabled"): ["-fno-omit-frame-pointer"],
     "//conditions:default": [],
 })
 
@@ -143,8 +143,8 @@ _SANITIZER_FRAME_POINTER_COPTS = select({
 # function-type identity. Clang's function sanitizer rejects that contract;
 # GCC has no such check and rejects the Clang-specific option.
 _UNDEFINED_SANITIZER_COPTS = select({
-    "//build_tools/bazel:undefined_sanitizer_cc_compiler_clang": ["-fno-sanitize=function"],
-    "//build_tools/bazel:undefined_sanitizer_cc_compiler_clang_cl": ["/clang:-fno-sanitize=function"],
+    Label("//build_tools/bazel:undefined_sanitizer_cc_compiler_clang"): ["-fno-sanitize=function"],
+    Label("//build_tools/bazel:undefined_sanitizer_cc_compiler_clang_cl"): ["/clang:-fno-sanitize=function"],
     "//conditions:default": [],
 })
 
@@ -152,11 +152,11 @@ _UNDEFINED_SANITIZER_COPTS = select({
 # also needs the C++ runtime to intercept new/delete in C++ dependencies.
 # Windows runtime dependencies come from the selected C/C++ runtimes toolchain.
 _ADDRESS_SANITIZER_LINKOPTS = select({
-    "//build_tools/bazel:address_sanitizer_cc_compiler_clang": [
+    Label("//build_tools/bazel:address_sanitizer_cc_compiler_clang"): [
         "-fsanitize=address",
         "-fsanitize-link-c++-runtime",
     ],
-    "//build_tools/bazel:address_sanitizer_cc_compiler_gcc": ["-fsanitize=address"],
+    Label("//build_tools/bazel:address_sanitizer_cc_compiler_gcc"): ["-fsanitize=address"],
     "//conditions:default": [],
 })
 
@@ -173,10 +173,10 @@ def _compiler_options(
         clang_cl_options,
         msvc_options):
     return select({
-        "//build_tools/bazel:cc_compiler_clang": clang_options,
-        "//build_tools/bazel:cc_compiler_clang_cl": clang_cl_options,
-        "//build_tools/bazel:cc_compiler_gcc": gcc_options,
-        "//build_tools/bazel:cc_compiler_msvc": msvc_options,
+        Label("//build_tools/bazel:cc_compiler_clang"): clang_options,
+        Label("//build_tools/bazel:cc_compiler_clang_cl"): clang_cl_options,
+        Label("//build_tools/bazel:cc_compiler_gcc"): gcc_options,
+        Label("//build_tools/bazel:cc_compiler_msvc"): msvc_options,
         "//conditions:default": clang_options,
     })
 
