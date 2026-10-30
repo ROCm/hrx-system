@@ -83,6 +83,11 @@ iree_status_t loom_rewriter_relocate_fact_block(loom_rewriter_t* rewriter,
 // Returns whether inference owns a loop or region-branch summary.
 bool loom_rewriter_op_summarizes_nested_regions(const loom_op_vtable_t* vtable);
 
+// Transfers retained pending-summary ownership after an operation moves.
+// Called by subtree recording before recording the moved descendants.
+iree_status_t loom_rewriter_refresh_fact_summary_parent(
+    loom_rewriter_t* rewriter, loom_op_t* op);
+
 // Returns whether every summarized region has its required terminator.
 bool loom_rewriter_nested_region_summary_is_ready(
     const loom_rewriter_t* rewriter, loom_op_t* op,

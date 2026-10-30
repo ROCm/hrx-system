@@ -561,6 +561,60 @@ TEST_P(FactInputsTest, TypeEdgesRefreshTheirEquationOwnerBeforeFolding) {
   }
 }
 
+TEST_F(FactPublicationTest, SelectorEditPublishesThroughUnchangedNumericFacts) {
+  loom_builder_t builder;
+  loom_builder_initialize(module_, &module_->arena, loom_module_block(module_),
+                          &builder);
+  loom_string_id_t name;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder, IREE_SV("selectors"), &name));
+  loom_symbol_id_t symbol;
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, name, &symbol));
+  const auto index = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  const auto predicate = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
+  const loom_type_t inputs[] = {predicate, predicate, index, index};
+  loom_op_t* function = nullptr;
+  IREE_ASSERT_OK(loom_test_func_build(
+      &builder, 0, 0, 0, {0, symbol}, inputs, IREE_ARRAYSIZE(inputs), nullptr,
+      0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function));
+  const auto function_like = loom_func_like_cast(module_, function);
+  auto* body = loom_func_like_body(function_like);
+  loom_builder_enter_region(&builder, function, body);
+  const auto first = loom_region_entry_arg_id(body, 0);
+  const auto second = loom_region_entry_arg_id(body, 1);
+  const auto left = loom_region_entry_arg_id(body, 2);
+  const auto right = loom_region_entry_arg_id(body, 3);
+  loom_op_t* select = nullptr;
+  IREE_ASSERT_OK(loom_scf_select_build(&builder, first, left, right, index,
+                                       LOOM_LOCATION_UNKNOWN, &select));
+  loom_op_t* add = nullptr;
+  IREE_ASSERT_OK(loom_index_add_build(&builder, loom_scf_select_result(select),
+                                      left, index, LOOM_LOCATION_UNKNOWN,
+                                      &add));
+  loom_op_t* end = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_yield_build(&builder, nullptr, 0, LOOM_LOCATION_UNKNOWN, &end));
+  loom_value_fact_table_t* facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &owner_, module_, loom_pass_value_fact_scope_function(function_like),
+      &facts));
+  loom_rewriter_attach_value_facts(&rewriter_, facts);
+  const auto result = loom_index_add_result(add);
+  const auto numeric = loom_value_fact_table_lookup(facts, result);
+  for (auto condition : {second, first, second}) {
+    IREE_ASSERT_OK(loom_rewriter_replace_all_uses_with(
+        &rewriter_, loom_scf_select_condition(select), condition));
+    IREE_ASSERT_OK(loom_rewriter_propagate_value_facts(&rewriter_));
+    EXPECT_TRUE(loom_value_facts_equal(
+        loom_value_fact_table_lookup(facts, result), numeric));
+    loom_value_set_cursor_t dependencies;
+    loom_value_fact_table_select_dependencies_begin(facts, result,
+                                                    &dependencies);
+    EXPECT_EQ(loom_value_set_cursor_next(&dependencies), condition);
+    EXPECT_EQ(loom_value_set_cursor_next(&dependencies), LOOM_VALUE_ID_INVALID);
+  }
+}
+
 TEST_F(FactPublicationTest, ScopeDetachReusesPendingStorage) {
   const loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   loom_builder_t builder;

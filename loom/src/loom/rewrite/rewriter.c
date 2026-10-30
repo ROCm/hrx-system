@@ -158,6 +158,7 @@ static iree_status_t loom_rewriter_on_op_finalized(void* user_data,
 iree_status_t loom_rewriter_record_subtree(loom_rewriter_t* rewriter,
                                            loom_op_t* op) {
   loom_module_record_op_summaries(rewriter->module, op);
+  IREE_RETURN_IF_ERROR(loom_rewriter_refresh_fact_summary_parent(rewriter, op));
   IREE_RETURN_IF_ERROR(loom_rewriter_seed_nested_execution_facts(rewriter, op));
   loom_region_t** regions = loom_op_regions(op);
   for (uint8_t region_index = 0; region_index < op->region_count;
