@@ -6,7 +6,7 @@
       "run": {
         "tool": "loom-compile",
         "args": [
-          "{srcdir}/resident_xdna.loom",
+          "{srcdir}/../testdata/resident_xdna.loom",
           "--pipeline=none",
           "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
           "--output={tmp}/resident.xdna",

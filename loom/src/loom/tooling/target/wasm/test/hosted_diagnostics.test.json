@@ -6,7 +6,7 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/unresolved_function.loom",
+          "{srcdir}/../testdata/unresolved_function.loom",
           "--case=@probe"
         ]
       },

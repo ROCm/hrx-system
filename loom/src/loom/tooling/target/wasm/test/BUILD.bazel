@@ -18,7 +18,7 @@ package(
 
 iree_execution_test_suite(
     name = "hosted_diagnostics_test",
-    data = ["unresolved_function.loom"],
+    data = ["//loom/src/loom/tooling/target/wasm/testdata:unresolved_function.loom"],
     env_inherit = [
         "IREE_WASM_NODE",
         "PATH",
