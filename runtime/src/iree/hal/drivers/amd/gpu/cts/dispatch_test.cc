@@ -137,6 +137,14 @@ TEST_P(GpuNativeDispatchTest, ExecutableGlobalsPreservePlacementAndVisibility) {
       executable, IREE_SV("image_value"), &token));
   iree_hal_buffer_t* global = nullptr;
   IREE_ASSERT_OK(iree_hal_executable_global_buffer(executable, token, &global));
+  iree_hal_memory_scope_t queue_scope;
+  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+      group_, {IREE_HAL_MEMORY_SITE_QUEUE, iree_hal_queue_family(queues_[0])},
+      &queue_scope));
+  EXPECT_TRUE(iree_all_bits_set(
+      iree_hal_buffer_query_atomic_operations(global, queue_scope)
+          .device_scope_32,
+      IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD));
   iree_hal_executable_function_t function;
   IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
       executable, IREE_SV("image_increment"), &function));
@@ -192,6 +200,17 @@ TEST_P(GpuNativeDispatchTest, ExecutableGlobalsPreservePlacementAndVisibility) {
           {1, &semaphore, &ready}, 1, &update, nullptr));
       completed = ready;
     }
+    const iree_hal_atomic_rmw_params_t add = {
+        .operand = 3,
+        .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
+        .width = IREE_HAL_ATOMIC_WIDTH_32,
+        .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+    };
+    uint64_t updated = completed + 1;
+    IREE_ASSERT_OK(iree_hal_queue_atomic_rmw(
+        queue, {completed ? 1u : 0u, &semaphore, &completed},
+        {1, &semaphore, &updated}, global, 0, add, nullptr));
+    completed = updated;
     uint64_t after = completed + 1;
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
         queue, {completed ? 1u : 0u, &semaphore, &completed},
@@ -224,7 +243,7 @@ TEST_P(GpuNativeDispatchTest, ExecutableGlobalsPreservePlacementAndVisibility) {
                                              iree_infinite_timeout(),
                                              IREE_ASYNC_WAIT_FLAG_NONE));
     }
-    EXPECT_EQ(observed, values[i] + increment);
+    EXPECT_EQ(observed, values[i] + 3 + increment);
     iree_hal_queue_dispatch_concurrency_t concurrency;
     IREE_ASSERT_OK(iree_hal_queue_query_dispatch_concurrency(
         queue, executable, function, concurrency_params,

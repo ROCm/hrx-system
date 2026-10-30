@@ -47,6 +47,10 @@ struct NativeMemory {
   uint32_t flushes = 0;
   // Achieved coherence; write-back caching alone does not imply this.
   amdf_memory_flags_t access_flags = AMDF_MEMORY_FLAG_HOST_COHERENT;
+  // Achieved shader transaction capabilities, independent of CP operations.
+  amdf_memory_atomic_capabilities_t program_atomics = {};
+  // Native host-view features supplied by this mapping dependency.
+  amdf_host_mapping_features_t host_features = 0;
   // Thread running the last native allocation, captured for placement checks.
   std::thread::id allocation_thread;
   // Thread publishing the image after caller-side relocation and preparation.
@@ -141,6 +145,11 @@ struct NativeMemory {
     EXPECT_EQ(ordinal, 0u);
     info->flags = self.access_flags | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
     info->access = self.request.accesses[0].requirements.access;
+    if (info->next) {
+      auto* program = static_cast<amdf_memory_program_atomics_t*>(info->next);
+      EXPECT_EQ(program->type, AMDF_STRUCTURE_TYPE_MEMORY_PROGRAM_ATOMICS);
+      program->operations = self.program_atomics;
+    }
     return AMDF_STATUS_OK;
   }
   static amdf_status_t AMDF_CALL QueryAddress(amdf_memory_t* memory,
@@ -163,6 +172,8 @@ struct NativeMemory {
     auto* self =
         producer->kind == AMDF_MEMORY_SITE_KIND_HOST
             ? reinterpret_cast<NativeMemory*>(producer->value.host.mapping)
+        : producer->kind == AMDF_MEMORY_SITE_KIND_PROGRAM
+            ? reinterpret_cast<NativeMemory*>(producer->value.program.memory)
             : reinterpret_cast<NativeMemory*>(producer->value.device.memory);
     const auto status = self->Step();
     if (!amdf_status_is_ok(status)) {
@@ -172,11 +183,51 @@ struct NativeMemory {
       if (site->kind == AMDF_MEMORY_SITE_KIND_DEVICE) {
         EXPECT_EQ(site->value.device.access_ordinal, 0u);
         EXPECT_EQ(site->value.device.queue_family_ordinal, 1u);
+      } else if (site->kind == AMDF_MEMORY_SITE_KIND_PROGRAM) {
+        EXPECT_EQ(site->value.program.access_ordinal, 0u);
       }
     }
     info->flags = AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE;
     info->release.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
     info->acquire.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
+    if (info->next) {
+      auto* pair = static_cast<amdf_memory_pair_atomics_t*>(info->next);
+      EXPECT_EQ(pair->type, AMDF_STRUCTURE_TYPE_MEMORY_PAIR_ATOMICS);
+      for (auto* operations : {&pair->producer, &pair->consumer}) {
+        const auto* site = operations == &pair->producer ? producer : consumer;
+        if (site->kind == AMDF_MEMORY_SITE_KIND_PROGRAM) {
+          *operations = self->program_atomics;
+        } else if (site->kind == AMDF_MEMORY_SITE_KIND_HOST &&
+                   (self->host_features &
+                    AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS)) {
+          operations->system_scope_32 = operations->system_scope_64 =
+              AMDF_ATOMIC_OPERATION_LOAD | AMDF_ATOMIC_OPERATION_STORE;
+        }
+      }
+      const bool device_pair =
+          producer->kind == AMDF_MEMORY_SITE_KIND_PROGRAM &&
+          consumer->kind == AMDF_MEMORY_SITE_KIND_PROGRAM;
+      if (!device_pair) {
+        pair->producer.device_scope_32 = pair->producer.device_scope_64 = 0;
+        pair->consumer.device_scope_32 = pair->consumer.device_scope_64 = 0;
+      }
+      for (auto cell : {&amdf_memory_atomic_capabilities_t::device_scope_32,
+                        &amdf_memory_atomic_capabilities_t::device_scope_64,
+                        &amdf_memory_atomic_capabilities_t::system_scope_32,
+                        &amdf_memory_atomic_capabilities_t::system_scope_64}) {
+        if (!(pair->producer.*cell) || !(pair->consumer.*cell)) {
+          pair->producer.*cell = pair->consumer.*cell = 0;
+        }
+      }
+      info->atomic_reach.scope_32 =
+          pair->producer.system_scope_32   ? AMDF_ATOMIC_SCOPE_SYSTEM
+          : pair->producer.device_scope_32 ? AMDF_ATOMIC_SCOPE_DEVICE
+                                           : AMDF_ATOMIC_SCOPE_NONE;
+      info->atomic_reach.scope_64 =
+          pair->producer.system_scope_64   ? AMDF_ATOMIC_SCOPE_SYSTEM
+          : pair->producer.device_scope_64 ? AMDF_ATOMIC_SCOPE_DEVICE
+                                           : AMDF_ATOMIC_SCOPE_NONE;
+    }
     return AMDF_STATUS_OK;
   }
   static amdf_status_t AMDF_CALL Map(amdf_memory_t* memory,
@@ -203,6 +254,7 @@ struct NativeMemory {
     info->byte_length = self.bytes.size();
     info->properties = (AMDF_HOST_MEMORY_PROPERTY_READ_CACHED |
                         AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK);
+    info->features = self.host_features;
     return AMDF_STATUS_OK;
   }
   static amdf_status_t AMDF_CALL CacheControl(
@@ -314,6 +366,14 @@ class ExecutableTest : public ::testing::TestWithParam<
     // device method or pretend to qualify public queue execution.
     family_.device = reinterpret_cast<iree_hal_device_t*>(this);
     family_.ordinal = 3;
+    family_spec_.role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+                              IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
+    family_spec_.atomic_capabilities.operations = {
+        IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+        IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+        IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+        IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL};
+    family_.spec = &family_spec_;
     family_.memory.domain = this;
     family_.memory.queue_scope_id = 4;
     access_.device = reinterpret_cast<amdf_device_t*>(this);
@@ -405,6 +465,8 @@ class ExecutableTest : public ::testing::TestWithParam<
   amdf_queue_family_info_t native_families_[2] = {};
   // Sealed-group identity and exact family selected by the parent.
   iree_hal_queue_family_t family_ = {};
+  // Queue execution capabilities independent of native memory qualification.
+  iree_hal_queue_family_spec_t family_spec_ = {};
   // Qualified native access for the executable's physical device.
   amdf_memory_device_access_t access_ = {};
   // Explicit backing policy; no implicit allocator or pool.
@@ -635,6 +697,76 @@ TEST_P(ExecutableTest, HostMappingPermissionsStayWithinTheNativeView) {
                         iree_hal_buffer_map_range(
                             buffer, IREE_HAL_MAPPING_MODE_SCOPED,
                             IREE_HAL_MEMORY_ACCESS_READ, 0, 0, 4, &mapping));
+}
+
+TEST_P(ExecutableTest, GlobalsCaptureExactShaderAndHostAtomicPairs) {
+  const auto transactions = AMDF_ATOMIC_OPERATION_LOAD |
+                            AMDF_ATOMIC_OPERATION_STORE |
+                            AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE;
+  native_.program_atomics = {transactions, transactions, 0, 0,
+                             transactions, transactions};
+  native_.host_features = AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS;
+  IREE_ASSERT_OK(Load());
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_executable_global_buffer(
+      executable_, Global("image_value"), &buffer));
+  const iree_hal_memory_scope_t host = {this, 1};
+  const iree_hal_memory_scope_t queue = {this, family_.memory.queue_scope_id};
+  const iree_hal_memory_scope_t program = {this, queue.id + 1};
+  const auto table = iree_hal_buffer_transition_table(buffer);
+  const auto pair = [&](iree_hal_memory_scope_t producer,
+                        iree_hal_memory_scope_t consumer) {
+    iree_hal_memory_transition_pair_t prepared;
+    IREE_CHECK_OK(iree_hal_memory_transition_prepare_pair(
+        table, producer, consumer, IREE_HAL_MEMORY_TRANSITION_RELEASE,
+        &prepared));
+    return iree_hal_memory_transition_query_info(table, prepared);
+  };
+  const uint32_t calls = native_.calls;
+  for (auto site : {queue, program}) {
+    const auto available =
+        iree_hal_buffer_query_atomic_operations(buffer, site);
+    EXPECT_EQ(available.device_scope_32, IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    EXPECT_EQ(available.device_scope_64, IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    EXPECT_EQ(available.system_scope_32, IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    EXPECT_EQ(available.system_scope_64, IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    for (auto peer : {queue, program}) {
+      const auto info = pair(site, peer);
+      EXPECT_EQ(info.producer_atomics.device_scope_32,
+                IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+      EXPECT_EQ(info.consumer_atomics.device_scope_64,
+                IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+      EXPECT_EQ(info.producer_atomics.system_scope_64,
+                IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+      EXPECT_EQ(info.consumer_atomics.system_scope_32,
+                IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    }
+    const auto to_host = pair(site, host);
+    const auto from_host = pair(host, site);
+    EXPECT_EQ(to_host.producer_atomics.system_scope_32,
+              IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    EXPECT_EQ(to_host.consumer_atomics.system_scope_32,
+              IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+                  IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+    EXPECT_EQ(from_host.producer_atomics.system_scope_64,
+              IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+                  IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+    EXPECT_EQ(from_host.consumer_atomics.system_scope_64,
+              IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+    EXPECT_EQ(to_host.producer_atomics.device_scope_32, 0u);
+    EXPECT_EQ(from_host.consumer_atomics.device_scope_64, 0u);
+  }
+  const auto cpu = pair(host, host);
+  EXPECT_EQ(cpu.producer_atomics.system_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  EXPECT_EQ(cpu.consumer_atomics.system_scope_64,
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  EXPECT_EQ(native_.calls, calls);
+  const auto memory = iree_hal_buffer_memory_view(buffer);
+  const auto* facts =
+      reinterpret_cast<const iree_hal_amd_fabric_memory_binding_facts_t*>(
+          memory.bindings + memory.contract->binding_layout.binding_count);
+  EXPECT_EQ(facts->scope_facts[queue.id].queue_atomic_operations, 0u);
 }
 
 TEST_P(ExecutableTest, CapturesExportClassesAndPreservesGlobalRange) {
