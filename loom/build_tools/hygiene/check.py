@@ -12,7 +12,7 @@ import argparse
 import json
 import re
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from build_tools.devtools.command_line import batch_path_commands
 
@@ -21,6 +21,7 @@ _SCENARIO_CORPUS_PREFIXES = tuple(
     for family in ("control", "function", "kernel", "memory", "numeric", "sanitizer")
 )
 _SEMANTIC_CORPUS_PREFIX = "loom/src/loom/test/corpus/"
+_TOOLING_TARGET_PREFIX = "loom/src/loom/tooling/target/"
 _CHECK_RECORD_PATTERN = re.compile(r"^\s*check\.(case|scenario)(?:\s|$)")
 _TARGET_DECLARATION_PATTERN = re.compile(r"^\s*[A-Za-z_][A-Za-z0-9_.]*\.target<")
 _TARGET_SPECIALIZATION_PATTERN = re.compile(r"\btarget\(\s*@")
@@ -133,6 +134,29 @@ def check_corpus_target_neutrality(paths: list[str], root: Path) -> bool:
     return ok
 
 
+def check_tooling_target_testdata_ownership(paths: list[str], root: Path) -> bool:
+    """Requires target tooling inputs to live in explicit testdata packages."""
+    ok = True
+    for path in paths:
+        if not path.startswith(_TOOLING_TARGET_PREFIX):
+            continue
+        source_path = PurePosixPath(path)
+        if source_path.suffix not in (".loom", ".loom-test"):
+            continue
+        if not (root / path).is_file():
+            continue
+        relative_path = PurePosixPath(path.removeprefix(_TOOLING_TARGET_PREFIX))
+        if "testdata" in relative_path.parts:
+            continue
+        print(
+            f"{path}:1: target tooling Loom inputs must live in an explicit "
+            "testdata package; semantic qualification belongs to target or "
+            "corpus packages"
+        )
+        ok = False
+    return ok
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tool", type=Path, required=True)
@@ -157,7 +181,15 @@ def main() -> int:
             target_neutral = check_corpus_target_neutrality(
                 paths, source_manifest.parent
             )
-            if not valid_headers or not valid_scenarios or not target_neutral:
+            tooling_inputs_owned = check_tooling_target_testdata_ownership(
+                paths, source_manifest.parent
+            )
+            if (
+                not valid_headers
+                or not valid_scenarios
+                or not target_neutral
+                or not tooling_inputs_owned
+            ):
                 return 1
         flags = {
             "format": ["--check"],

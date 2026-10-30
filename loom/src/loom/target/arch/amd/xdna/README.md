@@ -243,7 +243,7 @@ fixtures. C tests cover API and representation contracts. The
 [native HAL CTS](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/cts/)
 verifies loading, binding, repeated execution, numerical outputs, and resource
 lifetimes through libamdf on matching hardware. The
-[normal Loom HAL scenario](../../../../tooling/target/amd/xdna/test/hal_execution.loom)
+[normal Loom HAL scenario](../../../../../../target/amd/xdna/test/native/hal_execution.loom)
 adds device-driven target selection, compilation, staging, dispatch, readback,
 and comparison with an independent VM oracle. The
 [BF16 FFN benchmark](../../../../../../binding/c/benchmark/kernels/ffn/gate_up_quadratic_bf16_xdna.loom)

@@ -12,7 +12,7 @@ load(
 )
 load("//loom/src/loom/test/corpus:catalog.bzl", "LOOM_CORPUS")
 load(
-    "//loom/src/loom/tooling/target/spirv:execution_profiles.bzl",
+    "//loom/target/spirv:execution_profiles.bzl",
     "SPIRV_VULKAN_HARDWARE_PROFILE",
 )
 
@@ -51,6 +51,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "memory/packed/transport.loom",
     "memory/storage/word.loom",
     "memory/view/access.loom",
+    "memory/view/bitcast.loom",
     "memory/view/borrowed_transport.loom",
     "memory/view/boundary_transport.loom",
     "memory/view/nested_selection.loom",
@@ -236,6 +237,7 @@ _ALL_PROFILE_XFAILS = {
     "kernel/workgroup/reduce_tree.loom:@workgroup_tree_vector_all": "TARGET/003",
     "kernel/workgroup/scan.loom:@workgroup_scan_float": "TARGET/032",
     "kernel/workgroup/scan.loom:@workgroup_scan_vector": "TARGET/032",
+    "memory/address/dynamic_record_fields.loom:@atomic_record_fields": "TARGET/003",
     "memory/address/generic.loom:@generic_atomic_uniform_i64": "TARGET/003",
     "memory/address/generic.loom:@generic_workgroup_publication": "TARGET/032",
     # Loaded i64 coordinates exceed the target's exact signed 32-bit index.
@@ -448,6 +450,7 @@ _ALL_ROOTS_XFAIL = [
     "kernel/workgroup/reduce_partial.loom",
     "kernel/workgroup/reduce_tree.loom",
     "kernel/workgroup/scan.loom",
+    "memory/address/dynamic_record_fields.loom",
     "memory/atomic/float_bitwise.loom",
     "memory/atomic/float64_contention.loom",
     "memory/atomic/global_add_f32.loom",
@@ -581,6 +584,7 @@ _SPIRV_EXECUTION_XFAILS = {
 # still reject them with the exact target diagnostic.
 _SPIRV_EXECUTION_ALLOWED_FAILURES = {
     "control/loop/carried_lane_liveness.loom:@loop_carried_lane_liveness_values": "TARGET/003",
+    "memory/address/dynamic_record_fields.loom:@atomic_record_field_values": "TARGET/003",
     "memory/atomic/float64.loom:@atomic_f64_random_values": "TARGET/002,TARGET/003",
     "memory/atomic/float64.loom:@atomic_f64_special_values": "TARGET/002,TARGET/003",
     "memory/atomic/float64_contention.loom:@contended_atomic_f64_values": "TARGET/002,TARGET/003",

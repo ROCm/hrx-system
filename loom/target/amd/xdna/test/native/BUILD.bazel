@@ -1,0 +1,148 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_binary",
+    "loom_config_compatible_with",
+    "loom_generated_file",
+)
+load("//loom/build_tools/bazel:defs.bzl", "loom_execution_profile", "loom_test")
+load("//loom/target/amd/xdna:execution_profiles.bzl", "XDNA_HARDWARE_PROFILE")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+_XDNA_COMPILE_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/emit:aie2p_elf",
+])
+
+_VM_REFERENCE_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/execute:vm_iree_vm",
+])
+
+[
+    loom_test(
+        name = test_name,
+        srcs = [source_name + ".loom"],
+        benchmark_smoke = False,
+        execution_profiles = [XDNA_HARDWARE_PROFILE],
+        target_compatible_with = _VM_REFERENCE_COMPATIBLE_WITH,
+    )
+    for test_name, source_name in [
+        ("channel_lifetime_execution_test", "channel_lifetime"),
+        ("dma_reuse_execution_test", "dma_reuse"),
+        ("hal_execution_test", "hal_execution"),
+    ]
+]
+
+[
+    loom_test(
+        name = name + "_execution_test",
+        srcs = [name + ".loom"],
+        benchmark_smoke = False,
+        execution_profiles = [XDNA_HARDWARE_PROFILE],
+    )
+    for name in [
+        "dma_wrap",
+        "grouped_dma",
+        "hardware_loop",
+        "radian_trigonometry",
+        "source_owned_accumulation",
+    ]
+]
+
+# This topology reserves all eight columns of the Strix Halo array.
+_XDNA_EIGHT_COLUMN_PROFILE = loom_execution_profile(
+    name = "xdna_eight_columns",
+    build_requirements = XDNA_HARDWARE_PROFILE.build_requirements,
+    executor = XDNA_HARDWARE_PROFILE.executor,
+    resource_group = XDNA_HARDWARE_PROFILE.resource_group,
+    run_requirements = XDNA_HARDWARE_PROFILE.run_requirements,
+    runner_args = ["--device=xdna://0?columns=8"],
+    target_class = XDNA_HARDWARE_PROFILE.target_class,
+    target_family = XDNA_HARDWARE_PROFILE.target_family,
+)
+
+loom_test(
+    name = "multicast_execution_test",
+    srcs = ["channel_multicast.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_EIGHT_COLUMN_PROFILE],
+    tags = ["manual"],
+)
+
+loom_test(
+    name = "staging_stress",
+    srcs = ["staging_stress.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [XDNA_HARDWARE_PROFILE],
+    tags = [
+        "manual",
+        "stress",
+    ],
+)
+
+[
+    loom_generated_file(
+        name = "temporal_fold_image_" + suffix,
+        testonly = True,
+        args = [
+            "$(location temporal_fold.loom)",
+            "--target=amd.xdna.aie2p:" + profile,
+        ],
+        generator = "//loom/src/loom/tools/loom-compile",
+        inputs = ["temporal_fold.loom"],
+        output = "temporal_fold_" + suffix + ".xdna",
+        output_flag = "--output=",
+        target_compatible_with = _XDNA_COMPILE_COMPATIBLE_WITH,
+    )
+    for suffix, profile in [
+        ("npu4", "amd.xdna.strix.17f0_10"),
+        ("npu5", "amd.xdna.strix_halo.17f0_11"),
+    ]
+]
+
+loom_cc_binary(
+    name = "temporal_fold_test_bin",
+    testonly = True,
+    srcs = ["temporal_fold_test.cc"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/execute:aie2p_xdna_hal"]),
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/cts/util:test_main",
+        "//runtime/src/iree/hal/drivers/amd:driver",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+iree_executable_test(
+    name = "temporal_fold_execution_test",
+    src = ":temporal_fold_test_bin",
+    args = [
+        "--executable_file_npu4=$(rootpath :temporal_fold_image_npu4)",
+        "--executable_file_npu5=$(rootpath :temporal_fold_image_npu5)",
+    ],
+    data = [
+        ":temporal_fold_image_npu4",
+        ":temporal_fold_image_npu5",
+    ],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=libamdf.resource.xdna",
+        "runtime-resource=amd-xdna",
+    ],
+    target_compatible_with = _XDNA_COMPILE_COMPATIBLE_WITH + loom_config_compatible_with(["//loom/config/execute:aie2p_xdna_hal"]),
+)

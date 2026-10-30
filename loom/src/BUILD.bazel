@@ -26,8 +26,6 @@ set(IREE_PACKAGE_ROOT_PREFIX "loom/src")
 set(IREE_HDRS_ROOT_PATH "${_IREE_PACKAGE_SOURCE_DIR}")
 set(IREE_COMPILER_TABLEGEN_INCLUDE_DIRS "${_IREE_PACKAGE_SOURCE_DIR}")
 set(IREE_IMPLICIT_DEFS_CC_DEPS loom_defs)
-
-include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_check.cmake")
 """,
 )
 

@@ -4,7 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:defs.bzl", "loom_module")
+load("//loom/build_tools/bazel:defs.bzl", "loom_corpus_sources")
+load(":manifest.bzl", "HIP_AUTHORING_CORPUS")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -12,21 +13,7 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-_NON_EXECUTION_EXAMPLES = [
-    "lane_distribution.loom",
-    "packed_field_contracts.loom",
-    "q8_hip_shaped_unroll_unresolved.loom",
-]
-
-_PORTABLE_CASES = glob(
-    ["*.loom"],
-    exclude = _NON_EXECUTION_EXAMPLES,
-)
-
-exports_files(glob(["*.loom"]))
-
-loom_module(
-    name = "portable_cases",
-    srcs = _PORTABLE_CASES,
-    output_format = "bc",
+loom_corpus_sources(
+    name = "corpus",
+    manifest = HIP_AUTHORING_CORPUS,
 )

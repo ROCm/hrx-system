@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import hashlib
 import json
 import os
 import re
@@ -152,6 +153,20 @@ def _safe_case_name(name: str) -> str:
     return safe or "case"
 
 
+_CASE_PATH_NAME_MAX_LENGTH = 32
+
+
+def _case_path_name(name: str) -> str:
+    """Returns a bounded filesystem component identifying a test case."""
+    safe = _safe_case_name(name)
+    if len(safe) <= _CASE_PATH_NAME_MAX_LENGTH:
+        return safe
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
+    prefix_length = _CASE_PATH_NAME_MAX_LENGTH - len(digest) - 1
+    prefix = safe[:prefix_length].rstrip("._-") or "case"
+    return f"{prefix}-{digest}"
+
+
 def _decode_text(data: bytes) -> str:
     return data.decode("utf-8", errors="replace").replace("\r\n", "\n")
 
@@ -264,7 +279,7 @@ class ExecutionRunner:
         case_name = _as_string(case.get("name"), "case.name")
         temp_root = os.environ.get("TEST_TMPDIR")
         temp_dir = Path(
-            tempfile.mkdtemp(prefix=_safe_case_name(case_name) + "-", dir=temp_root)
+            tempfile.mkdtemp(prefix=_case_path_name(case_name) + "-", dir=temp_root)
         )
         substituter = _Substituter(
             {
@@ -642,7 +657,7 @@ class ExecutionRunner:
         undeclared_outputs = os.environ.get("TEST_UNDECLARED_OUTPUTS_DIR")
         if undeclared_outputs:
             destination = Path(undeclared_outputs) / (
-                _safe_case_name(case_name) + "_temp"
+                _case_path_name(case_name) + "_temp"
             )
             if destination.exists():
                 shutil.rmtree(destination)

@@ -21,11 +21,6 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-exports_files(
-    ["execution_profiles.bzl"],
-    visibility = ["//visibility:public"],
-)
-
 _WASM_BINARY_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/emit:wasm_binary",
 ])

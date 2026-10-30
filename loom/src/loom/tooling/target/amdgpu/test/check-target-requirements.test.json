@@ -6,7 +6,7 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/check_target_requirements.loom",
+          "{srcdir}/../testdata/check_target_requirements.loom",
           "--device=amdgpu"
         ]
       },
@@ -25,7 +25,7 @@
       "run": {
         "tool": "loom-benchmark",
         "args": [
-          "{srcdir}/check_target_requirements.loom",
+          "{srcdir}/../testdata/check_target_requirements.loom",
           "--device=amdgpu",
           "--iterations=1",
           "--warmup-iterations=0",

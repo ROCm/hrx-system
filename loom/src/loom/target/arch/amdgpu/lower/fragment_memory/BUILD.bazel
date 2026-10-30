@@ -85,11 +85,9 @@ loom_cc_test(
 loom_check_test(
     name = "transpose_loom_test",
     src = "transpose.loom-test",
-    compile_targets = ["//loom/target/amdgpu:gfx1200"],
 )
 
 loom_check_test(
     name = "transpose_gfx950_loom_test",
     src = "transpose_gfx950.loom-test",
-    compile_targets = ["//loom/target/amdgpu:gfx950"],
 )

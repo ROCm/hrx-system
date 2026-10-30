@@ -34,7 +34,7 @@ def _validate_catalog(catalog):
     if getattr(catalog, "kind", None) != _CATALOG_KIND:
         fail("expected a Loom corpus catalog, got %r" % catalog)
 
-def loom_corpus_manifest(name, package, srcs):
+def loom_corpus_manifest(name, package, srcs, configs = {}):
     """Describes one semantic package without target or execution policy.
 
     Args:
@@ -42,6 +42,8 @@ def loom_corpus_manifest(name, package, srcs):
       package: Absolute Bazel package owning the semantic manifest. Source
         directories below it are independent Bazel packages.
       srcs: Sources using the scenario correctness harness.
+      configs: Optional source paths mapped to string-valued configuration
+        bindings required to execute and compile that source.
 
     Returns:
       An immutable manifest value suitable for a shared corpus catalog.
@@ -52,6 +54,16 @@ def loom_corpus_manifest(name, package, srcs):
         fail("Loom corpus manifest package %r must be an absolute package label" % package)
     if not srcs:
         fail("Loom corpus manifest %s must contain at least one source" % name)
+    for source, source_configs in configs.items():
+        if source not in srcs:
+            fail("Loom corpus manifest %s config names unknown source %r" % (name, source))
+        if type(source_configs) != "dict":
+            fail("Loom corpus manifest %s configs for %s must be a dict" % (name, source))
+        for symbol, value in source_configs.items():
+            if type(symbol) != "string" or not symbol:
+                fail("Loom corpus manifest %s config symbols for %s must be non-empty strings" % (name, source))
+            if type(value) != "string":
+                fail("Loom corpus manifest %s config %s for %s must have a string value" % (name, symbol, source))
 
     programs = []
     seen_sources = {}
@@ -73,6 +85,7 @@ def loom_corpus_manifest(name, package, srcs):
             )
         seen_targets[target_name] = source
         programs.append(struct(
+            configs = dict(configs.get(source, {})),
             identity = name + "/" + source,
             label = source_package + ":" + source_name,
             manifest = name,

@@ -37,16 +37,17 @@ cp -- "${script_dir}/guarded-read-ahead.loom" "${output_dir}/guarded-read-ahead.
 cp -- "${script_dir}/guarded-read-ahead-tests.loom" "${output_dir}/guarded-read-ahead-tests.loom"
 # Each downloadable example includes its kernel and named benchmark workloads.
 corpus_dir="${repo_root}/loom/src/loom/test/corpus/checked_benchmarks"
+benchmark_dir="${corpus_dir}/benchmark"
 "${loom_link}" "${corpus_dir}/streaming_packed_s8_dot.loom" \
-  "${corpus_dir}/streaming_packed_s8_dot_benchmark.loom" --mode=merge --to=text \
+  "${benchmark_dir}/streaming_packed_s8_dot_benchmark.loom" --mode=merge --to=text \
   --output="${output_dir}/streaming-packed-dot.loom"
 for name in routed_row_combine cooperative_paged_attention \
   sparse_token_attention grouped_paged_attention; do
   "${loom_link}" "${corpus_dir}/${name}_f32.loom" \
-    "${corpus_dir}/${name}_f32_benchmark.loom" --mode=merge --to=text \
+    "${benchmark_dir}/${name}_f32_benchmark.loom" --mode=merge --to=text \
     --output="${output_dir}/${name//_/-}.loom"
 done
-cp -- "${repo_root}/loom/src/loom/tooling/target/amdgpu/test/corpus/split_barrier_reuse.loom" \
+cp -- "${repo_root}/loom/target/amdgpu/test/native/split_barrier_reuse.loom" \
   "${output_dir}/split-barrier-reuse.loom"
 
 cd -- "${output_dir}"

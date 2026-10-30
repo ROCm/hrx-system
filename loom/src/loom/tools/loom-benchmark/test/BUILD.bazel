@@ -4,6 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:python.bzl", "loom_py_test")
 
@@ -35,4 +37,38 @@ loom_py_test(
         "//loom/config/execute:x86_task_hal",
         "//loom/config/execute:vm_iree_vm",
     ]) + ["@platforms//cpu:x86_64"],
+)
+
+iree_executable_test(
+    name = "benchmark_task_smoke_test",
+    src = "//loom/src/loom/tools/loom-benchmark",
+    args = [
+        "$(rootpath //loom/target/x86/test:x86_approximate_roots.loom)",
+        "--device=task",
+        "--benchmark=@x86_root_approximate_benchmark",
+        "--iterations=1",
+        "--warmup-iterations=0",
+        "--min-time-ms=0",
+        "--max-batches=1",
+        "--stable-p90-to-p50-ppm=0",
+        "--task_topology_max_group_count=2",
+    ],
+    data = ["//loom/target/x86/test:x86_approximate_roots.loom"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:x86_task_hal",
+    ]) + ["@platforms//cpu:x86_64"],
+)
+
+iree_execution_test_suite(
+    name = "benchmark_scenario_correctness_test",
+    data = [
+        "//loom/src/loom/tooling/execution/hal/testdata:command_scenario_dependent_stages.loom",
+        "//loom/src/loom/tooling/testbench/testdata:benchmark_scenarios.loom",
+    ],
+    manifests = ["benchmark_scenario_correctness.test.json"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:x86_task_hal",
+        "//loom/config/execute:vm_iree_vm",
+    ]) + ["@platforms//cpu:x86_64"],
+    tools = {"benchmark": "//loom/src/loom/tools/loom-benchmark"},
 )

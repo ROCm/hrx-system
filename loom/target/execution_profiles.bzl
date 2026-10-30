@@ -7,12 +7,12 @@
 """Native hardware policies for shared GPU source tests."""
 
 load(
-    "//loom/src/loom/tooling/target/spirv:execution_profiles.bzl",
-    "SPIRV_VULKAN_HARDWARE_PROFILE",
-)
-load(
     "//loom/target/amdgpu:execution_profiles.bzl",
     "AMD_GPU_HARDWARE_PROFILE",
+)
+load(
+    "//loom/target/spirv:execution_profiles.bzl",
+    "SPIRV_VULKAN_HARDWARE_PROFILE",
 )
 
 # Each child executes on a compatible local device; offline compiler profiles

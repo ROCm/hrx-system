@@ -8,7 +8,7 @@
           "run": {
             "tool": "loom-opt",
             "args": [
-              "{srcdir}/resident_publication.loom",
+              "{srcdir}/../testdata/resident_publication.loom",
               "--pipeline=source-low",
               "--dump-ir-after=aie2p-lower-pipeline",
               "--dump-ir-format=jsonl",

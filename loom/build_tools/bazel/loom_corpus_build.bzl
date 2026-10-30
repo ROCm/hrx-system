@@ -87,6 +87,10 @@ def _declare_subject_module(ctx, source):
         strip_check = True,
     )
 
+def _add_config_args(args, configs):
+    for symbol in sorted(configs):
+        args.add("--config=%s=%s" % (symbol, configs[symbol]))
+
 def _declare_positive_compile(ctx, source, profile, xfails):
     profile_info = profile[LoomTargetProfileInfo]
     output_stem = ctx.label.name + "/" + _profile_stem(profile)
@@ -95,6 +99,7 @@ def _declare_positive_compile(ctx, source, profile, xfails):
     args = ctx.actions.args()
     args.add(source)
     args.add("--target=%s:%s" % (profile_info.family, profile_info.selector))
+    _add_config_args(args, ctx.attr.configs)
     for root in sorted(xfails):
         args.add("--exclude-root=%s" % root)
     args.add("--output=%s" % artifact.path)
@@ -130,6 +135,7 @@ def _declare_xfail_probes(ctx, source, profile, xfails, require_all_roots):
         args.add("--expected-diagnostic=%s" % xfails[root])
     args.add(source)
     args.add("--target=%s:%s" % (profile_info.family, profile_info.selector))
+    _add_config_args(args, ctx.attr.configs)
     ctx.actions.run(
         arguments = [args],
         executable = ctx.executable._xfails_tool,
@@ -267,6 +273,9 @@ _loom_corpus_program = rule(
                 [LoomTargetSetInfo],
             ],
             doc = "Target profiles or sets whose complete default root set is covered by diagnostic xfails.",
+        ),
+        "configs": attr.string_dict(
+            doc = "String-valued configuration bindings required by this corpus source.",
         ),
         "excludes": attr.label_keyed_string_dict(
             doc = "Target profiles or sets mapped to whole-source exclusion reasons.",
@@ -462,6 +471,7 @@ def loom_corpus_build(
         _loom_corpus_program(
             name = program.target_name,
             all_roots_xfail = all_roots_xfail_by_source[program.identity],
+            configs = program.configs,
             excludes = source_excludes,
             profiles = profiles,
             source_identity = program.identity,

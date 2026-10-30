@@ -6,7 +6,7 @@
       "run": {
         "tool": "loom-opt",
         "args": [
-          "{srcdir}/loom_opt_f32_arith.loom",
+          "{srcdir}/../testdata/loom_opt_f32_arith.loom",
           "--pipeline=source-low",
           "--dump-ir-after=source-to-low",
           "--dump-ir-format=jsonl",
@@ -37,7 +37,7 @@
           "run": {
             "tool": "loom-opt",
             "args": [
-              "{srcdir}/loom_opt_f32_arith.loom",
+              "{srcdir}/../testdata/loom_opt_f32_arith.loom",
               "--pipeline=prepared-low",
               "--output={tmp}/prepared.loom"
             ]
@@ -50,7 +50,7 @@
           "run": {
             "tool": "loom-opt",
             "args": [
-              "{srcdir}/loom_opt_f32_arith.loom",
+              "{srcdir}/../testdata/loom_opt_f32_arith.loom",
               "--pipeline=default",
               "--require-resolved-config",
               "--to=bytecode",

@@ -22,6 +22,7 @@ py_test(
         "//loom:.bazel_to_cmake.cfg.py",
         "//loom/build_tools/amdgpu:target_config.bzl",
         "//loom/build_tools/bazel:build_defs.bzl",
+        "//loom/build_tools/bazel_to_cmake/testdata:configured_corpus.bzl",
         "//loom/requirements:defs.bzl",
         "//loom/requirements:package_policy.bzl",
         "//runtime:.bazel_to_cmake.cfg.py",

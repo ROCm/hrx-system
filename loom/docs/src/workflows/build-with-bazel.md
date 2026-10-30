@@ -295,16 +295,6 @@ remain shared across every row and profile. `args` remains correctness-only;
 `--config` and `--case` are rejected there and in execution profiles so the two
 numerical runners cannot accidentally select different workloads.
 
-### Compiler fixtures retain their source assertions
-
-Compiler fixtures have the same alongside option. `loom_check_test` accepts a
-`compile_targets` list; `loom_check_test_suite` accepts a map from existing
-source paths to profile lists. Each source case uses the ordinary input
-provider and diagnostic annotations. Compilation
-does not compare RUN goldens or inherit their execution skips and expected
-failures. Profile labels supply typed compiler identities, independently of
-execution resource requirements.
-
 ## The CLI and in-memory APIs use the same boundaries
 
 The Bazel rules orchestrate the public tools; they do not add a second linkage

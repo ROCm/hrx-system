@@ -5,7 +5,7 @@
       "name": "prints selected Low text input as target assembly",
       "run": {
         "tool": "loom-link",
-        "args": ["--root=sum", "{srcdir}/loom_link_low.loom"]
+        "args": ["--root=sum", "{srcdir}/../testdata/loom_link_low.loom"]
       },
       "stdout": {
         "contains": [
@@ -27,7 +27,7 @@
             "args": [
               "--mode=merge",
               "--output={tmp}/merged.loom",
-              "{srcdir}/loom_link_low.loom"
+              "{srcdir}/../testdata/loom_link_low.loom"
             ]
           },
           "files": [
@@ -62,7 +62,7 @@
             "args": [
               "--to=bc",
               "--output={tmp}/input.loombc",
-              "{srcdir}/loom_link_low.loom"
+              "{srcdir}/../testdata/loom_link_low.loom"
             ]
           }
         },
@@ -94,7 +94,7 @@
             "args": [
               "--to=bc",
               "--output={tmp}/bindings.loombc",
-              "{srcdir}/loom_link_type_bindings.loom"
+              "{srcdir}/../testdata/loom_link_type_bindings.loom"
             ]
           }
         },
@@ -135,7 +135,7 @@
             "args": [
               "--root=register_type_binding",
               "{tmp}/bindings.loombc",
-              "{srcdir}/loom_link_type_binding_declaration.loom"
+              "{srcdir}/../testdata/loom_link_type_binding_declaration.loom"
             ]
           },
           "stdout": {
@@ -159,7 +159,7 @@
             "args": [
               "--root=call_register_type_binding",
               "{tmp}/bindings.loombc",
-              "{srcdir}/loom_link_type_binding_declaration.loom"
+              "{srcdir}/../testdata/loom_link_type_binding_declaration.loom"
             ]
           },
           "stdout": {

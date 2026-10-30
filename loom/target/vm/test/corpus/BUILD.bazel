@@ -23,6 +23,7 @@ _KERNEL_SOURCES = [
     "control/loop/condition.loom",
     "control/loop/count.loom",
     "control/loop/predicate_lifetimes.loom",
+    "control/loop/queued_routes.loom",
     "control/loop/rotation/offsets.loom",
     "control/loop/rotation/values.loom",
     "control/loop/rotation/views.loom",
@@ -50,6 +51,7 @@ _KERNEL_SOURCES = [
     "kernel/workgroup/scan.loom",
     "memory/address/carrier_casts.loom",
     "memory/address/carrier_loops.loom",
+    "memory/address/dynamic_record_fields.loom",
     "memory/address/generic.loom",
     "memory/address/integer_casts.loom",
     "memory/address/integer_terms.loom",
@@ -153,7 +155,10 @@ loom_corpus_test(
     execution_profiles = [VM_REFERENCE_PROFILE],
     profile_sources = {
         VM_REFERENCE_PROFILE.name: [
+            "function/call/calls.loom",
             "memory/buffer/packing.loom",
+            "memory/buffer/selection.loom",
+            "memory/view/bitcast.loom",
             "numeric/float/activations.loom",
             "numeric/float/exponent.loom",
             "numeric/float/exponential.loom",

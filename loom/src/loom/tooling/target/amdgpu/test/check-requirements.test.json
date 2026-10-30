@@ -6,7 +6,7 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/check_requirements.loom"
+          "{srcdir}/../testdata/check_requirements.loom"
         ]
       },
       "stdout": {
@@ -27,7 +27,7 @@
       "run": {
         "tool": "loom-benchmark",
         "args": [
-          "{srcdir}/check_requirements.loom",
+          "{srcdir}/../testdata/check_requirements.loom",
           "--iterations=1",
           "--warmup-iterations=0",
           "--output-format=jsonl"
@@ -45,7 +45,7 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/check_requirements_invalid.loom",
+          "{srcdir}/../testdata/check_requirements_invalid.loom",
           "--case=@missing_target"
         ]
       },
@@ -61,7 +61,7 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/check_requirements_invalid.loom",
+          "{srcdir}/../testdata/check_requirements_invalid.loom",
           "--case=@wrong_target_type"
         ]
       },
@@ -77,7 +77,7 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/check_requirements_invalid.loom",
+          "{srcdir}/../testdata/check_requirements_invalid.loom",
           "--case=@unknown_target"
         ]
       },
@@ -93,7 +93,7 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/check_requirements_invalid.loom",
+          "{srcdir}/../testdata/check_requirements_invalid.loom",
           "--case=@invalid_feature"
         ]
       },

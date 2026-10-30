@@ -7,8 +7,8 @@
 # bazel-to-cmake: skip
 
 load("@hrx//loom/build_tools/bazel:defs.bzl", "loom_kernel_library", "loom_library", "loom_test")
-load("@hrx//loom/src/loom/tooling/target/spirv:execution_profiles.bzl", "SPIRV_VULKAN_HARDWARE_PROFILE")
 load("@hrx//loom/target/amdgpu:execution_profiles.bzl", "AMD_GPU_ACCESS_PROFILE", "AMD_GPU_HARDWARE_PROFILE")
+load("@hrx//loom/target/spirv:execution_profiles.bzl", "SPIRV_VULKAN_HARDWARE_PROFILE")
 load("@hrx//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
 package(

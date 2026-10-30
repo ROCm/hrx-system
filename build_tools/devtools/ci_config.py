@@ -243,6 +243,7 @@ AMD_CLIENT_WINDOWS_BAZEL_TARGETS = (
         "//runtime/src/iree/hal/drivers/vulkan/...",
         "//loom/binding/c/test/target/spirv/...",
         "//loom/src/loom/tooling/target/spirv/...",
+        "//loom/target/spirv/test/...",
     )
     + AMD_GPU_WINDOWS_BAZEL_TARGETS
 )
@@ -327,7 +328,7 @@ LOOM_AMDGPU_CMAKE_COMPILE_CTEST_REGEXES = tuple(
     for target in LOOM_AMDGPU_BAZEL_COMPILE_TEST_TARGETS
 )
 AMDGPU_XFAILS = tuple(
-    bazel_xfail(f"//loom/src/loom/tooling/target/amdgpu/test/cxx:{target}")
+    bazel_xfail(f"//loom/target/amdgpu/test/cxx:{target}")
     for target in (
         # Low assembly parsing requires a function representation contract that
         # the CXX import path does not provide before lowering.
@@ -355,9 +356,7 @@ AMDGPU_BAZEL_XFAILS_BY_TARGET_SELECTOR = {
     ),
     # gfx120X currently hangs while initializing or executing device-side TSAN.
     # Keep every other Loom AMDGPU execution test active on the runner.
-    "gfx120X-all": (
-        bazel_xfail("//loom/src/loom/tooling/target/amdgpu/test:tsan_test"),
-    ),
+    "gfx120X-all": (bazel_xfail("//loom/target/amdgpu/test/sanitizer:tsan_test"),),
 }
 AMDGPU_XFAIL_TARGETS = bazel_xfail_targets(AMDGPU_XFAILS)
 AMDGPU_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(AMDGPU_XFAILS)

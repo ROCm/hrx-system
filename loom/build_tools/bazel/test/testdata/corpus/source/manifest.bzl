@@ -11,6 +11,11 @@ load("//loom/build_tools/bazel:defs.bzl", "loom_corpus_manifest")
 SAMPLE_CORPUS = loom_corpus_manifest(
     name = "sample",
     package = "//loom/build_tools/bazel/test/testdata/corpus/source",
+    configs = {
+        "nested/fixture.loom": {
+            "sample.value": "42",
+        },
+    },
     srcs = [
         "excluded.loom",
         "nested/fixture.loom",

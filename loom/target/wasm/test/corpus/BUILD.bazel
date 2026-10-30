@@ -6,7 +6,7 @@
 
 load("//loom/build_tools/bazel:defs.bzl", "loom_corpus_build", "loom_scenario_test")
 load("//loom/src/loom/test/corpus:catalog.bzl", "LOOM_CORPUS")
-load("//loom/src/loom/tooling/target/wasm:execution_profiles.bzl", "WASM_HOSTED_PROFILE")
+load("//loom/target/wasm:execution_profiles.bzl", "WASM_HOSTED_PROFILE")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -23,6 +23,7 @@ _KERNEL_SOURCES = [
     "control/loop/condition.loom",
     "control/loop/count.loom",
     "control/loop/predicate_lifetimes.loom",
+    "control/loop/queued_routes.loom",
     "control/loop/rotation/offsets.loom",
     "control/loop/rotation/values.loom",
     "control/loop/rotation/views.loom",
@@ -50,6 +51,7 @@ _KERNEL_SOURCES = [
     "kernel/workgroup/scan.loom",
     "memory/address/carrier_casts.loom",
     "memory/address/carrier_loops.loom",
+    "memory/address/dynamic_record_fields.loom",
     "memory/address/generic.loom",
     "memory/address/integer_casts.loom",
     "memory/address/integer_terms.loom",
@@ -133,6 +135,7 @@ _SCENARIO_KERNEL_SOURCES = [
     "control/loop/condition.loom",
     "control/loop/count.loom",
     "control/loop/predicate_lifetimes.loom",
+    "control/loop/queued_routes.loom",
     "control/loop/rotation/offsets.loom",
     "control/loop/rotation/values.loom",
     "control/loop/rotation/views.loom",
@@ -160,6 +163,7 @@ _SCENARIO_KERNEL_SOURCES = [
     "kernel/workgroup/scan.loom",
     "memory/address/carrier_casts.loom",
     "memory/address/carrier_loops.loom",
+    "memory/address/dynamic_record_fields.loom",
     "memory/address/generic.loom",
     "memory/address/integer_casts.loom",
     "memory/address/integer_terms.loom",

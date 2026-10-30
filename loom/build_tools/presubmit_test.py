@@ -221,11 +221,6 @@ class LoomPresubmitTest(unittest.TestCase):
         )
         self.assertFalse(
             self.presubmit.is_format_source_path(
-                "loom/src/loom/tooling/target/amdgpu/test/amdgpu_bad_return.loom"
-            )
-        )
-        self.assertFalse(
-            self.presubmit.is_format_source_path(
                 "loom/src/loom/tools/loom-benchmark/testdata/duplicate_symbol.loom"
             )
         )

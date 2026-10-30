@@ -66,6 +66,13 @@ class CMakeLoomCorpusTest(unittest.TestCase):
                 "examples",
                 "//fixture",
                 ["nested/fixture.loom", "identity.loom"],
+                configs={
+                    "identity.loom": {
+                        "identity.empty": "",
+                        "identity.value": "42",
+                    },
+                    "nested/fixture.loom": {"nested.value": "7"},
+                },
             )
             source_functions.loom_corpus_sources("sources", manifest)
             nested_source_functions.loom_corpus_sources("sources", manifest)
@@ -169,6 +176,14 @@ class CMakeLoomCorpusTest(unittest.TestCase):
                         ],
                     )
                     for test in tests:
+                        expected_config = (
+                            "--config=identity.value=42"
+                            if "examples_identity" in test["name"]
+                            else "--config=nested.value=7"
+                        )
+                        self.assertIn(expected_config, test["command"])
+                        if "examples_identity" in test["name"]:
+                            self.assertIn("--config=identity.empty=", test["command"])
                         labels = next(
                             property["value"]
                             for property in test["properties"]

@@ -1,0 +1,63 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/amdgpu:target_config.bzl",
+    "LOOM_AMDGPU_SUPPORTED_TARGETS",
+)
+load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load(
+    "//loom/target/amdgpu:execution_profiles.bzl",
+    "AMD_GPU_ASAN_PROFILE",
+    "AMD_GPU_HARDWARE_PROFILE",
+    "AMD_GPU_TSAN_CAPACITY_PROFILE",
+    "AMD_GPU_TSAN_PROFILE",
+)
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+loom_test(
+    name = "asan_test",
+    srcs = ["//loom/src/loom/test/corpus/sanitizer:access_reporting.loom"],
+    configs = {"asan_launch_bound.tile_capacity": "1"},
+    execution_profiles = [AMD_GPU_ASAN_PROFILE],
+)
+
+loom_test(
+    name = "ubsan_test",
+    srcs = ["//loom/src/loom/test/corpus/sanitizer:assertion_reporting.loom"],
+    # Authored assertions must provision feedback without insertion options.
+    execution_profiles = [AMD_GPU_HARDWARE_PROFILE],
+    tags = ["requires-amd-gpu-feedback"],
+)
+
+loom_test(
+    name = "tsan_test",
+    srcs = ["//loom/src/loom/test/corpus/sanitizer:race_workgroup.loom"],
+    execution_profiles = [AMD_GPU_TSAN_PROFILE],
+)
+
+loom_test(
+    name = "tsan_collective_publication_test",
+    srcs = ["//loom/src/loom/test/corpus/kernel/workgroup:publication.loom"],
+    execution_profiles = [AMD_GPU_TSAN_PROFILE],
+)
+
+loom_test(
+    name = "tsan_subgroup_test",
+    srcs = ["//loom/src/loom/test/corpus/sanitizer:race_subgroup.loom"],
+    compile_targets = ["//loom/target/amdgpu:" + target for target in LOOM_AMDGPU_SUPPORTED_TARGETS],
+    execution_profiles = [AMD_GPU_TSAN_PROFILE],
+)
+
+loom_test(
+    name = "tsan_capacity_test",
+    srcs = ["//loom/src/loom/test/corpus/sanitizer:race_capacity.loom"],
+    execution_profiles = [AMD_GPU_TSAN_CAPACITY_PROFILE],
+)

@@ -169,15 +169,15 @@ _loom_check_executable = rule(
 )
 
 def loom_check_compile_tests(name, src, targets, size = "small", tags = [], data = [], env = {}, **kwargs):
-    """Adds compiler tests beside one source owner's RUN or execution test.
+    """Adds compiler tests for an authored or linked module.
 
     Returns the generated test names so the owning suite includes every profile.
-    The source is an ordinary fixture or the owner's linked test module; the
-    same loom-check input admission and diagnostics apply to both.
+    Textual .<format>-test fixtures are excluded: they own exact RUN assertions,
+    not final-artifact presence checks.
 
     Args:
       name: Name prefix shared with the source owner's tests.
-      src: Source fixture or linked test module.
+      src: Authored source module or linked test module.
       targets: Typed compiler profile labels.
       size: Bazel test size.
       tags: Additional test tags.
@@ -188,6 +188,8 @@ def loom_check_compile_tests(name, src, targets, size = "small", tags = [], data
     Returns:
       Generated test names for inclusion in the owning suite.
     """
+    if str(src).endswith("-test"):
+        fail("compiler checks require an authored or linked module, not a textual test fixture: %s" % src)
     tests = []
     for target in targets:
         label = native.package_relative_label(target)
@@ -233,7 +235,6 @@ def loom_check_test(
         data = [],
         env = {},
         runner = Label("//loom/src/loom/tools/loom-check:loom-check-test"),
-        compile_targets = [],
         **kwargs):
     """Creates a test that runs a single .<format>-test file through loom-check.
 
@@ -245,20 +246,9 @@ def loom_check_test(
       data: Additional runfiles made available to loom-check.
       env: Additional test environment variables.
       runner: loom-check compatible runner binary.
-      compile_targets: Typed profiles checked independently of RUN goldens.
       **kwargs: Additional attributes passed to sh_test.
     """
     _loom_check_test_base_name(src)
-    compile_tests = loom_check_compile_tests(
-        name = name,
-        src = src,
-        targets = compile_targets,
-        size = size,
-        tags = tags,
-        data = data,
-        env = env,
-        **kwargs
-    )
     kwargs = apply_loom_test_policy(kwargs, name = name)
     policy_tags = kwargs.pop("tags", [])
     resource_group = kwargs.pop("resource_group", None)
@@ -276,9 +266,8 @@ def loom_check_test(
         tags = ["manual"],
         testonly = True,
     )
-    run_name = name + "_run" if compile_tests else name
     sh_test(
-        name = run_name,
+        name = name,
         srcs = [":" + launcher_name],
         data = data + [runner, src],
         env = env,
@@ -286,13 +275,6 @@ def loom_check_test(
         tags = test_tags,
         **kwargs
     )
-    if compile_tests:
-        native.test_suite(
-            name = name,
-            tests = [run_name] + compile_tests,
-            tags = tags,
-            visibility = kwargs.get("visibility"),
-        )
 
 def loom_check_test_suite(
         name,
@@ -302,7 +284,6 @@ def loom_check_test_suite(
         data = [],
         env = {},
         runner = Label("//loom/src/loom/tools/loom-check:loom-check-test"),
-        compile_targets = {},
         test_name_prefix_to_strip = "",
         **kwargs):
     """Creates one test per .<format>-test file, bundled into a test suite.
@@ -319,8 +300,6 @@ def loom_check_test_suite(
       data: Additional runfiles made available to each generated test.
       env: Additional test environment variables for each generated test.
       runner: loom-check compatible runner binary.
-      compile_targets: Source-to-profile lists for additional compiler checks.
-          Keys must name sources in this suite; no separate case roster exists.
       test_name_prefix_to_strip: Optional source path prefix to remove before
           deriving generated test names. This lets suites move files into a
           directory such as "test/" without changing the familiar test target
@@ -328,9 +307,6 @@ def loom_check_test_suite(
       **kwargs: Additional attributes passed to each loom_check_test
           and the test suite, when supported by both.
     """
-    for src in compile_targets:
-        if src not in srcs:
-            fail("compiler qualification source is not registered in %s: %s" % (name, src))
     tests = []
     for src in srcs:
         test_name_src = _loom_check_test_base_name(src)
@@ -345,7 +321,6 @@ def loom_check_test_suite(
             data = data,
             env = env,
             runner = runner,
-            compile_targets = compile_targets.get(src, []),
             **kwargs
         )
         tests.append(test_name)

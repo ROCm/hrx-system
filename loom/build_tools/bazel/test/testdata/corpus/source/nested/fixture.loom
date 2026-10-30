@@ -1,5 +1,7 @@
+config.decl @sample.value : %value: i32
+
 func.def @supported() -> (i32) {
-  %value = scalar.constant 42 : i32
+  %value = config.get @sample.value : i32
   func.return %value : i32
 }
 

@@ -661,7 +661,7 @@ function(_loom_declare_corpus_test ID)
     _RULE
     ""
     "NAME;PROFILE;RESOURCE_GROUP"
-    "MANIFESTS;SOURCES;XFAILS;ALLOWED_FAILURES;EXCLUDES;ARGS;RUNNER_ARGS;LABELS;REQUIRES"
+    "MANIFESTS;SOURCES;XFAILS;ALLOWED_FAILURES;EXCLUDES;CONFIGS;ARGS;RUNNER_ARGS;LABELS;REQUIRES"
     ${_ARGUMENTS}
   )
   if(_RULE_UNPARSED_ARGUMENTS)
@@ -733,6 +733,50 @@ function(_loom_declare_corpus_test ID)
         "loom_corpus_test(${_RULE_NAME}) source ${_SOURCE_ID} cannot be both selected and excluded")
     endif()
     list(APPEND _EXCLUDED_SOURCES "${_SOURCE_ID}")
+  endwhile()
+
+  list(LENGTH _RULE_CONFIGS _CONFIG_VALUE_COUNT)
+  math(EXPR _CONFIG_REMAINDER "${_CONFIG_VALUE_COUNT} % 2")
+  if(NOT _CONFIG_REMAINDER EQUAL 0)
+    message(FATAL_ERROR
+      "loom_corpus_test(${_RULE_NAME}) CONFIGS must contain source/binding pairs")
+  endif()
+  set(_CONFIG_KEYS)
+  set(_INDEX 0)
+  while(_INDEX LESS _CONFIG_VALUE_COUNT)
+    list(GET _RULE_CONFIGS ${_INDEX} _SOURCE_ID)
+    math(EXPR _INDEX "${_INDEX} + 1")
+    list(GET _RULE_CONFIGS ${_INDEX} _BINDING)
+    math(EXPR _INDEX "${_INDEX} + 1")
+    if(NOT _SOURCE_ID IN_LIST _SOURCE_IDS)
+      message(FATAL_ERROR
+        "loom_corpus_test(${_RULE_NAME}) config names unknown source ${_SOURCE_ID}")
+    endif()
+    if(_SOURCE_ID IN_LIST _EXCLUDED_SOURCES)
+      message(FATAL_ERROR
+        "loom_corpus_test(${_RULE_NAME}) config names excluded source ${_SOURCE_ID}")
+    endif()
+    if(_SELECTED_SOURCES AND NOT _SOURCE_ID IN_LIST _SELECTED_SOURCES)
+      message(FATAL_ERROR
+        "loom_corpus_test(${_RULE_NAME}) config names unselected source ${_SOURCE_ID}")
+    endif()
+    string(FIND "${_BINDING}" "=" _SEPARATOR)
+    if(_SEPARATOR LESS 1)
+      message(FATAL_ERROR
+        "loom_corpus_test(${_RULE_NAME}) config for ${_SOURCE_ID} must use symbol=value")
+    endif()
+    string(SUBSTRING "${_BINDING}" 0 ${_SEPARATOR} _SYMBOL)
+    set(_CONFIG_KEY "${_SOURCE_ID}=${_SYMBOL}")
+    if(_CONFIG_KEY IN_LIST _CONFIG_KEYS)
+      message(FATAL_ERROR
+        "loom_corpus_test(${_RULE_NAME}) repeats config ${_SYMBOL} for ${_SOURCE_ID}")
+    endif()
+    list(APPEND _CONFIG_KEYS "${_CONFIG_KEY}")
+    string(SHA256 _SOURCE_KEY "${_SOURCE_ID}")
+    set(_SOURCE_CONFIG_ARGS_VARIABLE
+      "_LOOM_CORPUS_CONFIG_ARGS_${_SOURCE_KEY}")
+    list(APPEND ${_SOURCE_CONFIG_ARGS_VARIABLE}
+      "--config=${_BINDING}")
   endwhile()
 
   set(_FAILURE_QUALIFICATION_KEYS)
@@ -808,14 +852,18 @@ function(_loom_declare_corpus_test ID)
     endif()
     get_property(_SOURCE_FAILURE_QUALIFICATION_ARGS GLOBAL PROPERTY
       "${ID}_FAILURE_QUALIFICATION_${_SOURCE_ID}")
+    string(SHA256 _SOURCE_KEY "${_SOURCE_ID}")
+    set(_SOURCE_CONFIG_ARGS_VARIABLE
+      "_LOOM_CORPUS_CONFIG_ARGS_${_SOURCE_KEY}")
+    set(_SOURCE_CONFIG_ARGS ${${_SOURCE_CONFIG_ARGS_VARIABLE}})
     list(GET _SOURCE_MODULE_TARGETS ${_SOURCE_INDEX} _MODULE_TARGET)
     _loom_corpus_program_stem(_PROGRAM_STEM "${_SOURCE_ID}")
     loom_execution_test(
       NAME "${_PROGRAM_STEM}_test_execute_${_PROFILE_STEM}_test"
       CORRECTNESS_ONLY
       MODULE "${_MODULE_TARGET}"
-      ARGS ${_RULE_ARGS} ${_SOURCE_FAILURE_QUALIFICATION_ARGS}
-      RUNNER_ARGS ${_RULE_RUNNER_ARGS}
+      ARGS ${_SOURCE_CONFIG_ARGS} ${_RULE_ARGS}
+      RUNNER_ARGS ${_RULE_RUNNER_ARGS} ${_SOURCE_FAILURE_QUALIFICATION_ARGS}
       LABELS ${_RULE_LABELS}
       RESOURCE_GROUP "${_RULE_RESOURCE_GROUP}"
     )

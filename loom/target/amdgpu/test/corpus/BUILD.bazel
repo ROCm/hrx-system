@@ -48,6 +48,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "memory/packed/transport.loom",
     "memory/storage/word.loom",
     "memory/view/access.loom",
+    "memory/view/bitcast.loom",
     "memory/view/borrowed_transport.loom",
     "memory/view/boundary_transport.loom",
     "memory/view/nested_selection.loom",
@@ -171,7 +172,10 @@ loom_corpus_test(
         AMD_GPU_ACCESS_PROFILE,
     ],
     profile_sources = {
-        AMD_GPU_ACCESS_PROFILE.name: ["numeric/vector/dynamic_windows.loom"],
+        AMD_GPU_ACCESS_PROFILE.name: [
+            "control/loop/queued_routes.loom",
+            "numeric/vector/dynamic_windows.loom",
+        ],
     },
     xfails = {
         AMD_GPU_HARDWARE_PROFILE.name: {

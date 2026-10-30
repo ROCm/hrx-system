@@ -15,10 +15,6 @@ loom_check_test_suite(
         "source_capture.cxx-test",
         "vm_import.cxx-test",
     ],
-    compile_targets = {
-        "import.cxx-test": ["//loom/target/vm:core"],
-        "vm_import.cxx-test": ["//loom/target/vm:core"],
-    },
     data = [
         "helper.h",
         "source_capture.h",

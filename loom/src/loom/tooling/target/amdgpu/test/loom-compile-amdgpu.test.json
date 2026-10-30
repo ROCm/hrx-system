@@ -6,7 +6,7 @@
       "run": {
         "tool": "loom-compile",
         "args": [
-          "{srcdir}/feature_distinct_code_objects.loom",
+          "{srcdir}/../testdata/feature_distinct_code_objects.loom",
           "--pipeline=none",
           "--format=amdgpu-hsaco",
           "--output={tmp}/feature-distinct.hsaco"
@@ -19,6 +19,45 @@
       ]
     },
     {
+      "name": "infers kernel roots from a complete authoring module",
+      "steps": [
+        {
+          "name": "compile-inferred-root",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/../testdata/complete_authoring_module.loom",
+              "--target=amdgpu:gfx1100",
+              "--format=amdgpu-hsaco",
+              "--output={tmp}/inferred-root.hsaco"
+            ]
+          },
+          "files": [
+            {"path": "{tmp}/inferred-root.hsaco", "non_empty": true}
+          ]
+        },
+        {
+          "name": "compile-explicit-root",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/../testdata/complete_authoring_module.loom",
+              "--root=@complete_authoring_copy_i32",
+              "--target=amdgpu:gfx1100",
+              "--format=amdgpu-hsaco",
+              "--output={tmp}/explicit-root.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/explicit-root.hsaco",
+              "equals": "{tmp}/inferred-root.hsaco"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "resumes explicit kernel roots from Low text and bytecode",
       "steps": [
         {
@@ -26,7 +65,7 @@
           "run": {
             "tool": "loom-compile",
             "args": [
-              "{srcdir}/loom_opt_f32_arith.loom",
+              "{srcdir}/../testdata/loom_opt_f32_arith.loom",
               "--root=@f32_arith",
               "--format=amdgpu-hsaco",
               "--output={tmp}/source.hsaco",
@@ -46,7 +85,7 @@
           "run": {
             "tool": "loom-opt",
             "args": [
-              "{srcdir}/loom_opt_f32_arith.loom",
+              "{srcdir}/../testdata/loom_opt_f32_arith.loom",
               "--pipeline=source-low",
               "--output={tmp}/prepared.loom"
             ]
@@ -71,7 +110,7 @@
           "run": {
             "tool": "loom-opt",
             "args": [
-              "{srcdir}/loom_opt_f32_arith.loom",
+              "{srcdir}/../testdata/loom_opt_f32_arith.loom",
               "--pipeline=source-low",
               "--to=bytecode",
               "--output={tmp}/prepared.loombc"
@@ -113,7 +152,7 @@
           "run": {
             "tool": "loom-compile",
             "args": [
-              "{srcdir}/selected_root_amdgpu.loom",
+              "{srcdir}/../testdata/selected_root_amdgpu.loom",
               "--format=amdgpu-hsaco",
               "--root=@selected_store_i32",
               "--target=amdgpu:gfx1151",
@@ -157,7 +196,7 @@
           "run": {
             "tool": "loom-compile",
             "args": [
-              "{srcdir}/selected_root_amdgpu.loom",
+              "{srcdir}/../testdata/selected_root_amdgpu.loom",
               "--root=@targetless_math_f32",
               "--target=amdgpu:gfx1151",
               "--output={tmp}/math.hsaco",
@@ -190,7 +229,7 @@
       "run": {
         "tool": "loom-compile",
         "args": [
-          "{srcdir}/selected_root_amdgpu.loom",
+          "{srcdir}/../testdata/selected_root_amdgpu.loom",
           "--exclude-root=configured_targetless_store_i32",
           "--target=amdgpu:gfx1151",
           "--format=amdgpu-hsaco",
@@ -215,7 +254,7 @@
       "run": {
         "tool": "loom-benchmark",
         "args": [
-          "{srcdir}/compile_requests.loom",
+          "{srcdir}/../testdata/compile_requests.loom",
           "--compile-only",
           "--scenario-correctness=true",
           "--target=amdgpu:gfx1100",
@@ -241,7 +280,7 @@
           "run": {
             "tool": "loom-benchmark",
             "args": [
-              "{srcdir}/compile_requests.loom",
+              "{srcdir}/../testdata/compile_requests.loom",
               "--compile-only",
               "--target=amdgpu:gfx1100",
               "--config=compile_requests.alpha=4",

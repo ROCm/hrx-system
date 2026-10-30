@@ -6,7 +6,7 @@
       "run": {
         "tool": "loom-benchmark",
         "args": [
-          "{srcdir}/hal_execution.loom",
+          "{srcdir}/../../../../../../../target/amd/xdna/test/native/hal_execution.loom",
           "--device=xdna",
           "--benchmark=@serial_array_latency",
           "--measure=dispatch_complete",
