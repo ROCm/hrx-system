@@ -40,7 +40,7 @@ typedef iree_host_size_t iree_hal_streaming_device_ordinal_t;
 
 // Scheduling policy.
 typedef enum iree_hal_streaming_scheduling_mode_e {
-  // Automatic scheduling.
+  // Bounded active progress before yielding to the backend's blocking wait.
   IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO = 0,
   // Spin wait (busy wait).
   IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN,
@@ -103,8 +103,8 @@ struct iree_hal_streaming_context_t {
   // Unused, and never grown, when |timestamp_domain| is zeroed.
   iree_hal_streaming_event_timestamp_pool_t timestamp_pool;
 
-  // Context flags.
-  iree_hal_streaming_context_flags_t flags;
+  // Encoded context flags, accessed atomically through the flag accessors.
+  iree_atomic_uint32_t flags;
 
   // Default stream for this context (always created during context
   // initialization).
@@ -261,8 +261,18 @@ void iree_hal_streaming_context_release(iree_hal_streaming_context_t* context);
 bool iree_hal_streaming_context_try_retain(
     iree_hal_streaming_context_t* context);
 
-// Synchronization: none (queries flags).
+// Loads one coherent snapshot of the caller-selected context flags.
 iree_hal_streaming_context_flags_t iree_hal_streaming_context_flags(
+    iree_hal_streaming_context_t* context);
+
+// Publishes caller-selected context flags atomically for subsequent waits.
+void iree_hal_streaming_context_set_flags(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_context_flags_t flags);
+
+// Resolves the current scheduling policy to the HAL's progress preference.
+// The backend owns progression; this does not change completion guarantees.
+iree_async_wait_flags_t iree_hal_streaming_context_wait_flags(
     iree_hal_streaming_context_t* context);
 
 // Synchronization: none (thread-local access).

@@ -90,7 +90,7 @@ iree_status_t iree_hal_streaming_context_create(
       iree_hal_device_allocator(device_entry->hal_device);
   context->timestamp_domain = iree_hal_streaming_query_timestamp_domain(
       iree_hal_device_spec(device_entry->hal_device));
-  context->flags = flags;
+  iree_hal_streaming_context_set_flags(context, flags);
   context->default_stream = NULL;
   context->next_capture_id = 1;
   context->peer_contexts = NULL;
@@ -377,7 +377,36 @@ void iree_hal_streaming_context_release(iree_hal_streaming_context_t* context) {
 iree_hal_streaming_context_flags_t iree_hal_streaming_context_flags(
     iree_hal_streaming_context_t* context) {
   IREE_ASSERT_ARGUMENT(context);
-  return context->flags;
+  const uint32_t bits =
+      iree_atomic_load(&context->flags, iree_memory_order_relaxed);
+  return (iree_hal_streaming_context_flags_t){
+      .scheduling_mode = (iree_hal_streaming_scheduling_mode_t)(bits & 0xFFu),
+      .map_host_memory = (bits >> 8) & 1u,
+      .resize_local_mem_to_max = (bits >> 9) & 1u,
+  };
+}
+
+void iree_hal_streaming_context_set_flags(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_context_flags_t flags) {
+  const uint32_t bits = (uint32_t)flags.scheduling_mode |
+                        ((uint32_t)flags.map_host_memory << 8) |
+                        ((uint32_t)flags.resize_local_mem_to_max << 9);
+  iree_atomic_store(&context->flags, bits, iree_memory_order_relaxed);
+}
+
+iree_async_wait_flags_t iree_hal_streaming_context_wait_flags(
+    iree_hal_streaming_context_t* context) {
+  switch (iree_hal_streaming_context_flags(context).scheduling_mode) {
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN:
+      return IREE_ASYNC_WAIT_FLAG_ACTIVE;
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_BLOCKING_SYNC:
+      return IREE_ASYNC_WAIT_FLAG_NONE;
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_YIELD:
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO:
+    default:
+      return IREE_ASYNC_WAIT_FLAG_YIELD;
+  }
 }
 
 iree_hal_streaming_context_t* iree_hal_streaming_context_current(void) {
@@ -1322,8 +1351,9 @@ iree_status_t iree_hal_streaming_context_synchronize_event_records(
 
   iree_status_t status = iree_ok_status();
   if (semaphore) {
-    status = iree_hal_semaphore_wait(semaphore, value, iree_infinite_timeout(),
-                                     IREE_ASYNC_WAIT_FLAG_NONE);
+    status =
+        iree_hal_semaphore_wait(semaphore, value, iree_infinite_timeout(),
+                                iree_hal_streaming_context_wait_flags(context));
   }
   iree_hal_semaphore_release(semaphore);
   return status;

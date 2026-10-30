@@ -942,6 +942,9 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
   iree_slim_mutex_lock(&stream->mutex);
   const uint64_t target_value = stream->pending_value;
   uint64_t completed_value = stream->completed_value;
+  const iree_async_wait_flags_t wait_flags =
+      stream->context ? iree_hal_streaming_context_wait_flags(stream->context)
+                      : IREE_ASYNC_WAIT_FLAG_NONE;
   iree_slim_mutex_unlock(&stream->mutex);
 
   uint64_t current_value = 0;
@@ -959,9 +962,9 @@ static iree_status_t iree_hal_streaming_stream_synchronize_impl(
   // accepted tail, even though only success advances |completed_value|.
   bool target_completed = target_value <= completed_value;
   if (!target_completed) {
-    iree_status_t wait_status = iree_hal_semaphore_wait(
-        stream->timeline_semaphore, target_value, iree_infinite_timeout(),
-        IREE_ASYNC_WAIT_FLAG_NONE);
+    iree_status_t wait_status =
+        iree_hal_semaphore_wait(stream->timeline_semaphore, target_value,
+                                iree_infinite_timeout(), wait_flags);
     target_completed = iree_status_is_ok(wait_status);
     status = iree_status_join(status, wait_status);
     if (target_completed) {

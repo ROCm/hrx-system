@@ -247,7 +247,7 @@ iree_status_t iree_hal_streaming_device_set_primary_context_flags(
   iree_slim_mutex_lock(&device->primary_context_mutex);
   device->primary_context_flags = *flags;
   if (device->primary_context) {
-    device->primary_context->flags = *flags;
+    iree_hal_streaming_context_set_flags(device->primary_context, *flags);
   }
   iree_slim_mutex_unlock(&device->primary_context_mutex);
 
@@ -271,8 +271,9 @@ iree_status_t iree_hal_streaming_device_primary_context_state(
 
   iree_slim_mutex_lock(&device->primary_context_mutex);
   if (out_flags) {
-    *out_flags = device->primary_context ? device->primary_context->flags
-                                         : device->primary_context_flags;
+    *out_flags = device->primary_context
+                     ? iree_hal_streaming_context_flags(device->primary_context)
+                     : device->primary_context_flags;
   }
   if (out_active) {
     *out_active = device->primary_context != NULL;

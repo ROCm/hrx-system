@@ -597,7 +597,10 @@ iree_status_t iree_hal_streaming_event_synchronize(
   if (recorded_point.semaphore) {
     status = iree_hal_semaphore_wait(
         recorded_point.semaphore, recorded_point.value, iree_infinite_timeout(),
-        IREE_ASYNC_WAIT_FLAG_NONE);
+        iree_any_bit_set(event->flags,
+                         IREE_HAL_STREAMING_EVENT_FLAG_BLOCKING_SYNC)
+            ? IREE_ASYNC_WAIT_FLAG_NONE
+            : IREE_ASYNC_WAIT_FLAG_ACTIVE);
   }
   iree_hal_streaming_event_release_recorded_point(&recorded_point);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);

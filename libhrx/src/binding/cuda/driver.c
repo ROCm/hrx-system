@@ -460,10 +460,12 @@ CUDAAPI CUresult cuCtxGetFlags(unsigned int* flags) {
   }
 
   // Convert internal flags structure to CUDA flags.
+  const iree_hal_streaming_context_flags_t context_flags =
+      iree_hal_streaming_context_flags(context);
   *flags = 0;
 
   // Convert scheduling mode.
-  switch (context->flags.scheduling_mode) {
+  switch (context_flags.scheduling_mode) {
     case IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN:
       *flags |= CU_CTX_SCHED_SPIN;
       break;
@@ -480,10 +482,10 @@ CUDAAPI CUresult cuCtxGetFlags(unsigned int* flags) {
   }
 
   // Convert other flags.
-  if (context->flags.map_host_memory) {
+  if (context_flags.map_host_memory) {
     *flags |= CU_CTX_MAP_HOST;
   }
-  if (context->flags.resize_local_mem_to_max) {
+  if (context_flags.resize_local_mem_to_max) {
     *flags |= CU_CTX_LMEM_RESIZE_TO_MAX;
   }
 

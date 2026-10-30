@@ -10,7 +10,11 @@
 #include "benchmark/benchmark.h"
 #include "binding/hip/api.h"
 #include "binding/hip/hip_dso_test_util.h"
+#include "iree/base/tooling/flags.h"
 #include "libhrx/cts/core/amdgpu_executable_test_data.hpp"
+
+IREE_FLAG(string, hip_wait_mode, "auto",
+          "HIP synchronization policy: auto, spin, yield, or blocking.");
 
 namespace {
 
@@ -32,6 +36,19 @@ class HipRuntime {
       Require(false, library_.error().c_str());
     }
     Check(Resolve<decltype(&hipInit)>("hipInit")(0));
+    unsigned int device_flags = hipDeviceScheduleAuto;
+    const std::string wait_mode = FLAG_hip_wait_mode;
+    if (wait_mode == "spin") {
+      device_flags = hipDeviceScheduleSpin;
+    } else if (wait_mode == "yield") {
+      device_flags = hipDeviceScheduleYield;
+    } else if (wait_mode == "blocking") {
+      device_flags = hipDeviceScheduleBlockingSync;
+    } else {
+      Require(wait_mode == "auto", "invalid HIP synchronization policy");
+    }
+    Check(Resolve<decltype(&hipSetDeviceFlags)>("hipSetDeviceFlags")(
+        device_flags));
     launch_ =
         Resolve<decltype(&hipModuleLaunchKernel)>("hipModuleLaunchKernel");
     synchronize_ =
@@ -50,7 +67,8 @@ class HipRuntime {
     const char* direct = std::getenv("HRX_DIRECT_QUEUE_DISPATCH");
     label_ = std::string(driver && driver[0] ? driver : "configured-default") +
              " " + properties.gcnArchName + " " + pci_address + " dispatch=" +
-             (direct && direct[0] && direct[0] != '0' ? "queue" : "recording");
+             (direct && direct[0] && direct[0] != '0' ? "queue" : "recording") +
+             " wait=" + wait_mode;
 
     const auto image =
         hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);
