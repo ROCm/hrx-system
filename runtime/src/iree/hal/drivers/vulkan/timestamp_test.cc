@@ -187,6 +187,15 @@ TEST(VulkanTimestampTest, DeliveryBatchesContiguousQueriesAndPreservesHoles) {
   iree_hal_buffer_t* subspan = nullptr;
   IREE_ASSERT_OK(iree_hal_buffer_subspan(buffer, 8, 32, iree_allocator_system(),
                                          &subspan));
+  // A second import can name the same bytes without sharing a HAL allocation
+  // object or using the same byte coordinates.
+  iree_hal_buffer_t* imported_alias = nullptr;
+  IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+      iree_hal_buffer_placement_undefined(), IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
+      IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_TRANSFER, 32,
+      iree_make_byte_span(storage.data() + 8, 32),
+      iree_hal_buffer_release_callback_null(), iree_allocator_system(),
+      &imported_alias));
   for (bool indirect : {false, true}) {
     SCOPED_TRACE(indirect);
     std::array<iree_hal_vulkan_timestamp_pending_t, 4> pending = {};
@@ -244,6 +253,31 @@ TEST(VulkanTimestampTest, DeliveryBatchesContiguousQueriesAndPreservesHoles) {
     const auto previous = capture.commands;
     iree_hal_vulkan_timestamp_record_delivery(&syms, commands, &recording, {});
     EXPECT_EQ(capture.commands, previous);
+
+    pending[0] = {
+        .buffer = buffer,
+        .offset = 8,
+        .target_handle = indirect ? VK_NULL_HANDLE : handle,
+        .target_offset = indirect ? 8u : 72u,
+    };
+    recording.first_pending = 0;
+    recording.count = 1;
+    Capture alias_capture;
+    const auto alias_commands =
+        reinterpret_cast<VkCommandBuffer>(&alias_capture);
+    iree_hal_vulkan_timestamp_record_delivery(
+        &syms, alias_commands, &recording,
+        iree_hal_make_buffer_ref(imported_alias, 0, 0));
+    EXPECT_TRUE(alias_capture.commands.empty());
+    iree_hal_vulkan_timestamp_record_delivery(
+        &syms, alias_commands, &recording,
+        iree_hal_make_buffer_ref(imported_alias, 0, 8));
+    EXPECT_EQ(alias_capture.commands,
+              indirect ? std::vector<char>({'C', 'B', 'P', 'A', 'D'})
+                       : std::vector<char>({'C'}));
+    EXPECT_EQ(alias_capture.copies,
+              (std::vector<std::array<uint64_t, 3>>{{0, 1, 72}}));
+    EXPECT_EQ(recording.first_pending, 1u);
   }
 
   // Mixed recordings use separate query and indirect-result ordinals. The
@@ -278,6 +312,7 @@ TEST(VulkanTimestampTest, DeliveryBatchesContiguousQueriesAndPreservesHoles) {
   EXPECT_EQ(capture.constants, (std::array<uint64_t, 3>{0x1000, 0x2000, 2}));
   EXPECT_EQ(recording.first_pending, 4u);
   iree_hal_buffer_release(subspan);
+  iree_hal_buffer_release(imported_alias);
   iree_hal_buffer_release(buffer);
 }
 
