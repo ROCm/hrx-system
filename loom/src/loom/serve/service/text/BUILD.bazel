@@ -1237,7 +1237,10 @@ loom_cc_library(
 
 loom_cc_test(
     name = "schedule_test",
-    srcs = ["schedule_test.cc"],
+    srcs = [
+        "packing_workload_test.cc",
+        "schedule_test.cc",
+    ],
     deps = [
         ":packing",
         ":schedule",

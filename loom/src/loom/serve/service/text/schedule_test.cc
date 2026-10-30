@@ -140,58 +140,6 @@ TEST(TextScheduleTest, SameCatalogFillsWiderCohortsAsResidentsGrow) {
   }
 }
 
-TEST(TextScheduleTest, LateShortPromptFinishesWhileLongPromptKeepsProgressing) {
-  const iree_host_size_t capacity = 8192;
-  const iree_host_size_t shape_count =
-      loom_serve_text_default_shapes(capacity, nullptr);
-  std::vector<loom_serve_packing_shape_t> shapes(shape_count);
-  loom_serve_text_default_shapes(capacity, shapes.data());
-  loom_serve_ready_span_t ready[16] = {};
-  for (iree_host_size_t row = 0; row < 8; ++row) {
-    ready[row] = {1, 1};
-  }
-  ready[8] = {32768, 1};
-  loom_serve_packed_span_t spans[16], scratch[16];
-  iree_host_size_t cursor = 0, shape = 0, decode_tokens = 0;
-  // The short request arrives after the first long-prefill epoch. Once its
-  // prompt completes, it decodes alongside the eight original requests.
-  const iree_host_size_t long_spans[] = {8184, 8160, 8183, 8183, 58};
-  const iree_host_size_t short_spans[] = {0, 24, 1, 1, 1};
-  for (iree_host_size_t epoch = 0; epoch < IREE_ARRAYSIZE(long_spans);
-       ++epoch) {
-    SCOPED_TRACE(epoch);
-    const iree_host_size_t count = loom_serve_pack_shapes(
-        IREE_ARRAYSIZE(ready), ready, shape_count, shapes.data(), capacity,
-        &cursor, spans, scratch, &shape);
-    ASSERT_EQ(count, epoch ? 10 : 9);
-    EXPECT_EQ(shapes[shape].span_capacity, 16);
-    EXPECT_EQ(shapes[shape].token_capacity, epoch == 4 ? 128 : capacity);
-    iree_host_size_t selected[16] = {};
-    for (iree_host_size_t i = 0; i < count; ++i) {
-      ASSERT_LT(spans[i].row_index, IREE_ARRAYSIZE(ready));
-      EXPECT_EQ(selected[spans[i].row_index], 0);
-      selected[spans[i].row_index] = spans[i].token_count;
-    }
-    for (iree_host_size_t row = 0; row < 8; ++row) {
-      EXPECT_EQ(selected[row], 1);
-      decode_tokens += selected[row];
-    }
-    EXPECT_EQ(selected[8], long_spans[epoch]);
-    EXPECT_EQ(selected[9], short_spans[epoch]);
-    ASSERT_LE(selected[8], ready[8].token_count);
-    ready[8].token_count -= selected[8];
-    if (epoch == 0) {
-      ready[9] = {24, 1};
-    } else if (epoch == 1) {
-      ready[9] = {1, 1};
-    } else {
-      decode_tokens += selected[9];
-    }
-  }
-  EXPECT_EQ(ready[8].token_count, 0);
-  EXPECT_EQ(decode_tokens, 43);
-}
-
 TEST(TextScheduleTest, CompletionReservationCoversLegalWriteHighWater) {
   for (iree_host_size_t context = 1; context <= 260; ++context) {
     for (iree_host_size_t input = 1; input <= context; ++input) {
