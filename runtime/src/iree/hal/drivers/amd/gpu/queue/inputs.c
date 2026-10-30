@@ -26,9 +26,10 @@ typedef struct iree_hal_amd_gpu_command_input_t {
   uint64_t minimum_offset;
   // Direct, binding, image-base, or binding-length input.
   uint8_t kind;
-  // Atomic base alignment masks: default mode low nibble, INCOMPATIBLE high.
-  // Public atomic offsets are naturally aligned, so both require residue zero.
-  uint8_t atomic_alignment;
+  // Scalar control base alignment masks: default mode low nibble, INCOMPATIBLE
+  // high. Public control offsets are naturally aligned, so both require residue
+  // zero.
+  uint8_t control_alignment;
   // Queue/program native site, ignored for image and length inputs.
   uint16_t site;
   // Prepared direct-buffer native slot, unused for other kinds.
@@ -174,7 +175,7 @@ static iree_status_t iree_hal_amd_gpu_command_input(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_gpu_command_inputs_add_atomic(
+iree_status_t iree_hal_amd_gpu_command_inputs_add_control(
     iree_hal_amd_gpu_command_inputs_t* inputs, iree_hal_buffer_ref_t reference,
     iree_hal_amd_gpu_control_t command, uint32_t* out_value) {
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_binding(
@@ -195,7 +196,7 @@ iree_status_t iree_hal_amd_gpu_command_inputs_add_atomic(
       requirement->atomic_operations |= operations;
     }
   }
-  inputs->entries[*out_value - inputs->value_base].atomic_alignment |=
+  inputs->entries[*out_value - inputs->value_base].control_alignment |=
       (command.width / 8u - 1) << (incompatible ? 4 : 0);
   return iree_ok_status();
 }
@@ -445,12 +446,12 @@ iree_status_t iree_hal_amd_gpu_command_inputs_write(
         status =
             iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                              "recorded GPU input overflows or is misaligned");
-      } else if (value & ((input->atomic_alignment & 15u) |
-                          (input->atomic_alignment >> 4))) {
-        status = iree_make_status((value & (input->atomic_alignment & 15u))
+      } else if (value & ((input->control_alignment & 15u) |
+                          (input->control_alignment >> 4))) {
+        status = iree_make_status((value & (input->control_alignment & 15u))
                                       ? IREE_STATUS_INVALID_ARGUMENT
                                       : IREE_STATUS_INCOMPATIBLE,
-                                  "recorded atomic GPU address is misaligned");
+                                  "recorded scalar GPU address is misaligned");
       }
     }
     values[i] = value;

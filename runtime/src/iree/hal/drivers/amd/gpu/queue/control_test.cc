@@ -33,6 +33,11 @@ void ExpectPacket(iree_hal_amd_gpu_control_t command,
   EXPECT_EQ(storage[offset + 2], 0x12u);
 }
 
+TEST(ControlTest, TimestampUsesAConfirmedClockRead) {
+  ExpectPacket(iree_hal_amd_gpu_control_timestamp(),
+               {0xc0044000, 0x110509, 0, 0, 0x34567890, 0x12});
+}
+
 TEST(ControlTest, WaitWidthsPredicatesAndFullMasks) {
   for (uint8_t condition = 0; condition < 3; ++condition) {
     SCOPED_TRACE(condition);

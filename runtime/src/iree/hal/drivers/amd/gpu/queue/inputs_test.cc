@@ -74,9 +74,9 @@ TEST_F(InputsTest, IndirectAtomicUsesShareOneQualifiedInput) {
   });
   for (uint32_t i = 0; i < 1000; ++i) {
     uint32_t add_value = 0, store_value = 0;
-    IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_add_atomic(
+    IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_add_control(
         &inputs_, iree_hal_make_indirect_buffer_ref(0, 4, 4), add, &add_value));
-    IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_add_atomic(
+    IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_add_control(
         &inputs_, iree_hal_make_indirect_buffer_ref(0, 16, 8), store,
         &store_value));
     EXPECT_EQ(add_value, 1u);
@@ -121,12 +121,45 @@ TEST_F(InputsTest, IndirectAtomicUsesShareOneQualifiedInput) {
   iree_hal_buffer_release(captured.buffer);
 }
 
+TEST_F(InputsTest, TimestampTargetsNeedNoAtomicCapabilities) {
+  buffer_.allowed_usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET;
+  uint32_t direct = 0, indirect = 0;
+  const auto timestamp = iree_hal_amd_gpu_control_timestamp();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_add_control(
+      &inputs_, iree_hal_make_buffer_ref(&buffer_, 8, 8), timestamp, &direct));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_add_control(
+      &inputs_, iree_hal_make_indirect_buffer_ref(0, 16, 8), timestamp,
+      &indirect));
+  iree_hal_amd_gpu_command_inputs_seal(&inputs_);
+  ASSERT_EQ(inputs_.count, 2u);
+  EXPECT_EQ(requirements_[1].atomic_operations, 0u);
+  EXPECT_EQ(requirements_[1].minimum_length, 24u);
+  const iree_hal_buffer_binding_t binding = {&buffer_, 8, 32};
+  iree_hal_amd_gpu_command_binding_t captured = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_capture(
+      &inputs_, {1, &binding}, 0, &captured));
+  uint64_t values[2] = {};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, values));
+  binding_.device_address = 0x1004;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, values));
+  binding_.device_address = 0x1000;
+  IREE_EXPECT_OK(
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, values));
+  EXPECT_EQ(values[direct - inputs_.value_base], 0x1000u);
+  EXPECT_EQ(values[indirect - inputs_.value_base], 0x1008u);
+  iree_hal_buffer_release(captured.buffer);
+}
+
 TEST_F(InputsTest, DirectAtomicRequiresTheQueueSiteAtRecording) {
   contract_->scopes[2].atomic_operations = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
   uint32_t value = 0;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INCOMPATIBLE,
-      iree_hal_amd_gpu_command_inputs_add_atomic(
+      iree_hal_amd_gpu_command_inputs_add_control(
           &inputs_, iree_hal_make_buffer_ref(&buffer_, 0, 4),
           iree_hal_amd_gpu_control_wait({
               .width = IREE_HAL_ATOMIC_WIDTH_32,
@@ -139,7 +172,7 @@ TEST_F(InputsTest, DirectAtomicRequiresTheQueueSiteAtRecording) {
 TEST_F(InputsTest, DirectAtomicDefersAddressResolutionUntilDependencies) {
   contract_->scopes[1].atomic_operations = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
   uint32_t input_value = 0;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_add_atomic(
+  IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_add_control(
       &inputs_, iree_hal_make_buffer_ref(&buffer_, 4, 4),
       iree_hal_amd_gpu_control_wait({.width = IREE_HAL_ATOMIC_WIDTH_32}),
       &input_value));

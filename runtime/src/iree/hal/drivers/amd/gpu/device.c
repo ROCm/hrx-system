@@ -341,7 +341,12 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       .name = device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
                   ? IREE_SV("aql")
                   : IREE_SV("pm4"),
-      .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION,
+      .flags =
+          IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION |
+          (clock.frequency_hz
+               ? IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS |
+                     IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS
+               : 0),
       .provisioned_queue_count = queue_count,
       .placement_capabilities = placements,
       // COPY_DATA captures the 64-bit CP clock; the native query supplies its

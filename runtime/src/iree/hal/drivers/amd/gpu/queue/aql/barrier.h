@@ -26,9 +26,9 @@ uint32_t iree_hal_amd_gpu_aql_barrier_prepare(
 // This is a pure arithmetic operation; it consults no topology or device.
 uint32_t iree_hal_amd_gpu_aql_barrier_join(uint32_t a, uint32_t b);
 
-// Atomic producer completion/release precedes the scalar carrier; consumer
-// acquire follows it. Inapplicable flags have already been removed.
-void iree_hal_amd_gpu_aql_barrier_atomic(
+// Producer completion precedes the scalar carrier; consumers follow it.
+// Atomic release/acquire flags add memory ordering; timestamps use zero flags.
+void iree_hal_amd_gpu_aql_barrier_control(
     iree_hal_atomic_flags_t flags, iree_hal_execution_stage_t source_stage,
     iree_hal_execution_stage_t target_stage, uint32_t* before, uint32_t* after);
 

@@ -401,7 +401,8 @@ class NativeQueue {
   // Recorded dispatches use the same kernel and dependency shape as Submit.
   iree_status_t Record(uint32_t count, BindingMode bindings, Program program,
                        iree_hal_command_buffer_t** out_recording,
-                       iree_hal_command_buffer_mode_t mode = 0) {
+                       iree_hal_command_buffer_mode_t mode = 0,
+                       bool capture_timestamps = false) {
     *out_recording = nullptr;
     const auto& lane = lanes_[0];
     const bool transfers = program == Program::kTransfers;
@@ -417,8 +418,9 @@ class NativeQueue {
     iree_hal_command_buffer_t* recording = nullptr;
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
         iree_hal_queue_family(queue_), mode,
-        transfers ? IREE_HAL_COMMAND_CATEGORY_TRANSFER
-                  : IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+        (transfers ? IREE_HAL_COMMAND_CATEGORY_TRANSFER
+                   : IREE_HAL_COMMAND_CATEGORY_DISPATCH) |
+            (capture_timestamps ? IREE_HAL_COMMAND_CATEGORY_TRANSFER : 0),
         bindings == BindingMode::kTable ? 1 : 0, &recording));
     const auto reference = bindings == BindingMode::kTable
                                ? iree_hal_make_indirect_buffer_ref(0, 0, 4)
@@ -451,6 +453,13 @@ class NativeQueue {
     if (iree_status_is_ok(status)) {
       status = iree_hal_command_buffer_barrier(recording, &acquire);
     }
+    auto timestamp = reference;
+    timestamp.offset = 8;
+    timestamp.length = 8;
+    if (iree_status_is_ok(status) && capture_timestamps) {
+      status =
+          iree_hal_command_buffer_timestamp(recording, 0, stage, timestamp, 0);
+    }
     for (uint32_t i = 0; i < count && iree_status_is_ok(status); ++i) {
       if (i) {
         status = iree_hal_command_buffer_barrier(recording, &dependency);
@@ -480,6 +489,11 @@ class NativeQueue {
             iree_make_const_byte_span(&value, sizeof(value)), {1, &reference},
             0);
       }
+    }
+    if (iree_status_is_ok(status) && capture_timestamps) {
+      timestamp.offset = 16;
+      status =
+          iree_hal_command_buffer_timestamp(recording, stage, 0, timestamp, 0);
     }
     if (iree_status_is_ok(status)) {
       status = iree_hal_command_buffer_barrier(recording, &release);
@@ -523,7 +537,7 @@ class NativeQueue {
     uint64_t before = lane.epoch, after = lane.epoch + 1;
     const iree_hal_buffer_binding_t binding = {
         .buffer = lane.output,
-        .length = 8,
+        .length = iree_hal_buffer_byte_length(lane.output),
     };
     IREE_RETURN_IF_ERROR(iree_hal_queue_execute(
         queue_, {lane.epoch ? 1u : 0u, &lane.timeline, &before},
@@ -1374,6 +1388,68 @@ static void BM_Execute(
     IREE_CHECK_OK(queue.EndCapture());
   }
 }
+
+// Paired phase-boundary observations preserve the same kernel, allocation,
+// binding table, and terminal notification. The second argument toggles only
+// the two recorded samples. Recording and warm submission allocations are
+// reported separately from the selected submit/completion interval.
+static void BM_RecordedTimestamps(benchmark::State& state,
+                                  amdf_queue_command_type_t command_type,
+                                  Timing timing) {
+  NativeQueue queue(command_type);
+  if (!queue.Initialize(state, 1, 32)) {
+    return;
+  }
+  const uint32_t count = state.range(0);
+  const bool capture_timestamps = state.range(1) != 0;
+  iree_hal_command_buffer_t* recording = nullptr;
+  const auto recording_begin = iree_time_now();
+  IREE_CHECK_OK(queue.Record(count, BindingMode::kTable, Program::kDispatch,
+                             &recording, 0, capture_timestamps));
+  state.counters["record_ns"] = iree_time_now() - recording_begin;
+  for (int i = 0; i < 2; ++i) {
+    IREE_CHECK_OK(queue.Execute(recording, BindingMode::kTable));
+    IREE_CHECK_OK(queue.Wait(0, IREE_ASYNC_WAIT_FLAG_NONE));
+    IREE_CHECK_OK(queue.CheckOutput(0));
+  }
+  const auto allocations_before = queue.allocation_count();
+  const auto publications_before = queue.completed_publications();
+  for (auto _ : state) {
+    IREE_CHECK_OK(queue.Execute(recording, BindingMode::kTable));
+    if (timing == Timing::kSubmit) {
+      state.PauseTiming();
+    }
+    IREE_CHECK_OK(queue.Wait(0, IREE_ASYNC_WAIT_FLAG_NONE));
+    if (timing == Timing::kCompletion) {
+      state.PauseTiming();
+    }
+    IREE_CHECK_OK(queue.CheckOutput(0));
+    state.ResumeTiming();
+  }
+  state.counters["host_allocations"] =
+      queue.allocation_count() - allocations_before;
+  state.counters["publications_per_invocation"] =
+      double(queue.completed_publications() - publications_before) /
+      state.iterations();
+  state.SetItemsProcessed(state.iterations());
+  iree_hal_command_buffer_release(recording);
+}
+#define RECORDED_TIMESTAMP_CASE(name, command_type, timing)                    \
+  BENCHMARK_CAPTURE(BM_RecordedTimestamps, name, command_type, Timing::timing) \
+      ->Args({1, 0})                                                           \
+      ->Args({1, 1})                                                           \
+      ->Args({20, 0})                                                          \
+      ->Args({20, 1})                                                          \
+      ->Iterations(100)                                                        \
+      ->UseRealTime()
+RECORDED_TIMESTAMP_CASE(Pm4Submit, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, kSubmit);
+RECORDED_TIMESTAMP_CASE(Pm4Completion, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                        kCompletion);
+RECORDED_TIMESTAMP_CASE(AqlSubmit, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, kSubmit);
+RECORDED_TIMESTAMP_CASE(AqlCompletion, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+                        kCompletion);
+#undef RECORDED_TIMESTAMP_CASE
+
 #define EXECUTE_CASE(name, bindings, timing, program)                        \
   BENCHMARK_CAPTURE(BM_Execute, name, BindingMode::bindings, Timing::timing, \
                     Program::program, 1, Capture::kNone)                     \

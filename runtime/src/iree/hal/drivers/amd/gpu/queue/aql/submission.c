@@ -251,7 +251,7 @@ iree_status_t iree_hal_amd_gpu_aql_submission_control(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_acquire(
       pool, profile, IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL, waits, signals, 0,
       &submission, &payload));
-  iree_hal_amd_gpu_aql_barrier_atomic(
+  iree_hal_amd_gpu_aql_barrier_control(
       command.flags,
       (command.flags & IREE_HAL_ATOMIC_FLAG_RELEASE)
           ? IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE
