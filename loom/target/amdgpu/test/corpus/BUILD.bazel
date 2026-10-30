@@ -48,6 +48,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "memory/packed/transport.loom",
     "memory/storage/word.loom",
     "memory/view/access.loom",
+    "memory/view/bitcast.loom",
     "memory/view/borrowed_transport.loom",
     "memory/view/boundary_transport.loom",
     "memory/view/nested_selection.loom",

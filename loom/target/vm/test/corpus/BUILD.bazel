@@ -153,7 +153,10 @@ loom_corpus_test(
     execution_profiles = [VM_REFERENCE_PROFILE],
     profile_sources = {
         VM_REFERENCE_PROFILE.name: [
+            "function/call/calls.loom",
             "memory/buffer/packing.loom",
+            "memory/buffer/selection.loom",
+            "memory/view/bitcast.loom",
             "numeric/float/activations.loom",
             "numeric/float/exponent.loom",
             "numeric/float/exponential.loom",

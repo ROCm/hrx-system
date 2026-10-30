@@ -1,0 +1,52 @@
+// A bitcast alias returned across a call retains the selected view's byte
+// origin. Writes through that alias remain visible through both the typed view
+// and the independently addressed backing buffer.
+func.def inline @packet_byte_alias(%packet: view<4xi32>) -> (view<16xi8>) {
+  %bytes = view.bitcast %packet : view<4xi32> -> view<16xi8>
+  func.return %bytes : view<16xi8>
+}
+
+func.def @view_bitcast_observations(%ordinal_input: index, %replacement_input: i64, %storage: buffer, %output: buffer) {
+  %c0 = index.constant 0 : index
+  %c2 = index.constant 2 : index
+  %ordinal = index.assume %ordinal_input [range(%ordinal_input, 0, 31)] : index
+  %slot = index.rem %ordinal, %c2 : index
+  %second_slot = index.cmp ne, %slot, %c0 : index
+  %replacement = scalar.trunci %replacement_input : i64 to i8
+  %origin = index.constant 64 : offset
+  %words = buffer.view %storage[%origin] : buffer -> view<24xi32>
+  %first = view.subview %words[3] : view<24xi32> -> view<4xi32>
+  %second = view.subview %words[8] : view<24xi32> -> view<4xi32>
+  %packet = scf.select %second_slot, %second, %first : view<4xi32>
+  %pattern = scalar.constant 16909060 : i32
+  view.store %pattern, %packet[0] : i32, view<4xi32>
+  view.store %pattern, %packet[1] : i32, view<4xi32>
+  %bytes = func.call @packet_byte_alias(%packet) : (view<4xi32>) -> (view<16xi8>)
+  view.store %replacement, %bytes[5] : i8, view<16xi8>
+  %byte = view.load %bytes[0] : view<16xi8> -> i8
+  %word = view.load %packet[1] : view<4xi32> -> i32
+  %first_address = index.constant 81 : offset
+  %second_address = index.constant 101 : offset
+  %address = scf.select %second_slot, %second_address, %first_address : offset
+  %raw = buffer.load.i8.u %storage[%address]
+  %byte_word = scalar.extui %byte : i8 to i32
+  %output_origin = index.constant 0 : offset
+  %results = buffer.view %output[%output_origin] : buffer -> view<3xi32>
+  view.store %byte_word, %results[0] : i32, view<3xi32>
+  view.store %word, %results[1] : i32, view<3xi32>
+  view.store %raw, %results[2] : i32, view<3xi32>
+  func.return
+}
+
+check.scenario @view_bitcast_values {
+  check.trial[32](%trial: index, %entropy: check.entropy) {
+    %replacement = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %storage = check.generate.fill value(0) : tensor<160xi8>
+    %output = check.generate.fill value(-1) : tensor<3xi32>
+    check.compare<@view_bitcast_observations>(%trial, %replacement, %storage, %output) : (index, i64, tensor<160xi8>, tensor<3xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<160xi8>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<3xi32>
+    }
+  }
+  check.return
+}
