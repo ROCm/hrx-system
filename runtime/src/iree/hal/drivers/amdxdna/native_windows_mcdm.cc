@@ -753,11 +753,34 @@ iree_status_t reserve_command_persistent_code_slots(
                             "amdxdna Windows MCDM command slot count overflow");
   }
   const size_t requested_count = static_cast<size_t>(requested_count_u64);
+  const size_t slot_capacity =
+      context->pathb_persistent_code_slots_in_use.size();
+  if (requested_count == 0 || requested_count > slot_capacity) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "amdxdna Windows MCDM persistent command code exceeds its aperture "
+        "region");
+  }
   size_t first_slot = 0;
-  if (!iree_hal_amdxdna_native_windows_reserve_code_slots(
-          context->pathb_persistent_code_slots_in_use.data(),
-          context->pathb_persistent_code_slots_in_use.size(), requested_count,
-          &first_slot)) {
+  bool reserved = false;
+  while (!(reserved = iree_hal_amdxdna_native_windows_reserve_code_slots(
+               context->pathb_persistent_code_slots_in_use.data(),
+               slot_capacity, requested_count, &first_slot))) {
+    // Cached commands retain their CPU control-code source, so their aperture
+    // staging is disposable. A context serializes native submissions; after
+    // begin_pathb_submission() returns, every retained command except the one
+    // being prepared is idle. Reclaim the oldest staging reservation until a
+    // contiguous run is available. The evicted command will reserve and
+    // restage its code on its next submission.
+    if (context->pathb_persistent_code_commands.empty()) break;
+    iree_hal_amdxdna_native_command_t* reclaimed =
+        context->pathb_persistent_code_commands.front();
+    IREE_ASSERT(reclaimed != command);
+    reclaimed->pathb_code_staged = false;
+    reclaimed->pathb_code_staged_size = 0;
+    release_command_persistent_code_slots_locked(reclaimed);
+  }
+  if (!reserved) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "amdxdna Windows MCDM persistent command code exceeds its aperture "
@@ -1182,6 +1205,11 @@ iree_status_t publish_pathb_code_end_marker(
   return iree_ok_status();
 }
 
+bool uses_windows_dpu_regmap(iree_hal_amdxdna_native_command_t* command);
+void set_windows_dpu_instruction_arg(iree_hal_amdxdna_native_command_t* command,
+                                     uint64_t instruction_va,
+                                     uint32_t instruction_words);
+
 iree_status_t stage_windows_dpu_code_buffer(
     iree_hal_amdxdna_native_queue_t* queue,
     iree_hal_amdxdna_native_command_t* command) {
@@ -1285,6 +1313,14 @@ iree_status_t stage_windows_dpu_code_buffer(
       npu_data->instruction_buffer_size =
           static_cast<uint32_t>(command->control_buffer_size);
       npu_data->instruction_prop_count = 0;
+    } else if (uses_windows_dpu_regmap(command) &&
+               command->windows_dpu_regmap_finalized) {
+      // Reclamation may move compact START_NPU code after the register map was
+      // finalized; keep its instruction pointer aligned with the new slot.
+      set_windows_dpu_instruction_arg(
+          command, code_gpu_va,
+          static_cast<uint32_t>(command->control_buffer_size /
+                                sizeof(uint32_t)));
     }
     return iree_ok_status();
   };
