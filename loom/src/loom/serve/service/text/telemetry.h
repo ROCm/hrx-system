@@ -37,16 +37,20 @@ typedef struct loom_serve_text_telemetry_t {
   loom_serve_telemetry_latency_t latency;
   // Monotonic request identity independent of TCP connection identity.
   uint64_t next_serial;
-  // This model's terminal failure, distinct from another model's shutdown.
-  iree_status_code_t failure_code;
+  // Owned first model failure, retained through every request's retirement.
+  iree_status_t failure;
 } loom_serve_text_telemetry_t;
 
 // Borrows an existing registration stream or creates a private bounded stream
-// when NULL. Only a private stream publishes a start here. The service destroys
-// an owned stream after retiring its heartbeat and all producer/consumer uses.
+// when NULL. Only a private stream publishes a start here.
 iree_status_t loom_serve_text_telemetry_initialize(
     loom_serve_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_text_telemetry_t* out_telemetry);
+
+// Releases the retained failure and any owned stream after retiring the
+// heartbeat and all producer/consumer uses. A borrowed stream remains live.
+void loom_serve_text_telemetry_deinitialize(
+    loom_serve_text_telemetry_t* telemetry);
 
 // Counts a protocol receipt exactly once, before validation and admission.
 loom_serve_text_receipt_t loom_serve_text_telemetry_begin(
@@ -63,7 +67,8 @@ void loom_serve_text_telemetry_end(loom_serve_text_telemetry_t* telemetry,
 void loom_serve_text_telemetry_diagnose(loom_serve_text_telemetry_t* telemetry,
                                         uint64_t request, iree_status_t status);
 
-// Captures a model failure while its original status propagates normally.
+// Retains the first model failure while its original status propagates
+// normally. Later failures are recorded without replacing the drain's cause.
 void loom_serve_text_telemetry_fail(loom_serve_text_telemetry_t* telemetry,
                                     const iree_status_t borrowed_status);
 

@@ -27,6 +27,15 @@ iree_status_t loom_serve_text_telemetry_initialize(
   return iree_ok_status();
 }
 
+void loom_serve_text_telemetry_deinitialize(
+    loom_serve_text_telemetry_t* telemetry) {
+  iree_status_free(telemetry->failure);
+  if (telemetry->owns_stream) {
+    loom_serve_telemetry_stream_free(telemetry->stream);
+  }
+  *telemetry = (loom_serve_text_telemetry_t){0};
+}
+
 loom_serve_text_receipt_t loom_serve_text_telemetry_begin(
     loom_serve_text_telemetry_t* telemetry) {
   const loom_serve_text_receipt_t receipt = {++telemetry->next_serial,
@@ -257,18 +266,19 @@ void loom_serve_text_telemetry_diagnose(loom_serve_text_telemetry_t* telemetry,
 
 void loom_serve_text_telemetry_fail(loom_serve_text_telemetry_t* telemetry,
                                     const iree_status_t status) {
-  telemetry->failure_code = iree_status_code(status);
+  if (iree_status_is_ok(telemetry->failure)) {
+    telemetry->failure = iree_status_clone(status);
+  }
   loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
                                           .event = &LOOM_SERVE_TELEMETRY_ERROR};
   loom_serve_telemetry_diagnostic_capture(status, &record.data.error);
   loom_serve_telemetry_stream_append(telemetry->stream, &record);
 }
 
-void loom_serve_text_telemetry_end(loom_serve_text_telemetry_t* telemetry,
-                                   loom_serve_text_receipt_t receipt,
-                                   loom_serve_telemetry_outcome_t outcome,
-                                   uint64_t input_tokens,
-                                   const iree_status_t borrowed_status) {
+static void loom_serve_text_telemetry_end_diagnostic(
+    loom_serve_text_telemetry_t* telemetry, loom_serve_text_receipt_t receipt,
+    loom_serve_telemetry_outcome_t outcome, uint64_t input_tokens,
+    const loom_serve_telemetry_diagnostic_t* diagnostic) {
   loom_serve_telemetry_count_outcome(&telemetry->counters, outcome);
   loom_serve_telemetry_record_t record = {
       .time_ns = iree_time_now(),
@@ -279,9 +289,19 @@ void loom_serve_text_telemetry_end(loom_serve_text_telemetry_t* telemetry,
   loom_serve_telemetry_latency_observe(&telemetry->latency.outcomes[outcome],
                                        record.data.end.duration_ns);
   record.data.end.input_tokens = input_tokens;
-  loom_serve_telemetry_diagnostic_capture(borrowed_status,
-                                          &record.data.end.diagnostic);
+  record.data.end.diagnostic = *diagnostic;
   loom_serve_telemetry_stream_append(telemetry->stream, &record);
+}
+
+void loom_serve_text_telemetry_end(loom_serve_text_telemetry_t* telemetry,
+                                   loom_serve_text_receipt_t receipt,
+                                   loom_serve_telemetry_outcome_t outcome,
+                                   uint64_t input_tokens,
+                                   const iree_status_t borrowed_status) {
+  loom_serve_telemetry_diagnostic_t diagnostic;
+  loom_serve_telemetry_diagnostic_capture(borrowed_status, &diagnostic);
+  loom_serve_text_telemetry_end_diagnostic(telemetry, receipt, outcome,
+                                           input_tokens, &diagnostic);
 }
 
 void loom_serve_text_telemetry_request_end(
@@ -309,8 +329,15 @@ void loom_serve_text_telemetry_request_end(
   }
   loom_serve_text_record(telemetry->stream, &LOOM_SERVE_TEXT_REQUEST_STATS,
                          session->lifetime.serial, &value, sizeof(value));
-  loom_serve_text_telemetry_end(telemetry, receipt, outcome,
-                                value.counters.input_tokens, iree_ok_status());
+  if (!iree_status_is_ok(telemetry->failure)) {
+    loom_serve_text_telemetry_end(telemetry, receipt, outcome,
+                                  value.counters.input_tokens,
+                                  telemetry->failure);
+  } else {
+    loom_serve_text_telemetry_end_diagnostic(telemetry, receipt, outcome,
+                                             value.counters.input_tokens,
+                                             &session->request.diagnostic);
+  }
 }
 
 void loom_serve_text_telemetry_session_end(

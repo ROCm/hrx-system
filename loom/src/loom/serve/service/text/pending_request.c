@@ -75,15 +75,14 @@ void loom_serve_text_pending_request_cancel(
     loom_serve_text_telemetry_diagnose(telemetry, request->receipt.serial,
                                        status);
   }
+  const iree_status_code_t failure_code = iree_status_code(telemetry->failure);
   loom_serve_text_telemetry_end(telemetry, request->receipt,
-                                telemetry->failure_code
-                                    ? LOOM_SERVE_TELEMETRY_FAILED
-                                    : LOOM_SERVE_TELEMETRY_CANCELLED,
-                                0, iree_ok_status());
-  request->consumer.vtable->end(request->consumer.self, false,
-                                telemetry->failure_code
-                                    ? telemetry->failure_code
-                                    : IREE_STATUS_CANCELLED);
+                                failure_code ? LOOM_SERVE_TELEMETRY_FAILED
+                                             : LOOM_SERVE_TELEMETRY_CANCELLED,
+                                0, telemetry->failure);
+  request->consumer.vtable->end(
+      request->consumer.self, false,
+      failure_code ? failure_code : IREE_STATUS_CANCELLED);
 }
 
 iree_status_t loom_serve_text_pending_request_reject(

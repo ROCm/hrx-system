@@ -63,7 +63,7 @@ class TextHttpFixture : public ::testing::Test {
     IREE_EXPECT_OK(loom_serve_http_listener_free(listener_));
     loom_serve_http_server_free(server_);
     iree_async_proactor_pool_release(pool_);
-    loom_serve_telemetry_stream_free(telemetry_.stream);
+    loom_serve_text_telemetry_deinitialize(&telemetry_);
     loom_serve_text_tool_calls_deinitialize(&calls_);
     iree_string_builder_deinitialize(&scratch_);
     iree_string_builder_deinitialize(&reasoning_);
