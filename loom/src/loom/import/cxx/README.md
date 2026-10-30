@@ -1701,7 +1701,7 @@ Packed saturate_s4(SignedBytes values) {
 High `vector.bitpack` packs low bits; this fragment also selects the hardware's
 saturation behavior. Its control-register writes and the pack's state reads
 are descriptor effects visible to optimization and scheduling. The native
-[packing test](../../tooling/target/amd/xdna/test/assembly_pack.cxx)
+[packing test](../../../../target/amd/xdna/test/cxx/assembly_pack.cxx)
 alternates saturated and unsaturated fragments on the same inputs, within
 ordinary C++ vector loads, stores, and loops.
 

@@ -566,7 +566,7 @@ scheduling. A fence inside an inlined helper participates in the caller's
 source order. A fence inside a nested `scf.if` or `scf.for` retains that region's
 scope when the enclosing operation is cloned as a unit.
 
-The [checked dependent-lookup example](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/tooling/target/amdgpu/test/amdgpu_unroll_fences.loom)
+The [checked dependent-lookup example](https://github.com/ROCm/hrx-system/blob/main/loom/target/amdgpu/test/native/unroll_fences.loom)
 composes two helpers and exercises empty, short, full, and remainder tiles.
 A loop requesting `pipeline(%depth)` with depth greater than one rejects
 authored fences: the read-ahead transform cannot carry an explicit source-range
