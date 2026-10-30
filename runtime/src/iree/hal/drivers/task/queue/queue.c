@@ -238,6 +238,8 @@ static iree_hal_profile_queue_event_type_t iree_hal_task_queue_profile_type(
       return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_STORE;
     case IREE_HAL_TASK_QUEUE_OP_ATOMIC_RMW:
       return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_ATOMIC_RMW;
+    case IREE_HAL_TASK_QUEUE_OP_TIMESTAMP:
+      return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TIMESTAMP;
     case IREE_HAL_TASK_QUEUE_OP_DISPATCH:
       return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH;
   }
@@ -1933,6 +1935,22 @@ static void iree_hal_task_queue_execute_recording_inline(
   }
 }
 
+static void iree_hal_task_queue_drain_timestamp(
+    iree_hal_task_queue_op_t* operation) {
+  // Resolve only after the waits have admitted any pending allocation.
+  iree_byte_span_t span;
+  iree_status_t status = iree_hal_buffer_native_host_span(
+      operation->timestamp.target_buffer, operation->timestamp.target_offset,
+      sizeof(uint64_t), &span);
+  if (iree_status_is_ok(status)) {
+    const uint64_t timestamp = (uint64_t)iree_time_now();
+    memcpy(span.data, &timestamp, sizeof(timestamp));
+    iree_hal_task_queue_op_complete(operation);
+  } else {
+    iree_hal_task_queue_op_destroy(operation, status);
+  }
+}
+
 static iree_status_t iree_hal_task_queue_resolve_atomic_target(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_hal_atomic_width_t width,
@@ -2879,6 +2897,10 @@ static iree_status_t iree_hal_task_queue_process_drain(
         iree_hal_task_queue_op_destroy(operation, status);
         status = iree_ok_status();
       }
+      break;
+    case IREE_HAL_TASK_QUEUE_OP_TIMESTAMP:
+      iree_hal_task_queue_profile_start_host_execution(operation);
+      iree_hal_task_queue_drain_timestamp(operation);
       break;
     case IREE_HAL_TASK_QUEUE_OP_ATOMIC_STORE:
       iree_hal_task_queue_profile_start_host_execution(operation);
@@ -4470,13 +4492,22 @@ static iree_status_t iree_hal_task_queue_timestamp(
     const iree_hal_queue_barriers_t* barriers,
     iree_hal_timestamp_flags_t flags) {
   IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_task_queue_vtable);
-  (void)wait_semaphore_list;
-  (void)signal_semaphore_list;
-  (void)target_buffer;
-  (void)target_offset;
-  (void)flags;
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "task device-side timestamps not implemented");
+  iree_hal_task_queue_op_t* operation = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_task_queue_submit_op_begin(
+      (iree_hal_task_queue_t*)base_queue, IREE_HAL_TASK_QUEUE_OP_TIMESTAMP,
+      &signal_semaphore_list, &operation));
+  iree_status_t status =
+      iree_hal_task_queue_memory_barriers_capture(operation, barriers);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_task_queue_op_destroy(operation, iree_status_clone(status));
+    return status;
+  }
+  operation->timestamp.target_buffer = target_buffer;
+  operation->timestamp.target_offset = target_offset;
+  iree_hal_task_queue_profile_set_payload(operation, sizeof(uint64_t));
+  return iree_hal_task_queue_submit_op_finish(
+      operation, wait_semaphore_list, 1,
+      (iree_hal_resource_t* const*)&target_buffer);
 }
 
 static iree_status_t iree_hal_task_queue_flush(iree_hal_queue_t* base_queue) {

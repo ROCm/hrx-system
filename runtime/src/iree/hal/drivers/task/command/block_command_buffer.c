@@ -730,15 +730,48 @@ static iree_status_t iree_hal_block_command_buffer_check_atomic_width(
 }
 
 // Inserts the block ISA's global region boundary only when the requested stage
-// dependency has prior work to order. This coalesces an atomic's trailing
-// boundary with the next atomic's leading boundary.
-static iree_status_t iree_hal_block_command_buffer_atomic_stage_barrier(
+// dependency has prior work to order. This coalesces adjacent scalar commands'
+// trailing and leading boundaries.
+static iree_status_t iree_hal_block_command_buffer_stage_barrier(
     iree_hal_block_command_buffer_t* command_buffer,
     iree_hal_execution_stage_t stage_mask) {
   if (stage_mask == 0 || command_buffer->builder.region_dispatch_count == 0) {
     return iree_ok_status();
   }
   return iree_hal_cmd_block_builder_barrier(&command_buffer->builder);
+}
+
+static iree_status_t iree_hal_block_command_buffer_timestamp(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_timestamp_flags_t flags) {
+  iree_hal_block_command_buffer_t* command_buffer =
+      iree_hal_block_command_buffer_cast(base_command_buffer);
+  IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert_strided(
+      command_buffer->resource_set, 1, &target_ref,
+      offsetof(iree_hal_buffer_ref_t, buffer), sizeof(iree_hal_buffer_ref_t)));
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_profile_reserve_operations(
+      command_buffer, command_buffer->profile.operations.count + 1));
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_stage_barrier(
+      command_buffer, source_stage_mask));
+
+  iree_hal_cmd_fixup_t* fixups = NULL;
+  iree_hal_cmd_build_token_t token;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_cmd_build_timestamp(&command_buffer->builder, &fixups, &token));
+  iree_status_t status = iree_hal_block_command_buffer_resolve_refs(
+      command_buffer, 1, &target_ref, fixups);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_cmd_build_rollback(&command_buffer->builder, token);
+    return status;
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_stage_barrier(
+      command_buffer, target_stage_mask));
+  iree_hal_block_command_buffer_profile_append_target(
+      command_buffer, IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_TIMESTAMP,
+      target_ref);
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_block_command_buffer_atomic_wait(
@@ -755,7 +788,7 @@ static iree_status_t iree_hal_block_command_buffer_atomic_wait(
       offsetof(iree_hal_buffer_ref_t, buffer), sizeof(iree_hal_buffer_ref_t)));
   IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_profile_reserve_operations(
       command_buffer, command_buffer->profile.operations.count + 1));
-  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_atomic_stage_barrier(
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_stage_barrier(
       command_buffer, source_stage_mask));
 
   iree_hal_cmd_fixup_t* fixups = NULL;
@@ -768,7 +801,7 @@ static iree_status_t iree_hal_block_command_buffer_atomic_wait(
     iree_hal_cmd_build_rollback(&command_buffer->builder, token);
     return status;
   }
-  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_atomic_stage_barrier(
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_stage_barrier(
       command_buffer, target_stage_mask));
   iree_hal_block_command_buffer_profile_append_target(
       command_buffer, IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_WAIT,
@@ -790,7 +823,7 @@ static iree_status_t iree_hal_block_command_buffer_atomic_store(
       offsetof(iree_hal_buffer_ref_t, buffer), sizeof(iree_hal_buffer_ref_t)));
   IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_profile_reserve_operations(
       command_buffer, command_buffer->profile.operations.count + 1));
-  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_atomic_stage_barrier(
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_stage_barrier(
       command_buffer, source_stage_mask));
 
   iree_hal_cmd_fixup_t* fixups = NULL;
@@ -803,7 +836,7 @@ static iree_status_t iree_hal_block_command_buffer_atomic_store(
     iree_hal_cmd_build_rollback(&command_buffer->builder, token);
     return status;
   }
-  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_atomic_stage_barrier(
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_stage_barrier(
       command_buffer, target_stage_mask));
   iree_hal_block_command_buffer_profile_append_target(
       command_buffer, IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_STORE,
@@ -825,7 +858,7 @@ static iree_status_t iree_hal_block_command_buffer_atomic_rmw(
       offsetof(iree_hal_buffer_ref_t, buffer), sizeof(iree_hal_buffer_ref_t)));
   IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_profile_reserve_operations(
       command_buffer, command_buffer->profile.operations.count + 1));
-  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_atomic_stage_barrier(
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_stage_barrier(
       command_buffer, source_stage_mask));
 
   iree_hal_cmd_fixup_t* fixups = NULL;
@@ -838,7 +871,7 @@ static iree_status_t iree_hal_block_command_buffer_atomic_rmw(
     iree_hal_cmd_build_rollback(&command_buffer->builder, token);
     return status;
   }
-  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_atomic_stage_barrier(
+  IREE_RETURN_IF_ERROR(iree_hal_block_command_buffer_stage_barrier(
       command_buffer, target_stage_mask));
   iree_hal_block_command_buffer_profile_append_target(
       command_buffer, IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_RMW,
@@ -1045,6 +1078,7 @@ static const iree_hal_command_buffer_vtable_t
         .begin_debug_group = iree_hal_block_command_buffer_begin_debug_group,
         .end_debug_group = iree_hal_block_command_buffer_end_debug_group,
         .barrier = iree_hal_block_command_buffer_barrier,
+        .timestamp = iree_hal_block_command_buffer_timestamp,
         .atomic_wait = iree_hal_block_command_buffer_atomic_wait,
         .atomic_store = iree_hal_block_command_buffer_atomic_store,
         .atomic_rmw = iree_hal_block_command_buffer_atomic_rmw,

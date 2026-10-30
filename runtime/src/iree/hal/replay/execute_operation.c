@@ -1184,6 +1184,36 @@ static iree_status_t iree_hal_replay_executor_command_buffer_atomic_wait(
       payload.target_stage_mask, target_ref, params);
 }
 
+static iree_status_t iree_hal_replay_executor_command_buffer_timestamp(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_file_record_t* record) {
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_fixed_payload(
+      record, IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_TIMESTAMP,
+      sizeof(iree_hal_replay_command_buffer_timestamp_payload_t)));
+  iree_hal_replay_command_buffer_timestamp_payload_t payload;
+  memcpy(&payload, record->payload.data, sizeof(payload));
+  if (IREE_UNLIKELY(
+          payload.target_ref.reserved0 ||
+          payload.target_ref.buffer_slot >= (1u << 24) ||
+          (payload.target_ref.buffer_id && payload.target_ref.buffer_slot) ||
+          payload.target_ref.length != sizeof(uint64_t) ||
+          payload.target_ref.offset % sizeof(uint64_t))) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "invalid replay timestamp buffer reference");
+  }
+
+  iree_hal_replay_object_entry_t* command_buffer_entry = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_lookup(
+      executor, record->header.object_id,
+      IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER, &command_buffer_entry));
+  iree_hal_buffer_ref_t target_ref;
+  IREE_RETURN_IF_ERROR(iree_hal_replay_executor_make_buffer_ref(
+      executor, &payload.target_ref, &target_ref));
+  return iree_hal_command_buffer_timestamp(
+      command_buffer_entry->value.command_buffer, payload.source_stage_mask,
+      payload.target_stage_mask, target_ref, payload.flags);
+}
+
 static iree_status_t iree_hal_replay_executor_command_buffer_atomic_store(
     iree_hal_replay_executor_t* executor,
     const iree_hal_replay_file_record_t* record) {
@@ -1786,6 +1816,9 @@ static iree_status_t iree_hal_replay_executor_replay_operation_with_barriers(
     }
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_EXECUTION_BARRIER:
       return iree_hal_replay_executor_command_buffer_barrier(executor, record);
+    case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_TIMESTAMP:
+      return iree_hal_replay_executor_command_buffer_timestamp(executor,
+                                                               record);
     case IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_WAIT:
       return iree_hal_replay_executor_command_buffer_atomic_wait(executor,
                                                                  record);

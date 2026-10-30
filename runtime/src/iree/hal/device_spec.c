@@ -332,13 +332,36 @@ static iree_status_t iree_hal_device_spec_validate_queue_family(
   }
   const iree_hal_queue_family_spec_flags_t known_family_flags =
       IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION |
-      IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_HOST_MEMORY_BARRIERS;
+      IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_HOST_MEMORY_BARRIERS |
+      IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS |
+      IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS;
   if (IREE_UNLIKELY(family->flags & ~known_family_flags)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "device spec queue family %" PRIhsz
                             " has unknown capability flag bits 0x%08" PRIx32,
                             family_ordinal,
                             family->flags & ~known_family_flags);
+  }
+  if (iree_any_bit_set(
+          family->flags,
+          IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS) &&
+      !iree_any_bit_set(family->flags,
+                        IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "device spec queue family %" PRIhsz
+        " advertises indirect command timestamps without command timestamps",
+        family_ordinal);
+  }
+  if (iree_any_bit_set(family->flags,
+                       IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS) &&
+      (!family->timestamp_frequency_hz || !family->timestamp_valid_bits ||
+       family->timestamp_valid_bits > 64)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "device spec queue family %" PRIhsz
+        " command timestamps require a frequency and 1..64 valid bits",
+        family_ordinal);
   }
   return iree_ok_status();
 }

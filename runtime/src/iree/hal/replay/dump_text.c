@@ -1146,6 +1146,20 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
       return iree_hal_replay_dump_append_text_buffer_ref(builder, "target_ref",
                                                          &payload.target_ref);
     }
+    case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_TIMESTAMP: {
+      IREE_RETURN_IF_ERROR(iree_hal_replay_dump_payload_length_check(
+          record, sizeof(iree_hal_replay_command_buffer_timestamp_payload_t)));
+      iree_hal_replay_command_buffer_timestamp_payload_t payload;
+      memcpy(&payload, record->payload.data, sizeof(payload));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          " source_stage_mask=0x%08" PRIx32 " target_stage_mask=0x%08" PRIx32,
+          payload.source_stage_mask, payload.target_stage_mask));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, " flags=0x%016" PRIx64, payload.flags));
+      return iree_hal_replay_dump_append_text_buffer_ref(builder, "target_ref",
+                                                         &payload.target_ref);
+    }
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_ATOMIC_STORE: {
       IREE_RETURN_IF_ERROR(iree_hal_replay_dump_payload_length_check(
           record,

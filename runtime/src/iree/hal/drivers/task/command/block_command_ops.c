@@ -230,10 +230,10 @@ iree_status_t iree_hal_cmd_build_cache(
 }
 
 //===----------------------------------------------------------------------===//
-// ATOMIC
+// Scalar commands
 //===----------------------------------------------------------------------===//
 
-static iree_status_t iree_hal_cmd_build_atomic(
+static iree_status_t iree_hal_cmd_build_scalar(
     iree_hal_cmd_block_builder_t* builder, iree_hal_cmd_opcode_t opcode,
     iree_host_size_t command_size, void** out_command,
     iree_hal_cmd_fixup_t** out_fixups, iree_hal_cmd_build_token_t* out_token) {
@@ -255,6 +255,18 @@ static iree_status_t iree_hal_cmd_build_atomic(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_cmd_build_timestamp(
+    iree_hal_cmd_block_builder_t* builder, iree_hal_cmd_fixup_t** out_fixups,
+    iree_hal_cmd_build_token_t* out_token) {
+  iree_hal_cmd_timestamp_t* command = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_scalar(
+      builder, IREE_HAL_CMD_TIMESTAMP, sizeof(*command), (void**)&command,
+      out_fixups, out_token));
+  command->target_binding = (*out_fixups)[0].data_index;
+  command->reserved = 0;
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_cmd_build_atomic_wait(
     iree_hal_cmd_block_builder_t* builder, iree_hal_atomic_wait_params_t params,
     iree_hal_cmd_fixup_t** out_fixups, iree_hal_cmd_build_token_t* out_token) {
@@ -263,7 +275,7 @@ iree_status_t iree_hal_cmd_build_atomic_wait(
   IREE_ASSERT_ARGUMENT(out_token);
 
   iree_hal_cmd_atomic_wait_t* command = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_atomic(
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_scalar(
       builder, IREE_HAL_CMD_ATOMIC_WAIT, sizeof(iree_hal_cmd_atomic_wait_t),
       (void**)&command, out_fixups, out_token));
   command->target_binding = (*out_fixups)[0].data_index;
@@ -281,7 +293,7 @@ iree_status_t iree_hal_cmd_build_atomic_store(
   IREE_ASSERT_ARGUMENT(out_token);
 
   iree_hal_cmd_atomic_store_t* command = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_atomic(
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_scalar(
       builder, IREE_HAL_CMD_ATOMIC_STORE, sizeof(iree_hal_cmd_atomic_store_t),
       (void**)&command, out_fixups, out_token));
   command->target_binding = (*out_fixups)[0].data_index;
@@ -298,7 +310,7 @@ iree_status_t iree_hal_cmd_build_atomic_rmw(
   IREE_ASSERT_ARGUMENT(out_token);
 
   iree_hal_cmd_atomic_rmw_t* command = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_atomic(
+  IREE_RETURN_IF_ERROR(iree_hal_cmd_build_scalar(
       builder, IREE_HAL_CMD_ATOMIC_RMW, sizeof(iree_hal_cmd_atomic_rmw_t),
       (void**)&command, out_fixups, out_token));
   command->target_binding = (*out_fixups)[0].data_index;

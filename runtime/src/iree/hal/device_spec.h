@@ -412,6 +412,12 @@ typedef enum iree_hal_queue_family_spec_flag_bits_e {
   // Barriers may execute qualified HOST_DIRECT and HOST_API cache recipes
   // through prepared CPU execution bindings, independently of public maps.
   IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_HOST_MEMORY_BARRIERS = 1u << 1,
+  // Command buffers can write timestamps in this family's clock domain to
+  // direct buffer references. Requires nonzero timestamp frequency and width.
+  IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS = 1u << 2,
+  // Command timestamps also support submission-relative binding-table targets.
+  // Implies COMMAND_TIMESTAMPS.
+  IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS = 1u << 3,
 } iree_hal_queue_family_spec_flag_bits_t;
 
 // Canonical ordinal of one execution-resource constraint group within a queue

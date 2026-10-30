@@ -23,12 +23,9 @@ extern "C" {
 // source pool contracts admitted by each virtual buffer.
 #define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 17u
 
-// Minor version of the IREE HAL replay file format. Scoped host mappings have
-// independent identities in related_object_id: map creates the identity,
-// flush/invalidate use it, and unmap consumes it. Buffer range offsets are
-// relative to the captured buffer view. Both legacy scalar allocator VMM and
-// ordinary virtual-buffer/batched mapping records are supported.
-#define IREE_HAL_REPLAY_FILE_VERSION_MINOR 8u
+// Minor version of the IREE HAL replay file format. Version 9 adds recorded
+// command-buffer timestamp writes with direct or binding-table destinations.
+#define IREE_HAL_REPLAY_FILE_VERSION_MINOR 9u
 
 // Minor version that first assigns atomic target-error mode payload bytes.
 #define IREE_HAL_REPLAY_ATOMIC_TARGET_ERROR_MODE_VERSION_MINOR 3u
@@ -153,6 +150,7 @@ enum iree_hal_replay_operation_code_e {
   IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_WAIT = 314u,
   IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_STORE = 315u,
   IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_ATOMIC_RMW = 316u,
+  IREE_HAL_REPLAY_OPERATION_CODE_COMMAND_BUFFER_TIMESTAMP = 317u,
 
   IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_COUNT = 500u,
   IREE_HAL_REPLAY_OPERATION_CODE_EXECUTABLE_FUNCTION_INFO = 501u,
@@ -224,6 +222,7 @@ enum iree_hal_replay_payload_type_e {
   IREE_HAL_REPLAY_PAYLOAD_TYPE_VIRTUAL_BUFFER_CREATE = 59u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_MAP = 60u,
   IREE_HAL_REPLAY_PAYLOAD_TYPE_VIRTUAL_BUFFER_DETACH = 62u,
+  IREE_HAL_REPLAY_PAYLOAD_TYPE_COMMAND_BUFFER_TIMESTAMP = 63u,
 };
 
 // Type of one operation in a captured exact-queue transfer transaction.
@@ -1217,6 +1216,20 @@ typedef struct iree_hal_replay_queue_barriers_footer_t {
 } iree_hal_replay_queue_barriers_footer_t;
 static_assert(sizeof(iree_hal_replay_queue_barriers_footer_t) == 24,
               "queue barrier footer must be 24 bytes");
+
+// Payload describing a command buffer timestamp write.
+typedef struct iree_hal_replay_command_buffer_timestamp_payload_t {
+  // Eight-byte timestamp destination, direct or binding-table relative.
+  iree_hal_replay_buffer_ref_payload_t target_ref;
+  // Earlier execution stages that complete before capture.
+  uint32_t source_stage_mask;
+  // Later execution stages ordered after capture and the write.
+  uint32_t target_stage_mask;
+  // Timestamp flags.
+  uint64_t flags;
+} iree_hal_replay_command_buffer_timestamp_payload_t;
+static_assert(sizeof(iree_hal_replay_command_buffer_timestamp_payload_t) == 48,
+              "command buffer timestamp replay payload must be 48 bytes");
 
 // Payload describing a command buffer atomic wait operation.
 typedef struct iree_hal_replay_command_buffer_atomic_wait_payload_t {
