@@ -458,6 +458,8 @@ class VulkanCommandBufferTest : public ::testing::Test {
         reinterpret_cast<VkPipelineLayout>(static_cast<uintptr_t>(0x1111));
     atomic_pipelines_.pipeline_32 =
         reinterpret_cast<VkPipeline>(static_cast<uintptr_t>(0x2222));
+    atomic_pipelines_.pipeline_64 =
+        reinterpret_cast<VkPipeline>(static_cast<uintptr_t>(0x3333));
   }
 
   void TearDown() override {
@@ -494,7 +496,7 @@ class VulkanCommandBufferTest : public ::testing::Test {
   // Command-payload and resource-set block pool borrowed by command buffers.
   iree_arena_block_pool_t block_pool_;
 
-  // Empty device-owned pipeline table borrowed by command buffers.
+  // Device-owned pipeline table borrowed by command buffers.
   iree_hal_vulkan_atomic_pipelines_t atomic_pipelines_ = {};
 };
 
@@ -852,6 +854,199 @@ TEST_F(VulkanCommandBufferTest, TimestampDeliveryFollowsDataDependencies) {
                     VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                 0u);
       EXPECT_EQ(capture.memory_barriers[execution_index].srcAccessMask, 0u);
+    }
+  }
+}
+
+TEST_F(VulkanCommandBufferTest, AtomicDependenciesIncludeTimestampCaptures) {
+  const auto syms = MakeNativeReplaySyms();
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_vulkan_buffer_create_borrowed(
+      &syms, reinterpret_cast<VkDevice>(uintptr_t{1}),
+      iree_hal_buffer_placement_undefined(),
+      IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE, IREE_HAL_MEMORY_ACCESS_ALL,
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE, 128, 0,
+      128, 0, 1, VK_NULL_HANDLE, nullptr,
+      reinterpret_cast<VkBuffer>(uintptr_t{0x2468}), 0x1000, nullptr,
+      iree_hal_buffer_release_callback_null(), iree_allocator_system(),
+      &buffer));
+  const std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
+      buffer_owner(buffer, iree_hal_buffer_release);
+  const iree_hal_buffer_binding_t binding = {buffer, 0, 128};
+  iree_hal_vulkan_builtins_t builtins = {};
+  builtins.atomic_pipelines.syms = syms;
+  builtins.atomic_pipelines.pipeline_layout =
+      reinterpret_cast<VkPipelineLayout>(uintptr_t{0x1111});
+  builtins.atomic_pipelines.pipeline_32 =
+      reinterpret_cast<VkPipeline>(uintptr_t{0x2222});
+  builtins.atomic_pipelines.pipeline_64 =
+      reinterpret_cast<VkPipeline>(uintptr_t{0x3333});
+  struct Dependency {
+    // Authored atomic source domain.
+    iree_hal_execution_stage_t source;
+    // Authored atomic publication and acquisition flags.
+    iree_hal_atomic_flags_t flags;
+    // Whether a modifying atomic must publish earlier timestamp results.
+    bool delivers;
+    // Exact write accesses published by a modifying atomic.
+    VkAccessFlags2 source_access;
+  };
+  constexpr VkAccessFlags2 kTransferWrites =
+      VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+  const Dependency dependencies[] = {
+      {IREE_HAL_EXECUTION_STAGE_TRANSFER, IREE_HAL_ATOMIC_FLAG_NONE, false, 0},
+      {IREE_HAL_EXECUTION_STAGE_TRANSFER, IREE_HAL_ATOMIC_FLAG_ACQUIRE, false,
+       0},
+      {IREE_HAL_EXECUTION_STAGE_TRANSFER, IREE_HAL_ATOMIC_FLAG_RELEASE, true,
+       kTransferWrites},
+      {IREE_HAL_EXECUTION_STAGE_TRANSFER,
+       IREE_HAL_ATOMIC_FLAG_RELEASE | IREE_HAL_ATOMIC_FLAG_ACQUIRE, true,
+       kTransferWrites},
+      {IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS, IREE_HAL_ATOMIC_FLAG_RELEASE,
+       true, VK_ACCESS_2_MEMORY_WRITE_BIT},
+      {IREE_HAL_EXECUTION_STAGE_DISPATCH, IREE_HAL_ATOMIC_FLAG_RELEASE, false,
+       VK_ACCESS_2_SHADER_WRITE_BIT},
+      {IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, IREE_HAL_ATOMIC_FLAG_RELEASE,
+       false, 0},
+      {0, IREE_HAL_ATOMIC_FLAG_RELEASE, false, 0},
+  };
+  for (bool indirect : {false, true}) {
+    for (iree_hal_atomic_width_t width :
+         {IREE_HAL_ATOMIC_WIDTH_32, IREE_HAL_ATOMIC_WIDTH_64}) {
+      // The selector family covers all three waits, stores, and five RMWs.
+      for (uint32_t operation = IREE_HAL_VULKAN_ATOMIC_OPERATION_WAIT_EQUAL;
+           operation <= IREE_HAL_VULKAN_ATOMIC_OPERATION_RMW_XOR; ++operation) {
+        for (const auto& dependency : dependencies) {
+          SCOPED_TRACE(::testing::Message()
+                       << indirect << '/' << +width << '/' << operation << '/'
+                       << dependency.source << '/' << dependency.flags);
+          const auto reference = [&](uint64_t offset, uint64_t length) {
+            return indirect
+                       ? iree_hal_make_indirect_buffer_ref(0, offset, length)
+                       : iree_hal_make_buffer_ref(buffer, offset, length);
+          };
+          auto commands =
+              CreateCommandBuffer(1, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT);
+          IREE_ASSERT_OK(iree_hal_command_buffer_begin(commands.get()));
+          IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(commands.get(), 0, 0,
+                                                           reference(0, 8), 0));
+          const auto target = reference(16, width / 8);
+          const auto target_stage = IREE_HAL_EXECUTION_STAGE_TRANSFER;
+          const bool is_wait =
+              operation < IREE_HAL_VULKAN_ATOMIC_OPERATION_STORE;
+          if (is_wait) {
+            const iree_hal_atomic_wait_params_t params = {
+                .value = 1,
+                .mask = UINT32_MAX,
+                .flags = dependency.flags,
+                .width = width,
+                .condition =
+                    static_cast<iree_hal_atomic_wait_condition_t>(operation),
+            };
+            IREE_ASSERT_OK(iree_hal_command_buffer_atomic_wait(
+                commands.get(), dependency.source, target_stage, target,
+                params));
+          } else if (operation == IREE_HAL_VULKAN_ATOMIC_OPERATION_STORE) {
+            const iree_hal_atomic_store_params_t params = {
+                .value = 1,
+                .flags = dependency.flags,
+                .width = width,
+            };
+            IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(
+                commands.get(), dependency.source, target_stage, target,
+                params));
+          } else {
+            const iree_hal_atomic_rmw_params_t params = {
+                .operand = 1,
+                .flags = dependency.flags,
+                .width = width,
+                .operation = static_cast<iree_hal_atomic_rmw_operation_t>(
+                    operation - IREE_HAL_VULKAN_ATOMIC_OPERATION_RMW_ADD),
+            };
+            IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
+                commands.get(), dependency.source, target_stage, target,
+                params));
+          }
+          IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(commands.get(), 0, 0,
+                                                           reference(8, 8), 0));
+          IREE_ASSERT_OK(iree_hal_command_buffer_end(commands.get()));
+
+          std::array<uint64_t, 3> addresses = {};
+          const iree_hal_vulkan_command_buffer_bda_publication_t publication = {
+              .host_span =
+                  iree_make_byte_span(addresses.data(), sizeof(addresses)),
+              .device_address = 0x2000,
+          };
+          std::array<iree_hal_vulkan_timestamp_pending_t, 2> pending = {};
+          const iree_hal_vulkan_timestamp_pipeline_t pipeline = {};
+          const iree_hal_vulkan_timestamp_state_t timestamps = {
+              .resolve_address = 0x3000,
+              .pipeline = &pipeline,
+              .pending = pending.data(),
+          };
+          const iree_hal_vulkan_debug_utils_t debug_utils = {};
+          NativeReplayCapture capture;
+          g_native_replay_capture = &capture;
+          IREE_ASSERT_OK(iree_hal_vulkan_command_buffer_record_native(
+              commands.get(), &syms, reinterpret_cast<VkDevice>(uintptr_t{1}),
+              &debug_utils, &builtins,
+              reinterpret_cast<VkCommandBuffer>(uintptr_t{2}), 0,
+              VK_NULL_HANDLE, {1, &binding}, indirect ? &publication : nullptr,
+              nullptr, &timestamps, nullptr, iree_allocator_system()));
+          g_native_replay_capture = nullptr;
+
+          // Only a release of timestamp payloads splits delivery. A wait's
+          // RELEASE flag is inapplicable; execution joins never copy results.
+          const bool delivers = dependency.delivers && !is_wait;
+          std::vector<std::pair<char, uint32_t>> expected = {{'R', 2}};
+          if (indirect) {
+            expected.emplace_back('B', 0);  // Address publication.
+          }
+          expected.emplace_back('T', 0);
+          if (delivers) {
+            expected.emplace_back('C', 0);
+            if (indirect) {
+              expected.emplace_back('B', 0);
+              expected.emplace_back('D', 0);
+            }
+          }
+          expected.insert(expected.end(), {{'B', 0},
+                                           {'D', 0},
+                                           {'B', 0},
+                                           {'T', 1},
+                                           {'C', delivers ? 1u : 0u}});
+          if (indirect) {
+            expected.emplace_back('B', 0);
+            expected.emplace_back('D', 0);
+          }
+          EXPECT_EQ(capture.events, expected);
+          const std::vector<std::array<uint64_t, 3>> expected_copies =
+              delivers
+                  ? std::vector<std::array<uint64_t, 3>>{{0, 1, 0}, {1, 1, 8}}
+                  : std::vector<std::array<uint64_t, 3>>{{0, 2, 0}};
+          EXPECT_EQ(capture.query_copies, expected_copies);
+          const size_t first_barrier = indirect ? 1 : 0;
+          const auto& before = capture.memory_barriers[first_barrier];
+          const auto& after = capture.memory_barriers[first_barrier + 1];
+          if (dependency.source == IREE_HAL_EXECUTION_STAGE_TRANSFER) {
+            EXPECT_NE(
+                before.srcStageMask & VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0u);
+          }
+          EXPECT_EQ(before.srcAccessMask,
+                    is_wait ? 0u : dependency.source_access);
+          EXPECT_EQ(after.dstStageMask,
+                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT |
+                        VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+                        VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+          const bool acquires =
+              (dependency.flags & IREE_HAL_ATOMIC_FLAG_ACQUIRE) &&
+              operation != IREE_HAL_VULKAN_ATOMIC_OPERATION_STORE;
+          EXPECT_EQ(after.dstAccessMask,
+                    acquires ? kTransferWrites | VK_ACCESS_2_TRANSFER_READ_BIT |
+                                   VK_ACCESS_2_SHADER_READ_BIT
+                             : 0u);
+        }
+      }
     }
   }
 }
