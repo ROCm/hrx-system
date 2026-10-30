@@ -356,9 +356,7 @@ AMDGPU_BAZEL_XFAILS_BY_TARGET_SELECTOR = {
     ),
     # gfx120X currently hangs while initializing or executing device-side TSAN.
     # Keep every other Loom AMDGPU execution test active on the runner.
-    "gfx120X-all": (
-        bazel_xfail("//loom/src/loom/tooling/target/amdgpu/test:tsan_test"),
-    ),
+    "gfx120X-all": (bazel_xfail("//loom/target/amdgpu/test/sanitizer:tsan_test"),),
 }
 AMDGPU_XFAIL_TARGETS = bazel_xfail_targets(AMDGPU_XFAILS)
 AMDGPU_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(AMDGPU_XFAILS)
