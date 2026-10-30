@@ -163,6 +163,8 @@ struct loom_serve_weights_t {
     uint64_t values[WEIGHT_COMPLETIONS];
     // Initialized handles, including a partially failed activation.
     iree_host_size_t count;
+    // Captured-input credit until its queued deallocation completes.
+    uint64_t workspace_bytes;
   } activation;
   // Native release borrower, joined before reactivation or destruction.
   loom_serve_memory_operation_t* deactivation;
@@ -1489,6 +1491,27 @@ iree_hal_pool_reservation_request_t loom_serve_weights_activation_workspace(
       loom_serve_weight_inputs_staging_alignment(weights->inputs));
 }
 
+bool loom_serve_weights_query_activation_workspace(
+    loom_serve_weights_t* weights, uint64_t* out_bytes) {
+  bool pending = false;
+  if (weights->activation.workspace_bytes) {
+    // The producer's final deallocation joins every preparation lane. A
+    // failed timeline can publish a sentinel value without freeing storage;
+    // its consumer still owns that error and the accepted payloads.
+    iree_async_semaphore_t* semaphore =
+        (iree_async_semaphore_t*)weights->activation.semaphores[WEIGHT_LANES];
+    const uint64_t value = iree_async_semaphore_query(semaphore);
+    if (iree_async_semaphore_query_status(semaphore) == IREE_STATUS_OK) {
+      pending = value < weights->activation.values[WEIGHT_LANES];
+      if (!pending) {
+        weights->activation.workspace_bytes = 0;
+      }
+    }
+  }
+  *out_bytes = weights->activation.workspace_bytes;
+  return pending;
+}
+
 loom_serve_memory_demand_t loom_serve_weights_missing_demand(
     const loom_serve_weights_t* weights) {
   loom_serve_memory_demand_t demand = {0};
@@ -1507,6 +1530,8 @@ static iree_status_t loom_serve_weights_activate_storage(
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0,
                                    (int64_t)weights->statistics.reserved_bytes);
+  weights->activation.workspace_bytes =
+      loom_serve_weights_activation_workspace(weights).allocation_size;
   iree_status_t status = iree_ok_status();
   if (weights->pool && weights->storage_count) {
     loom_serve_memory_admission_t admission;
@@ -1616,6 +1641,7 @@ iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights,
       weights->activation.values[i] = 0;
     }
     weights->activation.count = 0;
+    weights->activation.workspace_bytes = 0;
     iree_status_free(weights->activation.backing_status);
     weights->activation.backing_status = iree_ok_status();
     iree_allocator_free(weights->host_allocator, weights->activation.backing);
