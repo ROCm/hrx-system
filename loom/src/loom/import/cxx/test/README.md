@@ -37,7 +37,7 @@ functions or kernels, and compare their complete outputs with independent Loom
 oracles. Numerical kernels use independent double-precision references. Every
 native scenario checks both allocation guards bitwise. AMDGPU qualification
 consumes the reusable modules through `loom_test` in the
-[target test package](../../../tooling/target/amdgpu/test/cxx/BUILD.bazel).
+[target test package](../../../../../target/amdgpu/test/cxx/BUILD.bazel).
 The [source authoring guide](../README.md#executable-checks-and-benchmarks)
 shows handwritten cases and benchmarks.
 
@@ -46,7 +46,7 @@ iree-bazel-test --config=asan --config=loom-importer-cxx \
   --config=loom-target-amd-gpu \
   --//runtime/config/hal:drivers=amd-gpu \
   --//libamdf/config:enabled=true --//libamdf/config:families=rdna,cdna \
-  //loom/src/loom/tooling/target/amdgpu/test/cxx:kernels_test
+  //loom/target/amdgpu/test/cxx:kernels_test
 
 iree-bazel-test --config=asan --config=loom-importer-cxx \
   --config=loom-target-vm \

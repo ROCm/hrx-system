@@ -328,7 +328,7 @@ LOOM_AMDGPU_CMAKE_COMPILE_CTEST_REGEXES = tuple(
     for target in LOOM_AMDGPU_BAZEL_COMPILE_TEST_TARGETS
 )
 AMDGPU_XFAILS = tuple(
-    bazel_xfail(f"//loom/src/loom/tooling/target/amdgpu/test/cxx:{target}")
+    bazel_xfail(f"//loom/target/amdgpu/test/cxx:{target}")
     for target in (
         # Low assembly parsing requires a function representation contract that
         # the CXX import path does not provide before lowering.
