@@ -338,6 +338,74 @@ TEST(DeviceSpecTest, AtomicCapabilitiesRequireExactFeatures) {
             IREE_HAL_ATOMIC_OPERATION_FLAG_NONE);
 }
 
+TEST(DeviceSpecTest, CommandTimestampsRequireComparableQueueClock) {
+  iree_hal_allocator_t* allocator = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_allocator_create_heap(iree_allocator_system(), &allocator));
+  struct Case {
+    // Native queue support for query capture and GPU resolve.
+    VkQueueFlags queue_flags;
+    // Number of implemented clock bits.
+    uint32_t valid_bits;
+    // Nanoseconds per native tick.
+    float period;
+    // Extension providing the cross-submission clock contract.
+    bool calibrated;
+    // Device-address support for binding-relative results.
+    bool addresses;
+    // Expected advertised command timestamp capabilities.
+    iree_hal_queue_family_spec_flags_t expected;
+  };
+  constexpr auto kDirect = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS;
+  constexpr auto kBoth =
+      kDirect | IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS;
+  const Case cases[] = {
+      {VK_QUEUE_COMPUTE_BIT, 64, 1.0f, true, true, kBoth},
+      {VK_QUEUE_COMPUTE_BIT, 32, 10.0f, true, true, kBoth},
+      {VK_QUEUE_COMPUTE_BIT, 64, 1.0f, true, false, kDirect},
+      {VK_QUEUE_COMPUTE_BIT, 64, 1.0f, false, true, 0},
+      {VK_QUEUE_COMPUTE_BIT, 0, 1.0f, true, true, 0},
+      {VK_QUEUE_COMPUTE_BIT, 64, 0.0f, true, true, 0},
+      {VK_QUEUE_TRANSFER_BIT, 64, 1.0f, true, true, 0},
+  };
+  for (const auto& entry : cases) {
+    SCOPED_TRACE(&entry - cases);
+    iree_hal_vulkan_physical_device_snapshot_t physical_device = {};
+    physical_device.properties2.properties.limits.timestampPeriod =
+        entry.period;
+    iree_hal_vulkan_queue_family_plan_t family = {
+        .flags = entry.queue_flags,
+        .timestamp_valid_bits = entry.valid_bits,
+        .queue_count = 1,
+    };
+    uint32_t queue_index = 0;
+    iree_hal_vulkan_device_plan_t plan = {
+        .queue_inventory = {1, &family, 1, &queue_index},
+    };
+    if (entry.calibrated) {
+      plan.enabled_extensions =
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_CALIBRATED_TIMESTAMPS;
+    }
+    if (entry.addresses) {
+      plan.enabled_features.general =
+          IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES;
+    }
+    const iree_hal_vulkan_device_spec_params_t params = {
+        .logical_device_id = IREE_SV("vulkan://0"),
+        .physical_device = &physical_device,
+        .device_plan = &plan,
+        .device_allocator = allocator,
+    };
+    iree_hal_device_spec_t* spec = nullptr;
+    IREE_ASSERT_OK(iree_hal_vulkan_device_spec_create(
+        &params, iree_allocator_system(), &spec));
+    EXPECT_EQ(iree_hal_device_spec_queues(spec)->families[0].flags,
+              entry.expected);
+    iree_hal_device_spec_release(spec);
+  }
+  iree_hal_allocator_release(allocator);
+}
+
 TEST(DeviceSpecTest, SparseGeometryUsesAddressLimitsBeyondDescriptorRanges) {
   iree_hal_allocator_t* allocator = nullptr;
   IREE_ASSERT_OK(

@@ -26,6 +26,7 @@ typedef enum iree_hal_vulkan_command_type_e {
   IREE_HAL_VULKAN_COMMAND_TYPE_ATOMIC = 5,
   IREE_HAL_VULKAN_COMMAND_TYPE_BEGIN_DEBUG_GROUP = 6,
   IREE_HAL_VULKAN_COMMAND_TYPE_END_DEBUG_GROUP = 7,
+  IREE_HAL_VULKAN_COMMAND_TYPE_TIMESTAMP = 8,
 } iree_hal_vulkan_command_type_t;
 
 typedef struct iree_hal_vulkan_command_t {
@@ -35,6 +36,19 @@ typedef struct iree_hal_vulkan_command_t {
   // Recorded operation selector.
   iree_hal_vulkan_command_type_t type;
 } iree_hal_vulkan_command_t;
+
+typedef struct iree_hal_vulkan_command_timestamp_t {
+  // Target buffer reference captured during recording.
+  iree_hal_buffer_ref_t target_ref;
+  // Work that precedes capture.
+  iree_hal_execution_stage_t source_stage_mask;
+  // Work that follows capture and delivery.
+  iree_hal_execution_stage_t target_stage_mask;
+  // Query assigned by the recorder, private to each native replay instance.
+  uint32_t query_index;
+  // Private resolve slot for binding-relative delivery; unused for direct refs.
+  uint32_t resolve_index;
+} iree_hal_vulkan_command_timestamp_t;
 
 typedef struct iree_hal_vulkan_command_fill_buffer_t {
   // Target buffer reference captured during recording.
@@ -223,6 +237,12 @@ typedef struct iree_hal_vulkan_command_buffer_t {
   // Number of dispatch commands recorded.
   iree_host_size_t dispatch_count;
 
+  // Number of explicit timestamp queries required by each replay instance.
+  uint32_t timestamp_count;
+
+  // Number of queries requiring binding-relative delivery through scratch.
+  uint32_t indirect_timestamp_count;
+
   // Descriptor pool capacity required to replay recorded native commands.
   iree_hal_vulkan_command_buffer_descriptor_requirements_t
       descriptor_requirements;
@@ -323,6 +343,13 @@ static const void* iree_hal_vulkan_command_buffer_const_command_payload(
     const iree_hal_vulkan_command_t* command) {
   return (const uint8_t*)command +
          iree_hal_vulkan_command_buffer_payload_offset();
+}
+
+static const iree_hal_vulkan_command_timestamp_t*
+iree_hal_vulkan_command_timestamp_payload(
+    const iree_hal_vulkan_command_t* command) {
+  return (const iree_hal_vulkan_command_timestamp_t*)
+      iree_hal_vulkan_command_buffer_const_command_payload(command);
 }
 
 static const iree_hal_vulkan_command_fill_buffer_t*
@@ -812,6 +839,8 @@ iree_hal_vulkan_command_buffer_profile_operation_type(
       return IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_COPY;
     case IREE_HAL_VULKAN_COMMAND_TYPE_DISPATCH:
       return IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_DISPATCH;
+    case IREE_HAL_VULKAN_COMMAND_TYPE_TIMESTAMP:
+      return IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_TIMESTAMP;
     case IREE_HAL_VULKAN_COMMAND_TYPE_EXECUTION_BARRIER:
       return IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_BARRIER;
     case IREE_HAL_VULKAN_COMMAND_TYPE_ATOMIC: {
@@ -940,6 +969,16 @@ static iree_status_t iree_hal_vulkan_command_buffer_profile_operation(
         record.flags |=
             iree_hal_vulkan_command_buffer_profile_binding_flags(bindings[i]);
       }
+      break;
+    }
+    case IREE_HAL_VULKAN_COMMAND_TYPE_TIMESTAMP: {
+      const iree_hal_vulkan_command_timestamp_t* timestamp =
+          iree_hal_vulkan_command_timestamp_payload(command);
+      record.flags |= iree_hal_vulkan_command_buffer_profile_binding_flags(
+          timestamp->target_ref);
+      iree_hal_vulkan_command_buffer_profile_ref(
+          timestamp->target_ref, &record.target_ordinal, &record.target_offset,
+          &record.length);
       break;
     }
     case IREE_HAL_VULKAN_COMMAND_TYPE_EXECUTION_BARRIER:
@@ -1353,6 +1392,15 @@ bool iree_hal_vulkan_command_buffer_native_replay_compatible(
   // semaphore publication, when callers are allowed to destroy the pool.
   return !command_buffer->has_binding_dependent_native_commands &&
          !command_buffer->has_static_buffer_refs;
+}
+
+void iree_hal_vulkan_command_buffer_timestamp_requirements(
+    iree_hal_command_buffer_t* base_command_buffer, uint32_t* out_query_count,
+    uint32_t* out_resolve_count) {
+  const iree_hal_vulkan_command_buffer_t* command_buffer =
+      iree_hal_vulkan_command_buffer_cast(base_command_buffer);
+  *out_query_count = command_buffer->timestamp_count;
+  *out_resolve_count = command_buffer->indirect_timestamp_count;
 }
 
 iree_status_t iree_hal_vulkan_command_buffer_native_bda_publication_length(
@@ -2330,6 +2378,26 @@ static iree_status_t iree_hal_vulkan_command_buffer_publish_atomic_target(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_vulkan_command_buffer_publish_timestamp_target(
+    iree_hal_buffer_binding_table_t binding_table,
+    const iree_hal_vulkan_command_timestamp_t* timestamp,
+    iree_hal_vulkan_command_buffer_bda_recording_state_t* bda_recording_state,
+    iree_hal_vulkan_command_buffer_bda_binding_cache_t* bda_binding_cache,
+    VkDeviceAddress* out_publication_address) {
+  VkDeviceAddress target_address = 0;
+  iree_device_size_t target_length = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_resolve_bda_ref(
+      binding_table, timestamp->target_ref, IREE_SV("timestamp target"),
+      bda_binding_cache, IREE_STATUS_FAILED_PRECONDITION, &target_address,
+      &target_length));
+  iree_byte_span_t publication_span = iree_byte_span_empty();
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_allocate_bda_publication(
+      bda_recording_state, sizeof(uint64_t), &publication_span,
+      out_publication_address));
+  memcpy(publication_span.data, &target_address, sizeof(target_address));
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_vulkan_command_buffer_validate_bda_publication(
     const iree_hal_vulkan_command_buffer_t* command_buffer,
     const iree_hal_vulkan_command_buffer_bda_publication_t* bda_publication) {
@@ -2401,6 +2469,17 @@ iree_status_t iree_hal_vulkan_command_buffer_publish_bda_replay_data(
         }
         break;
       }
+      case IREE_HAL_VULKAN_COMMAND_TYPE_TIMESTAMP: {
+        const iree_hal_vulkan_command_timestamp_t* timestamp =
+            iree_hal_vulkan_command_timestamp_payload(command);
+        if (!timestamp->target_ref.buffer) {
+          VkDeviceAddress publication_address = 0;
+          status = iree_hal_vulkan_command_buffer_publish_timestamp_target(
+              binding_table, timestamp, &bda_recording_state, bda_binding_cache,
+              &publication_address);
+        }
+        break;
+      }
       default:
         break;
     }
@@ -2415,6 +2494,43 @@ iree_status_t iree_hal_vulkan_command_buffer_publish_bda_replay_data(
                          command_buffer->bda_publication_length);
   }
   return status;
+}
+
+static iree_status_t iree_hal_vulkan_command_buffer_record_timestamp_native(
+    const iree_hal_vulkan_device_syms_t* syms, VkQueueFlags queue_flags,
+    VkCommandBuffer native_command_buffer,
+    iree_hal_buffer_binding_table_t binding_table,
+    const iree_hal_vulkan_command_timestamp_t* timestamp,
+    const iree_hal_vulkan_timestamp_state_t* timestamps,
+    iree_hal_vulkan_command_buffer_bda_recording_state_t* bda_recording_state,
+    iree_hal_vulkan_command_buffer_bda_binding_cache_t* bda_binding_cache) {
+  if (timestamp->target_ref.buffer) {
+    VkBuffer target_buffer = VK_NULL_HANDLE;
+    VkDeviceSize target_offset = 0;
+    VkDeviceSize target_length = 0;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_vulkan_command_buffer_resolve_native_buffer_ref(
+            binding_table, timestamp->target_ref, IREE_SV("timestamp target"),
+            &target_buffer, NULL, &target_offset, &target_length));
+    iree_hal_vulkan_timestamp_record_direct(
+        syms, queue_flags, native_command_buffer, timestamps->queries,
+        timestamp->query_index, timestamp->source_stage_mask,
+        timestamp->target_stage_mask, target_buffer, target_offset);
+  } else {
+    VkDeviceAddress publication_address = 0;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_vulkan_command_buffer_publish_timestamp_target(
+            binding_table, timestamp, bda_recording_state, bda_binding_cache,
+            &publication_address));
+    iree_hal_vulkan_command_buffer_record_bda_publication_barrier(
+        syms, native_command_buffer, bda_recording_state);
+    iree_hal_vulkan_timestamp_record_indirect(
+        syms, queue_flags, native_command_buffer, timestamps,
+        timestamp->query_index, timestamp->resolve_index,
+        timestamp->source_stage_mask, timestamp->target_stage_mask,
+        publication_address);
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t iree_hal_vulkan_command_buffer_record_atomic_native(
@@ -2526,6 +2642,7 @@ iree_status_t iree_hal_vulkan_command_buffer_record_native(
     iree_hal_buffer_binding_table_t binding_table,
     const iree_hal_vulkan_command_buffer_bda_publication_t* bda_publication,
     iree_hal_vulkan_command_buffer_bda_binding_cache_t* bda_binding_cache,
+    const iree_hal_vulkan_timestamp_state_t* timestamps,
     const iree_hal_vulkan_command_buffer_profile_marker_t* profile_marker,
     iree_allocator_t host_allocator) {
   IREE_ASSERT_ARGUMENT(syms);
@@ -2571,6 +2688,11 @@ iree_status_t iree_hal_vulkan_command_buffer_record_native(
                                 profile_marker->query_pool,
                                 profile_marker->queue_start_query);
     }
+  }
+  if (iree_status_is_ok(status) && command_buffer->timestamp_count != 0) {
+    iree_vkCmdResetQueryPool(IREE_VULKAN_DEVICE(syms), native_command_buffer,
+                             timestamps->queries, 0,
+                             command_buffer->timestamp_count);
   }
   uint32_t dispatch_query_ordinal = 0;
   iree_hal_vulkan_command_buffer_iterator_t iterator =
@@ -2651,6 +2773,12 @@ iree_status_t iree_hal_vulkan_command_buffer_record_native(
         status = iree_hal_vulkan_command_buffer_record_execution_barrier_native(
             syms, command_buffer->queue_flags, native_command_buffer,
             binding_table, command);
+        break;
+      case IREE_HAL_VULKAN_COMMAND_TYPE_TIMESTAMP:
+        status = iree_hal_vulkan_command_buffer_record_timestamp_native(
+            syms, command_buffer->queue_flags, native_command_buffer,
+            binding_table, iree_hal_vulkan_command_timestamp_payload(command),
+            timestamps, &bda_recording_state, bda_binding_cache);
         break;
       case IREE_HAL_VULKAN_COMMAND_TYPE_ATOMIC:
         status = iree_hal_vulkan_command_buffer_record_atomic_native(
@@ -2985,6 +3113,48 @@ static iree_status_t iree_hal_vulkan_command_buffer_barrier(
           };
     }
   }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_vulkan_command_buffer_timestamp(
+    iree_hal_command_buffer_t* base_command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_timestamp_flags_t flags) {
+  iree_hal_vulkan_command_buffer_t* command_buffer =
+      iree_hal_vulkan_command_buffer_cast(base_command_buffer);
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_validate_recording_state(
+      command_buffer, IREE_SV("timestamp")));
+  if (command_buffer->timestamp_count == UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "Vulkan timestamp query count exceeds uint32_t");
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_track_buffer_ref(
+      command_buffer, target_ref));
+  iree_host_size_t record_length = 0;
+  iree_host_size_t payload_offset = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_ensure_command_capacity(
+      command_buffer, sizeof(iree_hal_vulkan_command_timestamp_t),
+      &record_length, &payload_offset));
+  if (!target_ref.buffer) {
+    IREE_RETURN_IF_ERROR(
+        iree_hal_vulkan_command_buffer_add_bda_publication_bytes(
+            command_buffer, sizeof(uint64_t)));
+  }
+  void* payload = NULL;
+  iree_hal_vulkan_command_buffer_append_command(
+      command_buffer, IREE_HAL_VULKAN_COMMAND_TYPE_TIMESTAMP, record_length,
+      payload_offset, NULL, &payload);
+  iree_hal_vulkan_command_timestamp_t* timestamp =
+      (iree_hal_vulkan_command_timestamp_t*)payload;
+  *timestamp = (iree_hal_vulkan_command_timestamp_t){
+      .target_ref = target_ref,
+      .source_stage_mask = source_stage_mask,
+      .target_stage_mask = target_stage_mask,
+      .query_index = command_buffer->timestamp_count++,
+      .resolve_index =
+          target_ref.buffer ? 0 : command_buffer->indirect_timestamp_count++,
+  };
   return iree_ok_status();
 }
 
@@ -3442,6 +3612,7 @@ static const iree_hal_command_buffer_vtable_t
         .begin_debug_group = iree_hal_vulkan_command_buffer_begin_debug_group,
         .end_debug_group = iree_hal_vulkan_command_buffer_end_debug_group,
         .barrier = iree_hal_vulkan_command_buffer_barrier,
+        .timestamp = iree_hal_vulkan_command_buffer_timestamp,
         .atomic_wait = iree_hal_vulkan_command_buffer_atomic_wait,
         .atomic_store = iree_hal_vulkan_command_buffer_atomic_store,
         .atomic_rmw = iree_hal_vulkan_command_buffer_atomic_rmw,

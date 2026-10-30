@@ -1,0 +1,46 @@
+; Copyright 2026 The IREE Authors
+; SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+; Copy one eight-byte query result through a published destination address.
+OpCapability Shader
+OpCapability PhysicalStorageBufferAddresses
+OpMemoryModel PhysicalStorageBuffer64 GLSL450
+OpEntryPoint GLCompute %main "main" %params
+OpExecutionMode %main LocalSize 1 1 1
+OpDecorate %Value Block
+OpMemberDecorate %Value 0 Offset 0
+OpDecorate %Slot Block
+OpMemberDecorate %Slot 0 Offset 0
+OpDecorate %Params Block
+OpMemberDecorate %Params 0 Offset 0
+OpMemberDecorate %Params 1 Offset 8
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%u32 = OpTypeInt 32 0
+%v2 = OpTypeVector %u32 2
+%zero = OpConstant %u32 0
+%one = OpConstant %u32 1
+%Value = OpTypeStruct %v2
+%ptrValue = OpTypePointer PhysicalStorageBuffer %Value
+%Slot = OpTypeStruct %ptrValue
+%ptrSlot = OpTypePointer PhysicalStorageBuffer %Slot
+%Params = OpTypeStruct %ptrValue %ptrSlot
+%ptrParams = OpTypePointer PushConstant %Params
+%params = OpVariable %ptrParams PushConstant
+%pcValue = OpTypePointer PushConstant %ptrValue
+%pcSlot = OpTypePointer PushConstant %ptrSlot
+%pointer = OpTypePointer PhysicalStorageBuffer %ptrValue
+%vector = OpTypePointer PhysicalStorageBuffer %v2
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%sourceParam = OpAccessChain %pcValue %params %zero
+%source = OpLoad %ptrValue %sourceParam
+%slotParam = OpAccessChain %pcSlot %params %one
+%slot = OpLoad %ptrSlot %slotParam
+%targetPointer = OpAccessChain %pointer %slot %zero
+%target = OpLoad %ptrValue %targetPointer Aligned 8
+%sourceValue = OpAccessChain %vector %source %zero
+%value = OpLoad %v2 %sourceValue Aligned 8
+%targetValue = OpAccessChain %vector %target %zero
+OpStore %targetValue %value Aligned 8
+OpReturn
+OpFunctionEnd

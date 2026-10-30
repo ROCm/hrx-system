@@ -393,6 +393,23 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_queues(
     if (supports_atomics) {
       role_flags |= IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC;
     }
+    iree_hal_queue_family_spec_flags_t flags =
+        IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE;
+    // The calibrated-timestamps extension guarantees a shared device domain
+    // across submissions. Query capture alone does not establish that contract.
+    if (iree_all_bits_set(queue_family->flags, VK_QUEUE_COMPUTE_BIT) &&
+        queue_family->timestamp_valid_bits != 0 &&
+        timestamp_frequency_hz != 0 &&
+        iree_all_bits_set(
+            params->device_plan->enabled_extensions,
+            IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_CALIBRATED_TIMESTAMPS)) {
+      flags |= IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS;
+      if (iree_all_bits_set(
+              params->device_plan->enabled_features.general,
+              IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES)) {
+        flags |= IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS;
+      }
+    }
     queue_families[i] = (iree_hal_queue_family_spec_t){
         .name = iree_make_string_view(queue_family_names[i],
                                       (iree_host_size_t)name_length),
@@ -403,7 +420,7 @@ static iree_status_t iree_hal_vulkan_device_spec_populate_queues(
         .timestamp_frequency_hz = timestamp_frequency_hz,
         .physical_device_affinity = 1ull,
         .role_flags = role_flags,
-        .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_NONE,
+        .flags = flags,
     };
     if (supports_atomics) {
       queue_families[i].atomic_capabilities = atomic_capabilities;

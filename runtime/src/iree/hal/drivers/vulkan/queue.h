@@ -24,6 +24,7 @@
 #include "iree/hal/drivers/vulkan/profile.h"
 #include "iree/hal/drivers/vulkan/queue_stats.h"
 #include "iree/hal/drivers/vulkan/semaphore.h"
+#include "iree/hal/drivers/vulkan/timestamp.h"
 #include "iree/hal/drivers/vulkan/util/libvulkan.h"
 
 #ifdef __cplusplus
@@ -157,6 +158,9 @@ typedef struct iree_hal_vulkan_queue_t {
   // Device allocator used for queue-owned staging resources. Borrowed and
   // bound after logical-device allocator creation.
   iree_hal_allocator_t* device_allocator;
+
+  // Lazy indirect timestamp pipeline, serialized by submission_mutex.
+  iree_hal_vulkan_timestamp_pipeline_t timestamp_pipeline;
 
   // Vulkan queue handle borrowed from the logical device.
   VkQueue queue;

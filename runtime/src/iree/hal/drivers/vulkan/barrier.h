@@ -68,6 +68,12 @@ VkAccessFlags2 iree_hal_vulkan_barrier_target_access_mask(
 VkAccessFlags2 iree_hal_vulkan_access_scope_mask(
     iree_hal_access_scope_t access_scope);
 
+// Maps logical stages to the native engines that can implement them. An empty
+// scope remains empty unless memory accesses require an unscoped dependency.
+VkPipelineStageFlags2 iree_hal_vulkan_barrier_stage_mask(
+    VkQueueFlags queue_flags, iree_hal_execution_stage_t stage_mask,
+    VkAccessFlags2 access_mask);
+
 // Records |barrier| into |command_buffer|. Transfer stages and accesses include
 // compute polyfills only when |queue_flags| permits compute commands.
 void iree_hal_vulkan_barrier_record(const iree_hal_vulkan_device_syms_t* syms,

@@ -104,8 +104,7 @@ iree_hal_vulkan_queue_barriers_t iree_hal_vulkan_queue_barriers_resolve(
   };
 }
 
-static VkPipelineStageFlags2
-iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
+VkPipelineStageFlags2 iree_hal_vulkan_barrier_stage_mask(
     VkQueueFlags queue_flags, iree_hal_execution_stage_t stage_mask,
     VkAccessFlags2 access_mask) {
   VkPipelineStageFlags2 pipeline_stage_mask = 0;
@@ -245,16 +244,12 @@ void iree_hal_vulkan_barrier_record(const iree_hal_vulkan_device_syms_t* syms,
   }
   VkMemoryBarrier2 memory_barrier = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-      .srcStageMask =
-          iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
-              queue_flags, barrier->source_stage_mask,
-              barrier->source_access_mask),
+      .srcStageMask = iree_hal_vulkan_barrier_stage_mask(
+          queue_flags, barrier->source_stage_mask, barrier->source_access_mask),
       .srcAccessMask = iree_hal_vulkan_transfer_access_mask(
           queue_flags, barrier->source_access_mask, /*is_target=*/false),
-      .dstStageMask =
-          iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
-              queue_flags, barrier->target_stage_mask,
-              barrier->target_access_mask),
+      .dstStageMask = iree_hal_vulkan_barrier_stage_mask(
+          queue_flags, barrier->target_stage_mask, barrier->target_access_mask),
       .dstAccessMask = iree_hal_vulkan_transfer_access_mask(
           queue_flags, barrier->target_access_mask, /*is_target=*/true),
   };
@@ -276,16 +271,12 @@ void iree_hal_vulkan_buffer_barrier_record(
   }
   VkBufferMemoryBarrier2 buffer_barrier = {
       .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-      .srcStageMask =
-          iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
-              queue_flags, barrier->source_stage_mask,
-              barrier->source_access_mask),
+      .srcStageMask = iree_hal_vulkan_barrier_stage_mask(
+          queue_flags, barrier->source_stage_mask, barrier->source_access_mask),
       .srcAccessMask = iree_hal_vulkan_transfer_access_mask(
           queue_flags, barrier->source_access_mask, /*is_target=*/false),
-      .dstStageMask =
-          iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
-              queue_flags, barrier->target_stage_mask,
-              barrier->target_access_mask),
+      .dstStageMask = iree_hal_vulkan_barrier_stage_mask(
+          queue_flags, barrier->target_stage_mask, barrier->target_access_mask),
       .dstAccessMask = iree_hal_vulkan_transfer_access_mask(
           queue_flags, barrier->target_access_mask, /*is_target=*/true),
       .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
