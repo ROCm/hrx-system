@@ -2,8 +2,8 @@
 
 This package composes complete Loom cases into capability-coherent modules and
 executes them through the AMDGPU HAL with `loom-test`. Generic corpus
-packages own target-independent semantics; this provider package owns device
-selection, architecture qualification, and physical execution.
+packages own target-independent semantics; this AMDGPU target package owns
+device selection, architecture qualification, and physical execution.
 
 Architecture directories contain only cases whose authored contract names that
 architecture. The generic module combines reusable corpus archives so all of

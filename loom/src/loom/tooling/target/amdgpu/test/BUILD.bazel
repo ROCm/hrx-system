@@ -177,14 +177,6 @@ loom_check_compile_tests(
     targets = ["//loom/target/amdgpu:gfx1250"],
 )
 
-loom_check_compile_tests(
-    name = "loop_entry_access",
-    src = "//loom/src/loom/tooling/target/amdgpu/test/corpus:gfx11_loop_entry_module",
-    args = ["--sanitizer=access"],
-    target_compatible_with = loom_amdgpu_descriptor_set_compatible_with("descriptor_set_gfx11_generic_core"),
-    targets = ["//loom/target/amdgpu:gfx1151"],
-)
-
 iree_execution_test_suite(
     name = "loom_link_execution_test",
     data = [
@@ -423,15 +415,6 @@ loom_test(
     execution_profiles = [
         AMD_GPU_TSAN_PROFILE,
     ],
-)
-
-loom_test(
-    name = "tsan_fragment_test",
-    srcs = ["//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:fragment_repack_bf16.loom"],
-    execution_profiles = [
-        AMD_GPU_TSAN_PROFILE,
-    ],
-    target_compatible_with = _GFX11_EXECUTION_COMPATIBLE_WITH,
 )
 
 loom_test(

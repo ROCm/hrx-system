@@ -225,7 +225,7 @@ may still execute independent work concurrently or out of order. Intermediate
 artifacts such as SPIR-V pass through another compiler, so their textual order
 does not establish final native instruction order.
 
-The [checked WMMA example](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11/low_schedule.loom)
+The [checked WMMA example](https://github.com/ROCm/hrx-system/blob/main/loom/target/amdgpu/test/native/gfx11/low_schedule.loom)
 compares free, fenced, locked, and explicitly overlapped two-tile schedules.
 After downloading `low_schedule.loom`, run its four correctness cases on an
 AMDGPU device supporting the example's GFX11 WMMA instructions:
@@ -260,7 +260,7 @@ zero and cannot supply this address. For example, inside a GFX11 Low helper:
 ```
 
 Here `%local_byte_offset` includes the workgroup allocation's base and the
-lane's offset. The [checked flat-pointer example](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11/flat_aperture.loom)
+lane's offset. The [checked flat-pointer example](https://github.com/ROCm/hrx-system/blob/main/loom/target/amdgpu/test/native/gfx11/flat_aperture.loom)
 passes a `buffer.alloca<workgroup>` allocation into a Low helper, exercises
 returning and non-returning atomics, and selects global or LDS addresses per
 lane. Download it and run `loom-test flat_aperture.loom --device=amdgpu`
@@ -326,7 +326,7 @@ still order the whole instruction stream, and `schedule(locked)` still fixes
 block order. Native AMDGPU and x86 support scopes; SPIR-V, Wasm, and VM
 representations reject the native-order contract explicitly.
 
-The [checked paired-matrix example](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11/schedule_scopes.loom)
+The [checked paired-matrix example](https://github.com/ROCm/hrx-system/blob/main/loom/target/amdgpu/test/native/gfx11/schedule_scopes.loom)
 invokes a two-tile WMMA helper twice with distinct inputs and expected results.
 Its compile report exposes the materialized scope count alongside register use
 and partial waits. [Scope report queries](../workflows/compile-report-queries.md#inspect-authored-scheduling-scopes)

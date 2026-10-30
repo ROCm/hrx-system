@@ -17,7 +17,13 @@ load(
 )
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_module", "loom_test", "loom_test_module")
-load("//loom/target/amdgpu:execution_profiles.bzl", "AMD_GPU_ACCESS_PROFILE", "AMD_GPU_HARDWARE_PROFILE")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_compile_tests")
+load(
+    "//loom/target/amdgpu:execution_profiles.bzl",
+    "AMD_GPU_ACCESS_PROFILE",
+    "AMD_GPU_HARDWARE_PROFILE",
+    "AMD_GPU_TSAN_PROFILE",
+)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -89,7 +95,7 @@ loom_module(
         "//loom/src/loom/test/corpus/authoring/hip:portable_cases",
         "//loom/src/loom/test/corpus/checked_benchmarks:checked_benchmark_cases",
         "//loom/src/loom/test/corpus/encoding:numeric_conversion_cases",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/generic:target_specialized_launch_config.loom",
+        "//loom/target/amdgpu/test/native/generic:target_specialized_launch_config.loom",
     ],
     output_format = "bc",
 )
@@ -111,7 +117,7 @@ iree_executable_test(
 
 loom_test(
     name = "gfx11_wave64_reductions_test",
-    srcs = ["//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:wave64_reductions.loom"],
+    srcs = ["//loom/target/amdgpu/test/native/gfx11:wave64_reductions.loom"],
     compile_targets = ["//loom/target/amdgpu:gfx1151"],
     execution_profiles = [
         AMD_GPU_HARDWARE_PROFILE,
@@ -125,27 +131,27 @@ loom_module(
         "//loom/binding/c/benchmark/kernels/attention:prefill_f16_wmma_amdgpu.loom",
         "//loom/binding/c/benchmark/kernels/synthetic:paired_matrix_helpers.loom",
         "//loom/binding/c/benchmark/kernels/synthetic:paired_scoped_matrix_helpers.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:attention_prefill.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:cache_completion.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:divergent_loop_carry.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:flat_aperture.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:fp8_finite_storage_fragments.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:fragment_numeric_coordinates.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:fragment_repack_bf16.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:fragment_result_f32_to_f16_publication.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:gfx11_wmma_families.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:incoming_completion.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:incoming_wait.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:loop_entry.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:loop_entry_wave32.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:low_invoke.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:low_schedule.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:mask_write.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:matrix_mixed_consumers.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:schedule_scopes.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:spill_storage.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:temporal_broadcast.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:workgroup_scan_wave64.loom",
+        "//loom/target/amdgpu/test/native/gfx11:attention_prefill.loom",
+        "//loom/target/amdgpu/test/native/gfx11:cache_completion.loom",
+        "//loom/target/amdgpu/test/native/gfx11:divergent_loop_carry.loom",
+        "//loom/target/amdgpu/test/native/gfx11:flat_aperture.loom",
+        "//loom/target/amdgpu/test/native/gfx11:fp8_finite_storage_fragments.loom",
+        "//loom/target/amdgpu/test/native/gfx11:fragment_numeric_coordinates.loom",
+        "//loom/target/amdgpu/test/native/gfx11:fragment_repack_bf16.loom",
+        "//loom/target/amdgpu/test/native/gfx11:fragment_result_f32_to_f16_publication.loom",
+        "//loom/target/amdgpu/test/native/gfx11:gfx11_wmma_families.loom",
+        "//loom/target/amdgpu/test/native/gfx11:incoming_completion.loom",
+        "//loom/target/amdgpu/test/native/gfx11:incoming_wait.loom",
+        "//loom/target/amdgpu/test/native/gfx11:loop_entry.loom",
+        "//loom/target/amdgpu/test/native/gfx11:loop_entry_wave32.loom",
+        "//loom/target/amdgpu/test/native/gfx11:low_invoke.loom",
+        "//loom/target/amdgpu/test/native/gfx11:low_schedule.loom",
+        "//loom/target/amdgpu/test/native/gfx11:mask_write.loom",
+        "//loom/target/amdgpu/test/native/gfx11:matrix_mixed_consumers.loom",
+        "//loom/target/amdgpu/test/native/gfx11:schedule_scopes.loom",
+        "//loom/target/amdgpu/test/native/gfx11:spill_storage.loom",
+        "//loom/target/amdgpu/test/native/gfx11:temporal_broadcast.loom",
+        "//loom/target/amdgpu/test/native/gfx11:workgroup_scan_wave64.loom",
     ],
     output_format = "bc",
     target_compatible_with = _GFX11_ARTIFACT_COMPATIBLE_WITH,
@@ -170,11 +176,26 @@ iree_executable_test(
 loom_module(
     name = "gfx11_loop_entry_module",
     srcs = [
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:loop_entry.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx11:loop_entry_wave32.loom",
+        "//loom/target/amdgpu/test/native/gfx11:loop_entry.loom",
+        "//loom/target/amdgpu/test/native/gfx11:loop_entry_wave32.loom",
     ],
     output_format = "bc",
     target_compatible_with = _GFX11_ARTIFACT_COMPATIBLE_WITH,
+)
+
+loom_check_compile_tests(
+    name = "loop_entry_access",
+    src = ":gfx11_loop_entry_module",
+    args = ["--sanitizer=access"],
+    target_compatible_with = _GFX11_ARTIFACT_COMPATIBLE_WITH,
+    targets = ["//loom/target/amdgpu:gfx1151"],
+)
+
+loom_test(
+    name = "tsan_fragment_test",
+    srcs = ["//loom/target/amdgpu/test/native/gfx11:fragment_repack_bf16.loom"],
+    execution_profiles = [AMD_GPU_TSAN_PROFILE],
+    target_compatible_with = _GFX11_COMPATIBLE_WITH,
 )
 
 iree_executable_test(
@@ -192,8 +213,8 @@ iree_executable_test(
 loom_module(
     name = "gfx1100_test_module",
     srcs = [
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx1100:fragment_result_dynamic_strided_f16acc_f32_store.loom",
-        "//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx1100:fragment_result_f16_lds_roundtrip.loom",
+        "//loom/target/amdgpu/test/native/gfx1100:fragment_result_dynamic_strided_f16acc_f32_store.loom",
+        "//loom/target/amdgpu/test/native/gfx1100:fragment_result_f16_lds_roundtrip.loom",
     ],
     output_format = "bc",
 )
@@ -215,7 +236,7 @@ iree_executable_test(
 
 loom_module(
     name = "gfx9_4_test_module",
-    srcs = ["//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx9_4:gfx9_4_mfma_families.loom"],
+    srcs = ["//loom/target/amdgpu/test/native/gfx9_4:gfx9_4_mfma_families.loom"],
     output_format = "bc",
 )
 
@@ -236,7 +257,7 @@ iree_executable_test(
 
 loom_test_module(
     name = "gfx950_v4_lds_shared_qk_module",
-    srcs = ["//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx950:v4_lds_shared_qk.loom"],
+    srcs = ["//loom/target/amdgpu/test/native/gfx950:v4_lds_shared_qk.loom"],
     target_compatible_with = _CDNA4_ARTIFACT_COMPATIBLE_WITH,
 )
 
@@ -258,6 +279,6 @@ loom_test(
 
 loom_test(
     name = "gfx1250_cluster_b128_multicast_test",
-    srcs = ["//loom/src/loom/tooling/target/amdgpu/test/corpus/gfx1250:cluster_b128_multicast.loom"],
+    srcs = ["//loom/target/amdgpu/test/native/gfx1250:cluster_b128_multicast.loom"],
     compile_targets = ["//loom/target/amdgpu:gfx1250"],
 )

@@ -729,8 +729,8 @@ def _run_self_tests() -> int:
         (),
     )
     ok &= _expect_target_execution_self_test(
-        "provider-owned qualification package passes",
-        "loom/src/loom/tooling/target/amdgpu/test/corpus/BUILD.bazel",
+        "target catalog qualification package passes",
+        "loom/target/amdgpu/test/native/BUILD.bazel",
         'src = "//loom/src/loom/tools/loom-test"\n',
         (),
     )

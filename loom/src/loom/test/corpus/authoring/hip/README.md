@@ -39,7 +39,7 @@ python dev.py bazel run //loom/src/loom/tools/loom-opt:loom-opt -- \
 | `global_load_b32`, packed bytes, `q8`, bitfield, unpack | `vector.load`, `vector.bitunpacks<8>`, `scalar.extf`, `vector.dotf` | `q8_block_unroll.loom` |
 | `global_load_b32`, `global_load_b128`, `uint4`, adjacent scalar loads, coalescing | `vector.load -> vector<1xi32>` versus `vector.load -> vector<4xi32>` | `q8_load_width.loom` |
 | `__shared__`, `__syncthreads`, LDS, tile staging, cross-lane exchange | `buffer.alloca ... memory_space = workgroup`, `buffer.view`, `kernel.barrier<workgroup>` | `shared_memory_tile.loom` |
-| `__shared__`, LDS reuse, split barrier, `s_barrier_signal`, `s_barrier_wait` | target-selected `kernel.barrier.arrive`/`kernel.barrier.wait` provider with a complete-barrier fallback | [`split_barrier_reuse.loom`](../../../../tooling/target/amdgpu/test/corpus/split_barrier_reuse.loom) |
+| `__shared__`, LDS reuse, split barrier, `s_barrier_signal`, `s_barrier_wait` | target-selected `kernel.barrier.arrive`/`kernel.barrier.wait` provider with a complete-barrier fallback | [`split_barrier_reuse.loom`](../../../../../../target/amdgpu/test/native/split_barrier_reuse.loom) |
 | `__shared__`, `__syncthreads`, LDS, 2D tile, transpose, double buffering | two workgroup `buffer.alloca` tiles, x/y workitem ids, repeated `kernel.barrier<workgroup>` | `shared_memory_transpose.loom` |
 | `__shared__`, `__syncthreads`, LDS, `uint4`, `int4`, `ds_store_b128`, `ds_load_b128` | `vector.load -> vector<4xi32>` staged through workgroup memory | `shared_memory_vector_tile.loom` |
 | `q8`, `q4`, `u8`, `s8`, `u4`, `s4`, `v_dot4_i32_iu8`, `dp4a` | `vector.bitunpacku`, `vector.bitunpacks`, `vector.dot4i<u8s8>` | `q8_q4_signedness.loom` |
@@ -47,7 +47,7 @@ python dev.py bazel run //loom/src/loom/tools/loom-opt:loom-opt -- \
 | dynamic lower-bound unroll, missing facts | structured diagnostic, exact/range facts | `q8_hip_shaped_unroll_unresolved.loom` |
 | wave size, template, specialization, fallback | targetless `template.apply`, typed `template.def ... requires`, `#target.subgroup.size` | `target_provider_selection.loom` |
 | targetless template device function, `expf`, target math policy, inline | invocation specialization, then authoring expansion and math legalization | `template_math_legalization.loom` |
-| `__cluster_dims__`, cluster multicast, async-to-LDS, `s_wait_asynccnt`, b128 | static `cluster_size`, `kernel.async.cluster.gather`, async groups and waits | [`cluster_b128_multicast.loom`](../../../../tooling/target/amdgpu/test/corpus/gfx1250/cluster_b128_multicast.loom) |
+| `__cluster_dims__`, cluster multicast, async-to-LDS, `s_wait_asynccnt`, b128 | static `cluster_size`, `kernel.async.cluster.gather`, async groups and waits | [`cluster_b128_multicast.loom`](../../../../../../target/amdgpu/test/native/gfx1250/cluster_b128_multicast.loom) |
 
 ## Lane Distribution
 
@@ -351,7 +351,7 @@ Only ordinary per-workitem work and pure calls sit between the pair. The
 publication barrier before the shared read remains a separate synchronization
 point.
 
-The [checked source](../../../../tooling/target/amdgpu/test/corpus/split_barrier_reuse.loom)
+The [checked source](../../../../../../target/amdgpu/test/native/split_barrier_reuse.loom)
 wraps this sequence in a targetless template family. GFX12 and GFX12.5 select
 native split providers; CDNA3, GFX11, and SPIR-V select the complete-barrier
 fallback without changing the caller. It repeats the phase four times, includes
@@ -361,7 +361,7 @@ helpers, and compares the selected result bitwise with a full-barrier reference.
 Proof commands from this directory:
 
 ```bash
-source=../../../../tooling/target/amdgpu/test/corpus/split_barrier_reuse.loom
+source=../../../../../../target/amdgpu/test/native/split_barrier_reuse.loom
 
 loom-test "${source}" --device=amdgpu
 loom-compile "${source}" --root=@selected_barrier_reuse \
@@ -832,7 +832,7 @@ the target's cluster-transfer counter before the ordinary workgroup barrier
 makes the populated LDS visible to consumers.
 
 The target-owned
-[`cluster_b128_multicast.loom`](../../../../tooling/target/amdgpu/test/corpus/gfx1250/cluster_b128_multicast.loom)
+[`cluster_b128_multicast.loom`](../../../../../../target/amdgpu/test/native/gfx1250/cluster_b128_multicast.loom)
 uses a nonuniform iota rather than a constant payload. Both recipients
 independently read their own LDS allocation and check all four words transferred
 for every lane. That shape catches wrong cluster identity, wrong recipient
@@ -842,7 +842,7 @@ validation of only one participant.
 Proof command:
 
 ```bash
-loom-compile ../../../../tooling/target/amdgpu/test/corpus/gfx1250/cluster_b128_multicast.loom \
+loom-compile ../../../../../../target/amdgpu/test/native/gfx1250/cluster_b128_multicast.loom \
   --format=amdgpu-hsaco \
   --target=amdgpu:gfx1250 \
   --output=/tmp/cluster-b128-multicast.hsaco \
