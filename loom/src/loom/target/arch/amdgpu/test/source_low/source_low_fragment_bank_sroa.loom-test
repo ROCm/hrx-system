@@ -1,18 +1,12 @@
-config.decl @test.fragment_bank.m_fragments : %value: index where [range(%value, 1, 8)]
+// RUN: with-checks emit source-low output=low
 
-config.decl @test.fragment_bank.n_fragments : %value: index where [range(%value, 1, 8)]
-
-config.decl @test.fragment_bank.k_fragments : %value: index where [range(%value, 1, 8)]
-
-config.decl @test.fragment_bank.workgroup_size : %value: index where [range(%value, 1, 2048)]
-
-config.decl @test.fragment_bank.scratch_elements : %value: index where [range(%value, 1, 100000)]
-
+// The 8x4 accumulator bank exceeds gfx1250's legal vector representation.
+// Source lowering must split it into 32 fragments before target selection.
 amdgpu.target<gfx1250> @target
 
-kernel.def target(@target) export("configured_fragment_bank") @configured_fragment_bank() {
+kernel.def target(@target) @fragment_bank_sroa() {
   %unit = index.constant 1 : index
-  %workgroup_size = config.get @test.fragment_bank.workgroup_size : index
+  %workgroup_size = index.constant 32 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
 } launch(%output: buffer) {
   %base = index.constant 0 : offset
@@ -24,10 +18,10 @@ kernel.def target(@target) export("configured_fragment_bank") @configured_fragme
   %matrix_m = index.constant 16 : index
   %matrix_n = index.constant 16 : index
   %matrix_k = index.constant 32 : index
-  %m_fragments = config.get @test.fragment_bank.m_fragments : index
-  %n_fragments = config.get @test.fragment_bank.n_fragments : index
-  %k_fragments = config.get @test.fragment_bank.k_fragments : index
-  %scratch_elements = config.get @test.fragment_bank.scratch_elements : index
+  %m_fragments = index.constant 8 : index
+  %n_fragments = index.constant 4 : index
+  %k_fragments = index.constant 2 : index
+  %scratch_elements = index.constant 32 : index
   %m_extent = index.mul %m_fragments, %tile_extent : index
   %n_extent = index.mul %n_fragments, %tile_extent : index
   %scratch_bytes_index = index.mul %scratch_elements, %element_bytes : index
@@ -74,3 +68,9 @@ kernel.def target(@target) export("configured_fragment_bank") @configured_fragme
   }
   kernel.return
 }
+
+// ----
+CHECK: low.kernel.def target<amdgpu.rdna4.gfx125x.core>*workgroup_size(32, 1, 1)*@fragment_bank_sroa() asm {
+CHECK-COUNT-64: * = v_wmma_f32_16x16x32_bf16 *
+CHECK-COUNT-256: global_store_b32_saddr *
+CHECK-NOT: *vector<8x4x8xf32>*
