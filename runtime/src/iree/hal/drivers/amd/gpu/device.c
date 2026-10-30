@@ -13,6 +13,7 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/notification.h"
 #include "iree/hal/drivers/amd/fabric/fabric.h"
+#include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
 #include "iree/hal/drivers/amd/fabric/memory_spec.h"
 #include "iree/hal/drivers/amd/gpu/code.h"
@@ -360,6 +361,37 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
   const uint32_t wait_conditions_64 = IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
   const amdf_queue_family_info_t* native_family =
       &device->context->families[family_ordinal];
+  // Family support describes packet encodings. Each pool separately qualifies
+  // these operations against its exact backing and requested access scopes.
+  const amdf_atomic_capabilities_t* native_atomics =
+      &native_family->atomic_capabilities;
+  const iree_hal_atomic_operation_capabilities_t zero_compute_operations =
+      iree_hal_amd_fabric_memory_translate_atomics(
+          native_atomics->operations_without_dispatch_32,
+          native_atomics->operations_without_dispatch_64,
+          (amdf_atomic_reach_t){.scope_32 = AMDF_ATOMIC_SCOPE_SYSTEM,
+                                .scope_64 = AMDF_ATOMIC_SCOPE_SYSTEM});
+  static_assert(
+      (uint32_t)AMDF_ATOMIC_WAIT_CONDITION_EQUAL ==
+              (uint32_t)IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_EQUAL &&
+          (uint32_t)AMDF_ATOMIC_WAIT_CONDITION_NOT_EQUAL ==
+              (uint32_t)IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NOT_EQUAL &&
+          (uint32_t)AMDF_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL ==
+              (uint32_t)
+                  IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_UNSIGNED_GREATER_EQUAL,
+      "native and HAL wait predicate bits must match");
+  const uint32_t native_wait_conditions_32 =
+      (zero_compute_operations.device_scope_32 &
+       IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT)
+          ? native_atomics->wait_conditions_32 &
+                IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL
+          : 0;
+  const uint32_t native_wait_conditions_64 =
+      (zero_compute_operations.device_scope_64 &
+       IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT)
+          ? native_atomics->wait_conditions_64 &
+                IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL
+          : 0;
   const bool user_publication =
       (iree_hal_amd_gpu_device_compute_publication_modes(native_family) &
        AMDF_QUEUE_PUBLICATION_MODE_USER) != 0;
@@ -443,6 +475,12 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
                                .device_scope_64 = wait_conditions_64,
                                .system_scope_32 = wait_conditions_32,
                                .system_scope_64 = wait_conditions_64}},
+      .zero_compute_atomic_capabilities =
+          {.operations = zero_compute_operations,
+           .wait_conditions = {.device_scope_32 = native_wait_conditions_32,
+                               .device_scope_64 = native_wait_conditions_64,
+                               .system_scope_32 = native_wait_conditions_32,
+                               .system_scope_64 = native_wait_conditions_64}},
   };
   static_assert(
       (uint32_t)AMDF_QUEUE_PLACEMENT_COUNT ==
