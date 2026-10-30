@@ -12,6 +12,7 @@
 #include "iree/hal/drivers/vulkan/builtins.h"
 #include "iree/hal/drivers/vulkan/debug_utils.h"
 #include "iree/hal/drivers/vulkan/profile.h"
+#include "iree/hal/drivers/vulkan/timestamp.h"
 #include "iree/hal/drivers/vulkan/util/libvulkan.h"
 
 #ifdef __cplusplus
@@ -117,6 +118,11 @@ iree_status_t iree_hal_vulkan_command_buffer_resolve_bda_binding_table_slot(
     iree_hal_buffer_binding_table_t binding_table, uint32_t buffer_slot,
     iree_hal_vulkan_command_buffer_bda_binding_cache_t* bda_binding_cache,
     iree_hal_vulkan_command_buffer_bda_binding_slot_t* out_slot);
+
+// Returns explicit timestamp storage requirements established while recording.
+void iree_hal_vulkan_command_buffer_timestamp_requirements(
+    iree_hal_command_buffer_t* command_buffer, uint32_t* out_query_count,
+    uint32_t* out_resolve_count);
 
 // Returns host-published BDA bytes required to replay |command_buffer| once
 // into a native VkCommandBuffer.
@@ -226,6 +232,10 @@ typedef struct iree_hal_vulkan_command_buffer_profile_marker_t {
 // publication alive until |native_command_buffer| is no longer executing. When
 // the command buffer requires no BDA publication this may be NULL.
 //
+// |timestamps| owns the explicit command query/resolve resources, separate from
+// profiling. It may be NULL only when no timestamp commands were recorded and
+// must remain alive and exclusively leased through native completion.
+//
 // |bda_binding_cache| may be NULL. When present, it caches binding-table slot
 // device addresses for the duration of this recording/publication pass.
 iree_status_t iree_hal_vulkan_command_buffer_record_native(
@@ -238,6 +248,7 @@ iree_status_t iree_hal_vulkan_command_buffer_record_native(
     iree_hal_buffer_binding_table_t binding_table,
     const iree_hal_vulkan_command_buffer_bda_publication_t* bda_publication,
     iree_hal_vulkan_command_buffer_bda_binding_cache_t* bda_binding_cache,
+    const iree_hal_vulkan_timestamp_state_t* timestamps,
     const iree_hal_vulkan_command_buffer_profile_marker_t* profile_marker,
     iree_allocator_t host_allocator);
 

@@ -512,7 +512,8 @@ TEST_F(VulkanCommandBufferTest, ReplaysDebugGroupsAsDebugUtilsLabels) {
       command_buffer.get(), &syms, logical_device, &debug_utils, &builtins,
       native_command_buffer, /*usage_flags=*/0, VK_NULL_HANDLE, binding_table,
       /*bda_publication=*/nullptr, /*bda_binding_cache=*/nullptr,
-      /*profile_marker=*/nullptr, iree_allocator_system()));
+      /*timestamps=*/nullptr, /*profile_marker=*/nullptr,
+      iree_allocator_system()));
 
   EXPECT_EQ(1, capture.begin_command_buffer_count);
   EXPECT_EQ(1, capture.end_command_buffer_count);
@@ -570,7 +571,8 @@ TEST_F(VulkanCommandBufferTest, SystemScopeUsesHostMemoryDomain) {
       command_buffer.get(), &syms, logical_device, &debug_utils, &builtins,
       native_command_buffer, /*usage_flags=*/0, VK_NULL_HANDLE, binding_table,
       /*bda_publication=*/nullptr, /*bda_binding_cache=*/nullptr,
-      /*profile_marker=*/nullptr, iree_allocator_system()));
+      /*timestamps=*/nullptr, /*profile_marker=*/nullptr,
+      iree_allocator_system()));
 
   EXPECT_EQ(capture.pipeline_barrier_count, 1);
   EXPECT_NE(capture.memory_barriers[0].srcStageMask &
@@ -623,7 +625,8 @@ TEST_F(VulkanCommandBufferTest,
       command_buffer.get(), &syms, logical_device, &debug_utils, &builtins,
       native_command_buffer, /*usage_flags=*/0, VK_NULL_HANDLE, binding_table,
       /*bda_publication=*/nullptr, /*bda_binding_cache=*/nullptr,
-      /*profile_marker=*/nullptr, iree_allocator_system()));
+      /*timestamps=*/nullptr, /*profile_marker=*/nullptr,
+      iree_allocator_system()));
 
   EXPECT_EQ(capture.pipeline_barrier_count, 1);
   EXPECT_NE(capture.memory_barriers[0].srcStageMask &
@@ -721,8 +724,8 @@ TEST_F(VulkanCommandBufferTest,
       reinterpret_cast<VkDevice>(static_cast<uintptr_t>(0x1234)), &debug_utils,
       &builtins, native_command_buffer, /*usage_flags=*/0, VK_NULL_HANDLE,
       binding_table, /*bda_publication=*/nullptr,
-      /*bda_binding_cache=*/nullptr, /*profile_marker=*/nullptr,
-      iree_allocator_system()));
+      /*bda_binding_cache=*/nullptr, /*timestamps=*/nullptr,
+      /*profile_marker=*/nullptr, iree_allocator_system()));
 
   ASSERT_EQ(capture.pipeline_barrier_count, 1);
   ASSERT_EQ(capture.memory_barrier_count, 0u);
@@ -896,8 +899,8 @@ TEST_F(VulkanCommandBufferTest,
     IREE_ASSERT_OK(iree_hal_vulkan_command_buffer_record_native(
         command_buffer.get(), &syms, logical_device, &debug_utils, &builtins,
         native_command_buffer, /*usage_flags=*/0, VK_NULL_HANDLE, binding_table,
-        &publication, &binding_cache, /*profile_marker=*/nullptr,
-        iree_allocator_system()));
+        &publication, &binding_cache, /*timestamps=*/nullptr,
+        /*profile_marker=*/nullptr, iree_allocator_system()));
 
     EXPECT_EQ(published_target_address, 0x1004u);
     ASSERT_EQ(capture.pipeline_barrier_count, 3);

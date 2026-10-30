@@ -16,6 +16,30 @@
 namespace iree::hal::vulkan {
 namespace {
 
+TEST(VulkanBufferUsageTest, TransferTargetsSupportIndirectTimestampDelivery) {
+  for (const iree_hal_buffer_usage_t usage :
+       {IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE,
+        IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET,
+        IREE_HAL_BUFFER_USAGE_STORAGE_READ, IREE_HAL_BUFFER_USAGE_STORAGE_WRITE,
+        IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS}) {
+    SCOPED_TRACE(usage);
+    for (bool addresses : {false, true}) {
+      SCOPED_TRACE(addresses);
+      iree_hal_vulkan_features_t features = {};
+      if (addresses) {
+        features.general =
+            IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES;
+      }
+      const auto native =
+          iree_hal_vulkan_buffer_usage_from_hal(features, usage);
+      EXPECT_EQ(bool(native & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT),
+                addresses && usage != IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE);
+      EXPECT_EQ(bool(native & VK_BUFFER_USAGE_TRANSFER_DST_BIT),
+                usage == IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET);
+    }
+  }
+}
+
 class VulkanBufferTest : public ::testing::Test {
  protected:
   void TearDown() override { iree_hal_buffer_release(buffer_); }

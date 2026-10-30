@@ -229,8 +229,8 @@ class BdaSpirvTest : public CtsTestBase<> {
   }
 
   void CreateIndirectDispatchCommandBuffer(
-      uint32_t workgroup_count,
-      Ref<iree_hal_command_buffer_t>* command_buffer) {
+      uint32_t workgroup_count, Ref<iree_hal_command_buffer_t>* command_buffer,
+      bool timestamps = false) {
     iree_hal_buffer_ref_t binding_refs[2] = {
         iree_hal_make_indirect_buffer_ref(
             /*buffer_slot=*/0, /*offset=*/0,
@@ -244,22 +244,36 @@ class BdaSpirvTest : public CtsTestBase<> {
         .values = binding_refs,
     };
 
-    IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-                                       IREE_HAL_COMMAND_CATEGORY_DISPATCH,
-                                       /*binding_capacity=*/2,
-                                       command_buffer->out()));
+    IREE_ASSERT_OK(CreateCommandBuffer(
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+        IREE_HAL_COMMAND_CATEGORY_DISPATCH |
+            (timestamps ? IREE_HAL_COMMAND_CATEGORY_TRANSFER : 0),
+        /*binding_capacity=*/timestamps ? 3 : 2, command_buffer->out()));
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer->get()));
+    if (timestamps) {
+      IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+          command_buffer->get(), IREE_HAL_EXECUTION_STAGE_DISPATCH,
+          IREE_HAL_EXECUTION_STAGE_DISPATCH,
+          iree_hal_make_indirect_buffer_ref(2, 0, 8), 0));
+    }
     IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
         command_buffer->get(), executable_,
         iree_hal_executable_function_from_index(0),
         iree_hal_make_static_dispatch_config(workgroup_count, 1, 1),
         iree_const_byte_span_empty(), bindings, IREE_HAL_DISPATCH_FLAG_NONE));
+    if (timestamps) {
+      IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+          command_buffer->get(), IREE_HAL_EXECUTION_STAGE_DISPATCH,
+          IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+          iree_hal_make_indirect_buffer_ref(2, 8, 8), 0));
+    }
     IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer->get()));
   }
 
   static iree_hal_buffer_binding_table_t MakeBindingTable(
       iree_hal_buffer_t* input_buffer, iree_hal_buffer_t* output_buffer,
-      iree_hal_buffer_binding_t binding_table_entries[2]) {
+      iree_hal_buffer_binding_t* binding_table_entries,
+      iree_hal_buffer_t* timestamps = nullptr) {
     binding_table_entries[0] = {
         /*buffer=*/input_buffer,
         /*offset=*/0,
@@ -270,10 +284,39 @@ class BdaSpirvTest : public CtsTestBase<> {
         /*offset=*/0,
         /*length=*/iree_hal_buffer_byte_length(output_buffer),
     };
+    if (timestamps) {
+      binding_table_entries[2] = {timestamps, 0, 16};
+    }
     return {
-        .count = 2,
+        .count = timestamps ? 3u : 2u,
         .bindings = binding_table_entries,
     };
+  }
+
+  void CreateTimestampBuffer(Ref<iree_hal_buffer_t>* buffer) {
+    const auto* family =
+        iree_hal_queue_family_spec(iree_hal_queue_family(dispatch_queue_));
+    if (!(family->flags &
+          IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS)) {
+      return;
+    }
+    const uint64_t initial[] = {UINT64_MAX, UINT64_MAX};
+    IREE_ASSERT_OK(
+        CreateDeviceBufferWithData(initial, sizeof(initial), buffer->out()));
+  }
+
+  void CheckTimestamps(iree_hal_buffer_t* buffer) {
+    if (!buffer) {
+      return;
+    }
+    const auto ticks = ReadBufferData<uint64_t>(buffer);
+    ASSERT_EQ(ticks.size(), 2);
+    EXPECT_NE(ticks[0], UINT64_MAX);
+    EXPECT_NE(ticks[1], UINT64_MAX);
+    const auto* family =
+        iree_hal_queue_family_spec(iree_hal_queue_family(dispatch_queue_));
+    const uint64_t mask = UINT64_MAX >> (64 - family->timestamp_valid_bits);
+    EXPECT_LT((ticks[1] - ticks[0]) & mask, mask / 2);
   }
 
   void ExpectOutput(iree_hal_buffer_t* output_buffer) {
@@ -1098,19 +1141,22 @@ TEST_P(BdaSpirvTest, CommandBufferProfilingBypassesCachedNativeReplay) {
   Ref<iree_hal_buffer_t> output_buffer;
   CreateInputOutputBuffers(&input_buffer, &output_buffer);
 
+  Ref<iree_hal_buffer_t> timestamps;
+  CreateTimestampBuffer(&timestamps);
   Ref<iree_hal_command_buffer_t> command_buffer;
   CreateIndirectDispatchCommandBuffer(/*workgroup_count=*/kElementCount,
-                                      &command_buffer);
+                                      &command_buffer, timestamps != nullptr);
 
-  iree_hal_buffer_binding_t binding_table_entries[2];
-  iree_hal_buffer_binding_table_t binding_table = MakeBindingTable(
-      input_buffer.get(), output_buffer.get(), binding_table_entries);
+  iree_hal_buffer_binding_t binding_table_entries[3];
+  iree_hal_buffer_binding_table_t binding_table =
+      MakeBindingTable(input_buffer.get(), output_buffer.get(),
+                       binding_table_entries, timestamps);
 
   TestProfileSink sink = {};
   TestProfileSinkInitialize(&sink);
   sink.expected_dispatch_flags =
       IREE_HAL_PROFILE_DISPATCH_EVENT_FLAG_COMMAND_BUFFER;
-  sink.expected_dispatch_command_indices = {0};
+  sink.expected_dispatch_command_indices = {timestamps ? 1u : 0u};
   sink.expected_workgroup_count[0] = kElementCount;
   sink.expected_workgroup_count[1] = 1;
   sink.expected_workgroup_count[2] = 1;
@@ -1131,6 +1177,7 @@ TEST_P(BdaSpirvTest, CommandBufferProfilingBypassesCachedNativeReplay) {
 
   ExecuteCommandBufferAndWait(command_buffer.get(), binding_table);
   ExpectOutput(output_buffer.get());
+  CheckTimestamps(timestamps);
 
   IREE_ASSERT_OK(iree_hal_device_profiling_flush(device_));
   IREE_ASSERT_OK(profiling.End());
@@ -1650,13 +1697,16 @@ TEST_P(BdaSpirvReplayCacheTest, CommandBufferReusesCachedNativeReplay) {
   Ref<iree_hal_buffer_t> output_buffer;
   CreateInputOutputBuffers(&input_buffer, &output_buffer);
 
+  Ref<iree_hal_buffer_t> timestamps;
+  CreateTimestampBuffer(&timestamps);
   Ref<iree_hal_command_buffer_t> command_buffer;
   CreateIndirectDispatchCommandBuffer(/*workgroup_count=*/kElementCount,
-                                      &command_buffer);
+                                      &command_buffer, timestamps != nullptr);
 
-  iree_hal_buffer_binding_t binding_table_entries[2];
-  iree_hal_buffer_binding_table_t binding_table = MakeBindingTable(
-      input_buffer.get(), output_buffer.get(), binding_table_entries);
+  iree_hal_buffer_binding_t binding_table_entries[3];
+  iree_hal_buffer_binding_table_t binding_table =
+      MakeBindingTable(input_buffer.get(), output_buffer.get(),
+                       binding_table_entries, timestamps);
 
   const uint64_t initial_hit_count = NativeReplayCacheStats().hit_count;
   const uint64_t initial_miss_count = NativeReplayCacheStats().miss_count;
@@ -1666,8 +1716,14 @@ TEST_P(BdaSpirvReplayCacheTest, CommandBufferReusesCachedNativeReplay) {
 
   ExecuteCommandBufferAndWait(command_buffer.get(), binding_table);
   ExpectOutput(output_buffer.get());
+  CheckTimestamps(timestamps);
+  if (timestamps) {
+    const uint64_t cleared[] = {UINT64_MAX, UINT64_MAX};
+    IREE_ASSERT_OK(UploadBufferData(cleared, timestamps, 0, sizeof(cleared)));
+  }
   ExecuteCommandBufferAndWait(command_buffer.get(), binding_table);
   ExpectOutput(output_buffer.get());
+  CheckTimestamps(timestamps);
 
   EXPECT_GE(NativeReplayCacheStats().miss_count - initial_miss_count, 1);
   EXPECT_GE(NativeReplayCacheStats().create_count - initial_create_count, 1);
@@ -1841,16 +1897,22 @@ TEST_P(BdaSpirvReplayCacheTest, ConcurrentExecutionsForkCachedNativeReplay) {
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
       fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
+  Ref<iree_hal_buffer_t> timestamps_a;
+  Ref<iree_hal_buffer_t> timestamps_b;
+  CreateTimestampBuffer(&timestamps_a);
+  CreateTimestampBuffer(&timestamps_b);
   Ref<iree_hal_command_buffer_t> command_buffer;
   CreateIndirectDispatchCommandBuffer(kLargeDispatchElementCount,
-                                      &command_buffer);
+                                      &command_buffer, timestamps_a != nullptr);
 
-  iree_hal_buffer_binding_t binding_table_a_entries[2];
-  iree_hal_buffer_binding_table_t binding_table_a = MakeBindingTable(
-      input_buffer.get(), output_a_buffer.get(), binding_table_a_entries);
-  iree_hal_buffer_binding_t binding_table_b_entries[2];
-  iree_hal_buffer_binding_table_t binding_table_b = MakeBindingTable(
-      input_buffer.get(), output_b_buffer.get(), binding_table_b_entries);
+  iree_hal_buffer_binding_t binding_table_a_entries[3];
+  iree_hal_buffer_binding_table_t binding_table_a =
+      MakeBindingTable(input_buffer.get(), output_a_buffer.get(),
+                       binding_table_a_entries, timestamps_a);
+  iree_hal_buffer_binding_t binding_table_b_entries[3];
+  iree_hal_buffer_binding_table_t binding_table_b =
+      MakeBindingTable(input_buffer.get(), output_b_buffer.get(),
+                       binding_table_b_entries, timestamps_b);
 
   const uint64_t initial_create_count = NativeReplayCacheStats().create_count;
   const uint64_t initial_fork_count = NativeReplayCacheStats().fork_count;
@@ -1871,6 +1933,9 @@ TEST_P(BdaSpirvReplayCacheTest, ConcurrentExecutionsForkCachedNativeReplay) {
       execute_b_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   ExpectFilledOutputPrefix(output_a_buffer.get(), /*expected_value=*/12);
   ExpectFilledOutputPrefix(output_b_buffer.get(), /*expected_value=*/12);
+
+  CheckTimestamps(timestamps_a);
+  CheckTimestamps(timestamps_b);
 
   EXPECT_GE(NativeReplayCacheStats().create_count - initial_create_count, 2);
   EXPECT_GE(NativeReplayCacheStats().fork_count - initial_fork_count, 1);
