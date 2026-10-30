@@ -22,7 +22,7 @@ namespace loom::command {
 // Dependent view dimensions and encodings are projected into specializations;
 // the view handle remains a launch binding.
 template <auto Program, class... Args>
-[[loom::op("command.program.launch")]] void launch(Args... args);
+[[loom::op("command.launch")]] void launch(Args... args);
 
 // Resolves one immutable named parameter as a typed view. Dynamic extent and
 // encoding values, when present in the result type, precede the key pattern;

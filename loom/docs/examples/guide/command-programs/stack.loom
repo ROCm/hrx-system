@@ -4,7 +4,7 @@ config.decl @model.layer_count : %value: index where [range(%value, 1, 256)]
 
 kernel.decl @project_block(%element_count: index) launch(%weights: view<8xf32>, %input: buffer, %output: buffer)
 
-command.program.def public @layer_stack(%element_count: index) launch(%parameters: buffer, %state: buffer) where [range(%element_count, 1, 8)] {
+command.def public @layer_stack(%element_count: index) launch(%parameters: buffer, %state: buffer) where [range(%element_count, 1, 8)] {
   %layer_count = config.get @model.layer_count : index
   %first_layer = index.constant 0 : index
   %layer_step = index.constant 1 : index

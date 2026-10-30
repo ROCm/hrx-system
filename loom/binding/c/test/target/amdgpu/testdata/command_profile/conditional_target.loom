@@ -20,7 +20,7 @@ kernel.def target(@cdna) @write_cdna() {
   kernel.return
 }
 
-command.program.def public target(@device) @dispatch() launch() {
+command.def public target(@device) @dispatch() launch() {
   %mode = config.get @test.use_rdna : index
   %c0 = index.constant 0 : index
   %use_rdna = index.cmp ne, %mode, %c0 : index

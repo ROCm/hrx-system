@@ -155,22 +155,22 @@ static iree_status_t loom_command_verify_program_contract(
   return iree_ok_status();
 }
 
-iree_status_t loom_command_program_def_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter) {
+iree_status_t loom_command_def_verify(const loom_module_t* module,
+                                      const loom_op_t* op,
+                                      iree_diagnostic_emitter_t emitter) {
   return loom_command_verify_program_contract(module, op, emitter);
 }
 
-iree_status_t loom_command_program_decl_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter) {
+iree_status_t loom_command_decl_verify(const loom_module_t* module,
+                                       const loom_op_t* op,
+                                       iree_diagnostic_emitter_t emitter) {
   return loom_command_verify_program_contract(module, op, emitter);
 }
 
-iree_status_t loom_command_program_launch_verify(
-    const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter) {
-  const loom_symbol_ref_t callee = loom_command_program_launch_callee(op);
+iree_status_t loom_command_launch_verify(const loom_module_t* module,
+                                         const loom_op_t* op,
+                                         iree_diagnostic_emitter_t emitter) {
+  const loom_symbol_ref_t callee = loom_command_launch_callee(op);
   const loom_op_t* definition_op =
       module->symbols.entries[callee.symbol_id].defining_op;
   loom_func_like_t program = loom_func_like_const_cast(module, definition_op);
@@ -190,14 +190,14 @@ iree_status_t loom_command_program_launch_verify(
   const uint16_t binding_count = argument_count - specialization_count;
 
   const loom_value_slice_t specializations =
-      loom_command_program_launch_specializations(op);
+      loom_command_launch_specializations(op);
   if (specializations.count != specialization_count) {
     return loom_command_emit_count_mismatch(
         emitter, op, definition_op, IREE_SV("specialization"),
         specializations.count, IREE_SV("program specialization argument"),
         specialization_count);
   }
-  const loom_value_slice_t bindings = loom_command_program_launch_bindings(op);
+  const loom_value_slice_t bindings = loom_command_launch_bindings(op);
   if (bindings.count != binding_count) {
     return loom_command_emit_count_mismatch(
         emitter, op, definition_op, IREE_SV("binding"), bindings.count,

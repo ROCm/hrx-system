@@ -44,12 +44,12 @@ kernel.def target(@device) @scale() {
   kernel.return
 }
 
-command.program.def public @produce() launch(%input: buffer, %output: buffer) {
+command.def public @produce() launch(%input: buffer, %output: buffer) {
   kernel.launch @descriptors(%output) : (buffer)
   command.return
 }
 
-command.program.def public @consume() launch(%input: buffer, %output: buffer) {
+command.def public @consume() launch(%input: buffer, %output: buffer) {
   kernel.launch @scale(%input, %output) : (buffer, buffer)
   command.return
 }

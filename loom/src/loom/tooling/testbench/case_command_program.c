@@ -607,7 +607,7 @@ static iree_status_t loom_testbench_case_command_program_build_impl(
   loom_builder_initialize(build->module, &build->module->arena,
                           loom_module_block(build->module), &build->builder);
   loom_op_t* program_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_command_program_def_build(
+  IREE_RETURN_IF_ERROR(loom_command_def_build(
       &build->builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0,
       loom_symbol_ref_null(), root_ref,
       /*specializations_types=*/NULL,
@@ -622,7 +622,7 @@ static iree_status_t loom_testbench_case_command_program_build_impl(
   IREE_ASSERT_EQ(wrapper_argument_count, build->binding_count);
 
   const loom_builder_ip_t module_ip = loom_builder_enter_region(
-      &build->builder, program_op, loom_command_program_def_body(program_op));
+      &build->builder, program_op, loom_command_def_body(program_op));
   IREE_RETURN_IF_ERROR(
       loom_testbench_case_command_program_prepare_values(build));
   IREE_RETURN_IF_ERROR(

@@ -35,7 +35,7 @@ kernel.def @cohort_kernel() {
   kernel.return
 }
 
-command.program.def @cohort_sequence() launch(%output: buffer) {
+command.def @cohort_sequence() launch(%output: buffer) {
   %narrow_width = index.constant 8 : index
   %wide_width = index.constant 16 : index
   %unused_width = index.constant 37 : index

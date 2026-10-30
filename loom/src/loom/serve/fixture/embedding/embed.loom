@@ -97,7 +97,7 @@ kernel.def target(@fixture_target) @project() {
   kernel.return
 }
 
-command.program.def public @embed() launch(%input: buffer, %output: buffer) {
+command.def public @embed() launch(%input: buffer, %output: buffer) {
   %units = config.get @fixture.units : index
   %c16 = index.constant 16 : offset
   %length = index.scale %units, %c16 : index, offset -> offset

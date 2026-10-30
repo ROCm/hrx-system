@@ -100,7 +100,7 @@ kernel.def target(@fixture_target) @normalize() {
   kernel.return
 }
 
-command.program.def public @decide() launch(%input: buffer, %output: buffer) {
+command.def public @decide() launch(%input: buffer, %output: buffer) {
   %units = config.get @fixture.units : index
   %c4 = index.constant 4 : offset
   %bytes = index.scale %units, %c4 : index, offset -> offset

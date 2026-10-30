@@ -29,7 +29,7 @@ template.def<@test.decode_schedule> @decode_many(%token_count: index, %storage: 
   template.return
 }
 
-command.program.def public @selected_schedule() launch(%storage: buffer) {
+command.def public @selected_schedule() launch(%storage: buffer) {
   %token_count = index.constant 1 : index
   template.apply<@test.decode_schedule>(%token_count, %storage) : (index, buffer)
   command.return
@@ -68,7 +68,7 @@ template.def<@test.decode_schedule> @decode_many(%token_count: index, %storage: 
   template.return
 }
 
-command.program.def public @exact_schedule() launch(%storage: buffer) {
+command.def public @exact_schedule() launch(%storage: buffer) {
   %token_count = index.constant 8 : index
   template.call @decode_many(%token_count, %storage) : (index, buffer)
   command.return
@@ -110,7 +110,7 @@ template.def<@test.schedule> priority(1) @general(%count: index) {
   template.return
 }
 
-command.program.def public @fallback_schedule(%count: index) launch() {
+command.def public @fallback_schedule(%count: index) launch() {
   template.apply<@test.schedule>(%count) : (index)
   command.return
 }
@@ -133,7 +133,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 template.decl @test.missing_schedule(%storage: buffer)
 
-command.program.def public @unresolved_schedule() launch(%storage: buffer) {
+command.def public @unresolved_schedule() launch(%storage: buffer) {
   // ERROR@+1: LOWERING/045 {op_name="template.apply", phase_name="select-templates", contract_key="test.missing_schedule", failure_code="no_provider"}
   template.apply<@test.missing_schedule>(%storage) : (buffer)
   command.return
@@ -151,7 +151,7 @@ template.def<@test.schedule> @several(%count: index) where [range(%count, 2, 8)]
   template.return
 }
 
-command.program.def public @invalid_schedule() launch() {
+command.def public @invalid_schedule() launch() {
   %out_of_range = index.constant 1 : index
   // ERROR@+1: LOWERING/045 {op_name="template.call", phase_name="select-templates", contract_key="test.schedule", failure_code="exact_call_rejected"}
   template.call @several(%out_of_range) : (index)
@@ -171,7 +171,7 @@ kernel.def @configured(%groups: index) {
   kernel.return
 }
 
-command.program.def @stage(%groups: index) launch(%storage: buffer) {
+command.def @stage(%groups: index) launch(%storage: buffer) {
   kernel.launch @configured[%groups](%storage) : [index](buffer)
   command.return
 }
@@ -181,21 +181,21 @@ template.decl @test.composed(%wide: i1, %storage: buffer)
 template.def<@test.composed> @composed(%wide: i1, %storage: buffer) {
   scf.if %wide {
     %c8 = index.constant 8 : index
-    command.program.launch @stage[%c8](%storage) : [index](buffer)
+    command.launch @stage[%c8](%storage) : [index](buffer)
   } else {
     %c1 = index.constant 1 : index
-    command.program.launch @stage[%c1](%storage) : [index](buffer)
+    command.launch @stage[%c1](%storage) : [index](buffer)
   }
   template.return
 }
 
-command.program.def public @narrow() launch(%storage: buffer) {
+command.def public @narrow() launch(%storage: buffer) {
   %wide = scalar.constant false : i1
   template.apply<@test.composed>(%wide, %storage) : (i1, buffer)
   command.return
 }
 
-command.program.def public @wide() launch(%storage: buffer) {
+command.def public @wide() launch(%storage: buffer) {
   %wide = scalar.constant true : i1
   template.call @composed(%wide, %storage) : (i1, buffer)
   command.return
@@ -233,7 +233,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 kernel.entry.decl @step(%input: buffer, %output: buffer)
 
-command.program.def @pair() launch(%input: buffer, %temporary: buffer, %output: buffer) {
+command.def @pair() launch(%input: buffer, %temporary: buffer, %output: buffer) {
   %c1 = index.constant 1 : index
   kernel.dispatch @step[%c1](%input, %temporary) : [index](buffer, buffer)
   kernel.dispatch @step[%c1](%temporary, %output) : [index](buffer, buffer)
@@ -243,19 +243,19 @@ command.program.def @pair() launch(%input: buffer, %temporary: buffer, %output: 
 template.decl @test.pair(%input: buffer, %temporary: buffer, %output: buffer)
 
 template.def<@test.pair> @pair_template(%input: buffer, %temporary: buffer, %output: buffer) {
-  command.program.launch @pair(%input, %temporary, %output) : (buffer, buffer, buffer)
+  command.launch @pair(%input, %temporary, %output) : (buffer, buffer, buffer)
   template.return
 }
 
-command.program.def @wrapper() launch(%input: buffer, %temporary: buffer, %output: buffer) {
+command.def @wrapper() launch(%input: buffer, %temporary: buffer, %output: buffer) {
   template.apply<@test.pair>(%input, %temporary, %output) : (buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @joined() launch(%input: buffer, %left_temporary: buffer, %left: buffer, %right_temporary: buffer, %right: buffer) {
+command.def public @joined() launch(%input: buffer, %left_temporary: buffer, %left: buffer, %right_temporary: buffer, %right: buffer) {
   command.concurrent {
-    command.program.launch @pair(%input, %left_temporary, %left) : (buffer, buffer, buffer)
-    command.program.launch @wrapper(%input, %right_temporary, %right) : (buffer, buffer, buffer)
+    command.launch @pair(%input, %left_temporary, %left) : (buffer, buffer, buffer)
+    command.launch @wrapper(%input, %right_temporary, %right) : (buffer, buffer, buffer)
   }
   %c1 = index.constant 1 : index
   kernel.dispatch @step[%c1](%left, %right) : [index](buffer, buffer)
@@ -290,8 +290,8 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 kernel.entry.decl @step()
 
-command.program.def @recursive() launch() {
-  command.program.launch @recursive() : ()
+command.def @recursive() launch() {
+  command.launch @recursive() : ()
   command.return
 }
 
@@ -303,11 +303,11 @@ template.def<@test.choice> @single(%count: index) where [eq(%count, 1)] {
 }
 
 template.def<@test.choice> @other(%count: index) where [eq(%count, 2)] {
-  command.program.launch @recursive() : ()
+  command.launch @recursive() : ()
   template.return
 }
 
-command.program.def public @selected() launch() {
+command.def public @selected() launch() {
   %c1 = index.constant 1 : index
   template.apply<@test.choice>(%c1) : (index)
   command.return

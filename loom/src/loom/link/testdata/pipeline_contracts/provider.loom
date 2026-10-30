@@ -8,7 +8,7 @@ pipeline.def<kernel> public retain target(@array) @resident(%width: index) run(%
   func.call @implementation_only(%width) : (index)
 }
 
-command.program.def public @embed(%width: index) launch(%checkpoint: buffer, %input: buffer, %output: buffer) {
+command.def public @embed(%width: index) launch(%checkpoint: buffer, %input: buffer, %output: buffer) {
   %offset = index.constant 0 : offset
   %parameters = buffer.view %checkpoint[%offset] : buffer -> view<[%width]xi8>
   kernel.launch @resident[%width](%parameters, %input, %output) : [index](view<[%width]xi8>, buffer, buffer)

@@ -31,7 +31,7 @@ Four boundaries keep the feature composable:
 
 ## Source Model
 
-`command.program.def` divides its signature into two roles:
+`command.def` divides its signature into two roles:
 
 - Specialization arguments precede `launch`. They are program-invocation
   values whose facts participate in staged specialization. Uses that control
@@ -64,7 +64,7 @@ kernel.def @project(%token_count: index) {
   kernel.return
 }
 
-command.program.def public @attention(%token_count: index) launch(
+command.def public @attention(%token_count: index) launch(
     %parameters: buffer,
     %input: buffer,
     %query: buffer,

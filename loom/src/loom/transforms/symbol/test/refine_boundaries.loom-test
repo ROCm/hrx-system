@@ -1482,22 +1482,22 @@ func.def public @source_invoker(%value: i32, %unused: i32) -> (i32) {
 
 // Command programs retain their specialization/binding partition even when
 // the body does not use those inputs. Their launch edges are not semantic calls.
-command.program.def @unused_program_inputs(%extent: index) launch(%storage: buffer) {
+command.def @unused_program_inputs(%extent: index) launch(%storage: buffer) {
   command.return
 }
 
-command.program.def public @launch_program(%extent: index) launch(%storage: buffer) {
-  command.program.launch @unused_program_inputs[%extent](%storage) : [index](buffer)
+command.def public @launch_program(%extent: index) launch(%storage: buffer) {
+  command.launch @unused_program_inputs[%extent](%storage) : [index](buffer)
   command.return
 }
 
 // ----
-command.program.def @unused_program_inputs(%extent: index) launch(%storage: buffer) {
+command.def @unused_program_inputs(%extent: index) launch(%storage: buffer) {
   command.return
 }
 
-command.program.def public @launch_program(%extent: index) launch(%storage: buffer) {
-  command.program.launch @unused_program_inputs[%extent](%storage) : [index](buffer)
+command.def public @launch_program(%extent: index) launch(%storage: buffer) {
+  command.launch @unused_program_inputs[%extent](%storage) : [index](buffer)
   command.return
 }
 

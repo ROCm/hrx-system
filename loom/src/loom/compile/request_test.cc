@@ -262,7 +262,7 @@ func.decl @function()
 kernel.decl @configured() launch()
 kernel.entry.decl @physical()
 pipeline.decl<kernel> @pipeline() run()
-command.program.decl @command() launch()
+command.decl @command() launch()
 )");
   const iree_string_view_t roots[] = {
       IREE_SV("function"), IREE_SV("configured"), IREE_SV("physical"),
@@ -718,7 +718,7 @@ kernel.def @Kernel123() {
 } launch() {
   kernel.return
 }
-command.program.def public @Command123() launch() {
+command.def public @Command123() launch() {
   kernel.launch @Kernel123() : ()
   command.return
 }
@@ -734,7 +734,7 @@ command.program.def public @Command123() launch() {
 
 TEST_F(CompileRequestTest, RejectsCommandProgramRoots) {
   ModulePtr module = Parse(R"(
-command.program.def public @Command123() launch() {
+command.def public @Command123() launch() {
   command.return
 }
 )");
@@ -791,7 +791,7 @@ kernel.def @Kernel123() {
 } launch() {
   kernel.return
 }
-command.program.def public @Command123() launch() {
+command.def public @Command123() launch() {
   command.return
 }
 )");

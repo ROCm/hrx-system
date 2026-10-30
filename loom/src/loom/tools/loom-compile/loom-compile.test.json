@@ -146,7 +146,7 @@
           "--output={tmp}/command.bin"
         ],
         "stdin": {
-          "text": "command.program.def public @program() launch() {\n  command.return\n}\n"
+          "text": "command.def public @program() launch() {\n  command.return\n}\n"
         }
       },
       "exit": 1,
@@ -166,7 +166,7 @@
         "tool": "loom-compile",
         "args": ["--output={tmp}/mixed.bin"],
         "stdin": {
-          "text": "kernel.def @kernel() {\n  %one = index.constant 1 : index\n  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index\n} launch() {\n  kernel.return\n}\ncommand.program.def public @program() launch() {\n  command.return\n}\n"
+          "text": "kernel.def @kernel() {\n  %one = index.constant 1 : index\n  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index\n} launch() {\n  kernel.return\n}\ncommand.def public @program() launch() {\n  command.return\n}\n"
         }
       },
       "exit": 1,

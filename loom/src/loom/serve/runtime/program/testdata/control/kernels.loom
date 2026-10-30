@@ -28,7 +28,7 @@ kernel.def @geometry_fill_tiles(%count: index) {
   kernel.return
 }
 
-command.program.def public @geometry_fill() launch(%output: buffer) {
+command.def public @geometry_fill() launch(%output: buffer) {
   %count = index.constant 127 : index
   kernel.launch @geometry_fill_tiles[%count](%output) : [index](buffer)
   command.return
@@ -92,7 +92,7 @@ kernel.def @decode_commit_token() {
 }
 
 // Generic launch arguments retain whole-buffer ranges in the portable artifact.
-command.program.def public @prefill_to_decode() launch(%control: buffer, %token_ids: buffer, %progress: buffer) {
+command.def public @prefill_to_decode() launch(%control: buffer, %token_ids: buffer, %progress: buffer) {
   command.serial {
     kernel.launch @prefill_finish_control(%control, %token_ids, %progress) : (buffer, buffer, buffer)
     kernel.launch @decode_commit_token(%control, %token_ids, %progress) : (buffer, buffer, buffer)
@@ -100,7 +100,7 @@ command.program.def public @prefill_to_decode() launch(%control: buffer, %token_
   command.return
 }
 
-command.program.def public @decode_transition() launch(%control: buffer, %token_ids: buffer, %progress: buffer) {
+command.def public @decode_transition() launch(%control: buffer, %token_ids: buffer, %progress: buffer) {
   %c0 = index.constant 0 : offset
   %control_view = buffer.view %control[%c0] : buffer -> view<3xi32>
   %token_ids_view = buffer.view %token_ids[%c0] : buffer -> view<129xi32>
@@ -178,7 +178,7 @@ kernel.def @continuation_consume(%schedule: buffer, %state: buffer) {
   kernel.return
 }
 
-command.program.def public @device_continuation() launch(%schedule: buffer, %state: buffer) {
+command.def public @device_continuation() launch(%schedule: buffer, %state: buffer) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c8 = index.constant 8 : index

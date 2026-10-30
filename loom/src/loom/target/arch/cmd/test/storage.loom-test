@@ -32,7 +32,7 @@ kernel.def @sum_three() {
   kernel.return
 }
 
-command.program.def public @attention_wave() launch(%source: buffer, %target: buffer) {
+command.def public @attention_wave() launch(%source: buffer, %target: buffer) {
   %branch_bytes = index.constant 64 : offset
   %post_bytes = index.constant 256 : offset
   %unused_bytes = index.constant 4096 : offset
@@ -83,7 +83,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 kernel.entry.decl @consume(%storage: buffer)
 
-command.program.def public @extend_retired_tail() launch() {
+command.def public @extend_retired_tail() launch() {
   %workgroup_count = index.constant 1 : index
   %small_bytes = index.constant 64 : offset
   %large_bytes = index.constant 80 : offset
@@ -116,7 +116,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 kernel.entry.decl @consume(%storage: buffer)
 
-command.program.def public @retain_live_tail() launch() {
+command.def public @retain_live_tail() launch() {
   %workgroup_count = index.constant 1 : index
   %small_bytes = index.constant 64 : offset
   %large_bytes = index.constant 80 : offset
@@ -151,7 +151,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 kernel.entry.decl @consume(%storage: buffer)
 
-command.program.def public @reuse_tail_alignment_padding() launch() {
+command.def public @reuse_tail_alignment_padding() launch() {
   %workgroup_count = index.constant 1 : index
   %prefix_bytes = index.constant 24 : offset
   %retired_bytes = index.constant 56 : offset
@@ -207,7 +207,7 @@ kernel.def @combine() {
   kernel.return
 }
 
-command.program.def public @parameterized() launch(%parameters: buffer, %target: buffer) {
+command.def public @parameterized() launch(%parameters: buffer, %target: buffer) {
   %layer = index.constant 3 : index
   %lhs = command.parameter %parameters, "blk.{}.lhs"[%layer] : view<3xi32>
   %rhs = command.parameter %parameters, "shared.rhs" : view<4xi32>
@@ -240,7 +240,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 kernel.entry.decl @consume(%first: view<2xbf16>, %middle: view<1x4xf32>, %last: view<1x4xf32>, %adapter: view<1x4xbf16>, %input: view<1x4xbf16>)
 
-command.program.def public @parameter_views() launch(%parameters: buffer, %adapter: buffer, %input: buffer) {
+command.def public @parameter_views() launch(%parameters: buffer, %adapter: buffer, %input: buffer) {
   %first = command.parameter %parameters, "first" : view<4xbf16>
   %first_part = view.subview %first[0] : view<4xbf16> -> view<2xbf16>
   %table = command.parameter %parameters, "table" : view<6x4xf32>
@@ -292,7 +292,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 kernel.entry.decl @consume(%prefix: view<4xi8>, %base: buffer, %projected_base: buffer, %bounded: view<2xi32>, %derived: view<2xi64>, %tail: view<4xi8>)
 
-command.program.def public @parameter_bases() launch(%parameters: buffer) {
+command.def public @parameter_bases() launch(%parameters: buffer) {
   %prefix = command.parameter %parameters, "prefix" : view<4xi8>
   %small = command.parameter %parameters, "table" : view<2xi32>
   %large = command.parameter %parameters, "table" : view<64xi64>
@@ -334,7 +334,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 kernel.entry.decl @consume(%prefix: view<1073741824xi32>, %base: buffer, %bounded: view<8xi32>)
 
-command.program.def public @wide_parameter_base() launch(%parameters: buffer) {
+command.def public @wide_parameter_base() launch(%parameters: buffer) {
   %prefix = command.parameter %parameters, "prefix" : view<1073741824xi32>
   %weight = command.parameter %parameters, "weight" : view<8xi32>
   %base = command.parameter.base %weight : view<8xi32> -> buffer
@@ -375,7 +375,7 @@ kernel.def @read_first() {
   kernel.return
 }
 
-command.program.def public @parameter_strided_view() launch(%parameters: buffer, %output: buffer) {
+command.def public @parameter_strided_view() launch(%parameters: buffer, %output: buffer) {
   %layout = encoding.layout.strided [8, 1] : encoding<layout>
   %table = command.parameter %parameters, "strided" : view<6x8xi32, %layout>
   %outer, %outer_layout = view.subview %table[1, 1] : view<6x8xi32, %layout> -> view<4x6xi32, %outer_layout>
@@ -411,7 +411,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 kernel.entry.decl @counted()
 
-command.program.def public @parameter_count_view() launch(%parameters: buffer) {
+command.def public @parameter_count_view() launch(%parameters: buffer) {
   %table = command.parameter %parameters, "counts" : view<6xi32>
   %counts = view.subview %table[3] : view<6xi32> -> view<3xi32>
   kernel.dispatch @counted[%counts]() : [view<3xi32>]()
@@ -440,19 +440,19 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 kernel.entry.decl @project(%weight: view<4xf32>, %state: buffer)
 
-command.program.def @projection() launch(%parameters: buffer, %state: buffer) {
+command.def @projection() launch(%parameters: buffer, %state: buffer) {
   %weight = command.parameter %parameters, "shared.weight" : view<4xf32>
   %c1 = index.constant 1 : index
   kernel.dispatch @project[%c1](%weight, %state) : [index](view<4xf32>, buffer)
   command.return
 }
 
-command.program.def public @rounds() launch(%parameters: buffer, %state: buffer) {
+command.def public @rounds() launch(%parameters: buffer, %state: buffer) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c3 = index.constant 3 : index
   scf.for %round = [%c0 to %c3 step %c1] unroll {
-    command.program.launch @projection(%parameters, %state) : (buffer, buffer)
+    command.launch @projection(%parameters, %state) : (buffer, buffer)
   }
   command.return
 }
@@ -487,7 +487,7 @@ kernel.entry.decl @tail(%weight: view<2xf32>)
 
 kernel.entry.decl @bytes(%weight: view<4xi8>)
 
-command.program.def public @shared_views() launch(%base: buffer, %adapter: buffer) {
+command.def public @shared_views() launch(%base: buffer, %adapter: buffer) {
   %c1 = index.constant 1 : index
   %layer = index.constant 3 : index
   %anchor = command.parameter %base, "anchor" : view<4xi8>

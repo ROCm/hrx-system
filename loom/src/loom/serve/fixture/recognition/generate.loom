@@ -63,7 +63,7 @@ kernel.def target(@recognition_target) @accumulate() {
   kernel.return
 }
 
-command.program.def public @recognize() launch(%work: buffer, %requests: buffer, %conditioning: buffer, %streams: buffer, %output: buffer) {
+command.def public @recognize() launch(%work: buffer, %requests: buffer, %conditioning: buffer, %streams: buffer, %output: buffer) {
   kernel.launch @accumulate(%work, %requests, %conditioning, %streams, %output) : (buffer, buffer, buffer, buffer, buffer)
   command.return
 }

@@ -230,7 +230,7 @@ generation, fixtures, requirements, expectations, and benchmark records.
 
 ## Command programs move the same model upward
 
-A [`command.program.def`](../reference/dialects/command/ops/program-def.md)
+A [`command.def`](../reference/dialects/command/ops/def.md)
 composes kernel launches, parameter views, resources, and serial or concurrent
 schedule regions into a reusable subgraph. Its leading specialization
 arguments participate in staged specialization and deterministic launch-count

@@ -319,7 +319,7 @@ kernel.def target(@second_device) @second() {
   kernel.return
 }
 
-command.program.def public @dispatch() launch() {
+command.def public @dispatch() launch() {
   kernel.launch @first() : ()
   kernel.launch @second() : ()
   command.return
@@ -475,7 +475,7 @@ kernel.def @record_subgroup_size() {
   kernel.return
 }
 
-command.program.def public @dispatch() launch() {
+command.def public @dispatch() launch() {
   kernel.launch @record_subgroup_size() : ()
   command.return
 }
@@ -616,7 +616,7 @@ func.def inline @read_width() -> (index) {
   func.return %size : index
 }
 
-command.program.def public target(@shared) @dispatch() launch(%output: buffer) {
+command.def public target(@shared) @dispatch() launch(%output: buffer) {
   %groups = func.call pure @read_width() : () -> (index)
   kernel.launch @record[%groups](%output) : [index](buffer)
   command.return
@@ -771,7 +771,7 @@ kernel.def @entry() {
   kernel.return
 }
 
-command.program.def public @dispatch() launch() {
+command.def public @dispatch() launch() {
   kernel.launch @entry() : ()
   command.return
 }

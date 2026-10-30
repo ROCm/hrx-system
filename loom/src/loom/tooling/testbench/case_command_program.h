@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 typedef struct loom_testbench_case_command_program_t {
-  // Generated private command.program.def symbol.
+  // Generated private command.def symbol.
   loom_symbol_ref_t root_ref;
   // Case value IDs providing storage for command bindings in signature order.
   // Tensor aliases are represented by their ultimate authored storage root.

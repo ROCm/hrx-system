@@ -121,7 +121,7 @@ The runner checks each selected configuration/trial coordinate once, before
 timing. Aliases share that check, and interleaved comparisons check each
 candidate once, not once per timing window. Failed expectations or unhandled
 device errors suppress that candidate's score. Both individual kernels and
-complete `command.program.def` subjects use this policy. Target compilation is
+complete `command.def` subjects use this policy. Target compilation is
 shared between checking and timing, and oracle storage is never replicated
 across the timing ring.
 

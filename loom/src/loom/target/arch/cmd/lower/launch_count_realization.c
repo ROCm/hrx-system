@@ -609,9 +609,9 @@ static loom_symbol_ref_t loom_cmd_launch_count_dispatch_target(
 
 static bool loom_cmd_launch_count_has_serial_parent(const loom_op_t* dispatch) {
   const loom_op_t* parent = dispatch->parent_op;
-  return parent != NULL && (loom_command_program_def_isa(parent) ||
-                            loom_command_serial_isa(parent) ||
-                            loom_kernel_launch_serial_isa(parent));
+  return parent != NULL &&
+         (loom_command_def_isa(parent) || loom_command_serial_isa(parent) ||
+          loom_kernel_launch_serial_isa(parent));
 }
 
 static bool loom_cmd_launch_count_can_cross_operations(

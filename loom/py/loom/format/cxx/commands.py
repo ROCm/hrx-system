@@ -580,7 +580,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
     def _render_command_op(self, operation: Operation) -> tuple[str, ...] | None:
         if operation.name in {"command.return", "command.yield"}:
             return ()
-        if operation.name == "command.program.launch":
+        if operation.name == "command.launch":
             return self._render_command_launch(operation)
         if operation.name == "kernel.launch":
             return self._render_kernel_launch(operation)

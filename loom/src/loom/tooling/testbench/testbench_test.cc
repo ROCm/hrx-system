@@ -367,7 +367,7 @@ test.func @generate_input(%input: i64) -> (i64) {
 
 kernel.decl @update(%workload: index) launch(%storage: buffer, %tail: buffer)
 
-command.program.decl @program(%configuration: index) launch(%storage: buffer)
+command.decl @program(%configuration: index) launch(%storage: buffer)
 
 pipeline.def @pipeline(%configuration: index) run(%storage: buffer) {
 }

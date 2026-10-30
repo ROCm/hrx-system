@@ -13,8 +13,8 @@ pipeline.def @ambiguous_memory(%column: index) run() {
 
 // ====
 
-command.program.def @command_memory() launch() {
-  // ERROR@+1: STRUCTURE/029 "pipeline.def" "command.program.def"
+command.def @command_memory() launch() {
+  // ERROR@+1: STRUCTURE/029 "pipeline.def" "command.def"
   %memory = pipeline.memory<workgroup>[0, 3] : pool
   command.return
 }
@@ -49,7 +49,7 @@ pipeline.def @typed_arguments(%width: index) run(%input: channel<tile<[%width]xf
 
 // ====
 
-// A reusable command product is authored with command.program.def; pipeline
+// A reusable command product is authored with command.def; pipeline
 // scope names the directly loadable kernel artifact boundary.
 // ERROR@+1: PARSE/017 "scope" "command"
 pipeline.def<command> @unsupported_command_scope() run() {

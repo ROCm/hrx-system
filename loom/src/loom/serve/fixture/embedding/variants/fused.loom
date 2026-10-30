@@ -2,7 +2,7 @@ kernel.decl @resident_embed() launch(%input: buffer, %output: buffer)
 
 // The fused embedding implementation satisfies the command ABI without a
 // private intermediate. It shares its native entry with direct dispatch.
-command.program.def public @embed() launch(%input: buffer, %output: buffer) {
+command.def public @embed() launch(%input: buffer, %output: buffer) {
   kernel.launch @resident_embed(%input, %output) : (buffer, buffer)
   command.return
 }

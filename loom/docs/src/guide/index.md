@@ -76,7 +76,7 @@ semantically because it is a guide.
 A reusable motif is usually a `func.def` or `template.def`: it carries an
 algorithm or physical representation contract but no launch ABI. A concrete
 `kernel.def` composes motifs behind a workload and launch contract. A
-`command.program.def` composes kernels behind a reusable scheduling and resource
+`command.def` composes kernels behind a reusable scheduling and resource
 contract.
 
 This layering is also the library organization model. Format decoders,

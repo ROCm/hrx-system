@@ -5,7 +5,7 @@ kernel.def @entry(%groups: index) {
   kernel.return
 }
 
-command.program.def public @root() launch(%data: buffer) {
+command.def public @root() launch(%data: buffer) {
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
   kernel.launch @entry[%c1](%data) : [index](buffer)

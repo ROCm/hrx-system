@@ -158,18 +158,18 @@ def test_projects_selected_function_roots_without_unrelated_kernels() -> None:
 
 def test_projects_command_program_signatures_and_schedule_regions() -> None:
     source = """\
-command.program.decl public @decode.leaf(%tokens: i32, %tile_dim0: index, %tile_layout: encoding<layout>) launch(%parameters: buffer, %tile: view<[%tile_dim0]x4xf32, %tile_layout>)
+command.decl public @decode.leaf(%tokens: i32, %tile_dim0: index, %tile_layout: encoding<layout>) launch(%parameters: buffer, %tile: view<[%tile_dim0]x4xf32, %tile_layout>)
 
-command.program.def public @decode.root(%tokens: i32, %tile_dim0: index, %tile_layout: encoding<layout>) launch(%parameters: buffer, %tile: view<[%tile_dim0]x4xf32, %tile_layout>) where [ne(%tokens, 0)] {
+command.def public @decode.root(%tokens: i32, %tile_dim0: index, %tile_layout: encoding<layout>) launch(%parameters: buffer, %tile: view<[%tile_dim0]x4xf32, %tile_layout>) where [ne(%tokens, 0)] {
   command.serial {
     command.concurrent {
-      command.program.launch @decode.leaf[%tokens, %tile_dim0, %tile_layout](%parameters, %tile) : [i32, index, encoding<layout>](buffer, view<[%tile_dim0]x4xf32, %tile_layout>)
+      command.launch @decode.leaf[%tokens, %tile_dim0, %tile_layout](%parameters, %tile) : [i32, index, encoding<layout>](buffer, view<[%tile_dim0]x4xf32, %tile_layout>)
     }
   }
   command.return
 }
 
-command.program.def public @ignored() launch() {
+command.def public @ignored() launch() {
   command.return
 }
 """
@@ -195,7 +195,7 @@ def test_projects_kernel_scoped_pipeline_contracts_and_launches() -> None:
     source = """\
 pipeline.decl<kernel> @resident(%width: index) run(%input: buffer, %output: buffer) where [multiple_of(%width, 4)]
 
-command.program.def public @run(%width: index) launch(%input: buffer, %output: buffer) {
+command.def public @run(%width: index) launch(%input: buffer, %output: buffer) {
   kernel.launch @resident[%width](%input, %output) : [index](buffer, buffer)
   command.return
 }
@@ -218,7 +218,7 @@ def test_pipeline_buffer_contract_accepts_dynamic_view_argument() -> None:
     source = """\
 pipeline.decl<kernel> @consume() run(%input: buffer)
 
-command.program.def public @run(%width: index) launch(%input: view<[%width]xf32>) {
+command.def public @run(%width: index) launch(%input: view<[%width]xf32>) {
   kernel.launch @consume(%input) : (view<[%width]xf32>)
   command.return
 }
@@ -278,7 +278,7 @@ def test_rejects_unowned_configuration_declarations() -> None:
 
 def test_rejects_command_signatures_without_a_source_order_projection() -> None:
     source = """\
-command.program.def public @misordered(%dimension: index, %token: i32) launch(%output: view<[%dimension]xf32>) {
+command.def public @misordered(%dimension: index, %token: i32) launch(%output: view<[%dimension]xf32>) {
   command.return
 }
 """

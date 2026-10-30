@@ -15,7 +15,7 @@ using Output = loomt::buffer<float>;
 }
 
 // ----
-command.program.def public @run.tile(%factor: i32, %scale: f32, %tile_dim0: index, %tile_layout: encoding<layout>) launch(%tile: view<[%tile_dim0]x4xf32, %tile_layout>, %output: buffer) {
+command.def public @run.tile(%factor: i32, %scale: f32, %tile_dim0: index, %tile_layout: encoding<layout>) launch(%tile: view<[%tile_dim0]x4xf32, %tile_layout>, %output: buffer) {
   command.serial {
     kernel.launch @resident.tile[%factor, %tile_dim0, %tile_layout](%tile, %scale, %output) : [i32, index, encoding<layout>](view<[%tile_dim0]x4xf32, %tile_layout>, f32, buffer)
   }
@@ -44,7 +44,7 @@ using Dynamic = loomt::view<loomt::shape<loomt::dynamic, 4>, float, loomt::encod
 }
 
 // ----
-command.program.def public @launch_materialized(%input_dim0: index, %input_layout: encoding<layout>) launch(%input: view<[%input_dim0]x4xf32, %input_layout>) {
+command.def public @launch_materialized(%input_dim0: index, %input_layout: encoding<layout>) launch(%input: view<[%input_dim0]x4xf32, %input_layout>) {
   %3 = scalar.constant 256 : i32
   %4 = scalar.extsi %3 : i32 to i64
   %5 = index.cast %4 : i64 to offset

@@ -204,7 +204,7 @@ kernel.def @publish_pixels() {
   kernel.return
 }
 
-command.program.def public @bank_image_base() launch(%weights: buffer, %request: buffer, %output: buffer) {
+command.def public @bank_image_base() launch(%weights: buffer, %request: buffer, %output: buffer) {
   %a = command.parameter %weights, "a" : view<8xi32>
   %base = command.parameter.base %a : view<8xi32> -> buffer
   %length = index.constant 12 : offset
@@ -214,7 +214,7 @@ command.program.def public @bank_image_base() launch(%weights: buffer, %request:
   command.return
 }
 
-command.program.def public @bank_image_adapted() launch(%arena: buffer, %request: buffer, %output: buffer) {
+command.def public @bank_image_adapted() launch(%arena: buffer, %request: buffer, %output: buffer) {
   %a = command.parameter %arena, "a" : view<8xi32>
   %base = command.parameter.base %a : view<8xi32> -> buffer
   %length = index.constant 12 : offset

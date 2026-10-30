@@ -7,7 +7,7 @@ kernel.def target(@device) @tiles() {
   kernel.return
 }
 
-command.program.def public @dispatch() launch() {
+command.def public @dispatch() launch() {
   kernel.launch @tiles() : ()
   command.return
 }

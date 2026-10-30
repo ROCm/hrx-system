@@ -76,7 +76,7 @@ workflow](../workflows/link-and-package.md#link-transitive-dependencies-incremen
 demonstrates that lifecycle across two independent invocations.
 
 Compile-time exact declarations such as `func.decl`, `kernel.decl`, and
-`command.program.decl` use this symbol-linkage model. Runtime function imports
+`command.decl` use this symbol-linkage model. Runtime function imports
 remain external ABI contracts rather than library requests. Template families
 compose from the supplied library universe and match through `template.decl`,
 facts, requirements, and priority. The [source-module

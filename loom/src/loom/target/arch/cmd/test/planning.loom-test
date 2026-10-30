@@ -22,7 +22,7 @@ kernel.def target(@wave64) @wide() {
   kernel.return
 }
 
-command.program.def public @target_counts() launch() {
+command.def public @target_counts() launch() {
   kernel.launch @narrow() : ()
   kernel.launch @wide() : ()
   command.return
@@ -59,7 +59,7 @@ kernel.def @copy() {
   kernel.return
 }
 
-command.program.def public @waves() launch(%source: buffer, %first: buffer, %second: buffer, %target: buffer) {
+command.def public @waves() launch(%source: buffer, %first: buffer, %second: buffer, %target: buffer) {
   kernel.launch.serial {
     kernel.launch.concurrent {
       kernel.launch @copy(%source, %first) : (buffer, buffer)
@@ -96,7 +96,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 kernel.entry.decl @step()
 
-command.program.def @batch(%count: index) launch() where [range(%count, 2, 4)] {
+command.def @batch(%count: index) launch() where [range(%count, 2, 4)] {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   scf.for %i = [%c0 to %count step %c1] unroll {
@@ -105,9 +105,9 @@ command.program.def @batch(%count: index) launch() where [range(%count, 2, 4)] {
   command.return
 }
 
-command.program.def public @unrolled_nested() launch() {
+command.def public @unrolled_nested() launch() {
   %count = index.constant 2 : index
-  command.program.launch @batch[%count]() : [index]()
+  command.launch @batch[%count]() : [index]()
   command.return
 }
 
@@ -141,18 +141,18 @@ kernel.def @combine() {
   kernel.return
 }
 
-command.program.def @combine_views() launch(%lhs: buffer, %rhs: buffer, %target: buffer, %unused: buffer) {
+command.def @combine_views() launch(%lhs: buffer, %rhs: buffer, %target: buffer, %unused: buffer) {
   kernel.launch @combine(%lhs, %rhs, %target, %unused) : (buffer, buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @parameterized() launch(%parameters: buffer, %target: buffer, %unused: buffer) {
+command.def public @parameterized() launch(%parameters: buffer, %target: buffer, %unused: buffer) {
   %layer = index.constant 3 : index
   %lhs = command.parameter %parameters, "blk.{}.lhs"[%layer] : view<3xi32>
   %rhs = command.parameter %parameters, "shared.rhs" : view<4xi32>
   %target_offset = index.constant 32 : offset
   %target_view = buffer.view %target[%target_offset] : buffer -> view<1xi32>
-  command.program.launch @combine_views(%lhs, %rhs, %target_view, %unused) : (view<3xi32>, view<4xi32>, view<1xi32>, buffer)
+  command.launch @combine_views(%lhs, %rhs, %target_view, %unused) : (view<3xi32>, view<4xi32>, view<1xi32>, buffer)
   command.return
 }
 
@@ -192,14 +192,14 @@ kernel.def @copy_one() {
   kernel.return
 }
 
-command.program.def @copy_stage() launch(%source: buffer, %target: buffer) {
+command.def @copy_stage() launch(%source: buffer, %target: buffer) {
   kernel.launch @copy_one(%source, %target) : (buffer, buffer)
   command.return
 }
 
-command.program.def public @copy_twice() launch(%source: buffer, %scratch: buffer, %target: buffer) {
-  command.program.launch @copy_stage(%source, %scratch) : (buffer, buffer)
-  command.program.launch @copy_stage(%scratch, %target) : (buffer, buffer)
+command.def public @copy_twice() launch(%source: buffer, %scratch: buffer, %target: buffer) {
+  command.launch @copy_stage(%source, %scratch) : (buffer, buffer)
+  command.launch @copy_stage(%scratch, %target) : (buffer, buffer)
   command.return
 }
 
@@ -252,13 +252,13 @@ kernel.def @double(%element_count: index) {
   kernel.return
 }
 
-command.program.def public @increment_then_double(%element_count: index) launch(%source: buffer, %scratch: buffer, %target: buffer) where [range(%element_count, 1, 128)] {
+command.def public @increment_then_double(%element_count: index) launch(%source: buffer, %scratch: buffer, %target: buffer) where [range(%element_count, 1, 128)] {
   kernel.launch @increment[%element_count](%source, %scratch) : [index](buffer, buffer)
   kernel.launch @double[%element_count](%scratch, %target) : [index](buffer, buffer)
   command.return
 }
 
-command.program.def public @increment_twice(%element_count: index) launch(%source: buffer, %scratch: buffer, %target: buffer) where [range(%element_count, 1, 128)] {
+command.def public @increment_twice(%element_count: index) launch(%source: buffer, %scratch: buffer, %target: buffer) where [range(%element_count, 1, 128)] {
   kernel.launch @increment[%element_count](%source, %scratch) : [index](buffer, buffer)
   kernel.launch @increment[%element_count](%scratch, %target) : [index](buffer, buffer)
   command.return
@@ -313,7 +313,7 @@ kernel.def @copy_element(%element: index) {
   kernel.return
 }
 
-command.program.def public @unrolled_targetless() launch(%source: buffer, %target: buffer) {
+command.def public @unrolled_targetless() launch(%source: buffer, %target: buffer) {
   %loop_begin = index.constant 0 : index
   %loop_end = index.constant 2 : index
   %loop_step = index.constant 1 : index
@@ -355,7 +355,7 @@ kernel.def @copy_one() {
   kernel.return
 }
 
-command.program.def public @allocation_definition_lifetime() launch(%source: buffer, %target: buffer) {
+command.def public @allocation_definition_lifetime() launch(%source: buffer, %target: buffer) {
   %bytes = index.constant 64 : offset
   %persistent = buffer.alloca<global> align(64) %bytes : buffer
   %early = buffer.alloca<global> align(64) %bytes : buffer
@@ -399,7 +399,7 @@ kernel.def @two_groups() {
   kernel.return
 }
 
-command.program.def @shape_program(%token_count: index) launch(%storage: view<4xi32>) where [range(%token_count, 1, 512)] {
+command.def @shape_program(%token_count: index) launch(%storage: view<4xi32>) where [range(%token_count, 1, 512)] {
   %c512 = index.constant 512 : index
   %is_full_shape = index.cmp eq, %token_count, %c512 : index
   scf.if %is_full_shape {
@@ -410,9 +410,9 @@ command.program.def @shape_program(%token_count: index) launch(%storage: view<4x
   command.return
 }
 
-command.program.def public @exact_composition() launch(%storage: view<4xi32>) {
+command.def public @exact_composition() launch(%storage: view<4xi32>) {
   %token_count = index.constant 512 : index
-  command.program.launch @shape_program[%token_count](%storage) : [index](view<4xi32>)
+  command.launch @shape_program[%token_count](%storage) : [index](view<4xi32>)
   command.return
 }
 
@@ -468,7 +468,7 @@ kernel.def @down_q6() {
   kernel.return
 }
 
-command.program.def @quantized_pair(%gate_schema: encoding<schema>, %down_schema: encoding<schema>) launch(%storage: buffer) {
+command.def @quantized_pair(%gate_schema: encoding<schema>, %down_schema: encoding<schema>) launch(%storage: buffer) {
   %gate_is_q4 = encoding.isa<#ggml.q4_0> %gate_schema : encoding<schema>
   scf.if %gate_is_q4 {
     kernel.launch @gate_q4(%storage) : (buffer)
@@ -484,29 +484,29 @@ command.program.def @quantized_pair(%gate_schema: encoding<schema>, %down_schema
   command.return
 }
 
-command.program.def public @q4_q4() launch(%storage: buffer) {
+command.def public @q4_q4() launch(%storage: buffer) {
   %q4 = config.get @quant.q4 : encoding<schema>
-  command.program.launch @quantized_pair[%q4, %q4](%storage) : [encoding<schema>, encoding<schema>](buffer)
+  command.launch @quantized_pair[%q4, %q4](%storage) : [encoding<schema>, encoding<schema>](buffer)
   command.return
 }
 
-command.program.def public @q4_q6() launch(%storage: buffer) {
+command.def public @q4_q6() launch(%storage: buffer) {
   %q4 = config.get @quant.q4 : encoding<schema>
   %q6 = config.get @quant.q6 : encoding<schema>
-  command.program.launch @quantized_pair[%q4, %q6](%storage) : [encoding<schema>, encoding<schema>](buffer)
+  command.launch @quantized_pair[%q4, %q6](%storage) : [encoding<schema>, encoding<schema>](buffer)
   command.return
 }
 
-command.program.def public @q6_q4() launch(%storage: buffer) {
+command.def public @q6_q4() launch(%storage: buffer) {
   %q4 = config.get @quant.q4 : encoding<schema>
   %q6 = config.get @quant.q6 : encoding<schema>
-  command.program.launch @quantized_pair[%q6, %q4](%storage) : [encoding<schema>, encoding<schema>](buffer)
+  command.launch @quantized_pair[%q6, %q4](%storage) : [encoding<schema>, encoding<schema>](buffer)
   command.return
 }
 
-command.program.def public @q6_q6() launch(%storage: buffer) {
+command.def public @q6_q6() launch(%storage: buffer) {
   %q6 = config.get @quant.q6 : encoding<schema>
-  command.program.launch @quantized_pair[%q6, %q6](%storage) : [encoding<schema>, encoding<schema>](buffer)
+  command.launch @quantized_pair[%q6, %q6](%storage) : [encoding<schema>, encoding<schema>](buffer)
   command.return
 }
 
@@ -583,7 +583,7 @@ kernel.entry.decl @configured_a(%element_index: index, %byte_offset: offset, %sc
 
 kernel.entry.decl @configured_b(%output: buffer)
 
-command.program.def public @bodyless_dispatch() launch(%output: buffer) {
+command.def public @bodyless_dispatch() launch(%output: buffer) {
   %count_x = index.constant 7 : index
   %count_y = index.constant 3 : index
   %c0 = index.constant 0 : offset
@@ -646,7 +646,7 @@ kernel.def @local_entry() {
 
 kernel.entry.decl @provided_entry(%output: buffer)
 
-command.program.def public @mixed_dispatch() launch(%output: buffer) {
+command.def public @mixed_dispatch() launch(%output: buffer) {
   %c2 = index.constant 2 : index
   kernel.launch @local_entry(%output) : (buffer)
   kernel.dispatch @provided_entry[%c2](%output) : [index](buffer)
@@ -675,7 +675,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 kernel.entry.decl @consume_transient(%scratch: buffer)
 
-command.program.def public @transient_direct_dispatch() launch() {
+command.def public @transient_direct_dispatch() launch() {
   %count = index.constant 1 : index
   %scratch_bytes = index.constant 64 : offset
   %scratch = buffer.alloca<global> align(64) %scratch_bytes : buffer
@@ -701,7 +701,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 kernel.entry.decl @invocation_count_entry(%output: buffer)
 
-command.program.def public @invocation_indirect_dispatch() launch(%count_storage: buffer, %output: buffer) {
+command.def public @invocation_indirect_dispatch() launch(%count_storage: buffer, %output: buffer) {
   %c0 = index.constant 0 : offset
   %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>
   kernel.dispatch @invocation_count_entry[%counts](%output) : [view<3xi32>](buffer)
@@ -730,7 +730,7 @@ kernel.entry.decl @produce_counts(%counts: view<3xi32>)
 
 kernel.entry.decl @consume_counts(%output: buffer, %scratch: view<4xi32>)
 
-command.program.def public @dynamic_indirect_dispatch() launch(%output: buffer) {
+command.def public @dynamic_indirect_dispatch() launch(%output: buffer) {
   %c0 = index.constant 0 : offset
   %c1 = index.constant 1 : index
   %count_bytes = index.constant 12 : offset
@@ -769,7 +769,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
 
 kernel.entry.decl @fixed_count_entry()
 
-command.program.def public @fixed_indirect_dispatch() launch(%parameters: buffer) {
+command.def public @fixed_indirect_dispatch() launch(%parameters: buffer) {
   %counts = command.parameter %parameters, "dispatch.counts" : view<3xi32>
   kernel.dispatch @fixed_count_entry[%counts]() : [view<3xi32>]()
   command.return
@@ -801,7 +801,7 @@ kernel.def @source_entry(%workload: index) {
   kernel.return
 }
 
-command.program.def public @configured_source() launch(%storage: buffer) {
+command.def public @configured_source() launch(%storage: buffer) {
   %c0 = index.constant 0 : offset
   %c4 = index.constant 4 : index
   %c1 = index.constant 1 : index
@@ -840,7 +840,7 @@ kernel.def @shared_entry(%workload: index) {
   kernel.return
 }
 
-command.program.def public @mixed_source() launch(%storage: buffer) {
+command.def public @mixed_source() launch(%storage: buffer) {
   %c2 = index.constant 2 : index
   %c3 = index.constant 3 : index
   kernel.launch @shared_entry[%c2](%storage) : [index](buffer)
@@ -875,7 +875,7 @@ kernel.entry.decl @heartbeat()
 
 kernel.entry.decl @consume(%output: buffer)
 
-command.program.def public @concurrent_dynamic_counts() launch(%first: buffer, %second: buffer) {
+command.def public @concurrent_dynamic_counts() launch(%first: buffer, %second: buffer) {
   %c0 = index.constant 0 : offset
   %c1 = index.constant 1 : index
   %count_bytes = index.constant 12 : offset
@@ -931,7 +931,7 @@ kernel.def target(@device) @configured() {
   kernel.return
 }
 
-command.program.def public target(@construction) @dispatch() launch() {
+command.def public target(@construction) @dispatch() launch() {
   // ERROR@+1: LOWERING/051 {kernel_name="configured", dimension="0", requirement="an exact unsigned 32-bit value"}
   kernel.launch @configured() : ()
   command.return
@@ -947,7 +947,7 @@ kernel.entry.decl @produce_counts(%counts: view<3xi32>)
 
 kernel.entry.decl @consume_counts(%output: buffer)
 
-command.program.def public @updated_invocation_counts() launch(%storage: buffer, %output: buffer) {
+command.def public @updated_invocation_counts() launch(%storage: buffer, %output: buffer) {
   %offset = index.constant 4 : offset
   %c1 = index.constant 1 : index
   %table = buffer.view %storage[%offset] : buffer -> view<8xi32>

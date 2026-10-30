@@ -628,13 +628,13 @@ kernel.def @device_kernel() {
   kernel.return
 }
 
-command.program.def public target(@device) @device_program() launch() {
+command.def public target(@device) @device_program() launch() {
   kernel.launch @device_kernel() : ()
   command.return
 }
 
 func.def public @host() {
-  command.program.launch @device_program() : ()
+  command.launch @device_program() : ()
   func.return
 }
 )");

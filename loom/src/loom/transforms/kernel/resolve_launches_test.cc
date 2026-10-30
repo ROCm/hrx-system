@@ -121,7 +121,7 @@ class ResolveLaunchesTest : public ::testing::Test {
         loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
     const loom_type_t binding_type = loom_type_buffer();
     loom_op_t* program = nullptr;
-    IREE_CHECK_OK(loom_command_program_def_build(
+    IREE_CHECK_OK(loom_command_def_build(
         &module_builder_, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0,
         loom_symbol_ref_null(), symbol, &specialization_type,
         /*specializations_types_count=*/1, &binding_type,
@@ -130,9 +130,9 @@ class ResolveLaunchesTest : public ::testing::Test {
 
     loom_builder_t program_builder = module_builder_;
     loom_builder_enter_region(&program_builder, program,
-                              loom_command_program_def_body(program));
+                              loom_command_def_body(program));
     const loom_block_t* entry_block =
-        loom_region_const_entry_block(loom_command_program_def_body(program));
+        loom_region_const_entry_block(loom_command_def_body(program));
     loom_op_t* schedule = nullptr;
     IREE_CHECK_OK(loom_kernel_launch_serial_build(
         &program_builder, LOOM_LOCATION_UNKNOWN, &schedule));
@@ -221,7 +221,7 @@ TEST_F(ResolveLaunchesTest, PreservesConfigurationPlacement) {
   const loom_op_t* root_op =
       module_->symbols.entries[root.symbol_id].defining_op;
   const loom_block_t* root_block =
-      loom_region_const_entry_block(loom_command_program_def_body(root_op));
+      loom_region_const_entry_block(loom_command_def_body(root_op));
   const loom_op_t* pure_call = root_block->first_op;
   ASSERT_TRUE(loom_func_call_isa(pure_call));
   EXPECT_EQ(loom_func_call_effect_contract(pure_call),

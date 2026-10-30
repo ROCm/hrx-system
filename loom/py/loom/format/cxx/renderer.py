@@ -1505,7 +1505,7 @@ class CxxRenderer(CxxKernelConfigurationRenderer):
         commands = [
             operation
             for operation in self.module.body.ops
-            if operation.name in {"command.program.def", "command.program.decl"}
+            if operation.name in {"command.def", "command.decl"}
         ]
         pipelines = [
             operation
@@ -1513,9 +1513,7 @@ class CxxRenderer(CxxKernelConfigurationRenderer):
             if operation.name == "pipeline.decl"
         ]
         command_definitions = [
-            operation
-            for operation in commands
-            if operation.name == "command.program.def"
+            operation for operation in commands if operation.name == "command.def"
         ]
         if not kernels and not functions and not commands and not pipelines:
             raise CxxRenderError(
@@ -1526,8 +1524,8 @@ class CxxRenderer(CxxKernelConfigurationRenderer):
             if operation.name in {
                 "kernel.def",
                 "func.def",
-                "command.program.def",
-                "command.program.decl",
+                "command.def",
+                "command.decl",
                 "pipeline.decl",
                 "config.decl",
             } or operation.name.endswith(".target"):
@@ -1552,7 +1550,7 @@ class CxxRenderer(CxxKernelConfigurationRenderer):
         for index, command in enumerate(commands):
             if index:
                 self.writer.line()
-            if command.name == "command.program.def":
+            if command.name == "command.def":
                 body = self._resolved(command).region("body")
                 assert body is not None
                 self._validate_projected_attributes(
@@ -1579,7 +1577,7 @@ class CxxRenderer(CxxKernelConfigurationRenderer):
                 self.writer.line()
             if callable_operation.name == "func.def":
                 self._render_function(callable_operation)
-            elif callable_operation.name == "command.program.def":
+            elif callable_operation.name == "command.def":
                 self._render_command_program(callable_operation)
             else:
                 self._render_kernel(callable_operation)
@@ -1674,13 +1672,12 @@ def _select_callable_roots(module: Module, roots: Sequence[str]) -> Module:
         callable_operations = {
             "kernel.def",
             "func.def",
-            "command.program.def",
-            "command.program.decl",
+            "command.def",
+            "command.decl",
             "pipeline.decl",
         }
         if symbol.op.name not in callable_operations or (
-            require_definition
-            and symbol.op.name in {"command.program.decl", "pipeline.decl"}
+            require_definition and symbol.op.name in {"command.decl", "pipeline.decl"}
         ):
             raise CxxRenderError(
                 symbol.op,
@@ -1708,7 +1705,7 @@ def _select_callable_roots(module: Module, roots: Sequence[str]) -> Module:
                         continue
                     if operation.name not in {
                         "func.call",
-                        "command.program.launch",
+                        "command.launch",
                         "kernel.launch",
                     }:
                         continue

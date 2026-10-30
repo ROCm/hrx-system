@@ -14,7 +14,7 @@ kernel.def @add() {
   kernel.return
 }
 
-command.program.def public @add_configured() launch(%storage: buffer) {
+command.def public @add_configured() launch(%storage: buffer) {
   %delta = config.get @delta : i32
   kernel.launch @add(%storage, %delta) : (buffer, i32)
   command.return
@@ -41,7 +41,7 @@ kernel.def @consume() {
   kernel.return
 }
 
-command.program.def public @target() launch(%weights: buffer, %output: buffer) {
+command.def public @target() launch(%weights: buffer, %output: buffer) {
   %a = command.parameter %weights, "a" : view<8xi32>
   %b = command.parameter %weights, "b" : view<8xi32>
   %raw = command.parameter %weights, "raw" : view<8xi32>
@@ -49,27 +49,27 @@ command.program.def public @target() launch(%weights: buffer, %output: buffer) {
   command.return
 }
 
-command.program.def public @auxiliary() launch(%shared: buffer, %private: buffer, %output: buffer) {
+command.def public @auxiliary() launch(%shared: buffer, %private: buffer, %output: buffer) {
   %a = command.parameter %shared, "a" : view<8xi32>
   %d = command.parameter %private, "d" : view<8xi32>
   kernel.launch @consume(%a, %d, %d, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
   command.return
 }
 
-command.program.def public @raw() launch(%weights: buffer, %output: buffer) {
+command.def public @raw() launch(%weights: buffer, %output: buffer) {
   %data = command.parameter %weights, "raw" : view<8xi32>
   kernel.launch @consume(%data, %data, %data, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
   command.return
 }
 
-command.program.def public @domains() launch(%base: buffer, %adapter: buffer, %output: buffer) {
+command.def public @domains() launch(%base: buffer, %adapter: buffer, %output: buffer) {
   %left = command.parameter %base, "raw" : view<8xi32>
   %right = command.parameter %adapter, "raw" : view<8xi32>
   kernel.launch @consume(%left, %right, %right, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
   command.return
 }
 
-command.program.def public @domains_workspace() launch(%base: buffer, %adapter: buffer, %output: buffer) {
+command.def public @domains_workspace() launch(%base: buffer, %adapter: buffer, %output: buffer) {
   %left = command.parameter %base, "raw" : view<8xi32>
   %right = command.parameter %adapter, "raw" : view<8xi32>
   %bytes = index.constant 32 : offset
@@ -81,21 +81,21 @@ command.program.def public @domains_workspace() launch(%base: buffer, %adapter: 
   command.return
 }
 
-command.program.def public @domains_interleaved() launch(%base: buffer, %adapter: buffer, %output: buffer) {
+command.def public @domains_interleaved() launch(%base: buffer, %adapter: buffer, %output: buffer) {
   %right = command.parameter %adapter, "raw" : view<8xi32>
   %left = command.parameter %base, "raw" : view<8xi32>
   kernel.launch @consume(%left, %right, %right, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
   command.return
 }
 
-command.program.def public @domains_swapped() launch(%adapter: buffer, %base: buffer, %output: buffer) {
+command.def public @domains_swapped() launch(%adapter: buffer, %base: buffer, %output: buffer) {
   %left = command.parameter %base, "raw" : view<8xi32>
   %right = command.parameter %adapter, "raw" : view<8xi32>
   kernel.launch @consume(%left, %right, %right, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
   command.return
 }
 
-command.program.def public @many_domains() launch(%root0: buffer, %root1: buffer, %root2: buffer, %root3: buffer, %root4: buffer, %root5: buffer, %root6: buffer, %root7: buffer, %root8: buffer, %output: buffer) {
+command.def public @many_domains() launch(%root0: buffer, %root1: buffer, %root2: buffer, %root3: buffer, %root4: buffer, %root5: buffer, %root6: buffer, %root7: buffer, %root8: buffer, %output: buffer) {
   %p0 = command.parameter %root0, "raw" : view<8xi32>
   %p1 = command.parameter %root1, "raw" : view<8xi32>
   %p2 = command.parameter %root2, "raw" : view<8xi32>
@@ -111,25 +111,25 @@ command.program.def public @many_domains() launch(%root0: buffer, %root1: buffer
   command.return
 }
 
-command.program.def public @size() launch(%weights: buffer, %output: buffer) {
+command.def public @size() launch(%weights: buffer, %output: buffer) {
   %data = command.parameter %weights, "size" : view<8xi32>
   kernel.launch @consume(%data, %data, %data, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
   command.return
 }
 
-command.program.def public @missing() launch(%weights: buffer, %output: buffer) {
+command.def public @missing() launch(%weights: buffer, %output: buffer) {
   %data = command.parameter %weights, "missing" : view<8xi32>
   kernel.launch @consume(%data, %data, %data, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
   command.return
 }
 
-command.program.def public @unavailable() launch(%weights: buffer, %output: buffer) {
+command.def public @unavailable() launch(%weights: buffer, %output: buffer) {
   %data = command.parameter %weights, "unavailable" : view<8xi32>
   kernel.launch @consume(%data, %data, %data, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
   command.return
 }
 
-command.program.def public @partial() launch(%weights: buffer, %output: buffer) {
+command.def public @partial() launch(%weights: buffer, %output: buffer) {
   %a = command.parameter %weights, "a" : view<8xi32>
   %b = command.parameter %weights, "b" : view<8xi32>
   %missing = command.parameter %weights, "unavailable" : view<8xi32>
@@ -164,7 +164,7 @@ kernel.def @add_wide_kernel() {
   kernel.return
 }
 
-command.program.def public @add_wide() launch(%storage: buffer) {
+command.def public @add_wide() launch(%storage: buffer) {
   kernel.launch @add_wide_kernel(%storage) : (buffer)
   command.return
 }
@@ -188,7 +188,7 @@ kernel.def @consume_wide() {
   kernel.return
 }
 
-command.program.def public @windowed() launch(%weights: buffer, %output: buffer) {
+command.def public @windowed() launch(%weights: buffer, %output: buffer) {
   %a = command.parameter %weights, "a" : view<8xi32>
   %wide = command.parameter %weights, "wide" : view<524296xi32>
   %b = command.parameter %weights, "b" : view<8xi32>
@@ -239,7 +239,7 @@ kernel.def @combine_wide_kernel() {
   kernel.return
 }
 
-command.program.def public @combine_wide() launch(%output: buffer, %input: buffer) {
+command.def public @combine_wide() launch(%output: buffer, %input: buffer) {
   kernel.launch @combine_wide_kernel(%output, %input) : (buffer, buffer)
   command.return
 }
@@ -263,7 +263,7 @@ kernel.def @consume_coarse() {
   kernel.return
 }
 
-command.program.def public @coarse_raw() launch(%weights: buffer, %output: buffer) {
+command.def public @coarse_raw() launch(%weights: buffer, %output: buffer) {
   %raw = command.parameter %weights, "raw" : view<16777224xi32>
   kernel.launch @consume_coarse(%raw, %output) : (view<16777224xi32>, buffer)
   command.return
@@ -293,7 +293,7 @@ kernel.def @consume_selected() {
   kernel.return
 }
 
-command.program.def public @selected_target() launch(%weights: buffer, %request: buffer, %output: buffer) {
+command.def public @selected_target() launch(%weights: buffer, %request: buffer, %output: buffer) {
   %a = command.parameter %weights, "a" : view<8xi32>
   %b = command.parameter %weights, "b" : view<8xi32>
   %raw = command.parameter %weights, "raw" : view<8xi32>
@@ -348,21 +348,21 @@ kernel.def @consume_bank_cohort() {
   kernel.return
 }
 
-command.program.def public @bank_cohort() launch(%arena: buffer, %request: buffer, %output: buffer) {
+command.def public @bank_cohort() launch(%arena: buffer, %request: buffer, %output: buffer) {
   %a = command.parameter %arena, "a" : view<8xi32>
   %base = command.parameter.base %a : view<8xi32> -> buffer
   kernel.launch @consume_bank_cohort(%base, %request, %output) : (buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @bank_missing() launch(%arena: buffer, %request: buffer, %output: buffer) {
+command.def public @bank_missing() launch(%arena: buffer, %request: buffer, %output: buffer) {
   %missing = command.parameter %arena, "missing" : view<8xi32>
   %base = command.parameter.base %missing : view<8xi32> -> buffer
   kernel.launch @consume_bank_cohort(%base, %request, %output) : (buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @bank_cold() launch(%weights: buffer, %request: buffer, %output: buffer) {
+command.def public @bank_cold() launch(%weights: buffer, %request: buffer, %output: buffer) {
   %raw = command.parameter %weights, "raw" : view<8xi32>
   %base = command.parameter.base %raw : view<8xi32> -> buffer
   kernel.launch @consume_bank_cohort(%base, %request, %output) : (buffer, buffer, buffer)

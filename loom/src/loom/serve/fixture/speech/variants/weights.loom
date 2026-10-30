@@ -20,7 +20,7 @@ kernel.def target(@weighted_speech_target) @double_factor() {
   kernel.return
 }
 
-command.program.def public @prepare_factor() launch(%storage: buffer) {
+command.def public @prepare_factor() launch(%storage: buffer) {
   kernel.launch @double_factor(%storage) : (buffer)
   command.return
 }
@@ -46,7 +46,7 @@ kernel.def target(@weighted_speech_target) @condition_voice() {
 }
 
 // Four fixed roots coexist with the five dynamic speech roots.
-command.program.def public @initialize_weighted_audio() launch(%encoder_weights: buffer, %base_weights: buffer, %voice_weights: buffer, %raw_weights: buffer, %work: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+command.def public @initialize_weighted_audio() launch(%encoder_weights: buffer, %base_weights: buffer, %voice_weights: buffer, %raw_weights: buffer, %work: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
   %encoder = command.parameter %encoder_weights, "encoder" : view<1xf32>
   %base = command.parameter %base_weights, "factor" : view<1xf32>
   %voice = command.parameter %voice_weights, "factor" : view<1xf32>
@@ -89,7 +89,7 @@ kernel.def target(@weighted_speech_target) @scale_audio() {
 }
 
 // Decoding shares the prepared base factor but owns a disjoint phase tensor.
-command.program.def public @step_weighted_audio() launch(%decoder_weights: buffer, %base_weights: buffer, %work: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+command.def public @step_weighted_audio() launch(%decoder_weights: buffer, %base_weights: buffer, %work: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
   %decoder = command.parameter %decoder_weights, "decoder" : view<1xf32>
   %base = command.parameter %base_weights, "factor" : view<1xf32>
   %length = index.constant 144 : offset

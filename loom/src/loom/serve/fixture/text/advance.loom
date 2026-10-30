@@ -245,14 +245,14 @@ kernel.def target(@target) @select() {
   kernel.return
 }
 
-command.program.def public @advance() launch(%weights: buffer, %residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {
+command.def public @advance() launch(%weights: buffer, %residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {
   %bias = command.parameter %weights, "bias" : view<1xi32>
   kernel.launch @consume(%bias, %residual, %metadata, %origins, %arena, %tokens) : (view<1xi32>, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @select(%residual, %metadata, %origins, %arena, %outputs) : (buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @advance_media() launch(%weights: buffer, %residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {
+command.def public @advance_media() launch(%weights: buffer, %residual: buffer, %metadata: buffer, %origins: buffer, %arena: buffer, %tokens: buffer, %outputs: buffer) {
   %bias = command.parameter %weights, "bias" : view<1xi32>
   kernel.launch @consume(%bias, %residual, %metadata, %origins, %arena, %tokens) : (view<1xi32>, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @select(%residual, %metadata, %origins, %arena, %outputs) : (buffer, buffer, buffer, buffer, buffer)

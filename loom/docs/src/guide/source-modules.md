@@ -72,7 +72,7 @@ is a command-line frontend; the LoomC API can receive the same text and
 bytecode entirely from memory.
 
 Exact compile-time declarations such as `func.decl`, `kernel.decl`, and
-`command.program.decl` use C-like global linkage. A definition in the module's
+`command.decl` use C-like global linkage. A definition in the module's
 direct input sources may satisfy the declaration regardless of visibility. A
 definition contributed by a library must be exported. At most one direct
 definition may own a global name. When no direct definition exists, exactly one

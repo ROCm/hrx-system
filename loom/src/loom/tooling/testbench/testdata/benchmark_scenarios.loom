@@ -104,7 +104,7 @@ check.scenario @invoke_only {
 check.benchmark<@invoke_only> @invoke_latency
 
 // Checking must observe the complete program, including the final overwrite.
-command.program.def @wrong_command() launch(%output: buffer) {
+command.def @wrong_command() launch(%output: buffer) {
   kernel.launch @write_right(%output) : (buffer)
   kernel.launch @write_wrong(%output) : (buffer)
   command.return

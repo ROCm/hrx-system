@@ -269,7 +269,7 @@ TEST_F(CmdProgramPlanTest, PreservesProjectedBufferLaunchArguments) {
   ModulePtr source_module = ParseAndVerify(R"(
 kernel.entry.decl @step(%storage: buffer)
 
-command.program.def public @root() launch(%storage: buffer) {
+command.def public @root() launch(%storage: buffer) {
   %global = buffer.assume.memory_space<global> %storage : buffer
   %aligned = buffer.assume.alignment %global {minimum_alignment = 64} : buffer
   %unique = buffer.assume.noalias %aligned : buffer
@@ -331,7 +331,7 @@ kernel.def target(@device) @consume(%count_storage: buffer) {
   kernel.return
 }
 
-command.program.def public @root() launch(%count_storage: buffer, %first_output: buffer, %second_output: buffer) {
+command.def public @root() launch(%count_storage: buffer, %first_output: buffer, %second_output: buffer) {
   %unique_counts = buffer.assume.noalias %count_storage : buffer
   %unique_first = buffer.assume.noalias %first_output : buffer
   %unique_second = buffer.assume.noalias %second_output : buffer
@@ -591,7 +591,7 @@ kernel.def target(@device) @overwrite() {
   kernel.return
 }
 
-command.program.def public @root() launch(%count_storage: buffer) {
+command.def public @root() launch(%count_storage: buffer) {
   %unique_counts = buffer.assume.noalias %count_storage : buffer
   kernel.launch @consume[%unique_counts]() : [buffer]()
   kernel.launch @overwrite(%unique_counts) : (buffer)
@@ -666,7 +666,7 @@ TEST_F(CmdProgramPlanTest, UsesSelectedCleanupProvidersInNestedPipeline) {
   ModulePtr source_module = ParseAndVerify(R"(
 kernel.entry.decl @step()
 
-command.program.def public @root() launch() {
+command.def public @root() launch() {
   %count = index.constant 1 : index
   kernel.dispatch @step[%count]() : [index]()
   command.return
@@ -719,14 +719,14 @@ TEST_F(CmdProgramPlanTest, OwnsMultipleRootsAndDeduplicatesEntries) {
 kernel.entry.decl @increment(%source: buffer, %target: buffer)
 kernel.entry.decl @double(%source: buffer, %target: buffer)
 
-command.program.def public @increment_then_double() launch(%source: buffer, %scratch: buffer, %target: buffer) {
+command.def public @increment_then_double() launch(%source: buffer, %scratch: buffer, %target: buffer) {
   %count = index.constant 1 : index
   kernel.dispatch @increment[%count](%source, %scratch) : [index](buffer, buffer)
   kernel.dispatch @double[%count](%scratch, %target) : [index](buffer, buffer)
   command.return
 }
 
-command.program.def public @increment_twice() launch(%source: buffer, %scratch: buffer, %target: buffer) {
+command.def public @increment_twice() launch(%source: buffer, %scratch: buffer, %target: buffer) {
   %count = index.constant 1 : index
   kernel.dispatch @increment[%count](%source, %scratch) : [index](buffer, buffer)
   kernel.dispatch @increment[%count](%scratch, %target) : [index](buffer, buffer)
@@ -843,7 +843,7 @@ template.def<@test.dispatch_schedule> @dispatch_many(%token_count: index, %stora
   template.return
 }
 
-command.program.def public @selected_schedule() launch(%storage: buffer) {
+command.def public @selected_schedule() launch(%storage: buffer) {
   %token_count = index.constant 1 : index
   template.apply<@test.command_schedule>(%token_count, %storage) : (index, buffer)
   command.return
@@ -951,12 +951,12 @@ kernel.def @physical_child() {
 kernel.decl @logical_child() launch()
 kernel.entry.decl @physical_child()
 
-command.program.def public @root() launch() {
+command.def public @root() launch() {
   kernel.launch @logical_child() : ()
   command.return
 }
 
-command.program.def public @configured_root() launch() {
+command.def public @configured_root() launch() {
   %unit = index.constant 1 : index
   kernel.dispatch @physical_child[%unit]() : [index]()
   command.return
@@ -1120,7 +1120,7 @@ kernel.def @fixed() {
 
 kernel.entry.decl @external(%storage: buffer)
 
-command.program.def public @root_a() launch(%storage: buffer) {
+command.def public @root_a() launch(%storage: buffer) {
   %small = index.constant 64 : index
   %large = index.constant 256 : index
   %unit = index.constant 1 : index
@@ -1131,7 +1131,7 @@ command.program.def public @root_a() launch(%storage: buffer) {
   command.return
 }
 
-command.program.def public @root_b() launch(%storage: buffer) {
+command.def public @root_b() launch(%storage: buffer) {
   %small = index.constant 64 : index
   %large = index.constant 256 : index
   %unit = index.constant 1 : index
@@ -1278,7 +1278,7 @@ TEST_F(CmdProgramPlanTest, OwnsParameterRequirementTables) {
   ModulePtr source_module = ParseAndVerify(R"(
 kernel.entry.decl @combine(%lhs: view<3xi32>, %rhs: view<4xi32>, %target: buffer)
 
-command.program.def public @parameterized() launch(%parameters: buffer, %target: buffer) {
+command.def public @parameterized() launch(%parameters: buffer, %target: buffer) {
   %layer = index.constant 3 : index
   %count = index.constant 1 : index
   %lhs = command.parameter %parameters, "blk.{}.lhs"[%layer] : view<3xi32>
@@ -1368,7 +1368,7 @@ TEST_F(CmdProgramPlanTest, OwnsBodylessEntryRequirementsAndArtifact) {
 kernel.entry.decl @configured_a(%element_index: index, %byte_offset: offset, %raw_bits: i64, %scale: i8, %output: buffer)
 kernel.entry.decl @configured_b(%output: buffer)
 
-command.program.def public @bodyless() launch(%output: buffer) {
+command.def public @bodyless() launch(%output: buffer) {
   %count_x = index.constant 7 : index
   %count_y = index.constant 5 : index
   %element_index = index.constant 64 : index
@@ -1485,14 +1485,14 @@ kernel.entry.decl @invocation_entry()
 kernel.entry.decl @produce_counts(%counts: view<3xi32>)
 kernel.entry.decl @dynamic_entry()
 
-command.program.def public @invocation_root() launch(%count_storage: buffer) {
+command.def public @invocation_root() launch(%count_storage: buffer) {
   %c0 = index.constant 0 : offset
   %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>
   kernel.dispatch @invocation_entry[%counts]() : [view<3xi32>]()
   command.return
 }
 
-command.program.def public @dynamic_root() launch() {
+command.def public @dynamic_root() launch() {
   %c0 = index.constant 0 : offset
   %c1 = index.constant 1 : index
   %count_bytes = index.constant 12 : offset

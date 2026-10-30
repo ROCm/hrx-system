@@ -292,7 +292,7 @@ TEST_F(CaseCommandProgramTest,
 
   const loom_symbol_t& program_symbol =
       module_->symbols.entries[program.root_ref.symbol_id];
-  ASSERT_TRUE(loom_command_program_def_isa(program_symbol.defining_op));
+  ASSERT_TRUE(loom_command_def_isa(program_symbol.defining_op));
   const loom_func_like_t program_function =
       loom_func_like_cast(module_, program_symbol.defining_op);
   uint16_t program_argument_count = 0;
@@ -303,7 +303,7 @@ TEST_F(CaseCommandProgramTest,
       loom_module_value_type(module_, program_arguments[0])));
 
   const loom_block_t* program_block = loom_region_const_entry_block(
-      loom_command_program_def_body(program_symbol.defining_op));
+      loom_command_def_body(program_symbol.defining_op));
   const loom_op_t* concurrent_op = nullptr;
   const loom_op_t* direct_launch = nullptr;
   const loom_op_t* body_op = nullptr;

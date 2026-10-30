@@ -15,7 +15,7 @@ kernel.def @write_specialization_marker() {
 // Every scalar specialization must reach command lowering with its exact
 // value. Float checks compare raw negative-zero encodings so numeric conversion
 // through a wider host type cannot silently erase representation identity.
-command.program.def target(@execution) @all_scalar_specializations(%index_value: index, %offset_value: offset, %boolean_value: i1, %byte_value: i8, %halfword_value: i16, %word_value: i32, %doubleword_value: i64, %e4m3_value: f8E4M3, %e5m2_value: f8E5M2, %half_value: f16, %brain_value: bf16, %single_value: f32, %double_value: f64) launch(%output: buffer) where [range(%index_value, 17, 17), finite(%single_value)] {
+command.def target(@execution) @all_scalar_specializations(%index_value: index, %offset_value: offset, %boolean_value: i1, %byte_value: i8, %halfword_value: i16, %word_value: i32, %doubleword_value: i64, %e4m3_value: f8E4M3, %e5m2_value: f8E5M2, %half_value: f16, %brain_value: bf16, %single_value: f32, %double_value: f64) launch(%output: buffer) where [range(%index_value, 17, 17), finite(%single_value)] {
   %expected_index = index.constant 17 : index
   %expected_offset = index.constant 23 : offset
   %expected_boolean = scalar.constant true : i1

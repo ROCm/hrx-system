@@ -52,7 +52,7 @@ template.def<@mark_earlier> @mark_earlier_impl(%earlier: i1, %output: buffer) {
   template.return
 }
 
-command.program.def @consume(%earlier: i1) launch(%storage: buffer, %output: buffer) {
+command.def @consume(%earlier: i1) launch(%storage: buffer, %output: buffer) {
   %slot = index.constant 1 : index
   command.concurrent {
     kernel.launch @mark_current[%storage](%slot, %output) : [buffer](index, buffer)
@@ -62,7 +62,7 @@ command.program.def @consume(%earlier: i1) launch(%storage: buffer, %output: buf
   command.return
 }
 
-command.program.def @observe(%initial: i32) launch(%output: buffer) {
+command.def @observe(%initial: i32) launch(%output: buffer) {
   %bytes = index.constant 4 : offset
   %storage = buffer.alloca<global> align(16) %bytes : buffer
   kernel.launch @publish(%initial, %storage) : (i32, buffer)
@@ -74,26 +74,26 @@ command.program.def @observe(%initial: i32) launch(%output: buffer) {
   %c1 = scalar.constant 1 : i32
   %replacement = scalar.xori %initial, %c1 : i32
   kernel.launch @publish(%replacement, %storage) : (i32, buffer)
-  command.program.launch @consume[%earlier](%storage, %output) : [i1](buffer, buffer)
+  command.launch @consume[%earlier](%storage, %output) : [i1](buffer, buffer)
   command.return
 }
 
-command.program.def @initially_zero() launch(%output: buffer) {
+command.def @initially_zero() launch(%output: buffer) {
   %c0 = scalar.constant 0 : i32
-  command.program.launch @observe[%c0](%output) : [i32](buffer)
+  command.launch @observe[%c0](%output) : [i32](buffer)
   command.return
 }
 
-command.program.def @initially_one() launch(%output: buffer) {
+command.def @initially_one() launch(%output: buffer) {
   %c1 = scalar.constant 1 : i32
-  command.program.launch @observe[%c1](%output) : [i32](buffer)
+  command.launch @observe[%c1](%output) : [i32](buffer)
   command.return
 }
 
 // Every kernel configuration here is pure. Count realization still has to
 // handle the caller-authored device observation, without another read-only
 // configuration accidentally enabling it.
-command.program.def @only_earlier() launch(%output: buffer) {
+command.def @only_earlier() launch(%output: buffer) {
   %bytes = index.constant 4 : offset
   %storage = buffer.alloca<global> align(16) %bytes : buffer
   %c0 = scalar.constant 0 : i32

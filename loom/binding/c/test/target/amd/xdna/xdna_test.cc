@@ -421,7 +421,7 @@ low.func.def target<amd.xdna.aie2p.configuration>(@device) @invoke() asm {
   binding.unused %c0
   return
 }
-command.program.def public @dispatch() launch(%buffer: buffer) {
+command.def public @dispatch() launch(%buffer: buffer) {
   kernel.launch @configured(%buffer) : (buffer)
   command.return
 }

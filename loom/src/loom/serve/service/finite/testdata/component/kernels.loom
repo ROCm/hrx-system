@@ -13,7 +13,7 @@ kernel.def target(@device) @prepare_factor() {
   kernel.return
 }
 
-command.program.def public @prepare_weights() launch(%storage: buffer) {
+command.def public @prepare_weights() launch(%storage: buffer) {
   kernel.launch @prepare_factor(%storage) : (buffer)
   command.return
 }
@@ -41,7 +41,7 @@ kernel.def target(@device) @scale() {
 
 kernel.entry.decl target(@device) @copy(%input: buffer, %output: buffer)
 
-command.program.def public @project() launch(%weights: buffer, %input: buffer, %output: buffer) {
+command.def public @project() launch(%weights: buffer, %input: buffer, %output: buffer) {
   %factor = command.parameter %weights, "factor" : view<1xf32>
   %c16 = index.constant 16 : offset
   %hidden = buffer.alloca<global> align(16) %c16 : buffer

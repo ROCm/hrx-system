@@ -86,7 +86,7 @@ typedef struct loom_cmd_lower_plan_t {
   const loom_cmd_lower_dispatch_t* dispatches;
 } loom_cmd_lower_plan_t;
 
-// Replaces one specialized command.program.def with a targetless,
+// Replaces one specialized command.def with a targetless,
 // zero-signature command_program low.func.def using the cmd.core
 // representation contract.
 //

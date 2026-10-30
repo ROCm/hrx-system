@@ -155,11 +155,11 @@ static iree_status_t loom_run_hal_command_scenario_find_program(
                             (int)name.size, name.data);
   }
   const loom_symbol_t* symbol = &module->symbols.entries[symbol_id];
-  if (!loom_command_program_def_isa(symbol->defining_op)) {
+  if (!loom_command_def_isa(symbol->defining_op)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "command scenario subject '@%.*s' is not a command.program.def",
-        (int)name.size, name.data);
+        "command scenario subject '@%.*s' is not a command.def", (int)name.size,
+        name.data);
   }
   *out_ref = (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id};
   *out_program = loom_func_like_cast(module, symbol->defining_op);
@@ -442,16 +442,16 @@ static iree_status_t loom_run_hal_command_scenario_build_wrapper(
   IREE_RETURN_IF_ERROR(
       loom_run_hal_command_scenario_add_wrapper_symbol(module, &wrapper_ref));
   const loom_symbol_ref_t target = loom_func_like_target(program);
-  loom_command_program_def_build_flags_t build_flags = 0;
+  loom_command_def_build_flags_t build_flags = 0;
   if (loom_symbol_ref_is_valid(target)) {
-    build_flags |= LOOM_COMMAND_PROGRAM_DEF_BUILD_FLAG_HAS_TARGET;
+    build_flags |= LOOM_COMMAND_DEF_BUILD_FLAG_HAS_TARGET;
   }
 
   loom_builder_t builder;
   loom_builder_initialize(module, &module->arena, loom_module_block(module),
                           &builder);
   loom_op_t* wrapper_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_command_program_def_build(
+  IREE_RETURN_IF_ERROR(loom_command_def_build(
       &builder, build_flags, /*visibility=*/0, /*retain=*/0, target,
       wrapper_ref,
       /*specializations_types=*/NULL,
@@ -475,7 +475,7 @@ static iree_status_t loom_run_hal_command_scenario_build_wrapper(
         (void**)&specialization_values));
   }
   const loom_builder_ip_t module_ip = loom_builder_enter_region(
-      &builder, wrapper_op, loom_command_program_def_body(wrapper_op));
+      &builder, wrapper_op, loom_command_def_body(wrapper_op));
   // The wrapper has no specialization arguments and therefore owns no scalar
   // predicates. The launched program retains its predicate contract, which is
   // proved against the concrete constants materialized below.
@@ -488,7 +488,7 @@ static iree_status_t loom_run_hal_command_scenario_build_wrapper(
         program.op->location, &specialization_values[i]));
   }
   loom_op_t* launch_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_command_program_launch_build(
+  IREE_RETURN_IF_ERROR(loom_command_launch_build(
       &builder, program_ref, specialization_values, specialization_count,
       wrapper_arguments, wrapper_argument_count, program.op->location,
       &launch_op));

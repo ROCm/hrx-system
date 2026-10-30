@@ -96,7 +96,7 @@ void launch_outside_command(Bytes output) {
 using Bytes = loom::type::buffer<unsigned char>;
 [[loom::command_program]] void child([[loom::launch]] Bytes output);
 void command_launch_outside_command(Bytes output) {
-  // ERROR@+1: LOWERING/059 "command.program.launch requires a command_program body"
+  // ERROR@+1: LOWERING/059 "command.launch requires a command_program body"
   loom::command::launch<child>(output);
 }
 

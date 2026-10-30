@@ -72,7 +72,7 @@ kernel.def target(@fixture_target) @pixels() {
   kernel.return
 }
 
-command.program.def public @generate_image() launch(%request: buffer, %rgb: buffer) {
+command.def public @generate_image() launch(%request: buffer, %rgb: buffer) {
   %batch = config.get @fixture.batch : index
   %stride = index.constant 8 : offset
   %length = index.scale %batch, %stride : index, offset -> offset

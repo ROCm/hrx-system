@@ -1337,16 +1337,16 @@ void Functions::build_declarations(Types& types, Locations& locations,
       auto predicates = function_contracts_.bind(
           symbol, types, signature.source_identities,
           FunctionContractSignature::Flattened, source);
-      loom_command_program_decl_build_flags_t flags =
-          LOOM_COMMAND_PROGRAM_DECL_BUILD_FLAG_HAS_VISIBILITY;
+      loom_command_decl_build_flags_t flags =
+          LOOM_COMMAND_DECL_BUILD_FLAG_HAS_VISIBILITY;
       if (loom_symbol_ref_is_valid(target)) {
-        flags |= LOOM_COMMAND_PROGRAM_DECL_BUILD_FLAG_HAS_TARGET;
+        flags |= LOOM_COMMAND_DECL_BUILD_FLAG_HAS_TARGET;
       }
       if (!predicates.empty()) {
-        flags |= LOOM_COMMAND_PROGRAM_DECL_BUILD_FLAG_HAS_PREDICATES;
+        flags |= LOOM_COMMAND_DECL_BUILD_FLAG_HAS_PREDICATES;
       }
       loom_op_t* op;
-      check(loom_command_program_decl_build(
+      check(loom_command_decl_build(
           builder, flags, LOOM_COMMAND_VISIBILITY_PUBLIC, /*retain=*/0, target,
           callees_.at({symbol->canonical(), ImplicitObjectABI::None}),
           signature.specialization_types.data(),
@@ -1527,17 +1527,17 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
         configuration_argument_count, locations.get(definition), &op));
   } else if (command_program) {
     const auto target = target_definitions_.reference(symbol);
-    loom_command_program_def_build_flags_t flags = 0;
+    loom_command_def_build_flags_t flags = 0;
     if (exported_.contains(symbol)) {
-      flags |= LOOM_COMMAND_PROGRAM_DEF_BUILD_FLAG_HAS_VISIBILITY;
+      flags |= LOOM_COMMAND_DEF_BUILD_FLAG_HAS_VISIBILITY;
     }
     if (loom_symbol_ref_is_valid(target)) {
-      flags |= LOOM_COMMAND_PROGRAM_DEF_BUILD_FLAG_HAS_TARGET;
+      flags |= LOOM_COMMAND_DEF_BUILD_FLAG_HAS_TARGET;
     }
     if (!predicates.empty()) {
-      flags |= LOOM_COMMAND_PROGRAM_DEF_BUILD_FLAG_HAS_PREDICATES;
+      flags |= LOOM_COMMAND_DEF_BUILD_FLAG_HAS_PREDICATES;
     }
-    check(loom_command_program_def_build(
+    check(loom_command_def_build(
         builder, flags,
         exported_.contains(symbol) ? LOOM_COMMAND_VISIBILITY_PUBLIC : 0,
         /*retain=*/0, target,
@@ -1683,7 +1683,7 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
   }
   auto* region = check_case            ? loom_check_case_body(op)
                  : check_scenario      ? loom_check_scenario_body(op)
-                 : command_program     ? loom_command_program_def_body(op)
+                 : command_program     ? loom_command_def_body(op)
                  : kernel              ? loom_kernel_def_body(op)
                  : template_definition ? loom_template_def_body(op)
                                        : loom_func_def_body(op);

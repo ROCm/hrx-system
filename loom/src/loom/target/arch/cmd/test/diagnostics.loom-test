@@ -17,7 +17,7 @@ kernel.def @combined(%earlier: i1, %storage: buffer) {
   kernel.return
 }
 
-command.program.def public @earlier_observation() launch(%storage: buffer, %output: buffer) {
+command.def public @earlier_observation() launch(%storage: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %words = buffer.view %storage[%origin] : buffer -> view<1xi32>
   // One expression needs both sides of the write. It cannot become one reload
@@ -36,14 +36,14 @@ command.program.def public @earlier_observation() launch(%storage: buffer, %outp
 
 // RUN: emit command-program @entry
 
-command.program.def @recursive() launch() {
-  // ERROR@+1: LOWERING/044 {op_name="command.program.launch", phase_name="inline-callables", callee_name="recursive", failure_code="required_cycle"}
-  command.program.launch @recursive() : ()
+command.def @recursive() launch() {
+  // ERROR@+1: LOWERING/044 {op_name="command.launch", phase_name="inline-callables", callee_name="recursive", failure_code="required_cycle"}
+  command.launch @recursive() : ()
   command.return
 }
 
-command.program.def public @entry() launch() {
-  command.program.launch @recursive() : ()
+command.def public @entry() launch() {
+  command.launch @recursive() : ()
   command.return
 }
 
@@ -54,7 +54,7 @@ command.program.def public @entry() launch() {
 // ERROR@+1: LOWERING/050 {kernel_name="external_kernel"}
 kernel.decl @external_kernel(%workgroup_count_x: index) launch()
 
-command.program.def public @external_entry(%workgroup_count_x: index) launch() {
+command.def public @external_entry(%workgroup_count_x: index) launch() {
   kernel.launch @external_kernel[%workgroup_count_x]() : [index]()
   command.return
 }
@@ -65,7 +65,7 @@ command.program.def public @external_entry(%workgroup_count_x: index) launch() {
 
 kernel.entry.decl @configured()
 
-command.program.def public @dynamic_dispatch(%workgroup_count_x: index) launch() {
+command.def public @dynamic_dispatch(%workgroup_count_x: index) launch() {
   // ERROR@+1: LOWERING/051 {kernel_name="configured", dimension="0", requirement="an exact unsigned 32-bit value"}
   kernel.dispatch @configured[%workgroup_count_x]() : [index]()
   command.return
@@ -82,7 +82,7 @@ kernel.def @configured_from_workload(%workgroup_count_x: index) {
   kernel.return
 }
 
-command.program.def public @dynamic_launch(%workgroup_count_x: index) launch() {
+command.def public @dynamic_launch(%workgroup_count_x: index) launch() {
   // ERROR@+1: LOWERING/051 {kernel_name="configured_from_workload", dimension="0", requirement="an exact unsigned 32-bit value"}
   kernel.launch @configured_from_workload[%workgroup_count_x]() : [index]()
   command.return
@@ -94,7 +94,7 @@ command.program.def public @dynamic_launch(%workgroup_count_x: index) launch() {
 
 kernel.entry.decl @range_checked()
 
-command.program.def public @invalid_dispatch() launch() {
+command.def public @invalid_dispatch() launch() {
   %negative = index.constant -1 : index
   // ERROR@+1: LOWERING/051 {kernel_name="range_checked", dimension="0", requirement="within the unsigned 32-bit range"}
   kernel.dispatch @range_checked[%negative]() : [index]()
@@ -107,7 +107,7 @@ command.program.def public @invalid_dispatch() launch() {
 
 kernel.entry.decl @overridden_entry()
 
-command.program.def public @workgroup_size_override(%size_x: index, %size_y: index, %size_z: index) launch() {
+command.def public @workgroup_size_override(%size_x: index, %size_y: index, %size_z: index) launch() {
   %c1 = index.constant 1 : index
   // ERROR@+1: LOWERING/055 {kernel_name="overridden_entry"}
   kernel.dispatch @overridden_entry[%c1]() workgroup_size(%size_x, %size_y, %size_z) : [index]()
@@ -120,7 +120,7 @@ command.program.def public @workgroup_size_override(%size_x: index, %size_y: ind
 
 kernel.entry.decl @scalar_entry(%scale: i32)
 
-command.program.def public @dynamic_argument(%scale: i32) launch() {
+command.def public @dynamic_argument(%scale: i32) launch() {
   %c1 = index.constant 1 : index
   // ERROR@+1: LOWERING/052 {kernel_name="scalar_entry", argument_index="0", actual_type="i32", requirement="an exact scalar bit pattern"}
   kernel.dispatch @scalar_entry[%c1](%scale) : [index](i32)
@@ -135,7 +135,7 @@ kernel.entry.decl @write_counts(%counts: view<3xi32>)
 
 kernel.entry.decl @use_counts()
 
-command.program.def public @unordered_indirect_dispatch() launch() {
+command.def public @unordered_indirect_dispatch() launch() {
   %c0 = index.constant 0 : offset
   %c1 = index.constant 1 : index
   %count_bytes = index.constant 12 : offset
@@ -155,7 +155,7 @@ command.program.def public @unordered_indirect_dispatch() launch() {
 
 kernel.entry.decl @unplaced_counts()
 
-command.program.def public @unplaced_indirect_dispatch(%byte_offset: offset) launch(%count_storage: buffer) {
+command.def public @unplaced_indirect_dispatch(%byte_offset: offset) launch(%count_storage: buffer) {
   %counts = buffer.view %count_storage[%byte_offset] : buffer -> view<3xi32>
   // ERROR@+1: LOWERING/054 {kernel_name="unplaced_counts", requirement="an exact aligned buffer range"}
   kernel.dispatch @unplaced_counts[%counts]() : [view<3xi32>]()
@@ -168,7 +168,7 @@ command.program.def public @unplaced_indirect_dispatch(%byte_offset: offset) lau
 
 kernel.entry.decl @consume_scratch(%scratch: buffer)
 
-command.program.def public @unbounded_scratch(%byte_length: offset) launch() {
+command.def public @unbounded_scratch(%byte_length: offset) launch() {
   %workgroups = index.constant 1 : index
   // ERROR@+1: LOWERING/065 {requirement="a finite positive byte-length maximum"}
   %scratch = buffer.alloca<global> align(64) %byte_length : buffer
@@ -182,7 +182,7 @@ command.program.def public @unbounded_scratch(%byte_length: offset) launch() {
 
 kernel.entry.decl @consume_scratch(%scratch: buffer)
 
-command.program.def public @local_scratch() launch() {
+command.def public @local_scratch() launch() {
   %workgroups = index.constant 1 : index
   %byte_length = index.constant 64 : offset
   // ERROR@+1: LOWERING/065 {requirement="global memory"}
@@ -197,7 +197,7 @@ command.program.def public @local_scratch() launch() {
 
 kernel.entry.decl @consume(%storage: buffer)
 
-command.program.def public @unnamed_parameter_base() launch(%input: buffer) {
+command.def public @unnamed_parameter_base() launch(%input: buffer) {
   %origin = index.constant 0 : offset
   %view = buffer.view %input[%origin] : buffer -> view<8xi32>
   // ERROR@+1: LOWERING/069
@@ -213,7 +213,7 @@ command.program.def public @unnamed_parameter_base() launch(%input: buffer) {
 
 kernel.entry.decl @consume(%storage: buffer)
 
-command.program.def public @transient_parameter_base() launch() {
+command.def public @transient_parameter_base() launch() {
   %origin = index.constant 0 : offset
   %bytes = index.constant 32 : offset
   %scratch = buffer.alloca<global> align(256) %bytes : buffer

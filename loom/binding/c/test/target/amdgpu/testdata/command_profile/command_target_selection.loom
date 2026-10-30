@@ -32,12 +32,12 @@ kernel.def target(@cdna) @write_cdna() {
   kernel.return
 }
 
-command.program.def target(@device) @nested_dispatch() launch() {
+command.def target(@device) @nested_dispatch() launch() {
   template.apply<@submit>() : ()
   command.return
 }
 
-command.program.def public target(@device) @dispatch() launch() {
-  command.program.launch @nested_dispatch() : ()
+command.def public target(@device) @dispatch() launch() {
+  command.launch @nested_dispatch() : ()
   command.return
 }

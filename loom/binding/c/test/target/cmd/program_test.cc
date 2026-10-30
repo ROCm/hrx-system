@@ -188,12 +188,12 @@ kernel.def @second() {
   kernel.return
 }
 
-command.program.def @private_root() launch(%storage: buffer) {
+command.def @private_root() launch(%storage: buffer) {
   kernel.launch @first(%storage) : (buffer)
   command.return
 }
 
-command.program.def public @public_root() launch(%storage: buffer) {
+command.def public @public_root() launch(%storage: buffer) {
   kernel.launch @first(%storage) : (buffer)
   kernel.launch @second(%storage) : (buffer)
   command.return
@@ -300,7 +300,7 @@ kernel.def @classified() {
 
 kernel.entry.decl @external(%storage: buffer)
 
-command.program.def public @public_root() launch(%storage: buffer) {
+command.def public @public_root() launch(%storage: buffer) {
   %small = index.constant 64 : index
   %large = index.constant 256 : index
   %unit = index.constant 1 : index
@@ -310,7 +310,7 @@ command.program.def public @public_root() launch(%storage: buffer) {
   command.return
 }
 
-command.program.def @private_root() launch(%storage: buffer) {
+command.def @private_root() launch(%storage: buffer) {
   %small = index.constant 64 : index
   kernel.launch @classified(%small, %storage) : (index, buffer)
   command.return
@@ -602,7 +602,7 @@ kernel.def @configured() {
 kernel.decl @configured() launch()
 kernel.entry.decl @external()
 
-command.program.def public @entry() launch() {
+command.def public @entry() launch() {
   %one = index.constant 1 : index
   kernel.launch @configured() : ()
   kernel.dispatch @external[%one]() : [index]()
@@ -680,7 +680,7 @@ pipeline.def<kernel> @resident(%pattern: vector<[%width]xi32>, %width: index) ru
   func.call @consume(%width, %parameters, %pattern) : (index, view<[%width]xi8>, vector<[%width]xi32>)
   pipeline.finish
 }
-command.program.def public @embed() launch(%checkpoint: buffer, %output: buffer) {
+command.def public @embed() launch(%checkpoint: buffer, %output: buffer) {
   %small = index.constant 64 : index
   %large = index.constant 128 : index
   %zero = index.constant 0 : index
@@ -801,9 +801,9 @@ TEST(TargetCmdProgramTest, RejectsUnresolvedPipelineSpecializations) {
                         "where [ge(%width, 64)] { pipeline.finish }\n";
     const std::string command =
         scenario == 0
-            ? "command.program.def public @embed(%width: index) "
+            ? "command.def public @embed(%width: index) "
               "launch(%output: buffer) {\n"
-            : "command.program.def public @embed() launch(%output: buffer) {\n"
+            : "command.def public @embed() launch(%output: buffer) {\n"
               "%width = index.constant " +
                   std::string(scenario == 1 ? "63" : "64") + " : index\n";
     const std::string text = declaration + command +
@@ -880,7 +880,7 @@ kernel.def @ordinary(%width: index) {
 } launch(%output: buffer) {
   kernel.return
 }
-command.program.def public @embed() launch(%output: buffer) {
+command.def public @embed() launch(%output: buffer) {
   %width = index.constant 64 : index
   %value = scalar.constant 1.0 : f32
 )";

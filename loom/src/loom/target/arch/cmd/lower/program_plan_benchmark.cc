@@ -154,7 +154,7 @@ class ProgramPlanFixture {
 
 )");
       }
-      source.append("command.program.def public @root() launch() {\n");
+      source.append("command.def public @root() launch() {\n");
       for (iree_host_size_t i = 0; i < launch_count; ++i) {
         source.append("  kernel.launch @kernel_");
         source.append(std::to_string(i));
@@ -179,7 +179,7 @@ kernel.def @tiles(%count_storage: buffer) {
   kernel.return
 }
 
-command.program.def public @root() launch(%count_storage: buffer) {
+command.def public @root() launch(%count_storage: buffer) {
   %unique_counts = buffer.assume.noalias %count_storage : buffer
 )");
       for (iree_host_size_t i = 0; i < launch_count; ++i) {
@@ -232,7 +232,7 @@ kernel.def @tiles(%extent: index) {
 )");
     }
 
-    source.append(R"(command.program.def public @root() launch() {
+    source.append(R"(command.def public @root() launch() {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %cN = index.constant )");

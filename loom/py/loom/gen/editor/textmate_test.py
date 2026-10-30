@@ -90,7 +90,10 @@ def test_loom_grammar_uses_generated_op_and_type_metadata() -> None:
     assert "func" in serialized
     assert "return" in serialized
     assert "command" in serialized
-    assert "program\\\\.launch" in serialized
+    op_name_patterns = grammar["repository"]["op-names"]["patterns"]  # type: ignore[index]
+    command_pattern = next(pattern["match"] for pattern in op_name_patterns if "(command)" in pattern["match"])
+    assert "launch" in command_pattern
+    assert "program" not in command_pattern
     type_pattern = grammar["repository"]["types"]["patterns"][0]["match"]  # type: ignore[index]
     assert "hal\\.buffer" in type_pattern
     assert "tile" in serialized

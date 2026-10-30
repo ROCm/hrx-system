@@ -265,7 +265,7 @@ Structured compute belongs in the narrowest boundary that owns it:
 | --- | --- |
 | Decode a block format, reduce lanes, or compute one logical tile | `func.def` or `template.def` motif. |
 | Map work across workgroups and workitems, access buffers, and synchronize | `kernel.def`. |
-| Sequence launches and bind reusable resources | `command.program.def`. |
+| Sequence launches and bind reusable resources | `command.def`. |
 | Choose a target-specific implementation of a shared contract | Template provider plus target requirements. |
 
 This separation is what lets a format decoder feed a scalar kernel, a vector

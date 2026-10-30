@@ -112,7 +112,7 @@ kernel.def target(@speech_target) @publish_block() {
 
 // Compiler-private workspace lasts for both kernels in this command. The
 // separate stream bank carries only state needed by the next command.
-command.program.def public @step_audio() launch(%work: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+command.def public @step_audio() launch(%work: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
   %length = index.constant 144 : offset
   %intermediate = buffer.alloca<global> align(16) %length : buffer
   kernel.launch @audio_block(%work, %request, %conditioning, %state, %intermediate) : (buffer, buffer, buffer, buffer, buffer)
@@ -148,7 +148,7 @@ kernel.def target(@speech_target) @initialize() {
   kernel.return
 }
 
-command.program.def public @initialize_audio() launch(%work: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+command.def public @initialize_audio() launch(%work: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
   kernel.launch @initialize(%work, %request, %conditioning, %state, %output) : (buffer, buffer, buffer, buffer, buffer)
   command.return
 }

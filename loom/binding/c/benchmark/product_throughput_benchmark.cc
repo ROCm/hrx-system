@@ -52,7 +52,7 @@ static std::string BuildIndependentKernelSource(
 
 )");
   }
-  source.append("command.program.def public @root() launch() {\n");
+  source.append("command.def public @root() launch() {\n");
   for (uint32_t i = 0; i < launched_kernel_count; ++i) {
     source.append("  kernel.launch @kernel_");
     source.append(std::to_string(i));

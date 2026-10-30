@@ -13,7 +13,7 @@ using MutableBytes = loomt::buffer<unsigned char>;
 }
 
 // ----
-command.program.def public @decode.static(%variant: i32) launch(%parameters: buffer, %output: buffer) {
+command.def public @decode.static(%variant: i32) launch(%parameters: buffer, %output: buffer) {
   command.return
 }
 
@@ -35,7 +35,7 @@ using Output = loomt::view<loomt::shape<loomt::dynamic, 4>, float, loomt::encodi
 }
 
 // ----
-command.program.def public @decode.dynamic(%tokens: i32, %output_dim0: index, %output_layout: encoding<layout>) launch(%parameters: buffer, %output: view<[%output_dim0]x4xf32, %output_layout>) where [ne(%tokens, 0)] {
+command.def public @decode.dynamic(%tokens: i32, %output_dim0: index, %output_layout: encoding<layout>) launch(%parameters: buffer, %output: view<[%output_dim0]x4xf32, %output_layout>) where [ne(%tokens, 0)] {
   command.return
 }
 
@@ -45,7 +45,7 @@ command.program.def public @decode.dynamic(%tokens: i32, %output_dim0: index, %o
 [[loom::command_program]] void prepare(unsigned count) { (void)count; }
 
 // ----
-command.program.def public @prepare(%count: i32) launch() {
+command.def public @prepare(%count: i32) launch() {
   command.return
 }
 
@@ -72,18 +72,18 @@ using Output = loomt::view<loomt::shape<loomt::dynamic, 4>, float, loomt::encodi
 }
 
 // ----
-command.program.def public @decode.root(%tokens: i32, %output_dim0: index, %output_layout: encoding<layout>) launch(%parameters: buffer, %output: view<[%output_dim0]x4xf32, %output_layout>) {
+command.def public @decode.root(%tokens: i32, %output_dim0: index, %output_layout: encoding<layout>) launch(%parameters: buffer, %output: view<[%output_dim0]x4xf32, %output_layout>) {
   command.serial {
-    command.program.launch @decode.leaf[%tokens, %output_dim0, %output_layout](%parameters, %output) : [i32, index, encoding<layout>](buffer, view<[%output_dim0]x4xf32, %output_layout>)
+    command.launch @decode.leaf[%tokens, %output_dim0, %output_layout](%parameters, %output) : [i32, index, encoding<layout>](buffer, view<[%output_dim0]x4xf32, %output_layout>)
     command.concurrent {
-      command.program.launch @decode.leaf[%tokens, %output_dim0, %output_layout](%parameters, %output) : [i32, index, encoding<layout>](buffer, view<[%output_dim0]x4xf32, %output_layout>)
-      command.program.launch @decode.leaf[%tokens, %output_dim0, %output_layout](%parameters, %output) : [i32, index, encoding<layout>](buffer, view<[%output_dim0]x4xf32, %output_layout>)
+      command.launch @decode.leaf[%tokens, %output_dim0, %output_layout](%parameters, %output) : [i32, index, encoding<layout>](buffer, view<[%output_dim0]x4xf32, %output_layout>)
+      command.launch @decode.leaf[%tokens, %output_dim0, %output_layout](%parameters, %output) : [i32, index, encoding<layout>](buffer, view<[%output_dim0]x4xf32, %output_layout>)
     }
   }
   command.return
 }
 
-command.program.decl public @decode.leaf(%5: i32, %6: index, %7: encoding<layout>) launch(%8: buffer, %9: view<[%6]x4xf32, %7>)
+command.decl public @decode.leaf(%5: i32, %6: index, %7: encoding<layout>) launch(%8: buffer, %9: view<[%6]x4xf32, %7>)
 
 // ====
 // Kernels use the same explicit launch spelling and typed buffers materialize
@@ -121,7 +121,7 @@ kernel.def @copy() {
   kernel.return
 }
 
-command.program.def public @run_copy(%count: i32) launch(%input: buffer, %output: buffer) {
+command.def public @run_copy(%count: i32) launch(%input: buffer, %output: buffer) {
   kernel.launch @copy(%count, %input, %output) : (i32, buffer, buffer)
   command.return
 }
@@ -144,7 +144,7 @@ using Layout = loomt::encoding<loom::encoding::role::layout, 2>;
 }
 
 // ----
-command.program.def public @resolve_weight(%rows: index, %layer: index) launch(%parameters: buffer) {
+command.def public @resolve_weight(%rows: index, %layer: index) launch(%parameters: buffer) {
   %layout = encoding.layout.dense : encoding<layout>
   %weight = command.parameter %parameters, "blk.{}.weight"[%layer] : view<[%rows]x4xf32, %layout>
   %base = command.parameter.base %weight : view<[%rows]x4xf32, %layout> -> buffer
@@ -199,7 +199,7 @@ kernel.def @configured(%count: i32, %counts: buffer, %counts_byte_offset: offset
   kernel.return
 }
 
-command.program.def public @run_configured(%count: i32) launch(%counts: buffer, %output: buffer) {
+command.def public @run_configured(%count: i32) launch(%counts: buffer, %output: buffer) {
   %counts_byte_offset = index.constant 0 : offset
   kernel.launch @configured[%count, %counts, %counts_byte_offset](%output) : [i32, buffer, offset](buffer)
   command.return

@@ -1548,25 +1548,25 @@ kernel.def @decode_kernel() {
   kernel.return
 }
 
-command.program.def public target(@prefill_device) @prefill_program() launch() {
+command.def public target(@prefill_device) @prefill_program() launch() {
   kernel.launch @prefill_kernel() : ()
   command.return
 }
 
-command.program.def public target(@decode_device) @decode_program() launch() {
+command.def public target(@decode_device) @decode_program() launch() {
   kernel.launch @decode_kernel() : ()
   command.return
 }
 
-command.program.def public target(@batch_device) @batch_program() launch() {
+command.def public target(@batch_device) @batch_program() launch() {
   kernel.launch @prefill_kernel() : ()
   command.return
 }
 
 func.def public @host() {
-  command.program.launch @prefill_program() : ()
-  command.program.launch @decode_program() : ()
-  command.program.launch @batch_program() : ()
+  command.launch @prefill_program() : ()
+  command.launch @decode_program() : ()
+  command.launch @batch_program() : ()
   func.return
 }
 

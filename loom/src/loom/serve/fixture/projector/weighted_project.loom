@@ -27,7 +27,7 @@ kernel.def target(@fixture_target) @project_bias() {
   kernel.return
 }
 
-command.program.def public @weighted_project() launch(%weights: buffer, %input: buffer, %output: buffer) {
+command.def public @weighted_project() launch(%weights: buffer, %input: buffer, %output: buffer) {
   %bias = command.parameter %weights, "bias" : view<1xi32>
   kernel.launch @project(%input, %output) : (buffer, buffer)
   kernel.launch @project_bias(%bias, %input, %output) : (view<1xi32>, buffer, buffer)

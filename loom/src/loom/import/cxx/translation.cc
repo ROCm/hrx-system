@@ -2421,7 +2421,7 @@ class Translator final : private Initialization::Evaluation {
   void command_launch(cxx::CallExpressionAST* call,
                       const CommandLaunchIntrinsic& launch) {
     if (current_function_.kind != FunctionKind::CommandProgram) {
-      fail(call, "command.program.launch requires a command_program body");
+      fail(call, "command.launch requires a command_program body");
     }
     std::vector<loom_value_id_t> specializations;
     std::vector<loom_value_id_t> bindings;
@@ -2429,7 +2429,7 @@ class Translator final : private Initialization::Evaluation {
                             /*buffer_materializations=*/{}, specializations,
                             bindings);
     loom_op_t* op;
-    check(loom_command_program_launch_build(
+    check(loom_command_launch_build(
         &builder_, functions_.declare(launch.program, call),
         specializations.data(), specializations.size(), bindings.data(),
         bindings.size(), locations_.get(call), &op));

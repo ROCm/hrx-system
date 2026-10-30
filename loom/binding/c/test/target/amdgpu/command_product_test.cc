@@ -52,7 +52,7 @@ kernel.def target(@device) @record_subgroup_size() {
   kernel.return
 }
 
-command.program.def public @dispatch() launch() {
+command.def public @dispatch() launch() {
   kernel.launch @record_subgroup_size() : ()
   command.return
 }

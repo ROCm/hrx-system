@@ -170,12 +170,12 @@ pipeline.def<kernel> target(@parameter_target) @double_factor() run(%storage: bu
   }
 }
 
-command.program.def public @prepare_factor() launch(%storage: buffer) {
+command.def public @prepare_factor() launch(%storage: buffer) {
   kernel.launch @double_factor(%storage) : (buffer)
   command.return
 }
 
-command.program.def public @embed_with_parameters() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+command.def public @embed_with_parameters() launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %factor = command.parameter %parameters, "factor" : view<1xf32>
   %width = index.constant 1 : index
   kernel.launch @resident_with_parameters[%width](%factor, %input, %output) : [index](view<1xf32>, buffer, buffer)

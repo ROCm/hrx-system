@@ -31,7 +31,7 @@ bool is_string_type(Types& types, const cxx::Type* type) {
 }  // namespace
 
 bool CommandLaunchIntrinsic::supports(std::string_view name) {
-  return name == "command.program.launch";
+  return name == "command.launch";
 }
 
 std::optional<CommandLaunchIntrinsic> CommandLaunchIntrinsic::resolve(
@@ -50,7 +50,7 @@ std::optional<CommandLaunchIntrinsic> CommandLaunchIntrinsic::resolve(
       signature->isVariadic() ||
       !unit.typeTraits().is_void(signature->returnType())) {
     fail(
-        "command.program.launch requires one binding and a fixed void "
+        "command.launch requires one binding and a fixed void "
         "signature");
   }
 
@@ -67,19 +67,19 @@ std::optional<CommandLaunchIntrinsic> CommandLaunchIntrinsic::resolve(
           : nullptr;
   if (!program || !programs.contains(program)) {
     fail(
-        "command.program.launch requires a command_program as its first "
+        "command.launch requires a command_program as its first "
         "template argument");
   }
   const auto& projection = programs.project(program, types, owner);
   auto parameters = signature->parameterTypes();
   if (parameters.size() != projection.source_types.size()) {
-    fail("command.program.launch arguments must match the command signature");
+    fail("command.launch arguments must match the command signature");
   }
   for (size_t index = 0; index < parameters.size(); ++index) {
     if (types.unqualified_value(parameters[index]) !=
         projection.source_types[index]) {
       fail(
-          "command.program.launch arguments must preserve the command source "
+          "command.launch arguments must preserve the command source "
           "types");
     }
   }

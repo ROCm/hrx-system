@@ -57,7 +57,7 @@ kernel.def @pack_factors() {
   kernel.return
 }
 
-command.program.def public @pack() launch(%output: buffer, %input: buffer) {
+command.def public @pack() launch(%output: buffer, %input: buffer) {
   kernel.launch @pack_factors(%output, %input) : (buffer, buffer)
   command.return
 }
@@ -91,7 +91,7 @@ kernel.def @packed_consumer() {
   kernel.return
 }
 
-command.program.def public @packed_target() launch(%weights: buffer, %output: buffer) {
+command.def public @packed_target() launch(%weights: buffer, %output: buffer) {
   %a = command.parameter %weights, "a" : view<12xbf16>
   %b = command.parameter %weights, "b" : view<12xbf16>
   %c = command.parameter %weights, "c" : view<12xbf16>

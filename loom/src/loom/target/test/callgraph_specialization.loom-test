@@ -293,12 +293,12 @@ kernel.def @kernel() {
   kernel.return
 }
 
-command.program.def public target(@device) @bound() launch() {
+command.def public target(@device) @bound() launch() {
   kernel.launch @kernel() : ()
   command.return
 }
 
-command.program.def public @unbound() launch() {
+command.def public @unbound() launch() {
   kernel.launch @kernel() : ()
   command.return
 }
@@ -324,12 +324,12 @@ kernel.def @kernel_spec0() {
   kernel.return
 }
 
-command.program.def public target(@device) @bound() launch() {
+command.def public target(@device) @bound() launch() {
   kernel.launch @kernel_spec0() : ()
   command.return
 }
 
-command.program.def public @unbound() launch() {
+command.def public @unbound() launch() {
   kernel.launch @kernel() : ()
   command.return
 }

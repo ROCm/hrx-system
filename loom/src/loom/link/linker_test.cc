@@ -359,15 +359,15 @@ TEST_F(LinkerTest, CommandDefinitionSupersedesMatchingDeclaration) {
   loom_module_t* harness = Parse(IREE_SV(R"(
 test.target<low_core> @test_target
 
-command.program.decl target(@test_target) @decode(%token_count: index) launch(%parameters: buffer)
+command.decl target(@test_target) @decode(%token_count: index) launch(%parameters: buffer)
 
-command.program.def public @entry(%token_count: index) launch(%parameters: buffer) {
-  command.program.launch @decode[%token_count](%parameters) : [index](buffer)
+command.def public @entry(%token_count: index) launch(%parameters: buffer) {
+  command.launch @decode[%token_count](%parameters) : [index](buffer)
   command.return
 }
 )"));
   loom_module_t* corpus = Parse(IREE_SV(R"(
-command.program.def @decode(%token_count: index) launch(%parameters: buffer) {
+command.def @decode(%token_count: index) launch(%parameters: buffer) {
   command.return
 }
 )"));
@@ -376,10 +376,10 @@ command.program.def @decode(%token_count: index) launch(%parameters: buffer) {
   Verify(linked);
 
   std::string text = Print(linked);
-  EXPECT_EQ(text.find("command.program.decl @decode"), std::string::npos);
-  EXPECT_NE(text.find("command.program.def target(@test_target) @decode"),
+  EXPECT_EQ(text.find("command.decl @decode"), std::string::npos);
+  EXPECT_NE(text.find("command.def target(@test_target) @decode"),
             std::string::npos);
-  EXPECT_NE(text.find("command.program.launch @decode"), std::string::npos);
+  EXPECT_NE(text.find("command.launch @decode"), std::string::npos);
 }
 
 TEST_F(LinkerTest, ConcreteTargetRecordSupersedesDeclaration) {
@@ -873,10 +873,10 @@ func.def @identity(%x: i32) -> (i32) {
 
 TEST_F(LinkerTest, RejectsCommandSignaturePartitionConflict) {
   loom_module_t* harness = Parse(IREE_SV(R"(
-command.program.decl @program(%fixed: buffer) launch(%dynamic: buffer)
+command.decl @program(%fixed: buffer) launch(%dynamic: buffer)
 )"));
   loom_module_t* corpus = Parse(IREE_SV(R"(
-command.program.def @program() launch(%fixed: buffer, %dynamic: buffer) {
+command.def @program() launch(%fixed: buffer, %dynamic: buffer) {
   command.return
 }
 )"));

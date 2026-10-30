@@ -39,24 +39,24 @@ def _roundtrip(text: str) -> None:
 def test_program_definition_and_launch_roundtrip() -> None:
     text = """test.target<low_core> @gfx1100
 
-command.program.def public target(@gfx1100) @decode(%token_count: index) launch(%parameters: buffer, %weights: buffer) {
+command.def public target(@gfx1100) @decode(%token_count: index) launch(%parameters: buffer, %weights: buffer) {
   command.return
 }
 
-command.program.def @driver(%token_count: index) launch(%parameters: buffer, %weights: view<16xf16>) {
-  command.program.launch @decode[%token_count](%parameters, %weights) : [index](buffer, view<16xf16>)
+command.def @driver(%token_count: index) launch(%parameters: buffer, %weights: view<16xf16>) {
+  command.launch @decode[%token_count](%parameters, %weights) : [index](buffer, view<16xf16>)
   command.return
 }
 """
     module = _parse_module(text)
-    definitions = {symbol.name: symbol.op for symbol in module.symbols if symbol.op is not None and symbol.op.name == "command.program.def"}
+    definitions = {symbol.name: symbol.op for symbol in module.symbols if symbol.op is not None and symbol.op.name == "command.def"}
     assert definitions["decode"].attributes["specialization_count"] == 1
     assert definitions["driver"].attributes["specialization_count"] == 1
     _roundtrip(text)
 
 
 def test_program_declaration_roundtrip() -> None:
-    text = "command.program.decl @decode(%token_count: index) launch(%parameters: buffer, %transient: buffer)\n"
+    text = "command.decl @decode(%token_count: index) launch(%parameters: buffer, %transient: buffer)\n"
     module = _parse_module(text)
     declaration = module.symbols[0].op
     assert declaration is not None
@@ -65,12 +65,12 @@ def test_program_declaration_roundtrip() -> None:
 
 
 def test_program_without_specializations_roundtrip() -> None:
-    _roundtrip("command.program.def @static_program() launch(%parameters: buffer) {\n  command.return\n}\n")
+    _roundtrip("command.def @static_program() launch(%parameters: buffer) {\n  command.return\n}\n")
 
 
 def test_parameter_roundtrip() -> None:
     _roundtrip(
-        """command.program.def @parameters(%layer: index) launch(%parameters: buffer) {
+        """command.def @parameters(%layer: index) launch(%parameters: buffer) {
   %embedding = command.parameter %parameters, "token_embd.weight" : view<1024xi8>
   %query = command.parameter %parameters, "blk.{}.attn_q.weight"[%layer] : view<256xi8>
   %base = command.parameter.base %query : view<256xi8> -> buffer
@@ -82,16 +82,16 @@ def test_parameter_roundtrip() -> None:
 
 def test_structured_command_schedules_roundtrip() -> None:
     _roundtrip(
-        """command.program.def @scheduled() launch(%weights: view<16xf16>) {
+        """command.def @scheduled() launch(%weights: view<16xf16>) {
   command.serial {
     command.concurrent {
-      command.program.launch @leaf(%weights) : (view<16xf16>)
+      command.launch @leaf(%weights) : (view<16xf16>)
     }
   }
   command.return
 }
 
-command.program.def @leaf() launch(%weights: buffer) {
+command.def @leaf() launch(%weights: buffer) {
   command.return
 }
 """

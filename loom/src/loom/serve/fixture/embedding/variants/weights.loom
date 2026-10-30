@@ -20,7 +20,7 @@ kernel.def target(@parameter_target) @double_factor() {
   kernel.return
 }
 
-command.program.def public @prepare_factor() launch(%storage: buffer) {
+command.def public @prepare_factor() launch(%storage: buffer) {
   kernel.launch @double_factor(%storage) : (buffer)
   command.return
 }
@@ -66,7 +66,7 @@ kernel.def target(@parameter_target) @scale() {
   kernel.return
 }
 
-command.program.def public @embed_with_parameters() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+command.def public @embed_with_parameters() launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %factor = command.parameter %parameters, "factor" : view<1xf32>
   %units = config.get @fixture.units : index
   %c16 = index.constant 16 : offset

@@ -20,11 +20,11 @@ In this chapter, you will learn:
 
 ## The signature separates host decisions from storage
 
-[`command.program.def`](../reference/dialects/command/ops/program-def.md) has
+[`command.def`](../reference/dialects/command/ops/def.md) has
 two argument groups:
 
 ```loom
-command.program.def @project_layer(%layer: index, %element_count: index) launch(
+command.def @project_layer(%layer: index, %element_count: index) launch(
     %parameters: buffer, %input: buffer, %output: buffer) {
   // Reusable command schedule.
   command.return
@@ -53,7 +53,7 @@ callback outside the command artifact.
 
 A command program is not a pure function: launching a kernel and ordering work
 are its purpose. Those observable effects must nevertheless be represented by
-explicit command operations such as `kernel.launch`, `command.program.launch`,
+explicit command operations such as `kernel.launch`, `command.launch`,
 `command.serial`, and `command.concurrent`. Ordinary SSA computation around
 them is pure or deterministic read-only computation. Calls used to derive
 launch workloads carry the corresponding `pure` or `readonly` contract, just
@@ -90,7 +90,7 @@ disagree about which ABI carries a value.
 
     A `kernel.launch @entry[%count](...)` workload configures that kernel's
     physical launch without changing its device ABI. A
-    `command.program.launch @program[%variant](...)` specialization contributes
+    `command.launch @program[%variant](...)` specialization contributes
     facts to the complete reachable subgraph. Exact facts may change which
     kernels exist or make direct launch counts exact. Counts that intentionally
     remain issue-time dynamic use explicit indirect storage.
@@ -208,9 +208,9 @@ planning a direct portable command artifact.
 ## Compose programs through exact contracts
 
 Command programs are symbols. A bodyless
-[`command.program.decl`](../reference/dialects/command/ops/program-decl.md)
+[`command.decl`](../reference/dialects/command/ops/decl.md)
 records the exact specialization and binding contract required by one source
-module. [`command.program.launch`](../reference/dialects/command/ops/program-launch.md)
+module. [`command.launch`](../reference/dialects/command/ops/launch.md)
 provides both groups explicitly at each call site.
 
 The model module depends on the layer library and composes it in two

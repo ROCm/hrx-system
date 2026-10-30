@@ -28,7 +28,7 @@ kernel.def @value() {
   kernel.return
 }
 
-command.program.def public @attention() launch(%parameters: buffer, %input: buffer, %scratch: buffer, %query_output: buffer, %key_output: buffer, %value_output: buffer) {
+command.def public @attention() launch(%parameters: buffer, %input: buffer, %scratch: buffer, %query_output: buffer, %key_output: buffer, %value_output: buffer) {
   kernel.launch @prepare(%parameters, %input, %scratch) : (buffer, buffer, buffer)
   command.concurrent {
     kernel.launch @query(%parameters, %scratch, %query_output) : (buffer, buffer, buffer)
@@ -103,7 +103,7 @@ kernel.def @e() {
   kernel.return
 }
 
-command.program.def public @nested() launch() {
+command.def public @nested() launch() {
   command.concurrent {
     command.serial {
       kernel.launch @a() : ()
@@ -147,7 +147,7 @@ kernel.entry.decl @left(%storage: buffer)
 
 kernel.entry.decl @right(%storage: buffer)
 
-command.program.def public @kernel_schedule() launch(%count_storage: buffer, %storage: buffer) {
+command.def public @kernel_schedule() launch(%count_storage: buffer, %storage: buffer) {
   %c0 = index.constant 0 : offset
   %c1 = index.constant 1 : index
   %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>

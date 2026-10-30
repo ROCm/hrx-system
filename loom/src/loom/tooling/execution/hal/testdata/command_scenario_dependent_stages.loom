@@ -65,7 +65,7 @@ kernel.def @copy_stage_values() {
 
 // Each stage consumes the prior stage's result. The configuration changes the
 // number of dependent dispatches while all configurations share one scenario.
-command.program.def @dependent_stages(%configuration: index) launch(%parameters: buffer, %source: buffer, %target: buffer) where [range(%configuration, 0, 2)] {
+command.def @dependent_stages(%configuration: index) launch(%parameters: buffer, %source: buffer, %target: buffer) where [range(%configuration, 0, 2)] {
   %scratch_bytes = index.constant 64 : offset
   %scratch = buffer.alloca<global> align(16) %scratch_bytes : buffer
   %bias = command.parameter %parameters, "bias" : view<1xi32>

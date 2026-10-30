@@ -134,8 +134,8 @@ _PROGRAM_FUNC_LIKE = dict(
 )
 
 
-command_program_def = Op(
-    "command.program.def",
+command_def = Op(
+    "command.def",
     group=command_ops,
     phase=OpPhase.EXECUTABLE,
     doc=(
@@ -161,21 +161,21 @@ command_program_def = Op(
         ),
     ],
     interfaces=[FuncLikeInterface(**_PROGRAM_FUNC_LIKE, body="body")],
-    verify="loom_command_program_def_verify",
+    verify="loom_command_def_verify",
     format=[
         *_PROGRAM_MODIFIER_FORMAT,
         *_PROGRAM_SIGNATURE_FORMAT,
         Region("body"),
     ],
     examples=[
-        "command.program.def @decode(%token_count: index) launch(%parameters: buffer, %transient: buffer) {\n  command.return\n}",
-        "command.program.def public target(@gfx1100) @prefill(%token_count: index) launch(%parameters: buffer) {\n  command.return\n}",
+        "command.def @decode(%token_count: index) launch(%parameters: buffer, %transient: buffer) {\n  command.return\n}",
+        "command.def public target(@gfx1100) @prefill(%token_count: index) launch(%parameters: buffer) {\n  command.return\n}",
     ],
 )
 
 
-command_program_decl = Op(
-    "command.program.decl",
+command_decl = Op(
+    "command.decl",
     group=command_ops,
     phase=OpPhase.EXECUTABLE,
     doc="Bodyless declaration of a reusable command program.",
@@ -188,20 +188,20 @@ command_program_decl = Op(
         flags=[SymbolDefinitionFlag.DECLARATION],
     ),
     interfaces=[FuncLikeInterface(**_PROGRAM_FUNC_LIKE, args="args")],
-    verify="loom_command_program_decl_verify",
+    verify="loom_command_decl_verify",
     format=[
         *_PROGRAM_MODIFIER_FORMAT,
         *_PROGRAM_SIGNATURE_FORMAT,
     ],
     examples=[
-        "command.program.decl @decode(%token_count: index) launch(%parameters: buffer, %transient: buffer)",
-        "command.program.decl @static_program() launch(%parameters: buffer)",
+        "command.decl @decode(%token_count: index) launch(%parameters: buffer, %transient: buffer)",
+        "command.decl @static_program() launch(%parameters: buffer)",
     ],
 )
 
 
-command_program_launch = Op(
-    "command.program.launch",
+command_launch = Op(
+    "command.launch",
     group=command_ops,
     phase=OpPhase.EXECUTABLE,
     doc=(
@@ -230,7 +230,7 @@ command_program_launch = Op(
             kind=CallLikeKind.COMMAND_PROGRAM,
         ),
     ],
-    verify="loom_command_program_launch_verify",
+    verify="loom_command_launch_verify",
     format=[
         SymbolRef("callee"),
         OptionalGroup(
@@ -251,8 +251,8 @@ command_program_launch = Op(
         RPAREN,
     ],
     examples=[
-        "command.program.launch @decode[%token_count](%parameters, %transient) : [index](buffer, buffer)",
-        "command.program.launch @static_program(%parameters) : (buffer)",
+        "command.launch @decode[%token_count](%parameters, %transient) : [index](buffer, buffer)",
+        "command.launch @static_program(%parameters) : (buffer)",
     ],
 )
 
@@ -384,9 +384,9 @@ command_concurrent = _schedule(
 
 
 ALL_COMMAND_OPS: tuple[Op, ...] = (
-    command_program_def,
-    command_program_decl,
-    command_program_launch,
+    command_def,
+    command_decl,
+    command_launch,
     command_return,
     command_yield,
     command_serial,

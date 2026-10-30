@@ -20,7 +20,7 @@ kernel.def @increment_groups() {
   kernel.return
 }
 
-command.program.def public @advance_groups() launch(%storage: buffer) {
+command.def public @advance_groups() launch(%storage: buffer) {
   kernel.launch @increment_groups(%storage) : (buffer)
   command.return
 }
@@ -125,7 +125,7 @@ kernel.def @increment_7() {
   kernel.return
 }
 
-command.program.def public @advance() launch(%storage: buffer) {
+command.def public @advance() launch(%storage: buffer) {
   kernel.launch @increment_0(%storage) : (buffer)
   kernel.launch @increment_1(%storage) : (buffer)
   kernel.launch @increment_2(%storage) : (buffer)
@@ -138,7 +138,7 @@ command.program.def public @advance() launch(%storage: buffer) {
 }
 
 // A second command changes parent slots and repeats one cached native root.
-command.program.def public @selected_pair() launch(%storage: buffer) {
+command.def public @selected_pair() launch(%storage: buffer) {
   kernel.launch @increment_7(%storage) : (buffer)
   kernel.launch @increment_2(%storage) : (buffer)
   kernel.launch @increment_7(%storage) : (buffer)
@@ -161,7 +161,7 @@ kernel.def @store_boolean() {
 
 // Logical predicates stay byte-sized in the portable command while the native
 // target independently assigns and initializes its padded kernarg slots.
-command.program.def public @boolean_arguments() launch(%storage: buffer) {
+command.def public @boolean_arguments() launch(%storage: buffer) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %disabled = scalar.constant false : i1
@@ -220,7 +220,7 @@ kernel.def @temporary_read() {
   kernel.return
 }
 
-command.program.def public @temporary_advance() launch(%storage: buffer) {
+command.def public @temporary_advance() launch(%storage: buffer) {
   %bytes = config.get @increment.temporary_bytes : offset
   %temporary = buffer.alloca<global> align(16) %bytes : buffer
   kernel.launch @temporary_write(%storage, %temporary) : (buffer, buffer)
@@ -244,7 +244,7 @@ kernel.def @requires_host() {
   kernel.return
 }
 
-command.program.def public @invalid_native() launch(%storage: buffer) {
+command.def public @invalid_native() launch(%storage: buffer) {
   kernel.launch @increment_0(%storage) : (buffer)
   kernel.launch @increment_1(%storage) : (buffer)
   kernel.launch @increment_2(%storage) : (buffer)
@@ -261,17 +261,17 @@ kernel.entry.decl @dynamic_scalar(%value: i32)
 
 // Native requests are published before command argument lowering rejects the
 // dynamic scalar. Accepted native work remains useful without a parent product.
-command.program.def public @invalid_argument(%value: i32) launch(%storage: buffer) {
+command.def public @invalid_argument(%value: i32) launch(%storage: buffer) {
   kernel.launch @increment_0(%storage) : (buffer)
   %c1 = index.constant 1 : index
   kernel.dispatch @dynamic_scalar[%c1](%value) : [index](i32)
   command.return
 }
 
-command.program.def public @idle() launch() {
+command.def public @idle() launch() {
   command.return
 }
 
-command.program.def public @ambiguous() launch() {
+command.def public @ambiguous() launch() {
   command.return
 }

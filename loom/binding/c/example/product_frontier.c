@@ -40,7 +40,7 @@ static const char kSourceText[] =
     "\n"
     "kernel.entry.decl @external(%storage: buffer)\n"
     "\n"
-    "command.program.def public @run() launch(%storage: buffer) {\n"
+    "command.def public @run() launch(%storage: buffer) {\n"
     "  %one = index.constant 1 : index\n"
     "  kernel.launch @load(%storage) : (buffer)\n"
     "  kernel.launch @transform(%storage) : (buffer)\n"

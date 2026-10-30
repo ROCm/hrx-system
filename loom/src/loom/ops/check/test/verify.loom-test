@@ -445,7 +445,7 @@ check.scenario @wrong_invoke_result_signature {
 // ====
 
 // Command and pipeline specializations cannot depend on runtime trial values.
-command.program.decl @runtime_specialized_subject(%configuration: index) launch()
+command.decl @runtime_specialized_subject(%configuration: index) launch()
 
 check.scenario @runtime_specialization {
   check.trial[1](%trial: index, %entropy: check.entropy) {
@@ -544,7 +544,7 @@ check.scenario @dependent_results {
 // ABI bindings while retaining staged specialization outside the trial domain.
 kernel.decl @materialized_kernel() launch(%storage: buffer)
 
-command.program.decl @materialized_program(%configuration: index) launch(%storage: buffer)
+command.decl @materialized_program(%configuration: index) launch(%storage: buffer)
 
 pipeline.def @materialized_pipeline(%configuration: index) run(%storage: buffer) {
 }

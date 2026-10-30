@@ -33,7 +33,7 @@ kernel.def target(@speech_target) @encode_voice() {
   kernel.return
 }
 
-command.program.def public @prepare_voice_audio() launch(%work: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
+command.def public @prepare_voice_audio() launch(%work: buffer, %request: buffer, %conditioning: buffer, %state: buffer, %output: buffer) {
   kernel.launch @encode_voice(%work, %request, %conditioning) : (buffer, buffer, buffer)
   command.return
 }

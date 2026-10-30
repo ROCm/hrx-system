@@ -2,7 +2,7 @@ target.decl @array
 
 pipeline.decl<kernel> target(@array) @resident(%width: index) run(%parameters: view<[%width]xi8>, %input: buffer, %output: buffer) where [multiple_of(%width, 16)]
 
-command.program.def public @external_embed(%width: index) launch(%checkpoint: buffer, %input: buffer, %output: buffer) {
+command.def public @external_embed(%width: index) launch(%checkpoint: buffer, %input: buffer, %output: buffer) {
   %offset = index.constant 0 : offset
   %parameters = buffer.view %checkpoint[%offset] : buffer -> view<[%width]xi8>
   kernel.launch @resident[%width](%parameters, %input, %output) : [index](view<[%width]xi8>, buffer, buffer)
