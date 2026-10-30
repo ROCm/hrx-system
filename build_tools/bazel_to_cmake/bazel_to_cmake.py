@@ -49,6 +49,7 @@ The file is evaluated as a module and can have the following customizations:
 
 import argparse
 import importlib.util
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -74,6 +75,11 @@ def parse_arguments():
         "--preview",
         type=Path,
         help="Print one package's generated CMake; accepts a directory or BUILD file.",
+    )
+    parser.add_argument(
+        "--configuration",
+        type=Path,
+        help="Effective native settings written by the CMake bootstrap.",
     )
     return parser.parse_args()
 
@@ -158,7 +164,7 @@ class Package:
         )
 
 
-def evaluate_directory(directory, input_files, generated_files):
+def evaluate_directory(directory, input_files, generated_files, configuration=None):
     """Collects a generated package; authored packages retain their native scope."""
     directory = Path(directory)
     if (directory / "CMakeLists.txt").is_file():
@@ -185,13 +191,14 @@ def evaluate_directory(directory, input_files, generated_files):
             repo_root=repo_root,
             input_files=input_files,
             generated_files=generated_files,
+            configuration=configuration,
         )
     except (NameError, NotImplementedError, KeyError) as error:
         raise RuntimeError(f"Cannot convert {build_file}: {error}") from error
     return Package(directory.relative_to(repo_root), build_file, converter)
 
 
-def evaluate_packages(root_dirs, input_files):
+def evaluate_packages(root_dirs, input_files, configuration=None):
     """Establishes generated-file ownership before any consumer is emitted."""
     generated_files = {}
     packages = {}
@@ -203,7 +210,9 @@ def evaluate_packages(root_dirs, input_files):
         for directory, _, _ in os.walk(root_path):
             if (Path(directory) / "CMakeLists.txt").is_file():
                 authored_directories.add(Path(directory).relative_to(repo_root))
-            package = evaluate_directory(directory, input_files, generated_files)
+            package = evaluate_directory(
+                directory, input_files, generated_files, configuration
+            )
             if package is not None:
                 packages[package.directory] = package
     return packages, authored_directories
@@ -217,7 +226,7 @@ def write_if_changed(path, content):
         path.write_bytes(data)
 
 
-def generate_build_tree(output_dir, root_dirs):
+def generate_build_tree(output_dir, root_dirs, configuration=None):
     """Emits packages and their regeneration inputs into one owned build tree."""
     output_dir = output_dir.resolve()
     source_root = Path(repo_root).resolve()
@@ -236,7 +245,9 @@ def generate_build_tree(output_dir, root_dirs):
                 )
     input_files = set()
     output_files = set()
-    packages, authored_directories = evaluate_packages(root_dirs, input_files)
+    packages, authored_directories = evaluate_packages(
+        root_dirs, input_files, configuration
+    )
     for package in packages.values():
         path = output_dir / package.directory / "CMakeLists.txt"
         write_if_changed(path, package.convert())
@@ -304,19 +315,26 @@ def generate_build_tree(output_dir, root_dirs):
 
 
 def main(args):
+    configuration = (
+        json.loads(args.configuration.read_text(encoding="utf-8"))
+        if args.configuration
+        else None
+    )
     if args.preview:
         path = args.preview.resolve()
         if path.is_file():
             path = path.parent
         if not path.is_dir():
             raise FileNotFoundError(f"Cannot find package {path}")
-        packages, _ = evaluate_packages(repo_cfg.DEFAULT_ROOT_DIRS, set())
+        packages, _ = evaluate_packages(
+            repo_cfg.DEFAULT_ROOT_DIRS, set(), configuration
+        )
         package = packages.get(path.relative_to(repo_root))
         if package is None:
             raise ValueError(f"{path} has no generated CMake package")
         print(package.convert(), end="")
     else:
-        generate_build_tree(args.output_dir, repo_cfg.DEFAULT_ROOT_DIRS)
+        generate_build_tree(args.output_dir, repo_cfg.DEFAULT_ROOT_DIRS, configuration)
 
 
 if __name__ == "__main__":

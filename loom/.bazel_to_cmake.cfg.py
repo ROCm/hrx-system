@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import bazel_to_cmake_config
 import bazel_to_cmake_converter
 import bazel_to_cmake_requirements
+from conditions import all_of, any_of
 from loom_binary import LoomBinaryBuildFileFunctions
 
 
@@ -90,11 +91,11 @@ def _loom_amdgpu_config_cmake_options():
     return options
 
 
-_LOOM_NATIVE_ELF_CMAKE_CONDITION = (
-    "LOOM_ARTIFACT_AIE2P_ELF OR LOOM_ARTIFACT_AMDGPU_ELF OR LOOM_ARTIFACT_X86_ELF"
+_LOOM_NATIVE_ELF_CMAKE_CONDITION = any_of(
+    "LOOM_ARTIFACT_AIE2P_ELF", "LOOM_ARTIFACT_AMDGPU_ELF", "LOOM_ARTIFACT_X86_ELF"
 )
-_LOOM_NATIVE_OBJECT_ELF_CMAKE_CONDITION = (
-    "LOOM_ARTIFACT_AIE2P_ELF OR LOOM_ARTIFACT_X86_ELF"
+_LOOM_NATIVE_OBJECT_ELF_CMAKE_CONDITION = any_of(
+    "LOOM_ARTIFACT_AIE2P_ELF", "LOOM_ARTIFACT_X86_ELF"
 )
 
 _LOOM_CONFIG_CMAKE_OPTIONS = {
@@ -135,7 +136,9 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
     "//loom/config/serve:audio_decoding": "LOOM_SERVE_AUDIO_DECODING",
     "//loom/config/serve:flac": "LOOM_SERVE_AUDIO_CODEC_FLAC",
     "//loom/config/serve:gif": "LOOM_SERVE_IMAGE_CODEC_GIF",
-    "//loom/config/serve:image_input_enabled": "LOOM_BUILD AND LOOM_SERVE_IMAGE_INPUT",
+    "//loom/config/serve:image_input_enabled": all_of(
+        "LOOM_BUILD", "LOOM_SERVE_IMAGE_INPUT"
+    ),
     "//loom/config/serve:jpeg": "LOOM_SERVE_IMAGE_CODEC_JPEG",
     "//loom/config/serve:mp3": "LOOM_SERVE_AUDIO_CODEC_MP3",
     "//loom/config/serve:png": "LOOM_SERVE_IMAGE_CODEC_PNG",
@@ -219,9 +222,9 @@ class LoomBuildFileFunctions(
         policy = self._loom_package_policy()
         kwargs = dict(kwargs)
         kwargs["target_compatible_with"] = (
-            bazel_to_cmake_requirements.append_cmake_conditions(
+            bazel_to_cmake_requirements.append_conditions(
                 kwargs.get("target_compatible_with"),
-                policy.cmake_conditions(),
+                policy.conditions(),
             )
         )
         policy_tags = policy.tags(include_run_requirements=include_run_requirements)
@@ -239,9 +242,9 @@ class LoomBuildFileFunctions(
 
     def _apply_loom_target_compatible_with(self, target_compatible_with):
         policy = self._loom_package_policy()
-        return bazel_to_cmake_requirements.append_cmake_conditions(
+        return bazel_to_cmake_requirements.append_conditions(
             target_compatible_with,
-            policy.cmake_conditions(),
+            policy.conditions(),
         )
 
     def _cmake_guard_condition(self, target_compatible_with):
@@ -671,9 +674,9 @@ class LoomBuildFileFunctions(
             self._convert_string_list_block("LABELS", labels, sort=False),
             self._convert_string_arg_block("RESOURCE_GROUP", policy.resource_group),
         ]
-        self._emit_platform_guard_begin(policy.cmake_conditions())
+        self._emit_platform_guard_begin(policy.conditions())
         self._converter.body += "loom_execution_test(\n" + "".join(blocks) + ")\n\n"
-        self._emit_platform_guard_end(policy.cmake_conditions())
+        self._emit_platform_guard_end(policy.conditions())
 
     def loom_amdgpu_target_selectors_flag(self, **kwargs):
         return None

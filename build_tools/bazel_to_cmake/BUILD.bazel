@@ -33,6 +33,7 @@ py_library(
         "bazel_to_cmake_loads.py",
         "bazel_to_cmake_requirements.py",
         "bazel_to_cmake_targets.py",
+        "conditions.py",
         "loom_binary.py",
     ],
     visibility = ["//loom/build_tools/bazel_to_cmake:__pkg__"],

@@ -9,16 +9,26 @@ import os
 import bazel_to_cmake_config
 import bazel_to_cmake_converter
 import bazel_to_cmake_requirements
+from conditions import Equal, all_of, any_of
 from loom_binary import LoomBinaryBuildFileFunctions
 
 _AMDF_CONFIG_CMAKE_OPTIONS = {
     "//libamdf/config:enabled_setting": "AMDF_BUILD",
     "//libamdf/config/family:cdna": "AMDF_FAMILY_CDNA",
-    "//libamdf/config/family:gpu": "AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA",
+    "//libamdf/config/family:gpu": any_of("AMDF_FAMILY_RDNA", "AMDF_FAMILY_CDNA"),
     "//libamdf/config/family:rdna": "AMDF_FAMILY_RDNA",
     "//libamdf/config/family:xdna": "AMDF_FAMILY_XDNA",
-    "//libamdf/config/provider:gpu": '(AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND (CMAKE_SYSTEM_NAME STREQUAL "Windows" OR (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IREE_ARCH STREQUAL "x86_64"))',
-    "//libamdf/config/provider:wddm": '(AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND CMAKE_SYSTEM_NAME STREQUAL "Windows"',
+    "//libamdf/config/provider:gpu": all_of(
+        any_of("AMDF_FAMILY_RDNA", "AMDF_FAMILY_CDNA"),
+        any_of(
+            Equal("CMAKE_SYSTEM_NAME", "Windows"),
+            all_of(Equal("CMAKE_SYSTEM_NAME", "Linux"), Equal("IREE_ARCH", "x86_64")),
+        ),
+    ),
+    "//libamdf/config/provider:wddm": all_of(
+        any_of("AMDF_FAMILY_RDNA", "AMDF_FAMILY_CDNA"),
+        Equal("CMAKE_SYSTEM_NAME", "Windows"),
+    ),
 }
 
 
@@ -54,9 +64,9 @@ class AmdfBuildFileFunctions(
         policy = self._amdf_requirement_policy.collect(self._package_name())
         kwargs = dict(kwargs)
         kwargs["target_compatible_with"] = (
-            bazel_to_cmake_requirements.append_cmake_conditions(
+            bazel_to_cmake_requirements.append_conditions(
                 kwargs.get("target_compatible_with"),
-                policy.cmake_conditions(),
+                policy.conditions(),
             )
         )
         policy_tags = policy.tags(include_run_requirements=include_run_requirements)
@@ -71,11 +81,6 @@ class AmdfBuildFileFunctions(
         ):
             kwargs["resource_group"] = policy.resource_group
         return kwargs
-
-    def _convert_select_condition(self, label):
-        if label in _AMDF_CONFIG_CMAKE_OPTIONS:
-            return _AMDF_CONFIG_CMAKE_OPTIONS[label]
-        return super()._convert_select_condition(label)
 
     def apply_amdf_target_policy(self, kwargs, name=None):
         del name
@@ -284,6 +289,7 @@ PROJECT_CONFIG = bazel_to_cmake_config.ProjectConfig(
     name="libamdf",
     package_prefixes=["libamdf"],
     build_file_functions=AmdfBuildFileFunctions,
+    condition_mappings=_AMDF_CONFIG_CMAKE_OPTIONS,
     target_mappings={
         "//libamdf:amdf": ["amdf::amdf"],
         "//libamdf:amdf_shared_artifact": ["amdf::amdf"],

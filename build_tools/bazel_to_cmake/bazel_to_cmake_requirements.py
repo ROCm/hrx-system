@@ -21,7 +21,6 @@ class Requirement:
     label: str
     phase: str
     enabled_by: str | None = None
-    cmake_condition: str | None = None
     cmake_label: str | None = None
     skip_contract: str | None = None
 
@@ -36,22 +35,13 @@ class PackagePolicy:
 
 
 @dataclass(frozen=True)
-class CMakeRequirementCondition:
-    cmake_condition: str
-
-
-@dataclass(frozen=True)
 class CollectedPackagePolicy:
     build_requirements: list[Requirement]
     run_requirements: list[Requirement]
     resource_group: str | None
 
-    def cmake_conditions(self) -> list[CMakeRequirementCondition]:
-        return [
-            CMakeRequirementCondition(requirement.cmake_condition)
-            for requirement in self.build_requirements
-            if requirement.cmake_condition
-        ]
+    def conditions(self) -> list[str]:
+        return [requirement.enabled_by for requirement in self.build_requirements]
 
     def tags(self, include_run_requirements: bool) -> list[str]:
         tags = [
@@ -103,13 +93,12 @@ class ProjectRequirementPolicy:
         )
 
 
-def build_requirement(id: str, label: str, enabled_by: str, cmake_condition: str):
+def build_requirement(id: str, label: str, enabled_by: str):
     return Requirement(
         id=id,
         label=label,
         phase="build",
         enabled_by=enabled_by,
-        cmake_condition=cmake_condition,
     )
 
 
@@ -141,7 +130,7 @@ def package_policy(
     )
 
 
-def append_cmake_conditions(target_compatible_with, conditions):
+def append_conditions(target_compatible_with, conditions):
     if not conditions:
         return target_compatible_with
     if target_compatible_with is None:

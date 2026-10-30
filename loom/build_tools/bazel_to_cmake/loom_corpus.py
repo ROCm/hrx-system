@@ -498,9 +498,9 @@ class LoomCorpusBuildFileFunctions:
                     "loom-executor=" + profile.executor,
                 ]
             )
-            requirements = bazel_to_cmake_requirements.append_cmake_conditions(
+            requirements = bazel_to_cmake_requirements.append_conditions(
                 target_compatible_with,
-                policy.cmake_conditions(),
+                policy.conditions(),
             )
             condition = self._target_compatible_condition(requirements)
             self._converter.body += (

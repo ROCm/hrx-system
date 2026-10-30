@@ -27,6 +27,58 @@ class _PythonBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
 
 
 class ConfigTest(unittest.TestCase):
+    def test_configured_selection_uses_effective_native_values(self):
+        functions = bazel_to_cmake_converter.BuildFileFunctions(
+            converter=SimpleNamespace(body=""),
+            targets=bazel_to_cmake_targets.TargetConverter(repo_map={}),
+            build_dir="/repo/pkg",
+            repo_root="/repo",
+            configuration={
+                "CMAKE_SYSTEM_NAME": "Windows",
+                "CMAKE_C_COMPILER_ID": "Clang",
+                "MSVC": "ON",
+                "IREE_ENABLE_RUNTIME_TRACING": "ON",
+                "IREE_TRACING_MODE": "2",
+                "IREE_TRACING_PROVIDER": "console",
+            },
+        )
+        self.assertEqual(
+            functions.select(
+                {
+                    "//build_tools/bazel:cc_compiler_clang": ["-fexceptions"],
+                    "//build_tools/bazel:cc_compiler_clang_cl": ["/EHsc"],
+                    "//conditions:default": [],
+                }
+            ),
+            ["/EHsc"],
+        )
+        providers = {
+            "//runtime/config/base/tracing:provider_console": ":console",
+            "//runtime/config/base/tracing:provider_tracy": ":tracy",
+            "//conditions:default": ":disabled",
+        }
+        self.assertEqual(functions.select(providers), ":console")
+        functions._configuration["IREE_ENABLE_RUNTIME_TRACING"] = "OFF"
+        self.assertEqual(functions.select(providers), ":disabled")
+        with self.assertRaisesRegex(ValueError, "Ambiguous native selection"):
+            functions.select(
+                {
+                    "//build_tools/bazel:iree_is_windows": ["windows.c"],
+                    "@platforms//os:windows": ["other.c"],
+                }
+            )
+        with self.assertRaisesRegex(ValueError, "No matching native selection"):
+            functions.select({"@platforms//os:linux": ["linux.c"]})
+        self.assertEqual(
+            functions.select(
+                {
+                    "//build_tools/bazel:iree_is_windows": ["windows.c"],
+                    "@platforms//os:windows": ["windows.c"],
+                }
+            ),
+            ["windows.c"],
+        )
+
     def test_cc_library_compiles_linkstamp_as_a_native_source(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
@@ -578,8 +630,8 @@ cc_library(
         )
 
         target_compatible_with = [
-            SimpleNamespace(cmake_condition="IREE_HAL_DRIVER_WEBGPU"),
-            SimpleNamespace(cmake_condition="IREE_HAL_DRIVER_WEBGPU"),
+            "//runtime/config/hal:driver_webgpu",
+            "//runtime/config/hal:driver_webgpu",
         ] + functions.select(
             {
                 "@platforms//cpu:wasm32": [],
@@ -687,10 +739,8 @@ cc_library(
         self.assertEqual(
             functions._target_compatible_condition(
                 [
-                    SimpleNamespace(cmake_condition="AMDF_BUILD"),
-                    SimpleNamespace(
-                        cmake_condition="AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA"
-                    ),
+                    "//libamdf/config:enabled_setting",
+                    "//libamdf/config/family:gpu",
                 ]
             ),
             "AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA)",
@@ -1140,7 +1190,6 @@ FEATURE = build_requirement(
     id = "alpha.feature",
     label = Label("//alpha/requirements:feature"),
     enabled_by = Label("//alpha/config:feature"),
-    cmake_condition = "ENABLE_ALPHA",
 )
 """,
                 encoding="utf-8",
@@ -1161,7 +1210,11 @@ cc_library(
     target_compatible_with = [LOCAL_FEATURE],
 )
 """,
-                SimpleNamespace(PROJECTS=[], REPO_MAP={}),
+                SimpleNamespace(
+                    PROJECTS=[],
+                    REPO_MAP={},
+                    CONDITION_MAPPINGS={"//alpha/config:feature": "ENABLE_ALPHA"},
+                ),
                 str(repo_root / "beta"),
                 repo_root=str(repo_root),
             )
@@ -1173,13 +1226,11 @@ cc_library(
             id="synthetic.broad",
             label="//synthetic:requires_broad",
             enabled_by="//synthetic:enable_broad",
-            cmake_condition="SYNTHETIC_BROAD",
         )
         host_requirement = bazel_to_cmake_requirements.build_requirement(
             id="synthetic.host",
             label="//synthetic:requires_host",
             enabled_by="//synthetic:enable_host",
-            cmake_condition="SYNTHETIC_HOST",
         )
         policy = bazel_to_cmake_requirements.ProjectRequirementPolicy(
             package_policies=[

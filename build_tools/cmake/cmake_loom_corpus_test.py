@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import bazel_to_cmake_config
 import bazel_to_cmake_requirements
 import bazel_to_cmake_targets
+from conditions import all_of, any_of
 
 from build_tools.cmake.test_environment import (
     REPO_ROOT,
@@ -77,25 +78,30 @@ class CMakeLoomCorpusTest(unittest.TestCase):
             source_functions.loom_corpus_sources("sources", manifest)
             nested_source_functions.loom_corpus_sources("sources", manifest)
             profiles = []
-            for name, expression in (
+            for name, predicate in (
                 ("unconditional", None),
                 ("single", "FEATURE_ENABLED"),
                 (
                     "compound",
-                    "FEATURE_ENABLED AND (FEATURE_DISABLED OR FEATURE_ENABLED)",
+                    all_of(
+                        "FEATURE_ENABLED", any_of("FEATURE_DISABLED", "FEATURE_ENABLED")
+                    ),
                 ),
                 ("disabled", "FEATURE_DISABLED"),
                 (
                     "compound_disabled",
-                    "FEATURE_ENABLED AND (FEATURE_DISABLED OR FEATURE_MISSING)",
+                    all_of(
+                        "FEATURE_ENABLED", any_of("FEATURE_DISABLED", "FEATURE_MISSING")
+                    ),
                 ),
                 ("literal_false", "FALSE"),
             ):
                 requirements = []
-                if expression is not None:
+                if predicate is not None:
+                    target_functions._condition_mappings["//config:" + name] = predicate
                     requirements.append(
                         bazel_to_cmake_requirements.build_requirement(
-                            name, "//config:" + name, name, expression
+                            name, "//config:" + name, "//config:" + name
                         )
                     )
                 target_functions.loom_target_profile(
@@ -103,12 +109,8 @@ class CMakeLoomCorpusTest(unittest.TestCase):
                     "amdgpu",
                     "gfx90a",
                     target_compatible_with=[]
-                    if expression is None
-                    else [
-                        bazel_to_cmake_requirements.CMakeRequirementCondition(
-                            expression
-                        )
-                    ],
+                    if predicate is None
+                    else ["//config:" + name],
                 )
                 profiles.append(
                     target_functions.loom_execution_profile(

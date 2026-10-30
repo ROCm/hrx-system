@@ -24,6 +24,7 @@ import bazel_to_cmake_loads
 import bazel_to_cmake_requirements
 import bazel_to_cmake_targets
 from bazel_to_cmake_generated import GeneratedFileBuildFileFunctions
+from conditions import Equal, Greater, Matches, Not, Option, all_of, any_of, condition
 
 _LOCATION_PATTERN = re.compile(
     r"\$\((location|locations|rootpath|rootpaths|execpath|execpaths) ([^)]+)\)"
@@ -53,14 +54,14 @@ _PLATFORM_CMAKE_SYSTEM_NAME = {
 }
 
 _COMPILER_CMAKE_OPTIONS = {
-    "//build_tools/bazel:cc_compiler_clang": (
-        'CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT MSVC'
+    "//build_tools/bazel:cc_compiler_clang": all_of(
+        Matches("CMAKE_C_COMPILER_ID", "Clang"), Not(Option("MSVC"))
     ),
-    "//build_tools/bazel:cc_compiler_clang_cl": (
-        'CMAKE_C_COMPILER_ID MATCHES "Clang" AND MSVC'
+    "//build_tools/bazel:cc_compiler_clang_cl": all_of(
+        Matches("CMAKE_C_COMPILER_ID", "Clang"), "MSVC"
     ),
-    "//build_tools/bazel:cc_compiler_gcc": 'CMAKE_C_COMPILER_ID STREQUAL "GNU"',
-    "//build_tools/bazel:cc_compiler_msvc": 'CMAKE_C_COMPILER_ID STREQUAL "MSVC"',
+    "//build_tools/bazel:cc_compiler_gcc": Equal("CMAKE_C_COMPILER_ID", "GNU"),
+    "//build_tools/bazel:cc_compiler_msvc": Equal("CMAKE_C_COMPILER_ID", "MSVC"),
 }
 
 _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
@@ -68,7 +69,9 @@ _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
     "//runtime/config/hal:driver_task": "IREE_HAL_DRIVER_TASK",
     "//runtime/config/hal:driver_vulkan": "IREE_HAL_DRIVER_VULKAN",
     "//runtime/config/hal:driver_webgpu": "IREE_HAL_DRIVER_WEBGPU",
-    "//runtime/config/hal:driver_amd": "IREE_HAL_DRIVER_AMD_GPU OR IREE_HAL_DRIVER_AMD_XDNA",
+    "//runtime/config/hal:driver_amd": any_of(
+        "IREE_HAL_DRIVER_AMD_GPU", "IREE_HAL_DRIVER_AMD_XDNA"
+    ),
     "//runtime/config/hal:driver_amd_gpu": "IREE_HAL_DRIVER_AMD_GPU",
     "//runtime/config/hal:driver_amd_xdna": "IREE_HAL_DRIVER_AMD_XDNA",
     "//runtime/config/hal:executable_loader_embedded_elf": "IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF",
@@ -77,12 +80,20 @@ _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
 
 _API_CONFIG_CMAKE_OPTIONS = {
     "//libamdf/config:enabled_setting": "AMDF_BUILD",
-    "//runtime/config/base/tracing:provider_console": 'IREE_ENABLE_RUNTIME_TRACING AND IREE_TRACING_MODE GREATER 0 AND IREE_TRACING_PROVIDER STREQUAL "console"',
-    "//runtime/config/base/tracing:provider_tracy": 'IREE_ENABLE_RUNTIME_TRACING AND IREE_TRACING_MODE GREATER 0 AND IREE_TRACING_PROVIDER STREQUAL "tracy"',
+    "//runtime/config/base/tracing:provider_console": all_of(
+        "IREE_ENABLE_RUNTIME_TRACING",
+        Greater("IREE_TRACING_MODE", 0),
+        Equal("IREE_TRACING_PROVIDER", "console"),
+    ),
+    "//runtime/config/base/tracing:provider_tracy": all_of(
+        "IREE_ENABLE_RUNTIME_TRACING",
+        Greater("IREE_TRACING_MODE", 0),
+        Equal("IREE_TRACING_PROVIDER", "tracy"),
+    ),
     "//libamdf/config/family:rdna": "AMDF_FAMILY_RDNA",
     "//libamdf/config/family:cdna": "AMDF_FAMILY_CDNA",
     "//libamdf/config/family:xdna": "AMDF_FAMILY_XDNA",
-    "//libamdf/config/family:gpu": "AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA",
+    "//libamdf/config/family:gpu": any_of("AMDF_FAMILY_RDNA", "AMDF_FAMILY_CDNA"),
     "//runtime/config/net:rdma_enabled": "IREE_NET_RDMA",
     "//build_tools/vulkan/config:available": "IREE_VULKAN_AVAILABLE",
     "//build_tools/d3d12/config:available": "IREE_D3D12_AVAILABLE",
@@ -195,10 +206,14 @@ class BuildFileFunctions(GeneratedFileBuildFileFunctions):
         repo_root: str = "",
         condition_mappings=None,
         generated_files=None,
+        configuration=None,
     ):
         self._converter = converter
         self._targets = targets
         self._condition_mappings = condition_mappings or {}
+        # Effective native settings, captured before any BUILD declarations.
+        # None preserves symbolic selection for unconfigured package previews.
+        self._configuration = configuration
         self._repo_root = os.path.abspath(repo_root) if repo_root else ""
         if self._repo_root and build_dir and not os.path.isabs(build_dir):
             self._build_dir = os.path.join(self._repo_root, build_dir)
@@ -277,33 +292,43 @@ class BuildFileFunctions(GeneratedFileBuildFileFunctions):
             names = ", ".join(sorted(kwargs))
             raise NotImplementedError(f"{rule_name} attributes: {names}")
 
-    def _convert_platform_condition(self, constraint_label):
-        """Returns a CMake condition string for a platform constraint label."""
+    def _platform_condition(self, constraint_label):
+        """Returns the source predicate for a platform constraint label."""
         if constraint_label == "//build_tools/bazel:iree_is_wasm":
-            return 'IREE_ARCH STREQUAL "wasm_32"'
+            return Equal("IREE_ARCH", "wasm_32")
         cmake_name = _PLATFORM_CMAKE_SYSTEM_NAME.get(constraint_label)
         if not cmake_name:
             return None
         # CPU architecture constraints use IREE_ARCH; OS constraints use
         # CMAKE_SYSTEM_NAME.
         if constraint_label.startswith("@platforms//cpu:"):
-            return f'IREE_ARCH STREQUAL "{cmake_name}"'
-        return f'CMAKE_SYSTEM_NAME STREQUAL "{cmake_name}"'
+            return Equal("IREE_ARCH", cmake_name)
+        return Equal("CMAKE_SYSTEM_NAME", cmake_name)
 
-    def _convert_select_condition(self, label):
-        """Returns a CMake condition string for a supported select condition."""
-        cmake_condition = getattr(label, "cmake_condition", None)
-        if cmake_condition:
-            return cmake_condition
-        condition = self._convert_platform_condition(label)
-        if condition:
-            return condition
-        return (
+    def _select_condition(self, label):
+        """Resolves a source label without evaluating any native build rules."""
+        if isinstance(label, bazel_to_cmake_requirements.Requirement):
+            label = label.enabled_by
+        if label == "@platforms//:incompatible":
+            return Option("FALSE")
+        platform = self._platform_condition(label)
+        if platform:
+            return platform
+        selected = (
             self._condition_mappings.get(label)
             or _COMPILER_CMAKE_OPTIONS.get(label)
             or _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS.get(label)
             or _API_CONFIG_CMAKE_OPTIONS.get(label)
         )
+        return condition(selected) if selected is not None else None
+
+    def _convert_platform_condition(self, label):
+        selected = self._platform_condition(label)
+        return selected.render() if selected else None
+
+    def _convert_select_condition(self, label):
+        selected = self._select_condition(label)
+        return selected.render() if selected else None
 
     def _condition_select_compatibility_condition(self, condition_select):
         conditions = []
@@ -1833,15 +1858,29 @@ class BuildFileFunctions(GeneratedFileBuildFileFunctions):
         return [f"//{path}/internal:{basename}_internal"]
 
     def select(self, d):
-        # Check if all condition keys (except //conditions:default) are known
-        # conditions. If so, return a ConditionSelect that the rule handler can
-        # convert to CMake if/elseif/else blocks.
-        non_default_keys = [k for k in d if k != "//conditions:default"]
-        if non_default_keys and all(
-            self._convert_select_condition(k) for k in non_default_keys
-        ):
+        predicates = {
+            label: self._select_condition(label)
+            for label in d
+            if label != "//conditions:default"
+        }
+        if not predicates or not all(predicates.values()):
+            raise NotImplementedError(f"select: {d}")
+        if self._configuration is None:
             return ConditionSelect(d)
-        raise NotImplementedError(f"select: {d}")
+        matches = [
+            d[label]
+            for label, predicate in predicates.items()
+            if predicate.evaluate(self._configuration)
+        ]
+        if matches:
+            if any(value != matches[0] for value in matches[1:]):
+                raise ValueError(
+                    f"Ambiguous native selection in {self._build_dir}: {d}"
+                )
+            return matches[0]
+        if "//conditions:default" not in d:
+            raise ValueError(f"No matching native selection in {self._build_dir}: {d}")
+        return d["//conditions:default"]
 
     def iree_select(self, selector):
         return self.select(selector)
@@ -3170,6 +3209,7 @@ def evaluate_build_file(
     repo_root="",
     input_files=None,
     generated_files=None,
+    configuration=None,
 ):
     """Collects declarations; conversion follows repository-wide evaluation."""
     converter = Converter()
@@ -3193,6 +3233,7 @@ def evaluate_build_file(
         repo_root=repo_root,
         condition_mappings=bazel_to_cmake_config.collect_condition_mappings(repo_cfg),
         generated_files=generated_files,
+        configuration=configuration,
     )
 
     exec_namespace = GetDict(build_file_functions)

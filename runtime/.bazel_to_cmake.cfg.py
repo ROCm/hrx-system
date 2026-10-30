@@ -9,6 +9,7 @@ import os
 import bazel_to_cmake_config
 import bazel_to_cmake_converter
 import bazel_to_cmake_requirements
+from conditions import Equal, Matches, Not, Option, all_of, any_of
 from loom_binary import LoomBinaryBuildFileFunctions
 
 
@@ -43,9 +44,9 @@ class RuntimeBuildFileFunctions(
         policy = self._runtime_package_policy()
         kwargs = dict(kwargs)
         kwargs["target_compatible_with"] = (
-            bazel_to_cmake_requirements.append_cmake_conditions(
+            bazel_to_cmake_requirements.append_conditions(
                 kwargs.get("target_compatible_with"),
-                policy.cmake_conditions(),
+                policy.conditions(),
             )
         )
         policy_tags = policy.tags(include_run_requirements=include_run_requirements)
@@ -297,20 +298,24 @@ PROJECT_CONFIG = bazel_to_cmake_config.ProjectConfig(
         "@iree_macos_toolchain//:Foundation": ['"-framework Foundation"'],
     },
     condition_mappings={
-        "//runtime/src/iree/math:gnu_x86": (
-            '(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU" AND NOT MSVC) AND '
-            '(IREE_ARCH STREQUAL "x86_32" OR IREE_ARCH STREQUAL "x86_64")'
+        "//runtime/src/iree/math:gnu_x86": all_of(
+            all_of(Matches("CMAKE_C_COMPILER_ID", "Clang|GNU"), Not(Option("MSVC"))),
+            any_of(Equal("IREE_ARCH", "x86_32"), Equal("IREE_ARCH", "x86_64")),
         ),
-        "//runtime/src/iree/math:clang_cl_x86": (
-            '(CMAKE_C_COMPILER_ID MATCHES "Clang" AND MSVC) AND '
-            '(IREE_ARCH STREQUAL "x86_32" OR IREE_ARCH STREQUAL "x86_64")'
+        "//runtime/src/iree/math:clang_cl_x86": all_of(
+            all_of(Matches("CMAKE_C_COMPILER_ID", "Clang"), "MSVC"),
+            any_of(Equal("IREE_ARCH", "x86_32"), Equal("IREE_ARCH", "x86_64")),
         ),
-        "//runtime/src/iree/math:msvc_x86_32": (
-            '(CMAKE_C_COMPILER_ID STREQUAL "MSVC") AND (IREE_ARCH STREQUAL "x86_32")'
+        "//runtime/src/iree/math:msvc_x86_32": all_of(
+            Equal("CMAKE_C_COMPILER_ID", "MSVC"), Equal("IREE_ARCH", "x86_32")
         ),
-        "//runtime/config/base:allocator_system_custom": 'IREE_ALLOCATOR_SYSTEM STREQUAL "custom"',
-        "//runtime/config/base:allocator_system_mimalloc": 'IREE_ALLOCATOR_SYSTEM STREQUAL "mimalloc"',
-        ":windows_x86_64": 'WIN32 AND IREE_ARCH STREQUAL "x86_64"',
+        "//runtime/config/base:allocator_system_custom": Equal(
+            "IREE_ALLOCATOR_SYSTEM", "custom"
+        ),
+        "//runtime/config/base:allocator_system_mimalloc": Equal(
+            "IREE_ALLOCATOR_SYSTEM", "mimalloc"
+        ),
+        ":windows_x86_64": all_of("WIN32", Equal("IREE_ARCH", "x86_64")),
     },
     convert_unmatched_target=convert_unmatched_target,
 )

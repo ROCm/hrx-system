@@ -82,7 +82,6 @@ def apply_test_requirements(
 IreeRequirementInfo = provider(
     doc = "Describes a semantic build or run requirement.",
     fields = {
-        "cmake_condition": "CMake condition that enables a build requirement.",
         "cmake_label": "CTest/CMake label generated for a run requirement.",
         "enabled_by": "Bazel config_setting label enabling a build requirement.",
         "id": "Stable semantic requirement id.",
@@ -91,20 +90,18 @@ IreeRequirementInfo = provider(
     },
 )
 
-def build_requirement(id, label, enabled_by, cmake_condition):
+def build_requirement(id, label, enabled_by):
     """Defines a build-time requirement spec.
 
     Args:
       id: Stable semantic requirement id.
       label: Queryable requirement target label.
       enabled_by: Bazel config_setting label that enables the requirement.
-      cmake_condition: CMake condition that enables the requirement.
 
     Returns:
       Requirement spec consumed by package policy.
     """
     return struct(
-        cmake_condition = cmake_condition,
         cmake_label = None,
         enabled_by = enabled_by,
         id = id,
@@ -126,7 +123,6 @@ def run_requirement(id, label, cmake_label, skip_contract):
       Requirement spec consumed by package policy.
     """
     return struct(
-        cmake_condition = None,
         cmake_label = cmake_label,
         enabled_by = None,
         id = id,
@@ -138,7 +134,6 @@ def run_requirement(id, label, cmake_label, skip_contract):
 def _requirement_target_impl(ctx):
     return [
         IreeRequirementInfo(
-            cmake_condition = ctx.attr.cmake_condition,
             cmake_label = ctx.attr.cmake_label,
             enabled_by = ctx.attr.enabled_by,
             id = ctx.attr.requirement_id,
@@ -150,7 +145,6 @@ def _requirement_target_impl(ctx):
 _requirement_target = rule(
     implementation = _requirement_target_impl,
     attrs = {
-        "cmake_condition": attr.string(),
         "cmake_label": attr.string(),
         "enabled_by": attr.string(),
         "phase": attr.string(mandatory = True, values = ["build", "run"]),
@@ -175,7 +169,6 @@ def declare_requirements(name, requirements):
     for requirement in requirements:
         _requirement_target(
             name = _target_name(requirement.label),
-            cmake_condition = requirement.cmake_condition or "",
             cmake_label = requirement.cmake_label or "",
             enabled_by = str(requirement.enabled_by or ""),
             phase = requirement.phase,
