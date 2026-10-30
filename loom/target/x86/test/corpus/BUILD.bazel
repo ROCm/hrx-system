@@ -15,6 +15,12 @@ package(
 
 loom_corpus_test(
     name = "execution",
+    allowed_failures = {
+        X86_TASK_HARDWARE_PROFILE.name: {
+            "function/rodata.loom:@immutable_gather_values": "X86/005",
+            "numeric/conversion/f32_narrowing.loom:@f32_narrowing_values": "TARGET/031",
+        },
+    },
     catalog = LOOM_CORPUS,
     execution_profiles = [X86_TASK_HARDWARE_PROFILE],
     profile_sources = {
@@ -47,10 +53,8 @@ loom_corpus_test(
     target_compatible_with = ["@platforms//cpu:x86_64"],
     xfails = {
         X86_TASK_HARDWARE_PROFILE.name: {
-            "function/rodata.loom:@immutable_gather_values": "X86/005",
             "function/rodata.loom:@rodata_copy_values": "SUBRANGE/026",
             "function/rodata.loom:@rodata_extent_values": "TARGET/001",
-            "numeric/conversion/f32_narrowing.loom:@f32_narrowing_values": "TARGET/031",
             "numeric/float/activations.loom:@activation_portable_values": "LOWERING/036",
             "numeric/float/activations.loom:@activation_values": "LOWERING/036",
             "numeric/float/activations.loom:@ordinary_activation_values": "LOWERING/036",
