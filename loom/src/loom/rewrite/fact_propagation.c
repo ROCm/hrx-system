@@ -24,6 +24,9 @@ enum loom_rewriter_fact_entry_flag_bits_e {
   // Direct inputs changed: blocks publish semantic invalidation, and structured
   // operations refresh nested facts before joining their results.
   LOOM_REWRITER_FACT_INPUTS_CHANGED = 1u << 2,
+  // A completed full summary established this owner's body and scope facts.
+  // Missing rows have no witness; structural edits withdraw it.
+  LOOM_REWRITER_FACT_BODY_CURRENT = 1u << 3,
 };
 
 typedef struct loom_rewriter_fact_entry_t {
@@ -102,6 +105,17 @@ static loom_rewriter_fact_entry_t* loom_rewriter_find_fact_entry(
   return probe.index == UINT32_MAX ? NULL
                                    : loom_rewriter_fact_entry_at(
                                          rewriter->pending_facts, probe.index);
+}
+
+void loom_rewriter_invalidate_enclosing_fact_bodies(
+    loom_rewriter_t* rewriter, loom_op_t* owner) {
+  if (!rewriter->fact_table) return;
+  for (loom_op_t* current = owner; current; current = current->parent_op) {
+    if (!current->region_count) continue;
+    loom_rewriter_fact_entry_t* entry =
+        loom_rewriter_find_fact_entry(rewriter, current);
+    if (entry) entry->flags &= ~LOOM_REWRITER_FACT_BODY_CURRENT;
+  }
 }
 
 static iree_status_t loom_rewriter_get_fact_entry(
@@ -1044,13 +1058,35 @@ static iree_status_t loom_rewriter_update_op_facts(loom_rewriter_t* rewriter,
   }
   // A changed yield only updates its owner's result join. Direct inputs can
   // change nested execution facts; loops always retain their feedback solve.
+  loom_rewriter_fact_entry_t* entry =
+      loom_rewriter_find_fact_entry(rewriter, op);
+  const bool has_body_witness =
+      entry && (entry->flags & LOOM_REWRITER_FACT_BODY_CURRENT) != 0;
+  const bool owns_regions = op->region_count != 0;
+  const loom_loop_like_t loop = loom_loop_like_cast(rewriter->module, op);
+  const bool counted_loop =
+      loom_loop_like_isa(loop) && loom_loop_like_has_counted_range(loop);
+  const bool needs_full_body =
+      inputs_changed || (counted_loop && !has_body_witness);
+  const loom_op_t* previous_sparse_first_owner =
+      rewriter->fact_table->sparse_first_owner;
+  rewriter->fact_table->sparse_first_owner =
+      counted_loop && !needs_full_body ? op : NULL;
   bool facts_changed = false;
-  IREE_RETURN_IF_ERROR(
-      inputs_changed
-          ? loom_value_fact_table_compute_op_and_report(
-                rewriter->fact_table, rewriter->module, op, &facts_changed)
-          : loom_value_fact_table_compute_op_summary(
-                rewriter->fact_table, rewriter->module, op, &facts_changed));
+  iree_status_t status = needs_full_body
+                             ? loom_value_fact_table_compute_op_and_report(
+                                   rewriter->fact_table, rewriter->module, op,
+                                   &facts_changed)
+                             : loom_value_fact_table_compute_op_summary(
+                                   rewriter->fact_table, rewriter->module, op,
+                                   &facts_changed);
+  rewriter->fact_table->sparse_first_owner =
+      previous_sparse_first_owner;
+  IREE_RETURN_IF_ERROR(status);
+  const bool established_body_witness = needs_full_body && owns_regions && entry;
+  if (established_body_witness) {
+    entry->flags |= LOOM_REWRITER_FACT_BODY_CURRENT;
+  }
   if (facts_changed) {
     rewriter->flags |= LOOM_REWRITER_FLAG_FACTS_CHANGED;
     // Ensure downstream ops are revisited with updated facts. Type-use edges
@@ -1119,6 +1155,35 @@ static iree_status_t loom_rewriter_publish_fact_invalidations(
   return status;
 }
 
+// The summary queue is LIFO. A changed outer yield can therefore reach its
+// loop before pending branch joins inside the body. Publish the deepest live
+// child first so every parent consumes maintained descendant results.
+static iree_host_size_t loom_rewriter_deepest_pending_descendant(
+    const loom_rewriter_pending_facts_t* pending, const loom_op_t* owner) {
+  iree_host_size_t selected = IREE_HOST_SIZE_MAX;
+  uint32_t selected_depth = 0;
+  for (iree_host_size_t i = 0; i < pending->summaries.count; ++i) {
+    const loom_rewriter_fact_entry_t* entry = pending->summaries.values[i];
+    const bool queued = (entry->flags & LOOM_REWRITER_FACT_PENDING) != 0;
+    const loom_op_t* child = entry->owner;
+    const bool live = (child->flags & LOOM_OP_FLAG_DEAD) == 0;
+    const bool eligible_child = queued && live;
+    if (!eligible_child) continue;
+    uint32_t depth = 0;
+    for (const loom_op_t* ancestor = child->parent_op; ancestor;
+         ancestor = ancestor->parent_op) {
+      ++depth;
+      if (ancestor != owner) continue;
+      if (depth > selected_depth) {
+        selected = i;
+        selected_depth = depth;
+      }
+      break;
+    }
+  }
+  return selected;
+}
+
 iree_status_t loom_rewriter_propagate_value_facts(loom_rewriter_t* rewriter) {
   loom_rewriter_pending_facts_t* pending = rewriter->pending_facts;
   if (!pending) {
@@ -1148,20 +1213,48 @@ iree_status_t loom_rewriter_propagate_value_facts(loom_rewriter_t* rewriter) {
       continue;
     }
     loom_rewriter_fact_entry_t* entry = NULL;
+    bool summary_entry = false;
     if (pending->operation_head < pending->operations.count) {
       entry = pending->operations.values[pending->operation_head++];
     } else {
       pending->operations.count = 0;
       pending->operation_head = 0;
       entry = pending->summaries.values[--pending->summaries.count];
+      summary_entry = true;
     }
     const bool queued = (entry->flags & LOOM_REWRITER_FACT_PENDING) != 0;
     const bool inputs_changed =
         (entry->flags & LOOM_REWRITER_FACT_INPUTS_CHANGED) != 0;
+    loom_op_t* op = entry->owner;
+    const bool live = (op->flags & LOOM_OP_FLAG_DEAD) == 0;
+    const bool has_body_witness =
+        (entry->flags & LOOM_REWRITER_FACT_BODY_CURRENT) != 0;
+    const loom_loop_like_t loop =
+        summary_entry && live
+            ? loom_loop_like_cast(rewriter->module, op)
+            : (loom_loop_like_t){0};
+    const bool counted_loop =
+        loom_loop_like_isa(loop) && loom_loop_like_has_counted_range(loop);
+    const bool can_publish_children = summary_entry && queued && live &&
+                                      !inputs_changed && has_body_witness &&
+                                      counted_loop;
+    if (can_publish_children) {
+      const iree_host_size_t child_index =
+          loom_rewriter_deepest_pending_descendant(pending, op);
+      if (child_index != IREE_HOST_SIZE_MAX) {
+        // Reuse the slot just popped from this queue. The child retains its
+        // direct-input reason and ordinary invalidations still drain first.
+        const iree_host_size_t last = pending->summaries.count++;
+        pending->summaries.values[last] =
+            pending->summaries.values[child_index];
+        pending->summaries.values[child_index] = entry;
+        continue;
+      }
+    }
     entry->flags &=
         ~(LOOM_REWRITER_FACT_PENDING | LOOM_REWRITER_FACT_INPUTS_CHANGED);
-    loom_op_t* op = entry->owner;
-    if (!(op->flags & LOOM_OP_FLAG_DEAD) && queued) {
+    const bool should_update = live && queued;
+    if (should_update) {
       status = loom_rewriter_update_op_facts(rewriter, op, inputs_changed);
     }
   }

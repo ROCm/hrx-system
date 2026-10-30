@@ -173,6 +173,7 @@ loom_cc_test(
     deps = [
         ":rewriter",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/test",

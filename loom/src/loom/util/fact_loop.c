@@ -11,12 +11,163 @@
 #include "loom/analysis/condition_edge_projection.h"
 #include "loom/analysis/loop_domain.h"
 #include "loom/analysis/scc.h"
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 #include "loom/util/fact_induction.h"
 #include "loom/util/fact_loop_replay.h"
 
 #define LOOM_VALUE_FACT_LOOP_MAX_ITERATIONS 8
+#define LOOM_VALUE_FACT_LOOP_SPARSE_LIMIT 128
+
+// A full first traversal owns the body state. Within the same immutable solve,
+// later carried-argument changes can only affect this use-def closure. Keep
+// the work bounded; uncertain dependencies use the ordinary full traversal.
+typedef struct loom_value_fact_loop_sparse_body_t {
+  loom_op_t* ops[LOOM_VALUE_FACT_LOOP_SPARSE_LIMIT];
+  uint16_t count;
+} loom_value_fact_loop_sparse_body_t;
+
+static bool loom_value_fact_loop_build_sparse_body(
+    loom_value_fact_table_t* table, const loom_module_t* module,
+    loom_region_t* body, uint16_t arg_offset, uint16_t carried_count,
+    loom_value_fact_loop_sparse_body_t* sparse) {
+  const bool single_block = body->block_count == 1;
+  const bool has_cfg =
+      iree_any_bit_set(body->flags, LOOM_REGION_INSTANCE_FLAG_CFG);
+  const bool has_conditioned_results = table->has_conditioned_results;
+  const bool has_independent_targets = table->regions.has_independent_targets;
+  const bool refines_operands = table->context.refine_operands.fn != NULL;
+  const bool too_many_carried =
+      carried_count > LOOM_VALUE_FACT_LOOP_SPARSE_LIMIT;
+  const bool requires_full_body = !single_block || has_cfg ||
+                                  has_conditioned_results ||
+                                  has_independent_targets || refines_operands ||
+                                  too_many_carried;
+  if (requires_full_body) return false;
+
+  const loom_block_t* block = loom_region_const_entry_block(body);
+  const uint32_t required_args = (uint32_t)arg_offset + carried_count;
+  const bool has_carried_args = block->arg_count >= required_args;
+  const loom_op_t* terminator = block->last_op;
+  const bool has_terminator =
+      terminator && iree_any_bit_set(terminator->traits, LOOM_TRAIT_TERMINATOR);
+  const bool has_yielded_values =
+      has_terminator && terminator->operand_count >= carried_count;
+  const bool body_complete = has_carried_args && has_yielded_values;
+  if (!body_complete) return false;
+  loom_value_id_t values[LOOM_VALUE_FACT_LOOP_SPARSE_LIMIT];
+  loom_op_t* discovered[LOOM_VALUE_FACT_LOOP_SPARSE_LIMIT];
+  uint16_t value_count = 0;
+  uint16_t value_head = 0;
+  uint16_t op_count = 0;
+  for (uint16_t i = 0; i < carried_count; ++i) {
+    values[value_count++] = loom_block_arg_id(block, arg_offset + i);
+  }
+  while (value_head < value_count) {
+    const loom_value_id_t value_id = values[value_head++];
+    loom_type_use_iterator_t type_users;
+    loom_module_value_type_users(module, value_id, &type_users);
+    const bool has_type_user =
+        loom_type_users_next(&type_users) != LOOM_VALUE_ID_INVALID;
+    if (has_type_user) return false;
+    loom_type_use_iterator_t attribute_users;
+    loom_attribute_users_begin(&module->type_uses, value_id, &attribute_users);
+    const bool has_attribute_user =
+        loom_attribute_users_next(&attribute_users).op != NULL;
+    if (has_attribute_user) return false;
+
+    const loom_value_t* value = loom_module_value(module, value_id);
+    const loom_use_t* uses = loom_value_uses(value);
+    for (uint32_t use_index = 0; use_index < value->use_count; ++use_index) {
+      loom_op_t* op = loom_use_user_op(uses[use_index]);
+      const bool same_block = op->parent_block == block;
+      const bool has_regions = op->region_count != 0;
+      const bool has_successors = op->successor_count != 0;
+      const bool has_structural_dependency =
+          !same_block || has_regions || has_successors;
+      if (has_structural_dependency) return false;
+      bool already_discovered = false;
+      for (uint16_t i = 0; i < op_count; ++i) {
+        already_discovered |= discovered[i] == op;
+      }
+      if (already_discovered) continue;
+      if (op_count == LOOM_VALUE_FACT_LOOP_SPARSE_LIMIT) return false;
+      const bool is_terminator =
+          iree_any_bit_set(op->traits, LOOM_TRAIT_TERMINATOR);
+      const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
+      const bool operand_facts_only =
+          vtable && iree_any_bit_set(vtable->vtable_flags,
+                                    LOOM_OP_VTABLE_FACTS_FROM_OPERANDS);
+      const bool publishes_auxiliary =
+          loom_traits_are_value_alias(op->traits) ||
+          loom_traits_are_fact_identity(op->traits);
+      const bool unsupported_inference =
+          !is_terminator && (!operand_facts_only || publishes_auxiliary);
+      if (unsupported_inference) return false;
+      discovered[op_count++] = op;
+      const loom_value_id_t* results = loom_op_const_results(op);
+      for (uint16_t i = 0; i < op->result_count; ++i) {
+        const bool values_full =
+            value_count == LOOM_VALUE_FACT_LOOP_SPARSE_LIMIT;
+        const bool result_unseen =
+            !loom_value_fact_table_has_entry(table, results[i]);
+        const bool cannot_extend_closure = values_full || result_unseen;
+        if (cannot_extend_closure) return false;
+        values[value_count++] = results[i];
+      }
+    }
+  }
+
+  // The closure contains every changing SSA value. In particular, an omitted
+  // scf.select reading a comparison through its condition identity cannot
+  // observe a changed comparison input: the producer's indexed operand path
+  // would have reached its unclassified comparison and failed above.
+  bool emitted[LOOM_VALUE_FACT_LOOP_SPARSE_LIMIT] = {false};
+  for (uint16_t slot = 0; slot < op_count; ++slot) {
+    bool found_ready = false;
+    for (uint16_t i = 0; i < op_count; ++i) {
+      if (emitted[i]) continue;
+      bool ready = true;
+      const loom_value_id_t* operands = loom_op_const_operands(discovered[i]);
+      for (uint16_t operand = 0;
+           operand < discovered[i]->operand_count && ready; ++operand) {
+        const loom_value_t* source =
+            loom_module_value(module, operands[operand]);
+        if (loom_value_is_block_arg(source)) continue;
+        loom_op_t* producer = loom_value_def_op(source);
+        for (uint16_t prior = 0; prior < op_count; ++prior) {
+          const bool waits_for_producer =
+              discovered[prior] == producer && !emitted[prior];
+          if (waits_for_producer) {
+            ready = false;
+            break;
+          }
+        }
+      }
+      if (!ready) continue;
+      sparse->ops[slot] = discovered[i];
+      emitted[i] = true;
+      found_ready = true;
+      break;
+    }
+    if (!found_ready) return false;
+  }
+  sparse->count = op_count;
+  return true;
+}
+
+static iree_status_t loom_value_fact_loop_refresh_sparse_body(
+    loom_value_fact_table_t* table, const loom_module_t* module,
+    const loom_value_fact_loop_sparse_body_t* sparse) {
+  for (uint16_t i = 0; i < sparse->count; ++i) {
+    loom_op_t* op = sparse->ops[i];
+    if (iree_any_bit_set(op->traits, LOOM_TRAIT_TERMINATOR)) continue;
+    IREE_RETURN_IF_ERROR(
+        loom_value_fact_table_compute_op_and_report(table, module, op, NULL));
+  }
+  return iree_ok_status();
+}
 
 struct loom_value_fact_condition_scratch_t {
   // Module bound to the reusable query state.
@@ -595,12 +746,31 @@ static iree_status_t loom_value_fact_table_compute_counted_loop_summary(
           : LOOM_LOOP_TRIP_COUNT_BOUNDED;
   bool converged = false;
   bool exact_replayed = false;
+  loom_value_fact_loop_sparse_body_t sparse_body = {0};
+  const bool owns_sparse_permission = table->sparse_first_owner == loop.op;
+  const bool sparse_first = owns_sparse_permission &&
+                            loom_value_fact_loop_build_sparse_body(
+                                table, module, body, carried_arg_offset,
+                                count, &sparse_body);
+  bool use_sparse_body = sparse_first;
   for (uint32_t feedback_round = 0;
        feedback_round < LOOM_VALUE_FACT_LOOP_MAX_ITERATIONS; ++feedback_round) {
     IREE_RETURN_IF_ERROR(loom_value_fact_table_define_loop_entry_args(
         table, module, body, carried_arg_offset, current_facts, count));
-    IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_region_tree(
-        table, module, body, loop.op));
+    const bool first_sparse_round = feedback_round == 0 && sparse_first;
+    if (first_sparse_round) {
+      // The previous complete body solve owns independent rows. Refresh the
+      // counted domain explicitly because the full region walk usually seeds
+      // it before the carried feedback equations run.
+      IREE_RETURN_IF_ERROR(loom_value_fact_table_seed_loop_iv_arg(
+          table, module, loom_region_const_entry_block(body), loop.op));
+      table->replaying = true;
+    }
+    IREE_RETURN_IF_ERROR(use_sparse_body
+                             ? loom_value_fact_loop_refresh_sparse_body(
+                                   table, module, &sparse_body)
+                             : loom_value_fact_table_compute_region_tree(
+                                   table, module, body, loop.op));
     loom_op_t* yield = loom_value_fact_region_terminator(body);
     // One body traversal establishes constant results and selector roots.
     // Operand-dependent equations still change during widening and replay.
@@ -636,6 +806,10 @@ static iree_status_t loom_value_fact_table_compute_counted_loop_summary(
       converged = true;
       break;
     }
+    if (feedback_round == 0) {
+      use_sparse_body = loom_value_fact_loop_build_sparse_body(
+          table, module, body, carried_arg_offset, count, &sparse_body);
+    }
   }
   if (!converged) {
     loom_value_fact_loop_forget_state(types, count, current_facts);
@@ -646,8 +820,11 @@ static iree_status_t loom_value_fact_table_compute_counted_loop_summary(
     }
     IREE_RETURN_IF_ERROR(loom_value_fact_table_define_loop_entry_args(
         table, module, body, carried_arg_offset, current_facts, count));
-    IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_region_tree(
-        table, module, body, loop.op));
+    IREE_RETURN_IF_ERROR(use_sparse_body
+                             ? loom_value_fact_loop_refresh_sparse_body(
+                                   table, module, &sparse_body)
+                             : loom_value_fact_table_compute_region_tree(
+                                   table, module, body, loop.op));
     loom_op_t* yield = loom_value_fact_region_terminator(body);
     loom_value_fact_table_collect_terminator_operands(
         table, yield, /*operand_offset=*/0, yielded_facts, count);

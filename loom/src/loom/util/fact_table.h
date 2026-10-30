@@ -205,6 +205,10 @@ struct loom_value_fact_table_t {
   // edits. Constant results and structural selector dependencies remain valid.
   // Nested solves inherit this state; each solver restores its caller's state.
   bool replaying;
+  // Rewriter-owned full body witness permits only this result-only loop to
+  // refresh its carried closure on its first feedback round. Nested solves
+  // do not inherit the permission.
+  const loom_op_t* sparse_first_owner;
 
   // Facts derived under path conditions require whole-scope invalidation after
   // edits. The incremental rewriter cannot maintain their guard dependencies.
