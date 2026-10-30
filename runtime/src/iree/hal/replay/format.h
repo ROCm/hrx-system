@@ -1223,7 +1223,8 @@ typedef struct iree_hal_replay_command_buffer_timestamp_payload_t {
   iree_hal_replay_buffer_ref_payload_t target_ref;
   // Earlier execution stages that complete before capture.
   uint32_t source_stage_mask;
-  // Later execution stages ordered after capture and the write.
+  // Later execution stages ordered after capture; delivery follows memory
+  // dependencies or normal completion.
   uint32_t target_stage_mask;
   // Timestamp flags.
   uint64_t flags;

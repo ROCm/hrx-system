@@ -2588,7 +2588,8 @@ static iree_status_t iree_hal_vulkan_command_buffer_record_atomic_native(
     iree_hal_buffer_binding_table_t binding_table,
     const iree_hal_vulkan_command_t* command,
     iree_hal_vulkan_command_buffer_bda_recording_state_t* bda_recording_state,
-    iree_hal_vulkan_command_buffer_bda_binding_cache_t* bda_binding_cache) {
+    iree_hal_vulkan_command_buffer_bda_binding_cache_t* bda_binding_cache,
+    iree_hal_vulkan_timestamp_recording_t* timestamps) {
   const iree_hal_vulkan_command_atomic_t* atomic =
       iree_hal_vulkan_command_atomic_payload(command);
 
@@ -2608,6 +2609,23 @@ static iree_status_t iree_hal_vulkan_command_buffer_record_atomic_native(
   if (!atomic->target_ref.buffer) {
     iree_hal_vulkan_command_buffer_record_bda_publication_barrier(
         syms, native_command_buffer, bda_recording_state);
+  }
+  if (timestamps->state) {
+    record_flags |= IREE_HAL_VULKAN_ATOMIC_RECORD_FLAG_TRANSFER_TIMESTAMPS;
+    const bool publishes_writes =
+        iree_any_bit_set(atomic->params.flags, IREE_HAL_ATOMIC_FLAG_RELEASE) &&
+        iree_any_bit_set(iree_hal_vulkan_atomic_access_mask(atomic->params),
+                         VK_ACCESS_2_SHADER_WRITE_BIT);
+    const VkAccessFlags2 source_access =
+        iree_hal_vulkan_barrier_source_access_mask(atomic->source_stage_mask);
+    if (publishes_writes &&
+        iree_any_bit_set(source_access, VK_ACCESS_2_TRANSFER_WRITE_BIT |
+                                            VK_ACCESS_2_MEMORY_WRITE_BIT)) {
+      // The release must publish the payload before its readiness flag. Waits
+      // and unrelated source domains leave results batched until consumption.
+      iree_hal_vulkan_timestamp_record_delivery(
+          syms, native_command_buffer, timestamps, (iree_hal_buffer_ref_t){0});
+    }
   }
   iree_hal_vulkan_atomic_record_command(
       syms, pipelines, native_command_buffer, atomic->source_stage_mask,
@@ -2839,7 +2857,8 @@ iree_status_t iree_hal_vulkan_command_buffer_record_native(
       case IREE_HAL_VULKAN_COMMAND_TYPE_ATOMIC:
         status = iree_hal_vulkan_command_buffer_record_atomic_native(
             syms, &builtins->atomic_pipelines, native_command_buffer,
-            binding_table, command, &bda_recording_state, bda_binding_cache);
+            binding_table, command, &bda_recording_state, bda_binding_cache,
+            &timestamp_recording);
         break;
       case IREE_HAL_VULKAN_COMMAND_TYPE_BEGIN_DEBUG_GROUP: {
         const iree_hal_vulkan_command_begin_debug_group_t* begin_debug_group =
