@@ -348,20 +348,16 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
           status, "device_query_queue_clock_info"));
     }
   }
-  const amdf_atomic_capabilities_t* native_atomics =
-      &device->context->families[family_ordinal].atomic_capabilities;
-  const iree_hal_atomic_operation_capabilities_t atomic_operations =
-      iree_hal_amd_fabric_memory_translate_atomics(
-          native_atomics->operations_without_dispatch_32,
-          native_atomics->operations_without_dispatch_64,
-          (amdf_atomic_reach_t){AMDF_ATOMIC_SCOPE_SYSTEM,
-                                AMDF_ATOMIC_SCOPE_SYSTEM});
-  // Both APIs assign one bit per predicate in the same order. Unknown native
-  // bits remain excluded from the HAL execution contract.
-  const uint32_t wait_conditions_32 = native_atomics->wait_conditions_32 &
-                                      IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
-  const uint32_t wait_conditions_64 = native_atomics->wait_conditions_64 &
-                                      IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
+  // Runtime-owned scalar shaders implement the complete semantic family. Each
+  // pool intersects this execution support with its exact backing guarantees.
+  const iree_hal_atomic_operation_capabilities_t atomic_operations = {
+      .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+      .device_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+      .system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+      .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+  };
+  const uint32_t wait_conditions_32 = IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
+  const uint32_t wait_conditions_64 = IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL;
   const amdf_queue_family_info_t* native_family =
       &device->context->families[family_ordinal];
   const bool user_publication =
@@ -437,13 +433,10 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
       .priority_count = priority_count,
       .priorities = priorities,
       .physical_device_affinity = 1,
-      .role_flags =
-          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
-          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
-          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL |
-          (iree_hal_atomic_operation_capabilities_is_empty(atomic_operations)
-               ? 0
-               : IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC),
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_HOST_CALL |
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_ATOMIC,
       .atomic_capabilities =
           {.operations = atomic_operations,
            .wait_conditions = {.device_scope_32 = wait_conditions_32,
@@ -646,6 +639,7 @@ static void iree_hal_amd_gpu_device_initialize_memory(
       .supported_usage =
           IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_TRANSFER,
       .minimum_access = device->memory.capabilities.minimum_access,
+      .program_atomics = true,
       .binding_count = IREE_ARRAYSIZE(bindings),
       .bindings = bindings,
   };
@@ -1337,6 +1331,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
                                      : 64 * 1024,
       .memory = &device->memory.control,
       .scratch_memory = &device->scratch.memory,
+      .programs = aql ? NULL : &device->programs.pm4,
       .scratch_profile = device->scratch.profile,
       .publication = &device->publication,
       .allocations = &device->memory.allocations,

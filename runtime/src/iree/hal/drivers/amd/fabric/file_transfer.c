@@ -212,7 +212,7 @@ iree_status_t iree_hal_amd_fabric_file_transfer_prepare_ranges(
     physical_source = (amdf_memory_mapping_update_t){
         .memory = physical_storage->handle,
         .memory_access_ordinal =
-            facts->scope_access_ordinals[family->memory.queue_scope_id],
+            facts->scope_facts[family->memory.queue_scope_id].access_ordinal,
         .source_byte_offset = memory.offset + transfer->buffer_offset,
         .byte_length = transfer->length,
     };

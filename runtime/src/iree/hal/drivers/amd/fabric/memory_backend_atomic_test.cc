@@ -359,6 +359,41 @@ TEST_F(MemoryBackendTest, ShaderOperationsPreserveScopeWidthAndPhysicalRecipe) {
   iree_hal_pool_release(pool);
 }
 
+TEST_F(MemoryBackendTest, QueueShadersPreserveOrdinaryBackingAndCpSubset) {
+  native_.required_flags = 0;
+  native_families_[0].program_atomics = true;
+  native_.program_atomics[0] = {
+      .device_scope_32 = AMDF_ATOMIC_OPERATION_LOAD |
+                         AMDF_ATOMIC_OPERATION_STORE |
+                         AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE,
+      .device_scope_64 = AMDF_ATOMIC_OPERATION_STORE,
+  };
+  const iree_hal_atomic_operation_capabilities_t required = {
+      .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+      .device_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+  };
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, 0,
+                            IREE_HAL_MEMORY_ACCESS_NONE, 0, required));
+  const auto queue = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]);
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
+      iree_hal_pool_query_atomic_operations(pool, queue), required));
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(256, 64),
+      iree_infinite_timeout(), &buffer));
+  for (const auto& access : native_.created_accesses) {
+    EXPECT_EQ(access.requirements.flags, AMDF_MEMORY_FLAG_DEVICE_ADDRESS);
+  }
+  const auto view = iree_hal_buffer_memory_view(buffer);
+  const auto* facts =
+      reinterpret_cast<const iree_hal_amd_fabric_memory_binding_facts_t*>(
+          view.bindings + view.contract->binding_layout.binding_count);
+  EXPECT_EQ(facts->scope_facts[queue.id].queue_atomic_operations, 0u);
+  iree_hal_buffer_release(buffer);
+  iree_hal_pool_release(pool);
+}
+
 TEST_F(MemoryBackendTest,
        ShaderGuaranteesCoverEveryImportAndAchievedAttachment) {
   native_.registration_enabled = true;

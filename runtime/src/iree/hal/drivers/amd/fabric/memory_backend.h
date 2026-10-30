@@ -27,8 +27,7 @@ typedef struct iree_hal_amd_fabric_memory_binding_t {
 } iree_hal_amd_fabric_memory_binding_t;
 
 // Captured execution requirements for one HAL queue family. Entries are in
-// HAL family-ordinal order; native ordinals may differ. Program-side visibility
-// remains unqualified because libamdf's pair query describes queue operations.
+// HAL family-ordinal order; native ordinals may differ.
 typedef struct iree_hal_amd_fabric_memory_family_t {
   // Exact native execution family used by pair queries.
   uint32_t queue_family_ordinal;
@@ -39,6 +38,8 @@ typedef struct iree_hal_amd_fabric_memory_family_t {
   // Usages implemented through a private CPU view, independent of public
   // mappings. These require qualified host/device cache transitions.
   iree_hal_buffer_usage_t host_usage;
+  // Queue atomic operations can use the qualified PROGRAM shader recipes.
+  bool program_atomics;
   // Number of entries in |bindings|.
   uint32_t binding_count;
   // Borrowed unique non-HOST interfaces prepared for this family's buffers.

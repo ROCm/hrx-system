@@ -8,6 +8,19 @@
 
 #include "iree/hal/drivers/amd/status.h"
 
+iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_control_program_packet(
+    uint64_t kernel, uint64_t arguments, uint32_t header, uint64_t completion) {
+  const iree_hal_amd_gpu_aql_dispatch_t dispatch = {
+      .header = header | IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH | (1u << 16),
+      .workgroup_size = {1, 1, 1},
+      .grid_size = {1, 1, 1},
+      .kernel_object = kernel,
+      .kernarg_address = arguments,
+      .completion_signal = completion,
+  };
+  return iree_hal_amd_gpu_aql_packet_dispatch(&dispatch);
+}
+
 // Cold placement input. Each descriptor names one aligned instruction range
 // within the same allocation; no parser or runtime compiler is involved.
 typedef struct iree_hal_amd_gpu_aql_builtin_t {
@@ -44,6 +57,14 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
       {.argument_length =
            sizeof(iree_hal_amd_gpu_aql_materialize_profile_arguments_t),
        .kernel_object = &out_pool->materialize_profile},
+      {.argument_length = sizeof(iree_hal_amd_gpu_control_program_arguments_t),
+       .kernel_object = &out_pool->control[0]},
+      {.argument_length = sizeof(iree_hal_amd_gpu_control_program_arguments_t),
+       .kernel_object = &out_pool->control[1]},
+      {.argument_length = sizeof(iree_hal_amd_gpu_control_program_arguments_t),
+       .kernel_object = &out_pool->control[2]},
+      {.argument_length = sizeof(iree_hal_amd_gpu_control_program_arguments_t),
+       .kernel_object = &out_pool->control[3]},
       {.argument_length = sizeof(iree_hal_amd_gpu_grid_sync_t),
        .kernel_object = &out_pool->grid_sync},
   };
@@ -58,6 +79,14 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
       gfxip, &builtins[3].code, &builtins[3].kernel));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_materialize_program_query(
       gfxip, true, &builtins[4].code, &builtins[4].kernel));
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0;
+       i < IREE_HAL_AMD_GPU_CONTROL_PROGRAM_COUNT && iree_status_is_ok(status);
+       ++i) {
+    status = iree_hal_amd_gpu_control_program_query(
+        gfxip, i, &builtins[5 + i].code, &builtins[5 + i].kernel);
+  }
+  IREE_RETURN_IF_ERROR(status);
   if (iree_hal_amd_gpu_grid_sync_select_strategy(gfxip) ==
       IREE_HAL_AMD_GPU_GRID_SYNC_STRATEGY_GWS) {
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_grid_sync_program_query(

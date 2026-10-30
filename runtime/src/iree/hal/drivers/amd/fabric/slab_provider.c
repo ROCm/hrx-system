@@ -161,7 +161,7 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
     io_binding_count +=
         options->bindings[i].type == IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO;
   }
-  iree_host_size_t scope_access_ordinals_offset = 0;
+  iree_host_size_t scope_facts_offset = 0;
   iree_host_size_t imports_offset = 0;
   iree_host_size_t exports_offset = 0;
   iree_host_size_t export_count = options->memory.exports.class_count;
@@ -191,8 +191,9 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
           &bindings_offset),
       IREE_STRUCT_FIELD(io_binding_count, iree_async_proactor_t*,
                         &io_proactors_offset),
-      IREE_STRUCT_FIELD(options->scope_count, uint32_t,
-                        &scope_access_ordinals_offset),
+      IREE_STRUCT_FIELD(options->scope_count,
+                        iree_hal_amd_fabric_memory_scope_facts_t,
+                        &scope_facts_offset),
       IREE_STRUCT_FIELD(options->import_count,
                         iree_hal_amd_fabric_import_route_t, &imports_offset),
       IREE_STRUCT_FIELD(export_count, iree_hal_external_storage_class_t,
@@ -251,13 +252,13 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
       (void*)((uint8_t*)provider + io_proactors_offset);
   provider->options.memory.io.proactor_count = 0;
   provider->options.memory.io.proactors = io_proactors;
-  uint32_t* scope_access_ordinals =
-      (void*)((uint8_t*)provider + scope_access_ordinals_offset);
+  iree_hal_amd_fabric_memory_scope_facts_t* scope_facts =
+      (void*)((uint8_t*)provider + scope_facts_offset);
   if (options->scope_count) {
-    memcpy(scope_access_ordinals, options->scope_access_ordinals,
-           options->scope_count * sizeof(*scope_access_ordinals));
+    memcpy(scope_facts, options->scope_facts,
+           options->scope_count * sizeof(*scope_facts));
   }
-  provider->options.scope_access_ordinals = scope_access_ordinals;
+  provider->options.scope_facts = scope_facts;
   for (uint32_t i = 0; i < options->binding_count; ++i) {
     provider->has_mapping_source |=
         bindings[i].type == IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
@@ -483,7 +484,7 @@ static iree_status_t iree_hal_amd_fabric_slab_handle_bind(
       (void*)(handle->bindings + provider->options.binding_count);
   *facts = (iree_hal_amd_fabric_memory_binding_facts_t){
       .memory = &handle->memory,
-      .scope_access_ordinals = provider->options.scope_access_ordinals,
+      .scope_facts = provider->options.scope_facts,
   };
   if (handle->io) {
     handle->io->bindings.memory = handle->memory.handle;

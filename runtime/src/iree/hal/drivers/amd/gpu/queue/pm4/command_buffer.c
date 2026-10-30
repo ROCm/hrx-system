@@ -8,6 +8,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
+#include "iree/hal/drivers/amd/gpu/queue/control_program.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/dispatch.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/recording.h"
@@ -391,27 +392,47 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_control(
   if (command.flags & IREE_HAL_ATOMIC_FLAG_RELEASE) {
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_drain_timestamps(buffer));
   }
+  const bool program = command.kind != IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP;
   iree_hal_amd_gpu_pm4_barrier_t after = {0};
-  iree_hal_amd_gpu_pm4_barrier_control(&buffer->profile, command.flags,
-                                       source_stage, &buffer->pending_barrier,
-                                       &after);
+  iree_hal_amd_gpu_pm4_barrier_control(&buffer->profile, program, command.flags,
+                                      source_stage, &buffer->pending_barrier,
+                                      &after);
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_flush_barrier(buffer));
   uint32_t offset = 0;
   uint32_t* words = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_commands(
-      &buffer->recording, iree_hal_amd_gpu_control_word_count(command), &offset,
-      &words));
-  if (command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP) {
+  if (program) {
+    uint32_t argument_offset = 0;
+    iree_hal_amd_gpu_control_program_arguments_t* arguments = NULL;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
+        &buffer->recording.storage, sizeof(*arguments), 8, &argument_offset,
+        (void**)&arguments));
+    *arguments = iree_hal_amd_gpu_control_program_arguments(0, command);
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
+        buffer, true, argument_offset, value, target.offset, false));
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_commands(
+        &buffer->recording, 31, &offset, &words));
+    iree_hal_amd_gpu_pm4_control_program_emit(
+        words,
+        &buffer->pool->control[iree_hal_amd_gpu_control_program_index(command)],
+        0);
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
+        buffer, false, offset + 24 * 4, IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE,
+        argument_offset, true));
+    if (target_stage & ~IREE_HAL_EXECUTION_STAGE_HOST) {
+      after.execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
+    }
+  } else {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_commands(
+        &buffer->recording, iree_hal_amd_gpu_control_word_count(command),
+        &offset, &words));
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_timestamp_writes_append(
         &buffer->recording.storage, target, &buffer->timestamps));
     iree_hal_amd_gpu_pm4_emit_clock(words, 0, false);
-  } else {
-    iree_hal_amd_gpu_control_emit(words, 0, command);
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
+        buffer, false,
+        offset + 4 * iree_hal_amd_gpu_control_address_word(command), value,
+        target.offset, false));
   }
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
-      buffer, false,
-      offset + 4 * iree_hal_amd_gpu_control_address_word(command), value,
-      target.offset, false));
   buffer->pending_barrier = after;
   ++buffer->program->operation_count;
   return iree_ok_status();

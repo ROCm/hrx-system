@@ -22,6 +22,7 @@ class InputsTest : public ::testing::Test {
     contract_->scopes[1].interfaces =
         1u << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
     contract_->scopes[1].bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS] = 0;
+    contract_->scopes[2] = contract_->scopes[1];
     static const iree_hal_buffer_vtable_t vtable = {
         .destroy = [](iree_hal_buffer_t*) {},
     };
@@ -110,13 +111,13 @@ TEST_F(InputsTest, IndirectAtomicUsesShareOneQualifiedInput) {
                         iree_hal_amd_gpu_command_inputs_capture(
                             &inputs_, {1, &binding}, 0, &captured));
   EXPECT_EQ(captured.buffer, nullptr);
-  contract_->scopes[1].atomic_operations =
+  contract_->scopes[2].atomic_operations =
       IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INCOMPATIBLE,
                         iree_hal_amd_gpu_command_inputs_capture(
                             &inputs_, {1, &binding}, 0, &captured));
   EXPECT_EQ(captured.buffer, nullptr);
-  contract_->scopes[1].atomic_operations |= IREE_HAL_ATOMIC_OPERATION_FLAG_STORE
+  contract_->scopes[2].atomic_operations |= IREE_HAL_ATOMIC_OPERATION_FLAG_STORE
                                             << 8;
   IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_capture(
       &inputs_, {1, &binding}, 0, &captured));
@@ -173,8 +174,8 @@ TEST_F(InputsTest, TimestampTargetsNeedNoAtomicCapabilities) {
   iree_hal_buffer_release(captured.buffer);
 }
 
-TEST_F(InputsTest, DirectAtomicRequiresTheQueueSiteAtRecording) {
-  contract_->scopes[2].atomic_operations = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
+TEST_F(InputsTest, DirectAtomicRequiresTheProgramSiteAtRecording) {
+  contract_->scopes[1].atomic_operations = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
   uint32_t value = 0;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INCOMPATIBLE,
@@ -189,7 +190,7 @@ TEST_F(InputsTest, DirectAtomicRequiresTheQueueSiteAtRecording) {
 }
 
 TEST_F(InputsTest, DirectAtomicDefersAddressResolutionUntilDependencies) {
-  contract_->scopes[1].atomic_operations = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
+  contract_->scopes[2].atomic_operations = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
   uint32_t input_value = 0;
   IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_add_control(
       &inputs_, iree_hal_make_buffer_ref(&buffer_, 4, 4),

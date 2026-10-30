@@ -1030,9 +1030,9 @@ TEST_F(MemoryBackendTest, PrivateTransferViewsFollowEachStorageRoute) {
           facts->memory->host_features,
           mapped && file_capable ? AMDF_HOST_MAPPING_FEATURE_FILE_IO : 0u);
       for (uint32_t i = 0; i < families_.size(); ++i) {
-        EXPECT_EQ(
-            facts->scope_access_ordinals[families_[i]->memory.queue_scope_id],
-            i);
+        EXPECT_EQ(facts->scope_facts[families_[i]->memory.queue_scope_id]
+                      .access_ordinal,
+                  i);
       }
       iree_hal_buffer_mapping_t mapping;
       IREE_EXPECT_STATUS_IS(

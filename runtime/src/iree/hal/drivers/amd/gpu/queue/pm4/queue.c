@@ -14,6 +14,7 @@
 #include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/queue/buffer.h"
 #include "iree/hal/drivers/amd/gpu/queue/capture_pool.h"
+#include "iree/hal/drivers/amd/gpu/queue/control_program.h"
 #include "iree/hal/drivers/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/drivers/amd/gpu/queue/host_call.h"
 #include "iree/hal/drivers/amd/gpu/queue/host_wait.h"
@@ -1014,8 +1015,45 @@ iree_hal_amd_gpu_pm4_publish_control(
     iree_hal_amd_gpu_pm4_abandon(queue, submission, status);
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
   }
+  const bool program = iree_hal_amd_gpu_control_uses_program(
+      queue->base.queue_family, submission->control.target.buffer,
+      submission->control.command);
+  iree_hal_amd_gpu_argument_storage_t* arguments = queue->producer.arguments;
+  uint64_t argument_offset = 0, argument_end = arguments->end;
+  if (program) {
+    const uint64_t length =
+        sizeof(iree_hal_amd_gpu_control_program_arguments_t);
+    if (length > arguments->capacity) {
+      return IREE_HAL_AMD_GPU_PM4_PUBLICATION_GROW_ARGUMENTS;
+    }
+    uint64_t relative = iree_align_uint64(arguments->end - arguments->begin, 8);
+    argument_offset = relative & (arguments->capacity - 1);
+    if (length > arguments->capacity - argument_offset) {
+      relative += arguments->capacity - argument_offset;
+      argument_offset = 0;
+    }
+    const uint64_t start = arguments->begin + relative;
+    const uint64_t completed = (uint64_t)iree_atomic_load(
+        &queue->completed.arguments, iree_memory_order_acquire);
+    const uint64_t reusable = completed >= arguments->end
+                                  ? start
+                                  : iree_max(completed, arguments->begin);
+    if (start - reusable + length > arguments->capacity) {
+      return IREE_HAL_AMD_GPU_PM4_PUBLICATION_CAPACITY;
+    }
+    argument_end = start + length;
+  }
   iree_hal_amd_gpu_pm4_barrier_t before = submission->before;
   iree_hal_amd_gpu_pm4_barrier_t after = submission->after;
+  iree_hal_amd_gpu_pm4_barrier_control(
+      &queue->options.barriers, program, submission->control.command.flags,
+      (submission->control.command.flags & IREE_HAL_ATOMIC_FLAG_RELEASE)
+          ? IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE
+          : 0,
+      &before, &after);
+  if (program) {
+    before.cache_control |= queue->options.barriers.shader;
+  }
   // Every earlier publication joins its own DMA before leaving the CP.
   before.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
   after.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
@@ -1026,7 +1064,9 @@ iree_hal_amd_gpu_pm4_publish_control(
   }
   const uint32_t body_words =
       submission->native_wait_count * 7 +
-      iree_hal_amd_gpu_control_word_count(submission->control.command) +
+      (program
+           ? 31
+           : iree_hal_amd_gpu_control_word_count(submission->control.command)) +
       iree_hal_amd_gpu_pm4_barrier_word_count(before) +
       iree_hal_amd_gpu_pm4_barrier_tail_word_count(after) +
       (native_signal ? 8 : 0) + 14 + (queue->kernel ? 0 : 8);
@@ -1056,11 +1096,26 @@ iree_hal_amd_gpu_pm4_publish_control(
     }
   }
   words = iree_hal_amd_gpu_pm4_barrier_emit(words, before);
-  words =
-      iree_hal_amd_gpu_control_emit(words, target, submission->control.command);
+  if (program) {
+    *(iree_hal_amd_gpu_control_program_arguments_t*)(arguments->memory.contents
+                                                         .data +
+                                                     argument_offset) =
+        iree_hal_amd_gpu_control_program_arguments(target,
+                                                   submission->control.command);
+    arguments->end = argument_end;
+    words = iree_hal_amd_gpu_pm4_control_program_emit(
+        words,
+        &queue->options.programs
+             ->control[iree_hal_amd_gpu_control_program_index(
+                 submission->control.command)],
+        arguments->address + argument_offset);
+  } else {
+    words = iree_hal_amd_gpu_control_emit(words, target,
+                                          submission->control.command);
+  }
   return iree_hal_amd_gpu_pm4_publish_commit(
       queue, submission, position, &reservation, body_words, 0, words, after,
-      queue->producer.arguments->end, (iree_hal_amd_gpu_download_t){0}, true);
+      argument_end, (iree_hal_amd_gpu_download_t){0}, true);
 }
 
 static void iree_hal_amd_gpu_pm4_allocation_ready(void* user_data,

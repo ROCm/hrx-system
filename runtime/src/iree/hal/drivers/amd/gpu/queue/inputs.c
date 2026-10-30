@@ -180,14 +180,17 @@ iree_status_t iree_hal_amd_gpu_command_inputs_add_control(
     iree_hal_amd_gpu_command_inputs_t* inputs, iree_hal_buffer_ref_t reference,
     iree_hal_amd_gpu_control_t command, uint32_t* out_value) {
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_binding(
-      inputs, reference, 0, command.width / 8, 1, false, out_value));
+      inputs, reference,
+      command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP ? 0 : 1,
+      command.width / 8, 1, false, out_value));
   const uint32_t operations = iree_hal_amd_gpu_control_requirement(command);
   const bool incompatible = command.target_error_mode ==
                             IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE;
   if (reference.buffer) {
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_control_validate_target(
-        inputs->command_buffer->queue_family, reference.buffer,
-        incompatible ? 0 : operations, incompatible ? operations : 0));
+        inputs->command_buffer->queue_family, IREE_HAL_MEMORY_SITE_PROGRAM,
+        reference.buffer, incompatible ? 0 : operations,
+        incompatible ? operations : 0));
   } else {
     iree_hal_amd_gpu_binding_requirement_t* requirement =
         &inputs->requirements[reference.buffer_slot + 1];
@@ -386,7 +389,8 @@ iree_status_t iree_hal_amd_gpu_command_inputs_capture(
           (requirement->atomic_operations |
            requirement->incompatible_atomic_operations)) {
         status = iree_hal_amd_gpu_control_validate_target(
-            base->queue_family, binding.buffer, requirement->atomic_operations,
+            base->queue_family, IREE_HAL_MEMORY_SITE_PROGRAM, binding.buffer,
+            requirement->atomic_operations,
             requirement->incompatible_atomic_operations);
       }
       if (iree_status_is_ok(status)) {

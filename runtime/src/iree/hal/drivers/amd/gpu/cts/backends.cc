@@ -107,6 +107,7 @@ static bool registered_ = []() {
                                          create_params, out_driver, out_device);
                 },
             .executable_target_selector = SelectGpuExecutableTarget,
+            .default_atomic_target_error_code = IREE_STATUS_INVALID_ARGUMENT,
         },
         {"async_queue", "file_io", "indirect"},
     });

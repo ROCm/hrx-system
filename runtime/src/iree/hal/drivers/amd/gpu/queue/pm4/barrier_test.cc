@@ -83,8 +83,9 @@ TEST_P(BarrierTest, AtomicOrderingRetainsBothBoundaries) {
   for (uint32_t flags = 0; flags < 8; ++flags) {
     SCOPED_TRACE(flags);
     iree_hal_amd_gpu_pm4_barrier_t before = {}, after = {};
-    iree_hal_amd_gpu_pm4_barrier_control(
-        &profile_, flags, IREE_HAL_EXECUTION_STAGE_DISPATCH, &before, &after);
+    iree_hal_amd_gpu_pm4_barrier_control(&profile_, false, flags,
+                                        IREE_HAL_EXECUTION_STAGE_DISPATCH,
+                                        &before, &after);
     const bool system = (flags & IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE) ||
                         profile_.command_processor_bypasses_l2;
     EXPECT_EQ(before.execution, 1u);
@@ -100,9 +101,29 @@ TEST_P(BarrierTest, AtomicOrderingRetainsBothBoundaries) {
   }
   iree_hal_amd_gpu_pm4_barrier_t before = {}, after = {};
   iree_hal_amd_gpu_pm4_barrier_control(
-      &profile_, 0, IREE_HAL_EXECUTION_STAGE_ATOMIC, &before, &after);
-  EXPECT_EQ(iree_hal_amd_gpu_pm4_barrier_word_count(before), 0u);
+      &profile_, false, 0, IREE_HAL_EXECUTION_STAGE_ATOMIC, &before, &after);
+  EXPECT_EQ(iree_hal_amd_gpu_pm4_barrier_word_count(before), 2u);
   EXPECT_EQ(iree_hal_amd_gpu_pm4_barrier_word_count(after), 0u);
+}
+
+TEST_P(BarrierTest, ShaderAtomicsUseTheirRequestedScope) {
+  for (uint32_t flags = 0; flags < 8; ++flags) {
+    SCOPED_TRACE(flags);
+    iree_hal_amd_gpu_pm4_barrier_t before = {}, after = {};
+    iree_hal_amd_gpu_pm4_barrier_control(&profile_, true, flags,
+                                        IREE_HAL_EXECUTION_STAGE_ATOMIC,
+                                        &before, &after);
+    const bool system = (flags & IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE) != 0;
+    EXPECT_EQ(before.execution, 1u);
+    EXPECT_EQ(before.cache_control,
+              (flags & IREE_HAL_ATOMIC_FLAG_RELEASE)
+                  ? (system ? profile_.release : profile_.shader)
+                  : 0u);
+    EXPECT_EQ(after.cache_control,
+              (flags & IREE_HAL_ATOMIC_FLAG_ACQUIRE)
+                  ? (system ? profile_.acquire : profile_.shader)
+                  : 0u);
+  }
 }
 
 TEST_P(BarrierTest, DirectionComesFromActionNotBoundaryPosition) {
@@ -127,7 +148,7 @@ TEST_P(BarrierTest, DirectionComesFromActionNotBoundaryPosition) {
 }
 
 TEST_P(BarrierTest, EveryExecutionStagePreservesItsCompletionDomain) {
-  const uint32_t expected[] = {0, 3, 1, 3, 3, 0, 0};
+  const uint32_t expected[] = {0, 3, 1, 3, 3, 0, 1};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(expected); ++i) {
     SCOPED_TRACE(i);
     const auto barrier = Prepare({
@@ -180,7 +201,8 @@ TEST_P(BarrierTest, CommandProcessorCrossingsIncludeReadReadDirtyHistory) {
         EXPECT_EQ(to_shader.cache_control, GetParam().shader);
         EXPECT_EQ(to_cp.cache_control, GetParam().shader);
       }
-      EXPECT_EQ(to_shader.execution, 0u);
+      EXPECT_EQ(to_shader.execution,
+                cp == IREE_HAL_ACCESS_SCOPE_INDIRECT_COMMAND_READ ? 0u : 1u);
       EXPECT_EQ(to_cp.execution, 1u);
     }
   }

@@ -570,7 +570,8 @@ TEST_P(ExecutableTest, GlobalsPreserveRelocationsPermissionsAndBorrowIdentity) {
       reinterpret_cast<const iree_hal_amd_fabric_memory_binding_facts_t*>(
           memory.bindings + layout.binding_count);
   EXPECT_EQ(facts->memory->handle, reinterpret_cast<amdf_memory_t*>(&native_));
-  EXPECT_EQ(facts->scope_access_ordinals[family_.memory.queue_scope_id], 0u);
+  EXPECT_EQ(facts->scope_facts[family_.memory.queue_scope_id].access_ordinal,
+            0u);
   EXPECT_EQ(facts->memory->contents.data + memory.offset,
             native_.bytes.data() + value->memory.binding_offset);
   iree_hal_buffer_mapping_t mapping;

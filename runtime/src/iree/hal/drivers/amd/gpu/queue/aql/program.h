@@ -12,6 +12,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/aql/materialize.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/ring.h"
 #include "iree/hal/drivers/amd/gpu/queue/blit.h"
+#include "iree/hal/drivers/amd/gpu/queue/control_program.h"
 #include "iree/hal/drivers/amd/gpu/queue/program.h"
 #include "iree/hal/drivers/amd/gpu/queue/user_queue.h"
 
@@ -38,6 +39,8 @@ typedef struct iree_hal_amd_gpu_aql_program_pool_t {
   uint64_t materialize_profile;
   // Native descriptor for execution-time grid/hidden-count publication.
   uint64_t indirect;
+  // Scalar atomic descriptors indexed by instruction scope and integer width.
+  uint64_t control[IREE_HAL_AMD_GPU_CONTROL_PROGRAM_COUNT];
   // Native one-workitem GWS initializer, zero for memory-barrier targets.
   uint64_t grid_sync;
 } iree_hal_amd_gpu_aql_program_pool_t;
@@ -50,6 +53,11 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
     iree_hal_amd_gpu_aql_program_pool_t* out_pool);
 void iree_hal_amd_gpu_aql_program_pool_deinitialize(
     iree_hal_amd_gpu_aql_program_pool_t* pool);
+
+// One-workitem atomic dispatch. The caller owns ordering, argument publication,
+// and completion exactly as for an application dispatch.
+iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_control_program_packet(
+    uint64_t kernel, uint64_t arguments, uint32_t header, uint64_t completion);
 
 // Initial invocation upload. Instrumented recordings extend materialize to
 // materialize_profile_arguments_t; the dense uint64_t value table follows

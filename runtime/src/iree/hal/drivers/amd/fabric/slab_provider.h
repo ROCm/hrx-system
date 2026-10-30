@@ -67,8 +67,8 @@ typedef struct iree_hal_amd_fabric_slab_provider_options_t {
   const iree_hal_amd_fabric_binding_request_t* bindings;
   // Number of entries in the dense group memory scope namespace.
   uint32_t scope_count;
-  // Native access ordinal per scope, copied into provider-owned storage.
-  const uint32_t* scope_access_ordinals;
+  // Exact native access facts per scope, copied into provider-owned storage.
+  const iree_hal_amd_fabric_memory_scope_facts_t* scope_facts;
   // HAL memory properties promised by every materialized buffer.
   iree_hal_memory_type_t memory_type;
   // HAL usages implemented by every materialized buffer.

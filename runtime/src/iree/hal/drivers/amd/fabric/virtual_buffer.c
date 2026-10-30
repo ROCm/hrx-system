@@ -616,6 +616,39 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_prepare(
     status = iree_hal_virtual_buffer_initialize_contract(
         scope, sources, IREE_HAL_MEMORY_BACKEND_AMDF, 0, contract,
         &capabilities);
+    // A replaceable range has no single physical CP recipe. GPU queues use
+    // their fixed shader recipe, which must cover every declared source even
+    // when different sources offer additional CP-only queue operations.
+    for (iree_host_size_t i = 0;
+         i < scope.family_count && capabilities.max_byte_length &&
+         iree_status_is_ok(status);
+         ++i) {
+      const iree_hal_pool_family_access_t* access = &scope.families[i];
+      const iree_hal_memory_backend_t* participant =
+          iree_hal_device_memory_backend(access->family->device);
+      if (participant->create_virtual_buffer !=
+          iree_hal_amd_fabric_virtual_buffer_create) {
+        continue;
+      }
+      const iree_hal_amd_fabric_memory_backend_t* backend =
+          (const iree_hal_amd_fabric_memory_backend_t*)participant;
+      if (!backend->native
+               .families[iree_hal_queue_family_ordinal(access->family)]
+               .program_atomics) {
+        continue;
+      }
+      const uint32_t id = access->family->memory.queue_scope_id;
+      contract->scopes[id].atomic_operations &=
+          contract->scopes[id + 1].atomic_operations;
+      iree_hal_memory_scope_access_t required = {0};
+      iree_hal_memory_scope_access_set_atomic_operations(&required,
+                                                         access->atomics.queue);
+      if (!iree_all_bits_set(contract->scopes[id].atomic_operations,
+                             required.atomic_operations)) {
+        capabilities = (iree_hal_virtual_buffer_capabilities_t){0};
+      }
+    }
+    iree_hal_memory_contract_finalize_atomic_operations(contract);
   }
   if (contract && capabilities.max_byte_length && iree_status_is_ok(status)) {
     *out_plan = (iree_hal_amd_fabric_reservation_plan_t){

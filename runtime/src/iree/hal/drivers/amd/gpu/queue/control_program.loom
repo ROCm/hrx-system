@@ -1,0 +1,274 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// One workitem performs one scalar operation. The opcode selects EQ/NE/UGE
+// waits (0..2), STORE (3), or modular ADD/SUB/AND/OR/XOR (4..8). Payload cache
+// ordering belongs to the enclosing command barrier. Scope and width are
+// separate entries so the selected recipe issues only qualified transactions.
+
+kernel.def export("control_device_32") @control_device_32() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%target: buffer, %operand: i64, %mask_bits: i64, %opcode: i32) {
+  %zero_offset = index.constant 0 : offset
+  %global_target = buffer.assume.memory_space<global> %target : buffer
+  %cell = buffer.view %global_target[%zero_offset] : buffer -> view<1xi32>
+  %value = scalar.trunci %operand : i64 to i32
+  %mask = scalar.trunci %mask_bits : i64 to i32
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %three = scalar.constant 3 : i32
+  %four = scalar.constant 4 : i32
+  %five = scalar.constant 5 : i32
+  %six = scalar.constant 6 : i32
+  %seven = scalar.constant 7 : i32
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %store = scalar.cmpi eq, %opcode, %three : i32
+  scf.if %store {
+    view.atomic.store %value, %cell[0] {ordering = relaxed, scope = device} : i32, view<1xi32>
+  } else {
+    %wait = scalar.cmpi ult, %opcode, %three : i32
+    scf.if %wait {
+      %wait_equal = scalar.cmpi eq, %opcode, %zero : i32
+      %wait_not_equal = scalar.cmpi eq, %opcode, %one : i32
+      %terminal = scf.while(%pending = %true : i1) -> (i1) {
+        scf.condition %pending, %pending : i1, i1
+      } do(%pending: i1) {
+        %observed = view.atomic.load %cell[0] {ordering = relaxed, scope = device} : view<1xi32> -> i32
+        %masked = scalar.andi %observed, %mask : i32
+        %equal = scalar.cmpi eq, %masked, %value : i32
+        %not_equal = scalar.cmpi ne, %masked, %value : i32
+        %greater_equal = scalar.cmpi uge, %masked, %value : i32
+        %other = scf.select %wait_not_equal, %not_equal, %greater_equal : i1
+        %complete = scf.select %wait_equal, %equal, %other : i1
+        %again = scalar.xori %complete, %true : i1
+        scf.yield %again : i1
+      }
+    } else {
+      %add = scalar.cmpi eq, %opcode, %four : i32
+      %subtract = scalar.cmpi eq, %opcode, %five : i32
+      %and = scalar.cmpi eq, %opcode, %six : i32
+      %or = scalar.cmpi eq, %opcode, %seven : i32
+      %initial = view.atomic.load %cell[0] {ordering = relaxed, scope = device} : view<1xi32> -> i32
+      %final, %complete = scf.while(%expected = %initial : i32, %done = %false : i1) -> (i32, i1) {
+        %again = scalar.xori %done, %true : i1
+        scf.condition %again, %expected, %done : i1, i32, i1
+      } do(%expected: i32, %done: i1) {
+        %sum = scalar.addi %expected, %value : i32
+        %difference = scalar.subi %expected, %value : i32
+        %both = scalar.andi %expected, %value : i32
+        %either = scalar.ori %expected, %value : i32
+        %exclusive = scalar.xori %expected, %value : i32
+        %or_xor = scf.select %or, %either, %exclusive : i32
+        %bitwise = scf.select %and, %both, %or_xor : i32
+        %other = scf.select %subtract, %difference, %bitwise : i32
+        %desired = scf.select %add, %sum, %other : i32
+        %observed = view.atomic.cmpxchg %expected, %desired, %cell[0] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i32, view<1xi32> -> i32
+        %success = scalar.cmpi eq, %observed, %expected : i32
+        scf.yield %observed, %success : i32, i1
+      }
+    }
+  }
+  kernel.return
+}
+
+kernel.def export("control_device_64") @control_device_64() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%target: buffer, %operand: i64, %mask_bits: i64, %opcode: i32) {
+  %zero_offset = index.constant 0 : offset
+  %global_target = buffer.assume.memory_space<global> %target : buffer
+  %cell = buffer.view %global_target[%zero_offset] : buffer -> view<1xi64>
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %three = scalar.constant 3 : i32
+  %four = scalar.constant 4 : i32
+  %five = scalar.constant 5 : i32
+  %six = scalar.constant 6 : i32
+  %seven = scalar.constant 7 : i32
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %store = scalar.cmpi eq, %opcode, %three : i32
+  scf.if %store {
+    view.atomic.store %operand, %cell[0] {ordering = relaxed, scope = device} : i64, view<1xi64>
+  } else {
+    %wait = scalar.cmpi ult, %opcode, %three : i32
+    scf.if %wait {
+      %wait_equal = scalar.cmpi eq, %opcode, %zero : i32
+      %wait_not_equal = scalar.cmpi eq, %opcode, %one : i32
+      %terminal = scf.while(%pending = %true : i1) -> (i1) {
+        scf.condition %pending, %pending : i1, i1
+      } do(%pending: i1) {
+        %observed = view.atomic.load %cell[0] {ordering = relaxed, scope = device} : view<1xi64> -> i64
+        %masked = scalar.andi %observed, %mask_bits : i64
+        %equal = scalar.cmpi eq, %masked, %operand : i64
+        %not_equal = scalar.cmpi ne, %masked, %operand : i64
+        %greater_equal = scalar.cmpi uge, %masked, %operand : i64
+        %other = scf.select %wait_not_equal, %not_equal, %greater_equal : i1
+        %complete = scf.select %wait_equal, %equal, %other : i1
+        %again = scalar.xori %complete, %true : i1
+        scf.yield %again : i1
+      }
+    } else {
+      %add = scalar.cmpi eq, %opcode, %four : i32
+      %subtract = scalar.cmpi eq, %opcode, %five : i32
+      %and = scalar.cmpi eq, %opcode, %six : i32
+      %or = scalar.cmpi eq, %opcode, %seven : i32
+      %initial = view.atomic.load %cell[0] {ordering = relaxed, scope = device} : view<1xi64> -> i64
+      %final, %complete = scf.while(%expected = %initial : i64, %done = %false : i1) -> (i64, i1) {
+        %again = scalar.xori %done, %true : i1
+        scf.condition %again, %expected, %done : i1, i64, i1
+      } do(%expected: i64, %done: i1) {
+        %sum = scalar.addi %expected, %operand : i64
+        %difference = scalar.subi %expected, %operand : i64
+        %both = scalar.andi %expected, %operand : i64
+        %either = scalar.ori %expected, %operand : i64
+        %exclusive = scalar.xori %expected, %operand : i64
+        %or_xor = scf.select %or, %either, %exclusive : i64
+        %bitwise = scf.select %and, %both, %or_xor : i64
+        %other = scf.select %subtract, %difference, %bitwise : i64
+        %desired = scf.select %add, %sum, %other : i64
+        %observed = view.atomic.cmpxchg %expected, %desired, %cell[0] {failure_ordering = relaxed, scope = device, success_ordering = relaxed} : i64, view<1xi64> -> i64
+        %success = scalar.cmpi eq, %observed, %expected : i64
+        scf.yield %observed, %success : i64, i1
+      }
+    }
+  }
+  kernel.return
+}
+
+kernel.def export("control_system_32") @control_system_32() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%target: buffer, %operand: i64, %mask_bits: i64, %opcode: i32) {
+  %zero_offset = index.constant 0 : offset
+  %global_target = buffer.assume.memory_space<global> %target : buffer
+  %cell = buffer.view %global_target[%zero_offset] : buffer -> view<1xi32>
+  %value = scalar.trunci %operand : i64 to i32
+  %mask = scalar.trunci %mask_bits : i64 to i32
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %three = scalar.constant 3 : i32
+  %four = scalar.constant 4 : i32
+  %five = scalar.constant 5 : i32
+  %six = scalar.constant 6 : i32
+  %seven = scalar.constant 7 : i32
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %store = scalar.cmpi eq, %opcode, %three : i32
+  scf.if %store {
+    view.atomic.store %value, %cell[0] {ordering = relaxed, scope = system} : i32, view<1xi32>
+  } else {
+    %wait = scalar.cmpi ult, %opcode, %three : i32
+    scf.if %wait {
+      %wait_equal = scalar.cmpi eq, %opcode, %zero : i32
+      %wait_not_equal = scalar.cmpi eq, %opcode, %one : i32
+      %terminal = scf.while(%pending = %true : i1) -> (i1) {
+        scf.condition %pending, %pending : i1, i1
+      } do(%pending: i1) {
+        %observed = view.atomic.load %cell[0] {ordering = relaxed, scope = system} : view<1xi32> -> i32
+        %masked = scalar.andi %observed, %mask : i32
+        %equal = scalar.cmpi eq, %masked, %value : i32
+        %not_equal = scalar.cmpi ne, %masked, %value : i32
+        %greater_equal = scalar.cmpi uge, %masked, %value : i32
+        %other = scf.select %wait_not_equal, %not_equal, %greater_equal : i1
+        %complete = scf.select %wait_equal, %equal, %other : i1
+        %again = scalar.xori %complete, %true : i1
+        scf.yield %again : i1
+      }
+    } else {
+      %add = scalar.cmpi eq, %opcode, %four : i32
+      %subtract = scalar.cmpi eq, %opcode, %five : i32
+      %and = scalar.cmpi eq, %opcode, %six : i32
+      %or = scalar.cmpi eq, %opcode, %seven : i32
+      %initial = view.atomic.load %cell[0] {ordering = relaxed, scope = system} : view<1xi32> -> i32
+      %final, %complete = scf.while(%expected = %initial : i32, %done = %false : i1) -> (i32, i1) {
+        %again = scalar.xori %done, %true : i1
+        scf.condition %again, %expected, %done : i1, i32, i1
+      } do(%expected: i32, %done: i1) {
+        %sum = scalar.addi %expected, %value : i32
+        %difference = scalar.subi %expected, %value : i32
+        %both = scalar.andi %expected, %value : i32
+        %either = scalar.ori %expected, %value : i32
+        %exclusive = scalar.xori %expected, %value : i32
+        %or_xor = scf.select %or, %either, %exclusive : i32
+        %bitwise = scf.select %and, %both, %or_xor : i32
+        %other = scf.select %subtract, %difference, %bitwise : i32
+        %desired = scf.select %add, %sum, %other : i32
+        %observed = view.atomic.cmpxchg %expected, %desired, %cell[0] {failure_ordering = relaxed, scope = system, success_ordering = relaxed} : i32, view<1xi32> -> i32
+        %success = scalar.cmpi eq, %observed, %expected : i32
+        scf.yield %observed, %success : i32, i1
+      }
+    }
+  }
+  kernel.return
+}
+
+kernel.def export("control_system_64") @control_system_64() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%target: buffer, %operand: i64, %mask_bits: i64, %opcode: i32) {
+  %zero_offset = index.constant 0 : offset
+  %global_target = buffer.assume.memory_space<global> %target : buffer
+  %cell = buffer.view %global_target[%zero_offset] : buffer -> view<1xi64>
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %three = scalar.constant 3 : i32
+  %four = scalar.constant 4 : i32
+  %five = scalar.constant 5 : i32
+  %six = scalar.constant 6 : i32
+  %seven = scalar.constant 7 : i32
+  %false = scalar.constant false : i1
+  %true = scalar.constant true : i1
+  %store = scalar.cmpi eq, %opcode, %three : i32
+  scf.if %store {
+    view.atomic.store %operand, %cell[0] {ordering = relaxed, scope = system} : i64, view<1xi64>
+  } else {
+    %wait = scalar.cmpi ult, %opcode, %three : i32
+    scf.if %wait {
+      %wait_equal = scalar.cmpi eq, %opcode, %zero : i32
+      %wait_not_equal = scalar.cmpi eq, %opcode, %one : i32
+      %terminal = scf.while(%pending = %true : i1) -> (i1) {
+        scf.condition %pending, %pending : i1, i1
+      } do(%pending: i1) {
+        %observed = view.atomic.load %cell[0] {ordering = relaxed, scope = system} : view<1xi64> -> i64
+        %masked = scalar.andi %observed, %mask_bits : i64
+        %equal = scalar.cmpi eq, %masked, %operand : i64
+        %not_equal = scalar.cmpi ne, %masked, %operand : i64
+        %greater_equal = scalar.cmpi uge, %masked, %operand : i64
+        %other = scf.select %wait_not_equal, %not_equal, %greater_equal : i1
+        %complete = scf.select %wait_equal, %equal, %other : i1
+        %again = scalar.xori %complete, %true : i1
+        scf.yield %again : i1
+      }
+    } else {
+      %add = scalar.cmpi eq, %opcode, %four : i32
+      %subtract = scalar.cmpi eq, %opcode, %five : i32
+      %and = scalar.cmpi eq, %opcode, %six : i32
+      %or = scalar.cmpi eq, %opcode, %seven : i32
+      %initial = view.atomic.load %cell[0] {ordering = relaxed, scope = system} : view<1xi64> -> i64
+      %final, %complete = scf.while(%expected = %initial : i64, %done = %false : i1) -> (i64, i1) {
+        %again = scalar.xori %done, %true : i1
+        scf.condition %again, %expected, %done : i1, i64, i1
+      } do(%expected: i64, %done: i1) {
+        %sum = scalar.addi %expected, %operand : i64
+        %difference = scalar.subi %expected, %operand : i64
+        %both = scalar.andi %expected, %operand : i64
+        %either = scalar.ori %expected, %operand : i64
+        %exclusive = scalar.xori %expected, %operand : i64
+        %or_xor = scf.select %or, %either, %exclusive : i64
+        %bitwise = scf.select %and, %both, %or_xor : i64
+        %other = scf.select %subtract, %difference, %bitwise : i64
+        %desired = scf.select %add, %sum, %other : i64
+        %observed = view.atomic.cmpxchg %expected, %desired, %cell[0] {failure_ordering = relaxed, scope = system, success_ordering = relaxed} : i64, view<1xi64> -> i64
+        %success = scalar.cmpi eq, %observed, %expected : i64
+        scf.yield %observed, %success : i64, i1
+      }
+    }
+  }
+  kernel.return
+}

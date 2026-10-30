@@ -113,6 +113,50 @@ TEST_F(VirtualBufferContractTest, AtomicsIntersectSourcesAtEachExecutionSite) {
   iree_hal_buffer_release(target);
 }
 
+TEST_F(VirtualBufferContractTest, QueueShaderContractCoversEveryReplacement) {
+  native_families_[0].program_atomics = true;
+  native_.program_atomics[0] = {
+      .system_scope_32 = AMDF_ATOMIC_OPERATION_LOAD |
+                         AMDF_ATOMIC_OPERATION_STORE |
+                         AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE,
+  };
+  std::array<iree_hal_pool_t*, 2> sources = {};
+  IREE_ASSERT_OK(CreateSource(&sources[0]));
+  native_.program_atomics[0].system_scope_32 &=
+      ~AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE;
+  IREE_ASSERT_OK(CreateSource(&sources[1]));
+  const auto queue = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]);
+  // Both physical sources provide CP ADD, but only the first can use the
+  // shader ADD recipe fixed by a recording for the replaceable range.
+  for (auto* source : sources) {
+    EXPECT_TRUE(iree_all_bits_set(
+        iree_hal_pool_query_atomic_operations(source, queue).system_scope_32,
+        IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD));
+  }
+  const iree_hal_virtual_buffer_sources_t declaration = {sources.size(),
+                                                         sources.data()};
+  const iree_hal_virtual_buffer_options_t options = {.byte_length = 4096};
+  iree_hal_buffer_t* target = nullptr;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(group_, Scope(), declaration,
+                                                &options, allocator_, &target));
+  EXPECT_EQ(
+      iree_hal_buffer_query_atomic_operations(target, queue).system_scope_32,
+      IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+          IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+  iree_hal_buffer_release(target);
+  const auto reservations = native_.reservation_count;
+  accesses_[0].atomics.queue.system_scope_32 =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
+  iree_hal_virtual_buffer_capabilities_t capabilities;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      group_, Scope(), declaration, allocator_, &capabilities));
+  EXPECT_EQ(capabilities.max_byte_length, 0u);
+  EXPECT_EQ(native_.reservation_count, reservations);
+  for (auto* source : sources) {
+    iree_hal_pool_release(source);
+  }
+}
+
 TEST_F(VirtualBufferContractTest, HostCoherencePreservesDeviceSideBarrier) {
   native_.api.memory_scope_query_pair_info =
       [](amdf_memory_scope_t* scope,

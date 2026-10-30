@@ -941,7 +941,7 @@ iree_status_t iree_hal_amd_gpu_executable_create(
   const uint32_t variant_count =
       tsan_enabled && options->tsan ? options->tsan->provisioned_count : 1;
   iree_host_size_t exports_offset = 0, variants_offset = 0, memories_offset = 0,
-                   addresses_offset = 0, scope_ordinals_offset = 0,
+                   addresses_offset = 0, scope_facts_offset = 0,
                    tsan_offset = 0;
   iree_host_size_t function_count = 0, total_packet_count = 0;
   iree_host_size_t packet_count = 0, packets_offset = 0, program_offset = 0;
@@ -965,8 +965,9 @@ iree_status_t iree_hal_amd_gpu_executable_create(
                           &variants_offset),
         IREE_STRUCT_FIELD(variant_count, iree_hal_amd_fabric_memory_t,
                           &memories_offset),
-        IREE_STRUCT_FIELD(family->memory.queue_scope_id + 2, uint32_t,
-                          &scope_ordinals_offset),
+        IREE_STRUCT_FIELD(family->memory.queue_scope_id + 2,
+                          iree_hal_amd_fabric_memory_scope_facts_t,
+                          &scope_facts_offset),
         IREE_STRUCT_FIELD(tsan_enabled ? 1 : 0,
                           iree_hal_amd_gpu_executable_tsan_t, &tsan_offset),
         IREE_STRUCT_FIELD(tsan_enabled ? 256 : 0, uint64_t, &addresses_offset),
@@ -1049,9 +1050,10 @@ iree_status_t iree_hal_amd_gpu_executable_create(
       // zero. The executable allocation initializes the shared table to zero.
       variant->binding_facts = (iree_hal_amd_fabric_memory_binding_facts_t){
           .memory = variant->memory,
-          .scope_access_ordinals =
-              (const uint32_t*)((const uint8_t*)executable +
-                                scope_ordinals_offset),
+          .scope_facts =
+              (const iree_hal_amd_fabric_memory_scope_facts_t*)((const uint8_t*)
+                                                                    executable +
+                                                                scope_facts_offset),
       };
       variant->functions = (uint8_t*)executable->functions +
                            (iree_host_size_t)v *

@@ -9,6 +9,7 @@
 #include <array>
 #include <vector>
 
+#include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -127,25 +128,71 @@ TEST(ControlTest, RequirementsMatchExactSiteCellsAndErrorModes) {
       const uint32_t required = iree_hal_amd_gpu_control_requirement(command);
       EXPECT_EQ(required, 1u << (cell * 8 + operation));
       scopes[2].atomic_operations = required;
-      IREE_EXPECT_OK(iree_hal_amd_gpu_control_validate_target(&family, &buffer,
-                                                              required, 0));
+      IREE_EXPECT_OK(iree_hal_amd_gpu_control_validate_target(
+          &family, IREE_HAL_MEMORY_SITE_QUEUE, &buffer, required, 0));
       scopes[2].atomic_operations = 0;
       scopes[3].atomic_operations = required;
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_PERMISSION_DENIED,
+          iree_hal_amd_gpu_control_validate_target(
+              &family, IREE_HAL_MEMORY_SITE_QUEUE, &buffer, required, 0));
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_INCOMPATIBLE,
+          iree_hal_amd_gpu_control_validate_target(
+              &family, IREE_HAL_MEMORY_SITE_QUEUE, &buffer, 0, required));
       IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
                             iree_hal_amd_gpu_control_validate_target(
-                                &family, &buffer, required, 0));
-      IREE_EXPECT_STATUS_IS(IREE_STATUS_INCOMPATIBLE,
-                            iree_hal_amd_gpu_control_validate_target(
-                                &family, &buffer, 0, required));
-      IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
-                            iree_hal_amd_gpu_control_validate_target(
-                                &family, &buffer, required, required));
+                                &family, IREE_HAL_MEMORY_SITE_QUEUE, &buffer,
+                                required, required));
     }
   }
   EXPECT_EQ(sizeof(iree_hal_amd_gpu_control_t), 24u);
   EXPECT_EQ(iree_hal_amd_gpu_control_requirement(
                 iree_hal_amd_gpu_control_timestamp()),
             0u);
+}
+
+TEST(ControlTest, DirectSelectionUsesTheCapturedCpSubset) {
+  std::array<iree_hal_amd_fabric_memory_scope_facts_t, 4> scopes = {};
+  struct {
+    // One generic native binding followed immediately by provider facts.
+    iree_hal_buffer_native_binding_t binding;
+    // Borrowed implementation subset independent of the public union.
+    iree_hal_amd_fabric_memory_binding_facts_t facts;
+  } bindings = {{}, {nullptr, scopes.data()}};
+  iree_hal_memory_contract_t contract = {};
+  contract.binding_layout.binding_count = 1;
+  contract.binding_layout.byte_length = sizeof(bindings);
+  iree_hal_buffer_backing_facts_t backing = {};
+  iree_hal_buffer_t buffer = {};
+  buffer.memory.contract = &contract;
+  buffer.memory.bindings = &bindings.binding;
+  buffer.memory.backing = &backing;
+  iree_hal_queue_family_t family = {};
+  family.memory.queue_scope_id = 2;
+  for (uint8_t width : {32, 64}) {
+    auto command = iree_hal_amd_gpu_control_store({.width = width});
+    for (auto flags :
+         {IREE_HAL_ATOMIC_FLAG_NONE, IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE}) {
+      command.flags = flags;
+      scopes[2].queue_atomic_operations =
+          iree_hal_amd_gpu_control_requirement(command);
+      EXPECT_FALSE(
+          iree_hal_amd_gpu_control_uses_program(&family, &buffer, command));
+      command.kind = IREE_HAL_AMD_GPU_CONTROL_WAIT;
+      EXPECT_TRUE(
+          iree_hal_amd_gpu_control_uses_program(&family, &buffer, command));
+      command.kind = IREE_HAL_AMD_GPU_CONTROL_STORE;
+    }
+  }
+  // Reservations have no physical-owner suffix and retain a fixed shader
+  // contract even when a currently attached allocation could also use CP.
+  contract.binding_layout.byte_length = sizeof(bindings.binding);
+  EXPECT_TRUE(iree_hal_amd_gpu_control_uses_program(
+      &family, &buffer,
+      iree_hal_amd_gpu_control_store({.width = IREE_HAL_ATOMIC_WIDTH_64})));
+  EXPECT_FALSE(iree_hal_amd_gpu_control_uses_program(
+      &family, &buffer, iree_hal_amd_gpu_control_timestamp()));
 }
 
 }  // namespace

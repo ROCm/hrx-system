@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/control.h"
 
+#include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
 
 uint32_t iree_hal_amd_gpu_control_requirement(
@@ -26,18 +27,42 @@ uint32_t iree_hal_amd_gpu_control_requirement(
 }
 
 iree_status_t iree_hal_amd_gpu_control_validate_target(
-    const iree_hal_queue_family_t* family, const iree_hal_buffer_t* buffer,
-    uint32_t required, uint32_t incompatible) {
-  const uint32_t available =
-      buffer->memory.contract->scopes[family->memory.queue_scope_id]
-          .atomic_operations;
+    const iree_hal_queue_family_t* family, iree_hal_memory_site_kind_t site,
+    const iree_hal_buffer_t* buffer, uint32_t required, uint32_t incompatible) {
+  const uint32_t available = buffer->memory.contract
+                                 ->scopes[family->memory.queue_scope_id +
+                                          (site - IREE_HAL_MEMORY_SITE_QUEUE)]
+                                 .atomic_operations;
   if (((required | incompatible) & ~available) != 0) {
     return iree_make_status(
         (required & ~available) ? IREE_STATUS_PERMISSION_DENIED
                                 : IREE_STATUS_INCOMPATIBLE,
-        "GPU target lacks prepared queue atomic capabilities");
+        "GPU target lacks prepared execution-site atomic capabilities");
   }
   return iree_ok_status();
+}
+
+bool iree_hal_amd_gpu_control_uses_program(
+    const iree_hal_queue_family_t* family, const iree_hal_buffer_t* buffer,
+    iree_hal_amd_gpu_control_t command) {
+  const uint32_t required = iree_hal_amd_gpu_control_requirement(command);
+  if (!required) {
+    return false;
+  }
+  const iree_hal_buffer_memory_view_t view =
+      iree_hal_buffer_memory_view(buffer);
+  const iree_hal_buffer_binding_layout_t* layout =
+      &view.contract->binding_layout;
+  if (layout->byte_length !=
+      layout->binding_count * sizeof(iree_hal_buffer_native_binding_t) +
+          sizeof(iree_hal_amd_fabric_memory_binding_facts_t)) {
+    return true;
+  }
+  const iree_hal_amd_fabric_memory_binding_facts_t* facts =
+      (const void*)(view.bindings + layout->binding_count);
+  return !iree_all_bits_set(
+      facts->scope_facts[family->memory.queue_scope_id].queue_atomic_operations,
+      required);
 }
 
 iree_status_t iree_hal_amd_gpu_control_resolve(

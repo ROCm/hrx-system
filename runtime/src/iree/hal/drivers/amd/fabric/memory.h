@@ -65,14 +65,24 @@ typedef struct iree_hal_amd_fabric_memory_t {
   iree_async_buffer_registration_state_t registrations;
 } iree_hal_amd_fabric_memory_t;
 
+// Exact native recipe facts shared by every buffer materialized by a provider.
+// The generic scope table holds semantic guarantees; this table selects their
+// implementation only after the physical binding is available.
+typedef struct iree_hal_amd_fabric_memory_scope_facts_t {
+  // Native device access ordinal for this scope.
+  uint32_t access_ordinal;
+  // Packed device32/device64/system32/system64 command-processor operations.
+  uint32_t queue_atomic_operations;
+} iree_hal_amd_fabric_memory_scope_facts_t;
+
 // Private suffix after the generic entries of a fabric native binding table.
 // Copies borrow the same physical owner and preserve its lifetime contract.
 // Translated host bindings establish byte correspondence for nested views.
 typedef struct iree_hal_amd_fabric_memory_binding_facts_t {
   // Borrowed physical storage, including its optional prepared host view.
   const iree_hal_amd_fabric_memory_t* memory;
-  // Provider-owned native access ordinals indexed by the HAL memory scope ID.
-  const uint32_t* scope_access_ordinals;
+  // Provider-owned native facts indexed by the HAL memory scope ID.
+  const iree_hal_amd_fabric_memory_scope_facts_t* scope_facts;
 } iree_hal_amd_fabric_memory_binding_facts_t;
 
 // Prepared file registrations placed with one physical slab. Regions borrow

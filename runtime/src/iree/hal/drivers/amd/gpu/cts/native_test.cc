@@ -851,7 +851,16 @@ TEST_F(GpuNativeTest, NonfinalReleaseFromFailedDependencyCallback) {
   EXPECT_EQ(allocator_.live_count.load(), 0u);
 }
 
-TEST_F(GpuNativeTest, RecordedAtomicsFollowReplacementBacking) {
+class GpuNativeAtomicTest : public GpuNativeTest,
+                            public ::testing::WithParamInterface<
+                                std::pair<amdf_queue_command_type_t, bool>> {
+ protected:
+  amdf_queue_command_type_t command_type() const override {
+    return GetParam().first;
+  }
+};
+
+TEST_P(GpuNativeAtomicTest, RecordedAtomicsFollowReplacementBacking) {
   using iree::hal::cts::Ref;
   Create();
   if (HasFatalFailure()) {
@@ -902,12 +911,19 @@ TEST_F(GpuNativeTest, RecordedAtomicsFollowReplacementBacking) {
   Ref<iree_hal_command_buffer_t> commands;
   IREE_ASSERT_OK(iree_hal_command_buffer_create(
       access.family, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
-      IREE_HAL_COMMAND_CATEGORY_ATOMIC, 0, commands.out()));
+      IREE_HAL_COMMAND_CATEGORY_ATOMIC, GetParam().second ? 1 : 0,
+      commands.out()));
+  const auto reference =
+      GetParam().second
+          ? iree_hal_make_indirect_buffer_ref(0, 0, sizeof(uint32_t))
+          : iree_hal_make_buffer_ref(target, 0, sizeof(uint32_t));
+  const iree_hal_buffer_binding_t binding = {target, 0, sizeof(uint32_t)};
+  const iree_hal_buffer_binding_table_t table = {GetParam().second ? 1u : 0u,
+                                                 &binding};
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(commands));
   IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(
       commands, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
-      IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-      iree_hal_make_buffer_ref(target, 0, sizeof(uint32_t)),
+      IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, reference,
       {
           .value = 99,
           .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
@@ -916,8 +932,7 @@ TEST_F(GpuNativeTest, RecordedAtomicsFollowReplacementBacking) {
   if (supports_add) {
     IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
         commands, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
-        IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-        iree_hal_make_buffer_ref(target, 0, sizeof(uint32_t)),
+        IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, reference,
         {
             .operand = 1,
             .flags =
@@ -957,7 +972,7 @@ TEST_F(GpuNativeTest, RecordedAtomicsFollowReplacementBacking) {
                                       {1, &timeline, &mapped}, 1, &mapping, 0));
     IREE_ASSERT_OK(iree_hal_queue_execute(queues_[0], {1, &timeline, &mapped},
                                           {1, &timeline, &executed}, commands,
-                                          {}, 0));
+                                          table, 0));
     uint32_t result = 0;
     IREE_ASSERT_OK(iree_hal_queue_download(
         queues_[0], {1, &timeline, &executed}, {1, &timeline, &read},
@@ -968,6 +983,19 @@ TEST_F(GpuNativeTest, RecordedAtomicsFollowReplacementBacking) {
   }
   IREE_ASSERT_OK(iree_hal_virtual_buffer_detach(target, all));
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    Protocol, GpuNativeAtomicTest,
+    ::testing::Values(std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, false),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, true),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, false),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, true)),
+    [](const auto& info) {
+      return std::string(info.param.first == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                             ? "Aql"
+                             : "Pm4") +
+             (info.param.second ? "Indirect" : "Direct");
+    });
 
 TEST_F(GpuNativeTest, BatchedMappingsReplaceProtectAndReleaseNativeBacking) {
   using iree::hal::cts::Ref;

@@ -10,6 +10,7 @@
 #include "iree/hal/drivers/amd/gpu/executable.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/barrier.h"
 #include "iree/hal/drivers/amd/gpu/queue/aql/transfer.h"
+#include "iree/hal/drivers/amd/gpu/queue/control_program.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
 #include "iree/hal/drivers/amd/gpu/queue/recording.h"
 #include "iree/hal/drivers/amd/gpu/queue/timestamp.h"
@@ -914,39 +915,57 @@ static iree_status_t iree_hal_amd_gpu_aql_command_control(
                                        &after);
   uint32_t header = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_header(buffer, &header));
-  if (command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP) {
+  const bool program = command.kind != IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP;
+  uint32_t data_offset = 0;
+  uint32_t word_count = 0;
+  uint32_t predicate_words = 0;
+  uint32_t* words = NULL;
+  if (program) {
+    iree_hal_amd_gpu_control_program_arguments_t* arguments = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amd_gpu_recording_data(&buffer->recording, sizeof(*arguments),
+                                        8, &data_offset, (void**)&arguments));
+    *arguments = iree_hal_amd_gpu_control_program_arguments(0, command);
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
+        buffer, data_offset, value, target.offset,
+        IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA));
+  } else {
+    const uint32_t xcc_count =
+        buffer->pool->storage.context->target_info.topology.xcc_count;
+    predicate_words = xcc_count > 1 ? 2 : 0;
+    const uint32_t body_words = iree_hal_amd_gpu_control_word_count(command);
+    word_count = predicate_words + body_words;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_timestamp_writes_append(
         &buffer->recording, target, &buffer->timestamps));
-  }
-  const uint32_t xcc_count =
-      buffer->pool->storage.context->target_info.topology.xcc_count;
-  const uint32_t predicate_words = xcc_count > 1 ? 2 : 0;
-  const uint32_t body_words = iree_hal_amd_gpu_control_word_count(command);
-  uint32_t data_offset = 0;
-  uint32_t* words = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
-      &buffer->recording, (predicate_words + body_words) * 4, 4, &data_offset,
-      (void**)&words));
-  uint32_t* cursor =
-      iree_hal_amd_gpu_aql_emit_single_executor(words, xcc_count, body_words);
-  if (command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP) {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
+        &buffer->recording, word_count * 4, 4, &data_offset, (void**)&words));
+    uint32_t* cursor =
+        iree_hal_amd_gpu_aql_emit_single_executor(words, xcc_count, body_words);
     iree_hal_amd_gpu_pm4_emit_clock(cursor, 0, false);
-  } else {
-    iree_hal_amd_gpu_control_emit(cursor, 0, command);
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
+        buffer,
+        data_offset + 4 * (predicate_words +
+                           iree_hal_amd_gpu_control_address_word(command)),
+        value, target.offset, IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA));
+    buffer->program->has_control = true;
   }
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
-      buffer,
-      data_offset + 4 * (predicate_words +
-                         iree_hal_amd_gpu_control_address_word(command)),
-      value, target.offset, IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA));
   uint32_t packet_offset = 0;
   iree_hal_amd_gpu_aql_packet_t* packet = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_aql_command_packets(buffer, 1, &packet_offset, &packet));
-  *packet = iree_hal_amd_gpu_aql_packet_indirect_buffer(
-      header, 0, predicate_words + body_words, 0);
+  if (program) {
+    header |= IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED;
+  }
+  *packet =
+      program
+          ? iree_hal_amd_gpu_aql_control_program_packet(
+                buffer->pool
+                    ->control[iree_hal_amd_gpu_control_program_index(command)],
+                0, header, 0)
+          : iree_hal_amd_gpu_aql_packet_indirect_buffer(
+                header, 0, word_count, 0);
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
-      buffer, packet_offset + 8, 0, data_offset,
+      buffer, packet_offset + (program ? 40 : 8), 0, data_offset,
       IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
   if (command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP) {
     buffer->timestamp_tail = packet;
@@ -958,7 +977,6 @@ static iree_status_t iree_hal_amd_gpu_aql_command_control(
                          (header & IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) != 0;
   buffer->last_header = &packet->words[0];
   buffer->pending_barrier = after;
-  buffer->program->has_control = true;
   ++buffer->program->operation_count;
   return iree_ok_status();
 }
