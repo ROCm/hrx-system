@@ -122,7 +122,7 @@ TEST_F(HostCallbackTest, CancelledInvocationReleasesPayloadWithoutCallingIt) {
   iree_hal_host_call_t call;
   IREE_ASSERT_OK(iree_hal_streaming_host_callback_prepare(
       &queue_, iree_hal_streaming_make_host_function(Increment), &calls,
-      &captured.resource, &call));
+      /*user_data_size=*/0, &captured.resource, &call));
   iree_hal_resource_release(&captured.resource);
   EXPECT_EQ(captured.destroyed, 0);
   // Releasing the prepared call models queue rejection or pre-invocation
@@ -142,11 +142,44 @@ TEST_F(HostCallbackTest, AllocationFailurePreservesOutputAndStartsNoWorker) {
       IREE_STATUS_RESOURCE_EXHAUSTED,
       iree_hal_streaming_host_callback_prepare(
           &queue_, iree_hal_streaming_make_host_function(Increment), &calls,
-          nullptr, &call));
+          /*user_data_size=*/0, nullptr, &call));
   EXPECT_EQ(call.fn, expected.fn);
   EXPECT_EQ(call.user_data, expected.user_data);
   EXPECT_EQ(call.resource, expected.resource);
   EXPECT_EQ(queue_.thread, nullptr);
+}
+
+TEST_F(HostCallbackTest, ParameterCopySharesTheJobAllocation) {
+  struct alignas(iree_max_align_t) Parameters {
+    // Value snapshotted at preparation rather than at worker invocation.
+    int value;
+    // Borrowed output live through worker shutdown.
+    int* output;
+  };
+  int output = 0;
+  iree_hal_host_call_t warmup;
+  IREE_ASSERT_OK(iree_hal_streaming_host_callback_prepare(
+      &queue_, iree_hal_streaming_make_host_function(Increment), &output,
+      /*user_data_size=*/0, nullptr, &warmup));
+  iree_hal_resource_release(warmup.resource);
+  const int initial_allocations = allocator_.allocations.load();
+
+  Parameters parameters = {17, &output};
+  iree_hal_host_call_t call;
+  IREE_ASSERT_OK(iree_hal_streaming_host_callback_prepare(
+      &queue_, iree_hal_streaming_make_host_function(+[](void* user_data) {
+        EXPECT_EQ(reinterpret_cast<uintptr_t>(user_data) % iree_max_align_t,
+                  0u);
+        const auto* parameters = static_cast<const Parameters*>(user_data);
+        *parameters->output = parameters->value;
+      }),
+      &parameters, sizeof(parameters), nullptr, &call));
+  EXPECT_EQ(allocator_.allocations.load() - initial_allocations, 1);
+  parameters.value = 23;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED, Ready(call));
+  iree_hal_resource_release(call.resource);
+  iree_hal_streaming_host_callback_queue_stop(&queue_);
+  EXPECT_EQ(output, 17);
 }
 
 TEST_F(HostCallbackTest,
@@ -155,7 +188,7 @@ TEST_F(HostCallbackTest,
   iree_hal_host_call_t call;
   IREE_ASSERT_OK(iree_hal_streaming_host_callback_prepare(
       &queue_, iree_hal_streaming_make_host_function(Increment), &calls,
-      nullptr, &call));
+      /*user_data_size=*/0, nullptr, &call));
   auto* semaphore = MakeSemaphore();
   uint64_t value = 1;
   allocator_.reject_allocations = true;
@@ -176,7 +209,7 @@ TEST_F(HostCallbackTest, ShutdownJoinsNativeCaptureBeforeReleasingItsOwners) {
   iree_hal_host_call_t call;
   IREE_ASSERT_OK(iree_hal_streaming_host_callback_prepare(
       &queue_, iree_hal_streaming_make_host_function(Increment), &calls,
-      &captured.resource, &call));
+      /*user_data_size=*/0, &captured.resource, &call));
   iree_hal_resource_release(&captured.resource);
   std::atomic<bool> stopped = false;
   std::thread shutdown([&] {
@@ -237,7 +270,7 @@ TEST_F(HostCallbackTest, ReadyFifoClonesCompletionListsAndPreservesCallOrder) {
   for (size_t i = 0; i < 2; ++i) {
     IREE_ASSERT_OK(iree_hal_streaming_host_callback_prepare(
         &queue_, iree_hal_streaming_make_host_function(invoke), &arguments[i],
-        nullptr, &calls[i]));
+        /*user_data_size=*/0, nullptr, &calls[i]));
   }
   iree_hal_semaphore_t* semaphores[] = {MakeSemaphore(), MakeSemaphore(),
                                         MakeSemaphore()};
@@ -277,7 +310,7 @@ TEST_F(HostCallbackTest, StopJoinsCpuTailAfterCompletionIsAlreadyVisible) {
         ++*invocation->calls;
         invocation->release.acquire();
       }),
-      &invocation, nullptr, &call));
+      &invocation, /*user_data_size=*/0, nullptr, &call));
   allocator_.held_capture = call.resource;
   auto* semaphore = MakeSemaphore();
   uint64_t value = 1;
@@ -328,7 +361,7 @@ TEST_F(HostCallbackTest,
         iree_allocator_free(allocator->value(), staging);
         return status;
       }),
-      &dependency, &captured.resource, &call));
+      &dependency, /*user_data_size=*/0, &captured.resource, &call));
   iree_hal_resource_release(&captured.resource);
   iree_hal_semaphore_t* semaphores[] = {MakeSemaphore(), MakeSemaphore()};
   uint64_t values[] = {1, 3};
@@ -359,7 +392,7 @@ TEST_F(HostCallbackTest, ConcurrentReadyProducersRetireEveryCallBeforeJoin) {
             &queue_, iree_hal_streaming_make_host_function(+[](void* data) {
               ++*static_cast<std::atomic<int>*>(data);
             }),
-            &calls, nullptr, &call);
+            &calls, /*user_data_size=*/0, nullptr, &call);
         if (iree_status_is_ok(status)) {
           status = Ready(call, {1, &semaphores[i], &value});
           iree_hal_resource_release(call.resource);

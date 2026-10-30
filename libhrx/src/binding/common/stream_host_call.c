@@ -90,7 +90,7 @@ iree_status_t iree_hal_streaming_launch_host_function(
       z0, iree_hal_streaming_host_callback_prepare(
               stream->context->device_entry->host_callbacks,
               iree_hal_streaming_make_host_function(fn), user_data,
-              /*resource=*/NULL, &call));
+              /*user_data_size=*/0, /*resource=*/NULL, &call));
 
   const uint64_t args[4] = {0, 0, 0, 0};
   iree_status_t status = iree_hal_streaming_queue_host_call(

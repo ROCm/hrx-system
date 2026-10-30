@@ -21,7 +21,8 @@ struct iree_hal_streaming_host_callback_job_t {
   iree_hal_streaming_host_callback_job_t* next;
   // Application function or compatibility CPU copy invoked by the worker.
   iree_hal_streaming_host_callback_t callback;
-  // Unowned function argument, optionally protected by captured_resource.
+  // Borrowed argument or inline parameter copy, with referenced objects
+  // optionally protected by captured_resource.
   void* user_data;
   // Retained callback payload released before publishing callback completion.
   iree_hal_resource_t* captured_resource;
@@ -170,16 +171,24 @@ static iree_status_t iree_hal_streaming_host_callback_ready(
 iree_status_t iree_hal_streaming_host_callback_prepare(
     iree_hal_streaming_host_callback_queue_t* queue,
     iree_hal_streaming_host_callback_t callback_code, void* user_data,
-    iree_hal_resource_t* resource, iree_hal_host_call_t* out_call) {
+    iree_host_size_t user_data_size, iree_hal_resource_t* resource,
+    iree_hal_host_call_t* out_call) {
   iree_hal_streaming_host_callback_job_t* callback = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      queue->host_allocator, sizeof(*callback), (void**)&callback));
+  const iree_host_size_t payload_offset =
+      iree_sizeof_struct(iree_hal_streaming_host_callback_job_t);
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(queue->host_allocator,
+                                             payload_offset + user_data_size,
+                                             (void**)&callback));
   iree_hal_resource_initialize(&iree_hal_streaming_host_callback_vtable,
                                &callback->resource);
   callback->host_allocator = queue->host_allocator;
   callback->queue = queue;
   callback->callback = callback_code;
   callback->user_data = user_data;
+  if (user_data_size > 0) {
+    callback->user_data = (uint8_t*)callback + payload_offset;
+    memcpy(callback->user_data, user_data, user_data_size);
+  }
   callback->captured_resource = resource;
   iree_hal_resource_retain(resource);
   iree_slim_mutex_lock(&queue->mutex);

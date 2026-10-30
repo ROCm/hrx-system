@@ -73,6 +73,9 @@ typedef struct iree_hal_streaming_graph_host_call_block_attrs_t {
   iree_hal_streaming_host_callback_t callback;
   // User data passed to the host callback.
   void* user_data;
+  // Owned parameter bytes captured by each invocation, or zero for a borrowed
+  // application argument.
+  iree_host_size_t user_data_size;
   // Host-call submission flags.
   iree_hal_host_call_flags_t flags;
 } iree_hal_streaming_graph_host_call_block_attrs_t;
@@ -1288,6 +1291,8 @@ static iree_status_t iree_hal_streaming_graph_create_host_call_block(
       &out_ptrs->attrs->host_call;
   attrs->callback = callback;
   attrs->user_data = user_data;
+  attrs->user_data_size =
+      source_node ? source_node->attrs.host.user_data_size : 0;
   if (source_node && source_node->attrs.host.user_data_size > 0 && user_data) {
     void* copied_data = NULL;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -2424,6 +2429,7 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
       status = iree_hal_streaming_host_callback_prepare(
           stream->context->device_entry->host_callbacks,
           ptrs->attrs->host_call.callback, ptrs->attrs->host_call.user_data,
+          ptrs->attrs->host_call.user_data_size,
           /*resource=*/NULL, &call);
       if (iree_status_is_ok(status)) {
         const uint64_t args[4] = {0};

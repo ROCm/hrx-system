@@ -596,6 +596,84 @@ TEST_F(GraphExecTest, ClonedHostOperationOwnsItsPayloadAndExecutableSnapshot) {
   EXPECT_EQ(output, 17);
 }
 
+TEST_F(GraphExecTest, UpdatePreservesParametersOfPendingHostOperations) {
+  struct Gate {
+    // Publishes that the first callback holds the frontend worker.
+    std::binary_semaphore entered{0};
+    // Allows each launch to continue after its update/inspection boundary.
+    std::binary_semaphore release{0};
+  } gate;
+  struct Copy {
+    // Value snapshotted for one launch.
+    int value;
+    // Application output retained until the launch completes.
+    int* output;
+  };
+  int output = 0;
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* executable = nullptr;
+  bool gate_released = false;
+  ScopeExit release_handles([&] {
+    if (!gate_released) {
+      gate.release.release();
+    }
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    iree_hal_streaming_graph_exec_release(executable);
+    iree_hal_streaming_graph_release(graph);
+  });
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+  iree_hal_streaming_graph_node_t* gate_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      graph, nullptr, 0,
+      +[](void* user_data) {
+        auto* gate = static_cast<Gate*>(user_data);
+        gate->entered.release();
+        gate->release.acquire();
+      },
+      &gate, &gate_node));
+  Copy* copy = nullptr;
+  IREE_ASSERT_OK(iree_arena_allocate(&graph->arena, sizeof(*copy),
+                                     reinterpret_cast<void**>(&copy)));
+  *copy = {17, &output};
+  iree_hal_streaming_graph_node_t* node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_operation_node(
+      graph, &gate_node, 1,
+      +[](void* user_data) {
+        const auto* copy = static_cast<const Copy*>(user_data);
+        *copy->output = copy->value;
+        return iree_ok_status();
+      },
+      copy, &node));
+  node->attrs.host.user_data_size = sizeof(*copy);
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+  iree_hal_streaming_graph_exec_launch_result_t launch_result;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(executable, stream_,
+                                                      &launch_result));
+  gate.entered.acquire();
+
+  // Rebuilding releases the compiled arena while the old launch still owns a
+  // pending operation. Its captured parameters must survive that release.
+  copy->value = 31;
+  iree_hal_streaming_graph_node_t* error_node = nullptr;
+  iree_hal_streaming_graph_exec_update_result_t update_result;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_update(
+      executable, graph, &error_node, &update_result));
+  EXPECT_EQ(update_result, IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_SUCCESS);
+  gate.release.release();
+  gate_released = true;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_EQ(output, 17);
+
+  gate.release.release();
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(executable, stream_,
+                                                      &launch_result));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_EQ(output, 31);
+}
+
 TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
   iree_hal_pool_t* memory_pool = nullptr;
   iree_hal_buffer_t* buffer = nullptr;

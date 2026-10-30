@@ -102,8 +102,10 @@ void iree_hal_streaming_host_callback_queue_deinitialize(
     iree_hal_streaming_host_callback_queue_t* queue);
 
 // Prepares a one-shot HAL call on an open queue, starting the worker on
-// first use. |resource| optionally retains |user_data| through callback
-// execution or cancellation. Success returns an owned reference in
+// first use. A nonzero |user_data_size| copies that many parameter bytes into
+// the job allocation; zero borrows |user_data| unchanged. |resource| optionally
+// retains objects referenced by those parameters through execution or
+// cancellation. Success returns an owned reference in
 // out_call->resource; the caller releases it after queue_host_call returns.
 // Failure changes no output. The HAL adapter clones its ready completion list
 // and returns DEFERRED; only this queue's worker invokes |callback|. Operation
@@ -112,7 +114,8 @@ void iree_hal_streaming_host_callback_queue_deinitialize(
 iree_status_t iree_hal_streaming_host_callback_prepare(
     iree_hal_streaming_host_callback_queue_t* queue,
     iree_hal_streaming_host_callback_t callback, void* user_data,
-    iree_hal_resource_t* resource, iree_hal_host_call_t* out_call);
+    iree_host_size_t user_data_size, iree_hal_resource_t* resource,
+    iree_hal_host_call_t* out_call);
 
 #ifdef __cplusplus
 }  // extern "C"
