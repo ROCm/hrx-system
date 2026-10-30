@@ -26,7 +26,7 @@ _AMDGPU_EXECUTION_COMPATIBLE_WITH = loom_config_compatible_with([
 
 iree_execution_test_suite(
     name = "device_failure_test",
-    data = ["device_failure.loom"],
+    data = ["//loom/src/loom/tooling/target/amdgpu/testdata:device_failure.loom"],
     manifests = ["device_failure.test.json"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = [
@@ -76,7 +76,7 @@ iree_execution_test_suite(
 
 iree_execution_test_suite(
     name = "benchmark_profile_policy_test",
-    data = ["benchmark_profile_policy.loom"],
+    data = ["//loom/src/loom/tooling/target/amdgpu/testdata:benchmark_profile_policy.loom"],
     manifests = ["benchmark_profile_policy.test.json"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = [
@@ -93,15 +93,15 @@ iree_py_test(
     srcs = ["qualification_test.py"],
     args = [
         "$(location //loom/src/loom/tools/loom-check:loom-check)",
-        "$(location qualification_accepted.loom-test)",
+        "$(location //loom/src/loom/tooling/target/amdgpu/testdata:qualification_accepted.loom-test)",
         "$(location //loom/src/loom/tools/loom-compile:loom-compile)",
-        "$(location memory_address_realizations.loom-test)",
-        "$(location qualification_rejected.loom-test)",
+        "$(location //loom/src/loom/tooling/target/amdgpu/testdata:memory_address_realizations.loom-test)",
+        "$(location //loom/src/loom/tooling/target/amdgpu/testdata:qualification_rejected.loom-test)",
     ],
     data = [
-        "memory_address_realizations.loom-test",
-        "qualification_accepted.loom-test",
-        "qualification_rejected.loom-test",
+        "//loom/src/loom/tooling/target/amdgpu/testdata:memory_address_realizations.loom-test",
+        "//loom/src/loom/tooling/target/amdgpu/testdata:qualification_accepted.loom-test",
+        "//loom/src/loom/tooling/target/amdgpu/testdata:qualification_rejected.loom-test",
         "//loom/src/loom/tools/loom-check",
         "//loom/src/loom/tools/loom-compile",
     ],
@@ -111,11 +111,11 @@ iree_py_test(
 iree_execution_test_suite(
     name = "loom_compile_execution_test",
     data = [
-        "compile_requests.loom",
-        "complete_authoring_module.loom",
-        "feature_distinct_code_objects.loom",
-        "loom_opt_f32_arith.loom",
-        "selected_root_amdgpu.loom",
+        "//loom/src/loom/tooling/target/amdgpu/testdata:compile_requests.loom",
+        "//loom/src/loom/tooling/target/amdgpu/testdata:complete_authoring_module.loom",
+        "//loom/src/loom/tooling/target/amdgpu/testdata:feature_distinct_code_objects.loom",
+        "//loom/src/loom/tooling/target/amdgpu/testdata:loom_opt_f32_arith.loom",
+        "//loom/src/loom/tooling/target/amdgpu/testdata:selected_root_amdgpu.loom",
     ],
     manifests = ["loom-compile-amdgpu.test.json"],
     tags = ["hostonly"],
@@ -132,9 +132,9 @@ iree_execution_test_suite(
 iree_execution_test_suite(
     name = "loom_link_execution_test",
     data = [
-        "loom_link_low.loom",
-        "loom_link_type_binding_declaration.loom",
-        "loom_link_type_bindings.loom",
+        "//loom/src/loom/tooling/target/amdgpu/testdata:loom_link_low.loom",
+        "//loom/src/loom/tooling/target/amdgpu/testdata:loom_link_type_binding_declaration.loom",
+        "//loom/src/loom/tooling/target/amdgpu/testdata:loom_link_type_bindings.loom",
     ],
     manifests = ["loom-link-amdgpu.test.json"],
     tags = ["hostonly"],
@@ -147,7 +147,7 @@ iree_execution_test_suite(
 
 iree_execution_test_suite(
     name = "loom_opt_execution_test",
-    data = ["loom_opt_f32_arith.loom"],
+    data = ["//loom/src/loom/tooling/target/amdgpu/testdata:loom_opt_f32_arith.loom"],
     manifests = ["loom-opt-amdgpu.test.json"],
     tags = ["hostonly"],
     target_compatible_with = _AMDGPU_ARTIFACTS_COMPATIBLE_WITH,
@@ -159,8 +159,8 @@ iree_execution_test_suite(
 iree_execution_test_suite(
     name = "check_requirements_test",
     data = [
-        "check_requirements.loom",
-        "check_requirements_invalid.loom",
+        "//loom/src/loom/tooling/target/amdgpu/testdata:check_requirements.loom",
+        "//loom/src/loom/tooling/target/amdgpu/testdata:check_requirements_invalid.loom",
     ],
     manifests = ["check-requirements.test.json"],
     tags = ["hostonly"],
@@ -173,7 +173,7 @@ iree_execution_test_suite(
 
 iree_execution_test_suite(
     name = "check_target_requirements_test",
-    data = ["check_target_requirements.loom"],
+    data = ["//loom/src/loom/tooling/target/amdgpu/testdata:check_target_requirements.loom"],
     manifests = ["check-target-requirements.test.json"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = [
