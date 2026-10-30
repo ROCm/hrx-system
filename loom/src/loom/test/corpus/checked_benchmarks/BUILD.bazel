@@ -4,12 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load(
-    "//loom/build_tools/bazel:defs.bzl",
-    "loom_library",
-    "loom_module",
-    "loom_test_module",
-)
+load("//loom/build_tools/bazel:defs.bzl", "loom_corpus_sources")
+load(":manifest.bzl", "CHECKED_BENCHMARK_CORPUS")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -17,28 +13,7 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-_BENCHMARK_WORKLOADS = glob(["*_benchmark.loom"])
-
-_CASES = glob(
-    ["*.loom"],
-    exclude = ["*_benchmark.loom"],
-)
-
-exports_files(_CASES + _BENCHMARK_WORKLOADS)
-
-loom_module(
-    name = "checked_benchmark_cases",
-    srcs = _CASES,
-    output_format = "bc",
-)
-
-loom_library(
-    name = "checked_benchmark_library",
-    srcs = _CASES,
-)
-
-loom_test_module(
-    name = "checked_benchmark_workload_module",
-    srcs = _BENCHMARK_WORKLOADS,
-    deps = [":checked_benchmark_library"],
+loom_corpus_sources(
+    name = "corpus",
+    manifest = CHECKED_BENCHMARK_CORPUS,
 )

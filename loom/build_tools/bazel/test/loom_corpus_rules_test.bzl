@@ -66,6 +66,8 @@ def _test_program_fans_out_by_profile_impl(env, target):
     profile_b = _action_with_argument(env, compile_actions, "--target=fake:b")
     for action in [profile_a, profile_b]:
         _expect_basename(env, action.inputs.to_list(), "subjects.loombc")
+        if "--config=sample.value=42" not in action.argv:
+            env.fail("expected source configuration in %r" % action.argv)
         if any([arg.startswith("--product=") for arg in action.argv]):
             env.fail("corpus compilation must infer its product: %r" % action.argv)
         if "--compile-report=details" not in action.argv:
@@ -101,6 +103,7 @@ def _test_program_exposes_outputs_and_batched_xfails_impl(env, target):
     for expected_arg in [
         "--expected-root=@unsupported_common",
         "--expected-diagnostic=TYPE/002",
+        "--config=sample.value=42",
     ]:
         if expected_arg not in profile_a.argv:
             env.fail("expected %r in profile A xfail arguments %r" % (expected_arg, profile_a.argv))
@@ -237,6 +240,7 @@ def _test_execution_partitions_profiles_and_xfails_impl(env, target):
     if info.test_runner_args != [
         "--max-samples-per-case=1",
         "--xfail=@fixture_scenario=TARGET/003,EXPECT/006",
+        "--config=sample.value=42",
     ]:
         env.fail("unexpected corpus correctness arguments %r" % info.test_runner_args)
     if info.benchmark_runner != None or info.benchmark_runner_args:

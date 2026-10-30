@@ -352,7 +352,7 @@ loom_test(
     execution_profiles = [
         AMD_GPU_HARDWARE_PROFILE,
     ],
-    module = "//loom/src/loom/test/corpus/checked_benchmarks:checked_benchmark_workload_module",
+    module = "//loom/src/loom/test/corpus/checked_benchmarks/benchmark:checked_benchmark_workload_module",
     tags = ["manual"],
 )
 
@@ -364,7 +364,7 @@ loom_test(
     execution_profiles = [
         AMD_GPU_HARDWARE_PROFILE,
     ],
-    module = "//loom/src/loom/test/corpus/authoring:authoring_benchmark_workload_module",
+    module = "//loom/src/loom/test/corpus/authoring/benchmark:authoring_benchmark_workload_module",
     tags = ["manual"],
 )
 
@@ -378,7 +378,7 @@ loom_test(
     name = "split_kv_stage2_test",
     srcs = [
         "//loom/src/loom/test/corpus/checked_benchmarks:split_kv_online_softmax_combine_f32.loom",
-        "//loom/src/loom/test/corpus/checked_benchmarks:split_kv_online_softmax_combine_f32_benchmark.loom",
+        "//loom/src/loom/test/corpus/checked_benchmarks/benchmark:split_kv_online_softmax_combine_f32_benchmark.loom",
     ],
     compile_targets = [
         "//loom/target/amdgpu:gfx942",

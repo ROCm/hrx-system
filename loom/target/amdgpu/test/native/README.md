@@ -6,5 +6,5 @@ packages own target-independent semantics; this AMDGPU target package owns
 device selection, architecture qualification, and physical execution.
 
 Architecture directories contain only cases whose authored contract names that
-architecture. The generic module combines reusable corpus archives so all of
-their cases share one device and execution context.
+architecture. Reusable application programs remain in their semantic corpus
+packages and execute here as independent, source-owned modules.

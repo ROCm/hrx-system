@@ -4,7 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:defs.bzl", "loom_module")
+load("//loom/build_tools/bazel:defs.bzl", "loom_corpus_sources")
+load(":manifest.bzl", "ENCODING_CORPUS")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -12,20 +13,7 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-_CASES = glob(["*.loom"])
-
-exports_files(_CASES)
-
-loom_module(
-    name = "numeric_conversion_cases",
-    srcs = _CASES,
-    configs = [
-        "finite_storage_decode.input_capacity=4608",
-        "finite_storage_decode.output_capacity=16",
-        "finite_storage_decode.row_capacity=65",
-        "fp8_encode.row_capacity=65536",
-    ],
-    output = "numeric_conversion_cases.loombc",
-    output_format = "bc",
-    require_resolved_config = True,
+loom_corpus_sources(
+    name = "corpus",
+    manifest = ENCODING_CORPUS,
 )

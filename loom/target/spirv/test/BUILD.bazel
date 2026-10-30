@@ -135,7 +135,7 @@ loom_test(
     name = "vulkan_extended_types_tests",
     srcs = [
         "//loom/src/loom/test/corpus/checked_benchmarks:split_kv_online_softmax_combine_f32.loom",
-        "//loom/src/loom/test/corpus/checked_benchmarks:split_kv_online_softmax_combine_f32_benchmark.loom",
+        "//loom/src/loom/test/corpus/checked_benchmarks/benchmark:split_kv_online_softmax_combine_f32_benchmark.loom",
     ],
     compile_targets = ["//loom/target/spirv:vulkan1.3+bda+extended-types"],
 )

@@ -34,7 +34,7 @@ python dev.py bazel run //loom/src/loom/tools/loom-opt:loom-opt -- \
 | --- | --- | --- |
 | `#pragma unroll`, `pragma-unroll`, `loop-expansion`, `for`, `q8`, `WG64` | `scf.for ... unroll`, `unroll-scf-for`, range-fact trip count inference | `q8_block_unroll.loom` |
 | `blockIdx`, `threadIdx`, `lane`, `warp`, `wavefront` | `kernel.launch.config`, `kernel.workgroup.id`, `kernel.workitem.id`, `kernel.subgroup.*` | `q8_block_unroll.loom` |
-| `threadIdx`, `lane_id`, `warp lane`, `wavefront lane`, `SGPR`, `VGPR`, `EXEC`, `scalarized`, `lane-varying`, `uniform`, `dot operand` | value distribution facts, `test.fact_subgroup_uniform`, `test.fact_workgroup_uniform`, `test.fact_lane_varying`, `test.fact_lane_predicate` | `lane_distribution.loom` |
+| `threadIdx`, `lane_id`, `warp lane`, `wavefront lane`, `SGPR`, `VGPR`, `EXEC`, `scalarized`, `lane-varying`, `uniform`, `dot operand` | value distribution facts, `test.fact_subgroup_uniform`, `test.fact_workgroup_uniform`, `test.fact_lane_varying`, `test.fact_lane_predicate` | `examples/lane_distribution.loom` |
 | `__global__`, `restrict`, pointer casts, address arithmetic | kernel ABI `buffer`, `buffer.assume.noalias`, `buffer.view`, `index`/`offset` math | `q8_block_unroll.loom` |
 | `global_load_b32`, packed bytes, `q8`, bitfield, unpack | `vector.load`, `vector.bitunpacks<8>`, `scalar.extf`, `vector.dotf` | `q8_block_unroll.loom` |
 | `global_load_b32`, `global_load_b128`, `uint4`, adjacent scalar loads, coalescing | `vector.load -> vector<1xi32>` versus `vector.load -> vector<4xi32>` | `q8_load_width.loom` |
@@ -44,7 +44,7 @@ python dev.py bazel run //loom/src/loom/tools/loom-opt:loom-opt -- \
 | `__shared__`, `__syncthreads`, LDS, `uint4`, `int4`, `ds_store_b128`, `ds_load_b128` | `vector.load -> vector<4xi32>` staged through workgroup memory | `shared_memory_vector_tile.loom` |
 | `q8`, `q4`, `u8`, `s8`, `u4`, `s4`, `v_dot4_i32_iu8`, `dp4a` | `vector.bitunpacku`, `vector.bitunpacks`, `vector.dot4i<u8s8>` | `q8_q4_signedness.loom` |
 | `q2`, `q3`, `q4`, `q5`, `q6`, split high bits, lookup tables, offset-binary, packed-dot repack | `vector.bitunpacku`, `vector.bitfield.extractu`, `vector.bitfield.insert`, `vector.table.lookup`, `vector.dot8i4` | `packed_field_contracts.loom` |
-| dynamic lower-bound unroll, missing facts | structured diagnostic, exact/range facts | `q8_hip_shaped_unroll_unresolved.loom` |
+| dynamic lower-bound unroll, missing facts | structured diagnostic, exact/range facts | `examples/q8_hip_shaped_unroll_unresolved.loom` |
 | wave size, template, specialization, fallback | targetless `template.apply`, typed `template.def ... requires`, `#target.subgroup.size` | `target_provider_selection.loom` |
 | targetless template device function, `expf`, target math policy, inline | invocation specialization, then authoring expansion and math legalization | `template_math_legalization.loom` |
 | `__cluster_dims__`, cluster multicast, async-to-LDS, `s_wait_asynccnt`, b128 | static `cluster_size`, `kernel.async.cluster.gather`, async groups and waits | [`cluster_b128_multicast.loom`](../../../../../../target/amdgpu/test/native/gfx1250/cluster_b128_multicast.loom) |
@@ -93,7 +93,7 @@ lane-varying root at the point where source transforms run.
 Proof command:
 
 ```bash
-loom-opt lane_distribution.loom \
+loom-opt examples/lane_distribution.loom \
   --pass=canonicalize \
   --output=/tmp/lane-distribution.loom
 ```
@@ -611,7 +611,7 @@ Expected signal:
 Diagnostic contract when the source omits enough facts:
 
 ```bash
-loom-opt q8_hip_shaped_unroll_unresolved.loom \
+loom-opt examples/q8_hip_shaped_unroll_unresolved.loom \
   --pass=unroll-scf-for \
   --diagnostic-format=json \
   --output=/tmp/unused.loom 2>/tmp/unroll-diag.jsonl

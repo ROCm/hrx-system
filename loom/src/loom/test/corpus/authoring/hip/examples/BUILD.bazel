@@ -5,11 +5,8 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 package(
-    default_visibility = ["//loom/target/amdgpu/test/native:__pkg__"],
-    licenses = ["notice"],  # Apache 2.0
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],
 )
 
-exports_files(
-    glob(["*.loom"]),
-    visibility = ["//loom/target/amdgpu/test/native:__pkg__"],
-)
+exports_files(glob(["*.loom"]))

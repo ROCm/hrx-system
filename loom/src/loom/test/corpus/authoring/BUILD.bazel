@@ -4,12 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load(
-    "//loom/build_tools/bazel:defs.bzl",
-    "loom_library",
-    "loom_module",
-    "loom_test_module",
-)
+load("//loom/build_tools/bazel:defs.bzl", "loom_corpus_sources")
+load(":manifest.bzl", "AUTHORING_CORPUS")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -17,38 +13,7 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
-_BENCHMARK_WORKLOADS = glob(["*_benchmark.loom"])
-
-_CASES = glob(
-    ["*.loom"],
-    exclude = ["*_benchmark.loom"],
-)
-
-exports_files(_CASES + _BENCHMARK_WORKLOADS)
-
-loom_module(
-    name = "authoring_cases",
-    srcs = _CASES,
-    configs = [
-        "indexed_row_gather_f32.column_capacity=4",
-        "indexed_row_gather_f32.row_capacity=5",
-        "indexed_row_gather_f32.source_row_capacity=2",
-        "memset_i8.element_capacity=1009",
-        "mlp_down_projection_residual_bf16.row_capacity=2",
-    ],
-    output_format = "bc",
-    require_resolved_config = True,
-)
-
-loom_library(
-    name = "mlp_down_projection_residual_bf16_library",
-    srcs = ["mlp_down_projection_residual_bf16.loom"],
-    tags = ["manual"],
-    visibility = ["//visibility:private"],
-)
-
-loom_test_module(
-    name = "authoring_benchmark_workload_module",
-    srcs = _BENCHMARK_WORKLOADS,
-    deps = [":mlp_down_projection_residual_bf16_library"],
+loom_corpus_sources(
+    name = "corpus",
+    manifest = AUTHORING_CORPUS,
 )
