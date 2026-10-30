@@ -309,6 +309,8 @@ typedef struct iree_hal_amd_fabric_slab_pool_query_t {
   iree_hal_amd_fabric_memory_transition_site_t* transition_sites;
   // Scratch output array for native consumer qualification.
   amdf_memory_access_capabilities_t* capabilities;
+  // Caller-owned extensions paired with the scratch consumer outputs.
+  amdf_memory_program_atomics_t* program_atomics;
   // Native binding interface identifiers in binding order.
   const uint16_t* binding_types;
   // Consumes complete candidate plans during synchronous construction.
@@ -337,6 +339,7 @@ static bool iree_hal_amd_fabric_memory_supports_atomics(
         &query->transition_sites[requested->family->memory.queue_scope_id];
     const bool cpu = site->kind == IREE_HAL_AMD_FABRIC_MEMORY_SITE_HOST;
     iree_hal_atomic_operation_capabilities_t queue = host;
+    iree_hal_atomic_operation_capabilities_t program = host;
     if (!cpu) {
       const amdf_memory_access_capabilities_t* access =
           &capabilities[site->native.value.device.access_ordinal];
@@ -344,6 +347,8 @@ static bool iree_hal_amd_fabric_memory_supports_atomics(
           access->atomic_operations_32, access->atomic_operations_64,
           (amdf_atomic_reach_t){AMDF_ATOMIC_SCOPE_SYSTEM,
                                 AMDF_ATOMIC_SCOPE_SYSTEM});
+      program = iree_hal_amd_fabric_memory_translate_program_atomics(
+          &((const amdf_memory_program_atomics_t*)access->next)->operations);
     }
     if (!iree_hal_atomic_operation_capabilities_support(
             iree_hal_memory_site_filter_atomic_operations(
@@ -355,7 +360,7 @@ static bool iree_hal_amd_fabric_memory_supports_atomics(
             iree_hal_memory_site_filter_atomic_operations(
                 (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_PROGRAM,
                                          requested->family},
-                cpu ? host : (iree_hal_atomic_operation_capabilities_t){0}),
+                program),
             requested->atomics.program)) {
       return false;
     }
@@ -920,11 +925,9 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
     memcpy(imports_accesses, query->accesses,
            query->access_count * sizeof(*imports_accesses));
     plan->provider_options.import_accesses = imports_accesses;
+    iree_hal_amd_fabric_memory_initialize_capabilities(
+        query->access_count, query->capabilities, query->program_atomics);
     for (uint32_t i = 0; i < query->access_count; ++i) {
-      query->capabilities[i] = (amdf_memory_access_capabilities_t){
-          .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
-          .structure_size = sizeof(query->capabilities[i]),
-      };
       if (plan->accesses[i].device == query->asan->device) {
         plan->accesses[i].requirements.access |=
             query->asan->application_info.access;
@@ -1116,6 +1119,29 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
       const iree_hal_amd_fabric_memory_transition_site_t* site =
           &query->transition_sites[id];
       const bool cpu = site->kind == IREE_HAL_AMD_FABRIC_MEMORY_SITE_HOST;
+      iree_hal_atomic_operation_capabilities_t program = host_atomics;
+      if (!cpu) {
+        const uint32_t owned_count = profile ? 1 : 0;
+        for (uint32_t route = 0;
+             route < owned_count + plan->provider_options.import_count;
+             ++route) {
+          const amdf_memory_access_capabilities_t* capabilities =
+              route < owned_count
+                  ? transition_query.owned_capabilities
+                  : profile_capabilities +
+                        (iree_host_size_t)import_routes[route - owned_count]
+                                .profile.ordinal *
+                            query->access_count;
+          const amdf_memory_program_atomics_t* native_program =
+              capabilities[site->native.value.device.access_ordinal].next;
+          const iree_hal_atomic_operation_capabilities_t operations =
+              iree_hal_amd_fabric_memory_translate_program_atomics(
+                  &native_program->operations);
+          program = !route ? operations
+                           : iree_hal_atomic_operation_capabilities_intersect(
+                                 program, operations);
+        }
+      }
       const iree_hal_atomic_operation_capabilities_t queue_operations =
           iree_hal_memory_site_filter_atomic_operations(
               (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_QUEUE,
@@ -1125,8 +1151,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
           iree_hal_memory_site_filter_atomic_operations(
               (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_PROGRAM,
                                        requested->family},
-              cpu ? host_atomics
-                  : (iree_hal_atomic_operation_capabilities_t){0});
+              program);
       requirements_satisfied &=
           iree_hal_atomic_operation_capabilities_support(
               queue_operations, requested->atomics.queue) &&
@@ -1143,13 +1168,16 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
             !iree_hal_atomic_operation_capabilities_is_empty(
                 program_operations);
       } else if (!iree_hal_atomic_operation_capabilities_is_empty(
-                     queue_operations)) {
+                     queue_operations) ||
+                 !iree_hal_atomic_operation_capabilities_is_empty(
+                     program_operations)) {
         atomic_accesses[plan->provider_options.memory.atomic_access_count++] =
             (iree_hal_amd_fabric_memory_atomic_access_t){
                 .access_ordinal = site->native.value.device.access_ordinal,
                 .queue_family_ordinal =
                     site->native.value.device.queue_family_ordinal,
                 .operations = queue_operations,
+                .program_operations = program_operations,
             };
       }
     }
@@ -1216,6 +1244,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query_storage(
   iree_host_size_t profiles_offset = 0;
   iree_host_size_t imports_offset = 0;
   iree_host_size_t capabilities_offset = 0;
+  iree_host_size_t program_atomics_offset = 0;
   iree_host_size_t capabilities_count = 0;
   if (!iree_host_size_checked_mul(scope_info.memory_profile_count,
                                   query->access_count, &capabilities_count)) {
@@ -1228,6 +1257,8 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query_storage(
                         &profiles_offset),
       IREE_STRUCT_FIELD(capabilities_count, amdf_memory_access_capabilities_t,
                         &capabilities_offset),
+      IREE_STRUCT_FIELD(capabilities_count, amdf_memory_program_atomics_t,
+                        &program_atomics_offset),
       IREE_STRUCT_FIELD(query->options->imports.class_count,
                         iree_hal_amd_fabric_import_route_t, &imports_offset)));
   uint8_t* routes = NULL;
@@ -1241,6 +1272,9 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query_storage(
           : NULL;
   iree_hal_amd_fabric_import_route_t* imports =
       routes ? (iree_hal_amd_fabric_import_route_t*)(routes + imports_offset)
+             : NULL;
+  amdf_memory_program_atomics_t* program_atomics =
+      routes ? (amdf_memory_program_atomics_t*)(routes + program_atomics_offset)
              : NULL;
   uint32_t profile_count = 0;
   bool supported = true;
@@ -1257,12 +1291,10 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query_storage(
         .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
         .structure_size = sizeof(*profile),
     };
-    for (uint32_t i = 0; i < query->access_count; ++i) {
-      capabilities[i] = (amdf_memory_access_capabilities_t){
-          .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
-          .structure_size = sizeof(capabilities[i]),
-      };
-    }
+    iree_hal_amd_fabric_memory_initialize_capabilities(
+        query->access_count, capabilities,
+        program_atomics +
+            (iree_host_size_t)profile_ordinal * query->access_count);
     const amdf_status_t native_status =
         owner->native.api->memory_scope_query_device_profile(
             storage->scope, profile_ordinal, query->access_count,
@@ -1381,6 +1413,7 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
   iree_host_size_t accesses_offset = 0, family_bindings_offset = 0;
   iree_host_size_t backends_offset = 0;
   iree_host_size_t capabilities_offset = 0, binding_types_offset = 0;
+  iree_host_size_t program_atomics_offset = 0;
   iree_host_size_t requests_offset = 0, transition_sites_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       0, &scratch_size,
@@ -1398,6 +1431,8 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
                                 amdf_memory_access_capabilities_t,
                                 iree_alignof(amdf_memory_access_capabilities_t),
                                 &capabilities_offset),
+      IREE_STRUCT_FIELD(scope.family_count + 1, amdf_memory_program_atomics_t,
+                        &program_atomics_offset),
       IREE_STRUCT_FIELD_ALIGNED(binding_capacity, uint16_t,
                                 iree_alignof(uint16_t), &binding_types_offset),
       IREE_STRUCT_FIELD_ALIGNED(
@@ -1743,6 +1778,8 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
       .requests = requests,
       .transition_sites = transition_sites,
       .capabilities = capabilities,
+      .program_atomics =
+          (amdf_memory_program_atomics_t*)(scratch + program_atomics_offset),
       .binding_types = binding_types,
       .callback = callback,
       .host_allocator = host_allocator,

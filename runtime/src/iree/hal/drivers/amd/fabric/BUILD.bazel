@@ -322,6 +322,7 @@ iree_runtime_cc_library(
 iree_runtime_cc_test(
     name = "memory_backend_test",
     srcs = [
+        "memory_backend_atomic_test.cc",
         "memory_backend_mapping_test.cc",
         "memory_backend_test.cc",
         "virtual_buffer_test.cc",

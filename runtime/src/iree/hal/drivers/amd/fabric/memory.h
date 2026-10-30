@@ -104,7 +104,7 @@ typedef struct iree_hal_amd_fabric_mapping_source_t {
   const iree_hal_amd_fabric_io_binding_table_t* io_bindings;
 } iree_hal_amd_fabric_mapping_source_t;
 
-// One queue site's immutable promise, checked before an attachment is exposed.
+// One family's immutable promises, checked before an attachment is exposed.
 typedef struct iree_hal_amd_fabric_memory_atomic_access_t {
   // Index in the native device access array.
   uint32_t access_ordinal;
@@ -112,6 +112,8 @@ typedef struct iree_hal_amd_fabric_memory_atomic_access_t {
   uint32_t queue_family_ordinal;
   // Qualified backing operations and reach after execution-site filtering.
   iree_hal_atomic_operation_capabilities_t operations;
+  // Shader recipes qualified independently of command-processor operations.
+  iree_hal_atomic_operation_capabilities_t program_operations;
 } iree_hal_amd_fabric_memory_atomic_access_t;
 
 // Qualified construction facts copied by a provider. Accesses and scope are
@@ -155,6 +157,18 @@ iree_hal_atomic_operation_capabilities_t
 iree_hal_amd_fabric_memory_translate_atomics(
     amdf_atomic_operations_t operations_32,
     amdf_atomic_operations_t operations_64, amdf_atomic_reach_t reach);
+
+// Shader recipes use LOAD for WAIT, STORE for STORE, and LOAD plus returning
+// CAS for modular integer RMW. Each width and instruction scope is independent.
+iree_hal_atomic_operation_capabilities_t
+iree_hal_amd_fabric_memory_translate_program_atomics(
+    const amdf_memory_atomic_capabilities_t* operations);
+
+// Initializes borrowed per-access query outputs with one PROGRAM extension
+// each.
+void iree_hal_amd_fabric_memory_initialize_capabilities(
+    uint32_t count, amdf_memory_access_capabilities_t* capabilities,
+    amdf_memory_program_atomics_t* program_atomics);
 
 // Maps transport vocabulary only. NONE means libamdf has no representation;
 // native profile qualification establishes actual support and provenance.

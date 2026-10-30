@@ -191,6 +191,15 @@ struct FakeNative {
                                 : self->atomics[device->ordinal];
       out_capabilities[i].atomic_operations_32 = atomics[0];
       out_capabilities[i].atomic_operations_64 = atomics[1];
+      if (out_capabilities[i].next) {
+        auto* program = static_cast<amdf_memory_program_atomics_t*>(
+            out_capabilities[i].next);
+        EXPECT_EQ(program->type, AMDF_STRUCTURE_TYPE_MEMORY_PROGRAM_ATOMICS);
+        program->operations =
+            profile_ordinal == 1 && self->registration_enabled
+                ? self->registration_program_atomics[device->ordinal]
+                : self->program_atomics[device->ordinal];
+      }
     }
     ++self->profile_query_count;
     out_profile->ordinal = profile_ordinal;
@@ -524,6 +533,15 @@ struct FakeNative {
     if (memory->owner->attachment_atomics_supported) {
       out_info->atomic_operations_32 = operations[0];
       out_info->atomic_operations_64 = operations[1];
+      if (out_info->next) {
+        auto* program =
+            static_cast<amdf_memory_program_atomics_t*>(out_info->next);
+        EXPECT_EQ(program->type, AMDF_STRUCTURE_TYPE_MEMORY_PROGRAM_ATOMICS);
+        program->operations =
+            memory->registered
+                ? memory->owner->registration_program_atomics[device->ordinal]
+                : memory->owner->program_atomics[device->ordinal];
+      }
     }
     return AMDF_STATUS_OK;
   }
@@ -831,6 +849,11 @@ struct FakeNative {
   // Registered backing operation masks in the same native device order.
   std::array<std::array<amdf_atomic_operations_t, 2>, 2> registration_atomics =
       {};
+  // Owned and registered shader transactions in native device order.
+  std::array<amdf_memory_atomic_capabilities_t, 2> program_atomics = {};
+  // Registered shader transactions, independent of queue-engine operations.
+  std::array<amdf_memory_atomic_capabilities_t, 2>
+      registration_program_atomics = {};
   // Exact self-site reach, independent of operation encoding support.
   std::array<amdf_atomic_reach_t, 2> atomic_reach = {};
   // Actual attachment support may be weaker than its prospective profile.

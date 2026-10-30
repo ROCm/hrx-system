@@ -58,6 +58,61 @@ iree_hal_amd_fabric_memory_translate_atomics(
   };
 }
 
+static iree_hal_atomic_operation_flags_t
+iree_hal_amd_fabric_memory_translate_program_atomic_flags(
+    amdf_atomic_operations_t operations) {
+  return ((operations & AMDF_ATOMIC_OPERATION_LOAD)
+              ? IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT
+              : 0) |
+         ((operations & AMDF_ATOMIC_OPERATION_STORE)
+              ? IREE_HAL_ATOMIC_OPERATION_FLAG_STORE
+              : 0) |
+         (iree_all_bits_set(operations,
+                            AMDF_ATOMIC_OPERATION_LOAD |
+                                AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE)
+              ? IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD |
+                    IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_SUBTRACT |
+                    IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_AND |
+                    IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_OR |
+                    IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_XOR
+              : 0);
+}
+
+iree_hal_atomic_operation_capabilities_t
+iree_hal_amd_fabric_memory_translate_program_atomics(
+    const amdf_memory_atomic_capabilities_t* operations) {
+  return (iree_hal_atomic_operation_capabilities_t){
+      .device_scope_32 =
+          iree_hal_amd_fabric_memory_translate_program_atomic_flags(
+              operations->device_scope_32),
+      .device_scope_64 =
+          iree_hal_amd_fabric_memory_translate_program_atomic_flags(
+              operations->device_scope_64),
+      .system_scope_32 =
+          iree_hal_amd_fabric_memory_translate_program_atomic_flags(
+              operations->system_scope_32),
+      .system_scope_64 =
+          iree_hal_amd_fabric_memory_translate_program_atomic_flags(
+              operations->system_scope_64),
+  };
+}
+
+void iree_hal_amd_fabric_memory_initialize_capabilities(
+    uint32_t count, amdf_memory_access_capabilities_t* capabilities,
+    amdf_memory_program_atomics_t* program_atomics) {
+  for (uint32_t i = 0; i < count; ++i) {
+    program_atomics[i] = (amdf_memory_program_atomics_t){
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PROGRAM_ATOMICS,
+        .structure_size = sizeof(program_atomics[i]),
+    };
+    capabilities[i] = (amdf_memory_access_capabilities_t){
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+        .structure_size = sizeof(capabilities[i]),
+        .next = &program_atomics[i],
+    };
+  }
+}
+
 amdf_external_memory_type_t iree_hal_amd_fabric_memory_external_type(
     iree_hal_external_storage_type_t type) {
   switch (type) {
@@ -215,13 +270,29 @@ amdf_memory_release_info_t iree_hal_amd_fabric_memory_deinitialize(
 static iree_status_t iree_hal_amd_fabric_memory_validate_atomic_access(
     const amdf_api_t* api, amdf_memory_t* memory,
     const iree_hal_amd_fabric_memory_atomic_access_t* required) {
+  amdf_memory_program_atomics_t program = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROGRAM_ATOMICS,
+      .structure_size = sizeof(program),
+  };
   amdf_memory_access_info_t access = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
       .structure_size = sizeof(access),
+      .next = &program,
   };
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       api->memory_query_access_info(memory, required->access_ordinal, &access),
       "memory_query_access_info"));
+  if (!iree_hal_atomic_operation_capabilities_support(
+          iree_hal_amd_fabric_memory_translate_program_atomics(
+              &program.operations),
+          required->program_operations)) {
+    return iree_make_status(
+        IREE_STATUS_PERMISSION_DENIED,
+        "native attachment cannot supply pool shader atomics");
+  }
+  if (iree_hal_atomic_operation_capabilities_is_empty(required->operations)) {
+    return iree_ok_status();
+  }
   const amdf_memory_site_t site = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
       .structure_size = sizeof(site),
