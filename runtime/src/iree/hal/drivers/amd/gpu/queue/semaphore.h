@@ -14,7 +14,9 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Immutable device-owned policy for active host observation of native signals.
+// Immutable device-owned policy for host observation of native signals.
+// ACTIVE observes through the caller deadline; YIELD uses a bounded budget
+// before returning to ordinary host notification. NONE observes no native word.
 // Retirement remains authoritative for cleanup, frontiers, and shader failure;
 // a native value alone never satisfies the public timeline. The semaphore and
 // its callers borrow this context through the parent device's lifetime.
