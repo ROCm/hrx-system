@@ -420,7 +420,7 @@ TEST_P(VulkanSlabPoolTest, PendingAllocationDoesNotBlockIndependentTransfer) {
   Wait(returned);
 }
 
-TEST_P(VulkanSlabPoolTest, TransfersResolveNestedViewsAfterAllocation) {
+TEST_P(VulkanSlabPoolTest, AcceptedTransfersRetireBeforeQueuedDeallocation) {
   Ref<iree_hal_pool_t> source;
   IREE_ASSERT_OK(CreateSource(Scope(), source.out()));
   const auto request = iree_hal_make_pool_reservation_request(512, 0);
@@ -443,30 +443,51 @@ TEST_P(VulkanSlabPoolTest, TransfersResolveNestedViewsAfterAllocation) {
         source, request, iree_infinite_timeout(), destination.out()));
     const uint8_t pattern = 0xCD;
     const auto update = MakeDeterministicBytes(16);
+    const std::array<uint8_t, 256> initial = {};
+    std::array<uint8_t, 256> downloaded = {};
+    SemaphoreList uploaded(device_, {0}, {1});
     SemaphoreList filled(device_, {0}, {1});
     SemaphoreList updated(device_, {0}, {1});
     SemaphoreList copied(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], allocated, filled, view, 0,
-                                       256, &pattern, sizeof(pattern), nullptr,
-                                       IREE_HAL_FILL_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_upload(queues_[0], allocated, uploaded,
+                                         initial.data(), view, 0,
+                                         initial.size(), nullptr));
+    IREE_ASSERT_OK(iree_hal_queue_fill(
+        queues_[0], uploaded, filled, view, update_offset, 256 - update_offset,
+        &pattern, sizeof(pattern), nullptr, IREE_HAL_FILL_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_queue_update(
         queues_[0], filled, updated, update.data(), 0, view, update_offset,
         update.size(), nullptr, IREE_HAL_UPDATE_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_queue_copy(queues_[0], updated, copied, view, 0,
                                        destination, 0, 256, nullptr,
                                        IREE_HAL_COPY_FLAG_NONE));
-    EXPECT_FALSE(iree_hal_semaphore_list_poll(copied));
-    IREE_ASSERT_OK(iree_hal_semaphore_list_signal(gate, nullptr));
-    Wait(copied);
-    std::vector<uint8_t> expected(256, pattern);
-    std::copy(update.begin(), update.end(), expected.begin() + update_offset);
-    EXPECT_EQ(ReadBufferBytes(destination, 0, 256), expected);
-    view.reset();
+    SemaphoreList read(device_, {0}, {1});
+    IREE_ASSERT_OK(iree_hal_queue_download(queues_[0], copied, read, view, 0,
+                                           downloaded.data(), downloaded.size(),
+                                           nullptr));
     SemaphoreList returned(device_, {0}, {1});
     auto* buffer = allocation.get();
     IREE_ASSERT_OK(
-        iree_hal_queue_dealloca(queues_[0], copied, returned, 1, &buffer));
+        iree_hal_queue_dealloca(queues_[0], read, returned, 1, &buffer));
+    // New uses fail admission, but the captured transactions own their earlier
+    // uses until the deallocation's explicit predecessor completes.
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_hal_queue_fill(queues_[0], {}, {}, view, 0, 4, &pattern,
+                            sizeof(pattern), nullptr, IREE_HAL_FILL_FLAG_NONE));
+    view.reset();
+    allocation.reset();
+    EXPECT_FALSE(iree_hal_semaphore_list_poll(returned));
+    IREE_ASSERT_OK(iree_hal_semaphore_list_signal(gate, nullptr));
     Wait(returned);
+    std::vector<uint8_t> expected(256, pattern);
+    if (update_offset != 0) {
+      expected[0] = 0;
+    }
+    std::copy(update.begin(), update.end(), expected.begin() + update_offset);
+    EXPECT_EQ(ReadBufferBytes(destination, 0, 256), expected);
+    EXPECT_EQ(std::vector<uint8_t>(downloaded.begin(), downloaded.end()),
+              expected);
   }
 }
 
