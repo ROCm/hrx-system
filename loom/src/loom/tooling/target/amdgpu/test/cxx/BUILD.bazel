@@ -146,30 +146,30 @@ test_suite(
 
 loom_test(
     name = "bitcast_test",
-    srcs = ["bitcast.cxx"],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:bitcast_execution_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
     name = "packed_slices_test",
-    srcs = ["packed_slices.cxx"],
     compile_targets = ["//loom/target/amdgpu:" + target for target in LOOM_AMDGPU_SUPPORTED_TARGETS],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:packed_slices_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
     name = "check_resources_test",
-    srcs = ["check_resources.cxx"],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:check_resources_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
     name = "opaque_pointers_test",
-    srcs = ["opaque_pointers.cxx"],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:opaque_pointers_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
@@ -187,11 +187,8 @@ loom_test(
 
 loom_test(
     name = "atomic_publication_test",
-    srcs = [
-        "atomic_publication.cxx",
-        "atomic_publication.loom",
-    ],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:atomic_publication_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
@@ -380,82 +377,64 @@ loom_check_test(
 
 loom_test(
     name = "parameter_noalias_test",
-    srcs = ["parameter_noalias.cxx"],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:parameter_noalias_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
     name = "parameter_alignment_test",
-    srcs = [
-        "parameter_alignment.cxx",
-        "parameter_alignment.loom",
-    ],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:parameter_alignment_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
     name = "float16_test",
-    srcs = [
-        "float16.cxx",
-        "float16.loom",
-    ],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:float16_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
     name = "bfloat16_test",
-    srcs = [
-        "bfloat16.cxx",
-        "bfloat16.loom",
-    ],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:bfloat16_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
     name = "float8_test",
-    srcs = [
-        "float8.cxx",
-        "float8.loom",
-    ],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:float8_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
     name = "vector_constants_test",
-    srcs = [
-        "vector_constants.cxx",
-        "vector_constants.loom",
-    ],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:vector_constants_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
     name = "vector_conversion_test",
-    srcs = [
-        "vector_conversion.cxx",
-        "vector_conversion.loom",
-    ],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:vector_conversion_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
     name = "vector_list_assignment_test",
-    srcs = ["vector_list_assignment.cxx"],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:vector_list_assignment_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
     name = "iq4xs_blocks_test",
-    srcs = ["iq4xs_blocks.cxx"],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/test/corpus/authoring/cxx:iq4xs_blocks_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
@@ -493,17 +472,14 @@ loom_test(
 
 loom_test(
     name = "packed_byte_shifts_test",
-    srcs = ["packed_byte_shifts.cxx"],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:packed_byte_shifts_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
     name = "narrow_float_subtraction_test",
-    srcs = [
-        "narrow_float_subtraction.cxx",
-        "narrow_float_subtraction.loom",
-    ],
     execution_profiles = _EXECUTION_PROFILES,
+    module = "//loom/src/loom/import/cxx/test:narrow_float_subtraction_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )

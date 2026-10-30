@@ -42,6 +42,12 @@ loom_test_module(
 )
 
 loom_test_module(
+    name = "iq4xs_blocks_module",
+    srcs = ["iq4xs_blocks.cxx"],
+    target_compatible_with = _CXX_COMPATIBLE_WITH,
+)
+
+loom_test_module(
     name = "nvfp4_matrix_module",
     srcs = [
         "nvfp4_matrix.cxx",
