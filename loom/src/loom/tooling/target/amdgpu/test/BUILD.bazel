@@ -142,6 +142,7 @@ iree_execution_test_suite(
     name = "loom_compile_execution_test",
     data = [
         "compile_requests.loom",
+        "complete_authoring_module.loom",
         "feature_distinct_code_objects.loom",
         "loom_opt_f32_arith.loom",
         "selected_root_amdgpu.loom",
@@ -156,12 +157,6 @@ iree_execution_test_suite(
         "loom-format": "//loom/src/loom/tools/loom-format",
         "loom-opt": "//loom/src/loom/tools/loom-opt",
     },
-)
-
-loom_check_compile_tests(
-    name = "authoring_closure",
-    src = "complete_authoring_module.loom",
-    targets = ["//loom/target/amdgpu:gfx1100"],
 )
 
 loom_check_compile_tests(

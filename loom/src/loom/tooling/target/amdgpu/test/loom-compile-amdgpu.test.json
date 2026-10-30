@@ -19,6 +19,45 @@
       ]
     },
     {
+      "name": "infers kernel roots from a complete authoring module",
+      "steps": [
+        {
+          "name": "compile-inferred-root",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/complete_authoring_module.loom",
+              "--target=amdgpu:gfx1100",
+              "--format=amdgpu-hsaco",
+              "--output={tmp}/inferred-root.hsaco"
+            ]
+          },
+          "files": [
+            {"path": "{tmp}/inferred-root.hsaco", "non_empty": true}
+          ]
+        },
+        {
+          "name": "compile-explicit-root",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{srcdir}/complete_authoring_module.loom",
+              "--root=@complete_authoring_copy_i32",
+              "--target=amdgpu:gfx1100",
+              "--format=amdgpu-hsaco",
+              "--output={tmp}/explicit-root.hsaco"
+            ]
+          },
+          "files": [
+            {
+              "path": "{tmp}/explicit-root.hsaco",
+              "equals": "{tmp}/inferred-root.hsaco"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "resumes explicit kernel roots from Low text and bytecode",
       "steps": [
         {
