@@ -134,6 +134,8 @@ typedef struct loom_cmd_lower_state_t {
   loom_cmd_lower_types_t types;
   // Source-to-low value map and imported ABI resources.
   loom_cmd_lower_resources_t resources;
+  // Immutable execution scope shared by all wave boundaries in this root.
+  loom_attribute_t wave_barrier_attributes;
   // Deduplicated portable constant tables grouped by representation.
   struct {
     // Unsigned 32-bit structural constants.
@@ -183,6 +185,17 @@ static iree_status_t loom_cmd_lower_initialize_types(
         state->module, IREE_SV("target"), &state->types.target_attr_name));
     IREE_RETURN_IF_ERROR(loom_module_intern_string(
         state->module, IREE_SV("flags"), &state->types.flags_attr_name));
+    const loom_named_attr_t attributes[] = {
+        {.name_id = state->types.source_attr_name,
+         .value = loom_attr_i64(LOOM_CMD_PROGRAM_STAGE_WORK)},
+        {.name_id = state->types.target_attr_name,
+         .value = loom_attr_i64(LOOM_CMD_PROGRAM_STAGE_WORK)},
+        {.name_id = state->types.flags_attr_name, .value = loom_attr_i64(0)},
+    };
+    IREE_RETURN_IF_ERROR(loom_module_make_canonical_attr_dict(
+        state->module,
+        loom_make_named_attr_slice(attributes, IREE_ARRAYSIZE(attributes)),
+        &state->wave_barrier_attributes));
   }
   IREE_RETURN_IF_ERROR(loom_module_intern_type_id(
       state->module, loom_type_buffer(), &state->types.buffer_source));
@@ -721,20 +734,12 @@ static iree_status_t loom_cmd_lower_build_wave_dependency(
 static iree_status_t loom_cmd_lower_build_wave_barrier(
     loom_cmd_lower_state_t* state, loom_value_id_t dependency,
     loom_location_id_t location) {
-  const loom_named_attr_t attrs[] = {
-      {.name_id = state->types.source_attr_name,
-       .value = loom_attr_i64(LOOM_CMD_PROGRAM_STAGE_WORK)},
-      {.name_id = state->types.target_attr_name,
-       .value = loom_attr_i64(LOOM_CMD_PROGRAM_STAGE_WORK)},
-      {.name_id = state->types.flags_attr_name, .value = loom_attr_i64(0)},
-  };
   loom_op_t* barrier = NULL;
-  return loom_low_build_resolved_descriptor_op(
+  return loom_low_build_prepared_descriptor_op(
       &state->builder, state->descriptor_set,
       loom_cmd_lower_descriptor(state, CMD_CORE_DESCRIPTOR_REF_BARRIER),
-      /*access_flags=*/0, &dependency, 1,
-      loom_make_named_attr_slice(attrs, IREE_ARRAYSIZE(attrs)), NULL, 0, NULL,
-      0, location, &barrier);
+      /*access_flags=*/0, &dependency, 1, state->wave_barrier_attributes, NULL,
+      0, NULL, 0, location, &barrier);
 }
 
 static iree_status_t loom_cmd_lower_build_commands(
