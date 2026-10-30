@@ -58,7 +58,8 @@ bool loom_callable_effects_is_pure(loom_func_like_t function) {
     return !loom_region_has_read_effects(body) &&
            !loom_region_has_write_effects(body) &&
            !loom_region_has_convergent_effects(body) &&
-           !loom_region_has_observable_effects(body);
+           !loom_region_has_observable_effects(body) &&
+           !loom_region_has_unique_identities(body);
   }
   return loom_func_like_effect_contract(function) ==
          LOOM_CALLABLE_EFFECT_CONTRACT_PURE;

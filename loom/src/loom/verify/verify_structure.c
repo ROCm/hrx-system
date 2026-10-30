@@ -519,6 +519,7 @@ void loom_verify_func_effect_contract_body_effects(
       loom_param_u32(body ? body->write_effect_count : 0),
       loom_param_u32(body ? body->convergent_effect_count : 0),
       loom_param_u32(body ? body->observable_effect_count : 0),
+      loom_param_u32(body ? body->unique_identity_count : 0),
   };
   loom_verify_emit_structured(state, op, LOOM_ERR_STRUCTURE_017, params,
                               IREE_ARRAYSIZE(params));

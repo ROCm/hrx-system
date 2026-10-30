@@ -246,7 +246,8 @@ ERR_STRUCTURE_017 = ErrorDef(
     message=(
         "'{op_name}' declares {contract_name} but its body has {read_count} "
         "read-like, {write_count} write-like, {convergent_count} convergent, "
-        "and {observable_count} independently observable effect(s)"
+        "{observable_count} independently observable, and "
+        "{identity_count} fresh-identity effect(s)"
     ),
     params=(
         ErrorParam("op_name", ParamKind.STRING),
@@ -255,6 +256,7 @@ ERR_STRUCTURE_017 = ErrorDef(
         ErrorParam("write_count", ParamKind.U32),
         ErrorParam("convergent_count", ParamKind.U32),
         ErrorParam("observable_count", ParamKind.U32),
+        ErrorParam("identity_count", ParamKind.U32),
     ),
     fix_hint=(
         "Remove the effect modifier or make the body satisfy its declared "
