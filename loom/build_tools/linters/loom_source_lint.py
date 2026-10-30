@@ -18,6 +18,10 @@ qualification programs and manifests may invoke shared tools, but production
 targets must not include execution internals or grow private runner/provider
 stacks under `loom/src/loom/target/**`.
 
+Target tooling packages own command-line and host integration behavior, not
+Loom program semantics. Their BUILD files may consume explicit testdata through
+tool manifests, but must not instantiate Loom semantic build or test rules.
+
 The core Loom compiler must stay independent from command-line flag machinery.
 Only tools, tooling helpers, and tests may include `iree/base/tooling/flags.h`
 or define IREE flags.
@@ -115,6 +119,15 @@ TARGET_EXECUTION_BAZEL_DEPS_PATTERN = re.compile(
 )
 
 TARGET_PRIVATE_EXECUTION_SYMBOL_PATTERN = re.compile(r"\bloom_run_hal_[A-Za-z0-9_]*\b")
+
+TOOLING_TARGET_SEMANTIC_RULE_PATTERN = re.compile(
+    r"^\s*(?P<rule>loom_(?:"
+    r"library|module|test_module|test|kernel_library|"
+    r"check_compile_tests|check_test|check_test_suite|"
+    r"corpus_build|corpus_catalog|corpus_manifest|corpus_sources|"
+    r"corpus_test|corpus_validate_catalog|scenario_test"
+    r"))\s*\("
+)
 
 TOOLING_FLAGS_INCLUDE_PATTERN = re.compile(
     r"#\s*include\s+[<\"]iree/base/tooling/flags\.h[>\"]"
@@ -481,6 +494,39 @@ def _scan_authoring_text(path: Path, text: str) -> list[Finding]:
     return findings
 
 
+def _scan_tooling_target_ownership_text(
+    relative_path: str, text: str
+) -> list[tuple[int, str, str]]:
+    path = PurePosixPath(relative_path)
+    if len(path.parts) < 6 or path.parts[:5] != (
+        "loom",
+        "src",
+        "loom",
+        "tooling",
+        "target",
+    ):
+        return []
+    if path.name != "BUILD.bazel":
+        return []
+
+    findings: list[tuple[int, str, str]] = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        bazel_line = line.split("#", 1)[0]
+        match = TOOLING_TARGET_SEMANTIC_RULE_PATTERN.match(bazel_line)
+        if match:
+            findings.append(
+                (
+                    line_number,
+                    (
+                        "target tooling packages must not own Loom semantic "
+                        "build or test rules"
+                    ),
+                    match.group("rule"),
+                )
+            )
+    return findings
+
+
 def _scan_target_execution_text(
     relative_path: str, text: str
 ) -> list[tuple[int, str, str]]:
@@ -573,6 +619,7 @@ def _scan_source(relative_path: str, text: str) -> list[Finding]:
     findings = _scan_statements(path, text) if path.suffix in SOURCE_SUFFIXES else []
     for scan in (
         _scan_core_tooling_flags_text,
+        _scan_tooling_target_ownership_text,
         _scan_target_execution_text,
         _scan_spirv_backend_text,
     ):
@@ -630,6 +677,20 @@ def _expect_target_execution_self_test(
     name: str, relative_path: str, text: str, expected_messages: tuple[str, ...]
 ) -> bool:
     findings = _scan_target_execution_text(relative_path, text)
+    messages = tuple(finding[1] for finding in findings)
+    if messages == expected_messages:
+        print(f"  PASS  {name}")
+        return True
+    print(f"  FAIL  {name}")
+    print(f"        expected: {expected_messages!r}")
+    print(f"        actual:   {messages!r}")
+    return False
+
+
+def _expect_tooling_target_ownership_self_test(
+    name: str, relative_path: str, text: str, expected_messages: tuple[str, ...]
+) -> bool:
+    findings = _scan_tooling_target_ownership_text(relative_path, text)
     messages = tuple(finding[1] for finding in findings)
     if messages == expected_messages:
         print(f"  PASS  {name}")
@@ -726,6 +787,41 @@ def _run_self_tests() -> int:
         "test flags include is in scope",
         "loom/src/loom/sanitizer/options_test.cc",
         '#include "iree/base/tooling/flags.h"\n',
+        (),
+    )
+    ok &= _expect_tooling_target_ownership_self_test(
+        "target tooling manifest passes",
+        "loom/src/loom/tooling/target/amdgpu/test/BUILD.bazel",
+        (
+            "iree_execution_test_suite(\n"
+            '    name = "compile",\n'
+            '    data = ["//loom/src/loom/tooling/target/amdgpu/testdata:input.loom"],\n'
+            ")\n"
+        ),
+        (),
+    )
+    ok &= _expect_tooling_target_ownership_self_test(
+        "target tooling semantic test fails",
+        "loom/src/loom/tooling/target/amdgpu/test/BUILD.bazel",
+        'loom_test(name = "semantic", src = "input.loom")\n',
+        ("target tooling packages must not own Loom semantic build or test rules",),
+    )
+    ok &= _expect_tooling_target_ownership_self_test(
+        "target tooling semantic library fails",
+        "loom/src/loom/tooling/target/amdgpu/test/BUILD.bazel",
+        'loom_library(name = "semantic", srcs = ["input.loom"])\n',
+        ("target tooling packages must not own Loom semantic build or test rules",),
+    )
+    ok &= _expect_tooling_target_ownership_self_test(
+        "commented target tooling semantic rule passes",
+        "loom/src/loom/tooling/target/amdgpu/test/BUILD.bazel",
+        '# loom_corpus_test(name = "semantic")\n',
+        (),
+    )
+    ok &= _expect_tooling_target_ownership_self_test(
+        "target semantic tests remain target-owned",
+        "loom/src/loom/target/arch/amdgpu/test/BUILD.bazel",
+        'loom_test(name = "semantic", src = "input.loom")\n',
         (),
     )
     ok &= _expect_target_execution_self_test(

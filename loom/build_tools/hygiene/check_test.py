@@ -167,12 +167,50 @@ class CheckTest(unittest.TestCase):
                     case_source.unlink()
 
             target_owned = (
-                root / "loom/src/loom/tooling/target/amdgpu/test/gfx1151_example.loom"
+                root / "loom/src/loom/target/arch/amdgpu/test/gfx1151_example.loom"
             )
             target_owned.parent.mkdir(parents=True)
             target_owned.write_text("func.decl @example()\n", encoding="utf-8")
             manifest.write_text(
                 json.dumps([target_owned.relative_to(root).as_posix()]),
+                encoding="utf-8",
+            )
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(output.read_text(encoding="utf-8"), "PASS\n")
+
+    def test_authoring_requires_explicit_tooling_target_testdata(self):
+        with tempfile.TemporaryDirectory(prefix="loom hygiene ") as temporary:
+            root = Path(temporary)
+            source = root / "loom/src/loom/tooling/target/amdgpu/test/example.loom"
+            source.parent.mkdir(parents=True)
+            source.write_text("func.decl @example()\n", encoding="utf-8")
+            manifest = root / "sources.json"
+            manifest.write_text(
+                json.dumps([source.relative_to(root).as_posix()]), encoding="utf-8"
+            )
+            output = root / "passed"
+            command = [
+                self.runner,
+                "--check=authoring",
+                "--tool",
+                self.authoring,
+                "--sources",
+                str(manifest),
+                "--output",
+                str(output),
+            ]
+
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must live in an explicit testdata package", result.stdout)
+            self.assertFalse(output.exists())
+
+            testdata_source = source.parent.parent / "testdata/example.loom"
+            testdata_source.parent.mkdir()
+            testdata_source.write_text(source.read_text(encoding="utf-8"))
+            manifest.write_text(
+                json.dumps([testdata_source.relative_to(root).as_posix()]),
                 encoding="utf-8",
             )
             result = subprocess.run(command, capture_output=True, text=True)
