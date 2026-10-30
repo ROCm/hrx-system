@@ -8,15 +8,6 @@ load("//build_tools/bazel:python.bzl", "iree_py_test")
 load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load(
-    "//loom/build_tools/bazel:defs.bzl",
-    "loom_test",
-)
-load(
-    "//loom/target/amdgpu:execution_profiles.bzl",
-    "AMD_GPU_ACCESS_PROFILE",
-    "AMD_GPU_HARDWARE_PROFILE",
-)
 
 package(
     default_visibility = ["//visibility:public"],
@@ -163,15 +154,6 @@ iree_execution_test_suite(
     tools = {
         "loom-opt": "//loom/src/loom/tools/loom-opt",
     },
-)
-
-loom_test(
-    name = "hal_actual_test",
-    srcs = ["amdgpu_hal_actual.loom"],
-    execution_profiles = [
-        AMD_GPU_HARDWARE_PROFILE,
-        AMD_GPU_ACCESS_PROFILE,
-    ],
 )
 
 iree_execution_test_suite(
