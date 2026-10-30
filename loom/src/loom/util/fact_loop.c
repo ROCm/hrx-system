@@ -429,6 +429,21 @@ static void loom_value_fact_table_collect_terminator_operands(
   }
 }
 
+static iree_status_t loom_value_fact_table_compute_counted_body(
+    loom_value_fact_table_t* table, const loom_module_t* module,
+    loom_loop_like_t loop, uint16_t arg_offset, const loom_value_facts_t* facts,
+    uint16_t count) {
+  loom_region_t* body = loom_loop_like_body(loop);
+  if (table->loop_update && table->loop_update->op == loop.op) {
+    return table->loop_update->fn(table->loop_update->user_data, body,
+                                  arg_offset, facts, count);
+  }
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_define_loop_entry_args(
+      table, module, body, arg_offset, facts, count));
+  return loom_value_fact_table_compute_region_tree(table, module, body,
+                                                   loop.op);
+}
+
 static iree_status_t loom_value_fact_table_join_loop_backedge(
     loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_type_t* types, const loom_value_facts_t* init_facts,
@@ -528,19 +543,15 @@ static iree_status_t loom_value_fact_table_replay_counted_loop(
           current_facts[i], &joined));
       body_facts[i] = joined;
     }
-    IREE_RETURN_IF_ERROR(loom_value_fact_table_define_loop_entry_args(
-        table, module, body, argument_offset, current_facts, count));
-    IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_region_tree(
-        table, module, body, loop.op));
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_counted_body(
+        table, module, loop, argument_offset, current_facts, count));
     loom_value_fact_table_collect_terminator_operands(
         table, loom_value_fact_region_terminator(body), /*operand_offset=*/0,
         yielded_facts, count);
   }
   memcpy(current_facts, yielded_facts, count * sizeof(*current_facts));
-  IREE_RETURN_IF_ERROR(loom_value_fact_table_define_loop_entry_args(
-      table, module, body, argument_offset, body_facts, count));
-  return loom_value_fact_table_compute_region_tree(table, module, body,
-                                                   loop.op);
+  return loom_value_fact_table_compute_counted_body(
+      table, module, loop, argument_offset, body_facts, count);
 }
 
 static iree_status_t loom_value_fact_table_compute_counted_loop_summary(
@@ -597,10 +608,8 @@ static iree_status_t loom_value_fact_table_compute_counted_loop_summary(
   bool exact_replayed = false;
   for (uint32_t feedback_round = 0;
        feedback_round < LOOM_VALUE_FACT_LOOP_MAX_ITERATIONS; ++feedback_round) {
-    IREE_RETURN_IF_ERROR(loom_value_fact_table_define_loop_entry_args(
-        table, module, body, carried_arg_offset, current_facts, count));
-    IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_region_tree(
-        table, module, body, loop.op));
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_counted_body(
+        table, module, loop, carried_arg_offset, current_facts, count));
     loom_op_t* yield = loom_value_fact_region_terminator(body);
     // One body traversal establishes constant results and selector roots.
     // Operand-dependent equations still change during widening and replay.
@@ -644,10 +653,8 @@ static iree_status_t loom_value_fact_table_compute_counted_loop_summary(
           table, module, &forwarding, i, LOOM_VALUE_FACT_LOOP_OBSERVATION_BODY,
           current_facts[i]);
     }
-    IREE_RETURN_IF_ERROR(loom_value_fact_table_define_loop_entry_args(
-        table, module, body, carried_arg_offset, current_facts, count));
-    IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_region_tree(
-        table, module, body, loop.op));
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_compute_counted_body(
+        table, module, loop, carried_arg_offset, current_facts, count));
     loom_op_t* yield = loom_value_fact_region_terminator(body);
     loom_value_fact_table_collect_terminator_operands(
         table, yield, /*operand_offset=*/0, yielded_facts, count);

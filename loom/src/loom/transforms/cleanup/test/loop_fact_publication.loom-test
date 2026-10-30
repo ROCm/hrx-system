@@ -1,0 +1,81 @@
+// RUN: pass combine
+
+// Body rewrites preserve the independent branch while simplifying feedback of
+// different scalar types. The unknown carried values must remain unknown.
+func.def @floating_feedback(%count: index, %choose: i1, %input: f32, %wide_input: f64) -> (f32, f64) {
+  %start = index.constant 0 : index
+  %step = index.constant 1 : index
+  %unit = scalar.constant 1.0 : f32
+  %identity = scalar.constant 1.0 : f64
+  %result, %wide_result = scf.for %iv = [%start to %count step %step](%carried = %input : f32, %wide_carried = %wide_input : f64) -> (f32, f64) {
+    %independent = scf.if %choose -> (f32) {
+      %true_increment = scalar.addf %unit, %unit : f32
+      scf.yield %true_increment : f32
+    } else {
+      %false_increment = scalar.constant 3.0 : f32
+      scf.yield %false_increment : f32
+    }
+    %next = scalar.addf %carried, %independent : f32
+    %wide_next = scalar.mulf<nnan|ninf|nsz> %wide_carried, %identity : f64
+    scf.yield %next, %wide_next : f32, f64
+  }
+  func.return %result, %wide_result : f32, f64
+}
+
+// ----
+func.def @floating_feedback(%count: index, %choose: i1, %input: f32, %wide_input: f64) -> (f32, f64) {
+  %start = index.constant 0 : index
+  %step = index.constant 1 : index
+  %result = scf.for %iv = [%start to %count step %step](%carried = %input : f32) -> (f32) {
+    %true_increment = scalar.constant 2.0 : f32
+    %false_increment = scalar.constant 3.0 : f32
+    %independent = scf.select %choose, %true_increment, %false_increment : f32
+    %next = scalar.addf %carried, %independent : f32
+    scf.yield %next : f32
+  }
+  func.return %result, %wide_input : f32, f64
+}
+
+// ====
+
+// A selector depends on changing carried state. Folding the neutral arithmetic
+// in either branch must retain that dependency as the branch becomes a select.
+func.def @bounded_feedback() -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %increment = scalar.constant 1 : i32
+  %limit = scalar.constant 2 : i32
+  %result = scf.for %iv = [%start to %end step %step](%carried = %initial : i32) -> (i32) {
+    %below = scalar.cmpi slt, %carried, %limit : i32
+    %next = scf.if %below -> (i32) {
+      %advance = scalar.addi %carried, %increment : i32
+      %neutral = scalar.addi %advance, %initial : i32
+      scf.yield %neutral : i32
+    } else {
+      %neutral = scalar.addi %carried, %initial : i32
+      scf.yield %neutral : i32
+    }
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @bounded_feedback() -> (i32) {
+  %start = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %increment = scalar.constant 1 : i32
+  %limit = scalar.constant 2 : i32
+  %result = scf.for %iv = [%start to %end step %step](%carried = %initial : i32) -> (i32) {
+    %below = scalar.cmpi slt, %carried, %limit : i32
+    %advance = scalar.addi %carried, %increment : i32
+    %17 = scf.select %below, %advance, %carried : i32
+    %next = scalar.assume %17 [range(%17, -2147483647, 2147483647)] : i32
+    scf.yield %next : i32
+  }
+  func.return %result : i32
+}
