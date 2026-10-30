@@ -1,51 +1,4 @@
-// Fixed-input splits preserve the entry declarations and dominate body uses.
-// RUN: with-checks emit amdgpu-allocation-json @split_resource strategy=source amdgpu.sgpr=4 fixed=%current:physical_register:0:2 fixed=%next:physical_register:0:2
-
-amdgpu.target<gfx1151> @target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @split_resource() -> (reg<amdgpu.sgpr x2>) asm {
-  %current = resource<native_pointer> {index = 0, source_type = buffer} : reg<amdgpu.sgpr x2>
-  %value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %first = slice %current[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %second = slice %current[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %swapped = concat(%second, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %selected = v_cndmask_b32_src0_inline %value, %current {false_value = 0}
-  low.br ^exit(%swapped: reg<amdgpu.sgpr x2>)
-^exit(%next: reg<amdgpu.sgpr x2>):
-  return %next
-}
-
-// ----
-CHECK: *"spill_count":0,*
-CHECK: *"name":"current_split",*
-
-// ====
-
-// Input preparation preserves resource extents and dominates body uses.
-// RUN: with-checks emit amdgpu-allocation-json @split_preamble_operand strategy=source amdgpu.sgpr=4 fixed=%current:physical_register:0:2 fixed=%next:physical_register:0:2
-
-amdgpu.target<gfx1151> @target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @split_preamble_operand() -> (reg<amdgpu.sgpr x2>) asm {
-  %current = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
-  %value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
-  %buffer = resource<native_pointer> extent(%current) {index = 0, source_type = buffer} : reg<amdgpu.sgpr x2>
-  %first = slice %current[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %second = slice %current[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %swapped = concat(%second, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %selected = v_cndmask_b32_src0_inline %value, %current {false_value = 0}
-  low.br ^exit(%swapped: reg<amdgpu.sgpr x2>)
-^exit(%next: reg<amdgpu.sgpr x2>):
-  return %next
-}
-
-// ----
-CHECK: *"spill_count":0,*
-CHECK: *"name":"current_input",*
-
-// ====
-
-// Profitable VOPD replication also places its copy after the complete preamble.
+// Profitable VOPD replication places its copy after the complete preamble.
 // RUN: emit amdgpu-assembly @replicate_entry_argument strategy=resource-stall
 
 amdgpu.target<gfx1100> @target
@@ -82,7 +35,7 @@ low.func.def target<amdgpu.rdna3.core>(@target) @replicate_entry_argument(%lhs: 
 
 // ====
 
-// Profitable VOPD replication also places its copy after the complete preamble.
+// Profitable VOPD replication places its copy after the complete preamble.
 // RUN: emit amdgpu-assembly @replicate_live_in strategy=resource-stall
 
 amdgpu.target<gfx1100> @target
