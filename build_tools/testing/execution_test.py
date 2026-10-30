@@ -21,6 +21,27 @@ import execution
 
 
 class ExecutionUnitTest(unittest.TestCase):
+    def test_case_path_name_bounds_long_case_names(self):
+        first_name = (
+            "checked command programs retain configuration subviews and physical "
+            "dispatch counts"
+        )
+        second_name = first_name + " after specialization"
+
+        self.assertEqual(execution._case_path_name("short case"), "short_case")
+        self.assertEqual(
+            execution._case_path_name(first_name),
+            execution._case_path_name(first_name),
+        )
+        self.assertNotEqual(
+            execution._case_path_name(first_name),
+            execution._case_path_name(second_name),
+        )
+        for name in (first_name, second_name):
+            path_name = execution._case_path_name(name)
+            self.assertLessEqual(len(path_name), execution._CASE_PATH_NAME_MAX_LENGTH)
+            self.assertRegex(path_name, r"^[A-Za-z0-9_.-]+-[0-9a-f]{8}$")
+
     def test_substitution_preserves_unknown_braces(self):
         with tempfile.TemporaryDirectory() as directory:
             tool_path = Path(directory) / "tool"
