@@ -64,11 +64,9 @@ class HipRuntime {
     Check(Resolve<decltype(&hipDeviceGetPCIBusId)>("hipDeviceGetPCIBusId")(
         pci_address, sizeof(pci_address), device));
     const char* driver = std::getenv("HRX_GPU_DRIVER");
-    const char* direct = std::getenv("HRX_DIRECT_QUEUE_DISPATCH");
     label_ = std::string(driver && driver[0] ? driver : "configured-default") +
-             " " + properties.gcnArchName + " " + pci_address + " dispatch=" +
-             (direct && direct[0] && direct[0] != '0' ? "queue" : "recording") +
-             " wait=" + wait_mode;
+             " " + properties.gcnArchName + " " + pci_address +
+             " dispatch=queue wait=" + wait_mode;
 
     const auto image =
         hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);

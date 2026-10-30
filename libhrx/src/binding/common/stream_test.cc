@@ -65,7 +65,7 @@ TEST_F(StreamTest, ConcurrentFirstUseAndCompletion) {
           IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING, 0,
           iree_allocator_system(), &streams[i]));
 
-      // A rejected launch still enters the stream's submission policy path.
+      // A rejected launch still validates admission on the stream.
       // No executable is needed to exercise concurrent launch admission.
       iree_hal_streaming_symbol_t symbol = {
           .type = IREE_HAL_STREAMING_SYMBOL_TYPE_GLOBAL,
@@ -76,7 +76,7 @@ TEST_F(StreamTest, ConcurrentFirstUseAndCompletion) {
           iree_hal_streaming_launch_kernel(&symbol, &params, streams[i]));
 
       // Submit a real command buffer and join its queue completion. Independent
-      // streams must not mutate shared launch/flush/synchronization policy.
+      // streams must independently publish and complete their timeline values.
       IREE_ASSERT_OK(iree_hal_streaming_stream_begin(streams[i]));
       IREE_ASSERT_OK(iree_hal_streaming_stream_flush(streams[i]));
       IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize_flushed(streams[i]));

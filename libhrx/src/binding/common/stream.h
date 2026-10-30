@@ -85,8 +85,6 @@ typedef struct iree_hal_streaming_stream_t {
   iree_hal_streaming_stream_flags_t flags;
   // HIP stream scheduling priority hint.
   int priority;
-  // Immutable direct-submission policy captured during stream construction.
-  bool direct_queue_dispatch;
   // Stable process-wide stream identifier used by timeline dependencies.
   unsigned long long stream_id;
 
@@ -98,8 +96,6 @@ typedef struct iree_hal_streaming_stream_t {
   iree_hal_streaming_value_flush_timer_t* value_flush_timer;
   // Number of kernel launches recorded in |command_buffer|.
   uint32_t pending_launch_count;
-  // Immutable launch count triggering a recording flush, or zero for unbounded.
-  uint32_t launch_flush_interval;
 
   // Semaphore chain for synchronization.
   iree_hal_semaphore_t* timeline_semaphore;
@@ -354,7 +350,9 @@ iree_status_t iree_hal_streaming_execute_host_operation(
 
 // Enqueues one kernel launch on |stream| without waiting for completion.
 // Pointer-array arguments are copied into an owned native argument image before
-// the function returns. Graph capture is supported by the single-launch path.
+// the function returns. Outside capture the queue accepts the launch before
+// return, so progress does not depend on another call to this stream. Graph
+// capture is supported by the single-launch path.
 iree_status_t iree_hal_streaming_launch_kernel(
     iree_hal_streaming_symbol_t* symbol,
     const iree_hal_streaming_dispatch_params_t* params,

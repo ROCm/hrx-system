@@ -6,7 +6,6 @@
 
 #include "common/stream.h"
 
-#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,33 +15,6 @@
 #include "common/kernel_arguments.h"
 #include "common/memory.h"
 #include "common/stream_queue.h"
-
-// Submission policy is immutable once a stream is published. Reading process
-// configuration belongs to construction, not concurrent launch/flush paths.
-static iree_status_t iree_hal_streaming_stream_read_launch_policy(
-    bool* out_direct_queue_dispatch, uint32_t* out_launch_flush_interval) {
-  const char* direct = getenv("HRX_DIRECT_QUEUE_DISPATCH");
-  *out_direct_queue_dispatch = direct && direct[0] && direct[0] != '0';
-  *out_launch_flush_interval = 0;
-  const char* interval = getenv("HRX_FLUSH_INTERVAL");
-  if (interval && interval[0]) {
-    char* end = NULL;
-    errno = 0;
-    const long long value = strtoll(interval, &end, 10);
-    if (errno == ERANGE || end == interval || *end || value < 0 ||
-        (unsigned long long)value > UINT32_MAX) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "HRX_FLUSH_INTERVAL must be an unsigned "
-                              "32-bit decimal integer");
-    }
-    *out_launch_flush_interval = (uint32_t)value;
-  }
-  const char* each = getenv("HRX_FLUSH_EACH_LAUNCH");
-  if (each && each[0] && each[0] != '0') {
-    *out_launch_flush_interval = 1;
-  }
-  return iree_ok_status();
-}
 
 //===----------------------------------------------------------------------===//
 // Stream management
@@ -183,12 +155,6 @@ iree_status_t iree_hal_streaming_stream_create(
   *out_stream = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  bool direct_queue_dispatch = false;
-  uint32_t launch_flush_interval = 0;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_stream_read_launch_policy(&direct_queue_dispatch,
-                                                       &launch_flush_interval));
-
   iree_hal_streaming_stream_t* stream = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0,
@@ -199,12 +165,10 @@ iree_status_t iree_hal_streaming_stream_create(
       IREE_HAL_STREAMING_STREAM_REGISTRATION_STATE_UNREGISTERED;
   stream->flags = flags;
   stream->priority = priority;
-  stream->direct_queue_dispatch = direct_queue_dispatch;
   stream->stream_id = 0;
   stream->command_buffer = NULL;
   stream->value_flush_timer = NULL;
   stream->pending_launch_count = 0;
-  stream->launch_flush_interval = launch_flush_interval;
   stream->timeline_semaphore = NULL;
   stream->pending_value = 0;
   stream->completed_value = 0;
@@ -1502,11 +1466,7 @@ static iree_status_t iree_hal_streaming_prepare_launch_arguments(
 static iree_status_t iree_hal_streaming_record_dispatch_locked(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_symbol_t* symbol,
     iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
-    iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags,
-    bool* out_should_flush) {
-  if (out_should_flush) {
-    *out_should_flush = false;
-  }
+    iree_hal_buffer_ref_list_t bindings, iree_hal_dispatch_flags_t flags) {
   iree_status_t status = iree_hal_streaming_stream_begin_locked(stream);
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_dispatch(
@@ -1517,11 +1477,6 @@ static iree_status_t iree_hal_streaming_record_dispatch_locked(
 
   if (iree_status_is_ok(status)) {
     ++stream->pending_launch_count;
-    if (out_should_flush) {
-      *out_should_flush =
-          stream->launch_flush_interval > 0 &&
-          stream->pending_launch_count >= stream->launch_flush_interval;
-    }
   }
   return status;
 }
@@ -1535,7 +1490,6 @@ iree_status_t iree_hal_streaming_launch_kernel(
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  const bool direct_queue_dispatch_requested = stream->direct_queue_dispatch;
   const bool cooperative_dispatch = iree_any_bit_set(
       params->flags, IREE_HAL_STREAMING_DISPATCH_FLAG_COOPERATIVE);
 
@@ -1661,22 +1615,6 @@ iree_status_t iree_hal_streaming_launch_kernel(
         &arguments);
   }
 
-  // Cooperative dispatch is an operation-level queue requirement, not mutable
-  // stream state. Submit it directly through the cooperative realization while
-  // preserving the stream's timeline around the cross-queue operation.
-  bool dispatch_directly =
-      direct_queue_dispatch_requested || cooperative_dispatch;
-  if (iree_status_is_ok(status) && !dispatch_directly) {
-    for (iree_host_size_t i = 0; i < arguments.bindings.count; ++i) {
-      const iree_hal_buffer_ref_t* binding = &arguments.bindings.values[i];
-      if (!binding->buffer && binding->reserved == 0 &&
-          binding->buffer_slot == 0 && binding->offset == 0 &&
-          binding->length == 0) {
-        dispatch_directly = true;
-        break;
-      }
-    }
-  }
   if (iree_status_is_ok(status)) {
     // Create IREE dispatch config.
     const iree_hal_dispatch_config_t config = {
@@ -1716,7 +1654,6 @@ iree_status_t iree_hal_streaming_launch_kernel(
       flags |= IREE_HAL_DISPATCH_FLAG_EXACT_WORKITEM_COUNT;
     }
 
-    bool should_flush = false;
     for (;;) {
       iree_slim_mutex_lock(&stream->mutex);
       if (IREE_UNLIKELY(stream->capture_status !=
@@ -1732,11 +1669,13 @@ iree_status_t iree_hal_streaming_launch_kernel(
         continue;
       }
 
-      if (dispatch_directly && stream->command_buffer) {
+      // Ordinary launches must progress even if this is the final API call on
+      // their stream. Capture owns deferred execution; an uncaptured launch
+      // transfers its arguments and dependencies to the queue before returning.
+      if (stream->command_buffer) {
         status = iree_hal_streaming_stream_flush_locked(stream);
       }
-      const bool dispatch_attempted = iree_status_is_ok(status);
-      if (dispatch_attempted && dispatch_directly) {
+      if (iree_status_is_ok(status)) {
         iree_hal_queue_t* dispatch_queue = stream->queue;
         if (cooperative_dispatch) {
           status = iree_hal_streaming_stream_select_cooperative_queue_locked(
@@ -1774,19 +1713,9 @@ iree_status_t iree_hal_streaming_launch_kernel(
         if (iree_status_is_ok(status)) {
           status = iree_hal_queue_flush(submission.queue);
         }
-      } else if (dispatch_attempted) {
-        status = iree_hal_streaming_record_dispatch_locked(
-            stream, symbol, config,
-            iree_make_const_byte_span(arguments.constants,
-                                      arguments.constants_size),
-            arguments.bindings, flags, &should_flush);
       }
       iree_slim_mutex_unlock(&stream->mutex);
       break;
-    }
-    if (!was_captured && !dispatch_directly && iree_status_is_ok(status) &&
-        should_flush) {
-      status = iree_hal_streaming_stream_flush(stream);
     }
   }
   iree_allocator_free(stream->host_allocator, allocated_argument_storage);
@@ -1985,8 +1914,7 @@ iree_status_t iree_hal_streaming_launch_kernel_batch(
         launch->stream, launch->symbol, config,
         iree_make_const_byte_span(prepared[i].constants,
                                   prepared[i].constants_size),
-        iree_hal_buffer_ref_list_empty(), flags,
-        /*out_should_flush=*/NULL);
+        iree_hal_buffer_ref_list_empty(), flags);
     if (iree_status_is_ok(status)) {
       ++recorded_count;
     }
