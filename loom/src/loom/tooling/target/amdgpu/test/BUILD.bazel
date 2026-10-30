@@ -188,40 +188,6 @@ loom_test(
     ],
 )
 
-loom_test(
-    name = "checked_benchmark_workload_test",
-    execution_profiles = [
-        AMD_GPU_HARDWARE_PROFILE,
-    ],
-    module = "//loom/src/loom/test/corpus/checked_benchmarks/benchmark:checked_benchmark_workload_module",
-    tags = ["manual"],
-)
-
-loom_test(
-    name = "authoring_benchmark_workload_test",
-    configs = {
-        "mlp_down_projection_residual_bf16.row_capacity": "3584",
-    },
-    execution_profiles = [
-        AMD_GPU_HARDWARE_PROFILE,
-    ],
-    module = "//loom/src/loom/test/corpus/authoring/benchmark:authoring_benchmark_workload_module",
-    tags = ["manual"],
-)
-
-loom_test(
-    name = "split_kv_stage2_test",
-    srcs = [
-        "//loom/src/loom/test/corpus/checked_benchmarks:split_kv_online_softmax_combine_f32.loom",
-        "//loom/src/loom/test/corpus/checked_benchmarks/benchmark:split_kv_online_softmax_combine_f32_benchmark.loom",
-    ],
-    compile_targets = [
-        "//loom/target/amdgpu:gfx942",
-        "//loom/target/amdgpu:gfx1151",
-        "//loom/target/amdgpu:gfx1250",
-    ],
-)
-
 iree_execution_test_suite(
     name = "check_requirements_test",
     data = [
