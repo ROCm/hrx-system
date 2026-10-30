@@ -243,6 +243,7 @@ AMD_CLIENT_WINDOWS_BAZEL_TARGETS = (
         "//runtime/src/iree/hal/drivers/vulkan/...",
         "//loom/binding/c/test/target/spirv/...",
         "//loom/src/loom/tooling/target/spirv/...",
+        "//loom/target/spirv/test/...",
     )
     + AMD_GPU_WINDOWS_BAZEL_TARGETS
 )

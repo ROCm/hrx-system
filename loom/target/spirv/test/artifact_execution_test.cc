@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "iree/hal/cts/util/test_base.h"
-#include "loom/tooling/target/spirv/test/multiple_entries_spv.h"
-#include "loom/tooling/target/spirv/test/subgroup_entries_spv.h"
+#include "loom/target/spirv/test/multiple_entries_spv.h"
+#include "loom/target/spirv/test/subgroup_entries_spv.h"
 
 namespace iree::hal::cts {
 namespace {

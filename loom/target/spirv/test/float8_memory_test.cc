@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "iree/hal/cts/util/test_base.h"
-#include "loom/tooling/target/spirv/test/float8_memory_spv.h"
+#include "loom/target/spirv/test/float8_memory_spv.h"
 
 namespace iree::hal::cts {
 namespace {

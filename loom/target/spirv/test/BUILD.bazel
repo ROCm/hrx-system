@@ -15,7 +15,7 @@ load(
 )
 load("//loom/build_tools/bazel:defs.bzl", "loom_test")
 load(
-    "//loom/src/loom/tooling/target/spirv:execution_profiles.bzl",
+    "//loom/target/spirv:execution_profiles.bzl",
     "SPIRV_VULKAN_EXPLICIT_TARGET_HARDWARE_PROFILE",
     "SPIRV_VULKAN_HARDWARE_PROFILE",
 )

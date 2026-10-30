@@ -6,7 +6,7 @@
 
 load("//loom/build_tools/bazel:defs.bzl", "loom_corpus_build", "loom_scenario_test")
 load("//loom/src/loom/test/corpus:catalog.bzl", "LOOM_CORPUS")
-load("//loom/src/loom/tooling/target/wasm:execution_profiles.bzl", "WASM_HOSTED_PROFILE")
+load("//loom/target/wasm:execution_profiles.bzl", "WASM_HOSTED_PROFILE")
 
 package(default_visibility = ["//visibility:public"])
 
