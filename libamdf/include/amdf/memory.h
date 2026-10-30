@@ -132,7 +132,11 @@ enum amdf_memory_map_flag_bits_e {
   AMDF_MEMORY_MAP_FLAG_WRITE = 1u << 1,
 };
 
-/// Atomic operations supported by queues and target memory.
+/// Atomic transactions supported by execution sites and target memory.
+/// Integer operations act on the physical word width selected by their table.
+/// A composed operation requires the transactions it actually emits: a CAS loop
+/// does not require native support for the arithmetic inside that loop. These
+/// integer masks make no floating-point or packed/subword atomic promise.
 typedef uint64_t amdf_atomic_operations_t;
 enum amdf_atomic_operation_bits_e {
   /// Waits until an atomic value satisfies a supported condition.
@@ -144,12 +148,28 @@ enum amdf_atomic_operation_bits_e {
   AMDF_ATOMIC_OPERATION_ADD = UINT64_C(1) << 2,
   /// No-result atomic subtraction.
   AMDF_ATOMIC_OPERATION_SUBTRACT = UINT64_C(1) << 3,
-  /// Atomic bitwise AND.
+  /// No-result atomic bitwise AND.
   AMDF_ATOMIC_OPERATION_AND = UINT64_C(1) << 4,
-  /// Atomic bitwise OR.
+  /// No-result atomic bitwise OR.
   AMDF_ATOMIC_OPERATION_OR = UINT64_C(1) << 5,
-  /// Atomic bitwise XOR.
+  /// No-result atomic bitwise XOR.
   AMDF_ATOMIC_OPERATION_XOR = UINT64_C(1) << 6,
+  /// Naturally aligned atomic load, without read-modify-write.
+  AMDF_ATOMIC_OPERATION_LOAD = UINT64_C(1) << 7,
+  /// Compare/exchange returning the observed old word on success or failure.
+  AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE = UINT64_C(1) << 8,
+  /// Unconditional exchange returning the old word.
+  AMDF_ATOMIC_OPERATION_EXCHANGE = UINT64_C(1) << 9,
+  /// Atomic addition returning the old word.
+  AMDF_ATOMIC_OPERATION_FETCH_ADD = UINT64_C(1) << 10,
+  /// Atomic subtraction returning the old word.
+  AMDF_ATOMIC_OPERATION_FETCH_SUBTRACT = UINT64_C(1) << 11,
+  /// Atomic bitwise AND returning the old word.
+  AMDF_ATOMIC_OPERATION_FETCH_AND = UINT64_C(1) << 12,
+  /// Atomic bitwise OR returning the old word.
+  AMDF_ATOMIC_OPERATION_FETCH_OR = UINT64_C(1) << 13,
+  /// Atomic bitwise XOR returning the old word.
+  AMDF_ATOMIC_OPERATION_FETCH_XOR = UINT64_C(1) << 14,
 };
 
 /// Atomic wait conditions supported by one queue command representation.
@@ -202,6 +222,45 @@ typedef struct amdf_atomic_reach_t {
   /// Largest mutually atomic scope for naturally aligned 64-bit accesses.
   amdf_atomic_scope_t scope_64;
 } amdf_atomic_reach_t;
+
+/// Qualified transactions by naturally aligned physical width and scope.
+/// Each cell is independent; a wider-scope instruction that silently executes
+/// at a narrower scope is absent from the wider cell. Zero means no supported
+/// transaction, not an error or a request to discover capabilities by
+/// execution. Atomic-cell guarantees do not replace payload release/acquire
+/// ordering.
+typedef struct amdf_memory_atomic_capabilities_t {
+  /// Qualified 32-bit transactions at device scope.
+  amdf_atomic_operations_t device_scope_32;
+  /// Qualified 64-bit transactions at device scope.
+  amdf_atomic_operations_t device_scope_64;
+  /// Qualified 32-bit transactions at fabric scope.
+  amdf_atomic_operations_t fabric_scope_32;
+  /// Qualified 64-bit transactions at fabric scope.
+  amdf_atomic_operations_t fabric_scope_64;
+  /// Qualified 32-bit transactions at system scope.
+  amdf_atomic_operations_t system_scope_32;
+  /// Qualified 64-bit transactions at system scope.
+  amdf_atomic_operations_t system_scope_64;
+} amdf_memory_atomic_capabilities_t;
+
+/// Optional output of memory_scope_query_device_profile or
+/// memory_query_access_info. The former guarantees the requested contract; the
+/// latter describes the established access. Permissions constrain every cell:
+/// LOAD/WAIT require read, STORE requires write, and RMW requires both.
+/// This qualifies shader instructions on the selected backing. Mutual atomicity
+/// with another site additionally requires the corresponding pair query. The
+/// query neither changes memory policy nor constructs native resources.
+typedef struct amdf_memory_program_atomics_t {
+  /// Must be AMDF_STRUCTURE_TYPE_MEMORY_PROGRAM_ATOMICS.
+  amdf_structure_type_t type;
+  /// Must be at least sizeof(amdf_memory_program_atomics_t).
+  uint32_t structure_size;
+  /// Optional output extension chain. No extensions are currently defined.
+  void* next;
+  /// Qualified shader transactions for this exact device access.
+  amdf_memory_atomic_capabilities_t operations;
+} amdf_memory_program_atomics_t;
 
 /// Native representation carried by one external-memory value.
 typedef uint32_t amdf_external_memory_type_t;
@@ -469,7 +528,7 @@ typedef struct amdf_memory_access_capabilities_t {
   amdf_structure_type_t type;
   /// Must be at least `sizeof(amdf_memory_access_capabilities_t)`.
   uint32_t structure_size;
-  /// Optional output extension chain. No extensions are currently defined.
+  /// Optional amdf_memory_program_atomics_t output extension.
   void* next;
   /// Permissions present for every construction of this contract.
   amdf_memory_access_t guaranteed_access;
@@ -756,7 +815,7 @@ typedef struct amdf_memory_access_info_t {
   amdf_structure_type_t type;
   /// Must be at least `sizeof(amdf_memory_access_info_t)`.
   uint32_t structure_size;
-  /// Optional output extension chain. No extensions are currently defined.
+  /// Optional amdf_memory_program_atomics_t output extension.
   void* next;
   /// Resource-local ordinal identifying this access.
   uint32_t ordinal;
@@ -1008,6 +1067,9 @@ enum amdf_memory_site_kind_e {
   /// does not describe raw-controller DMA or mutual atomic access. Views
   /// reporting only BUFFERED_FILE_IO use HOST sites instead.
   AMDF_MEMORY_SITE_KIND_FILE_IO = 2,
+  /// Shader execution through one initialized device access, independent of
+  /// the queue engine that launches the program.
+  AMDF_MEMORY_SITE_KIND_PROGRAM = 3,
 };
 
 /// One concrete device, CPU, or native file-buffer access in a pair query.
@@ -1033,6 +1095,15 @@ typedef struct amdf_memory_site_t {
       /// Exact queue family used for access and cache transitions.
       uint32_t queue_family_ordinal;
     } device;
+    /// Exact shader access; no queue family is required.
+    struct {
+      /// Memory containing the immutable device access.
+      amdf_memory_t* memory;
+      /// Resource-local access ordinal identifying the consuming device.
+      uint32_t access_ordinal;
+      /// Must be zero.
+      uint32_t reserved;
+    } program;
     /// CPU or file-buffer view and the backing being qualified for that view.
     struct {
       /// Live mapping supplying the address range and immutable cache policy.
@@ -1058,8 +1129,9 @@ enum amdf_memory_profile_site_flag_e {
 };
 
 /// One prospective access within a scope/profile construction contract.
-/// DEVICE names an exact queue family; it does not qualify shader/program-side
-/// cache operations. HOST normally names a view created through memory_map;
+/// DEVICE names an exact queue family. PROGRAM names a shader access, whose
+/// release/acquire recipes execute in the program. HOST normally names a view
+/// created through memory_map;
 /// HOST_RESERVATION selects the independently mapped reservation view. FILE_IO
 /// names memory_map on that backing and requires its reported view feature.
 typedef struct amdf_memory_profile_site_t {
@@ -1076,6 +1148,13 @@ typedef struct amdf_memory_profile_site_t {
       /// Exact queue family of that device's endpoint.
       uint32_t queue_family_ordinal;
     } device;
+    /// Shader access in the caller-ordered live consumer array.
+    struct {
+      /// Index into the query's accesses array.
+      uint32_t access_ordinal;
+      /// Must be zero.
+      uint32_t reserved;
+    } program;
     /// Required host read and write permissions.
     amdf_memory_map_flags_t host_access;
   } value;
@@ -1134,7 +1213,7 @@ typedef struct amdf_memory_pair_info_t {
   amdf_structure_type_t type;
   /// Must be at least `sizeof(amdf_memory_pair_info_t)`.
   uint32_t structure_size;
-  /// Optional output extension chain. No extensions are currently defined.
+  /// Optional amdf_memory_pair_atomics_t output extension.
   void* next;
   /// Direct reach and mapping-source capabilities.
   amdf_memory_pair_flags_t flags;
@@ -1152,6 +1231,25 @@ typedef struct amdf_memory_pair_info_t {
   /// only when `AMDF_MEMORY_PAIR_FLAG_FIXED_COST_KNOWN` is set.
   uint64_t estimated_fixed_cost_nanoseconds;
 } amdf_memory_pair_info_t;
+
+/// Optional output of either memory-pair query. Every combination of producer
+/// and consumer transactions in a matching width/scope cell is mutually atomic
+/// on corresponding bytes of the queried backing. An empty side makes no
+/// promise for that cell. Pair guarantees are not transitive to other sites.
+/// Separate release/acquire recipes in the base result govern payload
+/// visibility.
+typedef struct amdf_memory_pair_atomics_t {
+  /// Must be AMDF_STRUCTURE_TYPE_MEMORY_PAIR_ATOMICS.
+  amdf_structure_type_t type;
+  /// Must be at least sizeof(amdf_memory_pair_atomics_t).
+  uint32_t structure_size;
+  /// Optional output extension chain. No extensions are currently defined.
+  void* next;
+  /// Producer transactions qualified against every corresponding consumer bit.
+  amdf_memory_atomic_capabilities_t producer;
+  /// Consumer transactions qualified against every corresponding producer bit.
+  amdf_memory_atomic_capabilities_t consumer;
+} amdf_memory_pair_atomics_t;
 
 #ifdef __cplusplus
 }  // extern "C"

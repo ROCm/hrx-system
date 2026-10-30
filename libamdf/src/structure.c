@@ -63,3 +63,27 @@ amdf_status_t amdf_structure_validate_output(
   return amdf_structure_validate_unextended(structure, expected_type,
                                             minimum_size);
 }
+
+amdf_status_t amdf_structure_validate_output_extension(
+    const void* structure, amdf_structure_type_t expected_type,
+    uint32_t minimum_size, amdf_structure_type_t extension_type,
+    uint32_t extension_size) {
+  const amdf_status_t status =
+      amdf_structure_validate_header(structure, expected_type, minimum_size);
+  if (!amdf_status_is_ok(status)) {
+    return status;
+  }
+  const void* next = NULL;
+  memcpy(&next,
+         (const uint8_t*)structure + offsetof(amdf_output_structure_t, next),
+         sizeof(next));
+  if (next == NULL) {
+    return AMDF_STATUS_OK;
+  }
+  amdf_structure_type_t type;
+  memcpy(&type, next, sizeof(type));
+  if (type != extension_type) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  }
+  return amdf_structure_validate_output(next, extension_type, extension_size);
+}

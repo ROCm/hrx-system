@@ -1284,4 +1284,68 @@ TEST_F(WindowsGpuMemoryTest,
   EXPECT_TRUE(state_.operations.empty());
 }
 
+TEST_F(WindowsGpuMemoryTest,
+       ShaderCapabilitiesKeepPlatformAndMappingIndependent) {
+  constexpr amdf_atomic_operations_t kLoadStore =
+      AMDF_ATOMIC_OPERATION_LOAD | AMDF_ATOMIC_OPERATION_STORE;
+  constexpr amdf_atomic_operations_t kPcie =
+      kLoadStore | AMDF_ATOMIC_OPERATION_ADD | AMDF_ATOMIC_OPERATION_FETCH_ADD |
+      AMDF_ATOMIC_OPERATION_EXCHANGE | AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE;
+  constexpr amdf_atomic_operations_t kInteger =
+      kPcie | AMDF_ATOMIC_OPERATION_AND | AMDF_ATOMIC_OPERATION_OR |
+      AMDF_ATOMIC_OPERATION_XOR | AMDF_ATOMIC_OPERATION_FETCH_AND |
+      AMDF_ATOMIC_OPERATION_FETCH_OR | AMDF_ATOMIC_OPERATION_FETCH_XOR;
+  for (uint32_t major : {9u, 10u, 11u, 12u}) {
+    SCOPED_TRACE(major);
+    device_.memory_capabilities.program_gfx_major = major;
+    for (bool integrated : {false, true}) {
+      device_.memory_capabilities.program_host_is_fabric = integrated;
+      for (bool platform_rmw : {false, true}) {
+        device_.memory_capabilities.program_host_rmw_supported = platform_rmw;
+        for (bool atomic64 : {false, true}) {
+          device_.memory_capabilities.atomic_update_64_supported = atomic64;
+          for (uint32_t ordinal : {0u, 1u, 2u, 3u}) {
+            amdf_memory_native_profile_t profile = {};
+            ASSERT_EQ(amdf_gpu_umd_device_query_memory_profile(
+                          &device_, ordinal, &profile),
+                      AMDF_STATUS_OK);
+            for (bool fine : {false, true}) {
+              // Owned/registered SYSTEM permits FINE_GRAIN. LOCAL and imported
+              // memory have their own explicit native acquisition contract.
+              if (fine && ordinal != 0 && ordinal != 2) {
+                continue;
+              }
+              const amdf_memory_flags_t flags =
+                  profile.guaranteed_flags |
+                  (fine ? AMDF_MEMORY_FLAG_HOST_COHERENT : 0);
+              const auto operations =
+                  amdf_memory_native_profile_program_atomics(
+                      &profile, flags,
+                      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
+              const amdf_atomic_operations_t remote32 =
+                  platform_rmw ? (integrated ? kInteger : kPcie) : kLoadStore;
+              const amdf_atomic_operations_t remote64 =
+                  atomic64 ? remote32 : remote32 & ~kLoadStore;
+              const bool import = ordinal == 3;
+              EXPECT_EQ(operations.device_scope_32, import ? 0u
+                                                    : !fine || major == 12
+                                                        ? kInteger
+                                                        : remote32);
+              EXPECT_EQ(operations.device_scope_64, import ? 0u
+                                                    : !fine || major == 12
+                                                        ? kInteger
+                                                        : remote64);
+              EXPECT_EQ(operations.system_scope_32, fine ? remote32 : 0u);
+              EXPECT_EQ(operations.system_scope_64, fine ? remote64 : 0u);
+              EXPECT_EQ(operations.fabric_scope_32, 0u);
+              EXPECT_EQ(operations.fabric_scope_64, 0u);
+            }
+          }
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(state_.operations.empty());
+}
+
 }  // namespace

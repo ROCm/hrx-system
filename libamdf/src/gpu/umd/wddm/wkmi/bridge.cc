@@ -50,6 +50,7 @@ void PopulateGpuProperties(Wkmi::DeviceInfo& device_info,
   properties.xcc_count = device_info.num_xcc;
   properties.shader_engine_count = device_info.num_shader_engine;
   properties.is_discrete = device_info.is_dgpu;
+  properties.platform_atomic_support = device_info.platform_atomic_support;
   const bool has_kernel_queue_api =
       Wkmi::GetContextPrivDataSize() > 0 && Wkmi::GetSubmitPrivDataSize() > 0;
   const bool has_hardware_queue_api = Wkmi::GetHwQueuePrivDataSize() > 0;
@@ -175,9 +176,9 @@ GpuClockSample(amdf_wkmi_bridge_gpu_adapter_t* adapter, uint32_t adapter_handle,
   return AMDF_WKMI_BRIDGE_RESULT_SUCCESS;
 }
 
-const amdf_wkmi_bridge_api_t kBridgeApiV10 = {
+const amdf_wkmi_bridge_api_t kBridgeApi = {
     sizeof(amdf_wkmi_bridge_api_t),
-    AMDF_WKMI_BRIDGE_ABI_VERSION_10,
+    AMDF_WKMI_BRIDGE_ABI_VERSION_11,
     GpuAdapterOpen,
     GpuAdapterClose,
     amdf::wkmi_bridge::GpuAllocationQueryLayout,
@@ -197,10 +198,10 @@ amdf_wkmi_bridge_query_api(uint32_t minimum_version, uint32_t maximum_version,
   if (out_api == nullptr) {
     return AMDF_WKMI_BRIDGE_RESULT_INVALID_ARGUMENT;
   }
-  if (minimum_version > AMDF_WKMI_BRIDGE_ABI_VERSION_10 ||
-      maximum_version < AMDF_WKMI_BRIDGE_ABI_VERSION_10) {
+  if (minimum_version > AMDF_WKMI_BRIDGE_ABI_VERSION_11 ||
+      maximum_version < AMDF_WKMI_BRIDGE_ABI_VERSION_11) {
     return AMDF_WKMI_BRIDGE_RESULT_VERSION_MISMATCH;
   }
-  *out_api = &kBridgeApiV10;
+  *out_api = &kBridgeApi;
   return AMDF_WKMI_BRIDGE_RESULT_SUCCESS;
 }

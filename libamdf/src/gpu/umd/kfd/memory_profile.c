@@ -7,8 +7,66 @@
 #include "libamdf/src/gpu/umd/kfd/memory_profile.h"
 
 #include "amdf/gpu.h"
+#include "libamdf/src/device.h"
+#include "libamdf/src/endpoint.h"
 #include "libamdf/src/gpu/umd/memory.h"
 #include "libamdf/src/platform/linux/dma_buf.h"
+
+static amdf_memory_site_description_t amdf_gpu_kfd_describe_program_site(
+    amdf_memory_access_t access, const amdf_device_t* device,
+    amdf_memory_atomic_capabilities_t operations) {
+  return amdf_gpu_umd_memory_describe_program_site(
+      access, &amdf_endpoint_get_cached_info(device->endpoint)->id, operations);
+}
+
+static amdf_memory_atomic_capabilities_t amdf_gpu_kfd_query_program_atomics(
+    const amdf_memory_native_profile_t* profile, amdf_memory_flags_t flags) {
+  const amdf_gpu_kfd_topology_t* topology = profile->construction.data;
+  const amdf_gpu_kfd_ip_version_t* gc = &topology->gc_ip;
+  if (!gc->exact || gc->major < 9 || gc->major > 12) {
+    return (amdf_memory_atomic_capabilities_t){0};
+  }
+  // gmc_v9_0_get_coherence_flags and gmc_v11_0_get_vm_pte select UC for
+  // explicit uncached and coherent USERPTR mappings. GC12 retains NC for
+  // coherent mappings and uses the instruction scope to select atomic reach.
+  const bool uncached = (flags & AMDF_MEMORY_FLAG_DEVICE_UNCACHED) != 0;
+  const bool registered =
+      (profile->roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER) != 0;
+  const bool modern_cdna =
+      gc->major == 9 &&
+      (gc->minor > 4 || (gc->minor == 4 && gc->revision >= 3));
+  const bool forwarded =
+      uncached || (registered && gc->major < 12) || modern_cdna;
+  // MI300+ implements unsupported outgoing PCIe atomics with device-atomic
+  // load/op/store serialization. It does not thereby grant system atomicity.
+  const bool device_integer = !forwarded || modern_cdna || gc->major == 12;
+  const amdf_atomic_operations_t integer =
+      amdf_gpu_umd_program_atomic_integer_operations();
+  const amdf_atomic_operations_t remote_32 =
+      topology->integrated && topology->host_atomics.supports_32
+          ? integer
+          : amdf_gpu_umd_program_atomic_pcie_operations(
+                topology->host_atomics.supports_32);
+  const amdf_atomic_operations_t remote_64 =
+      topology->integrated && topology->host_atomics.supports_64
+          ? integer
+          : amdf_gpu_umd_program_atomic_pcie_operations(
+                topology->host_atomics.supports_64);
+  amdf_memory_atomic_capabilities_t result = {
+      .device_scope_32 = device_integer ? integer : remote_32,
+      .device_scope_64 = device_integer ? integer : remote_64,
+  };
+  // Cached GC9-11 ordinary backing deliberately has only device scope.
+  // Coherent SYSTEM accesses use the exact CPU-facing route; LOCAL can be
+  // evicted into GTT and cannot inherit a stronger permanent residency promise.
+  if (profile->memory_class == AMDF_MEMORY_CLASS_SYSTEM &&
+      (flags & AMDF_MEMORY_FLAG_HOST_COHERENT) != 0 &&
+      (forwarded || gc->major == 12)) {
+    result.system_scope_32 = remote_32;
+    result.system_scope_64 = remote_64;
+  }
+  return result;
+}
 
 // Selected backing policies need no SDMA payload cache operation. Explicit
 // transfer completion and dependency ordering remain caller obligations.
@@ -131,10 +189,14 @@ static bool amdf_gpu_kfd_query_group_access(
   profile.allocation = candidate->allocation;
   profile.construction = candidate->construction;
   profile.visibility = candidate->visibility;
+  // A remote LOCAL attachment has a different native route from either the
+  // owner's local access or this consumer's SYSTEM allocation profile.
+  profile.query_program_atomics = NULL;
   if (source->gpu_id == consumer->gpu_id) {
     // A second handle for this GPU keeps the backing's LOCAL site policy;
     // its construction, address and host-policy facts remain consumer-owned.
     profile.visibility.describe_site = backing->visibility.describe_site;
+    profile.query_program_atomics = backing->query_program_atomics;
   }
   // The backing determines VRAM cache semantics. In particular, a consumer's
   // GTT profile must not add HOST_COHERENT to an access of local memory.
@@ -179,7 +241,9 @@ amdf_status_t amdf_gpu_kfd_query_memory_profile(
   amdf_memory_native_profile_t profile = {
       .ordinal = memory_profile_ordinal,
       .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
-      .visibility = {.describe_site = amdf_gpu_umd_memory_describe_site},
+      .query_program_atomics = amdf_gpu_kfd_query_program_atomics,
+      .visibility = {.describe_site = amdf_gpu_umd_memory_describe_site,
+                     .describe_program = amdf_gpu_kfd_describe_program_site},
       .construction =
           {
               .query_access = amdf_gpu_kfd_query_group_access,

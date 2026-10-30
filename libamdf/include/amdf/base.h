@@ -269,6 +269,10 @@ enum amdf_structure_type_e {
   AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_OBSERVATION = 26,
   /// PCI attachment address captured while opening an endpoint.
   AMDF_STRUCTURE_TYPE_ENDPOINT_PCI_ADDRESS = 27,
+  /// Shader atomic capabilities of one prospective or established access.
+  AMDF_STRUCTURE_TYPE_MEMORY_PROGRAM_ATOMICS = 28,
+  /// Exact operation sets sharing atomicity between two memory sites.
+  AMDF_STRUCTURE_TYPE_MEMORY_PAIR_ATOMICS = 29,
 };
 
 /// Identifier of an optional API table compiled into the providing library.

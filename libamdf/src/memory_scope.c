@@ -885,10 +885,12 @@ static amdf_status_t amdf_memory_scope_query_access_profile(
     return status;
   }
   for (uint32_t i = 0; amdf_status_is_ok(status) && i < query->count; ++i) {
-    status = amdf_structure_validate_output(
+    status = amdf_structure_validate_output_extension(
         &out_access_capabilities[i],
         AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
-        sizeof(out_access_capabilities[i]));
+        sizeof(out_access_capabilities[i]),
+        AMDF_STRUCTURE_TYPE_MEMORY_PROGRAM_ATOMICS,
+        sizeof(amdf_memory_program_atomics_t));
   }
   if (!amdf_status_is_ok(status)) {
     return status;
@@ -917,6 +919,16 @@ static amdf_status_t amdf_memory_scope_query_access_profile(
         .device_address = native->device_address,
         .address_kinds = native->address_kinds,
     };
+    if (out_access_capabilities[i].next != NULL) {
+      amdf_memory_program_atomics_t* program = out_access_capabilities[i].next;
+      program->operations = amdf_memory_native_profile_program_atomics(
+          native,
+          native->guaranteed_flags |
+              amdf_memory_scope_plan_required_access_flags(&plan,
+                                                           query->accesses, i),
+          native->guaranteed_device_access |
+              query->accesses[i].requirements.access);
+    }
   }
   amdf_memory_scope_plan_deinitialize(&plan);
   return AMDF_STATUS_OK;
@@ -994,6 +1006,14 @@ static amdf_status_t amdf_memory_profile_validate_site(
                ? AMDF_STATUS_OK
                : amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
   }
+  if (site->kind == AMDF_MEMORY_SITE_KIND_PROGRAM) {
+    if (site->value.program.reserved != 0) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+    return site->value.program.access_ordinal < plan->access_count
+               ? AMDF_STATUS_OK
+               : amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);
+  }
   if ((site->kind != AMDF_MEMORY_SITE_KIND_HOST &&
        site->kind != AMDF_MEMORY_SITE_KIND_FILE_IO) ||
       site->value.host_access == 0 ||
@@ -1039,6 +1059,23 @@ static amdf_status_t amdf_memory_profile_describe_site(
     const amdf_memory_profile_site_t* peer,
     const amdf_memory_site_description_t* peer_description,
     amdf_memory_site_description_t* out_description) {
+  if (site->kind == AMDF_MEMORY_SITE_KIND_PROGRAM) {
+    const uint32_t ordinal = site->value.program.access_ordinal;
+    const amdf_memory_native_profile_t* native =
+        &plan->native_profiles[ordinal];
+    if (native->visibility.describe_program == NULL) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
+    const amdf_memory_access_t access =
+        query->accesses[ordinal].requirements.access |
+        native->guaranteed_device_access;
+    *out_description = native->visibility.describe_program(
+        access, query->accesses[ordinal].device,
+        amdf_memory_native_profile_program_atomics(
+            native, amdf_memory_profile_access_flags(plan, query, ordinal),
+            access));
+    return AMDF_STATUS_OK;
+  }
   if (site->kind == AMDF_MEMORY_SITE_KIND_DEVICE) {
     const uint32_t ordinal = site->value.device.access_ordinal;
     const amdf_memory_native_profile_t* native =
@@ -1082,7 +1119,8 @@ static amdf_status_t amdf_memory_profile_describe_site(
     }
   } else if (plan->access_count == 0 ||
              (plan->backing_access_ordinal == plan->access_count &&
-              peer->kind != AMDF_MEMORY_SITE_KIND_DEVICE)) {
+              peer->kind != AMDF_MEMORY_SITE_KIND_DEVICE &&
+              peer->kind != AMDF_MEMORY_SITE_KIND_PROGRAM)) {
     // Host-only access has no device visibility edge and no native exporter.
     // REGISTER admission has already established ordinary write-back pages.
     host = (amdf_memory_host_description_t){
@@ -1109,13 +1147,17 @@ static amdf_status_t amdf_memory_profile_describe_site(
         amdf_memory_profile_access_flags(plan, query, ordinal),
         native->host_mapping.properties);
   }
-  const bool coherent = peer->kind != AMDF_MEMORY_SITE_KIND_DEVICE ||
-                        (amdf_memory_profile_access_flags(
-                             plan, query, peer->value.device.access_ordinal) &
-                         AMDF_MEMORY_FLAG_HOST_COHERENT) != 0;
-  *out_description = amdf_memory_describe_host_site(
-      &host, site->value.host_access, coherent,
-      peer->kind == AMDF_MEMORY_SITE_KIND_DEVICE ? peer_description : NULL);
+  const bool device_peer = peer->kind == AMDF_MEMORY_SITE_KIND_DEVICE ||
+                           peer->kind == AMDF_MEMORY_SITE_KIND_PROGRAM;
+  const uint32_t peer_ordinal = peer->kind == AMDF_MEMORY_SITE_KIND_PROGRAM
+                                    ? peer->value.program.access_ordinal
+                                    : peer->value.device.access_ordinal;
+  const bool coherent = !device_peer || (amdf_memory_profile_access_flags(
+                                             plan, query, peer_ordinal) &
+                                         AMDF_MEMORY_FLAG_HOST_COHERENT) != 0;
+  *out_description =
+      amdf_memory_describe_host_site(&host, site->value.host_access, coherent,
+                                     device_peer ? peer_description : NULL);
   return AMDF_STATUS_OK;
 }
 
@@ -1130,8 +1172,10 @@ amdf_status_t AMDF_CALL amdf_memory_scope_query_pair_info(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  status = amdf_structure_validate_output(
-      out_info, AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO, sizeof(*out_info));
+  status = amdf_structure_validate_output_extension(
+      out_info, AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO, sizeof(*out_info),
+      AMDF_STRUCTURE_TYPE_MEMORY_PAIR_ATOMICS,
+      sizeof(amdf_memory_pair_atomics_t));
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -1187,7 +1231,8 @@ amdf_status_t AMDF_CALL amdf_memory_scope_query_pair_info(
   // Match concrete pair ordering: the device supplies any SYSTEM fact before
   // the host view is described, while composition retains the query direction.
   const bool consumer_first =
-      query->producer.kind != AMDF_MEMORY_SITE_KIND_DEVICE;
+      query->producer.kind != AMDF_MEMORY_SITE_KIND_DEVICE &&
+      query->producer.kind != AMDF_MEMORY_SITE_KIND_PROGRAM;
   const amdf_memory_profile_site_t* first_site =
       consumer_first ? &query->consumer : &query->producer;
   const amdf_memory_profile_site_t* second_site =

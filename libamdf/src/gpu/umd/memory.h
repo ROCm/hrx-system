@@ -15,9 +15,42 @@
 extern "C" {
 #endif  // __cplusplus
 
+// Describes shader ordering and already-qualified atomic transactions. The
+// native provider supplies only capabilities whose program fence protocol is
+// represented by RELEASE_TO_SYSTEM/ACQUIRE_FROM_SYSTEM. An empty capability
+// table is not evidence that a provider implements that shader protocol.
+amdf_memory_site_description_t amdf_gpu_umd_memory_describe_program_site(
+    amdf_memory_access_t access, const amdf_endpoint_id_t* endpoint_id,
+    amdf_memory_atomic_capabilities_t operations);
+
 typedef struct amdf_gpu_umd_memory_t amdf_gpu_umd_memory_t;
 typedef struct amdf_gpu_umd_host_mapping_t amdf_gpu_umd_host_mapping_t;
 typedef struct amdf_gpu_umd_device_t amdf_gpu_umd_device_t;
+
+// Native integer transactions shared by the supported GPU shader ISAs. SUB
+// is expressed by ADD or CAS by the compiler, not a native subtraction atomic.
+static inline amdf_atomic_operations_t
+amdf_gpu_umd_program_atomic_integer_operations(void) {
+  return AMDF_ATOMIC_OPERATION_LOAD | AMDF_ATOMIC_OPERATION_STORE |
+         AMDF_ATOMIC_OPERATION_ADD | AMDF_ATOMIC_OPERATION_AND |
+         AMDF_ATOMIC_OPERATION_OR | AMDF_ATOMIC_OPERATION_XOR |
+         AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE |
+         AMDF_ATOMIC_OPERATION_EXCHANGE | AMDF_ATOMIC_OPERATION_FETCH_ADD |
+         AMDF_ATOMIC_OPERATION_FETCH_AND | AMDF_ATOMIC_OPERATION_FETCH_OR |
+         AMDF_ATOMIC_OPERATION_FETCH_XOR;
+}
+
+// PCIe AtomicOps supports integer FetchAdd, Swap, and CompareSwap. Ordinary
+// aligned loads/stores are qualified independently of AtomicOps route support.
+static inline amdf_atomic_operations_t
+amdf_gpu_umd_program_atomic_pcie_operations(bool supports_rmw) {
+  return AMDF_ATOMIC_OPERATION_LOAD | AMDF_ATOMIC_OPERATION_STORE |
+         (supports_rmw
+              ? AMDF_ATOMIC_OPERATION_ADD | AMDF_ATOMIC_OPERATION_FETCH_ADD |
+                    AMDF_ATOMIC_OPERATION_EXCHANGE |
+                    AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE
+              : 0);
+}
 
 // Native GPU memory properties established before publication.
 typedef struct amdf_gpu_umd_memory_result_t {

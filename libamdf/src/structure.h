@@ -30,6 +30,13 @@ amdf_status_t amdf_structure_validate_header(
     const void* structure, amdf_structure_type_t expected_type,
     uint32_t minimum_size);
 
+// Validates an output and its optional single supported extension before any
+// output bytes are changed. The extension itself must have an empty next chain.
+amdf_status_t amdf_structure_validate_output_extension(
+    const void* structure, amdf_structure_type_t expected_type,
+    uint32_t minimum_size, amdf_structure_type_t extension_type,
+    uint32_t extension_size);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

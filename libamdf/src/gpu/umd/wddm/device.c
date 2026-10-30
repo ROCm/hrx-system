@@ -103,6 +103,15 @@ amdf_status_t amdf_gpu_umd_device_create(
         endpoint->physical_adapter_index, host_allocator, &device->wkmi_adapter,
         &device->properties);
   }
+  if (amdf_status_is_ok(status)) {
+    device->memory_capabilities.program_gfx_major =
+        (uint32_t)device->properties.gfx_ip_major;
+    device->memory_capabilities.program_host_is_fabric =
+        !device->properties.is_discrete;
+    device->memory_capabilities.program_host_rmw_supported =
+        !device->properties.is_discrete ||
+        device->properties.platform_atomic_support;
+  }
 
   D3DKMT_CREATEDEVICE create_device = {0};
   create_device.hAdapter = endpoint->adapter;

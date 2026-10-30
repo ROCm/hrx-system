@@ -89,11 +89,20 @@ typedef struct amdf_memory_site_description_t {
   uint64_t release_fixed_cost_nanoseconds;
   // Fixed local acquire cost in nanoseconds when reported as known.
   uint64_t acquire_fixed_cost_nanoseconds;
+  // Exact transactions qualified independently at each width and scope.
+  amdf_memory_atomic_capabilities_t atomic_operations;
+  // Physical execution endpoint serializing device-scope shader transactions.
+  // The existing atomic_domain separately identifies system serialization.
+  amdf_memory_compatibility_domain_t device_atomic_domain;
 } amdf_memory_site_description_t;
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
+
+// Removes transactions unavailable under the established permissions.
+amdf_memory_atomic_capabilities_t amdf_memory_atomic_capabilities_filter(
+    amdf_memory_atomic_capabilities_t operations, amdf_memory_access_t access);
 
 // Describes a host view against one peer's coherence contract. Native API
 // publication and unqualified operations cannot become no-ops through

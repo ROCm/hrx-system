@@ -231,6 +231,8 @@ static amdf_status_t FakeDeviceMemoryPrepare(
       memory, access_ordinal, create_info->device_access, profile->ordinal, 0,
       native_length, device->backing_id, out_info);
   if (amdf_status_is_ok(status)) {
+    memory->accesses[access_ordinal].info.flags |=
+        create_info->required_flags & AMDF_MEMORY_ACCESS_FLAGS;
     for (uint32_t i = 1; i < group->access_count; ++i) {
       const uint32_t ordinal = group->access_ordinals[i];
       auto& member = memory->accesses[ordinal];

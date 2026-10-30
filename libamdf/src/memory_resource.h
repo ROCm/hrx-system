@@ -58,6 +58,9 @@ typedef struct amdf_memory_access_state_t {
   amdf_device_t* device;
   // Complete consumer properties established before publication.
   amdf_memory_access_info_t info;
+  // Shader transactions qualified from the resolved native policy and achieved
+  // flags. Immutable after construction; no profile query is needed on access.
+  amdf_memory_atomic_capabilities_t program_atomics;
   // Cached interface bases; info.address_kinds identifies available entries.
   uint64_t addresses[AMDF_MEMORY_ADDRESS_XDNA_FIRMWARE + 1];
   // Native operations selected before preparation begins.
@@ -67,6 +70,11 @@ typedef struct amdf_memory_access_state_t {
   amdf_status_t (*describe_site)(
       const amdf_memory_site_query_t* query,
       amdf_memory_site_description_t* out_description);
+  // Program protocol captured from the resolved native profile; NULL when the
+  // provider has no qualified program-site description.
+  amdf_memory_site_description_t (*describe_program)(
+      amdf_memory_access_t access, const amdf_device_t* device,
+      amdf_memory_atomic_capabilities_t operations);
   // Owned native state, including partial preparation, released through vtable.
   void* native;
   // Direct index of the access owning native state for this consumer. Only

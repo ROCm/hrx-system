@@ -11,8 +11,7 @@ namespace {
 
 using AqlProgramAtomicTest = GpuProgramAtomicTest<AqlDispatchTest>;
 
-TEST_P(AqlProgramAtomicTest,
-       ContendedShaderUpdatesReachTheHostBeforeCompletion) {
+TEST_P(AqlProgramAtomicTest, ContendedShaderUpdatesRespectSelectedScope) {
   GpuMemory* completion = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &completion,
@@ -36,18 +35,26 @@ TEST_P(AqlProgramAtomicTest,
                        {kProducerCount, 1, 1}},
                       0, 0, descriptor_address, arguments_->device_address,
                       completion->device_address,
-                      {aql::FenceScope::kSystem, aql::FenceScope::kNone});
+                      {aql::FenceScope::kSystem,
+                       UsesSystemScope() ? aql::FenceScope::kNone
+                                         : aql::FenceScope::kSystem});
     GpuStoreRelease(queue->host.write_index_address, index + 1);
     ASSERT_TRUE(aql::Publish(*queue, index++, packet));
-    const auto observed = WaitForRecords();
-    EXPECT_TRUE(observed);
-    if (observed) {
-      CheckRecords();
+    if (UsesSystemScope()) {
+      const auto observed = WaitForRecords();
+      EXPECT_TRUE(observed);
+      if (observed) {
+        CheckRecords();
+      }
     }
-    // Release NONE above prevents packet completion from supplying visibility.
-    // Native completion and consumption still independently protect reuse.
+    // System scope proves shader publication independently of packet release.
+    // Device scope needs the packet's release and join before CPU observation.
+    // Both retain backing until native completion and consumption join.
     ASSERT_NO_FATAL_FAILURE(
         WaitCompletionAndConsumption(*queue, signal, index));
+    if (!UsesSystemScope()) {
+      CheckRecords();
+    }
     if (HasFailure()) {
       return;
     }
@@ -56,7 +63,11 @@ TEST_P(AqlProgramAtomicTest,
   RecordProperty("program_atomic_producers", kProducerCount);
 }
 
-INSTANTIATE_TEST_SUITE_P(Width, AqlProgramAtomicTest,
-                         ::testing::Values(32u, 64u));
+INSTANTIATE_TEST_SUITE_P(
+    ScopeAndWidth, AqlProgramAtomicTest,
+    ::testing::Values(kernels::program_atomic::Variant{32, false},
+                      kernels::program_atomic::Variant{64, false},
+                      kernels::program_atomic::Variant{32, true},
+                      kernels::program_atomic::Variant{64, true}));
 
 }  // namespace
