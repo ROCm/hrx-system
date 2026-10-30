@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "amdf/amdf.h"
@@ -483,6 +484,7 @@ TEST_F(GpuEndpointTest, ReturnsQualifiedCachedProfile) {
   EXPECT_GT(info.compute.local_data_share_byte_length, 0u);
   EXPECT_GT(info.topology.xcc_count, 0u);
   EXPECT_GT(info.topology.shader_engine_count_per_xcc, 0u);
+  RecordProperty("native_unique_id", std::to_string(info.unique_id));
 
   amdf_gpu_endpoint_info_t second_info = {
       .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
@@ -491,6 +493,25 @@ TEST_F(GpuEndpointTest, ReturnsQualifiedCachedProfile) {
   ASSERT_TRUE(amdf_status_is_ok(
       gpu_api_->endpoint_query_info(endpoint_, &second_info)));
   EXPECT_EQ(std::memcmp(&info, &second_info, sizeof(info)), 0);
+
+  // Consumers compiled against the original record still receive its complete
+  // prefix. A partial new field is never written beyond their declared extent.
+  for (uint32_t size : {uint32_t(offsetof(amdf_gpu_endpoint_info_t, unique_id)),
+                        uint32_t(sizeof(info) - 1)}) {
+    amdf_gpu_endpoint_info_t prefix = {
+        .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
+        .structure_size = size,
+        .unique_id = UINT64_C(0xa5a5a5a5a5a5a5a5),
+    };
+    ASSERT_EQ(gpu_api_->endpoint_query_info(endpoint_, &prefix),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(prefix.structure_size, size);
+    EXPECT_EQ(prefix.unique_id, UINT64_C(0xa5a5a5a5a5a5a5a5));
+    prefix.structure_size = info.structure_size;
+    EXPECT_EQ(std::memcmp(&prefix, &info,
+                          offsetof(amdf_gpu_endpoint_info_t, unique_id)),
+              0);
+  }
 }
 
 TEST_F(GpuEndpointTest, RejectsMalformedOutputWithoutMutation) {

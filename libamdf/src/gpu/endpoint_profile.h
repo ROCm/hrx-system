@@ -72,6 +72,8 @@ typedef struct amdf_gpu_endpoint_properties_t {
   } gfx_ip;
   // HSA/KFD ASIC revision used for physical target selection.
   uint32_t asic_revision;
+  // Native persistent GPU or partition identifier, or zero when unavailable.
+  uint64_t unique_id;
   // Active compute geometry and per-compute-unit limits.
   struct {
     // Number of lanes in one hardware wavefront.

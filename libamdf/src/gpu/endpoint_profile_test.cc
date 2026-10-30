@@ -172,6 +172,18 @@ TEST(GpuEndpointProfileTest, QualifiesRdnaCdnaAndMultiXccProfiles) {
   }
 }
 
+TEST(GpuEndpointProfileTest, PreservesNativeIdentityIncludingUnavailable) {
+  auto properties =
+      MakeProperties(9, 4, 2, 0, 64, 304, 32, 32, 64u * 1024u, 8, 4);
+  for (uint64_t unique_id : {UINT64_C(0), UINT64_C(0xfedcba9876543210)}) {
+    properties.unique_id = unique_id;
+    amdf_gpu_endpoint_profile_t profile = {};
+    ASSERT_TRUE(amdf_gpu_endpoint_profile_initialize(&properties, &profile));
+    EXPECT_EQ(amdf_gpu_endpoint_profile_get_info(&profile)->unique_id,
+              unique_id);
+  }
+}
+
 TEST(GpuEndpointProfileTest, RejectsIncompleteOrInconsistentProperties) {
   const amdf_gpu_endpoint_properties_t valid =
       MakeProperties(12, 5, 0, 1, 32, 256, 64, 32, 320u * 1024u, 8, 2);

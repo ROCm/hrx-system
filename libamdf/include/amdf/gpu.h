@@ -104,7 +104,7 @@ enum amdf_gpu_device_feature_bits_e {
 typedef struct amdf_gpu_endpoint_info_t {
   /// Must be `AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO`.
   amdf_structure_type_t type;
-  /// Must be at least `sizeof(amdf_gpu_endpoint_info_t)`.
+  /// Caller record size; initialize to `sizeof(amdf_gpu_endpoint_info_t)`.
   uint32_t structure_size;
   /// Optional output extension chain. No extensions are currently defined.
   void* next;
@@ -143,6 +143,15 @@ typedef struct amdf_gpu_endpoint_info_t {
     /// Uniform number of shader engines within each XCC.
     uint32_t shader_engine_count_per_xcc;
   } topology;
+  /// Native persistent GPU or partition identifier, or zero when unavailable.
+  ///
+  /// Linux reports the KFD `unique_id`, the value ROCr spells as
+  /// `GPU-<16 hexadecimal digits>`. This is distinct from the instance-local
+  /// endpoint ID and the PCI address. Providers without a native identifier
+  /// return zero; no identifier is synthesized from discovery order or PCI.
+  /// Device partitioning may change the identifier. Callers selecting by this
+  /// value must reject ambiguity if a provider reports duplicate identifiers.
+  uint64_t unique_id;
 } amdf_gpu_endpoint_info_t;
 
 /// Hardware architecture family, independent of available execution services.
@@ -801,6 +810,8 @@ typedef struct amdf_gpu_api_t {
   /// its complete extension chain.
   /// Cached facts are read without locking, lazy initialization or
   /// ownership-counter updates.
+  /// Output records ending after `topology` remain accepted; `unique_id` is
+  /// written only when the complete field fits in `structure_size`.
   amdf_status_t(AMDF_CALL* endpoint_query_info)(
       amdf_endpoint_t* endpoint, amdf_gpu_endpoint_info_t* out_info);
 

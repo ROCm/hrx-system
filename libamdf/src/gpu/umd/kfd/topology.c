@@ -195,6 +195,8 @@ static amdf_status_t amdf_gpu_kfd_read_node(
   };
   uint32_t values[PROPERTY_COUNT] = {0};
   uint32_t present = 0;
+  uint64_t unique_id = 0;
+  bool unique_id_present = false;
   char text[8192];
   amdf_status_t status =
       amdf_gpu_kfd_read_attribute(directory, "properties", text, sizeof(text));
@@ -211,8 +213,16 @@ static amdf_status_t amdf_gpu_kfd_read_node(
     char* end = NULL;
     errno = 0;
     const unsigned long long value = strtoull(separator + 1, &end, 10);
-    if (errno || end == separator + 1 || *end != '\n') {
+    if (errno || separator[1] < '0' || separator[1] > '9' ||
+        end == separator + 1 || *end != '\n') {
       return amdf_linux_error(EPROTO);
+    }
+    if (strcmp(cursor, "unique_id") == 0) {
+      if (unique_id_present) {
+        return amdf_linux_error(EPROTO);
+      }
+      unique_id = (uint64_t)value;
+      unique_id_present = true;
     }
     for (uint32_t i = 0; i < PROPERTY_COUNT; ++i) {
       if (strcmp(cursor, names[i]) != 0) {
@@ -268,6 +278,7 @@ static amdf_status_t amdf_gpu_kfd_read_node(
           },
       .asic_revision = (values[CAPABILITY] & HSA_CAP_ASIC_REVISION_MASK) >>
                        HSA_CAP_ASIC_REVISION_SHIFT,
+      .unique_id = unique_id,
       .compute =
           {
               .wavefront_size = values[WAVE_SIZE],

@@ -7,6 +7,7 @@
 #include "libamdf/src/gpu/extension.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "amdf/gpu.h"
 #include "libamdf/src/gpu/clock.h"
@@ -27,7 +28,7 @@ static amdf_status_t AMDF_CALL amdf_gpu_endpoint_query_info(
   }
   const amdf_status_t validation_status = amdf_structure_validate_output(
       out_info, AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
-      (uint32_t)sizeof(amdf_gpu_endpoint_info_t));
+      (uint32_t)offsetof(amdf_gpu_endpoint_info_t, unique_id));
   if (!amdf_status_is_ok(validation_status)) {
     return validation_status;
   }
@@ -43,7 +44,10 @@ static amdf_status_t AMDF_CALL amdf_gpu_endpoint_query_info(
 
   const uint32_t structure_size = out_info->structure_size;
   void* const next = out_info->next;
-  *out_info = *amdf_gpu_endpoint_profile_get_info(profile);
+  const size_t copy_size = structure_size >= sizeof(*out_info)
+                               ? sizeof(*out_info)
+                               : offsetof(amdf_gpu_endpoint_info_t, unique_id);
+  memcpy(out_info, amdf_gpu_endpoint_profile_get_info(profile), copy_size);
   out_info->structure_size = structure_size;
   out_info->next = next;
   return AMDF_STATUS_OK;

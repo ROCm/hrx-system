@@ -242,6 +242,7 @@ TEST_F(KfdTopologyTest, DiscoversMemoryAndSdmaWithoutComputeStorageMetadata) {
                 &endpoint_, amdf_allocator_system(), &topology),
             AMDF_STATUS_OK);
   EXPECT_EQ(topology.gpu_id, 53458u);
+  EXPECT_EQ(topology.properties.unique_id, 0u);
   EXPECT_EQ(topology.properties.gfx_ip.major, 9u);
   EXPECT_EQ(topology.properties.gfx_ip.minor, 4u);
   EXPECT_EQ(topology.properties.gfx_ip.stepping, 2u);
@@ -264,6 +265,35 @@ TEST_F(KfdTopologyTest, DiscoversMemoryAndSdmaWithoutComputeStorageMetadata) {
   EXPECT_EQ(topology.context_save_restore_byte_length, 0u);
   EXPECT_EQ(topology.control_stack_byte_length, 0u);
   amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
+}
+
+TEST_F(KfdTopologyTest, PreservesFullWidthNativeUniqueId) {
+  for (uint64_t unique_id :
+       {UINT64_C(0), UINT64_C(0xfedcba9876543210), UINT64_MAX}) {
+    const std::string properties =
+        "unique_id " + std::to_string(unique_id) + "\n";
+    WriteProperties(properties.c_str());
+    amdf_gpu_kfd_topology_t topology = {};
+    ASSERT_EQ(amdf_gpu_kfd_topology_initialize(
+                  &endpoint_, amdf_allocator_system(), &topology),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(topology.properties.unique_id, unique_id);
+    amdf_gpu_kfd_topology_deinitialize(&topology, amdf_allocator_system());
+  }
+}
+
+TEST_F(KfdTopologyTest, RejectsMalformedOrDuplicateNativeUniqueId) {
+  for (const char* properties :
+       {"unique_id -1\n", "unique_id 18446744073709551616\n",
+        "unique_id 1tail\n", "unique_id 0\nunique_id 1\n"}) {
+    SCOPED_TRACE(properties);
+    WriteProperties(properties);
+    amdf_gpu_kfd_topology_t topology = {.gpu_id = 123};
+    EXPECT_EQ(amdf_gpu_kfd_topology_initialize(
+                  &endpoint_, amdf_allocator_system(), &topology),
+              amdf_linux_error(EPROTO));
+    EXPECT_EQ(topology.gpu_id, 123u);
+  }
 }
 
 TEST_F(KfdTopologyTest, LocalAdmissionUsesInitializedAllocationDomains) {

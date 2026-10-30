@@ -211,6 +211,7 @@ bool amdf_gpu_endpoint_profile_initialize(
   profile.info.gfx_ip.minor = properties->gfx_ip.minor;
   profile.info.gfx_ip.stepping = properties->gfx_ip.stepping;
   profile.info.asic_revision = properties->asic_revision;
+  profile.info.unique_id = properties->unique_id;
   profile.info.compute.wavefront_size = properties->compute.wavefront_size;
   profile.info.compute.compute_unit_count =
       properties->compute.compute_unit_count;
