@@ -410,7 +410,8 @@ void iree_hal_vulkan_atomic_record_command(
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_ATOMIC,
       .target_access_mask = has_release ? atomic_access_mask : 0,
   };
-  iree_hal_vulkan_barrier_record(syms, command_buffer, &pre_barrier);
+  iree_hal_vulkan_barrier_record(syms, VK_QUEUE_COMPUTE_BIT, command_buffer,
+                                 &pre_barrier);
 
   iree_hal_vulkan_atomic_record(pipelines, command_buffer, target_address,
                                 record_flags, params);
@@ -427,5 +428,6 @@ void iree_hal_vulkan_atomic_record_command(
               ? iree_hal_vulkan_barrier_target_access_mask(target_stage_mask)
               : 0,
   };
-  iree_hal_vulkan_barrier_record(syms, command_buffer, &post_barrier);
+  iree_hal_vulkan_barrier_record(syms, VK_QUEUE_COMPUTE_BIT, command_buffer,
+                                 &post_barrier);
 }

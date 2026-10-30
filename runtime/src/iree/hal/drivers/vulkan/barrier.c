@@ -106,7 +106,8 @@ iree_hal_vulkan_queue_barriers_t iree_hal_vulkan_queue_barriers_resolve(
 
 static VkPipelineStageFlags2
 iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
-    iree_hal_execution_stage_t stage_mask, VkAccessFlags2 access_mask) {
+    VkQueueFlags queue_flags, iree_hal_execution_stage_t stage_mask,
+    VkAccessFlags2 access_mask) {
   VkPipelineStageFlags2 pipeline_stage_mask = 0;
   if (iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS)) {
     pipeline_stage_mask |= VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
@@ -119,24 +120,25 @@ iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
   }
   if (iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_TRANSFER)) {
     pipeline_stage_mask |= VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    if (iree_any_bit_set(queue_flags, VK_QUEUE_COMPUTE_BIT)) {
+      // Unaligned fills and updates execute compute patches in the logical
+      // transfer domain. Their accesses participate in the same dependency.
+      pipeline_stage_mask |= VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    }
   }
   if (iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_HOST)) {
     pipeline_stage_mask |= VK_PIPELINE_STAGE_2_HOST_BIT;
   }
-  if (pipeline_stage_mask) {
-    return pipeline_stage_mask;
-  }
-
-  if (access_mask) {
+  if (!pipeline_stage_mask && access_mask) {
     return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
   }
   if (iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE)) {
-    return VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+    pipeline_stage_mask |= VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
   }
   if (iree_any_bit_set(stage_mask, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE)) {
-    return VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+    pipeline_stage_mask |= VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
   }
-  return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+  return pipeline_stage_mask;
 }
 
 VkAccessFlags2 iree_hal_vulkan_barrier_source_access_mask(
@@ -217,7 +219,25 @@ VkAccessFlags2 iree_hal_vulkan_access_scope_mask(
   return access_mask;
 }
 
+static VkAccessFlags2 iree_hal_vulkan_transfer_access_mask(
+    VkQueueFlags queue_flags, VkAccessFlags2 access_mask, bool is_target) {
+  if (iree_any_bit_set(queue_flags, VK_QUEUE_COMPUTE_BIT)) {
+    if (iree_any_bit_set(access_mask, VK_ACCESS_2_TRANSFER_READ_BIT)) {
+      access_mask |= VK_ACCESS_2_SHADER_READ_BIT;
+    }
+    if (iree_any_bit_set(access_mask, VK_ACCESS_2_TRANSFER_WRITE_BIT)) {
+      access_mask |= VK_ACCESS_2_SHADER_WRITE_BIT;
+      if (is_target) {
+        // Partial-word patches preserve neighboring bytes with atomic RMWs.
+        access_mask |= VK_ACCESS_2_SHADER_READ_BIT;
+      }
+    }
+  }
+  return access_mask;
+}
+
 void iree_hal_vulkan_barrier_record(const iree_hal_vulkan_device_syms_t* syms,
+                                    VkQueueFlags queue_flags,
                                     VkCommandBuffer command_buffer,
                                     const iree_hal_vulkan_barrier_t* barrier) {
   if (iree_hal_vulkan_barrier_is_empty(barrier)) {
@@ -227,12 +247,16 @@ void iree_hal_vulkan_barrier_record(const iree_hal_vulkan_device_syms_t* syms,
       .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
       .srcStageMask =
           iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
-              barrier->source_stage_mask, barrier->source_access_mask),
-      .srcAccessMask = barrier->source_access_mask,
+              queue_flags, barrier->source_stage_mask,
+              barrier->source_access_mask),
+      .srcAccessMask = iree_hal_vulkan_transfer_access_mask(
+          queue_flags, barrier->source_access_mask, /*is_target=*/false),
       .dstStageMask =
           iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
-              barrier->target_stage_mask, barrier->target_access_mask),
-      .dstAccessMask = barrier->target_access_mask,
+              queue_flags, barrier->target_stage_mask,
+              barrier->target_access_mask),
+      .dstAccessMask = iree_hal_vulkan_transfer_access_mask(
+          queue_flags, barrier->target_access_mask, /*is_target=*/true),
   };
   VkDependencyInfo dependency_info = {
       .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
@@ -244,9 +268,9 @@ void iree_hal_vulkan_barrier_record(const iree_hal_vulkan_device_syms_t* syms,
 }
 
 void iree_hal_vulkan_buffer_barrier_record(
-    const iree_hal_vulkan_device_syms_t* syms, VkCommandBuffer command_buffer,
-    const iree_hal_vulkan_barrier_t* barrier, VkBuffer buffer,
-    VkDeviceSize offset, VkDeviceSize length) {
+    const iree_hal_vulkan_device_syms_t* syms, VkQueueFlags queue_flags,
+    VkCommandBuffer command_buffer, const iree_hal_vulkan_barrier_t* barrier,
+    VkBuffer buffer, VkDeviceSize offset, VkDeviceSize length) {
   if (iree_hal_vulkan_barrier_is_empty(barrier)) {
     return;
   }
@@ -254,12 +278,16 @@ void iree_hal_vulkan_buffer_barrier_record(
       .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
       .srcStageMask =
           iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
-              barrier->source_stage_mask, barrier->source_access_mask),
-      .srcAccessMask = barrier->source_access_mask,
+              queue_flags, barrier->source_stage_mask,
+              barrier->source_access_mask),
+      .srcAccessMask = iree_hal_vulkan_transfer_access_mask(
+          queue_flags, barrier->source_access_mask, /*is_target=*/false),
       .dstStageMask =
           iree_hal_vulkan_pipeline_stage_mask_from_hal_execution_stage(
-              barrier->target_stage_mask, barrier->target_access_mask),
-      .dstAccessMask = barrier->target_access_mask,
+              queue_flags, barrier->target_stage_mask,
+              barrier->target_access_mask),
+      .dstAccessMask = iree_hal_vulkan_transfer_access_mask(
+          queue_flags, barrier->target_access_mask, /*is_target=*/true),
       .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
       .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
       .buffer = buffer,

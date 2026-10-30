@@ -4203,7 +4203,7 @@ static iree_status_t iree_hal_vulkan_queue_record_fill_native(
       &begin_info));
   iree_hal_vulkan_queue_profile_reset_native_timestamps(queue, submission);
   iree_hal_vulkan_queue_profile_write_timestamp_begin(queue, submission);
-  iree_hal_vulkan_barrier_record(&queue->syms,
+  iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                  submission->native_command_buffer,
                                  &submission->barriers.before);
   VkDeviceSize fill_offset = target.offset;
@@ -4242,7 +4242,7 @@ static iree_status_t iree_hal_vulkan_queue_record_fill_native(
                          submission->native_command_buffer, target.handle,
                          fill_offset, fill_length, pattern);
   }
-  iree_hal_vulkan_barrier_record(&queue->syms,
+  iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                  submission->native_command_buffer,
                                  &submission->barriers.after);
   iree_hal_vulkan_queue_profile_write_timestamp_end(queue, submission);
@@ -4356,7 +4356,7 @@ static iree_status_t iree_hal_vulkan_queue_record_update_native(
       &begin_info));
   iree_hal_vulkan_queue_profile_reset_native_timestamps(queue, submission);
   iree_hal_vulkan_queue_profile_write_timestamp_begin(queue, submission);
-  iree_hal_vulkan_barrier_record(&queue->syms,
+  iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                  submission->native_command_buffer,
                                  &submission->barriers.before);
   VkDeviceSize update_offset = (VkDeviceSize)target_offset;
@@ -4388,7 +4388,7 @@ static iree_status_t iree_hal_vulkan_queue_record_update_native(
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_queue_record_update_chunks(
       queue, submission->native_command_buffer, target_handle, update_offset,
       update_length, submission->update.source_data, source_data_offset));
-  iree_hal_vulkan_barrier_record(&queue->syms,
+  iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                  submission->native_command_buffer,
                                  &submission->barriers.after);
   iree_hal_vulkan_queue_profile_write_timestamp_end(queue, submission);
@@ -4471,7 +4471,7 @@ static iree_status_t iree_hal_vulkan_queue_record_copy_native_buffers(
   if (submission) {
     iree_hal_vulkan_queue_profile_reset_native_timestamps(queue, submission);
     iree_hal_vulkan_queue_profile_write_timestamp_begin(queue, submission);
-    iree_hal_vulkan_barrier_record(&queue->syms,
+    iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                    submission->native_command_buffer,
                                    &submission->barriers.before);
   }
@@ -4484,7 +4484,7 @@ static iree_status_t iree_hal_vulkan_queue_record_copy_native_buffers(
                        source_handle, target_handle, /*regionCount=*/1,
                        &copy_region);
   if (submission) {
-    iree_hal_vulkan_barrier_record(&queue->syms,
+    iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                    submission->native_command_buffer,
                                    &submission->barriers.after);
     iree_hal_vulkan_queue_profile_write_timestamp_end(queue, submission);
@@ -4520,7 +4520,7 @@ static iree_status_t iree_hal_vulkan_queue_record_transfer_native(
       &begin_info));
   iree_hal_vulkan_queue_profile_reset_native_timestamps(queue, submission);
   iree_hal_vulkan_queue_profile_write_timestamp_begin(queue, submission);
-  iree_hal_vulkan_barrier_record(&queue->syms,
+  iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                  submission->native_command_buffer,
                                  &submission->barriers.before);
 
@@ -4603,7 +4603,7 @@ static iree_status_t iree_hal_vulkan_queue_record_transfer_native(
     }
   }
   if (iree_status_is_ok(status)) {
-    iree_hal_vulkan_barrier_record(&queue->syms,
+    iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                    submission->native_command_buffer,
                                    &submission->barriers.after);
     iree_hal_vulkan_queue_profile_write_timestamp_end(queue, submission);
@@ -6024,10 +6024,10 @@ static iree_status_t iree_hal_vulkan_queue_record_barrier_native(
   IREE_RETURN_IF_ERROR(iree_vkBeginCommandBuffer(
       IREE_VULKAN_DEVICE(&queue->syms), submission->native_command_buffer,
       &begin_info));
-  iree_hal_vulkan_barrier_record(&queue->syms,
+  iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                  submission->native_command_buffer,
                                  &submission->barriers.before);
-  iree_hal_vulkan_barrier_record(&queue->syms,
+  iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                  submission->native_command_buffer,
                                  &submission->barriers.after);
   return iree_vkEndCommandBuffer(IREE_VULKAN_DEVICE(&queue->syms),
@@ -8687,7 +8687,7 @@ static iree_status_t iree_hal_vulkan_queue_record_dispatch_bda_native(
                                  &dependency_info);
     }
     iree_hal_vulkan_queue_profile_write_timestamp_begin(queue, submission);
-    iree_hal_vulkan_barrier_record(&queue->syms,
+    iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                    submission->native_command_buffer,
                                    &submission->barriers.before);
     iree_hal_vulkan_bda_dispatch_root_v1_t root = {
@@ -8742,7 +8742,7 @@ static iree_status_t iree_hal_vulkan_queue_record_dispatch_bda_native(
                                 submission->profile.query_pool,
                                 submission->profile.dispatch_base_query + 1);
     }
-    iree_hal_vulkan_barrier_record(&queue->syms,
+    iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                    submission->native_command_buffer,
                                    &submission->barriers.after);
     iree_hal_vulkan_queue_profile_write_timestamp_end(queue, submission);
@@ -8788,14 +8788,14 @@ static iree_status_t iree_hal_vulkan_queue_record_atomic_native(
       &begin_info));
   iree_hal_vulkan_queue_profile_reset_native_timestamps(queue, submission);
   iree_hal_vulkan_queue_profile_write_timestamp_begin(queue, submission);
-  iree_hal_vulkan_barrier_record(&queue->syms,
+  iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                  submission->native_command_buffer,
                                  &submission->barriers.before);
   iree_hal_vulkan_atomic_record(
       &queue->builtins->atomic_pipelines, submission->native_command_buffer,
       target_address, IREE_HAL_VULKAN_ATOMIC_RECORD_FLAG_NONE,
       submission->atomic.params);
-  iree_hal_vulkan_barrier_record(&queue->syms,
+  iree_hal_vulkan_barrier_record(&queue->syms, queue->queue_flags,
                                  submission->native_command_buffer,
                                  &submission->barriers.after);
   iree_hal_vulkan_queue_profile_write_timestamp_end(queue, submission);
