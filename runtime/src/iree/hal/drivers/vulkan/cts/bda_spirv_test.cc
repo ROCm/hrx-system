@@ -1873,37 +1873,20 @@ TEST_P(BdaSpirvReplayCacheTest, ConcurrentExecutionsForkCachedNativeReplay) {
   IREE_ASSERT_OK(iree_hal_device_trim(device_));
   ASSERT_EQ(0, NativeReplayCacheStats().instance_count);
 
-  static constexpr uint32_t kLargeDispatchElementCount = 8 * 1024 * 1024;
-  const iree_device_size_t dispatch_byte_length =
-      kLargeDispatchElementCount * sizeof(int32_t);
-
   Ref<iree_hal_buffer_t> input_buffer;
-  IREE_ASSERT_OK(
-      CreateZeroedDeviceBuffer(dispatch_byte_length, input_buffer.out()));
   Ref<iree_hal_buffer_t> output_a_buffer;
-  IREE_ASSERT_OK(
-      CreateZeroedDeviceBuffer(dispatch_byte_length, output_a_buffer.out()));
+  CreateInputOutputBuffers(&input_buffer, &output_a_buffer);
   Ref<iree_hal_buffer_t> output_b_buffer;
   IREE_ASSERT_OK(
-      CreateZeroedDeviceBuffer(dispatch_byte_length, output_b_buffer.out()));
-
-  const int32_t input_pattern = 5;
-  SemaphoreList fill_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_fill(
-      transfer_queue_, iree_hal_semaphore_list_empty(), fill_signal,
-      input_buffer.get(), /*target_offset=*/0, dispatch_byte_length,
-      &input_pattern, sizeof(input_pattern), /*barriers=*/NULL,
-      IREE_HAL_FILL_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-      fill_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+      CreateZeroedDeviceBuffer(kDispatchByteLength, output_b_buffer.out()));
 
   Ref<iree_hal_buffer_t> timestamps_a;
   Ref<iree_hal_buffer_t> timestamps_b;
   CreateTimestampBuffer(&timestamps_a);
   CreateTimestampBuffer(&timestamps_b);
   Ref<iree_hal_command_buffer_t> command_buffer;
-  CreateIndirectDispatchCommandBuffer(kLargeDispatchElementCount,
-                                      &command_buffer, timestamps_a != nullptr);
+  CreateIndirectDispatchCommandBuffer(kElementCount, &command_buffer,
+                                      timestamps_a != nullptr);
 
   iree_hal_buffer_binding_t binding_table_a_entries[3];
   iree_hal_buffer_binding_table_t binding_table_a =
@@ -1918,28 +1901,50 @@ TEST_P(BdaSpirvReplayCacheTest, ConcurrentExecutionsForkCachedNativeReplay) {
   const uint64_t initial_fork_count = NativeReplayCacheStats().fork_count;
   iree_hal_queue_t* queue = QueueForCommandBuffer(command_buffer.get());
   ASSERT_NE(nullptr, queue);
-  SemaphoreList execute_a_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_execute(
-      queue, iree_hal_semaphore_list_empty(), execute_a_signal,
-      command_buffer.get(), binding_table_a, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
-  SemaphoreList execute_b_signal(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_execute(
-      queue, iree_hal_semaphore_list_empty(), execute_b_signal,
-      command_buffer.get(), binding_table_b, IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
-
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-      execute_a_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
-      execute_b_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
-  ExpectFilledOutputPrefix(output_a_buffer.get(), /*expected_value=*/12);
-  ExpectFilledOutputPrefix(output_b_buffer.get(), /*expected_value=*/12);
+  SemaphoreList signals(device_, {0, 0}, {1, 1});
+  const iree_hal_buffer_binding_table_t tables[] = {binding_table_a,
+                                                    binding_table_b};
+  // A native timeline wait covers later submissions at ALL_COMMANDS. Both HAL
+  // invocations must therefore retain independent replay instances until the
+  // host opens the gate, regardless of shader duration or CPU scheduling.
+  ScopedVulkanQueueGate gate(queue);
+  IREE_ASSERT_OK(gate.Begin());
+  iree_status_t status = iree_ok_status();
+  iree_host_size_t submitted_count = 0;
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(tables) && iree_status_is_ok(status); ++i) {
+    const iree_hal_semaphore_list_t signal = {
+        .count = 1,
+        .semaphores = &signals.semaphores[i],
+        .payload_values = &signals.payload_values[i],
+    };
+    status = iree_hal_queue_execute(queue, iree_hal_semaphore_list_empty(),
+                                    signal, command_buffer, tables[i],
+                                    IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
+    if (iree_status_is_ok(status)) {
+      ++submitted_count;
+    }
+  }
+  const auto busy_stats = NativeReplayCacheStats();
+  gate.Open();
+  const iree_hal_semaphore_list_t submitted = {
+      .count = submitted_count,
+      .semaphores = signals.semaphores.data(),
+      .payload_values = signals.payload_values.data(),
+  };
+  status = iree_status_join(
+      status, iree_hal_semaphore_list_wait(submitted, iree_infinite_timeout(),
+                                           IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(status);
+  ExpectOutput(output_a_buffer.get());
+  ExpectOutput(output_b_buffer.get());
 
   CheckTimestamps(timestamps_a);
   CheckTimestamps(timestamps_b);
 
-  EXPECT_GE(NativeReplayCacheStats().create_count - initial_create_count, 2);
-  EXPECT_GE(NativeReplayCacheStats().fork_count - initial_fork_count, 1);
-  EXPECT_GE(NativeReplayCacheStats().peak_instance_count, 2);
+  EXPECT_EQ(busy_stats.create_count - initial_create_count, 2);
+  EXPECT_EQ(busy_stats.fork_count - initial_fork_count, 1);
+  EXPECT_EQ(busy_stats.instance_count, 2);
 
   IREE_ASSERT_OK(iree_hal_device_trim(device_));
   EXPECT_EQ(0, NativeReplayCacheStats().instance_count);
