@@ -44,6 +44,8 @@ typedef struct loom_kernel_request_access_cache_t {
 struct loom_kernel_request_source_t {
   // Callback-live boundary classifier over the materialized source module.
   loom_kernel_class_classifier_t classifier;
+  // Existing source provider catalog, borrowed by canonical effect analysis.
+  loom_template_provider_catalog_t providers;
   // Callback-live demand cache; its graphs never survive an individual query.
   loom_kernel_request_access_cache_t* storage_access;
 };
@@ -113,6 +115,7 @@ iree_status_t loom_kernel_request_require_storage_access(
   iree_arena_initialize(cache->block_pool, &arena);
   loom_storage_access_scope_t scope;
   loom_storage_access_scope_initialize(module, &arena, &scope);
+  scope.providers = &request->source->providers;
   loom_storage_access_binding_t* bindings = NULL;
   iree_status_t status =
       iree_arena_allocate_array(&arena, collection->accepted_decision_count,
@@ -307,17 +310,17 @@ static iree_status_t loom_kernel_request_source_prepare(
   }
   loom_symbol_fact_table_t symbol_facts = {0};
   loom_symbol_fact_table_initialize(&symbol_facts, scratch_arena);
-  loom_template_provider_catalog_t providers = {0};
-  loom_template_provider_catalog_initialize(&providers, scratch_arena);
+  loom_template_provider_catalog_t* providers = &out_source->providers;
+  loom_template_provider_catalog_initialize(providers, scratch_arena);
   if (iree_status_is_ok(status)) {
     status = loom_template_provider_catalog_build(
-        &providers, materialization.product.module, &symbol_facts,
+        providers, materialization.product.module, &symbol_facts,
         external_candidates.providers, external_candidates.count);
   }
   loom_template_decision_model_catalog_t decision_models = {0};
   if (iree_status_is_ok(status)) {
     status = loom_template_decision_model_catalog_build(
-        materialization.product.module, &symbol_facts, &references, &providers,
+        materialization.product.module, &symbol_facts, &references, providers,
         scratch_arena, &decision_models);
   }
 

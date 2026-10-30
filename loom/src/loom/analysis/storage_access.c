@@ -9,10 +9,12 @@
 #include <string.h>
 
 #include "loom/analysis/movement.h"
+#include "loom/analysis/template_provider_catalog.h"
 #include "loom/analysis/value_relation.h"
 #include "loom/ir/context.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/ops/template/ops.h"
 #include "loom/util/walk.h"
 
 typedef struct loom_storage_access_caller_t {
@@ -88,8 +90,8 @@ static bool loom_storage_access_is_reference(const loom_module_t* module,
 static loom_func_like_t loom_storage_access_call_function(
     const loom_module_t* module, loom_call_like_t call) {
   // An exact template call already names its implementation. Its body shares
-  // the ordinary source-call argument contract; unresolved template selection
-  // remains opaque and never enters the reached-body graph.
+  // the ordinary source-call argument contract. Unresolved applications use
+  // their provider catalog in the visitor instead of naming one implementation.
   if (loom_call_like_is_direct_semantic(call) ||
       loom_call_like_kind(call) == LOOM_CALL_LIKE_KIND_TEMPLATE) {
     const loom_symbol_ref_t callee = loom_call_like_callee(call);
@@ -393,6 +395,39 @@ static void loom_storage_access_mark_unbounded(
   state->last_unbounded = function;
 }
 
+static iree_status_t loom_storage_access_add_call(
+    loom_storage_access_state_t* state, loom_op_t* op,
+    loom_func_like_t function, loom_value_slice_t arguments,
+    uint16_t argument_offset) {
+  loom_storage_access_function_record_t* callee_record = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_storage_access_enqueue_function(state, function, &callee_record));
+  loom_storage_access_caller_t* caller = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(state->scope->arena, sizeof(*caller),
+                                           (void**)&caller));
+  *caller = (loom_storage_access_caller_t){.function = state->current,
+                                           .next = callee_record->callers};
+  callee_record->callers = caller;
+  if (callee_record->graph.has_unbounded_memory_access) {
+    loom_storage_access_mark_unbounded(state, state->current);
+  }
+  for (uint16_t i = 0; i < arguments.count; ++i) {
+    loom_storage_reference_t* formal = callee_record->graph.arguments[i];
+    if (!formal) {
+      continue;
+    }
+    loom_storage_reference_t* actual = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_storage_access_reference(state, arguments.values[i], &actual));
+    IREE_RETURN_IF_ERROR(
+        loom_storage_access_add_edge(state, actual, formal, 0));
+    IREE_RETURN_IF_ERROR(loom_storage_access_record_use(
+        state, op, arguments.values[i], 0, formal));
+    state->operand_effects[argument_offset + i] = 0;
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_storage_access_visit(
     void* user_data, loom_op_t* op, const loom_walk_context_t* context,
     loom_walk_result_t* out_result) {
@@ -426,7 +461,6 @@ static iree_status_t loom_storage_access_visit(
            op->operand_count * sizeof(*state->operand_effects));
   }
   const loom_call_like_t call = loom_call_like_cast(module, op);
-  loom_storage_access_function_record_t* callee_record = NULL;
   loom_func_like_t function = loom_storage_access_call_function(module, call);
   loom_value_slice_t arguments = loom_call_like_operands(call);
   uint16_t argument_offset = loom_call_like_operand_offset(call);
@@ -443,36 +477,41 @@ static iree_status_t loom_storage_access_visit(
       };
     }
   }
-  if (loom_func_like_isa(function)) {
-    IREE_RETURN_IF_ERROR(
-        loom_storage_access_enqueue_function(state, function, &callee_record));
-  }
   // Calls cannot access fresh caller storage without receiving a reference.
   // Opaque calls keep the default escape effect on each exposed operand;
   // ambient effects in a callee do not reach an unexposed caller root.
-  if (callee_record) {
-    loom_storage_access_caller_t* caller = NULL;
-    IREE_RETURN_IF_ERROR(iree_arena_allocate(state->scope->arena,
-                                             sizeof(*caller), (void**)&caller));
-    *caller = (loom_storage_access_caller_t){.function = state->current,
-                                             .next = callee_record->callers};
-    callee_record->callers = caller;
-    if (callee_record->graph.has_unbounded_memory_access) {
-      loom_storage_access_mark_unbounded(state, state->current);
-    }
-    for (uint16_t i = 0; i < arguments.count; ++i) {
-      loom_storage_reference_t* formal = callee_record->graph.arguments[i];
-      if (!formal) {
+  if (loom_func_like_isa(function)) {
+    IREE_RETURN_IF_ERROR(loom_storage_access_add_call(
+        state, op, function, arguments, argument_offset));
+  } else if (loom_template_apply_isa(op) && state->scope->providers) {
+    const loom_template_provider_slice_t providers =
+        loom_template_provider_catalog_lookup(state->scope->providers,
+                                              loom_template_apply_family(op));
+    const loom_value_slice_t operands = loom_template_apply_operands(op);
+    const uint16_t offset =
+        (uint16_t)(operands.values - loom_op_const_operands(op));
+    bool has_opaque_callee = providers.count == 0;
+    iree_status_t status = iree_ok_status();
+    for (iree_host_size_t i = 0;
+         iree_status_is_ok(status) && i < providers.count; ++i) {
+      const loom_template_provider_summary_t* provider =
+          &providers.providers[i];
+      if (provider->module != module ||
+          !loom_func_like_isa(provider->function) ||
+          loom_func_like_repr_contract(provider->function) !=
+              LOOM_STRING_ID_INVALID ||
+          !loom_func_like_body(provider->function)) {
+        has_opaque_callee = true;
         continue;
       }
-      loom_storage_reference_t* actual = NULL;
-      IREE_RETURN_IF_ERROR(
-          loom_storage_access_reference(state, arguments.values[i], &actual));
-      IREE_RETURN_IF_ERROR(
-          loom_storage_access_add_edge(state, actual, formal, 0));
-      IREE_RETURN_IF_ERROR(loom_storage_access_record_use(
-          state, op, arguments.values[i], 0, formal));
-      state->operand_effects[argument_offset + i] = 0;
+      status = loom_storage_access_add_call(state, op, provider->function,
+                                            operands, offset);
+    }
+    IREE_RETURN_IF_ERROR(status);
+    if (has_opaque_callee) {
+      loom_storage_access_mark_unbounded(state, state->current);
+      memset(state->operand_effects, LOOM_STORAGE_ACCESS_ESCAPE,
+             op->operand_count * sizeof(*state->operand_effects));
     }
   } else if (loom_call_like_isa(call)) {
     if (iree_any_bit_set(traits, LOOM_TRAIT_READS_MEMORY |

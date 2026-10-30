@@ -474,3 +474,137 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   cmd.dispatch.direct<%55, %57>[%64, %64, %64](%53, %58, %61)
   return
 }
+
+// ====
+
+// Conditional and nested applications retain every possible provider's effects.
+// The unknown higher-priority writer must contribute alongside the reader,
+// while neither can touch the two clocks outside the payload view.
+// RUN: emit command-program @residual_effects publish-kernels
+
+template.decl @access(%write: i1, %payload: view<1xi64>)
+
+template.def<@access> priority(2) @writer(%write: i1, %payload: view<1xi64>) where [eq(%write, 1)] {
+  %value = scalar.constant 42 : i64
+  view.store %value, %payload[0] : i64, view<1xi64>
+  template.return
+}
+
+template.def<@access> priority(1) @reader(%write: i1, %payload: view<1xi64>) {
+  %value = view.load %payload[0] : view<1xi64> -> i64
+  template.return
+}
+
+template.decl @relay(%write: i1, %payload: view<1xi64>)
+
+template.def<@relay> @relay_impl(%write: i1, %payload: view<1xi64>) {
+  template.apply<@access>(%write, %payload) : (i1, view<1xi64>)
+  template.return
+}
+
+kernel.def @work() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%control: view<2xi32>, %payload: view<1xi64>) {
+  %inactive = scalar.constant 0 : i32
+  %active_word = view.load %control[0] : view<2xi32> -> i32
+  %write_word = view.load %control[1] : view<2xi32> -> i32
+  %active = scalar.cmpi ne, %active_word, %inactive : i32
+  %write = scalar.cmpi ne, %write_word, %inactive : i32
+  scf.if %active {
+    template.apply<@relay>(%write, %payload) : (i1, view<1xi64>)
+  }
+  kernel.return
+}
+
+command.def public @residual_effects() launch(%bank: buffer) {
+  %begin_origin = index.constant 0 : offset
+  %end_origin = index.constant 8 : offset
+  %control_origin = index.constant 16 : offset
+  %prefix = index.constant 32 : offset
+  %begin = buffer.view %bank[%begin_origin] : buffer -> view<1xi64>
+  %end = buffer.view %bank[%end_origin] : buffer -> view<1xi64>
+  %control = buffer.view %bank[%control_origin] : buffer -> view<2xi32>
+  %payload = buffer.view %bank[%prefix] : buffer -> view<1xi64>
+  command.timestamp %begin : view<1xi64>
+  kernel.launch @work(%control, %payload) : (view<2xi32>, view<1xi64>)
+  command.timestamp %end : view<1xi64>
+  kernel.launch @work(%control, %payload) : (view<2xi32>, view<1xi64>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @residual_effects() asm {
+  %24 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %25 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %26 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %27 = cmd.constant.u64 0
+  %28 = cmd.constant.u64 -1
+  %29 = cmd.constant.u64 8
+  %30 = cmd.constant.u64 16
+  %31 = cmd.constant.u64 32
+  %32 = cmd.buffer.ref.binding %24, %31, %29
+  %33 = cmd.memory.buffer %32 {source = ["dispatch_write"], target = ["dispatch_read", "dispatch_write"]}
+  %34 = cmd.buffer.ref.binding %24, %27, %29
+  cmd.timestamp %34
+  %35 = cmd.constant.u32 1
+  cmd.dispatch.direct.barrier<%25, %26>[%35, %35, %35](%24, %30, %29, %24, %31, %29)
+  %36 = cmd.buffer.ref.binding %24, %29, %29
+  cmd.timestamp.barrier %36
+  cmd.barrier(%33) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  cmd.dispatch.direct<%25, %26>[%35, %35, %35](%24, %30, %29, %24, %31, %29)
+  return
+}
+
+// ====
+
+// An unavailable provider body prevents a bounded effect proof even when a
+// generic reader is available. The unknown alternative could write globals.
+// RUN: emit command-program @opaque_alternative publish-kernels
+
+template.decl @access(%mode: i32, %payload: view<1xi64>)
+
+template.ukernel<@access> priority(2) @native(%mode: i32, %payload: view<1xi64>) where [eq(%mode, 1)]
+
+template.def<@access> priority(1) @reader(%mode: i32, %payload: view<1xi64>) {
+  %value = view.load %payload[0] : view<1xi64> -> i64
+  template.return
+}
+
+kernel.def @work() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%payload: view<1xi64>) {
+  %value = view.load %payload[0] : view<1xi64> -> i64
+  %mode = scalar.trunci %value : i64 to i32
+  template.apply<@access>(%mode, %payload) : (i32, view<1xi64>)
+  kernel.return
+}
+
+command.def public @opaque_alternative() launch(%bank: buffer) {
+  %origin = index.constant 0 : offset
+  %prefix = index.constant 32 : offset
+  %clock = buffer.view %bank[%origin] : buffer -> view<1xi64>
+  %payload = buffer.view %bank[%prefix] : buffer -> view<1xi64>
+  command.timestamp %clock : view<1xi64>
+  kernel.launch @work(%payload) : (view<1xi64>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @opaque_alternative() asm {
+  %14 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %15 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %16 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %17 = cmd.constant.u64 0
+  %18 = cmd.constant.u64 -1
+  %19 = cmd.constant.u64 8
+  %20 = cmd.constant.u64 32
+  %21 = cmd.memory.global {source = ["transfer_write"], target = ["dispatch_read", "dispatch_write"]}
+  %22 = cmd.buffer.ref.binding %14, %17, %19
+  cmd.timestamp %22
+  cmd.barrier(%21) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  %23 = cmd.constant.u32 1
+  cmd.dispatch.direct<%15, %16>[%23, %23, %23](%14, %20, %19)
+  return
+}
