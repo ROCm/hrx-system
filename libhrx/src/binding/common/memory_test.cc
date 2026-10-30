@@ -24,7 +24,7 @@
 #include "libhrx/src/libhrx/device.h"
 
 #if defined(IREE_PLATFORM_LINUX)
-static std::atomic<bool> g_fail_next_memory_barrier = false;
+static std::atomic<bool> g_fail_next_system_release = false;
 
 extern "C" iree_status_t __real_iree_hal_command_buffer_barrier(
     iree_hal_command_buffer_t* command_buffer,
@@ -33,7 +33,9 @@ extern "C" iree_status_t __real_iree_hal_command_buffer_barrier(
 extern "C" iree_status_t __wrap_iree_hal_command_buffer_barrier(
     iree_hal_command_buffer_t* command_buffer,
     const iree_hal_barrier_t* barrier) {
-  if (g_fail_next_memory_barrier.exchange(false, std::memory_order_acq_rel)) {
+  if (iree_any_bit_set(barrier->flags,
+                       IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE) &&
+      g_fail_next_system_release.exchange(false, std::memory_order_acq_rel)) {
     return iree_make_status(IREE_STATUS_ABORTED,
                             "injected post-copy barrier failure");
   }
@@ -891,7 +893,7 @@ TEST_F(CpuStreamingMemoryTest,
   uint64_t gate_value = 1;
   fault_queue.execute_gate = gate;
   fault_queue.execute_gate_value = gate_value;
-  g_fail_next_memory_barrier.store(true, std::memory_order_release);
+  g_fail_next_system_release.store(true, std::memory_order_release);
 
   std::atomic<bool> copy_returned = false;
   std::atomic<iree_status_code_t> copy_status_code = IREE_STATUS_UNKNOWN;
@@ -918,7 +920,7 @@ TEST_F(CpuStreamingMemoryTest,
   IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, gate_value,
                                            /*frontier=*/nullptr));
   copy_thread.join();
-  g_fail_next_memory_barrier.store(false, std::memory_order_release);
+  g_fail_next_system_release.store(false, std::memory_order_release);
   EXPECT_TRUE(copy_returned.load(std::memory_order_acquire));
   EXPECT_EQ(IREE_STATUS_ABORTED,
             copy_status_code.load(std::memory_order_acquire));

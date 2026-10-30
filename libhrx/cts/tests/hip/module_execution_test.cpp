@@ -718,6 +718,118 @@ TEST_F(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
   EXPECT_EQ(hipSuccess, hip_free(input));
 }
 
+TEST_F(HipModuleExecutionTest, StreamDependenciesAcrossRecordingBoundaries) {
+  const auto get_device = library_.Resolve<HipGetDeviceFn>("hipGetDevice");
+  const auto get_properties = library_.Resolve<HipGetDevicePropertiesR0600Fn>(
+      "hipGetDevicePropertiesR0600");
+  const auto load = library_.Resolve<HipModuleLoadDataFn>("hipModuleLoadData");
+  const auto unload = library_.Resolve<HipModuleUnloadFn>("hipModuleUnload");
+  const auto get_function =
+      library_.Resolve<HipModuleGetFunctionFn>("hipModuleGetFunction");
+  const auto launch =
+      library_.Resolve<HipModuleLaunchKernelFn>("hipModuleLaunchKernel");
+  const auto allocate = library_.Resolve<HipMallocFn>("hipMalloc");
+  const auto release = library_.Resolve<HipFreeFn>("hipFree");
+  const auto copy = library_.Resolve<HipMemcpyAsyncFn>("hipMemcpyAsync");
+  const auto fill = library_.Resolve<HipMemsetAsyncFn>("hipMemsetAsync");
+  const auto create_stream =
+      library_.Resolve<HipStreamCreateFn>("hipStreamCreate");
+  const auto destroy_stream =
+      library_.Resolve<HipStreamDestroyFn>("hipStreamDestroy");
+  const auto synchronize =
+      library_.Resolve<HipStreamSynchronizeFn>("hipStreamSynchronize");
+  const auto create_event =
+      library_.Resolve<decltype(&hipEventCreateWithFlags)>(
+          "hipEventCreateWithFlags");
+  const auto destroy_event =
+      library_.Resolve<decltype(&hipEventDestroy)>("hipEventDestroy");
+  const auto record_event =
+      library_.Resolve<decltype(&hipEventRecord)>("hipEventRecord");
+  ASSERT_NE(get_device, nullptr);
+  ASSERT_NE(get_properties, nullptr);
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(unload, nullptr);
+  ASSERT_NE(get_function, nullptr);
+  ASSERT_NE(launch, nullptr);
+  ASSERT_NE(allocate, nullptr);
+  ASSERT_NE(release, nullptr);
+  ASSERT_NE(copy, nullptr);
+  ASSERT_NE(fill, nullptr);
+  ASSERT_NE(create_stream, nullptr);
+  ASSERT_NE(destroy_stream, nullptr);
+  ASSERT_NE(synchronize, nullptr);
+  ASSERT_NE(create_event, nullptr);
+  ASSERT_NE(destroy_event, nullptr);
+  ASSERT_NE(record_event, nullptr);
+
+  int device = 0;
+  ASSERT_EQ(hipSuccess, get_device(&device));
+  hipDeviceProp_t properties = {};
+  ASSERT_EQ(hipSuccess, get_properties(&properties, device));
+  const auto image =
+      hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);
+  ASSERT_NE(image.file, nullptr) << properties.gcnArchName;
+  ScopedModule module = {.unload = unload};
+  ASSERT_EQ(hipSuccess, load(&module.value, image.file->data));
+  hipFunction_t function = nullptr;
+  ASSERT_EQ(hipSuccess, get_function(&function, module.value,
+                                     "hrx_transform_nested_pointers"));
+  hipDeviceptr_t allocation = nullptr;
+  ASSERT_EQ(hipSuccess, allocate(&allocation, 8 * sizeof(uint32_t)));
+  auto release_allocation = [release](void* value) {
+    EXPECT_EQ(hipSuccess, release(value));
+  };
+  std::unique_ptr<void, decltype(release_allocation)> allocation_guard(
+      allocation, release_allocation);
+  auto* input = static_cast<uint32_t*>(allocation);
+  auto* output = input + 4;
+  hipStream_t stream = nullptr;
+  ASSERT_EQ(hipSuccess, create_stream(&stream));
+  ScopedStream stream_guard(stream, StreamDeleter{destroy_stream});
+  hipEvent_t event = nullptr;
+  ASSERT_EQ(hipSuccess, create_event(&event, hipEventDisableTiming));
+  auto release_event = [destroy_event](hipEvent_t value) {
+    EXPECT_EQ(hipSuccess, destroy_event(value));
+  };
+  std::unique_ptr<hipEvent_st, decltype(release_event)> event_guard(
+      event, release_event);
+
+  for (bool split_recordings : {false, true}) {
+    SCOPED_TRACE(split_recordings);
+    ASSERT_EQ(hipSuccess, fill(input, 0, 4 * sizeof(uint32_t), stream));
+    uint32_t expected = 0;
+    auto transform = [&](uint32_t* source, uint32_t* target, uint32_t scale,
+                         uint32_t offset) {
+      PointerArguments pointers = {source, target};
+      void* arguments[] = {&pointers, &scale, &offset};
+      ASSERT_EQ(hipSuccess, launch(function, 1, 1, 1, 1, 1, 1, 0, stream,
+                                   arguments, nullptr));
+      expected = expected * scale + offset;
+      if (split_recordings) {
+        // Recording an event submits the producer without a host wait. The
+        // following operation must consume it through the stream timeline.
+        ASSERT_EQ(hipSuccess, record_event(event, stream));
+      }
+    };
+    for (uint32_t i = 0; i < 16; ++i) {
+      ASSERT_NO_FATAL_FAILURE(transform(input, output, 3, i + 1));
+      ASSERT_NO_FATAL_FAILURE(transform(output, input, 2, 1));
+      ASSERT_EQ(hipSuccess, copy(output, input, 4 * sizeof(uint32_t),
+                                 hipMemcpyDeviceToDevice, stream));
+      ASSERT_NO_FATAL_FAILURE(transform(output, input, 1, 7));
+      ASSERT_NO_FATAL_FAILURE(transform(input, output, 3, 2));
+      ASSERT_EQ(hipSuccess, copy(input, output, 4 * sizeof(uint32_t),
+                                 hipMemcpyDeviceToDevice, stream));
+    }
+    std::array<uint32_t, 4> actual = {};
+    ASSERT_EQ(hipSuccess, copy(actual.data(), input, sizeof(actual),
+                               hipMemcpyDeviceToHost, stream));
+    ASSERT_EQ(hipSuccess, synchronize(stream));
+    EXPECT_EQ((std::array<uint32_t, 4>{expected, expected, expected, expected}),
+              actual);
+  }
+}
+
 TEST_F(HipModuleExecutionTest,
        ThreadExitReleasesCurrentStackAndPerThreadStream) {
   const auto get_device =

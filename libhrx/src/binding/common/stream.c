@@ -364,6 +364,36 @@ bool iree_hal_streaming_stream_retain_context(
   return *out_context != NULL;
 }
 
+static const iree_hal_access_scope_t iree_hal_streaming_device_access_scope =
+    IREE_HAL_ACCESS_SCOPE_DISPATCH_READ | IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+    IREE_HAL_ACCESS_SCOPE_TRANSFER_READ | IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE;
+
+// Empty source/target access scopes express entry acquire/terminal release.
+// Internal dependencies need both; submission completion alone does not publish
+// recorded writes or acquire earlier stream writes for a later recording.
+static iree_status_t iree_hal_streaming_stream_record_dependency(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_access_scope_t source_scope,
+    iree_hal_access_scope_t target_scope) {
+  const iree_hal_memory_barrier_t memory_barrier = {
+      .source_scope = source_scope,
+      .target_scope = target_scope,
+  };
+  const iree_hal_barrier_t barrier = {
+      .source_stage_mask = source_scope
+                               ? IREE_HAL_EXECUTION_STAGE_DISPATCH |
+                                     IREE_HAL_EXECUTION_STAGE_TRANSFER
+                               : IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      .target_stage_mask = target_scope
+                               ? IREE_HAL_EXECUTION_STAGE_DISPATCH |
+                                     IREE_HAL_EXECUTION_STAGE_TRANSFER
+                               : IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .memory_barrier_count = 1,
+      .memory_barriers = &memory_barrier,
+  };
+  return iree_hal_command_buffer_barrier(command_buffer, &barrier);
+}
+
 iree_status_t iree_hal_streaming_stream_begin_locked(
     iree_hal_streaming_stream_t* stream) {
   IREE_ASSERT_ARGUMENT(stream);
@@ -385,10 +415,21 @@ iree_status_t iree_hal_streaming_stream_begin_locked(
       status = iree_hal_command_buffer_begin(command_buffer);
     }
     if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_stream_record_dependency(
+          command_buffer, 0, iree_hal_streaming_device_access_scope);
+    }
+    if (iree_status_is_ok(status)) {
       stream->command_buffer = command_buffer;
     } else {
       iree_hal_command_buffer_release(command_buffer);
     }
+  } else if (stream->pending_launch_count) {
+    // Acquire a dispatch's writes only when there is a following consumer.
+    // Transfer recorders already publish their own dependencies, including
+    // stronger system releases when required for host-visible results.
+    status = iree_hal_streaming_stream_record_dependency(
+        stream->command_buffer, iree_hal_streaming_device_access_scope,
+        iree_hal_streaming_device_access_scope);
   }
 
   return status;
@@ -413,12 +454,22 @@ iree_status_t iree_hal_streaming_stream_flush_locked(
   }
 
   iree_hal_command_buffer_t* command_buffer = stream->command_buffer;
+  iree_status_t status = iree_ok_status();
+  if (stream->pending_launch_count) {
+    // Retain the producer release at the submission boundary without an
+    // acquire for nonexistent later commands. The next recording acquires at
+    // entry, after its stream timeline prerequisite has completed.
+    status = iree_hal_streaming_stream_record_dependency(
+        command_buffer, iree_hal_streaming_device_access_scope, 0);
+  }
   stream->command_buffer = NULL;
   stream->pending_launch_count = 0;
 
-  // Once ending has been attempted, a one-shot command buffer cannot accept
+  // Once flushing has been attempted, a one-shot command buffer cannot accept
   // more commands and must be released on every path below.
-  iree_status_t status = iree_hal_command_buffer_end(command_buffer);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_end(command_buffer);
+  }
 
   uint64_t wait_value = 0;
   uint64_t signal_value = 0;
@@ -1446,8 +1497,8 @@ static iree_status_t iree_hal_streaming_prepare_launch_arguments(
 }
 
 // Appends one dispatch to a stream command buffer while |stream->mutex| is
-// held. Timing accumulators are optional and are only used by the normal
-// single-launch instrumentation path.
+// held. The next recorded operation acquires this dispatch's writes; flushing
+// records the terminal release when there is no subsequent consumer.
 static iree_status_t iree_hal_streaming_record_dispatch_locked(
     iree_hal_streaming_stream_t* stream, iree_hal_streaming_symbol_t* symbol,
     iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
@@ -1462,42 +1513,6 @@ static iree_status_t iree_hal_streaming_record_dispatch_locked(
         stream->command_buffer, symbol->executable,
         iree_hal_executable_function_from_index(symbol->export_ordinal), config,
         constants, bindings, flags);
-  }
-
-  // Insert an execution + memory barrier after each dispatch to enforce serial
-  // ordering within the command buffer, emulating HIP stream semantics. This
-  // allows batching multiple dispatches per command buffer submission while
-  // maintaining correctness. Inter-command-buffer ordering is handled by
-  // timeline semaphore chaining in iree_hal_streaming_stream_flush.
-  //
-  // The memory barrier with non-host (DISPATCH/TRANSFER) access scopes is
-  // important: under the AMDGPU HAL backend it resolves to an AGENT-scoped AQL
-  // release+acquire fence between this dispatch and the next, which flushes the
-  // GPU L1/L2 caches so the next dispatch sees this dispatch's writes. A bare
-  // execution barrier with no memory barriers does not publish dispatch memory
-  // side effects under backends that preserve empty barrier scopes, so later
-  // dispatches can observe stale device cache contents.
-  if (iree_status_is_ok(status)) {
-    static const iree_hal_memory_barrier_t memory_barrier = {
-        .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-                        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
-                        IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
-                        IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
-        .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-                        IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
-                        IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
-                        IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
-    };
-    const iree_hal_barrier_t execution_barrier = {
-        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH |
-                             IREE_HAL_EXECUTION_STAGE_TRANSFER,
-        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH |
-                             IREE_HAL_EXECUTION_STAGE_TRANSFER,
-        .memory_barrier_count = 1,
-        .memory_barriers = &memory_barrier,
-    };
-    status = iree_hal_command_buffer_barrier(stream->command_buffer,
-                                             &execution_barrier);
   }
 
   if (iree_status_is_ok(status)) {

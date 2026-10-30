@@ -193,13 +193,14 @@ iree_status_t iree_hal_streaming_stream_create(
 void iree_hal_streaming_stream_retain(iree_hal_streaming_stream_t* stream);
 void iree_hal_streaming_stream_release(iree_hal_streaming_stream_t* stream);
 
-// Begins command buffer recording.
-// Synchronization: none (begins recording).
+// Begins command buffer recording and orders the next operation after any
+// preceding recorded dispatch. Synchronization: holds the stream mutex.
 iree_status_t iree_hal_streaming_stream_begin(
     iree_hal_streaming_stream_t* stream);
 
-// Ensures a stream command buffer is recording while the caller holds
-// stream->mutex. Use this when appending commands under the stream lock.
+// Ensures a stream command buffer is recording and orders the next operation
+// after any preceding recorded dispatch. Call once before appending each
+// operation while holding stream->mutex.
 iree_status_t iree_hal_streaming_stream_begin_locked(
     iree_hal_streaming_stream_t* stream);
 
