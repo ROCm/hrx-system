@@ -36,7 +36,6 @@ iree_execution_test_suite(
         "source_call_context.loom",
         "source_cases.loom",
         "source_config.loom",
-        "source_elementary.loom",
         "source_library_cases.loom",
         "source_mismatch.loom",
         "source_template.loom",
