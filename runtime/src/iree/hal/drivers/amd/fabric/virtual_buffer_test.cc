@@ -95,22 +95,100 @@ TEST_F(VirtualBufferContractTest, AtomicsIntersectSourcesAtEachExecutionSite) {
         IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
   }
   for (auto* source : sources) {
-    EXPECT_TRUE(
-        iree_hal_virtual_buffer_query_pool_compatibility(target, source));
+    EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(
+        target,
+        {iree_hal_device_group_memory_domain(group_),
+         IREE_HAL_MEMORY_SCOPE_ANY},
+        source));
     iree_hal_pool_release(source);
   }
   // The declaration borrows pools. A later pool with the same guarantees is
   // compatible after both original pool identities have been destroyed.
   iree_hal_pool_t* replacement = nullptr;
   IREE_ASSERT_OK(CreateSource(&replacement));
-  EXPECT_TRUE(
-      iree_hal_virtual_buffer_query_pool_compatibility(target, replacement));
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(
+      target,
+      {iree_hal_device_group_memory_domain(group_), IREE_HAL_MEMORY_SCOPE_ANY},
+      replacement));
   EXPECT_EQ(
       iree_hal_buffer_query_atomic_operations(target, gpu).system_scope_32,
       gpu_operations.system_scope_32);
   EXPECT_EQ(native_.create_count, 0);
   iree_hal_pool_release(replacement);
   iree_hal_buffer_release(target);
+}
+
+TEST_F(VirtualBufferContractTest, PartialSourceMapsOnlyItsNativeProjection) {
+  native_.alias_projections = false;
+  iree_hal_pool_t* shared_source = nullptr;
+  IREE_ASSERT_OK(CreateSource(&shared_source));
+  native_.host_source_enabled = false;
+  native_.required_flags = 0;
+  const iree_hal_pool_family_access_t gpu_family = {
+      .family = families_[0],
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
+  };
+  iree_hal_pool_t* device_source = nullptr;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, {1, &gpu_family, {}},
+                                           &pool_options_, allocator_,
+                                           &device_source));
+  iree_hal_pool_t* sources[] = {device_source, shared_source};
+  iree_hal_virtual_buffer_capabilities_t capabilities;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      group_, Scope(), {IREE_ARRAYSIZE(sources), sources}, allocator_,
+      &capabilities));
+  ASSERT_NE(capabilities.max_byte_length, 0u);
+  EXPECT_EQ(native_.create_count, 0);
+  EXPECT_EQ(native_.reservation_count, 0);
+  const iree_hal_virtual_buffer_options_t options = {.byte_length = 8192};
+  iree_hal_buffer_t* target = nullptr;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
+      group_, Scope(), {IREE_ARRAYSIZE(sources), sources}, &options, allocator_,
+      &target));
+  const auto gpu = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]);
+  const auto host = ResolveScope(IREE_HAL_MEMORY_SITE_HOST);
+  const iree_hal_memory_scope_t all = {
+      iree_hal_device_group_memory_domain(group_), IREE_HAL_MEMORY_SCOPE_ANY};
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(target, gpu,
+                                                               device_source));
+  EXPECT_FALSE(iree_hal_virtual_buffer_query_pool_compatibility(target, host,
+                                                                device_source));
+  EXPECT_FALSE(iree_hal_virtual_buffer_query_pool_compatibility(target, all,
+                                                                device_source));
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(target, all,
+                                                               shared_source));
+  iree_hal_buffer_t* backing = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      device_source, iree_hal_make_pool_reservation_request(4096, 4096),
+      iree_infinite_timeout(), &backing));
+  iree_hal_memory_mapping_t mapping = {
+      .target = target,
+      .scope = host,
+      .target_range = {0, 4096},
+      .source = backing,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+  };
+  auto* queue = iree_hal_device_queue(cpu_device_, 0, 0);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        iree_hal_queue_map(queue, {}, {}, 1, &mapping, 0));
+  EXPECT_EQ(native_.update_count, 0);
+  mapping.scope = gpu;
+  iree_hal_semaphore_t* done = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      cpu_device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0, 0, &done));
+  uint64_t value = 1;
+  IREE_ASSERT_OK(
+      iree_hal_queue_map(queue, {}, {1, &done, &value}, 1, &mapping, 0));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(done, value, iree_infinite_timeout(), 0));
+  EXPECT_EQ(native_.update_count, 1);
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_detach(target, all));
+  iree_hal_semaphore_release(done);
+  iree_hal_buffer_release(target);
+  iree_hal_buffer_release(backing);
+  iree_hal_pool_release(device_source);
+  iree_hal_pool_release(shared_source);
 }
 
 TEST_F(VirtualBufferContractTest, QueueShaderContractCoversEveryReplacement) {
@@ -187,7 +265,10 @@ TEST_F(VirtualBufferContractTest, PairGuaranteesFollowTheVirtualShaderRecipe) {
             IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
   EXPECT_EQ(pair.consumer_atomics.device_scope_32,
             IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
-  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(target, source));
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(
+      target,
+      {iree_hal_device_group_memory_domain(group_), IREE_HAL_MEMORY_SCOPE_ANY},
+      source));
 
   // A new source keeps identical one-site support and cache actions, but loses
   // only the exact peer guarantee. It cannot replace this declared backing.
@@ -207,8 +288,10 @@ TEST_F(VirtualBufferContractTest, PairGuaranteesFollowTheVirtualShaderRecipe) {
   iree_hal_pool_t* replacement = nullptr;
   IREE_ASSERT_OK(CreateSource(&replacement));
   const int queries = native_.pair_query_count;
-  EXPECT_FALSE(
-      iree_hal_virtual_buffer_query_pool_compatibility(target, replacement));
+  EXPECT_FALSE(iree_hal_virtual_buffer_query_pool_compatibility(
+      target,
+      {iree_hal_device_group_memory_domain(group_), IREE_HAL_MEMORY_SCOPE_ANY},
+      replacement));
   EXPECT_EQ(PairInfo(contract, queue, queue).producer_atomics.device_scope_32,
             IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
   EXPECT_EQ(native_.pair_query_count, queries);
@@ -303,8 +386,10 @@ TEST_F(VirtualBufferContractTest,
   native_.host_alias_coherent = false;
   iree_hal_pool_t* noncoherent = nullptr;
   IREE_ASSERT_OK(CreateSource(&noncoherent));
-  EXPECT_FALSE(
-      iree_hal_virtual_buffer_query_pool_compatibility(target, noncoherent));
+  EXPECT_FALSE(iree_hal_virtual_buffer_query_pool_compatibility(
+      target,
+      {iree_hal_device_group_memory_domain(group_), IREE_HAL_MEMORY_SCOPE_ANY},
+      noncoherent));
   iree_hal_buffer_t* backing = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       noncoherent, iree_hal_make_pool_reservation_request(4096, 4096),
@@ -353,8 +438,11 @@ TEST_F(VirtualBufferContractTest, DeclaredCacheObligationsCoverEverySource) {
     EXPECT_EQ(info.release.executor,
               IREE_HAL_MEMORY_TRANSITION_EXECUTOR_HOST_API);
     for (auto* source : sources) {
-      EXPECT_TRUE(
-          iree_hal_virtual_buffer_query_pool_compatibility(target, source));
+      EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(
+          target,
+          {iree_hal_device_group_memory_domain(group_),
+           IREE_HAL_MEMORY_SCOPE_ANY},
+          source));
     }
     iree_hal_buffer_release(target);
     std::swap(sources[0], sources[1]);
@@ -572,9 +660,10 @@ TEST_F(MemoryBackendTest, SharedTranslationsDoNotGrantSourceConsumerAccess) {
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       cpu_device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0, 0, &done));
   uint64_t value = 1;
-  EXPECT_FALSE(iree_hal_virtual_buffer_query_pool_compatibility(target, pool));
+  EXPECT_FALSE(
+      iree_hal_virtual_buffer_query_pool_compatibility(target, first, pool));
   EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(
-      target, complete_source));
+      target, first, complete_source));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
       iree_hal_queue_map(iree_hal_device_queue(cpu_device_, 0, 0), {},

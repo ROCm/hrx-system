@@ -1003,11 +1003,11 @@ TEST_P(TaskSlabPoolTest, RecordedAtomicsSurviveReplacementFromAnotherPool) {
 
   Ref<iree_hal_pool_t> replacement_source;
   IREE_ASSERT_OK(CreateMappingSource(replacement_source.out()));
-  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(
-      target, replacement_source));
-  std::array<Ref<iree_hal_buffer_t>, 2> backings;
   const iree_hal_memory_scope_t all = {
       iree_hal_device_group_memory_domain(group_), IREE_HAL_MEMORY_SCOPE_ANY};
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(
+      target, all, replacement_source));
+  std::array<Ref<iree_hal_buffer_t>, 2> backings;
   for (size_t i = 0; i < backings.size(); ++i) {
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
         replacement_source, iree_hal_make_pool_reservation_request(unit, unit),

@@ -174,7 +174,8 @@ TEST_F(ReplayRecorderVirtualBufferTest, UncapturedSourcePreservesLiveCreation) {
   iree_hal_buffer_t* target = nullptr;
   IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
       group_, scope, {1, &source}, &options, iree_allocator_system(), &target));
-  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(target, source));
+  EXPECT_TRUE(
+      iree_hal_virtual_buffer_query_pool_compatibility(target, all_, source));
   iree_hal_buffer_release(target);
   iree_hal_pool_release(source);
   IREE_ASSERT_OK(iree_hal_replay_recorder_close(recorder_));

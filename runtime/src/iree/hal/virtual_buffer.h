@@ -47,7 +47,11 @@ enum iree_hal_virtual_buffer_flag_bits_e {
 
 // Source pools describing backing admitted for the reservation's entire life.
 // Query and construction borrow this array and its pools; neither retains them.
-// Each source covers the complete consumer scope. Order conveys no preference.
+// Sources contribute at sites where they provide MAPPING_SOURCE. Every source
+// contributes at one or more requested sites, and every requested site has a
+// contributing source. Order conveys no preference. A source may cover only
+// part of the scope: device-local backing can serve GPU sites while shared
+// backing serves both CPU and GPU sites in the same reservation.
 typedef struct iree_hal_virtual_buffer_sources_t {
   // Nonzero number of prepared mapping-source pools in the same sealed group.
   iree_host_size_t pool_count;
@@ -109,26 +113,33 @@ typedef struct iree_hal_virtual_buffer_options_t {
 // ordinary buffer reference. Buffer references, subspans and child pools keep
 // the native addresses alive until final release. Installed backing remains
 // caller-owned and must stay live until checked removal completes after its
-// last users. Accessing an unbound range is invalid. The sealed group outlives
-// its buffers. Failure returns NULL and transfers no cleanup obligation.
-// The immutable contract combines source alias cache obligations and intersects
-// host properties and per-site atomic guarantees. Later backing must preserve
-// that contract, regardless of whether it comes from an originally named pool.
+// last users. Accessing a range without a mapping for the accessing site is
+// invalid, even if it is mapped at another site. The sealed group outlives its
+// buffers. Failure returns NULL and transfers no cleanup obligation.
+// The immutable contract intersects host properties and per-site atomic
+// guarantees across sources serving each site. Pair guarantees and cache
+// obligations combine sources serving both sites; a pair without a common
+// source is unsupported. Later backing must preserve every applicable site and
+// pair guarantee, regardless of whether it comes from an originally named pool.
 IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_create(
     iree_hal_device_group_t* group, iree_hal_pool_scope_t scope,
     iree_hal_virtual_buffer_sources_t sources,
     const iree_hal_virtual_buffer_options_t* options,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
 
-// Tests a pool's immutable mapping contract against the virtual buffer's fixed
-// guarantees by comparing immutable site and producer/consumer pair facts.
+// Tests whether a pool can back |scope| while preserving the virtual buffer's
+// fixed site and producer/consumer pair guarantees. A concrete scope requires
+// coverage of every admitted site sharing its native page tables. ANY requires
+// coverage of the native root's complete scope. All applicable guarantees are
+// checked, including for aliases that may be installed later at other sites.
 // No allocation, native call, or installed-mapping lookup occurs. Ordinary
-// views use the native root's complete contract. False means ordinary
-// incompatibility or no committed virtual target. Exact ranges must separately
-// satisfy source and target geometry when mapped. Allocation prerequisites must
-// have completed before querying a transient view.
+// views use the native root's contract. False means incompatibility, an invalid
+// scope, or no committed virtual target. Exact ranges must separately satisfy
+// source and target geometry when mapped. Allocation prerequisites must have
+// completed before querying a transient view.
 IREE_API_EXPORT bool iree_hal_virtual_buffer_query_pool_compatibility(
-    const iree_hal_buffer_t* buffer, const iree_hal_pool_t* pool);
+    const iree_hal_buffer_t* buffer, iree_hal_memory_scope_t scope,
+    const iree_hal_pool_t* pool);
 
 // Achieved mapping geometry of a virtual buffer or an ordinary view of one.
 typedef struct iree_hal_virtual_buffer_info_t {
@@ -186,7 +197,8 @@ typedef struct iree_hal_memory_mapping_t {
   // Destination interval relative to the target view's first byte.
   iree_hal_buffer_range_t target_range;
   // Ordinary buffer from a pool prepared with the MAPPING_SOURCE interface for
-  // each selected site. NULL detaches the target range.
+  // each selected site and every admitted site sharing its native page tables.
+  // NULL detaches the target range.
   iree_hal_buffer_t* source;
   // Byte offset within the logical source buffer; zero when detaching.
   iree_device_size_t source_offset;

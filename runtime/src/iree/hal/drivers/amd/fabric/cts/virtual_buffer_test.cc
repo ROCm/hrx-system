@@ -437,6 +437,163 @@ TEST_P(FabricVirtualBufferTest,
   IREE_ASSERT_OK(iree_hal_virtual_buffer_detach(root, scope_));
 }
 
+TEST_P(FabricVirtualBufferTest, MixedSourcesKeepCpuAccessOnSharedBacking) {
+  using iree::hal::cts::Ref;
+  if (storage_.size() == 1) {
+    GTEST_SKIP() << "native device has no independently placed local storage";
+  }
+  uint32_t physical_node = IREE_HAL_TOPOLOGY_NODE_ORDINAL_INVALID;
+  const auto* topology = iree_hal_device_group_topology(group_);
+  for (iree_host_size_t i = 0; i < iree_hal_topology_node_count(topology);
+       ++i) {
+    const auto* node = iree_hal_topology_node_at(topology, i);
+    if (node->kind == IREE_HAL_TOPOLOGY_NODE_KIND_PHYSICAL_DEVICE &&
+        node->device_ordinal ==
+            iree_hal_device_topology_info(device_)->topology_index) {
+      physical_node = node->ordinal;
+      break;
+    }
+  }
+  ASSERT_NE(physical_node, IREE_HAL_TOPOLOGY_NODE_ORDINAL_INVALID);
+  const uint64_t mapping_source = UINT64_C(1)
+                                  << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
+  std::array<iree_hal_pool_family_access_t, 2> families = {{
+      {
+          .family = access_.family,
+          .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+          .interfaces = mapping_source,
+      },
+      {
+          .family = iree_hal_device_queue_family(cpu_, 0),
+          .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+          .interfaces = mapping_source,
+      },
+  }};
+  iree_hal_slab_pool_options_t pool_options;
+  iree_hal_slab_pool_options_initialize(&pool_options);
+  pool_options.placement = {IREE_HAL_POOL_PLACEMENT_REQUIRED, physical_node};
+  Ref<iree_hal_pool_t> local_pool;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, {1, families.data(), {}},
+                                           &pool_options, allocator_,
+                                           local_pool.out()));
+  pool_options.placement = {};
+  const iree_hal_pool_scope_t scope = {
+      families.size(),
+      families.data(),
+      {IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_MAPPING_MODE_PERSISTENT}};
+  Ref<iree_hal_pool_t> shared_pool;
+  auto status = iree_hal_slab_pool_create(group_, scope, &pool_options,
+                                          allocator_, shared_pool.out());
+  if (iree_status_is_unavailable(status)) {
+    iree_status_ignore(status);
+    GTEST_SKIP() << "no jointly remappable host/device backing";
+  }
+  IREE_ASSERT_OK(status);
+  families[0].interfaces = UINT64_C(1)
+                           << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
+  families[1].interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_HOST;
+  iree_hal_pool_t* sources[] = {local_pool, shared_pool};
+  iree_hal_virtual_buffer_capabilities_t capabilities;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      group_, scope, {IREE_ARRAYSIZE(sources), sources}, allocator_,
+      &capabilities));
+  ASSERT_NE(capabilities.max_byte_length, 0u);
+  const auto unit = std::max(capabilities.mapping_granularity,
+                             capabilities.reservation_granularity);
+  std::array<Ref<iree_hal_buffer_t>, 2> backings;
+  for (size_t i = 0; i < backings.size(); ++i) {
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        sources[i], iree_hal_make_pool_reservation_request(unit, unit),
+        iree_infinite_timeout(), backings[i].out()));
+  }
+  const iree_hal_virtual_buffer_options_t options = {
+      .byte_length = 2 * unit,
+      .mapping_granularity = unit,
+  };
+  Ref<iree_hal_buffer_t> target;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
+      group_, scope, {IREE_ARRAYSIZE(sources), sources}, &options, allocator_,
+      target.out()));
+  const iree_hal_memory_scope_t all = {
+      iree_hal_device_group_memory_domain(group_), IREE_HAL_MEMORY_SCOPE_ANY};
+  iree_hal_memory_scope_t host;
+  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+      group_, {IREE_HAL_MEMORY_SITE_HOST, nullptr}, &host));
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(target, scope_,
+                                                               local_pool));
+  EXPECT_FALSE(iree_hal_virtual_buffer_query_pool_compatibility(target, host,
+                                                                local_pool));
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(target, all,
+                                                               shared_pool));
+  std::array<iree_hal_memory_mapping_t, 2> mappings = {{
+      {
+          .target = target,
+          .scope = host,
+          .target_range = {0, unit},
+          .source = backings[0],
+          .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      },
+      {
+          .target = target,
+          .scope = all,
+          .target_range = {unit, unit},
+          .source = backings[1],
+          .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      },
+  }};
+  // This fails during public admission, before any native address mutation.
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        iree_hal_queue_map(iree_hal_device_queue(cpu_, 0, 0),
+                                           {}, {}, 1, mappings.data(), 0));
+  mappings[0].scope = scope_;
+  IREE_ASSERT_OK(Map(mappings));
+  iree_byte_span_t shared_view;
+  IREE_ASSERT_OK(
+      iree_hal_buffer_native_host_span(target, unit, 256, &shared_view));
+  auto* shared_words = reinterpret_cast<uint32_t*>(shared_view.data);
+  auto* staging = reinterpret_cast<uint32_t*>(host_mapping_.contents.data);
+  for (uint32_t i = 0; i < 64; ++i) {
+    shared_words[i] = 0x1000 + i;
+    staging[i] = 0x2000 + i;
+  }
+  IREE_ASSERT_OK(iree_hal_buffer_flush_host_range(target, unit, 256));
+  IREE_ASSERT_OK(iree_hal_buffer_flush_host_range(backing_, 0, 256));
+  const iree_hal_buffer_native_binding_slot_t slot = {
+      .index = target.get()
+                   ->memory.contract->scopes[scope_.id]
+                   .bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS],
+      .type = IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+  };
+  const auto address =
+      iree_hal_buffer_native_binding(target, slot).device_address;
+  const auto staging_address =
+      iree_hal_buffer_native_binding(backing_, source_slot_).device_address;
+  SdmaCommandWriter commands(
+      reinterpret_cast<uint32_t*>(queue_host_.ring_address) + ring_words_,
+      native_family_.format_features);
+  const bool cache_control =
+      native_family_.format_features & AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR;
+  if (cache_control) {
+    commands.AcquireFromSystem();
+  }
+  commands.CopyLinear(staging_address, address, 256);
+  commands.CopyLinear(address, staging_address + granularity_, 256);
+  commands.CopyLinear(address + unit, staging_address + 2 * granularity_, 256);
+  if (cache_control) {
+    commands.ReleaseToSystem();
+  }
+  ASSERT_NO_FATAL_FAILURE(SubmitAndWait(commands));
+  for (uint32_t i = 1; i <= 2; ++i) {
+    IREE_ASSERT_OK(
+        iree_hal_buffer_invalidate_host_range(backing_, i * granularity_, 256));
+    for (uint32_t j = 0; j < 64; ++j) {
+      EXPECT_EQ(staging[i * granularity_ / sizeof(uint32_t) + j],
+                (i == 1 ? 0x2000 : 0x1000) + j);
+    }
+  }
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_detach(target, all));
+}
+
 TEST_P(FabricVirtualBufferTest, CpuQueueUsesPrivatelyOwnedLocalStorage) {
   using iree::hal::cts::Ref;
   if (storage_.size() == 1) {
