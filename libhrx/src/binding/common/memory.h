@@ -405,6 +405,10 @@ iree_status_t iree_hal_streaming_memory_host_flags(
     iree_hal_streaming_context_t* context, void* ptr,
     iree_hal_streaming_host_register_flags_t* out_flags);
 
+// With a stream these helpers may append to its current recording so a
+// frontend can batch rows/chunks within one API operation. The frontend must
+// flush after the complete non-captured operation and before returning success.
+// Flush transfers ownership to the queue; it does not wait for completion.
 // Synchronization: stream or blocking (async if stream, sync if NULL stream).
 iree_status_t iree_hal_streaming_memory_memset(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,

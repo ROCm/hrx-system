@@ -7742,8 +7742,16 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
       break;
   }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_stream_flush(stream_obj);
+  }
   if (iree_status_is_ok(status) && pageable_d2h) {
     status = iree_hal_streaming_stream_synchronize(stream_obj);
+  } else if (!iree_status_is_ok(status) &&
+             stream_capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE) {
+    // Submission can fail after accepting work that borrows host storage.
+    status = iree_status_join(
+        status, iree_hal_streaming_stream_synchronize(stream_obj));
   }
 
   hipError_t result = iree_status_to_hip_result(status);
@@ -8160,8 +8168,15 @@ HIPAPI hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
     src_ptr += spitch;
     dst_ptr += dpitch;
   }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_stream_flush(stream_obj);
+  }
   if (iree_status_is_ok(status) && pageable_d2h) {
     status = iree_hal_streaming_stream_synchronize(stream_obj);
+  } else if (!iree_status_is_ok(status)) {
+    // Earlier rows may already be accepted and still borrow host storage.
+    status = iree_status_join(
+        status, iree_hal_streaming_stream_synchronize(stream_obj));
   }
 
   hipError_t result = iree_status_to_hip_result(status);
@@ -8659,6 +8674,11 @@ static hipError_t iree_hip_memcpy3d_internal(
     result = iree_status_to_hip_result(row_status);
   } else {
     iree_status_ignore(row_status);
+  }
+
+  if (result == hipSuccess && attempted_work && !host_work_completed) {
+    result =
+        iree_status_to_hip_result(iree_hal_streaming_stream_flush(stream_obj));
   }
 
   const bool device_to_device = effective_kind == hipMemcpyDeviceToDevice ||
@@ -9320,6 +9340,11 @@ static hipError_t iree_hip_array_copy_packed_rows(
           array_ptr, (uint8_t*)external_ptr + external_offset, external_context,
           remaining, kind);
     }
+  }
+
+  if (result == hipSuccess && attempted_work && recording_stream) {
+    result = iree_status_to_hip_result(
+        iree_hal_streaming_stream_flush(recording_stream));
   }
 
   const bool device_to_device =
@@ -10427,45 +10452,33 @@ static iree_status_t iree_hip_capture_record_memset_2d(
   }
   return status;
 }
-// Sets 2D device memory to a value (asynchronous).
-//
-// Parameters:
-//  - dst: [OUT] Device pointer to 2D memory to set.
-//  - pitch: [IN] Pitch in bytes of the 2D memory.
-//  - value: [IN] Value to set (interpreted as unsigned char).
-//  - width: [IN] Width in bytes to set.
-//  - height: [IN] Number of rows to set.
-//  - stream: [IN] Stream for asynchronous execution.
-//
-// Returns:
-//  - hipSuccess: Operation enqueued successfully.
-//  - hipErrorInvalidValue: dst is NULL or dimensions invalid.
-HIPAPI hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value,
-                                   size_t width, size_t height,
-                                   hipStream_t stream) {
-  HIP_API_BEGIN();
+// Records a complete rectangle. A standalone 2D operation submits it here;
+// a 3D operation retains its slice recordings until all slices are recorded.
+static hipError_t iree_hip_memset_2d(void* dst, size_t pitch, int value,
+                                     size_t width, size_t height,
+                                     hipStream_t stream, bool submit) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   if (!dst) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
 
   if (width == 0 || height == 0) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipSuccess);
+    return hipSuccess;
   }
 
   if (width > pitch) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   iree_host_size_t byte_span = 0;
   if (IREE_UNLIKELY(
           !iree_host_size_checked_mul(height - 1, pitch, &byte_span) ||
           !iree_host_size_checked_add(byte_span, width, &byte_span))) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
 
   iree_hip_resolved_stream_t resolved_stream = {0};
@@ -10473,7 +10486,7 @@ HIPAPI hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value,
       iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (resolve_result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(resolve_result);
+    return resolve_result;
   }
   iree_hal_streaming_context_t* context = resolved_stream.context;
   iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
@@ -10485,7 +10498,7 @@ HIPAPI hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value,
     hipError_t result = iree_memset_status_to_hip_result(range_status);
     iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(result);
+    return result;
   }
 
   hipError_t dependency_result =
@@ -10493,7 +10506,7 @@ HIPAPI hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value,
   if (dependency_result != hipSuccess) {
     iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(dependency_result);
+    return dependency_result;
   }
 
   iree_hip_capture_memset_2d_t capture = {
@@ -10512,28 +10525,47 @@ HIPAPI hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value,
     iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     if (result != hipSuccess) {
-      HIP_RETURN_ERROR(result);
+      return result;
     }
-    HIP_RETURN_ERROR(hipSuccess);
+    return hipSuccess;
   }
 
-  // Perform row-by-row memset.
+  // Keep every row in the same recording until the operation is complete.
   uint8_t* dst_ptr = (uint8_t*)dst;
-  for (size_t row = 0; row < height; ++row) {
-    iree_status_t status = iree_hal_streaming_memory_memset(
+  iree_status_t status = iree_ok_status();
+  for (size_t row = 0; row < height && iree_status_is_ok(status); ++row) {
+    status = iree_hal_streaming_memory_memset(
         context, (iree_hal_streaming_deviceptr_t)(dst_ptr + row * pitch), width,
         &value, 1, stream_obj);
-    if (!iree_status_is_ok(status)) {
-      hipError_t result = iree_memset_status_to_hip_result(status);
-      iree_hip_resolved_stream_release(&resolved_stream);
-      IREE_TRACE_ZONE_END(z0);
-      HIP_RETURN_ERROR(result);
-    }
   }
-
+  if (iree_status_is_ok(status) && submit) {
+    status = iree_hal_streaming_stream_flush(stream_obj);
+  }
+  hipError_t result = iree_memset_status_to_hip_result(status);
   iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
-  HIP_RETURN_ERROR(hipSuccess);
+  return result;
+}
+
+// Sets 2D device memory to a value (asynchronous).
+//
+// Parameters:
+//  - dst: [OUT] Device pointer to 2D memory to set.
+//  - pitch: [IN] Pitch in bytes of the 2D memory.
+//  - value: [IN] Value to set (interpreted as unsigned char).
+//  - width: [IN] Width in bytes to set.
+//  - height: [IN] Number of rows to set.
+//  - stream: [IN] Stream for asynchronous execution.
+//
+// Returns:
+//  - hipSuccess: Operation enqueued successfully.
+//  - hipErrorInvalidValue: dst is NULL or dimensions invalid.
+HIPAPI hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value,
+                                   size_t width, size_t height,
+                                   hipStream_t stream) {
+  HIP_API_BEGIN();
+  HIP_RETURN_ERROR(iree_hip_memset_2d(dst, pitch, value, width, height, stream,
+                                      /*submit=*/true));
 }
 
 // Sets 2D device memory to a value (synchronous).
@@ -10658,18 +10690,20 @@ HIPAPI hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int value,
     HIP_RETURN_ERROR(result);
   }
 
-  iree_hal_streaming_context_t* context = NULL;
-  result = iree_hip_ensure_context(&context);
+  iree_hip_resolved_stream_t resolved_stream = {0};
+  result = iree_hip_resolve_registered_stream(stream, &resolved_stream);
   if (result != hipSuccess) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
   }
+  iree_hal_streaming_context_t* context = resolved_stream.context;
   iree_hal_streaming_buffer_ref_t dst_ref;
   iree_status_t range_status = iree_hal_streaming_memory_lookup_range(
       context, (iree_hal_streaming_deviceptr_t)pitchedDevPtr.ptr, byte_span,
       &dst_ref);
   if (!iree_status_is_ok(range_status)) {
     result = iree_memset_status_to_hip_result(range_status);
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(result);
   }
@@ -10677,36 +10711,26 @@ HIPAPI hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int value,
   const iree_host_size_t rows_per_slice =
       pitchedDevPtr.ysize ? pitchedDevPtr.ysize : extent.height;
   if (extent.width == pitchedDevPtr.pitch && extent.height == rows_per_slice) {
-    iree_host_size_t byte_count = 0;
-    if (IREE_UNLIKELY(!iree_host_size_checked_mul(slice_pitch, extent.depth,
-                                                  &byte_count))) {
-      IREE_TRACE_ZONE_END(z0);
-      HIP_RETURN_ERROR(hipErrorInvalidValue);
-    }
-    hipError_t linear_result =
-        hipMemsetAsync(pitchedDevPtr.ptr, value, byte_count, stream);
+    result = hipMemsetAsync(pitchedDevPtr.ptr, value, byte_span, stream);
+    iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(linear_result);
+    HIP_RETURN_ERROR(result);
   }
 
   uint8_t* base = (uint8_t*)pitchedDevPtr.ptr;
-  for (size_t z = 0; z < extent.depth; ++z) {
-    iree_host_size_t slice_offset = 0;
-    if (IREE_UNLIKELY(
-            !iree_host_size_checked_mul(z, slice_pitch, &slice_offset))) {
-      IREE_TRACE_ZONE_END(z0);
-      HIP_RETURN_ERROR(hipErrorInvalidValue);
-    }
-    result = hipMemset2DAsync(base + slice_offset, pitchedDevPtr.pitch, value,
-                              extent.width, extent.height, stream);
-    if (result != hipSuccess) {
-      IREE_TRACE_ZONE_END(z0);
-      HIP_RETURN_ERROR(result);
-    }
+  for (size_t z = 0; z < extent.depth && result == hipSuccess; ++z) {
+    result = iree_hip_memset_2d(base + z * slice_pitch, pitchedDevPtr.pitch,
+                                value, extent.width, extent.height, stream,
+                                /*submit=*/false);
   }
+  if (result == hipSuccess) {
+    result = iree_status_to_hip_result(
+        iree_hal_streaming_stream_flush(resolved_stream.stream));
+  }
+  iree_hip_resolved_stream_release(&resolved_stream);
 
   IREE_TRACE_ZONE_END(z0);
-  HIP_RETURN_ERROR(hipSuccess);
+  HIP_RETURN_ERROR(result);
 }
 
 HIPAPI hipError_t hipMemset3D(hipPitchedPtr pitchedDevPtr, int value,
@@ -11907,6 +11931,10 @@ HIPAPI hipError_t hipMemsetAsync(void* dst, int value, size_t sizeBytes,
       resolved_stream.context, (iree_hal_streaming_deviceptr_t)dst, sizeBytes,
       &value, 1, resolved_stream.stream);
 
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_stream_flush(resolved_stream.stream);
+  }
+
   hipError_t result = iree_memset_status_to_hip_result(status);
   iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
@@ -12192,6 +12220,10 @@ HIPAPI hipError_t hipMemsetD8Async(hipDeviceptr_t dstDevice, unsigned char uc,
       resolved_stream.context, (iree_hal_streaming_deviceptr_t)dstDevice, N,
       &uc, 1, resolved_stream.stream);
 
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_stream_flush(resolved_stream.stream);
+  }
+
   hipError_t result = iree_memset_status_to_hip_result(status);
   iree_hip_resolved_stream_release(&resolved_stream);
   IREE_TRACE_ZONE_END(z0);
@@ -12273,6 +12305,10 @@ HIPAPI hipError_t hipMemsetD16Async(hipDeviceptr_t dstDevice, unsigned short us,
   iree_status_t status = iree_hal_streaming_memory_memset(
       resolved_stream.context, (iree_hal_streaming_deviceptr_t)dstDevice,
       byte_count, &us, sizeof(us), resolved_stream.stream);
+
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_stream_flush(resolved_stream.stream);
+  }
 
   hipError_t result = iree_memset_status_to_hip_result(status);
   iree_hip_resolved_stream_release(&resolved_stream);
@@ -12356,6 +12392,10 @@ HIPAPI hipError_t hipMemsetD32Async(hipDeviceptr_t dstDevice, int i, size_t N,
   iree_status_t status = iree_hal_streaming_memory_memset(
       resolved_stream.context, (iree_hal_streaming_deviceptr_t)dstDevice,
       byte_count, &i, sizeof(i), resolved_stream.stream);
+
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_stream_flush(resolved_stream.stream);
+  }
 
   hipError_t result = iree_memset_status_to_hip_result(status);
   iree_hip_resolved_stream_release(&resolved_stream);
