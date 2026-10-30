@@ -246,6 +246,13 @@ typedef enum iree_hal_streaming_memory_flag_bits_e {
 iree_hal_streaming_deviceptr_t iree_hal_streaming_buffer_device_pointer(
     iree_hal_streaming_buffer_t* buffer);
 
+// Finds an allocation by device or host alias without an error for a miss.
+// The returned wrapper is borrowed; the caller keeps its allocation alive.
+bool iree_hal_streaming_memory_try_lookup(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_deviceptr_t pointer,
+    iree_hal_streaming_buffer_ref_t* out_ref);
+
 // Looks up a buffer by device pointer.
 // Returns a borrowed reference to the buffer (does not transfer ownership).
 // Returns an error if the device pointer is not found.

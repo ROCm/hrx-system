@@ -7573,6 +7573,62 @@ HIPAPI hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes,
   HIP_RETURN_ERROR(result);
 }
 
+typedef struct iree_hip_capture_memcpy3d_t {
+  // Copy parameters retained by the caller for the recording callback.
+  const hipMemcpy3DParms* params;
+  // Exact HIP result produced while constructing the graph operation.
+  hipError_t result;
+} iree_hip_capture_memcpy3d_t;
+
+static iree_status_t iree_hip_capture_record_memcpy3d_node(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count, void* user_data,
+    iree_hal_streaming_graph_node_t** out_terminal_node) {
+  iree_hip_capture_memcpy3d_t* capture =
+      (iree_hip_capture_memcpy3d_t*)user_data;
+  hipGraphNode_t node = NULL;
+  // A graph created by stream capture is owned by the stream but is not a
+  // public graph handle until capture ends. Record directly against that owned
+  // graph instead of applying public-handle validation to an unpublished graph.
+  capture->result = iree_hip_graph_add_memcpy_node(
+      &node, graph, (const hipGraphNode_t*)dependencies, dependency_count,
+      capture->params);
+  if (capture->result != hipSuccess) {
+    return iree_make_status(IREE_STATUS_ABORTED,
+                            "captured memory copy construction failed");
+  }
+
+  *out_terminal_node = (iree_hal_streaming_graph_node_t*)node;
+  return iree_ok_status();
+}
+
+static hipError_t iree_hip_capture_memcpy3d_node(
+    iree_hal_streaming_stream_t* stream, const hipMemcpy3DParms* params,
+    bool* out_was_capturing) {
+  *out_was_capturing = false;
+  if (!iree_hal_streaming_context_has_capture_streams(stream->context)) {
+    return hipSuccess;
+  }
+  if (params && (params->extent.width == 0 || params->extent.height == 0 ||
+                 params->extent.depth == 0)) {
+    return iree_status_to_hip_result(
+        iree_hal_streaming_capture_try_record_noop(stream, out_was_capturing));
+  }
+  iree_hip_capture_memcpy3d_t capture = {
+      .params = params,
+      .result = hipSuccess,
+  };
+  iree_status_t status = iree_hal_streaming_capture_try_record_node(
+      stream, iree_hip_capture_record_memcpy3d_node, &capture,
+      out_was_capturing);
+  if (capture.result != hipSuccess) {
+    iree_status_ignore(status);
+    return capture.result;
+  }
+  return iree_status_to_hip_result(status);
+}
+
 // Copies data between host and device asynchronously.
 //
 // Parameters:
@@ -7643,6 +7699,7 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
   iree_hal_streaming_context_t* context = resolved_stream.context;
   iree_hal_streaming_stream_t* stream_obj = resolved_stream.stream;
 
+  const hipMemcpyKind requested_kind = kind;
   hipError_t kind_result =
       iree_hip_resolve_memcpy_kind(context, dst, src, kind, &kind);
   if (kind_result != hipSuccess) {
@@ -7702,6 +7759,29 @@ HIPAPI hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes,
     iree_hip_resolved_stream_release(&resolved_stream);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(dependency_result);
+  }
+
+  if (iree_hal_streaming_context_has_capture_streams(context)) {
+    const hipMemcpy3DParms params = {
+        .srcPtr = {.ptr = (void*)src,
+                   .pitch = sizeBytes,
+                   .xsize = sizeBytes,
+                   .ysize = 1},
+        .dstPtr = {.ptr = dst,
+                   .pitch = sizeBytes,
+                   .xsize = sizeBytes,
+                   .ysize = 1},
+        .extent = {.width = sizeBytes, .height = 1, .depth = 1},
+        .kind = requested_kind,
+    };
+    bool was_capturing = false;
+    const hipError_t result =
+        iree_hip_capture_memcpy3d_node(stream_obj, &params, &was_capturing);
+    if (result != hipSuccess || was_capturing) {
+      iree_hip_resolved_stream_release(&resolved_stream);
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(result);
+    }
   }
 
   iree_status_t status = iree_ok_status();
@@ -7819,62 +7899,6 @@ static hipError_t iree_hip_validate_2d_copy_shape(size_t dst_pitch,
     return hipErrorInvalidValue;
   }
   return hipSuccess;
-}
-
-typedef struct iree_hip_capture_memcpy3d_t {
-  // Copy parameters retained by the caller for the recording callback.
-  const hipMemcpy3DParms* params;
-  // Exact HIP result produced while constructing the graph operation.
-  hipError_t result;
-} iree_hip_capture_memcpy3d_t;
-
-static iree_status_t iree_hip_capture_record_memcpy3d_node(
-    iree_hal_streaming_graph_t* graph,
-    iree_hal_streaming_graph_node_t** dependencies,
-    iree_host_size_t dependency_count, void* user_data,
-    iree_hal_streaming_graph_node_t** out_terminal_node) {
-  iree_hip_capture_memcpy3d_t* capture =
-      (iree_hip_capture_memcpy3d_t*)user_data;
-  hipGraphNode_t node = NULL;
-  // A graph created by stream capture is owned by the stream but is not a
-  // public graph handle until capture ends. Record directly against that owned
-  // graph instead of applying public-handle validation to an unpublished graph.
-  capture->result = iree_hip_graph_add_memcpy_node(
-      &node, graph, (const hipGraphNode_t*)dependencies, dependency_count,
-      capture->params);
-  if (capture->result != hipSuccess) {
-    return iree_make_status(IREE_STATUS_ABORTED,
-                            "captured memory copy construction failed");
-  }
-
-  *out_terminal_node = (iree_hal_streaming_graph_node_t*)node;
-  return iree_ok_status();
-}
-
-static hipError_t iree_hip_capture_memcpy3d_node(
-    iree_hal_streaming_stream_t* stream, const hipMemcpy3DParms* params,
-    bool* out_was_capturing) {
-  *out_was_capturing = false;
-  if (!iree_hal_streaming_context_has_capture_streams(stream->context)) {
-    return hipSuccess;
-  }
-  if (params && (params->extent.width == 0 || params->extent.height == 0 ||
-                 params->extent.depth == 0)) {
-    return iree_status_to_hip_result(
-        iree_hal_streaming_capture_try_record_noop(stream, out_was_capturing));
-  }
-  iree_hip_capture_memcpy3d_t capture = {
-      .params = params,
-      .result = hipSuccess,
-  };
-  iree_status_t status = iree_hal_streaming_capture_try_record_node(
-      stream, iree_hip_capture_record_memcpy3d_node, &capture,
-      out_was_capturing);
-  if (capture.result != hipSuccess) {
-    iree_status_ignore(status);
-    return capture.result;
-  }
-  return iree_status_to_hip_result(status);
 }
 
 static hipError_t iree_hip_memcpy2d_to_3d_params(const hip_Memcpy2D* copy,
@@ -20945,9 +20969,8 @@ static hipError_t iree_hip_graph_add_memcpy_node_1d(
 
   iree_hal_streaming_graph_node_t* node = NULL;
 
-  // For device-to-device copies, try to use the optimized memcpy node.
-  // For copies involving host memory, use graph-owned host staging buffers so
-  // callbacks never submit blocking transfers from a queue completion thread.
+  // Copies crossing compatibility contexts use host operations around a local
+  // device copy, or a host operation for two remote endpoints.
   if (kind == hipMemcpyDeviceToDevice) {
     iree_hal_streaming_context_t* dst_context = NULL;
     iree_hal_streaming_buffer_ref_t dst_ref = {0};
@@ -20996,7 +21019,21 @@ static hipError_t iree_hip_graph_add_memcpy_node_1d(
       IREE_TRACE_ZONE_END(z0);
       return (peer_result);
     }
+  }
 
+  // Registered host memory already has a device-visible mapping. Keep it on
+  // the direct copy path for explicit nodes and stream capture alike.
+  iree_hal_streaming_buffer_ref_t host_ref;
+  const bool direct_host =
+      (kind == hipMemcpyHostToDevice &&
+       iree_hal_streaming_memory_try_lookup(stream_graph->context,
+                                            (iree_hal_streaming_deviceptr_t)src,
+                                            &host_ref)) ||
+      (kind == hipMemcpyDeviceToHost &&
+       iree_hal_streaming_memory_try_lookup(stream_graph->context,
+                                            (iree_hal_streaming_deviceptr_t)dst,
+                                            &host_ref));
+  if (kind == hipMemcpyDeviceToDevice || direct_host) {
     iree_status_t status = iree_hal_streaming_graph_add_copy_ptr_node(
         stream_graph, deps, numDependencies,
         (iree_hal_streaming_deviceptr_t)dst,
@@ -23551,6 +23588,32 @@ static hipError_t iree_hip_graph_prepare_memcpy_node_params(
   if (result == hipSuccess && kind != hipMemcpyHostToDevice) {
     result = iree_hip_lookup_memcpy_range_with_owner(
         graph->context, src, src_span, &src_context, &plan->attrs.src_ref);
+  }
+  // A known host allocation needs no staging, but an out-of-range access must
+  // still fail instead of treating that allocation as an unregistered pointer.
+  iree_hal_streaming_buffer_ref_t host_ref;
+  const bool registered_host =
+      (kind == hipMemcpyHostToDevice &&
+       iree_hal_streaming_memory_try_lookup(
+           graph->context, (iree_hal_streaming_deviceptr_t)src, &host_ref)) ||
+      (kind == hipMemcpyDeviceToHost &&
+       iree_hal_streaming_memory_try_lookup(
+           graph->context, (iree_hal_streaming_deviceptr_t)dst, &host_ref));
+  if (result == hipSuccess && registered_host) {
+    const iree_host_size_t span =
+        kind == hipMemcpyHostToDevice ? src_span : dst_span;
+    if (span > host_ref.buffer->size - host_ref.offset) {
+      result = hipErrorInvalidValue;
+    } else {
+      iree_hal_streaming_context_retain(graph->context);
+      if (kind == hipMemcpyHostToDevice) {
+        src_context = graph->context;
+        plan->attrs.src_ref = host_ref;
+      } else {
+        dst_context = graph->context;
+        plan->attrs.dst_ref = host_ref;
+      }
+    }
   }
   const bool local_dst = dst_context == graph->context;
   const bool local_src = src_context == graph->context;

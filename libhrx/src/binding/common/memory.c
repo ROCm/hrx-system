@@ -50,7 +50,7 @@ static iree_status_t iree_hal_streaming_command_buffer_barrier(
   return iree_hal_command_buffer_barrier(command_buffer, &execution_barrier);
 }
 
-static bool iree_hal_streaming_memory_try_lookup(
+bool iree_hal_streaming_memory_try_lookup(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_deviceptr_t device_ptr,
     iree_hal_streaming_buffer_ref_t* out_ref) {

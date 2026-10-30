@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <array>
+#include <cstring>
 
 #include "binding/hip/api.h"
 #include "binding/hip/hip_dso_test_util.h"
@@ -39,6 +40,10 @@ struct HipGraphApi {
   decltype(&hipMalloc) allocate = nullptr;
   // Releases the allocation after graph completion.
   decltype(&hipFree) free = nullptr;
+  // Allocates host storage with a direct device mapping.
+  decltype(&hipHostAlloc) allocate_host = nullptr;
+  // Releases host storage after all graph users are joined.
+  decltype(&hipFreeHost) free_host = nullptr;
   // Creates an empty graph template.
   decltype(&hipGraphCreate) graph_create = nullptr;
   // Releases a graph template.
@@ -119,6 +124,8 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     RESOLVE(stream_synchronize, "hipStreamSynchronize");
     RESOLVE(allocate, "hipMalloc");
     RESOLVE(free, "hipFree");
+    RESOLVE(allocate_host, "hipHostAlloc");
+    RESOLVE(free_host, "hipFreeHost");
     RESOLVE(graph_create, "hipGraphCreate");
     RESOLVE(graph_destroy, "hipGraphDestroy");
     RESOLVE(graph_clone, "hipGraphClone");
@@ -197,6 +204,11 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     if (device_) {
       EXPECT_EQ(hipSuccess, api_.free(device_));
     }
+    for (auto* buffer : host_buffers_) {
+      if (buffer) {
+        EXPECT_EQ(hipSuccess, api_.free_host(buffer));
+      }
+    }
     if (remote_context_) {
       EXPECT_EQ(hipSuccess, api_.set_context(remote_context_));
       for (auto* buffer : remote_buffers_) {
@@ -249,6 +261,8 @@ class HipGraphMemoryApiTest : public ::testing::Test {
   hipCtx_t remote_context_ = nullptr;
   // Peer copy endpoints retained through graph completion and cleanup.
   std::array<hipDeviceptr_t, 2> remote_buffers_ = {};
+  // Registered host endpoints retained until graph and stream cleanup.
+  std::array<void*, 2> host_buffers_ = {};
   // Initial copy data retained through teardown, including assertion failures.
   std::array<uint8_t, 64> source_ = {};
   // Replacement data used by template and executable updates.
@@ -662,10 +676,35 @@ TEST_F(HipGraphMemoryApiTest, CapturedCopiesSharePublicEnableAndDeletion) {
   size_t count = nodes.size();
   ASSERT_EQ(hipSuccess, api_.get_nodes(clone_, nodes.data(), &count));
   ASSERT_EQ(count, nodes.size());
+  hipGraphNode_t upload = nullptr;
+  for (auto node : nodes) {
+    hipMemcpy3DParms parameters = {};
+    ASSERT_EQ(hipSuccess, api_.get_copy(node, &parameters));
+    EXPECT_EQ(source_.size(), parameters.extent.width);
+    if (parameters.kind == hipMemcpyHostToDevice) {
+      EXPECT_EQ(device_, parameters.dstPtr.ptr);
+      EXPECT_EQ(source_.data(), parameters.srcPtr.ptr);
+      upload = node;
+    } else {
+      EXPECT_EQ(hipMemcpyDeviceToHost, parameters.kind);
+      EXPECT_EQ(destination_.data(), parameters.dstPtr.ptr);
+      EXPECT_EQ(device_, parameters.srcPtr.ptr);
+    }
+  }
+  ASSERT_NE(nullptr, upload);
   ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, clone_, 0));
   Replay();
   ASSERT_FALSE(HasFatalFailure());
   EXPECT_EQ(destination_, source_);
+  ASSERT_EQ(hipSuccess, api_.set_executable_copy(
+                            executable_, upload, device_, replacement_.data(),
+                            replacement_.size(), hipMemcpyHostToDevice));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, replacement_);
+  hipMemcpy3DParms original = {};
+  ASSERT_EQ(hipSuccess, api_.get_copy(upload, &original));
+  EXPECT_EQ(source_.data(), original.srcPtr.ptr);
   // Disable both public operations: neither staging callback may touch the
   // destination. This also covers implementations returning nodes unordered.
   for (auto node : nodes) {
@@ -683,6 +722,96 @@ TEST_F(HipGraphMemoryApiTest, CapturedCopiesSharePublicEnableAndDeletion) {
   Replay(sibling_);
   ASSERT_FALSE(HasFatalFailure());
   EXPECT_EQ(destination_, untouched);
+}
+
+TEST_F(HipGraphMemoryApiTest, RegisteredHostCopiesPreserveCaptureAndUpdates) {
+  ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
+  for (auto& buffer : host_buffers_) {
+    ASSERT_EQ(hipSuccess, api_.allocate_host(&buffer, source_.size(),
+                                             hipHostMallocDefault));
+  }
+  auto* source = static_cast<uint8_t*>(host_buffers_[0]);
+  auto* destination = static_cast<uint8_t*>(host_buffers_[1]);
+  std::memcpy(source, source_.data(), source_.size());
+  std::memset(destination, 0, source_.size());
+  ASSERT_EQ(hipSuccess,
+            api_.begin_capture(stream_, hipStreamCaptureModeGlobal));
+  ASSERT_EQ(hipSuccess, api_.copy_async(device_, source, source_.size(),
+                                        hipMemcpyDefault, stream_));
+  ASSERT_EQ(hipSuccess, api_.copy_async(destination, device_, source_.size(),
+                                        hipMemcpyDeviceToHost, stream_));
+  ASSERT_EQ(hipSuccess, api_.end_capture(stream_, &clone_));
+  std::array<hipGraphNode_t, 2> nodes = {};
+  size_t count = nodes.size();
+  ASSERT_EQ(hipSuccess, api_.get_nodes(clone_, nodes.data(), &count));
+  ASSERT_EQ(nodes.size(), count);
+  hipGraphNode_t upload = nullptr;
+  hipGraphNode_t download = nullptr;
+  for (auto node : nodes) {
+    hipMemcpy3DParms parameters = {};
+    ASSERT_EQ(hipSuccess, api_.get_copy(node, &parameters));
+    if (parameters.kind == hipMemcpyDefault) {
+      EXPECT_EQ(source, parameters.srcPtr.ptr);
+      EXPECT_EQ(device_, parameters.dstPtr.ptr);
+      upload = node;
+    } else {
+      EXPECT_EQ(hipMemcpyDeviceToHost, parameters.kind);
+      EXPECT_EQ(device_, parameters.srcPtr.ptr);
+      EXPECT_EQ(destination, parameters.dstPtr.ptr);
+      download = node;
+    }
+  }
+  ASSERT_NE(nullptr, upload);
+  ASSERT_NE(nullptr, download);
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, clone_, 0));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(0, std::memcmp(source, destination, source_.size()));
+
+  constexpr size_t offset = 8;
+  constexpr size_t length = 16;
+  ASSERT_EQ(hipSuccess, api_.set_executable_copy(executable_, upload, device_,
+                                                 source + offset, length,
+                                                 hipMemcpyDefault));
+  ASSERT_EQ(hipSuccess, api_.set_executable_copy(
+                            executable_, download, destination + offset,
+                            device_, length, hipMemcpyDeviceToHost));
+  // Reject a registered range overrun without losing the accepted parameters.
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.set_executable_copy(executable_, upload, device_, source + 1,
+                                     source_.size(), hipMemcpyDefault));
+  std::memcpy(source, replacement_.data(), replacement_.size());
+  std::memset(destination, 0xCC, source_.size());
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  for (size_t i = 0; i < source_.size(); ++i) {
+    EXPECT_EQ(i >= offset && i < offset + length ? replacement_[i] : 0xCC,
+              destination[i]);
+  }
+}
+
+TEST_F(HipGraphMemoryApiTest, HostCopyCaptureDefersUntilGraphLaunch) {
+  const auto untouched = destination_;
+  ASSERT_EQ(hipSuccess,
+            api_.begin_capture(stream_, hipStreamCaptureModeGlobal));
+  ASSERT_EQ(hipSuccess,
+            api_.copy_async(destination_.data(), source_.data(), source_.size(),
+                            hipMemcpyHostToHost, stream_));
+  ASSERT_EQ(hipSuccess, api_.end_capture(stream_, &clone_));
+  EXPECT_EQ(untouched, destination_);
+  hipGraphNode_t node = nullptr;
+  size_t count = 1;
+  ASSERT_EQ(hipSuccess, api_.get_nodes(clone_, &node, &count));
+  ASSERT_EQ(1u, count);
+  hipMemcpy3DParms parameters = {};
+  ASSERT_EQ(hipSuccess, api_.get_copy(node, &parameters));
+  EXPECT_EQ(hipMemcpyHostToHost, parameters.kind);
+  EXPECT_EQ(source_.data(), parameters.srcPtr.ptr);
+  EXPECT_EQ(destination_.data(), parameters.dstPtr.ptr);
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, clone_, 0));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(source_, destination_);
 }
 
 TEST_F(HipGraphMemoryApiTest, CopyDirectionUpdatesPreserveRejectedParameters) {
