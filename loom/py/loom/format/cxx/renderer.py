@@ -1439,6 +1439,9 @@ class CxxRenderer(CxxConfigRenderer):
         resolved = self._resolved(function)
         symbol = str(resolved.attr("callee"))
         attributes = [f'loom::symbol("{symbol}")']
+        target = resolved.attr("target")
+        if target is not None:
+            attributes.append(self._target_attribute(function, str(target)))
         inline_policy = resolved.attr("inline_policy")
         if inline_policy == "inline":
             attributes.append("loom::force_inline")
@@ -1451,15 +1454,18 @@ class CxxRenderer(CxxConfigRenderer):
 
     def _function_signature(self, function: Operation, *, bind_parameters: bool) -> str:
         resolved = self._resolved(function)
-        body = resolved.region("body")
-        if body is None or len(body.blocks) != 1:
-            raise CxxRenderError(
-                function, "function body must have one structured entry block"
-            )
-        entry = body.blocks[0]
+        if function.name == "func.decl":
+            argument_ids = list(function.operands)
+        else:
+            body = resolved.region("body")
+            if body is None or len(body.blocks) != 1:
+                raise CxxRenderError(
+                    function, "function body must have one structured entry block"
+                )
+            argument_ids = list(body.blocks[0].arg_ids)
         parameters: list[str] = []
         buffer_elements: list[str | None] = []
-        source_parameters = self._flat_source_parameters(function, list(entry.arg_ids))
+        source_parameters = self._flat_source_parameters(function, argument_ids)
         for parameter in source_parameters:
             argument = parameter.value_id
             value_type = self.module.values[argument].type
@@ -1479,13 +1485,19 @@ class CxxRenderer(CxxConfigRenderer):
         symbol = str(resolved.attr("callee"))
         self.function_buffer_elements[symbol] = tuple(buffer_elements)
         visibility = resolved.attr("visibility")
-        storage = "" if visibility == "public" else "static "
+        storage = (
+            "" if function.name == "func.decl" or visibility == "public" else "static "
+        )
         return (
             f"{storage}{self._function_result_type(function)} "
             f"{self.function_names[symbol]}(" + ", ".join(parameters) + ")"
         )
 
     def _render_function_declaration(self, function: Operation) -> None:
+        if function.name == "func.decl":
+            self._validate_projected_attributes(
+                function, ("callee", "inline_policy", "target")
+            )
         self._analyze_buffers(function)
         self.writer.attributes(self._function_attributes(function))
         self.writer.line(
@@ -1497,7 +1509,7 @@ class CxxRenderer(CxxConfigRenderer):
         self.temporary_names = set(self.scope_names[scope])
         self.rendered_assumptions_by_block.clear()
         self._validate_projected_attributes(
-            function, ("callee", "visibility", "inline_policy")
+            function, ("callee", "visibility", "inline_policy", "target")
         )
         self._analyze_buffers(function)
         body = self._resolved(function).region("body")
@@ -1610,7 +1622,10 @@ class CxxRenderer(CxxConfigRenderer):
         functions = [
             operation
             for operation in self.module.body.ops
-            if operation.name == "func.def"
+            if operation.name in {"func.def", "func.decl"}
+        ]
+        function_definitions = [
+            operation for operation in functions if operation.name == "func.def"
         ]
         commands = [
             operation
@@ -1633,6 +1648,7 @@ class CxxRenderer(CxxConfigRenderer):
         for operation in self.module.body.ops:
             if operation.name in {
                 "kernel.def",
+                "func.decl",
                 "func.def",
                 "command.def",
                 "command.decl",
@@ -1693,7 +1709,12 @@ class CxxRenderer(CxxConfigRenderer):
         pipeline_definitions = [
             operation for operation in pipelines if operation.name == "pipeline.def"
         ]
-        callables = [*functions, *kernels, *command_definitions, *pipeline_definitions]
+        callables = [
+            *function_definitions,
+            *kernels,
+            *command_definitions,
+            *pipeline_definitions,
+        ]
         for index, callable_operation in enumerate(callables):
             if index:
                 self.writer.line()
@@ -1817,6 +1838,7 @@ def _select_callable_roots(module: Module, roots: Sequence[str]) -> Module:
             raise CxxRenderError(None, f"callable root '@{name}' was not found")
         callable_operations = {
             "kernel.def",
+            "func.decl",
             "func.def",
             "command.def",
             "command.decl",
@@ -1824,7 +1846,8 @@ def _select_callable_roots(module: Module, roots: Sequence[str]) -> Module:
             "pipeline.decl",
         }
         if symbol.op.name not in callable_operations or (
-            require_definition and symbol.op.name in {"command.decl", "pipeline.decl"}
+            require_definition
+            and symbol.op.name in {"func.decl", "command.decl", "pipeline.decl"}
         ):
             raise CxxRenderError(
                 symbol.op,

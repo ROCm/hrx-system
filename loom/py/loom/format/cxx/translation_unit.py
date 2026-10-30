@@ -20,7 +20,7 @@ class TargetInfo:
 
     operation: Operation
     operation_name: str
-    kind: str
+    kind: str | None
     subgroup_size: int | None
     features: tuple[tuple[str, bool], ...]
 
@@ -75,7 +75,20 @@ def _render_generic_target(
     return lines
 
 
+def _render_target_declaration(target_name: str, target: TargetInfo) -> list[str]:
+    symbol = target.operation.attributes.get("symbol")
+    if not isinstance(symbol, str):
+        raise CxxRenderError(target.operation, "target declaration has no symbol name")
+    return [
+        f"[[loom::symbol({json.dumps(symbol)})]]",
+        f"extern const loom::target::declaration {target_name};",
+        "",
+    ]
+
+
 def _render_amdgpu_target(target_name: str, target: TargetInfo) -> list[str]:
+    if target.kind is None:
+        raise CxxRenderError(target.operation, "AMDGPU target has no selector")
     target_fields = [f'.kind = "{target.kind}"']
     if target.subgroup_size is not None:
         target_fields.append(f".subgroup_size = {target.subgroup_size}")
@@ -102,6 +115,8 @@ def _render_amdgpu_target(target_name: str, target: TargetInfo) -> list[str]:
 
 
 def _render_aie2p_target(target_name: str, target: TargetInfo) -> list[str]:
+    if target.kind is None:
+        raise CxxRenderError(target.operation, "AIE2P target has no selector")
     target_fields = [f".kind = {json.dumps(target.kind)}"]
     device_profile = target.operation.attributes.get("device_profile")
     if isinstance(device_profile, Utf8Attr):
@@ -128,7 +143,9 @@ def _render_targets(
 ) -> list[str]:
     lines: list[str] = []
     for target_name, target_type_name, target in targets:
-        if target.operation_name == "target.generic":
+        if target.operation_name == "target.decl":
+            lines.extend(_render_target_declaration(target_name, target))
+        elif target.operation_name == "target.generic":
             lines.extend(_render_generic_target(target_name, target_type_name, target))
         elif target.operation_name == "aie2p.target":
             lines.extend(_render_aie2p_target(target_name, target))
@@ -171,7 +188,7 @@ def render_preamble(
         headers.add("loomcxx/target/amdgpu.h")
     if "aie2p.target" in target_operations:
         headers.add("loomcxx/target/aie2p.h")
-    if "target.generic" in target_operations:
+    if target_operations & {"target.decl", "target.generic"}:
         headers.add("loomcxx/target.h")
     if any(name.startswith("view.atomic.") for name in operation_names):
         headers.add("loomcxx/atomic.h")

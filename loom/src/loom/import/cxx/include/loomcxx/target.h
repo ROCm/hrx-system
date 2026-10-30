@@ -9,6 +9,11 @@
 
 namespace loom::target {
 
+// Link-time target identity whose concrete record is supplied by another
+// module. Namespace-scope extern const objects of this type become
+// target.decl symbols and can be named by loom::target(object).
+struct [[loom::target("target.decl")]] declaration {};
+
 // Presence-bearing source value for an optional target field. Direct
 // assignment sets the field; value initialization leaves it absent so the
 // selected target row supplies its default.

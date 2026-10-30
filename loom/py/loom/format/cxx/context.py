@@ -49,6 +49,8 @@ _OP_BY_NAME = {operation.name: operation for operation in _OPS}
 def is_target_operation(operation: Operation) -> bool:
     """Returns whether an operation defines a target-family record."""
 
+    if operation.name == "target.decl":
+        return True
     descriptor = _OP_BY_NAME.get(operation.name)
     return descriptor is not None and any(
         isinstance(interface, TargetLikeInterface)
@@ -565,6 +567,12 @@ class CxxRenderContext:
         for operation in self.module.body.ops:
             if is_target_operation(operation):
                 symbol = operation.attributes.get("symbol")
+                if operation.name == "target.decl":
+                    if isinstance(symbol, str):
+                        targets[symbol] = TargetInfo(
+                            operation, operation.name, None, None, ()
+                        )
+                    continue
                 kind = operation.attributes.get("kind")
                 if isinstance(symbol, str) and isinstance(kind, str):
                     if operation.name not in {"amdgpu.target", "aie2p.target"}:
@@ -642,6 +650,7 @@ class CxxRenderContext:
         if target.operation_name not in {
             "aie2p.target",
             "amdgpu.target",
+            "target.decl",
             "target.generic",
         }:
             raise CxxRenderError(
@@ -719,17 +728,24 @@ class CxxRenderContext:
                     self.buffer_info[root].alignment = max(old, alignment)
 
     def _analyze_buffers(self, callable_operation: Operation) -> None:
-        fields = self._resolved(callable_operation)
-        body = fields.region("body")
-        if body is None or len(body.blocks) != 1:
-            raise CxxRenderError(
-                callable_operation,
-                "callable body must have one structured entry block",
-            )
-        entry = body.blocks[0]
-        direct_operations = {id(operation) for operation in entry.ops}
+        if callable_operation.name == "func.decl":
+            argument_ids = callable_operation.operands
+            body_operations: tuple[Operation, ...] = ()
+            direct_operations: set[int] = set()
+        else:
+            fields = self._resolved(callable_operation)
+            body = fields.region("body")
+            if body is None or len(body.blocks) != 1:
+                raise CxxRenderError(
+                    callable_operation,
+                    "callable body must have one structured entry block",
+                )
+            entry = body.blocks[0]
+            argument_ids = entry.arg_ids
+            body_operations = tuple(walk_operations(entry))
+            direct_operations = {id(operation) for operation in entry.ops}
         parameter_contracts = callable_operation.name == "kernel.def"
-        for argument in entry.arg_ids:
+        for argument in argument_ids:
             argument_type = self.module.values[argument].type
             if isinstance(argument_type, BufferType):
                 self.buffer_roots[argument] = argument
@@ -756,7 +772,7 @@ class CxxRenderContext:
                     element_types={repr(argument_type.element_type)},
                 )
 
-        for operation in walk_operations(entry):
+        for operation in body_operations:
             if operation.name in {
                 "buffer.assume.alignment",
                 "buffer.assume.memory_space",
@@ -852,7 +868,7 @@ class CxxRenderContext:
         changed = True
         while changed:
             changed = False
-            for operation in walk_operations(entry):
+            for operation in body_operations:
                 if operation.name == "view.subview":
                     source, result = operation.operands[0], operation.results[0]
                     if result in self.view_signed and source not in self.view_signed:

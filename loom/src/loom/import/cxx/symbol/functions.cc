@@ -592,9 +592,12 @@ bool Functions::admit_declaration(
   }
   template_definitions_.declaration(function, attributes);
   bool is_module_metadata = configs_.declaration(symbol, attributes, owner);
-  is_module_metadata |=
+  const bool is_target_metadata =
       target_definitions_.declaration(symbol, attributes, owner);
-  admit_symbol(symbol, attributes);
+  is_module_metadata |= is_target_metadata;
+  if (!is_target_metadata) {
+    admit_symbol(symbol, attributes);
+  }
   auto require_namespace_function = [&] {
     if (!function || scope != DeclarationScope::Namespace ||
         function->isTemplatePattern() ||

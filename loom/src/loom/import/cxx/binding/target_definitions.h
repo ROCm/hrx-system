@@ -36,9 +36,9 @@ class TargetDefinitions {
         symbol_names_(symbol_names),
         module_(module) {}
 
-  // Admits a marked namespace-scope constexpr object or a target binding during
-  // the shared declaration walk. Returns whether |symbol| is a target
-  // definition whose global storage is replaced by module metadata.
+  // Admits a marked namespace-scope target object or a target binding during
+  // the shared declaration walk. Returns whether |symbol| is target metadata
+  // whose source storage is replaced by a target definition or declaration.
   bool declaration(cxx::Symbol* symbol,
                    cxx::List<cxx::AttributeSpecifierAST*>* attributes,
                    cxx::AST* owner);
@@ -69,9 +69,12 @@ class TargetDefinitions {
     cxx::VariableSymbol* variable;
     // Declarator owning source diagnostics and the emitted target location.
     cxx::AST* owner;
+    // Whether this object declares an externally defined target record.
+    bool is_declaration;
     // Registered target operation selected by the facade type marker.
     loom_op_kind_t operation_kind;
-    // TargetLike operation schema valid for the context lifetime.
+    // Registered operation schema valid for the context lifetime. A
+    // target.decl schema carries only symbol identity, not target facts.
     const loom_op_vtable_t* vtable;
     // Module spelling derived from the qualified source object name.
     std::string name;
@@ -89,9 +92,13 @@ class TargetDefinitions {
   void admit_function(cxx::FunctionSymbol* function,
                       cxx::List<cxx::AttributeSpecifierAST*>* attributes,
                       cxx::AST* owner);
-  bool admit_definition(cxx::VariableSymbol* variable, cxx::AST* owner);
+  bool admit_target(cxx::VariableSymbol* variable,
+                    cxx::List<cxx::AttributeSpecifierAST*>* attributes,
+                    cxx::AST* owner);
   void emit_definition(Definition& definition, loom_builder_t* builder);
   std::string qualified_name(cxx::VariableSymbol* variable) const;
+  std::string source_name(cxx::VariableSymbol* variable,
+                          cxx::List<cxx::AttributeSpecifierAST*>* attributes);
 
   // Invocation-owned frontend and source diagnostic boundary.
   cxx::TranslationUnit& unit_;
