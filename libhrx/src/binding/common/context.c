@@ -13,7 +13,7 @@
 #include "common/init.h"
 #include "common/memory.h"
 #include "common/stream.h"
-#include "common/stream_value.h"
+#include "common/stream_queue.h"
 #include "libhrx/src/libhrx/mem_pool_backing.h"
 
 //===----------------------------------------------------------------------===//
@@ -822,6 +822,19 @@ void iree_hal_streaming_context_unregister_stream(
   // Capture detachment and registry removal are one lifecycle transaction;
   // releasing the list reference remains outside all capture locks.
   if (iree_hal_streaming_capture_unregister_stream(context, stream)) {
+    // Completion observers can retain a detached stream after its public handle
+    // is gone. Sever its borrowed context before removing the registry's final
+    // ownership so later observer retirement cannot revisit a destroyed
+    // context.
+    iree_slim_mutex_lock(&stream->mutex);
+    iree_hal_queue_t* queue = stream->queue;
+    iree_hal_queue_t* cooperative_queue = stream->cooperative_queue;
+    stream->queue = NULL;
+    stream->cooperative_queue = NULL;
+    stream->context = NULL;
+    iree_slim_mutex_unlock(&stream->mutex);
+    iree_hal_queue_release(cooperative_queue);
+    iree_hal_queue_release(queue);
     iree_hal_streaming_stream_release(stream);
   }
 

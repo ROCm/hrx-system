@@ -12,6 +12,7 @@
 #include "common/module.h"
 #include "common/occupancy.h"
 #include "common/stream.h"
+#include "common/stream_queue.h"
 #include "common/stream_value.h"
 #include "iree/base/api.h"
 #include "iree/hal/utils/resource_set.h"
@@ -2261,7 +2262,8 @@ static iree_status_t iree_hal_streaming_accepted_signal_list_drain(
 
 static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream,
-    iree_hal_queue_t* cooperative_queue, uint64_t launch_stream_tail_value,
+    iree_hal_queue_t* queue, iree_hal_queue_t* cooperative_queue,
+    uint64_t launch_stream_tail_value,
     iree_hal_semaphore_list_t external_wait_semaphores,
     iree_hal_semaphore_list_t external_signal_semaphores,
     iree_hal_streaming_dropped_graph_list_t* dropped_graphs,
@@ -2320,8 +2322,8 @@ iree_hal_streaming_graph_exec_preflight_cooperative_dispatches_locked(
 static iree_status_t iree_hal_streaming_graph_submit_block(
     iree_hal_streaming_graph_block_t* block,
     const iree_hal_streaming_graph_block_ptrs_t* ptrs,
-    iree_hal_streaming_stream_t* stream, iree_hal_queue_t* cooperative_queue,
-    uint64_t launch_stream_tail_value,
+    iree_hal_streaming_stream_t* stream, iree_hal_queue_t* queue,
+    iree_hal_queue_t* cooperative_queue, uint64_t launch_stream_tail_value,
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores,
     iree_hal_streaming_recorded_point_t* record_point,
@@ -2335,7 +2337,7 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
     // the tail carries down unchanged. The shared accepted list includes every
     // actual child submission if a later child block rejects.
     return iree_hal_streaming_graph_exec_submit_blocks_locked(
-        child_exec, stream, cooperative_queue, launch_stream_tail_value,
+        child_exec, stream, queue, cooperative_queue, launch_stream_tail_value,
         wait_semaphores, signal_semaphores, dropped_graphs, accepted_signals);
   }
   if (IREE_UNLIKELY(signal_semaphores.count == 0)) {
@@ -2353,8 +2355,8 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
   switch (block->type) {
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD:
       status = iree_hal_streaming_event_enqueue_record(
-          ptrs->attrs->event.event, stream->context, stream->queue,
-          wait_semaphores, signal_semaphores, record_point);
+          ptrs->attrs->event.event, stream->context, queue, wait_semaphores,
+          signal_semaphores, record_point);
       break;
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_WAIT:
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER: {
@@ -2362,14 +2364,13 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
           block->type == IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER
               ? ptrs->attrs->barrier.flags
               : IREE_HAL_QUEUE_BARRIER_FLAG_NONE;
-      status =
-          iree_hal_queue_barrier(stream->queue, wait_semaphores,
-                                 signal_semaphores, /*barriers=*/NULL, flags);
+      status = iree_hal_queue_barrier(queue, wait_semaphores, signal_semaphores,
+                                      /*barriers=*/NULL, flags);
       break;
     }
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_FILL:
       status = iree_hal_queue_fill(
-          stream->queue, wait_semaphores, signal_semaphores,
+          queue, wait_semaphores, signal_semaphores,
           ptrs->attrs->fill.target_buffer, ptrs->attrs->fill.target_offset,
           ptrs->attrs->fill.length, &ptrs->attrs->fill.pattern,
           ptrs->attrs->fill.pattern_length, /*barriers=*/NULL,
@@ -2377,13 +2378,13 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
       break;
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_COPY:
       status = iree_hal_queue_copy(
-          stream->queue, wait_semaphores, signal_semaphores,
+          queue, wait_semaphores, signal_semaphores,
           ptrs->attrs->copy.source_buffer, ptrs->attrs->copy.source_offset,
           ptrs->attrs->copy.target_buffer, ptrs->attrs->copy.target_offset,
           ptrs->attrs->copy.length, /*barriers=*/NULL, ptrs->attrs->copy.flags);
       break;
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_DISPATCH: {
-      iree_hal_queue_t* dispatch_queue = stream->queue;
+      iree_hal_queue_t* dispatch_queue = queue;
       if (iree_any_bit_set(ptrs->attrs->dispatch.flags,
                            IREE_HAL_DISPATCH_FLAG_COOPERATIVE)) {
         IREE_ASSERT(cooperative_queue);
@@ -2403,8 +2404,7 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
       break;
     }
     case IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_EXECUTE:
-      status = iree_hal_queue_execute(stream->queue, wait_semaphores,
-                                      signal_semaphores,
+      status = iree_hal_queue_execute(queue, wait_semaphores, signal_semaphores,
                                       ptrs->attrs->execute.command_buffer,
                                       iree_hal_buffer_binding_table_empty(),
                                       IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
@@ -2417,9 +2417,9 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
           /*resource=*/NULL, &call);
       if (iree_status_is_ok(status)) {
         const uint64_t args[4] = {0};
-        status = iree_hal_queue_host_call(stream->queue, wait_semaphores,
-                                          signal_semaphores, call, args,
-                                          ptrs->attrs->host_call.flags);
+        status =
+            iree_hal_queue_host_call(queue, wait_semaphores, signal_semaphores,
+                                     call, args, ptrs->attrs->host_call.flags);
         iree_hal_resource_release(call.resource);
       }
       break;
@@ -2446,7 +2446,8 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
 // waits on every signal of the partition ahead of it, back to block 0.
 static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream,
-    iree_hal_queue_t* cooperative_queue, uint64_t launch_stream_tail_value,
+    iree_hal_queue_t* queue, iree_hal_queue_t* cooperative_queue,
+    uint64_t launch_stream_tail_value,
     iree_hal_semaphore_list_t external_wait_semaphores,
     iree_hal_semaphore_list_t external_signal_semaphores,
     iree_hal_streaming_dropped_graph_list_t* dropped_graphs,
@@ -2477,7 +2478,7 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     IREE_RETURN_IF_ERROR(iree_hal_streaming_accepted_signal_list_push_empty(
         accepted_signals, &accepted_signal));
     iree_status_t status = iree_hal_queue_barrier(
-        stream->queue, external_wait_semaphores, external_signal_semaphores,
+        queue, external_wait_semaphores, external_signal_semaphores,
         /*barriers=*/NULL, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
     if (iree_status_is_ok(status)) {
       accepted_signal->semaphore = external_signal_semaphores.semaphores[0];
@@ -2682,9 +2683,9 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
       }
       if (iree_status_is_ok(status)) {
         status = iree_hal_streaming_graph_submit_block(
-            block, &ptrs, stream, cooperative_queue, launch_stream_tail_value,
-            wait_semaphores, signal_semaphores, &record_point, dropped_graphs,
-            accepted_signals);
+            block, &ptrs, stream, queue, cooperative_queue,
+            launch_stream_tail_value, wait_semaphores, signal_semaphores,
+            &record_point, dropped_graphs, accepted_signals);
         if (iree_status_is_ok(status)) {
           for (uint16_t i = 0; i < block->signal_semaphore_count; ++i) {
             const uint16_t semaphore_index = ptrs.signal_semaphore_indices[i];
@@ -2864,22 +2865,22 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
 
   iree_hal_semaphore_t* wait_semaphore = stream->timeline_semaphore;
   uint64_t wait_payload_value = stream_wait_value;
-  iree_hal_semaphore_t* signal_semaphore = stream->timeline_semaphore;
-  uint64_t signal_payload_value = stream_signal_value;
   iree_hal_semaphore_list_t wait_semaphores = {
       .count = stream_wait_value > 0 ? 1 : 0,
       .semaphores = &wait_semaphore,
       .payload_values = &wait_payload_value,
   };
-  iree_hal_semaphore_list_t signal_semaphores = {
-      .count = 1,
-      .semaphores = &signal_semaphore,
-      .payload_values = &signal_payload_value,
-  };
+  iree_hal_streaming_submission_t submission = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_submission_prepare_locked(
+        stream, stream->queue, stream_signal_value,
+        IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
+  }
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_graph_exec_submit_blocks_locked(
-        exec, stream, cooperative_queue, stream_wait_value, wait_semaphores,
-        signal_semaphores, &dropped_graphs, &accepted_signals);
+        exec, stream, submission.queue, cooperative_queue, stream_wait_value,
+        wait_semaphores, submission.signals, &dropped_graphs,
+        &accepted_signals);
   }
 
   if (!iree_status_is_ok(status)) {
@@ -2889,12 +2890,21 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
     // overtaking the prefix. Join keeps the submission failure primary.
     iree_status_t drain_status =
         iree_hal_streaming_accepted_signal_list_drain(&accepted_signals);
+    if (!iree_status_is_ok(drain_status) && submission.completion) {
+      // A failed prefix signal cannot prove hardware retirement. The final
+      // graph signal was not accepted, so rejecting its prepared observer is
+      // insufficient: retain the lane for authoritative queue teardown.
+      iree_slim_mutex_lock(&stream->context->value_wait_lane_mutex);
+      submission.completion->lane->has_failed_submission = true;
+      iree_slim_mutex_unlock(&stream->context->value_wait_lane_mutex);
+    }
     status = iree_status_join(status, drain_status);
   }
 
+  iree_hal_streaming_submission_finish_locked(stream, &submission,
+                                              iree_status_is_ok(status));
   if (iree_status_is_ok(status)) {
     *out_result = IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS;
-    stream->pending_value = stream_signal_value;
     if (exec->uses_graph_memory_nodes) {
       iree_hal_streaming_stream_release(
           exec->graph_memory_active_launch_stream);

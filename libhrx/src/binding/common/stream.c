@@ -16,6 +16,7 @@
 #include "common/graph.h"
 #include "common/kernel_arguments.h"
 #include "common/memory.h"
+#include "common/stream_queue.h"
 
 // Env-gated timing for launch-path investigation. This intentionally uses plain
 // counters because the current perf probes run single-threaded and we want the
@@ -340,6 +341,7 @@ iree_status_t iree_hal_streaming_stream_create(
   stream->queue = queue;
   iree_hal_queue_retain(stream->queue);
   stream->cooperative_queue = NULL;
+  stream->value_wait_lane = NULL;
   stream->memory_reuse_dependencies = NULL;
   stream->memory_reuse_dependency_count = 0;
   stream->memory_reuse_dependency_capacity = 0;
@@ -356,7 +358,6 @@ iree_status_t iree_hal_streaming_stream_create(
   stream->capture_dependency_capacity = 0;
 
   stream->host_allocator = host_allocator;
-  iree_slim_mutex_initialize(&stream->value_wait_mutex);
   iree_slim_mutex_initialize(&stream->mutex);
 
   // Create timeline semaphore for synchronization.
@@ -458,7 +459,6 @@ static void iree_hal_streaming_stream_destroy(
 
   // Deinitialize synchronization.
   iree_slim_mutex_deinitialize(&stream->mutex);
-  iree_slim_mutex_deinitialize(&stream->value_wait_mutex);
 
   // Free stream memory.
   const iree_allocator_t host_allocator = stream->host_allocator;
@@ -601,22 +601,23 @@ static iree_status_t iree_hal_streaming_stream_flush_locked_impl(
         .semaphores = &stream->timeline_semaphore,
         .payload_values = &wait_value,
     };
-    const iree_hal_semaphore_list_t signal_semaphores = {
-        .count = 1,
-        .semaphores = &stream->timeline_semaphore,
-        .payload_values = &signal_value,
-    };
-
+    iree_hal_streaming_submission_t submission;
+    status = iree_hal_streaming_submission_prepare_locked(
+        stream, stream->queue, signal_value,
+        IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
     timing_step_ns = timing->enabled ? hrx_launch_timing_now_ns() : 0;
-    status = iree_hal_queue_execute(stream->queue, wait_semaphores,
-                                    signal_semaphores, command_buffer,
-                                    iree_hal_buffer_binding_table_empty(),
-                                    IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_queue_execute(submission.queue, wait_semaphores,
+                                      submission.signals, command_buffer,
+                                      iree_hal_buffer_binding_table_empty(),
+                                      IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
+    }
+    iree_hal_streaming_submission_finish_locked(stream, &submission,
+                                                iree_status_is_ok(status));
     if (iree_status_is_ok(status)) {
       // An accepted submission owns the value it signals, even if flushing the
       // hardware queue subsequently reports an error.
-      stream->pending_value = signal_value;
-      status = iree_hal_queue_flush(stream->queue);
+      status = iree_hal_queue_flush(submission.queue);
     }
     if (timing->enabled) {
       timing->execute_ns += hrx_launch_timing_now_ns() - timing_step_ns;
@@ -869,20 +870,22 @@ iree_status_t iree_hal_streaming_stream_wait_streams(
           .semaphores = wait_semaphores_storage,
           .payload_values = wait_values_storage,
       };
-      const iree_hal_semaphore_list_t signal_semaphores = {
-          .count = 1,
-          .semaphores = &stream->timeline_semaphore,
-          .payload_values = &signal_value,
-      };
-      status = iree_hal_queue_barrier(stream->queue, wait_semaphores,
-                                      signal_semaphores, /*barriers=*/NULL,
-                                      IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+      iree_hal_streaming_submission_t submission;
+      status = iree_hal_streaming_submission_prepare_locked(
+          stream, stream->queue, signal_value,
+          IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_queue_barrier(submission.queue, wait_semaphores,
+                                        submission.signals, /*barriers=*/NULL,
+                                        IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+      }
+      iree_hal_streaming_submission_finish_locked(stream, &submission,
+                                                  iree_status_is_ok(status));
       if (iree_status_is_ok(status)) {
         // The accepted barrier owns the value it signals, so the timeline
         // advances here and stays advanced even when the flush below fails.
         submitted = true;
-        stream->pending_value = signal_value;
-        status = iree_hal_queue_flush(stream->queue);
+        status = iree_hal_queue_flush(submission.queue);
       }
     }
     iree_slim_mutex_unlock(&stream->mutex);
@@ -1069,17 +1072,19 @@ iree_status_t iree_hal_streaming_stream_wait_semaphores(
           .semaphores = semaphore_storage,
           .payload_values = value_storage,
       };
-      const iree_hal_semaphore_list_t signal = {
-          .count = 1,
-          .semaphores = &stream->timeline_semaphore,
-          .payload_values = &stream_signal_value,
-      };
-      status = iree_hal_queue_barrier(stream->queue, combined_waits, signal,
-                                      /*barriers=*/NULL,
-                                      IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+      iree_hal_streaming_submission_t submission;
+      status = iree_hal_streaming_submission_prepare_locked(
+          stream, stream->queue, stream_signal_value,
+          IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
       if (iree_status_is_ok(status)) {
-        stream->pending_value = stream_signal_value;
-        status = iree_hal_queue_flush(stream->queue);
+        status = iree_hal_queue_barrier(submission.queue, combined_waits,
+                                        submission.signals, /*barriers=*/NULL,
+                                        IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+      }
+      iree_hal_streaming_submission_finish_locked(stream, &submission,
+                                                  iree_status_is_ok(status));
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_queue_flush(submission.queue);
       }
     }
     iree_slim_mutex_unlock(&stream->mutex);
@@ -1479,21 +1484,23 @@ iree_status_t iree_hal_streaming_stream_wait_event(
           .semaphores = wait_semaphore_storage,
           .payload_values = wait_value_storage,
       };
-      iree_hal_semaphore_list_t signal_semaphores = {
-          .count = 1,
-          .semaphores = &stream->timeline_semaphore,
-          .payload_values = &signal_value,
-      };
+      iree_hal_streaming_submission_t submission;
+      status = iree_hal_streaming_submission_prepare_locked(
+          stream, stream->queue, signal_value,
+          IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
 
-      status = iree_hal_queue_barrier(stream->queue, wait_semaphores,
-                                      signal_semaphores, /*barriers=*/NULL,
-                                      IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_queue_barrier(submission.queue, wait_semaphores,
+                                        submission.signals, /*barriers=*/NULL,
+                                        IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+      }
+      iree_hal_streaming_submission_finish_locked(stream, &submission,
+                                                  iree_status_is_ok(status));
       if (iree_status_is_ok(status)) {
         // The accepted barrier owns the value it signals, so the timeline
         // advances here and stays advanced even when the flush below fails.
         submitted = true;
-        stream->pending_value = signal_value;
-        status = iree_hal_queue_flush(stream->queue);
+        status = iree_hal_queue_flush(submission.queue);
       }
     }
 
@@ -1962,14 +1969,15 @@ iree_status_t iree_hal_streaming_launch_kernel(
             .semaphores = &stream->timeline_semaphore,
             .payload_values = &wait_value,
         };
-        const iree_hal_semaphore_list_t signal_semaphores = {
-            .count = 1,
-            .semaphores = &stream->timeline_semaphore,
-            .payload_values = &signal_value,
-        };
+        iree_hal_streaming_submission_t submission = {0};
+        if (iree_status_is_ok(status)) {
+          status = iree_hal_streaming_submission_prepare_locked(
+              stream, dispatch_queue, signal_value,
+              IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
+        }
         if (iree_status_is_ok(status)) {
           status = iree_hal_queue_dispatch(
-              dispatch_queue, wait_semaphores, signal_semaphores,
+              submission.queue, wait_semaphores, submission.signals,
               symbol->executable,
               iree_hal_executable_function_from_index(symbol->export_ordinal),
               config,
@@ -1977,11 +1985,10 @@ iree_status_t iree_hal_streaming_launch_kernel(
                                         arguments.constants_size),
               arguments.bindings, /*barriers=*/NULL, flags);
         }
+        iree_hal_streaming_submission_finish_locked(stream, &submission,
+                                                    iree_status_is_ok(status));
         if (iree_status_is_ok(status)) {
-          // The accepted dispatch owns the value it signals, so the timeline
-          // advances here and stays advanced even when the flush below fails.
-          stream->pending_value = signal_value;
-          status = iree_hal_queue_flush(dispatch_queue);
+          status = iree_hal_queue_flush(submission.queue);
         }
       } else if (dispatch_attempted) {
         status = iree_hal_streaming_record_dispatch_locked(

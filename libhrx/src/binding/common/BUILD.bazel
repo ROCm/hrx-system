@@ -111,6 +111,7 @@ hrx_cc_library(
         "registry.c",
         "stream.c",
         "stream_host_call.c",
+        "stream_queue.c",
         "stream_value.c",
         "tls.c",
     ],
@@ -133,6 +134,7 @@ hrx_cc_library(
         "peer.h",
         "registry.h",
         "stream.h",
+        "stream_queue.h",
         "stream_value.h",
         "tls.h",
     ],
@@ -286,12 +288,23 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
-    name = "stream_value_test",
-    srcs = ["stream_value_test.cc"],
+    name = "stream_queue_test",
+    srcs = ["stream_queue_test.cc"],
     deps = [
         ":common",
         "//libhrx/src/libhrx:hrx_static",
         "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
+    name = "stream_value_test",
+    srcs = ["stream_value_test.cc"],
+    deps = [
+        ":common",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

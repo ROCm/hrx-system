@@ -9,6 +9,7 @@
 #include "common/context.h"
 #include "common/graph.h"
 #include "common/stream.h"
+#include "common/stream_queue.h"
 #include "iree/base/internal/math.h"
 
 //===----------------------------------------------------------------------===//
@@ -526,11 +527,10 @@ iree_status_t iree_hal_streaming_event_record(
       .semaphores = &stream->timeline_semaphore,
       .payload_values = &stream_wait_value,
   };
-  iree_hal_semaphore_list_t signal_semaphores = {
-      .count = 1,
-      .semaphores = &stream->timeline_semaphore,
-      .payload_values = &stream_signal_value,
-  };
+  iree_hal_streaming_submission_t submission;
+  status = iree_hal_streaming_submission_prepare_locked(
+      stream, stream->queue, stream_signal_value,
+      IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
 
   // The record signals the stream's own timeline, so reaching the point is
   // exactly the stream reaching that value.
@@ -541,18 +541,21 @@ iree_status_t iree_hal_streaming_event_record(
       .ordered_after_stream_value = stream_signal_value,
   };
   iree_hal_streaming_graph_t* dropped_capture_graph = NULL;
-  status = iree_hal_streaming_event_enqueue_record(
-      event, stream->context, stream->queue, wait_semaphores, signal_semaphores,
-      &recorded_point);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_event_enqueue_record(
+        event, stream->context, submission.queue, wait_semaphores,
+        submission.signals, &recorded_point);
+  }
+  iree_hal_streaming_submission_finish_locked(stream, &submission,
+                                              iree_status_is_ok(status));
   if (iree_status_is_ok(status)) {
     // The accepted enqueue owns the value it signals, so the timeline advances
     // here and stays advanced even when the flush below fails.
-    stream->pending_value = stream_signal_value;
     // A rejected submission signals nothing, so the event keeps its old point
     // and stays associated with whatever capture it belonged to.
     dropped_capture_graph =
         iree_hal_streaming_event_commit_recorded_point(event, recorded_point);
-    status = iree_hal_queue_flush(stream->queue);
+    status = iree_hal_queue_flush(submission.queue);
   }
   iree_slim_mutex_unlock(&stream->mutex);
   // The last captured-graph reference can synchronize every context and relock

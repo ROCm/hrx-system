@@ -8,6 +8,7 @@
 #include "common/graph.h"
 #include "common/host_callback.h"
 #include "common/stream.h"
+#include "common/stream_queue.h"
 
 typedef struct iree_hal_streaming_capture_host_function_t {
   void (*fn)(void* user_data);
@@ -47,16 +48,16 @@ iree_status_t iree_hal_streaming_queue_host_call(
         .semaphores = &stream->timeline_semaphore,
         .payload_values = &wait_value,
     };
-    const iree_hal_semaphore_list_t signal_semaphores = {
-        .count = 1,
-        .semaphores = &stream->timeline_semaphore,
-        .payload_values = &signal_value,
-    };
-    status = iree_hal_queue_host_call(stream->queue, wait_semaphores,
-                                      signal_semaphores, call, args, flags);
+    iree_hal_streaming_submission_t submission;
+    status = iree_hal_streaming_submission_prepare_locked(
+        stream, stream->queue, signal_value,
+        IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
     if (iree_status_is_ok(status)) {
-      stream->pending_value = signal_value;
+      status = iree_hal_queue_host_call(submission.queue, wait_semaphores,
+                                        submission.signals, call, args, flags);
     }
+    iree_hal_streaming_submission_finish_locked(stream, &submission,
+                                                iree_status_is_ok(status));
   }
   iree_slim_mutex_unlock(&stream->mutex);
 
