@@ -138,7 +138,6 @@ target_compile_definitions(${_LIBRARY_OBJECT_TARGET} PRIVATE LATE_VALUE=11)
 # interface header's consumer and the library's generated source.
 add_subdirectory(producer)
 iree_finalize_target_dependencies()
-cmake_language(DEFER CALL iree_finalize_compile_usage)
 
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/paths-$<CONFIG>.txt"
   CONTENT "${_LIBRARY_OBJECT_TARGET}\n$<TARGET_FILE:iree_fixture_leaf>\n$<TARGET_FILE:iree_fixture_probe>\n$<TARGET_FILE:iree_fixture_unified_probe>\n$<TARGET_FILE:iree_fixture_collected_probe>\n$<TARGET_FILE:iree_fixture_runtime_tool_probe>\n$<TARGET_FILE:iree_fixture_tool_probe>\n$<TARGET_FILE:iree_fixture_source_less_test_with_a_long_target_name_matching_real_cts_binaries>\n")

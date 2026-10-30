@@ -15,6 +15,8 @@ include("${IREE_REPO_ROOT}/build_tools/cmake/iree_macros.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_copts.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_install_support.cmake")
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_cc_library.cmake")
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_add_all_subdirs.cmake")
+include("${IREE_REPO_ROOT}/build_tools/cmake/iree_generated_cmake.cmake")
 iree_setup_c_src_root(PACKAGE_ROOT_PREFIX iree/fixture
   DEFAULT_EXPORT_SET fixture DEFAULT_INSTALL_COMPONENT FixtureLibraries
   IMPLICIT_DEFS_TARGET fixture_defs)
@@ -31,8 +33,8 @@ target_include_directories(iree_fixture_leaf SYSTEM INTERFACE
 target_compile_definitions(iree_fixture_leaf INTERFACE
   "$<$<CONFIG:Release>:PROFILE_VALUE=7>"
   "$<$<COMPILE_LANGUAGE:C>:LANGUAGE_VALUE=19>")
-iree_cc_library(NAME middle DEPS ::leaf)
-iree_cc_library(NAME branch SRCS branch.c HDRS branch.h DEPS ::middle)
+iree_generate_cmake()
+iree_add_subdirectory(package)
 iree_cc_unified_library(NAME unified ROOT ::branch)
 iree_generate_export_targets(EXPORT_SET fixture COMPONENT FixtureLibraries
   INSTALL_DESTINATION lib/cmake/fixture)
@@ -77,6 +79,3 @@ function(late_requirements)
   target_compile_definitions(iree_fixture_leaf INTERFACE LATE_VALUE=23)
 endfunction()
 cmake_language(DEFER CALL late_requirements)
-if(FIXTURE_RESOLVE)
-  cmake_language(DEFER CALL iree_finalize_compile_usage)
-endif()

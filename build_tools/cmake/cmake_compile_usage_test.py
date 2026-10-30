@@ -23,12 +23,18 @@ from build_tools.cmake.test_environment import (
 FIXTURE = REPO_ROOT / "build_tools/cmake/testdata/compile_usage"
 
 
+def copy_source(source):
+    shutil.copytree(FIXTURE, source)
+    for template in source.rglob("BUILD.bazel.in"):
+        template.rename(template.with_suffix(""))
+
+
 class CMakeCompileUsageTest(unittest.TestCase):
     def test_native_requirements_and_relocated_consumer(self):
         with tempfile.TemporaryDirectory(prefix="cmake compile usage ") as temporary:
             root = Path(temporary)
             source, build = root / "source", root / "build"
-            shutil.copytree(FIXTURE, source)
+            copy_source(source)
             caller_hook = source / "caller.cmake"
             caller_hook.write_text(
                 'set_property(DIRECTORY PROPERTY CALLER_PROJECT "${PROJECT_NAME}")\n'
@@ -42,15 +48,14 @@ class CMakeCompileUsageTest(unittest.TestCase):
                     )
                     self.assertEqual(run_command(str(executable)), "42\n")
 
-            # Compare evaluated compiler commands, not serialized target lists.
-            # Reuse the native build for boundary variants and incremental work.
+            # Exercise native imports through the resolved source-owned chain.
             version = tuple(
                 map(
                     int,
                     run_command(CMAKE_COMMAND, "--version").split()[2].split(".")[:2],
                 )
             )
-            variants = ["", "SCOPED", "NO_PYTHON"]
+            variants = ["", "SCOPED"]
             if version >= (3, 30):
                 variants.extend(("CUSTOM", "SCOPED_CUSTOM"))
             for variant in variants:
@@ -60,26 +65,13 @@ class CMakeCompileUsageTest(unittest.TestCase):
                     f"-DFIXTURE_SCOPED={'ON' if 'SCOPED' in variant else 'OFF'}",
                     f"-DFIXTURE_CUSTOM={'ON' if 'CUSTOM' in variant else 'OFF'}",
                 ]
-                if variant == "NO_PYTHON":
-                    arguments.append("-DPython3_EXECUTABLE=")
-                configure_project(source, build, "-DFIXTURE_RESOLVE=OFF", *arguments)
-                commands = build / "compile_commands.json"
-                baseline = commands.read_bytes() if commands.exists() else None
-                configure_project(source, build, "-DFIXTURE_RESOLVE=ON", *arguments)
-                if baseline is not None:
-                    self.assertEqual(commands.read_bytes(), baseline)
+                configure_project(source, build, *arguments)
                 check()
 
             configure_project(
                 source, build, "-DFIXTURE_SCOPED=OFF", "-DFIXTURE_CUSTOM=OFF"
             )
             check()
-            if version >= (3, 30):
-                # Ensure the lifecycle checks actually traversed resolved edges.
-                self.assertIn(
-                    "$<LINK_ONLY:iree::fixture::leaf>",
-                    (build / ".iree/compile_usage.cmake").read_text(),
-                )
             prefix = root / "stage"
             run_command(
                 CMAKE_COMMAND,
@@ -122,12 +114,11 @@ file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/probe-$<CONFIG>.txt" CONTENT "
         with tempfile.TemporaryDirectory(prefix="cmake usage subproject ") as temporary:
             root = Path(temporary)
             source, build = root / "source", root / "build"
-            shutil.copytree(FIXTURE, source / "child")
+            copy_source(source / "child")
             (
                 source / "CMakeLists.txt"
             ).write_text("""cmake_minimum_required(VERSION 3.26...4.2)
 project(usage_parent C CXX)
-set(FIXTURE_RESOLVE ON)
 add_subdirectory(child)
 target_compile_definitions(iree_fixture_leaf INTERFACE PARENT_VALUE=61)
 target_compile_definitions(probe PRIVATE REQUIRE_PARENT=1)

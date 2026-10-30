@@ -56,6 +56,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import bazel_to_cmake_converter
+import cc
 
 repo_root = None
 repo_cfg = None
@@ -164,7 +165,9 @@ class Package:
         )
 
 
-def evaluate_directory(directory, input_files, generated_files, configuration=None):
+def evaluate_directory(
+    directory, input_files, generated_files, configuration=None, libraries=None
+):
     """Collects a generated package; authored packages retain their native scope."""
     directory = Path(directory)
     if (directory / "CMakeLists.txt").is_file():
@@ -192,6 +195,7 @@ def evaluate_directory(directory, input_files, generated_files, configuration=No
             input_files=input_files,
             generated_files=generated_files,
             configuration=configuration,
+            libraries=libraries,
         )
     except (NameError, NotImplementedError, KeyError) as error:
         raise RuntimeError(f"Cannot convert {build_file}: {error}") from error
@@ -201,6 +205,7 @@ def evaluate_directory(directory, input_files, generated_files, configuration=No
 def evaluate_packages(root_dirs, input_files, configuration=None):
     """Establishes generated-file ownership before any consumer is emitted."""
     generated_files = {}
+    libraries = cc.Graph() if configuration is not None else None
     packages = {}
     authored_directories = set()
     for root_dir in root_dirs:
@@ -211,7 +216,7 @@ def evaluate_packages(root_dirs, input_files, configuration=None):
             if (Path(directory) / "CMakeLists.txt").is_file():
                 authored_directories.add(Path(directory).relative_to(repo_root))
             package = evaluate_directory(
-                directory, input_files, generated_files, configuration
+                directory, input_files, generated_files, configuration, libraries
             )
             if package is not None:
                 packages[package.directory] = package

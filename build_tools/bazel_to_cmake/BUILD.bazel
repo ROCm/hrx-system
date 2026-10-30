@@ -33,6 +33,7 @@ py_library(
         "bazel_to_cmake_loads.py",
         "bazel_to_cmake_requirements.py",
         "bazel_to_cmake_targets.py",
+        "cc.py",
         "conditions.py",
         "loom_binary.py",
     ],

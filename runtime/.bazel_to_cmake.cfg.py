@@ -139,6 +139,18 @@ class RuntimeBuildFileFunctions(
     def iree_runtime_benchmark_library(
         self, name, srcs, deps, disabled_srcs, disabled_deps, **kwargs
     ):
+        if self._configuration is not None:
+            enabled = all_of(
+                "IREE_TARGET_HAS_THREADS",
+                any_of("IREE_BUILD_TESTS", "IREE_BUILD_BENCHMARKS"),
+            ).evaluate(self._configuration)
+            self.iree_runtime_cc_library(
+                name=name,
+                srcs=srcs if enabled else disabled_srcs,
+                deps=deps if enabled else disabled_deps,
+                **kwargs,
+            )
+            return
         self._converter.body += "if(IREE_TARGET_HAS_THREADS AND (IREE_BUILD_TESTS OR IREE_BUILD_BENCHMARKS))\n"
         self.iree_runtime_cc_library(name=name, srcs=srcs, deps=deps, **kwargs)
         self._converter.body += "else()\n"

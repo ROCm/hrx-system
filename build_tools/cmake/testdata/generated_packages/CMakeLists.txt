@@ -26,6 +26,5 @@ if(TARGET authored_usage OR NOT PROJECT_NAME STREQUAL "generated_packages")
   message(FATAL_ERROR "Authored package scope leaked into its parent")
 endif()
 iree_finalize_target_dependencies()
-cmake_language(DEFER CALL iree_finalize_compile_usage)
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/paths-$<CONFIG>.txt"
   CONTENT "$<TARGET_FILE:fixture_package_probe>\n$<TARGET_FILE:fixture_package_authored_child_probe>\n")

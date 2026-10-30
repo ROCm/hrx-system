@@ -43,5 +43,23 @@ cc_library(
 cc_binary(
     name = "probe",
     srcs = ["main.c"],
-    deps = [":library_with_generated_inputs_and_package_identity"],
+    deps = [
+        ":library_with_generated_inputs_and_package_identity",
+        ":scoped_requirements",
+    ],
+)
+
+# The provider's private native import remains owned by its authored directory.
+cc_library(
+    name = "scoped_requirements",
+    deps = [
+        ":registration",
+        "//package/authored/child:requirements",
+    ],
+)
+
+cc_library(
+    name = "registration",
+    srcs = ["registration.cc"],
+    alwayslink = True,
 )

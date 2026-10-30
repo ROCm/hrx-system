@@ -13,6 +13,7 @@ See bazel_to_cmake.py for usage.
 # pylint: disable=unused-argument
 # pylint: disable=exec-used
 
+import glob as source_glob
 import hashlib
 import itertools
 import os
@@ -23,6 +24,7 @@ import bazel_to_cmake_config
 import bazel_to_cmake_loads
 import bazel_to_cmake_requirements
 import bazel_to_cmake_targets
+import cc
 from bazel_to_cmake_generated import GeneratedFileBuildFileFunctions
 from conditions import Equal, Greater, Matches, Not, Option, all_of, any_of, condition
 
@@ -194,7 +196,7 @@ class _SelectsModule:
         pass
 
 
-class BuildFileFunctions(GeneratedFileBuildFileFunctions):
+class BuildFileFunctions(cc.BuildFileFunctions, GeneratedFileBuildFileFunctions):
     """Object passed to `exec` that has handlers for BUILD file functions."""
 
     def __init__(
@@ -207,6 +209,7 @@ class BuildFileFunctions(GeneratedFileBuildFileFunctions):
         condition_mappings=None,
         generated_files=None,
         configuration=None,
+        libraries=None,
     ):
         self._converter = converter
         self._targets = targets
@@ -214,11 +217,24 @@ class BuildFileFunctions(GeneratedFileBuildFileFunctions):
         # Effective native settings, captured before any BUILD declarations.
         # None preserves symbolic selection for unconfigured package previews.
         self._configuration = configuration
+        self._libraries = libraries
         self._repo_root = os.path.abspath(repo_root) if repo_root else ""
         if self._repo_root and build_dir and not os.path.isabs(build_dir):
             self._build_dir = os.path.join(self._repo_root, build_dir)
         else:
             self._build_dir = build_dir
+        # Authored native scopes can introduce private imported interfaces. Keep
+        # those boundaries intact instead of exporting their names to siblings.
+        self._native_scope = self._repo_root
+        directory = os.path.abspath(self._build_dir)
+        while self._repo_root and directory != self._repo_root:
+            if os.path.isfile(os.path.join(directory, "CMakeLists.txt")):
+                self._native_scope = directory
+                break
+            parent = os.path.dirname(directory)
+            if parent == directory:
+                break
+            directory = parent
         self._filegroup_srcs = {}
         # Globs contain package-relative sources, unlike generic CMake lists.
         self._source_glob_vars = {}
@@ -1851,6 +1867,18 @@ class BuildFileFunctions(GeneratedFileBuildFileFunctions):
                 f'list(TRANSFORM {var} PREPEND "${{_IREE_PACKAGE_SOURCE_DIR}}/"'
                 f" OUTPUT_VARIABLE {var}_ABSOLUTE)\n"
             )
+        if self._configuration is not None:
+            # Native globs watch the filesystem for regeneration; declaration
+            # evaluation owns the selected files and their compilation kinds.
+            def files(patterns):
+                return {
+                    filename.replace("\\", "/")
+                    for pattern in patterns
+                    for filename in source_glob.glob(pattern, root_dir=self._build_dir)
+                    if os.path.isfile(os.path.join(self._build_dir, filename))
+                }
+
+            return sorted(files(include) - files(exclude))
         return [self._expand_cmake_var(var) for var in glob_vars]
 
     # TODO(gcmn) implement these types of functions in a less hard-coded way
@@ -1892,121 +1920,6 @@ class BuildFileFunctions(GeneratedFileBuildFileFunctions):
             raise ValueError("bazel_to_cmake can only convert selects with a default")
         return default_value
 
-    def cc_library(
-        self,
-        name,
-        hdrs=None,
-        textual_hdrs=None,
-        srcs=None,
-        linkstamp=None,
-        copts=None,
-        conlyopts=None,
-        cxxopts=None,
-        cxx_standard=None,
-        cxx_features=None,
-        defines=None,
-        data=None,
-        deps=None,
-        testonly=None,
-        linkopts=None,
-        includes=None,
-        system_includes=None,
-        alwayslink=None,
-        shared=None,
-        sanitizer_suppressions=None,
-        target_compatible_with=None,
-        cmake_package=None,
-        **kwargs,
-    ):
-        if self._should_skip_target(**kwargs):
-            return
-        name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        if cxx_standard is not None and cxx_standard not in ("c++17", "c++20", "c++23"):
-            raise ValueError(f"Unsupported C++ standard: {cxx_standard}")
-        cxx_standard_block = self._convert_string_arg_block(
-            "CXX_STANDARD", cxx_standard[3:] if cxx_standard else None, quote=False
-        )
-        cxx_features_block = self._convert_string_list_block(
-            "CXX_FEATURES", cxx_features
-        )
-        hdrs_block = self._convert_srcs_block(hdrs, block_name="HDRS")
-        textual_hdrs_block = self._convert_srcs_block(
-            textual_hdrs, block_name="TEXTUAL_HDRS"
-        )
-        if linkstamp:
-            if isinstance(srcs, ConditionSelect):
-                raise ValueError("linkstamp cannot be combined with configurable srcs")
-            srcs = list(srcs or []) + [linkstamp]
-        srcs_block, platform_srcs_block = self._convert_platform_select_srcs(name, srcs)
-        copts_block, platform_copts_block = self._convert_compile_options(
-            name, copts, conlyopts, cxxopts
-        )
-        defines_block, platform_defines_block = self._convert_platform_select_strings(
-            name, "DEFINES", defines
-        )
-        data_block = self._convert_target_list_block("DATA", data)
-        deps_block, platform_deps_block = self._convert_platform_select_deps(name, deps)
-        testonly_block = self._convert_option_block("TESTONLY", testonly)
-        alwayslink_block = self._convert_option_block("ALWAYSLINK", alwayslink)
-        shared_block = self._convert_option_block("SHARED", shared)
-        duplicate_safe_block = self._convert_option_block(
-            "LINKABLE_MORE_THAN_ONCE",
-            "LINKABLE_MORE_THAN_ONCE" in (kwargs.get("tags") or []),
-        )
-        linkopts_block, platform_linkopts_block = self._convert_platform_select_strings(
-            name, "LINKOPTS", linkopts, expand_locations=True
-        )
-        includes_block = self._convert_includes_block(includes)
-        system_includes_block = self._convert_string_list_block(
-            "SYSTEM_INCLUDES", system_includes
-        )
-
-        sanitizer_suppressions_block = self._convert_sanitizer_suppressions_block(
-            sanitizer_suppressions
-        )
-
-        self._emit_platform_guard_begin(target_compatible_with)
-        if platform_srcs_block:
-            self._converter.body += platform_srcs_block
-        if platform_copts_block:
-            self._converter.body += platform_copts_block
-        if platform_defines_block:
-            self._converter.body += platform_defines_block
-        if platform_deps_block:
-            self._converter.body += platform_deps_block
-        if platform_linkopts_block:
-            self._converter.body += platform_linkopts_block
-        self._converter.body += (
-            f"iree_cc_library(\n"
-            f"{name_block}"
-            + self._convert_string_arg_block("PACKAGE", cmake_package)
-            + f"{copts_block}"
-            f"{cxx_standard_block}"
-            f"{cxx_features_block}"
-            f"{hdrs_block}"
-            f"{textual_hdrs_block}"
-            f"{srcs_block}"
-            f"{data_block}"
-            f"{deps_block}"
-            f"{defines_block}"
-            f"{testonly_block}"
-            f"{alwayslink_block}"
-            f"{shared_block}"
-            f"{duplicate_safe_block}"
-            f"{sanitizer_suppressions_block}"
-            f"{linkopts_block}"
-            f"{includes_block}"
-            f"{system_includes_block}"
-            f"  PUBLIC\n)\n\n"
-        )
-        self._emit_platform_guard_end(target_compatible_with)
-
-    def iree_cc_library(self, **kwargs):
-        self.cc_library(**kwargs)
-
-    def iree_cc_library_group(self, **kwargs):
-        self.cc_library(**kwargs)
-
     def iree_compiler_register_plugin(self, plugin_id, target):
         plugin_id_block = self._convert_string_arg_block(
             "PLUGIN_ID", plugin_id, quote=False
@@ -2015,265 +1928,6 @@ class BuildFileFunctions(GeneratedFileBuildFileFunctions):
         self._converter.body += (
             f"iree_compiler_register_plugin(\n{plugin_id_block}{target_block})\n\n"
         )
-
-    def cc_test(
-        self,
-        name,
-        hdrs=None,
-        srcs=None,
-        copts=None,
-        conlyopts=None,
-        cxxopts=None,
-        cxx_standard=None,
-        cxx_features=None,
-        defines=None,
-        linkopts=None,
-        data=None,
-        deps=None,
-        timeout=None,
-        args=None,
-        env=None,
-        tags=None,
-        includes=None,
-        group=None,
-        resource_group=None,
-        sanitizer_suppressions=None,
-        target_compatible_with=None,
-        **kwargs,
-    ):
-        if self._should_skip_target(tags=tags, **kwargs):
-            return
-        # Extract resource_group from tags if provided via Bazel tag convention.
-        # The iree_runtime_cc_test .bzl macro encodes it as "resource_group:name".
-        if not resource_group and tags:
-            for tag in tags:
-                if tag.startswith("resource_group:"):
-                    resource_group = tag[len("resource_group:") :]
-                    break
-        name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        if cxx_standard is not None and cxx_standard not in ("c++17", "c++20", "c++23"):
-            raise ValueError(f"Unsupported C++ standard: {cxx_standard}")
-        cxx_standard_block = self._convert_string_arg_block(
-            "CXX_STANDARD", cxx_standard[3:] if cxx_standard else None, quote=False
-        )
-        cxx_features_block = self._convert_string_list_block(
-            "CXX_FEATURES", cxx_features
-        )
-        hdrs_block = self._convert_srcs_block(hdrs, block_name="HDRS")
-        srcs_block, platform_srcs_block = self._convert_platform_select_srcs(name, srcs)
-        copts_block, platform_copts_block = self._convert_compile_options(
-            name, copts, conlyopts, cxxopts
-        )
-        defines_block, platform_defines_block = self._convert_platform_select_strings(
-            name, "DEFINES", defines
-        )
-        linkopts_block, platform_linkopts_block = self._convert_platform_select_strings(
-            name, "LINKOPTS", linkopts, expand_locations=True
-        )
-        data_block = self._convert_data_list_block(data)
-        deps_block, platform_deps_block = self._convert_platform_select_deps(name, deps)
-        args_block = self._convert_string_list_block(
-            "ARGS",
-            self._convert_cc_test_args(args),
-            sort=False,
-        )
-        env_block = self._convert_string_list_block(
-            "ENV", self._convert_test_env(env), sort=False
-        )
-        labels_block = self._convert_string_list_block("LABELS", tags)
-        timeout_block = self._convert_timeout_arg_block("TIMEOUT", timeout)
-        includes_block = self._convert_includes_block(includes)
-        group_block = self._convert_string_arg_block("GROUP", group)
-        resource_group_block = self._convert_string_arg_block(
-            "RESOURCE_GROUP", resource_group, quote=False
-        )
-        sanitizer_suppressions_block = self._convert_sanitizer_suppressions_block(
-            sanitizer_suppressions
-        )
-
-        self._emit_platform_guard_begin(target_compatible_with)
-        did_emit_testdata_guard = self._emit_optional_local_cts_testdata_guard_begin(
-            deps
-        )
-        if platform_srcs_block:
-            self._converter.body += platform_srcs_block
-        if platform_copts_block:
-            self._converter.body += platform_copts_block
-        if platform_defines_block:
-            self._converter.body += platform_defines_block
-        if platform_deps_block:
-            self._converter.body += platform_deps_block
-        if platform_linkopts_block:
-            self._converter.body += platform_linkopts_block
-        self._converter.body += (
-            f"iree_cc_test(\n"
-            f"{name_block}"
-            f"{hdrs_block}"
-            f"{srcs_block}"
-            f"{copts_block}"
-            f"{cxx_standard_block}"
-            f"{cxx_features_block}"
-            f"{defines_block}"
-            f"{linkopts_block}"
-            f"{data_block}"
-            f"{deps_block}"
-            f"{args_block}"
-            f"{env_block}"
-            f"{labels_block}"
-            f"{timeout_block}"
-            f"{includes_block}"
-            f"{group_block}"
-            f"{resource_group_block}"
-            f"{sanitizer_suppressions_block}"
-            f")\n\n"
-        )
-        self._emit_optional_local_cts_testdata_guard_end(did_emit_testdata_guard)
-        self._emit_platform_guard_end(target_compatible_with)
-
-    def iree_cc_test(self, **kwargs):
-        self.cc_test(**kwargs)
-
-    def cc_binary(
-        self,
-        name,
-        srcs=None,
-        data=None,
-        deps=None,
-        copts=None,
-        conlyopts=None,
-        cxxopts=None,
-        defines=None,
-        linkopts=None,
-        linkshared=None,
-        testonly=None,
-        includes=None,
-        target_compatible_with=None,
-        **kwargs,
-    ):
-        if self._should_skip_target(**kwargs):
-            return
-        self._target_file_labels.add(self._current_target_label(name))
-        name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        copts_block, platform_copts_block = self._convert_compile_options(
-            name, copts, conlyopts, cxxopts
-        )
-        defines_block, platform_defines_block = self._convert_platform_select_strings(
-            name, "DEFINES", defines
-        )
-        linkopts_block, platform_linkopts_block = self._convert_platform_select_strings(
-            name, "LINKOPTS", linkopts, expand_locations=True
-        )
-        srcs_block, platform_srcs_block = self._convert_platform_select_srcs(name, srcs)
-        data_block = self._convert_target_list_block("DATA", data)
-        deps_block, platform_deps_block = self._convert_platform_select_deps(name, deps)
-        testonly_block = self._convert_option_block("TESTONLY", testonly)
-        includes_block = self._convert_includes_block(includes)
-
-        self._emit_platform_guard_begin(target_compatible_with)
-        if platform_srcs_block:
-            self._converter.body += platform_srcs_block
-        if platform_copts_block:
-            self._converter.body += platform_copts_block
-        if platform_defines_block:
-            self._converter.body += platform_defines_block
-        if platform_deps_block:
-            self._converter.body += platform_deps_block
-        if platform_linkopts_block:
-            self._converter.body += platform_linkopts_block
-        if linkshared:
-            self._converter.body += (
-                f"iree_cc_library(\n"
-                f"{name_block}"
-                f"{copts_block}"
-                f"{srcs_block}"
-                f"{data_block}"
-                f"{deps_block}"
-                f"{defines_block}"
-                f"{linkopts_block}"
-                f"{testonly_block}"
-                f"{includes_block}"
-                f"  SHARED\n"
-                f")\n\n"
-            )
-            self._emit_platform_guard_end(target_compatible_with)
-            return
-        self._converter.body += (
-            f"iree_cc_binary(\n"
-            f"{name_block}"
-            f"{srcs_block}"
-            f"{copts_block}"
-            f"{defines_block}"
-            f"{linkopts_block}"
-            f"{data_block}"
-            f"{deps_block}"
-            f"{testonly_block}"
-            f"{includes_block}"
-            f")\n\n"
-        )
-        self._emit_platform_guard_end(target_compatible_with)
-
-    def iree_cc_binary(self, **kwargs):
-        self.cc_binary(**kwargs)
-
-    def iree_cc_fuzz(
-        self,
-        name,
-        srcs=None,
-        data=None,
-        deps=None,
-        copts=None,
-        conlyopts=None,
-        cxxopts=None,
-        defines=None,
-        linkopts=None,
-        tags=None,
-        target_compatible_with=None,
-        **kwargs,
-    ):
-        if self._should_skip_target(tags=tags, **kwargs):
-            return
-        name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        srcs_block, platform_srcs_block = self._convert_platform_select_srcs(name, srcs)
-        data_block = self._convert_target_list_block("DATA", data)
-        deps_block, platform_deps_block = self._convert_platform_select_deps(name, deps)
-        copts_block, platform_copts_block = self._convert_compile_options(
-            name, copts, conlyopts, cxxopts
-        )
-        defines_block, platform_defines_block = self._convert_platform_select_strings(
-            name, "DEFINES", defines
-        )
-        linkopts_block, platform_linkopts_block = self._convert_platform_select_strings(
-            name, "LINKOPTS", linkopts, expand_locations=True
-        )
-        labels_block = self._convert_string_list_block("LABELS", tags)
-
-        self._emit_platform_guard_begin(target_compatible_with)
-        if platform_srcs_block:
-            self._converter.body += platform_srcs_block
-        if platform_copts_block:
-            self._converter.body += platform_copts_block
-        if platform_defines_block:
-            self._converter.body += platform_defines_block
-        if platform_deps_block:
-            self._converter.body += platform_deps_block
-        if platform_linkopts_block:
-            self._converter.body += platform_linkopts_block
-        self._converter.body += (
-            f"iree_cc_fuzz(\n"
-            f"{name_block}"
-            f"{srcs_block}"
-            f"{data_block}"
-            f"{deps_block}"
-            f"{copts_block}"
-            f"{defines_block}"
-            f"{linkopts_block}"
-            f"{labels_block}"
-            f")\n\n"
-        )
-        self._emit_platform_guard_end(target_compatible_with)
-
-    def iree_compiler_cc_fuzz(self, **kwargs):
-        self.iree_cc_fuzz(**kwargs)
 
     def iree_c_embed_data(
         self,
@@ -3082,64 +2736,6 @@ class BuildFileFunctions(GeneratedFileBuildFileFunctions):
             return
         raise NotImplementedError(f"iree_wasi_executable_alias: {name}")
 
-    def cc_binary_benchmark(
-        self,
-        name,
-        srcs=None,
-        data=None,
-        deps=None,
-        copts=None,
-        defines=None,
-        linkopts=None,
-        args=None,
-        tags=None,
-        resource_group=None,
-        testonly=True,
-        target_compatible_with=None,
-        # unused
-        size="small",
-        timeout=None,
-        visibility=None,
-    ):
-        if self._should_skip_target(tags=tags):
-            return
-        name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        srcs_block = self._convert_srcs_block(srcs)
-        data_block = self._convert_data_list_block(data)
-        deps_block = self._convert_target_list_block("DEPS", deps)
-        copts_block = self._convert_string_list_block("COPTS", copts, sort=False)
-        defines_block = self._convert_string_list_block("DEFINES", defines)
-        linkopts_block = self._convert_string_list_block("LINKOPTS", linkopts)
-        args_block = self._convert_string_list_block(
-            "ARGS", self._convert_test_location_args(args), sort=False
-        )
-        testonly_block = self._convert_option_block("TESTONLY", testonly)
-        labels_block = self._convert_string_list_block("LABELS", tags)
-        resource_group_block = self._convert_string_arg_block(
-            "RESOURCE_GROUP", resource_group, quote=False
-        )
-
-        self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += (
-            f"iree_cc_binary_benchmark(\n"
-            f"{name_block}"
-            f"{srcs_block}"
-            f"{data_block}"
-            f"{deps_block}"
-            f"{copts_block}"
-            f"{defines_block}"
-            f"{linkopts_block}"
-            f"{args_block}"
-            f"{testonly_block}"
-            f"{labels_block}"
-            f"{resource_group_block}"
-            f")\n\n"
-        )
-        self._emit_platform_guard_end(target_compatible_with)
-
-    def iree_cc_benchmark(self, **kwargs):
-        self.cc_binary_benchmark(**kwargs)
-
     def iree_cmake_extra_content(self, content, inline=False):
         if inline:
             self._converter.body += f"\n{content}\n"
@@ -3210,6 +2806,7 @@ def evaluate_build_file(
     input_files=None,
     generated_files=None,
     configuration=None,
+    libraries=None,
 ):
     """Collects declarations; conversion follows repository-wide evaluation."""
     converter = Converter()
@@ -3234,6 +2831,7 @@ def evaluate_build_file(
         condition_mappings=bazel_to_cmake_config.collect_condition_mappings(repo_cfg),
         generated_files=generated_files,
         configuration=configuration,
+        libraries=libraries,
     )
 
     exec_namespace = GetDict(build_file_functions)

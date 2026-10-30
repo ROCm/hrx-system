@@ -307,4 +307,3 @@ endif()
 
 # Register after callbacks that create targets, including Windows Python sources.
 cmake_language(DEFER CALL iree_write_target_map)
-cmake_language(DEFER CALL iree_finalize_compile_usage)
