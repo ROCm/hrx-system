@@ -189,9 +189,8 @@ typedef struct iree_hal_vulkan_command_buffer_t {
   // Device-owned atomic pipelines borrowed for record-time validation.
   const iree_hal_vulkan_atomic_pipelines_t* atomic_pipelines;
 
-  // Whether transfer payloads require family-compatible staging instead of
-  // compute built-ins.
-  bool uses_transfer_staging;
+  // Native queue capabilities governing compute polyfills and synchronization.
+  VkQueueFlags queue_flags;
 
   // Arena used for variable-length command payload storage.
   iree_arena_allocator_t payload_arena;
@@ -755,8 +754,7 @@ iree_status_t iree_hal_vulkan_command_buffer_create(
   command_buffer->host_allocator = host_allocator;
   command_buffer->device_allocator = device_allocator;
   command_buffer->atomic_pipelines = atomic_pipelines;
-  command_buffer->uses_transfer_staging =
-      !iree_all_bits_set(queue_flags, VK_QUEUE_COMPUTE_BIT);
+  command_buffer->queue_flags = queue_flags;
   iree_arena_initialize(command_buffer_block_pool,
                         &command_buffer->payload_arena);
   command_buffer->state = IREE_HAL_VULKAN_COMMAND_BUFFER_STATE_INITIAL;
@@ -2037,7 +2035,7 @@ static iree_status_t iree_hal_vulkan_command_buffer_record_copy_native(
 
 static iree_status_t
 iree_hal_vulkan_command_buffer_record_execution_barrier_native(
-    const iree_hal_vulkan_device_syms_t* syms,
+    const iree_hal_vulkan_device_syms_t* syms, VkQueueFlags queue_flags,
     VkCommandBuffer native_command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
     const iree_hal_vulkan_command_t* command) {
@@ -2056,7 +2054,8 @@ iree_hal_vulkan_command_buffer_record_execution_barrier_native(
         execution_barrier->source_stage_mask,
         execution_barrier->target_stage_mask, execution_barrier->flags,
         has_global_memory_visibility);
-    iree_hal_vulkan_barrier_record(syms, native_command_buffer, &barrier);
+    iree_hal_vulkan_barrier_record(syms, queue_flags, native_command_buffer,
+                                   &barrier);
   }
 
   const iree_hal_vulkan_command_resource_barrier_t* resource_barriers =
@@ -2092,7 +2091,8 @@ iree_hal_vulkan_command_buffer_record_execution_barrier_native(
       barrier.target_access_mask =
           VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
     }
-    iree_hal_vulkan_buffer_barrier_record(syms, native_command_buffer, &barrier,
+    iree_hal_vulkan_buffer_barrier_record(syms, queue_flags,
+                                          native_command_buffer, &barrier,
                                           buffer, offset, length);
   }
   return iree_ok_status();
@@ -2224,7 +2224,8 @@ static void iree_hal_vulkan_command_buffer_record_bda_publication_barrier(
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
       .target_access_mask = VK_ACCESS_2_SHADER_READ_BIT,
   };
-  iree_hal_vulkan_barrier_record(syms, native_command_buffer, &barrier);
+  iree_hal_vulkan_barrier_record(syms, VK_QUEUE_COMPUTE_BIT,
+                                 native_command_buffer, &barrier);
   bda_recording_state->barrier_recorded = true;
 }
 
@@ -2648,7 +2649,8 @@ iree_status_t iree_hal_vulkan_command_buffer_record_native(
       }
       case IREE_HAL_VULKAN_COMMAND_TYPE_EXECUTION_BARRIER:
         status = iree_hal_vulkan_command_buffer_record_execution_barrier_native(
-            syms, native_command_buffer, binding_table, command);
+            syms, command_buffer->queue_flags, native_command_buffer,
+            binding_table, command);
         break;
       case IREE_HAL_VULKAN_COMMAND_TYPE_ATOMIC:
         status = iree_hal_vulkan_command_buffer_record_atomic_native(
@@ -3108,7 +3110,7 @@ static iree_status_t iree_hal_vulkan_command_buffer_fill_buffer(
       &record_length, &payload_offset));
   iree_device_size_t staging_offset = IREE_DEVICE_SIZE_MAX;
   iree_device_size_t staging_length = command_buffer->transfer_staging_length;
-  if (command_buffer->uses_transfer_staging) {
+  if (!iree_all_bits_set(command_buffer->queue_flags, VK_QUEUE_COMPUTE_BIT)) {
     IREE_RETURN_IF_ERROR(
         iree_hal_vulkan_command_buffer_plan_transfer_staging_reservation(
             command_buffer, /*reservation_length=*/8, &staging_offset,
@@ -3185,7 +3187,7 @@ static iree_status_t iree_hal_vulkan_command_buffer_update_buffer(
       command_buffer, payload_length, &record_length, &payload_offset));
   iree_device_size_t staging_offset = IREE_DEVICE_SIZE_MAX;
   iree_device_size_t staging_length = command_buffer->transfer_staging_length;
-  if (command_buffer->uses_transfer_staging) {
+  if (!iree_all_bits_set(command_buffer->queue_flags, VK_QUEUE_COMPUTE_BIT)) {
     IREE_RETURN_IF_ERROR(
         iree_hal_vulkan_command_buffer_plan_transfer_staging_reservation(
             command_buffer, target_ref.length, &staging_offset,

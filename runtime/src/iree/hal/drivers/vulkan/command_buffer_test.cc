@@ -11,6 +11,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "iree/base/internal/arena.h"
 #include "iree/hal/drivers/vulkan/barrier.h"
@@ -276,6 +277,108 @@ static iree_hal_vulkan_device_syms_t MakeNativeReplaySyms() {
       .vkCmdDispatch = FakeCmdDispatch,
   };
   return syms;
+}
+
+TEST(QueueBarrierTest, ExecutionStagesComposeWithoutInventingDependencies) {
+  const auto syms = MakeNativeReplaySyms();
+  const auto command_buffer = reinterpret_cast<VkCommandBuffer>(uintptr_t{1});
+  const std::pair<iree_hal_execution_stage_t, VkPipelineStageFlags2> cases[] = {
+      {0, VK_PIPELINE_STAGE_2_NONE},
+      {IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+       VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT},
+      {IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+       VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT},
+      {IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE |
+           IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+       VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT |
+           VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT},
+      {IREE_HAL_EXECUTION_STAGE_DISPATCH |
+           IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+       VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+           VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT},
+      {IREE_HAL_EXECUTION_STAGE_TRANSFER |
+           IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+       VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+           VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+           VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT},
+  };
+  for (auto [stages, native_stages] : cases) {
+    const iree_hal_vulkan_barrier_t barrier = {
+        .source_stage_mask = stages,
+        .target_stage_mask = stages | IREE_HAL_EXECUTION_STAGE_HOST,
+    };
+    NativeReplayCapture capture;
+    g_native_replay_capture = &capture;
+    iree_hal_vulkan_barrier_record(&syms, VK_QUEUE_COMPUTE_BIT, command_buffer,
+                                   &barrier);
+    g_native_replay_capture = nullptr;
+    ASSERT_EQ(capture.memory_barrier_count, 1u);
+    EXPECT_EQ(capture.memory_barriers[0].srcStageMask, native_stages);
+    EXPECT_EQ(capture.memory_barriers[0].dstStageMask,
+              native_stages | VK_PIPELINE_STAGE_2_HOST_BIT);
+    EXPECT_EQ(capture.memory_barriers[0].srcAccessMask, 0u);
+    EXPECT_EQ(capture.memory_barriers[0].dstAccessMask, 0u);
+  }
+}
+
+TEST(QueueBarrierTest, TransferScopesCoverOnlyAvailableNativeEngines) {
+  const auto syms = MakeNativeReplaySyms();
+  const auto command_buffer = reinterpret_cast<VkCommandBuffer>(uintptr_t{1});
+  const auto buffer = reinterpret_cast<VkBuffer>(uintptr_t{2});
+  for (VkQueueFlags queue_flags : {VkQueueFlags{VK_QUEUE_TRANSFER_BIT},
+                                   VkQueueFlags{VK_QUEUE_COMPUTE_BIT}}) {
+    const bool has_compute = (queue_flags & VK_QUEUE_COMPUTE_BIT) != 0;
+    const VkPipelineStageFlags2 stages =
+        VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+        (has_compute ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : 0);
+    for (VkAccessFlags2 target_access :
+         {VkAccessFlags2{0}, VK_ACCESS_2_TRANSFER_READ_BIT,
+          VK_ACCESS_2_TRANSFER_WRITE_BIT}) {
+      const iree_hal_vulkan_barrier_t barrier = {
+          .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+          .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+          .source_access_mask =
+              target_access ? VK_ACCESS_2_TRANSFER_WRITE_BIT : 0,
+          .target_access_mask = target_access,
+      };
+      const VkAccessFlags2 writes =
+          target_access ? VK_ACCESS_2_TRANSFER_WRITE_BIT |
+                              (has_compute ? VK_ACCESS_2_SHADER_WRITE_BIT : 0)
+                        : 0;
+      VkAccessFlags2 accesses = target_access;
+      if (target_access && has_compute) {
+        accesses |=
+            target_access == VK_ACCESS_2_TRANSFER_READ_BIT
+                ? VK_ACCESS_2_SHADER_READ_BIT
+                : VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+      }
+      NativeReplayCapture capture;
+      g_native_replay_capture = &capture;
+      iree_hal_vulkan_barrier_record(&syms, queue_flags, command_buffer,
+                                     &barrier);
+      iree_hal_vulkan_buffer_barrier_record(&syms, queue_flags, command_buffer,
+                                            &barrier, buffer, 8, 16);
+      g_native_replay_capture = nullptr;
+      ASSERT_EQ(capture.pipeline_barrier_count, 2);
+      ASSERT_EQ(capture.memory_barrier_count, 1u);
+      ASSERT_EQ(capture.buffer_barrier_count, 1u);
+      const auto& global = capture.memory_barriers[0];
+      EXPECT_EQ(global.srcStageMask, stages);
+      EXPECT_EQ(global.dstStageMask, stages);
+      EXPECT_EQ(global.srcAccessMask, writes);
+      EXPECT_EQ(global.dstAccessMask, accesses);
+      const auto& ranged = capture.buffer_barriers[0];
+      EXPECT_EQ(ranged.srcStageMask, stages);
+      EXPECT_EQ(ranged.dstStageMask, stages);
+      EXPECT_EQ(ranged.srcAccessMask, writes);
+      EXPECT_EQ(ranged.dstAccessMask, accesses);
+      EXPECT_EQ(ranged.srcQueueFamilyIndex, VK_QUEUE_FAMILY_IGNORED);
+      EXPECT_EQ(ranged.dstQueueFamilyIndex, VK_QUEUE_FAMILY_IGNORED);
+      EXPECT_EQ(ranged.buffer, buffer);
+      EXPECT_EQ(ranged.offset, 8u);
+      EXPECT_EQ(ranged.size, 16u);
+    }
+  }
 }
 
 struct CommandBufferDeleter {
@@ -655,51 +758,63 @@ TEST_F(VulkanCommandBufferTest,
           .flags = IREE_HAL_ATOMIC_FLAG_NONE,
           .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
           .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
-          .pre_source_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+          .pre_source_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+                                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
           .pre_source_access_mask = 0,
           .pre_target_access_mask = 0,
           .post_source_access_mask = 0,
-          .post_target_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+          .post_target_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+                                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
           .post_target_access_mask = 0,
       },
       {
           .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
           .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
           .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
-          .pre_source_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-          .pre_source_access_mask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+          .pre_source_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+                                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+          .pre_source_access_mask =
+              VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
           .pre_target_access_mask =
               VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
           .post_source_access_mask = 0,
-          .post_target_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+          .post_target_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+                                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
           .post_target_access_mask = 0,
       },
       {
           .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
           .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
           .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
-          .pre_source_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+          .pre_source_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+                                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
           .pre_source_access_mask = 0,
           .pre_target_access_mask = 0,
           .post_source_access_mask =
               VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
-          .post_target_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+          .post_target_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+                                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
           .post_target_access_mask =
-              VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+              VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT |
+              VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
       },
       {
           .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE,
           .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
           .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
-          .pre_source_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-          .pre_source_access_mask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+          .pre_source_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+                                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+          .pre_source_access_mask =
+              VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
           .pre_target_access_mask =
               VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
           .post_source_access_mask =
               VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
-          .post_target_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+          .post_target_stage_mask = VK_PIPELINE_STAGE_2_TRANSFER_BIT |
+                                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
           .post_target_access_mask =
-              VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+              VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT |
+              VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
       },
       {
           .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE,
