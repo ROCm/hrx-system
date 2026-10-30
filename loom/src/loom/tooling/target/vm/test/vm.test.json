@@ -2,6 +2,20 @@
   "version": 1,
   "cases": [
     {
+      "name": "VM testbench installs native Unicode services",
+      "run": {
+        "tool": "loom-test",
+        "args": ["{srcdir}/../testdata/unicode.loom"]
+      },
+      "stdout": {
+        "contains": [
+          "\"case_count\":4",
+          "\"failed_sample_count\":0",
+          "\"skipped_case_count\":0"
+        ]
+      }
+    },
+    {
       "name": "typed views preserve values, subranges, aliases, and lifetimes across host calls",
       "steps": [
         {
@@ -9,7 +23,7 @@
           "run": {
             "tool": "loom-test",
             "args": [
-              "{srcdir}/source_views.loom"
+              "{srcdir}/../testdata/source_views.loom"
             ]
           },
           "stdout": {
@@ -26,7 +40,7 @@
           "run": {
             "tool": "loom-benchmark",
             "args": [
-              "{srcdir}/source_views.loom",
+              "{srcdir}/../testdata/source_views.loom",
               "--iterations=1",
               "--warmup-iterations=0"
             ]
@@ -48,7 +62,7 @@
           "run": {
             "tool": "loom-link",
             "args": [
-              "{srcdir}/source_views.loom",
+              "{srcdir}/../testdata/source_views.loom",
               "--mode=link",
               "--root=@returned_subview_alias",
               "--root=@dynamic_view_results",
@@ -82,7 +96,7 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/source_views_invalid.loom",
+          "{srcdir}/../testdata/source_views_invalid.loom",
           "--case=non_dense_input"
         ]
       },
@@ -98,7 +112,7 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/source_views_invalid.loom",
+          "{srcdir}/../testdata/source_views_invalid.loom",
           "--case=non_dense_result"
         ]
       },
@@ -114,7 +128,7 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/source_views_invalid.loom",
+          "{srcdir}/../testdata/source_views_invalid.loom",
           "--case=extent_outside"
         ]
       },
@@ -130,7 +144,7 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/source_views_invalid.loom",
+          "{srcdir}/../testdata/source_views_invalid.loom",
           "--case=offset_outside"
         ]
       },
@@ -180,7 +194,7 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/source_config.loom",
+          "{srcdir}/../testdata/source_config.loom",
           "--case=five",
           "--config=tuning.factor=5"
         ]
@@ -198,7 +212,7 @@
       "run": {
         "tool": "loom-benchmark",
         "args": [
-          "{srcdir}/source_config.loom",
+          "{srcdir}/../testdata/source_config.loom",
           "--case=five",
           "--config=tuning.factor=5",
           "--iterations=1",
@@ -217,7 +231,7 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/source_config.loom",
+          "{srcdir}/../testdata/source_config.loom",
           "--case=nine",
           "--config=tuning.factor=9"
         ]
@@ -235,7 +249,7 @@
       "run": {
         "tool": "loom-benchmark",
         "args": [
-          "{srcdir}/source_config.loom",
+          "{srcdir}/../testdata/source_config.loom",
           "--case=nine",
           "--config=tuning.factor=9",
           "--iterations=1",
@@ -254,8 +268,8 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/source_template_case.loom",
-          "--library={srcdir}/source_template.loom"
+          "{srcdir}/../testdata/source_template_case.loom",
+          "--library={srcdir}/../testdata/source_template.loom"
         ]
       },
       "exit": {
@@ -283,7 +297,7 @@
       "run": {
         "tool": "loom-compile",
         "args": [
-          "{srcdir}/source_template.loom",
+          "{srcdir}/../testdata/source_template.loom",
           "--root=@missing_implementation",
           "--target=vm:core",
           "--output={tmp}/output.vm"
@@ -304,7 +318,7 @@
       "run": {
         "tool": "loom-benchmark",
         "args": [
-          "{srcdir}/source_mismatch.loom",
+          "{srcdir}/../testdata/source_mismatch.loom",
           "--iterations=1",
           "--warmup-iterations=0",
           "--output-format=jsonl"
@@ -327,8 +341,8 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/source_cases.loom",
-          "--library={srcdir}/source_mismatch.loom",
+          "{srcdir}/../testdata/source_cases.loom",
+          "--library={srcdir}/../testdata/source_mismatch.loom",
           "--case=mismatch"
         ]
       },
@@ -349,8 +363,8 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/source_unavailable.loom",
-          "--library={srcdir}/source_cases.loom"
+          "{srcdir}/../testdata/source_unavailable.loom",
+          "--library={srcdir}/../testdata/source_cases.loom"
         ]
       },
       "exit": {
@@ -367,7 +381,7 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/source_cases.loom"
+          "{srcdir}/../testdata/source_cases.loom"
         ]
       },
       "stdout": {
@@ -384,8 +398,8 @@
       "run": {
         "tool": "loom-test",
         "args": [
-          "{srcdir}/source_library_cases.loom",
-          "--library={srcdir}/source_cases.loom"
+          "{srcdir}/../testdata/source_library_cases.loom",
+          "--library={srcdir}/../testdata/source_cases.loom"
         ]
       },
       "stdout": {
@@ -401,7 +415,7 @@
       "run": {
         "tool": "loom-benchmark",
         "args": [
-          "{srcdir}/source_cases.loom",
+          "{srcdir}/../testdata/source_cases.loom",
           "--iterations=1",
           "--warmup-iterations=0"
         ]
@@ -416,7 +430,7 @@
       "name": "rejects a target opcode with incompatible source registers",
       "run": {
         "tool": "loom-compile",
-        "args": ["{srcdir}/invalid_operand.loom", "--format=vm", "--output={tmp}/invalid.vm"]
+        "args": ["{srcdir}/../testdata/invalid_operand.loom", "--format=vm", "--output={tmp}/invalid.vm"]
       },
       "exit": 1,
       "stderr": {
@@ -434,7 +448,7 @@
           "name": "compile",
           "run": {
             "tool": "loom-compile",
-            "args": ["{srcdir}/module.loom", "--target=vm:core", "--output={tmp}/module.vm", "--dump-ir-after-all", "--dump-ir-output={tmp}/module.ir"]
+            "args": ["{srcdir}/../testdata/module.loom", "--target=vm:core", "--output={tmp}/module.vm", "--dump-ir-after-all", "--dump-ir-output={tmp}/module.ir"]
           },
           "files": [{"path": "{tmp}/module.ir", "contains": ["vm.target<core>", "integer.mul.i32"]}]
         },
@@ -466,7 +480,7 @@
           "name": "compile",
           "run": {
             "tool": "loom-compile",
-            "args": ["{srcdir}/module.loom", "--root=arithmetic", "--target=vm:core", "--output={tmp}/selected.vm"]
+            "args": ["{srcdir}/../testdata/module.loom", "--root=arithmetic", "--target=vm:core", "--output={tmp}/selected.vm"]
           }
         },
         {
@@ -489,7 +503,7 @@
           "name": "compile",
           "run": {
             "tool": "loom-compile",
-            "args": ["{srcdir}/module.loom", "--exclude-root=swap", "--target=vm:core", "--output={tmp}/excluded.vm"]
+            "args": ["{srcdir}/../testdata/module.loom", "--exclude-root=swap", "--target=vm:core", "--output={tmp}/excluded.vm"]
           }
         },
         {
@@ -509,7 +523,7 @@
       "name": "rejects colliding host export names",
       "run": {
         "tool": "loom-compile",
-        "args": ["{srcdir}/duplicate_exports.loom", "--format=vm", "--output={tmp}/invalid.vm"]
+        "args": ["{srcdir}/../testdata/duplicate_exports.loom", "--format=vm", "--output={tmp}/invalid.vm"]
       },
       "exit": 1,
       "stderr": {"contains": ["duplicate VM export 'collision'"]}
@@ -518,7 +532,7 @@
       "name": "rejects an explicitly empty export name",
       "run": {
         "tool": "loom-compile",
-        "args": ["{srcdir}/empty_export.loom", "--format=vm", "--output={tmp}/invalid.vm"]
+        "args": ["{srcdir}/../testdata/empty_export.loom", "--format=vm", "--output={tmp}/invalid.vm"]
       },
       "exit": 1,
       "stderr": {"contains": ["VM export names must not be empty"]}
@@ -527,7 +541,7 @@
       "name": "rejects storage exceeding the Core frame extent",
       "run": {
         "tool": "loom-compile",
-        "args": ["{srcdir}/invalid_storage.loom", "--root=oversized", "--format=vm", "--output={tmp}/invalid.vm"]
+        "args": ["{srcdir}/../testdata/invalid_storage.loom", "--root=oversized", "--format=vm", "--output={tmp}/invalid.vm"]
       },
       "exit": 1,
       "stderr": {"contains": ["VM local storage exceeds 65535 bytes"]}
@@ -536,7 +550,7 @@
       "name": "rejects a narrow scalar spill that does not hold a complete value cell",
       "run": {
         "tool": "loom-compile",
-        "args": ["{srcdir}/invalid_storage.loom", "--root=short", "--format=vm", "--output={tmp}/invalid.vm"]
+        "args": ["{srcdir}/../testdata/invalid_storage.loom", "--root=short", "--format=vm", "--output={tmp}/invalid.vm"]
       },
       "exit": 1,
       "stderr": {"contains": ["VM register transfer exceeds its storage span"]}
@@ -545,7 +559,7 @@
       "name": "rejects workgroup storage in a Core host function",
       "run": {
         "tool": "loom-compile",
-        "args": ["{srcdir}/invalid_storage.loom", "--root=wrong_space", "--format=vm", "--output={tmp}/invalid.vm"]
+        "args": ["{srcdir}/../testdata/invalid_storage.loom", "--root=wrong_space", "--format=vm", "--output={tmp}/invalid.vm"]
       },
       "exit": 1,
       "stderr": {"contains": ["VM local storage requires stack or private space"]}

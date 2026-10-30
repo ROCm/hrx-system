@@ -6,44 +6,31 @@
 
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:defs.bzl", "loom_test")
-load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
 package(
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
 )
 
-exports_files([
-    "imports.loom",
-    "native_references.loom",
-])
-
-loom_test(
-    name = "unicode_test",
-    srcs = ["unicode.loom"],
-    execution_profiles = [VM_REFERENCE_PROFILE],
-)
-
 iree_execution_test_suite(
     name = "tools_test",
-    data = [
-        "duplicate_exports.loom",
-        "empty_export.loom",
-        "invalid_operand.loom",
-        "invalid_storage.loom",
-        "module.loom",
-        "source_cases.loom",
-        "source_config.loom",
-        "source_library_cases.loom",
-        "source_mismatch.loom",
-        "source_template.loom",
-        "source_template_case.loom",
-        "source_unavailable.loom",
-        "source_views.loom",
-        "source_views_invalid.loom",
-        "//loom/target/vm/test:call_target_context.loom",
-    ],
+    data = ["//loom/src/loom/tooling/target/vm/testdata:" + name + ".loom" for name in [
+        "duplicate_exports",
+        "empty_export",
+        "invalid_operand",
+        "invalid_storage",
+        "module",
+        "source_cases",
+        "source_config",
+        "source_library_cases",
+        "source_mismatch",
+        "source_template",
+        "source_template_case",
+        "source_unavailable",
+        "source_views",
+        "source_views_invalid",
+        "unicode",
+    ]] + ["//loom/target/vm/test:call_target_context.loom"],
     manifests = ["vm.test.json"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/execute:vm_iree_vm",
