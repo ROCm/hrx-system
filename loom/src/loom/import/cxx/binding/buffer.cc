@@ -74,7 +74,8 @@ bool BufferIntrinsic::supports(std::string_view name) {
   return name == "buffer.constant" || name == "buffer.alloca.init" ||
          name == "buffer.alloca" || name == "buffer.assume.alignment" ||
          name == "buffer.assume.noalias" ||
-         name == "buffer.assume.memory_space" || name == "buffer.cast";
+         name == "buffer.assume.memory_space" || name == "buffer.cast" ||
+         name == "buffer.root";
 }
 
 std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
@@ -89,33 +90,58 @@ std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
   auto parameters = signature->parameterTypes();
   auto* result = cxx::type_cast<cxx::PointerType>(
       types.unqualified(signature->returnType()));
-  if (name == "buffer.cast") {
+  if (name == "buffer.cast" || name == "buffer.root") {
     if (attribute.arguments.size() != 1 || signature->isVariadic() ||
         parameters.size() != 1) {
-      diagnostics.reject(unit, owner,
-                         "buffer.cast requires one typed buffer operand");
+      diagnostics.reject(
+          unit, owner,
+          std::string(name) + " requires one typed storage operand");
     }
     const auto& source_partition = types.partition(parameters[0], owner);
     const auto& result_partition =
         types.partition(signature->returnType(), owner);
-    if (source_partition.kind != ValueKind::Buffer ||
+    const auto expected_source_kind =
+        name == "buffer.root" ? ValueKind::Pointer : ValueKind::Buffer;
+    if (source_partition.kind != expected_source_kind ||
         result_partition.kind != ValueKind::Buffer) {
-      diagnostics.reject(unit, owner,
-                         "buffer.cast requires typed buffer source and result");
+      diagnostics.reject(
+          unit, owner,
+          std::string(name) +
+              (name == "buffer.root"
+                   ? " requires a pointer source and typed buffer result"
+                   : " requires typed buffer source and result"));
     }
-    const auto& source_buffer =
-        static_cast<const BufferPartition&>(source_partition);
     const auto& result_buffer =
         static_cast<const BufferPartition&>(result_partition);
     auto traits = unit.typeTraits();
-    if ((traits.is_const(source_buffer.element_type) &&
-         !traits.is_const(result_buffer.element_type)) ||
-        (traits.is_volatile(source_buffer.element_type) &&
-         !traits.is_volatile(result_buffer.element_type))) {
+    const cxx::Type* source_element_type = nullptr;
+    if (name == "buffer.root") {
+      auto* pointer =
+          cxx::type_cast<cxx::PointerType>(types.unqualified(parameters[0]));
+      source_element_type = pointer ? pointer->elementType() : nullptr;
+    } else {
+      source_element_type =
+          static_cast<const BufferPartition&>(source_partition).element_type;
+    }
+    if (!source_element_type) {
+      diagnostics.reject(unit, owner,
+                         std::string(name) + " has no source element type");
+    }
+    if (name == "buffer.root") {
+      if (!traits.is_same(source_element_type, result_buffer.element_type)) {
+        diagnostics.reject(unit, owner,
+                           "buffer.root must preserve its source element type");
+      }
+    } else if ((traits.is_const(source_element_type) &&
+                !traits.is_const(result_buffer.element_type)) ||
+               (traits.is_volatile(source_element_type) &&
+                !traits.is_volatile(result_buffer.element_type))) {
       diagnostics.reject(unit, owner,
                          "buffer.cast cannot discard element qualifiers");
     }
-    return BufferIntrinsic(&result_buffer);
+    return BufferIntrinsic(
+        name == "buffer.root" ? Operation::Root : Operation::Cast,
+        &result_buffer);
   }
   if (name == "buffer.constant" || name == "buffer.alloca.init") {
     const bool immutable = name == "buffer.constant";
@@ -353,6 +379,10 @@ Value BufferIntrinsic::call(std::span<const Value> arguments, ValueArena& arena,
                             Storage& storage, cxx::AST* owner) const {
   if (operation_ == Operation::Cast) {
     return arena.capture(*result_buffer_, arguments[0].components());
+  }
+  if (operation_ == Operation::Root) {
+    auto root = arguments[0].pointer().root;
+    return arena.capture(*result_buffer_, {&root, 1});
   }
   if (operation_ == Operation::AssumeMemorySpace) {
     auto source = arguments[0];

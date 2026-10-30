@@ -120,6 +120,47 @@ enum class Bits : unsigned { Zero = 0 };
 // CHECK-NOT: *@entry*
 
 // ====
+// Retention is independent of source visibility and explicit root selection.
+// Every callable family uses the same source annotation, while definitions
+// keep their private visibility and bodyless declarations retain link identity.
+// INPUT: cxx root=entry
+#include <loomcxx/command.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/pipeline.h>
+
+LOOM_TEMPLATE_DECL("retained.family") unsigned retained_family(unsigned value);
+
+[[loom::retain, loom::symbol("retained.function")]]
+static unsigned retained_function(unsigned value);
+static unsigned retained_function(unsigned value) { return value; }
+
+[[loom::retain, loom::symbol("retained.external")]]
+unsigned retained_external(unsigned value);
+
+[[loom::retain, loom::kernel, loom::symbol("retained.kernel")]]
+static void retained_kernel() {}
+
+[[loom::retain, loom::command_program, loom::symbol("retained.command")]]
+static void retained_command() {}
+
+[[loom::retain, loom::pipeline("kernel"), loom::symbol("retained.pipeline")]]
+static void retained_pipeline() {}
+
+LOOM_TEMPLATE_DEF(retained_family)
+[[loom::retain, loom::symbol("retained.provider")]]
+static unsigned retained_provider(unsigned value) { return value; }
+
+unsigned entry(unsigned value) { return value; }
+// ----
+// CHECK: func.def public @entry*
+// CHECK: func.def retain @retained.function*
+// CHECK: kernel.def retain @retained.kernel*
+// CHECK: command.def retain @retained.command*
+// CHECK: pipeline.def<kernel> retain @retained.pipeline*
+// CHECK: template.def<@retained.family> retain @retained.provider*
+// CHECK: func.decl retain @retained.external*
+
+// ====
 // Check cases and their benchmark references obey the same naming contract.
 [[loom::check_case, loom::symbol("checks.case")]] void case_body() {}
 [[loom::check_benchmark(case_body), loom::symbol("checks.benchmark")]]

@@ -30,6 +30,7 @@ from loom.ir import (
     BufferType,
     DynamicDim,
     DynamicEncoding,
+    EncodingInstance,
     EncodingType,
     Module,
     Operation,
@@ -68,6 +69,39 @@ def _buffer_payload_literal(contents: bytes | Utf8Attr) -> str:
 
 
 class CxxRenderer(CxxConfigRenderer):
+    def _static_view_encoding_expression(
+        self, operation: Operation, view_type: ShapedType
+    ) -> str:
+        encoding = view_type.encoding
+        if not isinstance(encoding, EncodingInstance):
+            raise CxxRenderError(
+                operation, "view encoding is neither a static nor dynamic encoding"
+            )
+        if encoding.name == "encoding.layout.dense" and not encoding.params:
+            return f"loom::encoding::layout::dense<{view_type.rank}>()"
+        if encoding.name == "encoding.layout.strided":
+            parameters = dict(encoding.params)
+            strides = parameters.get("strides")
+            if set(parameters) != {"strides"} or not isinstance(strides, tuple):
+                raise CxxRenderError(
+                    operation, "static strided layout has malformed stride metadata"
+                )
+            if len(strides) != view_type.rank or any(
+                type(stride) is not int for stride in strides
+            ):
+                raise CxxRenderError(
+                    operation,
+                    "static strided layout requires one integer stride per view axis",
+                )
+            arguments = ", ".join(
+                f"loom::type::index{{{stride}}}" for stride in strides
+            )
+            return f"loom::encoding::layout::strided({arguments})"
+        raise CxxRenderError(
+            operation,
+            f"static view encoding {encoding.name!r} has no C++ value projection",
+        )
+
     def _view_shape_arguments(
         self, operation: Operation, view_type: ShapedType
     ) -> tuple[str, str]:
@@ -335,10 +369,7 @@ class CxxRenderer(CxxConfigRenderer):
             elif result_type.encoding is None:
                 encoding = None
             else:
-                raise CxxRenderError(
-                    operation,
-                    "static view encoding has no explicit C++ value projection",
-                )
+                encoding = self._static_view_encoding_expression(operation, result_type)
             if result_type.alignment is not None:
                 raise CxxRenderError(
                     operation,
@@ -1301,7 +1332,7 @@ class CxxRenderer(CxxConfigRenderer):
         scope = self.operation_scopes[id(kernel)]
         self.temporary_names = set(self.scope_names[scope])
         self.rendered_assumptions_by_block.clear()
-        self._validate_projected_attributes(kernel, ("callee", "target"))
+        self._validate_projected_attributes(kernel, ("callee", "retain", "target"))
         self._analyze_buffers(kernel)
         resolved = self._resolved(kernel)
         body = resolved.region("body")
@@ -1310,6 +1341,8 @@ class CxxRenderer(CxxConfigRenderer):
         attributes = self._render_kernel_configuration(kernel)
         self.temporary_names = set(self.scope_names[scope])
         self.rendered_assumptions_by_block.clear()
+        if retain := self._retention_attribute(kernel):
+            attributes.append(retain)
         target_symbol = resolved.attr("target")
         if target_symbol is not None:
             attributes.append(self._target_attribute(kernel, str(target_symbol)))
@@ -1396,7 +1429,15 @@ class CxxRenderer(CxxConfigRenderer):
             )
             if expected_element is not None:
                 expected_type = f"loom::type::buffer<{expected_element}>"
-                if self.expression_type(operand) != expected_type:
+                source_type = self.expression_type(operand)
+                if source_type.endswith("*"):
+                    expression = f"loom::buffer::root({expression})"
+                    source_element = source_type[:-1].strip()
+                    if source_element != expected_element:
+                        expression = (
+                            f"loom::buffer::cast<{expected_element}>({expression})"
+                        )
+                elif source_type != expected_type:
                     expression = f"loom::buffer::cast<{expected_element}>({expression})"
             arguments_list.append(expression)
         arguments = ", ".join(arguments_list)
@@ -1439,6 +1480,8 @@ class CxxRenderer(CxxConfigRenderer):
         resolved = self._resolved(function)
         symbol = str(resolved.attr("callee"))
         attributes = [f'loom::symbol("{symbol}")']
+        if retain := self._retention_attribute(function):
+            attributes.append(retain)
         target = resolved.attr("target")
         if target is not None:
             attributes.append(self._target_attribute(function, str(target)))
@@ -1496,7 +1539,7 @@ class CxxRenderer(CxxConfigRenderer):
     def _render_function_declaration(self, function: Operation) -> None:
         if function.name == "func.decl":
             self._validate_projected_attributes(
-                function, ("callee", "inline_policy", "target")
+                function, ("callee", "inline_policy", "retain", "target")
             )
         self._analyze_buffers(function)
         self.writer.attributes(self._function_attributes(function))
@@ -1509,7 +1552,8 @@ class CxxRenderer(CxxConfigRenderer):
         self.temporary_names = set(self.scope_names[scope])
         self.rendered_assumptions_by_block.clear()
         self._validate_projected_attributes(
-            function, ("callee", "visibility", "inline_policy", "target")
+            function,
+            ("callee", "visibility", "inline_policy", "retain", "target"),
         )
         self._analyze_buffers(function)
         body = self._resolved(function).region("body")
@@ -1693,6 +1737,7 @@ class CxxRenderer(CxxConfigRenderer):
                     (
                         "callee",
                         "visibility",
+                        "retain",
                         "target",
                         "predicates",
                         "specialization_count",

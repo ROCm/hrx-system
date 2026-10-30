@@ -49,6 +49,12 @@ void reject_misplaced_binding_attributes(
                              "target bindings require a leading attribute on a "
                              "namespace-scope callable or a pipeline strand");
         }
+        if (name == "retain" && scope != BindingAttributeScope::Declaration) {
+          diagnostics.reject(
+              unit, attribute,
+              "retain requires a leading attribute on a namespace-scope "
+              "callable");
+        }
         if ((name == "template_def" || name == "priority") &&
             scope != BindingAttributeScope::Declaration) {
           diagnostics.reject(

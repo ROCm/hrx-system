@@ -78,6 +78,12 @@ enum class memory_space {
 
 namespace buffer {
 
+// Recovers the zero-origin Loom buffer root carried by a source pointer. The
+// pointer expression is evaluated normally; its interior byte origin is not
+// part of the returned root value.
+template <class T>
+[[loom::op("buffer.root")]] loom::type::buffer<T> root(T* source);
+
 // Changes only the source-visible element interpretation of an untyped Loom
 // buffer root. Storage identity, byte origin, and all retained facts survive.
 // Element qualifiers cannot be weakened; additional const or volatile access

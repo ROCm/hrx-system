@@ -26,7 +26,7 @@ unsigned adjust(unsigned value);
 
 [[loom::pipeline("kernel")]] void child(unsigned factor, [[loom::launch]] Bytes output);
 
-[[loom::pipeline("kernel"), loom::target(array_target)]] void resident(unsigned factor, loomt::index column, loomt::index count, [[loom::launch]] Bytes output) {
+[[loom::pipeline("kernel"), loom::retain, loom::target(array_target)]] void resident(unsigned factor, loomt::index column, loomt::index count, [[loom::launch]] Bytes output) {
   auto pool = loom::pipeline::memory<loom::memory_space::workgroup>(loomt::indices{column, loomt::index{3}});
   auto* scratch = loom::buffer::alloca<unsigned char, loom::memory_space::workgroup, 64>(loomt::index{256}, pool);
   loom::pipeline::compose<child>(factor, output);
@@ -62,13 +62,13 @@ constexpr rendered_target_worker_target_type rendered_target_worker_target{
 [[loom::symbol("workers.adjust"), loom::target(rendered_target_deployment_array), loom::force_inline]]
 unsigned workers_adjust(unsigned v21);
 
-[[loom::pipeline("kernel"), loom::symbol("resident"), loom::target(rendered_target_deployment_array)]]
+[[loom::pipeline("kernel"), loom::symbol("resident"), loom::retain, loom::target(rendered_target_deployment_array)]]
 void resident(unsigned factor, loom::type::index column, loom::type::index count, [[loom::launch]] loom::type::buffer<unsigned char> output);
 
 [[loom::pipeline("kernel"), loom::symbol("child")]]
 void child(unsigned v19, [[loom::launch]] loom::type::buffer<unsigned char> v20);
 
-[[loom::pipeline("kernel"), loom::symbol("resident"), loom::target(rendered_target_deployment_array)]]
+[[loom::pipeline("kernel"), loom::symbol("resident"), loom::retain, loom::target(rendered_target_deployment_array)]]
 void resident(unsigned factor, loom::type::index column, loom::type::index count, [[loom::launch]] loom::type::buffer<unsigned char> output) {
   auto pool = loom::pipeline::memory<loom::memory_space::workgroup>(loom::type::indices{column, loom::type::index{3}});
   auto* scratch = loom::buffer::alloca<unsigned char, loom::memory_space::workgroup, 64>(loom::type::index{256}, pool);

@@ -319,3 +319,24 @@ config.decl @entry.workgroup_size.x : index
 config.decl @entry.workgroup_size.y : index
 
 config.decl @entry.workgroup_size.z : index
+
+// ====
+// A source pointer retains its allocation root independently of its current
+// byte origin, allowing root-only Loom interfaces to consume local storage.
+#include <loomcxx/buffer.h>
+
+loom::type::buffer<unsigned> recover_root(unsigned* pointer) {
+  return loom::buffer::root(pointer + 4);
+}
+// ----
+func.def public @recover_root(%pointer: buffer, %pointer_byte_offset: offset) -> (buffer) {
+  %3 = scalar.constant 4 : i32
+  %4 = scalar.extsi %3 : i32 to i64
+  %5 = scalar.constant 4 : i64
+  %6 = scalar.muli %4, %5 : i64
+  %7 = index.cast %pointer_byte_offset : offset to i64
+  %8 = scalar.addi %7, %6 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  func.return %pointer : buffer
+}
