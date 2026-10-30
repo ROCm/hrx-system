@@ -50,6 +50,7 @@ _KERNEL_SOURCES = [
     "kernel/workgroup/scan.loom",
     "memory/address/carrier_casts.loom",
     "memory/address/carrier_loops.loom",
+    "memory/address/dynamic_record_fields.loom",
     "memory/address/generic.loom",
     "memory/address/integer_casts.loom",
     "memory/address/integer_terms.loom",

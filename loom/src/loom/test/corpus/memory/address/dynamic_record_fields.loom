@@ -1,5 +1,5 @@
-// Native buffer descriptors must cover each narrow field when a shared dynamic
-// record base is materialized independently of the field's static byte offset.
+// A shared dynamic record base must retain each field's static byte offset.
+// Mixed-width atomics make undersized or double-counted address extents visible.
 func.def inline @atomic_record_base(%bits: i64) -> (offset) {
   %word = scalar.trunci %bits : i64 to i32
   %mask = scalar.constant 15 : i32

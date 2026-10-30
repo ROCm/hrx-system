@@ -209,17 +209,6 @@ loom_test(
 )
 
 loom_test(
-    name = "buffer_descriptor_extents_test",
-    srcs = ["buffer_descriptor_extents.loom"],
-    benchmark_smoke = False,
-    compile_targets = ["//loom/target/amdgpu:" + target for target in LOOM_AMDGPU_SUPPORTED_TARGETS],
-    execution_profiles = [
-        AMD_GPU_HARDWARE_PROFILE,
-        AMD_GPU_ACCESS_PROFILE,
-    ],
-)
-
-loom_test(
     name = "kernarg_test",
     srcs = ["amdgpu_unused_kernargs.loom"],
     execution_profiles = [

@@ -237,6 +237,7 @@ _ALL_PROFILE_XFAILS = {
     "kernel/workgroup/reduce_tree.loom:@workgroup_tree_vector_all": "TARGET/003",
     "kernel/workgroup/scan.loom:@workgroup_scan_float": "TARGET/032",
     "kernel/workgroup/scan.loom:@workgroup_scan_vector": "TARGET/032",
+    "memory/address/dynamic_record_fields.loom:@atomic_record_fields": "TARGET/003",
     "memory/address/generic.loom:@generic_atomic_uniform_i64": "TARGET/003",
     "memory/address/generic.loom:@generic_workgroup_publication": "TARGET/032",
     # Loaded i64 coordinates exceed the target's exact signed 32-bit index.
@@ -449,6 +450,7 @@ _ALL_ROOTS_XFAIL = [
     "kernel/workgroup/reduce_partial.loom",
     "kernel/workgroup/reduce_tree.loom",
     "kernel/workgroup/scan.loom",
+    "memory/address/dynamic_record_fields.loom",
     "memory/atomic/float_bitwise.loom",
     "memory/atomic/float64_contention.loom",
     "memory/atomic/global_add_f32.loom",
@@ -494,6 +496,7 @@ _SPIRV_EXECUTION_XFAILS = {
     "kernel/workgroup/scan.loom:@workgroup_scan_float_values": "TARGET/032",
     "kernel/workgroup/scan.loom:@workgroup_scan_vector_values": "TARGET/032",
     "memory/address/address.loom:@launch_arithmetic_values": "SPIRV/027,TARGET/005",
+    "memory/address/dynamic_record_fields.loom:@atomic_record_field_values": "TARGET/003",
     "memory/address/generic.loom:@generic_workgroup_publication_values": "TARGET/032",
     "memory/address/integer_casts.loom:@loaded_integer_address_join_values": "SPIRV/026",
     "memory/address/scaling.loom:@scaled_offset_values": "SPIRV/026",

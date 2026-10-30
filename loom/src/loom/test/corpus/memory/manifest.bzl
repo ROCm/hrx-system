@@ -16,6 +16,7 @@ MEMORY_CORPUS = loom_corpus_manifest(
         "address/biased_offsets.loom",
         "address/carrier_casts.loom",
         "address/carrier_loops.loom",
+        "address/dynamic_record_fields.loom",
         "address/generic.loom",
         "address/integer_casts.loom",
         "address/integer_terms.loom",
