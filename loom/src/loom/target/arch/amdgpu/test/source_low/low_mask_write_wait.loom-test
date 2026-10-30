@@ -146,7 +146,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 
 // ====
 
-// RUN: emit amdgpu-assembly @reuse strategy=source fixed=%replacement:physical_register:0:2 fixed=%source:physical_register:4:2
+// RUN: emit amdgpu-assembly @reuse strategy=source
 
 // A loop header sees a mask read arriving from its backedge.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -163,10 +163,10 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 
 // ----
 .Lbb1:
-  s_or_b64 s[0:1], s[4:5], s[4:5]
+  s_or_b64 s[2:3], s[0:1], s[0:1]
   s_waitcnt_depctr 0xff9e
 .Lbb2:
-  v_cndmask_b32 v1, 0, v0, s[0:1]
+  v_cndmask_b32 v1, 0, v0, s[2:3]
   s_branch .Lbb1
 
 // ====
