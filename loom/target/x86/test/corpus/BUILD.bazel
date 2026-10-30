@@ -1,0 +1,64 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:defs.bzl", "loom_corpus_test")
+load("//loom/src/loom/test/corpus:catalog.bzl", "LOOM_CORPUS")
+load("//loom/target/x86:execution_profiles.bzl", "X86_TASK_HARDWARE_PROFILE")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],
+)
+
+loom_corpus_test(
+    name = "execution",
+    catalog = LOOM_CORPUS,
+    execution_profiles = [X86_TASK_HARDWARE_PROFILE],
+    profile_sources = {
+        X86_TASK_HARDWARE_PROFILE.name: [
+            "control/loop/scalar_state.loom",
+            "function/rodata.loom",
+            "memory/view/scalar_exchange.loom",
+            "numeric/conversion/conversion.loom",
+            "numeric/conversion/f32_narrowing.loom",
+            "numeric/conversion/float_narrowing_matrix.loom",
+            "numeric/conversion/integer_floating.loom",
+            "numeric/conversion/narrow_widening.loom",
+            "numeric/float/activations.loom",
+            "numeric/float/exponent.loom",
+            "numeric/float/exponential.loom",
+            "numeric/float/reciprocal.loom",
+            "numeric/float/roots.loom",
+            "numeric/float/turns.loom",
+            "numeric/integer/bit_count.loom",
+            "numeric/integer/bitfield.loom",
+            "numeric/integer/constant_division.loom",
+            "numeric/integer/rotation.loom",
+            "numeric/integer/scalar_observations.loom",
+            "numeric/integer/signed_unary.loom",
+            "numeric/vector/concatenation.loom",
+            "numeric/vector/conversion.loom",
+            "numeric/vector/integer_bitwise.loom",
+        ],
+    },
+    target_compatible_with = ["@platforms//cpu:x86_64"],
+    xfails = {
+        X86_TASK_HARDWARE_PROFILE.name: {
+            "function/rodata.loom:@immutable_gather_values": "X86/005",
+            "function/rodata.loom:@rodata_copy_values": "SUBRANGE/026",
+            "function/rodata.loom:@rodata_extent_values": "TARGET/001",
+            "numeric/conversion/f32_narrowing.loom:@f32_narrowing_values": "TARGET/031",
+            "numeric/float/activations.loom:@activation_portable_values": "LOWERING/036",
+            "numeric/float/activations.loom:@activation_values": "LOWERING/036",
+            "numeric/float/activations.loom:@ordinary_activation_values": "LOWERING/036",
+            "numeric/float/exponential.loom:@exponential_difference_values": "LOWERING/036",
+            "numeric/float/exponential.loom:@power_values": "LOWERING/036",
+            "numeric/float/roots.loom:@cube_root_values": "LOWERING/036",
+            "numeric/float/turns.loom:@turn_values": "LOWERING/036",
+            "numeric/integer/scalar_observations.loom:@address_cast_values": "TARGET/002",
+        },
+    },
+)

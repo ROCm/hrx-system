@@ -1,0 +1,53 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/target/x86:execution_profiles.bzl", "X86_TASK_HARDWARE_PROFILE")
+
+package(
+    default_visibility = ["//visibility:public"],
+    licenses = ["notice"],
+)
+
+_X86_HOST_COMPATIBLE_WITH = ["@platforms//cpu:x86_64"]
+
+# Native x86 accuracy, conversion, and carrier contracts that intentionally
+# exercise ISA-specific lowering paths.
+[
+    loom_test(
+        name = name + "_test",
+        srcs = [name + ".loom"],
+        benchmark_smoke = False,
+        execution_profiles = [X86_TASK_HARDWARE_PROFILE],
+        target_compatible_with = _X86_HOST_COMPATIBLE_WITH,
+    )
+    for name in [
+        "x86_approximate_roots",
+        "x86_integer_floating_f64",
+        "x86_native_i16_count_carriers",
+    ]
+]
+
+# C++ modules qualify importer output through the native x86 ABI across object
+# layouts, call lifetimes, padded vectors, and public integer intrinsics.
+[
+    loom_test(
+        name = name + "_test",
+        benchmark_smoke = False,
+        execution_profiles = [X86_TASK_HARDWARE_PROFILE],
+        module = "//loom/src/loom/import/cxx/test:" + name + "_module",
+        target_compatible_with = loom_config_compatible_with([
+            "//loom/config/import:cxx",
+        ]) + _X86_HOST_COMPATIBLE_WITH,
+    )
+    for name in [
+        "array_records",
+        "call_lifetimes",
+        "integer_intrinsics",
+        "padded_vectors",
+    ]
+]

@@ -4,12 +4,14 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:executable.bzl", "iree_executable_test")
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load("//loom/binding/c:shared.bzl", "loomc_cc_binary")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "iree_select",
     "loom_cc_library",
+    "loom_config_compatible_with",
 )
 
 package(
@@ -111,4 +113,23 @@ iree_execution_test_suite(
     tools = {
         "loom-run": ":loom-run",
     },
+)
+
+# The public CLI admits C++ directly through its configured LoomC importer.
+iree_executable_test(
+    name = "run_cxx_input_test",
+    src = ":loom-run",
+    args = [
+        "$(rootpath //loom/src/loom/import/cxx/test:array_records_kernel.cxx)",
+        "--device=task",
+        "--kernel-input-buffer=4xi32=37",
+        "--kernel-input-buffer=4xi32=97",
+        "--expected-kernel-buffer=4xi32=37",
+        "--expected-kernel-buffer=4xi32=[42,37,40,37]",
+    ],
+    data = ["//loom/src/loom/import/cxx/test:array_records_kernel.cxx"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/execute:x86_task_hal",
+    ]) + ["@platforms//cpu:x86_64"],
 )
