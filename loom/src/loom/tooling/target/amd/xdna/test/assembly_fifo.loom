@@ -1,0 +1,93 @@
+func.decl @subtract_blocks(%input: buffer, %output: buffer)
+
+func.def inline @query_load_fifos() -> (aie2p.load_fifo, aie2p.load_fifo) {
+  %first, %second = aie2p.load_fifo.state : aie2p.load_fifo, aie2p.load_fifo
+  func.return %first, %second : aie2p.load_fifo, aie2p.load_fifo
+}
+
+aie2p.target<array> @npu
+
+pipeline.def<kernel> public retain target(@npu) @stream_fifo_blocks() run(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %memory = pipeline.memory<workgroup>[0, 3] : pool
+  %origin = index.constant 0 : offset
+  %input_bytes = index.constant 512 : offset
+  %output_bytes = index.constant 256 : offset
+  %capacity = index.constant 1 : index
+  %input_storage = buffer.alloca<workgroup> pool(%memory) align(64) %input_bytes : buffer
+  %output_storage = buffer.alloca<workgroup> pool(%memory) align(64) %output_bytes : buffer
+  %input_slots = buffer.view %input_storage[%origin] : buffer -> view<1x512xi8>
+  %output_slots = buffer.view %output_storage[%origin] : buffer -> view<1x256xi8>
+  %inputs = channel.bind<fifo> %input_slots, %capacity : view<1x512xi8>, index -> channel<tile<512xi8>>
+  %outputs = channel.bind<fifo> %output_slots, %capacity : view<1x256xi8>, index -> channel<tile<256xi8>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %external_input = buffer.view %source[%origin] : buffer -> view<512xi8>
+    %write, %incoming = channel.reserve %inputs : channel<tile<512xi8>> -> (write<tile<512xi8>>, view<512xi8>)
+    %ingress = kernel.async.copy %external_input to %incoming {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<512xi8> to view<512xi8> -> kernel.async.token
+    %ingress_group = kernel.async.group %ingress : kernel.async.token -> kernel.async.group
+    kernel.async.wait %ingress_group {newer_groups = 0} : kernel.async.group
+    channel.publish %write : write<tile<512xi8>>
+    %read, %outgoing = channel.acquire %outputs : channel<tile<256xi8>> -> (read<tile<256xi8>>, view<256xi8>)
+    %external_output = buffer.view %destination[%origin] : buffer -> view<256xi8>
+    %egress = kernel.async.copy %outgoing to %external_output {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<256xi8> to view<256xi8> -> kernel.async.token
+    %egress_group = kernel.async.group %egress : kernel.async.token -> kernel.async.group
+    kernel.async.wait %egress_group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<256xi8>>
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %read, %incoming = channel.acquire %inputs : channel<tile<512xi8>> -> (read<tile<512xi8>>, view<512xi8>)
+    %write, %outgoing = channel.reserve %outputs : channel<tile<256xi8>> -> (write<tile<256xi8>>, view<256xi8>)
+    func.call @subtract_blocks(%input_storage, %output_storage) : (buffer, buffer)
+    channel.publish %write : write<tile<256xi8>>
+    channel.release %read : read<tile<512xi8>>
+  }
+}
+
+func.def @subtract_reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<128xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<64xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%begin to %end step %step] {
+    %upper = index.add %i, %end : index
+    %lower_value = view.load %source[%i] : view<128xi32> -> i32
+    %upper_value = view.load %source[%upper] : view<128xi32> -> i32
+    %difference = scalar.subi %lower_value, %upper_value : i32
+    view.store %difference, %destination[%i] : i32, view<64xi32>
+  }
+  func.return
+}
+
+func.def @generate_fifo_input(%trial: index, %input: buffer) {
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %input[%origin] : buffer -> view<128xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 128 : index
+  %step = index.constant 1 : index
+  %seed = index.cast %trial : index to i32
+  scf.for %i = [%begin to %end step %step] {
+    %position = index.cast %i : index to i32
+    %square = scalar.muli %position, %position : i32
+    %linear = scalar.muli %position, %seed : i32
+    %value = scalar.addi %square, %linear : i32
+    view.store %value, %destination[%i] : i32, view<128xi32>
+  }
+  func.return
+}
+
+check.scenario @fifo_state_loop {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %input_storage = check.generate.fill value(90) : tensor<160xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<160xi32> -> tensor<128xi32>
+    check.generate<@generate_fifo_input>(%trial, %input) : (index, tensor<128xi32>) -> ()
+    %output_storage = check.generate.fill value(-52) : tensor<96xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<96xi32> -> tensor<64xi32>
+    check.compare<@stream_fifo_blocks, @subtract_reference>(%input, %output) : (tensor<128xi32>, tensor<64xi32>) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<160xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<96xi32>
+    }
+  }
+  check.return
+}

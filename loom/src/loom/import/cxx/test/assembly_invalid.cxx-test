@@ -107,15 +107,61 @@ int wrong_result(int value) {
 }
 
 // ====
-#include <loomcxx/buffer.h>
+// Shaped objects do not silently become native addresses, including when
+// hidden inside a result record.
+#include <loomcxx/view.h>
 #include <loomcxx/low.h>
 struct [[loom::representation("test.low.core")]] Contract {};
 struct Result {
-  loom::type::buffer<unsigned> value;
+  // Shaped values have no native register ABI.
+  loom::type::view<loom::type::shape<4>, unsigned> value;
 };
 Result invalid(loom::type::buffer<unsigned> value) {
-  // ERROR@+1: LOWERING/059 "assembly result records require scalar or vector fields"
+  // ERROR@+1: LOWERING/059 "assembly values require scalar, vector, buffer, or opaque dialect components"
   return loom::low::assembly<Contract, Result>(R"(
       (%value: reg<test.ptr>) -> (reg<test.ptr>) { return %value }
   )", value);
+}
+
+// ====
+#include <loomcxx/view.h>
+#include <loomcxx/low.h>
+struct [[loom::representation("test.low.core")]] Contract {};
+void invalid(loom::type::view<loom::type::shape<4>, unsigned> value) {
+  // ERROR@+1: LOWERING/059 "assembly values require scalar, vector, buffer, or opaque dialect components"
+  loom::low::assembly<Contract, void>(R"(() { return })", value);
+}
+
+// ====
+#include <loomcxx/encoding_type.h>
+#include <loomcxx/low.h>
+struct [[loom::representation("test.low.core")]] Contract {};
+using Layout = loom::type::encoding<loom::encoding::role::layout, 1>;
+Layout invalid(Layout value) {
+  // ERROR@+1: LOWERING/059 "assembly values require scalar, vector, buffer, or opaque dialect components"
+  return loom::low::assembly<Contract, Layout>(R"(() { return })", value);
+}
+
+// ====
+#include <loomcxx/view.h>
+#include <loomcxx/low.h>
+struct [[loom::representation("test.low.core")]] Contract {};
+using Dynamic = loom::type::view<loom::type::shape<loom::type::dynamic>, unsigned>;
+struct Result {
+  // A dependent field requires source value identities.
+  Dynamic value;
+};
+Result invalid() {
+  // ERROR@+1: LOWERING/059 "dependent source values require reserved destination identities"
+  return loom::low::assembly<Contract, Result>(R"(() { return })");
+}
+
+// ====
+#include <loomcxx/check.h>
+#include <loomcxx/low.h>
+struct [[loom::representation("test.low.core")]] Contract {};
+using Tensor = loom::type::tensor<loom::type::shape<4>, unsigned>;
+Tensor invalid(Tensor value) {
+  // ERROR@+1: LOWERING/059 "assembly values require scalar, vector, buffer, or opaque dialect components"
+  return loom::low::assembly<Contract, Tensor>(R"(() { return })", value);
 }

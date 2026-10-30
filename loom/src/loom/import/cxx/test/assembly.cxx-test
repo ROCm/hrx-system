@@ -122,3 +122,118 @@ func.def public @split(%source: buffer, %first: i32, %second: i32) -> (i32, i32)
 low.func.def target<test.low.core> @__loom_assembly$(%source: reg<test.ptr>, %first: reg<test.i32>, %second: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
   return %first, %second
 }
+
+// ====
+// Buffer roots, byte offsets, and opaque values retain their source identities
+// on both sides of the native fragment. C++ pointers keep their two components.
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+#include <loomcxx/low.h>
+struct [[loom::representation("test.low.core")]] Contract {};
+struct [[loom::type("hal.buffer")]] Handle {};
+using Buffer = loom::type::buffer<unsigned>;
+Buffer root(Buffer value) {
+  return loom::low::assembly<Contract, Buffer>(R"(
+      (%value: reg<test.ptr>) -> (reg<test.ptr>) { return %value }
+  )", value);
+}
+loom::type::offset displacement(loom::type::offset value) {
+  return loom::low::assembly<Contract, loom::type::offset>(R"(
+      (%value: reg<test.i32>) -> (reg<test.i32>) { return %value }
+  )", value);
+}
+Handle handle(Handle value) {
+  return loom::low::assembly<Contract, Handle>(R"(
+      (%value: reg<test.ptr>) -> (reg<test.ptr>) { return %value }
+  )", value);
+}
+unsigned* cursor(unsigned* value) {
+  return loom::low::assembly<Contract, unsigned*>(R"(
+      (%root: reg<test.ptr>, %offset: reg<test.i32>) -> (reg<test.ptr>, reg<test.i32>) {
+        return %root, %offset
+      }
+  )", value);
+}
+
+// ----
+func.def public @root(%value: buffer) -> (buffer) {
+  %4 = low.invoke pure inline @__loom_assembly$(%value) : (buffer) -> (buffer)
+  func.return %4 : buffer
+}
+
+low.func.def target<test.low.core> @__loom_assembly$(%value: reg<test.ptr>) -> (reg<test.ptr>) asm {
+  return %value
+}
+
+func.def public @displacement(%value: offset) -> (offset) {
+  %9 = low.invoke pure inline @__loom_assembly$_1(%value) : (offset) -> (offset)
+  func.return %9 : offset
+}
+
+low.func.def target<test.low.core> @__loom_assembly$_1(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
+func.def public @handle(%value: hal.buffer) -> (hal.buffer) {
+  %14 = low.invoke pure inline @__loom_assembly$_2(%value) : (hal.buffer) -> (hal.buffer)
+  func.return %14 : hal.buffer
+}
+
+low.func.def target<test.low.core> @__loom_assembly$_2(%value: reg<test.ptr>) -> (reg<test.ptr>) asm {
+  return %value
+}
+
+func.def public @cursor(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
+  %23, %24 = low.invoke pure inline @__loom_assembly$_3(%value, %value_byte_offset) : (buffer, offset) -> (buffer, offset)
+  func.return %23, %24 : buffer, offset
+}
+
+low.func.def target<test.low.core> @__loom_assembly$_3(%root: reg<test.ptr>, %offset: reg<test.i32>) -> (reg<test.ptr>, reg<test.i32>) asm {
+  return %root, %offset
+}
+
+// ====
+// Nested records and arrays share ordinary function flattening; the fragment
+// deliberately permutes components so result reconstruction is observable.
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+#include <loomcxx/low.h>
+struct [[loom::representation("test.low.core")]] Contract {};
+struct [[loom::type("hal.buffer")]] Handle {};
+struct Cursor {
+  // Borrowed storage root.
+  loom::type::buffer<unsigned char> storage;
+  // Byte position within the root.
+  loom::type::offset position;
+};
+struct State {
+  // Nested root and byte position.
+  Cursor cursor;
+  // Opaque runtime identity carried unchanged.
+  Handle handle;
+  // Two scalar components exchanged by the fragment.
+  int counts[2];
+};
+State advance(State state) {
+  return loom::low::assembly<Contract, State>(R"(
+      (%storage: reg<test.ptr>, %position: reg<test.i32>, %handle: reg<test.ptr>, %first: reg<test.i32>, %second: reg<test.i32>) -> (reg<test.ptr>, reg<test.i32>, reg<test.ptr>, reg<test.i32>, reg<test.i32>) {
+        return %storage, %position, %handle, %second, %first
+      }
+  )", state);
+}
+State entry(State state) { return advance(state); }
+
+// ----
+func.def public @advance(%state_cursor_storage: buffer, %state_cursor_position: offset, %state_handle: hal.buffer, %state_counts_0: i32, %state_counts_1: i32) -> (buffer, offset, hal.buffer, i32, i32) {
+  %20, %21, %22, %23, %24 = low.invoke pure inline @__loom_assembly$(%state_cursor_storage, %state_cursor_position, %state_handle, %state_counts_0, %state_counts_1) : (buffer, offset, hal.buffer, i32, i32) -> (buffer, offset, hal.buffer, i32, i32)
+  func.return %20, %21, %22, %23, %24 : buffer, offset, hal.buffer, i32, i32
+}
+
+low.func.def target<test.low.core> @__loom_assembly$(%storage: reg<test.ptr>, %position: reg<test.i32>, %handle: reg<test.ptr>, %first: reg<test.i32>, %second: reg<test.i32>) -> (reg<test.ptr>, reg<test.i32>, reg<test.ptr>, reg<test.i32>, reg<test.i32>) asm {
+  return %storage, %position, %handle, %second, %first
+}
+
+func.def public @entry(%state_cursor_storage: buffer, %state_cursor_position: offset, %state_handle: hal.buffer, %state_counts_0: i32, %state_counts_1: i32) -> (buffer, offset, hal.buffer, i32, i32) {
+  %35, %36, %37, %38, %39 = func.call pure @advance(%state_cursor_storage, %state_cursor_position, %state_handle, %state_counts_0, %state_counts_1) : (buffer, offset, hal.buffer, i32, i32) -> (buffer, offset, hal.buffer, i32, i32)
+  func.return %35, %36, %37, %38, %39 : buffer, offset, hal.buffer, i32, i32
+}

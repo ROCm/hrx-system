@@ -248,6 +248,17 @@ loom_check_test(
 )
 
 loom_test(
+    name = "assembly_fifo_execution_test",
+    srcs = [
+        "assembly_fifo.cxx",
+        "assembly_fifo.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [XDNA_HARDWARE_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_test(
     name = "assembly_pack_execution_test",
     srcs = [
         "assembly_pack.cxx",

@@ -118,22 +118,26 @@ std::optional<AssemblyIntrinsic> AssemblyIntrinsic::resolve(
     diagnostics.reject(unit, owner,
                        "assembly first parameter must be const char*");
   }
+  std::vector<loom_type_t> transport_types;
+  auto append_transport = [&](const cxx::Type* source_type) {
+    types.append(source_type, owner, transport_types);
+    for (loom_type_t type : transport_types) {
+      if (loom_type_kind(type) != LOOM_TYPE_SCALAR &&
+          loom_type_kind(type) != LOOM_TYPE_VECTOR &&
+          loom_type_kind(type) != LOOM_TYPE_BUFFER &&
+          !loom_type_is_dialect(type)) {
+        diagnostics.reject(
+            unit, owner,
+            "assembly values require scalar, vector, buffer, or opaque "
+            "dialect components");
+      }
+    }
+  };
   size_t argument_count = 0;
   for (auto* parameter : std::span(parameters).subspan(1)) {
-    if (types.requires_binding(parameter, owner)) {
-      diagnostics.reject(unit, owner,
-                         "assembly operands require static source values");
-    }
-    const auto& partition = types.partition(parameter, owner);
-    if (partition.kind != ValueKind::SSA &&
-        partition.kind != ValueKind::Buffer &&
-        partition.kind != ValueKind::Address &&
-        partition.kind != ValueKind::Vector) {
-      diagnostics.reject(
-          unit, owner,
-          "assembly operands require scalar, vector, or typed buffer values");
-    }
-    argument_count += partition.component_count;
+    append_transport(parameter);
+    argument_count += transport_types.size();
+    transport_types.clear();
   }
   auto* result = types.unqualified(signature->returnType());
   auto* selected_result = cxx::template_argument_type(arguments[1]);
@@ -143,33 +147,13 @@ std::optional<AssemblyIntrinsic> AssemblyIntrinsic::resolve(
         "assembly return type must match its result type argument");
   }
   const Partition* result_partition = nullptr;
-  std::vector<loom_type_t> result_types;
   if (result->kind() != cxx::TypeKind::kVoid) {
-    if (types.requires_binding(result, owner)) {
-      diagnostics.reject(unit, owner,
-                         "assembly result requires a static source value");
-    }
     result_partition = &types.partition(result, owner);
-    if (result_partition->kind != ValueKind::SSA &&
-        result_partition->kind != ValueKind::Vector &&
-        result_partition->kind != ValueKind::Record) {
-      diagnostics.reject(
-          unit, owner,
-          "assembly result requires a scalar, vector, trivial result record, "
-          "or void type");
-    }
-    types.append(result, owner, result_types);
-    for (loom_type_t type : result_types) {
-      if (loom_type_kind(type) != LOOM_TYPE_SCALAR &&
-          loom_type_kind(type) != LOOM_TYPE_VECTOR) {
-        diagnostics.reject(
-            unit, owner,
-            "assembly result records require scalar or vector fields");
-      }
-    }
+    append_transport(result);
   }
   return AssemblyIntrinsic(representation, argument_count, result_partition,
-                           std::move(result_types));
+                           result_partition ? std::move(transport_types)
+                                            : std::vector<loom_type_t>{});
 }
 
 loom_symbol_ref_t AssemblyIntrinsic::fragment(

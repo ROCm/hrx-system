@@ -1721,13 +1721,20 @@ contract and can be reused after the C++ frontend and source invocation end.
 
 The source argument is a narrow raw string literal. Its formal parameters bind
 positionally to the remaining C++ arguments, which are evaluated once. Result
-and argument types are SSA scalars or vectors; `void` permits no result.
+and argument types use the same component transport as ordinary Loom functions:
+static scalars, vectors, typed buffers, and opaque dialect values, including
+trivial records and arrays of those components. Record fields flatten in
+declaration order. C++ pointers retain two components, the buffer root and its
+byte offset, rather than becoming an implicit native address. `void` permits
+no result. Views, tensors, encoding values, and dependent shapes have no
+register ABI through this interface. Target lowering verifies each component's
+physical representation against the literal's register signature.
+
 The literal contains an argument list, optional result list, optional `where`
 predicates, and a braced body using the normal Low assembly grammar. It can use
 local SSA values and blocks. Surrounding C++ names and module symbols are not
-implicit captures. Pointer/view/record arguments require an explicit Low ABI
-binding beyond this scalar/vector surface. Scheduling is free; the literal
-does not impose a locked instruction order.
+implicit captures. Scheduling is free; the literal does not impose a locked
+instruction order.
 
 Malformed mnemonics and types diagnose inside the original C++ literal.
 Physical signature mismatches diagnose at the callsite during target lowering.
