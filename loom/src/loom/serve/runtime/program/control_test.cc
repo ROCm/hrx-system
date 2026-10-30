@@ -10,6 +10,7 @@
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
+#include "iree/base/alignment.h"
 #include "iree/base/threading/numa.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -249,6 +250,7 @@ class ControlTest
     };
     const iree_byte_span_t feedback[] = {
         iree_make_byte_span(outputs_[0].tokens.data(), kLengths[1]),
+        iree_make_byte_span(outputs_[1].tokens.data(), kLengths[1]),
     };
     loom_serve_module_options_t options = {
         .binding_capacity = 12,
@@ -260,6 +262,7 @@ class ControlTest
     const std::string path = directory_ + "/control.loom";
     iree_const_byte_span_t image;
     const iree_string_view_t roots[] = {IREE_SVL("step"), IREE_SVL("fork"),
+                                        IREE_SVL("captured_epochs"),
                                         IREE_SVL("dependencies")};
     const loom_serve_sources_t sources = {.base_directory = IREE_SV(".")};
     IREE_RETURN_IF_ERROR(loom_serve_jit_compile_vm(
@@ -625,7 +628,7 @@ TEST_P(ControlTest, FeedbackChecksBothExtentsAndAllowsSubranges) {
     int64_t length;
   };
   const loom_serve_test_control_range_t invalid[] = {
-      {1, 0, 4}, {0, 0, 520}, {0, 516, 4}, {0, -1, 4}, {0, 0, -1}};
+      {2, 0, 4}, {0, 0, 520}, {0, 516, 4}, {0, -1, 4}, {0, 0, -1}};
   for (auto range : invalid) {
     iree_vm_variant_t arguments[] = {
         iree_vm_variant_from_i32(range.slot),
@@ -729,6 +732,93 @@ TEST_P(ControlTest, SourceForkAndPartialFailureRetireBorrowedStorage) {
   IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
   EXPECT_EQ(outputs_[0].control[0], 22);
   EXPECT_EQ(outputs_[0].tokens[3], 19);
+}
+
+TEST_P(ControlTest, PassiveSamplesFollowTwoBankPublicationAndRetirement) {
+  const auto* family = iree_hal_queue_family(
+      SelectQueue(device_, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH));
+  if (!iree_all_bits_set(
+          family->spec->flags,
+          IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS)) {
+    GTEST_SKIP() << "Queue family does not support rebindable timestamps";
+  }
+  const char* roots[] = {"captured_first", "captured_second",
+                         "private_catchup"};
+  const size_t slots[] = {0, 1, 3};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(roots); ++i) {
+    iree_hal_command_buffer_release(commands_[slots[i]]);
+    commands_[slots[i]] = nullptr;
+    loom_cmd_program_transient_requirement_t transient = {};
+    IREE_ASSERT_OK(Prepare(family, roots[i], &transient, &commands_[slots[i]]));
+    EXPECT_EQ(transient.required_byte_length, 0u);
+  }
+  const loom_serve_stage_t stages[] = {
+      {commands_[0], 3}, {commands_[1], 3}, {commands_[3], 3}};
+  IREE_ASSERT_OK(loom_serve_module_bind_stages(native_module_,
+                                               IREE_ARRAYSIZE(stages), stages));
+  iree_vm_function_t function = {};
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process_, IREE_SV("model"), IREE_SV("captured_epochs"), &function));
+  const uint64_t tick_mask =
+      UINT64_MAX >> (64 - family->spec->timestamp_valid_bits);
+
+  // Reuse both banks after retirement, then fail after both feedback copies
+  // have been accepted. Every round queues two epochs without a host join.
+  for (int iteration = 0; iteration < 3; ++iteration) {
+    uint64_t completion = 0;
+    for (size_t bank = 0; bank < 2; ++bank) {
+      inputs_[bank].control = {100 + iteration * 10 + int(bank),
+                               200 + iteration * 10 + int(bank), 0};
+      inputs_[bank].tokens.fill(-12345);
+      inputs_[bank].progress.fill(0);
+      outputs_[bank].tokens.fill(-12345);
+      IREE_ASSERT_OK(Upload(bank, 0, 3, &completion));
+    }
+    const auto before = loom_serve_execution_frontier(execution_);
+    iree_vm_variant_t arguments[7] = {};
+    arguments[0] = iree_vm_variant_from_i32(iteration == 2 ? 99 : 2);
+    for (size_t bank = 0; bank < 2; ++bank) {
+      for (size_t binding = 0; binding < 3; ++binding) {
+        arguments[1 + bank * 3 + binding] =
+            iree_hal_buffer_variant_from_ptr_borrowed(&types_,
+                                                      buffers_[bank][binding]);
+      }
+    }
+    completion = 777;
+    IREE_ASSERT_STATUS_IS(
+        iteration == 2 ? IREE_STATUS_OUT_OF_RANGE : IREE_STATUS_OK,
+        InvokeFunction(function, iree_vm_variant_span_from_array(arguments),
+                       &completion));
+    const auto accepted = loom_serve_execution_frontier(execution_);
+    // Captures add neither submissions nor timing-only feedback transfers.
+    EXPECT_EQ(accepted.values[0] - before.values[0], iteration == 2 ? 5u : 6u);
+    EXPECT_EQ(accepted.values[1] - before.values[1], 2u);
+    EXPECT_EQ(completion, iteration == 2 ? 777u : accepted.values[0]);
+    IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
+
+    uint64_t previous = 0;
+    for (size_t bank = 0; bank < 2; ++bank) {
+      const auto* bytes =
+          reinterpret_cast<const uint8_t*>(outputs_[bank].tokens.data());
+      const uint64_t sentinel =
+          iree_unaligned_load_le_u64(inputs_[bank].tokens.data());
+      for (size_t sample = 0; sample < 4; ++sample) {
+        const uint64_t value =
+            iree_unaligned_load_le_u64(bytes + sample * sizeof(uint64_t));
+        EXPECT_NE(value, sentinel);
+        if (bank || sample) {
+          EXPECT_LT((value - previous) & tick_mask, tick_mask / 2);
+        }
+        previous = value;
+      }
+      EXPECT_EQ(outputs_[bank].tokens[8], inputs_[bank].control[0]);
+      EXPECT_EQ(outputs_[bank].tokens[9], inputs_[bank].control[1]);
+      // Two downloaded guard words and the untouched host tail stay intact.
+      for (size_t i = 10; i < outputs_[bank].tokens.size(); ++i) {
+        EXPECT_EQ(outputs_[bank].tokens[i], -12345);
+      }
+    }
+  }
 }
 
 TEST_P(ControlTest, SourceFencesExcludeLaterWorkAndJoinExternalDependencies) {
