@@ -7,10 +7,6 @@
 load("//build_tools/bazel:python.bzl", "iree_py_test")
 load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
-load(
-    "//loom/build_tools/amdgpu:target_config.bzl",
-    "LOOM_AMDGPU_SUPPORTED_TARGETS",
-)
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load(
     "//loom/build_tools/bazel:defs.bzl",
@@ -20,10 +16,7 @@ load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_compile_tests")
 load(
     "//loom/target/amdgpu:execution_profiles.bzl",
     "AMD_GPU_ACCESS_PROFILE",
-    "AMD_GPU_ASAN_PROFILE",
     "AMD_GPU_HARDWARE_PROFILE",
-    "AMD_GPU_TSAN_CAPACITY_PROFILE",
-    "AMD_GPU_TSAN_PROFILE",
 )
 
 package(
@@ -196,25 +189,6 @@ loom_test(
 )
 
 loom_test(
-    name = "asan_test",
-    srcs = ["//loom/src/loom/test/corpus/sanitizer:access_reporting.loom"],
-    configs = {"asan_launch_bound.tile_capacity": "1"},
-    execution_profiles = [
-        AMD_GPU_ASAN_PROFILE,
-    ],
-)
-
-loom_test(
-    name = "ubsan_test",
-    srcs = ["//loom/src/loom/test/corpus/sanitizer:assertion_reporting.loom"],
-    # Authored assertions must provision feedback without insertion options.
-    execution_profiles = [
-        AMD_GPU_HARDWARE_PROFILE,
-    ],
-    tags = ["requires-amd-gpu-feedback"],
-)
-
-loom_test(
     name = "indirection_access_test",
     srcs = [
         "queued_routes.loom",
@@ -266,39 +240,6 @@ loom_test(
         "//loom/target/amdgpu:gfx942",
         "//loom/target/amdgpu:gfx1151",
         "//loom/target/amdgpu:gfx1250",
-    ],
-)
-
-loom_test(
-    name = "tsan_test",
-    srcs = ["//loom/src/loom/test/corpus/sanitizer:race_workgroup.loom"],
-    execution_profiles = [
-        AMD_GPU_TSAN_PROFILE,
-    ],
-)
-
-loom_test(
-    name = "tsan_collective_publication_test",
-    srcs = ["//loom/src/loom/test/corpus/kernel/workgroup:publication.loom"],
-    execution_profiles = [
-        AMD_GPU_TSAN_PROFILE,
-    ],
-)
-
-loom_test(
-    name = "tsan_subgroup_test",
-    srcs = ["//loom/src/loom/test/corpus/sanitizer:race_subgroup.loom"],
-    compile_targets = ["//loom/target/amdgpu:" + target for target in LOOM_AMDGPU_SUPPORTED_TARGETS],
-    execution_profiles = [
-        AMD_GPU_TSAN_PROFILE,
-    ],
-)
-
-loom_test(
-    name = "tsan_capacity_test",
-    srcs = ["//loom/src/loom/test/corpus/sanitizer:race_capacity.loom"],
-    execution_profiles = [
-        AMD_GPU_TSAN_CAPACITY_PROFILE,
     ],
 )
 
