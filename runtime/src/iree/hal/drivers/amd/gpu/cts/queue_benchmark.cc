@@ -1439,6 +1439,9 @@ static void BM_RecordedTimestamps(benchmark::State& state,
     state.counters["native_bytes"] = program->host_template
                                          ? program->host_template->byte_length
                                          : program->resident.byte_length;
+    state.counters["fixups"] = program->host_template
+                                   ? program->host_template->fixup_count
+                                   : program->resident.fixup_count;
   }
   for (int i = 0; i < 2; ++i) {
     IREE_CHECK_OK(queue.Execute(recording, BindingMode::kTable));
@@ -1474,6 +1477,8 @@ static void BM_RecordedTimestamps(benchmark::State& state,
       ->Args({1, 0})                                                           \
       ->Args({1, 2})                                                           \
       ->Args({1, 4})                                                           \
+      ->Args({5, 0})                                                           \
+      ->Args({6, 0})                                                           \
       ->Args({20, 0})                                                          \
       ->Args({20, 2})                                                          \
       ->Args({20, 4})                                                          \
