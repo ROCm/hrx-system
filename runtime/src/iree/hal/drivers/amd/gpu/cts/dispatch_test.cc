@@ -744,7 +744,7 @@ TEST_P(GpuNativeDispatchTest,
   // Small and multi-wrap recordings share exactly the same public lifecycle.
   // Repeated invocations contend for instances on two FIFOs, then idle trim
   // drops spare instances before the next epoch reuses the immutable program.
-  for (uint32_t count : {1u, 2u, 5u, 97u}) {
+  for (uint32_t count : {1u, 6u, 7u, 97u}) {
     SCOPED_TRACE(count);
     iree_hal_command_buffer_t* recording = nullptr;
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
@@ -767,8 +767,8 @@ TEST_P(GpuNativeDispatchTest,
     if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
       const auto* program =
           iree_hal_amd_gpu_aql_command_buffer_program(recording);
-      EXPECT_EQ(program->host_template != nullptr, count <= 2);
-      EXPECT_EQ(program->resident.pool == nullptr, count <= 2);
+      EXPECT_EQ(program->host_template != nullptr, count <= 6);
+      EXPECT_EQ(program->resident.pool == nullptr, count <= 6);
       uint32_t dispatch_index = 0;
       for (uint32_t i = 0; i < program->block_count; ++i) {
         const auto& block = program->blocks[i];

@@ -323,11 +323,11 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
     const uint32_t fixup_count =
         iree_hal_amd_gpu_recording_fixup_count(&buffer->recording);
     // Bound host publication to eight cache lines of packet/private data and
-    // sixteen replacement stores. Larger recordings and device-produced
-    // dispatch headers keep resident fixup/materialization.
+    // eight cache lines of fixup entries (32 disjoint DWORD stores). Larger
+    // recordings and device-produced headers keep resident materialization.
     if (buffer->program->block_count == 1 &&
         !buffer->requires_device_publication && length <= 512 &&
-        fixup_count <= 16) {
+        fixup_count <= 512 / sizeof(iree_hal_amd_gpu_fixup_t)) {
       const uint32_t fixup_offset = (uint32_t)iree_align_uint64(length, 16);
       IREE_RETURN_IF_ERROR(iree_allocator_malloc(
           buffer->host_allocator,
