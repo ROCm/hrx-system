@@ -178,25 +178,6 @@ loom_check_compile_tests(
 )
 
 loom_check_compile_tests(
-    name = "memory_address_realizations",
-    src = "memory_address_realizations.loom-test",
-    targets = ["//loom/target/amdgpu:" + target for target in LOOM_AMDGPU_SUPPORTED_TARGETS],
-)
-
-# Ordered global atomics require RDNA memory-ordering support.
-loom_check_compile_tests(
-    name = "memory_atomic_preservation",
-    src = "memory_atomic_preservation.loom-test",
-    targets = [
-        "//loom/target/amdgpu:gfx11-generic",
-        "//loom/target/amdgpu:gfx1151",
-        "//loom/target/amdgpu:gfx12-generic",
-        "//loom/target/amdgpu:gfx1250",
-        "//loom/target/amdgpu:gfx12-5-generic",
-    ],
-)
-
-loom_check_compile_tests(
     name = "loop_entry_access",
     src = "//loom/src/loom/tooling/target/amdgpu/test/corpus:gfx11_loop_entry_module",
     args = ["--sanitizer=access"],

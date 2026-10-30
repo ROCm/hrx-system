@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_SUPPORTED_TARGETS")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test", "loom_check_test_suite")
 
@@ -98,10 +97,6 @@ _AMDGPU_ARTIFACT_CHECK_TESTS = [
 loom_check_test(
     name = "memory_stability",
     src = "memory_stability.loom-test",
-    compile_targets = [
-        "//loom/target/amdgpu:gfx1151",
-        "//loom/target/amdgpu:gfx1200",
-    ],
 )
 
 loom_check_test_suite(
@@ -112,83 +107,6 @@ loom_check_test_suite(
             "memory_stability.loom-test",
         ],
     ),
-    compile_targets = {
-        "address_cast_banks.loom-test": [
-            "//loom/target/amdgpu:gfx942",
-            "//loom/target/amdgpu:gfx1100",
-            "//loom/target/amdgpu:gfx1151",
-            "//loom/target/amdgpu:gfx1200",
-            "//loom/target/amdgpu:gfx1250",
-        ],
-        "cluster_query_carriers.loom-test": [
-            "//loom/target/amdgpu:gfx1250",
-        ],
-        "float64_narrow.loom-test": [
-            "//loom/target/amdgpu:" + target
-            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
-        ],
-        "immutable_storage.loom-test": [
-            "//loom/target/amdgpu:" + target
-            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
-        ],
-        "memory_float64_carrier.loom-test": [
-            "//loom/target/amdgpu:" + target
-            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
-        ],
-        "memory_mixed_wide_offsets.loom-test": [
-            "//loom/target/amdgpu:" + target
-            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
-        ],
-        "memory_scalar_packets.loom-test": [
-            "//loom/target/amdgpu:" + target
-            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
-        ],
-        "memory_strided_packed_packets.loom-test": [
-            "//loom/target/amdgpu:" + target
-            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
-        ],
-        "narrow_float_arguments.loom-test": [
-            "//loom/target/amdgpu:gfx942",
-            "//loom/target/amdgpu:gfx950",
-            "//loom/target/amdgpu:gfx1100",
-            "//loom/target/amdgpu:gfx1151",
-            "//loom/target/amdgpu:gfx1170",
-            "//loom/target/amdgpu:gfx1200",
-            "//loom/target/amdgpu:gfx1250",
-        ],
-        "narrow_kernel_arguments.loom-test": [
-            "//loom/target/amdgpu:" + target
-            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
-        ],
-        "predicate_truncation.loom-test": [
-            "//loom/target/amdgpu:" + target
-            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
-        ],
-        "query_carriers.loom-test": [
-            "//loom/target/amdgpu:gfx942",
-            "//loom/target/amdgpu:gfx1100",
-            "//loom/target/amdgpu:gfx1151",
-            "//loom/target/amdgpu:gfx1200",
-            "//loom/target/amdgpu:gfx1250",
-        ],
-        "source_low_system_scope_store_wait.loom-test": [
-            "//loom/target/amdgpu:gfx1200",
-            "//loom/target/amdgpu:gfx1201",
-            "//loom/target/amdgpu:gfx12-generic",
-        ],
-        "source_low_uniform_vector_extract.loom-test": [
-            "//loom/target/amdgpu:" + target
-            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
-        ],
-        "trigonometry.loom-test": [
-            "//loom/target/amdgpu:" + target
-            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
-        ],
-        "uniform_packed_memory.loom-test": [
-            "//loom/target/amdgpu:" + target
-            for target in LOOM_AMDGPU_SUPPORTED_TARGETS
-        ],
-    },
 )
 
 loom_check_test_suite(

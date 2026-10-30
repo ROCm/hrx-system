@@ -41,7 +41,6 @@ loom_check_test_suite(
         "native_references.loom-test",
         "storage.loom-test",
     ],
-    compile_targets = {"emission.loom-test": ["//loom/target/vm:core"]},
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/emit:vm_binary",
     ]),

@@ -1092,7 +1092,6 @@ class LoomBuildFileFunctions(
         tags=None,
         runner="//loom/src/loom/tools/loom-check:loom-check-test",
         target_compatible_with=None,
-        compile_targets=None,
         **kwargs,
     ):
         if self._should_skip_target(tags=tags, **kwargs):
@@ -1128,16 +1127,6 @@ class LoomBuildFileFunctions(
             f")\n\n"
         )
         self._emit_platform_guard_end(target_compatible_with)
-        self._loom_check_compile_tests(
-            name,
-            src,
-            compile_targets,
-            data,
-            env,
-            tags,
-            target_compatible_with,
-            args=args,
-        )
 
     def loom_check_compile_tests(
         self,
@@ -1153,6 +1142,11 @@ class LoomBuildFileFunctions(
     ):
         if self._should_skip_target(tags=tags, **kwargs):
             return
+        if isinstance(src, str) and src.endswith("-test"):
+            raise ValueError(
+                "compiler checks require an authored or linked module, "
+                f"not a textual test fixture: {src}"
+            )
         self._loom_check_compile_tests(
             name,
             src,
@@ -1173,7 +1167,6 @@ class LoomBuildFileFunctions(
         env,
         tags,
         target_compatible_with,
-        registered_srcs=None,
         args=None,
     ):
         if not targets:
@@ -1183,9 +1176,6 @@ class LoomBuildFileFunctions(
             "loom_check_compile_tests(\n"
             + self._convert_string_arg_block("NAME", name)
             + self._convert_loom_module_inputs("SRC", [src])
-            + self._convert_string_list_block(
-                "REGISTERED_SRCS", registered_srcs, sort=False
-            )
             + self._convert_target_list_block("TARGETS", targets)
             + self._convert_string_list_block(
                 "ARGS", self._convert_test_location_args(args), sort=False
@@ -1213,7 +1203,6 @@ class LoomBuildFileFunctions(
         resource_group=None,
         timeout=None,
         target_compatible_with=None,
-        compile_targets=None,
         **kwargs,
     ):
         del size
@@ -1265,30 +1254,6 @@ class LoomBuildFileFunctions(
             f")\n\n"
         )
         self._emit_platform_guard_end(target_compatible_with)
-        for src, targets in (compile_targets or {}).items():
-            if src not in srcs and not any(
-                item.startswith("${_GLOB_") for item in srcs
-            ):
-                raise ValueError(
-                    f"compiler qualification source is not registered in {name}: {src}"
-                )
-            test_name = self._loom_check_test_base_name(src)
-            if test_name_prefix_to_strip and test_name.startswith(
-                test_name_prefix_to_strip
-            ):
-                test_name = test_name[len(test_name_prefix_to_strip) :]
-            test_name = test_name.replace("/", "_")
-            self._loom_check_compile_tests(
-                test_name,
-                src,
-                targets,
-                data,
-                env,
-                tags,
-                target_compatible_with,
-                srcs,
-                args=args,
-            )
 
 
 def convert_unmatched_target(converter, target):
