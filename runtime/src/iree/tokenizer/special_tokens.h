@@ -278,8 +278,6 @@ static inline iree_host_size_t iree_tokenizer_special_tokens_safe_prefix_length(
 
   // Fast path: single bucket means all special tokens share the same first
   // byte. Use memchr which is SIMD-optimized (16-32 bytes per instruction).
-  // Real-world tokenizers almost always have a single first byte
-  // (e.g., '<' for GPT/Llama/DeepSeek, '[' for BERT).
   if (IREE_LIKELY(special_tokens->bucket_count == 1)) {
     uint8_t first_byte = special_tokens->buckets[0].prefix[0];
     const void* found = memchr(input.data, first_byte, input.size);
@@ -288,8 +286,7 @@ static inline iree_host_size_t iree_tokenizer_special_tokens_safe_prefix_length(
   }
 
   // General path: multiple possible first bytes. Scan using lookup table.
-  // This is O(n) but the table lookup is cache-friendly (256 bytes fits in
-  // one cache line on most architectures).
+  // The fixed 256-byte index stays hot while scanning the input.
   for (iree_host_size_t i = 0; i < input.size; ++i) {
     if (special_tokens->first_byte_to_bucket[(uint8_t)input.data[i]] !=
         IREE_TOKENIZER_SPECIAL_TOKENS_NO_BUCKET) {
