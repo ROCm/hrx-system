@@ -14,7 +14,6 @@ load(
     "loom_generated_file",
 )
 load("//loom/build_tools/bazel:defs.bzl", "loom_execution_profile", "loom_test")
-load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 load("//loom/target/amd/xdna:execution_profiles.bzl", "XDNA_HARDWARE_PROFILE")
 
 package(
@@ -215,102 +214,4 @@ iree_executable_test(
         "runtime-resource=amd-xdna",
     ],
     target_compatible_with = _XDNA_COMPILE_COMPATIBLE_WITH + loom_config_compatible_with(["//loom/config/execute:aie2p_xdna_hal"]),
-)
-
-loom_check_test(
-    name = "assembly_lowering",
-    src = "assembly.cxx-test",
-    runner = "//loom/src/loom/tools/loom-check",
-    target_compatible_with = _XDNA_COMPILE_COMPATIBLE_WITH + loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_check_test(
-    name = "boolean_storage_lowering",
-    src = "boolean_storage.cxx-test",
-    data = ["//loom/src/loom/import/cxx/test:boolean_storage.cxx"],
-    runner = "//loom/src/loom/tools/loom-check",
-    target_compatible_with = _XDNA_COMPILE_COMPATIBLE_WITH + loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_check_test(
-    name = "ordinary_function_lowering",
-    src = "ordinary_function.cxx-test",
-    runner = "//loom/src/loom/tools/loom-check",
-    target_compatible_with = _XDNA_COMPILE_COMPATIBLE_WITH + loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_check_test(
-    name = "vector_lookup_lowering",
-    src = "vector_lookup.cxx-test",
-    data = ["//loom/src/loom/import/cxx/test:vector_lookup.cxx"],
-    runner = "//loom/src/loom/tools/loom-check",
-    target_compatible_with = _XDNA_COMPILE_COMPATIBLE_WITH + loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "assembly_fifo_execution_test",
-    srcs = [
-        "assembly_fifo.cxx",
-        "assembly_fifo.loom",
-    ],
-    benchmark_smoke = False,
-    execution_profiles = [XDNA_HARDWARE_PROFILE],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "assembly_pack_execution_test",
-    srcs = [
-        "assembly_pack.cxx",
-        "assembly_pack.loom",
-    ],
-    benchmark_smoke = False,
-    execution_profiles = [XDNA_HARDWARE_PROFILE],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "bitcast_execution_test",
-    srcs = ["bitcast.loom"],
-    benchmark_smoke = False,
-    execution_profiles = [XDNA_HARDWARE_PROFILE],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-    deps = ["//loom/src/loom/import/cxx/test:vector_memory_library"],
-)
-
-loom_test(
-    name = "buffer_selection_execution_test",
-    srcs = ["buffer_selection.loom"],
-    benchmark_smoke = False,
-    execution_profiles = [XDNA_HARDWARE_PROFILE],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-    deps = ["//loom/src/loom/import/cxx/test:vector_memory_library"],
-)
-
-loom_test(
-    name = "vector_copy_execution_test",
-    srcs = ["vector_copy.loom"],
-    benchmark_smoke = False,
-    execution_profiles = [XDNA_HARDWARE_PROFILE],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-    deps = ["//loom/src/loom/import/cxx/test:vector_memory_library"],
-)
-
-loom_test(
-    name = "packed_memory_execution_test",
-    srcs = [
-        "packed_memory.loom",
-        "//loom/src/loom/import/cxx/test:packed_memory.cxx",
-    ],
-    benchmark_smoke = False,
-    execution_profiles = [XDNA_HARDWARE_PROFILE],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
-    name = "padded_vectors_execution_test",
-    benchmark_smoke = False,
-    execution_profiles = [XDNA_HARDWARE_PROFILE],
-    module = "//loom/src/loom/import/cxx/test:padded_vectors_module",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )

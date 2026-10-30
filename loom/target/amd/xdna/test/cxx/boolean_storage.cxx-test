@@ -1,4 +1,4 @@
-// INPUT: cxx root=boolean_transfer data-model=ilp32 I=../../../../../import/cxx/test
+// INPUT: cxx root=boolean_transfer data-model=ilp32 I=../../../../../src/loom/import/cxx/test
 // RUN: emit source-low @boolean_transfer target=amd.xdna.aie2p:core output=low
 
 #include "boolean_storage.cxx"

@@ -1,4 +1,4 @@
-// INPUT: cxx root=lookup I=../../../../../import/cxx/test
+// INPUT: cxx root=lookup I=../../../../../src/loom/import/cxx/test
 // RUN: emit source-low @lookup target=amd.xdna.aie2p:core output=low
 
 #include "vector_lookup.cxx"
