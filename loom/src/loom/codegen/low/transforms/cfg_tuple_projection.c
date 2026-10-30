@@ -17,8 +17,10 @@
 typedef struct loom_low_cfg_tuple_slice_use_t {
   // Admitted low.slice operation consuming the logical tuple.
   loom_op_t* op;
-  // Physical component replacing the slice result.
-  uint16_t component;
+  // First physical component observed by the slice.
+  uint16_t first_component;
+  // Number of consecutive unit components observed by the slice.
+  uint16_t component_count;
 } loom_low_cfg_tuple_slice_use_t;
 
 typedef struct loom_low_cfg_tuple_slot_plan_t {
@@ -98,21 +100,25 @@ static bool loom_low_cfg_tuple_slot_matches(
 
 static bool loom_low_cfg_tuple_match_slice(
     const loom_boundary_projection_plan_t* plan, loom_type_t component_type,
-    uint16_t component_count, const loom_op_t* op, uint16_t* out_component) {
-  *out_component = 0;
+    uint16_t component_count, loom_op_t* op,
+    loom_low_cfg_tuple_slice_use_t* out_slice_use) {
   if (!loom_low_slice_isa(op)) {
     return false;
   }
-  const int64_t offset = loom_low_slice_offset(op);
-  if (offset < 0 || (uint64_t)offset >= component_count) {
+  const loom_type_t result_type =
+      loom_module_value_type(plan->module, loom_low_slice_result(op));
+  const uint32_t slice_component_count =
+      loom_low_register_type_unit_count(result_type);
+  if (loom_type_register_has_value_type(result_type) ||
+      !loom_low_register_type_same_class(result_type, component_type) ||
+      slice_component_count == component_count) {
     return false;
   }
-  const loom_type_t result_type = loom_module_value_type(
-      plan->module, loom_low_slice_result((loom_op_t*)op));
-  if (!loom_type_equal(result_type, component_type)) {
-    return false;
-  }
-  *out_component = (uint16_t)offset;
+  *out_slice_use = (loom_low_cfg_tuple_slice_use_t){
+      .op = op,
+      .first_component = (uint16_t)loom_low_slice_offset(op),
+      .component_count = (uint16_t)slice_component_count,
+  };
   return true;
 }
 
@@ -153,15 +159,10 @@ static iree_status_t loom_low_cfg_tuple_plan_slot(
       return iree_ok_status();
     }
     loom_op_t* slice_op = loom_use_user_op(uses[i]);
-    uint16_t component = 0;
     if (!loom_low_cfg_tuple_match_slice(plan, component_type, component_count,
-                                        slice_op, &component)) {
+                                        slice_op, &slot_plan->slice_uses[i])) {
       return iree_ok_status();
     }
-    slot_plan->slice_uses[i] = (loom_low_cfg_tuple_slice_use_t){
-        .op = slice_op,
-        .component = component,
-    };
   }
 
   loom_type_t* component_types = NULL;
@@ -342,8 +343,25 @@ static iree_status_t loom_low_cfg_tuple_eliminate(
   // later slice can consume its capture independently of an earlier observer.
   for (uint32_t i = 0; i < slot_plan->slice_use_count; ++i) {
     const loom_low_cfg_tuple_slice_use_t* slice_use = &slot_plan->slice_uses[i];
-    const loom_value_id_t replacement =
-        slot->component_value_ids[slice_use->component];
+    loom_value_id_t replacement =
+        slot->component_value_ids[slice_use->first_component];
+    if (slice_use->component_count > 1) {
+      // Reconstruct only the observed range at its original capture point.
+      // The components can retain independent lifetimes across CFG edges.
+      loom_builder_ip_t saved_ip = loom_builder_save(&plan->rewriter.builder);
+      loom_builder_set_before(&plan->rewriter.builder, slice_use->op);
+      loom_op_t* concat_op = NULL;
+      iree_status_t status = loom_low_concat_build(
+          &plan->rewriter.builder,
+          &slot->component_value_ids[slice_use->first_component],
+          slice_use->component_count,
+          loom_module_value_type(plan->module,
+                                 loom_low_slice_result(slice_use->op)),
+          slice_use->op->location, &concat_op);
+      loom_builder_restore(&plan->rewriter.builder, saved_ip);
+      IREE_RETURN_IF_ERROR(status);
+      replacement = loom_low_concat_result(concat_op);
+    }
     IREE_RETURN_IF_ERROR(loom_rewriter_set_attr(&plan->rewriter, slice_use->op,
                                                 0, loom_attr_i64(0)));
     IREE_RETURN_IF_ERROR(loom_rewriter_set_operand(
