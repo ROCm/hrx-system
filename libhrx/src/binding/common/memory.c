@@ -206,12 +206,15 @@ static iree_status_t iree_hal_streaming_capture_record_host_to_device(
   IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_add_host_call_node(
       graph, dependencies, dependency_count,
       iree_hal_streaming_host_memcpy_callback, callback_data, &callback_node));
-  callback_node->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
   callback_node->attrs.host.user_data_size = sizeof(*callback_data);
 
-  return iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
-      graph, dependencies, dependency_count, callback_node, capture->dst,
-      staging->device_ptr, capture->size, out_terminal_node);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
+          graph, dependencies, dependency_count, callback_node, capture->dst,
+          staging->device_ptr, capture->size, out_terminal_node));
+  iree_hal_streaming_graph_attach_copy_callback(*out_terminal_node,
+                                                callback_node, false);
+  return iree_ok_status();
 }
 
 typedef struct iree_hal_streaming_capture_device_to_host_t {
@@ -260,12 +263,13 @@ static iree_status_t iree_hal_streaming_capture_record_device_to_host(
   callback_data->count = capture->size;
 
   iree_hal_streaming_graph_node_t* copy_dependencies[] = {copy_node};
+  iree_hal_streaming_graph_node_t* callback_node = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_add_host_call_node(
       graph, copy_dependencies, IREE_ARRAYSIZE(copy_dependencies),
-      iree_hal_streaming_host_memcpy_callback, callback_data,
-      out_terminal_node));
-  (*out_terminal_node)->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
-  (*out_terminal_node)->attrs.host.user_data_size = sizeof(*callback_data);
+      iree_hal_streaming_host_memcpy_callback, callback_data, &callback_node));
+  iree_hal_streaming_graph_attach_copy_callback(copy_node, callback_node, true);
+  callback_node->attrs.host.user_data_size = sizeof(*callback_data);
+  *out_terminal_node = copy_node;
   return iree_ok_status();
 }
 

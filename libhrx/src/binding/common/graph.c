@@ -202,6 +202,7 @@ iree_status_t iree_hal_streaming_graph_create(
   graph->additional_edge_count = 0;
   graph->owned_host_allocations = NULL;
   graph->storage_source = NULL;
+  graph->copy_helper_count = 0;
   graph->user_object_refs = NULL;
   graph->has_graph_memory_nodes = false;
   graph->active_graph_memory_exec_count = 0;
@@ -1099,6 +1100,22 @@ iree_status_t iree_hal_streaming_graph_clone(
         clone_node->dependencies[j] =
             node_map[source_node->dependencies[j]->node_index];
       }
+      if (source_node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY) {
+        clone_node->attrs.memcpy.pre_callback = NULL;
+        clone_node->attrs.memcpy.post_callback = NULL;
+        if (source_node->attrs.memcpy.pre_callback) {
+          iree_hal_streaming_graph_attach_copy_callback(
+              clone_node,
+              node_map[source_node->attrs.memcpy.pre_callback->node_index],
+              false);
+        }
+        if (source_node->attrs.memcpy.post_callback) {
+          iree_hal_streaming_graph_attach_copy_callback(
+              clone_node,
+              node_map[source_node->attrs.memcpy.post_callback->node_index],
+              true);
+        }
+      }
     }
   }
 
@@ -1889,6 +1906,19 @@ iree_status_t iree_hal_streaming_graph_add_host_operation_node(
       iree_hal_streaming_make_host_operation(operation), user_data, out_node);
 }
 
+void iree_hal_streaming_graph_attach_copy_callback(
+    iree_hal_streaming_graph_node_t* copy_node,
+    iree_hal_streaming_graph_node_t* callback_node, bool after_copy) {
+  if (after_copy) {
+    copy_node->attrs.memcpy.post_callback = callback_node;
+  } else {
+    copy_node->attrs.memcpy.pre_callback = callback_node;
+  }
+  callback_node->attrs.host.copy_node = copy_node;
+  callback_node->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
+  ++copy_node->graph->copy_helper_count;
+}
+
 iree_status_t iree_hal_streaming_graph_add_event_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
@@ -2221,49 +2251,63 @@ iree_status_t iree_hal_streaming_graph_add_dependencies(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_streaming_graph_destroy_node(
+// Removes one known-active node. Composite operations detach their helpers
+// before removing the public node so every dependency reference is retired.
+static void iree_hal_streaming_graph_erase_node(
     iree_hal_streaming_graph_node_t* node) {
-  if (!node || !node->graph) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "node must belong to an active graph");
-  }
   iree_hal_streaming_graph_t* graph = node->graph;
-  const bool removed_graph_memory_node =
-      node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC ||
-      node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE;
-  IREE_TRACE_ZONE_BEGIN(z0);
-
   iree_hal_streaming_graph_remove_dependency_refs(graph, node);
   iree_hal_streaming_graph_remove_additional_edges(graph, node);
-
-  const bool removed_from_nodes =
-      iree_hal_streaming_graph_remove_from_blocks(graph->node_blocks, node);
-  if (removed_from_nodes) {
-    --graph->node_count;
-    if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH) {
-      --graph->child_graph_node_count;
+  iree_hal_streaming_graph_remove_from_blocks(graph->node_blocks, node);
+  --graph->node_count;
+  if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH) {
+    --graph->child_graph_node_count;
+  } else if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL &&
+             node->attrs.host.copy_node) {
+    iree_hal_streaming_graph_memcpy_node_attrs_t* copy =
+        &node->attrs.host.copy_node->attrs.memcpy;
+    if (copy->pre_callback == node) {
+      copy->pre_callback = NULL;
+    } else {
+      copy->post_callback = NULL;
     }
+    --graph->copy_helper_count;
   }
   if (iree_hal_streaming_graph_remove_from_blocks(graph->root_blocks, node)) {
     --graph->root_count;
   }
-  if (removed_from_nodes) {
-    iree_hal_streaming_graph_node_deinitialize_attrs(node);
-    if (removed_graph_memory_node) {
-      graph->has_graph_memory_nodes =
-          iree_hal_streaming_graph_contains_graph_memory_nodes(graph);
-    }
-    iree_hal_streaming_graph_renumber_nodes(graph);
-    node->graph = NULL;
-    node->dependency_count = 0;
-  }
+  iree_hal_streaming_graph_node_deinitialize_attrs(node);
+  node->graph = NULL;
+  node->dependency_count = 0;
+}
 
-  IREE_TRACE_ZONE_END(z0);
-
-  if (!removed_from_nodes) {
+iree_status_t iree_hal_streaming_graph_destroy_node(
+    iree_hal_streaming_graph_node_t* node) {
+  if (!node || !node->graph ||
+      !iree_hal_streaming_graph_node_is_active_in_graph(node->graph, node)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "node not found in owning graph");
+                            "node must belong to an active graph");
   }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_hal_streaming_graph_t* graph = node->graph;
+  const bool removed_graph_memory_node =
+      node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC ||
+      node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE;
+  if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY) {
+    if (node->attrs.memcpy.pre_callback) {
+      iree_hal_streaming_graph_erase_node(node->attrs.memcpy.pre_callback);
+    }
+    if (node->attrs.memcpy.post_callback) {
+      iree_hal_streaming_graph_erase_node(node->attrs.memcpy.post_callback);
+    }
+  }
+  iree_hal_streaming_graph_erase_node(node);
+  if (removed_graph_memory_node) {
+    graph->has_graph_memory_nodes =
+        iree_hal_streaming_graph_contains_graph_memory_nodes(graph);
+  }
+  iree_hal_streaming_graph_renumber_nodes(graph);
+  IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
 }
 

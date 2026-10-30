@@ -545,6 +545,75 @@ TEST_F(GraphExecTest,
   EXPECT_TRUE(stream_marker_ran_.load(std::memory_order_acquire));
 }
 
+TEST_F(GraphExecTest, CopyHelpersShareEnableStateAndTemplateLifetime) {
+  std::array<int, 2> calls = {};
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_t* clone = nullptr;
+  iree_hal_streaming_graph_exec_t* executable = nullptr;
+  ScopeExit release_handles([&] {
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    iree_hal_streaming_graph_exec_release(executable);
+    iree_hal_streaming_graph_release(clone);
+    iree_hal_streaming_graph_release(graph);
+  });
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+  iree_hal_streaming_buffer_t* source = nullptr;
+  iree_hal_streaming_buffer_t* destination = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_allocate_host_staging(
+      graph, sizeof(uint32_t), &source));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_allocate_host_staging(
+      graph, sizeof(uint32_t), &destination));
+  const uint32_t value = 37;
+  memcpy(source->host_ptr, &value, sizeof(value));
+  memset(destination->host_ptr, 0, sizeof(value));
+  const auto increment = +[](void* pointer) { ++*static_cast<int*>(pointer); };
+  iree_hal_streaming_graph_node_t* pre_callback = nullptr;
+  iree_hal_streaming_graph_node_t* copy = nullptr;
+  iree_hal_streaming_graph_node_t* post_callback = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      graph, nullptr, 0, increment, &calls[0], &pre_callback));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_copy_ptr_node(
+      graph, &pre_callback, 1, destination->device_ptr, source->device_ptr,
+      sizeof(value), &copy));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      graph, &copy, 1, increment, &calls[1], &post_callback));
+  iree_hal_streaming_graph_attach_copy_callback(copy, pre_callback, false);
+  iree_hal_streaming_graph_attach_copy_callback(copy, post_callback, true);
+  IREE_ASSERT_OK(iree_hal_streaming_graph_clone(
+      graph, IREE_HAL_STREAMING_GRAPH_CLONE_MODE_TEMPLATE, &clone));
+  auto* cloned_copy = clone->node_blocks->nodes[1];
+  EXPECT_EQ(clone->copy_helper_count, 2u);
+  EXPECT_EQ(cloned_copy->attrs.memcpy.pre_callback->attrs.host.copy_node,
+            cloned_copy);
+  EXPECT_EQ(cloned_copy->attrs.memcpy.post_callback->attrs.host.copy_node,
+            cloned_copy);
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      clone, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_set_node_enabled(
+      executable, cloned_copy, false));
+  iree_hal_streaming_graph_exec_launch_result_t result;
+  IREE_ASSERT_OK(
+      iree_hal_streaming_graph_exec_launch(executable, stream_, &result));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_EQ(calls, (std::array<int, 2>{0, 0}));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_set_node_enabled(
+      executable, cloned_copy, true));
+  IREE_ASSERT_OK(
+      iree_hal_streaming_graph_exec_launch(executable, stream_, &result));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_EQ(calls, (std::array<int, 2>{1, 1}));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_destroy_node(cloned_copy));
+  EXPECT_EQ(clone->node_count, 0u);
+  EXPECT_EQ(clone->copy_helper_count, 0u);
+  // Removing the template operation does not alter the compiled snapshot.
+  IREE_ASSERT_OK(
+      iree_hal_streaming_graph_exec_launch(executable, stream_, &result));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_EQ(calls, (std::array<int, 2>{2, 2}));
+}
+
 TEST_F(GraphExecTest, ClonedHostOperationOwnsItsPayloadAndExecutableSnapshot) {
   struct Copy {
     // Value captured by the graph and snapshotted at instantiation.

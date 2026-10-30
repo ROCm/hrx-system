@@ -1548,8 +1548,6 @@ static bool iree_hip_context_invalidate_capture_graph(
          iree_hal_streaming_capture_graph_invalidate(graph, capture_id);
 }
 
-static iree_hal_streaming_graph_node_t*
-iree_hip_graph_find_post_memcpy_callback(iree_hal_streaming_graph_node_t* node);
 static bool iree_hip_graph_node_is_active(
     const iree_hal_streaming_graph_node_t* node);
 static hipError_t iree_hip_graph_exec_rebuild(
@@ -7849,15 +7847,7 @@ static iree_status_t iree_hip_capture_record_memcpy3d_node(
                             "captured memory copy construction failed");
   }
 
-  iree_hal_streaming_graph_node_t* terminal_node =
-      (iree_hal_streaming_graph_node_t*)node;
-  iree_hal_streaming_graph_node_t* post_callback =
-      iree_hip_graph_find_post_memcpy_callback(terminal_node);
-  if (post_callback) {
-    terminal_node = post_callback;
-  }
-
-  *out_terminal_node = terminal_node;
+  *out_terminal_node = (iree_hal_streaming_graph_node_t*)node;
   return iree_ok_status();
 }
 
@@ -9929,11 +9919,7 @@ static iree_status_t iree_hip_capture_record_memcpy2d_array_node(
         &node, graph, (const hipGraphNode_t*)dependencies, dependency_count,
         &params);
     if (capture->result == hipSuccess) {
-      iree_hal_streaming_graph_node_t* terminal_node =
-          (iree_hal_streaming_graph_node_t*)node;
-      iree_hal_streaming_graph_node_t* post_callback =
-          iree_hip_graph_find_post_memcpy_callback(terminal_node);
-      *out_terminal_node = post_callback ? post_callback : terminal_node;
+      *out_terminal_node = (iree_hal_streaming_graph_node_t*)node;
     }
   }
   iree_hip_memcpy3d_array_ownership_release(&ownership);
@@ -20257,7 +20243,8 @@ static hipError_t iree_hip_graph_add_staged_peer_memcpy_node(
       iree_hip_graph_release_remote_context(stream_graph, dst_context);
       return hipErrorInvalidValue;
     }
-    callback_node->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
+    iree_hal_streaming_graph_attach_copy_callback(copy_node, callback_node,
+                                                  true);
     callback_node->attrs.host.user_data_size = sizeof(*callback_data);
 
     *pGraphNode = (hipGraphNode_t)copy_node;
@@ -20295,7 +20282,6 @@ static hipError_t iree_hip_graph_add_staged_peer_memcpy_node(
       iree_hip_graph_release_remote_context(stream_graph, src_context);
       return hipErrorInvalidValue;
     }
-    callback_node->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
     callback_node->attrs.host.user_data_size = sizeof(*callback_data);
 
     iree_hal_streaming_graph_node_t* copy_node = NULL;
@@ -20308,6 +20294,8 @@ static hipError_t iree_hip_graph_add_staged_peer_memcpy_node(
       iree_hip_graph_release_remote_context(stream_graph, src_context);
       return hipErrorInvalidValue;
     }
+    iree_hal_streaming_graph_attach_copy_callback(copy_node, callback_node,
+                                                  false);
     iree_hip_graph_store_memcpy3d_metadata(copy_node, params);
     iree_hip_graph_store_memcpy_execution_geometry(
         copy_node, execution_params->dstPtr.pitch,
@@ -20689,7 +20677,6 @@ static hipError_t iree_hip_graph_add_memcpy_node(
       IREE_TRACE_ZONE_END(z0);
       return (hipErrorInvalidValue);
     }
-    callback_node->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
     callback_node->attrs.host.user_data_size = sizeof(*callback_data);
 
     iree_hal_streaming_graph_node_t* node = NULL;
@@ -20701,6 +20688,7 @@ static hipError_t iree_hip_graph_add_memcpy_node(
       IREE_TRACE_ZONE_END(z0);
       return (hipErrorInvalidValue);
     }
+    iree_hal_streaming_graph_attach_copy_callback(node, callback_node, false);
     iree_hip_graph_store_memcpy3d_metadata(node, params);
     iree_host_size_t dst_rows_per_slice = 0;
     callback_result = iree_hip_graph_memcpy_rows_per_slice(
@@ -20861,7 +20849,8 @@ static hipError_t iree_hip_graph_add_memcpy_node(
       IREE_TRACE_ZONE_END(z0);
       return (hipErrorInvalidValue);
     }
-    callback_node->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
+    iree_hal_streaming_graph_attach_copy_callback(copy_node, callback_node,
+                                                  true);
     callback_node->attrs.host.user_data_size = sizeof(*callback_data);
 
     *pGraphNode = (hipGraphNode_t)copy_node;
@@ -21057,7 +21046,6 @@ static hipError_t iree_hip_graph_add_memcpy_node_1d(
       IREE_TRACE_ZONE_END(z0);
       return callback_node_result;
     }
-    callback_node->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
     callback_node->attrs.host.user_data_size = sizeof(*callback_data);
 
     hipError_t copy_node_result = iree_status_to_fixed_hip_result(
@@ -21070,6 +21058,7 @@ static hipError_t iree_hip_graph_add_memcpy_node_1d(
       IREE_TRACE_ZONE_END(z0);
       return copy_node_result;
     }
+    iree_hal_streaming_graph_attach_copy_callback(node, callback_node, false);
     iree_hip_graph_store_1d_memcpy_metadata(node, dst, src, count,
                                             requested_kind);
     *pGraphNode = (hipGraphNode_t)node;
@@ -21123,7 +21112,7 @@ static hipError_t iree_hip_graph_add_memcpy_node_1d(
       IREE_TRACE_ZONE_END(z0);
       return callback_node_result;
     }
-    node->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
+    iree_hal_streaming_graph_attach_copy_callback(copy_node, node, true);
     node->attrs.host.user_data_size = sizeof(*callback_data);
 
     *pGraphNode = (hipGraphNode_t)copy_node;
@@ -23322,10 +23311,15 @@ static hipError_t iree_hip_graph_validate_memcpy3d_params(
 }
 
 typedef struct iree_hip_graph_memcpy_node_update_t {
+  // Previous public copy parameters and helper associations.
   iree_hal_streaming_graph_memcpy_node_attrs_t old_memcpy_attrs;
+  // Preparation helper modified or added by this update, or NULL.
   iree_hal_streaming_graph_node_t* pre_callback_node;
+  // Previous preparation payload and its retained context references.
   iree_hip_graph_memcpy_callback_data_t old_pre_callback_data;
+  // Completion helper modified or added by this update, or NULL.
   iree_hal_streaming_graph_node_t* post_callback_node;
+  // Previous completion payload and its retained context references.
   iree_hip_graph_memcpy_callback_data_t old_post_callback_data;
 } iree_hip_graph_memcpy_node_update_t;
 
@@ -23418,49 +23412,6 @@ static void iree_hip_graph_disable_memcpy_callback(
   memset(callback_data, 0, sizeof(*callback_data));
 }
 
-static bool iree_hip_graph_node_is_hidden_memcpy_callback(
-    const iree_hal_streaming_graph_node_t* node) {
-  return node && node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL &&
-         (node->flags & IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN) != 0 &&
-         node->attrs.host.callback.type ==
-             IREE_HAL_STREAMING_HOST_CALLBACK_TYPE_OPERATION &&
-         node->attrs.host.callback.operation ==
-             iree_hip_graph_memcpy_callback &&
-         node->attrs.host.user_data;
-}
-
-static iree_hal_streaming_graph_node_t* iree_hip_graph_find_pre_memcpy_callback(
-    iree_hal_streaming_graph_node_t* node) {
-  for (uint32_t i = 0; i < node->dependency_count; ++i) {
-    iree_hal_streaming_graph_node_t* dependency = node->dependencies[i];
-    if (iree_hip_graph_node_is_hidden_memcpy_callback(dependency)) {
-      return dependency;
-    }
-  }
-  return NULL;
-}
-
-static iree_hal_streaming_graph_node_t*
-iree_hip_graph_find_post_memcpy_callback(
-    iree_hal_streaming_graph_node_t* node) {
-  iree_hal_streaming_graph_t* graph = node->graph;
-  for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
-       block = block->next) {
-    for (iree_host_size_t i = 0; i < block->count; ++i) {
-      iree_hal_streaming_graph_node_t* candidate = block->nodes[i];
-      if (!iree_hip_graph_node_is_hidden_memcpy_callback(candidate)) {
-        continue;
-      }
-      for (uint32_t j = 0; j < candidate->dependency_count; ++j) {
-        if (candidate->dependencies[j] == node) {
-          return candidate;
-        }
-      }
-    }
-  }
-  return NULL;
-}
-
 static hipError_t iree_hip_graph_add_hidden_memcpy_callback(
     iree_hal_streaming_graph_node_t* node, bool after_memcpy,
     iree_hal_streaming_graph_node_t** out_callback_node) {
@@ -23489,7 +23440,6 @@ static hipError_t iree_hip_graph_add_hidden_memcpy_callback(
     iree_status_ignore(status);
     return hipErrorInvalidValue;
   }
-  callback_node->flags |= IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN;
   callback_node->attrs.host.user_data_size = sizeof(*callback_data);
   if (!after_memcpy) {
     status = iree_hal_streaming_graph_add_dependencies(
@@ -23499,6 +23449,8 @@ static hipError_t iree_hip_graph_add_hidden_memcpy_callback(
       return hipErrorInvalidValue;
     }
   }
+  iree_hal_streaming_graph_attach_copy_callback(node, callback_node,
+                                                after_memcpy);
   *out_callback_node = callback_node;
   return hipSuccess;
 }
@@ -23542,14 +23494,20 @@ static hipError_t iree_hip_graph_update_memcpy_metadata(
 static void iree_hip_graph_rollback_memcpy_node_update(
     iree_hal_streaming_graph_node_t* node,
     const iree_hip_graph_memcpy_node_update_t* update) {
-  node->attrs.memcpy = update->old_memcpy_attrs;
   if (update->pre_callback_node) {
     iree_hip_graph_memcpy_callback_data_t* callback_data =
         (iree_hip_graph_memcpy_callback_data_t*)
             update->pre_callback_node->attrs.host.user_data;
     iree_hip_graph_release_memcpy_callback_context_refs(node->graph,
                                                         callback_data);
-    *callback_data = update->old_pre_callback_data;
+    if (update->old_memcpy_attrs.pre_callback) {
+      *callback_data = update->old_pre_callback_data;
+    } else {
+      // The helper was created by this rejected template update. Removing
+      // this known-active node only unlinks graph metadata; it cannot fail.
+      iree_status_ignore(
+          iree_hal_streaming_graph_destroy_node(update->pre_callback_node));
+    }
   }
   if (update->post_callback_node) {
     iree_hip_graph_memcpy_callback_data_t* callback_data =
@@ -23557,8 +23515,14 @@ static void iree_hip_graph_rollback_memcpy_node_update(
             update->post_callback_node->attrs.host.user_data;
     iree_hip_graph_release_memcpy_callback_context_refs(node->graph,
                                                         callback_data);
-    *callback_data = update->old_post_callback_data;
+    if (update->old_memcpy_attrs.post_callback) {
+      *callback_data = update->old_post_callback_data;
+    } else {
+      iree_status_ignore(
+          iree_hal_streaming_graph_destroy_node(update->post_callback_node));
+    }
   }
+  node->attrs.memcpy = update->old_memcpy_attrs;
 }
 
 static void iree_hip_graph_commit_memcpy_node_update(
@@ -23777,9 +23741,21 @@ static hipError_t iree_hip_graph_set_memcpy_node_params(
       .old_memcpy_attrs = node->attrs.memcpy,
   };
   iree_hal_streaming_graph_node_t* pre_callback =
-      iree_hip_graph_find_pre_memcpy_callback(node);
+      node->attrs.memcpy.pre_callback;
   iree_hal_streaming_graph_node_t* post_callback =
-      iree_hip_graph_find_post_memcpy_callback(node);
+      node->attrs.memcpy.post_callback;
+  // Common streaming captures use a smaller payload and a different callback.
+  // Only this frontend's callbacks carry the HIP update record below.
+  if ((pre_callback && (pre_callback->attrs.host.callback.type !=
+                            IREE_HAL_STREAMING_HOST_CALLBACK_TYPE_OPERATION ||
+                        pre_callback->attrs.host.callback.operation !=
+                            iree_hip_graph_memcpy_callback)) ||
+      (post_callback && (post_callback->attrs.host.callback.type !=
+                             IREE_HAL_STREAMING_HOST_CALLBACK_TYPE_OPERATION ||
+                         post_callback->attrs.host.callback.operation !=
+                             iree_hip_graph_memcpy_callback))) {
+    return hipErrorInvalidValue;
+  }
 
   if (kind == hipMemcpyDeviceToDevice) {
     iree_hal_streaming_context_t* dst_context = NULL;

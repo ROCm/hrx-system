@@ -69,6 +69,16 @@ struct HipGraphApi {
   decltype(&hipGraphNodeGetType) get_node_type = nullptr;
   // Removes a template node without changing its existing executables.
   decltype(&hipGraphDestroyNode) destroy_node = nullptr;
+  // Adds public dependencies after node construction.
+  decltype(&hipGraphAddDependencies) add_dependencies = nullptr;
+  // Begins recording operations issued through the streaming copy API.
+  decltype(&hipStreamBeginCapture) begin_capture = nullptr;
+  // Returns the graph built from stream operations.
+  decltype(&hipStreamEndCapture) end_capture = nullptr;
+  // Records or submits a contiguous streaming copy.
+  decltype(&hipMemcpyAsync) copy_async = nullptr;
+  // Enumerates only public graph operations.
+  decltype(&hipGraphGetNodes) get_nodes = nullptr;
   // Adds an independently described nested graph.
   decltype(&hipGraphAddChildGraphNode) add_child = nullptr;
   // Applies the generic executable update to its typed operation.
@@ -120,6 +130,11 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     RESOLVE(set_enabled, "hipGraphNodeSetEnabled");
     RESOLVE(get_node_type, "hipGraphNodeGetType");
     RESOLVE(destroy_node, "hipGraphDestroyNode");
+    RESOLVE(add_dependencies, "hipGraphAddDependencies");
+    RESOLVE(begin_capture, "hipStreamBeginCapture");
+    RESOLVE(end_capture, "hipStreamEndCapture");
+    RESOLVE(copy_async, "hipMemcpyAsync");
+    RESOLVE(get_nodes, "hipGraphGetNodes");
     RESOLVE(add_child, "hipGraphAddChildGraphNode");
     RESOLVE(set_executable_node, "hipGraphExecNodeSetParams");
     RESOLVE(get_copy, "hipGraphMemcpyNodeGetParams");
@@ -196,6 +211,16 @@ class HipGraphMemoryApiTest : public ::testing::Test {
 
   static void Increment(void* user_data) { ++*static_cast<int*>(user_data); }
 
+  static void ObserveDestination(void* user_data) {
+    auto* test = static_cast<HipGraphMemoryApiTest*>(user_data);
+    test->observed_ = test->destination_;
+  }
+
+  static void ReplaceSource(void* user_data) {
+    auto* test = static_cast<HipGraphMemoryApiTest*>(user_data);
+    test->source_ = test->replacement_;
+  }
+
   // Exact frontend shared object and API reused for the whole suite.
   static hrx::hip::testing::HipDso dso_;
   // Function table resolved only from that shared object.
@@ -222,6 +247,8 @@ class HipGraphMemoryApiTest : public ::testing::Test {
   std::array<uint8_t, 64> source_ = {};
   // Replacement data used by template and executable updates.
   std::array<uint8_t, 64> replacement_ = {};
+  // Data observed by a host consumer after the complete public copy operation.
+  std::array<uint8_t, 64> observed_ = {};
   // Copy destination retained through teardown.
   std::array<uint8_t, 64> destination_ = {};
   // Application callback outputs retained through teardown.
@@ -452,6 +479,158 @@ TEST_F(HipGraphMemoryApiTest, PitchedCopyCloneReplaysItsOwnStaging) {
   }
 }
 
+TEST_F(HipGraphMemoryApiTest, StagedCopiesFollowPublicEnableAndDeletion) {
+  ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
+  for (bool pitched : {false, true}) {
+    SCOPED_TRACE(pitched);
+    if (!graph_) {
+      ASSERT_EQ(hipSuccess, api_.graph_create(&graph_, 0));
+    }
+    source_.fill(0x23);
+    destination_.fill(0);
+    hipGraphNode_t upload = nullptr;
+    hipGraphNode_t download = nullptr;
+    if (pitched) {
+      hipMemcpy3DParms parameters = {
+          .srcPtr = {source_.data(), 8, 8, 3},
+          .dstPtr = {device_, 8, 8, 3},
+          .extent = {4, 2, 2},
+          .kind = hipMemcpyHostToDevice,
+      };
+      ASSERT_EQ(hipSuccess,
+                api_.add_copy(&upload, graph_, nullptr, 0, &parameters));
+      parameters.srcPtr.ptr = device_;
+      parameters.dstPtr.ptr = destination_.data();
+      parameters.kind = hipMemcpyDeviceToHost;
+      ASSERT_EQ(hipSuccess,
+                api_.add_copy(&download, graph_, &upload, 1, &parameters));
+    } else {
+      ASSERT_EQ(
+          hipSuccess,
+          api_.add_copy_1d(&upload, graph_, nullptr, 0, device_, source_.data(),
+                           source_.size(), hipMemcpyHostToDevice));
+      ASSERT_EQ(
+          hipSuccess,
+          api_.add_copy_1d(&download, graph_, &upload, 1, destination_.data(),
+                           device_, source_.size(), hipMemcpyDeviceToHost));
+    }
+    ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+    Replay();
+    ASSERT_FALSE(HasFatalFailure());
+    const auto original = destination_;
+    EXPECT_EQ(original[0], 0x23);
+
+    // Disabled upload leaves device bytes unchanged; disabled download leaves
+    // the application destination unchanged, including its host-side helper.
+    ASSERT_EQ(hipSuccess, api_.set_enabled(executable_, upload, 0));
+    source_.fill(0x54);
+    Replay();
+    ASSERT_FALSE(HasFatalFailure());
+    EXPECT_EQ(destination_, original);
+    ASSERT_EQ(hipSuccess, api_.set_enabled(executable_, download, 0));
+    destination_.fill(0xCC);
+    const auto untouched = destination_;
+    Replay();
+    ASSERT_FALSE(HasFatalFailure());
+    EXPECT_EQ(destination_, untouched);
+    ASSERT_EQ(hipSuccess, api_.set_enabled(executable_, upload, 1));
+    ASSERT_EQ(hipSuccess, api_.set_enabled(executable_, download, 1));
+    Replay();
+    ASSERT_FALSE(HasFatalFailure());
+    EXPECT_EQ(destination_[0], 0x54);
+
+    ASSERT_EQ(hipSuccess, api_.destroy_node(download));
+    ASSERT_EQ(hipSuccess, api_.instantiate(&sibling_, graph_, 0));
+    destination_ = untouched;
+    Replay(sibling_);
+    ASSERT_FALSE(HasFatalFailure());
+    EXPECT_EQ(destination_, untouched);
+    // The original executable still owns its complete captured copy.
+    Replay();
+    ASSERT_FALSE(HasFatalFailure());
+    EXPECT_EQ(destination_[0], 0x54);
+    ASSERT_EQ(hipSuccess, api_.executable_destroy(sibling_));
+    sibling_ = nullptr;
+    ASSERT_EQ(hipSuccess, api_.executable_destroy(executable_));
+    executable_ = nullptr;
+    ASSERT_EQ(hipSuccess, api_.graph_destroy(graph_));
+    graph_ = nullptr;
+  }
+}
+
+TEST_F(HipGraphMemoryApiTest,
+       AddedCopyDependenciesBracketHostPreparationAndCompletion) {
+  ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
+  // Create the consumer first so creation order cannot accidentally provide
+  // the post-copy ordering that its later public dependency must establish.
+  hipHostNodeParams consumer_parameters = {
+      .fn = ObserveDestination,
+      .userData = this,
+  };
+  hipGraphNode_t consumer = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.add_host(&consumer, graph_, nullptr, 0, &consumer_parameters));
+  hipGraphNode_t upload = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_copy_1d(&upload, graph_, nullptr, 0, device_,
+                                         source_.data(), source_.size(),
+                                         hipMemcpyHostToDevice));
+  hipHostNodeParams producer_parameters = {
+      .fn = ReplaceSource,
+      .userData = this,
+  };
+  hipGraphNode_t producer = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.add_host(&producer, graph_, nullptr, 0, &producer_parameters));
+  hipGraphNode_t download = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.add_copy_1d(&download, graph_, &upload, 1, destination_.data(),
+                             device_, source_.size(), hipMemcpyDeviceToHost));
+  const hipGraphNode_t from[] = {producer, download};
+  const hipGraphNode_t to[] = {upload, consumer};
+  ASSERT_EQ(hipSuccess, api_.add_dependencies(graph_, from, to, 2));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(observed_, replacement_);
+}
+
+TEST_F(HipGraphMemoryApiTest, CapturedCopiesSharePublicEnableAndDeletion) {
+  ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
+  ASSERT_EQ(hipSuccess,
+            api_.begin_capture(stream_, hipStreamCaptureModeGlobal));
+  ASSERT_EQ(hipSuccess, api_.copy_async(device_, source_.data(), source_.size(),
+                                        hipMemcpyHostToDevice, stream_));
+  ASSERT_EQ(hipSuccess,
+            api_.copy_async(destination_.data(), device_, destination_.size(),
+                            hipMemcpyDeviceToHost, stream_));
+  ASSERT_EQ(hipSuccess, api_.end_capture(stream_, &clone_));
+  std::array<hipGraphNode_t, 2> nodes = {};
+  size_t count = nodes.size();
+  ASSERT_EQ(hipSuccess, api_.get_nodes(clone_, nodes.data(), &count));
+  ASSERT_EQ(count, nodes.size());
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, clone_, 0));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, source_);
+  // Disable both public operations: neither staging callback may touch the
+  // destination. This also covers implementations returning nodes unordered.
+  for (auto node : nodes) {
+    ASSERT_EQ(hipSuccess, api_.set_enabled(executable_, node, 0));
+  }
+  destination_.fill(0xCC);
+  const auto untouched = destination_;
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, untouched);
+  for (auto node : nodes) {
+    ASSERT_EQ(hipSuccess, api_.destroy_node(node));
+  }
+  ASSERT_EQ(hipSuccess, api_.instantiate(&sibling_, clone_, 0));
+  Replay(sibling_);
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, untouched);
+}
+
 TEST_F(HipGraphMemoryApiTest,
        HostParametersCannotReplaceInternalCopyOperations) {
   hipGraphNode_t copy_node = nullptr;
@@ -511,6 +690,25 @@ TEST_F(HipGraphMemoryApiTest, PeerCopiesCompleteAcrossCompatibilityContexts) {
               api_.add_copy_1d(&node, graph_, nullptr, 0, destination, source,
                                source_.size(), hipMemcpyDeviceToDevice));
     ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+    ASSERT_EQ(hipSuccess, api_.set_context(placement == 1 ? primary_context_
+                                                          : remote_context_));
+    destination_.fill(0xCC);
+    const auto untouched = destination_;
+    ASSERT_EQ(hipSuccess,
+              api_.copy(destination, destination_.data(), destination_.size(),
+                        hipMemcpyHostToDevice));
+    ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
+    ASSERT_EQ(hipSuccess, api_.set_enabled(executable_, node, 0));
+    Replay();
+    ASSERT_FALSE(HasFatalFailure());
+    ASSERT_EQ(hipSuccess, api_.set_context(placement == 1 ? primary_context_
+                                                          : remote_context_));
+    ASSERT_EQ(hipSuccess,
+              api_.copy(destination_.data(), destination, destination_.size(),
+                        hipMemcpyDeviceToHost));
+    EXPECT_EQ(destination_, untouched) << placement;
+    ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
+    ASSERT_EQ(hipSuccess, api_.set_enabled(executable_, node, 1));
     Replay();
     ASSERT_FALSE(HasFatalFailure());
     ASSERT_EQ(hipSuccess, api_.set_context(placement == 1 ? primary_context_

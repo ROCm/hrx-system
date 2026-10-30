@@ -164,6 +164,10 @@ typedef struct iree_hal_streaming_graph_memcpy_driver_node_attrs_t {
 } iree_hal_streaming_graph_memcpy_driver_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_memcpy_node_attrs_t {
+  // Borrowed host preparation node in this graph, or NULL for direct copies.
+  iree_hal_streaming_graph_node_t* pre_callback;
+  // Borrowed host completion node in this graph, or NULL for direct copies.
+  iree_hal_streaming_graph_node_t* post_callback;
   // Destination buffer reference.
   iree_hal_streaming_buffer_ref_t dst_ref;
   // Source buffer reference.
@@ -252,6 +256,8 @@ typedef struct iree_hal_streaming_graph_memset_node_attrs_t {
 } iree_hal_streaming_graph_memset_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_host_call_node_attrs_t {
+  // Borrowed public copy owning this hidden helper, or NULL for host nodes.
+  iree_hal_streaming_graph_node_t* copy_node;
   // Application function or fallible compatibility operation.
   iree_hal_streaming_host_callback_t callback;
   // User data passed to the host callback function.
@@ -404,6 +410,13 @@ iree_status_t iree_hal_streaming_graph_clone(
     iree_hal_streaming_graph_t* source_graph,
     iree_hal_streaming_graph_clone_mode_t mode,
     iree_hal_streaming_graph_t** out_graph);
+
+// Associates an already-created host helper with its copy in the same graph.
+// Each copy has at most one preparation and one completion helper. The caller
+// supplies the helper's dependency on the copy, or the copy's on the helper.
+void iree_hal_streaming_graph_attach_copy_callback(
+    iree_hal_streaming_graph_node_t* copy_node,
+    iree_hal_streaming_graph_node_t* callback_node, bool after_copy);
 
 // Synchronization: none (reference counting).
 void iree_hal_streaming_graph_retain(iree_hal_streaming_graph_t* graph);
@@ -726,6 +739,8 @@ typedef struct iree_hal_streaming_graph_t {
   // Retained allocation owner for executable descriptions; NULL for public
   // templates. Parameters are copied, while backing remains with this owner.
   iree_hal_streaming_graph_t* storage_source;
+  // Number of host helpers attached to public copy operations.
+  iree_host_size_t copy_helper_count;
   // Opaque user objects retained by this graph template.
   iree_hal_streaming_graph_user_object_ref_t* user_object_refs;
 
@@ -896,6 +911,13 @@ typedef struct iree_hal_streaming_graph_schedule_t {
   // Total number of blocks across all partitions.
   iree_host_size_t block_count;
 } iree_hal_streaming_graph_schedule_t;
+
+// Adds execution dependencies across complete copy operations, including their
+// host preparation/completion helpers. The returned list shares the graph's
+// immutable additional edges and allocates only new edges from |arena|.
+iree_status_t iree_hal_streaming_graph_schedule_copy_dependencies(
+    iree_hal_streaming_graph_t* graph, iree_arena_allocator_t* arena,
+    iree_hal_streaming_graph_edge_t** out_edges);
 
 // Unified scheduler that performs topological sorting, partitioning, and
 // workstream detection in an efficient three-phase algorithm.

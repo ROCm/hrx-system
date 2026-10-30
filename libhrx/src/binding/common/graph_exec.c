@@ -1878,10 +1878,13 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
   exec->instantiated_visible_node_count =
       iree_hal_streaming_graph_visible_node_count(exec->graph);
 
-  // Use the new scheduler to analyze and partition the graph.
+  // Lower public copy dependencies to include their host helpers, then
+  // analyze and partition the complete execution graph.
   iree_hal_streaming_graph_schedule_t schedule;
-  iree_hal_streaming_graph_edge_t* additional_edges =
-      exec->graph ? exec->graph->additional_edges : NULL;
+  iree_hal_streaming_graph_edge_t* additional_edges = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_graph_schedule_copy_dependencies(
+              exec->graph, &exec->arena_allocator, &additional_edges));
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_streaming_graph_schedule_nodes(
               node_blocks, node_count, exec->node_disabled_states,
