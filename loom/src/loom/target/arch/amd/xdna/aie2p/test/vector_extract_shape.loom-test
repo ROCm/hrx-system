@@ -7,9 +7,7 @@ func.def @static_tail(%source: vector<2x3x4xi16>) -> (vector<3x4xi16>) {
 
 // ----
 func.def @static_tail(%source: vector<2x3x4xi16>) -> (vector<3x4xi16>) {
-  %3 = vector.bitcast %source : vector<2x3x4xi16> to vector<24xi16>
-  %4 = vector.slice %3[12] : vector<24xi16> -> vector<12xi16>
-  %result = vector.bitcast %4 : vector<12xi16> to vector<3x4xi16>
+  %result = vector.extract %source[1] : vector<2x3x4xi16> -> vector<3x4xi16>
   func.return %result : vector<3x4xi16>
 }
 
@@ -22,12 +20,7 @@ func.def @dynamic_scalar(%source: vector<2x3xi16>, %row: index) -> (i16) {
 
 // ----
 func.def @dynamic_scalar(%source: vector<2x3xi16>, %row: index) -> (i16) {
-  %4 = index.constant 3 : index
-  %5 = index.mul %row, %4 : index
-  %6 = index.constant 1 : index
-  %7 = index.add %5, %6 : index
-  %8 = vector.bitcast %source : vector<2x3xi16> to vector<6xi16>
-  %result = vector.extract %8[%7] : vector<6xi16> -> i16
+  %result = vector.extract %source[%row, 1] : vector<2x3xi16> -> i16
   func.return %result : i16
 }
 

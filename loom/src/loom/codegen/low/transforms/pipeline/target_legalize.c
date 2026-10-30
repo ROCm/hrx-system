@@ -355,6 +355,19 @@ static bool loom_low_target_legalize_op_is_deferred_for_shaped_load(
          state->deferred_shaped_component_ops.by_value_id[result] != 0;
 }
 
+static bool loom_low_target_legalize_op_has_shaped_vector_access(
+    const loom_module_t* module, const loom_op_t* op) {
+  loom_value_id_t bank = LOOM_VALUE_ID_INVALID;
+  if (loom_vector_extract_isa(op)) {
+    bank = loom_vector_extract_source(op);
+  } else if (loom_vector_insert_isa(op)) {
+    bank = loom_vector_insert_dest(op);
+  } else {
+    return false;
+  }
+  return loom_type_rank(loom_module_value_type(module, bank)) > 1;
+}
+
 static iree_status_t loom_low_target_legalize_defer_shaped_component_op(
     void* user_data, const loom_op_t* op) {
   loom_low_target_legalize_function_state_t* state =
@@ -1229,6 +1242,14 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
   bool erased = false;
   IREE_RETURN_IF_ERROR(
       loom_rewriter_erase_if_dead(&driver->rewriter, op, &erased));
+  // Shape legalization may flatten a value restored by an earlier rewrite.
+  // Cancel inverse bitcasts in this worklist so packet consumers can still
+  // reach their native producers before the legalization fixed point closes.
+  if (!erased && loom_vector_bitcast_isa(op)) {
+    IREE_RETURN_IF_ERROR(
+        loom_vector_bitcast_canonicalize(op, &driver->rewriter));
+    erased = iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD);
+  }
   if (erased) {
     if (report_decision != NULL && !is_report_source) {
       loom_low_target_legalize_accumulate_descendant_rewrite(
@@ -1286,8 +1307,14 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
         &state->legalization_context, op, &query_result_storage));
     query_result = &query_result_storage;
   }
+  // Unrolling exposes static bank slots before boundary projection. Preserve
+  // multidimensional access structure until complete legalization; flattening
+  // it here hides independent recurrence values. Linear packet accesses retain
+  // their native legalization alongside their memory producers and consumers.
   if (state->legalization_context.mode == LOOM_TARGET_LEGALIZATION_MODE_EAGER &&
-      loom_low_target_legalize_op_is_deferred_for_shaped_load(state, op)) {
+      (loom_low_target_legalize_op_has_shaped_vector_access(state->module,
+                                                            op) ||
+       loom_low_target_legalize_op_is_deferred_for_shaped_load(state, op))) {
     if (is_report_source) {
       IREE_RETURN_IF_ERROR(loom_low_target_legalize_retain_report_decision(
           state, report_decision, source_op_name, source_op_kind,
