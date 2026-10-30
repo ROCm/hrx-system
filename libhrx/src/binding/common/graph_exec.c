@@ -250,9 +250,11 @@ typedef struct iree_hal_streaming_graph_exec_t {
   // Number of successful launches of this exec.
   uint64_t launch_count;
 
-  // Borrowed through graph: template whose allocation-node admission this
-  // executable occupies, or NULL when it has no graph allocation nodes.
-  iree_hal_streaming_graph_t* graph_memory_owner;
+  // Stable logical root identity shared by children and rebuild candidates.
+  // Borrowed by children, which are owned by the root's compiled blocks.
+  iree_hal_streaming_graph_exec_t* execution_owner;
+  // Arena-owned admission claims, one per original direct allocation owner.
+  struct iree_hal_streaming_graph_memory_claim_t* memory_claims;
 
   // Completion of the last accepted launch, preserved through parameter edits.
   struct {
@@ -278,6 +280,13 @@ typedef struct iree_hal_streaming_graph_memory_contribution_t {
   // True when this contribution can be shared by graph alloc/free pairs.
   bool reusable;
 } iree_hal_streaming_graph_memory_contribution_t;
+
+typedef struct iree_hal_streaming_graph_memory_claim_t {
+  // Next admission held by this compiled graph version.
+  struct iree_hal_streaming_graph_memory_claim_t* next;
+  // Original allocation owner, borrowed through the retained template chain.
+  iree_hal_streaming_graph_t* graph;
+} iree_hal_streaming_graph_memory_claim_t;
 
 static iree_status_t iree_hal_streaming_graph_record_memcpy_node(
     iree_hal_command_buffer_t* command_buffer,
@@ -480,6 +489,54 @@ static bool iree_hal_streaming_graph_has_free_node_for_pointer(
   return false;
 }
 
+// Compilation acquires each original allocation owner once. Rebuilds and
+// nested graphs share the same logical executable identity, while independent
+// executables cannot concurrently reuse these fixed graph allocation addresses.
+static iree_status_t iree_hal_streaming_graph_memory_acquire_claim(
+    iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_graph_t* graph) {
+  for (iree_hal_streaming_graph_memory_claim_t* claim = exec->memory_claims;
+       claim; claim = claim->next) {
+    if (claim->graph == graph) {
+      return iree_ok_status();
+    }
+  }
+  iree_hal_streaming_graph_memory_claim_t* claim = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(&exec->arena_allocator,
+                                           sizeof(*claim), (void**)&claim));
+  iree_slim_mutex_lock(&graph->capture_mutex);
+  const bool available =
+      !graph->memory_admission.executable ||
+      graph->memory_admission.executable == exec->execution_owner;
+  if (available) {
+    graph->memory_admission.executable = exec->execution_owner;
+    ++graph->memory_admission.count;
+  }
+  iree_slim_mutex_unlock(&graph->capture_mutex);
+  if (!available) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "graph allocation nodes already belong to another executable");
+  }
+  claim->graph = graph;
+  claim->next = exec->memory_claims;
+  exec->memory_claims = claim;
+  return iree_ok_status();
+}
+
+static void iree_hal_streaming_graph_memory_release_claims(
+    iree_hal_streaming_graph_exec_t* exec) {
+  for (iree_hal_streaming_graph_memory_claim_t* claim = exec->memory_claims;
+       claim; claim = claim->next) {
+    iree_hal_streaming_graph_t* graph = claim->graph;
+    iree_slim_mutex_lock(&graph->capture_mutex);
+    if (--graph->memory_admission.count == 0) {
+      graph->memory_admission.executable = NULL;
+    }
+    iree_slim_mutex_unlock(&graph->capture_mutex);
+  }
+  exec->memory_claims = NULL;
+}
+
 static iree_status_t iree_hal_streaming_graph_memory_build_contributions(
     iree_hal_streaming_graph_exec_t* exec) {
   if (!exec->graph->has_graph_memory_nodes || exec->graph->node_count == 0) {
@@ -506,6 +563,10 @@ static iree_status_t iree_hal_streaming_graph_memory_build_contributions(
           node->attrs.mem_alloc.bytesize == 0) {
         continue;
       }
+      IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_memory_acquire_claim(
+          exec, node->attrs.mem_alloc.allocation_owner
+                    ? node->attrs.mem_alloc.allocation_owner
+                    : node->graph));
       const bool has_matching_free =
           iree_hal_streaming_graph_has_free_node_for_pointer(
               exec->graph, node->attrs.mem_alloc.dptr);
@@ -683,6 +744,7 @@ void iree_hal_streaming_graph_memory_trim(iree_hal_streaming_device_t* device) {
 iree_status_t iree_hal_streaming_graph_exec_create(
     iree_hal_streaming_context_t* context, iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_instantiate_flags_t flags,
+    iree_hal_streaming_graph_exec_t* execution_owner,
     iree_allocator_t host_allocator,
     iree_hal_streaming_graph_exec_t** out_exec) {
   IREE_ASSERT_ARGUMENT(context);
@@ -721,18 +783,16 @@ iree_status_t iree_hal_streaming_graph_exec_create(
   exec->graph_memory_contribution_count = 0;
   exec->has_unfreed_graph_alloc_nodes = false;
   exec->launch_count = 0;
-  exec->graph_memory_owner = graph->has_graph_memory_nodes ? graph : NULL;
+  exec->execution_owner = execution_owner ? execution_owner : exec;
+  exec->memory_claims = NULL;
   exec->last_launch.semaphore = NULL;
   exec->last_launch.value = 0;
   exec->last_launch.requires_independent_queue = false;
-  if (exec->graph_memory_owner) {
-    ++graph->active_graph_memory_exec_count;
-  }
   exec->flags = flags;
   iree_slim_mutex_initialize(&exec->mutex);
 
   iree_status_t status = iree_ok_status();
-  if (graph->template_graph) {
+  if (graph->is_executable_snapshot) {
     // A compiled child's descriptions were already captured recursively by
     // its parent. Share that private snapshot instead of copying each subtree
     // again at every level of nesting.
@@ -799,10 +859,6 @@ static void iree_hal_streaming_graph_exec_destroy(
 
   iree_hal_streaming_graph_exec_deinitialize_compiled_state(exec);
 
-  if (exec->graph_memory_owner) {
-    IREE_ASSERT(exec->graph_memory_owner->active_graph_memory_exec_count > 0);
-    --exec->graph_memory_owner->active_graph_memory_exec_count;
-  }
   iree_hal_semaphore_release(exec->last_launch.semaphore);
 
   iree_allocator_free(exec->host_allocator, exec->node_disabled_states);
@@ -862,6 +918,7 @@ static void iree_hal_streaming_graph_exec_initialize_compiled_state(
   exec->graph_memory_contributions = NULL;
   exec->graph_memory_contribution_count = 0;
   exec->has_unfreed_graph_alloc_nodes = false;
+  exec->memory_claims = NULL;
 }
 
 static void iree_hal_streaming_graph_exec_deinitialize_compiled_state(
@@ -874,6 +931,7 @@ static void iree_hal_streaming_graph_exec_deinitialize_compiled_state(
   if (exec->graph_memory_contribution_count > 0) {
     iree_hal_streaming_graph_memory_release_exec(exec);
   }
+  iree_hal_streaming_graph_memory_release_claims(exec);
   iree_arena_deinitialize(&exec->arena_allocator);
   exec->blocks = NULL;
   exec->block_count = 0;
@@ -910,6 +968,8 @@ static void iree_hal_streaming_graph_exec_move_compiled_state(
   target->graph_memory_contribution_count =
       source->graph_memory_contribution_count;
   target->has_unfreed_graph_alloc_nodes = source->has_unfreed_graph_alloc_nodes;
+  target->memory_claims = source->memory_claims;
+  source->memory_claims = NULL;
 
   source->blocks = NULL;
   source->block_count = 0;
@@ -1094,6 +1154,7 @@ iree_status_t iree_hal_streaming_graph_exec_rebuild_locked(
   candidate.node_disabled_states = exec->node_disabled_states;
   candidate.node_disabled_state_count = exec->node_disabled_state_count;
   candidate.flags = exec->flags;
+  candidate.execution_owner = exec->execution_owner;
   iree_hal_streaming_graph_exec_initialize_compiled_state(&candidate);
 
   iree_status_t status = iree_hal_resource_set_allocate(
@@ -1575,16 +1636,19 @@ static iree_status_t iree_hal_streaming_graph_create_child_graph_block(
 
   iree_hal_streaming_graph_exec_t* child_exec = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_graph_instantiate(
-              child_graph,
+      z0, iree_hal_streaming_graph_exec_create(
+              exec->context, child_graph,
               (iree_hal_streaming_graph_instantiate_flags_t)exec->flags,
-              &child_exec));
+              exec->execution_owner, exec->host_allocator, &child_exec));
 
   iree_hal_streaming_graph_block_t* block = NULL;
-  iree_status_t status = iree_hal_streaming_graph_block_allocate(
-      &exec->arena_allocator, IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH,
-      node_start_index, node_count, wait_semaphore_count,
-      signal_semaphore_count, &block, out_ptrs);
+  iree_status_t status = iree_hal_streaming_graph_exec_compile(child_exec);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_graph_block_allocate(
+        &exec->arena_allocator, IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH,
+        node_start_index, node_count, wait_semaphore_count,
+        signal_semaphore_count, &block, out_ptrs);
+  }
   if (iree_status_is_ok(status)) {
     out_ptrs->attrs->child_graph.exec = child_exec;
     // A launch of |exec| walks the child's blocks too, so the records they hold
@@ -3380,15 +3444,6 @@ iree_status_t iree_hal_streaming_graph_exec_update(
                             "graph update is not compatible");
   }
 
-  if (graph->has_graph_memory_nodes && graph != exec->graph_memory_owner &&
-      graph->active_graph_memory_exec_count > 0) {
-    iree_slim_mutex_unlock(&exec->mutex);
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "graph allocation nodes already belong to another executable");
-  }
-
   iree_hal_streaming_graph_t* replacement = NULL;
   uint8_t* replacement_disabled_states = NULL;
   iree_status_t status = iree_hal_streaming_graph_clone(
@@ -3434,13 +3489,6 @@ iree_status_t iree_hal_streaming_graph_exec_update(
     }
   }
   if (iree_status_is_ok(status)) {
-    if (exec->graph_memory_owner) {
-      --exec->graph_memory_owner->active_graph_memory_exec_count;
-    }
-    exec->graph_memory_owner = graph->has_graph_memory_nodes ? graph : NULL;
-    if (exec->graph_memory_owner) {
-      ++exec->graph_memory_owner->active_graph_memory_exec_count;
-    }
     iree_host_size_t mapping_index = 0;
     for (iree_hal_streaming_node_block_t* block = replacement->node_blocks;
          block; block = block->next) {

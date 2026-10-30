@@ -95,12 +95,16 @@ struct HipGraphApi {
   decltype(&hipStreamBeginCapture) begin_capture = nullptr;
   // Returns the graph built from stream operations.
   decltype(&hipStreamEndCapture) end_capture = nullptr;
+  // Borrows the graph under construction during stream capture.
+  decltype(&hipStreamGetCaptureInfo_v2) capture_info = nullptr;
   // Records or submits a contiguous streaming copy.
   decltype(&hipMemcpyAsync) copy_async = nullptr;
   // Enumerates only public graph operations.
   decltype(&hipGraphGetNodes) get_nodes = nullptr;
   // Adds an independently described nested graph.
   decltype(&hipGraphAddChildGraphNode) add_child = nullptr;
+  // Borrows the node's independently snapshotted graph template.
+  decltype(&hipGraphChildGraphNodeGetGraph) get_child = nullptr;
   // Applies the generic executable update to its typed operation.
   decltype(&hipGraphExecNodeSetParams) set_executable_node = nullptr;
   // Reports a template copy's public parameters.
@@ -162,9 +166,11 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     RESOLVE(add_dependencies, "hipGraphAddDependencies");
     RESOLVE(begin_capture, "hipStreamBeginCapture");
     RESOLVE(end_capture, "hipStreamEndCapture");
+    RESOLVE(capture_info, "hipStreamGetCaptureInfo_v2");
     RESOLVE(copy_async, "hipMemcpyAsync");
     RESOLVE(get_nodes, "hipGraphGetNodes");
     RESOLVE(add_child, "hipGraphAddChildGraphNode");
+    RESOLVE(get_child, "hipGraphChildGraphNodeGetGraph");
     RESOLVE(set_executable_node, "hipGraphExecNodeSetParams");
     RESOLVE(get_copy, "hipGraphMemcpyNodeGetParams");
     RESOLVE(add_host, "hipGraphAddHostNode");
@@ -597,6 +603,221 @@ TEST_F(HipGraphMemoryApiTest, ExecutableUpdatesPreserveTemplatesAndSiblings) {
   ASSERT_FALSE(HasFatalFailure());
   EXPECT_EQ(destination_, source_);
   EXPECT_EQ(callbacks_, (std::array<int, 3>{2, 3, 1}));
+}
+
+TEST_F(HipGraphMemoryApiTest, ChildInsertionAndParentCloneOwnTheirSnapshots) {
+  ASSERT_EQ(hipSuccess, api_.graph_create(&clone_, 0));
+  hipHostNodeParams host = {.fn = Increment, .userData = &callbacks_[0]};
+  hipGraphNode_t source_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_host(&source_node, clone_, nullptr, 0, &host));
+  hipGraphNode_t child_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.add_child(&child_node, graph_, nullptr, 0, clone_));
+  hipGraph_t embedded = nullptr;
+  ASSERT_EQ(hipSuccess, api_.get_child(child_node, &embedded));
+  EXPECT_NE(embedded, clone_);
+
+  // Insertion captures the child before any executable exists.
+  host.userData = &callbacks_[1];
+  ASSERT_EQ(hipSuccess, api_.set_host(source_node, &host));
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(clone_));
+  clone_ = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_clone(&clone_, graph_));
+  hipGraphNode_t cloned_child_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.find_clone_node(&cloned_child_node, child_node, clone_));
+  hipGraph_t cloned_child = nullptr;
+  ASSERT_EQ(hipSuccess, api_.get_child(cloned_child_node, &cloned_child));
+  EXPECT_NE(cloned_child, embedded);
+  hipGraphNode_t cloned_host = nullptr;
+  size_t count = 1;
+  ASSERT_EQ(hipSuccess, api_.get_nodes(cloned_child, &cloned_host, &count));
+  ASSERT_EQ(count, 1u);
+  host.userData = &callbacks_[2];
+  ASSERT_EQ(hipSuccess, api_.set_host(cloned_host, &host));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&sibling_, clone_, 0));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  Replay(sibling_);
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(callbacks_, (std::array<int, 3>{1, 0, 1}));
+
+  HoldStreamAtGate();
+  ASSERT_FALSE(HasFatalFailure());
+  ASSERT_EQ(hipSuccess, api_.launch(executable_, stream_));
+  hipGraphNodeParams update = {
+      .type = hipGraphNodeTypeGraph,
+      .graph = {.graph = cloned_child},
+  };
+  ASSERT_EQ(hipSuccess,
+            api_.set_executable_node(executable_, child_node, &update));
+  ReleaseStreamGate();
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+  EXPECT_EQ(callbacks_, (std::array<int, 3>{2, 0, 1}));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(callbacks_, (std::array<int, 3>{2, 0, 2}));
+}
+
+TEST_F(HipGraphMemoryApiTest, BorrowedChildHandleFollowsItsOwnerLifetime) {
+  ASSERT_EQ(hipSuccess, api_.graph_create(&clone_, 0));
+  hipHostNodeParams host = {.fn = Increment, .userData = &callbacks_[0]};
+  hipGraphNode_t host_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_host(&host_node, clone_, nullptr, 0, &host));
+  hipGraphNode_t child_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.add_child(&child_node, graph_, nullptr, 0, clone_));
+  hipGraph_t embedded = nullptr;
+  ASSERT_EQ(hipSuccess, api_.get_child(child_node, &embedded));
+  hipGraph_t repeated = nullptr;
+  ASSERT_EQ(hipSuccess, api_.get_child(child_node, &repeated));
+  EXPECT_EQ(embedded, repeated);
+  EXPECT_EQ(hipErrorInvalidValue, api_.graph_destroy(embedded));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, embedded, 0));
+  ASSERT_EQ(hipSuccess, api_.destroy_node(child_node));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(callbacks_[0], 1);
+  ASSERT_EQ(hipSuccess, api_.executable_destroy(executable_));
+  executable_ = nullptr;
+  // The public boundary rejects the expired borrowed handle without reading
+  // its released object. No native operation is issued for this request.
+  EXPECT_EQ(hipErrorInvalidValue, api_.instantiate(&executable_, embedded, 0));
+  EXPECT_EQ(executable_, nullptr);
+}
+
+TEST_F(HipGraphMemoryApiTest, CaptureTransfersItsExposedBorrowedGraph) {
+  ASSERT_EQ(hipSuccess,
+            api_.begin_capture(stream_, hipStreamCaptureModeGlobal));
+  hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
+  hipGraph_t captured = nullptr;
+  const hipError_t query = api_.capture_info(stream_, &capture_status, nullptr,
+                                             &captured, nullptr, nullptr);
+  EXPECT_EQ(query, hipSuccess);
+  EXPECT_EQ(capture_status, hipStreamCaptureStatusActive);
+  if (query == hipSuccess && captured) {
+    EXPECT_EQ(hipErrorInvalidValue, api_.graph_destroy(captured));
+    hipHostNodeParams host = {.fn = Increment, .userData = &callbacks_[0]};
+    hipGraphNode_t host_node = nullptr;
+    EXPECT_EQ(hipSuccess,
+              api_.add_host(&host_node, captured, nullptr, 0, &host));
+  }
+  ASSERT_EQ(hipSuccess, api_.end_capture(stream_, &clone_));
+  ASSERT_EQ(captured, clone_);
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, clone_, 0));
+  // EndCapture makes the exposed handle caller-owned and destroyable.
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(clone_));
+  clone_ = nullptr;
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(callbacks_[0], 1);
+}
+
+TEST_F(HipGraphMemoryApiTest, NestedAllocationsKeepTheirOriginalAdmission) {
+  int device = 0;
+  ASSERT_EQ(hipSuccess, api_.get_device(&device));
+  hipMemAllocNodeParams allocation = {};
+  allocation.poolProps.allocType = hipMemAllocationTypePinned;
+  allocation.poolProps.location.type = hipMemLocationTypeDevice;
+  allocation.poolProps.location.id = device;
+  allocation.bytesize = source_.size();
+  hipGraphNode_t allocation_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_allocation(&allocation_node, graph_, nullptr,
+                                            0, &allocation));
+  hipGraphNode_t upload = nullptr;
+  ASSERT_EQ(
+      hipSuccess,
+      api_.add_copy_1d(&upload, graph_, &allocation_node, 1, allocation.dptr,
+                       source_.data(), source_.size(), hipMemcpyHostToDevice));
+  hipGraphNode_t download = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.add_copy_1d(&download, graph_, &upload, 1, destination_.data(),
+                             allocation.dptr, destination_.size(),
+                             hipMemcpyDeviceToHost));
+  hipGraphNode_t free_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.add_free(&free_node, graph_, &download, 1, allocation.dptr));
+
+  ASSERT_EQ(hipSuccess, api_.graph_create(&clone_, 0));
+  hipGraphNode_t middle_child = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.add_child(&middle_child, clone_, nullptr, 0, graph_));
+  // A retained allocation template must not become its own descendant owner.
+  hipGraphNode_t rejected = nullptr;
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.add_child(&rejected, graph_, nullptr, 0, clone_));
+  EXPECT_EQ(rejected, nullptr);
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(graph_));
+  graph_ = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_create(&graph_, 0));
+  hipGraphNode_t outer_child = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.add_child(&outer_child, graph_, nullptr, 0, clone_));
+  ASSERT_EQ(hipSuccess, api_.graph_destroy(clone_));
+  clone_ = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_clone(&clone_, graph_));
+
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  EXPECT_EQ(hipErrorNotSupported, api_.instantiate(&sibling_, graph_, 0));
+  EXPECT_EQ(sibling_, nullptr);
+  EXPECT_EQ(hipErrorNotSupported, api_.instantiate(&sibling_, clone_, 0));
+  EXPECT_EQ(sibling_, nullptr);
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, source_);
+
+  // Recompilation holds old and candidate children simultaneously under one
+  // logical executable identity, without granting another executable access.
+  hipGraphNode_t error_node = nullptr;
+  hipGraphExecUpdateResult result;
+  ASSERT_EQ(hipSuccess,
+            api_.update_executable(executable_, clone_, &error_node, &result));
+  EXPECT_EQ(result, hipGraphExecUpdateSuccess);
+  destination_.fill(0);
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, source_);
+  ASSERT_EQ(hipSuccess, api_.executable_destroy(executable_));
+  executable_ = nullptr;
+  ASSERT_EQ(hipSuccess, api_.instantiate(&sibling_, clone_, 0));
+  source_ = replacement_;
+  destination_.fill(0);
+  Replay(sibling_);
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, replacement_);
+}
+
+TEST_F(HipGraphMemoryApiTest, FailedChildCompilationReleasesParentAdmission) {
+  ASSERT_EQ(hipSuccess, api_.graph_create(&clone_, 0));
+  int device = 0;
+  ASSERT_EQ(hipSuccess, api_.get_device(&device));
+  hipMemAllocNodeParams allocation = {};
+  allocation.poolProps.allocType = hipMemAllocationTypePinned;
+  allocation.poolProps.location.type = hipMemLocationTypeDevice;
+  allocation.poolProps.location.id = device;
+  allocation.bytesize = source_.size();
+  for (auto graph : {graph_, clone_}) {
+    hipGraphNode_t allocation_node = nullptr;
+    ASSERT_EQ(hipSuccess, api_.add_allocation(&allocation_node, graph, nullptr,
+                                              0, &allocation));
+    hipGraphNode_t free_node = nullptr;
+    ASSERT_EQ(hipSuccess, api_.add_free(&free_node, graph, &allocation_node, 1,
+                                        allocation.dptr));
+  }
+  ASSERT_EQ(hipSuccess, api_.instantiate(&sibling_, clone_, 0));
+  hipGraphNode_t child_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.add_child(&child_node, graph_, nullptr, 0, clone_));
+  // The parent acquires its own allocation before compilation discovers that
+  // the child belongs to an independent executable.
+  EXPECT_EQ(hipErrorNotSupported, api_.instantiate(&executable_, graph_, 0));
+  EXPECT_EQ(executable_, nullptr);
+  ASSERT_EQ(hipSuccess, api_.executable_destroy(sibling_));
+  sibling_ = nullptr;
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
 }
 
 TEST_F(HipGraphMemoryApiTest, NestedUpdatesSurviveTemplateChangesAndRebuilds) {

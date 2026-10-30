@@ -190,10 +190,13 @@ iree_status_t iree_hal_streaming_graph_create(
   graph->additional_edges = NULL;
   graph->additional_edge_count = 0;
   graph->template_graph = NULL;
+  graph->is_executable_snapshot = false;
   graph->copy_helper_count = 0;
   graph->user_object_refs = NULL;
+  graph->destroy_callback = NULL;
   graph->has_graph_memory_nodes = false;
-  graph->active_graph_memory_exec_count = 0;
+  graph->memory_admission.executable = NULL;
+  graph->memory_admission.count = 0;
   graph->flags = flags;
   graph->context = context;
   iree_hal_streaming_context_retain(context);
@@ -207,6 +210,10 @@ iree_status_t iree_hal_streaming_graph_create(
 static void iree_hal_streaming_graph_destroy(
     iree_hal_streaming_graph_t* graph) {
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  if (graph->destroy_callback) {
+    graph->destroy_callback(graph);
+  }
 
   for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
        block = block->next) {
@@ -277,7 +284,7 @@ iree_status_t iree_hal_streaming_graph_prepare_copy_staging(
   *ref = (iree_hal_streaming_buffer_ref_t){0};
   void* host_pointer = NULL;
   iree_status_t status = iree_ok_status();
-  if (graph->template_graph) {
+  if (graph->is_executable_snapshot) {
     iree_hal_streaming_graph_staging_t* staging = NULL;
     status = iree_allocator_malloc(graph->host_allocator, sizeof(*staging),
                                    (void**)&staging);
@@ -503,7 +510,8 @@ iree_status_t iree_hal_streaming_graph_validate_child_graph(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "child graph must belong to the parent context");
   }
-  if (child_graph->child_graph_node_count == 0) {
+  if (child_graph->child_graph_node_count == 0 &&
+      !child_graph->template_graph) {
     return iree_ok_status();
   }
 
@@ -524,7 +532,14 @@ iree_status_t iree_hal_streaming_graph_validate_child_graph(
           "child graph would create recursive graph containment");
       break;
     }
-    if (graph->child_graph_node_count == 0) {
+    if (graph->template_graph &&
+        !iree_hal_streaming_graph_list_contains(graphs, graph_count,
+                                                graph->template_graph)) {
+      status = iree_hal_streaming_graph_list_append(
+          host_allocator, &graphs, &graph_count, &graph_capacity,
+          graph->template_graph);
+    }
+    if (!iree_status_is_ok(status) || graph->child_graph_node_count == 0) {
       continue;
     }
 
@@ -788,7 +803,10 @@ iree_status_t iree_hal_streaming_graph_clone(
 
   iree_hal_streaming_graph_node_t** node_map = NULL;
   iree_status_t status = iree_ok_status();
-  if (mode == IREE_HAL_STREAMING_GRAPH_CLONE_MODE_EXECUTABLE) {
+  clone_graph->is_executable_snapshot =
+      mode == IREE_HAL_STREAMING_GRAPH_CLONE_MODE_EXECUTABLE;
+  if (clone_graph->is_executable_snapshot ||
+      source_graph->has_graph_memory_nodes) {
     clone_graph->template_graph = source_graph;
     iree_hal_streaming_graph_retain(source_graph);
   }
@@ -892,21 +910,23 @@ iree_status_t iree_hal_streaming_graph_clone(
       } else if (source_node->type ==
                      IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH &&
                  source_node->attrs.child_graph.graph) {
-        if (mode == IREE_HAL_STREAMING_GRAPH_CLONE_MODE_EXECUTABLE) {
-          clone_node->attrs.child_graph.graph = NULL;
-          status = iree_hal_streaming_graph_clone(
-              source_node->attrs.child_graph.graph, mode,
-              &clone_node->attrs.child_graph.graph);
-          if (!iree_status_is_ok(status)) {
-            break;
-          }
-        } else {
-          iree_hal_streaming_graph_retain(source_node->attrs.child_graph.graph);
+        clone_node->attrs.child_graph.graph = NULL;
+        status = iree_hal_streaming_graph_clone(
+            source_node->attrs.child_graph.graph,
+            clone_graph->is_executable_snapshot
+                ? IREE_HAL_STREAMING_GRAPH_CLONE_MODE_EXECUTABLE
+                : IREE_HAL_STREAMING_GRAPH_CLONE_MODE_CHILD,
+            &clone_node->attrs.child_graph.graph);
+        if (!iree_status_is_ok(status)) {
+          break;
         }
       } else if (source_node->type ==
                  IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC) {
         // The retained source owns the actual allocation and query payload.
         clone_node->attrs.mem_alloc.owns_device_allocation = false;
+        if (!clone_node->attrs.mem_alloc.allocation_owner) {
+          clone_node->attrs.mem_alloc.allocation_owner = source_graph;
+        }
       } else if ((source_node->type ==
                       IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD ||
                   source_node->type ==
@@ -1974,10 +1994,12 @@ iree_status_t iree_hal_streaming_graph_add_child_graph_node(
     memcpy(node->dependencies, dependencies,
            dependency_count * sizeof(*dependencies));
   }
-  node->attrs.child_graph.graph = child_graph;
-  iree_hal_streaming_graph_retain(child_graph);
-
-  iree_status_t status = iree_hal_streaming_graph_add_node(graph, node);
+  iree_status_t status = iree_hal_streaming_graph_clone(
+      child_graph, IREE_HAL_STREAMING_GRAPH_CLONE_MODE_CHILD,
+      &node->attrs.child_graph.graph);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_graph_add_node(graph, node);
+  }
   if (iree_status_is_ok(status)) {
     ++graph->child_graph_node_count;
     if (out_node) {
@@ -2221,18 +2243,11 @@ iree_status_t iree_hal_streaming_graph_instantiate(
   *out_exec = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (graph->has_graph_memory_nodes &&
-      graph->active_graph_memory_exec_count > 0) {
-    IREE_TRACE_ZONE_END(z0);
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "graphs with memory allocation nodes support one live executable");
-  }
-
   // Create an uninitialized exec object.
   iree_hal_streaming_graph_exec_t* exec = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_streaming_graph_exec_create(graph->context, graph, flags,
+                                               /*execution_owner=*/NULL,
                                                graph->host_allocator, &exec));
 
   // Instantiate from the graph template. HIP graph objects are not internally

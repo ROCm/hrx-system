@@ -19059,9 +19059,16 @@ HIPAPI hipError_t hipGraphReleaseUserObject(hipGraph_t graph,
 // Graphs
 //===----------------------------------------------------------------------===//
 
+typedef enum iree_hip_graph_handle_ownership_e {
+  IREE_HIP_GRAPH_HANDLE_BORROWED = 0,
+  IREE_HIP_GRAPH_HANDLE_OWNED = 1,
+} iree_hip_graph_handle_ownership_t;
+
 typedef struct iree_hip_live_graph_entry_t {
-  // Public HIP graph handle that is currently owned by the caller.
+  // Public HIP graph handle, either caller-owned or borrowed from a live owner.
   hipGraph_t graph;
+  // Whether GraphDestroy can consume a caller-owned reference.
+  iree_hip_graph_handle_ownership_t ownership;
   // Next entry in the process-global live graph registry.
   struct iree_hip_live_graph_entry_t* next;
 } iree_hip_live_graph_entry_t;
@@ -19101,37 +19108,12 @@ static void iree_hip_live_graph_exec_lock(void) {
   iree_slim_mutex_lock(&iree_hip_live_graph_exec_mutex);
 }
 
-static bool iree_hip_live_graph_register(hipGraph_t graph) {
-  if (!graph) {
-    return false;
-  }
-  iree_hip_live_graph_entry_t* entry =
-      (iree_hip_live_graph_entry_t*)malloc(sizeof(*entry));
-  if (!entry) {
-    return false;
-  }
-  entry->graph = graph;
-
-  iree_hip_live_graph_lock();
-  for (iree_hip_live_graph_entry_t* current = iree_hip_live_graph_head; current;
-       current = current->next) {
-    if (current->graph == graph) {
-      iree_slim_mutex_unlock(&iree_hip_live_graph_mutex);
-      free(entry);
-      return true;
-    }
-  }
-  entry->next = iree_hip_live_graph_head;
-  iree_hip_live_graph_head = entry;
-  iree_slim_mutex_unlock(&iree_hip_live_graph_mutex);
-  return true;
-}
-
-static bool iree_hip_live_graph_unregister(hipGraph_t graph) {
+static bool iree_hip_live_graph_unregister(
+    hipGraph_t graph, iree_hip_graph_handle_ownership_t ownership) {
   iree_hip_live_graph_lock();
   iree_hip_live_graph_entry_t** current = &iree_hip_live_graph_head;
   while (*current) {
-    if ((*current)->graph == graph) {
+    if ((*current)->graph == graph && (*current)->ownership == ownership) {
       iree_hip_live_graph_entry_t* entry = *current;
       *current = entry->next;
       iree_slim_mutex_unlock(&iree_hip_live_graph_mutex);
@@ -19142,6 +19124,43 @@ static bool iree_hip_live_graph_unregister(hipGraph_t graph) {
   }
   iree_slim_mutex_unlock(&iree_hip_live_graph_mutex);
   return false;
+}
+
+static void iree_hip_borrowed_graph_destroy(iree_hal_streaming_graph_t* graph) {
+  iree_hip_live_graph_unregister((hipGraph_t)graph,
+                                 IREE_HIP_GRAPH_HANDLE_BORROWED);
+}
+
+static bool iree_hip_live_graph_register(
+    hipGraph_t graph, iree_hip_graph_handle_ownership_t ownership) {
+  iree_hal_streaming_graph_t* stream_graph = (iree_hal_streaming_graph_t*)graph;
+  iree_hip_live_graph_lock();
+  for (iree_hip_live_graph_entry_t* current = iree_hip_live_graph_head; current;
+       current = current->next) {
+    if (current->graph == graph) {
+      // Ending capture transfers its reference to the caller. A later query
+      // of an owned graph never changes its ownership back to borrowed.
+      if (ownership == IREE_HIP_GRAPH_HANDLE_OWNED) {
+        current->ownership = ownership;
+        stream_graph->destroy_callback = NULL;
+      }
+      iree_slim_mutex_unlock(&iree_hip_live_graph_mutex);
+      return true;
+    }
+  }
+  iree_hip_live_graph_entry_t* entry =
+      (iree_hip_live_graph_entry_t*)malloc(sizeof(*entry));
+  if (entry) {
+    entry->graph = graph;
+    entry->ownership = ownership;
+    entry->next = iree_hip_live_graph_head;
+    iree_hip_live_graph_head = entry;
+    stream_graph->destroy_callback = ownership == IREE_HIP_GRAPH_HANDLE_BORROWED
+                                         ? iree_hip_borrowed_graph_destroy
+                                         : NULL;
+  }
+  iree_slim_mutex_unlock(&iree_hip_live_graph_mutex);
+  return entry != NULL;
 }
 
 static bool iree_hip_graph_handle_is_live(hipGraph_t graph) {
@@ -19249,7 +19268,8 @@ HIPAPI hipError_t hipGraphCreate(hipGraph_t* pGraph, unsigned int flags) {
                                       context->host_allocator, &graph),
       hipErrorOutOfMemory);
 
-  if (!iree_hip_live_graph_register((hipGraph_t)graph)) {
+  if (!iree_hip_live_graph_register((hipGraph_t)graph,
+                                    IREE_HIP_GRAPH_HANDLE_OWNED)) {
     iree_hal_streaming_graph_release(graph);
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorOutOfMemory);
@@ -19292,7 +19312,7 @@ HIPAPI hipError_t hipGraphDestroy(hipGraph_t graph) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  if (!iree_hip_live_graph_unregister(graph)) {
+  if (!iree_hip_live_graph_unregister(graph, IREE_HIP_GRAPH_HANDLE_OWNED)) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
@@ -22140,7 +22160,8 @@ HIPAPI hipError_t hipGraphClone(hipGraph_t* pGraphClone,
           (iree_hal_streaming_graph_t*)originalGraph,
           IREE_HAL_STREAMING_GRAPH_CLONE_MODE_TEMPLATE, &clone_graph),
       hipErrorInvalidValue);
-  if (!iree_hip_live_graph_register((hipGraph_t)clone_graph)) {
+  if (!iree_hip_live_graph_register((hipGraph_t)clone_graph,
+                                    IREE_HIP_GRAPH_HANDLE_OWNED)) {
     iree_hal_streaming_graph_release(clone_graph);
     HIP_RETURN_ERROR(hipErrorOutOfMemory);
   }
@@ -22944,12 +22965,18 @@ HIPAPI hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node,
   if (!node || !pGraph) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
+  *pGraph = NULL;
   iree_hal_streaming_graph_node_t* stream_node =
       (iree_hal_streaming_graph_node_t*)node;
   if (!stream_node->graph ||
       stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH ||
       !stream_node->attrs.child_graph.graph) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (!iree_hip_live_graph_register(
+          (hipGraph_t)stream_node->attrs.child_graph.graph,
+          IREE_HIP_GRAPH_HANDLE_BORROWED)) {
+    HIP_RETURN_ERROR(hipErrorOutOfMemory);
   }
   *pGraph = (hipGraph_t)stream_node->attrs.child_graph.graph;
   HIP_RETURN_ERROR(hipSuccess);
@@ -26083,7 +26110,8 @@ HIPAPI hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {
 
   if (iree_status_is_ok(status)) {
     if (pGraph) {
-      if (!iree_hip_live_graph_register((hipGraph_t)graph)) {
+      if (!iree_hip_live_graph_register((hipGraph_t)graph,
+                                        IREE_HIP_GRAPH_HANDLE_OWNED)) {
         iree_hal_streaming_graph_release(graph);
         iree_hip_resolved_stream_release(&resolved_stream);
         IREE_TRACE_ZONE_END(z0);
@@ -26449,6 +26477,14 @@ HIPAPI hipError_t hipStreamGetCaptureInfo_v2(
     *graph_out = capture_status == IREE_HAL_STREAMING_CAPTURE_STATUS_NONE
                      ? NULL
                      : (hipGraph_t)stream_obj->capture_graph;
+    if (*graph_out && !iree_hip_live_graph_register(
+                          *graph_out, IREE_HIP_GRAPH_HANDLE_BORROWED)) {
+      *graph_out = NULL;
+      iree_slim_mutex_unlock(&stream_obj->mutex);
+      iree_hip_resolved_stream_release(&resolved_stream);
+      IREE_TRACE_ZONE_END(z0);
+      HIP_RETURN_ERROR(hipErrorOutOfMemory);
+    }
   }
   if (dependencies_out) {
     *dependencies_out =

@@ -302,6 +302,9 @@ typedef struct iree_hal_streaming_graph_mem_alloc_node_attrs_t {
   void* dptr;
   // Allocation size in bytes.
   iree_device_size_t bytesize;
+  // Original allocation owner for a cloned node, borrowed through the retained
+  // template chain. NULL means this node's graph owns the allocation.
+  iree_hal_streaming_graph_t* allocation_owner;
   // True when |dptr| is owned by this graph template and must be released with
   // the node.
   bool owns_device_allocation;
@@ -416,8 +419,11 @@ iree_status_t iree_hal_streaming_graph_create(
     iree_hal_streaming_graph_t** out_graph);
 
 typedef enum iree_hal_streaming_graph_clone_mode_e {
-  // Independent public graph, including separate staged transfer allocations.
+  // Independent public graph; direct allocation nodes cannot be cloned.
   IREE_HAL_STREAMING_GRAPH_CLONE_MODE_TEMPLATE = 0,
+  // Embedded child descriptions, including shared allocation-node addresses.
+  // Transfer staging is materialized only when an executable is instantiated.
+  IREE_HAL_STREAMING_GRAPH_CLONE_MODE_CHILD,
   // Private executable descriptions. Recursively copies node parameters and
   // retains the source graph's allocations without duplicating their contents.
   IREE_HAL_STREAMING_GRAPH_CLONE_MODE_EXECUTABLE,
@@ -744,18 +750,29 @@ typedef struct iree_hal_streaming_graph_t {
   iree_hal_streaming_graph_edge_t* additional_edges;
   iree_host_size_t additional_edge_count;
 
-  // Retained source template of a private executable snapshot, or NULL for a
-  // public template. Keeps allocation-node addresses and source handles alive.
+  // Retained source of an executable snapshot or allocation-bearing child.
+  // Keeps allocation-node addresses, query payloads, and source handles alive.
   iree_hal_streaming_graph_t* template_graph;
+  // True only for private descriptions with materialized transfer staging.
+  bool is_executable_snapshot;
   // Number of host helpers attached to public copy operations.
   iree_host_size_t copy_helper_count;
   // Opaque user objects retained by this graph template.
   iree_hal_streaming_graph_user_object_ref_t* user_object_refs;
+  // Optional frontend notification before final destruction. Not inherited by
+  // clones; lets a frontend invalidate borrowed handles without retaining us.
+  void (*destroy_callback)(iree_hal_streaming_graph_t* graph);
 
-  // True when the graph contains HIP memory allocation or free nodes.
+  // True when the graph directly contains memory allocation or free nodes.
   bool has_graph_memory_nodes;
-  // Number of live executable graphs instantiated from memory-node graph.
-  uint32_t active_graph_memory_exec_count;
+  // Exclusive logical executable using this graph's direct allocations.
+  // Protected by capture_mutex; rebuilds and children share one identity.
+  struct {
+    // Borrowed identity, NULL when no compiled version has a claim.
+    iree_hal_streaming_graph_exec_t* executable;
+    // Number of compiled versions holding this admission.
+    iree_host_size_t count;
+  } memory_admission;
 
   // Graph creation flags.
   uint32_t flags;
@@ -847,9 +864,12 @@ typedef struct iree_hal_streaming_graph_partition_block_t {
   iree_hal_streaming_graph_partition_t partitions[];
 } iree_hal_streaming_graph_partition_block_t;
 
+// Creates private execution state. Children borrow their root's stable
+// |execution_owner| identity; NULL starts a new independent executable.
 iree_status_t iree_hal_streaming_graph_exec_create(
     iree_hal_streaming_context_t* context, iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_instantiate_flags_t flags,
+    iree_hal_streaming_graph_exec_t* execution_owner,
     iree_allocator_t host_allocator,
     iree_hal_streaming_graph_exec_t** out_exec);
 
@@ -950,10 +970,9 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
 
 // Checks whether |child_graph| may be the child graph of a node in
 // |parent_graph|: the two must be distinct, must belong to the same context,
-// and |child_graph| must not reach |parent_graph| through its own child graph
-// nodes. Instantiating a node's child graph instantiates that graph's own child
-// graph nodes in turn, so containment that leads back to |parent_graph| would
-// recurse until the stack ran out.
+// and |child_graph| must not reach |parent_graph| through child nodes or
+// retained allocation templates. Such edges would create recursive containment
+// or a reference cycle when the child snapshot is published.
 iree_status_t iree_hal_streaming_graph_validate_child_graph(
     iree_hal_streaming_graph_t* parent_graph,
     iree_hal_streaming_graph_t* child_graph);
