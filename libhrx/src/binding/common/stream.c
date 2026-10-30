@@ -809,6 +809,14 @@ iree_status_t iree_hal_streaming_stream_wait_streams(
       continue;
     }
 
+    // Every later destination operation already follows an accepted join of
+    // this source point. Repeating it adds no ordering and can move a pending
+    // external wait back onto a shared queue used by its producer.
+    if (iree_hal_streaming_stream_has_memory_reuse_dependency(
+            stream, source_stream->stream_id, source_timeline_value)) {
+      continue;
+    }
+
     iree_hal_streaming_wait_dependency_t* dependency =
         &dependencies[dependency_count];
     dependency->source_stream = source_stream;

@@ -494,6 +494,44 @@ TEST_F(CpuStreamingContextTest, LeavesTheDomainZeroedOnTheCpuDevice) {
   EXPECT_EQ(0u, context_->timestamp_domain.valid_bits);
 }
 
+TEST_F(CpuStreamingContextTest, RepeatedStreamJoinReusesAcceptedSourcePoint) {
+  iree_hal_streaming_stream_t* consumer = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_create(
+      context_, context_->queue, IREE_HAL_STREAMING_STREAM_FLAG_NONE,
+      /*priority=*/0, iree_allocator_system(), &consumer));
+  ScopeExit release_consumer([&] {
+    IREE_EXPECT_OK(ReleaseAllGates());
+    iree_hal_streaming_stream_release(consumer);
+  });
+  iree_hal_streaming_stream_t* producer = context_->default_stream;
+  iree_hal_semaphore_t* gate = nullptr;
+  IREE_ASSERT_OK(CreateGate(/*release_value=*/2, &gate));
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_semaphores(
+      producer, {1, &gate, &gate_value}));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_stream(consumer, producer));
+  const uint64_t first_join = consumer->pending_value;
+  EXPECT_GT(first_join, 0u);
+
+  // The producer is still pending. Completion is not required to reuse an
+  // accepted dependency, and a later consumer operation keeps that ordering.
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_semaphores(
+      consumer, {1, &gate, &gate_value}));
+  const uint64_t consumer_tail = consumer->pending_value;
+  EXPECT_GT(consumer_tail, first_join);
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_stream(consumer, producer));
+  EXPECT_EQ(consumer_tail, consumer->pending_value);
+
+  // A newer source point must still create a new join.
+  gate_value = 2;
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_semaphores(
+      producer, {1, &gate, &gate_value}));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_wait_stream(consumer, producer));
+  EXPECT_GT(consumer->pending_value, consumer_tail);
+  IREE_ASSERT_OK(SignalGate(gate, 2));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(consumer));
+}
+
 // A record on a context whose domain is zeroed captures no tick, so the pool it
 // would have drawn a slot from stays empty and the interval between two such
 // records names no clock to be measured on. This is the only reachable path to
