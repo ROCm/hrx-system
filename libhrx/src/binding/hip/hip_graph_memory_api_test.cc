@@ -329,6 +329,47 @@ class HipGraphMemoryApiTest : public ::testing::Test {
 hrx::hip::testing::HipDso HipGraphMemoryApiTest::dso_;
 HipGraphApi HipGraphMemoryApiTest::api_;
 
+TEST_F(HipGraphMemoryApiTest, RejectedCopiesLeaveTheOriginalGraphUsable) {
+  ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
+  ASSERT_EQ(hipSuccess, api_.graph_create(&clone_, 0));
+  hipGraphNode_t foreign = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_empty(&foreign, clone_, nullptr, 0));
+  for (const auto direction : {hipMemcpyHostToDevice, hipMemcpyDeviceToHost}) {
+    SCOPED_TRACE(direction);
+    void* destination =
+        direction == hipMemcpyHostToDevice ? device_ : destination_.data();
+    const void* source =
+        direction == hipMemcpyHostToDevice ? source_.data() : device_;
+    hipGraphNode_t rejected = nullptr;
+    EXPECT_EQ(hipErrorInvalidValue,
+              api_.add_copy_1d(&rejected, graph_, &foreign, 1, destination,
+                               source, source_.size(), direction));
+    const hipMemcpy3DParms params = {
+        .srcPtr = {const_cast<void*>(source), 16, 16, 2},
+        .dstPtr = {destination, 16, 16, 2},
+        .extent = {16, 2, 2},
+        .kind = direction,
+    };
+    EXPECT_EQ(hipErrorInvalidValue,
+              api_.add_copy(&rejected, graph_, &foreign, 1, &params));
+    size_t count = 0;
+    ASSERT_EQ(hipSuccess, api_.get_nodes(graph_, nullptr, &count));
+    EXPECT_EQ(0u, count);
+  }
+  hipGraphNode_t upload = nullptr;
+  hipGraphNode_t download = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_copy_1d(&upload, graph_, nullptr, 0, device_,
+                                         source_.data(), source_.size(),
+                                         hipMemcpyHostToDevice));
+  ASSERT_EQ(
+      hipSuccess,
+      api_.add_copy_1d(&download, graph_, &upload, 1, destination_.data(),
+                       device_, destination_.size(), hipMemcpyDeviceToHost));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  Replay();
+  EXPECT_EQ(source_, destination_);
+}
+
 TEST_F(HipGraphMemoryApiTest, IndependentFillsJoinBeforeGraphCompletion) {
   ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
   std::array<hipGraphNode_t, 64> fills = {};

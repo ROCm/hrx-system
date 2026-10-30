@@ -158,7 +158,7 @@ typedef struct iree_hal_streaming_capture_host_to_device_t {
   bool copy_source_into_graph;
 } iree_hal_streaming_capture_host_to_device_t;
 
-static iree_status_t iree_hal_streaming_capture_record_host_to_device(
+static iree_status_t iree_hal_streaming_capture_build_host_to_device(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, void* user_data,
@@ -217,13 +217,28 @@ static iree_status_t iree_hal_streaming_capture_record_host_to_device(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_streaming_capture_record_host_to_device(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count, void* user_data,
+    iree_hal_streaming_graph_node_t** out_terminal_node) {
+  const iree_hal_streaming_graph_copy_checkpoint_t checkpoint =
+      iree_hal_streaming_graph_copy_checkpoint(graph);
+  iree_status_t status = iree_hal_streaming_capture_build_host_to_device(
+      graph, dependencies, dependency_count, user_data, out_terminal_node);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_graph_rollback_copy(graph, checkpoint);
+  }
+  return status;
+}
+
 typedef struct iree_hal_streaming_capture_device_to_host_t {
   void* dst;
   iree_hal_streaming_deviceptr_t src;
   iree_device_size_t size;
 } iree_hal_streaming_capture_device_to_host_t;
 
-static iree_status_t iree_hal_streaming_capture_record_device_to_host(
+static iree_status_t iree_hal_streaming_capture_build_device_to_host(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, void* user_data,
@@ -271,6 +286,21 @@ static iree_status_t iree_hal_streaming_capture_record_device_to_host(
   callback_node->attrs.host.user_data_size = sizeof(*callback_data);
   *out_terminal_node = copy_node;
   return iree_ok_status();
+}
+
+static iree_status_t iree_hal_streaming_capture_record_device_to_host(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count, void* user_data,
+    iree_hal_streaming_graph_node_t** out_terminal_node) {
+  const iree_hal_streaming_graph_copy_checkpoint_t checkpoint =
+      iree_hal_streaming_graph_copy_checkpoint(graph);
+  iree_status_t status = iree_hal_streaming_capture_build_device_to_host(
+      graph, dependencies, dependency_count, user_data, out_terminal_node);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_graph_rollback_copy(graph, checkpoint);
+  }
+  return status;
 }
 
 static void iree_hal_streaming_buffer_free(iree_hal_streaming_buffer_t* buffer);

@@ -970,6 +970,38 @@ iree_status_t iree_hal_streaming_graph_allocate_host_staging(
 void iree_hal_streaming_graph_discard_host_staging(
     iree_hal_streaming_graph_t* graph, iree_hal_streaming_buffer_t* buffer);
 
+// Rollback boundary for one append-only staged copy construction. Construction
+// may append copy/host nodes and staging, but cannot edit existing nodes or add
+// additional edges. The frontend balances any external context references.
+typedef struct iree_hal_streaming_graph_copy_checkpoint_t {
+  // Number of nodes preceding the copy and its helpers.
+  iree_host_size_t node_count;
+  // Number of root nodes preceding construction.
+  iree_host_size_t root_count;
+  // Number of attached helpers preceding construction.
+  iree_host_size_t helper_count;
+  // Borrowed head of staging owned before construction.
+  iree_hal_streaming_graph_owned_host_allocation_t* allocations;
+} iree_hal_streaming_graph_copy_checkpoint_t;
+
+// Captures a construction boundary without allocating or retaining resources.
+static inline iree_hal_streaming_graph_copy_checkpoint_t
+iree_hal_streaming_graph_copy_checkpoint(
+    const iree_hal_streaming_graph_t* graph) {
+  return (iree_hal_streaming_graph_copy_checkpoint_t){
+      .node_count = graph->node_count,
+      .root_count = graph->root_count,
+      .helper_count = graph->copy_helper_count,
+      .allocations = graph->owned_host_allocations,
+  };
+}
+
+// Discards a rejected construction's topology and never-submitted staging.
+// No completion wait is needed; existing graph operations remain unchanged.
+void iree_hal_streaming_graph_rollback_copy(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_copy_checkpoint_t checkpoint);
+
 #ifdef __cplusplus
 }
 #endif

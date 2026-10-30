@@ -20197,11 +20197,15 @@ static hipError_t iree_hip_graph_add_staged_peer_memcpy_node(
   }
 
   iree_hal_streaming_buffer_t* staging = NULL;
-  iree_status_t status = iree_hal_streaming_graph_allocate_host_staging(
-      stream_graph, size, &staging);
-  if (!iree_status_is_ok(status)) {
-    iree_status_ignore(status);
-    return hipErrorOutOfMemory;
+  iree_status_t status = iree_ok_status();
+  if (src_context == stream_graph->context ||
+      dst_context == stream_graph->context) {
+    result = iree_status_to_hip_result(
+        iree_hal_streaming_graph_allocate_host_staging(stream_graph, size,
+                                                       &staging));
+    if (result != hipSuccess) {
+      return result;
+    }
   }
 
   if (src_context == stream_graph->context) {
@@ -20530,7 +20534,7 @@ HIPAPI hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode,
   HIP_RETURN_ERROR(result);
 }
 
-static hipError_t iree_hip_graph_add_memcpy_node(
+static hipError_t iree_hip_graph_construct_memcpy_node(
     hipGraphNode_t* pGraphNode, iree_hal_streaming_graph_t* stream_graph,
     const hipGraphNode_t* pDependencies, size_t numDependencies,
     const void* pCopyParams) {
@@ -20902,6 +20906,23 @@ static hipError_t iree_hip_graph_add_memcpy_node(
   return (hipSuccess);
 }
 
+static hipError_t iree_hip_graph_add_memcpy_node(
+    hipGraphNode_t* pGraphNode, iree_hal_streaming_graph_t* stream_graph,
+    const hipGraphNode_t* pDependencies, size_t numDependencies,
+    const void* pCopyParams) {
+  if (!stream_graph) {
+    return hipErrorInvalidValue;
+  }
+  const iree_hal_streaming_graph_copy_checkpoint_t checkpoint =
+      iree_hal_streaming_graph_copy_checkpoint(stream_graph);
+  hipError_t result = iree_hip_graph_construct_memcpy_node(
+      pGraphNode, stream_graph, pDependencies, numDependencies, pCopyParams);
+  if (result != hipSuccess) {
+    iree_hal_streaming_graph_rollback_copy(stream_graph, checkpoint);
+  }
+  return result;
+}
+
 // Adds a 1D memory copy node to a graph.
 //
 // Parameters:
@@ -20935,7 +20956,7 @@ HIPAPI hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode,
   HIP_RETURN_ERROR(result);
 }
 
-static hipError_t iree_hip_graph_add_memcpy_node_1d(
+static hipError_t iree_hip_graph_construct_memcpy_node_1d(
     hipGraphNode_t* pGraphNode, iree_hal_streaming_graph_t* stream_graph,
     const hipGraphNode_t* pDependencies, size_t numDependencies, void* dst,
     const void* src, size_t count, hipMemcpyKind kind) {
@@ -21207,6 +21228,24 @@ static hipError_t iree_hip_graph_add_memcpy_node_1d(
   *pGraphNode = (hipGraphNode_t)node;
   IREE_TRACE_ZONE_END(z0);
   return (hipSuccess);
+}
+
+static hipError_t iree_hip_graph_add_memcpy_node_1d(
+    hipGraphNode_t* pGraphNode, iree_hal_streaming_graph_t* stream_graph,
+    const hipGraphNode_t* pDependencies, size_t numDependencies, void* dst,
+    const void* src, size_t count, hipMemcpyKind kind) {
+  if (!stream_graph) {
+    return hipErrorInvalidValue;
+  }
+  const iree_hal_streaming_graph_copy_checkpoint_t checkpoint =
+      iree_hal_streaming_graph_copy_checkpoint(stream_graph);
+  hipError_t result = iree_hip_graph_construct_memcpy_node_1d(
+      pGraphNode, stream_graph, pDependencies, numDependencies, dst, src, count,
+      kind);
+  if (result != hipSuccess) {
+    iree_hal_streaming_graph_rollback_copy(stream_graph, checkpoint);
+  }
+  return result;
 }
 
 // Adds a memory set node to a graph.

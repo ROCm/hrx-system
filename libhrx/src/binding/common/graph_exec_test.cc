@@ -574,6 +574,105 @@ class GraphExecTest : public ::testing::Test {
   std::atomic<bool> stream_marker_ran_{false};
 };
 
+TEST_F(GraphExecTest, RejectedCopyConstructionPreservesTopologyAndBacking) {
+  for (const size_t initial_nodes : {size_t{0}, size_t{15}, size_t{64}}) {
+    SCOPED_TRACE(initial_nodes);
+    std::array<int, 2> calls = {};
+    iree_hal_streaming_graph_t* graph = nullptr;
+    iree_hal_streaming_graph_exec_t* executable = nullptr;
+    ScopeExit release_handles([&] {
+      IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+      iree_hal_streaming_graph_exec_release(executable);
+      iree_hal_streaming_graph_release(graph);
+    });
+    IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+        context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+        &graph));
+    for (size_t i = 0; i < initial_nodes; ++i) {
+      IREE_ASSERT_OK(
+          iree_hal_streaming_graph_add_empty_node(graph, nullptr, 0, nullptr));
+    }
+    iree_hal_streaming_buffer_t* destination = nullptr;
+    IREE_ASSERT_OK(iree_hal_streaming_graph_allocate_host_staging(
+        graph, sizeof(uint32_t), &destination));
+    const auto checkpoint = iree_hal_streaming_graph_copy_checkpoint(graph);
+    const auto increment = +[](void* data) { ++*static_cast<int*>(data); };
+    struct NodeAllocator {
+      // Real arena used by the graph's node and block constructors.
+      iree_allocator_t arena;
+      // Construction allocation to reject in this attempt.
+      size_t fail_index;
+      // Number of allocations observed in this attempt.
+      size_t count = 0;
+    } allocator = {graph->arena_allocator, 0};
+    const uint32_t value = 37;
+    size_t rejected = 0;
+    for (;; ++allocator.fail_index) {
+      iree_hal_streaming_buffer_t* staging = nullptr;
+      IREE_ASSERT_OK(iree_hal_streaming_graph_allocate_host_staging(
+          graph, sizeof(value), &staging));
+      memcpy(staging->host_ptr, &value, sizeof(value));
+      const auto staging_pointer = staging->device_ptr;
+      allocator.count = 0;
+      graph->arena_allocator = {
+          .self = &allocator,
+          .ctl =
+              +[](void* self, iree_allocator_command_t command,
+                  const void* parameters, void** pointer) {
+                auto* state = static_cast<NodeAllocator*>(self);
+                if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+                    state->count++ == state->fail_index) {
+                  return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+                }
+                return state->arena.ctl(state->arena.self, command, parameters,
+                                        pointer);
+              },
+      };
+      iree_hal_streaming_graph_node_t* prepare = nullptr;
+      iree_hal_streaming_graph_node_t* copy = nullptr;
+      iree_hal_streaming_graph_node_t* complete = nullptr;
+      iree_status_t status = iree_hal_streaming_graph_add_host_call_node(
+          graph, nullptr, 0, increment, &calls[0], &prepare);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_streaming_graph_add_copy_ptr_node(
+            graph, &prepare, 1, destination->device_ptr, staging_pointer,
+            sizeof(value), &copy);
+      }
+      if (iree_status_is_ok(status)) {
+        iree_hal_streaming_graph_attach_copy_callback(copy, prepare, false);
+        status = iree_hal_streaming_graph_add_host_call_node(
+            graph, &copy, 1, increment, &calls[1], &complete);
+      }
+      graph->arena_allocator = allocator.arena;
+      if (iree_status_is_ok(status)) {
+        iree_hal_streaming_graph_attach_copy_callback(copy, complete, true);
+        break;
+      }
+      IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+      ++rejected;
+      iree_hal_streaming_graph_rollback_copy(graph, checkpoint);
+      EXPECT_EQ(graph->node_count, checkpoint.node_count);
+      EXPECT_EQ(graph->root_count, checkpoint.root_count);
+      EXPECT_EQ(graph->copy_helper_count, checkpoint.helper_count);
+      EXPECT_EQ(graph->owned_host_allocations, checkpoint.allocations);
+      iree_hal_streaming_buffer_ref_t ref;
+      EXPECT_FALSE(iree_hal_streaming_memory_try_lookup(context_,
+                                                        staging_pointer, &ref));
+    }
+    EXPECT_GE(rejected, 3u);
+    IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+        graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+    iree_hal_streaming_graph_exec_launch_result_t result;
+    IREE_ASSERT_OK(
+        iree_hal_streaming_graph_exec_launch(executable, stream_, &result));
+    IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    uint32_t actual = 0;
+    memcpy(&actual, destination->host_ptr, sizeof(actual));
+    EXPECT_EQ(value, actual);
+    EXPECT_EQ(calls, (std::array<int, 2>{1, 1}));
+  }
+}
+
 TEST_F(GraphExecTest, ParallelWorkstreamsCarryBothLaunchBoundaries) {
   for (const size_t fill_count : {size_t{1}, size_t{64}}) {
     for (const bool append_barrier : {false, true}) {

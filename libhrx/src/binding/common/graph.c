@@ -292,6 +292,42 @@ void iree_hal_streaming_graph_discard_host_staging(
   iree_hal_streaming_memory_release_wrapped_buffer(buffer);
 }
 
+void iree_hal_streaming_graph_rollback_copy(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_copy_checkpoint_t checkpoint) {
+  if (graph->node_count != checkpoint.node_count) {
+    iree_host_size_t remaining = checkpoint.node_count;
+    for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
+         block = block->next) {
+      const iree_host_size_t keep_count = iree_min(remaining, block->count);
+      remaining -= keep_count;
+      for (iree_host_size_t i = keep_count; i < block->count; ++i) {
+        iree_hal_streaming_graph_node_t* node = block->nodes[i];
+        IREE_ASSERT(node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY ||
+                    node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL);
+        node->graph = NULL;
+        node->dependency_count = 0;
+      }
+      block->count = keep_count;
+    }
+    graph->node_count = checkpoint.node_count;
+    graph->copy_helper_count = checkpoint.helper_count;
+
+    remaining = checkpoint.root_count;
+    for (iree_hal_streaming_node_block_t* block = graph->root_blocks; block;
+         block = block->next) {
+      const iree_host_size_t keep_count = iree_min(remaining, block->count);
+      remaining -= keep_count;
+      block->count = keep_count;
+    }
+    graph->root_count = checkpoint.root_count;
+  }
+  while (graph->owned_host_allocations != checkpoint.allocations) {
+    iree_hal_streaming_graph_discard_host_staging(
+        graph, graph->owned_host_allocations->buffer);
+  }
+}
+
 void iree_hal_streaming_graph_retain(iree_hal_streaming_graph_t* graph) {
   if (graph) {
     iree_atomic_ref_count_inc(&graph->ref_count);
