@@ -1902,30 +1902,23 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
     IREE_TRACE_ZONE_END(z0);
     return iree_ok_status();
   }
+  const uint16_t final_stream_count =
+      schedule.partitions[schedule.partition_count - 1].stream_count;
+  const bool needs_final_join = final_stream_count > 1;
+  exec->block_count += needs_final_join ? 1 : 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_arena_allocate(&exec->arena_allocator,
                               exec->block_count * sizeof(*exec->blocks),
                               (void**)&exec->blocks));
   memset(exec->blocks, 0, exec->block_count * sizeof(*exec->blocks));
 
-  // Calculate semaphore count needed.
-  // We need semaphores at partition boundaries for synchronization.
-  // Multi-stream partitions need join semaphores.
-  //
-  // This currently allocates semaphores per block boundary. A future
-  // optimization can reduce this to the maximum layer size by advancing
-  // timeline values between partitions.
+  // Every workstream signals a point joined by the next partition. Parallel
+  // terminal workstreams also signal points joined by the completion barrier.
+  const iree_host_size_t signaling_partition_count =
+      schedule.partition_count - (needs_final_join ? 0 : 1);
   uint32_t semaphore_count = 0;
-  if (schedule.partition_count > 1) {
-    for (iree_host_size_t i = 0; i < schedule.partition_count - 1; i++) {
-      if (schedule.partitions[i].stream_count > 1) {
-        // Multi-stream partition needs one semaphore per stream for join.
-        semaphore_count += schedule.partitions[i].stream_count;
-      } else {
-        // Single stream needs one semaphore.
-        semaphore_count += 1;
-      }
-    }
+  for (iree_host_size_t i = 0; i < signaling_partition_count; ++i) {
+    semaphore_count += schedule.partitions[i].stream_count;
   }
   exec->semaphore_count = semaphore_count;
 
@@ -1991,11 +1984,11 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
     // Determine signal semaphores for chaining TO the next partition.
     // Each partition gets at least one signal semaphore while multi-stream
     // partitions get one per stream to allow the subsequent partition to join
-    // them. The final partition signals the original submission stream timeline
-    // semaphores. Note that we don't allocate space for the final semaphores as
-    // those are part of the submission, not the exec object.
+    // them. A single-workstream final partition signals the caller directly;
+    // parallel final workstreams signal the compiled join instead. External
+    // signals are supplied by the caller, not stored in the compiled block.
     uint16_t signal_semaphore_count = 0;
-    if (p < schedule.partition_count - 1) {
+    if (p < schedule.partition_count - 1 || needs_final_join) {
       signal_semaphore_count =
           partition->stream_count > 1 ? partition->stream_count : 1;
     }
@@ -2174,6 +2167,21 @@ iree_status_t iree_hal_streaming_graph_exec_compile(
       semaphore_index += signal_semaphore_count;
       exec->blocks[block_index++] = block;
     }
+  }
+  if (needs_final_join) {
+    // Each terminal workstream signals its own point. Only this join publishes
+    // the external completion, so the launch cannot retire a partial result.
+    iree_hal_streaming_graph_block_t* block = NULL;
+    iree_hal_streaming_graph_block_ptrs_t ptrs;
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_streaming_graph_create_barrier_block(
+                exec, 0, 0, final_stream_count, 0,
+                IREE_HAL_QUEUE_BARRIER_FLAG_NONE, &block, &ptrs));
+    for (uint16_t i = 0; i < final_stream_count; ++i) {
+      ptrs.wait_semaphore_indices[i] = semaphore_index - final_stream_count + i;
+      ptrs.wait_payload_deltas[i] = 1;
+    }
+    exec->blocks[block_index++] = block;
   }
   exec->block_count = block_index;
 
@@ -2431,19 +2439,16 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
     iree_hal_streaming_accepted_signal_list_t* accepted_signals) {
   if (block->type == IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH) {
     iree_hal_streaming_graph_exec_t* child_exec = ptrs->attrs->child_graph.exec;
-    // Only the child's block 0 carries this block's waits, which are
-    // themselves behind the launch tail; a record inside the child sits in a
-    // single-block partition that either is block 0 or chains back to it, so
-    // the tail carries down unchanged. The shared accepted list includes every
-    // actual child submission if a later child block rejects.
+    // Every child entry block carries this block's waits, so the launch tail
+    // carries down unchanged. The shared accepted list includes every actual
+    // child submission if a later child block rejects.
     return iree_hal_streaming_graph_exec_submit_blocks_locked(
         child_exec, stream, queue, cooperative_queue, launch_stream_tail_value,
         wait_semaphores, signal_semaphores, dropped_graphs, accepted_signals);
   }
-  if (IREE_UNLIKELY(signal_semaphores.count == 0)) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "graph block signals no timeline value");
-  }
+  // Compilation gives every block a completion, joining parallel exits before
+  // publishing the external signal. Failure cleanup relies on that proof.
+  IREE_ASSERT(signal_semaphores.count > 0);
 
   // Claim storage before the queue call so an accepted operation always has a
   // terminal signal the launch can drain if a later block rejects.
@@ -2539,12 +2544,9 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
 }
 
 // |launch_stream_tail_value| is the value on |stream|'s timeline that the whole
-// launch waits behind, or 0 when the stream had never submitted. Only block 0
-// carries the launch's external waits, and the extra workstream blocks of the
-// first partition wait on nothing, so a block is behind the tail only when it
-// chains back to block 0. An event record node is never recordable and so gets
-// a partition of its own holding a single block, which either is block 0 or
-// waits on every signal of the partition ahead of it, back to block 0.
+// launch waits behind, or 0 when the stream had never submitted. Every block
+// in the first partition carries the external waits. Subsequent partitions
+// join every workstream in their predecessor, including the final completion.
 static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_stream_t* stream,
     iree_hal_queue_t* queue, iree_hal_queue_t* cooperative_queue,
@@ -2622,9 +2624,10 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
         block->type == IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_WAIT;
     const bool block_records_event =
         block->type == IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD;
+    const bool is_entry_block = block->wait_semaphore_count == 0;
     const iree_host_size_t total_wait_count =
         block->wait_semaphore_count +
-        (block_index == 0 ? external_wait_semaphores.count : 0) +
+        (is_entry_block ? external_wait_semaphores.count : 0) +
         (block_waits_event ? 1 : 0);
     const iree_host_size_t total_signal_count =
         block->signal_semaphore_count + (block_index == exec->block_count - 1
@@ -2686,7 +2689,7 @@ static iree_status_t iree_hal_streaming_graph_exec_submit_blocks_locked(
     uint64_t* signal_vals = value_array ? value_array + total_wait_count : NULL;
 
     iree_host_size_t wait_count = 0;
-    if (block_index == 0) {
+    if (is_entry_block) {
       for (iree_host_size_t i = 0; i < external_wait_semaphores.count; ++i) {
         wait_sems[wait_count] = external_wait_semaphores.semaphores[i];
         wait_vals[wait_count] = external_wait_semaphores.payload_values[i];

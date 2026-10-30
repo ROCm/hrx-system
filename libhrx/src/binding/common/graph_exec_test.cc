@@ -12,6 +12,7 @@
 #include <semaphore>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "common/context.h"
 #include "common/device.h"
@@ -378,6 +379,109 @@ iree_hal_queue_t* ReplaceGraphExecTestQueue(iree_hal_streaming_stream_t* stream,
   return previous;
 }
 
+// Observes submitted graph boundaries while the real task queue executes them.
+struct GraphBoundaryQueue {
+  // Queue interface borrowed by the launch stream during observation.
+  iree_hal_queue_t base;
+  // Retained execution target.
+  iree_hal_queue_t* target = nullptr;
+  // Stream predecessor that every initial workstream must wait for.
+  std::pair<iree_hal_semaphore_t*, uint64_t> predecessor;
+  // Actual completion points supplied to the independent workstreams.
+  std::vector<std::pair<iree_hal_semaphore_t*, uint64_t>> completions;
+  // True after a barrier joins all observed workstream completions.
+  bool joined = false;
+};
+
+GraphBoundaryQueue* CastGraphBoundaryQueue(iree_hal_queue_t* queue) {
+  return reinterpret_cast<GraphBoundaryQueue*>(queue);
+}
+
+void DestroyGraphBoundaryQueue(iree_hal_queue_t* base_queue) {
+  iree_hal_queue_release(CastGraphBoundaryQueue(base_queue)->target);
+}
+
+bool ContainsPoint(iree_hal_semaphore_list_t points,
+                   std::pair<iree_hal_semaphore_t*, uint64_t> expected) {
+  for (iree_host_size_t i = 0; i < points.count; ++i) {
+    if (points.semaphores[i] == expected.first &&
+        points.payload_values[i] == expected.second) {
+      return true;
+    }
+  }
+  return false;
+}
+
+iree_status_t GraphBoundaryQueueExecute(
+    iree_hal_queue_t* base_queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals,
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t binding_table,
+    iree_hal_queue_execute_flags_t flags) {
+  auto* queue = CastGraphBoundaryQueue(base_queue);
+  EXPECT_TRUE(ContainsPoint(waits, queue->predecessor));
+  EXPECT_GT(signals.count, 0u);
+  if (signals.count) {
+    queue->completions.emplace_back(signals.semaphores[0],
+                                    signals.payload_values[0]);
+  }
+  return iree_hal_queue_execute(queue->target, waits, signals, command_buffer,
+                                binding_table, flags);
+}
+
+iree_status_t GraphBoundaryQueueBarrier(
+    iree_hal_queue_t* base_queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals,
+    const iree_hal_queue_barriers_t* barriers,
+    iree_hal_queue_barrier_flags_t flags) {
+  auto* queue = CastGraphBoundaryQueue(base_queue);
+  EXPECT_FALSE(queue->completions.empty());
+  EXPECT_EQ(queue->completions.size(), waits.count);
+  for (const auto& completion : queue->completions) {
+    EXPECT_TRUE(ContainsPoint(waits, completion));
+  }
+  EXPECT_TRUE(ContainsPoint(
+      signals, {queue->predecessor.first, queue->predecessor.second + 1}));
+  queue->joined = true;
+  return iree_hal_queue_barrier(queue->target, waits, signals, barriers, flags);
+}
+
+iree_status_t GraphBoundaryQueueFlush(iree_hal_queue_t* base_queue) {
+  return iree_hal_queue_flush(CastGraphBoundaryQueue(base_queue)->target);
+}
+
+const iree_hal_queue_vtable_t kGraphBoundaryQueueVtable = {
+    .destroy = DestroyGraphBoundaryQueue,
+    .barrier = GraphBoundaryQueueBarrier,
+    .execute = GraphBoundaryQueueExecute,
+    .host_call = nullptr,
+    .query_dispatch_concurrency = nullptr,
+    .dispatch = nullptr,
+    .atomic_wait = nullptr,
+    .atomic_store = nullptr,
+    .atomic_rmw = nullptr,
+    .timestamp = nullptr,
+    .flush = GraphBoundaryQueueFlush,
+    .alloca = nullptr,
+    .dealloca = nullptr,
+    .transfer = nullptr,
+    .read = nullptr,
+    .write = nullptr,
+};
+
+void InitializeGraphBoundaryQueue(iree_hal_queue_t* target,
+                                  GraphBoundaryQueue* queue) {
+  queue->target = target;
+  iree_hal_queue_retain(target);
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  params.priority = iree_hal_queue_priority(target);
+  params.features = iree_hal_queue_features(target);
+  params.execution_resources = iree_hal_queue_execution_resources(target);
+  iree_hal_queue_initialize(iree_hal_queue_family(target), &params,
+                            &kGraphBoundaryQueueVtable, &queue->base);
+}
+
 // Runs streaming graph launches against the host CPU device. Launches take the
 // same block submit path they take on an accelerator; the event records they
 // enqueue resolve to queue barriers because the device advertises no timestamp
@@ -469,6 +573,76 @@ class GraphExecTest : public ::testing::Test {
   // pending as the test body returns.
   std::atomic<bool> stream_marker_ran_{false};
 };
+
+TEST_F(GraphExecTest, ParallelWorkstreamsCarryBothLaunchBoundaries) {
+  for (const size_t fill_count : {size_t{1}, size_t{64}}) {
+    for (const bool append_barrier : {false, true}) {
+      SCOPED_TRACE(fill_count);
+      SCOPED_TRACE(append_barrier);
+      iree_hal_streaming_graph_t* graph = nullptr;
+      iree_hal_streaming_graph_exec_t* executable = nullptr;
+      GraphBoundaryQueue queue;
+      InitializeGraphBoundaryQueue(stream_->queue, &queue);
+      auto* original_queue = ReplaceGraphExecTestQueue(stream_, &queue.base);
+      ScopeExit release_handles([&] {
+        IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+        ReplaceGraphExecTestQueue(stream_, original_queue);
+        iree_hal_queue_release(&queue.base);
+        iree_hal_streaming_graph_exec_release(executable);
+        iree_hal_streaming_graph_release(graph);
+      });
+      IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+          context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+          &graph));
+      iree_hal_streaming_buffer_t* storage = nullptr;
+      IREE_ASSERT_OK(iree_hal_streaming_graph_allocate_host_staging(
+          graph, fill_count, &storage));
+      std::vector<iree_hal_streaming_graph_node_t*> fills(fill_count);
+      for (size_t i = 0; i < fill_count; ++i) {
+        IREE_ASSERT_OK(iree_hal_streaming_graph_add_fill_ptr_node(
+            graph, nullptr, 0, storage->device_ptr + i,
+            static_cast<uint32_t>(i + 1), 1, 1, &fills[i]));
+      }
+      if (append_barrier) {
+        IREE_ASSERT_OK(iree_hal_streaming_graph_add_empty_node(
+            graph, fills.data(), fills.size(), nullptr));
+      }
+      IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+          graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+      for (int replay = 0; replay < 2; ++replay) {
+        memset(storage->host_ptr, 0, fill_count);
+        queue.predecessor = {stream_->timeline_semaphore,
+                             stream_->pending_value};
+        queue.completions.clear();
+        queue.joined = false;
+        // The first graph also has a real predecessor; no queue-ordering
+        // assumption is allowed even when its timeline has already completed.
+        if (queue.predecessor.second == 0) {
+          ReplaceGraphExecTestQueue(stream_, original_queue);
+          IREE_ASSERT_OK(iree_hal_streaming_launch_host_function(
+              stream_, SetFlag, &stream_marker_ran_));
+          ReplaceGraphExecTestQueue(stream_, &queue.base);
+          queue.predecessor.second = stream_->pending_value;
+        }
+        iree_hal_streaming_graph_exec_launch_result_t result;
+        IREE_ASSERT_OK(
+            iree_hal_streaming_graph_exec_launch(executable, stream_, &result));
+        EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS, result);
+        IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+        EXPECT_EQ(fill_count > 1 || append_barrier, queue.joined);
+        if (fill_count > 1) {
+          EXPECT_GT(queue.completions.size(), 1u);
+        } else {
+          EXPECT_EQ(1u, queue.completions.size());
+        }
+        const auto* bytes = static_cast<const uint8_t*>(storage->host_ptr);
+        for (size_t i = 0; i < fill_count; ++i) {
+          EXPECT_EQ(i + 1, bytes[i]);
+        }
+      }
+    }
+  }
+}
 
 TEST_F(GraphExecTest,
        HostOperationFailureStopsDependentsAndPreservesOtherStreams) {

@@ -66,6 +66,10 @@ struct HipGraphApi {
   decltype(&hipGraphAddMemFreeNode) add_free = nullptr;
   // Adds a pitched multidimensional graph copy.
   decltype(&hipGraphAddMemcpyNode) add_copy = nullptr;
+  // Adds a fill that can execute independently of other graph roots.
+  decltype(&hipGraphAddMemsetNode) add_fill = nullptr;
+  // Adds an explicit join after a set of independent operations.
+  decltype(&hipGraphAddEmptyNode) add_empty = nullptr;
   // Updates a template's contiguous copy parameters.
   decltype(&hipGraphMemcpyNodeSetParams1D) set_copy = nullptr;
   // Updates only one compiled graph's contiguous copy parameters.
@@ -137,6 +141,8 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     RESOLVE(add_allocation, "hipGraphAddMemAllocNode");
     RESOLVE(add_free, "hipGraphAddMemFreeNode");
     RESOLVE(add_copy, "hipGraphAddMemcpyNode");
+    RESOLVE(add_fill, "hipGraphAddMemsetNode");
+    RESOLVE(add_empty, "hipGraphAddEmptyNode");
     RESOLVE(set_copy, "hipGraphMemcpyNodeSetParams1D");
     RESOLVE(set_executable_copy, "hipGraphExecMemcpyNodeSetParams1D");
     RESOLVE(update_executable, "hipGraphExecUpdate");
@@ -277,6 +283,46 @@ class HipGraphMemoryApiTest : public ::testing::Test {
 
 hrx::hip::testing::HipDso HipGraphMemoryApiTest::dso_;
 HipGraphApi HipGraphMemoryApiTest::api_;
+
+TEST_F(HipGraphMemoryApiTest, IndependentFillsJoinBeforeGraphCompletion) {
+  ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
+  std::array<hipGraphNode_t, 64> fills = {};
+  for (size_t i = 0; i < fills.size(); ++i) {
+    const hipMemsetParams params = {
+        .dst = static_cast<uint8_t*>(device_) + i,
+        .elementSize = 1,
+        .height = 1,
+        .pitch = 0,
+        .value = static_cast<unsigned int>(i + 1),
+        .width = 1,
+    };
+    ASSERT_EQ(hipSuccess,
+              api_.add_fill(&fills[i], graph_, nullptr, 0, &params));
+  }
+  for (const bool explicit_join : {false, true}) {
+    SCOPED_TRACE(explicit_join);
+    if (explicit_join) {
+      hipGraphNode_t join = nullptr;
+      ASSERT_EQ(hipSuccess,
+                api_.add_empty(&join, graph_, fills.data(), fills.size()));
+    }
+    ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+    for (int replay = 0; replay < 2; ++replay) {
+      destination_.fill(0);
+      ASSERT_EQ(hipSuccess, api_.copy_async(device_, destination_.data(),
+                                            destination_.size(),
+                                            hipMemcpyHostToDevice, stream_));
+      Replay();
+      ASSERT_FALSE(HasFatalFailure());
+      ASSERT_EQ(hipSuccess,
+                api_.copy(destination_.data(), device_, destination_.size(),
+                          hipMemcpyDeviceToHost));
+      EXPECT_EQ(source_, destination_);
+    }
+    ASSERT_EQ(hipSuccess, api_.executable_destroy(executable_));
+    executable_ = nullptr;
+  }
+}
 
 TEST_F(HipGraphMemoryApiTest, HostCopyCloneOwnsItsParameters) {
   hipGraphNode_t node = nullptr;
