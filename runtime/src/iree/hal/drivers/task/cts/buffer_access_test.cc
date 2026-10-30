@@ -203,6 +203,71 @@ TEST_P(TaskBufferAccessTest, DirectionalStorageBindings) {
   }
 }
 
+TEST_P(TaskBufferAccessTest, TimestampedDispatch) {
+  auto* queue = QueueForCommandCategories(IREE_HAL_COMMAND_CATEGORY_DISPATCH |
+                                          IREE_HAL_COMMAND_CATEGORY_TRANSFER);
+  ASSERT_NE(queue, nullptr);
+  const std::array<float, 4> inputs[] = {{1.0f, 2.0f, 3.0f, 4.0f},
+                                         {100.0f, 200.0f, 300.0f, 400.0f}};
+  Ref<iree_hal_buffer_t> buffers[4];
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(inputs); ++i) {
+    IREE_ASSERT_OK(CreateDeviceBufferWithData(
+        inputs[i].data(), sizeof(inputs[i]), buffers[i].out()));
+  }
+  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(sizeof(inputs[0]), buffers[2].out()));
+  IREE_ASSERT_OK(
+      CreateFilledDeviceBuffer<uint32_t>(32, UINT32_MAX, buffers[3].out()));
+  for (bool indirect : {false, true}) {
+    SCOPED_TRACE(indirect);
+    Ref<iree_hal_command_buffer_t> command_buffer;
+    IREE_ASSERT_OK(iree_hal_command_buffer_create(
+        iree_hal_queue_family(queue), 0,
+        IREE_HAL_COMMAND_CATEGORY_DISPATCH | IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+        indirect ? 4 : 0, command_buffer.out()));
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+    iree_hal_buffer_ref_t refs[4];
+    iree_hal_buffer_binding_t entries[4];
+    for (uint32_t i = 0; i < IREE_ARRAYSIZE(refs); ++i) {
+      const auto length = iree_hal_buffer_byte_length(buffers[i]);
+      refs[i] = indirect ? iree_hal_make_indirect_buffer_ref(i, 0, length)
+                         : iree_hal_make_buffer_ref(buffers[i], 0, length);
+      entries[i] = {buffers[i], 0, length};
+    }
+    auto timestamp = refs[3];
+    timestamp.offset = 8;
+    timestamp.length = 8;
+    IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+        command_buffer, 0, IREE_HAL_EXECUTION_STAGE_DISPATCH, timestamp, 0));
+    IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+        command_buffer, executable_, iree_hal_executable_function_from_index(0),
+        iree_hal_make_static_dispatch_config(1, 1, 1),
+        iree_const_byte_span_empty(), {3, refs}, IREE_HAL_DISPATCH_FLAG_NONE));
+    timestamp.offset = 16;
+    IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+        command_buffer, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, timestamp, 0));
+    const iree_hal_barrier_t publish = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH |
+                             IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(command_buffer, &publish));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+    IREE_ASSERT_OK(SubmitCommandBufferAndWait(
+        command_buffer, {indirect ? 4u : 0u, indirect ? entries : nullptr}));
+    EXPECT_THAT(ReadBufferData<float>(buffers[2]),
+                ::testing::ElementsAre(100.0f, 400.0f, 900.0f, 1600.0f));
+    const auto ticks = ReadBufferData<uint64_t>(buffers[3]);
+    ASSERT_EQ(ticks.size(), 4u);
+    EXPECT_EQ(ticks[0], UINT64_MAX);
+    EXPECT_EQ(ticks[3], UINT64_MAX);
+    EXPECT_NE(ticks[1], UINT64_MAX);
+    EXPECT_NE(ticks[2], UINT64_MAX);
+    EXPECT_LE(ticks[1], ticks[2]);
+  }
+}
+
 // Releases a deliberately parked allocation even when a recording assertion
 // fails, so fixture teardown can drain the queue's retained operations.
 class AllocationGate {

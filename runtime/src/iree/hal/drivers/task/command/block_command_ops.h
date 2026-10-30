@@ -145,8 +145,13 @@ iree_status_t iree_hal_cmd_build_cache(
     iree_hal_cmd_build_token_t* out_token);
 
 //===----------------------------------------------------------------------===//
-// ATOMIC
+// Scalar commands
 //===----------------------------------------------------------------------===//
+
+// Builds a timestamp write with one target fixup for the caller to resolve.
+iree_status_t iree_hal_cmd_build_timestamp(
+    iree_hal_cmd_block_builder_t* builder, iree_hal_cmd_fixup_t** out_fixups,
+    iree_hal_cmd_build_token_t* out_token);
 
 // Builds a one-tile ATOMIC_WAIT command into the builder.
 //

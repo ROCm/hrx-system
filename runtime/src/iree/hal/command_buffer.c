@@ -401,6 +401,52 @@ iree_hal_command_buffer_barrier(iree_hal_command_buffer_t* command_buffer,
   return status;
 }
 
+IREE_API_EXPORT iree_status_t iree_hal_command_buffer_timestamp(
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask,
+    iree_hal_buffer_ref_t target_ref, iree_hal_timestamp_flags_t flags) {
+  IREE_ASSERT_ARGUMENT(command_buffer);
+  if (IREE_UNLIKELY(flags != IREE_HAL_TIMESTAMP_FLAG_NONE)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported timestamp flags: 0x%016" PRIx64,
+                            flags);
+  }
+  const iree_hal_execution_stage_t supported_stages =
+      IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE |
+      IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS |
+      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER |
+      IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE | IREE_HAL_EXECUTION_STAGE_ATOMIC;
+  if (IREE_UNLIKELY((source_stage_mask | target_stage_mask) &
+                    ~supported_stages)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported timestamp execution stage");
+  }
+  const iree_hal_queue_family_spec_t* family_spec =
+      iree_hal_queue_family_spec(command_buffer->queue_family);
+  const iree_hal_queue_family_spec_flags_t required_capability =
+      target_ref.buffer
+          ? IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS
+          : IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS;
+  if (IREE_UNLIKELY(
+          !iree_all_bits_set(family_spec->flags, required_capability))) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "queue family does not support %s command timestamps",
+        target_ref.buffer ? "direct" : "indirect");
+  }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  IF_VALIDATING(command_buffer, {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_hal_command_buffer_timestamp_validation(
+                command_buffer, VALIDATION_STATE(command_buffer), target_ref));
+  });
+  iree_status_t status = _VTABLE_DISPATCH(command_buffer, timestamp)(
+      command_buffer, source_stage_mask, target_stage_mask, target_ref, flags);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 IREE_API_EXPORT iree_status_t iree_hal_command_buffer_atomic_wait(
     iree_hal_command_buffer_t* command_buffer,
     iree_hal_execution_stage_t source_stage_mask,

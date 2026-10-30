@@ -1507,6 +1507,8 @@ const char* iree_profile_command_operation_type_name(
       return "atomic_store";
     case IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_ATOMIC_RMW:
       return "atomic_rmw";
+    case IREE_HAL_PROFILE_COMMAND_OPERATION_TYPE_TIMESTAMP:
+      return "timestamp";
     default:
       return "unknown";
   }

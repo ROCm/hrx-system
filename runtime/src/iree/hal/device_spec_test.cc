@@ -159,7 +159,9 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
                     IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
       .atomic_capabilities = {},
       .zero_compute_atomic_capabilities = {},
-      .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION,
+      .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION |
+               IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS |
+               IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS,
   };
   out_queue_families[0].atomic_capabilities.operations.device_scope_32 =
       IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
@@ -444,9 +446,11 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   }
   EXPECT_EQ(parsed_family->supported_queue_features,
             IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH);
-  EXPECT_TRUE(
-      iree_all_bits_set(parsed_family->flags,
-                        IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION));
+  EXPECT_TRUE(iree_all_bits_set(
+      parsed_family->flags,
+      IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION |
+          IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS |
+          IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS));
   EXPECT_EQ(parsed_family->atomic_capabilities.wait_conditions.device_scope_32,
             IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_EQUAL |
                 IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NOT_EQUAL);
@@ -461,6 +465,56 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   iree_allocator_free(iree_allocator_system(), reparsed_serialized_bytes.data);
   iree_allocator_free(iree_allocator_system(), serialized_bytes.data);
   iree_hal_device_spec_release(spec);
+}
+
+TEST(DeviceSpecTest, CommandTimestampCapabilitiesRequireClock) {
+  constexpr auto direct = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS;
+  constexpr auto indirect =
+      IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS;
+  const iree_hal_queue_priority_t priority = IREE_HAL_QUEUE_PRIORITY_NORMAL;
+  const struct {
+    // Advertised timestamp capabilities.
+    iree_hal_queue_family_spec_flags_t flags;
+    // Number of meaningful clock bits.
+    uint32_t valid_bits;
+    // Clock rate in ticks per second.
+    uint64_t frequency_hz;
+    // Whether this describes an implementable command timestamp contract.
+    bool valid;
+  } cases[] = {
+      {0, 0, 0, true},
+      {direct, 64, 1000000000, true},
+      {direct | indirect, 32, 100000000, true},
+      {indirect, 64, 1000000000, false},
+      {direct, 0, 1000000000, false},
+      {direct, 65, 1000000000, false},
+      {direct, 64, 0, false},
+  };
+  for (const auto& test : cases) {
+    SCOPED_TRACE(::testing::Message() << test.flags << "/" << test.valid_bits
+                                      << "/" << test.frequency_hz);
+    const iree_hal_queue_family_spec_t family = {
+        .name = IREE_SV("timestamp"),
+        .priority_count = 1,
+        .priorities = &priority,
+        .timestamp_valid_bits = test.valid_bits,
+        .timestamp_frequency_hz = test.frequency_hz,
+        .physical_device_affinity = 1,
+        .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
+        .flags = test.flags,
+    };
+    const iree_hal_device_queue_spec_t queues = {
+        .family_count = 1,
+        .families = &family,
+    };
+    const iree_hal_device_spec_params_t params = {.queues = &queues};
+    iree_hal_device_spec_t* spec = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        test.valid ? IREE_STATUS_OK : IREE_STATUS_INVALID_ARGUMENT,
+        iree_hal_device_spec_create(&params, iree_allocator_system(), &spec));
+    EXPECT_EQ(spec != nullptr, test.valid);
+    iree_hal_device_spec_release(spec);
+  }
 }
 
 TEST(DeviceSpecTest, ValidatesHostPublicationRequirements) {

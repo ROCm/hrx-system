@@ -292,11 +292,15 @@ IREE_API_EXPORT iree_status_t iree_hal_task_device_spec_create(
           },
       .physical_device_affinity = 1ull,
       .role_flags = queue_role_flags,
+      .timestamp_frequency_hz = 1000000000ull,
+      .timestamp_valid_bits = 64,
       .atomic_capabilities = params->atomic_capabilities,
       .zero_compute_atomic_capabilities =
           params->zero_compute_atomic_capabilities,
       .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION |
-               IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_HOST_MEMORY_BARRIERS,
+               IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_HOST_MEMORY_BARRIERS |
+               IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS |
+               IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS,
   };
   iree_hal_device_queue_spec_t queues = {
       .family_count = 1,
