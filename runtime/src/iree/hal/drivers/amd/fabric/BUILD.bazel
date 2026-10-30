@@ -293,6 +293,21 @@ iree_runtime_cc_benchmark(
 )
 
 iree_runtime_cc_library(
+    name = "memory_transition_plan",
+    srcs = ["memory_transition_plan.c"],
+    hdrs = ["memory_transition_plan.h"],
+    deps = [
+        ":memory",
+        ":memory_transition",
+        ":slab_provider",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd:status",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "memory_backend",
     srcs = [
         "memory_backend.c",
@@ -306,7 +321,7 @@ iree_runtime_cc_library(
         ":asan_support",
         ":mapping_index",
         ":memory",
-        ":memory_transition",
+        ":memory_transition_plan",
         ":slab_provider",
         "//libamdf:headers",
         "//runtime/src/iree/async",

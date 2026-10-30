@@ -279,12 +279,51 @@ struct FakeNative {
 
   static void CheckDeviceSite(const amdf_memory_profile_pair_query_t* query,
                               const amdf_memory_profile_site_t& site) {
-    ASSERT_EQ(site.kind, AMDF_MEMORY_SITE_KIND_DEVICE);
-    ASSERT_LT(site.value.device.access_ordinal, query->access_count);
-    const auto* device = reinterpret_cast<const Device*>(
-        query->accesses[site.value.device.access_ordinal].device);
-    EXPECT_EQ(site.value.device.queue_family_ordinal,
-              device->owner->queue_family_ordinals[device->ordinal]);
+    ASSERT_TRUE(site.kind == AMDF_MEMORY_SITE_KIND_DEVICE ||
+                site.kind == AMDF_MEMORY_SITE_KIND_PROGRAM);
+    const uint32_t ordinal = site.kind == AMDF_MEMORY_SITE_KIND_PROGRAM
+                                 ? site.value.program.access_ordinal
+                                 : site.value.device.access_ordinal;
+    ASSERT_LT(ordinal, query->access_count);
+    if (site.kind == AMDF_MEMORY_SITE_KIND_DEVICE) {
+      const auto* device =
+          reinterpret_cast<const Device*>(query->accesses[ordinal].device);
+      EXPECT_EQ(site.value.device.queue_family_ordinal,
+                device->owner->queue_family_ordinals[device->ordinal]);
+    }
+  }
+
+  // Native transaction facts for one issuer. The HAL owns recipe composition.
+  static amdf_memory_atomic_capabilities_t AtomicOperations(
+      const FakeNative* self, const amdf_memory_profile_pair_query_t* query,
+      const amdf_memory_profile_site_t& site) {
+    if (site.kind == AMDF_MEMORY_SITE_KIND_HOST) {
+      const auto operations = AMDF_ATOMIC_OPERATION_LOAD |
+                              AMDF_ATOMIC_OPERATION_WAIT |
+                              AMDF_ATOMIC_OPERATION_STORE;
+      return {.system_scope_32 = operations, .system_scope_64 = operations};
+    }
+    const uint32_t ordinal = site.kind == AMDF_MEMORY_SITE_KIND_PROGRAM
+                                 ? site.value.program.access_ordinal
+                                 : site.value.device.access_ordinal;
+    const auto* device =
+        reinterpret_cast<const Device*>(query->accesses[ordinal].device);
+    const bool registered =
+        query->memory_profile_ordinal == 1 && self->registration_enabled;
+    if (site.kind == AMDF_MEMORY_SITE_KIND_PROGRAM) {
+      return registered ? self->registration_program_atomics[device->ordinal]
+                        : self->program_atomics[device->ordinal];
+    }
+    const auto& operations = registered
+                                 ? self->registration_atomics[device->ordinal]
+                                 : self->atomics[device->ordinal];
+    const auto reach = self->atomic_reach[device->ordinal];
+    return {
+        .system_scope_32 =
+            reach.scope_32 == AMDF_ATOMIC_SCOPE_SYSTEM ? operations[0] : 0,
+        .system_scope_64 =
+            reach.scope_64 == AMDF_ATOMIC_SCOPE_SYSTEM ? operations[1] : 0,
+    };
   }
 
   static amdf_status_t AMDF_CALL
@@ -331,6 +370,31 @@ struct FakeNative {
       const auto* device = reinterpret_cast<const Device*>(
           query->accesses[query->producer.value.device.access_ordinal].device);
       out_info->atomic_reach = self->atomic_reach[device->ordinal];
+    }
+    if (out_info->next) {
+      auto* pair = static_cast<amdf_memory_pair_atomics_t*>(out_info->next);
+      EXPECT_EQ(pair->type, AMDF_STRUCTURE_TYPE_MEMORY_PAIR_ATOMICS);
+      auto producer = AtomicOperations(self, query, query->producer);
+      auto consumer = AtomicOperations(self, query, query->consumer);
+      const bool same_program_device =
+          query->producer.kind == AMDF_MEMORY_SITE_KIND_PROGRAM &&
+          query->consumer.kind == AMDF_MEMORY_SITE_KIND_PROGRAM &&
+          query->producer.value.program.access_ordinal ==
+              query->consumer.value.program.access_ordinal;
+      if (!same_program_device) {
+        producer.device_scope_32 = producer.device_scope_64 = 0;
+        consumer.device_scope_32 = consumer.device_scope_64 = 0;
+      }
+      for (auto cell : {&amdf_memory_atomic_capabilities_t::device_scope_32,
+                        &amdf_memory_atomic_capabilities_t::device_scope_64,
+                        &amdf_memory_atomic_capabilities_t::system_scope_32,
+                        &amdf_memory_atomic_capabilities_t::system_scope_64}) {
+        if (!(producer.*cell) || !(consumer.*cell)) {
+          producer.*cell = consumer.*cell = 0;
+        }
+      }
+      pair->producer = producer;
+      pair->consumer = consumer;
     }
     out_info->release.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
     out_info->acquire.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
@@ -1151,6 +1215,16 @@ class MemoryBackendTest : public ::testing::Test {
     IREE_CHECK_OK(
         iree_hal_device_group_resolve_memory_scope(group_, site, &scope));
     return scope;
+  }
+
+  iree_hal_memory_pair_info_t PairInfo(
+      const iree_hal_memory_contract_t* contract,
+      iree_hal_memory_scope_t producer, iree_hal_memory_scope_t consumer) {
+    iree_hal_memory_transition_pair_t pair;
+    IREE_CHECK_OK(iree_hal_memory_transition_prepare_pair(
+        {contract}, producer, consumer, IREE_HAL_MEMORY_TRANSITION_RELEASE,
+        &pair));
+    return iree_hal_memory_transition_query_info({contract}, pair);
   }
 
   iree_status_t CreateReservation(

@@ -904,6 +904,17 @@ TEST_P(GpuNativeAtomicTest, RecordedAtomicsFollowReplacementBacking) {
       iree_hal_buffer_query_atomic_operations(target, queue_scope);
   ASSERT_TRUE(iree_all_bits_set(atomic_operations.device_scope_32,
                                 IREE_HAL_ATOMIC_OPERATION_FLAG_STORE));
+  const auto transitions = iree_hal_buffer_transition_table(target);
+  iree_hal_memory_transition_pair_t pair;
+  IREE_ASSERT_OK(iree_hal_memory_transition_prepare_pair(
+      transitions, queue_scope, queue_scope, IREE_HAL_MEMORY_TRANSITION_RELEASE,
+      &pair));
+  const auto pair_info =
+      iree_hal_memory_transition_query_info(transitions, pair);
+  EXPECT_EQ(pair_info.producer_atomics.device_scope_32,
+            atomic_operations.device_scope_32);
+  EXPECT_EQ(pair_info.consumer_atomics.device_scope_32,
+            atomic_operations.device_scope_32);
   const bool supports_add =
       iree_all_bits_set(atomic_operations.device_scope_32,
                         IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD);

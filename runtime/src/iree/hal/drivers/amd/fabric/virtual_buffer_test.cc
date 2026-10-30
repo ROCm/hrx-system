@@ -157,6 +157,67 @@ TEST_F(VirtualBufferContractTest, QueueShaderContractCoversEveryReplacement) {
   }
 }
 
+TEST_F(VirtualBufferContractTest, PairGuaranteesFollowTheVirtualShaderRecipe) {
+  native_families_[0].program_atomics = true;
+  native_.atomics[0] = {AMDF_ATOMIC_OPERATION_STORE, 0};
+  const auto transactions = AMDF_ATOMIC_OPERATION_LOAD |
+                            AMDF_ATOMIC_OPERATION_STORE |
+                            AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE;
+  native_.program_atomics[0] = {
+      .device_scope_32 = transactions,
+      .system_scope_32 = transactions,
+  };
+  iree_hal_pool_t* source = nullptr;
+  IREE_ASSERT_OK(CreateSource(&source));
+  const auto queue = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]);
+  EXPECT_EQ(PairInfo(source->memory_contract, queue, queue)
+                .producer_atomics.device_scope_32,
+            0u);
+  const auto* alias =
+      iree_hal_memory_contract_mapping_alias(source->memory_contract);
+  EXPECT_EQ(PairInfo(alias, queue, queue).producer_atomics.device_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  const iree_hal_virtual_buffer_options_t options = {.byte_length = 4096};
+  iree_hal_buffer_t* target = nullptr;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(group_, Scope(), {1, &source},
+                                                &options, allocator_, &target));
+  const auto* contract = iree_hal_buffer_memory_view(target).contract;
+  const auto pair = PairInfo(contract, queue, queue);
+  EXPECT_EQ(pair.producer_atomics.device_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  EXPECT_EQ(pair.consumer_atomics.device_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(target, source));
+
+  // A new source keeps identical one-site support and cache actions, but loses
+  // only the exact peer guarantee. It cannot replace this declared backing.
+  native_.api.memory_scope_query_pair_info =
+      [](amdf_memory_scope_t* scope,
+         const amdf_memory_profile_pair_query_t* query,
+         amdf_memory_pair_info_t* info) -> amdf_status_t {
+    auto status = FakeNative::MemoryScopeQueryPairInfo(scope, query, info);
+    if (amdf_status_is_ok(status) && info->next &&
+        query->producer.kind == AMDF_MEMORY_SITE_KIND_PROGRAM &&
+        query->consumer.kind == AMDF_MEMORY_SITE_KIND_PROGRAM) {
+      auto* pair = static_cast<amdf_memory_pair_atomics_t*>(info->next);
+      pair->producer.device_scope_32 &= ~AMDF_ATOMIC_OPERATION_COMPARE_EXCHANGE;
+    }
+    return status;
+  };
+  iree_hal_pool_t* replacement = nullptr;
+  IREE_ASSERT_OK(CreateSource(&replacement));
+  const int queries = native_.pair_query_count;
+  EXPECT_FALSE(
+      iree_hal_virtual_buffer_query_pool_compatibility(target, replacement));
+  EXPECT_EQ(PairInfo(contract, queue, queue).producer_atomics.device_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  EXPECT_EQ(native_.pair_query_count, queries);
+  EXPECT_EQ(native_.create_count, 0);
+  iree_hal_pool_release(replacement);
+  iree_hal_pool_release(source);
+  iree_hal_buffer_release(target);
+}
+
 TEST_F(VirtualBufferContractTest, HostCoherencePreservesDeviceSideBarrier) {
   native_.api.memory_scope_query_pair_info =
       [](amdf_memory_scope_t* scope,
