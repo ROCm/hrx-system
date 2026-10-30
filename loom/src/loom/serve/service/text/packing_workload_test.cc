@@ -308,6 +308,46 @@ TEST(PackingWorkloadTest, PerRowChunksDoNotBoundTheSharedTraversal) {
   }
 }
 
+TEST(PackingWorkloadTest, DecodeLifetimeDeterminesAdditionalTraversalWork) {
+  const std::vector<std::vector<size_t>> decoder_outputs = {
+      {}, {1, 2, 3, 4, 5, 6, 7, 8}, {8, 16, 32, 64, 128, 256, 384, 512}};
+  const size_t expected_traversals[][2] = {{65, 5}, {65, 8}, {512, 512}};
+  const size_t capacities[] = {512, 8192};
+  for (size_t cohort = 0; cohort < decoder_outputs.size(); ++cohort) {
+    for (size_t shape = 0; shape < IREE_ARRAYSIZE(capacities); ++shape) {
+      SCOPED_TRACE(cohort);
+      SCOPED_TRACE(capacities[shape]);
+      std::vector<Request> requests;
+      size_t expected_decode = 3;
+      for (size_t outputs : decoder_outputs[cohort]) {
+        requests.push_back({.output_count = outputs});
+        expected_decode += outputs;
+      }
+      requests.push_back({.input_count = 32768});
+      requests.push_back({.input_count = 24, .output_count = 4, .arrival = 10});
+      Workload workload(capacities[shape], capacities[shape],
+                        std::move(requests));
+      ASSERT_NO_FATAL_FAILURE(
+          workload.Run([](const Traversal&) { return 10; }));
+      size_t prefill_traversals = 0, prefill_inputs = 0, decode_inputs = 0;
+      for (const auto& traversal : workload.traversals()) {
+        prefill_traversals += traversal.prefill_inputs != 0;
+        prefill_inputs += traversal.prefill_inputs;
+        decode_inputs += traversal.decode_inputs;
+      }
+      EXPECT_EQ(prefill_inputs, 32768 + 24);
+      EXPECT_EQ(decode_inputs, expected_decode);
+      EXPECT_EQ(prefill_traversals, shape == 0 ? 65 : 5);
+      EXPECT_EQ(workload.traversals().size(),
+                expected_traversals[cohort][shape]);
+    }
+  }
+  // Long-lived unequal decoders let smaller prefills replace decode-only
+  // traversals. When they finish early or are absent, smaller chunks add
+  // traversals. Neither traversal count nor this virtual clock establishes
+  // execution latency or physical weight traffic.
+}
+
 TEST(PackingWorkloadTest, CreditPausesOnlyItsRowAndCancellationRetiresWork) {
   Workload workload(8, 8,
                     {{.output_count = 4, .pause_begin = 10, .pause_end = 45},
