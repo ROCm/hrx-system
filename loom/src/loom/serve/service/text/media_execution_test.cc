@@ -210,6 +210,12 @@ TEST_F(MediaExecutionTest, RaggedCohortConditionsPackedAndIsolatedTextChunks) {
     for (size_t chunk = 0; chunk < 2; ++chunk) {
       loom_serve_text_epoch_row_t rows[3] = {};
       loom_serve_packed_span_t scheduled[3];
+      loom_serve_packing_plan_t plan = {
+          .span_count = 3,
+          .shape_index = 1,
+          .next_row = 1,
+          .next_span = 1,
+      };
       for (size_t row = 0; row < 3; ++row) {
         rows[row] = {
             .input_tokens = tokens[row].data() + offsets[row],
@@ -220,9 +226,10 @@ TEST_F(MediaExecutionTest, RaggedCohortConditionsPackedAndIsolatedTextChunks) {
             .position = offsets[row],
         };
         scheduled[row] = {row, chunk ? rows[row].input_count : (row ? 2u : 3u)};
+        plan.token_count += scheduled[row].token_count;
       }
       loom_serve_text_continuation_t continuation;
-      loom_serve_text_epoch_prepare(&options, rows, 1, 3, scheduled, &epoch,
+      loom_serve_text_epoch_prepare(&options, rows, 3, &plan, scheduled, &epoch,
                                     &continuation);
       do {
         loom_serve_execution_frontier_t ready;

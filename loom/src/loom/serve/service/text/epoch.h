@@ -132,15 +132,18 @@ void loom_serve_text_epoch_deinitialize(loom_serve_text_epoch_t* epoch);
 
 // Converts an already credited, nonempty packed partition into model inputs.
 // The partition, source capacities and compact snapshots are trusted owner
-// state. rows has count entries in scheduled order, independent of row IDs.
+// state. rows has plan->span_count entries in scheduled order, independent of
+// row IDs. row_count is the complete resident domain, including unleased rows.
 // Caller supplies start identity/time after planning and before submission.
-// epoch has capacity for count entries. continuation borrows epoch's reusable
-// planning storage until the native submission captures it.
-void loom_serve_text_epoch_prepare(
+// epoch has capacity for the cohort. continuation borrows epoch's reusable
+// planning storage until the native submission captures it. Returns the next
+// resident priority after both planned epochs; a first-epoch deferred resident
+// retains precedence over rotation within the leased cohort.
+iree_host_size_t loom_serve_text_epoch_prepare(
     const loom_serve_text_epoch_options_t* options,
-    const loom_serve_text_epoch_row_t* rows, iree_host_size_t shape_index,
-    iree_host_size_t count, const loom_serve_packed_span_t* scheduled,
-    loom_serve_text_epoch_t* epoch,
+    const loom_serve_text_epoch_row_t* rows, iree_host_size_t row_count,
+    const loom_serve_packing_plan_t* plan,
+    const loom_serve_packed_span_t* scheduled, loom_serve_text_epoch_t* epoch,
     loom_serve_text_continuation_t* continuation);
 
 // Submits a packed cohort or the current isolated span without waiting.

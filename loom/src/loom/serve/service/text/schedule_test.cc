@@ -74,19 +74,19 @@ TEST(TextScheduleTest, DefaultCatalogShrinksBothAxesWithLiveReadiness) {
       for (iree_host_size_t row = 16 - active; row < 16; ++row) {
         ready[row] = {minimum, minimum};
       }
-      iree_host_size_t cursor = 0, shape = 0, expected_spans = 1;
+      iree_host_size_t expected_spans = 1;
       while (expected_spans < active) {
         expected_spans *= 2;
       }
-      ASSERT_EQ(loom_serve_pack_shapes(16, ready, shape_count, shapes.data(),
-                                       512, &cursor, spans, scratch, &shape),
-                active);
+      const auto plan = loom_serve_pack_shapes(
+          16, ready, shape_count, shapes.data(), 512, 0, spans, scratch);
+      ASSERT_EQ(plan.span_count, active);
       iree_host_size_t expected_tokens = 1;
       while (expected_tokens < active * minimum) {
         expected_tokens *= 2;
       }
-      EXPECT_EQ(shapes[shape].token_capacity, expected_tokens);
-      EXPECT_EQ(shapes[shape].span_capacity, expected_spans);
+      EXPECT_EQ(shapes[plan.shape_index].token_capacity, expected_tokens);
+      EXPECT_EQ(shapes[plan.shape_index].span_capacity, expected_spans);
       for (iree_host_size_t i = 0; i < active; ++i) {
         EXPECT_EQ(spans[i].row_index, 16 - active + i);
         EXPECT_EQ(spans[i].token_count, minimum);
@@ -98,12 +98,11 @@ TEST(TextScheduleTest, DefaultCatalogShrinksBothAxesWithLiveReadiness) {
     row = {4, 4};
   }
   ready[15] = {1000, 1};
-  iree_host_size_t cursor = 0, shape = 0;
-  ASSERT_EQ(loom_serve_pack_shapes(16, ready, shape_count, shapes.data(), 512,
-                                   &cursor, spans, scratch, &shape),
-            16);
-  EXPECT_EQ(shapes[shape].token_capacity, 512);
-  EXPECT_EQ(shapes[shape].span_capacity, 16);
+  const auto plan = loom_serve_pack_shapes(
+      16, ready, shape_count, shapes.data(), 512, 0, spans, scratch);
+  ASSERT_EQ(plan.span_count, 16);
+  EXPECT_EQ(shapes[plan.shape_index].token_capacity, 512);
+  EXPECT_EQ(shapes[plan.shape_index].span_capacity, 16);
   EXPECT_EQ(spans[15].token_count, 452);
 }
 
@@ -118,24 +117,23 @@ TEST(TextScheduleTest, SameCatalogFillsWiderCohortsAsResidentsGrow) {
     std::vector<loom_serve_ready_span_t> ready(residents, {1, 1});
     std::vector<loom_serve_packed_span_t> spans(token_capacity);
     std::vector<loom_serve_packed_span_t> scratch(token_capacity);
-    iree_host_size_t cursor = 0, shape = 0;
     const iree_host_size_t expected = iree_min(residents, token_capacity);
-    EXPECT_EQ(loom_serve_pack_shapes(residents, ready.data(), shape_count,
-                                     shapes.data(), token_capacity, &cursor,
-                                     spans.data(), scratch.data(), &shape),
-              expected);
+    const auto plan = loom_serve_pack_shapes(
+        residents, ready.data(), shape_count, shapes.data(), token_capacity, 0,
+        spans.data(), scratch.data());
+    EXPECT_EQ(plan.span_count, expected);
     iree_host_size_t bucket = 1;
     while (bucket < expected) {
       bucket *= 2;
     }
-    EXPECT_EQ(shapes[shape].token_capacity, bucket);
-    EXPECT_EQ(shapes[shape].span_capacity, bucket);
+    EXPECT_EQ(shapes[plan.shape_index].token_capacity, bucket);
+    EXPECT_EQ(shapes[plan.shape_index].span_capacity, bucket);
     for (iree_host_size_t i = 0; i < expected; ++i) {
       EXPECT_EQ(spans[i].row_index, i);
       EXPECT_EQ(spans[i].token_count, 1);
     }
     if (residents > token_capacity) {
-      EXPECT_EQ(cursor, token_capacity);
+      EXPECT_EQ(plan.next_row, token_capacity);
     }
   }
 }

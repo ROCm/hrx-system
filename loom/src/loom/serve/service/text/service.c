@@ -440,14 +440,15 @@ static void loom_serve_text_separate_ready(
 }
 
 static iree_status_t loom_serve_text_submit_epoch(
-    loom_serve_text_service_t* service, iree_host_size_t shape_index,
-    iree_host_size_t count, const loom_serve_packed_span_t* scheduled) {
+    loom_serve_text_service_t* service, const loom_serve_packing_plan_t* plan,
+    const loom_serve_packed_span_t* scheduled) {
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, service->name.data, service->name.size);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(
       z0,
       loom_serve_telemetry_stream_identity(service->telemetry.stream).ordinal);
   loom_serve_text_epoch_row_t* rows = service->epoch.planning.rows;
+  const iree_host_size_t count = plan->span_count;
   for (iree_host_size_t i = 0; i < count; ++i) {
     const iree_host_size_t row = scheduled[i].row_index;
     const loom_serve_text_session_t* session = service->sessions[row];
@@ -473,8 +474,9 @@ static iree_status_t loom_serve_text_submit_epoch(
     };
   }
   loom_serve_text_continuation_t continuation;
-  loom_serve_text_epoch_prepare(&service->scheduling, rows, shape_index, count,
-                                scheduled, &service->epoch, &continuation);
+  service->cursor = loom_serve_text_epoch_prepare(
+      &service->scheduling, rows, service->row_count, plan, scheduled,
+      &service->epoch, &continuation);
   loom_serve_text_observe(service, "execute");
   const iree_time_t start = iree_time_now();
   iree_slim_mutex_lock(&service->heartbeat.mutex);
@@ -1180,14 +1182,13 @@ static iree_status_t loom_serve_text_advance_work(
     }
     loom_serve_packed_span_t* spans = service->epoch.planning.scheduled;
     loom_serve_packed_span_t* scratch = service->epoch.planning.candidate;
-    iree_host_size_t shape_index = 0;
-    const iree_host_size_t count = loom_serve_pack_shapes(
+    const loom_serve_packing_plan_t plan = loom_serve_pack_shapes(
         service->row_count, ready, service->scheduling.shape_count,
         service->scheduling.shapes, service->scheduling.chunk_size,
-        &service->cursor, spans, scratch, &shape_index);
-    if (count) {
+        service->cursor, spans, scratch);
+    if (plan.span_count) {
       *out_progress = true;
-      status = loom_serve_text_submit_epoch(service, shape_index, count, spans);
+      status = loom_serve_text_submit_epoch(service, &plan, spans);
     } else if (yield_preparation) {
       // With no ready device work, rejection never stalls the remaining FIFO.
       *out_progress |= loom_serve_text_begin_preparation(service);

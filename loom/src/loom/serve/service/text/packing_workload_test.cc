@@ -136,10 +136,11 @@ class Workload {
       if (!remaining) {
         return;
       }
-      size_t shape = 0;
-      const size_t selected = loom_serve_pack_shapes(
+      const auto plan = loom_serve_pack_shapes(
           count, ready.data(), shapes_.size(), shapes_.data(), chunk_size_,
-          &cursor, spans.data(), scratch.data(), &shape);
+          cursor, spans.data(), scratch.data());
+      const size_t selected = plan.span_count;
+      cursor = plan.next_row;
       if (!selected) {
         ASSERT_NE(next_event, kNever) << "unreachable remaining work";
         ASSERT_GT(next_event, now);
@@ -151,7 +152,7 @@ class Workload {
       ASSERT_LT(traversals_.size(), work_bound);
       Traversal traversal;
       traversal.start = now;
-      traversal.shape = shapes_[shape];
+      traversal.shape = shapes_[plan.shape_index];
       traversal.spans.assign(spans.begin(), spans.begin() + selected);
       std::vector<bool> seen(count);
       for (const auto& span : traversal.spans) {
@@ -169,6 +170,8 @@ class Workload {
       }
       ASSERT_LE(traversal.prefill_inputs + traversal.decode_inputs,
                 traversal.shape.token_capacity);
+      ASSERT_EQ(traversal.prefill_inputs + traversal.decode_inputs,
+                plan.token_count);
       ASSERT_LE(selected, traversal.shape.span_capacity);
       const Tick duration = cost(traversal);
       ASSERT_GT(duration, 0);

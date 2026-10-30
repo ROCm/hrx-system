@@ -8,18 +8,16 @@
 
 #include <string.h>
 
-iree_host_size_t loom_serve_pack_spans(iree_host_size_t row_count,
-                                       const loom_serve_ready_span_t* ready,
-                                       iree_host_size_t token_capacity,
-                                       iree_host_size_t span_capacity,
-                                       iree_host_size_t chunk_size,
-                                       iree_host_size_t* cursor,
-                                       loom_serve_packed_span_t* spans) {
+loom_serve_packing_plan_t loom_serve_pack_spans(
+    iree_host_size_t row_count, const loom_serve_ready_span_t* ready,
+    iree_host_size_t token_capacity, iree_host_size_t span_capacity,
+    iree_host_size_t chunk_size, iree_host_size_t cursor,
+    loom_serve_packed_span_t* spans) {
   iree_host_size_t count = 0;
   iree_host_size_t remaining = token_capacity;
   iree_host_size_t deferred_row = row_count;
   for (iree_host_size_t visited = 0; visited < row_count; ++visited) {
-    const iree_host_size_t row = (*cursor + visited) % row_count;
+    const iree_host_size_t row = (cursor + visited) % row_count;
     if (!ready[row].token_count || ready[row].minimum_count > token_capacity) {
       continue;
     }
@@ -37,7 +35,7 @@ iree_host_size_t loom_serve_pack_spans(iree_host_size_t row_count,
       break;
     }
   }
-  iree_host_size_t expanded_row = row_count;
+  iree_host_size_t expanded_span = count;
   for (iree_host_size_t i = 0; i < count && remaining; ++i) {
     loom_serve_packed_span_t* span = &spans[i];
     const iree_host_size_t limit =
@@ -45,55 +43,53 @@ iree_host_size_t loom_serve_pack_spans(iree_host_size_t row_count,
                  iree_min(ready[span->row_index].token_count, chunk_size));
     const iree_host_size_t extra =
         iree_min(remaining, limit - span->token_count);
-    if (extra && expanded_row == row_count) {
-      expanded_row = span->row_index;
+    if (extra && expanded_span == count) {
+      expanded_span = i;
     }
     span->token_count += extra;
     remaining -= extra;
   }
+  iree_host_size_t next_row = cursor;
+  iree_host_size_t next_span = 0;
   if (count) {
-    const iree_host_size_t first_row =
-        expanded_row < row_count ? expanded_row : spans[0].row_index;
-    *cursor =
-        deferred_row < row_count ? deferred_row : (first_row + 1) % row_count;
+    const iree_host_size_t first = expanded_span < count ? expanded_span : 0;
+    const iree_host_size_t following = spans[first].row_index + 1;
+    next_row = following == row_count ? 0 : following;
+    next_span = first + 1 == count ? 0 : first + 1;
   }
-  return count;
+  const bool deferred = deferred_row < row_count;
+  return (loom_serve_packing_plan_t){
+      .span_count = count,
+      .token_count = token_capacity - remaining,
+      .next_row = deferred ? deferred_row : next_row,
+      .next_span = next_span,
+      .deferred = deferred,
+  };
 }
 
-iree_host_size_t loom_serve_pack_shapes(
+loom_serve_packing_plan_t loom_serve_pack_shapes(
     iree_host_size_t row_count, const loom_serve_ready_span_t* ready,
     iree_host_size_t shape_count, const loom_serve_packing_shape_t* shapes,
-    iree_host_size_t chunk_size, iree_host_size_t* cursor,
-    loom_serve_packed_span_t* spans, loom_serve_packed_span_t* scratch,
-    iree_host_size_t* out_shape) {
-  iree_host_size_t best_count = 0;
-  iree_host_size_t best_tokens = 0;
-  iree_host_size_t best_shape = 0;
-  iree_host_size_t best_cursor = *cursor;
+    iree_host_size_t chunk_size, iree_host_size_t cursor,
+    loom_serve_packed_span_t* spans, loom_serve_packed_span_t* scratch) {
+  loom_serve_packing_plan_t best = {0};
   for (iree_host_size_t i = 0; i < shape_count; ++i) {
-    iree_host_size_t candidate_cursor = *cursor;
-    const iree_host_size_t count = loom_serve_pack_spans(
+    loom_serve_packing_plan_t candidate = loom_serve_pack_spans(
         row_count, ready, shapes[i].token_capacity, shapes[i].span_capacity,
-        chunk_size, &candidate_cursor, scratch);
-    iree_host_size_t tokens = 0;
-    for (iree_host_size_t j = 0; j < count; ++j) {
-      tokens += scratch[j].token_count;
-    }
-    const loom_serve_packing_shape_t best = shapes[best_shape];
-    const bool smaller = shapes[i].token_capacity < best.token_capacity ||
-                         (shapes[i].token_capacity == best.token_capacity &&
-                          shapes[i].span_capacity < best.span_capacity);
-    if (i == 0 || tokens > best_tokens ||
-        (tokens == best_tokens &&
-         (count > best_count || (count == best_count && smaller)))) {
-      best_count = count;
-      best_tokens = tokens;
-      best_shape = i;
-      best_cursor = candidate_cursor;
-      memcpy(spans, scratch, count * sizeof(*spans));
+        chunk_size, cursor, scratch);
+    candidate.shape_index = i;
+    const loom_serve_packing_shape_t best_shape = shapes[best.shape_index];
+    const bool smaller =
+        shapes[i].token_capacity < best_shape.token_capacity ||
+        (shapes[i].token_capacity == best_shape.token_capacity &&
+         shapes[i].span_capacity < best_shape.span_capacity);
+    if (i == 0 || candidate.token_count > best.token_count ||
+        (candidate.token_count == best.token_count &&
+         (candidate.span_count > best.span_count ||
+          (candidate.span_count == best.span_count && smaller)))) {
+      best = candidate;
+      memcpy(spans, scratch, best.span_count * sizeof(*spans));
     }
   }
-  *cursor = best_cursor;
-  *out_shape = best_shape;
-  return best_count;
+  return best;
 }
