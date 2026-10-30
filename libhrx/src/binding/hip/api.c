@@ -29,6 +29,7 @@
 #include "binding/hip/array_lifetime.h"
 #include "binding/hip/binding_internal.h"
 #include "binding/hip/blocking_printf_provider.h"
+#include "binding/hip/device_properties.h"
 #include "binding/hip/device_selection.h"
 #include "binding/hip/error_state.h"
 #include "binding/hip/execution_context.h"
@@ -148,9 +149,12 @@ iree_hip_physical_device_identity(const iree_hal_streaming_device_t* device) {
   return NULL;
 }
 
-static void iree_hip_copy_device_uuid(const iree_hal_uuid_t* source,
+static void iree_hip_copy_device_uuid(const iree_hal_streaming_device_t* device,
+                                      const iree_hal_uuid_t* source,
                                       hipUUID* target) {
-  memcpy(target->bytes, source->bytes, sizeof(target->bytes));
+  const iree_hal_device_identity_spec_t* identity =
+      iree_hal_device_spec_identity(iree_hal_device_spec(device->hal_device));
+  iree_hip_format_device_uuid(identity->driver_id, source, target->bytes);
 }
 
 HIPAPI int hrx_hip_binding_active(void) { return 1; }
@@ -2491,7 +2495,8 @@ HIPAPI hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int device) {
   if (physical_identity &&
       iree_all_bits_set(physical_identity->flags,
                         IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_UUID)) {
-    iree_hip_copy_device_uuid(&physical_identity->uuid, &prop->uuid);
+    iree_hip_copy_device_uuid(device_obj, &physical_identity->uuid,
+                              &prop->uuid);
   }
   prop->tccDriver = 0;
   prop->asyncEngineCount = 2;
@@ -3026,11 +3031,12 @@ HIPAPI hipError_t hipDeviceGetName(char* name, int len, int device) {
 //
 // UUID behavior:
 // - Returns a unique identifier for the physical device.
-// - UUID persists across reboots and driver reloads.
+// - Native identifiers may change with device partitioning.
 // - Can be used to identify specific GPUs in multi-GPU systems.
-// - Format is 16-byte binary value.
+// - AMD native/HSA identifiers use 16 lowercase ASCII hex digits, matching HIP.
+//   Other providers preserve their opaque 16-byte UUID.
 //
-// Multi-GPU: Each physical device has a unique UUID.
+// Multi-GPU: The provider's native identifier names the physical device.
 //
 // See also: hipDeviceGet, hipGetDeviceProperties.
 HIPAPI hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t dev) {
@@ -3053,7 +3059,7 @@ HIPAPI hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t dev) {
                          IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_UUID)) {
     HIP_RETURN_ERROR(hipErrorNotSupported);
   }
-  iree_hip_copy_device_uuid(&physical_identity->uuid, uuid);
+  iree_hip_copy_device_uuid(device, &physical_identity->uuid, uuid);
   HIP_RETURN_ERROR(hipSuccess);
 }
 

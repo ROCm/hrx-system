@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -71,6 +72,8 @@ TEST_F(HipDeviceSelectionTest, SelectedDevicesHaveDenseExecutableOrdinals) {
           "hipGetDevicePropertiesR0600");
   const auto pci_address =
       library_.Resolve<decltype(&hipDeviceGetPCIBusId)>("hipDeviceGetPCIBusId");
+  const auto device_uuid =
+      library_.Resolve<decltype(&hipDeviceGetUuid)>("hipDeviceGetUuid");
   const auto module_load =
       library_.Resolve<decltype(&hipModuleLoadData)>("hipModuleLoadData");
   const auto module_unload =
@@ -109,6 +112,14 @@ TEST_F(HipDeviceSelectionTest, SelectedDevicesHaveDenseExecutableOrdinals) {
     }
     ASSERT_EQ(expected_pci_addresses.size(), static_cast<size_t>(count));
   }
+  std::vector<std::string> expected_uuids;
+  if (const char* expected = std::getenv("HRX_TEST_EXPECT_DEVICE_UUID")) {
+    std::istringstream input(expected);
+    for (std::string uuid; std::getline(input, uuid, ',');) {
+      expected_uuids.push_back(uuid);
+    }
+    ASSERT_EQ(expected_uuids.size(), static_cast<size_t>(count));
+  }
 
   for (int ordinal = 0; ordinal < count; ++ordinal) {
     SCOPED_TRACE(ordinal);
@@ -124,6 +135,22 @@ TEST_F(HipDeviceSelectionTest, SelectedDevicesHaveDenseExecutableOrdinals) {
                    std::string(actual_pci) + " " + properties.gcnArchName);
     if (!expected_pci_addresses.empty()) {
       EXPECT_EQ(expected_pci_addresses[ordinal], actual_pci);
+    }
+    hipUUID uuid = {};
+    const hipError_t uuid_result = device_uuid(&uuid, ordinal);
+    if (uuid_result == hipSuccess) {
+      const std::string text(reinterpret_cast<const char*>(uuid.bytes),
+                             sizeof(uuid.bytes));
+      EXPECT_EQ(text.find_first_not_of("0123456789abcdef"), std::string::npos);
+      EXPECT_EQ(std::memcmp(uuid.bytes, properties.uuid.bytes, sizeof(uuid)),
+                0);
+      RecordProperty("uuid_" + std::to_string(ordinal), text);
+      if (!expected_uuids.empty()) {
+        EXPECT_EQ(expected_uuids[ordinal], text);
+      }
+    } else {
+      EXPECT_EQ(uuid_result, hipErrorNotSupported);
+      EXPECT_TRUE(expected_uuids.empty()) << "required native UUID missing";
     }
     const auto image =
         hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);
