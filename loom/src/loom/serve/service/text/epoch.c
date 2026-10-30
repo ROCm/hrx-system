@@ -60,13 +60,14 @@ void loom_serve_text_epoch_deinitialize(loom_serve_text_epoch_t* epoch) {
 
 // Only the leased first cohort can contribute to its device-fed continuation.
 // Known progress is exact; the device resolves speculative acceptance and EOS.
-static void loom_serve_text_epoch_prepare_continuation(
+static iree_host_size_t loom_serve_text_epoch_prepare_continuation(
     const loom_serve_text_epoch_options_t* options,
-    const loom_serve_text_epoch_row_t* rows, loom_serve_text_epoch_t* epoch,
+    const loom_serve_text_epoch_row_t* rows, iree_host_size_t row_count,
+    const loom_serve_packing_plan_t* plan, loom_serve_text_epoch_t* epoch,
     loom_serve_text_continuation_t* out_continuation) {
   *out_continuation = (loom_serve_text_continuation_t){0};
   if (options->continuation_epochs != 2) {
-    return;
+    return plan->next_row;
   }
   const iree_host_size_t count = epoch->count;
   const loom_serve_text_span_t* spans = epoch->spans;
@@ -96,9 +97,7 @@ static void loom_serve_text_epoch_prepare_continuation(
       }
     }
   }
-  // Rotate within the leased cohort instead of repeatedly giving its first
-  // long prompt all of the expansion slots.
-  iree_host_size_t cursor = count > 1 ? 1 : 0;
+  const iree_host_size_t cursor = plan->next_span;
   if (options->packing_mode == LOOM_SERVE_TEXT_PACKING_SEPARATE) {
     for (iree_host_size_t i = 0; i < count; ++i) {
       const iree_host_size_t first = (cursor + i) % count;
@@ -116,10 +115,10 @@ static void loom_serve_text_epoch_prepare_continuation(
   }
   loom_serve_packed_span_t* scheduled = epoch->planning.scheduled;
   loom_serve_packed_span_t* scratch = epoch->planning.candidate;
-  iree_host_size_t shape = 0;
-  const iree_host_size_t next_count = loom_serve_pack_shapes(
+  const loom_serve_packing_plan_t next = loom_serve_pack_shapes(
       count, ready, options->shape_count, options->shapes, options->chunk_size,
-      &cursor, scheduled, scratch, &shape);
+      cursor, scheduled, scratch);
+  const iree_host_size_t next_count = next.span_count;
   for (iree_host_size_t i = 0; i < next_count; ++i) {
     const iree_host_size_t first = scheduled[i].row_index;
     const iree_host_size_t row = spans[first].row_index;
@@ -146,21 +145,34 @@ static void loom_serve_text_epoch_prepare_continuation(
             : 0;
   }
   *out_continuation = (loom_serve_text_continuation_t){
-      .shape_index = shape,
+      .shape_index = next.shape_index,
       .span_count = next_count,
       .spans = next_spans,
       .output_limits = next_limits,
   };
+  if (!next_count || plan->deferred) {
+    return plan->next_row;
+  }
+  if (next.deferred) {
+    return spans[next.next_row].row_index;
+  }
+  // The continuation's row domain is the first cohort. Advance after its
+  // rotation owner in the full resident domain, preserving newly ready gaps.
+  const iree_host_size_t previous =
+      next.next_row ? next.next_row - 1 : count - 1;
+  const iree_host_size_t following = spans[previous].row_index + 1;
+  return following == row_count ? 0 : following;
 }
 
-void loom_serve_text_epoch_prepare(
+iree_host_size_t loom_serve_text_epoch_prepare(
     const loom_serve_text_epoch_options_t* options,
-    const loom_serve_text_epoch_row_t* rows, iree_host_size_t shape_index,
-    iree_host_size_t count, const loom_serve_packed_span_t* scheduled,
-    loom_serve_text_epoch_t* epoch,
+    const loom_serve_text_epoch_row_t* rows, iree_host_size_t row_count,
+    const loom_serve_packing_plan_t* plan,
+    const loom_serve_packed_span_t* scheduled, loom_serve_text_epoch_t* epoch,
     loom_serve_text_continuation_t* continuation) {
+  const iree_host_size_t count = plan->span_count;
   epoch->count = count;
-  epoch->shape_index = shape_index;
+  epoch->shape_index = plan->shape_index;
   epoch->cursor = 0;
   epoch->start.serial = 0;
   epoch->start.time = 0;
@@ -172,7 +184,6 @@ void loom_serve_text_epoch_prepare(
   iree_host_size_t* positions = epoch->positions;
   uint32_t* output_limits = epoch->output_limits;
   iree_host_size_t proposal_count = 0;
-  iree_host_size_t input_count = 0;
   const iree_host_size_t width = options->draft_depth + 1;
   for (iree_host_size_t i = 0; i < count; ++i) {
     const iree_host_size_t row = scheduled[i].row_index;
@@ -200,10 +211,9 @@ void loom_serve_text_epoch_prepare(
         .input_offset = prefill ? input->input_offset : 0,
         .media = prefill ? input->media : NULL,
     };
-    input_count += spans[i].token_count;
   }
-  loom_serve_text_epoch_prepare_continuation(options, rows, epoch,
-                                             continuation);
+  const iree_host_size_t next_row = loom_serve_text_epoch_prepare_continuation(
+      options, rows, row_count, plan, epoch, continuation);
   if (!continuation->span_count) {
     for (iree_host_size_t i = 0; i < count; ++i) {
       output_limits[i] = (uint32_t)iree_min(output_limits[i], width);
@@ -214,17 +224,18 @@ void loom_serve_text_epoch_prepare(
     continued_prefill_count +=
         continuation->output_limits[i] ? 0 : continuation->spans[i].token_count;
   }
-  epoch->input_count = input_count;
+  epoch->input_count = plan->token_count;
   epoch->proposal_count = proposal_count;
   epoch->device_epochs = continuation->span_count ? 2 : 1;
   if (options->schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED) {
-    epoch->token_slots = options->shapes[shape_index].token_capacity;
+    epoch->token_slots = options->shapes[plan->shape_index].token_capacity;
     if (continuation->span_count) {
       epoch->token_slots +=
           options->shapes[continuation->shape_index].token_capacity;
     }
   }
   epoch->continued_prefill_count = continued_prefill_count;
+  return next_row;
 }
 
 iree_status_t loom_serve_text_epoch_submit(

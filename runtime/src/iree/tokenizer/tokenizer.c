@@ -41,7 +41,8 @@
 
 // Completion advances only after the preceding producer can emit no more.
 // MATCH drains normalized token matching before the segmenter receives EOF.
-typedef enum iree_tokenizer_encode_phase_e {
+typedef uint8_t iree_tokenizer_encode_phase_t;
+enum iree_tokenizer_encode_phase_e {
   IREE_TOKENIZER_ENCODE_PHASE_PROCESS = 0,
   IREE_TOKENIZER_ENCODE_PHASE_NORMALIZE,
   IREE_TOKENIZER_ENCODE_PHASE_MATCH,
@@ -49,7 +50,7 @@ typedef enum iree_tokenizer_encode_phase_e {
   IREE_TOKENIZER_ENCODE_PHASE_MODEL,
   IREE_TOKENIZER_ENCODE_PHASE_SUFFIX,
   IREE_TOKENIZER_ENCODE_PHASE_DONE,
-} iree_tokenizer_encode_phase_t;
+};
 
 // Internal encode state structure.
 // Layout in state_storage:
@@ -82,6 +83,11 @@ struct iree_tokenizer_encode_state_t {
   // Post-normalization special token match state. Runs AFTER the normalizer
   // to match tokens with normalized=true in the transformed output.
   iree_tokenizer_special_tokens_encode_state_t special_token_match_post;
+
+  // First logical normalized position not ruled out as an added-token start.
+  // Retained while segmentation borrows the already searched prefix. Appending
+  // normalized bytes, ring wrap, and ring growth preserve earlier rejections.
+  iree_host_size_t post_norm_scan_position;
 
   // Ring buffer position tracking. All positions are logical (cumulative).
   // Physical buffer index = logical_position & capacity_mask.
@@ -673,6 +679,7 @@ static iree_status_t iree_tokenizer_encode_state_reset_internal(
   state->read_position = 0;
   state->write_position = 0;
   state->segmenter_view_start = 0;
+  state->post_norm_scan_position = 0;
   state->segment_count = 0;
   state->segments_consumed = 0;
 
@@ -1330,7 +1337,9 @@ iree_tokenizer_encode_state_match_post_norm_special_tokens(
   // viable, then release their entire original span back to this search.
   iree_host_size_t already_matched =
       state->special_token_match_post.match_position;
-  iree_host_size_t safe = 0;
+  iree_host_size_t safe =
+      iree_max(state->post_norm_scan_position, state->segmenter_view_start) -
+      state->segmenter_view_start;
   iree_host_size_t match_length = 0;
   iree_tokenizer_token_id_t match_id = 0;
   iree_tokenizer_special_tokens_encode_state_t match_state;
@@ -1340,6 +1349,7 @@ iree_tokenizer_encode_state_match_post_norm_special_tokens(
       safe += iree_tokenizer_special_tokens_safe_prefix_length(
           &tokenizer->special_tokens_post_norm,
           iree_string_view_substr(normalized_text, safe, IREE_HOST_SIZE_MAX));
+      state->post_norm_scan_position = state->segmenter_view_start + safe;
       if (safe == normalized_text.size) {
         return IREE_TOKENIZER_POST_NORM_NO_MATCH;
       }

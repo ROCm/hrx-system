@@ -180,6 +180,14 @@ loom_cmd_program_parameter_t loom_serve_weights_parameter_at(
 iree_hal_pool_reservation_request_t loom_serve_weights_activation_workspace(
     const loom_serve_weights_t* weights);
 
+// Collects captured-input workspace credit for a submitted activation without
+// waiting. Returns whether deallocation is still pending, and writes retained
+// credit to out_bytes. Successful completion returns zero credit. Failure
+// retains credit but promises no future capacity wake; the consuming execution
+// owns its error and payload retirement. Completed activations need no query.
+bool loom_serve_weights_query_activation_workspace(
+    loom_serve_weights_t* weights, uint64_t* out_bytes);
+
 // Commits storage and streams directly into final roots through four read
 // lanes. Four preparation lanes join each tensor's reads and captured inputs.
 // An already active plan does not reload or prepare again. Success means

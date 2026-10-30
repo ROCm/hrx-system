@@ -7,6 +7,8 @@
 
 #include "iree/base/threading/mutex.h"
 
+typedef struct loom_serve_residency_entry_t loom_serve_residency_entry_t;
+
 struct loom_serve_residency_cache_t {
   // Allocation policy for the cache metadata.
   iree_allocator_t host_allocator;
@@ -33,6 +35,8 @@ struct loom_serve_residency_cache_t {
   } groups;
   // Physical groups with release interest awaiting owner collection.
   iree_host_size_t releasing_count;
+  // Accepted staging deallocations whose credit still awaits completion.
+  loom_serve_residency_group_t* activating;
   // Explicit new-work interests after a physical weight-capacity denial.
   struct {
     // Oldest waiting service, retried by the shared host owner.
@@ -76,16 +80,30 @@ struct loom_serve_residency_group_t {
   iree_time_t idle_since;
   // Number of exclusive borrowed plans in the trailing array.
   iree_host_size_t weight_count;
+  // Cold or accepted-but-uncompleted captured-input staging requirement.
+  uint64_t activation_bytes;
+  // Working-set memberships whose aggregate staging bound includes this group.
+  loom_serve_residency_entry_t* borrowers;
+  // Previous pending-list link, or NULL without accepted staging work.
+  loom_serve_residency_group_t** activation_previous;
+  // Next group with accepted staging awaiting owner collection.
+  loom_serve_residency_group_t* activation_next;
   // Plans whose backing is activated and evicted together.
   loom_serve_weights_t* weights[];
 };
 
-typedef struct loom_serve_residency_entry_t {
+struct loom_serve_residency_entry_t {
   // Borrowed immutable resource group, outliving this working set.
   loom_serve_residency_group_t* group;
   // Group generation whose readiness was imported into this execution.
   uint64_t generation;
-} loom_serve_residency_entry_t;
+  // Borrowing invocation whose aggregate changes with group activation.
+  loom_serve_residency_t* residency;
+  // Previous borrower-list link, including the group's head.
+  loom_serve_residency_entry_t** previous;
+  // Next working set borrowing the same immutable group.
+  loom_serve_residency_entry_t* next;
+};
 
 struct loom_serve_residency_t {
   // Allocation policy for the registration and copied working-set entries.
@@ -104,6 +122,8 @@ struct loom_serve_residency_t {
   bool pinned;
   // Prepared peak for ordered commands and cohort-private input storage.
   uint64_t private_bytes;
+  // Sum of current cold/in-flight staging requirements across borrowed groups.
+  uint64_t activation_bytes;
   // Prepared escaping output bound for the next invocation.
   uint64_t output_bytes;
   // Producer obligation for the accepted output, independent after publication.
@@ -240,7 +260,7 @@ void loom_serve_residency_set_reclaimer(
 
 bool loom_serve_residency_cache_is_reclaiming(
     const loom_serve_residency_cache_t* cache) {
-  if (cache->releasing_count ||
+  if (cache->activating || cache->releasing_count ||
       (cache->workspace &&
        loom_serve_workspace_is_reclaiming(cache->workspace)) ||
       (cache->pool && loom_serve_memory_pool_is_pending(cache->pool))) {
@@ -399,10 +419,39 @@ static void loom_serve_residency_group_append(
   cache->groups.newest = group;
 }
 
+static void loom_serve_residency_group_set_activation_bytes(
+    loom_serve_residency_group_t* group, uint64_t bytes) {
+  for (loom_serve_residency_entry_t* entry = group->borrowers; entry;
+       entry = entry->next) {
+    entry->residency->activation_bytes -= group->activation_bytes;
+    entry->residency->activation_bytes += bytes;
+  }
+  group->activation_bytes = bytes;
+}
+
+static void loom_serve_residency_group_unlink_activation(
+    loom_serve_residency_group_t* group) {
+  if (group->activation_previous) {
+    *group->activation_previous = group->activation_next;
+    if (group->activation_next) {
+      group->activation_next->activation_previous = group->activation_previous;
+    }
+    group->activation_previous = NULL;
+    group->activation_next = NULL;
+  }
+}
+
 iree_status_t loom_serve_residency_group_deactivate(
     loom_serve_residency_group_t* group, bool* out_complete) {
   *out_complete = false;
   if (group->active) {
+    uint64_t bytes = 0;
+    for (iree_host_size_t i = 0; i < group->weight_count; ++i) {
+      bytes += loom_serve_weights_activation_workspace(group->weights[i])
+                   .allocation_size;
+    }
+    loom_serve_residency_group_set_activation_bytes(group, bytes);
+    loom_serve_residency_group_unlink_activation(group);
     group->active = false;
     ++group->generation;
   }
@@ -456,6 +505,24 @@ iree_status_t loom_serve_residency_deactivate(loom_serve_residency_t* residency,
 
 iree_status_t loom_serve_residency_cache_query_status(
     loom_serve_residency_cache_t* cache) {
+  for (loom_serve_residency_group_t* group = cache->activating; group;) {
+    loom_serve_residency_group_t* next = group->activation_next;
+    uint64_t bytes = 0;
+    bool pending = false;
+    for (iree_host_size_t i = 0; i < group->weight_count; ++i) {
+      uint64_t weight_bytes = 0;
+      pending |= loom_serve_weights_query_activation_workspace(
+          group->weights[i], &weight_bytes);
+      bytes += weight_bytes;
+    }
+    if (bytes != group->activation_bytes) {
+      loom_serve_residency_group_set_activation_bytes(group, bytes);
+    }
+    if (!pending) {
+      loom_serve_residency_group_unlink_activation(group);
+    }
+    group = next;
+  }
   if (!cache->releasing_count) {
     return iree_ok_status();
   }
@@ -657,6 +724,7 @@ void loom_serve_residency_group_free(loom_serve_residency_group_t* group) {
     return;
   }
   loom_serve_residency_group_unlink(group);
+  loom_serve_residency_group_unlink_activation(group);
   if (group->releasing) {
     --group->cache->releasing_count;
   }
@@ -719,10 +787,28 @@ iree_status_t loom_serve_residency_allocate(
   residency->execution = execution;
   residency->group_count = group_count;
   for (iree_host_size_t i = 0; i < group_count; ++i) {
-    residency->entries[i].group = groups[i];
+    loom_serve_residency_entry_t* entry = &residency->entries[i];
+    loom_serve_residency_group_t* group = groups[i];
+    // Banks register groups before source preparation. The first invocation
+    // binds only after preparation has established the cold lane geometry.
+    if (!group->borrowers && !group->active) {
+      group->activation_bytes = 0;
+      for (iree_host_size_t j = 0; j < group->weight_count; ++j) {
+        group->activation_bytes +=
+            loom_serve_weights_activation_workspace(group->weights[j])
+                .allocation_size;
+      }
+    }
+    entry->group = group;
+    entry->residency = residency;
+    entry->previous = &group->borrowers;
+    entry->next = group->borrowers;
+    if (entry->next) {
+      entry->next->previous = &entry->next;
+    }
+    group->borrowers = entry;
+    residency->activation_bytes += group->activation_bytes;
   }
-  residency->private_bytes =
-      loom_serve_residency_activation_workspace(residency);
   loom_serve_residency_append(residency);
   *out_residency = residency;
   return iree_ok_status();
@@ -776,6 +862,13 @@ void loom_serve_residency_free(loom_serve_residency_t* residency) {
   if (residency->pin_count) {
     residency->pin_count = 1;
     loom_serve_residency_release(residency);
+  }
+  for (iree_host_size_t i = 0; i < residency->group_count; ++i) {
+    loom_serve_residency_entry_t* entry = &residency->entries[i];
+    *entry->previous = entry->next;
+    if (entry->next) {
+      entry->next->previous = entry->previous;
+    }
   }
   loom_serve_residency_unlink(residency);
   iree_allocator_free(residency->host_allocator, residency);
@@ -831,25 +924,26 @@ iree_status_t loom_serve_residency_check_working_set(
   return iree_ok_status();
 }
 
-static uint64_t loom_serve_residency_private_peak(
-    const loom_serve_residency_t* residency, uint64_t private_bytes,
-    uint64_t output_bytes) {
+static uint64_t loom_serve_residency_private_peak(uint64_t activation_bytes,
+                                                  uint64_t private_bytes,
+                                                  uint64_t output_bytes) {
   // Activation staging and execution are ordered on this invocation's
   // timeline. Reserve their maximum, retaining output credit independently
   // after producer completion. Shared-group borrowers conservatively reserve
-  // their own activation peak until their invocation releases its final pin.
-  const uint64_t activation =
-      loom_serve_residency_activation_workspace(residency);
-  return iree_max(private_bytes,
-                  activation > output_bytes ? activation - output_bytes : 0);
+  // their own activation peak until the group's staging deallocation completes.
+  return iree_max(private_bytes, activation_bytes > output_bytes
+                                     ? activation_bytes - output_bytes
+                                     : 0);
 }
 
 iree_status_t loom_serve_residency_prepare_working_set(
     loom_serve_residency_t* residency, uint64_t private_bytes,
     uint64_t output_bytes) {
-  private_bytes =
-      loom_serve_residency_private_peak(residency, private_bytes, output_bytes);
-  const iree_device_size_t extents[] = {private_bytes, output_bytes};
+  const iree_device_size_t extents[] = {
+      loom_serve_residency_private_peak(
+          loom_serve_residency_activation_workspace(residency), private_bytes,
+          output_bytes),
+      output_bytes};
   IREE_RETURN_IF_ERROR(loom_serve_residency_check_working_set(
       residency, IREE_ARRAYSIZE(extents), extents));
   IREE_ASSERT(!residency->pin_count);
@@ -918,8 +1012,10 @@ static bool loom_serve_residency_admit_working_set(
   for (const loom_serve_residency_t* entry = cache->oldest; entry;
        entry = entry->next) {
     if (entry == residency || entry->pin_count) {
-      const uint64_t required =
-          entry == residency ? private_bytes : entry->private_bytes;
+      const uint64_t required = loom_serve_residency_private_peak(
+          entry->activation_bytes,
+          entry == residency ? private_bytes : entry->private_bytes,
+          entry->output_bytes);
       if (required > remaining) {
         return false;
       }
@@ -961,9 +1057,13 @@ static bool loom_serve_residency_admit_working_set(
 
 iree_status_t loom_serve_residency_check_private_peak(
     const loom_serve_residency_t* residency, uint64_t private_bytes) {
-  private_bytes = loom_serve_residency_private_peak(residency, private_bytes,
-                                                    residency->output_bytes);
-  const iree_device_size_t extents[] = {private_bytes, residency->output_bytes};
+  IREE_RETURN_IF_ERROR(
+      loom_serve_residency_cache_query_status(residency->cache));
+  const iree_device_size_t extents[] = {
+      loom_serve_residency_private_peak(
+          loom_serve_residency_activation_workspace(residency), private_bytes,
+          residency->output_bytes),
+      residency->output_bytes};
   IREE_RETURN_IF_ERROR(loom_serve_residency_check_working_set(
       residency, IREE_ARRAYSIZE(extents), extents));
   if (residency->pin_count && private_bytes > residency->private_bytes &&
@@ -978,8 +1078,7 @@ iree_status_t loom_serve_residency_check_private_peak(
 
 void loom_serve_residency_set_private_peak(loom_serve_residency_t* residency,
                                            uint64_t private_bytes) {
-  residency->private_bytes = loom_serve_residency_private_peak(
-      residency, private_bytes, residency->output_bytes);
+  residency->private_bytes = private_bytes;
 }
 
 // Borrowed for one serialized admission, before either state or parameters
@@ -1118,6 +1217,14 @@ static iree_status_t loom_serve_residency_acquire_parameters(
         status = loom_serve_weights_activate(group->weights[j]);
       }
       group->active = iree_status_is_ok(status);
+      if (group->active && group->activation_bytes) {
+        group->activation_previous = &group->cache->activating;
+        group->activation_next = group->cache->activating;
+        if (group->activation_next) {
+          group->activation_next->activation_previous = &group->activation_next;
+        }
+        group->cache->activating = group;
+      }
     }
     for (iree_host_size_t j = 0;
          j < group->weight_count && iree_status_is_ok(status); ++j) {

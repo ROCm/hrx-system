@@ -39,6 +39,24 @@ typedef struct loom_serve_packing_shape_t {
   iree_host_size_t span_capacity;
 } loom_serve_packing_shape_t;
 
+// Selected partition and the producer-owned priority facts needed to continue
+// it. Resident priority and rotation within its compact cohort are distinct:
+// the first deferred resident may not belong to the cohort at all.
+typedef struct loom_serve_packing_plan_t {
+  // Number of populated output spans.
+  iree_host_size_t span_count;
+  // Sum of their live input tokens, excluding shape padding.
+  iree_host_size_t token_count;
+  // Selected catalog entry; zero when packing one explicit shape.
+  iree_host_size_t shape_index;
+  // Next priority in the original readiness row domain.
+  iree_host_size_t next_row;
+  // Next priority in the packed span domain, or zero for an empty cohort.
+  iree_host_size_t next_span;
+  // next_row names an eligible row omitted for lack of token or span capacity.
+  bool deferred;
+} loom_serve_packing_plan_t;
+
 // Packs trusted ready spans without allocating or modifying row state. Every
 // admitted row gets its minimum_count before remaining capacity is filled from
 // longer known spans. chunk_size limits expansion, never an indivisible
@@ -49,17 +67,16 @@ typedef struct loom_serve_packing_shape_t {
 // row_count, token_capacity, span_capacity, and chunk_size are positive. cursor
 // is below row_count. spans has room for min(row_count, span_capacity) entries.
 // The first deferred row whose minimum fits this shape gets next priority.
-// When every eligible row fits, priority advances past the first admitted row
-// so prompt expansion rotates across ready rows, including around idle gaps.
-// Empty readiness leaves cursor unchanged. Only the caller commits model
+// When every eligible row fits, priority advances past the first expanded row,
+// or the first admitted row if none expanded. Indivisible spans and idle gaps
+// therefore do not delay rotation of prompt expansion.
+// Empty readiness preserves cursor in next_row. Only the caller commits model
 // progress, after execution succeeds; output credit determines readiness.
-iree_host_size_t loom_serve_pack_spans(iree_host_size_t row_count,
-                                       const loom_serve_ready_span_t* ready,
-                                       iree_host_size_t token_capacity,
-                                       iree_host_size_t span_capacity,
-                                       iree_host_size_t chunk_size,
-                                       iree_host_size_t* cursor,
-                                       loom_serve_packed_span_t* spans);
+loom_serve_packing_plan_t loom_serve_pack_spans(
+    iree_host_size_t row_count, const loom_serve_ready_span_t* ready,
+    iree_host_size_t token_capacity, iree_host_size_t span_capacity,
+    iree_host_size_t chunk_size, iree_host_size_t cursor,
+    loom_serve_packed_span_t* spans);
 
 // Evaluates each cached shape against the same readiness and rotating cursor.
 // Chooses the most useful tokens, breaking ties by more ready rows advanced,
@@ -67,15 +84,13 @@ iree_host_size_t loom_serve_pack_spans(iree_host_size_t row_count,
 // cannot displace plans that also advance ready peers. This is an occupancy
 // policy, not a measured execution-cost model.
 // shapes is nonempty; each shape satisfies the capacity contract above.
-// spans and scratch each have row_count entries. Only the winning plan advances
-// cursor. Returns its span count and writes its index, including for empty
-// work.
-iree_host_size_t loom_serve_pack_shapes(
+// spans and scratch each have row_count entries. Only the winning plan supplies
+// the next priorities; candidate evaluation never modifies the caller's cursor.
+loom_serve_packing_plan_t loom_serve_pack_shapes(
     iree_host_size_t row_count, const loom_serve_ready_span_t* ready,
     iree_host_size_t shape_count, const loom_serve_packing_shape_t* shapes,
-    iree_host_size_t chunk_size, iree_host_size_t* cursor,
-    loom_serve_packed_span_t* spans, loom_serve_packed_span_t* scratch,
-    iree_host_size_t* out_shape);
+    iree_host_size_t chunk_size, iree_host_size_t cursor,
+    loom_serve_packed_span_t* spans, loom_serve_packed_span_t* scratch);
 
 #ifdef __cplusplus
 }  // extern "C"

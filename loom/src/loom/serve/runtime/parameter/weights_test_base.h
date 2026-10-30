@@ -382,7 +382,8 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
       IREE_EXPECT_OK(loom_serve_execution_drain(shared_execution_));
     }
     if (execution_) {
-      IREE_EXPECT_OK(loom_serve_execution_drain(execution_));
+      IREE_EXPECT_STATUS_IS(execution_code_,
+                            loom_serve_execution_drain(execution_));
     }
     for (auto* command : commands_) {
       iree_hal_command_buffer_release(command);
@@ -713,6 +714,8 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   iree_hal_queue_t* transfer_ = nullptr;
   // Owned model timelines used by consuming commands.
   loom_serve_execution_t* execution_ = nullptr;
+  // Explicitly injected execution failure expected during terminal cleanup.
+  iree_status_code_t execution_code_ = IREE_STATUS_OK;
   // Independent consumer of the same immutable roots, retired before teardown.
   loom_serve_execution_t* shared_execution_ = nullptr;
   // Unrelated first-consumer work, excluded from shared weight readiness.

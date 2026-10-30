@@ -395,12 +395,7 @@ TEST_F(BPEByteLevelTest, EmptyChunks) {
 // the normalizer runs. This test suite verifies correct behavior when these
 // tokens appear in various positions and streaming scenarios.
 
-TEST(AddedTokenSearchTest, RejectedPrefixesPreserveLaterMatches) {
-  // Normalized token search must find the earliest viable start, including
-  // starts inside a rejected or incomplete longer candidate. The sequence
-  // pre-tokenizer also borrows an input view while expanding a large parent
-  // span; output backpressure must preserve that view's added-token boundary.
-  const char* json = R"({
+static constexpr char kAddedTokenSearchTokenizerJson[] = R"({
     "model": {
       "type": "BPE",
       "vocab": {"<":0,"x":1,"k":2,"e":3,"y":4,"a":5,"b":6,
@@ -428,9 +423,16 @@ TEST(AddedTokenSearchTest, RejectedPrefixesPreserveLaterMatches) {
        "trim_offsets":false,"use_regex":true}
     ]}
   })";
+
+TEST(AddedTokenSearchTest, RejectedPrefixesPreserveLaterMatches) {
+  // Normalized token search must find the earliest viable start, including
+  // starts inside a rejected or incomplete longer candidate. The sequence
+  // pre-tokenizer also borrows an input view while expanding a large parent
+  // span; output backpressure must preserve that view's added-token boundary.
   iree_tokenizer_t* tokenizer = nullptr;
   IREE_ASSERT_OK(iree_tokenizer_from_huggingface_json(
-      iree_make_cstring_view(json), iree_allocator_system(), &tokenizer));
+      iree_make_cstring_view(kAddedTokenSearchTokenizerJson),
+      iree_allocator_system(), &tokenizer));
   ScopedTokenizer owner(tokenizer);
   struct Case {
     // Complete UTF-8 input, with no implicit chunk boundaries.
@@ -484,6 +486,87 @@ TEST(AddedTokenSearchTest, RejectedPrefixesPreserveLaterMatches) {
       }
     }
   }
+}
+
+TEST(AddedTokenSearchTest, SearchFrontierSurvivesRetainedSpans) {
+  iree_tokenizer_t* tokenizer = nullptr;
+  IREE_ASSERT_OK(iree_tokenizer_from_huggingface_json(
+      iree_make_cstring_view(kAddedTokenSearchTokenizerJson),
+      iree_allocator_system(), &tokenizer));
+  ScopedTokenizer owner(tokenizer);
+
+  // Each parent span expands into many more segments than the batch capacity.
+  // Rejected '<' candidates and their searched suffix survive output pressure,
+  // ring growth, and wrap. A token between spans advances beyond the frontier;
+  // a terminal incomplete candidate must still release its nested 'bc' match.
+  std::string text;
+  std::vector<int32_t> expected;
+  for (int span = 0; span < 2; ++span) {
+    for (int i = 0; i < 2051; ++i) {
+      text += "x< ";
+      expected.insert(expected.end(), {1, 0, 11});
+    }
+    text += "<｜call｜";
+    expected.insert(expected.end(), {0, 14});
+  }
+  text += "abc";
+  expected.insert(expected.end(), {5, 16});
+  iree_string_view_t input = iree_make_string_view(text.data(), text.size());
+  for (iree_host_size_t buffer_size : {16, 4096}) {
+    SCOPED_TRACE(buffer_size);
+    for (iree_host_size_t chunk_size : {0, 7, 257}) {
+      SCOPED_TRACE(chunk_size);
+      for (iree_host_size_t output_capacity : {1, 17, 256}) {
+        SCOPED_TRACE(output_capacity);
+        IREE_ASSERT_OK_AND_ASSIGN(auto streamed,
+                                  EncodeStreaming(tokenizer, input, buffer_size,
+                                                  chunk_size, output_capacity));
+        EXPECT_EQ(streamed, expected);
+      }
+    }
+  }
+}
+
+TEST(AddedTokenSearchTest, SearchFrontierResetsBetweenSequences) {
+  iree_tokenizer_t* tokenizer = nullptr;
+  IREE_ASSERT_OK(iree_tokenizer_from_huggingface_json(
+      iree_make_cstring_view(kAddedTokenSearchTokenizerJson),
+      iree_allocator_system(), &tokenizer));
+  ScopedTokenizer owner(tokenizer);
+
+  std::string text;
+  std::vector<int32_t> expected;
+  for (int i = 0; i < 2051; ++i) {
+    text += "x< ";
+    expected.insert(expected.end(), {1, 0, 11});
+  }
+  expected.push_back(13);
+  std::vector<int32_t> first(expected.size());
+  std::vector<int32_t> second(2);
+  iree_tokenizer_encode_batch_item_t items[2] = {};
+  items[0].text = iree_make_string_view(text.data(), text.size());
+  items[0].text_pair = IREE_SV("key");
+  items[0].flags = IREE_TOKENIZER_ENCODE_BATCH_ITEM_FLAG_HAS_TEXT_PAIR;
+  items[0].output = iree_tokenizer_make_token_output(first.data(), nullptr,
+                                                     nullptr, first.size());
+  items[1].text = IREE_SV("<｜call｜");
+  items[1].output = iree_tokenizer_make_token_output(second.data(), nullptr,
+                                                     nullptr, second.size());
+
+  iree_host_size_t state_size = 0;
+  IREE_ASSERT_OK(
+      iree_tokenizer_encode_state_calculate_size(tokenizer, &state_size));
+  std::vector<uint8_t> state_storage(state_size);
+  std::vector<uint8_t> transform_buffer(64);
+  IREE_ASSERT_OK(iree_tokenizer_encode_batch(
+      tokenizer, items, IREE_ARRAYSIZE(items), IREE_TOKENIZER_ENCODE_FLAG_NONE,
+      iree_make_byte_span(state_storage.data(), state_storage.size()),
+      iree_make_byte_span(transform_buffer.data(), transform_buffer.size()),
+      iree_tokenizer_offset_run_list_empty(), iree_allocator_system()));
+  EXPECT_EQ(items[0].out_token_count, expected.size());
+  EXPECT_EQ(first, expected);
+  EXPECT_EQ(items[1].out_token_count, 2u);
+  EXPECT_EQ(second, (std::vector<int32_t>{0, 14}));
 }
 
 class PostNormSpecialTokenTest : public ::testing::Test {

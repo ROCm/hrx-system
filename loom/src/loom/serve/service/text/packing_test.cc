@@ -18,13 +18,14 @@ TEST(PackingTest, CallerOwnsRowCapacityAndIndivisibleSpanLengths) {
   }
   const loom_serve_packing_shape_t shapes[] = {{64, 16}, {128, 32}, {256, 40}};
   loom_serve_packed_span_t spans[40], scratch[40];
-  iree_host_size_t cursor = 0, shape = 0;
-  ASSERT_EQ(loom_serve_pack_shapes(IREE_ARRAYSIZE(ready), ready,
-                                   IREE_ARRAYSIZE(shapes), shapes, 256, &cursor,
-                                   spans, scratch, &shape),
-            IREE_ARRAYSIZE(ready));
-  EXPECT_EQ(shape, 2);
-  EXPECT_EQ(cursor, 1);
+  const auto plan = loom_serve_pack_shapes(IREE_ARRAYSIZE(ready), ready,
+                                           IREE_ARRAYSIZE(shapes), shapes, 256,
+                                           0, spans, scratch);
+  ASSERT_EQ(plan.span_count, IREE_ARRAYSIZE(ready));
+  EXPECT_EQ(plan.shape_index, 2);
+  EXPECT_EQ(plan.next_row, 1);
+  EXPECT_EQ(plan.next_span, 1);
+  EXPECT_FALSE(plan.deferred);
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(ready); ++i) {
     EXPECT_EQ(spans[i].row_index, i);
     EXPECT_EQ(spans[i].token_count, ready[i].token_count);
@@ -35,14 +36,15 @@ TEST(PackingTest, PromptChunksFillAroundDecodeAndShortTails) {
   const loom_serve_ready_span_t ready[] = {{80, 1}, {1, 1},  {3, 1},
                                            {1, 1},  {50, 1}, {0, 0}};
   loom_serve_packed_span_t spans[6];
-  iree_host_size_t cursor = 0;
-  ASSERT_EQ(loom_serve_pack_spans(6, ready, 64, 6, 32, &cursor, spans), 5);
+  const auto plan = loom_serve_pack_spans(6, ready, 64, 6, 32, 0, spans);
+  ASSERT_EQ(plan.span_count, 5);
   const iree_host_size_t expected[] = {32, 1, 3, 1, 27};
   for (iree_host_size_t i = 0; i < 5; ++i) {
     EXPECT_EQ(spans[i].row_index, i);
     EXPECT_EQ(spans[i].token_count, expected[i]);
   }
-  EXPECT_EQ(cursor, 1);
+  EXPECT_EQ(plan.token_count, 64);
+  EXPECT_EQ(plan.next_row, 1);
 }
 
 TEST(PackingTest, CapacityPressureRotatesWithoutStarvation) {
@@ -66,10 +68,11 @@ TEST(PackingTest, CapacityPressureRotatesWithoutStarvation) {
         iree_host_size_t visits[8] = {};
         const iree_host_size_t expected_count = iree_min(ready_count, 2);
         for (iree_host_size_t epoch = 0; epoch < ready_count; ++epoch) {
-          ASSERT_EQ(
+          const auto plan =
               loom_serve_pack_spans(8, ready, shape.token_capacity,
-                                    shape.span_capacity, 8, &cursor, spans),
-              expected_count);
+                                    shape.span_capacity, 8, cursor, spans);
+          cursor = plan.next_row;
+          ASSERT_EQ(plan.span_count, expected_count);
           for (iree_host_size_t i = 0; i < expected_count; ++i) {
             ++visits[spans[i].row_index];
           }
@@ -87,11 +90,36 @@ TEST(PackingTest, PromptExpansionRotatesWhenAllRowsFit) {
   loom_serve_packed_span_t spans[3];
   iree_host_size_t cursor = 0;
   for (iree_host_size_t epoch = 0; epoch < 3; ++epoch) {
-    ASSERT_EQ(loom_serve_pack_spans(3, ready, 8, 3, 8, &cursor, spans), 3);
+    const auto plan = loom_serve_pack_spans(3, ready, 8, 3, 8, cursor, spans);
+    cursor = plan.next_row;
+    ASSERT_EQ(plan.span_count, 3);
     EXPECT_EQ(spans[0].row_index, epoch);
     EXPECT_EQ(spans[0].token_count, 6);
     EXPECT_EQ(spans[1].token_count, 1);
     EXPECT_EQ(spans[2].token_count, 1);
+  }
+}
+
+TEST(PackingTest, PromptExpansionSkipsIndivisiblePeers) {
+  const loom_serve_ready_span_t ready[] = {{1, 1},     {1, 1}, {1, 1}, {1, 1},
+                                           {1, 1},     {1, 1}, {1, 1}, {1, 1},
+                                           {32768, 1}, {24, 1}};
+  loom_serve_packed_span_t spans[10];
+  auto plan = loom_serve_pack_spans(10, ready, 8192, 16, 8192, 0, spans);
+  ASSERT_EQ(plan.span_count, 10);
+  EXPECT_EQ(spans[8].token_count, 8183);
+  EXPECT_EQ(spans[9].token_count, 1);
+  EXPECT_EQ(plan.next_row, 9);
+  EXPECT_EQ(plan.next_span, 9);
+  plan = loom_serve_pack_spans(10, ready, 8192, 16, 8192, plan.next_row, spans);
+  ASSERT_EQ(plan.span_count, 10);
+  EXPECT_EQ(spans[0].row_index, 9);
+  EXPECT_EQ(spans[0].token_count, 24);
+  EXPECT_EQ(spans[9].row_index, 8);
+  EXPECT_EQ(spans[9].token_count, 8160);
+  for (iree_host_size_t i = 1; i < 9; ++i) {
+    EXPECT_EQ(spans[i].row_index, i - 1);
+    EXPECT_EQ(spans[i].token_count, 1);
   }
 }
 
@@ -112,9 +140,10 @@ TEST(PackingTest, PromptExpansionRotatesAcrossEveryReadyRowLayout) {
       iree_host_size_t expanded[8] = {};
       loom_serve_packed_span_t spans[8];
       for (iree_host_size_t epoch = 0; epoch < ready_count; ++epoch) {
-        ASSERT_EQ(loom_serve_pack_spans(8, ready, 16, ready_count, 16, &cursor,
-                                        spans),
-                  ready_count);
+        const auto plan =
+            loom_serve_pack_spans(8, ready, 16, ready_count, 16, cursor, spans);
+        cursor = plan.next_row;
+        ASSERT_EQ(plan.span_count, ready_count);
         for (iree_host_size_t i = 0; i < ready_count; ++i) {
           expanded[spans[i].row_index] += spans[i].token_count > 1;
         }
@@ -132,7 +161,9 @@ TEST(PackingTest, DeferredVerifierGetsNextPriorityAcrossInactiveRows) {
   iree_host_size_t cursor = 0;
   iree_host_size_t visits[4] = {};
   for (iree_host_size_t epoch = 0; epoch < 2; ++epoch) {
-    ASSERT_EQ(loom_serve_pack_spans(4, ready, 5, 4, 5, &cursor, spans), 2);
+    const auto plan = loom_serve_pack_spans(4, ready, 5, 4, 5, cursor, spans);
+    cursor = plan.next_row;
+    ASSERT_EQ(plan.span_count, 2);
     for (iree_host_size_t i = 0; i < 2; ++i) {
       EXPECT_EQ(spans[i].token_count, ready[spans[i].row_index].minimum_count);
       ++visits[spans[i].row_index];
@@ -144,12 +175,107 @@ TEST(PackingTest, DeferredVerifierGetsNextPriorityAcrossInactiveRows) {
   EXPECT_EQ(visits[3], 0);
 }
 
+TEST(PackingTest, ExpansionRotatesAcrossMixedReadinessLayouts) {
+  // Every layout of idle, decoding, verifying, and prefilling rows, including
+  // every starting priority. Capacity admits all minima and expands one row.
+  for (iree_host_size_t width : {4u, 8u}) {
+    SCOPED_TRACE(width);
+    const loom_serve_ready_span_t states[] = {
+        {0, 0}, {1, 1}, {width, width}, {64, 1}};
+    for (uint32_t layout = 0; layout < 1024; ++layout) {
+      SCOPED_TRACE(layout);
+      loom_serve_ready_span_t ready[5];
+      iree_host_size_t ready_count = 0, prompt_count = 0, minima = 0;
+      for (iree_host_size_t row = 0; row < 5; ++row) {
+        ready[row] = states[(layout >> (row * 2)) & 3];
+        ready_count += ready[row].token_count != 0;
+        prompt_count += ready[row].token_count > ready[row].minimum_count;
+        minima += ready[row].minimum_count;
+      }
+      for (iree_host_size_t start = 0; start < 5; ++start) {
+        SCOPED_TRACE(start);
+        iree_host_size_t cursor = start;
+        iree_host_size_t expanded[5] = {};
+        loom_serve_packed_span_t spans[5];
+        for (iree_host_size_t epoch = 0; epoch < iree_max(prompt_count, 1);
+             ++epoch) {
+          const auto plan =
+              loom_serve_pack_spans(5, ready, minima + 8, 5, 64, cursor, spans);
+          cursor = plan.next_row;
+          ASSERT_EQ(plan.span_count, ready_count);
+          uint32_t seen = 0;
+          iree_host_size_t tokens = 0;
+          for (iree_host_size_t i = 0; i < ready_count; ++i) {
+            const auto span = spans[i];
+            ASSERT_LT(span.row_index, 5);
+            EXPECT_EQ(seen & (1u << span.row_index), 0);
+            seen |= 1u << span.row_index;
+            ASSERT_GE(span.token_count, ready[span.row_index].minimum_count);
+            ASSERT_LE(span.token_count, ready[span.row_index].token_count);
+            expanded[span.row_index] +=
+                span.token_count > ready[span.row_index].minimum_count;
+            tokens += span.token_count;
+          }
+          EXPECT_EQ(tokens, minima + (prompt_count ? 8 : 0));
+          EXPECT_EQ(plan.token_count, tokens);
+          EXPECT_FALSE(plan.deferred);
+          if (ready_count) {
+            ASSERT_LT(plan.next_span, ready_count);
+            const auto previous =
+                (plan.next_span + ready_count - 1) % ready_count;
+            EXPECT_EQ(plan.next_row, (spans[previous].row_index + 1) % 5);
+          }
+          if (!prompt_count) {
+            EXPECT_EQ(cursor,
+                      ready_count ? (spans[0].row_index + 1) % 5 : start);
+          }
+        }
+        for (iree_host_size_t row = 0; row < 5; ++row) {
+          EXPECT_EQ(expanded[row],
+                    ready[row].token_count > ready[row].minimum_count ? 1 : 0);
+        }
+      }
+    }
+  }
+}
+
+TEST(PackingTest, DeferredAdmissionPrecedesExpansionRotation) {
+  const loom_serve_ready_span_t ready[] = {
+      {1, 1}, {64, 1}, {1, 1}, {8, 8}, {64, 1}};
+  loom_serve_packed_span_t spans[5];
+  for (iree_host_size_t span_capacity : {3u, 5u}) {
+    SCOPED_TRACE(span_capacity);
+    auto plan =
+        loom_serve_pack_spans(5, ready, 10, span_capacity, 10, 0, spans);
+    EXPECT_EQ(plan.span_count, span_capacity == 3 ? 3 : 4);
+    EXPECT_EQ(spans[0].row_index, 0);
+    EXPECT_EQ(spans[0].token_count, 1);
+    EXPECT_EQ(spans[1].row_index, 1);
+    EXPECT_EQ(spans[1].token_count, span_capacity == 3 ? 8 : 7);
+    EXPECT_EQ(plan.next_row, 3);
+    EXPECT_EQ(plan.next_span, 2);
+    EXPECT_TRUE(plan.deferred);
+    plan = loom_serve_pack_spans(5, ready, 10, span_capacity, 10, plan.next_row,
+                                 spans);
+    ASSERT_EQ(plan.span_count, 3);
+    EXPECT_EQ(spans[0].row_index, 3);
+    EXPECT_EQ(spans[0].token_count, 8);
+    EXPECT_EQ(spans[1].row_index, 4);
+    EXPECT_EQ(spans[1].token_count, 1);
+    EXPECT_EQ(spans[2].row_index, 0);
+    EXPECT_EQ(spans[2].token_count, 1);
+    EXPECT_EQ(plan.next_row, 1);
+  }
+}
+
 TEST(PackingTest, IneligibleMinimumDoesNotPinExpansionPriority) {
   const loom_serve_ready_span_t ready[] = {{16, 16}, {32, 1}, {32, 1}, {0, 0}};
   loom_serve_packed_span_t spans[4];
   iree_host_size_t cursor = 0;
   for (iree_host_size_t row : {1u, 2u}) {
-    ASSERT_EQ(loom_serve_pack_spans(4, ready, 8, 2, 8, &cursor, spans), 2);
+    const auto plan = loom_serve_pack_spans(4, ready, 8, 2, 8, cursor, spans);
+    cursor = plan.next_row;
+    ASSERT_EQ(plan.span_count, 2);
     EXPECT_EQ(spans[0].row_index, row);
     EXPECT_EQ(spans[0].token_count, 7);
     EXPECT_EQ(spans[1].token_count, 1);
@@ -160,8 +286,8 @@ TEST(PackingTest, PausedRowsConsumeNeitherTokensNorSpanSlots) {
   const loom_serve_ready_span_t ready[] = {{0, 0}, {1, 1}, {0, 0},
                                            {7, 1}, {0, 0}, {2, 1}};
   loom_serve_packed_span_t spans[6];
-  iree_host_size_t cursor = 4;
-  ASSERT_EQ(loom_serve_pack_spans(6, ready, 16, 3, 16, &cursor, spans), 3);
+  const auto plan = loom_serve_pack_spans(6, ready, 16, 3, 16, 4, spans);
+  ASSERT_EQ(plan.span_count, 3);
   EXPECT_EQ(spans[0].row_index, 5);
   EXPECT_EQ(spans[0].token_count, 2);
   EXPECT_EQ(spans[1].row_index, 1);
@@ -173,9 +299,12 @@ TEST(PackingTest, PausedRowsConsumeNeitherTokensNorSpanSlots) {
 TEST(PackingTest, EmptyReadinessDoesNotAdvanceCursor) {
   const loom_serve_ready_span_t ready[3] = {};
   loom_serve_packed_span_t spans[3];
-  iree_host_size_t cursor = 2;
-  EXPECT_EQ(loom_serve_pack_spans(3, ready, 8, 3, 8, &cursor, spans), 0);
-  EXPECT_EQ(cursor, 2);
+  const auto plan = loom_serve_pack_spans(3, ready, 8, 3, 8, 2, spans);
+  EXPECT_EQ(plan.span_count, 0);
+  EXPECT_EQ(plan.token_count, 0);
+  EXPECT_EQ(plan.next_row, 2);
+  EXPECT_EQ(plan.next_span, 0);
+  EXPECT_FALSE(plan.deferred);
 }
 
 TEST(PackingTest, ExhaustsFiniteMixedWorkExactlyOnce) {
@@ -185,11 +314,15 @@ TEST(PackingTest, ExhaustsFiniteMixedWorkExactlyOnce) {
   iree_host_size_t consumed[8] = {};
   iree_host_size_t cursor = 0;
   loom_serve_packed_span_t spans[8];
-  iree_host_size_t count = 0;
-  while ((count = loom_serve_pack_spans(8, ready, 32, 4, 24, &cursor, spans))) {
+  while (true) {
+    const auto plan = loom_serve_pack_spans(8, ready, 32, 4, 24, cursor, spans);
+    if (!plan.span_count) {
+      break;
+    }
+    cursor = plan.next_row;
     iree_host_size_t total = 0;
     uint32_t seen = 0;
-    for (iree_host_size_t i = 0; i < count; ++i) {
+    for (iree_host_size_t i = 0; i < plan.span_count; ++i) {
       const auto span = spans[i];
       ASSERT_LT(span.row_index, 8);
       EXPECT_EQ(seen & (1u << span.row_index), 0);
@@ -202,6 +335,7 @@ TEST(PackingTest, ExhaustsFiniteMixedWorkExactlyOnce) {
       total += span.token_count;
     }
     EXPECT_LE(total, 32);
+    EXPECT_EQ(total, plan.token_count);
   }
   for (iree_host_size_t i = 0; i < 8; ++i) {
     EXPECT_EQ(consumed[i], expected[i]);
@@ -213,25 +347,24 @@ TEST(PackingTest, CachedShapesShrinkWithoutLosingReadyWork) {
   loom_serve_ready_span_t ready[] = {{500, 1}, {1, 1}, {1, 1}, {1, 1},
                                      {1, 1},   {1, 1}, {1, 1}, {1, 1}};
   loom_serve_packed_span_t spans[8], scratch[8];
-  iree_host_size_t cursor = 0, shape = 0;
-  ASSERT_EQ(loom_serve_pack_shapes(8, ready, 3, shapes, 512, &cursor, spans,
-                                   scratch, &shape),
-            8);
-  EXPECT_EQ(shape, 0);
+  auto plan =
+      loom_serve_pack_shapes(8, ready, 3, shapes, 512, 0, spans, scratch);
+  ASSERT_EQ(plan.span_count, 8);
+  EXPECT_EQ(plan.shape_index, 0);
   EXPECT_EQ(spans[0].token_count, 500);
-  EXPECT_EQ(cursor, 1);
+  EXPECT_EQ(plan.next_row, 1);
   ready[0].token_count = 70;
-  ASSERT_EQ(loom_serve_pack_shapes(8, ready, 3, shapes, 512, &cursor, spans,
-                                   scratch, &shape),
-            8);
-  EXPECT_EQ(shape, 2);
-  EXPECT_EQ(cursor, 2);
+  plan = loom_serve_pack_shapes(8, ready, 3, shapes, 512, plan.next_row, spans,
+                                scratch);
+  ASSERT_EQ(plan.span_count, 8);
+  EXPECT_EQ(plan.shape_index, 2);
+  EXPECT_EQ(plan.next_row, 1);
   ready[0].token_count = 1;
-  ASSERT_EQ(loom_serve_pack_shapes(8, ready, 3, shapes, 512, &cursor, spans,
-                                   scratch, &shape),
-            8);
-  EXPECT_EQ(shape, 1);
-  EXPECT_EQ(cursor, 3);
+  plan = loom_serve_pack_shapes(8, ready, 3, shapes, 512, plan.next_row, spans,
+                                scratch);
+  ASSERT_EQ(plan.span_count, 8);
+  EXPECT_EQ(plan.shape_index, 1);
+  EXPECT_EQ(plan.next_row, 2);
   for (const auto& span : spans) {
     EXPECT_EQ(span.token_count, 1);
   }
@@ -242,28 +375,25 @@ TEST(PackingTest, ShapePlanningKeepsTokenAndSpanConstraintsIndependent) {
   const loom_serve_ready_span_t ready[] = {{1, 1}, {1, 1}, {1, 1}, {1, 1},
                                            {0, 0}, {0, 0}, {0, 0}, {0, 0}};
   loom_serve_packed_span_t spans[8], scratch[8];
-  iree_host_size_t cursor = 0, shape = 0;
-  ASSERT_EQ(loom_serve_pack_shapes(8, ready, 3, shapes, 512, &cursor, spans,
-                                   scratch, &shape),
-            4);
-  EXPECT_EQ(shape, 2);
-  const iree_host_size_t saved_cursor = cursor;
+  const auto plan =
+      loom_serve_pack_shapes(8, ready, 3, shapes, 512, 0, spans, scratch);
+  ASSERT_EQ(plan.span_count, 4);
+  EXPECT_EQ(plan.shape_index, 2);
   const loom_serve_ready_span_t empty[8] = {};
-  EXPECT_EQ(loom_serve_pack_shapes(8, empty, 3, shapes, 512, &cursor, spans,
-                                   scratch, &shape),
-            0);
-  EXPECT_EQ(cursor, saved_cursor);
+  const auto empty_plan = loom_serve_pack_shapes(8, empty, 3, shapes, 512,
+                                                 plan.next_row, spans, scratch);
+  EXPECT_EQ(empty_plan.span_count, 0);
+  EXPECT_EQ(empty_plan.next_row, plan.next_row);
 }
 
 TEST(PackingTest, ShapePlanningHonorsChunkLimitBeforeSizing) {
   const loom_serve_packing_shape_t shapes[] = {{512, 8}, {128, 8}, {32, 8}};
   const loom_serve_ready_span_t ready[] = {{1000, 1}, {1, 1}, {1, 1}, {1, 1}};
   loom_serve_packed_span_t spans[4], scratch[4];
-  iree_host_size_t cursor = 0, shape = 0;
-  EXPECT_EQ(loom_serve_pack_shapes(4, ready, 3, shapes, 64, &cursor, spans,
-                                   scratch, &shape),
-            4);
-  EXPECT_EQ(shape, 1);
+  const auto plan =
+      loom_serve_pack_shapes(4, ready, 3, shapes, 64, 0, spans, scratch);
+  EXPECT_EQ(plan.span_count, 4);
+  EXPECT_EQ(plan.shape_index, 1);
   EXPECT_EQ(spans[0].token_count, 64);
 }
 
@@ -277,15 +407,14 @@ TEST(PackingTest, EquallyOccupiedShapesKeepReadyPeers) {
     for (const auto& shapes : catalogs) {
       SCOPED_TRACE(shapes[0].span_capacity);
       loom_serve_packed_span_t spans[4], scratch[4];
-      iree_host_size_t cursor = 0, shape = 0;
-      const iree_host_size_t count = loom_serve_pack_shapes(
-          4, ready, 2, shapes, 512, &cursor, spans, scratch, &shape);
-      EXPECT_EQ(count, 4);
-      EXPECT_EQ(shapes[shape].span_capacity, 4);
-      EXPECT_EQ(cursor, 1);
+      const auto plan =
+          loom_serve_pack_shapes(4, ready, 2, shapes, 512, 0, spans, scratch);
+      EXPECT_EQ(plan.span_count, 4);
+      EXPECT_EQ(shapes[plan.shape_index].span_capacity, 4);
+      EXPECT_EQ(plan.next_row, 1);
       const iree_host_size_t expected[] = {512 - 2 * minimum - 1, minimum, 1,
                                            minimum};
-      for (iree_host_size_t i = 0; i < count; ++i) {
+      for (iree_host_size_t i = 0; i < plan.span_count; ++i) {
         EXPECT_EQ(spans[i].row_index, i);
         EXPECT_EQ(spans[i].token_count, expected[i]);
       }
@@ -298,22 +427,20 @@ TEST(PackingTest, ReservesWholeVerifiersBeforePromptExpansion) {
                                            {50, 1}, {4, 4}, {1, 1}, {4, 4}};
   const loom_serve_packing_shape_t shapes[] = {{128, 8}, {32, 8}};
   loom_serve_packed_span_t spans[8], scratch[8];
-  iree_host_size_t cursor = 0, shape = 0;
-  ASSERT_EQ(loom_serve_pack_spans(8, ready, 32, 8, 7, &cursor, spans), 8);
+  auto plan = loom_serve_pack_spans(8, ready, 32, 8, 7, 0, spans);
+  ASSERT_EQ(plan.span_count, 8);
   const iree_host_size_t expected[] = {7, 4, 3, 4, 5, 4, 1, 4};
   for (iree_host_size_t i = 0; i < 8; ++i) {
     EXPECT_EQ(spans[i].row_index, i);
     EXPECT_EQ(spans[i].token_count, expected[i]);
   }
-  cursor = 0;
-  ASSERT_EQ(loom_serve_pack_shapes(8, ready, 2, shapes, 6, &cursor, spans,
-                                   scratch, &shape),
-            8);
-  EXPECT_EQ(shape, 1);
+  plan = loom_serve_pack_shapes(8, ready, 2, shapes, 6, 0, spans, scratch);
+  ASSERT_EQ(plan.span_count, 8);
+  EXPECT_EQ(plan.shape_index, 1);
   EXPECT_EQ(spans[0].token_count, 6);
   EXPECT_EQ(spans[4].token_count, 6);
-  cursor = 0;
-  ASSERT_EQ(loom_serve_pack_spans(8, ready, 32, 8, 1, &cursor, spans), 8);
+  plan = loom_serve_pack_spans(8, ready, 32, 8, 1, 0, spans);
+  ASSERT_EQ(plan.span_count, 8);
   for (iree_host_size_t i = 0; i < 8; ++i) {
     EXPECT_EQ(spans[i].token_count, ready[i].minimum_count);
   }
@@ -325,7 +452,9 @@ TEST(PackingTest, FillsGapsWithoutSplittingOrStarvingVerifiers) {
   iree_host_size_t cursor = 0;
   iree_host_size_t visits[3] = {};
   for (int epoch = 0; epoch < 3; ++epoch) {
-    ASSERT_EQ(loom_serve_pack_spans(3, ready, 6, 3, 6, &cursor, spans), 2);
+    const auto plan = loom_serve_pack_spans(3, ready, 6, 3, 6, cursor, spans);
+    cursor = plan.next_row;
+    ASSERT_EQ(plan.span_count, 2);
     iree_host_size_t tokens = 0;
     for (iree_host_size_t i = 0; i < 2; ++i) {
       const auto span = spans[i];

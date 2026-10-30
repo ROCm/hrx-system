@@ -31,6 +31,7 @@
 #include "benchmark/benchmark.h"
 #include "iree/base/api.h"
 #include "iree/tokenizer/decoder/byte_level.h"
+#include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "iree/tokenizer/model/bpe.h"
 #include "iree/tokenizer/segmenter/whitespace.h"
 #include "iree/tokenizer/tokenizer.h"
@@ -667,6 +668,62 @@ BENCHMARK_REGISTER_F(StreamingEncodeBenchmark, Stream)
     ->Args({10000, 10240, 4096})
     // Streaming vs batch comparison on 100KB.
     ->Args({10000, 102400, 1024});
+
+// A sequence pre-tokenizer retains a large parent span while returning bounded
+// batches of child segments. Added-token search must retain its own progress
+// across those batches, including after rejected candidate prefixes.
+static void BM_RetainedSpanAddedTokenSearch(benchmark::State& state) {
+  const char* json = R"({
+    "model":{"type":"BPE","vocab":{
+      "x":0,"Ġ":1,"<":2,"t":3,"a":4,"g":5,">":6},"merges":[]},
+    "added_tokens":[
+      {"id":7,"content":"<tag>","normalized":true,"special":false,
+       "single_word":false,"lstrip":false,"rstrip":false},
+      {"id":8,"content":"[tag]","normalized":true,"special":false,
+       "single_word":false,"lstrip":false,"rstrip":false}
+    ],
+    "pre_tokenizer":{"type":"Sequence","pretokenizers":[
+      {"type":"Split","pattern":{"Regex":"[0-9]+"},
+       "behavior":"Isolated","invert":false},
+      {"type":"ByteLevel","add_prefix_space":false,
+       "trim_offsets":false,"use_regex":true}
+    ]}
+  })";
+  iree_tokenizer_t* tokenizer = nullptr;
+  IREE_CHECK_OK(iree_tokenizer_from_huggingface_json(
+      iree_make_cstring_view(json), iree_allocator_system(), &tokenizer));
+  std::string text;
+  size_t text_bytes = static_cast<size_t>(state.range(0));
+  text.reserve(text_bytes + 5);
+  for (size_t i = 0; i < text_bytes; ++i) {
+    text.push_back("x< "[i % 3]);
+  }
+  text += "<tag>";
+  bool match_added_tokens = state.range(1) != 0;
+  iree_tokenizer_encode_flags_t flags =
+      match_added_tokens ? IREE_TOKENIZER_ENCODE_FLAG_NONE
+                         : IREE_TOKENIZER_ENCODE_FLAG_NO_SPECIAL_TOKEN_MATCHING;
+  std::vector<iree_tokenizer_token_id_t> tokens(text.size());
+  for (auto _ : state) {
+    iree_host_size_t token_count = 0;
+    IREE_CHECK_OK(iree_tokenizer_encode(
+        tokenizer, iree_make_string_view(text.data(), text.size()), flags,
+        iree_tokenizer_make_token_output(tokens.data(), nullptr, nullptr,
+                                         tokens.size()),
+        iree_allocator_system(), &token_count));
+    if (token_count != text.size() - (match_added_tokens ? 4 : 0)) {
+      state.SkipWithError("unexpected added-token output count");
+      break;
+    }
+    benchmark::DoNotOptimize(tokens.data());
+  }
+  state.SetBytesProcessed(state.iterations() *
+                          static_cast<int64_t>(text.size()));
+  iree_tokenizer_free(tokenizer);
+}
+BENCHMARK(BM_RetainedSpanAddedTokenSearch)
+    ->ArgNames({"text_bytes", "match_added_tokens"})
+    ->ArgsProduct({{4096, 16384, 65536, 262144}, {0, 1}});
 
 //===----------------------------------------------------------------------===//
 // Cold Start Benchmarks

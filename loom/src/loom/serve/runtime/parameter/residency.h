@@ -49,10 +49,11 @@ void loom_serve_residency_cache_set_observer(
 // removal or failed readiness. Final credit retirement wakes the owner.
 bool loom_serve_residency_cache_is_pending(loom_serve_residency_cache_t* cache);
 
-// Collects completed parameter releases on the serialized owner without
-// starting new release work. Call on native-capacity wakes before advancing
-// services, even when no cold activation is waiting. Native failure propagates
-// to the owner for ordinary draining. With no releases this is constant-time.
+// Collects completed staging credit and parameter releases on the serialized
+// owner without starting new work. Call on native-capacity wakes before
+// advancing services. Native release failure propagates for ordinary draining;
+// activation failure remains on its consuming execution and retains credit.
+// With no pending activation or release this is constant-time.
 iree_status_t loom_serve_residency_cache_query_status(
     loom_serve_residency_cache_t* cache);
 
@@ -140,17 +141,18 @@ iree_status_t loom_serve_residency_check_working_set(
 // Sets the next serialized invocation's private peak and escaping output bound
 // before admission. Private bytes include cohort input and ordered command
 // scratch; output bytes survive independently of the producer after
-// publication. Ordered activation staging shares the invocation's private
-// high-water. The caller owns no invocation pin while replacing these prepared
-// bounds.
+// publication. Ordered activation staging contributes to the admission peak
+// only until its deallocation completes. The caller owns no invocation pin
+// while replacing these prepared bounds.
 iree_status_t loom_serve_residency_prepare_working_set(
     loom_serve_residency_t* residency, uint64_t private_bytes,
     uint64_t output_bytes);
 
 // Checks a replacement command peak at a completed execution boundary. Live
 // rows may retain parameter pins; an increase must fit alongside their state
-// and accepted peers. This neither changes accounting nor reclaims history.
-// Ordered activation staging remains part of the private high-water.
+// and accepted peers. Collects completed native ownership without changing
+// declared bounds or reclaiming history. Cold feasibility is checked
+// independently of completed activation staging.
 iree_status_t loom_serve_residency_check_private_peak(
     const loom_serve_residency_t* residency, uint64_t private_bytes);
 
