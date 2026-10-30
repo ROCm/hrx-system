@@ -444,13 +444,6 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
     const void* src, iree_device_size_t size,
     iree_hal_streaming_stream_t* stream);
 
-// Copies immediate value bytes into graph-owned storage during capture so the
-// caller storage need not outlive this call.
-iree_status_t iree_hal_streaming_memcpy_value_to_device(
-    iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
-    const void* src, iree_device_size_t size,
-    iree_hal_streaming_stream_t* stream);
-
 // Outside capture, registered host destinations remain asynchronous when a
 // stream is supplied. Unregistered host destinations and NULL-stream copies
 // complete on the caller.

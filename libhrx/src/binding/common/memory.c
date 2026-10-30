@@ -155,7 +155,6 @@ typedef struct iree_hal_streaming_capture_host_to_device_t {
   iree_hal_streaming_deviceptr_t dst;
   const void* src;
   iree_device_size_t size;
-  bool copy_source_into_graph;
 } iree_hal_streaming_capture_host_to_device_t;
 
 static iree_status_t iree_hal_streaming_capture_build_host_to_device(
@@ -176,30 +175,17 @@ static iree_status_t iree_hal_streaming_capture_build_host_to_device(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "host-to-device source is not host memory");
     }
-    if (!capture->copy_source_into_graph) {
-      return iree_hal_streaming_graph_add_copy_ptr_node(
-          graph, dependencies, dependency_count, capture->dst,
-          (iree_hal_streaming_deviceptr_t)capture->src, capture->size,
-          out_terminal_node);
-    }
+    return iree_hal_streaming_graph_add_copy_ptr_node(
+        graph, dependencies, dependency_count, capture->dst,
+        (iree_hal_streaming_deviceptr_t)capture->src, capture->size,
+        out_terminal_node);
   }
-  const void* source = capture->src;
-  if (capture->copy_source_into_graph) {
-    void* graph_source = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate(&graph->arena, capture->size, &graph_source));
-    memcpy(graph_source, capture->src, capture->size);
-    source = graph_source;
-  }
-  iree_hal_streaming_buffer_t* staging = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_allocate_host_staging(
-      graph, capture->size, &staging));
 
   iree_hal_streaming_host_memcpy_callback_data_t* callback_data = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
       &graph->arena, sizeof(*callback_data), (void**)&callback_data));
-  callback_data->dst = staging->host_ptr;
-  callback_data->src = source;
+  callback_data->dst = NULL;
+  callback_data->src = capture->src;
   callback_data->count = capture->size;
 
   iree_hal_streaming_graph_node_t* callback_node = NULL;
@@ -208,10 +194,12 @@ static iree_status_t iree_hal_streaming_capture_build_host_to_device(
       iree_hal_streaming_host_memcpy_callback, callback_data, &callback_node));
   callback_node->attrs.host.user_data_size = sizeof(*callback_data);
 
-  IREE_RETURN_IF_ERROR(
-      iree_hal_streaming_graph_add_copy_ptr_node_with_extra_dependency(
-          graph, dependencies, dependency_count, callback_node, capture->dst,
-          staging->device_ptr, capture->size, out_terminal_node));
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_add_staged_copy_node(
+      graph, dependencies, dependency_count, callback_node,
+      IREE_HAL_STREAMING_GRAPH_STAGING_UPLOAD, capture->dst, capture->size,
+      capture->size,
+      offsetof(iree_hal_streaming_host_memcpy_callback_data_t, dst),
+      out_terminal_node));
   iree_hal_streaming_graph_attach_copy_callback(*out_terminal_node,
                                                 callback_node, false);
   return iree_ok_status();
@@ -261,20 +249,20 @@ static iree_status_t iree_hal_streaming_capture_build_device_to_host(
         (iree_hal_streaming_deviceptr_t)capture->dst, capture->src,
         capture->size, out_terminal_node);
   }
-  iree_hal_streaming_buffer_t* staging = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_allocate_host_staging(
-      graph, capture->size, &staging));
 
   iree_hal_streaming_graph_node_t* copy_node = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_add_copy_ptr_node(
-      graph, dependencies, dependency_count, staging->device_ptr, capture->src,
-      capture->size, &copy_node));
+  IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_add_staged_copy_node(
+      graph, dependencies, dependency_count, NULL,
+      IREE_HAL_STREAMING_GRAPH_STAGING_DOWNLOAD, capture->src, capture->size,
+      capture->size,
+      offsetof(iree_hal_streaming_host_memcpy_callback_data_t, src),
+      &copy_node));
 
   iree_hal_streaming_host_memcpy_callback_data_t* callback_data = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
       &graph->arena, sizeof(*callback_data), (void**)&callback_data));
   callback_data->dst = capture->dst;
-  callback_data->src = staging->host_ptr;
+  callback_data->src = NULL;
   callback_data->count = capture->size;
 
   iree_hal_streaming_graph_node_t* copy_dependencies[] = {copy_node};
@@ -3193,33 +3181,6 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
 //===----------------------------------------------------------------------===//
 // Memory copy helper functions
 //===----------------------------------------------------------------------===//
-iree_status_t iree_hal_streaming_memcpy_value_to_device(
-    iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
-    const void* src, iree_device_size_t size,
-    iree_hal_streaming_stream_t* stream) {
-  IREE_ASSERT_ARGUMENT(context);
-  IREE_ASSERT_ARGUMENT(dst);
-  IREE_ASSERT_ARGUMENT(src);
-
-  if (stream) {
-    iree_hal_streaming_capture_host_to_device_t capture = {
-        .dst = dst,
-        .src = src,
-        .size = size,
-        .copy_source_into_graph = true,
-    };
-    bool was_capturing = false;
-    IREE_RETURN_IF_ERROR(iree_hal_streaming_capture_try_record_node(
-        stream, iree_hal_streaming_capture_record_host_to_device, &capture,
-        &was_capturing));
-    if (was_capturing) {
-      return iree_ok_status();
-    }
-  }
-  return iree_hal_streaming_memcpy_host_to_device(context, dst, src, size,
-                                                  stream);
-}
-
 // Host coherence removes explicit host cache management, not device cache
 // publication. Join producers before asking the native queue to make their
 // writes visible and invalidate cached data before the CPU takes ownership.

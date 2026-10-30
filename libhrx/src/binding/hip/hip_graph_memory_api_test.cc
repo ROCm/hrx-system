@@ -79,6 +79,8 @@ struct HipGraphApi {
   decltype(&hipGraphMemcpyNodeSetParams1D) set_copy = nullptr;
   // Updates only one compiled graph's contiguous copy parameters.
   decltype(&hipGraphExecMemcpyNodeSetParams1D) set_executable_copy = nullptr;
+  // Updates one compiled pitched copy without joining previous launches.
+  decltype(&hipGraphExecMemcpyNodeSetParams) set_executable_copy_3d = nullptr;
   // Replaces the executable parameters using a topology-compatible template.
   decltype(&hipGraphExecUpdate) update_executable = nullptr;
   // Changes an executable's node-enable state without editing its template.
@@ -152,6 +154,7 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     RESOLVE(add_empty, "hipGraphAddEmptyNode");
     RESOLVE(set_copy, "hipGraphMemcpyNodeSetParams1D");
     RESOLVE(set_executable_copy, "hipGraphExecMemcpyNodeSetParams1D");
+    RESOLVE(set_executable_copy_3d, "hipGraphExecMemcpyNodeSetParams");
     RESOLVE(update_executable, "hipGraphExecUpdate");
     RESOLVE(set_enabled, "hipGraphNodeSetEnabled");
     RESOLVE(get_node_type, "hipGraphNodeGetType");
@@ -267,6 +270,75 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     }
   }
 
+  void CheckPendingStagedCopyUpdates(bool pitched) {
+    ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
+    const size_t width = pitched ? 16 : source_.size();
+    const size_t height = pitched ? 2 : 1;
+    const size_t depth = pitched ? 2 : 1;
+    hipMemcpy3DParms upload_params = {
+        .srcPtr = {source_.data(), width, width, height},
+        .dstPtr = {device_, width, width, height},
+        .extent = {width, height, depth},
+        .kind = hipMemcpyHostToDevice,
+    };
+    hipMemcpy3DParms download_params = {
+        .srcPtr = {device_, width, width, height},
+        .dstPtr = {destination_.data(), width, width, height},
+        .extent = {width, height, depth},
+        .kind = hipMemcpyDeviceToHost,
+    };
+    hipGraphNode_t upload = nullptr;
+    hipGraphNode_t download = nullptr;
+    ASSERT_EQ(hipSuccess,
+              api_.add_copy(&upload, graph_, nullptr, 0, &upload_params));
+    ASSERT_EQ(hipSuccess,
+              api_.add_copy(&download, graph_, &upload, 1, &download_params));
+    ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+
+    HoldStreamAtGate();
+    ASSERT_FALSE(HasFatalFailure());
+    ASSERT_EQ(hipSuccess, api_.launch(executable_, stream_));
+    upload_params.srcPtr.ptr = replacement_.data();
+    download_params.dstPtr.ptr = observed_.data();
+    if (pitched) {
+      ASSERT_EQ(hipSuccess, api_.set_executable_copy_3d(executable_, upload,
+                                                        &upload_params));
+      ASSERT_EQ(hipSuccess, api_.set_executable_copy_3d(executable_, download,
+                                                        &download_params));
+    } else {
+      ASSERT_EQ(hipSuccess,
+                api_.set_executable_copy(
+                    executable_, upload, device_, replacement_.data(),
+                    replacement_.size(), hipMemcpyHostToDevice));
+      ASSERT_EQ(hipSuccess, api_.set_executable_copy(executable_, download,
+                                                     observed_.data(), device_,
+                                                     observed_.size(),
+                                                     hipMemcpyDeviceToHost));
+    }
+    ReleaseStreamGate();
+    ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+    EXPECT_EQ(destination_, source_);
+    EXPECT_EQ(observed_, (std::array<uint8_t, 64>{}));
+
+    // Replacing the entire private graph releases its node references while
+    // the pending callbacks and GPU copies still own the previous storage.
+    HoldStreamAtGate();
+    ASSERT_FALSE(HasFatalFailure());
+    ASSERT_EQ(hipSuccess, api_.launch(executable_, stream_));
+    hipGraphNode_t error_node = nullptr;
+    hipGraphExecUpdateResult result;
+    ASSERT_EQ(hipSuccess, api_.update_executable(executable_, graph_,
+                                                 &error_node, &result));
+    EXPECT_EQ(result, hipGraphExecUpdateSuccess);
+    ReleaseStreamGate();
+    ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+    EXPECT_EQ(observed_, replacement_);
+    destination_.fill(0);
+    Replay();
+    ASSERT_FALSE(HasFatalFailure());
+    EXPECT_EQ(destination_, source_);
+  }
+
   static void Increment(void* user_data) { ++*static_cast<int*>(user_data); }
 
   static void ObserveDestination(void* user_data) {
@@ -328,6 +400,14 @@ class HipGraphMemoryApiTest : public ::testing::Test {
 
 hrx::hip::testing::HipDso HipGraphMemoryApiTest::dso_;
 HipGraphApi HipGraphMemoryApiTest::api_;
+
+TEST_F(HipGraphMemoryApiTest, PendingContiguousCopiesOwnTheirStaging) {
+  CheckPendingStagedCopyUpdates(false);
+}
+
+TEST_F(HipGraphMemoryApiTest, PendingPitchedCopiesOwnTheirStaging) {
+  CheckPendingStagedCopyUpdates(true);
+}
 
 TEST_F(HipGraphMemoryApiTest, RejectedCopiesLeaveTheOriginalGraphUsable) {
   ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));

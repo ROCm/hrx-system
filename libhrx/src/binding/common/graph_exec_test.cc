@@ -578,12 +578,14 @@ TEST_F(GraphExecTest, RejectedCopyConstructionPreservesTopologyAndBacking) {
   for (const size_t initial_nodes : {size_t{0}, size_t{15}, size_t{64}}) {
     SCOPED_TRACE(initial_nodes);
     std::array<int, 2> calls = {};
+    iree_hal_streaming_buffer_t* destination = nullptr;
     iree_hal_streaming_graph_t* graph = nullptr;
     iree_hal_streaming_graph_exec_t* executable = nullptr;
     ScopeExit release_handles([&] {
       IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
       iree_hal_streaming_graph_exec_release(executable);
       iree_hal_streaming_graph_release(graph);
+      iree_hal_streaming_memory_release_wrapped_buffer(destination);
     });
     IREE_ASSERT_OK(iree_hal_streaming_graph_create(
         context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
@@ -592,9 +594,8 @@ TEST_F(GraphExecTest, RejectedCopyConstructionPreservesTopologyAndBacking) {
       IREE_ASSERT_OK(
           iree_hal_streaming_graph_add_empty_node(graph, nullptr, 0, nullptr));
     }
-    iree_hal_streaming_buffer_t* destination = nullptr;
-    IREE_ASSERT_OK(iree_hal_streaming_graph_allocate_host_staging(
-        graph, sizeof(uint32_t), &destination));
+    IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host_staging(
+        context_, sizeof(uint32_t), &destination));
     const auto checkpoint = iree_hal_streaming_graph_copy_checkpoint(graph);
     const auto increment = +[](void* data) { ++*static_cast<int*>(data); };
     struct NodeAllocator {
@@ -606,13 +607,21 @@ TEST_F(GraphExecTest, RejectedCopyConstructionPreservesTopologyAndBacking) {
       size_t count = 0;
     } allocator = {graph->arena_allocator, 0};
     const uint32_t value = 37;
+    struct CopyParameters {
+      // Executable-owned staging pointer filled during instantiation.
+      void* destination;
+      // Caller-owned source, live through completion.
+      const uint32_t* source;
+      // Counts preparation invocations independently of the copy value.
+      int* calls;
+    } parameters = {nullptr, &value, &calls[0]};
+    const auto prepare_copy = +[](void* user_data) {
+      const auto* parameters = static_cast<const CopyParameters*>(user_data);
+      memcpy(parameters->destination, parameters->source, sizeof(uint32_t));
+      ++*parameters->calls;
+    };
     size_t rejected = 0;
     for (;; ++allocator.fail_index) {
-      iree_hal_streaming_buffer_t* staging = nullptr;
-      IREE_ASSERT_OK(iree_hal_streaming_graph_allocate_host_staging(
-          graph, sizeof(value), &staging));
-      memcpy(staging->host_ptr, &value, sizeof(value));
-      const auto staging_pointer = staging->device_ptr;
       allocator.count = 0;
       graph->arena_allocator = {
           .self = &allocator,
@@ -632,11 +641,13 @@ TEST_F(GraphExecTest, RejectedCopyConstructionPreservesTopologyAndBacking) {
       iree_hal_streaming_graph_node_t* copy = nullptr;
       iree_hal_streaming_graph_node_t* complete = nullptr;
       iree_status_t status = iree_hal_streaming_graph_add_host_call_node(
-          graph, nullptr, 0, increment, &calls[0], &prepare);
+          graph, nullptr, 0, prepare_copy, &parameters, &prepare);
       if (iree_status_is_ok(status)) {
-        status = iree_hal_streaming_graph_add_copy_ptr_node(
-            graph, &prepare, 1, destination->device_ptr, staging_pointer,
-            sizeof(value), &copy);
+        prepare->attrs.host.user_data_size = sizeof(parameters);
+        status = iree_hal_streaming_graph_add_staged_copy_node(
+            graph, nullptr, 0, prepare, IREE_HAL_STREAMING_GRAPH_STAGING_UPLOAD,
+            destination->device_ptr, sizeof(value), sizeof(value),
+            offsetof(CopyParameters, destination), &copy);
       }
       if (iree_status_is_ok(status)) {
         iree_hal_streaming_graph_attach_copy_callback(copy, prepare, false);
@@ -654,10 +665,6 @@ TEST_F(GraphExecTest, RejectedCopyConstructionPreservesTopologyAndBacking) {
       EXPECT_EQ(graph->node_count, checkpoint.node_count);
       EXPECT_EQ(graph->root_count, checkpoint.root_count);
       EXPECT_EQ(graph->copy_helper_count, checkpoint.helper_count);
-      EXPECT_EQ(graph->owned_host_allocations, checkpoint.allocations);
-      iree_hal_streaming_buffer_ref_t ref;
-      EXPECT_FALSE(iree_hal_streaming_memory_try_lookup(context_,
-                                                        staging_pointer, &ref));
     }
     EXPECT_GE(rejected, 3u);
     IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
@@ -678,6 +685,7 @@ TEST_F(GraphExecTest, ParallelWorkstreamsCarryBothLaunchBoundaries) {
     for (const bool append_barrier : {false, true}) {
       SCOPED_TRACE(fill_count);
       SCOPED_TRACE(append_barrier);
+      iree_hal_streaming_buffer_t* storage = nullptr;
       iree_hal_streaming_graph_t* graph = nullptr;
       iree_hal_streaming_graph_exec_t* executable = nullptr;
       GraphBoundaryQueue queue;
@@ -689,13 +697,13 @@ TEST_F(GraphExecTest, ParallelWorkstreamsCarryBothLaunchBoundaries) {
         iree_hal_queue_release(&queue.base);
         iree_hal_streaming_graph_exec_release(executable);
         iree_hal_streaming_graph_release(graph);
+        iree_hal_streaming_memory_release_wrapped_buffer(storage);
       });
       IREE_ASSERT_OK(iree_hal_streaming_graph_create(
           context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
           &graph));
-      iree_hal_streaming_buffer_t* storage = nullptr;
-      IREE_ASSERT_OK(iree_hal_streaming_graph_allocate_host_staging(
-          graph, fill_count, &storage));
+      IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host_staging(
+          context_, fill_count, &storage));
       std::vector<iree_hal_streaming_graph_node_t*> fills(fill_count);
       for (size_t i = 0; i < fill_count; ++i) {
         IREE_ASSERT_OK(iree_hal_streaming_graph_add_fill_ptr_node(
@@ -820,6 +828,8 @@ TEST_F(GraphExecTest,
 
 TEST_F(GraphExecTest, CopyHelpersShareEnableStateAndTemplateLifetime) {
   std::array<int, 2> calls = {};
+  iree_hal_streaming_buffer_t* source = nullptr;
+  iree_hal_streaming_buffer_t* destination = nullptr;
   iree_hal_streaming_graph_t* graph = nullptr;
   iree_hal_streaming_graph_t* clone = nullptr;
   iree_hal_streaming_graph_exec_t* executable = nullptr;
@@ -828,16 +838,16 @@ TEST_F(GraphExecTest, CopyHelpersShareEnableStateAndTemplateLifetime) {
     iree_hal_streaming_graph_exec_release(executable);
     iree_hal_streaming_graph_release(clone);
     iree_hal_streaming_graph_release(graph);
+    iree_hal_streaming_memory_release_wrapped_buffer(source);
+    iree_hal_streaming_memory_release_wrapped_buffer(destination);
   });
   IREE_ASSERT_OK(iree_hal_streaming_graph_create(
       context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
       &graph));
-  iree_hal_streaming_buffer_t* source = nullptr;
-  iree_hal_streaming_buffer_t* destination = nullptr;
-  IREE_ASSERT_OK(iree_hal_streaming_graph_allocate_host_staging(
-      graph, sizeof(uint32_t), &source));
-  IREE_ASSERT_OK(iree_hal_streaming_graph_allocate_host_staging(
-      graph, sizeof(uint32_t), &destination));
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host_staging(
+      context_, sizeof(uint32_t), &source));
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_host_staging(
+      context_, sizeof(uint32_t), &destination));
   const uint32_t value = 37;
   memcpy(source->host_ptr, &value, sizeof(value));
   memset(destination->host_ptr, 0, sizeof(value));
@@ -946,9 +956,26 @@ TEST_F(GraphExecTest, UpdatePreservesParametersOfPendingHostOperations) {
     // Allows each launch to continue after its update/inspection boundary.
     std::binary_semaphore release{0};
   } gate;
-  struct Copy {
-    // Value snapshotted for one launch.
+  struct Value {
+    // Shared by graph snapshots and their pending host operations.
+    iree_hal_resource_t resource;
+    // Immutable value read by the operation.
     int value;
+    // Records reclamation independently of graph metadata lifetime.
+    std::atomic<int>* destroyed;
+  };
+  static const iree_hal_resource_vtable_t value_vtable = {
+      .destroy =
+          +[](iree_hal_resource_t* resource) {
+            auto* value = reinterpret_cast<Value*>(resource);
+            value->destroyed->fetch_add(1, std::memory_order_release);
+            delete value;
+          },
+  };
+  std::atomic<int> destroyed{0};
+  struct Copy {
+    // Immutable resource referenced by the snapshotted parameters.
+    Value* value;
     // Application output retained until the launch completes.
     int* output;
   };
@@ -979,17 +1006,20 @@ TEST_F(GraphExecTest, UpdatePreservesParametersOfPendingHostOperations) {
   Copy* copy = nullptr;
   IREE_ASSERT_OK(iree_arena_allocate(&graph->arena, sizeof(*copy),
                                      reinterpret_cast<void**>(&copy)));
-  *copy = {17, &output};
+  auto* initial_value = new Value{{}, 17, &destroyed};
+  iree_hal_resource_initialize(&value_vtable, &initial_value->resource);
+  *copy = {initial_value, &output};
   iree_hal_streaming_graph_node_t* node = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_operation_node(
       graph, &gate_node, 1,
       +[](void* user_data) {
         const auto* copy = static_cast<const Copy*>(user_data);
-        *copy->output = copy->value;
+        *copy->output = copy->value->value;
         return iree_ok_status();
       },
       copy, &node));
   node->attrs.host.user_data_size = sizeof(*copy);
+  node->attrs.host.resource = &initial_value->resource;
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
   iree_hal_streaming_graph_exec_launch_result_t launch_result;
@@ -999,16 +1029,22 @@ TEST_F(GraphExecTest, UpdatePreservesParametersOfPendingHostOperations) {
 
   // Rebuilding releases the compiled arena while the old launch still owns a
   // pending operation. Its captured parameters must survive that release.
-  copy->value = 31;
+  auto* updated_value = new Value{{}, 31, &destroyed};
+  iree_hal_resource_initialize(&value_vtable, &updated_value->resource);
+  iree_hal_resource_release(node->attrs.host.resource);
+  node->attrs.host.resource = &updated_value->resource;
+  copy->value = updated_value;
   iree_hal_streaming_graph_node_t* error_node = nullptr;
   iree_hal_streaming_graph_exec_update_result_t update_result;
   IREE_ASSERT_OK(iree_hal_streaming_graph_exec_update(
       executable, graph, &error_node, &update_result));
   EXPECT_EQ(update_result, IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_SUCCESS);
+  EXPECT_EQ(destroyed.load(std::memory_order_acquire), 0);
   gate.release.release();
   gate_released = true;
   IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
   EXPECT_EQ(output, 17);
+  EXPECT_EQ(destroyed.load(std::memory_order_acquire), 1);
 
   gate.release.release();
   IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(executable, stream_,

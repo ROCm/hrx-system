@@ -539,6 +539,89 @@ TEST_F(CpuStreamingMemoryTest,
   }
 }
 
+TEST_F(CpuStreamingMemoryTest, ExecutableCopiesOwnDistinctStaging) {
+  constexpr size_t kSize = 16;
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, kSize, IREE_HAL_STREAMING_MEMORY_FLAG_NONE, &buffer_));
+  device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
+  std::array<uint8_t, kSize> source;
+  source.fill(0x37);
+  std::array<uint8_t, kSize> output = {};
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture(
+      stream_, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  iree_status_t status = iree_hal_streaming_memcpy_host_to_device(
+      context_, device_pointer_, source.data(), source.size(), stream_);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_memcpy_device_to_host(
+        context_, output.data(), device_pointer_, output.size(), stream_);
+  }
+  iree_hal_streaming_graph_t* graph = nullptr;
+  status =
+      iree_status_join(status, iree_hal_streaming_end_capture(stream_, &graph));
+  std::unique_ptr<iree_hal_streaming_graph_t,
+                  decltype(&iree_hal_streaming_graph_release)>
+      graph_owner(graph, iree_hal_streaming_graph_release);
+  IREE_ASSERT_OK(status);
+  iree_hal_streaming_graph_t* clone = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_clone(
+      graph, IREE_HAL_STREAMING_GRAPH_CLONE_MODE_TEMPLATE, &clone));
+  std::unique_ptr<iree_hal_streaming_graph_t,
+                  decltype(&iree_hal_streaming_graph_release)>
+      clone_owner(clone, iree_hal_streaming_graph_release);
+  graph_owner.reset();
+
+  iree_hal_streaming_graph_exec_t* first = nullptr;
+  iree_hal_streaming_graph_exec_t* second = nullptr;
+  const auto release_executable = [&](iree_hal_streaming_graph_exec_t* value) {
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    iree_hal_streaming_graph_exec_release(value);
+  };
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      clone, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &first));
+  std::unique_ptr<iree_hal_streaming_graph_exec_t, decltype(release_executable)>
+      first_owner(first, release_executable);
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      clone, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &second));
+  std::unique_ptr<iree_hal_streaming_graph_exec_t, decltype(release_executable)>
+      second_owner(second, release_executable);
+  size_t staged_copies = 0;
+  for (auto* block = clone->node_blocks; block; block = block->next) {
+    for (size_t i = 0; i < block->count; ++i) {
+      auto* node = block->nodes[i];
+      if (node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEMCPY) {
+        continue;
+      }
+      ++staged_copies;
+      const bool upload = node->attrs.memcpy.staging.direction ==
+                          IREE_HAL_STREAMING_GRAPH_STAGING_UPLOAD;
+      EXPECT_EQ(nullptr, upload ? node->attrs.memcpy.src_ref.buffer
+                                : node->attrs.memcpy.dst_ref.buffer);
+      auto* first_node = iree_hal_streaming_graph_exec_lock_node(first, node);
+      auto* second_node = iree_hal_streaming_graph_exec_lock_node(second, node);
+      auto* first_buffer = upload ? first_node->attrs.memcpy.src_ref.buffer
+                                  : first_node->attrs.memcpy.dst_ref.buffer;
+      auto* second_buffer = upload ? second_node->attrs.memcpy.src_ref.buffer
+                                   : second_node->attrs.memcpy.dst_ref.buffer;
+      EXPECT_NE(nullptr, first_buffer);
+      EXPECT_NE(nullptr, second_buffer);
+      EXPECT_NE(first_buffer, second_buffer);
+      EXPECT_NE(first_buffer->host_ptr, second_buffer->host_ptr);
+      iree_hal_streaming_graph_exec_unlock(second);
+      iree_hal_streaming_graph_exec_unlock(first);
+    }
+  }
+  EXPECT_EQ(staged_copies, 2u);
+  for (auto* executable : {first, second, first}) {
+    iree_hal_streaming_graph_exec_launch_result_t launch_result;
+    IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(executable, stream_,
+                                                        &launch_result));
+    EXPECT_EQ(launch_result, IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS);
+    IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    EXPECT_EQ(output, source);
+    source.fill(static_cast<uint8_t>(source[0] + 1));
+  }
+}
+
 TEST_F(CpuStreamingMemoryTest,
        CapturedHostCopiesRejectRegisteredRangeOverruns) {
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
@@ -549,18 +632,13 @@ TEST_F(CpuStreamingMemoryTest,
       IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT, &host_buffer_));
   registered_storage_.fill(0xcd);
 
-  for (int operation : {0, 1, 2}) {
+  for (int operation : {0, 1}) {
     IREE_ASSERT_OK(iree_hal_streaming_begin_capture(
         stream_, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
     iree_status_t status;
     switch (operation) {
       case 0:
         status = iree_hal_streaming_memcpy_host_to_device(
-            context_, device_pointer_, registered_storage_.data() + 8, 9,
-            stream_);
-        break;
-      case 1:
-        status = iree_hal_streaming_memcpy_value_to_device(
             context_, device_pointer_, registered_storage_.data() + 8, 9,
             stream_);
         break;

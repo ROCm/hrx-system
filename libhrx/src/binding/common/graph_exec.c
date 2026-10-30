@@ -76,6 +76,8 @@ typedef struct iree_hal_streaming_graph_host_call_block_attrs_t {
   // Owned parameter bytes captured by each invocation, or zero for a borrowed
   // application argument.
   iree_host_size_t user_data_size;
+  // Parameter-referenced storage retained by the compiled resource set.
+  iree_hal_resource_t* resource;
   // Host-call submission flags.
   iree_hal_host_call_flags_t flags;
 } iree_hal_streaming_graph_host_call_block_attrs_t;
@@ -730,7 +732,7 @@ iree_status_t iree_hal_streaming_graph_exec_create(
   iree_slim_mutex_initialize(&exec->mutex);
 
   iree_status_t status = iree_ok_status();
-  if (graph->storage_source) {
+  if (graph->template_graph) {
     // A compiled child's descriptions were already captured recursively by
     // its parent. Share that private snapshot instead of copying each subtree
     // again at every level of nesting.
@@ -1378,6 +1380,12 @@ static iree_status_t iree_hal_streaming_graph_create_host_call_block(
   attrs->user_data = user_data;
   attrs->user_data_size =
       source_node ? source_node->attrs.host.user_data_size : 0;
+  attrs->resource = source_node ? source_node->attrs.host.resource : NULL;
+  if (attrs->resource) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0,
+        iree_hal_resource_set_insert(exec->resource_set, 1, &attrs->resource));
+  }
   if (source_node && source_node->attrs.host.user_data_size > 0 && user_data) {
     void* copied_data = NULL;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
@@ -1529,15 +1537,14 @@ static iree_status_t iree_hal_streaming_graph_create_execute_block(
       &out_ptrs->attrs->execute;
   attrs->flags = flags;
 
-  // Create command buffer. HIP pointer lifetime is enforced by explicit API
-  // ordering, not by scanning graph or kernarg contents: synchronous
-  // destruction waits for active streams, and stream-ordered destruction queues
-  // the release after prior work.
-  //
+  // Parameter updates can replace this compiled graph while an older launch
+  // is pending. Each command buffer retains its recorded buffers/executables
+  // until all accepted submissions retire. Raw HIP pointers in kernel
+  // arguments remain governed by the application's allocation lifetime.
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_command_buffer_create(
               iree_hal_queue_family(exec->context->queue),
-              IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
+              IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
               IREE_HAL_COMMAND_CATEGORY_TRANSFER |
                   IREE_HAL_COMMAND_CATEGORY_DISPATCH |
                   IREE_HAL_COMMAND_CATEGORY_ATOMIC,
@@ -2524,7 +2531,7 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
           stream->context->device_entry->host_callbacks,
           ptrs->attrs->host_call.callback, ptrs->attrs->host_call.user_data,
           ptrs->attrs->host_call.user_data_size,
-          /*resource=*/NULL, &call);
+          ptrs->attrs->host_call.resource, &call);
       if (iree_status_is_ok(status)) {
         const uint64_t args[4] = {0};
         status =
