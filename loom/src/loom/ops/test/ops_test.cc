@@ -390,6 +390,25 @@ TEST_F(BuilderTest, DirectWriteEffectSummaryUpdatesOnErase) {
   EXPECT_EQ(loom_region_written_memory_spaces(module_->body), 0);
 }
 
+TEST_F(BuilderTest, DirectIdentitySummaryUpdatesOnErase) {
+  loom_op_t* size_op = NULL;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &builder_, loom_attr_i64(16), loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+      LOOM_LOCATION_UNKNOWN, &size_op));
+  loom_op_t* allocation_op = NULL;
+  IREE_ASSERT_OK(loom_test_alloc_build(
+      &builder_, loom_test_constant_result(size_op), loom_type_pool(),
+      LOOM_LOCATION_UNKNOWN, &allocation_op));
+
+  EXPECT_EQ(module_->body->unique_identity_count, 1u);
+  EXPECT_TRUE(loom_region_has_unique_identities(module_->body));
+  EXPECT_FALSE(loom_region_has_memory_accesses(module_->body));
+
+  IREE_ASSERT_OK(loom_op_erase(module_, allocation_op));
+  EXPECT_EQ(module_->body->unique_identity_count, 0u);
+  EXPECT_FALSE(loom_region_has_unique_identities(module_->body));
+}
+
 TEST_F(BuilderTest, UnknownOpEffectsAreConservative) {
   loom_op_t* op = NULL;
   IREE_ASSERT_OK(loom_builder_allocate_op(
@@ -405,7 +424,7 @@ TEST_F(BuilderTest, UnknownOpEffectsAreConservative) {
   EXPECT_EQ(module_->body->memory_access_count, 1u);
 }
 
-TEST_F(BuilderTest, NestedWriteEffectSummaryPropagatesToAncestors) {
+TEST_F(BuilderTest, NestedEffectSummariesPropagateToAncestors) {
   loom_type_t pool_type = loom_type_pool();
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
 
@@ -420,6 +439,10 @@ TEST_F(BuilderTest, NestedWriteEffectSummaryPropagatesToAncestors) {
   IREE_ASSERT_OK(loom_test_constant_build(&builder_, loom_attr_i64(1), i32,
                                           LOOM_LOCATION_UNKNOWN, &data_op));
   loom_value_id_t data_id = loom_test_constant_result(data_op);
+  loom_op_t* size_op = NULL;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &builder_, loom_attr_i64(16), loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+      LOOM_LOCATION_UNKNOWN, &size_op));
 
   loom_op_t* map_op = NULL;
   IREE_ASSERT_OK(loom_test_map_build(&builder_, &input_id, 1, i32, NULL, 0,
@@ -430,12 +453,18 @@ TEST_F(BuilderTest, NestedWriteEffectSummaryPropagatesToAncestors) {
   loom_op_t* write_op = NULL;
   IREE_ASSERT_OK(loom_test_write_resource_build(
       &builder_, pool_id, data_id, LOOM_LOCATION_UNKNOWN, &write_op));
+  loom_op_t* allocation_op = NULL;
+  IREE_ASSERT_OK(loom_test_alloc_build(
+      &builder_, loom_test_constant_result(size_op), loom_type_pool(),
+      LOOM_LOCATION_UNKNOWN, &allocation_op));
   loom_builder_restore(&builder_, saved_ip);
 
   EXPECT_EQ(map_body->write_effect_count, 1u);
   EXPECT_EQ(module_->body->write_effect_count, 1u);
   EXPECT_EQ(map_body->memory_access_count, 1u);
   EXPECT_EQ(module_->body->memory_access_count, 1u);
+  EXPECT_EQ(map_body->unique_identity_count, 1u);
+  EXPECT_EQ(module_->body->unique_identity_count, 1u);
   EXPECT_EQ(loom_region_written_memory_spaces(map_body),
             1u << LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
   EXPECT_EQ(loom_region_written_memory_spaces(module_->body),
@@ -444,13 +473,18 @@ TEST_F(BuilderTest, NestedWriteEffectSummaryPropagatesToAncestors) {
   IREE_ASSERT_OK(loom_module_compute_uses(module_));
   EXPECT_EQ(map_body->memory_access_count, 1u);
   EXPECT_EQ(module_->body->memory_access_count, 1u);
+  EXPECT_EQ(map_body->unique_identity_count, 1u);
+  EXPECT_EQ(module_->body->unique_identity_count, 1u);
 
   IREE_ASSERT_OK(loom_op_erase(module_, map_op));
   EXPECT_EQ(map_body->write_effect_count, 0u);
   EXPECT_EQ(module_->body->write_effect_count, 0u);
   EXPECT_EQ(map_body->memory_access_count, 0u);
   EXPECT_EQ(module_->body->memory_access_count, 0u);
+  EXPECT_EQ(map_body->unique_identity_count, 0u);
+  EXPECT_EQ(module_->body->unique_identity_count, 0u);
   EXPECT_EQ(write_op->flags & LOOM_OP_FLAG_SUMMARIES_COUNTED, 0u);
+  EXPECT_EQ(allocation_op->flags & LOOM_OP_FLAG_SUMMARIES_COUNTED, 0u);
   EXPECT_EQ(loom_region_written_memory_spaces(map_body), 0);
   EXPECT_EQ(loom_region_written_memory_spaces(module_->body), 0);
 }

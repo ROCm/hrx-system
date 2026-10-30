@@ -2165,6 +2165,10 @@ typedef struct loom_region_t {
   // nested in this region. These ops remain live even when their SSA results
   // are unused.
   uint32_t observable_effect_count;
+  // Transitive count of fresh identities produced by all live ops nested in
+  // this region. Fresh identities prevent referentially transparent callable
+  // contracts but do not themselves imply memory or observable effects.
+  uint32_t unique_identity_count;
   // Transitive count of actual or unknown memory accesses. Unlike read/write
   // effects, this excludes ordering and observations of non-memory state.
   uint32_t memory_access_count;
@@ -2184,7 +2188,7 @@ typedef struct loom_region_t {
   loom_block_t* inline_blocks[1];
 } loom_region_t;
 
-static_assert(sizeof(loom_region_t) == (IREE_PTR_SIZE == 8 ? 128 : 104),
+static_assert(sizeof(loom_region_t) == (IREE_PTR_SIZE == 8 ? 136 : 108),
               "loom_region_t must retain its pointer-width layout");
 
 // Returns the retained union of write-like memory effects in this region.
@@ -2264,6 +2268,12 @@ static inline bool loom_region_has_convergent_effects(
 static inline bool loom_region_has_observable_effects(
     const loom_region_t* region) {
   return region && region->observable_effect_count != 0;
+}
+
+// Returns true when any live op nested in |region| produces a fresh identity.
+static inline bool loom_region_has_unique_identities(
+    const loom_region_t* region) {
+  return region && region->unique_identity_count != 0;
 }
 
 // Returns true when any live nested op may access storage, including unknown
