@@ -24,6 +24,7 @@ from loom.target.low_descriptors import (
     DescriptorSet,
     EffectKind,
     EnumDomain,
+    EnumDomainKind,
     EnumValue,
     Hazard,
     Immediate,
@@ -2044,7 +2045,12 @@ def validate_immediate_default(descriptor: Descriptor, immediate: Immediate, enu
         case ImmediateKind.ENUM:
             assert immediate.enum_domain is not None
             domain = enum_domains[immediate.enum_domain]
-            if all(value.value != immediate.default_value for value in domain.values):
+            if domain.kind == EnumDomainKind.BITSET:
+                valid_bits = sum({value.value for value in validate_enum_domain(domain)})
+                admitted = immediate.default_value >= 0 and not immediate.default_value & ~valid_bits
+            else:
+                admitted = any(value.value == immediate.default_value for value in domain.values)
+            if not admitted:
                 raise ValueError(f"descriptor '{descriptor.key}' immediate '{immediate.field_name}' default value is not in enum domain '{domain.name}'")
             return
     if immediate.default_value % immediate.value_step:
@@ -2155,4 +2161,6 @@ def validate_enum_domain(domain: EnumDomain) -> tuple[EnumValue, ...]:
         by_token[value.token] = value
         if value.value < -(1 << 63) or value.value > (1 << 63) - 1:
             raise ValueError(f"enum domain '{domain.name}' token '{value.token}' value does not fit i64")
+        if domain.kind == EnumDomainKind.BITSET and (value.value <= 0 or value.value & (value.value - 1)):
+            raise ValueError(f"bitset domain '{domain.name}' token '{value.token}' must name one positive bit")
     return tuple(sorted(domain.values, key=lambda value: value.token))

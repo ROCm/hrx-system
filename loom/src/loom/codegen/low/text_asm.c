@@ -518,6 +518,10 @@ static void loom_low_descriptor_text_asm_immediate_descriptor(
   out_immediate->enum_domain = immediate->kind == LOOM_LOW_IMMEDIATE_KIND_ENUM
                                    ? immediate->enum_domain_id
                                    : UINT16_MAX;
+  out_immediate->enum_is_bitset =
+      immediate->kind == LOOM_LOW_IMMEDIATE_KIND_ENUM &&
+      descriptor_set->enum_domains[immediate->enum_domain_id].kind ==
+          LOOM_LOW_ENUM_DOMAIN_KIND_BITSET;
   out_immediate->spelling =
       asm_immediate->name_string_ref != LOOM_STRING_REF_NONE
           ? loom_low_descriptor_set_string(descriptor_set,

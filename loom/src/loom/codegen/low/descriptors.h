@@ -986,6 +986,14 @@ typedef struct loom_low_encoding_field_value_t {
   uint64_t value;
 } loom_low_encoding_field_value_t;
 
+enum loom_low_enum_domain_kind_e {
+  // Exactly one of the domain's semantic values.
+  LOOM_LOW_ENUM_DOMAIN_KIND_ENUM = 0,
+  // A union of named independent bits, including the empty set.
+  LOOM_LOW_ENUM_DOMAIN_KIND_BITSET = 1,
+};
+typedef uint16_t loom_low_enum_domain_kind_t;
+
 typedef struct loom_low_enum_domain_t {
   // String-pool reference for the stable enum-domain name.
   loom_string_ref_t name_string_ref;
@@ -993,8 +1001,8 @@ typedef struct loom_low_enum_domain_t {
   uint32_t value_start;
   // Number of enum-value rows for this domain.
   uint16_t value_count;
-  // Reserved for future enum-domain flags.
-  uint16_t reserved;
+  // Whether the domain admits one value or a union of independent bits.
+  loom_low_enum_domain_kind_t kind;
 } loom_low_enum_domain_t;
 
 typedef struct loom_low_enum_value_t {
@@ -2231,6 +2239,18 @@ static inline bool loom_low_operand_requires_low_window_assignment(
 
 // Returns the stable diagnostic spelling for an immediate kind.
 iree_string_view_t loom_low_immediate_kind_name(loom_low_immediate_kind_t kind);
+
+// Tests a semantic value against an enum or named-bitset domain. Bitset
+// domains admit zero and unions of their declared independent bits.
+bool loom_low_enum_domain_contains_value(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_enum_domain_t* domain, int64_t value);
+
+// Resolves one stable token to its semantic value within |domain|.
+bool loom_low_enum_domain_resolve_token(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_enum_domain_t* domain, iree_string_view_t token,
+    int64_t* out_value);
 
 // Returns the stable diagnostic spelling for an effect kind.
 iree_string_view_t loom_low_effect_kind_name(loom_low_effect_kind_t kind);

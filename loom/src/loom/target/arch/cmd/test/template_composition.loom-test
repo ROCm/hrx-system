@@ -273,12 +273,15 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   %28 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
   %29 = cmd.constant.u64 0
   %30 = cmd.constant.u64 -1
-  %31 = cmd.constant.u32 1
-  cmd.dispatch.direct<%27, %28>[%31, %31, %31](%22, %29, %30, %23, %29, %30)
-  cmd.dispatch.direct<%27, %28>[%31, %31, %31](%22, %29, %30, %25, %29, %30)
-  cmd.dispatch.direct.barrier<%27, %28>[%31, %31, %31](%23, %29, %30, %24, %29, %30)
-  cmd.dispatch.direct<%27, %28>[%31, %31, %31](%25, %29, %30, %26, %29, %30)
-  cmd.dispatch.direct.barrier<%27, %28>[%31, %31, %31](%24, %29, %30, %26, %29, %30)
+  %31 = cmd.memory.global {source = ["dispatch_write", "transfer_write"], target = ["indirect_command_read", "dispatch_read", "dispatch_write", "transfer_read", "transfer_write"]}
+  %32 = cmd.constant.u32 1
+  cmd.dispatch.direct<%27, %28>[%32, %32, %32](%22, %29, %30, %23, %29, %30)
+  cmd.dispatch.direct<%27, %28>[%32, %32, %32](%22, %29, %30, %25, %29, %30)
+  cmd.barrier(%31) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  cmd.dispatch.direct<%27, %28>[%32, %32, %32](%23, %29, %30, %24, %29, %30)
+  cmd.dispatch.direct<%27, %28>[%32, %32, %32](%25, %29, %30, %26, %29, %30)
+  cmd.barrier(%31) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  cmd.dispatch.direct<%27, %28>[%32, %32, %32](%24, %29, %30, %26, %29, %30)
   return
 }
 
