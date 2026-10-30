@@ -174,6 +174,85 @@ TEST_F(InputsTest, TimestampTargetsNeedNoAtomicCapabilities) {
   iree_hal_buffer_release(captured.buffer);
 }
 
+TEST_F(InputsTest, MixedNativeAndShaderUsesKeepIndependentRequirements) {
+  const auto wait = iree_hal_amd_gpu_control_wait({
+      .flags = IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+      .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
+  });
+  const auto add = iree_hal_amd_gpu_control_rmw({
+      .operand = 1,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+      .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+  });
+  uint32_t wait_value = 0, add_value = 0;
+  for (uint32_t i = 0; i < 1000; ++i) {
+    IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_add_control(
+        &inputs_, iree_hal_make_indirect_buffer_ref(0, 0, 4), wait,
+        &wait_value));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_add_control(
+        &inputs_, iree_hal_make_indirect_buffer_ref(0, 0, 4), add, &add_value));
+  }
+  iree_hal_amd_gpu_command_inputs_seal(&inputs_);
+  EXPECT_EQ(inputs_.count, 2u);
+  EXPECT_NE(wait_value, add_value);
+  const iree_hal_buffer_binding_t binding = {&buffer_, 0, 32};
+  iree_hal_amd_gpu_command_binding_t captured = {};
+  contract_->scopes[1].atomic_operations =
+      contract_->scopes[2].atomic_operations =
+          IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+          IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INCOMPATIBLE,
+                        iree_hal_amd_gpu_command_inputs_capture(
+                            &inputs_, {1, &binding}, 0, &captured));
+  EXPECT_EQ(captured.buffer, nullptr);
+  contract_->zero_compute_atomic_operations[1] =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
+  contract_->scopes[2].atomic_operations = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        iree_hal_amd_gpu_command_inputs_capture(
+                            &inputs_, {1, &binding}, 0, &captured));
+  EXPECT_EQ(captured.buffer, nullptr);
+  contract_->scopes[2].atomic_operations =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_capture(
+      &inputs_, {1, &binding}, 0, &captured));
+  EXPECT_EQ(iree_atomic_ref_count_load(&buffer_.resource.ref_count), 2);
+  binding_.device_address = 0x1000;
+  uint64_t values[2] = {};
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, &captured, 0, values));
+  EXPECT_EQ(values[0], 0x1000u);
+  EXPECT_EQ(values[1], 0x1000u);
+  iree_hal_buffer_release(captured.buffer);
+}
+
+TEST_F(InputsTest, DirectZeroComputeTargetIsQualifiedBeforeRecording) {
+  contract_->scopes[1].atomic_operations =
+      contract_->scopes[2].atomic_operations =
+          IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
+  const auto command = iree_hal_amd_gpu_control_wait({
+      .flags = IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+  });
+  uint32_t input_value = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        iree_hal_amd_gpu_command_inputs_add_control(
+                            &inputs_, iree_hal_make_buffer_ref(&buffer_, 0, 4),
+                            command, &input_value));
+  contract_->zero_compute_atomic_operations[1] =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
+  contract_->scopes[2].atomic_operations = 0;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_command_inputs_add_control(
+      &inputs_, iree_hal_make_buffer_ref(&buffer_, 0, 4), command,
+      &input_value));
+  binding_.device_address = 0x1000;
+  uint64_t value = 0;
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_command_inputs_write(&inputs_, nullptr, 0, &value));
+  EXPECT_EQ(value, 0x1000u);
+}
+
 TEST_F(InputsTest, DirectAtomicRequiresTheProgramSiteAtRecording) {
   contract_->scopes[1].atomic_operations = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
   uint32_t value = 0;

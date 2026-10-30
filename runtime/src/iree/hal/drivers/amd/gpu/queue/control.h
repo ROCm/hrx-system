@@ -28,7 +28,7 @@ typedef struct iree_hal_amd_gpu_control_t {
   uint64_t value;
   // Wait comparison mask; unused by other kinds.
   uint64_t mask;
-  // Requested atomic ordering and coherence domain.
+  // Requested atomic ordering, coherence domain, and execution requirements.
   iree_hal_atomic_flags_t flags;
   // Timestamp, wait, store, or RMW.
   uint8_t kind;
@@ -90,9 +90,11 @@ uint32_t iree_hal_amd_gpu_control_requirement(
 // backing. required and incompatible use the packed scope-row representation;
 // the latter classifies only failures not also required with the default mode.
 // Native binding admission has already established family membership.
+// ZERO_COMPUTE selects the captured native queue subset instead of the site.
 iree_status_t iree_hal_amd_gpu_control_validate_target(
     const iree_hal_queue_family_t* family, iree_hal_memory_site_kind_t site,
-    const iree_hal_buffer_t* buffer, uint32_t required, uint32_t incompatible);
+    const iree_hal_buffer_t* buffer, uint32_t required, uint32_t incompatible,
+    iree_hal_atomic_flags_t flags);
 
 // Selects the shader recipe from the immutable zero-compute subset. No native
 // binding or committed backing is needed; virtual ranges retain zero here.

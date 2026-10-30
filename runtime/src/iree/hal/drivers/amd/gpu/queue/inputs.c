@@ -179,22 +179,32 @@ static iree_status_t iree_hal_amd_gpu_command_input(
 iree_status_t iree_hal_amd_gpu_command_inputs_add_control(
     iree_hal_amd_gpu_command_inputs_t* inputs, iree_hal_buffer_ref_t reference,
     iree_hal_amd_gpu_control_t command, uint32_t* out_value) {
+  const bool zero_compute =
+      (command.flags & IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE) != 0;
+  const uint32_t site =
+      command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP || zero_compute ? 0
+                                                                         : 1;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_binding(
-      inputs, reference,
-      command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP ? 0 : 1,
-      command.width / 8, 1, false, out_value));
+      inputs, reference, site, command.width / 8, 1, false, out_value));
   const uint32_t operations = iree_hal_amd_gpu_control_requirement(command);
   const bool incompatible = command.target_error_mode ==
                             IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE;
   if (reference.buffer) {
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_control_validate_target(
-        inputs->command_buffer->queue_family, IREE_HAL_MEMORY_SITE_PROGRAM,
+        inputs->command_buffer->queue_family,
+        (iree_hal_memory_site_kind_t)(IREE_HAL_MEMORY_SITE_QUEUE + site),
         reference.buffer, incompatible ? 0 : operations,
-        incompatible ? operations : 0));
+        incompatible ? operations : 0, command.flags));
   } else {
     iree_hal_amd_gpu_binding_requirement_t* requirement =
         &inputs->requirements[reference.buffer_slot + 1];
-    if (incompatible) {
+    if (zero_compute) {
+      if (incompatible) {
+        requirement->incompatible_zero_compute_atomic_operations |= operations;
+      } else {
+        requirement->zero_compute_atomic_operations |= operations;
+      }
+    } else if (incompatible) {
       requirement->incompatible_atomic_operations |= operations;
     } else {
       requirement->atomic_operations |= operations;
@@ -391,7 +401,17 @@ iree_status_t iree_hal_amd_gpu_command_inputs_capture(
         status = iree_hal_amd_gpu_control_validate_target(
             base->queue_family, IREE_HAL_MEMORY_SITE_PROGRAM, binding.buffer,
             requirement->atomic_operations,
-            requirement->incompatible_atomic_operations);
+            requirement->incompatible_atomic_operations,
+            IREE_HAL_ATOMIC_FLAG_NONE);
+      }
+      if (iree_status_is_ok(status) &&
+          (requirement->zero_compute_atomic_operations |
+           requirement->incompatible_zero_compute_atomic_operations)) {
+        status = iree_hal_amd_gpu_control_validate_target(
+            base->queue_family, IREE_HAL_MEMORY_SITE_QUEUE, binding.buffer,
+            requirement->zero_compute_atomic_operations,
+            requirement->incompatible_zero_compute_atomic_operations,
+            IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
       }
       if (iree_status_is_ok(status)) {
         captured->buffer = binding.buffer;

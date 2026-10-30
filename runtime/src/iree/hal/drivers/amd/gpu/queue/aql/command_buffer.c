@@ -915,7 +915,8 @@ static iree_status_t iree_hal_amd_gpu_aql_command_control(
                                        &after);
   uint32_t header = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_header(buffer, &header));
-  const bool program = command.kind != IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP;
+  const bool program = command.kind != IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP &&
+                       !(command.flags & IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE);
   uint32_t data_offset = 0;
   uint32_t word_count = 0;
   uint32_t predicate_words = 0;
@@ -935,13 +936,19 @@ static iree_status_t iree_hal_amd_gpu_aql_command_control(
     predicate_words = xcc_count > 1 ? 2 : 0;
     const uint32_t body_words = iree_hal_amd_gpu_control_word_count(command);
     word_count = predicate_words + body_words;
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_timestamp_writes_append(
-        &buffer->recording, target, &buffer->timestamps));
+    if (command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP) {
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_timestamp_writes_append(
+          &buffer->recording, target, &buffer->timestamps));
+    }
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
         &buffer->recording, word_count * 4, 4, &data_offset, (void**)&words));
     uint32_t* cursor =
         iree_hal_amd_gpu_aql_emit_single_executor(words, xcc_count, body_words);
-    iree_hal_amd_gpu_pm4_emit_clock(cursor, 0, false);
+    if (command.kind == IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP) {
+      iree_hal_amd_gpu_pm4_emit_clock(cursor, 0, false);
+    } else {
+      iree_hal_amd_gpu_control_emit(cursor, 0, command);
+    }
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
         buffer,
         data_offset + 4 * (predicate_words +
@@ -953,7 +960,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_control(
   iree_hal_amd_gpu_aql_packet_t* packet = NULL;
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_aql_command_packets(buffer, 1, &packet_offset, &packet));
-  if (program) {
+  if (command.kind != IREE_HAL_AMD_GPU_CONTROL_TIMESTAMP) {
     header |= IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED;
   }
   *packet =

@@ -36,6 +36,8 @@ iree_status_t iree_hal_amdgpu_aql_atomic_record_wait(
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_amdgpu_command_buffer_atomic_target_t target,
     iree_hal_atomic_wait_params_t params) {
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_atomic_memory_validate_flags(params.flags));
   iree_hal_amdgpu_aql_atomic_record_dependency(
       builder, source_stage_mask, params.flags, IREE_HAL_ATOMIC_FLAG_NONE);
 
@@ -68,6 +70,8 @@ iree_status_t iree_hal_amdgpu_aql_atomic_record_store(
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_amdgpu_command_buffer_atomic_target_t target,
     iree_hal_atomic_store_params_t params) {
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_atomic_memory_validate_flags(params.flags));
   iree_hal_amdgpu_aql_atomic_record_dependency(
       builder, source_stage_mask, params.flags, IREE_HAL_ATOMIC_FLAG_RELEASE);
 
@@ -98,6 +102,8 @@ iree_status_t iree_hal_amdgpu_aql_atomic_record_rmw(
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_amdgpu_command_buffer_atomic_target_t target,
     iree_hal_atomic_rmw_params_t params) {
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdgpu_atomic_memory_validate_flags(params.flags));
   iree_hal_amdgpu_aql_atomic_record_dependency(
       builder, source_stage_mask, params.flags, IREE_HAL_ATOMIC_FLAG_RELEASE);
 

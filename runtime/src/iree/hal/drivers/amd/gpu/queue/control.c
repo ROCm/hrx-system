@@ -27,11 +27,15 @@ uint32_t iree_hal_amd_gpu_control_requirement(
 
 iree_status_t iree_hal_amd_gpu_control_validate_target(
     const iree_hal_queue_family_t* family, iree_hal_memory_site_kind_t site,
-    const iree_hal_buffer_t* buffer, uint32_t required, uint32_t incompatible) {
-  const uint32_t available = buffer->memory.contract
-                                 ->scopes[family->memory.queue_scope_id +
-                                          (site - IREE_HAL_MEMORY_SITE_QUEUE)]
-                                 .atomic_operations;
+    const iree_hal_buffer_t* buffer, uint32_t required, uint32_t incompatible,
+    iree_hal_atomic_flags_t flags) {
+  const iree_hal_memory_contract_t* contract = buffer->memory.contract;
+  const uint32_t id = family->memory.queue_scope_id;
+  const uint32_t available =
+      flags & IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE
+          ? contract->zero_compute_atomic_operations[id]
+          : contract->scopes[id + (site - IREE_HAL_MEMORY_SITE_QUEUE)]
+                .atomic_operations;
   if (((required | incompatible) & ~available) != 0) {
     return iree_make_status(
         (required & ~available) ? IREE_STATUS_PERMISSION_DENIED

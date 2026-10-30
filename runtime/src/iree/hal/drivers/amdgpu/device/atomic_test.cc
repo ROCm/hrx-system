@@ -94,7 +94,8 @@ TEST(AtomicTest, WaitX32NormalizesModeAndEmplacesDispatch) {
   const iree_hal_atomic_wait_params_t params = {
       .value = 0x12345678u,
       .mask = 0xFFFF00FFu,
-      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+               IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
       .width = IREE_HAL_ATOMIC_WIDTH_32,
       .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL,
   };
@@ -150,7 +151,8 @@ TEST(AtomicTest, StoreX32NormalizesModeAndClearsPadding) {
   };
   const iree_hal_atomic_store_params_t params = {
       .value = 0x89ABCDEFu,
-      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+               IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
       .width = IREE_HAL_ATOMIC_WIDTH_32,
   };
 
@@ -197,7 +199,8 @@ TEST(AtomicTest, RmwX32PreservesCompleteModeAndOperation) {
   iree_hal_amdgpu_device_atomic_rmw_kernargs_t kernargs = {};
   const iree_hal_atomic_rmw_params_t params = {
       .operand = 0x55AA55AAu,
-      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
+               IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
       .width = IREE_HAL_ATOMIC_WIDTH_32,
       .operation = IREE_HAL_ATOMIC_RMW_OPERATION_XOR,
   };

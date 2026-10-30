@@ -20,6 +20,21 @@ bool iree_hal_task_atomic_width_is_lock_free(iree_hal_atomic_width_t width) {
   }
 }
 
+iree_status_t iree_hal_task_atomic_validate(iree_hal_atomic_width_t width,
+                                            iree_hal_atomic_flags_t flags) {
+  if (flags & IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "task atomics require a CPU worker");
+  }
+  if (IREE_UNLIKELY(!iree_hal_task_atomic_width_is_lock_free(width))) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "task execution does not support lock-based "
+                            "%u-bit atomic operations",
+                            width);
+  }
+  return iree_ok_status();
+}
+
 iree_hal_atomic_capabilities_t iree_hal_task_atomic_capabilities(
     iree_hal_atomic_operation_flags_t allowed_operations) {
   iree_hal_atomic_capabilities_t capabilities = {

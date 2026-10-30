@@ -244,7 +244,7 @@ iree_status_t iree_hal_amd_gpu_aql_submission_control(
                               IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_control_validate_target(
         family, IREE_HAL_MEMORY_SITE_QUEUE, target, incompatible ? 0 : required,
-        incompatible ? required : 0));
+        incompatible ? required : 0, command.flags));
   }
   iree_hal_amd_gpu_aql_submission_t* submission = NULL;
   void* payload = NULL;

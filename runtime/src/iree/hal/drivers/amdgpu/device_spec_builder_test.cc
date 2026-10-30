@@ -180,11 +180,10 @@ TEST(DeviceSpecBuilderTest, QueueFamiliesReportPerPhysicalDeviceFrequency) {
   iree_hal_allocator_release(allocator);
 }
 
-// Functional atomics are backed by target-compiled kernels on every physical
-// device, while native packet capabilities independently describe which queue
-// families can execute waits and stores without occupying compute resources.
+// Native packet encodings alone do not qualify the target backing. This backend
+// advertises functional atomics but no buffer-qualified zero-compute guarantee.
 TEST(DeviceSpecBuilderTest,
-     AdvertisesFunctionalAndNativeAtomicCapabilitiesPerPhysicalDevice) {
+     AdvertisesFunctionalAtomicsWithoutZeroComputeGuarantees) {
   iree_hal_allocator_t* allocator = NULL;
   IREE_ASSERT_OK(
       iree_hal_allocator_create_heap(iree_allocator_system(), &allocator));
@@ -221,9 +220,8 @@ TEST(DeviceSpecBuilderTest,
   }
   ExpectUniformAtomicCapabilities(
       queues->families[0].zero_compute_atomic_capabilities,
-      IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
-          IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
-      IREE_HAL_ATOMIC_WAIT_CONDITION_FLAGS_ALL);
+      IREE_HAL_ATOMIC_OPERATION_FLAG_NONE,
+      IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_NONE);
   ExpectUniformAtomicCapabilities(
       queues->families[1].zero_compute_atomic_capabilities,
       IREE_HAL_ATOMIC_OPERATION_FLAG_NONE,

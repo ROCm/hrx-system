@@ -25,11 +25,17 @@ typedef struct iree_hal_amd_gpu_binding_requirement_t {
   uint32_t parent;
   // Required native sites and whether the logical length is consumed.
   uint32_t sites;
-  // Packed queue-site atomic requirements with default target-error handling.
+  // Packed program-site atomic requirements with default target-error handling.
   uint32_t atomic_operations;
   // Packed requirements whose missing target support reports INCOMPATIBLE.
   uint32_t incompatible_atomic_operations;
+  // Packed native queue requirements with default target-error handling.
+  uint32_t zero_compute_atomic_operations;
+  // Native queue requirements whose missing support reports INCOMPATIBLE.
+  uint32_t incompatible_zero_compute_atomic_operations;
 } iree_hal_amd_gpu_binding_requirement_t;
+static_assert(sizeof(iree_hal_amd_gpu_binding_requirement_t) == 40,
+              "recorded binding requirements must remain compact");
 
 // Captured, qualified binding. Address commitment waits for queue dependencies;
 // repeated uses in recorded commands share one dense native input.
@@ -95,7 +101,7 @@ iree_status_t iree_hal_amd_gpu_command_inputs_add_binding(
     bool whole_transfer, uint32_t* out_value);
 
 // Accumulates scalar target alignment and atomic capabilities, if required,
-// on the same dense queue input. Timestamps require no atomic capabilities.
+// on the dense queue or program input. Timestamps require no atomic capabilities.
 // Direct targets qualify now; indirect targets qualify once at table capture.
 iree_status_t iree_hal_amd_gpu_command_inputs_add_control(
     iree_hal_amd_gpu_command_inputs_t* inputs, iree_hal_buffer_ref_t reference,

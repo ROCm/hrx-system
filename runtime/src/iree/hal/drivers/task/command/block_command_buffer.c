@@ -717,18 +717,6 @@ static iree_status_t iree_hal_block_command_buffer_barrier(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_block_command_buffer_check_atomic_width(
-    iree_hal_atomic_width_t width) {
-  if (IREE_UNLIKELY(!iree_hal_task_atomic_width_is_lock_free(width))) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "task-driver command buffers do not support lock-based %u-bit atomic "
-        "operations",
-        width);
-  }
-  return iree_ok_status();
-}
-
 // Inserts the block ISA's global region boundary only when the requested stage
 // dependency has prior work to order. This coalesces adjacent scalar commands'
 // trailing and leading boundaries.
@@ -780,7 +768,7 @@ static iree_status_t iree_hal_block_command_buffer_atomic_wait(
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_buffer_ref_t target_ref, iree_hal_atomic_wait_params_t params) {
   IREE_RETURN_IF_ERROR(
-      iree_hal_block_command_buffer_check_atomic_width(params.width));
+      iree_hal_task_atomic_validate(params.width, params.flags));
   iree_hal_block_command_buffer_t* command_buffer =
       iree_hal_block_command_buffer_cast(base_command_buffer);
   IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert_strided(
@@ -815,7 +803,7 @@ static iree_status_t iree_hal_block_command_buffer_atomic_store(
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_buffer_ref_t target_ref, iree_hal_atomic_store_params_t params) {
   IREE_RETURN_IF_ERROR(
-      iree_hal_block_command_buffer_check_atomic_width(params.width));
+      iree_hal_task_atomic_validate(params.width, params.flags));
   iree_hal_block_command_buffer_t* command_buffer =
       iree_hal_block_command_buffer_cast(base_command_buffer);
   IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert_strided(
@@ -850,7 +838,7 @@ static iree_status_t iree_hal_block_command_buffer_atomic_rmw(
     iree_hal_execution_stage_t target_stage_mask,
     iree_hal_buffer_ref_t target_ref, iree_hal_atomic_rmw_params_t params) {
   IREE_RETURN_IF_ERROR(
-      iree_hal_block_command_buffer_check_atomic_width(params.width));
+      iree_hal_task_atomic_validate(params.width, params.flags));
   iree_hal_block_command_buffer_t* command_buffer =
       iree_hal_block_command_buffer_cast(base_command_buffer);
   IREE_RETURN_IF_ERROR(iree_hal_resource_set_insert_strided(

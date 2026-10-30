@@ -52,11 +52,15 @@ TEST_P(AqlSubmissionTest, AtomicTargetRetainsDeferredBackingUntilRetirement) {
       iree_allocator_system(), &buffer));
   std::array<iree_hal_memory_scope_access_t, 2> scopes = {};
   scopes[1].bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS] = 0;
-  iree_hal_memory_contract_t contract = {.scopes = scopes.data()};
+  std::array<uint32_t, 2> zero_compute = {};
+  iree_hal_memory_contract_t contract = {
+      .scopes = scopes.data(),
+      .zero_compute_atomic_operations = zero_compute.data(),
+  };
   iree_hal_buffer_native_binding_t binding = {};
   buffer->memory = {.contract = &contract, .bindings = &binding};
   const iree_hal_queue_family_t family = {.memory = {.queue_scope_id = 1}};
-  const auto command = iree_hal_amd_gpu_control_store({
+  auto command = iree_hal_amd_gpu_control_store({
       .value = 123,
       .width = IREE_HAL_ATOMIC_WIDTH_64,
       .target_error_mode = static_cast<iree_hal_atomic_target_error_mode_t>(
@@ -72,6 +76,15 @@ TEST_P(AqlSubmissionTest, AtomicTargetRetainsDeferredBackingUntilRetirement) {
   EXPECT_EQ(capture, nullptr);
   EXPECT_EQ(iree_atomic_ref_count_load(&buffer->resource.ref_count), 1);
   scopes[1].atomic_operations = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE << 8;
+  command.flags |= IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE;
+  IREE_EXPECT_STATUS_IS(
+      GetParam() ? IREE_STATUS_INCOMPATIBLE : IREE_STATUS_PERMISSION_DENIED,
+      iree_hal_amd_gpu_aql_submission_control(&pool_, nullptr, &family, {}, {},
+                                              buffer, 8, command, 0, 0,
+                                              &capture));
+  EXPECT_EQ(capture, nullptr);
+  EXPECT_EQ(iree_atomic_ref_count_load(&buffer->resource.ref_count), 1);
+  zero_compute[1] = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE << 8;
   IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_control(
       &pool_, nullptr, &family, {}, {}, buffer, 8, command, 0, 0, &capture));
   uint64_t address = 0;
