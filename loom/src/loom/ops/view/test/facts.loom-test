@@ -825,3 +825,24 @@ command.def @parameter_reference() launch(%parameters: buffer) {
   kernel.dispatch @observe[%groups](%root, %scope, %space, %root_alignment, %offset_lo, %offset_hi, %length) : [index](i1, i1, i64, i64, i64, i64, i64)
   command.return
 }
+
+// ====
+
+// Exact physical-layout facts may specialize the subview to an independently
+// equivalent static encoding while its now-redundant co-result remains.
+func.def @specializes_physical_encoding_with_sibling(%buffer: buffer) -> (bf16) {
+  %byte_offset = index.constant 0 : offset
+  %layout = encoding.layout.dense : encoding<layout>
+  %source = buffer.view %buffer[%byte_offset] : buffer -> view<5x512xbf16, %layout>
+  %crop, %physical = view.subview %source[1, 2] : view<5x512xbf16, %layout> -> view<1x2xbf16, %physical>
+  %value = view.load %crop[0, 0] : view<1x2xbf16, %physical> -> bf16
+  func.return %value : bf16
+}
+// ----
+func.def @specializes_physical_encoding_with_sibling(%buffer: buffer) -> (bf16) {
+  %byte_offset = index.constant 0 : offset
+  %source = buffer.view %buffer[%byte_offset] : buffer -> view<5x512xbf16>
+  %crop, %physical = view.subview %source[1, 2] : view<5x512xbf16> -> view<1x2xbf16, #encoding.layout.strided<strides=[512, 1]>>
+  %value = view.load %crop[0, 0] : view<1x2xbf16, #encoding.layout.strided<strides=[512, 1]>> -> bf16
+  func.return %value : bf16
+}
