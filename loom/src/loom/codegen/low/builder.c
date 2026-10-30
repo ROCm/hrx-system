@@ -91,6 +91,28 @@ iree_status_t loom_low_build_resolved_descriptor_op(
     const loom_tied_result_t* tied_results, iree_host_size_t tied_result_count,
     loom_location_id_t location, loom_op_t** out_op) {
   *out_op = NULL;
+  loom_attribute_t attributes = loom_attr_absent();
+  if (attrs.count > 0) {
+    IREE_RETURN_IF_ERROR(loom_module_make_canonical_attr_dict(
+        builder->module, attrs, &attributes));
+    IREE_RETURN_IF_ERROR(loom_low_resolve_immediate_enums(
+        builder->module, descriptor_set, descriptor, &attributes));
+  }
+  return loom_low_build_prepared_descriptor_op(
+      builder, descriptor_set, descriptor, access_flags, operands,
+      operand_count, attributes, result_types, result_count, tied_results,
+      tied_result_count, location, out_op);
+}
+
+iree_status_t loom_low_build_prepared_descriptor_op(
+    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor,
+    loom_memory_access_flags_t access_flags, const loom_value_id_t* operands,
+    iree_host_size_t operand_count, loom_attribute_t attributes,
+    const loom_type_t* result_types, iree_host_size_t result_count,
+    const loom_tied_result_t* tied_results, iree_host_size_t tied_result_count,
+    loom_location_id_t location, loom_op_t** out_op) {
+  *out_op = NULL;
   const uint32_t descriptor_ordinal =
       loom_low_descriptor_set_descriptor_ordinal(descriptor_set, descriptor);
   IREE_ASSERT_NE(descriptor_ordinal, LOOM_LOW_DESCRIPTOR_ORDINAL_NONE);
@@ -120,13 +142,6 @@ iree_status_t loom_low_build_resolved_descriptor_op(
   }
   loom_low_op_initialize_descriptor(*out_op,
                                     loom_attr_scoped_enum(descriptor_ordinal));
-  loom_attribute_t attributes = loom_attr_absent();
-  if (attrs.count > 0) {
-    IREE_RETURN_IF_ERROR(loom_module_make_canonical_attr_dict(
-        builder->module, attrs, &attributes));
-    IREE_RETURN_IF_ERROR(loom_low_resolve_immediate_enums(
-        builder->module, descriptor_set, descriptor, &attributes));
-  }
   loom_low_op_initialize_attrs(*out_op, attributes);
   for (iree_host_size_t i = 0; i < result_count; ++i) {
     loom_value_id_t result_id = LOOM_VALUE_ID_INVALID;
