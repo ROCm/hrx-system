@@ -9,6 +9,25 @@ low.func.def target<cmd.core> abi(command_program) @capture_bindings() asm {
   %end = cmd.buffer.ref.binding %dynamic, %sample_bytes, %sample_bytes
   cmd.timestamp %start
   cmd.timestamp.barrier %end
+  %visibility = cmd.memory.buffer %end {source = ["transfer_write"], target = ["dispatch_read", "indirect_command_read"]}
+  cmd.barrier(%visibility) {source = ["transfer"], target = ["command_process", "dispatch"], flags = []}
+  cmd.barrier() {source = [], target = ["dispatch"], flags = ["acquire_system"]}
+  return
+}
+
+// ----
+low.func.def target<cmd.core> abi(command_program) @capture_bindings() asm {
+  %fixed = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>
+  %dynamic = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %c0 = cmd.constant.u64 0
+  %sample_bytes = cmd.constant.u64 8
+  %start = cmd.buffer.ref.direct %fixed, %c0, %sample_bytes
+  %end = cmd.buffer.ref.binding %dynamic, %sample_bytes, %sample_bytes
+  cmd.timestamp %start
+  cmd.timestamp.barrier %end
+  %visibility = cmd.memory.buffer %end {source = ["transfer_write"], target = ["indirect_command_read", "dispatch_read"]}
+  cmd.barrier(%visibility) {source = ["transfer"], target = ["command_process", "dispatch"], flags = []}
+  cmd.barrier() {source = [], target = ["dispatch"], flags = ["acquire_system"]}
   return
 }
 

@@ -10,10 +10,10 @@
 
 iree_status_t loom_cmd_program_format_calculate_layout(
     uint32_t launch_binding_count, uint32_t buffer_ref_count,
-    uint32_t entry_schema_count, uint32_t entry_schema_kind_count,
-    uint32_t argument_data_length, uint32_t command_count,
-    uint32_t parameter_root_count, uint32_t parameter_count,
-    uint32_t parameter_key_length,
+    uint32_t memory_dependency_count, uint32_t entry_schema_count,
+    uint32_t entry_schema_kind_count, uint32_t argument_data_length,
+    uint32_t command_count, uint32_t parameter_root_count,
+    uint32_t parameter_count, uint32_t parameter_key_length,
     loom_cmd_program_format_layout_t* out_layout) {
   IREE_ASSERT_ARGUMENT(out_layout);
   uint64_t offset = LOOM_CMD_PROGRAM_HEADER_SIZE;
@@ -32,6 +32,14 @@ iree_status_t loom_cmd_program_format_calculate_layout(
       !iree_checked_add_u64(offset, table_length, &offset)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "command buffer-reference table is too large");
+  }
+  const uint64_t memory_dependency_offset = offset;
+  if (!iree_checked_mul_u64(memory_dependency_count,
+                            LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_SIZE,
+                            &table_length) ||
+      !iree_checked_add_u64(offset, table_length, &offset)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "command memory-dependency table is too large");
   }
   const uint64_t entry_schema_offset = offset;
   if (!iree_checked_mul_u64(entry_schema_count,
@@ -82,6 +90,7 @@ iree_status_t loom_cmd_program_format_calculate_layout(
   *out_layout = (loom_cmd_program_format_layout_t){
       .launch_binding_offset = (uint32_t)launch_binding_offset,
       .buffer_ref_offset = (uint32_t)buffer_ref_offset,
+      .memory_dependency_offset = (uint32_t)memory_dependency_offset,
       .entry_schema_offset = (uint32_t)entry_schema_offset,
       .entry_schema_kind_offset = (uint32_t)entry_schema_kind_offset,
       .argument_data_offset = (uint32_t)argument_data_offset,

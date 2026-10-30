@@ -371,6 +371,34 @@ static iree_status_t loom_print_low_asm_immediate_value(
   if (value->kind == LOOM_ATTR_I64 && immediate->enum_domain != UINT16_MAX) {
     const loom_low_repr_environment_t* environment =
         &ctx->low_asm_environment.low_repr;
+    if (immediate->enum_is_bitset) {
+      // Canonical bit order is independent of token/table order. Verify the
+      // complete spelling before writing so invalid IR still prints intact.
+      uint64_t remaining = (uint64_t)value->i64;
+      while (remaining) {
+        const uint64_t bit = remaining & (0u - remaining);
+        if (iree_string_view_is_empty(environment->vtable->enum_value_token(
+                environment->state, statement->packet.descriptor_set,
+                immediate->enum_domain, (int64_t)bit))) {
+          return loom_print_attr(ctx, value, NULL);
+        }
+        remaining &= ~bit;
+      }
+      IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "[", true));
+      remaining = (uint64_t)value->i64;
+      while (remaining) {
+        const uint64_t bit = remaining & (0u - remaining);
+        const iree_string_view_t token = environment->vtable->enum_value_token(
+            environment->state, statement->packet.descriptor_set,
+            immediate->enum_domain, (int64_t)bit);
+        IREE_RETURN_IF_ERROR(loom_print_string_literal(ctx->stream, token));
+        remaining &= ~bit;
+        if (remaining) {
+          IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, ", ", true));
+        }
+      }
+      return loom_print_emit_cstr(ctx, "]", true);
+    }
     const iree_string_view_t token = environment->vtable->enum_value_token(
         environment->state, statement->packet.descriptor_set,
         immediate->enum_domain, value->i64);

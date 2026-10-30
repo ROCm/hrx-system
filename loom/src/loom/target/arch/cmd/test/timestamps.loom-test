@@ -11,11 +11,13 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   %1 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
   %2 = cmd.constant.u64 0
   %3 = cmd.constant.u64 -1
-  %4 = cmd.constant.u64 8
-  %5 = cmd.buffer.ref.binding %1, %2, %4
-  cmd.timestamp %5
-  %6 = cmd.buffer.ref.binding %1, %2, %4
-  cmd.timestamp.barrier %6
+  %4 = cmd.memory.global {source = ["dispatch_write", "transfer_write"], target = ["indirect_command_read", "dispatch_read", "dispatch_write", "transfer_read", "transfer_write"]}
+  %5 = cmd.constant.u64 8
+  %6 = cmd.buffer.ref.binding %1, %2, %5
+  cmd.timestamp %6
+  cmd.barrier(%4) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  %7 = cmd.buffer.ref.binding %1, %2, %5
+  cmd.timestamp %7
   return
 }
 
@@ -88,14 +90,17 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   %15 = cmd.constant.u64 -1
   %16 = cmd.constant.u64 8
   %17 = cmd.constant.u64 16
-  %18 = cmd.buffer.ref.binding %10, %14, %16
-  cmd.timestamp %18
-  %19 = cmd.buffer.ref.binding %10, %16, %16
-  cmd.timestamp.barrier %19
-  %20 = cmd.constant.u32 1
-  cmd.dispatch.direct<%12, %13>[%20, %20, %20](%11, %14, %15)
-  %21 = cmd.buffer.ref.binding %10, %17, %16
-  cmd.timestamp.barrier %21
+  %18 = cmd.memory.global {source = ["dispatch_write", "transfer_write"], target = ["indirect_command_read", "dispatch_read", "dispatch_write", "transfer_read", "transfer_write"]}
+  %19 = cmd.buffer.ref.binding %10, %14, %16
+  cmd.timestamp %19
+  cmd.barrier(%18) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  %20 = cmd.buffer.ref.binding %10, %16, %16
+  cmd.timestamp %20
+  %21 = cmd.constant.u32 1
+  cmd.dispatch.direct<%12, %13>[%21, %21, %21](%11, %14, %15)
+  cmd.barrier(%18) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  %22 = cmd.buffer.ref.binding %10, %17, %16
+  cmd.timestamp %22
   return
 }
 
@@ -137,15 +142,21 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   %16 = cmd.constant.u64 0
   %17 = cmd.constant.u64 -1
   %18 = cmd.constant.u64 8
-  %19 = cmd.buffer.ref.binding %13, %16, %18
-  cmd.timestamp %19
-  %20 = cmd.buffer.ref.binding %13, %18, %18
-  cmd.timestamp.barrier %20
-  %21 = cmd.constant.u32 1
-  cmd.dispatch.direct.barrier<%14, %15>[%21, %21, %21](%13, %16, %18, %12, %16, %17)
-  cmd.dispatch.direct.barrier<%14, %15>[%21, %21, %21](%13, %18, %18, %12, %16, %17)
-  %22 = cmd.buffer.ref.binding %13, %16, %18
-  cmd.timestamp.barrier %22
-  cmd.dispatch.direct.barrier<%14, %15>[%21, %21, %21](%13, %16, %18, %12, %16, %17)
+  %19 = cmd.memory.global {source = ["dispatch_write", "transfer_write"], target = ["indirect_command_read", "dispatch_read", "dispatch_write", "transfer_read", "transfer_write"]}
+  %20 = cmd.buffer.ref.binding %13, %16, %18
+  cmd.timestamp %20
+  cmd.barrier(%19) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  %21 = cmd.buffer.ref.binding %13, %18, %18
+  cmd.timestamp %21
+  cmd.barrier(%19) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  %22 = cmd.constant.u32 1
+  cmd.dispatch.direct<%14, %15>[%22, %22, %22](%13, %16, %18, %12, %16, %17)
+  cmd.barrier(%19) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  cmd.dispatch.direct<%14, %15>[%22, %22, %22](%13, %18, %18, %12, %16, %17)
+  cmd.barrier(%19) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  %23 = cmd.buffer.ref.binding %13, %16, %18
+  cmd.timestamp %23
+  cmd.barrier(%19) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  cmd.dispatch.direct<%14, %15>[%22, %22, %22](%13, %16, %18, %12, %16, %17)
   return
 }

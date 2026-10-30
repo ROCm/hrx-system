@@ -299,12 +299,12 @@ TEST_P(AmdgpuCommandProfileTest, ConfiguresSelectedKernelsAndOwnsTargets) {
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(command_bytes.data(), command_bytes.size()),
       &decoded));
-  ASSERT_EQ(decoded.commands.count, 2u);
+  ASSERT_EQ(decoded.commands.count, 3u);
+  EXPECT_EQ(loom_cmd_program_command_at(&decoded, 1).kind,
+            LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER);
   for (uint32_t i = 0; i < 2; ++i) {
-    const auto dispatch = loom_cmd_program_command_at(&decoded, i);
-    EXPECT_EQ(dispatch.kind,
-              i == 0 ? LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT
-                     : LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT_BARRIER);
+    const auto dispatch = loom_cmd_program_command_at(&decoded, i * 2);
+    EXPECT_EQ(dispatch.kind, LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT);
     EXPECT_EQ(dispatch.payload.dispatch_direct.workgroup_count_x,
               128 / (subgroup_size * (i + 1)));
     EXPECT_EQ(dispatch.payload.dispatch_direct.workgroup_count_y, 1u);

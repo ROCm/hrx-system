@@ -34,6 +34,7 @@ loom_check_test_suite(
         "allocation_structured_liveness.loom-test",
         "allocation_tied_domains.loom-test",
         "descriptor_constraints.loom-test",
+        "enum_bitsets.loom-test",
         "guarded_motion.loom-test",
         "packet.loom-test",
         "register_parts.loom-test",
