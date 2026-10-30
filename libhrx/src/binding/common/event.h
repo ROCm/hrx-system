@@ -81,6 +81,10 @@ typedef struct iree_hal_streaming_recorded_point_t {
   // inside a graph launch is ordered after the tail the launch waited on,
   // which is earlier than anything the launch signals.
   uint64_t ordered_after_stream_value;
+  // True when the record executes outside its context's shared primary queue.
+  // A dependent stream must keep its wait off that shared queue so producers
+  // submitted later can continue to run.
+  bool requires_independent_queue;
   // Slot the device writes this record's tick into at the point |value| names,
   // or NULL when the record captured no tick because timing is disabled on the
   // event or the device advertises no domain. Retained by whoever holds the
@@ -258,13 +262,14 @@ iree_hal_streaming_event_acquire_capture_graph(
 // stream must belong to the context that created |event| and none may be
 // capturing. The caller keeps the borrowed stream references live for the
 // duration of the call. The fan-in record is submitted directly on the
-// context's primary queue and retains no single recording stream.
+// context's lazily acquired event queue and retains no single recording stream.
 //
 // All records advance the context's event-record timeline. When
 // |additional_timeline| is non-NULL the same submission also waits on and
 // advances it, and the caller must serialize access to it for the duration of
 // the call. Accepted submissions update both timelines before returning OK.
-// The caller must flush the context queue after a successful call.
+// The selected queue is flushed after acceptance; a flush error preserves the
+// accepted timeline values and recorded point.
 iree_status_t iree_hal_streaming_event_record_after_streams(
     iree_hal_streaming_event_t* event,
     iree_hal_streaming_stream_t* const* streams, iree_host_size_t stream_count,

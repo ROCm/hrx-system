@@ -204,6 +204,10 @@ struct iree_hal_streaming_context_t {
   // Timeline covering context-wide event records submitted on behalf of this
   // context and every binding scheduling domain layered over it.
   iree_hal_streaming_operation_timeline_t event_record_timeline;
+  // Lazily acquired queue for context-wide event joins, owned until context
+  // destruction. Independent of stream producers; guarded by
+  // event_record_mutex.
+  iree_hal_queue_t* event_record_queue;
   // Serializes event record submission and |event_record_timeline| updates.
   iree_slim_mutex_t event_record_mutex;
 

@@ -860,9 +860,6 @@ hipError_t iree_hip_execution_context_record_event(
       iree_status_free(status);
       result = hipErrorStreamCaptureUnsupported;
     } else {
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_queue_flush(snapshot.common_context->queue);
-      }
       result = iree_status_is_ok(status)
                    ? hipSuccess
                    : iree_hip_execution_context_consume_status(status);

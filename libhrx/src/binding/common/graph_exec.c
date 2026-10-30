@@ -197,6 +197,9 @@ typedef struct iree_hal_streaming_graph_exec_t {
   // launch on a stream of any other context would have every one of its
   // records refused.
   bool records_events;
+  // True when this graph or a child waits on an event whose producer queue can
+  // change between launches. Such launches need independent queue progression.
+  bool waits_for_events;
   // True when |blocks|, or the blocks of a child-graph executable they launch,
   // contain a cooperative dispatch requiring launch-time residency preflight.
   bool has_cooperative_dispatches;
@@ -680,6 +683,7 @@ iree_status_t iree_hal_streaming_graph_exec_create(
   exec->blocks = NULL;
   exec->block_count = 0;
   exec->records_events = false;
+  exec->waits_for_events = false;
   exec->has_cooperative_dispatches = false;
   exec->instantiated_node_count = 0;
   exec->instantiated_visible_node_count = 0;
@@ -790,6 +794,7 @@ static void iree_hal_streaming_graph_exec_initialize_compiled_state(
   exec->blocks = NULL;
   exec->block_count = 0;
   exec->records_events = false;
+  exec->waits_for_events = false;
   exec->has_cooperative_dispatches = false;
   exec->instantiated_node_count = 0;
   exec->instantiated_visible_node_count = 0;
@@ -816,6 +821,7 @@ static void iree_hal_streaming_graph_exec_deinitialize_compiled_state(
   exec->blocks = NULL;
   exec->block_count = 0;
   exec->records_events = false;
+  exec->waits_for_events = false;
   exec->has_cooperative_dispatches = false;
   exec->instantiated_node_count = 0;
   exec->instantiated_visible_node_count = 0;
@@ -834,6 +840,7 @@ static void iree_hal_streaming_graph_exec_move_compiled_state(
   target->blocks = source->blocks;
   target->block_count = source->block_count;
   target->records_events = source->records_events;
+  target->waits_for_events = source->waits_for_events;
   target->has_cooperative_dispatches = source->has_cooperative_dispatches;
   target->instantiated_node_count = source->instantiated_node_count;
   target->instantiated_visible_node_count =
@@ -850,6 +857,7 @@ static void iree_hal_streaming_graph_exec_move_compiled_state(
   source->blocks = NULL;
   source->block_count = 0;
   source->records_events = false;
+  source->waits_for_events = false;
   source->has_cooperative_dispatches = false;
   source->instantiated_node_count = 0;
   source->instantiated_visible_node_count = 0;
@@ -1327,6 +1335,8 @@ static iree_status_t iree_hal_streaming_graph_create_event_block(
   // one. A launch reads this to answer for every record at once.
   if (type == IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_EVENT_RECORD) {
     exec->records_events = true;
+  } else {
+    exec->waits_for_events = true;
   }
 
   *out_block = block;
@@ -1485,6 +1495,7 @@ static iree_status_t iree_hal_streaming_graph_create_child_graph_block(
     // are records of this launch. The child instantiated above already carries
     // its own children's, which makes the property transitive.
     exec->records_events |= child_exec->records_events;
+    exec->waits_for_events |= child_exec->waits_for_events;
     exec->has_cooperative_dispatches |= child_exec->has_cooperative_dispatches;
     *out_block = block;
   } else {
@@ -2874,7 +2885,9 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_submission_prepare_locked(
         stream, stream->queue, stream_signal_value,
-        IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
+        exec->waits_for_events ? IREE_HAL_STREAMING_SUBMISSION_FLAG_INDEPENDENT
+                               : IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE,
+        &submission);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_graph_exec_submit_blocks_locked(

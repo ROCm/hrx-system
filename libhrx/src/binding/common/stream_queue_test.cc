@@ -461,6 +461,15 @@ class StreamQueueLeaseTest : public ::testing::Test {
     for (auto* gate : gates_) {
       IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, 2, nullptr));
     }
+    for (auto* exec : graph_execs_) {
+      iree_hal_streaming_graph_exec_release(exec);
+    }
+    for (auto* graph : graphs_) {
+      iree_hal_streaming_graph_release(graph);
+    }
+    for (auto* event : events_) {
+      iree_hal_streaming_event_release(event);
+    }
     iree_hal_streaming_context_release(context_);
     for (auto* stream : streams_) {
       iree_hal_streaming_stream_release(stream);
@@ -546,6 +555,12 @@ class StreamQueueLeaseTest : public ::testing::Test {
   std::atomic<iree_hal_queue_t*> observed_queue_{nullptr};
   // Independent producer callback output with the same lifetime.
   std::atomic<iree_hal_queue_t*> producer_queue_{nullptr};
+  // Event handles kept alive until dependency gates have been released.
+  std::vector<iree_hal_streaming_event_t*> events_;
+  // Graph templates released after all dependency gates are open.
+  std::vector<iree_hal_streaming_graph_t*> graphs_;
+  // Instantiated graphs released before their templates and contexts.
+  std::vector<iree_hal_streaming_graph_exec_t*> graph_execs_;
 };
 
 static iree_status_t ObserveExecutionQueue(
@@ -795,5 +810,114 @@ TEST_F(StreamQueueLeaseTest, GraphLaunchExtendsTheAcceptedStreamLease) {
   AwaitObserverCount(0);
   EXPECT_EQ(queue, observed_queue_.load(std::memory_order_acquire));
 }
+
+enum class DependencyKind {
+  Stream,
+  Event,
+  ContextEvent,
+  GraphEvent,
+  Semaphore
+};
+
+class StreamQueueDependencyTest
+    : public StreamQueueLeaseTest,
+      public ::testing::WithParamInterface<DependencyKind> {};
+
+TEST_P(StreamQueueDependencyTest, TransitiveWaitLeavesProducerQueueAvailable) {
+  auto* source = CreateStream();
+  auto* consumer = CreateStream();
+  auto* producer = CreateStream();
+  auto* gate = CreateGate();
+  ASSERT_NE(nullptr, source);
+  ASSERT_NE(nullptr, consumer);
+  ASSERT_NE(nullptr, producer);
+  ASSERT_NE(nullptr, gate);
+
+  iree_hal_streaming_event_t* event = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_event_create(
+      context_, IREE_HAL_STREAMING_EVENT_FLAG_DISABLE_TIMING,
+      iree_allocator_system(), &event));
+  events_.push_back(event);
+  IREE_ASSERT_OK(StartLease(source, gate));
+  auto* source_queue = source->value_wait_lane->queue;
+  if (GetParam() == DependencyKind::ContextEvent) {
+    IREE_ASSERT_OK(iree_hal_streaming_event_record_after_streams(event, &source,
+                                                                 1, nullptr));
+    EXPECT_NE(context_->queue, context_->event_record_queue);
+  } else {
+    IREE_ASSERT_OK(iree_hal_streaming_event_record(event, source));
+  }
+
+  switch (GetParam()) {
+    case DependencyKind::Stream:
+      IREE_ASSERT_OK(iree_hal_streaming_stream_wait_stream(consumer, source));
+      break;
+    case DependencyKind::Event:
+    case DependencyKind::ContextEvent:
+      IREE_ASSERT_OK(iree_hal_streaming_stream_wait_event(
+          consumer, event, /*capture_external_wait=*/false));
+      break;
+    case DependencyKind::GraphEvent: {
+      iree_hal_streaming_graph_t* graph = nullptr;
+      IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+          context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+          &graph));
+      graphs_.push_back(graph);
+      iree_hal_streaming_graph_node_t* node = nullptr;
+      IREE_ASSERT_OK(iree_hal_streaming_graph_add_event_node(
+          graph, nullptr, 0, IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT,
+          event, &node));
+      iree_hal_streaming_graph_exec_t* exec = nullptr;
+      IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+          graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
+      graph_execs_.push_back(exec);
+      auto result = IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_ERROR;
+      IREE_ASSERT_OK(
+          iree_hal_streaming_graph_exec_launch(exec, consumer, &result));
+      EXPECT_EQ(IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS, result);
+      break;
+    }
+    case DependencyKind::Semaphore: {
+      iree_hal_streaming_recorded_point_t point;
+      iree_hal_streaming_event_acquire_recorded_point(event, &point);
+      iree_status_t status = iree_hal_streaming_stream_wait_semaphores(
+          consumer, {1, &point.semaphore, &point.value});
+      iree_hal_streaming_event_release_recorded_point(&point);
+      IREE_ASSERT_OK(status);
+      break;
+    }
+  }
+  ASSERT_NE(nullptr, consumer->value_wait_lane);
+  auto* consumer_queue = consumer->value_wait_lane->queue;
+  EXPECT_NE(source_queue, consumer_queue);
+  EXPECT_NE(context_->queue, consumer_queue);
+  const uint64_t args[4] = {};
+  IREE_ASSERT_OK(iree_hal_streaming_queue_host_call(
+      consumer,
+      iree_hal_make_host_call(ObserveExecutionQueue, &observed_queue_), args,
+      IREE_HAL_HOST_CALL_FLAG_NONE));
+
+  IREE_ASSERT_OK(iree_hal_streaming_queue_host_call(
+      producer,
+      iree_hal_make_host_call(ObserveExecutionQueue, &producer_queue_), args,
+      IREE_HAL_HOST_CALL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(producer));
+  EXPECT_EQ(context_->queue, producer_queue_.load(std::memory_order_acquire));
+  EXPECT_EQ(nullptr, observed_queue_.load(std::memory_order_acquire));
+  uint64_t value = 1;
+  IREE_ASSERT_OK(iree_hal_queue_barrier(
+      producer->queue, iree_hal_semaphore_list_empty(), {1, &gate, &value},
+      nullptr, IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(consumer));
+  AwaitObserverCount(0);
+  EXPECT_EQ(consumer_queue, observed_queue_.load(std::memory_order_acquire));
+}
+
+INSTANTIATE_TEST_SUITE_P(Dependencies, StreamQueueDependencyTest,
+                         ::testing::Values(DependencyKind::Stream,
+                                           DependencyKind::Event,
+                                           DependencyKind::ContextEvent,
+                                           DependencyKind::GraphEvent,
+                                           DependencyKind::Semaphore));
 
 }  // namespace

@@ -1128,6 +1128,61 @@ TEST_F(HipStreamValueApiTest, IndependentStreamWaitsDoNotShareAQueueLane) {
   EXPECT_EQ(hipSuccess, api_.stream_synchronize(stream_a));
 }
 
+TEST_F(HipStreamValueApiTest, DependentEventWaitLeavesProducerRunnable) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
+  const auto event_create =
+      library_.Resolve<decltype(&hipEventCreateWithFlags)>(
+          "hipEventCreateWithFlags");
+  const auto event_destroy =
+      library_.Resolve<decltype(&hipEventDestroy)>("hipEventDestroy");
+  const auto event_record =
+      library_.Resolve<decltype(&hipEventRecord)>("hipEventRecord");
+  const auto wait_event =
+      library_.Resolve<decltype(&hipStreamWaitEvent)>("hipStreamWaitEvent");
+  ASSERT_NE(nullptr, event_create);
+  ASSERT_NE(nullptr, event_destroy);
+  ASSERT_NE(nullptr, event_record);
+  ASSERT_NE(nullptr, wait_event);
+  hipEvent_t event = nullptr;
+  ASSERT_EQ(hipSuccess, event_create(&event, hipEventDisableTiming));
+  ScopeExit destroy_event([&] { EXPECT_EQ(hipSuccess, event_destroy(event)); });
+  hipStream_t source = CreateStream();
+  hipStream_t consumer = CreateStream();
+  hipStream_t producer = CreateStream();
+  void* signal = AllocateSignal();
+  void* result = Allocate(sizeof(uint32_t));
+  ASSERT_NE(nullptr, source);
+  ASSERT_NE(nullptr, consumer);
+  ASSERT_NE(nullptr, producer);
+  ASSERT_NE(nullptr, signal);
+  ASSERT_NE(nullptr, result);
+  ASSERT_EQ(hipSuccess, api_.memset(signal, 0, sizeof(uint64_t)));
+  ASSERT_EQ(hipSuccess, api_.memset(result, 0, sizeof(uint32_t)));
+  ScopeExit release_wait([&] {
+    __atomic_store_n(static_cast<uint32_t*>(signal), 1u, __ATOMIC_RELEASE);
+  });
+
+  ASSERT_EQ(hipSuccess, api_.wait_value_32(source, signal, 1,
+                                           hipStreamWaitValueEq, UINT32_MAX));
+  ASSERT_EQ(hipSuccess, event_record(event, source));
+  ASSERT_EQ(hipSuccess, wait_event(consumer, event, 0));
+  ASSERT_EQ(hipSuccess, api_.write_value_32(consumer, result, 7,
+                                            hipStreamWriteValueDefault));
+  // Query flushes the ordinary recorded write after the event wait. The
+  // consumer is pending, but must not occupy the later producer's queue.
+  EXPECT_EQ(hipErrorNotReady, api_.stream_query(consumer));
+  ASSERT_EQ(hipSuccess, api_.write_value_32(producer, signal, 1,
+                                            hipStreamWriteValueDefault));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(producer));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(consumer));
+  uint32_t actual = 0;
+  ASSERT_EQ(hipSuccess, api_.memcpy(&actual, result, sizeof(actual),
+                                    hipMemcpyDeviceToHost));
+  EXPECT_EQ(7u, actual);
+}
+
 TEST_F(HipStreamValueApiTest, SameStreamPendingWaitsShareAQueueLane) {
   if (!supports_value_waits_) {
     GTEST_SKIP() << "backend does not provide native signal waits";

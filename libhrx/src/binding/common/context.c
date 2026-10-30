@@ -121,6 +121,7 @@ iree_status_t iree_hal_streaming_context_create(
   context->streams = NULL;
   context->stream_wait_frontier = NULL;
   context->event_record_timeline = (iree_hal_streaming_operation_timeline_t){0};
+  context->event_record_queue = NULL;
   iree_slim_mutex_initialize(&context->event_record_mutex);
 
   // Initialize default limits.
@@ -231,6 +232,10 @@ static void iree_hal_streaming_context_destroy(
     iree_status_free(status);
   }
 
+  // A failed public event timeline is not proof that its native queue has
+  // retired. Stop that queue before releasing the storage its records use.
+  iree_hal_queue_release(context->event_record_queue);
+  context->event_record_queue = NULL;
   iree_hal_streaming_memory_release_pageable_staging(context);
 
   // Deinitialize symbol map and unload any statically-registered modules that
@@ -945,10 +950,6 @@ iree_status_t iree_hal_streaming_context_record_event(
     status = iree_hal_streaming_event_record_after_streams(
         event, streams, stream_count, /*additional_timeline=*/NULL);
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_queue_flush(context->queue);
-  }
-
   iree_hal_streaming_context_release_stream_snapshot(context, streams,
                                                      stream_count);
 

@@ -705,6 +705,7 @@ iree_status_t iree_hal_streaming_stream_wait_streams(
   iree_slim_mutex_lock(&stream->mutex);
   const bool destination_is_capturing =
       stream->capture_status != IREE_HAL_STREAMING_CAPTURE_STATUS_NONE;
+  iree_hal_queue_t* destination_queue = stream->queue;
   iree_slim_mutex_unlock(&stream->mutex);
   if (destination_is_capturing) {
     IREE_TRACE_ZONE_END(z0);
@@ -762,6 +763,8 @@ iree_status_t iree_hal_streaming_stream_wait_streams(
   }
 
   iree_host_size_t dependency_count = 0;
+  iree_hal_streaming_submission_flags_t submission_flags =
+      IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE;
   for (iree_host_size_t i = 0;
        i < source_stream_count && iree_status_is_ok(status); ++i) {
     iree_hal_streaming_stream_t* source_stream = source_streams[i];
@@ -791,6 +794,9 @@ iree_status_t iree_hal_streaming_stream_wait_streams(
     }
     iree_slim_mutex_lock(&source_stream->mutex);
     uint64_t source_timeline_value = 0;
+    const bool source_requires_independent_queue =
+        source_stream->value_wait_lane != NULL ||
+        source_stream->queue != destination_queue;
     if (IREE_UNLIKELY(source_stream->capture_status !=
                       IREE_HAL_STREAMING_CAPTURE_STATUS_NONE)) {
       status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -828,6 +834,9 @@ iree_status_t iree_hal_streaming_stream_wait_streams(
         &dependency->added_memory_reuse_dependency);
     if (iree_status_is_ok(status)) {
       ++dependency_count;
+      if (source_requires_independent_queue) {
+        submission_flags |= IREE_HAL_STREAMING_SUBMISSION_FLAG_INDEPENDENT;
+      }
     }
   }
 
@@ -872,8 +881,7 @@ iree_status_t iree_hal_streaming_stream_wait_streams(
       };
       iree_hal_streaming_submission_t submission;
       status = iree_hal_streaming_submission_prepare_locked(
-          stream, stream->queue, signal_value,
-          IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
+          stream, stream->queue, signal_value, submission_flags, &submission);
       if (iree_status_is_ok(status)) {
         status = iree_hal_queue_barrier(submission.queue, wait_semaphores,
                                         submission.signals, /*barriers=*/NULL,
@@ -1075,7 +1083,7 @@ iree_status_t iree_hal_streaming_stream_wait_semaphores(
       iree_hal_streaming_submission_t submission;
       status = iree_hal_streaming_submission_prepare_locked(
           stream, stream->queue, stream_signal_value,
-          IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
+          IREE_HAL_STREAMING_SUBMISSION_FLAG_INDEPENDENT, &submission);
       if (iree_status_is_ok(status)) {
         status = iree_hal_queue_barrier(submission.queue, combined_waits,
                                         submission.signals, /*barriers=*/NULL,
@@ -1487,7 +1495,10 @@ iree_status_t iree_hal_streaming_stream_wait_event(
       iree_hal_streaming_submission_t submission;
       status = iree_hal_streaming_submission_prepare_locked(
           stream, stream->queue, signal_value,
-          IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
+          recorded_point.requires_independent_queue
+              ? IREE_HAL_STREAMING_SUBMISSION_FLAG_INDEPENDENT
+              : IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE,
+          &submission);
 
       if (iree_status_is_ok(status)) {
         status = iree_hal_queue_barrier(submission.queue, wait_semaphores,

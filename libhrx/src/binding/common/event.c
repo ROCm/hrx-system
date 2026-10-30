@@ -307,6 +307,20 @@ iree_status_t iree_hal_streaming_event_record_after_streams(
     status = iree_hal_streaming_stream_flush(streams[i]);
   }
 
+  if (iree_status_is_ok(status) && !context->event_record_queue) {
+    // A context join can wait on an independently blocked stream. Keeping its
+    // record off the shared producer queue prevents an artificial FIFO cycle.
+    iree_hal_queue_params_t params;
+    iree_hal_queue_params_initialize(&params);
+    params.priority = iree_hal_queue_priority(context->queue);
+    params.placement = iree_hal_queue_placement(context->queue);
+    params.features = iree_hal_queue_features(context->queue);
+    params.execution_resources =
+        iree_hal_queue_execution_resources(context->queue);
+    status = iree_hal_queue_acquire(iree_hal_queue_family(context->queue),
+                                    &params, &context->event_record_queue);
+  }
+
   iree_host_size_t wait_count = 0;
   if (iree_status_is_ok(status) &&
       context->event_record_timeline.pending_value > 0) {
@@ -366,7 +380,8 @@ iree_status_t iree_hal_streaming_event_record_after_streams(
         .value = context_signal_value,
     };
     status = iree_hal_streaming_event_enqueue_record(
-        event, context, context->queue, waits, signals, &recorded_point);
+        event, context, context->event_record_queue, waits, signals,
+        &recorded_point);
     if (iree_status_is_ok(status)) {
       context->event_record_timeline.pending_value = context_signal_value;
       if (additional_timeline) {
@@ -374,6 +389,7 @@ iree_status_t iree_hal_streaming_event_record_after_streams(
       }
       dropped_capture_graph =
           iree_hal_streaming_event_commit_recorded_point(event, recorded_point);
+      status = iree_hal_queue_flush(context->event_record_queue);
     }
   }
 
@@ -480,6 +496,7 @@ iree_status_t iree_hal_streaming_event_enqueue_record(
 
   // The point owns what it names from here.
   iree_hal_semaphore_retain(point->semaphore);
+  point->requires_independent_queue = queue != context->queue;
   point->timestamp_slot = slot;
   return iree_ok_status();
 }
