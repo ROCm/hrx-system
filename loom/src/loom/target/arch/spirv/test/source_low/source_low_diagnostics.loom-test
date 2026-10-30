@@ -463,17 +463,6 @@ func.def target(@target) @offset_to_index_requires_s32_proof(%input: offset) -> 
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @index_scale_requires_non_negative_s32_coordinate(%input0: index, %stride: offset) -> (offset) {
-  %input = index.assume %input0 [range(%input0, -8, -1)] : index
-  // ERROR@+1: SPIRV/027 {field_name="index", value_type="index", required_range_lo="0", required_range_hi="2147483647", constraint_key="spirv.index.scale_coordinate.non_negative_s32"}
-  %result = index.scale %input, %stride : index, offset -> offset
-  func.return %result : offset
-}
-
-// ====
-
-spirv.target<vulkan1_3> @target
-
 func.def target(@target) @index_div_requires_unsigned_dividend(%lhs0: index, %rhs0: index) -> (index) {
   %lhs, %rhs = index.assume %lhs0, %rhs0 [range(%lhs0, -8, -1), range(%rhs0, 1, 8)] : index, index
   // ERROR@+1: SPIRV/027 {field_name="lhs", value_type="index", required_range_lo="0", required_range_hi="4294967295", constraint_key="spirv.index.dividend.u32"}

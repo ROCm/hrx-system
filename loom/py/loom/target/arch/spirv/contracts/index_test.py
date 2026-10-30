@@ -222,7 +222,6 @@ def test_index_contract_accounts_for_every_target_lowered_index_operation() -> N
 
 def test_index_numeric_range_guards_have_spirv_diagnostics() -> None:
     guarded_ops = {
-        index.index_scale,
         index.index_div,
         index.index_rem,
         index.index_shli,
@@ -237,7 +236,7 @@ def test_index_numeric_range_guards_have_spirv_diagnostics() -> None:
         if guard.kind == GuardKind.VALUE_I64_RANGE
     ]
 
-    assert len(range_guards) == 8
+    assert len(range_guards) == 7
     assert all(guard.diagnostic is not None for guard in range_guards)
     assert all(
         guard.diagnostic.ref is not None

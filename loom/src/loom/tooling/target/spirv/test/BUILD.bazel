@@ -93,6 +93,13 @@ loom_test(
 )
 
 loom_test(
+    name = "index_scale_tests",
+    srcs = ["index_scale.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [SPIRV_VULKAN_HARDWARE_PROFILE],
+)
+
+loom_test(
     name = "vulkan_tests",
     srcs = [
         "cooperative_integer.loom",

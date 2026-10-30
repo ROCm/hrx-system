@@ -1,0 +1,110 @@
+// Signed coordinates and full-width unsigned byte strides meet at index.scale.
+// Fixed-width I64 arithmetic is an independent oracle for the modular product.
+// The doubled stride includes values with bit 63 set without narrowing them
+// through the signed source-literal domain. Inputs remain runtime buffer data.
+
+func.def @scale_inputs(%coordinates: buffer, %strides: buffer) {
+  %origin = index.constant 0 : offset
+  %coordinate_view = buffer.view %coordinates[%origin] : buffer -> view<8xi32>
+  %stride_view = buffer.view %strides[%origin] : buffer -> view<5xi64>
+  %coordinate_values = vector.constanti [-2147483648, -3, -1, 0, 1, 2, 3, 2147483647] : vector<8xi32>
+  %stride_values = vector.constanti [0, 1, 4, 4294967297, 4611686018427387905] : vector<5xi64>
+  vector.store %coordinate_values, %coordinate_view[0] : vector<8xi32>, view<8xi32>
+  vector.store %stride_values, %stride_view[0] : vector<5xi64>, view<5xi64>
+  func.return
+}
+
+kernel.def @scale_products() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%coordinates: buffer, %strides: buffer, %output: buffer) {
+  %item = kernel.workitem.id<x> : index
+  %count = index.constant 40 : index
+  %live = index.cmp ult, %item, %count : index
+  scf.if %live {
+    %origin = index.constant 0 : offset
+    %stride_count = index.constant 5 : index
+    %row = index.div %item, %stride_count : index
+    %column = index.rem %item, %stride_count : index
+    %coordinate_view = buffer.view %coordinates[%origin] : buffer -> view<8xi32>
+    %stride_view = buffer.view %strides[%origin] : buffer -> view<5xi64>
+    %output_view = buffer.view %output[%origin] : buffer -> view<40xi64>
+    %coordinate_bits = view.load %coordinate_view[%row] : view<8xi32> -> i32
+    %stride_bits = view.load %stride_view[%column] : view<5xi64> -> i64
+    %nonnegative_stride = scalar.assume %stride_bits [ge(%stride_bits, 0)] : i64
+    %coordinate = index.cast %coordinate_bits : i32 to index
+    %half_stride = index.cast %nonnegative_stride : i64 to offset
+    %stride = index.add %half_stride, %half_stride : offset
+    %product = index.scale %coordinate, %stride : index, offset -> offset
+    %bits = index.cast %product : offset to i64
+    view.store %bits, %output_view[%item] : i64, view<40xi64>
+  }
+  kernel.return
+}
+
+func.def @scale_reference(%coordinates: buffer, %strides: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 40 : index
+  %step = index.constant 1 : index
+  %stride_count = index.constant 5 : index
+  %coordinate_view = buffer.view %coordinates[%origin] : buffer -> view<8xi32>
+  %stride_view = buffer.view %strides[%origin] : buffer -> view<5xi64>
+  %output_view = buffer.view %output[%origin] : buffer -> view<40xi64>
+  scf.for %item = [%begin to %end step %step] {
+    %row = index.div %item, %stride_count : index
+    %column = index.rem %item, %stride_count : index
+    %coordinate = view.load %coordinate_view[%row] : view<8xi32> -> i32
+    %half_stride = view.load %stride_view[%column] : view<5xi64> -> i64
+    %wide_coordinate = scalar.extsi %coordinate : i32 to i64
+    %stride = scalar.addi %half_stride, %half_stride : i64
+    %product = scalar.muli %wide_coordinate, %stride : i64
+    view.store %product, %output_view[%item] : i64, view<40xi64>
+  }
+  func.return
+}
+
+check.scenario @signed_products {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %coordinates = check.generate.fill value(0) : tensor<8xi32>
+    %strides = check.generate.fill value(0) : tensor<5xi64>
+    check.generate<@scale_inputs>(%coordinates, %strides) : (tensor<8xi32>, tensor<5xi64>) -> ()
+    %output = check.generate.fill value(19) : tensor<40xi64>
+    check.compare<@scale_products, @scale_reference>(%coordinates, %strides, %output) : (tensor<8xi32>, tensor<5xi64>, tensor<40xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<40xi64>
+      check.expect.bitwise actual(%coordinates) expected(%coordinates) : tensor<8xi32>
+      check.expect.bitwise actual(%strides) expected(%strides) : tensor<5xi64>
+    }
+  }
+  check.return
+}
+
+kernel.def @reverse_coordinates() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 8 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %item = kernel.workitem.id<x> : index
+  %begin = index.constant 0 : index
+  %negative_item = index.sub %begin, %item : index
+  %word = index.constant 4 : offset
+  %last_element = index.constant 28 : offset
+  %displacement = index.scale %negative_item, %word : index, offset -> offset
+  %input_origin = index.add %last_element, %displacement : offset
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%input_origin] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<8xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
+  view.store %value, %output_view[%item] : i32, view<8xi32>
+  kernel.return
+}
+
+check.case @reverse_addressing {
+  %input = check.generate.iota offset(10) step(3) : tensor<8xi32>
+  %output = check.generate.fill value(-1) : tensor<8xi32>
+  %expected = check.generate.iota offset(31) step(-3) : tensor<8xi32>
+  kernel.launch @reverse_coordinates(%input, %output) : (tensor<8xi32>, tensor<8xi32>)
+  check.expect.bitwise actual(%output) expected(%expected) : tensor<8xi32>
+  check.return
+}

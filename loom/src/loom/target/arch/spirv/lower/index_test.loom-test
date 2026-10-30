@@ -1,0 +1,19 @@
+// RUN: pass source-to-low
+
+// Scaling accepts the complete signed coordinate carrier. Unlike index.cast,
+// the product wraps in the offset domain, so a negative input needs no guard.
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @signed_scale(%coordinate: index, %stride: offset) -> (offset) {
+  %result = index.scale %coordinate, %stride : index, offset -> offset
+  func.return %result : offset
+}
+
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @signed_scale(%coordinate: reg<spirv.id : index>, %stride: reg<spirv.offset64>) -> (reg<spirv.offset64>) asm {
+  %7 = OpSConvert.i32.offset64 %coordinate
+  %result = OpIMul.offset64 %7, %stride
+  return %result
+}

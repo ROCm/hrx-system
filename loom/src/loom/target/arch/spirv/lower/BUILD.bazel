@@ -112,6 +112,13 @@ loom_cc_library(
 )
 
 loom_check_test_suite(
+    name = "index_tests",
+    srcs = ["index_test.loom-test"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
+)
+
+loom_check_test_suite(
     name = "collective_arithmetic_tests",
     srcs = ["collective_arithmetic_test.loom-test"],
     tags = ["hostonly"],

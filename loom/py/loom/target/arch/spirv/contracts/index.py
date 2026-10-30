@@ -565,28 +565,11 @@ def _index_scale_rule() -> DescriptorRule:
             Guard.value_type("index", _INDEX),
             Guard.value_type("stride", _OFFSET),
             Guard.value_type("result", _OFFSET),
-            Guard.value_i64_range(
-                "index",
-                0,
-                _S32_MAX,
-                diagnostic=_numeric_range_diagnostic(
-                    "index",
-                    0,
-                    _S32_MAX,
-                    "spirv.index.scale_coordinate.non_negative_s32",
-                ),
-            ),
         ),
         emit=(
-            _integer_view_emit(
-                "spirv.op_bitcast.i32.u32",
-                ValueRef.operand("index"),
-                ValueRef.temporary("unsigned_index"),
-                DescriptorResultType(),
-            ),
             _emit(
-                _descriptor("spirv.op_uconvert.u32.offset64"),
-                operands={"input": ValueRef.temporary("unsigned_index")},
+                _descriptor("spirv.op_s_convert.i32.offset64"),
+                operands={"input": ValueRef.operand("index")},
                 results={"dst": ValueRef.temporary("wide_index")},
                 result_types={"dst": _OFFSET},
             ),
