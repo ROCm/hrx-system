@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 // Immutable source-selected read ranges. Keys and metadata borrow retained
-// checkpoint indexes; this recipe owner neither opens files nor loads payload.
+// indexes; captured host buffers own snapshots independent of the policy VM.
 typedef struct loom_serve_weight_inputs_t loom_serve_weight_inputs_t;
 
 // Retains the selected indexes and providers in policy-local input order.
@@ -31,6 +31,7 @@ iree_status_t loom_serve_weight_inputs_allocate(
 void loom_serve_weight_inputs_free(loom_serve_weight_inputs_t* inputs);
 
 // Borrows one indexed source, with ordinal established by declaration capture.
+// The final source, when present, privately owns generated host snapshots.
 iree_io_parameter_provider_t* loom_serve_weight_inputs_provider(
     const loom_serve_weight_inputs_t* inputs, uint32_t source);
 uint32_t loom_serve_weight_inputs_source_count(
@@ -79,10 +80,15 @@ iree_device_size_t loom_serve_weight_inputs_staging_alignment(
 //   count() -> i32
 //   parameter(i32 source, buffer key) -> (buffer metadata, i64 byte_length)
 //   input(i32 source, buffer key, i64 offset, i64 length, i64 alignment) -> i64
+//   input_buffer(buffer data, i64 alignment) -> i64
 // parameter exposes the index format's opaque metadata; interpretation belongs
 // to the model policy. input captures a nonempty, in-bounds range and returns
-// its aligned staging offset. Alignment is a positive power of two. The plan
-// outlives the module and all source programs borrowing returned metadata.
+// its aligned staging offset. input_buffer snapshots a nonempty readable buffer
+// into the same staging recipe. Later writes and VM teardown do not affect
+// captured bytes; snapshots live until the plan and its reads retire. Alignment
+// is a positive power of two. count and source ordinals describe only declared
+// checkpoints, never generated buffers. The plan outlives the module and all
+// source programs borrowing returned metadata.
 iree_status_t loom_serve_weight_inputs_module_create(
     loom_serve_weight_inputs_t* inputs, iree_vm_environment_t* environment,
     iree_allocator_t host_allocator, iree_vm_module_t** out_module);

@@ -4,6 +4,14 @@ func.decl import("weights") @parameter(%source: i32, %key: buffer) -> (buffer, i
 
 func.decl import("weights") @input(%source: i32, %key: buffer, %offset: i64, %length: i64, %alignment: i64) -> (i64)
 
+func.decl import("weights") @input_buffer(%data: buffer, %alignment: i64) -> (i64)
+
+func.def public @capture_buffer(%data: buffer, %alignment: i64) -> (i64, i32) {
+  %target = func.call @input_buffer(%data, %alignment) : (buffer, i64) -> (i64)
+  %count = func.call @count() : () -> (i32)
+  func.return %target, %count : i64, i32
+}
+
 func.def public @capture(%source: i32, %key: buffer, %offset: i64, %length: i64, %alignment: i64) -> (buffer, i32, i64) {
   %count = func.call @count() : () -> (i32)
   %metadata, %size = func.call @parameter(%source, %key) : (i32, buffer) -> (buffer, i64)

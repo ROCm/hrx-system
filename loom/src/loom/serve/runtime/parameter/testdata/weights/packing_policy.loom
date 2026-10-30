@@ -4,6 +4,8 @@ func.decl import("weights") @parameter(%source: i32, %key: buffer) -> (buffer, i
 
 func.decl import("weights") @input(%source: i32, %key: buffer, %offset: i64, %length: i64, %alignment: i64) -> (i64)
 
+func.decl import("weights") @input_buffer(%data: buffer, %alignment: i64) -> (i64)
+
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
@@ -72,6 +74,37 @@ func.def @check_metadata(%metadata: buffer) {
   func.return
 }
 
+// Alternate tensors compute their second factor on the VM. Overwriting it
+// after capture proves that later activation consumes the snapshot, including
+// after the policy VM has retired and after device backing is evicted.
+func.def @capture_generated(%letter: i32, %alignment: i64) -> (i64) {
+  %c96 = scalar.constant 96 : i32
+  %c10 = scalar.constant 10 : i32
+  %c100 = scalar.constant 100 : i32
+  %ordinal = scalar.subi %letter, %c96 : i32
+  %scale = scalar.muli %ordinal, %c10 : i32
+  %base = scalar.addi %scale, %c100 : i32
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 16 : offset
+  %data = buffer.alloca<private> align(16) %bytes : buffer
+  %values = buffer.view %data[%origin] : buffer -> view<4xf32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  scf.for %i = [%c0 to %c4 step %c1] {
+    %index = index.cast %i : index to i32
+    %value = scalar.addi %base, %index : i32
+    %float = scalar.sitofp %value : i32 to f32
+    view.store %float, %values[%i] : f32, view<4xf32>
+  }
+  %offset = func.call @input_buffer(%data, %alignment) : (buffer, i64) -> (i64)
+  %cleared = scalar.constant 0.0 : f32
+  scf.for %i = [%c0 to %c4 step %c1] {
+    view.store %cleared, %values[%i] : f32, view<4xf32>
+  }
+  func.return %offset : i64
+}
+
 func.def public @prepare_weight(%key: buffer) -> (i64) {
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
@@ -93,11 +126,18 @@ func.def public @prepare_weight(%key: buffer) -> (i64) {
   func.call @check(%sized) : (i1)
   // The padding tests that staging offsets, not checkpoint lengths, drive ABI.
   %first = func.call @input(%c0, %key, %c0_i64, %first_length, %c64) : (i32, buffer, i64, i64, i64) -> (i64)
-  %second = func.call @input(%c1, %key, %c0_i64, %second_length, %c64) : (i32, buffer, i64, i64, i64) -> (i64)
   %origin = index.constant 0 : offset
   %letter = buffer.load.i8.u %key[%origin]
   %low_bit = scalar.andi %letter, %c1 : i32
   %interleaved = scalar.extui %low_bit : i32 to i64
+  %generated = scalar.cmpi ne, %low_bit, %c0 : i32
+  %second = scf.if %generated -> (i64) {
+    %offset = func.call @capture_generated(%letter, %c64) : (i32, i64) -> (i64)
+    scf.yield %offset : i64
+  } else {
+    %offset = func.call @input(%c1, %key, %c0_i64, %second_length, %c64) : (i32, buffer, i64, i64, i64) -> (i64)
+    scf.yield %offset : i64
+  }
   %root = buffer.constant utf8("pack") : buffer
   %stage = func.call @stage(%root, %c0_i64) : (buffer, i64) -> (i32)
   %layout = buffer.constant utf8("interleaved") : buffer

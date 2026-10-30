@@ -11,6 +11,7 @@
 #include <string>
 
 #include "iree/base/tooling/flags.h"
+#include "iree/io/file_handle.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
@@ -55,7 +56,8 @@ class WeightInputsTest : public ::testing::Test {
         loomc_allocator_from_iree(allocator_), &target_environment_)));
     IREE_ASSERT_OK(loom_serve_weight_inputs_module_create(
         inputs_, environment_, allocator_, &module_));
-    const iree_string_view_t roots[] = {IREE_SV("capture")};
+    const iree_string_view_t roots[] = {IREE_SV("capture"),
+                                        IREE_SV("capture_buffer")};
     IREE_ASSERT_OK(loom_serve_program_allocate(
         target_environment_, environment_, &sources_,
         iree_make_cstring_view(FLAG_input_policy), IREE_ARRAYSIZE(roots), roots,
@@ -63,6 +65,9 @@ class WeightInputsTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_vm_process_lookup_function(
         loom_serve_program_process(program_), IREE_SV("model"),
         IREE_SV("capture"), &function_));
+    IREE_ASSERT_OK(iree_vm_process_lookup_function(
+        loom_serve_program_process(program_), IREE_SV("model"),
+        IREE_SV("capture_buffer"), &buffer_function_));
   }
 
   void TearDown() override {
@@ -140,6 +145,27 @@ class WeightInputsTest : public ::testing::Test {
     return status;
   }
 
+  iree_status_t InvokeBuffer(iree_vm_buffer_t* buffer, int64_t alignment) {
+    iree_vm_buffer_retain(buffer);
+    iree_vm_variant_t arguments[] = {
+        iree_vm_buffer_variant_from_ptr_move(&types_, &buffer),
+        iree_vm_variant_from_i64(alignment)};
+    iree_vm_variant_t results[2] = {};
+    auto status = iree_vm_invoke(loom_serve_program_invocation(program_),
+                                 buffer_function_,
+                                 iree_vm_variant_span_from_array(arguments),
+                                 iree_vm_variant_span_from_array(results));
+    if (iree_status_is_ok(status)) {
+      status = iree_vm_i64_from_variant(results[0], &offset_);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_vm_i32_from_variant(results[1], &count_);
+    }
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+    return status;
+  }
+
   // Host allocation for the actual VM and file indexes.
   const iree_allocator_t allocator_ = iree_allocator_system();
   // Explicit server-local namespace for checkpoint and source fixtures.
@@ -164,6 +190,8 @@ class WeightInputsTest : public ::testing::Test {
   loom_serve_program_t* program_ = nullptr;
   // Borrowed export resolved once from the linked source program.
   iree_vm_function_t function_ = {};
+  // Source wrapper capturing host bytes and querying visible checkpoint count.
+  iree_vm_function_t buffer_function_ = {};
   // Copied compiler diagnostics retained independently of source ownership.
   loom_serve_compilation_report_t compilation_ = {};
   // Last successful source-visible metadata copy.
@@ -280,6 +308,85 @@ TEST_F(WeightInputsTest, AlignedExtentCannotOverflowTheAddressableRecipe) {
 
 TEST_F(WeightInputsTest, CapabilityIsUnavailableOutsidePolicyCapture) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION, Invoke(0, 0, 4, 4));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        InvokeBuffer(nullptr, 1));
+}
+
+TEST_F(WeightInputsTest, BufferSnapshotsSurviveMutationAndSourceVmTeardown) {
+  const uint8_t first_bytes[] = {1, 3, 5, 7};
+  iree_vm_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_clone(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
+      iree_make_const_byte_span(first_bytes, sizeof(first_bytes)), 1,
+      allocator_, &buffer));
+  loom_serve_weight_inputs_module_begin(module_);
+  IREE_ASSERT_OK(Invoke(0, 0, 4, 4));
+  IREE_ASSERT_OK(InvokeBuffer(buffer, 16));
+  EXPECT_EQ(offset_, 16);
+  EXPECT_EQ(count_, 2);
+  const uint8_t second_bytes[] = {2, 4, 6, 8};
+  std::memcpy(iree_vm_buffer_data(buffer), second_bytes, sizeof(second_bytes));
+  IREE_ASSERT_OK(InvokeBuffer(buffer, 32));
+  EXPECT_EQ(offset_, 32);
+  EXPECT_EQ(count_, 2);
+  std::memset(iree_vm_buffer_data(buffer), 0, sizeof(second_bytes));
+  iree_vm_buffer_release(buffer);
+  // The private provider must not become a policy-addressable checkpoint.
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, Invoke(2, 0, 4, 4));
+  const auto recipe = loom_serve_weight_inputs_module_take(module_);
+  ASSERT_EQ(recipe.count, 3u);
+  EXPECT_EQ(recipe.byte_length, 36u);
+  EXPECT_EQ(loom_serve_weight_inputs_staging_length(inputs_), 64u);
+  EXPECT_EQ(loom_serve_weight_inputs_source_count(inputs_), 3u);
+  loom_serve_program_free(program_);
+  program_ = nullptr;
+  iree_vm_module_release(module_);
+  module_ = nullptr;
+  iree_vm_environment_free(environment_);
+  environment_ = nullptr;
+  for (uint32_t i = 0; i < 2; ++i) {
+    const auto* input =
+        loom_serve_weight_inputs_at(inputs_, recipe.first + 1 + i);
+    EXPECT_EQ(input->source, 2u);
+    EXPECT_EQ(input->span.parameter_offset, 0u);
+    EXPECT_EQ(input->span.buffer_offset, i ? 32u : 16u);
+    EXPECT_EQ(input->span.length, 4u);
+    auto* handle = input->entry->storage.file.handle;
+    EXPECT_EQ(iree_io_file_handle_access(handle), IREE_IO_FILE_ACCESS_READ);
+    ASSERT_EQ(iree_io_file_handle_type(handle),
+              IREE_IO_FILE_HANDLE_TYPE_HOST_ALLOCATION);
+    const auto bytes = iree_io_file_handle_value(handle).host_allocation;
+    ASSERT_EQ(bytes.data_length, 4u);
+    EXPECT_EQ(std::memcmp(bytes.data, i ? second_bytes : first_bytes, 4), 0);
+  }
+}
+
+TEST_F(WeightInputsTest, InvalidBufferCapturesLeaveTheRecipeUnchanged) {
+  loom_serve_weight_inputs_module_begin(module_);
+  IREE_ASSERT_OK(Invoke(0, 0, 4, 4));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, InvokeBuffer(nullptr, 1));
+  iree_vm_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_create(0, 1, allocator_, &buffer));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, InvokeBuffer(buffer, 1));
+  iree_vm_buffer_release(buffer);
+  const uint8_t bytes[] = {1, 2, 3, 4};
+  IREE_ASSERT_OK(iree_vm_buffer_clone(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ,
+      iree_make_const_byte_span(bytes, sizeof(bytes)), 1, allocator_, &buffer));
+  for (int64_t alignment : {INT64_C(0), INT64_C(-1), INT64_C(3)}) {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          InvokeBuffer(buffer, alignment));
+  }
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        InvokeBuffer(buffer, INT64_C(1) << 62));
+  iree_vm_buffer_release(buffer);
+  IREE_ASSERT_OK(iree_vm_buffer_clone(
+      IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
+      iree_make_const_byte_span(bytes, sizeof(bytes)), 1, allocator_, &buffer));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED, InvokeBuffer(buffer, 1));
+  iree_vm_buffer_release(buffer);
+  EXPECT_EQ(loom_serve_weight_inputs_module_take(module_).count, 1u);
+  EXPECT_EQ(loom_serve_weight_inputs_source_count(inputs_), 2u);
 }
 
 TEST_F(WeightInputsTest,

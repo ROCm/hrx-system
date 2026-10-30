@@ -125,10 +125,12 @@ typedef void (*loom_serve_weights_completion_fn_t)(void* user_data,
 // No declaration and zero byte_length preserve file bytes. Otherwise
 // byte_length equals the reflected final tensor size. Checkpoint declarations
 // are unavailable inside weight policies.
-// The "weights" capability exposes source metadata and captures explicit input
-// ranges (see inputs.h). The standard "json" and "input" capabilities support
-// source-owned metadata interpretation and requirements. A preparer has no
-// fixed buffers or global scratch. It binds final storage alone for in-place
+// The "weights" capability exposes source metadata, captures checkpoint ranges,
+// and snapshots computed host buffers into input recipes (see inputs.h).
+// Snapshots remain immutable after the policy VM retires and are reused on
+// reactivation alongside checkpoint ranges. The "json" and "input" capabilities
+// support source-owned metadata interpretation and requirements. A preparer has
+// no fixed buffers or global scratch. It binds final storage alone for in-place
 // preparation, or final storage followed by the captured input blob for
 // out-of-place preparation. Each distinct declaration is JITed once; activation
 // prepares each tensor once using bounded staging shared across tensors. The

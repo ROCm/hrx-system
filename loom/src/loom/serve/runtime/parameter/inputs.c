@@ -6,11 +6,15 @@
 
 #include "loom/serve/runtime/parameter/inputs.h"
 
+#include <stdio.h>
+
+#include "iree/io/file_handle.h"
+#include "iree/io/parameter_index_provider.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/reflection.h"
 
 typedef struct loom_serve_weight_source_t {
-  // Retained canonical keys, metadata, and backing checkpoint files.
+  // Retained canonical keys, metadata, and backing storage.
   iree_io_parameter_index_t* index;
   // Retained imported-file cache shared with other users of this source.
   iree_io_parameter_provider_t* provider;
@@ -24,6 +28,8 @@ struct loom_serve_weight_inputs_t {
   // Retained selected sources in policy-local order, following this object.
   // Unused peers in a request catalog do not stay live through this plan.
   loom_serve_weight_source_t* sources;
+  // Private host snapshots, populated lazily and hidden from policy ordinals.
+  loom_serve_weight_source_t generated;
   // Number of initialized ranges, addressable by the compact recipe ordinals.
   uint32_t count;
   // Allocated range capacity, grown only during cold source capture.
@@ -69,18 +75,21 @@ void loom_serve_weight_inputs_free(loom_serve_weight_inputs_t* inputs) {
     iree_io_parameter_provider_release(inputs->sources[i].provider);
     iree_io_parameter_index_release(inputs->sources[i].index);
   }
+  iree_io_parameter_provider_release(inputs->generated.provider);
+  iree_io_parameter_index_release(inputs->generated.index);
   iree_allocator_free(inputs->host_allocator, inputs->values);
   iree_allocator_free(inputs->host_allocator, inputs);
 }
 
 iree_io_parameter_provider_t* loom_serve_weight_inputs_provider(
     const loom_serve_weight_inputs_t* inputs, uint32_t source) {
-  return inputs->sources[source].provider;
+  return source == inputs->source_count ? inputs->generated.provider
+                                        : inputs->sources[source].provider;
 }
 
 uint32_t loom_serve_weight_inputs_source_count(
     const loom_serve_weight_inputs_t* inputs) {
-  return inputs->source_count;
+  return inputs->source_count + (inputs->generated.provider != NULL);
 }
 
 iree_status_t loom_serve_weight_inputs_validate_direct(
@@ -174,21 +183,13 @@ static iree_status_t loom_serve_weight_inputs_lookup(
       out_entry);
 }
 
-static iree_status_t loom_serve_weight_inputs_capture(
-    loom_serve_weight_inputs_module_t* module,
-    const iree_vm_call_packet_t* call,
-    const iree_io_parameter_index_entry_t* entry) {
+static iree_status_t loom_serve_weight_inputs_reserve(
+    loom_serve_weight_inputs_module_t* module, uint64_t length,
+    int64_t alignment, iree_device_size_t* out_target) {
   loom_serve_weight_inputs_t* inputs = module->inputs;
-  const int64_t offset = (int64_t)iree_vm_call_value_argument_load(call, 1);
-  const int64_t length = (int64_t)iree_vm_call_value_argument_load(call, 2);
-  const int64_t alignment = (int64_t)iree_vm_call_value_argument_load(call, 3);
-  if (offset < 0 || length <= 0 || (uint64_t)offset > entry->length ||
-      (uint64_t)length > entry->length - (uint64_t)offset) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "weight '%.*s' input range offset %" PRId64 " length %" PRId64
-        " exceeds checkpoint tensor length %" PRIu64,
-        (int)entry->key.size, entry->key.data, offset, length, entry->length);
+  if (!length) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "weight input must not be empty");
   }
   if (alignment <= 0 || (alignment & (alignment - 1)) ||
       module->recipe.byte_length > INT64_MAX - (uint64_t)(alignment - 1)) {
@@ -201,7 +202,7 @@ static iree_status_t loom_serve_weight_inputs_capture(
   // Leave every captured extent addressable after final lane alignment as well.
   const uint64_t maximum_alignment =
       iree_max(inputs->staging_alignment, (uint64_t)alignment);
-  if ((uint64_t)length > INT64_MAX - target ||
+  if (length > INT64_MAX - target ||
       target + length > INT64_MAX - (maximum_alignment - 1) ||
       inputs->staging_length > INT64_MAX - (maximum_alignment - 1) ||
       inputs->count == UINT32_MAX) {
@@ -213,18 +214,124 @@ static iree_status_t loom_serve_weight_inputs_capture(
         inputs->host_allocator, (iree_host_size_t)inputs->count + 1,
         sizeof(*inputs->values), &inputs->capacity, (void**)&inputs->values));
   }
+  *out_target = target;
+  return iree_ok_status();
+}
+
+// Commits a range after reserve has established its extent and storage.
+static void loom_serve_weight_inputs_append(
+    loom_serve_weight_inputs_module_t* module, uint32_t source,
+    const iree_io_parameter_index_entry_t* entry, uint64_t offset,
+    uint64_t length, iree_device_size_t target, uint64_t alignment) {
+  loom_serve_weight_inputs_t* inputs = module->inputs;
   inputs->values[inputs->count++] = (loom_serve_weight_input_t){
       .entry = entry,
-      .span = {.parameter_offset = (uint64_t)offset,
+      .span = {.parameter_offset = offset,
                .buffer_offset = target,
-               .length = (uint64_t)length},
-      .source = (uint32_t)iree_vm_call_value_argument_load(call, 0),
+               .length = length},
+      .source = source,
   };
   ++module->recipe.count;
   module->recipe.byte_length = target + length;
-  inputs->staging_alignment = maximum_alignment;
+  inputs->staging_alignment = iree_max(inputs->staging_alignment, alignment);
+}
+
+static iree_status_t loom_serve_weight_inputs_capture(
+    loom_serve_weight_inputs_module_t* module,
+    const iree_vm_call_packet_t* call,
+    const iree_io_parameter_index_entry_t* entry) {
+  const int64_t offset = (int64_t)iree_vm_call_value_argument_load(call, 1);
+  const int64_t length = (int64_t)iree_vm_call_value_argument_load(call, 2);
+  const int64_t alignment = (int64_t)iree_vm_call_value_argument_load(call, 3);
+  if (offset < 0 || length <= 0 || (uint64_t)offset > entry->length ||
+      (uint64_t)length > entry->length - (uint64_t)offset) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "weight '%.*s' input range offset %" PRId64 " length %" PRId64
+        " exceeds checkpoint tensor length %" PRIu64,
+        (int)entry->key.size, entry->key.data, offset, length, entry->length);
+  }
+  iree_device_size_t target = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_weight_inputs_reserve(module, length, alignment, &target));
+  loom_serve_weight_inputs_append(
+      module, (uint32_t)iree_vm_call_value_argument_load(call, 0), entry,
+      offset, length, target, alignment);
   iree_vm_call_value_result_store(call, 0, target);
   return iree_ok_status();
+}
+
+static void loom_serve_weight_input_buffer_release(
+    void* user_data, iree_io_file_handle_primitive_t primitive) {
+  iree_vm_buffer_release((iree_vm_buffer_t*)user_data);
+}
+
+static iree_status_t loom_serve_weight_inputs_capture_buffer(
+    loom_serve_weight_inputs_module_t* module,
+    const iree_vm_call_packet_t* call) {
+  iree_vm_ref_t ref = iree_vm_ref_null();
+  iree_vm_call_ref_argument_load_borrow(call, 0, &ref);
+  if (!ref.object) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "weight input buffer must not be null");
+  }
+  iree_vm_buffer_t* buffer = (iree_vm_buffer_t*)ref.object;
+  iree_const_byte_span_t bytes = iree_const_byte_span_empty();
+  IREE_RETURN_IF_ERROR(iree_vm_buffer_map_read(
+      buffer, 0, iree_vm_buffer_length(buffer), &bytes));
+  const int64_t alignment = (int64_t)iree_vm_call_value_argument_load(call, 0);
+  iree_device_size_t target = 0;
+  IREE_RETURN_IF_ERROR(loom_serve_weight_inputs_reserve(
+      module, bytes.data_length, alignment, &target));
+
+  loom_serve_weight_inputs_t* inputs = module->inputs;
+  if (!inputs->generated.index) {
+    IREE_RETURN_IF_ERROR(iree_io_parameter_index_create(
+        inputs->host_allocator, &inputs->generated.index));
+    IREE_RETURN_IF_ERROR(iree_io_parameter_index_provider_create(
+        iree_string_view_empty(), inputs->generated.index, IREE_HOST_SIZE_MAX,
+        inputs->host_allocator, &inputs->generated.provider));
+  }
+  // A private copy remains immutable even if the policy mutates its buffer,
+  // and its ownership is independent of the temporary VM and environment.
+  iree_vm_buffer_t* snapshot = NULL;
+  IREE_RETURN_IF_ERROR(iree_vm_buffer_clone(IREE_VM_BUFFER_ACCESS_FLAG_READ,
+                                            bytes, iree_max_align_t,
+                                            inputs->host_allocator, &snapshot));
+  iree_io_file_handle_t* handle = NULL;
+  iree_status_t status = iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ,
+      iree_make_byte_span((void*)iree_vm_buffer_const_data(snapshot),
+                          bytes.data_length),
+      (iree_io_file_handle_release_callback_t){
+          loom_serve_weight_input_buffer_release, snapshot},
+      inputs->host_allocator, &handle);
+  if (!iree_status_is_ok(status)) {
+    iree_vm_buffer_release(snapshot);
+    return status;
+  }
+  // Keys are private recipe ordinals, never names in the model's checkpoints.
+  char key[16];
+  const int key_length = snprintf(key, sizeof(key), "%u", inputs->count);
+  const iree_io_parameter_index_entry_t entry = {
+      .key = iree_make_string_view(key, key_length),
+      .length = bytes.data_length,
+      .type = IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE,
+      .storage.file = {.handle = handle},
+  };
+  status = iree_io_parameter_index_add(inputs->generated.index, &entry);
+  const iree_io_parameter_index_entry_t* stored = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_io_parameter_index_lookup(inputs->generated.index, entry.key,
+                                            &stored);
+  }
+  iree_io_file_handle_release(handle);
+  if (iree_status_is_ok(status)) {
+    loom_serve_weight_inputs_append(module, inputs->source_count, stored, 0,
+                                    bytes.data_length, target, alignment);
+    iree_vm_call_value_result_store(call, 0, target);
+  }
+  return status;
 }
 
 static iree_status_t loom_serve_weight_inputs_module_start(
@@ -240,6 +347,8 @@ static iree_status_t loom_serve_weight_inputs_module_start(
   const iree_vm_call_packet_t* call = &params->call;
   if (params->function_ordinal == 0) {
     iree_vm_call_value_result_store(call, 0, module->inputs->source_count);
+  } else if (params->function_ordinal == 3) {
+    IREE_RETURN_IF_ERROR(loom_serve_weight_inputs_capture_buffer(module, call));
   } else {
     const iree_io_parameter_index_entry_t* entry = NULL;
     IREE_RETURN_IF_ERROR(loom_serve_weight_inputs_lookup(module, call, &entry));
@@ -283,10 +392,14 @@ static const iree_vm_module_signature_type_t inputs_input_arguments[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0}};
 static const iree_vm_module_signature_type_t inputs_input_results[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0}};
+static const iree_vm_module_signature_type_t inputs_buffer_arguments[] = {
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}, {IREE_VM_SCALAR_TYPE_I64, 0}};
 static const iree_vm_module_callable_type_declaration_t inputs_callables[] = {
     {.signature = {.results = {inputs_count_results, 1, 1, 0, 0}}},
     {.signature = {.arguments = {inputs_parameter_arguments, 2, 1, 1, 0},
                    .results = {inputs_parameter_results, 2, 1, 1, 0}}},
+    {.signature = {.arguments = {inputs_buffer_arguments, 2, 1, 1, 0},
+                   .results = {inputs_input_results, 1, 1, 0, 0}}},
     {.signature = {.arguments = {inputs_input_arguments, 5, 4, 1, 0},
                    .results = {inputs_input_results, 1, 1, 0, 0}}},
 };
@@ -295,8 +408,11 @@ static const iree_vm_module_export_declaration_t inputs_exports[] = {
      .callable_type_ordinal = 0,
      .function_ordinal = 0},
     {.export_name = IREE_SVL("input"),
-     .callable_type_ordinal = 2,
+     .callable_type_ordinal = 3,
      .function_ordinal = 2},
+    {.export_name = IREE_SVL("input_buffer"),
+     .callable_type_ordinal = 2,
+     .function_ordinal = 3},
     {.export_name = IREE_SVL("parameter"),
      .callable_type_ordinal = 1,
      .function_ordinal = 1},
@@ -359,10 +475,10 @@ iree_status_t loom_serve_weight_inputs_module_create(
       .name = IREE_SVL("weights"),
       .flags = IREE_VM_MODULE_FLAG_LINKABLE,
       .ref_types = {&module->types.buffer, 1},
-      .counts = {.function_count = 3,
-                 .callable_type_count = 3,
-                 .export_count = 3,
-                 .callable_fields = {.value_count = 8, .ref_count = 3}},
+      .counts = {.function_count = 4,
+                 .callable_type_count = 4,
+                 .export_count = 4,
+                 .callable_fields = {.value_count = 10, .ref_count = 4}},
   };
   iree_status_t status = iree_vm_module_initialize(
       &inputs_module_vtable, &module->descriptor, &module->base);
