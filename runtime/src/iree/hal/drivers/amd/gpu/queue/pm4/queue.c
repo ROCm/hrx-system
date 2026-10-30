@@ -974,7 +974,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
       profile->completion.samples = (void*)(arguments->memory.contents.data +
                                             argument_offset + sample_offset);
       words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
-      words = iree_hal_amd_gpu_pm4_emit_clock(words, sample_address);
+      words = iree_hal_amd_gpu_pm4_emit_clock(words, sample_address, true);
     }
     if (indirect_parameters) {
       words = iree_hal_amd_gpu_pm4_dispatch_emit_indirect(
@@ -990,7 +990,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
     }
     if (sample_length) {
       words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
-      words = iree_hal_amd_gpu_pm4_emit_clock(words, sample_address + 8);
+      words = iree_hal_amd_gpu_pm4_emit_clock(words, sample_address + 8, true);
     }
   }
   return iree_hal_amd_gpu_pm4_publish_commit(

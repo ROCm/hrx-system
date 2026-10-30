@@ -3133,8 +3133,8 @@ static iree_status_t iree_hal_vulkan_command_buffer_barrier(
       includes_timestamps &&
       (iree_any_bit_set(barrier->flags,
                         IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE) ||
-       iree_any_bit_set(barrier->target_stage_mask,
-                        IREE_HAL_EXECUTION_STAGE_HOST));
+       iree_any_bit_set(barrier->effects.bits,
+                        IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM));
   for (iree_host_size_t i = 0; i < barrier->memory_barrier_count; ++i) {
     delivers_timestamps |=
         includes_timestamps &&

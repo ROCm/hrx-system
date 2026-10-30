@@ -227,10 +227,11 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_copy64(uint32_t* words,
 }
 
 uint32_t* iree_hal_amd_gpu_pm4_emit_clock(uint32_t* words,
-                                          uint64_t target_address) {
+                                          uint64_t target_address,
+                                          bool wait_for_write) {
   words[0] = UINT32_C(0xc0044000);
-  // GPU clock source, memory destination, 64-bit count, write confirmation.
-  words[1] = 9 | (5 << 8) | (1 << 16) | (1 << 20);
+  // GPU clock source, memory destination, 64-bit count.
+  words[1] = 9 | (5 << 8) | (1 << 16) | ((uint32_t)wait_for_write << 20);
   words[2] = 0;
   words[3] = 0;
   words[4] = (uint32_t)target_address;

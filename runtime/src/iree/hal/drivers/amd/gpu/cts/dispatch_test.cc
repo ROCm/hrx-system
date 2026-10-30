@@ -979,11 +979,12 @@ TEST_P(GpuNativeDispatchTest, ControlOrderingPreservesIndependentShaderWrites) {
     const uint64_t mask =
         width == IREE_HAL_ATOMIC_WIDTH_64 ? UINT64_MAX : UINT32_MAX;
     const auto target = iree_hal_make_indirect_buffer_ref(0, 8, width / 8);
-    enum class Position { kFirst, kConcurrent, kOrdered };
-    for (auto position :
-         {Position::kFirst, Position::kConcurrent, Position::kOrdered}) {
+    enum class Position { kFirst, kBeforeDispatch, kConcurrent, kOrdered };
+    for (auto position : {Position::kFirst, Position::kBeforeDispatch,
+                          Position::kConcurrent, Position::kOrdered}) {
       SCOPED_TRACE(static_cast<int>(position));
       const bool dispatch = position != Position::kFirst;
+      const bool before_dispatch = position == Position::kBeforeDispatch;
       const bool ordered = position == Position::kOrdered;
       IREE_ASSERT_OK(iree_hal_buffer_map_write(output, 0, initial.data(),
                                                sizeof(initial)));
@@ -995,11 +996,14 @@ TEST_P(GpuNativeDispatchTest, ControlOrderingPreservesIndependentShaderWrites) {
               IREE_HAL_COMMAND_CATEGORY_TRANSFER,
           1, recording.out()));
       IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
-      if (dispatch) {
-        uint32_t increment = 1;
-        IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+      const auto record_dispatch = [&]() {
+        const uint32_t increment = 1;
+        return iree_hal_command_buffer_dispatch(
             recording, executable, function, config,
-            iree_make_const_byte_span(&increment, 4), {1, &shader_target}, 0));
+            iree_make_const_byte_span(&increment, 4), {1, &shader_target}, 0);
+      };
+      if (dispatch && !before_dispatch) {
+        IREE_ASSERT_OK(record_dispatch());
       }
       const iree_hal_execution_stage_t source =
           ordered ? IREE_HAL_EXECUTION_STAGE_DISPATCH : 0;
@@ -1034,6 +1038,9 @@ TEST_P(GpuNativeDispatchTest, ControlOrderingPreservesIndependentShaderWrites) {
                                                           target, params));
         expected = kGuard + 1;
       }
+      if (before_dispatch) {
+        IREE_ASSERT_OK(record_dispatch());
+      }
       IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
       IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
       if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
@@ -1041,6 +1048,7 @@ TEST_P(GpuNativeDispatchTest, ControlOrderingPreservesIndependentShaderWrites) {
             iree_hal_amd_gpu_aql_command_buffer_program(recording);
         ASSERT_NE(program->host_template, nullptr);
         ASSERT_EQ(program->block_count, 1u);
+        const bool timestamp = kind == ControlKind::kTimestamp;
         const bool standalone_release = dispatch && !ordered;
         EXPECT_EQ(program->blocks[0].packet_count,
                   1u + dispatch + standalone_release);
@@ -1048,16 +1056,22 @@ TEST_P(GpuNativeDispatchTest, ControlOrderingPreservesIndependentShaderWrites) {
             reinterpret_cast<const iree_hal_amd_gpu_aql_packet_t*>(
                 program->host_template + 1);
         if (dispatch) {
-          EXPECT_EQ(packets[0].words[0] & 0xFFFFu,
+          EXPECT_EQ(packets[before_dispatch].words[0] & 0xFFFFu,
                     IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH);
         }
-        EXPECT_EQ(packets[dispatch].words[0],
+        EXPECT_EQ(packets[dispatch && !before_dispatch].words[0],
                   (1u << 16) |
                       (ordered ? IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED : 0) |
                       (standalone_release
                            ? 0
                            : IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM));
-        if (standalone_release) {
+        if (timestamp && before_dispatch) {
+          // Work separates capture from delivery, so the write drain has its
+          // own carrier at the authored publication boundary.
+          EXPECT_EQ(packets[2].words[0],
+                    (1u << 16) | IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                        IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM);
+        } else if (standalone_release) {
           EXPECT_EQ(packets[2].words[0],
                     IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND |
                         IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |

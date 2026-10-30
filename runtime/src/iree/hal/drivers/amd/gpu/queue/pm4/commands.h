@@ -152,11 +152,13 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_release64(uint32_t* words,
                                               uint64_t value);
 
 // Emits six DWORDs sampling the command processor's GPU clock to an aligned
-// eight-byte destination. The confirmed write does not join preceding shaders
-// or publish other addresses. Sampling after a compute join isolates the next
-// dispatch from preceding compute work.
+// eight-byte destination, without joining shaders or publishing other data.
+// Posted writes require a later confirmed MEC WRITE_DATA before a data consumer
+// or completion publication. Execution-only dependencies order capture without
+// requiring delivery. Standalone samples may request immediate confirmation.
 uint32_t* iree_hal_amd_gpu_pm4_emit_clock(uint32_t* words,
-                                          uint64_t target_address);
+                                          uint64_t target_address,
+                                          bool wait_for_write);
 
 // Emits eight DWORDs of RELEASE_MEM with an interrupt after write confirmation.
 // The destination, value and interrupt context are a previously admitted native

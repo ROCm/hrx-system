@@ -702,8 +702,15 @@ TEST_F(VulkanCommandBufferTest, TimestampDeliveryFollowsDataDependencies) {
       &buffer));
   const std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
       buffer_owner(buffer, iree_hal_buffer_release);
-  for (bool alias_slot : {false, true}) {
+  const std::pair<bool, iree_hal_execution_stage_t> cases[] = {
+      {false, IREE_HAL_EXECUTION_STAGE_TRANSFER},
+      {true, IREE_HAL_EXECUTION_STAGE_TRANSFER},
+      {false, IREE_HAL_EXECUTION_STAGE_HOST},
+      {true, IREE_HAL_EXECUTION_STAGE_HOST},
+  };
+  for (auto [alias_slot, execution_target] : cases) {
     SCOPED_TRACE(alias_slot);
+    SCOPED_TRACE(execution_target);
     auto commands =
         CreateCommandBuffer(2, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT);
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(commands.get()));
@@ -712,7 +719,7 @@ TEST_F(VulkanCommandBufferTest, TimestampDeliveryFollowsDataDependencies) {
     // A wave join orders captures, but does not consume timestamp data.
     const iree_hal_barrier_t execution = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
-        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .target_stage_mask = execution_target,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(commands.get(), &execution));
     IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
