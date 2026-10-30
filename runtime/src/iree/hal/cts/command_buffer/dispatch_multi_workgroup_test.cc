@@ -130,6 +130,90 @@ TEST_P(DispatchMultiWorkgroupTest, WriteWorkgroupIds) {
   iree_hal_buffer_release(output_buffer);
 }
 
+TEST_P(DispatchMultiWorkgroupTest, TimestampedDispatch) {
+  auto* queue = QueueForCommandCategories(IREE_HAL_COMMAND_CATEGORY_DISPATCH |
+                                          IREE_HAL_COMMAND_CATEGORY_TRANSFER);
+  ASSERT_NE(nullptr, queue);
+  const auto* family = iree_hal_queue_family(queue);
+  const bool indirect = recording_mode() == RecordingMode::kIndirect;
+  const auto capability =
+      indirect ? IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_INDIRECT_COMMAND_TIMESTAMPS
+               : IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS;
+  if (!(family->spec->flags & capability)) {
+    GTEST_SKIP() << "Queue family does not support command timestamps";
+  }
+  Ref<iree_hal_buffer_t> output;
+  Ref<iree_hal_buffer_t> timestamps;
+  IREE_ASSERT_OK(CreateZeroedDeviceBuffer(kWorkgroupCount * sizeof(uint32_t),
+                                          output.out()));
+  IREE_ASSERT_OK(
+      CreateFilledDeviceBuffer<uint32_t>(32, 0xABABABAB, timestamps.out()));
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      family, 0,
+      IREE_HAL_COMMAND_CATEGORY_DISPATCH | IREE_HAL_COMMAND_CATEGORY_TRANSFER,
+      indirect ? 2 : 0, command_buffer.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
+  const auto first = indirect ? iree_hal_make_indirect_buffer_ref(1, 8, 8)
+                              : iree_hal_make_buffer_ref(timestamps, 8, 8);
+  // The end timestamp replaces workgroups 4 and 5's output after an ordinary
+  // write-to-write visibility transition, without an intervening submission.
+  const auto last = indirect ? iree_hal_make_indirect_buffer_ref(0, 16, 8)
+                             : iree_hal_make_buffer_ref(output, 16, 8);
+  const auto target = indirect
+                          ? iree_hal_make_indirect_buffer_ref(
+                                0, 0, kWorkgroupCount * sizeof(uint32_t))
+                          : iree_hal_make_buffer_ref(
+                                output, 0, kWorkgroupCount * sizeof(uint32_t));
+  IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+      command_buffer, 0, IREE_HAL_EXECUTION_STAGE_DISPATCH, first, 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+      command_buffer, executable_, iree_hal_executable_function_from_index(0),
+      iree_hal_make_static_dispatch_config(kWorkgroupCount, 1, 1),
+      iree_const_byte_span_empty(), {1, &target}, IREE_HAL_DISPATCH_FLAG_NONE));
+  const iree_hal_memory_barrier_t overwrite_memory = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+  };
+  const iree_hal_barrier_t overwrite = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .memory_barrier_count = 1,
+      .memory_barriers = &overwrite_memory,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(command_buffer, &overwrite));
+  IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+      command_buffer, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, last, 0));
+  const iree_hal_barrier_t publish = {
+      .source_stage_mask =
+          IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(command_buffer, &publish));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+  const iree_hal_buffer_binding_t bindings[] = {
+      {output, 0, kWorkgroupCount * sizeof(uint32_t)}, {timestamps, 0, 32}};
+  IREE_ASSERT_OK(SubmitCommandBufferAndWait(
+      command_buffer, {indirect ? 2u : 0u, indirect ? bindings : nullptr}));
+  std::vector<uint32_t> expected(kWorkgroupCount);
+  std::iota(expected.begin(), expected.end(), 0u);
+  auto actual = ReadBufferData<uint32_t>(output);
+  ASSERT_EQ(actual.size(), kWorkgroupCount);
+  const uint64_t end_tick = uint64_t{actual[4]} | (uint64_t{actual[5]} << 32);
+  EXPECT_NE(end_tick, UINT64_C(0x0000000500000004));
+  actual[4] = 4;
+  actual[5] = 5;
+  EXPECT_EQ(actual, expected);
+  const auto ticks = ReadBufferData<uint64_t>(timestamps);
+  ASSERT_EQ(ticks.size(), 4u);
+  EXPECT_EQ(ticks[0], UINT64_C(0xABABABABABABABAB));
+  EXPECT_EQ(ticks[3], ticks[0]);
+  EXPECT_NE(ticks[1], ticks[0]);
+  EXPECT_EQ(ticks[2], ticks[0]);
+}
+
 CTS_REGISTER_EXECUTABLE_COMMAND_BUFFER_TEST_SUITE(DispatchMultiWorkgroupTest);
 
 }  // namespace iree::hal::cts

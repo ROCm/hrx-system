@@ -80,21 +80,33 @@ class CommandBufferTimestampTest : public CtsTestBase<> {
   }
 
   void Record(iree_hal_buffer_t* buffer,
-              iree_hal_command_buffer_t** out_command_buffer) {
-    Begin(out_command_buffer);
+              iree_hal_command_buffer_t** out_command_buffer,
+              iree_hal_command_buffer_mode_t mode = 0) {
+    Begin(out_command_buffer, mode);
     if (HasFatalFailure()) {
       return;
     }
     auto* command_buffer = *out_command_buffer;
     IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
         command_buffer, IREE_HAL_EXECUTION_STAGE_TRANSFER,
-        IREE_HAL_EXECUTION_STAGE_TRANSFER, RefAt(buffer, 8), 0));
+        IREE_HAL_EXECUTION_STAGE_TRANSFER, RefAt(buffer, 56), 0));
     IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
         command_buffer, RefAt(buffer, 64, kPayloadLength), &kPattern,
         sizeof(kPattern), IREE_HAL_FILL_FLAG_NONE));
+    const iree_hal_memory_barrier_t overwrite_memory = {
+        .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+        .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+    };
+    const iree_hal_barrier_t overwrite = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .memory_barrier_count = 1,
+        .memory_barriers = &overwrite_memory,
+    };
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(command_buffer, &overwrite));
     IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
         command_buffer, IREE_HAL_EXECUTION_STAGE_TRANSFER,
-        IREE_HAL_EXECUTION_STAGE_TRANSFER, RefAt(buffer, 16), 0));
+        IREE_HAL_EXECUTION_STAGE_TRANSFER, RefAt(buffer, 64), 0));
     const iree_hal_memory_barrier_t memory_barrier = {
         .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
         .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
@@ -106,9 +118,11 @@ class CommandBufferTimestampTest : public CtsTestBase<> {
         .memory_barriers = &memory_barrier,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(command_buffer, &consume));
-    // Resolving queries only at command-buffer end would make this read stale.
+    // The fill overwrites the end timestamp's location: capture must follow
+    // its completion. Resolving only at command-buffer end would also make
+    // this consumer stale.
     IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
-        command_buffer, RefAt(buffer, 8, 16), RefAt(buffer, 24, 16), 0));
+        command_buffer, RefAt(buffer, 56, 16), RefAt(buffer, 24, 16), 0));
     const iree_hal_barrier_t publish = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
         .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
@@ -140,17 +154,19 @@ class CommandBufferTimestampTest : public CtsTestBase<> {
 
   std::array<uint64_t, 2> CheckWords(const std::vector<uint64_t>& words) {
     EXPECT_EQ(words[0], kGuard);
-    EXPECT_NE(words[1], kGuard);
-    EXPECT_NE(words[2], kGuard);
-    EXPECT_EQ(words[3], words[1]);
-    EXPECT_EQ(words[4], words[2]);
-    for (size_t i = 5; i < 8; ++i) {
+    EXPECT_EQ(words[1], kGuard);
+    EXPECT_EQ(words[2], kGuard);
+    EXPECT_NE(words[7], kGuard);
+    EXPECT_EQ(words[3], words[7]);
+    EXPECT_EQ(words[4], words[8]);
+    for (size_t i = 5; i < 7; ++i) {
       EXPECT_EQ(words[i], kGuard);
     }
     const uint64_t pattern = (uint64_t{kPattern} << 32) | kPattern;
-    EXPECT_THAT(std::vector<uint64_t>(words.begin() + 8, words.end()),
+    EXPECT_NE(words[8], pattern);
+    EXPECT_THAT(std::vector<uint64_t>(words.begin() + 9, words.end()),
                 ::testing::Each(pattern));
-    return {words[1], words[2]};
+    return {words[7], words[8]};
   }
 
   // Pool backing retained until every test-local buffer is released.
@@ -166,7 +182,8 @@ TEST_P(CommandBufferTimestampTest, TransferConsumerAndQueueClock) {
   Allocate(kRangeLength, buffer.out());
   ASSERT_FALSE(HasFatalFailure());
   Ref<iree_hal_command_buffer_t> command_buffer;
-  Record(buffer, command_buffer.out());
+  Record(buffer, command_buffer.out(),
+         indirect() ? 0 : IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT);
   ASSERT_FALSE(HasFatalFailure());
   Ref<iree_hal_buffer_t> outer;
   Allocate(16, outer.out());
