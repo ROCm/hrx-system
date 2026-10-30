@@ -7545,8 +7545,39 @@ static iree_status_t iree_hal_vulkan_transfer_validate_buffer(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_vulkan_transfer_select_strategy(
+// Admission checks apply once, before a caller may enqueue deallocation.
+// Captured transfers retain their operands; readiness only resolves backing.
+static iree_status_t iree_hal_vulkan_transfer_validate_operation(
     iree_hal_vulkan_queue_t* queue,
+    const iree_hal_transfer_operation_t* operation) {
+  if (iree_hal_vulkan_transfer_operation_length(operation) == 0) {
+    return iree_ok_status();
+  }
+  switch (operation->type) {
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
+      return iree_hal_vulkan_transfer_validate_buffer(
+          queue, operation->fill.target_buffer);
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
+      return iree_hal_vulkan_transfer_validate_buffer(
+          queue, operation->update.target_buffer);
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY: {
+      IREE_RETURN_IF_ERROR(iree_hal_vulkan_transfer_validate_buffer(
+          queue, operation->copy.source_buffer));
+      return iree_hal_vulkan_transfer_validate_buffer(
+          queue, operation->copy.target_buffer);
+    }
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
+      return iree_hal_vulkan_transfer_validate_buffer(
+          queue, operation->upload.target_buffer);
+    case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
+      return iree_hal_vulkan_transfer_validate_buffer(
+          queue, operation->download.source_buffer);
+  }
+  IREE_ASSERT_UNREACHABLE("transfer operation is validated at queue entry");
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_vulkan_transfer_select_strategy(
     const iree_hal_transfer_operation_t* operation,
     iree_hal_vulkan_transfer_strategy_t* out_strategy) {
   if (iree_hal_vulkan_transfer_operation_length(operation) == 0) {
@@ -7555,8 +7586,6 @@ static iree_status_t iree_hal_vulkan_transfer_select_strategy(
   }
   switch (operation->type) {
     case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL: {
-      IREE_RETURN_IF_ERROR(iree_hal_vulkan_transfer_validate_buffer(
-          queue, operation->fill.target_buffer));
       if (!iree_hal_vulkan_queue_buffer_has_recordable_backing(
               operation->fill.target_buffer)) {
         *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_PENDING;
@@ -7575,8 +7604,6 @@ static iree_status_t iree_hal_vulkan_transfer_select_strategy(
       return iree_ok_status();
     }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE: {
-      IREE_RETURN_IF_ERROR(iree_hal_vulkan_transfer_validate_buffer(
-          queue, operation->update.target_buffer));
       if (!iree_hal_vulkan_queue_buffer_has_recordable_backing(
               operation->update.target_buffer)) {
         *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_PENDING;
@@ -7592,22 +7619,14 @@ static iree_status_t iree_hal_vulkan_transfer_select_strategy(
       return iree_ok_status();
     }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY: {
-      IREE_RETURN_IF_ERROR(iree_hal_vulkan_transfer_validate_buffer(
-          queue, operation->copy.source_buffer));
-      IREE_RETURN_IF_ERROR(iree_hal_vulkan_transfer_validate_buffer(
-          queue, operation->copy.target_buffer));
       *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE;
       return iree_ok_status();
     }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD: {
-      IREE_RETURN_IF_ERROR(iree_hal_vulkan_transfer_validate_buffer(
-          queue, operation->upload.target_buffer));
       *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_STAGED_UPLOAD;
       return iree_ok_status();
     }
     case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD: {
-      IREE_RETURN_IF_ERROR(iree_hal_vulkan_transfer_validate_buffer(
-          queue, operation->download.source_buffer));
       *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_STAGED_DOWNLOAD;
       return iree_ok_status();
     }
@@ -7677,6 +7696,8 @@ static iree_status_t iree_hal_vulkan_transfer_transaction_create(
   iree_host_size_t captured_data_length = 0;
   for (iree_host_size_t i = 0; i < operation_count; ++i) {
     const iree_hal_transfer_operation_t* operation = &source_operations[i];
+    IREE_RETURN_IF_ERROR(
+        iree_hal_vulkan_transfer_validate_operation(queue, operation));
     iree_host_size_t capture_length = 0;
     if (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_FILL &&
         operation->fill.length != 0) {
@@ -7794,7 +7815,7 @@ static iree_status_t iree_hal_vulkan_transfer_transaction_create(
   for (iree_host_size_t i = 0; i < operation_count && iree_status_is_ok(status);
        ++i) {
     status = iree_hal_vulkan_transfer_select_strategy(
-        queue, &transaction->operations[i], &transaction->strategies[i]);
+        &transaction->operations[i], &transaction->strategies[i]);
     if (iree_status_is_ok(status) &&
         transaction->strategies[i] ==
             IREE_HAL_VULKAN_TRANSFER_STRATEGY_NATIVE) {
@@ -7938,8 +7959,7 @@ iree_hal_vulkan_transfer_transaction_resolve_pending_strategies(
       continue;
     }
     status = iree_hal_vulkan_transfer_select_strategy(
-        transaction->queue, &transaction->operations[i],
-        &transaction->strategies[i]);
+        &transaction->operations[i], &transaction->strategies[i]);
     if (iree_status_is_ok(status) &&
         transaction->strategies[i] ==
             IREE_HAL_VULKAN_TRANSFER_STRATEGY_PENDING) {
