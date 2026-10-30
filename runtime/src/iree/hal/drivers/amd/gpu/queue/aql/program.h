@@ -80,6 +80,17 @@ uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
     const iree_hal_amd_gpu_program_t* program,
     const iree_hal_amd_gpu_program_instance_t* instance, bool first);
 
+// Publishes a bounded immutable packet sequence from invocation-private upload
+// storage. Dense inputs and fixups are already resolved. Completion operands
+// contain producer-assigned profile ordinals, or zero for unsampled packets.
+// samples is invocation-private storage at sample_address, or NULL/zero when
+// capture is disabled. The caller retains both uploads through completion.
+amdf_status_t iree_hal_amd_gpu_aql_program_emit_host(
+    uint32_t packet_count, const void* upload,
+    iree_hal_amd_gpu_aql_ring_t* ring,
+    const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
+    uint64_t sample_address, iree_hal_amd_gpu_aql_signal_t* samples);
+
 // Emits one fully reserved block's host prelude. Resident templates are copied
 // exclusively by the GPU. upload is coherent native argument storage and its
 // value table is already written. The caller establishes ownership before

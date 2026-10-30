@@ -554,6 +554,22 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_test(
+    name = "program_test",
+    srcs = ["program_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":packet",
+        ":program",
+        ":ring",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "lifecycle_test",
     srcs = ["lifecycle_test.cc"],
     target_compatible_with = select({

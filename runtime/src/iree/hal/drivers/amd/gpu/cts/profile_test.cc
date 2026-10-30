@@ -136,10 +136,12 @@ class GpuNativeProfileTestBase : public GpuNativeTest {
               iree_hal_executable_function_t function,
               iree_hal_command_buffer_mode_t mode,
               iree_hal_command_buffer_t** out_recording,
-              uint32_t dispatch_count = 2) {
+              uint32_t dispatch_count = 2, bool timestamps = false) {
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
         iree_hal_queue_family(queues_[0]), mode,
-        IREE_HAL_COMMAND_CATEGORY_DISPATCH, 1, out_recording));
+        IREE_HAL_COMMAND_CATEGORY_DISPATCH |
+            (timestamps ? IREE_HAL_COMMAND_CATEGORY_TRANSFER : 0),
+        1, out_recording));
     auto* recording = *out_recording;
     IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
     const iree_hal_barrier_t acquire = {
@@ -164,6 +166,11 @@ class GpuNativeProfileTestBase : public GpuNativeTest {
         .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &acquire));
+    if (timestamps) {
+      IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+          recording, 0, IREE_HAL_EXECUTION_STAGE_DISPATCH,
+          iree_hal_make_indirect_buffer_ref(0, 8, 8), 0));
+    }
     auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
     config.workgroup_size[0] = 32;
     config.workgroup_size[1] = config.workgroup_size[2] = 1;
@@ -177,6 +184,11 @@ class GpuNativeProfileTestBase : public GpuNativeTest {
           recording, executable, function, config,
           iree_make_const_byte_span(&increment, sizeof(increment)),
           {1, &reference}, 0));
+    }
+    if (timestamps) {
+      IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+          recording, IREE_HAL_EXECUTION_STAGE_DISPATCH, 0,
+          iree_hal_make_indirect_buffer_ref(0, 16, 8), 0));
     }
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
     IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
@@ -228,7 +240,7 @@ TEST_P(GpuNativeDispatchProfileTest,
        AcquiredQueueRetainsRecordedSamplesAfterFinalRelease) {
   Ref<iree_hal_buffer_t> output;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-      pool_, iree_hal_make_pool_reservation_request(4, 4),
+      pool_, iree_hal_make_pool_reservation_request(24, 8),
       iree_infinite_timeout(), output.out()));
   Ref<iree_hal_executable_t> executable;
   iree_hal_executable_function_t function;
@@ -237,15 +249,16 @@ TEST_P(GpuNativeDispatchProfileTest,
   ASSERT_NO_FATAL_FAILURE(
       Record(executable, function,
              IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA,
-             recording.out(), 3));
+             recording.out(), 1, /*timestamps=*/true));
   Ref<iree_hal_semaphore_t> done;
   CreateSemaphore(done.out());
   auto* timeline = done.get();
   uint64_t value = 1;
-  uint32_t zero = 0, observed = 0;
+  uint32_t zero = 0;
+  std::array<uint64_t, 3> observed = {};
   IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &timeline, &value},
-                                     output, 0, 4, &zero, 4, nullptr, 0));
-  iree_hal_buffer_binding_t binding = {.buffer = output, .length = 4};
+                                     output, 0, 24, &zero, 4, nullptr, 0));
+  iree_hal_buffer_binding_t binding = {.buffer = output, .length = 24};
   for (uint32_t i = 0; i < 2; ++i) {
     Ref<iree_hal_queue_t> acquired;
     IREE_ASSERT_OK(AcquireQueue(acquired.out()));
@@ -256,18 +269,19 @@ TEST_P(GpuNativeDispatchProfileTest,
     wait = value++;
     IREE_ASSERT_OK(iree_hal_queue_download(
         queues_[0], {1, &timeline, &wait}, {1, &timeline, &value}, output, 0,
-        &observed, sizeof(observed), nullptr));
+        observed.data(), sizeof(observed), nullptr));
     acquired.reset();
     ASSERT_NO_FATAL_FAILURE(Wait(done, value));
-    EXPECT_EQ(observed, 6u * (i + 1));
+    EXPECT_EQ(observed[0], i + 1);
+    EXPECT_LE(observed[1], observed[2]);
   }
   recording.reset();
   executable.reset();
   sink_.expected_dispatch_flags =
       IREE_HAL_PROFILE_DISPATCH_EVENT_FLAG_COMMAND_BUFFER;
-  sink_.expected_dispatch_command_indices = {1, 3, 5, 1, 3, 5};
+  sink_.expected_dispatch_command_indices = {2, 2};
   ASSERT_NO_FATAL_FAILURE(End(3));
-  ASSERT_EQ(sink_.dispatch_events.size(), 6u);
+  ASSERT_EQ(sink_.dispatch_events.size(), 2u);
   for (const auto& event : sink_.dispatch_events) {
     EXPECT_GT(event.start_tick, 0u);
     EXPECT_GE(event.end_tick, event.start_tick);
