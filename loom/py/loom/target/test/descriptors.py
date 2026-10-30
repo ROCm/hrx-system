@@ -27,6 +27,7 @@ from loom.target.low_descriptors import (
     EffectFlag,
     EffectKind,
     EnumDomain,
+    EnumDomainKind,
     EnumValue,
     EventSeparation,
     Hazard,
@@ -551,6 +552,21 @@ _CONVERGENT_EFFECT = Effect(
 _TIED_RESULT_CONSTRAINTS = (
     Constraint(ConstraintKind.TIED, 0, 1),
     Constraint(ConstraintKind.DESTRUCTIVE, 0, 1),
+)
+
+TEST_LOW_CONST_FLAGS_DESCRIPTOR = Descriptor(
+    key="test.const.flags",
+    mnemonic="test.const.flags",
+    semantic_tag="constant",
+    operands=(Operand("result", OperandRole.RESULT, _I32_ALT),),
+    op_kind=DescriptorOpKind.CONST,
+    immediates=(
+        Immediate("value", ImmediateKind.ENUM, enum_domain="test.permissions"),
+    ),
+    asm_forms=(AsmForm(results=("result",), immediates=(AsmImmediate("value"),)),),
+    schedule_class=_SCHEDULE_CONST,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    instruction_classes=(InstructionClass.OTHER,),
 )
 
 TEST_LOW_CONST_I32_DESCRIPTOR = Descriptor(
@@ -2817,6 +2833,11 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
     ),
     enum_domains=(
         EnumDomain(
+            "test.permissions",
+            (EnumValue("read", 1), EnumValue("write", 4), EnumValue("execute", 16)),
+            kind=EnumDomainKind.BITSET,
+        ),
+        EnumDomain(
             _INTEGER_PREDICATE_ENUM,
             tuple(
                 EnumValue(predicate, ordinal)
@@ -2825,6 +2846,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         ),
     ),
     descriptors=(
+        TEST_LOW_CONST_FLAGS_DESCRIPTOR,
         TEST_LOW_CONST_I32_DESCRIPTOR,
         TEST_LOW_CONST_ZERO_I32_DESCRIPTOR,
         TEST_LOW_CONST_PACKED_NARROW_DESCRIPTOR,

@@ -53,6 +53,19 @@ iree_status_t loom_low_build_resolved_descriptor_op(
     const loom_tied_result_t* tied_results, iree_host_size_t tied_result_count,
     loom_location_id_t location, loom_op_t** out_op);
 
+// Emits a descriptor-backed low.op with an already canonical, module-owned
+// attribute dictionary (or ABSENT). Enum values are already resolved to i64.
+// The immutable dictionary is shared, allowing a planned instruction family
+// to reuse its attributes without copying or resolving them per instance.
+iree_status_t loom_low_build_prepared_descriptor_op(
+    loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
+    const loom_low_descriptor_t* descriptor,
+    loom_memory_access_flags_t access_flags, const loom_value_id_t* operands,
+    iree_host_size_t operand_count, loom_attribute_t attributes,
+    const loom_type_t* result_types, iree_host_size_t result_count,
+    const loom_tied_result_t* tied_results, iree_host_size_t tied_result_count,
+    loom_location_id_t location, loom_op_t** out_op);
+
 // Emits a descriptor-backed low.const from a descriptor row resolved earlier in
 // the pipeline, resolving named enum immediates as for low.op.
 iree_status_t loom_low_build_resolved_descriptor_const(

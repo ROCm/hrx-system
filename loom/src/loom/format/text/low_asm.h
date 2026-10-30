@@ -108,6 +108,8 @@ typedef struct loom_text_low_asm_immediate_descriptor_t {
   bool has_default_value;
   // Contract-local enum domain, or UINT16_MAX for a non-enum immediate.
   uint16_t enum_domain;
+  // True when a semantic enum value is a union of named independent bits.
+  bool enum_is_bitset;
   // Effective i64 value used when the packet omits this immediate.
   int64_t default_value;
 } loom_text_low_asm_immediate_descriptor_t;

@@ -150,10 +150,12 @@ loom_cc_library(
 loom_cc_library(
     name = "program_plan",
     srcs = [
+        "dependencies.c",
         "program_plan.c",
         "program_plan_requests.c",
     ],
     hdrs = [
+        "dependencies.h",
         "program_plan.h",
         "program_plan_requests.h",
     ],
@@ -165,10 +167,12 @@ loom_cc_library(
         ":parameters",
         ":schedule",
         ":transients",
+        "//loom/src/loom/analysis:storage_access",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/codegen:pass_environment",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/link:module_index",
@@ -187,6 +191,7 @@ loom_cc_library(
         "//loom/src/loom/transforms/kernel:kernel_request_producer",
         "//loom/src/loom/transforms/kernel:resolve_launches",
         "//loom/src/loom/transforms/symbol:template_expansion_pipeline",
+        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

@@ -13,9 +13,12 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   %3 = cmd.constant.u64 -1
   %4 = cmd.constant.u64 8
   %5 = cmd.buffer.ref.binding %1, %2, %4
-  cmd.timestamp %5
-  %6 = cmd.buffer.ref.binding %1, %2, %4
-  cmd.timestamp.barrier %6
+  %6 = cmd.memory.buffer %5 {source = ["transfer_write"], target = ["transfer_write"]}
+  %7 = cmd.buffer.ref.binding %1, %2, %4
+  cmd.timestamp %7
+  cmd.barrier(%6) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  %8 = cmd.buffer.ref.binding %1, %2, %4
+  cmd.timestamp %8
   return
 }
 
@@ -88,14 +91,18 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   %15 = cmd.constant.u64 -1
   %16 = cmd.constant.u64 8
   %17 = cmd.constant.u64 16
-  %18 = cmd.buffer.ref.binding %10, %14, %16
-  cmd.timestamp %18
-  %19 = cmd.buffer.ref.binding %10, %16, %16
-  cmd.timestamp.barrier %19
-  %20 = cmd.constant.u32 1
-  cmd.dispatch.direct<%12, %13>[%20, %20, %20](%11, %14, %15)
-  %21 = cmd.buffer.ref.binding %10, %17, %16
-  cmd.timestamp.barrier %21
+  %18 = cmd.memory.global {source = ["transfer_write"], target = ["dispatch_read", "dispatch_write", "transfer_write"]}
+  %19 = cmd.memory.global {source = ["dispatch_write", "transfer_write"], target = ["transfer_write"]}
+  %20 = cmd.buffer.ref.binding %10, %14, %16
+  cmd.timestamp %20
+  cmd.barrier(%18) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  %21 = cmd.buffer.ref.binding %10, %16, %16
+  cmd.timestamp %21
+  %22 = cmd.constant.u32 1
+  cmd.dispatch.direct<%12, %13>[%22, %22, %22](%11, %14, %15)
+  cmd.barrier(%19) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  %23 = cmd.buffer.ref.binding %10, %17, %16
+  cmd.timestamp %23
   return
 }
 
@@ -137,15 +144,25 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   %16 = cmd.constant.u64 0
   %17 = cmd.constant.u64 -1
   %18 = cmd.constant.u64 8
-  %19 = cmd.buffer.ref.binding %13, %16, %18
-  cmd.timestamp %19
-  %20 = cmd.buffer.ref.binding %13, %18, %18
-  cmd.timestamp.barrier %20
-  %21 = cmd.constant.u32 1
-  cmd.dispatch.direct.barrier<%14, %15>[%21, %21, %21](%13, %16, %18, %12, %16, %17)
-  cmd.dispatch.direct.barrier<%14, %15>[%21, %21, %21](%13, %18, %18, %12, %16, %17)
-  %22 = cmd.buffer.ref.binding %13, %16, %18
-  cmd.timestamp.barrier %22
-  cmd.dispatch.direct.barrier<%14, %15>[%21, %21, %21](%13, %16, %18, %12, %16, %17)
+  %19 = cmd.memory.global {source = ["dispatch_write"], target = ["dispatch_read", "dispatch_write"]}
+  %20 = cmd.memory.global {source = ["transfer_write"], target = ["dispatch_read", "dispatch_write"]}
+  %21 = cmd.memory.global {source = ["transfer_write"], target = ["transfer_write"]}
+  %22 = cmd.memory.global {source = ["dispatch_write", "transfer_write"], target = ["dispatch_read", "dispatch_write"]}
+  %23 = cmd.memory.global {source = ["dispatch_write", "transfer_write"], target = ["transfer_write"]}
+  %24 = cmd.buffer.ref.binding %13, %16, %18
+  cmd.timestamp %24
+  cmd.barrier(%21) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  %25 = cmd.buffer.ref.binding %13, %18, %18
+  cmd.timestamp %25
+  cmd.barrier(%20) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  %26 = cmd.constant.u32 1
+  cmd.dispatch.direct<%14, %15>[%26, %26, %26](%13, %16, %18, %12, %16, %17)
+  cmd.barrier(%19) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  cmd.dispatch.direct<%14, %15>[%26, %26, %26](%13, %18, %18, %12, %16, %17)
+  cmd.barrier(%23) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  %27 = cmd.buffer.ref.binding %13, %16, %18
+  cmd.timestamp %27
+  cmd.barrier(%22) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
+  cmd.dispatch.direct<%14, %15>[%26, %26, %26](%13, %16, %18, %12, %16, %17)
   return
 }

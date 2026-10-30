@@ -610,10 +610,16 @@ class EnumValue:
     value: int
 
 
+class EnumDomainKind(CEnum):
+    ENUM = "LOOM_LOW_ENUM_DOMAIN_KIND_ENUM"
+    BITSET = "LOOM_LOW_ENUM_DOMAIN_KIND_BITSET"
+
+
 @dataclass(frozen=True, slots=True)
 class EnumDomain:
     name: str
     values: tuple[EnumValue, ...]
+    kind: EnumDomainKind = EnumDomainKind.ENUM
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,0 +1,43 @@
+// RUN: roundtrip
+
+// Tokens and input order resolve to semantic bits. Printing retains names.
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @permissions() -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %empty = test.const.flags [] : reg<test.i32>
+  %one = test.const.flags "write" : reg<test.i32>
+  %set = test.const.flags ["execute", "read", "write", "read"] : reg<test.i32>
+  return %empty, %one, %set
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @permissions() -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %empty = test.const.flags []
+  %one = test.const.flags ["write"]
+  %set = test.const.flags ["read", "write", "execute"]
+  return %empty, %one, %set
+}
+
+// ====
+// RUN: verify
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @unnamed_bit() -> (reg<test.i32>) asm {
+  // ERROR@+1: STRUCTURE/027 {attr_name="value", actual_value="2", expected_constraint="value from enum domain 'test.permissions'"}
+  %value = test.const.flags 2
+  return %value
+}
+
+// ====
+// RUN: verify
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @unknown_token() -> (reg<test.i32>) asm {
+  // ERROR@+1: STRUCTURE/027 {attr_name="value", actual_value="typo", expected_constraint="value from enum domain 'test.permissions'"}
+  %value = test.const.flags ["read", "typo"]
+  return %value
+}

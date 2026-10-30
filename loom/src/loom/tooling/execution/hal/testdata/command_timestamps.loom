@@ -1,0 +1,72 @@
+// Captures share a cache line with kernel output. A later device consumer must
+// observe both samples and the payload without changing neighboring words.
+kernel.def @write_payload() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%payload: view<1xi64>) {
+  %value = scalar.constant 42 : i64
+  view.store %value, %payload[0] : i64, view<1xi64>
+  kernel.return
+}
+
+kernel.def @consume() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%begin: view<1xi64>, %end: view<1xi64>, %payload: view<1xi64>, %report: view<4xi64>) {
+  %first = view.load %begin[0] : view<1xi64> -> i64
+  %last = view.load %end[0] : view<1xi64> -> i64
+  %value = view.load %payload[0] : view<1xi64> -> i64
+  // Zero is a valid sample. The initialized sentinel detects stale delivery.
+  %sentinel = scalar.constant -1 : i64
+  %first_written = scalar.cmpi ne, %first, %sentinel : i64
+  %last_written = scalar.cmpi ne, %last, %sentinel : i64
+  %written = scalar.andi %first_written, %last_written : i1
+  %valid = scalar.extui %written : i1 to i64
+  view.store %first, %report[0] : i64, view<4xi64>
+  view.store %last, %report[1] : i64, view<4xi64>
+  view.store %valid, %report[2] : i64, view<4xi64>
+  view.store %value, %report[3] : i64, view<4xi64>
+  kernel.return
+}
+
+command.def @timed() launch(%bank: buffer, %output: buffer) {
+  %bank_unique, %output_unique = buffer.assume.noalias %bank, %output : buffer, buffer
+  %c0 = index.constant 0 : offset
+  %c8 = index.constant 8 : offset
+  %payload_offset = index.constant 32 : offset
+  %begin = buffer.view %bank_unique[%c0] : buffer -> view<1xi64>
+  %end = buffer.view %bank_unique[%c8] : buffer -> view<1xi64>
+  %payload = buffer.view %bank_unique[%payload_offset] : buffer -> view<1xi64>
+  %report = buffer.view %output_unique[%c0] : buffer -> view<4xi64>
+  command.timestamp %begin : view<1xi64>
+  kernel.launch @write_payload(%payload) : (view<1xi64>)
+  command.timestamp %end : view<1xi64>
+  kernel.launch @consume(%begin, %end, %payload, %report) : (view<1xi64>, view<1xi64>, view<1xi64>, view<4xi64>)
+  command.return
+}
+
+func.def @expected(%bank: buffer, %output: buffer) {
+  %c0 = index.constant 0 : offset
+  %report = buffer.view %output[%c0] : buffer -> view<4xi64>
+  %valid = scalar.constant 1 : i64
+  %value = scalar.constant 42 : i64
+  view.store %valid, %report[2] : i64, view<4xi64>
+  view.store %value, %report[3] : i64, view<4xi64>
+  func.return
+}
+
+check.scenario @capture_and_consume {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %bank = check.generate.fill value(-1) : tensor<8xi64>
+    %report = check.generate.fill value(-99) : tensor<4xi64>
+    %result = check.tensor.view %report offset(16) : tensor<4xi64> -> tensor<2xi64>
+    %prefix_guard = check.tensor.view %bank offset(16) : tensor<8xi64> -> tensor<2xi64>
+    %suffix_guard = check.tensor.view %bank offset(40) : tensor<8xi64> -> tensor<3xi64>
+    check.compare<@timed, @expected>(%bank, %report) : (tensor<8xi64>, tensor<4xi64>) -> () {
+      check.expect.bitwise actual(%result) expected(%result) : tensor<2xi64>
+      check.expect.bitwise actual(%prefix_guard) expected(%prefix_guard) : tensor<2xi64>
+      check.expect.bitwise actual(%suffix_guard) expected(%suffix_guard) : tensor<3xi64>
+    }
+  }
+  check.return
+}

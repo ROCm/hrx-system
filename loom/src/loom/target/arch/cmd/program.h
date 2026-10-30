@@ -60,6 +60,61 @@ typedef struct loom_cmd_program_buffer_ref_t {
   uint64_t byte_length;
 } loom_cmd_program_buffer_ref_t;
 
+// Execution stages named by command dependencies. These are semantic bits in
+// the portable format; a recorder maps them to its execution API.
+enum loom_cmd_program_execution_stage_bits_e {
+  LOOM_CMD_PROGRAM_STAGE_COMMAND_ISSUE = 1u << 0,
+  LOOM_CMD_PROGRAM_STAGE_COMMAND_PROCESS = 1u << 1,
+  LOOM_CMD_PROGRAM_STAGE_DISPATCH = 1u << 2,
+  LOOM_CMD_PROGRAM_STAGE_TRANSFER = 1u << 3,
+  LOOM_CMD_PROGRAM_STAGE_COMMAND_RETIRE = 1u << 4,
+  LOOM_CMD_PROGRAM_STAGE_HOST = 1u << 5,
+  LOOM_CMD_PROGRAM_STAGE_ATOMIC = 1u << 6,
+  // Local work joined by a full execution barrier; excludes host coherence.
+  LOOM_CMD_PROGRAM_STAGE_WORK =
+      LOOM_CMD_PROGRAM_STAGE_COMMAND_PROCESS | LOOM_CMD_PROGRAM_STAGE_DISPATCH |
+      LOOM_CMD_PROGRAM_STAGE_TRANSFER | LOOM_CMD_PROGRAM_STAGE_ATOMIC,
+  LOOM_CMD_PROGRAM_STAGE_ALL = (1u << 7) - 1,
+};
+
+// Access scopes participating in a memory dependency.
+enum loom_cmd_program_access_scope_bits_e {
+  LOOM_CMD_PROGRAM_ACCESS_INDIRECT_COMMAND_READ = 1u << 0,
+  LOOM_CMD_PROGRAM_ACCESS_CONSTANT_READ = 1u << 1,
+  LOOM_CMD_PROGRAM_ACCESS_DISPATCH_READ = 1u << 2,
+  LOOM_CMD_PROGRAM_ACCESS_DISPATCH_WRITE = 1u << 3,
+  LOOM_CMD_PROGRAM_ACCESS_TRANSFER_READ = 1u << 4,
+  LOOM_CMD_PROGRAM_ACCESS_TRANSFER_WRITE = 1u << 5,
+  LOOM_CMD_PROGRAM_ACCESS_HOST_READ = 1u << 6,
+  LOOM_CMD_PROGRAM_ACCESS_HOST_WRITE = 1u << 7,
+  LOOM_CMD_PROGRAM_ACCESS_MEMORY_READ = 1u << 8,
+  LOOM_CMD_PROGRAM_ACCESS_MEMORY_WRITE = 1u << 9,
+  LOOM_CMD_PROGRAM_ACCESS_ATOMIC_READ = 1u << 10,
+  LOOM_CMD_PROGRAM_ACCESS_ATOMIC_WRITE = 1u << 11,
+  LOOM_CMD_PROGRAM_ACCESS_ALL = (1u << 12) - 1,
+};
+
+// Minimum coherence requirements independent of the named local accesses.
+enum loom_cmd_program_barrier_flag_bits_e {
+  LOOM_CMD_PROGRAM_BARRIER_FLAG_ACQUIRE_SYSTEM = 1u << 0,
+  LOOM_CMD_PROGRAM_BARRIER_FLAG_RELEASE_SYSTEM = 1u << 1,
+  LOOM_CMD_PROGRAM_BARRIER_FLAG_ALL = (1u << 2) - 1,
+};
+
+// An access dependency applying to all memory instead of one buffer range.
+#define LOOM_CMD_PROGRAM_MEMORY_DEPENDENCY_GLOBAL UINT32_MAX
+
+// One memory obligation applied at an explicit execution boundary. Dependencies
+// at the same boundary are unordered and may refer to different access scopes.
+typedef struct loom_cmd_program_memory_dependency_t {
+  // Prior accesses whose writes must be made available.
+  uint32_t source_scope;
+  // Subsequent accesses to which those writes must be visible.
+  uint32_t target_scope;
+  // Exact buffer-reference index, or MEMORY_DEPENDENCY_GLOBAL.
+  uint32_t buffer_ref;
+} loom_cmd_program_memory_dependency_t;
+
 // Kind of one logical kernel argument in an executable-entry schema.
 typedef enum loom_cmd_program_argument_kind_e {
   // A direct fixed or rebindable root, byte offset, and byte length tuple.
@@ -117,6 +172,8 @@ typedef enum loom_cmd_program_command_kind_e {
   LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER_EXECUTION = 6,
   // Write one raw 64-bit queue-family clock sample to a buffer reference.
   LOOM_CMD_PROGRAM_COMMAND_KIND_TIMESTAMP = 7,
+  // Apply selected execution stages and explicit global/ranged dependencies.
+  LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER = 8,
   // Perform a full execution barrier, then fill one buffer range.
   LOOM_CMD_PROGRAM_COMMAND_KIND_FILL_BARRIER =
       LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER_BIT |
@@ -159,11 +216,9 @@ loom_cmd_program_command_kind_base(loom_cmd_program_command_kind_t kind) {
   return (loom_cmd_program_command_kind_t)base_kind;
 }
 
-// Returns true when |kind| opens a new full-execution barrier wave.
-//
-// This includes both standalone barriers and payload commands carrying a
-// folded leading barrier.
-static inline bool loom_cmd_program_command_kind_begins_barrier_wave(
+// Returns true when |kind| implies a full execution-only dependency without
+// explicit stage operands. General barriers carry their stages in the payload.
+static inline bool loom_cmd_program_command_kind_has_implicit_execution_barrier(
     loom_cmd_program_command_kind_t kind) {
   return loom_cmd_program_command_kind_has_barrier(kind) ||
          loom_cmd_program_command_kind_base(kind) ==
@@ -180,6 +235,19 @@ typedef struct loom_cmd_program_command_t {
   uint32_t argument_schema_index;
   // Command-specific payload.
   union {
+    // Payload for an explicit execution and memory dependency boundary.
+    struct {
+      // Earlier stages that must finish; zero adds no source execution edge.
+      uint32_t source_stages;
+      // Later stages that must wait; zero adds no target execution edge.
+      uint32_t target_stages;
+      // Minimum coherence requirements from barrier_flag_bits_e.
+      uint32_t flags;
+      // First row in the program's memory-dependency table.
+      uint32_t first_dependency;
+      // Number of memory dependencies applied together at this boundary.
+      uint32_t dependency_count;
+    } barrier;
     // Payload for either timestamp command kind.
     struct {
       // Eight-byte-aligned, eight-byte destination buffer-reference index.
@@ -307,6 +375,8 @@ typedef struct loom_cmd_program_t {
   loom_cmd_program_table_t launch_bindings;
   // Buffer ranges used by fills, copies, and indirect launch counts.
   loom_cmd_program_table_t buffer_refs;
+  // Explicit global and ranged access obligations, shared by barriers.
+  loom_cmd_program_table_t memory_dependencies;
   // Executable-entry logical argument schemas.
   loom_cmd_program_table_t entry_schemas;
   // Flattened one-byte logical argument kinds referenced by entry schemas.
@@ -315,6 +385,9 @@ typedef struct loom_cmd_program_t {
   iree_const_byte_span_t argument_data;
   // Ordered command table.
   loom_cmd_program_table_t commands;
+  // Maximum simultaneous dependencies, retained by validation for recorder
+  // scratch.
+  uint32_t maximum_barrier_dependency_count;
   // Fixed parameter-buffer roots in canonical ascending root order.
   loom_cmd_program_table_t parameter_roots;
   // Concrete immutable parameter requirements.
@@ -337,6 +410,9 @@ typedef struct loom_cmd_program_barrier_wave_t {
   uint32_t ordinal;
   // Contiguous canonical commands belonging to the wave.
   loom_cmd_program_command_range_t commands;
+  // Dispatch/fill/copy work charged to a scheduling quantum. Dependencies and
+  // clock samples do not change the amount of useful work in the program.
+  uint32_t work_count;
 } loom_cmd_program_barrier_wave_t;
 
 // Single-pass cursor over the barrier waves in one parsed program.
@@ -363,6 +439,10 @@ loom_cmd_program_launch_binding_t loom_cmd_program_launch_binding_at(
 
 // Returns one validated buffer-reference table entry.
 loom_cmd_program_buffer_ref_t loom_cmd_program_buffer_ref_at(
+    const loom_cmd_program_t* program, uint32_t index);
+
+// Returns one validated global or ranged memory dependency.
+loom_cmd_program_memory_dependency_t loom_cmd_program_memory_dependency_at(
     const loom_cmd_program_t* program, uint32_t index);
 
 // Returns one validated executable-entry logical argument schema.

@@ -23,6 +23,7 @@ from loom.target.low_descriptors import (
     DescriptorFlag,
     EncodingFieldValue,
     EnumDomain,
+    EnumDomainKind,
     EnumValue,
     Hazard,
     HazardKind,
@@ -268,6 +269,32 @@ def test_enum_immediate_projection_retains_semantic_values() -> None:
     assert DescriptorFlag.ENUM_IMMEDIATES not in descriptors[TEST_LOW_ADD_I32_DESCRIPTOR.key].flags
     assert DescriptorFlag.ENUM_IMMEDIATES in descriptors[enum_descriptor.key].flags
     assert {value.token: value.value for value in compiled.enum_values} == {"reverse": -5, "forward": 7}
+
+
+@pytest.mark.parametrize("default", [0, 1, 4, 5, 2])
+def test_bitset_defaults_admit_only_declared_bits(default) -> None:
+    domain = EnumDomain("permissions", (EnumValue("read", 1), EnumValue("write", 4)), kind=EnumDomainKind.BITSET)
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        immediates=(replace(TEST_LOW_CONST_I32_DESCRIPTOR.immediates[0], kind=ImmediateKind.ENUM, enum_domain=domain.name, flags=(ImmediateFlag.DEFAULT_VALUE,), default_value=default),),
+    )
+    spec = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,), enum_domains=(domain,))
+    if default == 2:
+        with pytest.raises(ValueError, match="default value is not in enum domain"):
+            compiler.compile_descriptor_set(spec)
+    else:
+        compiler.compile_descriptor_set(spec)
+
+
+@pytest.mark.parametrize("value", [0, -1, 3])
+def test_bitset_members_name_independent_positive_bits(value) -> None:
+    domain = EnumDomain("permissions", (EnumValue("invalid", value),), kind=EnumDomainKind.BITSET)
+    descriptor = replace(
+        TEST_LOW_CONST_I32_DESCRIPTOR,
+        immediates=(replace(TEST_LOW_CONST_I32_DESCRIPTOR.immediates[0], kind=ImmediateKind.ENUM, enum_domain=domain.name),),
+    )
+    with pytest.raises(ValueError, match="must name one positive bit"):
+        compiler.compile_descriptor_set(replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,), enum_domains=(domain,)))
 
 
 @pytest.mark.parametrize(

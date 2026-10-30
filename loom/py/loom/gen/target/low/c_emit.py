@@ -877,6 +877,7 @@ def emit_source_for_views(
                 f".name_string_ref = {pool.ref(f'enum_domain_{domain.name}')},",
                 f".value_start = {compiled.enum_domain_rows[i]['value_start']},",
                 f".value_count = {compiled.enum_domain_rows[i]['value_count']},",
+                f".kind = {domain.kind.value},",
             ]
             for i, domain in enumerate(compiled.enum_domains)
         ],

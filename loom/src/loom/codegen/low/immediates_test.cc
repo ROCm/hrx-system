@@ -157,6 +157,54 @@ TEST_F(LowImmediatesTest, BindsEverySparseDictionaryShape) {
   }
 }
 
+TEST_F(LowImmediatesTest, ResolvesNamedBitsetsWithoutChangingTheirInput) {
+  domain_.kind = LOOM_LOW_ENUM_DOMAIN_KIND_BITSET;
+  values_[0].value = 1;
+  values_[1].value = 4;
+  const loom_string_id_t tokens[] = {Intern(IREE_SV("forward")),
+                                     Intern(IREE_SV("reverse")),
+                                     Intern(IREE_SV("forward"))};
+  const loom_attribute_t sets[] = {
+      loom_attr_string_array(nullptr, 0), loom_attr_i64_array(nullptr, 0),
+      loom_attr_string(tokens[0]),        loom_attr_string_array(tokens, 1),
+      loom_attr_string_array(tokens, 2),  loom_attr_string_array(tokens, 3),
+  };
+  const int64_t expected[] = {0, 0, 4, 4, 5, 5};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(sets); ++i) {
+    loom_named_attr_t entry = {Intern(IREE_SV("mode")), 0, sets[i]};
+    loom_attribute_t original = {};
+    IREE_ASSERT_OK(loom_module_make_canonical_attr_dict(
+        module_, loom_make_named_attr_slice(&entry, 1), &original));
+    loom_attribute_t resolved = original;
+    IREE_ASSERT_OK(loom_low_resolve_immediate_enums(module_, &descriptor_set_,
+                                                    &descriptor_, &resolved));
+    EXPECT_NE(original.dict_entries, resolved.dict_entries);
+    EXPECT_EQ(original.dict_entries[0].value.kind, sets[i].kind);
+    EXPECT_EQ(resolved.dict_entries[0].value.kind, LOOM_ATTR_I64);
+    EXPECT_EQ(resolved.dict_entries[0].value.i64, expected[i]);
+  }
+  // Every subset of the declared bits is valid; a hole is not a named bit.
+  for (int64_t bits = 0; bits < 8; ++bits) {
+    EXPECT_EQ(
+        loom_low_enum_domain_contains_value(&descriptor_set_, &domain_, bits),
+        (bits & 2) == 0);
+  }
+  EXPECT_FALSE(
+      loom_low_enum_domain_contains_value(&descriptor_set_, &domain_, -1));
+
+  const loom_string_id_t invalid_tokens[] = {tokens[0],
+                                             Intern(IREE_SV("typo"))};
+  loom_named_attr_t entry = {Intern(IREE_SV("mode")), 0,
+                             loom_attr_string_array(invalid_tokens, 2)};
+  loom_attribute_t attrs = {};
+  IREE_ASSERT_OK(loom_module_make_canonical_attr_dict(
+      module_, loom_make_named_attr_slice(&entry, 1), &attrs));
+  const loom_named_attr_t* original_entries = attrs.dict_entries;
+  IREE_ASSERT_OK(loom_low_resolve_immediate_enums(module_, &descriptor_set_,
+                                                  &descriptor_, &attrs));
+  EXPECT_EQ(attrs.dict_entries, original_entries);
+}
+
 TEST_F(LowImmediatesTest, PreservesNumericAndUnrecognizedInputForVerification) {
   const loom_attribute_t values[] = {
       loom_attr_i64(7), loom_attr_i64(99),

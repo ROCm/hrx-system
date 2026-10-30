@@ -61,3 +61,34 @@ low.func.def target<cmd.core> abi(command_program) @empty_indirect() asm {
   cmd.dispatch.indirect.static<%executable, %entry>[%count_ref]()
   return
 }
+
+// ====
+
+// Execution and payload visibility are independent. The clock range and the
+// payload can have different consumers at the same execution boundary.
+low.func.def target<cmd.core> abi(command_program) @scoped_dependencies() asm {
+  %feedback = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %c0 = cmd.constant.u64 0
+  %sample_bytes = cmd.constant.u64 8
+  %clock = cmd.buffer.ref.binding %feedback, %c0, %sample_bytes
+  %sample = cmd.memory.buffer %clock {source = ["transfer_write"], target = ["dispatch_read"]}
+  %payload = cmd.memory.global {source = ["dispatch_write"], target = ["dispatch_read", "indirect_command_read"]}
+  cmd.barrier(%sample, %payload) {source = ["transfer", "dispatch"], target = ["command_process", "dispatch"], flags = []}
+  cmd.barrier() {source = ["transfer"], target = ["dispatch"], flags = []}
+  cmd.barrier() {source = ["dispatch"], target = [], flags = ["release_system"]}
+  return
+}
+
+// ----
+low.func.def target<cmd.core> abi(command_program) @scoped_dependencies() asm {
+  %feedback = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %c0 = cmd.constant.u64 0
+  %sample_bytes = cmd.constant.u64 8
+  %clock = cmd.buffer.ref.binding %feedback, %c0, %sample_bytes
+  %sample = cmd.memory.buffer %clock {source = ["transfer_write"], target = ["dispatch_read"]}
+  %payload = cmd.memory.global {source = ["dispatch_write"], target = ["indirect_command_read", "dispatch_read"]}
+  cmd.barrier(%sample, %payload) {source = ["dispatch", "transfer"], target = ["command_process", "dispatch"], flags = []}
+  cmd.barrier() {source = ["transfer"], target = ["dispatch"], flags = []}
+  cmd.barrier() {source = ["dispatch"], target = [], flags = ["release_system"]}
+  return
+}

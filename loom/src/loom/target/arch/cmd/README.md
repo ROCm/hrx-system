@@ -6,7 +6,9 @@ structure long enough for Loom to specialize control flow, share kernel
 dependencies, derive launch counts, plan transient storage, and encode explicit
 concurrency. The result is a target-neutral command artifact plus explicit
 executable-entry requirements. Kernel implementations remain independent
-compilation products and are never opened by command planning.
+compilation products. Their source owner supplies compact canonical access
+summaries during request publication; command planning combines those facts
+with final storage placement without interpreting device bodies itself.
 
 The command compiler is independent of HAL. A materializer maps the portable
 artifact to its command system, such as a HAL command buffer, a CUDA graph, or
@@ -27,7 +29,8 @@ These boundaries keep the feature composable:
   HAL objects, process addresses, native calling conventions, or target code.
 - Optional kernel request publication transfers independently owned ordinary
   Loom modules to its recipient. The plan retains only their atomic entry
-  requirements, not source products or classification state.
+  requirements. Compact argument effects and confinement survive only until
+  dependency planning finishes; source products and classification state do not.
 
 ## Source Model
 
@@ -99,8 +102,10 @@ instead of acquiring an implicit runtime interpretation.
 aligned `view<1xi64>`. It participates in ordinary wave scheduling and storage
 lifetime planning, and lowers to `cmd.timestamp` or `cmd.timestamp.barrier`
 with a normal buffer reference. No kernel entry or separate allocation is
-needed. Portable records preserve the capture; HAL materialization reports
-`UNIMPLEMENTED` until capture and execution ordering are implemented there.
+needed. HAL recording preserves the planned execution edges without introducing
+ordering between concurrent siblings. Memory dependencies deliver samples to
+their consumers; normal completion delivers samples that have no earlier
+consumer. Queue families without timestamp support reject recording.
 
 `command.parameter` names immutable content within an explicit source buffer.
 It returns a typed logical view and contributes a placement requirement; it
@@ -232,10 +237,20 @@ The source schedule describes dependency intent:
 
 Planning flattens that structure into contiguous waves. Commands within one
 wave retain source traversal order but may execute concurrently. Successive
-waves are separated by a full execution barrier. When a barrier immediately
-precedes a fill, copy, or dispatch, the Low ISA and artifact encode a dedicated
-barrier form of that command so the common join-and-record sequence remains one
-portable instruction.
+waves are separated by a full execution barrier. Memory visibility is separate:
+canonical source effects, alias facts, and physical buffer placement determine
+which earlier writes need publication to each consuming wave. Typed-view access
+confinement preserves disjoint ranges within one allocation. Raw-buffer access
+can require the backing storage, and opaque implementations remain conservative.
+Reused transient bytes retain their dependencies across source allocation names.
+
+An execution-only join folds into the following command's `.barrier` form.
+An edge requiring visibility uses `cmd.barrier` with explicit `cmd.memory.buffer`
+or `cmd.memory.global` dependencies. A passive timestamp in disjoint storage
+does not publish unrelated writes. A device consumer of that sample receives
+a transfer-write dependency for its actual byte range. The recorder translates
+these scopes and ranges directly; it does not infer a global payload flush from
+the existence of an execution edge.
 
 ## Portable Low ISA
 
@@ -298,6 +313,7 @@ The artifact records:
 - fixed buffers, rebindable bindings, executables, and entry requirements;
 - operational buffer ranges and logical entry argument schemas;
 - exact dispatch argument bytes and ordered command records;
+- shared memory-dependency descriptors with explicit access scopes and ranges;
 - parameter roots, keys, and concrete placements;
 - transient slab and optional launch-count storage requirements.
 

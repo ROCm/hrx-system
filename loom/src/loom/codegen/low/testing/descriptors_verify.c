@@ -2900,16 +2900,8 @@ static iree_status_t loom_low_verify_immediate(
       IREE_RETURN_IF_ERROR(loom_low_verify_span(
           domain->value_start, domain->value_count,
           descriptor_set->enum_value_count, "enum_values"));
-      bool found = false;
-      for (uint16_t i = 0; i < domain->value_count; ++i) {
-        const loom_low_enum_value_t* value =
-            &descriptor_set->enum_values[domain->value_start + i];
-        if (value->value == immediate->default_value) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
+      if (!loom_low_enum_domain_contains_value(descriptor_set, domain,
+                                               immediate->default_value)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "low enum immediate %" PRIu32
                                 " default value %" PRId64
@@ -2958,11 +2950,23 @@ static iree_status_t loom_low_verify_enum_domain(
                             "low enum domain %" PRIu32 " has no values",
                             enum_domain_index);
   }
+  if (domain->kind != LOOM_LOW_ENUM_DOMAIN_KIND_ENUM &&
+      domain->kind != LOOM_LOW_ENUM_DOMAIN_KIND_BITSET) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low enum domain %" PRIu32 " has unknown kind",
+                            enum_domain_index);
+  }
   iree_string_view_t previous_token = iree_string_view_empty();
   for (uint16_t i = 0; i < domain->value_count; ++i) {
     const uint32_t value_index = domain->value_start + i;
     const loom_low_enum_value_t* value =
         &descriptor_set->enum_values[value_index];
+    if (domain->kind == LOOM_LOW_ENUM_DOMAIN_KIND_BITSET &&
+        (value->value <= 0 ||
+         ((uint64_t)value->value & ((uint64_t)value->value - 1)) != 0)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "low bitset token must name one positive bit");
+    }
     iree_string_view_t token = iree_string_view_empty();
     IREE_RETURN_IF_ERROR(loom_low_descriptor_set_string_impl(
         descriptor_set, value->token_string_ref, /*allow_none=*/false, &token));

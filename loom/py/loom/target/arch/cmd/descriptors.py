@@ -22,6 +22,9 @@ from loom.target.low_descriptors import (
     Effect,
     EffectFlag,
     EffectKind,
+    EnumDomain,
+    EnumDomainKind,
+    EnumValue,
     Immediate,
     ImmediateKind,
     InstructionClass,
@@ -55,6 +58,11 @@ _REG_BINDING = "cmd.binding"
 _REG_BUFFER_REF = "cmd.buffer_ref"
 _REG_EXECUTABLE = "cmd.executable"
 _REG_ENTRY = "cmd.entry"
+_REG_MEMORY_DEPENDENCY = "cmd.memory_dependency"
+
+_EXECUTION_STAGE_DOMAIN = "cmd.execution_stage"
+_ACCESS_SCOPE_DOMAIN = "cmd.access_scope"
+_BARRIER_FLAGS_DOMAIN = "cmd.barrier_flags"
 
 _SCHEDULE_PURE = "cmd.pure"
 _SCHEDULE_RECORD = "cmd.record"
@@ -99,6 +107,7 @@ _ALT_BY_CLASS = {
         _REG_BUFFER_REF,
         _REG_EXECUTABLE,
         _REG_ENTRY,
+        _REG_MEMORY_DEPENDENCY,
     )
 }
 
@@ -342,7 +351,76 @@ def _timestamp_descriptor(*, barrier: bool) -> Descriptor:
     )
 
 
+def _scope_immediate(name: str, domain: str) -> Immediate:
+    return Immediate(
+        name,
+        ImmediateKind.ENUM,
+        enum_domain=domain,
+    )
+
+
+# Dependencies are immutable values. Only cmd.barrier applies them: a single
+# boundary can combine different access scopes and exact buffer ranges without
+# introducing execution edges between the dependency declarations themselves.
+def _memory_dependency_descriptor(*, ranged: bool) -> Descriptor:
+    key = "cmd.memory.buffer" if ranged else "cmd.memory.global"
+    return Descriptor(
+        key=key,
+        mnemonic=key,
+        semantic_tag=key,
+        operands=(
+            _result(_REG_MEMORY_DEPENDENCY),
+            *((_operand(_REG_BUFFER_REF, "buffer"),) if ranged else ()),
+        ),
+        immediates=(
+            _scope_immediate("source", _ACCESS_SCOPE_DOMAIN),
+            _scope_immediate("target", _ACCESS_SCOPE_DOMAIN),
+        ),
+        asm_forms=(
+            AsmForm(
+                results=("result",),
+                operands=("buffer",) if ranged else (),
+                immediates=tuple(
+                    AsmImmediate(name, name=name) for name in ("source", "target")
+                ),
+            ),
+        ),
+        schedule_class=_SCHEDULE_PURE,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+
+
 _COMMAND_DESCRIPTORS = (
+    _memory_dependency_descriptor(ranged=False),
+    _memory_dependency_descriptor(ranged=True),
+    Descriptor(
+        key="cmd.barrier",
+        mnemonic="cmd.barrier",
+        semantic_tag="command.barrier",
+        operands=(_variadic_operand((_REG_MEMORY_DEPENDENCY,), "dependencies"),),
+        immediates=(
+            _scope_immediate("source", _EXECUTION_STAGE_DOMAIN),
+            _scope_immediate("target", _EXECUTION_STAGE_DOMAIN),
+            _scope_immediate("flags", _BARRIER_FLAGS_DOMAIN),
+        ),
+        asm_forms=(
+            AsmForm(
+                operand_segments=(
+                    AsmOperandSegment(
+                        AsmOperandSegmentDelimiter.PAREN, ("dependencies",)
+                    ),
+                ),
+                immediates=tuple(
+                    AsmImmediate(name, name=name)
+                    for name in ("source", "target", "flags")
+                ),
+            ),
+        ),
+        effects=(_BARRIER_EFFECT,),
+        schedule_class=_SCHEDULE_BARRIER,
+        flags=(DescriptorFlag.SIDE_EFFECTING, DescriptorFlag.BARRIER),
+        instruction_classes=(InstructionClass.EXECUTION_BARRIER,),
+    ),
     _fill_descriptor(barrier=False),
     _fill_descriptor(barrier=True),
     _copy_descriptor(barrier=False),
@@ -422,6 +500,7 @@ CMD_CORE_DESCRIPTOR_SET = DescriptorSet(
         _reference_reg_class(_REG_BUFFER_REF),
         _reference_reg_class(_REG_EXECUTABLE),
         _scalar_reg_class(_REG_ENTRY, 64),
+        _reference_reg_class(_REG_MEMORY_DEPENDENCY),
     ),
     resources=(
         Resource(_RESOURCE_PURE, capacity_per_cycle=1, kind=ResourceKind.SCALAR_ALU),
@@ -453,6 +532,54 @@ CMD_CORE_DESCRIPTOR_SET = DescriptorSet(
             flags=(ScheduleClassFlag.CONTROL,),
             model_quality=ModelQuality.FALLBACK,
             instruction_classes=(InstructionClass.EXECUTION_BARRIER,),
+        ),
+    ),
+    enum_domains=(
+        EnumDomain(
+            _EXECUTION_STAGE_DOMAIN,
+            tuple(
+                EnumValue(name, 1 << bit)
+                for bit, name in enumerate(
+                    (
+                        "command_issue",
+                        "command_process",
+                        "dispatch",
+                        "transfer",
+                        "command_retire",
+                        "host",
+                        "atomic",
+                    )
+                )
+            ),
+            kind=EnumDomainKind.BITSET,
+        ),
+        EnumDomain(
+            _ACCESS_SCOPE_DOMAIN,
+            tuple(
+                EnumValue(name, 1 << bit)
+                for bit, name in enumerate(
+                    (
+                        "indirect_command_read",
+                        "constant_read",
+                        "dispatch_read",
+                        "dispatch_write",
+                        "transfer_read",
+                        "transfer_write",
+                        "host_read",
+                        "host_write",
+                        "memory_read",
+                        "memory_write",
+                        "atomic_read",
+                        "atomic_write",
+                    )
+                )
+            ),
+            kind=EnumDomainKind.BITSET,
+        ),
+        EnumDomain(
+            _BARRIER_FLAGS_DOMAIN,
+            (EnumValue("acquire_system", 1), EnumValue("release_system", 2)),
+            kind=EnumDomainKind.BITSET,
         ),
     ),
     descriptors=(

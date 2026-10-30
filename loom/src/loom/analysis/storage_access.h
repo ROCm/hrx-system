@@ -42,6 +42,8 @@ enum loom_storage_access_footprint_e {
 typedef uint8_t loom_storage_access_footprint_t;
 
 typedef struct loom_storage_reference_t loom_storage_reference_t;
+typedef struct loom_template_provider_catalog_t
+    loom_template_provider_catalog_t;
 
 typedef struct loom_storage_access_use_t {
   // Source operation containing the classified reference operand.
@@ -117,6 +119,38 @@ typedef struct loom_storage_access_function_t {
   bool has_unbounded_memory_access;
 } loom_storage_access_function_t;
 
+// One source application whose implementation has already been selected by
+// its owning specialization plan. Bindings borrow an immutable source module
+// and are sorted by the uintptr_t value of operation. The callee is a local
+// source function with a body; no provider selection occurs during analysis.
+typedef struct loom_storage_access_binding_t {
+  // Callable-boundary operation receiving this exact source implementation.
+  const loom_op_t* operation;
+  // Selected source definition in the analyzed module.
+  loom_func_like_t function;
+  // First operation operand corresponding to a callee argument.
+  uint16_t argument_offset;
+  // Number of operation operands passed to the callee.
+  uint16_t argument_count;
+} loom_storage_access_binding_t;
+
+// Graph-independent argument facts retained across source-scope retirement.
+typedef struct loom_storage_access_argument_t {
+  // Union of effects through this argument; zero for scalars or unused values.
+  loom_storage_access_effects_t effects;
+  // Proven confinement relative to this argument's current span.
+  loom_storage_access_footprint_t footprint;
+} loom_storage_access_argument_t;
+
+typedef struct loom_storage_access_summary_t {
+  // Arena-owned argument facts in complete source-signature order.
+  const loom_storage_access_argument_t* arguments;
+  // Number of entries in arguments.
+  uint16_t argument_count;
+  // Reached memory effects not confined to any argument.
+  bool has_unbounded_memory_access;
+} loom_storage_access_summary_t;
+
 typedef struct loom_storage_access_scope_t {
   // Source module, whose represented program remains immutable in this scope.
   loom_module_t* module;
@@ -124,6 +158,14 @@ typedef struct loom_storage_access_scope_t {
   iree_arena_allocator_t* arena;
   // Demand-allocated state; NULL until the first storage query.
   struct loom_storage_access_state_t* state;
+  // Optional, preselected source bindings installed before the first query.
+  const loom_storage_access_binding_t* bindings;
+  // Number of sorted entries in bindings.
+  iree_host_size_t binding_count;
+  // Optional existing provider catalog for unresolved source applications.
+  // Their effects are the union of available bodies, without selecting one.
+  // Exact bindings take precedence; an unavailable body remains opaque.
+  const loom_template_provider_catalog_t* providers;
 } loom_storage_access_scope_t;
 
 // Memory effects projected through one call boundary. Reference arguments
@@ -158,6 +200,16 @@ iree_status_t loom_storage_access_require_function(
     loom_storage_access_scope_t* scope, loom_func_like_t function,
     loom_local_value_domain_t* value_domain,
     const loom_storage_access_function_t** out_function);
+
+// Retains only the canonical argument effects and confinement in
+// |result_arena|. Neither the returned record nor its arguments borrow the
+// source or graph. Source interpretation and recursive closure use the ordinary
+// demand scope.
+iree_status_t loom_storage_access_require_summary(
+    loom_storage_access_scope_t* scope, loom_func_like_t function,
+    loom_local_value_domain_t* value_domain,
+    iree_arena_allocator_t* result_arena,
+    const loom_storage_access_summary_t** out_summary);
 
 // Projects the canonical reached-body summaries through |call|. Pure calls
 // need no graph; opaque memory effects remain unbounded. Visible semantic and
