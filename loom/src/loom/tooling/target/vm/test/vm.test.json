@@ -149,7 +149,7 @@
           "run": {
             "tool": "loom-compile",
             "args": [
-              "{srcdir}/source_call_context.loom",
+              "{srcdir}/../../../../../../target/vm/test/call_target_context.loom",
               "--root=@unbound_caller",
               "--target=vm:core",
               "--format=vm",
@@ -174,22 +174,6 @@
           }
         }
       ]
-    },
-    {
-      "name": "executes calls between authored and inherited compatible target contexts",
-      "run": {
-        "tool": "loom-test",
-        "args": [
-          "{srcdir}/source_call_context.loom"
-        ]
-      },
-      "stdout": {
-        "contains": [
-          "\"case_count\":1",
-          "\"failed_sample_count\":0",
-          "\"planning_issue_count\":0"
-        ]
-      }
     },
     {
       "name": "loom-test applies invocation config 5 before VM compilation",

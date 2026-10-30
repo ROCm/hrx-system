@@ -23,3 +23,9 @@ loom_test(
     srcs = ["callable_storage.loom"],
     execution_profiles = [VM_REFERENCE_PROFILE],
 )
+
+loom_test(
+    name = "call_target_context_test",
+    srcs = ["call_target_context.loom"],
+    execution_profiles = [VM_REFERENCE_PROFILE],
+)

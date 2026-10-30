@@ -33,7 +33,6 @@ iree_execution_test_suite(
         "invalid_operand.loom",
         "invalid_storage.loom",
         "module.loom",
-        "source_call_context.loom",
         "source_cases.loom",
         "source_config.loom",
         "source_library_cases.loom",
@@ -43,6 +42,7 @@ iree_execution_test_suite(
         "source_unavailable.loom",
         "source_views.loom",
         "source_views_invalid.loom",
+        "//loom/target/vm/test:call_target_context.loom",
     ],
     manifests = ["vm.test.json"],
     target_compatible_with = loom_config_compatible_with([
