@@ -546,6 +546,39 @@ TEST_P(WriteInterferenceTieTest, LaterMemberRetainsTheWholePhysicalSource) {
   }
 }
 
+TEST_P(WriteInterferenceTieTest, SourcePlacementRespectsItsPublishedCopy) {
+  const uint32_t copied =
+      InitializeLiveSource(GetParam(), ObservationKind::Whole);
+  const uint32_t source_base = assignments_[0].location_base;
+  ResetArenas();
+  IREE_ASSERT_OK(BuildTable());
+  Publish(copied, source_base + 1);
+  assignment_indices_[0] = UINT32_MAX;
+  // Placing the source after its copy must reject overwriting a different
+  // still-live source word, while accepting identity and disjoint placements.
+  EXPECT_EQ(Query(0, source_base), 0u);
+  EXPECT_EQ(Query(0, source_base + 1), kNoConflict);
+  EXPECT_EQ(Query(0, source_base + 2), kNoConflict);
+
+  // A simultaneous relocation checks the proposed pair, not either old base.
+  Publish(0, source_base + 1);
+  loom_low_allocation_write_proposal_t proposal = {};
+  IREE_ASSERT_OK(loom_low_allocation_write_proposal_initialize(
+      table_, &decision_, &proposal));
+  for (uint32_t ordinal : {0u, copied}) {
+    loom_low_allocation_write_proposal_add(table_, Origin(ordinal),
+                                           &assignments_[ordinal], source_base,
+                                           &proposal);
+  }
+  EXPECT_FALSE(loom_low_allocation_write_proposal_conflicts(table_, &write_map_,
+                                                            &proposal));
+  loom_low_allocation_write_proposal_add(table_, Origin(copied),
+                                         &assignments_[copied], source_base + 1,
+                                         &proposal);
+  EXPECT_TRUE(loom_low_allocation_write_proposal_conflicts(table_, &write_map_,
+                                                           &proposal));
+}
+
 TEST_P(WriteInterferenceTieTest, DeadUnitsBetweenLiveRangesRemainReusable) {
   const uint32_t copied =
       InitializeLiveSource(GetParam(), ObservationKind::Partial);
