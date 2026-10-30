@@ -1183,6 +1183,55 @@ TEST_F(HipStreamValueApiTest, DependentEventWaitLeavesProducerRunnable) {
   EXPECT_EQ(7u, actual);
 }
 
+TEST_F(HipStreamValueApiTest, GraphReplayDependencyLeavesProducerRunnable) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
+  hipStream_t source = CreateStream();
+  hipStream_t consumer = CreateStream();
+  hipStream_t producer = CreateStream();
+  void* signal = AllocateSignal();
+  void* result = Allocate(sizeof(uint32_t));
+  ASSERT_NE(nullptr, source);
+  ASSERT_NE(nullptr, consumer);
+  ASSERT_NE(nullptr, producer);
+  ASSERT_NE(nullptr, signal);
+  ASSERT_NE(nullptr, result);
+  ASSERT_EQ(hipSuccess, api_.memset(signal, 0, sizeof(uint64_t)));
+  ASSERT_EQ(hipSuccess, api_.memset(result, 0, sizeof(uint32_t)));
+  ASSERT_EQ(hipSuccess,
+            api_.stream_begin_capture(source, hipStreamCaptureModeGlobal));
+  ASSERT_EQ(hipSuccess,
+            api_.write_value_32(source, result, 7, hipStreamWriteValueDefault));
+  hipGraph_t graph = nullptr;
+  ASSERT_EQ(hipSuccess, api_.stream_end_capture(source, &graph));
+  graphs_.push_back(graph);
+  hipGraphExec_t executable = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.graph_instantiate(&executable, graph, nullptr, nullptr, 0));
+  graph_executables_.push_back(executable);
+  ScopeExit release_wait([&] {
+    __atomic_store_n(static_cast<uint32_t*>(signal), 1u, __ATOMIC_RELEASE);
+  });
+  ASSERT_EQ(hipSuccess, api_.wait_value_32(source, signal, 1,
+                                           hipStreamWaitValueEq, UINT32_MAX));
+  ASSERT_EQ(hipSuccess, api_.graph_launch(executable, source));
+  ASSERT_EQ(hipSuccess, api_.graph_launch(executable, consumer));
+  ASSERT_EQ(hipSuccess, api_.write_value_32(consumer, result, 9,
+                                            hipStreamWriteValueDefault));
+  EXPECT_EQ(hipErrorNotReady, api_.stream_query(consumer));
+  // The consumer inherits the graph's independent queue requirement. Its
+  // implicit replay dependency must leave this later producer runnable.
+  ASSERT_EQ(hipSuccess, api_.write_value_32(producer, signal, 1,
+                                            hipStreamWriteValueDefault));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(producer));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(consumer));
+  uint32_t actual = 0;
+  ASSERT_EQ(hipSuccess, api_.memcpy(&actual, result, sizeof(actual),
+                                    hipMemcpyDeviceToHost));
+  EXPECT_EQ(9u, actual);
+}
+
 TEST_F(HipStreamValueApiTest, SameStreamPendingWaitsShareAQueueLane) {
   if (!supports_value_waits_) {
     GTEST_SKIP() << "backend does not provide native signal waits";

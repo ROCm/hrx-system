@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstring>
+#include <semaphore>
 
 #include "binding/hip/api.h"
 #include "binding/hip/hip_dso_test_util.h"
@@ -36,6 +37,10 @@ struct HipGraphApi {
   decltype(&hipStreamDestroy) stream_destroy = nullptr;
   // Waits for graph completion.
   decltype(&hipStreamSynchronize) stream_synchronize = nullptr;
+  // Checks pending work without waiting on its completion.
+  decltype(&hipStreamQuery) stream_query = nullptr;
+  // Holds a stream at an application-owned completion gate.
+  decltype(&hipLaunchHostFunc) launch_host = nullptr;
   // Allocates a device buffer for graph transfers.
   decltype(&hipMalloc) allocate = nullptr;
   // Releases the allocation after graph completion.
@@ -126,6 +131,8 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     RESOLVE(stream_create, "hipStreamCreateWithFlags");
     RESOLVE(stream_destroy, "hipStreamDestroy");
     RESOLVE(stream_synchronize, "hipStreamSynchronize");
+    RESOLVE(stream_query, "hipStreamQuery");
+    RESOLVE(launch_host, "hipLaunchHostFunc");
     RESOLVE(allocate, "hipMalloc");
     RESOLVE(free, "hipFree");
     RESOLVE(allocate_host, "hipHostAlloc");
@@ -186,11 +193,15 @@ class HipGraphMemoryApiTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    ReleaseStreamGate();
     if (primary_context_) {
       EXPECT_EQ(hipSuccess, api_.set_context(primary_context_));
     }
     if (stream_) {
       EXPECT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+    }
+    if (other_stream_) {
+      EXPECT_EQ(hipSuccess, api_.stream_synchronize(other_stream_));
     }
     if (executable_) {
       EXPECT_EQ(hipSuccess, api_.executable_destroy(executable_));
@@ -206,6 +217,9 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     }
     if (stream_) {
       EXPECT_EQ(hipSuccess, api_.stream_destroy(stream_));
+    }
+    if (other_stream_) {
+      EXPECT_EQ(hipSuccess, api_.stream_destroy(other_stream_));
     }
     if (device_) {
       EXPECT_EQ(hipSuccess, api_.free(device_));
@@ -233,6 +247,26 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
   }
 
+  void HoldStreamAtGate() {
+    gate_.pending = true;
+    ASSERT_EQ(hipSuccess, api_.launch_host(
+                              stream_,
+                              +[](void* argument) {
+                                auto* gate = static_cast<StreamGate*>(argument);
+                                gate->entered.release();
+                                gate->release.acquire();
+                              },
+                              &gate_));
+    gate_.entered.acquire();
+  }
+
+  void ReleaseStreamGate() {
+    if (gate_.pending) {
+      gate_.release.release();
+      gate_.pending = false;
+    }
+  }
+
   static void Increment(void* user_data) { ++*static_cast<int*>(user_data); }
 
   static void ObserveDestination(void* user_data) {
@@ -251,6 +285,17 @@ class HipGraphMemoryApiTest : public ::testing::Test {
   static HipGraphApi api_;
   // Launch stream joined on every test exit.
   hipStream_t stream_ = nullptr;
+  // Second stream for replaying one executable across timeline boundaries.
+  hipStream_t other_stream_ = nullptr;
+  // A host callback gate retained through all failure cleanup paths.
+  struct StreamGate {
+    // Announces that the stream reached the gated application callback.
+    std::binary_semaphore entered{0};
+    // Allows that callback to return and the stream to progress.
+    std::binary_semaphore release{0};
+    // True while teardown must release the gate before joining streams.
+    bool pending = false;
+  } gate_;
   // Original template, or null after explicit destruction.
   hipGraph_t graph_ = nullptr;
   // Clone whose payload lifetime is independent of the original template.
@@ -553,6 +598,42 @@ TEST_F(HipGraphMemoryApiTest, AllocationNodesRemainUntilTheirGraphIsReleased) {
   destination_.fill(0);
   Replay();
   EXPECT_EQ(replacement_, destination_);
+
+  ASSERT_EQ(hipSuccess,
+            api_.stream_create(&other_stream_, hipStreamNonBlocking));
+  HoldStreamAtGate();
+  ASSERT_FALSE(HasFatalFailure());
+  // Allocation-node backing is reused through timeline dependencies. All
+  // launches must return while the first stream remains held at the gate.
+  ASSERT_EQ(hipSuccess, api_.launch(executable_, stream_));
+  ASSERT_EQ(hipSuccess, api_.launch(executable_, stream_));
+  ASSERT_EQ(hipSuccess, api_.launch(executable_, other_stream_));
+  EXPECT_EQ(hipErrorNotReady, api_.stream_query(other_stream_));
+  ReleaseStreamGate();
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(other_stream_));
+  EXPECT_EQ(replacement_, destination_);
+}
+
+TEST_F(HipGraphMemoryApiTest,
+       DisabledGraphCarriesItsPendingLaunchToAnotherStream) {
+  ASSERT_EQ(hipSuccess,
+            api_.stream_create(&other_stream_, hipStreamNonBlocking));
+  hipGraphNode_t node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_copy_1d(&node, graph_, nullptr, 0,
+                                         destination_.data(), source_.data(),
+                                         source_.size(), hipMemcpyHostToHost));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  HoldStreamAtGate();
+  ASSERT_FALSE(HasFatalFailure());
+  ASSERT_EQ(hipSuccess, api_.launch(executable_, stream_));
+  ASSERT_EQ(hipSuccess, api_.set_enabled(executable_, node, 0));
+  ASSERT_EQ(hipSuccess, api_.launch(executable_, other_stream_));
+  // Even an empty updated recording cannot discard the previous launch's
+  // completion when replayed on a different stream.
+  EXPECT_EQ(hipErrorNotReady, api_.stream_query(other_stream_));
+  ReleaseStreamGate();
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(other_stream_));
+  EXPECT_EQ(source_, destination_);
 }
 
 TEST_F(HipGraphMemoryApiTest, PitchedCopyCloneReplaysItsOwnStaging) {

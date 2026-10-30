@@ -252,10 +252,15 @@ typedef struct iree_hal_streaming_graph_exec_t {
   // executable occupies, or NULL when it has no graph allocation nodes.
   iree_hal_streaming_graph_t* graph_memory_owner;
 
-  // Stream retained while the most recent graph-memory launch is in flight.
-  iree_hal_streaming_stream_t* graph_memory_active_launch_stream;
-  // Timeline value signaled by |graph_memory_active_launch_stream|.
-  uint64_t graph_memory_active_launch_value;
+  // Completion of the last accepted launch, preserved through parameter edits.
+  struct {
+    // Retained stream timeline; NULL before the first accepted launch.
+    iree_hal_semaphore_t* semaphore;
+    // Value proving all workstreams of that launch completed.
+    uint64_t value;
+    // A dependent stream must not block the shared producer queue.
+    bool requires_independent_queue;
+  } last_launch;
 
   unsigned long long flags;
 
@@ -715,8 +720,9 @@ iree_status_t iree_hal_streaming_graph_exec_create(
   exec->has_unfreed_graph_alloc_nodes = false;
   exec->launch_count = 0;
   exec->graph_memory_owner = graph->has_graph_memory_nodes ? graph : NULL;
-  exec->graph_memory_active_launch_stream = NULL;
-  exec->graph_memory_active_launch_value = 0;
+  exec->last_launch.semaphore = NULL;
+  exec->last_launch.value = 0;
+  exec->last_launch.requires_independent_queue = false;
   if (exec->graph_memory_owner) {
     ++graph->active_graph_memory_exec_count;
   }
@@ -795,9 +801,7 @@ static void iree_hal_streaming_graph_exec_destroy(
     IREE_ASSERT(exec->graph_memory_owner->active_graph_memory_exec_count > 0);
     --exec->graph_memory_owner->active_graph_memory_exec_count;
   }
-  iree_hal_streaming_stream_release(exec->graph_memory_active_launch_stream);
-  exec->graph_memory_active_launch_stream = NULL;
-  exec->graph_memory_active_launch_value = 0;
+  iree_hal_semaphore_release(exec->last_launch.semaphore);
 
   iree_allocator_free(exec->host_allocator, exec->node_disabled_states);
   iree_allocator_free(exec->host_allocator, exec->node_mappings);
@@ -2849,8 +2853,11 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
   }
-  // Handle empty graph - nothing to do.
-  if (exec->block_count == 0) {
+  // An empty recording needs no submission unless it must carry a previous
+  // launch across streams after a parameter update removed all executable work.
+  if (exec->block_count == 0 &&
+      (!exec->last_launch.semaphore ||
+       exec->last_launch.semaphore == stream->timeline_semaphore)) {
     *out_result = IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS;
     iree_slim_mutex_unlock(&exec->mutex);
     IREE_TRACE_ZONE_END(z0);
@@ -2879,41 +2886,6 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "graph contains live allocation nodes from a previous launch");
-  }
-
-  // Graph memory nodes allocate backing storage at template construction time
-  // in this implementation. Serializing launches that can touch that backing
-  // prevents two launches from concurrently sharing one graph allocation.
-  while (exec->graph_memory_owner && exec->graph_memory_active_launch_stream) {
-    iree_hal_streaming_stream_t* active_stream =
-        exec->graph_memory_active_launch_stream;
-    const uint64_t active_value = exec->graph_memory_active_launch_value;
-    iree_hal_streaming_stream_retain(active_stream);
-    iree_slim_mutex_unlock(&exec->mutex);
-
-    iree_status_t wait_status = iree_hal_semaphore_wait(
-        active_stream->timeline_semaphore, active_value,
-        iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
-
-    iree_slim_mutex_lock(&exec->mutex);
-    if (exec->graph_memory_active_launch_stream == active_stream &&
-        exec->graph_memory_active_launch_value == active_value) {
-      iree_hal_streaming_stream_release(
-          exec->graph_memory_active_launch_stream);
-      exec->graph_memory_active_launch_stream = NULL;
-      exec->graph_memory_active_launch_value = 0;
-    }
-    iree_hal_streaming_stream_release(active_stream);
-    if (!iree_status_is_ok(wait_status)) {
-      iree_slim_mutex_unlock(&exec->mutex);
-      IREE_TRACE_ZONE_END(z0);
-      return wait_status;
-    }
-    if (exec->is_destroyed) {
-      iree_slim_mutex_unlock(&exec->mutex);
-      IREE_TRACE_ZONE_END(z0);
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT);
-    }
   }
 
   // Event records this launch enqueues end their events' capture associations.
@@ -2966,19 +2938,39 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
   status = iree_hal_streaming_stream_reserve_next_value_locked(
       stream, &stream_wait_value, &stream_signal_value);
 
-  iree_hal_semaphore_t* wait_semaphore = stream->timeline_semaphore;
-  uint64_t wait_payload_value = stream_wait_value;
+  iree_hal_semaphore_t* wait_semaphores_storage[2];
+  uint64_t wait_values_storage[2];
   iree_hal_semaphore_list_t wait_semaphores = {
-      .count = stream_wait_value > 0 ? 1 : 0,
-      .semaphores = &wait_semaphore,
-      .payload_values = &wait_payload_value,
+      .count = 0,
+      .semaphores = wait_semaphores_storage,
+      .payload_values = wait_values_storage,
   };
+  if (stream_wait_value > 0) {
+    wait_semaphores_storage[wait_semaphores.count] = stream->timeline_semaphore;
+    wait_values_storage[wait_semaphores.count++] = stream_wait_value;
+  }
+  // Replays of one executable are ordered even when issued on different
+  // streams. The same-stream tail already contains this edge. Cross-stream
+  // launches carry it directly into the graph instead of adding a host wait
+  // or a separate queue operation.
+  const bool waits_for_previous_launch =
+      exec->last_launch.semaphore &&
+      exec->last_launch.semaphore != stream->timeline_semaphore;
+  if (waits_for_previous_launch) {
+    wait_semaphores_storage[wait_semaphores.count] =
+        exec->last_launch.semaphore;
+    wait_values_storage[wait_semaphores.count++] = exec->last_launch.value;
+  }
+  const bool requires_independent_queue =
+      exec->waits_for_events || (waits_for_previous_launch &&
+                                 exec->last_launch.requires_independent_queue);
   iree_hal_streaming_submission_t submission = {0};
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_submission_prepare_locked(
         stream, stream->queue, stream_signal_value,
-        exec->waits_for_events ? IREE_HAL_STREAMING_SUBMISSION_FLAG_INDEPENDENT
-                               : IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE,
+        requires_independent_queue
+            ? IREE_HAL_STREAMING_SUBMISSION_FLAG_INDEPENDENT
+            : IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE,
         &submission);
   }
   if (iree_status_is_ok(status)) {
@@ -3010,13 +3002,14 @@ iree_status_t iree_hal_streaming_graph_exec_launch(
                                               iree_status_is_ok(status));
   if (iree_status_is_ok(status)) {
     *out_result = IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS;
-    if (exec->graph_memory_owner) {
-      iree_hal_streaming_stream_release(
-          exec->graph_memory_active_launch_stream);
-      iree_hal_streaming_stream_retain(stream);
-      exec->graph_memory_active_launch_stream = stream;
-      exec->graph_memory_active_launch_value = stream_signal_value;
+    if (exec->last_launch.semaphore != stream->timeline_semaphore) {
+      iree_hal_semaphore_retain(stream->timeline_semaphore);
+      iree_hal_semaphore_release(exec->last_launch.semaphore);
+      exec->last_launch.semaphore = stream->timeline_semaphore;
     }
+    exec->last_launch.value = stream_signal_value;
+    exec->last_launch.requires_independent_queue =
+        submission.queue != stream->context->queue;
     ++exec->launch_count;
   }
 
