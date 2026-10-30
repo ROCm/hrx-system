@@ -75,15 +75,16 @@ static void loom_serve_text_request_release(
 
 static void loom_serve_text_request_cancel(loom_serve_text_service_t* service,
                                            loom_serve_text_session_t* session) {
+  const iree_status_code_t failure_code =
+      iree_status_code(service->telemetry.failure);
   loom_serve_text_telemetry_request_end(
       &service->telemetry, session,
-      service->telemetry.failure_code || session->request.diagnostic.code
+      failure_code || session->request.diagnostic.code
           ? LOOM_SERVE_TELEMETRY_FAILED
           : LOOM_SERVE_TELEMETRY_CANCELLED);
   const loom_serve_text_consumer_t consumer = session->request.consumer;
-  const iree_status_code_t code = service->telemetry.failure_code
-                                      ? service->telemetry.failure_code
-                                      : session->request.diagnostic.code;
+  const iree_status_code_t code =
+      failure_code ? failure_code : session->request.diagnostic.code;
   loom_serve_text_chat_completion_deinitialize(&session->completion);
   if (session->mode == LOOM_SERVE_TEXT_MODE_ENCODE) {
     // A partially committed append cannot be retried under its old identity.
@@ -807,8 +808,8 @@ void loom_serve_text_service_free(loom_serve_text_service_t* service,
   loom_serve_residency_set_reclaimer(
       loom_serve_text_model_residency(service->model),
       (loom_serve_residency_reclaimer_t){0});
-  if (service->telemetry.failure_code) {
-    terminal_code = service->telemetry.failure_code;
+  if (!iree_status_is_ok(service->telemetry.failure)) {
+    terminal_code = iree_status_code(service->telemetry.failure);
   }
   loom_serve_text_stop(service, terminal_code);
   loom_serve_text_capture_snapshot_release(service->capture);
@@ -833,9 +834,7 @@ void loom_serve_text_service_free(loom_serve_text_service_t* service,
   loom_serve_text_prefix_cache_deinitialize(&service->prefixes);
   loom_serve_text_epoch_deinitialize(&service->epoch);
   loom_serve_text_heartbeat_deinitialize(&service->heartbeat);
-  if (service->telemetry.owns_stream) {
-    loom_serve_telemetry_stream_free(service->telemetry.stream);
-  }
+  loom_serve_text_telemetry_deinitialize(&service->telemetry);
   iree_allocator_free_aligned(host_allocator, service);
 }
 
@@ -1127,7 +1126,7 @@ static iree_status_t loom_serve_text_advance_work(
     for (iree_host_size_t i = 0; i < service->row_count; ++i) {
       *out_progress |= service->sessions[i]->request.consumer.self != NULL;
     }
-    loom_serve_text_stop(service, service->telemetry.failure_code);
+    loom_serve_text_stop(service, iree_status_code(service->telemetry.failure));
     return iree_ok_status();
   }
   *out_progress |= loom_serve_execution_reconfiguration_advance(
@@ -1230,7 +1229,10 @@ static iree_status_t loom_serve_text_advance(void* self,
   *out_progress |= was_loading && !loom_serve_text_warmup_is_pending(warmup);
   status = iree_status_join(status, loom_serve_text_warmup_status(warmup));
   if (!iree_status_is_ok(status)) {
+    // Retain the cause before STOPPING can retire delivery receipts.
     flags |= LOOM_SERVE_SERVICE_FLAG_STOPPING;
+    service->stopping = true;
+    loom_serve_text_telemetry_fail(&service->telemetry, status);
   }
   bool projection_progress = false;
   loom_serve_service_flags_t projection_flags = flags;
@@ -1241,6 +1243,8 @@ static iree_status_t loom_serve_text_advance(void* self,
       service->projector, projection_flags, &projection_progress);
   if (!iree_status_is_ok(projection_status)) {
     flags |= LOOM_SERVE_SERVICE_FLAG_STOPPING;
+    service->stopping = true;
+    loom_serve_text_telemetry_fail(&service->telemetry, projection_status);
   }
   status = iree_status_join(status, projection_status);
   bool work_progress = false;
@@ -1253,13 +1257,13 @@ static iree_status_t loom_serve_text_advance(void* self,
   // A new model failure needs another owner turn to stop a pending timer.
   *out_progress |= image_progress || projection_progress ||
                    configuration_progress || work_progress ||
+                   !iree_status_is_ok(status) ||
                    !iree_status_is_ok(work_status);
-  status = iree_status_join(status, work_status);
-  if (!iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(work_status)) {
     service->stopping = true;
-    loom_serve_text_telemetry_fail(&service->telemetry, status);
+    loom_serve_text_telemetry_fail(&service->telemetry, work_status);
   }
-  return status;
+  return iree_status_join(status, work_status);
 }
 
 static iree_status_t loom_serve_text_accept(

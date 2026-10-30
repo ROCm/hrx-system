@@ -290,7 +290,7 @@ class InputCountOutcomeTest : public SourceTextServiceTest {
     loom_serve_text_input_count_cancel(&queries_, false, true, &telemetry_);
     loom_serve_text_input_count_deinitialize(&queries_);
     iree_string_builder_deinitialize(&scratch_);
-    loom_serve_telemetry_stream_free(telemetry_.stream);
+    loom_serve_text_telemetry_deinitialize(&telemetry_);
     SourceTextServiceTest::TearDown();
   }
 
@@ -353,9 +353,16 @@ TEST_F(InputCountOutcomeTest, ModelFailureAccountsBothBorrowedAndQueuedClaims) {
   int first = -1, second = -1;
   ASSERT_NO_FATAL_FAILURE(Enqueue(&first));
   ASSERT_NO_FATAL_FAILURE(Enqueue(&second));
-  iree_status_t failure = iree_make_status(IREE_STATUS_UNAVAILABLE);
+  iree_status_t failure =
+      iree_make_status(IREE_STATUS_UNAVAILABLE, "execution became unavailable");
+  loom_serve_telemetry_diagnostic_t expected;
+  loom_serve_telemetry_diagnostic_capture(failure, &expected);
   loom_serve_text_telemetry_fail(&telemetry_, failure);
   iree_status_free(failure);
+  // Cleanup can report another error after the first failure has propagated
+  // to its caller. Neither that status nor the caller owns the drain's cause.
+  loom_serve_text_telemetry_fail(&telemetry_,
+                                 iree_status_from_code(IREE_STATUS_CANCELLED));
   EXPECT_TRUE(
       loom_serve_text_input_count_cancel(&queries_, true, true, &telemetry_));
   EXPECT_EQ(queries_.count, 1u);
@@ -367,6 +374,27 @@ TEST_F(InputCountOutcomeTest, ModelFailureAccountsBothBorrowedAndQueuedClaims) {
   EXPECT_EQ(telemetry_.counters.failed, 2u);
   EXPECT_EQ(telemetry_.counters.cancelled, 0u);
   EXPECT_EQ(telemetry_.counters.input_tokens, 0u);
+  uint64_t cursor = 0;
+  size_t outcomes = 0;
+  const auto head = loom_serve_telemetry_stream_head(telemetry_.stream);
+  while (cursor < head) {
+    loom_serve_telemetry_record_t record;
+    ASSERT_EQ(
+        loom_serve_telemetry_stream_read(telemetry_.stream, &cursor, &record),
+        LOOM_SERVE_TELEMETRY_READ_RECORD);
+    if (record.event != &LOOM_SERVE_TELEMETRY_REQUEST_END) {
+      continue;
+    }
+    ++outcomes;
+    EXPECT_EQ(record.data.end.outcome, LOOM_SERVE_TELEMETRY_FAILED);
+    EXPECT_EQ(record.data.end.diagnostic.code, expected.code);
+    EXPECT_EQ(record.data.end.diagnostic.length, expected.length);
+    EXPECT_EQ(record.data.end.diagnostic.truncated, expected.truncated);
+    EXPECT_EQ(std::string(record.data.end.diagnostic.message,
+                          record.data.end.diagnostic.length),
+              std::string(expected.message, expected.length));
+  }
+  EXPECT_EQ(outcomes, 2u);
 }
 
 TEST_F(InputCountOutcomeTest, ValidationFailuresRemainRequestLocal) {
