@@ -69,13 +69,21 @@ The process sees `xdna:0` as A, `rdna:0` as C, `rdna:1` as B, and `amdgpu:0`
 as B. All aliases share the same native fabric. Existing drivers retain their
 captured selections if the environment changes later.
 
-Enumeration returns `id/<32 hexadecimal digits>` paths for exact native identity
-selection within the same visible scheme. An unsupported or hidden identity is
-unavailable; identities can expire on reset, removal, or reboot. Opaque numeric
-device IDs returned by enumeration name native endpoints across aliases, not
-URI ordinals. Visibility configures selection and is not an access-control
-boundary. Architecture-local ordinals do not claim to match another runtime's
-combined GPU numbering.
+Enumeration returns `GPU-<16 hexadecimal digits>` when the native persistent
+identifier selects one visible GPU. For example,
+`amdgpu://GPU-4939e1d93d24ff77` selects that GPU independently of its ordinal.
+Linux uses the same native identifier as ROCr. Device partitioning can change
+the identifier. Providers without one, or with ambiguous identifiers, return
+`id/<32 hexadecimal digits>` endpoint paths. These exact endpoint paths remain
+accepted for every device but can expire on reset, removal, or reboot.
+
+Both identity forms require an exact match within the same visible scheme;
+unsupported or hidden identities are unavailable. Opaque numeric device IDs
+returned by enumeration name native endpoints across aliases, not URI ordinals.
+Visibility configures selection and is not an access-control boundary.
+Architecture-local ordinals do not claim to match another runtime's combined
+GPU numbering. HIP's ROCR/HIP/CUDA visibility variables are frontend policy
+applied before activation, independently of these HAL scheme filters.
 
 GPU discovery captures architecture and usable compute families through query-only
 endpoints; it creates no device, address space, queue, or event. Enumeration and

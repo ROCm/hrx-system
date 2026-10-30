@@ -323,6 +323,15 @@ static iree_status_t iree_hal_amd_gpu_device_build_spec(
   IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_query_physical_device_identity(
       device->context->api, device->context->endpoint, display_name,
       &physical.identity));
+  const uint64_t unique_id = device->context->target_info.unique_id;
+  if (unique_id) {
+    // The HAL UUID stores the native identifier most-significant byte first,
+    // followed by eight zero bytes, independently of host byte order.
+    for (uint32_t i = 0; i < sizeof(unique_id); ++i) {
+      physical.identity.uuid.bytes[i] = (uint8_t)(unique_id >> (56 - i * 8));
+    }
+    physical.identity.flags |= IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_UUID;
+  }
   if (device->context->host_numa_node != UINT32_MAX) {
     physical.identity.numa.node_id = device->context->host_numa_node;
     physical.identity.flags |= IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NUMA_NODE;

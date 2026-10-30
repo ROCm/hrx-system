@@ -237,6 +237,8 @@ amdf_status_t AMDF_CALL QueryEndpoint(amdf_endpoint_t* endpoint,
 amdf_status_t AMDF_CALL QueryGpu(amdf_endpoint_t* endpoint,
                                  amdf_gpu_endpoint_info_t* out_info) {
   out_info->gfx_ip = reinterpret_cast<NativeEndpoint*>(endpoint)->gpu.gfx_ip;
+  out_info->unique_id =
+      reinterpret_cast<NativeEndpoint*>(endpoint)->gpu.unique_id;
   return AMDF_STATUS_OK;
 }
 
@@ -411,6 +413,76 @@ TEST_F(DriverTest, DefaultOrdinalAndIdentityUseTheSameExecutableSet) {
              IREE_STATUS_UNAVAILABLE, 0);
   CreatePath(IREE_SV("id/00000000000000990000000000000000"),
              IREE_STATUS_NOT_FOUND, 0);
+}
+
+TEST_F(DriverTest, NativeGpuIdentityPathsUseCachedDiscovery) {
+  native_.endpoints[0].gpu.unique_id = UINT64_C(0x1111222233334444);
+  native_.endpoints[1].gpu.unique_id = UINT64_C(0xfedcba9876543210);
+  native_.endpoints[3].gpu.unique_id = UINT64_C(0x0123456789abcdef);
+  native_.endpoints[5].gpu.unique_id = UINT64_C(0x5555666677778888);
+  IREE_ASSERT_OK(CreateDriver());
+  const uint32_t query_count = native_.query_count;
+  iree_host_size_t count = 0;
+  iree_hal_device_info_t* infos = nullptr;
+  IREE_ASSERT_OK(iree_hal_driver_query_available_devices(
+      driver_, IREE_SV("rdna"), iree_allocator_system(), &count, &infos));
+  EXPECT_EQ(count, 2u);
+  if (count == 2) {
+    EXPECT_TRUE(
+        iree_string_view_equal(infos[0].path, IREE_SV("GPU-fedcba9876543210")));
+    EXPECT_TRUE(
+        iree_string_view_equal(infos[1].path, IREE_SV("GPU-0123456789abcdef")));
+  }
+  iree_allocator_free(iree_allocator_system(), infos);
+  EXPECT_EQ(native_.query_count, query_count);
+  EXPECT_EQ(native_.activation_count, 0u);
+  CreatePath(IREE_SV("GPU-fedcba9876543210"), IREE_STATUS_RESOURCE_EXHAUSTED,
+             2);
+  CreatePath(IREE_SV("GPU-0123456789ABCDEF"), IREE_STATUS_RESOURCE_EXHAUSTED,
+             4);
+  CreatePath(IREE_SV("id/00000000000000020000000000000000"),
+             IREE_STATUS_RESOURCE_EXHAUSTED, 2);
+  CreatePath(IREE_SV("GPU-1111222233334444"), IREE_STATUS_UNAVAILABLE, 0);
+  CreatePath(IREE_SV("GPU-5555666677778888"), IREE_STATUS_UNAVAILABLE, 0);
+  CreatePath(IREE_SV("GPU-5555666677778888"), IREE_STATUS_RESOURCE_EXHAUSTED, 6,
+             IREE_SV("cdna"));
+  CreatePath(IREE_SV("GPU-ffffffffffffffff"), IREE_STATUS_NOT_FOUND, 0);
+  for (auto path :
+       {IREE_SV("GPU-"), IREE_SV("GPU-0123456789abcde"),
+        IREE_SV("GPU-0123456789abcdef0"), IREE_SV("GPU-0123456789abcdeg"),
+        IREE_SV("GPU-0000000000000000")}) {
+    CreatePath(path, IREE_STATUS_INVALID_ARGUMENT, 0);
+  }
+}
+
+TEST_F(DriverTest, AmbiguousGpuIdentityKeepsExactEndpointPaths) {
+  native_.endpoints[1].gpu.unique_id = UINT64_C(0xfedcba9876543210);
+  native_.endpoints[3].gpu.unique_id = native_.endpoints[1].gpu.unique_id;
+  IREE_ASSERT_OK(CreateDriver());
+  iree_host_size_t count = 0;
+  iree_hal_device_info_t* infos = nullptr;
+  IREE_ASSERT_OK(iree_hal_driver_query_available_devices(
+      driver_, IREE_SV("rdna"), iree_allocator_system(), &count, &infos));
+  EXPECT_EQ(count, 2u);
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    EXPECT_TRUE(iree_string_view_starts_with(infos[i].path, IREE_SV("id/")));
+    CreatePath(infos[i].path, IREE_STATUS_RESOURCE_EXHAUSTED,
+               infos[i].device_id);
+  }
+  iree_allocator_free(iree_allocator_system(), infos);
+  CreatePath(IREE_SV("GPU-fedcba9876543210"), IREE_STATUS_INVALID_ARGUMENT, 0);
+}
+
+TEST_F(DriverTest, NativeGpuIdentityRespectsSchemeVisibility) {
+  native_.endpoints[1].gpu.unique_id = UINT64_C(0xfedcba9876543210);
+  native_.endpoints[3].gpu.unique_id = UINT64_C(0x0123456789abcdef);
+  rdna_visibility_.Set("1");
+  IREE_ASSERT_OK(CreateDriver());
+  CreatePath(IREE_SV("GPU-fedcba9876543210"), IREE_STATUS_UNAVAILABLE, 0);
+  CreatePath(IREE_SV("GPU-0123456789abcdef"), IREE_STATUS_RESOURCE_EXHAUSTED,
+             4);
+  CreatePath(IREE_SV("GPU-fedcba9876543210"), IREE_STATUS_RESOURCE_EXHAUSTED, 2,
+             IREE_SV("amdgpu"));
 }
 
 TEST_F(DriverTest, NumericIdsCannotBypassPassiveQualification) {

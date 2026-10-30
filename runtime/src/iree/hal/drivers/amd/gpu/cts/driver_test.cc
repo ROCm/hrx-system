@@ -38,7 +38,10 @@ class DriverTest : public ::testing::Test {
       for (iree_host_size_t i = 0; i < count_; ++i) {
         if (!selected_path_[0] ||
             iree_string_view_equal(infos_[i].path,
-                                   iree_make_cstring_view(selected_path_))) {
+                                   iree_make_cstring_view(selected_path_)) ||
+            (selected_gpu_path_[0] &&
+             iree_string_view_equal(
+                 infos_[i].path, iree_make_cstring_view(selected_gpu_path_)))) {
           scheme_ = scheme;
           ordinal_ = i;
           break;
@@ -137,6 +140,10 @@ class DriverTest : public ::testing::Test {
         continue;
       }
       selected_architecture_ = amdf_gpu_endpoint_architecture(&gpu_info);
+      if (gpu_info.unique_id) {
+        std::snprintf(selected_gpu_path_, sizeof(selected_gpu_path_),
+                      "GPU-%016" PRIx64, gpu_info.unique_id);
+      }
       std::snprintf(selected_path_, sizeof(selected_path_),
                     "id/%016" PRIx64 "%016" PRIx64, summary->id.words[0],
                     summary->id.words[1]);
@@ -198,6 +205,8 @@ class DriverTest : public ::testing::Test {
   iree_hal_amd_fabric_t* discovery_ = nullptr;
   // Exact endpoint path selected by AMDF_CTS_GPU_NATIVE_IDENTITY, when set.
   char selected_path_[36] = {};
+  // Persistent identity alias for the same runner-selected GPU, when present.
+  char selected_gpu_path_[21] = {};
   // Architecture of the selected endpoint, established by passive discovery.
   amdf_gpu_architecture_t selected_architecture_ =
       AMDF_GPU_ARCHITECTURE_UNKNOWN;
