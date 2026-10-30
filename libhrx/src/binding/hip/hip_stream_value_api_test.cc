@@ -428,16 +428,6 @@ class HipStreamValueApiTest : public testing::Test {
     return pointer;
   }
 
-  bool CheckWaitSupport(hipStream_t stream, void* signal) {
-    if (supports_value_waits_) {
-      return true;
-    }
-    EXPECT_EQ(hipErrorNotSupported,
-              api_.wait_value_32(stream, signal, 0, hipStreamWaitValueEq,
-                                 UINT32_MAX));
-    return false;
-  }
-
   void* AllocateHost(size_t size) {
     void* pointer = nullptr;
     EXPECT_EQ(hipSuccess, api_.malloc_host(&pointer, size));
@@ -589,6 +579,9 @@ TEST_F(HipStreamValueApiTest, RejectsIncompatibleImportedBatchTargets) {
 }
 
 TEST_F(HipStreamValueApiTest, FailedWaitLaneDoesNotPoisonOtherStreams) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   hipCtx_t original_context = nullptr;
   ASSERT_EQ(hipSuccess, api_.ctx_get_current(&original_context));
 
@@ -671,15 +664,6 @@ TEST_F(HipStreamValueApiTest, FailedWaitLaneDoesNotPoisonOtherStreams) {
   if (setup_result != hipSuccess) {
     FAIL() << "cross-context wait-lane setup failed with " << setup_result;
   }
-
-  hipStream_t support_stream = nullptr;
-  ASSERT_EQ(hipSuccess, api_.stream_create(&support_stream));
-  context_streams.push_back(support_stream);
-  if (!CheckWaitSupport(support_stream, ready_signal)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
-  ASSERT_EQ(hipSuccess, api_.stream_destroy(support_stream));
-  context_streams.clear();
 
   for (bool synchronize_owner_first : {false, true}) {
     ASSERT_EQ(hipSuccess,
@@ -779,14 +763,37 @@ TEST_F(HipStreamValueApiTest, PublishesFinalWriteWithoutHostFlush) {
   EXPECT_EQ(kExpectedValue, __atomic_load_n(observed_value, __ATOMIC_ACQUIRE));
 }
 
+TEST_F(HipStreamValueApiTest,
+       SignalAllocationFollowsNativeProgressCapabilities) {
+  if (supports_value_waits_) {
+    ASSERT_NE(AllocateSignal(), nullptr);
+  } else {
+    void* signal = nullptr;
+    EXPECT_EQ(hipErrorNotSupported,
+              api_.ext_malloc_with_flags(&signal, sizeof(uint64_t),
+                                         hipMallocSignalMemory));
+    EXPECT_EQ(signal, nullptr);
+    hipStream_t stream = CreateStream();
+    void* payload = Allocate(sizeof(uint64_t));
+    ASSERT_NE(stream, nullptr);
+    ASSERT_NE(payload, nullptr);
+    EXPECT_EQ(hipErrorNotSupported,
+              api_.wait_value_32(stream, payload, 0, hipStreamWaitValueEq,
+                                 UINT32_MAX));
+    EXPECT_EQ(hipErrorNotSupported,
+              api_.wait_value_64(stream, payload, 0, hipStreamWaitValueEq,
+                                 UINT64_MAX));
+  }
+}
+
 TEST_F(HipStreamValueApiTest, ExecutesEveryWaitPredicateAtBothWidths) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   hipStream_t stream = CreateStream();
   void* signal = AllocateSignal();
   ASSERT_NE(nullptr, stream);
   ASSERT_NE(nullptr, signal);
-  if (!CheckWaitSupport(stream, signal)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
 
   const unsigned int predicates[] = {
       hipStreamWaitValueGte,
@@ -854,32 +861,67 @@ TEST_F(HipStreamValueApiTest, ExecutesSystemScopeWritesOnHostMemory) {
   EXPECT_EQ(15u, observed_64);
 }
 
-TEST_F(HipStreamValueApiTest, ExecutesSystemScopeWaitsOnHostMemory) {
-  hipStream_t stream = CreateStream();
-  void* host_allocation = AllocateHost(16);
-  ASSERT_NE(nullptr, stream);
-  ASSERT_NE(nullptr, host_allocation);
-
-  hipDeviceptr_t device_pointer = nullptr;
-  ASSERT_EQ(hipSuccess, api_.host_get_device_pointer(
-                            &device_pointer, host_allocation, /*flags=*/0));
-  ASSERT_NE(nullptr, device_pointer);
-  if (!CheckWaitSupport(stream, device_pointer)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
+TEST_F(HipStreamValueApiTest, ExecutesSystemScopeWaitsOnSignalMemory) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
   }
+  hipStream_t stream = CreateStream();
+  void* signal_32 = AllocateSignal();
+  void* signal_64 = AllocateSignal();
+  ASSERT_NE(nullptr, stream);
+  ASSERT_NE(nullptr, signal_32);
+  ASSERT_NE(nullptr, signal_64);
 
   constexpr uint32_t kValue32 = 10;
   constexpr uint64_t kValue64 = 15;
-  std::memcpy(host_allocation, &kValue32, sizeof(kValue32));
-  std::memcpy(static_cast<uint8_t*>(host_allocation) + 8, &kValue64,
-              sizeof(kValue64));
-
-  EXPECT_EQ(hipSuccess, api_.wait_value_32(stream, device_pointer, kValue32,
+  std::memcpy(signal_32, &kValue32, sizeof(kValue32));
+  std::memcpy(signal_64, &kValue64, sizeof(kValue64));
+  EXPECT_EQ(hipSuccess, api_.wait_value_32(stream, signal_32, kValue32,
                                            hipStreamWaitValueEq, UINT32_MAX));
-  EXPECT_EQ(hipSuccess, api_.wait_value_64(
-                            stream, static_cast<uint8_t*>(device_pointer) + 8,
-                            kValue64, hipStreamWaitValueEq, UINT64_MAX));
+  EXPECT_EQ(hipSuccess, api_.wait_value_64(stream, signal_64, kValue64,
+                                           hipStreamWaitValueEq, UINT64_MAX));
   EXPECT_EQ(hipSuccess, api_.stream_synchronize(stream));
+}
+
+TEST_F(HipStreamValueApiTest,
+       MixedBatchUsesNativeWaitsAndShaderPayloadAtomics) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
+  hipStream_t stream = CreateStream();
+  void* signal = AllocateSignal();
+  void* payload = Allocate(16);
+  ASSERT_NE(nullptr, stream);
+  ASSERT_NE(nullptr, signal);
+  ASSERT_NE(nullptr, payload);
+  const uint64_t ready = 1;
+  std::memcpy(signal, &ready, sizeof(ready));
+  ASSERT_EQ(hipSuccess, api_.memset(payload, 0, 16));
+  hipStreamBatchMemOpParams parameters[4] = {};
+  parameters[0].waitValue.operation = hipStreamMemOpWaitValue32;
+  parameters[0].waitValue.address = (hipDeviceptr_t)(uintptr_t)signal;
+  parameters[0].waitValue.value = 1;
+  parameters[0].waitValue.flags = hipStreamWaitValueEq;
+  parameters[1].writeValue.operation = hipStreamMemOpWriteValue32;
+  parameters[1].writeValue.address = (hipDeviceptr_t)(uintptr_t)payload;
+  parameters[1].writeValue.value = 7;
+  parameters[1].writeValue.flags = hipExtStreamWriteValueIncrement;
+  parameters[2].waitValue.operation = hipStreamMemOpWaitValue64;
+  parameters[2].waitValue.address = (hipDeviceptr_t)(uintptr_t)signal;
+  parameters[2].waitValue.value64 = 1;
+  parameters[2].waitValue.flags = hipStreamWaitValueEq;
+  parameters[3].writeValue.operation = hipStreamMemOpWriteValue64;
+  parameters[3].writeValue.address =
+      (hipDeviceptr_t)(uintptr_t)(static_cast<uint8_t*>(payload) + 8);
+  parameters[3].writeValue.value64 = 11;
+  parameters[3].writeValue.flags = hipStreamWriteValueDefault;
+  ASSERT_EQ(hipSuccess, api_.batch_mem_op(stream, 4, parameters, 0));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream));
+  std::array<uint64_t, 2> output = {};
+  ASSERT_EQ(hipSuccess, api_.memcpy(output.data(), payload, sizeof(output),
+                                    hipMemcpyDeviceToHost));
+  EXPECT_EQ(output[0], 7u);
+  EXPECT_EQ(output[1], 11u);
 }
 
 TEST_F(HipStreamValueApiTest, ExecutesBatchAsOneOrderedTransaction) {
@@ -1027,6 +1069,9 @@ TEST_F(HipStreamValueApiTest, BatchDoesNotInterleaveWithSameStreamCall) {
 }
 
 TEST_F(HipStreamValueApiTest, IndependentStreamWaitsDoNotShareAQueueLane) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   hipStream_t stream_a = CreateStream();
   hipStream_t stream_b = CreateStream();
   void* value_x = AllocateSignal();
@@ -1043,9 +1088,14 @@ TEST_F(HipStreamValueApiTest, IndependentStreamWaitsDoNotShareAQueueLane) {
   ASSERT_EQ(hipSuccess, api_.memset(value_y, 0, sizeof(uint64_t)));
   ASSERT_EQ(hipSuccess, api_.memset(value_x_64, 0, sizeof(uint64_t)));
   ASSERT_EQ(hipSuccess, api_.memset(value_y_64, 0, sizeof(uint64_t)));
-  if (!CheckWaitSupport(stream_a, value_x)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
+  // On an API failure, unblock accepted work before fixture teardown releases
+  // its storage. The successful path completes through the GPU producer.
+  ScopeExit release_waits([&] {
+    for (void* signal : {value_x, value_y, value_x_64, value_y_64}) {
+      __atomic_store_n(static_cast<uint64_t*>(signal), UINT64_C(1),
+                       __ATOMIC_RELEASE);
+    }
+  });
   ASSERT_EQ(hipSuccess, api_.wait_value_32(stream_a, value_x, 1,
                                            hipStreamWaitValueEq, UINT32_MAX));
   ASSERT_EQ(hipSuccess, api_.wait_value_64(stream_a, value_x_64, 1,
@@ -1079,14 +1129,14 @@ TEST_F(HipStreamValueApiTest, IndependentStreamWaitsDoNotShareAQueueLane) {
 }
 
 TEST_F(HipStreamValueApiTest, SameStreamPendingWaitsShareAQueueLane) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   hipStream_t wait_stream = CreateStream();
   void* signal = AllocateSignal();
   ASSERT_NE(nullptr, wait_stream);
   ASSERT_NE(nullptr, signal);
   ASSERT_EQ(hipSuccess, api_.memset(signal, 0, sizeof(uint32_t)));
-  if (!CheckWaitSupport(wait_stream, signal)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
 
   // Queue more unresolved waits than the backend's dynamic queue identity
   // space. Ordered waits on one logical stream must remain on one sticky lane
@@ -1102,13 +1152,16 @@ TEST_F(HipStreamValueApiTest, SameStreamPendingWaitsShareAQueueLane) {
     }
   }
 
-  *static_cast<volatile uint32_t*>(signal) = 1;
+  __atomic_store_n(static_cast<uint32_t*>(signal), 1u, __ATOMIC_RELEASE);
   ASSERT_EQ(hipSuccess, api_.stream_synchronize(wait_stream));
   EXPECT_EQ(hipSuccess, wait_result)
       << "accepted " << accepted_wait_count << " of " << kWaitCount << " waits";
 }
 
 TEST_F(HipStreamValueApiTest, CompletedWaitLanesRecycleAcrossLiveStreams) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   void* signal = AllocateSignal();
   ASSERT_NE(nullptr, signal);
   const uint32_t ready_value = 1;
@@ -1117,9 +1170,6 @@ TEST_F(HipStreamValueApiTest, CompletedWaitLanesRecycleAcrossLiveStreams) {
 
   hipStream_t first_stream = CreateStream();
   ASSERT_NE(nullptr, first_stream);
-  if (!CheckWaitSupport(first_stream, signal)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
 
   // Keep more logical streams alive than the hardware queue identity space.
   // Each satisfied wait completes before the next stream submits, so a
@@ -1425,13 +1475,13 @@ TEST_F(HipStreamValueApiTest, WaitInBatchInvalidatesCaptureWithoutWrites) {
 }
 
 TEST_F(HipStreamValueApiTest, CaptureBeginRacesValueWaitSubmission) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   hipStream_t stream = CreateStream();
   void* allocation = AllocateSignal();
   ASSERT_NE(nullptr, stream);
   ASSERT_NE(nullptr, allocation);
-  if (!CheckWaitSupport(stream, allocation)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
 
   for (int iteration = 0; iteration < 64; ++iteration) {
     ASSERT_EQ(hipSuccess, api_.memset(allocation, 0, sizeof(uint32_t)));
@@ -1467,14 +1517,14 @@ TEST_F(HipStreamValueApiTest, CaptureBeginRacesValueWaitSubmission) {
 }
 
 TEST_F(HipStreamValueApiTest, CaptureEndRacesValueWaitSubmission) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   hipStream_t stream = CreateStream();
   void* allocation = AllocateSignal();
   ASSERT_NE(nullptr, stream);
   ASSERT_NE(nullptr, allocation);
   ASSERT_EQ(hipSuccess, api_.memset(allocation, 0, sizeof(uint32_t)));
-  if (!CheckWaitSupport(stream, allocation)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
 
   for (int iteration = 0; iteration < 64; ++iteration) {
     ASSERT_EQ(hipSuccess,
@@ -1599,6 +1649,9 @@ TEST_F(HipStreamValueApiTest, BatchTargetLookupRacesFreeWithoutPartialCommit) {
 }
 
 TEST_F(HipStreamValueApiTest, StreamTeardownCompletesAfterIndependentProducer) {
+  if (!supports_value_waits_) {
+    GTEST_SKIP() << "backend does not provide native signal waits";
+  }
   hipStream_t wait_stream = CreateStream();
   hipStream_t producer_stream = CreateStream();
   void* allocation = AllocateSignal();
@@ -1606,9 +1659,6 @@ TEST_F(HipStreamValueApiTest, StreamTeardownCompletesAfterIndependentProducer) {
   ASSERT_NE(nullptr, producer_stream);
   ASSERT_NE(nullptr, allocation);
   ASSERT_EQ(hipSuccess, api_.memset(allocation, 0, sizeof(uint32_t)));
-  if (!CheckWaitSupport(wait_stream, allocation)) {
-    GTEST_SKIP() << "stream memory waits are unsupported on this runner";
-  }
   ASSERT_EQ(hipSuccess, api_.wait_value_32(wait_stream, allocation, 1,
                                            hipStreamWaitValueEq, UINT32_MAX));
 
@@ -1616,8 +1666,12 @@ TEST_F(HipStreamValueApiTest, StreamTeardownCompletesAfterIndependentProducer) {
   hipError_t destroy_result = hipErrorUnknown;
   std::thread destroy_thread(
       [&] { destroy_result = api_.stream_destroy(wait_stream); });
-  EXPECT_EQ(hipSuccess, api_.write_value_32(producer_stream, allocation, 1,
-                                            hipStreamWriteValueDefault));
+  const hipError_t producer_result = api_.write_value_32(
+      producer_stream, allocation, 1, hipStreamWriteValueDefault);
+  EXPECT_EQ(hipSuccess, producer_result);
+  if (producer_result != hipSuccess) {
+    __atomic_store_n(static_cast<uint32_t*>(allocation), 1u, __ATOMIC_RELEASE);
+  }
   EXPECT_EQ(hipSuccess, api_.stream_synchronize(producer_stream));
   destroy_thread.join();
   EXPECT_EQ(hipSuccess, destroy_result);

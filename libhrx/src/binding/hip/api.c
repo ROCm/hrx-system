@@ -5982,6 +5982,11 @@ HIPAPI hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes,
       if (context_result != hipSuccess) {
         HIP_RETURN_ERROR(context_result);
       }
+      if (!iree_hal_streaming_queue_family_supports_value_waits(
+              iree_hal_queue_family_spec(
+                  iree_hal_queue_family(context->queue)))) {
+        HIP_RETURN_ERROR(hipErrorNotSupported);
+      }
       if (iree_hip_context_invalidate_non_relaxed_visible_captures(context)) {
         HIP_RETURN_ERROR(hipErrorStreamCaptureUnsupported);
       }

@@ -69,6 +69,8 @@ TEST(StreamValueTest, TranslatesGreaterEqualAndEqual) {
       IREE_HIP_STREAM_WAIT_VALUE_GTE, IREE_HAL_ATOMIC_WIDTH_32, &params));
   EXPECT_EQ(2u, params.value);
   EXPECT_EQ(15u, params.mask);
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE,
+            params.flags);
   EXPECT_EQ(IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
             params.condition);
   EXPECT_EQ(IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
@@ -78,6 +80,8 @@ TEST(StreamValueTest, TranslatesGreaterEqualAndEqual) {
       7, 15, IREE_HIP_STREAM_WAIT_VALUE_EQ, IREE_HAL_ATOMIC_WIDTH_64, &params));
   EXPECT_EQ(7u, params.value);
   EXPECT_EQ(15u, params.mask);
+  EXPECT_EQ(IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_ZERO_COMPUTE,
+            params.flags);
   EXPECT_EQ(IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL, params.condition);
 }
 

@@ -2141,18 +2141,25 @@ static iree_status_t iree_hal_streaming_memory_allocate_host_with_context_mode(
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_buffer = NULL;
 
+  const bool signal_memory = iree_any_bit_set(
+      flags, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_SIGNAL_MEMORY);
   const iree_host_size_t allocation_size = iree_max(size, (iree_host_size_t)8);
   const iree_host_size_t host_alignment =
-      iree_max((iree_host_size_t)min_alignment, (iree_host_size_t)4096);
+      iree_max((iree_host_size_t)min_alignment,
+               (iree_host_size_t)(signal_memory ? sizeof(uint64_t) : 4096));
   (void)usage;
   const iree_hal_memory_type_t memory_type =
       IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
 
   iree_hal_pool_t* pool = NULL;
   iree_hal_buffer_t* buffer = NULL;
-  iree_status_t status = hrx_mem_pool_backing_retain_allocation_source(
-      context->device_entry->hrx_device, (hrx_memory_type_t)memory_type,
-      HRX_BUFFER_USAGE_DEFAULT, &pool);
+  iree_status_t status = signal_memory
+                             ? hrx_mem_pool_backing_retain_signal_pool(
+                                   context->device_entry->hrx_device, &pool)
+                             : hrx_mem_pool_backing_retain_allocation_source(
+                                   context->device_entry->hrx_device,
+                                   (hrx_memory_type_t)memory_type,
+                                   HRX_BUFFER_USAGE_DEFAULT, &pool);
   if (iree_status_is_ok(status)) {
     const iree_hal_pool_reservation_request_t request =
         iree_hal_make_pool_reservation_request(allocation_size, host_alignment);
@@ -2290,6 +2297,13 @@ iree_status_t iree_hal_streaming_memory_allocate_host(
     iree_hal_streaming_context_t* context, iree_host_size_t size,
     iree_hal_streaming_host_register_flags_t flags,
     iree_hal_streaming_buffer_t** out_buffer) {
+  if (iree_any_bit_set(
+          flags, IREE_HAL_STREAMING_HOST_REGISTER_FLAG_HIP_SIGNAL_MEMORY)) {
+    return iree_hal_streaming_memory_allocate_host_with_context_mode(
+        context, size, flags, IREE_HAL_BUFFER_USAGE_DEFAULT,
+        /*min_alignment=*/sizeof(uint64_t),
+        IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED, out_buffer);
+  }
   return iree_hal_streaming_memory_allocate_owned_host_import_with_context_mode(
       context, size, flags, IREE_HAL_BUFFER_USAGE_DEFAULT,
       /*min_alignment=*/64, IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED,
