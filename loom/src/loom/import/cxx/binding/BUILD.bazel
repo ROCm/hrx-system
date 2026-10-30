@@ -315,6 +315,7 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/symbol:names",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/target:builders",
         "//runtime/src/iree/base",
         "//third_party:cxx_parser",
     ],

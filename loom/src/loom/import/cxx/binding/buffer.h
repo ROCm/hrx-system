@@ -62,6 +62,7 @@ class BufferIntrinsic {
     AssumeMemorySpace,
     AssumeNoalias,
     Cast,
+    Root,
   };
 
   BufferIntrinsic(Operation operation,
@@ -98,8 +99,8 @@ class BufferIntrinsic {
       : operation_(Operation::AssumeMemorySpace),
         element_type_(element_type),
         memory_space_(memory_space) {}
-  explicit BufferIntrinsic(const BufferPartition* result_buffer)
-      : operation_(Operation::Cast), result_buffer_(result_buffer) {}
+  BufferIntrinsic(Operation operation, const BufferPartition* result_buffer)
+      : operation_(operation), result_buffer_(result_buffer) {}
 
   // Buffer operation selected by the source declaration.
   Operation operation_;

@@ -28,7 +28,7 @@
 /// loomc_pass_program_t* pass_program = NULL;
 /// loomc_result_t* pass_result = NULL;
 /// loomc_status_t status = loomc_pass_program_create_from_pipeline_text(
-///     context, loomc_make_cstring_view("combine,cse,dce"),
+///     context, loomc_make_cstring_view("combine,cse,dce,location-dce"),
 ///     NULL, loomc_allocator_system(), &pass_program, &pass_result);
 /// if (!loomc_status_is_ok(status)) {
 ///   return status;

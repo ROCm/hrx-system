@@ -321,6 +321,14 @@ class Functions {
   };
   // Namespace prototypes available to satisfy reachable bodyless calls.
   std::unordered_map<cxx::FunctionSymbol*, FunctionDeclaration> declarations_;
+  struct RetainedRoot {
+    // Semantic callable selected independently of visibility and root lists.
+    cxx::FunctionSymbol* function;
+    // Exact declaration owning the retain annotation and source diagnostics.
+    cxx::AST* source;
+  };
+  // Explicit retained roots in source declaration order.
+  std::vector<RetainedRoot> retained_roots_;
   // Case annotations retained with their original declaration for diagnostics.
   std::unordered_map<cxx::FunctionSymbol*, cxx::AST*> check_cases_;
   struct CheckScenario {

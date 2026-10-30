@@ -156,6 +156,34 @@ def test_projects_selected_function_roots_without_unrelated_kernels() -> None:
     assert "copy_one" not in result
 
 
+def test_projects_callable_retention_policy() -> None:
+    source = """\
+func.decl retain @external()
+
+func.def retain @helper() {
+  func.return
+}
+
+command.def retain @schedule() launch() {
+  command.return
+}
+
+pipeline.def<kernel> retain @resident() run() {
+}
+
+""" + SOURCE_MODULE.replace("kernel.def @copy_one()", "kernel.def retain @copy_one()")
+
+    result = render_module(load_module(source.encode()))
+
+    assert '[[loom::symbol("external"), loom::retain]]' in result
+    assert '[[loom::symbol("helper"), loom::retain]]' in result
+    assert '[[loom::command_program, loom::symbol("schedule"), loom::retain]]' in result
+    assert (
+        '[[loom::pipeline("kernel"), loom::symbol("resident"), loom::retain]]' in result
+    )
+    assert "loom::retain]]\nvoid copy_one" in result
+
+
 def test_projects_command_program_signatures_and_schedule_regions() -> None:
     source = """\
 command.decl public @decode.leaf(%tokens: i32, %tile_dim0: index, %tile_layout: encoding<layout>) launch(%parameters: buffer, %tile: view<[%tile_dim0]x4xf32, %tile_layout>)
@@ -418,6 +446,28 @@ def test_projects_explicit_strided_layout_values() -> None:
         "auto input_layout = loom::encoding::layout::strided(loom::type::index{8});"
     ) in result
     assert "loom::buffer::view<4>(input, {}, input_layout)" in result
+
+
+def test_projects_static_strided_layout_values() -> None:
+    encoding = "#encoding.layout.strided<strides=[8]>"
+    source = SOURCE_MODULE.replace(
+        "  %input_view = buffer.view %input[%zero] : buffer -> view<4xf32>\n",
+        "  %input_view = buffer.view %input[%zero] : buffer -> "
+        f"view<4xf32, {encoding}>\n",
+    ).replace(
+        "  %slice = view.subview %input_view[%43] : view<4xf32> -> view<1xf32>\n"
+        "  %value = view.load %slice[0] : view<1xf32> -> f32\n",
+        "  %slice = view.subview %input_view[%43] : "
+        f"view<4xf32, {encoding}> -> view<1xf32, {encoding}>\n"
+        f"  %value = view.load %slice[0] : view<1xf32, {encoding}> -> f32\n",
+    )
+
+    result = render_module(load_module(source.encode()))
+
+    assert (
+        "loom::buffer::view<4>(input, {}, "
+        "loom::encoding::layout::strided(loom::type::index{8}))"
+    ) in result
 
 
 def test_projects_exposed_kernel_topology_family() -> None:

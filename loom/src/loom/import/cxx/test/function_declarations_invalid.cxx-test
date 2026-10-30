@@ -81,3 +81,20 @@ unsigned external(unsigned value) [[loom::import("service")]];
 // ERROR@+2: LOWERING/059 "import bindings require concrete namespace-scope functions"
 template <class T>
 [[loom::import("service")]] T external(T value);
+
+// ====
+// ERROR@+1: LOWERING/059 "retain takes no argument clause"
+[[loom::retain("always")]] unsigned retained(unsigned value);
+
+// ====
+// ERROR@+1: LOWERING/059 "retain requires a concrete namespace-scope Loom callable"
+[[loom::retain]] extern const unsigned retained_value;
+
+// ====
+// ERROR@+1: LOWERING/059 "retain requires a leading attribute on a namespace-scope callable"
+unsigned retained(unsigned value) [[loom::retain]];
+
+// ====
+// ERROR@+1: LOWERING/059 "retain requires a concrete namespace-scope Loom callable"
+[[loom::retain, loom::op("scalar.addi")]]
+unsigned retained_add(unsigned left, unsigned right);

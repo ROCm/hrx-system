@@ -232,6 +232,11 @@ void Functions::select(std::span<const iree_string_view_t> roots) {
       }
     }
   }
+  for (const auto& root : retained_roots_) {
+    if (!template_definitions_.lookup(root.function)) {
+      declare(root.function, root.source);
+    }
+  }
   for (const auto& provider : template_definitions_.providers()) {
     auto* source =
         provider.family_source ? provider.family_source : provider.source;
@@ -580,6 +585,7 @@ bool Functions::admit_declaration(
         });
   }
   if (function) {
+    bool found_retain = false;
     visit_loom_attributes(
         unit_, attributes,
         [&](std::string_view name, cxx::AttributeAST* attribute) {
@@ -588,13 +594,51 @@ bool Functions::admit_declaration(
                 unit_, attribute,
                 "function where contracts must follow the parameter list");
           }
+          if (name != "retain") {
+            return;
+          }
+          if (found_retain) {
+            diagnostics_.reject(unit_, attribute,
+                                "one retain annotation is allowed per "
+                                "declaration");
+          }
+          found_retain = true;
+          if (attribute->attributeArgumentClause) {
+            diagnostics_.reject(unit_, attribute,
+                                "retain takes no argument clause");
+          }
+          if (scope != DeclarationScope::Namespace ||
+              function->isTemplatePattern() ||
+              !cxx::symbol_cast<cxx::NamespaceSymbol>(function->parent()) ||
+              annotated(function, "op") || annotated(function, "assume") ||
+              annotated(function, "check_case") ||
+              annotated(function, "check_scenario") ||
+              annotated(function, "check_benchmark")) {
+            diagnostics_.reject(
+                unit_, attribute,
+                "retain requires a concrete namespace-scope Loom callable");
+          }
+          retained_roots_.push_back({function, owner});
+        });
+  } else {
+    visit_loom_attributes(
+        unit_, attributes,
+        [&](std::string_view name, cxx::AttributeAST* attribute) {
+          if (name == "retain") {
+            diagnostics_.reject(
+                unit_, attribute,
+                "retain requires a concrete namespace-scope Loom callable");
+          }
         });
   }
   template_definitions_.declaration(function, attributes);
   bool is_module_metadata = configs_.declaration(symbol, attributes, owner);
-  is_module_metadata |=
+  const bool is_target_metadata =
       target_definitions_.declaration(symbol, attributes, owner);
-  admit_symbol(symbol, attributes);
+  is_module_metadata |= is_target_metadata;
+  if (!is_target_metadata) {
+    admit_symbol(symbol, attributes);
+  }
   auto require_namespace_function = [&] {
     if (!function || scope != DeclarationScope::Namespace ||
         function->isTemplatePattern() ||
@@ -1313,6 +1357,9 @@ void Functions::build_declarations(Types& types, Locations& locations,
           FunctionContractSignature::Flattened, source);
       loom_pipeline_decl_build_flags_t flags =
           LOOM_PIPELINE_DECL_BUILD_FLAG_HAS_SCOPE;
+      if (annotated(symbol, "retain")) {
+        flags |= LOOM_PIPELINE_DECL_BUILD_FLAG_HAS_RETAIN;
+      }
       if (loom_symbol_ref_is_valid(target)) {
         flags |= LOOM_PIPELINE_DECL_BUILD_FLAG_HAS_TARGET;
       }
@@ -1322,7 +1369,8 @@ void Functions::build_declarations(Types& types, Locations& locations,
       loom_op_t* op;
       check(loom_pipeline_decl_build(
           builder, flags, LOOM_PIPELINE_SCOPE_KERNEL,
-          /*visibility=*/0, /*retain=*/0, target,
+          /*visibility=*/0,
+          annotated(symbol, "retain") ? LOOM_PIPELINE_RETAIN_RETAIN : 0, target,
           callees_.at({symbol->canonical(), ImplicitObjectABI::None}),
           signature.specialization_types.data(),
           signature.specialization_types.size(), signature.binding_types.data(),
@@ -1341,6 +1389,9 @@ void Functions::build_declarations(Types& types, Locations& locations,
           FunctionContractSignature::Flattened, source);
       loom_command_decl_build_flags_t flags =
           LOOM_COMMAND_DECL_BUILD_FLAG_HAS_VISIBILITY;
+      if (annotated(symbol, "retain")) {
+        flags |= LOOM_COMMAND_DECL_BUILD_FLAG_HAS_RETAIN;
+      }
       if (loom_symbol_ref_is_valid(target)) {
         flags |= LOOM_COMMAND_DECL_BUILD_FLAG_HAS_TARGET;
       }
@@ -1349,7 +1400,8 @@ void Functions::build_declarations(Types& types, Locations& locations,
       }
       loom_op_t* op;
       check(loom_command_decl_build(
-          builder, flags, LOOM_COMMAND_VISIBILITY_PUBLIC, /*retain=*/0, target,
+          builder, flags, LOOM_COMMAND_VISIBILITY_PUBLIC,
+          annotated(symbol, "retain") ? LOOM_COMMAND_RETAIN_RETAIN : 0, target,
           callees_.at({symbol->canonical(), ImplicitObjectABI::None}),
           signature.specialization_types.data(),
           signature.specialization_types.size(), signature.binding_types.data(),
@@ -1384,6 +1436,9 @@ void Functions::build_declarations(Types& types, Locations& locations,
     if (annotated(symbol, "device")) {
       flags |= LOOM_FUNC_DECL_BUILD_FLAG_HAS_CC;
     }
+    if (annotated(symbol, "retain")) {
+      flags |= LOOM_FUNC_DECL_BUILD_FLAG_HAS_RETAIN;
+    }
     if (annotated(symbol, "force_inline")) {
       flags |= LOOM_FUNC_DECL_BUILD_FLAG_HAS_INLINE_POLICY;
     }
@@ -1395,8 +1450,10 @@ void Functions::build_declarations(Types& types, Locations& locations,
     }
     loom_op_t* op;
     check(loom_func_decl_build(
-        builder, flags, /*visibility=*/0, /*retain=*/0, import_module,
-        import_symbol, annotated(symbol, "device") ? LOOM_FUNC_CC_DEVICE : 0,
+        builder, flags, /*visibility=*/0,
+        annotated(symbol, "retain") ? LOOM_FUNC_RETAIN_RETAIN : 0,
+        import_module, import_symbol,
+        annotated(symbol, "device") ? LOOM_FUNC_CC_DEVICE : 0,
         /*effect_contract=*/0, /*temperature=*/0,
         annotated(symbol, "force_inline") ? LOOM_INLINE_POLICY_INLINE : 0,
         target, source_signature, /*abi=*/0, {}, LOOM_STRING_ID_INVALID, {},
@@ -1543,6 +1600,9 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
     if (exported_.contains(symbol)) {
       flags |= LOOM_COMMAND_DEF_BUILD_FLAG_HAS_VISIBILITY;
     }
+    if (annotated(symbol, "retain")) {
+      flags |= LOOM_COMMAND_DEF_BUILD_FLAG_HAS_RETAIN;
+    }
     if (loom_symbol_ref_is_valid(target)) {
       flags |= LOOM_COMMAND_DEF_BUILD_FLAG_HAS_TARGET;
     }
@@ -1552,7 +1612,7 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
     check(loom_command_def_build(
         builder, flags,
         exported_.contains(symbol) ? LOOM_COMMAND_VISIBILITY_PUBLIC : 0,
-        /*retain=*/0, target,
+        annotated(symbol, "retain") ? LOOM_COMMAND_RETAIN_RETAIN : 0, target,
         callees_.at({symbol->canonical(), instance.receiver_abi}),
         staged_signature.specialization_types.data(),
         staged_signature.specialization_types.size(),
@@ -1566,6 +1626,9 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
     if (exported_.contains(symbol)) {
       flags |= LOOM_PIPELINE_DEF_BUILD_FLAG_HAS_VISIBILITY;
     }
+    if (annotated(symbol, "retain")) {
+      flags |= LOOM_PIPELINE_DEF_BUILD_FLAG_HAS_RETAIN;
+    }
     if (loom_symbol_ref_is_valid(target)) {
       flags |= LOOM_PIPELINE_DEF_BUILD_FLAG_HAS_TARGET;
     }
@@ -1575,7 +1638,7 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
     check(loom_pipeline_def_build(
         builder, flags, LOOM_PIPELINE_SCOPE_KERNEL,
         exported_.contains(symbol) ? LOOM_PIPELINE_VISIBILITY_PUBLIC : 0,
-        /*retain=*/0, target,
+        annotated(symbol, "retain") ? LOOM_PIPELINE_RETAIN_RETAIN : 0, target,
         callees_.at({symbol->canonical(), instance.receiver_abi}),
         staged_signature.specialization_types.data(),
         staged_signature.specialization_types.size(),
@@ -1634,9 +1697,12 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
              ? LOOM_KERNEL_DEF_BUILD_FLAG_HAS_TARGET
              : 0) |
             (link_once ? LOOM_KERNEL_DEF_BUILD_FLAG_HAS_LINKAGE : 0) |
+            (annotated(symbol, "retain") ? LOOM_KERNEL_DEF_BUILD_FLAG_HAS_RETAIN
+                                         : 0) |
             (predicates.empty() ? 0
                                 : LOOM_KERNEL_DEF_BUILD_FLAG_HAS_PREDICATES),
-        link_once ? LOOM_SYMBOL_LINKAGE_LINK_ONCE : 0, /*retain=*/0, target,
+        link_once ? LOOM_SYMBOL_LINKAGE_LINK_ONCE : 0,
+        annotated(symbol, "retain") ? LOOM_KERNEL_RETAIN_RETAIN : 0, target,
         LOOM_STRING_ID_INVALID, /*export_linkage=*/0, callee,
         configuration_arguments.data(), configuration_arguments.size(),
         arguments.data(), arguments.size(), predicates.data(),
@@ -1660,6 +1726,9 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
     if (is_device) {
       flags |= LOOM_TEMPLATE_DEF_BUILD_FLAG_HAS_CC;
     }
+    if (annotated(symbol, "retain")) {
+      flags |= LOOM_TEMPLATE_DEF_BUILD_FLAG_HAS_RETAIN;
+    }
     if (loom_symbol_ref_is_valid(target)) {
       flags |= LOOM_TEMPLATE_DEF_BUILD_FLAG_HAS_TARGET;
     }
@@ -1674,7 +1743,8 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
       flags |= LOOM_TEMPLATE_DEF_BUILD_FLAG_HAS_REQUIRES;
     }
     check(loom_template_def_build(
-        builder, flags, family.reference, /*visibility=*/0, /*retain=*/0,
+        builder, flags, family.reference, /*visibility=*/0,
+        annotated(symbol, "retain") ? LOOM_TEMPLATE_RETAIN_RETAIN : 0,
         is_device ? LOOM_TEMPLATE_CC_DEVICE : 0,
         /*effect_contract=*/0, /*temperature=*/0, target,
         loom_make_parameterized_attr_array(requirements.data(),
@@ -1697,6 +1767,8 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
             (exported_.contains(symbol)
                  ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY
                  : 0) |
+            (annotated(symbol, "retain") ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_RETAIN
+                                         : 0) |
             (annotated(symbol, "force_inline")
                  ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY
                  : 0) |
@@ -1706,7 +1778,8 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
                  : 0) |
             (predicates.empty() ? 0 : LOOM_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES),
         exported_.contains(symbol) ? LOOM_FUNC_VISIBILITY_PUBLIC : 0,
-        link_once ? LOOM_SYMBOL_LINKAGE_LINK_ONCE : 0, /*retain=*/0,
+        link_once ? LOOM_SYMBOL_LINKAGE_LINK_ONCE : 0,
+        annotated(symbol, "retain") ? LOOM_FUNC_RETAIN_RETAIN : 0,
         annotated(symbol, "device") ? LOOM_FUNC_CC_DEVICE : 0,
         /*effect_contract=*/0, /*temperature=*/0,
         annotated(symbol, "force_inline") ? LOOM_INLINE_POLICY_INLINE : 0,

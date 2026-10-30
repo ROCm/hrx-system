@@ -25,11 +25,15 @@ constexpr generic_target reference{
 };
 }  // namespace library
 
+[[loom::symbol("deployment.external")]]
+extern const loom::target::declaration external_target;
+
 [[loom::target(library::reference)]] unsigned linked(unsigned value);
+[[loom::target(external_target)]] unsigned external(unsigned value);
 
 [[loom::target(library::reference)]] unsigned increment(unsigned value);
 [[loom::target(library::reference)]] unsigned increment(unsigned value) {
-  return linked(value) + 1u;
+  return linked(value) + external(value) + 1u;
 }
 
 [[loom::kernel, loom::target(library::reference), loom::workgroup_size(32, 1, 1)]] void dispatch() {
@@ -39,24 +43,28 @@ constexpr generic_target reference{
 // ----
 target.generic<reference> @library.reference {codegen_format = low_native, default_pointer_bitwidth = 64, export_symbol = "dispatch", subgroup_size = 32}
 
+target.decl @deployment.external
+
 func.def public target(@library.reference) @increment(%value: i32) -> (i32) {
   %2 = func.call @linked(%value) : (i32) -> (i32)
-  %3 = scalar.constant 1 : i32
+  %3 = func.call @external(%value) : (i32) -> (i32)
   %4 = scalar.addi %2, %3 : i32
-  func.return %4 : i32
+  %5 = scalar.constant 1 : i32
+  %6 = scalar.addi %4, %5 : i32
+  func.return %6 : i32
 }
 
 kernel.def target(@library.reference) @dispatch() {
   %workgroup_count_x = config.get @dispatch.workgroup_count.x : index
   %workgroup_count_y = config.get @dispatch.workgroup_count.y : index
   %workgroup_count_z = config.get @dispatch.workgroup_count.z : index
-  %11 = index.constant 32 : index
-  %12 = index.constant 1 : index
-  %13 = index.constant 1 : index
-  kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%11, %12, %13) : index
+  %13 = index.constant 32 : index
+  %14 = index.constant 1 : index
+  %15 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%13, %14, %15) : index
 } launch() {
-  %14 = scalar.constant 0 : i32
-  %15 = func.call @increment(%14) : (i32) -> (i32)
+  %16 = scalar.constant 0 : i32
+  %17 = func.call @increment(%16) : (i32) -> (i32)
   kernel.return
 }
 
@@ -66,4 +74,6 @@ config.decl @dispatch.workgroup_count.y : index
 
 config.decl @dispatch.workgroup_count.z : index
 
-func.decl target(@library.reference) @linked(%16: i32) -> (i32)
+func.decl target(@library.reference) @linked(%18: i32) -> (i32)
+
+func.decl target(@deployment.external) @external(%20: i32) -> (i32)

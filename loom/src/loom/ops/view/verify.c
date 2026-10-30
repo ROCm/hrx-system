@@ -325,7 +325,13 @@ iree_status_t loom_view_subview_verify(const loom_module_t* module,
   const loom_value_id_t encoding_result = physical_encoding.values[0];
   if (!loom_type_has_ssa_encoding(result_type) ||
       loom_type_encoding_value_id(result_type) != encoding_result) {
-    return loom_view_subview_emit_sibling_requirement(module, op, emitter);
+    // Type specialization may replace the sibling reference with a static
+    // encoding that independently proves the source mapping. The co-result is
+    // then redundant but remains valid until a rewrite removes it.
+    if (!loom_view_subview_one_result_is_physical_equivalent(
+            module, source_type, result_type)) {
+      return loom_view_subview_emit_sibling_requirement(module, op, emitter);
+    }
   }
 
   const loom_encoding_role_t source_role =

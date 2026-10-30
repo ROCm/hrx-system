@@ -28,6 +28,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/target/ops.h"
 
 namespace loom::cxx_import {
 namespace {
@@ -226,7 +227,7 @@ bool TargetDefinitions::declaration(
         }
       });
   auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(symbol);
-  return variable ? admit_definition(variable, owner) : false;
+  return variable ? admit_target(variable, attributes, owner) : false;
 }
 
 void TargetDefinitions::admit_function(
@@ -281,8 +282,9 @@ void TargetDefinitions::admit_function(
   }
 }
 
-bool TargetDefinitions::admit_definition(cxx::VariableSymbol* variable,
-                                         cxx::AST* owner) {
+bool TargetDefinitions::admit_target(
+    cxx::VariableSymbol* variable,
+    cxx::List<cxx::AttributeSpecifierAST*>* attributes, cxx::AST* owner) {
   auto* definition = class_definition(unit_, variable->type());
   auto* marker = annotation(definition, "target");
   if (!marker) {
@@ -292,9 +294,21 @@ bool TargetDefinitions::admit_definition(cxx::VariableSymbol* variable,
     diagnostics_.reject(
         unit_, owner, "target facade type requires one target operation name");
   }
-  if (variable->isTemplatePattern() || variable->isThreadLocal() ||
-      !variable->isConstexpr() ||
-      !cxx::symbol_cast<cxx::NamespaceSymbol>(variable->parent())) {
+  const auto operation_name = marker->arguments[0]->name();
+  const bool is_declaration = operation_name == "target.decl";
+  if (is_declaration) {
+    if (variable->isTemplatePattern() || variable->isThreadLocal() ||
+        !variable->isExtern() ||
+        !unit_.typeTraits().is_const(variable->type()) ||
+        variable->constValue() ||
+        !cxx::symbol_cast<cxx::NamespaceSymbol>(variable->parent())) {
+      diagnostics_.reject(
+          unit_, owner,
+          "target declarations require namespace-scope extern const objects");
+    }
+  } else if (variable->isTemplatePattern() || variable->isThreadLocal() ||
+             !variable->isConstexpr() ||
+             !cxx::symbol_cast<cxx::NamespaceSymbol>(variable->parent())) {
     diagnostics_.reject(
         unit_, owner,
         "target definitions require namespace-scope constexpr objects");
@@ -305,41 +319,45 @@ bool TargetDefinitions::admit_definition(cxx::VariableSymbol* variable,
                      : nullptr;
   auto* class_type = cxx::type_cast<cxx::ClassType>(
       unit_.typeTraits().remove_cv(variable->type()));
-  if (!object || !*object || !definition || definition->isUnion() ||
-      !definition->baseClasses().empty() ||
-      !unit_.typeTraits().is_aggregate(class_type)) {
+  if (!is_declaration &&
+      (!object || !*object || !definition || definition->isUnion() ||
+       !definition->baseClasses().empty() ||
+       !unit_.typeTraits().is_aggregate(class_type))) {
     diagnostics_.reject(
         unit_, owner,
         "target definitions require a constant aggregate without "
         "bases or unions");
   }
   loom_op_kind_t operation_kind;
-  auto operation_name = marker->arguments[0]->name();
   auto* vtable = loom_context_lookup_op_by_name(
       module_->context, view(operation_name), &operation_kind);
   constexpr uint8_t kVariableShapeFlags = LOOM_OP_VTABLE_VARIADIC_OPERANDS |
                                           LOOM_OP_VTABLE_VARIADIC_RESULTS |
                                           LOOM_OP_VTABLE_VARIADIC_REGIONS;
-  if (!vtable || !vtable->target_like || !vtable->attr_descriptors ||
-      vtable->fixed_operand_count || vtable->fixed_result_count ||
-      vtable->region_count ||
-      iree_any_bit_set(vtable->vtable_flags, kVariableShapeFlags)) {
+  const bool valid_declaration =
+      is_declaration && vtable && operation_kind == LOOM_OP_TARGET_DECL;
+  const bool valid_definition =
+      !is_declaration && vtable && vtable->target_like &&
+      vtable->attr_descriptors && !vtable->fixed_operand_count &&
+      !vtable->fixed_result_count && !vtable->region_count &&
+      !iree_any_bit_set(vtable->vtable_flags, kVariableShapeFlags);
+  if (!valid_declaration && !valid_definition) {
     diagnostics_.reject(
         unit_, owner,
-        "target facade requires one registered attribute-only TargetLike "
-        "operation: " +
+        "target facade requires target.decl or one registered attribute-only "
+        "TargetLike operation: " +
             std::string(operation_name));
   }
   auto canonical = variable->canonical();
   if (variables_.contains(canonical)) {
     diagnostics_.reject(unit_, owner,
-                        "target objects require one constexpr definition");
+                        "target objects require one declaration or definition");
   }
-  auto name = qualified_name(variable);
+  auto name = source_name(variable, attributes);
   symbol_names_.reserve(name, owner);
   variables_.emplace(canonical, definitions_.size());
-  definitions_.push_back({canonical, owner, operation_kind, vtable,
-                          std::move(name), loom_symbol_ref_null()});
+  definitions_.push_back({canonical, owner, is_declaration, operation_kind,
+                          vtable, std::move(name), loom_symbol_ref_null()});
   return true;
 }
 
@@ -359,6 +377,39 @@ std::string TargetDefinitions::qualified_name(
   return spelling;
 }
 
+std::string TargetDefinitions::source_name(
+    cxx::VariableSymbol* variable,
+    cxx::List<cxx::AttributeSpecifierAST*>* attributes) {
+  std::optional<std::string> explicit_name;
+  visit_loom_attributes(
+      unit_, attributes,
+      [&](std::string_view name, cxx::AttributeAST* attribute) {
+        if (name != "symbol") {
+          return;
+        }
+        if (explicit_name) {
+          diagnostics_.reject(unit_, attribute,
+                              "one symbol binding is allowed per declaration");
+        }
+        auto* clause = attribute->attributeArgumentClause;
+        auto* arguments = clause ? clause->expressionList : nullptr;
+        auto* literal = arguments && !arguments->next
+                            ? cxx::ast_cast<cxx::StringLiteralExpressionAST>(
+                                  arguments->value)
+                            : nullptr;
+        auto spelling =
+            literal ? literal->literal->stringValue() : std::string_view{};
+        if (!is_symbol_name(spelling)) {
+          diagnostics_.reject(
+              unit_, attribute,
+              "symbol binding requires one valid Loom symbol string without "
+              "the @ prefix");
+        }
+        explicit_name = std::string(spelling);
+      });
+  return explicit_name.value_or(qualified_name(variable));
+}
+
 void TargetDefinitions::build(loom_builder_t* builder) {
   for (auto& definition : definitions_) {
     loom_string_id_t name;
@@ -370,14 +421,22 @@ void TargetDefinitions::build(loom_builder_t* builder) {
   }
   for (const auto& [function, binding] : functions_) {
     if (!variables_.contains(binding.variable)) {
-      diagnostics_.reject(unit_, binding.owner,
-                          "target binding must name a constexpr target object");
+      diagnostics_.reject(
+          unit_, binding.owner,
+          "target binding must name a constexpr target definition or extern "
+          "target declaration");
     }
   }
 }
 
 void TargetDefinitions::emit_definition(Definition& definition,
                                         loom_builder_t* builder) {
+  if (definition.is_declaration) {
+    loom_op_t* op;
+    check(loom_target_decl_build(builder, definition.reference,
+                                 locations_.get(definition.owner), &op));
+    return;
+  }
   auto object = std::get<std::shared_ptr<cxx::ConstObject>>(
       *definition.variable->constValue());
   std::vector<loom_attribute_t> attributes(definition.vtable->attribute_count,

@@ -30,6 +30,7 @@ from loom.ir import (
     BufferType,
     DynamicDim,
     DynamicEncoding,
+    EncodingInstance,
     EncodingType,
     Module,
     Operation,
@@ -68,6 +69,39 @@ def _buffer_payload_literal(contents: bytes | Utf8Attr) -> str:
 
 
 class CxxRenderer(CxxConfigRenderer):
+    def _static_view_encoding_expression(
+        self, operation: Operation, view_type: ShapedType
+    ) -> str:
+        encoding = view_type.encoding
+        if not isinstance(encoding, EncodingInstance):
+            raise CxxRenderError(
+                operation, "view encoding is neither a static nor dynamic encoding"
+            )
+        if encoding.name == "encoding.layout.dense" and not encoding.params:
+            return f"loom::encoding::layout::dense<{view_type.rank}>()"
+        if encoding.name == "encoding.layout.strided":
+            parameters = dict(encoding.params)
+            strides = parameters.get("strides")
+            if set(parameters) != {"strides"} or not isinstance(strides, tuple):
+                raise CxxRenderError(
+                    operation, "static strided layout has malformed stride metadata"
+                )
+            if len(strides) != view_type.rank or any(
+                type(stride) is not int for stride in strides
+            ):
+                raise CxxRenderError(
+                    operation,
+                    "static strided layout requires one integer stride per view axis",
+                )
+            arguments = ", ".join(
+                f"loom::type::index{{{stride}}}" for stride in strides
+            )
+            return f"loom::encoding::layout::strided({arguments})"
+        raise CxxRenderError(
+            operation,
+            f"static view encoding {encoding.name!r} has no C++ value projection",
+        )
+
     def _view_shape_arguments(
         self, operation: Operation, view_type: ShapedType
     ) -> tuple[str, str]:
@@ -335,10 +369,7 @@ class CxxRenderer(CxxConfigRenderer):
             elif result_type.encoding is None:
                 encoding = None
             else:
-                raise CxxRenderError(
-                    operation,
-                    "static view encoding has no explicit C++ value projection",
-                )
+                encoding = self._static_view_encoding_expression(operation, result_type)
             if result_type.alignment is not None:
                 raise CxxRenderError(
                     operation,
@@ -1301,7 +1332,7 @@ class CxxRenderer(CxxConfigRenderer):
         scope = self.operation_scopes[id(kernel)]
         self.temporary_names = set(self.scope_names[scope])
         self.rendered_assumptions_by_block.clear()
-        self._validate_projected_attributes(kernel, ("callee", "target"))
+        self._validate_projected_attributes(kernel, ("callee", "retain", "target"))
         self._analyze_buffers(kernel)
         resolved = self._resolved(kernel)
         body = resolved.region("body")
@@ -1310,6 +1341,8 @@ class CxxRenderer(CxxConfigRenderer):
         attributes = self._render_kernel_configuration(kernel)
         self.temporary_names = set(self.scope_names[scope])
         self.rendered_assumptions_by_block.clear()
+        if retain := self._retention_attribute(kernel):
+            attributes.append(retain)
         target_symbol = resolved.attr("target")
         if target_symbol is not None:
             attributes.append(self._target_attribute(kernel, str(target_symbol)))
@@ -1396,7 +1429,15 @@ class CxxRenderer(CxxConfigRenderer):
             )
             if expected_element is not None:
                 expected_type = f"loom::type::buffer<{expected_element}>"
-                if self.expression_type(operand) != expected_type:
+                source_type = self.expression_type(operand)
+                if source_type.endswith("*"):
+                    expression = f"loom::buffer::root({expression})"
+                    source_element = source_type[:-1].strip()
+                    if source_element != expected_element:
+                        expression = (
+                            f"loom::buffer::cast<{expected_element}>({expression})"
+                        )
+                elif source_type != expected_type:
                     expression = f"loom::buffer::cast<{expected_element}>({expression})"
             arguments_list.append(expression)
         arguments = ", ".join(arguments_list)
@@ -1439,6 +1480,11 @@ class CxxRenderer(CxxConfigRenderer):
         resolved = self._resolved(function)
         symbol = str(resolved.attr("callee"))
         attributes = [f'loom::symbol("{symbol}")']
+        if retain := self._retention_attribute(function):
+            attributes.append(retain)
+        target = resolved.attr("target")
+        if target is not None:
+            attributes.append(self._target_attribute(function, str(target)))
         inline_policy = resolved.attr("inline_policy")
         if inline_policy == "inline":
             attributes.append("loom::force_inline")
@@ -1451,15 +1497,18 @@ class CxxRenderer(CxxConfigRenderer):
 
     def _function_signature(self, function: Operation, *, bind_parameters: bool) -> str:
         resolved = self._resolved(function)
-        body = resolved.region("body")
-        if body is None or len(body.blocks) != 1:
-            raise CxxRenderError(
-                function, "function body must have one structured entry block"
-            )
-        entry = body.blocks[0]
+        if function.name == "func.decl":
+            argument_ids = list(function.operands)
+        else:
+            body = resolved.region("body")
+            if body is None or len(body.blocks) != 1:
+                raise CxxRenderError(
+                    function, "function body must have one structured entry block"
+                )
+            argument_ids = list(body.blocks[0].arg_ids)
         parameters: list[str] = []
         buffer_elements: list[str | None] = []
-        source_parameters = self._flat_source_parameters(function, list(entry.arg_ids))
+        source_parameters = self._flat_source_parameters(function, argument_ids)
         for parameter in source_parameters:
             argument = parameter.value_id
             value_type = self.module.values[argument].type
@@ -1479,13 +1528,19 @@ class CxxRenderer(CxxConfigRenderer):
         symbol = str(resolved.attr("callee"))
         self.function_buffer_elements[symbol] = tuple(buffer_elements)
         visibility = resolved.attr("visibility")
-        storage = "" if visibility == "public" else "static "
+        storage = (
+            "" if function.name == "func.decl" or visibility == "public" else "static "
+        )
         return (
             f"{storage}{self._function_result_type(function)} "
             f"{self.function_names[symbol]}(" + ", ".join(parameters) + ")"
         )
 
     def _render_function_declaration(self, function: Operation) -> None:
+        if function.name == "func.decl":
+            self._validate_projected_attributes(
+                function, ("callee", "inline_policy", "retain", "target")
+            )
         self._analyze_buffers(function)
         self.writer.attributes(self._function_attributes(function))
         self.writer.line(
@@ -1497,7 +1552,8 @@ class CxxRenderer(CxxConfigRenderer):
         self.temporary_names = set(self.scope_names[scope])
         self.rendered_assumptions_by_block.clear()
         self._validate_projected_attributes(
-            function, ("callee", "visibility", "inline_policy")
+            function,
+            ("callee", "visibility", "inline_policy", "retain", "target"),
         )
         self._analyze_buffers(function)
         body = self._resolved(function).region("body")
@@ -1610,7 +1666,10 @@ class CxxRenderer(CxxConfigRenderer):
         functions = [
             operation
             for operation in self.module.body.ops
-            if operation.name == "func.def"
+            if operation.name in {"func.def", "func.decl"}
+        ]
+        function_definitions = [
+            operation for operation in functions if operation.name == "func.def"
         ]
         commands = [
             operation
@@ -1633,6 +1692,7 @@ class CxxRenderer(CxxConfigRenderer):
         for operation in self.module.body.ops:
             if operation.name in {
                 "kernel.def",
+                "func.decl",
                 "func.def",
                 "command.def",
                 "command.decl",
@@ -1677,6 +1737,7 @@ class CxxRenderer(CxxConfigRenderer):
                     (
                         "callee",
                         "visibility",
+                        "retain",
                         "target",
                         "predicates",
                         "specialization_count",
@@ -1693,7 +1754,12 @@ class CxxRenderer(CxxConfigRenderer):
         pipeline_definitions = [
             operation for operation in pipelines if operation.name == "pipeline.def"
         ]
-        callables = [*functions, *kernels, *command_definitions, *pipeline_definitions]
+        callables = [
+            *function_definitions,
+            *kernels,
+            *command_definitions,
+            *pipeline_definitions,
+        ]
         for index, callable_operation in enumerate(callables):
             if index:
                 self.writer.line()
@@ -1817,6 +1883,7 @@ def _select_callable_roots(module: Module, roots: Sequence[str]) -> Module:
             raise CxxRenderError(None, f"callable root '@{name}' was not found")
         callable_operations = {
             "kernel.def",
+            "func.decl",
             "func.def",
             "command.def",
             "command.decl",
@@ -1824,7 +1891,8 @@ def _select_callable_roots(module: Module, roots: Sequence[str]) -> Module:
             "pipeline.decl",
         }
         if symbol.op.name not in callable_operations or (
-            require_definition and symbol.op.name in {"command.decl", "pipeline.decl"}
+            require_definition
+            and symbol.op.name in {"func.decl", "command.decl", "pipeline.decl"}
         ):
             raise CxxRenderError(
                 symbol.op,

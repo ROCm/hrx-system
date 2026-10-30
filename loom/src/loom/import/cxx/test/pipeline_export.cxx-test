@@ -18,9 +18,15 @@ constexpr generic_target worker_target{
     .subgroup_size = 32,
 };
 
+[[loom::symbol("deployment.array")]]
+extern const loom::target::declaration array_target;
+
+[[loom::symbol("workers.adjust"), loom::force_inline, loom::target(array_target)]]
+unsigned adjust(unsigned value);
+
 [[loom::pipeline("kernel")]] void child(unsigned factor, [[loom::launch]] Bytes output);
 
-[[loom::pipeline("kernel")]] void resident(unsigned factor, loomt::index column, loomt::index count, [[loom::launch]] Bytes output) {
+[[loom::pipeline("kernel"), loom::retain, loom::target(array_target)]] void resident(unsigned factor, loomt::index column, loomt::index count, [[loom::launch]] Bytes output) {
   auto pool = loom::pipeline::memory<loom::memory_space::workgroup>(loomt::indices{column, loomt::index{3}});
   auto* scratch = loom::buffer::alloca<unsigned char, loom::memory_space::workgroup, 64>(loomt::index{256}, pool);
   loom::pipeline::compose<child>(factor, output);
@@ -28,7 +34,7 @@ constexpr generic_target worker_target{
   [[loom::strand(loomt::indices{column, loomt::index{2}}, loomt::indices{count, loomt::index{1}}, loomt::indices{loomt::index{1}, loomt::index{1}}), loom::target(worker_target)]] {
     auto worker = loom::kernel::workitem::id.x;
     auto scratch_view = loom::buffer::view<256>(scratch, {});
-    loom::view::store(static_cast<unsigned char>(worker), scratch_view, 0);
+    loom::view::store(static_cast<unsigned char>(adjust(worker)), scratch_view, 0);
     (void)output;
   }
 }
@@ -39,32 +45,39 @@ constexpr generic_target worker_target{
 #include <loomcxx/pipeline.h>
 #include <loomcxx/target.h>
 
-struct [[loom::target("target.generic")]] rendered_target_type {
+[[loom::symbol("deployment.array")]]
+extern const loom::target::declaration rendered_target_deployment_array;
+
+struct [[loom::target("target.generic")]] rendered_target_worker_target_type {
   const char* kind;
   const char* export_symbol;
   long long subgroup_size;
 };
-constexpr rendered_target_type rendered_target{
+constexpr rendered_target_worker_target_type rendered_target_worker_target{
   .kind = "reference",
   .export_symbol = "resident_worker",
   .subgroup_size = 32,
 };
 
-[[loom::pipeline("kernel"), loom::symbol("resident")]]
+[[loom::symbol("workers.adjust"), loom::target(rendered_target_deployment_array), loom::force_inline]]
+unsigned workers_adjust(unsigned v21);
+
+[[loom::pipeline("kernel"), loom::symbol("resident"), loom::retain, loom::target(rendered_target_deployment_array)]]
 void resident(unsigned factor, loom::type::index column, loom::type::index count, [[loom::launch]] loom::type::buffer<unsigned char> output);
 
 [[loom::pipeline("kernel"), loom::symbol("child")]]
-void child(unsigned v18, [[loom::launch]] loom::type::buffer<unsigned char> v19);
+void child(unsigned v19, [[loom::launch]] loom::type::buffer<unsigned char> v20);
 
-[[loom::pipeline("kernel"), loom::symbol("resident")]]
+[[loom::pipeline("kernel"), loom::symbol("resident"), loom::retain, loom::target(rendered_target_deployment_array)]]
 void resident(unsigned factor, loom::type::index column, loom::type::index count, [[loom::launch]] loom::type::buffer<unsigned char> output) {
   auto pool = loom::pipeline::memory<loom::memory_space::workgroup>(loom::type::indices{column, loom::type::index{3}});
   auto* scratch = loom::buffer::alloca<unsigned char, loom::memory_space::workgroup, 64>(loom::type::index{256}, pool);
   loom::pipeline::compose<child>(factor, output);
-  [[loom::strand(loom::type::indices{column, loom::type::index{2}}, loom::type::indices{count, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}), loom::target(rendered_target)]] {
+  [[loom::strand(loom::type::indices{column, loom::type::index{2}}, loom::type::indices{count, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}), loom::target(rendered_target_worker_target)]] {
     auto scratch_view = loom::buffer::view<256>(scratch, {});
     unsigned workitem = static_cast<unsigned>(loom::kernel::workitem::id.x);
-    loom::view::store(loom::convert<unsigned char>(workitem), scratch_view, loom::type::index{0});
+    unsigned v15 = workers_adjust(workitem);
+    loom::view::store(loom::convert<unsigned char>(v15), scratch_view, loom::type::index{0});
   }
 }
 

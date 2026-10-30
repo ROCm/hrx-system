@@ -10,7 +10,10 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
+#include "loom/ir/location_compaction.h"
 #include "loom/ir/module.h"
+#include "loom/ops/test/ops.h"
+#include "loom/ops/test/registry.h"
 
 namespace loom {
 namespace {
@@ -44,6 +47,7 @@ class ModuleLocationTest : public ::testing::TestWithParam<iree_host_size_t> {
 
   void SetUp() override {
     loom_context_initialize(iree_allocator_system(), &context_);
+    IREE_ASSERT_OK(loom_test_dialect_register(&context_));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     iree_arena_block_pool_initialize(GetParam(), {this, Allocate}, &pool_);
     ASSERT_NO_FATAL_FAILURE(CreateModule());
@@ -223,6 +227,139 @@ TEST_P(ModuleLocationTest, WideCoordinatesRemainExact) {
   EXPECT_EQ(retained_span.start_col, 80002u);
   EXPECT_EQ(retained_span.end_line, 90003u);
   EXPECT_EQ(retained_span.end_col, 100004u);
+}
+
+TEST_P(ModuleLocationTest, CompactionPreservesReachableLocationGraphs) {
+  const auto dead_before = AppendLocation(10);
+  const auto live_file_a = AppendLocation(20);
+  const auto live_file_b = AppendLocation(30);
+  loom_location_compact_field_span_t span = {
+      .kind = LOOM_LOCATION_FIELD_OPERAND,
+      .index = 1,
+      .start_line = 30,
+      .start_col = 2,
+      .end_line = 30,
+      .end_col = 7,
+  };
+  IREE_ASSERT_OK(loom_module_attach_location_field_spans(
+      module_, live_file_b, loom_location_field_span_array_compact(&span, 1)));
+
+  loom_location_id_t* fused_children = nullptr;
+  IREE_ASSERT_OK(
+      iree_arena_allocate_array(&module_->arena, 2, sizeof(*fused_children),
+                                reinterpret_cast<void**>(&fused_children)));
+  fused_children[0] = live_file_a;
+  fused_children[1] = live_file_b;
+  loom_location_entry_t fused_entry = {.kind = LOOM_LOCATION_FUSED};
+  fused_entry.fused.count = 2;
+  fused_entry.fused.children = fused_children;
+  loom_location_id_t fused = LOOM_LOCATION_UNKNOWN;
+  IREE_ASSERT_OK(loom_module_add_location(module_, fused_entry, &fused));
+
+  const uint8_t opaque_data[] = {1, 2, 3};
+  loom_location_entry_t dead_opaque = {.kind = LOOM_LOCATION_OPAQUE};
+  dead_opaque.opaque.source_id = source_id_;
+  dead_opaque.opaque.data_length = IREE_ARRAYSIZE(opaque_data);
+  dead_opaque.opaque.data = opaque_data;
+  loom_location_id_t dead_opaque_id = LOOM_LOCATION_UNKNOWN;
+  IREE_ASSERT_OK(
+      loom_module_add_location(module_, dead_opaque, &dead_opaque_id));
+
+  loom_location_id_t tagged = LOOM_LOCATION_UNKNOWN;
+  IREE_ASSERT_OK(loom_module_add_location(
+      module_,
+      loom_location_tagged(LOOM_LOCATION_TAG_TILE_LOWERING, fused, nullptr, 0),
+      &tagged));
+  const auto dead_after = AppendLocation(40);
+  ASSERT_EQ(dead_before, 1u);
+  ASSERT_EQ(live_file_a, 2u);
+  ASSERT_EQ(live_file_b, 3u);
+  ASSERT_EQ(fused, 4u);
+  ASSERT_EQ(dead_opaque_id, 5u);
+  ASSERT_EQ(tagged, 6u);
+  ASSERT_EQ(dead_after, 7u);
+
+  loom_builder_t builder;
+  loom_builder_initialize(module_, &module_->arena, loom_module_block(module_),
+                          &builder);
+  loom_op_t* outer = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_block_args_build(&builder, nullptr, 0, tagged, &outer));
+  loom_builder_initialize(
+      module_, &module_->arena,
+      loom_region_entry_block(loom_test_block_args_body(outer)), &builder);
+  loom_op_t* inner = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_block_args_build(&builder, nullptr, 0, live_file_a, &inner));
+
+  iree_arena_allocator_t scratch;
+  iree_arena_initialize(&pool_, &scratch);
+  iree_host_size_t removed_count = 0;
+  IREE_ASSERT_OK(
+      loom_module_compact_locations(module_, &scratch, &removed_count));
+  iree_arena_deinitialize(&scratch);
+
+  EXPECT_EQ(removed_count, 3u);
+  ASSERT_EQ(module_->locations.count, 5u);
+  EXPECT_EQ(outer->location, 4u);
+  EXPECT_EQ(inner->location, 1u);
+  const auto* compact_file_a =
+      loom_location_table_const_entry(&module_->locations, 1);
+  EXPECT_EQ(compact_file_a->kind, LOOM_LOCATION_FILE);
+  EXPECT_EQ(compact_file_a->file.start_line, 20u);
+  const auto* compact_file_b =
+      loom_location_table_const_entry(&module_->locations, 2);
+  EXPECT_EQ(compact_file_b->kind, LOOM_LOCATION_FILE);
+  EXPECT_EQ(compact_file_b->file.start_line, 30u);
+  ASSERT_EQ(compact_file_b->file.field_span_count, 1u);
+  EXPECT_EQ(loom_location_file_field_span_at(compact_file_b, 0).start_col, 2u);
+  const auto* compact_fused =
+      loom_location_table_const_entry(&module_->locations, 3);
+  ASSERT_EQ(compact_fused->kind, LOOM_LOCATION_FUSED);
+  ASSERT_EQ(compact_fused->fused.count, 2u);
+  EXPECT_EQ(compact_fused->fused.children[0], 1u);
+  EXPECT_EQ(compact_fused->fused.children[1], 2u);
+  const auto* compact_tagged =
+      loom_location_table_const_entry(&module_->locations, 4);
+  ASSERT_EQ(compact_tagged->kind, LOOM_LOCATION_TAGGED);
+  EXPECT_EQ(compact_tagged->tagged.child, 3u);
+
+  EXPECT_EQ(AppendLocation(50), 5u);
+  EXPECT_EQ(module_->locations.count, 6u);
+}
+
+TEST_P(ModuleLocationTest, CompactionDropsUnreferencedRows) {
+  constexpr uint32_t kDeadLocationCount = LOOM_LOCATION_SEGMENT_CAPACITY + 3;
+  for (uint32_t i = 0; i < kDeadLocationCount; ++i) {
+    AppendLocation(i + 1);
+  }
+  ASSERT_EQ(module_->locations.count, kDeadLocationCount + 1);
+  ASSERT_EQ(module_->locations.segments.segment_count, 2u);
+  void* second_segment =
+      loom_segmented_storage_segment(&module_->locations.segments, 1);
+
+  iree_arena_allocator_t scratch;
+  iree_arena_initialize(&pool_, &scratch);
+  iree_host_size_t removed_count = 0;
+  IREE_ASSERT_OK(
+      loom_module_compact_locations(module_, &scratch, &removed_count));
+  iree_arena_deinitialize(&scratch);
+
+  EXPECT_EQ(removed_count, kDeadLocationCount);
+  ASSERT_EQ(module_->locations.count, 1u);
+  EXPECT_EQ(module_->locations.segments.segment_count, 2u);
+  EXPECT_EQ(loom_location_table_const_entry(&module_->locations, 0)->kind,
+            LOOM_LOCATION_NONE);
+  for (uint32_t i = 1; i <= LOOM_LOCATION_SEGMENT_CAPACITY; ++i) {
+    EXPECT_EQ(AppendLocation(1000 + i), i);
+  }
+  EXPECT_EQ(module_->locations.segments.segment_count, 2u);
+  EXPECT_EQ(loom_segmented_storage_segment(&module_->locations.segments, 1),
+            second_segment);
+  EXPECT_EQ(loom_location_table_const_entry(&module_->locations,
+                                            LOOM_LOCATION_SEGMENT_CAPACITY)
+                ->file.start_line,
+            1000 + LOOM_LOCATION_SEGMENT_CAPACITY);
 }
 
 TEST_P(ModuleLocationTest, FailedAppendCanRewindAndRetryWithoutChangingIds) {

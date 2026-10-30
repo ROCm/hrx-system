@@ -1647,8 +1647,14 @@ iree_status_t loom_module_add_location(loom_module_t* module,
   loom_location_id_t id = (loom_location_id_t)module->locations.count;
   loom_location_segment_t* segment = NULL;
   if ((id & LOOM_LOCATION_SEGMENT_MASK) == 0) {
-    IREE_RETURN_IF_ERROR(loom_segmented_storage_append(
-        &module->locations.segments, &module->arena, (void**)&segment));
+    const uint32_t segment_index = id >> LOOM_LOCATION_SEGMENT_SHIFT;
+    if (segment_index < module->locations.segments.segment_count) {
+      segment = (loom_location_segment_t*)loom_segmented_storage_segment(
+          &module->locations.segments, segment_index);
+    } else {
+      IREE_RETURN_IF_ERROR(loom_segmented_storage_append(
+          &module->locations.segments, &module->arena, (void**)&segment));
+    }
     if (id == LOOM_LOCATION_UNKNOWN) {
       segment->rows[0] = (loom_location_entry_t){.kind = LOOM_LOCATION_NONE};
       id = 1;

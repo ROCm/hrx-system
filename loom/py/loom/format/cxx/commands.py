@@ -52,6 +52,16 @@ def _quote_string(value: str | Utf8Attr) -> str:
 class CxxCommandRenderer(CxxExpressionRenderer):
     """Renders command definitions and operations from verified High IR."""
 
+    def _retention_attribute(self, operation: Operation) -> str | None:
+        retain = self._resolved(operation).attr("retain")
+        if retain is None:
+            return None
+        if retain != "retain":
+            raise CxxRenderError(
+                operation, f"symbol retention policy {retain!r} has no C++ spelling"
+            )
+        return "loom::retain"
+
     def _source_type_dependencies(self, value_id: int) -> tuple[int, ...]:
         """Returns flattened identities carried inside one source value."""
 
@@ -278,6 +288,8 @@ class CxxCommandRenderer(CxxExpressionRenderer):
         resolved = self._resolved(operation)
         symbol = str(resolved.attr("callee"))
         attributes = ["loom::command_program", f"loom::symbol({_quote_string(symbol)})"]
+        if retain := self._retention_attribute(operation):
+            attributes.append(retain)
         target_symbol = resolved.attr("target")
         if target_symbol is not None:
             attributes.append(self._target_attribute(operation, str(target_symbol)))
@@ -313,6 +325,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
             (
                 "callee",
                 "visibility",
+                "retain",
                 "target",
                 "predicates",
                 "specialization_count",
@@ -329,15 +342,13 @@ class CxxCommandRenderer(CxxExpressionRenderer):
             raise CxxRenderError(
                 operation, "only kernel-scoped pipeline contracts are launchable"
             )
-        if resolved.attr("retain") is not None:
-            raise CxxRenderError(
-                operation, "retained pipeline declarations have no C++ projection"
-            )
         symbol = str(resolved.attr("callee"))
         attributes = [
             'loom::pipeline("kernel")',
             f"loom::symbol({_quote_string(symbol)})",
         ]
+        if retain := self._retention_attribute(operation):
+            attributes.append(retain)
         target_symbol = resolved.attr("target")
         if target_symbol is not None:
             attributes.append(self._target_attribute(operation, str(target_symbol)))
@@ -451,6 +462,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
             (
                 "callee",
                 "visibility",
+                "retain",
                 "target",
                 "predicates",
                 "specialization_count",

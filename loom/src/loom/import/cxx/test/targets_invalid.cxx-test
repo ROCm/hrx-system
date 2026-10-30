@@ -109,7 +109,7 @@ constexpr generic_target target{.kind = "reference"};
 
 // ====
 constexpr unsigned ordinary_target = 0;
-// ERROR@+1: LOWERING/059 "constexpr target object"
+// ERROR@+1: LOWERING/059 "constexpr target definition or extern target declaration"
 [[loom::kernel, loom::target(ordinary_target)]] void missing_target() {}
 
 // ====
@@ -131,3 +131,13 @@ constexpr generic_target second{.kind = "reference"};
   // ERROR@+1: LOWERING/059 "leading attribute"
   [[loom::target(kernel)]] unsigned value = 0;
 }
+
+// ====
+#include <loomcxx/target.h>
+// ERROR@+1: LOWERING/059 "extern const objects"
+const loom::target::declaration target{};
+
+// ====
+#include <loomcxx/target.h>
+// ERROR@+1: LOWERING/059 "extern const objects"
+extern loom::target::declaration target;
