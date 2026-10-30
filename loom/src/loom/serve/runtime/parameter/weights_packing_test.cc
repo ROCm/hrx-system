@@ -300,9 +300,11 @@ TEST_P(WeightPackingTest,
   }
   // The outer physical owner services cold staging while joining the accepted
   // activation; its completion callback still owns the cancellation boundary.
-  IREE_ASSERT_OK(loom_serve_residency_await(residencies_[0]));
+  // Consume terminal completion and release the activation even when loading
+  // fails, so an assertion does not abandon its retained status and observer.
+  IREE_EXPECT_OK(loom_serve_residency_await(residencies_[0]));
   wake.Await();
-  IREE_ASSERT_OK(loom_serve_activation_advance(
+  IREE_EXPECT_OK(loom_serve_activation_advance(
       activation, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &phase));
   EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_COMPLETE);
   loom_serve_activation_free(activation);

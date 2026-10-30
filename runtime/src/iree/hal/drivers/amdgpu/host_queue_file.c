@@ -149,18 +149,6 @@ static bool iree_hal_amdgpu_host_queue_file_buffer_supports_direct_io(
                            IREE_HAL_BUFFER_USAGE_MAPPING_SCOPED);
 }
 
-static iree_status_t iree_hal_amdgpu_host_queue_validate_direct_file_handle(
-    iree_hal_file_t* file, const char* operation_name) {
-  if (IREE_UNLIKELY(!iree_hal_file_async_handle(file))) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "AMDGPU queue_%s for non-memory files requires a proactor-backed "
-        "async file handle",
-        operation_name);
-  }
-  return iree_ok_status();
-}
-
 static void iree_hal_amdgpu_file_action_fail_with_borrowed_status(
     iree_hal_amdgpu_file_action_state_t* state, const iree_status_t status) {
   if (iree_hal_semaphore_list_is_empty(state->signal_semaphore_list)) {
@@ -530,9 +518,8 @@ iree_status_t iree_hal_amdgpu_host_queue_read_file(
 
   iree_hal_buffer_t* storage_buffer = iree_hal_file_storage_buffer(source_file);
   if (!storage_buffer) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_validate_direct_file_handle(
-        source_file, "read"));
-    if (iree_hal_amdgpu_host_queue_file_buffer_supports_direct_io(
+    if (iree_hal_file_async_handle(source_file) &&
+        iree_hal_amdgpu_host_queue_file_buffer_supports_direct_io(
             target_buffer)) {
       IREE_RETURN_IF_ERROR(
           iree_hal_amdgpu_host_queue_validate_direct_file_buffer(
@@ -566,9 +553,8 @@ iree_status_t iree_hal_amdgpu_host_queue_write_file(
 
   iree_hal_buffer_t* storage_buffer = iree_hal_file_storage_buffer(target_file);
   if (!storage_buffer) {
-    IREE_RETURN_IF_ERROR(iree_hal_amdgpu_host_queue_validate_direct_file_handle(
-        target_file, "write"));
-    if (iree_hal_amdgpu_host_queue_file_buffer_supports_direct_io(
+    if (iree_hal_file_async_handle(target_file) &&
+        iree_hal_amdgpu_host_queue_file_buffer_supports_direct_io(
             source_buffer)) {
       IREE_RETURN_IF_ERROR(
           iree_hal_amdgpu_host_queue_validate_direct_file_buffer(

@@ -24,6 +24,7 @@ constexpr iree_device_size_t kFileAlignment = 128;
 
 enum class FileProviderKind {
   kMemory,
+  kHostOnlyMemory,
   kNative,
 };
 
@@ -38,6 +39,10 @@ const FileProvider kFileProviders[] = {
     {
         "memory_file",
         FileProviderKind::kMemory,
+    },
+    {
+        "host_only_memory_file",
+        FileProviderKind::kHostOnlyMemory,
     },
     {
         "native_file",
@@ -349,12 +354,15 @@ class FileTest : public CtsTestBase<> {
 
   iree_status_t CreateBorrowedMemoryTestFile(iree_hal_memory_access_t access,
                                              iree_byte_span_t contents,
-                                             TestFile* out_file) {
+                                             TestFile* out_file,
+                                             bool host_only = false) {
     out_file->Reset();
     iree_hal_pool_t* storage_pool = nullptr;
-    IREE_RETURN_IF_ERROR(SelectHostFileStoragePool(
-        iree_make_const_byte_span(contents.data, contents.data_length),
-        &storage_pool));
+    if (!host_only) {
+      IREE_RETURN_IF_ERROR(SelectHostFileStoragePool(
+          iree_make_const_byte_span(contents.data, contents.data_length),
+          &storage_pool));
+    }
     iree_io_file_handle_t* handle = nullptr;
     IREE_RETURN_IF_ERROR(iree_io_file_handle_wrap_host_allocation(
         IREE_IO_FILE_ACCESS_READ | IREE_IO_FILE_ACCESS_WRITE, contents,
@@ -366,6 +374,9 @@ class FileTest : public CtsTestBase<> {
     iree_io_file_handle_release(handle);
     if (iree_status_is_ok(status)) {
       out_file->SetMemoryContents(contents.data);
+      if (host_only) {
+        EXPECT_EQ(iree_hal_file_storage_buffer(out_file->get()), nullptr);
+      }
     }
     return status;
   }
@@ -455,7 +466,11 @@ class FileTest : public CtsTestBase<> {
     out_file->Reset();
     switch (provider.kind) {
       case FileProviderKind::kMemory:
-        return CreateMemoryTestFile(access, initial_contents, out_file);
+        return CreateMemoryTestFile(access, initial_contents, out_file,
+                                    /*host_only=*/false);
+      case FileProviderKind::kHostOnlyMemory:
+        return CreateMemoryTestFile(access, initial_contents, out_file,
+                                    /*host_only=*/true);
       case FileProviderKind::kNative:
         return CreateNativeTestFile(access, initial_contents, out_file);
     }
@@ -478,9 +493,12 @@ class FileTest : public CtsTestBase<> {
 
   iree_status_t CreateMemoryTestFile(
       iree_hal_memory_access_t access,
-      const std::vector<uint8_t>& initial_contents, TestFile* out_file) {
+      const std::vector<uint8_t>& initial_contents, TestFile* out_file,
+      bool host_only) {
     iree_hal_pool_t* storage_pool = nullptr;
-    IREE_RETURN_IF_ERROR(GetHostFileStoragePool(&storage_pool));
+    if (!host_only) {
+      IREE_RETURN_IF_ERROR(GetHostFileStoragePool(&storage_pool));
+    }
     iree_host_size_t allocation_alignment = kFileAlignment;
     if (storage_pool) {
       iree_hal_pool_import_requirements_t requirements;
@@ -531,6 +549,9 @@ class FileTest : public CtsTestBase<> {
     }
     if (iree_status_is_ok(status)) {
       out_file->SetMemoryContents(static_cast<uint8_t*>(file_contents));
+      if (host_only) {
+        EXPECT_EQ(iree_hal_file_storage_buffer(out_file->get()), nullptr);
+      }
     } else if (!handle) {
       iree_io_file_handle_primitive_t primitive = {};
       release_callback.fn(release_callback.user_data, primitive);
@@ -578,7 +599,10 @@ class FileTest : public CtsTestBase<> {
   }
 };
 
-class AsyncFileTest : public FileTest {};
+class AsyncFileTest : public FileTest {
+ protected:
+  void CheckMemoryFileChainRetainsDeferredResources(bool host_only);
+};
 
 TEST_P(AsyncFileTest, DirectFileRoundTripUsesReportedRequirements) {
   // A range large enough to cross ordinary staging slots, with untouched file
@@ -1168,7 +1192,8 @@ TEST_P(AsyncFileTest, ZeroLengthWriteForwardsDependencies) {
       write_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 }
 
-TEST_P(AsyncFileTest, MemoryFileChainRetainsDeferredResources) {
+void AsyncFileTest::CheckMemoryFileChainRetainsDeferredResources(
+    bool host_only) {
   const iree_device_size_t allocation_length = 640;
   const iree_device_size_t subspan_offset = 73;
   const iree_device_size_t subspan_length = 400;
@@ -1191,13 +1216,13 @@ TEST_P(AsyncFileTest, MemoryFileChainRetainsDeferredResources) {
       IREE_HAL_MEMORY_ACCESS_READ,
       iree_make_byte_span(source_contents.get(),
                           static_cast<iree_host_size_t>(file_length)),
-      &source_file));
+      &source_file, host_only));
   TestFile target_file;
   IREE_ASSERT_OK(CreateBorrowedMemoryTestFile(
       IREE_HAL_MEMORY_ACCESS_WRITE,
       iree_make_byte_span(target_contents.get(),
                           static_cast<iree_host_size_t>(file_length)),
-      &target_file));
+      &target_file, host_only));
 
   Ref<iree_hal_buffer_t> allocation = CreateZeroedBuffer(allocation_length);
   Ref<iree_hal_buffer_t> subspan;
@@ -1253,6 +1278,14 @@ TEST_P(AsyncFileTest, MemoryFileChainRetainsDeferredResources) {
   const std::vector<uint8_t> actual(target_contents.get(),
                                     target_contents.get() + file_length);
   EXPECT_EQ(actual, expected);
+}
+
+TEST_P(AsyncFileTest, MemoryFileChainRetainsDeferredResources) {
+  CheckMemoryFileChainRetainsDeferredResources(/*host_only=*/false);
+}
+
+TEST_P(AsyncFileTest, HostOnlyMemoryFileChainRetainsDeferredResources) {
+  CheckMemoryFileChainRetainsDeferredResources(/*host_only=*/true);
 }
 
 TEST_P(AsyncFileTest, NativeFileChainRetainsDeferredResources) {

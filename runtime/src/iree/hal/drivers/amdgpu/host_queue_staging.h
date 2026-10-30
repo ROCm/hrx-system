@@ -122,7 +122,8 @@ iree_status_t iree_hal_amdgpu_staging_transfer_start(
 void iree_hal_amdgpu_staging_transfer_release(
     iree_hal_amdgpu_staging_transfer_t* transfer);
 
-// Submits a chunked fd-backed queue_read through the staging pool.
+// Submits a chunked fd-backed or host-only memory-file queue_read through the
+// staging pool, retaining the file until the transfer retires.
 iree_status_t iree_hal_amdgpu_host_queue_submit_staged_read(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,
@@ -131,7 +132,8 @@ iree_status_t iree_hal_amdgpu_host_queue_submit_staged_read(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, const iree_hal_queue_barriers_t* barriers);
 
-// Submits a chunked fd-backed queue_write through the staging pool.
+// Submits a chunked fd-backed or host-only memory-file queue_write through the
+// staging pool, retaining the file until the transfer retires.
 iree_status_t iree_hal_amdgpu_host_queue_submit_staged_write(
     iree_hal_amdgpu_host_queue_t* queue,
     const iree_hal_semaphore_list_t wait_semaphore_list,

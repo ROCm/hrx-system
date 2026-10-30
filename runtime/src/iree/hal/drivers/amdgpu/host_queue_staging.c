@@ -16,6 +16,7 @@
 #include "iree/hal/drivers/amdgpu/host_queue_profile.h"
 #include "iree/hal/drivers/amdgpu/host_queue_submission.h"
 #include "iree/hal/drivers/amdgpu/slab_provider.h"
+#include "iree/hal/utils/memory_file.h"
 
 typedef struct iree_hal_amdgpu_staging_slot_t {
   // Slot ordinal in the physical-device staging pool.
@@ -509,16 +510,18 @@ static bool iree_hal_amdgpu_staging_transfer_copies_to_device(
 
 static iree_hal_profile_queue_event_type_t
 iree_hal_amdgpu_staging_transfer_profile_event_type(
-    iree_hal_amdgpu_staging_transfer_kind_t kind) {
+    iree_hal_amdgpu_staging_transfer_kind_t kind, bool is_file) {
   switch (kind) {
     case IREE_HAL_AMDGPU_STAGING_TRANSFER_FILE_READ:
       return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_READ;
     case IREE_HAL_AMDGPU_STAGING_TRANSFER_FILE_WRITE:
       return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_WRITE;
     case IREE_HAL_AMDGPU_STAGING_TRANSFER_UPLOAD:
-      return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_UPDATE;
+      return is_file ? IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_READ
+                     : IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_UPDATE;
     case IREE_HAL_AMDGPU_STAGING_TRANSFER_DOWNLOAD:
-      return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_NONE;
+      return is_file ? IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_WRITE
+                     : IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_NONE;
     default:
       return IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_NONE;
   }
@@ -583,11 +586,13 @@ struct iree_hal_amdgpu_staging_transfer_t {
   iree_hal_amdgpu_staging_pool_t* pool;
   // Logical device retained while asynchronous transfer work is pending.
   iree_hal_device_t* logical_device;
-  // File being read or written.
+  // Retained file being read or written, including the owner of |host_base|
+  // for host-only memory files.
   iree_hal_file_t* file;
   // Async file handle borrowed from |file|.
   iree_async_file_t* async_file;
-  // Borrowed host range used by upload/download transfers.
+  // Host range used by upload/download transfers, retained through |file| for
+  // memory files and otherwise borrowed from the transfer caller.
   uint8_t* host_base;
   // User buffer being copied to or from.
   iree_hal_buffer_t* buffer;
@@ -708,8 +713,8 @@ static iree_status_t iree_hal_amdgpu_staging_transfer_submit_signal_barrier(
   bool ready = false;
   uint64_t submission_id = 0;
   iree_hal_amdgpu_host_queue_profile_event_info_t profile_event_info = {
-      .type =
-          iree_hal_amdgpu_staging_transfer_profile_event_type(transfer->kind),
+      .type = iree_hal_amdgpu_staging_transfer_profile_event_type(
+          transfer->kind, transfer->file != NULL),
       .payload_length = transfer->requested_length,
       .operation_count = 1,
   };
@@ -1402,14 +1407,27 @@ static iree_status_t iree_hal_amdgpu_host_queue_submit_staged_transfer(
     uint64_t file_offset, iree_hal_buffer_t* buffer,
     iree_device_size_t buffer_offset, iree_device_size_t length,
     const iree_hal_queue_barriers_t* barriers) {
+  // A memory file without imported storage is ordinary host memory. Copy
+  // through the HAL staging pool; hardware never receives this host pointer.
+  // Capture only the span here: the queued host action waits for the producer
+  // before reading it, and the transfer retains the file through retirement.
+  void* host_base = NULL;
+  if (iree_hal_memory_file_isa(file)) {
+    iree_byte_span_t contents;
+    IREE_RETURN_IF_ERROR(iree_hal_memory_file_contents(file, &contents));
+    host_base = contents.data + file_offset;
+    kind = kind == IREE_HAL_AMDGPU_STAGING_TRANSFER_FILE_READ
+               ? IREE_HAL_AMDGPU_STAGING_TRANSFER_UPLOAD
+               : IREE_HAL_AMDGPU_STAGING_TRANSFER_DOWNLOAD;
+  }
   const iree_hal_amdgpu_queue_barriers_t resolved_barriers =
       iree_hal_amdgpu_queue_barriers_resolve(barriers);
   iree_hal_amdgpu_staging_transfer_t* transfer = NULL;
   const uint32_t profile_wait_count =
       iree_hal_amdgpu_host_queue_profile_semaphore_count(wait_semaphore_list);
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_staging_transfer_create(
-      queue, kind, file, file_offset, /*host_base=*/NULL, buffer, buffer_offset,
-      length, profile_wait_count, signal_semaphore_list, &transfer));
+      queue, kind, file, file_offset, host_base, buffer, buffer_offset, length,
+      profile_wait_count, signal_semaphore_list, &transfer));
   transfer->after_barrier = resolved_barriers.after;
 
   iree_hal_resource_t* resources[1] = {&transfer->resource};
