@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -45,6 +46,8 @@ class HipModuleExecutionTest : public testing::Test {
 
   // One exact HIP artifact and runtime shared through synchronous teardown.
   static inline hrx::hip::testing::HipDso library_;
+
+  void CheckVirtualAliases(bool host_input);
 };
 
 template <typename T>
@@ -216,7 +219,7 @@ struct ScopedVirtualAliases {
         if (!mapped[i]) {
           continue;
         }
-        const hipError_t result = unmap(Address(2 * i), 2 * unit);
+        const hipError_t result = unmap(Address(i), unit);
         EXPECT_EQ(hipSuccess, result);
         if (result != hipSuccess) {
           return;
@@ -224,8 +227,10 @@ struct ScopedVirtualAliases {
       }
       EXPECT_EQ(hipSuccess, close(address, 4 * unit));
     }
-    if (backing) {
-      EXPECT_EQ(hipSuccess, release(backing));
+    for (auto handle : backing) {
+      if (handle) {
+        EXPECT_EQ(hipSuccess, release(handle));
+      }
     }
   }
 
@@ -235,12 +240,12 @@ struct ScopedVirtualAliases {
 
   // Native mapping unit queried for the selected physical device.
   size_t unit = 0;
-  // Address interval containing two aliases of the same two-unit backing.
+  // Address interval containing two aliases each of input and output backing.
   void* address = nullptr;
-  // Public backing reference until explicitly released before dispatch.
-  hipMemGenericAllocationHandle_t backing = nullptr;
+  // Public input/output references until explicitly released before dispatch.
+  std::array<hipMemGenericAllocationHandle_t, 2> backing = {};
   // Successful native mappings requiring removal on every exit path.
-  std::array<bool, 2> mapped = {};
+  std::array<bool, 4> mapped = {};
   // Completion boundary before removing addresses used by accepted work.
   HipDeviceSynchronizeFn synchronize = nullptr;
   // Checked native alias removal from the exact DSO.
@@ -858,8 +863,7 @@ TEST_F(HipModuleExecutionTest,
   worker.join();
 }
 
-TEST_F(HipModuleExecutionTest,
-       KernelUsesVirtualAliasesAfterBackingHandleRelease) {
+void HipModuleExecutionTest::CheckVirtualAliases(bool host_input) {
   const auto get_device =
       library_.Resolve<decltype(&hipGetDevice)>("hipGetDevice");
   const auto set_device = library_.Resolve<HipSetDeviceFn>("hipSetDevice");
@@ -919,19 +923,29 @@ TEST_F(HipModuleExecutionTest,
   int device_count = 0;
   ASSERT_EQ(hipSuccess, get_device_count(&device_count));
   RecordProperty("participating_device_count", device_count);
-  const hipMemAllocationProp allocation = {
+  hipMemAllocationProp allocation = {
       .type = hipMemAllocationTypePinned,
       .location = {.type = hipMemLocationTypeDevice, .id = device},
   };
   ASSERT_EQ(hipSuccess, granularity(&aliases.unit, &allocation,
                                     hipMemAllocationGranularityMinimum));
+  if (host_input) {
+    allocation.location = {.type = hipMemLocationTypeHost, .id = 0};
+    size_t host_unit = 0;
+    ASSERT_EQ(hipSuccess, granularity(&host_unit, &allocation,
+                                      hipMemAllocationGranularityMinimum));
+    aliases.unit = std::max(aliases.unit, host_unit);
+  }
   ASSERT_EQ(hipSuccess, reserve(&aliases.address, 4 * aliases.unit,
                                 aliases.unit, nullptr, 0));
   ASSERT_EQ(hipSuccess,
-            create(&aliases.backing, 2 * aliases.unit, &allocation, 0));
+            create(&aliases.backing[0], aliases.unit, &allocation, 0));
+  allocation.location = {.type = hipMemLocationTypeDevice, .id = device};
+  ASSERT_EQ(hipSuccess,
+            create(&aliases.backing[1], aliases.unit, &allocation, 0));
   for (size_t i = 0; i < aliases.mapped.size(); ++i) {
-    ASSERT_EQ(hipSuccess, map(aliases.Address(2 * i), 2 * aliases.unit, 0,
-                              aliases.backing, 0));
+    ASSERT_EQ(hipSuccess, map(aliases.Address(i), aliases.unit, 0,
+                              aliases.backing[i % 2], 0));
     aliases.mapped[i] = true;
   }
   std::vector<hipMemAccessDesc> accesses(device_count);
@@ -943,8 +957,20 @@ TEST_F(HipModuleExecutionTest,
   }
   ASSERT_EQ(hipSuccess, set_access(aliases.address, 4 * aliases.unit,
                                    accesses.data(), accesses.size()));
-  ASSERT_EQ(hipSuccess, aliases.release(aliases.backing));
-  aliases.backing = nullptr;
+  if (host_input) {
+    const hipMemAccessDesc host_access = {
+        .location = {.type = hipMemLocationTypeHost, .id = 0},
+        .flags = hipMemAccessFlagsProtReadWrite,
+    };
+    for (size_t i : {0u, 2u}) {
+      ASSERT_EQ(hipSuccess,
+                set_access(aliases.Address(i), aliases.unit, &host_access, 1));
+    }
+  }
+  for (auto& handle : aliases.backing) {
+    ASSERT_EQ(hipSuccess, aliases.release(handle));
+    handle = nullptr;
+  }
 
   const std::array<uint32_t, 4> input = {1, 2, 3, 4};
   PointerArguments pointers = {
@@ -954,8 +980,12 @@ TEST_F(HipModuleExecutionTest,
   for (int i = 0; i < device_count; ++i) {
     SCOPED_TRACE(i);
     ASSERT_EQ(hipSuccess, set_device(i));
-    ASSERT_EQ(hipSuccess, copy(aliases.Address(0), input.data(), sizeof(input),
-                               hipMemcpyDefault));
+    if (host_input) {
+      std::memcpy(aliases.Address(0), input.data(), sizeof(input));
+    } else {
+      ASSERT_EQ(hipSuccess, copy(aliases.Address(0), input.data(),
+                                 sizeof(input), hipMemcpyDefault));
+    }
     hipDeviceProp_t properties = {};
     ASSERT_EQ(hipSuccess, get_properties(&properties, i));
     const auto image =
@@ -979,6 +1009,16 @@ TEST_F(HipModuleExecutionTest,
       EXPECT_EQ(output[j], input[j] * scale + offset);
     }
   }
+}
+
+TEST_F(HipModuleExecutionTest,
+       KernelUsesVirtualAliasesAfterBackingHandleRelease) {
+  CheckVirtualAliases(false);
+}
+
+TEST_F(HipModuleExecutionTest,
+       KernelUsesMixedVirtualAliasesAfterBackingHandleRelease) {
+  CheckVirtualAliases(true);
 }
 
 TEST_F(HipModuleExecutionTest,

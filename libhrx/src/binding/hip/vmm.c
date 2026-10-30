@@ -519,7 +519,8 @@ static hipError_t iree_hip_vmm_get_device_for_properties(
 
 static hipError_t iree_hip_vmm_prepare_scope(
     hrx_device_t device, hrx_device_t* devices,
-    hrx_virtual_buffer_scope_t* out_scope) {
+    hrx_virtual_buffer_source_t* sources, hrx_virtual_buffer_scope_t* out_scope,
+    hrx_virtual_buffer_sources_t* out_sources) {
   int count = 0;
   hipError_t result =
       iree_hip_vmm_from_hrx_status(hrx_gpu_device_count(&count));
@@ -537,6 +538,24 @@ static hipError_t iree_hip_vmm_prepare_scope(
       .devices = devices,
       .host_access = HRX_MEMORY_ACCESS_ALL,
   };
+  // hipMemAddressReserve precedes physical allocation. Its immutable contract
+  // must admit ordinary device backing for GPUs and coherent shared backing
+  // for CPU/GPU aliases, independently of the permissions later granted by
+  // hipMemSetAccess. Device backing does not imply remappable CPU access.
+  for (size_t i = 0; i < index; ++i) {
+    sources[2 * i] = (hrx_virtual_buffer_source_t){
+        .device = devices[i],
+        .memory_type = HRX_MEMORY_TYPE_DEVICE_LOCAL,
+    };
+    sources[2 * i + 1] = (hrx_virtual_buffer_source_t){
+        .device = devices[i],
+        .memory_type = HRX_MEMORY_TYPE_HOST_LOCAL,
+    };
+  }
+  *out_sources = (hrx_virtual_buffer_sources_t){
+      .source_count = 2 * index,
+      .sources = sources,
+  };
   return result;
 }
 
@@ -547,12 +566,15 @@ static hipError_t iree_hip_vmm_query_granularity(hrx_device_t device,
                                                  bool* out_modern) {
   *out_modern = false;
   hrx_device_t devices[IREE_HAL_STREAMING_MAX_DEVICES];
+  hrx_virtual_buffer_source_t sources[2 * IREE_HAL_STREAMING_MAX_DEVICES];
   hrx_virtual_buffer_scope_t scope;
-  hipError_t result = iree_hip_vmm_prepare_scope(device, devices, &scope);
+  hrx_virtual_buffer_sources_t accepted_sources;
+  hipError_t result = iree_hip_vmm_prepare_scope(device, devices, sources,
+                                                 &scope, &accepted_sources);
   hrx_virtual_buffer_capabilities_t capabilities = {0};
   if (result == hipSuccess) {
-    result = iree_hip_vmm_from_hrx_status(
-        hrx_virtual_buffer_query_capabilities(scope, &capabilities));
+    result = iree_hip_vmm_from_hrx_status(hrx_virtual_buffer_query_capabilities(
+        scope, accepted_sources, &capabilities));
   }
   if (result != hipSuccess) {
     return result;
@@ -1004,8 +1026,11 @@ hipError_t iree_hip_vmm_address_reserve(void** ptr, size_t size,
   hrx_buffer_t virtual_buffer = NULL;
   if (modern) {
     hrx_device_t devices[IREE_HAL_STREAMING_MAX_DEVICES];
+    hrx_virtual_buffer_source_t sources[2 * IREE_HAL_STREAMING_MAX_DEVICES];
     hrx_virtual_buffer_scope_t scope;
-    result = iree_hip_vmm_prepare_scope(device, devices, &scope);
+    hrx_virtual_buffer_sources_t accepted_sources;
+    result = iree_hip_vmm_prepare_scope(device, devices, sources, &scope,
+                                        &accepted_sources);
     const hrx_virtual_buffer_options_t options = {
         .byte_length = size,
         .min_alignment = alignment,
@@ -1013,8 +1038,8 @@ hipError_t iree_hip_vmm_address_reserve(void** ptr, size_t size,
         .flags = HRX_VIRTUAL_BUFFER_FLAG_REQUIRE_COMMON_ADDRESS,
     };
     if (result == hipSuccess) {
-      result = iree_hip_vmm_from_hrx_status(
-          hrx_virtual_buffer_create(scope, &options, &virtual_buffer));
+      result = iree_hip_vmm_from_hrx_status(hrx_virtual_buffer_create(
+          scope, accepted_sources, &options, &virtual_buffer));
     }
   } else {
     result = iree_hip_vmm_from_hrx_status(hrx_allocator_virtual_memory_reserve(

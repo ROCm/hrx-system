@@ -1,6 +1,7 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 
@@ -225,6 +226,60 @@ TEST_F(HipVirtualMemoryApiTest,
                               hipMemcpyHostToDevice));
   std::memcpy(observed.data(), Address(0), sizeof(observed));
   EXPECT_EQ(observed, update);
+}
+
+TEST_F(HipVirtualMemoryApiTest,
+       NativeMixedBackingKeepsCpuPermissionsOnSharedRanges) {
+  std::array<hipMemAllocationProp, 2> properties = {Properties(), Properties()};
+  properties[1].location = {.type = hipMemLocationTypeHost, .id = 0};
+  for (const auto& property : properties) {
+    size_t granularity = 0;
+    ASSERT_EQ(hipSuccess, granularity_(&granularity, &property,
+                                       hipMemAllocationGranularityMinimum));
+    unit_ = std::max(unit_, granularity);
+  }
+  ASSERT_EQ(hipSuccess, reserve_(&address_, 3 * unit_, unit_, nullptr, 0));
+  for (size_t i = 0; i < handles_.size(); ++i) {
+    ASSERT_EQ(hipSuccess, create_(&handles_[i], unit_, &properties[i], 0));
+    ASSERT_EQ(hipSuccess, map_(Address(i), unit_, 0, handles_[i], 0));
+    mapped_[i] = true;
+  }
+  ASSERT_EQ(hipSuccess, map_(Address(2), unit_, 0, handles_[1], 0));
+  mapped_[2] = true;
+  const hipMemAccessDesc gpu = {
+      .location = properties[0].location,
+      .flags = hipMemAccessFlagsProtReadWrite,
+  };
+  ASSERT_EQ(hipSuccess, set_access_(address_, 3 * unit_, &gpu, 1));
+  const hipMemAccessDesc host = {
+      .location = properties[1].location,
+      .flags = hipMemAccessFlagsProtReadWrite,
+  };
+  // Admission rejects the GPU-only class before issuing a native map. The
+  // original GPU permissions and the reservation's timeline remain usable.
+  EXPECT_EQ(hipErrorInvalidContext, set_access_(Address(0), unit_, &host, 1));
+  unsigned long long access = 0;
+  ASSERT_EQ(hipSuccess, get_access_(&access, &host.location, Address(0)));
+  EXPECT_EQ(access, hipMemAccessFlagsProtNone);
+  ASSERT_EQ(hipSuccess, get_access_(&access, &gpu.location, Address(0)));
+  EXPECT_EQ(access, hipMemAccessFlagsProtReadWrite);
+  ASSERT_EQ(hipSuccess, set_access_(Address(1), 2 * unit_, &host, 1));
+  for (auto& handle : handles_) {
+    ASSERT_EQ(hipSuccess, release_(handle));
+    handle = nullptr;
+  }
+  const std::array<uint32_t, 4> expected = {41, 43, 47, 53};
+  std::memcpy(Address(1), expected.data(), sizeof(expected));
+  ASSERT_EQ(hipSuccess, copy_(Address(0), Address(2), sizeof(expected),
+                              hipMemcpyDeviceToDevice));
+  std::array<uint32_t, 4> observed = {};
+  ASSERT_EQ(hipSuccess, copy_(observed.data(), Address(0), sizeof(observed),
+                              hipMemcpyDeviceToHost));
+  EXPECT_EQ(observed, expected);
+  ASSERT_EQ(hipSuccess, unmap_(Address(1), unit_));
+  mapped_[1] = false;
+  std::memcpy(observed.data(), Address(2), sizeof(observed));
+  EXPECT_EQ(observed, expected);
 }
 
 TEST_F(HipVirtualMemoryApiTest,
