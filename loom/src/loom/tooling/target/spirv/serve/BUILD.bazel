@@ -128,6 +128,7 @@ loom_cc_test(
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
