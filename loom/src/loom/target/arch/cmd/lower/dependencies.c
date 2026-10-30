@@ -56,7 +56,8 @@ typedef struct loom_cmd_dependency_build_t {
   loom_module_t* module;
   // Per-root temporary storage; no graph or interval state escapes this arena.
   iree_arena_allocator_t* arena;
-  // Appended actual accesses in schedule order.
+  // Heap-owned actual accesses in schedule order; released at the root
+  // boundary.
   loom_cmd_memory_access_t* accesses;
   // Number of initialized accesses.
   iree_host_size_t access_count;
@@ -99,8 +100,8 @@ static iree_status_t loom_cmd_dependency_append(
                             "command memory access table is too large");
   }
   if (build->access_count == build->access_capacity) {
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        build->arena, build->access_count, build->access_count + 1,
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        build->arena->block_pool->block_allocator, build->access_count + 1,
         sizeof(*build->accesses), &build->access_capacity,
         (void**)&build->accesses));
   }
@@ -317,12 +318,14 @@ static iree_status_t loom_cmd_dependency_partition(
     *out_count = 1;
     return iree_ok_status();
   }
+  const iree_host_size_t external_capacity = (iree_host_size_t)iree_min(
+      (uint64_t)count, (uint64_t)build->lower->abi_layout.fixed_buffer_count +
+                           build->lower->abi_layout.rebindable_binding_count);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      build->arena, count, sizeof(*external_scopes), (void**)&external_scopes));
+      build->arena, external_capacity, sizeof(*external_scopes),
+      (void**)&external_scopes));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       build->arena, count, sizeof(*sorted), (void**)&sorted));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      build->arena, count, sizeof(*components), (void**)&components));
   for (iree_host_size_t i = 0; i < count; ++i) {
     sorted[i] = &build->accesses[i];
   }
@@ -359,39 +362,48 @@ static iree_status_t loom_cmd_dependency_partition(
   }
   *out_count = 0;
   uint32_t external_component = UINT32_MAX;
-  if (external_aliases && external_roots > 1) {
-    external_component = (*out_count)++;
-    components[external_component] =
-        (loom_cmd_memory_component_t){.range = {.resource_index = UINT32_MAX}};
-  }
+  external_aliases &= external_roots > 1;
   uint64_t prior_root = UINT64_MAX;
   uint32_t component = UINT32_MAX;
+  // Compact the consumed prefix of the sorted index to one representative per
+  // component. Its range becomes the union; later accesses use only component
+  // IDs, so their original byte ranges need not survive this partition.
   for (iree_host_size_t i = 0; i < count; ++i) {
     loom_cmd_memory_access_t* access = sorted[i];
     const uint64_t root = loom_cmd_dependency_root(access->range);
     const bool transient =
         access->range.role == LOOM_CMD_BUFFER_ROLE_REBINDABLE &&
         access->range.resource_index == transient_binding;
-    if (!transient && external_component != UINT32_MAX) {
+    if (!transient && external_aliases) {
+      if (external_component == UINT32_MAX) {
+        external_component = (*out_count)++;
+        sorted[external_component] = access;
+        access->range =
+            (loom_cmd_buffer_binding_t){.resource_index = UINT32_MAX};
+      }
       access->component = external_component;
       continue;
     }
     if (root != prior_root || component == UINT32_MAX ||
         access->range.byte_offset >=
-            loom_cmd_dependency_end(components[component].range)) {
+            loom_cmd_dependency_end(sorted[component]->range)) {
       component = (*out_count)++;
-      components[component] =
-          (loom_cmd_memory_component_t){.range = access->range};
+      sorted[component] = access;
     } else {
       const uint64_t end =
           iree_max(loom_cmd_dependency_end(access->range),
-                   loom_cmd_dependency_end(components[component].range));
-      components[component].range.byte_length =
+                   loom_cmd_dependency_end(sorted[component]->range));
+      sorted[component]->range.byte_length =
           end == UINT64_MAX ? UINT64_MAX
-                            : end - components[component].range.byte_offset;
+                            : end - sorted[component]->range.byte_offset;
     }
     access->component = component;
     prior_root = root;
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      build->arena, *out_count, sizeof(*components), (void**)&components));
+  for (uint32_t i = 0; i < *out_count; ++i) {
+    components[i] = (loom_cmd_memory_component_t){.range = sorted[i]->range};
   }
   *out_components = components;
   return iree_ok_status();
@@ -557,6 +569,7 @@ iree_status_t loom_cmd_dependency_plan_build(
     status = loom_cmd_dependency_sweep(&build, transient->binding_index, arena,
                                        out_plan);
   }
+  iree_allocator_free(arena->block_pool->block_allocator, build.accesses);
   iree_arena_deinitialize(&temporary_arena);
   for (iree_host_size_t i = 0; i < lower->buffer_range_count; ++i) {
     loom_module_value_ordinal_scratch_clear(
