@@ -496,7 +496,6 @@ _SPIRV_EXECUTION_XFAILS = {
     "kernel/workgroup/scan.loom:@workgroup_scan_float_values": "TARGET/032",
     "kernel/workgroup/scan.loom:@workgroup_scan_vector_values": "TARGET/032",
     "memory/address/address.loom:@launch_arithmetic_values": "SPIRV/027,TARGET/005",
-    "memory/address/dynamic_record_fields.loom:@atomic_record_field_values": "TARGET/003",
     "memory/address/generic.loom:@generic_workgroup_publication_values": "TARGET/032",
     "memory/address/integer_casts.loom:@loaded_integer_address_join_values": "SPIRV/026",
     "memory/address/scaling.loom:@scaled_offset_values": "SPIRV/026",
@@ -585,6 +584,7 @@ _SPIRV_EXECUTION_XFAILS = {
 # still reject them with the exact target diagnostic.
 _SPIRV_EXECUTION_ALLOWED_FAILURES = {
     "control/loop/carried_lane_liveness.loom:@loop_carried_lane_liveness_values": "TARGET/003",
+    "memory/address/dynamic_record_fields.loom:@atomic_record_field_values": "TARGET/003",
     "memory/atomic/float64.loom:@atomic_f64_random_values": "TARGET/002,TARGET/003",
     "memory/atomic/float64.loom:@atomic_f64_special_values": "TARGET/002,TARGET/003",
     "memory/atomic/float64_contention.loom:@contended_atomic_f64_values": "TARGET/002,TARGET/003",
