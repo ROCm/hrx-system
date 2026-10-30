@@ -1,0 +1,13 @@
+target.decl @device
+
+template.decl @elements() -> (index)
+
+func.def public @unknown() -> (index) {
+  %count = template.apply<@elements>() : () -> (index)
+  func.return %count : index
+}
+
+func.def public target(@device) @known() -> (index) {
+  %count = template.apply<@elements>() : () -> (index)
+  func.return %count : index
+}

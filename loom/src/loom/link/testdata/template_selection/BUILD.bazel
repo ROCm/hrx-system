@@ -14,6 +14,13 @@ package(
 
 exports_files(
     [
+        "target_providers.loom",
+        "target_roots.loom",
+    ],
+)
+
+exports_files(
+    [
         "missing_provider.loom",
         "root.loom",
     ],

@@ -1,0 +1,18 @@
+target.decl @device
+
+template.decl @elements() -> (index)
+
+template.def<@elements> target(@device) priority(10) @specialized() -> (index) {
+  %count = index.constant 4 : index
+  template.return %count : index
+}
+
+template.def<@elements> @generic() -> (index) {
+  %count = index.constant 16 : index
+  template.return %count : index
+}
+
+template.def<@elements> priority(-1) @shadowed() -> (index) {
+  %count = index.constant 8 : index
+  template.return %count : index
+}

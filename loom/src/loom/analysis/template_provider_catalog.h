@@ -54,11 +54,15 @@ typedef struct loom_template_provider_summary_t {
   // True when the provider has a materialized body.
   bool has_body;
 
+  // True when the authored provider requires a target identity, including an
+  // external target declaration not yet bound into this module.
+  bool has_target_requirement;
+
   // Local module symbol reference, or null for external providers.
   loom_symbol_ref_t symbol;
 
-  // Module-local target applicability symbol, or null for target-independent
-  // providers.
+  // Module-local target applicability symbol, or null when absent or not yet
+  // bound into this module. Presence is owned by has_target_requirement.
   loom_symbol_ref_t target_symbol;
 
   // Local function-like operation, or empty for external providers.
@@ -106,7 +110,7 @@ typedef struct loom_template_provider_summary_t {
   // Borrowed resolved target-condition conjunction.
   const loom_target_condition_t* target_conditions;
 
-  // Immutable target identity requirement, or NULL when target-independent.
+  // Immutable target identity requirement, or NULL when absent or unresolved.
   const loom_target_facts_t* target_facts;
 } loom_template_provider_summary_t;
 
@@ -120,6 +124,10 @@ typedef struct loom_template_provider_contract_t {
 
   // True when the provider has an implementation body.
   bool has_body;
+
+  // True when the authored provider requires a target identity, even when its
+  // target declaration has no concrete facts yet.
+  bool has_target_requirement;
 
   // Number of signature arguments.
   uint16_t argument_count;
@@ -145,7 +153,7 @@ typedef struct loom_template_provider_contract_t {
   // Borrowed resolved target-condition conjunction.
   const loom_target_condition_t* target_conditions;
 
-  // Immutable target identity requirement, or NULL when target-independent.
+  // Immutable target identity requirement, or NULL when absent or unresolved.
   const loom_target_facts_t* target_facts;
 } loom_template_provider_contract_t;
 

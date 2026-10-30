@@ -447,10 +447,12 @@ iree_status_t loom_link_bytecode_template_contract_reader_load(
   };
   IREE_RETURN_IF_ERROR(loom_link_bytecode_template_target_symbol_ordinal(
       reader, symbol, vtable->func_like, &contract->target_symbol_ordinal));
+  contract->provider.has_target_requirement =
+      contract->target_symbol_ordinal != UINT32_MAX;
   IREE_RETURN_IF_ERROR(loom_link_bytecode_template_decode_conditions(
       reader, symbol, vtable->func_like, &contract->provider.target_conditions,
       &contract->provider.target_condition_count));
-  if (contract->target_symbol_ordinal != UINT32_MAX) {
+  if (contract->provider.has_target_requirement) {
     IREE_RETURN_IF_ERROR(loom_link_bytecode_template_project_target_facts(
         reader, contract->target_symbol_ordinal,
         &contract->provider.target_facts));

@@ -73,7 +73,7 @@ typedef struct loom_template_applicability_contract_t {
   // Module whose symbols and values own this contract.
   const loom_module_t* module;
 
-  // Module-local target requirement, or null when target-independent.
+  // Module-local target requirement, or null when absent or not yet bound.
   loom_symbol_ref_t target_symbol;
 
   // Immutable target identity requirement, or NULL when unresolved.
@@ -102,6 +102,10 @@ typedef struct loom_template_applicability_contract_t {
 
   // Number of resolved target conditions.
   uint16_t target_condition_count;
+
+  // True when a target identity is required, even before its symbol or facts
+  // are available in this contract's module.
+  bool has_target_requirement;
 } loom_template_applicability_contract_t;
 
 // Returns an allocation-free applicability contract over |provider|.
@@ -109,11 +113,13 @@ loom_template_applicability_contract_t
 loom_template_applicability_provider_contract(
     const loom_template_provider_summary_t* provider);
 
-// Evaluates one target identity requirement against |application_target|.
+// Evaluates one present target identity requirement against
+// |application_target|.
 //
 // |requirement_module| identifies the symbol domain of |target_symbol|. The
 // immutable target facts may satisfy requirements across module boundaries;
-// exact symbol identity applies only within one module.
+// exact symbol identity applies only within one module. A requirement with
+// neither a bound symbol nor concrete facts remains unresolved.
 loom_template_provider_feasibility_t
 loom_template_applicability_evaluate_target_requirement(
     const loom_module_t* application_module,

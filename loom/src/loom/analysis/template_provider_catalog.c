@@ -149,6 +149,8 @@ static iree_status_t loom_template_provider_catalog_populate_local(
         .module = module,
         .kind = kind,
         .has_body = facts->has_body,
+        .has_target_requirement =
+            loom_symbol_ref_is_valid(facts->target_symbol),
         .symbol =
             (loom_symbol_ref_t){
                 .module_id = 0,
@@ -530,6 +532,7 @@ iree_status_t loom_template_provider_contract_bind_family(
       .module = target_module,
       .kind = contract->kind,
       .has_body = contract->has_body,
+      .has_target_requirement = contract->has_target_requirement,
       .symbol = loom_symbol_ref_null(),
       .target_symbol = target_symbol,
       .origin_ordinal = origin_ordinal,

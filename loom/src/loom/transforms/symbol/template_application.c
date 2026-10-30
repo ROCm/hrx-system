@@ -197,6 +197,7 @@ static iree_status_t loom_template_application_load_contract_from_facts(
       .result_count = facts->result_count,
       .predicate_count = facts->predicate_count,
       .target_condition_count = facts->target_condition_count,
+      .has_target_requirement = loom_symbol_ref_is_valid(facts->target_symbol),
   };
   return loom_template_application_lookup_target_facts(
       module, symbol_facts, facts->target_symbol, &out_contract->target_facts);

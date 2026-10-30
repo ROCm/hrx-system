@@ -46,6 +46,7 @@ loom_template_applicability_provider_contract(
       .result_count = provider->result_count,
       .predicate_count = provider->predicate_count,
       .target_condition_count = provider->target_condition_count,
+      .has_target_requirement = provider->has_target_requirement,
   };
 }
 
@@ -55,9 +56,6 @@ loom_template_applicability_evaluate_target_requirement(
     const loom_module_t* requirement_module, loom_symbol_ref_t target_symbol,
     const loom_target_facts_t* target_facts,
     const loom_template_applicability_target_t* application_target) {
-  if (!loom_symbol_ref_is_valid(target_symbol) && target_facts == NULL) {
-    return LOOM_TEMPLATE_PROVIDER_MATCH;
-  }
   if (requirement_module == application_module &&
       loom_symbol_ref_is_valid(application_target->witness) &&
       target_symbol.module_id == application_target->witness.module_id &&
@@ -603,21 +601,9 @@ void loom_template_applicability_classify_provider(
     const loom_template_applicability_target_t* application_target,
     const loom_template_applicability_facts_t* application_facts,
     loom_template_provider_classification_t* out_classification) {
-  *out_classification = (loom_template_provider_classification_t){
-      .feasibility = LOOM_TEMPLATE_PROVIDER_REJECT,
-      .target_feasibility = LOOM_TEMPLATE_PROVIDER_REJECT,
-  };
   const loom_template_applicability_contract_t contract =
       loom_template_applicability_provider_contract(provider);
-  out_classification->target_feasibility =
-      loom_template_applicability_evaluate_target_requirement(
-          application_module, contract.module, contract.target_symbol,
-          contract.target_facts, application_target);
-  if (out_classification->target_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
-    return;
-  }
-
-  loom_template_applicability_classify_constraints(
+  loom_template_applicability_classify_contract(
       application_module, application_op, &contract, application_target,
       application_facts, out_classification);
 }
@@ -633,9 +619,11 @@ void loom_template_applicability_classify_contract(
       .target_feasibility = LOOM_TEMPLATE_PROVIDER_REJECT,
   };
   out_classification->target_feasibility =
-      loom_template_applicability_evaluate_target_requirement(
-          application_module, contract->module, contract->target_symbol,
-          contract->target_facts, application_target);
+      contract->has_target_requirement
+          ? loom_template_applicability_evaluate_target_requirement(
+                application_module, contract->module, contract->target_symbol,
+                contract->target_facts, application_target)
+          : LOOM_TEMPLATE_PROVIDER_MATCH;
   if (out_classification->target_feasibility == LOOM_TEMPLATE_PROVIDER_REJECT) {
     return;
   }

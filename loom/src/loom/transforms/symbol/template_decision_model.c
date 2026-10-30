@@ -113,11 +113,6 @@ LOOM_DEFINE_ADAPTIVE_SORT(loom_template_decision_sort_ranked_choices,
 #define LOOM_TEMPLATE_DECISION_LINEAR_SIGNATURE_COMPARISON_LIMIT \
   UINT64_C(1000000)
 
-static bool loom_template_decision_contract_has_target_identity(
-    loom_symbol_ref_t target_symbol, const loom_target_facts_t* target_facts) {
-  return loom_symbol_ref_is_valid(target_symbol) || target_facts != NULL;
-}
-
 static iree_status_t loom_template_decision_add_count(iree_host_size_t amount,
                                                       uint32_t* inout_count) {
   if (amount > UINT32_MAX - *inout_count) {
@@ -129,18 +124,13 @@ static iree_status_t loom_template_decision_add_count(iree_host_size_t amount,
 }
 
 static iree_status_t loom_template_decision_count_contract(
-    loom_symbol_ref_t target_symbol, const loom_target_facts_t* target_facts,
-    const loom_predicate_t* predicates, uint16_t predicate_count,
-    const loom_target_condition_t* target_conditions,
+    bool has_target_requirement, const loom_predicate_t* predicates,
+    uint16_t predicate_count, const loom_target_condition_t* target_conditions,
     uint16_t target_condition_count,
     loom_template_decision_build_family_t* build_family,
     uint32_t* out_value_reference_count) {
   *out_value_reference_count = 0;
-  const uint32_t target_identity_count =
-      loom_template_decision_contract_has_target_identity(target_symbol,
-                                                          target_facts)
-          ? 1
-          : 0;
+  const uint32_t target_identity_count = has_target_requirement ? 1 : 0;
   if ((uint32_t)target_condition_count + target_identity_count > UINT16_MAX) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -436,8 +426,8 @@ loom_template_decision_compile_value_operand(
 }
 
 static void loom_template_decision_compile_contract(
-    const loom_module_t* requirement_module, loom_symbol_ref_t target_symbol,
-    const loom_target_facts_t* target_facts,
+    bool has_target_requirement, const loom_module_t* requirement_module,
+    loom_symbol_ref_t target_symbol, const loom_target_facts_t* target_facts,
     const loom_value_id_t* argument_ids, uint16_t argument_count,
     const loom_value_id_t* result_ids, uint16_t result_count,
     const loom_predicate_t* source_predicates, uint16_t source_predicate_count,
@@ -455,15 +445,10 @@ static void loom_template_decision_compile_contract(
       .first_feature = cursor->feature_ordinal - cursor->feature_ref_base,
       .predicate_count = source_predicate_count,
       .feature_count =
-          (uint16_t)(target_condition_count +
-                     (loom_template_decision_contract_has_target_identity(
-                          target_symbol, target_facts)
-                          ? 1
-                          : 0)),
+          (uint16_t)(target_condition_count + (has_target_requirement ? 1 : 0)),
   };
 
-  if (loom_template_decision_contract_has_target_identity(target_symbol,
-                                                          target_facts)) {
+  if (has_target_requirement) {
     *cursor->features++ = (loom_template_decision_feature_t){
         .kind = LOOM_TEMPLATE_DECISION_FEATURE_TARGET_IDENTITY,
         .value.target_identity =
@@ -521,6 +506,7 @@ static void loom_template_decision_build_family(
   cursor->predicate_ref_base = first_predicate;
   cursor->constant_ref_base = first_constant;
   loom_template_decision_compile_contract(
+      loom_symbol_ref_is_valid(build_family->family_facts->target_symbol),
       model->module, build_family->family_facts->target_symbol,
       build_family->family_target_facts,
       build_family->family_facts->argument_ids,
@@ -538,9 +524,10 @@ static void loom_template_decision_build_family(
         &model->providers.providers[i];
     loom_decision_program_conjunction_t conjunction = {0};
     loom_template_decision_compile_contract(
-        provider->module, provider->target_symbol, provider->target_facts,
-        provider->argument_ids, provider->argument_count, provider->result_ids,
-        provider->result_count, provider->predicates, provider->predicate_count,
+        provider->has_target_requirement, provider->module,
+        provider->target_symbol, provider->target_facts, provider->argument_ids,
+        provider->argument_count, provider->result_ids, provider->result_count,
+        provider->predicates, provider->predicate_count,
         provider->target_conditions, provider->target_condition_count,
         operand_map, cursor, &conjunction);
     const loom_decision_program_choice_t choice = {
@@ -707,8 +694,7 @@ iree_status_t loom_template_decision_model_catalog_build(
         &build_family->family_target_facts));
     uint32_t family_value_reference_count = 0;
     IREE_RETURN_IF_ERROR(loom_template_decision_count_contract(
-        build_family->family_facts->target_symbol,
-        build_family->family_target_facts,
+        loom_symbol_ref_is_valid(build_family->family_facts->target_symbol),
         build_family->family_facts->predicates,
         build_family->family_facts->predicate_count,
         build_family->family_facts->target_conditions,
@@ -729,8 +715,7 @@ iree_status_t loom_template_decision_model_catalog_build(
     for (uint32_t i = 0; i < family_providers.count; ++i) {
       const loom_template_provider_summary_t* provider =
           &family_providers.providers[i];
-      if (!loom_template_decision_contract_has_target_identity(
-              provider->target_symbol, provider->target_facts)) {
+      if (!provider->has_target_requirement) {
         ++model->target_independent_provider_count;
       }
       if (i > 0 &&
@@ -739,7 +724,7 @@ iree_status_t loom_template_decision_model_catalog_build(
       }
       uint32_t provider_value_reference_count = 0;
       IREE_RETURN_IF_ERROR(loom_template_decision_count_contract(
-          provider->target_symbol, provider->target_facts, provider->predicates,
+          provider->has_target_requirement, provider->predicates,
           provider->predicate_count, provider->target_conditions,
           provider->target_condition_count, build_family,
           &provider_value_reference_count));

@@ -226,6 +226,8 @@ class TemplateDecisionModelTest : public ::testing::Test {
         .result_count = facts->result_count,
         .predicate_count = facts->predicate_count,
         .target_condition_count = facts->target_condition_count,
+        .has_target_requirement =
+            loom_symbol_ref_is_valid(facts->target_symbol),
     };
   }
 

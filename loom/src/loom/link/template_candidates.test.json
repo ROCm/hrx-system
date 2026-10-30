@@ -1,0 +1,170 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "source candidates preserve unresolved target requirements and prune proven lower priorities",
+      "steps": [
+        {
+          "name": "unknown",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/template_selection/target_roots.loom",
+              "--library={srcdir}/testdata/template_selection/target_providers.loom",
+              "--root=unknown"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "@specialized()",
+              "@generic()"
+            ],
+            "not_contains": [
+              "@shadowed()"
+            ]
+          }
+        },
+        {
+          "name": "known",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/template_selection/target_roots.loom",
+              "--library={srcdir}/testdata/template_selection/target_providers.loom",
+              "--root=known"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "@specialized()"
+            ],
+            "not_contains": [
+              "@shadowed()",
+              "@generic()"
+            ]
+          }
+        },
+        {
+          "name": "link-known",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/template_selection/target_roots.loom",
+              "--library={srcdir}/testdata/template_selection/target_providers.loom",
+              "--root=known",
+              "--to=bc",
+              "--output={tmp}/known.loombc"
+            ]
+          }
+        },
+        {
+          "name": "select-known",
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "{tmp}/known.loombc",
+              "--pass=select-templates{mode=final,rewrite=inline}"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "index.constant 4 : index"
+            ],
+            "not_contains": [
+              "template.apply",
+              "index.constant 16"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "bytecode candidates preserve unresolved target requirements and prune proven lower priorities",
+      "steps": [
+        {
+          "name": "encode",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "{srcdir}/testdata/template_selection/target_providers.loom",
+              "--to=bc",
+              "--output={tmp}/providers.loombc"
+            ]
+          }
+        },
+        {
+          "name": "unknown",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/template_selection/target_roots.loom",
+              "--library={tmp}/providers.loombc",
+              "--root=unknown"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "@specialized()",
+              "@generic()"
+            ],
+            "not_contains": [
+              "@shadowed()"
+            ]
+          }
+        },
+        {
+          "name": "known",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/template_selection/target_roots.loom",
+              "--library={tmp}/providers.loombc",
+              "--root=known"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "@specialized()"
+            ],
+            "not_contains": [
+              "@shadowed()",
+              "@generic()"
+            ]
+          }
+        },
+        {
+          "name": "link-known",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/template_selection/target_roots.loom",
+              "--library={tmp}/providers.loombc",
+              "--root=known",
+              "--to=bc",
+              "--output={tmp}/known.loombc"
+            ]
+          }
+        },
+        {
+          "name": "select-known",
+          "run": {
+            "tool": "loom-opt",
+            "args": [
+              "{tmp}/known.loombc",
+              "--pass=select-templates{mode=final,rewrite=inline}"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "index.constant 4 : index"
+            ],
+            "not_contains": [
+              "template.apply",
+              "index.constant 16"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
