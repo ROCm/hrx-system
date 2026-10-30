@@ -58,8 +58,7 @@ adapter binds the tool to a single executable path. Tools launched through an
 interpreter or another multi-argument command prefix can be selected by
 `run.tool`, but cannot be flattened into a string substitution.
 
-Run steps default to `exit: 0`. Stdout and stderr are ignored unless checks are
-declared:
+Run steps default to `exit: 0`. Assertions on stdout and stderr are optional:
 
 ```json
 {
@@ -111,6 +110,11 @@ Expected failures and file checks are explicit:
   ]
 }
 ```
+
+A failed exit, stream, or file assertion reports the command arguments, actual
+exit status, and both captured streams. Diagnostics retain the original output
+even when assertions normalize it. Passing commands remain quiet, including
+commands with an expected nonzero exit.
 
 Generated artifacts can be compared byte-for-byte against another file:
 

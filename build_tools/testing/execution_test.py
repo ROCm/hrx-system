@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
@@ -81,6 +82,189 @@ class ExecutionUnitTest(unittest.TestCase):
             self.assertEqual(
                 runner.run_manifest(manifest_path), execution.RunSummary(case_count=1)
             )
+
+    def test_failed_assertions_retain_command_diagnostics(self):
+        expectations = [
+            ({"exit": 0}, "expected exit 0", False),
+            ({"exit": {"code": 3}}, "unexpected exit 7", False),
+            (
+                {"files": [{"path": "{tmp}/missing.txt"}]},
+                "to exist",
+                False,
+            ),
+            (
+                {"files": [{"path": "{tmp}/report.txt", "exists": False}]},
+                "not to exist",
+                False,
+            ),
+            (
+                {"files": [{"path": "{tmp}/report.txt", "contains": ["missing"]}]},
+                "pattern 'missing'",
+                True,
+            ),
+            (
+                {"files": [{"path": "{tmp}/report.txt", "empty": True}]},
+                "expected empty",
+                True,
+            ),
+            (
+                {
+                    "files": [
+                        {"path": "{tmp}/report.txt", "equals": "{srcdir}/expected.txt"}
+                    ]
+                },
+                "differs from",
+                False,
+            ),
+        ]
+        for stream in ("stdout", "stderr"):
+            expectations.extend(
+                [
+                    (
+                        {stream: {"contains": ["missing"]}},
+                        f"missing {stream} pattern",
+                        False,
+                    ),
+                    (
+                        {stream: {"not_contains": [{"regex": "actual.*"}]}},
+                        f"forbidden {stream} pattern",
+                        False,
+                    ),
+                    ({stream: {"empty": True}}, f"expected empty {stream}", False),
+                    (
+                        {
+                            stream: {
+                                "normalize": [
+                                    {
+                                        "kind": "regex",
+                                        "pattern": "(?s).*",
+                                        "replacement": "",
+                                    }
+                                ],
+                                "non_empty": True,
+                            }
+                        },
+                        f"expected non-empty {stream}",
+                        False,
+                    ),
+                ]
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script_path = root / "probe.py"
+            script_path.write_text(
+                "import sys\n"
+                "from pathlib import Path\n"
+                "print('actual stdout')\n"
+                "print('actual diagnostic', file=sys.stderr)\n"
+                "Path('report.txt').write_text('actual file contents\\n')\n"
+                "sys.exit(7)\n",
+                encoding="utf-8",
+            )
+            (root / "expected.txt").write_text("different contents\n", encoding="utf-8")
+            manifest_path = root / "manifest.json"
+            for expectation, reason, includes_file_contents in expectations:
+                with self.subTest(expectation=expectation):
+                    manifest_path.write_text(
+                        json.dumps(
+                            {
+                                "version": 1,
+                                "cases": [
+                                    {
+                                        "name": "diagnostics",
+                                        "steps": [
+                                            {
+                                                "name": "probe",
+                                                "run": {
+                                                    "tool": "fixture",
+                                                    "args": [
+                                                        "argument with spaces",
+                                                        "",
+                                                    ],
+                                                },
+                                                "exit": {"nonzero": True},
+                                                **expectation,
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                    output = io.StringIO()
+                    runner = execution.ExecutionRunner(
+                        tools={
+                            "fixture": execution.ToolCommand(
+                                sys.executable, (str(script_path),)
+                            )
+                        },
+                        output_stream=output,
+                    )
+                    with mock.patch.dict(
+                        os.environ,
+                        {
+                            "TEST_TMPDIR": directory,
+                            "TEST_UNDECLARED_OUTPUTS_DIR": str(root / "artifacts"),
+                        },
+                    ):
+                        summary = runner.run_manifest(manifest_path)
+                    self.assertEqual(
+                        summary, execution.RunSummary(case_count=1, failed_count=1)
+                    )
+                    diagnostic = output.getvalue()
+                    self.assertIn("diagnostics:probe:", diagnostic)
+                    self.assertIn(reason, diagnostic)
+                    self.assertIn("exit: 7", diagnostic)
+                    self.assertIn(repr(str(script_path)), diagnostic)
+                    self.assertIn("'argument with spaces', ''", diagnostic)
+                    self.assertEqual(diagnostic.count("stdout:\nactual stdout\n"), 1)
+                    self.assertEqual(
+                        diagnostic.count("stderr:\nactual diagnostic\n"), 1
+                    )
+                    self.assertEqual(diagnostic.count("actual stdout\n"), 1)
+                    self.assertEqual(diagnostic.count("actual diagnostic\n"), 1)
+                    if includes_file_contents:
+                        self.assertEqual(diagnostic.count("actual file contents\n"), 1)
+
+    def test_passing_command_diagnostics_stay_quiet(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest_path = Path(directory) / "manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "cases": [
+                            {
+                                "name": "expected failure",
+                                "run": {"tool": "fixture"},
+                                "exit": {"nonzero": True},
+                                "stdout": {"contains": ["expected output"]},
+                                "stderr": {"contains": ["expected diagnostic"]},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            runner = execution.ExecutionRunner(
+                tools={
+                    "fixture": execution.ToolCommand(
+                        sys.executable,
+                        (
+                            "-c",
+                            "import sys; print('expected output'); "
+                            "print('expected diagnostic', file=sys.stderr); sys.exit(7)",
+                        ),
+                    )
+                },
+                output_stream=output,
+            )
+            self.assertEqual(
+                runner.run_manifest(manifest_path), execution.RunSummary(case_count=1)
+            )
+            self.assertEqual(output.getvalue(), "")
 
     def test_tool_environment_is_scoped_and_resolved_before_chdir(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -179,7 +363,6 @@ class ExecutionUnitTest(unittest.TestCase):
         runner._check_stream(
             "case",
             "step",
-            ["fixture"],
             "stdout",
             b"generated output\n",
             {"non_empty": True},
@@ -188,7 +371,6 @@ class ExecutionUnitTest(unittest.TestCase):
             runner._check_stream(
                 "case",
                 "step",
-                ["fixture"],
                 "stdout",
                 b"",
                 {"non_empty": True},
@@ -202,7 +384,6 @@ class ExecutionUnitTest(unittest.TestCase):
             runner._check_stream(
                 "case",
                 "step",
-                ["fixture"],
                 "stdout",
                 b"",
                 {"empty": True, "non_empty": True},

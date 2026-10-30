@@ -372,17 +372,28 @@ class ExecutionRunner:
             raise CaseFailure(
                 f"{case_name}:{step_name}: failed to launch command: {exc}\n"
                 "argv:\n"
-                f"  {' '.join(argv)}\n"
+                f"  {argv!r}\n"
                 f"cwd: {cwd}"
             ) from exc
-        self._check_exit(case_name, step_name, argv, completed, step.get("exit", 0))
-        self._check_stream(
-            case_name, step_name, argv, "stdout", completed.stdout, step.get("stdout")
-        )
-        self._check_stream(
-            case_name, step_name, argv, "stderr", completed.stderr, step.get("stderr")
-        )
-        self._check_files(case_name, step_name, step.get("files", []))
+        try:
+            self._check_exit(
+                case_name, step_name, completed.returncode, step.get("exit", 0)
+            )
+            self._check_stream(
+                case_name, step_name, "stdout", completed.stdout, step.get("stdout")
+            )
+            self._check_stream(
+                case_name, step_name, "stderr", completed.stderr, step.get("stderr")
+            )
+            self._check_files(case_name, step_name, step.get("files", []))
+        except CaseFailure as exc:
+            raise CaseFailure(
+                f"{exc}\n"
+                f"argv:\n  {completed.args!r}\n"
+                f"exit: {completed.returncode}\n"
+                f"stdout:\n{_decode_text(completed.stdout)}\n"
+                f"stderr:\n{_decode_text(completed.stderr)}"
+            ) from exc
         step_outputs[step_name] = completed
 
     def _run_write_step(
@@ -441,34 +452,24 @@ class ExecutionRunner:
         self,
         case_name: str,
         step_name: str,
-        argv: list[str],
-        completed: subprocess.CompletedProcess[bytes],
+        returncode: int,
         expected: Any,
     ) -> None:
         if isinstance(expected, int):
-            if completed.returncode == expected:
+            if returncode == expected:
                 return
-            self._fail_command(
-                case_name, step_name, argv, completed, f"expected exit {expected}"
-            )
+            raise CaseFailure(f"{case_name}:{step_name}: expected exit {expected}")
         spec = _as_mapping(expected, f"{case_name}:{step_name}.exit")
-        if spec.get("nonzero") is True and completed.returncode != 0:
+        if spec.get("nonzero") is True and returncode != 0:
             return
-        if "code" in spec and completed.returncode == spec["code"]:
+        if "code" in spec and returncode == spec["code"]:
             return
-        self._fail_command(
-            case_name,
-            step_name,
-            argv,
-            completed,
-            f"unexpected exit {completed.returncode}",
-        )
+        raise CaseFailure(f"{case_name}:{step_name}: unexpected exit {returncode}")
 
     def _check_stream(
         self,
         case_name: str,
         step_name: str,
-        argv: list[str],
         stream_name: str,
         raw: bytes,
         spec_value: Any,
@@ -489,20 +490,10 @@ class ExecutionRunner:
             save_path.write_bytes(raw)
         text = _normalize_text(_decode_text(raw), spec.get("normalize"))
         if spec.get("empty") is True and text:
-            self._fail_command(
-                case_name,
-                step_name,
-                argv,
-                None,
-                f"expected empty {stream_name}, got:\n{text}",
-            )
+            raise CaseFailure(f"{case_name}:{step_name}: expected empty {stream_name}")
         if spec.get("non_empty") is True and not text:
-            self._fail_command(
-                case_name,
-                step_name,
-                argv,
-                None,
-                f"expected non-empty {stream_name}",
+            raise CaseFailure(
+                f"{case_name}:{step_name}: expected non-empty {stream_name}"
             )
         if "contains" in spec:
             self._check_contains(
@@ -529,8 +520,7 @@ class ExecutionRunner:
             match = self._find_match(text, entry, position if ordered else 0)
             if match is None:
                 raise CaseFailure(
-                    f"{case_name}:{step_name}: missing {stream_name} pattern "
-                    f"{entry!r}\n{stream_name}:\n{text}"
+                    f"{case_name}:{step_name}: missing {stream_name} pattern {entry!r}"
                 )
             if ordered:
                 position = match
@@ -550,7 +540,7 @@ class ExecutionRunner:
             if self._find_match(text, entry, 0) is not None:
                 raise CaseFailure(
                     f"{case_name}:{step_name}: forbidden {stream_name} pattern "
-                    f"{entry!r}\n{stream_name}:\n{text}"
+                    f"{entry!r}"
                 )
 
     def _contains_entries(self, value: Any, location: str) -> tuple[bool, list[Any]]:
@@ -623,14 +613,13 @@ class ExecutionRunner:
                     f"{case_name}:{step_name}: expected file {path} to exist"
                 )
             if content_spec:
-                self._check_stream(
-                    case_name,
-                    step_name,
-                    [],
-                    str(path),
-                    path.read_bytes(),
-                    content_spec,
-                )
+                raw = path.read_bytes()
+                try:
+                    self._check_stream(
+                        case_name, step_name, str(path), raw, content_spec
+                    )
+                except CaseFailure as exc:
+                    raise CaseFailure(f"{exc}\n{path}:\n{_decode_text(raw)}") from exc
             if "equals" in spec:
                 expected_path = Path(
                     _as_string(
@@ -648,31 +637,6 @@ class ExecutionRunner:
                         f"{case_name}:{step_name}: file {path} differs from "
                         f"{expected_path}"
                     )
-
-    def _fail_command(
-        self,
-        case_name: str,
-        step_name: str,
-        argv: list[str],
-        completed: subprocess.CompletedProcess[bytes] | None,
-        reason: str,
-    ) -> None:
-        message = [
-            f"{case_name}:{step_name}: {reason}",
-            "argv:",
-            "  " + " ".join(argv),
-        ]
-        if completed is not None:
-            message.extend(
-                [
-                    f"exit: {completed.returncode}",
-                    "stdout:",
-                    _decode_text(completed.stdout),
-                    "stderr:",
-                    _decode_text(completed.stderr),
-                ]
-            )
-        raise CaseFailure("\n".join(message))
 
     def _preserve_failed_temp(self, case_name: str, temp_dir: Path) -> None:
         undeclared_outputs = os.environ.get("TEST_UNDECLARED_OUTPUTS_DIR")
