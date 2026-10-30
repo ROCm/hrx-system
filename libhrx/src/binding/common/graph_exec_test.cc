@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
+#include <semaphore>
 #include <thread>
 #include <utility>
 
@@ -415,7 +416,8 @@ class GraphExecTest : public ::testing::Test {
 
   void TearDown() override {
     if (context_) {
-      IREE_EXPECT_OK(iree_hal_streaming_context_synchronize(context_));
+      IREE_EXPECT_STATUS_IS(expected_synchronization_status_,
+                            iree_hal_streaming_context_synchronize(context_));
     }
     iree_hal_streaming_host_callback_queue_stop(&host_callbacks_);
     iree_hal_streaming_stream_release(stream_);
@@ -453,6 +455,8 @@ class GraphExecTest : public ::testing::Test {
   iree_hal_streaming_context_t* context_ = nullptr;
   // Stream every launch submits on.
   iree_hal_streaming_stream_t* stream_ = nullptr;
+  // A failed submission remains observable at the context's completion join.
+  iree_status_code_t expected_synchronization_status_ = IREE_STATUS_OK;
   // Set by the host-call node a graph carries. A fixture member rather than a
   // local because no semaphore edge a test can name joins a block an aborted
   // launch left in flight; hrx_cpu_shutdown() above is what drains the workers,
@@ -465,6 +469,132 @@ class GraphExecTest : public ::testing::Test {
   // pending as the test body returns.
   std::atomic<bool> stream_marker_ran_{false};
 };
+
+TEST_F(GraphExecTest,
+       HostOperationFailureStopsDependentsAndPreservesOtherStreams) {
+  struct Operation {
+    // Allows the whole graph to be submitted before its dependency fails.
+    std::binary_semaphore release{0};
+    // Proves the operation reached its allocation dependency.
+    std::atomic<bool> invoked{false};
+  } operation;
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_exec_t* executable = nullptr;
+  iree_hal_streaming_stream_t* failed_stream = nullptr;
+  bool operation_released = false;
+  ScopeExit release_handles([&] {
+    if (!operation_released) {
+      operation.release.release();
+    }
+    iree_hal_streaming_host_callback_queue_stop(&host_callbacks_);
+    iree_hal_streaming_graph_exec_release(executable);
+    iree_hal_streaming_graph_release(graph);
+    iree_hal_streaming_stream_release(failed_stream);
+  });
+  IREE_ASSERT_OK(iree_hal_streaming_stream_create(
+      context_, context_->queue, IREE_HAL_STREAMING_STREAM_FLAG_NON_BLOCKING,
+      /*priority=*/0, iree_allocator_system(), &failed_stream));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+  iree_hal_streaming_graph_node_t* operation_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_operation_node(
+      graph, nullptr, 0,
+      +[](void* user_data) {
+        auto* operation = static_cast<Operation*>(user_data);
+        operation->release.acquire();
+        operation->invoked.store(true, std::memory_order_release);
+        const iree_allocator_t allocator = {
+            .self = nullptr,
+            .ctl =
+                +[](void*, iree_allocator_command_t command, const void*,
+                    void**) {
+                  return command == IREE_ALLOCATOR_COMMAND_FREE
+                             ? iree_ok_status()
+                             : iree_status_from_code(
+                                   IREE_STATUS_RESOURCE_EXHAUSTED);
+                },
+        };
+        void* staging = nullptr;
+        return iree_allocator_malloc(allocator, 16, &staging);
+      },
+      &operation, &operation_node));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      graph, &operation_node, 1, SetFlag, &graph_host_node_ran_, nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+  iree_hal_streaming_graph_exec_launch_result_t launch_result;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(executable, failed_stream,
+                                                      &launch_result));
+  EXPECT_EQ(launch_result, IREE_HAL_STREAMING_GRAPH_EXEC_LAUNCH_SUCCESS);
+  expected_synchronization_status_ = IREE_STATUS_RESOURCE_EXHAUSTED;
+  operation.release.release();
+  operation_released = true;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_semaphore_wait(failed_stream->timeline_semaphore,
+                              failed_stream->pending_value,
+                              iree_infinite_timeout(), 0));
+  EXPECT_TRUE(operation.invoked.load(std::memory_order_acquire));
+  EXPECT_FALSE(graph_host_node_ran_.load(std::memory_order_acquire));
+  IREE_ASSERT_OK(iree_hal_streaming_launch_host_function(stream_, SetFlag,
+                                                         &stream_marker_ran_));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(stream_->timeline_semaphore,
+                                         stream_->pending_value,
+                                         iree_infinite_timeout(), 0));
+  EXPECT_TRUE(stream_marker_ran_.load(std::memory_order_acquire));
+}
+
+TEST_F(GraphExecTest, ClonedHostOperationOwnsItsPayloadAndExecutableSnapshot) {
+  struct Copy {
+    // Value captured by the graph and snapshotted at instantiation.
+    int value;
+    // Borrowed application output, live through stream completion.
+    int* output;
+  };
+  int output = 0;
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_t* clone = nullptr;
+  iree_hal_streaming_graph_exec_t* executable = nullptr;
+  ScopeExit release_handles([&] {
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    iree_hal_streaming_graph_exec_release(executable);
+    iree_hal_streaming_graph_release(clone);
+    iree_hal_streaming_graph_release(graph);
+  });
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, iree_allocator_system(),
+      &graph));
+  Copy* copy = nullptr;
+  IREE_ASSERT_OK(iree_arena_allocate(&graph->arena, sizeof(*copy),
+                                     reinterpret_cast<void**>(&copy)));
+  *copy = {17, &output};
+  iree_hal_streaming_graph_node_t* node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_operation_node(
+      graph, nullptr, 0,
+      +[](void* user_data) {
+        auto* copy = static_cast<Copy*>(user_data);
+        *copy->output = copy->value;
+        return iree_ok_status();
+      },
+      copy, &node));
+  node->attrs.host.user_data_size = sizeof(*copy);
+  IREE_ASSERT_OK(iree_hal_streaming_graph_clone(graph, &clone));
+  copy->value = 23;
+  iree_hal_streaming_graph_release(graph);
+  graph = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      clone, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+  iree_hal_streaming_graph_node_t* cloned_node = clone->node_blocks->nodes[0];
+  auto* cloned_copy = static_cast<Copy*>(cloned_node->attrs.host.user_data);
+  EXPECT_EQ(cloned_copy->value, 17);
+  cloned_copy->value = 31;
+  iree_hal_streaming_graph_exec_launch_result_t launch_result;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(executable, stream_,
+                                                      &launch_result));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_EQ(output, 17);
+}
 
 TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
   iree_hal_pool_t* memory_pool = nullptr;

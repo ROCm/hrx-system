@@ -20,7 +20,7 @@ struct iree_hal_streaming_host_callback_job_t {
   // Next ready callback, linked only while queued under the owner's mutex.
   iree_hal_streaming_host_callback_job_t* next;
   // Application function or compatibility CPU copy invoked by the worker.
-  void (*fn)(void* user_data);
+  iree_hal_streaming_host_callback_t callback;
   // Unowned function argument, optionally protected by captured_resource.
   void* user_data;
   // Retained callback payload released before publishing callback completion.
@@ -53,13 +53,20 @@ static const iree_hal_resource_vtable_t
 static void iree_hal_streaming_host_callback_run(
     iree_hal_streaming_host_callback_job_t* callback) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  callback->fn(callback->user_data);
+  iree_status_t status = iree_ok_status();
+  if (callback->callback.type ==
+      IREE_HAL_STREAMING_HOST_CALLBACK_TYPE_OPERATION) {
+    status = callback->callback.operation(callback->user_data);
+  } else {
+    callback->callback.function(callback->user_data);
+  }
   // End captured CPU state before waking stream consumers. The worker still
   // owns the capture while signaling may synchronously dispatch continuations.
   iree_hal_resource_release(callback->captured_resource);
   callback->captured_resource = NULL;
-  iree_status_t status =
-      iree_hal_semaphore_list_signal(callback->signals, NULL);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_semaphore_list_signal(callback->signals, NULL);
+  }
   if (!iree_status_is_ok(status)) {
     iree_hal_semaphore_list_fail(callback->signals, status);
   }
@@ -161,9 +168,9 @@ static iree_status_t iree_hal_streaming_host_callback_ready(
 }
 
 iree_status_t iree_hal_streaming_host_callback_prepare(
-    iree_hal_streaming_host_callback_queue_t* queue, void (*fn)(void*),
-    void* user_data, iree_hal_resource_t* resource,
-    iree_hal_host_call_t* out_call) {
+    iree_hal_streaming_host_callback_queue_t* queue,
+    iree_hal_streaming_host_callback_t callback_code, void* user_data,
+    iree_hal_resource_t* resource, iree_hal_host_call_t* out_call) {
   iree_hal_streaming_host_callback_job_t* callback = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       queue->host_allocator, sizeof(*callback), (void**)&callback));
@@ -171,7 +178,7 @@ iree_status_t iree_hal_streaming_host_callback_prepare(
                                &callback->resource);
   callback->host_allocator = queue->host_allocator;
   callback->queue = queue;
-  callback->fn = fn;
+  callback->callback = callback_code;
   callback->user_data = user_data;
   callback->captured_resource = resource;
   iree_hal_resource_retain(resource);

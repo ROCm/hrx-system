@@ -971,8 +971,6 @@ iree_status_t iree_hal_streaming_graph_clone(
             &clone_node->attrs.memcpy.src_ref);
       } else if (source_node->type ==
                      IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL &&
-                 (source_node->flags &
-                  IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN) != 0 &&
                  source_node->attrs.host.user_data &&
                  source_node->attrs.host.user_data_size > 0) {
         void* clone_data = NULL;
@@ -988,8 +986,10 @@ iree_status_t iree_hal_streaming_graph_clone(
         // Graph-owned hidden host callbacks currently use a memcpy-compatible
         // prefix. Preserve the rest of the callback-private payload verbatim
         // while remapping staged host pointers into the clone's allocations.
-        if (source_node->attrs.host.user_data_size >=
-            sizeof(iree_hal_streaming_graph_clone_host_memcpy_prefix_t)) {
+        if ((source_node->flags & IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN) !=
+                0 &&
+            source_node->attrs.host.user_data_size >=
+                sizeof(iree_hal_streaming_graph_clone_host_memcpy_prefix_t)) {
           iree_hal_streaming_graph_clone_host_memcpy_prefix_t* source_data =
               (iree_hal_streaming_graph_clone_host_memcpy_prefix_t*)
                   source_node->attrs.host.user_data;
@@ -1804,13 +1804,13 @@ iree_status_t iree_hal_streaming_graph_add_fill_ptr_node(
   return status;
 }
 
-iree_status_t iree_hal_streaming_graph_add_host_call_node(
+static iree_status_t iree_hal_streaming_graph_add_host_callback_node(
     iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** dependencies,
-    iree_host_size_t dependency_count, void (*fn)(void*), void* user_data,
+    iree_host_size_t dependency_count,
+    iree_hal_streaming_host_callback_t callback, void* user_data,
     iree_hal_streaming_graph_node_t** out_node) {
   IREE_ASSERT_ARGUMENT(graph);
-  IREE_ASSERT_ARGUMENT(fn);
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_streaming_graph_validate_dependencies(graph, dependencies,
@@ -1833,7 +1833,7 @@ iree_status_t iree_hal_streaming_graph_add_host_call_node(
 
   // Copy host function data.
   iree_hal_streaming_graph_host_call_node_attrs_t* attrs = &node->attrs.host;
-  attrs->fn = fn;
+  attrs->callback = callback;
   attrs->user_data = user_data;
   attrs->user_data_size = 0;
 
@@ -1843,6 +1843,26 @@ iree_status_t iree_hal_streaming_graph_add_host_call_node(
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+iree_status_t iree_hal_streaming_graph_add_host_call_node(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count, void (*fn)(void*), void* user_data,
+    iree_hal_streaming_graph_node_t** out_node) {
+  return iree_hal_streaming_graph_add_host_callback_node(
+      graph, dependencies, dependency_count,
+      iree_hal_streaming_make_host_function(fn), user_data, out_node);
+}
+
+iree_status_t iree_hal_streaming_graph_add_host_operation_node(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count, iree_status_t (*operation)(void*),
+    void* user_data, iree_hal_streaming_graph_node_t** out_node) {
+  return iree_hal_streaming_graph_add_host_callback_node(
+      graph, dependencies, dependency_count,
+      iree_hal_streaming_make_host_operation(operation), user_data, out_node);
 }
 
 iree_status_t iree_hal_streaming_graph_add_event_node(

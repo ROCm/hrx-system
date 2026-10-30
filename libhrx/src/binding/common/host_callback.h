@@ -20,6 +20,45 @@ extern "C" {
 typedef struct iree_hal_streaming_host_callback_job_t
     iree_hal_streaming_host_callback_job_t;
 
+typedef enum iree_hal_streaming_host_callback_type_e {
+  // Application-defined function with the HIP/CUDA void return convention.
+  IREE_HAL_STREAMING_HOST_CALLBACK_TYPE_FUNCTION = 0,
+  // Compatibility operation whose result controls dependent stream progress.
+  IREE_HAL_STREAMING_HOST_CALLBACK_TYPE_OPERATION,
+} iree_hal_streaming_host_callback_type_t;
+
+// Callback code shared by stream invocations and compiled graph blocks. The
+// argument and its ownership are carried separately by the invocation. An
+// operation returns success or an owned error; it cannot defer completion.
+typedef struct iree_hal_streaming_host_callback_t {
+  // Selects the active function pointer and its return convention.
+  iree_hal_streaming_host_callback_type_t type;
+  union {
+    // Application function, active when type is FUNCTION.
+    void (*function)(void* user_data);
+    // Fallible compatibility operation, active when type is OPERATION.
+    iree_status_t (*operation)(void* user_data);
+  };
+} iree_hal_streaming_host_callback_t;
+
+static inline iree_hal_streaming_host_callback_t
+iree_hal_streaming_make_host_function(void (*function)(void*)) {
+  iree_hal_streaming_host_callback_t callback = {
+      .type = IREE_HAL_STREAMING_HOST_CALLBACK_TYPE_FUNCTION,
+      .function = function,
+  };
+  return callback;
+}
+
+static inline iree_hal_streaming_host_callback_t
+iree_hal_streaming_make_host_operation(iree_status_t (*operation)(void*)) {
+  iree_hal_streaming_host_callback_t callback = {
+      .type = IREE_HAL_STREAMING_HOST_CALLBACK_TYPE_OPERATION,
+      .operation = operation,
+  };
+  return callback;
+}
+
 // Frontend-owned FIFO of ready compatibility callouts. Native queues retain
 // responsibility for dependency waiting and GPU visibility. Only application
 // host functions and bulk compatibility CPU copies use this execution owner.
@@ -67,12 +106,13 @@ void iree_hal_streaming_host_callback_queue_deinitialize(
 // execution or cancellation. Success returns an owned reference in
 // out_call->resource; the caller releases it after queue_host_call returns.
 // Failure changes no output. The HAL adapter clones its ready completion list
-// and returns DEFERRED; only this queue's worker invokes |fn|. No device
-// reference is retained.
+// and returns DEFERRED; only this queue's worker invokes |callback|. Operation
+// errors fail that completion list after releasing the captured payload. No
+// device reference is retained.
 iree_status_t iree_hal_streaming_host_callback_prepare(
-    iree_hal_streaming_host_callback_queue_t* queue, void (*fn)(void*),
-    void* user_data, iree_hal_resource_t* resource,
-    iree_hal_host_call_t* out_call);
+    iree_hal_streaming_host_callback_queue_t* queue,
+    iree_hal_streaming_host_callback_t callback, void* user_data,
+    iree_hal_resource_t* resource, iree_hal_host_call_t* out_call);
 
 #ifdef __cplusplus
 }  // extern "C"

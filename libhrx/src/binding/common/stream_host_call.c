@@ -88,7 +88,8 @@ iree_status_t iree_hal_streaming_launch_host_function(
   iree_hal_host_call_t call;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_streaming_host_callback_prepare(
-              stream->context->device_entry->host_callbacks, fn, user_data,
+              stream->context->device_entry->host_callbacks,
+              iree_hal_streaming_make_host_function(fn), user_data,
               /*resource=*/NULL, &call));
 
   const uint64_t args[4] = {0, 0, 0, 0};

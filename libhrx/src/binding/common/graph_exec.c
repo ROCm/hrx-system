@@ -42,8 +42,6 @@ typedef enum iree_hal_streaming_graph_block_type_e {
   IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_CHILD_GRAPH,
 } iree_hal_streaming_graph_block_type_t;
 
-typedef void (*iree_hal_streaming_host_callback_t)(void* user_data);
-
 // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_BARRIER
 typedef struct iree_hal_streaming_graph_barrier_block_attrs_t {
   iree_hal_queue_barrier_flags_t flags;
@@ -72,7 +70,7 @@ typedef struct iree_hal_streaming_graph_copy_block_attrs_t {
 // IREE_HAL_STREAMING_GRAPH_BLOCK_TYPE_QUEUE_HOST_CALL
 typedef struct iree_hal_streaming_graph_host_call_block_attrs_t {
   // Host callback invoked when the queued host call reaches this block.
-  iree_hal_streaming_host_callback_t fn;
+  iree_hal_streaming_host_callback_t callback;
   // User data passed to the host callback.
   void* user_data;
   // Host-call submission flags.
@@ -1268,8 +1266,9 @@ static iree_status_t iree_hal_streaming_graph_create_copy_block(
 static iree_status_t iree_hal_streaming_graph_create_host_call_block(
     iree_hal_streaming_graph_exec_t* exec, uint32_t node_start_index,
     uint32_t node_count, uint16_t wait_semaphore_count,
-    uint16_t signal_semaphore_count, void (*fn)(void* user_data),
-    void* user_data, const iree_hal_streaming_graph_node_t* source_node,
+    uint16_t signal_semaphore_count,
+    iree_hal_streaming_host_callback_t callback, void* user_data,
+    const iree_hal_streaming_graph_node_t* source_node,
     iree_hal_host_call_flags_t flags,
     iree_hal_streaming_graph_block_t** out_block,
     iree_hal_streaming_graph_block_ptrs_t* out_ptrs) {
@@ -1287,7 +1286,7 @@ static iree_status_t iree_hal_streaming_graph_create_host_call_block(
   // Set host call attributes.
   iree_hal_streaming_graph_host_call_block_attrs_t* attrs =
       &out_ptrs->attrs->host_call;
-  attrs->fn = fn;
+  attrs->callback = callback;
   attrs->user_data = user_data;
   if (source_node && source_node->attrs.host.user_data_size > 0 && user_data) {
     void* copied_data = NULL;
@@ -1989,7 +1988,7 @@ iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
             z0, iree_hal_streaming_graph_create_host_call_block(
                     exec, partition->start_index, partition->count,
                     wait_semaphore_count, signal_semaphore_count,
-                    node->attrs.host.fn, node->attrs.host.user_data, node,
+                    node->attrs.host.callback, node->attrs.host.user_data, node,
                     IREE_HAL_HOST_CALL_FLAG_NONE, &block, &ptrs));
       } else if (partition->type ==
                  IREE_HAL_STREAMING_GRAPH_PARTITION_TYPE_DISPATCH) {
@@ -2424,7 +2423,7 @@ static iree_status_t iree_hal_streaming_graph_submit_block(
       iree_hal_host_call_t call;
       status = iree_hal_streaming_host_callback_prepare(
           stream->context->device_entry->host_callbacks,
-          ptrs->attrs->host_call.fn, ptrs->attrs->host_call.user_data,
+          ptrs->attrs->host_call.callback, ptrs->attrs->host_call.user_data,
           /*resource=*/NULL, &call);
       if (iree_status_is_ok(status)) {
         const uint64_t args[4] = {0};

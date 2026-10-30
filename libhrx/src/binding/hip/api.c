@@ -20460,7 +20460,9 @@ static void iree_hip_graph_memcpy_callback(void* user_data) {
 static bool iree_hip_graph_node_is_memcpy_host_call(
     const iree_hal_streaming_graph_node_t* node) {
   return node && node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL &&
-         node->attrs.host.fn == iree_hip_graph_memcpy_callback &&
+         node->attrs.host.callback.type ==
+             IREE_HAL_STREAMING_HOST_CALLBACK_TYPE_FUNCTION &&
+         node->attrs.host.callback.function == iree_hip_graph_memcpy_callback &&
          node->attrs.host.user_data;
 }
 
@@ -23451,7 +23453,9 @@ static bool iree_hip_graph_node_is_hidden_memcpy_callback(
     const iree_hal_streaming_graph_node_t* node) {
   return node && node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL &&
          (node->flags & IREE_HAL_STREAMING_GRAPH_NODE_FLAG_HIDDEN) != 0 &&
-         node->attrs.host.fn == iree_hip_graph_memcpy_callback &&
+         node->attrs.host.callback.type ==
+             IREE_HAL_STREAMING_HOST_CALLBACK_TYPE_FUNCTION &&
+         node->attrs.host.callback.function == iree_hip_graph_memcpy_callback &&
          node->attrs.host.user_data;
 }
 
@@ -24398,13 +24402,17 @@ HIPAPI hipError_t hipGraphExecHostNodeSetParams(hipGraphExec_t graphExec,
       (iree_hal_streaming_graph_node_t*)node;
   if (!iree_hip_graph_node_is_active(stream_node) ||
       !iree_hal_streaming_graph_exec_owns_node(exec, stream_node) ||
-      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL) {
+      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL ||
+      stream_node->attrs.host.callback.type !=
+          IREE_HAL_STREAMING_HOST_CALLBACK_TYPE_FUNCTION ||
+      iree_hip_graph_node_is_memcpy_host_call(stream_node)) {
     iree_hal_streaming_graph_exec_release(exec);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
   iree_hal_streaming_graph_host_call_node_attrs_t old_attrs =
       stream_node->attrs.host;
-  stream_node->attrs.host.fn = (void (*)(void*))params->fn;
+  stream_node->attrs.host.callback =
+      iree_hal_streaming_make_host_function((void (*)(void*))params->fn);
   stream_node->attrs.host.user_data = params->userData;
   result = iree_hip_graph_exec_rebuild(exec);
   stream_node->attrs.host = old_attrs;
@@ -24800,10 +24808,14 @@ HIPAPI hipError_t hipGraphHostNodeSetParams(hipGraphNode_t node,
   iree_hal_streaming_graph_node_t* stream_node =
       (iree_hal_streaming_graph_node_t*)node;
   if (!iree_hip_graph_node_is_active(stream_node) ||
-      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL) {
+      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL ||
+      stream_node->attrs.host.callback.type !=
+          IREE_HAL_STREAMING_HOST_CALLBACK_TYPE_FUNCTION ||
+      iree_hip_graph_node_is_memcpy_host_call(stream_node)) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  stream_node->attrs.host.fn = (void (*)(void*))params->fn;
+  stream_node->attrs.host.callback =
+      iree_hal_streaming_make_host_function((void (*)(void*))params->fn);
   stream_node->attrs.host.user_data = params->userData;
   HIP_RETURN_ERROR(hipSuccess);
 }
@@ -24817,10 +24829,13 @@ HIPAPI hipError_t hipGraphHostNodeGetParams(hipGraphNode_t node,
   iree_hal_streaming_graph_node_t* stream_node =
       (iree_hal_streaming_graph_node_t*)node;
   if (!iree_hip_graph_node_is_active(stream_node) ||
-      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL) {
+      stream_node->type != IREE_HAL_STREAMING_GRAPH_NODE_TYPE_HOST_CALL ||
+      stream_node->attrs.host.callback.type !=
+          IREE_HAL_STREAMING_HOST_CALLBACK_TYPE_FUNCTION ||
+      iree_hip_graph_node_is_memcpy_host_call(stream_node)) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
-  pNodeParams->fn = (hipHostFn_t)stream_node->attrs.host.fn;
+  pNodeParams->fn = (hipHostFn_t)stream_node->attrs.host.callback.function;
   pNodeParams->userData = stream_node->attrs.host.user_data;
   HIP_RETURN_ERROR(hipSuccess);
 }

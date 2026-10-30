@@ -7,6 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_STREAMING_GRAPH_H_
 #define IREE_EXPERIMENTAL_STREAMING_GRAPH_H_
 
+#include "common/host_callback.h"
 #include "common/memory.h"
 #include "common/stream.h"
 #include "iree/base/api.h"
@@ -251,8 +252,8 @@ typedef struct iree_hal_streaming_graph_memset_node_attrs_t {
 } iree_hal_streaming_graph_memset_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_host_call_node_attrs_t {
-  // Host callback function.
-  void (*fn)(void* user_data);
+  // Application function or fallible compatibility operation.
+  iree_hal_streaming_host_callback_t callback;
   // User data passed to the host callback function.
   void* user_data;
   // Bytes of graph-owned user data to copy into graph execs, or zero.
@@ -457,6 +458,16 @@ iree_status_t iree_hal_streaming_graph_add_host_call_node(
     iree_hal_streaming_graph_node_t** dependencies,
     iree_host_size_t dependency_count, void (*fn)(void*), void* user_data,
     iree_hal_streaming_graph_node_t** out_node);
+
+// Adds an internal compatibility operation whose failure propagates through
+// graph completion. Unlike application host functions, operations can fail due
+// to allocation or transfer dependencies. Owned payloads set user_data_size on
+// the returned node so cloning and instantiation preserve their storage.
+iree_status_t iree_hal_streaming_graph_add_host_operation_node(
+    iree_hal_streaming_graph_t* graph,
+    iree_hal_streaming_graph_node_t** dependencies,
+    iree_host_size_t dependency_count, iree_status_t (*operation)(void*),
+    void* user_data, iree_hal_streaming_graph_node_t** out_node);
 
 iree_status_t iree_hal_streaming_graph_add_event_node(
     iree_hal_streaming_graph_t* graph,
