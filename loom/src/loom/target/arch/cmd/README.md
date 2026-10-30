@@ -102,8 +102,10 @@ instead of acquiring an implicit runtime interpretation.
 aligned `view<1xi64>`. It participates in ordinary wave scheduling and storage
 lifetime planning, and lowers to `cmd.timestamp` or `cmd.timestamp.barrier`
 with a normal buffer reference. No kernel entry or separate allocation is
-needed. Portable records preserve the capture; HAL materialization reports
-`UNIMPLEMENTED` until capture and execution ordering are implemented there.
+needed. HAL recording preserves the planned execution edges without introducing
+ordering between concurrent siblings. Memory dependencies deliver samples to
+their consumers; normal completion delivers samples that have no earlier
+consumer. Queue families without timestamp support reject recording.
 
 `command.parameter` names immutable content within an explicit source buffer.
 It returns a typed logical view and contributes a placement requirement; it

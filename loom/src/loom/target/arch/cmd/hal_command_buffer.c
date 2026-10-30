@@ -327,11 +327,20 @@ static iree_status_t loom_cmd_program_hal_record_commands(
         status = loom_cmd_program_hal_record_barrier(
             program, &command, fixed_bindings, barriers, command_buffer);
         break;
-      case LOOM_CMD_PROGRAM_COMMAND_KIND_TIMESTAMP:
-        status = iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "command timestamp HAL materialization is not implemented");
+      case LOOM_CMD_PROGRAM_COMMAND_KIND_TIMESTAMP: {
+        iree_hal_buffer_ref_t target = {0};
+        status = loom_cmd_program_hal_buffer_ref(
+            loom_cmd_program_buffer_ref_at(
+                program, command.payload.timestamp.target_buffer_ref),
+            fixed_bindings, &target);
+        if (iree_status_is_ok(status)) {
+          // Wave edges already order capture. Zero masks preserve concurrent
+          // siblings; delivery belongs to memory dependencies or completion.
+          status = iree_hal_command_buffer_timestamp(
+              command_buffer, 0, 0, target, IREE_HAL_TIMESTAMP_FLAG_NONE);
+        }
         break;
+      }
       case LOOM_CMD_PROGRAM_COMMAND_KIND_FILL: {
         iree_hal_buffer_ref_t target = {0};
         status = loom_cmd_program_hal_buffer_ref(
