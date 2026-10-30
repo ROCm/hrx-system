@@ -96,10 +96,12 @@ void iree_hal_streaming_event_timestamp_slot_retain(
 
 // Drops one reference to |slot|; NULL is ignored. The last reference returns it
 // to its pool: straight to the free list when |retire_semaphore| is NULL or has
-// already reached |retire_value|, and otherwise onto a pending list the pool
-// drains before it grows, so a slot a submission may still write is never
+// successfully reached |retire_value|, and otherwise onto a pending list the
+// pool drains before it grows, so a slot a submission may still write is never
 // handed out again. A NULL |retire_semaphore| states that no write is
-// outstanding, which only the record that failed to enqueue can say.
+// outstanding, which only the record that failed to enqueue can say. A failed
+// semaphore does not prove that an accepted write stopped; its slot is retained
+// until pool teardown instead of being reused by another record.
 void iree_hal_streaming_event_timestamp_slot_release(
     iree_hal_streaming_event_timestamp_slot_t* slot,
     iree_hal_semaphore_t* retire_semaphore, uint64_t retire_value);
