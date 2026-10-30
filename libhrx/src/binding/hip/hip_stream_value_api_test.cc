@@ -1384,7 +1384,7 @@ TEST_F(HipStreamValueApiTest, CapturedWriteBatchReplaysAsOneNode) {
 
 TEST_F(HipStreamValueApiTest, DirectBatchNodeSupportsTemplateAndExecUpdates) {
   hipStream_t stream = CreateStream();
-  void* allocation = Allocate(16);
+  void* allocation = Allocate(3 * sizeof(uint64_t));
   ASSERT_NE(nullptr, stream);
   ASSERT_NE(nullptr, allocation);
 
@@ -1427,6 +1427,20 @@ TEST_F(HipStreamValueApiTest, DirectBatchNodeSupportsTemplateAndExecUpdates) {
   ASSERT_EQ(2u, queried_params.count);
   ASSERT_EQ(hipSuccess,
             api_.graph_batch_mem_op_node_set_params(node, &queried_params));
+
+  hipStreamBatchMemOpParams second_operation = operations[0];
+  second_operation.writeValue.address =
+      static_cast<uint8_t*>(allocation) + 2 * sizeof(uint64_t);
+  second_operation.writeValue.value64 = 7;
+  hipBatchMemOpNodeParams second_params = {
+      .ctx = context,
+      .count = 1,
+      .paramArray = &second_operation,
+      .flags = 0,
+  };
+  hipGraphNode_t second_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.graph_add_batch_mem_op_node(
+                            &second_node, graph, &node, 1, &second_params));
   hipGraphExec_t executable = nullptr;
   ASSERT_EQ(hipSuccess,
             api_.graph_instantiate(&executable, graph, /*error_node=*/nullptr,
@@ -1438,6 +1452,9 @@ TEST_F(HipStreamValueApiTest, DirectBatchNodeSupportsTemplateAndExecUpdates) {
   operations[1].writeValue.value64 = 19;
   ASSERT_EQ(hipSuccess, api_.graph_exec_batch_mem_op_node_set_params(
                             executable, node, &params));
+  second_operation.writeValue.value64 = 23;
+  ASSERT_EQ(hipSuccess, api_.graph_exec_batch_mem_op_node_set_params(
+                            executable, second_node, &second_params));
 
   hipBatchMemOpNodeParams observed_params = {};
   ASSERT_EQ(hipSuccess,
@@ -1447,14 +1464,15 @@ TEST_F(HipStreamValueApiTest, DirectBatchNodeSupportsTemplateAndExecUpdates) {
   EXPECT_EQ(11u, observed_params.paramArray[0].writeValue.value64);
   EXPECT_EQ(13u, observed_params.paramArray[1].writeValue.value64);
 
-  ASSERT_EQ(hipSuccess, api_.memset(allocation, 0, 16));
+  ASSERT_EQ(hipSuccess, api_.memset(allocation, 0, 3 * sizeof(uint64_t)));
   ASSERT_EQ(hipSuccess, api_.graph_launch(executable, stream));
   ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream));
-  uint64_t observed[2] = {};
+  uint64_t observed[3] = {};
   ASSERT_EQ(hipSuccess, api_.memcpy(observed, allocation, sizeof(observed),
                                     hipMemcpyDeviceToHost));
   EXPECT_EQ(17u, observed[0]);
   EXPECT_EQ(19u, observed[1]);
+  EXPECT_EQ(23u, observed[2]);
 
   hipGraphExec_t template_executable = nullptr;
   ASSERT_EQ(hipSuccess,
@@ -1463,13 +1481,14 @@ TEST_F(HipStreamValueApiTest, DirectBatchNodeSupportsTemplateAndExecUpdates) {
                                    /*log_buffer=*/nullptr, /*buffer_size=*/0));
   ASSERT_NE(nullptr, template_executable);
   graph_executables_.push_back(template_executable);
-  ASSERT_EQ(hipSuccess, api_.memset(allocation, 0, 16));
+  ASSERT_EQ(hipSuccess, api_.memset(allocation, 0, 3 * sizeof(uint64_t)));
   ASSERT_EQ(hipSuccess, api_.graph_launch(template_executable, stream));
   ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream));
   ASSERT_EQ(hipSuccess, api_.memcpy(observed, allocation, sizeof(observed),
                                     hipMemcpyDeviceToHost));
   EXPECT_EQ(11u, observed[0]);
   EXPECT_EQ(13u, observed[1]);
+  EXPECT_EQ(7u, observed[2]);
 }
 
 TEST_F(HipStreamValueApiTest, UnsupportedWaitInvalidatesCapture) {

@@ -579,7 +579,8 @@ TEST_F(GraphExecTest, ClonedHostOperationOwnsItsPayloadAndExecutableSnapshot) {
       },
       copy, &node));
   node->attrs.host.user_data_size = sizeof(*copy);
-  IREE_ASSERT_OK(iree_hal_streaming_graph_clone(graph, &clone));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_clone(
+      graph, IREE_HAL_STREAMING_GRAPH_CLONE_MODE_TEMPLATE, &clone));
   copy->value = 23;
   iree_hal_streaming_graph_release(graph);
   graph = nullptr;
@@ -674,6 +675,85 @@ TEST_F(GraphExecTest, UpdatePreservesParametersOfPendingHostOperations) {
   EXPECT_EQ(output, 31);
 }
 
+TEST_F(GraphExecTest, FailedUpdatePreservesThePreviousExecutable) {
+  struct AllocationControl {
+    // Number of graph-owned host allocations attempted during this update.
+    size_t allocation_count = 0;
+    // Allocation to reject, or SIZE_MAX for ordinary allocation behavior.
+    size_t fail_index = SIZE_MAX;
+  } allocation_control;
+  const iree_allocator_t allocator = {
+      .self = &allocation_control,
+      .ctl =
+          +[](void* self, iree_allocator_command_t command,
+              const void* parameters, void** pointer) {
+            auto* control = static_cast<AllocationControl*>(self);
+            if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+                control->allocation_count++ == control->fail_index) {
+              return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+            }
+            const auto system = iree_allocator_system();
+            return system.ctl(system.self, command, parameters, pointer);
+          },
+  };
+  std::array<int, 3> calls = {};
+  iree_hal_streaming_graph_t* graph = nullptr;
+  iree_hal_streaming_graph_t* replacement = nullptr;
+  iree_hal_streaming_graph_exec_t* executable = nullptr;
+  ScopeExit release_handles([&] {
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    iree_hal_streaming_graph_exec_release(executable);
+    iree_hal_streaming_graph_release(replacement);
+    iree_hal_streaming_graph_release(graph);
+  });
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, allocator, &graph));
+  const auto increment = +[](void* pointer) { ++*static_cast<int*>(pointer); };
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      graph, nullptr, 0, increment, &calls[0], nullptr));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_create(
+      context_, IREE_HAL_STREAMING_GRAPH_FLAG_NONE, allocator, &replacement));
+  iree_hal_streaming_graph_node_t* replacement_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      replacement, nullptr, 0, increment, &calls[1], &replacement_node));
+
+  allocation_control.allocation_count = 0;
+  iree_hal_streaming_graph_node_t* error_node = nullptr;
+  iree_hal_streaming_graph_exec_update_result_t update_result;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_update(
+      executable, replacement, &error_node, &update_result));
+  const size_t allocation_count = allocation_control.allocation_count;
+  ASSERT_GT(allocation_count, 0u);
+  replacement_node->attrs.host.user_data = &calls[2];
+  for (size_t failure_index = 0; failure_index < allocation_count;
+       ++failure_index) {
+    SCOPED_TRACE(failure_index);
+    allocation_control.allocation_count = 0;
+    allocation_control.fail_index = failure_index;
+    iree_status_t status = iree_hal_streaming_graph_exec_update(
+        executable, replacement, &error_node, &update_result);
+    allocation_control.fail_index = SIZE_MAX;
+    IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+    EXPECT_EQ(update_result, IREE_HAL_STREAMING_GRAPH_EXEC_UPDATE_ERROR);
+    iree_hal_streaming_graph_exec_launch_result_t launch_result;
+    IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(executable, stream_,
+                                                        &launch_result));
+    IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+    EXPECT_EQ(calls[0], 0);
+    EXPECT_EQ(calls[1], static_cast<int>(failure_index + 1));
+    EXPECT_EQ(calls[2], 0);
+  }
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_update(
+      executable, replacement, &error_node, &update_result));
+  iree_hal_streaming_graph_exec_launch_result_t launch_result;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_exec_launch(executable, stream_,
+                                                      &launch_result));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_EQ(calls[2], 1);
+}
+
 TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
   iree_hal_pool_t* memory_pool = nullptr;
   iree_hal_buffer_t* buffer = nullptr;
@@ -754,7 +834,8 @@ TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
   EXPECT_EQ(target.offset,
             node->attrs.batch_mem_op.operations[0].target_offset);
 
-  IREE_ASSERT_OK(iree_hal_streaming_graph_clone(graph, &clone_graph));
+  IREE_ASSERT_OK(iree_hal_streaming_graph_clone(
+      graph, IREE_HAL_STREAMING_GRAPH_CLONE_MODE_TEMPLATE, &clone_graph));
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       clone_graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE,
       &executable));
@@ -944,6 +1025,8 @@ TEST_F(GraphExecTest, ReplayedEventRecordsDropEveryCapturedGraphReference) {
 // held to the same rule because the template setter holds both node types to
 // it, so retargeting cannot seat an event the template would have refused.
 TEST_F(GraphExecTest, ExecEventNodeTakesOnlyItsOwnContextsEvent) {
+  std::atomic<bool> original_called = false;
+  std::atomic<bool> replacement_called = false;
   iree_hal_streaming_context_t* other_context = nullptr;
   iree_hal_streaming_event_t* event = nullptr;
   iree_hal_streaming_event_t* replacement = nullptr;
@@ -953,6 +1036,7 @@ TEST_F(GraphExecTest, ExecEventNodeTakesOnlyItsOwnContextsEvent) {
   // Hands back whatever was built, on the assertion failure paths as much as
   // on the last line.
   ScopeExit release_handles([&] {
+    IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize(stream_));
     iree_hal_streaming_graph_exec_release(exec);
     iree_hal_streaming_graph_release(graph);
     iree_hal_streaming_event_release(other_context_event);
@@ -987,6 +1071,9 @@ TEST_F(GraphExecTest, ExecEventNodeTakesOnlyItsOwnContextsEvent) {
   IREE_ASSERT_OK(iree_hal_streaming_graph_add_event_node(
       graph, &record_node, /*dependency_count=*/1,
       IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT, event, &wait_node));
+  iree_hal_streaming_graph_node_t* host_node = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_add_host_call_node(
+      graph, &wait_node, 1, SetFlag, &original_called, &host_node));
 
   IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
       graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &exec));
@@ -1016,6 +1103,29 @@ TEST_F(GraphExecTest, ExecEventNodeTakesOnlyItsOwnContextsEvent) {
   IREE_EXPECT_OK(iree_hal_streaming_graph_exec_set_event_node_event(
       exec, wait_node, IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_WAIT,
       replacement));
+
+  // A later parameter update recompiles the graph and must preserve both
+  // event replacements while leaving their template nodes untouched.
+  auto* private_node = iree_hal_streaming_graph_exec_lock_node(exec, host_node);
+  private_node->attrs.host.user_data = &replacement_called;
+  status = iree_hal_streaming_graph_exec_rebuild_locked(exec);
+  iree_hal_streaming_graph_exec_unlock(exec);
+  IREE_ASSERT_OK(status);
+  iree_hal_streaming_graph_exec_launch_result_t launch_result;
+  IREE_ASSERT_OK(
+      iree_hal_streaming_graph_exec_launch(exec, stream_, &launch_result));
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  EXPECT_FALSE(original_called.load());
+  EXPECT_TRUE(replacement_called.load());
+  EXPECT_EQ(record_node->attrs.event.event, event);
+  EXPECT_EQ(wait_node->attrs.event.event, event);
+  iree_hal_streaming_recorded_point_t point;
+  iree_hal_streaming_event_acquire_recorded_point(event, &point);
+  EXPECT_EQ(point.semaphore, nullptr);
+  iree_hal_streaming_event_release_recorded_point(&point);
+  iree_hal_streaming_event_acquire_recorded_point(replacement, &point);
+  EXPECT_NE(point.semaphore, nullptr);
+  iree_hal_streaming_event_release_recorded_point(&point);
 }
 
 // A launch answers the cross-context record rule once for the whole executable,

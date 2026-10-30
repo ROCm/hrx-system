@@ -392,8 +392,17 @@ iree_status_t iree_hal_streaming_graph_create(
     iree_hal_streaming_graph_flags_t flags, iree_allocator_t host_allocator,
     iree_hal_streaming_graph_t** out_graph);
 
+typedef enum iree_hal_streaming_graph_clone_mode_e {
+  // Independent public graph, including separate staged transfer allocations.
+  IREE_HAL_STREAMING_GRAPH_CLONE_MODE_TEMPLATE = 0,
+  // Private executable descriptions. Recursively copies node parameters and
+  // retains the source graph's allocations without duplicating their contents.
+  IREE_HAL_STREAMING_GRAPH_CLONE_MODE_EXECUTABLE,
+} iree_hal_streaming_graph_clone_mode_t;
+
 iree_status_t iree_hal_streaming_graph_clone(
     iree_hal_streaming_graph_t* source_graph,
+    iree_hal_streaming_graph_clone_mode_t mode,
     iree_hal_streaming_graph_t** out_graph);
 
 // Synchronization: none (reference counting).
@@ -714,6 +723,9 @@ typedef struct iree_hal_streaming_graph_t {
 
   // Host allocations owned by this graph template.
   iree_hal_streaming_graph_owned_host_allocation_t* owned_host_allocations;
+  // Retained allocation owner for executable descriptions; NULL for public
+  // templates. Parameters are copied, while backing remains with this owner.
+  iree_hal_streaming_graph_t* storage_source;
   // Opaque user objects retained by this graph template.
   iree_hal_streaming_graph_user_object_ref_t* user_object_refs;
 
@@ -818,12 +830,30 @@ iree_status_t iree_hal_streaming_graph_exec_create(
     iree_allocator_t host_allocator,
     iree_hal_streaming_graph_exec_t** out_exec);
 
-iree_status_t iree_hal_streaming_graph_exec_instantiate_from_template(
-    iree_hal_streaming_graph_exec_t* exec,
-    iree_hal_streaming_node_block_t* node_blocks, iree_host_size_t node_count);
-
-iree_status_t iree_hal_streaming_graph_exec_rebuild_from_template(
+// Compiles the executable's private descriptions during construction.
+iree_status_t iree_hal_streaming_graph_exec_compile(
     iree_hal_streaming_graph_exec_t* exec);
+
+// Locks the executable and returns its private parameters for |node|, or NULL
+// for an invalid source handle. The caller always unlocks, including on NULL.
+// Successful parameter changes must be compiled before unlocking; a compilation
+// error leaves the old compiled state intact and requires restoring parameters.
+iree_hal_streaming_graph_node_t* iree_hal_streaming_graph_exec_lock_node(
+    iree_hal_streaming_graph_exec_t* exec,
+    iree_hal_streaming_graph_node_t* node);
+void iree_hal_streaming_graph_exec_unlock(
+    iree_hal_streaming_graph_exec_t* exec);
+
+// Requires the executable lock. Replaces compiled state only on success.
+iree_status_t iree_hal_streaming_graph_exec_rebuild_locked(
+    iree_hal_streaming_graph_exec_t* exec);
+
+// Replaces one executable's child description with a topology-compatible
+// snapshot. The source template and prior launches retain their parameters.
+iree_status_t iree_hal_streaming_graph_exec_set_child_graph(
+    iree_hal_streaming_graph_exec_t* exec,
+    iree_hal_streaming_graph_node_t* node,
+    iree_hal_streaming_graph_t* child_graph);
 
 bool iree_hal_streaming_graph_exec_owns_node(
     iree_hal_streaming_graph_exec_t* exec,

@@ -59,6 +59,20 @@ struct HipGraphApi {
   decltype(&hipGraphAddMemcpyNode) add_copy = nullptr;
   // Updates a template's contiguous copy parameters.
   decltype(&hipGraphMemcpyNodeSetParams1D) set_copy = nullptr;
+  // Updates only one compiled graph's contiguous copy parameters.
+  decltype(&hipGraphExecMemcpyNodeSetParams1D) set_executable_copy = nullptr;
+  // Replaces the executable parameters using a topology-compatible template.
+  decltype(&hipGraphExecUpdate) update_executable = nullptr;
+  // Changes an executable's node-enable state without editing its template.
+  decltype(&hipGraphNodeSetEnabled) set_enabled = nullptr;
+  // Reports the public operation type, including host-executed copies.
+  decltype(&hipGraphNodeGetType) get_node_type = nullptr;
+  // Removes a template node without changing its existing executables.
+  decltype(&hipGraphDestroyNode) destroy_node = nullptr;
+  // Adds an independently described nested graph.
+  decltype(&hipGraphAddChildGraphNode) add_child = nullptr;
+  // Applies the generic executable update to its typed operation.
+  decltype(&hipGraphExecNodeSetParams) set_executable_node = nullptr;
   // Reports a template copy's public parameters.
   decltype(&hipGraphMemcpyNodeGetParams) get_copy = nullptr;
   // Adds an application function after a copy.
@@ -101,6 +115,13 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     RESOLVE(add_copy_1d, "hipGraphAddMemcpyNode1D");
     RESOLVE(add_copy, "hipGraphAddMemcpyNode");
     RESOLVE(set_copy, "hipGraphMemcpyNodeSetParams1D");
+    RESOLVE(set_executable_copy, "hipGraphExecMemcpyNodeSetParams1D");
+    RESOLVE(update_executable, "hipGraphExecUpdate");
+    RESOLVE(set_enabled, "hipGraphNodeSetEnabled");
+    RESOLVE(get_node_type, "hipGraphNodeGetType");
+    RESOLVE(destroy_node, "hipGraphDestroyNode");
+    RESOLVE(add_child, "hipGraphAddChildGraphNode");
+    RESOLVE(set_executable_node, "hipGraphExecNodeSetParams");
     RESOLVE(get_copy, "hipGraphMemcpyNodeGetParams");
     RESOLVE(add_host, "hipGraphAddHostNode");
     RESOLVE(get_host, "hipGraphHostNodeGetParams");
@@ -140,6 +161,9 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     if (executable_) {
       EXPECT_EQ(hipSuccess, api_.executable_destroy(executable_));
     }
+    if (sibling_) {
+      EXPECT_EQ(hipSuccess, api_.executable_destroy(sibling_));
+    }
     if (clone_) {
       EXPECT_EQ(hipSuccess, api_.graph_destroy(clone_));
     }
@@ -164,8 +188,9 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     }
   }
 
-  void Replay() {
-    ASSERT_EQ(hipSuccess, api_.launch(executable_, stream_));
+  void Replay(hipGraphExec_t executable = nullptr) {
+    ASSERT_EQ(hipSuccess,
+              api_.launch(executable ? executable : executable_, stream_));
     ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
   }
 
@@ -183,6 +208,8 @@ class HipGraphMemoryApiTest : public ::testing::Test {
   hipGraph_t clone_ = nullptr;
   // Compiled graph snapshot.
   hipGraphExec_t executable_ = nullptr;
+  // Independent executable from the same source template.
+  hipGraphExec_t sibling_ = nullptr;
   // Device endpoint retained through all graph launches.
   hipDeviceptr_t device_ = nullptr;
   // Borrowed primary context owning the graph and launch stream.
@@ -226,6 +253,165 @@ TEST_F(HipGraphMemoryApiTest, HostCopyCloneOwnsItsParameters) {
   ASSERT_EQ(hipSuccess, api_.get_copy(cloned_node, &parameters));
   EXPECT_EQ(parameters.kind, hipMemcpyHostToHost);
   EXPECT_EQ(parameters.srcPtr.ptr, source_.data());
+}
+
+TEST_F(HipGraphMemoryApiTest, ExecutableUpdatesPreserveTemplatesAndSiblings) {
+  hipGraphNode_t copy_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_copy_1d(&copy_node, graph_, nullptr, 0,
+                                         destination_.data(), source_.data(),
+                                         source_.size(), hipMemcpyHostToHost));
+  hipHostNodeParams host = {.fn = Increment, .userData = &callbacks_[0]};
+  hipGraphNode_t host_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.add_host(&host_node, graph_, &copy_node, 1, &host));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&sibling_, graph_, 0));
+
+  hipGraphNodeType type = hipGraphNodeTypeEmpty;
+  ASSERT_EQ(hipSuccess, api_.get_node_type(copy_node, &type));
+  EXPECT_EQ(type, hipGraphNodeTypeMemcpy);
+  ASSERT_EQ(hipSuccess, api_.get_node_type(host_node, &type));
+  EXPECT_EQ(type, hipGraphNodeTypeHost);
+
+  ASSERT_EQ(hipSuccess,
+            api_.set_executable_copy(executable_, copy_node,
+                                     destination_.data(), replacement_.data(),
+                                     source_.size(), hipMemcpyHostToHost));
+  host.userData = &callbacks_[1];
+  ASSERT_EQ(hipSuccess,
+            api_.set_executable_host(executable_, host_node, &host));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, replacement_);
+  EXPECT_EQ(callbacks_, (std::array<int, 3>{0, 1, 0}));
+
+  hipMemcpy3DParms copy_parameters = {};
+  ASSERT_EQ(hipSuccess, api_.get_copy(copy_node, &copy_parameters));
+  EXPECT_EQ(copy_parameters.srcPtr.ptr, source_.data());
+  hipHostNodeParams host_parameters = {};
+  ASSERT_EQ(hipSuccess, api_.get_host(host_node, &host_parameters));
+  EXPECT_EQ(host_parameters.userData, &callbacks_[0]);
+
+  // Template edits and an enable-state recompilation must not replace either
+  // executable's captured parameters or its already committed updates.
+  ASSERT_EQ(hipSuccess,
+            api_.set_copy(copy_node, destination_.data(), source_.data(),
+                          source_.size() / 2, hipMemcpyHostToHost));
+  host.userData = &callbacks_[2];
+  ASSERT_EQ(hipSuccess, api_.set_host(host_node, &host));
+  destination_.fill(0);
+  ASSERT_EQ(hipSuccess, api_.set_enabled(executable_, copy_node, 0));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, (std::array<uint8_t, 64>{}));
+  ASSERT_EQ(hipSuccess, api_.set_enabled(executable_, copy_node, 1));
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.set_executable_copy(executable_, copy_node,
+                                     destination_.data(), replacement_.data(),
+                                     source_.size(), hipMemcpyDeviceToDevice));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, replacement_);
+  EXPECT_EQ(callbacks_, (std::array<int, 3>{0, 3, 0}));
+  Replay(sibling_);
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, source_);
+  EXPECT_EQ(callbacks_, (std::array<int, 3>{1, 3, 0}));
+
+  // Whole-graph replacement changes parameters while original node handles
+  // continue to identify the executable's corresponding nodes.
+  ASSERT_EQ(hipSuccess, api_.graph_clone(&clone_, graph_));
+  hipGraphNode_t error_node = nullptr;
+  hipGraphExecUpdateResult update_result = hipGraphExecUpdateError;
+  ASSERT_EQ(hipSuccess, api_.update_executable(executable_, clone_, &error_node,
+                                               &update_result));
+  EXPECT_EQ(update_result, hipGraphExecUpdateSuccess);
+  ASSERT_EQ(hipSuccess,
+            api_.set_executable_copy(executable_, copy_node,
+                                     destination_.data(), replacement_.data(),
+                                     source_.size(), hipMemcpyHostToHost));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, replacement_);
+  EXPECT_EQ(callbacks_, (std::array<int, 3>{1, 3, 1}));
+  Replay(sibling_);
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, source_);
+  EXPECT_EQ(callbacks_, (std::array<int, 3>{2, 3, 1}));
+}
+
+TEST_F(HipGraphMemoryApiTest, NestedUpdatesSurviveTemplateChangesAndRebuilds) {
+  ASSERT_EQ(hipSuccess, api_.graph_create(&clone_, 0));
+  hipHostNodeParams host = {.fn = Increment, .userData = &callbacks_[0]};
+  hipGraphNode_t child_host = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_host(&child_host, clone_, nullptr, 0, &host));
+  hipGraphNode_t child_node = nullptr;
+  ASSERT_EQ(hipSuccess,
+            api_.add_child(&child_node, graph_, nullptr, 0, clone_));
+  hipGraphNode_t host_node = nullptr;
+  host.userData = &callbacks_[1];
+  ASSERT_EQ(hipSuccess,
+            api_.add_host(&host_node, graph_, &child_node, 1, &host));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&sibling_, graph_, 0));
+
+  host.userData = &callbacks_[2];
+  ASSERT_EQ(hipSuccess, api_.set_host(child_host, &host));
+  ASSERT_EQ(hipSuccess,
+            api_.set_executable_host(executable_, host_node, &host));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(callbacks_, (std::array<int, 3>{1, 0, 1}));
+
+  hipGraphNodeParams update = {
+      .type = hipGraphNodeTypeGraph,
+      .graph = {.graph = clone_},
+  };
+  ASSERT_EQ(hipSuccess,
+            api_.set_executable_node(executable_, child_node, &update));
+  host.userData = &callbacks_[1];
+  ASSERT_EQ(hipSuccess, api_.set_host(child_host, &host));
+  update.type = hipGraphNodeTypeHost;
+  update.host = {.fn = Increment, .userData = &callbacks_[0]};
+  ASSERT_EQ(hipSuccess,
+            api_.set_executable_node(executable_, host_node, &update));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(callbacks_, (std::array<int, 3>{2, 0, 2}));
+  Replay(sibling_);
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(callbacks_, (std::array<int, 3>{3, 1, 2}));
+
+  // A changed child topology is rejected without replacing either snapshot.
+  hipGraphNode_t extra = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_host(&extra, clone_, &child_host, 1, &host));
+  update.type = hipGraphNodeTypeGraph;
+  update.graph.graph = clone_;
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.set_executable_node(executable_, child_node, &update));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(callbacks_, (std::array<int, 3>{4, 1, 3}));
+}
+
+TEST_F(HipGraphMemoryApiTest, TemplateNodeRemovalPreservesExecutableHandles) {
+  hipHostNodeParams host = {.fn = Increment, .userData = &callbacks_[0]};
+  hipGraphNode_t removed = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_host(&removed, graph_, nullptr, 0, &host));
+  hipGraphNode_t copy_node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_copy_1d(&copy_node, graph_, &removed, 1,
+                                         destination_.data(), source_.data(),
+                                         source_.size(), hipMemcpyHostToHost));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  ASSERT_EQ(hipSuccess, api_.destroy_node(removed));
+  ASSERT_EQ(hipSuccess,
+            api_.set_executable_copy(executable_, copy_node,
+                                     destination_.data(), replacement_.data(),
+                                     source_.size(), hipMemcpyHostToHost));
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(destination_, replacement_);
+  EXPECT_EQ(callbacks_[0], 1);
 }
 
 TEST_F(HipGraphMemoryApiTest, PitchedCopyCloneReplaysItsOwnStaging) {

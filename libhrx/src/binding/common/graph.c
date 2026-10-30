@@ -201,6 +201,7 @@ iree_status_t iree_hal_streaming_graph_create(
   graph->additional_edges = NULL;
   graph->additional_edge_count = 0;
   graph->owned_host_allocations = NULL;
+  graph->storage_source = NULL;
   graph->user_object_refs = NULL;
   graph->has_graph_memory_nodes = false;
   graph->active_graph_memory_exec_count = 0;
@@ -246,6 +247,7 @@ static void iree_hal_streaming_graph_destroy(
   // Reset the arena - this frees all nodes and arrays at once.
   // The arena returns all blocks to the device's block pool for reuse.
   iree_arena_deinitialize(&graph->arena);
+  iree_hal_streaming_graph_release(graph->storage_source);
 
   iree_slim_mutex_deinitialize(&graph->capture_mutex);
   // Release context.
@@ -822,13 +824,15 @@ static iree_status_t iree_hal_streaming_graph_clone_host_allocations(
 
 iree_status_t iree_hal_streaming_graph_clone(
     iree_hal_streaming_graph_t* source_graph,
+    iree_hal_streaming_graph_clone_mode_t mode,
     iree_hal_streaming_graph_t** out_graph) {
   IREE_ASSERT_ARGUMENT(source_graph);
   IREE_ASSERT_ARGUMENT(out_graph);
   *out_graph = NULL;
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  if (source_graph->has_graph_memory_nodes) {
+  if (source_graph->has_graph_memory_nodes &&
+      mode == IREE_HAL_STREAMING_GRAPH_CLONE_MODE_TEMPLATE) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
@@ -847,8 +851,14 @@ iree_status_t iree_hal_streaming_graph_clone(
   iree_hal_streaming_graph_clone_host_allocation_t* host_allocation_map = NULL;
   iree_host_size_t host_allocation_count = 0;
   iree_status_t status = iree_ok_status();
-  status = iree_hal_streaming_graph_clone_host_allocations(
-      source_graph, clone_graph, &host_allocation_map, &host_allocation_count);
+  if (mode == IREE_HAL_STREAMING_GRAPH_CLONE_MODE_EXECUTABLE) {
+    clone_graph->storage_source = source_graph;
+    iree_hal_streaming_graph_retain(source_graph);
+  } else {
+    status = iree_hal_streaming_graph_clone_host_allocations(
+        source_graph, clone_graph, &host_allocation_map,
+        &host_allocation_count);
+  }
   if (!iree_status_is_ok(status)) {
     iree_hal_streaming_graph_release(clone_graph);
     IREE_TRACE_ZONE_END(z0);
@@ -954,7 +964,21 @@ iree_status_t iree_hal_streaming_graph_clone(
       } else if (source_node->type ==
                      IREE_HAL_STREAMING_GRAPH_NODE_TYPE_GRAPH &&
                  source_node->attrs.child_graph.graph) {
-        iree_hal_streaming_graph_retain(source_node->attrs.child_graph.graph);
+        if (mode == IREE_HAL_STREAMING_GRAPH_CLONE_MODE_EXECUTABLE) {
+          clone_node->attrs.child_graph.graph = NULL;
+          status = iree_hal_streaming_graph_clone(
+              source_node->attrs.child_graph.graph, mode,
+              &clone_node->attrs.child_graph.graph);
+          if (!iree_status_is_ok(status)) {
+            break;
+          }
+        } else {
+          iree_hal_streaming_graph_retain(source_node->attrs.child_graph.graph);
+        }
+      } else if (source_node->type ==
+                 IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC) {
+        // The retained source owns the actual allocation and query payload.
+        clone_node->attrs.mem_alloc.owns_device_allocation = false;
       } else if ((source_node->type ==
                       IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD ||
                   source_node->type ==
@@ -2273,9 +2297,7 @@ iree_status_t iree_hal_streaming_graph_instantiate(
   // Instantiate from the graph template. HIP graph objects are not internally
   // synchronized; callers must externally serialize access to a graph while it
   // is being modified, queried, or instantiated.
-  iree_status_t status =
-      iree_hal_streaming_graph_exec_instantiate_from_template(
-          exec, graph->node_blocks, graph->node_count);
+  iree_status_t status = iree_hal_streaming_graph_exec_compile(exec);
 
   if (iree_status_is_ok(status)) {
     *out_exec = exec;
