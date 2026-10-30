@@ -251,6 +251,20 @@ TEST_F(VirtualBufferContractTest, HostCoherencePreservesDeviceSideBarrier) {
   iree_hal_pool_release(source);
 }
 
+TEST_F(VirtualBufferContractTest, ZeroComputeRequirementRejectsShaderAliases) {
+  iree_hal_pool_t* source = nullptr;
+  IREE_ASSERT_OK(CreateSource(&source));
+  accesses_[0].atomics.queue_zero_compute.device_scope_32 =
+      IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
+  iree_hal_virtual_buffer_capabilities_t capabilities;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_query_capabilities(
+      group_, Scope(), {1, &source}, allocator_, &capabilities));
+  EXPECT_EQ(capabilities.max_byte_length, 0u);
+  EXPECT_EQ(native_.reservation_count, 0);
+  EXPECT_EQ(native_.create_count, 0);
+  iree_hal_pool_release(source);
+}
+
 TEST_F(VirtualBufferContractTest, MissingRequiredAtomicRejectsBeforeAddresses) {
   native_.atomics[0][0] &= ~AMDF_ATOMIC_OPERATION_ADD;
   iree_hal_pool_t* source = nullptr;

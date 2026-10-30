@@ -618,7 +618,7 @@ static std::vector<uint8_t> MakeFullFileAtomicReplayStorage(
       .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
       .interfaces = 0,
       .requirements = 0,
-      .reserved0 = 0,
+      .queue_zero_compute_atomic_operations = 0,
       .queue_atomic_device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
       .queue_atomic_device_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
       .queue_atomic_system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,

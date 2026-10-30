@@ -147,7 +147,9 @@ static iree_status_t iree_hal_vulkan_virtual_buffer_prepare(
                 (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_PROGRAM,
                                          access->family},
                 atomic_operations),
-            access->atomics.program)) {
+            access->atomics.program) ||
+        !iree_hal_atomic_operation_capabilities_is_empty(
+            access->atomics.queue_zero_compute)) {
       return iree_ok_status();
     }
     const iree_hal_vulkan_queue_t* queue =

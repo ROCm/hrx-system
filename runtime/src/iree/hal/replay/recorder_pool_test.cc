@@ -4,12 +4,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "iree/hal/replay/recorder_pool.h"
+
 #include <array>
 #include <atomic>
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/task/registration/driver_module.h"
+#include "iree/hal/replay/execute_pool.h"
 #include "iree/hal/replay/recorder.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/io/file_handle.h"
@@ -217,6 +220,67 @@ class ReplayRecorderPoolTest : public ::testing::Test {
   // Import-only recording pool under test.
   iree_hal_pool_t* pool_ = nullptr;
 };
+
+TEST_F(ReplayRecorderPoolTest, PreservesZeroComputeRequirementsInEveryCell) {
+  iree_hal_pool_family_access_t access = {
+      .family = iree_hal_device_queue_family(
+          iree_hal_device_group_device_at(source_group_, 0), 0),
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .atomics =
+          {
+              .queue_zero_compute = {IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT,
+                                     IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+                                     IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD,
+                                     IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_XOR},
+          },
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = 1,
+      .families = &access,
+  };
+  IREE_ASSERT_OK(iree_hal_pool_scope_validate(source_group_, scope));
+  iree_hal_replay_pool_family_access_payload_t payload;
+  iree_hal_replay_recorder_pool_capture_families(&scope, &payload);
+  iree_hal_replay_executor_t executor = {
+      .file_version_minor = IREE_HAL_REPLAY_FILE_VERSION_MINOR,
+      .device_group = source_group_,
+  };
+  iree_hal_pool_family_access_t decoded;
+  IREE_ASSERT_OK(iree_hal_replay_executor_pool_decode_families(
+      &executor, 1, reinterpret_cast<const uint8_t*>(&payload), &decoded));
+  EXPECT_EQ(decoded.family, access.family);
+  EXPECT_EQ(decoded.atomics.queue_zero_compute.device_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT);
+  EXPECT_EQ(decoded.atomics.queue_zero_compute.device_scope_64,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+  EXPECT_EQ(decoded.atomics.queue_zero_compute.system_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD);
+  EXPECT_EQ(decoded.atomics.queue_zero_compute.system_scope_64,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_XOR);
+  // Replay must preserve the hard requirement even when this executor cannot
+  // satisfy it. The CPU backend must not silently perform the work on a worker.
+  const iree_hal_pool_scope_t decoded_scope = {
+      .family_count = 1,
+      .families = &decoded,
+  };
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  iree_hal_pool_t* rejected = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      iree_hal_slab_pool_create(source_group_, decoded_scope, &options,
+                                iree_allocator_system(), &rejected));
+  EXPECT_EQ(rejected, nullptr);
+  executor.file_version_minor =
+      IREE_HAL_REPLAY_ZERO_COMPUTE_ATOMICS_VERSION_MINOR - 1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DATA_LOSS,
+      iree_hal_replay_executor_pool_decode_families(
+          &executor, 1, reinterpret_cast<const uint8_t*>(&payload), &decoded));
+  payload.queue_zero_compute_atomic_operations = 0;
+  IREE_ASSERT_OK(iree_hal_replay_executor_pool_decode_families(
+      &executor, 1, reinterpret_cast<const uint8_t*>(&payload), &decoded));
+}
 
 TEST_F(ReplayRecorderPoolTest, ProxyFailurePreservesCallerOwnership) {
   const auto allocation_attempt_count =

@@ -23,9 +23,12 @@ extern "C" {
 // source pool contracts admitted by each virtual buffer.
 #define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 17u
 
-// Minor version of the IREE HAL replay file format. Virtual-buffer creation
-// records preserve explicit address constraints in their construction flags.
-#define IREE_HAL_REPLAY_FILE_VERSION_MINOR 10u
+// Minor version of the IREE HAL replay file format. Pool scopes preserve
+// zero-compute atomic requirements in their previously reserved family word.
+#define IREE_HAL_REPLAY_FILE_VERSION_MINOR 11u
+
+// Minor version that first assigns the zero-compute atomic family word.
+#define IREE_HAL_REPLAY_ZERO_COMPUTE_ATOMICS_VERSION_MINOR 11u
 
 // Minor version that first assigns virtual-buffer construction flag bytes.
 #define IREE_HAL_REPLAY_VIRTUAL_BUFFER_FLAGS_VERSION_MINOR 10u
@@ -414,8 +417,9 @@ typedef struct iree_hal_replay_pool_family_access_payload_t {
   uint64_t interfaces;
   // Hard family access requirements.
   uint32_t requirements;
-  // Reserved for future family requirements; must be zero.
-  uint32_t reserved0;
+  // Required zero-compute queue operations in four byte-sized cells, from
+  // low to high: device 32, device 64, system 32, system 64.
+  uint32_t queue_zero_compute_atomic_operations;
   // Required 32-bit atomic operations in the device coherence domain.
   uint32_t queue_atomic_device_scope_32;
   // Required 64-bit atomic operations in the device coherence domain.

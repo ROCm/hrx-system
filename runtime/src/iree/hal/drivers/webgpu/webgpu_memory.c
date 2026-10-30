@@ -427,7 +427,9 @@ static iree_status_t iree_hal_webgpu_slab_pool_query_owner(
         !iree_hal_atomic_operation_capabilities_is_empty(
             access->atomics.queue) ||
         !iree_hal_atomic_operation_capabilities_is_empty(
-            access->atomics.program)) {
+            access->atomics.program) ||
+        !iree_hal_atomic_operation_capabilities_is_empty(
+            access->atomics.queue_zero_compute)) {
       return iree_ok_status();
     }
     usage |= access->usage;

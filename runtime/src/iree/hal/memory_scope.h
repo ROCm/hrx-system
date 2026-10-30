@@ -96,6 +96,11 @@ typedef struct iree_hal_pool_family_access_t {
   struct {
     // Queue commands, including atomic commands recorded in command buffers.
     iree_hal_atomic_operation_capabilities_t queue;
+    // Queue operations that must execute without occupying compute resources.
+    // Implies the corresponding queue requirements; shader fallback is not
+    // permitted. Does not promise hardware queue residency under
+    // oversubscription.
+    iree_hal_atomic_operation_capabilities_t queue_zero_compute;
     // Operations issued by executable programs on this family.
     iree_hal_atomic_operation_capabilities_t program;
   } atomics;

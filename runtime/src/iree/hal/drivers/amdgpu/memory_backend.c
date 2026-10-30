@@ -617,7 +617,9 @@ static iree_status_t iree_hal_amdgpu_slab_pool_query_memory(
                   (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_PROGRAM,
                                            scope.families[i].family},
                   atomic_operations),
-              scope.families[i].atomics.program)) {
+              scope.families[i].atomics.program) ||
+          !iree_hal_atomic_operation_capabilities_is_empty(
+              scope.families[i].atomics.queue_zero_compute)) {
         supported = false;
         break;
       }

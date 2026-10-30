@@ -298,6 +298,7 @@ static bool iree_hal_amd_fabric_memory_supports_atomics(
     const bool cpu = site->kind == IREE_HAL_AMD_FABRIC_MEMORY_SITE_HOST;
     iree_hal_atomic_operation_capabilities_t queue = host;
     iree_hal_atomic_operation_capabilities_t program = host;
+    iree_hal_atomic_operation_capabilities_t zero_compute = {0};
     if (!cpu) {
       const amdf_memory_access_capabilities_t* access =
           &capabilities[site->native.value.device.access_ordinal];
@@ -305,6 +306,7 @@ static bool iree_hal_amd_fabric_memory_supports_atomics(
           access->atomic_operations_32, access->atomic_operations_64,
           (amdf_atomic_reach_t){AMDF_ATOMIC_SCOPE_SYSTEM,
                                 AMDF_ATOMIC_SCOPE_SYSTEM});
+      zero_compute = queue;
       program = iree_hal_amd_fabric_memory_translate_program_atomics(
           &((const amdf_memory_program_atomics_t*)access->next)->operations);
       if (site->program_atomics) {
@@ -317,6 +319,12 @@ static bool iree_hal_amd_fabric_memory_supports_atomics(
                                          requested->family},
                 queue),
             requested->atomics.queue) ||
+        !iree_hal_atomic_operation_capabilities_support(
+            iree_hal_memory_site_filter_atomic_operations(
+                (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_QUEUE,
+                                         requested->family},
+                zero_compute),
+            requested->atomics.queue_zero_compute) ||
         !iree_hal_atomic_operation_capabilities_support(
             iree_hal_memory_site_filter_atomic_operations(
                 (iree_hal_memory_site_t){IREE_HAL_MEMORY_SITE_PROGRAM,
@@ -917,6 +925,10 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
           iree_hal_atomic_operation_capabilities_support(
               queue_operations, requested->atomics.queue) &&
           iree_hal_atomic_operation_capabilities_support(
+              cpu ? (iree_hal_atomic_operation_capabilities_t){0}
+                  : queue_native,
+              requested->atomics.queue_zero_compute) &&
+          iree_hal_atomic_operation_capabilities_support(
               program_operations, requested->atomics.program);
       if (!cpu) {
         iree_hal_memory_contract_set_zero_compute_atomic_operations(
@@ -1435,9 +1447,11 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_query(
           requested->atomics.program.system_scope_64) {
         requirements->flags |= AMDF_MEMORY_FLAG_HOST_COHERENT;
       }
-      if (!family->program_atomics &&
+      if ((!family->program_atomics &&
+           !iree_hal_atomic_operation_capabilities_is_empty(
+               requested->atomics.queue)) ||
           !iree_hal_atomic_operation_capabilities_is_empty(
-              requested->atomics.queue)) {
+              requested->atomics.queue_zero_compute)) {
         // Native queue control storage selects the uncached GPU mapping that
         // qualifies CP atomics. Ordinary host-coherent payload storage may
         // remain GPU-cached and cannot supply the same control-word contract.

@@ -62,6 +62,8 @@ IREE_API_EXPORT iree_status_t iree_hal_pool_scope_validate(
         !iree_hal_atomic_operation_capabilities_are_valid(
             access->atomics.queue) ||
         !iree_hal_atomic_operation_capabilities_are_valid(
+            access->atomics.queue_zero_compute) ||
+        !iree_hal_atomic_operation_capabilities_are_valid(
             access->atomics.program)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "invalid family access flags");

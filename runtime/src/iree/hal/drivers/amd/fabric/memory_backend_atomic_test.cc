@@ -33,6 +33,95 @@ TEST_F(MemoryBackendTest, RejectsAtomicPromisesAbsentFromNativeBuffers) {
   EXPECT_GT(native_.profile_query_count, 0);
 }
 
+TEST_F(MemoryBackendTest, ZeroComputeRequirementsSelectNativeControlStorage) {
+  native_.required_flags = 0;
+  native_families_[0].program_atomics = true;
+  native_.access_flags[0] =
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE;
+  native_.atomics[0] = {
+      AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE,
+      AMDF_ATOMIC_OPERATION_WAIT | AMDF_ATOMIC_OPERATION_STORE};
+  native_.atomic_reach[0] = {AMDF_ATOMIC_SCOPE_SYSTEM,
+                             AMDF_ATOMIC_SCOPE_SYSTEM};
+  const auto operations = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+                          IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
+  iree_hal_pool_family_access_t family = {
+      .family = families_[0],
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .atomics =
+          {
+              .queue_zero_compute = {operations, operations, operations,
+                                     operations},
+          },
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = 1,
+      .families = &family,
+  };
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(group_, scope, &pool_options_,
+                                           allocator_, &pool));
+  EXPECT_EQ(native_.create_count, 0);
+  const auto queue = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]);
+  EXPECT_EQ(iree_hal_pool_query_zero_compute_atomic_operations(pool, queue)
+                .system_scope_64,
+            operations);
+  EXPECT_EQ(iree_hal_pool_query_atomic_operations(pool, queue).system_scope_64,
+            operations);
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(8, 8),
+      iree_infinite_timeout(), &buffer));
+  ASSERT_EQ(native_.created_accesses.size(), 1u);
+  EXPECT_TRUE(iree_all_bits_set(
+      native_.created_accesses[0].requirements.flags,
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE));
+  iree_hal_buffer_release(buffer);
+  iree_hal_pool_release(pool);
+  native_.AwaitEmpty();
+
+  // The same guarantee is unavailable through a CPU worker.
+  family.family = iree_hal_device_queue_family(cpu_device_, 0);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        iree_hal_slab_pool_create(group_, scope, &pool_options_,
+                                                  allocator_, &pool));
+  EXPECT_EQ(pool, nullptr);
+}
+
+TEST_F(MemoryBackendTest,
+       ShaderOperationsCannotSatisfyZeroComputeRequirements) {
+  native_.required_flags = 0;
+  native_families_[0].program_atomics = true;
+  native_.access_flags[0] =
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE;
+  native_.program_atomics[0] = {
+      AMDF_ATOMIC_OPERATION_WAIT, AMDF_ATOMIC_OPERATION_WAIT,
+      AMDF_ATOMIC_OPERATION_WAIT, AMDF_ATOMIC_OPERATION_WAIT};
+  for (auto cell :
+       {&iree_hal_atomic_operation_capabilities_t::device_scope_32,
+        &iree_hal_atomic_operation_capabilities_t::device_scope_64,
+        &iree_hal_atomic_operation_capabilities_t::system_scope_32,
+        &iree_hal_atomic_operation_capabilities_t::system_scope_64}) {
+    iree_hal_pool_family_access_t family = {
+        .family = families_[0],
+        .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+    };
+    family.atomics.queue_zero_compute.*cell =
+        IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
+    const iree_hal_pool_scope_t scope = {
+        .family_count = 1,
+        .families = &family,
+    };
+    iree_hal_pool_t* pool = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_UNAVAILABLE,
+        iree_hal_slab_pool_create(group_, scope, &pool_options_, allocator_,
+                                  &pool));
+    EXPECT_EQ(pool, nullptr);
+  }
+  EXPECT_EQ(native_.create_count, 0);
+}
+
 TEST_F(MemoryBackendTest, AtomicGuaranteesFollowSitesAndEveryBackingRoute) {
   native_.registration_enabled = true;
   native_.host_mapping_features |= AMDF_HOST_MAPPING_FEATURE_ATOMIC_ACCESS;
@@ -54,7 +143,7 @@ TEST_F(MemoryBackendTest, AtomicGuaranteesFollowSitesAndEveryBackingRoute) {
           .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
           .atomics =
               {
-                  .queue =
+                  .queue_zero_compute =
                       {
                           .system_scope_32 =
                               IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT,

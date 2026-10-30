@@ -212,12 +212,10 @@ static iree_status_t iree_hal_virtual_buffer_query_transition(
 }
 
 static bool iree_hal_virtual_buffer_supports_atomics(
-    const iree_hal_memory_scope_access_t* site,
-    iree_hal_atomic_operation_capabilities_t required) {
+    uint32_t available, iree_hal_atomic_operation_capabilities_t required) {
   iree_hal_memory_scope_access_t requested = {0};
   iree_hal_memory_scope_access_set_atomic_operations(&requested, required);
-  return iree_all_bits_set(site->atomic_operations,
-                           requested.atomic_operations);
+  return iree_all_bits_set(available, requested.atomic_operations);
 }
 
 IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_initialize_contract(
@@ -256,17 +254,22 @@ IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_initialize_contract(
       capabilities->reservation_granularity <= capabilities->max_byte_length &&
       capabilities->mapping_granularity <= capabilities->max_alignment;
   iree_hal_memory_contract_finalize_atomic_operations(contract);
-  supported &= iree_hal_virtual_buffer_supports_atomics(&contract->scopes[1],
-                                                        scope.host.atomics);
+  supported &= iree_hal_virtual_buffer_supports_atomics(
+      contract->scopes[1].atomic_operations, scope.host.atomics);
   supported &=
       iree_all_bits_set(contract->host.properties, scope.host.properties);
   for (iree_host_size_t i = 0; i < scope.family_count && supported; ++i) {
     const iree_hal_pool_family_access_t* access = &scope.families[i];
     const uint32_t id = access->family->memory.queue_scope_id;
+    supported &=
+        iree_hal_virtual_buffer_supports_atomics(
+            contract->scopes[id].atomic_operations, access->atomics.queue) &&
+        iree_hal_virtual_buffer_supports_atomics(
+            contract->scopes[id + 1].atomic_operations,
+            access->atomics.program);
     supported &= iree_hal_virtual_buffer_supports_atomics(
-                     &contract->scopes[id], access->atomics.queue) &&
-                 iree_hal_virtual_buffer_supports_atomics(
-                     &contract->scopes[id + 1], access->atomics.program);
+        contract->zero_compute_atomic_operations[id],
+        access->atomics.queue_zero_compute);
   }
   iree_hal_virtual_buffer_transition_query_t query = {sources, supported};
   iree_status_t status = iree_ok_status();

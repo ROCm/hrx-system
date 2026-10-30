@@ -71,7 +71,9 @@ iree_status_t iree_hal_replay_executor_pool_decode_families(
     memcpy(&family_payload, family_payload_data + i * sizeof(family_payload),
            sizeof(family_payload));
     if (IREE_UNLIKELY(
-            family_payload.reserved0 != 0 ||
+            (family_payload.queue_zero_compute_atomic_operations &&
+             executor->file_version_minor <
+                 IREE_HAL_REPLAY_ZERO_COMPUTE_ATOMICS_VERSION_MINOR) ||
             family_payload.device_ordinal >=
                 iree_hal_device_group_device_count(executor->device_group))) {
       status = iree_make_status(IREE_STATUS_DATA_LOSS,
@@ -91,6 +93,8 @@ iree_status_t iree_hal_replay_executor_pool_decode_families(
       }
     }
     if (iree_status_is_ok(status)) {
+      const uint32_t zero_compute =
+          family_payload.queue_zero_compute_atomic_operations;
       families[i] = (iree_hal_pool_family_access_t){
           .family = family,
           .usage = (iree_hal_buffer_usage_t)family_payload.usage,
@@ -107,6 +111,13 @@ iree_status_t iree_hal_replay_executor_pool_decode_families(
                                   family_payload.queue_atomic_system_scope_32,
                               .system_scope_64 =
                                   family_payload.queue_atomic_system_scope_64,
+                          },
+                      .queue_zero_compute =
+                          {
+                              .device_scope_32 = zero_compute & 0xFFu,
+                              .device_scope_64 = (zero_compute >> 8) & 0xFFu,
+                              .system_scope_32 = (zero_compute >> 16) & 0xFFu,
+                              .system_scope_64 = zero_compute >> 24,
                           },
                       .program =
                           {

@@ -482,6 +482,11 @@ void iree_hal_replay_recorder_pool_capture_families(
         .usage = access->usage,
         .interfaces = access->interfaces,
         .requirements = access->requirements,
+        .queue_zero_compute_atomic_operations =
+            access->atomics.queue_zero_compute.device_scope_32 |
+            (access->atomics.queue_zero_compute.device_scope_64 << 8) |
+            (access->atomics.queue_zero_compute.system_scope_32 << 16) |
+            (access->atomics.queue_zero_compute.system_scope_64 << 24),
         .queue_atomic_device_scope_32 = access->atomics.queue.device_scope_32,
         .queue_atomic_device_scope_64 = access->atomics.queue.device_scope_64,
         .queue_atomic_system_scope_32 = access->atomics.queue.system_scope_32,
