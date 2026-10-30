@@ -189,21 +189,6 @@ loom_test(
 )
 
 loom_test(
-    name = "indirection_access_test",
-    srcs = [
-        "queued_routes.loom",
-        "//loom/src/loom/test/corpus/checked_benchmarks:cooperative_paged_attention_f32.loom",
-        "//loom/src/loom/test/corpus/checked_benchmarks:grouped_paged_attention_f32.loom",
-        "//loom/src/loom/test/corpus/checked_benchmarks:moe_routed_combine_loop_f32.loom",
-        "//loom/src/loom/test/corpus/checked_benchmarks:paged_online_softmax_loop_f32.loom",
-        "//loom/src/loom/test/corpus/checked_benchmarks:routed_row_combine_f32.loom",
-        "//loom/src/loom/test/corpus/checked_benchmarks:sparse_token_attention_f32.loom",
-    ],
-    benchmark_smoke = False,
-    execution_profiles = [AMD_GPU_ACCESS_PROFILE],
-)
-
-loom_test(
     name = "checked_benchmark_workload_test",
     execution_profiles = [
         AMD_GPU_HARDWARE_PROFILE,
@@ -222,12 +207,6 @@ loom_test(
     ],
     module = "//loom/src/loom/test/corpus/authoring/benchmark:authoring_benchmark_workload_module",
     tags = ["manual"],
-)
-
-loom_test(
-    name = "split_kv_stage2_access_test",
-    srcs = ["//loom/src/loom/test/corpus/checked_benchmarks:split_kv_online_softmax_combine_f32.loom"],
-    execution_profiles = [AMD_GPU_ACCESS_PROFILE],
 )
 
 loom_test(

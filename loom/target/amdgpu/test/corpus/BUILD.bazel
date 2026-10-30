@@ -172,7 +172,10 @@ loom_corpus_test(
         AMD_GPU_ACCESS_PROFILE,
     ],
     profile_sources = {
-        AMD_GPU_ACCESS_PROFILE.name: ["numeric/vector/dynamic_windows.loom"],
+        AMD_GPU_ACCESS_PROFILE.name: [
+            "control/loop/queued_routes.loom",
+            "numeric/vector/dynamic_windows.loom",
+        ],
     },
     xfails = {
         AMD_GPU_HARDWARE_PROFILE.name: {

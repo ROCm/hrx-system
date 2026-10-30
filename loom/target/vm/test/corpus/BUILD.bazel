@@ -23,6 +23,7 @@ _KERNEL_SOURCES = [
     "control/loop/condition.loom",
     "control/loop/count.loom",
     "control/loop/predicate_lifetimes.loom",
+    "control/loop/queued_routes.loom",
     "control/loop/rotation/offsets.loom",
     "control/loop/rotation/values.loom",
     "control/loop/rotation/views.loom",
