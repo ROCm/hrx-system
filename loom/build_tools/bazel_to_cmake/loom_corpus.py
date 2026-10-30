@@ -92,7 +92,34 @@ class LoomCorpusBuildFileFunctions:
                 source_qualifications[record] = diagnostic
         return qualifications_by_profile_and_source
 
-    def loom_corpus_manifest(self, name, package, srcs):
+    def loom_corpus_manifest(self, name, package, srcs, configs=None):
+        if configs is None:
+            configs = {}
+        if not isinstance(configs, dict):
+            raise ValueError(
+                f"Loom corpus manifest {name} configs must be a dictionary"
+            )
+        for source, source_configs in configs.items():
+            if source not in srcs:
+                raise ValueError(
+                    f"Loom corpus manifest {name} config names unknown source {source}"
+                )
+            if not isinstance(source_configs, dict):
+                raise ValueError(
+                    f"Loom corpus manifest {name} configs for {source} must be "
+                    "a dictionary"
+                )
+            for symbol, value in source_configs.items():
+                if not isinstance(symbol, str) or not symbol:
+                    raise ValueError(
+                        f"Loom corpus manifest {name} config symbols for "
+                        f"{source} must be non-empty strings"
+                    )
+                if not isinstance(value, str):
+                    raise ValueError(
+                        f"Loom corpus manifest {name} config {symbol} for "
+                        f"{source} must have a string value"
+                    )
         programs = []
         for source in srcs:
             source_directory, separator, source_name = source.rpartition("/")
@@ -102,6 +129,7 @@ class LoomCorpusBuildFileFunctions:
             source_stem = self._loom_corpus_target_stem(source.removesuffix(".loom"))
             programs.append(
                 {
+                    "configs": dict(configs.get(source, {})),
                     "identity": f"{name}/{source}",
                     "label": f"{source_package}:{source_name}",
                     "manifest": name,
@@ -152,6 +180,18 @@ class LoomCorpusBuildFileFunctions:
                 f"Loom corpus package {current_package} owns no sources in "
                 f"manifest {manifest['name']}"
             )
+        filegroup_programs = (
+            manifest["programs"]
+            if current_package == manifest_package
+            else local_programs
+        )
+        self._register_target_files(
+            name,
+            [
+                self._cmake_source_location_path(program["label"])
+                for program in filegroup_programs
+            ],
+        )
         self._converter.body += (
             "loom_corpus_sources(\n"
             + self._convert_string_arg_block("NAME", name)
@@ -425,6 +465,23 @@ class LoomCorpusBuildFileFunctions:
                             source_allowed_failures[record],
                         ]
                     )
+            profile_config_values = []
+            for program in catalog["programs"]:
+                source_identity = program["identity"]
+                if source_identity in excluded_sources:
+                    continue
+                if (
+                    selected_sources is not None
+                    and source_identity not in selected_sources
+                ):
+                    continue
+                for symbol in sorted(program["configs"]):
+                    profile_config_values.extend(
+                        [
+                            source_identity,
+                            f"{symbol}={program['configs'][symbol]}",
+                        ]
+                    )
 
             policy = bazel_to_cmake_requirements.CollectedPackagePolicy(
                 build_requirements=profile.build_requirements,
@@ -466,6 +523,9 @@ class LoomCorpusBuildFileFunctions:
                     "ALLOWED_FAILURES",
                     profile_allowed_failure_values or None,
                     sort=False,
+                )
+                + self._convert_string_list_block(
+                    "CONFIGS", profile_config_values or None, sort=False
                 )
                 + self._convert_string_list_block(
                     "ARGS", self._convert_test_location_args(args), sort=False

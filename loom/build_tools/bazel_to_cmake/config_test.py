@@ -303,6 +303,82 @@ loom_kernel_binary(name="program", srcs=["program.loom"], deps=[":support"], tar
         self.assertIn("  LIBRARIES\n    ::support", output)
         self.assertIn('OUTPUT\n    "program"', output)
 
+    def test_corpus_catalog_preserves_per_source_configs(self):
+        output = bazel_to_cmake_converter.convert_build_file(
+            """
+load(
+    "//loom/build_tools/bazel_to_cmake/testdata:configured_corpus.bzl",
+    "CONFIGURED_CORPUS",
+    "CONFIGURED_MANIFEST",
+)
+load("//loom/build_tools/bazel:loom_corpus_catalog.bzl", "loom_corpus_sources")
+load("//loom/build_tools/bazel:loom_corpus_execution.bzl", "loom_corpus_test")
+load(
+    "//loom/build_tools/bazel:loom_library.bzl",
+    "loom_execution_profile",
+    "loom_library",
+)
+profile = loom_execution_profile(
+    name = "test-profile",
+    target_family = "amdgpu",
+    target_class = "gpu",
+    executor = "hardware",
+)
+loom_corpus_test(
+    name = "selected_workloads",
+    catalog = CONFIGURED_CORPUS,
+    execution_profiles = [profile],
+    profile_sources = {
+        profile.name: [
+            "configured/second.loom",
+            "configured/first.loom",
+        ],
+    },
+)
+loom_corpus_sources(
+    name = "corpus",
+    manifest = CONFIGURED_MANIFEST,
+)
+loom_library(
+    name = "consumer",
+    srcs = [":corpus"],
+)
+""",
+            SimpleNamespace(PROJECTS=[self.project], REPO_MAP={"@hrx": ""}),
+            str(REPO_ROOT / "loom/build_tools/bazel_to_cmake/testdata/configured"),
+            repo_root=str(REPO_ROOT),
+        )
+        self.assertIn(
+            """  SOURCES
+    "configured/second.loom"
+    "configured/first.loom"
+""",
+            output,
+        )
+        self.assertIn(
+            """loom_module(
+  NAME
+    consumer
+  SRCS
+    "${PROJECT_SOURCE_DIR}/loom/build_tools/bazel_to_cmake/testdata/configured/first.loom"
+    "${PROJECT_SOURCE_DIR}/loom/build_tools/bazel_to_cmake/testdata/configured/second.loom"
+""",
+            output,
+        )
+        self.assertIn(
+            """  CONFIGS
+    "configured/first.loom"
+    "first.columns=4"
+    "configured/first.loom"
+    "first.rows=5"
+    "configured/second.loom"
+    "second.capacity=65"
+    "configured/second.loom"
+    "second.empty="
+""",
+            output,
+        )
+
     def test_runtime_amdgpu_cts_uses_architecture_selector_variables(self):
         runtime_project = bazel_to_cmake_config.include_project(
             REPO_ROOT / ".bazel_to_cmake.cfg.py", "runtime/.bazel_to_cmake.cfg.py"

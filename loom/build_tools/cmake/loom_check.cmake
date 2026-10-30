@@ -11,10 +11,50 @@
 # owns expansion into individual CTest entries.
 
 function(loom_check_compile_tests)
+  iree_package_source_dir(IREE_PACKAGE_SOURCE_DIR)
+  iree_package_binary_dir(IREE_PACKAGE_BINARY_DIR)
   if(NOT IREE_BUILD_TESTS)
     return()
   endif()
-  cmake_parse_arguments(_RULE "" "NAME;SRC" "TARGETS;DATA;ENV;LABELS;ARGS" ${ARGN})
+  cmake_parse_arguments(_RULE "" "NAME" "" ${ARGN})
+  if(NOT _RULE_NAME)
+    message(FATAL_ERROR "loom_check_compile_tests requires NAME")
+  endif()
+  iree_package_name(_PACKAGE_NAME)
+  set(_ID "${_PACKAGE_NAME}_${_RULE_NAME}")
+  set(_PROPERTY_PREFIX "LOOM_CHECK_COMPILE_${_ID}")
+  get_property(_REGISTERED GLOBAL PROPERTY "${_PROPERTY_PREFIX}_ARGUMENTS" SET)
+  if(_REGISTERED)
+    message(FATAL_ERROR
+      "loom_check_compile_tests repeats ${_RULE_NAME}")
+  endif()
+  set_property(GLOBAL APPEND PROPERTY LOOM_CHECK_COMPILE_TESTS "${_ID}")
+  set_property(GLOBAL PROPERTY "${_PROPERTY_PREFIX}_ARGUMENTS" "${ARGN}")
+  iree_package_path(_PACKAGE_PATH)
+  set_property(GLOBAL PROPERTY
+    "${_PROPERTY_PREFIX}_PACKAGE_PATH" "${_PACKAGE_PATH}")
+  foreach(_VARIABLE
+      IREE_PACKAGE_SOURCE_DIR IREE_PACKAGE_BINARY_DIR
+      IREE_IDE_FOLDER)
+    set_property(GLOBAL PROPERTY
+      "${_PROPERTY_PREFIX}_${_VARIABLE}" "${${_VARIABLE}}")
+  endforeach()
+endfunction()
+
+function(_loom_declare_check_compile_tests ID)
+  set(_PROPERTY_PREFIX "LOOM_CHECK_COMPILE_${ID}")
+  foreach(_VARIABLE
+      IREE_PACKAGE_SOURCE_DIR IREE_PACKAGE_BINARY_DIR
+      IREE_IDE_FOLDER)
+    get_property("${_VARIABLE}" GLOBAL PROPERTY
+      "${_PROPERTY_PREFIX}_${_VARIABLE}")
+  endforeach()
+  set(IREE_PACKAGE_ROOT_DIR "${IREE_PACKAGE_SOURCE_DIR}")
+  get_property(IREE_PACKAGE_ROOT_PREFIX GLOBAL PROPERTY
+    "${_PROPERTY_PREFIX}_PACKAGE_PATH")
+  get_property(_ARGUMENTS GLOBAL PROPERTY
+    "${_PROPERTY_PREFIX}_ARGUMENTS")
+  cmake_parse_arguments(_RULE "" "NAME;SRC" "TARGETS;DATA;ENV;LABELS;ARGS" ${_ARGUMENTS})
   if(_RULE_SRC MATCHES "\\.[^.]+-test$")
     message(FATAL_ERROR
       "Compiler checks require an authored or linked module, not a textual test fixture: ${_RULE_SRC}"
@@ -53,6 +93,13 @@ function(loom_check_compile_tests)
       ENV ${_RULE_ENV}
       LABELS loom-compile hostonly ${_RULE_LABELS}
     )
+  endforeach()
+endfunction()
+
+function(loom_finalize_check_compile_tests)
+  get_property(_TESTS GLOBAL PROPERTY LOOM_CHECK_COMPILE_TESTS)
+  foreach(_TEST IN LISTS _TESTS)
+    _loom_declare_check_compile_tests("${_TEST}")
   endforeach()
 endfunction()
 
