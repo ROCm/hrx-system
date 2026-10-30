@@ -37,6 +37,7 @@ iree_host_size_t loom_serve_pack_spans(iree_host_size_t row_count,
       break;
     }
   }
+  iree_host_size_t expanded_row = row_count;
   for (iree_host_size_t i = 0; i < count && remaining; ++i) {
     loom_serve_packed_span_t* span = &spans[i];
     const iree_host_size_t limit =
@@ -44,12 +45,17 @@ iree_host_size_t loom_serve_pack_spans(iree_host_size_t row_count,
                  iree_min(ready[span->row_index].token_count, chunk_size));
     const iree_host_size_t extra =
         iree_min(remaining, limit - span->token_count);
+    if (extra && expanded_row == row_count) {
+      expanded_row = span->row_index;
+    }
     span->token_count += extra;
     remaining -= extra;
   }
   if (count) {
-    *cursor = deferred_row < row_count ? deferred_row
-                                       : (spans[0].row_index + 1) % row_count;
+    const iree_host_size_t first_row =
+        expanded_row < row_count ? expanded_row : spans[0].row_index;
+    *cursor =
+        deferred_row < row_count ? deferred_row : (first_row + 1) % row_count;
   }
   return count;
 }

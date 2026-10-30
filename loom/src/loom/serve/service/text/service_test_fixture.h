@@ -329,7 +329,10 @@ class SourceTextServiceTest : public ::testing::Test {
     }
     const auto log =
         Read(Send("", "X-Loom-Model: fixture-text\r\n", "/logz", "GET"));
-    EXPECT_NE(log.find(R"("token_slots":null)"), std::string::npos) << log;
+    EXPECT_NE(log.find(R"("token_slots":)"), std::string::npos) << log;
+    EXPECT_EQ(log.find(R"("token_slots":null)") != std::string::npos,
+              mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED)
+        << log;
   }
 
   void Observe(const loom_serve_service_t& interface) {

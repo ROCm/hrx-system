@@ -49,8 +49,9 @@ typedef struct loom_serve_packing_shape_t {
 // row_count, token_capacity, span_capacity, and chunk_size are positive. cursor
 // is below row_count. spans has room for min(row_count, span_capacity) entries.
 // The first deferred row whose minimum fits this shape gets next priority.
-// When every eligible row fits, priority advances past the first admitted row
-// so prompt expansion rotates across ready rows, including around idle gaps.
+// When every eligible row fits, priority advances past the first expanded row,
+// or the first admitted row if none expanded. Indivisible spans and idle gaps
+// therefore do not delay rotation of prompt expansion.
 // Empty readiness leaves cursor unchanged. Only the caller commits model
 // progress, after execution succeeds; output credit determines readiness.
 iree_host_size_t loom_serve_pack_spans(iree_host_size_t row_count,

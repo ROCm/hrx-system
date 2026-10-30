@@ -660,6 +660,25 @@ TEST_F(SourceTextServiceTest, MatchedEpochsPreserveRetainedHttpHistory) {
   CheckScheduledResponses(LOOM_SERVE_TEXT_SCHEDULE_MATCHED);
 }
 
+class PackedTextServiceTest
+    : public SourceTextServiceTest,
+      public ::testing::WithParamInterface<loom_serve_text_packing_mode_t> {
+ protected:
+  loom_serve_text_service_options_t ServiceOptions() const override {
+    auto options = SourceTextServiceTest::ServiceOptions();
+    options.packing_mode = GetParam();
+    return options;
+  }
+};
+
+TEST_P(PackedTextServiceTest, RetainsHttpHistoryAcrossPackingPolicies) {
+  CheckScheduledResponses(LOOM_SERVE_TEXT_SCHEDULE_PACKED);
+}
+
+INSTANTIATE_TEST_SUITE_P(PackingPolicies, PackedTextServiceTest,
+                         ::testing::Values(LOOM_SERVE_TEXT_PACKING_MIXED,
+                                           LOOM_SERVE_TEXT_PACKING_SEPARATE));
+
 TEST_F(SourceTextServiceTest, CancelledPreparationRetainsPartialOwnership) {
   const auto before = loom_serve_pool_statistics(storage_owner_);
   auto options = ModelOptions();
