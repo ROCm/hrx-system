@@ -965,6 +965,11 @@ iree_status_t iree_hal_streaming_graph_allocate_host_staging(
     iree_hal_streaming_graph_t* graph, iree_device_size_t size,
     iree_hal_streaming_buffer_t** out_buffer);
 
+// Releases graph staging rejected during construction or parameter update.
+// The allocation must not be referenced by any submitted operation.
+void iree_hal_streaming_graph_discard_host_staging(
+    iree_hal_streaming_graph_t* graph, iree_hal_streaming_buffer_t* buffer);
+
 #ifdef __cplusplus
 }
 #endif

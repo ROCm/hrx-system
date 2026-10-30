@@ -278,6 +278,20 @@ iree_status_t iree_hal_streaming_graph_allocate_host_staging(
   return iree_ok_status();
 }
 
+void iree_hal_streaming_graph_discard_host_staging(
+    iree_hal_streaming_graph_t* graph, iree_hal_streaming_buffer_t* buffer) {
+  if (!buffer) {
+    return;
+  }
+  iree_hal_streaming_graph_owned_host_allocation_t** previous_next =
+      &graph->owned_host_allocations;
+  while ((*previous_next)->buffer != buffer) {
+    previous_next = &(*previous_next)->next;
+  }
+  *previous_next = (*previous_next)->next;
+  iree_hal_streaming_memory_release_wrapped_buffer(buffer);
+}
+
 void iree_hal_streaming_graph_retain(iree_hal_streaming_graph_t* graph) {
   if (graph) {
     iree_atomic_ref_count_inc(&graph->ref_count);
