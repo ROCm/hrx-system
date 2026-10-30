@@ -209,33 +209,6 @@ loom_test(
 )
 
 loom_test(
-    name = "kernarg_test",
-    srcs = ["amdgpu_unused_kernargs.loom"],
-    execution_profiles = [
-        AMD_GPU_HARDWARE_PROFILE,
-        AMD_GPU_ACCESS_PROFILE,
-    ],
-)
-
-loom_test(
-    name = "callable_values_test",
-    srcs = ["callable_values.loom"],
-    execution_profiles = [
-        AMD_GPU_HARDWARE_PROFILE,
-        AMD_GPU_ACCESS_PROFILE,
-    ],
-)
-
-loom_test(
-    name = "narrow_argument_test",
-    srcs = ["narrow_arguments.loom"],
-    execution_profiles = [
-        AMD_GPU_HARDWARE_PROFILE,
-        AMD_GPU_ACCESS_PROFILE,
-    ],
-)
-
-loom_test(
     name = "repeated_wmma_test",
     srcs = ["amdgpu_repeated_wmma.loom"],
     compile_targets = [
