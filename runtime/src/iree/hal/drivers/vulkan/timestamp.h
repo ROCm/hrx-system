@@ -17,11 +17,25 @@ extern "C" {
 // Queue-owned lazy pipeline for delivering resolved ticks through BDA bindings.
 // Initialization is serialized by the queue's native command-pool lock.
 typedef struct iree_hal_vulkan_timestamp_pipeline_t {
-  // Pipeline layout accepting a source address and a destination-pointer slot.
+  // Pipeline layout accepting source/destination tables and a value count.
   VkPipelineLayout layout;
-  // Compute pipeline copying one complete eight-byte tick.
+  // Compute pipeline scattering complete eight-byte ticks.
   VkPipeline handle;
 } iree_hal_vulkan_timestamp_pipeline_t;
+
+// One captured query awaiting delivery. Populated during native recording;
+// cached replay executes the resulting commands without revisiting this table.
+typedef struct iree_hal_vulkan_timestamp_pending_t {
+  // Borrowed resolved target buffer; NULL once delivered.
+  iree_hal_buffer_t* buffer;
+  // Byte offset in buffer, including the submission's binding displacement.
+  iree_device_size_t offset;
+  // Native direct destination, or NULL for binding-relative shader delivery.
+  VkBuffer target_handle;
+  // Byte offset in target_handle, or in the private indirect result/address
+  // tables when target_handle is NULL.
+  VkDeviceSize target_offset;
+} iree_hal_vulkan_timestamp_pending_t;
 
 // Mutable timestamp resources owned by one native command-buffer cache slot.
 // The slot's lease prevents reset, writes, or destruction while it is in
@@ -44,7 +58,24 @@ typedef struct iree_hal_vulkan_timestamp_state_t {
   VkDeviceAddress resolve_address;
   // Queue-owned pipeline, borrowed while resolve_buffer is present.
   const iree_hal_vulkan_timestamp_pipeline_t* pipeline;
+  // Reusable native-recording workspace, indexed by query ordinal.
+  iree_hal_vulkan_timestamp_pending_t* pending;
+  // Number of entries allocated in pending.
+  uint32_t pending_capacity;
 } iree_hal_vulkan_timestamp_state_t;
+
+// Invocation-local cursor over the exclusively leased native-recording
+// workspace.
+typedef struct iree_hal_vulkan_timestamp_recording_t {
+  // Resources leased for this native recording; NULL when there are no queries.
+  const iree_hal_vulkan_timestamp_state_t* state;
+  // Device address of the contiguous published indirect destination table.
+  VkDeviceAddress target_table;
+  // First captured query not yet delivered, or count when none remain.
+  uint32_t first_pending;
+  // Number of queries captured so far.
+  uint32_t count;
+} iree_hal_vulkan_timestamp_recording_t;
 
 // Ensures capacity while the native command-buffer slot is exclusively leased
 // for recording. Existing resources are reused when large enough. Native
@@ -55,21 +86,27 @@ iree_status_t iree_hal_vulkan_timestamp_state_prepare(
     iree_hal_queue_family_affinity_t queue_family_affinity,
     uint32_t query_count, uint32_t resolve_count,
     iree_hal_vulkan_timestamp_pipeline_t* pipeline,
-    iree_hal_vulkan_timestamp_state_t* state);
+    iree_allocator_t host_allocator, iree_hal_vulkan_timestamp_state_t* state);
 
 // Releases retired native command-buffer resources.
 void iree_hal_vulkan_timestamp_state_deinitialize(
     const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
-    iree_hal_vulkan_timestamp_state_t* state);
+    iree_allocator_t host_allocator, iree_hal_vulkan_timestamp_state_t* state);
 
 // Releases the queue-owned pipeline after all native recordings retire.
 void iree_hal_vulkan_timestamp_pipeline_deinitialize(
     const iree_hal_vulkan_device_syms_t* syms, VkDevice logical_device,
     iree_hal_vulkan_timestamp_pipeline_t* pipeline);
 
-// Captures a query and writes it directly to a native transfer destination.
-// The caller resets the query before capture. Execution dependencies do not
-// imply payload memory visibility; ordinary HAL barriers own that contract.
+// Captures after the requested source stages and before the target stages.
+// The caller resets the query before capture. No result delivery is recorded.
+void iree_hal_vulkan_timestamp_record_capture(
+    const iree_hal_vulkan_device_syms_t* syms, VkQueueFlags queue_flags,
+    VkCommandBuffer command_buffer, VkQueryPool queries, uint32_t query_index,
+    iree_hal_execution_stage_t source_stage_mask,
+    iree_hal_execution_stage_t target_stage_mask);
+
+// Captures and immediately delivers a standalone queue timestamp.
 void iree_hal_vulkan_timestamp_record_direct(
     const iree_hal_vulkan_device_syms_t* syms, VkQueueFlags queue_flags,
     VkCommandBuffer command_buffer, VkQueryPool queries, uint32_t query_index,
@@ -77,16 +114,13 @@ void iree_hal_vulkan_timestamp_record_direct(
     iree_hal_execution_stage_t target_stage_mask, VkBuffer target_buffer,
     VkDeviceSize target_offset);
 
-// Captures through private resolve storage and copies the tick to the address
-// in |target_slot_address|. Host publication of that slot must be visible to
-// compute reads before this call. Each live capture uses its own resolve index.
-void iree_hal_vulkan_timestamp_record_indirect(
-    const iree_hal_vulkan_device_syms_t* syms, VkQueueFlags queue_flags,
-    VkCommandBuffer command_buffer,
-    const iree_hal_vulkan_timestamp_state_t* state, uint32_t query_index,
-    uint32_t resolve_index, iree_hal_execution_stage_t source_stage_mask,
-    iree_hal_execution_stage_t target_stage_mask,
-    VkDeviceAddress target_slot_address);
+// Delivers pending queries overlapping a resolved range, or all queries if
+// |range.buffer| is NULL. Adjacent queries share native copies and scatter
+// dispatches. The caller records the consuming visibility dependency afterward.
+void iree_hal_vulkan_timestamp_record_delivery(
+    const iree_hal_vulkan_device_syms_t* syms, VkCommandBuffer command_buffer,
+    iree_hal_vulkan_timestamp_recording_t* recording,
+    iree_hal_buffer_ref_t range);
 
 #ifdef __cplusplus
 }  // extern "C"

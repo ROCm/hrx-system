@@ -207,6 +207,94 @@ TEST_P(CommandBufferTimestampTest, TransferConsumerAndQueueClock) {
   EXPECT_LE((bounds[1] - ticks[1]) & tick_mask_, duration);
 }
 
+TEST_P(CommandBufferTimestampTest, BatchedCompletionPreservesInterleavedBytes) {
+  // Boundary sizes exercise a partial, full, and multi-iteration delivery
+  // batch.
+  for (uint32_t count : {1u, 64u, 65u}) {
+    SCOPED_TRACE(count);
+    const uint32_t length = (count + 1) * 16;
+    Ref<iree_hal_buffer_t> buffer;
+    Allocate(length, buffer.out());
+    Ref<iree_hal_command_buffer_t> commands;
+    Begin(commands.out());
+    ASSERT_FALSE(HasFatalFailure());
+    for (uint32_t i = 0; i < count; ++i) {
+      // These independent captures share bytes' cache lines with untouched
+      // guards; a batched implementation must scatter exact eight-byte writes.
+      IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+          commands, 0, 0, RefAt(buffer, 8 + i * 16), 0));
+    }
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(commands));
+    const iree_hal_buffer_binding_t binding = {buffer, 0, length};
+    SemaphoreList done(device_, {0}, {1});
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        queue_, {}, done, commands,
+        {indirect() ? 1u : 0u, indirect() ? &binding : nullptr}, 0));
+    IREE_ASSERT_OK(iree_hal_semaphore_list_wait(done, iree_infinite_timeout(),
+                                                IREE_ASYNC_WAIT_FLAG_NONE));
+    const auto words = ReadBufferData<uint64_t>(buffer);
+    ASSERT_EQ(words.size(), length / 8);
+    for (uint32_t i = 0; i < count; ++i) {
+      EXPECT_EQ(words[i * 2], kGuard);
+      EXPECT_NE(words[i * 2 + 1], kGuard);
+    }
+    EXPECT_EQ(words[count * 2], kGuard);
+    EXPECT_EQ(words[count * 2 + 1], kGuard);
+  }
+}
+
+TEST_P(CommandBufferTimestampTest, RangedConsumerAndOverwrite) {
+  Ref<iree_hal_buffer_t> buffer;
+  Allocate(64, buffer.out());
+  Ref<iree_hal_command_buffer_t> commands;
+  Begin(commands.out());
+  ASSERT_FALSE(HasFatalFailure());
+  IREE_ASSERT_OK(
+      iree_hal_command_buffer_timestamp(commands, 0, 0, RefAt(buffer, 8), 0));
+  IREE_ASSERT_OK(
+      iree_hal_command_buffer_timestamp(commands, 0, 0, RefAt(buffer, 24), 0));
+  const iree_hal_buffer_barrier_t read = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ,
+      .buffer_ref = RefAt(buffer, 24),
+  };
+  iree_hal_barrier_t dependency = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .buffer_barrier_count = 1,
+      .buffer_barriers = &read,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(commands, &dependency));
+  IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+      commands, RefAt(buffer, 24), RefAt(buffer, 48), 0));
+  const iree_hal_buffer_barrier_t overwrite = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .buffer_ref = RefAt(buffer, 24),
+  };
+  dependency.buffer_barriers = &overwrite;
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(commands, &dependency));
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      commands, RefAt(buffer, 24), &kPattern, sizeof(kPattern), 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(commands));
+  const iree_hal_buffer_binding_t binding = {buffer, 0, 64};
+  SemaphoreList done(device_, {0}, {1});
+  IREE_ASSERT_OK(iree_hal_queue_execute(
+      queue_, {}, done, commands,
+      {indirect() ? 1u : 0u, indirect() ? &binding : nullptr}, 0));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(done, iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE));
+  const auto words = ReadBufferData<uint64_t>(buffer);
+  ASSERT_EQ(words.size(), 8u);
+  EXPECT_NE(words[1], kGuard);
+  EXPECT_NE(words[6], kGuard);
+  EXPECT_EQ(words[3], (uint64_t{kPattern} << 32) | kPattern);
+  for (uint32_t i : {0u, 2u, 4u, 5u, 7u}) {
+    EXPECT_EQ(words[i], kGuard);
+  }
+}
+
 TEST_P(CommandBufferTimestampTest, ConcurrentBindingsAndReuse) {
   if (!indirect()) {
     GTEST_SKIP() << "Independent targets require indirect bindings";

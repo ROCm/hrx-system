@@ -42,7 +42,7 @@ typedef struct iree_hal_vulkan_command_timestamp_t {
   iree_hal_buffer_ref_t target_ref;
   // Work that precedes capture.
   iree_hal_execution_stage_t source_stage_mask;
-  // Work that follows capture and delivery.
+  // Work that follows capture without waiting for result delivery.
   iree_hal_execution_stage_t target_stage_mask;
   // Query assigned by the recorder, private to each native replay instance.
   uint32_t query_index;
@@ -139,6 +139,12 @@ typedef struct iree_hal_vulkan_command_execution_barrier_t {
 
   // Number of trailing exact-range native actions.
   iree_host_size_t resource_barrier_count;
+
+  // Whether the global access dependency requires all pending query writes.
+  bool delivers_timestamps;
+
+  // Number of trailing timestamp result ranges after the resource actions.
+  iree_host_size_t timestamp_range_count;
 } iree_hal_vulkan_command_execution_barrier_t;
 
 typedef struct iree_hal_vulkan_command_resource_barrier_t {
@@ -242,6 +248,9 @@ typedef struct iree_hal_vulkan_command_buffer_t {
 
   // Number of queries requiring binding-relative delivery through scratch.
   uint32_t indirect_timestamp_count;
+
+  // Common indirect timestamp slot, or UINT32_MAX for mixed/direct targets.
+  uint32_t timestamp_binding_slot;
 
   // Descriptor pool capacity required to replay recorded native commands.
   iree_hal_vulkan_command_buffer_descriptor_requirements_t
@@ -2086,9 +2095,48 @@ iree_hal_vulkan_command_buffer_record_execution_barrier_native(
     const iree_hal_vulkan_device_syms_t* syms, VkQueueFlags queue_flags,
     VkCommandBuffer native_command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
-    const iree_hal_vulkan_command_t* command) {
+    const iree_hal_vulkan_command_t* command,
+    iree_hal_vulkan_timestamp_recording_t* timestamps) {
   const iree_hal_vulkan_command_execution_barrier_t* execution_barrier =
       iree_hal_vulkan_command_execution_barrier_payload(command);
+  const iree_hal_vulkan_command_resource_barrier_t* resource_barriers =
+      iree_hal_vulkan_command_execution_resource_barriers(execution_barrier);
+  if (execution_barrier->delivers_timestamps) {
+    iree_hal_vulkan_timestamp_record_delivery(
+        syms, native_command_buffer, timestamps, (iree_hal_buffer_ref_t){0});
+  }
+  const iree_hal_buffer_ref_t* timestamp_ranges =
+      (const iree_hal_buffer_ref_t*)(resource_barriers +
+                                     execution_barrier->resource_barrier_count);
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; iree_status_is_ok(status) &&
+                               i < execution_barrier->timestamp_range_count;
+       ++i) {
+    iree_hal_buffer_ref_t range = {0};
+    status = iree_hal_buffer_binding_table_resolve_ref(
+        binding_table, timestamp_ranges[i], &range);
+    if (iree_status_is_ok(status)) {
+      iree_hal_vulkan_timestamp_record_delivery(syms, native_command_buffer,
+                                                timestamps, range);
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
+
+  // Queries participate in the logical transfer stage, but Vulkan query
+  // operations are covered by ALL_COMMANDS rather than transfer commands.
+  // This orders capture without delivering any result at execution-only joins.
+  iree_hal_execution_stage_t source_stage =
+      execution_barrier->source_stage_mask;
+  iree_hal_execution_stage_t target_stage =
+      execution_barrier->target_stage_mask;
+  if (timestamps->state) {
+    if (source_stage & IREE_HAL_EXECUTION_STAGE_TRANSFER) {
+      source_stage |= IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS;
+    }
+    if (target_stage & IREE_HAL_EXECUTION_STAGE_TRANSFER) {
+      target_stage |= IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS;
+    }
+  }
   // Exact range barriers carry the execution dependency themselves. Emit a
   // separate global barrier only for global visibility, ordinary access
   // barriers, or an execution-only dependency with no ranged action.
@@ -2099,15 +2147,12 @@ iree_hal_vulkan_command_buffer_record_execution_barrier_native(
   if (has_global_memory_visibility ||
       execution_barrier->resource_barrier_count == 0) {
     const iree_hal_vulkan_barrier_t barrier = iree_hal_vulkan_barrier_resolve(
-        execution_barrier->source_stage_mask,
-        execution_barrier->target_stage_mask, execution_barrier->flags,
+        source_stage, target_stage, execution_barrier->flags,
         has_global_memory_visibility);
     iree_hal_vulkan_barrier_record(syms, queue_flags, native_command_buffer,
                                    &barrier);
   }
 
-  const iree_hal_vulkan_command_resource_barrier_t* resource_barriers =
-      iree_hal_vulkan_command_execution_resource_barriers(execution_barrier);
   for (iree_host_size_t i = 0; i < execution_barrier->resource_barrier_count;
        ++i) {
     const iree_hal_vulkan_command_resource_barrier_t* resource_barrier =
@@ -2124,8 +2169,7 @@ iree_hal_vulkan_command_buffer_record_execution_barrier_native(
         resource_barrier->operation.operation ==
         IREE_HAL_MEMORY_TRANSITION_OPERATION_RELEASE_TO_SYSTEM;
     iree_hal_vulkan_barrier_t barrier = iree_hal_vulkan_barrier_resolve(
-        execution_barrier->source_stage_mask,
-        execution_barrier->target_stage_mask,
+        source_stage, target_stage,
         is_release ? IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE
                    : IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
         /*has_memory_visibility=*/false);
@@ -2382,19 +2426,17 @@ static iree_status_t iree_hal_vulkan_command_buffer_publish_timestamp_target(
     iree_hal_buffer_binding_table_t binding_table,
     const iree_hal_vulkan_command_timestamp_t* timestamp,
     iree_hal_vulkan_command_buffer_bda_recording_state_t* bda_recording_state,
-    iree_hal_vulkan_command_buffer_bda_binding_cache_t* bda_binding_cache,
-    VkDeviceAddress* out_publication_address) {
+    iree_hal_vulkan_command_buffer_bda_binding_cache_t* bda_binding_cache) {
   VkDeviceAddress target_address = 0;
   iree_device_size_t target_length = 0;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_resolve_bda_ref(
       binding_table, timestamp->target_ref, IREE_SV("timestamp target"),
       bda_binding_cache, IREE_STATUS_FAILED_PRECONDITION, &target_address,
       &target_length));
-  iree_byte_span_t publication_span = iree_byte_span_empty();
-  IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_allocate_bda_publication(
-      bda_recording_state, sizeof(uint64_t), &publication_span,
-      out_publication_address));
-  memcpy(publication_span.data, &target_address, sizeof(target_address));
+  const iree_host_size_t offset =
+      (iree_host_size_t)timestamp->resolve_index * sizeof(uint64_t);
+  memcpy(bda_recording_state->host_span.data + offset, &target_address,
+         sizeof(target_address));
   return iree_ok_status();
 }
 
@@ -2439,6 +2481,9 @@ iree_status_t iree_hal_vulkan_command_buffer_publish_bda_replay_data(
       .host_span =
           bda_publication ? bda_publication->host_span : iree_byte_span_empty(),
       .device_address = bda_publication ? bda_publication->device_address : 0,
+      .byte_offset =
+          (iree_host_size_t)command_buffer->indirect_timestamp_count *
+          sizeof(uint64_t),
   };
 
   iree_status_t status = iree_ok_status();
@@ -2473,10 +2518,9 @@ iree_status_t iree_hal_vulkan_command_buffer_publish_bda_replay_data(
         const iree_hal_vulkan_command_timestamp_t* timestamp =
             iree_hal_vulkan_command_timestamp_payload(command);
         if (!timestamp->target_ref.buffer) {
-          VkDeviceAddress publication_address = 0;
           status = iree_hal_vulkan_command_buffer_publish_timestamp_target(
-              binding_table, timestamp, &bda_recording_state, bda_binding_cache,
-              &publication_address);
+              binding_table, timestamp, &bda_recording_state,
+              bda_binding_cache);
         }
         break;
       }
@@ -2501,35 +2545,39 @@ static iree_status_t iree_hal_vulkan_command_buffer_record_timestamp_native(
     VkCommandBuffer native_command_buffer,
     iree_hal_buffer_binding_table_t binding_table,
     const iree_hal_vulkan_command_timestamp_t* timestamp,
-    const iree_hal_vulkan_timestamp_state_t* timestamps,
+    iree_hal_vulkan_timestamp_recording_t* recording,
     iree_hal_vulkan_command_buffer_bda_recording_state_t* bda_recording_state,
     iree_hal_vulkan_command_buffer_bda_binding_cache_t* bda_binding_cache) {
+  iree_hal_vulkan_timestamp_pending_t pending = {
+      .buffer = timestamp->target_ref.buffer,
+      .offset = timestamp->target_ref.offset,
+      .target_offset =
+          (VkDeviceSize)timestamp->resolve_index * sizeof(uint64_t),
+  };
   if (timestamp->target_ref.buffer) {
-    VkBuffer target_buffer = VK_NULL_HANDLE;
-    VkDeviceSize target_offset = 0;
     VkDeviceSize target_length = 0;
     IREE_RETURN_IF_ERROR(
         iree_hal_vulkan_command_buffer_resolve_native_buffer_ref(
             binding_table, timestamp->target_ref, IREE_SV("timestamp target"),
-            &target_buffer, NULL, &target_offset, &target_length));
-    iree_hal_vulkan_timestamp_record_direct(
-        syms, queue_flags, native_command_buffer, timestamps->queries,
-        timestamp->query_index, timestamp->source_stage_mask,
-        timestamp->target_stage_mask, target_buffer, target_offset);
+            &pending.target_handle, NULL, &pending.target_offset,
+            &target_length));
   } else {
-    VkDeviceAddress publication_address = 0;
     IREE_RETURN_IF_ERROR(
         iree_hal_vulkan_command_buffer_publish_timestamp_target(
-            binding_table, timestamp, bda_recording_state, bda_binding_cache,
-            &publication_address));
+            binding_table, timestamp, bda_recording_state, bda_binding_cache));
     iree_hal_vulkan_command_buffer_record_bda_publication_barrier(
         syms, native_command_buffer, bda_recording_state);
-    iree_hal_vulkan_timestamp_record_indirect(
-        syms, queue_flags, native_command_buffer, timestamps,
-        timestamp->query_index, timestamp->resolve_index,
-        timestamp->source_stage_mask, timestamp->target_stage_mask,
-        publication_address);
+    const iree_hal_buffer_binding_t* binding =
+        &binding_table.bindings[timestamp->target_ref.buffer_slot];
+    pending.buffer = binding->buffer;
+    pending.offset += binding->offset;
   }
+  recording->state->pending[timestamp->query_index] = pending;
+  recording->count = timestamp->query_index + 1;
+  iree_hal_vulkan_timestamp_record_capture(
+      syms, queue_flags, native_command_buffer, recording->state->queries,
+      timestamp->query_index, timestamp->source_stage_mask,
+      timestamp->target_stage_mask);
   return iree_ok_status();
 }
 
@@ -2666,6 +2714,14 @@ iree_status_t iree_hal_vulkan_command_buffer_record_native(
       .host_span =
           bda_publication ? bda_publication->host_span : iree_byte_span_empty(),
       .device_address = bda_publication ? bda_publication->device_address : 0,
+      .byte_offset =
+          (iree_host_size_t)command_buffer->indirect_timestamp_count *
+          sizeof(uint64_t),
+  };
+
+  iree_hal_vulkan_timestamp_recording_t timestamp_recording = {
+      .state = timestamps,
+      .target_table = bda_recording_state.device_address,
   };
 
   iree_status_t status = iree_ok_status();
@@ -2772,13 +2828,13 @@ iree_status_t iree_hal_vulkan_command_buffer_record_native(
       case IREE_HAL_VULKAN_COMMAND_TYPE_EXECUTION_BARRIER:
         status = iree_hal_vulkan_command_buffer_record_execution_barrier_native(
             syms, command_buffer->queue_flags, native_command_buffer,
-            binding_table, command);
+            binding_table, command, &timestamp_recording);
         break;
       case IREE_HAL_VULKAN_COMMAND_TYPE_TIMESTAMP:
         status = iree_hal_vulkan_command_buffer_record_timestamp_native(
             syms, command_buffer->queue_flags, native_command_buffer,
             binding_table, iree_hal_vulkan_command_timestamp_payload(command),
-            timestamps, &bda_recording_state, bda_binding_cache);
+            &timestamp_recording, &bda_recording_state, bda_binding_cache);
         break;
       case IREE_HAL_VULKAN_COMMAND_TYPE_ATOMIC:
         status = iree_hal_vulkan_command_buffer_record_atomic_native(
@@ -2805,6 +2861,11 @@ iree_status_t iree_hal_vulkan_command_buffer_record_native(
                                   (uint32_t)command->type);
         break;
     }
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_vulkan_timestamp_record_delivery(syms, native_command_buffer,
+                                              &timestamp_recording,
+                                              (iree_hal_buffer_ref_t){0});
   }
   if (iree_status_is_ok(status) && bda_recording_state.byte_offset !=
                                        command_buffer->bda_publication_length) {
@@ -3036,6 +3097,18 @@ static iree_status_t iree_hal_vulkan_command_buffer_end_debug_group(
   return iree_ok_status();
 }
 
+// A ranged availability dependency or prepared release consumes earlier query
+// writes even when its target access scope is empty.
+static bool iree_hal_vulkan_command_buffer_barrier_delivers_timestamp_range(
+    const iree_hal_buffer_barrier_t* barrier) {
+  return iree_any_bit_set(barrier->source_scope,
+                          IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE |
+                              IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE) ||
+         (barrier->recipe &&
+          iree_any_bit_set(barrier->recipe->effects.bits,
+                           IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM));
+}
+
 static iree_status_t iree_hal_vulkan_command_buffer_barrier(
     iree_hal_command_buffer_t* base_command_buffer,
     const iree_hal_barrier_t* barrier) {
@@ -3044,13 +3117,44 @@ static iree_status_t iree_hal_vulkan_command_buffer_barrier(
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_validate_recording_state(
       command_buffer, IREE_SV("barrier")));
 
+  // Retain only the dependency facts needed by deferred query delivery.
+  // Ordinary native visibility may still be promoted globally; that does not
+  // authorize materializing unrelated query results at this boundary.
+  const bool includes_timestamps =
+      command_buffer->timestamp_count != 0 &&
+      (!barrier->source_stage_mask ||
+       iree_any_bit_set(barrier->source_stage_mask,
+                        IREE_HAL_EXECUTION_STAGE_TRANSFER |
+                            IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS |
+                            IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE));
+  const iree_hal_access_scope_t timestamp_writes =
+      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE | IREE_HAL_ACCESS_SCOPE_MEMORY_WRITE;
+  bool delivers_timestamps =
+      includes_timestamps &&
+      (iree_any_bit_set(barrier->flags,
+                        IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE) ||
+       iree_any_bit_set(barrier->target_stage_mask,
+                        IREE_HAL_EXECUTION_STAGE_HOST));
+  for (iree_host_size_t i = 0; i < barrier->memory_barrier_count; ++i) {
+    delivers_timestamps |=
+        includes_timestamps &&
+        iree_any_bit_set(barrier->memory_barriers[i].source_scope,
+                         timestamp_writes);
+  }
+  iree_host_size_t timestamp_range_count = 0;
   iree_host_size_t global_buffer_barrier_count = 0;
   iree_host_size_t resource_barrier_count = 0;
   for (iree_host_size_t i = 0; i < barrier->buffer_barrier_count; ++i) {
     const iree_hal_buffer_barrier_t* buffer_barrier =
         &barrier->buffer_barriers[i];
+    if (includes_timestamps && !delivers_timestamps &&
+        iree_hal_vulkan_command_buffer_barrier_delivers_timestamp_range(
+            buffer_barrier)) {
+      ++timestamp_range_count;
+    }
     if (!buffer_barrier->recipe) {
-      ++global_buffer_barrier_count;
+      global_buffer_barrier_count +=
+          (buffer_barrier->source_scope | buffer_barrier->target_scope) != 0;
       continue;
     }
     if (!iree_host_size_checked_add(resource_barrier_count,
@@ -3061,6 +3165,7 @@ static iree_status_t iree_hal_vulkan_command_buffer_barrier(
     }
   }
   iree_host_size_t resource_barriers_size = 0;
+  iree_host_size_t timestamp_ranges_size = 0;
   iree_host_size_t payload_length = 0;
   if (!iree_host_size_checked_mul(
           resource_barrier_count,
@@ -3068,7 +3173,12 @@ static iree_status_t iree_hal_vulkan_command_buffer_barrier(
           &resource_barriers_size) ||
       !iree_host_size_checked_add(
           sizeof(iree_hal_vulkan_command_execution_barrier_t),
-          resource_barriers_size, &payload_length)) {
+          resource_barriers_size, &payload_length) ||
+      !iree_host_size_checked_mul(timestamp_range_count,
+                                  sizeof(iree_hal_buffer_ref_t),
+                                  &timestamp_ranges_size) ||
+      !iree_host_size_checked_add(payload_length, timestamp_ranges_size,
+                                  &payload_length)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "Vulkan barrier command size overflows");
   }
@@ -3077,9 +3187,24 @@ static iree_status_t iree_hal_vulkan_command_buffer_barrier(
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_ensure_command_capacity(
       command_buffer, payload_length, &record_length, &payload_offset));
   for (iree_host_size_t i = 0; i < barrier->buffer_barrier_count; ++i) {
-    if (barrier->buffer_barriers[i].recipe) {
+    const iree_hal_buffer_barrier_t* buffer_barrier =
+        &barrier->buffer_barriers[i];
+    const bool native_range =
+        buffer_barrier->recipe && buffer_barrier->recipe->operation_count != 0;
+    const bool timestamp_range =
+        includes_timestamps && !delivers_timestamps &&
+        iree_hal_vulkan_command_buffer_barrier_delivers_timestamp_range(
+            buffer_barrier);
+    if (native_range || timestamp_range) {
       IREE_RETURN_IF_ERROR(iree_hal_vulkan_command_buffer_track_buffer_ref(
-          command_buffer, barrier->buffer_barriers[i].buffer_ref));
+          command_buffer, buffer_barrier->buffer_ref));
+      // One symbolic slot has a binding-independent overlap relation. Different
+      // slots may alias differently on each invocation and require native
+      // recording with that invocation's concrete bindings.
+      command_buffer->has_binding_dependent_native_commands |=
+          !buffer_barrier->buffer_ref.buffer &&
+          (native_range || command_buffer->timestamp_binding_slot !=
+                               buffer_barrier->buffer_ref.buffer_slot);
     }
   }
   void* payload = NULL;
@@ -3094,12 +3219,22 @@ static iree_status_t iree_hal_vulkan_command_buffer_barrier(
   execution_barrier->memory_barrier_count = barrier->memory_barrier_count;
   execution_barrier->global_buffer_barrier_count = global_buffer_barrier_count;
   execution_barrier->resource_barrier_count = resource_barrier_count;
+  execution_barrier->delivers_timestamps = delivers_timestamps;
+  execution_barrier->timestamp_range_count = timestamp_range_count;
   iree_hal_vulkan_command_resource_barrier_t* resource_barriers =
       (iree_hal_vulkan_command_resource_barrier_t*)(execution_barrier + 1);
   iree_host_size_t resource_ordinal = 0;
+  iree_hal_buffer_ref_t* timestamp_ranges =
+      (iree_hal_buffer_ref_t*)(resource_barriers + resource_barrier_count);
+  iree_host_size_t timestamp_range_ordinal = 0;
   for (iree_host_size_t i = 0; i < barrier->buffer_barrier_count; ++i) {
     const iree_hal_buffer_barrier_t* buffer_barrier =
         &barrier->buffer_barriers[i];
+    if (includes_timestamps && !delivers_timestamps &&
+        iree_hal_vulkan_command_buffer_barrier_delivers_timestamp_range(
+            buffer_barrier)) {
+      timestamp_ranges[timestamp_range_ordinal++] = buffer_barrier->buffer_ref;
+    }
     if (!buffer_barrier->recipe) {
       continue;
     }
@@ -3147,6 +3282,13 @@ static iree_status_t iree_hal_vulkan_command_buffer_timestamp(
       payload_offset, NULL, &payload);
   iree_hal_vulkan_command_timestamp_t* timestamp =
       (iree_hal_vulkan_command_timestamp_t*)payload;
+  if (command_buffer->timestamp_count == 0) {
+    command_buffer->timestamp_binding_slot =
+        target_ref.buffer ? UINT32_MAX : target_ref.buffer_slot;
+  } else if (target_ref.buffer ||
+             command_buffer->timestamp_binding_slot != target_ref.buffer_slot) {
+    command_buffer->timestamp_binding_slot = UINT32_MAX;
+  }
   *timestamp = (iree_hal_vulkan_command_timestamp_t){
       .target_ref = target_ref,
       .source_stage_mask = source_stage_mask,

@@ -602,10 +602,16 @@ iree_hal_command_buffer_barrier(iree_hal_command_buffer_t* command_buffer,
 // Writes one raw 64-bit timestamp to |target_ref| during execution.
 //
 // |source_stage_mask| names earlier stages that must complete before capture.
-// |target_stage_mask| names later stages that cannot begin until capture and
-// the write complete. A zero mask adds no dependency on that side; stages
-// outside the masks may overlap. HOST is not an execution stage for this
-// operation. Cache visibility transitions use ordinary barriers.
+// |target_stage_mask| names later stages that cannot begin until capture.
+// A zero mask adds no dependency on that side; stages outside the masks may
+// overlap. HOST is not an execution stage for this operation. Execution-only
+// barriers order captures without requiring delivery to the destination.
+//
+// Result delivery may be deferred and batched until a memory dependency on the
+// destination or normal completion. A subsequent consumer requires an ordinary
+// TRANSFER_WRITE memory dependency covering the target range. Execution
+// ordering alone does not make the result available or replace payload
+// visibility.
 //
 // The timestamp has the same clock domain, frequency, and valid-bit width as
 // iree_hal_queue_timestamp on this family. Differences are modulo that width;
