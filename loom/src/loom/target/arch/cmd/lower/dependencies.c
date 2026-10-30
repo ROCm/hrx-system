@@ -62,6 +62,8 @@ typedef struct loom_cmd_dependency_build_t {
   iree_host_size_t access_count;
   // Allocated access capacity.
   iree_host_size_t access_capacity;
+  // An ambient access connects all physical ranges into one global component.
+  bool has_unbounded_access;
 } loom_cmd_dependency_build_t;
 
 static loom_cmd_buffer_binding_t loom_cmd_dependency_placement(
@@ -102,6 +104,7 @@ static iree_status_t loom_cmd_dependency_append(
         sizeof(*build->accesses), &build->access_capacity,
         (void**)&build->accesses));
   }
+  build->has_unbounded_access |= access.range.resource_index == UINT32_MAX;
   build->accesses[build->access_count++] = access;
   return iree_ok_status();
 }
@@ -302,6 +305,18 @@ static iree_status_t loom_cmd_dependency_partition(
   loom_cmd_memory_access_t** sorted = NULL;
   loom_cmd_memory_component_t* components = NULL;
   loom_value_fact_alias_scope_id_t* external_scopes = NULL;
+  if (build->has_unbounded_access) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(build->arena, sizeof(*components),
+                                             (void**)&components));
+    *components =
+        (loom_cmd_memory_component_t){.range = {.resource_index = UINT32_MAX}};
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      build->accesses[i].component = 0;
+    }
+    *out_components = components;
+    *out_count = 1;
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       build->arena, count, sizeof(*external_scopes), (void**)&external_scopes));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -316,7 +331,6 @@ static iree_status_t loom_cmd_dependency_partition(
   // All fresh command allocations share one owned slab. Source noalias does
   // not separate reused slab bytes. External roots use only canonical alias
   // scopes, and an unscoped reference connects every potentially aliased root.
-  bool unbounded = false;
   bool external_aliases = false;
   iree_host_size_t external_roots = 0;
   for (iree_host_size_t begin = 0; begin < count;) {
@@ -333,9 +347,7 @@ static iree_status_t loom_cmd_dependency_partition(
       }
       ++end;
     }
-    if (root == UINT64_MAX) {
-      unbounded = true;
-    } else if (!transient) {
+    if (!transient) {
       external_scopes[external_roots++] = alias;
       external_aliases |= alias == LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
     }
@@ -347,7 +359,7 @@ static iree_status_t loom_cmd_dependency_partition(
   }
   *out_count = 0;
   uint32_t external_component = UINT32_MAX;
-  if (unbounded || (external_aliases && external_roots > 1)) {
+  if (external_aliases && external_roots > 1) {
     external_component = (*out_count)++;
     components[external_component] =
         (loom_cmd_memory_component_t){.range = {.resource_index = UINT32_MAX}};
@@ -360,7 +372,7 @@ static iree_status_t loom_cmd_dependency_partition(
     const bool transient =
         access->range.role == LOOM_CMD_BUFFER_ROLE_REBINDABLE &&
         access->range.resource_index == transient_binding;
-    if (unbounded || (!transient && external_component != UINT32_MAX)) {
+    if (!transient && external_component != UINT32_MAX) {
       access->component = external_component;
       continue;
     }
