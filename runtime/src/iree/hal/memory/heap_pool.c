@@ -84,6 +84,10 @@ static iree_status_t iree_hal_heap_pool_query_memory_pair(
               .scope_32 = IREE_HAL_ATOMIC_REACH_SYSTEM,
               .scope_64 = IREE_HAL_ATOMIC_REACH_SYSTEM,
           },
+      .producer_atomics = iree_hal_atomic_operation_capabilities_for_host(
+          IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL),
+      .consumer_atomics = iree_hal_atomic_operation_capabilities_for_host(
+          IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL),
   };
   return iree_ok_status();
 }

@@ -194,6 +194,12 @@ static iree_status_t iree_hal_virtual_buffer_query_transition(
         iree_min(out_info->atomic_reach.scope_32, value.atomic_reach.scope_32);
     out_info->atomic_reach.scope_64 =
         iree_min(out_info->atomic_reach.scope_64, value.atomic_reach.scope_64);
+    out_info->producer_atomics =
+        iree_hal_atomic_operation_capabilities_intersect(
+            out_info->producer_atomics, value.producer_atomics);
+    out_info->consumer_atomics =
+        iree_hal_atomic_operation_capabilities_intersect(
+            out_info->consumer_atomics, value.consumer_atomics);
     out_info->estimated_fixed_cost_nanoseconds =
         iree_max(out_info->estimated_fixed_cost_nanoseconds,
                  value.estimated_fixed_cost_nanoseconds);
@@ -357,6 +363,10 @@ static bool iree_hal_virtual_buffer_source_is_compatible(
       if (!iree_all_bits_set(candidate.flags, required.flags & guarantees) ||
           candidate.atomic_reach.scope_32 < required.atomic_reach.scope_32 ||
           candidate.atomic_reach.scope_64 < required.atomic_reach.scope_64 ||
+          !iree_hal_atomic_operation_capabilities_support(
+              candidate.producer_atomics, required.producer_atomics) ||
+          !iree_hal_atomic_operation_capabilities_support(
+              candidate.consumer_atomics, required.consumer_atomics) ||
           !iree_hal_virtual_buffer_recipe_covers(&required.release,
                                                  &candidate.release) ||
           !iree_hal_virtual_buffer_recipe_covers(&required.acquire,

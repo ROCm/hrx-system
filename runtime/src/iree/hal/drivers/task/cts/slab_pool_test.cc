@@ -270,6 +270,18 @@ TEST_P(TaskSlabPoolTest, QualifiesRequiredAtomicCapabilities) {
         iree_hal_buffer_query_atomic_operations(buffer, site), required));
     EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
         iree_hal_buffer_query_atomic_operations(view, site), required));
+    iree_hal_memory_scope_t peer;
+    IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+        group_, {IREE_HAL_MEMORY_SITE_QUEUE, families_[0].family}, &peer));
+    const auto table = iree_hal_buffer_transition_table(view);
+    iree_hal_memory_transition_pair_t pair;
+    IREE_ASSERT_OK(iree_hal_memory_transition_prepare_pair(
+        table, peer, site, IREE_HAL_MEMORY_TRANSITION_ACQUIRE, &pair));
+    const auto info = iree_hal_memory_transition_query_info(table, pair);
+    EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
+        info.producer_atomics, required));
+    EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
+        info.consumer_atomics, required));
   }
   iree_hal_memory_scope_t host;
   IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(

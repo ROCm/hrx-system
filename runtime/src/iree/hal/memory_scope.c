@@ -822,8 +822,59 @@ static bool iree_hal_memory_pair_info_equal(
          iree_hal_memory_recipe_info_equal(&lhs->acquire, &rhs->acquire) &&
          lhs->atomic_reach.scope_32 == rhs->atomic_reach.scope_32 &&
          lhs->atomic_reach.scope_64 == rhs->atomic_reach.scope_64 &&
+         lhs->producer_atomics.device_scope_32 ==
+             rhs->producer_atomics.device_scope_32 &&
+         lhs->producer_atomics.device_scope_64 ==
+             rhs->producer_atomics.device_scope_64 &&
+         lhs->producer_atomics.system_scope_32 ==
+             rhs->producer_atomics.system_scope_32 &&
+         lhs->producer_atomics.system_scope_64 ==
+             rhs->producer_atomics.system_scope_64 &&
+         lhs->consumer_atomics.device_scope_32 ==
+             rhs->consumer_atomics.device_scope_32 &&
+         lhs->consumer_atomics.device_scope_64 ==
+             rhs->consumer_atomics.device_scope_64 &&
+         lhs->consumer_atomics.system_scope_32 ==
+             rhs->consumer_atomics.system_scope_32 &&
+         lhs->consumer_atomics.system_scope_64 ==
+             rhs->consumer_atomics.system_scope_64 &&
          lhs->estimated_fixed_cost_nanoseconds ==
              rhs->estimated_fixed_cost_nanoseconds;
+}
+
+static iree_hal_atomic_operation_capabilities_t
+iree_hal_memory_pair_site_atomics(const iree_hal_memory_contract_t* contract,
+                                  uint32_t id) {
+  const bool read = iree_hal_memory_scope_can_read(contract, id);
+  const bool write = iree_hal_memory_scope_can_write(contract, id);
+  const uint32_t allowed = read && write ? IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL
+                           : read        ? IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT
+                           : write       ? IREE_HAL_ATOMIC_OPERATION_FLAG_STORE
+                                         : 0;
+  return iree_hal_memory_scope_unpack_atomic_operations(
+      contract->scopes[id].atomic_operations &
+      (allowed * UINT32_C(0x01010101)));
+}
+
+static void iree_hal_memory_pair_filter_atomics(
+    const iree_hal_memory_contract_t* contract, uint32_t producer,
+    uint32_t consumer, iree_hal_memory_pair_info_t* info) {
+  info->producer_atomics = iree_hal_atomic_operation_capabilities_intersect(
+      info->producer_atomics,
+      iree_hal_memory_pair_site_atomics(contract, producer));
+  info->consumer_atomics = iree_hal_atomic_operation_capabilities_intersect(
+      info->consumer_atomics,
+      iree_hal_memory_pair_site_atomics(contract, consumer));
+  // A pair with an empty side cannot retain a standalone atomic guarantee.
+#define IREE_HAL_CLEAR_EMPTY_ATOMIC_PAIR(field)                         \
+  if (!info->producer_atomics.field || !info->consumer_atomics.field) { \
+    info->producer_atomics.field = info->consumer_atomics.field = 0;    \
+  }
+  IREE_HAL_CLEAR_EMPTY_ATOMIC_PAIR(device_scope_32);
+  IREE_HAL_CLEAR_EMPTY_ATOMIC_PAIR(device_scope_64);
+  IREE_HAL_CLEAR_EMPTY_ATOMIC_PAIR(system_scope_32);
+  IREE_HAL_CLEAR_EMPTY_ATOMIC_PAIR(system_scope_64);
+#undef IREE_HAL_CLEAR_EMPTY_ATOMIC_PAIR
 }
 
 // Only the local side contributes to a wildcard. An inapplicable read-only
@@ -965,6 +1016,8 @@ IREE_API_EXPORT iree_status_t iree_hal_memory_contract_initialize_transitions(
       iree_hal_memory_pair_info_t info = {0};
       status = query(user_data, producer, consumer, &info);
       if (iree_status_is_ok(status)) {
+        iree_hal_memory_pair_filter_atomics(contract, producer, consumer,
+                                            &info);
         uint32_t index = 0;
         while (index < info_count &&
                !iree_hal_memory_pair_info_equal(&infos[index], &info)) {

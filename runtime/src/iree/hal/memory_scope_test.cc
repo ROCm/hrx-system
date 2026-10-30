@@ -175,6 +175,129 @@ TEST_F(MemoryScopeTest, PreservesEveryOperationInEveryWidthAndDomain) {
   }
 }
 
+TEST_F(MemoryScopeTest, PairOperationIdentityIncludesBothSidesAndEveryCell) {
+  const iree_hal_atomic_operation_capabilities_t all = {
+      IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL, IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+      IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL, IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL};
+  for (uint32_t id = 1; id < 6; ++id) {
+    iree_hal_memory_scope_access_set_atomic_operations(&contract_->scopes[id],
+                                                       all);
+  }
+  for (auto cell :
+       {&iree_hal_atomic_operation_capabilities_t::device_scope_32,
+        &iree_hal_atomic_operation_capabilities_t::device_scope_64,
+        &iree_hal_atomic_operation_capabilities_t::system_scope_32,
+        &iree_hal_atomic_operation_capabilities_t::system_scope_64}) {
+    for (bool producer : {false, true}) {
+      struct Variant {
+        // The single cell that distinguishes this pair's cold record.
+        decltype(cell) field;
+        // Whether the producer or consumer owns that cell.
+        bool producer;
+      } variant = {cell, producer};
+      IREE_ASSERT_OK(iree_hal_memory_contract_initialize_transitions(
+          contract_,
+          +[](void* user_data, uint32_t producer, uint32_t consumer,
+              iree_hal_memory_pair_info_t* info) -> iree_status_t {
+            IREE_RETURN_IF_ERROR(
+                CoherentPair(nullptr, producer, consumer, info));
+            constexpr uint32_t baseline = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |
+                                          IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
+            info->producer_atomics = {baseline, baseline, baseline, baseline};
+            info->consumer_atomics = info->producer_atomics;
+            if (producer == 2 && consumer == 3) {
+              const auto* variant = static_cast<Variant*>(user_data);
+              auto& side = variant->producer ? info->producer_atomics
+                                             : info->consumer_atomics;
+              side.*variant->field |= IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
+            }
+            return iree_ok_status();
+          },
+          &variant));
+      for (uint32_t consumer : {2u, 3u}) {
+        iree_hal_memory_transition_pair_t pair;
+        IREE_ASSERT_OK(iree_hal_memory_transition_prepare_pair(
+            table(), scope(2), scope(consumer),
+            IREE_HAL_MEMORY_TRANSITION_ACQUIRE, &pair));
+        const auto info = iree_hal_memory_transition_query_info(table(), pair);
+        const auto& selected =
+            producer ? info.producer_atomics : info.consumer_atomics;
+        const auto& other =
+            producer ? info.consumer_atomics : info.producer_atomics;
+        const uint32_t baseline = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |
+                                  IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT;
+        EXPECT_EQ(
+            selected.*cell,
+            baseline |
+                (consumer == 3 ? IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD : 0));
+        EXPECT_EQ(other.*cell, baseline);
+      }
+    }
+  }
+  iree_hal_memory_transition_pair_t wildcard;
+  IREE_ASSERT_OK(iree_hal_memory_transition_prepare_pair(
+      table(), scope(0), scope(2), IREE_HAL_MEMORY_TRANSITION_ACQUIRE,
+      &wildcard));
+  const auto info = iree_hal_memory_transition_query_info(table(), wildcard);
+  EXPECT_TRUE(
+      iree_hal_atomic_operation_capabilities_is_empty(info.producer_atomics));
+  EXPECT_TRUE(
+      iree_hal_atomic_operation_capabilities_is_empty(info.consumer_atomics));
+}
+
+TEST_F(MemoryScopeTest, PairOperationsRequireSiteSupportAndAccess) {
+  contract_->scopes[2].usage = IREE_HAL_BUFFER_USAGE_STORAGE_WRITE;
+  contract_->scopes[3].usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ;
+  const iree_hal_atomic_operation_capabilities_t admitted = {
+      .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+      .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+  };
+  iree_hal_memory_scope_access_set_atomic_operations(&contract_->scopes[2],
+                                                     admitted);
+  iree_hal_memory_scope_access_set_atomic_operations(&contract_->scopes[3],
+                                                     admitted);
+  IREE_ASSERT_OK(iree_hal_memory_contract_initialize_transitions(
+      contract_,
+      +[](void*, uint32_t producer, uint32_t consumer,
+          iree_hal_memory_pair_info_t* info) -> iree_status_t {
+        IREE_RETURN_IF_ERROR(CoherentPair(nullptr, producer, consumer, info));
+        info->producer_atomics = {IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+                                  IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+                                  IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL,
+                                  IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL};
+        info->consumer_atomics = info->producer_atomics;
+        return iree_ok_status();
+      },
+      nullptr));
+  iree_hal_memory_transition_pair_t pair;
+  IREE_ASSERT_OK(iree_hal_memory_transition_prepare_pair(
+      table(), scope(2), scope(3), IREE_HAL_MEMORY_TRANSITION_ACQUIRE, &pair));
+  const auto info = iree_hal_memory_transition_query_info(table(), pair);
+  EXPECT_EQ(info.producer_atomics.device_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+  EXPECT_EQ(info.producer_atomics.system_scope_64,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+  EXPECT_EQ(info.consumer_atomics.device_scope_32,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT);
+  EXPECT_EQ(info.consumer_atomics.system_scope_64,
+            IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT);
+  EXPECT_EQ(info.producer_atomics.device_scope_64, 0u);
+  EXPECT_EQ(info.producer_atomics.system_scope_32, 0u);
+  EXPECT_EQ(info.consumer_atomics.device_scope_64, 0u);
+  EXPECT_EQ(info.consumer_atomics.system_scope_32, 0u);
+
+  // Site 4 has no atomic executor; reach cannot supply the missing guarantee
+  // or leave the other side looking like a standalone atomic promise.
+  IREE_ASSERT_OK(iree_hal_memory_transition_prepare_pair(
+      table(), scope(2), scope(4), IREE_HAL_MEMORY_TRANSITION_ACQUIRE, &pair));
+  const auto absent = iree_hal_memory_transition_query_info(table(), pair);
+  EXPECT_EQ(absent.atomic_reach.scope_64, IREE_HAL_ATOMIC_REACH_SYSTEM);
+  EXPECT_TRUE(
+      iree_hal_atomic_operation_capabilities_is_empty(absent.producer_atomics));
+  EXPECT_TRUE(
+      iree_hal_atomic_operation_capabilities_is_empty(absent.consumer_atomics));
+}
+
 TEST(MemoryScopeHostAccessTest, RejectsAtomicRequirementsWithoutHostAccess) {
   iree_hal_pool_host_access_t host = {};
   host.atomics.system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;

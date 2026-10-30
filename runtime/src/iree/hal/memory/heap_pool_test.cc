@@ -33,6 +33,18 @@ TEST(HeapPoolTest, AllocatesMappedHostStorageWithoutProgressOwner) {
   EXPECT_EQ(actual_host_access.properties,
             (IREE_HAL_HOST_MEMORY_PROPERTY_READ_CACHED |
              IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_BACK));
+  const auto table = iree_hal_pool_transition_table(pool);
+  const iree_hal_memory_scope_t host = {pool->memory_contract->domain, 1};
+  iree_hal_memory_transition_pair_t pair;
+  IREE_ASSERT_OK(iree_hal_memory_transition_prepare_pair(
+      table, host, host, IREE_HAL_MEMORY_TRANSITION_ACQUIRE, &pair));
+  const auto info = iree_hal_memory_transition_query_info(table, pair);
+  const auto atomics = iree_hal_atomic_operation_capabilities_for_host(
+      IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
+      info.producer_atomics, atomics));
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_support(
+      info.consumer_atomics, atomics));
 
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
