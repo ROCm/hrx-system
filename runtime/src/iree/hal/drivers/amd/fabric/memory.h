@@ -65,14 +65,10 @@ typedef struct iree_hal_amd_fabric_memory_t {
   iree_async_buffer_registration_state_t registrations;
 } iree_hal_amd_fabric_memory_t;
 
-// Exact native recipe facts shared by every buffer materialized by a provider.
-// The generic scope table holds semantic guarantees; this table selects their
-// implementation only after the physical binding is available.
+// Native access identity shared by every buffer materialized by a provider.
 typedef struct iree_hal_amd_fabric_memory_scope_facts_t {
   // Native device access ordinal for this scope.
   uint32_t access_ordinal;
-  // Packed device32/device64/system32/system64 command-processor operations.
-  uint32_t queue_atomic_operations;
 } iree_hal_amd_fabric_memory_scope_facts_t;
 
 // Private suffix after the generic entries of a fabric native binding table.

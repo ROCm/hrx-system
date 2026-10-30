@@ -242,6 +242,8 @@ IREE_API_EXPORT iree_status_t iree_hal_virtual_buffer_initialize_contract(
     for (uint32_t id = 1; id < contract->scope_count; ++id) {
       contract->scopes[id].atomic_operations &=
           alias->scopes[id].atomic_operations;
+      contract->zero_compute_atomic_operations[id] &=
+          alias->zero_compute_atomic_operations[id];
     }
     const iree_device_size_t granularity =
         source->mapping_source.requirements.minimum_granularity;
@@ -338,8 +340,10 @@ static bool iree_hal_virtual_buffer_source_is_compatible(
   }
   for (uint32_t id = 1; id < contract->scope_count; ++id) {
     if (contract->scopes[id].interfaces &&
-        !iree_all_bits_set(alias->scopes[id].atomic_operations,
-                           contract->scopes[id].atomic_operations)) {
+        (!iree_all_bits_set(alias->scopes[id].atomic_operations,
+                            contract->scopes[id].atomic_operations) ||
+         !iree_all_bits_set(alias->zero_compute_atomic_operations[id],
+                            contract->zero_compute_atomic_operations[id]))) {
       return false;
     }
   }
@@ -690,8 +694,11 @@ static iree_status_t iree_hal_memory_mapping_validate(
     const uint32_t end = mapping->scope.id ? begin + 1 : contract->scope_count;
     for (uint32_t id = begin; id < end; ++id) {
       if (contract->scopes[id].interfaces &&
-          !iree_all_bits_set(source->scopes[id].atomic_operations,
-                             contract->scopes[id].atomic_operations)) {
+          (!iree_all_bits_set(source->scopes[id].atomic_operations,
+                              contract->scopes[id].atomic_operations) ||
+           !iree_all_bits_set(iree_hal_memory_contract_mapping_alias(source)
+                                  ->zero_compute_atomic_operations[id],
+                              contract->zero_compute_atomic_operations[id]))) {
         return iree_make_status(
             IREE_STATUS_PERMISSION_DENIED,
             "source lacks target atomic guarantees at scope %u", id);

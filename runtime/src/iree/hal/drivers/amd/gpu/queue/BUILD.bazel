@@ -36,7 +36,6 @@ iree_runtime_cc_library(
         ":buffer",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amd/fabric:memory",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue/pm4:commands",
     ],
 )
@@ -48,7 +47,6 @@ iree_runtime_cc_test(
         ":control",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amd/fabric:memory",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

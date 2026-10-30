@@ -762,11 +762,8 @@ TEST_P(ExecutableTest, GlobalsCaptureExactShaderAndHostAtomicPairs) {
   EXPECT_EQ(cpu.consumer_atomics.system_scope_64,
             IREE_HAL_ATOMIC_OPERATION_FLAGS_ALL);
   EXPECT_EQ(native_.calls, calls);
-  const auto memory = iree_hal_buffer_memory_view(buffer);
-  const auto* facts =
-      reinterpret_cast<const iree_hal_amd_fabric_memory_binding_facts_t*>(
-          memory.bindings + memory.contract->binding_layout.binding_count);
-  EXPECT_EQ(facts->scope_facts[queue.id].queue_atomic_operations, 0u);
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+      iree_hal_buffer_query_zero_compute_atomic_operations(buffer, queue)));
 }
 
 TEST_P(ExecutableTest, CapturesExportClassesAndPreservesGlobalRange) {

@@ -111,6 +111,14 @@ TEST_F(MemoryBackendTest, AtomicGuaranteesFollowSitesAndEveryBackingRoute) {
             IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
                 IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
   EXPECT_EQ(operations.system_scope_64, IREE_HAL_ATOMIC_OPERATION_FLAG_STORE);
+  const auto zero_compute =
+      iree_hal_pool_query_zero_compute_atomic_operations(pool, gpu);
+  EXPECT_EQ(zero_compute.system_scope_32, operations.system_scope_32);
+  EXPECT_EQ(zero_compute.system_scope_64, operations.system_scope_64);
+  for (auto site : {npu, program, cpu, host}) {
+    EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+        iree_hal_pool_query_zero_compute_atomic_operations(pool, site)));
+  }
   EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
       iree_hal_pool_query_atomic_operations(pool, npu)));
   EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
@@ -149,6 +157,9 @@ TEST_F(MemoryBackendTest, AtomicGuaranteesFollowSitesAndEveryBackingRoute) {
         operations.system_scope_64);
     EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
         iree_hal_buffer_query_atomic_operations(view, npu)));
+    EXPECT_EQ(iree_hal_buffer_query_zero_compute_atomic_operations(view, gpu)
+                  .system_scope_64,
+              zero_compute.system_scope_64);
     iree_hal_buffer_release(view);
     iree_hal_buffer_release(buffer);
   }
@@ -385,11 +396,8 @@ TEST_F(MemoryBackendTest, QueueShadersPreserveOrdinaryBackingAndCpSubset) {
   for (const auto& access : native_.created_accesses) {
     EXPECT_EQ(access.requirements.flags, AMDF_MEMORY_FLAG_DEVICE_ADDRESS);
   }
-  const auto view = iree_hal_buffer_memory_view(buffer);
-  const auto* facts =
-      reinterpret_cast<const iree_hal_amd_fabric_memory_binding_facts_t*>(
-          view.bindings + view.contract->binding_layout.binding_count);
-  EXPECT_EQ(facts->scope_facts[queue.id].queue_atomic_operations, 0u);
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+      iree_hal_buffer_query_zero_compute_atomic_operations(buffer, queue)));
   iree_hal_buffer_release(buffer);
   iree_hal_pool_release(pool);
 }

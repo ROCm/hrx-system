@@ -94,8 +94,8 @@ iree_status_t iree_hal_amd_gpu_control_validate_target(
     const iree_hal_queue_family_t* family, iree_hal_memory_site_kind_t site,
     const iree_hal_buffer_t* buffer, uint32_t required, uint32_t incompatible);
 
-// Selects the shader recipe after commitment. Physical buffers carry the
-// provider's exact CP subset; virtual ranges use their declared PROGRAM facts.
+// Selects the shader recipe from the immutable zero-compute subset. No native
+// binding or committed backing is needed; virtual ranges retain zero here.
 bool iree_hal_amd_gpu_control_uses_program(
     const iree_hal_queue_family_t* family, const iree_hal_buffer_t* buffer,
     iree_hal_amd_gpu_control_t command);

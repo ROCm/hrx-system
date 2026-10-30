@@ -157,12 +157,14 @@ IREE_API_EXPORT iree_status_t iree_hal_memory_contract_create(
   const uint32_t cell_count = scope_count << row_shift;
   iree_host_size_t total_size = 0;
   iree_host_size_t scopes_offset = 0;
+  iree_host_size_t zero_compute_offset = 0;
   iree_host_size_t types_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_memory_contract_t), &total_size,
       IREE_STRUCT_FIELD_FAM(cell_count, uint64_t),
       IREE_STRUCT_FIELD_ALIGNED(scope_count, iree_hal_memory_scope_access_t, 32,
                                 &scopes_offset),
+      IREE_STRUCT_FIELD(scope_count, uint32_t, &zero_compute_offset),
       IREE_STRUCT_FIELD(binding_layout->binding_count, uint16_t,
                         &types_offset)));
   iree_hal_memory_contract_t* contract = NULL;
@@ -175,6 +177,8 @@ IREE_API_EXPORT iree_status_t iree_hal_memory_contract_create(
   contract->transition_row_shift = row_shift;
   contract->scopes =
       (iree_hal_memory_scope_access_t*)((uint8_t*)contract + scopes_offset);
+  contract->zero_compute_atomic_operations =
+      (uint32_t*)((uint8_t*)contract + zero_compute_offset);
   uint16_t* binding_types = (uint16_t*)((uint8_t*)contract + types_offset);
   if (binding_layout->binding_count) {
     memcpy(binding_types, binding_layout->types,
@@ -241,6 +245,15 @@ IREE_API_EXPORT void iree_hal_memory_scope_access_set_atomic_operations(
       (operations.system_scope_32 << 16) | (operations.system_scope_64 << 24);
 }
 
+IREE_API_EXPORT void
+iree_hal_memory_contract_set_zero_compute_atomic_operations(
+    iree_hal_memory_contract_t* contract, iree_hal_memory_scope_id_t scope_id,
+    iree_hal_atomic_operation_capabilities_t operations) {
+  contract->zero_compute_atomic_operations[scope_id] =
+      operations.device_scope_32 | (operations.device_scope_64 << 8) |
+      (operations.system_scope_32 << 16) | (operations.system_scope_64 << 24);
+}
+
 static iree_hal_atomic_operation_capabilities_t
 iree_hal_memory_scope_unpack_atomic_operations(uint32_t packed) {
   return (iree_hal_atomic_operation_capabilities_t){
@@ -254,16 +267,22 @@ iree_hal_memory_scope_unpack_atomic_operations(uint32_t packed) {
 IREE_API_EXPORT void iree_hal_memory_contract_finalize_atomic_operations(
     iree_hal_memory_contract_t* contract) {
   uint32_t common = UINT32_MAX;
+  uint32_t zero_compute_common = UINT32_MAX;
   bool any = false;
   for (uint32_t id = 1; id < contract->scope_count; ++id) {
+    contract->zero_compute_atomic_operations[id] &=
+        contract->scopes[id].atomic_operations;
     if (id == 1 ? contract->host.access != 0
                 : contract->scopes[id].interfaces != 0) {
       common &= contract->scopes[id].atomic_operations;
+      zero_compute_common &= contract->zero_compute_atomic_operations[id];
       any = true;
     }
   }
   contract->scopes[IREE_HAL_MEMORY_SCOPE_ANY].atomic_operations =
       any ? common : 0;
+  contract->zero_compute_atomic_operations[IREE_HAL_MEMORY_SCOPE_ANY] =
+      any ? zero_compute_common : 0;
   contract->host.atomics = iree_hal_memory_scope_unpack_atomic_operations(
       contract->host.access ? contract->scopes[1].atomic_operations : 0);
 }
@@ -290,6 +309,31 @@ IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
 iree_hal_buffer_query_atomic_operations(const iree_hal_buffer_t* buffer,
                                         iree_hal_memory_scope_t scope) {
   return iree_hal_memory_contract_query_atomic_operations(
+      buffer->memory.contract, scope);
+}
+
+static iree_hal_atomic_operation_capabilities_t
+iree_hal_memory_contract_query_zero_compute_atomic_operations(
+    const iree_hal_memory_contract_t* contract, iree_hal_memory_scope_t scope) {
+  if (!contract || scope.domain != contract->domain ||
+      scope.id >= contract->scope_count) {
+    return (iree_hal_atomic_operation_capabilities_t){0};
+  }
+  return iree_hal_memory_scope_unpack_atomic_operations(
+      contract->zero_compute_atomic_operations[scope.id]);
+}
+
+IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
+iree_hal_pool_query_zero_compute_atomic_operations(
+    const iree_hal_pool_t* pool, iree_hal_memory_scope_t scope) {
+  return iree_hal_memory_contract_query_zero_compute_atomic_operations(
+      pool->memory_contract, scope);
+}
+
+IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
+iree_hal_buffer_query_zero_compute_atomic_operations(
+    const iree_hal_buffer_t* buffer, iree_hal_memory_scope_t scope) {
+  return iree_hal_memory_contract_query_zero_compute_atomic_operations(
       buffer->memory.contract, scope);
 }
 
@@ -1127,6 +1171,8 @@ iree_hal_memory_contract_initialize_mapping_transitions(
     if (iree_any_bit_set(contract->scopes[id].interfaces,
                          1u << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE)) {
       alias->scopes[id] = contract->scopes[id];
+      alias->zero_compute_atomic_operations[id] =
+          contract->zero_compute_atomic_operations[id];
     }
   }
   if (alias->scopes[1].interfaces) {

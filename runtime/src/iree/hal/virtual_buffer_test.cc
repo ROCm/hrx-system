@@ -161,4 +161,69 @@ TEST_F(VirtualBufferContractTest, ReplacementPreservesExactPairOperations) {
   }
 }
 
+TEST_F(VirtualBufferContractTest, ReplacementPreservesZeroComputeExecution) {
+  const iree_hal_atomic_operation_capabilities_t required = {
+      .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT,
+      .device_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+      .system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+      .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT,
+  };
+  for (size_t i = 0; i < sources_.size(); ++i) {
+    IREE_ASSERT_OK(CapturePair(i, required, required));
+    iree_hal_memory_contract_set_zero_compute_atomic_operations(
+        sources_[i].memory_contract, 2, required);
+  }
+  auto broad = required;
+  broad.system_scope_64 |= IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
+  iree_hal_memory_contract_set_zero_compute_atomic_operations(
+      sources_[0].memory_contract, 2, broad);
+  iree_hal_memory_contract_t* contract = nullptr;
+  IREE_ASSERT_OK(InitializeContract(&contract));
+  iree_hal_memory_contract_set_zero_compute_atomic_operations(contract, 2,
+                                                              broad);
+  iree_hal_pool_t* declared_sources[] = {&sources_[0], &sources_[1]};
+  iree_hal_virtual_buffer_capabilities_t capabilities = {
+      .max_byte_length = 4096,
+      .max_alignment = 4096,
+  };
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_initialize_contract(
+      {}, {IREE_ARRAYSIZE(declared_sources), declared_sources},
+      IREE_HAL_MEMORY_BACKEND_HOST, 0, contract, &capabilities));
+  ASSERT_EQ(capabilities.max_byte_length, 4096u);
+  static const iree_hal_buffer_vtable_t vtable = {
+      .destroy =
+          +[](iree_hal_buffer_t* buffer) {
+            iree_hal_memory_contract_release(buffer->memory.contract);
+          },
+      .query_virtual = iree_hal_virtual_buffer_query_root,
+  };
+  iree_hal_virtual_buffer_t target = {};
+  iree_hal_virtual_buffer_initialize(contract, nullptr, nullptr,
+                                     IREE_HAL_MEMORY_TYPE_HOST_LOCAL, 4096,
+                                     4096, 0, IREE_HAL_MEMORY_BACKEND_HOST,
+                                     &vtable, iree_allocator_system(), &target);
+  iree_hal_memory_contract_release(contract);
+  EXPECT_EQ(iree_hal_buffer_query_zero_compute_atomic_operations(&target.buffer,
+                                                                 {this, 2})
+                .system_scope_64,
+            required.system_scope_64);
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(&target.buffer,
+                                                               &sources_[2]));
+  // Ordinary atomics and exact pair relationships remain unchanged. Each
+  // width/scope cell must independently preserve the execution guarantee.
+  for (auto cell :
+       {&iree_hal_atomic_operation_capabilities_t::device_scope_32,
+        &iree_hal_atomic_operation_capabilities_t::device_scope_64,
+        &iree_hal_atomic_operation_capabilities_t::system_scope_32,
+        &iree_hal_atomic_operation_capabilities_t::system_scope_64}) {
+    auto weaker = required;
+    weaker.*cell = 0;
+    iree_hal_memory_contract_set_zero_compute_atomic_operations(
+        sources_[2].memory_contract, 2, weaker);
+    EXPECT_FALSE(iree_hal_virtual_buffer_query_pool_compatibility(
+        &target.buffer, &sources_[2]));
+  }
+  iree_hal_buffer_release(&target.buffer);
+}
+
 }  // namespace

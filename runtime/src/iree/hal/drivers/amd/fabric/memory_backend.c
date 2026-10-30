@@ -918,10 +918,10 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
               queue_operations, requested->atomics.queue) &&
           iree_hal_atomic_operation_capabilities_support(
               program_operations, requested->atomics.program);
-      iree_hal_memory_scope_access_set_atomic_operations(&contract->scopes[id],
-                                                         queue_native);
-      scope_facts[id].queue_atomic_operations =
-          contract->scopes[id].atomic_operations;
+      if (!cpu) {
+        iree_hal_memory_contract_set_zero_compute_atomic_operations(
+            contract, id, queue_native);
+      }
       iree_hal_memory_scope_access_set_atomic_operations(&contract->scopes[id],
                                                          queue_operations);
       iree_hal_memory_scope_access_set_atomic_operations(
@@ -1007,6 +1007,12 @@ static iree_status_t iree_hal_amd_fabric_slab_pool_emit_plan(
           IREE_HAL_HOST_MEMORY_PROPERTY_READ_CACHED |
               IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_BACK,
           iree_hal_amd_fabric_memory_query_transition, &alias_query);
+      if (iree_status_is_ok(status)) {
+        iree_hal_memory_contract_t* alias =
+            contract->mapping_source.alias_contract;
+        memset(alias->zero_compute_atomic_operations, 0,
+               scope_count * sizeof(*alias->zero_compute_atomic_operations));
+      }
       requirements_satisfied &= alias_query.complete;
     }
     if (iree_status_is_ok(status) && requirements_satisfied) {

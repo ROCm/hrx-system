@@ -165,14 +165,64 @@ TEST_F(MemoryScopeTest, PreservesEveryOperationInEveryWidthAndDomain) {
       expected.*cell = operations;
       iree_hal_memory_scope_access_set_atomic_operations(&contract_->scopes[2],
                                                          expected);
+      iree_hal_memory_contract_set_zero_compute_atomic_operations(contract_, 2,
+                                                                  expected);
       const auto actual =
           iree_hal_buffer_query_atomic_operations(&buffer, scope(2));
       EXPECT_EQ(actual.device_scope_32, expected.device_scope_32);
       EXPECT_EQ(actual.device_scope_64, expected.device_scope_64);
       EXPECT_EQ(actual.system_scope_32, expected.system_scope_32);
       EXPECT_EQ(actual.system_scope_64, expected.system_scope_64);
+      const auto zero_compute =
+          iree_hal_buffer_query_zero_compute_atomic_operations(&buffer,
+                                                               scope(2));
+      EXPECT_EQ(zero_compute.device_scope_32, expected.device_scope_32);
+      EXPECT_EQ(zero_compute.device_scope_64, expected.device_scope_64);
+      EXPECT_EQ(zero_compute.system_scope_32, expected.system_scope_32);
+      EXPECT_EQ(zero_compute.system_scope_64, expected.system_scope_64);
     }
   }
+}
+
+TEST_F(MemoryScopeTest, ZeroComputeIsAnIndependentSubsetOfTheAdmittedSite) {
+  iree_hal_pool_t pool = {.memory_contract = contract_};
+  iree_hal_buffer_t buffer = {};
+  buffer.memory.contract = contract_;
+  const iree_hal_atomic_operation_capabilities_t queue = {
+      .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+      .system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+                         IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD,
+  };
+  iree_hal_memory_scope_access_set_atomic_operations(&contract_->scopes[2],
+                                                     queue);
+  iree_hal_memory_contract_set_zero_compute_atomic_operations(
+      contract_, 2, {.system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT});
+  iree_hal_memory_contract_finalize_atomic_operations(contract_);
+  const auto subset =
+      iree_hal_pool_query_zero_compute_atomic_operations(&pool, scope(2));
+  EXPECT_EQ(subset.device_scope_32, 0u);
+  EXPECT_EQ(subset.device_scope_64, 0u);
+  EXPECT_EQ(subset.system_scope_32, 0u);
+  EXPECT_EQ(subset.system_scope_64, IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT);
+  for (auto site : {scope(0), scope(1), scope(3), scope(4), scope(5), scope(6),
+                    scope(7), scope(8), scope(IREE_HAL_MEMORY_SCOPE_INVALID),
+                    iree_hal_memory_scope_t{&pool, 2}}) {
+    EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+        iree_hal_buffer_query_zero_compute_atomic_operations(&buffer, site)));
+  }
+
+  // A construction-time permission restriction narrows both guarantees.
+  iree_hal_memory_scope_access_set_atomic_operations(
+      &contract_->scopes[2],
+      {.system_scope_64 = IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD});
+  iree_hal_memory_contract_finalize_atomic_operations(contract_);
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+      iree_hal_buffer_query_zero_compute_atomic_operations(&buffer, scope(2))));
+  buffer.memory.contract = nullptr;
+  EXPECT_TRUE(iree_hal_atomic_operation_capabilities_is_empty(
+      iree_hal_buffer_query_zero_compute_atomic_operations(&buffer, scope(2))));
+  EXPECT_EQ(sizeof(iree_hal_memory_scope_access_t), 32u);
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(contract_->scopes) % 32, 0u);
 }
 
 TEST_F(MemoryScopeTest, PairOperationIdentityIncludesBothSidesAndEveryCell) {
@@ -565,6 +615,8 @@ TEST_F(MemoryScopeTest, CapturesMappingAliasesWithoutChangingSourceViews) {
         {.system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE});
   }
   contract_->host.properties = IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_COMBINED;
+  iree_hal_memory_contract_set_zero_compute_atomic_operations(
+      contract_, 2, {.system_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE});
   IREE_ASSERT_OK(iree_hal_memory_contract_initialize_mapping_transitions(
       contract_, IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_BACK,
       +[](void* user_data, uint32_t producer, uint32_t consumer,
@@ -588,6 +640,9 @@ TEST_F(MemoryScopeTest, CapturesMappingAliasesWithoutChangingSourceViews) {
             IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_COMBINED);
   EXPECT_EQ(alias->scopes[2].atomic_operations,
             contract_->scopes[2].atomic_operations);
+  EXPECT_EQ(alias->zero_compute_atomic_operations[2],
+            contract_->zero_compute_atomic_operations[2]);
+  EXPECT_EQ(alias->zero_compute_atomic_operations[4], 0u);
   EXPECT_EQ(alias->scopes[4].interfaces, 0u);
   EXPECT_EQ(alias->scopes[5].interfaces, 0u);
   iree_hal_memory_transition_pair_t pair;

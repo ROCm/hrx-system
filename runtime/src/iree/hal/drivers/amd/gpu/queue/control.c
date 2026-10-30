@@ -6,7 +6,6 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/control.h"
 
-#include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/commands.h"
 
 uint32_t iree_hal_amd_gpu_control_requirement(
@@ -49,19 +48,9 @@ bool iree_hal_amd_gpu_control_uses_program(
   if (!required) {
     return false;
   }
-  const iree_hal_buffer_memory_view_t view =
-      iree_hal_buffer_memory_view(buffer);
-  const iree_hal_buffer_binding_layout_t* layout =
-      &view.contract->binding_layout;
-  if (layout->byte_length !=
-      layout->binding_count * sizeof(iree_hal_buffer_native_binding_t) +
-          sizeof(iree_hal_amd_fabric_memory_binding_facts_t)) {
-    return true;
-  }
-  const iree_hal_amd_fabric_memory_binding_facts_t* facts =
-      (const void*)(view.bindings + layout->binding_count);
   return !iree_all_bits_set(
-      facts->scope_facts[family->memory.queue_scope_id].queue_atomic_operations,
+      buffer->memory.contract
+          ->zero_compute_atomic_operations[family->memory.queue_scope_id],
       required);
 }
 

@@ -9,7 +9,6 @@
 #include <array>
 #include <vector>
 
-#include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -153,21 +152,12 @@ TEST(ControlTest, RequirementsMatchExactSiteCellsAndErrorModes) {
 }
 
 TEST(ControlTest, DirectSelectionUsesTheCapturedCpSubset) {
-  std::array<iree_hal_amd_fabric_memory_scope_facts_t, 4> scopes = {};
-  struct {
-    // One generic native binding followed immediately by provider facts.
-    iree_hal_buffer_native_binding_t binding;
-    // Borrowed implementation subset independent of the public union.
-    iree_hal_amd_fabric_memory_binding_facts_t facts;
-  } bindings = {{}, {nullptr, scopes.data()}};
-  iree_hal_memory_contract_t contract = {};
-  contract.binding_layout.binding_count = 1;
-  contract.binding_layout.byte_length = sizeof(bindings);
-  iree_hal_buffer_backing_facts_t backing = {};
+  std::array<uint32_t, 4> zero_compute_operations = {};
+  iree_hal_memory_contract_t contract = {
+      .zero_compute_atomic_operations = zero_compute_operations.data(),
+  };
   iree_hal_buffer_t buffer = {};
   buffer.memory.contract = &contract;
-  buffer.memory.bindings = &bindings.binding;
-  buffer.memory.backing = &backing;
   iree_hal_queue_family_t family = {};
   family.memory.queue_scope_id = 2;
   for (uint8_t width : {32, 64}) {
@@ -175,7 +165,7 @@ TEST(ControlTest, DirectSelectionUsesTheCapturedCpSubset) {
     for (auto flags :
          {IREE_HAL_ATOMIC_FLAG_NONE, IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE}) {
       command.flags = flags;
-      scopes[2].queue_atomic_operations =
+      zero_compute_operations[2] =
           iree_hal_amd_gpu_control_requirement(command);
       EXPECT_FALSE(
           iree_hal_amd_gpu_control_uses_program(&family, &buffer, command));
@@ -185,9 +175,9 @@ TEST(ControlTest, DirectSelectionUsesTheCapturedCpSubset) {
       command.kind = IREE_HAL_AMD_GPU_CONTROL_STORE;
     }
   }
-  // Reservations have no physical-owner suffix and retain a fixed shader
-  // contract even when a currently attached allocation could also use CP.
-  contract.binding_layout.byte_length = sizeof(bindings.binding);
+  // Reservations retain a fixed shader contract even when a currently
+  // attached allocation could also use CP.
+  zero_compute_operations[2] = 0;
   EXPECT_TRUE(iree_hal_amd_gpu_control_uses_program(
       &family, &buffer,
       iree_hal_amd_gpu_control_store({.width = IREE_HAL_ATOMIC_WIDTH_64})));

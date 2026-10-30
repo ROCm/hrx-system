@@ -161,6 +161,20 @@ IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
 iree_hal_buffer_query_atomic_operations(const iree_hal_buffer_t* buffer,
                                         iree_hal_memory_scope_t scope);
 
+// Returns the subset of atomic operations implemented without occupying
+// dispatch resources at this site. Such operations may still occupy their
+// command queue; callers must order producers on independently progressing
+// queues. HOST and PROGRAM sites return zero. Scope handling and query cost
+// match query_atomic_operations; backing-specific upgrades are not inferred.
+IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
+iree_hal_pool_query_zero_compute_atomic_operations(
+    const iree_hal_pool_t* pool, iree_hal_memory_scope_t scope);
+
+// Returns the owning pool's zero-compute guarantee, inherited by subranges.
+IREE_API_EXPORT iree_hal_atomic_operation_capabilities_t
+iree_hal_buffer_query_zero_compute_atomic_operations(
+    const iree_hal_buffer_t* buffer, iree_hal_memory_scope_t scope);
+
 typedef uint32_t iree_hal_pool_mapping_flags_t;
 enum iree_hal_pool_mapping_flag_bits_e {
   // Every binding must cover an entire native allocation at source offset zero.
@@ -274,6 +288,9 @@ typedef struct iree_hal_memory_contract_t {
   } mapping_source;
   // Immutable site facts in this allocation, indexed by memory scope ID.
   iree_hal_memory_scope_access_t* scopes;
+  // Packed zero-compute subsets in this allocation, indexed by scope ID.
+  // Each word has the same width/scope layout as scopes[].atomic_operations.
+  uint32_t* zero_compute_atomic_operations;
   // Owned cold pair descriptions, never followed by a hot transition query.
   iree_hal_memory_transition_details_t* transition_details;
   // Directional visibility cells at a fixed offset from the contract. The low
@@ -294,7 +311,16 @@ IREE_API_EXPORT void iree_hal_memory_contract_retain(
 IREE_API_EXPORT void iree_hal_memory_contract_release(
     iree_hal_memory_contract_t* contract);
 
-// Captures the wildcard intersection and achieved public host operations.
+// Captures a qualified queue site's zero-compute subset during construction.
+// HOST, PROGRAM, and excluded sites retain zero. The producer supplies trusted
+// backing and executor facts, then finalizes after populating all site facts.
+IREE_API_EXPORT void
+iree_hal_memory_contract_set_zero_compute_atomic_operations(
+    iree_hal_memory_contract_t* contract, iree_hal_memory_scope_id_t scope_id,
+    iree_hal_atomic_operation_capabilities_t operations);
+
+// Captures wildcard intersections and achieved public host operations. Each
+// zero-compute subset is restricted to the site's admitted atomic operations.
 // Called once after populating site facts and before publishing the contract.
 IREE_API_EXPORT void iree_hal_memory_contract_finalize_atomic_operations(
     iree_hal_memory_contract_t* contract);
