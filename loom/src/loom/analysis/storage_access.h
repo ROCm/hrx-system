@@ -42,6 +42,8 @@ enum loom_storage_access_footprint_e {
 typedef uint8_t loom_storage_access_footprint_t;
 
 typedef struct loom_storage_reference_t loom_storage_reference_t;
+typedef struct loom_template_provider_catalog_t
+    loom_template_provider_catalog_t;
 
 typedef struct loom_storage_access_use_t {
   // Source operation containing the classified reference operand.
@@ -158,8 +160,12 @@ typedef struct loom_storage_access_scope_t {
   struct loom_storage_access_state_t* state;
   // Optional, preselected source bindings installed before the first query.
   const loom_storage_access_binding_t* bindings;
-  // Number of sorted entries in bindings; zero leaves applications opaque.
+  // Number of sorted entries in bindings.
   iree_host_size_t binding_count;
+  // Optional existing provider catalog for unresolved source applications.
+  // Their effects are the union of available bodies, without selecting one.
+  // Exact bindings take precedence; an unavailable body remains opaque.
+  const loom_template_provider_catalog_t* providers;
 } loom_storage_access_scope_t;
 
 // Memory effects projected through one call boundary. Reference arguments
