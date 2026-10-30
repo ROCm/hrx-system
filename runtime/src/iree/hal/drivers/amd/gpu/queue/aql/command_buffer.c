@@ -754,13 +754,13 @@ static iree_status_t iree_hal_amd_gpu_aql_command_control(
   IREE_RETURN_IF_ERROR(
       iree_hal_amd_gpu_aql_command_packets(buffer, 1, &packet_offset, &packet));
   *packet = iree_hal_amd_gpu_aql_packet_indirect_buffer(
-      header | IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED, 0,
-      predicate_words + body_words, 0);
+      header, 0, predicate_words + body_words, 0);
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
       buffer, packet_offset + 8, 0, data_offset,
       IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
+  buffer->last_ordered = !buffer->last_header ||
+                         (header & IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) != 0;
   buffer->last_header = &packet->words[0];
-  buffer->last_ordered = true;
   buffer->pending_barrier = after;
   buffer->program->has_control = true;
   ++buffer->program->operation_count;
