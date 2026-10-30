@@ -184,8 +184,8 @@ static iree_status_t loom_cxx_cli_import(iree_string_view_t filename,
     loomc_result_t* result = NULL;
     status =
         iree_status_from_loomc(loomc_pass_program_create_from_pipeline_text(
-            context, loomc_make_cstring_view("combine,cse,dce"), NULL,
-            host_allocator, &pass_program, &result));
+            context, loomc_make_cstring_view("combine,cse,dce,location-dce"),
+            NULL, host_allocator, &pass_program, &result));
     if (iree_status_is_ok(status)) {
       status = loom_tooling_cli_print_loomc_result(stderr, result, &succeeded);
     }

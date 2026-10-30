@@ -7,6 +7,7 @@
 #include "loom/transforms/cleanup/dce.h"
 
 #include "loom/ir/context.h"
+#include "loom/ir/location_compaction.h"
 #include "loom/ir/module.h"
 #include "loom/ir/value_refs.h"
 #include "loom/ops/op_defs.h"
@@ -27,6 +28,37 @@ static const loom_pass_info_t loom_dce_pass_info_storage = {
 
 const loom_pass_info_t* loom_dce_pass_info(void) {
   return &loom_dce_pass_info_storage;
+}
+
+#define LOOM_LOCATION_DCE_STATISTICS(V, statistics_type)           \
+  V(statistics_type, locations_eliminated, "locations-eliminated", \
+    "Number of unreachable source-location rows removed from the module.")
+
+LOOM_PASS_STATISTICS_DEFINE(loom_location_dce_statistics,
+                            loom_location_dce_statistics_t,
+                            LOOM_LOCATION_DCE_STATISTICS)
+
+static const loom_pass_info_t loom_location_dce_pass_info_storage = {
+    .name = IREE_SVL("location-dce"),
+    .description = IREE_SVL("Remove unreachable source locations."),
+    .kind = LOOM_PASS_MODULE,
+    .statistic_layout = &loom_location_dce_statistics_layout,
+};
+
+const loom_pass_info_t* loom_location_dce_pass_info(void) {
+  return &loom_location_dce_pass_info_storage;
+}
+
+iree_status_t loom_location_dce_run(loom_pass_t* pass, loom_module_t* module) {
+  iree_host_size_t removed_count = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_module_compact_locations(module, pass->arena, &removed_count));
+  if (removed_count == 0) {
+    return iree_ok_status();
+  }
+  loom_pass_mark_changed(pass);
+  loom_location_dce_statistics(pass)->locations_eliminated += removed_count;
+  return iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//

@@ -188,6 +188,7 @@ loom_cc_instance_library(
         "encoding.c",
         "intern_table.c",
         "location.c",
+        "location_compaction.c",
         "module.c",
         "module_record.c",
         "module_source.c",
@@ -200,6 +201,7 @@ loom_cc_instance_library(
     ],
     hdrs = _REPRESENTATION_HEADERS + [
         "context.h",
+        "location_compaction.h",
         "module.h",
         "module_record.h",
         "module_source.h",

@@ -38,6 +38,9 @@ extern const loom_pass_statistic_layout_t loom_dce_statistic_layout;
 // Returns immutable metadata for the dead code elimination pass.
 const loom_pass_info_t* loom_dce_pass_info(void);
 
+// Returns immutable metadata for the module location DCE pass.
+const loom_pass_info_t* loom_location_dce_pass_info(void);
+
 // Dead code elimination pass.
 //
 // Removes ops whose results are unused and that have no side effects. The pass
@@ -46,6 +49,9 @@ const loom_pass_info_t* loom_dce_pass_info(void);
 // uses.
 iree_status_t loom_dce_run(loom_pass_t* pass, loom_module_t* module,
                            loom_func_like_t function);
+
+// Removes source-location rows not reachable from any live operation.
+iree_status_t loom_location_dce_run(loom_pass_t* pass, loom_module_t* module);
 
 // Runs DCE with a caller-provided deadness predicate.
 //

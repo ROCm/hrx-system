@@ -493,6 +493,11 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .function_run = loom_linearize_view_accesses_run,
     },
     {
+        .key = IREE_SVL("location-dce"),
+        .info = loom_location_dce_pass_info,
+        .module_run = loom_location_dce_run,
+    },
+    {
         .key = IREE_SVL("loop-fusion"),
         .info = loom_loop_fusion_pass_info,
         .function_run = loom_loop_fusion_run,
