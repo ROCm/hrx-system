@@ -189,6 +189,7 @@ loom_cc_library(
     hdrs = ["kernel_request_producer.h"],
     deps = [
         ":kernel_class_materializer",
+        "//loom/src/loom/analysis:storage_access",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/analysis:symbolic_expr",
@@ -201,7 +202,9 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/target",
+        "//loom/src/loom/ops/template",
         "//loom/src/loom/transforms/symbol:template_decision_model",
+        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",

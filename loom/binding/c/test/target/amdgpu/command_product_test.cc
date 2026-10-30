@@ -299,12 +299,21 @@ TEST_P(AmdgpuCommandProfileTest, ConfiguresSelectedKernelsAndOwnsTargets) {
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(command_bytes.data(), command_bytes.size()),
       &decoded));
-  ASSERT_EQ(decoded.commands.count, 3u);
-  EXPECT_EQ(loom_cmd_program_command_at(&decoded, 1).kind,
-            LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER);
+  // Source publication proves these kernels have no memory effects. Opaque
+  // entries retain publication; both paths preserve the configured launches.
+  ASSERT_EQ(decoded.commands.count, publish_requests ? 2u : 3u);
+  EXPECT_EQ(decoded.memory_dependencies.count, publish_requests ? 0u : 1u);
+  if (!publish_requests) {
+    EXPECT_EQ(loom_cmd_program_command_at(&decoded, 1).kind,
+              LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER);
+  }
   for (uint32_t i = 0; i < 2; ++i) {
-    const auto dispatch = loom_cmd_program_command_at(&decoded, i * 2);
-    EXPECT_EQ(dispatch.kind, LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT);
+    const auto dispatch =
+        loom_cmd_program_command_at(&decoded, i * (publish_requests ? 1 : 2));
+    EXPECT_EQ(dispatch.kind,
+              publish_requests && i == 1
+                  ? LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT_BARRIER
+                  : LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT);
     EXPECT_EQ(dispatch.payload.dispatch_direct.workgroup_count_x,
               128 / (subgroup_size * (i + 1)));
     EXPECT_EQ(dispatch.payload.dispatch_direct.workgroup_count_y, 1u);

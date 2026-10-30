@@ -56,7 +56,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   %71 = resource<command_input> {index = 3, source_type = index} : reg<cmd.entry>
   %72 = cmd.constant.u64 0
   %73 = cmd.constant.u64 -1
-  %74 = cmd.memory.global {source = ["dispatch_write", "transfer_write"], target = ["indirect_command_read", "dispatch_read", "dispatch_write", "transfer_read", "transfer_write"]}
+  %74 = cmd.memory.global {source = ["dispatch_write"], target = ["dispatch_read", "dispatch_write"]}
   %75 = cmd.constant.u32 1
   cmd.dispatch.direct<%64, %68>[%75, %75, %75](%58, %72, %73, %59, %72, %73, %60, %72, %73)
   cmd.barrier(%74) {source = ["command_process", "dispatch", "transfer", "atomic"], target = ["command_process", "dispatch", "transfer", "atomic"], flags = []}
@@ -132,7 +132,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   %42 = resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
   %43 = resource<command_input> {index = 3, source_type = index} : reg<cmd.entry>
   %44 = resource<command_input> {index = 4, source_type = index} : reg<cmd.entry>
-  %45 = cmd.memory.global {source = ["dispatch_write", "transfer_write"], target = ["indirect_command_read", "dispatch_read", "dispatch_write", "transfer_read", "transfer_write"]}
+  %45 = cmd.memory.global {source = ["dispatch_write"], target = ["dispatch_read", "dispatch_write"]}
   %46 = cmd.constant.u32 1
   cmd.dispatch.direct<%35, %40>[%46, %46, %46]()
   cmd.dispatch.direct<%36, %41>[%46, %46, %46]()
@@ -177,7 +177,7 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   %13 = cmd.constant.u64 0
   %14 = cmd.constant.u64 -1
   %15 = cmd.constant.u64 12
-  %16 = cmd.memory.global {source = ["dispatch_write", "transfer_write"], target = ["indirect_command_read", "dispatch_read", "dispatch_write", "transfer_read", "transfer_write"]}
+  %16 = cmd.memory.global {source = ["dispatch_write"], target = ["dispatch_read", "dispatch_write"]}
   %17 = cmd.buffer.ref.binding %7, %13, %15
   cmd.dispatch.indirect.dynamic<%9, %11>[%17](%8, %13, %14)
   %18 = cmd.buffer.ref.binding %7, %13, %15
