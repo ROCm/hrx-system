@@ -25,6 +25,7 @@ extern "C" {
 typedef struct loom_serve_host_t loom_serve_host_t;
 
 struct loomc_iree_hal_target_provider_t;
+struct loom_serve_native_cache_t;
 
 // Creates one immutable compiler target environment for an application host.
 typedef loomc_status_t(
@@ -94,6 +95,11 @@ loomc_task_sink_t loom_serve_host_preparation_sink(
 // Shared native and VM compiler environment, or NULL for a device-only host.
 // Borrowed through host release. All model source catalogs use this grammar.
 loomc_target_environment_t* loom_serve_host_target_environment(
+    const loom_serve_host_t* host);
+
+// Exact native compilation rendezvous shared by device catalogs, or NULL for
+// a device-only host. The host outlives every domain, artifact, and callback.
+struct loom_serve_native_cache_t* loom_serve_host_native_cache(
     const loom_serve_host_t* host);
 
 // Ordered HAL target routes paired with the host environment. Returns NULL and

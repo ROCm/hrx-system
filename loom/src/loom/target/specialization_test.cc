@@ -64,6 +64,12 @@ static const loom_target_profile_type_t kTestProfileType = {
     .name = IREE_SVL("specialization-test"),
     .fact_type = &loom_test_target_fact_type,
     .project_facts = ProjectTestProfileFacts,
+    .equal =
+        [](const loom_target_profile_t* lhs, const loom_target_profile_t* rhs) {
+          return loom_target_profile_equal_common(lhs, rhs) &&
+                 reinterpret_cast<const TestTargetProfile*>(lhs)->kind ==
+                     reinterpret_cast<const TestTargetProfile*>(rhs)->kind;
+        },
 };
 
 static TestTargetProfile MakeTestProfile(loom_test_target_kind_t kind) {

@@ -293,6 +293,14 @@ static const loom_target_profile_type_t kTestTargetProfileType = {
     .name = IREE_SVL("loomc-target-test"),
     .fact_type = &loom_test_target_fact_type,
     .project_facts = ProjectTestTargetProfileFacts,
+    .equal =
+        [](const loom_target_profile_t* lhs, const loom_target_profile_t* rhs) {
+          return loom_target_profile_equal_common(lhs, rhs) &&
+                 reinterpret_cast<const TestTargetProfile*>(lhs)
+                         ->subgroup_size ==
+                     reinterpret_cast<const TestTargetProfile*>(rhs)
+                         ->subgroup_size;
+        },
 };
 
 static iree_status_t RegisterTestTargetContext(loom_context_t* context) {
@@ -511,8 +519,8 @@ ContextPtr CreateTargetContext(loomc_target_environment_t* target_environment) {
 }
 
 TargetProfilePtr CreateTestTargetProfile(
-    loomc_target_environment_t* target_environment,
-    uint32_t subgroup_size = 0) {
+    loomc_target_environment_t* target_environment, uint32_t subgroup_size = 0,
+    const char* identifier = "test-low-core") {
   loomc_allocator_t allocator = loomc_allocator_system();
   TestTargetProfile* internal_profile = nullptr;
   LOOMC_EXPECT_OK(loomc_allocator_malloc(allocator, sizeof(*internal_profile),
@@ -530,7 +538,7 @@ TargetProfilePtr CreateTestTargetProfile(
   IREE_ASSERT(internal_profile->base.target_bundle != nullptr);
   loomc_target_profile_t* profile = nullptr;
   loomc_status_t status = loomc_target_profile_create(
-      target_environment, loomc_make_cstring_view("test-low-core"),
+      target_environment, loomc_make_cstring_view(identifier),
       &internal_profile->base, DeinitializeTestTargetProfile, allocator,
       &profile);
   LOOMC_EXPECT_OK(status);
@@ -1396,6 +1404,32 @@ TEST(TargetTest, RetainReleaseProfile) {
   TargetProfilePtr profile = CreateTestTargetProfile(target_environment.get());
   loomc_target_profile_retain(profile.get());
   loomc_target_profile_release(profile.get());
+}
+
+TEST(TargetTest, ExactProfilesIncludeEnvironmentDiagnosticsAndFamilyFacts) {
+  auto environment = CreateTestTargetEnvironment();
+  auto compatible_environment = CreateTestTargetEnvironment();
+  auto first = CreateTestTargetProfile(environment.get(), 32);
+  auto same = CreateTestTargetProfile(compatible_environment.get(), 32);
+  auto wider = CreateTestTargetProfile(environment.get(), 64);
+  auto renamed = CreateTestTargetProfile(environment.get(), 32, "other-device");
+  EXPECT_TRUE(loomc_target_profile_equal(nullptr, nullptr));
+  EXPECT_FALSE(loomc_target_profile_equal(first.get(), nullptr));
+  EXPECT_FALSE(loomc_target_profile_equal(nullptr, first.get()));
+  EXPECT_TRUE(loomc_target_profile_equal(first.get(), first.get()));
+  EXPECT_TRUE(loomc_target_profile_equal(first.get(), same.get()));
+  EXPECT_FALSE(loomc_target_profile_equal(first.get(), wider.get()));
+  EXPECT_FALSE(loomc_target_profile_equal(wider.get(), first.get()));
+  EXPECT_FALSE(loomc_target_profile_equal(first.get(), renamed.get()));
+
+  // Equal family payloads cannot cross incompatible environment compositions.
+  loomc_target_environment_t* inputs[] = {environment.get()};
+  loomc_target_environment_t* composed = nullptr;
+  LOOMC_EXPECT_OK(loomc_target_environment_create(
+      IREE_ARRAYSIZE(inputs), inputs, loomc_allocator_system(), &composed));
+  TargetEnvironmentPtr composition(composed);
+  auto separate = CreateTestTargetProfile(composition.get(), 32);
+  EXPECT_FALSE(loomc_target_profile_equal(first.get(), separate.get()));
 }
 
 TEST(TargetTest, AcceptsSanitizerPipelineOptions) {

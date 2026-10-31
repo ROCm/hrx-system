@@ -24,10 +24,23 @@ static iree_status_t loom_aie2p_target_profile_project_facts(
   return iree_ok_status();
 }
 
+static bool loom_aie2p_target_profile_equal(const loom_target_profile_t* lhs,
+                                            const loom_target_profile_t* rhs) {
+  const loom_aie2p_target_profile_t* lhs_profile =
+      (const loom_aie2p_target_profile_t*)lhs;
+  const loom_aie2p_target_profile_t* rhs_profile =
+      (const loom_aie2p_target_profile_t*)rhs;
+  // Device profiles are canonical immutable rows in the deployment catalog.
+  return loom_target_profile_equal_common(lhs, rhs) &&
+         lhs_profile->kind == rhs_profile->kind &&
+         lhs_profile->device_profile == rhs_profile->device_profile;
+}
+
 const loom_target_profile_type_t loom_aie2p_target_profile_type = {
     .name = IREE_SVL("amd.xdna.aie2p"),
     .fact_type = &loom_aie2p_target_fact_type,
     .project_facts = loom_aie2p_target_profile_project_facts,
+    .equal = loom_aie2p_target_profile_equal,
 };
 
 #include "loom/target/arch/amd/xdna/aie2p_profile_tables.inl"

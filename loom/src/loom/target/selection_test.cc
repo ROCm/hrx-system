@@ -45,6 +45,7 @@ static const loom_target_profile_type_t kTargetProfileType = {
     .name = IREE_SVL("fake"),
     .fact_type = &kTargetFactType,
     .project_facts = ProjectTargetFacts,
+    .equal = loom_target_profile_equal_common,
 };
 static const loom_target_profile_t kTargetProfile = {
     .type = &kTargetProfileType,
@@ -58,6 +59,7 @@ static const loom_target_profile_type_t kOtherTargetProfileType = {
     .name = IREE_SVL("other"),
     .fact_type = &kOtherTargetFactType,
     .project_facts = ProjectTargetFacts,
+    .equal = loom_target_profile_equal_common,
 };
 static const loom_target_profile_t kOtherTargetProfile = {
     .type = &kOtherTargetProfileType,

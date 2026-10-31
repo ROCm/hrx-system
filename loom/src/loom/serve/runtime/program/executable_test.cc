@@ -7,7 +7,10 @@
 #include "loom/serve/runtime/program/executable.h"
 
 #include "iree/testing/status_matchers.h"
+#include "loom/serve/runtime/program/native_artifact.h"
+#include "loom/serve/runtime/program/target.h"
 #include "loom/serve/testing/jit.h"
+#include "loomc/iree.h"
 
 namespace {
 
@@ -29,6 +32,12 @@ static iree_status_t CreateOwnedSequence(iree_const_byte_span_t contents,
 
 class ExecutableTest : public JitTest {
  protected:
+  void TearDown() override {
+    loom_serve_native_artifact_release(artifact_);
+    loom_serve_native_domain_release(domain_);
+    JitTest::TearDown();
+  }
+
   void CheckImageReuse(bool direct) {
     const loomc_config_binding_t bindings[] = {
         {loomc_make_cstring_view("increment.groups"),
@@ -141,6 +150,11 @@ class ExecutableTest : public JitTest {
       }
     }
   }
+
+  // Published dependency output held through failed loader callbacks.
+  loom_serve_native_artifact_t* artifact_ = nullptr;
+  // Exact compilation domain matching the fixture's actual loader target.
+  loom_serve_native_domain_t* domain_ = nullptr;
 };
 
 TEST_P(ExecutableTest, CommandInputsShareCodeAndPreserveLaunchGeometry) {
@@ -152,6 +166,48 @@ TEST_P(ExecutableTest, DirectInputsShareCodeAndPreserveLaunchGeometry) {
 }
 
 TEST_P(ExecutableTest, FailedImageLoadsAreNotRetainedAndCanRetireCache) {
+  auto* host = loom_serve_device_host(device_owner_);
+  iree_host_size_t provider_count = 0;
+  const auto* providers =
+      loom_serve_host_target_providers(host, &provider_count);
+  loom_serve_target_t target = {};
+  IREE_ASSERT_OK(loom_serve_target_select(
+      loom_serve_host_target_environment(host), providers, provider_count,
+      device_,
+      iree_hal_queue_family_spec(iree_hal_queue_family(dispatch_))
+          ->physical_device_affinity,
+      &compilation_, host_allocator_, &target));
+  const loom_serve_native_domain_options_t options = {
+      .profile = target.selection.target_profile,
+      .artifact_format = target.artifact_format,
+      .control_flow_lowering = target.control_flow_lowering,
+  };
+  auto status = loom_serve_native_domain_acquire(
+      loom_serve_host_native_cache(host), &options, &domain_);
+  loomc_target_profile_release(target.selection.target_profile);
+  IREE_ASSERT_OK(status);
+  iree_string_builder_t key;
+  iree_string_builder_initialize(host_allocator_, &key);
+  IREE_ASSERT_OK(iree_string_builder_append_string(
+      &key, IREE_SV("invalid executable image")));
+  loom_serve_native_subscription_t subscription = {
+      .ready = [](void*, const loom_serve_native_result_t*) {},
+  };
+  bool created = false, ready = false;
+  status = loom_serve_native_artifact_acquire(domain_, &key, 0, &subscription,
+                                              &artifact_, &created, &ready);
+  iree_string_builder_deinitialize(&key);
+  IREE_ASSERT_OK(status);
+  ASSERT_TRUE(created);
+  ASSERT_FALSE(ready);
+  const uint8_t invalid[] = {0, 1, 2, 3};
+  auto* result = loom_serve_native_artifact_result(artifact_);
+  result->status =
+      CreateOwnedSequence(iree_make_const_byte_span(invalid, sizeof(invalid)),
+                          host_allocator_, &result->image);
+  loom_serve_native_artifact_publish(artifact_);
+  IREE_ASSERT_OK(iree_status_clone(result->status));
+
   const auto* targets =
       iree_hal_device_spec_executables(iree_hal_device_spec(device_));
   ASSERT_GT(targets->target_count, 0u);
@@ -170,26 +226,8 @@ TEST_P(ExecutableTest, FailedImageLoadsAreNotRetainedAndCanRetireCache) {
     SCOPED_TRACE(attempt);
     completion.completed = false;
     completion.retire = attempt != 0;
-    const uint8_t invalid[] = {0, 1, 2, 3};
-    iree_byte_sequence_t* image = nullptr;
-    if (attempt == 0) {
-      IREE_ASSERT_OK(CreateOwnedSequence(
-          iree_make_const_byte_span(invalid, sizeof(invalid)), host_allocator_,
-          &image));
-    } else {
-      iree_byte_sequence_t* segments[2] = {nullptr, nullptr};
-      IREE_ASSERT_OK(CreateOwnedSequence(iree_make_const_byte_span(invalid, 2),
-                                         host_allocator_, &segments[0]));
-      IREE_ASSERT_OK(
-          CreateOwnedSequence(iree_make_const_byte_span(invalid + 2, 2),
-                              host_allocator_, &segments[1]));
-      IREE_ASSERT_OK(iree_byte_sequence_create_concat(
-          IREE_ARRAYSIZE(segments), segments, host_allocator_, &image));
-      iree_byte_sequence_release(segments[0]);
-      iree_byte_sequence_release(segments[1]);
-    }
     loom_serve_executable_request_t request = {
-        .image = image,
+        .artifact = artifact_,
         .completion =
             [](void* user_data, iree_status_t status,
                loom_serve_executable_t* executable) {
@@ -210,7 +248,7 @@ TEST_P(ExecutableTest, FailedImageLoadsAreNotRetainedAndCanRetireCache) {
     };
     loom_serve_executable_cache_load(completion.cache, &request);
     EXPECT_TRUE(completion.completed);
-    EXPECT_EQ(request.image, nullptr);
+    EXPECT_EQ(request.artifact, artifact_);
   }
   EXPECT_EQ(completion.cache, nullptr);
 }

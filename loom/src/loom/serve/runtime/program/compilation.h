@@ -61,7 +61,8 @@ typedef struct loom_serve_compilation_report_t {
   // exact-input reuse.
   uint64_t kernels;
   // Native entries satisfied by exact input or complete-stage reuse instead
-  // of new compiler work in this model's JIT catalog.
+  // of new compiler work. Exact-input reuse includes matching target domains
+  // on independent devices belonging to the same serving host.
   uint64_t reused_kernels;
   // Successfully bound native entries across both stage kinds.
   uint64_t entries;

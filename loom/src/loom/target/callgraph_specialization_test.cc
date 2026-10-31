@@ -72,6 +72,17 @@ static const loom_target_profile_type_t kTestProfileType = {
     .name = IREE_SVL("callgraph-specialization-test"),
     .fact_type = &loom_test_target_fact_type,
     .project_facts = ProjectTestProfileFacts,
+    .equal =
+        [](const loom_target_profile_t* lhs, const loom_target_profile_t* rhs) {
+          const auto* lhs_profile =
+              reinterpret_cast<const TestTargetProfile*>(lhs);
+          const auto* rhs_profile =
+              reinterpret_cast<const TestTargetProfile*>(rhs);
+          return loom_target_profile_equal_common(lhs, rhs) &&
+                 lhs_profile->subgroup_size == rhs_profile->subgroup_size &&
+                 lhs_profile->subgroup_size_explicit ==
+                     rhs_profile->subgroup_size_explicit;
+        },
 };
 
 static TestTargetProfile MakeTestProfile(uint32_t subgroup_size,

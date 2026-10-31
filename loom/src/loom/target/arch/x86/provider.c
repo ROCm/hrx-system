@@ -99,10 +99,30 @@ static iree_status_t loom_x86_profile_project_facts(
   return iree_ok_status();
 }
 
+static bool loom_x86_profile_equal(const loom_target_profile_t* lhs,
+                                   const loom_target_profile_t* rhs) {
+  const loom_x86_target_profile_t* lhs_profile =
+      (const loom_x86_target_profile_t*)lhs;
+  const loom_x86_target_profile_t* rhs_profile =
+      (const loom_x86_target_profile_t*)rhs;
+  return loom_target_profile_equal_common(lhs, rhs) &&
+         iree_string_view_equal(lhs_profile->name, rhs_profile->name) &&
+         lhs_profile->selector == rhs_profile->selector &&
+         lhs_profile->executable_target_kinds ==
+             rhs_profile->executable_target_kinds &&
+         lhs_profile->deployment_profile_ordinal ==
+             rhs_profile->deployment_profile_ordinal &&
+         (lhs_profile->exact_cpu_data == rhs_profile->exact_cpu_data ||
+          (lhs_profile->exact_cpu_data && rhs_profile->exact_cpu_data &&
+           loom_x86_cpu_data_equal(lhs_profile->exact_cpu_data,
+                                   rhs_profile->exact_cpu_data)));
+}
+
 static const loom_target_profile_type_t kProfileType = {
     .name = IREE_SVL("x86"),
     .fact_type = &loom_x86_target_fact_type,
     .project_facts = loom_x86_profile_project_facts,
+    .equal = loom_x86_profile_equal,
 };
 
 static const loom_x86_target_profile_t kProfiles[] = {

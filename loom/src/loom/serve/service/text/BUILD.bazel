@@ -255,6 +255,23 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "device_group_tests",
+    testonly = True,
+    srcs = ["device_group_test.cc"],
+    target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
+    deps = [
+        ":model",
+        ":source_service_fixture",
+        "//loom/src/loom/serve/runtime/device",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+    ],
+    alwayslink = True,
+)
+
 # Source compilation and execution invariants shared by every physical target.
 loom_cc_library(
     name = "source_execution_tests",

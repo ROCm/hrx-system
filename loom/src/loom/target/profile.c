@@ -25,6 +25,117 @@ void loom_target_profile_selection_release(
   *selection = (loom_target_profile_selection_t){0};
 }
 
+static bool loom_target_profile_snapshot_equal(
+    const loom_target_snapshot_t* lhs, const loom_target_snapshot_t* rhs) {
+  if (lhs == rhs) {
+    return true;
+  }
+  if (!lhs || !rhs) {
+    return false;
+  }
+  return iree_string_view_equal(lhs->name, rhs->name) &&
+         lhs->codegen_format == rhs->codegen_format &&
+         lhs->artifact_format == rhs->artifact_format &&
+         lhs->subgroup_partition == rhs->subgroup_partition &&
+         lhs->maximum_index_bitwidth == rhs->maximum_index_bitwidth &&
+         lhs->default_pointer_bitwidth == rhs->default_pointer_bitwidth &&
+         lhs->index_bitwidth == rhs->index_bitwidth &&
+         lhs->offset_bitwidth == rhs->offset_bitwidth &&
+         lhs->max_workgroup_size.x == rhs->max_workgroup_size.x &&
+         lhs->max_workgroup_size.y == rhs->max_workgroup_size.y &&
+         lhs->max_workgroup_size.z == rhs->max_workgroup_size.z &&
+         lhs->max_flat_workgroup_size == rhs->max_flat_workgroup_size &&
+         lhs->max_workgroup_storage_bytes == rhs->max_workgroup_storage_bytes &&
+         lhs->subgroup_size == rhs->subgroup_size &&
+         lhs->max_grid_size.x == rhs->max_grid_size.x &&
+         lhs->max_grid_size.y == rhs->max_grid_size.y &&
+         lhs->max_grid_size.z == rhs->max_grid_size.z &&
+         lhs->max_flat_grid_size == rhs->max_flat_grid_size &&
+         lhs->max_workgroup_count.x == rhs->max_workgroup_count.x &&
+         lhs->max_workgroup_count.y == rhs->max_workgroup_count.y &&
+         lhs->max_workgroup_count.z == rhs->max_workgroup_count.z &&
+         lhs->memory_spaces.generic == rhs->memory_spaces.generic &&
+         lhs->memory_spaces.global == rhs->memory_spaces.global &&
+         lhs->memory_spaces.workgroup == rhs->memory_spaces.workgroup &&
+         lhs->memory_spaces.constant == rhs->memory_spaces.constant &&
+         lhs->memory_spaces.private_memory ==
+             rhs->memory_spaces.private_memory &&
+         lhs->memory_spaces.host == rhs->memory_spaces.host &&
+         lhs->memory_spaces.descriptor == rhs->memory_spaces.descriptor;
+}
+
+static bool loom_target_profile_export_equal(
+    const loom_target_export_plan_t* lhs,
+    const loom_target_export_plan_t* rhs) {
+  if (lhs == rhs) {
+    return true;
+  }
+  if (!lhs || !rhs) {
+    return false;
+  }
+  return iree_string_view_equal(lhs->name, rhs->name) &&
+         iree_string_view_equal(lhs->export_symbol, rhs->export_symbol) &&
+         iree_string_view_equal(lhs->calling_convention,
+                                rhs->calling_convention) &&
+         lhs->abi_kind == rhs->abi_kind && lhs->linkage == rhs->linkage &&
+         lhs->hal_kernel.required_workgroup_size.x ==
+             rhs->hal_kernel.required_workgroup_size.x &&
+         lhs->hal_kernel.required_workgroup_size.y ==
+             rhs->hal_kernel.required_workgroup_size.y &&
+         lhs->hal_kernel.required_workgroup_size.z ==
+             rhs->hal_kernel.required_workgroup_size.z &&
+         lhs->hal_kernel.flat_workgroup_size_min ==
+             rhs->hal_kernel.flat_workgroup_size_min &&
+         lhs->hal_kernel.flat_workgroup_size_max ==
+             rhs->hal_kernel.flat_workgroup_size_max;
+}
+
+static bool loom_target_profile_config_equal(const loom_target_config_t* lhs,
+                                             const loom_target_config_t* rhs) {
+  if (lhs == rhs) {
+    return true;
+  }
+  if (!lhs || !rhs) {
+    return false;
+  }
+  return iree_string_view_equal(lhs->name, rhs->name) &&
+         lhs->schedule_model_stable_id == rhs->schedule_model_stable_id &&
+         lhs->contract_set.stable_id == rhs->contract_set.stable_id &&
+         iree_string_view_equal(lhs->contract_set.spelling,
+                                rhs->contract_set.spelling) &&
+         lhs->contract_feature_bits == rhs->contract_feature_bits;
+}
+
+bool loom_target_profile_equal_common(const loom_target_profile_t* lhs,
+                                      const loom_target_profile_t* rhs) {
+  if (lhs->explicit_fields != rhs->explicit_fields) {
+    return false;
+  }
+  const loom_target_bundle_t* lhs_bundle = lhs->target_bundle;
+  const loom_target_bundle_t* rhs_bundle = rhs->target_bundle;
+  if (lhs_bundle == rhs_bundle) {
+    return true;
+  }
+  if (!lhs_bundle || !rhs_bundle) {
+    return false;
+  }
+  return iree_string_view_equal(lhs_bundle->name, rhs_bundle->name) &&
+         loom_target_profile_snapshot_equal(lhs_bundle->snapshot,
+                                            rhs_bundle->snapshot) &&
+         loom_target_profile_export_equal(lhs_bundle->export_plan,
+                                          rhs_bundle->export_plan) &&
+         loom_target_profile_config_equal(lhs_bundle->config,
+                                          rhs_bundle->config);
+}
+
+bool loom_target_profile_equal(const loom_target_profile_t* lhs,
+                               const loom_target_profile_t* rhs) {
+  if (lhs == rhs) {
+    return true;
+  }
+  return lhs && rhs && lhs->type == rhs->type && lhs->type->equal(lhs, rhs);
+}
+
 iree_status_t loom_target_profile_project_facts(
     const loom_target_profile_t* profile, iree_arena_allocator_t* arena,
     loom_target_facts_t** out_facts) {

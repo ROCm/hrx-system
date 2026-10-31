@@ -547,10 +547,12 @@ TEST_F(TargetProviderTest, LooksUpProfileProvider) {
   static const loom_target_profile_type_t kOwnedProfileType = {
       .name = IREE_SVL("owned"),
       .fact_type = &kOwnedFactType,
+      .equal = loom_target_profile_equal_common,
   };
   static const loom_target_profile_type_t kUnownedProfileType = {
       .name = IREE_SVL("unowned"),
       .fact_type = &kUnownedFactType,
+      .equal = loom_target_profile_equal_common,
   };
   static const loom_target_provider_t provider = {
       .profile_type = &kOwnedProfileType,
@@ -868,10 +870,12 @@ TEST_F(TargetProviderTest, RejectsDuplicateProfileFamilyNames) {
   static const loom_target_profile_type_t kFirstProfileType = {
       .name = IREE_SVL("shared-family"),
       .fact_type = &kFirstFactType,
+      .equal = loom_target_profile_equal_common,
   };
   static const loom_target_profile_type_t kSecondProfileType = {
       .name = IREE_SVL("shared-family"),
       .fact_type = &kSecondFactType,
+      .equal = loom_target_profile_equal_common,
   };
   loom_target_provider_t first_provider = {.profile_type = &kFirstProfileType};
   loom_target_provider_t second_provider = {
@@ -985,6 +989,7 @@ TEST_F(TargetProviderTest, RejectsMismatchedProfileAndProviderFactTypes) {
   static const loom_target_profile_type_t kProfileType = {
       .name = IREE_SVL("mismatched"),
       .fact_type = &kProfileFactType,
+      .equal = loom_target_profile_equal_common,
   };
   loom_target_provider_t provider = {
       .profile_type = &kProfileType,

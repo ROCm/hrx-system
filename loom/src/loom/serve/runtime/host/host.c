@@ -12,6 +12,7 @@
 #include "iree/hal/drivers/task/driver.h"
 #include "iree/hal/drivers/task/executable/loaders/registration/init.h"
 #include "iree/task/topology.h"
+#include "loom/serve/runtime/program/native_artifact.h"
 #include "loomc/iree.h"
 #include "loomc/iree/task_pool.h"
 #include "loomc/target/vm.h"
@@ -36,6 +37,8 @@ struct loom_serve_host_t {
   loomc_task_queue_t* preparation_queue;
   // Immutable exact compiler target package shared by every catalog.
   loomc_target_environment_t* target_environment;
+  // Weak exact-input and emitted-image indexes shared by matching targets.
+  loom_serve_native_cache_t* native_cache;
   // Owned copy of process-lifetime HAL target provider pointers.
   const struct loomc_iree_hal_target_provider_t** target_providers;
   // Number of entries in target_providers.
@@ -145,6 +148,10 @@ iree_status_t loom_serve_host_create(
           compiler_options->target_environment_create, host_allocator,
           &host->target_environment);
     }
+    if (iree_status_is_ok(status)) {
+      status =
+          loom_serve_native_cache_allocate(host_allocator, &host->native_cache);
+    }
   }
   iree_task_topology_t topology;
   if (iree_status_is_ok(status)) {
@@ -218,6 +225,7 @@ void loom_serve_host_release(loom_serve_host_t* host) {
     loomc_task_queue_free(host->compiler_queue);
     loomc_task_queue_free(host->preparation_queue);
     loomc_task_pool_free(host->task_pool);
+    loom_serve_native_cache_free(host->native_cache);
     iree_hal_driver_release(host->task_driver);
     iree_task_executor_release(host->executor);
     loomc_target_environment_release(host->target_environment);
@@ -255,6 +263,11 @@ loomc_task_sink_t loom_serve_host_preparation_sink(
 loomc_target_environment_t* loom_serve_host_target_environment(
     const loom_serve_host_t* host) {
   return host->target_environment;
+}
+
+loom_serve_native_cache_t* loom_serve_host_native_cache(
+    const loom_serve_host_t* host) {
+  return host->native_cache;
 }
 
 const struct loomc_iree_hal_target_provider_t* const*

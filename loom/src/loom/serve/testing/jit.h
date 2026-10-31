@@ -74,6 +74,10 @@ class JitTest : public ::testing::TestWithParam<int> {
   void SetUp() override;
   void TearDown() override;
 
+  // Independent device owners share one host without expanding single-device
+  // target suites. Dedicated group tests select their required topology.
+  virtual iree_host_size_t DeviceCount() const { return 1; }
+
   // Null uses the source provider; text overlays its value for this request.
   iree_status_t Compile(const char* delta, size_t index,
                         iree_string_view_t root = IREE_SV("advance"),

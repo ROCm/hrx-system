@@ -9,6 +9,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/target/arch/spirv/cooperative_properties.h"
 #include "loom/target/arch/spirv/records/target_records.h"
 #include "loom/target/facts_builder.h"
 
@@ -111,6 +112,129 @@ TEST(SpirvTargetProfileTest, ProjectsOwnedCooperativePropertyFacts) {
 
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);
+}
+
+TEST(SpirvTargetProfileTest, ExactProfilesPreserveSubgroupCapabilities) {
+  loom_spirv_target_profile_t first = {};
+  loom_spirv_target_profile_initialize(&loom_spirv_low_target_bundle_vulkan1_3,
+                                       0, {}, nullptr, &first);
+  uint32_t loom_spirv_subgroup_properties_t::* const fields[] = {
+      &loom_spirv_subgroup_properties_t::default_size,
+      &loom_spirv_subgroup_properties_t::minimum_size,
+      &loom_spirv_subgroup_properties_t::maximum_size,
+      &loom_spirv_subgroup_properties_t::maximum_workgroup_subgroup_count,
+  };
+  for (auto field : fields) {
+    auto second = first;
+    EXPECT_TRUE(loom_target_profile_equal(&first.base, &second.base));
+    second.subgroup.*field = 32;
+    EXPECT_FALSE(loom_target_profile_equal(&first.base, &second.base));
+  }
+}
+
+TEST(SpirvTargetProfileTest, ExactProfilesPreserveOwnedCooperativeRows) {
+  iree_host_size_t matrix_count = 0, vector_count = 0;
+  const auto* matrix_rows =
+      loom_spirv_cooperative_matrix_model_properties(&matrix_count);
+  const auto* vector_rows =
+      loom_spirv_cooperative_vector_model_properties(&vector_count);
+  ASSERT_GT(matrix_count, 0u);
+  ASSERT_GT(vector_count, 0u);
+  const auto matrix = matrix_rows[0];
+  const auto vector = vector_rows[0];
+  const auto feature_bits =
+      matrix.required_feature_bits | vector.required_feature_bits;
+  loom_spirv_cooperative_property_storage_t storage = {};
+  IREE_ASSERT_OK(loom_spirv_cooperative_property_storage_initialize(
+      feature_bits, &matrix, 1, &vector, 1, iree_allocator_system(), &storage));
+  auto other_matrix = matrix;
+  auto other_vector = vector;
+  auto other_feature_bits = feature_bits;
+  iree_host_size_t other_matrix_count = 1, other_vector_count = 1;
+  loom_spirv_target_profile_t first = {};
+  loom_spirv_target_profile_initialize(&loom_spirv_low_target_bundle_vulkan1_3,
+                                       0, {}, &storage.set, &first);
+  // Shape spans are producer-derived: rebuild them from valid rows instead of
+  // manufacturing an inconsistent index just to change a comparison field.
+  auto compare = [&](bool equal) {
+    loom_spirv_cooperative_property_storage_t other_storage = {};
+    IREE_ASSERT_OK(loom_spirv_cooperative_property_storage_initialize(
+        other_feature_bits, &other_matrix, other_matrix_count, &other_vector,
+        other_vector_count, iree_allocator_system(), &other_storage));
+    auto second = first;
+    second.cooperative_properties = &other_storage.set;
+    EXPECT_EQ(loom_target_profile_equal(&first.base, &second.base), equal);
+    EXPECT_EQ(loom_target_profile_equal(&second.base, &first.base), equal);
+    loom_spirv_cooperative_property_storage_deinitialize(
+        &other_storage, iree_allocator_system());
+  };
+  compare(true);
+#define DIFFERENT(field, value)  \
+  do {                           \
+    SCOPED_TRACE(#field);        \
+    const auto original = field; \
+    field = value;               \
+    compare(false);              \
+    field = original;            \
+  } while (false)
+  DIFFERENT(other_matrix.name, IREE_SV("matrix"));
+  DIFFERENT(other_matrix.required_feature_bits, 0);
+  DIFFERENT(other_matrix.m_size, matrix.m_size * 2);
+  DIFFERENT(other_matrix.n_size, matrix.n_size * 2);
+  DIFFERENT(other_matrix.k_size, matrix.k_size * 2);
+#define SCALAR(field)                                  \
+  DIFFERENT(field, field == LOOM_SPIRV_SCALAR_TYPE_F16 \
+                       ? LOOM_SPIRV_SCALAR_TYPE_F32    \
+                       : LOOM_SPIRV_SCALAR_TYPE_F16)
+  SCALAR(other_matrix.lhs_type);
+  SCALAR(other_matrix.rhs_type);
+  SCALAR(other_matrix.accumulator_type);
+  SCALAR(other_matrix.result_type);
+#undef SCALAR
+  DIFFERENT(other_matrix.scope, matrix.scope == LOOM_SPIRV_SCOPE_SUBGROUP
+                                    ? LOOM_SPIRV_SCOPE_WORKGROUP
+                                    : LOOM_SPIRV_SCOPE_SUBGROUP);
+  DIFFERENT(
+      other_matrix.layout_flags,
+      matrix.layout_flags ^ LOOM_SPIRV_COOPERATIVE_MATRIX_LAYOUT_ROW_MAJOR_BIT);
+  DIFFERENT(
+      other_matrix.storage_class_flags,
+      matrix.storage_class_flags ^ LOOM_SPIRV_STORAGE_CLASS_BIT_WORKGROUP);
+  DIFFERENT(other_matrix.operand_flags,
+            matrix.operand_flags ^
+                LOOM_SPIRV_COOPERATIVE_MATRIX_OPERAND_SATURATING_ACCUMULATION);
+  DIFFERENT(other_matrix.mul_add_descriptor_ref, 0);
+  DIFFERENT(other_vector.name, IREE_SV("vector"));
+  DIFFERENT(other_vector.required_feature_bits, 0);
+  DIFFERENT(other_vector.m_size, vector.m_size * 2);
+  DIFFERENT(other_vector.k_size, vector.k_size * 2);
+#define COMPONENT(field)                                         \
+  DIFFERENT(field, field == LOOM_SPIRV_COMPONENT_TYPE_FLOAT16_NV \
+                       ? LOOM_SPIRV_COMPONENT_TYPE_FLOAT32_NV    \
+                       : LOOM_SPIRV_COMPONENT_TYPE_FLOAT16_NV)
+  COMPONENT(other_vector.input_type);
+  COMPONENT(other_vector.input_interpretation);
+  COMPONENT(other_vector.matrix_interpretation);
+  COMPONENT(other_vector.bias_interpretation);
+  COMPONENT(other_vector.result_type);
+#undef COMPONENT
+  DIFFERENT(other_vector.matrix_layout_flags,
+            vector.matrix_layout_flags ^
+                LOOM_SPIRV_COOPERATIVE_VECTOR_MATRIX_LAYOUT_ROW_MAJOR_BIT);
+  DIFFERENT(
+      other_vector.storage_class_flags,
+      vector.storage_class_flags ^ LOOM_SPIRV_STORAGE_CLASS_BIT_WORKGROUP);
+  DIFFERENT(other_vector.flags,
+            vector.flags ^ LOOM_SPIRV_COOPERATIVE_VECTOR_FLAG_TRANSPOSE);
+  DIFFERENT(other_feature_bits, 0);
+  DIFFERENT(other_matrix_count, 0);
+  DIFFERENT(other_vector_count, 0);
+#undef DIFFERENT
+  auto second = first;
+  second.cooperative_properties = nullptr;
+  EXPECT_FALSE(loom_target_profile_equal(&first.base, &second.base));
+  loom_spirv_cooperative_property_storage_deinitialize(&storage,
+                                                       iree_allocator_system());
 }
 
 TEST(SpirvTargetProfileTest, SelectsImmutableVulkanProfile) {
@@ -342,6 +466,7 @@ TEST(SpirvTargetProfileTest, RejectsUnknownNamedProfile) {
 TEST(SpirvTargetProfileTest, CheckedCastRejectsAnotherFamily) {
   static const loom_target_profile_type_t kOtherProfileType = {
       .name = IREE_SVL("other"),
+      .equal = loom_target_profile_equal_common,
   };
   const loom_target_profile_t other_profile = {
       .type = &kOtherProfileType,

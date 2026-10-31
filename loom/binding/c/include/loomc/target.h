@@ -360,6 +360,24 @@ LOOMC_API_EXPORT void loomc_target_profile_retain(
 LOOMC_API_EXPORT void loomc_target_profile_release(
     loomc_target_profile_t* profile);
 
+/// Compares exact immutable profile inputs without allocating or compiling.
+///
+/// Equal profiles have compatible compiler environments, identical diagnostic
+/// identifiers, and identical common and family-specific facts, including
+/// unknown or explicitly supplied fields. This is stronger than executable
+/// compatibility: a stronger target is not equal to a weaker one. NULL equals
+/// only NULL. The query is safe from multiple threads.
+///
+/// Profiles are only one part of a compilation identity. Reusing artifacts also
+/// requires identical sources, roots, compiler configuration, and emit options.
+///
+/// @param lhs First profile to compare, or `NULL`. Borrowed for this call.
+/// @param rhs Second profile to compare, or `NULL`. Borrowed for this call.
+/// @return True when the profiles have equal immutable inputs or both are
+/// `NULL`; false otherwise.
+LOOMC_API_EXPORT bool loomc_target_profile_equal(
+    const loomc_target_profile_t* lhs, const loomc_target_profile_t* rhs);
+
 /// Creates one immutable environment from explicitly selected target packages.
 ///
 /// The result retains every input environment and includes each identical
