@@ -222,6 +222,14 @@ class CMakeGeneratedPackagesTest(unittest.TestCase):
             self.assertFalse(programs[1].exists())
             check(15)
 
+            # Embedding the same authored fragment in BUILD preserves its
+            # private imported interface and the consumers in sibling packages.
+            (authored.parent / "BUILD.bazel").write_text(
+                f"iree_cmake_extra_content(content={authored.read_text()!r})\n"
+            )
+            authored.unlink()
+            check(15)
+
 
 if __name__ == "__main__":
     unittest.main()

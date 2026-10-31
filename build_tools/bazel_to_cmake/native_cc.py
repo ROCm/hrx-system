@@ -18,6 +18,15 @@ def command(name, *parts):
     return f"{name}({' '.join(parts)})\n"
 
 
+def interfaces(declarations):
+    """Binds opaque requirements without copying native target properties."""
+    return "".join(
+        command("add_library", name, "INTERFACE IMPORTED GLOBAL")
+        + command("target_link_libraries", name, "INTERFACE", arguments((dependency,)))
+        for name, dependency in declarations
+    )
+
+
 def generated_dependencies(name, generated, producers):
     lines = []
     producer_targets = dict.fromkeys(

@@ -232,18 +232,6 @@ class BuildFileFunctions(
             self._build_dir = os.path.join(self._repo_root, build_dir)
         else:
             self._build_dir = build_dir
-        # Authored native scopes can introduce private imported interfaces. Keep
-        # those boundaries intact instead of exporting their names to siblings.
-        self._native_scope = self._repo_root
-        directory = os.path.abspath(self._build_dir)
-        while self._repo_root and directory != self._repo_root:
-            if os.path.isfile(os.path.join(directory, "CMakeLists.txt")):
-                self._native_scope = directory
-                break
-            parent = os.path.dirname(directory)
-            if parent == directory:
-                break
-            directory = parent
         self._filegroup_srcs = {}
         # Globs contain package-relative sources, unlike generic CMake lists.
         self._source_glob_vars = {}

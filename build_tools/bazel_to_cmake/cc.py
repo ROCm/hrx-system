@@ -13,7 +13,7 @@ scope. No native target properties or generator expressions are interpreted.
 import hashlib
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cached_property
 from pathlib import Path
 
@@ -55,8 +55,6 @@ class Interface:
 class Library:
     # Canonical native target name used by this source declaration's consumers.
     name: str
-    # Closest authored native directory; its private imports stay in this scope.
-    native_scope: str
     # Ordered direct dependencies, including opaque native target expressions.
     dependencies: tuple[str, ...]
     # Compile and link requirements contributed by this declaration.
@@ -82,10 +80,20 @@ class Library:
 class Graph:
     # Effective native output settings; parent/toolchain overrides remain native.
     configuration: dict[str, str]
+    # Native directory owning each source package and its private imports.
+    native_scopes: dict[str, str] = field(default_factory=dict)
     # Source-owned declarations indexed by native name and default-package alias.
     libraries: dict[str, Library] = field(default_factory=dict)
     # Resolved transitive interfaces, computed once after source collection.
     resolved: dict[str, Interface] = field(default_factory=dict)
+    # Opaque requirements reachable in each library's native directory scope.
+    public_native: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Private interfaces preserving opaque dependencies in their native scope.
+    native_interfaces: dict[tuple[str, str], str] = field(default_factory=dict)
+    # Interfaces awaiting emission in the source package that first owns them.
+    pending_native_interfaces: dict[str, list[tuple[str, str]]] = field(
+        default_factory=dict
+    )
     # Active source dependency chain for a useful BUILD-cycle diagnostic.
     resolving: list[str] = field(default_factory=list)
     # Ordered source link closure; dependents precede their providers.
@@ -125,6 +133,22 @@ class Graph:
                 raise ValueError(f"Duplicate source library: {name}")
             self.libraries[name] = library
 
+    def native_interface(self, package, dependency):
+        key = (self.native_scopes[package], dependency)
+        if key not in self.native_interfaces:
+            name = (
+                "_iree_native_"
+                + hashlib.sha256("\0".join(key).encode()).hexdigest()[:16]
+            )
+            self.native_interfaces[key] = name
+            self.pending_native_interfaces.setdefault(package, []).append(
+                (name, dependency)
+            )
+        return self.native_interfaces[key]
+
+    def take_native_interfaces(self, package):
+        return self.pending_native_interfaces.pop(package, ())
+
     def resolve(self, name):
         library = self.libraries.get(name)
         if library is None:
@@ -140,7 +164,25 @@ class Graph:
         inherited = [
             self._dependency(library, dependency) for dependency in library.dependencies
         ]
-        result = library.interface.with_dependencies(inherited)
+        interface = replace(
+            library.interface,
+            native=tuple(
+                self.native_interface(library.package, dependency)
+                for dependency in library.interface.native
+            ),
+        )
+        # Source compilation can cross native directories through the private
+        # interfaces. Public/exported interfaces retain ordinary native edges,
+        # so private imported names never escape their owning lookup scope.
+        public_native = list(library.interface.native)
+        for dependency in library.dependencies:
+            if self._shares_native_scope(library, dependency):
+                provider = self.libraries[dependency]
+                public_native.extend(self.public_native[provider.name])
+            else:
+                public_native.append(dependency)
+        self.public_native[library.name] = tuple(dict.fromkeys(public_native))
+        result = interface.with_dependencies(inherited)
         self.resolving.pop()
         self.resolved[library.name] = result
         return result
@@ -151,26 +193,29 @@ class Graph:
             [self._dependency(library, dep) for dep in library.dependencies]
         )
 
-    def _owns_dependency(self, library, dependency):
+    def _shares_native_scope(self, library, dependency):
         provider = self.libraries.get(dependency)
-        return provider is not None and provider.native_scope == library.native_scope
+        return provider is not None and (
+            self.native_scopes[provider.package] == self.native_scopes[library.package]
+        )
 
     def _dependency(self, library, dependency):
-        if self._owns_dependency(library, dependency):
+        if dependency in self.libraries:
             return self.resolve(dependency)
-        return Interface(native=(dependency,))
+        return Interface(native=(self.native_interface(library.package, dependency),))
 
     def link_dependencies(self, name):
         library = self.libraries[name]
+        self.resolve(name)
         return tuple(
             dict.fromkeys(
                 [
                     f"$<LINK_ONLY:{dependency}>"
-                    if self._owns_dependency(library, dependency)
+                    if self._shares_native_scope(library, dependency)
                     else dependency
                     for dependency in library.dependencies
                 ]
-                + list(self.resolve(name).native)
+                + list(self.public_native[library.name])
             )
         )
 
@@ -178,17 +223,18 @@ class Graph:
         if name not in self.links:
             library = self.libraries[name]
             self.links[name] = self._ordered_links(
-                library.native_scope, (*library.dependencies, *library.interface.native)
+                library.package, (*library.dependencies, *library.interface.native)
             )
         return self.links[name]
 
-    def _ordered_links(self, native_scope, dependencies):
+    def _ordered_links(self, package, dependencies):
         ordered = {}
         for dependency in dependencies:
-            sequence = (dependency,)
             provider = self.libraries.get(dependency)
-            if provider and provider.native_scope == native_scope:
+            if provider:
                 sequence = (provider.name, *self.link_inputs(dependency))
+            else:
+                sequence = (self.native_interface(package, dependency),)
             for item in sequence:
                 # A shared provider moves after every dependent that reaches
                 # it. Child closures already retain this invariant.
@@ -196,20 +242,22 @@ class Graph:
                 ordered[item] = None
         return tuple(ordered)
 
-    def executable_inputs(self, native_scope, dependencies):
+    def executable_inputs(self, package, dependencies):
         interfaces, generated = [], {}
         for dependency in dependencies:
             provider = self.libraries.get(dependency)
-            if provider and provider.native_scope == native_scope:
+            if provider:
                 interfaces.append(self.resolve(dependency))
                 generated.update(dict.fromkeys(self.generated_inputs(dependency)))
             else:
-                interfaces.append(Interface(native=(dependency,)))
+                interfaces.append(
+                    Interface(native=(self.native_interface(package, dependency),))
+                )
         artifacts, native = [], []
         cxx = False
-        for dependency in self._ordered_links(native_scope, dependencies):
+        for dependency in self._ordered_links(package, dependencies):
             provider = self.libraries.get(dependency)
-            if provider and provider.native_scope == native_scope:
+            if provider:
                 if provider.compiled:
                     target = provider.name.replace("::", "_")
                     cxx |= provider.requires_cxx_linker
@@ -277,7 +325,7 @@ class Graph:
             library = self.libraries[name]
             inputs = dict.fromkeys(library.generated)
             for dependency in library.dependencies:
-                if self._owns_dependency(library, dependency):
+                if dependency in self.libraries:
                     inputs.update(dict.fromkeys(self.generated_inputs(dependency)))
             self.inputs[name] = tuple(inputs)
         return self.inputs[name]
@@ -323,19 +371,27 @@ class BuildFileFunctions:
             dependencies += ("${IREE_IMPLICIT_DEFS_CC_DEPS}",)
 
         def render():
+            package = self._current_package()
             interface, artifacts, native, generated, cxx = (
-                self._libraries.executable_inputs(self._native_scope, dependencies)
+                self._libraries.executable_inputs(package, dependencies)
             )
-            return invocation + native_cc.executable_inputs(
-                target.replace("::", "_"),
-                interface,
-                artifacts,
-                native,
-                generated,
-                self._libraries.producers,
-                response=self._libraries.response(artifacts) if artifacts else None,
-                cxx=cxx,
-                msvc=Option("MSVC").evaluate(self._configuration),
+            interfaces = native_cc.interfaces(
+                self._libraries.take_native_interfaces(package)
+            )
+            return (
+                invocation
+                + interfaces
+                + native_cc.executable_inputs(
+                    target.replace("::", "_"),
+                    interface,
+                    artifacts,
+                    native,
+                    generated,
+                    self._libraries.producers,
+                    response=self._libraries.response(artifacts) if artifacts else None,
+                    cxx=cxx,
+                    msvc=Option("MSVC").evaluate(self._configuration),
+                )
             )
 
         self._converter.defer(render)
@@ -456,7 +512,6 @@ class BuildFileFunctions:
         self._libraries.add(
             Library(
                 native_name,
-                self._native_scope,
                 dependencies,
                 interface,
                 compiled,
@@ -583,7 +638,7 @@ class BuildFileFunctions:
                         f"$<$<COMPILE_LANGUAGE:{language}>:{value}>"
                         for value in values or []
                     )
-                return native_cc.library(
+                body = native_cc.library(
                     self._libraries.libraries[native_library],
                     resolved,
                     inherited,
@@ -613,6 +668,12 @@ class BuildFileFunctions:
                     in (kwargs.get("tags") or []),
                     msvc=Option("MSVC").evaluate(self._configuration),
                     wasm=self._configuration.get("CMAKE_SYSTEM_PROCESSOR") == "wasm32",
+                )
+                return (
+                    native_cc.interfaces(
+                        self._libraries.take_native_interfaces(self._current_package())
+                    )
+                    + body
                 )
             interface_blocks = defines_block + includes_block + system_includes_block
             return (

@@ -54,6 +54,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 import bazel_to_cmake_converter
@@ -252,6 +253,11 @@ def evaluate_packages(root_dirs, input_files, configuration=None):
         root_path = Path(repo_root) / root_dir
         if not root_path.is_dir():
             raise FileNotFoundError(f"Cannot find package root {root_path}")
+        for parent in (root_path, *root_path.parents):
+            if parent == Path(repo_root):
+                break
+            if (parent / "CMakeLists.txt").is_file():
+                authored_directories.add(parent.relative_to(repo_root))
         for directory, children, _ in os.walk(root_path):
             if (Path(directory) / "CMakeLists.txt").is_file():
                 authored_directories.add(Path(directory).relative_to(repo_root))
@@ -271,7 +277,23 @@ def evaluate_packages(root_dirs, input_files, configuration=None):
             )
             if package is not None:
                 packages[package.directory] = package
-    return packages, authored_directories, libraries
+    native_directories = authored_directories | {
+        directory
+        for directory, package in packages.items()
+        if package.converter.requires_native_scope
+    }
+    if libraries:
+
+        @cache
+        def native_scope(directory):
+            if directory == Path(".") or directory in native_directories:
+                return directory.as_posix()
+            return native_scope(directory.parent)
+
+        libraries.native_scopes = {
+            directory.as_posix(): native_scope(directory) for directory in packages
+        }
+    return packages, authored_directories, native_directories, libraries
 
 
 def write_if_changed(path, content):
@@ -301,14 +323,9 @@ def generate_build_tree(output_dir, root_dirs, configuration=None):
                 )
     input_files = set()
     output_files = set()
-    packages, authored_directories, libraries = evaluate_packages(
+    packages, authored_directories, native_directories, libraries = evaluate_packages(
         root_dirs, input_files, configuration
     )
-    native_directories = authored_directories | {
-        directory
-        for directory, package in packages.items()
-        if package.converter.requires_native_scope
-    }
     # Native directory traversal must reach every declared package, including
     # leaves beneath directories that have no declarations of their own.
     # Authored CMake retains control of its children and directory scope.
@@ -433,7 +450,7 @@ def main(args):
             path = path.parent
         if not path.is_dir():
             raise FileNotFoundError(f"Cannot find package {path}")
-        packages, _, _ = evaluate_packages(
+        packages, _, _, _ = evaluate_packages(
             repo_cfg.DEFAULT_ROOT_DIRS, set(), configuration
         )
         package = packages.get(path.relative_to(repo_root))

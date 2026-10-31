@@ -120,6 +120,31 @@ _iree_wasm_setup_bundler(WASM_TARGET module
                 source, build, "-DFIXTURE_SCOPED=OFF", "-DFIXTURE_CUSTOM=OFF"
             )
             check()
+            consumer, consumer_build = root / "consumer", root / "consumer build"
+            consumer.mkdir()
+            shutil.copyfile(source / "main.c", consumer / "main.c")
+            (
+                consumer / "CMakeLists.txt"
+            ).write_text("""cmake_minimum_required(VERSION 3.26...4.2)
+project(usage_consumer C)
+include("${FIXTURE_TARGETS}")
+add_executable(probe main.c)
+target_compile_definitions(probe PRIVATE INSTALLED_CONSUMER=1)
+target_link_libraries(probe PRIVATE iree_fixture_branch)
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/probe-$<CONFIG>.txt" CONTENT "$<TARGET_FILE:probe>")
+""")
+
+            def check_consumer(targets):
+                configure_project(
+                    consumer, consumer_build, f"-DFIXTURE_TARGETS={targets.as_posix()}"
+                )
+                build_project(consumer_build, "probe")
+                executable = Path(
+                    (consumer_build / f"probe-{CONFIGURATION}.txt").read_text()
+                )
+                self.assertEqual(run_command(str(executable)), "42\n")
+
+            check_consumer(build / "IREETargets-fixture.cmake")
             prefix = root / "stage"
             run_command(
                 CMAKE_COMMAND,
@@ -134,29 +159,9 @@ _iree_wasm_setup_bundler(WASM_TARGET module
             )
             relocated = root / "relocated"
             prefix.rename(relocated)
-            consumer, consumer_build = root / "consumer", root / "consumer build"
-            consumer.mkdir()
-            shutil.copyfile(source / "main.c", consumer / "main.c")
-            (
-                consumer / "CMakeLists.txt"
-            ).write_text("""cmake_minimum_required(VERSION 3.26...4.2)
-project(usage_consumer C)
-include("${FIXTURE_PREFIX}/lib/cmake/fixture/IREETargets-fixture.cmake")
-add_executable(probe main.c)
-target_compile_definitions(probe PRIVATE INSTALLED_CONSUMER=1)
-target_link_libraries(probe PRIVATE iree_fixture_branch)
-file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/probe-$<CONFIG>.txt" CONTENT "$<TARGET_FILE:probe>")
-""")
             source.rename(root / "source hidden")
             build.rename(root / "build hidden")
-            configure_project(
-                consumer, consumer_build, f"-DFIXTURE_PREFIX={relocated.as_posix()}"
-            )
-            build_project(consumer_build, "probe")
-            executable = Path(
-                (consumer_build / f"probe-{CONFIGURATION}.txt").read_text()
-            )
-            self.assertEqual(run_command(str(executable)), "42\n")
+            check_consumer(relocated / "lib/cmake/fixture/IREETargets-fixture.cmake")
 
     def test_enclosing_project_can_change_requirements(self):
         with tempfile.TemporaryDirectory(prefix="cmake usage subproject ") as temporary:
