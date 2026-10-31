@@ -81,14 +81,24 @@ enum iree_hal_amd_gpu_aql_program_flag_bits_e {
   IREE_HAL_AMD_GPU_AQL_PROGRAM_PROFILE = 1u << 2,
   // GPU-patched private command bytes are consumed by the command processor.
   IREE_HAL_AMD_GPU_AQL_PROGRAM_CONTROL = 1u << 3,
+  // This invocation must replace resident operands before materialization.
+  IREE_HAL_AMD_GPU_AQL_PROGRAM_FIXUP = 1u << 4,
 };
 typedef uint32_t iree_hal_amd_gpu_aql_program_flags_t;
 
-// Counts host-owned prelude packets; block packets and the terminal barrier
-// are separate. The unpublished instance remains reserved through emission.
-uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
+// Captures preparation before publication changes the reserved instance's
+// writer coordinate. A value_count of one contains only the instance base:
+// those relocations remain valid after that instance's first invocation.
+// Additional inputs require replacement on every invocation.
+iree_hal_amd_gpu_aql_program_flags_t iree_hal_amd_gpu_aql_program_prepare(
     const iree_hal_amd_gpu_program_t* program,
-    const iree_hal_amd_gpu_program_instance_t* instance, bool first);
+    const iree_hal_amd_gpu_program_instance_t* instance, uint32_t value_count,
+    bool first);
+
+// Counts host-owned prelude packets; block packets and the terminal barrier
+// are separate. Emission consumes the same captured preparation flags.
+uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
+    iree_hal_amd_gpu_aql_program_flags_t flags);
 
 // Publishes a bounded immutable packet sequence from invocation-private upload
 // storage. Dense inputs and fixups are already resolved. Completion operands

@@ -1066,12 +1066,17 @@ iree_hal_amd_gpu_aql_publish_execute(
   const iree_hal_amd_gpu_aql_program_block_t block =
       invocation->program->blocks[invocation->block_ordinal];
   const uint32_t waits = first ? (submission->native_wait_count + 4) / 5 : 0;
-  const bool initialize =
-      !host_template && first && !invocation->instance->initialized;
-  const uint32_t prefix = host_template
-                              ? 0
-                              : iree_hal_amd_gpu_aql_program_prefix_count(
-                                    program, invocation->instance, first);
+  const iree_hal_amd_gpu_aql_program_flags_t program_flags =
+      (host_template ? 0
+                     : iree_hal_amd_gpu_aql_program_prepare(
+                           program, invocation->instance,
+                           invocation->program->value_count, first)) |
+      (invocation->program->has_control ? IREE_HAL_AMD_GPU_AQL_PROGRAM_CONTROL
+                                        : 0) |
+      (invocation->program->profile ? IREE_HAL_AMD_GPU_AQL_PROGRAM_PROFILE : 0);
+  const uint32_t prefix =
+      host_template ? 0
+                    : iree_hal_amd_gpu_aql_program_prefix_count(program_flags);
   const uint32_t packet_count = waits + prefix + block.packet_count + 1;
   iree_hal_amd_gpu_aql_ring_t* ring = &queue->producer.ring;
   if (ring->reserved - ring->consumed + packet_count > ring->capacity) {
@@ -1136,12 +1141,6 @@ iree_hal_amd_gpu_aql_publish_execute(
       samples = (void*)(arguments->memory.contents.data + offset);
     }
   }
-  const iree_hal_amd_gpu_aql_program_flags_t program_flags =
-      (first ? IREE_HAL_AMD_GPU_AQL_PROGRAM_FIRST : 0) |
-      (initialize ? IREE_HAL_AMD_GPU_AQL_PROGRAM_INITIALIZE : 0) |
-      (invocation->program->has_control ? IREE_HAL_AMD_GPU_AQL_PROGRAM_CONTROL
-                                        : 0) |
-      (invocation->program->profile ? IREE_HAL_AMD_GPU_AQL_PROGRAM_PROFILE : 0);
   ++invocation->block_ordinal;
   iree_hal_amd_gpu_aql_accept(queue, submission, signal, position, argument_end,
                               terminal, true);

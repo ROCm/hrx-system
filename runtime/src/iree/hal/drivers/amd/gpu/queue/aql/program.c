@@ -154,11 +154,25 @@ void iree_hal_amd_gpu_aql_program_pool_deinitialize(
   iree_hal_amd_gpu_program_pool_deinitialize(&pool->storage);
 }
 
-uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
+iree_hal_amd_gpu_aql_program_flags_t iree_hal_amd_gpu_aql_program_prepare(
     const iree_hal_amd_gpu_program_t* program,
-    const iree_hal_amd_gpu_program_instance_t* instance, bool first) {
-  return 1 + (first && !instance->initialized) +
-         (first && program->fixup_count);
+    const iree_hal_amd_gpu_program_instance_t* instance, uint32_t value_count,
+    bool first) {
+  if (!first) {
+    return 0;
+  }
+  return IREE_HAL_AMD_GPU_AQL_PROGRAM_FIRST |
+         (!instance->initialized ? IREE_HAL_AMD_GPU_AQL_PROGRAM_INITIALIZE
+                                 : 0) |
+         (program->fixup_count && (value_count > 1 || !instance->last_epoch)
+              ? IREE_HAL_AMD_GPU_AQL_PROGRAM_FIXUP
+              : 0);
+}
+
+uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
+    iree_hal_amd_gpu_aql_program_flags_t flags) {
+  return 1 + ((flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_INITIALIZE) != 0) +
+         ((flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_FIXUP) != 0);
 }
 
 amdf_status_t iree_hal_amd_gpu_aql_program_emit_host(
@@ -236,7 +250,7 @@ amdf_status_t iree_hal_amd_gpu_aql_program_emit(
       prefix[count++] = iree_hal_amd_gpu_aql_program_dispatch(
           pool->blit, argument_address, 256);
     }
-    if (program->fixup_count) {
+    if (flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_FIXUP) {
       arguments->fixup = (iree_hal_amd_gpu_fixup_arguments_t){
           .entries = source.fixups,
           .values =
