@@ -20,6 +20,10 @@
 
 IREE_FLAG(string, hip_wait_mode, "auto",
           "HIP synchronization policy: auto, spin, yield, or blocking.");
+IREE_FLAG(
+    string, hip_download_source, "fill",
+    "Initialize download sources with GPU fills or host uploads: fill or "
+    "upload. Run histories in separate processes to compare queue storage.");
 
 namespace {
 
@@ -224,13 +228,30 @@ class DownloadWorkload {
               "hipStreamCreateWithPriority")(&streams_[i], hipStreamNonBlocking,
                                              priority));
     }
+    const std::string source_initialization = FLAG_hip_download_source;
+    const bool upload = source_initialization == "upload";
+    Require(upload || source_initialization == "fill",
+            "invalid HIP download source initialization");
     auto fill = runtime_.Resolve<decltype(&hipMemsetAsync)>("hipMemsetAsync");
     for (size_t offset = 0; offset < length_; offset += kStagingWindowLength) {
+      const size_t count = std::min(kStagingWindowLength, length_ - offset);
+      if (upload) {
+        std::memset(target_ + offset, Payload(offset), count);
+      } else {
+        HipRuntime::Check(fill(static_cast<uint8_t*>(source_) + offset,
+                               Payload(offset), count, streams_[0]));
+      }
+    }
+    if (upload) {
+      // Reuse the destination as the initialization source. Its upload must
+      // finish before resetting it for the first measured download.
       HipRuntime::Check(
-          fill(static_cast<uint8_t*>(source_) + offset, Payload(offset),
-               std::min(kStagingWindowLength, length_ - offset), streams_[0]));
+          copy_(source_, target_, length_, hipMemcpyHostToDevice, streams_[0]));
     }
     HipRuntime::Check(synchronize_(streams_[0]));
+    if (upload) {
+      std::memset(target_, kGuard, allocation_length_);
+    }
   }
 
   void Start() {
@@ -404,7 +425,7 @@ void DispatchDuringDownload(
     background->Stop();
   }
   runtime.VerifyOutput();
-  state.SetLabel(runtime.label());
+  state.SetLabel(runtime.label() + " source=" + FLAG_hip_download_source);
   state.SetItemsProcessed(state.iterations());
   state.counters["downloads"] = static_cast<double>(count);
   state.counters["download_priority"] = copy_priority;
@@ -423,7 +444,7 @@ void DownloadSerial(benchmark::State& state, DownloadMode mode) {
   for (auto _ : state) {
     download.Run();
   }
-  state.SetLabel(runtime.label());
+  state.SetLabel(runtime.label() + " source=" + FLAG_hip_download_source);
   state.SetBytesProcessed(state.iterations() * length);
 }
 
