@@ -525,6 +525,11 @@ void GpuNativeDispatchTest::RunIndirect(bool recorded) {
   for (uint32_t i = 0; i < kInvocations; ++i) {
     const auto& shape = shapes[(i / 3) % shapes.size()];
     memcpy(control.data() + i * 8 + 4, shape.data(), 12);
+    if (recorded && (i & 1)) {
+      // Static counts are immutable throughout the recording's invocation.
+      // Dynamic counts retain poison until their in-recording producer runs.
+      memcpy(control.data() + i * 8, shape.data(), 12);
+    }
     const uint64_t address = output_address + i * kOutputLength;
     const iree_hal_amd_gpu_kernarg_inputs_t inputs = {
         .block_count = {7, 9, 11},
@@ -615,10 +620,12 @@ void GpuNativeDispatchTest::RunIndirect(bool recorded) {
         config.workgroup_count_ref,
         iree_hal_make_buffer_ref(buffers[0], i * 32 + 16, 12)};
     if (recorded) {
-      IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
-          recording, executable, producer, producer_config, {},
-          {references.size(), references.data()}, 0));
-      IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &boundary));
+      if (!(i & 1)) {
+        IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+            recording, executable, producer, producer_config, {},
+            {references.size(), references.data()}, 0));
+        IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &boundary));
+      }
       IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
           recording, executable, consumer, config, constants, bindings, flags));
     } else {
