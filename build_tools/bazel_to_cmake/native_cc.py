@@ -149,7 +149,7 @@ def library(
                 "set_target_properties",
                 name,
                 "PROPERTIES COMPILE_PDB_NAME compile COMPILE_PDB_OUTPUT_DIRECTORY",
-                f'"${{CMAKE_CURRENT_BINARY_DIR}}/CMakeFiles/{name}.dir"',
+                f'"${{IREE_BINARY_DIR}}/{declaration.package}/CMakeFiles/{name}.dir"',
             )
         requirements(
             "target_compile_options",

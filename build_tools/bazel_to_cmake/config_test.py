@@ -949,7 +949,7 @@ cc_library(
         self.assertIn(
             "iree_register_generated_compile_input(${_FILEGROUP_TARGET}\n"
             "  OUTPUTS\n"
-            '    "${CMAKE_CURRENT_BINARY_DIR}/device_headers.stamp"',
+            '    "${IREE_BINARY_DIR}/runtime/src/example/device_headers.stamp"',
             converter.body,
         )
 
@@ -1147,9 +1147,9 @@ cc_library(
             use_param_file=True,
         )
         content = converter.convert()
-        self.assertIn('"--header=${CMAKE_CURRENT_BINARY_DIR}/tables/values.h"', content)
+        self.assertIn('"--header=${IREE_BINARY_DIR}/pkg/tables/values.h"', content)
         self.assertIn(
-            '"--source"\n    "${CMAKE_CURRENT_BINARY_DIR}/tables/values.c"',
+            '"--source"\n    "${IREE_BINARY_DIR}/pkg/tables/values.c"',
             content,
         )
         self.assertEqual(

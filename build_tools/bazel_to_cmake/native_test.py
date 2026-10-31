@@ -116,7 +116,7 @@ def emit(
         ]
     )
     properties = {
-        "WORKING_DIRECTORY": working_directory or "${CMAKE_CURRENT_BINARY_DIR}",
+        "WORKING_DIRECTORY": working_directory,
         "LABELS": ";".join((*labels, package)),
         "REQUIRED_FILES": ";".join(required),
         "TIMEOUT": str(timeout or 60),
@@ -240,6 +240,6 @@ class BuildFileFunctions:
             suppressions=suppressions,
             resource_group=resource_group,
             timeout=timeout,
-            working_directory=working_directory,
+            working_directory=working_directory or self._package_binary_dir(),
             dependencies=dependencies,
         )

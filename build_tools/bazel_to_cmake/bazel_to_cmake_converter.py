@@ -726,6 +726,12 @@ class BuildFileFunctions(
     def _current_package(self):
         return self._package
 
+    def _package_binary_dir(self):
+        package = self._current_package()
+        return "${IREE_BINARY_DIR}" + (
+            "/" + package if package and package != "." else ""
+        )
+
     def _canonical_location_label(self, label):
         package, name = self._split_location_label(label)
         if package:
@@ -741,10 +747,7 @@ class BuildFileFunctions(
     def _register_target_files(self, name, paths):
         # Output paths belong to the producer's package, including when another
         # package consumes them before its native directory is entered.
-        binary_dir = "${IREE_BINARY_DIR}"
-        package = self._current_package()
-        if package and package != ".":
-            binary_dir += "/" + package
+        binary_dir = self._package_binary_dir()
         self._target_file_paths[self._current_target_label(name)] = [
             path.replace("${CMAKE_CURRENT_BINARY_DIR}", binary_dir) for path in paths
         ]
@@ -1305,9 +1308,7 @@ class BuildFileFunctions(
             dirs.append(
                 "$<BUILD_INTERFACE:${_IREE_PACKAGE_SOURCE_DIR}/%s>" % (include,)
             )
-            dirs.append(
-                "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/%s>" % (include,)
-            )
+            dirs.append(f"$<BUILD_INTERFACE:{self._package_binary_dir()}/{include}>")
         return self._convert_string_list_block("INCLUDES", dirs, sort=False, quote=True)
 
     # ------------------------------------------------------------------------- #
@@ -1635,42 +1636,26 @@ class BuildFileFunctions(
             return
         self._filegroup_srcs[name] = list(srcs)
 
-        # Converting a dependency on a filegroup requires either using the
-        # transitive dependency to the actual file or creating a similar
-        # abstraction in CMake.
-        #
-        # One way of doing the transitive dependency is peeking in the build
-        # file that defines a given filegroup but goes against the current
-        # design where each build file is processed independently.
-        #
-        # Alternatively, the build file that defines a filegroup could set a
-        # variable with the list of all the files in the filegroup which the
-        # CMakeLists.txt corresponding to the using build file would use.
-        # However that requires the variable to be defined before the
-        # add_directory() for the corresponding using CMakeLists.txt which is
-        # not a given.
-        #
-        # Instead, we generate a custom command that creates a stamp file that
-        # acts as an abstraction to the filegroup. The using CMakeLists.txt
-        # then creates a file dependency on that stamp file. We also need a
-        # custom target in the same CMakeLists.txt to ensure a rule for the
-        # custom command is actually created as per add_custom_command
-        # documentation.
+        # Native consumers can depend on the group as one file edge. Its stamp
+        # stays at the producer's logical package path, independently of the
+        # native directory containing its custom command.
         inputs_block = self._convert_srcs_block(srcs, block_name="_FILEGROUP_INPUTS")
-        stamp_file = self._filegroup_dep_filename(name)
+        stamp_file = (
+            f"{self._package_binary_dir()}/{self._filegroup_dep_filename(name)}"
+        )
         self._converter.body += (
             f'iree_package_target_name(_FILEGROUP_TARGET "::{name}")\n'
             f"iree_resolve_source_files(\n{inputs_block})\n"
-            f"add_custom_command(OUTPUT {stamp_file}\n"
-            f"    COMMAND ${{CMAKE_COMMAND}} -E touch {stamp_file}\n"
+            f'add_custom_command(OUTPUT "{stamp_file}"\n'
+            f'    COMMAND ${{CMAKE_COMMAND}} -E touch "{stamp_file}"\n'
             f"    DEPENDS ${{_FILEGROUP_INPUTS}}\n"
             f")\n\n"
             f"add_custom_target(${{_FILEGROUP_TARGET}}\n"
-            f"    DEPENDS {stamp_file}\n"
+            f'    DEPENDS "{stamp_file}"\n'
             f")\n"
             f"iree_register_generated_compile_input(${{_FILEGROUP_TARGET}}\n"
             f"  OUTPUTS\n"
-            f'    "${{CMAKE_CURRENT_BINARY_DIR}}/{stamp_file}"\n'
+            f'    "{stamp_file}"\n'
             f")\n\n"
         )
 
@@ -2409,7 +2394,7 @@ class BuildFileFunctions(
         if target_compatible_with is None:
             target_compatible_with = _SPIRV_TOOL_TARGET_COMPATIBLE_WITH
         out_file = out or ("%s.spv" % name)
-        self._register_target_files(name, [f"${{CMAKE_CURRENT_BINARY_DIR}}/{out_file}"])
+        self._register_target_files(name, [f"{self._package_binary_dir()}/{out_file}"])
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         src_block = self._convert_string_arg_block("SRC", src)
         out_block = self._convert_string_arg_block("OUT", out)
@@ -2700,6 +2685,7 @@ class BuildFileFunctions(
         raise NotImplementedError(f"iree_wasi_executable_alias: {name}")
 
     def iree_cmake_extra_content(self, content, inline=False):
+        self._converter.requires_native_scope = True
         if inline:
             self._converter.body += f"\n{content}\n"
         else:
@@ -2720,6 +2706,8 @@ class Converter(object):
     """Conversion state tracking and full file template substitution."""
 
     def __init__(self):
+        # Authored fragments can own native directory state and private imports.
+        self.requires_native_scope = False
         # Header appears before child directory traversal.
         self.header = ""
         # Body appears after child directory traversal.

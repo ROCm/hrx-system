@@ -323,6 +323,9 @@ endfunction()
 # Parameters:
 #   TEST_NAME: the test name, e.g. iree/base/math_test
 function(iree_configure_test TEST_NAME)
+  if(DEFINED IREE_PACKAGE_BINARY_DIR)
+    set_property(TEST ${TEST_NAME} PROPERTY WORKING_DIRECTORY "${IREE_PACKAGE_BINARY_DIR}")
+  endif()
   set(_TEST_TMPDIR "${IREE_TEST_TMPDIR_ROOT}/${TEST_NAME}_test_tmpdir")
   set_property(GLOBAL APPEND PROPERTY IREE_TEST_TMPDIRS ${_TEST_TMPDIR})
   set_property(TEST ${TEST_NAME} APPEND PROPERTY ENVIRONMENT "TEST_TMPDIR=${_TEST_TMPDIR}")

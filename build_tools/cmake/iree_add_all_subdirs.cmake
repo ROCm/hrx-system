@@ -4,22 +4,46 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# Enter each package in a real directory scope, with generated declarations in
-# the private CMake tree and native artifacts at their original binary paths.
-# A macro preserves add_subdirectory's parent variable scope for authored CMake.
+# BUILD packages have variable scopes and explicit artifact paths. Authored
+# CMake and callers requesting native directory options retain add_subdirectory
+# semantics. A macro preserves their parent variable scope.
 macro(iree_add_subdirectory DIRECTORY)
   iree_package_source_dir(_IREE_PARENT_SOURCE_DIR)
+  iree_package_binary_dir(_IREE_PARENT_BINARY_DIR)
   get_filename_component(_IREE_CHILD_SOURCE_DIR "${DIRECTORY}" ABSOLUTE
     BASE_DIR "${_IREE_PARENT_SOURCE_DIR}")
   file(RELATIVE_PATH _IREE_CHILD_PACKAGE "${IREE_SOURCE_DIR}"
     "${_IREE_CHILD_SOURCE_DIR}")
-  if(IREE_GENERATED_CMAKE_DIR AND EXISTS
-      "${IREE_GENERATED_CMAKE_DIR}/${_IREE_CHILD_PACKAGE}/CMakeLists.txt")
-    add_subdirectory("${IREE_GENERATED_CMAKE_DIR}/${_IREE_CHILD_PACKAGE}"
-      "${CMAKE_CURRENT_BINARY_DIR}/${DIRECTORY}" ${ARGN})
+  set(_IREE_CHILD_BINARY_DIR "${_IREE_PARENT_BINARY_DIR}/${DIRECTORY}")
+  if(IREE_GENERATED_CMAKE_DIR AND "${ARGN}" STREQUAL "" AND EXISTS
+      "${IREE_GENERATED_CMAKE_DIR}/${_IREE_CHILD_PACKAGE}/package.cmake")
+    include("${IREE_GENERATED_CMAKE_DIR}/${_IREE_CHILD_PACKAGE}/package.cmake")
+    cmake_language(CALL ${_IREE_PACKAGE_FUNCTION} "${_IREE_CHILD_BINARY_DIR}")
   else()
-    add_subdirectory("${_IREE_CHILD_SOURCE_DIR}"
-      "${CMAKE_CURRENT_BINARY_DIR}/${DIRECTORY}" ${ARGN})
+    set(_IREE_RESTORE_PACKAGE_SOURCE FALSE)
+    set(_IREE_RESTORE_PACKAGE_BINARY FALSE)
+    if(DEFINED IREE_PACKAGE_SOURCE_DIR)
+      set(_IREE_RESTORE_PACKAGE_SOURCE TRUE)
+    endif()
+    if(DEFINED IREE_PACKAGE_BINARY_DIR)
+      set(_IREE_RESTORE_PACKAGE_BINARY TRUE)
+    endif()
+    unset(IREE_PACKAGE_SOURCE_DIR)
+    unset(IREE_PACKAGE_BINARY_DIR)
+    if(IREE_GENERATED_CMAKE_DIR AND EXISTS
+        "${IREE_GENERATED_CMAKE_DIR}/${_IREE_CHILD_PACKAGE}/CMakeLists.txt")
+      add_subdirectory("${IREE_GENERATED_CMAKE_DIR}/${_IREE_CHILD_PACKAGE}"
+        "${_IREE_CHILD_BINARY_DIR}" ${ARGN})
+    else()
+      add_subdirectory("${_IREE_CHILD_SOURCE_DIR}"
+        "${_IREE_CHILD_BINARY_DIR}" ${ARGN})
+    endif()
+    if(_IREE_RESTORE_PACKAGE_SOURCE)
+      set(IREE_PACKAGE_SOURCE_DIR "${_IREE_PARENT_SOURCE_DIR}")
+    endif()
+    if(_IREE_RESTORE_PACKAGE_BINARY)
+      set(IREE_PACKAGE_BINARY_DIR "${_IREE_PARENT_BINARY_DIR}")
+    endif()
   endif()
 endmacro()
 

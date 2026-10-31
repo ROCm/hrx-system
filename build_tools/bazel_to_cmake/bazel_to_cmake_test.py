@@ -44,7 +44,7 @@ class BazelToCMakeTest(unittest.TestCase):
                     bazel_to_cmake.generate_build_tree(output, ["package"])
 
                 generate()
-                generated = output / "package/CMakeLists.txt"
+                generated = output / "package/package.cmake"
                 self.assertFalse((package / "CMakeLists.txt").exists())
                 self.assertIn("VALUE=1", generated.read_text())
                 manifest = output / "inputs.cmake"
@@ -130,14 +130,12 @@ class BazelToCMakeTest(unittest.TestCase):
                 )
                 self.assertEqual(authored.read_text(), "project(authored)\n")
                 self.assertIn(
-                    'add_subdirectory("${IREE_GENERATED_CMAKE_DIR}/group/nested" '
-                    '"${CMAKE_CURRENT_BINARY_DIR}/nested")',
-                    (output / "group/CMakeLists.txt").read_text(),
+                    'include("${IREE_GENERATED_CMAKE_DIR}/group/nested/package.cmake")',
+                    (output / "group/package.cmake").read_text(),
                 )
                 self.assertIn(
-                    'add_subdirectory("${IREE_SOURCE_DIR}/group/nested/authored" '
-                    '"${CMAKE_CURRENT_BINARY_DIR}/authored")',
-                    (output / "group/nested/CMakeLists.txt").read_text(),
+                    'iree_add_subdirectory("authored")',
+                    (output / "group/nested/package.cmake").read_text(),
                 )
                 # A new authored parent takes over traversal and retires the
                 # generated entry; its contents are never replaced.
@@ -145,11 +143,11 @@ class BazelToCMakeTest(unittest.TestCase):
                 parent.write_text("add_subdirectory(authored)\n")
                 bazel_to_cmake.generate_build_tree(output, ["group"])
                 self.assertFalse((output / "group/nested/CMakeLists.txt").exists())
+                self.assertFalse((output / "group/nested/package.cmake").exists())
                 self.assertEqual(parent.read_text(), "add_subdirectory(authored)\n")
                 self.assertIn(
-                    'add_subdirectory("${IREE_SOURCE_DIR}/group/nested" '
-                    '"${CMAKE_CURRENT_BINARY_DIR}/nested")',
-                    (output / "group/CMakeLists.txt").read_text(),
+                    'iree_add_subdirectory("nested")',
+                    (output / "group/package.cmake").read_text(),
                 )
 
     def test_traversal_reaches_authored_directory_symlinks(self):
@@ -171,9 +169,8 @@ class BazelToCMakeTest(unittest.TestCase):
             ):
                 bazel_to_cmake.generate_build_tree(output, ["."])
             self.assertIn(
-                'add_subdirectory("${IREE_SOURCE_DIR}/linked" '
-                '"${CMAKE_CURRENT_BINARY_DIR}/linked")',
-                (output / "CMakeLists.txt").read_text(),
+                'iree_add_subdirectory("linked")',
+                (output / "package.cmake").read_text(),
             )
             self.assertFalse((output / "linked/CMakeLists.txt").exists())
 

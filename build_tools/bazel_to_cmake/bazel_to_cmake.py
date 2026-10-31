@@ -48,6 +48,7 @@ The file is evaluated as a module and can have the following customizations:
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -159,11 +160,42 @@ class Package:
 
     def convert(self, traversal="iree_add_all_subdirs()"):
         package = self.directory.as_posix()
+        if not self.converter.requires_native_scope:
+            # Defaults belong to this package's products, not its children.
+            for kind in ("ARCHIVE", "LIBRARY", "RUNTIME"):
+                traversal += (
+                    f"\nif(NOT DEFINED CMAKE_{kind}_OUTPUT_DIRECTORY)\n"
+                    f'  set(CMAKE_{kind}_OUTPUT_DIRECTORY "${{IREE_PACKAGE_BINARY_DIR}}")\n'
+                    "endif()\n"
+                )
+            return source_package(self.directory, self.converter.convert(traversal))
         return (
             f"# Generated from {package}/{self.build_file.name}. Edit the BUILD declaration.\n"
             "set_property(DIRECTORY PROPERTY IREE_PACKAGE_SOURCE_DIR "
             f'"${{IREE_SOURCE_DIR}}/{package}")\n' + self.converter.convert(traversal)
         )
+
+
+def package_function(directory):
+    return (
+        "_iree_source_package_"
+        + hashlib.sha256(directory.as_posix().encode()).hexdigest()[:16]
+    )
+
+
+def source_package(directory, body):
+    """Scopes BUILD variables without creating another native build directory."""
+    package = directory.as_posix()
+    function = package_function(directory)
+    return (
+        f"# Generated from {package} declarations.\n"
+        f"function({function} IREE_PACKAGE_BINARY_DIR)\n"
+        f'  set(IREE_PACKAGE_SOURCE_DIR "${{IREE_SOURCE_DIR}}/{package}")\n'
+        '  file(MAKE_DIRECTORY "${IREE_PACKAGE_BINARY_DIR}")\n'
+        + body
+        + "\nendfunction()\n"
+        + f"set(_IREE_PACKAGE_FUNCTION {function})\n"
+    )
 
 
 def evaluate_directory(
@@ -261,7 +293,7 @@ def generate_build_tree(output_dir, root_dirs, configuration=None):
         # files behind. Recovery accepts those, without claiming authored files.
         for path in output_dir.rglob("*"):
             if path.is_file() and (
-                path.name != "CMakeLists.txt"
+                path.name not in ("CMakeLists.txt", "package.cmake")
                 or not path.read_bytes().startswith(b"# Generated from ")
             ):
                 raise ValueError(
@@ -272,6 +304,11 @@ def generate_build_tree(output_dir, root_dirs, configuration=None):
     packages, authored_directories, libraries = evaluate_packages(
         root_dirs, input_files, configuration
     )
+    native_directories = authored_directories | {
+        directory
+        for directory, package in packages.items()
+        if package.converter.requires_native_scope
+    }
     # Native directory traversal must reach every declared package, including
     # leaves beneath directories that have no declarations of their own.
     # Authored CMake retains control of its children and directory scope.
@@ -297,33 +334,43 @@ def generate_build_tree(output_dir, root_dirs, configuration=None):
     def traversal(directory):
         lines = []
         for child in children.get(directory, ()):
-            root = (
-                "IREE_SOURCE_DIR"
-                if child in authored_directories
-                else "IREE_GENERATED_CMAKE_DIR"
-            )
-            lines.append(
-                f'add_subdirectory("${{{root}}}/{child.as_posix()}" '
-                f'"${{CMAKE_CURRENT_BINARY_DIR}}/{child.name}")'
-            )
+            if child in native_directories:
+                lines.append(f'iree_add_subdirectory("{child.name}")')
+            else:
+                binary = (
+                    "CMAKE_CURRENT_BINARY_DIR"
+                    if directory in native_directories
+                    else "IREE_PACKAGE_BINARY_DIR"
+                )
+                lines.extend(
+                    (
+                        f'include("${{IREE_GENERATED_CMAKE_DIR}}/{child.as_posix()}/package.cmake")',
+                        f'cmake_language(CALL {package_function(child)} "${{{binary}}}/{child.name}")',
+                    )
+                )
         return "\n".join(lines)
 
-    for package in packages.values():
-        path = output_dir / package.directory / "CMakeLists.txt"
-        write_if_changed(path, package.convert(traversal(package.directory)))
+    def write_package(directory, content):
+        path = output_dir / directory / "CMakeLists.txt"
+        if directory not in native_directories:
+            fragment = path.with_name("package.cmake")
+            write_if_changed(fragment, content)
+            output_files.add(fragment)
+            # The entry point also supports a native caller explicitly asking
+            # for a real directory, such as add_subdirectory(EXCLUDE_FROM_ALL).
+            content = (
+                f"# Generated from {directory.as_posix()} declarations.\n"
+                'include("${CMAKE_CURRENT_LIST_DIR}/package.cmake")\n'
+                'cmake_language(CALL ${_IREE_PACKAGE_FUNCTION} "${CMAKE_CURRENT_BINARY_DIR}")\n'
+            )
+        write_if_changed(path, content)
         output_files.add(path)
 
+    for package in packages.values():
+        write_package(package.directory, package.convert(traversal(package.directory)))
+
     for directory in sorted(traversal_directories):
-        path = output_dir / directory / "CMakeLists.txt"
-        write_if_changed(
-            path,
-            "# Generated from descendant package declarations.\n"
-            "set_property(DIRECTORY PROPERTY IREE_PACKAGE_SOURCE_DIR "
-            f'"${{IREE_SOURCE_DIR}}/{directory.as_posix()}")\n'
-            + traversal(directory)
-            + "\n",
-        )
-        output_files.add(path)
+        write_package(directory, source_package(directory, traversal(directory)))
 
     # Include configuration and handler modules actually imported by conversion.
     # The converter can live outside the source root in embedded fixture builds.
@@ -336,15 +383,19 @@ def generate_build_tree(output_dir, root_dirs, configuration=None):
                 path.is_relative_to(source_root) or path.is_relative_to(converter_root)
             ):
                 input_files.add(path)
-    for path in output_dir.rglob("CMakeLists.txt"):
-        if path not in output_files:
-            path.unlink()
+    for filename in ("CMakeLists.txt", "package.cmake"):
+        for path in output_dir.rglob(filename):
+            if path not in output_files:
+                path.unlink()
 
     def quote(path):
         return '"' + Path(path).as_posix().replace('"', '\\"') + '"'
 
     # The native glob notices new/deleted packages and changes between authored
     # and generated packages. Source globs stay with their generated rules.
+    # Entry points can be unused when their package is included directly. They
+    # still belong to generation and must be repaired after deletion.
+    input_files.update(output_files)
     patterns = [
         source_root / root / name
         for root in root_dirs

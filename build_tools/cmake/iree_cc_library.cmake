@@ -71,6 +71,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/../sanitizer/iree_sanitizer_suppressions.cmak
 
 function(iree_cc_library)
   iree_package_source_dir(_IREE_PACKAGE_SOURCE_DIR)
+  iree_package_binary_dir(_IREE_PACKAGE_BINARY_DIR)
   cmake_parse_arguments(
     _RULE
     "PUBLIC;TESTONLY;SHARED;ALWAYSLINK;LINKABLE_MORE_THAN_ONCE"
@@ -112,7 +113,7 @@ function(iree_cc_library)
     elseif(EXISTS "${_IREE_PACKAGE_SOURCE_DIR}/${_SRC_FILE}")
       list(APPEND _RULE_SRC_TARGET_SRCS "${_IREE_PACKAGE_SOURCE_DIR}/${_SRC_FILE}")
     else()
-      set(_SRC_BINARY_FILE "${CMAKE_CURRENT_BINARY_DIR}/${_SRC_FILE}")
+      set(_SRC_BINARY_FILE "${_IREE_PACKAGE_BINARY_DIR}/${_SRC_FILE}")
       list(APPEND _RULE_SRC_TARGET_SRCS "${_SRC_BINARY_FILE}")
     endif()
   endforeach()
@@ -138,7 +139,7 @@ function(iree_cc_library)
     elseif(EXISTS "${_IREE_PACKAGE_SOURCE_DIR}/${_HDR_FILE}")
       list(APPEND _RULE_HDR_TARGET_SRCS "${_IREE_PACKAGE_SOURCE_DIR}/${_HDR_FILE}")
     else()
-      set(_HDR_BINARY_FILE "${CMAKE_CURRENT_BINARY_DIR}/${_HDR_FILE}")
+      set(_HDR_BINARY_FILE "${_IREE_PACKAGE_BINARY_DIR}/${_HDR_FILE}")
       list(APPEND _RULE_HDR_TARGET_SRCS "${_HDR_BINARY_FILE}")
       list(APPEND _RULE_BINARY_HDR_FILES "${_HDR_BINARY_FILE}")
     endif()

@@ -105,10 +105,10 @@ loom_generated_source_family(
             repo_root=str(REPO_ROOT),
         )
         self.assertEqual(output.count("iree_generated_files(\n"), 2)
-        self.assertIn('"${CMAKE_CURRENT_BINARY_DIR}/table.inl"', output)
-        self.assertIn('"--output=${CMAKE_CURRENT_BINARY_DIR}/table.inl"', output)
-        self.assertIn('"${CMAKE_CURRENT_BINARY_DIR}/records.c"', output)
-        self.assertIn('"${CMAKE_CURRENT_BINARY_DIR}/records.h"', output)
+        self.assertIn('"${IREE_BINARY_DIR}/loom/consumer/table.inl"', output)
+        self.assertIn('"--output=${IREE_BINARY_DIR}/loom/consumer/table.inl"', output)
+        self.assertIn('"${IREE_BINARY_DIR}/loom/consumer/records.c"', output)
+        self.assertIn('"${IREE_BINARY_DIR}/loom/consumer/records.h"', output)
 
     def test_loom_image_provider_selection_survives_conversion(self):
         converter = SimpleNamespace(body="")

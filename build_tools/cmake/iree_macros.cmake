@@ -380,9 +380,9 @@ function(iree_setup_c_src_root)
   endif()
 endfunction()
 
-# Authored CMake directories use their native source directory. Generated
-# package directories carry the original source explicitly; this property is
-# deliberately not inherited by authored children.
+# BUILD packages carry their source in a function variable or native directory
+# property. Authored children enter their own native scope without inheriting
+# that logical package identity.
 function(iree_package_source_dir OUTPUT_VARIABLE)
   if(DEFINED IREE_PACKAGE_SOURCE_DIR)
     set(_SOURCE_DIR "${IREE_PACKAGE_SOURCE_DIR}")
@@ -395,8 +395,8 @@ function(iree_package_source_dir OUTPUT_VARIABLE)
   set(${OUTPUT_VARIABLE} "${_SOURCE_DIR}" PARENT_SCOPE)
 endfunction()
 
-# Deferred declarations retain the owning package's binary directory without
-# modifying CMake's native directory variables.
+# Generated and deferred declarations retain their logical output directory.
+# CMake's native directory variables remain owned by its generator.
 function(iree_package_binary_dir OUTPUT_VARIABLE)
   if(DEFINED IREE_PACKAGE_BINARY_DIR)
     set(${OUTPUT_VARIABLE} "${IREE_PACKAGE_BINARY_DIR}" PARENT_SCOPE)
@@ -797,7 +797,8 @@ endfunction()
 # of potentially long target names.
 function(iree_add_empty_object _TARGET)
   if(NOT TARGET iree_cmake_empty_object)
-    set(_EMPTY_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/iree_empty_source.cc")
+    iree_package_binary_dir(_IREE_PACKAGE_BINARY_DIR)
+    set(_EMPTY_SOURCE "${_IREE_PACKAGE_BINARY_DIR}/iree_empty_source.cc")
     iree_make_empty_file("${_EMPTY_SOURCE}")
     add_library(iree_cmake_empty_object OBJECT "${_EMPTY_SOURCE}")
   endif()
@@ -915,7 +916,8 @@ function(iree_symlink_tool)
   iree_package_name(_PACKAGE_NAME)
   set(_TARGET "${_PACKAGE_NAME}_${_RULE_TARGET}")
   set(_FROM_TOOL_TARGET ${_RULE_FROM_TOOL_TARGET})
-  set(_TO_TOOL_PATH "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_TO_EXE_NAME}${CMAKE_EXECUTABLE_SUFFIX}")
+  iree_package_binary_dir(_IREE_PACKAGE_BINARY_DIR)
+  set(_TO_TOOL_PATH "${_IREE_PACKAGE_BINARY_DIR}/${_RULE_TO_EXE_NAME}${CMAKE_EXECUTABLE_SUFFIX}")
   get_filename_component(_TO_TOOL_DIR "${_TO_TOOL_PATH}" DIRECTORY)
   if(WIN32)
     set(_TO_TOOL_MATERIALIZATION_COMMAND
@@ -936,7 +938,7 @@ function(iree_symlink_tool)
     TARGET "${_TARGET}"
     POST_BUILD
     BYPRODUCTS
-      "${CMAKE_CURRENT_BINARY_DIR}/${_RULE_TO_EXE_NAME}${CMAKE_EXECUTABLE_SUFFIX}"
+      "${_TO_TOOL_PATH}"
     COMMAND
       ${CMAKE_COMMAND} -E make_directory "${_TO_TOOL_DIR}"
     COMMAND

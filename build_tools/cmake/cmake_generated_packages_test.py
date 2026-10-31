@@ -207,6 +207,21 @@ class CMakeGeneratedPackagesTest(unittest.TestCase):
             relocated_archive.unlink()
             check(15)
 
+            # Explicit native directory options keep their build semantics even
+            # for a package that ordinarily uses a generated function scope.
+            authored = source / "package/authored/CMakeLists.txt"
+            authored.write_text(
+                authored.read_text().replace(
+                    "iree_add_subdirectory(child)",
+                    "iree_add_subdirectory(child EXCLUDE_FROM_ALL)",
+                )
+            )
+            configure_project(host, build)
+            programs[1].unlink()
+            build_project(build)
+            self.assertFalse(programs[1].exists())
+            check(15)
+
 
 if __name__ == "__main__":
     unittest.main()

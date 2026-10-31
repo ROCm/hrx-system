@@ -990,6 +990,7 @@ class LoomBuildFileFunctions(
             )
         source_dir = f"${{IREE_BINARY_DIR}}/_deps/{repo_name}-src"
         archive_name = "loom_" + self._cmake_identifier(name)
+        self._converter.requires_native_scope = True
         self._loom_generated_external_repositories[repo_name] = source_dir
         urls_block = self._convert_string_list_block("URL", urls)
         self._converter.header += self._guard_cmake_text(

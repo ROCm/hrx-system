@@ -159,6 +159,7 @@ function(iree_install_targets)
   # Install headers if the rule declares them and the directory level
   # root path is truthy.
   if(_RULE_HDRS AND IREE_HDRS_ROOT_PATH)
+    iree_package_binary_dir(_IREE_PACKAGE_BINARY_DIR)
     foreach(_hdr_file ${_RULE_HDRS})
       if(IS_ABSOLUTE "${_hdr_file}")
         set(_hdr_abs_path "${_hdr_file}")
@@ -172,7 +173,7 @@ function(iree_install_targets)
         set(_hdr_abs_path "${_IREE_PACKAGE_SOURCE_DIR}/${_hdr_file}")
         if(NOT EXISTS "${_hdr_abs_path}")
           # Producers own generated headers at the corresponding binary path.
-          set(_hdr_abs_path "${CMAKE_CURRENT_BINARY_DIR}/${_hdr_file}")
+          set(_hdr_abs_path "${_IREE_PACKAGE_BINARY_DIR}/${_hdr_file}")
         endif()
         set(_hdr_base_relative "${_IREE_PACKAGE_SOURCE_DIR}/${_hdr_file}")
       endif()

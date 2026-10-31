@@ -29,9 +29,7 @@ class GeneratedFileBuildFileFunctions:
         if self._should_skip_target(tags=tags):
             return
         outputs = list(outs) + list(output_directories or [])
-        paths = {
-            output: f"${{CMAKE_CURRENT_BINARY_DIR}}/{output}" for output in outputs
-        }
+        paths = {output: f"{self._package_binary_dir()}/{output}" for output in outputs}
         output_paths = list(paths.values())
         for output, path in paths.items():
             self._register_target_files(output, [path])
