@@ -3184,9 +3184,8 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
   const iree_device_size_t staging_threshold = 256 * 1024;
   if (stream) {
     iree_hal_streaming_buffer_ref_t src_ref;
-    iree_status_t src_status = iree_hal_streaming_memory_lookup(
-        context, (iree_hal_streaming_deviceptr_t)src, &src_ref);
-    if (iree_status_is_ok(src_status)) {
+    if (iree_hal_streaming_memory_try_lookup(
+            context, (iree_hal_streaming_deviceptr_t)src, &src_ref)) {
       if (src_ref.buffer->memory_kind ==
           IREE_HAL_STREAMING_MEMORY_KIND_DEVICE) {
         IREE_TRACE_ZONE_END(z0);
@@ -3198,7 +3197,6 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
       IREE_TRACE_ZONE_END(z0);
       return queue_status;
     }
-    iree_status_ignore(src_status);
     if (size <= staging_threshold) {
       iree_status_t queue_status =
           iree_hal_streaming_enqueue_host_update(stream, src, dst_ref, size);
@@ -3298,9 +3296,8 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
 
   if (stream) {
     iree_hal_streaming_buffer_ref_t dst_ref;
-    iree_status_t dst_status = iree_hal_streaming_memory_lookup(
-        context, (iree_hal_streaming_deviceptr_t)dst, &dst_ref);
-    if (iree_status_is_ok(dst_status)) {
+    if (iree_hal_streaming_memory_try_lookup(
+            context, (iree_hal_streaming_deviceptr_t)dst, &dst_ref)) {
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, iree_hal_streaming_buffer_ref_validate_range(&dst_ref, size));
       if (dst_ref.buffer->memory_kind ==
@@ -3310,8 +3307,7 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
             IREE_STATUS_INVALID_ARGUMENT,
             "device-to-host destination is not host memory");
       }
-    } else if (iree_status_is_not_found(dst_status)) {
-      iree_status_ignore(dst_status);
+    } else {
       const iree_hal_transfer_operation_t operation = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
           .download =
@@ -3326,9 +3322,6 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
           iree_hal_streaming_direct_transfer_and_wait(stream, 1, &operation);
       IREE_TRACE_ZONE_END(z0);
       return status;
-    } else {
-      IREE_TRACE_ZONE_END(z0);
-      return dst_status;
     }
 
     // Host pools require coherent access from every participating family. Copy
