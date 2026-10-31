@@ -243,7 +243,7 @@ function(iree_finalize_test_build_targets)
   # Encode each entry independently instead of parsing and serializing the
   # growing catalog for every test. Publish only the completed JSON document.
   set(_CATALOG_TEMP "${IREE_CTEST_BUILD_TARGETS_FILE}.tmp")
-  file(WRITE "${_CATALOG_TEMP}"
+  string(CONCAT _CATALOG_JSON
     "{\n  \"kind\": \"ireeCtestBuildTargets\",\n  \"version\": 2,"
     "\n  \"temporaryDirectoryRoot\": \"${IREE_TEST_TMPDIR_ROOT}\","
     "\n  \"tests\": {")
@@ -269,10 +269,11 @@ function(iree_finalize_test_build_targets)
     math(EXPR _MEMBER_LENGTH "${_ENTRY_LENGTH} - 2")
     string(SUBSTRING "${_ENTRY}" 1 ${_MEMBER_LENGTH} _MEMBER)
     string(STRIP "${_MEMBER}" _MEMBER)
-    file(APPEND "${_CATALOG_TEMP}" "${_ENTRY_SEPARATOR}\n    ${_MEMBER}")
+    string(APPEND _CATALOG_JSON "${_ENTRY_SEPARATOR}\n    ${_MEMBER}")
     set(_ENTRY_SEPARATOR ",")
   endforeach()
-  file(APPEND "${_CATALOG_TEMP}" "\n  }\n}\n")
+  string(APPEND _CATALOG_JSON "\n  }\n}\n")
+  file(WRITE "${_CATALOG_TEMP}" "${_CATALOG_JSON}")
   file(RENAME "${_CATALOG_TEMP}" "${IREE_CTEST_BUILD_TARGETS_FILE}")
 
   get_property(_RESOURCE_BUILD_TARGETS
