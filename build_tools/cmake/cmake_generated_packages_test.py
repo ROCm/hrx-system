@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -100,10 +101,13 @@ iree_generated_files(NAME copy GENERATOR copy_tool
             # binary roots, including a nested authored project and local import.
             host = source / "host"
             host.mkdir()
+            (host / "fallback.c").write_text("int fixture_value(void) { return -1; }\n")
             (host / "CMakeLists.txt").write_text(
                 "cmake_minimum_required(VERSION 3.26)\n"
                 "project(embedding C CXX)\n"
+                "add_library(native_fallback STATIC fallback.c)\n"
                 'add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/.." owned)\n'
+                "target_link_libraries(native_suppression_provider INTERFACE native_fallback)\n"
                 'if(NOT PROJECT_NAME STREQUAL "embedding")\n'
                 '  message(FATAL_ERROR "Embedded project scope leaked")\n'
                 "endif()\n"
@@ -133,6 +137,13 @@ iree_generated_files(NAME copy GENERATOR copy_tool
                 self.assertFalse((source / "package/CMakeLists.txt").exists())
 
             check(7)
+            # Source libraries precede native defaults regardless of whether
+            # Ninja places the link inputs in a response file.
+            if os.environ["IREE_TEST_CMAKE_GENERATOR"].startswith("Ninja"):
+                configure_project(host, build, "-DCMAKE_NINJA_FORCE_RESPONSE_FILE=ON")
+                check(7)
+                configure_project(host, build, "-UCMAKE_NINJA_FORCE_RESPONSE_FILE")
+                check(7)
             environment = (owned / f"environment-{CONFIGURATION}.txt").read_text()
             suppression = Path(
                 environment.removeprefix('LSAN_OPTIONS=suppressions="').removesuffix(
@@ -269,7 +280,7 @@ iree_generated_files(NAME copy GENERATOR copy_tool
             # Final links consume the actual target files, not predicted names.
             declaration.write_text(
                 declaration.read_text() + '\niree_cmake_extra_content(content="""\n'
-                'set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native archives")\n'
+                'set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native\'s, archives")\n'
                 f'set(CMAKE_{CONFIGURATION.upper()}_POSTFIX "_native")\n'
                 '""")\n'
             )
@@ -280,7 +291,7 @@ iree_generated_files(NAME copy GENERATOR copy_tool
                 (owned / f"paths-{CONFIGURATION}.txt").read_text().splitlines()[-1]
             )
             self.assertTrue(
-                scoped_archive.is_relative_to(owned / "package/native archives")
+                scoped_archive.is_relative_to(owned / "package/native's, archives")
             )
             self.assertTrue(scoped_archive.stem.endswith("_native"))
             scoped_archive.unlink()

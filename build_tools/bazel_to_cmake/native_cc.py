@@ -59,7 +59,22 @@ def executable_inputs(
         if values:
             lines.append(command(operation, name, scope, arguments(values)))
     links = list(native)
-    if artifacts:
+    if artifacts and msvc:
+        # Keep the resolved closure in the native library position, including
+        # when Ninja creates a response file. SHELL parsing retains the inner
+        # quotes so the linker receives each native path as one argument.
+        grouped = " ".join(r'"\"' + artifact + r'\""' for artifact in artifacts)
+        links.insert(0, "[=[LINKER:SHELL:" + grouped + "]=]")
+        lines.append(
+            command(
+                "set_property",
+                "TARGET",
+                name,
+                "APPEND PROPERTY LINK_DEPENDS",
+                arguments(artifacts),
+            )
+        )
+    elif artifacts:
         relative = f"CMakeFiles/iree/link/{response}.rsp"
         response_file = "${CMAKE_BINARY_DIR}/" + relative
         # Only instantiated consumers require their response file. Tracking it
@@ -71,17 +86,7 @@ def executable_inputs(
                 arguments((response_file,)),
             )
         )
-        if msvc:
-            lines.append(
-                command(
-                    "target_link_options",
-                    name,
-                    "PRIVATE",
-                    arguments(('SHELL:@\\"' + relative + '\\"',)),
-                )
-            )
-        else:
-            links.insert(0, '"-Wl,@\\"' + relative + '\\""')
+        links.insert(0, '"-Wl,@\\"' + relative + '\\""')
         lines.append(
             command(
                 "set_property",

@@ -130,14 +130,12 @@ class Graph:
         relative_base = binary_root.as_posix().replace(",", "$<COMMA>")
         for artifacts, response in self.responses.items():
             output = binary_root / "CMakeFiles/iree/link" / (response.key + ".rsp")
-            # MSVC accepts native absolute paths, including another volume.
             # POSIX link dependency files retain build-relative spelling so
             # whitespace in the build root does not enter their prerequisites.
-            if not Option("MSVC").evaluate(self.configuration):
-                artifacts = tuple(
-                    f"$<PATH:RELATIVE_PATH,{artifact},{relative_base}>"
-                    for artifact in artifacts
-                )
+            artifacts = tuple(
+                f"$<PATH:RELATIVE_PATH,{artifact},{relative_base}>"
+                for artifact in artifacts
+            )
             content = "".join(f'"{artifact}"\n' for artifact in artifacts)
             condition = (
                 "$<OR:"
@@ -306,14 +304,15 @@ class Graph:
         """Whether final links can consume the source-resolved artifact closure."""
         # Recursive generators need native target edges to enter each
         # provider's build. Ninja can follow the owned artifact file edges.
-        return (
-            self.configuration.get("CMAKE_GENERATOR") == "Ninja"
-            and (
-                Option("MSVC").evaluate(self.configuration)
-                or self.configuration.get("CMAKE_SYSTEM_NAME") == "Linux"
-            )
-            and not self.configuration.get("CMAKE_CONFIGURATION_TYPES")
-        )
+        if self.configuration.get(
+            "CMAKE_GENERATOR"
+        ) != "Ninja" or self.configuration.get("CMAKE_CONFIGURATION_TYPES"):
+            return False
+        if Option("MSVC").evaluate(self.configuration):
+            # LINKER:SHELL in native library inputs requires CMake 4. Older
+            # cross-host toolchains retain ordinary native target edges.
+            return int(self.configuration.get("CMAKE_VERSION", "0").split(".")[0]) >= 4
+        return self.configuration.get("CMAKE_SYSTEM_NAME") == "Linux"
 
     def generated_inputs(self, name):
         if name not in self.inputs:
@@ -386,6 +385,7 @@ class BuildFileFunctions:
                     response=(
                         self._libraries.response(artifacts, target.replace("::", "_"))
                         if artifacts
+                        and not Option("MSVC").evaluate(self._configuration)
                         else None
                     ),
                     cxx=cxx,
