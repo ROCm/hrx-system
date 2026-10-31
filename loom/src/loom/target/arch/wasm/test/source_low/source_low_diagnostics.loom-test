@@ -137,12 +137,10 @@ func.def target(@target) @index_remainder_unproven_divisor(%value: index, %divis
 
 wasm.target<simd128> @target
 
-func.def target(@target) @index_division_wide_dividend(%value: index) -> (index) where [range(%value, 4294967296, 8589934591)] {
-  %wide_value = index.assume %value [range(%value, 4294967296, 8589934591)] : index
-  %divisor = index.constant 3 : index
-  // ERROR@+1: TARGET/005 {op_name="index.div", subject_name="lhs", minimum="0", maximum="4294967295"}
-  %quotient = index.div %wide_value, %divisor : index
-  func.return %quotient : index
+func.def target(@target) @index_multiply_wide_result(%lhs: index, %rhs: index) -> (index) where [range(%lhs, 65536, 65537), range(%rhs, 65536, 65537)] {
+  // ERROR@+1: TARGET/005 {op_name="index.mul", subject_role="result", subject_name="product", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="4294967295"}
+  %product = index.mul %lhs, %rhs : index
+  func.return %product : index
 }
 
 // ====

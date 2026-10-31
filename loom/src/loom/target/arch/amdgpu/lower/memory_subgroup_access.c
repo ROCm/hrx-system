@@ -135,8 +135,9 @@ static bool loom_amdgpu_memory_comparison_mask(
           loom_value_facts_exact_i64(rhs_value);
       bool result = false;
       if (!loom_condition_integer_comparison_evaluate(
-              &condition->comparison, &expressions->fact_table->context,
-              &lhs_facts, &rhs_facts, &result)) {
+              &condition->comparison, expressions->module,
+              &expressions->fact_table->context, &lhs_facts, &rhs_facts,
+              &result)) {
         return false;
       }
       if (result == condition->assumed_truth) {

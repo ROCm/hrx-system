@@ -170,6 +170,8 @@ static void ExpectTargetFactsEqual(const loom_amdgpu_target_facts_t& expected,
   EXPECT_EQ(actual_snapshot.default_pointer_bitwidth,
             expected_snapshot.default_pointer_bitwidth);
   EXPECT_EQ(actual_snapshot.index_bitwidth, expected_snapshot.index_bitwidth);
+  EXPECT_EQ(actual_snapshot.maximum_index_bitwidth,
+            expected_snapshot.maximum_index_bitwidth);
   EXPECT_EQ(actual_snapshot.offset_bitwidth, expected_snapshot.offset_bitwidth);
   EXPECT_EQ(actual_snapshot.max_workgroup_size.x,
             expected_snapshot.max_workgroup_size.x);
@@ -547,6 +549,8 @@ TEST_F(AmdgpuProviderTest, MaterializesEveryStructuredProfile) {
     const loom_target_facts_t* selected_facts = nullptr;
     IREE_ASSERT_OK(loom_target_facts_builder_select_execution(
         profile_facts, &analysis_arena_, &selected_facts));
+    EXPECT_EQ(selected_facts->storage.snapshot.index_bitwidth, 32u);
+    EXPECT_EQ(selected_facts->storage.snapshot.maximum_index_bitwidth, 64u);
     const auto* processor = loom_amdgpu_target_info_target_processor(target);
     EXPECT_EQ(selected_facts->storage.snapshot.subgroup_size,
               processor->properties.wavefront.default_size);

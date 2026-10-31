@@ -97,6 +97,14 @@ class ConditionFactsTest : public ::testing::Test {
     return op;
   }
 
+  loom_value_id_t BuildIndexAdd(loom_value_id_t left, loom_value_id_t right) {
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(loom_index_add_build(&builder_, left, right,
+                                       loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+                                       LOOM_LOCATION_UNKNOWN, &op));
+    return loom_index_add_result(op);
+  }
+
   loom_op_t* BuildScalarCompare(loom_scalar_cmpi_predicate_t predicate,
                                 loom_value_id_t left, loom_value_id_t right) {
     loom_op_t* op = nullptr;
@@ -185,6 +193,71 @@ TEST_F(ConditionFactsTest, IndexCompareTrueEdgeProducesRelation) {
   EXPECT_EQ(relation.left.value_id, induction);
   EXPECT_EQ(relation.right.kind, LOOM_CONDITION_INTEGER_OPERAND_VALUE);
   EXPECT_EQ(relation.right.value_id, upper_bound);
+}
+
+TEST_F(ConditionFactsTest, WideComputedIndexCompareRetainsTrueEdgeRelation) {
+  loom_target_facts_t target_facts = {};
+  target_facts.storage.snapshot.index_bitwidth = 32;
+  target_facts.storage.snapshot.maximum_index_bitwidth = 64;
+  fact_table_.context.target_facts = &target_facts;
+  const loom_value_id_t coordinate =
+      BuildIndexAdd(DefineIndexValue(), DefineIndexValue());
+  const loom_value_id_t bound = DefineIndexValue();
+  DefineFacts(coordinate, loom_value_facts_make(0, 8590983151, 1));
+  DefineFacts(bound, loom_value_facts_exact_i64(1048576));
+  const loom_op_t* compare =
+      BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_ULT, coordinate, bound);
+
+  ASSERT_TRUE(Query(loom_index_cmp_result(compare)));
+  ASSERT_EQ(condition_facts_.integer_relation_count, 1u);
+  const loom_condition_integer_relation_t& relation =
+      condition_facts_.integer_relations[0];
+  EXPECT_EQ(relation.relation, LOOM_SYMBOLIC_INTEGER_RELATION_LT);
+  EXPECT_EQ(relation.left.kind, LOOM_CONDITION_INTEGER_OPERAND_VALUE);
+  EXPECT_EQ(relation.left.value_id, coordinate);
+  EXPECT_EQ(relation.right.kind, LOOM_CONDITION_INTEGER_OPERAND_VALUE);
+  EXPECT_EQ(relation.right.value_id, bound);
+}
+
+TEST_F(ConditionFactsTest,
+       WideComputedIndexCompareRetainsDynamicTrueEdgeRelation) {
+  loom_target_facts_t target_facts = {};
+  target_facts.storage.snapshot.index_bitwidth = 32;
+  target_facts.storage.snapshot.maximum_index_bitwidth = 64;
+  fact_table_.context.target_facts = &target_facts;
+  const loom_value_id_t coordinate =
+      BuildIndexAdd(DefineIndexValue(), DefineIndexValue());
+  const loom_value_id_t bound =
+      BuildIndexAdd(DefineIndexValue(), DefineIndexValue());
+  DefineFacts(coordinate, loom_value_facts_make(0, 8590983151, 1));
+  DefineFacts(bound, loom_value_facts_make(1, 1048576, 1));
+  const loom_op_t* compare =
+      BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_ULT, coordinate, bound);
+
+  ASSERT_TRUE(Query(loom_index_cmp_result(compare)));
+  ASSERT_EQ(condition_facts_.integer_relation_count, 1u);
+  const loom_condition_integer_relation_t& relation =
+      condition_facts_.integer_relations[0];
+  EXPECT_EQ(relation.relation, LOOM_SYMBOLIC_INTEGER_RELATION_LT);
+  EXPECT_EQ(relation.left.value_id, coordinate);
+  EXPECT_EQ(relation.right.value_id, bound);
+}
+
+TEST_F(ConditionFactsTest,
+       WideComputedIndexCompareRequiresTargetCarrierSupport) {
+  loom_target_facts_t target_facts = {};
+  target_facts.storage.snapshot.index_bitwidth = 32;
+  fact_table_.context.target_facts = &target_facts;
+  const loom_value_id_t coordinate =
+      BuildIndexAdd(DefineIndexValue(), DefineIndexValue());
+  const loom_value_id_t bound = DefineIndexValue();
+  DefineFacts(coordinate, loom_value_facts_make(0, 8590983151, 1));
+  DefineFacts(bound, loom_value_facts_exact_i64(1048576));
+  const loom_op_t* compare =
+      BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_ULT, coordinate, bound);
+
+  ASSERT_TRUE(Query(loom_index_cmp_result(compare)));
+  EXPECT_EQ(condition_facts_.integer_relation_count, 0u);
 }
 
 TEST_F(ConditionFactsTest, CompleteDerivationRetainsComposedAliasBound) {
@@ -367,16 +440,16 @@ TEST_F(ConditionFactsTest, ComparisonCertificatePreservesCarrierAndIdentity) {
       loom_value_facts_exact_i64(INT64_C(1) << 31);
   bool result = false;
   EXPECT_TRUE(loom_condition_integer_comparison_evaluate(
-      &comparison, nullptr, &zero, &sign_bit, &result));
+      &comparison, module_, nullptr, &zero, &sign_bit, &result));
   EXPECT_TRUE(result);
   EXPECT_FALSE(loom_condition_integer_comparison_evaluate(
-      &comparison, &fact_table_.context, &zero, &sign_bit, &result));
+      &comparison, module_, &fact_table_.context, &zero, &sign_bit, &result));
 
   ASSERT_TRUE(loom_condition_integer_comparison_describe(
       module_, BuildIndexCompare(LOOM_INDEX_CMP_PREDICATE_ULT, left, right),
       &comparison));
   EXPECT_TRUE(loom_condition_integer_comparison_evaluate(
-      &comparison, &fact_table_.context, &zero, &sign_bit, &result));
+      &comparison, module_, &fact_table_.context, &zero, &sign_bit, &result));
   EXPECT_TRUE(result);
 
   ASSERT_TRUE(loom_condition_integer_comparison_describe(
@@ -384,7 +457,7 @@ TEST_F(ConditionFactsTest, ComparisonCertificatePreservesCarrierAndIdentity) {
       &comparison));
   const loom_value_facts_t unknown = loom_value_facts_unknown();
   EXPECT_TRUE(loom_condition_integer_comparison_evaluate(
-      &comparison, &fact_table_.context, &unknown, &unknown, &result));
+      &comparison, module_, &fact_table_.context, &unknown, &unknown, &result));
   EXPECT_TRUE(result);
 }
 
@@ -407,7 +480,7 @@ TEST_F(ConditionFactsTest, ComparisonCertificatePreservesSignedBooleanOrder) {
         const loom_value_facts_t rhs = loom_value_facts_exact_i64(b);
         bool result = false;
         ASSERT_TRUE(loom_condition_integer_comparison_evaluate(
-            &comparison, nullptr, &lhs, &rhs, &result));
+            &comparison, module_, nullptr, &lhs, &rhs, &result));
         EXPECT_EQ(result, signed_order ? a > b : a < b);
       }
     }
@@ -488,7 +561,7 @@ static bool EvaluateIntegerComparison(loom_index_cmp_predicate_t predicate,
 
 static void ExpectRefinementContainsConcreteValues(
     const loom_condition_integer_comparison_t& comparison,
-    const loom_fact_context_t* context,
+    const loom_module_t* module, const loom_fact_context_t* context,
     loom_index_cmp_predicate_t oracle_predicate, uint32_t bit_count,
     int64_t minimum, int64_t maximum) {
   // The central interval enumerates every integer in [-2,2]. The remaining
@@ -517,7 +590,7 @@ static void ExpectRefinementContainsConcreteValues(
         auto refined_left = left;
         auto refined_right = right;
         loom_condition_integer_comparison_refine_facts(
-            &comparison, context, truth, &refined_left, &refined_right);
+            &comparison, module, context, truth, &refined_left, &refined_right);
         for (int64_t a : samples) {
           for (int64_t b : samples) {
             if (a < left.range_lo || a > left.range_hi || b < right.range_lo ||
@@ -551,9 +624,9 @@ TEST_F(ConditionFactsTest, ScalarRefinementPreservesEveryComparisonOutcome) {
       ASSERT_TRUE(loom_condition_integer_comparison_describe(
           module_, BuildScalarCompare(operation.scalar_predicate, left, right),
           &comparison));
-      ExpectRefinementContainsConcreteValues(comparison, &fact_table_.context,
-                                             operation.index_predicate,
-                                             bit_count, minimum, maximum);
+      ExpectRefinementContainsConcreteValues(
+          comparison, module_, &fact_table_.context, operation.index_predicate,
+          bit_count, minimum, maximum);
     }
   }
 }
@@ -582,9 +655,9 @@ TEST_F(ConditionFactsTest, AddressRefinementPreservesCarrierComparisons) {
         ASSERT_TRUE(loom_condition_integer_comparison_describe(
             module_, BuildIndexCompare(operation.index_predicate, left, right),
             &comparison));
-        ExpectRefinementContainsConcreteValues(comparison, &fact_table_.context,
-                                               operation.index_predicate,
-                                               bit_count, minimum, maximum);
+        ExpectRefinementContainsConcreteValues(
+            comparison, module_, &fact_table_.context,
+            operation.index_predicate, bit_count, minimum, maximum);
       }
     }
   }
@@ -607,8 +680,9 @@ TEST_F(ConditionFactsTest, RefinementUsesNumericCopiesWithoutAllocation) {
   auto refined_left = source;
   auto refined_right = bound;
   loom_value_facts_mark_lane_varying(&refined_left);
-  loom_condition_integer_comparison_refine_facts(
-      &comparison, &fact_table_.context, true, &refined_left, &refined_right);
+  loom_condition_integer_comparison_refine_facts(&comparison, module_,
+                                                 &fact_table_.context, true,
+                                                 &refined_left, &refined_right);
   EXPECT_EQ(refined_left.range_lo, 0);
   EXPECT_EQ(refined_left.range_hi, 15);
   EXPECT_TRUE(loom_value_facts_is_lane_varying(refined_left));
@@ -648,7 +722,7 @@ TEST_F(ConditionFactsTest, AddressEdgesDoNotTruncateMathematicalEnvelopes) {
       auto refined_left = source;
       auto refined_right = bound;
       loom_condition_integer_comparison_refine_facts(
-          &comparison, &fact_table_.context, true, &refined_left,
+          &comparison, module_, &fact_table_.context, true, &refined_left,
           &refined_right);
       EXPECT_TRUE(loom_value_facts_equal(refined_left, source));
       EXPECT_TRUE(loom_value_facts_equal(refined_right, bound));
@@ -748,7 +822,7 @@ TEST_F(ConditionFactsTest, UnsignedProofRequiresIndependentSignPartition) {
         // Numeric edge summaries alone do not establish the unsigned result;
         // the allowed proof must use the retained relation between operands.
         EXPECT_FALSE(loom_condition_integer_comparison_evaluate(
-            &comparison, &fact_table_.context,
+            &comparison, module_, &fact_table_.context,
             swapped ? &right_facts : &left_facts,
             swapped ? &left_facts : &right_facts, &value));
         bool proven = false;
@@ -1167,7 +1241,7 @@ TEST_F(ConditionFactsTest, UnsignedBoundMustFitSignedTargetCarrier) {
     auto numeric_refined = source;
     auto numeric_bound = loom_value_facts_exact_i64(bound_value);
     loom_condition_integer_comparison_refine_facts(
-        &comparison, &fact_table_.context, true, &numeric_refined,
+        &comparison, module_, &fact_table_.context, true, &numeric_refined,
         &numeric_bound);
     ASSERT_TRUE(Query(loom_index_cmp_result(compare)));
     auto refined = source;
@@ -1204,8 +1278,9 @@ TEST_F(ConditionFactsTest, UnknownIndexFactsDoNotAcquireNativeCarrierBounds) {
   for (bool truth : {false, true}) {
     auto refined = loom_value_facts_unknown();
     auto refined_bound = bound;
-    loom_condition_integer_comparison_refine_facts(
-        &comparison, &fact_table_.context, truth, &refined, &refined_bound);
+    loom_condition_integer_comparison_refine_facts(&comparison, module_,
+                                                   &fact_table_.context, truth,
+                                                   &refined, &refined_bound);
     EXPECT_TRUE(loom_value_facts_is_unknown(refined));
     EXPECT_TRUE(loom_value_facts_equal(refined_bound, bound));
     ASSERT_TRUE(Query(loom_index_cmp_result(compare), truth));

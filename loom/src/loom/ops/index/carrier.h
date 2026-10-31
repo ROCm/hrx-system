@@ -50,6 +50,19 @@ bool loom_index_value_facts_fit_unsigned_target_carrier(
     const loom_fact_context_t* context, loom_scalar_type_t scalar_type,
     loom_value_facts_t facts);
 
+// Returns the carrier width established for one source SSA value. Defined
+// index values may use a wider carrier when their facts extend above the
+// target-native payload and the target advertises that carrier. Raw fact
+// summaries retain the target-native carrier because facts alone cannot
+// distinguish a wide source value from a mathematical envelope over native
+// payload bits. Offset values always use their target-selected carrier. Zero
+// indicates a targetless context and -1 indicates an invalid or unsupported
+// carrier.
+int32_t loom_index_value_fact_carrier_bitwidth(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_value_id_t value_id, loom_scalar_type_t scalar_type,
+    loom_value_facts_t facts);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

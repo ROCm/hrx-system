@@ -103,6 +103,8 @@ bool loom_target_snapshot_satisfies_specialization_requirement(
              target_requirement->default_pointer_bitwidth &&
          effective_snapshot->index_bitwidth ==
              target_requirement->index_bitwidth &&
+         loom_target_snapshot_maximum_index_bitwidth(effective_snapshot) ==
+             loom_target_snapshot_maximum_index_bitwidth(target_requirement) &&
          effective_snapshot->offset_bitwidth ==
              target_requirement->offset_bitwidth &&
          loom_target_limit_satisfies(

@@ -1224,9 +1224,10 @@ static iree_status_t loom_index_minmax_canonicalize(
   loom_scalar_type_t operand_scalar_type =
       loom_type_element_type(loom_module_value_type(rewriter->module, lhs));
   bool lhs_le_rhs = false;
-  if (!loom_index_cmp_result_from_facts(
-          loom_index_rewriter_fact_context(rewriter), operand_scalar_type,
-          LOOM_INDEX_CMP_PREDICATE_SLE, &lhs_facts, &rhs_facts, &lhs_le_rhs)) {
+  if (!loom_index_cmp_result_from_value_facts(
+          loom_index_rewriter_fact_context(rewriter), rewriter->module,
+          operand_scalar_type, LOOM_INDEX_CMP_PREDICATE_SLE, lhs, &lhs_facts,
+          rhs, &rhs_facts, &lhs_le_rhs)) {
     return iree_ok_status();
   }
 
@@ -1657,9 +1658,10 @@ iree_status_t loom_index_cmp_canonicalize(loom_op_t* op,
   if ((loom_rewriter_value_identity(rewriter, lhs) ==
            loom_rewriter_value_identity(rewriter, rhs) &&
        loom_index_cmp_same_value_result(predicate, &result)) ||
-      loom_index_cmp_result_from_facts(
-          loom_index_rewriter_fact_context(rewriter), operand_scalar_type,
-          predicate, &lhs_facts, &rhs_facts, &result)) {
+      loom_index_cmp_result_from_value_facts(
+          loom_index_rewriter_fact_context(rewriter), rewriter->module,
+          operand_scalar_type, predicate, lhs, &lhs_facts, rhs, &rhs_facts,
+          &result)) {
     return loom_index_replace_single_result_with_i1_constant(op, rewriter,
                                                              result);
   }

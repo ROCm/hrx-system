@@ -475,3 +475,54 @@ func.def @nested_dynamic_condition_scope(%output: buffer, %initial: i64, %raw_le
   }
   func.return
 }
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// The compound true edge retains the exact loop-derived coordinate bound.
+amdgpu.target<gfx942> @cdna {subgroup_size = 64}
+
+kernel.def target(@cdna) @cfg_loop_compound_store_guard() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%output: buffer, %initial: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4 = index.constant 4 : index
+  %c7 = index.constant 7 : index
+  %c15 = index.constant 15 : index
+  %c32 = index.constant 32 : index
+  %bound = index.constant 1048576 : index
+  %loop_bound = index.constant 67117056 : index
+  %base = index.constant 0 : offset
+  %value = scalar.constant 0 : i32
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %view = buffer.view %aligned[%base] : buffer -> view<1x1048576xi32>
+  %lane = kernel.subgroup.lane.id : index
+  %head = index.andi %lane, %c15 : index
+  %quarter = index.shrui %lane, %c4 : index
+  %leader = index.cmp eq, %quarter, %c0 : index
+  cfg.br ^loop(%initial: index)
+^loop(%position: index):
+  %more = index.cmp ult, %position, %loop_bound : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %panel = index.assume %position [range(%position, 0, 67117055)] : index
+  %first = index.shli %panel, %c7 : index
+  %wave = kernel.subgroup.id : index
+  %lane_column = index.madd %wave, %c32, %head : index
+  %column = index.add %first, %lane_column : index
+  %within = index.cmp ult, %column, %bound : index
+  %writer = scalar.andi %leader, %within : i1
+  cfg.cond_br %writer, ^store, ^advance
+^store:
+  view.store %value, %view[%c0, %column] : i32, view<1x1048576xi32>
+  cfg.br ^advance
+^advance:
+  %next = index.add %position, %c1 : index
+  cfg.br ^loop(%next: index)
+^exit:
+  kernel.return
+}
