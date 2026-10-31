@@ -178,7 +178,10 @@ iree_status_t iree_hal_amd_gpu_semaphore_acquire_wait(
     if (current_value >= minimum_value) {
       out_wait->state = IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_COMPLETED;
     } else if (semaphore->submitted.value >= minimum_value) {
-      if (semaphore->submitted.signal->block->domain == domain) {
+      // A later producer may depend on this consumer. Only the exact requested
+      // point can replace the public timeline with a native dependency.
+      if (semaphore->submitted.value == minimum_value &&
+          semaphore->submitted.signal->block->domain == domain) {
         out_wait->state = IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE;
         out_wait->signal = semaphore->submitted.signal;
         iree_hal_amd_gpu_signal_retain(out_wait->signal);

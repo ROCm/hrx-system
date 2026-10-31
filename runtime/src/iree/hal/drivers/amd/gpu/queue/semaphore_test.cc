@@ -633,13 +633,54 @@ TEST_F(SemaphoreTest, ReplacingCachePreservesEveryNativeReader) {
   auto first_wait = AcquireWait(semaphore, 1);
   Publish(semaphore, 2, second);
   iree_hal_amd_gpu_signal_release(first);
-  auto second_wait = AcquireWait(semaphore, 1);
+  auto second_wait = AcquireWait(semaphore, 2);
   EXPECT_EQ(first_wait.signal, first);
   EXPECT_EQ(second_wait.signal, second);
   ExpectAvailableSignals(6);
   iree_hal_amd_gpu_signal_release(first_wait.signal);
   ExpectAvailableSignals(7);
   iree_hal_amd_gpu_signal_release(second_wait.signal);
+  iree_hal_amd_gpu_signal_release(second);
+}
+
+TEST_F(SemaphoreTest, EarlierConsumerProgressesWithoutLaterProducer) {
+  auto* semaphore = Semaphore();
+  auto* first = AcquireSignal(1);
+  auto* second = AcquireSignal(1);
+  Publish(semaphore, 1, first);
+  Publish(semaphore, 2, second);
+
+  // Producer 2 may depend on this consumer. Its cached native signal cannot
+  // replace the consumer's dependency on the independently progressing 1.
+  auto earlier = AcquireWait(semaphore, 1);
+  EXPECT_EQ(earlier.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_HOST);
+  EXPECT_EQ(earlier.signal, nullptr);
+  auto later = AcquireWait(semaphore, 2);
+  EXPECT_EQ(later.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
+  EXPECT_EQ(later.signal, second);
+
+  iree_async_semaphore_wait_context_t context;
+  iree_async_semaphore_wait_context_initialize(&context);
+  uint64_t value = 1;
+  Completion completion;
+  iree_hal_amd_gpu_host_wait_t wait;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_host_wait_begin(
+      &context, {1, &semaphore, &value}, Completion::Run, &completion,
+      iree_allocator_system(), &wait));
+  EXPECT_EQ(completion.calls.load(), 0u);
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_semaphore_publish_completed(semaphore, 1, nullptr));
+  completion.done.acquire();
+  EXPECT_EQ(iree_status_code(completion.status), IREE_STATUS_OK);
+  EXPECT_EQ(completion.calls.load(), 1u);
+  EXPECT_EQ(Value(semaphore), 1u);
+  EXPECT_EQ(*second->host_value, 1u);
+  EXPECT_EQ(AcquireWait(semaphore, 1).state,
+            IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_COMPLETED);
+  iree_async_semaphore_wait_context_deinitialize(&context);
+  iree_hal_amd_gpu_signal_release(earlier.signal);
+  iree_hal_amd_gpu_signal_release(later.signal);
+  iree_hal_amd_gpu_signal_release(first);
   iree_hal_amd_gpu_signal_release(second);
 }
 
@@ -663,8 +704,12 @@ TEST_F(SemaphoreTest, DelayedPublicationCannotReplaceHigherProducer) {
   Publish(semaphore, 1, first);
   iree_hal_amd_gpu_signal_release(first);
   ExpectAvailableSignals(7);
-  auto wait = AcquireWait(semaphore, 1);
+  auto earlier = AcquireWait(semaphore, 1);
+  EXPECT_EQ(earlier.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_HOST);
+  EXPECT_EQ(earlier.signal, nullptr);
+  auto wait = AcquireWait(semaphore, 2);
   EXPECT_EQ(wait.signal, second);
+  iree_hal_amd_gpu_signal_release(earlier.signal);
   iree_hal_amd_gpu_signal_release(wait.signal);
   iree_hal_amd_gpu_signal_release(second);
 }

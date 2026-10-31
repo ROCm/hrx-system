@@ -57,8 +57,8 @@ typedef enum iree_hal_amd_gpu_semaphore_wait_state_e {
   IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_COMPLETED,
   // A retained native producer can satisfy the wait without host retirement.
   IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE,
-  // The published producer belongs to another native domain. Wait for its
-  // completed public timeline without borrowing its queue-local storage.
+  // The cache contains a later producer or belongs to another native domain.
+  // Wait for the requested public value without borrowing native storage.
   IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_HOST,
 } iree_hal_amd_gpu_semaphore_wait_state_t;
 
@@ -72,7 +72,9 @@ typedef struct iree_hal_amd_gpu_semaphore_wait_t {
 } iree_hal_amd_gpu_semaphore_wait_t;
 
 // Resolves completed waits using atomic loads. An unresolved wait pins its
-// native reader under the cache replacement lock.
+// native reader under the cache replacement lock only for an exact producer
+// value. A later producer may depend on this consumer and cannot replace the
+// requested dependency; HOST observes the original public timeline instead.
 // The caller has established the semaphore type and retains the native domain
 // through the reader's final release. Domain identity includes addressing,
 // atomic width, completion protocol, visibility, forward progress, and backing
