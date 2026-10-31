@@ -140,6 +140,30 @@ TEST_F(TextStorageTest, LogicalOrderAndCarrySurviveBootstrapPayloadRelease) {
   iree_allocator_free(host_allocator, ranges);
 }
 
+TEST_F(TextStorageTest, AdjacentPagesShareRangesWithoutReorderingLogicalBytes) {
+  IREE_ASSERT_OK(loom_serve_text_storage_initialize(&types, results, 3, 17, 32,
+                                                    host_allocator, &storage));
+  const uint32_t blocks[] = {2, 3, 7, 0, 1};
+  iree_hal_buffer_t* views[5] = {};
+  iree_host_size_t count = 0;
+  loom_serve_snapshot_range_t* ranges = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_storage_plan_snapshot(
+      &storage, 2, views, true, IREE_ARRAYSIZE(blocks), blocks, host_allocator,
+      &count, &ranges));
+  const loom_serve_snapshot_range_t expected[] = {
+      {6, 256, 128},  {1, 512, 256},  {1, 1152, 128}, {1, 256, 256},
+      {1, 4608, 256}, {1, 5248, 128}, {1, 4352, 256}, {9, 640, 128},
+      {9, 960, 64},   {9, 512, 128},
+  };
+  ASSERT_EQ(count, IREE_ARRAYSIZE(expected));
+  for (size_t i = 0; i < count; ++i) {
+    EXPECT_EQ(ranges[i].buffer_index, expected[i].buffer_index);
+    EXPECT_EQ(ranges[i].offset, expected[i].offset);
+    EXPECT_EQ(ranges[i].length, expected[i].length);
+  }
+  iree_allocator_free(host_allocator, ranges);
+}
+
 TEST_F(TextStorageTest, RejectsUnrepresentablePoolGeometry) {
   iree_unaligned_store_le_u64(bytes[4].data, 3);
   IREE_EXPECT_STATUS_IS(
@@ -174,6 +198,33 @@ TEST_F(TextStorageTest, FullPageIdSpacePreservesWideByteOffsets) {
     EXPECT_EQ(ranges[6 + block].offset, 512 + uint64_t{blocks[block]} * 64);
     EXPECT_EQ(ranges[6 + block].length, 64u);
   }
+  iree_allocator_free(host_allocator, ranges);
+}
+
+TEST_F(TextStorageTest, AdjacentWidePageIdsKeepWideRunOffsetsAndLengths) {
+  SetPoolGeometry(1, UINT32_MAX);
+  IREE_ASSERT_OK(loom_serve_text_storage_initialize(
+      &types, results, 3, 17, UINT32_MAX, host_allocator, &storage));
+  const uint32_t blocks[] = {UINT32_MAX - 2, UINT32_MAX - 1, 0};
+  iree_hal_buffer_t* views[5] = {};
+  iree_host_size_t count = 0;
+  loom_serve_snapshot_range_t* ranges = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_storage_plan_snapshot(
+      &storage, 0, views, false, IREE_ARRAYSIZE(blocks), blocks, host_allocator,
+      &count, &ranges));
+  ASSERT_EQ(count, 6u);
+  for (size_t plane = 0; plane < 2; ++plane) {
+    const uint64_t origin = 256 + plane * uint64_t{UINT32_MAX} * 128;
+    EXPECT_EQ(ranges[plane * 2].offset,
+              origin + uint64_t{UINT32_MAX - 2} * 128);
+    EXPECT_EQ(ranges[plane * 2].length, 256u);
+    EXPECT_EQ(ranges[plane * 2 + 1].offset, origin);
+    EXPECT_EQ(ranges[plane * 2 + 1].length, 128u);
+  }
+  EXPECT_EQ(ranges[4].offset, 512 + uint64_t{UINT32_MAX - 2} * 64);
+  EXPECT_EQ(ranges[4].length, 128u);
+  EXPECT_EQ(ranges[5].offset, 512u);
+  EXPECT_EQ(ranges[5].length, 64u);
   iree_allocator_free(host_allocator, ranges);
 }
 

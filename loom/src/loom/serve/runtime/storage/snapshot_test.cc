@@ -198,6 +198,54 @@ TEST_F(SnapshotTest, LogicalRangesSurviveSourceDestructionAndFreshPlacement) {
   }
 }
 
+TEST_F(SnapshotTest, CaptureAndRestoreMayGroupTheSameLogicalBytesDifferently) {
+  for (size_t i = 0; i < roots.size(); ++i) {
+    IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+        pool, loom_serve_pool_state_geometry(storage_owner), kSlabSize, 256,
+        &statistics, &reservations[i]));
+    roots[i] = loom_serve_virtual_buffer_handle(reservations[i]);
+    iree_hal_buffer_retain(roots[i]);
+    IREE_ASSERT_OK(loom_serve_retirement_track(&retirement, &roots[i],
+                                               iree_allocator_system()));
+    IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(reservations[i], 0, 512));
+  }
+  const std::array<uint32_t, 6> expected = {17, 31, 53, 79, 113, 151};
+  const iree_hal_transfer_operation_t upload = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+      .upload = {expected.data(), roots[0], 256, sizeof(expected)},
+  };
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_serve_execution_transfer(execution, 1, &upload, &completion));
+  const loom_serve_snapshot_range_t contiguous = {0, 256, sizeof(expected)};
+  const loom_serve_snapshot_range_t fragmented[] = {
+      {1, 64, 4}, {1, 128, 12}, {1, 16, 8}};
+  IREE_ASSERT_OK(loom_serve_snapshot_capture(
+      execution, roots.size(), roots.data(), 1, &contiguous,
+      iree_allocator_system(), &snapshot));
+  IREE_ASSERT_OK(loom_serve_snapshot_restore(
+      snapshot, execution, roots.size(), roots.data(),
+      IREE_ARRAYSIZE(fragmented), fragmented));
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+  loom_serve_snapshot_release(std::exchange(snapshot, nullptr));
+
+  IREE_ASSERT_OK(loom_serve_snapshot_capture(
+      execution, roots.size(), roots.data(), IREE_ARRAYSIZE(fragmented),
+      fragmented, iree_allocator_system(), &snapshot));
+  const loom_serve_snapshot_range_t restored = {0, 0, sizeof(expected)};
+  IREE_ASSERT_OK(loom_serve_snapshot_restore(snapshot, execution, roots.size(),
+                                             roots.data(), 1, &restored));
+  std::array<uint32_t, 6> observed = {};
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download = {roots[0], 0, observed.data(), sizeof(observed)},
+  };
+  IREE_ASSERT_OK(
+      loom_serve_execution_transfer(execution, 1, &download, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_wait(execution, completion));
+  EXPECT_EQ(observed, expected);
+}
+
 TEST_F(SnapshotTest, LargeSparseStateSurvivesBackingReuseAndFreshPlacement) {
   constexpr uint64_t kStateBytes = 156893184;
   constexpr uint64_t kStateStride = kStateBytes + 256 + 2048 + 256;
