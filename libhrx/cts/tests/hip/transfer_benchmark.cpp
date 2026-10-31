@@ -113,7 +113,7 @@ TransferRuntime& Runtime() {
   return runtime;
 }
 
-enum DownloadFlags : uint32_t {
+enum TransferFlags : uint32_t {
   kDefault = 0,
   kRegistered = 1u << 0,
   kPitched = 1u << 1,
@@ -285,17 +285,27 @@ DOWNLOAD_INTERVAL_CASE(PageablePitched4M, kPitched, 4 * 1024 * 1024);
 #undef DOWNLOAD_INTERVAL_CASE
 
 // A blocking HIP completion owns the borrowed upload bytes until return. Use
-// one persistent allocation per row so steady-state measurements include no
+// one persistent allocation per case so steady-state measurements include no
 // application allocation, registration, or validation work.
-void Upload(benchmark::State& state, bool registered) {
+void Upload(benchmark::State& state, uint32_t flags) {
   auto& runtime = Runtime();
+  const bool registered = (flags & kRegistered) != 0;
+  const bool pitched = (flags & kPitched) != 0;
   const size_t length = state.range(0);
-  const size_t allocation_length = ((length + 4095) & ~size_t{4095}) + 4096;
+  const size_t width = pitched ? std::min(size_t{4096}, length) : length;
+  const size_t height = length / width;
+  const size_t source_pitch = width + (pitched ? 64 : 0);
+  const size_t target_pitch = width + (pitched ? 128 : 0);
+  const size_t target_length = target_pitch * height;
+  const size_t allocation_length =
+      ((target_length + 4095) & ~size_t{4095}) + 4096;
   auto* source =
       static_cast<uint8_t*>(std::aligned_alloc(4096, allocation_length));
   Require(source != nullptr, "upload host allocation failed");
-  for (size_t i = 0; i < length; ++i) {
-    source[i] = i % 251;
+  for (size_t row = 0; row < height; ++row) {
+    for (size_t column = 0; column < width; ++column) {
+      source[row * source_pitch + column] = (row * width + column) % 251;
+    }
   }
   if (registered) {
     Check(runtime.Resolve<decltype(&hipHostRegister)>("hipHostRegister")(
@@ -308,9 +318,16 @@ void Upload(benchmark::State& state, bool registered) {
       target, kPadding, allocation_length, runtime.stream()));
   runtime.Wait();
   auto copy = runtime.Resolve<decltype(&hipMemcpyAsync)>("hipMemcpyAsync");
+  auto copy_2d =
+      runtime.Resolve<decltype(&hipMemcpy2DAsync)>("hipMemcpy2DAsync");
   const auto transfer = [&] {
-    Check(
-        copy(target, source, length, hipMemcpyHostToDevice, runtime.stream()));
+    if (pitched) {
+      Check(copy_2d(target, target_pitch, source, source_pitch, width, height,
+                    hipMemcpyHostToDevice, runtime.stream()));
+    } else {
+      Check(copy(target, source, length, hipMemcpyHostToDevice,
+                 runtime.stream()));
+    }
     runtime.Wait();
   };
   transfer();
@@ -324,10 +341,18 @@ void Upload(benchmark::State& state, bool registered) {
   Check(copy(source, target, allocation_length, hipMemcpyDeviceToHost,
              runtime.stream()));
   runtime.Wait();
-  for (size_t i = 0; i < length; ++i) {
-    Require(source[i] == i % 251, "upload payload mismatch");
+  for (size_t row = 0; row < height; ++row) {
+    for (size_t column = 0; column < width; ++column) {
+      Require(
+          source[row * target_pitch + column] == (row * width + column) % 251,
+          "upload payload mismatch");
+    }
+    for (size_t column = width; column < target_pitch; ++column) {
+      Require(source[row * target_pitch + column] == kPadding,
+              "upload overwrote row padding");
+    }
   }
-  for (size_t i = length; i < allocation_length; ++i) {
+  for (size_t i = target_length; i < allocation_length; ++i) {
     Require(source[i] == kPadding, "upload overwrote its guard");
   }
   Check(runtime.Resolve<decltype(&hipFree)>("hipFree")(target));
@@ -338,18 +363,34 @@ void Upload(benchmark::State& state, bool registered) {
   std::free(source);
   state.SetLabel(runtime.label());
   state.SetBytesProcessed(state.iterations() * length);
+  state.counters["width"] = width;
+  state.counters["height"] = height;
+  state.counters["source_pitch"] = source_pitch;
+  state.counters["target_pitch"] = target_pitch;
 }
 
-#define UPLOAD_CASE(name, registered)         \
-  BENCHMARK_CAPTURE(Upload, name, registered) \
-      ->Name("HIP/Upload/" #name)             \
-      ->Arg(4 * 1024)                         \
-      ->Arg(1024 * 1024 + 123)                \
-      ->Arg(64 * 1024 * 1024)                 \
-      ->MeasureProcessCPUTime()               \
+#define UPLOAD_CASE(name, flags)         \
+  BENCHMARK_CAPTURE(Upload, name, flags) \
+      ->Name("HIP/Upload/" #name)        \
+      ->Arg(4 * 1024)                    \
+      ->Arg(1024 * 1024 + 123)           \
+      ->Arg(64 * 1024 * 1024)            \
+      ->MeasureProcessCPUTime()          \
       ->UseRealTime()
-UPLOAD_CASE(Pageable, false);
-UPLOAD_CASE(Registered, true);
+UPLOAD_CASE(Pageable, kDefault);
+UPLOAD_CASE(Registered, kRegistered);
 #undef UPLOAD_CASE
+
+#define UPLOAD_PITCHED_CASE(name, flags)              \
+  BENCHMARK_CAPTURE(Upload, name, (flags) | kPitched) \
+      ->Name("HIP/Upload/" #name)                     \
+      ->Arg(4 * 1024)                                 \
+      ->Arg(1024 * 1024)                              \
+      ->Arg(64 * 1024 * 1024)                         \
+      ->MeasureProcessCPUTime()                       \
+      ->UseRealTime()
+UPLOAD_PITCHED_CASE(PageablePitched, kDefault);
+UPLOAD_PITCHED_CASE(RegisteredPitched, kRegistered);
+#undef UPLOAD_PITCHED_CASE
 
 }  // namespace
