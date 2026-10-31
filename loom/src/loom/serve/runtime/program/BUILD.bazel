@@ -246,6 +246,7 @@ loom_cc_library(
     srcs = ["executable.c"],
     hdrs = ["executable.h"],
     deps = [
+        ":native_artifact",
         "//loom/binding/c:loomc",
         "//loom/src/loom/serve/runtime/execution:dispatch",
         "//runtime/src/iree/base",

@@ -47,6 +47,8 @@ struct loom_serve_executable_cache_t {
 struct loom_serve_executable_t {
   // Input-cache and stage ownership of this specialization's binding view.
   iree_atomic_ref_count_t ref_count;
+  // Exact native input retained beyond the preparing catalog's lifetime.
+  loom_serve_native_artifact_t* artifact;
   // Retained image shared with other specializations.
   loom_serve_executable_image_t* image;
   // Owned direct launch descriptor, or NULL for command children.
@@ -90,6 +92,7 @@ void loom_serve_executable_release(loom_serve_executable_t* executable) {
     iree_atomic_fetch_sub(&image->dispatch_count, 1, iree_memory_order_relaxed);
     loom_serve_dispatch_release(executable->dispatch);
   }
+  loom_serve_native_artifact_release(executable->artifact);
   iree_allocator_free(image->host_allocator, executable);
   loom_serve_executable_image_release(image);
 }
@@ -183,22 +186,26 @@ static iree_status_t loom_serve_executable_create(
     const loom_serve_executable_request_t* request,
     loom_serve_executable_t** out_executable) {
   *out_executable = NULL;
+  const loom_serve_native_result_t* result =
+      loom_serve_native_artifact_result(request->artifact);
   loom_serve_executable_t* executable = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_struct_array(
-      image->host_allocator, sizeof(*executable), request->root_count,
+      image->host_allocator, sizeof(*executable), result->root_count,
       sizeof(*executable->functions), (void**)&executable));
   iree_atomic_ref_count_init(&executable->ref_count);
+  executable->artifact = request->artifact;
+  loom_serve_native_artifact_retain(executable->artifact);
   executable->image = image;
   iree_atomic_ref_count_inc(&image->ref_count);
-  executable->function_count = request->root_count;
+  executable->function_count = result->root_count;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
-       i < request->root_count && iree_status_is_ok(status); ++i) {
+       i < result->root_count && iree_status_is_ok(status); ++i) {
     status = iree_hal_executable_lookup_function_by_name(
-        image->handle, request->roots[i], &executable->functions[i]);
+        image->handle, result->roots[i], &executable->functions[i]);
   }
-  if (iree_status_is_ok(status) && request->launch_config) {
-    status = loom_serve_executable_create_dispatch(request->launch_config,
+  if (iree_status_is_ok(status) && result->direct_dispatch) {
+    status = loom_serve_executable_create_dispatch(&result->launch_config,
                                                    executable);
   }
   if (iree_status_is_ok(status)) {
@@ -265,7 +272,7 @@ static iree_host_size_t loom_serve_executable_cache_position(
 
 static iree_status_t loom_serve_executable_cache_insert(
     loom_serve_executable_cache_t* cache, iree_host_size_t position,
-    loom_serve_executable_request_t* request, iree_const_byte_span_t data,
+    iree_byte_sequence_t* storage, iree_const_byte_span_t data,
     loom_serve_executable_image_t** out_image) {
   if (cache->count == cache->capacity) {
     IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
@@ -277,9 +284,9 @@ static iree_status_t loom_serve_executable_cache_insert(
                                              sizeof(*image), (void**)&image));
   iree_atomic_ref_count_init(&image->ref_count);
   image->host_allocator = cache->host_allocator;
-  image->storage = request->image;
+  image->storage = storage;
+  iree_byte_sequence_retain(storage);
   image->data = data;
-  request->image = NULL;
   memmove(&cache->images[position + 1], &cache->images[position],
           (cache->count - position) * sizeof(*cache->images));
   cache->images[position] = image;
@@ -313,9 +320,11 @@ static void loom_serve_executable_complete(
 void loom_serve_executable_cache_load(
     loom_serve_executable_cache_t* cache,
     loom_serve_executable_request_t* request) {
+  const loom_serve_native_result_t* result =
+      loom_serve_native_artifact_result(request->artifact);
   iree_const_byte_span_t data = iree_const_byte_span_empty();
   const bool contiguous =
-      iree_byte_sequence_try_get_contiguous_span(request->image, &data);
+      iree_byte_sequence_try_get_contiguous_span(result->image, &data);
   IREE_ASSERT(contiguous && "native publication owns image coalescing");
   (void)contiguous;
 
@@ -328,14 +337,10 @@ void loom_serve_executable_cache_load(
   if (found) {
     image = cache->images[position];
   } else {
-    status = loom_serve_executable_cache_insert(cache, position, request, data,
-                                                &image);
+    status = loom_serve_executable_cache_insert(cache, position, result->image,
+                                                data, &image);
   }
   const bool ready = image && image->handle;
-  // Retire producer storage before publishing its continuation. The loader
-  // can complete it immediately after unlock, including destroying the caller.
-  iree_byte_sequence_release(request->image);
-  request->image = NULL;
   if (image && !ready) {
     request->next = image->waiters;
     image->waiters = request;

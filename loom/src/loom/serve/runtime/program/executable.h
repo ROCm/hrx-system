@@ -7,9 +7,8 @@
 #ifndef LOOM_SERVE_RUNTIME_PROGRAM_EXECUTABLE_H_
 #define LOOM_SERVE_RUNTIME_PROGRAM_EXECUTABLE_H_
 
-#include "iree/base/byte_sequence.h"
 #include "loom/serve/runtime/execution/dispatch.h"
-#include "loomc/launch_config.h"
+#include "loom/serve/runtime/program/native_artifact.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,19 +21,14 @@ typedef struct loom_serve_executable_cache_t loom_serve_executable_cache_t;
 
 // One input's entry mapping and optional direct launch geometry. Views of an
 // identical image share code, not launch configurations. A view retains the
-// image independently of its originating cache.
+// exact native artifact and loaded image independently of its originating
+// catalog, preserving peer-device reuse while compiled stages remain live.
 typedef struct loom_serve_executable_t loom_serve_executable_t;
 
 typedef struct loom_serve_executable_request_t {
-  // Owned contiguous emitted bytes transferred to the cache. Native artifact
-  // publication coalesces producer storage before independent device loads.
-  iree_byte_sequence_t* image;
-  // Root names borrowed through completion, in this input's binding order.
-  const iree_string_view_t* roots;
-  // Number of roots; a direct launch has exactly one.
-  iree_host_size_t root_count;
-  // Optional direct geometry borrowed through completion.
-  const loomc_launch_config_t* launch_config;
+  // Successfully published immutable input, borrowed through completion.
+  // The resulting view retains it independently of catalog ownership.
+  loom_serve_native_artifact_t* artifact;
   // Receives owned status and view (NULL on failure). May destroy this request
   // and the cache. Invoked without the cache lock, possibly before load
   // returns.

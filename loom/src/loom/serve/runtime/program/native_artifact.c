@@ -312,6 +312,12 @@ iree_status_t loom_serve_native_artifact_acquire(
   return status;
 }
 
+void loom_serve_native_artifact_retain(loom_serve_native_artifact_t* artifact) {
+  iree_slim_mutex_lock(&artifact->domain->mutex);
+  ++artifact->references;
+  iree_slim_mutex_unlock(&artifact->domain->mutex);
+}
+
 void loom_serve_native_artifact_release(
     loom_serve_native_artifact_t* artifact) {
   if (!artifact) {

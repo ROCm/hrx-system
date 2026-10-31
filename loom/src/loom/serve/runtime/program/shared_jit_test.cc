@@ -28,17 +28,21 @@ class Compilation {
   }
 
   void Start(loom_serve_jit_t* jit, loomc_task_sink_t sink,
-             iree_string_view_t root = IREE_SV("advance")) {
+             iree_string_view_t root = IREE_SV("advance"),
+             bool direct = false) {
     started_ = true;
-    auto status = loom_serve_jit_compile_async(
-        jit, sink, root, &config_,
-        [](void* payload, const loom_cmd_program_t*) {
-          auto* self = static_cast<Compilation*>(payload);
-          std::lock_guard<std::mutex> lock(self->mutex_);
-          self->layout_ = true;
-          self->condition_.notify_all();
-        },
-        Complete, this);
+    auto status = direct
+                      ? loom_serve_jit_compile_dispatch_async(
+                            jit, sink, root, &config_, Complete, this)
+                      : loom_serve_jit_compile_async(
+                            jit, sink, root, &config_,
+                            [](void* payload, const loom_cmd_program_t*) {
+                              auto* self = static_cast<Compilation*>(payload);
+                              std::lock_guard<std::mutex> lock(self->mutex_);
+                              self->layout_ = true;
+                              self->condition_.notify_all();
+                            },
+                            Complete, this);
     if (!iree_status_is_ok(status)) {
       Complete(this, status, nullptr);
     }
@@ -200,9 +204,12 @@ class SharedJitTest : public loom_serve::testing::JitTest {
           iree_infinite_timeout(), buffer));
     }
     iree_hal_command_buffer_t* command = nullptr;
-    IREE_ASSERT_OK(loom_serve_jit_stage_record(
-        stage, iree_hal_queue_family(loom_serve_device_dispatch_queue(owner)),
-        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, nullptr, &command));
+    auto* direct = loom_serve_jit_stage_dispatch(stage);
+    if (!direct) {
+      IREE_ASSERT_OK(loom_serve_jit_stage_record(
+          stage, iree_hal_queue_family(loom_serve_device_dispatch_queue(owner)),
+          IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, nullptr, &command));
+    }
     const iree_hal_transfer_operation_t upload = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
         .upload = {input_.data(), *buffer, 0, sizeof(input_)},
@@ -212,8 +219,14 @@ class SharedJitTest : public loom_serve::testing::JitTest {
         loom_serve_execution_transfer(execution, 1, &upload, &completion);
     const iree_hal_buffer_binding_t binding = {*buffer, 0, sizeof(input_)};
     if (iree_status_is_ok(status)) {
-      status = loom_serve_execution_execute(execution, command, {1, &binding},
-                                            &completion);
+      if (direct) {
+        iree_hal_buffer_ref_t scratch;
+        status = loom_serve_dispatch_issue(direct, execution, {1, &binding},
+                                           &scratch, &completion);
+      } else {
+        status = loom_serve_execution_execute(execution, command, {1, &binding},
+                                              &completion);
+      }
     }
     iree_hal_command_buffer_release(command);
     const iree_hal_transfer_operation_t download = {
@@ -229,8 +242,40 @@ class SharedJitTest : public loom_serve::testing::JitTest {
     }
     IREE_ASSERT_OK(status);
     for (size_t i = 0; i < output_.size(); ++i) {
-      EXPECT_EQ(output_[i], 105 + i);
+      EXPECT_EQ(output_[i], direct ? (i == 0 ? 105 : 100) : 105 + i);
     }
+  }
+
+  void CheckLiveStageArtifacts(bool direct) {
+    const auto root = direct ? IREE_SV("increment_0") : IREE_SV("advance");
+    const size_t count = direct ? 1 : 8;
+    {
+      Compilation first;
+      first.Start(jit_, loom_serve_jit_task_sink(jit_), root, direct);
+      IREE_ASSERT_OK(first.Await());
+      EXPECT_EQ(compilation_.kernels, count);
+      // Preparation releases its compiler catalog while the model's immutable
+      // stage remains live. A later device still reuses that exact compilation.
+      loom_serve_jit_release(std::exchange(jit_, nullptr));
+      Compilation second;
+      second.Start(peer_, loom_serve_jit_task_sink(peer_), root, direct);
+      IREE_ASSERT_OK(second.Await());
+      EXPECT_EQ(peer_report_.kernels, 0u);
+      EXPECT_EQ(peer_report_.reused_kernels, count);
+      loom_serve_jit_release(std::exchange(peer_, nullptr));
+      Execute(first.stage(), false);
+      Execute(second.stage(), true);
+    }
+    // Both stages and catalogs have retired. No host-owned history keeps their
+    // input keys alive, so a new consumer compiles again.
+    IREE_ASSERT_OK(CreatePeer());
+    peer_report_ = {};
+    Compilation fresh;
+    fresh.Start(peer_, loom_serve_jit_task_sink(peer_), root, direct);
+    IREE_ASSERT_OK(fresh.Await());
+    EXPECT_EQ(peer_report_.kernels, count);
+    EXPECT_EQ(peer_report_.reused_kernels, 0u);
+    Execute(fresh.stage(), true);
   }
 
   // Independent device owner sharing only the host and immutable artifacts.
@@ -264,19 +309,19 @@ TEST_P(SharedJitTest, PendingArtifactsLoadAndExecuteOnIndependentDevices) {
   EXPECT_EQ(peer_report_.kernels, 0u);
   EXPECT_EQ(peer_report_.reused_kernels, 8u);
   EXPECT_EQ(loom_serve_jit_cache_storage(peer_).executable_count, 8u);
-  // Stages retain device-local loaded code after both compilation catalogs
-  // and their shared exact-input ownership have retired.
+  // Stages retain device-local loaded code and its exact immutable input after
+  // both compilation catalogs have retired.
   loom_serve_jit_release(std::exchange(peer_, nullptr));
   Execute(first.stage(), false);
   Execute(second.stage(), true);
-  // Loaded stages do not turn the host registry into a permanent input cache.
+  // A new catalog reuses the live stages without retaining their compilers.
   IREE_ASSERT_OK(CreatePeer());
   peer_report_ = {};
   Compilation fresh;
   fresh.Start(peer_, loom_serve_jit_task_sink(peer_));
   IREE_ASSERT_OK(fresh.Await());
-  EXPECT_EQ(peer_report_.kernels, 8u);
-  EXPECT_EQ(peer_report_.reused_kernels, 0u);
+  EXPECT_EQ(peer_report_.kernels, 0u);
+  EXPECT_EQ(peer_report_.reused_kernels, 8u);
   Execute(fresh.stage(), true);
 }
 
@@ -307,6 +352,14 @@ TEST_P(SharedJitTest, CachedArtifactsDoNotBypassPipelineOptionValidation) {
   EXPECT_EQ(peer_report_.kernels, 0u);
   EXPECT_EQ(peer_report_.reused_kernels, 8u);
   Execute(second.stage(), true);
+}
+
+TEST_P(SharedJitTest, LiveStagesRetainArtifactsAfterCatalogRetirement) {
+  CheckLiveStageArtifacts(false);
+}
+
+TEST_P(SharedJitTest, LiveDirectStagesRetainArtifactsAfterCatalogRetirement) {
+  CheckLiveStageArtifacts(true);
 }
 
 TEST_P(SharedJitTest, LoadSubmissionFailureDoesNotPoisonSharedCompilation) {

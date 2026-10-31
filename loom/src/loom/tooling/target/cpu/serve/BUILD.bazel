@@ -199,6 +199,8 @@ loom_cc_test(
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/program:executable",
         "//loom/src/loom/serve/runtime/program:jit",
+        "//loom/src/loom/serve/runtime/program:native_artifact",
+        "//loom/src/loom/serve/runtime/program:target",
         "//loom/src/loom/serve/testing:jit",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",

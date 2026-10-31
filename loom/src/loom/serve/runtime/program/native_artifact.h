@@ -16,8 +16,9 @@
 extern "C" {
 #endif
 
-// Host-owned compilation rendezvous. Its indexes are non-owning: catalogs and
-// pending producers retain artifacts, and the last release removes their keys.
+// Host-owned compilation rendezvous. Its indexes are non-owning: catalogs,
+// loaded input views, and pending producers retain artifacts. Last release
+// removes their keys.
 // No HAL handle, device, queue, catalog, or compiler workspace is retained
 // here.
 typedef struct loom_serve_native_cache_t loom_serve_native_cache_t;
@@ -96,6 +97,7 @@ iree_status_t loom_serve_native_artifact_acquire(
     iree_host_size_t root_count, loom_serve_native_subscription_t* subscription,
     loom_serve_native_artifact_t** out_artifact, bool* out_created,
     bool* out_ready);
+void loom_serve_native_artifact_retain(loom_serve_native_artifact_t* artifact);
 void loom_serve_native_artifact_release(loom_serve_native_artifact_t* artifact);
 
 // The producer alone mutates this result before publish. Consumers borrow it

@@ -1214,12 +1214,7 @@ static void loom_serve_jit_artifact_ready(
                                  NULL);
     return;
   }
-  native->load.image = result->image;
-  iree_byte_sequence_retain(native->load.image);
-  native->load.roots = result->roots;
-  native->load.root_count = result->root_count;
-  native->load.launch_config =
-      result->direct_dispatch ? &result->launch_config : NULL;
+  native->load.artifact = native->artifact;
   const iree_allocator_t allocator =
       loom_serve_native_domain_allocator(native->jit->native_domain);
   loom_serve_jit_load_task_t* task = NULL;
@@ -1234,8 +1229,6 @@ static void loom_serve_jit_artifact_ready(
   }
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(allocator, task);
-    iree_byte_sequence_release(native->load.image);
-    native->load.image = NULL;
     loom_serve_jit_native_loaded(native, status, NULL);
   }
 }
