@@ -73,16 +73,25 @@ typedef struct iree_hal_amd_gpu_transfer_t {
   bool program_accessible;
 } iree_hal_amd_gpu_transfer_t;
 
-// A download copy owned by one native retirement record. The queue keeps its
-// staging source and captured transaction alive until this copy finishes.
+// A consecutive download run owned by one native retirement record. The queue
+// keeps staging and the immutable capture alive until every host copy finishes.
 typedef struct iree_hal_amd_gpu_download_t {
   // Coherent, mapped staging bytes written by the native transfer.
   const void* source;
-  // Borrowed caller range receiving those bytes before terminal signaling.
-  void* target;
-  // Nonzero copy extent, or zero when this publication has no host copy.
+  // First captured DOWNLOAD; subsequent destinations follow in capture order.
+  const iree_hal_amd_gpu_transfer_operation_t* operation;
+  // First operation's already-consumed prefix, independent of staging capacity.
+  iree_device_size_t offset;
+  // Total staged bytes, or zero when this publication has no host copy.
   iree_host_size_t length;
 } iree_hal_amd_gpu_download_t;
+
+// Copies a completed staging run into its borrowed host destinations. All
+// native writes and visibility operations have completed. The owning capture
+// and staging prefix remain live until this returns, including a partial final
+// operation. This trusted transform does not allocate or signal completion.
+void iree_hal_amd_gpu_download_complete(
+    const iree_hal_amd_gpu_download_t* download);
 
 // Measures a transaction validated by the public queue API. Failure means its
 // captured representation exceeds the host addressable extent.

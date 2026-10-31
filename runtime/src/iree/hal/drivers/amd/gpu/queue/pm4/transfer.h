@@ -57,8 +57,8 @@ iree_hal_amd_gpu_pm4_transfer_emit_packet(
     const iree_hal_amd_gpu_pm4_transfer_span_t* span, uint64_t offset,
     iree_byte_span_t staging, uint64_t staging_address, uint32_t* words);
 
-// One bounded candidate publication. Consecutive packets for one download
-// share a contiguous retirement copy; completing that operation ends the batch.
+// One bounded candidate publication. Consecutive downloads share contiguous
+// staging and one retirement action; the next different operation ends the run.
 // No owner changes until the enclosing queue commits this candidate and its
 // staging prefix.
 typedef struct iree_hal_amd_gpu_pm4_transfer_chunk_t {

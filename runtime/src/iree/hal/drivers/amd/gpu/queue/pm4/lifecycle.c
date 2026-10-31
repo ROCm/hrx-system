@@ -19,7 +19,8 @@ void iree_hal_amd_gpu_pm4_queue_fail_issued(iree_hal_amd_gpu_pm4_queue_t* queue,
                                                   iree_memory_order_acquire);
   for (uint64_t i = begin; i != end; ++i) {
     iree_hal_amd_gpu_pm4_submission_t* submission =
-        queue->issued[i & queue->retirement.capacity_mask].action.submission;
+        iree_hal_amd_gpu_pm4_retirement_submission(
+            &queue->issued[i & queue->retirement.capacity_mask].action);
     iree_status_t status = iree_status_from_code(code);
     iree_hal_amd_gpu_pm4_submission_fail(submission, status);
   }
@@ -61,12 +62,13 @@ bool iree_hal_amd_gpu_pm4_queue_retire_failed(iree_hal_queue_t* base,
     // lifetime for this trusted host record without a successful frontier.
     iree_hal_amd_gpu_pm4_retirement_t* action =
         &queue->issued[position & queue->retirement.capacity_mask].action;
-    iree_hal_amd_gpu_pm4_submission_t* submission = action->submission;
+    iree_hal_amd_gpu_pm4_submission_t* submission =
+        iree_hal_amd_gpu_pm4_retirement_submission(action);
     const uint64_t words = action->consumed_words;
     const uint64_t arguments = action->consumed_arguments;
     iree_hal_amd_gpu_pm4_scratch_storage_free(queue->context, action->scratch);
     action->scratch = NULL;
-    if (action->terminal) {
+    if (iree_hal_amd_gpu_pm4_retirement_is_terminal(action)) {
       iree_hal_amd_gpu_pm4_submission_release_payload(submission);
       iree_hal_amd_gpu_signal_retire(submission->signal, code);
     }

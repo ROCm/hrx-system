@@ -46,6 +46,49 @@ TEST(AqlTransferPacketTest, BoundedGridTraversesTheCompleteByteRange) {
   }
 }
 
+TEST(AqlTransferPacketTest, DownloadBatchUsesExistingWindowWithoutGrowth) {
+  struct Case {
+    // Captured maximum host operation size, capped by the normal bulk limit.
+    uint32_t staging;
+    // Remaining captured descriptors.
+    size_t count;
+    // Already allocated argument-ring bytes; zero queries minimum growth.
+    uint64_t capacity;
+    // Required argument and staging span.
+    uint64_t expected;
+  };
+  const Case cases[] = {
+      {17, 37, 0, 529},
+      {17, 37, 8, 529},
+      {17, 37, 1024, 520},
+      {17, 37, 2048, 784},
+      {4096, 256, 65536, 32768},
+      {4096, 2, 65536, 8704},
+      {4096, 1, 65536, 4608},
+      {1048064, 1, 65536, 1048576},
+      {1048064, 1, 1048576, 524288},
+      {1048064, 32, UINT64_C(1) << 32, 1048576},
+  };
+  for (const auto& test : cases) {
+    SCOPED_TRACE(::testing::Message() << test.staging << 'x' << test.count
+                                      << " in " << test.capacity);
+    const iree_hal_amd_gpu_transfer_t transfer = {
+        .count = test.count + 3,
+        .cursor = {.index = 3},
+        .staging_capacity = test.staging,
+        .host_completion_required = true,
+    };
+    EXPECT_EQ(
+        iree_hal_amd_gpu_aql_transfer_argument_length(&transfer, test.capacity),
+        test.expected);
+    auto upload = transfer;
+    upload.host_completion_required = false;
+    EXPECT_EQ(
+        iree_hal_amd_gpu_aql_transfer_argument_length(&upload, test.capacity),
+        512u + test.staging);
+  }
+}
+
 class AqlTransferTest : public ::testing::Test {
  protected:
   void SetUp() override { buffer_.memory.bindings = &binding_; }
@@ -167,7 +210,8 @@ TEST_F(AqlTransferTest, HostRangesRespectCursorAndStagingCapacity) {
     EXPECT_EQ(arguments.target, download ? 0x2020u : 0x123500000013u);
     if (download) {
       EXPECT_EQ(chunk.download.source, bytes.data() + 33);
-      EXPECT_EQ(chunk.download.target, target.data() + 3);
+      EXPECT_EQ(chunk.download.operation, &operation);
+      EXPECT_EQ(chunk.download.offset, 3u);
       EXPECT_EQ(chunk.download.length, 3u);
       EXPECT_TRUE(std::all_of(bytes.begin() + 33, bytes.end(),
                               [](uint8_t byte) { return byte == 0xCC; }));
@@ -220,11 +264,60 @@ TEST_F(AqlTransferTest, DownloadEndsThePieceBeforeItsSibling) {
   EXPECT_EQ(chunk.next.offset, 0u);
   EXPECT_EQ(chunk.argument_length, 72u);
   EXPECT_EQ(chunk.download.source, bytes.data() + 64);
-  EXPECT_EQ(chunk.download.target, target.data());
+  EXPECT_EQ(chunk.download.operation, operations);
+  EXPECT_EQ(chunk.download.offset, 0u);
   EXPECT_EQ(chunk.download.length, 8u);
   EXPECT_EQ(Arguments(bytes.data()).target, 0x2040u);
   EXPECT_TRUE(std::all_of(bytes.begin() + 32, bytes.end(),
                           [](uint8_t byte) { return byte == 0xCC; }));
+}
+
+TEST_F(AqlTransferTest, ConsecutiveDownloadsShareOneRetirement) {
+  std::array<std::array<uint8_t, 10>, 3> targets = {};
+  std::array<iree_hal_amd_gpu_transfer_operation_t, 3> operations = {};
+  for (size_t i = 0; i < operations.size(); ++i) {
+    operations[i] = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .source = Device(i * 16),
+        .target = {.host = targets[i].data() + 1},
+        .length = 8,
+    };
+  }
+  const iree_hal_amd_gpu_transfer_t transfer = {
+      .count = operations.size(),
+      .operations = operations.data(),
+      .cursor = {.offset = 3},
+  };
+  for (size_t capacity : {0u, 1u, 5u, 6u, 13u, 14u, 21u, 22u}) {
+    SCOPED_TRACE(capacity);
+    std::array<uint8_t, 120> bytes;
+    bytes.fill(0xCC);
+    iree_hal_amd_gpu_aql_transfer_chunk_t chunk;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_aql_transfer_prepare_chunk(
+        &transfer, 0x1000, 3,
+        iree_make_byte_span(bytes.data() + 1, 96 + capacity), 0x2000, &chunk));
+    const size_t length = std::min(capacity, size_t{21});
+    const size_t packets = !length ? 0 : 1 + (length + 2) / 8;
+    EXPECT_EQ(chunk.packet_count, packets);
+    EXPECT_EQ(chunk.argument_length, length ? 96 + length : 0);
+    EXPECT_EQ(chunk.download.length, length);
+    EXPECT_EQ(chunk.next.index, (length + 3) / 8);
+    EXPECT_EQ(chunk.next.offset, (length + 3) % 8);
+    if (length) {
+      EXPECT_EQ(chunk.download.source, bytes.data() + 97);
+      EXPECT_EQ(chunk.download.operation, operations.data());
+      EXPECT_EQ(chunk.download.offset, 3u);
+    }
+    if (length > 5) {
+      const auto arguments = Arguments(bytes.data() + 33);
+      EXPECT_EQ(arguments.source, binding_.device_address + 16);
+      EXPECT_EQ(arguments.target, 0x2065u);
+      EXPECT_EQ(arguments.length, std::min(length - 5, size_t{8}));
+    }
+    EXPECT_EQ(bytes.front(), 0xCC);
+    EXPECT_TRUE(std::all_of(bytes.begin() + 97, bytes.end(),
+                            [](uint8_t byte) { return byte == 0xCC; }));
+  }
 }
 
 }  // namespace

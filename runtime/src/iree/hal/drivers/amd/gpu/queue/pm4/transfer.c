@@ -78,6 +78,10 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
          iree_status_is_ok(status)) {
     const iree_hal_amd_gpu_transfer_operation_t* operation =
         &transfer->operations[out_chunk->next.index];
+    if (out_chunk->download.length &&
+        operation->type != IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD) {
+      break;
+    }
     const uint64_t offset = out_chunk->next.offset;
     iree_hal_amd_gpu_pm4_transfer_span_t span = {
         .length = operation->length,
@@ -113,7 +117,8 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
         if (!out_chunk->download.length) {
           out_chunk->download = (iree_hal_amd_gpu_download_t){
               .source = data,
-              .target = (uint8_t*)operation->target.host + offset,
+              .operation = operation,
+              .offset = offset,
           };
         }
         out_chunk->download.length += packet.length;
@@ -124,11 +129,6 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
       if (out_chunk->next.offset == operation->length) {
         ++out_chunk->next.index;
         out_chunk->next.offset = 0;
-        if (out_chunk->download.length) {
-          // One retirement record owns one contiguous host destination. A
-          // different operation starts a new publication, even if it downloads.
-          break;
-        }
       }
     }
   }

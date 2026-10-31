@@ -110,10 +110,10 @@ class Pm4LifecycleTest : public ::testing::Test {
         iree_hal_amd_gpu_pm4_submission_retain(capture_);
       }
       issued_[i].action = {
-          .submission = capture_,
+          .tagged_submission = reinterpret_cast<uintptr_t>(capture_) |
+                               static_cast<uintptr_t>(!partial),
           .consumed_words = (i + 1) * 64,
           .consumed_arguments = (i + 1) * 128,
-          .terminal = !partial,
       };
     }
     iree_atomic_store(&queue_.producer.count, count, iree_memory_order_release);

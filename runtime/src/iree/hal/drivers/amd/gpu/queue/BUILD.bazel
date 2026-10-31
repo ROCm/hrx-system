@@ -87,6 +87,18 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_test(
+    name = "transfer_test",
+    srcs = ["transfer_test.cc"],
+    deps = [
+        ":transfer",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "allocation",
     srcs = ["allocation.c"],

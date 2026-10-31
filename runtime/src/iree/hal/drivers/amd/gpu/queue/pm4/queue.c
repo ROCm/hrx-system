@@ -330,12 +330,13 @@ iree_hal_amd_gpu_pm4_publish_kernel(iree_hal_amd_gpu_pm4_queue_t* queue,
     queue->producer.arguments->end = kernel->rollback.arguments;
     kernel->pending.byte_length = 0;
     iree_hal_amd_gpu_pm4_abandon(
-        queue, action->submission,
+        queue, iree_hal_amd_gpu_pm4_retirement_submission(action),
         IREE_HAL_AMD_STATUS_FROM_AMDF(status, "gpu.kernel_queue_submit"));
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;
   }
-  return iree_hal_amd_gpu_pm4_publish_accepted(queue, action->submission,
-                                               position, action->terminal);
+  return iree_hal_amd_gpu_pm4_publish_accepted(
+      queue, iree_hal_amd_gpu_pm4_retirement_submission(action), position,
+      iree_hal_amd_gpu_pm4_retirement_is_terminal(action));
 }
 
 // Encodes one complete piece before native publication. USER publication is
@@ -351,10 +352,9 @@ iree_hal_amd_gpu_pm4_publish_commit(
   iree_hal_amd_gpu_pm4_retirement_t* action =
       &queue->issued[position & queue->retirement.capacity_mask].action;
   *action = (iree_hal_amd_gpu_pm4_retirement_t){
-      .submission = submission,
+      .tagged_submission = (uintptr_t)submission | (uintptr_t)terminal,
       .consumed_arguments = argument_end,
       .download = download,
-      .terminal = terminal,
   };
   words = iree_hal_amd_gpu_pm4_barrier_emit_tail(words, after);
   if (submission->signal) {
@@ -1896,7 +1896,8 @@ static bool iree_hal_amd_gpu_pm4_retire(
     // them during a logical failure because native retirement keeps running.
     for (uint64_t i = position; i != published; ++i) {
       iree_hal_amd_gpu_pm4_submission_t* submission =
-          queue->issued[i & queue->retirement.capacity_mask].action.submission;
+          iree_hal_amd_gpu_pm4_retirement_submission(
+              &queue->issued[i & queue->retirement.capacity_mask].action);
       iree_hal_amd_gpu_pm4_fail_submission(
           queue, submission,
           iree_make_status(feedback_failure, "GPU sanitizer failure"));
@@ -1939,10 +1940,12 @@ static bool iree_hal_amd_gpu_pm4_retire(
     if (!action) {
       break;
     }
-    iree_hal_amd_gpu_pm4_submission_t* submission = action->submission;
+    iree_hal_amd_gpu_pm4_submission_t* submission =
+        iree_hal_amd_gpu_pm4_retirement_submission(action);
+    const bool terminal = iree_hal_amd_gpu_pm4_retirement_is_terminal(action);
     iree_status_code_t completion_code = IREE_STATUS_OK;
-    if (action->terminal && !iree_hal_amd_gpu_pm4_submission_retirement_ready(
-                                submission, &completion_code)) {
+    if (terminal && !iree_hal_amd_gpu_pm4_submission_retirement_ready(
+                        submission, &completion_code)) {
       waiting_for_producer = true;
       break;
     }
@@ -1961,13 +1964,12 @@ static bool iree_hal_amd_gpu_pm4_retire(
     const uint64_t consumed_arguments = action->consumed_arguments;
     if (action->download.length && feedback_failure == IREE_STATUS_OK &&
         completion_code == IREE_STATUS_OK) {
-      memcpy(action->download.target, action->download.source,
-             action->download.length);
-      // Return staging credit before the next host copy, allowing publication
-      // and other queues' retirement to progress between bulk downloads.
+      iree_hal_amd_gpu_download_complete(&action->download);
+      // Return staging credit before the next window so publication and other
+      // queues' retirement can progress between bulk downloads.
       limit = position + 1;
     }
-    if (action->terminal) {
+    if (terminal) {
       if (submission->profiled) {
         const iree_hal_amd_gpu_profile_operation_t* operation =
             iree_hal_amd_gpu_pm4_submission_profile(submission);
@@ -1991,8 +1993,7 @@ static bool iree_hal_amd_gpu_pm4_retire(
             ? iree_ok_status()
             : iree_make_status(completion_code, "GPU queue execution failed");
     for (iree_host_size_t i = 0;
-         action->terminal && i < submission->signals.count &&
-         iree_status_is_ok(status);
+         terminal && i < submission->signals.count && iree_status_is_ok(status);
          ++i) {
       iree_hal_semaphore_t* semaphore = submission->signals.semaphores[i];
       const uint64_t value = submission->signals.payload_values[i];
@@ -2005,7 +2006,7 @@ static bool iree_hal_amd_gpu_pm4_retire(
     if (!iree_status_is_ok(status)) {
       iree_hal_amd_gpu_pm4_fail_submission(queue, submission, status);
     }
-    if (action->terminal) {
+    if (terminal) {
       iree_hal_amd_gpu_signal_retire(submission->signal, completion_code);
       iree_hal_amd_gpu_pm4_submission_set_frontier(
           submission, frontier ? &completed_frontier : NULL);

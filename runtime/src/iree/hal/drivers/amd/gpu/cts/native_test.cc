@@ -377,7 +377,7 @@ TEST_P(GpuNativeTransferTest,
 TEST_P(GpuNativeTransferTest, SmallDownloadsRetainEveryHostDestination) {
   constexpr size_t kDownloadCount = 37;
   constexpr size_t kDownloadLength = 17;
-  std::array<uint8_t, kDownloadLength> source;
+  std::array<uint8_t, kDownloadCount * kDownloadLength> source;
   for (size_t i = 0; i < source.size(); ++i) {
     source[i] = static_cast<uint8_t>(i * 29 + 7);
   }
@@ -390,16 +390,16 @@ TEST_P(GpuNativeTransferTest, SmallDownloadsRetainEveryHostDestination) {
         .download =
             {
                 .source_buffer = buffers_[0],
-                .source_offset = 3,
+                .source_offset = 3 + i * kDownloadLength,
                 .target = targets[i].data() + 1,
-                .length = source.size(),
+                .length = kDownloadLength,
             },
     };
   }
   uint64_t ready = 1, produced = 1, downloaded = 2;
-  // Independent destinations require distinct retirement actions. The small
-  // argument ring must fit both packet arguments and a nonempty staging span,
-  // and the completion signal must cover every host copy across ring reuse.
+  // The small argument ring bounds each download run. Distinct row identities
+  // and guarded destinations prove each retirement scatters the correct bytes,
+  // and completion covers every host copy across partial rows and ring reuse.
   IREE_ASSERT_OK(iree_hal_queue_transfer(
       queues_[1], {1, &timeline_, &produced}, {1, &timeline_, &downloaded},
       downloads.size(), downloads.data(), Barriers()));
@@ -419,10 +419,12 @@ TEST_P(GpuNativeTransferTest, SmallDownloadsRetainEveryHostDestination) {
   ReleaseBuffers();
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, ready, nullptr));
   Wait(downloaded);
-  for (const auto& target : targets) {
+  for (size_t i = 0; i < targets.size(); ++i) {
+    const auto& target = targets[i];
     EXPECT_EQ(target.front(), 0xCC);
     EXPECT_EQ(target.back(), 0xCC);
-    EXPECT_TRUE(std::equal(source.begin(), source.end(), target.begin() + 1));
+    const auto first = source.begin() + i * kDownloadLength;
+    EXPECT_TRUE(std::equal(first, first + kDownloadLength, target.begin() + 1));
   }
 }
 

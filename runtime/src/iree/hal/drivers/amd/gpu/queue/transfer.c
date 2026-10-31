@@ -6,6 +6,23 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/transfer.h"
 
+void iree_hal_amd_gpu_download_complete(
+    const iree_hal_amd_gpu_download_t* download) {
+  const iree_hal_amd_gpu_transfer_operation_t* operation = download->operation;
+  const uint8_t* source = download->source;
+  iree_device_size_t offset = download->offset;
+  iree_host_size_t remaining = download->length;
+  while (remaining) {
+    const iree_host_size_t length =
+        iree_min(remaining, operation->length - offset);
+    memcpy((uint8_t*)operation->target.host + offset, source, length);
+    source += length;
+    remaining -= length;
+    ++operation;
+    offset = 0;
+  }
+}
+
 void iree_hal_amd_gpu_transfer_profile(
     const iree_hal_amd_gpu_transfer_t* transfer,
     iree_hal_profile_queue_event_t* event) {

@@ -218,7 +218,8 @@ TEST(TransferBatchTest, HostTransfersUseAvailableStagingInOnePacket) {
     EXPECT_EQ(staging.back(), 0xCC);
     if (download) {
       EXPECT_EQ(chunk.download.source, staging.data() + 1);
-      EXPECT_EQ(chunk.download.target, host.data());
+      EXPECT_EQ(chunk.download.operation, &operation);
+      EXPECT_EQ(chunk.download.offset, 0u);
       EXPECT_EQ(chunk.download.length, kLength);
       EXPECT_TRUE(std::all_of(staging.begin(), staging.end(),
                               [](uint8_t byte) { return byte == 0xCC; }));
@@ -230,37 +231,70 @@ TEST(TransferBatchTest, HostTransfersUseAvailableStagingInOnePacket) {
   }
 }
 
-TEST(TransferBatchTest, DownloadRetirementStopsAtTheHostDestinationBoundary) {
-  std::vector<uint8_t> host(65536), staging(1024 * 1024);
+TEST(TransferBatchTest, DownloadRunsShareStagingAndRetirement) {
   const iree_hal_buffer_native_binding_t binding = {.device_address = 0x10000};
   iree_hal_buffer_t buffer = {};
   buffer.memory.bindings = &binding;
-  std::array<iree_hal_amd_gpu_transfer_operation_t, 2> operations = {};
-  for (auto& operation : operations) {
+  std::array<std::array<uint8_t, 10>, 3> targets = {};
+  std::array<iree_hal_amd_gpu_transfer_operation_t, 4> operations = {};
+  for (size_t i = 0; i < targets.size(); ++i) {
+    auto& operation = operations[i];
     operation.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
     operation.source.device.buffer = &buffer;
+    operation.source.device.offset = 16 * i;
     operation.source.device.slot = {
         .index = 0,
         .type = IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
     };
-    operation.target.host = host.data();
-    operation.length = host.size();
+    operation.target.host = targets[i].data() + 1;
+    operation.length = 8;
   }
+  operations.back().type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
   const iree_hal_amd_gpu_transfer_t transfer = {
       .count = operations.size(),
       .operations = operations.data(),
+      .cursor = {.offset = 3},
   };
+  for (uint32_t capacity : {0u, 1u, 5u, 6u, 13u, 14u, 21u, 22u}) {
+    SCOPED_TRACE(capacity);
+    std::array<uint8_t, 24> staging;
+    staging.fill(0xCC);
+    iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
+        &transfer, IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS,
+        iree_make_byte_span(staging.data() + 1, capacity), 0x20000, &chunk));
+    const uint32_t length = std::min(capacity, 21u);
+    const uint32_t packets = !length ? 0 : 1 + (length + 2) / 8;
+    EXPECT_EQ(chunk.word_count, packets * 7);
+    EXPECT_EQ(chunk.staging_length, length);
+    EXPECT_EQ(chunk.download.length, length);
+    EXPECT_EQ(chunk.next.index, (length + 3) / 8);
+    EXPECT_EQ(chunk.next.offset, (length + 3) % 8);
+    if (length) {
+      EXPECT_EQ(chunk.download.source, staging.data() + 1);
+      EXPECT_EQ(chunk.download.operation, operations.data());
+      EXPECT_EQ(chunk.download.offset, 3u);
+    }
+    // CPU preparation never writes download staging. Each native destination
+    // follows its predecessor tightly even when host targets are disjoint.
+    EXPECT_TRUE(std::all_of(staging.begin(), staging.end(),
+                            [](uint8_t byte) { return byte == 0xCC; }));
+    if (length > 5) {
+      EXPECT_EQ(chunk.words[7 + 2], 0x10010u);
+      EXPECT_EQ(chunk.words[7 + 4], 0x20005u);
+    }
+  }
+  operations[0].length = (UINT64_C(8) << 30) + 8;
+  auto large_transfer = transfer;
+  large_transfer.cursor.offset = (UINT64_C(8) << 30) + 3;
+  std::array<uint8_t, 5> staging;
   iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
-      &transfer, IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS,
-      iree_make_byte_span(staging.data(), staging.size()), 0x20000, &chunk));
-  EXPECT_EQ(chunk.word_count, 7u);
+      &large_transfer, 7, iree_make_byte_span(staging.data(), staging.size()),
+      0x20000, &chunk));
+  EXPECT_EQ(chunk.download.offset, large_transfer.cursor.offset);
   EXPECT_EQ(chunk.next.index, 1u);
   EXPECT_EQ(chunk.next.offset, 0u);
-  EXPECT_EQ(chunk.staging_length, host.size());
-  EXPECT_EQ(chunk.download.length, host.size());
-  EXPECT_EQ(chunk.download.source, staging.data());
-  EXPECT_EQ(chunk.download.target, host.data());
 }
 
 TEST(TransferBatchTest, DeviceCopiesUseCommandCapacityWithoutStaging) {
