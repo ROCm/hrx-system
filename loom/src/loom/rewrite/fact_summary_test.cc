@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cstdint>
+#include <tuple>
 
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
@@ -349,14 +350,17 @@ TEST_P(NewBranchContextTest, PublishesContextBeforeBodyConstruction) {
 INSTANTIATE_TEST_SUITE_P(BooleanAndKeyed, NewBranchContextTest,
                          ::testing::Bool());
 
+enum class PendingBranchEdit { kKeep, kMove, kErase };
+
 class NestedFeedbackTest : public FactSummaryTest,
-                           public ::testing::WithParamInterface<bool> {};
+                           public ::testing::WithParamInterface<
+                               std::tuple<bool, PendingBranchEdit, bool>> {};
 
 // Semantic edits can invalidate feedback even when derived rows are already
 // broad. Publishing through a nested summary must both weaken and recover the
 // enclosing loop's facts, without relying on the optional rewrite worklist.
 TEST_P(NestedFeedbackTest, RestoresExactState) {
-  const bool is_conditional_loop = GetParam();
+  const auto [is_conditional_loop, branch_edit, track_rewrites] = GetParam();
   const auto i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   const auto index = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   auto constant = [&](int64_t value, loom_type_t type) {
@@ -423,6 +427,18 @@ TEST_P(NestedFeedbackTest, RestoresExactState) {
     IREE_ASSERT_OK(loom_test_yield_build(&inner_builder, &value, 1,
                                          LOOM_LOCATION_UNKNOWN, &yield));
   }
+  loom_op_t* independent = nullptr;
+  IREE_ASSERT_OK(loom_test_branch_build(&body_builder, selector, &i32, 1,
+                                        nullptr, 0, LOOM_LOCATION_UNKNOWN,
+                                        &independent));
+  for (int i = 0; i < 2; ++i) {
+    auto nested = body_builder;
+    loom_builder_enter_region(&nested, independent,
+                              loom_op_regions(independent)[i]);
+    loom_op_t* yield = nullptr;
+    IREE_ASSERT_OK(loom_test_yield_build(&nested, &initial, 1,
+                                         LOOM_LOCATION_UNKNOWN, &yield));
+  }
   loom_op_t* yield = nullptr;
   IREE_ASSERT_OK(loom_scf_yield_build(&body_builder, loom_op_results(branch), 1,
                                       LOOM_LOCATION_UNKNOWN, &yield));
@@ -439,19 +455,70 @@ TEST_P(NestedFeedbackTest, RestoresExactState) {
       loom_pass_value_fact_owner_acquire(&owner, module_, scope, &facts));
   loom_rewriter_t rewriter;
   loom_rewriter_initialize(&rewriter, module_, &arena);
+  if (track_rewrites) {
+    IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
+  }
   loom_rewriter_attach_value_facts(&rewriter, facts);
+  struct Observer {
+    // Production completion consumer that retires pending equations.
+    decltype(facts->summary_computed) previous;
+    // Body independent of loop feedback, including its execution scope.
+    const loom_op_t* independent;
+    // Complete evaluations of that body's result join.
+    size_t independent_count = 0;
+  } observer{facts->summary_computed, independent};
+  facts->summary_computed = {
+      .user_data = &observer,
+      .fn =
+          [](void* user_data, const loom_op_t* op) {
+            auto* observer = static_cast<Observer*>(user_data);
+            observer->independent_count += op == observer->independent;
+            observer->previous.fn(observer->previous.user_data, op);
+          },
+  };
   for (int64_t delta : {1, 0, 1, 0}) {
+    observer.independent_count = 0;
     IREE_ASSERT_OK(loom_test_constant_rewrite_value(&rewriter, increment,
                                                     loom_attr_i64(delta)));
+    if (branch_edit == PendingBranchEdit::kMove) {
+      // Queue the old ownership before moving, then transfer that pending
+      // subtree into and out of the loop without changing its valid SSA uses.
+      IREE_ASSERT_OK(
+          loom_rewriter_add_fact_user_to_worklist(&rewriter, independent));
+      IREE_ASSERT_OK(loom_rewriter_move_before(&rewriter, independent,
+                                               delta ? loop : branch));
+    } else if (branch_edit == PendingBranchEdit::kErase &&
+               !(independent->flags & LOOM_OP_FLAG_DEAD)) {
+      IREE_ASSERT_OK(
+          loom_rewriter_add_fact_user_to_worklist(&rewriter, independent));
+      IREE_ASSERT_OK(loom_rewriter_erase(&rewriter, independent));
+    }
+#ifndef NDEBUG
+    const uint64_t generation = facts->observation.generation;
+#endif
     IREE_ASSERT_OK(loom_rewriter_propagate_value_facts(&rewriter));
+#ifndef NDEBUG
+    EXPECT_EQ(facts->observation.generation, generation);
+    EXPECT_FALSE(facts->observation.pending);
+#endif
+    while (loom_rewriter_pop(&rewriter)) {
+    }
+    if (!is_conditional_loop && branch_edit == PendingBranchEdit::kKeep) {
+      EXPECT_EQ(observer.independent_count, 0u);
+    }
     loom_pass_value_fact_owner_t fresh_owner;
     loom_pass_value_fact_owner_initialize(&block_pool_, &fresh_owner);
     loom_value_fact_table_t* fresh = nullptr;
     IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(&fresh_owner, module_,
                                                       scope, &fresh));
-    for (auto value : {carried, loom_test_addi_result(additions[0]),
-                       loom_test_addi_result(additions[1]),
-                       loom_op_results(branch)[0], loom_op_results(loop)[0]}) {
+    for (auto value :
+         {carried, loom_test_addi_result(additions[0]),
+          loom_test_addi_result(additions[1]), loom_op_results(branch)[0],
+          loom_op_results(loop)[0], loom_op_results(independent)[0]}) {
+      if ((independent->flags & LOOM_OP_FLAG_DEAD) &&
+          value == loom_op_results(independent)[0]) {
+        continue;
+      }
       EXPECT_TRUE(loom_value_fact_table_facts_equal_for_type(
           module_, i32, facts, loom_value_fact_table_lookup(facts, value),
           fresh, loom_value_fact_table_lookup(fresh, value)))
@@ -468,7 +535,12 @@ TEST_P(NestedFeedbackTest, RestoresExactState) {
   iree_arena_deinitialize(&arena);
 }
 
-INSTANTIATE_TEST_SUITE_P(CountedAndConditional, NestedFeedbackTest,
-                         ::testing::Bool());
+INSTANTIATE_TEST_SUITE_P(
+    CountedAndConditional, NestedFeedbackTest,
+    ::testing::Combine(::testing::Bool(),
+                       ::testing::Values(PendingBranchEdit::kKeep,
+                                         PendingBranchEdit::kMove,
+                                         PendingBranchEdit::kErase),
+                       ::testing::Bool()));
 }  // namespace
 }  // namespace loom

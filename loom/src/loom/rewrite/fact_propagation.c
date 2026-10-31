@@ -14,6 +14,7 @@
 #include "loom/rewrite/rewriter.h"
 #include "loom/util/fact_cfg.h"
 #include "loom/util/fact_loop.h"
+#include "loom/util/fact_loop_replay.h"
 #include "loom/util/fact_observation.h"
 
 enum loom_rewriter_fact_entry_flag_bits_e {
@@ -24,6 +25,14 @@ enum loom_rewriter_fact_entry_flag_bits_e {
   // Direct inputs changed: blocks publish semantic invalidation, and structured
   // operations refresh nested facts before joining their results.
   LOOM_REWRITER_FACT_INPUTS_CHANGED = 1u << 2,
+  // A dequeued summary is held by an enclosing feedback solve.
+  LOOM_REWRITER_FACT_SUSPENDED = 1u << 3,
+  // A dequeued summary will become ready when its descendants finish.
+  LOOM_REWRITER_FACT_WAITING = 1u << 4,
+  // The summary is linked into a current or suspended readiness list.
+  LOOM_REWRITER_FACT_READY = 1u << 5,
+  // A feedback solve owns this summary or one of its descendants.
+  LOOM_REWRITER_FACT_ACTIVE = 1u << 6,
 };
 
 typedef struct loom_rewriter_fact_entry_t {
@@ -31,7 +40,23 @@ typedef struct loom_rewriter_fact_entry_t {
   void* owner;
   // Pending membership owned exclusively by this rewriter.
   uint8_t flags;
+  // One-based structured-summary row; ordinary equations and blocks use zero.
+  // Fits the existing pointer-alignment padding on 64-bit hosts.
+  uint32_t summary_index;
 } loom_rewriter_fact_entry_t;
+
+typedef struct loom_rewriter_fact_summary_t {
+  // Canonical membership shared with the ordinary summary queue.
+  loom_rewriter_fact_entry_t* entry;
+  // Nearest structured owner, maintained when the subtree moves.
+  struct loom_rewriter_fact_summary_t* parent;
+  // Next ready summary in the owning publication's intrusive list.
+  struct loom_rewriter_fact_summary_t* next_ready;
+  // Link pointing at this row, permitting constant-time completion/removal.
+  struct loom_rewriter_fact_summary_t** previous_ready;
+  // Pending structured descendants that must publish before this summary.
+  uint32_t pending_descendants;
+} loom_rewriter_fact_summary_t;
 
 typedef struct loom_rewriter_fact_queue_t {
   // Stable membership rows retained in the rewriter's pass arena.
@@ -55,13 +80,26 @@ struct loom_rewriter_pending_facts_t {
   iree_host_size_t operation_head;
   // Structured summaries consumed after their ordinary input equations.
   loom_rewriter_fact_queue_t summaries;
+  // Stable hierarchy rows allocated only for structured equation owners.
+  loom_segmented_storage_t summary_rows;
+  // Number of registered hierarchy rows in summary_rows.
+  uint32_t summary_count;
+  // Summaries whose last pending child completed in this publication.
+  loom_rewriter_fact_summary_t* ready;
+  // Queue prefix suspended while a feedback solve publishes its own work.
+  iree_host_size_t summary_floor;
   // Semantic edits retained until their complete direct-use closure is queued.
   loom_rewriter_fact_queue_t invalidations;
   // Argument equations consumed before operation equations.
   loom_rewriter_fact_queue_t blocks;
+  // An outer publication still owns the coherent observation boundary.
+  bool publishing;
 };
 
 #define LOOM_REWRITER_FACT_ROWS_PER_SEGMENT 128u
+// Structured owners are much sparser than ordinary equations. Small stable
+// pages avoid charging a flat loop for a large hierarchy allocation.
+#define LOOM_REWRITER_FACT_SUMMARIES_PER_SEGMENT 16u
 
 static loom_rewriter_fact_entry_t* loom_rewriter_fact_entry_at(
     loom_rewriter_pending_facts_t* pending, uint32_t index) {
@@ -118,6 +156,10 @@ static iree_status_t loom_rewriter_get_fact_entry(
                                           sizeof(loom_rewriter_fact_entry_t),
                                       iree_alignof(loom_rewriter_fact_entry_t),
                                       &pending->rows);
+    loom_segmented_storage_initialize(
+        LOOM_REWRITER_FACT_SUMMARIES_PER_SEGMENT *
+            sizeof(loom_rewriter_fact_summary_t),
+        iree_alignof(loom_rewriter_fact_summary_t), &pending->summary_rows);
     rewriter->pending_facts = pending;
   }
   const uint32_t hash = loom_rewriter_fact_owner_hash(owner);
@@ -164,7 +206,9 @@ static iree_status_t loom_rewriter_append_fact_entry(
 static void loom_rewriter_clear_fact_invalidations(loom_rewriter_t* rewriter) {
   loom_rewriter_fact_queue_t* queue = &rewriter->pending_facts->invalidations;
   for (iree_host_size_t i = 0; i < queue->count; ++i) {
-    queue->values[i]->flags &= ~LOOM_REWRITER_FACT_INVALIDATED;
+    if (!(queue->values[i]->flags & LOOM_REWRITER_FACT_ACTIVE)) {
+      queue->values[i]->flags &= ~LOOM_REWRITER_FACT_INVALIDATED;
+    }
   }
   queue->count = 0;
 }
@@ -178,6 +222,9 @@ static void loom_rewriter_clear_pending_facts(loom_rewriter_t* rewriter) {
   pending->operations.count = 0;
   pending->operation_head = 0;
   pending->summaries.count = 0;
+  pending->summary_count = 0;
+  pending->ready = NULL;
+  pending->summary_floor = 0;
   pending->invalidations.count = 0;
   pending->blocks.count = 0;
 }
@@ -188,6 +235,145 @@ static iree_status_t loom_rewriter_publish_fact_invalidations(
 bool loom_rewriter_op_summarizes_nested_regions(
     const loom_op_vtable_t* vtable) {
   return vtable && (vtable->loop_like || vtable->region_branch);
+}
+
+static loom_rewriter_fact_summary_t* loom_rewriter_fact_summary_at(
+    loom_rewriter_pending_facts_t* pending, uint32_t index) {
+  loom_rewriter_fact_summary_t* rows = loom_segmented_storage_segment(
+      &pending->summary_rows, index / LOOM_REWRITER_FACT_SUMMARIES_PER_SEGMENT);
+  return &rows[index % LOOM_REWRITER_FACT_SUMMARIES_PER_SEGMENT];
+}
+
+static void loom_rewriter_make_summary_ready(
+    loom_rewriter_t* rewriter, loom_rewriter_fact_summary_t* summary) {
+  uint8_t* flags = &summary->entry->flags;
+  if (*flags & LOOM_REWRITER_FACT_ACTIVE) {
+    *flags |= LOOM_REWRITER_FACT_SUSPENDED;
+  } else if (summary->pending_descendants) {
+    *flags |= LOOM_REWRITER_FACT_WAITING;
+  } else if (!(*flags & LOOM_REWRITER_FACT_READY)) {
+    *flags &= ~(LOOM_REWRITER_FACT_WAITING | LOOM_REWRITER_FACT_SUSPENDED);
+    *flags |= LOOM_REWRITER_FACT_READY;
+    summary->next_ready = rewriter->pending_facts->ready;
+    summary->previous_ready = &rewriter->pending_facts->ready;
+    if (summary->next_ready) {
+      summary->next_ready->previous_ready = &summary->next_ready;
+    }
+    rewriter->pending_facts->ready = summary;
+  }
+}
+
+static void loom_rewriter_remove_ready_summary(
+    loom_rewriter_fact_summary_t* summary) {
+  *summary->previous_ready = summary->next_ready;
+  if (summary->next_ready) {
+    summary->next_ready->previous_ready = summary->previous_ready;
+  }
+  summary->entry->flags &= ~LOOM_REWRITER_FACT_READY;
+}
+
+static void loom_rewriter_remove_pending_descendants(
+    loom_rewriter_t* rewriter, loom_rewriter_fact_summary_t* ancestor,
+    uint32_t count) {
+  for (; ancestor; ancestor = ancestor->parent) {
+    ancestor->pending_descendants -= count;
+    if (!ancestor->pending_descendants &&
+        (ancestor->entry->flags & LOOM_REWRITER_FACT_WAITING)) {
+      loom_rewriter_make_summary_ready(rewriter, ancestor);
+    }
+  }
+}
+
+static void loom_rewriter_add_pending_descendants(
+    loom_rewriter_fact_summary_t* ancestor, uint32_t count) {
+  for (; ancestor; ancestor = ancestor->parent) {
+    ancestor->pending_descendants += count;
+  }
+}
+
+static iree_status_t loom_rewriter_get_summary(
+    loom_rewriter_t* rewriter, loom_op_t* op,
+    loom_rewriter_fact_summary_t** out_summary) {
+  *out_summary = NULL;
+  loom_rewriter_fact_summary_t* child = NULL;
+  for (loom_op_t* owner = op; owner; owner = owner->parent_op) {
+    if (!loom_rewriter_op_summarizes_nested_regions(
+            loom_op_vtable(rewriter->module, owner))) {
+      continue;
+    }
+    loom_rewriter_fact_entry_t* entry = NULL;
+    IREE_RETURN_IF_ERROR(loom_rewriter_get_fact_entry(rewriter, owner, &entry));
+    loom_rewriter_pending_facts_t* pending = rewriter->pending_facts;
+    if (entry->summary_index) {
+      loom_rewriter_fact_summary_t* summary =
+          loom_rewriter_fact_summary_at(pending, entry->summary_index - 1);
+      if (child) {
+        child->parent = summary;
+      } else {
+        *out_summary = summary;
+      }
+      break;
+    }
+    if (pending->summary_count == UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "rewrite summary count exceeds index capacity");
+    }
+    const uint32_t index = pending->summary_count;
+    if (index / LOOM_REWRITER_FACT_SUMMARIES_PER_SEGMENT ==
+        pending->summary_rows.segment_count) {
+      void* segment = NULL;
+      IREE_RETURN_IF_ERROR(loom_segmented_storage_append(
+          &pending->summary_rows, rewriter->arena, &segment));
+    }
+    loom_rewriter_fact_summary_t* summary =
+        loom_rewriter_fact_summary_at(pending, index);
+    *summary = (loom_rewriter_fact_summary_t){.entry = entry};
+    entry->summary_index = ++pending->summary_count;
+    if (child) {
+      child->parent = summary;
+    } else {
+      *out_summary = summary;
+    }
+    child = summary;
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_rewriter_refresh_fact_summary_parent(
+    loom_rewriter_t* rewriter, loom_op_t* op) {
+  loom_rewriter_fact_entry_t* entry =
+      loom_rewriter_find_fact_entry(rewriter, op);
+  if (!entry || !entry->summary_index) {
+    return iree_ok_status();
+  }
+  loom_rewriter_fact_summary_t* summary = loom_rewriter_fact_summary_at(
+      rewriter->pending_facts, entry->summary_index - 1);
+  loom_rewriter_fact_summary_t* parent = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_get_summary(rewriter, op->parent_op, &parent));
+  if (summary->parent != parent) {
+    const uint32_t count = summary->pending_descendants +
+                           ((entry->flags & LOOM_REWRITER_FACT_PENDING) != 0);
+    loom_rewriter_remove_pending_descendants(rewriter, summary->parent, count);
+    summary->parent = parent;
+    loom_rewriter_add_pending_descendants(parent, count);
+  }
+  return iree_ok_status();
+}
+
+static void loom_rewriter_consume_pending_fact(
+    loom_rewriter_t* rewriter, loom_rewriter_fact_entry_t* entry) {
+  if ((entry->flags & LOOM_REWRITER_FACT_PENDING) && entry->summary_index) {
+    loom_rewriter_fact_summary_t* summary = loom_rewriter_fact_summary_at(
+        rewriter->pending_facts, entry->summary_index - 1);
+    if (entry->flags & LOOM_REWRITER_FACT_READY) {
+      loom_rewriter_remove_ready_summary(summary);
+    }
+    loom_rewriter_remove_pending_descendants(rewriter, summary->parent, 1);
+  }
+  entry->flags &=
+      ~(LOOM_REWRITER_FACT_PENDING | LOOM_REWRITER_FACT_INPUTS_CHANGED |
+        LOOM_REWRITER_FACT_WAITING);
 }
 
 static iree_status_t loom_rewriter_add_fact_equation(loom_rewriter_t* rewriter,
@@ -210,11 +396,19 @@ static iree_status_t loom_rewriter_add_fact_equation(loom_rewriter_t* rewriter,
   }
   const bool summary = loom_rewriter_op_summarizes_nested_regions(
       loom_op_vtable(rewriter->module, op));
-  IREE_RETURN_IF_ERROR(loom_rewriter_append_fact_entry(
-      rewriter,
-      summary ? &rewriter->pending_facts->summaries
-              : &rewriter->pending_facts->operations,
-      entry));
+  if (summary) {
+    loom_rewriter_fact_summary_t* summary_entry = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_rewriter_get_summary(rewriter, op, &summary_entry));
+    loom_rewriter_add_pending_descendants(summary_entry->parent, 1);
+  }
+  if (!(entry->flags & LOOM_REWRITER_FACT_READY)) {
+    IREE_RETURN_IF_ERROR(loom_rewriter_append_fact_entry(
+        rewriter,
+        summary ? &rewriter->pending_facts->summaries
+                : &rewriter->pending_facts->operations,
+        entry));
+  }
   entry->flags |= LOOM_REWRITER_FACT_PENDING;
   return iree_ok_status();
 }
@@ -471,9 +665,9 @@ static void loom_rewriter_on_summary_computed(void* user_data,
   loom_rewriter_t* rewriter = user_data;
   loom_rewriter_fact_entry_t* entry =
       loom_rewriter_find_fact_entry(rewriter, op);
-  if (entry) {
-    entry->flags &=
-        ~(LOOM_REWRITER_FACT_PENDING | LOOM_REWRITER_FACT_INPUTS_CHANGED);
+  if (entry && !((entry->flags & LOOM_REWRITER_FACT_ACTIVE) &&
+                 (entry->flags & LOOM_REWRITER_FACT_INPUTS_CHANGED))) {
+    loom_rewriter_consume_pending_fact(rewriter, entry);
   }
 }
 
@@ -890,6 +1084,9 @@ iree_status_t loom_rewriter_add_parent_summary_ops_to_worklist(
   }
   bool changes_summary =
       op && iree_any_bit_set(op->traits, LOOM_TRAIT_TERMINATOR);
+  if (!changes_summary && !rewriter->worklist_chunk) {
+    return iree_ok_status();
+  }
   bool has_cfg_facts =
       rewriter->fact_table && rewriter->fact_table->regions.cfg_count;
   for (loom_op_t* parent = op ? op->parent_op : NULL; parent;
@@ -900,12 +1097,13 @@ iree_status_t loom_rewriter_add_parent_summary_ops_to_worklist(
     }
     const loom_op_vtable_t* vtable = loom_op_vtable(rewriter->module, parent);
     if (loom_rewriter_op_summarizes_nested_regions(vtable)) {
-      const loom_loop_like_t loop =
-          loom_loop_like_cast(rewriter->module, parent);
       // A counted body without carried state has no feedback/result summary.
       // Direct range or execution-scope updates still refresh its whole body.
+      const loom_loop_like_t loop =
+          loom_loop_like_cast(rewriter->module, parent);
       const bool independent_counted_body =
-          loom_loop_like_isa(loop) && loom_loop_like_has_counted_range(loop) &&
+          changes_summary && loom_loop_like_isa(loop) &&
+          loom_loop_like_has_counted_range(loop) &&
           !loom_loop_like_condition_region(loop) &&
           loom_loop_like_iter_args(loop).count == 0;
       if (!independent_counted_body) {
@@ -926,6 +1124,9 @@ iree_status_t loom_rewriter_add_parent_summary_ops_to_worklist(
       // The nearest owner consumes the terminator's equation. Ancestors still
       // receive rewrite-policy notifications for structural patterns.
       changes_summary = false;
+      if (!rewriter->worklist_chunk) {
+        break;
+      }
     }
   }
   return iree_ok_status();
@@ -1030,6 +1231,128 @@ iree_status_t loom_rewriter_add_result_users_to_worklist(
   return iree_ok_status();
 }
 
+static loom_rewriter_fact_summary_t* loom_rewriter_hold_fact_summaries(
+    loom_rewriter_fact_summary_t* summary) {
+  while (summary && !(summary->entry->flags & LOOM_REWRITER_FACT_ACTIVE)) {
+    summary->entry->flags |= LOOM_REWRITER_FACT_ACTIVE;
+    summary = summary->parent;
+  }
+  return summary;
+}
+
+static iree_status_t loom_rewriter_release_fact_summaries(
+    loom_rewriter_t* rewriter, loom_rewriter_fact_summary_t* summary,
+    loom_rewriter_fact_summary_t* stop) {
+  iree_status_t status = iree_ok_status();
+  for (; summary != stop; summary = summary->parent) {
+    loom_rewriter_fact_entry_t* entry = summary->entry;
+    entry->flags &= ~LOOM_REWRITER_FACT_ACTIVE;
+    if (entry->flags & LOOM_REWRITER_FACT_INVALIDATED) {
+      status = iree_status_join(
+          status,
+          loom_rewriter_append_fact_entry(
+              rewriter, &rewriter->pending_facts->invalidations, entry));
+    }
+    if ((entry->flags & LOOM_REWRITER_FACT_PENDING) &&
+        (entry->flags &
+         (LOOM_REWRITER_FACT_SUSPENDED | LOOM_REWRITER_FACT_WAITING))) {
+      loom_rewriter_make_summary_ready(rewriter, summary);
+    }
+    entry->flags &= ~LOOM_REWRITER_FACT_SUSPENDED;
+  }
+  return status;
+}
+
+static iree_status_t loom_rewriter_update_loop_body(
+    void* user_data, loom_region_t* region, uint16_t arg_offset,
+    const loom_value_facts_t* facts, uint16_t count) {
+  loom_rewriter_t* rewriter = user_data;
+  loom_block_t* block = loom_region_entry_block(region);
+  iree_status_t status = iree_ok_status();
+  for (uint16_t i = 0; i < count && arg_offset + i < block->arg_count &&
+                       iree_status_is_ok(status);
+       ++i) {
+    const loom_value_id_t argument = loom_block_arg_id(block, arg_offset + i);
+    const loom_value_facts_t previous =
+        loom_value_fact_table_lookup(rewriter->fact_table, argument);
+    status =
+        loom_value_fact_table_define(rewriter->fact_table, argument, facts[i]);
+    if (iree_status_is_ok(status) &&
+        !loom_value_facts_equal(previous, facts[i])) {
+      status =
+          loom_rewriter_add_users_to_worklist(rewriter, argument, /*flags=*/0);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    loom_value_fact_loop_replay_t* previous_loop =
+        rewriter->fact_table->replay.loop;
+    loom_value_fact_loop_reads_t* previous_reads =
+        rewriter->fact_table->replay.reads;
+    rewriter->fact_table->replay.loop = NULL;
+    rewriter->fact_table->replay.reads = NULL;
+    status = loom_rewriter_propagate_value_facts(rewriter);
+    rewriter->fact_table->replay.loop = previous_loop;
+    rewriter->fact_table->replay.reads = previous_reads;
+  }
+  return status;
+}
+
+// The ordinary queue and pending descendants have published before this point.
+// Preserve that body state and evaluate only the dependencies of carried
+// inputs. Independent queued summaries belong to the caller's batch, not this
+// solve.
+static iree_status_t loom_rewriter_compute_updated_loop_facts(
+    loom_rewriter_t* rewriter, loom_op_t* op, bool* out_changed) {
+  loom_value_fact_table_t* table = rewriter->fact_table;
+  loom_rewriter_pending_facts_t* pending = rewriter->pending_facts;
+  const loom_rewriter_fact_entry_t* entry =
+      loom_rewriter_find_fact_entry(rewriter, op);
+  loom_rewriter_fact_summary_t* summary =
+      loom_rewriter_fact_summary_at(pending, entry->summary_index - 1);
+  loom_rewriter_fact_summary_t* stop =
+      loom_rewriter_hold_fact_summaries(summary);
+
+  // Reentrant publication can reach equations outside an immutable nested-solve
+  // cache's ownership index. Withdraw that binding for the maintained solve.
+  loom_value_fact_loop_replay_t* previous_loop = table->replay.loop;
+  loom_value_fact_loop_reads_t* previous_reads = table->replay.reads;
+  loom_value_fact_loop_replay_invalidate(table);
+  table->replay.loop = NULL;
+  table->replay.reads = NULL;
+
+  const iree_host_size_t previous_floor = pending->summary_floor;
+  pending->summary_floor = pending->summaries.count;
+  loom_rewriter_fact_summary_t* previous_ready = pending->ready;
+  if (previous_ready) {
+    previous_ready->previous_ready = &previous_ready;
+  }
+  pending->ready = NULL;
+  loom_value_fact_loop_update_t* previous_update = table->loop_update;
+  loom_value_fact_loop_update_t update = {
+      .op = op, .user_data = rewriter, .fn = loom_rewriter_update_loop_body};
+  table->loop_update = &update;
+  iree_status_t status = loom_value_fact_table_compute_op_summary(
+      table, rewriter->module, op, out_changed);
+  table->loop_update = previous_update;
+  pending->summary_floor = previous_floor;
+
+  // Failed publication invalidates the fact owner; unlink its unfinished local
+  // readiness list before the caller's suspended stack binding goes away.
+  IREE_ASSERT(!iree_status_is_ok(status) || !pending->ready);
+  while (pending->ready) {
+    loom_rewriter_remove_ready_summary(pending->ready);
+  }
+  pending->ready = previous_ready;
+  if (previous_ready) {
+    previous_ready->previous_ready = &pending->ready;
+  }
+  status = iree_status_join(
+      status, loom_rewriter_release_fact_summaries(rewriter, summary, stop));
+  table->replay.loop = previous_loop;
+  table->replay.reads = previous_reads;
+  return status;
+}
+
 static iree_status_t loom_rewriter_update_op_facts(loom_rewriter_t* rewriter,
                                                    loom_op_t* op,
                                                    bool inputs_changed) {
@@ -1044,13 +1367,31 @@ static iree_status_t loom_rewriter_update_op_facts(loom_rewriter_t* rewriter,
   }
   // A changed yield only updates its owner's result join. Direct inputs can
   // change nested execution facts; loops always retain their feedback solve.
+  const bool was_replaying = rewriter->fact_table->replaying;
+  if (inputs_changed) {
+    rewriter->fact_table->replaying = false;
+  }
   bool facts_changed = false;
-  IREE_RETURN_IF_ERROR(
-      inputs_changed
-          ? loom_value_fact_table_compute_op_and_report(
-                rewriter->fact_table, rewriter->module, op, &facts_changed)
-          : loom_value_fact_table_compute_op_summary(
-                rewriter->fact_table, rewriter->module, op, &facts_changed));
+  iree_status_t status;
+  const loom_loop_like_t loop = !inputs_changed && op->region_count
+                                    ? loom_loop_like_cast(rewriter->module, op)
+                                    : (loom_loop_like_t){0};
+  if (loom_loop_like_isa(loop) && loom_loop_like_has_counted_range(loop) &&
+      !loom_loop_like_condition_region(loop) &&
+      !rewriter->fact_table->context.refine_operands.fn) {
+    rewriter->fact_table->replaying = true;
+    status =
+        loom_rewriter_compute_updated_loop_facts(rewriter, op, &facts_changed);
+  } else {
+    status =
+        inputs_changed
+            ? loom_value_fact_table_compute_op_and_report(
+                  rewriter->fact_table, rewriter->module, op, &facts_changed)
+            : loom_value_fact_table_compute_op_summary(
+                  rewriter->fact_table, rewriter->module, op, &facts_changed);
+  }
+  rewriter->fact_table->replaying = was_replaying;
+  IREE_RETURN_IF_ERROR(status);
   if (facts_changed) {
     rewriter->flags |= LOOM_REWRITER_FLAG_FACTS_CHANGED;
     // Ensure downstream ops are revisited with updated facts. Type-use edges
@@ -1105,7 +1446,11 @@ static iree_status_t loom_rewriter_publish_fact_invalidations(
   }
   for (iree_host_size_t i = 0;
        i < pending->invalidations.count && iree_status_is_ok(status); ++i) {
-    loom_op_t* op = pending->invalidations.values[i]->owner;
+    loom_rewriter_fact_entry_t* entry = pending->invalidations.values[i];
+    loom_op_t* op = entry->owner;
+    if (entry->flags & LOOM_REWRITER_FACT_ACTIVE) {
+      continue;
+    }
     if (op->flags & LOOM_OP_FLAG_DEAD) {
       continue;
     }
@@ -1124,15 +1469,23 @@ iree_status_t loom_rewriter_propagate_value_facts(loom_rewriter_t* rewriter) {
   if (!pending) {
     return iree_ok_status();
   }
+  const bool was_publishing = pending->publishing;
+  pending->publishing = true;
   iree_status_t status = loom_rewriter_publish_fact_invalidations(rewriter);
   while (iree_status_is_ok(status) &&
          (pending->operation_head < pending->operations.count ||
-          pending->summaries.count || pending->blocks.count)) {
+          pending->summaries.count > pending->summary_floor || pending->ready ||
+          pending->blocks.count || pending->invalidations.count)) {
     if (pending->invalidations.count) {
       // Publishing changed equations can expose another summary dependency.
       // Finish its semantic closure before evaluating the next queued owner.
       status = loom_rewriter_publish_fact_invalidations(rewriter);
       if (!iree_status_is_ok(status)) {
+        break;
+      }
+      if (pending->operation_head == pending->operations.count &&
+          pending->summaries.count == pending->summary_floor &&
+          !pending->ready && !pending->blocks.count) {
         break;
       }
     }
@@ -1153,13 +1506,29 @@ iree_status_t loom_rewriter_propagate_value_facts(loom_rewriter_t* rewriter) {
     } else {
       pending->operations.count = 0;
       pending->operation_head = 0;
-      entry = pending->summaries.values[--pending->summaries.count];
+      if (pending->ready) {
+        loom_rewriter_fact_summary_t* summary = pending->ready;
+        loom_rewriter_remove_ready_summary(summary);
+        entry = summary->entry;
+      } else {
+        entry = pending->summaries.values[--pending->summaries.count];
+      }
     }
     const bool queued = (entry->flags & LOOM_REWRITER_FACT_PENDING) != 0;
     const bool inputs_changed =
         (entry->flags & LOOM_REWRITER_FACT_INPUTS_CHANGED) != 0;
-    entry->flags &=
-        ~(LOOM_REWRITER_FACT_PENDING | LOOM_REWRITER_FACT_INPUTS_CHANGED);
+    if (queued && entry->summary_index) {
+      loom_rewriter_fact_summary_t* summary =
+          loom_rewriter_fact_summary_at(pending, entry->summary_index - 1);
+      if ((entry->flags & LOOM_REWRITER_FACT_ACTIVE) ||
+          summary->pending_descendants) {
+        entry->flags |= (entry->flags & LOOM_REWRITER_FACT_ACTIVE)
+                            ? LOOM_REWRITER_FACT_SUSPENDED
+                            : LOOM_REWRITER_FACT_WAITING;
+        continue;
+      }
+    }
+    loom_rewriter_consume_pending_fact(rewriter, entry);
     loom_op_t* op = entry->owner;
     if (!(op->flags & LOOM_OP_FLAG_DEAD) && queued) {
       status = loom_rewriter_update_op_facts(rewriter, op, inputs_changed);
@@ -1169,8 +1538,11 @@ iree_status_t loom_rewriter_propagate_value_facts(loom_rewriter_t* rewriter) {
     pending->operations.count = 0;
     pending->operation_head = 0;
 #ifndef NDEBUG
-    loom_value_fact_table_publish_observations(rewriter->fact_table);
+    if (!was_publishing) {
+      loom_value_fact_table_publish_observations(rewriter->fact_table);
+    }
 #endif
   }
+  pending->publishing = was_publishing;
   return status;
 }

@@ -189,6 +189,10 @@ struct loom_value_fact_table_t {
     void (*fn)(void* user_data, const loom_op_t* op);
   } summary_computed;
 
+  // Borrowed, synchronous counted-body evaluator. NULL uses ordered traversal.
+  // The binding owner restores the previous evaluator after its summary solve.
+  struct loom_value_fact_loop_update_t* loop_update;
+
   // Immutable scope inputs supplied by a surrounding analysis. Independent
   // entry arguments and opaque results consult these on every solve instead
   // of retaining constraints accumulated in their derived rows.
