@@ -86,12 +86,15 @@ void loom_serve_text_storage_release_payloads(
     loom_serve_text_storage_t* storage);
 void loom_serve_text_storage_deinitialize(loom_serve_text_storage_t* storage);
 
-// Builds a cold logical-order transfer plan from the source geometry. The five
-// private views are row bindings 1-5; null views are omitted. A row supplies
-// control, recurrence and input/progress; an independent endpoint supplies only
-// recurrence. carry_index selects the source-declared row or checkpoint carry
-// entry. Workspace and proposal scratch are not retained. The caller owns the
-// returned array. Capture and restore supply their respective physical IDs.
+// Builds logical-order transfer and admission ranges from the source geometry.
+// Consecutive physical pages share a range without changing logical byte order.
+// The five private views are row bindings 1-5; null views are omitted. A row
+// supplies control, recurrence and input/progress; an independent endpoint
+// supplies only recurrence. carry_index selects the source-declared row or
+// checkpoint carry entry. Workspace and proposal scratch are not retained. The
+// caller owns the returned array. Capture and restore supply their respective
+// physical IDs and may produce different range groupings for the same logical
+// byte sequence.
 iree_status_t loom_serve_text_storage_plan_snapshot(
     const loom_serve_text_storage_t* storage, iree_host_size_t carry_index,
     iree_hal_buffer_t* const* private_views, bool include_carry,
