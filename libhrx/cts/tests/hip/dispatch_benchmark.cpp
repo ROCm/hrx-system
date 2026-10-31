@@ -1,6 +1,7 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -240,9 +241,63 @@ void Dispatch(benchmark::State& state) {
   state.SetItemsProcessed(state.iterations() * dispatch_count);
 }
 
-// Enqueue rows measure the public API return. With dispatch=recording, the
-// adapter may defer physical submission to the untimed completion wait. The
-// dispatch=queue policy and graph launches include physical queue submission.
+// Device event intervals include preparation and execution between two queue
+// timestamps. The zero-dispatch row measures the event pair alone. Host time
+// includes both event enqueues and completion, excluding the elapsed-time read.
+void GraphEventInterval(benchmark::State& state) {
+  auto& runtime = Runtime();
+  const int64_t dispatch_count = state.range(0);
+  auto create = runtime.Resolve<decltype(&hipEventCreate)>("hipEventCreate");
+  auto destroy = runtime.Resolve<decltype(&hipEventDestroy)>("hipEventDestroy");
+  auto record = runtime.Resolve<decltype(&hipEventRecord)>("hipEventRecord");
+  auto elapsed =
+      runtime.Resolve<decltype(&hipEventElapsedTime)>("hipEventElapsedTime");
+  hipEvent_t begin = nullptr, end = nullptr;
+  HipRuntime::Check(create(&begin));
+  HipRuntime::Check(create(&end));
+  std::unique_ptr<HipGraph> graph;
+  if (dispatch_count) {
+    graph = std::make_unique<HipGraph>(runtime, dispatch_count);
+  }
+  const auto enqueue = [&]() {
+    HipRuntime::Check(record(begin, runtime.stream()));
+    if (graph) {
+      graph->Launch();
+    }
+    HipRuntime::Check(record(end, runtime.stream()));
+    runtime.Wait();
+  };
+  enqueue();
+  if (graph) {
+    runtime.VerifyOutput();
+  }
+  runtime.ResetOutput();
+
+  double host_nanoseconds = 0;
+  for (auto _ : state) {
+    const auto start = std::chrono::steady_clock::now();
+    enqueue();
+    const auto finish = std::chrono::steady_clock::now();
+    float milliseconds = 0;
+    HipRuntime::Check(elapsed(&milliseconds, begin, end));
+    Require(milliseconds > 0, "device event interval did not advance");
+    state.SetIterationTime(static_cast<double>(milliseconds) * 1e-3);
+    host_nanoseconds +=
+        std::chrono::duration<double, std::nano>(finish - start).count();
+  }
+  if (graph) {
+    runtime.VerifyOutput();
+  }
+  HipRuntime::Check(destroy(end));
+  HipRuntime::Check(destroy(begin));
+  state.SetLabel(runtime.label());
+  state.counters["host_ns"] =
+      benchmark::Counter(host_nanoseconds, benchmark::Counter::kAvgIterations);
+  state.SetItemsProcessed(state.iterations() * dispatch_count);
+}
+
+// Enqueue rows measure the public API return with completion outside timing.
+// Direct dispatches and graph launches both publish to the physical queue.
 BENCHMARK_TEMPLATE(Dispatch, false, false)
     ->Name("HIP/Dispatch/Enqueue")
     ->Arg(1)
@@ -271,5 +326,14 @@ BENCHMARK_TEMPLATE(Dispatch, true, true)
     ->Arg(256)
     ->Arg(4096)
     ->UseRealTime();
+
+BENCHMARK(GraphEventInterval)
+    ->Name("HIP/Graph/EventInterval")
+    ->Arg(0)
+    ->Arg(1)
+    ->Arg(32)
+    ->Arg(256)
+    ->Arg(4096)
+    ->UseManualTime();
 
 }  // namespace
