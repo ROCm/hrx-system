@@ -1,6 +1,8 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -115,14 +117,16 @@ enum DownloadFlags : uint32_t {
   kDefault = 0,
   kRegistered = 1u << 0,
   kPitched = 1u << 1,
+  kDeviceInterval = 1u << 2,
 };
 
-void Download(benchmark::State& state, uint32_t flags) {
+void Download(benchmark::State& state, uint32_t flags,
+              size_t row_width = 4096) {
   auto& runtime = Runtime();
   const bool registered = (flags & kRegistered) != 0;
   const bool pitched = (flags & kPitched) != 0;
   const size_t length = state.range(0);
-  const size_t width = pitched ? 4096 : length;
+  const size_t width = pitched ? std::min(row_width, length) : length;
   const size_t height = length / width;
   const size_t source_pitch = width + (pitched ? 64 : 0);
   const size_t target_pitch = width + (pitched ? 128 : 0);
@@ -163,7 +167,6 @@ void Download(benchmark::State& state, uint32_t flags) {
       Check(copy(target, source, length, hipMemcpyDeviceToHost,
                  runtime.stream()));
     }
-    runtime.Wait();
   };
   const auto verify = [&] {
     for (size_t row = 0; row < height; ++row) {
@@ -186,10 +189,47 @@ void Download(benchmark::State& state, uint32_t flags) {
     }
   };
   transfer();
+  runtime.Wait();
   verify();
   std::memset(target, kPadding, allocation_length);
-  for (auto _ : state) {
-    transfer();
+  if (flags & kDeviceInterval) {
+    auto create = runtime.Resolve<decltype(&hipEventCreate)>("hipEventCreate");
+    auto destroy =
+        runtime.Resolve<decltype(&hipEventDestroy)>("hipEventDestroy");
+    auto record = runtime.Resolve<decltype(&hipEventRecord)>("hipEventRecord");
+    auto elapsed =
+        runtime.Resolve<decltype(&hipEventElapsedTime)>("hipEventElapsedTime");
+    hipEvent_t begin = nullptr, end = nullptr;
+    Check(create(&begin));
+    Check(create(&end));
+    const auto enqueue = [&] {
+      Check(record(begin, runtime.stream()));
+      transfer();
+      Check(record(end, runtime.stream()));
+      runtime.Wait();
+    };
+    enqueue();
+    double host_nanoseconds = 0;
+    for (auto _ : state) {
+      const auto start = std::chrono::steady_clock::now();
+      enqueue();
+      const auto finish = std::chrono::steady_clock::now();
+      float milliseconds = 0;
+      Check(elapsed(&milliseconds, begin, end));
+      Require(milliseconds > 0, "device event interval did not advance");
+      state.SetIterationTime(static_cast<double>(milliseconds) * 1e-3);
+      host_nanoseconds +=
+          std::chrono::duration<double, std::nano>(finish - start).count();
+    }
+    Check(destroy(end));
+    Check(destroy(begin));
+    state.counters["host_ns"] = benchmark::Counter(
+        host_nanoseconds, benchmark::Counter::kAvgIterations);
+  } else {
+    for (auto _ : state) {
+      transfer();
+      runtime.Wait();
+    }
   }
   verify();
   Check(runtime.Resolve<decltype(&hipFree)>("hipFree")(source));
@@ -218,5 +258,30 @@ DOWNLOAD_CASE(RegisteredContiguous, kRegistered);
 DOWNLOAD_CASE(PageablePitched, kPitched);
 DOWNLOAD_CASE(RegisteredPitched, kRegistered | kPitched);
 #undef DOWNLOAD_CASE
+
+// Sparse event pairs expose device-timeline gaps independently of host return
+// and waiting. Intervals include any host gaps between device commands, and
+// host_ns includes event enqueues and completion but not the elapsed-time
+// query. Constant payload with varying row width separates byte and copy-count
+// costs.
+#define DOWNLOAD_INTERVAL_CASE(name, flags, width)                             \
+  BENCHMARK_CAPTURE(Download, name##DeviceInterval, (flags) | kDeviceInterval, \
+                    width)                                                     \
+      ->Name("HIP/DownloadDeviceInterval/" #name)                              \
+      ->Arg(64 * 1024 * 1024)                                                  \
+      ->UseManualTime()
+DOWNLOAD_INTERVAL_CASE(RegisteredContiguous, kRegistered, 0);
+DOWNLOAD_INTERVAL_CASE(RegisteredPitched4K, kRegistered | kPitched, 4096);
+DOWNLOAD_INTERVAL_CASE(RegisteredPitched64K, kRegistered | kPitched, 65536);
+DOWNLOAD_INTERVAL_CASE(RegisteredPitched1M, kRegistered | kPitched,
+                       1024 * 1024);
+DOWNLOAD_INTERVAL_CASE(RegisteredPitched4M, kRegistered | kPitched,
+                       4 * 1024 * 1024);
+DOWNLOAD_INTERVAL_CASE(PageableContiguous, kDefault, 0);
+DOWNLOAD_INTERVAL_CASE(PageablePitched4K, kPitched, 4096);
+DOWNLOAD_INTERVAL_CASE(PageablePitched64K, kPitched, 65536);
+DOWNLOAD_INTERVAL_CASE(PageablePitched1M, kPitched, 1024 * 1024);
+DOWNLOAD_INTERVAL_CASE(PageablePitched4M, kPitched, 4 * 1024 * 1024);
+#undef DOWNLOAD_INTERVAL_CASE
 
 }  // namespace
