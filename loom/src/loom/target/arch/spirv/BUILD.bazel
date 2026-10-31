@@ -262,6 +262,7 @@ loom_cc_test(
     name = "profile_test",
     srcs = ["profile_test.cc"],
     deps = [
+        ":cooperative_properties",
         ":profile",
         "//loom/src/loom/target:facts_builder",
         "//loom/src/loom/target/arch/spirv/records:target_records",

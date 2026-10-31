@@ -287,6 +287,16 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "profile_test",
+    srcs = ["profile_test.cc"],
+    deps = [
+        ":profile",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "selection",
     srcs = ["selection.c"],

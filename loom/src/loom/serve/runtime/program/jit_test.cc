@@ -102,7 +102,7 @@ void JitConcurrentTest::CheckConcurrent(bool direct_dispatch) {
   struct Submissions {
     // Independent scheduling domain over the catalog's same worker pool.
     loomc_task_sink_t target;
-    // Includes parents and their newly published native requests.
+    // Includes parents, native compilation, and device-load continuations.
     std::atomic<size_t> count = 0;
   } submissions{
       loom_serve_host_preparation_sink(loom_serve_device_host(device_owner_))};
@@ -187,11 +187,12 @@ void JitConcurrentTest::CheckConcurrent(bool direct_dispatch) {
   IREE_ASSERT_OK(status);
   EXPECT_EQ(compilation_.commands, direct_dispatch ? 0u : 3u);
   EXPECT_EQ(compilation_.kernels, direct_dispatch ? 1u : 8u);
-  // Direct roots compile in the submitted task; command parents publish
-  // independent native tasks, which must inherit the caller's sink too.
-  EXPECT_EQ(
-      submissions.count,
-      IREE_ARRAYSIZE(results) + (direct_dispatch ? 0 : compilation_.kernels));
+  // Direct roots compile in the parent; command roots publish native tasks.
+  // Every new native also schedules one independent device load. Both child
+  // task kinds inherit the caller's scheduling domain.
+  EXPECT_EQ(submissions.count,
+            IREE_ARRAYSIZE(results) +
+                compilation_.kernels * (direct_dispatch ? 1 : 2));
   EXPECT_EQ(compilation_.reused_kernels, direct_dispatch ? 1u : 3u);
   EXPECT_EQ(compilation_.entries, direct_dispatch ? 2u : 10u);
   if (direct_dispatch) {
@@ -620,7 +621,8 @@ TEST_P(JitTest, SourceFailureOutlivesUnconstructedCatalogAndVm) {
 }
 
 TEST_P(JitTest, CompletedCatalogsRetireWithoutClosingSharedCompilerQueue) {
-  // The first catalog is warm; the independent peer must compile its own copy.
+  // The first catalog is warm. Its callback may retire it before the peer
+  // subscribes, so sharing lasts only as long as a live owner retains an input.
   IREE_ASSERT_OK(Compile(nullptr, 0));
   iree_hal_command_buffer_release(commands_[0]);
   commands_[0] = nullptr;
@@ -670,8 +672,7 @@ TEST_P(JitTest, CompletedCatalogsRetireWithoutClosingSharedCompilerQueue) {
   EXPECT_EQ(compilation_.kernels, 8u);
   EXPECT_EQ(compilation_.reused_kernels, 2u);
   EXPECT_EQ(peer_report.entries, 8u);
-  EXPECT_EQ(peer_report.kernels, 8u);
-  EXPECT_EQ(peer_report.reused_kernels, 0u);
+  EXPECT_EQ(peer_report.kernels + peer_report.reused_kernels, 8u);
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       loom_serve_pool_storage(storage_owner_),
       iree_hal_make_pool_reservation_request(sizeof(input_), 0),
@@ -750,8 +751,12 @@ TEST_P(JitReadinessTest, IndependentCompletionDoesNotWaitForEarlierProduct) {
   struct DeferredNatives {
     // Shared executor preserving the catalog's worker ordinals.
     loomc_task_sink_t target;
+    // Protects pending tasks while the outer observer releases the gate.
+    std::mutex mutex;
     // The outer caller submits one parent before it can publish natives.
     bool parent_submitted = false;
+    // After release, child continuations pass directly to the real executor.
+    bool released = false;
     // Native tasks appended by that parent before its layout callback.
     loomc_task_t* head = nullptr;
     // Final queued task; ownership transfers after layout publication.
@@ -761,8 +766,10 @@ TEST_P(JitReadinessTest, IndependentCompletionDoesNotWaitForEarlierProduct) {
       .submit =
           [](void* payload, loomc_task_t* task) {
             auto* deferred = static_cast<DeferredNatives*>(payload);
-            if (!deferred->parent_submitted) {
+            std::unique_lock<std::mutex> lock(deferred->mutex);
+            if (!deferred->parent_submitted || deferred->released) {
               deferred->parent_submitted = true;
+              lock.unlock();
               return loomc_task_sink_submit(deferred->target, task);
             }
             if (deferred->tail) {
@@ -832,10 +839,17 @@ TEST_P(JitReadinessTest, IndependentCompletionDoesNotWaitForEarlierProduct) {
     std::lock_guard<std::mutex> lock(first.mutex);
     EXPECT_FALSE(first.complete);
   }
-  EXPECT_NE(deferred.head, nullptr);
-  while (deferred.head) {
-    auto* task = deferred.head;
-    deferred.head = task->next;
+  loomc_task_t* pending = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(deferred.mutex);
+    EXPECT_NE(deferred.head, nullptr);
+    pending = deferred.head;
+    deferred.head = deferred.tail = nullptr;
+    deferred.released = true;
+  }
+  while (pending) {
+    auto* task = pending;
+    pending = task->next;
     task->next = nullptr;
     IREE_ASSERT_OK(
         iree_status_from_loomc(loomc_task_sink_submit(deferred.target, task)));

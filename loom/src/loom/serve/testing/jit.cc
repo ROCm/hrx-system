@@ -7,6 +7,7 @@
 #include "loom/serve/testing/jit.h"
 
 #include <filesystem>
+#include <vector>
 
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/status_matchers.h"
@@ -22,31 +23,37 @@ namespace {
 struct JitTestApplication {
   // Host worker count selecting this application.
   iree_host_size_t worker_count;
+  // Independent HAL owners sharing that host's executor and compiler services.
+  iree_host_size_t device_count;
   // Process-owned physical device group shared by matching test cases.
   loom_serve_device_group_t* group = nullptr;
 };
 
-std::array<JitTestApplication, 2>& GetJitTestApplications() {
-  static std::array<JitTestApplication, 2> applications = {
-      JitTestApplication{1}, JitTestApplication{4}};
+std::array<JitTestApplication, 4>& GetJitTestApplications() {
+  static std::array<JitTestApplication, 4> applications = {
+      JitTestApplication{1, 1}, JitTestApplication{4, 1},
+      JitTestApplication{1, 2}, JitTestApplication{4, 2}};
   return applications;
 }
 
 iree_status_t AcquireJitTestApplication(iree_host_size_t worker_count,
+                                        iree_host_size_t device_count,
                                         iree_allocator_t host_allocator,
                                         loom_serve_device_group_t** out_group) {
   *out_group = nullptr;
   JitTestApplication* selected = nullptr;
   for (auto& application : GetJitTestApplications()) {
-    if (application.worker_count == worker_count) {
+    if (application.worker_count == worker_count &&
+        application.device_count == device_count) {
       selected = &application;
       break;
     }
   }
   if (!selected) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unsupported JIT test worker count: %" PRIhsz,
-                            worker_count);
+                            "unsupported JIT test topology: %" PRIhsz
+                            " workers, %" PRIhsz " devices",
+                            worker_count, device_count);
   }
   if (selected->group) {
     *out_group = selected->group;
@@ -60,17 +67,26 @@ iree_status_t AcquireJitTestApplication(iree_host_size_t worker_count,
   iree_status_t status = loom_serve_test_driver_acquire(host, &driver);
   loom_serve_device_group_t* group = nullptr;
   if (iree_status_is_ok(status)) {
-    const loom_serve_device_options_t options = {
-        .driver = driver,
-        .uri = loom_serve_test_device()->device_uri,
-    };
-    status = loom_serve_device_group_allocate(host, 1, &options, host_allocator,
-                                              &group);
-    if (iree_status_is_ok(status)) {
+    std::vector<loom_serve_device_options_t> options(device_count);
+    std::vector<std::string> names(device_count);
+    for (iree_host_size_t i = 0; i < device_count; ++i) {
+      names[i] = "device" + std::to_string(i);
+      options[i] = {
+          .driver = driver,
+          .uri = loom_serve_test_device()->device_uri,
+          .name = iree_make_cstring_view(names[i].c_str()),
+      };
+    }
+    status = loom_serve_device_group_allocate(
+        host, device_count, options.data(), host_allocator, &group);
+    for (iree_host_size_t i = 0; i < device_count && iree_status_is_ok(status);
+         ++i) {
       const loom_serve_pool_options_t pool_options = {};
       loom_serve_pool_t* pool = nullptr;
-      status = loom_serve_device_group_create_pool(group, {IREE_SV("pool"), 1},
-                                                   &pool_options, &pool);
+      const std::string name = "pool" + std::to_string(i);
+      status = loom_serve_device_group_create_pool(
+          group, {iree_make_cstring_view(name.c_str()), UINT64_C(1) << i},
+          &pool_options, &pool);
     }
   }
   iree_hal_driver_release(driver);
@@ -166,8 +182,8 @@ iree_status_t loom_serve_test_compilation_t::Await(
 }
 
 void JitTest::SetUp() {
-  IREE_ASSERT_OK(
-      AcquireJitTestApplication(GetParam(), host_allocator_, &group_));
+  IREE_ASSERT_OK(AcquireJitTestApplication(GetParam(), DeviceCount(),
+                                           host_allocator_, &group_));
   device_owner_ = loom_serve_device_group_at(group_, 0);
   storage_owner_ = loom_serve_device_group_pool_at(group_, 0);
   device_ = loom_serve_device_handle(device_owner_);

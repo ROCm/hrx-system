@@ -26,8 +26,8 @@ typedef struct loom_serve_executable_cache_t loom_serve_executable_cache_t;
 typedef struct loom_serve_executable_t loom_serve_executable_t;
 
 typedef struct loom_serve_executable_request_t {
-  // Owned emitted bytes transferred to the cache. Segmented sequences are
-  // coalesced once; contiguous producer storage is retained without copying.
+  // Owned contiguous emitted bytes transferred to the cache. Native artifact
+  // publication coalesces producer storage before independent device loads.
   iree_byte_sequence_t* image;
   // Root names borrowed through completion, in this input's binding order.
   const iree_string_view_t* roots;

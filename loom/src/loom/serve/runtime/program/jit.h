@@ -24,10 +24,12 @@ extern "C" {
 // on a catalog may overlap; parents and native requests use distinct worker
 // scratch and join shared pending native results without waiting on workers.
 // Execution of already prepared commands does not access this object.
-// Native requests with identical source bytes and ordered source roots
-// share compilation inside this catalog's fixed target/pipeline domain.
-// Distinct inputs emitting identical bytes share the loaded executable while
-// retaining their own entry mappings and direct launch configurations.
+// Native requests with identical sources, diagnostic identifiers, and ordered
+// roots share immutable compilation artifacts across the host's matching
+// target/pipeline domains. Each catalog loads its own device executable.
+// Distinct inputs emitting identical bytes share immutable image storage and,
+// within a catalog, loaded code; entry mappings and direct launch facts remain
+// independent. Last catalog/producer release removes an artifact from lookup.
 // Prepared stages retain their executables independently of catalog lifetime.
 typedef struct loom_serve_jit_t loom_serve_jit_t;
 typedef struct loom_serve_jit_cache_t loom_serve_jit_cache_t;
@@ -87,7 +89,10 @@ typedef struct loom_serve_jit_cache_storage_t {
   iree_host_size_t count;
   // Distinct emitted images loaded, independent of native-input count.
   iree_host_size_t executable_count;
-  // Requested bytes for keys, images, entries, diagnostics, and lookup arrays.
+  // Referenced bytes for keys, images, entries, diagnostics, and local lookup
+  // arrays. Shared artifacts are charged fully to each generation so eviction
+  // budgets stay stable as peers retire; these charges are not additive
+  // physical-memory counts. Host-owned domain/index capacity is excluded.
   iree_host_size_t host_bytes;
   // Lookup capacity included in host_bytes; retained as catalog infrastructure
   // independently of individual native entries.

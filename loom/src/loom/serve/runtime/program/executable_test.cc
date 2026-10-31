@@ -172,22 +172,9 @@ TEST_P(ExecutableTest, FailedImageLoadsAreNotRetainedAndCanRetireCache) {
     completion.retire = attempt != 0;
     const uint8_t invalid[] = {0, 1, 2, 3};
     iree_byte_sequence_t* image = nullptr;
-    if (attempt == 0) {
-      IREE_ASSERT_OK(CreateOwnedSequence(
-          iree_make_const_byte_span(invalid, sizeof(invalid)), host_allocator_,
-          &image));
-    } else {
-      iree_byte_sequence_t* segments[2] = {nullptr, nullptr};
-      IREE_ASSERT_OK(CreateOwnedSequence(iree_make_const_byte_span(invalid, 2),
-                                         host_allocator_, &segments[0]));
-      IREE_ASSERT_OK(
-          CreateOwnedSequence(iree_make_const_byte_span(invalid + 2, 2),
-                              host_allocator_, &segments[1]));
-      IREE_ASSERT_OK(iree_byte_sequence_create_concat(
-          IREE_ARRAYSIZE(segments), segments, host_allocator_, &image));
-      iree_byte_sequence_release(segments[0]);
-      iree_byte_sequence_release(segments[1]);
-    }
+    IREE_ASSERT_OK(
+        CreateOwnedSequence(iree_make_const_byte_span(invalid, sizeof(invalid)),
+                            host_allocator_, &image));
     loom_serve_executable_request_t request = {
         .image = image,
         .completion =

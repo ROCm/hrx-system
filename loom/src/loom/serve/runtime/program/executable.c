@@ -301,34 +301,6 @@ static iree_status_t loom_serve_executable_cache_load_image(
   return status;
 }
 
-// Preserves contiguous producer storage and coalesces segmented producers once
-// before exact lookup. The request always retains the resulting span.
-static iree_status_t loom_serve_executable_request_prepare_image(
-    loom_serve_executable_cache_t* cache,
-    loom_serve_executable_request_t* request,
-    iree_const_byte_span_t* out_data) {
-  *out_data = iree_const_byte_span_empty();
-  if (iree_byte_sequence_try_get_contiguous_span(request->image, out_data)) {
-    return iree_ok_status();
-  }
-
-  iree_byte_span_t storage = iree_byte_span_empty();
-  iree_status_t status =
-      iree_byte_sequence_clone(request->image, cache->host_allocator, &storage);
-  iree_byte_sequence_t* image = NULL;
-  if (iree_status_is_ok(status)) {
-    *out_data = iree_make_const_byte_span(storage.data, storage.data_length);
-    status = iree_byte_sequence_create_from_span_move(
-        &storage, cache->host_allocator, &image);
-  }
-  iree_allocator_free(cache->host_allocator, storage.data);
-  if (iree_status_is_ok(status)) {
-    iree_byte_sequence_release(request->image);
-    request->image = image;
-  }
-  return status;
-}
-
 static void loom_serve_executable_complete(
     loom_serve_executable_image_t* image,
     loom_serve_executable_request_t* request) {
@@ -342,15 +314,12 @@ void loom_serve_executable_cache_load(
     loom_serve_executable_cache_t* cache,
     loom_serve_executable_request_t* request) {
   iree_const_byte_span_t data = iree_const_byte_span_empty();
-  iree_status_t status =
-      loom_serve_executable_request_prepare_image(cache, request, &data);
-  if (!iree_status_is_ok(status)) {
-    iree_byte_sequence_release(request->image);
-    request->image = NULL;
-    request->completion(request->user_data, status, NULL);
-    return;
-  }
+  const bool contiguous =
+      iree_byte_sequence_try_get_contiguous_span(request->image, &data);
+  IREE_ASSERT(contiguous && "native publication owns image coalescing");
+  (void)contiguous;
 
+  iree_status_t status = iree_ok_status();
   iree_slim_mutex_lock(&cache->mutex);
   bool found = false;
   const iree_host_size_t position =

@@ -202,6 +202,27 @@ TEST_F(X86ProviderTest, PreservesLowCalls) {
             LOOM_TARGET_CALL_POLICY_DIRECT);
 }
 
+TEST_F(X86ProviderTest, ExactProfilesPreserveCpuRecordsAndDeploymentChoices) {
+  auto first_cpu = AmdCpuData(0x1A, 0x70);
+  auto same_cpu = first_cpu;
+  auto other_cpu = AmdCpuData(0x19, 0x11);
+  auto first = Select(&first_cpu);
+  auto same = Select(&same_cpu);
+  auto other = Select(&other_cpu);
+  ASSERT_NE(first.profile, nullptr);
+  ASSERT_NE(same.profile, nullptr);
+  ASSERT_NE(other.profile, nullptr);
+  EXPECT_TRUE(loom_target_profile_equal(first.profile, same.profile));
+  EXPECT_FALSE(loom_target_profile_equal(first.profile, other.profile));
+  EXPECT_FALSE(
+      loom_target_profile_equal(first.profile, Profile(IREE_SV("avx2"))));
+  EXPECT_FALSE(loom_target_profile_equal(Profile(IREE_SV("avx2")),
+                                         Profile(IREE_SV("avx512"))));
+  loom_target_profile_selection_release(&other, iree_allocator_system());
+  loom_target_profile_selection_release(&same, iree_allocator_system());
+  loom_target_profile_selection_release(&first, iree_allocator_system());
+}
+
 TEST_F(X86ProviderTest, SelectsStrongestExecutableCpuProfile) {
   struct SelectionCase {
     uint64_t cpu_features;

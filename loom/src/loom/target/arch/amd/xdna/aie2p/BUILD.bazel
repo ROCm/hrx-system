@@ -261,6 +261,8 @@ loom_cc_test(
     srcs = ["provider_test.cc"],
     deps = [
         ":provider",
+        ":target_profile",
+        "//loom/src/loom/target:profile",
         "//loom/src/loom/target:provider",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

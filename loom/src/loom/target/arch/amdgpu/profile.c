@@ -35,10 +35,22 @@ static iree_status_t loom_amdgpu_target_profile_project_facts(
   return iree_ok_status();
 }
 
+static bool loom_amdgpu_target_profile_equal(const loom_target_profile_t* lhs,
+                                             const loom_target_profile_t* rhs) {
+  const loom_amdgpu_target_profile_t* lhs_profile =
+      (const loom_amdgpu_target_profile_t*)lhs;
+  const loom_amdgpu_target_profile_t* rhs_profile =
+      (const loom_amdgpu_target_profile_t*)rhs;
+  return loom_target_profile_equal_common(lhs, rhs) &&
+         loom_amdgpu_target_identity_equal(&lhs_profile->identity,
+                                           &rhs_profile->identity);
+}
+
 const loom_target_profile_type_t loom_amdgpu_target_profile_type = {
     .name = IREE_SVL("amdgpu"),
     .fact_type = &loom_amdgpu_target_fact_type,
     .project_facts = loom_amdgpu_target_profile_project_facts,
+    .equal = loom_amdgpu_target_profile_equal,
 };
 
 // clang-format off

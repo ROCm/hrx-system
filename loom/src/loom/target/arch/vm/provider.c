@@ -24,6 +24,7 @@ static const loom_target_profile_type_t kProfileType = {
     .name = IREE_SVL("vm"),
     .fact_type = &loom_vm_target_fact_type,
     .project_facts = loom_vm_profile_project_facts,
+    .equal = loom_target_profile_equal_common,
 };
 
 static const loom_target_profile_t kCoreProfile = {

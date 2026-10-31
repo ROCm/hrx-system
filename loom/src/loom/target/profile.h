@@ -32,6 +32,14 @@ typedef iree_status_t (*loom_target_profile_project_facts_fn_t)(
     const loom_target_profile_t* profile, iree_arena_allocator_t* arena,
     loom_target_facts_t* out_facts);
 
+// Compares complete immutable profiles of the same family. This is exact input
+// identity, not target compatibility or specialization satisfaction. Family
+// implementations compare the common projection with equal_common below and
+// every family-owned field, including diagnostic names. The query allocates
+// nothing and does not project profiles into compiler facts.
+typedef bool (*loom_target_profile_equal_fn_t)(
+    const loom_target_profile_t* lhs, const loom_target_profile_t* rhs);
+
 // Stable process-local identity for one target-family profile representation.
 //
 // Family packages define one static descriptor and use pointer identity for
@@ -45,6 +53,9 @@ typedef struct loom_target_profile_type_t {
 
   // Family-owned structured profile projector.
   loom_target_profile_project_facts_fn_t project_facts;
+
+  // Required exact comparison, including the target-neutral projection.
+  loom_target_profile_equal_fn_t equal;
 } loom_target_profile_type_t;
 
 // Target-neutral base embedded first in every target-family profile.
@@ -97,6 +108,19 @@ static inline const loom_target_bundle_t* loom_target_profile_bundle(
     const loom_target_profile_t* profile) {
   return profile ? profile->target_bundle : NULL;
 }
+
+// Compares all immutable profile inputs, including partial-field presence and
+// diagnostic names. NULL equals only NULL. Profile equality alone does not
+// identify a compilation: its compiler environment, inputs, and options also
+// participate in the embedding's cache identity.
+bool loom_target_profile_equal(const loom_target_profile_t* lhs,
+                               const loom_target_profile_t* rhs);
+
+// Compares the common bundle and explicit-field set of two same-family
+// profiles. Base-only profile families use this as their equality callback;
+// extended families additionally compare their own structured payload.
+bool loom_target_profile_equal_common(const loom_target_profile_t* lhs,
+                                      const loom_target_profile_t* rhs);
 
 // Projects |profile| once into compiler-owned typed target facts.
 //

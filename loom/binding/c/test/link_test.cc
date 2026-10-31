@@ -77,6 +77,7 @@ static const loom_target_profile_type_t kFakeTargetProfileType = {
     .name = IREE_SVL("fake-link"),
     .fact_type = &loom_test_target_fact_type,
     .project_facts = ProjectFakeTargetProfileFacts,
+    .equal = loom_target_profile_equal_common,
 };
 
 static loom_target_profile_t kFakeTargetProfile = {

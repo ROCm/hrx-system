@@ -25,6 +25,7 @@ exports_files(
         "jit_module_test.cc",
         "jit_test.cc",
         "jit_workspace_test.cc",
+        "shared_jit_test.cc",
         "stage_set_test.cc",
         "stage_table_storage_benchmark.cc",
         "testdata/compilation/invalid.loom",
@@ -228,6 +229,19 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "native_artifact",
+    srcs = ["native_artifact.c"],
+    hdrs = ["native_artifact.h"],
+    deps = [
+        ":compilation",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/util:digest",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+loom_cc_library(
     name = "executable",
     srcs = ["executable.c"],
     hdrs = ["executable.h"],
@@ -237,6 +251,19 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_test(
+    name = "native_artifact_test",
+    srcs = ["native_artifact_test.cc"],
+    deps = [
+        ":native_artifact",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/vm",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -253,6 +280,7 @@ loom_cc_library(
     deps = [
         ":compilation",
         ":executable",
+        ":native_artifact",
         ":source_index",
         ":sources",
         ":target",

@@ -49,6 +49,23 @@ TEST(AmdgpuTargetProfileTest, PreservesStructuredTargetFacts) {
                 target->descriptor_set_ordinal));
 }
 
+TEST(AmdgpuTargetProfileTest, ExactProfilesPreserveProcessorAndAmdhsaFeatures) {
+  const loom_amdgpu_target_profile_t* selected = nullptr;
+  IREE_ASSERT_OK(loom_amdgpu_target_profile_select(
+      IREE_SV("gfx942:sramecc+:xnack-"), &selected));
+  loom_amdgpu_target_profile_t first = *selected;
+  loom_amdgpu_target_profile_t second = *selected;
+  EXPECT_TRUE(loom_target_profile_equal(&first.base, &second.base));
+  second.identity.amdhsa_features.xnack = LOOM_AMDGPU_TARGET_FEATURE_ON;
+  EXPECT_FALSE(loom_target_profile_equal(&first.base, &second.base));
+  second = first;
+  second.identity.amdhsa_features.sramecc = LOOM_AMDGPU_TARGET_FEATURE_OFF;
+  EXPECT_FALSE(loom_target_profile_equal(&first.base, &second.base));
+  second = first;
+  second.identity.target = LookupTarget("gfx940");
+  EXPECT_FALSE(loom_target_profile_equal(&first.base, &second.base));
+}
+
 TEST(AmdgpuTargetProfileTest, ProjectsCompilerOwnedTypedFacts) {
   const loom_amdgpu_target_info_t* target = LookupTarget("gfx1151");
   loom_amdgpu_target_identity_t identity = {};

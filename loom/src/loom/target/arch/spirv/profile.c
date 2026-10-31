@@ -134,10 +134,108 @@ static iree_status_t loom_spirv_target_profile_project_facts(
   return iree_ok_status();
 }
 
+static bool loom_spirv_profile_matrix_equal(
+    const loom_spirv_cooperative_matrix_property_t* lhs,
+    const loom_spirv_cooperative_matrix_property_t* rhs) {
+  return iree_string_view_equal(lhs->name, rhs->name) &&
+         lhs->required_feature_bits == rhs->required_feature_bits &&
+         lhs->m_size == rhs->m_size && lhs->n_size == rhs->n_size &&
+         lhs->k_size == rhs->k_size && lhs->lhs_type == rhs->lhs_type &&
+         lhs->rhs_type == rhs->rhs_type &&
+         lhs->accumulator_type == rhs->accumulator_type &&
+         lhs->result_type == rhs->result_type && lhs->scope == rhs->scope &&
+         lhs->layout_flags == rhs->layout_flags &&
+         lhs->storage_class_flags == rhs->storage_class_flags &&
+         lhs->operand_flags == rhs->operand_flags &&
+         lhs->mul_add_descriptor_ref == rhs->mul_add_descriptor_ref;
+}
+
+static bool loom_spirv_profile_vector_equal(
+    const loom_spirv_cooperative_vector_property_t* lhs,
+    const loom_spirv_cooperative_vector_property_t* rhs) {
+  return iree_string_view_equal(lhs->name, rhs->name) &&
+         lhs->required_feature_bits == rhs->required_feature_bits &&
+         lhs->m_size == rhs->m_size && lhs->k_size == rhs->k_size &&
+         lhs->input_type == rhs->input_type &&
+         lhs->input_interpretation == rhs->input_interpretation &&
+         lhs->matrix_interpretation == rhs->matrix_interpretation &&
+         lhs->bias_interpretation == rhs->bias_interpretation &&
+         lhs->result_type == rhs->result_type &&
+         lhs->matrix_layout_flags == rhs->matrix_layout_flags &&
+         lhs->storage_class_flags == rhs->storage_class_flags &&
+         lhs->flags == rhs->flags;
+}
+
+static bool loom_spirv_profile_spans_equal(
+    uint16_t count, const loom_spirv_cooperative_property_span_t* lhs,
+    const loom_spirv_cooperative_property_span_t* rhs) {
+  for (uint16_t i = 0; i < count; ++i) {
+    if (lhs[i].shape_key != rhs[i].shape_key || lhs[i].start != rhs[i].start ||
+        lhs[i].count != rhs[i].count) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool loom_spirv_profile_cooperative_equal(
+    const loom_spirv_cooperative_property_set_t* lhs,
+    const loom_spirv_cooperative_property_set_t* rhs) {
+  if (lhs == rhs) {
+    return true;
+  }
+  if (!lhs || !rhs || lhs->feature_bits != rhs->feature_bits ||
+      lhs->matrix_property_count != rhs->matrix_property_count ||
+      lhs->matrix_shape_span_count != rhs->matrix_shape_span_count ||
+      lhs->vector_property_count != rhs->vector_property_count ||
+      lhs->vector_shape_span_count != rhs->vector_shape_span_count) {
+    return false;
+  }
+  for (uint16_t i = 0; i < lhs->matrix_property_count; ++i) {
+    if (!loom_spirv_profile_matrix_equal(&lhs->matrix_properties[i],
+                                         &rhs->matrix_properties[i])) {
+      return false;
+    }
+  }
+  for (uint16_t i = 0; i < lhs->vector_property_count; ++i) {
+    if (!loom_spirv_profile_vector_equal(&lhs->vector_properties[i],
+                                         &rhs->vector_properties[i])) {
+      return false;
+    }
+  }
+  return loom_spirv_profile_spans_equal(lhs->matrix_shape_span_count,
+                                        lhs->matrix_shape_spans,
+                                        rhs->matrix_shape_spans) &&
+         loom_spirv_profile_spans_equal(lhs->vector_shape_span_count,
+                                        lhs->vector_shape_spans,
+                                        rhs->vector_shape_spans);
+}
+
+static bool loom_spirv_target_profile_equal(const loom_target_profile_t* lhs,
+                                            const loom_target_profile_t* rhs) {
+  const loom_spirv_target_profile_t* lhs_profile =
+      (const loom_spirv_target_profile_t*)lhs;
+  const loom_spirv_target_profile_t* rhs_profile =
+      (const loom_spirv_target_profile_t*)rhs;
+  return loom_target_profile_equal_common(lhs, rhs) &&
+         lhs_profile->subgroup.default_size ==
+             rhs_profile->subgroup.default_size &&
+         lhs_profile->subgroup.minimum_size ==
+             rhs_profile->subgroup.minimum_size &&
+         lhs_profile->subgroup.maximum_size ==
+             rhs_profile->subgroup.maximum_size &&
+         lhs_profile->subgroup.maximum_workgroup_subgroup_count ==
+             rhs_profile->subgroup.maximum_workgroup_subgroup_count &&
+         loom_spirv_profile_cooperative_equal(
+             lhs_profile->cooperative_properties,
+             rhs_profile->cooperative_properties);
+}
+
 const loom_target_profile_type_t loom_spirv_target_profile_type = {
     .name = IREE_SVL("spirv"),
     .fact_type = &loom_spirv_target_fact_type,
     .project_facts = loom_spirv_target_profile_project_facts,
+    .equal = loom_spirv_target_profile_equal,
 };
 
 static const loom_spirv_target_profile_t kSpirvVulkan13BdaTargetProfile = {

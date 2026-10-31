@@ -63,6 +63,9 @@ class SourceTextServiceTest : public ::testing::Test {
   // runs can exercise the same owner contract with additional workers.
   virtual iree_host_size_t WorkerCount() const { return 1; }
 
+  // Dedicated group suites select additional independent device owners.
+  virtual iree_host_size_t DeviceCount() const { return 1; }
+
   virtual loom_serve_http_server_options_t ServerOptions() const {
     return loom_serve_http_server_options_default();
   }

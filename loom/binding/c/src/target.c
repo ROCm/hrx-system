@@ -879,6 +879,18 @@ loomc_string_view_t loomc_target_profile_identifier(
   return profile ? profile->identifier : loomc_string_view_empty();
 }
 
+bool loomc_target_profile_equal(const loomc_target_profile_t* lhs,
+                                const loomc_target_profile_t* rhs) {
+  if (lhs == rhs) {
+    return true;
+  }
+  return lhs && rhs && lhs->target_provider == rhs->target_provider &&
+         loomc_target_environment_is_compatible(lhs->target_environment,
+                                                rhs->target_environment) &&
+         loomc_string_view_equal(lhs->identifier, rhs->identifier) &&
+         loom_target_profile_equal(lhs->target_profile, rhs->target_profile);
+}
+
 void loomc_target_profile_retain(loomc_target_profile_t* profile) {
   if (profile == NULL) {
     return;
