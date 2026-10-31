@@ -67,9 +67,11 @@ class CMakeGeneratedPackagesTest(unittest.TestCase):
                     build,
                     "fixture_package_probe",
                     "fixture_package_authored_child_probe",
+                    "fixture_package_tool",
                 )
                 self.assertEqual(run_command(str(programs[0])), f"{value}\n")
                 self.assertEqual(run_command(str(programs[1])), "23\n")
+                self.assertEqual(run_command(str(programs[2])), f"{value}\n")
                 self.assertFalse((source / "package/CMakeLists.txt").exists())
 
             check(7)
@@ -199,7 +201,7 @@ class CMakeGeneratedPackagesTest(unittest.TestCase):
             )
             check(15)
             relocated_archive = Path(
-                (owned / f"paths-{CONFIGURATION}.txt").read_text().splitlines()[2]
+                (owned / f"paths-{CONFIGURATION}.txt").read_text().splitlines()[-1]
             )
             self.assertTrue(relocated_archive.is_relative_to(build / "archive outputs"))
             relocated_archive.unlink()

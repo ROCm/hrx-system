@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import bazel_to_cmake_config
 import bazel_to_cmake_converter
 import bazel_to_cmake_requirements
-from conditions import all_of, any_of
+from conditions import Option, all_of, any_of
 from loom_binary import LoomBinaryBuildFileFunctions
 
 
@@ -775,16 +775,6 @@ class LoomBuildFileFunctions(
             "${PROJECT_SOURCE_DIR}",
         ]
 
-    def _emit_rewritten_cmake_rule(self, old_rule_name, new_rule_name, emit):
-        body_start = len(self._converter.body)
-        emit()
-        emitted_body = self._converter.body[body_start:]
-        self._converter.body = self._converter.body[:body_start] + emitted_body.replace(
-            f"{old_rule_name}(",
-            f"{new_rule_name}(",
-            1,
-        )
-
     def loom_py_library(self, **kwargs):
         self.iree_py_library(**self._apply_loom_cmake_policy(kwargs))
 
@@ -818,16 +808,14 @@ class LoomBuildFileFunctions(
         )
 
     def loomc_cc_binary(self, runtime_only=False, **kwargs):
-        body_start = len(self._converter.body)
-        self._emit_rewritten_cmake_rule(
-            "iree_cc_binary", "loomc_cc_binary", lambda: self.loom_cc_binary(**kwargs)
+        self.loom_cc_binary(
+            _cmake_rule="loomc_cc_binary",
+            _cmake_options=("RUNTIME_ONLY",) if runtime_only else (),
+            _native_linking=Option("LOOM_LINK_SHARED_TOOLS").evaluate(
+                self._configuration or {}
+            ),
+            **kwargs,
         )
-        if runtime_only:
-            emitted_body = self._converter.body[body_start:]
-            emitted_body = emitted_body.replace(
-                "loomc_cc_binary(\n", "loomc_cc_binary(\n  RUNTIME_ONLY\n", 1
-            )
-            self._converter.body = self._converter.body[:body_start] + emitted_body
 
     def loomc_interop_headers(self, name, deps):
         self._converter.body += (
@@ -1040,19 +1028,12 @@ class LoomBuildFileFunctions(
         target_compatible_with = self._apply_loom_target_compatible_with(
             target_compatible_with
         )
-        runner_deps = (deps or []) + ["//loom/src/loom/tools/loom-check:main"]
-        name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        srcs_block = self._convert_srcs_block([src])
-        deps_block, platform_deps_block = self._convert_platform_select_deps(
-            name, runner_deps
+        self.cc_binary(
+            name=name,
+            srcs=[src],
+            deps=(deps or []) + ["//loom/src/loom/tools/loom-check:main"],
+            target_compatible_with=target_compatible_with,
         )
-        if platform_deps_block:
-            self._converter.body += platform_deps_block
-        self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += (
-            f"iree_cc_binary(\n{name_block}{srcs_block}{deps_block})\n\n"
-        )
-        self._emit_platform_guard_end(target_compatible_with)
 
     def loom_check_test(
         self,

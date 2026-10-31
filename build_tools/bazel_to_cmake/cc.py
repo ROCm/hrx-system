@@ -283,6 +283,60 @@ class Graph:
 class BuildFileFunctions:
     """Source C/C++ rules and their native projections."""
 
+    def _emit_executable(
+        self,
+        invocation,
+        name,
+        deps,
+        target_compatible_with,
+        *,
+        enabled=True,
+        implicit=True,
+    ):
+        if (
+            self._libraries is None
+            or not enabled
+            or not all(
+                self._select_condition(label).evaluate(self._configuration)
+                for label in target_compatible_with or []
+            )
+        ):
+            self._converter.body += invocation
+            return
+        target = self._convert_single_target(self._current_target_label(name))
+        namespace = target.rsplit("::", 1)[0]
+        dependencies = tuple(
+            namespace + native if native.startswith("::") else native
+            for native in sorted(
+                {
+                    native
+                    for dependency in deps or []
+                    for native in self._convert_target(dependency)
+                    if native
+                }
+            )
+        )
+        if implicit:
+            dependencies += ("${IREE_IMPLICIT_DEFS_CC_DEPS}",)
+
+        def render():
+            interface, artifacts, native, generated, cxx = (
+                self._libraries.executable_inputs(self._native_scope, dependencies)
+            )
+            return invocation + native_cc.executable_inputs(
+                target.replace("::", "_"),
+                interface,
+                artifacts,
+                native,
+                generated,
+                self._libraries.producers,
+                response=self._libraries.response(artifacts) if artifacts else None,
+                cxx=cxx,
+                msvc=Option("MSVC").evaluate(self._configuration),
+            )
+
+        self._converter.defer(render)
+
     def _native_source_paths(self, values):
         paths, generated = [], []
         package = self._current_package()
@@ -703,48 +757,15 @@ class BuildFileFunctions:
             f"{sanitizer_suppressions_block}"
             f")\n\n"
         )
-        if (
-            self._libraries is not None
-            and _cmake_rule == "iree_cc_test"
-            and Option("IREE_BUILD_TESTS").evaluate(self._configuration)
-            and all(
-                self._select_condition(label).evaluate(self._configuration)
-                for label in target_compatible_with or []
-            )
-        ):
-            target = self._convert_single_target(self._current_target_label(name))
-            namespace = target.rsplit("::", 1)[0]
-            dependencies = tuple(
-                namespace + native if native.startswith("::") else native
-                for native in sorted(
-                    {
-                        native
-                        for dep in deps or []
-                        for native in self._convert_target(dep)
-                        if native
-                    }
-                )
-            )
-
-            def render():
-                interface, artifacts, native, generated, cxx = (
-                    self._libraries.executable_inputs(self._native_scope, dependencies)
-                )
-                return invocation + native_cc.executable_inputs(
-                    target.replace("::", "_"),
-                    interface,
-                    artifacts,
-                    native,
-                    generated,
-                    self._libraries.producers,
-                    response=self._libraries.response(artifacts) if artifacts else None,
-                    cxx=cxx,
-                    msvc=Option("MSVC").evaluate(self._configuration),
-                )
-
-            self._converter.defer(render)
-        else:
-            self._converter.body += invocation
+        self._emit_executable(
+            invocation,
+            name,
+            deps,
+            target_compatible_with,
+            enabled=_cmake_rule == "iree_cc_test"
+            and Option("IREE_BUILD_TESTS").evaluate(self._configuration or {}),
+            implicit=False,
+        )
         self._emit_optional_local_cts_testdata_guard_end(did_emit_testdata_guard)
         self._emit_platform_guard_end(target_compatible_with)
 
@@ -766,6 +787,9 @@ class BuildFileFunctions:
         testonly=None,
         includes=None,
         target_compatible_with=None,
+        _cmake_rule="iree_cc_binary",
+        _cmake_options=(),
+        _native_linking=False,
         **kwargs,
     ):
         if self._should_skip_target(**kwargs):
@@ -815,9 +839,10 @@ class BuildFileFunctions:
             )
             self._emit_platform_guard_end(target_compatible_with)
             return
-        self._converter.body += (
-            f"iree_cc_binary(\n"
-            f"{name_block}"
+        invocation = (
+            f"{_cmake_rule}(\n"
+            + "".join(f"  {option}\n" for option in _cmake_options)
+            + f"{name_block}"
             f"{srcs_block}"
             f"{copts_block}"
             f"{defines_block}"
@@ -827,6 +852,17 @@ class BuildFileFunctions:
             f"{testonly_block}"
             f"{includes_block}"
             f")\n\n"
+        )
+        self._emit_executable(
+            invocation,
+            name,
+            deps,
+            target_compatible_with,
+            enabled=not _native_linking
+            and (
+                not testonly
+                or Option("IREE_BUILD_TESTS").evaluate(self._configuration or {})
+            ),
         )
         self._emit_platform_guard_end(target_compatible_with)
 
@@ -876,7 +912,7 @@ class BuildFileFunctions:
             self._converter.body += platform_deps_block
         if platform_linkopts_block:
             self._converter.body += platform_linkopts_block
-        self._converter.body += (
+        invocation = (
             f"iree_cc_fuzz(\n"
             f"{name_block}"
             f"{srcs_block}"
@@ -887,6 +923,14 @@ class BuildFileFunctions:
             f"{linkopts_block}"
             f"{labels_block}"
             f")\n\n"
+        )
+        self._emit_executable(
+            invocation,
+            name,
+            deps,
+            target_compatible_with,
+            enabled=Option("IREE_BUILD_TESTS").evaluate(self._configuration or {})
+            and Option("IREE_ENABLE_FUZZING").evaluate(self._configuration or {}),
         )
         self._emit_platform_guard_end(target_compatible_with)
 
@@ -931,7 +975,7 @@ class BuildFileFunctions:
         )
 
         self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += (
+        invocation = (
             f"iree_cc_binary_benchmark(\n"
             f"{name_block}"
             f"{srcs_block}"
@@ -945,6 +989,17 @@ class BuildFileFunctions:
             f"{labels_block}"
             f"{resource_group_block}"
             f")\n\n"
+        )
+        self._emit_executable(
+            invocation,
+            name,
+            deps,
+            target_compatible_with,
+            enabled=Option("IREE_BUILD_BENCHMARKS").evaluate(self._configuration or {})
+            and (
+                not testonly
+                or Option("IREE_BUILD_TESTS").evaluate(self._configuration or {})
+            ),
         )
         self._emit_platform_guard_end(target_compatible_with)
 

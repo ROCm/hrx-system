@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
 load("//build_tools/bazel:generate.bzl", "iree_generated_sources")
@@ -42,6 +43,15 @@ cc_library(
 
 cc_test(
     name = "probe",
+    srcs = ["main.c"],
+    deps = [
+        ":library_with_generated_inputs_and_package_identity",
+        ":scoped_requirements",
+    ],
+)
+
+cc_binary(
+    name = "tool",
     srcs = ["main.c"],
     deps = [
         ":library_with_generated_inputs_and_package_identity",

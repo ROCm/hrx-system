@@ -39,6 +39,6 @@ iree_finalize_sanitizer_suppressions()
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/environment-$<CONFIG>.txt"
   CONTENT "$<TARGET_PROPERTY:fixture_package_probe,IREE_SANITIZER_ENVIRONMENT>")
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/paths-$<CONFIG>.txt"
-  CONTENT "$<TARGET_FILE:fixture_package_probe>\n$<TARGET_FILE:fixture_package_authored_child_probe>\n$<TARGET_LINKER_FILE:fixture_package_library_with_generated_inputs_and_package_identity>\n")
+  CONTENT "$<TARGET_FILE:fixture_package_probe>\n$<TARGET_FILE:fixture_package_authored_child_probe>\n$<TARGET_FILE:fixture_package_tool>\n$<TARGET_LINKER_FILE:fixture_package_library_with_generated_inputs_and_package_identity>\n")
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/link-inputs-$<CONFIG>.txt"
   CONTENT "$<TARGET_PROPERTY:fixture_package_probe,LINK_DEPENDS>")

@@ -129,14 +129,8 @@ class AmdfBuildFileFunctions(
             "@platforms//cpu:x86_64",
             "@platforms//os:windows",
         ]
-        body_start = len(self._converter.body)
-        self.amdf_cc_binary(**kwargs)
-        emitted_body = self._converter.body[body_start:]
-        self._converter.body = self._converter.body[:body_start]
-        self._converter.body += emitted_body.replace(
-            "iree_cc_binary(",
-            "amdf_windows_sidecar_library(",
-            1,
+        self.amdf_cc_binary(
+            _cmake_rule="amdf_windows_sidecar_library", _native_linking=True, **kwargs
         )
 
     def iree_dynamic_library_bundle(self, **kwargs):
@@ -237,20 +231,13 @@ class AmdfBuildFileFunctions(
         for mode in linkage_modes:
             binary_name = name + "_" + mode + "_bin"
             data = None if mode == "static" else ["//libamdf:amdf_shared_artifact"]
-            body_start = len(self._converter.body)
             self.amdf_cc_binary(
                 name=binary_name,
                 testonly=True,
                 data=data,
                 deps=common_deps + ["//libamdf/cts/util:" + mode + "_provider"],
+                _cmake_rule="amdf_cts_binary",
                 **kwargs,
-            )
-            emitted_body = self._converter.body[body_start:]
-            self._converter.body = self._converter.body[:body_start]
-            self._converter.body += emitted_body.replace(
-                "iree_cc_binary(",
-                "amdf_cts_binary(",
-                1,
             )
             provider_args = (
                 ["--amdf_library=$(rootpath //libamdf:amdf_shared_artifact)"]
