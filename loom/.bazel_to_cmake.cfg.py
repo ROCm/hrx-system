@@ -1053,32 +1053,23 @@ class LoomBuildFileFunctions(
             target_compatible_with
         )
         self._loom_check_test_base_name(src)
-        combined_tags = (tags or []) + ["loom-check"]
-        name_block = self._convert_string_arg_block("NAME", name)
-        test_binary_block = self._convert_single_target_block("SRC", runner)
-        args_block = self._convert_string_list_block(
-            "ARGS",
-            self._convert_test_location_args(args or [])
-            + ["{{${_IREE_PACKAGE_SOURCE_DIR}/%s}}" % src],
-            sort=False,
-        )
-        data_block = self._convert_data_list_block(data)
-        env_block = self._convert_string_list_block(
-            "ENV", self._convert_test_env(env), sort=False
-        )
-        labels_block = self._convert_string_list_block("LABELS", combined_tags)
         self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += (
-            f"iree_native_test(\n"
-            f"{name_block}"
-            f'  WORKING_DIRECTORY "${{IREE_ROOT_DIR}}"\n'
-            f"{args_block}"
-            f"{test_binary_block}"
-            f"{data_block}"
-            f"{env_block}"
-            f"{labels_block}"
-            f")\n\n"
+        self._converter.body += "if(IREE_BUILD_TESTS)\n"
+        self._converter.defer(
+            lambda: self._native_test(
+                name,
+                self._convert_single_target(runner),
+                args=(self._convert_test_location_args(args) or [])
+                + [
+                    "{{${IREE_SOURCE_DIR}/" + self._current_package() + "/" + src + "}}"
+                ],
+                data=sorted(self._convert_data_locations(data) or []),
+                environment=self._convert_test_env(env),
+                labels=sorted((tags or []) + ["loom-check"]),
+                working_directory="${IREE_ROOT_DIR}",
+            )
         )
+        self._converter.body += "endif()\n"
         self._emit_platform_guard_end(target_compatible_with)
 
     def loom_check_compile_tests(
@@ -1166,6 +1157,45 @@ class LoomBuildFileFunctions(
         )
         for src in srcs:
             self._loom_check_test_base_name(src)
+        if self._configuration is not None:
+            self._emit_platform_guard_begin(target_compatible_with)
+            self._converter.body += "if(IREE_BUILD_TESTS)\n"
+
+            def render():
+                lines = []
+                for source in srcs:
+                    source = self._normalize_label(source)
+                    base = self._loom_check_test_base_name(source)
+                    test_name = base.removeprefix(test_name_prefix_to_strip).replace(
+                        "/", "_"
+                    )
+                    logical = self._current_package() + "/" + source
+                    path = "${IREE_SOURCE_DIR}/" + logical
+                    lines.append(
+                        self._native_test(
+                            test_name,
+                            self._convert_single_target(runner),
+                            args=(self._convert_test_location_args(args) or [])
+                            + [
+                                "--source-prefix-map=${IREE_ROOT_DIR}/=",
+                                "--source-prefix-map={{" + path + "}}=" + logical,
+                                "{{" + path + "}}",
+                            ],
+                            data=sorted(self._convert_data_locations(data) or []),
+                            environment=self._convert_test_env(env),
+                            labels=list(tags or [])
+                            + ([] if "loom-check" in (tags or []) else ["loom-check"]),
+                            resource_group=resource_group,
+                            timeout=self._timeout_map[timeout] if timeout else None,
+                            working_directory="${IREE_ROOT_DIR}",
+                        )
+                    )
+                return "".join(lines)
+
+            self._converter.defer(render)
+            self._converter.body += "endif()\n"
+            self._emit_platform_guard_end(target_compatible_with)
+            return
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
         srcs_block = self._convert_string_list_block(
             "SRCS", [self._normalize_label(src) for src in srcs], sort=False

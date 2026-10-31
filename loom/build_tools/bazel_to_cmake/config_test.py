@@ -348,7 +348,7 @@ loom_library(
             str(REPO_ROOT / "loom/build_tools/bazel_to_cmake/testdata/configured"),
             repo_root=str(REPO_ROOT),
         )
-        self.assertEqual(output.count("iree_native_test(\n"), 2)
+        self.assertEqual(output.count("add_test("), 2)
         self.assertIn("configured_first_test_execute_test_profile_test", output)
         self.assertIn("configured_second_test_execute_test_profile_test", output)
         self.assertIn(

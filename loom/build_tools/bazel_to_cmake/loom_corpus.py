@@ -788,29 +788,19 @@ class LoomCorpusBuildFileFunctions:
                 for symbol, value in sorted(program["configs"].items())
             ]
             lines.append(
-                "iree_native_test(\n"
-                + self._convert_string_arg_block("NAME", name)
-                + "  SRC loom::tools::loom-test\n"
-                + self._convert_string_list_block(
-                    "ARGS",
-                    [
+                self._native_test(
+                    name,
+                    "loom::tools::loom-test",
+                    args=[
                         "{{" + module + "}}",
-                        *self._convert_test_location_args(runner_args),
+                        *(self._convert_test_location_args(runner_args) or []),
                         *configurations,
-                        *self._convert_test_location_args(args or []),
+                        *(self._convert_test_location_args(args) or []),
                     ],
-                    sort=False,
-                )
-                + self._convert_string_list_block("LABELS", labels, sort=False)
-                + self._convert_string_arg_block("RESOURCE_GROUP", resource_group)
-                + '  WORKING_DIRECTORY "${IREE_BINARY_DIR}"\n)\n'
-                + command("iree_package_name", "_LOOM_CORPUS_PACKAGE")
-                + command(
-                    "iree_register_target_dependency",
-                    "TARGET",
-                    '"${_LOOM_CORPUS_PACKAGE}_' + name + '_test_deps"',
-                    "DEPENDENCY",
-                    arguments((target,)),
+                    labels=labels,
+                    resource_group=resource_group,
+                    working_directory="${IREE_BINARY_DIR}",
+                    dependencies=(target,),
                 )
             )
         return self._corpus_guard(predicate, "".join(lines))

@@ -1258,7 +1258,7 @@ cc_library(
         )
 
     def test_native_test_emits_target_compatible_guard(self):
-        converter = SimpleNamespace(body="")
+        converter = bazel_to_cmake_converter.Converter()
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
             targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
@@ -1276,14 +1276,14 @@ cc_library(
             ),
         )
 
-        self.assertIn('if(IREE_ARCH STREQUAL "wasm_32")', converter.body)
-        self.assertIn("iree_native_test(", converter.body)
-        self.assertIn("endif()", converter.body)
+        self.assertIn('if(IREE_ARCH STREQUAL "wasm_32")', converter.convert())
+        self.assertIn("add_test(", converter.convert())
+        self.assertIn("endif()", converter.convert())
 
     def test_executable_test_preserves_resource_lock(self):
         for resource_group in (None, "shared-device", "shared-storage"):
             with self.subTest(resource_group=resource_group):
-                converter = SimpleNamespace(body="")
+                converter = bazel_to_cmake_converter.Converter()
                 functions = bazel_to_cmake_converter.BuildFileFunctions(
                     converter=converter,
                     targets=bazel_to_cmake_targets.TargetConverter(
@@ -1297,17 +1297,17 @@ cc_library(
                     resource_group=resource_group,
                 )
                 if resource_group is None:
-                    self.assertNotIn("RESOURCE_GROUP", converter.body)
+                    self.assertNotIn("RESOURCE_GROUP", converter.convert())
                 else:
                     self.assertIn(
-                        "RESOURCE_GROUP\n    " + resource_group, converter.body
+                        'RESOURCE_LOCK "' + resource_group + '"', converter.convert()
                     )
 
     def test_native_test_rejects_multiple_files_in_single_file_locations(self):
         for kind in ("location", "rootpath", "execpath"):
             for field in ("args", "env"):
                 with self.subTest(kind=kind, field=field):
-                    converter = SimpleNamespace(body="")
+                    converter = bazel_to_cmake_converter.Converter()
                     functions = bazel_to_cmake_converter.BuildFileFunctions(
                         converter=converter,
                         targets=bazel_to_cmake_targets.TargetConverter(
@@ -1325,6 +1325,7 @@ cc_library(
                             src="//tools:runner",
                             **{field: value},
                         )
+                        converter.convert()
 
     def test_cc_binary_benchmark_converts_location_args_to_source_paths(self):
         converter = SimpleNamespace(body="")
@@ -1500,11 +1501,11 @@ iree_execution_test_suite(
         self.assertLess(exclusion, conversion)
 
     def test_native_test_omits_unresolved_external_location_env(self):
-        converter = SimpleNamespace(body="")
+        converter = bazel_to_cmake_converter.Converter()
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
             targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-            build_dir="/repo/pkg",
+            build_dir="/repo/runtime/src/iree/fixture",
             repo_root="/repo",
         )
 
@@ -1517,10 +1518,10 @@ iree_execution_test_suite(
             },
         )
 
-        self.assertNotIn("ENV", converter.body)
-        self.assertNotIn("DATA", converter.body)
-        self.assertNotIn("@wasi_sdk", converter.body)
-        self.assertNotIn("TARGET_FILE:pkg_@wasi_sdk", converter.body)
+        self.assertNotIn("LLVM_OBJDUMP=", converter.convert())
+        self.assertIn('REQUIRED_FILES ""', converter.convert())
+        self.assertNotIn("@wasi_sdk", converter.convert())
+        self.assertNotIn("TARGET_FILE:pkg_@wasi_sdk", converter.convert())
 
     def test_cc_test_preserves_platform_link_options_and_locations(self):
         converter = SimpleNamespace(body="")

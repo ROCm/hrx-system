@@ -37,6 +37,7 @@ py_library(
         "conditions.py",
         "loom_binary.py",
         "native_cc.py",
+        "native_test.py",
     ],
     visibility = ["//loom/build_tools/bazel_to_cmake:__pkg__"],
 )

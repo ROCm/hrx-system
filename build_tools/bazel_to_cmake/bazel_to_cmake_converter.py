@@ -25,6 +25,7 @@ import bazel_to_cmake_loads
 import bazel_to_cmake_requirements
 import bazel_to_cmake_targets
 import cc
+import native_test
 from bazel_to_cmake_generated import GeneratedFileBuildFileFunctions
 from conditions import Equal, Greater, Matches, Not, Option, all_of, any_of, condition
 
@@ -196,7 +197,11 @@ class _SelectsModule:
         pass
 
 
-class BuildFileFunctions(cc.BuildFileFunctions, GeneratedFileBuildFileFunctions):
+class BuildFileFunctions(
+    cc.BuildFileFunctions,
+    native_test.BuildFileFunctions,
+    GeneratedFileBuildFileFunctions,
+):
     """Object passed to `exec` that has handlers for BUILD file functions."""
 
     def __init__(
@@ -2674,57 +2679,6 @@ class BuildFileFunctions(cc.BuildFileFunctions, GeneratedFileBuildFileFunctions)
             f"{target_cpu_features_variants_block}"
             f")\n\n"
         )
-
-    def native_test(
-        self,
-        name,
-        src,
-        args=None,
-        data=None,
-        env=None,
-        sanitizer_suppressions=None,
-        tags=None,
-        resource_group=None,
-        timeout=None,
-        target_compatible_with=None,
-        visibility=None,
-    ):
-        if self._should_skip_target(tags=tags):
-            return
-
-        name_block = self._convert_string_arg_block("NAME", name)
-        test_binary_block = self._convert_single_target_block("SRC", src)
-        args_block = self._convert_string_list_block(
-            "ARGS", self._convert_test_location_args(args)
-        )
-        data_block = self._convert_data_list_block(data)
-        env_block = self._convert_string_list_block(
-            "ENV", self._convert_test_env(env), sort=False
-        )
-        labels_block = self._convert_string_list_block("LABELS", tags)
-        resource_group_block = self._convert_string_arg_block(
-            "RESOURCE_GROUP", resource_group, quote=False
-        )
-        sanitizer_suppressions_block = self._convert_sanitizer_suppressions_block(
-            sanitizer_suppressions
-        )
-        timeout_block = self._convert_timeout_arg_block("TIMEOUT", timeout)
-
-        self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += (
-            f"iree_native_test(\n"
-            f"{name_block}"
-            f"{args_block}"
-            f"{test_binary_block}"
-            f"{data_block}"
-            f"{env_block}"
-            f"{labels_block}"
-            f"{resource_group_block}"
-            f"{sanitizer_suppressions_block}"
-            f"{timeout_block}"
-            f")\n\n"
-        )
-        self._emit_platform_guard_end(target_compatible_with)
 
     def iree_executable_test(self, src, **kwargs):
         self.native_test(src=src, **kwargs)

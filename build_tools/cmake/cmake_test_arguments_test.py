@@ -27,6 +27,13 @@ from build_tools.cmake.test_environment import (
 FIXTURE = REPO_ROOT / "build_tools/cmake/testdata/test_arguments"
 
 
+class FixtureTargets(bazel_to_cmake_targets.TargetConverter):
+    def _convert_unmatched_target(self, target):
+        if target.startswith("//converted:"):
+            return ["fixture::" + self._convert_to_cmake_path(target)]
+        return super()._convert_unmatched_target(target)
+
+
 class FixtureBuildFileFunctions(bazel_to_cmake_converter.BuildFileFunctions):
     def _should_emit_python_target(self):
         return True
@@ -96,10 +103,10 @@ class CMakeTestArgumentsTest(unittest.TestCase):
             # Run actual converter output through the native/C/Python rules.
             package = source / "converted"
             package.mkdir()
-            converter = SimpleNamespace(body="")
+            converter = bazel_to_cmake_converter.Converter()
             functions = FixtureBuildFileFunctions(
                 converter=converter,
-                targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
+                targets=FixtureTargets(repo_map={"@hrx": ""}),
                 build_dir=str(package),
                 repo_root=str(source),
             )
@@ -131,8 +138,29 @@ class CMakeTestArgumentsTest(unittest.TestCase):
                 data=[":inputs", "//tools:runner"],
                 sanitizer_suppressions=suppression,
             )
-            (package / "CMakeLists.txt").write_text(converter.body)
+            functions.native_test(
+                name="direct_generated",
+                src="//tools:direct",
+                args=[
+                    "--check-suppression",
+                    "{{${PROJECT_BINARY_DIR}/direct_generated.txt}}",
+                ],
+                tags=["runtime-resource=fixture"],
+            )
+            (package / "CMakeLists.txt").write_text(converter.convert())
             configure_project(source, build)
+            catalog = json.loads((build / "iree_ctest_build_targets.json").read_text())
+            direct_name = "fixture/converted/direct_generated"
+            direct_roots = catalog["tests"][direct_name]
+            build_project(build, *direct_roots)
+            self.assertFalse((build / "generated.txt").exists())
+            test_project(build, "-R", f"^{direct_name}$")
+            direct_data = build / "direct_generated.txt"
+            direct_data.unlink()
+            build_project(build, "iree-test-resource-fixture")
+            self.assertEqual(
+                direct_data.read_bytes(), (source / "fixture.txt").read_bytes()
+            )
             build_project(build)
             test_project(build)
             tests = json.loads(test_project(build, "--show-only=json-v1"))["tests"]
@@ -162,7 +190,7 @@ class CMakeTestArgumentsTest(unittest.TestCase):
                 ),
             )
 
-            generated = [build / "generated.py", build / "generated.txt"]
+            generated = [build / "generated.py", build / "generated.txt", direct_data]
             timestamps = [path.stat().st_mtime_ns for path in generated]
             build_project(build)
             self.assertEqual(
@@ -173,7 +201,9 @@ class CMakeTestArgumentsTest(unittest.TestCase):
             with (source / "fixture.txt").open("a") as output:
                 output.write("updated input\n")
             build_project(build)
-            for output, input_name in zip(generated, ("reader.py", "fixture.txt")):
+            for output, input_name in zip(
+                generated, ("reader.py", "fixture.txt", "fixture.txt")
+            ):
                 self.assertEqual(
                     output.read_bytes(), (source / input_name).read_bytes()
                 )
