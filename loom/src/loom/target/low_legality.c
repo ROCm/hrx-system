@@ -16,6 +16,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/cfg/ops.h"
+#include "loom/ops/index/carrier.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
@@ -439,6 +440,17 @@ static iree_status_t loom_target_low_legality_validate_options(
         "non-zero",
         (int)bundle->name.size, bundle->name.data);
   }
+  const uint32_t maximum_index_bitwidth =
+      loom_target_snapshot_maximum_index_bitwidth(bundle->snapshot);
+  if (maximum_index_bitwidth < bundle->snapshot->index_bitwidth ||
+      maximum_index_bitwidth > 64) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "target bundle '%.*s' maximum index bit width %u must be between "
+        "the native index bit width %u and 64",
+        (int)bundle->name.size, bundle->name.data, maximum_index_bitwidth,
+        bundle->snapshot->index_bitwidth);
+  }
   if (iree_any_bit_set(options->diagnostic_flags,
                        ~LOOM_TARGET_LOW_LEGALITY_DIAGNOSTIC_ALL)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -601,6 +613,69 @@ static iree_status_t loom_target_low_legality_verify_value(
   const loom_type_t type = loom_module_value_type(context->module, value_id);
   return loom_target_low_legality_verify_type(context, op, type, value_id,
                                               vector_carrier_supported);
+}
+
+static iree_status_t loom_target_low_legality_verify_index_value_carrier(
+    loom_target_low_legality_context_t* context, const loom_op_t* op,
+    loom_value_id_t value_id, iree_string_view_t subject_role) {
+  const uint32_t maximum_bitwidth = loom_target_snapshot_maximum_index_bitwidth(
+      loom_target_low_legality_bundle(context)->snapshot);
+  const uint32_t native_bitwidth =
+      loom_target_low_legality_bundle(context)->snapshot->index_bitwidth;
+  if (native_bitwidth == 64) {
+    return iree_ok_status();
+  }
+  const loom_type_t type = loom_module_value_type(context->module, value_id);
+  if (!loom_type_is_scalar(type) ||
+      loom_type_element_type(type) != LOOM_SCALAR_TYPE_INDEX) {
+    return iree_ok_status();
+  }
+  const loom_value_fact_table_t* fact_table =
+      loom_target_low_legality_fact_table(context);
+  const loom_value_facts_t facts =
+      loom_value_fact_table_lookup(fact_table, value_id);
+  if (loom_index_value_fact_carrier_bitwidth(
+          &fact_table->context, context->module, value_id,
+          LOOM_SCALAR_TYPE_INDEX, facts) >= 0) {
+    return iree_ok_status();
+  }
+
+  IREE_ASSERT(native_bitwidth > 0 && native_bitwidth <= 64 &&
+              maximum_bitwidth >= native_bitwidth && maximum_bitwidth <= 64);
+  iree_string_view_t subject_name =
+      loom_module_value_name(context->module, value_id);
+  if (iree_string_view_is_empty(subject_name)) {
+    subject_name = IREE_SV("value");
+  }
+  const int64_t minimum = native_bitwidth == 64
+                              ? INT64_MIN
+                              : -(INT64_C(1) << (native_bitwidth - 1));
+  const int64_t maximum =
+      maximum_bitwidth == 64 ? INT64_MAX
+                             : (int64_t)((UINT64_C(1) << maximum_bitwidth) - 1);
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(subject_role),
+      loom_param_string(subject_name),
+      loom_param_string(IREE_SV("index.maximum_carrier")),
+      loom_param_i64(minimum),
+      loom_param_i64(maximum),
+  };
+  return loom_target_low_legality_emit_target_context_error(
+      context, op, LOOM_ERR_TARGET_005, params, IREE_ARRAYSIZE(params));
+}
+
+static iree_status_t loom_target_low_legality_verify_op_index_carriers(
+    loom_target_low_legality_context_t* context, const loom_op_t* op) {
+  if (loom_target_low_legality_bundle(context)->snapshot->index_bitwidth ==
+      64) {
+    return iree_ok_status();
+  }
+  const loom_value_id_t* results = loom_op_const_results(op);
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_target_low_legality_verify_index_value_carrier(
+        context, op, results[i], IREE_SV("result")));
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_target_low_legality_verify_op_value_types(
@@ -883,24 +958,35 @@ static iree_status_t loom_target_low_legality_verify_op(
 
   // Target contracts and providers own their shape-specific legality. Let them
   // emit precise diagnostics before the generic executable type gate runs.
+  const uint32_t previous_error_count = context->result->error_count;
   bool contract_handled = false;
   IREE_RETURN_IF_ERROR(loom_target_low_legality_try_contract_query_op(
       context, op, &contract_handled));
   if (contract_handled) {
-    return iree_ok_status();
+    return context->result->error_count == previous_error_count &&
+                   !context->terminal_rejection
+               ? loom_target_low_legality_verify_op_index_carriers(context, op)
+               : iree_ok_status();
   }
 
   bool provider_handled = false;
   IREE_RETURN_IF_ERROR(
       loom_target_low_legality_try_provider_op(context, op, &provider_handled));
   if (provider_handled) {
-    return iree_ok_status();
+    return context->result->error_count == previous_error_count &&
+                   !context->terminal_rejection
+               ? loom_target_low_legality_verify_op_index_carriers(context, op)
+               : iree_ok_status();
   }
 
   IREE_RETURN_IF_ERROR(
       loom_target_low_legality_verify_op_value_types(context, op));
 
-  return loom_target_low_legality_verify_op_class(context, op);
+  IREE_RETURN_IF_ERROR(loom_target_low_legality_verify_op_class(context, op));
+  return context->result->error_count == previous_error_count &&
+                 !context->terminal_rejection
+             ? loom_target_low_legality_verify_op_index_carriers(context, op)
+             : iree_ok_status();
 }
 
 static bool loom_target_low_legality_skip_children_after_rejection(
@@ -950,6 +1036,8 @@ static iree_status_t loom_target_low_legality_verify_function_signature(
     IREE_RETURN_IF_ERROR(loom_target_low_legality_verify_value(
         context, context->function.op, argument_ids[i],
         vector_carrier_supported));
+    IREE_RETURN_IF_ERROR(loom_target_low_legality_verify_index_value_carrier(
+        context, context->function.op, argument_ids[i], IREE_SV("argument")));
   }
   const loom_value_id_t* result_ids =
       loom_op_const_results(context->function.op);
@@ -957,6 +1045,8 @@ static iree_status_t loom_target_low_legality_verify_function_signature(
     IREE_RETURN_IF_ERROR(loom_target_low_legality_verify_value(
         context, context->function.op, result_ids[i],
         vector_carrier_supported));
+    IREE_RETURN_IF_ERROR(loom_target_low_legality_verify_index_value_carrier(
+        context, context->function.op, result_ids[i], IREE_SV("result")));
   }
   return iree_ok_status();
 }

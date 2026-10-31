@@ -36,37 +36,66 @@ static bool loom_index_cmp_facts_are_non_overlapping(
          rhs_facts->range_hi < lhs_facts->range_lo;
 }
 
-bool loom_index_cmp_facts_fit_target_carrier(
-    const loom_fact_context_t* context, loom_scalar_type_t operand_scalar_type,
-    uint8_t predicate, const loom_value_facts_t* lhs_facts,
+int32_t loom_index_cmp_value_carrier_bitwidth(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_scalar_type_t operand_scalar_type, loom_value_id_t lhs,
+    const loom_value_facts_t* lhs_facts, loom_value_id_t rhs,
     const loom_value_facts_t* rhs_facts) {
+  const int32_t lhs_bitwidth = loom_index_value_fact_carrier_bitwidth(
+      context, module, lhs, operand_scalar_type, *lhs_facts);
+  const int32_t rhs_bitwidth = loom_index_value_fact_carrier_bitwidth(
+      context, module, rhs, operand_scalar_type, *rhs_facts);
+  if (lhs_bitwidth < 0 || rhs_bitwidth < 0) {
+    return -1;
+  }
+  return iree_max(lhs_bitwidth, rhs_bitwidth);
+}
+
+static bool loom_index_cmp_facts_fit_signed_carrier(
+    int32_t bitwidth, const loom_value_facts_t* lhs_facts,
+    const loom_value_facts_t* rhs_facts) {
+  return bitwidth == 0 ||
+         (bitwidth > 0 &&
+          loom_value_facts_fit_signed_bit_count(*lhs_facts,
+                                                (uint8_t)bitwidth) &&
+          loom_value_facts_fit_signed_bit_count(*rhs_facts, (uint8_t)bitwidth));
+}
+
+static bool loom_index_cmp_facts_fit_unsigned_carrier(
+    int32_t bitwidth, const loom_value_facts_t* lhs_facts,
+    const loom_value_facts_t* rhs_facts) {
+  return bitwidth == 0 || (bitwidth > 0 &&
+                           loom_value_facts_fit_unsigned_bit_count(
+                               *lhs_facts, (uint8_t)bitwidth) &&
+                           loom_value_facts_fit_unsigned_bit_count(
+                               *rhs_facts, (uint8_t)bitwidth));
+}
+
+bool loom_index_cmp_facts_fit_carrier(int32_t bitwidth, uint8_t predicate,
+                                      const loom_value_facts_t* lhs_facts,
+                                      const loom_value_facts_t* rhs_facts) {
+  if (bitwidth < 0) {
+    return false;
+  }
   switch ((loom_index_cmp_predicate_t)predicate) {
     case LOOM_INDEX_CMP_PREDICATE_EQ:
     case LOOM_INDEX_CMP_PREDICATE_NE:
-      return (loom_index_value_facts_fit_signed_target_carrier(
-                  context, operand_scalar_type, *lhs_facts) &&
-              loom_index_value_facts_fit_signed_target_carrier(
-                  context, operand_scalar_type, *rhs_facts)) ||
-             (loom_index_value_facts_fit_unsigned_target_carrier(
-                  context, operand_scalar_type, *lhs_facts) &&
-              loom_index_value_facts_fit_unsigned_target_carrier(
-                  context, operand_scalar_type, *rhs_facts));
+      return loom_index_cmp_facts_fit_signed_carrier(bitwidth, lhs_facts,
+                                                     rhs_facts) ||
+             loom_index_cmp_facts_fit_unsigned_carrier(bitwidth, lhs_facts,
+                                                       rhs_facts);
     case LOOM_INDEX_CMP_PREDICATE_SLT:
     case LOOM_INDEX_CMP_PREDICATE_SLE:
     case LOOM_INDEX_CMP_PREDICATE_SGT:
     case LOOM_INDEX_CMP_PREDICATE_SGE:
-      return loom_index_value_facts_fit_signed_target_carrier(
-                 context, operand_scalar_type, *lhs_facts) &&
-             loom_index_value_facts_fit_signed_target_carrier(
-                 context, operand_scalar_type, *rhs_facts);
+      return loom_index_cmp_facts_fit_signed_carrier(bitwidth, lhs_facts,
+                                                     rhs_facts);
     case LOOM_INDEX_CMP_PREDICATE_ULT:
     case LOOM_INDEX_CMP_PREDICATE_ULE:
     case LOOM_INDEX_CMP_PREDICATE_UGT:
     case LOOM_INDEX_CMP_PREDICATE_UGE:
-      return loom_index_value_facts_fit_unsigned_target_carrier(
-                 context, operand_scalar_type, *lhs_facts) &&
-             loom_index_value_facts_fit_unsigned_target_carrier(
-                 context, operand_scalar_type, *rhs_facts);
+      return loom_index_cmp_facts_fit_unsigned_carrier(bitwidth, lhs_facts,
+                                                       rhs_facts);
     default:
       return false;
   }
@@ -161,12 +190,9 @@ static loom_value_facts_t loom_index_unsigned_comparison_facts(
   return loom_value_facts_make_signed_bit_count_range(bit_count);
 }
 
-bool loom_index_cmp_result_from_facts(const loom_fact_context_t* context,
-                                      loom_scalar_type_t operand_scalar_type,
-                                      uint8_t predicate,
-                                      const loom_value_facts_t* lhs_facts,
-                                      const loom_value_facts_t* rhs_facts,
-                                      bool* out_result) {
+static bool loom_index_cmp_result_from_carrier_facts(
+    int32_t bit_count, uint8_t predicate, const loom_value_facts_t* lhs_facts,
+    const loom_value_facts_t* rhs_facts, bool* out_result) {
   uint8_t predicate_kind;
   switch ((loom_index_cmp_predicate_t)predicate) {
     case LOOM_INDEX_CMP_PREDICATE_ULT:
@@ -182,14 +208,11 @@ bool loom_index_cmp_result_from_facts(const loom_fact_context_t* context,
       predicate_kind = LOOM_PREDICATE_UGE;
       break;
     default:
-      return loom_index_cmp_facts_fit_target_carrier(
-                 context, operand_scalar_type, predicate, lhs_facts,
-                 rhs_facts) &&
+      return loom_index_cmp_facts_fit_carrier(bit_count, predicate, lhs_facts,
+                                              rhs_facts) &&
              loom_index_signed_cmp_facts_result(predicate, lhs_facts, rhs_facts,
                                                 out_result);
   }
-  int32_t bit_count =
-      loom_index_target_carrier_bitwidth(context, operand_scalar_type);
   if (bit_count < 0 || loom_value_facts_is_float(*lhs_facts) ||
       loom_value_facts_is_float(*rhs_facts)) {
     return false;
@@ -218,4 +241,27 @@ bool loom_index_cmp_result_from_facts(const loom_fact_context_t* context,
   }
   return loom_value_facts_unsigned_comparison_result(
       predicate_kind, (uint8_t)bit_count, &lhs, &rhs, out_result);
+}
+
+bool loom_index_cmp_result_from_facts(const loom_fact_context_t* context,
+                                      loom_scalar_type_t operand_scalar_type,
+                                      uint8_t predicate,
+                                      const loom_value_facts_t* lhs_facts,
+                                      const loom_value_facts_t* rhs_facts,
+                                      bool* out_result) {
+  return loom_index_cmp_result_from_carrier_facts(
+      loom_index_target_carrier_bitwidth(context, operand_scalar_type),
+      predicate, lhs_facts, rhs_facts, out_result);
+}
+
+bool loom_index_cmp_result_from_value_facts(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_scalar_type_t operand_scalar_type, uint8_t predicate,
+    loom_value_id_t lhs, const loom_value_facts_t* lhs_facts,
+    loom_value_id_t rhs, const loom_value_facts_t* rhs_facts,
+    bool* out_result) {
+  return loom_index_cmp_result_from_carrier_facts(
+      loom_index_cmp_value_carrier_bitwidth(
+          context, module, operand_scalar_type, lhs, lhs_facts, rhs, rhs_facts),
+      predicate, lhs_facts, rhs_facts, out_result);
 }

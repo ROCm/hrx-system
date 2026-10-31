@@ -23,6 +23,7 @@
       .subgroup_partition = LOOM_TARGET_SUBGROUP_PARTITION_DENSE,            \
       .default_pointer_bitwidth = 64,                                        \
       .index_bitwidth = 32,                                                  \
+      .maximum_index_bitwidth = 64,                                          \
       .offset_bitwidth = 64,                                                 \
       .max_workgroup_size = {.x = 1024, .y = 1024, .z = 1024},               \
       .max_flat_workgroup_size = 1024,                                       \

@@ -19,6 +19,7 @@ static const loom_target_snapshot_t kWasmCoreSimd128Snapshot = {
     .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_WASM_BINARY,
     .default_pointer_bitwidth = 32,
     .index_bitwidth = 32,
+    .maximum_index_bitwidth = 32,
     .offset_bitwidth = 32,
     .memory_spaces =
         {

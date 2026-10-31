@@ -121,7 +121,7 @@ static iree_status_t loom_index_symbolic_cmp_pattern(
                 .value_id = comparison.rhs},
   };
   if (!loom_condition_integer_comparison_equivalent_relation(
-          &comparison,
+          &comparison, rewriter->module,
           rewriter->fact_table ? &rewriter->fact_table->context : NULL,
           /*assumed_truth=*/true, &lhs_facts, &rhs_facts, &relation.relation)) {
     return iree_ok_status();

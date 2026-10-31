@@ -577,3 +577,13 @@ func.def target(@target) @explicit_fma_requires_fused_instruction(%a: f32, %b: f
   %result = scalar.fmaf %a, %b, %c : f32
   func.return %result : f32
 }
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @computed_index_must_fit_physical_carrier(%lhs: index, %rhs: index) -> (index) where [range(%lhs, 65536, 65537), range(%rhs, 65536, 65537)] {
+  // ERROR@+1: TARGET/005 {op_name="index.mul", subject_role="result", subject_name="product", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="4294967295"}
+  %product = index.mul %lhs, %rhs : index
+  func.return %product : index
+}
