@@ -284,4 +284,72 @@ DOWNLOAD_INTERVAL_CASE(PageablePitched1M, kPitched, 1024 * 1024);
 DOWNLOAD_INTERVAL_CASE(PageablePitched4M, kPitched, 4 * 1024 * 1024);
 #undef DOWNLOAD_INTERVAL_CASE
 
+// A blocking HIP completion owns the borrowed upload bytes until return. Use
+// one persistent allocation per row so steady-state measurements include no
+// application allocation, registration, or validation work.
+void Upload(benchmark::State& state, bool registered) {
+  auto& runtime = Runtime();
+  const size_t length = state.range(0);
+  const size_t allocation_length = ((length + 4095) & ~size_t{4095}) + 4096;
+  auto* source =
+      static_cast<uint8_t*>(std::aligned_alloc(4096, allocation_length));
+  Require(source != nullptr, "upload host allocation failed");
+  for (size_t i = 0; i < length; ++i) {
+    source[i] = i % 251;
+  }
+  if (registered) {
+    Check(runtime.Resolve<decltype(&hipHostRegister)>("hipHostRegister")(
+        source, allocation_length, hipHostRegisterDefault));
+  }
+  hipDeviceptr_t target = nullptr;
+  Check(runtime.Resolve<decltype(&hipMalloc)>("hipMalloc")(&target,
+                                                           allocation_length));
+  Check(runtime.Resolve<decltype(&hipMemsetAsync)>("hipMemsetAsync")(
+      target, kPadding, allocation_length, runtime.stream()));
+  runtime.Wait();
+  auto copy = runtime.Resolve<decltype(&hipMemcpyAsync)>("hipMemcpyAsync");
+  const auto transfer = [&] {
+    Check(
+        copy(target, source, length, hipMemcpyHostToDevice, runtime.stream()));
+    runtime.Wait();
+  };
+  transfer();
+  for (auto _ : state) {
+    transfer();
+  }
+
+  // Reuse the input allocation for readback after all measured uploads finish.
+  // Both the varying payload and a full guard page come from device memory.
+  std::memset(source, 0, allocation_length);
+  Check(copy(source, target, allocation_length, hipMemcpyDeviceToHost,
+             runtime.stream()));
+  runtime.Wait();
+  for (size_t i = 0; i < length; ++i) {
+    Require(source[i] == i % 251, "upload payload mismatch");
+  }
+  for (size_t i = length; i < allocation_length; ++i) {
+    Require(source[i] == kPadding, "upload overwrote its guard");
+  }
+  Check(runtime.Resolve<decltype(&hipFree)>("hipFree")(target));
+  if (registered) {
+    Check(runtime.Resolve<decltype(&hipHostUnregister)>("hipHostUnregister")(
+        source));
+  }
+  std::free(source);
+  state.SetLabel(runtime.label());
+  state.SetBytesProcessed(state.iterations() * length);
+}
+
+#define UPLOAD_CASE(name, registered)         \
+  BENCHMARK_CAPTURE(Upload, name, registered) \
+      ->Name("HIP/Upload/" #name)             \
+      ->Arg(4 * 1024)                         \
+      ->Arg(1024 * 1024 + 123)                \
+      ->Arg(64 * 1024 * 1024)                 \
+      ->MeasureProcessCPUTime()               \
+      ->UseRealTime()
+UPLOAD_CASE(Pageable, false);
+UPLOAD_CASE(Registered, true);
+#undef UPLOAD_CASE
+
 }  // namespace
