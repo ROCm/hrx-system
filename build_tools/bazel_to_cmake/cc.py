@@ -386,6 +386,7 @@ class BuildFileFunctions:
         resource_group=None,
         sanitizer_suppressions=None,
         target_compatible_with=None,
+        _cmake_rule="iree_cc_test",
         **kwargs,
     ):
         if self._should_skip_target(tags=tags, **kwargs):
@@ -453,7 +454,7 @@ class BuildFileFunctions:
         if platform_linkopts_block:
             self._converter.body += platform_linkopts_block
         self._converter.body += (
-            f"iree_cc_test(\n"
+            f"{_cmake_rule}(\n"
             f"{name_block}"
             f"{hdrs_block}"
             f"{srcs_block}"

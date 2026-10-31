@@ -151,15 +151,7 @@ class AmdfBuildFileFunctions(
             "@platforms//cpu:x86_64",
             "@platforms//os:windows",
         ]
-        body_start = len(self._converter.body)
-        self.amdf_cc_test(**kwargs)
-        emitted_body = self._converter.body[body_start:]
-        self._converter.body = self._converter.body[:body_start]
-        self._converter.body += emitted_body.replace(
-            "iree_cc_test(",
-            "amdf_windows_sidecar_test(",
-            1,
-        )
+        self.amdf_cc_test(_cmake_rule="amdf_windows_sidecar_test", **kwargs)
 
     def amdf_library(
         self,
