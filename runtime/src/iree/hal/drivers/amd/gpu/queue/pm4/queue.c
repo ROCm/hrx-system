@@ -2846,10 +2846,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_timestamp(
 
 static iree_status_t iree_hal_amd_gpu_pm4_queue_flush(iree_hal_queue_t* base) {
   iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_check_acceptance(queue));
-  iree_hal_amd_gpu_publication_notify(queue->options.publication,
-                                      queue->options.source_ordinal);
-  return iree_ok_status();
+  // Inline submissions publish immediately. Deferred work owns its
+  // readiness notification; flushing an idle publisher has nothing to advance.
+  return iree_hal_amd_gpu_pm4_check_acceptance(queue);
 }
 
 static iree_status_t iree_hal_amd_gpu_pm4_queue_alloca(
