@@ -14,6 +14,13 @@ iree_hal_device_t* hrx_device_hal(hrx_device_t device) {
   return device ? device->hal_device : NULL;
 }
 
+iree_hal_command_buffer_mode_t hrx_device_profile_command_buffer_mode(
+    hrx_device_t device) {
+  return device->profiling_active
+             ? IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA
+             : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
+}
+
 hrx_status_t hrx_device_query_total_memory_from_spec(
     hrx_device_t device, bool* out_known, iree_device_size_t* out_total) {
   if (!device || !out_known || !out_total) {

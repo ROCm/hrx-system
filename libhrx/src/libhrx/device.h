@@ -18,6 +18,13 @@ extern "C" {
 // is NULL.
 iree_hal_device_t* hrx_device_hal(hrx_device_t device);
 
+// Returns recording modes required by the device's active HRX profile session.
+// OR these into modes used to create command buffers that may contain
+// dispatches. The session is established before publishing the device and ends
+// at teardown.
+iree_hal_command_buffer_mode_t hrx_device_profile_command_buffer_mode(
+    hrx_device_t device);
+
 // Queries immutable total device memory from the HAL device spec. Returns OK
 // with |out_known| false when the spec does not describe a known capacity.
 hrx_status_t hrx_device_query_total_memory_from_spec(

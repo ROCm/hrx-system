@@ -16,6 +16,7 @@
 #include "common/stream_value.h"
 #include "iree/base/api.h"
 #include "iree/hal/utils/resource_set.h"
+#include "libhrx/src/libhrx/device.h"
 
 //===----------------------------------------------------------------------===//
 // iree_hal_streaming_graph_exec_t (instantiation)
@@ -1605,7 +1606,8 @@ static iree_status_t iree_hal_streaming_graph_create_execute_block(
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_hal_command_buffer_create(
               iree_hal_queue_family(exec->context->queue),
-              IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+              hrx_device_profile_command_buffer_mode(
+                  exec->context->device_entry->hrx_device),
               IREE_HAL_COMMAND_CATEGORY_TRANSFER |
                   IREE_HAL_COMMAND_CATEGORY_DISPATCH |
                   IREE_HAL_COMMAND_CATEGORY_ATOMIC,

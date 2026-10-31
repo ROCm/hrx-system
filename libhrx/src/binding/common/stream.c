@@ -10,11 +10,13 @@
 #include <string.h>
 
 #include "common/context.h"
+#include "common/device.h"
 #include "common/event.h"
 #include "common/graph.h"
 #include "common/kernel_arguments.h"
 #include "common/memory.h"
 #include "common/stream_queue.h"
+#include "libhrx/src/libhrx/device.h"
 
 //===----------------------------------------------------------------------===//
 // Stream management
@@ -372,7 +374,9 @@ iree_status_t iree_hal_streaming_stream_begin_locked(
     status = iree_hal_command_buffer_create(
         iree_hal_queue_family(stream->queue),
         IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
-            IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED,
+            IREE_HAL_COMMAND_BUFFER_MODE_UNRETAINED |
+            hrx_device_profile_command_buffer_mode(
+                stream->context->device_entry->hrx_device),
         IREE_HAL_COMMAND_CATEGORY_TRANSFER | IREE_HAL_COMMAND_CATEGORY_DISPATCH,
         /*binding_capacity=*/0, &command_buffer);
     if (iree_status_is_ok(status)) {

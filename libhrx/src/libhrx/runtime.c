@@ -629,7 +629,6 @@ static iree_status_t hrx_get_profile_data_families(
     *out_data_families = IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS;
   } else if (strcmp(value, "dispatch") == 0) {
     *out_data_families = IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
-                         IREE_HAL_DEVICE_PROFILING_DATA_DEVICE_QUEUE_EVENTS |
                          IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS;
   } else if (strcmp(value, "executable") == 0) {
     *out_data_families = IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
