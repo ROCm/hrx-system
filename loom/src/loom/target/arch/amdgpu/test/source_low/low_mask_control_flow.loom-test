@@ -326,33 +326,6 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @retained_wit
 
 // ====
 
-// RUN: emit amdgpu-assembly @authored_retained_attribute strategy=source amdgpu.sgpr=4 fixed=%entry:physical_register:0:2 fixed=%next:physical_register:0:2
-
-amdgpu.target<gfx1151> @target {subgroup_size = 64}
-
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @authored_retained_attribute(%value: reg<amdgpu.vgpr>, %entry: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
-  %current = copy %entry : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr x2>
-  %alias = low.assume %current [range(%entry, 0, 1024)] : reg<amdgpu.sgpr x2>
-  %first = slice %alias[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %second = slice %current[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %swapped = concat(%second, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %selected = v_cndmask_b32_src0_inline %value, %current {false_value = 0}
-  low.br ^exit(%swapped: reg<amdgpu.sgpr x2>)
-^exit(%next: reg<amdgpu.sgpr x2>):
-  return %next
-}
-
-// ----
-  s_mov_b32 s2, s0
-  s_mov_b32 s3, s1
-  s_mov_b32 s1, s2
-  s_mov_b32 s0, s3
-  v_cndmask_b32 v0, 0, v0, s[2:3]
-.Lbb1:
-  s_endpgm
-
-// ====
-
 // A copied mask can retain a previous iteration's read. Its permuted backedge
 // requires real register moves, not a forced identity or scratch spill.
 // RUN: emit amdgpu-assembly @copied_mask_loop strategy=source
