@@ -76,8 +76,10 @@ iree_status_t iree_hal_streaming_direct_transfer_h2d(
               .length = length,
           },
   };
-  return hrx_hal_queue_transfer_and_wait(context->device_entry->hrx_device,
-                                         /*operation_count=*/1, &operation);
+  return hrx_hal_queue_transfer_and_wait(
+      context->device_entry->hrx_device,
+      /*operation_count=*/1, &operation,
+      iree_hal_streaming_context_wait_flags(context));
 }
 
 iree_status_t iree_hal_streaming_direct_transfer_d2h(
@@ -103,8 +105,10 @@ iree_status_t iree_hal_streaming_direct_transfer_d2h(
               .length = length,
           },
   };
-  return hrx_hal_queue_transfer_and_wait(context->device_entry->hrx_device,
-                                         /*operation_count=*/1, &operation);
+  return hrx_hal_queue_transfer_and_wait(
+      context->device_entry->hrx_device,
+      /*operation_count=*/1, &operation,
+      iree_hal_streaming_context_wait_flags(context));
 }
 
 iree_status_t iree_hal_streaming_direct_transfer_d2d(
@@ -131,8 +135,10 @@ iree_status_t iree_hal_streaming_direct_transfer_d2d(
               .flags = IREE_HAL_COPY_FLAG_NONE,
           },
   };
-  return hrx_hal_queue_transfer_and_wait(context->device_entry->hrx_device,
-                                         /*operation_count=*/1, &operation);
+  return hrx_hal_queue_transfer_and_wait(
+      context->device_entry->hrx_device,
+      /*operation_count=*/1, &operation,
+      iree_hal_streaming_context_wait_flags(context));
 }
 
 typedef struct iree_hal_streaming_host_download_t {
@@ -142,12 +148,15 @@ typedef struct iree_hal_streaming_host_download_t {
   iree_host_size_t operation_count;
   // Borrowed capture, live on the caller until the transaction completes.
   const iree_hal_transfer_operation_t* operations;
+  // Frontend context's scheduling policy for this blocking host call.
+  iree_async_wait_flags_t wait_flags;
 } iree_hal_streaming_host_download_t;
 
 static iree_status_t iree_hal_streaming_host_download_execute(void* user_data) {
   const iree_hal_streaming_host_download_t* download = user_data;
   return hrx_hal_queue_transfer_and_wait(
-      download->device, download->operation_count, download->operations);
+      download->device, download->operation_count, download->operations,
+      download->wait_flags);
 }
 
 // Unregistered host memory is a blocking compatibility destination. Keep its
@@ -160,6 +169,7 @@ iree_status_t iree_hal_streaming_direct_transfer_and_wait(
       .device = stream->context->device_entry->hrx_device,
       .operation_count = operation_count,
       .operations = operations,
+      .wait_flags = iree_hal_streaming_context_wait_flags(stream->context),
   };
   return iree_hal_streaming_execute_host_operation(
       stream, iree_hal_streaming_host_download_execute, &download);

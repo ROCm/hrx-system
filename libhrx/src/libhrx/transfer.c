@@ -7,7 +7,8 @@
 
 iree_status_t hrx_hal_queue_transfer_and_wait(
     hrx_device_t device, iree_host_size_t operation_count,
-    const iree_hal_transfer_operation_t* operations) {
+    const iree_hal_transfer_operation_t* operations,
+    iree_async_wait_flags_t wait_flags) {
   IREE_ASSERT_ARGUMENT(device);
   IREE_ASSERT_ARGUMENT(operation_count == 0 || operations);
 
@@ -36,8 +37,7 @@ iree_status_t hrx_hal_queue_transfer_and_wait(
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_semaphore_wait(semaphore, signal_value,
-                                     iree_infinite_timeout(),
-                                     IREE_ASYNC_WAIT_FLAG_NONE);
+                                     iree_infinite_timeout(), wait_flags);
   }
   iree_hal_semaphore_release(semaphore);
   return status;
@@ -111,8 +111,8 @@ hrx_status_t hrx_synchronous_h2d(hrx_device_t device, const void* host_src,
           },
   };
   HRX_RETURN_AND_END_ZONE(
-      z0, hrx_status_from_iree(
-              hrx_hal_queue_transfer_and_wait(device, 1, &operation)));
+      z0, hrx_status_from_iree(hrx_hal_queue_transfer_and_wait(
+              device, 1, &operation, IREE_ASYNC_WAIT_FLAG_NONE)));
 }
 
 hrx_status_t hrx_synchronous_d2h(hrx_device_t device, hrx_buffer_t src,
@@ -146,8 +146,8 @@ hrx_status_t hrx_synchronous_d2h(hrx_device_t device, hrx_buffer_t src,
           },
   };
   HRX_RETURN_AND_END_ZONE(
-      z0, hrx_status_from_iree(
-              hrx_hal_queue_transfer_and_wait(device, 1, &operation)));
+      z0, hrx_status_from_iree(hrx_hal_queue_transfer_and_wait(
+              device, 1, &operation, IREE_ASYNC_WAIT_FLAG_NONE)));
 }
 
 //===----------------------------------------------------------------------===//

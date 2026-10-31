@@ -1040,9 +1040,10 @@ iree_status_t iree_hal_streaming_execute_host_operation(
   iree_slim_mutex_unlock(&stream->mutex);
 
   if (iree_status_is_ok(status) && wait_value != 0) {
-    status = iree_hal_semaphore_wait(stream->timeline_semaphore, wait_value,
-                                     iree_infinite_timeout(),
-                                     IREE_ASYNC_WAIT_FLAG_NONE);
+    status = iree_hal_semaphore_wait(
+        stream->timeline_semaphore, wait_value, iree_infinite_timeout(),
+        stream->context ? iree_hal_streaming_context_wait_flags(stream->context)
+                        : IREE_ASYNC_WAIT_FLAG_NONE);
   }
   if (iree_status_is_ok(status)) {
     status = fn(user_data);
@@ -1077,9 +1078,12 @@ iree_status_t iree_hal_streaming_stream_wait_submitted(
   iree_slim_mutex_unlock(&stream->mutex);
   if (pending_value > 0) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_semaphore_wait(stream->timeline_semaphore, pending_value,
-                                    iree_infinite_timeout(),
-                                    IREE_ASYNC_WAIT_FLAG_NONE));
+        z0,
+        iree_hal_semaphore_wait(
+            stream->timeline_semaphore, pending_value, iree_infinite_timeout(),
+            stream->context
+                ? iree_hal_streaming_context_wait_flags(stream->context)
+                : IREE_ASYNC_WAIT_FLAG_NONE));
   }
 
   IREE_TRACE_ZONE_END(z0);
