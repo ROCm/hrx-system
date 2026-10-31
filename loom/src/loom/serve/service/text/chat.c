@@ -1163,7 +1163,8 @@ static iree_status_t loom_serve_text_chat_history_message(
       {"tool_call_id", LOOM_SERVE_TEXT_CHAT_STRING},
       {"name", LOOM_SERVE_TEXT_CHAT_STRING}};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      value, IREE_ARRAYSIZE(fields), fields, 0));
+      value, IREE_ARRAYSIZE(fields), fields,
+      LOOM_SERVE_TEXT_CHAT_FIELDS_IGNORE_UNKNOWN));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
   const iree_host_size_t first_image = history->chat->images.count;
   iree_host_size_t content_count = 0;
@@ -1196,6 +1197,17 @@ static iree_status_t loom_serve_text_chat_history_message(
       &history->state);
 }
 
+static iree_status_t loom_serve_text_chat_tool_limit(
+    void* user_data, iree_host_size_t index, iree_json_value_type_t type,
+    iree_string_view_t value) {
+  if (index >= LOOM_SERVE_TEXT_CHAT_MAX_TOOL_COUNT) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "tools must contain at most %d entries",
+                            LOOM_SERVE_TEXT_CHAT_MAX_TOOL_COUNT);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_serve_text_chat_request_render(
     iree_string_view_t body, loom_serve_text_chat_history_t* history) {
   if (!iree_unicode_utf8_validate(body)) {
@@ -1216,35 +1228,20 @@ static iree_status_t loom_serve_text_chat_request_render(
       {"tools", LOOM_SERVE_TEXT_CHAT_ARRAY},
       {"max_tokens", LOOM_SERVE_TEXT_CHAT_NUMBER},
       {"max_completion_tokens", LOOM_SERVE_TEXT_CHAT_NUMBER},
-      {"temperature", LOOM_SERVE_TEXT_CHAT_NUMBER},
       {"stream_options",
        LOOM_SERVE_TEXT_CHAT_OBJECT | LOOM_SERVE_TEXT_CHAT_NULL},
       {"store", LOOM_SERVE_TEXT_CHAT_BOOL},
-      {"tool_choice", LOOM_SERVE_TEXT_CHAT_STRING},
-      {"enable_thinking", LOOM_SERVE_TEXT_CHAT_BOOL},
-      {"model_options", LOOM_SERVE_TEXT_CHAT_OBJECT},
-      {"top_p", LOOM_SERVE_TEXT_CHAT_NUMBER},
-      {"top_k", LOOM_SERVE_TEXT_CHAT_NUMBER},
-      {"seed", LOOM_SERVE_TEXT_CHAT_NUMBER},
-      {"reasoning_effort", LOOM_SERVE_TEXT_CHAT_STRING},
-      {"preserve_thinking", LOOM_SERVE_TEXT_CHAT_BOOL},
-      {"chat_template_kwargs", LOOM_SERVE_TEXT_CHAT_OBJECT},
       {"media_io_kwargs", LOOM_SERVE_TEXT_CHAT_OBJECT}};
+  // Only native transport and resource controls are decoded here. Source
+  // receives the complete request and owns its model-specific options.
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-      object, IREE_ARRAYSIZE(fields), fields, 0));
+      object, IREE_ARRAYSIZE(fields), fields,
+      LOOM_SERVE_TEXT_CHAT_FIELDS_IGNORE_UNKNOWN));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[1]));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_required(&fields[0]));
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_video_options_read(
-      fields[18].value, history->chat->policy->images.maximum_count,
+      fields[8].value, history->chat->policy->images.maximum_count,
       &history->video));
-  if (fields[17].value.data) {
-    loom_serve_text_chat_field_t options[] = {
-        {"enable_thinking", LOOM_SERVE_TEXT_CHAT_BOOL},
-        {"reasoning_effort", LOOM_SERVE_TEXT_CHAT_STRING},
-        {"preserve_thinking", LOOM_SERVE_TEXT_CHAT_BOOL}};
-    IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-        fields[17].value, IREE_ARRAYSIZE(options), options, 0));
-  }
   iree_string_builder_reset(&history->scratch);
   IREE_RETURN_IF_ERROR(
       loom_serve_text_chat_append_decoded(&history->scratch, fields[0].value));
@@ -1257,24 +1254,9 @@ static iree_status_t loom_serve_text_chat_request_render(
   if (fields[2].value.data && fields[2].type == IREE_JSON_VALUE_TYPE_TRUE) {
     history->chat->flags |= LOOM_SERVE_TEXT_CHAT_FLAG_STREAM;
   }
-  if (fields[8].value.data && fields[8].type != IREE_JSON_VALUE_TYPE_FALSE) {
+  if (fields[7].value.data && fields[7].type != IREE_JSON_VALUE_TYPE_FALSE) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "only store=false is supported");
-  }
-  if (fields[9].value.data) {
-    iree_string_builder_reset(&history->scratch);
-    IREE_RETURN_IF_ERROR(loom_serve_text_chat_append_decoded(&history->scratch,
-                                                             fields[9].value));
-    const iree_string_view_t choice =
-        iree_string_builder_view(&history->scratch);
-    const bool tools_enabled = iree_string_view_equal(choice, IREE_SV("auto"));
-    if (!tools_enabled && !iree_string_view_equal(choice, IREE_SV("none"))) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "tool_choice must be auto or none");
-    }
-    if (!tools_enabled) {
-      history->chat->flags |= LOOM_SERVE_TEXT_CHAT_FLAG_TOOL_CALLS_DISABLED;
-    }
   }
   if (fields[4].value.data && fields[5].value.data) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1292,7 +1274,7 @@ static iree_status_t loom_serve_text_chat_request_render(
     }
     history->chat->max_tokens = (iree_host_size_t)max_tokens;
   }
-  if (fields[7].value.data && fields[7].type != IREE_JSON_VALUE_TYPE_NULL) {
+  if (fields[6].value.data && fields[6].type != IREE_JSON_VALUE_TYPE_NULL) {
     if (!iree_any_bit_set(history->chat->flags,
                           LOOM_SERVE_TEXT_CHAT_FLAG_STREAM)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1301,20 +1283,15 @@ static iree_status_t loom_serve_text_chat_request_render(
     loom_serve_text_chat_field_t options[] = {
         {"include_usage", LOOM_SERVE_TEXT_CHAT_BOOL}};
     IREE_RETURN_IF_ERROR(loom_serve_text_chat_fields_read(
-        fields[7].value, IREE_ARRAYSIZE(options), options, 0));
+        fields[6].value, IREE_ARRAYSIZE(options), options, 0));
     if (options[0].value.data && options[0].type == IREE_JSON_VALUE_TYPE_TRUE) {
       history->chat->flags |= LOOM_SERVE_TEXT_CHAT_FLAG_INCLUDE_USAGE;
     }
   }
   history->chat->tool_schemas =
       fields[3].value.data ? fields[3].value : IREE_SV("[]");
-  loom_serve_text_tool_schemas_t schemas;
-  IREE_RETURN_IF_ERROR(loom_serve_text_tool_schemas_initialize(
-      history->chat->tool_schemas, history->chat->host_allocator, &schemas));
-  if (!schemas.count) {
-    history->chat->flags |= LOOM_SERVE_TEXT_CHAT_FLAG_TOOL_CALLS_DISABLED;
-  }
-  loom_serve_text_tool_schemas_deinitialize(&schemas);
+  IREE_RETURN_IF_ERROR(iree_json_enumerate_array_typed(
+      history->chat->tool_schemas, loom_serve_text_chat_tool_limit, NULL));
   const iree_string_view_t inputs[] = {body, history->chat->tool_schemas};
   IREE_RETURN_IF_ERROR(loom_serve_text_chat_render(
       history->chat->policy, history->chat->policy->chat_begin,
@@ -1572,8 +1549,6 @@ typedef struct loom_serve_text_chat_completion_tools_t {
   const loom_serve_text_chat_policy_t* policy;
   // Request-unique namespace for transport tool IDs.
   uint64_t request_id;
-  // Whether this turn permits structured output from the declared catalog.
-  bool tools_enabled;
   // Owned validated records, published only after canonical history succeeds.
   loom_serve_text_tool_calls_t* calls;
   // Exclusively borrowed formatting storage, reused across completions.
@@ -1584,11 +1559,6 @@ static iree_status_t loom_serve_text_chat_completion_tool(
     void* user_data, iree_host_size_t index, iree_json_value_type_t type,
     iree_string_view_t value) {
   loom_serve_text_chat_completion_tools_t* tools = user_data;
-  if (!tools->tools_enabled) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "source returned a tool call without enabled tools");
-  }
   if (type != IREE_JSON_VALUE_TYPE_OBJECT ||
       index >= LOOM_SERVE_TEXT_CHAT_MAX_TOOL_COUNT) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1655,8 +1625,6 @@ iree_status_t loom_serve_text_chat_complete(
       .scratch_allocator = scratch_allocator,
       .policy = chat->policy,
       .request_id = request_id,
-      .tools_enabled = !iree_any_bit_set(
-          chat->flags, LOOM_SERVE_TEXT_CHAT_FLAG_TOOL_CALLS_DISABLED),
       .calls = tool_calls,
       .scratch = scratch};
   const int64_t truncated_argument = truncated;

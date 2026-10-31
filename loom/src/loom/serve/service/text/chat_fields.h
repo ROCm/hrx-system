@@ -24,6 +24,10 @@ enum loom_serve_text_chat_field_type_bits_e {
   LOOM_SERVE_TEXT_CHAT_NULL = 1u << IREE_JSON_VALUE_TYPE_NULL,
   LOOM_SERVE_TEXT_CHAT_BOOL =
       (1u << IREE_JSON_VALUE_TYPE_TRUE) | (1u << IREE_JSON_VALUE_TYPE_FALSE),
+  LOOM_SERVE_TEXT_CHAT_ANY =
+      LOOM_SERVE_TEXT_CHAT_STRING | LOOM_SERVE_TEXT_CHAT_NUMBER |
+      LOOM_SERVE_TEXT_CHAT_OBJECT | LOOM_SERVE_TEXT_CHAT_ARRAY |
+      LOOM_SERVE_TEXT_CHAT_NULL | LOOM_SERVE_TEXT_CHAT_BOOL,
 };
 
 typedef struct loom_serve_text_chat_field_t {
@@ -38,7 +42,7 @@ typedef struct loom_serve_text_chat_field_t {
 } loom_serve_text_chat_field_t;
 
 typedef enum loom_serve_text_chat_field_flag_bits_e {
-  // Descriptive schema keys outside this view may pass through.
+  // Fields owned by other consumers pass through without interpretation.
   LOOM_SERVE_TEXT_CHAT_FIELDS_IGNORE_UNKNOWN = 1u << 0,
 } loom_serve_text_chat_field_flag_bits_t;
 typedef uint32_t loom_serve_text_chat_field_flags_t;

@@ -313,7 +313,6 @@ class ClientTest(unittest.TestCase):
                         {"stream_options": {}},
                         {"stream": False, "stream_options": {"include_usage": True}},
                         {"temperature": 0.7},
-                        {"tool_choice": "required"},
                     ):
                         error = self.request(
                             address, self.body(**options), expected=400
@@ -367,8 +366,8 @@ class ClientTest(unittest.TestCase):
                     )
                     self.assertIn("message", failed[-1]["error"])
 
-                    # A source parser cannot publish structured calls when the
-                    # request disables calls, even with a declared catalog.
+                    # Generated tool records are data, not native permission
+                    # decisions. Source owns their translation and history.
                     calls = json.dumps(
                         [
                             {
@@ -379,46 +378,6 @@ class ClientTest(unittest.TestCase):
                     )
                     marker = 'buffer.constant utf8("[]") : buffer'
                     self.assertEqual(source.count(marker), 1)
-                    path.write_text(
-                        source.replace(
-                            marker,
-                            f"buffer.constant utf8({json.dumps(calls)}) : buffer",
-                        )
-                    )
-                    control(
-                        address,
-                        "POST",
-                        "/v1/models/register",
-                        202,
-                        body=json.dumps(
-                            {
-                                **declaration,
-                                "name": "unexpected-tools",
-                                "base_directory": str(broken),
-                            }
-                        ),
-                    )
-                    for permission in (
-                        {"tools": tools, "tool_choice": "none"},
-                        {"tools": [], "tool_choice": "auto"},
-                        {},
-                    ):
-                        for streaming in (False, True):
-                            failed = self.request(
-                                address,
-                                self.body(
-                                    model="unexpected-tools",
-                                    stream=streaming,
-                                    **permission,
-                                ),
-                                expected=200 if streaming else 500,
-                            )
-                            error = (
-                                failed[-1]["error"] if streaming else failed["error"]
-                            )
-                            self.assertIn("without enabled tools", error["message"])
-                            self.assertNotIn("tool_calls", json.dumps(failed))
-
                     # The source owns call translation, but the native session
                     # owns why generation stopped. A complete call must not turn
                     # an exhausted budget into a normal tool handoff.
@@ -452,6 +411,39 @@ class ClientTest(unittest.TestCase):
                             }
                         ),
                     )
+                    for options in (
+                        {"tools": tools, "tool_choice": "none"},
+                        {"tools": [], "tool_choice": "auto"},
+                        {"tool_choice": "required"},
+                        {
+                            "tool_choice": {
+                                "type": "function",
+                                "function": {"name": "yield"},
+                            }
+                        },
+                        {},
+                    ):
+                        for streaming in (False, True):
+                            result = self.request(
+                                address,
+                                self.body(model="tools", stream=streaming, **options),
+                            )
+                            if streaming:
+                                returned = [
+                                    call
+                                    for event in result
+                                    for call in event["choices"][0]["delta"].get(
+                                        "tool_calls", []
+                                    )
+                                ]
+                            else:
+                                returned = result["choices"][0]["message"]["tool_calls"]
+                            self.assertEqual(len(returned), 1)
+                            self.assertEqual(
+                                returned[0]["function"],
+                                json.loads(calls)[0]["function"],
+                            )
+
                     for streaming in (False, True):
                         for budget, finish, outputs in (
                             (2, "length", 2),

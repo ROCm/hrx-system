@@ -139,15 +139,14 @@ class RequestTest(unittest.TestCase):
 
         tools[-1]["function"]["name"] = tools[7]["function"]["name"]
         result = self.execute(self.request(tools=tools))
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("duplicate tool name", result.stderr)
-        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["prompt"], "#" * 24 + "abxa")
 
         result = self.execute(
             self.request(tools=[tool(index) for index in range(4097)])
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("at most 4096 function objects", result.stderr)
+        self.assertIn("at most 4096 entries", result.stderr)
         self.assertEqual(result.stdout, "")
 
     def test_rejects_remote_image_urls(self):
@@ -178,7 +177,14 @@ class RequestTest(unittest.TestCase):
                 "parameters": {"type": "object", "properties": {}},
             },
         }
-        for choice in (None, "auto", "none"):
+        for choice in (
+            None,
+            "auto",
+            "none",
+            "required",
+            "unknown",
+            {"type": "function", "function": {"name": "yield"}},
+        ):
             with self.subTest(choice=choice):
                 options = {} if choice is None else {"tool_choice": choice}
                 result = self.execute(self.request(tools=[tool], **options))
@@ -193,20 +199,19 @@ class RequestTest(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["prompt"], "#abxa")
 
         result = self.execute(self.request(tools=[tool, tool], tool_choice="none"))
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("duplicate tool name", result.stderr)
-        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["prompt"], "##abxa")
 
-        for choice in (
-            "required",
-            "unknown",
-            {"type": "function", "function": {"name": "inspect"}},
+    def test_catalog_metadata_is_not_native_policy(self):
+        for tool in (
+            {"type": "function", "function": {"name": "read", "strict": True}},
+            {"type": "custom", "custom": {"name": "read", "format": "text"}},
+            {"type": "function", "function": {"name": "read", "parameters": True}},
         ):
-            with self.subTest(choice=choice):
-                result = self.execute(self.request(tools=[tool], tool_choice=choice))
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("INVALID_ARGUMENT", result.stderr)
-                self.assertEqual(result.stdout, "")
+            with self.subTest(tool=tool):
+                result = self.execute(self.request(tools=[tool]))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["prompt"], "#abxa")
 
     def test_policy_errors_publish_no_partial_success(self):
         requests = [
@@ -233,11 +238,6 @@ class RequestTest(unittest.TestCase):
             self.request([{"role": "user", "content": "?"}]),
             self.request(
                 [{"role": "assistant", "content": "a", "reasoning_content": "b"}]
-            ),
-            self.request(
-                tools=[
-                    {"type": "function", "function": {"name": "read", "strict": True}}
-                ]
             ),
             self.request(enable_thinking=True).replace(
                 "enable_thinking", "enable_think\\u0069ng"

@@ -41,15 +41,11 @@ TEST(ToolSchemasTest, LookupBorrowsInputWithoutReorderingDeclarations) {
   loom_serve_text_tool_schemas_deinitialize(&schemas);
 }
 
-TEST(ToolSchemasTest, RejectsInvalidTailWithoutRetainingPartialDescriptors) {
+TEST(ToolSchemasTest,
+     RejectsAmbiguousFieldsWithoutRetainingPartialDescriptors) {
   const char* invalid_functions[] = {
-      R"({"name":"read","parameters":{"type":"object","properties":{}}})",
-      R"({"parameters":{}})",
-      R"({"name":42})",
-      R"({"name":"write","parameters":[]})",
-      R"({"name":"write","parameters":{"type":"object","properties":{}},"strict":true})",
-      R"({"name":"re\u0061d"})",
       R"({"name":"write","name":"other","parameters":{"type":"object","properties":{}}})",
+      R"({"name":"write","parameters":{},"parameters":{}})",
   };
   for (const char* function : invalid_functions) {
     SCOPED_TRACE(function);
@@ -72,6 +68,9 @@ TEST(ToolSchemasTest, ParameterSchemasAreOpaqueAndNamesAreDecoded) {
   const char* functions[] = {
       R"({"name":"wr\u0069te"})",
       R"({"name":"write","parameters":{},"strict":false})",
+      R"({"name":"write","parameters":{},"strict":true})",
+      R"({"name":"write","parameters":true})",
+      R"({"name":"write","parameters":[]})",
       R"({"name":"write","parameters":null,"strict":null})",
       R"({"name":"write","parameters":{"$ref":"#/$defs/args","$defs":{"args":{"oneOf":[{"type":"object"},{"type":"null"}]}}}})",
       R"({"name":"write","parameters":{"type":"array","properties":false,"required":42},"description":null,"metadata":{"tag":"pass through"}})",
@@ -89,6 +88,33 @@ TEST(ToolSchemasTest, ParameterSchemasAreOpaqueAndNamesAreDecoded) {
               nullptr);
     loom_serve_text_tool_schemas_deinitialize(&schemas);
   }
+}
+
+TEST(ToolSchemasTest, CatalogEntriesWithoutFunctionHintsNeedNoAllocation) {
+  loom_serve_text_tool_schemas_t schemas;
+  IREE_ASSERT_OK(loom_serve_text_tool_schemas_initialize(
+      IREE_SV(R"([{"type":"custom","custom":{"name":"read"}},
+                  {"type":"function","function":{"name":42}},
+                  {"type":"function","function":{}},null])"),
+      iree_allocator_null(), &schemas));
+  EXPECT_EQ(schemas.count, 0);
+  loom_serve_text_tool_schemas_deinitialize(&schemas);
+}
+
+TEST(ToolSchemasTest, RepeatedNamesHaveNoUnambiguousHint) {
+  loom_serve_text_tool_schemas_t schemas;
+  IREE_ASSERT_OK(loom_serve_text_tool_schemas_initialize(
+      IREE_SV(
+          R"([{"type":"function","function":{"name":"read","parameters":{}}},
+                  {"type":"function","function":{"name":"re\u0061d","parameters":{"properties":{"path":{"type":"integer"}}}}},
+                  {"type":"function","function":{"name":"write"}}])"),
+      iree_allocator_system(), &schemas));
+  EXPECT_EQ(schemas.count, 3);
+  EXPECT_EQ(loom_serve_text_tool_schemas_find(&schemas, IREE_SV("read")),
+            nullptr);
+  EXPECT_NE(loom_serve_text_tool_schemas_find(&schemas, IREE_SV("write")),
+            nullptr);
+  loom_serve_text_tool_schemas_deinitialize(&schemas);
 }
 
 TEST(ToolSchemasTest, EmptyDeclarationsNeedNoAllocation) {

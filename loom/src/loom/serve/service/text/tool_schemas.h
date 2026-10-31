@@ -17,8 +17,8 @@ extern "C" {
 // allocated only for the declarations present in a request.
 #define LOOM_SERVE_TEXT_CHAT_MAX_TOOL_COUNT 4096
 
-// Indexed function declaration. Parameter schemas remain opaque to the request
-// boundary; a model-selected codec may consult them for representation hints.
+// Indexed representation hints for a function. The model-selected codec uses
+// parameter types to decode XML text, not to validate executable arguments.
 typedef struct loom_serve_text_chat_tool_t {
   // Decoded function name, borrowing the request unless it contains escapes.
   iree_string_view_t name;
@@ -42,16 +42,17 @@ typedef struct loom_serve_text_tool_schemas_t {
   loom_serve_text_chat_tool_t* values;
 } loom_serve_text_tool_schemas_t;
 
-// Parses native function declarations from the caller's validated UTF-8 input.
-// The JSON bytes outlive this table. Failure frees partial storage and leaves
-// out_schemas empty and safe to deinitialize.
+// Indexes function representation hints from the caller's validated UTF-8 JSON.
+// Entries without a function name supply no hints; other catalog metadata is
+// not interpreted. The JSON bytes outlive this table. Failure frees partial
+// storage and leaves out_schemas empty and safe to deinitialize.
 iree_status_t loom_serve_text_tool_schemas_initialize(
     iree_string_view_t declarations, iree_allocator_t host_allocator,
     loom_serve_text_tool_schemas_t* out_schemas);
 void loom_serve_text_tool_schemas_deinitialize(
     loom_serve_text_tool_schemas_t* schemas);
 
-// Returns the declared function or NULL when the name was not declared.
+// Returns the unique function's hints or NULL for absent or repeated names.
 const loom_serve_text_chat_tool_t* loom_serve_text_tool_schemas_find(
     const loom_serve_text_tool_schemas_t* schemas, iree_string_view_t name);
 

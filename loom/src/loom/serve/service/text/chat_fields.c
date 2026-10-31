@@ -11,7 +11,7 @@ typedef struct loom_serve_text_chat_fields_t {
   iree_host_size_t count;
   // Mutable decoding destinations.
   loom_serve_text_chat_field_t* values;
-  // Whether descriptive schema keys outside this view may pass through.
+  // Whether fields outside this consumer's view may pass through.
   loom_serve_text_chat_field_flags_t flags;
 } loom_serve_text_chat_fields_t;
 
