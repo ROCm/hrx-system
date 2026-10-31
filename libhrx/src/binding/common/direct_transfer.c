@@ -8,9 +8,49 @@
 
 #include "common/context.h"
 #include "common/device.h"
-#include "common/memory.h"
 #include "common/stream.h"
+#include "common/stream_queue.h"
 #include "transfer.h"
+
+iree_status_t iree_hal_streaming_direct_transfer_enqueue(
+    iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations) {
+  iree_slim_mutex_lock(&stream->mutex);
+  iree_status_t status = iree_hal_streaming_stream_flush_locked(stream);
+  uint64_t wait_value = 0;
+  uint64_t signal_value = 0;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_stream_reserve_next_value_locked(
+        stream, &wait_value, &signal_value);
+  }
+  iree_hal_streaming_submission_t submission = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_submission_prepare_locked(
+        stream, stream->queue, signal_value,
+        IREE_HAL_STREAMING_SUBMISSION_FLAG_NONE, &submission);
+  }
+  if (iree_status_is_ok(status)) {
+    const iree_hal_semaphore_list_t waits = {
+        .count = wait_value > 0 ? 1 : 0,
+        .semaphores = &stream->timeline_semaphore,
+        .payload_values = &wait_value,
+    };
+    status =
+        iree_hal_queue_transfer(submission.queue, waits, submission.signals,
+                                operation_count, operations, /*barriers=*/NULL);
+  }
+  const bool accepted = iree_status_is_ok(status);
+  iree_hal_streaming_submission_finish_locked(stream, &submission, accepted);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_flush(submission.queue);
+  }
+  iree_slim_mutex_unlock(&stream->mutex);
+  if (accepted && !iree_status_is_ok(status)) {
+    status =
+        iree_status_join(status, iree_hal_streaming_stream_synchronize(stream));
+  }
+  return status;
+}
 
 iree_status_t iree_hal_streaming_direct_transfer_h2d(
     iree_hal_streaming_context_t* context, const void* source,
@@ -113,39 +153,14 @@ static iree_status_t iree_hal_streaming_host_download_execute(void* user_data) {
 // Unregistered host memory is a blocking compatibility destination. Keep its
 // completion on the caller, ordered only after this stream, instead of making
 // it depend on unrelated application callbacks or allocating CPU-copy staging.
-iree_status_t iree_hal_streaming_direct_transfer_d2h_rows(
-    iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream,
-    void* destination, iree_device_size_t destination_pitch,
-    iree_device_size_t width, iree_host_size_t row_count,
-    const iree_hal_streaming_buffer_ref_t* sources) {
-  iree_hal_transfer_operation_t single_operation;
-  iree_hal_transfer_operation_t* operations = &single_operation;
-  if (row_count > 1) {
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array_uninitialized(
-        context->host_allocator, row_count, sizeof(*operations),
-        (void**)&operations));
-  }
-  for (iree_host_size_t row = 0; row < row_count; ++row) {
-    operations[row] = (iree_hal_transfer_operation_t){
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-        .download =
-            {
-                .source_buffer = sources[row].buffer->buffer,
-                .source_offset = sources[row].offset,
-                .target = (uint8_t*)destination + row * destination_pitch,
-                .length = width,
-            },
-    };
-  }
+iree_status_t iree_hal_streaming_direct_transfer_and_wait(
+    iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations) {
   iree_hal_streaming_host_download_t download = {
-      .device = context->device_entry->hrx_device,
-      .operation_count = row_count,
+      .device = stream->context->device_entry->hrx_device,
+      .operation_count = operation_count,
       .operations = operations,
   };
-  iree_status_t status = iree_hal_streaming_execute_host_operation(
+  return iree_hal_streaming_execute_host_operation(
       stream, iree_hal_streaming_host_download_execute, &download);
-  if (operations != &single_operation) {
-    iree_allocator_free(context->host_allocator, operations);
-  }
-  return status;
 }

@@ -16,7 +16,16 @@ extern "C" {
 
 typedef struct iree_hal_streaming_context_t iree_hal_streaming_context_t;
 typedef struct iree_hal_streaming_stream_t iree_hal_streaming_stream_t;
-typedef struct iree_hal_streaming_buffer_ref_t iree_hal_streaming_buffer_ref_t;
+
+// Submits uncaptured transfers after the stream's preceding work, preserving
+// its execution queue lease and publishing one new timeline point. Descriptors
+// are borrowed for this call; the HAL captures accepted operations. Default
+// queue barriers publish system-visible results before stream completion.
+// Success is asynchronous. A post-accept flush failure drains the accepted
+// transfer before returning ownership of borrowed host storage.
+iree_status_t iree_hal_streaming_direct_transfer_enqueue(
+    iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations);
 
 // Performs a blocking host-to-device transfer on |context|'s provisioned
 // transfer queue.
@@ -31,15 +40,12 @@ iree_status_t iree_hal_streaming_direct_transfer_d2h(
     iree_hal_streaming_context_t* context, iree_hal_buffer_t* source_buffer,
     iree_device_size_t source_offset, void* target, iree_device_size_t length);
 
-// Downloads validated source rows to unregistered host memory in one native
-// transfer batch. The caller reserves and completes one point on |stream|'s
-// timeline without routing CPU work to a callback worker. Prepared |sources|
-// and the host destination remain borrowed until this blocking call returns.
-iree_status_t iree_hal_streaming_direct_transfer_d2h_rows(
-    iree_hal_streaming_context_t* context, iree_hal_streaming_stream_t* stream,
-    void* destination, iree_device_size_t destination_pitch,
-    iree_device_size_t width, iree_host_size_t row_count,
-    const iree_hal_streaming_buffer_ref_t* sources);
+// Runs a blocking transfer batch after this stream's preceding work on the
+// context's transfer queue. Descriptors and host bytes remain borrowed until
+// return. The caller executes host participation without a callback worker.
+iree_status_t iree_hal_streaming_direct_transfer_and_wait(
+    iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations);
 
 // Performs a blocking device-to-device transfer on |context|'s provisioned
 // transfer queue.

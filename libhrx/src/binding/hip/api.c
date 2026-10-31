@@ -8126,75 +8126,41 @@ HIPAPI hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src,
     HIP_RETURN_ERROR(dependency_result);
   }
 
-  size_t dst_span = 0;
-  if (!iree_hip_calculate_2d_copy_span(dpitch, width, height, &dst_span)) {
-    iree_hip_resolved_stream_release(&resolved_stream);
-    IREE_TRACE_ZONE_END(z0);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  const bool pageable_d2h =
-      kind == hipMemcpyDeviceToHost &&
-      iree_hip_memcpy_destination_is_pageable(context, dst, dst_span);
-
-  if (kind == hipMemcpyDeviceToHost) {
-    iree_status_t packed_status = iree_hal_streaming_memcpy_device_to_host_2d(
-        context, dst, dpitch, (iree_hal_streaming_deviceptr_t)src, spitch,
-        width, height, stream_obj);
-    if (!iree_status_is_unavailable(packed_status)) {
-      if (iree_status_is_ok(packed_status) && pageable_d2h) {
-        packed_status = iree_hal_streaming_stream_synchronize(stream_obj);
-      }
-      hipError_t result = iree_status_to_hip_result(packed_status);
-      iree_hip_resolved_stream_release(&resolved_stream);
-      IREE_TRACE_ZONE_END(z0);
-      HIP_RETURN_ERROR(result);
-    }
-    iree_status_ignore(packed_status);
-  }
-
-  // Copy row by row.
   iree_status_t status = iree_ok_status();
-  if (kind == hipMemcpyHostToHost) {
-    status = iree_hal_streaming_stream_synchronize(stream_obj);
-  }
-  const uint8_t* src_ptr = (const uint8_t*)src;
-  uint8_t* dst_ptr = (uint8_t*)dst;
-
-  for (size_t row = 0; row < height && iree_status_is_ok(status); ++row) {
-    switch (kind) {
-      case hipMemcpyHostToDevice:
-        status = iree_hal_streaming_memcpy_host_to_device(
-            context, (iree_hal_streaming_deviceptr_t)dst_ptr, src_ptr, width,
-            stream_obj);
-        break;
-      case hipMemcpyDeviceToHost:
-        status = iree_hal_streaming_memcpy_device_to_host(
-            context, dst_ptr, (iree_hal_streaming_deviceptr_t)src_ptr, width,
-            stream_obj);
-        break;
-      case hipMemcpyDeviceToDevice:
-        status = iree_hal_streaming_memcpy_device_to_device(
-            context, (iree_hal_streaming_deviceptr_t)dst_ptr,
-            (iree_hal_streaming_deviceptr_t)src_ptr, width, stream_obj);
-        break;
-      case hipMemcpyHostToHost:
-        memcpy(dst_ptr, src_ptr, width);
-        break;
-      default:
-        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "invalid memory copy direction");
-        break;
-    }
-    src_ptr += spitch;
-    dst_ptr += dpitch;
+  switch (kind) {
+    case hipMemcpyHostToDevice:
+      status = iree_hal_streaming_memcpy_host_to_device_2d(
+          context, (iree_hal_streaming_deviceptr_t)dst, dpitch, src, spitch,
+          width, height, stream_obj);
+      break;
+    case hipMemcpyDeviceToHost:
+      status = iree_hal_streaming_memcpy_device_to_host_2d(
+          context, dst, dpitch, (iree_hal_streaming_deviceptr_t)src, spitch,
+          width, height, stream_obj);
+      break;
+    case hipMemcpyDeviceToDevice:
+      status = iree_hal_streaming_memcpy_device_to_device_2d(
+          context, (iree_hal_streaming_deviceptr_t)dst, dpitch,
+          (iree_hal_streaming_deviceptr_t)src, spitch, width, height,
+          stream_obj);
+      break;
+    case hipMemcpyHostToHost:
+      status = iree_hal_streaming_stream_synchronize(stream_obj);
+      for (size_t row = 0; row < height && iree_status_is_ok(status); ++row) {
+        memcpy((uint8_t*)dst + row * dpitch, (const uint8_t*)src + row * spitch,
+               width);
+      }
+      break;
+    default:
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "invalid memory copy direction");
+      break;
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_stream_flush(stream_obj);
   }
-  if (iree_status_is_ok(status) && pageable_d2h) {
-    status = iree_hal_streaming_stream_synchronize(stream_obj);
-  } else if (!iree_status_is_ok(status)) {
-    // Earlier rows may already be accepted and still borrow host storage.
+  if (!iree_status_is_ok(status)) {
+    // Snapshot uploads may already own a submitted prefix when flushing fails.
     status = iree_status_join(
         status, iree_hal_streaming_stream_synchronize(stream_obj));
   }

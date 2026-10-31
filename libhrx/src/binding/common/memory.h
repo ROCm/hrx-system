@@ -499,8 +499,8 @@ iree_status_t iree_hal_streaming_memory_allocate_host_staging(
     iree_hal_streaming_context_t* context, iree_host_size_t size,
     iree_hal_streaming_buffer_t** out_buffer);
 
-// Enqueues a pitched H2D copy as one command-buffer transaction.
-// Synchronization: stream-ordered.
+// Enqueues registered H2D rows in one stream-ordered transfer batch.
+// Unregistered sources are snapshotted while recording before returning.
 iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
     iree_device_size_t dst_pitch, const void* src, iree_device_size_t src_pitch,
@@ -508,18 +508,18 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device_2d(
     iree_hal_streaming_stream_t* stream);
 
 // Copies a pitched D2H region. Registered host destinations use asynchronous
-// queue-visible staging and a stream-ordered CPU scatter. Unregistered host
-// destinations complete on the caller through one stream-ordered transfer
-// batch.
+// copies into the destination buffer with one system visibility boundary.
+// Unregistered host destinations complete on the caller through one
+// stream-ordered transfer batch.
 iree_status_t iree_hal_streaming_memcpy_device_to_host_2d(
     iree_hal_streaming_context_t* context, void* dst,
     iree_device_size_t dst_pitch, iree_hal_streaming_deviceptr_t src,
     iree_device_size_t src_pitch, iree_device_size_t width,
     iree_host_size_t height, iree_hal_streaming_stream_t* stream);
 
-// Enqueues a pitched D2D copy as one command-buffer transaction.
-// Synchronization: stream-ordered. If recording fails after accepting any
-// rows, the accepted prefix completes before the original error is returned.
+// Enqueues a pitched D2D copy as one stream-ordered transfer batch. Every row
+// is validated before acceptance. A post-accept flush error joins the batch
+// before returning.
 iree_status_t iree_hal_streaming_memcpy_device_to_device_2d(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
     iree_device_size_t dst_pitch, iree_hal_streaming_deviceptr_t src,

@@ -353,12 +353,6 @@ hrx_cc_test(
 hrx_cc_test(
     name = "memory_test",
     srcs = ["memory_test.cc"],
-    linkopts = select({
-        "@platforms//os:linux": [
-            "-Wl,--wrap=iree_hal_command_buffer_barrier",
-        ],
-        "//conditions:default": [],
-    }),
     deps = [
         ":common",
         ":host_callback",
