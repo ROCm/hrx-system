@@ -70,6 +70,13 @@ class Library:
     # Repository-relative package owning this declaration's artifact directory.
     package: str
 
+    @cached_property
+    def requires_cxx_linker(self):
+        """Whether this library contributes C++ objects to a final link."""
+        return any(
+            re.search(r"\.(cc|cpp|cxx|c[+][+]|C)$", source) for source in self.compiled
+        )
+
 
 @dataclass
 class Graph:
@@ -205,10 +212,7 @@ class Graph:
             if provider and provider.native_scope == native_scope:
                 if provider.compiled:
                     target = provider.name.replace("::", "_")
-                    cxx |= any(
-                        re.search(r"\.(cc|cpp|cxx|c[+][+]|C)$", source)
-                        for source in provider.compiled
-                    )
+                    cxx |= provider.requires_cxx_linker
                     if provider.alwayslink:
                         native.append(
                             f"$<GENEX_EVAL:$<TARGET_PROPERTY:{target},IREE_CC_OBJECTS>>"

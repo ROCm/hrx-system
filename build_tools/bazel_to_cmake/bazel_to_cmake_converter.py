@@ -19,6 +19,7 @@ import itertools
 import os
 import re
 import shlex
+from functools import cached_property
 
 import bazel_to_cmake_config
 import bazel_to_cmake_loads
@@ -715,10 +716,15 @@ class BuildFileFunctions(
         else:
             return f"${{IREE_BINARY_DIR}}/{src}"
 
-    def _current_package(self):
+    @cached_property
+    def _package(self):
+        """Repository-relative identity shared by this package's declarations."""
         if not self._repo_root:
             return ""
         return os.path.relpath(self._build_dir, self._repo_root).replace("\\", "/")
+
+    def _current_package(self):
+        return self._package
 
     def _canonical_location_label(self, label):
         package, name = self._split_location_label(label)
