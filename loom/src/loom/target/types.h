@@ -224,9 +224,16 @@ typedef struct loom_target_snapshot_t {
   loom_target_artifact_format_t artifact_format;
   // Execution guarantee used with launch facts to bound subgroup coordinates.
   loom_target_subgroup_partition_t subgroup_partition;
+  // Maximum carrier bit width available to producer-established index values.
+  // Zero means |index_bitwidth|. A wider value lets lowering preserve computed
+  // coordinates that extend above the native raw payload, including joins
+  // with native signed coordinates, without changing ordinary native index
+  // representation.
+  uint8_t maximum_index_bitwidth;
   // Default pointer bit width for target-independent layout decisions.
   uint32_t default_pointer_bitwidth;
-  // Index bit width chosen for lowered index values.
+  // Native index bit width chosen for unconstrained inputs and ordinary
+  // lowered index values.
   uint32_t index_bitwidth;
   // Offset bit width chosen for lowered byte offsets.
   uint32_t offset_bitwidth;
@@ -254,6 +261,14 @@ typedef struct loom_target_snapshot_t {
   // Address space assignments used by target-specific ABI lowering.
   loom_target_memory_space_map_t memory_spaces;
 } loom_target_snapshot_t;
+
+// Returns the maximum carrier width available for computed index values.
+static inline uint32_t loom_target_snapshot_maximum_index_bitwidth(
+    const loom_target_snapshot_t* snapshot) {
+  return snapshot->maximum_index_bitwidth != 0
+             ? snapshot->maximum_index_bitwidth
+             : snapshot->index_bitwidth;
+}
 
 typedef struct loom_target_hal_kernel_abi_t {
   // Function-selected fixed workgroup size for a kernel entry point. A zero

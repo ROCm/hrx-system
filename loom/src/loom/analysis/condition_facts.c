@@ -611,16 +611,18 @@ static bool loom_condition_integer_comparison_same_value_result(
 
 bool loom_condition_integer_comparison_evaluate(
     const loom_condition_integer_comparison_t* comparison,
-    const loom_fact_context_t* context, const loom_value_facts_t* lhs_facts,
-    const loom_value_facts_t* rhs_facts, bool* out_result) {
+    const loom_module_t* module, const loom_fact_context_t* context,
+    const loom_value_facts_t* lhs_facts, const loom_value_facts_t* rhs_facts,
+    bool* out_result) {
   if (loom_condition_integer_comparison_same_value_result(comparison,
                                                           out_result)) {
     return true;
   }
   return comparison->kind == LOOM_OP_INDEX_CMP
-             ? loom_index_cmp_result_from_facts(
-                   context, comparison->operand_type, comparison->predicate,
-                   lhs_facts, rhs_facts, out_result)
+             ? loom_index_cmp_result_from_value_facts(
+                   context, module, comparison->operand_type,
+                   comparison->predicate, comparison->lhs, lhs_facts,
+                   comparison->rhs, rhs_facts, out_result)
              : loom_scalar_cmpi_result_from_facts(
                    comparison->operand_type, comparison->predicate, lhs_facts,
                    rhs_facts, out_result);
@@ -640,8 +642,9 @@ bool loom_condition_integer_comparison_relation(
 // additionally establish a nonnegative lower operand on the selected edge.
 static bool loom_condition_integer_comparison_normalize_relation(
     const loom_condition_integer_comparison_t* comparison,
-    const loom_fact_context_t* context, bool assumed_truth,
-    loom_value_facts_t* lhs_facts, loom_value_facts_t* rhs_facts,
+    const loom_module_t* module, const loom_fact_context_t* context,
+    bool assumed_truth, loom_value_facts_t* lhs_facts,
+    loom_value_facts_t* rhs_facts,
     loom_symbolic_integer_relation_t* out_relation) {
   bool unsigned_order = false;
   if (!loom_condition_integer_comparison_relation(comparison, out_relation,
@@ -654,15 +657,22 @@ static bool loom_condition_integer_comparison_normalize_relation(
           comparison->predicate) {
     *out_relation = loom_symbolic_integer_relation_swap(*out_relation);
   }
+  const int32_t index_comparison_bitwidth =
+      comparison->kind == LOOM_OP_INDEX_CMP
+          ? loom_index_cmp_value_carrier_bitwidth(
+                context, module, comparison->operand_type, comparison->lhs,
+                lhs_facts, comparison->rhs, rhs_facts)
+          : -1;
   if (comparison->kind == LOOM_OP_INDEX_CMP &&
-      !loom_index_cmp_facts_fit_target_carrier(
-          context, comparison->operand_type, comparison->predicate, lhs_facts,
-          rhs_facts) &&
-      !(unsigned_order &&
-        loom_index_value_facts_fit_signed_target_carrier(
-            context, comparison->operand_type, *lhs_facts) &&
-        loom_index_value_facts_fit_signed_target_carrier(
-            context, comparison->operand_type, *rhs_facts))) {
+      !loom_index_cmp_facts_fit_carrier(index_comparison_bitwidth,
+                                        comparison->predicate, lhs_facts,
+                                        rhs_facts) &&
+      !(unsigned_order && index_comparison_bitwidth >= 0 &&
+        (index_comparison_bitwidth == 0 ||
+         (loom_value_facts_fit_signed_bit_count(
+              *lhs_facts, (uint8_t)index_comparison_bitwidth) &&
+          loom_value_facts_fit_signed_bit_count(
+              *rhs_facts, (uint8_t)index_comparison_bitwidth))))) {
     return false;
   }
   if (!assumed_truth) {
@@ -681,8 +691,10 @@ static bool loom_condition_integer_comparison_normalize_relation(
   const loom_value_facts_t upper = ascending ? *rhs_facts : *lhs_facts;
   if (!loom_value_facts_is_non_negative(upper) ||
       (comparison->kind == LOOM_OP_INDEX_CMP &&
-       !loom_index_value_facts_fit_signed_target_carrier(
-           context, comparison->operand_type, upper))) {
+       index_comparison_bitwidth < 0) ||
+      (comparison->kind == LOOM_OP_INDEX_CMP && index_comparison_bitwidth > 0 &&
+       !loom_value_facts_fit_signed_bit_count(
+           upper, (uint8_t)index_comparison_bitwidth))) {
     return false;
   }
   // With no sign bit in the upper operand, lower <=u upper implies lower >= 0.
@@ -692,13 +704,14 @@ static bool loom_condition_integer_comparison_normalize_relation(
 
 bool loom_condition_integer_comparison_equivalent_relation(
     const loom_condition_integer_comparison_t* comparison,
-    const loom_fact_context_t* context, bool assumed_truth,
-    const loom_value_facts_t* lhs_facts, const loom_value_facts_t* rhs_facts,
+    const loom_module_t* module, const loom_fact_context_t* context,
+    bool assumed_truth, const loom_value_facts_t* lhs_facts,
+    const loom_value_facts_t* rhs_facts,
     loom_symbolic_integer_relation_t* out_relation) {
   loom_value_facts_t normalized_lhs = *lhs_facts;
   loom_value_facts_t normalized_rhs = *rhs_facts;
   return loom_condition_integer_comparison_normalize_relation(
-             comparison, context, assumed_truth, &normalized_lhs,
+             comparison, module, context, assumed_truth, &normalized_lhs,
              &normalized_rhs, out_relation) &&
          loom_value_facts_equal(normalized_lhs, *lhs_facts) &&
          loom_value_facts_equal(normalized_rhs, *rhs_facts);
@@ -706,11 +719,12 @@ bool loom_condition_integer_comparison_equivalent_relation(
 
 void loom_condition_integer_comparison_refine_facts(
     const loom_condition_integer_comparison_t* comparison,
-    const loom_fact_context_t* context, bool assumed_truth,
-    loom_value_facts_t* lhs_facts, loom_value_facts_t* rhs_facts) {
+    const loom_module_t* module, const loom_fact_context_t* context,
+    bool assumed_truth, loom_value_facts_t* lhs_facts,
+    loom_value_facts_t* rhs_facts) {
   loom_symbolic_integer_relation_t relation;
   if (!loom_condition_integer_comparison_normalize_relation(
-          comparison, context, assumed_truth, lhs_facts, rhs_facts,
+          comparison, module, context, assumed_truth, lhs_facts, rhs_facts,
           &relation)) {
     return;
   }
@@ -981,8 +995,8 @@ static iree_status_t loom_condition_facts_query_integer_compare(
   const int64_t right_minimum = right_facts.range_lo;
   loom_symbolic_integer_relation_t relation;
   if (!loom_condition_integer_comparison_normalize_relation(
-          &comparison, fact_table ? &fact_table->context : NULL, assumed_truth,
-          &left_facts, &right_facts, &relation)) {
+          &comparison, module, fact_table ? &fact_table->context : NULL,
+          assumed_truth, &left_facts, &right_facts, &relation)) {
     return iree_ok_status();
   }
   if (left_facts.range_lo != left_minimum ||
@@ -1547,7 +1561,7 @@ static bool loom_condition_fact_resolver_proves_integer_comparison(
   const loom_value_facts_t rhs_facts =
       loom_condition_edge_value_facts(fact_table, resolver, comparison.rhs);
   if (loom_condition_integer_comparison_equivalent_relation(
-          &comparison, fact_table ? &fact_table->context : NULL,
+          &comparison, module, fact_table ? &fact_table->context : NULL,
           /*assumed_truth=*/true, &lhs_facts, &rhs_facts, &relation.relation) &&
       resolver != NULL && resolver->proves_integer_relation != NULL &&
       resolver->proves_integer_relation(resolver->user_data, fact_table,
@@ -1556,7 +1570,7 @@ static bool loom_condition_fact_resolver_proves_integer_comparison(
   }
 
   return loom_condition_integer_comparison_evaluate(
-      &comparison, fact_table ? &fact_table->context : NULL, &lhs_facts,
+      &comparison, module, fact_table ? &fact_table->context : NULL, &lhs_facts,
       &rhs_facts, out_condition);
 }
 

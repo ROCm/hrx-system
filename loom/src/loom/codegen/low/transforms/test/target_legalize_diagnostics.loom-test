@@ -59,6 +59,38 @@ func.def target(@test_target) @rejects_unresolved_index_constexpr(%value: index)
 }
 
 // ====
+// RUN: pass source-to-low
+
+test.target<quirky> @test_target
+
+func.def target(@test_target) @rejects_computed_index_exceeding_target_carrier(%left: index, %right: index) -> (index) where [range(%left, 65536, 65537), range(%right, 65536, 65537)] {
+  // ERROR@+1: TARGET/005 {subject_role="result", subject_name="product", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="4294967295"}
+  %product = index.mul %left, %right : index
+  func.return %product : index
+}
+
+// ====
+// RUN: pass source-to-low
+
+test.target<quirky> @test_target
+
+func.def target(@test_target) @rejects_computed_index_below_target_carrier(%left: index, %right: index) -> (index) where [range(%left, 0, 1), range(%right, 2147483650, 2147483651)] {
+  // ERROR@+1: TARGET/005 {subject_role="result", subject_name="difference", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="4294967295"}
+  %difference = index.sub %left, %right : index
+  func.return %difference : index
+}
+
+// ====
+// RUN: pass source-to-low
+
+test.target<quirky> @test_target
+
+// ERROR@+1: TARGET/005 {op_name="func.def", subject_role="argument", subject_name="wide", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="4294967295"}
+func.def target(@test_target) @rejects_wide_index_function_contract(%wide: index) where [range(%wide, 4294967296, 4294967297)] {
+  func.return
+}
+
+// ====
 // RUN: pass dce,canonicalize,source-to-low
 
 test.target<low_core> @test_target

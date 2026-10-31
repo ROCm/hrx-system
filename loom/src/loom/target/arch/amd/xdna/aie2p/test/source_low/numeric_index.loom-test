@@ -1,7 +1,9 @@
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 func.def @index_arithmetic(%lhs0: index, %rhs0: index, %stride: offset) -> (index, index, index, index, index, index, index, index, offset) {
-  %lhs, %rhs = index.assume %lhs0, %rhs0 [range(%lhs0, 0, 2147483647), range(%rhs0, 1, 1024)] : index, index
+  // Keep every logical result representable in the core's 32-bit index
+  // carrier; wider computed indices are rejected before source lowering.
+  %lhs, %rhs = index.assume %lhs0, %rhs0 [range(%lhs0, 0, 2000000), range(%rhs0, 1, 1024)] : index, index
   %add = index.add %lhs, %rhs : index
   %sub = index.sub %lhs, %rhs : index
   %mul = index.mul %lhs, %rhs : index
@@ -203,4 +205,12 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @offset_compare_se
   %47 = copy %ult : reg<aie2p.er> -> reg<aie2p.mr27_select>
   %selected = sel.nez %lhs, %rhs, %47
   return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge, %selected
+}
+
+// ====
+
+func.def @computed_index_must_fit_physical_carrier(%lhs: index, %rhs: index) -> (index) where [range(%lhs, 65536, 65537), range(%rhs, 65536, 65537)] {
+  // ERROR@+1: TARGET/005 {op_name="index.mul", subject_role="result", subject_name="product", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="4294967295"}
+  %product = index.mul %lhs, %rhs : index
+  func.return %product : index
 }

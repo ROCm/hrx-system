@@ -383,6 +383,23 @@ func.def target(@target) @i64_to_index_requires_s32_proof(%input: i64) -> (index
 }
 
 // ====
+// RUN: emit source-low output=low control-flow=structured-low
+
+spirv.target<vulkan1_3> @target {contract_feature_bits = 4}
+
+func.def target(@target) @structured_join_preserves_producer_diagnostic(%condition: i1, %input: i64) -> (index) {
+  %joined = scf.if %condition -> (index) {
+    // ERROR@+1: SPIRV/026 {source_type="i64", result_type="index", required_range_lo="-2147483648", required_range_hi="2147483647", constraint_key="index_cast.s32_exact"}
+    %converted = index.cast %input : i64 to index
+    scf.yield %converted : index
+  } else {
+    %fallback = index.constant 0 : index
+    scf.yield %fallback : index
+  }
+  func.return %joined : index
+}
+
+// ====
 
 spirv.target<vulkan1_3> @target {abi = hal_kernel}
 
@@ -576,4 +593,14 @@ func.def target(@target) @explicit_fma_requires_fused_instruction(%a: f32, %b: f
   // ERROR@+1: TARGET/001 {op_name="scalar.fmaf"}
   %result = scalar.fmaf %a, %b, %c : f32
   func.return %result : f32
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @computed_index_must_fit_physical_carrier(%lhs: index, %rhs: index) -> (index) where [range(%lhs, 65536, 65537), range(%rhs, 65536, 65537)] {
+  // ERROR@+1: TARGET/005 {op_name="index.mul", subject_role="result", subject_name="product", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="4294967295"}
+  %product = index.mul %lhs, %rhs : index
+  func.return %product : index
 }

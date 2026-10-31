@@ -90,6 +90,7 @@ static const loom_target_snapshot_t kGenericReferenceSnapshot = {
     .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
     .default_pointer_bitwidth = 64,
     .index_bitwidth = 64,
+    .maximum_index_bitwidth = 64,
     .offset_bitwidth = 64,
 };
 

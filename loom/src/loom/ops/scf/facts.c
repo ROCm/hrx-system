@@ -174,8 +174,8 @@ static void loom_scf_select_refine_arm_facts(loom_fact_context_t* context,
         arm_identity == rhs_identity
             ? arm_facts[i]
             : loom_value_fact_table_lookup(context->table, comparison.rhs);
-    loom_condition_integer_comparison_refine_facts(&comparison, context, i == 0,
-                                                   &lhs, &rhs);
+    loom_condition_integer_comparison_refine_facts(&comparison, module, context,
+                                                   i == 0, &lhs, &rhs);
     arm_facts[i] = arm_identity == lhs_identity ? lhs : rhs;
   }
 }

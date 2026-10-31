@@ -71,27 +71,33 @@ bool loom_condition_integer_comparison_relation(
 // relation equivalent without additional edge-local assumptions.
 bool loom_condition_integer_comparison_equivalent_relation(
     const loom_condition_integer_comparison_t* comparison,
-    const loom_fact_context_t* context, bool assumed_truth,
-    const loom_value_facts_t* lhs_facts, const loom_value_facts_t* rhs_facts,
+    const loom_module_t* module, const loom_fact_context_t* context,
+    bool assumed_truth, const loom_value_facts_t* lhs_facts,
+    const loom_value_facts_t* rhs_facts,
     loom_symbolic_integer_relation_t* out_relation);
 
 // Proves comparison truth from operand facts in the comparison's original
 // scalar or target carrier domain. Returns false when the facts cannot decide
-// the result. Evaluation reads no IR and allocates no storage.
+// the result. Evaluation performs constant-time definition lookups in
+// |module| to distinguish native parameters from producer-established wide
+// index values and allocates no storage.
 bool loom_condition_integer_comparison_evaluate(
     const loom_condition_integer_comparison_t* comparison,
-    const loom_fact_context_t* context, const loom_value_facts_t* lhs_facts,
-    const loom_value_facts_t* rhs_facts, bool* out_result);
+    const loom_module_t* module, const loom_fact_context_t* context,
+    const loom_value_facts_t* lhs_facts, const loom_value_facts_t* rhs_facts,
+    bool* out_result);
 
 // Refines caller-owned numeric facts for one assumed comparison outcome.
 // Facts retain their mathematical source representation: comparisons whose
 // carrier interpretation cannot be represented by an interval leave them
-// unchanged. Reads no IR, allocates no storage, and does not publish edge-local
-// facts into the ambient fact table.
+// unchanged. Performs only constant-time value-definition lookups, allocates
+// no storage, and does not publish edge-local facts into the ambient fact
+// table.
 void loom_condition_integer_comparison_refine_facts(
     const loom_condition_integer_comparison_t* comparison,
-    const loom_fact_context_t* context, bool assumed_truth,
-    loom_value_facts_t* lhs_facts, loom_value_facts_t* rhs_facts);
+    const loom_module_t* module, const loom_fact_context_t* context,
+    bool assumed_truth, loom_value_facts_t* lhs_facts,
+    loom_value_facts_t* rhs_facts);
 
 typedef enum loom_condition_integer_operand_kind_e {
   // Operand is an SSA value.

@@ -175,6 +175,7 @@ const loom_x86_deployment_profile_t* loom_x86_deployment_profile_select_cpu(
       .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,      \
       .default_pointer_bitwidth = 64,                          \
       .index_bitwidth = 64,                                    \
+      .maximum_index_bitwidth = 64,                            \
       .offset_bitwidth = 64,                                   \
       .max_workgroup_size = {1, 1, 1},                         \
       .max_flat_workgroup_size = 1,                            \

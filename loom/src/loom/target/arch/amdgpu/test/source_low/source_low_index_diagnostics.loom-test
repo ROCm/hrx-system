@@ -35,7 +35,7 @@ func.def target(@target) @i64_index_cast_result_assume_rejected(%value: i64) -> 
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @negative_index_constant_below_storage_range() -> (index) {
-  // ERROR@+1: TARGET/001 {op_name="index.constant"}
+  // ERROR@+1: TARGET/005 {op_name="index.constant", subject_role="result", subject_name="value", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="9223372036854775807"}
   %value = index.constant -2147483649 : index
   func.return %value : index
 }
@@ -45,9 +45,19 @@ func.def target(@target) @negative_index_constant_below_storage_range() -> (inde
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @negative_index_constant_must_not_truncate_to_zero() -> (index) {
-  // ERROR@+1: TARGET/001 {op_name="index.constant"}
+  // ERROR@+1: TARGET/005 {op_name="index.constant", subject_role="result", subject_name="value", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="9223372036854775807"}
   %value = index.constant -4294967296 : index
   func.return %value : index
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @negative_computed_index_below_storage_range(%left: index, %right: index) -> (index) where [range(%left, 0, 1), range(%right, 2147483650, 2147483651)] {
+  // ERROR@+1: TARGET/005 {op_name="index.sub", subject_role="result", subject_name="difference", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="9223372036854775807"}
+  %difference = index.sub %left, %right : index
+  func.return %difference : index
 }
 
 // ====
