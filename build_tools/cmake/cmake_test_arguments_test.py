@@ -48,6 +48,8 @@ class CMakeTestArgumentsTest(unittest.TestCase):
             (source / "CMakeLists.txt").write_text(
                 "cmake_minimum_required(VERSION 3.26)\n"
                 "project(filegroup_packages NONE)\n"
+                'set(IREE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")\n'
+                'set(IREE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")\n'
                 'set(IREE_PACKAGE_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")\n'
                 "set(IREE_PACKAGE_ROOT_PREFIX fixture)\n"
                 'include("${IREE_REPO_ROOT}/build_tools/cmake/iree_macros.cmake")\n'
