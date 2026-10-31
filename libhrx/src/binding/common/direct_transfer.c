@@ -12,9 +12,14 @@
 #include "common/stream_queue.h"
 #include "transfer.h"
 
-iree_status_t iree_hal_streaming_direct_transfer_enqueue(
+// Accepts the native batch before exposing its stream dependency to another
+// caller. A blocking copy adds an independent completion proof so a later
+// public timeline failure cannot release its borrowed host bytes early.
+static iree_status_t iree_hal_streaming_direct_transfer_submit(
     iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
-    const iree_hal_transfer_operation_t* operations) {
+    const iree_hal_transfer_operation_t* operations,
+    iree_hal_semaphore_t* completion_semaphore, bool* out_accepted) {
+  *out_accepted = false;
   iree_slim_mutex_lock(&stream->mutex);
   iree_status_t status = iree_hal_streaming_stream_flush_locked(stream);
   uint64_t wait_value = 0;
@@ -35,9 +40,25 @@ iree_status_t iree_hal_streaming_direct_transfer_enqueue(
         .semaphores = &stream->timeline_semaphore,
         .payload_values = &wait_value,
     };
-    status =
-        iree_hal_queue_transfer(submission.queue, waits, submission.signals,
-                                operation_count, operations, /*barriers=*/NULL);
+    iree_hal_semaphore_t* signal_semaphores[3];
+    uint64_t signal_values[3];
+    iree_hal_semaphore_list_t signals = submission.signals;
+    if (completion_semaphore) {
+      for (iree_host_size_t i = 0; i < signals.count; ++i) {
+        signal_semaphores[i] = signals.semaphores[i];
+        signal_values[i] = signals.payload_values[i];
+      }
+      signal_semaphores[signals.count] = completion_semaphore;
+      signal_values[signals.count] = 1;
+      signals = (iree_hal_semaphore_list_t){
+          .count = signals.count + 1,
+          .semaphores = signal_semaphores,
+          .payload_values = signal_values,
+      };
+    }
+    status = iree_hal_queue_transfer(submission.queue, waits, signals,
+                                     operation_count, operations,
+                                     /*barriers=*/NULL);
   }
   const bool accepted = iree_status_is_ok(status);
   iree_hal_streaming_submission_finish_locked(stream, &submission, accepted);
@@ -45,6 +66,17 @@ iree_status_t iree_hal_streaming_direct_transfer_enqueue(
     status = iree_hal_queue_flush(submission.queue);
   }
   iree_slim_mutex_unlock(&stream->mutex);
+  *out_accepted = accepted;
+  return status;
+}
+
+iree_status_t iree_hal_streaming_direct_transfer_enqueue(
+    iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations) {
+  bool accepted = false;
+  iree_status_t status = iree_hal_streaming_direct_transfer_submit(
+      stream, operation_count, operations, /*completion_semaphore=*/NULL,
+      &accepted);
   if (accepted && !iree_status_is_ok(status)) {
     status =
         iree_status_join(status, iree_hal_streaming_stream_synchronize(stream));
@@ -141,37 +173,26 @@ iree_status_t iree_hal_streaming_direct_transfer_d2d(
       iree_hal_streaming_context_wait_flags(context));
 }
 
-typedef struct iree_hal_streaming_host_transfer_t {
-  // Borrowed stream queue preserving its selected family, placement, and
-  // priority.
-  iree_hal_queue_t* queue;
-  // Number of borrowed upload or download descriptors in this transaction.
-  iree_host_size_t operation_count;
-  // Borrowed capture, live on the caller until the transaction completes.
-  const iree_hal_transfer_operation_t* operations;
-  // Frontend context's scheduling policy for this blocking host call.
-  iree_async_wait_flags_t wait_flags;
-} iree_hal_streaming_host_transfer_t;
-
-static iree_status_t iree_hal_streaming_host_transfer_execute(void* user_data) {
-  const iree_hal_streaming_host_transfer_t* transfer = user_data;
-  return hrx_hal_queue_transfer_and_wait(
-      transfer->queue, transfer->operation_count, transfer->operations,
-      transfer->wait_flags);
-}
-
-// Borrowed host storage stays live through this blocking transaction. Order
-// it only after this stream, without unrelated application callbacks or a
-// frontend staging allocation. Native transfer completion releases the borrow.
 iree_status_t iree_hal_streaming_direct_transfer_and_wait(
     iree_hal_streaming_stream_t* stream, iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations) {
-  iree_hal_streaming_host_transfer_t transfer = {
-      .queue = stream->queue,
-      .operation_count = operation_count,
-      .operations = operations,
-      .wait_flags = iree_hal_streaming_context_wait_flags(stream->context),
-  };
-  return iree_hal_streaming_execute_host_operation(
-      stream, iree_hal_streaming_host_transfer_execute, &transfer);
+  const iree_hal_queue_family_t* family = iree_hal_queue_family(stream->queue);
+  iree_hal_semaphore_t* completion_semaphore = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
+      iree_hal_queue_family_device(family),
+      iree_hal_make_queue_family_affinity(
+          iree_hal_queue_family_ordinal(family)),
+      /*initial_value=*/0, IREE_HAL_SEMAPHORE_FLAG_NONE,
+      &completion_semaphore));
+  bool accepted = false;
+  iree_status_t status = iree_hal_streaming_direct_transfer_submit(
+      stream, operation_count, operations, completion_semaphore, &accepted);
+  if (accepted) {
+    status = iree_status_join(
+        status, iree_hal_semaphore_wait(
+                    completion_semaphore, 1, iree_infinite_timeout(),
+                    iree_hal_streaming_context_wait_flags(stream->context)));
+  }
+  iree_hal_semaphore_release(completion_semaphore);
+  return status;
 }
